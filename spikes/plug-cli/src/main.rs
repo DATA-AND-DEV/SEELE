@@ -40,7 +40,8 @@ use magi_audio::resample::RateConverter;
 use magi_audio::{FRAME_MS, FRAME_SAMPLES, SAMPLE_RATE_HZ};
 use magi_core::{Client, MemoryPinStore, PinDecision};
 use magi_proto::MediaHeader;
-use magi_proto::ids::CageId;
+use magi_proto::ids::{CageId, ClientMessageId, LineId};
+use magi_proto::ServerMessage;
 use shiguredo_opus::{
     Application, Decoder, DecoderConfig, Encoder, EncoderConfig, FrameDuration, InbandFec,
 };
@@ -146,7 +147,9 @@ async fn main() -> Result<()> {
     }
 
     client.insert_plug(args.cage).await?;
-    println!("\nplug inserido no cage {}\n", args.cage);
+    client.join_line(LineId(1)).await?;
+    client.fetch_history(LineId(1), None, 20).await?;
+    println!("\nplug inserido no cage {} · linha 1\n", args.cage);
 
     if args.no_audio {
         return protocol_only(client).await;
@@ -155,19 +158,72 @@ async fn main() -> Result<()> {
 }
 
 /// Exercises the control channel with no sound card in sight.
+///
+/// Typing a line sends it to Line 1; anything anybody else says shows up here.
+/// This is the half of the product that needs no hardware at all, which makes it
+/// the half a headless VPS or a CI box can exercise.
 async fn protocol_only(mut client: Client) -> Result<()> {
-    println!("modo protocolo: sem áudio, só Ping/Pong e datagramas recebidos");
+    println!("modo protocolo: sem áudio. digite para falar na linha 1.\n");
     // Media and control are independent (specs/02-protocolo.md), so they can be
     // awaited together without one borrow blocking the other.
     let media = client.media();
+    let me = client.session().pilot;
     let mut received = 0_u64;
+    let mut next_key = 1_u64;
+
+    // stdin blocks, so it gets its own task and a channel.
+    let (typed_tx, mut typed_rx) = tokio::sync::mpsc::channel::<String>(16);
+    std::thread::spawn(move || {
+        for line in std::io::stdin().lines().map_while(Result::ok) {
+            if typed_tx.blocking_send(line).is_err() {
+                return;
+            }
+        }
+    });
     loop {
         tokio::select! {
+            typed = typed_rx.recv() => {
+                let Some(body) = typed else { return Ok(()) };
+                if body.trim().is_empty() {
+                    continue;
+                }
+                // specs/02-protocolo.md: idempotent by client_msg_id, so a
+                // resend after a lost acknowledgement does not post twice.
+                client.send_message(LineId(1), body.trim(), ClientMessageId(next_key)).await?;
+                next_key += 1;
+            }
             event = client.next_event() => {
-                // Telemetry, roster changes and the Pong that measures rtt.
-                if let Err(error) = event {
-                    println!("stream de controle encerrado: {error}");
-                    return Ok(());
+                match event {
+                    Ok(ServerMessage::MessageReceived { author, body, .. }) => {
+                        let who = if author == me { "você" } else { "outro" };
+                        println!("  [{who} {author}] {body}");
+                    }
+                    Ok(ServerMessage::Telemetry(telemetry)) => {
+                        let sync = magi_proto::sync_ratio::raw(magi_proto::SyncInputs {
+                            rtt_ms: telemetry.rtt_ms,
+                            jitter_ms: telemetry.jitter_ms,
+                            loss_fraction: telemetry.loss_fraction,
+                        });
+                        if received % 20 == 0 {
+                            println!(
+                                "  · SYNC {sync:.0}% · RTT {:.1}ms · perda {:.2}%",
+                                telemetry.rtt_ms,
+                                telemetry.loss_fraction * 100.0
+                            );
+                        }
+                        received += 1;
+                    }
+                    Ok(ServerMessage::PilotJoined { profile, .. }) => {
+                        println!("  · {} inseriu o plug", profile.nickname);
+                    }
+                    Ok(ServerMessage::Alert { reason, .. }) => {
+                        println!("  · ALERTA · {reason:?}");
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        println!("stream de controle encerrado: {error}");
+                        return Ok(());
+                    }
                 }
             }
             datagram = media.next() => {
@@ -197,10 +253,7 @@ async fn protocol_only(mut client: Client) -> Result<()> {
                     println!("ping falhou: {error}");
                     return Ok(());
                 }
-                let rtt = client
-                    .rtt()
-                    .map_or_else(|| "—".to_owned(), |rtt| format!("{:.2} ms", rtt.as_secs_f64() * 1000.0));
-                println!("rtt {rtt} · {received} datagramas");
+                let _ = client.rtt();
             }
         }
     }
