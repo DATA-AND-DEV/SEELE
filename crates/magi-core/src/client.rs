@@ -53,6 +53,11 @@ pub struct SessionInfo {
     pub dogma: String,
     /// Voice channels visible to us.
     pub cages: Vec<magi_proto::control::CageInfo>,
+    /// Text channels visible to us.
+    ///
+    /// Carried through rather than dropped: an interface that knows the Cages
+    /// but not the Lines can only ever open whichever Line it was started with.
+    pub lines: Vec<magi_proto::control::LineInfo>,
 }
 
 /// The media half of a connection, usable independently of the control stream.
@@ -395,6 +400,7 @@ async fn handshake(
             ssrc,
             dogma,
             cages,
+            lines,
             ..
         } => Ok(SessionInfo {
             id,
@@ -402,6 +408,7 @@ async fn handshake(
             ssrc,
             dogma,
             cages,
+            lines,
         }),
         ServerMessage::Disconnecting { reason } => {
             bail!("pattern blue not established: {reason:?}")

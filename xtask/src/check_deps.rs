@@ -59,7 +59,15 @@ const RULES: &[(&str, &[&str])] = &[
     // nothing: every dependency is a dev-dependency and its library is empty.
     (
         "magi-conformance",
-        &["magi-proto", "magi-audio", "magi-core", "magi-server"],
+        // The crate that proves the others meet the acceptance criteria is the
+        // one place allowed to see all of them, the interface included.
+        &[
+            "magi-proto",
+            "magi-audio",
+            "magi-core",
+            "magi-server",
+            "magi-tui",
+        ],
     ),
     // Tooling. Must not depend on the product, or `cargo xtask` would need the
     // product to compile before it could check the product.

@@ -5,14 +5,15 @@ members = [
     "crates/magi-audio",
     "crates/magi-core",
     "crates/magi-server",
+    "crates/magi-tui",
     "crates/magi-conformance",
     "xtask",
 ]
 
-# `magi-tui` and `magi-ffi` are specified in specs/01-arquitetura.md but do not
-# exist yet, by plan decision (risk R10): an empty crate costs CI time on every
-# build and invites code into the wrong place. Each is created with the first code
-# that belongs to it — M4 and M5 respectively. `magi-server` arrived with M2.
+# `magi-ffi` is specified in specs/01-arquitetura.md but does not exist yet, by
+# plan decision (risk R10): an empty crate costs CI time on every build and
+# invites code into the wrong place. It is created with the first code that
+# belongs to it, in M5. `magi-server` arrived with M2, `magi-tui` with M4.
 
 [workspace.package]
 version = "0.0.0"

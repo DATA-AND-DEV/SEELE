@@ -27,8 +27,34 @@
 pub mod battery;
 pub mod client;
 pub mod frame;
+pub mod identity;
 pub mod tofu;
+pub mod voice;
 
 pub use battery::{Battery, Link};
 pub use client::{Client, MediaChannel, Pattern, SessionInfo};
+pub use identity::FilePinStore;
 pub use tofu::{MemoryPinStore, PinDecision, PinStore};
+pub use voice::{DeviceRates, Voice, VoiceMode};
+
+/// The surface a shell is allowed to see.
+///
+/// ADR 0002 keeps `magi-tui` and `magi-ffi` from depending on `magi-proto` or
+/// `magi-audio` directly. That is not bureaucracy: a shell that can name an
+/// `ssrc` has protocol knowledge in it, and the same knowledge would then have
+/// to be written twice more for the desktop and mobile shells.
+///
+/// So everything a shell legitimately needs is re-exported here, deliberately
+/// and one item at a time. Adding to this list is the moment to ask whether the
+/// shell needs the value or the decision behind it — usually it is the decision,
+/// and that belongs in the core.
+pub use magi_audio::telemetry::{AudioTelemetry, LocalTelemetry, SourceTelemetry};
+pub use magi_proto::control::{
+    AlertReason, AlertSeverity, CageInfo, DisconnectReason, LineInfo, Permission, PilotProfile,
+    PilotState, Presence, ServerMessage, Subsystem, SubsystemHealth, Telemetry,
+};
+pub use magi_proto::ids::{
+    CageId, ClientMessageId, LineId, MessageId, PilotId, RoleId, SessionId, Ssrc,
+};
+pub use magi_proto::sync_ratio::{SyncBand, SyncInputs, SyncRatio};
+pub use magi_proto::PROTOCOL_VERSION;
