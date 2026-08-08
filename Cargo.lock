@@ -1549,6 +1549,7 @@ dependencies = [
  "anyhow",
  "ed25519-dalek",
  "magi-core",
+ "magi-ffi",
  "magi-proto",
  "magi-server",
  "magi-tui",
@@ -1572,6 +1573,15 @@ dependencies = [
  "serde",
  "shiguredo_opus",
  "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "magi-ffi"
+version = "0.0.0"
+dependencies = [
+ "magi-core",
  "tokio",
  "tracing",
 ]

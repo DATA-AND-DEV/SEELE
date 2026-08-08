@@ -17,7 +17,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use anyhow::{bail, Context, Result};
+use anyhow::Result;
 use ed25519_dalek::{Signer, SigningKey};
 use magi_proto::control::{ClientMessage, ServerMessage};
 use magi_proto::ids::{CageId, ClientMessageId, LineId, MessageId, PilotId, SessionId, Ssrc};
@@ -39,6 +39,51 @@ pub enum Pattern {
     /// Verified. **PADRÃO: AZUL.**
     Blue,
 }
+
+/// Why a connection did not happen.
+///
+/// Enumerated rather than an opaque error, because `specs/06-clientes-gui.md`
+/// requires errors crossing to a shell to be enums a shell can localise. The
+/// alternative — matching on the text of somebody else's error message — breaks
+/// silently the day `quinn` rewords a sentence, and breaks in the direction of
+/// reporting the wrong cause rather than none.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConnectError {
+    /// The QUIC endpoint could not be opened locally.
+    ///
+    /// A blocked UDP socket or an exhausted port range. Nothing to do with the
+    /// server.
+    LocalEndpoint,
+    /// Nothing answered, or the network refused to carry it.
+    Unreachable,
+    /// TLS refused the certificate for a reason other than the pin.
+    TlsRefused,
+    /// The pinned key is not the key offered. ADR 0003.
+    PinChanged {
+        /// What was pinned before.
+        pinned: String,
+        /// What was offered now.
+        offered: String,
+    },
+    /// The handshake did not finish inside the budget in `specs/02-protocolo.md`.
+    HandshakeTimeout,
+    /// The server ended the session during the handshake, and said why.
+    Refused {
+        /// The enumerated reason.
+        reason: magi_proto::control::DisconnectReason,
+    },
+    /// The server said something that is not a handshake.
+    ProtocolViolation,
+}
+
+impl std::fmt::Display for ConnectError {
+    /// For logs, never for a user. A shell writes its own sentence.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{self:?}")
+    }
+}
+
+impl std::error::Error for ConnectError {}
 
 /// Everything the server told us on the way in.
 #[derive(Debug, Clone)]
@@ -118,15 +163,15 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// Fails if the pinned certificate changed, the handshake is refused, or the
-    /// budget in `specs/02-protocolo.md` runs out.
+    /// A [`ConnectError`] variant, never a message. Every caller has to be able
+    /// to say which of these happened in its own words.
     pub async fn connect(
         server: SocketAddr,
         server_name: &str,
         nickname: &str,
         signing_key: &SigningKey,
         pins: Arc<dyn PinStore>,
-    ) -> Result<Self> {
+    ) -> Result<Self, ConnectError> {
         let _ = rustls::crypto::ring::default_provider().install_default();
 
         let verifier = Arc::new(TofuVerifier::new(pins));
@@ -136,33 +181,50 @@ impl Client {
             .with_no_client_auth();
         tls.alpn_protocols = vec![magi_proto::transport::ALPN.to_vec()];
 
-        let quic = quinn::crypto::rustls::QuicClientConfig::try_from(tls)
-            .context("could not build the QUIC TLS config")?;
+        let quic = quinn::crypto::rustls::QuicClientConfig::try_from(tls).map_err(|error| {
+            tracing::error!(%error, "could not build the QUIC TLS config");
+            ConnectError::LocalEndpoint
+        })?;
         let mut client_config = quinn::ClientConfig::new(Arc::new(quic));
 
         let mut transport = quinn::TransportConfig::default();
-        transport.max_idle_timeout(Some(IDLE_TIMEOUT.try_into()?));
+        transport.max_idle_timeout(Some(
+            IDLE_TIMEOUT
+                .try_into()
+                .map_err(|_| ConnectError::LocalEndpoint)?,
+        ));
         transport.keep_alive_interval(Some(KEEPALIVE));
         client_config.transport_config(Arc::new(transport));
 
-        let mut endpoint = quinn::Endpoint::client(SocketAddr::from(([0, 0, 0, 0], 0)))?;
+        let mut endpoint =
+            quinn::Endpoint::client(SocketAddr::from(([0, 0, 0, 0], 0))).map_err(|error| {
+                tracing::error!(%error, "could not open a local QUIC endpoint");
+                ConnectError::LocalEndpoint
+            })?;
         endpoint.set_default_client_config(client_config);
 
         let connection = endpoint
-            .connect(server, server_name)?
+            .connect(server, server_name)
+            .map_err(|error| {
+                tracing::warn!(%error, "could not start the QUIC connection");
+                ConnectError::Unreachable
+            })?
             .await
-            .context("could not establish the QUIC connection")?;
+            .map_err(|error| classify_connection_error(&error, verifier.last_decision()))?;
 
         // PATTERN: ORANGE — connected, not verified.
         let pin = verifier.last_decision().unwrap_or(PinDecision::Matches);
 
-        let (mut send, mut recv) = connection.open_bi().await?;
+        let (mut send, mut recv) = connection.open_bi().await.map_err(|error| {
+            tracing::warn!(%error, "could not open the control stream");
+            ConnectError::Unreachable
+        })?;
         let session = tokio::time::timeout(
             HANDSHAKE_TIMEOUT,
             handshake(&mut send, &mut recv, nickname, signing_key),
         )
         .await
-        .context("handshake timed out")??;
+        .map_err(|_| ConnectError::HandshakeTimeout)??;
 
         Ok(Self {
             connection,
@@ -279,6 +341,50 @@ impl Client {
         .await
     }
 
+    /// Takes the plug out of whatever Cage it is in.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn eject_plug(&mut self) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::EjectPlug).await
+    }
+
+    /// Announces the A.T. Field — the microphone being muted.
+    ///
+    /// Announced rather than kept local because the roster shows it: talking to
+    /// somebody whose microphone is off is worth knowing, and the mute is only
+    /// half a feature if nobody else can see it. `specs/07-tema-evangelion.md`
+    /// gives it a marker in the roster for exactly this reason.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn set_at_field(&mut self, on: bool) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::SetAtField(on)).await
+    }
+
+    /// Announces Isolamento total — the speakers being muted.
+    ///
+    /// Local in effect, announced in the protocol. `specs/02-protocolo.md`:
+    /// "Talking to somebody who cannot hear you is worth knowing."
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn set_total_isolation(&mut self, on: bool) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::SetTotalIsolation(on)).await
+    }
+
+    /// Announces a presence hint.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn set_presence(&mut self, presence: magi_proto::control::Presence) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::SetPresence(presence)).await
+    }
+
     /// Asks for a page of history, oldest of the page first on the wire.
     ///
     /// # Errors
@@ -358,12 +464,38 @@ impl Client {
     }
 }
 
+/// Decides what a failed QUIC connection actually was.
+///
+/// The pin decision is consulted first: a certificate that changed produces a
+/// TLS rejection like any other, and the difference between "this server is not
+/// who it was" and "this server's certificate is unacceptable" is the whole of
+/// ADR 0003.
+fn classify_connection_error(
+    error: &quinn::ConnectionError,
+    pin: Option<PinDecision>,
+) -> ConnectError {
+    if let Some(PinDecision::Changed { pinned, offered }) = pin {
+        return ConnectError::PinChanged { pinned, offered };
+    }
+    match error {
+        quinn::ConnectionError::TimedOut => ConnectError::HandshakeTimeout,
+        quinn::ConnectionError::TransportError(_) => {
+            tracing::warn!(%error, "TLS refused the connection");
+            ConnectError::TlsRefused
+        }
+        other => {
+            tracing::warn!(error = %other, "could not establish the QUIC connection");
+            ConnectError::Unreachable
+        }
+    }
+}
+
 async fn handshake(
     send: &mut quinn::SendStream,
     recv: &mut quinn::RecvStream,
     nickname: &str,
     signing_key: &SigningKey,
-) -> Result<SessionInfo> {
+) -> Result<SessionInfo, ConnectError> {
     frame::write(
         send,
         &ClientMessage::Hello {
@@ -373,16 +505,27 @@ async fn handshake(
             public_key: signing_key.verifying_key().to_bytes().to_vec(),
         },
     )
-    .await?;
+    .await
+    .map_err(|error| {
+        tracing::warn!(%error, "could not send Hello");
+        ConnectError::Unreachable
+    })?;
 
-    let challenge = frame::read::<ServerMessage>(recv).await?;
+    let challenge = frame::read::<ServerMessage>(recv).await.map_err(|error| {
+        tracing::warn!(%error, "no Challenge came back");
+        ConnectError::Unreachable
+    })?;
     let nonce = match challenge {
         ServerMessage::Challenge { nonce } => nonce,
+        // specs/02-protocolo.md: the reason is enumerated and specific, and it
+        // survives all the way to the shell that has to explain it.
         ServerMessage::Disconnecting { reason } => {
-            // specs/02-protocolo.md: the reason is enumerated and specific.
-            bail!("pattern blue not established: {reason:?}");
+            return Err(ConnectError::Refused { reason });
         }
-        other => bail!("expected Challenge, got {other:?}"),
+        other => {
+            tracing::warn!(?other, "expected Challenge");
+            return Err(ConnectError::ProtocolViolation);
+        }
     };
 
     frame::write(
@@ -391,9 +534,17 @@ async fn handshake(
             proof: signing_key.sign(&nonce).to_bytes().to_vec(),
         },
     )
-    .await?;
+    .await
+    .map_err(|error| {
+        tracing::warn!(%error, "could not send the challenge response");
+        ConnectError::Unreachable
+    })?;
 
-    match frame::read::<ServerMessage>(recv).await? {
+    let answer = frame::read::<ServerMessage>(recv).await.map_err(|error| {
+        tracing::warn!(%error, "no Session came back");
+        ConnectError::Unreachable
+    })?;
+    match answer {
         ServerMessage::Session {
             id,
             pilot,
@@ -410,9 +561,10 @@ async fn handshake(
             cages,
             lines,
         }),
-        ServerMessage::Disconnecting { reason } => {
-            bail!("pattern blue not established: {reason:?}")
+        ServerMessage::Disconnecting { reason } => Err(ConnectError::Refused { reason }),
+        other => {
+            tracing::warn!(?other, "expected Session");
+            Err(ConnectError::ProtocolViolation)
         }
-        other => bail!("expected Session, got {other:?}"),
     }
 }

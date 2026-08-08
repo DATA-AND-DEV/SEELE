@@ -477,16 +477,28 @@ pub enum ServerMessage {
         id: MessageId,
         /// Who wrote it.
         author: PilotId,
-        /// When the server accepted it, in milliseconds since the Unix epoch.
+        /// When the server accepted it, in **seconds** since the Unix epoch.
+        ///
+        /// The unit is in the name because it was wrong once: CASPER stores
+        /// seconds, this field was declared in milliseconds, and every real
+        /// message would have been drawn as 1970 while the tests — which used
+        /// synthetic milliseconds — passed.
         ///
         /// The server's clock, not the client's, and not the arrival time.
-        /// Without this a page of history has no time on it at all — the
-        /// receiving client only knows when the *page* arrived, which is now.
+        /// Without it a page of history has no time on it at all: the receiving
+        /// client only knows when the *page* arrived, which is now.
         /// `specs/06-clientes-gui.md` requires a session to be resumable in
         /// another client "sem perda de histórico", and history whose lines all
-        /// claim to have been written the moment you opened the app has lost
+        /// claim to have been written the moment the app opened has lost
         /// something.
-        at: i64,
+        at_seconds: i64,
+        /// What the author is called.
+        ///
+        /// Carried with the message rather than looked up, because a client
+        /// reading history has never seen most of these pilots arrive and has
+        /// no other way to learn their names. Without it a resumed session
+        /// attributes everything written before you got there to "piloto 1".
+        author_nickname: String,
         /// Body.
         body: String,
         /// What it replies to.

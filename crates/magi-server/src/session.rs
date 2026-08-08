@@ -431,6 +431,23 @@ async fn run_session(
     let mut events = dogma.events.subscribe();
     let mut lines: Vec<LineId> = Vec::new();
     let mut current_cage: Option<CageId> = None;
+
+    // What this pilot has announced about themselves. Held here rather than
+    // rebuilt each tick, because the telemetry broadcast carries it and a tick
+    // that reported a hardcoded `false` would undo every mute a second later.
+    let mut at_field = false;
+    let mut total_isolation = false;
+    let mut presence = Presence::Available;
+    // Whether they are transmitting. Not announceable on the control channel,
+    // and it should not be: the truthful source is whether audio is actually
+    // arriving. A client that says it is speaking while sending nothing would
+    // light up somebody else's roster for silence.
+    let mut last_datagram: Option<Instant> = None;
+    // The last Sync Ratio this connection measured. Carried so that announcing
+    // a mute does not report a ratio of zero alongside it — every client folds
+    // the whole `PilotState` in, so a field left at a default is not left
+    // alone, it is overwritten.
+    let mut last_ratio = 0_u8;
     let mut sync = SyncRatio::new();
     let mut telemetry = tokio::time::interval(TELEMETRY_INTERVAL);
     telemetry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -545,6 +562,7 @@ async fn run_session(
                         dogma.post(PendingMessage {
                             line,
                             author: session.pilot,
+                            author_nickname: session.nickname.clone(),
                             body,
                             replies_to,
                             client_message_id: Some(client_message_id),
@@ -566,7 +584,8 @@ async fn run_session(
                                 line: stored.line,
                                 id: stored.id,
                                 author: stored.author,
-                                at: stored.created_at,
+                                at_seconds: stored.created_at,
+                                author_nickname: stored.author_nickname,
                                 body: stored.body,
                                 replies_to: stored.replies_to,
                                 client_message_id: stored.client_message_id,
@@ -576,11 +595,42 @@ async fn run_session(
                     ClientMessage::Ping { timestamp } => {
                         frame::write(&mut send, &ServerMessage::Pong { timestamp }).await?;
                     }
-                    ClientMessage::SetAtField(_)
-                    | ClientMessage::SetTotalIsolation(_)
-                    | ClientMessage::SetPresence(
-                        Presence::Available | Presence::Away | Presence::DoNotDisturb,
-                    ) => {}
+                    // The roster shows all three (specs/07-tema-evangelion.md).
+                    // Ignoring them, as this did, made every mute local-only:
+                    // the marker existed and could never light up.
+                    ClientMessage::SetAtField(on) => {
+                        at_field = on;
+                        announce(dogma, session, &AnnouncedState {
+                            at_field,
+                            total_isolation,
+                            speaking: speaking_now(last_datagram),
+                            presence,
+                            sync_ratio: last_ratio,
+                        });
+                    }
+                    ClientMessage::SetTotalIsolation(on) => {
+                        total_isolation = on;
+                        announce(dogma, session, &AnnouncedState {
+                            at_field,
+                            total_isolation,
+                            speaking: speaking_now(last_datagram),
+                            presence,
+                            sync_ratio: last_ratio,
+                        });
+                    }
+                    ClientMessage::SetPresence(
+                        announced @ (Presence::Available | Presence::Away
+                                     | Presence::DoNotDisturb),
+                    ) => {
+                        presence = announced;
+                        announce(dogma, session, &AnnouncedState {
+                            at_field,
+                            total_isolation,
+                            speaking: speaking_now(last_datagram),
+                            presence,
+                            sync_ratio: last_ratio,
+                        });
+                    }
                     // The handshake is over. Repeating it is a protocol
                     // violation, not a re-authentication.
                     ClientMessage::Response { .. } | ClientMessage::Hello { .. } => break,
@@ -592,6 +642,7 @@ async fn run_session(
                 if current_cage.is_none() {
                     continue;
                 }
+                last_datagram = Some(Instant::now());
                 let _ = cage.send(CageCommand::Datagram {
                     from: session.ssrc,
                     bytes: bytes.to_vec(),
@@ -625,6 +676,7 @@ async fn run_session(
                     loss_fraction: (lost / sent).clamp(0.0, 1.0),
                 };
                 let ratio = sync.update(inputs);
+                last_ratio = ratio;
 
                 frame::write(&mut send, &ServerMessage::Telemetry(Telemetry {
                     rtt_ms,
@@ -639,10 +691,10 @@ async fn run_session(
 
                 let _ = dogma.events.send(Event::PilotState(PilotState {
                     pilot: session.pilot,
-                    at_field: false,
-                    total_isolation: false,
-                    speaking: false,
-                    presence: Presence::Available,
+                    at_field,
+                    total_isolation,
+                    speaking: speaking_now(last_datagram),
+                    presence,
                     sync_ratio: ratio,
                 }));
             }
@@ -663,6 +715,44 @@ async fn run_session(
     Ok(())
 }
 
+/// How long after the last datagram a pilot still counts as speaking.
+///
+/// One telemetry tick is too coarse and one frame is too twitchy: at 20 ms per
+/// frame, a quarter of a second is about a dozen frames of grace, which rides
+/// out a hiccup without leaving the mark lit through a pause.
+const SPEAKING_TAIL: Duration = Duration::from_millis(250);
+
+/// Whether audio has arrived recently enough to call this pilot speaking.
+fn speaking_now(last_datagram: Option<Instant>) -> bool {
+    last_datagram.is_some_and(|at| at.elapsed() < SPEAKING_TAIL)
+}
+
+/// Everything a `PilotState` broadcast carries about one pilot.
+///
+/// Grouped rather than passed as six arguments because every one of them is
+/// overwritten wholesale on the receiving side: a client folds the entire
+/// struct in, so a field left at a default is not left alone — it replaces
+/// whatever that client knew.
+struct AnnouncedState {
+    at_field: bool,
+    total_isolation: bool,
+    speaking: bool,
+    presence: Presence,
+    sync_ratio: u8,
+}
+
+/// Tells everybody what this pilot just announced about themselves.
+fn announce(dogma: &Dogma, session: &Session, state: &AnnouncedState) {
+    let _ = dogma.events.send(Event::PilotState(PilotState {
+        pilot: session.pilot,
+        at_field: state.at_field,
+        total_isolation: state.total_isolation,
+        speaking: state.speaking,
+        presence: state.presence,
+        sync_ratio: state.sync_ratio,
+    }));
+}
+
 /// Decides whether an event concerns this connection, and what to send.
 fn translate(
     event: &Event,
@@ -678,7 +768,8 @@ fn translate(
                     line: message.line,
                     id: message.id,
                     author: message.author,
-                    at: message.created_at,
+                    at_seconds: message.created_at,
+                    author_nickname: message.author_nickname.clone(),
                     body: message.body.clone(),
                     replies_to: message.replies_to,
                     client_message_id: message.client_message_id,

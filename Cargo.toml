@@ -6,14 +6,14 @@ members = [
     "crates/magi-core",
     "crates/magi-server",
     "crates/magi-tui",
+    "crates/magi-ffi",
     "crates/magi-conformance",
     "xtask",
 ]
 
-# `magi-ffi` is specified in specs/01-arquitetura.md but does not exist yet, by
-# plan decision (risk R10): an empty crate costs CI time on every build and
-# invites code into the wrong place. It is created with the first code that
-# belongs to it, in M5. `magi-server` arrived with M2, `magi-tui` with M4.
+# Every crate specs/01-arquitetura.md names now exists. Each arrived with the
+# first code that belonged to it, never before (risk R10): `magi-server` with
+# M2, `magi-tui` with M4, `magi-ffi` with M5.
 
 [workspace.package]
 version = "0.0.0"

@@ -58,6 +58,7 @@ async fn connect(address: SocketAddr, nickname: &str) -> Result<Client> {
         Arc::new(MemoryPinStore::new()),
     )
     .await
+    .map_err(Into::into)
 }
 
 /// Builds one media datagram for a source.

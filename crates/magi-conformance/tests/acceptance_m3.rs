@@ -57,6 +57,7 @@ async fn connect(address: SocketAddr, nickname: &str, key: &SigningKey) -> Resul
         Arc::new(MemoryPinStore::new()),
     )
     .await
+    .map_err(Into::into)
 }
 
 fn key(seed: u8) -> SigningKey {

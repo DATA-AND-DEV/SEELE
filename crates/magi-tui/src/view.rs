@@ -68,7 +68,7 @@ fn project_messages(room: &Room, app: &mut App) {
         .messages
         .iter()
         .map(|message| ChatLine {
-            at: clock(message.at),
+            at: clock(message.at_seconds),
             author: message.author_nickname.clone(),
             body: if message.edited {
                 format!("{} (editada)", message.body)
@@ -122,14 +122,14 @@ pub fn project_link(link: Link, remaining_seconds: u64, app: &mut App) {
 
 /// Turns a server timestamp into a local wall clock.
 ///
-/// The shell owns this. `magi-core` deals in the server's milliseconds and has
-/// no opinion about what time it is where the pilot is sitting.
+/// The shell owns this. `magi-core` deals in the server's seconds and has no
+/// opinion about what time it is where the pilot is sitting.
 #[must_use]
-pub fn clock(at_millis: i64) -> String {
+pub fn clock(at_seconds: i64) -> String {
     use chrono::TimeZone;
 
     chrono::Local
-        .timestamp_millis_opt(at_millis)
+        .timestamp_opt(at_seconds, 0)
         .single()
         // A timestamp outside the representable range is somebody's clock being
         // wrong, not a reason to lose the message it came with.
@@ -206,7 +206,8 @@ mod tests {
             line: LINE,
             id: MessageId(id),
             author: PilotId(author),
-            at: 1_700_000_000_000,
+            at_seconds: 1_700_000_000,
+            author_nickname: "piloto".into(),
             body: body.into(),
             replies_to: None,
             client_message_id: None,
@@ -302,7 +303,7 @@ mod tests {
         let mut app = App::new();
         project(&room, &mut app);
 
-        assert_eq!(app.messages[0].at, clock(1_700_000_000_000));
+        assert_eq!(app.messages[0].at, clock(1_700_000_000));
         assert_ne!(app.messages[0].at, "--:--");
     }
 

@@ -55,6 +55,12 @@ pub struct PendingMessage {
     pub line: LineId,
     /// Who wrote it.
     pub author: PilotId,
+    /// What the author is called, stamped by their own connection.
+    ///
+    /// Carried through rather than looked up when the message is broadcast: the
+    /// authoring session already knows its own name, and every other session
+    /// receiving the broadcast would otherwise have to query for it.
+    pub author_nickname: String,
     /// Body.
     pub body: String,
     /// What it replies to.
@@ -72,6 +78,12 @@ pub struct StoredMessage {
     pub line: LineId,
     /// Who wrote it.
     pub author: PilotId,
+    /// What the author is called.
+    ///
+    /// Empty when read back from the database, where only the id is stored —
+    /// the caller resolving history joins the names itself, in one query rather
+    /// than one per row.
+    pub author_nickname: String,
     /// Body. Empty when removed.
     pub body: String,
     /// When it was written, seconds since the epoch.
@@ -151,6 +163,7 @@ impl<'a> Messages<'a> {
                         id: MessageId(id as u64),
                         line: message.line,
                         author: message.author,
+                        author_nickname: message.author_nickname.clone(),
                         body: message.body.clone(),
                         created_at: now,
                         edited_at: None,
@@ -178,6 +191,7 @@ impl<'a> Messages<'a> {
                 id: MessageId(transaction.last_insert_rowid() as u64),
                 line: message.line,
                 author: message.author,
+                author_nickname: message.author_nickname.clone(),
                 body: message.body.clone(),
                 created_at: now,
                 edited_at: None,
@@ -208,12 +222,17 @@ impl<'a> Messages<'a> {
         let limit = i64::from(limit.clamp(1, MAX_PAGE));
         let before = cursor.map_or(i64::MAX, |id| id.get() as i64);
 
+        // The nickname is joined here rather than resolved per row by the
+        // caller: a client reading history has never seen most of these pilots
+        // arrive and has no other way to learn their names, and a query per
+        // message would be fifty round trips through SQLite for one page.
         let mut statement = self.casper.connection().prepare(
-            "SELECT id, line_id, author_id, body, created_at, edited_at,
-                    replies_to, client_message_id
-             FROM messages
-             WHERE line_id = ?1 AND id < ?2 AND deleted_at IS NULL
-             ORDER BY id DESC
+            "SELECT m.id, m.line_id, m.author_id, m.body, m.created_at, m.edited_at,
+                    m.replies_to, m.client_message_id, p.nickname
+             FROM messages m
+             JOIN pilots p ON p.id = m.author_id
+             WHERE m.line_id = ?1 AND m.id < ?2 AND m.deleted_at IS NULL
+             ORDER BY m.id DESC
              LIMIT ?3",
         )?;
 
@@ -222,6 +241,7 @@ impl<'a> Messages<'a> {
                 id: MessageId(row.get::<_, i64>(0)? as u64),
                 line: LineId(row.get::<_, i64>(1)? as u32),
                 author: PilotId(row.get::<_, i64>(2)? as u64),
+                author_nickname: row.get(8)?,
                 body: row.get(3)?,
                 created_at: row.get(4)?,
                 edited_at: row.get(5)?,
@@ -300,15 +320,18 @@ impl<'a> Messages<'a> {
             .casper
             .connection()
             .query_row(
-                "SELECT id, line_id, author_id, body, created_at, edited_at,
-                        replies_to, client_message_id
-                 FROM messages WHERE id = ?1 AND deleted_at IS NULL",
+                "SELECT m.id, m.line_id, m.author_id, m.body, m.created_at, m.edited_at,
+                        m.replies_to, m.client_message_id, p.nickname
+                 FROM messages m
+                 JOIN pilots p ON p.id = m.author_id
+                 WHERE m.id = ?1 AND m.deleted_at IS NULL",
                 [id.get() as i64],
                 |row| {
                     Ok(StoredMessage {
                         id: MessageId(row.get::<_, i64>(0)? as u64),
                         line: LineId(row.get::<_, i64>(1)? as u32),
                         author: PilotId(row.get::<_, i64>(2)? as u64),
+                        author_nickname: row.get(8)?,
                         body: row.get(3)?,
                         created_at: row.get(4)?,
                         edited_at: row.get(5)?,
@@ -364,6 +387,7 @@ mod tests {
         PendingMessage {
             line: LineId(1),
             author: PilotId(1),
+            author_nickname: "piloto".into(),
             body: body.into(),
             replies_to: None,
             client_message_id: None,

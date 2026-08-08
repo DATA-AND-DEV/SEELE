@@ -33,7 +33,8 @@ pub mod tofu;
 pub mod voice;
 
 pub use battery::{Battery, Link};
-pub use client::{Client, MediaChannel, Pattern, SessionInfo};
+pub use client::{Client, ConnectError, MediaChannel, Pattern, SessionInfo};
+pub use ed25519_dalek::SigningKey;
 pub use identity::FilePinStore;
 pub use state::{Changed, Ended, Message, Notice, Pilot, Room};
 pub use tofu::{MemoryPinStore, PinDecision, PinStore};
@@ -59,4 +60,5 @@ pub use magi_proto::ids::{
     CageId, ClientMessageId, LineId, MessageId, PilotId, RoleId, SessionId, Ssrc,
 };
 pub use magi_proto::sync_ratio::{SyncBand, SyncInputs, SyncRatio};
+pub use magi_proto::transport::DEFAULT_PORT;
 pub use magi_proto::PROTOCOL_VERSION;

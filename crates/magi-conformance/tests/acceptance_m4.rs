@@ -62,6 +62,7 @@ async fn connect(address: SocketAddr, nickname: &str, seed: u8) -> Result<Client
         Arc::new(MemoryPinStore::new()),
     )
     .await
+    .map_err(Into::into)
 }
 
 /// Draws the interface and returns the screen as text.

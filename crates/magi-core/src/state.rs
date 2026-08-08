@@ -80,12 +80,12 @@ pub struct Message {
     pub author: PilotId,
     /// Their name at the time it arrived.
     pub author_nickname: String,
-    /// When the server accepted it, in milliseconds since the Unix epoch.
+    /// When the server accepted it, in **seconds** since the Unix epoch.
     ///
     /// The server's clock. Turning it into something a person reads — a local
     /// time, a locale, a relative "há 3 min" — is a shell's job, and this
     /// module has no opinion about what time it is.
-    pub at: i64,
+    pub at_seconds: i64,
     /// The body.
     pub body: String,
     /// What it replies to.
@@ -369,7 +369,8 @@ impl Room {
                 line,
                 id,
                 author,
-                at,
+                at_seconds,
+                author_nickname,
                 body,
                 replies_to,
                 ..
@@ -383,8 +384,15 @@ impl Room {
                     id: *id,
                     line: *line,
                     author: *author,
-                    author_nickname: self.name_of(*author),
-                    at: *at,
+                    // The server's name for them wins over ours only when we
+                    // have none: somebody we watched arrive is somebody whose
+                    // name we already learned, and history for a stranger is
+                    // the case this field exists for.
+                    author_nickname: self
+                        .pilots
+                        .get(author)
+                        .map_or_else(|| author_nickname.clone(), |pilot| pilot.nickname.clone()),
+                    at_seconds: *at_seconds,
                     body: body.clone(),
                     replies_to: *replies_to,
                     own: Some(*author) == self.me,
@@ -504,9 +512,10 @@ mod tests {
             line: LINE,
             id: MessageId(id),
             author: PilotId(author),
+            author_nickname: format!("piloto {author}"),
             // Deliberately unrelated to the id: the server's clock can tie or
             // go backwards across a restart, and ordering must not depend on it.
-            at: 1_700_000_000_000 - i64::try_from(id).expect("at"),
+            at_seconds: 1_700_000_000 - i64::try_from(id).expect("at"),
             body: body.into(),
             replies_to: None,
             client_message_id: None,
@@ -670,7 +679,7 @@ mod tests {
         // moment the app opened has lost what makes it history.
         let mut room = room();
         room.apply(&said(1, 7, "olá"));
-        assert_eq!(room.messages[0].at, 1_700_000_000_000 - 1);
+        assert_eq!(room.messages[0].at_seconds, 1_700_000_000 - 1);
     }
 
     #[test]
