@@ -17,8 +17,10 @@ magi-proto = { path = "../magi-proto" }
 quinn = "0.11.11"
 rand = "0.10.2"
 rcgen = "0.14.8"
+rusqlite = { version = "0.40.1", features = ["bundled"] }
 rustls = "0.23.43"
 serde = "1.0.229"
+serde_json = "1.0.151"
 thiserror = "2.0.19"
 tokio = { version = "1.53.1", features = ["full"] }
 tracing = "0.1.44"
@@ -34,3 +36,6 @@ path = "src/lib.rs"
 [[bin]]
 name = "magid"
 path = "src/main.rs"
+
+[dev-dependencies]
+tempfile = "3.27.0"

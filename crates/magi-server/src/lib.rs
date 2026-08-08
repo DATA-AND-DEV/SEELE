@@ -31,7 +31,9 @@ use anyhow::{Context, Result};
 use magi_proto::ids::CageId;
 
 pub mod cage;
+pub mod casper;
 pub mod frame;
+pub mod melchior;
 pub mod session;
 pub mod tls;
 
