@@ -11,9 +11,38 @@ targets = [
 
 [advisories]
 version = 2
-# No ignores. An entry here is a deliberate, dated exception and needs a comment
-# explaining why the advisory does not apply to us.
-ignore = []
+# An entry here is a deliberate exception and needs a reason. Everything listed
+# is `unmaintained` — **no vulnerability is ignored**, and the day one of these
+# becomes a vulnerability it stops matching this list and fails the build.
+#
+# All of it arrives with Tauri, which specs/06-clientes-gui.md chose over
+# Electron. ADR 0020 records the trade and what would make it stop being
+# acceptable.
+ignore = [
+    # GTK3 bindings. Linux only, and reached only through webkit2gtk, which is
+    # the system webview Tauri uses there. Upstream's migration to GTK4 is
+    # tracked by Tauri, not by us; we do not call these crates directly.
+    { id = "RUSTSEC-2024-0411", reason = "gtk3 bindings via tauri/webkit2gtk, Linux only" },
+    { id = "RUSTSEC-2024-0412", reason = "gtk3 bindings via tauri/webkit2gtk, Linux only" },
+    { id = "RUSTSEC-2024-0413", reason = "gtk3 bindings via tauri/webkit2gtk, Linux only" },
+    { id = "RUSTSEC-2024-0414", reason = "gtk3 bindings via tauri/webkit2gtk, Linux only" },
+    { id = "RUSTSEC-2024-0415", reason = "gtk3 bindings via tauri/webkit2gtk, Linux only" },
+    { id = "RUSTSEC-2024-0416", reason = "gtk3 bindings via tauri/webkit2gtk, Linux only" },
+    { id = "RUSTSEC-2024-0417", reason = "gtk3 bindings via tauri/webkit2gtk, Linux only" },
+    { id = "RUSTSEC-2024-0418", reason = "gtk3 bindings via tauri/webkit2gtk, Linux only" },
+    { id = "RUSTSEC-2024-0419", reason = "gtk3 bindings via tauri/webkit2gtk, Linux only" },
+    { id = "RUSTSEC-2024-0420", reason = "gtk3 bindings via tauri/webkit2gtk, Linux only" },
+    # Build-time only: a proc-macro helper in tauri's macro crate. Never linked
+    # into a shipped binary.
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error, build-time only, via tauri-macros" },
+    # Unicode tables behind tauri's URL/IDNA handling. Data crates with no
+    # unsafe and no network surface of their own.
+    { id = "RUSTSEC-2025-0075", reason = "unic-char-range, unicode tables via tauri" },
+    { id = "RUSTSEC-2025-0080", reason = "unic-common, unicode tables via tauri" },
+    { id = "RUSTSEC-2025-0081", reason = "unic-char-property, unicode tables via tauri" },
+    { id = "RUSTSEC-2025-0098", reason = "unic-ucd-version, unicode tables via tauri" },
+    { id = "RUSTSEC-2025-0100", reason = "unic-ucd-ident, unicode tables via tauri" },
+]
 
 [licenses]
 version = 2
@@ -23,10 +52,18 @@ confidence-threshold = 0.9
 # a licence before that decision would be worse than leaving it blank. They are
 # all `publish = false`, so skip them rather than fail on them.
 private = { ignore = true }
-# Permissive only. Anything copyleft — GPL, AGPL, LGPL, MPL — is denied by
-# omission and must be discussed before it enters the tree: MAGI ships a single
-# statically linked binary (ADR 0008), so linking terms actually matter here.
+# Permissive, plus MPL-2.0 under the exception below. Anything stronger — GPL,
+# AGPL, LGPL — stays denied by omission and must be discussed before it enters
+# the tree: MAGI ships a single statically linked binary (ADR 0008), so linking
+# terms actually matter here.
+#
+# MPL-2.0 is file-level copyleft: it reaches the files it covers and not the
+# work that links them. The five crates that carry it here are Servo's CSS
+# parser and friends, pulled in by Tauri, used unmodified. If we ever *modify*
+# one, those files must be published — which is the whole obligation, and it is
+# one we can meet. ADR 0020.
 allow = [
+    "MPL-2.0",
     "MIT",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",

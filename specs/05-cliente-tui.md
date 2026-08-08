@@ -53,7 +53,9 @@ g / G             topo / fim do histórico
 
 Comandos: `:conectar <host>`, `:cage <nome>`, `:sync` (diagnóstico detalhado), `:audio` (dispositivos), `:tema`, `:sobre`.
 
-**[EM ABERTO]** Push-to-talk com a barra de espaço colide com digitação. Alternativas: PTT só no modo Normal (proposta atual), tecla dedicada configurável, ou modo "voz sempre" com VAD como padrão para quem digita muito.
+**Resolvido em M4, e eram duas causas independentes.** A colisão com digitação: PTT só no modo Normal, onde não há nada com que colidir (decisão D19). E uma que esta spec não previa: **a maioria dos terminais não reporta soltura de tecla**, então "segurar espaço" abre um microfone que nunca fecha. Onde o protocolo de teclado do Kitty existe, é segurar de verdade; onde não existe, a barra vira trava — aperta para abrir, aperta para fechar (ADR 0016). A barra de telemetria diz qual estado está valendo nos dois casos.
+
+Tecla dedicada configurável não resolveria: o problema não é *qual* tecla, é que nenhuma tem soltura nesses terminais.
 
 ## Estados visuais que precisam existir
 

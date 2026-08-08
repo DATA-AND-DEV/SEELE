@@ -1,0 +1,360 @@
+/* MAGI · Entry Plug — a casca desktop.
+   Consome `tokens.css`, congelado em M0.12 (ADR 0014). Nenhuma cor literal
+   aparece aqui: se um valor não está nos tokens, ele não é do produto.
+
+   Célula de terminal: 8px × 16px. Todo espaçamento é múltiplo de célula, e é o
+   que mantém a resposta para "como isso ficaria em 80×24 monocromático?"
+   — specs/06-clientes-gui.md. */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--magi-negro-absoluto);
+  color: var(--magi-osso);
+  font-family: var(--magi-mono);
+  font-size: 13px;
+  line-height: 16px;
+  /* Zero border-radius e zero sombra em todo o arquivo: é regra de tema
+     (specs/07-tema-evangelion.md), não gosto. */
+  -webkit-font-smoothing: antialiased;
+}
+
+body { overflow: hidden; }
+
+.tela { height: 100vh; display: flex; flex-direction: column; }
+[hidden] { display: none !important; }
+
+.kanji { font-family: var(--magi-jp); }
+
+.rotulo {
+  font-size: 10px;
+  letter-spacing: var(--magi-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--magi-osso-apagado);
+}
+
+/* ---------- boot e fim ---------- */
+
+.boot {
+  margin: auto;
+  width: 480px;
+  padding: 32px;
+  border: 1px solid var(--magi-linha-forte);
+  background: var(--magi-negro-painel);
+}
+
+.boot-marca {
+  margin: 0;
+  font-family: var(--magi-display);
+  font-weight: var(--magi-cartela);
+  letter-spacing: var(--magi-tracking-cartela);
+  font-size: 48px;
+  line-height: 48px;
+  color: var(--magi-laranja-nerv);
+}
+
+.boot-marca.fim { color: var(--magi-vermelho-alerta); font-size: 32px; line-height: 32px; }
+
+.boot-sub {
+  margin: 0 0 32px;
+  color: var(--magi-osso-apagado);
+  letter-spacing: 0.3em;
+}
+
+.boot-form { display: flex; flex-direction: column; gap: 16px; }
+
+.campo { display: flex; flex-direction: column; gap: 4px; }
+.campo-linha { flex-direction: row; align-items: center; gap: 8px; }
+
+input[type="text"], input:not([type]) {
+  width: 100%;
+}
+
+input {
+  font: inherit;
+  color: var(--magi-osso);
+  background: var(--magi-negro-absoluto);
+  border: 1px solid var(--magi-linha);
+  padding: 8px;
+}
+
+input:focus {
+  outline: none;
+  border-color: var(--magi-laranja-nerv);
+}
+
+.botao {
+  font: inherit;
+  letter-spacing: var(--magi-tracking-rotulo);
+  padding: 8px 16px;
+  color: var(--magi-negro-absoluto);
+  background: var(--magi-laranja-nerv);
+  border: 1px solid var(--magi-laranja-nerv);
+  cursor: pointer;
+}
+
+.botao:disabled { opacity: 0.5; cursor: default; }
+.botao:focus-visible { outline: 2px solid var(--magi-osso); outline-offset: 2px; }
+
+.subsistemas {
+  list-style: none;
+  margin: 32px 0 0;
+  padding: 0;
+  display: flex;
+  gap: 32px;
+  font-size: 11px;
+  color: var(--magi-osso-apagado);
+}
+
+.subsistemas b { color: var(--magi-fosforo); margin-left: 8px; }
+
+.erro, .fim-motivo {
+  margin: 16px 0 0;
+  color: var(--magi-vermelho-alerta);
+}
+
+.fim-motivo { margin-bottom: 32px; color: var(--magi-osso); }
+
+/* ---------- topo ---------- */
+
+.topo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--magi-linha-forte);
+  background: var(--magi-negro-painel);
+  flex: 0 0 auto;
+}
+
+.marca {
+  font-family: var(--magi-display);
+  font-weight: var(--magi-cartela);
+  letter-spacing: var(--magi-tracking-cartela);
+  color: var(--magi-laranja-nerv);
+}
+
+.topo .kanji { color: var(--magi-osso-apagado); font-size: 11px; }
+
+.regua { width: 16px; height: 1px; background: var(--magi-linha-forte); }
+.regua-larga { flex: 1; }
+
+.padrao { font-size: 11px; letter-spacing: 0.1em; color: var(--magi-padrao-azul); }
+.padrao[data-padrao="Orange"] { color: var(--magi-laranja-nerv); }
+.padrao[data-padrao="Offline"] { color: var(--magi-osso-apagado); }
+
+.relogio { color: var(--magi-osso-apagado); font-variant-numeric: tabular-nums; }
+
+/* ---------- banner ---------- */
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--magi-vermelho-fraco);
+  border-bottom: 1px solid var(--magi-vermelho-alerta);
+  color: var(--magi-vermelho-alerta);
+  flex: 0 0 auto;
+}
+
+.banner[data-severidade="Info"] {
+  background: var(--magi-laranja-fraco);
+  border-bottom-color: var(--magi-laranja-nerv);
+  color: var(--magi-laranja-nerv);
+}
+
+.botao-fantasma {
+  margin-left: auto;
+  font: inherit;
+  font-size: 11px;
+  color: inherit;
+  background: none;
+  border: 1px solid currentColor;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+/* ---------- painéis ---------- */
+
+.paineis {
+  flex: 1 1 auto;
+  display: grid;
+  /* As mesmas larguras assimétricas do `plug`: 18 e 24 células, o resto para a
+     conversa. specs/05-cliente-tui.md. */
+  grid-template-columns: 176px 232px 1fr;
+  min-height: 0;
+}
+
+.painel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--magi-linha);
+  background: var(--magi-negro-painel);
+}
+
+.painel-mensagens { border-right: none; }
+
+.painel-titulo {
+  margin: 0;
+  padding: 8px 16px;
+  font-size: 10px;
+  font-weight: normal;
+  letter-spacing: var(--magi-tracking-rotulo);
+  color: var(--magi-osso-apagado);
+  border-bottom: 1px solid var(--magi-linha);
+  flex: 0 0 auto;
+}
+
+.lista {
+  list-style: none;
+  margin: 0;
+  padding: 8px 0;
+  overflow-y: auto;
+  flex: 1 1 auto;
+}
+
+.lista li {
+  padding: 0 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lista .cage, .lista .linha { cursor: pointer; }
+.lista .cage:hover, .lista .linha:hover { background: var(--magi-linha); }
+.lista .aberto { color: var(--magi-laranja-nerv); }
+
+.lista .piloto { padding-left: 32px; color: var(--magi-osso-apagado); }
+.lista .piloto.falando { color: var(--magi-osso); }
+
+.presenca { width: 8px; }
+.lista .piloto.falando .presenca { color: var(--magi-fosforo); }
+
+.sync { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+/* A faixa vem do core; a cor só a acompanha. O número e a marca de bloco estão
+   sempre presentes — specs/05: nenhuma informação só por cor. */
+.sync[data-faixa="Nominal"] { color: var(--magi-sync-nominal); }
+.sync[data-faixa="Acceptable"] { color: var(--magi-sync-aceitavel); }
+.sync[data-faixa="Degraded"] { color: var(--magi-sync-degradado); }
+.sync[data-faixa="Critical"] { color: var(--magi-sync-critico); }
+
+.marca-estado {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: var(--magi-osso-apagado);
+}
+
+/* O volume por pessoa fica escondido até a linha ser apontada: `specs/03-audio.md`
+   pede o controle, e um deslizante por piloto sempre visível transformaria o
+   roster numa mesa de som. */
+.volume {
+  width: 56px;
+  margin-left: 8px;
+  accent-color: var(--magi-laranja-nerv);
+  opacity: 0;
+}
+
+.lista .piloto:hover .volume,
+.lista .piloto:focus-within .volume { opacity: 1; }
+
+/* ---------- mensagens ---------- */
+
+.mensagens {
+  list-style: none;
+  margin: 0;
+  padding: 8px 16px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+}
+
+.mensagens li { margin-bottom: 8px; }
+
+.mensagens .cabeca {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--magi-osso-apagado);
+}
+
+.mensagens .propria .cabeca { color: var(--magi-laranja-nerv); }
+.mensagens .corpo { white-space: pre-wrap; overflow-wrap: anywhere; }
+.mensagens .editada { color: var(--magi-osso-apagado); font-size: 11px; }
+.mensagens .local .corpo { color: var(--magi-fosforo); }
+
+.compor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--magi-linha);
+  flex: 0 0 auto;
+}
+
+.compor .prompt { color: var(--magi-laranja-nerv); }
+.compor input { border: none; background: none; padding: 0; }
+
+/* ---------- telemetria ---------- */
+
+.telemetria {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 32px;
+  padding: 0 16px;
+  border-top: 1px solid var(--magi-linha-forte);
+  background: var(--magi-negro-painel);
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.metrica { display: flex; gap: 8px; align-items: baseline; }
+.espaco { flex: 1; }
+
+.botao-estado {
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: var(--magi-osso-apagado);
+  background: none;
+  border: 1px solid var(--magi-linha-forte);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.botao-estado[data-ativo="sim"] {
+  color: var(--magi-negro-absoluto);
+  background: var(--magi-laranja-nerv);
+  border-color: var(--magi-laranja-nerv);
+}
+
+#botao-falar[data-ativo="sim"] {
+  background: var(--magi-fosforo);
+  border-color: var(--magi-fosforo);
+}
+
+.falha-local { color: var(--magi-vermelho-alerta); font-size: 11px; }
+
+/* ---------- acessibilidade ---------- */
+
+/* specs/05-cliente-tui.md: modo sem cor, e daltonismo é comum no público. Aqui
+   a forma e o texto continuam suficientes — a marca de bloco e o número
+   acompanham toda Taxa de Sincronização. */
+@media (prefers-contrast: more) {
+  .lista .piloto { color: var(--magi-osso); }
+  .rotulo, .painel-titulo { color: var(--magi-osso); }
+}
+
+/* Nenhuma animação carrega informação, então desligar todas não perde nada. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

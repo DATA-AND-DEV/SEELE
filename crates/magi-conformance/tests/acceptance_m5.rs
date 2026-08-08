@@ -271,6 +271,85 @@ async fn a_second_client_resumes_the_conversation_with_its_history() -> Result<(
     Ok(())
 }
 
+/// O critério de aceite de M5, entre as duas cascas de verdade.
+///
+/// `specs/06-clientes-gui.md`: "mesma sessão pode ser retomada em outro cliente
+/// sem perda de histórico." Os outros testes deste arquivo usam dois handles da
+/// FFI, o que prova a retomada mas não a travessia — este usa o caminho do
+/// `plug` de um lado e o do app do outro, que é o que a frase quer dizer.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()> {
+    use magi_core::{Client, MemoryPinStore, Room};
+    use magi_proto::ids::{CageId, ClientMessageId, LineId};
+
+    let (address, server) = start().await?;
+
+    // ---- o lado do `plug`: magi-core cru, com o mesmo Room que a TUI projeta.
+    let mut terminal = Client::connect(
+        address,
+        "localhost",
+        "ayanami",
+        &ed25519_dalek::SigningKey::from_bytes(&[42; 32]),
+        Arc::new(MemoryPinStore::new()),
+    )
+    .await?;
+
+    let mut room = Room::new();
+    room.adopt(terminal.session(), "ayanami");
+    terminal.insert_plug(CageId(CAGE)).await?;
+    room.enter_cage(CageId(CAGE));
+    terminal.join_line(LineId(LINE)).await?;
+    room.open_line(LineId(LINE));
+    terminal
+        .send_message(LineId(LINE), "dito no terminal", ClientMessageId(1))
+        .await?;
+
+    // Espera a mensagem voltar, que é quando ela está durável.
+    let deadline = Instant::now() + WAIT;
+    while Instant::now() < deadline && room.messages.is_empty() {
+        if let Ok(Ok(message)) =
+            tokio::time::timeout(Duration::from_millis(500), terminal.next_event()).await
+        {
+            room.apply(&message);
+        }
+    }
+    assert_eq!(room.messages.len(), 1, "a mensagem não foi confirmada");
+    terminal.disconnect();
+    drop(terminal);
+
+    // ---- o lado do app: a mesma superfície que o Tauri chama.
+    let desktop = tokio::task::spawn_blocking(move || connect(address, "shinji")).await??;
+    desktop.open_line(LINE)?;
+
+    assert!(
+        until(&desktop, |snapshot| {
+            snapshot
+                .messages
+                .iter()
+                .any(|m| m.body == "dito no terminal")
+        }),
+        "o app abriu a Linha e não viu o que o terminal disse"
+    );
+
+    let snapshot = desktop.snapshot();
+    let mensagem = snapshot
+        .messages
+        .iter()
+        .find(|m| m.body == "dito no terminal")
+        .expect("mensagem");
+
+    // Sem perda: quem escreveu, e quando — não só o corpo.
+    assert_eq!(mensagem.author_nickname, "ayanami");
+    assert!(!mensagem.own, "atribuída ao piloto errado");
+    assert!(
+        mensagem.at_seconds > 1_600_000_000,
+        "sem horário do servidor: {mensagem:?}"
+    );
+
+    server.shutdown();
+    Ok(())
+}
+
 /// Every failure is an enum a shell can write its own sentence for.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_unreachable_dogma_is_an_enum_and_not_a_message() -> Result<()> {

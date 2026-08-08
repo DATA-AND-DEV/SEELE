@@ -1,0 +1,73 @@
+/* MAGI · Entry Plug — tokens de design (palheta v2, congelada em M0.12)
+   Fonte: design/Entry Plug v2.dc.html. Ver ADR 0014 e docs/tokens-achados.md.
+   Célula de terminal: 8px × 16px. Todo espaçamento é múltiplo de célula.
+   Zero border-radius. Zero sombra. */
+
+:root {
+  /* ---- cor ----
+     O índice ANSI 256 ao lado de cada cor é o mesmo do magi-tokens.json e é o
+     que a TUI usa ao degradar de truecolor. Calculado por vizinho mais próximo
+     em CIELAB, restrito a 16–255. Contraste medido sobre --magi-negro-painel. */
+  --magi-negro-absoluto: #050403;   /* ansi 232 · fundo. nunca cinza-carvão neutro */
+  --magi-negro-painel:   #0A0806;   /* ansi 232 · superfície de painel */
+  --magi-linha:          #241F19;   /* ansi 234 · borda 1px padrão */
+  --magi-linha-forte:    #3A322A;   /* ansi 236 · borda de painel ativo / régua */
+  --magi-osso:           #EAE3CF;   /* ansi 254 · texto corrido · 15,60:1 AAA */
+  --magi-osso-apagado:   #7A7061;   /* ansi 243 · rótulo secundário ·  4,11:1 só texto grande */
+  --magi-laranja-nerv:   #F2521F;   /* ansi 202 · acento institucional ·  5,71:1 AA */
+  --magi-laranja-fraco:  #331704;   /* ansi 234 · preenchimento laranja */
+  --magi-vermelho-alerta:#FF1A1A;   /* ansi 196 · EXCLUSIVO alerta e queda ·  5,16:1 AA */
+  --magi-vermelho-fraco: #2C0508;   /* ansi 233 */
+  --magi-fosforo:        #6BFFB6;   /* ansi  85 · telemetria e nominal · 15,81:1 AAA */
+  --magi-fosforo-fraco:  #06220F;   /* ansi 234 */
+  --magi-padrao-azul:    #2F8FE0;   /* ansi  32 · PADRÃO: AZUL ·  5,83:1 AA */
+  --magi-azul-fraco:     #04182B;   /* ansi 233 */
+
+  /* ---- faixas da Taxa de Sincronização (specs/07) ----
+     Nunca transmitidas só por cor: o número acompanha sempre (specs/05). */
+  --magi-sync-nominal:   var(--magi-fosforo);        /* >= 90 */
+  --magi-sync-aceitavel: var(--magi-osso);           /* 70–89 */
+  --magi-sync-degradado: var(--magi-laranja-nerv);   /* 40–69 */
+  --magi-sync-critico:   var(--magi-vermelho-alerta);/* < 40  */
+
+  /* ---- tipografia ---- */
+  --magi-display: "Saira Condensed", "Arial Narrow", sans-serif; /* cartelas, cabeçalhos */
+  --magi-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace; /* todo dado */
+  --magi-jp: "Noto Sans JP", "Hiragino Kaku Gothic ProN", sans-serif; /* acento em kanji */
+
+  --magi-cartela: 700;   /* peso de cartela */
+  --magi-tracking-cartela: 0.02em;
+  --magi-tracking-rotulo: 0.22em;
+
+  --magi-t-cartela: 56px;
+  --magi-t-titulo: 28px;
+  --magi-t-secao: 18px;
+  --magi-t-corpo: 14px;
+  --magi-t-dado: 13px;
+  --magi-t-rotulo: 10px;   /* uppercase, tracking largo */
+  --magi-t-micro: 9px;     /* réguas e coordenadas */
+
+  /* ---- espaçamento: múltiplos de célula ---- */
+  --magi-celula-x: 8px;
+  --magi-celula-y: 16px;
+  --magi-e1: 8px;
+  --magi-e2: 16px;
+  --magi-e3: 24px;
+  --magi-e4: 32px;
+  --magi-e6: 48px;
+  --magi-e8: 64px;
+
+  /* ---- borda ---- */
+  --magi-b: 1px;
+  --magi-b-forte: 2px;
+  --magi-raio: 0;
+  --magi-sombra: none;
+}
+
+/* specs/07: movimento é diagnóstico, nunca decorativo. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --magi-respiro-sync: none;
+    --magi-pulso-fala: none;
+  }
+}

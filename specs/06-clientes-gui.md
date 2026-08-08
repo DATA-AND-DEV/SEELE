@@ -12,7 +12,9 @@ Os clientes gráficos existem para alcançar quem não vive no terminal e para d
 - O núcleo Rust roda no processo nativo, não em JS. Áudio, QUIC e estado ficam onde já estão.
 - O frontend é apenas apresentação, comunicando por comandos e eventos Tauri, espelhando o contrato de `magi-core` descrito em `01`.
 
-Frontend: **[EM ABERTO]** — Svelte, Solid ou HTML/CSS puro com um pouco de TS. Dado que a interface é densa mas com pouca interação complexa, algo leve serve melhor que React.
+Frontend: **decidido em M5 — HTML, CSS e JavaScript à mão, sem framework e sem npm** (ADR 0019). O critério que decidiu não foi preferência de framework: foi não ter duas árvores de dependência com só uma auditada. O `cargo deny` cobre o produto inteiro; um `node_modules` seria a única parte fora dele.
+
+**Custo do Tauri, medido em M5** (ADR 0020): a árvore traz 16 avisos `unmaintained` — dez bindings GTK3 alcançados só no Linux via `webkit2gtk`, cinco tabelas Unicode, um proc-macro de build — e cinco crates sob MPL-2.0. Nenhuma vulnerabilidade. Cada exceção está nomeada no `deny.toml` com o motivo; nenhum `ignore` genérico.
 
 Requisito não negociável: **nenhuma lógica de protocolo em JavaScript**. Se o frontend precisa saber o que é um `ssrc`, algo está errado.
 
@@ -34,7 +36,7 @@ Recomendação: decidir **depois de M4**, com um protótipo descartável de áud
 
 ## Camada FFI (`magi-ffi`)
 
-Superfície mínima e estável, gerada com `uniffi` sempre que possível:
+Superfície mínima e estável. **O `uniffi` entra em M6**, com o primeiro consumidor de binding; em M5 a `magi-ffi` foi escrita com a forma que ele exige, sem a dependência (ADR 0018). A lista do que M6 anota sem reescrever está lá, verificável.
 
 ```
 conectar(host, credencial) -> Sessao
@@ -61,5 +63,6 @@ Toda tela gráfica precisa ter uma resposta para: "como isso ficaria em 80×24 m
 ## Critérios de aceite
 
 - Desktop: binário abaixo de 30 MB, RSS abaixo de 150 MB, inicialização abaixo de 2 s.
+  **Medido em M5, macOS aarch64:** binário 18,0 MB, `.app` 18 MB, DMG 6,3 MB, RSS ocioso 112 MB, do `exec` até a janela pronta 191 ms. Linux e Windows não foram medidos — a matriz de três SOs nunca executou por falta de repositório remoto.
 - Mobile: áudio sobrevive a bloqueio de tela, chamada telefônica recebida e troca de rede.
 - Ambos: mesma sessão pode ser retomada em outro cliente sem perda de histórico.

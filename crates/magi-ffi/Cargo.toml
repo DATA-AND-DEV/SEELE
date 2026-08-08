@@ -10,6 +10,8 @@ publish.workspace = true
 # the shape here is what `uniffi` requires, without the dependency until M6
 # brings a consumer that needs generated bindings.
 [dependencies]
+# The Tauri shell talks to its webview in JSON. See the note in `types`.
+serde = { version = "1", features = ["derive"] }
 magi-core = { path = "../magi-core" }
 tokio = { version = "1.53.1", features = ["full"] }
 tracing = "0.1.44"

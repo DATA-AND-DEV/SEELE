@@ -11,9 +11,20 @@
 //!
 //! ADR 0018 explains why the shapes are what they are: this is what `uniffi`
 //! will be able to annotate in M6 without a rewrite.
+//!
+//! # Why these derive `Serialize`
+//!
+//! The Tauri shell talks to its webview over JSON. Without `serde` here, the
+//! desktop crate would have to declare a mirror of every type in this file plus
+//! the conversion between them — the same duplication `magi_core::state` was
+//! moved to avoid, one layer up. The derive is invisible to `uniffi`, which
+//! generates its own marshalling and does not care.
+//!
+//! Field names stay `snake_case` on the wire. A rename layer buys nothing and
+//! costs one more place for a field to be spelled two ways.
 
 /// How the microphone opens. `specs/03-audio.md`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum VoiceMode {
     /// A key is held. Never false-triggers, so it is the default.
     PushToTalk,
@@ -34,7 +45,7 @@ impl From<VoiceMode> for magi_core::VoiceMode {
 }
 
 /// How far the connection has got. `specs/07-tema-evangelion.md`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Pattern {
     /// Not connected.
     Offline,
@@ -49,7 +60,7 @@ pub enum Pattern {
 /// Carried as an enum beside the number so a shell never has to know the
 /// thresholds. Two shells with two copies of "90 is nominal" is two shells that
 /// disagree the day one of them is updated.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
 pub enum SyncBand {
     /// 90 and above.
     Nominal,
@@ -79,7 +90,7 @@ impl From<magi_core::SyncBand> for SyncBand {
 }
 
 /// How loud a notice is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Severity {
     /// Worth knowing.
     Info,
@@ -100,7 +111,7 @@ impl From<magi_core::AlertSeverity> for Severity {
 }
 
 /// What a notice is about. Enumerated so each shell writes its own sentence.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum NoticeReason {
     /// The pilot was named in a message.
     Mentioned,
@@ -133,7 +144,7 @@ impl From<magi_core::AlertReason> for NoticeReason {
 }
 
 /// Why a session ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum EndReason {
     /// Protocol version outside the compatibility window.
     Incompatible,
@@ -181,7 +192,7 @@ impl From<magi_core::DisconnectReason> for EndReason {
 }
 
 /// What the server's certificate turned out to be. ADR 0003.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum Trust {
     /// Never seen before. The fingerprint was pinned.
     ///
@@ -197,7 +208,7 @@ pub enum Trust {
 }
 
 /// One pilot in a Cage.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Pilot {
     /// Stable identifier for this pilot on this Dogma.
     pub id: u64,
@@ -218,7 +229,7 @@ pub struct Pilot {
 }
 
 /// A voice channel.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Cage {
     /// Identifier.
     pub id: u32,
@@ -235,7 +246,7 @@ pub struct Cage {
 }
 
 /// A text channel.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Line {
     /// Identifier.
     pub id: u32,
@@ -246,7 +257,7 @@ pub struct Line {
 }
 
 /// One thing somebody said.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Message {
     /// Server-assigned identifier. Ordered; the clock is not.
     pub id: u64,
@@ -273,7 +284,7 @@ pub struct Message {
 }
 
 /// Connection quality.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize)]
 pub struct Telemetry {
     /// Round trip, milliseconds.
     pub rtt_ms: f32,
@@ -297,7 +308,7 @@ pub struct Telemetry {
 }
 
 /// Something worth surfacing.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Notice {
     /// How loud.
     pub severity: Severity,
@@ -311,7 +322,7 @@ pub struct Notice {
 }
 
 /// Everything the interface needs, in one value.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Snapshot {
     /// How far the connection has got.
     pub pattern: Pattern,
@@ -350,7 +361,7 @@ pub struct Snapshot {
 /// Deliberately coarse: a shell is told *that* the roster moved, then reads
 /// [`Snapshot`]. Delivering the change itself would mean every shell
 /// reimplementing the fold that `magi_core::state` already does.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub enum Event {
     /// The connection reached PADRÃO: AZUL.
     Connected {
@@ -383,7 +394,7 @@ pub enum Event {
 /// same reasoning applies here: a variant carrying free text is a variant the
 /// shell cannot localise and must print verbatim. Detail that helps a developer
 /// goes to `tracing`, not across this boundary.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum PlugError {
     /// No connection, or it is already gone.
     NotConnected,

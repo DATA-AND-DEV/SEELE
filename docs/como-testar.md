@@ -13,7 +13,30 @@ cargo build --release --bin magid --bin plug
 Ele imprime a impressão digital do certificado. Guarde: é o que o ADR 0003 pede
 que você confira por outro canal se algum dia o cliente avisar que a chave mudou.
 
-## Abrir o cliente
+## Abrir o cliente gráfico
+
+```sh
+cargo tauri build --no-bundle     # ou `cargo build --release -p magi-app`
+./target/release/magi-app
+```
+
+Instalador do macOS, se quiser:
+
+```sh
+cd apps/magi-app && cargo tauri build      # gera .app e .dmg em target/release/bundle
+```
+
+O app pede o Dogma e o apelido, entra no primeiro Cage e abre a primeira Linha.
+Barra de espaço fala enquanto segurada — aqui a janela relata a soltura de
+verdade, então não há a trava que os terminais precisam (ADR 0016). Clicar no
+Cage em que já se está sai dele. O deslizante de volume aparece ao apontar uma
+linha do roster.
+
+O app e o `plug` usam o mesmo `$MAGI_HOME`, então por padrão são **o mesmo
+piloto** — que é o que faz a mesma sessão ser retomável entre os dois. Para
+serem duas pessoas, dois diretórios.
+
+## Abrir o cliente de terminal
 
 Noutro terminal:
 

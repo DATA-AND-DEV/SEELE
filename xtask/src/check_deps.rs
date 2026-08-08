@@ -70,6 +70,9 @@ const RULES: &[(&str, &[&str])] = &[
             "magi-ffi",
         ],
     ),
+    // The desktop shell. Sees `magi-ffi`, which sees `magi-core`. Reaching past
+    // it would put protocol knowledge in a Tauri command — specs/06-clientes-gui.md.
+    ("magi-app", &["magi-ffi"]),
     // Tooling. Must not depend on the product, or `cargo xtask` would need the
     // product to compile before it could check the product.
     ("xtask", &[]),
