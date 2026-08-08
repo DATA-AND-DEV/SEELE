@@ -60,13 +60,14 @@ const RULES: &[(&str, &[&str])] = &[
     (
         "magi-conformance",
         // The crate that proves the others meet the acceptance criteria is the
-        // one place allowed to see all of them, the interface included.
+        // one place allowed to see all of them, both shells included.
         &[
             "magi-proto",
             "magi-audio",
             "magi-core",
             "magi-server",
             "magi-tui",
+            "magi-ffi",
         ],
     ),
     // Tooling. Must not depend on the product, or `cargo xtask` would need the
