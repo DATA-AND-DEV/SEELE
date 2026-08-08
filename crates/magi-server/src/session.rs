@@ -445,6 +445,14 @@ async fn run_session(
         })
         .await?;
         current_cage = Some(reclaimed);
+        dogma.occupancy.lock().await.seat(
+            reclaimed,
+            crate::dogma::Occupant {
+                pilot: session.pilot,
+                nickname: session.nickname.clone(),
+                ssrc: session.ssrc,
+            },
+        );
         tracing::info!(pilot = %session.pilot, "seat reclaimed");
     }
 
@@ -461,6 +469,42 @@ async fn run_session(
                             outbound: outbound_tx.clone(),
                         }).await?;
                         current_cage = Some(id);
+
+                        // Who was already here — gap G15. The protocol
+                        // announces arrivals going forward and nothing else, so
+                        // without this a pilot walking into an occupied Cage
+                        // sees an empty room until somebody else moves.
+                        //
+                        // Sent as `PilotJoined` on purpose: from this client's
+                        // point of view that is exactly what happened, and it
+                        // needs no new message the other two shells would also
+                        // have to learn.
+                        {
+                            let mut occupancy = dogma.occupancy.lock().await;
+                            for occupant in occupancy.in_cage(id) {
+                                if occupant.pilot == session.pilot {
+                                    continue;
+                                }
+                                frame::write(&mut send, &ServerMessage::PilotJoined {
+                                    cage: id,
+                                    profile: PilotProfile {
+                                        id: occupant.pilot,
+                                        nickname: occupant.nickname.clone(),
+                                        roles: Vec::new(),
+                                    },
+                                    ssrc: occupant.ssrc,
+                                }).await?;
+                            }
+                            occupancy.seat(
+                                id,
+                                crate::dogma::Occupant {
+                                    pilot: session.pilot,
+                                    nickname: session.nickname.clone(),
+                                    ssrc: session.ssrc,
+                                },
+                            );
+                        }
+
                         let _ = dogma.events.send(Event::PilotJoined {
                             cage: id,
                             profile: PilotProfile {
@@ -474,6 +518,7 @@ async fn run_session(
                     ClientMessage::EjectPlug => {
                         cage.send(CageCommand::Leave { pilot: session.pilot }).await?;
                         if let Some(id) = current_cage.take() {
+                            dogma.occupancy.lock().await.vacate(id, session.pilot);
                             let _ = dogma.events.send(Event::PilotLeft {
                                 cage: id,
                                 pilot: session.pilot,
@@ -521,6 +566,7 @@ async fn run_session(
                                 line: stored.line,
                                 id: stored.id,
                                 author: stored.author,
+                                at: stored.created_at,
                                 body: stored.body,
                                 replies_to: stored.replies_to,
                                 client_message_id: stored.client_message_id,
@@ -608,6 +654,10 @@ async fn run_session(
     if let Some(id) = current_cage {
         let mut slots = dogma.slots.lock().await;
         slots.reserve(session.pilot, id, session.ssrc, Instant::now());
+        // The seat is held, but the pilot is not in the room. Leaving them in
+        // the occupancy would show everybody a roster with somebody who left,
+        // for five minutes.
+        dogma.occupancy.lock().await.vacate(id, session.pilot);
     }
 
     Ok(())
@@ -628,6 +678,7 @@ fn translate(
                     line: message.line,
                     id: message.id,
                     author: message.author,
+                    at: message.created_at,
                     body: message.body.clone(),
                     replies_to: message.replies_to,
                     client_message_id: message.client_message_id,

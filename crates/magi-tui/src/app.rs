@@ -228,8 +228,17 @@ pub struct App {
     pub tree: Vec<Node>,
     /// Which tree row is selected.
     pub selected: usize,
-    /// The conversation.
+    /// The conversation, projected from the room.
+    ///
+    /// Rebuilt wholesale on every change, so nothing local may live here.
     pub messages: Vec<ChatLine>,
+    /// The client's own answers — `:sync`, `:audio`, an unknown command.
+    ///
+    /// Kept apart from the conversation because they are not part of it: they
+    /// were never sent anywhere and nobody else can see them. They are drawn
+    /// after the last message, which is where an answer to something just typed
+    /// belongs.
+    pub local: Vec<ChatLine>,
     /// What the bar shows.
     pub bar: Bar,
     /// The composition buffer, shared by Insert, Command and Search.
@@ -272,6 +281,7 @@ impl App {
             tree: Vec::new(),
             selected: 0,
             messages: Vec::new(),
+            local: Vec::new(),
             bar: Bar::default(),
             input: String::new(),
             alert: None,

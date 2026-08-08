@@ -28,12 +28,14 @@ pub mod battery;
 pub mod client;
 pub mod frame;
 pub mod identity;
+pub mod state;
 pub mod tofu;
 pub mod voice;
 
 pub use battery::{Battery, Link};
 pub use client::{Client, MediaChannel, Pattern, SessionInfo};
 pub use identity::FilePinStore;
+pub use state::{Changed, Ended, Message, Notice, Pilot, Room};
 pub use tofu::{MemoryPinStore, PinDecision, PinStore};
 pub use voice::{DeviceRates, Voice, VoiceMode};
 

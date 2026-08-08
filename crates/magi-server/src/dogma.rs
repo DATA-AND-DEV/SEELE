@@ -136,6 +136,64 @@ impl Slots {
     }
 }
 
+/// Somebody sitting in a Cage right now.
+#[derive(Debug, Clone)]
+pub struct Occupant {
+    /// Who.
+    pub pilot: PilotId,
+    /// What they are called.
+    pub nickname: String,
+    /// Their media source.
+    pub ssrc: Ssrc,
+}
+
+/// Who is in which Cage at this moment.
+///
+/// Separate from [`Slots`], which holds seats for pilots who are *away*. This
+/// is who is actually there, and it exists to answer one question the protocol
+/// could not: **who was already here when I walked in.**
+///
+/// `specs/02-protocolo.md` announces arrivals going forward and nothing else,
+/// so a pilot entering an occupied Cage saw an empty room until somebody moved.
+/// Gap G15, found by running two clients where the second started after the
+/// first had already sat down.
+#[derive(Debug, Default)]
+pub struct Occupancy {
+    by_cage: HashMap<CageId, Vec<Occupant>>,
+}
+
+impl Occupancy {
+    /// Seats a pilot, replacing any earlier seat they held.
+    ///
+    /// Replacing rather than appending: a reconnection inside the grace period
+    /// re-enters the same Cage, and a roster with the same person twice is a
+    /// roster nobody trusts.
+    pub fn seat(&mut self, cage: CageId, occupant: Occupant) {
+        self.vacate_everywhere(occupant.pilot);
+        self.by_cage.entry(cage).or_default().push(occupant);
+    }
+
+    /// Removes a pilot from one Cage.
+    pub fn vacate(&mut self, cage: CageId, pilot: PilotId) {
+        if let Some(seated) = self.by_cage.get_mut(&cage) {
+            seated.retain(|occupant| occupant.pilot != pilot);
+        }
+    }
+
+    /// Removes a pilot from wherever they were. Used when a connection drops.
+    pub fn vacate_everywhere(&mut self, pilot: PilotId) {
+        for seated in self.by_cage.values_mut() {
+            seated.retain(|occupant| occupant.pilot != pilot);
+        }
+    }
+
+    /// Who is in a Cage, in the order they arrived.
+    #[must_use]
+    pub fn in_cage(&self, cage: CageId) -> Vec<Occupant> {
+        self.by_cage.get(&cage).cloned().unwrap_or_default()
+    }
+}
+
 /// One message on its way to the batch, with somewhere to report the outcome.
 pub struct WriteRequest {
     /// What to write.
@@ -152,6 +210,8 @@ pub struct Dogma {
     pub writes: mpsc::Sender<WriteRequest>,
     /// Seats held for pilots who are expected back.
     pub slots: Arc<Mutex<Slots>>,
+    /// Who is sitting in which Cage right now — gap G15.
+    pub occupancy: Arc<Mutex<Occupancy>>,
 }
 
 /// Starts the batching writer.

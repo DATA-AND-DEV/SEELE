@@ -27,14 +27,13 @@ use crossterm::terminal::{
     LeaveAlternateScreen,
 };
 use magi_core::{
-    identity, CageId, Client, ClientMessageId, FilePinStore, LineId, PinDecision, SyncInputs,
+    identity, CageId, Client, ClientMessageId, FilePinStore, LineId, PinDecision, Room, SyncInputs,
     SyncRatio, Voice, VoiceMode,
 };
 use magi_tui::app::{Action, Alert, App, ChatLine, Key, Mode, Node, Screen};
 use magi_tui::command::{self, Command};
-use magi_tui::session::Session;
 use magi_tui::theme::{Palette, Theme};
-use magi_tui::ui;
+use magi_tui::{ui, view};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
@@ -224,7 +223,8 @@ fn leave_terminal(terminal: &mut Screen1, holds: bool) -> Result<()> {
 /// Everything the loop needs to hold between keystrokes.
 struct Runtime {
     app: App,
-    session: Session,
+    /// What is true about the session. Owned by `magi-core`, not by this file.
+    room: Room,
     theme: Theme,
     voice: Option<Voice>,
     sync: SyncRatio,
@@ -243,7 +243,7 @@ struct Runtime {
 async fn run(terminal: &mut Screen1, args: Args, holds: bool) -> Result<()> {
     let mut runtime = Runtime {
         app: App::new(),
-        session: Session::new(),
+        room: Room::new(),
         theme: Theme::detect(),
         voice: None,
         sync: SyncRatio::new(),
@@ -291,11 +291,9 @@ async fn run(terminal: &mut Screen1, args: Args, holds: bool) -> Result<()> {
     client.insert_plug(cage).await?;
     client.join_line(args.line).await?;
     client.fetch_history(args.line, None, 50).await?;
-    runtime
-        .session
-        .adopt(client.session(), &args.nickname, &mut runtime.app);
-    runtime.session.enter_cage(cage, &mut runtime.app);
-    runtime.session.current_line = Some(args.line);
+    runtime.room.adopt(client.session(), &args.nickname);
+    runtime.room.enter_cage(cage);
+    runtime.room.open_line(args.line);
 
     if !args.no_audio {
         match Voice::start(client.media(), client.session().ssrc) {
@@ -315,7 +313,7 @@ async fn run(terminal: &mut Screen1, args: Args, holds: bool) -> Result<()> {
     }
 
     runtime.app.screen = Screen::PatternBlue;
-    runtime.session.rebuild(&mut runtime.app);
+    view::project(&runtime.room, &mut runtime.app);
 
     let (key_tx, mut key_rx) = tokio::sync::mpsc::channel::<Event>(64);
     std::thread::spawn(move || read_terminal_events(&key_tx));
@@ -357,9 +355,13 @@ async fn run(terminal: &mut Screen1, args: Args, holds: bool) -> Result<()> {
             event = client.next_event() => {
                 match event {
                     Ok(message) => {
-                        let now = clock();
-                        runtime.session.apply(&message, &mut runtime.app, &now);
-                        dirty = true;
+                        // The core folds it in and says what moved; redrawing
+                        // for a round-trip measurement nobody asked to see is
+                        // thirty frames a second of nothing.
+                        if runtime.room.apply(&message).any() {
+                            view::project(&runtime.room, &mut runtime.app);
+                            dirty = true;
+                        }
                     }
                     Err(error) => {
                         runtime.app.screen = Screen::Lost {
@@ -548,7 +550,7 @@ async fn act(
             // after a lost acknowledgement does not post twice.
             let id = ClientMessageId(runtime.next_message_id);
             runtime.next_message_id += 1;
-            let target = runtime.session.current_line.unwrap_or(line);
+            let target = runtime.room.current_line.unwrap_or(line);
             client.send_message(target, body.trim(), id).await?;
         }
 
@@ -592,24 +594,33 @@ async fn activate(runtime: &mut Runtime, client: &mut Client) -> Result<()> {
     };
     match node {
         Node::Cage { name, .. } => {
-            if let Some(id) = runtime.session.find_cage(&name) {
+            if let Some(id) = runtime.room.find_cage(&name) {
                 client.insert_plug(id).await?;
-                runtime.session.enter_cage(id, &mut runtime.app);
+                runtime.room.enter_cage(id);
+                view::project(&runtime.room, &mut runtime.app);
             }
         }
         Node::Line { name } => {
-            if let Some(id) = runtime.session.find_line(&name) {
-                client.join_line(id).await?;
-                client.fetch_history(id, None, 50).await?;
-                runtime.session.current_line = Some(id);
-                // A new Line is a new conversation; keeping the old one on
-                // screen under a new heading would misattribute it.
-                runtime.app.messages.clear();
-                runtime.session.rebuild(&mut runtime.app);
+            if let Some(id) = runtime.room.find_line(&name) {
+                open_line(runtime, client, id).await?;
             }
         }
         Node::Pilot(_) => {}
     }
+    Ok(())
+}
+
+/// Opens a Line and asks for the page of history behind it.
+///
+/// The fetch is what makes `specs/06-clientes-gui.md`'s "sem perda de
+/// histórico" true: a client arriving late reads what was already said instead
+/// of an empty room.
+async fn open_line(runtime: &mut Runtime, client: &mut Client, line: LineId) -> Result<()> {
+    client.join_line(line).await?;
+    runtime.room.open_line(line);
+    client.fetch_history(line, None, 50).await?;
+    runtime.app.local.clear();
+    view::project(&runtime.room, &mut runtime.app);
     Ok(())
 }
 
@@ -618,20 +629,18 @@ async fn run_command(runtime: &mut Runtime, client: &mut Client, command: &Comma
         Command::Quit => runtime.app.quit(),
 
         Command::Cage { which } => {
-            if let Some(id) = runtime.session.find_cage(which) {
+            if let Some(id) = runtime.room.find_cage(which) {
                 client.insert_plug(id).await?;
-                runtime.session.enter_cage(id, &mut runtime.app);
+                runtime.room.enter_cage(id);
+                view::project(&runtime.room, &mut runtime.app);
             } else {
                 note(runtime, format!("nenhum Cage com «{which}»"));
             }
         }
 
         Command::Line { which } => {
-            if let Some(id) = runtime.session.find_line(which) {
-                client.join_line(id).await?;
-                client.fetch_history(id, None, 50).await?;
-                runtime.session.current_line = Some(id);
-                runtime.app.messages.clear();
+            if let Some(id) = runtime.room.find_line(which) {
+                open_line(runtime, client, id).await?;
             } else {
                 note(runtime, format!("nenhuma Linha com «{which}»"));
             }
@@ -735,7 +744,7 @@ async fn run_command(runtime: &mut Runtime, client: &mut Client, command: &Comma
         }
 
         Command::Volume { who, percent } => {
-            let ssrc = runtime.session.ssrc_of(who);
+            let ssrc = runtime.room.ssrc_of(who);
             match (ssrc, &runtime.voice) {
                 (Some(ssrc), Some(voice)) => {
                     voice.set_gain(ssrc.get(), f32::from(*percent) / 100.0);
@@ -757,7 +766,7 @@ async fn run_command(runtime: &mut Runtime, client: &mut Client, command: &Comma
 /// Not an alert: `:sync` is not a problem, and putting routine answers in the
 /// alert banner is how the alert banner stops being read.
 fn note(runtime: &mut Runtime, text: String) {
-    runtime.app.messages.push(ChatLine {
+    runtime.app.local.push(ChatLine {
         at: clock_short(),
         author: "MAGI".to_owned(),
         body: text,

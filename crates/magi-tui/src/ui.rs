@@ -363,7 +363,7 @@ fn render_messages(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
     let budget = history.width as usize;
 
     let mut lines: Vec<Line<'_>> = Vec::new();
-    for message in &app.messages {
+    for message in app.messages.iter().chain(&app.local) {
         lines.extend(message_lines(message, budget, theme));
     }
 
@@ -529,7 +529,7 @@ fn render_cramped(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
 
     let budget = history.width as usize;
     let mut lines = Vec::new();
-    for message in &app.messages {
+    for message in app.messages.iter().chain(&app.local) {
         lines.extend(message_lines(message, budget, theme));
     }
     let visible = history.height as usize;

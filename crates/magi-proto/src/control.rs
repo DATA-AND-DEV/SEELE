@@ -477,6 +477,16 @@ pub enum ServerMessage {
         id: MessageId,
         /// Who wrote it.
         author: PilotId,
+        /// When the server accepted it, in milliseconds since the Unix epoch.
+        ///
+        /// The server's clock, not the client's, and not the arrival time.
+        /// Without this a page of history has no time on it at all — the
+        /// receiving client only knows when the *page* arrived, which is now.
+        /// `specs/06-clientes-gui.md` requires a session to be resumable in
+        /// another client "sem perda de histórico", and history whose lines all
+        /// claim to have been written the moment you opened the app has lost
+        /// something.
+        at: i64,
         /// Body.
         body: String,
         /// What it replies to.

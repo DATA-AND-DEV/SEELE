@@ -19,15 +19,14 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use ed25519_dalek::SigningKey;
-use magi_core::{Client, MemoryPinStore};
+use magi_core::{Client, MemoryPinStore, Room};
 use magi_proto::ids::{CageId, ClientMessageId, LineId};
 use magi_proto::ServerMessage;
 use magi_server::casper::Location;
 use magi_server::{DogmaConfig, Server};
 use magi_tui::app::{App, Key, Mode, Screen};
-use magi_tui::session::Session;
 use magi_tui::theme::{Palette, Theme};
-use magi_tui::ui;
+use magi_tui::{ui, view};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
@@ -93,7 +92,7 @@ fn draw(app: &App, palette: Palette) -> String {
 
 /// Pumps events into the interface until it shows what the test is waiting for,
 /// or the wait runs out.
-async fn pump<F>(client: &mut Client, app: &mut App, session: &mut Session, mut done: F) -> bool
+async fn pump<F>(client: &mut Client, app: &mut App, room: &mut Room, mut done: F) -> bool
 where
     F: FnMut(&App) -> bool,
 {
@@ -107,9 +106,25 @@ where
         else {
             continue;
         };
-        session.apply(&message, app, "12:00");
+        if room.apply(&message).any() {
+            view::project(room, app);
+        }
     }
     done(app)
+}
+
+/// Brings the interface up against a live connection, the way `plug` does.
+fn attach(client: &Client, nickname: &str, cage: CageId, line: Option<LineId>) -> (App, Room) {
+    let mut app = App::new();
+    app.screen = Screen::PatternBlue;
+    let mut room = Room::new();
+    room.adopt(client.session(), nickname);
+    room.enter_cage(cage);
+    if let Some(line) = line {
+        room.open_line(line);
+    }
+    view::project(&room, &mut app);
+    (app, room)
 }
 
 /// Somebody outside the project connects, sees the room, and reads what is said.
@@ -121,23 +136,7 @@ async fn an_outsider_connects_and_the_screen_shows_the_conversation() -> Result<
     watcher.insert_plug(CAGE).await?;
     watcher.join_line(LINE).await?;
 
-    let mut app = App::new();
-    let mut session = Session::new();
-    session.current_cage = Some(CAGE);
-    session.current_line = Some(LINE);
-    session.apply(
-        &ServerMessage::Session {
-            id: magi_proto::ids::SessionId(1),
-            pilot: watcher.session().pilot,
-            ssrc: watcher.session().ssrc,
-            dogma: watcher.session().dogma.clone(),
-            cages: watcher.session().cages.clone(),
-            lines: watcher.session().lines.clone(),
-            roles: Vec::new(),
-        },
-        &mut app,
-        "12:00",
-    );
+    let (mut app, mut room) = attach(&watcher, "ayanami", CAGE, Some(LINE));
 
     let mut talker = connect(address, "shinji", 2).await?;
     talker.insert_plug(CAGE).await?;
@@ -146,7 +145,7 @@ async fn an_outsider_connects_and_the_screen_shows_the_conversation() -> Result<
         .send_message(LINE, "sync caiu aqui", ClientMessageId(1))
         .await?;
 
-    let arrived = pump(&mut watcher, &mut app, &mut session, |app| {
+    let arrived = pump(&mut watcher, &mut app, &mut room, |app| {
         app.messages.iter().any(|m| m.body == "sync caiu aqui")
     })
     .await;
@@ -172,27 +171,12 @@ async fn the_roster_shows_who_actually_entered_the_cage() -> Result<()> {
     let mut watcher = connect(address, "ayanami", 3).await?;
     watcher.insert_plug(CAGE).await?;
 
-    let mut app = App::new();
-    let mut session = Session::new();
-    session.current_cage = Some(CAGE);
-    session.apply(
-        &ServerMessage::Session {
-            id: magi_proto::ids::SessionId(1),
-            pilot: watcher.session().pilot,
-            ssrc: watcher.session().ssrc,
-            dogma: watcher.session().dogma.clone(),
-            cages: watcher.session().cages.clone(),
-            lines: watcher.session().lines.clone(),
-            roles: Vec::new(),
-        },
-        &mut app,
-        "12:00",
-    );
+    let (mut app, mut room) = attach(&watcher, "ayanami", CAGE, None);
 
     let mut talker = connect(address, "asuka", 4).await?;
     talker.insert_plug(CAGE).await?;
 
-    let seen = pump(&mut watcher, &mut app, &mut session, |app| {
+    let seen = pump(&mut watcher, &mut app, &mut room, |app| {
         app.roster().any(|pilot| pilot.nickname == "asuka")
     })
     .await;
@@ -211,6 +195,47 @@ async fn the_roster_shows_who_actually_entered_the_cage() -> Result<()> {
     Ok(())
 }
 
+/// Walking into an occupied Cage shows the people already in it.
+///
+/// Gap G15. `specs/02-protocolo.md` announces arrivals going forward and says
+/// nothing about who is already seated, so the second pilot to arrive saw an
+/// empty room until somebody else moved. Found by starting two clients in
+/// sequence rather than at once — which is what everybody actually does.
+#[tokio::test]
+async fn the_second_pilot_to_arrive_sees_the_first_one() -> Result<()> {
+    let (address, server) = start().await?;
+
+    // The first pilot sits down and stops being interesting.
+    let mut early = connect(address, "shinji", 10).await?;
+    early.insert_plug(CAGE).await?;
+
+    // The second arrives afterwards, and has never seen an announcement.
+    let mut late = connect(address, "asuka", 11).await?;
+    late.insert_plug(CAGE).await?;
+
+    let (mut app, mut room) = attach(&late, "asuka", CAGE, None);
+    let seen = pump(&mut late, &mut app, &mut room, |app| {
+        app.roster().any(|pilot| pilot.nickname == "shinji")
+    })
+    .await;
+
+    assert!(seen, "walked into an occupied Cage and saw an empty room");
+
+    let names: Vec<&str> = app.roster().map(|p| p.nickname.as_str()).collect();
+    assert!(
+        names.contains(&"asuka"),
+        "we are not on our own roster: {names:?}"
+    );
+    assert_eq!(
+        names.iter().filter(|name| **name == "shinji").count(),
+        1,
+        "the same pilot is seated twice: {names:?}"
+    );
+
+    server.shutdown();
+    Ok(())
+}
+
 /// Sixteen colours is what an SSH session gets, and it must lose nothing.
 #[tokio::test]
 async fn sixteen_colours_over_ssh_lose_no_information() -> Result<()> {
@@ -220,23 +245,7 @@ async fn sixteen_colours_over_ssh_lose_no_information() -> Result<()> {
     watcher.insert_plug(CAGE).await?;
     watcher.join_line(LINE).await?;
 
-    let mut app = App::new();
-    let mut session = Session::new();
-    session.current_cage = Some(CAGE);
-    session.current_line = Some(LINE);
-    session.apply(
-        &ServerMessage::Session {
-            id: magi_proto::ids::SessionId(1),
-            pilot: watcher.session().pilot,
-            ssrc: watcher.session().ssrc,
-            dogma: watcher.session().dogma.clone(),
-            cages: watcher.session().cages.clone(),
-            lines: watcher.session().lines.clone(),
-            roles: Vec::new(),
-        },
-        &mut app,
-        "12:00",
-    );
+    let (mut app, mut room) = attach(&watcher, "ayanami", CAGE, Some(LINE));
 
     let mut talker = connect(address, "shinji", 6).await?;
     talker.insert_plug(CAGE).await?;
@@ -244,7 +253,7 @@ async fn sixteen_colours_over_ssh_lose_no_information() -> Result<()> {
     talker
         .send_message(LINE, "verificando harmônicos", ClientMessageId(1))
         .await?;
-    pump(&mut watcher, &mut app, &mut session, |app| {
+    pump(&mut watcher, &mut app, &mut room, |app| {
         !app.messages.is_empty()
     })
     .await;
@@ -280,22 +289,7 @@ async fn boot_to_ready_is_under_a_second_and_a_half() -> Result<()> {
     client.insert_plug(CAGE).await?;
     client.join_line(LINE).await?;
 
-    let mut app = App::new();
-    let mut session = Session::new();
-    session.current_cage = Some(CAGE);
-    session.apply(
-        &ServerMessage::Session {
-            id: magi_proto::ids::SessionId(1),
-            pilot: client.session().pilot,
-            ssrc: client.session().ssrc,
-            dogma: client.session().dogma.clone(),
-            cages: client.session().cages.clone(),
-            lines: client.session().lines.clone(),
-            roles: Vec::new(),
-        },
-        &mut app,
-        "12:00",
-    );
+    let (app, _room) = attach(&client, "ayanami", CAGE, Some(LINE));
     let screen = draw(&app, Palette::True);
     let elapsed = started.elapsed();
 

@@ -147,6 +147,7 @@ impl Server {
             events,
             writes,
             slots: Arc::new(tokio::sync::Mutex::new(dogma::Slots::default())),
+            occupancy: Arc::new(tokio::sync::Mutex::new(dogma::Occupancy::default())),
         });
 
         // Held seats have to be released even if nobody reconnects, or a Dogma

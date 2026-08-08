@@ -20,7 +20,7 @@
 
 pub mod app;
 pub mod command;
-pub mod session;
 pub mod text;
 pub mod theme;
 pub mod ui;
+pub mod view;
