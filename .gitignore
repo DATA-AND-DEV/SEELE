@@ -1,0 +1,22 @@
+/target
+**/*.rs.bk
+*.pdb
+
+# macOS
+.DS_Store
+
+# The Claude Design zip is already extracted into design/. Do not version both copies.
+/*.zip
+
+# Local audio measurement artifacts (M1) — produced by a rig, never committed.
+/measurements/
+*.wav
+
+# cargo-fuzz: corpus and crash artifacts are local findings, not source.
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+/fuzz/coverage/
+
+# Throwaway spikes build their own targets (M1).
+/spikes/*/target/

@@ -1,0 +1,7 @@
+# Toolchain fixado para builds reproduzíveis nos três SOs.
+# Trocar de versão é uma decisão consciente, registrada em ADR — não um efeito
+# colateral de `rustup update` na máquina de alguém.
+[toolchain]
+channel = "1.97.1"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

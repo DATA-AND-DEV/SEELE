@@ -1,0 +1,17 @@
+[package]
+name = "spike-voice-link"
+description = "M1.11 harness: full audio pipeline over plain UDP. THROWAWAY — dies with M1."
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Outside the workspace on purpose. This is the disposable transport from task
+# M1.11: specs/01 and specs/08 require QUIC with TLS 1.3 and offer no plaintext
+# path, so nothing here may survive into the product. It exists to prove the
+# audio pipeline end to end before M2 puts a real protocol under it.
+[workspace]
+
+[dependencies]
+magi-audio = { path = "../../crates/magi-audio" }
+magi-proto = { path = "../../crates/magi-proto" }
+shiguredo_opus = "2026.2.0"

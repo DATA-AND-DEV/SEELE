@@ -1,0 +1,88 @@
+# 07 — Tema
+
+O tema é **vocabulário de produto**, não skin. É definido aqui uma vez e aplicado em todo lugar: interface, mensagens de erro, logs, documentação, nome de binário. Não se redesenha por tela.
+
+## Regra de ouro
+
+A referência não é "laranja e preto com fonte futurista". É a **densidade de informação** e a **hierarquia de comando** das telas da NERV: muito rótulo pequeno, muitos números vivos, quase nenhuma decoração, e a sensação de que tudo está sendo monitorado.
+
+Segunda regra: **o tema nunca custa clareza**. Se um usuário precisa saber o que "Distúrbio harmônico" significa para resolver um problema, a interface falhou. Nomeação temática vem sempre acompanhada do dado concreto — "Distúrbio harmônico · perda 8,4%".
+
+## Glossário canônico
+
+Estes termos são obrigatórios e consistentes em toda a superfície do produto.
+
+| Conceito | Termo | Nota |
+|---|---|---|
+| Instância de servidor | **Dogma Central** | Plural: Dogmas |
+| Daemon | **magid** | |
+| Cliente | **Entry Plug** / `plug` | |
+| Canal de voz | **Cage** | |
+| Canal de texto | **Linha** | |
+| Usuário | **Piloto** | |
+| Entrar em canal de voz | **Inserir plug** | |
+| Sair | **Ejetar** | |
+| Qualidade de conexão | **Taxa de Sincronização** | 0–100%, ver `02` |
+| Latência | **Atraso de sinal** | ms |
+| Perda de pacote | **Distúrbio harmônico** | |
+| Mudo (microfone) | **A.T. Field** ativo | |
+| Surdo (alto-falante) | **Isolamento total** | |
+| Sessão verificada | **PADRÃO: AZUL** | |
+| Sessão não verificada | **PADRÃO: LARANJA** | |
+| Reconectando | **Bateria interna** | contagem de 04:59 |
+| Notificação crítica | **Alerta · 警告** | |
+| Configurações | **Terminal Dogma** | |
+| Papéis | Comandante, Operador, Piloto, Observador | |
+| Subsistemas | MELCHIOR, BALTHASAR, CASPER | ver `04` |
+
+## O elemento assinatura
+
+**A Taxa de Sincronização por pessoa.** Cada piloto no roster tem um percentual vivo derivado do RTT, jitter e perda daquela conexão. Nenhum concorrente mostra isso; aqui é a coisa mais visível da tela. É a métrica que dá caráter ao produto e, não por acaso, é genuinamente útil — quando alguém fica difícil de entender, todo mundo já sabe por quê.
+
+## A bateria interna
+
+Quando a conexão cai, o cliente não fecha nem mostra um spinner. Ele entra em **bateria interna**: contagem regressiva de 5 minutos em vermelho, tentativas de reconexão listadas, interface esmaecida mas ainda legível — o histórico continua ali para leitura.
+
+Funcionalmente é um período de graça de sessão, sustentado pela migração de conexão do QUIC (ver `01`). Narrativamente é exato. Este é o melhor casamento entre tema e engenharia no projeto — proteger de simplificações.
+
+## Tokens de cor
+
+Valores definitivos saem do trabalho no Claude Design; estas são as **restrições** que aquele trabalho precisa respeitar:
+
+| Papel | Regra |
+|---|---|
+| Fundo | Preto quase absoluto, nunca cinza-carvão neutro |
+| Acento primário | Laranja NERV — cor institucional, **não** cor de sucesso |
+| Alerta | Vermelho, uso exclusivo para erro e queda. Se aparece, algo está errado |
+| Nominal / telemetria | Verde de fósforo |
+| Identidade verificada | Azul (PADRÃO: AZUL) |
+| Texto corrido | Off-white levemente amarelado. Branco puro é errado |
+
+Faixas da Taxa de Sincronização: **≥ 90** nominal (verde) · **70–89** aceitável (off-white) · **40–69** degradado (laranja) · **< 40** crítico (vermelho).
+
+## Tipografia
+
+Monoespaçada para todo dado, número, endereço e log. Display condensada e pesada, caixa alta e tracking apertado, para cabeçalhos e cartelas de alerta. Face japonesa para os fragmentos em kanji.
+
+**Regra sobre o japonês:** kanji é acento tipográfico, sempre secundário. Nunca carrega informação necessária para operar o produto. Um usuário que não lê japonês não perde nada. Fragmentos aprovados: 警告 (alerta), 同期率 (taxa de sincronização), 第3新東京市, 発令.
+
+## Movimento
+
+Só a sequência de boot é generosa. No resto, movimento é diagnóstico: a barra de sincronização respira, o indicador de fala pulsa com a voz, a contagem da bateria desce. Sem transição decorativa. `prefers-reduced-motion` respeitado, e a TUI oferece desligar animação por completo.
+
+Nenhuma animação pode atrasar o usuário. Se a conexão fecha em 200 ms, o boot dura 200 ms.
+
+## Voz da interface
+
+Operacional, fria, factual. A interface **reporta**; não pede desculpa, não é simpática, não usa primeira pessoa.
+
+- Certo: `PADRÃO AZUL NÃO ESTABELECIDO · credencial rejeitada`
+- Certo: `CAGE-02 vazio. Insira o plug para iniciar.`
+- Errado: `Ops! Não conseguimos te conectar 😥`
+- Errado: `Nenhuma mensagem ainda!`
+
+Erro sempre diz **o que aconteceu** e **o que fazer**. Tela vazia é convite à ação, não piada.
+
+## Cuidado com direitos
+
+Evangelion é propriedade da Khara. Usar a **linguagem visual** (paleta, densidade, tipo de cartela) e vocabulário genérico é uma coisa; reproduzir logotipos da NERV/SEELE, arte oficial, trilha sonora ou nomes de personagens como marca do produto é outra. **[EM ABERTO]** — se o projeto for público, decidir o quanto se aproxima. Recomendação: inspiração estética sim, ativos e logos oficiais não.

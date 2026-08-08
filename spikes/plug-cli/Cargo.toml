@@ -1,0 +1,21 @@
+[package]
+name = "spike-plug-cli"
+description = "M2.5: the ugly command-line client. THROWAWAY — magi-tui replaces it in M4."
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Outside the workspace on purpose. specs/09-roadmap.md asks M2 for "an ugly
+# command-line client, no TUI, only to exercise the protocol" — disposable by
+# description. M4 builds `plug` for real, on ratatui, against the same magi-core.
+[workspace]
+
+[dependencies]
+magi-core = { path = "../../crates/magi-core" }
+magi-audio = { path = "../../crates/magi-audio" }
+magi-proto = { path = "../../crates/magi-proto" }
+shiguredo_opus = "2026.2.0"
+ed25519-dalek = "3"
+rand = "0.10"
+anyhow = "1"
+tokio = { version = "1", features = ["full"] }

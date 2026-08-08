@@ -1,0 +1,38 @@
+[package]
+name = "magi-fuzz"
+description = "Fuzz targets for the untrusted-input surface of magi-proto."
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Excluded from the main workspace: fuzzing needs nightly, and `cargo build
+# --workspace` on stable must not try to compile this.
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+magi-proto = { path = "../crates/magi-proto" }
+
+[[bin]]
+name = "version_negotiation"
+path = "fuzz_targets/version_negotiation.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "media_header"
+path = "fuzz_targets/media_header.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "control_frame"
+path = "fuzz_targets/control_frame.rs"
+test = false
+doc = false
+bench = false

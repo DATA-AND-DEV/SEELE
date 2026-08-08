@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # specs/10-convencoes.md: main is always green and always runnable.
+  RUSTFLAGS: -D warnings
+
+jobs:
+  # Formatting is platform independent, so it runs once rather than three times.
+  # specs/10-convencoes.md: "default rustfmt, no custom configuration.
+  # Discussing formatting is wasted time."
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo fmt --all --check
+
+  # specs/09-roadmap.md, M0 acceptance: cargo build and cargo test green on all
+  # three operating systems.
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, name: linux }
+          - { os: macos-15, name: macos }
+          - { os: windows-2022, name: windows }
+    steps:
+      - uses: actions/checkout@v4
+
+      # ALSA headers are required by cpal on Linux (specs/03-audio.md).
+      # Installed from M0 so that the audio crate never introduces a CI failure
+      # that looks like an audio bug but is a packaging bug — see ADR 0008.
+      - name: Install Linux audio and build dependencies
+        if: matrix.name == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libasound2-dev pkg-config
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --workspace --all-targets
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      # specs/01-arquitetura.md: "this boundary is the most important contract in
+      # the project". A contract checked only by review is a contract that erodes.
+      - name: Dependency rule
+        run: cargo xtask check-deps
+
+  # specs/08-seguranca.md: cargo deny and cargo audit fail the build on a known
+  # vulnerability.
+  supply-chain:
+    name: supply chain
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+      - name: cargo-deny
+        run: cargo deny --all-features check
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: cargo-audit
+        run: cargo audit
+
+  # specs/08-seguranca.md: "Fuzzing of the magi-proto parsers — it is the surface
+  # that receives untrusted network bytes."
+  #
+  # A short smoke run on every push proves the harness still builds and runs; it
+  # is not a real fuzzing campaign. Long campaigns belong on a schedule or on a
+  # developer's machine, with the corpus kept between runs.
+  fuzz:
+    name: fuzz smoke
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly
+        run: rustup toolchain install nightly --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Smoke run
+        run: cargo +nightly fuzz run version_negotiation -- -max_total_time=60
+
+  # specs/10-convencoes.md: cargo doc on the whole public API. Broken intra-doc
+  # links are the usual way documentation rots without anyone noticing.
+  docs:
+    name: docs
+    runs-on: ubuntu-24.04
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --workspace --no-deps --document-private-items

@@ -1,0 +1,14 @@
+[package]
+name = "spike-device-latency"
+description = "M1.1 gate spike: device round-trip latency. THROWAWAY — dies with M1."
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Outside the main workspace on purpose. This is throwaway probe code (task M1.1)
+# and must not drag `cpal` into magi-audio before M1.3 puts it there deliberately.
+[workspace]
+
+[dependencies]
+cpal = "0.18"
+rtrb = "0.3"

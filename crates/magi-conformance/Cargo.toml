@@ -1,0 +1,28 @@
+[package]
+name = "magi-conformance"
+description = "End-to-end protocol tests. The one crate allowed to see both ends."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# This crate exists because an end-to-end protocol test needs a server and a
+# client at once, and ADR 0002 forbids either of them depending on the other —
+# for good reason: the daemon must not link the client, and the client must not
+# link the daemon.
+#
+# Putting the test here keeps that rule intact and gives the exception a name.
+# It ships nothing: `src/lib.rs` is empty and every dependency is a dev one.
+[dependencies]
+
+[dev-dependencies]
+magi-proto = { path = "../magi-proto" }
+magi-core = { path = "../magi-core" }
+magi-server = { path = "../magi-server" }
+tokio = { version = "1", features = ["full"] }
+ed25519-dalek = "3"
+rand = "0.10"
+anyhow = "1"
+
+[lints]
+workspace = true

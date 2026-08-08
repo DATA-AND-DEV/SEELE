@@ -1,0 +1,1263 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;700;900&family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+JP:wght@700;900&display=swap" rel="stylesheet">
+<style>
+  html, body { margin:0; padding:0; background:#050403; color:#EAE3CF; }
+  * { box-sizing:border-box; border-radius:0 !important; }
+  ::selection { background:#FF6B00; color:#050403; }
+  a { color:#FF6B00; text-decoration:none; }
+  a:hover { color:#EAE3CF; }
+  input, button { font-family:"IBM Plex Mono", monospace; }
+  :focus-visible { outline:2px solid #FF6B00; outline-offset:1px; }
+  @keyframes magiRespiro { 0%,100% { opacity:1; } 50% { opacity:.55; } }
+  @keyframes magiPiscar { 0%,49% { opacity:1; } 50%,100% { opacity:0; } }
+  @keyframes magiVarredura { 0% { transform:translateY(-100%); } 100% { transform:translateY(2000%); } }
+  @media (prefers-reduced-motion: reduce) { * { animation:none !important; } }
+</style>
+</helmet>
+
+<div style="min-height:100vh; display:flex; flex-direction:column; background:#050403; font-family:'IBM Plex Mono',monospace;">
+
+  <div style="display:flex; align-items:stretch; height:40px; border-bottom:1px solid #241F19; background:#0A0806; flex-shrink:0;">
+    <div style="display:flex; align-items:center; gap:8px; padding:0 16px; border-right:1px solid #241F19;">
+      <span style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:15px; letter-spacing:0.14em; color:#FF6B00;">MAGI</span>
+      <span style="font-size:9px; letter-spacing:0.2em; color:#7A7061;">SEQUÊNCIA</span>
+    </div>
+    <div style="flex:1; min-width:0; display:flex; overflow-x:auto;">
+      <sc-for list="{{ nav }}" as="n" hint-placeholder-count="9">
+        <button type="button" onClick="{{ n.ir }}" style="background:transparent; border:0; border-right:1px solid #241F19; padding:0 10px; font-size:10px; letter-spacing:0.1em; white-space:nowrap; cursor:pointer; color: {{ n.cor }}; box-shadow: {{ n.marca }};">{{ n.rot }}</button>
+      </sc-for>
+    </div>
+    <button type="button" onClick="{{ setGrafico }}" style="background:transparent; border:0; border-left:1px solid #241F19; padding:0 16px; font-size:10px; letter-spacing:0.16em; cursor:pointer; color: {{ corGrafico }};">GRÁFICO</button>
+    <button type="button" onClick="{{ setTerminal }}" style="background:transparent; border:0; border-left:1px solid #241F19; padding:0 16px; font-size:10px; letter-spacing:0.16em; cursor:pointer; color: {{ corTerminal }};">TERMINAL · TUI</button>
+  </div>
+
+  <sc-if value="{{ ehBoot }}" hint-placeholder-val="{{ true }}">
+    <div style="flex:1; display:grid; grid-template-columns:1fr 420px; min-height:calc(100vh - 40px);">
+      <div style="border-right:1px solid #241F19; display:flex; flex-direction:column; justify-content:center; padding:64px 64px 32px; position:relative;">
+        <div style="position:absolute; top:16px; left:64px; font-size:9px; letter-spacing:0.2em; color:#7A7061;">A·01 / SEQUÊNCIA DE INICIALIZAÇÃO</div>
+        <div style="position:absolute; top:0; bottom:0; left:0; width:12px; border-right:1px solid #241F19; background:repeating-linear-gradient(180deg,#241F19 0 1px,transparent 1px 16px);"></div>
+        <div style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:88px; line-height:0.86; letter-spacing:0.01em; color:#EAE3CF;">MAGI</div>
+        <div style="display:flex; align-items:baseline; gap:16px; margin-top:8px;">
+          <span style="font-family:'Saira Condensed',sans-serif; font-weight:700; font-size:24px; letter-spacing:0.18em; color:#FF6B00;">SISTEMA DE SINCRONIZAÇÃO</span>
+          <span style="font-family:'Noto Sans JP',sans-serif; font-weight:700; font-size:15px; color:#7A7061;">第三新東京市</span>
+        </div>
+
+        <div style="margin-top:48px; display:grid; grid-template-columns:repeat(3,1fr); border:1px solid #241F19;">
+          <sc-for list="{{ subsistemas }}" as="s" hint-placeholder-count="3">
+            <div style="border-right:1px solid #241F19; padding:16px; display:flex; flex-direction:column; gap:8px;">
+              <span style="font-family:'Saira Condensed',sans-serif; font-weight:700; font-size:20px; letter-spacing:0.1em; color: {{ s.cor }};">{{ s.nome }}</span>
+              <span style="font-size:10px; letter-spacing:0.16em; color:#7A7061;">{{ s.papel }}</span>
+              <span style="font-size:13px; color: {{ s.cor }};">{{ s.barra }}</span>
+              <span style="font-size:11px; letter-spacing:0.08em; color: {{ s.cor }};">{{ s.estado }}</span>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="margin-top:32px;">
+          <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;">
+            <span style="font-size:10px; letter-spacing:0.22em; color:#7A7061;">TAXA DE SINCRONIZAÇÃO</span>
+            <span style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:40px; line-height:1; color: {{ bootCor }};">{{ bootPct }}</span>
+          </div>
+          <div style="font-size:15px; letter-spacing:0.04em; color: {{ bootCor }}; white-space:nowrap; overflow:hidden;">{{ bootBarra }}</div>
+          <div style="margin-top:8px; display:flex; justify-content:space-between; font-size:9px; letter-spacing:0.14em; color:#7A7061;">
+            <span>0</span><span>25</span><span>50</span><span>75</span><span>100</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex; flex-direction:column; background:#0A0806; position:relative;">
+        <div style="padding:12px 16px; border-bottom:1px solid #241F19; font-size:9px; letter-spacing:0.2em; color:#7A7061;">B·01 / REGISTRO DE CARGA</div>
+        <div style="flex:1; padding:16px; display:flex; flex-direction:column; gap:4px; font-size:12px; line-height:1.5;">
+          <sc-for list="{{ bootLog }}" as="l" hint-placeholder-count="10">
+            <div style="display:flex; gap:12px;">
+              <span style="color:#3A322A; flex-shrink:0;">{{ l.t }}</span>
+              <span style="color: {{ l.cor }};">{{ l.txt }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="border-top:1px solid #241F19; padding:16px; display:flex; justify-content:space-between; align-items:center;">
+          <span style="font-size:10px; letter-spacing:0.16em; color:#7A7061;">CONCORDÂNCIA DOS TRÊS</span>
+          <span style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:22px; letter-spacing:0.08em; color: {{ bootCor }};">{{ bootConcordancia }}</span>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ ehAuth }}">
+    <div style="flex:1; display:grid; grid-template-columns:minmax(340px,460px) minmax(0,1fr) 300px; min-height:calc(100vh - 40px);">
+      <div style="border-right:1px solid #241F19; padding:48px 40px; display:flex; flex-direction:column; justify-content:center; gap:32px;">
+        <div>
+          <div style="font-size:9px; letter-spacing:0.2em; color:#7A7061; margin-bottom:16px;">A·02 / ENTRADA EM DOGMA CENTRAL</div>
+          <div style="border:2px solid {{ padraoCor }}; background: {{ padraoFundo }}; padding:16px 20px; display:flex; align-items:baseline; justify-content:space-between;">
+            <span style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:34px; letter-spacing:0.06em; color: {{ padraoCor }};">{{ padraoRotulo }}</span>
+            <span style="font-family:'Noto Sans JP',sans-serif; font-weight:700; font-size:13px; color: {{ padraoCor }};">{{ padraoKanji }}</span>
+          </div>
+          <div style="margin-top:8px; font-size:11px; line-height:1.6; color:#7A7061;">{{ padraoNota }}</div>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:24px;">
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <label for="ep-end" style="font-size:10px; letter-spacing:0.22em; color:#7A7061;">ENDEREÇO DO DOGMA CENTRAL</label>
+            <input id="ep-end" type="text" value="magi://toquio-3.dogma.central:7743" style="background:#0A0806; border:1px solid #241F19; border-left:2px solid #FF6B00; color:#EAE3CF; font-size:13px; padding:12px; width:100%;" style-focus="border-color:#FF6B00" />
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <label for="ep-chave" style="font-size:10px; letter-spacing:0.22em; color:#7A7061;">CHAVE DE IDENTIDADE · MELCHIOR</label>
+            <input id="ep-chave" type="password" value="ed25519-0x8F41C2" style="background:#0A0806; border:1px solid #241F19; border-left:2px solid #241F19; color:#EAE3CF; font-size:13px; padding:12px; width:100%; letter-spacing:0.2em;" style-focus="border-color:#FF6B00" />
+          </div>
+          <button type="button" onClick="{{ verificar }}" style="background: {{ padraoCor }}; color:#050403; border:0; padding:14px; font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:18px; letter-spacing:0.2em; cursor:pointer; width:100%;">{{ authBotao }}</button>
+        </div>
+      </div>
+
+      <div style="border-right:1px solid #241F19; display:flex; flex-direction:column; min-width:0; overflow:hidden;">
+        <div style="padding:12px 16px; border-bottom:1px solid #241F19; font-size:9px; letter-spacing:0.2em; color:#7A7061;">B·02 / APERTO DE MÃO — MELCHIOR</div>
+        <div style="flex:1; padding:16px; display:flex; flex-direction:column; gap:4px; font-size:12px; line-height:1.5;">
+          <sc-for list="{{ authLog }}" as="l" hint-placeholder-count="6">
+            <div style="display:flex; gap:12px;">
+              <span style="color:#3A322A; flex-shrink:0;">{{ l.t }}</span>
+              <span style="color: {{ l.cor }};">{{ l.txt }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="display:flex; flex-direction:column; background:#0A0806;">
+        <div style="padding:12px 16px; border-bottom:1px solid #241F19; font-size:9px; letter-spacing:0.2em; color:#7A7061;">C·02 / DOGMA</div>
+        <div style="padding:16px; display:flex; flex-direction:column; gap:16px;">
+          <div>
+            <div style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:30px; letter-spacing:0.04em; color:#EAE3CF;">TÓQUIO-3</div>
+            <div style="font-size:10px; letter-spacing:0.16em; color:#7A7061;">DOGMA CENTRAL · 412 OPERADORES</div>
+          </div>
+          <div style="border-top:1px solid #241F19; padding-top:16px; display:flex; flex-direction:column; gap:8px; font-size:11px;">
+            <div style="display:flex; justify-content:space-between;"><span style="color:#7A7061;">CAGES</span><span style="color:#EAE3CF;">03</span></div>
+            <div style="display:flex; justify-content:space-between;"><span style="color:#7A7061;">LINHAS</span><span style="color:#EAE3CF;">04</span></div>
+            <div style="display:flex; justify-content:space-between;"><span style="color:#7A7061;">CODEC</span><span style="color:#3DF57A;">OPUS 96k</span></div>
+            <div style="display:flex; justify-content:space-between;"><span style="color:#7A7061;">ROTA</span><span style="color:#3DF57A;">BALTHASAR·01</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ ehPrincipal }}">
+    <div style="flex:1; display:flex; flex-direction:column; min-height:calc(100vh - 40px); position:relative;">
+      <div style="flex:1; display:flex; flex-direction:column; opacity: {{ opacidadeApp }};">
+
+        <div style="display:flex; align-items:center; height:56px; border-bottom:1px solid #241F19; background:#0A0806; flex-shrink:0;">
+          <div style="width:56px; height:56px; border-right:1px solid #241F19; display:flex; align-items:center; justify-content:center; font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:16px; letter-spacing:0.06em; color:#FF6B00;">MG</div>
+          <div style="padding:0 20px; border-right:1px solid #241F19; height:100%; display:flex; flex-direction:column; justify-content:center;">
+            <span style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:20px; letter-spacing:0.06em; color:#EAE3CF; line-height:1;">TÓQUIO-3</span>
+            <span style="font-size:9px; letter-spacing:0.2em; color:#7A7061;">DOGMA CENTRAL · 7743</span>
+          </div>
+          <div style="padding:0 20px; border-right:1px solid #241F19; height:100%; display:flex; align-items:center; gap:12px;">
+            <span style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:16px; letter-spacing:0.12em; color:#2F8FE0;">PADRÃO: AZUL</span>
+            <span style="font-size:10px; color:#7A7061;">IKARI.S</span>
+          </div>
+          <div style="flex:1; height:100%; background:repeating-linear-gradient(90deg,#241F19 0 1px,transparent 1px 8px); opacity:.5;"></div>
+          <div style="padding:0 20px; border-left:1px solid #241F19; height:100%; display:flex; align-items:center; gap:20px;">
+            <span style="font-family:'Noto Sans JP',sans-serif; font-weight:700; font-size:12px; color:#7A7061;">同期率</span>
+            <span style="font-size:13px; color:#EAE3CF; letter-spacing:0.08em;">{{ relogio }}</span>
+          </div>
+        </div>
+
+        <div style="flex:1; display:grid; grid-template-columns:56px 240px 1fr 316px; min-height:0;">
+
+          <div style="border-right:1px solid #241F19; display:flex; flex-direction:column; background:#0A0806;">
+            <sc-for list="{{ dogmas }}" as="d" hint-placeholder-count="4">
+              <button type="button" onClick="{{ d.sel }}" style="height:56px; border:0; border-bottom:1px solid #241F19; border-left:2px solid {{ d.marca }}; background:transparent; color: {{ d.cor }}; font-family:'IBM Plex Mono',monospace; font-size:12px; letter-spacing:0.06em; cursor:pointer;">{{ d.sigla }}</button>
+            </sc-for>
+          </div>
+
+          <div style="border-right:1px solid #241F19; display:flex; flex-direction:column; min-height:0; overflow:auto;">
+            <div style="padding:12px 16px 8px; display:flex; justify-content:space-between; align-items:baseline;">
+              <span style="font-size:9px; letter-spacing:0.2em; color:#7A7061;">CAGES</span>
+              <span style="font-size:9px; color:#3A322A;">B·03</span>
+            </div>
+            <sc-for list="{{ cages }}" as="c" hint-placeholder-count="3">
+              <button type="button" onClick="{{ c.entrar }}" style="text-align:left; background: {{ c.fundo }}; border:0; border-top:1px solid #241F19; border-left:2px solid {{ c.marca }}; padding:10px 14px; cursor:pointer; display:flex; flex-direction:column; gap:4px; width:100%;">
+                <span style="display:flex; justify-content:space-between; align-items:baseline; width:100%;">
+                  <span style="font-family:'Saira Condensed',sans-serif; font-weight:700; font-size:15px; letter-spacing:0.08em; color: {{ c.cor }};">{{ c.nome }}</span>
+                  <span style="font-size:10px; color:#7A7061;">{{ c.ocup }}</span>
+                </span>
+                <span style="font-size:10px; letter-spacing:0.04em; color: {{ c.corBarra }};">{{ c.barra }}</span>
+              </button>
+            </sc-for>
+            <div style="padding:20px 16px 8px; display:flex; justify-content:space-between; align-items:baseline; border-top:1px solid #241F19; margin-top:16px;">
+              <span style="font-size:9px; letter-spacing:0.2em; color:#7A7061;">LINHAS</span>
+              <span style="font-size:9px; color:#3A322A;">B·04</span>
+            </div>
+            <sc-for list="{{ linhas }}" as="l" hint-placeholder-count="4">
+              <button type="button" onClick="{{ l.sel }}" style="text-align:left; background: {{ l.fundo }}; border:0; border-left:2px solid {{ l.marca }}; padding:8px 14px; cursor:pointer; display:flex; justify-content:space-between; align-items:baseline; width:100%; font-family:'IBM Plex Mono',monospace;">
+                <span style="font-size:13px; color: {{ l.cor }};">{{ l.nome }}</span>
+                <span style="font-size:10px; color: {{ l.corMarca }};">{{ l.pend }}</span>
+              </button>
+            </sc-for>
+            <div style="flex:1;"></div>
+            <div style="border-top:1px solid #241F19; padding:12px 14px; display:flex; flex-direction:column; gap:6px;">
+              <span style="font-size:9px; letter-spacing:0.2em; color:#7A7061;">OPERADOR</span>
+              <span style="font-size:13px; color:#2F8FE0;">IKARI.S</span>
+              <button type="button" onClick="{{ toggleAT }}" style="background:transparent; border:1px solid {{ atBorda }}; color: {{ atCor }}; padding:8px; font-size:10px; letter-spacing:0.14em; cursor:pointer; text-align:left;">{{ atRotulo }}</button>
+            </div>
+          </div>
+
+          <div style="display:flex; flex-direction:column; min-height:0; border-right:1px solid #241F19;">
+            <div style="height:40px; border-bottom:1px solid #241F19; display:flex; align-items:center; padding:0 16px; gap:16px; flex-shrink:0;">
+              <span style="font-family:'Saira Condensed',sans-serif; font-weight:700; font-size:16px; letter-spacing:0.1em; color:#EAE3CF;">LINHA {{ linhaAtiva }}</span>
+              <span style="font-size:10px; letter-spacing:0.16em; color:#7A7061;">REGISTRO ATIVO · SEM RETENÇÃO</span>
+              <span style="flex:1;"></span>
+              <span style="font-size:9px; color:#3A322A;">C·05</span>
+            </div>
+            <div style="flex:1; overflow:auto; padding:16px 16px 0; display:flex; flex-direction:column; gap:12px;">
+              <sc-for list="{{ mensagens }}" as="m" hint-placeholder-count="6">
+                <div style="display:grid; grid-template-columns:76px 1fr; gap:12px; border-left:1px solid {{ m.marca }}; padding-left:12px;">
+                  <span style="font-size:11px; color:#3A322A; padding-top:2px;">{{ m.hora }}</span>
+                  <span style="display:flex; flex-direction:column; gap:2px;">
+                    <span style="font-size:11px; letter-spacing:0.12em; color: {{ m.corAutor }};">{{ m.autor }}</span>
+                    <span style="font-size:14px; line-height:1.55; color: {{ m.corTexto }}; text-wrap:pretty;">{{ m.texto }}</span>
+                  </span>
+                </div>
+              </sc-for>
+              <div style="height:8px;"></div>
+            </div>
+            <div style="border-top:1px solid #241F19; display:flex; align-items:center; gap:8px; padding:0 16px; height:48px; flex-shrink:0;">
+              <span style="color:#FF6B00; font-size:14px;">&gt;</span>
+              <input type="text" placeholder="transmitir na linha" style="flex:1; background:transparent; border:0; color:#EAE3CF; font-size:14px; padding:8px 0;" />
+              <span style="font-size:9px; letter-spacing:0.16em; color:#3A322A;">ENTER TRANSMITE</span>
+            </div>
+          </div>
+
+          <div style="display:flex; flex-direction:column; background:#0A0806; min-height:0;">
+            <div style="padding:12px 16px; border-bottom:1px solid #241F19; display:flex; justify-content:space-between; align-items:baseline;">
+              <span style="font-size:9px; letter-spacing:0.2em; color:#FF6B00;">TAXA DE SINCRONIZAÇÃO</span>
+              <span style="font-family:'Noto Sans JP',sans-serif; font-weight:700; font-size:11px; color:#7A7061;">同期率</span>
+            </div>
+            <div style="padding:16px; border-bottom:1px solid #241F19; display:flex; align-items:flex-end; justify-content:space-between;">
+              <div style="display:flex; flex-direction:column; gap:4px;">
+                <span style="font-size:9px; letter-spacing:0.2em; color:#7A7061;">MÉDIA DO CAGE</span>
+                <span style="font-size:11px; color:#7A7061;">{{ syncAmostra }}</span>
+              </div>
+              <span style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:52px; line-height:0.8; color: {{ syncMediaCor }}; animation:magiRespiro 2400ms ease-in-out infinite;">{{ syncMedia }}</span>
+            </div>
+            <div style="flex:1; overflow:auto;">
+              <sc-for list="{{ roster }}" as="u" hint-placeholder-count="6">
+                <div style="border-bottom:1px solid #241F19; border-left:2px solid {{ u.marca }}; padding:10px 14px; display:flex; flex-direction:column; gap:6px; background: {{ u.fundo }};">
+                  <div style="display:flex; justify-content:space-between; align-items:baseline;">
+                    <span style="display:flex; align-items:baseline; gap:8px;">
+                      <span style="font-size:13px; letter-spacing:0.06em; color: {{ u.corNome }};">{{ u.nome }}</span>
+                      <span style="font-size:9px; letter-spacing:0.1em; color:#3A322A;">{{ u.tag }}</span>
+                    </span>
+                    <span style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:26px; line-height:1; color: {{ u.cor }};">{{ u.syncTxt }}</span>
+                  </div>
+                  <div style="font-size:11px; letter-spacing:0.02em; color: {{ u.cor }}; white-space:nowrap;">{{ u.barra }}</div>
+                  <div style="display:flex; justify-content:space-between; font-size:9px; letter-spacing:0.12em; color:#7A7061;">
+                    <span>{{ u.atraso }}</span>
+                    <span style="color: {{ u.corEstado }};">{{ u.estado }}</span>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+
+        <div style="height:40px; border-top:1px solid #241F19; background:#0A0806; display:flex; align-items:center; flex-shrink:0;">
+          <sc-for list="{{ telemetria }}" as="t" hint-placeholder-count="6">
+            <span style="border-right:1px solid #241F19; height:100%; display:flex; align-items:center; gap:8px; padding:0 16px;">
+              <span style="font-size:9px; letter-spacing:0.18em; color:#7A7061;">{{ t.rot }}</span>
+              <span style="font-size:12px; color: {{ t.cor }};">{{ t.val }}</span>
+            </span>
+          </sc-for>
+          <span style="flex:1;"></span>
+          <sc-for list="{{ tresMagi }}" as="s" hint-placeholder-count="3">
+            <span style="border-left:1px solid #241F19; height:100%; display:flex; align-items:center; gap:8px; padding:0 14px;">
+              <span style="width:6px; height:6px; background: {{ s.cor }};"></span>
+              <span style="font-size:9px; letter-spacing:0.14em; color: {{ s.cor }};">{{ s.nome }}</span>
+            </span>
+          </sc-for>
+        </div>
+      </div>
+
+      <sc-if value="{{ mostrarAlerta }}">
+        <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(5,4,3,0.72);">
+          <div style="width:720px; border:2px solid #FF6B00; background:#050403;">
+            <div style="display:flex; align-items:stretch; border-bottom:1px solid #FF6B00;">
+              <div style="background:#FF6B00; color:#050403; padding:16px 20px; display:flex; align-items:center; gap:16px;">
+                <span style="font-family:'Noto Sans JP',sans-serif; font-weight:900; font-size:44px; line-height:1;">警告</span>
+                <span style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:34px; letter-spacing:0.1em;">ALERTA</span>
+              </div>
+              <div style="flex:1; display:flex; flex-direction:column; justify-content:center; padding:0 20px; gap:4px;">
+                <span style="font-size:10px; letter-spacing:0.2em; color:#7A7061;">MELCHIOR · IDENTIDADE</span>
+                <span style="font-size:14px; color:#EAE3CF;">AIDA.K entrou em JAULA 01 sob PADRÃO: LARANJA</span>
+              </div>
+            </div>
+            <div style="padding:20px; display:flex; flex-direction:column; gap:12px;">
+              <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:1px; background:#241F19; border:1px solid #241F19;">
+                <span style="background:#050403; padding:12px; display:flex; flex-direction:column; gap:4px;"><span style="font-size:9px; letter-spacing:0.18em; color:#7A7061;">CHAVE</span><span style="font-size:12px; color:#FF6B00;">NÃO ASSINADA</span></span>
+                <span style="background:#050403; padding:12px; display:flex; flex-direction:column; gap:4px;"><span style="font-size:9px; letter-spacing:0.18em; color:#7A7061;">ROTA</span><span style="font-size:12px; color:#EAE3CF;">BALTHASAR·22</span></span>
+                <span style="background:#050403; padding:12px; display:flex; flex-direction:column; gap:4px;"><span style="font-size:9px; letter-spacing:0.18em; color:#7A7061;">SINCRONIA</span><span style="font-size:12px; color:#E01B24;">41.3%</span></span>
+              </div>
+              <div style="display:flex; gap:8px;">
+                <button type="button" onClick="{{ fecharAlerta }}" style="flex:1; background:#FF6B00; color:#050403; border:0; padding:12px; font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:16px; letter-spacing:0.16em; cursor:pointer;">RECONHECER</button>
+                <button type="button" onClick="{{ fecharAlerta }}" style="flex:1; background:transparent; color:#EAE3CF; border:1px solid #3A322A; padding:12px; font-family:'Saira Condensed',sans-serif; font-weight:700; font-size:16px; letter-spacing:0.16em; cursor:pointer;">EJETAR PLUG DO OPERADOR</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ mostrarBateria }}">
+        <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center;">
+          <div style="width:680px; border:2px solid #E01B24; background:#050403;">
+            <div style="background:#E01B24; color:#050403; padding:12px 20px; display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:24px; letter-spacing:0.14em;">BATERIA INTERNA</span>
+              <span style="font-family:'Noto Sans JP',sans-serif; font-weight:900; font-size:16px;">内部電源</span>
+            </div>
+            <div style="padding:24px 20px; display:flex; align-items:center; gap:32px; border-bottom:1px solid #241F19;">
+              <span style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:92px; line-height:0.82; color:#E01B24; animation:magiRespiro 1000ms steps(2,end) infinite;">{{ bateriaTempo }}</span>
+              <span style="display:flex; flex-direction:column; gap:8px;">
+                <span style="font-size:10px; letter-spacing:0.2em; color:#7A7061;">ENERGIA RESTANTE ANTES DA EJEÇÃO FORÇADA</span>
+                <span style="font-size:13px; color:#EAE3CF; line-height:1.6;">Conexão com BALTHASAR perdida. Sessão mantida em memória local. Áudio suspenso.</span>
+                <span style="font-size:13px; color:#E01B24;">{{ bateriaBarra }}</span>
+              </span>
+            </div>
+            <div style="padding:16px 20px; display:flex; flex-direction:column; gap:6px;">
+              <span style="font-size:9px; letter-spacing:0.2em; color:#7A7061; margin-bottom:6px;">TENTATIVAS DE RECONEXÃO</span>
+              <sc-for list="{{ tentativas }}" as="r" hint-placeholder-count="4">
+                <span style="display:flex; gap:16px; font-size:12px;">
+                  <span style="color:#3A322A; width:64px;">{{ r.t }}</span>
+                  <span style="color:#7A7061; width:150px;">{{ r.rota }}</span>
+                  <span style="color: {{ r.cor }};">{{ r.res }}</span>
+                </span>
+              </sc-for>
+              <button type="button" onClick="{{ religar }}" style="margin-top:12px; background:transparent; border:1px solid #E01B24; color:#E01B24; padding:12px; font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:16px; letter-spacing:0.16em; cursor:pointer;">FORÇAR REINSERÇÃO DE PLUG</button>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ ehChamada }}">
+    <div style="flex:1; display:grid; grid-template-columns:1fr 316px; min-height:calc(100vh - 40px);">
+      <div style="display:flex; flex-direction:column; border-right:1px solid #241F19;">
+        <div style="height:56px; border-bottom:1px solid #241F19; background:#0A0806; display:flex; align-items:center; padding:0 20px; gap:20px;">
+          <span style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:20px; letter-spacing:0.08em; color:#FF6B00;">JAULA 01 · OPERAÇÕES</span>
+          <span style="font-size:10px; letter-spacing:0.18em; color:#7A7061;">PLUG INSERIDO · 00:14:22</span>
+          <span style="flex:1;"></span>
+          <span style="font-size:10px; letter-spacing:0.18em; color:#3DF57A;">BALTHASAR·01 NOMINAL</span>
+        </div>
+
+        <div style="flex:1; display:grid; grid-template-columns:repeat(2,1fr); grid-auto-rows:1fr;">
+          <sc-for list="{{ chamada }}" as="p" hint-placeholder-count="4">
+            <div style="border-right:1px solid #241F19; border-bottom:1px solid #241F19; padding:24px; display:flex; flex-direction:column; justify-content:space-between; background: {{ p.fundo }}; box-shadow: {{ p.halo }};">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                <div style="display:flex; flex-direction:column; gap:4px;">
+                  <span style="font-family:'Saira Condensed',sans-serif; font-weight:700; font-size:22px; letter-spacing:0.08em; color: {{ p.corNome }};">{{ p.nome }}</span>
+                  <span style="font-size:9px; letter-spacing:0.16em; color:#7A7061;">{{ p.tag }}</span>
+                </div>
+                <span style="border:1px solid {{ p.atBorda }}; color: {{ p.atCor }}; font-size:9px; letter-spacing:0.14em; padding:4px 8px;">{{ p.atRot }}</span>
+              </div>
+
+              <div style="display:flex; align-items:flex-end; gap:2px; height:64px;">
+                <sc-for list="{{ p.onda }}" as="b" hint-placeholder-count="24">
+                  <span style="flex:1; background: {{ b.cor }}; height: {{ b.h }};"></span>
+                </sc-for>
+              </div>
+
+              <div style="display:flex; flex-direction:column; gap:8px;">
+                <div style="display:flex; justify-content:space-between; align-items:baseline;">
+                  <span style="font-size:9px; letter-spacing:0.2em; color:#7A7061;">SINCRONIZAÇÃO</span>
+                  <span style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:30px; line-height:1; color: {{ p.cor }};">{{ p.syncTxt }}</span>
+                </div>
+                <span style="font-size:11px; color: {{ p.cor }};">{{ p.barra }}</span>
+                <div style="display:flex; align-items:center; gap:8px; border-top:1px solid #241F19; padding-top:8px;">
+                  <span style="font-size:9px; letter-spacing:0.16em; color:#7A7061;">VOL</span>
+                  <span style="flex:1; font-size:11px; color:#7A7061;">{{ p.volBarra }}</span>
+                  <span style="font-size:11px; color:#EAE3CF;">{{ p.vol }}</span>
+                </div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="height:64px; border-top:1px solid #241F19; background:#0A0806; display:flex; align-items:stretch;">
+          <button type="button" onClick="{{ toggleAT }}" style="border:0; border-right:1px solid #241F19; background: {{ atFundo }}; color: {{ atCor }}; padding:0 28px; font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:17px; letter-spacing:0.14em; cursor:pointer;">{{ atRotulo }}</button>
+          <button type="button" style="border:0; border-right:1px solid #241F19; background:transparent; color:#EAE3CF; padding:0 24px; font-family:'Saira Condensed',sans-serif; font-weight:700; font-size:17px; letter-spacing:0.14em; cursor:pointer;">SURDEZ TOTAL</button>
+          <div style="flex:1;"></div>
+          <button type="button" onClick="{{ irPrincipal }}" style="border:0; border-left:1px solid #241F19; background:transparent; color:#7A7061; padding:0 24px; font-family:'Saira Condensed',sans-serif; font-weight:700; font-size:17px; letter-spacing:0.14em; cursor:pointer;">VOLTAR À LINHA</button>
+          <button type="button" onClick="{{ ejetar }}" style="border:0; background:#E01B24; color:#050403; padding:0 32px; font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:17px; letter-spacing:0.14em; cursor:pointer;">EJETAR PLUG</button>
+        </div>
+      </div>
+
+      <div style="background:#0A0806; display:flex; flex-direction:column;">
+        <div style="padding:12px 16px; border-bottom:1px solid #241F19; display:flex; justify-content:space-between;">
+          <span style="font-size:9px; letter-spacing:0.2em; color:#FF6B00;">MONITOR DO CAGE</span>
+          <span style="font-size:9px; color:#3A322A;">D·04</span>
+        </div>
+        <div style="padding:16px; border-bottom:1px solid #241F19; display:flex; flex-direction:column; gap:12px;">
+          <span style="font-size:9px; letter-spacing:0.2em; color:#7A7061;">FALANDO AGORA</span>
+          <span style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:30px; line-height:1; color:#FF6B00;">{{ falandoAgora }}</span>
+          <span style="font-size:11px; color:#7A7061; line-height:1.6;">Halo laranja marca transmissão ativa. A.T. Field ativo silencia a captura sem sair do cage.</span>
+        </div>
+        <div style="flex:1; padding:16px; display:flex; flex-direction:column; gap:10px;">
+          <span style="font-size:9px; letter-spacing:0.2em; color:#7A7061;">EVENTOS DO CAGE</span>
+          <sc-for list="{{ eventos }}" as="e" hint-placeholder-count="5">
+            <span style="display:flex; gap:10px; font-size:11px;">
+              <span style="color:#3A322A;">{{ e.t }}</span>
+              <span style="color: {{ e.cor }};">{{ e.txt }}</span>
+            </span>
+          </sc-for>
+        </div>
+        <div style="border-top:1px solid #241F19; padding:12px 16px; display:flex; flex-direction:column; gap:6px;">
+          <span style="display:flex; justify-content:space-between; font-size:11px;"><span style="color:#7A7061;">ATRASO DE SINAL</span><span style="color:#3DF57A;">{{ atrasoMedio }}</span></span>
+          <span style="display:flex; justify-content:space-between; font-size:11px;"><span style="color:#7A7061;">DISTÚRBIO HARMÔNICO</span><span style="color: {{ disturbioCor }};">{{ disturbio }}</span></span>
+          <span style="display:flex; justify-content:space-between; font-size:11px;"><span style="color:#7A7061;">CODEC</span><span style="color:#EAE3CF;">OPUS 96k / 48kHz</span></span>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ ehDogma }}">
+    <div style="flex:1; display:grid; grid-template-columns:220px 1fr; min-height:calc(100vh - 40px);">
+      <div style="border-right:1px solid #241F19; background:#0A0806; display:flex; flex-direction:column;">
+        <div style="padding:16px; border-bottom:1px solid #241F19;">
+          <div style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:24px; letter-spacing:0.06em; color:#FF6B00; line-height:1;">TERMINAL</div>
+          <div style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:24px; letter-spacing:0.06em; color:#EAE3CF; line-height:1;">DOGMA</div>
+          <div style="font-size:9px; letter-spacing:0.2em; color:#7A7061; margin-top:6px;">CONFIGURAÇÃO LOCAL</div>
+        </div>
+        <sc-for list="{{ secoesDogma }}" as="s" hint-placeholder-count="5">
+          <button type="button" onClick="{{ s.sel }}" style="text-align:left; background:transparent; border:0; border-bottom:1px solid #241F19; border-left:2px solid {{ s.marca }}; padding:12px 16px; font-size:12px; letter-spacing:0.1em; color: {{ s.cor }}; cursor:pointer;">{{ s.nome }}</button>
+        </sc-for>
+      </div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; grid-template-rows:auto 1fr; min-height:0;">
+        <div style="grid-column:1 / -1; border-bottom:1px solid #241F19; padding:16px 24px; display:flex; justify-content:space-between; align-items:baseline;">
+          <span style="font-family:'Saira Condensed',sans-serif; font-weight:700; font-size:22px; letter-spacing:0.1em; color:#EAE3CF;">DISPOSITIVOS DE ÁUDIO</span>
+          <span style="font-size:9px; letter-spacing:0.2em; color:#7A7061;">ALTERAÇÕES APLICAM NA PRÓXIMA INSERÇÃO DE PLUG</span>
+        </div>
+
+        <div style="border-right:1px solid #241F19; padding:24px; display:flex; flex-direction:column; gap:24px;">
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <span style="font-size:10px; letter-spacing:0.22em; color:#7A7061;">CAPTURA</span>
+            <div style="border:1px solid #241F19; border-left:2px solid #FF6B00; padding:12px; display:flex; justify-content:space-between; font-size:13px;"><span style="color:#EAE3CF;">Scarlett Solo · ENT 1</span><span style="color:#3DF57A;">−18 dB</span></div>
+            <span style="font-size:11px; color:#3DF57A; letter-spacing:0.04em;">{{ medidorCaptura }}</span>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <span style="font-size:10px; letter-spacing:0.22em; color:#7A7061;">SAÍDA</span>
+            <div style="border:1px solid #241F19; padding:12px; display:flex; justify-content:space-between; font-size:13px;"><span style="color:#EAE3CF;">HD 600 · saída ótica</span><span style="color:#EAE3CF;">72%</span></div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <span style="font-size:10px; letter-spacing:0.22em; color:#7A7061;">SUPRESSÃO</span>
+            <div style="display:flex; gap:1px; background:#241F19; border:1px solid #241F19;">
+              <span style="flex:1; background:#050403; padding:10px; text-align:center; font-size:11px; color:#7A7061;">DESLIGADA</span>
+              <span style="flex:1; background:#331704; padding:10px; text-align:center; font-size:11px; color:#FF6B00;">RNNOISE</span>
+              <span style="flex:1; background:#050403; padding:10px; text-align:center; font-size:11px; color:#7A7061;">AGRESSIVA</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="padding:24px; display:flex; flex-direction:column; gap:24px;">
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <span style="font-size:10px; letter-spacing:0.22em; color:#7A7061;">ATALHOS</span>
+            <sc-for list="{{ atalhos }}" as="a" hint-placeholder-count="5">
+              <span style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #241F19; padding:8px 0; font-size:12px;">
+                <span style="color:#EAE3CF;">{{ a.acao }}</span>
+                <span style="border:1px solid #3A322A; padding:3px 8px; color:#FF6B00; font-size:11px;">{{ a.tecla }}</span>
+              </span>
+            </sc-for>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <span style="font-size:10px; letter-spacing:0.22em; color:#7A7061;">TEMA</span>
+            <div style="display:flex; gap:1px; background:#241F19; border:1px solid #241F19;">
+              <span style="flex:1; background:#331704; padding:10px; text-align:center; font-size:11px; color:#FF6B00;">NERV PADRÃO</span>
+              <span style="flex:1; background:#050403; padding:10px; text-align:center; font-size:11px; color:#7A7061;">FÓSFORO</span>
+              <span style="flex:1; background:#050403; padding:10px; text-align:center; font-size:11px; color:#7A7061;">16 CORES</span>
+            </div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <span style="font-size:10px; letter-spacing:0.22em; color:#7A7061;">CHAVES</span>
+            <div style="border:1px solid #241F19; padding:12px; display:flex; flex-direction:column; gap:6px;">
+              <span style="display:flex; justify-content:space-between; font-size:12px;"><span style="color:#7A7061;">IDENTIDADE</span><span style="color:#2F8FE0;">ed25519 · 0x8F41C2</span></span>
+              <span style="display:flex; justify-content:space-between; font-size:12px;"><span style="color:#7A7061;">EMITIDA</span><span style="color:#EAE3CF;">2026-02-11</span></span>
+              <span style="display:flex; justify-content:space-between; font-size:12px;"><span style="color:#7A7061;">ROTAÇÃO</span><span style="color:#FF6B00;">EM 12 DIAS</span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ ehMobile }}">
+    <div style="flex:1; min-height:calc(100vh - 40px); display:flex; align-items:flex-start; justify-content:center; gap:48px; padding:48px 24px; background:repeating-linear-gradient(90deg,#0A0806 0 1px,transparent 1px 32px), #050403;">
+
+      <div style="width:390px; height:780px; border:1px solid #3A322A; background:#050403; display:flex; flex-direction:column; position:relative; flex-shrink:0;">
+        <div style="position:absolute; top:-24px; left:0; font-size:9px; letter-spacing:0.2em; color:#7A7061;">M·03 / PRINCIPAL · 390px</div>
+        <div style="height:44px; border-bottom:1px solid #241F19; background:#0A0806; display:flex; align-items:center; padding:0 12px; gap:10px;">
+          <button type="button" onClick="{{ toggleGaveta }}" style="background:transparent; border:1px solid #3A322A; color:#FF6B00; font-size:13px; padding:4px 9px; cursor:pointer; min-height:32px;">≡</button>
+          <span style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:16px; letter-spacing:0.06em; color:#EAE3CF;">LINHA {{ linhaAtiva }}</span>
+          <span style="flex:1;"></span>
+          <span style="font-size:9px; letter-spacing:0.14em; color:#2F8FE0;">AZUL</span>
+        </div>
+        <div style="flex:1; overflow:auto; padding:12px; display:flex; flex-direction:column; gap:12px;">
+          <sc-for list="{{ mensagens }}" as="m" hint-placeholder-count="5">
+            <div style="border-left:1px solid {{ m.marca }}; padding-left:10px; display:flex; flex-direction:column; gap:2px;">
+              <span style="display:flex; gap:8px; font-size:10px; letter-spacing:0.1em;"><span style="color:#3A322A;">{{ m.hora }}</span><span style="color: {{ m.corAutor }};">{{ m.autor }}</span></span>
+              <span style="font-size:13px; line-height:1.5; color: {{ m.corTexto }};">{{ m.texto }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="border-top:1px solid #241F19; padding:8px 12px; display:flex; align-items:center; gap:8px;">
+          <span style="color:#FF6B00; font-size:13px;">&gt;</span>
+          <input type="text" placeholder="transmitir" style="flex:1; background:transparent; border:0; color:#EAE3CF; font-size:13px; min-height:44px;" />
+        </div>
+        <div style="border-top:1px solid #241F19; background:#0A0806; height:56px; display:flex; align-items:center; padding:0 12px; gap:12px;">
+          <span style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:22px; color: {{ syncMediaCor }};">{{ syncMedia }}</span>
+          <span style="font-size:9px; letter-spacing:0.16em; color:#7A7061;">SINCRONIA MÉDIA</span>
+          <span style="flex:1;"></span>
+          <button type="button" onClick="{{ irChamada }}" style="background:#FF6B00; color:#050403; border:0; min-height:44px; padding:0 14px; font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:14px; letter-spacing:0.12em; cursor:pointer;">INSERIR PLUG</button>
+        </div>
+
+        <sc-if value="{{ gaveta }}">
+          <div style="position:absolute; inset:0; display:flex;">
+            <div style="width:272px; background:#0A0806; border-right:1px solid #FF6B00; display:flex; flex-direction:column;">
+              <div style="padding:12px; border-bottom:1px solid #241F19; display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:18px; letter-spacing:0.06em; color:#EAE3CF;">TÓQUIO-3</span>
+                <button type="button" onClick="{{ toggleGaveta }}" style="background:transparent; border:0; color:#FF6B00; font-size:16px; cursor:pointer; min-height:44px; min-width:44px;">×</button>
+              </div>
+              <div style="padding:10px 12px; font-size:9px; letter-spacing:0.2em; color:#7A7061;">CAGES</div>
+              <sc-for list="{{ cages }}" as="c" hint-placeholder-count="3">
+                <button type="button" onClick="{{ c.entrar }}" style="text-align:left; background:transparent; border:0; border-top:1px solid #241F19; border-left:2px solid {{ c.marca }}; padding:12px; min-height:44px; cursor:pointer; display:flex; justify-content:space-between;">
+                  <span style="font-size:13px; color: {{ c.cor }};">{{ c.nome }}</span>
+                  <span style="font-size:11px; color:#7A7061;">{{ c.ocup }}</span>
+                </button>
+              </sc-for>
+              <div style="padding:16px 12px 10px; font-size:9px; letter-spacing:0.2em; color:#7A7061;">LINHAS</div>
+              <sc-for list="{{ linhas }}" as="l" hint-placeholder-count="4">
+                <button type="button" onClick="{{ l.sel }}" style="text-align:left; background:transparent; border:0; border-left:2px solid {{ l.marca }}; padding:10px 12px; min-height:44px; cursor:pointer; font-family:'IBM Plex Mono',monospace; font-size:13px; color: {{ l.cor }};">{{ l.nome }}</button>
+              </sc-for>
+            </div>
+            <div onClick="{{ toggleGaveta }}" style="flex:1; background:rgba(5,4,3,0.8);"></div>
+          </div>
+        </sc-if>
+      </div>
+
+      <div style="width:390px; height:780px; border:1px solid #3A322A; background:#050403; display:flex; flex-direction:column; position:relative; flex-shrink:0;">
+        <div style="position:absolute; top:-24px; left:0; font-size:9px; letter-spacing:0.2em; color:#7A7061;">M·04 / EM CHAMADA · 390px</div>
+        <div style="height:44px; border-bottom:1px solid #241F19; background:#0A0806; display:flex; align-items:center; padding:0 12px; gap:10px;">
+          <span style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:15px; letter-spacing:0.06em; color:#FF6B00;">JAULA 01</span>
+          <span style="font-size:10px; color:#7A7061;">00:14:22</span>
+          <span style="flex:1;"></span>
+          <span style="font-size:10px; color:#3DF57A;">{{ atrasoMedio }}</span>
+        </div>
+        <div style="flex:1; overflow:auto;">
+          <sc-for list="{{ chamada }}" as="p" hint-placeholder-count="4">
+            <div style="border-bottom:1px solid #241F19; border-left:2px solid {{ p.marca }}; padding:12px; display:flex; flex-direction:column; gap:8px; background: {{ p.fundo }};">
+              <div style="display:flex; justify-content:space-between; align-items:baseline;">
+                <span style="font-family:'Saira Condensed',sans-serif; font-weight:700; font-size:17px; letter-spacing:0.06em; color: {{ p.corNome }};">{{ p.nome }}</span>
+                <span style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:24px; line-height:1; color: {{ p.cor }};">{{ p.syncTxt }}</span>
+              </div>
+              <span style="font-size:10px; color: {{ p.cor }};">{{ p.barra }}</span>
+              <div style="display:flex; justify-content:space-between; font-size:9px; letter-spacing:0.14em;">
+                <span style="color: {{ p.atCor }};">{{ p.atRot }}</span>
+                <span style="color:#7A7061;">VOL {{ p.vol }}</span>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="border-top:1px solid #241F19; background:#0A0806; display:flex; align-items:stretch; height:64px;">
+          <button type="button" onClick="{{ toggleAT }}" style="flex:1; border:0; border-right:1px solid #241F19; background: {{ atFundo }}; color: {{ atCor }}; font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:15px; letter-spacing:0.1em; cursor:pointer;">{{ atRotulo }}</button>
+          <button type="button" onClick="{{ ejetar }}" style="width:140px; border:0; background:#E01B24; color:#050403; font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:15px; letter-spacing:0.1em; cursor:pointer;">EJETAR</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ ehInventario }}">
+    <div style="flex:1; min-height:calc(100vh - 40px); padding:32px 40px 64px; display:flex; flex-direction:column; gap:32px;">
+
+      <div style="display:flex; align-items:baseline; gap:16px;">
+        <span style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:22px; letter-spacing:0.12em; color:#FF6B00;">INVENTÁRIO</span>
+        <span style="font-size:10px; letter-spacing:0.18em; color:#7A7061;">TOKENS E COMPONENTES · CADA PEÇA COM SUA FORMA EM TUI</span>
+      </div>
+
+      <div>
+        <div style="font-size:9px; letter-spacing:0.2em; color:#7A7061; margin-bottom:12px;">PALETA · 6 NOMES</div>
+        <div style="display:grid; grid-template-columns:repeat(6,1fr); gap:1px; background:#241F19; border:1px solid #241F19;">
+          <div style="background:#050403; padding:0;">
+            <div style="height:56px; background:#050403; border-bottom:1px solid #241F19;"></div>
+            <div style="padding:10px;"><div style="font-size:11px; color:#EAE3CF;">NEGRO ABSOLUTO</div><div style="font-size:11px; color:#7A7061;">#050403</div></div>
+          </div>
+          <div style="background:#050403;">
+            <div style="height:56px; background:#FF6B00;"></div>
+            <div style="padding:10px;"><div style="font-size:11px; color:#EAE3CF;">LARANJA NERV</div><div style="font-size:11px; color:#7A7061;">#FF6B00 · acento</div></div>
+          </div>
+          <div style="background:#050403;">
+            <div style="height:56px; background:#E01B24;"></div>
+            <div style="padding:10px;"><div style="font-size:11px; color:#EAE3CF;">VERMELHO ALERTA</div><div style="font-size:11px; color:#7A7061;">#E01B24 · só falha</div></div>
+          </div>
+          <div style="background:#050403;">
+            <div style="height:56px; background:#3DF57A;"></div>
+            <div style="padding:10px;"><div style="font-size:11px; color:#EAE3CF;">FÓSFORO</div><div style="font-size:11px; color:#7A7061;">#3DF57A · nominal</div></div>
+          </div>
+          <div style="background:#050403;">
+            <div style="height:56px; background:#2F8FE0;"></div>
+            <div style="padding:10px;"><div style="font-size:11px; color:#EAE3CF;">PADRÃO AZUL</div><div style="font-size:11px; color:#7A7061;">#2F8FE0 · verificado</div></div>
+          </div>
+          <div style="background:#050403;">
+            <div style="height:56px; background:#EAE3CF;"></div>
+            <div style="padding:10px;"><div style="font-size:11px; color:#EAE3CF;">OSSO</div><div style="font-size:11px; color:#7A7061;">#EAE3CF · texto</div></div>
+          </div>
+        </div>
+        <div style="margin-top:8px; font-size:11px; color:#7A7061;">Arquivos: <a href="magi-tokens.css">magi-tokens.css</a> · <a href="magi-tokens.json">magi-tokens.json</a> — célula 8×16px, borda 1px, raio 0, sombra nenhuma.</div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1px; background:#241F19; border:1px solid #241F19;">
+
+        <div style="background:#050403; padding:20px; display:flex; flex-direction:column; gap:12px;">
+          <span style="font-size:9px; letter-spacing:0.2em; color:#FF6B00;">ITEM DE CANAL</span>
+          <div style="border-left:2px solid #FF6B00; background:#331704; padding:10px 14px; display:flex; flex-direction:column; gap:4px;">
+            <span style="display:flex; justify-content:space-between;"><span style="font-family:'Saira Condensed',sans-serif; font-weight:700; font-size:15px; letter-spacing:0.08em; color:#FF6B00;">JAULA 01 · OPERAÇÕES</span><span style="font-size:10px; color:#7A7061;">4/8</span></span>
+            <span style="font-size:10px; color:#FF6B00;">██████░░░░░░</span>
+          </div>
+          <span style="font-size:11px; color:#7A7061; line-height:1.6;">Ocupação como barra de blocos. Estado ativo = marca de 2px e preenchimento laranja fraco.</span>
+          <span style="font-size:11px; color:#3A322A;">TUI ▸JAULA 01 · OPERAÇÕES 4/8</span>
+        </div>
+
+        <div style="background:#050403; padding:20px; display:flex; flex-direction:column; gap:12px;">
+          <span style="font-size:9px; letter-spacing:0.2em; color:#FF6B00;">LINHA DE USUÁRIO</span>
+          <div style="border-left:2px solid #FF6B00; background:#0F0A05; padding:10px 14px; display:flex; flex-direction:column; gap:6px;">
+            <span style="display:flex; justify-content:space-between; align-items:baseline;"><span style="font-size:13px; color:#EAE3CF;">IKARI.S <span style="font-size:9px; color:#3A322A;">MELCHIOR·01</span></span><span style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:26px; line-height:1; color:#3DF57A;">98.4</span></span>
+            <span style="font-size:11px; color:#3DF57A;">████████████████████</span>
+            <span style="display:flex; justify-content:space-between; font-size:9px; letter-spacing:0.12em; color:#7A7061;"><span>ATRASO 12ms</span><span style="color:#3DF57A;">TRANSMITINDO</span></span>
+          </div>
+          <span style="font-size:11px; color:#7A7061; line-height:1.6;">Nome, tag do subsistema, sincronização, atraso e estado. Marca laranja = transmitindo.</span>
+        </div>
+
+        <div style="background:#050403; padding:20px; display:flex; flex-direction:column; gap:12px;">
+          <span style="font-size:9px; letter-spacing:0.2em; color:#FF6B00;">INDICADOR DE SINCRONIZAÇÃO</span>
+          <div style="display:flex; align-items:flex-end; gap:16px;">
+            <span style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:52px; line-height:0.8; color:#3DF57A;">98.4</span>
+            <span style="display:flex; flex-direction:column; gap:4px;">
+              <span style="font-size:11px; color:#3DF57A;">████████████████████</span>
+              <span style="font-size:11px; color:#FF6B00;">████████████░░░░░░░░</span>
+              <span style="font-size:11px; color:#E01B24;">████████░░░░░░░░░░░░</span>
+            </span>
+          </div>
+          <span style="font-size:11px; color:#7A7061; line-height:1.6;">Faixas: ≥85 fósforo, 60–85 laranja, &lt;60 vermelho. 20 blocos = 5% cada, idêntico na TUI.</span>
+        </div>
+
+        <div style="background:#050403; padding:20px; display:flex; flex-direction:column; gap:12px;">
+          <span style="font-size:9px; letter-spacing:0.2em; color:#FF6B00;">MENSAGEM</span>
+          <div style="display:grid; grid-template-columns:76px 1fr; gap:12px; border-left:1px solid #241F19; padding-left:12px;">
+            <span style="font-size:11px; color:#3A322A;">07:44:51</span>
+            <span style="display:flex; flex-direction:column; gap:2px;">
+              <span style="font-size:11px; letter-spacing:0.12em; color:#2F8FE0;">IKARI.S</span>
+              <span style="font-size:14px; line-height:1.55; color:#EAE3CF;">eu. libero em dois minutos.</span>
+            </span>
+          </div>
+          <span style="font-size:11px; color:#7A7061; line-height:1.6;">Sem bolha e sem avatar. Régua de 1px à esquerda; autor colorido pelo padrão da sessão.</span>
+        </div>
+
+        <div style="background:#050403; padding:20px; display:flex; flex-direction:column; gap:12px;">
+          <span style="font-size:9px; letter-spacing:0.2em; color:#FF6B00;">CAMPO DE TELEMETRIA · BOTÃO</span>
+          <div style="display:flex; border:1px solid #241F19;">
+            <span style="display:flex; align-items:center; gap:8px; padding:8px 14px; border-right:1px solid #241F19;"><span style="font-size:9px; letter-spacing:0.18em; color:#7A7061;">ATRASO</span><span style="font-size:12px; color:#3DF57A;">24ms</span></span>
+            <span style="display:flex; align-items:center; gap:8px; padding:8px 14px;"><span style="font-size:9px; letter-spacing:0.18em; color:#7A7061;">DISTÚRBIO</span><span style="font-size:12px; color:#E01B24;">3.2%</span></span>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <span style="background:#FF6B00; color:#050403; padding:10px 16px; font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:15px; letter-spacing:0.16em;">INSERIR PLUG</span>
+            <span style="border:1px solid #3A322A; color:#EAE3CF; padding:10px 16px; font-family:'Saira Condensed',sans-serif; font-weight:700; font-size:15px; letter-spacing:0.16em;">EJETAR PLUG</span>
+          </div>
+          <span style="font-size:11px; color:#7A7061; line-height:1.6;">Botão primário é bloco sólido (inverso na TUI). Secundário é só linha.</span>
+        </div>
+
+        <div style="background:#050403; padding:20px; display:flex; flex-direction:column; gap:12px;">
+          <span style="font-size:9px; letter-spacing:0.2em; color:#FF6B00;">BANNER DE ALERTA</span>
+          <div style="border:2px solid #FF6B00; display:flex; align-items:stretch;">
+            <span style="background:#FF6B00; color:#050403; padding:10px 14px; display:flex; align-items:center; gap:10px;"><span style="font-family:'Noto Sans JP',sans-serif; font-weight:900; font-size:22px;">警告</span><span style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:18px; letter-spacing:0.1em;">ALERTA</span></span>
+            <span style="flex:1; display:flex; align-items:center; padding:0 14px; font-size:12px; color:#EAE3CF;">AIDA.K sob PADRÃO: LARANJA</span>
+          </div>
+          <span style="font-size:11px; color:#7A7061; line-height:1.6;">Laranja para menção e identidade; vermelho apenas quando a conexão cai. O kanji é acento — a palavra ALERTA carrega a informação.</span>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ ehTerminal }}">
+    <div style="flex:1; min-height:calc(100vh - 40px); padding:32px 40px; display:flex; flex-direction:column; gap:20px; background:#050403;">
+      <div style="display:flex; align-items:baseline; gap:16px;">
+        <span style="font-family:'Saira Condensed',sans-serif; font-weight:900; font-size:22px; letter-spacing:0.12em; color:#FF6B00;">VARIANTE TERMINAL-SAFE</span>
+        <span style="font-size:10px; letter-spacing:0.18em; color:#7A7061;">{{ tuiRotulo }}</span>
+        <span style="font-family:'Noto Sans JP',sans-serif; font-weight:700; font-size:12px; color:#7A7061;">{{ tuiKanji }}</span>
+      </div>
+      <div style="display:flex; gap:40px; align-items:flex-start; flex-wrap:wrap;">
+        <pre style="margin:0; font-family:'IBM Plex Mono',monospace; font-size:13px; line-height:1.3; color:#EAE3CF; white-space:pre;"><sc-for list="{{ tuiLinhas }}" as="l" hint-placeholder-count="24"><div><sc-for list="{{ l.s }}" as="g" hint-placeholder-count="3"><span style="color: {{ g.c }}; background: {{ g.b }}; font-weight: {{ g.w }};">{{ g.t }}</span></sc-for></div></sc-for></pre>
+        <sc-if value="{{ tuiDuplo }}"><pre style="margin:0; font-family:'IBM Plex Mono',monospace; font-size:13px; line-height:1.3; color:#EAE3CF; white-space:pre;"><sc-for list="{{ tuiLinhas2 }}" as="l" hint-placeholder-count="20"><div><sc-for list="{{ l.s }}" as="g" hint-placeholder-count="3"><span style="color: {{ g.c }}; background: {{ g.b }}; font-weight: {{ g.w }};">{{ g.t }}</span></sc-for></div></sc-for></pre></sc-if>
+      </div>
+      <div style="border-top:1px solid #241F19; padding-top:16px; display:grid; grid-template-columns:repeat(4,1fr); gap:24px; max-width:1200px;">
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          <span style="font-size:9px; letter-spacing:0.2em; color:#FF6B00;">GRID</span>
+          <span style="font-size:11px; line-height:1.6; color:#7A7061;">Tudo alinha a células de 8×16. Nenhum elemento ocupa meio caractere.</span>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          <span style="font-size:9px; letter-spacing:0.2em; color:#FF6B00;">BORDAS</span>
+          <span style="font-size:11px; line-height:1.6; color:#7A7061;">│ ─ ┌ ┐ └ ┘ ├ ┤ ┬ ┴ ┼ — nunca CSS. Painéis compartilham a mesma coluna de junção.</span>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          <span style="font-size:9px; letter-spacing:0.2em; color:#FF6B00;">BARRAS</span>
+          <span style="font-size:11px; line-height:1.6; color:#7A7061;">Sincronização e volume em █ ░; forma de onda em ▁▂▃▄▅▆▇█.</span>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          <span style="font-size:9px; letter-spacing:0.2em; color:#FF6B00;">ÊNFASE</span>
+          <span style="font-size:11px; line-height:1.6; color:#7A7061;">Cor, negrito e inverso. Cartelas e botões são inverso; queda de conexão esmaece a tela inteira.</span>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;telaInicial&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;boot&quot;,&quot;auth&quot;,&quot;principal&quot;,&quot;chamada&quot;,&quot;bateria&quot;,&quot;alerta&quot;,&quot;dogma&quot;,&quot;mobile&quot;,&quot;inventario&quot;],&quot;default&quot;:&quot;principal&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Protótipo&quot;},&quot;disturbioHarmonico&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Estado do sistema&quot;},&quot;mostrarKanji&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Estado do sistema&quot;}}">
+const OSSO='#EAE3CF', DIM='#7A7061', LINHA='#241F19', FORTE='#3A322A', LAR='#FF6B00', VER='#E01B24', FOS='#3DF57A', AZU='#2F8FE0';
+
+function blocos(pct, n){
+  n = n || 20;
+  const cheios = Math.max(0, Math.min(n, Math.round(pct / 100 * n)));
+  return '█'.repeat(cheios) + '░'.repeat(n - cheios);
+}
+function corSync(v){ if (v >= 85) return FOS; if (v >= 60) return LAR; return VER; }
+function pad(n){ return n < 10 ? '0' + n : '' + n; }
+
+const BASE = [
+  { id:'ikari', nome:'IKARI.S', tag:'MELCHIOR·01', s:98.4, ms:12, at:false, fala:true, verif:true, vol:82 },
+  { id:'ayanami', nome:'AYANAMI.R', tag:'MELCHIOR·02', s:99.7, ms:9, at:false, fala:false, verif:true, vol:74 },
+  { id:'soryu', nome:'SORYU.A', tag:'BALTHASAR·07', s:87.2, ms:31, at:false, fala:true, verif:true, vol:91 },
+  { id:'katsuragi', nome:'KATSURAGI.M', tag:'CASPER·11', s:64.5, ms:88, at:true, fala:false, verif:true, vol:60 },
+  { id:'aida', nome:'AIDA.K', tag:'BALTHASAR·22', s:41.3, ms:210, at:true, fala:false, verif:false, vol:55 },
+  { id:'horaki', nome:'HORAKI.H', tag:'CASPER·04', s:0, ms:0, at:false, fala:false, verif:true, vol:0, ejetado:true }
+];
+
+const MENSAGENS = [
+  { hora:'07:42:11', autor:'KATSURAGI.M', texto:'build 2411 promovido para dogma-2. sem regressão em MELCHIOR.', tipo:'normal' },
+  { hora:'07:42:40', autor:'AIDA.K', texto:'roteamento de áudio caiu para BALTHASAR secundário. atraso subiu para 210ms.', tipo:'normal' },
+  { hora:'07:43:02', autor:'[SISTEMA]', texto:'BALTHASAR reeleito. concordância dos três: 3/3.', tipo:'sistema' },
+  { hora:'07:44:19', autor:'SORYU.A', texto:'quem está segurando o lock da migration', tipo:'normal' },
+  { hora:'07:44:51', autor:'IKARI.S', texto:'eu. libero em dois minutos.', tipo:'eu' },
+  { hora:'07:45:30', autor:'[ALERTA]', texto:'AIDA.K opera sob PADRÃO: LARANJA — identidade não verificada.', tipo:'alerta' }
+];
+
+const BOOT_LOG = [
+  { t:'00.00', txt:'ENERGIA PRIMÁRIA — ACOPLADA', cor:FOS },
+  { t:'00.14', txt:'MELCHIOR · CARGA DE ESQUEMA DE IDENTIDADE', cor:OSSO },
+  { t:'00.31', txt:'BALTHASAR · MAPA DE ROTEAMENTO DE ÁUDIO', cor:OSSO },
+  { t:'00.52', txt:'CASPER · RESTAURAÇÃO DE ESTADO PERSISTIDO', cor:OSSO },
+  { t:'01.08', txt:'CODEC OPUS 96k / 48kHz — REGISTRADO', cor:DIM },
+  { t:'01.30', txt:'DISPOSITIVO DE CAPTURA — ENT 1 ATIVO', cor:DIM },
+  { t:'01.47', txt:'VOTAÇÃO DOS TRÊS SUBSISTEMAS', cor:LAR },
+  { t:'02.03', txt:'CONCORDÂNCIA 3/3 — NENHUMA DIVERGÊNCIA', cor:FOS },
+  { t:'02.20', txt:'TAXA DE SINCRONIZAÇÃO ENGATADA', cor:FOS },
+  { t:'02.34', txt:'ENTRY PLUG PRONTO PARA INSERÇÃO', cor:LAR }
+];
+
+const AUTH_LOG_BASE = [
+  { t:'00.00', txt:'RESOLVENDO magi://toquio-3.dogma.central:7743', cor:DIM },
+  { t:'00.06', txt:'ROTA ENCONTRADA — BALTHASAR·01', cor:OSSO },
+  { t:'00.11', txt:'APRESENTANDO CHAVE ed25519 · 0x8F41C2', cor:OSSO },
+  { t:'00.19', txt:'MELCHIOR EXIGE VERIFICAÇÃO DE IDENTIDADE', cor:LAR },
+  { t:'00.19', txt:'SESSÃO EM PADRÃO: LARANJA — CAPTURA SUSPENSA', cor:LAR }
+];
+const AUTH_LOG_OK = [
+  { t:'00.24', txt:'ASSINATURA CONFERE — 3/3 SUBSISTEMAS', cor:FOS },
+  { t:'00.27', txt:'SESSÃO ELEVADA A PADRÃO: AZUL', cor:AZU },
+  { t:'00.29', txt:'PERMISSÃO DE INSERÇÃO DE PLUG CONCEDIDA', cor:FOS }
+];
+
+const TELAS = [
+  ['boot','01 BOOT'], ['auth','02 AUTENTICAÇÃO'], ['principal','03 PRINCIPAL'], ['chamada','04 EM CHAMADA'],
+  ['bateria','05 BATERIA'], ['alerta','06 ALERTA'], ['dogma','07 TERMINAL DOGMA'], ['mobile','08 MOBILE'],
+  ['inventario','09 INVENTÁRIO']
+];
+
+/* ---------- variante terminal-safe: renderizador de grid de células ---------- */
+const TDIM = '#4A423A';
+function seg(t, c, b, w){ return { t: String(t), c: c || OSSO, b: b || 'transparent', w: w || '400' }; }
+function S(pairs){ return pairs.map(p => seg(p[0], p[1])); }
+function pd(s, n){ s = String(s); return s.length >= n ? s.slice(0, n) : s + ' '.repeat(n - s.length); }
+function pl(s, n){ s = String(s); return s.length >= n ? s.slice(0, n) : ' '.repeat(n - s.length) + s; }
+function cel(w, segs){ const len = segs.reduce((a, s) => a + s.t.length, 0); return len < w ? segs.concat([seg(' '.repeat(w - len))]) : segs; }
+function V(){ return seg('│', FORTE); }
+function row(cols){ let out = [V()]; cols.forEach(c => { out = out.concat(cel(c.w, c.s)); out.push(V()); }); return { s: out }; }
+function rule(ws, l, m, r){ let t = l; ws.forEach((w, i) => { t += '─'.repeat(w); t += (i < ws.length - 1 ? m : r); }); return { s: [seg(t, FORTE)] }; }
+function zip(ws, cols){
+  const n = Math.max.apply(null, cols.map(c => c.length));
+  const linhas = [rule(ws, '┌', '┬', '┐')];
+  for (let i = 0; i < n; i++){
+    linhas.push(row(ws.map((w, k) => ({ w: w, s: (cols[k][i] || []).slice() }))));
+    if (i === 0) linhas.push(rule(ws, '├', '┼', '┤'));
+  }
+  linhas.push(rule(ws, '└', '┴', '┘'));
+  return linhas;
+}
+function esmaecer(linhas){ return linhas.map(l => ({ s: l.s.map(g => seg(g.t, TDIM)) })); }
+function sobrepor(linhas, inicio, caixa, cor, largura){
+  const lado = Math.floor((94 - largura) / 2);
+  const out = linhas.slice();
+  caixa.forEach((conteudo, i) => {
+    out[inicio + i] = { s: [V(), seg(' '.repeat(lado))].concat(cel(largura, conteudo), [seg(' '.repeat(94 - largura - lado)), V()]) };
+  });
+  return out;
+}
+function cxTopo(w, tit, cor){ return [seg('┌─ ' + tit + ' ' + '─'.repeat(Math.max(0, w - 4 - tit.length)) + '┐', cor)]; }
+function cxBase(w, cor){ return [seg('└' + '─'.repeat(w - 2) + '┘', cor)]; }
+function cxLinha(w, segs, cor){ return [seg('│', cor)].concat(cel(w - 2, segs), [seg('│', cor)]); }
+
+class Component extends DCLogic {
+  state = {
+    tela: this.props.telaInicial || 'principal',
+    modo: 'grafico',
+    bootPct: 0,
+    autenticado: false,
+    atField: false,
+    linha: '#geral',
+    cage: 'JAULA 01 · OPERAÇÕES',
+    dogma: 'T3',
+    secaoDogma: 'ÁUDIO',
+    gaveta: false,
+    alertaAberto: true,
+    bateria: 299,
+    t: 0,
+    jitter: 3.1
+  };
+
+  componentDidMount(){
+    this.timer = setInterval(() => {
+      this.setState(s => {
+        const n = { t: s.t + 1 };
+        if (s.tela === 'boot' && s.bootPct < 100) n.bootPct = Math.min(100, s.bootPct + 7);
+        if (s.tela === 'bateria' && s.bateria > 0) n.bateria = s.bateria - 1;
+        n.jitter = 2.4 + Math.random() * 2.2;
+        return n;
+      });
+    }, 900);
+  }
+  componentWillUnmount(){ clearInterval(this.timer); }
+
+  ir(t){ return () => this.setState({ tela: t, gaveta: false, alertaAberto: true, bateria: 299, bootPct: t === 'boot' ? 0 : 100 }); }
+
+  roster(){
+    const t = this.state.t, disturbio = this.props.disturbioHarmonico;
+    return BASE.map((u, i) => {
+      if (u.ejetado) return Object.assign({}, u, { sVivo: 0 });
+      let v = u.s + Math.sin((t + i * 3) / 2.2) * (u.s > 90 ? 0.6 : 2.4);
+      if (disturbio && i % 2 === 1) v = Math.max(18, v - 34);
+      return Object.assign({}, u, { sVivo: Math.max(0, Math.min(100, v)) });
+    });
+  }
+
+  tuiPrincipal(){
+    const st = this.state, rs = this.roster(), ativos = rs.filter(u => !u.ejetado);
+    const media = ativos.reduce((a, u) => a + u.sVivo, 0) / ativos.length;
+    const A = [
+      S([[' CAGES', DIM]]),
+      S([['▸JAULA 01 · OPERAÇÕES', LAR], [' 4/8', LAR]]),
+      S([['  ' + blocos(50, 12), LAR]]),
+      S([[' JAULA 02 · PAIR', OSSO], [pl('2/4', 9), DIM]]),
+      S([['  ' + blocos(50, 12), FORTE]]),
+      S([[' JAULA 03 · SILÊNCIO', OSSO], [pl('0/12', 5), DIM]]),
+      S([['  ' + blocos(0, 12), FORTE]]),
+      [],
+      S([[' LINHAS', DIM]]),
+      S([['▸#geral', OSSO]]),
+      S([[' #incidentes', DIM], [pl('3', 13), LAR]]),
+      S([[' #deploy', DIM], [pl('12', 17), FORTE]]),
+      S([[' #fora-de-banda', DIM]]),
+      [],
+      S([[' OPERADOR', DIM]]),
+      S([[' IKARI.S', OSSO], [pl('AZUL', 17), AZU]]),
+      S([[st.atField ? ' [x] A.T. FIELD' : ' [ ] A.T. FIELD', st.atField ? LAR : DIM]]),
+      [], []
+    ];
+    const B = [
+      S([[' LINHA #geral', OSSO], [pl('REGISTRO ATIVO', 31), DIM]]),
+      S([[' 07:42:11 ', FORTE], ['KATSURAGI.M', OSSO]]),
+      S([['   build 2411 promovido para dogma-2.', OSSO]]),
+      S([['   sem regressão em MELCHIOR.', OSSO]]),
+      S([[' 07:42:40 ', FORTE], ['AIDA.K', LAR]]),
+      S([['   roteamento caiu para BALTHASAR·02.', OSSO]]),
+      S([[' 07:43:02 ', FORTE], ['[SISTEMA] concordância 3/3', FOS]]),
+      S([[' 07:44:19 ', FORTE], ['SORYU.A', OSSO]]),
+      S([['   quem está segurando o lock da migration', OSSO]]),
+      S([[' 07:44:51 ', FORTE], ['IKARI.S', AZU]]),
+      S([['   eu. libero em dois minutos.', OSSO]]),
+      S([[' 07:45:30 ', FORTE], ['[ALERTA] AIDA.K — PADRÃO: LARANJA', LAR]]),
+      [], [], [], [],
+      S([[' > ', LAR], ['transmitir na linha', DIM], ['█', LAR]]),
+      [], []
+    ];
+    const C = [
+      S([[' TAXA DE SINCRONIZ.', LAR]]),
+      S([[' MÉDIA', DIM], [pl(media.toFixed(1), 17), corSync(media)]])
+    ];
+    C.push([]);
+    rs.forEach(u => {
+      const c = u.ejetado ? FORTE : corSync(u.sVivo);
+      C.push(S([[pd(' ' + u.nome, 15), u.ejetado ? FORTE : OSSO], [pl(u.ejetado ? '——' : u.sVivo.toFixed(1), 8), c]]));
+      C.push(S([[' ' + (u.ejetado ? '░'.repeat(20) : blocos(u.sVivo, 20)), c]]));
+    });
+    C.push([]);
+    C.push(S([[' ATRASO', DIM], [pl(Math.round(28 + st.jitter * 2) + 'ms', 16), FOS]]));
+    C.push(S([[' JITTER', DIM], [pl(st.jitter.toFixed(1) + 'ms', 16), FOS]]));
+    C.push(S([[' M/B/C', DIM], [pl(this.props.disturbioHarmonico ? '2 / 3' : '3 / 3', 17), this.props.disturbioHarmonico ? VER : FOS]]));
+    return zip([25, 44, 23], [A, B, C]);
+  }
+
+  tuiBoot(){
+    const st = this.state, p = st.bootPct;
+    const sub = [['MELCHIOR', 'SESSÕES E IDENTIDADE', 30], ['BALTHASAR', 'ROTEAMENTO DE ÁUDIO', 55], ['CASPER', 'ESTADO E PERSISTÊNCIA', 80]];
+    const L = [ S([[' MAGI', LAR], [pl('SEQUÊNCIA DE INICIALIZAÇÃO', 89), DIM]]), [] ];
+    sub.forEach(s => {
+      const ok = p > s[2];
+      L.push(S([[pd(' ' + s[0], 13), ok ? FOS : DIM], [pd(s[1], 26), DIM], [blocos(Math.min(100, p * 1.2), 20), ok ? FOS : FORTE], [pl(ok ? 'NOMINAL' : 'CARREGANDO', 14), ok ? FOS : DIM]]));
+    });
+    L.push([]);
+    L.push(S([[' TAXA DE SINCRONIZAÇÃO', DIM], [pl(p.toFixed(1) + '%', 30), p >= 100 ? FOS : LAR]]));
+    L.push(S([[' ' + blocos(p, 90), p >= 100 ? FOS : LAR]]));
+    L.push(S([[' ' + pd('0', 23) + pd('25', 23) + pd('50', 23) + pd('75', 13) + '100', FORTE]]));
+    L.push([]);
+    BOOT_LOG.slice(0, Math.max(1, Math.round(p / 10))).forEach(l => L.push(S([[' ' + l.t + '  ', FORTE], [l.txt, l.cor]])));
+    return zip([94], [L]);
+  }
+
+  tuiAuth(){
+    const st = this.state, ok = st.autenticado;
+    const campo = (rot, val) => [
+      S([[' ' + rot, DIM]]),
+      S([[' ┌' + '─'.repeat(42) + '┐', FORTE]]),
+      S([[' │ ', FORTE], [pd(val, 40), OSSO], ['│', FORTE]]),
+      S([[' └' + '─'.repeat(42) + '┘', FORTE]])
+    ];
+    const A = [ S([[' ENTRADA EM DOGMA CENTRAL', DIM]]), [],
+      S([['  ', OSSO], [ok ? ' PADRÃO: AZUL ' : ' PADRÃO: LARANJA ', '#050403', ok ? AZU : LAR, '700']]),
+      S([['  ' + (ok ? 'identidade confirmada · captura liberada' : 'captura suspensa até MELCHIOR confirmar'), DIM]]),
+      [] ]
+      .concat(campo('ENDEREÇO DO DOGMA CENTRAL', 'magi://toquio-3.dogma.central:7743'))
+      .concat(campo('CHAVE DE IDENTIDADE · MELCHIOR', '••••••••••••••••••'))
+      .concat([[], S([['  ', OSSO], [ok ? ' INSERIR PLUG ' : ' VERIFICAR IDENTIDADE ', '#050403', ok ? AZU : LAR, '700']])]);
+    const B = [ S([[' APERTO DE MÃO — MELCHIOR', DIM]]) ];
+    (ok ? AUTH_LOG_BASE.concat(AUTH_LOG_OK) : AUTH_LOG_BASE).forEach(l => B.push(S([[' ' + l.t + ' ', FORTE], [l.txt, l.cor]])));
+    return zip([46, 47], [A, B]);
+  }
+
+  tuiChamada(){
+    const st = this.state, rs = this.roster().filter(u => !u.ejetado).slice(0, 4);
+    const A = [ S([[' JAULA 01 · OPERAÇÕES', LAR], [pl('PLUG INSERIDO · 00:14:22', 39), DIM]]), [] ];
+    rs.forEach((u, i) => {
+      const c = corSync(u.sVivo);
+      const onda = Array.from({ length: 30 }, (_, k) => u.fala ? '▁▂▃▄▅▆▇█'[Math.floor(Math.abs(Math.sin((st.t * 2 + k * 1.7 + i) / 1.6)) * 7)] : '▁').join('');
+      A.push(S([[u.fala ? '▸' : ' ', LAR], [pd(u.nome, 20), u.fala ? LAR : OSSO], [pl(u.sVivo.toFixed(1), 8), c], [pl(u.at ? 'A.T. FIELD' : 'CAPTURA ABERTA', 30), u.at ? LAR : FOS]]));
+      A.push(S([['   ' + onda, u.fala ? LAR : FORTE]]));
+      A.push(S([['   ' + blocos(u.sVivo, 24), c], ['   VOL ' + blocos(u.vol, 10) + ' ' + pl(u.vol + '%', 4), DIM]]));
+      A.push([]);
+    });
+    A.push(S([[' ', OSSO], [st.atField ? ' A.T. FIELD ATIVO ' : ' A.T. FIELD INATIVO ', '#050403', st.atField ? LAR : FORTE, '700'], ['  ', OSSO], [' EJETAR PLUG ', '#050403', VER, '700']]));
+    const B = [ S([[' MONITOR DO CAGE', DIM]]),
+      S([[' FALANDO', DIM]]),
+      S([[' ' + (rs.filter(u => u.fala).map(u => u.nome).join(' · ') || 'SILÊNCIO'), LAR]]),
+      [] ];
+    ['07:31 IKARI.S inseriu plug', '07:33 SORYU.A inseriu plug', '07:38 KATSURAGI.M A.T. Field', '07:41 BALTHASAR·22 distúrbio', '07:44 HORAKI.H ejetou plug'].forEach((e, i) => B.push(S([[' ' + e, i === 3 ? LAR : DIM]])));
+    B.push([]);
+    B.push(S([[' ATRASO', DIM], [pl(Math.round(28 + st.jitter * 2) + 'ms', 26), FOS]]));
+    B.push(S([[' DISTÚRBIO', DIM], [pl(this.props.disturbioHarmonico ? '3.2%' : '0.0%', 23), this.props.disturbioHarmonico ? VER : FOS]]));
+    B.push(S([[' CODEC', DIM], [pl('OPUS 96k', 27), OSSO]]));
+    return zip([60, 33], [A, B]);
+  }
+
+  tuiDogma(){
+    const st = this.state;
+    const A = [ S([[' TERMINAL DOGMA', LAR]]) ];
+    ['ÁUDIO', 'ATALHOS', 'TEMA', 'CHAVES', 'TUI'].forEach(s => A.push(S([[(st.secaoDogma === s ? '▸' : ' ') + s, st.secaoDogma === s ? LAR : DIM]])));
+    const B = [ S([[' DISPOSITIVOS DE ÁUDIO', OSSO]]), [],
+      S([[' CAPTURA', DIM], [pl('Scarlett Solo · ENT 1', 54), OSSO]]),
+      S([[' NÍVEL   ', DIM], [blocos(30 + Math.abs(Math.sin(this.state.t / 2)) * 45, 40), FOS], [pl('−18 dB', 13), FOS]]),
+      [],
+      S([[' SAÍDA', DIM], [pl('HD 600 · saída ótica            72%', 56), OSSO]]),
+      S([[' SUPRESSÃO ', DIM], ['[ DESLIGADA ]', FORTE], [' ', OSSO], [' RNNOISE ', '#050403', LAR, '700'], [' ', OSSO], ['[ AGRESSIVA ]', FORTE]]),
+      [],
+      S([[' ATALHOS', DIM]]) ];
+    [['A.T. Field (alternar)', 'F13'], ['A.T. Field (pressionar)', 'CTRL+ESPAÇO'], ['Inserir plug', 'ALT+↑'], ['Ejetar plug', 'ALT+Q'], ['Terminal Dogma', 'CTRL+,']]
+      .forEach(a => B.push(S([[pd(' ' + a[0], 34), OSSO], [pl(a[1], 20), LAR]])));
+    B.push([]);
+    B.push(S([[' TEMA  ', DIM], [' NERV PADRÃO ', '#050403', LAR, '700'], [' ', OSSO], ['[ FÓSFORO ]', FORTE], [' ', OSSO], ['[ 16 CORES ]', FORTE]]));
+    B.push(S([[' CHAVE ', DIM], ['ed25519 · 0x8F41C2', AZU], [pl('ROTAÇÃO EM 12 DIAS', 30), LAR]]));
+    return zip([30, 63], [A, B]);
+  }
+
+  tuiMobile(){
+    const rs = this.roster();
+    const A = [ S([[' ≡ LINHA #geral', OSSO], [pl('AZUL', 25), AZU]]),
+      S([[' 07:42 ', FORTE], ['KATSURAGI.M', OSSO]]),
+      S([['  build 2411 promovido para', OSSO]]),
+      S([['  dogma-2. sem regressão.', OSSO]]),
+      S([[' 07:43 ', FORTE], ['[SISTEMA] 3/3', FOS]]),
+      S([[' 07:44 ', FORTE], ['SORYU.A', OSSO]]),
+      S([['  quem segura o lock da', OSSO]]),
+      S([['  migration', OSSO]]),
+      S([[' 07:45 ', FORTE], ['[ALERTA] PADRÃO: LARANJA', LAR]]),
+      [],
+      S([[' > ', LAR], ['transmitir', DIM], ['█', LAR]]),
+      [],
+      S([[' MÉDIA ', DIM], ['82.4', FOS], [pl(' INSERIR PLUG ', 26), LAR]]) ];
+    const B = [ S([[' JAULA 01', LAR], [pl('00:14:22', 30), DIM]]) ];
+    rs.filter(u => !u.ejetado).forEach(u => {
+      const c = corSync(u.sVivo);
+      B.push(S([[(u.fala ? '▸' : ' ') + pd(u.nome, 16), u.fala ? LAR : OSSO], [pl(u.sVivo.toFixed(1), 8), c], [pl(u.at ? 'A.T.' : '', 14), LAR]]));
+      B.push(S([[' ' + blocos(u.sVivo, 20), c]]));
+    });
+    B.push([]);
+    B.push(S([[' ', OSSO], [' A.T. FIELD ', '#050403', FORTE, '700'], ['  ', OSSO], [' EJETAR ', '#050403', VER, '700']]));
+    return { a: zip([38], [A]), b: zip([38], [B]) };
+  }
+
+  renderVals(){
+    const st = this.state;
+    const kanji = this.props.mostrarKanji !== false;
+    const rs = this.roster();
+    const ativos = rs.filter(u => !u.ejetado);
+    const media = ativos.reduce((a, u) => a + u.sVivo, 0) / ativos.length;
+
+    const linhaCor = m => m.tipo === 'alerta' ? LAR : (m.tipo === 'sistema' ? FOS : (m.tipo === 'eu' ? AZU : OSSO));
+
+    const bat = st.bateria;
+    const bootDone = st.bootPct >= 100;
+    const batTxt = '0' + Math.floor(bat / 60) + ':' + pad(bat % 60);
+
+    let tuiL = [], tuiL2 = [], tuiDup = false;
+    if (st.modo === 'terminal'){
+      if (st.tela === 'boot') tuiL = this.tuiBoot();
+      else if (st.tela === 'auth') tuiL = this.tuiAuth();
+      else if (st.tela === 'chamada') tuiL = this.tuiChamada();
+      else if (st.tela === 'dogma') tuiL = this.tuiDogma();
+      else if (st.tela === 'mobile'){ const m = this.tuiMobile(); tuiL = m.a; tuiL2 = m.b; tuiDup = true; }
+      else {
+        tuiL = this.tuiPrincipal();
+        if (st.tela === 'alerta'){
+          tuiL = sobrepor(tuiL, 6, [
+            cxTopo(72, 'ALERTA', LAR),
+            cxLinha(72, S([[' MELCHIOR · IDENTIDADE', DIM]]), LAR),
+            cxLinha(72, S([[' AIDA.K entrou em JAULA 01 sob PADRÃO: LARANJA', OSSO]]), LAR),
+            cxLinha(72, [], LAR),
+            cxLinha(72, S([[' CHAVE NÃO ASSINADA    ROTA BALTHASAR·22    SINCRONIA 41.3%', LAR]]), LAR),
+            cxLinha(72, [], LAR),
+            cxLinha(72, S([[' ', OSSO], [' RECONHECER ', '#050403', LAR, '700'], ['  ', OSSO], ['[ EJETAR PLUG DO OPERADOR ]', OSSO]]), LAR),
+            cxBase(72, LAR)
+          ], LAR, 72);
+        } else if (st.tela === 'bateria'){
+          const t = [['−00:04', 'BALTHASAR·01', 'SEM RESPOSTA'], ['−00:09', 'BALTHASAR·02', 'SEM RESPOSTA'], ['−00:17', 'BALTHASAR·22', 'RECUSADO — ROTA MORTA'], ['−00:31', 'CASPER·CACHE', 'ESTADO PRESERVADO']];
+          tuiL = sobrepor(esmaecer(tuiL), 4, [
+            cxTopo(72, 'BATERIA INTERNA', VER),
+            cxLinha(72, S([[' ', OSSO], [' ' + batTxt + ' ', '#050403', VER, '700'], ['  ENERGIA RESTANTE ANTES DA EJEÇÃO FORÇADA', DIM]]), VER),
+            cxLinha(72, S([[' ' + blocos(bat / 299 * 100, 60), VER]]), VER),
+            cxLinha(72, [], VER),
+            cxLinha(72, S([[' TENTATIVAS DE RECONEXÃO', DIM]]), VER)
+          ].concat(t.map(r => cxLinha(72, S([[pd(' ' + r[0], 10), FORTE], [pd(r[1], 20), DIM], [r[2], r[2] === 'ESTADO PRESERVADO' ? LAR : VER]]), VER)), [
+            cxLinha(72, [], VER),
+            cxLinha(72, S([[' ', OSSO], [' FORÇAR REINSERÇÃO DE PLUG ', '#050403', VER, '700']]), VER),
+            cxBase(72, VER)
+          ]), VER, 72);
+        }
+      }
+    }
+
+    return {
+      nav: TELAS.map(([id, rot]) => ({
+        rot, ir: this.ir(id),
+        cor: st.tela === id ? LAR : DIM,
+        marca: st.tela === id ? 'inset 0 -2px 0 ' + LAR : 'none'
+      })),
+      setGrafico: () => this.setState({ modo: 'grafico' }),
+      setTerminal: () => this.setState({ modo: 'terminal' }),
+      corGrafico: st.modo === 'grafico' ? LAR : DIM,
+      corTerminal: st.modo === 'terminal' ? LAR : DIM,
+
+      ehBoot: st.tela === 'boot' && st.modo === 'grafico',
+      ehAuth: st.tela === 'auth' && st.modo === 'grafico',
+      ehPrincipal: ['principal','alerta','bateria'].indexOf(st.tela) >= 0 && st.modo === 'grafico',
+      ehChamada: st.tela === 'chamada' && st.modo === 'grafico',
+      ehDogma: st.tela === 'dogma' && st.modo === 'grafico',
+      ehMobile: st.tela === 'mobile' && st.modo === 'grafico',
+      ehInventario: st.tela === 'inventario',
+
+      subsistemas: [
+        { nome:'MELCHIOR', papel:'SESSÕES E IDENTIDADE', barra: blocos(Math.min(100, st.bootPct * 1.3), 14), estado: st.bootPct > 30 ? 'NOMINAL' : 'CARREGANDO', cor: st.bootPct > 30 ? FOS : DIM },
+        { nome:'BALTHASAR', papel:'ROTEAMENTO DE ÁUDIO', barra: blocos(Math.min(100, st.bootPct * 1.1), 14), estado: st.bootPct > 55 ? 'NOMINAL' : 'CARREGANDO', cor: st.bootPct > 55 ? FOS : DIM },
+        { nome:'CASPER', papel:'ESTADO E PERSISTÊNCIA', barra: blocos(Math.min(100, st.bootPct * 0.95), 14), estado: st.bootPct > 80 ? 'NOMINAL' : 'CARREGANDO', cor: st.bootPct > 80 ? FOS : DIM }
+      ],
+      bootPct: st.bootPct.toFixed(1) + '%',
+      bootBarra: blocos(st.bootPct, 46),
+      bootCor: bootDone ? FOS : LAR,
+      bootConcordancia: bootDone ? '3 / 3' : '— / 3',
+      bootLog: BOOT_LOG.slice(0, Math.max(1, Math.round(st.bootPct / 10))),
+
+      padraoRotulo: st.autenticado ? 'PADRÃO: AZUL' : 'PADRÃO: LARANJA',
+      padraoCor: st.autenticado ? AZU : LAR,
+      padraoFundo: st.autenticado ? '#04182B' : '#331704',
+      padraoKanji: kanji ? (st.autenticado ? '青' : '橙') : '',
+      padraoNota: st.autenticado ? 'Identidade confirmada pelos três subsistemas. Captura liberada.' : 'Sessão não verificada. Captura suspensa até MELCHIOR confirmar a chave.',
+      authBotao: st.autenticado ? 'INSERIR PLUG' : 'VERIFICAR IDENTIDADE',
+      authLog: st.autenticado ? AUTH_LOG_BASE.concat(AUTH_LOG_OK) : AUTH_LOG_BASE,
+      verificar: () => { if (st.autenticado) this.setState({ tela: 'principal' }); else this.setState({ autenticado: true }); },
+
+      relogio: '07:4' + (st.t % 10) + ':' + pad((st.t * 7) % 60),
+      opacidadeApp: st.tela === 'bateria' ? 0.34 : (st.tela === 'alerta' ? 0.5 : 1),
+      mostrarAlerta: st.tela === 'alerta' && st.alertaAberto,
+      mostrarBateria: st.tela === 'bateria',
+      fecharAlerta: () => this.setState({ tela: 'principal', alertaAberto: false }),
+      religar: () => this.setState({ tela: 'principal', bateria: 299 }),
+
+      dogmas: [
+        { sigla:'T3', cor: LAR, marca: LAR, sel: () => this.setState({ dogma:'T3' }) },
+        { sigla:'NV', cor: DIM, marca: 'transparent', sel: () => this.setState({ dogma:'NV' }) },
+        { sigla:'GH', cor: DIM, marca: 'transparent', sel: () => this.setState({ dogma:'GH' }) },
+        { sigla:'+', cor: FORTE, marca: 'transparent', sel: () => {} }
+      ],
+      cages: [
+        { nome:'JAULA 01 · OPERAÇÕES', ocup:'4/8', pct:50 },
+        { nome:'JAULA 02 · PAIR', ocup:'2/4', pct:50 },
+        { nome:'JAULA 03 · SILÊNCIO', ocup:'0/12', pct:0 }
+      ].map(c => ({
+        nome: c.nome, ocup: c.ocup, barra: blocos(c.pct, 12),
+        cor: st.cage === c.nome ? LAR : OSSO,
+        corBarra: st.cage === c.nome ? LAR : FORTE,
+        marca: st.cage === c.nome ? LAR : 'transparent',
+        fundo: st.cage === c.nome ? '#331704' : 'transparent',
+        entrar: () => this.setState({ cage: c.nome, tela: 'chamada', gaveta: false })
+      })),
+      linhas: ['#geral','#incidentes','#deploy','#fora-de-banda'].map((l, i) => ({
+        nome: l, pend: i === 1 ? '3' : (i === 2 ? '12' : ''),
+        cor: st.linha === l ? OSSO : DIM,
+        corMarca: i === 1 ? LAR : FORTE,
+        marca: st.linha === l ? OSSO : 'transparent',
+        fundo: st.linha === l ? '#0A0806' : 'transparent',
+        sel: () => this.setState({ linha: l, gaveta: false })
+      })),
+      linhaAtiva: st.linha,
+      mensagens: MENSAGENS.map(m => ({
+        hora: m.hora, autor: m.autor, texto: m.texto,
+        corAutor: linhaCor(m), corTexto: m.tipo === 'alerta' ? LAR : OSSO,
+        marca: m.tipo === 'alerta' ? LAR : (m.tipo === 'sistema' ? FORTE : LINHA)
+      })),
+
+      roster: rs.map(u => ({
+        nome: u.nome, tag: u.tag,
+        syncTxt: u.ejetado ? '——' : u.sVivo.toFixed(1),
+        barra: u.ejetado ? '░'.repeat(20) : blocos(u.sVivo, 20),
+        cor: u.ejetado ? FORTE : corSync(u.sVivo),
+        corNome: u.ejetado ? FORTE : (u.verif ? OSSO : LAR),
+        marca: u.fala ? LAR : 'transparent',
+        fundo: u.fala ? '#0F0A05' : 'transparent',
+        atraso: u.ejetado ? 'SEM ROTA' : 'ATRASO ' + Math.round(u.ms) + 'ms',
+        estado: u.ejetado ? 'PLUG EJETADO' : (u.at ? 'A.T. FIELD ATIVO' : (u.fala ? 'TRANSMITINDO' : 'EM ESCUTA')),
+        corEstado: u.ejetado ? FORTE : (u.at ? LAR : (u.fala ? FOS : DIM))
+      })),
+      syncMedia: media.toFixed(1),
+      syncMediaCor: corSync(media),
+      syncAmostra: '5 PLUGS · AMOSTRA 400ms',
+
+      chamada: rs.filter(u => !u.ejetado).slice(0, 4).map((u, i) => ({
+        nome: u.nome, tag: u.tag,
+        syncTxt: u.sVivo.toFixed(1), barra: blocos(u.sVivo, 24),
+        cor: corSync(u.sVivo), corNome: u.fala ? LAR : OSSO,
+        marca: u.fala ? LAR : 'transparent',
+        fundo: u.fala ? '#0F0A05' : 'transparent',
+        halo: u.fala ? 'inset 0 0 0 2px ' + LAR : 'none',
+        atRot: u.at ? 'A.T. FIELD' : 'CAPTURA ABERTA',
+        atCor: u.at ? LAR : FOS, atBorda: u.at ? LAR : '#3A322A',
+        vol: u.vol + '%', volBarra: blocos(u.vol, 14),
+        onda: Array.from({ length: 26 }, (_, k) => {
+          const amp = u.fala ? Math.abs(Math.sin((st.t * 2 + k * 1.7 + i) / 1.6)) : 0.06;
+          return { h: Math.max(4, Math.round(amp * 60)) + 'px', cor: u.fala ? LAR : '#241F19' };
+        })
+      })),
+      falandoAgora: rs.filter(u => u.fala).map(u => u.nome).join(' · ') || 'SILÊNCIO',
+      eventos: [
+        { t:'07:31', txt:'IKARI.S inseriu plug', cor: OSSO },
+        { t:'07:33', txt:'SORYU.A inseriu plug', cor: OSSO },
+        { t:'07:38', txt:'KATSURAGI.M ativou A.T. Field', cor: LAR },
+        { t:'07:41', txt:'BALTHASAR·22 · distúrbio 3.2%', cor: LAR },
+        { t:'07:44', txt:'HORAKI.H ejetou plug', cor: DIM }
+      ],
+      atrasoMedio: Math.round(28 + st.jitter * 2) + 'ms',
+      disturbio: this.props.disturbioHarmonico ? '3.2%' : '0.0%',
+      disturbioCor: this.props.disturbioHarmonico ? VER : FOS,
+
+      atField: st.atField,
+      atRotulo: st.atField ? 'A.T. FIELD ATIVO' : 'A.T. FIELD INATIVO',
+      atCor: st.atField ? LAR : DIM,
+      atBorda: st.atField ? LAR : FORTE,
+      atFundo: st.atField ? '#331704' : 'transparent',
+      toggleAT: () => this.setState(s => ({ atField: !s.atField })),
+      irChamada: () => this.setState({ tela: 'chamada' }),
+      irPrincipal: () => this.setState({ tela: 'principal' }),
+      ejetar: () => this.setState({ tela: 'principal' }),
+
+      telemetria: [
+        { rot:'ATRASO', val: Math.round(28 + st.jitter * 2) + 'ms', cor: FOS },
+        { rot:'JITTER', val: st.jitter.toFixed(1) + 'ms', cor: FOS },
+        { rot:'DISTÚRBIO', val: this.props.disturbioHarmonico ? '3.2%' : '0.0%', cor: this.props.disturbioHarmonico ? VER : FOS },
+        { rot:'CODEC', val:'OPUS 96k', cor: OSSO },
+        { rot:'UPTIME', val:'04:12:' + pad(st.t % 60), cor: OSSO },
+        { rot:'CAGE', val: st.cage.split(' · ')[0], cor: LAR }
+      ],
+      tresMagi: ['MELCHIOR','BALTHASAR','CASPER'].map((n, i) => ({
+        nome: n, cor: this.props.disturbioHarmonico && i === 1 ? VER : FOS
+      })),
+
+      bateriaTempo: '0' + Math.floor(bat / 60) + ':' + pad(bat % 60),
+      bateriaBarra: blocos(bat / 299 * 100, 28),
+      tentativas: [
+        { t:'−00:04', rota:'BALTHASAR·01', res:'SEM RESPOSTA', cor: VER },
+        { t:'−00:09', rota:'BALTHASAR·02', res:'SEM RESPOSTA', cor: VER },
+        { t:'−00:17', rota:'BALTHASAR·22', res:'RECUSADO — ROTA MORTA', cor: VER },
+        { t:'−00:31', rota:'CASPER·CACHE', res:'ESTADO PRESERVADO', cor: LAR }
+      ],
+
+      secoesDogma: ['ÁUDIO','ATALHOS','TEMA','CHAVES','TUI'].map(s => ({
+        nome: s, sel: () => this.setState({ secaoDogma: s }),
+        cor: st.secaoDogma === s ? LAR : DIM,
+        marca: st.secaoDogma === s ? LAR : 'transparent'
+      })),
+      medidorCaptura: blocos(30 + Math.abs(Math.sin(st.t / 2)) * 45, 26),
+      atalhos: [
+        { acao:'A.T. Field (alternar)', tecla:'F13' },
+        { acao:'A.T. Field (pressionar)', tecla:'CTRL+ESPAÇO' },
+        { acao:'Inserir plug no cage anterior', tecla:'ALT+↑' },
+        { acao:'Ejetar plug', tecla:'ALT+Q' },
+        { acao:'Terminal Dogma', tecla:'CTRL+,' }
+      ],
+
+      ehTerminal: st.modo === 'terminal' && st.tela !== 'inventario',
+      tuiRotulo: (TELAS.filter(t => t[0] === st.tela)[0] || ['', ''])[1] + ' · GRID DE CÉLULAS · 256 CORES ANSI',
+      tuiKanji: kanji ? '端末' : '',
+      tuiLinhas: tuiL,
+      tuiLinhas2: tuiL2,
+      tuiDuplo: tuiDup,
+
+      gaveta: st.gaveta,
+      toggleGaveta: () => this.setState(s => ({ gaveta: !s.gaveta }))
+    };
+  }
+}
+
+</script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+[package]
+name = "magi-audio"
+description = "MAGI audio pipeline: capture, codec, jitter buffer and mixing."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# specs/01-arquitetura.md, dependency rule: `audio` depends only on `proto`.
+# Enforced by `cargo xtask check-deps`.
+[dependencies]
+audioadapter-buffers = "4"
+cpal = "0.18.1"
+magi-proto = { path = "../magi-proto" }
+rtrb = "0.3.4"
+rubato = "4.0.0"
+shiguredo_opus = { workspace = true }
+thiserror = "2.0.19"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+assert_no_alloc = "1.1.2"
+criterion = { version = "0.8.2", features = ["html_reports"] }
+
+[[bench]]
+name = "opus_frame"
+harness = false

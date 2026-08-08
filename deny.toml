@@ -1,0 +1,56 @@
+# specs/08-seguranca.md: "cargo deny and cargo audit in CI, failing the build on a
+# known vulnerability."
+
+[graph]
+targets = [
+    { triple = "x86_64-unknown-linux-gnu" },
+    { triple = "aarch64-apple-darwin" },
+    { triple = "x86_64-apple-darwin" },
+    { triple = "x86_64-pc-windows-msvc" },
+]
+
+[advisories]
+version = 2
+# No ignores. An entry here is a deliberate, dated exception and needs a comment
+# explaining why the advisory does not apply to us.
+ignore = []
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+# Our own crates carry no `license` field yet: the rights posture around the
+# Evangelion vocabulary is still open (specs/07-tema-evangelion.md), and inventing
+# a licence before that decision would be worse than leaving it blank. They are
+# all `publish = false`, so skip them rather than fail on them.
+private = { ignore = true }
+# Permissive only. Anything copyleft — GPL, AGPL, LGPL, MPL — is denied by
+# omission and must be discussed before it enters the tree: MAGI ships a single
+# statically linked binary (ADR 0008), so linking terms actually matter here.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "CC0-1.0",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Intra-workspace `path` dependencies have no version requirement by design.
+# The ban is aimed at wildcard versions of third-party crates.
+allow-wildcard-paths = true
+# Nothing is banned outright yet. Expected future entries, once the real
+# dependency tree exists: a second TLS stack next to rustls, and any crate that
+# pulls OpenSSL into a project whose whole point is one self-contained binary.
+deny = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

@@ -1,0 +1,46 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/magi-proto",
+    "crates/magi-audio",
+    "crates/magi-core",
+    "crates/magi-server",
+    "crates/magi-conformance",
+    "xtask",
+]
+
+# `magi-tui` and `magi-ffi` are specified in specs/01-arquitetura.md but do not
+# exist yet, by plan decision (risk R10): an empty crate costs CI time on every
+# build and invites code into the wrong place. Each is created with the first code
+# that belongs to it — M4 and M5 respectively. `magi-server` arrived with M2.
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.97"
+publish = false
+
+# Rules from specs/10-convencoes.md and specs/08-seguranca.md, applied in one place.
+# Crates needing an exception (magi-ffi, audio bindings) declare their own `[lints]`
+# block instead of inheriting this one — `forbid` cannot be relaxed by `allow`, which
+# is precisely the property we want.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+# specs/10-convencoes.md: "no unwrap() or expect() outside tests and proven
+# invariants". Test-only relaxation is done per crate with cfg_attr.
+unwrap_used = "deny"
+expect_used = "deny"
+dbg_macro = "deny"
+# specs/08-seguranca.md: untrusted network input. Panicking indexation is the classic
+# way to turn a malformed packet into a denial of service.
+indexing_slicing = "warn"
+
+# Versions live here, never in the member crates, so they cannot drift apart.
+[workspace.dependencies]
+# Opus binding. See ADR 0008 for why this one and not `audiopus`.
+shiguredo_opus = "2026.2.0"
