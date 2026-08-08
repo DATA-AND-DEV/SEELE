@@ -30,5 +30,5 @@ pub mod frame;
 pub mod tofu;
 
 pub use battery::{Battery, Link};
-pub use client::{Client, Pattern, SessionInfo};
+pub use client::{Client, MediaChannel, Pattern, SessionInfo};
 pub use tofu::{MemoryPinStore, PinDecision, PinStore};

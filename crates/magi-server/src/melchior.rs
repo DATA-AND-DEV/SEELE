@@ -35,6 +35,15 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::casper::{now_seconds, Casper};
 
+/// The Comandante role, seeded by migration 1.
+pub const COMMANDER_ROLE: RoleId = RoleId(1);
+/// The Operador role.
+pub const OPERATOR_ROLE: RoleId = RoleId(2);
+/// The Piloto role, which every new account arrives with.
+pub const PILOT_ROLE: RoleId = RoleId(3);
+/// The Observador role: may listen and read, and nothing else.
+pub const OBSERVER_ROLE: RoleId = RoleId(4);
+
 /// A pilot as MELCHIOR knows them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pilot {
@@ -66,6 +75,15 @@ pub enum Refusal {
     /// ever surfaced to an operator — never to the peer who triggered it.
     #[error("nickname belongs to a different identity")]
     NicknameTaken,
+}
+
+/// Parses the JSON permission arrays the schema stores.
+///
+/// Public because the handshake builds the role list for `Sessao` out of the
+/// same column.
+#[must_use]
+pub fn permissions_from_json(json: &str) -> Vec<Permission> {
+    parse_permissions(json)
 }
 
 /// Parses the JSON permission arrays the schema stores.
@@ -366,10 +384,10 @@ mod tests {
     use super::*;
     use crate::casper::Location;
 
-    const COMMANDER: RoleId = RoleId(1);
-    const OPERATOR: RoleId = RoleId(2);
-    const PILOT: RoleId = RoleId(3);
-    const OBSERVER: RoleId = RoleId(4);
+    const COMMANDER: RoleId = COMMANDER_ROLE;
+    const OPERATOR: RoleId = OPERATOR_ROLE;
+    const PILOT: RoleId = PILOT_ROLE;
+    const OBSERVER: RoleId = OBSERVER_ROLE;
 
     /// Every permission `specs/04-servidor-magi.md` enumerates.
     const ALL: &[Permission] = &[

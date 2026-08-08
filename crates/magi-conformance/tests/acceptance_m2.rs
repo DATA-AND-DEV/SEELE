@@ -252,10 +252,27 @@ async fn a_second_connection_reuses_the_pin() -> Result<()> {
 async fn a_ping_comes_back_as_a_pong() -> Result<()> {
     // specs/02-protocolo.md makes this the base of the Sync Ratio, and the one
     // input magi-audio cannot produce on its own.
+    //
+    // The answer arrives through the event stream rather than a blocking read:
+    // the control stream carries telemetry and roster changes too, and a second
+    // reader would swallow whatever the first was waiting for.
     let address = start(Vec::new()).await?;
     let mut client = connect(address, "ayanami").await?;
 
-    let rtt = tokio::time::timeout(DELIVERY_TIMEOUT, client.ping()).await??;
+    client.send_ping().await?;
+    tokio::time::timeout(DELIVERY_TIMEOUT, async {
+        loop {
+            if matches!(
+                client.next_event().await?,
+                magi_proto::ServerMessage::Pong { .. }
+            ) {
+                return Ok::<_, anyhow::Error>(());
+            }
+        }
+    })
+    .await??;
+
+    let rtt = client.rtt().expect("a measured round trip");
     assert!(rtt < Duration::from_secs(1), "loopback rtt was {rtt:?}");
 
     Ok(())

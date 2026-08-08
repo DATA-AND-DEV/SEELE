@@ -20,7 +20,7 @@ use std::sync::Arc;
 use anyhow::{bail, Context, Result};
 use ed25519_dalek::{Signer, SigningKey};
 use magi_proto::control::{ClientMessage, ServerMessage};
-use magi_proto::ids::{CageId, PilotId, SessionId, Ssrc};
+use magi_proto::ids::{CageId, ClientMessageId, LineId, MessageId, PilotId, SessionId, Ssrc};
 use magi_proto::transport::{HANDSHAKE_TIMEOUT, IDLE_TIMEOUT, KEEPALIVE};
 
 use crate::frame;
@@ -55,6 +55,41 @@ pub struct SessionInfo {
     pub cages: Vec<magi_proto::control::CageInfo>,
 }
 
+/// The media half of a connection, usable independently of the control stream.
+///
+/// `specs/02-protocolo.md` puts voice on datagrams and control on a stream
+/// precisely so neither waits for the other. Handing them out as separate
+/// objects makes that structural: a caller can await both at once without one
+/// borrow blocking the other, which is exactly the shape a shell needs.
+#[derive(Clone)]
+pub struct MediaChannel {
+    connection: quinn::Connection,
+}
+
+impl MediaChannel {
+    /// Sends one media datagram.
+    ///
+    /// The `ssrc` in the header must be the one in [`SessionInfo::ssrc`]; the
+    /// server refuses anything else (gap G2).
+    ///
+    /// # Errors
+    ///
+    /// Fails if the datagram is too large for the path.
+    pub fn send(&self, datagram: Vec<u8>) -> Result<()> {
+        self.connection.send_datagram(datagram.into())?;
+        Ok(())
+    }
+
+    /// Waits for the next media datagram.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the connection closes.
+    pub async fn next(&self) -> Result<Vec<u8>> {
+        Ok(self.connection.read_datagram().await?.to_vec())
+    }
+}
+
 /// A connected, verified client.
 pub struct Client {
     connection: quinn::Connection,
@@ -63,6 +98,10 @@ pub struct Client {
     session: SessionInfo,
     pin: PinDecision,
     pattern: Pattern,
+    /// A ping that has been sent and not yet answered.
+    pending_ping: Option<(u64, std::time::Instant)>,
+    /// The most recent round trip.
+    last_rtt: Option<std::time::Duration>,
 }
 
 impl Client {
@@ -127,6 +166,8 @@ impl Client {
             session,
             pin,
             pattern: Pattern::Blue,
+            pending_ping: None,
+            last_rtt: None,
         })
     }
 
@@ -164,6 +205,17 @@ impl Client {
         .await
     }
 
+    /// The media half of this connection.
+    ///
+    /// Cheap to clone, and independent of the control stream — see
+    /// [`MediaChannel`].
+    #[must_use]
+    pub fn media(&self) -> MediaChannel {
+        MediaChannel {
+            connection: self.connection.clone(),
+        }
+    }
+
     /// Sends one media datagram.
     ///
     /// The `ssrc` must be the one in [`SessionInfo::ssrc`]; the server refuses
@@ -187,24 +239,111 @@ impl Client {
         Ok(self.connection.read_datagram().await?.to_vec())
     }
 
-    /// Round trip, measured with `Ping`/`Pong`.
-    ///
-    /// `specs/02-protocolo.md` makes this the base of the Sync Ratio — and the
-    /// one input `magi-audio` cannot produce on its own.
+    /// Subscribes to a text channel.
     ///
     /// # Errors
     ///
-    /// Fails if the control stream is closed or the server answers something
-    /// else.
-    pub async fn ping(&mut self) -> Result<std::time::Duration> {
-        let started = std::time::Instant::now();
-        let stamp = started.elapsed().as_nanos() as u64;
-        frame::write(&mut self.send, &ClientMessage::Ping { timestamp: stamp }).await?;
+    /// Fails if the control stream is closed.
+    pub async fn join_line(&mut self, line: LineId) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::JoinLine { line }).await
+    }
 
-        match frame::read::<ServerMessage>(&mut self.recv).await? {
-            ServerMessage::Pong { timestamp } if timestamp == stamp => Ok(started.elapsed()),
-            other => bail!("expected Pong, got {other:?}"),
+    /// Posts a message.
+    ///
+    /// `client_message_id` makes the send idempotent (`specs/02-protocolo.md`,
+    /// gap G9): resending after a lost acknowledgement does not post twice.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn send_message(
+        &mut self,
+        line: LineId,
+        body: &str,
+        client_message_id: ClientMessageId,
+    ) -> Result<()> {
+        frame::write(
+            &mut self.send,
+            &ClientMessage::SendMessage {
+                line,
+                body: body.to_owned(),
+                replies_to: None,
+                client_message_id,
+            },
+        )
+        .await
+    }
+
+    /// Asks for a page of history, oldest of the page first on the wire.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn fetch_history(
+        &mut self,
+        line: LineId,
+        cursor: Option<MessageId>,
+        limit: u16,
+    ) -> Result<()> {
+        frame::write(
+            &mut self.send,
+            &ClientMessage::FetchHistory {
+                line,
+                cursor,
+                limit,
+            },
+        )
+        .await
+    }
+
+    /// Waits for the next control message from the server.
+    ///
+    /// The shell drives this: `specs/01-arquitetura.md` has the core emit events
+    /// and the shell turn them into pixels.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the control stream closes.
+    pub async fn next_event(&mut self) -> Result<ServerMessage> {
+        let event = frame::read::<ServerMessage>(&mut self.recv).await?;
+        // The round trip is measured here rather than in a separate reader:
+        // two readers on one stream would race for every frame, and one of them
+        // would swallow messages the other was waiting for.
+        if let ServerMessage::Pong { timestamp } = event {
+            if let Some((sent, at)) = self.pending_ping {
+                if sent == timestamp {
+                    self.last_rtt = Some(at.elapsed());
+                    self.pending_ping = None;
+                }
+            }
         }
+        Ok(event)
+    }
+
+    /// Sends a keepalive.
+    ///
+    /// `specs/02-protocolo.md` sends one every 5 s and treats three unanswered
+    /// as `Reconectando` — which is what [`crate::Battery`] tracks. The answer
+    /// arrives through [`Self::next_event`], because the control stream has
+    /// exactly one reader.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn send_ping(&mut self) -> Result<()> {
+        let stamp = self.pending_ping.map_or(1, |(previous, _)| previous + 1);
+        self.pending_ping = Some((stamp, std::time::Instant::now()));
+        frame::write(&mut self.send, &ClientMessage::Ping { timestamp: stamp }).await
+    }
+
+    /// The most recent round trip, if a ping has been answered.
+    ///
+    /// `specs/02-protocolo.md` makes this the base of the Sync Ratio — and the
+    /// one input `magi-audio` cannot produce on its own, since it comes from the
+    /// control stream.
+    #[must_use]
+    pub fn rtt(&self) -> Option<std::time::Duration> {
+        self.last_rtt
     }
 
     /// Closes the connection.

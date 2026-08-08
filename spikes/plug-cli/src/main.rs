@@ -157,10 +157,20 @@ async fn main() -> Result<()> {
 /// Exercises the control channel with no sound card in sight.
 async fn protocol_only(mut client: Client) -> Result<()> {
     println!("modo protocolo: sem áudio, só Ping/Pong e datagramas recebidos");
+    // Media and control are independent (specs/02-protocolo.md), so they can be
+    // awaited together without one borrow blocking the other.
+    let media = client.media();
     let mut received = 0_u64;
     loop {
         tokio::select! {
-            datagram = client.next_media() => {
+            event = client.next_event() => {
+                // Telemetry, roster changes and the Pong that measures rtt.
+                if let Err(error) = event {
+                    println!("stream de controle encerrado: {error}");
+                    return Ok(());
+                }
+            }
+            datagram = media.next() => {
                 match datagram {
                     Ok(bytes) => {
                         received += 1;
@@ -180,13 +190,17 @@ async fn protocol_only(mut client: Client) -> Result<()> {
                 }
             }
             () = tokio::time::sleep(Duration::from_secs(5)) => {
-                match client.ping().await {
-                    Ok(rtt) => println!("rtt {:.2} ms · {received} datagramas", rtt.as_secs_f64() * 1000.0),
-                    Err(error) => {
-                        println!("ping falhou: {error}");
-                        return Ok(());
-                    }
+                // specs/02-protocolo.md: a Ping every 5 s. The Pong arrives
+                // through the event stream, which magi-core uses to measure the
+                // round trip — one reader on the control stream.
+                if let Err(error) = client.send_ping().await {
+                    println!("ping falhou: {error}");
+                    return Ok(());
                 }
+                let rtt = client
+                    .rtt()
+                    .map_or_else(|| "—".to_owned(), |rtt| format!("{:.2} ms", rtt.as_secs_f64() * 1000.0));
+                println!("rtt {rtt} · {received} datagramas");
             }
         }
     }

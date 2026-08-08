@@ -1111,6 +1111,7 @@ dependencies = [
  "magi-proto",
  "magi-server",
  "rand 0.10.2",
+ "tempfile",
  "tokio",
 ]
 

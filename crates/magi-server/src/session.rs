@@ -1,4 +1,4 @@
-//! MELCHIOR — identity, authentication and one connection's session.
+//! MELCHIOR's front door — one connection's handshake and session.
 //!
 //! # The handshake
 //!
@@ -18,43 +18,54 @@
 //! verified. The whole budget is 10 s, and failure produces a **specific**
 //! reason: `specs/02-protocolo.md` says "never generic".
 //!
-//! # What M2 can and cannot prove
+//! # What the key proves, and what MELCHIOR decides
 //!
-//! ADR 0004 makes identity an Ed25519 key. Verifying a signature over the
-//! server's nonce proves the peer holds the private key — but with no
-//! persistence in M2 (CASPER arrives in M3) there is no table of known accounts
-//! to check that key against. So M2 authenticates a *key*, not a *person*. That
-//! is the honest limit of a server with no database, and it is stated here
-//! rather than left for somebody to assume otherwise.
+//! Verifying the signature over the nonce proves the peer holds the private key.
+//! Turning that into an identity is [`crate::melchior`]'s job: it looks the key
+//! up, creates an account on first sight, and refuses a banned one. Roles and
+//! permissions come from there too — `specs/08-seguranca.md` is emphatic that
+//! the server denying is the security, and the interface hiding the button only
+//! convenience.
 
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use magi_proto::control::{
-    CageInfo, ClientMessage, DisconnectReason, LineInfo, Permission, Presence, Role, ServerMessage,
+    AlertReason, AlertSeverity, CageInfo, ClientMessage, DisconnectReason, LineInfo, Permission,
+    PilotProfile, PilotState, Presence, Role, ServerMessage, Subsystem, SubsystemHealth, Telemetry,
 };
-use magi_proto::ids::{LineId, PilotId, RoleId, SessionId, Ssrc};
+use magi_proto::ids::{CageId, LineId, PilotId, RoleId, SessionId, Ssrc};
+use magi_proto::sync_ratio::{SyncInputs, SyncRatio};
 use magi_proto::transport::HANDSHAKE_TIMEOUT;
 use tokio::sync::mpsc;
 
 use crate::cage::CageCommand;
-use crate::frame;
-use crate::{DogmaConfig, PUBLIC_KEY_LEN};
+use crate::casper::messages::{Messages, PendingMessage, DEFAULT_PAGE};
+use crate::casper::Casper;
+use crate::dogma::{Dogma, Event};
+use crate::melchior::{self, Melchior};
+use crate::{frame, DogmaConfig, PUBLIC_KEY_LEN};
 
 /// Bytes of nonce the client signs.
 const NONCE_LEN: usize = 32;
 
-/// How many datagrams queue for one listener before the Cage starts shedding.
+/// How many datagrams queue for one listener before the Cage sheds.
 const OUTBOUND_DEPTH: usize = 256;
 
-/// Hands out identifiers for the lifetime of a process.
+/// How often the server pushes telemetry.
 ///
-/// M2 has no persistence, so these are per-run rather than stable. M3's CASPER
-/// replaces the pilot side with real accounts.
+/// `specs/07-tema-evangelion.md` wants the Sync Ratio alive on screen; once a
+/// second looks live and costs nothing.
+const TELEMETRY_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Hands out per-connection identifiers.
+///
+/// Pilot identifiers come from CASPER and survive restarts; these do not need
+/// to. An `ssrc` is meaningful only for the life of a connection.
 pub struct Registry {
-    next_pilot: AtomicU64,
     next_ssrc: AtomicU32,
     next_session: AtomicU64,
 }
@@ -70,15 +81,13 @@ impl Registry {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            next_pilot: AtomicU64::new(1),
             next_ssrc: AtomicU32::new(1),
             next_session: AtomicU64::new(1),
         }
     }
 
-    fn issue(&self) -> (PilotId, Ssrc, SessionId) {
+    fn issue(&self) -> (Ssrc, SessionId) {
         (
-            PilotId(self.next_pilot.fetch_add(1, Ordering::Relaxed)),
             Ssrc(self.next_ssrc.fetch_add(1, Ordering::Relaxed)),
             SessionId(self.next_session.fetch_add(1, Ordering::Relaxed)),
         )
@@ -87,29 +96,30 @@ impl Registry {
 
 /// A connection that has reached PATTERN: BLUE.
 pub struct Session {
-    /// Who the server decided this connection is.
+    /// Which account this connection is.
     pub pilot: PilotId,
     /// The media source bound to this connection.
-    ///
-    /// `specs/08-seguranca.md`: assigned here, never accepted from the client.
-    /// Every datagram's header is checked against it — see [`crate::cage`].
     pub ssrc: Ssrc,
-    /// Requested nickname, as accepted.
+    /// Display name.
     pub nickname: String,
-    /// Whether this pilot may transmit.
+    /// May transmit voice.
     pub may_speak: bool,
+    /// May post text.
+    pub may_write: bool,
+    /// A seat reclaimed from an earlier connection, if any.
+    pub reclaimed_cage: Option<CageId>,
 }
 
 /// Runs the handshake, then the session, then cleans up.
 ///
 /// # Errors
 ///
-/// Returns the reason the connection ended. A handshake failure is reported to
-/// the client as an enumerated [`DisconnectReason`] before the error propagates.
+/// Returns the reason the connection ended.
 pub async fn serve(
     connection: quinn::Connection,
     config: Arc<DogmaConfig>,
     registry: Arc<Registry>,
+    dogma: Arc<Dogma>,
     cage: mpsc::Sender<CageCommand>,
 ) -> Result<()> {
     let (mut send, mut recv) = connection
@@ -117,17 +127,15 @@ pub async fn serve(
         .await
         .context("client never opened the control stream")?;
 
-    // specs/02-protocolo.md: 10 s for the whole handshake.
     let outcome = tokio::time::timeout(
         HANDSHAKE_TIMEOUT,
-        handshake(&mut send, &mut recv, &config, &registry),
+        handshake(&mut send, &mut recv, &config, &registry, &dogma),
     )
     .await;
 
     let session = match outcome {
         Ok(Ok(session)) => session,
         Ok(Err(failure)) => {
-            // specs/02-protocolo.md: a specific reason, never a generic one.
             let _ = frame::write(
                 &mut send,
                 &ServerMessage::Disconnecting {
@@ -156,10 +164,11 @@ pub async fn serve(
         ssrc = %session.ssrc,
         nickname = %session.nickname,
         may_speak = session.may_speak,
+        reclaimed = ?session.reclaimed_cage,
         "pattern blue"
     );
 
-    let result = run_session(connection, send, recv, &session, &cage).await;
+    let result = run_session(connection, send, recv, &session, &dogma, &cage).await;
 
     let _ = cage
         .send(CageCommand::Leave {
@@ -181,6 +190,7 @@ async fn handshake(
     recv: &mut quinn::RecvStream,
     config: &DogmaConfig,
     registry: &Registry,
+    dogma: &Dogma,
 ) -> std::result::Result<Session, Refusal> {
     let hello = frame::read::<ClientMessage>(recv)
         .await
@@ -207,7 +217,7 @@ async fn handshake(
         detail: format!("client speaks protocol {version}"),
     })?;
 
-    let key: [u8; PUBLIC_KEY_LEN] = public_key.try_into().map_err(|_| Refusal {
+    let key: [u8; PUBLIC_KEY_LEN] = public_key.clone().try_into().map_err(|_| Refusal {
         reason: DisconnectReason::CredentialRejected,
         detail: "public key was not 32 bytes".into(),
     })?;
@@ -216,8 +226,7 @@ async fn handshake(
         detail: "public key is not a valid Ed25519 point".into(),
     })?;
 
-    // A fresh nonce per handshake. Reusing one would let a recorded Response be
-    // replayed by anybody who saw it.
+    // A fresh nonce per handshake, or a recorded Response could be replayed.
     let nonce: [u8; NONCE_LEN] = rand::random();
     frame::write(
         send,
@@ -231,14 +240,14 @@ async fn handshake(
         detail: format!("could not send Challenge: {error}"),
     })?;
 
-    let response = frame::read::<ClientMessage>(recv)
-        .await
-        .map_err(|error| Refusal {
-            reason: DisconnectReason::ProtocolViolation,
-            detail: format!("could not read Response: {error}"),
-        })?;
-
-    let ClientMessage::Response { proof } = response else {
+    let ClientMessage::Response { proof } =
+        frame::read::<ClientMessage>(recv)
+            .await
+            .map_err(|error| Refusal {
+                reason: DisconnectReason::ProtocolViolation,
+                detail: format!("could not read Response: {error}"),
+            })?
+    else {
         return Err(Refusal {
             reason: DisconnectReason::ProtocolViolation,
             detail: "second frame was not Response".into(),
@@ -250,8 +259,8 @@ async fn handshake(
         detail: "proof was not a 64-byte signature".into(),
     })?;
 
-    // specs/08-seguranca.md requires a uniform failure message: nothing here
-    // reveals whether the key is known, only whether the signature holds.
+    // specs/08-seguranca.md wants a uniform failure: nothing here says whether
+    // the key is known, only whether the signature holds.
     verifying
         .verify(&nonce, &Signature::from_bytes(&signature))
         .map_err(|_| Refusal {
@@ -259,52 +268,76 @@ async fn handshake(
             detail: "signature did not verify".into(),
         })?;
 
-    let (pilot, ssrc, session_id) = registry.issue();
-    // M2 has no accounts, so the only authorisation available is the operator's
-    // configured list. M3's MELCHIOR replaces this with real roles.
-    let may_speak = !config.observers.iter().any(|name| name == &nickname);
+    // MELCHIOR turns the proven key into an account.
+    let account = {
+        let guard = dogma.casper.lock().await;
+        let melchior = Melchior::new(&guard);
 
-    let session = Session {
-        pilot,
-        ssrc,
-        nickname: nickname.clone(),
-        may_speak,
+        let pilot = melchior
+            .register_or_find(&public_key, &nickname)
+            .map_err(|error| Refusal {
+                reason: DisconnectReason::CredentialRejected,
+                detail: format!("could not establish an account: {error}"),
+            })?;
+
+        if melchior.is_banned(pilot.id).unwrap_or(false) {
+            return Err(Refusal {
+                reason: DisconnectReason::Banned,
+                detail: format!("pilot {} is banned", pilot.id),
+            });
+        }
+
+        // Bootstrap: somebody has to be able to set the first roles before there
+        // is an operator to do it. Applied through MELCHIOR rather than around
+        // it, so authorisation still has exactly one source of truth
+        // (`specs/08-seguranca.md`).
+        if config.observers.iter().any(|name| name == &nickname) {
+            let _ = melchior.revoke_role(pilot.id, melchior::PILOT_ROLE);
+            let _ = melchior.grant_role(pilot.id, melchior::OBSERVER_ROLE);
+        }
+
+        let may = |permission| melchior.may(pilot.id, permission).unwrap_or(false);
+        let (cages, lines, roles) = read_dogma(&guard).map_err(|error| Refusal {
+            reason: DisconnectReason::ServerShuttingDown,
+            detail: format!("could not read the Dogma: {error}"),
+        })?;
+
+        Account {
+            id: pilot.id,
+            nickname: pilot.nickname,
+            may_speak: may(Permission::Speak),
+            may_write: may(Permission::WriteLine),
+            cages,
+            lines,
+            roles,
+        }
+    };
+
+    let (fresh_ssrc, session_id) = registry.issue();
+
+    // specs/02-protocolo.md: the server holds the slot for the same five minutes
+    // as the client's internal battery. A pilot returning inside that window
+    // gets their own seat and their own `ssrc` back, so to everybody else the
+    // outage looks like an outage rather than a departure and an arrival.
+    let reclaimed = {
+        let mut slots = dogma.slots.lock().await;
+        slots.reclaim(account.id, Instant::now())
+    };
+    let (ssrc, reclaimed_cage) = match reclaimed {
+        Some((cage, ssrc)) => (ssrc, Some(cage)),
+        None => (fresh_ssrc, None),
     };
 
     frame::write(
         send,
         &ServerMessage::Session {
             id: session_id,
-            pilot,
+            pilot: account.id,
             ssrc,
             dogma: config.name.clone(),
-            cages: vec![CageInfo {
-                id: config.cage,
-                name: config.cage_name.clone(),
-                limit: config.cage_limit,
-                password_required: false,
-                line: Some(LineId(1)),
-            }],
-            lines: vec![LineInfo {
-                id: LineId(1),
-                name: "geral".into(),
-            }],
-            roles: vec![
-                Role {
-                    id: RoleId(1),
-                    name: "Pilot".into(),
-                    permissions: vec![
-                        Permission::ViewCage,
-                        Permission::InsertPlug,
-                        Permission::Speak,
-                    ],
-                },
-                Role {
-                    id: RoleId(2),
-                    name: "Observer".into(),
-                    permissions: vec![Permission::ViewCage, Permission::InsertPlug],
-                },
-            ],
+            cages: account.cages,
+            lines: account.lines,
+            roles: account.roles,
         },
     )
     .await
@@ -314,77 +347,326 @@ async fn handshake(
     })?;
 
     let _ = client;
-    Ok(session)
+    Ok(Session {
+        pilot: account.id,
+        ssrc,
+        nickname: account.nickname,
+        may_speak: account.may_speak,
+        may_write: account.may_write,
+        reclaimed_cage,
+    })
 }
 
-/// The session loop: control frames one way, datagrams both.
+/// What the handshake learned from MELCHIOR and CASPER.
+struct Account {
+    id: PilotId,
+    nickname: String,
+    may_speak: bool,
+    may_write: bool,
+    cages: Vec<CageInfo>,
+    lines: Vec<LineInfo>,
+    roles: Vec<Role>,
+}
+
+/// Reads the Cage and Line tree, and the roles, out of CASPER.
+fn read_dogma(casper: &Casper) -> Result<(Vec<CageInfo>, Vec<LineInfo>, Vec<Role>)> {
+    let connection = casper.connection();
+
+    let mut cage_statement = connection.prepare(
+        "SELECT id, name, member_limit, password_hash IS NOT NULL, line_id
+         FROM cages ORDER BY position, id",
+    )?;
+    let cages = cage_statement
+        .query_map([], |row| {
+            Ok(CageInfo {
+                id: CageId(row.get::<_, i64>(0)? as u32),
+                name: row.get(1)?,
+                limit: row.get::<_, i64>(2)? as u16,
+                password_required: row.get(3)?,
+                line: row.get::<_, Option<i64>>(4)?.map(|id| LineId(id as u32)),
+            })
+        })?
+        .filter_map(Result::ok)
+        .collect();
+
+    let mut line_statement =
+        connection.prepare("SELECT id, name FROM lines ORDER BY position, id")?;
+    let lines = line_statement
+        .query_map([], |row| {
+            Ok(LineInfo {
+                id: LineId(row.get::<_, i64>(0)? as u32),
+                name: row.get(1)?,
+            })
+        })?
+        .filter_map(Result::ok)
+        .collect();
+
+    let mut role_statement = connection.prepare("SELECT id, name, permissions FROM roles")?;
+    let roles = role_statement
+        .query_map([], |row| {
+            let permissions: String = row.get(2)?;
+            Ok(Role {
+                id: RoleId(row.get::<_, i64>(0)? as u32),
+                name: row.get(1)?,
+                permissions: melchior::permissions_from_json(&permissions),
+            })
+        })?
+        .filter_map(Result::ok)
+        .collect();
+
+    Ok((cages, lines, roles))
+}
+
+/// The session loop.
+#[allow(clippy::too_many_lines, reason = "one select over every event source")]
 async fn run_session(
     connection: quinn::Connection,
     mut send: quinn::SendStream,
     mut recv: quinn::RecvStream,
     session: &Session,
+    dogma: &Dogma,
     cage: &mpsc::Sender<CageCommand>,
 ) -> Result<()> {
     let (outbound_tx, mut outbound_rx) = mpsc::channel::<Vec<u8>>(OUTBOUND_DEPTH);
-    let mut in_cage = false;
+    let mut events = dogma.events.subscribe();
+    let mut lines: Vec<LineId> = Vec::new();
+    let mut current_cage: Option<CageId> = None;
+    let mut sync = SyncRatio::new();
+    let mut telemetry = tokio::time::interval(TELEMETRY_INTERVAL);
+    telemetry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+    // A reclaimed seat means the pilot was already in a Cage when they dropped.
+    if let Some(reclaimed) = session.reclaimed_cage {
+        cage.send(CageCommand::Join {
+            pilot: session.pilot,
+            ssrc: session.ssrc,
+            may_speak: session.may_speak,
+            outbound: outbound_tx.clone(),
+        })
+        .await?;
+        current_cage = Some(reclaimed);
+        tracing::info!(pilot = %session.pilot, "seat reclaimed");
+    }
 
     loop {
         tokio::select! {
-            // Control frames from this client.
-            frame = frame::read::<ClientMessage>(&mut recv) => {
-                let Ok(message) = frame else { return Ok(()) };
+            incoming = frame::read::<ClientMessage>(&mut recv) => {
+                let Ok(message) = incoming else { break };
                 match message {
-                    ClientMessage::InsertPlug { .. } => {
+                    ClientMessage::InsertPlug { cage: id, .. } => {
                         cage.send(CageCommand::Join {
                             pilot: session.pilot,
                             ssrc: session.ssrc,
                             may_speak: session.may_speak,
                             outbound: outbound_tx.clone(),
                         }).await?;
-                        in_cage = true;
-                        tracing::info!(pilot = %session.pilot, "plug inserted");
+                        current_cage = Some(id);
+                        let _ = dogma.events.send(Event::PilotJoined {
+                            cage: id,
+                            profile: PilotProfile {
+                                id: session.pilot,
+                                nickname: session.nickname.clone(),
+                                roles: Vec::new(),
+                            },
+                            ssrc: session.ssrc,
+                        });
                     }
                     ClientMessage::EjectPlug => {
                         cage.send(CageCommand::Leave { pilot: session.pilot }).await?;
-                        in_cage = false;
+                        if let Some(id) = current_cage.take() {
+                            let _ = dogma.events.send(Event::PilotLeft {
+                                cage: id,
+                                pilot: session.pilot,
+                            });
+                        }
+                    }
+                    ClientMessage::JoinLine { line } => {
+                        if !lines.contains(&line) {
+                            lines.push(line);
+                        }
+                    }
+                    ClientMessage::SendMessage { line, body, replies_to, client_message_id } => {
+                        // specs/08-seguranca.md: verified here, always.
+                        if !session.may_write {
+                            frame::write(&mut send, &ServerMessage::Alert {
+                                severity: AlertSeverity::Warning,
+                                reason: AlertReason::PermissionDenied,
+                                operator_text: None,
+                            }).await?;
+                            continue;
+                        }
+                        // Queued, not confirmed. The broadcast after the commit
+                        // is what tells anybody it happened.
+                        dogma.post(PendingMessage {
+                            line,
+                            author: session.pilot,
+                            body,
+                            replies_to,
+                            client_message_id: Some(client_message_id),
+                        }).await?;
+                    }
+                    ClientMessage::FetchHistory { line, cursor, limit } => {
+                        let page = {
+                            let mut guard = dogma.casper.lock().await;
+                            let messages = Messages::new(&mut guard);
+                            messages.history(
+                                line,
+                                cursor,
+                                if limit == 0 { DEFAULT_PAGE } else { limit },
+                            )?
+                        };
+                        // Oldest first on the wire, so a client can append.
+                        for stored in page.into_iter().rev() {
+                            frame::write(&mut send, &ServerMessage::MessageReceived {
+                                line: stored.line,
+                                id: stored.id,
+                                author: stored.author,
+                                body: stored.body,
+                                replies_to: stored.replies_to,
+                                client_message_id: stored.client_message_id,
+                            }).await?;
+                        }
                     }
                     ClientMessage::Ping { timestamp } => {
                         frame::write(&mut send, &ServerMessage::Pong { timestamp }).await?;
                     }
                     ClientMessage::SetAtField(_)
                     | ClientMessage::SetTotalIsolation(_)
-                    | ClientMessage::SetPresence(Presence::Available | Presence::Away | Presence::DoNotDisturb) => {
-                        // Accepted and acknowledged by silence. Broadcasting
-                        // state to the rest of the Cage needs the roster that
-                        // arrives with M3.
-                    }
-                    other => {
-                        tracing::debug!(?other, "message not implemented in M2");
-                    }
+                    | ClientMessage::SetPresence(
+                        Presence::Available | Presence::Away | Presence::DoNotDisturb,
+                    ) => {}
+                    // The handshake is over. Repeating it is a protocol
+                    // violation, not a re-authentication.
+                    ClientMessage::Response { .. } | ClientMessage::Hello { .. } => break,
                 }
             }
 
-            // Voice from this client.
             datagram = connection.read_datagram() => {
-                let Ok(bytes) = datagram else { return Ok(()) };
-                if !in_cage {
+                let Ok(bytes) = datagram else { break };
+                if current_cage.is_none() {
                     continue;
                 }
-                // The `ssrc` comes from the connection, never from the datagram.
-                // The Cage compares the two and refuses a mismatch — gap G2.
                 let _ = cage.send(CageCommand::Datagram {
                     from: session.ssrc,
                     bytes: bytes.to_vec(),
                 }).await;
             }
 
-            // Voice for this client.
             outbound = outbound_rx.recv() => {
-                let Some(bytes) = outbound else { return Ok(()) };
-                // A datagram that will not fit is dropped rather than queued:
-                // late audio helps nobody.
+                let Some(bytes) = outbound else { break };
                 let _ = connection.send_datagram(bytes.into());
             }
+
+            event = events.recv() => {
+                let Ok(event) = event else { continue };
+                if let Some(message) = translate(&event, &lines, current_cage, session.pilot) {
+                    frame::write(&mut send, &message).await?;
+                }
+            }
+
+            _ = telemetry.tick() => {
+                // The server measures RTT and loss from QUIC itself, which is
+                // the only vantage point that sees both directions. Jitter is
+                // measured at the receiver, so the server reports zero rather
+                // than a number it cannot know.
+                let stats = connection.stats();
+                let rtt_ms = connection.rtt().as_secs_f32() * 1000.0;
+                let sent = stats.path.sent_packets.max(1) as f32;
+                let lost = stats.path.lost_packets as f32;
+                let inputs = SyncInputs {
+                    rtt_ms,
+                    jitter_ms: 0.0,
+                    loss_fraction: (lost / sent).clamp(0.0, 1.0),
+                };
+                let ratio = sync.update(inputs);
+
+                frame::write(&mut send, &ServerMessage::Telemetry(Telemetry {
+                    rtt_ms,
+                    jitter_ms: inputs.jitter_ms,
+                    loss_fraction: inputs.loss_fraction,
+                    subsystems: vec![
+                        (Subsystem::Melchior, SubsystemHealth::Nominal),
+                        (Subsystem::Balthasar, SubsystemHealth::Nominal),
+                        (Subsystem::Casper, SubsystemHealth::Nominal),
+                    ],
+                })).await?;
+
+                let _ = dogma.events.send(Event::PilotState(PilotState {
+                    pilot: session.pilot,
+                    at_field: false,
+                    total_isolation: false,
+                    speaking: false,
+                    presence: Presence::Available,
+                    sync_ratio: ratio,
+                }));
+            }
+        }
+    }
+
+    // The connection is gone. Hold the seat for the grace window rather than
+    // letting a tunnel cost somebody their place — specs/02-protocolo.md.
+    if let Some(id) = current_cage {
+        let mut slots = dogma.slots.lock().await;
+        slots.reserve(session.pilot, id, session.ssrc, Instant::now());
+    }
+
+    Ok(())
+}
+
+/// Decides whether an event concerns this connection, and what to send.
+fn translate(
+    event: &Event,
+    lines: &[LineId],
+    cage: Option<CageId>,
+    self_pilot: PilotId,
+) -> Option<ServerMessage> {
+    match event {
+        Event::MessagePosted(message) => {
+            lines
+                .contains(&message.line)
+                .then(|| ServerMessage::MessageReceived {
+                    line: message.line,
+                    id: message.id,
+                    author: message.author,
+                    body: message.body.clone(),
+                    replies_to: message.replies_to,
+                    client_message_id: message.client_message_id,
+                })
+        }
+        Event::MessageEdited { line, id, body } => {
+            lines.contains(line).then(|| ServerMessage::MessageEdited {
+                line: *line,
+                id: *id,
+                body: body.clone(),
+            })
+        }
+        Event::MessageRemoved { line, id } => {
+            lines
+                .contains(line)
+                .then_some(ServerMessage::MessageRemoved {
+                    line: *line,
+                    id: *id,
+                })
+        }
+        // Not echoed to the pilot who caused it: they already know.
+        Event::PilotJoined {
+            cage: joined,
+            profile,
+            ssrc,
+        } => (cage == Some(*joined) && profile.id != self_pilot).then(|| {
+            ServerMessage::PilotJoined {
+                cage: *joined,
+                profile: profile.clone(),
+                ssrc: *ssrc,
+            }
+        }),
+        Event::PilotLeft { cage: left, pilot } => (cage == Some(*left) && *pilot != self_pilot)
+            .then_some(ServerMessage::PilotLeft {
+                cage: *left,
+                pilot: *pilot,
+            }),
+        Event::PilotState(state) => {
+            (state.pilot != self_pilot).then_some(ServerMessage::PilotState(*state))
         }
     }
 }

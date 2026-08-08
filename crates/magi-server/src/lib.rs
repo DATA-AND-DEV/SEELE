@@ -32,6 +32,7 @@ use magi_proto::ids::CageId;
 
 pub mod cage;
 pub mod casper;
+pub mod dogma;
 pub mod frame;
 pub mod melchior;
 pub mod session;
@@ -57,13 +58,14 @@ pub struct DogmaConfig {
     pub cage_name: String,
     /// How many pilots fit in it.
     pub cage_limit: u16,
-    /// Nicknames that may enter but not transmit.
+    /// Nicknames that arrive as Observador rather than Piloto.
     ///
-    /// A stand-in for the Observador role of `specs/04-servidor-magi.md` until
-    /// M3 brings accounts. It exists so the M2 acceptance criterion — "a client
-    /// without permission is refused" — can be exercised for real rather than
-    /// asserted.
+    /// M3 brought real accounts, so this is now only a bootstrap convenience:
+    /// somebody has to be able to configure the first roles before there is an
+    /// operator to do it. Authorisation itself is MELCHIOR's, always.
     pub observers: Vec<String>,
+    /// Where CASPER keeps the database.
+    pub database: crate::casper::Location,
 }
 
 impl Default for DogmaConfig {
@@ -75,8 +77,32 @@ impl Default for DogmaConfig {
             cage_name: "CAGE-01 CENTRAL".into(),
             cage_limit: 15,
             observers: Vec::new(),
+            database: crate::casper::Location::Memory,
         }
     }
+}
+
+/// Creates the configured Cage and its Line if they are not there yet.
+///
+/// M2 kept these in the config struct; M3 keeps them in CASPER so a restart
+/// finds the same room rather than rebuilding it. Idempotent, because it runs
+/// on every boot.
+fn seed(casper: &mut casper::Casper, config: &DogmaConfig) -> Result<()> {
+    let connection = casper.connection();
+    connection.execute(
+        "INSERT OR IGNORE INTO lines (id, name) VALUES (1, 'geral')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT OR IGNORE INTO cages (id, name, member_limit, line_id)
+         VALUES (?1, ?2, ?3, 1)",
+        rusqlite::params![
+            i64::from(config.cage.get()),
+            config.cage_name,
+            i64::from(config.cage_limit)
+        ],
+    )?;
+    Ok(())
 }
 
 /// A running Dogma.
@@ -85,6 +111,7 @@ pub struct Server {
     config: Arc<DogmaConfig>,
     fingerprint: String,
     registry: Arc<session::Registry>,
+    dogma: Arc<dogma::Dogma>,
     cage: tokio::sync::mpsc::Sender<cage::CageCommand>,
 }
 
@@ -107,6 +134,35 @@ impl Server {
         let endpoint = quinn::Endpoint::server(server_config, config.listen)
             .with_context(|| format!("could not bind {}", config.listen))?;
 
+        // CASPER first: the handshake needs accounts before it can answer
+        // anybody, and migrations run at boot (specs/04-servidor-magi.md).
+        let mut casper = casper::Casper::open(&config.database)?;
+        seed(&mut casper, &config)?;
+        let casper = Arc::new(tokio::sync::Mutex::new(casper));
+
+        let (events, _) = tokio::sync::broadcast::channel(1024);
+        let writes = dogma::spawn_writer(Arc::clone(&casper), events.clone());
+        let dogma = Arc::new(dogma::Dogma {
+            casper,
+            events,
+            writes,
+            slots: Arc::new(tokio::sync::Mutex::new(dogma::Slots::default())),
+        });
+
+        // Held seats have to be released even if nobody reconnects, or a Dogma
+        // slowly fills with places kept for people who left for good.
+        let sweeper = Arc::clone(&dogma.slots);
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                ticker.tick().await;
+                let freed = sweeper.lock().await.sweep(std::time::Instant::now());
+                if freed > 0 {
+                    tracing::info!(freed, "expired seats released");
+                }
+            }
+        });
+
         let cage = cage::spawn(config.cage);
 
         Ok(Self {
@@ -114,6 +170,7 @@ impl Server {
             config: Arc::new(config),
             fingerprint,
             registry: Arc::new(session::Registry::new()),
+            dogma,
             cage,
         })
     }
@@ -140,10 +197,11 @@ impl Server {
     /// # Errors
     ///
     /// Returns when the endpoint is closed.
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(&self) -> Result<()> {
         while let Some(incoming) = self.endpoint.accept().await {
             let config = Arc::clone(&self.config);
             let registry = Arc::clone(&self.registry);
+            let dogma = Arc::clone(&self.dogma);
             let cage = self.cage.clone();
 
             tokio::spawn(async move {
@@ -157,12 +215,19 @@ impl Server {
                 let peer = connection.remote_address();
                 tracing::info!(%peer, "pattern orange");
 
-                if let Err(error) = session::serve(connection, config, registry, cage).await {
+                if let Err(error) = session::serve(connection, config, registry, dogma, cage).await
+                {
                     tracing::info!(%peer, %error, "session closed");
                 }
             });
         }
         Ok(())
+    }
+
+    /// Borrows the shared state, for tests and for tooling.
+    #[must_use]
+    pub fn dogma(&self) -> &Arc<dogma::Dogma> {
+        &self.dogma
     }
 
     /// Stops accepting and closes the endpoint.
