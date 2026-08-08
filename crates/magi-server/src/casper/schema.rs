@@ -111,9 +111,17 @@ pub const MIGRATIONS: &[Migration] = &[Migration {
             client_message_id INTEGER
         ) STRICT;
 
-        -- specs/04-servidor-magi.md: 'index on (linha_id, criado_em) for cursor
-        -- pagination'. Descending, because history is read newest-first.
-        CREATE INDEX messages_by_line_time ON messages (line_id, created_at DESC, id DESC);
+        -- specs/04-servidor-magi.md asks for an index on (linha_id, criado_em)
+        -- for cursor pagination. Two indexes rather than one, because they serve
+        -- different questions:
+        --
+        --   by_line_id    pagination. The cursor is a message id, and ids are
+        --                 monotonic while created_at is a wall clock that can
+        --                 tie or step backwards. Paginating by time would drop
+        --                 or repeat messages whenever it did.
+        --   by_line_time  retention sweeps, which genuinely ask about time.
+        CREATE INDEX messages_by_line_id ON messages (line_id, id DESC);
+        CREATE INDEX messages_by_line_time ON messages (line_id, created_at);
 
         -- The idempotency key only has to be unique per author, and only when
         -- present: a partial index keeps NULLs out of the way.

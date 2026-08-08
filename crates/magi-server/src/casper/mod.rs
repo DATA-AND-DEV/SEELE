@@ -24,6 +24,7 @@
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 
+pub mod messages;
 pub mod schema;
 
 /// Where the database lives.
@@ -77,6 +78,11 @@ impl Casper {
     /// Borrows the connection.
     pub(crate) fn connection(&self) -> &Connection {
         &self.connection
+    }
+
+    /// Borrows the connection mutably, for a transaction.
+    pub(crate) fn connection_mut(&mut self) -> &mut Connection {
+        &mut self.connection
     }
 
     /// The schema version currently on disk.

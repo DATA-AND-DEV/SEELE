@@ -24,9 +24,11 @@
     allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)
 )]
 
+pub mod battery;
 pub mod client;
 pub mod frame;
 pub mod tofu;
 
+pub use battery::{Battery, Link};
 pub use client::{Client, Pattern, SessionInfo};
 pub use tofu::{MemoryPinStore, PinDecision, PinStore};
