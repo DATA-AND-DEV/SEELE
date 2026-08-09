@@ -2,7 +2,7 @@
 //!
 //! Parsing is separated from doing so that the vocabulary in
 //! `specs/05-cliente-tui.md` can be tested without a server, a sound card, or a
-//! terminal. Running the commands is [`crate::main`]'s job.
+//! terminal. Running the commands is the `plug` binary's job.
 
 /// A parsed command.
 #[derive(Debug, Clone, PartialEq, Eq)]
