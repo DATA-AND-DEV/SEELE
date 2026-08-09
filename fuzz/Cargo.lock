@@ -144,15 +144,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "magi-fuzz"
+name = "seele-fuzz"
 version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
- "magi-proto",
+ "seele-proto",
 ]
 
 [[package]]
-name = "magi-proto"
+name = "seele-proto"
 version = "0.0.0"
 dependencies = [
  "postcard",

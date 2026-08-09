@@ -9,7 +9,7 @@ O produto principal. Tudo o mais imita esta interface.
 ## Layout principal
 
 ```
-┌ MAGI ─────────────────────── 同期率 ─── 第3新東京市 ─────── 12:04:33 ┐
+┌ SEELE ─────────────────────── 同期率 ─── 第3新東京市 ─────── 12:04:33 ┐
 │ DOGMA          │ CAGES / LINHAS       │ MENSAGENS                  │
 │ ▸ Terceira Tó… │ ▼ CAGE-01 CENTRAL    │ 12:01 ayanami              │
 │   Geofront     │   ● ayanami    98%   │   verificando harmônicos   │

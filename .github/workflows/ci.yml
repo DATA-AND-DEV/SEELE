@@ -83,7 +83,7 @@ jobs:
       - name: cargo-audit
         run: cargo audit
 
-  # specs/08-seguranca.md: "Fuzzing of the magi-proto parsers — it is the surface
+  # specs/08-seguranca.md: "Fuzzing of the seele-proto parsers — it is the surface
   # that receives untrusted network bytes."
   #
   # A short smoke run on every push proves the harness still builds and runs; it

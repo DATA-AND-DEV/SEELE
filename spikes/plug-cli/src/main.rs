@@ -3,20 +3,20 @@
 //! > Cliente de linha de comando feio, sem TUI, só para exercitar o protocolo.
 //!
 //! **Throwaway.** M4 builds `plug` properly on `ratatui`, against this same
-//! `magi-core`. That is the point of the boundary in `specs/01-arquitetura.md`:
+//! `seele-core`. That is the point of the boundary in `specs/01-arquitetura.md`:
 //! the shell changes and the core does not.
 //!
 //! # What it is actually for
 //!
 //! This is the first place M1 and M2 meet. Everything below the transport comes
-//! from `magi-audio` — capture, resampling, the voice gate, Opus, the jitter
-//! buffer, drift tracking, the mixer — and everything above it from `magi-core`.
+//! from `seele-audio` — capture, resampling, the voice gate, Opus, the jitter
+//! buffer, drift tracking, the mixer — and everything above it from `seele-core`.
 //! If the two halves disagree about anything, this is where it shows.
 //!
 //! # Usage
 //!
 //! ```text
-//! magid 127.0.0.1:8383
+//! seeled 127.0.0.1:8383
 //! plug-cli --server 127.0.0.1:8383 --nick ayanami
 //! plug-cli --server 127.0.0.1:8383 --nick shinji --tone     # synthetic voice
 //! plug-cli --server 127.0.0.1:8383 --nick asuka  --deafen   # listen only, silent
@@ -31,17 +31,17 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use ed25519_dalek::SigningKey;
-use magi_audio::device::{self, AudioIo};
-use magi_audio::drift::DriftTracker;
-use magi_audio::gate::{GateConfig, GateMode, VoiceGate};
-use magi_audio::jitter::{Decision, JitterBuffer, JitterConfig};
-use magi_audio::mixer::Mixer;
-use magi_audio::resample::RateConverter;
-use magi_audio::{FRAME_MS, FRAME_SAMPLES, SAMPLE_RATE_HZ};
-use magi_core::{Client, MemoryPinStore, PinDecision};
-use magi_proto::MediaHeader;
-use magi_proto::ids::{CageId, ClientMessageId, LineId};
-use magi_proto::ServerMessage;
+use seele_audio::device::{self, AudioIo};
+use seele_audio::drift::DriftTracker;
+use seele_audio::gate::{GateConfig, GateMode, VoiceGate};
+use seele_audio::jitter::{Decision, JitterBuffer, JitterConfig};
+use seele_audio::mixer::Mixer;
+use seele_audio::resample::RateConverter;
+use seele_audio::{FRAME_MS, FRAME_SAMPLES, SAMPLE_RATE_HZ};
+use seele_core::{Client, MemoryPinStore, PinDecision};
+use seele_proto::MediaHeader;
+use seele_proto::ids::{CageId, ClientMessageId, LineId};
+use seele_proto::ServerMessage;
 use shiguredo_opus::{
     Application, Decoder, DecoderConfig, Encoder, EncoderConfig, FrameDuration, InbandFec,
 };
@@ -199,7 +199,7 @@ async fn protocol_only(mut client: Client) -> Result<()> {
                         println!("  [{who} {author}] {body}");
                     }
                     Ok(ServerMessage::Telemetry(telemetry)) => {
-                        let sync = magi_proto::sync_ratio::raw(magi_proto::SyncInputs {
+                        let sync = seele_proto::sync_ratio::raw(seele_proto::SyncInputs {
                             rtt_ms: telemetry.rtt_ms,
                             jitter_ms: telemetry.jitter_ms,
                             loss_fraction: telemetry.loss_fraction,
@@ -247,7 +247,7 @@ async fn protocol_only(mut client: Client) -> Result<()> {
             }
             () = tokio::time::sleep(Duration::from_secs(5)) => {
                 // specs/02-protocolo.md: a Ping every 5 s. The Pong arrives
-                // through the event stream, which magi-core uses to measure the
+                // through the event stream, which seele-core uses to measure the
                 // round trip — one reader on the control stream.
                 if let Err(error) = client.send_ping().await {
                     println!("ping falhou: {error}");
@@ -292,7 +292,7 @@ async fn full_pipeline(client: Client, args: &Args) -> Result<()> {
     let mut io = io;
     let (mut captured, mut at_48k, mut pending) = (Vec::new(), Vec::new(), Vec::<f32>::new());
     let mut frame_i16 = vec![0_i16; FRAME_SAMPLES];
-    let mut datagram = vec![0_u8; magi_proto::MAX_DATAGRAM_LEN];
+    let mut datagram = vec![0_u8; seele_proto::MAX_DATAGRAM_LEN];
     let mut mixed = vec![0.0_f32; FRAME_SAMPLES];
     let mut for_device = Vec::new();
 
@@ -372,7 +372,7 @@ async fn full_pipeline(client: Client, args: &Args) -> Result<()> {
             };
             seq = seq.wrapping_add(1);
             let header = MediaHeader {
-                version: magi_proto::PROTOCOL_VERSION,
+                version: seele_proto::PROTOCOL_VERSION,
                 // The server refuses anything but the ssrc it assigned — G2.
                 ssrc: ssrc.get(),
                 seq,

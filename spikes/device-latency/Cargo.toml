@@ -6,7 +6,7 @@ edition = "2021"
 publish = false
 
 # Outside the main workspace on purpose. This is throwaway probe code (task M1.1)
-# and must not drag `cpal` into magi-audio before M1.3 puts it there deliberately.
+# and must not drag `cpal` into seele-audio before M1.3 puts it there deliberately.
 [workspace]
 
 [dependencies]

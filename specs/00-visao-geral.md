@@ -6,7 +6,7 @@ Ferramentas de voz para grupos pequenos convergiram para um formato só: aplica�
 
 ## O produto
 
-**MAGI** é um servidor de voz e texto auto-hospedado. O cliente principal, **Entry Plug** (`plug`), roda inteiramente no terminal. Há clientes gráficos para desktop e mobile que compartilham o mesmo núcleo.
+**SEELE** é um servidor de voz e texto auto-hospedado. O cliente principal, **Entry Plug** (`plug`), roda inteiramente no terminal. Há clientes gráficos para desktop e mobile que compartilham o mesmo núcleo.
 
 Três coisas definem o projeto:
 

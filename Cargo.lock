@@ -2675,126 +2675,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dae608c151f68243f2b000364e1f7b186d9c29845f7d2d85bd31b9ad77ad552b"
 
 [[package]]
-name = "magi-app"
-version = "0.0.0"
-dependencies = [
- "magi-ffi",
- "serde",
- "tauri",
- "tauri-build",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "magi-audio"
-version = "0.0.0"
-dependencies = [
- "assert_no_alloc",
- "audioadapter-buffers",
- "cpal",
- "criterion",
- "magi-proto",
- "rtrb",
- "rubato",
- "shiguredo_opus",
- "thiserror 2.0.19",
- "tracing",
-]
-
-[[package]]
-name = "magi-conformance"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "ed25519-dalek",
- "magi-audio",
- "magi-core",
- "magi-ffi",
- "magi-proto",
- "magi-server",
- "magi-tui",
- "rand 0.10.2",
- "ratatui",
- "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "magi-core"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "ed25519-dalek",
- "magi-audio",
- "magi-proto",
- "quinn",
- "rand 0.10.2",
- "rustls",
- "serde",
- "thiserror 2.0.19",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "magi-ffi"
-version = "0.0.0"
-dependencies = [
- "magi-core",
- "serde",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "magi-proto"
-version = "0.0.0"
-dependencies = [
- "postcard",
- "proptest",
- "serde",
- "sha2 0.11.0",
- "thiserror 2.0.19",
-]
-
-[[package]]
-name = "magi-server"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "ed25519-dalek",
- "magi-proto",
- "quinn",
- "rand 0.10.2",
- "rcgen",
- "rusqlite",
- "rustls",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.19",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "magi-tui"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "chrono",
- "crossterm",
- "ed25519-dalek",
- "magi-core",
- "rand 0.10.2",
- "ratatui",
- "tokio",
- "unicode-width",
-]
-
-[[package]]
 name = "markup5ever"
 version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4546,6 +4426,126 @@ checksum = "6ce2691df843ecc5d231c0b14ece2acc3efb62c0a398c7e1d875f3983ce020e3"
 dependencies = [
  "core-foundation-sys",
  "libc",
+]
+
+[[package]]
+name = "seele-app"
+version = "0.0.0"
+dependencies = [
+ "seele-ffi",
+ "serde",
+ "tauri",
+ "tauri-build",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "seele-audio"
+version = "0.0.0"
+dependencies = [
+ "assert_no_alloc",
+ "audioadapter-buffers",
+ "cpal",
+ "criterion",
+ "rtrb",
+ "rubato",
+ "seele-proto",
+ "shiguredo_opus",
+ "thiserror 2.0.19",
+ "tracing",
+]
+
+[[package]]
+name = "seele-conformance"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "ed25519-dalek",
+ "rand 0.10.2",
+ "ratatui",
+ "seele-audio",
+ "seele-core",
+ "seele-ffi",
+ "seele-proto",
+ "seele-server",
+ "seele-tui",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "seele-core"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "ed25519-dalek",
+ "quinn",
+ "rand 0.10.2",
+ "rustls",
+ "seele-audio",
+ "seele-proto",
+ "serde",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "seele-ffi"
+version = "0.0.0"
+dependencies = [
+ "seele-core",
+ "serde",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "seele-proto"
+version = "0.0.0"
+dependencies = [
+ "postcard",
+ "proptest",
+ "serde",
+ "sha2 0.11.0",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "seele-server"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "ed25519-dalek",
+ "quinn",
+ "rand 0.10.2",
+ "rcgen",
+ "rusqlite",
+ "rustls",
+ "seele-proto",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "seele-tui"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "crossterm",
+ "ed25519-dalek",
+ "rand 0.10.2",
+ "ratatui",
+ "seele-core",
+ "tokio",
+ "unicode-width",
 ]
 
 [[package]]

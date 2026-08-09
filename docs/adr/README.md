@@ -11,7 +11,7 @@ Formato e regra de criação em `specs/10-convencoes.md`: toda decisão marcada
 | [0003](0003-certificados-tofu.md) | TOFU como padrão de certificado | aceito por default | `01`, `08` — certificados |
 | [0004](0004-autenticacao-chave-publica.md) | Autenticação por chave pública Ed25519 | aceito por default | `08` — autenticação |
 | [0005](0005-porta-padrao.md) | Porta padrão 8383/UDP | **proposto** | `01` — porta |
-| [0006](0006-esquema-de-uri.md) | Esquema de URI `magi://` | **proposto** | — (lacuna encontrada no design) |
+| [0006](0006-esquema-de-uri.md) | Esquema de URI `seele://` | **proposto** | — (lacuna encontrada no design) |
 | [0007](0007-sem-dsp-externo-em-v1.md) | Sem DSP externo em v1 | aceito por default | `03` — AEC, AGC, supressão |
 | [0008](0008-binding-opus.md) | `shiguredo_opus` como binding do codec | **aceito** | `03` — binding do codec |
 | [0009](0009-orcamento-de-latencia.md) | Orçamento de latência boca-a-ouvido | **aceito** | — (contradição `00` × `03`) |

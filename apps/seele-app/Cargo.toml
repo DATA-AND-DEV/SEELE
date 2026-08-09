@@ -1,0 +1,27 @@
+[package]
+name = "seele-app"
+description = "The desktop client. A Tauri shell over seele-ffi. specs/06-clientes-gui.md."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# ADR 0002 and specs/06: the desktop shell sees `seele-ffi`, which sees
+# `seele-core`. Nothing here may reach past it — a Tauri command that names an
+# `ssrc` is protocol knowledge in the shell.
+[dependencies]
+seele-ffi = { path = "../../crates/seele-ffi" }
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "2", features = [] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "seele-app"
+path = "src/main.rs"

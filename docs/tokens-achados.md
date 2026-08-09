@@ -1,6 +1,6 @@
 # Tokens de design — achados ao congelar (M0.12)
 
-Ao reconciliar `design/magi-tokens.*` com o protótipo v2 e recalcular os índices
+Ao reconciliar `design/seele-tokens.*` com o protótipo v2 e recalcular os índices
 ANSI e o contraste, apareceram seis coisas. Registradas aqui porque quatro delas
 viram trabalho em M4.
 
@@ -11,7 +11,7 @@ Contraste por WCAG 2.1 sobre `negro-painel`.
 
 ## 1. O arquivo de tokens entregue tinha um índice ANSI errado
 
-Independente da questão v1 × v2: `magi-tokens.json` dizia `ansi256: 208` para o
+Independente da questão v1 × v2: `seele-tokens.json` dizia `ansi256: 208` para o
 laranja `#FF6B00`. O índice 208 é `#FF8700`; o vizinho correto é **202**
 (`#FF5F00`). O verde 84 e o vermelho 160 estavam certos para os valores do v1,
 mas mudam com o v2.
@@ -83,8 +83,8 @@ alerta ainda precisam de marcador textual definido. **Trabalho de M4.**
 
 ## Não adotado: a varredura animada do v2
 
-O protótipo v2 acrescentou `.magi-scan` (textura de scanline) e o keyframe
-`magiVarredura`, que translada continuamente. `specs/07` diz "sem transição
+O protótipo v2 acrescentou `.seele-scan` (textura de scanline) e o keyframe
+`seeleVarredura`, que translada continuamente. `specs/07` diz "sem transição
 decorativa" e "movimento é diagnóstico".
 
 Adotei a textura estática e **deixei a animação de fora**. Se você quiser a

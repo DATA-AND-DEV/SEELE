@@ -25,7 +25,7 @@ Pico de correlação entre 0,796 e 0,826 em todas as execuções.
 ### Resultado
 
 Medido primeiro em `cpal 0.16`, depois refeito em **`cpal 0.18`**, que é a versão
-que `magi-audio` usa. A versão da biblioteca importa mais do que se esperava.
+que `seele-audio` usa. A versão da biblioteca importa mais do que se esperava.
 
 | `cpal` | round-trip |
 |---|---|
@@ -109,7 +109,7 @@ o fone no microfone, ou use um cabo de loopback da saída para uma entrada.
 ## M1.4 — custo da conversão de taxa
 
 **Máquina:** MacBook Pro, Apple Silicon. Perfil release, `criterion`.
-`cargo bench --package magi-audio --bench opus_frame`
+`cargo bench --package seele-audio --bench opus_frame`
 
 Orçamento: 20 ms de tempo real por quadro, ou 20 000 µs.
 
@@ -125,7 +125,7 @@ barato** que converter, o que justifica a ramificação.
 
 ### Caminho completo, hardware real
 
-`cargo run --release --package magi-audio --example device_smoke`
+`cargo run --release --package seele-audio --example device_smoke`
 
 Nesta máquina os dois dispositivos estão a 48 kHz, então ambos os conversores
 entram em passthrough e o atraso de filtro é zero. Em 3 segundos: 144 896 quadros
@@ -150,7 +150,7 @@ ruído de fundo e só aparece como "o áudio parece um pouco pior".
 
 ## M1.6 — calibração do simulador de rede
 
-`cargo run --release --package magi-audio --example netsim_profiles`
+`cargo run --release --package seele-audio --example netsim_profiles`
 30 000 quadros (10 minutos, a mesma duração do soak de `specs/09-roadmap.md`),
 semente 20260807.
 
@@ -210,7 +210,7 @@ não de quadros.**
 
 A lacuna G5, medida.
 
-`cargo run --release --package magi-audio --example jitter_profiles`
+`cargo run --release --package seele-audio --example jitter_profiles`
 
 Um falante em rajadas — 25 quadros de fala, 50 de silêncio, 40 ciclos — sobre um
 link **perfeito**, que não descarta nada:
@@ -258,7 +258,7 @@ altera o comportamento sob perda, só para de mentir sobre silêncio.
 
 ## M1.8 — deriva de clock (risco R3)
 
-`cargo run --release --package magi-audio --example clock_drift`
+`cargo run --release --package seele-audio --example clock_drift`
 30 000 quadros (10 minutos), perfil `lan`, semente 20260807.
 
 | deriva | corrigido | medido | prof. @1min | prof. @9min | creep |
@@ -360,8 +360,8 @@ encolhe devagar — visível fora do teste unitário.
 ### Nota sobre o cabeçalho de mídia
 
 O harness é descartável, mas o **cabeçalho não é**: `specs/01-arquitetura.md`
-torna `magi-proto` dono de todo byte que cruza a rede. Ele foi para
-`crates/magi-proto/src/media.rs`, com 11 testes, layout fixado byte a byte
+torna `seele-proto` dono de todo byte que cruza a rede. Ele foi para
+`crates/seele-proto/src/media.rs`, com 11 testes, layout fixado byte a byte
 (round-trip sozinho passaria com os campos trocados) e alvo de fuzzing próprio:
 **70,8 milhões de execuções, zero crashes**, 7 casos novos no corpus.
 
@@ -424,9 +424,9 @@ segundos que nenhuma revisão de código teria pego.
 > Três clientes entram no mesmo Cage e conversam por voz através do servidor.
 > Cliente sem permissão é rejeitado. Fuzzing do parser sem crash.
 
-`cargo test --package magi-conformance` — oito testes, todos passando, em
+`cargo test --package seele-conformance` — oito testes, todos passando, em
 processo e em porta efêmera. Roda em CI numa máquina sem placa de som e sem
-segunda máquina, que é por que `magi-server` é biblioteca além de binário.
+segunda máquina, que é por que `seele-server` é biblioteca além de binário.
 
 | teste | o que prova |
 |---|---|
@@ -442,10 +442,10 @@ segunda máquina, que é por que `magi-server` é biblioteca além de binário.
 Fuzzing: 29,4 milhões de execuções no parser de controle e 70,8 milhões no de
 mídia, zero crashes — depois de o primeiro achar o bug de NaN.
 
-### `magid` rodando de verdade
+### `seeled` rodando de verdade
 
 ```
-magid listening on 127.0.0.1:8383
+seeled listening on 127.0.0.1:8383
 certificate fingerprint: d3acf4ac8ba8922d7a150ab28f375c95654a1caea42d287035eee53276e91778
 ```
 
@@ -454,10 +454,10 @@ Uma porta UDP, TLS 1.3 obrigatório, sem caminho em claro.
 ### Um crate novo, e por quê
 
 O teste de aceite precisa das duas pontas, e o ADR 0002 proíbe tanto
-`magi-server` quanto `magi-core` de depender do outro — com razão: o daemon não
+`seele-server` quanto `seele-core` de depender do outro — com razão: o daemon não
 pode linkar o cliente, e o cliente não pode linkar o daemon.
 
-Em vez de abrir um buraco na regra, criei **`magi-conformance`**: biblioteca
+Em vez de abrir um buraco na regra, criei **`seele-conformance`**: biblioteca
 vazia, todas as dependências são de desenvolvimento, e o guarda de dependência
 tem uma entrada explícita para ele com dois testes garantindo que a exceção **não
 vaza** para nenhum outro crate.

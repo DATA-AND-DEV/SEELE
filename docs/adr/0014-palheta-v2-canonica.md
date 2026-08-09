@@ -1,8 +1,8 @@
 # 0014 — Palheta v2 como canônica
 
 Status: aceito por default
-Contexto: o Claude Design entregou dois protótipos e um arquivo de tokens. `magi-tokens.*` estava em sincronia com o **v1**; o **v2**, artefato mais recente, revisou três cores. Duas palhetas concorrentes no mesmo repositório garantem que alguém construa contra a errada.
-Decisão: a palheta do v2 é canônica. `design/magi-tokens.json` e `.css` foram regenerados a partir dela, com índices ANSI 256 recalculados e contraste medido.
+Contexto: o Claude Design entregou dois protótipos e um arquivo de tokens. `seele-tokens.*` estava em sincronia com o **v1**; o **v2**, artefato mais recente, revisou três cores. Duas palhetas concorrentes no mesmo repositório garantem que alguém construa contra a errada.
+Decisão: a palheta do v2 é canônica. `design/seele-tokens.json` e `.css` foram regenerados a partir dela, com índices ANSI 256 recalculados e contraste medido.
 
 | token | v1 | v2 |
 |---|---|---|
@@ -20,6 +20,6 @@ Consequências:
 
 Quatro achados viraram trabalho de M4 e estão em `docs/tokens-achados.md`: `osso-apagado` reprovando AA para texto pequeno, painel e fundo colapsando no mesmo ansi 232, linhas abaixo do critério de componente não textual, e a ausência de modo sem cor.
 
-Não adotado: a varredura animada do v2 (`magiVarredura`), por contrariar "movimento é diagnóstico" de `specs/07`. A textura estática de scanline foi mantida.
+Não adotado: a varredura animada do v2 (`seeleVarredura`), por contrariar "movimento é diagnóstico" de `specs/07`. A textura estática de scanline foi mantida.
 
 Custo de reverter: **baixo** agora, **médio** depois que M4 começar a construir telas.

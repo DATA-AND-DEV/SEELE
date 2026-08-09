@@ -17,7 +17,7 @@ temática vem sempre acompanhada do dado concreto — `Distúrbio harmônico · 
 | Conceito | pt-BR | en | Identificador Rust |
 |---|---|---|---|
 | Instância de servidor | Dogma Central | Central Dogma | `Dogma` |
-| Daemon | `magid` | `magid` | `magid` |
+| Daemon | `seeled` | `seeled` | `seeled` |
 | Cliente | Entry Plug · `plug` | Entry Plug · `plug` | `plug` |
 | Canal de voz | Cage | Cage | `Cage`, `CageId` |
 | Canal de texto | Linha | Line | `Line`, `LineId` |
@@ -110,7 +110,7 @@ A forma canônica é `PatternBlue`, não `BluePattern` — a exibição é
 
 ## Permissões
 
-`specs/04-servidor-magi.md`, modelo enumerado, sem sistema de expressão.
+`specs/04-servidor-seele.md`, modelo enumerado, sem sistema de expressão.
 
 | pt-BR | Identificador |
 |---|---|

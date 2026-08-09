@@ -11,12 +11,12 @@ nickname belongs to a different identity
 
 Isso é exatamente a proteção que o servidor deve oferecer, e exatamente a resposta errada para alguém reabrindo o próprio cliente. Foi encontrado rodando o `plug` duas vezes seguidas — a segunda execução não entra. O mesmo raciocínio vale para os pins: o ADR 0003 é confiança no **primeiro** uso, e um `MemoryPinStore` faz de toda conexão um primeiro uso, o que significa que o aviso que interessa — a chave mudou — nunca dispara.
 
-Decisão: gravar a identidade e os pins em disco, em `$MAGI_HOME` (ou `$XDG_CONFIG_HOME/magi`, ou `~/.config/magi`).
+Decisão: gravar a identidade e os pins em disco, em `$SEELE_HOME` (ou `$XDG_CONFIG_HOME/seele`, ou `~/.config/seele`).
 
 - `identity.key` — os 32 bytes crus da chave, modo `0600`, com a permissão aplicada **na criação do arquivo** e não depois. Uma chave privada legível por todos pela largura de uma syscall foi legível por todos.
 - `pins` — uma linha `host impressão` por servidor, texto puro. O formato é legível de propósito: quem foi avisado de que a chave do servidor mudou precisa conseguir abrir o arquivo e comparar a olho. Um formato binário transformaria isso numa conversa de suporte.
 
-`$MAGI_HOME` vem primeiro na ordem justamente para que dois clientes na mesma máquina possam ser dois pilotos — que é o que testar as duas pontas de uma conversa exige.
+`$SEELE_HOME` vem primeiro na ordem justamente para que dois clientes na mesma máquina possam ser dois pilotos — que é o que testar as duas pontas de uma conversa exige.
 
 Alternativas:
 
@@ -32,4 +32,4 @@ Consequências:
 - Um arquivo de pins corrompido custa um novo primeiro contato, não uma falha de arranque. Recusar abrir um cliente de conversa por causa de um cache ilegível seria a troca pior.
 - No Windows a proteção é a ACL herdada do diretório do perfil, que é mais fraca que o modo Unix. Registrado, não resolvido.
 
-Custo de reverter: **baixo** para o mecanismo — `magi-core::identity` é um módulo com duas funções e um `PinStore`. **Alto** para o formato, assim que existir um usuário: mudar o layout do arquivo depois de distribuído exige migração, e a coisa que migra é a única prova de quem a pessoa é.
+Custo de reverter: **baixo** para o mecanismo — `seele-core::identity` é um módulo com duas funções e um `PinStore`. **Alto** para o formato, assim que existir um usuário: mudar o layout do arquivo depois de distribuído exige migração, e a coisa que migra é a única prova de quem a pessoa é.

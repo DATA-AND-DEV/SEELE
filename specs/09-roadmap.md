@@ -35,7 +35,7 @@ Os dois números foram precisados depois de medir:
 - **70 ms**, não 60. Ver a nota em `00-visao-geral.md` e o orçamento por estágio
   em `docs/adr/0009-orcamento-de-latencia.md`.
 - **Em rajada**, não independente. Perda real vem em corridas, e o modelo
-  Gilbert-Elliott de `magi_audio::netsim` com rajada média de 4 quadros produz
+  Gilbert-Elliott de `seele_audio::netsim` com rajada média de 4 quadros produz
   buracos de até 480 ms — enquanto o PLC do Opus cobre 20 ms. "Inteligível com
   5% de perda" portanto significa: inteligível **apesar de** interrupções de meio
   segundo. É o teste mais duro e o que se parece com Wi-Fi e rede móvel reais.
@@ -46,9 +46,9 @@ Se este milestone escorregar muito, o escopo do projeto precisa ser revisto — 
 
 ## M2 — Protocolo e servidor mínimo
 
-- `magi-proto` com tipos, serialização e versionamento.
+- `seele-proto` com tipos, serialização e versionamento.
 - Conexão QUIC via `quinn`, handshake completo, PADRÃO LARANJA → AZUL.
-- `magid` com um Cage fixo, encaminhamento de datagrams, sem persistência.
+- `seeled` com um Cage fixo, encaminhamento de datagrams, sem persistência.
 - Cliente de linha de comando feio, sem TUI, só para exercitar o protocolo.
 
 **Aceite:** três clientes entram no mesmo Cage e conversam por voz através do servidor. Cliente sem permissão é rejeitado. Fuzzing do parser sem crash.
@@ -85,7 +85,7 @@ O primeiro milestone com o produto de verdade.
 
 ## M5 — Cliente desktop
 
-- Tauri sobre `magi-ffi`.
+- Tauri sobre `seele-ffi`.
 - Implementação do design entregue pelo Claude Design.
 - Paridade funcional com a TUI.
 - Instaladores para os três SOs.

@@ -17,13 +17,13 @@ porque a matriz de três SOs em CI nunca executou.
 Em cada máquina:
 
 ```sh
-cargo build --release --bin magid --bin plug
+cargo build --release --bin seeled --bin plug
 ```
 
 Se a máquina tiver interface gráfica e você quiser testar o app junto:
 
 ```sh
-cargo build --release -p magi-app
+cargo build --release -p seele-app
 ```
 
 ---
@@ -33,13 +33,13 @@ cargo build --release -p magi-app
 Na máquina A:
 
 ```sh
-./target/release/magid 0.0.0.0:8383
+./target/release/seeled 0.0.0.0:8383
 ```
 
 Ele imprime três coisas que importam:
 
 ```
-magid listening on 0.0.0.0:8383
+seeled listening on 0.0.0.0:8383
 
 na outra máquina:
   plug --server 192.168.x.x:8383
@@ -51,7 +51,7 @@ certificate fingerprint: 50217d68c6...
 cliente vai fixá-la no primeiro contato e recusar a conexão em silêncio se ela
 mudar depois.
 
-Se a linha "na outra máquina" não aparecer, o `magid` não achou um endereço de
+Se a linha "na outra máquina" não aparecer, o `seeled` não achou um endereço de
 rede — provavelmente está sem rede, ou só em loopback.
 
 ### Firewall
@@ -61,7 +61,7 @@ aqui, porque a maioria das regras que as pessoas escrevem de cabeça é TCP.
 
 - **macOS:** na primeira execução o sistema pergunta. Aceite.
 - **Linux:** `sudo ufw allow 8383/udp`, ou o equivalente do seu firewall.
-- **Windows:** `New-NetFirewallRule -DisplayName MAGI -Direction Inbound -Protocol UDP -LocalPort 8383 -Action Allow` num PowerShell de administrador.
+- **Windows:** `New-NetFirewallRule -DisplayName SEELE -Direction Inbound -Protocol UDP -LocalPort 8383 -Action Allow` num PowerShell de administrador.
 
 Redes de convidado e alguns pontos de acesso isolam clientes entre si. Se nada
 conectar e o firewall estiver liberado, é a suspeita seguinte.
@@ -75,7 +75,7 @@ conectar e o firewall estiver liberado, é a suspeita seguinte.
 ```
 
 Na primeira vez o cliente mostra `PRIMEIRO CONTATO — CHAVE FIXADA` com uma
-impressão digital. **Confira contra a que o `magid` imprimiu.** Se conferir, é
+impressão digital. **Confira contra a que o `seeled` imprimiu.** Se conferir, é
 esse servidor. Se não conferir, alguém está no meio — e é exatamente para esse
 momento que o ADR 0003 existe.
 
@@ -85,9 +85,9 @@ Conecte também na máquina A, com **apelido diferente**:
 ./target/release/plug --server 127.0.0.1:8383 --nick outronome
 ```
 
-> Dois clientes com o mesmo `$MAGI_HOME` são **a mesma pessoa** — o CASPER
+> Dois clientes com o mesmo `$SEELE_HOME` são **a mesma pessoa** — o CASPER
 > vincula o apelido à identidade que o reivindicou (ADR 0017). Para serem dois
-> pilotos na mesma máquina, `MAGI_HOME=~/.magi-outro`.
+> pilotos na mesma máquina, `SEELE_HOME=~/.seele-outro`.
 
 ---
 
@@ -188,7 +188,7 @@ lado e meça o intervalo entre as palmas no áudio. Divida por dois. Vale ±30 m
 **Boa.** Meça a metade local em cada máquina com o rig do M1.2:
 
 ```sh
-cargo run --release --example latencia -p magi-audio
+cargo run --release --example latencia -p seele-audio
 ```
 
 Rode duas vezes: uma com cabo da saída para a entrada (mede a máquina) e uma no
@@ -203,14 +203,14 @@ medições de M1.
 
 ## 6 · Se o app gráfico estiver na jogada
 
-Rode o `magi-app` numa das máquinas em vez do `plug` e repita as seções 3 e 4. A
+Rode o `seele-app` numa das máquinas em vez do `plug` e repita as seções 3 e 4. A
 composição é a mesma de propósito: mesmos três painéis, telemetria no rodapé.
 
 Aqui a barra de espaço segura de verdade — a janela relata soltura.
 
 O que checar a mais:
 
-- o app e o `plug` no mesmo `$MAGI_HOME` são o mesmo piloto (retomada de sessão)
+- o app e o `plug` no mesmo `$SEELE_HOME` são o mesmo piloto (retomada de sessão)
 - o histórico aparece ao abrir a Linha, com autor e horário corretos
 - o deslizante de volume, ao apontar uma linha do roster, muda o que se ouve
 
@@ -247,4 +247,4 @@ os números reais devem ficar ao lado delas. Onde a realidade divergir das specs
 pode ser feita depois disto.
 
 Se algo falhar, o mais útil é: qual seção, o que a barra de telemetria mostrava,
-e o que o `magid` imprimiu no terminal dele naquele momento.
+e o que o `seeled` imprimiu no terminal dele naquele momento.

@@ -1,0 +1,73 @@
+/* SEELE · Entry Plug — tokens de design (palheta v2, congelada em M0.12)
+   Fonte: design/Entry Plug v2.dc.html. Ver ADR 0014 e docs/tokens-achados.md.
+   Célula de terminal: 8px × 16px. Todo espaçamento é múltiplo de célula.
+   Zero border-radius. Zero sombra. */
+
+:root {
+  /* ---- cor ----
+     O índice ANSI 256 ao lado de cada cor é o mesmo do seele-tokens.json e é o
+     que a TUI usa ao degradar de truecolor. Calculado por vizinho mais próximo
+     em CIELAB, restrito a 16–255. Contraste medido sobre --seele-negro-painel. */
+  --seele-negro-absoluto: #050403;   /* ansi 232 · fundo. nunca cinza-carvão neutro */
+  --seele-negro-painel:   #0A0806;   /* ansi 232 · superfície de painel */
+  --seele-linha:          #241F19;   /* ansi 234 · borda 1px padrão */
+  --seele-linha-forte:    #3A322A;   /* ansi 236 · borda de painel ativo / régua */
+  --seele-osso:           #EAE3CF;   /* ansi 254 · texto corrido · 15,60:1 AAA */
+  --seele-osso-apagado:   #7A7061;   /* ansi 243 · rótulo secundário ·  4,11:1 só texto grande */
+  --seele-laranja-nerv:   #F2521F;   /* ansi 202 · acento institucional ·  5,71:1 AA */
+  --seele-laranja-fraco:  #331704;   /* ansi 234 · preenchimento laranja */
+  --seele-vermelho-alerta:#FF1A1A;   /* ansi 196 · EXCLUSIVO alerta e queda ·  5,16:1 AA */
+  --seele-vermelho-fraco: #2C0508;   /* ansi 233 */
+  --seele-fosforo:        #6BFFB6;   /* ansi  85 · telemetria e nominal · 15,81:1 AAA */
+  --seele-fosforo-fraco:  #06220F;   /* ansi 234 */
+  --seele-padrao-azul:    #2F8FE0;   /* ansi  32 · PADRÃO: AZUL ·  5,83:1 AA */
+  --seele-azul-fraco:     #04182B;   /* ansi 233 */
+
+  /* ---- faixas da Taxa de Sincronização (specs/07) ----
+     Nunca transmitidas só por cor: o número acompanha sempre (specs/05). */
+  --seele-sync-nominal:   var(--seele-fosforo);        /* >= 90 */
+  --seele-sync-aceitavel: var(--seele-osso);           /* 70–89 */
+  --seele-sync-degradado: var(--seele-laranja-nerv);   /* 40–69 */
+  --seele-sync-critico:   var(--seele-vermelho-alerta);/* < 40  */
+
+  /* ---- tipografia ---- */
+  --seele-display: "Saira Condensed", "Arial Narrow", sans-serif; /* cartelas, cabeçalhos */
+  --seele-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace; /* todo dado */
+  --seele-jp: "Noto Sans JP", "Hiragino Kaku Gothic ProN", sans-serif; /* acento em kanji */
+
+  --seele-cartela: 700;   /* peso de cartela */
+  --seele-tracking-cartela: 0.02em;
+  --seele-tracking-rotulo: 0.22em;
+
+  --seele-t-cartela: 56px;
+  --seele-t-titulo: 28px;
+  --seele-t-secao: 18px;
+  --seele-t-corpo: 14px;
+  --seele-t-dado: 13px;
+  --seele-t-rotulo: 10px;   /* uppercase, tracking largo */
+  --seele-t-micro: 9px;     /* réguas e coordenadas */
+
+  /* ---- espaçamento: múltiplos de célula ---- */
+  --seele-celula-x: 8px;
+  --seele-celula-y: 16px;
+  --seele-e1: 8px;
+  --seele-e2: 16px;
+  --seele-e3: 24px;
+  --seele-e4: 32px;
+  --seele-e6: 48px;
+  --seele-e8: 64px;
+
+  /* ---- borda ---- */
+  --seele-b: 1px;
+  --seele-b-forte: 2px;
+  --seele-raio: 0;
+  --seele-sombra: none;
+}
+
+/* specs/07: movimento é diagnóstico, nunca decorativo. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --seele-respiro-sync: none;
+    --seele-pulso-fala: none;
+  }
+}

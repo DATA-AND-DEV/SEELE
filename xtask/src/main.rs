@@ -1,4 +1,4 @@
-//! Repository automation for the MAGI workspace.
+//! Repository automation for the SEELE workspace.
 //!
 //! Run with `cargo xtask <command>`. This crate is tooling — it is never shipped
 //! and is not part of the product.

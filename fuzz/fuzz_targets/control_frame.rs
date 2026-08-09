@@ -10,7 +10,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use magi_proto::control::{decode, encode, ClientMessage, ServerMessage, MAX_FRAME_LEN};
+use seele_proto::control::{decode, encode, ClientMessage, ServerMessage, MAX_FRAME_LEN};
 
 fuzz_target!(|data: &[u8]| {
     // Both directions: a client parses server frames and a server parses client

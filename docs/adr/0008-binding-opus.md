@@ -20,7 +20,7 @@ Consequências:
 - Mais fácil: compila **sem workaround nenhum** nos três SOs — o crate vendoriza o próprio cmake (`shiguredo_cmake`), então nem cmake de sistema é pré-requisito. `.cargo/config.toml` não precisa mais de `CMAKE_POLICY_VERSION_MINIMUM`. `decode_plc()` e `decode_fec()` são métodos de primeira classe, exatamente o que o jitter buffer de `03` chama.
 - Mais difícil: `encode`/`decode`/`decode_plc` retornam `Vec`, ou seja **alocam por quadro**. Isso não viola `specs/03-audio.md` — a regra de zero alocação vale para o callback do `cpal`, e o codec roda na thread de processamento. Mas são 2 alocações × 50 quadros/s × N fontes, e `specs/10-convencoes.md` diz que regressão no caminho de áudio é bug.
 
-  **Medido em M0.10, e o plano B está aposentado.** `cargo bench --package magi-audio --bench opus_frame`, Apple Silicon, perfil release:
+  **Medido em M0.10, e o plano B está aposentado.** `cargo bench --package seele-audio --bench opus_frame`, Apple Silicon, perfil release:
 
   | | por quadro | % dos 20 ms de tempo real |
   |---|---|---|
@@ -33,4 +33,4 @@ Consequências:
 
 Medição obtida de brinde em `M0.4`, e que nenhuma spec registra: **lookahead algorítmico do encoder = 312 amostras = 6,50 ms**. Entra no orçamento do ADR 0009.
 
-Custo de reverter: **baixo**. A superfície usada é pequena e está isolada em `magi-audio`.
+Custo de reverter: **baixo**. A superfície usada é pequena e está isolada em `seele-audio`.

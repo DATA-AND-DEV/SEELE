@@ -22,6 +22,6 @@
 /spikes/*/target/
 
 # A Dogma started for local testing writes its CASPER database here.
-magi.db
-magi.db-wal
-magi.db-shm
+seele.db
+seele.db-wal
+seele.db-shm

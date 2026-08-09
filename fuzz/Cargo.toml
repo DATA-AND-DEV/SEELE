@@ -1,6 +1,6 @@
 [package]
-name = "magi-fuzz"
-description = "Fuzz targets for the untrusted-input surface of magi-proto."
+name = "seele-fuzz"
+description = "Fuzz targets for the untrusted-input surface of seele-proto."
 version = "0.0.0"
 edition = "2021"
 publish = false
@@ -14,7 +14,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-magi-proto = { path = "../crates/magi-proto" }
+seele-proto = { path = "../crates/seele-proto" }
 
 [[bin]]
 name = "version_negotiation"

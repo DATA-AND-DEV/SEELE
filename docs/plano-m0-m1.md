@@ -64,17 +64,17 @@ Tudo o mais de M1 permanece em M1.
 | ID | Tarefa | Depende de | Esforço | Destino |
 |---|---|---|---|---|
 | **M0.1** | Workspace: `git init`, `Cargo.toml` raiz, crates de `01` como stubs, `rust-toolchain.toml` com MSRV fixado, `.gitignore` | — | 2 | SOBREVIVE |
-| **M0.2** | Baseline de lint: `rustfmt` padrão, `clippy -D warnings`, `#![forbid(unsafe_code)]` em todos os crates menos `magi-ffi` e o binding de áudio, `deny.toml`, `cargo audit` | M0.1 | 2 | SOBREVIVE |
+| **M0.2** | Baseline de lint: `rustfmt` padrão, `clippy -D warnings`, `#![forbid(unsafe_code)]` em todos os crates menos `seele-ffi` e o binding de áudio, `deny.toml`, `cargo audit` | M0.1 | 2 | SOBREVIVE |
 | **M0.3** | CI matriz macOS · Windows · Linux: build, fmt, clippy, test. Runners pinados, cache de dependências | M0.2 | 3 | SOBREVIVE |
 | **M0.4** | **Deps nativas no CI** — libopus vendorizado/estático nos três SOs, `libasound2-dev` no Linux, + teste de round-trip Opus provando o toolchain. *Realocado de M1* | M0.3 | 5 | SOBREVIVE |
 | **M0.5** | Guarda da regra de dependência de `01`: step de CI que falha se `proto` depender de alguém, se `audio` depender de `core`, etc. | M0.1 | 1 | SOBREVIVE |
 | **M0.6** | Infra de ADR: `docs/adr/0000-template.md` + índice, no formato de `10` | — | 1 | SOBREVIVE |
 | **M0.7** | **Glossário bilíngue normativo completo** — termo em inglês para cada linha de `07`. Bloqueia nomes de tipo, de módulo e de variante de erro. *Ver lacuna G3* | M0.6 | 2 | SOBREVIVE |
 | **M0.8** | ADRs das decisões travantes: serialização · certificados · autenticação (direção) · porta · política de DSP · orçamento de latência · binding Opus | M0.6 | 3 | SOBREVIVE |
-| **M0.9** | ADR de mecanismo de i18n + fronteira `enum de erro → texto` estabelecida em `magi-proto`. *Ver lacuna G4* | M0.6 | 2 | SOBREVIVE |
-| **M0.10** | Esqueletos de teste: `proptest`, `criterion`, alvo `cargo-fuzz` placeholder em `magi-proto` | M0.3 | 2 | SOBREVIVE |
+| **M0.9** | ADR de mecanismo de i18n + fronteira `enum de erro → texto` estabelecida em `seele-proto`. *Ver lacuna G4* | M0.6 | 2 | SOBREVIVE |
+| **M0.10** | Esqueletos de teste: `proptest`, `criterion`, alvo `cargo-fuzz` placeholder em `seele-proto` | M0.3 | 2 | SOBREVIVE |
 | **M0.11** | **Rigs de teste**: segunda máquina em LAN, caixa Windows, caixa Linux com PipeWire, dois headsets, cabo de loopback. Checklist de plataforma versionado | — | 3 | FERRAMENTA |
-| **M0.12** | **Congelar tokens de design**: reconciliar `magi-tokens.*` com o protótipo v2, recalcular mapeamento ANSI 256/16, verificar contraste. *Ver seção 6* | M0.7 | 2 | SOBREVIVE |
+| **M0.12** | **Congelar tokens de design**: reconciliar `seele-tokens.*` com o protótipo v2, recalcular mapeamento ANSI 256/16, verificar contraste. *Ver seção 6* | M0.7 | 2 | SOBREVIVE |
 
 **Comece por `M0.11`.** É a única tarefa com prazo de entrega fora do seu controle e é pré-requisito duro do aceite de M1. Nenhuma spec a menciona.
 
@@ -103,7 +103,7 @@ Conforme `09`, mais o que este plano acrescenta:
 
 ### Nota de escopo: não criar crates vazios
 
-`01` descreve seis crates. Em M0 crie apenas `magi-proto`, `magi-audio` e o stub de `magi-core`. Os outros três nascem quando o primeiro código deles existir. Crate vazio custa tempo de CI em toda build e convida a colocar código no lugar errado por já haver uma gaveta esperando. Ver risco R10.
+`01` descreve seis crates. Em M0 crie apenas `seele-proto`, `seele-audio` e o stub de `seele-core`. Os outros três nascem quando o primeiro código deles existir. Crate vazio custa tempo de CI em toda build e convida a colocar código no lugar errado por já haver uma gaveta esperando. Ver risco R10.
 
 ---
 
@@ -144,21 +144,21 @@ Se o round-trip **só de dispositivo** já passar de ~35 ms com buffers padrão,
 
 **O mixer entra em M1 mesmo sem `09` pedir.** `09` exige duas máquinas em M1; `03` especifica mixer. Incluo `M1.12` porque o aceite de M2 pede três clientes conversando, e construir mixer dentro de M2 seria empurrar código de áudio para o milestone de protocolo — exatamente o que a ordem do roadmap quer evitar.
 
-### Como M1 protege a fronteira `magi-core` ↔ cascas
+### Como M1 protege a fronteira `seele-core` ↔ cascas
 
 Não é lembrete; são regras verificáveis nas tarefas acima:
 
-- `M1.7` e `M1.12` vivem em `magi-audio`, que por `01` só pode depender de `magi-proto`. O guarda de CI (`M0.5`) transforma a regra em build vermelho.
-- `M1.10` entrega métricas como **dado puro**. Nenhuma formatação, nenhuma cor, nenhuma faixa `nominal/degradado` — as faixas de `07` são decisão de casca. Se aparecer um `to_string()` temático dentro de `magi-audio`, é erro de arquitetura, não detalhe.
-- `M1.13` emite `speaking: bool`. Qual tecla aciona PTT não é assunto de `magi-audio`.
+- `M1.7` e `M1.12` vivem em `seele-audio`, que por `01` só pode depender de `seele-proto`. O guarda de CI (`M0.5`) transforma a regra em build vermelho.
+- `M1.10` entrega métricas como **dado puro**. Nenhuma formatação, nenhuma cor, nenhuma faixa `nominal/degradado` — as faixas de `07` são decisão de casca. Se aparecer um `to_string()` temático dentro de `seele-audio`, é erro de arquitetura, não detalhe.
+- `M1.13` emite `speaking: bool`. Qual tecla aciona PTT não é assunto de `seele-audio`.
 
 ### Como o tema entra já em M0/M1
 
 O tema é vocabulário de produto, então ele custa esforço agora, não em M4:
 
 - `M0.7` fecha o glossário nas duas línguas **antes** de qualquer tipo ser nomeado.
-- Crates e binários já nascem com os nomes canônicos: `magid`, `plug`, `magi-*`.
-- Variantes de erro em `magi-proto` nascem temáticas (`BluePatternNotEstablished`, não `AuthFailed`) e nascem como `enum` — nunca `String` — porque `02` diz que a casca decide a apresentação e `10` exige i18n desde o início. Renomear isso depois de M2 custa uma versão de protocolo.
+- Crates e binários já nascem com os nomes canônicos: `seeled`, `plug`, `seele-*`.
+- Variantes de erro em `seele-proto` nascem temáticas (`BluePatternNotEstablished`, não `AuthFailed`) e nascem como `enum` — nunca `String` — porque `02` diz que a casca decide a apresentação e `10` exige i18n desde o início. Renomear isso depois de M2 custa uma versão de protocolo.
 
 ### Aceite de M1
 
@@ -234,7 +234,7 @@ Coluna **Custo de reverter** = quanto custa mudar de ideia depois desse ponto.
 
 **D6 — Serialização: `postcard` vs `prost`.**
 
-> **Recomendação:** `postcard`, com todo o encoding confinado a um módulo de `magi-proto` e os tipos de domínio sem nenhum atributo específico do formato.
+> **Recomendação:** `postcard`, com todo o encoding confinado a um módulo de `seele-proto` e os tipos de domínio sem nenhum atributo específico do formato.
 >
 > **Motivo:** concordo com `02`. Clientes de terceiros são não-objetivo declarado em `00`; pagar boilerplate de `.proto` por um objetivo que a spec explicitamente rejeita é caro. O isolamento torna a troca mecânica se a premissa mudar.
 
@@ -248,7 +248,7 @@ Coluna **Custo de reverter** = quanto custa mudar de ideia depois desse ponto.
 
 > **Recomendação:** fechar a *direção* agora (Ed25519 + token de convite de uso único; senha como fallback opcional do operador) e implementar em M2/M3.
 >
-> **Motivo:** `09` coloca "mecanismo de autenticação" no aceite de M0; `08` diz "escolher em M2" (C2). A direção precisa vencer em M0 porque determina se `magi-proto` carrega o formato desafio-resposta e se o schema de CASPER tem colunas de senha — decidir depois força bump de versão de protocolo. A *implementação* pode esperar M2.
+> **Motivo:** `09` coloca "mecanismo de autenticação" no aceite de M0; `08` diz "escolher em M2" (C2). A direção precisa vencer em M0 porque determina se `seele-proto` carrega o formato desafio-resposta e se o schema de CASPER tem colunas de senha — decidir depois força bump de versão de protocolo. A *implementação* pode esperar M2.
 >
 > **Sinal de apoio:** o protótipo de design já assume esse caminho — a tela `02 AUTENTICAÇÃO` tem campo `ed25519-0x8F41C2`.
 >
@@ -337,7 +337,7 @@ Uma alocação que entra no callback do `cpal` seis meses depois produz estalo q
 
 ### R8 — Erosão da fronteira núcleo/casca
 
-Probabilidade **baixa em M0/M1**, porque nenhuma casca existe ainda — mas o código que sobrevive de M1 é justamente o que será consumido por elas. O risco real é escrever `magi-audio` já assumindo um consumidor.
+Probabilidade **baixa em M0/M1**, porque nenhuma casca existe ainda — mas o código que sobrevive de M1 é justamente o que será consumido por elas. O risco real é escrever `seele-audio` já assumindo um consumidor.
 **Mitigação:** `M1.10` como dado puro; `M0.5` como guarda automático.
 
 ### R9 — Escopo do tema
@@ -359,9 +359,9 @@ O arquivo `Aguardando respostas.zip` foi extraído em `design/`. **Isto resolve 
 
 | Arquivo | Conteúdo |
 |---|---|
-| `magi-tokens.json` / `.css` | Tokens de cor, tipografia, espaçamento, borda, movimento. **Inclui mapeamento ANSI 256 e ANSI 16** |
+| `seele-tokens.json` / `.css` | Tokens de cor, tipografia, espaçamento, borda, movimento. **Inclui mapeamento ANSI 256 e ANSI 16** |
 | `Entry Plug.dc.html` | Protótipo interativo, v1 — 9 telas |
-| `Entry Plug v2.dc.html` | Protótipo interativo, v2 — mesmas 9 telas, palheta revisada, painel MAGI, scanline |
+| `Entry Plug v2.dc.html` | Protótipo interativo, v2 — mesmas 9 telas, palheta revisada, painel SEELE, scanline |
 | `support.js`, `_ds/` | Runtime do Claude Design. Não é produto |
 | `uploads/*.png` | Frame do anime usado como referência de mood |
 
@@ -373,13 +373,13 @@ Isso cobre os seis estados visuais exigidos por `05`, mais Terminal Dogma, mobil
 
 O protótipo **não é só a casca gráfica**. Ele traz um renderizador de grid de células — funções `zip`, `row`, `rule`, `cel`, `pd`, `pl`, `esmaecer`, `sobrepor` — que desenha as mesmas telas em modo terminal, com box-drawing e 256 cores ANSI. Ou seja: o design já respondeu a pergunta que `06` exige de toda tela gráfica, *"como isso ficaria em 80×24 monocromático?"*, e respondeu em código.
 
-Consequência prática: **os tokens são a fonte para as duas cascas**, não só para o Tauri. `magi-tokens.json` já traz `ansi256` e `ansi16` por cor, que é exatamente o que `05` precisa para a degradação truecolor → 256 → 16.
+Consequência prática: **os tokens são a fonte para as duas cascas**, não só para o Tauri. `seele-tokens.json` já traz `ansi256` e `ansi16` por cor, que é exatamente o que `05` precisa para a degradação truecolor → 256 → 16.
 
 ### Achados que precisam de decisão
 
 **D11 · A palheta dos tokens está desatualizada em relação ao v2.**
 
-| Token | `magi-tokens.*` e v1 | protótipo v2 |
+| Token | `seele-tokens.*` e v1 | protótipo v2 |
 |---|---|---|
 | `laranja-nerv` | `#FF6B00` | `#F2521F` |
 | `vermelho-alerta` | `#E01B24` | `#FF1A1A` |
@@ -387,24 +387,24 @@ Consequência prática: **os tokens são a fonte para as duas cascas**, não só
 
 As demais cores (osso, linha, azul, negros) são idênticas. v2 é o artefato mais recente e a revisão parece deliberada — laranja mais avermelhado, vermelho mais puro, fósforo mais claro.
 
-> **Recomendação:** adotar a palheta do v2 e **regenerar** `magi-tokens.json`/`.css` a partir dela, recalculando os índices `ansi256` e `ansi16` — os atuais foram derivados dos valores do v1 e não valem para o v2. Verificar contraste do osso sobre negro-painel no processo.
+> **Recomendação:** adotar a palheta do v2 e **regenerar** `seele-tokens.json`/`.css` a partir dela, recalculando os índices `ansi256` e `ansi16` — os atuais foram derivados dos valores do v1 e não valem para o v2. Verificar contraste do osso sobre negro-painel no processo.
 >
 > **Motivo:** duas palhetas concorrentes no repositório garantem que alguém construa contra a errada. Custa duas horas agora e um retrabalho de tela inteira em M4. É a tarefa `M0.12`.
 
 **C9 · O protótipo usa a porta `7743`, a spec usa `8383`.**
-A tela de autenticação mostra `magi://toquio-3.dogma.central:7743`. `01` e `04` dizem `8383`. Decisão D10.
+A tela de autenticação mostra `seele://toquio-3.dogma.central:7743`. `01` e `04` dizem `8383`. Decisão D10.
 
-**Esquema de URI `magi://` não existe em spec nenhuma.**
+**Esquema de URI `seele://` não existe em spec nenhuma.**
 O protótipo o usa como forma canônica de endereçar um Dogma. É boa ideia — `:conectar <host>` de `05` fica mais claro com um esquema explícito — mas precisa ser especificado (host, porta, path opcional para o Cage) antes de M2. Adicionar a `02`.
 
 **A scanline do v2 tende a violar `07`.**
-v2 adiciona `.magi-scan` (overlay de linhas) e um keyframe `magiVarredura` que translada continuamente. `07` diz *"sem transição decorativa"* e *"movimento é diagnóstico"*. Um overlay estático de scanline é textura e passa; uma varredura em movimento perpétuo é decoração e não passa pela própria regra do tema. Recomendação: manter a textura, cortar a animação — ou aceitar explicitamente como exceção única e registrar.
+v2 adiciona `.seele-scan` (overlay de linhas) e um keyframe `seeleVarredura` que translada continuamente. `07` diz *"sem transição decorativa"* e *"movimento é diagnóstico"*. Um overlay estático de scanline é textura e passa; uma varredura em movimento perpétuo é decoração e não passa pela própria regra do tema. Recomendação: manter a textura, cortar a animação — ou aceitar explicitamente como exceção única e registrar.
 
 **`_ds/_ds_manifest.json` é lixo de outro projeto.**
-Lista cards `05-camera-card.html`, `06-tabela-animais.html`, `11-pagina-cameras.html` — metadados de um design system que não é o MAGI. `components`, `tokens` e `themes` estão vazios. Ignorar; não é fonte de verdade. Não apagar sem confirmar que o Claude Design não precisa dele para reabrir o projeto.
+Lista cards `05-camera-card.html`, `06-tabela-animais.html`, `11-pagina-cameras.html` — metadados de um design system que não é o SEELE. `components`, `tokens` e `themes` estão vazios. Ignorar; não é fonte de verdade. Não apagar sem confirmar que o Claude Design não precisa dele para reabrir o projeto.
 
 **O PNG é um frame do anime.**
-`design/uploads/pasted-1786132126320-0.png` é a tela do MAGI da série. Serviu de referência de mood e cumpriu o papel. **Não pode ser distribuído com o produto nem ficar num repositório público.** Ver D9.
+`design/uploads/pasted-1786132126320-0.png` é a tela do SEELE da série. Serviu de referência de mood e cumpriu o papel. **Não pode ser distribuído com o produto nem ficar num repositório público.** Ver D9.
 
 ### Como o design entra no plano
 

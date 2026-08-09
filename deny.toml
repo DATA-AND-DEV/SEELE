@@ -54,7 +54,7 @@ confidence-threshold = 0.9
 private = { ignore = true }
 # Permissive, plus MPL-2.0 under the exception below. Anything stronger — GPL,
 # AGPL, LGPL — stays denied by omission and must be discussed before it enters
-# the tree: MAGI ships a single statically linked binary (ADR 0008), so linking
+# the tree: SEELE ships a single statically linked binary (ADR 0008), so linking
 # terms actually matter here.
 #
 # MPL-2.0 is file-level copyleft: it reaches the files it covers and not the

@@ -1,4 +1,4 @@
-# MAGI no Windows
+# SEELE no Windows
 
 **Nada disto foi executado.** Não tenho uma máquina Windows, e a matriz de CI de
 três sistemas nunca rodou por falta de repositório remoto. O que está aqui é
@@ -66,9 +66,9 @@ inclusive o `llvm-tools`, que o codec Opus usa para renomear símbolos.
 Nos dois PCs:
 
 ```powershell
-git clone <url-do-repo> MAGI
-cd MAGI
-cargo build --release --bin magid --bin plug
+git clone <url-do-repo> SEELE
+cd SEELE
+cargo build --release --bin seeled --bin plug
 ```
 
 A primeira compilação demora — dez a vinte minutos é normal, e o Opus baixa uma
@@ -77,7 +77,7 @@ biblioteca pré-compilada no meio do caminho.
 Para o cliente gráfico, no PC onde quiser testá-lo:
 
 ```powershell
-cargo build --release -p magi-app
+cargo build --release -p seele-app
 ```
 
 O Tauri usa o **WebView2**, que já vem no Windows 11 e na maioria dos Windows 10
@@ -94,11 +94,11 @@ transporte é QUIC — e a regra que se escreve de cabeça é sempre TCP.
 Só no PC que vai rodar o servidor. PowerShell **como administrador**:
 
 ```powershell
-New-NetFirewallRule -DisplayName "MAGI" -Direction Inbound `
+New-NetFirewallRule -DisplayName "SEELE" -Direction Inbound `
   -Protocol UDP -LocalPort 8383 -Action Allow
 ```
 
-Se ao rodar o `magid` o Windows perguntar, aceite também — mas ele costuma
+Se ao rodar o `seeled` o Windows perguntar, aceite também — mas ele costuma
 perguntar só para TCP, e é por isso que a regra acima é explícita.
 
 ---
@@ -108,7 +108,7 @@ perguntar só para TCP, e é por isso que a regra acima é explícita.
 No **PC A**:
 
 ```powershell
-.\target\release\magid.exe 0.0.0.0:8383
+.\target\release\seeled.exe 0.0.0.0:8383
 ```
 
 Ele imprime, entre outras coisas:
@@ -126,7 +126,7 @@ certificate fingerprint: 50217d68c6...
 Se a linha "na outra máquina" não aparecer, o servidor não achou um endereço de
 rede. Confira com `ipconfig`.
 
-O `magid` cria o `magi.db` na pasta onde foi executado. Para começar do zero,
+O `seeled` cria o `seele.db` na pasta onde foi executado. Para começar do zero,
 pare o servidor e apague o arquivo.
 
 ---
@@ -145,16 +145,16 @@ No **PC B**:
 .\target\release\plug.exe --server 192.168.x.x:8383 --nick outro
 ```
 
-Use o endereço que o `magid` imprimiu, e **apelidos diferentes**.
+Use o endereço que o `seeled` imprimiu, e **apelidos diferentes**.
 
 Na primeira conexão o cliente mostra `PRIMEIRO CONTATO — CHAVE FIXADA` com uma
 impressão digital. Confira contra a do passo 4. Se conferir, é aquele servidor.
 
-> Dois clientes com o mesmo `$MAGI_HOME` são **a mesma pessoa** — o servidor
+> Dois clientes com o mesmo `$SEELE_HOME` são **a mesma pessoa** — o servidor
 > vincula o apelido à identidade que o reivindicou primeiro. No mesmo PC, para
 > ser um segundo piloto:
 > ```powershell
-> $env:MAGI_HOME="$HOME\.magi-outro"
+> $env:SEELE_HOME="$HOME\.seele-outro"
 > .\target\release\plug.exe --server 127.0.0.1:8383 --nick terceiro
 > ```
 
@@ -188,9 +188,9 @@ também não vai.
 | Erro no build do `shiguredo_opus` | `curl`/`tar` ausentes, ou sem saída para a internet |
 | `llvm-nm` não encontrado | `rustup component add llvm-tools` |
 | Cliente fica em PADRÃO: LARANJA e não passa | firewall — a regra é **UDP** |
-| `nickname belongs to a different identity` | apelido já pertence a outra identidade; troque de apelido ou de `$MAGI_HOME` |
+| `nickname belongs to a different identity` | apelido já pertence a outra identidade; troque de apelido ou de `$SEELE_HOME` |
 | Voz com eco horrível | alguém está sem fones |
-| A chave mudou e você não mudou nada | apagou o `magi.db`? O servidor gera certificado novo. Apague `%USERPROFILE%\.config\magi\pins` |
+| A chave mudou e você não mudou nada | apagou o `seele.db`? O servidor gera certificado novo. Apague `%USERPROFILE%\.config\seele\pins` |
 
 Terminal recomendado: **Windows Terminal** (na Microsoft Store). O `conhost`
 antigo desenha mal caracteres de caixa e kanji.

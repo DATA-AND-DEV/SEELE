@@ -12,6 +12,6 @@ publish = false
 [workspace]
 
 [dependencies]
-magi-audio = { path = "../../crates/magi-audio" }
-magi-proto = { path = "../../crates/magi-proto" }
+seele-audio = { path = "../../crates/seele-audio" }
+seele-proto = { path = "../../crates/seele-proto" }
 shiguredo_opus = "2026.2.0"

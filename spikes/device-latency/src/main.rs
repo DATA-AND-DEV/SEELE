@@ -199,7 +199,7 @@ fn acoustic(forced_frames: Option<u32>) {
     // Anchors, each written exactly once from a callback. A mutex in a real-time
     // callback is against the rules of specs/03-audio.md — acceptable here only
     // because this is throwaway probe code and the lock is uncontended after the
-    // single write. Nothing in magi-audio may copy this pattern.
+    // single write. Nothing in seele-audio may copy this pattern.
     let emitted_at: Arc<Mutex<Option<StreamInstant>>> = Arc::new(Mutex::new(None));
     let captured_at: Arc<Mutex<Option<StreamInstant>>> = Arc::new(Mutex::new(None));
 

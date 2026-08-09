@@ -1,7 +1,7 @@
 # 0004 — Autenticação por chave pública Ed25519
 
 Status: aceito por default
-Contexto: `specs/09-roadmap.md` exige a decisão em M0; `specs/08-seguranca.md` diz "escolher em M2". Contradição de cronograma (C1 do plano). A *direção* precisa vencer agora porque determina se `magi-proto` carrega o formato desafio-resposta e se o schema de CASPER tem colunas de senha — decidir depois força bump de versão de protocolo.
+Contexto: `specs/09-roadmap.md` exige a decisão em M0; `specs/08-seguranca.md` diz "escolher em M2". Contradição de cronograma (C1 do plano). A *direção* precisa vencer agora porque determina se `seele-proto` carrega o formato desafio-resposta e se o schema de CASPER tem colunas de senha — decidir depois força bump de versão de protocolo.
 Decisão: chave pública Ed25519 como mecanismo primário, com convite por token de uso único para entrada em um Dogma. Senha (Argon2id) como fallback opcional habilitado pelo operador. **Implementação em M2/M3; só a direção vale agora.**
 Alternativas: senha como primário. Descartado porque traz hash para vazar, não prepara terreno para E2EE, e `08` já recomenda o contrário.
 Consequências: mais fácil — sem segredo do lado do servidor para vazar, desafio-resposta natural no handshake, caminho aberto para E2EE pós-v1. Mais difícil — recuperação de conta e uso em múltiplos dispositivos precisam de fluxo próprio, **que ainda não existe em spec nenhuma**.

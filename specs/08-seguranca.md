@@ -60,10 +60,10 @@ Esboço para pós-v1:
 
 ## Práticas de código
 
-- `#![forbid(unsafe_code)]` em todos os crates exceto `magi-ffi` e bindings de áudio, onde `unsafe` é justificado por comentário caso a caso.
+- `#![forbid(unsafe_code)]` em todos os crates exceto `seele-ffi` e bindings de áudio, onde `unsafe` é justificado por comentário caso a caso.
 - `cargo deny` e `cargo audit` no CI, falhando o build em vulnerabilidade conhecida.
 - Nenhum segredo em log. Nenhum payload de mídia em log, nem em nível trace.
-- Fuzzing dos parsers de `magi-proto` (`cargo-fuzz`) — é a superfície que recebe bytes de rede não confiáveis.
+- Fuzzing dos parsers de `seele-proto` (`cargo-fuzz`) — é a superfície que recebe bytes de rede não confiáveis.
 - Toda entrada de rede tem limite de tamanho antes de alocar.
 
 ## Não fazer

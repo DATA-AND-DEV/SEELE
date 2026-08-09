@@ -10,7 +10,7 @@ Alternativas:
 
 Consequências: o mecanismo do FEC in-band (LBRR) só funciona se o decoder receber o pacote **seguinte** ao perdido, o que obriga o jitter buffer a segurar um quadro extra.
 
-Medido em `M1.7` (`cargo run --release -p magi-audio --example jitter_profiles`):
+Medido em `M1.7` (`cargo run --release -p seele-audio --example jitter_profiles`):
 
 | perfil | perda de rede | alvo do buffer |
 |---|---|---|

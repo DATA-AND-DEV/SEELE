@@ -19,7 +19,7 @@ Separar texto de controle evita que um `fetch` de 5 mil mensagens de histórico 
 - **`postcard`** — binário compacto, deriva de `serde`, zero boilerplate, esquema implícito. Rápido de construir. Amarra clientes de terceiros a Rust.
 - **`protobuf` (`prost`)** — esquema explícito em `.proto`, versionável, permite cliente em qualquer linguagem.
 
-Recomendação: `postcard` para M0–M3, com os tipos isolados em `magi-proto` de forma que a troca depois seja mecânica. Se abrir para clientes de terceiros virar objetivo, migrar.
+Recomendação: `postcard` para M0–M3, com os tipos isolados em `seele-proto` de forma que a troca depois seja mecânica. Se abrir para clientes de terceiros virar objetivo, migrar.
 
 ## Versionamento
 

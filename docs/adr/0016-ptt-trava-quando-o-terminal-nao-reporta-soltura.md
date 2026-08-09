@@ -26,4 +26,4 @@ Consequências:
 - A consulta é feita **uma vez**. Chamar `supports_keyboard_enhancement()` por uso custa uma pergunta ao terminal e a espera pela resposta a cada uso; num terminal que não responde, custa o timeout inteiro. Esse foi um travamento real de 2,4 s no arranque antes de ser corrigido — medido, não hipotético.
 - `specs/05-cliente-tui.md` deveria registrar que o item **[EM ABERTO]** tem duas causas independentes, e que esta ADR resolve a segunda. A primeira continua resolvida por D19.
 
-Custo de reverter: **baixo**. O ramo inteiro está em duas funções de `crates/magi-tui/src/main.rs`, e o modelo em `app.rs` só conhece `SpaceDown` e `SpaceUp` — ele não sabe nem se importa com qual dos dois caminhos os produziu.
+Custo de reverter: **baixo**. O ramo inteiro está em duas funções de `crates/seele-tui/src/main.rs`, e o modelo em `app.rs` só conhece `SpaceDown` e `SpaceUp` — ele não sabe nem se importa com qual dos dois caminhos os produziu.

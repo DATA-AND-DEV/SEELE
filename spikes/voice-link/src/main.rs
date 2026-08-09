@@ -39,14 +39,14 @@ use std::net::{SocketAddr, UdpSocket};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use magi_audio::device::{self, AudioIo};
-use magi_audio::drift::DriftTracker;
-use magi_audio::gate::{GateMode, VoiceGate};
-use magi_audio::jitter::{Decision, JitterBuffer, JitterConfig};
-use magi_audio::mixer::Mixer;
-use magi_audio::resample::RateConverter;
-use magi_audio::{FRAME_MS, FRAME_SAMPLES, SAMPLE_RATE_HZ};
-use magi_proto::media::{MAX_DATAGRAM_LEN, MediaHeader};
+use seele_audio::device::{self, AudioIo};
+use seele_audio::drift::DriftTracker;
+use seele_audio::gate::{GateMode, VoiceGate};
+use seele_audio::jitter::{Decision, JitterBuffer, JitterConfig};
+use seele_audio::mixer::Mixer;
+use seele_audio::resample::RateConverter;
+use seele_audio::{FRAME_MS, FRAME_SAMPLES, SAMPLE_RATE_HZ};
+use seele_proto::media::{MAX_DATAGRAM_LEN, MediaHeader};
 use shiguredo_opus::{
     Application, Decoder, DecoderConfig, Encoder, EncoderConfig, FrameDuration, InbandFec,
 };
@@ -156,7 +156,7 @@ fn run(args: &Args) -> Result<(), String> {
                 continue;
             };
             // A malformed datagram is dropped and forgotten. specs/08 wants the
-            // parser to be total, and magi-proto's is fuzzed for exactly this.
+            // parser to be total, and seele-proto's is fuzzed for exactly this.
             if let Ok((header, payload)) = MediaHeader::decode(datagram) {
                 let _ = tx.send((header, payload.to_vec(), Instant::now()));
             }
@@ -191,7 +191,7 @@ fn pipeline(
         .map_err(|error| error.to_string())?;
 
     let mut gate = VoiceGate::new(
-        magi_audio::gate::GateConfig::default(),
+        seele_audio::gate::GateConfig::default(),
         if args.voice_activated {
             GateMode::VoiceActivated
         } else {
@@ -267,7 +267,7 @@ fn pipeline(
             };
             seq = seq.wrapping_add(1);
             let header = MediaHeader {
-                version: magi_proto::PROTOCOL_VERSION,
+                version: seele_proto::PROTOCOL_VERSION,
                 ssrc: args.ssrc,
                 seq,
                 timestamp,

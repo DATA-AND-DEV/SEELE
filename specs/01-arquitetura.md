@@ -2,22 +2,22 @@
 
 ## Princípio central
 
-**Um núcleo, três cascas.** Toda lógica de sessão, protocolo, áudio e estado vive em `magi-core`, que é headless e testável sem interface. TUI, desktop e mobile são camadas de apresentação sobre a mesma máquina de estados. Nenhuma delas contém regra de negócio.
+**Um núcleo, três cascas.** Toda lógica de sessão, protocolo, áudio e estado vive em `seele-core`, que é headless e testável sem interface. TUI, desktop e mobile são camadas de apresentação sobre a mesma máquina de estados. Nenhuma delas contém regra de negócio.
 
 Se uma funcionalidade precisa ser implementada duas vezes em interfaces diferentes, ela está no lugar errado.
 
 ## Workspace
 
 ```
-magi/
+seele/
 ├─ Cargo.toml              # workspace
 ├─ crates/
-│  ├─ magi-proto/          # tipos do protocolo, serialização, versionamento
-│  ├─ magi-core/           # cliente headless: sessão, canais, áudio, eventos
-│  ├─ magi-audio/          # captura, codec, jitter buffer, mixagem
-│  ├─ magi-server/         # o daemon (magid)
-│  ├─ magi-tui/            # binário `plug` — ratatui + crossterm
-│  └─ magi-ffi/            # superfície C ABI + uniffi para Tauri/Flutter
+│  ├─ seele-proto/          # tipos do protocolo, serialização, versionamento
+│  ├─ seele-core/           # cliente headless: sessão, canais, áudio, eventos
+│  ├─ seele-audio/          # captura, codec, jitter buffer, mixagem
+│  ├─ seele-server/         # o daemon (seeled)
+│  ├─ seele-tui/            # binário `plug` — ratatui + crossterm
+│  └─ seele-ffi/            # superfície C ABI + uniffi para Tauri/Flutter
 ├─ apps/
 │  ├─ desktop/             # Tauri
 │  └─ mobile/              # Flutter  [EM ABERTO: ver 06]
@@ -66,10 +66,10 @@ Consequência negativa: banda cresce com O(n²) no pior caso. Para o alvo (Cages
 
 ## Fluxo de eventos no cliente
 
-`magi-core` expõe uma máquina de estados que consome comandos e emite eventos:
+`seele-core` expõe uma máquina de estados que consome comandos e emite eventos:
 
 ```
-Comando  →  [ magi-core ]  →  Evento
+Comando  →  [ seele-core ]  →  Evento
   Conectar                     SincronizacaoAlterada
   EntrarNoCage                 UsuarioEntrou / UsuarioSaiu
   EnviarMensagem               MensagemRecebida

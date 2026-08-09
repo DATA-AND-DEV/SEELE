@@ -12,7 +12,7 @@ O glossário de `07` é normativo em ambos os idiomas: `Cage` permanece `Cage`, 
 
 - `rustfmt` padrão, sem configuração customizada. Discussão de formatação é tempo perdido.
 - `clippy` com `-D warnings` no CI. Supressão permitida apenas com `#[allow(...)]` acompanhado de comentário explicando o porquê.
-- `#![forbid(unsafe_code)]` em todos os crates, exceto `magi-ffi` e bindings de áudio.
+- `#![forbid(unsafe_code)]` em todos os crates, exceto `seele-ffi` e bindings de áudio.
 - Erros com `thiserror` nas bibliotecas; `anyhow` apenas nos binários.
 - **Nada de `unwrap()` ou `expect()` fora de testes e de invariantes provadas** — e quando houver, com comentário justificando a invariante.
 
@@ -20,7 +20,7 @@ O glossário de `07` é normativo em ambos os idiomas: `Cage` permanece `Cage`, 
 
 | Camada | Abordagem |
 |---|---|
-| `magi-proto` | Round-trip de serialização, testes de propriedade, fuzzing |
+| `seele-proto` | Round-trip de serialização, testes de propriedade, fuzzing |
 | Jitter buffer | Determinístico, entrada sintética, sem áudio real |
 | Protocolo | Testes de integração com servidor em processo |
 | Permissões | Um teste por permissão negada, obrigatório |

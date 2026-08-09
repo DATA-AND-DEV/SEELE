@@ -1,6 +1,6 @@
 //! Fuzzes the first decision made on bytes from an unauthenticated socket.
 //!
-//! `specs/08-seguranca.md`: "Fuzzing of the magi-proto parsers (cargo-fuzz) — it
+//! `specs/08-seguranca.md`: "Fuzzing of the seele-proto parsers (cargo-fuzz) — it
 //! is the surface that receives untrusted network bytes."
 //!
 //! Right now that surface is one byte wide: `specs/02-protocolo.md` puts the
@@ -23,8 +23,8 @@ fuzz_target!(|data: &[u8]| {
     };
 
     // Must be total: every byte produces an answer, none of them panics.
-    if let Ok(agreed) = magi_proto::version::negotiate(version) {
-        assert!(agreed <= magi_proto::PROTOCOL_VERSION);
-        assert!(agreed >= magi_proto::oldest_supported_version());
+    if let Ok(agreed) = seele_proto::version::negotiate(version) {
+        assert!(agreed <= seele_proto::PROTOCOL_VERSION);
+        assert!(agreed >= seele_proto::oldest_supported_version());
     }
 });

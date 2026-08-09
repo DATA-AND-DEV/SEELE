@@ -700,12 +700,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dae608c151f68243f2b000364e1f7b186d9c29845f7d2d85bd31b9ad77ad552b"
 
 [[package]]
-name = "magi-audio"
+name = "seele-audio"
 version = "0.0.0"
 dependencies = [
  "audioadapter-buffers",
  "cpal",
- "magi-proto",
+ "seele-proto",
  "rtrb",
  "rubato",
  "shiguredo_opus",
@@ -713,13 +713,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "magi-core"
+name = "seele-core"
 version = "0.0.0"
 dependencies = [
  "anyhow",
  "ed25519-dalek",
- "magi-audio",
- "magi-proto",
+ "seele-audio",
+ "seele-proto",
  "quinn",
  "rand",
  "rustls",
@@ -730,7 +730,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "magi-proto"
+name = "seele-proto"
 version = "0.0.0"
 dependencies = [
  "postcard",
@@ -1546,9 +1546,9 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "ed25519-dalek",
- "magi-audio",
- "magi-core",
- "magi-proto",
+ "seele-audio",
+ "seele-core",
+ "seele-proto",
  "rand",
  "shiguredo_opus",
  "tokio",

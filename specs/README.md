@@ -1,4 +1,4 @@
-# MAGI — Especificações
+# SEELE — Especificações
 
 Sistema de comunicação por voz e texto operado via terminal, com clientes gráficos opcionais.
 Estética e vocabulário derivados de *Neon Genesis Evangelion*.
@@ -13,7 +13,7 @@ Estes documentos são a fonte de verdade para o planejamento. Eles descrevem **o
 | `01-arquitetura.md` | Workspace de crates, decisões técnicas e trade-offs |
 | `02-protocolo.md` | Formato de mensagens, handshake, canais QUIC |
 | `03-audio.md` | Pipeline de captura, codec, jitter buffer, mixagem |
-| `04-servidor-magi.md` | Estado, permissões, subsistemas, persistência |
+| `04-servidor-seele.md` | Estado, permissões, subsistemas, persistência |
 | `05-cliente-tui.md` | Layout, atalhos, modelo de interação do terminal |
 | `06-clientes-gui.md` | Desktop e mobile, camada FFI |
 | `07-tema-evangelion.md` | Glossário canônico, tokens, regras de aplicação |

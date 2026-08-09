@@ -15,7 +15,7 @@ Estes termos são obrigatórios e consistentes em toda a superfície do produto.
 | Conceito | Termo | Nota |
 |---|---|---|
 | Instância de servidor | **Dogma Central** | Plural: Dogmas |
-| Daemon | **magid** | |
+| Daemon | **seeled** | |
 | Cliente | **Entry Plug** / `plug` | |
 | Canal de voz | **Cage** | |
 | Canal de texto | **Linha** | |

@@ -1,13 +1,13 @@
-# Como testar o MAGI
+# Como testar o SEELE
 
-Estado em M4: o `plug` é uma TUI de verdade, contra um `magid` de verdade. Texto
+Estado em M4: o `plug` é uma TUI de verdade, contra um `seeled` de verdade. Texto
 funciona sem placa de som; voz precisa de microfone e alto-falante.
 
 ## Subir um Dogma
 
 ```sh
-cargo build --release --bin magid --bin plug
-./target/release/magid 127.0.0.1:8383
+cargo build --release --bin seeled --bin plug
+./target/release/seeled 127.0.0.1:8383
 ```
 
 Ele imprime a impressão digital do certificado. Guarde: é o que o ADR 0003 pede
@@ -16,14 +16,14 @@ que você confira por outro canal se algum dia o cliente avisar que a chave mudo
 ## Abrir o cliente gráfico
 
 ```sh
-cargo tauri build --no-bundle     # ou `cargo build --release -p magi-app`
-./target/release/magi-app
+cargo tauri build --no-bundle     # ou `cargo build --release -p seele-app`
+./target/release/seele-app
 ```
 
 Instalador do macOS, se quiser:
 
 ```sh
-cd apps/magi-app && cargo tauri build      # gera .app e .dmg em target/release/bundle
+cd apps/seele-app && cargo tauri build      # gera .app e .dmg em target/release/bundle
 ```
 
 O app pede o Dogma e o apelido, entra no primeiro Cage e abre a primeira Linha.
@@ -32,7 +32,7 @@ verdade, então não há a trava que os terminais precisam (ADR 0016). Clicar no
 Cage em que já se está sai dele. O deslizante de volume aparece ao apontar uma
 linha do roster.
 
-O app e o `plug` usam o mesmo `$MAGI_HOME`, então por padrão são **o mesmo
+O app e o `plug` usam o mesmo `$SEELE_HOME`, então por padrão são **o mesmo
 piloto** — que é o que faz a mesma sessão ser retomável entre os dois. Para
 serem duas pessoas, dois diretórios.
 
@@ -52,16 +52,16 @@ Sem placa de som, ou numa VPS:
 
 ## Dois pilotos na mesma máquina
 
-A identidade mora em `$MAGI_HOME` (ADR 0017). Dois clientes com o mesmo
-`$MAGI_HOME` são a **mesma pessoa** — o servidor recusa o segundo apelido. Para
+A identidade mora em `$SEELE_HOME` (ADR 0017). Dois clientes com o mesmo
+`$SEELE_HOME` são a **mesma pessoa** — o servidor recusa o segundo apelido. Para
 ser duas pessoas, dois diretórios:
 
 ```sh
-MAGI_HOME=~/.magi-shinji ./target/release/plug -n shinji
-MAGI_HOME=~/.magi-asuka  ./target/release/plug -n asuka
+SEELE_HOME=~/.seele-shinji ./target/release/plug -n shinji
+SEELE_HOME=~/.seele-asuka  ./target/release/plug -n asuka
 ```
 
-O padrão é `~/.config/magi`.
+O padrão é `~/.config/seele`.
 
 ## O que fazer lá dentro
 
@@ -117,5 +117,5 @@ sozinho, a mensagem estará na tela normal, não perdida na tela alternativa. Se
 o terminal ficar estranho mesmo assim, `reset`.
 
 Recusa de conexão com apelido já usado significa que aquele nome pertence a
-outra identidade naquele Dogma. Ou use `$MAGI_HOME` com a identidade certa, ou
+outra identidade naquele Dogma. Ou use `$SEELE_HOME` com a identidade certa, ou
 escolha outro apelido.

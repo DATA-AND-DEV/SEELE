@@ -18,7 +18,7 @@
 //! - **Dev-dependencies.** Cargo tolerates cycles through them, so
 //!   `proto` dev-depending on `audio` compiles fine and silently inverts the
 //!   graph.
-//! - **Sideways edges.** `magi-tui` depending directly on `magi-proto` is not a
+//! - **Sideways edges.** `seele-tui` depending directly on `seele-proto` is not a
 //!   cycle, so Cargo is happy — but it is exactly how protocol knowledge leaks
 //!   into a shell.
 //!
@@ -28,11 +28,11 @@
 //! wrong in two places, and this table encodes the stricter reading instead.
 //! See `docs/adr/0002-regra-de-dependencia.md`.
 //!
-//! - `magi-server` must **not** depend on `magi-core`, which is the headless
-//!   *client*, nor on `magi-audio`. The server is an SFU: `specs/04` states it
+//! - `seele-server` must **not** depend on `seele-core`, which is the headless
+//!   *client*, nor on `seele-audio`. The server is an SFU: `specs/04` states it
 //!   "never decodes Opus". Linking the audio crate would drag `cpal` and
 //!   `libopus` into a daemon that is supposed to fit in 1 vCPU / 512 MB.
-//! - Shells depend on `magi-core` **only**, not additionally on `proto` and
+//! - Shells depend on `seele-core` **only**, not additionally on `proto` and
 //!   `audio`. A shell that can name an `ssrc` already has logic in it.
 
 use std::process::ExitCode;
@@ -45,34 +45,34 @@ use cargo_metadata::{DependencyKind, MetadataCommand};
 /// implicit pass: adding a crate must be a deliberate act that states where the
 /// new crate sits in the graph.
 const RULES: &[(&str, &[&str])] = &[
-    ("magi-proto", &[]),
-    ("magi-audio", &["magi-proto"]),
-    ("magi-core", &["magi-proto", "magi-audio"]),
+    ("seele-proto", &[]),
+    ("seele-audio", &["seele-proto"]),
+    ("seele-core", &["seele-proto", "seele-audio"]),
     // The daemon speaks the wire format and nothing else.
-    ("magi-server", &["magi-proto"]),
+    ("seele-server", &["seele-proto"]),
     // Shells translate events into pixels and input into commands. Nothing more.
-    ("magi-tui", &["magi-core"]),
-    ("magi-ffi", &["magi-core"]),
+    ("seele-tui", &["seele-core"]),
+    ("seele-ffi", &["seele-core"]),
     // The one deliberate exception, and it has a name so it cannot spread.
     // An end-to-end protocol test needs a server and a client at once, and the
     // rule above forbids either depending on the other. This crate ships
     // nothing: every dependency is a dev-dependency and its library is empty.
     (
-        "magi-conformance",
+        "seele-conformance",
         // The crate that proves the others meet the acceptance criteria is the
         // one place allowed to see all of them, both shells included.
         &[
-            "magi-proto",
-            "magi-audio",
-            "magi-core",
-            "magi-server",
-            "magi-tui",
-            "magi-ffi",
+            "seele-proto",
+            "seele-audio",
+            "seele-core",
+            "seele-server",
+            "seele-tui",
+            "seele-ffi",
         ],
     ),
-    // The desktop shell. Sees `magi-ffi`, which sees `magi-core`. Reaching past
+    // The desktop shell. Sees `seele-ffi`, which sees `seele-core`. Reaching past
     // it would put protocol knowledge in a Tauri command — specs/06-clientes-gui.md.
-    ("magi-app", &["magi-ffi"]),
+    ("seele-app", &["seele-ffi"]),
     // Tooling. Must not depend on the product, or `cargo xtask` would need the
     // product to compile before it could check the product.
     ("xtask", &[]),
@@ -180,42 +180,42 @@ mod tests {
 
     #[test]
     fn allowed_edges_pass() {
-        assert!(evaluate("magi-audio", &[edge("magi-proto")]).is_empty());
-        assert!(evaluate("magi-core", &[edge("magi-proto"), edge("magi-audio")]).is_empty());
-        assert!(evaluate("magi-tui", &[edge("magi-core")]).is_empty());
+        assert!(evaluate("seele-audio", &[edge("seele-proto")]).is_empty());
+        assert!(evaluate("seele-core", &[edge("seele-proto"), edge("seele-audio")]).is_empty());
+        assert!(evaluate("seele-tui", &[edge("seele-core")]).is_empty());
     }
 
     #[test]
     fn third_party_edges_are_ignored() {
-        assert!(evaluate("magi-proto", &[edge("serde"), edge("postcard")]).is_empty());
+        assert!(evaluate("seele-proto", &[edge("serde"), edge("postcard")]).is_empty());
     }
 
     #[test]
     fn inverted_edge_is_rejected() {
-        assert_eq!(evaluate("magi-proto", &[edge("magi-core")]).len(), 1);
-        assert_eq!(evaluate("magi-audio", &[edge("magi-core")]).len(), 1);
+        assert_eq!(evaluate("seele-proto", &[edge("seele-core")]).len(), 1);
+        assert_eq!(evaluate("seele-audio", &[edge("seele-core")]).len(), 1);
     }
 
     #[test]
     fn inverted_dev_dependency_is_rejected() {
         // Cargo tolerates cycles through dev-dependencies; this is the class of
         // violation that only this check can catch.
-        assert_eq!(evaluate("magi-proto", &[dev_edge("magi-audio")]).len(), 1);
+        assert_eq!(evaluate("seele-proto", &[dev_edge("seele-audio")]).len(), 1);
     }
 
     #[test]
     fn shell_reaching_past_core_is_rejected() {
         // Not a cycle, so Cargo is perfectly happy — and this is exactly how
         // protocol knowledge leaks into a shell.
-        assert_eq!(evaluate("magi-tui", &[edge("magi-proto")]).len(), 1);
-        assert_eq!(evaluate("magi-ffi", &[edge("magi-audio")]).len(), 1);
+        assert_eq!(evaluate("seele-tui", &[edge("seele-proto")]).len(), 1);
+        assert_eq!(evaluate("seele-ffi", &[edge("seele-audio")]).len(), 1);
     }
 
     #[test]
     fn server_must_not_link_the_client_or_the_audio_stack() {
-        assert_eq!(evaluate("magi-server", &[edge("magi-core")]).len(), 1);
-        assert_eq!(evaluate("magi-server", &[edge("magi-audio")]).len(), 1);
-        assert!(evaluate("magi-server", &[edge("magi-proto")]).is_empty());
+        assert_eq!(evaluate("seele-server", &[edge("seele-core")]).len(), 1);
+        assert_eq!(evaluate("seele-server", &[edge("seele-audio")]).len(), 1);
+        assert!(evaluate("seele-server", &[edge("seele-proto")]).is_empty());
     }
 
     #[test]
@@ -223,8 +223,12 @@ mod tests {
         // The documented exception. It exists so an end-to-end test has a home
         // that is not a hole in the rule.
         assert!(evaluate(
-            "magi-conformance",
-            &[edge("magi-server"), edge("magi-core"), edge("magi-proto")]
+            "seele-conformance",
+            &[
+                edge("seele-server"),
+                edge("seele-core"),
+                edge("seele-proto")
+            ]
         )
         .is_empty());
     }
@@ -233,12 +237,12 @@ mod tests {
     fn the_exception_does_not_leak_to_anybody_else() {
         // If a second crate ever needs both ends, that is a design change to
         // argue about, not a table entry to copy.
-        assert_eq!(evaluate("magi-server", &[edge("magi-core")]).len(), 1);
-        assert_eq!(evaluate("magi-core", &[edge("magi-server")]).len(), 1);
+        assert_eq!(evaluate("seele-server", &[edge("seele-core")]).len(), 1);
+        assert_eq!(evaluate("seele-core", &[edge("seele-server")]).len(), 1);
     }
 
     #[test]
     fn unknown_workspace_crate_is_rejected() {
-        assert_eq!(evaluate("magi-something-new", &[]).len(), 1);
+        assert_eq!(evaluate("seele-something-new", &[]).len(), 1);
     }
 }

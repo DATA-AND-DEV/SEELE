@@ -2,7 +2,7 @@
 
 ## Posição no projeto
 
-Os clientes gráficos existem para alcançar quem não vive no terminal e para dar mobilidade. Eles **imitam a TUI**, não o contrário. Nenhuma funcionalidade nasce aqui: se algo é útil, é implementado em `magi-core` e aparece nas duas interfaces.
+Os clientes gráficos existem para alcançar quem não vive no terminal e para dar mobilidade. Eles **imitam a TUI**, não o contrário. Nenhuma funcionalidade nasce aqui: se algo é útil, é implementado em `seele-core` e aparece nas duas interfaces.
 
 ## Desktop — Tauri
 
@@ -10,7 +10,7 @@ Os clientes gráficos existem para alcançar quem não vive no terminal e para d
 
 - Usa a webview do sistema; binário na casa de dezenas de MB, não centenas.
 - O núcleo Rust roda no processo nativo, não em JS. Áudio, QUIC e estado ficam onde já estão.
-- O frontend é apenas apresentação, comunicando por comandos e eventos Tauri, espelhando o contrato de `magi-core` descrito em `01`.
+- O frontend é apenas apresentação, comunicando por comandos e eventos Tauri, espelhando o contrato de `seele-core` descrito em `01`.
 
 Frontend: **decidido em M5 — HTML, CSS e JavaScript à mão, sem framework e sem npm** (ADR 0019). O critério que decidiu não foi preferência de framework: foi não ter duas árvores de dependência com só uma auditada. O `cargo deny` cobre o produto inteiro; um `node_modules` seria a única parte fora dele.
 
@@ -34,9 +34,9 @@ Justificativa: áudio em background no iOS e Android é trabalhoso (interrupçõ
 
 Recomendação: decidir **depois de M4**, com um protótipo descartável de áudio em background em cada candidata. Não decidir por afinidade prévia.
 
-## Camada FFI (`magi-ffi`)
+## Camada FFI (`seele-ffi`)
 
-Superfície mínima e estável. **O `uniffi` entra em M6**, com o primeiro consumidor de binding; em M5 a `magi-ffi` foi escrita com a forma que ele exige, sem a dependência (ADR 0018). A lista do que M6 anota sem reescrever está lá, verificável.
+Superfície mínima e estável. **O `uniffi` entra em M6**, com o primeiro consumidor de binding; em M5 a `seele-ffi` foi escrita com a forma que ele exige, sem a dependência (ADR 0018). A lista do que M6 anota sem reescrever está lá, verificável.
 
 ```
 conectar(host, credencial) -> Sessao

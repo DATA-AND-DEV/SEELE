@@ -17,4 +17,4 @@ Consequências:
 
 Limiares atuais: abertura em RMS 0,02 (≈ −34 dBFS), fechamento em 0,01 (≈ −40 dBFS), hangover 300 ms. Escolhidos para ficar acima de ruído de sala e ventoinha, abaixo de voz falada baixa. **Não foram validados com microfone e sala reais** — isso entra no checklist de plataforma de M1.15.
 
-Custo de reverter: **baixo**. A fronteira é `GateMode`, e nada fora de `magi-audio::gate` sabe como a decisão é tomada.
+Custo de reverter: **baixo**. A fronteira é `GateMode`, e nada fora de `seele-audio::gate` sabe como a decisão é tomada.
