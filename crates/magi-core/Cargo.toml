@@ -12,7 +12,13 @@ publish.workspace = true
 magi-proto = { path = "../magi-proto" }
 magi-audio = { path = "../magi-audio" }
 quinn = "0.11.11"
-rustls = "0.23.43"
+# Só o provider `ring`, que é o que instalamos em tempo de execução. Os
+# defaults do rustls trazem o `aws-lc-rs` junto, e ele exige CMake e NASM
+# para compilar — num projeto cujo argumento inteiro é um binário
+# auto-contido, arrastar uma segunda pilha de cripto em C que nunca é
+# chamada é custo puro. No Windows é a diferença entre instalar o Rust e
+# instalar o Rust mais duas ferramentas de build.
+rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "logging", "tls12"] }
 tokio = { version = "1.53.1", features = ["full"] }
 ed25519-dalek = "3.0.0"
 rand = "0.10.2"

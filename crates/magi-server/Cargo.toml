@@ -18,7 +18,13 @@ quinn = "0.11.11"
 rand = "0.10.2"
 rcgen = "0.14.8"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
-rustls = "0.23.43"
+# Só o provider `ring`, que é o que instalamos em tempo de execução. Os
+# defaults do rustls trazem o `aws-lc-rs` junto, e ele exige CMake e NASM
+# para compilar — num projeto cujo argumento inteiro é um binário
+# auto-contido, arrastar uma segunda pilha de cripto em C que nunca é
+# chamada é custo puro. No Windows é a diferença entre instalar o Rust e
+# instalar o Rust mais duas ferramentas de build.
+rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "logging", "tls12"] }
 serde = "1.0.229"
 serde_json = "1.0.151"
 thiserror = "2.0.19"

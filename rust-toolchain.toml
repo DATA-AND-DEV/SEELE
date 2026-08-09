@@ -4,4 +4,9 @@
 [toolchain]
 channel = "1.97.1"
 profile = "minimal"
-components = ["rustfmt", "clippy"]
+# `llvm-tools` não é conforto: o `shiguredo_opus` usa `llvm-nm` e
+# `llvm-objcopy` para prefixar os símbolos do libopus e evitar colisão com
+# outra cópia do codec no mesmo processo. Sem o componente, a compilação
+# falha no build script — e falha só na máquina de quem ainda não o tinha,
+# que é o pior lugar para descobrir.
+components = ["rustfmt", "clippy", "llvm-tools"]
