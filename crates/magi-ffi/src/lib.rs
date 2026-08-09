@@ -152,7 +152,7 @@ impl Plug {
     /// Every failure is a [`PlugError`] variant, never a string: a shell has to
     /// be able to write its own sentence for each one.
     pub fn connect(config: ConnectConfig) -> Result<Arc<Self>, PlugError> {
-        let (address, server_name) = resolve(&config.server)?;
+        let (address, server_name, pin_key) = resolve(&config.server)?;
 
         let home = PathBuf::from(&config.home);
         let key = identity::load_or_create(&home.join("identity.key")).map_err(|error| {
@@ -198,6 +198,7 @@ impl Plug {
                     thread_config,
                     address,
                     server_name,
+                    pin_key,
                     key,
                     pins,
                     thread_shared,
@@ -550,12 +551,12 @@ fn pattern_from_byte(byte: u8) -> Pattern {
     }
 }
 
-/// Resolves `host` or `host:port` into an address plus the name to check the
-/// certificate against.
+/// Resolves `host` or `host:port` into an address, a TLS label, and a pin key.
 ///
-/// The name matters: TOFU pins per name (ADR 0003), so resolving to an address
-/// and forgetting what was typed would pin the wrong thing.
-fn resolve(target: &str) -> Result<(SocketAddr, String), PlugError> {
+/// Three values because they are three things — see the same function in
+/// `magi-tui`, and `TofuVerifier::new` for why keying the pin by the TLS label
+/// was wrong.
+fn resolve(target: &str) -> Result<(SocketAddr, String, String), PlugError> {
     let with_port = if target.contains(':') {
         target.to_owned()
     } else {
@@ -570,13 +571,14 @@ fn resolve(target: &str) -> Result<(SocketAddr, String), PlugError> {
         .next()
         .ok_or(PlugError::UnresolvableHost)?;
 
-    // An IP is not a name a certificate can be checked against.
+    // TLS gets the name the M2 certificate carries; the pin gets the address,
+    // which is what actually tells one server from another.
     let server_name = if host.parse::<std::net::IpAddr>().is_ok() {
         "localhost".to_owned()
     } else {
         host
     };
-    Ok((address, server_name))
+    Ok((address, server_name, with_port))
 }
 
 /// The driver: connects, then pumps until told to stop.
@@ -588,6 +590,7 @@ async fn drive(
     config: ConnectConfig,
     address: SocketAddr,
     server_name: String,
+    pin_key: String,
     key: magi_core::SigningKey,
     pins: Arc<FilePinStore>,
     shared: Arc<Shared>,
@@ -598,15 +601,23 @@ async fn drive(
         .pattern
         .store(pattern_byte(Pattern::Orange), Ordering::Relaxed);
 
-    let mut client =
-        match Client::connect(address, &server_name, &config.nickname, &key, pins).await {
-            Ok(client) => client,
-            Err(error) => {
-                tracing::warn!(%error, "could not reach the Dogma");
-                let _ = ready.send(Err(classify_connect_failure(&error)));
-                return;
-            }
-        };
+    let mut client = match Client::connect(
+        address,
+        &server_name,
+        &pin_key,
+        &config.nickname,
+        &key,
+        pins,
+    )
+    .await
+    {
+        Ok(client) => client,
+        Err(error) => {
+            tracing::warn!(%error, "could not reach the Dogma");
+            let _ = ready.send(Err(classify_connect_failure(&error)));
+            return;
+        }
+    };
 
     let trust = match client.pin_decision() {
         PinDecision::FirstContact { fingerprint } => Trust::FirstContact {
@@ -885,7 +896,7 @@ mod tests {
 
     #[test]
     fn a_bare_host_gets_the_default_port() {
-        let (address, name) = resolve("localhost").expect("resolve");
+        let (address, name, _) = resolve("localhost").expect("resolve");
         assert_eq!(address.port(), magi_core::DEFAULT_PORT);
         assert_eq!(name, "localhost");
     }
@@ -895,8 +906,12 @@ mod tests {
         // ADR 0003 pins per name. An IP is not a name a certificate is issued
         // for, so pinning under one would file the pin somewhere nothing ever
         // looks for it again.
-        let (_, name) = resolve("127.0.0.1:8383").expect("resolve");
-        assert_eq!(name, "localhost");
+        let (_, name, pin) = resolve("127.0.0.1:8383").expect("resolve");
+        assert_eq!(
+            name, "localhost",
+            "TLS gets the name the certificate carries"
+        );
+        assert_eq!(pin, "127.0.0.1:8383", "the pin is filed under the address");
     }
 
     #[test]

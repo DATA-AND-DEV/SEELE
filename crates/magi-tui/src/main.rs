@@ -51,6 +51,7 @@ const TICK: Duration = Duration::from_millis(250);
 struct Args {
     server: SocketAddr,
     server_name: String,
+    pin_key: String,
     nickname: String,
     cage: CageId,
     line: LineId,
@@ -86,10 +87,11 @@ fn parse_args() -> Result<Args> {
         }
     }
 
-    let (server, server_name) = resolve(&target)?;
+    let (server, server_name, pin_key) = resolve(&target)?;
     Ok(Args {
         server,
         server_name,
+        pin_key,
         nickname,
         cage,
         line,
@@ -97,12 +99,17 @@ fn parse_args() -> Result<Args> {
     })
 }
 
-/// Resolves `host:port` into an address plus the name to check the certificate
-/// against.
+/// Resolves `host:port` into an address, a TLS label, and a pin key.
 ///
-/// The name matters: TOFU pins per name (ADR 0003), so resolving to an address
-/// and forgetting what was typed would pin the wrong thing.
-fn resolve(target: &str) -> Result<(SocketAddr, String)> {
+/// Three values because they are three things. The address is where the packets
+/// go. The TLS label is what rustls is handed — it never gets checked, since
+/// TOFU compares fingerprints. The **pin key** is the policy: what this server's
+/// fingerprint is filed under, and it must be the target as typed.
+///
+/// Keying the pin by the TLS label instead was a real bug. Both shells mapped
+/// every IP address to `localhost`, so two Dogmas on a LAN shared one entry and
+/// the second one contacted looked like the first one's key had changed.
+fn resolve(target: &str) -> Result<(SocketAddr, String, String)> {
     let with_port = if target.contains(':') {
         target.to_owned()
     } else {
@@ -117,14 +124,15 @@ fn resolve(target: &str) -> Result<(SocketAddr, String)> {
         .next()
         .ok_or_else(|| anyhow!("{target} não resolveu para nenhum endereço"))?;
 
-    // An IP is not a name a certificate can be checked against, so the pin is
-    // filed under "localhost" the way the M2 server issues it.
+    // An IP is not a name the M2 server's certificate carries, so TLS is handed
+    // the name it does carry. The pin, meanwhile, is filed under the address —
+    // which is the thing that actually distinguishes one server from another.
     let server_name = if host.parse::<std::net::IpAddr>().is_ok() {
         "localhost".to_owned()
     } else {
         host
     };
-    Ok((address, server_name))
+    Ok((address, server_name, with_port))
 }
 
 /// Where this client keeps its identity and its pins.
@@ -266,16 +274,24 @@ async fn run(terminal: &mut Screen1, args: Args, holds: bool) -> Result<()> {
     // ADR 0003 is trust on *first* use, which needs the first use remembered.
     let pins = Arc::new(FilePinStore::open(home.join("pins"))?);
 
-    let mut client =
-        match Client::connect(args.server, &args.server_name, &args.nickname, &key, pins).await {
-            Ok(client) => client,
-            Err(error) => {
-                runtime.app.screen = Screen::Lost {
-                    reason: format!("NÃO FOI POSSÍVEL ALCANÇAR O DOGMA: {error}"),
-                };
-                return wait_for_key(terminal, &runtime).await;
-            }
-        };
+    let mut client = match Client::connect(
+        args.server,
+        &args.server_name,
+        &args.pin_key,
+        &args.nickname,
+        &key,
+        pins,
+    )
+    .await
+    {
+        Ok(client) => client,
+        Err(error) => {
+            runtime.app.screen = Screen::Lost {
+                reason: format!("NÃO FOI POSSÍVEL ALCANÇAR O DOGMA: {error}"),
+            };
+            return wait_for_key(terminal, &runtime).await;
+        }
+    };
 
     // ADR 0003 and specs/08-seguranca.md: first contact is stated, not accepted
     // in silence. A pin that establishes itself invisibly is a pin nobody knows

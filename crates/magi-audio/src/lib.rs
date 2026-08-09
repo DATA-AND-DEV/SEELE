@@ -22,10 +22,12 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod codec;
 pub mod device;
 pub mod drift;
 pub mod gate;
 pub mod jitter;
+pub mod latency;
 pub mod mixer;
 pub mod netsim;
 pub mod resample;

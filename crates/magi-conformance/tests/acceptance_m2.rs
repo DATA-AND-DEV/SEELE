@@ -53,6 +53,7 @@ async fn connect(address: SocketAddr, nickname: &str) -> Result<Client> {
     Client::connect(
         address,
         "localhost",
+        &address.to_string(),
         nickname,
         &key,
         Arc::new(MemoryPinStore::new()),
@@ -215,6 +216,72 @@ async fn the_first_connection_pins_the_certificate() -> Result<()> {
 }
 
 #[tokio::test]
+async fn two_dogmas_on_one_machine_do_not_share_a_pin() -> Result<()> {
+    // The bug this exists to stop: both shells hand TLS the name `localhost`
+    // for any IP address, because that is the name the M2 certificate carries.
+    // While the pin was filed under that same label, two Dogmas shared one
+    // entry — and the second one contacted looked like the first one's key had
+    // changed. That is the most alarming false positive this system can
+    // produce, and the first LAN test between two machines would have hit it.
+    let first_address = start(Vec::new()).await?;
+    let second_address = start(Vec::new()).await?;
+    assert_ne!(first_address, second_address);
+
+    // One store, the way one pilot's `~/.config/magi/pins` is one store.
+    let pins = Arc::new(MemoryPinStore::new());
+    let key = SigningKey::from_bytes(&[70; 32]);
+
+    let first = Client::connect(
+        first_address,
+        "localhost",
+        &first_address.to_string(),
+        "ayanami",
+        &key,
+        Arc::clone(&pins) as Arc<_>,
+    )
+    .await?;
+    assert!(matches!(
+        first.pin_decision(),
+        PinDecision::FirstContact { .. }
+    ));
+
+    // A different Dogma with a different self-signed certificate. This must be
+    // a first contact too, not a key change.
+    let second = Client::connect(
+        second_address,
+        "localhost",
+        &second_address.to_string(),
+        "ayanami",
+        &key,
+        Arc::clone(&pins) as Arc<_>,
+    )
+    .await
+    .map_err(|error| {
+        anyhow::anyhow!(
+            "a second Dogma was refused as if the first one's key had changed: {error:?}"
+        )
+    })?;
+    assert!(matches!(
+        second.pin_decision(),
+        PinDecision::FirstContact { .. }
+    ));
+
+    // And going back to the first one still matches what was pinned for it.
+    let again = Client::connect(
+        first_address,
+        "localhost",
+        &first_address.to_string(),
+        "ayanami",
+        &key,
+        Arc::clone(&pins) as Arc<_>,
+    )
+    .await?;
+    assert_eq!(again.pin_decision(), &PinDecision::Matches);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_second_connection_reuses_the_pin() -> Result<()> {
     // The store is shared between the two connections, as it would be on disk.
     let address = start(Vec::new()).await?;
@@ -226,6 +293,7 @@ async fn a_second_connection_reuses_the_pin() -> Result<()> {
     let first = Client::connect(
         address,
         "localhost",
+        &address.to_string(),
         "ayanami",
         &key,
         Arc::clone(&pins) as Arc<_>,
@@ -239,6 +307,7 @@ async fn a_second_connection_reuses_the_pin() -> Result<()> {
     let second = Client::connect(
         address,
         "localhost",
+        &address.to_string(),
         "ayanami",
         &key,
         Arc::clone(&pins) as Arc<_>,

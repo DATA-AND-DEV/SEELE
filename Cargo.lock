@@ -2740,6 +2740,7 @@ dependencies = [
  "rubato",
  "shiguredo_opus",
  "thiserror 2.0.19",
+ "tracing",
 ]
 
 [[package]]
@@ -2771,7 +2772,6 @@ dependencies = [
  "rand 0.10.2",
  "rustls",
  "serde",
- "shiguredo_opus",
  "thiserror 2.0.19",
  "tokio",
  "tracing",

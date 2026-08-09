@@ -15,6 +15,9 @@ magi-proto = { path = "../magi-proto" }
 rtrb = "0.3.4"
 rubato = "4.0.0"
 shiguredo_opus = { workspace = true }
+# The codec reports libopus failures to the log rather than across an API:
+# a C function name and an error code help a developer and tell a pilot nothing.
+tracing = "0.1.44"
 thiserror = "2.0.19"
 
 [lints]

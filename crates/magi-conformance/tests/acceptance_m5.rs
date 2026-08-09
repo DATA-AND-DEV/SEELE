@@ -288,6 +288,7 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
     let mut terminal = Client::connect(
         address,
         "localhost",
+        &address.to_string(),
         "ayanami",
         &ed25519_dalek::SigningKey::from_bytes(&[42; 32]),
         Arc::new(MemoryPinStore::new()),

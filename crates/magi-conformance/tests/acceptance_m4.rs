@@ -57,6 +57,7 @@ async fn connect(address: SocketAddr, nickname: &str, seed: u8) -> Result<Client
     Client::connect(
         address,
         "localhost",
+        &address.to_string(),
         nickname,
         &SigningKey::from_bytes(&[seed; 32]),
         Arc::new(MemoryPinStore::new()),

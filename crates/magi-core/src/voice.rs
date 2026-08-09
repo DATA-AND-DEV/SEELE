@@ -23,7 +23,8 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
+use magi_audio::codec::{VoiceDecoder, VoiceEncoder, DEFAULT_BITRATE_BPS};
 use magi_audio::device::{self, AudioIo};
 use magi_audio::drift::DriftTracker;
 use magi_audio::gate::{GateConfig, GateMode, VoiceGate};
@@ -34,9 +35,6 @@ use magi_audio::telemetry::{AudioTelemetry, LocalTelemetry, SourceTelemetry};
 use magi_audio::{FRAME_MS, FRAME_SAMPLES, SAMPLE_RATE_HZ};
 use magi_proto::ids::Ssrc;
 use magi_proto::MediaHeader;
-use shiguredo_opus::{
-    Application, Decoder, DecoderConfig, Encoder, EncoderConfig, FrameDuration, InbandFec,
-};
 
 use crate::client::MediaChannel;
 
@@ -44,9 +42,6 @@ use crate::client::MediaChannel;
 ///
 /// Absorbs scheduling jitter only. Not the jitter buffer.
 const RING_MS: u32 = 100;
-
-/// Default encoder bitrate. `specs/03-audio.md`, narrowed by ADR 0010.
-const DEFAULT_BITRATE_BPS: u32 = 32_000;
 
 /// How often the telemetry snapshot is refreshed.
 ///
@@ -264,7 +259,7 @@ struct Source {
     ssrc: u32,
     buffer: JitterBuffer<Vec<u8>>,
     drift: DriftTracker,
-    decoder: Decoder,
+    decoder: VoiceDecoder,
 }
 
 /// The whole loop, on its own thread.
@@ -279,7 +274,7 @@ async fn pipeline(
     controls: Arc<Controls>,
     telemetry: Arc<Mutex<AudioTelemetry>>,
 ) {
-    let Ok(mut encoder) = build_encoder(DEFAULT_BITRATE_BPS) else {
+    let Ok(mut encoder) = VoiceEncoder::with_defaults() else {
         return;
     };
     let (Ok(mut to_pipeline), Ok(mut to_device)) = (
@@ -294,7 +289,6 @@ async fn pipeline(
     let mut sources: Vec<Source> = Vec::new();
 
     let (mut captured, mut at_48k, mut pending) = (Vec::new(), Vec::new(), Vec::<f32>::new());
-    let mut frame_i16 = vec![0_i16; FRAME_SAMPLES];
     let mut datagram = vec![0_u8; magi_proto::MAX_DATAGRAM_LEN];
     let mut mixed = vec![0.0_f32; FRAME_SAMPLES];
     let mut for_device = Vec::new();
@@ -303,7 +297,6 @@ async fn pipeline(
     let started = Instant::now();
     let mut next_playout = Instant::now();
     let mut next_telemetry = Instant::now() + TELEMETRY_EVERY;
-    let mut bitrate = DEFAULT_BITRATE_BPS;
 
     while !controls.stop.load(Ordering::Relaxed) {
         // ---- receive ----
@@ -320,7 +313,7 @@ async fn pipeline(
             let index = match sources.iter().position(|s| s.ssrc == header.ssrc) {
                 Some(index) => index,
                 None => {
-                    let Ok(decoder) = Decoder::new(DecoderConfig::new(SAMPLE_RATE_HZ, 1)) else {
+                    let Ok(decoder) = VoiceDecoder::new() else {
                         continue;
                     };
                     sources.push(Source {
@@ -345,13 +338,9 @@ async fn pipeline(
         gate.set_mode(VoiceMode::from_byte(controls.mode.load(Ordering::Relaxed)).to_gate());
         gate.set_key_held(controls.key_held.load(Ordering::Relaxed));
 
-        let wanted_bitrate = controls.bitrate.load(Ordering::Relaxed);
-        if wanted_bitrate != bitrate {
-            if let Ok(fresh) = build_encoder(wanted_bitrate) {
-                encoder = fresh;
-                bitrate = wanted_bitrate;
-            }
-        }
+        // Rebuilds the encoder when it actually changes, and only then — see
+        // `VoiceEncoder::set_bitrate` on why a no-op must stay a no-op.
+        let _ = encoder.set_bitrate(controls.bitrate.load(Ordering::Relaxed));
 
         captured.clear();
         while let Ok(sample) = io.captured.pop() {
@@ -380,14 +369,19 @@ async fn pipeline(
                 continue;
             }
 
-            for (slot, sample) in frame_i16.iter_mut().zip(frame.iter()) {
-                *slot = (sample.clamp(-1.0, 1.0) * 32_768.0)
-                    .round()
-                    .clamp(-32_768.0, 32_767.0) as i16;
-            }
-            let Ok(payload) = encoder.encode(&frame_i16) else {
+            // Encoded from `f32` directly: the pipeline is `f32` end to end,
+            // and the conversion to `i16` that used to be here was a rounding
+            // step that existed only because the call site did not know
+            // `encode_f32` was available.
+            let Ok(payload) = encoder.encode(&frame) else {
                 continue;
             };
+            // Empty is DTX deciding this frame is silence, not a failure. The
+            // timestamp already advanced, which is what lets the receiver tell
+            // silence from loss — M1.9.
+            if payload.is_empty() {
+                continue;
+            }
             seq = seq.wrapping_add(1);
             let header = MediaHeader {
                 version: magi_proto::PROTOCOL_VERSION,
@@ -424,8 +418,8 @@ async fn pipeline(
             let mut decoded: Vec<(u32, Vec<f32>)> = Vec::new();
             for source in &mut sources {
                 let samples = match source.buffer.tick() {
-                    Decision::Play(payload) => source.decoder.decode_f32(&payload).ok(),
-                    Decision::Conceal => source.decoder.decode_plc_f32().ok(),
+                    Decision::Play(payload) => source.decoder.decode(&payload).ok(),
+                    Decision::Conceal => source.decoder.conceal().ok(),
                     Decision::Silence | Decision::Comfort | Decision::Starved => None,
                 };
                 if let Some(samples) = samples {
@@ -454,7 +448,7 @@ async fn pipeline(
                     io.counters.snapshot(),
                     gate.metrics(),
                     mixer.metrics(),
-                    bitrate,
+                    encoder.bitrate_bps(),
                     controls.speaking.load(Ordering::Relaxed),
                 ),
                 sources: sources
@@ -469,17 +463,6 @@ async fn pipeline(
 
         tokio::time::sleep(Duration::from_millis(2)).await;
     }
-}
-
-fn build_encoder(bitrate_bps: u32) -> Result<Encoder> {
-    let mut config = EncoderConfig::new(SAMPLE_RATE_HZ, 1);
-    config.application = Some(Application::Voip);
-    config.frame_duration = Some(FrameDuration::Ms20);
-    config.bitrate = Some(bitrate_bps);
-    // ADR 0010: in-band FEC off, with the measurements behind it.
-    config.inband_fec = Some(InbandFec::Disabled);
-    config.dtx = Some(true);
-    Encoder::new(config).map_err(|error| anyhow!("{error}"))
 }
 
 #[cfg(test)]

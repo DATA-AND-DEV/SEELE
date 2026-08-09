@@ -97,16 +97,32 @@ impl PinStore for MemoryPinStore {
 pub struct TofuVerifier {
     store: Arc<dyn PinStore>,
     /// The last decision, so the shell can report what happened.
+    /// What this connection's pin is filed under. See [`TofuVerifier::new`].
+    pin_key: String,
     last: Mutex<Option<PinDecision>>,
     provider: Arc<rustls::crypto::CryptoProvider>,
 }
 
 impl TofuVerifier {
-    /// A verifier backed by the given store.
+    /// A verifier backed by the given store, filing under `pin_key`.
+    ///
+    /// The key is given rather than taken from the TLS server name, because the
+    /// two are different things and conflating them was a real bug: this
+    /// verifier never checks the certificate's names — it compares
+    /// fingerprints — so the TLS name is only a label, and both shells were
+    /// labelling every IP address `localhost`. Two Dogmas on a LAN then shared
+    /// one pin entry, and the second one to be contacted looked like the first
+    /// one's key had changed. That is the most alarming false positive this
+    /// system can produce, and it would have fired the first time somebody
+    /// tested between two machines.
+    ///
+    /// The key should be the target as the pilot typed it, port included: two
+    /// Dogmas on one host at different ports are two servers.
     #[must_use]
-    pub fn new(store: Arc<dyn PinStore>) -> Self {
+    pub fn new(store: Arc<dyn PinStore>, pin_key: String) -> Self {
         Self {
             store,
+            pin_key,
             last: Mutex::new(None),
             provider: Arc::new(rustls::crypto::ring::default_provider()),
         }
@@ -142,17 +158,12 @@ impl ServerCertVerifier for TofuVerifier {
         &self,
         end_entity: &CertificateDer<'_>,
         _intermediates: &[CertificateDer<'_>],
-        server_name: &ServerName<'_>,
+        _server_name: &ServerName<'_>,
         _ocsp_response: &[u8],
         _now: UnixTime,
     ) -> Result<ServerCertVerified, TlsError> {
-        let host = match server_name {
-            ServerName::DnsName(name) => name.as_ref().to_owned(),
-            ServerName::IpAddress(address) => format!("{address:?}"),
-            _ => "unknown".to_owned(),
-        };
-
-        let decision = self.decide(&host, end_entity.as_ref());
+        // Deliberately not derived from `_server_name`: see `Self::new`.
+        let decision = self.decide(&self.pin_key.clone(), end_entity.as_ref());
         if let Ok(mut last) = self.last.lock() {
             *last = Some(decision.clone());
         }
@@ -209,7 +220,7 @@ mod tests {
     use super::*;
 
     fn verifier() -> TofuVerifier {
-        TofuVerifier::new(Arc::new(MemoryPinStore::new()))
+        TofuVerifier::new(Arc::new(MemoryPinStore::new()), "magi.exemplo".to_owned())
     }
 
     #[test]

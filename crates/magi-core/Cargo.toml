@@ -11,8 +11,6 @@ publish.workspace = true
 [dependencies]
 magi-proto = { path = "../magi-proto" }
 magi-audio = { path = "../magi-audio" }
-# The voice path lives here, not in the shells (ADR 0002), so the codec does too.
-shiguredo_opus = { workspace = true }
 quinn = "0.11.11"
 rustls = "0.23.43"
 tokio = { version = "1.53.1", features = ["full"] }

@@ -157,9 +157,16 @@ pub struct Client {
 impl Client {
     /// Connects, runs the handshake, and returns once PATTERN: BLUE is reached.
     ///
-    /// `signing_key` is this client's identity (ADR 0004). Generating a fresh
-    /// one produces a fresh identity, which in M2 — with no accounts — is all
-    /// there is.
+    /// `signing_key` is this client's identity (ADR 0004). ADR 0017 keeps it on
+    /// disk, because CASPER binds a nickname to the identity that claimed it.
+    ///
+    /// `server_name` is what TLS is told; `pin_key` is what the pin is filed
+    /// under. They are separate on purpose — the TOFU verifier compares
+    /// fingerprints and never looks at the certificate's names, so the TLS name
+    /// is a label and the pin key is the policy. Passing the same value for
+    /// both is fine for a hostname and **wrong for an IP address**, where the
+    /// TLS name has to be something the certificate carries and the pin key has
+    /// to be the address the pilot typed.
     ///
     /// # Errors
     ///
@@ -168,13 +175,14 @@ impl Client {
     pub async fn connect(
         server: SocketAddr,
         server_name: &str,
+        pin_key: &str,
         nickname: &str,
         signing_key: &SigningKey,
         pins: Arc<dyn PinStore>,
     ) -> Result<Self, ConnectError> {
         let _ = rustls::crypto::ring::default_provider().install_default();
 
-        let verifier = Arc::new(TofuVerifier::new(pins));
+        let verifier = Arc::new(TofuVerifier::new(pins, pin_key.to_owned()));
         let mut tls = rustls::ClientConfig::builder()
             .dangerous()
             .with_custom_certificate_verifier(Arc::clone(&verifier) as Arc<_>)
