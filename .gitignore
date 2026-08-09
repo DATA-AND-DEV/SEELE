@@ -25,3 +25,9 @@
 seele.db
 seele.db-wal
 seele.db-shm
+
+# Referências visuais que entraram junto com o design. Ficam em disco para
+# consulta e **nunca** no repositório: são quadros de obra de terceiros, e um
+# repositório é distribuição. Foram expurgados da história antes do primeiro
+# push — ver o commit de renomeação.
+/design/uploads/
