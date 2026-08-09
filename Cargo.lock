@@ -2749,6 +2749,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "ed25519-dalek",
+ "magi-audio",
  "magi-core",
  "magi-ffi",
  "magi-proto",

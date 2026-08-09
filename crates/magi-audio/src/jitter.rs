@@ -242,6 +242,12 @@ pub struct JitterBuffer<T> {
     last_transit_ms: Option<f64>,
     /// Consecutive missing slots, for the conceal-once-then-silence rule.
     consecutive_missing: u32,
+    /// Ticks spent starving since the last frame actually played.
+    ///
+    /// The gap a hole leaves is only discovered when the frame after it
+    /// arrives, and by then part of it may already have gone out as nothing.
+    /// See `plan_gap`.
+    starved_since_play: u64,
     metrics: JitterMetrics,
 }
 
@@ -261,6 +267,7 @@ impl<T> JitterBuffer<T> {
             jitter_ms: 0.0,
             last_transit_ms: None,
             consecutive_missing: 0,
+            starved_since_play: 0,
             metrics: JitterMetrics {
                 target_ms: config.initial_target_ms,
                 ..JitterMetrics::default()
@@ -359,6 +366,11 @@ impl<T> JitterBuffer<T> {
         let Some(front) = self.queue.front() else {
             // Nothing waiting at all: starved rather than lost. A talker who
             // stopped is not a network problem.
+            //
+            // Counted, because this tick is real time going by with nothing
+            // played. When the next frame finally arrives, `plan_gap` uses the
+            // count to know how much of the hole has already been heard.
+            self.starved_since_play = self.starved_since_play.saturating_add(1);
             return Decision::Starved;
         };
 
@@ -366,6 +378,7 @@ impl<T> JitterBuffer<T> {
             let played = self.queue.pop_front();
             self.next_timestamp = Some(next.wrapping_add(self.frame_samples()));
             self.consecutive_missing = 0;
+            self.starved_since_play = 0;
             self.metrics.frames_played += 1;
             if let Some(held) = played {
                 self.last_played_seq = Some(held.seq);
@@ -391,6 +404,7 @@ impl<T> JitterBuffer<T> {
                 self.next_timestamp = Some(front_ts.wrapping_add(self.frame_samples()));
                 self.last_played_seq = Some(held.seq);
                 self.consecutive_missing = 0;
+                self.starved_since_play = 0;
                 self.metrics.frames_played += 1;
                 return Decision::Play(held.payload);
             }
@@ -439,8 +453,55 @@ impl<T> JitterBuffer<T> {
             None => 0,
         };
 
-        self.gap_lost_left = lost.min(total);
-        self.gap_comfort_left = total - self.gap_lost_left;
+        // How much of this gap has already been lived through.
+        //
+        // A hole is only discovered when the frame *after* it arrives. If the
+        // buffer ran dry in the meantime, those ticks already went out as
+        // nothing — the listener has heard that silence. Scheduling slots to
+        // play it again would be double-counting, and the delay it adds is
+        // permanent: every pause in a conversation would push playout further
+        // behind, pause length by pause length, until the queue hit its cap.
+        //
+        // That is why this subtraction exists, and it is the difference between
+        // a call that stays at 90 ms and one that is two seconds behind after a
+        // minute of ordinary back-and-forth.
+        //
+        // A gap found while audio was still queued is the other case: there the
+        // ticks have not been spent, the buffer has depth to pay with, and
+        // concealment does its job without adding delay.
+        let spent = std::mem::take(&mut self.starved_since_play);
+        let skipped = spent.min(total);
+        let remaining = total - skipped;
+
+        // Move the playout pointer past what has already been heard.
+        //
+        // This line is the fix, and leaving it out was the first attempt: the
+        // counters were reduced but the pointer was not moved, so the next tick
+        // found the same hole with the counter already spent and scheduled the
+        // whole thing again. The skip has to happen in the pointer or it does
+        // not happen at all.
+        let advance = u32::try_from(skipped)
+            .unwrap_or(0)
+            .wrapping_mul(self.frame_samples());
+        self.next_timestamp = Some(next_ts.wrapping_add(advance));
+
+        // What is left is spent on the lost frames first. Concealment needs a
+        // slot to happen in; silence does not, because silence is what already
+        // went out while the buffer was dry.
+        self.gap_lost_left = lost.min(remaining);
+        self.gap_comfort_left = remaining - self.gap_lost_left;
+
+        // The skipped slots still happened, and the metrics have to describe
+        // what a listener heard. Loss that fell inside them stays counted as
+        // loss — understating it would make the Sync Ratio flatter the link
+        // than it deserves — and the rest is the talker's pause.
+        let lost_skipped = lost.saturating_sub(self.gap_lost_left);
+        self.metrics.frames_silenced += lost_skipped;
+        self.metrics.frames_comfort += skipped.saturating_sub(lost_skipped);
+
+        if remaining == 0 {
+            self.consecutive_missing = 0;
+        }
     }
 
     /// Emits one slot of a planned gap, if any remain.
@@ -927,6 +988,49 @@ mod tests {
             "lost"
         );
         assert_eq!(metrics.frames_comfort, 17, "silent");
+    }
+
+    #[test]
+    fn a_pause_does_not_push_playout_permanently_behind() {
+        // The failure this is here to stop, found by the M1.16 soak: a hole is
+        // only discovered when the frame after it arrives, and by then the
+        // buffer has already spent that time starving. Scheduling slots to play
+        // the silence *again* costs the length of the pause, every pause, and
+        // never gives it back — a conversation with a breath every few seconds
+        // ends up seconds behind.
+        let mut buffer = buffer();
+        let frame = crate::FRAME_SAMPLES as u32;
+
+        // Ten frames of speech, played out.
+        for index in 0..10_u16 {
+            buffer.push(
+                index + 1,
+                u32::from(index) * frame,
+                f64::from(index) * 20.0,
+                index,
+            );
+        }
+        for _ in 0..10 {
+            buffer.tick();
+        }
+
+        // Fifty ticks of nothing: the talker paused. The listener hears silence
+        // as it happens, because there is nothing to play.
+        let during: Vec<Decision<u16>> = (0..50).map(|_| buffer.tick()).collect();
+        assert!(
+            during.iter().all(|d| matches!(d, Decision::Starved)),
+            "the buffer had audio it was not playing during the pause"
+        );
+
+        // The talker resumes. Sequence is contiguous — DTX sent nothing — and
+        // the timestamp has jumped by the whole pause.
+        buffer.push(11, 60 * frame, 1_200.0, 99);
+
+        // This tick must play. Anything else is the pause being replayed.
+        match buffer.tick() {
+            Decision::Play(payload) => assert_eq!(payload, 99),
+            other => panic!("the pause was replayed instead of resuming: {other:?}"),
+        }
     }
 
     #[test]

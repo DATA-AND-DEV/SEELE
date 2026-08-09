@@ -17,6 +17,8 @@ publish.workspace = true
 
 [dev-dependencies]
 magi-proto = { path = "../magi-proto" }
+# The soak drives the real pipeline: codec, jitter buffer, network simulator.
+magi-audio = { path = "../magi-audio" }
 magi-core = { path = "../magi-core" }
 magi-server = { path = "../magi-server" }
 magi-ffi = { path = "../magi-ffi" }
