@@ -185,6 +185,14 @@ jobs:
           path: entrega
           merge-multiple: true
 
+      # As somas são o que torna o instalador por `curl` defensável: sem elas,
+      # quem roda o script está confiando no canal, e não no conteúdo.
+      - name: Somas de verificação
+        working-directory: entrega
+        run: |
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
       - name: Listar o que será publicado
         run: ls -la entrega
 
