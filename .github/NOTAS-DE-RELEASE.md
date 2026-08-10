@@ -1,20 +1,47 @@
 ## O que baixar
 
-| você quer | baixe |
+**Um arquivo por sistema.** Ele traz as duas metades do SEELE: o cliente
+gráfico e as duas ferramentas de terminal.
+
+| sistema | baixe |
 |---|---|
-| **Windows** — cliente gráfico | `SEELE_<versão>_x64-setup.exe` ou `SEELE_<versão>_x64_en-US.msi` |
-| **Windows** — terminal e servidor | `seele-cli-<versão>-windows-x86_64.zip` |
-| **macOS** — cliente gráfico | `SEELE_<versão>_universal.dmg` (Intel e Apple Silicon) |
-| **macOS** — terminal e servidor | `seele-cli-<versão>-macos.tar.gz` (universal) |
-| **Linux** — cliente gráfico | `.deb` (Debian/Ubuntu) ou `.AppImage` (qualquer distro) |
-| **Linux** — terminal e servidor | `seele-cli-<versão>-linux.tar.gz` |
+| **Windows** | `SEELE_<versão>_x64-setup.exe` |
+| **macOS** | `SEELE_<versão>_universal.dmg` — Intel e Apple Silicon |
+| **Linux** | `SEELE_<versão>_amd64.deb` — Debian, Ubuntu e derivados |
 
-Os arquivos `seele-cli-*` contêm dois programas:
+Dentro de cada um vão três programas:
 
+- **`SEELE`** — o cliente gráfico. Tem um botão **HOSPEDAR AQUI**, e com ele
+  você nunca precisa abrir um terminal.
 - **`plug`** — o cliente de terminal, que é o produto principal.
-- **`seeled`** — o servidor. Só uma das máquinas precisa rodá-lo.
+- **`seeled`** — o servidor, para quem quer um Dogma no ar o tempo todo. Só uma
+  das máquinas precisa dele.
 
-Nenhum dos dois precisa de instalação: descompacte e execute.
+### Onde ficam o `plug` e o `seeled`
+
+No **Linux** o `.deb` põe os dois em `/usr/bin`: é só digitar `plug`.
+
+No **macOS** eles vão dentro do app. Para tê-los no `PATH`:
+
+```sh
+sudo ln -sf /Applications/SEELE.app/Contents/MacOS/plug   /usr/local/bin/plug
+sudo ln -sf /Applications/SEELE.app/Contents/MacOS/seeled /usr/local/bin/seeled
+```
+
+No **Windows** ficam na pasta do programa, em
+`%LOCALAPPDATA%\Programs\SEELE`. O instalador ainda não acrescenta essa pasta
+ao `PATH` — está anotado como pendência.
+
+### E os `seele-cli-*`?
+
+São o mesmo `plug` e `seeled` num arquivo solto, e existem para o instalador de
+uma linha:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/DATA-AND-DEV/SEELE/main/install.sh | sh
+```
+
+Se você baixou o instalador do seu sistema, **não precisa deles**.
 
 ---
 
@@ -26,12 +53,22 @@ Windows. O sistema operacional vai reclamar, e a reclamação não significa que
 arquivo esteja corrompido ou infectado — significa que ninguém pagou para
 garantir quem o produziu.
 
-**macOS.** O Gatekeeper vai dizer que o app "está danificado e não pode ser
-aberto". Ele não está. Depois de arrastar para Aplicativos:
+**macOS.** É a reclamação mais dura das três, e a mais assustadora: o sistema
+diz que **não consegue verificar se o app contém malware**, e o botão que
+aparece é "Mover para o Lixo". Não é detecção de nada — é a ausência de
+notarização, que exige uma conta paga de desenvolvedor da Apple.
+
+Depois de arrastar o app para Aplicativos, uma linha resolve:
 
 ```sh
 xattr -dr com.apple.quarantine /Applications/SEELE.app
 ```
+
+Sem terminal: **clique com o botão direito** no app → **Abrir** → **Abrir** de
+novo no alerta. O caminho pelo botão direito é o único que oferece "Abrir";
+o duplo clique não oferece, e é por isso que parece que não há saída.
+
+Se aparecer de novo depois de uma atualização, é a mesma linha.
 
 Para os binários de linha de comando, o mesmo na pasta onde você os
 descompactou:

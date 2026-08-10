@@ -192,6 +192,23 @@ duas máquinas.
 
 ## Instalar
 
+### Um arquivo, tudo dentro
+
+Na aba **Releases**, um instalador por sistema: `.dmg` no macOS, `.exe` no
+Windows, `.deb` no Linux. Cada um traz as três coisas — o app gráfico, o `plug`
+e o `seeled` —, então quem instala não precisa decidir nada antes de entender a
+diferença.
+
+**Nada é assinado.** No macOS o sistema vai dizer que *não consegue verificar
+se o app contém malware*, e o botão que ele oferece é "Mover para o Lixo". Não
+é detecção de nada: é a ausência de notarização, que exige conta paga da Apple.
+A saída é uma linha, `xattr -dr com.apple.quarantine /Applications/SEELE.app`,
+ou abrir pelo botão direito → **Abrir**. No Windows o SmartScreen avisa e o
+caminho é **Mais informações** → **Executar assim mesmo**. As notas de release
+explicam cada caso.
+
+### Só o terminal, numa linha
+
 **macOS e Linux:**
 
 ```sh
@@ -222,9 +239,15 @@ cargo build --release --bin seeled --bin plug
 
 No Windows isso pede o Build Tools do Visual Studio — ver `docs/windows.md`.
 
-Instaladores gráficos (`.dmg`, `.msi`, `.deb`, `.AppImage`) saem na aba
-Releases. **Nada é assinado**: o macOS vai dizer que o app está danificado e
-não está, e o SmartScreen vai avisar. As saídas estão nas notas do release.
+Depois de instalar pelo `.dmg`, o `plug` e o `seeled` moram dentro do app. Para
+tê-los no `PATH`:
+
+```sh
+sudo ln -sf /Applications/SEELE.app/Contents/MacOS/{plug,seeled} /usr/local/bin/
+```
+
+No Linux o `.deb` já os põe em `/usr/bin`. No Windows ficam na pasta do
+programa e ainda não entram no `PATH` — ver `docs/pendencias.md`.
 
 ---
 

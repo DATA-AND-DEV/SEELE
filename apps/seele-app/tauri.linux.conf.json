@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "externalBin": [],
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/bin/plug": "binaries/plug-x86_64-unknown-linux-gnu",
+          "/usr/bin/seeled": "binaries/seeled-x86_64-unknown-linux-gnu"
+        }
+      }
+    }
+  }
+}

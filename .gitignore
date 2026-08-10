@@ -31,3 +31,6 @@ seele.db-shm
 # repositório é distribuição. Foram expurgados da história antes do primeiro
 # push — ver o commit de renomeação.
 /design/uploads/
+
+# Acompanhantes do app, copiados pelo release a partir de target/.
+apps/seele-app/binaries/

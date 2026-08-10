@@ -88,15 +88,26 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Um formato por sistema, de propósito. Uma página de release com
+          # .deb, .AppImage, .msi, .exe e .dmg obriga quem chegou a escolher
+          # antes de entender a diferença — e a primeira escolha de quem não
+          # sabe é fechar a aba.
+          #
+          # `.deb` e não AppImage: é o único formato que instala `plug` e
+          # `seeled` em `/usr/bin`, e o pedido era um arquivo que traga as duas
+          # metades. Quem não usa Debian nem Ubuntu tem o instalador por `curl`
+          # e o código-fonte.
           - os: ubuntu-24.04
             nome: linux
-            bundles: deb,appimage
-          - os: macos-15
-            nome: macos
-            bundles: dmg,app
+            bundles: deb
+          # `.exe` do NSIS e não `.msi`: instala no perfil sem pedir
+          # administrador, e o MSI é o que recusa versão com pré-lançamento.
           - os: windows-2022
             nome: windows
-            bundles: msi,nsis
+            bundles: nsis
+          - os: macos-15
+            nome: macos
+            bundles: dmg
 
     steps:
       - uses: actions/checkout@v4
@@ -153,14 +164,69 @@ jobs:
             lipo -info "target/release/${binario}"
           done
 
+      # Os dois entram **dentro** do instalador do app.
+      #
+      # Era isto que faltava: quem baixava o app ganhava só a metade gráfica, e
+      # hospedar ou usar o terminal exigia baixar outro arquivo. Agora um
+      # instalador traz as duas metades, que é o que "hospede você mesmo" quer
+      # dizer na prática.
+      #
+      # O Tauri procura acompanhantes pelo nome com o alvo no fim, e no macOS
+      # **universal ele quer os três nomes**: um por arquitetura, porque compila
+      # duas vezes, e o `-universal-apple-darwin`, porque é o que ele copia para
+      # dentro do bundle. Descoberto tentando aqui: com só o universal ele para
+      # em "resource path binaries/plug-aarch64-apple-darwin doesn't exist", e
+      # com só os dois por arquitetura ele compila e para na hora de empacotar.
+      - name: Pôr seeled e plug junto do app
+        shell: bash
+        run: |
+          set -eu
+          mkdir -p apps/seele-app/binaries
+
+          if [ "${{ matrix.nome }}" = "macos" ]; then
+            for binario in plug seeled; do
+              for alvo in aarch64-apple-darwin x86_64-apple-darwin; do
+                cp "target/${alvo}/release/${binario}" \
+                   "apps/seele-app/binaries/${binario}-${alvo}"
+              done
+              cp "target/release/${binario}" \
+                 "apps/seele-app/binaries/${binario}-universal-apple-darwin"
+            done
+          else
+            case "${{ matrix.nome }}" in
+              windows) alvo="x86_64-pc-windows-msvc"; sufixo=".exe" ;;
+              linux)   alvo="x86_64-unknown-linux-gnu"; sufixo="" ;;
+            esac
+            for binario in plug seeled; do
+              cp "target/release/${binario}${sufixo}" \
+                 "apps/seele-app/binaries/${binario}-${alvo}${sufixo}"
+            done
+          fi
+
+          ls -la apps/seele-app/binaries
+
       # ---------------------------------------------------------------- app
 
       - name: Instalar a CLI do Tauri
         run: cargo install tauri-cli --version "^2" --locked
 
+      # Assinatura e notarização da Apple, se houver credencial.
+      #
+      # Sem elas o Gatekeeper recusa abrir o app baixado — "não foi possível
+      # verificar se contém malware" — e não há truque que resolva: exige uma
+      # Developer ID paga. Os segredos entram vazios enquanto não existirem, o
+      # Tauri ignora, e o `.dmg` sai sem assinar. As NOTAS-DE-RELEASE dizem o
+      # que fazer nesse caso em vez de deixar a pessoa sozinha com o alerta.
       - name: Empacotar o app (macOS universal)
         if: matrix.nome == 'macos'
         working-directory: apps/seele-app
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: cargo tauri build --target universal-apple-darwin --bundles ${{ matrix.bundles }}
 
       - name: Empacotar o app
@@ -191,7 +257,18 @@ jobs:
                -o -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' \) \
             -exec cp {} "$destino/" \; 2>/dev/null || true
 
-          # As duas ferramentas de linha de comando, num arquivo só por sistema.
+          instaladores=$(find "$destino" -maxdepth 1 -type f | wc -l | tr -d ' ')
+          if [ "$instaladores" != "1" ]; then
+            echo "::error::esperava exatamente um instalador e vieram ${instaladores}."
+            echo "Um arquivo por sistema é o combinado; ver a matriz deste workflow." >&2
+            ls -la "$destino" >&2
+            exit 1
+          fi
+
+          # O arquivo da CLI **não** é um segundo instalador: é o que o
+          # `install.sh` e o `install.ps1` baixam. Sem ele o `curl | sh` que
+          # existe justamente para quem não quer instalador nenhum para de
+          # funcionar.
           if [ "${{ matrix.nome }}" = "windows" ]; then
             7z a "$destino/seele-cli-${versao}-windows-x86_64.zip" \
               ./target/release/seeled.exe ./target/release/plug.exe
