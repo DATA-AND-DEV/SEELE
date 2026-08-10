@@ -520,6 +520,7 @@ async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<
 
     runtime.app.screen = Screen::PatternBlue;
     view::project(&runtime.room, &mut runtime.app);
+    runtime.app.refazer_busca();
 
     let (key_tx, mut key_rx) = tokio::sync::mpsc::channel::<Event>(64);
     std::thread::spawn(move || read_terminal_events(&key_tx));
@@ -565,6 +566,7 @@ async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<
                         // thirty frames a second of nothing.
                         if runtime.room.apply(&message).any() {
                             view::project(&runtime.room, &mut runtime.app);
+                            runtime.app.refazer_busca();
                             dirty = true;
                         }
                     }
@@ -588,6 +590,7 @@ async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<
                         }
                         runtime.room.adopt(&sessao, &args.nickname);
                         view::project(&runtime.room, &mut runtime.app);
+                        runtime.app.refazer_busca();
                         note(&mut runtime, "enlace restabelecido.".to_owned());
                         dirty = true;
                     }
@@ -822,6 +825,7 @@ async fn activate(runtime: &mut Runtime, client: &Enlace) -> Result<()> {
                 client.inserir_plug(id).await?;
                 runtime.room.enter_cage(id);
                 view::project(&runtime.room, &mut runtime.app);
+                runtime.app.refazer_busca();
             }
         }
         Node::Line { name } => {
@@ -845,6 +849,7 @@ async fn open_line(runtime: &mut Runtime, client: &Enlace, line: LineId) -> Resu
     client.historico(line, 50).await?;
     runtime.app.local.clear();
     view::project(&runtime.room, &mut runtime.app);
+    runtime.app.refazer_busca();
     Ok(())
 }
 
@@ -857,6 +862,7 @@ async fn run_command(runtime: &mut Runtime, client: &Enlace, command: &Command) 
                 client.inserir_plug(id).await?;
                 runtime.room.enter_cage(id);
                 view::project(&runtime.room, &mut runtime.app);
+                runtime.app.refazer_busca();
             } else {
                 note(runtime, format!("nenhum Cage com «{which}»"));
             }

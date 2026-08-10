@@ -256,6 +256,14 @@ pub struct App {
     pub bar: Bar,
     /// The composition buffer, shared by Insert, Command and Search.
     pub input: String,
+    /// The current search, when there is one.
+    ///
+    /// Stored here rather than recomputed every frame because the cursor for
+    /// `n` and `N` is state: recomputing would lose which occurrence the
+    /// person was on.
+    pub busca: Option<seele_core::search::Search>,
+    /// The term that produced `busca`, kept to redraw the highlight.
+    pub termo: String,
     /// A banner, if there is one.
     pub alert: Option<Alert>,
     /// Whether this pilot is transmitting.
@@ -306,6 +314,8 @@ impl App {
             local: Vec::new(),
             bar: Bar::default(),
             input: String::new(),
+            busca: None,
+            termo: String::new(),
             alert: None,
             speaking: false,
             at_field: false,
@@ -386,11 +396,23 @@ impl App {
             Mode::Normal => self.on_normal(key),
             Mode::Insert => self.on_typing(key, Action::Send),
             Mode::Command => self.on_typing(key, Action::Command),
-            // Search filters the message list as it is typed, so there is
-            // nothing to do on submit but leave the mode — which on_typing
-            // already did by the time the discarded action comes back.
+            // The search finds matches while typing, and the counter moves
+            // along with it: it is the feedback that says whether it is worth
+            // continuing to type. `Enter` confirms and returns to Normal with
+            // the highlight in place; `Esc` gives up and clears it.
             Mode::Search => {
-                let _ = self.on_typing(key, Action::Command);
+                let desistiu = key == Key::Esc;
+                let resultado = self.on_typing(key, Action::Command);
+                if desistiu {
+                    self.busca = None;
+                    self.termo.clear();
+                } else if self.mode == Mode::Search {
+                    self.termo.clone_from(&self.input);
+                    self.refazer_busca();
+                } else if let Some(Action::Command(termo)) = resultado {
+                    self.termo = termo;
+                    self.refazer_busca();
+                }
                 None
             }
         }
@@ -409,6 +431,8 @@ impl App {
             Key::Char('/') => {
                 self.mode = Mode::Search;
                 self.input.clear();
+                self.termo.clear();
+                self.busca = None;
             }
             Key::Char('?') => self.help = true,
             Key::Tab => self.focus = self.focus.next(),
@@ -424,6 +448,17 @@ impl App {
             Key::Char('G') => self.jump(Edge::Last),
             Key::Char('m') => return Some(Action::ToggleAtField),
             Key::Char('d') => return Some(Action::ToggleTotalIsolation),
+            // `n` and `N` were free, and it is where Vim puts them.
+            Key::Char('n') => {
+                if let Some(busca) = self.busca.as_mut() {
+                    busca.next_match();
+                }
+            }
+            Key::Char('N') => {
+                if let Some(busca) = self.busca.as_mut() {
+                    busca.previous_match();
+                }
+            }
             Key::Enter => return Some(Action::Activate),
             // specs/05-cliente-tui.md marks the space bar as open: it collides
             // with typing. Decision D19 keeps push-to-talk in Normal mode only,
@@ -539,6 +574,26 @@ impl App {
     /// Records that the app should exit. `:q` — "ejetar e sair".
     pub fn quit(&mut self) {
         self.quit = true;
+    }
+
+    /// Redoes the search over the current history, keeping the term.
+    ///
+    /// Called when a message arrives: indices shift, and a cursor that does
+    /// not keep up points at the wrong line. If the current occurrence
+    /// disappeared, the cursor goes back to the first instead of falling out
+    /// of range.
+    pub fn refazer_busca(&mut self) {
+        if self.termo.trim().is_empty() {
+            self.busca = None;
+            return;
+        }
+        self.busca = Some(seele_core::search::Search::new(
+            self.messages
+                .iter()
+                .chain(&self.local)
+                .map(|linha| seele_core::search::normalize(&linha.body)),
+            &self.termo,
+        ));
     }
 }
 
@@ -861,6 +916,112 @@ mod tests {
         app.on_key(Key::Char('l'));
         assert_eq!(app.focus, focus_before);
         assert_eq!(app.input, "l");
+    }
+
+    fn app_with_history() -> App {
+        let mut app = App::new();
+        app.messages = ["sync caiu", "verificando harmônicos", "sync voltou"]
+            .into_iter()
+            .map(|corpo| ChatLine {
+                at: "12:00".into(),
+                author: "piloto".into(),
+                body: corpo.into(),
+                own: false,
+            })
+            .collect();
+        app
+    }
+
+    #[test]
+    fn the_search_finds_matches_while_typing() {
+        // This is the defect the plan exists to fix: the mode was entered, the
+        // bar wrote BUSCA, and the text was discarded without anyone looking at
+        // it.
+        let mut app = app_with_history();
+        app.on_key(Key::Char('/'));
+        for character in "sync".chars() {
+            app.on_key(Key::Char(character));
+        }
+        let busca = app.busca.as_ref().map(seele_core::search::Search::position);
+        assert_eq!(busca, Some((1, 2)));
+    }
+
+    #[test]
+    fn n_and_shift_n_step_through_occurrences_in_normal_mode() {
+        let mut app = app_with_history();
+        app.on_key(Key::Char('/'));
+        for character in "sync".chars() {
+            app.on_key(Key::Char(character));
+        }
+        app.on_key(Key::Enter);
+        assert_eq!(app.mode, Mode::Normal);
+
+        app.on_key(Key::Char('n'));
+        assert_eq!(
+            app.busca.as_ref().map(seele_core::search::Search::position),
+            Some((2, 2))
+        );
+        app.on_key(Key::Char('N'));
+        assert_eq!(
+            app.busca.as_ref().map(seele_core::search::Search::position),
+            Some((1, 2))
+        );
+    }
+
+    #[test]
+    fn enter_keeps_the_highlight_and_escape_clears_it() {
+        let mut app = app_with_history();
+        app.on_key(Key::Char('/'));
+        app.on_key(Key::Char('s'));
+        app.on_key(Key::Enter);
+        assert!(app.busca.is_some(), "confirming a search must not erase it");
+
+        app.on_key(Key::Char('/'));
+        app.on_key(Key::Char('s'));
+        app.on_key(Key::Esc);
+        assert!(app.busca.is_none(), "giving up erases it");
+    }
+
+    #[test]
+    fn n_without_an_active_search_does_nothing_and_does_not_panic() {
+        let mut app = app_with_history();
+        assert_eq!(app.on_key(Key::Char('n')), None);
+        assert!(app.busca.is_none());
+    }
+
+    #[test]
+    fn clearing_the_term_down_to_nothing_clears_the_search() {
+        // `refazer_busca` with an empty term zeroes out the whole search, and does
+        // not leave an empty search standing: a dangling [0/0] counter after
+        // clearing everything would say a search was still in progress.
+        let mut app = app_with_history();
+        app.on_key(Key::Char('/'));
+        app.on_key(Key::Char('s'));
+        app.on_key(Key::Backspace);
+        assert!(app.busca.is_none());
+    }
+
+    #[test]
+    fn a_new_message_during_a_search_is_rematched() {
+        // Indices shift when a new message arrives; redoing the search is what
+        // stops the cursor from pointing at a line that moved.
+        let mut app = app_with_history();
+        app.on_key(Key::Char('/'));
+        for character in "sync".chars() {
+            app.on_key(Key::Char(character));
+        }
+        app.on_key(Key::Enter);
+        app.messages.push(ChatLine {
+            at: "12:05".into(),
+            author: "rei".into(),
+            body: "sync estável".into(),
+            own: false,
+        });
+        app.refazer_busca();
+        assert_eq!(
+            app.busca.as_ref().map(seele_core::search::Search::position),
+            Some((1, 3))
+        );
     }
 }
 
