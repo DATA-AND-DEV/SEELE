@@ -985,12 +985,9 @@ Para isso, `message_lines` precisa dizer em que linha desenhada a corrente caiu.
 Run: `cargo test -p seele-tui && cargo clippy -p seele-tui --all-targets -- -D warnings`
 Expected: PASS, sem avisos.
 
-- [ ] **Step 7: Conferir a olho**
+**Conferência a olho: não é sua.** O controlador roda `cargo run -p seele-tui --example telas` depois desta tarefa. Não tente abrir um terminal interativo.
 
-Run: `cargo run -p seele-tui --example telas`
-O exemplo desenha as telas sem servidor. Confirme que o realce aparece e que o contador está legível.
-
-- [ ] **Step 8: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add crates/seele-tui/src/ui.rs
@@ -1301,10 +1298,16 @@ apareceria primeiro."
 
 ---
 
-### Task 7: App — os comandos que faltavam, e gravar em `conhecidos`
+### Task 7: App — os comandos, a tela de entrada e a busca
+
+**Tarefa grande de propósito.** As duas metades não se separam: o guarda `no_command_is_registered_and_never_called` (`apps/seele-app/tests/frontend.rs:76`) falha enquanto os seis comandos existirem sem nenhum `invoke` chamando, e só o frontend os chama. Uma tarefa que fecha com a suíte vermelha não é uma tarefa que alguém possa aprovar.
 
 **Files:**
 - Modify: `apps/seele-app/src/main.rs` (`Session` em 37, `connect` em 96, `generate_handler!` em 328)
+- Modify: `apps/seele-app/ui/index.html` (tela de boot em 25-78, painel de mensagens em 148-156)
+- Modify: `apps/seele-app/ui/seele.js` (`conectar` em 377, `desenharMensagens` em 246, ouvintes em 481)
+- Modify: `apps/seele-app/ui/seele.css`
+- Modify: `apps/seele-app/tests/frontend.rs`
 
 **Interfaces:**
 - Consumes: `seele_core::busca::{Busca, normalizar}` da Task 1; `seele_core::conhecidos::{Conhecidos, Conhecido}`; `seele_core::uri::analisar`.
@@ -1466,43 +1469,9 @@ Em `generate_handler!` (linha 328), acrescente ao fim da lista:
 - [ ] **Step 4: Compilar**
 
 Run: `cargo build -p seele-app`
-Expected: compila. Se `Casamento` não serializar, volte ao Passo 1.
+Expected: compila. **Não rode `cargo test -p seele-app` ainda** — o guarda `no_command_is_registered_and_never_called` vai falhar até o frontend chamar os comandos, e é o Passo 12 que fecha isso. Não commite aqui: esta tarefa tem um commit só, no fim.
 
-- [ ] **Step 5: Rodar os guardas do frontend**
-
-Run: `cargo test -p seele-app`
-Expected: **FALHA esperada** em `no_command_is_registered_and_never_called` — os seis comandos novos ainda não são chamados por nenhum `invoke`. A Task 8 os chama. Anote e siga.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add apps/seele-app/src/main.rs crates/seele-core/src/busca.rs
-git commit -m "feat(app): os comandos da tela de entrada e da busca
-
-O app nunca tocou em \`conhecidos\` — nem para ler nem para gravar. A
-lista na tela é a metade visível; \`registrar\` depois de conectar é a
-metade que a faz valer alguma coisa, e sem ela a seção nasceria
-permanentemente vazia.
-
-O cursor da busca fica na \`Session\` e não no frontend, porque é ele que
-impede a regra de dar-a-volta de ser reescrita em JavaScript. Ler um
-\`seele://\` também é Rust: \`specs/06:19\` é inegociável."
-```
-
----
-
-### Task 8: App — a tela de entrada e a busca no painel
-
-**Files:**
-- Modify: `apps/seele-app/ui/index.html` (tela de boot em 25-78, painel de mensagens em 148-156)
-- Modify: `apps/seele-app/ui/seele.js` (`conectar` em 377, ouvintes em 481)
-- Modify: `apps/seele-app/ui/seele.css`
-
-**Interfaces:**
-- Consumes: os seis comandos da Task 7.
-- Produces: nada.
-
-- [ ] **Step 1: Marcação da tela de entrada**
+- [ ] **Step 5: Marcação da tela de entrada**
 
 Em `apps/seele-app/ui/index.html`, dentro de `<div class="boot">`, **antes** do `<form id="form-conectar">`:
 
@@ -1546,7 +1515,7 @@ No painel de mensagens (linha 148), depois do `<h2 class="painel-titulo">`:
       </form>
 ```
 
-- [ ] **Step 2: Preencher a lista de visitados**
+- [ ] **Step 6: Preencher a lista de visitados**
 
 Em `apps/seele-app/ui/seele.js`, acrescente:
 
@@ -1599,7 +1568,7 @@ async function desenharVisitados() {
 
 Chame `desenharVisitados()` no arranque, junto dos outros ouvintes (perto da linha 481), e de novo depois de `ejetar()` — quem acabou de sair de um Dogma tem que vê-lo na lista.
 
-- [ ] **Step 3: Ler o convite colado**
+- [ ] **Step 7: Ler o convite colado**
 
 ```js
 async function lerConvite() {
@@ -1641,7 +1610,7 @@ Em `conectar()`, na chamada de `invoke("connect", …)`, acrescente o campo:
 
 **Confira o nome.** O parâmetro em Rust é `join_secret` (`apps/seele-app/src/main.rs:102`), e o Tauri converte snake_case para camelCase na ponte. Veja como os outros comandos já são chamados no arquivo e siga a mesma forma — se `set_at_field` é invocado com `{ on: … }`, a conversão está ativa.
 
-- [ ] **Step 4: Ligar a busca**
+- [ ] **Step 8: Ligar a busca**
 
 O snapshot já desenhado vive na variável `desenhado` (linha 21). Os casamentos ficam num módulo à parte para `desenharMensagens` alcançá-los:
 
@@ -1715,7 +1684,7 @@ No `keydown` da janela (linha 596), acrescente antes do tratamento da barra de e
   }
 ```
 
-- [ ] **Step 5: Acender o termo nas mensagens**
+- [ ] **Step 9: Acender o termo nas mensagens**
 
 `desenharMensagens` (linha 246) monta o corpo com `elemento("div", "corpo", mensagem.body)` — o texto entra como **argumento**, e `elemento` não aceita nós. A linha precisa virar duas.
 
@@ -1781,7 +1750,7 @@ fn o_frontend_normaliza_o_corpo_antes_de_fatiar_o_realce() {
 }
 ```
 
-- [ ] **Step 6: Estilo**
+- [ ] **Step 10: Estilo**
 
 Em `apps/seele-app/ui/seele.css`, acrescente. Use **só** variáveis de `tokens.css` — nenhuma cor literal, porque o teste `apps/seele-app/tests/tokens.rs` guarda isso. Antes de escrever, rode `grep -n "^  --" apps/seele-app/ui/tokens.css` e use os nomes que existirem; os abaixo são a forma, não a lista.
 
@@ -1810,23 +1779,18 @@ Em `apps/seele-app/ui/seele.css`, acrescente. Use **só** variáveis de `tokens.
 Run: `cargo test -p seele-app tokens`
 Expected: PASS. Se falhar, uma cor literal escapou — troque pela variável, nunca relaxe o teste.
 
-- [ ] **Step 7: Rodar os guardas**
+- [ ] **Step 11: Rodar os guardas**
 
 Run: `cargo test -p seele-app`
 Expected: PASS, incluindo `every_command_the_frontend_calls_is_registered`, `no_command_is_registered_and_never_called`, `every_element_the_script_reaches_for_exists_in_the_page` e `the_frontend_never_names_a_protocol_concept`.
 
 Se `the_frontend_never_names_a_protocol_concept` falhar, algum conceito de protocolo vazou para o JS. O conserto é mover a lógica para um comando, nunca relaxar o teste.
 
-- [ ] **Step 8: Conferir a olho**
-
-Run: `cargo tauri dev` (ou o que `docs/como-testar.md` mandar)
-Confirme: sem visitados a tela é a de antes; depois de conectar uma vez e ejetar, o Dogma aparece na lista; colar um `seele://` preenche o endereço; um link inválido mostra a frase sem limpar o formulário; a busca acende e o contador anda.
-
-- [ ] **Step 9: Rodar tudo e commitar**
+- [ ] **Step 12: Rodar tudo e commitar**
 
 ```bash
 cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && cargo fmt --all --check
-git add apps/seele-app/ui/index.html apps/seele-app/ui/seele.js apps/seele-app/ui/seele.css apps/seele-app/src/main.rs crates/seele-core/src/busca.rs
+git add apps/seele-app/ui/index.html apps/seele-app/ui/seele.js apps/seele-app/ui/seele.css apps/seele-app/src/main.rs apps/seele-app/tests/frontend.rs
 git commit -m "feat(app): a tela de entrada lembra onde você esteve, e a busca busca
 
 A lista de visitados fica acima do formulário e some inteira quando está
@@ -1838,9 +1802,11 @@ Os intervalos do realce vêm prontos do Rust: com dobramento de acento o
 frontend não teria como saber onde o casamento começou."
 ```
 
+**Conferência a olho: não é sua.** O controlador roda `cargo tauri dev` e confere a tela depois desta tarefa. Não tente abrir a janela.
+
 ---
 
-### Task 9: Fechar a documentação
+### Task 8: Fechar a documentação
 
 **Files:**
 - Modify: `docs/pendencias.md`
@@ -1896,10 +1862,14 @@ comando só, sem passar pela tela, continua sem fazer."
 
 ```
 Task 1 (core::busca) ─┬─> Task 3 (busca na TUI) ──> Task 4 (desenho)
-                      └─> Task 7 (comandos do app) ──> Task 8 (frontend)
+                      └─> Task 7 (app: comandos + tela + busca)
 Task 2 (foco) ────────────> (independente)
 Task 5 (ejetar) ──────────> Task 6 (conformidade)
-Task 9 (docs) ────────────> depois de todas
+Task 8 (docs) ────────────> depois de todas
 ```
 
 Tasks 2 e 5 não dependem de nada e podem sair primeiro se convier. **A Task 6 é a que carrega o risco** — se ela falhar, a Task 5 precisa voltar à mesa antes de qualquer coisa a jusante.
+
+**A Task 7 é grande e não se parte.** O guarda `no_command_is_registered_and_never_called` amarra os comandos Rust ao frontend que os chama: separá-los produziria uma tarefa que fecha com a suíte vermelha, que ninguém pode aprovar.
+
+**Duas conferências a olho são do controlador**, não dos subagentes: depois da Task 4 (`cargo run -p seele-tui --example telas`) e depois da Task 7 (`cargo tauri dev`).
