@@ -1,0 +1,229 @@
+name: Release
+
+# Dispara ao empurrar uma tag `v*`, ou manualmente pela aba Actions.
+#
+# O manual existe para que dê para provar o pipeline sem cortar uma versão —
+# um workflow de release que só roda quando alguém já decidiu lançar é um
+# workflow que estreia no pior momento possível.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      versao:
+        description: "Versão a gravar nos instaladores (ex.: 0.1.0)"
+        required: false
+        default: "0.0.0-dev"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Decide a versão uma vez, para que os três sistemas gravem a mesma coisa.
+  versao:
+    name: versão
+    runs-on: ubuntu-24.04
+    outputs:
+      numero: ${{ steps.calcular.outputs.numero }}
+      tag: ${{ steps.calcular.outputs.tag }}
+    steps:
+      - id: calcular
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME}"
+            numero="${tag#v}"
+          else
+            numero="${{ inputs.versao }}"
+            tag="v${numero}"
+          fi
+          echo "numero=${numero}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "versão ${numero}, tag ${tag}"
+
+  empacotar:
+    name: ${{ matrix.nome }}
+    needs: versao
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Um sistema quebrado não deve esconder o resultado dos outros dois.
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            nome: linux
+            bundles: deb,appimage
+          - os: macos-15
+            nome: macos
+            bundles: dmg,app
+          - os: windows-2022
+            nome: windows
+            bundles: msi,nsis
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Mesmas dependências do CI. Ver o comentário em ci.yml sobre o webkit2gtk
+      # ter chegado com o Tauri em M5.
+      - name: Dependências de sistema (Linux)
+        if: matrix.nome == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            pkg-config \
+            libasound2-dev \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libxdo-dev
+
+      # Um .dmg por Mac só serve se rodar nos dois. O runner é arm64, então o
+      # alvo Intel entra explicitamente e os binários viram universais no fim.
+      - name: Alvo Intel (macOS)
+        if: matrix.nome == 'macos'
+        run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.nome }}
+
+      # A versão vive no tauri.conf.json, e é ela que aparece no instalador e no
+      # "Sobre" do sistema. Gravada aqui para que o arquivo baixado não diga
+      # 0.0.0 quando a tag diz outra coisa.
+      - name: Gravar a versão
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          caminho = pathlib.Path("apps/seele-app/tauri.conf.json")
+          config = json.loads(caminho.read_text())
+          config["version"] = "${{ needs.versao.outputs.numero }}"
+          caminho.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n")
+          print("versão gravada:", config["version"])
+          PY
+
+      # ---------------------------------------------------------------- CLI
+      #
+      # `seeled` e `plug` são o que faz o teste entre duas máquinas não exigir
+      # um compilador em cada uma delas. Vêm antes do app de propósito: são o
+      # produto principal (`specs/00-visao-geral.md`) e o que menos pode falhar.
+
+      - name: Compilar seeled e plug
+        if: matrix.nome != 'macos'
+        run: cargo build --release --bin seeled --bin plug
+
+      - name: Compilar seeled e plug (universal, macOS)
+        if: matrix.nome == 'macos'
+        run: |
+          cargo build --release --bin seeled --bin plug --target aarch64-apple-darwin
+          cargo build --release --bin seeled --bin plug --target x86_64-apple-darwin
+          mkdir -p target/release
+          for binario in seeled plug; do
+            lipo -create -output "target/release/${binario}" \
+              "target/aarch64-apple-darwin/release/${binario}" \
+              "target/x86_64-apple-darwin/release/${binario}"
+            lipo -info "target/release/${binario}"
+          done
+
+      # ---------------------------------------------------------------- app
+
+      - name: Instalar a CLI do Tauri
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Empacotar o app (macOS universal)
+        if: matrix.nome == 'macos'
+        working-directory: apps/seele-app
+        run: cargo tauri build --target universal-apple-darwin --bundles ${{ matrix.bundles }}
+
+      - name: Empacotar o app
+        if: matrix.nome != 'macos'
+        working-directory: apps/seele-app
+        run: cargo tauri build --bundles ${{ matrix.bundles }}
+
+      # ------------------------------------------------------------- reunir
+
+      - name: Reunir os arquivos
+        shell: bash
+        run: |
+          set -eu
+          versao="${{ needs.versao.outputs.numero }}"
+          destino="entrega"
+          mkdir -p "$destino"
+
+          # O bundle do macOS universal sai noutra pasta.
+          if [ "${{ matrix.nome }}" = "macos" ]; then
+            raiz="target/universal-apple-darwin/release/bundle"
+          else
+            raiz="target/release/bundle"
+          fi
+
+          # Instaladores, seja qual for o formato que a plataforma produziu.
+          find "$raiz" -type f \
+            \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
+               -o -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' \) \
+            -exec cp {} "$destino/" \; 2>/dev/null || true
+
+          # As duas ferramentas de linha de comando, num arquivo só por sistema.
+          if [ "${{ matrix.nome }}" = "windows" ]; then
+            7z a "$destino/seele-cli-${versao}-windows-x86_64.zip" \
+              ./target/release/seeled.exe ./target/release/plug.exe
+          else
+            tar -czf "$destino/seele-cli-${versao}-${{ matrix.nome }}.tar.gz" \
+              -C target/release seeled plug
+          fi
+
+          echo "--- reunido ---"
+          ls -la "$destino"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: entrega-${{ matrix.nome }}
+          path: entrega/*
+          if-no-files-found: error
+
+  publicar:
+    name: publicar
+    needs: [versao, empacotar]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: entrega
+          merge-multiple: true
+
+      - name: Listar o que será publicado
+        run: ls -la entrega
+
+      # `gh` já vem no runner. Nada de action de terceiro aqui: um workflow que
+      # cria releases é exatamente onde uma dependência a mais custa caro.
+      #
+      # Rascunho, não publicado. Quem decide que uma versão está pronta é uma
+      # pessoa que baixou e abriu pelo menos um dos arquivos.
+      - name: Criar o rascunho do release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          tag="${{ needs.versao.outputs.tag }}"
+
+          # Apaga o release anterior desta tag, se houver, e **não** a tag.
+          # `--cleanup-tag` apagaria justamente a tag que disparou este
+          # workflow, e o release seguinte nasceria apontando para o commit
+          # padrão do repositório em vez do que foi marcado.
+          gh release view "$tag" >/dev/null 2>&1 \
+            && gh release delete "$tag" --yes || true
+
+          gh release create "$tag" \
+            --draft \
+            --target "$GITHUB_SHA" \
+            --title "SEELE $tag" \
+            --notes-file .github/NOTAS-DE-RELEASE.md \
+            entrega/*
+          echo "rascunho criado. Revise e publique em Releases."

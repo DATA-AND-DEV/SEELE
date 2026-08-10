@@ -1,5 +1,15 @@
 # SEELE no Windows
 
+> **O caminho curto:** se houver um release publicado, baixe
+> `seele-cli-<versão>-windows-x86_64.zip` na aba **Releases**, descompacte e
+> pule direto para o passo 3. Ele traz `seeled.exe` e `plug.exe` prontos, e
+> nenhuma das etapas de instalação abaixo é necessária — nem Rust, nem Build
+> Tools. O Windows vai reclamar que o arquivo não é assinado; **Mais
+> informações** → **Executar assim mesmo**.
+>
+> O resto desta página é para compilar do código-fonte, que é o que você quer
+> se for mexer no código ou se não confiar num binário baixado.
+
 **Nada disto foi executado.** Não tenho uma máquina Windows, e a matriz de CI de
 três sistemas nunca rodou por falta de repositório remoto. O que está aqui é
 derivado de ler o que cada dependência exige para compilar, e cada exigência
