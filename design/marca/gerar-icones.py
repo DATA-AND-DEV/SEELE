@@ -19,6 +19,7 @@ software quebrado. Aqui isso é um `if`, e é a única decisão de design que es
 arquivo toma sozinho.
 """
 
+import re
 import shutil
 import struct
 import subprocess
@@ -187,6 +188,60 @@ def conferir(caminho: Path, lado: int) -> None:
             )
 
 
+def cartela() -> None:
+    """A forma institucional, em PNG, para o README.
+
+    Markdown no GitHub descarta estilo embutido, então a cartela só chega
+    inteira como imagem. É a forma que a folha de marca pede para documento.
+
+    Sai de um quadrado pelo mesmo motivo dos ícones — é o que o `qlmanage`
+    desenha inteiro — e depois é recortada na faixa útil.
+    """
+    svg = (AQUI / "cartela.svg").read_text(encoding="utf-8")
+    medida = re.search(r'viewBox="0 0 ([0-9.]+) ([0-9.]+)"', svg)
+    if not medida:
+        raise SystemExit("cartela.svg sem viewBox")
+    largura, altura = float(medida.group(1)), float(medida.group(2))
+    dentro = svg.split("<title>SEELE</title>", 1)[1].rsplit("</svg>", 1)[0]
+
+    margem, escala = 20, 4
+    lado = largura + margem * 2
+    pixeis = int(lado * escala)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        trabalho = Path(tmp)
+        fonte = trabalho / "cartela.svg"
+        fonte.write_text(
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {lado} {lado}"'
+            f' width="{pixeis}" height="{pixeis}">'
+            f'<rect width="{lado}" height="{lado}" fill="{NEGRO}"/>'
+            f'<g transform="translate({margem} {(lado - altura) / 2:.3f})">{dentro}</g></svg>',
+            encoding="utf-8",
+        )
+        subprocess.run(
+            ["qlmanage", "-t", "-s", str(pixeis), "-o", str(trabalho), str(fonte)],
+            check=True,
+            capture_output=True,
+        )
+        bruto = next(p for p in trabalho.glob("*.png") if p != fonte)
+
+        destino = RAIZ / "docs" / "imagens" / "marca-cartela.png"
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            [
+                "sips",
+                "-c",
+                str(int((altura + margem * 2) * escala)),
+                str(pixeis),
+                str(bruto),
+                "--out",
+                str(destino),
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+
 def escrever_ico(caminho: Path, imagens: dict[int, bytes]) -> None:
     """Um `.ico` com PNGs dentro, que é o formato que o Windows lê desde o Vista.
 
@@ -266,6 +321,8 @@ def main() -> None:
     # são conferidas por teste contra estes originais, para não divergirem.
     for origem, nome in (("assinatura.svg", "marca-assinatura.svg"), ("muda.svg", "marca-muda.svg")):
         shutil.copyfile(AQUI / origem, RAIZ / "apps" / "seele-app" / "ui" / nome)
+
+    cartela()
 
     for arquivo in sorted(DESTINO.iterdir()):
         print(f"  {arquivo.name:20} {arquivo.stat().st_size:>8} bytes")

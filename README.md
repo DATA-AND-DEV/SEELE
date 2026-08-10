@@ -1,3 +1,5 @@
+<img src="docs/imagens/marca-cartela.png" alt="SEELE — sistema de comunicação" width="440">
+
 # SEELE
 
 **Voz e texto auto-hospedados, com o terminal em primeiro lugar.**
@@ -171,10 +173,20 @@ está quebrado.
 
 ### O cliente gráfico
 
-Existe, é Tauri sobre o mesmo núcleo, e **não tem print aqui** porque não
-consigo capturar tela nesta máquina — preferi não desenhar uma imagem à mão e
-chamar de captura. A composição é deliberadamente a mesma da TUI: mesmos três
-painéis, mesma barra no rodapé. Quem usa um abre o outro e sabe onde tudo está.
+Tauri sobre o mesmo núcleo. A composição é deliberadamente a mesma da TUI:
+mesmos três painéis, mesma barra permanente no rodapé. Quem usa um abre o outro
+e sabe onde tudo está.
+
+<img src="docs/imagens/app-entrada.png" alt="Tela de entrada do app: a assinatura ゼーレ, campos DOGMA e PILOTO, e os botões INSERIR PLUG e HOSPEDAR AQUI" width="520">
+
+**HOSPEDAR AQUI** sobe um Dogma dentro do próprio app e entra nele — quem só
+quer clicar nunca precisa abrir um terminal. Ele vive enquanto a janela estiver
+aberta, e o link de convite aparece no topo, pronto para copiar.
+
+Esta é a tela de entrada, renderizada pelo WebKit a partir da página que o app
+serve — mesma engine da janela, mesmo CSS. A tela de sessão não está aqui: ela
+só existe com uma conversa de pé, e é justamente isso que falta validar entre
+duas máquinas.
 
 ---
 

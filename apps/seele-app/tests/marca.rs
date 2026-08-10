@@ -46,7 +46,11 @@ fn os_glifos_da_marca_estao_em_contorno() {
     // A regra que sustenta todas as outras. Com `<text>`, a marca vira o que a
     // face japonesa do sistema for — Hiragino no macOS, Yu Gothic no Windows —
     // e substituir a face é justamente o que a folha de marca proíbe.
-    for arquivo in ["design/marca/assinatura.svg", "design/marca/reduzida.svg"] {
+    for arquivo in [
+        "design/marca/assinatura.svg",
+        "design/marca/reduzida.svg",
+        "design/marca/cartela.svg",
+    ] {
         let svg = ler(arquivo);
         assert!(
             !svg.contains("<text"),
@@ -68,6 +72,7 @@ fn a_marca_nunca_usa_o_vermelho_de_falha() {
         "design/marca/assinatura.svg",
         "design/marca/reduzida.svg",
         "design/marca/muda.svg",
+        "design/marca/cartela.svg",
     ] {
         let svg = ler(arquivo).to_uppercase();
         assert!(!svg.contains(vermelho), "{arquivo} usa o vermelho de falha");
@@ -78,11 +83,13 @@ fn a_marca_nunca_usa_o_vermelho_de_falha() {
 fn a_marca_so_usa_cores_que_os_tokens_definem() {
     // A folha de marca e os tokens congelados em M0.12 dizem os mesmos valores.
     // Se um dia divergirem, é aqui que se descobre — e não numa tela.
-    let permitidas = ["#F2521F", "#050403", "#EAE3CF"];
+    // Laranja, negro, osso e o apagado do descritor. Todos em tokens.css.
+    let permitidas = ["#F2521F", "#050403", "#EAE3CF", "#7A7061"];
     for arquivo in [
         "design/marca/assinatura.svg",
         "design/marca/reduzida.svg",
         "design/marca/muda.svg",
+        "design/marca/cartela.svg",
     ] {
         let svg = ler(arquivo).to_uppercase();
         for achado in svg
