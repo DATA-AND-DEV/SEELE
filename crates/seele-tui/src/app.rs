@@ -62,6 +62,19 @@ impl Panel {
             Self::Messages => Self::Dogma,
         }
     }
+
+    /// The previous panel, for `Shift+Tab` and `h`.
+    ///
+    /// A three-panel ring where going back costs two presses is a ring nobody
+    /// goes back in.
+    #[must_use]
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Dogma => Self::Messages,
+            Self::Channels => Self::Dogma,
+            Self::Messages => Self::Channels,
+        }
+    }
 }
 
 /// The six visual states `specs/05-cliente-tui.md` requires to exist.
@@ -399,6 +412,12 @@ impl App {
             }
             Key::Char('?') => self.help = true,
             Key::Tab => self.focus = self.focus.next(),
+            Key::BackTab => self.focus = self.focus.prev(),
+            // `h`/`l` move the focus and not the selection: with three panels
+            // side by side that is the natural reading of left and right, and
+            // `j`/`k` already cover movement inside a panel.
+            Key::Char('h') | Key::Left => self.focus = self.focus.prev(),
+            Key::Char('l') | Key::Right => self.focus = self.focus.next(),
             Key::Char('j') | Key::Down => self.move_selection(1),
             Key::Char('k') | Key::Up => self.move_selection(-1),
             Key::Char('g') => self.jump(Edge::First),
@@ -546,6 +565,8 @@ pub enum Key {
     Backspace,
     /// Tab.
     Tab,
+    /// Shift+Tab.
+    BackTab,
     /// Up arrow.
     Up,
     /// Down arrow.
@@ -798,6 +819,48 @@ mod tests {
         assert_eq!(app.screen, Screen::PatternOrange);
         app.set_pattern(Pattern::Blue);
         assert_eq!(app.screen, Screen::PatternBlue);
+    }
+
+    #[test]
+    fn h_and_l_move_between_panels_and_wrap() {
+        // `specs/05-cliente-tui.md:42` promises "h j k l / setas navegar", and
+        // until now only j and k did anything.
+        let mut app = App::new();
+        app.focus = Panel::Dogma;
+
+        app.on_key(Key::Char('l'));
+        assert_eq!(app.focus, Panel::Channels);
+        app.on_key(Key::Right);
+        assert_eq!(app.focus, Panel::Messages);
+        // Wraps around, the way Tab already does.
+        app.on_key(Key::Char('l'));
+        assert_eq!(app.focus, Panel::Dogma);
+
+        app.on_key(Key::Char('h'));
+        assert_eq!(app.focus, Panel::Messages);
+        app.on_key(Key::Left);
+        assert_eq!(app.focus, Panel::Channels);
+    }
+
+    #[test]
+    fn shift_tab_closes_the_cycle_tab_opens() {
+        let mut app = App::new();
+        let start = app.focus;
+        app.on_key(Key::Tab);
+        assert_ne!(app.focus, start);
+        app.on_key(Key::BackTab);
+        assert_eq!(app.focus, start);
+    }
+
+    #[test]
+    fn h_and_l_do_not_escape_insert_mode() {
+        // The letter `l` inside a message is a letter, not a focus command.
+        let mut app = App::new();
+        app.on_key(Key::Char('i'));
+        let focus_before = app.focus;
+        app.on_key(Key::Char('l'));
+        assert_eq!(app.focus, focus_before);
+        assert_eq!(app.input, "l");
     }
 }
 

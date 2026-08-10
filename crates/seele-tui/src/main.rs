@@ -727,6 +727,7 @@ fn key_source(runtime: &mut Runtime, event: KeyEvent) -> Vec<Key> {
         KeyCode::Esc => Key::Esc,
         KeyCode::Backspace => Key::Backspace,
         KeyCode::Tab => Key::Tab,
+        KeyCode::BackTab => Key::BackTab,
         KeyCode::Up => Key::Up,
         KeyCode::Down => Key::Down,
         KeyCode::Left => Key::Left,

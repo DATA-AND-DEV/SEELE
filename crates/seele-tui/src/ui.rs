@@ -666,7 +666,7 @@ fn render_alert(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
 fn render_help(frame: &mut Frame<'_>, theme: Theme, area: Rect) {
     let rows = [
         ("h j k l / setas", "navegar"),
-        ("Tab", "alternar painel"),
+        ("Tab / Shift+Tab", "alternar painel"),
         ("Enter", "entrar no Cage / abrir Linha"),
         ("i", "escrever mensagem"),
         ("Espaço (segurar)", "falar"),
@@ -1053,7 +1053,7 @@ mod tests {
         app.help = true;
         let screen = draw(&app, Palette::True, (80, 24));
 
-        for key in ["Tab", "Enter", ":q", "?"] {
+        for key in ["Tab", "Shift+Tab", "Enter", ":q", "?"] {
             assert!(screen.contains(key), "`{key}` missing from help:\n{screen}");
         }
         assert!(screen.contains("falar"), "{screen}");
