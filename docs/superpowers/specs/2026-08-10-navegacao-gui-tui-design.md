@@ -64,8 +64,8 @@ pub struct Casamento {
 pub struct Busca { /* termo, casamentos, cursor */ }
 
 impl Busca {
-    /// Os corpos, na ordem em que a casca os desenha.
-    pub fn nova<'a>(corpos: impl Iterator<Item = &'a str>, termo: &str) -> Self;
+    /// Os corpos já normalizados, na ordem em que a casca os desenha.
+    pub fn nova<S: AsRef<str>>(corpos: impl IntoIterator<Item = S>, termo: &str) -> Self;
     pub fn proxima(&mut self)  -> Option<&Casamento>;  // n
     pub fn anterior(&mut self) -> Option<&Casamento>;  // N
     pub fn atual(&self)        -> Option<&Casamento>;
@@ -81,6 +81,12 @@ que são `ChatLine` já projetadas com o `(editada)` colado no fim. Uma assinatu
 presa a um tipo de mensagem serviria a uma casca e excluiria a outra — e a
 busca não precisa saber o que é uma mensagem para achar um texto. De quebra, os
 testes ficam `["olá", "sync caiu"]` em vez de fabricar mensagens inteiras.
+
+**E os corpos entram normalizados.** `seele-tui::ui::wrap` quebra com
+`split_whitespace`, que colapsa espaço repetido; HTML colapsa sozinho. As duas
+cascas já mostram o texto colapsado, então `busca::normalizar` no meio é o que
+faz o deslocamento devolvido apontar para o que está na tela. Sem isso, um
+casamento depois de um espaço duplo apontaria para o lugar errado só na TUI.
 
 Cada casca busca na **sua** lista, então o `Casamento::mensagem` indexa o que
 aquela casca desenha. Na TUI é `App::messages`; no app é `Snapshot::messages`.

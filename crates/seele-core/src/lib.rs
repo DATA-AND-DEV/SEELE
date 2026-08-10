@@ -25,6 +25,7 @@
 )]
 
 pub mod battery;
+pub mod busca;
 pub mod client;
 pub mod conhecidos;
 pub mod enlace;
