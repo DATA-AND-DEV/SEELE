@@ -18,6 +18,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use ratatui::Frame;
+use seele_core::search::{occurrences, Search};
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{App, Bar, ChatLine, Mode, Node, Panel, Screen};
@@ -409,15 +410,10 @@ fn render_messages(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
         Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(inner);
     let budget = history.width as usize;
 
-    let mut lines: Vec<Line<'_>> = Vec::new();
-    for message in app.messages.iter().chain(&app.local) {
-        lines.extend(message_lines(message, budget, theme));
-    }
+    let (mut lines, current_line) = history_lines(app, budget, theme);
 
-    // Show the tail: a chat that scrolls off the top is normal, a chat that
-    // shows the first thing anybody ever said is broken.
     let visible = history.height as usize;
-    let skip = lines.len().saturating_sub(visible);
+    let skip = scroll(lines.len(), visible, current_line, app.busca.is_some());
 
     frame.render_widget(
         Paragraph::new(lines.split_off(skip)).style(dim(theme, app)),
@@ -426,7 +422,62 @@ fn render_messages(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
     frame.render_widget(compose_line(app, theme, budget), compose);
 }
 
-fn message_lines(message: &ChatLine, budget: usize, theme: Theme) -> Vec<Line<'static>> {
+/// The whole history as drawn lines, and which line the current match fell on.
+///
+/// Shared by the full layout and the cramped one so a search behaves the same
+/// in both: a term that only lights up on a wide terminal is a term somebody on
+/// a narrow one cannot find.
+fn history_lines(app: &App, budget: usize, theme: Theme) -> (Vec<Line<'static>>, Option<usize>) {
+    let current = app.busca.as_ref().and_then(Search::current);
+    let ordinal = app.busca.as_ref().and_then(Search::ordinal_in_message);
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut current_line = None;
+    for (index, message) in app.messages.iter().chain(&app.local).enumerate() {
+        let here = current.filter(|candidate| candidate.message == index);
+        if here.is_some() {
+            // Recorded before the message is laid out, so it is the row the
+            // message starts on rather than wherever the last one ended.
+            current_line = Some(lines.len());
+        }
+        lines.extend(message_lines(
+            message,
+            budget,
+            theme,
+            &app.termo,
+            here.and(ordinal),
+        ));
+    }
+    (lines, current_line)
+}
+
+/// Which line the history starts drawing at.
+///
+/// Without a search this shows the tail: a chat that scrolls off the top is
+/// normal, a chat that shows the first thing anybody ever said is broken. With
+/// a search the tail stops being what matters and the occurrence does — an
+/// occurrence off screen that nobody scrolls to is an occurrence that was not
+/// found. Never past the tail either way, because scrolling below the last line
+/// trades conversation for blank rows.
+fn scroll(total: usize, visible: usize, current_line: Option<usize>, searching: bool) -> usize {
+    let tail = total.saturating_sub(visible);
+    match current_line {
+        Some(line) if searching => line.saturating_sub(visible / 2).min(tail),
+        _ => tail,
+    }
+}
+
+/// One message: its header, then its body wrapped and lit where the term hits.
+///
+/// `current` is the ordinal *within this message* of the occurrence the cursor
+/// is on, or `None` when the cursor is in some other message.
+fn message_lines(
+    message: &ChatLine,
+    budget: usize,
+    theme: Theme,
+    term: &str,
+    current: Option<usize>,
+) -> Vec<Line<'static>> {
     let header = format!("{} {}", message.at, message.author);
     let mut lines = vec![Line::from(Span::styled(
         truncate(&header, budget),
@@ -437,13 +488,91 @@ fn message_lines(message: &ChatLine, budget: usize, theme: Theme) -> Vec<Line<'s
         },
     ))];
 
+    // Counts occurrences in order, exactly the way the core counts them, so the
+    // k-th hit here is the k-th hit there. Both passes go left to right over the
+    // same collapsed text, so the ordinals line up.
+    let mut seen = 0usize;
     for wrapped in wrap(&message.body, budget.saturating_sub(2)) {
-        lines.push(Line::from(Span::styled(
-            format!("  {wrapped}"),
-            theme.body(),
+        lines.push(Line::from(highlight(
+            &wrapped, term, theme, current, &mut seen,
         )));
     }
     lines
+}
+
+/// An already-wrapped segment, split into lit and unlit spans.
+///
+/// The highlight is applied per segment, and not by offset into the whole body,
+/// because [`wrap`] collapses whitespace with `split_whitespace` and an offset
+/// computed on the raw body would point at the wrong character after a double
+/// space. Re-finding the term in the segment costs a scan and cannot drift.
+///
+/// The indent span keeps the width budget intact: the segment was wrapped to
+/// `budget - 2`, and these two cells are the other two.
+fn highlight(
+    segment: &str,
+    term: &str,
+    theme: Theme,
+    current: Option<usize>,
+    seen: &mut usize,
+) -> Vec<Span<'static>> {
+    let mut spans = vec![Span::styled("  ".to_owned(), theme.body())];
+    if term.trim().is_empty() {
+        spans.push(Span::styled(segment.to_owned(), theme.body()));
+        return spans;
+    }
+
+    let characters: Vec<char> = segment.chars().collect();
+    let mut cursor = 0usize;
+    for (start, end) in occurrences(segment, term) {
+        let ordinal = *seen;
+        *seen += 1;
+        // Overlapping hits ("aa" twice in "aaa") are counted, because the core
+        // counts them and the ordinals have to agree, but drawn once: those
+        // cells are already lit, and re-emitting them would duplicate text.
+        if start < cursor {
+            continue;
+        }
+        let before: String = characters
+            .iter()
+            .skip(cursor)
+            .take(start - cursor)
+            .collect();
+        if !before.is_empty() {
+            spans.push(Span::styled(before, theme.body()));
+        }
+        let lit: String = characters.iter().skip(start).take(end - start).collect();
+        // Both states are visible without colour — bold against inverse — so a
+        // 16-colour terminal and `NO_COLOR` still separate "a hit" from "the
+        // hit you are on". The counter in the compose line is the other half.
+        spans.push(Span::styled(
+            lit,
+            if current == Some(ordinal) {
+                theme.accent().add_modifier(Modifier::REVERSED)
+            } else {
+                theme.accent()
+            },
+        ));
+        cursor = end;
+    }
+    let rest: String = characters.iter().skip(cursor).collect();
+    if !rest.is_empty() {
+        spans.push(Span::styled(rest, theme.body()));
+    }
+    spans
+}
+
+/// The counter that goes beside a search, `  [1/3]`, or nothing without one.
+///
+/// `specs/05-cliente-tui.md:105` forbids information carried by colour alone.
+/// "Which of the three occurrences am I on" is exactly such information, and
+/// this is the half of it that survives `NO_COLOR` and sixteen colours by SSH.
+/// It is not decoration.
+fn search_counter(app: &App) -> Option<String> {
+    app.busca.as_ref().map(|search| {
+        let (position, total) = search.position();
+        format!("  [{position}/{total}]")
+    })
 }
 
 fn compose_line(app: &App, theme: Theme, budget: usize) -> Paragraph<'static> {
@@ -454,11 +583,17 @@ fn compose_line(app: &App, theme: Theme, budget: usize) -> Paragraph<'static> {
         Mode::Normal => ("▸ ", theme.label()),
     };
 
+    let counter = search_counter(app);
+    // The counter is reserved rather than appended: this panel is about thirty
+    // cells wide at 80 columns, so a long term would otherwise push the counter
+    // off the edge, and the counter is the part that may not be lost.
+    let reserved = counter.as_deref().map_or(0, width);
+
     let shown = if app.mode == Mode::Normal {
         String::new()
     } else {
         // Keep the caret visible in a long line by showing the tail.
-        let room = budget.saturating_sub(width(prefix) + 1);
+        let room = budget.saturating_sub(width(prefix) + 1 + reserved);
         let text = &app.input;
         if width(text) <= room {
             text.clone()
@@ -474,11 +609,16 @@ fn compose_line(app: &App, theme: Theme, budget: usize) -> Paragraph<'static> {
         }
     };
 
-    Paragraph::new(Line::from(vec![
+    let mut spans = vec![
         Span::styled(prefix, style),
         Span::styled(shown, theme.body()),
         Span::styled("_", theme.accent()),
-    ]))
+    ];
+    if let Some(counter) = counter {
+        spans.push(Span::styled(counter, theme.label()));
+    }
+
+    Paragraph::new(Line::from(spans))
 }
 
 /// The permanent telemetry bar.
@@ -563,24 +703,25 @@ fn render_cramped(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
     let [warning, history] =
         Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
 
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            truncate(
-                &format!("TERMINAL {}×{} < 80×24", area.width, area.height),
-                area.width as usize,
-            ),
-            theme.alert(),
-        ))),
-        warning,
-    );
+    // There is no compose line down here to hang the counter off, and a
+    // highlight without its counter would be colour on its own — so it shares
+    // the warning row, which is the only chrome this layout has.
+    let mut spans = vec![Span::styled(
+        truncate(
+            &format!("TERMINAL {}×{} < 80×24", area.width, area.height),
+            area.width as usize,
+        ),
+        theme.alert(),
+    )];
+    if let Some(counter) = search_counter(app) {
+        spans.push(Span::styled(counter, theme.label()));
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), warning);
 
     let budget = history.width as usize;
-    let mut lines = Vec::new();
-    for message in app.messages.iter().chain(&app.local) {
-        lines.extend(message_lines(message, budget, theme));
-    }
+    let (mut lines, current_line) = history_lines(app, budget, theme);
     let visible = history.height as usize;
-    let skip = lines.len().saturating_sub(visible);
+    let skip = scroll(lines.len(), visible, current_line, app.busca.is_some());
 
     frame.render_widget(Paragraph::new(lines.split_off(skip)), history);
 }
@@ -1074,6 +1215,244 @@ mod tests {
         app.input = "conectar localhost".into();
         let screen = draw(&app, Palette::True, (80, 24));
         assert!(screen.contains("conectar localhost"), "{screen}");
+    }
+
+    /// A message with one body, so a test can say what it is searching.
+    fn said(body: &str) -> ChatLine {
+        ChatLine {
+            at: "12:03".into(),
+            author: "shinji".into(),
+            body: body.into(),
+            own: false,
+        }
+    }
+
+    /// An app in Search mode with `term` already run over `bodies`.
+    fn searching(bodies: &[&str], term: &str) -> App {
+        let mut app = populated();
+        app.messages = bodies.iter().map(|body| said(body)).collect();
+        app.mode = Mode::Search;
+        app.input = term.to_owned();
+        app.termo = term.to_owned();
+        app.refazer_busca();
+        app
+    }
+
+    #[test]
+    fn the_search_shows_the_counter_and_marks_the_current_line() {
+        // specs/05-cliente-tui.md:105: nothing may be conveyed by colour alone.
+        // The counter is the highlight's textual companion, and it is what
+        // survives NO_COLOR and a 16-colour SSH terminal.
+        let app = searching(&["o sync caiu aqui"], "sync");
+        let screen = draw(&app, Palette::True, (80, 24));
+        assert!(screen.contains("[1/1]"), "{screen}");
+    }
+
+    #[test]
+    fn a_search_with_no_results_says_zero_instead_of_disappearing() {
+        let app = searching(&["o sync caiu aqui"], "harmônicos");
+        let screen = draw(&app, Palette::True, (80, 24));
+        assert!(screen.contains("[0/0]"), "{screen}");
+    }
+
+    #[test]
+    fn the_counter_counts_the_whole_history_and_moves_with_n() {
+        let mut app = searching(&["o sync caiu", "sync de novo e sync"], "sync");
+        assert!(draw(&app, Palette::True, (80, 24)).contains("[1/3]"));
+
+        if let Some(search) = app.busca.as_mut() {
+            search.next_match();
+            search.next_match();
+        }
+        assert!(draw(&app, Palette::True, (80, 24)).contains("[3/3]"));
+    }
+
+    #[test]
+    fn the_counter_survives_every_palette() {
+        // The point of the counter is that it is not colour. Mono is where a
+        // decoration would give itself away by vanishing.
+        let app = searching(&["o sync caiu aqui"], "sync");
+        for palette in [Palette::True, Palette::Ansi16, Palette::Mono] {
+            let screen = draw(&app, palette, (80, 24));
+            assert!(screen.contains("[1/1]"), "{palette:?} lost it:\n{screen}");
+        }
+    }
+
+    #[test]
+    fn both_occurrences_are_drawn_and_only_the_current_one_is_lit() {
+        let theme = Theme::with_palette(Palette::True);
+        let mut seen = 0;
+        let spans = highlight("o sync e o sync", "sync", theme, Some(1), &mut seen);
+
+        assert_eq!(seen, 2, "the two hits were not both counted");
+        let text: String = spans.iter().map(|span| span.content.as_ref()).collect();
+        assert_eq!(text, "  o sync e o sync", "the segment was not kept whole");
+
+        let mut hits = spans.iter().filter(|span| span.content == "sync");
+        assert_eq!(hits.next().map(|span| span.style), Some(theme.accent()));
+        assert_eq!(
+            hits.next().map(|span| span.style),
+            Some(theme.accent().add_modifier(Modifier::REVERSED)),
+            "the current occurrence is not told apart from its neighbour"
+        );
+        assert!(hits.next().is_none(), "a third hit appeared from nowhere");
+    }
+
+    #[test]
+    fn a_double_space_does_not_shift_the_highlight() {
+        // This is the case the per-segment design exists for. `wrap` collapses
+        // runs of whitespace, so an offset taken over the raw body would light
+        // `aiu ` — one character to the right — instead of `caiu`.
+        let theme = Theme::with_palette(Palette::True);
+        let lines = message_lines(&said("o  sync  caiu"), 40, theme, "caiu", Some(0));
+
+        let body: Vec<&Span<'_>> = lines
+            .iter()
+            .skip(1)
+            .flat_map(|line| line.spans.iter())
+            .collect();
+        let text: String = body.iter().map(|span| span.content.as_ref()).collect();
+        assert_eq!(text, "  o sync caiu");
+
+        let lit: Vec<&str> = body
+            .iter()
+            .filter(|span| span.style != theme.body())
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert_eq!(lit, ["caiu"], "the highlight landed off the term");
+    }
+
+    #[test]
+    fn an_empty_term_draws_exactly_what_it_drew_before() {
+        let theme = Theme::with_palette(Palette::True);
+        let lines = message_lines(&said("o sync caiu"), 40, theme, "", None);
+
+        let body: Vec<&Span<'_>> = lines
+            .iter()
+            .skip(1)
+            .flat_map(|line| line.spans.iter())
+            .collect();
+        let text: String = body.iter().map(|span| span.content.as_ref()).collect();
+        assert_eq!(text, "  o sync caiu");
+        assert!(
+            body.iter().all(|span| span.style == theme.body()),
+            "an empty term still styled something"
+        );
+
+        // And nothing on the screen moved either.
+        let mut app = populated();
+        let before = draw(&app, Palette::True, (80, 24));
+        app.termo = String::new();
+        app.refazer_busca();
+        assert_eq!(draw(&app, Palette::True, (80, 24)), before);
+    }
+
+    #[test]
+    fn a_wide_term_lights_whole_cells_and_never_half_a_kanji() {
+        let theme = Theme::with_palette(Palette::True);
+        let mut seen = 0;
+        let spans = highlight("em 第3新東京市 agora", "新東京", theme, Some(0), &mut seen);
+
+        let lit: Vec<&str> = spans
+            .iter()
+            .filter(|span| span.style != theme.body())
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert_eq!(lit, ["新東京"]);
+        // The spans still add up to the segment's own cell width plus indent.
+        let cells: usize = spans.iter().map(|span| width(&span.content)).sum();
+        assert_eq!(cells, width("em 第3新東京市 agora") + 2);
+    }
+
+    #[test]
+    fn the_scroll_stays_on_the_tail_without_an_occurrence() {
+        assert_eq!(scroll(100, 10, None, true), 90);
+        assert_eq!(scroll(100, 10, Some(4), false), 90);
+        assert_eq!(scroll(4, 10, None, false), 0);
+    }
+
+    #[test]
+    fn the_scroll_centres_on_the_occurrence_without_passing_the_tail() {
+        assert_eq!(scroll(100, 10, Some(50), true), 45);
+        assert_eq!(scroll(100, 10, Some(2), true), 0);
+        // Past the tail would trade conversation for blank rows.
+        assert_eq!(scroll(100, 10, Some(99), true), 90);
+    }
+
+    #[test]
+    fn an_occurrence_above_the_tail_is_scrolled_to() {
+        let mut app = populated();
+        let mut messages = vec![said("o sync caiu aqui")];
+        messages.extend((0..40).map(|index| said(&format!("ruído {index}"))));
+        app.messages = messages;
+
+        let quiet = draw(&app, Palette::True, (80, 24));
+        assert!(
+            !quiet.contains("o sync caiu"),
+            "the occurrence was already on the tail, so this proves nothing:\n{quiet}"
+        );
+
+        app.mode = Mode::Search;
+        app.input = "sync".into();
+        app.termo = "sync".into();
+        app.refazer_busca();
+
+        let screen = draw(&app, Palette::True, (80, 24));
+        assert!(
+            screen.contains("o sync caiu"),
+            "the history never scrolled to the occurrence:\n{screen}"
+        );
+    }
+
+    #[test]
+    fn a_search_that_matches_nothing_moves_nothing() {
+        let mut app = populated();
+        app.messages = (0..40)
+            .map(|index| said(&format!("ruído {index}")))
+            .collect();
+        let quiet = draw(&app, Palette::True, (80, 24));
+
+        app.mode = Mode::Search;
+        app.input = "harmônicos".into();
+        app.termo = "harmônicos".into();
+        app.refazer_busca();
+        let screen = draw(&app, Palette::True, (80, 24));
+
+        // The compose line and the mode in the bar changed, and nothing else:
+        // with no occurrence to go to, the history stays where it was.
+        let history = |screen: &str| {
+            screen
+                .lines()
+                .filter(|line| line.contains("ruído"))
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        assert!(!history(&quiet).is_empty(), "nothing was drawn:\n{quiet}");
+        assert_eq!(
+            history(&screen),
+            history(&quiet),
+            "the history moved:\n{quiet}\n---\n{screen}"
+        );
+    }
+
+    #[test]
+    fn a_search_never_overflows_the_panel() {
+        let mut app = searching(&["o sync caiu aqui"], "sync");
+        app.input = "sync".repeat(40);
+        for size in [(80u16, 24u16), (100, 40), (60, 18)] {
+            let screen = draw(&app, Palette::True, size);
+            for line in screen.lines() {
+                assert!(
+                    width(line) <= size.0 as usize,
+                    "{size:?} produced a {}-cell row: {line:?}",
+                    width(line)
+                );
+            }
+            assert!(
+                screen.contains("[1/1]"),
+                "a long draft pushed the counter off screen at {size:?}:\n{screen}"
+            );
+        }
     }
 
     #[test]
