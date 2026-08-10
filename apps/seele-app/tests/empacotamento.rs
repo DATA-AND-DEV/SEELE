@@ -83,3 +83,27 @@ fn no_linux_as_ferramentas_vao_para_o_path() {
          `.deb`, uma em /usr/bin e outra dentro do diretório do app"
     );
 }
+
+#[test]
+fn o_app_declara_para_que_quer_o_microfone() {
+    // Sem esta chave o macOS nega o microfone **sem perguntar nada**: nenhum
+    // alerta, nenhuma entrada em Ajustes, e o programa recebe uma falha de
+    // dispositivo. No SEELE isso aparecia como "ÁUDIO LOCAL FALHANDO" — texto
+    // certo para a coisa errada, porque a máquina não estava falhando.
+    //
+    // A TUI nunca sofreu disso, e a diferença enganava: a permissão é atribuída
+    // ao aplicativo que iniciou o processo, e o terminal já tem a dele.
+    let plist = ler("Info.plist");
+    assert!(
+        plist.contains("NSMicrophoneUsageDescription"),
+        "o Info.plist não diz para que o app quer o microfone; o macOS nega calado"
+    );
+
+    // E o direito, para o dia em que a assinatura entrar: o hardened runtime
+    // que a notarização exige bloqueia o microfone sem ele.
+    let direitos = ler("Entitlements.plist");
+    assert!(
+        direitos.contains("com.apple.security.device.audio-input"),
+        "sem este direito o microfone volta a falhar assim que o app for assinado"
+    );
+}

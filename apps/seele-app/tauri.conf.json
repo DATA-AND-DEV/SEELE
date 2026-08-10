@@ -38,7 +38,8 @@
     "shortDescription": "Voz e texto auto-hospedados",
     "longDescription": "Cliente desktop do SEELE. Conversa por voz e texto num servidor que você mesmo hospeda.",
     "macOS": {
-      "minimumSystemVersion": "11.0"
+      "minimumSystemVersion": "11.0",
+      "entitlements": "Entitlements.plist"
     },
     "windows": {
       "nsis": {

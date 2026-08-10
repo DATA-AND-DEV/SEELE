@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Acrescentado ao Info.plist que o Tauri gera.
+
+  Sem `NSMicrophoneUsageDescription` o macOS **nega o microfone sem perguntar
+  nada**: não há alerta, não há entrada em Ajustes, e o programa recebe uma
+  falha de dispositivo. No SEELE isso aparecia como "ÁUDIO LOCAL FALHANDO", que
+  é o texto certo para a coisa errada — a máquina não estava falhando, o sistema
+  estava recusando.
+
+  O `plug` no terminal nunca sofreu disso porque a permissão de microfone é
+  atribuída ao aplicativo que iniciou o processo, e o terminal já tem a dele.
+  Por isso a TUI funcionava e o app não: não é diferença de código de áudio.
+
+  O texto é o que a pessoa lê no alerta do sistema. Vale escrever para ela, e
+  não para o revisor da App Store.
+-->
+<plist version="1.0">
+<dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>O SEELE usa o microfone para transmitir sua voz aos outros pilotos do Cage. Nada é gravado, e nada sai da sua máquina para além do Dogma ao qual você se conectou.</string>
+</dict>
+</plist>

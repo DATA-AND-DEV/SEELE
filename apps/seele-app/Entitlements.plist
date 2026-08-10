@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Só vale quando o app for assinado: a Apple exige o *hardened runtime* para
+  notarizar, e o hardened runtime bloqueia o microfone a menos que este
+  direito esteja declarado.
+
+  Está aqui agora de propósito. Sem ele, no dia em que existir uma conta de
+  desenvolvedor e a assinatura entrar, o microfone quebraria de novo — pelo
+  mesmo sintoma e por um motivo diferente. Um problema resolvido duas vezes
+  pela metade é um problema não resolvido.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+</dict>
+</plist>
