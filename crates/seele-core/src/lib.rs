@@ -26,6 +26,7 @@
 
 pub mod battery;
 pub mod client;
+pub mod conhecidos;
 pub mod frame;
 pub mod identity;
 pub mod state;

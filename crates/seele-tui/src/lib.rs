@@ -20,6 +20,7 @@
 
 pub mod app;
 pub mod command;
+pub mod selecao;
 pub mod text;
 pub mod theme;
 pub mod ui;

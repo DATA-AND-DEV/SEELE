@@ -28,12 +28,14 @@ use crossterm::terminal::{
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use seele_core::conhecidos::Conhecidos;
 use seele_core::{
     identity, CageId, Client, ClientMessageId, FilePinStore, LineId, PinDecision, Room, SyncInputs,
     SyncRatio, Voice, VoiceMode,
 };
 use seele_tui::app::{Action, Alert, App, ChatLine, Key, Mode, Node, Screen};
 use seele_tui::command::{self, Command};
+use seele_tui::selecao::{self, Resultado, Selecao};
 use seele_tui::theme::{Palette, Theme};
 use seele_tui::{ui, view};
 
@@ -64,7 +66,37 @@ struct Args {
     hospedar: bool,
 }
 
-fn parse_args() -> Result<Args> {
+impl Args {
+    /// Monta os argumentos a partir do que a tela de conexão devolveu.
+    ///
+    /// Mesmo caminho de quando vêm da linha de comando: o que a tela produz não
+    /// é um atalho para dentro, é o mesmo `Args` que o `--server` produziria.
+    fn da_escolha(escolha: &seele_tui::selecao::Escolha) -> Result<Self> {
+        let (server, server_name, pin_key) = resolve(&escolha.alvo)?;
+        Ok(Self {
+            server,
+            server_name,
+            pin_key,
+            nickname: escolha.apelido.clone(),
+            cage: CageId(escolha.cage),
+            line: LineId(1),
+            no_audio: false,
+            join_secret: escolha.convite.clone(),
+            expected_fingerprint: escolha.impressao_digital.clone(),
+            hospedar: escolha.hospedar,
+        })
+    }
+}
+
+/// Lê a linha de comando, ou avisa que não veio nada.
+///
+/// `None` significa `plug` puro, sem flag nenhuma: aí a tela de conexão decide.
+/// Qualquer argumento pula a tela — quem digitou aonde vai já disse aonde vai.
+fn parse_args() -> Result<Option<Args>> {
+    if std::env::args().len() <= 1 {
+        return Ok(None);
+    }
+
     let mut target = "127.0.0.1:8383".to_owned();
     let mut nickname = "piloto".to_owned();
     let mut cage = CageId(1);
@@ -115,7 +147,7 @@ fn parse_args() -> Result<Args> {
     }
 
     let (server, server_name, pin_key) = resolve(&target)?;
-    Ok(Args {
+    Ok(Some(Args {
         server,
         server_name,
         pin_key,
@@ -126,7 +158,7 @@ fn parse_args() -> Result<Args> {
         join_secret,
         expected_fingerprint,
         hospedar,
-    })
+    }))
 }
 
 /// Resolves `host:port` into an address, a TLS label, and a pin key.
@@ -182,8 +214,52 @@ fn config_dir() -> PathBuf {
     )
 }
 
+/// Roda a tela de conexão até alguém escolher ou desistir.
+///
+/// Laço próprio, bloqueante, e de propósito: aqui ainda não existe conexão nem
+/// áudio, então não há nada para o runtime fazer enquanto ninguém digita. O
+/// laço assíncrono do `run` existe porque lá **há** — pacotes chegando enquanto
+/// se digita — e copiá-lo para cá seria complexidade sem motivo.
+///
+/// `Ok(None)` é ter desistido, e sair calado é a resposta certa: quem apertou
+/// `q` não precisa de mensagem de erro.
+fn escolher(terminal: &mut Screen1, tema: Theme, home: &std::path::Path) -> Result<Option<Args>> {
+    let mut lista = Conhecidos::abrir(home.join("conhecidos"))?;
+    let mut tela = Selecao::nova(lista.listar());
+
+    loop {
+        terminal.draw(|frame| selecao::desenhar(frame, &tela, tema))?;
+
+        let Event::Key(tecla) = crossterm::event::read()? else {
+            continue;
+        };
+        // Sem isto uma tecla conta duas vezes no Windows, onde chegam o
+        // pressionar e o soltar.
+        if tecla.kind == KeyEventKind::Release {
+            continue;
+        }
+        if tecla.modifiers.contains(KeyModifiers::CONTROL)
+            && matches!(tecla.code, KeyCode::Char('c'))
+        {
+            return Ok(None);
+        }
+
+        match tela.tecla(tecla.code) {
+            Resultado::Segue => {}
+            Resultado::Sai => return Ok(None),
+            // A tela não escreve em disco. Ela diz o que aconteceu e quem tem o
+            // arquivo grava — a mesma separação do resto do cliente.
+            Resultado::Esquecer(alvo) => lista.esquecer(&alvo)?,
+            Resultado::Pronto(escolha) => return Args::da_escolha(&escolha).map(Some),
+        }
+    }
+}
+
 fn usage() {
     eprintln!("plug — Entry Plug, o cliente SEELE");
+    eprintln!();
+    eprintln!("  sem argumento nenhum, abre a tela de conexão: os Dogmas onde");
+    eprintln!("  você já esteve, um endereço novo, um convite, ou hospedar aqui.");
     eprintln!();
     eprintln!("  -s, --server <host[:porta]>  Dogma ao qual se conectar (padrão 127.0.0.1:8383)");
     eprintln!("  -n, --nick <nome>            como aparecer no roster");
@@ -194,6 +270,7 @@ fn usage() {
         "  -u, --url <seele://…>        link de convite: endereço, impressão digital e convite"
     );
     eprintln!("      --convite <token>        convite de uso único, ou a senha do Dogma");
+    eprintln!("      --hospedar               sobe um Dogma aqui e entra nele");
     eprintln!("  -h, --ajuda                  isto");
     eprintln!();
     eprintln!("  $SEELE_HOME  onde ficam a identidade e os pins (padrão ~/.config/seele)");
@@ -282,11 +359,23 @@ struct Runtime {
     clippy::too_many_lines,
     reason = "one event loop; the branches are the interface's whole surface"
 )]
-async fn run(terminal: &mut Screen1, args: Args, holds: bool) -> Result<()> {
+async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<()> {
+    let home = config_dir();
+    let tema = Theme::detect();
+
+    // Sem argumento nenhum, a tela decide. Com qualquer flag, ela nem aparece.
+    let args = match args {
+        Some(args) => args,
+        None => match escolher(terminal, tema, &home)? {
+            Some(args) => args,
+            None => return Ok(()),
+        },
+    };
+
     let mut runtime = Runtime {
         app: App::new(),
         room: Room::new(),
-        theme: Theme::detect(),
+        theme: tema,
         voice: None,
         sync: SyncRatio::new(),
         holds,
@@ -303,7 +392,6 @@ async fn run(terminal: &mut Screen1, args: Args, holds: bool) -> Result<()> {
     // ADR 0004, and the reason it has to be on disk: CASPER binds a nickname to
     // the identity that first claimed it, so a client that generates a fresh key
     // each run can never come back under its own name.
-    let home = config_dir();
     let key = identity::load_or_create(&home.join("identity.key"))?;
     // ADR 0003 is trust on *first* use, which needs the first use remembered.
     let pins = Arc::new(FilePinStore::open(home.join("pins"))?);
@@ -377,6 +465,23 @@ async fn run(terminal: &mut Screen1, args: Args, holds: bool) -> Result<()> {
     client.insert_plug(cage).await?;
     client.join_line(args.line).await?;
     client.fetch_history(args.line, None, 50).await?;
+
+    // Registrado só **depois** de dar certo. Guardar antes encheria a lista de
+    // endereços errados digitados uma vez, que é o oposto de uma lista de
+    // atalhos. Um Dogma hospedado aqui não entra: `127.0.0.1` não é lugar aonde
+    // se volta, é o botão "hospedar".
+    if !args.hospedar {
+        if let Ok(mut lista) = Conhecidos::abrir(home.join("conhecidos")) {
+            // Falhar em gravar um atalho não pode derrubar uma conversa que já
+            // está de pé.
+            if let Err(erro) = lista.registrar(&args.pin_key, &args.nickname, Some(cage.0)) {
+                note(
+                    &mut runtime,
+                    format!("não guardei este Dogma na lista: {erro}"),
+                );
+            }
+        }
+    }
     // O anfitrião precisa saber o que mandar para os amigos. Sem isto ele
     // hospeda e não tem como convidar ninguém, que é hospedar para nada.
     if let Some(dogma) = &hospedagem {
