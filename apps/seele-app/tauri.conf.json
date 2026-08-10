@@ -37,10 +37,6 @@
     "category": "SocialNetworking",
     "shortDescription": "Voz e texto auto-hospedados",
     "longDescription": "Cliente desktop do SEELE. Conversa por voz e texto num servidor que você mesmo hospeda.",
-    "externalBin": [
-      "binaries/plug",
-      "binaries/seeled"
-    ],
     "macOS": {
       "minimumSystemVersion": "11.0"
     },

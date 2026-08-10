@@ -227,10 +227,18 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: cargo tauri build --target universal-apple-darwin --bundles ${{ matrix.bundles }}
+        run: cargo tauri build --config tauri.release.conf.json --target universal-apple-darwin --bundles ${{ matrix.bundles }}
 
-      - name: Empacotar o app
-        if: matrix.nome != 'macos'
+      # O Windows recebe o `--config` dos acompanhantes; o Linux não, porque lá
+      # os dois entram em `/usr/bin` pelo `deb.files` do `tauri.linux.conf.json`
+      # — e receber os dois faria o `.deb` carregar os binários duas vezes.
+      - name: Empacotar o app (Windows)
+        if: matrix.nome == 'windows'
+        working-directory: apps/seele-app
+        run: cargo tauri build --config tauri.release.conf.json --bundles ${{ matrix.bundles }}
+
+      - name: Empacotar o app (Linux)
+        if: matrix.nome == 'linux'
         working-directory: apps/seele-app
         run: cargo tauri build --bundles ${{ matrix.bundles }}
 
