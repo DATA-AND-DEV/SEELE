@@ -280,6 +280,8 @@ function desenharTelemetria(snapshot) {
 
   $("tel-local").hidden = !tel.local_fault;
 
+  desenharEnlace(snapshot.link);
+
   const mudo = $("botao-mudo");
   mudo.textContent = snapshot.at_field ? "A.T. ON" : "A.T. OFF";
   mudo.dataset.ativo = snapshot.at_field ? "sim" : "nao";
@@ -289,7 +291,9 @@ function desenharTelemetria(snapshot) {
   surdo.dataset.ativo = snapshot.total_isolation ? "sim" : "nao";
 
   const voz = $("botao-voz");
-  voz.textContent = { PushToTalk: "TECLA", VoiceActivated: "VOZ", Open: "ABERTO" }[
+  // "MODO:" na frente porque `TECLA` sozinho não diz que é um seletor — e um
+  // seletor que ninguém reconhece como seletor é um botão que ninguém aperta.
+  voz.textContent = { PushToTalk: "MODO: TECLA", VoiceActivated: "MODO: VOZ", Open: "MODO: ABERTO" }[
     snapshot.voice_mode
   ] ?? "TECLA";
   voz.disabled = !snapshot.audio_available;
@@ -297,6 +301,13 @@ function desenharTelemetria(snapshot) {
 
   const falar = $("botao-falar");
   falar.dataset.ativo = snapshot.speaking ? "sim" : "nao";
+  // O rótulo é a instrução. Um botão escrito "FALAR" que não faz nada ao ser
+  // clicado é pior que nenhum botão: ensina a coisa errada.
+  $("falar-rotulo").textContent = snapshot.speaking
+    ? "NO AR"
+    : { PushToTalk: "SEGURE ESPAÇO", VoiceActivated: "FALE", Open: "MICROFONE ABERTO" }[
+        snapshot.voice_mode
+      ] ?? "SEGURE ESPAÇO";
   falar.disabled = !snapshot.audio_available;
   falar.title = snapshot.audio_available
     ? "segure a barra de espaço, ou este botão"
@@ -313,6 +324,36 @@ function desenharAviso(snapshot) {
   banner.hidden = false;
   banner.dataset.severidade = aviso.severity;
   $("banner-texto").textContent = aviso.operator_text ?? AVISOS[aviso.reason] ?? "AVISO";
+}
+
+/**
+ * A bateria interna, desenhada sobre a sessão.
+ *
+ * `specs/07-tema-evangelion.md` proíbe fechar ou trocar de tela quando a
+ * conexão cai: esmaece, conta, e deixa o histórico legível. Por isso isto só
+ * acende uma faixa e uma classe no corpo — nada some.
+ */
+function desenharEnlace(link) {
+  const faixa = $("bateria");
+  if (!link || link === "Online") {
+    faixa.hidden = true;
+    document.body.classList.remove("na-bateria");
+    return;
+  }
+
+  const bateria = link.InternalBattery;
+  if (!bateria) return;
+
+  const restam = Math.max(0, bateria.remaining_seconds);
+  const minutos = String(Math.floor(restam / 60)).padStart(2, "0");
+  const segundos = String(restam % 60).padStart(2, "0");
+  $("bateria-conta").textContent = `${minutos}:${segundos}`;
+  // As tentativas listadas, que a spec pede por nome. Zero ainda é informação:
+  // quer dizer que a primeira está em curso.
+  $("bateria-tentativas").textContent =
+    bateria.attempts === 0 ? "reconectando…" : `${bateria.attempts} tentativas`;
+  faixa.hidden = false;
+  document.body.classList.add("na-bateria");
 }
 
 function mostrarFim(motivo) {
@@ -523,6 +564,21 @@ $("convite-copiar").addEventListener("click", async () => {
     botao.textContent = "copie com ⌘C";
   }
 });
+
+/** Ejeta e volta para a tela de entrada, sem fechar o programa. */
+async function ejetar() {
+  await invoke("disconnect");
+  $("tela-sessao").hidden = true;
+  $("tela-fim").hidden = true;
+  $("tela-boot").hidden = false;
+  $("convite").hidden = true;
+  $("bateria").hidden = true;
+  document.body.classList.remove("na-bateria");
+  desenhado = null;
+  linhaAberta = null;
+}
+
+$("botao-trocar").addEventListener("click", ejetar);
 
 $("botao-voltar").addEventListener("click", async () => {
   await invoke("disconnect");

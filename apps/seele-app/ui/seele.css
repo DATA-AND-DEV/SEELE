@@ -424,3 +424,46 @@ input:focus {
   letter-spacing: var(--seele-tracking-rotulo);
   color: var(--seele-osso-apagado);
 }
+
+/* ---- bateria interna ----
+   `specs/07-tema-evangelion.md`: contagem em vermelho, interface esmaecida mas
+   **ainda legível**. Esmaecer não é esconder: o histórico continua ali para
+   leitura, e é isso que separa "segurando a sessão" de "caiu". */
+.bateria {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding: 8px 16px;
+  border-bottom: var(--seele-b) solid var(--seele-vermelho-alerta);
+  background: var(--seele-vermelho-fraco);
+  color: var(--seele-vermelho-alerta);
+}
+
+.bateria-titulo {
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+}
+
+/* A contagem é o que diz se vale esperar ou ir consertar o wifi, então é o
+   maior elemento da faixa. */
+.bateria-conta {
+  font-size: var(--seele-t-secao);
+  font-variant-numeric: tabular-nums;
+}
+
+.bateria-tentativas {
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-osso-apagado);
+}
+
+/* Esmaecido, e não desabilitado: dá para ler e rolar o que já foi dito. */
+.na-bateria .paineis { opacity: 0.55; }
+.na-bateria .compor { opacity: 0.4; }
+
+/* ---- o botão de falar diz o que fazer ---- */
+.botao-falar { min-width: 152px; }
+.botao-falar[data-ativo="sim"] {
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-fosforo);
+}

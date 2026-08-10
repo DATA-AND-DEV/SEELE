@@ -89,6 +89,12 @@
     <span id="padrao" class="padrao">PADRÃO: AZUL</span>
     <span class="regua regua-larga"></span>
     <time id="relogio" class="relogio">--:--:--</time>
+    <!--
+      A saída. Sem isto o app tinha três telas soltas e nenhum caminho entre
+      elas: quem entrava num Dogma só saía fechando o programa.
+    -->
+    <button id="botao-trocar" class="botao-fantasma" type="button"
+            title="ejetar e escolher outro Dogma">EJETAR</button>
   </header>
 
   <!--
@@ -100,6 +106,19 @@
     <span class="kanji" lang="ja">警告</span>
     <span id="banner-texto"></span>
     <button id="banner-fechar" class="botao-fantasma" type="button">dispensar</button>
+  </div>
+
+  <!--
+    Bateria interna. `specs/07-tema-evangelion.md` é explícito: o cliente não
+    fecha nem mostra um spinner. A interface esmaece, conta cinco minutos, e o
+    histórico continua ali para leitura. Por isso isto é uma faixa **sobre** a
+    sessão, e não uma tela que substitui o que estava escrito.
+  -->
+  <div id="bateria" class="bateria" role="status" hidden>
+    <span class="kanji" lang="ja">警告</span>
+    <span class="bateria-titulo">BATERIA INTERNA</span>
+    <time id="bateria-conta" class="bateria-conta">04:59</time>
+    <span id="bateria-tentativas" class="bateria-tentativas">reconectando…</span>
   </div>
 
   <!--
@@ -149,11 +168,22 @@
     <span class="metrica"><b class="rotulo">LOSS</b> <span id="tel-loss">·</span></span>
     <span class="metrica"><b class="rotulo">OPUS</b> <span id="tel-opus">·</span></span>
     <span class="espaco"></span>
-    <button id="botao-falar" class="botao-estado" type="button" title="segure para falar">
-      FALAR
+    <!--
+      Três controles, e a hierarquia agora é visível: **como** o microfone abre,
+      **se** ele está aberto, e **se** você ouve. Antes eram quatro botões no
+      mesmo peso — FALAR, TECLA, A.T. OFF, OUVINDO — todos sobre áudio em níveis
+      diferentes, e ninguém descobria que precisava segurar espaço.
+
+      `specs/03-audio.md` escolhe push-to-talk como padrão "mais previsível, sem
+      falso positivo", e o ADR 0016 recusou VAD como padrão porque transmitir
+      uma sala por engano é a falha mais cara. A decisão continua; o que muda é
+      que agora ela está escrita na tela.
+    -->
+    <button id="botao-falar" class="botao-estado botao-falar" type="button">
+      <span id="falar-rotulo">SEGURE ESPAÇO</span>
     </button>
     <button id="botao-voz" class="botao-estado" type="button"
-            title="como o microfone abre">TECLA</button>
+            title="como o microfone abre">MODO: TECLA</button>
     <button id="botao-mudo" class="botao-estado" type="button">A.T. OFF</button>
     <button id="botao-surdo" class="botao-estado" type="button">OUVINDO</button>
     <span id="tel-local" class="falha-local" hidden title="a máquina, não a rede">

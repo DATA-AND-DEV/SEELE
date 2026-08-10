@@ -324,6 +324,13 @@ pub struct Notice {
 /// Everything the interface needs, in one value.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Snapshot {
+    /// Onde o enlace está: no ar, na bateria interna, ou acabado.
+    ///
+    /// `specs/07-tema-evangelion.md` manda a interface não fechar quando a
+    /// conexão cai — ela esmaece, conta cinco minutos e continua legível. Sem
+    /// este campo a casca gráfica não tinha como saber disso e pulava direto
+    /// para "encerrado", que é a simplificação que a spec proíbe.
+    pub link: LinkState,
     /// How far the connection has got.
     pub pattern: Pattern,
     /// What the Dogma is called.
@@ -385,6 +392,20 @@ pub enum Event {
     Ended {
         /// Why.
         reason: EndReason,
+    },
+}
+
+/// Onde o enlace está.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum LinkState {
+    /// Conectado e respondendo.
+    Online,
+    /// Bateria interna: caiu, e a sessão está sendo segurada.
+    InternalBattery {
+        /// Segundos que faltam dos cinco minutos.
+        remaining_seconds: u64,
+        /// Tentativas de reconexão até agora.
+        attempts: u32,
     },
 }
 

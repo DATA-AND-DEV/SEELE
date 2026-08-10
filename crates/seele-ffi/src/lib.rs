@@ -41,18 +41,16 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use seele_core::enlace::Enlace;
 use seele_core::{
-    identity, CageId, Client, ClientMessageId, FilePinStore, LineId, PinDecision, Room, SyncBand,
+    identity, CageId, ClientMessageId, FilePinStore, LineId, PinDecision, Room, SyncBand,
     SyncInputs, SyncRatio, Voice,
 };
 
 pub use types::{
-    Cage, EndReason, Event, Line, Message, Notice, NoticeReason, Pattern, Pilot, PlugError,
-    Severity, Snapshot, SyncBand as Band, Telemetry, Trust, VoiceMode,
+    Cage, EndReason, Event, Line, LinkState, Message, Notice, NoticeReason, Pattern, Pilot,
+    PlugError, Severity, Snapshot, SyncBand as Band, Telemetry, Trust, VoiceMode,
 };
-
-/// How often the client pings. `specs/02-protocolo.md`.
-const PING_EVERY: Duration = Duration::from_secs(5);
 
 /// How often measurements are refreshed.
 const TICK: Duration = Duration::from_millis(250);
@@ -115,9 +113,40 @@ struct Shared {
     rtt_micros: std::sync::atomic::AtomicU64,
     sync_ratio: AtomicU8,
     running: AtomicBool,
+    /// Onde o enlace está, para o `Snapshot` contar à casca.
+    ///
+    /// Átomos e não um `Mutex`: isto é lido a cada quadro de interface e
+    /// escrito raramente, e um cadeado por leitura seria contenção por nada.
+    /// Zero segundos restantes significa "no ar".
+    link_battery: AtomicBool,
+    link_seconds: std::sync::atomic::AtomicU64,
+    link_attempts: std::sync::atomic::AtomicU32,
 }
 
 impl Shared {
+    /// Guarda onde o enlace está, para o `Snapshot` contar à casca.
+    fn gravar_enlace(&self, estado: seele_core::Link, restante: Option<std::time::Duration>) {
+        let na_bateria = matches!(estado, seele_core::Link::InternalBattery { .. });
+        self.link_battery.store(na_bateria, Ordering::Relaxed);
+        self.link_seconds
+            .store(restante.map_or(0, |q| q.as_secs()), Ordering::Relaxed);
+        if let seele_core::Link::InternalBattery { attempts } = estado {
+            self.link_attempts.store(attempts, Ordering::Relaxed);
+        }
+    }
+
+    /// O estado do enlace como a casca o vê.
+    fn enlace(&self) -> LinkState {
+        if self.link_battery.load(Ordering::Relaxed) {
+            LinkState::InternalBattery {
+                remaining_seconds: self.link_seconds.load(Ordering::Relaxed),
+                attempts: self.link_attempts.load(Ordering::Relaxed),
+            }
+        } else {
+            LinkState::Online
+        }
+    }
+
     fn notify(&self, event: &Event) {
         let listeners = match self.listeners.lock() {
             Ok(listeners) => listeners.clone(),
@@ -169,6 +198,9 @@ impl Plug {
         })?);
 
         let shared = Arc::new(Shared {
+            link_battery: AtomicBool::new(false),
+            link_seconds: std::sync::atomic::AtomicU64::new(0),
+            link_attempts: std::sync::atomic::AtomicU32::new(0),
             room: Mutex::new(Room::new()),
             listeners: Mutex::new(Vec::new()),
             voice: Mutex::new(None),
@@ -392,6 +424,7 @@ impl Plug {
         let rtt_ms = self.shared.rtt_micros.load(Ordering::Relaxed) as f32 / 1000.0;
 
         Snapshot {
+            link: self.shared.enlace(),
             pattern: pattern_from_byte(self.shared.pattern.load(Ordering::Relaxed)),
             dogma: room.dogma.clone(),
             me: room.me.map(|pilot| pilot.0),
@@ -605,17 +638,17 @@ async fn drive(
         .pattern
         .store(pattern_byte(Pattern::Orange), Ordering::Relaxed);
 
-    let mut client = match Client::connect(
-        address,
-        &server_name,
-        &pin_key,
-        &config.nickname,
-        &key,
-        pins,
-        config.join_secret.as_deref(),
-    )
-    .await
-    {
+    // `Enlace` e não `Client`: é a sessão que atravessa quedas, com a bateria
+    // interna dentro. Antes disto, o app pulava de "conectado" para "encerrado"
+    // no primeiro soluço de rede.
+    let destino = seele_core::enlace::Destino {
+        servidor: address,
+        nome_tls: server_name.clone(),
+        chave_do_pin: pin_key.clone(),
+        apelido: config.nickname.clone(),
+        segredo: config.join_secret.clone(),
+    };
+    let mut client = match seele_core::enlace::Enlace::conectar(destino, key, pins).await {
         Ok(client) => client,
         Err(error) => {
             tracing::warn!(%error, "could not reach the Dogma");
@@ -640,14 +673,14 @@ async fn drive(
     };
 
     if let Ok(mut room) = shared.room.lock() {
-        room.adopt(client.session(), &config.nickname);
+        room.adopt(client.sessao(), &config.nickname);
     }
     shared
         .pattern
         .store(pattern_byte(Pattern::Blue), Ordering::Relaxed);
 
     if config.audio {
-        match Voice::start(client.media(), client.session().ssrc) {
+        match Voice::start(client.media(), client.sessao().ssrc) {
             Ok(voice) => {
                 if let Ok(mut slot) = shared.voice.lock() {
                     *slot = Some(voice);
@@ -663,34 +696,49 @@ async fn drive(
     let _ = ready.send(Ok(trust));
 
     let mut sync = SyncRatio::new();
-    let mut next_ping = Instant::now() + PING_EVERY;
     let mut next_tick = Instant::now() + TICK;
 
     while shared.running.load(Ordering::Relaxed) {
         tokio::select! {
             command = commands.recv() => {
                 let Some(command) = command else { break };
-                if !run_command(&mut client, &shared, command).await {
+                if !run_command(&client, &shared, command).await {
                     break;
                 }
             }
 
-            event = client.next_event() => {
-                match event {
-                    Ok(message) => fold(&shared, &message),
-                    Err(error) => {
-                        tracing::info!(%error, "control stream closed");
-                        shared.notify(&Event::Ended { reason: EndReason::LinkLost });
+            aviso = client.proximo() => {
+                match aviso {
+                    seele_core::enlace::Aviso::Mensagem(message) => fold(&shared, &message),
+                    // Cair não encerra: começa a bateria interna, e a casca
+                    // esmaece em vez de fechar.
+                    seele_core::enlace::Aviso::Estado { estado, restante } => {
+                        shared.gravar_enlace(estado, restante);
+                        shared.notify(&Event::TelemetryChanged);
+                    }
+                    seele_core::enlace::Aviso::Reconectado { media, sessao } => {
+                        shared.gravar_enlace(seele_core::Link::Online, None);
+                        if let Ok(mut room) = shared.room.lock() {
+                            room.adopt(&sessao, &config.nickname);
+                        }
+                        // Conexão nova, `ssrc` novo, canal de mídia novo: sem
+                        // reabrir, a voz sairia por uma conexão morta.
+                        if let Ok(mut slot) = shared.voice.lock() {
+                            if slot.is_some() {
+                                *slot = Voice::start(*media, sessao.ssrc).ok();
+                            }
+                        }
+                        shared.notify(&Event::TelemetryChanged);
+                    }
+                    seele_core::enlace::Aviso::Encerrado(motivo) => {
+                        let reason = match motivo {
+                            seele_core::enlace::Motivo::Descarregou => EndReason::LinkLost,
+                            seele_core::enlace::Motivo::Recusado(_) => EndReason::CredentialRejected,
+                            seele_core::enlace::Motivo::Pedido => EndReason::LinkLost,
+                        };
+                        shared.notify(&Event::Ended { reason });
                         break;
                     }
-                }
-            }
-
-            () = tokio::time::sleep_until(next_ping.into()) => {
-                next_ping = Instant::now() + PING_EVERY;
-                if client.send_ping().await.is_err() {
-                    shared.notify(&Event::Ended { reason: EndReason::LinkLost });
-                    break;
                 }
             }
 
@@ -711,7 +759,7 @@ async fn drive(
     if let Ok(mut voice) = shared.voice.lock() {
         *voice = None;
     }
-    client.disconnect();
+    client.sair().await;
 }
 
 /// Folds a server message into the room and tells the shell what moved.
@@ -762,7 +810,7 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
 /// Refreshes what the shell reads without asking the server.
 ///
 /// Returns whether anything moved enough to be worth telling a shell about.
-fn measure(sync: &mut SyncRatio, client: &Client, shared: &Arc<Shared>) -> bool {
+fn measure(sync: &mut SyncRatio, client: &Enlace, shared: &Arc<Shared>) -> bool {
     let mut jitter_ms = 0.0;
     let mut loss = 0.0;
     if let Ok(voice) = shared.voice.lock() {
@@ -802,10 +850,10 @@ fn measure(sync: &mut SyncRatio, client: &Client, shared: &Arc<Shared>) -> bool 
 }
 
 /// Runs one command. Returns false when the driver should stop.
-async fn run_command(client: &mut Client, shared: &Arc<Shared>, command: Command) -> bool {
+async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) -> bool {
     match command {
         Command::InsertPlug(cage) => {
-            if client.insert_plug(cage).await.is_err() {
+            if client.inserir_plug(cage).await.is_err() {
                 return false;
             }
             if let Ok(mut room) = shared.room.lock() {
@@ -814,12 +862,12 @@ async fn run_command(client: &mut Client, shared: &Arc<Shared>, command: Command
             shared.notify(&Event::RosterChanged);
         }
         Command::EjectPlug => {
-            if client.eject_plug().await.is_err() {
+            if client.ejetar_plug().await.is_err() {
                 return false;
             }
         }
         Command::OpenLine(line) => {
-            if client.join_line(line).await.is_err() {
+            if client.abrir_linha(line).await.is_err() {
                 return false;
             }
             if let Ok(mut room) = shared.room.lock() {
@@ -827,11 +875,7 @@ async fn run_command(client: &mut Client, shared: &Arc<Shared>, command: Command
             }
             // The fetch is what makes "sem perda de histórico" true: a client
             // arriving late reads what was said instead of an empty room.
-            if client
-                .fetch_history(line, None, HISTORY_PAGE)
-                .await
-                .is_err()
-            {
+            if client.historico(line, HISTORY_PAGE).await.is_err() {
                 return false;
             }
             shared.notify(&Event::MessagesChanged);
@@ -840,17 +884,21 @@ async fn run_command(client: &mut Client, shared: &Arc<Shared>, command: Command
             // specs/02-protocolo.md: idempotent by client_msg_id, so a resend
             // after a lost acknowledgement does not post twice.
             let id = ClientMessageId(next_client_message_id());
-            if client.send_message(line, body.trim(), id).await.is_err() {
+            if client
+                .dizer(line, body.trim().to_owned(), id)
+                .await
+                .is_err()
+            {
                 return false;
             }
         }
         Command::SetAtField(on) => {
-            if client.set_at_field(on).await.is_err() {
+            if client.at_field(on).await.is_err() {
                 return false;
             }
         }
         Command::SetTotalIsolation(on) => {
-            if client.set_total_isolation(on).await.is_err() {
+            if client.isolamento(on).await.is_err() {
                 return false;
             }
         }
@@ -1058,6 +1106,9 @@ mod tests {
         }
 
         let shared = Arc::new(Shared {
+            link_battery: AtomicBool::new(false),
+            link_seconds: std::sync::atomic::AtomicU64::new(0),
+            link_attempts: std::sync::atomic::AtomicU32::new(0),
             room: Mutex::new(Room::new()),
             listeners: Mutex::new(Vec::new()),
             voice: Mutex::new(None),
@@ -1106,6 +1157,9 @@ mod tests {
         }
 
         let shared = Arc::new(Shared {
+            link_battery: AtomicBool::new(false),
+            link_seconds: std::sync::atomic::AtomicU64::new(0),
+            link_attempts: std::sync::atomic::AtomicU32::new(0),
             room: Mutex::new(Room::new()),
             listeners: Mutex::new(Vec::new()),
             voice: Mutex::new(None),
