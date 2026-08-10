@@ -4523,6 +4523,7 @@ dependencies = [
  "ed25519-dalek",
  "quinn",
  "rand 0.10.2",
+ "rcgen",
  "rustls",
  "seele-audio",
  "seele-proto",

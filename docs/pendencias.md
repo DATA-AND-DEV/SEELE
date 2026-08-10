@@ -10,11 +10,22 @@ meio: só duas chegam. As mesmas dez, com o receptor drenando entre lotes,
 chegam todas. Corpos pequenos chegam todos em qualquer ordem.
 
 **O que se sabe.** Não é o tamanho isolado — 10 de 3900 bytes com drenagem
-entre lotes entregam 10/10. Não é o conserto de segurança de cancelamento: o
-comportamento é idêntico antes e depois dele. Suspeitas na ordem: janela de
-controle de fluxo do QUIC no começo da conexão, a fila da tarefa que grava em
-lote, ou a tarefa leitora do cliente morrendo em silêncio e o erro sendo
-engolido por um `if let Ok(Ok(_))`.
+entre lotes entregam 10/10. Suspeitas na ordem: janela de controle de fluxo do
+QUIC no começo da conexão, a fila da tarefa que grava em lote, ou a tarefa
+leitora do cliente morrendo em silêncio e o erro sendo engolido por um
+`if let Ok(Ok(_))`.
+
+**Uma afirmação daqui estava errada.** Esta seção dizia "não é o conserto de
+cancelamento: o comportamento é idêntico antes e depois". Aquela comparação foi
+feita quando só o **cliente** tinha sido consertado; a sessão do servidor
+continuou lendo quadro dentro de um `select!` até o defeito derrubar o
+`acceptance_m5` no Linux e ser diagnosticado de verdade. Descartar o
+cancelamento com meia correção na mão não valia nada, e a frase saiu.
+
+**O que ficou tentado.** `crates/seele-conformance/tests/rajada.rs` roda o
+cenário da pendência. Ele passa — inclusive com a sessão sabotada de volta ao
+código antigo —, então **não reproduz o sintoma no macOS**. Não confirma nem
+descarta o cancelamento como causa; serve como rede, e roda nos três sistemas.
 
 **Por que não foi resolvido.** Precisa de instrumentação dos dois lados, e o
 `Casper::connection()` é `pub(crate)`, então um teste de conformidade não

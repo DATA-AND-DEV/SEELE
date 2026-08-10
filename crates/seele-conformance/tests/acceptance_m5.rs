@@ -309,11 +309,12 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
 
     // Espera a mensagem voltar, que é quando ela está durável.
     //
-    // Prazo maior que o `WAIT` dos outros: este teste falhou no runner do
-    // Linux com zero mensagens, e o caminho aqui é o mais longo do arquivo —
-    // gravação em lote, transação, difusão. Cinco segundos bastam nesta
-    // máquina e não bastaram lá.
-    let deadline = Instant::now() + Duration::from_secs(20);
+    // O prazo já foi de vinte segundos, quando eu achava que o problema era
+    // lentidão do runner. Não era: o `select!` da sessão cancelava a leitura no
+    // meio do quadro e o `SendMessage` sumia — nenhum prazo resolve uma
+    // mensagem que o servidor nunca recebeu. Com a tarefa leitora dedicada, o
+    // caminho todo (lote, transação, difusão) leva centenas de milissegundos.
+    let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline && room.messages.is_empty() {
         if let Ok(Ok(message)) =
             tokio::time::timeout(Duration::from_millis(500), terminal.next_event()).await

@@ -55,6 +55,26 @@ const NONCE_LEN: usize = 32;
 /// How many datagrams queue for one listener before the Cage sheds.
 const OUTBOUND_DEPTH: usize = 256;
 
+/// Quantos quadros de controle esperam a sessão antes de a leitura parar.
+///
+/// Limitado de propósito. Controle é raro — entrar num Cage, abrir uma Linha,
+/// dizer uma frase — então um cliente honesto nunca chega perto disto; e um
+/// desonesto encontra contrapressão em vez de memória do Dogma para gastar.
+const ENTRADA_DEPTH: usize = 64;
+
+/// Aborta uma tarefa quando sai de escopo.
+///
+/// A tarefa leitora é dona do fluxo de recepção. Sem isto ela sobreviveria a um
+/// retorno por `?` no meio da sessão, segurando o fluxo de uma conexão que já
+/// acabou.
+struct AbortaAoSair(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortaAoSair {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// How often the server pushes telemetry.
 ///
 /// `specs/07-tema-evangelion.md` wants the Sync Ratio alive on screen; once a
@@ -454,11 +474,51 @@ fn read_dogma(casper: &Casper) -> Result<(Vec<CageInfo>, Vec<LineInfo>, Vec<Role
 async fn run_session(
     connection: quinn::Connection,
     mut send: quinn::SendStream,
-    mut recv: quinn::RecvStream,
+    recv: quinn::RecvStream,
     session: &Session,
     dogma: &Dogma,
     cage: &mpsc::Sender<CageCommand>,
 ) -> Result<()> {
+    // Uma tarefa é dona do fluxo de leitura e entrega quadros inteiros por um
+    // canal.
+    //
+    // Ler direto dentro do `select!` abaixo era um defeito, e um caro. `read`
+    // faz dois `read_exact` — tamanho e corpo — e o `select!` cancela o que
+    // perde a corrida. Cancelado entre os dois, o tamanho já consumido some, e
+    // o `read` seguinte lê os primeiros bytes do **corpo** como tamanho: o
+    // fluxo fica deslocado para sempre. Depois disso o cliente segue conectado,
+    // manda mensagens, e o servidor não entende mais nenhuma.
+    //
+    // Aqui havia cinco ramos, um deles um `interval` de um segundo — uma
+    // oportunidade de cancelar por segundo, em toda sessão, para sempre. Foi o
+    // que derrubou `acceptance_m5` no runner do Linux, onde tamanho e corpo
+    // caem em pacotes separados com mais frequência.
+    // `crates/seele-core/src/frame.rs` tem o teste que prova o mecanismo.
+    //
+    // O canal é **limitado**: o par não é confiável, e um canal sem limite
+    // deixaria um cliente que fala mais rápido do que a sessão processa crescer
+    // sem teto na memória do Dogma. Cheio, a tarefa leitora para de ler, e a
+    // contrapressão volta pelo QUIC — que é onde ela deve aparecer.
+    let (para_dentro, mut entrada) = mpsc::channel::<ClientMessage>(ENTRADA_DEPTH);
+    let leitora = tokio::spawn(async move {
+        let mut recv = recv;
+        loop {
+            match frame::read::<ClientMessage>(&mut recv).await {
+                Ok(mensagem) => {
+                    if para_dentro.send(mensagem).await.is_err() {
+                        return;
+                    }
+                }
+                Err(erro) => {
+                    tracing::debug!(%erro, "o fluxo de controle do cliente terminou");
+                    return;
+                }
+            }
+        }
+    });
+    // Abortada ao sair por qualquer caminho, inclusive por `?`.
+    let _leitora = AbortaAoSair(leitora);
+
     let (outbound_tx, mut outbound_rx) = mpsc::channel::<Vec<u8>>(OUTBOUND_DEPTH);
     let mut events = dogma.events.subscribe();
     let mut lines: Vec<LineId> = Vec::new();
@@ -507,8 +567,10 @@ async fn run_session(
 
     loop {
         tokio::select! {
-            incoming = frame::read::<ClientMessage>(&mut recv) => {
-                let Ok(message) = incoming else { break };
+            // `recv` num canal é cancel-safe: nada é consumido pelo ramo que
+            // perde a corrida. É a propriedade que o `frame::read` não tem.
+            incoming = entrada.recv() => {
+                let Some(message) = incoming else { break };
                 match message {
                     ClientMessage::InsertPlug { cage: id, password } => {
                         // A senha do Cage era declarada no protocolo, relatada
