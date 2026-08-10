@@ -35,7 +35,43 @@ própria, não um remendo no fim de outra.
 **Quando dói.** Colar um texto longo, ou um cliente reconectando e recebendo
 histórico em rajada. Não apareceu em uso normal.
 
-## 2 · O instalador do Windows não põe `plug` no `PATH`
+## 2 · A reprodução perde amostras devagar, o tempo todo
+
+**Sintoma.** "ÁUDIO LOCAL FALHANDO" acende sozinho e volta a acender depois de
+apagar, com o áudio audivelmente bom.
+
+**Medido**, com `:sync` num `plug --hospedar` sem ninguém do outro lado:
+
+| | captura | saída |
+|---|---|---|
+| arranque | 832 | 320 |
+| +10 s, modo TECLA | 832 | 320 |
+| +10 s, modo ABERTO | 832 | 448 |
+
+Duas coisas separadas, e uma delas eu já sabia errado por outro motivo:
+
+1. **A captura estoura uma vez, no arranque, e nunca mais.** O fluxo começa a
+   encher o anel antes de alguém drenar. Inofensivo — e era isto que acendia o
+   aviso para sempre, antes de a regra virar derivada.
+2. **A reprodução perde amostras continuamente**, algumas centenas por dezena
+   de segundos. É pouco para ouvir e é suficiente para o aviso ser verdade.
+
+**O que a medição desmentiu.** A suspeita era que o anel de captura só fosse
+drenado ao transmitir, o que explicaria o aviso sumir no modo aberto. **Não é
+isso**: os contadores crescem igual nos dois modos. O laço drena a captura
+incondicionalmente, a cada 2 ms. A diferença que aparece na interface entre
+TECLA e ABERTO ainda não tem explicação.
+
+**Suspeitas, na ordem.** O laço de reprodução empurra um quadro de 20 ms por
+tica e recupera atraso somando 20 ms ao alvo — se uma volta passar do prazo,
+ele não repõe o que ficou para trás. Depois: contagem de canais do dispositivo
+de saída, e a conversão de taxa quando o dispositivo não roda a 48 kHz.
+
+**Por que não foi resolvido agora.** Precisa de instrumentação dentro do
+retorno de chamada de áudio, e chutar aqui produziria um conserto que parece
+funcionar. O `:sync` já mostra os números, que é o começo.
+
+## 3 · O instalador do Windows não põe `plug` no `PATH`
 
 O `.exe` do NSIS instala o app e os dois programas de terminal em
 `%LOCALAPPDATA%\Programs\SEELE`, e **não acrescenta essa pasta ao `PATH`**.
@@ -49,7 +85,7 @@ quebra o instalador inteiro — que é pior do que não ter `PATH`.
 No macOS o problema é o mesmo e a saída está nas notas de release: dois
 `ln -s`. No Linux o `.deb` já instala em `/usr/bin`.
 
-## 3 · Não há limitação de taxa
+## 4 · Não há limitação de taxa
 
 `DisconnectReason::RateLimited` existe no protocolo e **nunca é enviado**. Um
 convidado legítimo pode inundar o Dogma de mensagens ou de handshakes.
@@ -57,7 +93,7 @@ convidado legítimo pode inundar o Dogma de mensagens ou de handshakes.
 Não atrapalha rede local. **Bloqueia expor à internet**, e é a dívida mais
 séria de segurança depois do ADR 0021.
 
-## 4 · Apelido é validado só por tamanho
+## 5 · Apelido é validado só por tamanho
 
 Trinta e dois bytes, e nada sobre o conteúdo. O terminal está protegido — o
 ratatui filtra todo caractere de controle, verificado — e o app usa
@@ -66,24 +102,24 @@ ou parecidos com os de outra pessoa no roster.
 
 Baixo impacto num Dogma de amigos, real num aberto.
 
-## 5 · A matriz de três SOs nunca foi verde por inteiro
+## 6 · A matriz de três SOs nunca foi verde por inteiro
 
 Linux e Windows compilam no CI, mas ninguém rodou o `plug` neles fora disso.
 `docs/teste-duas-maquinas.md` é o roteiro.
 
-## 6 · Sem troca de chaves pós-quântica
+## 7 · Sem troca de chaves pós-quântica
 
 Ao tirar o `aws-lc-rs` da árvore (para não exigir CMake e NASM no Windows)
 perdeu-se o `prefer-post-quantum` do rustls. Nada protege contra gravar hoje e
 decifrar depois. Aceitável para v1 — o modelo é TOFU sobre TLS 1.3 e E2EE de
 mídia já é pós-v1 — mas é perda real.
 
-## 7 · `:conectar` não reconecta em execução
+## 8 · `:conectar` não reconecta em execução
 
 O comando existe e avisa que não faz. Reconectar exige derrubar uma conexão
 QUIC viva e uma thread de áudio; reiniciar o processo faz isso certo.
 
-## 8 · O esquema `seele://` não é clicável
+## 9 · O esquema `seele://` não é clicável
 
 Não está registrado no sistema operacional. Quando for, o cliente **precisa
 perguntar antes de conectar**: um link que inicia conexão sozinho é superfície

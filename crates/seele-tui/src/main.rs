@@ -890,6 +890,22 @@ async fn run_command(runtime: &mut Runtime, client: &Enlace, command: &Command) 
                     bar.bitrate / 1000
                 ),
             );
+            // Os tropeços desta máquina, separados dos da rede. Sem isto, "ÁUDIO
+            // LOCAL FALHANDO" é um aviso sem número atrás: dá para ver que
+            // acendeu e não dá para ver o que subiu, nem se ainda está subindo.
+            if let Some(voice) = runtime.voice.as_ref() {
+                let local = voice.telemetry().local;
+                note(
+                    runtime,
+                    format!(
+                        "LOCAL captura {} · saída {} · disp {} · agora {}",
+                        local.capture_overruns,
+                        local.playback_underruns,
+                        local.device_errors,
+                        if voice.falha_local() { "sim" } else { "não" }
+                    ),
+                );
+            }
         }
 
         Command::Audio => {
