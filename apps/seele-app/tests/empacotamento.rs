@@ -107,3 +107,22 @@ fn o_app_declara_para_que_quer_o_microfone() {
         "sem este direito o microfone volta a falhar assim que o app for assinado"
     );
 }
+
+#[test]
+fn o_bundle_do_macos_e_assinado() {
+    // Sem assinatura de **bundle** — e ter cada executável assinado pelo
+    // linker não conta — o macOS não tem a que identidade prender a permissão
+    // de microfone. O sintoma é cruel de diagnosticar: ele pergunta várias
+    // vezes por sessão, a pessoa autoriza, e na vez seguinte pergunta de novo.
+    // Medido no bundle antes do conserto: "code object is not signed at all".
+    //
+    // `-` é ad-hoc. Não engana o Gatekeeper, que continua exigindo
+    // notarização, mas dá ao sistema uma identidade estável para guardar a
+    // autorização — que é o problema que ele resolve.
+    let config = ler("tauri.conf.json");
+    assert!(
+        config.contains("\"signingIdentity\""),
+        "o bundle do macOS sairia sem assinatura, e a permissão de microfone \
+         nunca ficaria guardada"
+    );
+}

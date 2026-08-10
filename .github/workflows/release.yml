@@ -137,8 +137,25 @@ jobs:
           caminho = pathlib.Path("apps/seele-app/tauri.conf.json")
           config = json.loads(caminho.read_text())
           config["version"] = "${{ needs.versao.outputs.numero }}"
+
+          # A identidade de assinatura, quando houver uma de verdade.
+          #
+          # O padrão no arquivo é `-`, que é assinatura ad-hoc. Não vale para o
+          # Gatekeeper — só a notarização vale —, mas **é o que faz a permissão
+          # de microfone grudar no macOS**: sem assinatura de bundle o sistema
+          # não tem a que identidade prender a autorização e pergunta de novo a
+          # cada vez, sem nunca lembrar.
+          #
+          # Escrito aqui em vez de confiar na precedência da variável de
+          # ambiente, que eu não conferi. Explícito não tem precedência para
+          # errar.
+          identidade = "${{ secrets.APPLE_SIGNING_IDENTITY }}".strip()
+          if identidade:
+              config["bundle"].setdefault("macOS", {})["signingIdentity"] = identidade
+
           caminho.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n")
           print("versão gravada:", config["version"])
+          print("assinatura:", config["bundle"].get("macOS", {}).get("signingIdentity"))
           PY
 
       # ---------------------------------------------------------------- CLI
