@@ -201,7 +201,54 @@ pub fn render(frame: &mut Frame<'_>, app: &App, theme: Theme) {
 
     if app.help {
         render_help(frame, theme, area);
+    } else if app.convite_visivel {
+        if let Some(convite) = &app.convite {
+            render_convite(frame, theme, area, convite);
+        }
     }
+}
+
+/// O link de convite, numa caixa larga o bastante para ele caber inteiro.
+///
+/// Largura inteira de propósito. O painel de mensagens tem cinquenta colunas e
+/// o link tem uns noventa; ali ele quebraria em duas linhas, e um link quebrado
+/// é um link que ninguém copia — que é a única coisa que se faz com ele.
+fn render_convite(frame: &mut Frame<'_>, theme: Theme, area: Rect, convite: &str) {
+    let largura = area.width.saturating_sub(4).max(20);
+    let altura = 9;
+    let caixa = centred(area, largura, altura);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.border(true))
+        .title(Span::styled(" CONVITE ", theme.accent()));
+    let inner = block.inner(caixa);
+
+    frame.render_widget(Clear, caixa);
+    frame.render_widget(block, caixa);
+
+    let budget = inner.width as usize;
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "Mande este link para quem você quer no Dogma:",
+            theme.label(),
+        )),
+        Line::from(""),
+    ];
+    for pedaco in wrap(convite, budget) {
+        lines.push(Line::from(Span::styled(pedaco, theme.accent())));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Vale para quem chegar primeiro. O Dogma acaba quando você sair.",
+        theme.label(),
+    )));
+    lines.push(Line::from(Span::styled(
+        "`:convite` mostra de novo · qualquer tecla fecha",
+        theme.label(),
+    )));
+
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 /// The outer frame: `SEELE ─ 同期率 ─ 第3新東京市 ─ 12:04:33`.

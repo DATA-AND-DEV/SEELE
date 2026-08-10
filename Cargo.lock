@@ -4584,6 +4584,7 @@ dependencies = [
  "rand 0.10.2",
  "ratatui",
  "seele-core",
+ "seele-server",
  "tokio",
  "unicode-width",
 ]

@@ -35,6 +35,7 @@ pub mod cage;
 pub mod casper;
 pub mod dogma;
 pub mod frame;
+pub mod hospedagem;
 pub mod melchior;
 pub mod session;
 pub mod tls;
@@ -279,5 +280,15 @@ impl Server {
         // and given 3 s. That needs the per-connection registry M3 brings; for
         // now the close is abrupt and honest about it.
         self.endpoint.close(0_u32.into(), b"shutting down");
+    }
+
+    /// Espera o endpoint terminar de fechar.
+    ///
+    /// `shutdown` sinaliza e volta na hora; o socket UDP só é liberado quando o
+    /// endpoint termina. Sem esperar, parar de hospedar e recomeçar em seguida
+    /// falha com "endereço já em uso" — que é exatamente o que alguém faz ao
+    /// fechar uma conversa e abrir outra.
+    pub async fn wait_idle(&self) {
+        self.endpoint.wait_idle().await;
     }
 }

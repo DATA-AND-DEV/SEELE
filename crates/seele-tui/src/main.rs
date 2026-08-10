@@ -60,6 +60,8 @@ struct Args {
     join_secret: Option<String>,
     /// Impressão digital esperada, quando veio num link.
     expected_fingerprint: Option<String>,
+    /// Subir um Dogma neste processo e conectar nele.
+    hospedar: bool,
 }
 
 fn parse_args() -> Result<Args> {
@@ -70,6 +72,7 @@ fn parse_args() -> Result<Args> {
     let mut no_audio = false;
     let mut join_secret: Option<String> = None;
     let mut expected_fingerprint: Option<String> = None;
+    let mut hospedar = false;
     let mut argv = std::env::args().skip(1);
 
     while let Some(flag) = argv.next() {
@@ -101,6 +104,8 @@ fn parse_args() -> Result<Args> {
             // A terminal on a headless box has no sound card, and the text half
             // of the product needs none.
             "--sem-audio" | "--no-audio" => no_audio = true,
+            // Sobe o Dogma aqui dentro e entra nele. Um comando, um processo.
+            "--hospedar" | "--host" => hospedar = true,
             "--ajuda" | "--help" | "-h" => {
                 usage();
                 std::process::exit(0);
@@ -120,6 +125,7 @@ fn parse_args() -> Result<Args> {
         no_audio,
         join_secret,
         expected_fingerprint,
+        hospedar,
     })
 }
 
@@ -302,6 +308,22 @@ async fn run(terminal: &mut Screen1, args: Args, holds: bool) -> Result<()> {
     // ADR 0003 is trust on *first* use, which needs the first use remembered.
     let pins = Arc::new(FilePinStore::open(home.join("pins"))?);
 
+    // `--hospedar`: o Dogma sobe aqui dentro, antes de conectar. Fica vivo pelo
+    // tempo desta função — quando o cliente sai, o Dogma vai junto, que é o
+    // comportamento certo para "estou hospedando uma conversa".
+    let hospedagem = if args.hospedar {
+        let dogma = seele_server::hospedagem::Hospedagem::iniciar(
+            args.server.port(),
+            seele_server::casper::Location::File(home.join("dogma.db")),
+            "Casa",
+        )
+        .await
+        .context("não consegui subir o Dogma aqui")?;
+        Some(dogma)
+    } else {
+        None
+    };
+
     let mut client = match Client::connect(
         args.server,
         &args.server_name,
@@ -355,6 +377,28 @@ async fn run(terminal: &mut Screen1, args: Args, holds: bool) -> Result<()> {
     client.insert_plug(cage).await?;
     client.join_line(args.line).await?;
     client.fetch_history(args.line, None, 50).await?;
+    // O anfitrião precisa saber o que mandar para os amigos. Sem isto ele
+    // hospeda e não tem como convidar ninguém, que é hospedar para nada.
+    if let Some(dogma) = &hospedagem {
+        let alvo = dogma
+            .endereco_na_rede()
+            .map_or_else(|| dogma.endereco().to_string(), |rede| rede.to_string());
+        let convite = seele_core::uri::Convite::novo(alvo)
+            .com_impressao_digital(dogma.impressao_digital())
+            .to_string();
+        note(
+            &mut runtime,
+            "hospedando. `:convite` mostra o link.".to_owned(),
+        );
+        runtime.app.convite = Some(convite);
+        // Aberta de saída: a primeira coisa que o anfitrião precisa é o link.
+        runtime.app.convite_visivel = true;
+        note(
+            &mut runtime,
+            "o Dogma acaba quando você sair. `:convite` mostra o link de novo.".to_owned(),
+        );
+    }
+
     runtime.room.adopt(client.session(), &args.nickname);
     runtime.room.enter_cage(cage);
     runtime.room.open_line(args.line);
@@ -765,6 +809,17 @@ async fn run_command(runtime: &mut Runtime, client: &mut Client, command: &Comma
                 },
             });
             note(runtime, format!("tema {:?}", runtime.theme.palette));
+        }
+
+        Command::Convite => {
+            if runtime.app.convite.is_some() {
+                runtime.app.convite_visivel = true;
+            } else {
+                note(
+                    runtime,
+                    "este cliente não está hospedando; só o anfitrião tem convite a dar".to_owned(),
+                );
+            }
         }
 
         Command::About => note(

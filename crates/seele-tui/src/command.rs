@@ -36,6 +36,10 @@ pub enum Command {
     },
     /// `:sobre`.
     About,
+    /// `:convite` — mostra o link para convidar alguém.
+    ///
+    /// Só faz sentido em `--hospedar`: quem é convidado não tem o que oferecer.
+    Convite,
     /// `:mudo` / `:surdo` — the same toggles as `m` and `d`, for people who
     /// reach for words.
     AtField,
@@ -87,6 +91,7 @@ pub fn parse(input: &str) -> Command {
             which: rest.first().map(|word| (*word).to_owned()),
         },
         "sobre" | "about" => Command::About,
+        "convite" | "convidar" => Command::Convite,
         "mudo" | "at" => Command::AtField,
         "surdo" | "isolamento" => Command::TotalIsolation,
         "voz" | "voice" if !joined.is_empty() => Command::VoiceMode { which: joined },
@@ -139,6 +144,7 @@ mod tests {
         assert_eq!(parse(":audio"), Command::Audio);
         assert_eq!(parse(":tema"), Command::Theme { which: None });
         assert_eq!(parse(":sobre"), Command::About);
+        assert_eq!(parse(":convite"), Command::Convite);
         assert_eq!(parse(":q"), Command::Quit);
     }
 

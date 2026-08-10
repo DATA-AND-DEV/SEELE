@@ -253,6 +253,15 @@ pub struct App {
     pub total_isolation: bool,
     /// Whether the help overlay is up. `?` in Normal mode.
     pub help: bool,
+    /// O link de convite, quando este cliente é o anfitrião.
+    ///
+    /// Fica numa sobreposição de largura inteira e não no painel de mensagens:
+    /// o link tem uns noventa caracteres e o painel tem cinquenta. Um convite
+    /// quebrado em duas linhas é um convite que ninguém consegue copiar, e
+    /// copiar é a única coisa que se faz com ele.
+    pub convite: Option<String>,
+    /// Se a sobreposição do convite está aberta.
+    pub convite_visivel: bool,
     /// Wall-clock time for the title bar, already formatted.
     ///
     /// The shell owns the clock. `seele-core` deals in monotonic durations and
@@ -289,6 +298,8 @@ impl App {
             at_field: false,
             total_isolation: false,
             help: false,
+            convite: None,
+            convite_visivel: false,
             clock: "--:--:--".into(),
             quit: false,
         }
@@ -350,6 +361,11 @@ impl App {
 
         if self.help {
             self.help = false;
+            return None;
+        }
+
+        if self.convite_visivel {
+            self.convite_visivel = false;
             return None;
         }
 

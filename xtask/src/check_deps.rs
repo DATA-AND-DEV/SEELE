@@ -51,7 +51,13 @@ const RULES: &[(&str, &[&str])] = &[
     // The daemon speaks the wire format and nothing else.
     ("seele-server", &["seele-proto"]),
     // Shells translate events into pixels and input into commands. Nothing more.
-    ("seele-tui", &["seele-core"]),
+    //
+    // A exceção do `seele-server` é nomeada e tem motivo: `--hospedar` sobe um
+    // Dogma no próprio processo, para que quem hospeda entre amigos não precise
+    // saber o que é um daemon. Não inverte a regra — o servidor não passa a
+    // conhecer o cliente, e nenhuma lógica de protocolo entra na casca. É uma
+    // aresta lateral no topo do grafo: este binário contém os dois papéis.
+    ("seele-tui", &["seele-core", "seele-server"]),
     ("seele-ffi", &["seele-core"]),
     // The one deliberate exception, and it has a name so it cannot spread.
     // An end-to-end protocol test needs a server and a client at once, and the
@@ -72,7 +78,8 @@ const RULES: &[(&str, &[&str])] = &[
     ),
     // The desktop shell. Sees `seele-ffi`, which sees `seele-core`. Reaching past
     // it would put protocol knowledge in a Tauri command — specs/06-clientes-gui.md.
-    ("seele-app", &["seele-ffi"]),
+    // Mesma exceção, mesmo motivo: o botão **Hospedar**. Ver `seele-tui`.
+    ("seele-app", &["seele-ffi", "seele-server"]),
     // Tooling. Must not depend on the product, or `cargo xtask` would need the
     // product to compile before it could check the product.
     ("xtask", &[]),
