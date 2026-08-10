@@ -29,8 +29,9 @@ use crossterm::terminal::{
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use seele_core::conhecidos::Conhecidos;
+use seele_core::enlace::{Aviso, Destino, Enlace, Motivo};
 use seele_core::{
-    identity, CageId, Client, ClientMessageId, FilePinStore, LineId, PinDecision, Room, SyncInputs,
+    identity, CageId, ClientMessageId, FilePinStore, LineId, PinDecision, Room, SyncInputs,
     SyncRatio, Voice, VoiceMode,
 };
 use seele_tui::app::{Action, Alert, App, ChatLine, Key, Mode, Node, Screen};
@@ -38,9 +39,6 @@ use seele_tui::command::{self, Command};
 use seele_tui::selecao::{self, Resultado, Selecao};
 use seele_tui::theme::{Palette, Theme};
 use seele_tui::{ui, view};
-
-/// How often the client pings. `specs/02-protocolo.md`.
-const PING_EVERY: Duration = Duration::from_secs(5);
 
 /// The redraw floor. `specs/05-cliente-tui.md` asks for ~30 fps *when something
 /// changed*, so this is a ceiling on how often a change is allowed to cost a
@@ -412,17 +410,17 @@ async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<
         None
     };
 
-    let mut client = match Client::connect(
-        args.server,
-        &args.server_name,
-        &args.pin_key,
-        &args.nickname,
-        &key,
-        pins,
-        args.join_secret.as_deref(),
-    )
-    .await
-    {
+    // `Enlace` e não `Client`: um `Client` é uma conexão e acaba quando ela
+    // cai; o enlace é a **sessão**, que atravessa quedas. É ele que carrega a
+    // bateria interna e a reconexão de `specs/07-tema-evangelion.md`.
+    let destino = Destino {
+        servidor: args.server,
+        nome_tls: args.server_name.clone(),
+        chave_do_pin: args.pin_key.clone(),
+        apelido: args.nickname.clone(),
+        segredo: args.join_secret.clone(),
+    };
+    let mut client = match Enlace::conectar(destino, key, pins).await {
         Ok(client) => client,
         Err(error) => {
             runtime.app.screen = Screen::Lost {
@@ -462,9 +460,9 @@ async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<
     }
 
     let cage = args.cage;
-    client.insert_plug(cage).await?;
-    client.join_line(args.line).await?;
-    client.fetch_history(args.line, None, 50).await?;
+    client.inserir_plug(cage).await?;
+    client.abrir_linha(args.line).await?;
+    client.historico(args.line, 50).await?;
 
     // Registrado só **depois** de dar certo. Guardar antes encheria a lista de
     // endereços errados digitados uma vez, que é o oposto de uma lista de
@@ -499,12 +497,12 @@ async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<
         );
     }
 
-    runtime.room.adopt(client.session(), &args.nickname);
+    runtime.room.adopt(client.sessao(), &args.nickname);
     runtime.room.enter_cage(cage);
     runtime.room.open_line(args.line);
 
     if !args.no_audio {
-        match Voice::start(client.media(), client.session().ssrc) {
+        match Voice::start(client.media(), client.sessao().ssrc) {
             Ok(voice) => {
                 voice.set_mode(VoiceMode::PushToTalk);
                 runtime.voice = Some(voice);
@@ -526,7 +524,6 @@ async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<
     let (key_tx, mut key_rx) = tokio::sync::mpsc::channel::<Event>(64);
     std::thread::spawn(move || read_terminal_events(&key_tx));
 
-    let mut next_ping = Instant::now() + PING_EVERY;
     let mut next_tick = Instant::now();
     let mut last_draw = Instant::now() - FRAME;
     let mut dirty = true;
@@ -549,7 +546,7 @@ async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<
                     Event::Key(key_event) => {
                         for key in key_source(&mut runtime, key_event) {
                             if let Some(action) = runtime.app.on_key(key) {
-                                act(&mut runtime, &mut client, action, args.line).await?;
+                                act(&mut runtime, &client, action, args.line).await?;
                             }
                         }
                     }
@@ -560,9 +557,9 @@ async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<
                 }
             }
 
-            event = client.next_event() => {
-                match event {
-                    Ok(message) => {
+            aviso = client.proximo() => {
+                match aviso {
+                    Aviso::Mensagem(message) => {
                         // The core folds it in and says what moved; redrawing
                         // for a round-trip measurement nobody asked to see is
                         // thirty frames a second of nothing.
@@ -571,20 +568,43 @@ async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<
                             dirty = true;
                         }
                     }
-                    Err(error) => {
+                    // A queda não encerra nada. `specs/07-tema-evangelion.md`:
+                    // a interface esmaece e continua legível, a contagem desce,
+                    // e o histórico fica ali para leitura.
+                    Aviso::Estado { estado, restante } => {
+                        view::project_link(
+                            estado,
+                            restante.map_or(0, |quanto| quanto.as_secs()),
+                            &mut runtime.app,
+                        );
+                        dirty = true;
+                    }
+                    // Conexão nova, `ssrc` novo, canal de mídia novo: a voz
+                    // precisa recomeçar por cima do canal certo, ou o áudio
+                    // sairia por uma conexão que já morreu.
+                    Aviso::Reconectado { media, sessao } => {
+                        if runtime.voice.is_some() {
+                            runtime.voice = Voice::start(*media, sessao.ssrc).ok();
+                        }
+                        runtime.room.adopt(&sessao, &args.nickname);
+                        view::project(&runtime.room, &mut runtime.app);
+                        note(&mut runtime, "enlace restabelecido.".to_owned());
+                        dirty = true;
+                    }
+                    Aviso::Encerrado(motivo) => {
                         runtime.app.screen = Screen::Lost {
-                            reason: format!("ENLACE PERDIDO: {error}"),
+                            reason: match motivo {
+                                Motivo::Descarregou => {
+                                    "BATERIA INTERNA ESGOTADA — a sessão não voltou em cinco minutos"
+                                        .to_owned()
+                                }
+                                Motivo::Recusado(detalhe) => format!("O DOGMA RECUSOU: {detalhe}"),
+                                Motivo::Pedido => "ENLACE ENCERRADO".to_owned(),
+                            },
                         };
                         return wait_for_key(terminal, &runtime).await;
                     }
                 }
-            }
-
-            () = tokio::time::sleep_until(next_ping.into()) => {
-                next_ping = Instant::now() + PING_EVERY;
-                // The Pong comes back through the event stream, where the core
-                // measures the round trip. One reader on the control stream.
-                let _ = client.send_ping().await;
             }
 
             () = tokio::time::sleep_until(next_tick.into()) => {
@@ -598,7 +618,7 @@ async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<
 
 /// Refreshes everything that changes on its own: the clock, the audio meters,
 /// and the Sync Ratio.
-fn tick(runtime: &mut Runtime, client: &Client) {
+fn tick(runtime: &mut Runtime, client: &Enlace) {
     runtime.app.clock = clock();
 
     if let Some(rtt) = client.rtt() {
@@ -744,12 +764,7 @@ fn space(runtime: &mut Runtime, kind: KeyEventKind) -> Vec<Key> {
 }
 
 /// Carries out what a keystroke asked for.
-async fn act(
-    runtime: &mut Runtime,
-    client: &mut Client,
-    action: Action,
-    line: LineId,
-) -> Result<()> {
+async fn act(runtime: &mut Runtime, client: &Enlace, action: Action, line: LineId) -> Result<()> {
     match action {
         Action::Quit => runtime.app.quit(),
 
@@ -759,7 +774,7 @@ async fn act(
             let id = ClientMessageId(runtime.next_message_id);
             runtime.next_message_id += 1;
             let target = runtime.room.current_line.unwrap_or(line);
-            client.send_message(target, body.trim(), id).await?;
+            client.dizer(target, body.trim().to_owned(), id).await?;
         }
 
         Action::Command(text) => run_command(runtime, client, &command::parse(&text)).await?,
@@ -796,14 +811,14 @@ async fn act(
 }
 
 /// Enter on the selected row: enter a Cage, or open a Line.
-async fn activate(runtime: &mut Runtime, client: &mut Client) -> Result<()> {
+async fn activate(runtime: &mut Runtime, client: &Enlace) -> Result<()> {
     let Some(node) = runtime.app.tree.get(runtime.app.selected).cloned() else {
         return Ok(());
     };
     match node {
         Node::Cage { name, .. } => {
             if let Some(id) = runtime.room.find_cage(&name) {
-                client.insert_plug(id).await?;
+                client.inserir_plug(id).await?;
                 runtime.room.enter_cage(id);
                 view::project(&runtime.room, &mut runtime.app);
             }
@@ -823,22 +838,22 @@ async fn activate(runtime: &mut Runtime, client: &mut Client) -> Result<()> {
 /// The fetch is what makes `specs/06-clientes-gui.md`'s "sem perda de
 /// histórico" true: a client arriving late reads what was already said instead
 /// of an empty room.
-async fn open_line(runtime: &mut Runtime, client: &mut Client, line: LineId) -> Result<()> {
-    client.join_line(line).await?;
+async fn open_line(runtime: &mut Runtime, client: &Enlace, line: LineId) -> Result<()> {
+    client.abrir_linha(line).await?;
     runtime.room.open_line(line);
-    client.fetch_history(line, None, 50).await?;
+    client.historico(line, 50).await?;
     runtime.app.local.clear();
     view::project(&runtime.room, &mut runtime.app);
     Ok(())
 }
 
-async fn run_command(runtime: &mut Runtime, client: &mut Client, command: &Command) -> Result<()> {
+async fn run_command(runtime: &mut Runtime, client: &Enlace, command: &Command) -> Result<()> {
     match command {
         Command::Quit => runtime.app.quit(),
 
         Command::Cage { which } => {
             if let Some(id) = runtime.room.find_cage(which) {
-                client.insert_plug(id).await?;
+                client.inserir_plug(id).await?;
                 runtime.room.enter_cage(id);
                 view::project(&runtime.room, &mut runtime.app);
             } else {

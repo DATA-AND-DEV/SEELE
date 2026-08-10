@@ -164,6 +164,7 @@ pub async fn serve(
             )
             .await;
             let _ = send.finish();
+            despedir(&connection, &mut send).await;
             bail!("handshake refused: {}", failure.detail);
         }
         Err(_elapsed) => {
@@ -175,6 +176,7 @@ pub async fn serve(
             )
             .await;
             let _ = send.finish();
+            despedir(&connection, &mut send).await;
             bail!("handshake exceeded {HANDSHAKE_TIMEOUT:?}");
         }
     };
@@ -197,6 +199,26 @@ pub async fn serve(
         .await;
     tracing::info!(pilot = %session.pilot, "session ended");
     result
+}
+
+/// Espera o motivo da recusa sair do fio antes de a conexão morrer.
+///
+/// `specs/02-protocolo.md` exige que a razão de uma recusa seja específica,
+/// "nunca genérica". Escrever o `Disconnecting` não bastava: `bail!` devolve, a
+/// `Connection` é recolhida, e o QUIC derruba tudo — inclusive o quadro que
+/// ainda não tinha saído. **O cliente lia erro de conexão e mostrava "não foi
+/// possível alcançar o Dogma"**, mandando a pessoa procurar problema de rede
+/// enquanto a resposta era "esse apelido é de outro piloto".
+///
+/// `stopped()` volta quando o outro lado reconheceu o fim do fluxo, que é a
+/// prova de que ele leu. O prazo existe porque um cliente que sumiu no meio da
+/// recusa não pode segurar a tarefa: um segundo é muito mais do que o
+/// loopback precisa e pouco para quem não está mais lá.
+async fn despedir(connection: &quinn::Connection, send: &mut quinn::SendStream) {
+    let _ = tokio::time::timeout(Duration::from_secs(1), send.stopped()).await;
+    // Fechar com motivo, em vez de deixar cair: dá ao outro lado um encerramento
+    // limpo em vez de um tempo esgotado.
+    connection.close(0_u32.into(), b"handshake refused");
 }
 
 /// A handshake that did not succeed, with the reason to send back.
