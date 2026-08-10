@@ -505,7 +505,23 @@ fn message_lines(
 /// The highlight is applied per segment, and not by offset into the whole body,
 /// because [`wrap`] collapses whitespace with `split_whitespace` and an offset
 /// computed on the raw body would point at the wrong character after a double
-/// space. Re-finding the term in the segment costs a scan and cannot drift.
+/// space.
+///
+/// # A match across a wrap boundary is missed, and the ordinals then drift
+///
+/// This is the price of the per-segment scan, and it is a real one. The core
+/// searches the whole body; this searches one wrapped segment at a time. A
+/// match split by the line break belongs to neither segment, so nothing lights
+/// up for it — and because `seen` never counts it, every later occurrence in
+/// that message is off by one and `REVERSED` can land on the wrong neighbour.
+/// Two ordinary cases reach it: a term with a space in it (`"sync caiu"`) that
+/// falls on the break, and a word wider than the panel, which [`wrap`] splits
+/// mid-word.
+///
+/// The counter in the compose line comes from the core and stays correct
+/// regardless, so the half of `specs/05-cliente-tui.md:105` that is not colour
+/// survives this. Closing it properly needs either the offset mapping this
+/// design exists to avoid, or lighting cells rather than spans.
 ///
 /// The indent span keeps the width budget intact: the segment was wrapped to
 /// `budget - 2`, and these two cells are the other two.
@@ -530,6 +546,11 @@ fn highlight(
         // Overlapping hits ("aa" twice in "aaa") are counted, because the core
         // counts them and the ordinals have to agree, but drawn once: those
         // cells are already lit, and re-emitting them would duplicate text.
+        // Skipping is also what keeps `start - cursor` below from going
+        // negative, which in a debug build is a panic and not a wrong colour.
+        // The cost: when the cursor sits on the overlapped hit, nothing on
+        // screen is emphasised while the counter still reads `[2/2]`. The
+        // counter is the half that has to be right, and it is.
         if start < cursor {
             continue;
         }
@@ -706,14 +727,24 @@ fn render_cramped(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
     // There is no compose line down here to hang the counter off, and a
     // highlight without its counter would be colour on its own — so it shares
     // the warning row, which is the only chrome this layout has.
+    //
+    // Reserved out of the warning's budget rather than appended for ratatui to
+    // clip, exactly as `compose_line` does it: the warning alone is 22 cells,
+    // so below about 29 columns an appended counter would fall off the edge and
+    // leave the highlight carrying the position on its own, which is the
+    // `specs/05-cliente-tui.md:105` failure this row exists to prevent. The
+    // warning is the one that gives ground, because its own text is the thing
+    // the terminal's size already says.
+    let counter = search_counter(app);
+    let reserved = counter.as_deref().map_or(0, width);
     let mut spans = vec![Span::styled(
         truncate(
             &format!("TERMINAL {}×{} < 80×24", area.width, area.height),
-            area.width as usize,
+            (area.width as usize).saturating_sub(reserved),
         ),
         theme.alert(),
     )];
-    if let Some(counter) = search_counter(app) {
+    if let Some(counter) = counter {
         spans.push(Span::styled(counter, theme.label()));
     }
     frame.render_widget(Paragraph::new(Line::from(spans)), warning);
@@ -1339,12 +1370,145 @@ mod tests {
             "an empty term still styled something"
         );
 
-        // And nothing on the screen moved either.
+        // And clearing a search that was really live puts the screen back
+        // exactly as it was. `populated()` never sets `termo`, so emptying it
+        // there and redrawing would only prove that `draw` is deterministic.
         let mut app = populated();
-        let before = draw(&app, Palette::True, (80, 24));
-        app.termo = String::new();
+        let quiet = draw(&app, Palette::True, (80, 24));
+
+        app.mode = Mode::Search;
+        app.input = "harmônicos".into();
+        app.termo = "harmônicos".into();
         app.refazer_busca();
-        assert_eq!(draw(&app, Palette::True, (80, 24)), before);
+        assert!(app.busca.is_some(), "the search never went live");
+        assert_ne!(
+            draw(&app, Palette::True, (80, 24)),
+            quiet,
+            "the live search changed nothing, so clearing it proves nothing"
+        );
+
+        app.mode = Mode::Normal;
+        app.input.clear();
+        app.termo.clear();
+        app.refazer_busca();
+        assert!(app.busca.is_none(), "an empty term must erase the search");
+        assert_eq!(
+            draw(&app, Palette::True, (80, 24)),
+            quiet,
+            "clearing the search left something behind"
+        );
+    }
+
+    #[test]
+    fn history_lines_lights_the_right_occurrence_in_the_right_message() {
+        // The wiring `draw()` cannot see. It returns symbols and throws styles
+        // away, so passing `""` as the term, dropping the ordinal, or comparing
+        // against the wrong message index would leave every screen test green.
+        let theme = Theme::with_palette(Palette::True);
+        let reversed = theme.accent().add_modifier(Modifier::REVERSED);
+
+        let mut app = populated();
+        app.messages = vec![said("sync no começo"), said("o sync e o sync")];
+        app.mode = Mode::Search;
+        app.input = "sync".into();
+        app.termo = "sync".into();
+        app.refazer_busca();
+
+        // (hits drawn, which one is emphasised, how many are, first line of the
+        // message the cursor is in).
+        let read = |app: &App| {
+            let (lines, current_line) = history_lines(app, 40, theme);
+            let spans: Vec<Span<'static>> = lines.into_iter().flat_map(|line| line.spans).collect();
+            let drawn = spans.iter().filter(|span| span.content == "sync").count();
+            let which = spans
+                .iter()
+                .filter(|span| span.content == "sync")
+                .position(|span| span.style == reversed);
+            let emphasised = spans.iter().filter(|span| span.style == reversed).count();
+            (drawn, which, emphasised, current_line)
+        };
+
+        // Three hits over two messages. All three are drawn whatever the cursor
+        // is doing; exactly one of them is the one you are on.
+        assert_eq!(read(&app), (3, Some(0), 1, Some(0)));
+
+        // Message 0 is a header plus one wrapped body line, so message 1 starts
+        // on line 2 — and the hit in message 0 goes back to being an ordinary
+        // one, which is `current.filter(|c| c.message == index)` doing its job.
+        if let Some(search) = app.busca.as_mut() {
+            search.next_match();
+        }
+        assert_eq!(
+            read(&app),
+            (3, Some(1), 1, Some(2)),
+            "the emphasis did not follow the cursor into the next message"
+        );
+
+        // Both hits live in the same message now, so only `ordinal_in_message`
+        // can tell them apart.
+        if let Some(search) = app.busca.as_mut() {
+            search.next_match();
+        }
+        assert_eq!(
+            read(&app),
+            (3, Some(2), 1, Some(2)),
+            "the ordinal within the message was not threaded through"
+        );
+    }
+
+    #[test]
+    fn an_overlapping_match_neither_panics_nor_draws_twice() {
+        // `occurrences("aaa", "aa")` returns (0,2) and (1,3): the second starts
+        // before the first ends. Subtracting the cursor from that start goes
+        // negative, which in a debug build is a panic and not a wrong colour —
+        // and a term of `"aa"` or `"ss"` is an ordinary thing to type.
+        let theme = Theme::with_palette(Palette::True);
+        let reversed = theme.accent().add_modifier(Modifier::REVERSED);
+
+        let mut seen = 0;
+        let spans = highlight("aaa", "aa", theme, Some(0), &mut seen);
+        assert_eq!(seen, 2, "the core counts both, so the ordinals must too");
+        let text: String = spans.iter().map(|span| span.content.as_ref()).collect();
+        assert_eq!(text, "  aaa", "the overlap was drawn twice");
+        assert_eq!(
+            spans.iter().filter(|span| span.style == reversed).count(),
+            1
+        );
+
+        // And the cost the comment admits to: sitting on the overlapped hit
+        // emphasises nothing, while the counter still reads [2/2].
+        let mut seen = 0;
+        let spans = highlight("aaa", "aa", theme, Some(1), &mut seen);
+        let text: String = spans.iter().map(|span| span.content.as_ref()).collect();
+        assert_eq!(text, "  aaa");
+        assert_eq!(
+            spans.iter().filter(|span| span.style == reversed).count(),
+            0
+        );
+    }
+
+    #[test]
+    fn the_cramped_layout_keeps_the_counter_when_the_warning_will_not_fit() {
+        // Below 80×24 there is no compose line, so the warning row carries the
+        // counter. `TERMINAL 24×20 < 80×24` is 22 cells on its own: appended
+        // rather than reserved, the counter would be clipped off and the
+        // highlight left carrying the position alone — specs/05:105 failing in
+        // the very layout the extra row was added to honour.
+        let app = searching(&["o sync caiu aqui"], "sync");
+        for columns in [24u16, 28, 40, 60] {
+            let screen = draw(&app, Palette::True, (columns, 20));
+            assert!(
+                screen.contains("[1/1]"),
+                "{columns} columns lost the counter:\n{screen}"
+            );
+            for line in screen.lines() {
+                assert!(
+                    width(line) <= columns as usize,
+                    "{columns} columns produced a {}-cell row: {line:?}",
+                    width(line)
+                );
+            }
+        }
     }
 
     #[test]
