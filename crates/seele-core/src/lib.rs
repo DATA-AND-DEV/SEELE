@@ -25,12 +25,12 @@
 )]
 
 pub mod battery;
-pub mod busca;
 pub mod client;
 pub mod conhecidos;
 pub mod enlace;
 pub mod frame;
 pub mod identity;
+pub mod search;
 pub mod state;
 pub mod tofu;
 pub mod voice;

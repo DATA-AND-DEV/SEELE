@@ -65,7 +65,7 @@ pub struct Busca { /* termo, casamentos, cursor */ }
 
 impl Busca {
     /// Os corpos já normalizados, na ordem em que a casca os desenha.
-    pub fn nova<S: AsRef<str>>(corpos: impl IntoIterator<Item = S>, termo: &str) -> Self;
+    pub fn new<S: AsRef<str>>(bodies: impl IntoIterator<Item = S>, term: &str) -> Self;
     pub fn proxima(&mut self)  -> Option<&Casamento>;  // n
     pub fn anterior(&mut self) -> Option<&Casamento>;  // N
     pub fn atual(&self)        -> Option<&Casamento>;
@@ -84,7 +84,7 @@ testes ficam `["olá", "sync caiu"]` em vez de fabricar mensagens inteiras.
 
 **E os corpos entram normalizados.** `seele-tui::ui::wrap` quebra com
 `split_whitespace`, que colapsa espaço repetido; HTML colapsa sozinho. As duas
-cascas já mostram o texto colapsado, então `busca::normalizar` no meio é o que
+cascas já mostram o texto colapsado, então `search::normalize` no meio é o que
 faz o deslocamento devolvido apontar para o que está na tela. Sem isso, um
 casamento depois de um espaço duplo apontaria para o lugar errado só na TUI.
 
