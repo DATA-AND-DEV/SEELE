@@ -22,27 +22,27 @@
 
 ---
 
-### Task 1: `seele_core::busca`
+### Task 1: `seele_core::search`
 
 Módulo puro, sem I/O. É a peça que as duas cascas consomem, e por isso vem primeiro.
 
 **Files:**
-- Create: `crates/seele-core/src/busca.rs`
+- Create: `crates/seele-core/src/search.rs`
 - Modify: `crates/seele-core/src/lib.rs` (lista de módulos, linhas 27-34)
 
 **Interfaces:**
 - Consumes: nada.
 - Produces:
-  - `seele_core::busca::normalizar(texto: &str) -> String`
-  - `seele_core::busca::ocorrencias(texto: &str, termo: &str) -> Vec<(usize, usize)>`
-  - `seele_core::busca::Casamento { mensagem: usize, inicio: usize, fim: usize }` (Copy, PartialEq, Eq, Debug, Clone, **`serde::Serialize`** — a Task 7 o manda pela ponte do Tauri)
-  - `seele_core::busca::Busca` com `nova<S: AsRef<str>>(corpos: impl IntoIterator<Item = S>, termo: &str) -> Busca`, `proxima(&mut self) -> Option<Casamento>`, `anterior(&mut self) -> Option<Casamento>`, `atual(&self) -> Option<Casamento>`, `posicao(&self) -> (usize, usize)`, `ordinal_na_mensagem(&self) -> Option<usize>`, `vazia(&self) -> bool`, `casamentos(&self) -> &[Casamento]`
+  - `seele_core::search::normalize(text: &str) -> String`
+  - `seele_core::search::occurrences(text: &str, term: &str) -> Vec<(usize, usize)>`
+  - `seele_core::search::Match { message: usize, start: usize, end: usize }` (Copy, PartialEq, Eq, Debug, Clone, **`serde::Serialize`** — a Task 7 o manda pela ponte do Tauri)
+  - `seele_core::search::Search` com `new<S: AsRef<str>>(bodies: impl IntoIterator<Item = S>, term: &str) -> Search`, `next_match(&mut self) -> Option<Match>`, `previous_match(&mut self) -> Option<Match>`, `current(&self) -> Option<Match>`, `position(&self) -> (usize, usize)`, `ordinal_in_message(&self) -> Option<usize>`, `is_empty(&self) -> bool`, `matches(&self) -> &[Match]`
 
-**Por que a assinatura mudou em relação à spec.** A spec registrou `nova<'a>(corpos: impl Iterator<Item = &'a str>, …)`. Não serve: as cascas precisam passar corpos **normalizados**, que são `String` recém-criadas e não sobrevivem como `&'a str`. `S: AsRef<str>` aceita as duas formas. A spec é corrigida no Passo 8 desta tarefa.
+**Por que a assinatura mudou em relação à spec.** A spec registrou `new<'a>(bodies: impl Iterator<Item = &'a str>, …)`. Não serve: as cascas precisam passar corpos **normalizados**, que são `String` recém-criadas e não sobrevivem como `&'a str`. `S: AsRef<str>` aceita as duas formas. A spec é corrigida no Passo 7 desta tarefa.
 
 - [ ] **Step 1: Escrever os testes que falham**
 
-Crie `crates/seele-core/src/busca.rs` com **apenas** o bloco de testes abaixo (o código vem no Passo 3):
+Crie `crates/seele-core/src/search.rs` com **apenas** o bloco de testes abaixo (o código vem no Passo 3):
 
 ```rust
 #[cfg(test)]
@@ -51,109 +51,109 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_caixa_nao_importa() {
-        let busca = Busca::nova(["o SYNC caiu"], "sync");
-        assert_eq!(busca.posicao(), (1, 1));
-        assert_eq!(busca.atual(), Some(Casamento { mensagem: 0, inicio: 2, fim: 6 }));
+    fn case_does_not_matter() {
+        let search = Search::new(["o SYNC caiu"], "sync");
+        assert_eq!(search.position(), (1, 1));
+        assert_eq!(search.current(), Some(Match { message: 0, start: 2, end: 6 }));
     }
 
     #[test]
-    fn o_acento_nao_importa_e_o_intervalo_continua_certo() {
-        // A tabela é 1:1 por caractere, e é exatamente aqui que ela se
-        // denunciaria se deixasse de ser: `não` tem três caracteres, e o
-        // intervalo devolvido tem que ter três.
-        let busca = Busca::nova(["não foi"], "nao");
-        let casamento = busca.atual().unwrap_or(Casamento { mensagem: 9, inicio: 9, fim: 9 });
-        assert_eq!(casamento.inicio, 0);
-        assert_eq!(casamento.fim, 3);
+    fn accent_folding_keeps_the_match_range_correct() {
+        // The table is 1:1 per character, and this is exactly where it would
+        // give itself away if it stopped being so: `não` has three
+        // characters, and the range returned has to have three.
+        let search = Search::new(["não foi"], "nao");
+        let found = search.current().unwrap_or(Match { message: 9, start: 9, end: 9 });
+        assert_eq!(found.start, 0);
+        assert_eq!(found.end, 3);
     }
 
     #[test]
-    fn o_acento_dobra_nos_dois_sentidos() {
-        assert_eq!(Busca::nova(["nao foi"], "não").posicao(), (1, 1));
-        assert_eq!(Busca::nova(["MAIÚSCULA"], "maiuscula").posicao(), (1, 1));
+    fn the_accent_folds_in_both_directions() {
+        assert_eq!(Search::new(["nao foi"], "não").position(), (1, 1));
+        assert_eq!(Search::new(["MAIÚSCULA"], "maiuscula").position(), (1, 1));
     }
 
     #[test]
-    fn o_cursor_da_a_volta_nas_duas_pontas() {
-        let mut busca = Busca::nova(["sync", "sync", "sync"], "sync");
-        assert_eq!(busca.posicao(), (1, 3));
-        busca.proxima();
-        busca.proxima();
-        assert_eq!(busca.posicao(), (3, 3));
-        // Do fim, `n` volta ao começo: numa conversa a última ocorrência e a
-        // primeira são vizinhas para quem está procurando.
-        busca.proxima();
-        assert_eq!(busca.posicao(), (1, 3));
-        busca.anterior();
-        assert_eq!(busca.posicao(), (3, 3));
+    fn the_cursor_wraps_at_both_ends() {
+        let mut search = Search::new(["sync", "sync", "sync"], "sync");
+        assert_eq!(search.position(), (1, 3));
+        search.next_match();
+        search.next_match();
+        assert_eq!(search.position(), (3, 3));
+        // From the end, `n` wraps back to the start: in a conversation the
+        // last occurrence and the first are neighbours for someone searching.
+        search.next_match();
+        assert_eq!(search.position(), (1, 3));
+        search.previous_match();
+        assert_eq!(search.position(), (3, 3));
     }
 
     #[test]
-    fn varias_ocorrencias_na_mesma_mensagem_contam_separado() {
-        let busca = Busca::nova(["sync e sync"], "sync");
-        assert_eq!(busca.posicao(), (1, 2));
-        assert_eq!(busca.ordinal_na_mensagem(), Some(0));
+    fn multiple_occurrences_in_the_same_message_count_separately() {
+        let search = Search::new(["sync e sync"], "sync");
+        assert_eq!(search.position(), (1, 2));
+        assert_eq!(search.ordinal_in_message(), Some(0));
     }
 
     #[test]
-    fn o_ordinal_conta_dentro_da_mensagem_e_nao_no_total() {
-        let mut busca = Busca::nova(["sync", "sync e sync"], "sync");
-        busca.proxima();
-        assert_eq!(busca.atual().map(|c| c.mensagem), Some(1));
-        assert_eq!(busca.ordinal_na_mensagem(), Some(0));
-        busca.proxima();
-        assert_eq!(busca.ordinal_na_mensagem(), Some(1));
+    fn the_ordinal_counts_within_the_message_and_not_the_total() {
+        let mut search = Search::new(["sync", "sync e sync"], "sync");
+        search.next_match();
+        assert_eq!(search.current().map(|c| c.message), Some(1));
+        assert_eq!(search.ordinal_in_message(), Some(0));
+        search.next_match();
+        assert_eq!(search.ordinal_in_message(), Some(1));
     }
 
     #[test]
-    fn termo_vazio_ou_so_espaco_nao_casa_nada() {
-        assert!(Busca::nova(["sync"], "").vazia());
-        assert!(Busca::nova(["sync"], "   ").vazia());
-        assert_eq!(Busca::nova(["sync"], "").posicao(), (0, 0));
+    fn an_empty_or_whitespace_only_term_matches_nothing() {
+        assert!(Search::new(["sync"], "").is_empty());
+        assert!(Search::new(["sync"], "   ").is_empty());
+        assert_eq!(Search::new(["sync"], "").position(), (0, 0));
     }
 
     #[test]
-    fn sem_casamento_nao_e_erro_nem_panico() {
-        let mut busca = Busca::nova(["sync caiu"], "harmônicos");
-        assert!(busca.vazia());
-        assert_eq!(busca.atual(), None);
-        assert_eq!(busca.proxima(), None);
-        assert_eq!(busca.anterior(), None);
-        assert_eq!(busca.posicao(), (0, 0));
+    fn no_match_is_not_an_error_or_a_panic() {
+        let mut search = Search::new(["sync caiu"], "harmônicos");
+        assert!(search.is_empty());
+        assert_eq!(search.current(), None);
+        assert_eq!(search.next_match(), None);
+        assert_eq!(search.previous_match(), None);
+        assert_eq!(search.position(), (0, 0));
     }
 
     #[test]
-    fn um_termo_maior_que_o_corpo_nao_estoura() {
-        assert!(Busca::nova(["oi"], "oi mesmo").vazia());
-        assert!(Busca::nova([""], "oi").vazia());
+    fn a_term_longer_than_the_body_does_not_overflow() {
+        assert!(Search::new(["oi"], "oi mesmo").is_empty());
+        assert!(Search::new([""], "oi").is_empty());
     }
 
     #[test]
-    fn normalizar_colapsa_o_espaco_como_o_wrap_da_tui_faz() {
-        // `seele-tui::ui::wrap` usa `split_whitespace`, que colapsa. Sem esta
-        // normalização os deslocamentos apontariam para o lugar errado em
-        // qualquer corpo com espaço duplo.
-        assert_eq!(normalizar("a  b\tc\nd "), "a b c d");
-        assert_eq!(normalizar("   "), "");
+    fn normalize_collapses_whitespace_the_way_the_tui_wrap_does() {
+        // `seele-tui::ui::wrap` uses `split_whitespace`, which collapses. Without
+        // this normalisation the offsets would point to the wrong place in any
+        // body with a double space.
+        assert_eq!(normalize("a  b\tc\nd "), "a b c d");
+        assert_eq!(normalize("   "), "");
     }
 
     #[test]
-    fn ocorrencias_acha_todas_e_em_ordem() {
-        assert_eq!(ocorrencias("sync e sync", "sync"), vec![(0, 4), (7, 11)]);
-        assert_eq!(ocorrencias("nada", "sync"), Vec::new());
+    fn occurrences_finds_all_matches_in_order() {
+        assert_eq!(occurrences("sync e sync", "sync"), vec![(0, 4), (7, 11)]);
+        assert_eq!(occurrences("nada", "sync"), Vec::new());
     }
 }
 ```
 
 - [ ] **Step 2: Rodar e ver falhar**
 
-Run: `cargo test -p seele-core busca`
-Expected: FAIL na compilação — `cannot find type Busca in this scope`, `cannot find function normalizar`.
+Run: `cargo test -p seele-core search`
+Expected: FAIL na compilação — `cannot find type Search in this scope`, `cannot find function normalize`.
 
 - [ ] **Step 3: Escrever a implementação**
 
-Coloque **acima** do bloco de testes em `crates/seele-core/src/busca.rs`:
+Coloque **acima** do bloco de testes em `crates/seele-core/src/search.rs`:
 
 ```rust
 //! Finding a term in what a shell is showing.
@@ -173,7 +173,7 @@ Coloque **acima** do bloco de testes em `crates/seele-core/src/busca.rs`:
 //!
 //! # Callers pass normalised bodies
 //!
-//! [`normalizar`] collapses whitespace the same way `seele-tui::ui::wrap` does
+//! [`normalize`] collapses whitespace the same way `seele-tui::ui::wrap` does
 //! and the way HTML does. Both shells already show text with runs of
 //! whitespace collapsed, so searching the normalised body is searching exactly
 //! what is on screen.
@@ -184,28 +184,28 @@ Coloque **acima** do bloco de testes em `crates/seele-core/src/busca.rs`:
 /// with accent folding in the middle, a frontend cannot work out where a match
 /// began on its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-pub struct Casamento {
+pub struct Match {
     /// Index into the list of bodies, in the order the shell drew them.
-    pub mensagem: usize,
+    pub message: usize,
     /// Character offset where the match starts.
-    pub inicio: usize,
+    pub start: usize,
     /// Character offset one past the end.
-    pub fim: usize,
+    pub end: usize,
 }
 
 /// Collapses runs of whitespace, the way both shells already display text.
 #[must_use]
-pub fn normalizar(texto: &str) -> String {
-    texto.split_whitespace().collect::<Vec<_>>().join(" ")
+pub fn normalize(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Folds one character: lowercase first, then strip the Portuguese accent.
 ///
 /// `to_lowercase` can yield more than one character for a few code points;
 /// taking the first keeps this one-to-one, which is what the offsets depend on.
-fn dobrar_char(character: char) -> char {
-    let baixo = character.to_lowercase().next().unwrap_or(character);
-    match baixo {
+fn fold_char(character: char) -> char {
+    let lower = character.to_lowercase().next().unwrap_or(character);
+    match lower {
         'á' | 'à' | 'â' | 'ã' | 'ä' => 'a',
         'é' | 'è' | 'ê' | 'ë' => 'e',
         'í' | 'ì' | 'î' | 'ï' => 'i',
@@ -213,66 +213,65 @@ fn dobrar_char(character: char) -> char {
         'ú' | 'ù' | 'û' | 'ü' => 'u',
         'ç' => 'c',
         'ñ' => 'n',
-        outro => outro,
+        other => other,
     }
 }
 
-fn dobrar(texto: &str) -> Vec<char> {
-    texto.chars().map(dobrar_char).collect()
+fn fold(text: &str) -> Vec<char> {
+    text.chars().map(fold_char).collect()
 }
 
-/// Every place `termo` occurs in `texto`, as character ranges, left to right.
+/// Every place `term` occurs in `text`, as character ranges, left to right.
 ///
 /// Public because a shell that wraps text into segments needs to light the
 /// matches inside a segment without redoing the folding rule.
 #[must_use]
-pub fn ocorrencias(texto: &str, termo: &str) -> Vec<(usize, usize)> {
-    let alvo = dobrar(termo.trim());
-    if alvo.is_empty() {
+pub fn occurrences(text: &str, term: &str) -> Vec<(usize, usize)> {
+    let target = fold(term.trim());
+    if target.is_empty() {
         return Vec::new();
     }
-    let corpo = dobrar(texto);
+    let body = fold(text);
     // `windows` yields nothing when the body is shorter than the term, and
     // panics only on a zero width — ruled out above.
-    corpo
-        .windows(alvo.len())
+    body.windows(target.len())
         .enumerate()
-        .filter(|(_, janela)| *janela == alvo.as_slice())
-        .map(|(inicio, _)| (inicio, inicio + alvo.len()))
+        .filter(|(_, window)| *window == target.as_slice())
+        .map(|(start, _)| (start, start + target.len()))
         .collect()
 }
 
 /// A search over what a shell is showing.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Busca {
-    casamentos: Vec<Casamento>,
+pub struct Search {
+    matches: Vec<Match>,
     cursor: usize,
 }
 
-impl Busca {
+impl Search {
     /// Runs the term over the bodies, in drawing order.
     ///
     /// Rebuilt wholesale rather than patched, like `view::project`: an index
     /// that drifts out of step with the list is a bug that only shows up after
     /// an hour of use.
     #[must_use]
-    pub fn nova<S: AsRef<str>>(corpos: impl IntoIterator<Item = S>, termo: &str) -> Self {
-        let casamentos = corpos
+    pub fn new<S: AsRef<str>>(bodies: impl IntoIterator<Item = S>, term: &str) -> Self {
+        let matches = bodies
             .into_iter()
             .enumerate()
-            .flat_map(|(mensagem, corpo)| {
-                ocorrencias(corpo.as_ref(), termo)
+            .flat_map(|(message, body)| {
+                occurrences(body.as_ref(), term)
                     .into_iter()
-                    .map(move |(inicio, fim)| Casamento { mensagem, inicio, fim })
+                    .map(move |(start, end)| Match { message, start, end })
             })
             .collect();
-        Self { casamentos, cursor: 0 }
+        Self { matches, cursor: 0 }
     }
 
     /// Whether nothing matched.
     #[must_use]
-    pub fn vazia(&self) -> bool {
-        self.casamentos.is_empty()
+    pub fn is_empty(&self) -> bool {
+        self.matches.is_empty()
     }
 
     /// Every match, in drawing order.
@@ -280,47 +279,52 @@ impl Busca {
     /// A shell that paints the whole history at once — the desktop one does —
     /// needs all of them, not just the one the cursor is on.
     #[must_use]
-    pub fn casamentos(&self) -> &[Casamento] {
-        &self.casamentos
+    pub fn matches(&self) -> &[Match] {
+        &self.matches
     }
 
     /// The match the cursor is on.
     #[must_use]
-    pub fn atual(&self) -> Option<Casamento> {
-        self.casamentos.get(self.cursor).copied()
+    pub fn current(&self) -> Option<Match> {
+        self.matches.get(self.cursor).copied()
     }
 
+    // Named `next_match`/`previous_match` rather than `next`/`previous`: an
+    // inherent `fn next(&mut self) -> Option<T>` on a type that is not an
+    // `Iterator` trips `clippy::should_implement_trait`, and this workspace
+    // builds with `-D warnings`.
+
     /// `n` — the next match, wrapping past the end.
-    pub fn proxima(&mut self) -> Option<Casamento> {
-        self.andar(1)
+    pub fn next_match(&mut self) -> Option<Match> {
+        self.step(1)
     }
 
     /// `N` — the previous match, wrapping past the start.
-    pub fn anterior(&mut self) -> Option<Casamento> {
-        self.andar(-1)
+    pub fn previous_match(&mut self) -> Option<Match> {
+        self.step(-1)
     }
 
-    fn andar(&mut self, passo: isize) -> Option<Casamento> {
-        let total = self.casamentos.len();
+    fn step(&mut self, step: isize) -> Option<Match> {
+        let total = self.matches.len();
         if total == 0 {
             return None;
         }
         // Wrapping on purpose: for somebody searching, the last occurrence and
         // the first are neighbours.
         let total_i = isize::try_from(total).unwrap_or(isize::MAX);
-        let atual = isize::try_from(self.cursor).unwrap_or(0);
-        let proximo = (atual + passo).rem_euclid(total_i);
-        self.cursor = usize::try_from(proximo).unwrap_or(0);
-        self.atual()
+        let current = isize::try_from(self.cursor).unwrap_or(0);
+        let next = (current + step).rem_euclid(total_i);
+        self.cursor = usize::try_from(next).unwrap_or(0);
+        self.current()
     }
 
     /// `(1, 3)` for drawing "[1/3]". `(0, 0)` when nothing matched.
     #[must_use]
-    pub fn posicao(&self) -> (usize, usize) {
-        if self.casamentos.is_empty() {
+    pub fn position(&self) -> (usize, usize) {
+        if self.matches.is_empty() {
             return (0, 0);
         }
-        (self.cursor + 1, self.casamentos.len())
+        (self.cursor + 1, self.matches.len())
     }
 
     /// Which occurrence *within its own message* the cursor is on, from zero.
@@ -328,13 +332,13 @@ impl Busca {
     /// A shell that lights matches segment by segment counts them the same way
     /// and needs this to tell the current one from its neighbours.
     #[must_use]
-    pub fn ordinal_na_mensagem(&self) -> Option<usize> {
-        let atual = self.atual()?;
+    pub fn ordinal_in_message(&self) -> Option<usize> {
+        let current = self.current()?;
         Some(
-            self.casamentos
+            self.matches
                 .iter()
                 .take(self.cursor)
-                .filter(|casamento| casamento.mensagem == atual.mensagem)
+                .filter(|candidate| candidate.message == current.message)
                 .count(),
         )
     }
@@ -346,17 +350,17 @@ impl Busca {
 Em `crates/seele-core/src/lib.rs`, na lista de módulos (linhas 27-34), acrescente em ordem alfabética, depois de `pub mod battery;`:
 
 ```rust
-pub mod busca;
+pub mod search;
 ```
 
-`Casamento` deriva `serde::Serialize`. Confirme que o crate já tem a dependência:
+`Match` deriva `serde::Serialize`. Confirme que o crate já tem a dependência:
 
 Run: `grep -n "^serde" crates/seele-core/Cargo.toml`
 Expected: uma linha com `serde`. Se não houver, acrescente `serde = { workspace = true }` seguindo o padrão dos outros crates — **nunca** com versão literal, porque `Cargo.toml:45` diz que versões vivem só no workspace.
 
 - [ ] **Step 5: Rodar os testes**
 
-Run: `cargo test -p seele-core busca`
+Run: `cargo test -p seele-core search`
 Expected: PASS, 11 testes.
 
 - [ ] **Step 6: Clippy e formato**
@@ -370,7 +374,7 @@ Em `docs/superpowers/specs/2026-08-10-navegacao-gui-tui-design.md`, troque a lin
 
 ```rust
     /// Os corpos já normalizados, na ordem em que a casca os desenha.
-    pub fn nova<S: AsRef<str>>(corpos: impl IntoIterator<Item = S>, termo: &str) -> Self;
+    pub fn new<S: AsRef<str>>(bodies: impl IntoIterator<Item = S>, term: &str) -> Self;
 ```
 
 E acrescente, logo abaixo do parágrafo que começa com "**Entra por corpos**":
@@ -378,15 +382,23 @@ E acrescente, logo abaixo do parágrafo que começa com "**Entra por corpos**":
 ```markdown
 **E os corpos entram normalizados.** `seele-tui::ui::wrap` quebra com
 `split_whitespace`, que colapsa espaço repetido; HTML colapsa sozinho. As duas
-cascas já mostram o texto colapsado, então `busca::normalizar` no meio é o que
+cascas já mostram o texto colapsado, então `search::normalize` no meio é o que
 faz o deslocamento devolvido apontar para o que está na tela. Sem isso, um
 casamento depois de um espaço duplo apontaria para o lugar errado só na TUI.
 ```
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 8: ADR sobre o idioma dentro do `seele-core`**
+
+Crie `docs/adr/0023-idioma-dentro-do-seele-core.md`, seguindo a forma dos ADRs vizinhos (leia `docs/adr/0013-idioma-de-manifestos-e-ci.md` primeiro — é curto e é o mais próximo).
+
+Conteúdo, em português como manda `specs/10-convencoes.md` para ADRs:
+
+**Estado:** aceito. **Contexto:** `specs/10` manda identificadores e comentários em inglês, e o `seele-core` obedece em `state.rs`, `battery.rs`, `tofu.rs` e `voice.rs` — mas `conhecidos.rs` e `enlace.rs`, os dois módulos mais recentes, são inteiramente portugueses, identificadores e doc. A deriva nunca foi decidida; aconteceu. **Decisão:** módulos novos do `seele-core` seguem `specs/10` — inglês. `conhecidos` e `enlace` ficam como estão: renomeá-los agora tocaria as duas cascas e o `seele-ffi` por uma questão de coerência, e o custo não paga. **Consequências:** o crate fica com dois sotaques por um tempo, e isto fica escrito para o próximo módulo não re-litigar. Quem renomear `conhecidos` ou `enlace` algum dia faz isso como trabalho próprio, não de passagem.
+
+- [ ] **Step 9: Commit**
 
 ```bash
-git add crates/seele-core/src/busca.rs crates/seele-core/src/lib.rs docs/superpowers/specs/2026-08-10-navegacao-gui-tui-design.md
+git add crates/seele-core/src/search.rs crates/seele-core/src/lib.rs docs/superpowers/specs/2026-08-10-navegacao-gui-tui-design.md docs/adr/0023-idioma-dentro-do-seele-core.md
 git commit -m "feat(core): achar um termo no que está escrito na tela
 
 Dobra caixa e acento numa tabela 1:1, que é o que mantém o intervalo
@@ -418,9 +430,9 @@ Acrescente ao `mod tests` de `crates/seele-tui/src/app.rs`:
 
 ```rust
 #[test]
-fn h_e_l_andam_entre_os_paineis_e_dao_a_volta() {
-    // `specs/05-cliente-tui.md:42` promete "h j k l / setas navegar", e até
-    // agora só j e k faziam alguma coisa.
+fn h_and_l_move_between_panels_and_wrap() {
+    // `specs/05-cliente-tui.md:42` promises "h j k l / setas navegar", and
+    // until now only j and k did anything.
     let mut app = App::new();
     app.focus = Panel::Dogma;
 
@@ -428,7 +440,7 @@ fn h_e_l_andam_entre_os_paineis_e_dao_a_volta() {
     assert_eq!(app.focus, Panel::Channels);
     app.on_key(Key::Right);
     assert_eq!(app.focus, Panel::Messages);
-    // A volta, como o Tab já dá.
+    // Wraps around, the way Tab already does.
     app.on_key(Key::Char('l'));
     assert_eq!(app.focus, Panel::Dogma);
 
@@ -439,7 +451,7 @@ fn h_e_l_andam_entre_os_paineis_e_dao_a_volta() {
 }
 
 #[test]
-fn shift_tab_fecha_o_ciclo_que_o_tab_abre() {
+fn shift_tab_closes_the_cycle_tab_opens() {
     let mut app = App::new();
     let inicio = app.focus;
     app.on_key(Key::Tab);
@@ -449,8 +461,8 @@ fn shift_tab_fecha_o_ciclo_que_o_tab_abre() {
 }
 
 #[test]
-fn h_e_l_nao_escapam_do_modo_de_insercao() {
-    // A letra `l` numa mensagem é uma letra, não um comando de foco.
+fn h_and_l_do_not_escape_insert_mode() {
+    // The letter `l` inside a message is a letter, not a focus command.
     let mut app = App::new();
     app.on_key(Key::Char('i'));
     let foco = app.focus;
@@ -496,9 +508,9 @@ Em `on_normal`, substitua a linha `Key::Tab => self.focus = self.focus.next(),` 
 ```rust
             Key::Tab => self.focus = self.focus.next(),
             Key::BackTab => self.focus = self.focus.prev(),
-            // `h`/`l` movem o foco e não a seleção: com três painéis lado a
-            // lado é a leitura natural de esquerda e direita, e `j`/`k` já
-            // cobrem o movimento dentro de um painel.
+            // `h`/`l` move the focus and not the selection: with three panels
+            // side by side that is the natural reading of left and right, and
+            // `j`/`k` already cover movement inside a panel.
             Key::Char('h') | Key::Left => self.focus = self.focus.prev(),
             Key::Char('l') | Key::Right => self.focus = self.focus.next(),
 ```
@@ -538,15 +550,15 @@ foco, e o ciclo do Tab ganha o par que faltava."
 - Modify: `crates/seele-tui/src/app.rs` (campo novo em `App`, `on_key`, `on_normal`)
 
 **Interfaces:**
-- Consumes: `seele_core::busca::{Busca, normalizar}` da Task 1.
-- Produces: `App::busca: Option<Busca>`, público; `App::refazer_busca(&mut self)`, público.
+- Consumes: `seele_core::search::{Search, normalize}` da Task 1.
+- Produces: `App::busca: Option<Search>`, público; `App::refazer_busca(&mut self)`, público.
 
 - [ ] **Step 1: Escrever os testes que falham**
 
 Acrescente ao `mod tests` de `crates/seele-tui/src/app.rs`:
 
 ```rust
-fn com_historico() -> App {
+fn app_with_history() -> App {
     let mut app = App::new();
     app.messages = ["sync caiu", "verificando harmônicos", "sync voltou"]
         .into_iter()
@@ -561,21 +573,22 @@ fn com_historico() -> App {
 }
 
 #[test]
-fn a_busca_encontra_enquanto_se_digita() {
-    // Este é o defeito que o plano existe para consertar: o modo entrava, a
-    // barra escrevia BUSCA, e o texto era descartado sem ninguém olhar.
-    let mut app = com_historico();
+fn the_search_finds_matches_while_typing() {
+    // This is the defect the plan exists to fix: the mode was entered, the
+    // bar wrote BUSCA, and the text was discarded without anyone looking at
+    // it.
+    let mut app = app_with_history();
     app.on_key(Key::Char('/'));
     for character in "sync".chars() {
         app.on_key(Key::Char(character));
     }
-    let busca = app.busca.as_ref().map(seele_core::busca::Busca::posicao);
+    let busca = app.busca.as_ref().map(seele_core::search::Search::position);
     assert_eq!(busca, Some((1, 2)));
 }
 
 #[test]
-fn n_e_N_andam_entre_as_ocorrencias_no_modo_normal() {
-    let mut app = com_historico();
+fn n_and_shift_n_step_through_occurrences_in_normal_mode() {
+    let mut app = app_with_history();
     app.on_key(Key::Char('/'));
     for character in "sync".chars() {
         app.on_key(Key::Char(character));
@@ -584,38 +597,38 @@ fn n_e_N_andam_entre_as_ocorrencias_no_modo_normal() {
     assert_eq!(app.mode, Mode::Normal);
 
     app.on_key(Key::Char('n'));
-    assert_eq!(app.busca.as_ref().map(seele_core::busca::Busca::posicao), Some((2, 2)));
+    assert_eq!(app.busca.as_ref().map(seele_core::search::Search::position), Some((2, 2)));
     app.on_key(Key::Char('N'));
-    assert_eq!(app.busca.as_ref().map(seele_core::busca::Busca::posicao), Some((1, 2)));
+    assert_eq!(app.busca.as_ref().map(seele_core::search::Search::position), Some((1, 2)));
 }
 
 #[test]
-fn enter_guarda_o_destaque_e_esc_o_apaga() {
-    let mut app = com_historico();
+fn enter_keeps_the_highlight_and_escape_clears_it() {
+    let mut app = app_with_history();
     app.on_key(Key::Char('/'));
     app.on_key(Key::Char('s'));
     app.on_key(Key::Enter);
-    assert!(app.busca.is_some(), "confirmar uma busca não pode apagá-la");
+    assert!(app.busca.is_some(), "confirming a search must not erase it");
 
     app.on_key(Key::Char('/'));
     app.on_key(Key::Char('s'));
     app.on_key(Key::Esc);
-    assert!(app.busca.is_none(), "desistir apaga");
+    assert!(app.busca.is_none(), "giving up erases it");
 }
 
 #[test]
-fn n_sem_busca_ativa_nao_faz_nada_e_nao_estoura() {
-    let mut app = com_historico();
+fn n_without_an_active_search_does_nothing_and_does_not_panic() {
+    let mut app = app_with_history();
     assert_eq!(app.on_key(Key::Char('n')), None);
     assert!(app.busca.is_none());
 }
 
 #[test]
-fn apagar_o_termo_ate_o_fim_limpa_a_busca() {
-    // `refazer_busca` com termo vazio zera a busca inteira, e não deixa uma
-    // busca vazia de pé: um contador [0/0] pendurado depois de apagar tudo
-    // diria que ainda há uma busca em curso.
-    let mut app = com_historico();
+fn clearing_the_term_down_to_nothing_clears_the_search() {
+    // `refazer_busca` with an empty term zeroes out the whole search, and does
+    // not leave an empty search standing: a dangling [0/0] counter after
+    // clearing everything would say a search was still in progress.
+    let mut app = app_with_history();
     app.on_key(Key::Char('/'));
     app.on_key(Key::Char('s'));
     app.on_key(Key::Backspace);
@@ -623,10 +636,10 @@ fn apagar_o_termo_ate_o_fim_limpa_a_busca() {
 }
 
 #[test]
-fn mensagem_nova_durante_a_busca_e_reencontrada() {
-    // Os índices andam quando chega mensagem nova; refazer é o que impede o
-    // cursor de apontar para uma linha que mudou de lugar.
-    let mut app = com_historico();
+fn a_new_message_during_a_search_is_rematched() {
+    // Indices shift when a new message arrives; redoing the search is what
+    // stops the cursor from pointing at a line that moved.
+    let mut app = app_with_history();
     app.on_key(Key::Char('/'));
     for character in "sync".chars() {
         app.on_key(Key::Char(character));
@@ -639,7 +652,7 @@ fn mensagem_nova_durante_a_busca_e_reencontrada() {
         own: false,
     });
     app.refazer_busca();
-    assert_eq!(app.busca.as_ref().map(seele_core::busca::Busca::posicao), Some((1, 3)));
+    assert_eq!(app.busca.as_ref().map(seele_core::search::Search::position), Some((1, 3)));
 }
 ```
 
@@ -653,12 +666,13 @@ Expected: FAIL — `no field busca on type App`.
 Em `crates/seele-tui/src/app.rs`, acrescente ao `struct App` depois de `pub input: String,` (linha 245):
 
 ```rust
-    /// A busca corrente, quando há uma.
+    /// The current search, when there is one.
     ///
-    /// Guardada aqui e não recalculada a cada quadro porque o cursor de `n` e
-    /// `N` é estado: recomputar perderia em que ocorrência a pessoa estava.
-    pub busca: Option<seele_core::busca::Busca>,
-    /// O termo que produziu `busca`, guardado para redesenhar o realce.
+    /// Stored here rather than recomputed every frame because the cursor for
+    /// `n` and `N` is state: recomputing would lose which occurrence the
+    /// person was on.
+    pub busca: Option<seele_core::search::Search>,
+    /// The term that produced `busca`, kept to redraw the highlight.
     pub termo: String,
 ```
 
@@ -672,21 +686,22 @@ Em `App::new`, depois de `input: String::new(),`:
 Acrescente ao `impl App`:
 
 ```rust
-    /// Refaz a busca sobre o histórico atual, mantendo o termo.
+    /// Redoes the search over the current history, keeping the term.
     ///
-    /// Chamado quando chega mensagem: os índices andam, e um cursor que não
-    /// acompanha aponta para a linha errada. Se a ocorrência corrente sumiu, o
-    /// cursor volta à primeira em vez de sair do intervalo.
+    /// Called when a message arrives: indices shift, and a cursor that does
+    /// not keep up points at the wrong line. If the current occurrence
+    /// disappeared, the cursor goes back to the first instead of falling out
+    /// of range.
     pub fn refazer_busca(&mut self) {
         if self.termo.trim().is_empty() {
             self.busca = None;
             return;
         }
-        self.busca = Some(seele_core::busca::Busca::nova(
+        self.busca = Some(seele_core::search::Search::new(
             self.messages
                 .iter()
                 .chain(&self.local)
-                .map(|linha| seele_core::busca::normalizar(&linha.body)),
+                .map(|linha| seele_core::search::normalize(&linha.body)),
             &self.termo,
         ));
     }
@@ -695,15 +710,15 @@ Acrescente ao `impl App`:
 Em `on_normal`, acrescente antes de `Key::Enter =>`:
 
 ```rust
-            // `n` e `N` estavam livres, e é onde o Vim as põe.
+            // `n` and `N` were free, and it is where Vim puts them.
             Key::Char('n') => {
                 if let Some(busca) = self.busca.as_mut() {
-                    busca.proxima();
+                    busca.next_match();
                 }
             }
             Key::Char('N') => {
                 if let Some(busca) = self.busca.as_mut() {
-                    busca.anterior();
+                    busca.previous_match();
                 }
             }
 ```
@@ -711,9 +726,10 @@ Em `on_normal`, acrescente antes de `Key::Enter =>`:
 Em `on_key`, substitua o braço `Mode::Search` inteiro (linhas 379-383) por:
 
 ```rust
-            // A busca acha enquanto se digita, e o contador anda junto: é o
-            // retorno que diz se vale continuar escrevendo. `Enter` confirma e
-            // volta ao Normal com o destaque; `Esc` desiste e apaga.
+            // The search finds matches while typing, and the counter moves
+            // along with it: it is the feedback that says whether it is worth
+            // continuing to type. `Enter` confirms and returns to Normal with
+            // the highlight in place; `Esc` gives up and clears it.
             Mode::Search => {
                 let desistiu = key == Key::Esc;
                 let resultado = self.on_typing(key, Action::Command);
@@ -782,7 +798,7 @@ que mudou de lugar."
 - Modify: `crates/seele-tui/src/ui.rs` (`render_messages` em 402, `message_lines` em 428, `compose_line` em 448)
 
 **Interfaces:**
-- Consumes: `App::busca`, `App::termo` da Task 3; `seele_core::busca::ocorrencias` da Task 1.
+- Consumes: `App::busca`, `App::termo` da Task 3; `seele_core::search::occurrences` da Task 1.
 - Produces: nada que outra tarefa consuma.
 
 - [ ] **Step 1: Escrever o teste que falha**
@@ -791,10 +807,10 @@ Acrescente ao `mod tests` de `crates/seele-tui/src/ui.rs`, seguindo o padrão de
 
 ```rust
 #[test]
-fn a_busca_mostra_o_contador_e_marca_a_linha_corrente() {
-    // `specs/05-cliente-tui.md:105`: nada pode ser transmitido só por cor. O
-    // contador é o acompanhante textual do realce, e é o que sobrevive ao
-    // NO_COLOR e a um terminal de 16 cores por SSH.
+fn the_search_shows_the_counter_and_marks_the_current_line() {
+    // `specs/05-cliente-tui.md:105`: nothing may be conveyed by colour alone.
+    // The counter is the highlight's textual companion, and it is what
+    // survives NO_COLOR and a 16-colour SSH terminal.
     let mut app = App::new();
     app.messages = vec![ChatLine {
         at: "12:03".into(),
@@ -812,7 +828,7 @@ fn a_busca_mostra_o_contador_e_marca_a_linha_corrente() {
 }
 
 #[test]
-fn uma_busca_sem_resultado_diz_zero_em_vez_de_sumir() {
+fn a_search_with_no_results_says_zero_instead_of_disappearing() {
     let mut app = App::new();
     app.messages = vec![ChatLine {
         at: "12:03".into(),
@@ -842,10 +858,11 @@ Expected: FAIL — a tela não contém `[1/1]`.
 Em `crates/seele-tui/src/ui.rs`, no fim de `compose_line`, antes de montar o `Paragraph`, acrescente o sufixo quando houver busca:
 
 ```rust
-    // O contador é a metade textual do realce. Sem ele, "onde estou nas três
-    // ocorrências" seria informação só de cor, que `specs/05:105` proíbe.
+    // The counter is the highlight's textual half. Without it, "where am I
+    // among the three occurrences" would be information conveyed by colour
+    // alone, which `specs/05:105` forbids.
     let contador = app.busca.as_ref().map(|busca| {
-        let (posicao, total) = busca.posicao();
+        let (posicao, total) = busca.position();
         format!("  [{posicao}/{total}]")
     });
 ```
@@ -874,7 +891,7 @@ fn message_lines(
     message: &ChatLine,
     budget: usize,
     theme: Theme,
-    termo: &str,
+    term: &str,
     corrente: Option<usize>,
 ) -> Vec<Line<'static>> {
     let header = format!("{} {}", message.at, message.author);
@@ -883,14 +900,14 @@ fn message_lines(
         if message.own { theme.accent() } else { theme.label() },
     ))];
 
-    // Conta as ocorrências em ordem, exatamente como o core as conta, para
-    // saber qual delas é a corrente. As duas varreduras são da esquerda para a
-    // direita sobre o mesmo texto normalizado, então os ordinais batem.
+    // Counts occurrences in order, exactly the way the core counts them, to
+    // know which one is the current one. Both passes go left to right over
+    // the same normalised text, so the ordinals line up.
     let mut vistas = 0usize;
     for wrapped in wrap(&message.body, budget.saturating_sub(2)) {
         lines.push(Line::from(realcar(
             &wrapped,
-            termo,
+            term,
             theme,
             corrente,
             &mut vistas,
@@ -899,42 +916,42 @@ fn message_lines(
     lines
 }
 
-/// Um segmento já quebrado, partido em pedaços aceso e apagado.
+/// An already-wrapped segment, split into lit and unlit pieces.
 ///
-/// O realce é aplicado por segmento, e não por deslocamento no corpo inteiro,
-/// porque `wrap` colapsa espaço com `split_whitespace` e um deslocamento
-/// calculado no corpo cru apontaria para o lugar errado depois de um espaço
-/// duplo.
+/// The highlight is applied per segment, and not by offset into the whole
+/// body, because `wrap` collapses whitespace with `split_whitespace` and an
+/// offset computed on the raw body would point at the wrong place after a
+/// double space.
 fn realcar(
     segmento: &str,
-    termo: &str,
+    term: &str,
     theme: Theme,
     corrente: Option<usize>,
     vistas: &mut usize,
 ) -> Vec<Span<'static>> {
     let mut spans = vec![Span::styled("  ".to_owned(), theme.body())];
-    if termo.trim().is_empty() {
+    if term.trim().is_empty() {
         spans.push(Span::styled(segmento.to_owned(), theme.body()));
         return spans;
     }
 
-    let caracteres: Vec<char> = segmento.chars().collect();
+    let characters: Vec<char> = segmento.chars().collect();
     let mut cursor = 0usize;
-    for (inicio, fim) in seele_core::busca::ocorrencias(segmento, termo) {
-        let antes: String = caracteres.iter().skip(cursor).take(inicio - cursor).collect();
+    for (start, end) in seele_core::search::occurrences(segmento, term) {
+        let antes: String = characters.iter().skip(cursor).take(start - cursor).collect();
         if !antes.is_empty() {
             spans.push(Span::styled(antes, theme.body()));
         }
-        let aceso: String = caracteres.iter().skip(inicio).take(fim - inicio).collect();
+        let aceso: String = characters.iter().skip(start).take(end - start).collect();
         let esta = corrente == Some(*vistas);
         spans.push(Span::styled(
             aceso,
             if esta { theme.accent() } else { theme.label() },
         ));
         *vistas += 1;
-        cursor = fim;
+        cursor = end;
     }
-    let resto: String = caracteres.iter().skip(cursor).collect();
+    let resto: String = characters.iter().skip(cursor).collect();
     if !resto.is_empty() {
         spans.push(Span::styled(resto, theme.body()));
     }
@@ -945,15 +962,15 @@ fn realcar(
 Em `render_messages`, troque o laço que monta as linhas por um que sabe qual mensagem é a corrente:
 
 ```rust
-    let corrente = app.busca.as_ref().and_then(seele_core::busca::Busca::atual);
+    let corrente = app.busca.as_ref().and_then(seele_core::search::Search::current);
     let ordinal = app
         .busca
         .as_ref()
-        .and_then(seele_core::busca::Busca::ordinal_na_mensagem);
+        .and_then(seele_core::search::Search::ordinal_in_message);
 
     let mut lines: Vec<Line<'_>> = Vec::new();
     for (indice, message) in app.messages.iter().chain(&app.local).enumerate() {
-        let nesta = corrente.filter(|casamento| casamento.mensagem == indice);
+        let nesta = corrente.filter(|candidate| candidate.message == indice);
         lines.extend(message_lines(
             message,
             budget,
@@ -969,9 +986,9 @@ Em `render_messages`, troque o laço que monta as linhas por um que sabe qual me
 Em `render_messages`, o `skip` hoje mostra sempre a cauda. Com busca ativa e uma ocorrência fora da cauda, a rolagem tem que ir até ela. Depois do cálculo de `skip`, acrescente:
 
 ```rust
-    // Com busca ativa, a cauda deixa de ser o que interessa: o que interessa é
-    // onde o termo está. Uma ocorrência fora da tela que ninguém rola até é
-    // uma ocorrência que não foi achada.
+    // With a search active, the tail stops being what matters: what matters
+    // is where the term is. An occurrence off screen that nobody scrolls to
+    // is an occurrence that was not found.
     let skip = match linha_da_corrente {
         Some(linha) if app.busca.is_some() => linha.saturating_sub(visible / 2),
         _ => skip,
@@ -1021,10 +1038,10 @@ Em `crates/seele-tui/src/command.rs`, no `mod tests`:
 
 ```rust
 #[test]
-fn ejetar_deixa_de_ser_sair() {
-    // Mudança de comportamento assumida: o botão do app se chama EJETAR e
-    // volta à tela de entrada, e o terminal passa a fazer o mesmo. Sair do
-    // programa continua sendo `:q`.
+fn ejecting_is_no_longer_quitting() {
+    // Assumed behaviour change: the app's button is called EJETAR and
+    // returns to the entry screen, and the terminal now does the same.
+    // Quitting the program is still `:q`.
     assert_eq!(parse(":ejetar"), Command::Eject);
     assert_eq!(parse(":q"), Command::Quit);
     assert_eq!(parse(":sair"), Command::Quit);
@@ -1038,7 +1055,7 @@ Em `crates/seele-tui/src/app.rs`, no `mod tests`:
 
 ```rust
 #[test]
-fn ejetar_e_sair_sao_estados_diferentes() {
+fn ejecting_and_quitting_are_different_states() {
     let mut app = App::new();
     app.ejetar();
     assert!(app.ejetou, "ejetar marca a volta à seleção");
@@ -1056,11 +1073,11 @@ Expected: FAIL — `no variant named Eject`, `no method named ejetar`.
 Em `crates/seele-tui/src/command.rs`, no `enum Command`, depois de `Quit`:
 
 ```rust
-    /// `:ejetar` — sair deste Dogma e voltar à tela de seleção.
+    /// `:ejetar` — leave this Dogma and go back to the selection screen.
     ///
-    /// Separado de [`Command::Quit`] de propósito: sair do programa e sair de
-    /// uma conversa são coisas diferentes, e o app já tratava as duas como
-    /// diferentes com o botão EJETAR.
+    /// Separate from [`Command::Quit`] on purpose: quitting the program and
+    /// leaving a conversation are different things, and the app already
+    /// treated the two as different with the EJETAR button.
     Eject,
 ```
 
@@ -1076,7 +1093,7 @@ Na função `parse`, substitua a linha 84 por:
 Em `crates/seele-tui/src/app.rs`, no `struct App`, depois de `pub quit: bool,`:
 
 ```rust
-    /// Marcado quando a sessão acabou mas o programa continua.
+    /// Set when the session has ended but the program keeps running.
     pub ejetou: bool,
 ```
 
@@ -1089,7 +1106,7 @@ Em `App::new`, depois de `quit: false,`:
 No `impl App`, depois de `quit`:
 
 ```rust
-    /// Sai deste Dogma sem sair do programa. `:ejetar`.
+    /// Leaves this Dogma without quitting the program. `:ejetar`.
     pub fn ejetar(&mut self) {
         self.ejetou = true;
     }
@@ -1102,10 +1119,10 @@ No `impl App`, depois de `quit`:
 Em `crates/seele-tui/src/main.rs`, renomeie a função `run` atual (linha 360) para `sessao`, mude a assinatura para receber `args` já resolvidos e devolver se ejetou:
 
 ```rust
-/// Uma sessão, do primeiro pacote ao último.
+/// One session, from the first packet to the last.
 ///
-/// Devolve `true` quando saiu por `:ejetar`, que é o sinal para o laço de
-/// `run` voltar à tela de seleção em vez de encerrar.
+/// Returns `true` when it exited via `:ejetar`, which is the signal for
+/// `run`'s loop to go back to the selection screen instead of quitting.
 async fn sessao(
     terminal: &mut Screen1,
     args: &Args,
@@ -1129,19 +1146,21 @@ Remova de `sessao` o bloco que resolve `args` (linhas 361-371) e as declaraçõe
 Escreva o `run` novo:
 
 ```rust
-/// O laço externo: escolher, conversar, ejetar, escolher de novo.
+/// The outer loop: choose, talk, eject, choose again.
 ///
-/// A sessão inteira vive numa volta deste laço, e `Enlace` e `Voice` são
-/// soltos ao fim dela. Isto **não** é o que a pendência #9 recusou — lá era
-/// trocar a conexão por baixo de uma sessão viva; aqui é derrubar tudo e
-/// voltar a uma tela que não tem roster, telemetria nem áudio.
+/// The whole session lives inside one turn of this loop, and `Enlace` and
+/// `Voice` are dropped at the end of it. This is **not** what issue #9
+/// turned down — that was swapping the connection out from under a live
+/// session; this is tearing everything down and going back to a screen that
+/// has no roster, no telemetry, and no audio.
 async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<()> {
     let home = config_dir();
     let tema = Theme::detect();
 
-    // Com flag, a tela de seleção não aparece no arranque — quem digitou
-    // `--server` já disse aonde vai. Ao ejetar ela aparece, e está certo:
-    // ejetar é o pedido explícito de ir para outro lugar.
+    // With a flag, the selection screen does not appear at startup — whoever
+    // typed `--server` already said where to go. When ejecting it does
+    // appear, and rightly so: ejecting is the explicit request to go
+    // somewhere else.
     let mut escolhidos = args;
 
     loop {
@@ -1310,8 +1329,8 @@ apareceria primeiro."
 - Modify: `apps/seele-app/tests/frontend.rs`
 
 **Interfaces:**
-- Consumes: `seele_core::busca::{Busca, normalizar}` da Task 1; `seele_core::conhecidos::{Conhecidos, Conhecido}`; `seele_core::uri::analisar`.
-- Produces: os comandos Tauri `conhecidos`, `esquecer`, `analisar_convite`, `buscar`, `busca_andar`, `busca_limpar`; o tipo `BuscaEstado { casamentos: Vec<Casamento>, atual: Option<Casamento>, posicao: u32, total: u32 }`, serializável.
+- Consumes: `seele_core::search::{Search, normalize}` da Task 1; `seele_core::conhecidos::{Conhecidos, Conhecido}`; `seele_core::uri::analisar`.
+- Produces: os comandos Tauri `conhecidos`, `esquecer`, `analisar_convite`, `buscar`, `busca_andar`, `busca_limpar`; o tipo `BuscaEstado { casamentos: Vec<Match>, atual: Option<Match>, posicao: u32, total: u32 }`, serializável.
 
 - [ ] **Step 1: Escrever os comandos**
 
@@ -1320,7 +1339,7 @@ Em `apps/seele-app/src/main.rs`, acrescente ao `struct Session` (linha 37):
 ```rust
     /// A busca corrente. O cursor é estado de sessão, e é o que impede a regra
     /// de dar-a-volta de ser reescrita em JavaScript.
-    busca: Mutex<Option<seele_core::busca::Busca>>,
+    busca: Mutex<Option<seele_core::search::Search>>,
 ```
 
 Acrescente o tipo devolvido e os comandos:
@@ -1330,9 +1349,9 @@ Acrescente o tipo devolvido e os comandos:
 #[derive(Debug, Clone, Default, serde::Serialize)]
 struct BuscaEstado {
     /// Onde o termo casou, na ordem em que a tela desenha.
-    casamentos: Vec<seele_core::busca::Casamento>,
+    casamentos: Vec<seele_core::search::Match>,
     /// A ocorrência em que o cursor está.
-    atual: Option<seele_core::busca::Casamento>,
+    atual: Option<seele_core::search::Match>,
     /// Posição de 1, para desenhar "[1/3]". Zero quando não casou nada.
     posicao: u32,
     /// Quantas ao todo.
@@ -1340,14 +1359,14 @@ struct BuscaEstado {
 }
 
 impl BuscaEstado {
-    fn de(busca: &seele_core::busca::Busca) -> Self {
-        let (posicao, total) = busca.posicao();
+    fn de(busca: &seele_core::search::Search) -> Self {
+        let (posicao, total) = busca.position();
         Self {
             // Todos, e não só o corrente: o app pinta o histórico inteiro de
             // uma vez, e acender só a ocorrência do cursor esconderia as
             // outras que estão na mesma tela.
-            casamentos: busca.casamentos().to_vec(),
-            atual: busca.atual(),
+            casamentos: busca.matches().to_vec(),
+            atual: busca.current(),
             posicao: u32::try_from(posicao).unwrap_or(0),
             total: u32::try_from(total).unwrap_or(0),
         }
@@ -1390,11 +1409,11 @@ fn analisar_convite(link: String) -> Result<seele_core::uri::Convite, String> {
 #[tauri::command]
 fn buscar(session: State<'_, Session>, termo: String) -> Result<BuscaEstado, PlugError> {
     let snapshot = session.plug()?.snapshot();
-    let busca = seele_core::busca::Busca::nova(
+    let busca = seele_core::search::Search::new(
         snapshot
             .messages
             .iter()
-            .map(|mensagem| seele_core::busca::normalizar(&mensagem.body)),
+            .map(|mensagem| seele_core::search::normalize(&mensagem.body)),
         &termo,
     );
     let estado = BuscaEstado::de(&busca);
@@ -1413,9 +1432,9 @@ fn busca_andar(session: State<'_, Session>, adiante: bool) -> BuscaEstado {
         return BuscaEstado::default();
     };
     if adiante {
-        busca.proxima();
+        busca.next_match();
     } else {
-        busca.anterior();
+        busca.previous_match();
     }
     BuscaEstado::de(busca)
 }
@@ -1428,7 +1447,7 @@ fn busca_limpar(session: State<'_, Session>) {
 }
 ```
 
-`Casamento` já deriva `serde::Serialize` desde a Task 1, e `busca.casamentos()` já existe — nada a acrescentar no core aqui.
+`Match` já deriva `serde::Serialize` desde a Task 1, e `busca.matches()` já existe — nada a acrescentar no core aqui.
 
 - [ ] **Step 2: Gravar em `conhecidos` depois de conectar**
 
@@ -1724,7 +1743,7 @@ function corpoComRealce(corpo, intervalos) {
 }
 ```
 
-**O app tem que desenhar o corpo normalizado, e isto não é detalhe.** O comando `buscar` roda sobre `normalizar(&mensagem.body)` e devolve deslocamentos naquele texto. Fatiar o corpo **cru** com esses deslocamentos erra o alvo em qualquer mensagem com espaço duplo ou quebra de linha — e HTML colapsar espaço na hora de exibir **não** conserta isso, porque o erro é de índice de string, não de pintura.
+**O app tem que desenhar o corpo normalizado, e isto não é detalhe.** O comando `buscar` roda sobre `normalize(&mensagem.body)` e devolve deslocamentos naquele texto. Fatiar o corpo **cru** com esses deslocamentos erra o alvo em qualquer mensagem com espaço duplo ou quebra de linha — e HTML colapsar espaço na hora de exibir **não** conserta isso, porque o erro é de índice de string, não de pintura.
 
 O `desenharMensagens` fatia o normalizado:
 
