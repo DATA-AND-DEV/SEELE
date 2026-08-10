@@ -66,6 +66,31 @@ Tecla dedicada configurável não resolveria: o problema não é *qual* tecla, �
 5. **Bateria interna** — desconectado, contagem 04:59 regressiva, interface esmaecida mas legível, tentativas listadas.
 6. **Alerta** — banner 警告 para menção direta ou evento crítico.
 
+### A tela de conexão não é o sétimo
+
+Os seis acima descrevem uma **sessão**. `plug` sem argumento nenhum abre antes
+disso uma tela de conexão — Dogmas visitados, endereço novo, colar convite,
+hospedar aqui — que não tem roster, telemetria nem Taxa de Sincronização.
+Encaixá-la no mesmo enum custaria campos vazios nos outros seis, então ela vive
+fora, em `seele-tui::selecao`, e some quando a conexão começa.
+
+**Qualquer flag pula a tela.** `plug --server casa:8383` conecta direto, sem
+uma tecla no caminho. Um menu obrigatório entre a intenção e o resultado é o
+oposto do que este cliente promete a quem já sabe o que quer.
+
+Os Dogmas visitados ficam num arquivo à parte dos pins, e a separação é
+deliberada: o arquivo de pins decide se um servidor é o mesmo de ontem e por
+isso é curto e legível a olho. Apelido e último Cage são conveniência — um pode
+ser apagado sem consequência, o outro não.
+
+### Hospedar sem daemon
+
+`plug --hospedar` sobe um Dogma dentro do próprio processo e entra nele; o link
+de convite aparece de saída numa sobreposição de largura inteira, e `:convite`
+o traz de volta. Não substitui o `seeled`: este Dogma morre quando o cliente
+fecha, que é o certo para "estou hospedando uma conversa" e errado para
+"mantenho um Dogma no ar".
+
 ## Restrições de renderização
 
 - Tudo alinhado a células. Bordas com box-drawing (`│ ─ ┌ ┼ ╮`).

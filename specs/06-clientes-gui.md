@@ -18,6 +18,31 @@ Frontend: **decidido em M5 — HTML, CSS e JavaScript à mão, sem framework e s
 
 Requisito não negociável: **nenhuma lógica de protocolo em JavaScript**. Se o frontend precisa saber o que é um `ssrc`, algo está errado.
 
+### Hospedar pelo app
+
+A tela de entrada tem **HOSPEDAR AQUI** ao lado de INSERIR PLUG. Sobe um Dogma
+dentro do processo do app — o mesmo `seele-server::hospedagem` do
+`plug --hospedar` — e devolve o link de convite, que aparece no topo da sessão
+pronto para copiar. Ele vive enquanto a janela estiver aberta.
+
+Sem isso, hospedar exigia um terminal, e num produto cujo argumento é "hospede
+você mesmo" exigir linha de comando de quem hospeda exclui justamente quem mais
+ganharia. É a única exceção nomeada à regra de dependência do lado do app
+(`cargo xtask check-deps`): aresta lateral no topo do grafo, não inversão — este
+binário contém os dois papéis.
+
+O comando **não conecta**. Conectar continua sendo o caminho de sempre, com o
+endereço que ele devolve: um Dogma hospedado aqui e um do outro lado do mundo
+entram pela mesma porta.
+
+### A marca
+
+`docs/marca.md` é normativo para as duas cascas. Os dois pontos que o app tem de
+respeitar: a assinatura `ゼーレ` vem de SVG com **glifos em contorno** — o app
+não embarca fonte, e texto entregaria a marca à face japonesa do sistema, que a
+folha proíbe substituir — e o favicon é a forma muda, porque abaixo de 32 px de
+largura do plug a forma troca.
+
 ## Mobile
 
 **Escopo em v1: somente consumo.** Ouvir, falar, ler e responder texto. Sem administração, sem gerenciamento de canais, sem configuração avançada.
