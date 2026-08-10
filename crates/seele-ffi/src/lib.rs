@@ -474,7 +474,7 @@ impl Plug {
             voice.at_field(),
             voice.total_isolation(),
             telemetry.local.input_level,
-            telemetry.local.local_fault(),
+            voice.falha_local(),
             telemetry.local.bitrate_bps,
         )
     }

@@ -87,13 +87,73 @@ impl LocalTelemetry {
         }
     }
 
-    /// True when this machine, rather than the network, is dropping audio.
+    /// Quantas coisas deram errado nesta máquina, desde que o áudio começou.
     ///
-    /// Worth separating because the two look identical to a listener and have
-    /// opposite fixes.
+    /// Cumulativo. Quem quer saber se está dando errado **agora** pergunta ao
+    /// [`FalhaLocal`], não a este número.
     #[must_use]
-    pub fn local_fault(&self) -> bool {
-        self.capture_overruns > 0 || self.playback_underruns > 0 || self.device_errors > 0
+    pub fn tropecos(&self) -> u64 {
+        self.capture_overruns
+            .saturating_add(self.playback_underruns)
+            .saturating_add(self.device_errors)
+    }
+}
+
+/// Se a máquina está derrubando áudio **agora**.
+///
+/// Isto já foi uma comparação com zero sobre contadores cumulativos, e o efeito
+/// era este: um estouro qualquer, uma vez, acendia "ÁUDIO LOCAL FALHANDO" e o
+/// aviso não apagava mais. Abrir um dispositivo de captura produz estouros —
+/// o fluxo começa a encher o anel antes de alguém drenar —, então na prática o
+/// alarme acendia no arranque de toda sessão e ficava aceso com o áudio
+/// perfeito. Um alerta permanente é um alerta que ninguém lê, e `specs/05`
+/// separa justamente falha local de falha de rede para que cada uma signifique
+/// alguma coisa.
+///
+/// Agora é derivada: falha é o contador **crescer** entre duas olhadas. Acende
+/// enquanto o problema acontece e apaga sozinho quando para.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FalhaLocal {
+    visto: u64,
+    /// Quantas amostras seguidas sem crescimento.
+    ///
+    /// Uma folga curta antes de apagar: entre duas leituras o contador pode
+    /// ficar parado por um instante e voltar a subir, e um aviso piscando é
+    /// pior que um aviso errado.
+    quietas: u8,
+    acesa: bool,
+}
+
+/// Quantas amostras quietas apagam o aviso.
+const QUIETAS_PARA_APAGAR: u8 = 8;
+
+impl FalhaLocal {
+    /// Um detector que ainda não viu nada.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Olha os contadores e diz se a máquina está falhando agora.
+    pub fn observar(&mut self, agora: &LocalTelemetry) -> bool {
+        let total = agora.tropecos();
+        if total > self.visto {
+            self.visto = total;
+            self.quietas = 0;
+            self.acesa = true;
+        } else if self.acesa {
+            self.quietas = self.quietas.saturating_add(1);
+            if self.quietas >= QUIETAS_PARA_APAGAR {
+                self.acesa = false;
+            }
+        }
+        self.acesa
+    }
+
+    /// O que a última olhada concluiu.
+    #[must_use]
+    pub fn acesa(&self) -> bool {
+        self.acesa
     }
 }
 
@@ -202,6 +262,72 @@ impl AudioTelemetry {
 }
 
 #[cfg(test)]
+mod falha_local {
+    use super::*;
+
+    fn com(tropecos: u64) -> LocalTelemetry {
+        LocalTelemetry {
+            capture_overruns: tropecos,
+            ..LocalTelemetry::default()
+        }
+    }
+
+    #[test]
+    fn um_estouro_no_arranque_nao_acende_o_aviso_para_sempre() {
+        // O defeito que isto trava. A regra era `capture_overruns > 0` sobre um
+        // contador cumulativo, e abrir um dispositivo de captura sempre produz
+        // alguns estouros — o fluxo enche o anel antes de alguém drenar. Na
+        // prática o aviso "ÁUDIO LOCAL FALHANDO" acendia no começo de toda
+        // sessão e nunca mais apagava, com o áudio funcionando perfeitamente.
+        let mut detector = FalhaLocal::new();
+
+        assert!(detector.observar(&com(3392)), "não avisou quando aconteceu");
+
+        // O contador para de crescer: o problema passou.
+        for _ in 0..QUIETAS_PARA_APAGAR {
+            detector.observar(&com(3392));
+        }
+        assert!(
+            !detector.acesa(),
+            "o aviso ficou aceso com o contador parado — é o defeito de volta"
+        );
+    }
+
+    #[test]
+    fn o_aviso_volta_quando_o_problema_volta() {
+        let mut detector = FalhaLocal::new();
+        detector.observar(&com(10));
+        for _ in 0..QUIETAS_PARA_APAGAR {
+            detector.observar(&com(10));
+        }
+        assert!(!detector.acesa());
+
+        assert!(
+            detector.observar(&com(11)),
+            "um estouro novo tem que acender de novo"
+        );
+    }
+
+    #[test]
+    fn nao_pisca_a_cada_amostra_parada() {
+        // Entre duas leituras o contador pode ficar parado um instante e voltar
+        // a subir. Um aviso piscando é pior que um aviso errado: vira ruído.
+        let mut detector = FalhaLocal::new();
+        detector.observar(&com(1));
+        assert!(detector.observar(&com(1)), "apagou cedo demais");
+        assert!(detector.observar(&com(2)));
+    }
+
+    #[test]
+    fn maquina_saudavel_nunca_acende() {
+        let mut detector = FalhaLocal::new();
+        for _ in 0..50 {
+            assert!(!detector.observar(&LocalTelemetry::default()));
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -264,23 +390,23 @@ mod tests {
     }
 
     #[test]
-    fn local_telemetry_separates_this_machine_from_the_network() {
-        // A listener hearing gaps cannot tell an overrun from packet loss, and
-        // the two have opposite fixes.
-        let healthy = LocalTelemetry::default();
-        assert!(!healthy.local_fault());
+    fn os_tropecos_desta_maquina_somam_as_tres_origens() {
+        // Quem ouve buraco no áudio não distingue estouro de perda de pacote, e
+        // os dois têm conserto oposto — por isso a máquina é contada à parte.
+        //
+        // Este teste já afirmou que qualquer valor acima de zero **é** falha.
+        // Era o defeito: contador cumulativo comparado com zero acende no
+        // primeiro tropeço e não apaga nunca. O total continua sendo total;
+        // quem responde "está falhando agora" é o `FalhaLocal`.
+        assert_eq!(LocalTelemetry::default().tropecos(), 0);
 
-        let stalling = LocalTelemetry {
+        let tropecando = LocalTelemetry {
             capture_overruns: 12,
-            ..LocalTelemetry::default()
-        };
-        assert!(stalling.local_fault());
-
-        let unplugged = LocalTelemetry {
+            playback_underruns: 3,
             device_errors: 1,
             ..LocalTelemetry::default()
         };
-        assert!(unplugged.local_fault());
+        assert_eq!(tropecando.tropecos(), 16);
     }
 
     #[test]

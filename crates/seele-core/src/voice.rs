@@ -31,7 +31,7 @@ use seele_audio::gate::{GateConfig, GateMode, VoiceGate};
 use seele_audio::jitter::{Decision, JitterBuffer, JitterConfig};
 use seele_audio::mixer::Mixer;
 use seele_audio::resample::RateConverter;
-use seele_audio::telemetry::{AudioTelemetry, LocalTelemetry, SourceTelemetry};
+use seele_audio::telemetry::{AudioTelemetry, FalhaLocal, LocalTelemetry, SourceTelemetry};
 use seele_audio::{FRAME_MS, FRAME_SAMPLES, SAMPLE_RATE_HZ};
 use seele_proto::ids::Ssrc;
 use seele_proto::MediaHeader;
@@ -122,6 +122,12 @@ pub struct Voice {
     controls: Arc<Controls>,
     telemetry: Arc<Mutex<AudioTelemetry>>,
     rates: DeviceRates,
+    /// Se a máquina está derrubando áudio **agora**.
+    ///
+    /// Mora aqui porque é uma derivada: precisa lembrar o que viu da última
+    /// vez. Ver [`FalhaLocal`] — e por que isto não é mais uma comparação com
+    /// zero.
+    falha_local: Mutex<FalhaLocal>,
 }
 
 impl Voice {
@@ -175,6 +181,7 @@ impl Voice {
             controls,
             telemetry,
             rates,
+            falha_local: Mutex::new(FalhaLocal::new()),
         })
     }
 
@@ -245,6 +252,20 @@ impl Voice {
             .lock()
             .map(|snapshot| snapshot.clone())
             .unwrap_or_default()
+    }
+
+    /// Se esta máquina está derrubando áudio agora.
+    ///
+    /// Consultar **move** o detector: cada chamada é uma olhada, e é a
+    /// diferença entre duas olhadas que define a falha. As cascas perguntam
+    /// isto uma vez por quadro de telemetria.
+    #[must_use]
+    pub fn falha_local(&self) -> bool {
+        let telemetria = self.telemetry();
+        self.falha_local
+            .lock()
+            .map(|mut detector| detector.observar(&telemetria.local))
+            .unwrap_or(false)
     }
 }
 
