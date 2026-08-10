@@ -11,9 +11,12 @@ on:
   workflow_dispatch:
     inputs:
       versao:
-        description: "Versão a gravar nos instaladores (ex.: 0.1.0)"
+        description: "Versão a gravar nos instaladores — X.Y.Z, ou X.Y.Z-N com N só de dígitos"
         required: false
-        default: "0.0.0-dev"
+        # Era `0.0.0-dev`, e foi isso que quebrou o primeiro empacotamento:
+        # o instalador do Windows não representa um pré-lançamento por extenso.
+        # Ver a conferência no job `versao`.
+        default: "0.0.0"
 
 permissions:
   contents: write
@@ -39,9 +42,42 @@ jobs:
             numero="${{ inputs.versao }}"
             tag="v${numero}"
           fi
+          # O empacotador de MSI recusa versões que o formato do instalador não
+          # sabe representar — e recusa **depois** de seis minutos compilando, no
+          # último dos três sistemas. Conferir aqui custa um segundo e falha
+          # antes de qualquer build.
+          #
+          # As faixas são as do `ProductVersion` do MSI, e o pré-lançamento vira
+          # um campo numérico: `0.1.0-rc1` não tem como caber ali. Foi o padrão
+          # `0.0.0-dev` deste workflow que descobriu isso do jeito caro.
+          if ! printf '%s' "${numero}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$'; then
+            echo "::error::a versão «${numero}» não serve para o instalador do Windows."
+            {
+              echo "Aceito: X.Y.Z, ou X.Y.Z-N com N só de dígitos."
+              echo "Não serve: -dev, -rc1, -beta.2, +metadados, ou o «v» na frente."
+              echo "O MSI guarda o pré-lançamento num campo numérico; não há onde pôr letras."
+            } >&2
+            exit 1
+          fi
+
+          maior="${numero%%.*}"; resto="${numero#*.}"
+          menor="${resto%%.*}"; resto="${resto#*.}"
+          correcao="${resto%%-*}"
+          pre=""
+          case "${numero}" in *-*) pre="${numero##*-}" ;; esac
+
+          if [ "${maior}" -gt 255 ] || [ "${menor}" -gt 255 ] || [ "${correcao}" -gt 65535 ]; then
+            echo "::error::a versão «${numero}» estoura as faixas do MSI (maior e menor até 255, correção até 65535)."
+            exit 1
+          fi
+          if [ -n "${pre}" ] && [ "${pre}" -gt 65535 ]; then
+            echo "::error::o pré-lançamento «${pre}» passa de 65535, que é o teto do campo no MSI."
+            exit 1
+          fi
+
           echo "numero=${numero}" >> "$GITHUB_OUTPUT"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
-          echo "versão ${numero}, tag ${tag}"
+          echo "versão ${numero}, tag ${tag} — cabe no MSI"
 
   empacotar:
     name: ${{ matrix.nome }}
