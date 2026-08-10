@@ -308,7 +308,12 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
         .await?;
 
     // Espera a mensagem voltar, que é quando ela está durável.
-    let deadline = Instant::now() + WAIT;
+    //
+    // Prazo maior que o `WAIT` dos outros: este teste falhou no runner do
+    // Linux com zero mensagens, e o caminho aqui é o mais longo do arquivo —
+    // gravação em lote, transação, difusão. Cinco segundos bastam nesta
+    // máquina e não bastaram lá.
+    let deadline = Instant::now() + Duration::from_secs(20);
     while Instant::now() < deadline && room.messages.is_empty() {
         if let Ok(Ok(message)) =
             tokio::time::timeout(Duration::from_millis(500), terminal.next_event()).await

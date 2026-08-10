@@ -144,7 +144,10 @@ impl MediaChannel {
 pub struct Client {
     connection: quinn::Connection,
     send: quinn::SendStream,
-    recv: quinn::RecvStream,
+    /// Mensagens já decodificadas, vindas da tarefa que é dona do fluxo.
+    ///
+    /// O fluxo de leitura não fica aqui de propósito — ver [`Client::next_event`].
+    inbox: tokio::sync::mpsc::UnboundedReceiver<ServerMessage>,
     session: SessionInfo,
     pin: PinDecision,
     pattern: Pattern,
@@ -238,10 +241,33 @@ impl Client {
         .await
         .map_err(|_| ConnectError::HandshakeTimeout)??;
 
+        // Uma tarefa é dona do fluxo de leitura e entrega quadros inteiros por
+        // um canal. Nada mais lê deste fluxo, então não há corrida por quadro;
+        // e como ninguém cancela um `read_exact` no meio, o fluxo não
+        // dessincroniza.
+        let (para_dentro, inbox) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            let mut recv = recv;
+            loop {
+                match frame::read::<ServerMessage>(&mut recv).await {
+                    Ok(mensagem) => {
+                        if para_dentro.send(mensagem).is_err() {
+                            // Ninguém mais escuta: o `Client` foi descartado.
+                            return;
+                        }
+                    }
+                    Err(erro) => {
+                        tracing::debug!(%erro, "o fluxo de controle terminou");
+                        return;
+                    }
+                }
+            }
+        });
+
         Ok(Self {
             connection,
             send,
-            recv,
+            inbox,
             session,
             pin,
             pattern: Pattern::Blue,
@@ -428,10 +454,28 @@ impl Client {
     ///
     /// Fails when the control stream closes.
     pub async fn next_event(&mut self) -> Result<ServerMessage> {
-        let event = frame::read::<ServerMessage>(&mut self.recv).await?;
-        // The round trip is measured here rather than in a separate reader:
-        // two readers on one stream would race for every frame, and one of them
-        // would swallow messages the other was waiting for.
+        // Recebe de um canal, e não do fluxo QUIC direto. **Isto é o que torna
+        // a função segura de cancelar**, e a diferença não é acadêmica: as duas
+        // cascas chamam `next_event` dentro de um `tokio::select!`, que descarta
+        // os ramos perdedores a cada volta. Uma tecla, uma tica de telemetria
+        // ou um ping cancelariam a leitura em andamento.
+        //
+        // `frame::read` faz dois `read_exact` — o tamanho e depois o corpo. Ser
+        // cancelado entre eles consome bytes que ninguém guardou, e o fluxo
+        // fica dessincronizado **para sempre**: toda leitura seguinte lê lixo.
+        // Em loopback o quadro inteiro costuma chegar num pacote só e a leitura
+        // termina sem ceder, e é por isso que isto nunca apareceu aqui — só num
+        // runner de CI carregado.
+        //
+        // `mpsc::Receiver::recv` é seguro de cancelar por contrato: nada se
+        // perde se ninguém estiver esperando.
+        let event = self
+            .inbox
+            .recv()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("o fluxo de controle fechou"))?;
+        // O tempo de ida e volta é medido aqui, e não na tarefa que lê: o
+        // `Ping` é enviado por este objeto, e só ele sabe quando.
         if let ServerMessage::Pong { timestamp } = event {
             if let Some((sent, at)) = self.pending_ping {
                 if sent == timestamp {
