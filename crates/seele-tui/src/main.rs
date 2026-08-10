@@ -56,6 +56,10 @@ struct Args {
     cage: CageId,
     line: LineId,
     no_audio: bool,
+    /// Convite ou senha, quando o Dogma pede.
+    join_secret: Option<String>,
+    /// Impressão digital esperada, quando veio num link.
+    expected_fingerprint: Option<String>,
 }
 
 fn parse_args() -> Result<Args> {
@@ -64,11 +68,29 @@ fn parse_args() -> Result<Args> {
     let mut cage = CageId(1);
     let mut line = LineId(1);
     let mut no_audio = false;
+    let mut join_secret: Option<String> = None;
+    let mut expected_fingerprint: Option<String> = None;
     let mut argv = std::env::args().skip(1);
 
     while let Some(flag) = argv.next() {
         match flag.as_str() {
             "--server" | "-s" => target = argv.next().context("--server needs an address")?,
+            // Um link colado de uma conversa. Traz endereço, e pode trazer a
+            // impressão digital e um convite de uso único.
+            "--url" | "-u" => {
+                let texto = argv.next().context("--url needs a seele:// link")?;
+                let convite = seele_core::uri::analisar(&texto)
+                    .map_err(|erro| anyhow!("link inválido: {erro}"))?;
+                target = convite.alvo;
+                expected_fingerprint = convite.impressao_digital;
+                join_secret = convite.token;
+                if let Some(numero) = convite.cage {
+                    cage = CageId(numero);
+                }
+            }
+            "--convite" | "--senha" => {
+                join_secret = Some(argv.next().context("--convite needs a value")?);
+            }
             "--nick" | "-n" => nickname = argv.next().context("--nick needs a name")?,
             "--cage" => {
                 cage = CageId(argv.next().context("--cage needs a number")?.parse()?);
@@ -96,6 +118,8 @@ fn parse_args() -> Result<Args> {
         cage,
         line,
         no_audio,
+        join_secret,
+        expected_fingerprint,
     })
 }
 
@@ -160,6 +184,10 @@ fn usage() {
     eprintln!("      --cage <n>               Cage a entrar (padrão 1)");
     eprintln!("      --linha <n>              Linha a abrir (padrão 1)");
     eprintln!("      --sem-audio              só texto, sem placa de som");
+    eprintln!(
+        "  -u, --url <seele://…>        link de convite: endereço, impressão digital e convite"
+    );
+    eprintln!("      --convite <token>        convite de uso único, ou a senha do Dogma");
     eprintln!("  -h, --ajuda                  isto");
     eprintln!();
     eprintln!("  $SEELE_HOME  onde ficam a identidade e os pins (padrão ~/.config/seele)");
@@ -281,6 +309,7 @@ async fn run(terminal: &mut Screen1, args: Args, holds: bool) -> Result<()> {
         &args.nickname,
         &key,
         pins,
+        args.join_secret.as_deref(),
     )
     .await
     {
@@ -292,6 +321,25 @@ async fn run(terminal: &mut Screen1, args: Args, holds: bool) -> Result<()> {
             return wait_for_key(terminal, &runtime).await;
         }
     };
+
+    // Quando o link trouxe a impressão digital, ela é conferida aqui — e é o
+    // que transforma o primeiro contato de cego em verificado. Sem isso o ADR
+    // 0003 depende de a pessoa conferir por outro canal, o que ninguém faz.
+    if let Some(esperada) = &args.expected_fingerprint {
+        let oferecida = match client.pin_decision() {
+            PinDecision::FirstContact { fingerprint } => fingerprint.clone(),
+            PinDecision::Matches => esperada.clone(),
+            PinDecision::Changed { offered, .. } => offered.clone(),
+        };
+        if !oferecida.eq_ignore_ascii_case(esperada) {
+            runtime.app.screen = Screen::Lost {
+                reason: format!(
+                    "ESTE NÃO É O DOGMA DO CONVITE.\n\nesperada:  {esperada}\nofertada:  {oferecida}"
+                ),
+            };
+            return wait_for_key(terminal, &runtime).await;
+        }
+    }
 
     // ADR 0003 and specs/08-seguranca.md: first contact is stated, not accepted
     // in silence. A pin that establishes itself invisibly is a pin nobody knows

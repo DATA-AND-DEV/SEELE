@@ -61,4 +61,5 @@ pub use seele_proto::ids::{
 };
 pub use seele_proto::sync_ratio::{SyncBand, SyncInputs, SyncRatio};
 pub use seele_proto::transport::DEFAULT_PORT;
+pub use seele_proto::uri;
 pub use seele_proto::PROTOCOL_VERSION;

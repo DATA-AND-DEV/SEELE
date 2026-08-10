@@ -27,6 +27,7 @@ pub mod ids;
 pub mod media;
 pub mod sync_ratio;
 pub mod transport;
+pub mod uri;
 pub mod version;
 
 pub use control::{ClientMessage, ControlError, ServerMessage};

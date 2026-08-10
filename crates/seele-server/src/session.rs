@@ -202,6 +202,7 @@ async fn handshake(
     let ClientMessage::Hello {
         version,
         client,
+        join_secret,
         nickname,
         public_key,
     } = hello
@@ -216,6 +217,37 @@ async fn handshake(
         reason: DisconnectReason::Incompatible,
         detail: format!("client speaks protocol {version}"),
     })?;
+
+    // O porteiro, antes do desafio criptográfico. Quem não tem direito de estar
+    // batendo à porta não deve custar uma verificação de assinatura, e um
+    // Dogma exposto na internet é varrido o dia inteiro.
+    //
+    // A recusa é sempre `CredentialRejected`, seja senha errada, convite gasto
+    // ou convite vencido. `specs/08-seguranca.md` exige falha uniforme: um erro
+    // que distingue os casos conta a quem está adivinhando qual palpite chegou
+    // mais perto. O motivo real vai para o log do operador.
+    {
+        let mut guard = dogma.casper.lock().await;
+        let politica = crate::admissao::Politica::carregar(&guard).map_err(|error| Refusal {
+            reason: DisconnectReason::CredentialRejected,
+            detail: format!("could not read the admission policy: {error}"),
+        })?;
+        match politica.admitir(&mut guard, join_secret.as_deref()) {
+            Ok(Ok(())) => {}
+            Ok(Err(recusa)) => {
+                return Err(Refusal {
+                    reason: DisconnectReason::CredentialRejected,
+                    detail: format!("admissão recusada: {recusa:?}"),
+                });
+            }
+            Err(error) => {
+                return Err(Refusal {
+                    reason: DisconnectReason::CredentialRejected,
+                    detail: format!("could not evaluate admission: {error}"),
+                });
+            }
+        }
+    }
 
     let key: [u8; PUBLIC_KEY_LEN] = public_key.clone().try_into().map_err(|_| Refusal {
         reason: DisconnectReason::CredentialRejected,
@@ -478,7 +510,24 @@ async fn run_session(
             incoming = frame::read::<ClientMessage>(&mut recv) => {
                 let Ok(message) = incoming else { break };
                 match message {
-                    ClientMessage::InsertPlug { cage: id, .. } => {
+                    ClientMessage::InsertPlug { cage: id, password } => {
+                        // A senha do Cage era declarada no protocolo, relatada
+                        // ao cliente em `password_required` e **nunca
+                        // conferida**. Uma fechadura que se anuncia trancada e
+                        // não está é pior que porta aberta: quem confia nela
+                        // toma decisão errada sobre o que dizer ali dentro.
+                        if !crate::admissao::cage_liberado(
+                            &*dogma.casper.lock().await,
+                            id,
+                            password.as_deref(),
+                        ) {
+                            frame::write(&mut send, &ServerMessage::Alert {
+                                severity: AlertSeverity::Warning,
+                                reason: AlertReason::CageEntryRefused,
+                                operator_text: None,
+                            }).await?;
+                            continue;
+                        }
                         cage.send(CageCommand::Join {
                             pilot: session.pilot,
                             ssrc: session.ssrc,

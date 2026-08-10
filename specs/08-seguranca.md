@@ -35,7 +35,11 @@ Recomendação: TOFU como padrão, ACME como opção documentada. O aviso de mud
 1. **Chave pública (Ed25519)** — o cliente gera par de chaves no primeiro uso; o servidor guarda a pública. Desafio-resposta no handshake. Sem senha, sem hash para vazar, e prepara terreno para E2EE. Custo: recuperação de conta e uso em múltiplos dispositivos precisam de fluxo próprio.
 2. **Senha** — Argon2id com parâmetros modernos, salt por usuário. Familiar, fácil de usar em vários dispositivos. Traz todos os problemas conhecidos de senha.
 
-Recomendação: chave pública como mecanismo primário, com convite por token de uso único para entrada em um Dogma. Senha como fallback opcional configurável pelo operador.
+**Decidido em M5, exatamente como recomendado** (ADR 0021). Chave pública Ed25519 como identidade; entrada no Dogma por **convite de uso único** (160 bits, sete dias, consumido atomicamente) ou por **senha do Dogma** em Argon2id, à escolha do operador. Um Dogma sem nenhum dos dois é aberto, que segue sendo o padrão para rede local — e o `seeled` avisa em voz alta ao subir assim escutando fora do loopback.
+
+O segredo viaja no `Hello`, antes do desafio-resposta: gastar verificação de assinatura com quem não devia estar batendo à porta é trabalho de graça para quem varre a internet. A recusa é sempre `CredentialRejected`, uniforme, com o motivo real só no log do operador.
+
+O convite é o que torna um link compartilhável defensável — ver o esquema `seele://` no ADR 0006, que carrega endereço, impressão digital do certificado e convite, mas **nunca** a senha.
 
 Independente da escolha:
 - Rate limiting de tentativas, com backoff por IP e por identidade.

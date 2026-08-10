@@ -54,6 +54,31 @@ mudar depois.
 Se a linha "na outra máquina" não aparecer, o `seeled` não achou um endereço de
 rede — provavelmente está sem rede, ou só em loopback.
 
+### Fechar o Dogma, se quiser
+
+Por padrão qualquer um que alcance a porta entra — o certo para testar em rede
+local, e o `seeled` avisa ao subir assim. Para fechar:
+
+```sh
+./target/release/seeled convite ayanami   # link de uso único, sete dias
+./target/release/seeled senha "a senha"   # ou um segredo para o grupo
+./target/release/seeled senha --remover   # volta a aceitar qualquer um
+```
+
+O convite sai como um link pronto para mandar:
+
+```
+seele://192.168.x.x:8383?fp=782cc791…&convite=2QKPAXPP97W5459H3TPA
+```
+
+Ele carrega a impressão digital do certificado, então quem receber **não
+precisa conferi-la por outro canal** — o cliente compara sozinho e recusa se
+não bater. Do outro lado:
+
+```sh
+./target/release/plug --url "seele://…" --nick seunome
+```
+
 ### Firewall
 
 A porta 8383 é **UDP** (QUIC), não TCP. É o erro de configuração mais provável

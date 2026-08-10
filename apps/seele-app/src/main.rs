@@ -94,6 +94,7 @@ async fn connect(
     server: String,
     nickname: String,
     audio: bool,
+    join_secret: Option<String>,
 ) -> Result<Snapshot, PlugError> {
     if session.plug().is_ok() {
         return Err(PlugError::AlreadyConnected);
@@ -105,6 +106,7 @@ async fn connect(
         nickname,
         home,
         audio,
+        join_secret: join_secret.filter(|s| !s.trim().is_empty()),
     };
 
     // `connect` blocks on a QUIC handshake. Running it on the async runtime's

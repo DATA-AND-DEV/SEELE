@@ -72,6 +72,10 @@ pub struct ConnectConfig {
     /// A path rather than a key, because the shell knows where its platform
     /// keeps configuration and the core knows how to persist an identity.
     pub home: String,
+    /// Convite de uso único ou senha, quando o Dogma exige um.
+    ///
+    /// `None` num Dogma aberto, que é o padrão.
+    pub join_secret: Option<String>,
     /// Whether to open the microphone and speakers at all.
     ///
     /// False on a machine with no sound card, which is most servers and every
@@ -608,6 +612,7 @@ async fn drive(
         &config.nickname,
         &key,
         pins,
+        config.join_secret.as_deref(),
     )
     .await
     {

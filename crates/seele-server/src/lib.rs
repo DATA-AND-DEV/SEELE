@@ -30,6 +30,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use seele_proto::ids::CageId;
 
+pub mod admissao;
 pub mod cage;
 pub mod casper;
 pub mod dogma;
@@ -126,18 +127,27 @@ impl Server {
         // it here rather than in `main` means the integration tests get it too.
         let _ = rustls::crypto::ring::default_provider().install_default();
 
-        let identity =
-            tls::Identity::self_signed(vec!["localhost".into(), config.listen.ip().to_string()])?;
+        // CASPER first: the handshake needs accounts before it can answer
+        // anybody, and migrations run at boot (specs/04-servidor-seele.md).
+        // A identidade TLS também mora nele, então ele vem antes dela.
+        let mut casper = casper::Casper::open(&config.database)?;
+        seed(&mut casper, &config)?;
+
+        // Lida do banco, não gerada a cada vez. Sem isto, reiniciar o Dogma
+        // trocava a chave e todo cliente já conectado via `A CHAVE DO SERVIDOR
+        // MUDOU` — o alerta bloqueante do ADR 0003 — e era recusado. O aviso
+        // reservado para ataque disparando num reinício de rotina é como se
+        // ensina a ignorá-lo.
+        let identity = tls::Identity::load_or_create(
+            &casper,
+            vec!["localhost".into(), config.listen.ip().to_string()],
+        )?;
         let fingerprint = identity.fingerprint();
         let server_config = tls::server_config(identity)?;
 
         let endpoint = quinn::Endpoint::server(server_config, config.listen)
             .with_context(|| format!("could not bind {}", config.listen))?;
 
-        // CASPER first: the handshake needs accounts before it can answer
-        // anybody, and migrations run at boot (specs/04-servidor-seele.md).
-        let mut casper = casper::Casper::open(&config.database)?;
-        seed(&mut casper, &config)?;
         let casper = Arc::new(tokio::sync::Mutex::new(casper));
 
         let (events, _) = tokio::sync::broadcast::channel(1024);
@@ -189,6 +199,38 @@ impl Server {
     #[must_use]
     pub fn fingerprint(&self) -> &str {
         &self.fingerprint
+    }
+
+    /// A impressão digital lida direto do banco, sem subir servidor.
+    ///
+    /// É o que `seeled convite` precisa: o operador está com o Dogma parado
+    /// quando gera um convite, e o link tem de carregar a mesma impressão que
+    /// o servidor vai apresentar depois.
+    ///
+    /// # Errors
+    ///
+    /// Falha se o banco não responder ou não tiver identidade ainda.
+    pub fn fingerprint_do_banco(casper: &casper::Casper) -> Result<String> {
+        let cert: Vec<u8> = casper.connection().query_row(
+            "SELECT valor FROM configuracao WHERE chave = 'tls_cert'",
+            [],
+            |linha| linha.get(0),
+        )?;
+        Ok(seele_proto::transport::certificate_fingerprint(&cert))
+    }
+
+    /// A política de admissão deste Dogma.
+    ///
+    /// # Errors
+    ///
+    /// Falha se o banco não responder.
+    pub fn politica_de_admissao(&self) -> Result<admissao::Politica> {
+        let guard = self
+            .dogma
+            .casper
+            .try_lock()
+            .map_err(|_| anyhow::anyhow!("o banco está ocupado"))?;
+        admissao::Politica::carregar(&guard)
     }
 
     /// Accepts connections until the endpoint closes.

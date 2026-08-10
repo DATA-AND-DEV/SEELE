@@ -57,6 +57,7 @@ async fn connect(address: SocketAddr, nickname: &str) -> Result<Client> {
         nickname,
         &key,
         Arc::new(MemoryPinStore::new()),
+        None,
     )
     .await
     .map_err(Into::into)
@@ -238,6 +239,7 @@ async fn two_dogmas_on_one_machine_do_not_share_a_pin() -> Result<()> {
         "ayanami",
         &key,
         Arc::clone(&pins) as Arc<_>,
+        None,
     )
     .await?;
     assert!(matches!(
@@ -254,6 +256,7 @@ async fn two_dogmas_on_one_machine_do_not_share_a_pin() -> Result<()> {
         "ayanami",
         &key,
         Arc::clone(&pins) as Arc<_>,
+        None,
     )
     .await
     .map_err(|error| {
@@ -274,6 +277,7 @@ async fn two_dogmas_on_one_machine_do_not_share_a_pin() -> Result<()> {
         "ayanami",
         &key,
         Arc::clone(&pins) as Arc<_>,
+        None,
     )
     .await?;
     assert_eq!(again.pin_decision(), &PinDecision::Matches);
@@ -297,6 +301,7 @@ async fn a_second_connection_reuses_the_pin() -> Result<()> {
         "ayanami",
         &key,
         Arc::clone(&pins) as Arc<_>,
+        None,
     )
     .await?;
     assert!(matches!(
@@ -311,6 +316,7 @@ async fn a_second_connection_reuses_the_pin() -> Result<()> {
         "ayanami",
         &key,
         Arc::clone(&pins) as Arc<_>,
+        None,
     )
     .await?;
     assert_eq!(second.pin_decision(), &PinDecision::Matches);

@@ -350,6 +350,16 @@ pub enum AlertReason {
 pub enum ClientMessage {
     /// Opens the handshake. `specs/02-protocolo.md`.
     Hello {
+        /// Convite de uso único ou senha do Dogma, quando ele exige um.
+        ///
+        /// Viaja no `Hello`, portanto **antes** do desafio-resposta. Isso é
+        /// deliberado: o segredo diz se esta conexão tem direito de existir, e
+        /// gastar um desafio criptográfico com quem nem devia estar batendo à
+        /// porta é trabalho de graça para quem varre a internet. O canal já é
+        /// TLS 1.3 desde o primeiro byte, então o segredo nunca vai em claro.
+        ///
+        /// `None` num Dogma aberto é o caso normal.
+        join_secret: Option<String>,
         /// Protocol version the client speaks.
         version: u8,
         /// Client software name, for logs.
@@ -726,6 +736,7 @@ mod tests {
 
     fn hello() -> ClientMessage {
         ClientMessage::Hello {
+            join_secret: None,
             version: PROTOCOL_VERSION,
             client: "plug/0.0.0".into(),
             nickname: "ayanami".into(),
@@ -831,6 +842,7 @@ mod tests {
     #[test]
     fn an_oversized_nickname_is_refused() {
         let long = ClientMessage::Hello {
+            join_secret: None,
             version: PROTOCOL_VERSION,
             client: "plug".into(),
             nickname: "n".repeat(MAX_NICKNAME_LEN + 1),
@@ -1065,6 +1077,7 @@ mod key_tests {
         // peer that was never going to succeed.
         for len in [0, 16, 31, 33, 64] {
             let hello = ClientMessage::Hello {
+                join_secret: None,
                 version: PROTOCOL_VERSION,
                 client: "plug".into(),
                 nickname: "ayanami".into(),
@@ -1085,6 +1098,7 @@ mod key_tests {
     #[test]
     fn a_thirty_two_byte_key_is_accepted() {
         let hello = ClientMessage::Hello {
+            join_secret: None,
             version: PROTOCOL_VERSION,
             client: "plug".into(),
             nickname: "ayanami".into(),

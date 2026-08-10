@@ -46,6 +46,72 @@ impl Identity {
         })
     }
 
+    /// Lê a identidade guardada no banco, ou gera e guarda uma.
+    ///
+    /// **Sem isto, reiniciar o `seeled` trocava a chave do Dogma.** Todo
+    /// cliente que já tinha se conectado via `A CHAVE DO SERVIDOR MUDOU` — o
+    /// alerta bloqueante do ADR 0003 — e era recusado. Um reinício de rotina
+    /// disparando o aviso reservado para ataque é pior que não ter o aviso:
+    /// ensina a ignorá-lo.
+    ///
+    /// A chave privada fica no mesmo banco que o resto. Quem consegue lê-lo já
+    /// tem as mensagens todas; o que se protege é o arquivo, não uma camada a
+    /// mais dentro dele — e é por isso que o CASPER cria o banco com permissão
+    /// restrita ao dono.
+    ///
+    /// # Errors
+    ///
+    /// Falha se o banco não responder ou se o que está guardado não for uma
+    /// identidade válida.
+    pub fn load_or_create(
+        casper: &crate::casper::Casper,
+        subject_alt_names: Vec<String>,
+    ) -> Result<Self> {
+        let guardada: Option<(Vec<u8>, Vec<u8>)> = casper
+            .connection()
+            .query_row(
+                "SELECT
+                   (SELECT valor FROM configuracao WHERE chave = 'tls_cert'),
+                   (SELECT valor FROM configuracao WHERE chave = 'tls_key')",
+                [],
+                |linha| Ok((linha.get(0)?, linha.get(1)?)),
+            )
+            .ok();
+
+        if let Some((cert, key)) = guardada {
+            if !cert.is_empty() && !key.is_empty() {
+                return Ok(Self {
+                    chain: vec![CertificateDer::from(cert)],
+                    key: PrivateKeyDer::try_from(key).map_err(|erro| {
+                        anyhow::anyhow!("a chave guardada não é uma chave: {erro}")
+                    })?,
+                });
+            }
+        }
+
+        let identidade = Self::self_signed(subject_alt_names)?;
+        let cert = identidade
+            .chain
+            .first()
+            .map(|c| c.as_ref().to_vec())
+            .unwrap_or_default();
+        let key = identidade.key.secret_der().to_vec();
+
+        let conexao = casper.connection();
+        conexao.execute(
+            "INSERT INTO configuracao (chave, valor) VALUES ('tls_cert', ?1)
+             ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor",
+            rusqlite::params![cert],
+        )?;
+        conexao.execute(
+            "INSERT INTO configuracao (chave, valor) VALUES ('tls_key', ?1)
+             ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor",
+            rusqlite::params![key],
+        )?;
+
+        Ok(identidade)
+    }
+
     /// The fingerprint a client pins, as lowercase hex of the SHA-256 of the
     /// certificate.
     ///

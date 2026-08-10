@@ -160,6 +160,9 @@ impl Client {
     /// `signing_key` is this client's identity (ADR 0004). ADR 0017 keeps it on
     /// disk, because CASPER binds a nickname to the identity that claimed it.
     ///
+    /// `join_secret` is the invite token or the Dogma password, when the Dogma
+    /// asks for one. `None` for an open Dogma, which is the default.
+    ///
     /// `server_name` is what TLS is told; `pin_key` is what the pin is filed
     /// under. They are separate on purpose — the TOFU verifier compares
     /// fingerprints and never looks at the certificate's names, so the TLS name
@@ -179,6 +182,7 @@ impl Client {
         nickname: &str,
         signing_key: &SigningKey,
         pins: Arc<dyn PinStore>,
+        join_secret: Option<&str>,
     ) -> Result<Self, ConnectError> {
         let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -229,7 +233,7 @@ impl Client {
         })?;
         let session = tokio::time::timeout(
             HANDSHAKE_TIMEOUT,
-            handshake(&mut send, &mut recv, nickname, signing_key),
+            handshake(&mut send, &mut recv, nickname, signing_key, join_secret),
         )
         .await
         .map_err(|_| ConnectError::HandshakeTimeout)??;
@@ -503,6 +507,7 @@ async fn handshake(
     recv: &mut quinn::RecvStream,
     nickname: &str,
     signing_key: &SigningKey,
+    join_secret: Option<&str>,
 ) -> Result<SessionInfo, ConnectError> {
     frame::write(
         send,
@@ -511,6 +516,7 @@ async fn handshake(
             client: concat!("plug/", env!("CARGO_PKG_VERSION")).into(),
             nickname: nickname.to_owned(),
             public_key: signing_key.verifying_key().to_bytes().to_vec(),
+            join_secret: join_secret.map(str::to_owned),
         },
     )
     .await

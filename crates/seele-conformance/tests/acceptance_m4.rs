@@ -61,6 +61,7 @@ async fn connect(address: SocketAddr, nickname: &str, seed: u8) -> Result<Client
         nickname,
         &SigningKey::from_bytes(&[seed; 32]),
         Arc::new(MemoryPinStore::new()),
+        None,
     )
     .await
     .map_err(Into::into)

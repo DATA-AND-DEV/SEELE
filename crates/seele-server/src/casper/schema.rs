@@ -35,10 +35,11 @@ pub struct Migration {
 /// shapes, which is worse than any mistake the edit would fix. Before the first
 /// release there is no such database, so migration 1 is still editable — and
 /// saying so precisely is better than a rule nobody believes.
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    description: "initial schema: pilots, roles, cages, lines, messages, bans",
-    sql: r#"
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        description: "initial schema: pilots, roles, cages, lines, messages, bans",
+        sql: r#"
         -- specs/04-servidor-seele.md, domain model:
         --   Dogma (the instance)
         --    ├─ Cage    — voice channel
@@ -156,7 +157,44 @@ pub const MIGRATIONS: &[Migration] = &[Migration {
             -- alongside Pilot silences them instead of quietly doing nothing.
             (4, 'Observer',  '["ViewCage","InsertPlug","ReadLine"]', '["Speak","WriteLine"]');
     "#,
-}];
+    },
+    Migration {
+        version: 2,
+        description: "admissão no Dogma: senha e convites de uso único",
+        sql: r#"
+            -- specs/08-seguranca.md fechava com [EM ABERTO — escolher em M2]:
+            -- "chave pública como mecanismo primário, com convite por token de
+            -- uso único para entrada em um Dogma. Senha como fallback opcional
+            -- configurável pelo operador." É isto.
+
+            -- Configuração do Dogma que não cabe num arquivo, porque muda em
+            -- tempo de execução e precisa sobreviver a reinício.
+            -- `ANY` porque aqui cabem tanto o hash da senha (texto) quanto o
+            -- certificado e a chave TLS (bytes). STRICT permite `ANY`, e é
+            -- melhor que uma segunda tabela só pela diferença de tipo.
+            CREATE TABLE configuracao (
+                chave TEXT PRIMARY KEY,
+                valor ANY  NOT NULL
+            ) STRICT;
+
+            CREATE TABLE convites (
+                token      TEXT PRIMARY KEY,
+                criado_em  INTEGER NOT NULL,
+                expira_em  INTEGER NOT NULL,
+                -- NULL enquanto não usado. O UPDATE de consumo condiciona a
+                -- esta coluna ser NULL, e é isso que impede dois clientes de
+                -- gastarem o mesmo convite ao mesmo tempo.
+                usado_em   INTEGER,
+                -- Para quem o operador mandou. Só para ele se lembrar.
+                observacao TEXT NOT NULL DEFAULT ''
+            ) STRICT;
+
+            -- A varredura de convites vencidos e a listagem para o operador
+            -- olham por prazo, não por token.
+            CREATE INDEX convites_por_prazo ON convites(expira_em) WHERE usado_em IS NULL;
+        "#,
+    },
+];
 
 #[cfg(test)]
 mod tests {

@@ -56,6 +56,7 @@ fn connect(address: SocketAddr, nickname: &str) -> Result<Arc<Plug>, PlugError> 
         server: address.to_string(),
         nickname: nickname.to_owned(),
         home: home(nickname),
+        join_secret: None,
         // No sound card on a CI box, and the text half needs none.
         audio: false,
     })
@@ -292,6 +293,7 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
         "ayanami",
         &ed25519_dalek::SigningKey::from_bytes(&[42; 32]),
         Arc::new(MemoryPinStore::new()),
+        None,
     )
     .await?;
 
@@ -377,6 +379,7 @@ async fn a_name_that_does_not_resolve_says_so_specifically() -> Result<()> {
             server: "nao-existe.invalid:8383".into(),
             nickname: "ninguem".into(),
             home: home("unresolvable"),
+            join_secret: None,
             audio: false,
         })
     })
