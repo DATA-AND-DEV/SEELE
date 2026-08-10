@@ -323,11 +323,10 @@ pub fn desenhar(frame: &mut Frame<'_>, selecao: &Selecao, tema: Theme) {
         area,
     );
 
-    let titulo = if tema.kanji() {
-        " SEELE · ゼーレ "
-    } else {
-        " SEELE "
-    };
+    // `docs/marca.md`: dentro do terminal a marca é latina. `ゼーレ` ocupa
+    // célula dupla e nem todo emulador mede igual, e uma marca que às vezes
+    // desalinha o quadro não é uma marca. A forma katakana fica para o app.
+    let titulo = " ──SEELE── ";
     let bloco = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Plain)

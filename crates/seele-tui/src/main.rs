@@ -485,12 +485,7 @@ async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<
     // O anfitrião precisa saber o que mandar para os amigos. Sem isto ele
     // hospeda e não tem como convidar ninguém, que é hospedar para nada.
     if let Some(dogma) = &hospedagem {
-        let alvo = dogma
-            .endereco_na_rede()
-            .map_or_else(|| dogma.endereco().to_string(), |rede| rede.to_string());
-        let convite = seele_core::uri::Convite::novo(alvo)
-            .com_impressao_digital(dogma.impressao_digital())
-            .to_string();
+        let convite = dogma.convite();
         note(
             &mut runtime,
             "hospedando. `:convite` mostra o link.".to_owned(),

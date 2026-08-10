@@ -111,6 +111,25 @@ impl Hospedagem {
         self.server.fingerprint()
     }
 
+    /// O link para mandar aos amigos.
+    ///
+    /// Mora aqui, e não em cada casca, porque quem sabe montá-lo é quem tem as
+    /// duas partes: o endereço em que dá para chegar e a impressão digital
+    /// desta instância. Os dois clientes montavam o mesmo link à mão, e duas
+    /// cópias de uma construção é uma que vai ficar para trás.
+    ///
+    /// Sem rede, cai no endereço de escuta — que não serve para convidar
+    /// ninguém, mas é a resposta honesta, e quem chamou pode dizer isso.
+    #[must_use]
+    pub fn convite(&self) -> String {
+        let alvo = self
+            .endereco_na_rede()
+            .map_or_else(|| self.endereco.to_string(), |rede| rede.to_string());
+        seele_proto::uri::Convite::novo(alvo)
+            .com_impressao_digital(self.impressao_digital())
+            .to_string()
+    }
+
     /// Encerra o Dogma e devolve a porta.
     ///
     /// Consome, e a espera está aqui de propósito. Fechar uma conversa e abrir
@@ -203,6 +222,26 @@ mod tests {
         }
         // Numa máquina sem rede não há o que devolver, e `None` é a resposta
         // honesta — quem chamou mostra o endereço de escuta e avisa.
+    }
+
+    #[tokio::test]
+    async fn o_convite_carrega_a_impressao_digital_desta_instancia() {
+        // Sem ela o primeiro contato volta a ser cego, e o convite deixa de ser
+        // a coisa que torna o TOFU verificável.
+        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa")
+            .await
+            .expect("subir");
+
+        let convite = hospedagem.convite();
+        let lido = seele_proto::uri::analisar(&convite).expect("o convite não se lê de volta");
+        assert_eq!(
+            lido.impressao_digital.as_deref(),
+            Some(hospedagem.impressao_digital())
+        );
+        assert!(
+            !convite.contains("0.0.0.0"),
+            "convidou para o nada: {convite}"
+        );
     }
 
     #[tokio::test]

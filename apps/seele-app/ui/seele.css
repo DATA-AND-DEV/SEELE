@@ -45,22 +45,43 @@ body { overflow: hidden; }
   background: var(--seele-negro-painel);
 }
 
+/* ---- a marca ----
+   docs/marca.md. A assinatura é uma imagem porque os glifos vêm em contorno:
+   o app não embarca fonte, e deixar ゼーレ como texto entregaria a marca à
+   face japonesa que o sistema tiver à mão. */
 .boot-marca {
-  margin: 0;
+  margin: 0 0 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.marca-assinatura {
+  display: block;
+  /* Mínimo da folha de marca é 28px de altura; aqui sobra espaço, então usa o
+     tamanho da cartela. */
+  height: 72px;
+  width: auto;
+}
+
+/* Legenda latina: opcional pela folha, e presente aqui porque a tela de
+   entrada é onde alguém aprende como o produto se chama. */
+.marca-legenda {
+  font-size: 11px;
+  letter-spacing: 0.44em;
+  padding-left: 0.44em;
+  color: var(--seele-osso-apagado);
+}
+
+.boot-marca.fim {
+  color: var(--seele-vermelho-alerta);
   font-family: var(--seele-display);
   font-weight: var(--seele-cartela);
   letter-spacing: var(--seele-tracking-cartela);
-  font-size: 48px;
-  line-height: 48px;
-  color: var(--seele-laranja-nerv);
-}
-
-.boot-marca.fim { color: var(--seele-vermelho-alerta); font-size: 32px; line-height: 32px; }
-
-.boot-sub {
-  margin: 0 0 32px;
-  color: var(--seele-osso-apagado);
-  letter-spacing: 0.3em;
+  font-size: 32px;
+  line-height: 32px;
+  display: block;
 }
 
 .boot-form { display: flex; flex-direction: column; gap: 16px; }
@@ -93,6 +114,14 @@ input:focus {
   background: var(--seele-laranja-nerv);
   border: 1px solid var(--seele-laranja-nerv);
   cursor: pointer;
+}
+
+/* Hospedar é a alternativa, não o caminho principal: quem abre o app quase
+   sempre vai entrar num Dogma que já existe. Contorno em vez de campo sólido,
+   sem virar um botão escondido. */
+.botao-secundario {
+  color: var(--seele-laranja-nerv);
+  background: none;
 }
 
 .botao:disabled { opacity: 0.5; cursor: default; }
@@ -357,4 +386,41 @@ input:focus {
 /* Nenhuma animação carrega informação, então desligar todas não perde nada. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* ---- convite, para quem está hospedando ---- */
+.convite {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--seele-linha);
+  background: var(--seele-laranja-fraco);
+  font-size: var(--seele-t-dado);
+}
+
+.convite-rotulo {
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-laranja-nerv);
+}
+
+/* O link inteiro, selecionável. Um campo que corta o fim do endereço produz
+   convites que não funcionam e ninguém entende por quê. */
+.convite-link {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: var(--seele-osso);
+  background: var(--seele-negro-absoluto);
+  border: 1px solid var(--seele-linha-forte);
+  padding: 4px 8px;
+}
+
+.convite-copiado { color: var(--seele-fosforo); }
+
+.convite-nota {
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-osso-apagado);
 }

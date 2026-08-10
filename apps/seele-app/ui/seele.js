@@ -103,7 +103,7 @@ const AVISOS = {
  * humano compará-las (ADR 0003).
  */
 function fraseDeErro(erro) {
-  if (typeof erro === "string") return erro;
+  if (typeof erro === "string") return FRASES[erro] ?? erro;
   if (erro && typeof erro === "object") {
     if (erro.PinChanged) {
       return (
@@ -117,7 +117,14 @@ function fraseDeErro(erro) {
       return MOTIVOS[erro.Refused.reason] ?? "SESSÃO RECUSADA";
     }
   }
-  return {
+  return FRASES[erro] ?? "FALHA DESCONHECIDA";
+}
+
+/**
+ * Enum → frase. A fronteira erro→texto do produto fica aqui, e é por isso que
+ * nenhuma mensagem para gente é escrita em Rust.
+ */
+const FRASES = {
     NotConnected: "SEM CONEXÃO",
     AlreadyConnected: "JÁ HÁ UMA SESSÃO ABERTA",
     UnresolvableHost: "NÃO CONSEGUI RESOLVER ESSE ENDEREÇO",
@@ -128,8 +135,13 @@ function fraseDeErro(erro) {
     UnknownPilot: "NÃO CONHEÇO ESSE PILOTO",
     UnknownChannel: "NÃO CONHEÇO ESSE CANAL",
     LinkLost: "ENLACE PERDIDO",
-  }[erro] ?? "FALHA DESCONHECIDA";
-}
+
+    // Hospedar aqui dentro.
+    JaHospedando: "JÁ ESTOU HOSPEDANDO NESTA JANELA",
+    PortaOcupada:
+      "A PORTA 8383 JÁ ESTÁ EM USO.\nQuase sempre é outro SEELE aberto — feche o outro e tente de novo.",
+    NaoSubiu: "NÃO CONSEGUI SUBIR O DOGMA AQUI",
+};
 
 // ------------------------------------------------------------------- desenho
 
@@ -322,7 +334,7 @@ async function atualizar() {
 }
 
 async function conectar(evento) {
-  evento.preventDefault();
+  evento?.preventDefault();
   const botao = $("botao-conectar");
   const erro = $("boot-erro");
 
@@ -468,10 +480,57 @@ $("botao-falar").addEventListener("pointerdown", () => segurarFala(true));
 $("botao-falar").addEventListener("pointerup", () => segurarFala(false));
 $("botao-falar").addEventListener("pointerleave", () => segurarFala(false));
 
+/**
+ * Vira anfitrião: sobe o Dogma dentro deste app e entra nele.
+ *
+ * Duas etapas de propósito. `hospedar` põe o servidor de pé e devolve o link;
+ * conectar é o caminho de sempre, com o endereço que ele devolveu. Um Dogma
+ * hospedado aqui e um do outro lado do mundo entram pela mesma porta.
+ */
+async function hospedar() {
+  const botao = $("botao-hospedar");
+  const erro = $("boot-erro");
+  botao.disabled = true;
+  erro.hidden = true;
+
+  try {
+    const anfitriao = await invoke("hospedar");
+    $("campo-servidor").value = anfitriao.aqui;
+    $("convite-link").value = anfitriao.convite;
+    $("convite").hidden = false;
+    await conectar();
+  } catch (falha) {
+    erro.textContent = fraseDeErro(falha);
+    erro.hidden = false;
+  } finally {
+    botao.disabled = false;
+  }
+}
+
+$("botao-hospedar").addEventListener("click", hospedar);
+
+$("convite-copiar").addEventListener("click", async () => {
+  const campo = $("convite-link");
+  // `select()` antes de tudo: se a área de transferência for negada, a pessoa
+  // ainda fica com o link selecionado e copia com o teclado.
+  campo.select();
+  const botao = $("convite-copiar");
+  try {
+    await navigator.clipboard.writeText(campo.value);
+    botao.textContent = "copiado";
+    botao.classList.add("convite-copiado");
+  } catch {
+    botao.textContent = "copie com ⌘C";
+  }
+});
+
 $("botao-voltar").addEventListener("click", async () => {
   await invoke("disconnect");
   $("tela-fim").hidden = true;
   $("tela-boot").hidden = false;
+  // O `disconnect` também derruba o Dogma hospedado. A caixa some junto, ou
+  // ficaria oferecendo um link que não leva mais a lugar nenhum.
+  $("convite").hidden = true;
   desenhado = null;
   linhaAberta = null;
 });

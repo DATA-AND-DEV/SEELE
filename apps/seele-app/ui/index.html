@@ -3,6 +3,12 @@
 <head>
 <meta charset="utf-8">
 <title>SEELE · Entry Plug</title>
+<!--
+  Favicon é a forma muda: a folha de marca troca de forma abaixo de 32px de
+  largura do plug, e uma aba de navegador nunca chega perto disso. Com o nome
+  dentro, ゼーレ vira três borrões; sem ele, a silhueta ainda se lê a 16px.
+-->
+<link rel="icon" href="marca-muda.svg" type="image/svg+xml">
 <link rel="stylesheet" href="tokens.css">
 <link rel="stylesheet" href="seele.css">
 </head>
@@ -18,8 +24,21 @@
 <!-- Boot. Dura o tempo real da conexão; nada aqui espera de propósito. -->
 <section id="tela-boot" class="tela">
   <div class="boot">
-    <h1 class="boot-marca">SEELE</h1>
-    <p class="boot-sub" lang="ja">同期率</p>
+    <!--
+      Assinatura, a forma da marca para onde o nome precisa ser dito com
+      espaço: sequência de inicialização, autenticação, erro de tela cheia.
+      Uma forma por tela — por isso a sessão usa a palavra latina no topo e
+      nunca ゼーレ.
+
+      SVG com os glifos em contorno, e não texto: o app não embarca fonte
+      nenhuma, e deixar `ゼーレ` como texto entregaria a marca à Hiragino no
+      macOS e à Yu Gothic no Windows. Substituir a face japonesa é justamente
+      o que a folha de marca proíbe.
+    -->
+    <h1 class="boot-marca">
+      <img src="marca-assinatura.svg" alt="SEELE" class="marca-assinatura" width="292" height="95">
+      <span class="marca-legenda">SEELE</span>
+    </h1>
 
     <form id="form-conectar" class="boot-form" autocomplete="off">
       <label class="campo">
@@ -37,6 +56,15 @@
         <span class="rotulo">inserir plug com áudio</span>
       </label>
       <button id="botao-conectar" type="submit" class="botao">INSERIR PLUG</button>
+      <!--
+        Sem isto, hospedar exige abrir um terminal — e num produto cujo
+        argumento é "hospede você mesmo", exigir linha de comando de quem
+        hospeda exclui justamente quem mais ganharia. Mesmo servidor do
+        `seeled`, dentro deste processo, vivo enquanto a janela estiver aberta.
+      -->
+      <button id="botao-hospedar" type="button" class="botao botao-secundario">
+        HOSPEDAR AQUI
+      </button>
     </form>
 
     <ol class="subsistemas" aria-label="subsistemas">
@@ -72,6 +100,19 @@
     <span class="kanji" lang="ja">警告</span>
     <span id="banner-texto"></span>
     <button id="banner-fechar" class="botao-fantasma" type="button">dispensar</button>
+  </div>
+
+  <!--
+    O link de convite, para quem está hospedando. Fica de fora do painel de
+    mensagens de propósito: são uns noventa caracteres, e num painel estreito
+    ele quebra em duas linhas. Um convite que não dá para copiar inteiro não
+    serve para nada, e copiar é a única coisa que se faz com ele.
+  -->
+  <div id="convite" class="convite" hidden>
+    <span class="convite-rotulo">CONVITE</span>
+    <input id="convite-link" class="convite-link" readonly spellcheck="false">
+    <button id="convite-copiar" class="botao-fantasma" type="button">copiar</button>
+    <span class="convite-nota">o Dogma acaba quando esta janela fechar</span>
   </div>
 
   <main class="paineis">

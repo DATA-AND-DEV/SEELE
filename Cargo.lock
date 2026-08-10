@@ -4471,7 +4471,9 @@ dependencies = [
 name = "seele-app"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "seele-ffi",
+ "seele-server",
  "serde",
  "tauri",
  "tauri-build",

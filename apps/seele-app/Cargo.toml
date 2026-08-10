@@ -11,6 +11,11 @@ publish.workspace = true
 # `ssrc` is protocol knowledge in the shell.
 [dependencies]
 seele-ffi = { path = "../../crates/seele-ffi" }
+# Exceção nomeada no `cargo xtask check-deps`, mesmo motivo do `seele-tui`: o
+# botão **Hospedar** põe o servidor dentro do app. Aresta lateral no topo do
+# grafo, não inversão — este binário contém os dois papéis.
+seele-server = { path = "../../crates/seele-server" }
+anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 tauri = { version = "2", features = [] }
 tracing = "0.1.44"

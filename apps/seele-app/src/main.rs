@@ -37,6 +37,11 @@ const EVENT_CHANNEL: &str = "seele://event";
 #[derive(Default)]
 struct Session {
     plug: Mutex<Option<Arc<Plug>>>,
+    /// O Dogma que este app está hospedando, quando está.
+    ///
+    /// Vive aqui e não numa variável local porque tem que sobreviver ao comando
+    /// que o criou: o servidor fica de pé enquanto a janela estiver aberta.
+    hospedagem: Mutex<Option<seele_server::hospedagem::Hospedagem>>,
 }
 
 impl Session {
@@ -124,13 +129,117 @@ async fn connect(
     Ok(snapshot)
 }
 
+/// O que o app precisa saber depois de virar anfitrião.
+#[derive(Debug, serde::Serialize)]
+struct Anfitriao {
+    /// Onde este app se conecta — no próprio computador.
+    aqui: String,
+    /// O link para mandar aos amigos. ADR 0006.
+    convite: String,
+}
+
+/// Por que não deu para hospedar.
+///
+/// Enum, e não frase: `specs` põe a fronteira erro→texto no frontend, e uma
+/// mensagem escrita aqui seria uma frase que nenhum tradutor alcança. As três
+/// pedem coisas diferentes de quem está na frente da tela, e é por isso que são
+/// três e não uma.
+#[derive(Debug, serde::Serialize)]
+enum FalhaAoHospedar {
+    /// Já se está hospedando nesta janela.
+    JaHospedando,
+    /// A porta 8383 está ocupada — quase sempre outro SEELE aberto.
+    PortaOcupada,
+    /// Qualquer outro motivo para o Dogma não subir.
+    NaoSubiu,
+}
+
+/// Sobe um Dogma dentro do app e devolve o link do convite.
+///
+/// Este comando é o item de UX que faltava: sem ele, hospedar exige abrir um
+/// terminal, e num produto cujo argumento é "hospede você mesmo" isso exclui
+/// justamente quem só quer clicar. O mesmo caminho do `plug --hospedar`, o
+/// mesmo módulo, o mesmo Dogma.
+///
+/// Não conecta. Quem conecta é o `connect` de sempre, com o endereço que este
+/// comando devolve — um caminho só para entrar num Dogma, hospedado aqui ou do
+/// outro lado do mundo.
 #[tauri::command]
-fn disconnect(session: State<'_, Session>) {
-    if let Ok(mut slot) = session.plug.lock() {
-        // Dropping the handle is what ends the session; taking it out of the
-        // slot is what makes the next `connect` allowed.
-        slot.take();
+async fn hospedar(
+    app: AppHandle,
+    session: State<'_, Session>,
+) -> Result<Anfitriao, FalhaAoHospedar> {
+    {
+        let aberto = session
+            .hospedagem
+            .lock()
+            .map_err(|_| FalhaAoHospedar::NaoSubiu)?;
+        if aberto.is_some() {
+            return Err(FalhaAoHospedar::JaHospedando);
+        }
     }
+
+    let banco = std::path::Path::new(&config_dir(&app)).join("dogma.db");
+    let dogma = seele_server::hospedagem::Hospedagem::iniciar(
+        PORTA_PADRAO,
+        seele_server::casper::Location::File(banco),
+        "Casa",
+    )
+    .await
+    .map_err(|erro| classificar(&erro))?;
+
+    let anfitriao = Anfitriao {
+        aqui: format!("127.0.0.1:{PORTA_PADRAO}"),
+        convite: dogma.convite(),
+    };
+
+    session
+        .hospedagem
+        .lock()
+        .map_err(|_| FalhaAoHospedar::NaoSubiu)?
+        .replace(dogma);
+
+    Ok(anfitriao)
+}
+
+/// A porta em que um Dogma escuta por padrão.
+const PORTA_PADRAO: u16 = 8383;
+
+/// Separa "já tem um SEELE aberto" de todo o resto.
+///
+/// A distinção não é cosmética: porta ocupada tem conserto óbvio — fechar a
+/// outra janela — e todo o resto não tem. Dizer "não subiu" nos dois casos
+/// esconde a única falha que a pessoa consegue resolver sozinha.
+fn classificar(erro: &anyhow::Error) -> FalhaAoHospedar {
+    for causa in erro.chain() {
+        if let Some(io) = causa.downcast_ref::<std::io::Error>() {
+            if io.kind() == std::io::ErrorKind::AddrInUse {
+                return FalhaAoHospedar::PortaOcupada;
+            }
+        }
+    }
+    FalhaAoHospedar::NaoSubiu
+}
+
+#[tauri::command]
+async fn disconnect(session: State<'_, Session>) -> Result<(), ()> {
+    let plug = session.plug.lock().ok().and_then(|mut slot| slot.take());
+    // Dropping the handle is what ends the session; taking it out of the slot
+    // is what makes the next `connect` allowed.
+    drop(plug);
+
+    // Quem hospedava para de hospedar ao sair, e quem estava dentro é
+    // derrubado. É o comportamento certo: o anfitrião fechou. `encerrar`
+    // espera a porta voltar, para hospedar de novo em seguida funcionar.
+    let dogma = session
+        .hospedagem
+        .lock()
+        .ok()
+        .and_then(|mut slot| slot.take());
+    if let Some(dogma) = dogma {
+        dogma.encerrar().await;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -218,6 +327,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             connect,
+            hospedar,
             disconnect,
             snapshot,
             insert_plug,
