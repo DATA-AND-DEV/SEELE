@@ -30,3 +30,17 @@ criterion = { version = "0.8.2", features = ["html_reports"] }
 [[bench]]
 name = "opus_frame"
 harness = false
+
+# O pacote pré-compilado do `shiguredo_opus` está quebrado no Windows: o arquivo
+# publicado traz `lib/opus.lib`, e o build script procura `libopus.a` fixo — a
+# compilação morre logo depois de baixar e verificar o checksum. Conferi o
+# conteúdo do `.tar.gz` publicado; é defeito do crate, não nosso.
+#
+# `source-build` compila o libopus do código-fonte e contorna. Não exige CMake
+# do sistema: o `shiguredo_cmake` baixa o seu próprio, o que de quebra evita a
+# incompatibilidade com CMake 4 que derrubou o `audiopus` em M0.4 (ADR 0008).
+#
+# Só no Windows. Compilar do fonte custa cerca de meio minuto por build limpo, e
+# as outras plataformas têm um pré-compilado que funciona.
+[target.'cfg(windows)'.dependencies]
+shiguredo_opus = { workspace = true, features = ["source-build"] }
