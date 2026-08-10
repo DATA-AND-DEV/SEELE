@@ -33,4 +33,22 @@ Consequências:
 
 Medição obtida de brinde em `M0.4`, e que nenhuma spec registra: **lookahead algorítmico do encoder = 312 amostras = 6,50 ms**. Entra no orçamento do ADR 0009.
 
+## Revisão em M5 — o pré-compilado não serve, e passamos a compilar do fonte
+
+Ao gerar instaladores para os três sistemas, o caminho pré-compilado do crate falhou em **duas das três plataformas**, e a inspeção mostrou que a terceira também tem limite sério. Os três problemas foram verificados, não deduzidos:
+
+1. **Windows.** O `.tar.gz` publicado para `windows_x86_64` contém `lib/opus.lib`; o `build.rs` copia `lib/libopus.a` com o nome fixo no código. A compilação morre **depois** de baixar e conferir o checksum com sucesso, o que torna a mensagem de erro especialmente enganosa. Baixei o arquivo publicado e listei o conteúdo.
+2. **macOS Intel não existe.** O mapa de alvos cobre `macos_arm64` e nada mais para Apple. Um `.dmg` universal — o único que serve, já que metade dos Macs em uso ainda é Intel — é impossível por esse caminho.
+3. **Linux só Ubuntu.** `detect_linux_distro()` entra em pânico fora de Ubuntu 22.04, 24.04 e 26.04. Num produto cujo argumento central é ser auto-hospedado, um servidor que não compila em Debian, Fedora ou Alpine não é uma limitação aceitável.
+
+Decisão: ligar a feature `source-build` **em todas as plataformas**, compilando o libopus do código-fonte.
+
+Não é preferência por compilar do fonte; é parar de depender de uma matriz de binários que não cobre o nosso caso. O `shiguredo_cmake` continua baixando o próprio CMake, então nenhum pré-requisito de sistema aparece — o argumento original do ADR segue valendo.
+
+Custo medido: cerca de meio minuto por build limpo, uma vez por plataforma, com cache no CI. O ganho é as três plataformas se comportarem igual, o que num projeto com matriz de três SOs vale bem mais que trinta segundos.
+
+Verificado localmente antes de confiar: compila em `aarch64-apple-darwin` e em `x86_64-apple-darwin`, os oito testes do codec passam com o libopus construído do fonte, e o binário universal sai com as duas arquiteturas.
+
+**O que isto diz sobre a escolha do crate.** É o segundo defeito de terceiro que o Opus nos custa, depois do `audiopus` em M0.4. O `shiguredo_opus` continua sendo a melhor opção da mesa — é mantido, tem `decode_plc` e `decode_fec` de primeira classe, e o benchmark acima segue válido. Mas o suporte a plataforma dele claramente não é exercitado fora de Linux/Ubuntu e macOS ARM, que devem ser os alvos de quem o publica. Com `source-build` ligado, essa parte do crate deixa de estar no nosso caminho. **Se aparecer um terceiro defeito, a escolha merece ser reaberta** — e o candidato seria escrever o wrapper direto sobre `libopus` com `bindgen`, que é o que este crate faz.
+
 Custo de reverter: **baixo**. A superfície usada é pequena e está isolada em `seele-audio`.

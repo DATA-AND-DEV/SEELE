@@ -14,7 +14,24 @@ cpal = "0.18.1"
 seele-proto = { path = "../seele-proto" }
 rtrb = "0.3.4"
 rubato = "4.0.0"
-shiguredo_opus = { workspace = true }
+# `source-build` em toda plataforma: compila o libopus do código-fonte em vez
+# de baixar o pré-compilado do crate. Não é preferência, é que o pré-compilado
+# não serve para nós em três frentes, todas verificadas:
+#
+#   - **Windows** publica `lib/opus.lib` e o build script procura `libopus.a`
+#     fixo. Baixei o `.tar.gz` e conferi; o build morre depois de verificar o
+#     checksum com sucesso.
+#   - **macOS Intel não existe** no mapa de alvos, então um `.dmg` universal é
+#     impossível pelo caminho pré-compilado.
+#   - **Linux entra em pânico fora do Ubuntu 22/24/26.** Num produto cujo
+#     argumento é ser auto-hospedado, um servidor que só compila numa distro
+#     não é uma limitação aceitável.
+#
+# Não exige CMake do sistema: o `shiguredo_cmake` baixa o seu próprio, o que de
+# quebra evita a incompatibilidade com CMake 4 que derrubou o `audiopus` em
+# M0.4. Custa cerca de meio minuto por build limpo — o preço de as três
+# plataformas se comportarem igual. Ver ADR 0008.
+shiguredo_opus = { workspace = true, features = ["source-build"] }
 # The codec reports libopus failures to the log rather than across an API:
 # a C function name and an error code help a developer and tell a pilot nothing.
 tracing = "0.1.44"
@@ -31,16 +48,3 @@ criterion = { version = "0.8.2", features = ["html_reports"] }
 name = "opus_frame"
 harness = false
 
-# O pacote pré-compilado do `shiguredo_opus` está quebrado no Windows: o arquivo
-# publicado traz `lib/opus.lib`, e o build script procura `libopus.a` fixo — a
-# compilação morre logo depois de baixar e verificar o checksum. Conferi o
-# conteúdo do `.tar.gz` publicado; é defeito do crate, não nosso.
-#
-# `source-build` compila o libopus do código-fonte e contorna. Não exige CMake
-# do sistema: o `shiguredo_cmake` baixa o seu próprio, o que de quebra evita a
-# incompatibilidade com CMake 4 que derrubou o `audiopus` em M0.4 (ADR 0008).
-#
-# Só no Windows. Compilar do fonte custa cerca de meio minuto por build limpo, e
-# as outras plataformas têm um pré-compilado que funciona.
-[target.'cfg(windows)'.dependencies]
-shiguredo_opus = { workspace = true, features = ["source-build"] }
