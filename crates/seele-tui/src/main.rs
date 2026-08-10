@@ -590,7 +590,8 @@ async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<
                         }
                         runtime.room.adopt(&sessao, &args.nickname);
                         view::project(&runtime.room, &mut runtime.app);
-                        runtime.app.refazer_busca();
+                        // `note` below refreshes the search on its own, so no
+                        // explicit `refazer_busca` belongs between this and it.
                         note(&mut runtime, "enlace restabelecido.".to_owned());
                         dirty = true;
                     }
@@ -1022,6 +1023,10 @@ async fn run_command(runtime: &mut Runtime, client: &Enlace, command: &Command) 
 ///
 /// Not an alert: `:sync` is not a problem, and putting routine answers in the
 /// alert banner is how the alert banner stops being read.
+///
+/// Refreshes the search itself rather than leaving it to callers: `local` is
+/// in scope for `refazer_busca`, and a call at every one of this function's
+/// dozen-odd call sites is a call that eventually gets left out somewhere.
 fn note(runtime: &mut Runtime, text: String) {
     runtime.app.local.push(ChatLine {
         at: clock_short(),
@@ -1029,6 +1034,7 @@ fn note(runtime: &mut Runtime, text: String) {
         body: text,
         own: false,
     });
+    runtime.app.refazer_busca();
 }
 
 /// Wall-clock time for the title bar.

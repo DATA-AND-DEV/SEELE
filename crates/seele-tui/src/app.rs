@@ -401,16 +401,16 @@ impl App {
             // continuing to type. `Enter` confirms and returns to Normal with
             // the highlight in place; `Esc` gives up and clears it.
             Mode::Search => {
-                let desistiu = key == Key::Esc;
-                let resultado = self.on_typing(key, Action::Command);
-                if desistiu {
+                let gave_up = key == Key::Esc;
+                let outcome = self.on_typing(key, Action::Command);
+                if gave_up {
                     self.busca = None;
                     self.termo.clear();
                 } else if self.mode == Mode::Search {
                     self.termo.clone_from(&self.input);
                     self.refazer_busca();
-                } else if let Some(Action::Command(termo)) = resultado {
-                    self.termo = termo;
+                } else if let Some(Action::Command(term)) = outcome {
+                    self.termo = term;
                     self.refazer_busca();
                 }
                 None
@@ -450,13 +450,13 @@ impl App {
             Key::Char('d') => return Some(Action::ToggleTotalIsolation),
             // `n` and `N` were free, and it is where Vim puts them.
             Key::Char('n') => {
-                if let Some(busca) = self.busca.as_mut() {
-                    busca.next_match();
+                if let Some(search) = self.busca.as_mut() {
+                    search.next_match();
                 }
             }
             Key::Char('N') => {
-                if let Some(busca) = self.busca.as_mut() {
-                    busca.previous_match();
+                if let Some(search) = self.busca.as_mut() {
+                    search.previous_match();
                 }
             }
             Key::Enter => return Some(Action::Activate),
@@ -579,21 +579,41 @@ impl App {
     /// Redoes the search over the current history, keeping the term.
     ///
     /// Called when a message arrives: indices shift, and a cursor that does
-    /// not keep up points at the wrong line. If the current occurrence
-    /// disappeared, the cursor goes back to the first instead of falling out
-    /// of range.
+    /// not keep up points at the wrong line. The cursor is carried over to the
+    /// first match at or after the one it was on, so a message arriving while
+    /// somebody sits on the second of three occurrences does not throw them
+    /// back to the first. If the current occurrence disappeared, the cursor
+    /// lands on the last match instead of falling out of range. If nothing
+    /// matched before, there is nothing to carry over.
     pub fn refazer_busca(&mut self) {
         if self.termo.trim().is_empty() {
             self.busca = None;
             return;
         }
-        self.busca = Some(seele_core::search::Search::new(
+        let previous = self
+            .busca
+            .as_ref()
+            .and_then(seele_core::search::Search::current);
+        let mut search = seele_core::search::Search::new(
             self.messages
                 .iter()
                 .chain(&self.local)
                 .map(|linha| seele_core::search::normalize(&linha.body)),
             &self.termo,
-        ));
+        );
+        if let Some(previous) = previous {
+            let matches = search.matches();
+            let target = matches
+                .iter()
+                .position(|candidate| {
+                    (candidate.message, candidate.start) >= (previous.message, previous.start)
+                })
+                .unwrap_or_else(|| matches.len().saturating_sub(1));
+            for _ in 0..target {
+                search.next_match();
+            }
+        }
+        self.busca = Some(search);
     }
 }
 
@@ -922,10 +942,10 @@ mod tests {
         let mut app = App::new();
         app.messages = ["sync caiu", "verificando harmônicos", "sync voltou"]
             .into_iter()
-            .map(|corpo| ChatLine {
+            .map(|text| ChatLine {
                 at: "12:00".into(),
                 author: "piloto".into(),
-                body: corpo.into(),
+                body: text.into(),
                 own: false,
             })
             .collect();
@@ -942,8 +962,8 @@ mod tests {
         for character in "sync".chars() {
             app.on_key(Key::Char(character));
         }
-        let busca = app.busca.as_ref().map(seele_core::search::Search::position);
-        assert_eq!(busca, Some((1, 2)));
+        let search = app.busca.as_ref().map(seele_core::search::Search::position);
+        assert_eq!(search, Some((1, 2)));
     }
 
     #[test]
@@ -1021,6 +1041,38 @@ mod tests {
         assert_eq!(
             app.busca.as_ref().map(seele_core::search::Search::position),
             Some((1, 3))
+        );
+    }
+
+    #[test]
+    fn refazer_busca_keeps_the_cursor_near_its_previous_occurrence() {
+        // A message arriving while the cursor sits on the second of three
+        // occurrences must not throw it back to the first: that is a bigger
+        // jolt than losing your place by one.
+        let mut app = app_with_history();
+        app.on_key(Key::Char('/'));
+        for character in "sync".chars() {
+            app.on_key(Key::Char(character));
+        }
+        app.on_key(Key::Enter);
+        app.on_key(Key::Char('n'));
+        assert_eq!(
+            app.busca.as_ref().map(seele_core::search::Search::position),
+            Some((2, 2))
+        );
+
+        app.messages.push(ChatLine {
+            at: "12:05".into(),
+            author: "rei".into(),
+            body: "sync estável".into(),
+            own: false,
+        });
+        app.refazer_busca();
+
+        assert_eq!(
+            app.busca.as_ref().map(seele_core::search::Search::position),
+            Some((2, 3)),
+            "the cursor jumped back to the first occurrence"
         );
     }
 }
