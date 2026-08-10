@@ -1846,7 +1846,13 @@ E na linha dos comandos (54), acrescente `:ejetar` à lista.
 
 Em `specs/06-clientes-gui.md`, na seção "Hospedar pelo app", acrescente um parágrafo dizendo que a tela de entrada lista os Dogmas visitados e aceita um `seele://` colado, e que os dois vêm de `seele-core` por comando — nada de protocolo em JavaScript.
 
-- [ ] **Step 2: Atualizar as pendências**
+- [ ] **Step 2: Alinhar o pseudocódigo da spec de design**
+
+`docs/superpowers/specs/2026-08-10-navegacao-gui-tui-design.md` ainda mostra `Casamento`, `Busca`, `BuscaEstado`, `proxima`, `anterior` e `atual` no bloco ilustrativo da seção 1 e nas seções 2 e 3. A API real ficou em inglês (ADR 0023). Troque os nomes pelos reais — `Match`, `Search`, `next_match`, `previous_match`, `current`, `position`, `normalize`, `occurrences` — mantendo a **prosa em português**, que é onde a spec deve ficar.
+
+Um documento de design que nomeia tipos que não existem é pior que um sem código nenhum: manda o próximo leitor procurar por `Busca` e não achar.
+
+- [ ] **Step 3: Atualizar as pendências**
 
 Em `docs/pendencias.md`, na pendência **9 · `:conectar` não reconecta em execução**, substitua o texto por:
 
@@ -1864,7 +1870,7 @@ mesmo processo. O que a pendência recusava era outra coisa: trocar a conexão p
 baixo de uma sessão viva, com roster e áudio de pé.
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add docs/pendencias.md specs/05-cliente-tui.md specs/06-clientes-gui.md
