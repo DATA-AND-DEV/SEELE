@@ -484,6 +484,21 @@ struct BuscaEstado {
     casamentos: Vec<seele_ffi::search::Match>,
     /// A ocorrência em que o cursor está.
     atual: Option<seele_ffi::search::Match>,
+    /// Qual ocorrência **dentro da própria mensagem** é a do cursor, de zero.
+    ///
+    /// Sem isto o app desenhava todo casamento igual, e o cursor sumia dentro de
+    /// uma mensagem: em "sync caiu, o sync voltou, e o sync nem caiu" com o
+    /// contador em `[2/3]`, apertar a próxima duas vezes mudava o algarismo e
+    /// mais nada na tela. `atual` sozinho só alcança **qual mensagem**, que é
+    /// por onde a tela rola; é este número que alcança **qual trecho**.
+    ///
+    /// Vem do core, de `Search::ordinal_in_message`, que existe para isto: a
+    /// casca que pinta o histórico inteiro de uma vez conta as ocorrências de
+    /// cada mensagem do mesmo jeito, e precisa deste índice para distinguir a
+    /// do cursor das vizinhas. Contar do outro lado da ponte seria reescrever
+    /// em JavaScript uma contagem que o Rust já faz — e que ele tem de fazer,
+    /// porque é ela que decide o `[n/m]`.
+    ordinal: Option<u32>,
     /// Posição a partir de 1, para desenhar "[1/3]". Zero quando não casou nada.
     posicao: u32,
     /// Quantas ao todo.
@@ -499,6 +514,9 @@ impl BuscaEstado {
             // estão na mesma tela.
             casamentos: busca.matches().to_vec(),
             atual: busca.current(),
+            ordinal: busca
+                .ordinal_in_message()
+                .and_then(|ordinal| u32::try_from(ordinal).ok()),
             posicao: u32::try_from(posicao).unwrap_or(0),
             total: u32::try_from(total).unwrap_or(0),
         }
@@ -519,17 +537,38 @@ impl BuscaEstado {
 ///
 /// O custo, dito: com `' '` e `'\n'` sendo caracteres diferentes, um termo com
 /// espaço não casa por cima de uma quebra de linha.
+///
+/// # O cursor atravessa a reconstrução
+///
+/// Este comando é chamado de novo a cada mensagem que chega, porque os índices
+/// andam e um realce guardado passaria a acender o trecho errado. Uma busca
+/// recém-construída começa na ocorrência um — e era isso que, numa Linha
+/// movimentada, jogava quem estava na 7 de 12 de volta para a 1 e puxava o
+/// painel junto, toda vez que alguém falava. Numa conversa viva não dava para
+/// segurar a posição, que é exatamente onde buscar serve para alguma coisa.
+///
+/// `Search::resume_at` é a mesma regra que o `plug` já usava em
+/// `App::refazer_busca`, e mora no core justamente para não haver duas. O
+/// cursor continua deste lado da ponte, em `Session::busca`: o JavaScript não
+/// decide nada sobre busca (`specs/06-clientes-gui.md:19`).
 #[tauri::command]
 fn buscar(session: State<'_, Session>, termo: String) -> Result<BuscaEstado, PlugError> {
     let snapshot = session.plug()?.snapshot();
-    let busca = seele_ffi::search::Search::new(
+    let mut busca = seele_ffi::search::Search::new(
         snapshot.messages.iter().map(|mensagem| &mensagem.body),
         &termo,
     );
-    let estado = BuscaEstado::de(&busca);
-    if let Ok(mut slot) = session.busca.lock() {
-        *slot = Some(busca);
+
+    let Ok(mut slot) = session.busca.lock() else {
+        // Sem o cadeado não há cursor anterior a carregar nem onde guardar o
+        // novo. A busca ainda vale; o que se perde é a continuidade.
+        return Ok(BuscaEstado::de(&busca));
+    };
+    if let Some(anterior) = slot.as_ref().and_then(seele_ffi::search::Search::current) {
+        busca.resume_at(anterior);
     }
+    let estado = BuscaEstado::de(&busca);
+    *slot = Some(busca);
     Ok(estado)
 }
 

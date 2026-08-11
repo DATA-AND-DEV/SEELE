@@ -250,6 +250,151 @@ fn the_script_reads_the_field_names_a_match_actually_serialises() {
 }
 
 #[test]
+fn a_message_arriving_does_not_throw_the_search_back_to_the_first_occurrence() {
+    // What `buscar` does on every `MessagesChanged`, with the same types: build
+    // the search again over the new history, then put the cursor back.
+    //
+    // Without the second half the counter snapped to `[1/12]` and the pane
+    // jumped to match one every time anybody spoke, which is precisely the
+    // conversation where searching is worth doing.
+    let before_bodies = ["sync caiu", "o sync voltou", "o sync nem caiu"];
+    let mut before = seele_ffi::search::Search::new(before_bodies, "sync");
+    before.next_match();
+    assert_eq!(
+        before.position(),
+        (2, 3),
+        "the cursor should be on match two"
+    );
+    let Some(was_on) = before.current() else {
+        panic!("a search with three matches has a current one");
+    };
+
+    // Somebody speaks. The list is rebuilt and every later index shifts.
+    let after_bodies = [
+        "sync caiu",
+        "o sync voltou",
+        "o sync nem caiu",
+        "sync de novo",
+    ];
+    let mut after = seele_ffi::search::Search::new(after_bodies, "sync");
+    assert_eq!(
+        after.position(),
+        (1, 4),
+        "a freshly built search starts at one — this is the state being corrected"
+    );
+
+    after.resume_at(was_on);
+    assert_eq!(
+        after.position(),
+        (2, 4),
+        "the cursor did not stay on the occurrence the reader was on"
+    );
+    assert_eq!(
+        after.current(),
+        Some(was_on),
+        "the cursor moved to a different occurrence than the one it was on"
+    );
+}
+
+#[test]
+fn the_search_command_puts_the_cursor_back_after_rebuilding() {
+    // The test above proves the rule; this is what keeps `buscar` calling it.
+    // The rule has to run on the Rust side — the cursor lives in
+    // `Session::busca`, and `specs/06-clientes-gui.md:19` keeps decisions like
+    // this one out of the frontend.
+    let source = read("src/main.rs");
+    let script = read("ui/seele.js");
+
+    assert!(
+        source.contains("resume_at"),
+        "`buscar` rebuilds the search and never restores the cursor, so every \
+         incoming message sends the reader back to occurrence one"
+    );
+    assert!(
+        !script.contains("resume_at") && !script.contains("busca.cursor"),
+        "the frontend is deciding where the search cursor goes, which is protocol \
+         logic in JavaScript"
+    );
+}
+
+#[test]
+fn the_ordinal_indexes_the_same_list_the_page_groups_by_message() {
+    // `desenharMensagens` groups the matches by message, in the order they
+    // arrive, and lights the `ordinal`-th one of that group. So the ordinal has
+    // to be an index into exactly that list — if the core counted any other way
+    // the wrong word would be marked, silently and always by the same offset.
+    let body = "sync caiu, o sync voltou, e o sync nem caiu";
+    let mut search = seele_ffi::search::Search::new(["antes", body], "sync");
+
+    let in_this_message: Vec<_> = search
+        .matches()
+        .iter()
+        .filter(|found| found.message == 1)
+        .copied()
+        .collect();
+    assert_eq!(in_this_message.len(), 3, "the body matches three times");
+
+    for expected in 0..3 {
+        assert_eq!(
+            search.current().map(|found| found.message),
+            Some(1),
+            "the walk left the message under test"
+        );
+        let Some(ordinal) = search.ordinal_in_message() else {
+            panic!("a search with a current match has an ordinal");
+        };
+        assert_eq!(
+            ordinal, expected,
+            "the ordinal is not counting in drawing order"
+        );
+        assert_eq!(
+            search.current(),
+            in_this_message.get(ordinal).copied(),
+            "the ordinal does not index the list the page groups by message"
+        );
+        search.next_match();
+    }
+}
+
+#[test]
+fn the_current_occurrence_is_not_marked_out_by_colour_alone() {
+    // `specs/05-cliente-tui.md:144`. The terminal separates the two states with
+    // REVERSED against plain accent; the browser has weight and decoration, and
+    // has to use one of them. A rule that only swaps hues would leave the
+    // cursor invisible on a monochrome display — which is the same failure as
+    // not marking it at all, for the people it happens to.
+    let script = read("ui/seele.js");
+    let css = read("ui/seele.css");
+
+    assert!(
+        script.contains("realce-atual"),
+        "nothing in the page marks the occurrence the cursor is on"
+    );
+    assert!(
+        script.contains("estado.ordinal"),
+        "the script never reads the ordinal, so it cannot know which match is the current one"
+    );
+    assert!(
+        read("src/main.rs").contains("ordinal_in_message"),
+        "the bridge never sends which occurrence inside its message the cursor is on"
+    );
+
+    let rule = css
+        .split(".realce-atual")
+        .nth(1)
+        .and_then(|rest| rest.split('}').next())
+        .unwrap_or_default();
+    assert!(
+        !rule.is_empty(),
+        "the stylesheet has no rule for the current occurrence"
+    );
+    assert!(
+        rule.contains("font-weight") || rule.contains("outline") || rule.contains("border"),
+        "the current occurrence differs from the others only by colour:\n{rule}"
+    );
+}
+
+#[test]
 fn the_visited_list_hides_itself_when_it_is_empty() {
     // A heading over an empty list is worse than no heading: with nowhere to go
     // back to, the entry screen must be exactly what it was before the section

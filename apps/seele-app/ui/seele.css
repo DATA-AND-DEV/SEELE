@@ -541,17 +541,42 @@ input:focus {
 
 /* O contador é o acompanhante textual do realce: `specs/05-cliente-tui.md`
    proíbe informação transmitida só por cor, e "[2/7]" é a mesma informação sem
-   depender de enxergar o laranja. */
+   depender de enxergar o laranja.
+
+   Osso, e não osso-apagado. O `tokens.css` anota o apagado como "4,11:1 só
+   texto grande", e 10px não é texto grande — o mínimo que vale aqui é 4,5:1.
+   Um rótulo secundário podia viver com isso; este elemento não, porque ele é
+   precisamente a metade não-cromática de que o realce não pode abrir mão. Osso
+   sobre o painel dá 15,60:1. */
 .busca-contador {
   font-size: var(--seele-t-rotulo);
-  color: var(--seele-osso-apagado);
+  color: var(--seele-osso);
   font-variant-numeric: tabular-nums;
 }
 
-/* O realce. Sublinhado além do preenchimento, pelo mesmo motivo do contador: a
-   ocorrência sobrevive a um monitor ruim sem depender da cor. */
+/* O realce, e o realce onde o cursor está — duas coisas, e a diferença entre
+   elas nunca é só a cor (`specs/05-cliente-tui.md:144`).
+
+   O terminal resolveu isto com REVERSED contra o acento puro (`ui.rs`), e aqui
+   é a mesma ideia com o que o navegador tem: o corrente inverte o bloco e
+   engrossa o traço. Sem cor nenhuma continuam distintos — um é texto claro
+   sobre bloco escuro, o outro é texto escuro sobre bloco claro e em negrito.
+
+   O texto do realce era o laranja sobre o laranja-fraco, o par de menor
+   contraste da tela: um trecho **achado** ficava mais difícil de ler do que o
+   corpo em volta, que é o contrário do que um realce é para fazer. Osso sobre
+   laranja-fraco dá 12,95:1, e o laranja fica onde ele diz o mesmo sem custar
+   legibilidade — no sublinhado e no bloco do corrente. */
 .realce {
   background: var(--seele-laranja-fraco);
-  color: var(--seele-laranja-nerv);
+  color: var(--seele-osso);
   text-decoration: underline;
+  text-decoration-color: var(--seele-laranja-nerv);
+}
+
+.realce-atual {
+  background: var(--seele-laranja-nerv);
+  color: var(--seele-negro-absoluto);
+  font-weight: var(--seele-cartela);
+  text-decoration-color: var(--seele-negro-absoluto);
 }

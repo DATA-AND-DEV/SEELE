@@ -610,16 +610,10 @@ impl App {
             &self.termo,
         );
         if let Some(previous) = previous {
-            let matches = search.matches();
-            let target = matches
-                .iter()
-                .position(|candidate| {
-                    (candidate.message, candidate.start) >= (previous.message, previous.start)
-                })
-                .unwrap_or_else(|| matches.len().saturating_sub(1));
-            for _ in 0..target {
-                search.next_match();
-            }
+            // The rule itself lives in the core, where the desktop shell reads
+            // it too: both rebuild, both have to hold the cursor, and this was
+            // written here first only because this shell needed it first.
+            search.resume_at(previous);
         }
         self.busca = Some(search);
     }

@@ -34,6 +34,16 @@ let convitePendente = null;
  * corpo normalizado — ver `corpoComRealce`.
  */
 let casamentosPorMensagem = new Map();
+/**
+ * Qual mensagem e qual ocorrência dentro dela o cursor da busca está.
+ *
+ * `{ indice, ordinal }` — o índice da mensagem na ordem em que a tela desenha
+ * e qual ocorrência dentro dela. `null` sem busca. Os dois números vêm prontos do
+ * Rust — o ordinal é o `Search::ordinal_in_message` do core. Aqui não se conta
+ * nada: contar seria a mesma contagem que decide o `[n/m]`, escrita de novo e
+ * livre para discordar.
+ */
+let ocorrenciaAtual = null;
 
 // ---------------------------------------------------------------- utilidades
 
@@ -298,7 +308,8 @@ function desenharMensagens(snapshot) {
     // de uma linha; colapsar dos dois lados alinharia o realce achatando a
     // conversa, que é o preço errado a pagar por um índice.
     const corpo = elemento("div", "corpo");
-    corpo.append(...corpoComRealce(mensagem.body, casamentosPorMensagem.get(indice)));
+    const aceso = ocorrenciaAtual?.indice === indice ? ocorrenciaAtual.ordinal : null;
+    corpo.append(...corpoComRealce(mensagem.body, casamentosPorMensagem.get(indice), aceso));
     item.append(cabeca, corpo);
     return item;
   });
@@ -314,17 +325,23 @@ function desenharMensagens(snapshot) {
  * frontend não teria como saber onde o casamento começou. Os deslocamentos são
  * em caracteres, não em unidades de código — daí o `[...corpo]`, que é o que
  * mantém o realce no lugar num corpo com emoji.
+ *
+ * `aceso` é qual destes intervalos é o do cursor, ou `null` se o cursor está
+ * noutra mensagem. Sem ele todas as ocorrências saíam idênticas e o piloto não
+ * enxergava onde estava dentro de uma mensagem que casa três vezes. A ordem
+ * desta lista é a mesma em que o core contou, e é o que faz o índice bater.
  */
-function corpoComRealce(corpo, intervalos) {
+function corpoComRealce(corpo, intervalos, aceso = null) {
   if (!intervalos || intervalos.length === 0) return [document.createTextNode(corpo)];
   const caracteres = [...corpo];
   const pedacos = [];
   let cursor = 0;
-  for (const { start, end } of intervalos) {
+  for (const [ordinal, { start, end }] of intervalos.entries()) {
     if (start > cursor) {
       pedacos.push(document.createTextNode(caracteres.slice(cursor, start).join("")));
     }
-    pedacos.push(elemento("mark", "realce", caracteres.slice(start, end).join("")));
+    const classe = ordinal === aceso ? "realce realce-atual" : "realce";
+    pedacos.push(elemento("mark", classe, caracteres.slice(start, end).join("")));
     cursor = end;
   }
   if (cursor < caracteres.length) {
@@ -673,6 +690,10 @@ function guardarCasamentos(estado) {
     lista.push(casamento);
     casamentosPorMensagem.set(casamento.message, lista);
   }
+  ocorrenciaAtual =
+    estado.atual && estado.ordinal !== null && estado.ordinal !== undefined
+      ? { indice: estado.atual.message, ordinal: estado.ordinal }
+      : null;
 }
 
 function desenharBusca(estado) {
@@ -682,13 +703,19 @@ function desenharBusca(estado) {
   guardarCasamentos(estado);
   if (desenhado) desenharMensagens(desenhado);
   if (estado.atual) {
-    const linha = $("lista-mensagens").children[estado.atual.message];
-    linha?.scrollIntoView({ block: "center" });
+    // A ocorrência, e não a mensagem. Rolar até a mensagem punha na tela a
+    // linha certa e nada dentro dela: numa mensagem que casa três vezes,
+    // avançar duas vezes rolava para o mesmo lugar e mexia só no algarismo.
+    const alvo =
+      $("lista-mensagens").querySelector(".realce-atual") ??
+      $("lista-mensagens").children[estado.atual.message];
+    alvo?.scrollIntoView({ block: "center" });
   }
 }
 
 function limparBusca() {
   casamentosPorMensagem = new Map();
+  ocorrenciaAtual = null;
   $("busca-contador").textContent = "";
   if (desenhado) desenharMensagens(desenhado);
 }
@@ -708,6 +735,7 @@ function buscaAtiva() {
  */
 function soltarCasamentos() {
   casamentosPorMensagem = new Map();
+  ocorrenciaAtual = null;
 }
 
 /**

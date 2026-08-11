@@ -185,6 +185,35 @@ impl Search {
         self.current()
     }
 
+    /// Puts the cursor back where it was, after the search was rebuilt.
+    ///
+    /// A search is rebuilt wholesale whenever the drawn history changes, and a
+    /// rebuild starts at occurrence one. In a live conversation that is not a
+    /// detail: anybody speaking would throw a reader sitting on match 7 of 12
+    /// back to the first, which makes `n`/`N` unusable exactly where searching
+    /// matters.
+    ///
+    /// The cursor lands on the first match at or after `previous`, in drawing
+    /// order. If the occurrence it was on disappeared — an edited or deleted
+    /// message — it lands on the last match rather than falling out of range.
+    ///
+    /// Lives here rather than in a shell because both shells rebuild, both have
+    /// to hold the cursor, and a rule written twice is a rule that agrees twice
+    /// and then stops agreeing.
+    pub fn resume_at(&mut self, previous: Match) {
+        if self.matches.is_empty() {
+            self.cursor = 0;
+            return;
+        }
+        self.cursor = self
+            .matches
+            .iter()
+            .position(|candidate| {
+                (candidate.message, candidate.start) >= (previous.message, previous.start)
+            })
+            .unwrap_or_else(|| self.matches.len().saturating_sub(1));
+    }
+
     /// `(1, 3)` for drawing "[1/3]". `(0, 0)` when nothing matched.
     #[must_use]
     pub fn position(&self) -> (usize, usize) {
@@ -281,6 +310,53 @@ mod tests {
         assert_eq!(search.ordinal_in_message(), Some(0));
         search.next_match();
         assert_eq!(search.ordinal_in_message(), Some(1));
+    }
+
+    #[test]
+    fn resuming_lands_on_the_first_match_at_or_after_the_previous_one() {
+        // Somebody sitting on the second of three occurrences, and a message
+        // arriving above them: every index moved by one, and the cursor has to
+        // move with it instead of snapping back to the first.
+        let mut before = Search::new(["sync", "sync", "sync"], "sync");
+        before.next_match();
+        assert_eq!(before.position(), (2, 3));
+        let Some(was_on) = before.current() else {
+            panic!("a search with three matches has a current one");
+        };
+
+        let mut after = Search::new(["nova", "sync", "sync", "sync"], "sync");
+        // The occurrence that was message 1 is message 2 now, so the raw
+        // position is what moves; what must not move is the occurrence.
+        after.resume_at(Match {
+            message: was_on.message + 1,
+            ..was_on
+        });
+        assert_eq!(after.position(), (2, 3));
+    }
+
+    #[test]
+    fn resuming_past_the_end_lands_on_the_last_match() {
+        // The message the cursor was in was deleted, or edited until the term
+        // left it. Falling out of range would be an index nobody can draw.
+        let mut after = Search::new(["sync"], "sync");
+        after.resume_at(Match {
+            message: 40,
+            start: 0,
+            end: 4,
+        });
+        assert_eq!(after.position(), (1, 1));
+    }
+
+    #[test]
+    fn resuming_into_nothing_does_not_panic() {
+        let mut after = Search::new(["nada aqui"], "sync");
+        after.resume_at(Match {
+            message: 3,
+            start: 1,
+            end: 5,
+        });
+        assert!(after.is_empty());
+        assert_eq!(after.position(), (0, 0));
     }
 
     #[test]
