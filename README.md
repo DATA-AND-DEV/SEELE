@@ -95,25 +95,25 @@ para saber que a conexão está ruim.
 ```text
 ┌ SEELE ─ 同期率 ─ 第3新東京市 ─ 12:04:33 ─────────────────────────────────────┐
 │┌ DOGMA ─────────┐┌ CAGES / LINHAS ──────┐┌ MENSAGENS ───────────────────────┐│
-││▸ Terceira Tóqu…││▼ CAGE-01 CENTRAL     ││12:01 ayanami                     ││
-││                ││  ● ayanami      █ 98%││  verificando harmônicos          ││
-││           ┌ AJUDA ─────────────────────────────────────────────┐           ││
-││           │h j k l / setas   navegar                           │           ││
-││           │Tab               alternar painel                   │           ││
-││           │Enter             entrar no Cage / abrir Linha      │u junto    ││
+││▸ Terceira ┌ AJUDA ─────────────────────────────────────────────┐           ││
+││           │h j k l / setas   navegar                           │s          ││
+││           │Tab / Shift+Tab   alternar painel                   │           ││
+││           │Enter             entrar no Cage / abrir Linha      │           ││
 ││           │i                 escrever mensagem                 │           ││
-││           │Espaço (segurar)  falar                             │           ││
+││           │Espaço (segurar)  falar                             │u junto    ││
 ││           │m                 A.T. Field (mudo)                 │           ││
 ││           │d                 isolamento total (surdo)          │           ││
 ││           │g / G             topo / fim                        │           ││
+││           │/                 buscar no histórico               │           ││
+││           │n / N             ocorrência seguinte / anterior    │           ││
 ││           │?                 esta ajuda                        │           ││
 ││           │:conectar <host>  conectar a um Dogma               │           ││
 ││           │:cage <nome>      entrar num Cage                   │           ││
 ││           │:sync             diagnóstico detalhado             │           ││
 ││           │:audio            dispositivos                      │           ││
-││           │:q                ejetar e sair                     │           ││
+││           │:ejetar           sair deste Dogma e escolher outro │           ││
+││           │:q                sair do programa                  │           ││
 ││           └────────────────────────────────────────────────────┘           ││
-││                ││                      ││▸ _                               ││
 │└────────────────┘└──────────────────────┘└──────────────────────────────────┘│
 │ NORMAL │ SYNC █ 94% │ RTT 38ms │ JIT 12ms │ LOSS 0.2% │ OPUS 32k │ A.T. OFF  │
 └──────────────────────────────────────────────────────────────────────────────┘

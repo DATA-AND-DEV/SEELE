@@ -845,12 +845,15 @@ fn render_help(frame: &mut Frame<'_>, theme: Theme, area: Rect) {
         ("m", "A.T. Field (mudo)"),
         ("d", "isolamento total (surdo)"),
         ("g / G", "topo / fim"),
+        ("/", "buscar no histórico"),
+        ("n / N", "ocorrência seguinte / anterior"),
         ("?", "esta ajuda"),
         (":conectar <host>", "conectar a um Dogma"),
         (":cage <nome>", "entrar num Cage"),
         (":sync", "diagnóstico detalhado"),
         (":audio", "dispositivos"),
-        (":q", "ejetar e sair"),
+        (":ejetar", "sair deste Dogma e escolher outro"),
+        (":q", "sair do programa"),
     ];
 
     let height = rows.len() as u16 + 2;
@@ -1229,6 +1232,25 @@ mod tests {
             assert!(screen.contains(key), "`{key}` missing from help:\n{screen}");
         }
         assert!(screen.contains("falar"), "{screen}");
+    }
+
+    #[test]
+    fn the_help_overlay_names_the_keys_that_have_no_other_hint() {
+        // Searching and ejecting are reachable and announced nowhere else: `/`,
+        // `n`, `N` and `:ejetar` have no button, no label and no prompt. A key
+        // that works and is written down nowhere is as good as missing.
+        let mut app = populated();
+        app.help = true;
+        let screen = draw(&app, Palette::True, (80, 24));
+
+        for what in [
+            "buscar no histórico",
+            "ocorrência seguinte",
+            ":ejetar",
+            "sair do programa",
+        ] {
+            assert!(screen.contains(what), "`{what}` missing:\n{screen}");
+        }
     }
 
     #[test]

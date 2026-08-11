@@ -214,21 +214,36 @@ fn config_dir() -> PathBuf {
 
 /// Roda a tela de conexão até alguém escolher ou desistir.
 ///
-/// Laço próprio, bloqueante, e de propósito: aqui ainda não existe conexão nem
-/// áudio, então não há nada para o runtime fazer enquanto ninguém digita. O
-/// laço assíncrono do `run` existe porque lá **há** — pacotes chegando enquanto
-/// se digita — e copiá-lo para cá seria complexidade sem motivo.
+/// Laço próprio, e de propósito: aqui ainda não existe conexão nem áudio, então
+/// não há nada para o runtime fazer enquanto ninguém digita. O laço do `sessao`
+/// existe porque lá **há** — pacotes chegando enquanto se digita — e copiá-lo
+/// para cá seria complexidade sem motivo.
+///
+/// As teclas vêm pelo mesmo canal da sessão, e não de um
+/// `crossterm::event::read` próprio: dois leitores na mesma entrada disputam
+/// cada tecla, e ao voltar de um `:ejetar` o perdedor da disputa seria esta
+/// tela.
 ///
 /// `Ok(None)` é ter desistido, e sair calado é a resposta certa: quem apertou
 /// `q` não precisa de mensagem de erro.
-fn escolher(terminal: &mut Screen1, tema: Theme, home: &std::path::Path) -> Result<Option<Args>> {
+async fn escolher(
+    terminal: &mut Screen1,
+    key_rx: &mut tokio::sync::mpsc::Receiver<Event>,
+    tema: Theme,
+    home: &std::path::Path,
+) -> Result<Option<Args>> {
     let mut lista = Conhecidos::abrir(home.join("conhecidos"))?;
     let mut tela = Selecao::nova(lista.listar());
 
     loop {
         terminal.draw(|frame| selecao::desenhar(frame, &tela, tema))?;
 
-        let Event::Key(tecla) = crossterm::event::read()? else {
+        // Sem leitor não há como escolher nada, e insistir num canal fechado
+        // seria um laço quente para sempre.
+        let Some(evento) = key_rx.recv().await else {
+            return Ok(None);
+        };
+        let Event::Key(tecla) = evento else {
             continue;
         };
         // Sem isto uma tecla conta duas vezes no Windows, onde chegam o
@@ -353,23 +368,61 @@ struct Runtime {
     next_message_id: u64,
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one event loop; the branches are the interface's whole surface"
-)]
+/// The outer loop: choose, talk, eject, choose again.
+///
+/// The whole session lives inside one turn of this loop, and `Enlace` and
+/// `Voice` are dropped at the end of it. This is **not** what issue #9
+/// turned down — that was swapping the connection out from under a live
+/// session; this is tearing everything down and going back to a screen that
+/// has no roster, no telemetry, and no audio.
 async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<()> {
     let home = config_dir();
     let tema = Theme::detect();
 
-    // Sem argumento nenhum, a tela decide. Com qualquer flag, ela nem aparece.
-    let args = match args {
-        Some(args) => args,
-        None => match escolher(terminal, tema, &home)? {
-            Some(args) => args,
-            None => return Ok(()),
-        },
-    };
+    // Um leitor de teclado só, para o programa inteiro, e não um por sessão.
+    // `crossterm::event::read` segura a entrada enquanto espera: dois leitores
+    // vivos ao mesmo tempo roubam tecla um do outro, e ao ejetar era exatamente
+    // isso que acontecia — o leitor da sessão que acabou engolia a primeira
+    // tecla da tela de seleção.
+    let (key_tx, mut key_rx) = tokio::sync::mpsc::channel::<Event>(64);
+    std::thread::spawn(move || read_terminal_events(&key_tx));
 
+    // Com uma flag, a tela de seleção não aparece na entrada — quem digitou
+    // `--server` já disse aonde ia. Ao ejetar ela aparece, e é o certo: ejetar
+    // é o pedido explícito de ir a outro lugar.
+    let mut escolhidos = args;
+
+    loop {
+        let args = match escolhidos.take() {
+            Some(args) => args,
+            None => match escolher(terminal, &mut key_rx, tema, &home).await? {
+                Some(args) => args,
+                None => return Ok(()),
+            },
+        };
+
+        if !sessao(terminal, &mut key_rx, &args, holds, &home, tema).await? {
+            return Ok(());
+        }
+    }
+}
+
+/// One session, from the first packet to the last.
+///
+/// Returns `true` when it exited via `:ejetar`, which is the signal for
+/// [`run`]'s loop to go back to the selection screen instead of quitting.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one event loop; the branches are the interface's whole surface"
+)]
+async fn sessao(
+    terminal: &mut Screen1,
+    key_rx: &mut tokio::sync::mpsc::Receiver<Event>,
+    args: &Args,
+    holds: bool,
+    home: &std::path::Path,
+    tema: Theme,
+) -> Result<bool> {
     let mut runtime = Runtime {
         app: App::new(),
         room: Room::new(),
@@ -397,7 +450,10 @@ async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<
     // `--hospedar`: o Dogma sobe aqui dentro, antes de conectar. Fica vivo pelo
     // tempo desta função — quando o cliente sai, o Dogma vai junto, que é o
     // comportamento certo para "estou hospedando uma conversa".
-    let hospedagem = if args.hospedar {
+    // `mut` e `take()` porque ejetar tem de **esperar** a porta voltar antes de
+    // devolver o controle à tela de seleção; largar o handle no fim da função
+    // não espera nada, e a próxima volta do laço acharia a porta ocupada.
+    let mut hospedagem = if args.hospedar {
         let dogma = seele_server::hospedagem::Hospedagem::iniciar(
             args.server.port(),
             seele_server::casper::Location::File(home.join("dogma.db")),
@@ -426,7 +482,8 @@ async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<
             runtime.app.screen = Screen::Lost {
                 reason: format!("NÃO FOI POSSÍVEL ALCANÇAR O DOGMA: {error}"),
             };
-            return wait_for_key(terminal, &runtime).await;
+            wait_for_key(terminal, key_rx, &runtime).await?;
+            return Ok(false);
         }
     };
 
@@ -445,7 +502,8 @@ async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<
                     "ESTE NÃO É O DOGMA DO CONVITE.\n\nesperada:  {esperada}\nofertada:  {oferecida}"
                 ),
             };
-            return wait_for_key(terminal, &runtime).await;
+            wait_for_key(terminal, key_rx, &runtime).await?;
+            return Ok(false);
         }
     }
 
@@ -522,9 +580,6 @@ async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<
     view::project(&runtime.room, &mut runtime.app);
     runtime.app.refazer_busca();
 
-    let (key_tx, mut key_rx) = tokio::sync::mpsc::channel::<Event>(64);
-    std::thread::spawn(move || read_terminal_events(&key_tx));
-
     let mut next_tick = Instant::now();
     let mut last_draw = Instant::now() - FRAME;
     let mut dirty = true;
@@ -536,12 +591,27 @@ async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<
             dirty = false;
         }
         if runtime.app.quit {
-            return Ok(());
+            return Ok(false);
+        }
+        if runtime.app.ejetou {
+            // Primeiro o que está ligado, depois a porta: é a ordem do
+            // `disconnect` do app. Largar o enlace e a voz aqui, e não no fim
+            // da função, é o que faz o `wait_idle` do Dogma não ficar
+            // esperando a nossa própria conexão drenar.
+            drop(client);
+            runtime.voice = None;
+            // O Dogma hospedado aqui acaba junto com a sessão, e `encerrar`
+            // espera a porta voltar — hospedar de novo na volta seguinte
+            // depende disso.
+            if let Some(dogma) = hospedagem.take() {
+                dogma.encerrar().await;
+            }
+            return Ok(true);
         }
 
         tokio::select! {
             event = key_rx.recv() => {
-                let Some(event) = event else { return Ok(()) };
+                let Some(event) = event else { return Ok(false) };
                 dirty = true;
                 match event {
                     Event::Key(key_event) => {
@@ -606,7 +676,8 @@ async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<
                                 Motivo::Pedido => "ENLACE ENCERRADO".to_owned(),
                             },
                         };
-                        return wait_for_key(terminal, &runtime).await;
+                        wait_for_key(terminal, key_rx, &runtime).await?;
+                        return Ok(false);
                     }
                 }
             }
@@ -663,19 +734,28 @@ fn tick(runtime: &mut Runtime, client: &Enlace) {
     });
 }
 
-/// Blocks until any key, so a final screen can be read.
+/// Waits for any key, so a final screen can be read.
 ///
 /// A client that exits the instant it loses the link takes the reason with it.
-async fn wait_for_key(terminal: &mut Screen1, runtime: &Runtime) -> Result<()> {
+///
+/// Reads from the one reader thread instead of calling `crossterm::event::read`
+/// itself: with a second reader alive, whichever of the two is parked in `read`
+/// takes the keystroke, and this screen would sit out its whole thirty seconds
+/// with somebody hammering the keyboard at it.
+async fn wait_for_key(
+    terminal: &mut Screen1,
+    key_rx: &mut tokio::sync::mpsc::Receiver<Event>,
+    runtime: &Runtime,
+) -> Result<()> {
     terminal.draw(|frame| ui::render(frame, &runtime.app, runtime.theme))?;
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while Instant::now() < deadline {
-        if crossterm::event::poll(Duration::from_millis(200))?
-            && matches!(crossterm::event::read()?, Event::Key(_))
-        {
-            return Ok(());
+    let _ = tokio::time::timeout(Duration::from_secs(30), async {
+        while let Some(event) = key_rx.recv().await {
+            if matches!(event, Event::Key(_)) {
+                return;
+            }
         }
-    }
+    })
+    .await;
     Ok(())
 }
 
@@ -857,6 +937,8 @@ async fn open_line(runtime: &mut Runtime, client: &Enlace, line: LineId) -> Resu
 async fn run_command(runtime: &mut Runtime, client: &Enlace, command: &Command) -> Result<()> {
     match command {
         Command::Quit => runtime.app.quit(),
+
+        Command::Eject => runtime.app.ejetar(),
 
         Command::Cage { which } => {
             if let Some(id) = runtime.room.find_cage(which) {

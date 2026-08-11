@@ -7,8 +7,14 @@
 /// A parsed command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
-    /// `:q` — ejetar e sair.
+    /// `:q` — sair do programa.
     Quit,
+    /// `:ejetar` — leave this Dogma and go back to the selection screen.
+    ///
+    /// Separate from [`Command::Quit`] on purpose: quitting the program and
+    /// leaving a conversation are different things, and the app already
+    /// treated the two as different with the EJETAR button.
+    Eject,
     /// `:conectar <host>`.
     Connect {
         /// Whatever was typed. Resolving it is the caller's problem.
@@ -81,7 +87,8 @@ pub fn parse(input: &str) -> Command {
     let joined = rest.join(" ");
 
     match head {
-        "q" | "quit" | "sair" | "ejetar" => Command::Quit,
+        "q" | "quit" | "sair" => Command::Quit,
+        "ejetar" | "eject" => Command::Eject,
         "conectar" | "connect" if !joined.is_empty() => Command::Connect { target: joined },
         "cage" if !joined.is_empty() => Command::Cage { which: joined },
         "linha" | "line" if !joined.is_empty() => Command::Line { which: joined },
@@ -146,6 +153,18 @@ mod tests {
         assert_eq!(parse(":sobre"), Command::About);
         assert_eq!(parse(":convite"), Command::Convite);
         assert_eq!(parse(":q"), Command::Quit);
+    }
+
+    #[test]
+    fn ejecting_is_no_longer_quitting() {
+        // Assumed behaviour change: the app's button is called EJETAR and
+        // returns to the entry screen, and the terminal now does the same.
+        // Quitting the program is still `:q`.
+        assert_eq!(parse(":ejetar"), Command::Eject);
+        assert_eq!(parse(":eject"), Command::Eject);
+        assert_eq!(parse(":q"), Command::Quit);
+        assert_eq!(parse(":sair"), Command::Quit);
+        assert_eq!(parse(":quit"), Command::Quit);
     }
 
     #[test]

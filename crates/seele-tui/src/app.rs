@@ -206,7 +206,7 @@ pub struct Alert {
 /// What a keystroke asked for that the app cannot do alone.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
-    /// Leave. `:q` — "ejetar e sair".
+    /// Leave the program. `:q` — and Ctrl-C, from any mode.
     Quit,
     /// Post the composed message.
     Send(String),
@@ -290,6 +290,8 @@ pub struct App {
     pub clock: String,
     /// Set when the app should exit.
     pub quit: bool,
+    /// Set when the session has ended but the program keeps running.
+    pub ejetou: bool,
 }
 
 impl Default for App {
@@ -325,6 +327,7 @@ impl App {
             convite_visivel: false,
             clock: "--:--:--".into(),
             quit: false,
+            ejetou: false,
         }
     }
 
@@ -571,9 +574,14 @@ impl App {
         })
     }
 
-    /// Records that the app should exit. `:q` — "ejetar e sair".
+    /// Records that the app should exit. `:q` — sair do programa.
     pub fn quit(&mut self) {
         self.quit = true;
+    }
+
+    /// Leaves this Dogma without quitting the program. `:ejetar`.
+    pub fn ejetar(&mut self) {
+        self.ejetou = true;
     }
 
     /// Redoes the search over the current history, keeping the term.
@@ -684,6 +692,14 @@ mod tests {
         ];
         app.screen = Screen::PatternBlue;
         app
+    }
+
+    #[test]
+    fn ejecting_and_quitting_are_different_states() {
+        let mut app = App::new();
+        app.ejetar();
+        assert!(app.ejetou, "ejetar marca a volta à seleção");
+        assert!(!app.quit, "ejetar não é sair do programa");
     }
 
     #[test]
