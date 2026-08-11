@@ -136,3 +136,44 @@ QUIC viva e uma thread de áudio; reiniciar o processo faz isso certo.
 Não está registrado no sistema operacional. Quando for, o cliente **precisa
 perguntar antes de conectar**: um link que inicia conexão sozinho é superfície
 nova. Ver ADR 0006.
+
+## 11 · Reconectar rápido pode esvaziar o roster do Cage
+
+**Sintoma esperado.** Alguém dá `:ejetar` e entra de novo em seguida. A sessão
+nova sobe, fala e ouve normalmente, e o Cage aparece **vazio** — sem nem a
+própria pessoa — até o movimento de alguém redesenhar a lista.
+
+**O que se sabe.** É uma corrida entre a sessão que morre e a que nasce, e as
+duas mexem na lotação pela mesma chave. `Occupancy::seat` começa apagando o
+piloto de toda parte antes de sentá-lo (`dogma.rs:171-174`), e o desmonte da
+sessão antiga chama `occupancy.vacate(cage, pilot)` (`session.rs:845`). Como
+`vacate` filtra só por `PilotId` (`dogma.rs:177-181`), ele não distingue a
+cadeira da sessão velha da cadeira da sessão nova: se o desmonte da primeira
+chegar **depois** do `seat` da segunda, apaga a segunda. A ordem depende de
+quando a conexão QUIC antiga é dada por morta, o que ninguém controla.
+
+Só atinge a mesma identidade voltando — dois pilotos diferentes não colidem,
+porque as chaves diferem. E o cliente não tem como serializar isso do lado dele:
+`Drop for Enlace` é um `abort()`, que é assíncrono.
+
+**Encontrado lendo, não observado.** Saiu da revisão do
+`crates/seele-conformance/tests/ejetar.rs`, ao perguntar por que os dois lados
+do teste usavam a mesma semente. **Não foi reproduzido em uso**, e a janela é
+estreita: exige o desmonte da conexão antiga cair depois de um handshake
+inteiro. Fica registrado como defeito de leitura, e não como relato de campo.
+
+**O que ficou tentado.** Nada, de propósito — mas o `ejetar.rs` foi escrito para
+não depender disto: o teste que mede lotação usa duas identidades distintas, e o
+que faz a mesma pessoa voltar não olha a lotação. Está comentado nos dois
+lugares, senão alguém junta os dois "simplificando" e ganha uma reprovação
+intermitente no lugar do defeito.
+
+**Por que não foi resolvido.** O conserto é no Dogma, não no cliente: `vacate`
+precisa saber de qual sessão veio o pedido — carregar o `SessionId` no
+`Occupant` e só desocupar se for o mesmo —, e isso mexe em `seat`, `vacate`,
+`vacate_everywhere` e nos avisos de roster. É tarefa própria, com revisão
+própria, e não um remendo no fim de uma tarefa de teste.
+
+**Quando dói.** `:ejetar` seguido de reconexão imediata no mesmo Cage, que é
+exatamente o que a tela de seleção convida a fazer. Some assim que qualquer
+pessoa entra ou sai, porque aí o roster é reconstruído.
