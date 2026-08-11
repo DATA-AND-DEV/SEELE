@@ -29,7 +29,7 @@ use crossterm::terminal::{
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use seele_core::conhecidos::Conhecidos;
-use seele_core::enlace::{Aviso, Destino, Enlace, Motivo};
+use seele_core::enlace::{Aviso, Destino, Enlace, Fechado, Motivo};
 use seele_core::{
     identity, CageId, ClientMessageId, FilePinStore, LineId, PinDecision, Room, SyncInputs,
     SyncRatio, Voice, VoiceMode,
@@ -348,11 +348,18 @@ fn leave_terminal(terminal: &mut Screen1, holds: bool) -> Result<()> {
 }
 
 /// Everything the loop needs to hold between keystrokes.
-struct Runtime {
+struct Runtime<'a> {
     app: App,
     /// What is true about the session. Owned by `seele-core`, not by this file.
     room: Room,
-    theme: Theme,
+    /// Borrowed from [`run`], and borrowed rather than copied on purpose.
+    ///
+    /// `:tema` is an accessibility accommodation in a client whose spec forbids
+    /// information carried by colour: somebody whose terminal renders the
+    /// 256-colour palette illegibly types `:tema mono` because it is the only
+    /// way to read the screen. A copy per session put them back on the detected
+    /// palette at every eject, forever.
+    theme: &'a mut Theme,
     voice: Option<Voice>,
     sync: SyncRatio,
     /// True when the terminal reports key releases, so the space bar can be
@@ -372,7 +379,10 @@ struct Runtime {
 /// has no roster, no telemetry, and no audio.
 async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<()> {
     let home = config_dir();
-    let tema = Theme::detect();
+    // Detectado uma vez, para o programa inteiro. Quem escolher outra paleta com
+    // `:tema` continua nela ao trocar de Dogma: redetectar a cada sessão
+    // devolveria a pessoa à paleta que ela acabou de recusar.
+    let mut tema = Theme::detect();
 
     // Um leitor de teclado só, para o programa inteiro, e não um por sessão.
     // `crossterm::event::read` segura a entrada enquanto espera: dois leitores
@@ -396,7 +406,7 @@ async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<
             },
         };
 
-        if !sessao(terminal, &mut key_rx, &args, holds, &home, tema).await? {
+        if !sessao(terminal, &mut key_rx, &args, holds, &home, &mut tema).await? {
             return Ok(());
         }
     }
@@ -420,7 +430,7 @@ async fn sessao(
     args: &Args,
     holds: bool,
     home: &std::path::Path,
-    tema: Theme,
+    tema: &mut Theme,
 ) -> Result<bool> {
     let mut runtime = Runtime {
         app: App::new(),
@@ -437,7 +447,7 @@ async fn sessao(
     // when it lands. specs/05-cliente-tui.md: it lasts the real time of the
     // connection, and nothing is added to make it look busier.
     runtime.app.screen = Screen::Boot;
-    terminal.draw(|frame| ui::render(frame, &runtime.app, runtime.theme))?;
+    terminal.draw(|frame| ui::render(frame, &runtime.app, *runtime.theme))?;
 
     // ADR 0004, and the reason it has to be on disk: CASPER binds a nickname to
     // the identity that first claimed it, so a client that generates a fresh key
@@ -522,9 +532,13 @@ async fn sessao(
     }
 
     let cage = args.cage;
-    client.inserir_plug(cage).await?;
-    client.abrir_linha(args.line).await?;
-    client.historico(args.line, 50).await?;
+    // Um enlace que fecha antes mesmo de a sessão subir é uma sessão que
+    // acabou, e não um defeito do programa. Ver [`enlace_fechado`].
+    if entrar(&client, cage, args.line).await.is_err() {
+        enlace_fechado(&mut runtime);
+        drop(client);
+        return fim_de_sessao(terminal, key_rx, &mut runtime, &mut hospedagem).await;
+    }
 
     // Registrado só **depois** de dar certo. Guardar antes encheria a lista de
     // endereços errados digitados uma vez, que é o oposto de uma lista de
@@ -590,7 +604,7 @@ async fn sessao(
 
     loop {
         if dirty && last_draw.elapsed() >= FRAME {
-            terminal.draw(|frame| ui::render(frame, &runtime.app, runtime.theme))?;
+            terminal.draw(|frame| ui::render(frame, &runtime.app, *runtime.theme))?;
             last_draw = Instant::now();
             dirty = false;
         }
@@ -622,7 +636,21 @@ async fn sessao(
                     Event::Key(key_event) => {
                         for key in key_source(&mut runtime, key_event) {
                             if let Some(action) = runtime.app.on_key(key) {
-                                act(&mut runtime, &client, action, args.line).await?;
+                                // Um `?` aqui matava o cliente: mandar uma
+                                // mensagem por um enlace que acabou de fechar
+                                // virava `plug encerrou: …` numa linha de
+                                // stderr. Ver [`enlace_fechado`].
+                                if act(&mut runtime, &client, action, args.line).await.is_err() {
+                                    enlace_fechado(&mut runtime);
+                                    drop(client);
+                                    return fim_de_sessao(
+                                        terminal,
+                                        key_rx,
+                                        &mut runtime,
+                                        &mut hospedagem,
+                                    )
+                                    .await;
+                                }
                             }
                         }
                     }
@@ -725,9 +753,41 @@ async fn sessao(
     }
 }
 
+/// Os três pedidos que põem uma sessão de pé.
+///
+/// Juntos porque falham juntos e pelo mesmo motivo: se o enlace fechou, nenhum
+/// dos três vai a lugar nenhum, e o que se faz com isso é um só.
+async fn entrar(client: &Enlace, cage: CageId, line: LineId) -> Result<(), Fechado> {
+    client.inserir_plug(cage).await?;
+    client.abrir_linha(line).await?;
+    client.historico(line, 50).await
+}
+
+/// Põe na tela o fim de uma sessão cujo enlace fechou no meio de um pedido.
+///
+/// `specs/05-cliente-tui.md`: só `:q`, `:quit`, `:sair` e Ctrl-C saem do
+/// programa; toda outra forma de acabar mostra o motivo e volta à lista. Um
+/// enlace fechado é uma sessão que acabou — o Dogma não está mais do outro lado
+/// —, e não um defeito do cliente.
+///
+/// Era o buraco: `Enlace::dizer` devolve [`Fechado`] quando a sessão já morreu,
+/// e o `?` levava isso até o `main`, que imprimia `plug encerrou: …` e saía com
+/// código diferente de zero. Bastava o `select!` escolher a tecla em vez do
+/// `Aviso::Encerrado` que estava pronto ao lado — e ele escolhe qualquer um dos
+/// dois — para apertar Enter matar o cliente.
+///
+/// O que **continua** fatal é o que não tem tela onde caber: um terminal que
+/// não se deixa dirigir, uma pasta de configuração onde não dá para escrever.
+/// Isto aqui não é um `catch` geral, e é por isso que trata um tipo só.
+fn enlace_fechado(runtime: &mut Runtime<'_>) {
+    runtime.app.screen = Screen::Lost {
+        reason: "O ENLACE FECHOU — o Dogma não está mais do outro lado".to_owned(),
+    };
+}
+
 /// Refreshes everything that changes on its own: the clock, the audio meters,
 /// and the Sync Ratio.
-fn tick(runtime: &mut Runtime, client: &Enlace) {
+fn tick(runtime: &mut Runtime<'_>, client: &Enlace) {
     runtime.app.clock = clock();
 
     if let Some(rtt) = client.rtt() {
@@ -787,10 +847,26 @@ fn tick(runtime: &mut Runtime, client: &Enlace) {
 async fn fim_de_sessao(
     terminal: &mut Screen1,
     key_rx: &mut tokio::sync::mpsc::Receiver<Event>,
-    runtime: &mut Runtime,
+    runtime: &mut Runtime<'_>,
     hospedagem: &mut Option<seele_server::hospedagem::Hospedagem>,
 ) -> Result<bool> {
-    terminal.draw(|frame| ui::render(frame, &runtime.app, runtime.theme))?;
+    terminal.draw(|frame| ui::render(frame, &runtime.app, *runtime.theme))?;
+
+    // Tecla que chegou **antes** desta tela não é resposta a ela.
+    //
+    // Entre escolher um Dogma na lista e o `conectar` devolver, ninguém lê o
+    // canal: a identidade é carregada de disco, os pins abrem, o Dogma de casa
+    // sobe, o handshake acontece — e as sessenta e quatro vagas do canal vão
+    // enchendo com quem apertou Enter de novo, ou segurou (a repetição conta
+    // como apertar). Se o Dogma estiver morto, a tela de motivo aparecia e era
+    // dispensada no primeiro `recv()` por uma tecla de um segundo atrás: a
+    // pessoa voltava à lista sem nunca ter lido `NÃO FOI POSSÍVEL ALCANÇAR O
+    // DOGMA`, que é justamente por que este ramo parou de matar o processo.
+    //
+    // Esvaziar **depois** de desenhar é o que separa uma coisa da outra: o que
+    // for apertado com a tela já no ar chega depois daqui e continua valendo.
+    esvaziar(key_rx);
+
     let _ = tokio::time::timeout(Duration::from_secs(30), async {
         while let Some(event) = key_rx.recv().await {
             if tecla_apertada(&event).is_some() {
@@ -804,6 +880,14 @@ async fn fim_de_sessao(
     Ok(true)
 }
 
+/// Joga fora o que já estava no canal, sem esperar por nada.
+///
+/// `try_recv` e não `recv`: o ponto é não bloquear. O laço acaba tanto no canal
+/// vazio quanto no canal fechado, que são os dois `Err` que existem.
+fn esvaziar(key_rx: &mut tokio::sync::mpsc::Receiver<Event>) {
+    while key_rx.try_recv().is_ok() {}
+}
+
 /// Solta o que a sessão tinha de pé, e espera a porta voltar.
 ///
 /// A espera é o ponto: `Hospedagem::encerrar` fecha o endpoint e só volta
@@ -812,7 +896,7 @@ async fn fim_de_sessao(
 /// (`apps/seele-app/src/main.rs`), e a razão de a hospedagem não poder
 /// simplesmente cair no fim da função: `drop` não espera.
 async fn desligar(
-    runtime: &mut Runtime,
+    runtime: &mut Runtime<'_>,
     hospedagem: &mut Option<seele_server::hospedagem::Hospedagem>,
 ) {
     runtime.voice = None;
@@ -862,7 +946,7 @@ fn tecla_apertada(evento: &Event) -> Option<KeyEvent> {
 ///
 /// Returns a list because the space bar in a terminal that cannot report
 /// releases has to produce both halves of a press at once.
-fn key_source(runtime: &mut Runtime, event: KeyEvent) -> Vec<Key> {
+fn key_source(runtime: &mut Runtime<'_>, event: KeyEvent) -> Vec<Key> {
     // Terminals that report releases send both; without filtering, every key
     // would register twice.
     if runtime.holds && event.kind == KeyEventKind::Repeat {
@@ -911,7 +995,7 @@ fn key_source(runtime: &mut Runtime, event: KeyEvent) -> Vec<Key> {
 /// key there would mean a microphone that never closes. So they get a latch:
 /// press to open, press to close. Different feel, same two states, and the
 /// telemetry bar says which one is live either way.
-fn space(runtime: &mut Runtime, kind: KeyEventKind) -> Vec<Key> {
+fn space(runtime: &mut Runtime<'_>, kind: KeyEventKind) -> Vec<Key> {
     if runtime.holds {
         return match kind {
             KeyEventKind::Press => vec![Key::SpaceDown],
@@ -931,7 +1015,12 @@ fn space(runtime: &mut Runtime, kind: KeyEventKind) -> Vec<Key> {
 }
 
 /// Carries out what a keystroke asked for.
-async fn act(runtime: &mut Runtime, client: &Enlace, action: Action, line: LineId) -> Result<()> {
+async fn act(
+    runtime: &mut Runtime<'_>,
+    client: &Enlace,
+    action: Action,
+    line: LineId,
+) -> Result<(), Fechado> {
     match action {
         Action::Quit => runtime.app.quit(),
 
@@ -978,7 +1067,7 @@ async fn act(runtime: &mut Runtime, client: &Enlace, action: Action, line: LineI
 }
 
 /// Enter on the selected row: enter a Cage, or open a Line.
-async fn activate(runtime: &mut Runtime, client: &Enlace) -> Result<()> {
+async fn activate(runtime: &mut Runtime<'_>, client: &Enlace) -> Result<(), Fechado> {
     let Some(node) = runtime.app.tree.get(runtime.app.selected).cloned() else {
         return Ok(());
     };
@@ -1006,7 +1095,11 @@ async fn activate(runtime: &mut Runtime, client: &Enlace) -> Result<()> {
 /// The fetch is what makes `specs/06-clientes-gui.md`'s "sem perda de
 /// histórico" true: a client arriving late reads what was already said instead
 /// of an empty room.
-async fn open_line(runtime: &mut Runtime, client: &Enlace, line: LineId) -> Result<()> {
+async fn open_line(
+    runtime: &mut Runtime<'_>,
+    client: &Enlace,
+    line: LineId,
+) -> Result<(), Fechado> {
     client.abrir_linha(line).await?;
     runtime.room.open_line(line);
     client.historico(line, 50).await?;
@@ -1016,7 +1109,11 @@ async fn open_line(runtime: &mut Runtime, client: &Enlace, line: LineId) -> Resu
     Ok(())
 }
 
-async fn run_command(runtime: &mut Runtime, client: &Enlace, command: &Command) -> Result<()> {
+async fn run_command(
+    runtime: &mut Runtime<'_>,
+    client: &Enlace,
+    command: &Command,
+) -> Result<(), Fechado> {
     match command {
         Command::Quit => runtime.app.quit(),
 
@@ -1097,7 +1194,10 @@ async fn run_command(runtime: &mut Runtime, client: &Enlace, command: &Command) 
         }
 
         Command::Theme { which } => {
-            runtime.theme = Theme::with_palette(match which.as_deref() {
+            // Escrito no tema do **programa**, e não numa cópia da sessão: quem
+            // trocou de paleta para conseguir ler a tela continua lendo depois
+            // de ejetar e entrar noutro Dogma.
+            *runtime.theme = Theme::with_palette(match which.as_deref() {
                 Some("mono" | "sem-cor") => Palette::Mono,
                 Some("16") => Palette::Ansi16,
                 Some("256") => Palette::Ansi256,
@@ -1191,7 +1291,7 @@ async fn run_command(runtime: &mut Runtime, client: &Enlace, command: &Command) 
 /// Refreshes the search itself rather than leaving it to callers: `local` is
 /// in scope for `refazer_busca`, and a call at every one of this function's
 /// dozen-odd call sites is a call that eventually gets left out somewhere.
-fn note(runtime: &mut Runtime, text: String) {
+fn note(runtime: &mut Runtime<'_>, text: String) {
     runtime.app.local.push(ChatLine {
         at: clock_short(),
         author: "SEELE".to_owned(),
@@ -1248,6 +1348,62 @@ mod tests {
         // tela, e com a captura de mouse ligada há evento chegando o tempo todo.
         assert!(tecla_apertada(&Event::Resize(80, 24)).is_none());
         assert!(tecla_apertada(&Event::FocusGained).is_none());
+    }
+
+    #[test]
+    fn a_tela_de_motivo_nao_come_a_tecla_que_vem_depois_dela() {
+        // As duas metades da regra, e a segunda importa tanto quanto a
+        // primeira: esvaziar o canal não pode virar "ignore teclas por um
+        // tempo". O que chegou antes da tela some; o que chegar depois vale.
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<Event>(64);
+        for _ in 0..5 {
+            assert!(tx.try_send(evento(KeyEventKind::Press)).is_ok());
+        }
+
+        esvaziar(&mut rx);
+        assert!(
+            rx.try_recv().is_err(),
+            "sobrou tecla de antes da tela, e ela dispensaria a tela antes de alguém ler"
+        );
+
+        assert!(tx.try_send(evento(KeyEventKind::Press)).is_ok());
+        assert!(
+            rx.try_recv().is_ok(),
+            "a tecla apertada com a tela no ar foi engolida junto"
+        );
+    }
+
+    #[test]
+    fn um_enlace_fechado_vira_motivo_na_tela_e_nao_erro_do_programa() {
+        // `specs/05-cliente-tui.md`: só `:q`, `:quit`, `:sair` e Ctrl-C saem do
+        // programa. Mandar mensagem por um enlace que fechou devolvia `Fechado`,
+        // o `?` levava até o `main`, e o cliente morria com uma linha de stderr
+        // em vez de dizer o que houve.
+        let mut tema = Theme::detect();
+        let mut runtime = Runtime {
+            app: App::new(),
+            room: Room::new(),
+            theme: &mut tema,
+            voice: None,
+            sync: SyncRatio::new(),
+            holds: false,
+            latched: false,
+            next_message_id: 1,
+        };
+
+        enlace_fechado(&mut runtime);
+
+        let Screen::Lost { reason } = &runtime.app.screen else {
+            panic!("um enlace fechado não pôs na tela o fim da sessão");
+        };
+        assert!(
+            !reason.trim().is_empty(),
+            "a tela do fim está sem motivo, que é a única coisa que ela tem para dar"
+        );
+        assert!(
+            !runtime.app.quit,
+            "fechar o enlace não é pedido para fechar o cliente"
+        );
     }
 
     #[test]

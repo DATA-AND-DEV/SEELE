@@ -789,6 +789,15 @@ fn render_battery(frame: &mut Frame<'_>, theme: Theme, area: Rect, remaining: u6
 /// A client that closes without saying why turns every disconnection into a
 /// support question. `specs/02-protocolo.md` carries enumerated reasons for
 /// exactly this moment; [`crate::text`] turns them into sentences.
+///
+/// The reason is wrapped **line by line**, and that is not tidiness. Some
+/// reasons are written with newlines because the newline is the information:
+/// the invite check prints the expected fingerprint over the offered one so the
+/// two can be read against each other, and `docs/pendencias.md` #12 promises
+/// exactly that. Handing the whole string to [`wrap`], which splits on
+/// whitespace, reflowed two sixty-four-character hex strings into one greedy
+/// paragraph — and comparing two unaligned hex strings is the one thing a human
+/// cannot do, on the screen whose only job it is.
 fn render_lost(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect, reason: &str) {
     let block = title_block(app, theme);
     let inner = block.inner(area);
@@ -799,11 +808,19 @@ fn render_lost(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect, reaso
         Line::from(Span::styled("  ENLACE ENCERRADO", theme.alert())),
         Line::from(""),
     ];
-    for wrapped in wrap(reason, budget.saturating_sub(2)) {
-        lines.push(Line::from(Span::styled(
-            format!("  {wrapped}"),
-            theme.body(),
-        )));
+    for paragraph in reason.split('\n') {
+        // A blank line in the reason is a blank line on screen: it is what
+        // separates the sentence from the two values it is about.
+        if paragraph.trim().is_empty() {
+            lines.push(Line::from(""));
+            continue;
+        }
+        for wrapped in wrap(paragraph, budget.saturating_sub(2)) {
+            lines.push(Line::from(Span::styled(
+                format!("  {wrapped}"),
+                theme.body(),
+            )));
+        }
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
@@ -1193,6 +1210,48 @@ mod tests {
         assert!(
             !screen.contains("CAGES / LINHAS"),
             "a dead session still shows a live roster:\n{screen}"
+        );
+    }
+
+    #[test]
+    fn the_reason_keeps_the_line_breaks_that_carry_its_meaning() {
+        // `docs/pendencias.md` #12 promises the refused Dogma is shown "com a
+        // esperada e a ofertada lado a lado". `wrap` splits on whitespace, so
+        // handing it the whole reason reflowed two sixty-four-character hex
+        // strings into one paragraph — the one shape in which they cannot be
+        // compared, on the screen whose only job is comparing them.
+        let mut app = populated();
+        let expected = "a".repeat(64);
+        let offered = "b".repeat(64);
+        app.screen = Screen::Lost {
+            reason: format!(
+                "ESTE NÃO É O DOGMA DO CONVITE.\n\nesperada:  {expected}\nofertada:  {offered}"
+            ),
+        };
+        let screen = draw(&app, Palette::True, (80, 24));
+
+        // The rows carry the panel border, so this asks which row a label is on
+        // and not what a row begins with.
+        let row_with = |needle: &str| screen.lines().position(|line| line.contains(needle));
+        let (Some(esperada), Some(ofertada)) = (row_with("esperada:"), row_with("ofertada:"))
+        else {
+            panic!("the reason lost one of the two fingerprints:\n{screen}");
+        };
+        assert_ne!(
+            esperada, ofertada,
+            "both fingerprints reflowed onto one row, which is the shape they cannot be \
+             compared in:\n{screen}"
+        );
+        assert!(
+            ofertada > esperada,
+            "the offered fingerprint did not stay below the expected one:\n{screen}"
+        );
+        // Same prefix, same width, same column: that is what "side by side"
+        // means when the values themselves are unreadable strings.
+        assert_eq!(
+            screen.lines().nth(esperada).map(|line| line.find("aaa")),
+            screen.lines().nth(ofertada).map(|line| line.find("bbb")),
+            "the two fingerprints do not start in the same column:\n{screen}"
         );
     }
 
