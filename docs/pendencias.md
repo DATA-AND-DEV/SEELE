@@ -223,6 +223,44 @@ app: um campo de impressão esperada no `ConnectConfig` e a recusa antes do
 confiança do ADR 0003 para as duas cascas, e isso é tarefa própria — não um
 remendo no fim de uma tarefa de tela.
 
+**Uma segunda ponta, do mesmo fio.** O `Session::convite` é limpo só quando
+alguém troca o endereço no campo — nunca ao desconectar ou ejetar. Quem cola um
+link, entra, sai e entra de novo no mesmo endereço sem colar nada reaproveita a
+impressão digital do convite anterior. Hoje é inerte, porque nada confere nada;
+vira defeito no dia em que a FFI passar a conferir, que é o mesmo dia em que o
+resto desta pendência fecha.
+
 **Quando dói.** Toda vez que alguém cola no app um convite que trazia a
 confirmação de identidade. É o caminho que o ADR 0006 desenhou para transformar
 o primeiro contato de cego em verificado, e no app ele ainda não transforma.
+
+## 13 · As três telas novas do app nunca foram vistas por ninguém
+
+**Sintoma.** Não há sintoma relatado, e é justamente esse o problema. Três
+regiões da janela — a lista de Dogmas visitados na tela de entrada, o campo
+CONVITE com o aviso de conferência pendente, e a barra de busca com o contador
+`[n/m]` — foram escritas, testadas por fora e **nunca desenhadas para um
+humano**. O ambiente onde este ramo foi feito não consegue capturar tela, e
+`cargo tauri dev` abre uma janela que ninguém está lá para olhar.
+
+**O que se sabe.** O que dá para afirmar sem ver está afirmado, e não é pouco:
+`apps/seele-app/tests/frontend.rs` amarra cada `invoke` a um comando registrado
+e cada `$("id")` a um id que existe na página, `apps/seele-app/tests/tokens.rs`
+recusa cor que não esteja nos tokens, e a aritmética do realce é conferida
+sobre os mesmos tipos que atravessam a ponte. Nada disso alcança o que só o
+olho alcança: se o contador cabe ao lado do campo em janela estreita, se a
+lista de visitados empurra o formulário para fora da tela quando tem vinte
+entradas, se o realce corrente se distingue do resto de verdade e não só no
+papel, se o aviso do convite aparece onde alguém vai ler.
+
+**O que ficou tentado.** Nada — e a ausência é o registro. `specs/06-clientes-gui.md`
+já descreve as três como prontas, e é essa diferença entre "descrito" e "visto"
+que esta entrada existe para não deixar passar calada.
+
+**Por que não foi resolvido.** Precisa de uma máquina com tela e de alguém na
+frente dela. Não é tarefa de código, e fingir que um teste de texto substitui
+isso seria trocar a verificação pelo seu retrato.
+
+**Quando dói.** Na primeira vez que alguém abrir o app depois de M5 — que é
+tarde demais para descobrir que uma das três está torta. Ver
+`docs/teste-duas-maquinas.md`, que é o roteiro onde este passo cabe.
