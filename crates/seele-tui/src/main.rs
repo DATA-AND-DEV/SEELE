@@ -243,14 +243,9 @@ async fn escolher(
         let Some(evento) = key_rx.recv().await else {
             return Ok(None);
         };
-        let Event::Key(tecla) = evento else {
+        let Some(tecla) = tecla_apertada(&evento) else {
             continue;
         };
-        // Sem isto uma tecla conta duas vezes no Windows, onde chegam o
-        // pressionar e o soltar.
-        if tecla.kind == KeyEventKind::Release {
-            continue;
-        }
         if tecla.modifiers.contains(KeyModifiers::CONTROL)
             && matches!(tecla.code, KeyCode::Char('c'))
         {
@@ -644,10 +639,37 @@ async fn sessao(
                         // The core folds it in and says what moved; redrawing
                         // for a round-trip measurement nobody asked to see is
                         // thirty frames a second of nothing.
-                        if runtime.room.apply(&message).any() {
+                        let mudou = runtime.room.apply(&message);
+                        if mudou.any() {
                             view::project(&runtime.room, &mut runtime.app);
                             runtime.app.refazer_busca();
                             dirty = true;
+                        }
+                        // O Dogma avisou que está desconectando. O motivo é
+                        // deste momento e de mais nenhum: quando a conexão
+                        // cair de fato, o `Aviso::Estado` escreve a bateria
+                        // interna por cima, e cinco minutos depois a pessoa
+                        // saberia que a sessão acabou sem saber que foi
+                        // expulsa, barrada ou que o Dogma estava lotado.
+                        //
+                        // `view::project` acabou de pôr na tela o texto que o
+                        // `text::disconnect` dá para este `DisconnectReason`,
+                        // então é só mostrar e sair.
+                        if mudou.ended {
+                            // Soltar o enlace aqui responde ao
+                            // `view::worth_retrying`: sem enlace não há
+                            // contagem de reconexão para começar, nem para um
+                            // motivo que valeria a pena tentar de novo. Quem
+                            // quiser tentar volta pela lista, que é o que a
+                            // tela de seleção é.
+                            drop(client);
+                            return fim_de_sessao(
+                                terminal,
+                                key_rx,
+                                &mut runtime,
+                                &mut hospedagem,
+                            )
+                            .await;
                         }
                     }
                     // A queda não encerra nada. `specs/07-tema-evangelion.md`:
@@ -771,10 +793,7 @@ async fn fim_de_sessao(
     terminal.draw(|frame| ui::render(frame, &runtime.app, runtime.theme))?;
     let _ = tokio::time::timeout(Duration::from_secs(30), async {
         while let Some(event) = key_rx.recv().await {
-            // Soltar não é apertar. No Windows chegam as duas, e a soltura da
-            // tecla que trouxe até aqui dispensaria a tela antes de alguém
-            // conseguir ler — o mesmo filtro que o `escolher` já faz.
-            if matches!(event, Event::Key(tecla) if tecla.kind != KeyEventKind::Release) {
+            if tecla_apertada(&event).is_some() {
                 return;
             }
         }
@@ -816,6 +835,26 @@ fn read_terminal_events(sender: &tokio::sync::mpsc::Sender<Event>) {
             }
             Err(_) => return,
         }
+    }
+}
+
+/// A tecla que um evento representa, se representa alguma.
+///
+/// `None` para o que não é tecla e para as **solturas**. Um terminal que fala o
+/// protocolo do Kitty manda o apertar e o soltar, e o Windows manda os dois de
+/// qualquer jeito: sem este filtro, cada tecla conta duas vezes na tela de
+/// seleção, e a soltura da tecla que levou alguém até a tela de motivo dispensa
+/// a tela antes de a pessoa conseguir ler por que a sessão acabou.
+///
+/// Repetição conta como apertar: segurar uma tecla é continuar pedindo.
+///
+/// O laço da sessão **não** passa por aqui, e é de propósito: lá a soltura da
+/// barra de espaço é justamente o que fecha o microfone, e quem cuida disso é o
+/// [`key_source`].
+fn tecla_apertada(evento: &Event) -> Option<KeyEvent> {
+    match evento {
+        Event::Key(tecla) if tecla.kind != KeyEventKind::Release => Some(*tecla),
+        _ => None,
     }
 }
 
@@ -1172,4 +1211,58 @@ fn clock() -> String {
 
 fn clock_short() -> String {
     chrono::Local::now().format("%H:%M").to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn evento(kind: KeyEventKind) -> Event {
+        Event::Key(KeyEvent::new_with_kind(
+            KeyCode::Char('a'),
+            KeyModifiers::NONE,
+            kind,
+        ))
+    }
+
+    #[test]
+    fn soltar_uma_tecla_nao_conta_como_apertar() {
+        // Esta é a regra que só quebra no Windows e em terminal com o protocolo
+        // do Kitty, onde chegam as duas metades de cada tecla. Quem desenvolve
+        // no macOS nunca vê a regressão acontecer, e é por isso que ela precisa
+        // de teste e não de um leitor atento: sem o filtro, a tela que diz por
+        // que a sessão acabou some antes de ser lida, dispensada pela soltura
+        // da tecla que levou até ela.
+        assert!(tecla_apertada(&evento(KeyEventKind::Release)).is_none());
+        assert!(tecla_apertada(&evento(KeyEventKind::Press)).is_some());
+    }
+
+    #[test]
+    fn segurar_uma_tecla_continua_sendo_apertar() {
+        assert!(tecla_apertada(&evento(KeyEventKind::Repeat)).is_some());
+    }
+
+    #[test]
+    fn o_que_nao_e_tecla_nao_vira_tecla() {
+        // Redimensionar a janela não é escolher um Dogma nem dispensar uma
+        // tela, e com a captura de mouse ligada há evento chegando o tempo todo.
+        assert!(tecla_apertada(&Event::Resize(80, 24)).is_none());
+        assert!(tecla_apertada(&Event::FocusGained).is_none());
+    }
+
+    #[test]
+    fn a_tecla_atravessa_inteira() {
+        // O `escolher` lê `code` e `modifiers` depois deste filtro, então o
+        // filtro não pode devolver só "sim".
+        let ctrl_c = Event::Key(KeyEvent::new_with_kind(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL,
+            KeyEventKind::Press,
+        ));
+        let Some(tecla) = tecla_apertada(&ctrl_c) else {
+            panic!("uma tecla apertada voltou como nenhuma");
+        };
+        assert_eq!(tecla.code, KeyCode::Char('c'));
+        assert!(tecla.modifiers.contains(KeyModifiers::CONTROL));
+    }
 }
