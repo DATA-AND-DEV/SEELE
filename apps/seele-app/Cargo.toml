@@ -24,6 +24,13 @@ tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+# Só para os guardas de `tests/frontend.rs`: o frontend ramifica no *texto* que
+# um `Event` vira na ponte, e comparar com o texto de verdade é a única forma de
+# uma variante renomeada quebrar a compilação em vez de virar um ramo morto.
+# Mesma versão que o `seele-server` já traz para a árvore.
+[dev-dependencies]
+serde_json = "1.0.151"
+
 [lints]
 workspace = true
 

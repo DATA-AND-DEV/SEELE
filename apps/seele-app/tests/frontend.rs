@@ -274,6 +274,28 @@ fn the_visited_list_hides_itself_when_it_is_empty() {
 }
 
 #[test]
+fn the_event_name_the_script_branches_on_is_the_one_the_bridge_sends() {
+    // The listener rebuilds a live search only when the message list changed —
+    // an edit rewrites a body in place and a removal shortens the list, and
+    // either one leaves cached ranges pointing at different text.
+    //
+    // That branch is a string compared against whatever serde makes of a unit
+    // variant. Rename the variant and the branch simply stops firing: no error,
+    // no warning, and a search that quietly goes stale again.
+    let sent = serde_json::to_string(&seele_ffi::Event::MessagesChanged)
+        .expect("the event must serialise to cross the bridge at all");
+    assert_eq!(
+        sent, "\"MessagesChanged\"",
+        "the bridge no longer sends the string the script branches on"
+    );
+
+    assert!(
+        read("ui/seele.js").contains("payload === \"MessagesChanged\""),
+        "nothing in the script rebuilds the search when the message list changes"
+    );
+}
+
+#[test]
 fn the_frontend_never_names_a_protocol_concept() {
     // `specs/06-clientes-gui.md`, in one sentence: "Se o frontend precisa saber
     // o que é um `ssrc`, algo está errado." This is that sentence as a test.

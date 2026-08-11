@@ -630,6 +630,8 @@ async function alternarCanal(evento) {
       linhaAberta = Number(item.dataset.linha);
       await invoke("open_line", { line: linhaAberta });
     }
+    // Soltos **antes** do redesenho, não depois: ver `soltarCasamentos`.
+    soltarCasamentos();
     await atualizar();
     // A lista de mensagens acabou de ser trocada inteira. Ver `refazerBusca`.
     await refazerBusca();
@@ -691,15 +693,33 @@ function limparBusca() {
   if (desenhado) desenharMensagens(desenhado);
 }
 
+/** Há uma busca de pé? */
+function buscaAtiva() {
+  return $("campo-busca").value.trim() !== "";
+}
+
+/**
+ * Solta os casamentos antes de um redesenho que troca a lista.
+ *
+ * `atualizar()` repinta com o que estiver no mapa, e só uma volta de IPC depois
+ * é que `refazerBusca` conserta — mas o quadro do meio chega a aparecer,
+ * acendendo trechos das mensagens erradas. Soltar antes troca um realce errado
+ * visível por nenhum realce durante um quadro.
+ */
+function soltarCasamentos() {
+  casamentosPorMensagem = new Map();
+}
+
 /**
  * Refaz a busca sobre o histórico que está na tela agora.
  *
- * Obrigatório sempre que a lista desenhada for trocada inteira — abrir outra
- * Linha, entrar ou sair de um Cage. Ao contrário do `plug`, que recalcula o
- * realce a partir do termo a cada desenho (`seele-tui::ui`) e só guarda o
- * cursor, esta janela guarda os deslocamentos que vieram do Rust; sem um ponto
- * de invalidação eles passariam a acender trechos de mensagens que não são mais
- * aquelas, com `[n/m]` contando uma conversa que saiu da tela.
+ * Obrigatório sempre que a lista desenhada mudar de forma — abrir outra Linha,
+ * entrar ou sair de um Cage, uma mensagem editada ou apagada. Ao contrário do
+ * `plug`, que recalcula o realce a partir do termo a cada desenho
+ * (`seele-tui::ui`) e só guarda o cursor, esta janela guarda os deslocamentos
+ * que vieram do Rust; sem um ponto de invalidação eles passariam a acender
+ * trechos de mensagens que não são mais aquelas, com `[n/m]` contando uma
+ * conversa que saiu da tela.
  *
  * O termo continua. O que se recalcula é todo o resto.
  */
@@ -915,6 +935,23 @@ listen("seele://event", (evento) => {
     mostrarFim(payload.Ended.reason);
     return;
   }
+
+  // Uma mensagem editada troca um corpo no lugar e uma apagada encurta a lista:
+  // nos dois casos os deslocamentos guardados passam a apontar para outro texto,
+  // que é a mesma falha que trocar de Linha causava, por outra porta. Mensagem
+  // acrescentada não desloca nada — entra no fim —, mas o evento é um só e não
+  // diz qual das três foi.
+  //
+  // Só com uma busca de pé, e só neste evento: refazer a busca a cada tique de
+  // telemetria seria uma volta de IPC por nada, duas vezes por segundo.
+  if (payload === "MessagesChanged" && buscaAtiva()) {
+    soltarCasamentos();
+    atualizar()
+      .then(refazerBusca)
+      .catch((falha) => console.warn("busca:", falha));
+    return;
+  }
+
   atualizar();
 });
 
