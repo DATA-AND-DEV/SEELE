@@ -52,6 +52,20 @@ pub use types::{
     PlugError, Severity, Snapshot, SyncBand as Band, Telemetry, Trust, VoiceMode,
 };
 
+/// O que a casca gráfica precisa do core além de um [`Plug`] vivo.
+///
+/// ADR 0002 deixa `seele-app` ver `seele-ffi` e mais nada, e a tela de entrada
+/// do app precisa dos mesmos três módulos que o `plug` usa direto: a lista de
+/// Dogmas visitados, a busca no histórico e a leitura de um `seele://`. Nenhum
+/// dos três é lógica de casca — se fossem escritos aqui, seriam escritos de
+/// novo no terminal e mais uma vez no cliente móvel.
+///
+/// Re-exportados um a um, e não com um `pub use seele_core::*`, pela mesma
+/// doutrina que `seele-core` já aplica sobre `seele-proto`: acrescentar a esta
+/// lista é a hora de perguntar se a casca precisa do valor ou da decisão por
+/// trás dele.
+pub use seele_core::{conhecidos, search, uri};
+
 /// How often measurements are refreshed.
 const TICK: Duration = Duration::from_millis(250);
 

@@ -40,6 +40,16 @@
       <span class="marca-legenda">SEELE</span>
     </h1>
 
+    <!--
+      Onde você já esteve. Some inteira quando não há visitado nenhum — o estado
+      vazio da tela é exatamente o de antes desta seção existir, e um cabeçalho
+      sobre uma lista vazia é pior que nenhum cabeçalho.
+    -->
+    <section id="visitados" class="visitados" hidden>
+      <h2 class="visitados-titulo rotulo">ONDE VOCÊ JÁ ESTEVE</h2>
+      <ul id="lista-visitados" class="lista-visitados"></ul>
+    </section>
+
     <form id="form-conectar" class="boot-form" autocomplete="off">
       <label class="campo">
         <span class="rotulo">DOGMA</span>
@@ -50,6 +60,16 @@
         <span class="rotulo">PILOTO</span>
         <input id="campo-apelido" name="apelido" value="piloto"
                spellcheck="false" autocapitalize="off" maxlength="32" required>
+      </label>
+      <!--
+        Um link colado preenche o endereço, e o token viaja com ele até o
+        `connect`. Quem recebeu um convite não precisa saber separar o endereço
+        do resto à mão.
+      -->
+      <label class="campo">
+        <span class="rotulo">CONVITE</span>
+        <input id="campo-convite" name="convite" placeholder="cole um seele://…"
+               spellcheck="false" autocapitalize="off">
       </label>
       <label class="campo campo-linha">
         <input id="campo-audio" type="checkbox" checked>
@@ -147,6 +167,21 @@
 
     <section class="painel painel-mensagens" aria-label="Mensagens">
       <h2 class="painel-titulo">MENSAGENS</h2>
+      <!--
+        A busca. `[1/3]` não é enfeite: `specs/05-cliente-tui.md` proíbe
+        informação transmitida só por cor, e o contador é o acompanhante
+        textual do realce.
+      -->
+      <form id="form-busca" class="busca" autocomplete="off">
+        <span class="prompt">/</span>
+        <input id="campo-busca" name="busca" placeholder="buscar…"
+               spellcheck="false" autocomplete="off">
+        <span id="busca-contador" class="busca-contador"></span>
+        <button id="busca-anterior" class="botao-fantasma" type="button"
+                title="ocorrência anterior">◂</button>
+        <button id="busca-proxima" class="botao-fantasma" type="button"
+                title="próxima ocorrência">▸</button>
+      </form>
       <ol id="lista-mensagens" class="mensagens"></ol>
       <form id="form-mensagem" class="compor" autocomplete="off">
         <span class="prompt">▸</span>

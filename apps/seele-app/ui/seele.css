@@ -467,3 +467,82 @@ input:focus {
   color: var(--seele-negro-absoluto);
   background: var(--seele-fosforo);
 }
+
+/* ---- onde você já esteve ----
+   Acima do formulário porque é o caminho mais curto para a maioria: quem abre o
+   app quase sempre volta para onde já foi. Fica escondida enquanto a lista está
+   vazia, e a tela de entrada é então exatamente a de antes desta seção existir. */
+.visitados { margin-bottom: 32px; }
+
+.visitados-titulo {
+  margin: 0 0 8px;
+  font: inherit;
+  font-size: var(--seele-t-rotulo);
+  font-weight: normal;
+}
+
+.lista-visitados { list-style: none; margin: 0; padding: 0; }
+
+.visitado {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  height: 24px;
+}
+
+/* O endereço inteiro é o alvo do clique, e não um ícone ao lado: o que se quer
+   apertar é o nome do lugar. */
+.visitado-ir {
+  font: inherit;
+  color: var(--seele-osso);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: start;
+}
+
+.visitado-ir:hover { color: var(--seele-laranja-nerv); }
+.visitado-ir:focus-visible { outline: 1px solid var(--seele-laranja-nerv); outline-offset: 2px; }
+
+.visitado-apelido, .visitado-quando {
+  font-size: var(--seele-t-rotulo);
+  color: var(--seele-osso-apagado);
+}
+
+/* Esquecer só aparece quando a linha é apontada: uma lista de atalhos com um
+   botão de apagar em cada linha é uma lista que se olha com cuidado. */
+.visitado .botao-fantasma { opacity: 0; }
+.visitado:hover .botao-fantasma,
+.visitado:focus-within .botao-fantasma { opacity: 1; }
+
+/* ---- a busca no painel de mensagens ---- */
+.busca {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 16px;
+  border-bottom: 1px solid var(--seele-linha);
+  flex: 0 0 auto;
+}
+
+.busca .prompt { color: var(--seele-laranja-nerv); }
+.busca input { flex: 1; min-width: 0; border: none; background: none; padding: 0; }
+.busca .botao-fantasma { margin-left: 0; }
+
+/* O contador é o acompanhante textual do realce: `specs/05-cliente-tui.md`
+   proíbe informação transmitida só por cor, e "[2/7]" é a mesma informação sem
+   depender de enxergar o laranja. */
+.busca-contador {
+  font-size: var(--seele-t-rotulo);
+  color: var(--seele-osso-apagado);
+  font-variant-numeric: tabular-nums;
+}
+
+/* O realce. Sublinhado além do preenchimento, pelo mesmo motivo do contador: a
+   ocorrência sobrevive a um monitor ruim sem depender da cor. */
+.realce {
+  background: var(--seele-laranja-fraco);
+  color: var(--seele-laranja-nerv);
+  text-decoration: underline;
+}

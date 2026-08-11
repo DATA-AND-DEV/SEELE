@@ -25,6 +25,15 @@ let linhaAberta = null;
 let falando = false;
 /** Volume por apelido, para o deslizante não pular de volta a cada redesenho. */
 const volumes = new Map();
+/** O convite lido do último `seele://` colado, se houver. */
+let convitePendente = null;
+/**
+ * Os casamentos da busca corrente, agrupados por índice de mensagem.
+ *
+ * Vem prontos do Rust. Os deslocamentos são em **caracteres** e valem sobre o
+ * corpo normalizado — ver `corpoComRealce`.
+ */
+let casamentosPorMensagem = new Map();
 
 // ---------------------------------------------------------------- utilidades
 
@@ -38,6 +47,19 @@ function relogio(segundos) {
   if (!segundos) return "--:--";
   const quando = new Date(segundos * 1000);
   return quando.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+/**
+ * Quanto tempo faz, em palavras curtas.
+ *
+ * A data exata não ajuda a escolher para onde voltar; "ontem" ajuda.
+ */
+function quando(segundos) {
+  if (!segundos) return "—";
+  const dias = Math.floor((Date.now() / 1000 - segundos) / 86400);
+  if (dias <= 0) return "hoje";
+  if (dias === 1) return "ontem";
+  return `${dias} dias`;
 }
 
 /**
@@ -135,6 +157,15 @@ const FRASES = {
     UnknownPilot: "NÃO CONHEÇO ESSE PILOTO",
     UnknownChannel: "NÃO CONHEÇO ESSE CANAL",
     LinkLost: "ENLACE PERDIDO",
+
+    // Por que um texto colado não é um convite. O Rust devolve o nome da
+    // falha; a frase é daqui, como todas as outras.
+    EsquemaDesconhecido: "ISTO NÃO PARECE UM CONVITE SEELE",
+    SemEndereco: "ESTE CONVITE NÃO TRAZ ENDEREÇO NENHUM",
+    EnderecoInvalido: "O ENDEREÇO DENTRO DESTE CONVITE NÃO É UM ENDEREÇO",
+    ImpressaoDigitalInvalida: "ESTE CONVITE CHEGOU CORTADO OU ADULTERADO",
+    TokenInvalido: "O CONVITE DENTRO DESTE LINK NÃO É UM CONVITE",
+    CageInvalido: "O CAGE DESTE CONVITE NÃO É UM NÚMERO",
 
     // Hospedar aqui dentro.
     JaHospedando: "JÁ ESTOU HOSPEDANDO NESTA JANELA",
@@ -249,7 +280,7 @@ function desenharMensagens(snapshot) {
   // meio de uma leitura é pior do que não acompanhar.
   const noFim = lista.scrollHeight - lista.scrollTop - lista.clientHeight < 32;
 
-  const itens = snapshot.messages.map((mensagem) => {
+  const itens = snapshot.messages.map((mensagem, indice) => {
     const item = elemento("li", mensagem.own ? "propria" : null);
     const cabeca = elemento("div", "cabeca");
     cabeca.append(
@@ -257,12 +288,48 @@ function desenharMensagens(snapshot) {
       elemento("span", null, mensagem.author_nickname),
     );
     if (mensagem.edited) cabeca.append(elemento("span", "editada", "editada"));
-    item.append(cabeca, elemento("div", "corpo", mensagem.body));
+
+    // O corpo **normalizado**, e isto não é detalhe de pintura. A busca roda
+    // sobre o corpo com o espaço colapsado e devolve deslocamentos naquele
+    // texto; fatiar o corpo cru com eles erra o alvo depois de qualquer espaço
+    // duplo ou quebra de linha. O `plug` já mostra o texto assim (`ui::wrap`
+    // parte por `split_whitespace`), então os dois clientes passam a desenhar a
+    // mesma string — que é também a que atravessa a ponte.
+    const texto = mensagem.body.split(/\s+/).filter(Boolean).join(" ");
+    const corpo = elemento("div", "corpo");
+    corpo.append(...corpoComRealce(texto, casamentosPorMensagem.get(indice)));
+    item.append(cabeca, corpo);
     return item;
   });
 
   repovoar(lista, itens);
   if (noFim) lista.scrollTop = lista.scrollHeight;
+}
+
+/**
+ * Parte o corpo em pedaços aceso e apagado.
+ *
+ * Recebe os intervalos prontos do Rust: com dobramento de acento e de caixa o
+ * frontend não teria como saber onde o casamento começou. Os deslocamentos são
+ * em caracteres, não em unidades de código — daí o `[...corpo]`, que é o que
+ * mantém o realce no lugar num corpo com emoji.
+ */
+function corpoComRealce(corpo, intervalos) {
+  if (!intervalos || intervalos.length === 0) return [document.createTextNode(corpo)];
+  const caracteres = [...corpo];
+  const pedacos = [];
+  let cursor = 0;
+  for (const { start, end } of intervalos) {
+    if (start > cursor) {
+      pedacos.push(document.createTextNode(caracteres.slice(cursor, start).join("")));
+    }
+    pedacos.push(elemento("mark", "realce", caracteres.slice(start, end).join("")));
+    cursor = end;
+  }
+  if (cursor < caracteres.length) {
+    pedacos.push(document.createTextNode(caracteres.slice(cursor).join("")));
+  }
+  return pedacos;
 }
 
 function desenharTelemetria(snapshot) {
@@ -374,6 +441,84 @@ async function atualizar() {
   }
 }
 
+/**
+ * A lista de Dogmas onde este piloto já esteve.
+ *
+ * Quem já entrou uma vez não deveria ter que redigitar um endereço IP. A lista
+ * chega pronta do Rust, do mais recente para o mais antigo — a única ordem útil
+ * numa lista de atalhos.
+ */
+async function desenharVisitados() {
+  const lista = await invoke("conhecidos");
+  const secao = $("visitados");
+  // Sem visitados, a seção some inteira: a tela volta a ser exatamente a de
+  // antes desta seção existir, e o estado vazio não piora.
+  secao.hidden = lista.length === 0;
+  if (lista.length === 0) return;
+
+  repovoar(
+    $("lista-visitados"),
+    lista.map((conhecido) => {
+      const linha = elemento("li", "visitado");
+      const ir = elemento("button", "visitado-ir", conhecido.alvo);
+      ir.type = "button";
+      ir.title = `entrar em ${conhecido.alvo} como ${conhecido.apelido}`;
+      ir.addEventListener("click", () => {
+        $("campo-servidor").value = conhecido.alvo;
+        $("campo-apelido").value = conhecido.apelido;
+        // Escolher da lista não é usar o convite colado: o token do último
+        // `seele://` vale para o Dogma daquele link e para nenhum outro.
+        $("campo-convite").value = "";
+        convitePendente = null;
+        conectar();
+      });
+      const esquecer = elemento("button", "botao-fantasma", "esquecer");
+      esquecer.type = "button";
+      esquecer.addEventListener("click", async () => {
+        await invoke("esquecer", { alvo: conhecido.alvo });
+        await desenharVisitados();
+      });
+      linha.append(
+        ir,
+        elemento("span", "visitado-apelido", conhecido.apelido),
+        elemento("span", "visitado-quando", quando(conhecido.visto_em)),
+        esquecer,
+      );
+      return linha;
+    }),
+  );
+}
+
+/**
+ * Lê o `seele://` colado no campo CONVITE.
+ *
+ * Quem lê o link é o Rust: um segundo analisador aqui seria um segundo conjunto
+ * de casos de borda para discordar do primeiro, e a impressão digital que o link
+ * carrega nem chega a atravessar a ponte.
+ */
+async function lerConvite() {
+  const campo = $("campo-convite");
+  const link = campo.value.trim();
+  const erro = $("boot-erro");
+  if (link === "") {
+    convitePendente = null;
+    return;
+  }
+
+  try {
+    const convite = await invoke("analisar_convite", { link });
+    $("campo-servidor").value = convite.alvo;
+    convitePendente = convite;
+    erro.hidden = true;
+  } catch (falha) {
+    // O resto do formulário fica intacto: quem colou errado não perde o que já
+    // tinha digitado nos outros campos.
+    convitePendente = null;
+    erro.textContent = fraseDeErro(falha);
+    erro.hidden = false;
+  }
+}
+
 async function conectar(evento) {
   evento?.preventDefault();
   const botao = $("botao-conectar");
@@ -391,6 +536,9 @@ async function conectar(evento) {
       server: $("campo-servidor").value.trim(),
       nickname: $("campo-apelido").value.trim(),
       audio: $("campo-audio").checked,
+      // O token do convite, quando o link trouxe um. `join_secret` do outro
+      // lado: a ponte do Tauri converte para camelCase.
+      joinSecret: convitePendente?.token ?? null,
     });
 
     for (const id of ["sub-melchior", "sub-balthasar", "sub-casper"]) $(id).textContent = "ok";
@@ -476,9 +624,74 @@ function digitando() {
   return ativo && (ativo.tagName === "INPUT" || ativo.tagName === "TEXTAREA");
 }
 
+// --------------------------------------------------------------------- busca
+
+/**
+ * Reagrupa os casamentos por mensagem, que é como o desenho os alcança.
+ *
+ * O cursor — qual das ocorrências está selecionada, e a regra de dar a volta nas
+ * pontas — vive no Rust. Aqui não há decisão nenhuma sobre busca.
+ */
+function guardarCasamentos(estado) {
+  casamentosPorMensagem = new Map();
+  for (const casamento of estado.casamentos) {
+    const lista = casamentosPorMensagem.get(casamento.message) ?? [];
+    lista.push(casamento);
+    casamentosPorMensagem.set(casamento.message, lista);
+  }
+}
+
+function desenharBusca(estado) {
+  // `[0/0]` e não vazio: "não achei" é informação, e um contador que some
+  // parece uma busca que não rodou.
+  $("busca-contador").textContent = `[${estado.posicao}/${estado.total}]`;
+  guardarCasamentos(estado);
+  if (desenhado) desenharMensagens(desenhado);
+  if (estado.atual) {
+    const linha = $("lista-mensagens").children[estado.atual.message];
+    linha?.scrollIntoView({ block: "center" });
+  }
+}
+
+function limparBusca() {
+  casamentosPorMensagem = new Map();
+  $("busca-contador").textContent = "";
+  if (desenhado) desenharMensagens(desenhado);
+}
+
 // ------------------------------------------------------------------- ligação
 
 $("form-conectar").addEventListener("submit", conectar);
+$("campo-convite").addEventListener("change", lerConvite);
+// `paste` dispara antes de o valor entrar no campo; o tique seguinte já o tem.
+$("campo-convite").addEventListener("paste", () => setTimeout(lerConvite, 0));
+
+// A tela de entrada é a primeira coisa que aparece, e a lista faz parte dela.
+desenharVisitados().catch((falha) => console.warn("conhecidos:", falha));
+
+$("form-busca").addEventListener("submit", (evento) => evento.preventDefault());
+
+$("campo-busca").addEventListener("input", async () => {
+  const termo = $("campo-busca").value;
+  if (termo.trim() === "") {
+    await invoke("busca_limpar");
+    limparBusca();
+    return;
+  }
+  try {
+    desenharBusca(await invoke("buscar", { termo }));
+  } catch (falha) {
+    // Sem sessão não há histórico para buscar. Não é erro de ninguém.
+    if (falha !== "NotConnected") console.warn("buscar:", falha);
+  }
+});
+
+$("busca-proxima").addEventListener("click", async () =>
+  desenharBusca(await invoke("busca_andar", { adiante: true })),
+);
+$("busca-anterior").addEventListener("click", async () =>
+  desenharBusca(await invoke("busca_andar", { adiante: false })),
+);
 $("form-mensagem").addEventListener("submit", enviar);
 $("lista-canais").addEventListener("click", alternarCanal);
 $("banner-fechar").addEventListener("click", () => ($("banner").hidden = true));
@@ -576,6 +789,16 @@ async function ejetar() {
   document.body.classList.remove("na-bateria");
   desenhado = null;
   linhaAberta = null;
+  await encerrarBusca();
+  // Quem acabou de sair de um Dogma tem que vê-lo na lista.
+  await desenharVisitados();
+}
+
+/** Zera o campo, o cursor no Rust e o realce. */
+async function encerrarBusca() {
+  $("campo-busca").value = "";
+  await invoke("busca_limpar");
+  limparBusca();
 }
 
 $("botao-trocar").addEventListener("click", ejetar);
@@ -589,11 +812,36 @@ $("botao-voltar").addEventListener("click", async () => {
   $("convite").hidden = true;
   desenhado = null;
   linhaAberta = null;
+  await encerrarBusca();
+  await desenharVisitados();
 });
 
 // A barra de espaço fala, exceto enquanto se digita — a mesma colisão que a TUI
 // resolve mantendo o push-to-talk fora do modo de inserção (decisão D19).
 window.addEventListener("keydown", (evento) => {
+  // `/` foca a busca, como no terminal. Só fora de um campo de texto — uma
+  // barra digitada numa mensagem é uma barra — e só com a sessão na tela, ou
+  // engoliria a tecla para focar um campo que está escondido.
+  if (evento.key === "/" && !digitando() && !$("tela-sessao").hidden) {
+    evento.preventDefault();
+    $("campo-busca").focus();
+    return;
+  }
+  if (evento.target === $("campo-busca")) {
+    if (evento.key === "Escape") {
+      evento.preventDefault();
+      encerrarBusca();
+      $("campo-busca").blur();
+      return;
+    }
+    if (evento.key === "Enter") {
+      // Enter anda; Shift+Enter volta — o `n`/`N` do `plug`, no teclado que
+      // esta janela tem.
+      evento.preventDefault();
+      invoke("busca_andar", { adiante: !evento.shiftKey }).then(desenharBusca);
+      return;
+    }
+  }
   if (evento.code === "Space" && !digitando() && !evento.repeat) {
     evento.preventDefault();
     segurarFala(true);

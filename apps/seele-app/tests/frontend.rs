@@ -168,6 +168,44 @@ fn without_comments(text: &str) -> String {
 }
 
 #[test]
+fn the_frontend_normalises_the_body_before_slicing_the_highlight() {
+    // The offsets come from Rust, computed over the *normalised* body — `buscar`
+    // runs `search::normalize` over every message. Slicing the raw body with
+    // them lands on the wrong character after a double space or a newline, and
+    // HTML collapsing whitespace on display does not save it: the error is in
+    // string indices, not in painting.
+    let script = read("ui/seele.js");
+    assert!(
+        script.contains("split(/\\s+/)"),
+        "the body is not normalised before the highlight ranges are applied to it"
+    );
+}
+
+#[test]
+fn the_visited_list_hides_itself_when_it_is_empty() {
+    // A heading over an empty list is worse than no heading: with nowhere to go
+    // back to, the entry screen must be exactly what it was before the section
+    // existed.
+    let page = read("ui/index.html");
+    let script = read("ui/seele.js");
+
+    let section = page
+        .split("id=\"visitados\"")
+        .nth(1)
+        .and_then(|rest| rest.split('>').next())
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        section.contains("hidden"),
+        "the visited section is not hidden in the markup, so it flashes before the list loads"
+    );
+    assert!(
+        script.contains("secao.hidden = lista.length === 0"),
+        "nothing hides the visited section when the list comes back empty"
+    );
+}
+
+#[test]
 fn the_frontend_never_names_a_protocol_concept() {
     // `specs/06-clientes-gui.md`, in one sentence: "Se o frontend precisa saber
     // o que é um `ssrc`, algo está errado." This is that sentence as a test.

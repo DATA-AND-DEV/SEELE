@@ -32,7 +32,12 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 /// Um Dogma que este cliente já visitou.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Serialize` pelo mesmo motivo de [`crate::search::Match`]: a casca desktop
+/// manda esta lista para a webview, e nada aqui é segredo — endereço, apelido e
+/// data são exatamente o que a pessoa digitou e o que ela precisa ver de volta
+/// para escolher para onde voltar.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Conhecido {
     /// `host` ou `host:porta`, como foi digitado.
     pub alvo: String,

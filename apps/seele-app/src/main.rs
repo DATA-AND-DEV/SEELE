@@ -42,6 +42,9 @@ struct Session {
     /// Vive aqui e não numa variável local porque tem que sobreviver ao comando
     /// que o criou: o servidor fica de pé enquanto a janela estiver aberta.
     hospedagem: Mutex<Option<seele_server::hospedagem::Hospedagem>>,
+    /// A busca corrente. O cursor é estado de sessão, e é o que impede a regra
+    /// de dar-a-volta de ser reescrita em JavaScript.
+    busca: Mutex<Option<seele_ffi::search::Search>>,
 }
 
 impl Session {
@@ -106,6 +109,11 @@ async fn connect(
     }
 
     let home = config_dir(&app);
+    // Guardados antes de a configuração levar os originais para a outra thread:
+    // a lista de visitados só é escrita lá embaixo, depois de a conexão existir.
+    let alvo = server.clone();
+    let apelido = nickname.clone();
+    let casa = home.clone();
     let config = ConnectConfig {
         server,
         nickname,
@@ -126,7 +134,40 @@ async fn connect(
     if let Ok(mut slot) = session.plug.lock() {
         *slot = Some(plug);
     }
+
+    // A metade invisível da lista de visitados: sem isto a seção da tela de
+    // entrada ficaria permanentemente vazia. A política é a mesma que o `plug`
+    // já escreveu em `crates/seele-tui/src/main.rs`.
+    //
+    // Registrado só **depois** de dar certo — guardar antes encheria a lista de
+    // endereços errados digitados uma vez, que é o oposto de uma lista de
+    // atalhos. E um Dogma hospedado aqui não entra: `127.0.0.1` não é lugar
+    // aonde se volta, é o botão HOSPEDAR. O `plug` decide isso pela bandeira
+    // `--hospedar`; aqui não há bandeira, e o endereço é o que sobrou para
+    // dizer a mesma coisa.
+    if !hospedado_aqui(&alvo) {
+        if let Ok(mut lista) = seele_ffi::conhecidos::Conhecidos::abrir(
+            std::path::PathBuf::from(&casa).join("conhecidos"),
+        ) {
+            // Falhar em gravar um atalho não pode derrubar uma conversa que já
+            // está de pé.
+            if let Err(erro) = lista.registrar(&alvo, &apelido, None) {
+                tracing::warn!(%erro, "não guardei este Dogma na lista de visitados");
+            }
+        }
+    }
+
     Ok(snapshot)
+}
+
+/// Este endereço é a própria máquina?
+///
+/// Só o começo do texto, e não uma resolução de nome: a pergunta é sobre o que
+/// a pessoa escolheu, não sobre para onde o pacote foi. `127.0.0.1:8383` é o que
+/// o botão HOSPEDAR escreve no campo, e é exatamente esse caso que não pertence
+/// a uma lista de lugares aonde se volta.
+fn hospedado_aqui(alvo: &str) -> bool {
+    alvo.starts_with("127.0.0.1") || alvo.starts_with("localhost") || alvo.starts_with("[::1]")
 }
 
 /// O que o app precisa saber depois de virar anfitrião.
@@ -304,6 +345,161 @@ fn set_volume(
     session.plug()?.set_volume(nickname, percent)
 }
 
+/// Onde fica a lista de Dogmas visitados.
+fn caminho_dos_conhecidos(app: &AppHandle) -> std::path::PathBuf {
+    std::path::PathBuf::from(config_dir(app)).join("conhecidos")
+}
+
+/// Os Dogmas onde este piloto já esteve.
+///
+/// Uma lista de atalhos corrompida não pode fechar a porta: `specs/05` diz que
+/// este arquivo é conveniência e pode ser apagado sem consequência. Por isso
+/// falha vira lista vazia, e nunca erro — a tela esconde a seção e o formulário
+/// de sempre continua ali.
+#[tauri::command]
+fn conhecidos(app: AppHandle) -> Vec<seele_ffi::conhecidos::Conhecido> {
+    seele_ffi::conhecidos::Conhecidos::abrir(caminho_dos_conhecidos(&app))
+        .map(|lista| lista.listar())
+        .unwrap_or_default()
+}
+
+/// Tira um Dogma da lista.
+///
+/// Um `Ok` quando a lista nem abriu é a resposta certa e não uma mentira: o que
+/// se pediu foi que aquele endereço não estivesse mais lá, e ele não está.
+#[tauri::command]
+fn esquecer(app: AppHandle, alvo: String) -> Result<(), ()> {
+    let Ok(mut lista) = seele_ffi::conhecidos::Conhecidos::abrir(caminho_dos_conhecidos(&app))
+    else {
+        return Ok(());
+    };
+    lista.esquecer(&alvo).map_err(|_| ())
+}
+
+/// O que um `seele://` colado diz à tela de entrada.
+///
+/// Deliberadamente **não** é o `Convite` inteiro do core. Ele carrega a
+/// impressão digital do certificado, e `specs/06-clientes-gui.md:19` é
+/// inegociável: se o frontend precisa saber o que é uma impressão digital, algo
+/// está errado. O que atravessa a ponte é o endereço a preencher e o token a
+/// devolver no `connect` — as duas coisas que a tela tem o que fazer com.
+#[derive(Debug, serde::Serialize)]
+struct ConviteLido {
+    /// O endereço do Dogma, para o campo DOGMA.
+    alvo: String,
+    /// O convite de uso único, quando o link trouxe um.
+    token: Option<String>,
+}
+
+/// Lê um `seele://` colado.
+///
+/// Mora aqui e não no JavaScript porque `specs/06:19` é inegociável, e porque um
+/// segundo analisador de URI seria um segundo conjunto de casos de borda para
+/// discordar do primeiro.
+#[tauri::command]
+fn analisar_convite(link: String) -> Result<ConviteLido, String> {
+    seele_ffi::uri::analisar(&link)
+        .map(|convite| ConviteLido {
+            alvo: convite.alvo,
+            token: convite.token,
+        })
+        .map_err(|erro| nome_da_falha(&erro).to_owned())
+}
+
+/// O nome estável de uma falha ao ler um convite.
+///
+/// Um `match` e não o `Display` do core. O `Display` de `ErroDeUri` hoje escreve
+/// o nome da variante, mas isso é escolha do core, e a frase que a pessoa lê
+/// está no `FRASES` do JavaScript amarrada a este nome — igual a todo o resto
+/// dos erros, porque nenhuma mensagem para gente é escrita em Rust. Escrito
+/// aqui, a próxima variante para a compilação em vez de virar uma tela que diz
+/// o nome de uma variante em inglês.
+fn nome_da_falha(erro: &seele_ffi::uri::ErroDeUri) -> &'static str {
+    use seele_ffi::uri::ErroDeUri as Falha;
+    match erro {
+        Falha::EsquemaDesconhecido => "EsquemaDesconhecido",
+        Falha::SemEndereco => "SemEndereco",
+        Falha::EnderecoInvalido => "EnderecoInvalido",
+        Falha::ImpressaoDigitalInvalida => "ImpressaoDigitalInvalida",
+        Falha::TokenInvalido => "TokenInvalido",
+        Falha::CageInvalido => "CageInvalido",
+    }
+}
+
+/// O que o frontend precisa saber sobre a busca corrente.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+struct BuscaEstado {
+    /// Onde o termo casou, na ordem em que a tela desenha.
+    casamentos: Vec<seele_ffi::search::Match>,
+    /// A ocorrência em que o cursor está.
+    atual: Option<seele_ffi::search::Match>,
+    /// Posição a partir de 1, para desenhar "[1/3]". Zero quando não casou nada.
+    posicao: u32,
+    /// Quantas ao todo.
+    total: u32,
+}
+
+impl BuscaEstado {
+    fn de(busca: &seele_ffi::search::Search) -> Self {
+        let (posicao, total) = busca.position();
+        Self {
+            // Todos, e não só o corrente: o app pinta o histórico inteiro de uma
+            // vez, e acender só a ocorrência do cursor esconderia as outras que
+            // estão na mesma tela.
+            casamentos: busca.matches().to_vec(),
+            atual: busca.current(),
+            posicao: u32::try_from(posicao).unwrap_or(0),
+            total: u32::try_from(total).unwrap_or(0),
+        }
+    }
+}
+
+/// Roda o termo sobre o histórico desta sessão.
+///
+/// Os corpos vão **normalizados**, e é isso que amarra os deslocamentos ao texto
+/// que a tela desenha: o frontend fatia a mesma string dos dois lados da ponte.
+#[tauri::command]
+fn buscar(session: State<'_, Session>, termo: String) -> Result<BuscaEstado, PlugError> {
+    let snapshot = session.plug()?.snapshot();
+    let busca = seele_ffi::search::Search::new(
+        snapshot
+            .messages
+            .iter()
+            .map(|mensagem| seele_ffi::search::normalize(&mensagem.body)),
+        &termo,
+    );
+    let estado = BuscaEstado::de(&busca);
+    if let Ok(mut slot) = session.busca.lock() {
+        *slot = Some(busca);
+    }
+    Ok(estado)
+}
+
+/// Anda uma ocorrência, dando a volta nas pontas.
+#[tauri::command]
+fn busca_andar(session: State<'_, Session>, adiante: bool) -> BuscaEstado {
+    let Ok(mut slot) = session.busca.lock() else {
+        return BuscaEstado::default();
+    };
+    let Some(busca) = slot.as_mut() else {
+        return BuscaEstado::default();
+    };
+    if adiante {
+        busca.next_match();
+    } else {
+        busca.previous_match();
+    }
+    BuscaEstado::de(busca)
+}
+
+/// Apaga a busca. Não falha: esvaziar o campo nunca pode dar erro.
+#[tauri::command]
+fn busca_limpar(session: State<'_, Session>) {
+    if let Ok(mut slot) = session.busca.lock() {
+        *slot = None;
+    }
+}
+
 fn main() {
     // Marca de arranque. `specs/06-clientes-gui.md` aceita M5 com inicialização
     // abaixo de 2 s, e um critério que ninguém mede é um critério que passa a
@@ -339,6 +535,12 @@ fn main() {
             set_talking,
             set_voice_mode,
             set_volume,
+            conhecidos,
+            esquecer,
+            analisar_convite,
+            buscar,
+            busca_andar,
+            busca_limpar,
         ])
         .run(tauri::generate_context!());
 
