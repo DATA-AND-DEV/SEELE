@@ -146,6 +146,15 @@ input:focus {
 
 .fim-motivo { margin-bottom: 32px; color: var(--seele-osso); }
 
+/* Ressalva, não falha. Laranja institucional e não o vermelho de alerta: o
+   vermelho é do que impede de entrar, e gastá-lo numa ressalva ensina a fechar
+   sem ler. `white-space: pre-line` porque a segunda linha diz o que fazer. */
+.aviso {
+  margin: 16px 0 0;
+  color: var(--seele-laranja-nerv);
+  white-space: pre-line;
+}
+
 /* ---------- topo ---------- */
 
 .topo {

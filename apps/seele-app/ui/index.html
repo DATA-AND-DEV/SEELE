@@ -93,6 +93,13 @@
       <li><span>CASPER</span><b id="sub-casper">·</b></li>
     </ol>
 
+    <!--
+      Ressalva, não falha: laranja e `role="status"`. O vermelho e o `alert` do
+      `#boot-erro` são para o que impede de entrar; usar o mesmo tratamento aqui
+      ensinaria a fechar sem ler, que é exatamente o que este aviso não pode
+      virar.
+    -->
+    <p id="boot-aviso" class="aviso" role="status" hidden></p>
     <p id="boot-erro" class="erro" role="alert" hidden></p>
   </div>
 </section>

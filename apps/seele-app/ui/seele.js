@@ -160,6 +160,8 @@ const FRASES = {
 
     // Por que um texto colado não é um convite. O Rust devolve o nome da
     // falha; a frase é daqui, como todas as outras.
+    ConferenciaPendente:
+      "ESTE CONVITE TRAZ UMA CONFIRMAÇÃO DE IDENTIDADE DO DOGMA, E ESTA JANELA AINDA NÃO SABE CONFERI-LA.\nDá para entrar, mas sem essa garantia. O `plug` no terminal confere.",
     EsquemaDesconhecido: "ISTO NÃO PARECE UM CONVITE SEELE",
     SemEndereco: "ESTE CONVITE NÃO TRAZ ENDEREÇO NENHUM",
     EnderecoInvalido: "O ENDEREÇO DENTRO DESTE CONVITE NÃO É UM ENDEREÇO",
@@ -289,15 +291,14 @@ function desenharMensagens(snapshot) {
     );
     if (mensagem.edited) cabeca.append(elemento("span", "editada", "editada"));
 
-    // O corpo **normalizado**, e isto não é detalhe de pintura. A busca roda
-    // sobre o corpo com o espaço colapsado e devolve deslocamentos naquele
-    // texto; fatiar o corpo cru com eles erra o alvo depois de qualquer espaço
-    // duplo ou quebra de linha. O `plug` já mostra o texto assim (`ui::wrap`
-    // parte por `split_whitespace`), então os dois clientes passam a desenhar a
-    // mesma string — que é também a que atravessa a ponte.
-    const texto = mensagem.body.split(/\s+/).filter(Boolean).join(" ");
+    // O corpo **cru**, e isto não é detalhe de pintura. `.mensagens .corpo` é
+    // `white-space: pre-wrap`: esta janela mostra quebra de linha e espaço
+    // duplo como eles chegaram, e é essa string que a busca do outro lado da
+    // ponte recebeu. Colapsar aqui deslocaria o realce em toda mensagem de mais
+    // de uma linha; colapsar dos dois lados alinharia o realce achatando a
+    // conversa, que é o preço errado a pagar por um índice.
     const corpo = elemento("div", "corpo");
-    corpo.append(...corpoComRealce(texto, casamentosPorMensagem.get(indice)));
+    corpo.append(...corpoComRealce(mensagem.body, casamentosPorMensagem.get(indice)));
     item.append(cabeca, corpo);
     return item;
   });
@@ -466,16 +467,24 @@ async function desenharVisitados() {
       ir.addEventListener("click", () => {
         $("campo-servidor").value = conhecido.alvo;
         $("campo-apelido").value = conhecido.apelido;
-        // Escolher da lista não é usar o convite colado: o token do último
-        // `seele://` vale para o Dogma daquele link e para nenhum outro.
-        $("campo-convite").value = "";
-        convitePendente = null;
+        // Escolher da lista não é usar o convite colado.
+        limparConvite();
         conectar();
       });
       const esquecer = elemento("button", "botao-fantasma", "esquecer");
       esquecer.type = "button";
       esquecer.addEventListener("click", async () => {
-        await invoke("esquecer", { alvo: conhecido.alvo });
+        try {
+          await invoke("esquecer", { alvo: conhecido.alvo });
+        } catch (falha) {
+          // A lista não pôde ser reescrita — disco cheio, permissão. A linha
+          // continua ali, e dizer isso é melhor que uma promessa recusada em
+          // silêncio e uma linha que teima em voltar.
+          console.warn("esquecer:", falha);
+          const erro = $("boot-erro");
+          erro.textContent = "NÃO CONSEGUI REESCREVER A LISTA DE VISITADOS";
+          erro.hidden = false;
+        }
         await desenharVisitados();
       });
       linha.append(
@@ -501,7 +510,7 @@ async function lerConvite() {
   const link = campo.value.trim();
   const erro = $("boot-erro");
   if (link === "") {
-    convitePendente = null;
+    limparConvite();
     return;
   }
 
@@ -510,13 +519,34 @@ async function lerConvite() {
     $("campo-servidor").value = convite.alvo;
     convitePendente = convite;
     erro.hidden = true;
+    // Um link que traz a confirmação de identidade do Dogma e um que não traz
+    // parecem iguais na tela, e só um deles protege. Calar sobre isso deixaria
+    // quem colou o link supondo a proteção justamente por causa dela.
+    const aviso = $("boot-aviso");
+    aviso.textContent = FRASES.ConferenciaPendente;
+    aviso.hidden = !convite.conferencia_pendente;
   } catch (falha) {
     // O resto do formulário fica intacto: quem colou errado não perde o que já
     // tinha digitado nos outros campos.
     convitePendente = null;
+    $("boot-aviso").hidden = true;
     erro.textContent = fraseDeErro(falha);
     erro.hidden = false;
   }
+}
+
+/**
+ * Esquece o convite colado, campo e tudo.
+ *
+ * O token vale para o Dogma daquele link. Deixá-lo para trás numa troca de
+ * endereço manda a credencial de um servidor para outro, que a recusa — e a
+ * recusa aparece como "credencial rejeitada" num Dogma que nunca pediu
+ * credencial nenhuma.
+ */
+function limparConvite() {
+  $("campo-convite").value = "";
+  convitePendente = null;
+  $("boot-aviso").hidden = true;
 }
 
 async function conectar(evento) {
@@ -601,6 +631,8 @@ async function alternarCanal(evento) {
       await invoke("open_line", { line: linhaAberta });
     }
     await atualizar();
+    // A lista de mensagens acabou de ser trocada inteira. Ver `refazerBusca`.
+    await refazerBusca();
   } catch (falha) {
     console.warn("canal:", falha);
   }
@@ -659,19 +691,19 @@ function limparBusca() {
   if (desenhado) desenharMensagens(desenhado);
 }
 
-// ------------------------------------------------------------------- ligação
-
-$("form-conectar").addEventListener("submit", conectar);
-$("campo-convite").addEventListener("change", lerConvite);
-// `paste` dispara antes de o valor entrar no campo; o tique seguinte já o tem.
-$("campo-convite").addEventListener("paste", () => setTimeout(lerConvite, 0));
-
-// A tela de entrada é a primeira coisa que aparece, e a lista faz parte dela.
-desenharVisitados().catch((falha) => console.warn("conhecidos:", falha));
-
-$("form-busca").addEventListener("submit", (evento) => evento.preventDefault());
-
-$("campo-busca").addEventListener("input", async () => {
+/**
+ * Refaz a busca sobre o histórico que está na tela agora.
+ *
+ * Obrigatório sempre que a lista desenhada for trocada inteira — abrir outra
+ * Linha, entrar ou sair de um Cage. Ao contrário do `plug`, que recalcula o
+ * realce a partir do termo a cada desenho (`seele-tui::ui`) e só guarda o
+ * cursor, esta janela guarda os deslocamentos que vieram do Rust; sem um ponto
+ * de invalidação eles passariam a acender trechos de mensagens que não são mais
+ * aquelas, com `[n/m]` contando uma conversa que saiu da tela.
+ *
+ * O termo continua. O que se recalcula é todo o resto.
+ */
+async function refazerBusca() {
   const termo = $("campo-busca").value;
   if (termo.trim() === "") {
     await invoke("busca_limpar");
@@ -684,7 +716,25 @@ $("campo-busca").addEventListener("input", async () => {
     // Sem sessão não há histórico para buscar. Não é erro de ninguém.
     if (falha !== "NotConnected") console.warn("buscar:", falha);
   }
-});
+}
+
+// ------------------------------------------------------------------- ligação
+
+$("form-conectar").addEventListener("submit", conectar);
+$("campo-convite").addEventListener("change", lerConvite);
+// `paste` dispara antes de o valor entrar no campo; o tique seguinte já o tem.
+$("campo-convite").addEventListener("paste", () => setTimeout(lerConvite, 0));
+
+// Digitar outro endereço à mão desfaz o convite. `lerConvite` escreve neste
+// campo por código, e atribuição não dispara `input` — só o teclado chega aqui.
+$("campo-servidor").addEventListener("input", limparConvite);
+
+// A tela de entrada é a primeira coisa que aparece, e a lista faz parte dela.
+desenharVisitados().catch((falha) => console.warn("conhecidos:", falha));
+
+$("form-busca").addEventListener("submit", (evento) => evento.preventDefault());
+
+$("campo-busca").addEventListener("input", refazerBusca);
 
 $("busca-proxima").addEventListener("click", async () =>
   desenharBusca(await invoke("busca_andar", { adiante: true })),
@@ -790,6 +840,9 @@ async function ejetar() {
   desenhado = null;
   linhaAberta = null;
   await encerrarBusca();
+  // O convite não sobrevive à sessão que ele abriu: quem sai, digita outro
+  // endereço e aperta INSERT mandaria o token do Dogma anterior ao novo.
+  limparConvite();
   // Quem acabou de sair de um Dogma tem que vê-lo na lista.
   await desenharVisitados();
 }
@@ -813,6 +866,7 @@ $("botao-voltar").addEventListener("click", async () => {
   desenhado = null;
   linhaAberta = null;
   await encerrarBusca();
+  limparConvite();
   await desenharVisitados();
 });
 

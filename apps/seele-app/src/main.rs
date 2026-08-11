@@ -45,6 +45,20 @@ struct Session {
     /// A busca corrente. O cursor é estado de sessão, e é o que impede a regra
     /// de dar-a-volta de ser reescrita em JavaScript.
     busca: Mutex<Option<seele_ffi::search::Search>>,
+    /// O último `seele://` lido, **inteiro** — impressão digital inclusive.
+    ///
+    /// A impressão não atravessa a ponte: `specs/06-clientes-gui.md:19` diz que
+    /// se o frontend precisa saber o que é uma impressão digital, algo está
+    /// errado. Mas jogá-la fora aqui seria pior. `seele-proto/src/uri.rs` chama
+    /// `fp` "o motivo principal de isto existir": é o que transforma o primeiro
+    /// contato de cego em verificado, e é a razão de o ADR 0006 ter fechado.
+    ///
+    /// Este app ainda não sabe conferir — [`seele_ffi::ConnectConfig`] não tem
+    /// campo por onde ela passe, e o `Trust::FirstContact` sai antes de a casca
+    /// se inscrever. Guardar aqui é o que faz o conserto ser ligar dois pontos
+    /// em vez de descobrir onde o valor se perdeu; o `plug` já confere, e a tela
+    /// diz que este não confere em vez de calar.
+    convite: Mutex<Option<seele_ffi::uri::Convite>>,
 }
 
 impl Session {
@@ -108,6 +122,17 @@ async fn connect(
         return Err(PlugError::AlreadyConnected);
     }
 
+    // O convite guardado vale para o Dogma dele e para nenhum outro. Quem cola
+    // um link e depois troca o endereço no campo deixaria para trás uma
+    // confirmação de identidade que não é deste servidor — e o dia em que a FFI
+    // souber conferi-la seria o dia em que uma sobra dessas viraria uma recusa
+    // que ninguém consegue explicar.
+    if let Ok(mut slot) = session.convite.lock() {
+        if slot.as_ref().is_some_and(|convite| convite.alvo != server) {
+            *slot = None;
+        }
+    }
+
     let home = config_dir(&app);
     // Guardados antes de a configuração levar os originais para a outra thread:
     // a lista de visitados só é escrita lá embaixo, depois de a conexão existir.
@@ -149,9 +174,15 @@ async fn connect(
         if let Ok(mut lista) = seele_ffi::conhecidos::Conhecidos::abrir(
             std::path::PathBuf::from(&casa).join("conhecidos"),
         ) {
+            // O Cage que já estava anotado, preservado. `registrar` reescreve a
+            // entrada inteira, e este arquivo é compartilhado com o `plug`, que
+            // grava em qual Cage a pessoa entrou e o lê de volta como padrão na
+            // sua tela de seleção. Passar `None` daqui apagaria, a cada visita
+            // pelo app, o que o terminal anotou.
+            let cage = lista.buscar(&alvo).and_then(|conhecido| conhecido.cage);
             // Falhar em gravar um atalho não pode derrubar uma conversa que já
             // está de pé.
-            if let Err(erro) = lista.registrar(&alvo, &apelido, None) {
+            if let Err(erro) = lista.registrar(&alvo, &apelido, cage) {
                 tracing::warn!(%erro, "não guardei este Dogma na lista de visitados");
             }
         }
@@ -389,6 +420,17 @@ struct ConviteLido {
     alvo: String,
     /// O convite de uso único, quando o link trouxe um.
     token: Option<String>,
+    /// O link trouxe uma confirmação de identidade que este app não confere.
+    ///
+    /// Só *que* existe, nunca *qual* — a segunda metade é a que o frontend não
+    /// pode saber. Um booleano é o suficiente para a tela dizer o que tem que
+    /// dizer, e é tudo o que ela recebe.
+    ///
+    /// Existe porque silêncio aqui é a falha, não a falta do recurso: quem cola
+    /// um link que traz a confirmação supõe estar protegido **por causa dela**.
+    /// A afordância é nova nesta versão; "antes também não conferia" não vale
+    /// como resposta para algo que antes não dava para fazer.
+    conferencia_pendente: bool,
 }
 
 /// Lê um `seele://` colado.
@@ -397,13 +439,22 @@ struct ConviteLido {
 /// segundo analisador de URI seria um segundo conjunto de casos de borda para
 /// discordar do primeiro.
 #[tauri::command]
-fn analisar_convite(link: String) -> Result<ConviteLido, String> {
-    seele_ffi::uri::analisar(&link)
-        .map(|convite| ConviteLido {
-            alvo: convite.alvo,
-            token: convite.token,
-        })
-        .map_err(|erro| nome_da_falha(&erro).to_owned())
+fn analisar_convite(session: State<'_, Session>, link: String) -> Result<ConviteLido, String> {
+    let convite =
+        seele_ffi::uri::analisar(&link).map_err(|erro| nome_da_falha(&erro).to_owned())?;
+
+    let lido = ConviteLido {
+        alvo: convite.alvo.clone(),
+        token: convite.token.clone(),
+        conferencia_pendente: convite.impressao_digital.is_some(),
+    };
+
+    // Guardado inteiro deste lado da ponte. Ver o campo em `Session`.
+    if let Ok(mut slot) = session.convite.lock() {
+        *slot = Some(convite);
+    }
+
+    Ok(lido)
 }
 
 /// O nome estável de uma falha ao ler um convite.
@@ -456,16 +507,23 @@ impl BuscaEstado {
 
 /// Roda o termo sobre o histórico desta sessão.
 ///
-/// Os corpos vão **normalizados**, e é isso que amarra os deslocamentos ao texto
-/// que a tela desenha: o frontend fatia a mesma string dos dois lados da ponte.
+/// Os corpos vão **crus**, e é isso que amarra os deslocamentos ao texto que a
+/// tela desenha: `.mensagens .corpo` é `white-space: pre-wrap`, então esta
+/// janela mostra quebra de linha e espaço duplo como eles chegaram. Normalizar
+/// aqui erraria o alvo em toda mensagem com espaço colapsado, e achatar o
+/// desenho para consertar isso seria trocar o produto pela implementação.
+///
+/// O `plug` faz o contrário — e está certo: `ui::wrap` já colapsa antes de
+/// desenhar, então lá o texto na tela é o normalizado. Cada casca busca o que
+/// desenha.
+///
+/// O custo, dito: com `' '` e `'\n'` sendo caracteres diferentes, um termo com
+/// espaço não casa por cima de uma quebra de linha.
 #[tauri::command]
 fn buscar(session: State<'_, Session>, termo: String) -> Result<BuscaEstado, PlugError> {
     let snapshot = session.plug()?.snapshot();
     let busca = seele_ffi::search::Search::new(
-        snapshot
-            .messages
-            .iter()
-            .map(|mensagem| seele_ffi::search::normalize(&mensagem.body)),
+        snapshot.messages.iter().map(|mensagem| &mensagem.body),
         &termo,
     );
     let estado = BuscaEstado::de(&busca);
