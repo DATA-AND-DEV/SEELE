@@ -90,6 +90,41 @@ Retratos de verdade: saem do mesmo código que desenha no terminal, rodando
 Três painéis e uma barra de telemetria permanente. Ninguém precisa abrir menu
 para saber que a conexão está ruim.
 
+### Buscar no que foi dito
+
+```text
+┌ SEELE ─ 同期率 ─ 第3新東京市 ─ 12:04:33 ─────────────────────────────────────┐
+│┌ DOGMA ─────────┐┌ CAGES / LINHAS ──────┐┌ MENSAGENS ───────────────────────┐│
+││▸ Terceira Tóqu…││▼ CAGE-01 CENTRAL     ││12:01 ayanami                     ││
+││                ││  ● ayanami      █ 98%││  verificando harmônicos          ││
+││                ││  ○ shinji       ▓ 71%││12:03 shinji                      ││
+││                ││  ○ asuka   A.T. ▒ 44%││  sync caiu aqui                  ││
+││                ││▶ CAGE-02 TESTE       ││12:04 você                        ││
+││                ││─ LINHA #geral        ││  vendo — o jitter subiu junto    ││
+││                ││─ LINHA #logs         ││12:05 ayanami                     ││
+││                ││                      ││  o sync voltou a subir           ││
+││                ││                      ││12:06 asuka                       ││
+││                ││                      ││  aqui o sync nem caiu            ││
+││                ││                      ││                                  ││
+││                ││                      ││                                  ││
+││                ││                      ││                                  ││
+││                ││                      ││                                  ││
+││                ││                      ││                                  ││
+││                ││                      ││                                  ││
+││                ││                      ││                                  ││
+││                ││                      ││                                  ││
+││                ││                      ││/ sync_  [1/3]                    ││
+│└────────────────┘└──────────────────────┘└──────────────────────────────────┘│
+│ BUSCA │ SYNC █ 94% │ RTT 38ms │ JIT 12ms │ LOSS 0.2% │ OPUS 32k │ A.T. OFF   │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+`/` busca no histórico e o contador anda enquanto se digita; `n` e `N` pulam
+para a ocorrência seguinte e para a anterior, dando a volta nas duas pontas. A
+ocorrência sob o cursor acende — e como esta página é texto, o realce não
+aparece aqui. É por isso que o `[1/3]` existe: nenhuma informação desta
+interface é transmitida só por cor.
+
 ### A ajuda cabe numa tela
 
 ```text

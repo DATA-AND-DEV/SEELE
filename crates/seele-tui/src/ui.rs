@@ -519,7 +519,7 @@ fn message_lines(
 /// mid-word.
 ///
 /// The counter in the compose line comes from the core and stays correct
-/// regardless, so the half of `specs/05-cliente-tui.md:105` that is not colour
+/// regardless, so the half of `specs/05-cliente-tui.md:144` that is not colour
 /// survives this. Closing it properly needs either the offset mapping this
 /// design exists to avoid, or lighting cells rather than spans.
 ///
@@ -585,7 +585,7 @@ fn highlight(
 
 /// The counter that goes beside a search, `  [1/3]`, or nothing without one.
 ///
-/// `specs/05-cliente-tui.md:105` forbids information carried by colour alone.
+/// `specs/05-cliente-tui.md:144` forbids information carried by colour alone.
 /// "Which of the three occurrences am I on" is exactly such information, and
 /// this is the half of it that survives `NO_COLOR` and sixteen colours by SSH.
 /// It is not decoration.
@@ -732,7 +732,7 @@ fn render_cramped(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
     // clip, exactly as `compose_line` does it: the warning alone is 22 cells,
     // so below about 29 columns an appended counter would fall off the edge and
     // leave the highlight carrying the position on its own, which is the
-    // `specs/05-cliente-tui.md:105` failure this row exists to prevent. The
+    // `specs/05-cliente-tui.md:144` failure this row exists to prevent. The
     // warning is the one that gives ground, because its own text is the thing
     // the terminal's size already says.
     let counter = search_counter(app);
@@ -1293,7 +1293,7 @@ mod tests {
 
     #[test]
     fn the_search_shows_the_counter_and_marks_the_current_line() {
-        // specs/05-cliente-tui.md:105: nothing may be conveyed by colour alone.
+        // specs/05-cliente-tui.md:144: nothing may be conveyed by colour alone.
         // The counter is the highlight's textual companion, and it is what
         // survives NO_COLOR and a 16-colour SSH terminal.
         let app = searching(&["o sync caiu aqui"], "sync");
@@ -1514,7 +1514,7 @@ mod tests {
         // Below 80×24 there is no compose line, so the warning row carries the
         // counter. `TERMINAL 24×20 < 80×24` is 22 cells on its own: appended
         // rather than reserved, the counter would be clipped off and the
-        // highlight left carrying the position alone — specs/05:105 failing in
+        // highlight left carrying the position alone — specs/05:144 failing in
         // the very layout the extra row was added to honour.
         let app = searching(&["o sync caiu aqui"], "sync");
         for columns in [24u16, 28, 40, 60] {

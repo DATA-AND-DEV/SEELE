@@ -128,8 +128,15 @@ mídia já é pós-v1 — mas é perda real.
 
 ## 9 · `:conectar` não reconecta em execução
 
-O comando existe e avisa que não faz. Reconectar exige derrubar uma conexão
-QUIC viva e uma thread de áudio; reiniciar o processo faz isso certo.
+O comando existe e avisa que não faz. **`:ejetar` agora resolve o caso comum**:
+volta à tela de seleção, com a conexão e o áudio derrubados de verdade, e de lá
+se escolhe outro Dogma. O que continua faltando é trocar de destino num comando
+só, sem passar pela tela.
+
+O que o laço externo mostrou é que o teardown fecha —
+`crates/seele-conformance/tests/ejetar.rs` conecta, solta e conecta de novo no
+mesmo processo. O que a pendência recusava era outra coisa: trocar a conexão por
+baixo de uma sessão viva, com roster e áudio de pé.
 
 ## 10 · O esquema `seele://` não é clicável
 
@@ -158,9 +165,20 @@ porque as chaves diferem. E o cliente não tem como serializar isso do lado dele
 
 **Encontrado lendo, não observado.** Saiu da revisão do
 `crates/seele-conformance/tests/ejetar.rs`, ao perguntar por que os dois lados
-do teste usavam a mesma semente. **Não foi reproduzido em uso**, e a janela é
-estreita: exige o desmonte da conexão antiga cair depois de um handshake
-inteiro. Fica registrado como defeito de leitura, e não como relato de campo.
+do teste usavam a mesma semente. **Não foi reproduzido em uso**, e fica
+registrado como defeito de leitura, e não como relato de campo.
+
+**A janela tem dois tamanhos, e o segundo não é estreito.** Com a rede
+entregando, o `CONNECTION_CLOSE` da conexão antiga chega e o Dogma desmonta
+aquela sessão em milissegundos — aí a corrida exige que o desmonte caia depois
+de um handshake inteiro, e é de fato improvável. Mas o `CONNECTION_CLOSE` é um
+pacote só e não é retransmitido: se ele se perder, o Dogma não fica sabendo de
+nada e só derruba a sessão pelo tempo ocioso, que é o
+`seele_proto::transport::IDLE_TIMEOUT` de **20 s**. Contra um handshake com
+orçamento de 10 s, a janela deixa de ser uma corrida e passa a ser a regra —
+qualquer volta dentro desses 20 s cai nela. Perder um datagrama numa rede real
+não é exótico, e é justamente ao ejetar por causa de uma conexão ruim que se
+volta depressa.
 
 **O que ficou tentado.** Nada, de propósito — mas o `ejetar.rs` foi escrito para
 não depender disto: o teste que mede lotação usa duas identidades distintas, e o
@@ -177,3 +195,34 @@ própria, e não um remendo no fim de uma tarefa de teste.
 **Quando dói.** `:ejetar` seguido de reconexão imediata no mesmo Cage, que é
 exatamente o que a tela de seleção convida a fazer. Some assim que qualquer
 pessoa entra ou sai, porque aí o roster é reconstruído.
+
+## 12 · O app lê a impressão digital do convite e não a confere
+
+**Sintoma.** Colar um `seele://` com impressão digital no app conecta como se
+não houvesse impressão nenhuma: o primeiro contato é cego, fixa a chave que
+vier e segue. O `plug` com o mesmo link recusa o Dogma que não bate, com a
+esperada e a ofertada lado a lado (`crates/seele-tui/src/main.rs`).
+
+**O que se sabe.** A impressão chega inteira ao Rust — `analisar_convite`
+guarda o `Convite` em `Session::convite` — e para ali. `seele_ffi::ConnectConfig`
+não tem campo por onde ela passe até o `Enlace`, e o `Trust::FirstContact` sai
+antes de a casca conseguir se inscrever nos eventos, então nem dá para conferir
+depois pelo aviso. O que atravessa a ponte é um booleano, `conferencia_pendente`:
+só *que* existe, nunca *qual* — a segunda metade é a que `specs/06-clientes-gui.md:19`
+não deixa o frontend saber.
+
+**O que ficou tentado.** Nada de conferência. O que foi feito foi não calar: a
+tela diz que a conferência está pendente sempre que o link trouxe uma. Quem cola
+um link supõe estar protegido **por causa dela**, e a afordância de colar é nova
+— "antes também não conferia" não vale como resposta para algo que antes não
+dava para fazer.
+
+**Por que não foi resolvido.** O conserto é na `seele-ffi` e no `Enlace`, não no
+app: um campo de impressão esperada no `ConnectConfig` e a recusa antes do
+`FirstContact`, que é onde o `plug` já a faz. Mexer nisso é mexer na decisão de
+confiança do ADR 0003 para as duas cascas, e isso é tarefa própria — não um
+remendo no fim de uma tarefa de tela.
+
+**Quando dói.** Toda vez que alguém cola no app um convite que trazia a
+confirmação de identidade. É o caminho que o ADR 0006 desenhou para transformar
+o primeiro contato de cego em verificado, e no app ele ainda não transforma.

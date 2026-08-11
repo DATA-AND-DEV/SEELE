@@ -40,18 +40,33 @@ Atalhos essenciais no modo Normal:
 
 ```
 h j k l / setas   navegar
-Tab               alternar painel
+Tab / Shift+Tab   alternar painel, adiante e para trás
 Enter             inserir plug no Cage / abrir Linha
 i                 escrever mensagem
 Espaço (hold)     push-to-talk
 m                 alternar A.T. Field (mudo)
 d                 alternar surdo
 g / G             topo / fim do histórico
+/                 buscar no histórico
+n / N             próxima / anterior ocorrência da busca
 ?                 ajuda
-:q                ejetar e sair
+:q                sair do programa
 ```
 
-Comandos: `:conectar <host>`, `:cage <nome>`, `:sync` (diagnóstico detalhado), `:audio` (dispositivos), `:tema`, `:sobre`.
+`h` e `l` movem o **foco** entre os painéis e dão a volta nas pontas, como o
+`Tab`; `j` e `k` movem a seleção dentro do painel focado e prendem no fim. A
+diferença é deliberada: uma lista que dá a volta faz `j` e `G` significarem a
+mesma coisa com frequência suficiente para nenhum dos dois ser confiável.
+
+A busca é salto, não filtro. `/` reconstrói o casamento a cada tecla e o
+contador `[1/3]` anda junto — é o retorno que diz se vale continuar
+escrevendo. `Enter` confirma e mantém o destaque; `Esc` desiste e o apaga. A
+ocorrência corrente acende com ênfase diferente das demais, e o contador é a
+metade textual disso: sem ele o destaque seria informação só na cor, que esta
+spec proíbe. O cursor dá a volta nas duas pontas, porque quem procura trata a
+última ocorrência e a primeira como vizinhas.
+
+Comandos: `:conectar <host>`, `:cage <nome>`, `:sync` (diagnóstico detalhado), `:audio` (dispositivos), `:tema`, `:sobre`, `:ejetar` (sair deste Dogma e escolher outro).
 
 **Resolvido em M4, e eram duas causas independentes.** A colisão com digitação: PTT só no modo Normal, onde não há nada com que colidir (decisão D19). E uma que esta spec não previa: **a maioria dos terminais não reporta soltura de tecla**, então "segurar espaço" abre um microfone que nunca fecha. Onde o protocolo de teclado do Kitty existe, é segurar de verdade; onde não existe, a barra vira trava — aperta para abrir, aperta para fechar (ADR 0016). A barra de telemetria diz qual estado está valendo nos dois casos.
 
@@ -78,10 +93,34 @@ fora, em `seele-tui::selecao`, e some quando a conexão começa.
 uma tecla no caminho. Um menu obrigatório entre a intenção e o resultado é o
 oposto do que este cliente promete a quem já sabe o que quer.
 
+A flag pula a tela na **entrada**, e só. Um `--server` que não responde não
+imprime o motivo e devolve o terminal: ele mostra o motivo, e depois a tela de
+conexão, onde espera por alguém. Quem chama `plug` de dentro de um script tem
+de contar com isso — é um programa interativo do começo ao fim, e não um
+comando que termina sozinho quando dá errado.
+
 Os Dogmas visitados ficam num arquivo à parte dos pins, e a separação é
 deliberada: o arquivo de pins decide se um servidor é o mesmo de ontem e por
 isso é curto e legível a olho. Apelido e último Cage são conveniência — um pode
 ser apagado sem consequência, o outro não.
+
+### Sair do programa é uma coisa; sair do Dogma é outra
+
+`:q`, `:quit`, `:sair` e Ctrl-C fecham o cliente. **Nada mais fecha.**
+
+Toda outra forma de uma sessão acabar volta à tela de conexão. `:ejetar` volta
+direto, porque quem ejetou já sabe por quê. As outras mostram antes o motivo e
+esperam ser lidas: o Dogma que não atendeu, o convite cuja impressão digital não
+bate com a do Dogma que respondeu, o Dogma que desconectou — expulso, barrado,
+lotado —, a bateria interna que esgotou os cinco minutos.
+
+Em todos os casos o enlace e o áudio são derrubados de verdade antes da volta, e
+com `--hospedar` o Dogma daqui também: a tela de conexão não tem roster,
+telemetria nem som.
+
+Um cliente que some no instante em que perde o enlace leva o motivo junto, e
+some justamente de onde a próxima tentativa começaria. Fechar o programa é um
+pedido; perder a conexão não é.
 
 ### Hospedar sem daemon
 

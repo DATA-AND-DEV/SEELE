@@ -18,6 +18,33 @@ Frontend: **decidido em M5 — HTML, CSS e JavaScript à mão, sem framework e s
 
 Requisito não negociável: **nenhuma lógica de protocolo em JavaScript**. Se o frontend precisa saber o que é um `ssrc`, algo está errado.
 
+### A tela de entrada
+
+Acima do formulário fica **ONDE VOCÊ JÁ ESTEVE**: os Dogmas visitados, com o
+apelido usado em cada um e quando foi a última vez. Clicar numa linha preenche
+e conecta; cada linha tem um *esquecer*. Sem Dogmas visitados a seção some
+inteira e a tela é exatamente a de antes — o estado vazio não piora, e nada
+fica escondido atrás de um clique. A lista é conveniência, como manda `05`:
+ilegível ou corrompida, a seção não aparece e conectar continua funcionando.
+
+Abaixo, o campo CONVITE aceita um `seele://` colado. Ele preenche o endereço, e
+quem colou errado não perde o que já tinha digitado.
+
+Os dois vêm de `seele-core` por comando Tauri — `conhecidos`, `esquecer`,
+`analisar_convite` —, atravessando a `seele-ffi` como manda o ADR 0002. Não há
+segundo analisador de URI em JavaScript, nem lista de atalhos lida do disco
+pelo frontend: seriam dois conjuntos de casos de borda para discordar do
+primeiro, e o requisito acima não é negociável.
+
+**O que o app ainda não faz com o convite.** Um `seele://` pode carregar a
+impressão digital do certificado, e é ela que transforma o primeiro contato de
+cego em verificado (ADR 0006). O app **lê** a impressão e **não a confere** —
+`ConnectConfig` não tem campo por onde ela passe. A impressão fica do lado
+Rust, nunca cruza a ponte, e a tela diz que a conferência está pendente em vez
+de calar: quem cola um link supõe estar protegido por causa dela, e silêncio
+aqui seria a falha. O `plug` confere. A assimetria entre as duas cascas é a
+pendência 12.
+
 ### Hospedar pelo app
 
 A tela de entrada tem **HOSPEDAR AQUI** ao lado de INSERIR PLUG. Sobe um Dogma

@@ -47,31 +47,38 @@ que tecla dispara o quê.
 GUI os alcança por comandos Tauri, e nenhuma lógica de protocolo entra em
 JavaScript.
 
-## 1 · `seele_core::busca`
+## 1 · `seele_core::search`
 
-Módulo novo, puro: sem I/O, sem terminal, sem webview.
+Módulo novo, puro: sem I/O, sem terminal, sem webview. O nome e a API saem em
+inglês porque o ADR 0023 manda: a prosa que explica é português, o código que
+ela explica não.
 
 ```rust
 /// Onde um termo casou.
-pub struct Casamento {
+pub struct Match {
     /// Índice na lista de mensagens.
-    pub mensagem: usize,
+    pub message: usize,
     /// Intervalo em caracteres dentro do corpo.
-    pub inicio: usize,
-    pub fim: usize,
+    pub start: usize,
+    pub end: usize,
 }
 
-pub struct Busca { /* termo, casamentos, cursor */ }
+pub struct Search { /* termo, casamentos, cursor */ }
 
-impl Busca {
-    /// Os corpos já normalizados, na ordem em que a casca os desenha.
+impl Search {
+    /// Os corpos na ordem em que a casca os desenha.
     pub fn new<S: AsRef<str>>(bodies: impl IntoIterator<Item = S>, term: &str) -> Self;
-    pub fn proxima(&mut self)  -> Option<&Casamento>;  // n
-    pub fn anterior(&mut self) -> Option<&Casamento>;  // N
-    pub fn atual(&self)        -> Option<&Casamento>;
+    pub fn next_match(&mut self)     -> Option<Match>;  // n
+    pub fn previous_match(&mut self) -> Option<Match>;  // N
+    pub fn current(&self)            -> Option<Match>;
     /// (1, 3) para desenhar "[1/3]". (0, 0) quando não casou nada.
-    pub fn posicao(&self)      -> (usize, usize);
+    pub fn position(&self)           -> (usize, usize);
 }
+
+/// Colapsa espaço repetido, do jeito que a TUI desenha.
+pub fn normalize(text: &str) -> String;
+/// Todo lugar onde `term` ocorre em `text`, para acender um trecho já quebrado.
+pub fn occurrences(text: &str, term: &str) -> Vec<(usize, usize)>;
 ```
 
 **Entra por corpos, não por mensagens, e isso é decisão e não conveniência.**
@@ -82,18 +89,20 @@ presa a um tipo de mensagem serviria a uma casca e excluiria a outra — e a
 busca não precisa saber o que é uma mensagem para achar um texto. De quebra, os
 testes ficam `["olá", "sync caiu"]` em vez de fabricar mensagens inteiras.
 
-**E os corpos entram normalizados.** `seele-tui::ui::wrap` quebra com
-`split_whitespace`, que colapsa espaço repetido; HTML colapsa sozinho. As duas
-cascas já mostram o texto colapsado, então `search::normalize` no meio é o que
-faz o deslocamento devolvido apontar para o que está na tela. Sem isso, um
-casamento depois de um espaço duplo apontaria para o lugar errado só na TUI.
+**E cada casca entrega o texto que ela mesma desenha.** `seele-tui::ui::wrap`
+quebra com `split_whitespace`, que colapsa espaço repetido, então a TUI passa os
+corpos por `search::normalize` antes — sem isso, um casamento depois de um
+espaço duplo apontaria para o lugar errado. O app não normaliza: o corpo é
+`white-space: pre-wrap` e a janela mostra espaço duplo e quebra de linha como
+eles chegaram. `normalize` é público e opcional pela mesma razão: quem desenha o
+texto cru busca no texto cru.
 
-Cada casca busca na **sua** lista, então o `Casamento::mensagem` indexa o que
-aquela casca desenha. Na TUI é `App::messages`; no app é `Snapshot::messages`.
-Buscar no que está na tela é o que faz a busca casar com o que se vê — inclusive
-o `(editada)`.
+Cada casca busca na **sua** lista, então o `Match::message` indexa o que aquela
+casca desenha. Na TUI é `App::messages`; no app é `Snapshot::messages`. Buscar no
+que está na tela é o que faz a busca casar com o que se vê — inclusive o
+`(editada)`.
 
-O `Casamento` carrega o intervalo, e não só o índice da mensagem, porque as duas
+O `Match` carrega o intervalo, e não só o índice da mensagem, porque as duas
 cascas precisam acender o trecho certo — e com dobramento de acento o frontend
 não teria como recalcular sozinho onde o casamento começou.
 
@@ -139,14 +148,14 @@ suficiente para nenhum dos dois ser confiável.
 
 ### Busca
 
-`App` ganha `busca: Option<Busca>`.
+`App` ganha `busca: Option<Search>` e o `termo` que a produziu.
 
 No modo Busca, digitar reconstrói ao vivo, e o contador `[1/3]` anda enquanto se
 digita — é o retorno que diz se vale continuar escrevendo. `Enter` confirma e
 volta ao Normal **mantendo** o destaque; `Esc` cancela e apaga. No Normal, `n` e
 `N` andam entre as ocorrências; as duas teclas estão livres hoje.
 
-O painel de mensagens rola até `busca.atual()`. O `ui.rs` acende o intervalo do
+O painel de mensagens rola até `Search::current`. O `ui.rs` acende o intervalo do
 casamento corrente com ênfase diferente das demais ocorrências visíveis — e,
 como manda `specs/05`, a distinção não pode ser só cor: o contador `[1/3]` é a
 informação textual que sobrevive ao `NO_COLOR`.
@@ -213,16 +222,18 @@ não porque alguém precisa dela.
 ```
 conhecidos()            -> Vec<Conhecido>
 esquecer(alvo)          -> ()
-analisar_convite(link)  -> Convite
+analisar_convite(link)  -> ConviteLido
 buscar(termo)           -> BuscaEstado
 busca_andar(adiante)    -> BuscaEstado
 busca_limpar()          -> ()
 ```
 
-Todos finos, sem lógica própria. `BuscaEstado { casamentos, atual, posicao,
-total }`.
+Todos finos, sem lógica própria. `BuscaEstado { casamentos: Vec<Match>, atual:
+Option<Match>, posicao, total }` — os nomes desta struct ficam em português
+porque ela é do app e serializa para a página, que é escrita em português; o que
+ela carrega dentro é o `Match` do core.
 
-A busca vive em `Session` ao lado do `plug`, como `Mutex<Option<Busca>>`: o
+A busca vive em `Session` ao lado do `plug`, como `Mutex<Option<Search>>`: o
 cursor é estado de sessão, e mantê-lo lá é o que impede a regra de dar-a-volta
 de ser reescrita em JavaScript.
 
@@ -254,9 +265,12 @@ vazio não piora, e nada fica escondido atrás de um clique.
 Clicar numa linha preenche e conecta com o apelido lembrado. Cada linha tem um
 *esquecer*, que é o `Resultado::Esquecer` que a TUI já oferece.
 
-Colar um `seele://` no campo CONVITE chama `analisar_convite` e preenche DOGMA,
-impressão digital e convite. O parsing nunca encosta no JavaScript, e o teste
-`the_frontend_never_names_a_protocol_concept` continua valendo.
+Colar um `seele://` no campo CONVITE chama `analisar_convite`, que preenche
+DOGMA e guarda o resto do lado Rust. O parsing nunca encosta no JavaScript, e o
+teste `the_frontend_never_names_a_protocol_concept` continua valendo — a
+impressão digital em particular **não** atravessa a ponte: o frontend recebe só
+um booleano dizendo que ela existe e que este app ainda não a confere
+(pendência 12).
 
 ### A metade invisível
 
@@ -297,7 +311,7 @@ visitados é **conveniência**, e pode ser apagado sem consequência.
 
 ## 5 · Testes
 
-**`seele-core/src/busca.rs`** — dobra de caixa; dobra de acento; a volta nas
+**`seele-core/src/search.rs`** — dobra de caixa; dobra de acento; a volta nas
 duas pontas; termo vazio; zero casamentos. E um que não pode faltar: `nao`
 casando `não` devolve intervalo de **três** caracteres. É exatamente aí que uma
 tabela que deixasse de ser 1:1 se denunciaria.

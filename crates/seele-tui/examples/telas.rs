@@ -19,7 +19,7 @@
 
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
-use seele_tui::app::{Alert, App, ChatLine, Node, RosterEntry, Screen};
+use seele_tui::app::{Alert, App, ChatLine, Key, Node, RosterEntry, Screen};
 use seele_tui::theme::{Palette, Theme};
 use seele_tui::ui;
 
@@ -28,6 +28,7 @@ const ALTURA: u16 = 24;
 
 fn main() {
     imprimir("Operação — PADRÃO: AZUL", &operando());
+    imprimir("Busca no histórico, com `/`", &buscando());
     imprimir("Ajuda, com `?`", &com_ajuda());
     imprimir("Bateria interna — o enlace caiu", &na_bateria());
     imprimir("Terminal apertado — abaixo de 80×24", &operando());
@@ -139,6 +140,42 @@ fn operando() -> App {
         loss: 0.002,
         bitrate: 32_000,
     };
+    app
+}
+
+/// A mesma conversa, com uma busca em andamento.
+///
+/// As teclas são apertadas de verdade — `/` entra no modo Busca e cada letra
+/// refaz a busca —, então o contador `[1/3]` sai da mesma contagem que o
+/// terminal faz, e não de um número escrito aqui.
+///
+/// O que este retrato não mostra é a ocorrência acesa: o realce é cor, e isto é
+/// texto. É por isso que o contador existe — `specs/05-cliente-tui.md` proíbe
+/// informação que só a cor carrega, e ele é a metade que sobrevive ao
+/// `NO_COLOR` e a esta página.
+fn buscando() -> App {
+    let mut app = operando();
+    app.messages.push(ChatLine {
+        at: "12:05".into(),
+        author: "ayanami".into(),
+        body: "o sync voltou a subir".into(),
+        own: false,
+    });
+    app.messages.push(ChatLine {
+        at: "12:06".into(),
+        author: "asuka".into(),
+        body: "aqui o sync nem caiu".into(),
+        own: false,
+    });
+    for tecla in [
+        Key::Char('/'),
+        Key::Char('s'),
+        Key::Char('y'),
+        Key::Char('n'),
+        Key::Char('c'),
+    ] {
+        drop(app.on_key(tecla));
+    }
     app
 }
 
