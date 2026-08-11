@@ -409,8 +409,12 @@ async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<
 
 /// One session, from the first packet to the last.
 ///
-/// Returns `true` when it exited via `:ejetar`, which is the signal for
-/// [`run`]'s loop to go back to the selection screen instead of quitting.
+/// Returns `true` to send [`run`]'s loop back to the selection screen, and
+/// `false` only to leave the program. Every way a session can end returns
+/// `true` — ejecting, a Dogma that never answered, an invite that pointed at
+/// another Dogma, an internal battery that ran out — because none of those is
+/// a request to close the client. Quitting is `:q`, `:quit`, `:sair` and
+/// Ctrl-C, and nothing else.
 #[allow(
     clippy::too_many_lines,
     reason = "one event loop; the branches are the interface's whole surface"
@@ -482,8 +486,11 @@ async fn sessao(
             runtime.app.screen = Screen::Lost {
                 reason: format!("NÃO FOI POSSÍVEL ALCANÇAR O DOGMA: {error}"),
             };
-            wait_for_key(terminal, key_rx, &runtime).await?;
-            return Ok(false);
+            // Um endereço que não atende é o caso mais comum de todos, e
+            // justamente o que mais precisa da lista: escolher um Dogma morto
+            // dos conhecidos jogava a pessoa para fora do cliente, longe da
+            // lista de onde ela acabou de escolher.
+            return fim_de_sessao(terminal, key_rx, &mut runtime, &mut hospedagem).await;
         }
     };
 
@@ -502,8 +509,10 @@ async fn sessao(
                     "ESTE NÃO É O DOGMA DO CONVITE.\n\nesperada:  {esperada}\nofertada:  {oferecida}"
                 ),
             };
-            wait_for_key(terminal, key_rx, &runtime).await?;
-            return Ok(false);
+            // A conexão existe e está errada: soltar antes de esperar a porta
+            // é o que evita o Dogma hospedado aqui esperar por nós mesmos.
+            drop(client);
+            return fim_de_sessao(terminal, key_rx, &mut runtime, &mut hospedagem).await;
         }
     }
 
@@ -595,17 +604,18 @@ async fn sessao(
         }
         if runtime.app.ejetou {
             // Primeiro o que está ligado, depois a porta: é a ordem do
-            // `disconnect` do app. Largar o enlace e a voz aqui, e não no fim
-            // da função, é o que faz o `wait_idle` do Dogma não ficar
-            // esperando a nossa própria conexão drenar.
+            // `disconnect` do app.
+            //
+            // E soltar aqui não fecha nada de imediato: `Drop for Enlace` é um
+            // `abort`, que é assíncrono, e `Drop for Voice` só levanta a
+            // bandeira de parada de uma thread de áudio que ainda segura uma
+            // cópia da conexão. Soltar cedo torna o fechamento provável e
+            // imediato; quem o torna **suficiente** é o `encerrar`, que fecha
+            // o endpoint do Dogma antes de esperar e ainda dá uma folga medida
+            // no fim. Quem for afirmar em teste que a sessão fechou tem de
+            // afirmar sobre o `encerrar`, e não sobre estes dois `drop`.
             drop(client);
-            runtime.voice = None;
-            // O Dogma hospedado aqui acaba junto com a sessão, e `encerrar`
-            // espera a porta voltar — hospedar de novo na volta seguinte
-            // depende disso.
-            if let Some(dogma) = hospedagem.take() {
-                dogma.encerrar().await;
-            }
+            desligar(&mut runtime, &mut hospedagem).await;
             return Ok(true);
         }
 
@@ -676,8 +686,10 @@ async fn sessao(
                                 Motivo::Pedido => "ENLACE ENCERRADO".to_owned(),
                             },
                         };
-                        wait_for_key(terminal, key_rx, &runtime).await?;
-                        return Ok(false);
+                        // O enlace já desistiu por conta própria, então não há
+                        // conexão a soltar antes de esperar a porta — o que
+                        // sobrou de pé é a voz e, se for o caso, o Dogma daqui.
+                        return fim_de_sessao(terminal, key_rx, &mut runtime, &mut hospedagem).await;
                     }
                 }
             }
@@ -734,29 +746,60 @@ fn tick(runtime: &mut Runtime, client: &Enlace) {
     });
 }
 
-/// Waits for any key, so a final screen can be read.
+/// Mostra o motivo, espera ser lido, e volta à tela de seleção.
 ///
-/// A client that exits the instant it loses the link takes the reason with it.
+/// Um cliente que some no instante em que perde o enlace leva o motivo junto,
+/// e por isso a pausa continua aqui. O que mudou é aonde a tecla leva: sair do
+/// programa é `:q`, `:quit`, `:sair` e Ctrl-C, e mais nada. Toda outra forma de
+/// uma sessão acabar — o Dogma não atendeu, o convite apontava para outro, a
+/// bateria interna esgotou — volta para a lista, que é de onde se escolhe o
+/// próximo. É o que o app já faz: a `tela-fim` dele tem um EJETAR que leva à
+/// tela de entrada.
 ///
-/// Reads from the one reader thread instead of calling `crossterm::event::read`
-/// itself: with a second reader alive, whichever of the two is parked in `read`
-/// takes the keystroke, and this screen would sit out its whole thirty seconds
-/// with somebody hammering the keyboard at it.
-async fn wait_for_key(
+/// Devolve sempre `true` porque é sempre isso que significa: volte à seleção.
+///
+/// Lê do único leitor de teclado e não de um `crossterm::event::read` próprio:
+/// com um segundo leitor vivo, quem estiver parado dentro do `read` fica com a
+/// tecla, e esta tela cumpriria os trinta segundos inteiros com alguém
+/// martelando o teclado nela.
+async fn fim_de_sessao(
     terminal: &mut Screen1,
     key_rx: &mut tokio::sync::mpsc::Receiver<Event>,
-    runtime: &Runtime,
-) -> Result<()> {
+    runtime: &mut Runtime,
+    hospedagem: &mut Option<seele_server::hospedagem::Hospedagem>,
+) -> Result<bool> {
     terminal.draw(|frame| ui::render(frame, &runtime.app, runtime.theme))?;
     let _ = tokio::time::timeout(Duration::from_secs(30), async {
         while let Some(event) = key_rx.recv().await {
-            if matches!(event, Event::Key(_)) {
+            // Soltar não é apertar. No Windows chegam as duas, e a soltura da
+            // tecla que trouxe até aqui dispensaria a tela antes de alguém
+            // conseguir ler — o mesmo filtro que o `escolher` já faz.
+            if matches!(event, Event::Key(tecla) if tecla.kind != KeyEventKind::Release) {
                 return;
             }
         }
     })
     .await;
-    Ok(())
+
+    desligar(runtime, hospedagem).await;
+    Ok(true)
+}
+
+/// Solta o que a sessão tinha de pé, e espera a porta voltar.
+///
+/// A espera é o ponto: `Hospedagem::encerrar` fecha o endpoint e só volta
+/// quando o socket é devolvido, e sem isso a volta seguinte do laço tentaria
+/// hospedar numa porta ainda ocupada. É o que o `disconnect` do app já fazia
+/// (`apps/seele-app/src/main.rs`), e a razão de a hospedagem não poder
+/// simplesmente cair no fim da função: `drop` não espera.
+async fn desligar(
+    runtime: &mut Runtime,
+    hospedagem: &mut Option<seele_server::hospedagem::Hospedagem>,
+) {
+    runtime.voice = None;
+    if let Some(dogma) = hospedagem.take() {
+        dogma.encerrar().await;
+    }
 }
 
 /// Reads terminal events on a thread of its own.
