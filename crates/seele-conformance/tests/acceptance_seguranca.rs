@@ -89,7 +89,10 @@ async fn reiniciar_o_dogma_nao_troca_a_chave() -> Result<()> {
     let cliente = conectar(endereco, "ayanami", 1, pins, None)
         .await
         .map_err(|erro| anyhow::anyhow!("o piloto foi recusado após um reinício: {erro:?}"))?;
-    assert_eq!(cliente.pin_decision(), &PinDecision::Matches);
+    assert!(matches!(
+        cliente.pin_decision(),
+        PinDecision::Matches { .. }
+    ));
 
     servidor.shutdown();
     Ok(())

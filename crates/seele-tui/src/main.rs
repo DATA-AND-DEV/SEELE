@@ -505,7 +505,7 @@ async fn sessao(
     if let Some(esperada) = &args.expected_fingerprint {
         let oferecida = match client.pin_decision() {
             PinDecision::FirstContact { fingerprint } => fingerprint.clone(),
-            PinDecision::Matches => esperada.clone(),
+            PinDecision::Matches { .. } => esperada.clone(),
             PinDecision::Changed { offered, .. } => offered.clone(),
         };
         if !oferecida.eq_ignore_ascii_case(esperada) {

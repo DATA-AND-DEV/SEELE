@@ -675,7 +675,7 @@ async fn drive(
         PinDecision::FirstContact { fingerprint } => Trust::FirstContact {
             fingerprint: fingerprint.clone(),
         },
-        PinDecision::Matches => Trust::Known,
+        PinDecision::Matches { .. } => Trust::Known,
         PinDecision::Changed { pinned, offered } => {
             let error = PlugError::PinChanged {
                 pinned: pinned.clone(),

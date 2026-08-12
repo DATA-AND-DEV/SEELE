@@ -42,8 +42,16 @@ pub enum PinDecision {
         /// The fingerprint now pinned.
         fingerprint: String,
     },
-    /// The certificate matches what was pinned. Nothing to say.
-    Matches,
+    /// The certificate matches what was pinned.
+    ///
+    /// Carries the fingerprint because a caller comparing an invite against
+    /// what the server offered needs something to compare *with*. Without it
+    /// the terminal client ended up comparing the expected value with itself,
+    /// which is a test that cannot fail.
+    Matches {
+        /// The fingerprint that both the pin and the certificate carry.
+        fingerprint: String,
+    },
     /// The certificate does **not** match. The connection was refused.
     Changed {
         /// What was pinned before.
@@ -51,6 +59,90 @@ pub enum PinDecision {
         /// What the server offered now.
         offered: String,
     },
+}
+
+/// O que a conferência concluiu — já decidido, para a casca só desenhar.
+///
+/// Cinco variantes porque são cinco coisas distintas a dizer. `PinDecision`
+/// descreve o que o TOFU viu; isto descreve o que fazer a respeito, e é a
+/// diferença entre as duas que faz a regra existir num lugar só.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Verdict {
+    /// Nothing was pinned and no invite vouched for anything. Pinned blind.
+    ///
+    /// `specs/08-seguranca.md` wants this stated rather than accepted in
+    /// silence — the shell must say what it just trusted.
+    FirstContact {
+        /// What was pinned.
+        fingerprint: String,
+    },
+    /// Nothing was pinned, and the invite confirmed what the server offered.
+    ///
+    /// This is what ADR 0006 invented the link to produce.
+    FirstContactVerified {
+        /// What was pinned, now vouched for.
+        fingerprint: String,
+    },
+    /// The pin matches and nothing contradicts it. Nothing to say.
+    Known,
+    /// First contact, and the invite named a different key. Refused.
+    InviteRefused {
+        /// What the link promised.
+        expected: String,
+        /// What the server offered.
+        offered: String,
+    },
+    /// The pin is the usual one, but the invite names a different key.
+    ///
+    /// The connection stands: trust on first use already established that this
+    /// is the same server as before, so the link is what is wrong.
+    InviteDisagrees {
+        /// What the link promised.
+        expected: String,
+        /// What the server offered, and what stays pinned.
+        offered: String,
+    },
+}
+
+/// Turns what the TOFU verifier saw into what to do about it.
+///
+/// Pure on purpose: the refusal's side effect — removing the pin the verifier
+/// already wrote — belongs to the caller, so this can be tested as the table
+/// it is.
+#[must_use]
+pub fn verdict(decision: &PinDecision, expected: Option<&str>) -> Verdict {
+    let agrees =
+        |offered: &str| expected.is_none_or(|expected| expected.eq_ignore_ascii_case(offered));
+
+    match decision {
+        PinDecision::FirstContact { fingerprint } if agrees(fingerprint) => {
+            if expected.is_some() {
+                Verdict::FirstContactVerified {
+                    fingerprint: fingerprint.clone(),
+                }
+            } else {
+                Verdict::FirstContact {
+                    fingerprint: fingerprint.clone(),
+                }
+            }
+        }
+        PinDecision::FirstContact { fingerprint } => Verdict::InviteRefused {
+            expected: expected.unwrap_or_default().to_owned(),
+            offered: fingerprint.clone(),
+        },
+        PinDecision::Matches { fingerprint } if agrees(fingerprint) => Verdict::Known,
+        PinDecision::Matches { fingerprint } => Verdict::InviteDisagrees {
+            expected: expected.unwrap_or_default().to_owned(),
+            offered: fingerprint.clone(),
+        },
+        // `Changed` never reaches here: the verifier refuses it at the TLS
+        // layer, with or without an invite, and it surfaces as a connection
+        // error rather than a verdict.
+        PinDecision::Changed { pinned, offered } => Verdict::InviteRefused {
+            expected: pinned.clone(),
+            offered: offered.clone(),
+        },
+    }
 }
 
 /// Where pinned fingerprints live.
@@ -61,6 +153,13 @@ pub trait PinStore: Send + Sync + std::fmt::Debug {
     fn pinned(&self, host: &str) -> Option<String>;
     /// Records a fingerprint for a host.
     fn pin(&self, host: &str, fingerprint: String);
+    /// Forgets the fingerprint pinned for a host.
+    ///
+    /// Exists because refusing a connection is not enough on its own: the
+    /// verifier pins before anyone can judge, so a refusal that left the pin
+    /// behind would let the very next visit — without a link to check against
+    /// — walk into the server that was just rejected.
+    fn unpin(&self, host: &str);
 }
 
 /// A pin store that forgets everything when the process exits.
@@ -88,6 +187,12 @@ impl PinStore for MemoryPinStore {
     fn pin(&self, host: &str, fingerprint: String) {
         if let Ok(mut pins) = self.pins.lock() {
             pins.insert(host.to_owned(), fingerprint);
+        }
+    }
+
+    fn unpin(&self, host: &str) {
+        if let Ok(mut pins) = self.pins.lock() {
+            pins.remove(host);
         }
     }
 }
@@ -147,7 +252,9 @@ impl TofuVerifier {
                     fingerprint: offered,
                 }
             }
-            Some(pinned) if pinned == offered => PinDecision::Matches,
+            Some(pinned) if pinned == offered => PinDecision::Matches {
+                fingerprint: offered,
+            },
             Some(pinned) => PinDecision::Changed { pinned, offered },
         }
     }
@@ -169,7 +276,7 @@ impl ServerCertVerifier for TofuVerifier {
         }
 
         match decision {
-            PinDecision::FirstContact { .. } | PinDecision::Matches => {
+            PinDecision::FirstContact { .. } | PinDecision::Matches { .. } => {
                 Ok(ServerCertVerified::assertion())
             }
             // The handshake fails. specs/08-seguranca.md makes this alert
@@ -243,7 +350,9 @@ mod tests {
         verifier.decide("dogma.example", b"certificate-one");
         assert_eq!(
             verifier.decide("dogma.example", b"certificate-one"),
-            PinDecision::Matches
+            PinDecision::Matches {
+                fingerprint: seele_proto::transport::certificate_fingerprint(b"certificate-one")
+            }
         );
     }
 
@@ -297,7 +406,123 @@ mod tests {
         ));
         assert_eq!(
             verifier.decide("first.example", b"certificate-one"),
-            PinDecision::Matches
+            PinDecision::Matches {
+                fingerprint: seele_proto::transport::certificate_fingerprint(b"certificate-one")
+            }
         );
+    }
+
+    const A: &str = "aaaa1111";
+    const B: &str = "bbbb2222";
+
+    #[test]
+    fn a_first_contact_with_no_invite_is_blind_and_says_so() {
+        let decision = PinDecision::FirstContact {
+            fingerprint: A.into(),
+        };
+        assert_eq!(
+            verdict(&decision, None),
+            Verdict::FirstContact {
+                fingerprint: A.into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_first_contact_the_invite_confirms_is_verified() {
+        // ADR 0006 exists to produce exactly this outcome, and until now
+        // nothing could tell it apart from the blind one.
+        let decision = PinDecision::FirstContact {
+            fingerprint: A.into(),
+        };
+        assert_eq!(
+            verdict(&decision, Some(A)),
+            Verdict::FirstContactVerified {
+                fingerprint: A.into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_first_contact_the_invite_contradicts_is_refused() {
+        // No prior pin, so the invite was the only evidence, and it failed.
+        let decision = PinDecision::FirstContact {
+            fingerprint: A.into(),
+        };
+        assert_eq!(
+            verdict(&decision, Some(B)),
+            Verdict::InviteRefused {
+                expected: B.into(),
+                offered: A.into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_matching_pin_with_no_invite_has_nothing_to_say() {
+        let decision = PinDecision::Matches {
+            fingerprint: A.into(),
+        };
+        assert_eq!(verdict(&decision, None), Verdict::Known);
+    }
+
+    #[test]
+    fn a_matching_pin_the_invite_confirms_has_nothing_to_say_either() {
+        let decision = PinDecision::Matches {
+            fingerprint: A.into(),
+        };
+        assert_eq!(verdict(&decision, Some(A)), Verdict::Known);
+    }
+
+    #[test]
+    fn a_matching_pin_the_invite_contradicts_warns_and_does_not_refuse() {
+        // This is the hole: `plug` compared the expected value with itself,
+        // because `Matches` carried no fingerprint to compare against.
+        // Trust on first use already proved this is yesterday's server, so
+        // the link is what is wrong — refusing would lock somebody out of a
+        // Dogma they use because a friend sent a stale link.
+        let decision = PinDecision::Matches {
+            fingerprint: A.into(),
+        };
+        assert_eq!(
+            verdict(&decision, Some(B)),
+            Verdict::InviteDisagrees {
+                expected: B.into(),
+                offered: A.into()
+            }
+        );
+    }
+
+    #[test]
+    fn the_comparison_ignores_case() {
+        let decision = PinDecision::FirstContact {
+            fingerprint: "abcdef".into(),
+        };
+        assert_eq!(
+            verdict(&decision, Some("ABCDEF")),
+            Verdict::FirstContactVerified {
+                fingerprint: "abcdef".into()
+            }
+        );
+    }
+
+    #[test]
+    fn unpinning_a_host_makes_the_next_visit_a_first_contact_again() {
+        // The refusal has to undo the pin the verifier already wrote, or the
+        // next visit without a link walks straight into the server that was
+        // just rejected.
+        let store = MemoryPinStore::new();
+        store.pin("casa", A.into());
+        assert_eq!(store.pinned("casa"), Some(A.into()));
+
+        store.unpin("casa");
+        assert_eq!(store.pinned("casa"), None);
+    }
+
+    #[test]
+    fn unpinning_a_host_that_was_never_pinned_is_not_an_error() {
+        let store = MemoryPinStore::new();
+        store.unpin("nunca visto");
+        assert_eq!(store.pinned("nunca visto"), None);
     }
 }

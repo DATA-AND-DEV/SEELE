@@ -280,7 +280,7 @@ async fn two_dogmas_on_one_machine_do_not_share_a_pin() -> Result<()> {
         None,
     )
     .await?;
-    assert_eq!(again.pin_decision(), &PinDecision::Matches);
+    assert!(matches!(again.pin_decision(), PinDecision::Matches { .. }));
 
     Ok(())
 }
@@ -319,7 +319,7 @@ async fn a_second_connection_reuses_the_pin() -> Result<()> {
         None,
     )
     .await?;
-    assert_eq!(second.pin_decision(), &PinDecision::Matches);
+    assert!(matches!(second.pin_decision(), PinDecision::Matches { .. }));
 
     Ok(())
 }

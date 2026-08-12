@@ -228,7 +228,9 @@ impl Client {
             .map_err(|error| classify_connection_error(&error, verifier.last_decision()))?;
 
         // PATTERN: ORANGE — connected, not verified.
-        let pin = verifier.last_decision().unwrap_or(PinDecision::Matches);
+        let pin = verifier.last_decision().unwrap_or(PinDecision::Matches {
+            fingerprint: String::new(),
+        });
 
         let (mut send, mut recv) = connection.open_bi().await.map_err(|error| {
             tracing::warn!(%error, "could not open the control stream");

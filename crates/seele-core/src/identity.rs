@@ -161,6 +161,14 @@ impl PinStore for FilePinStore {
         }
         self.flush(&pins);
     }
+
+    fn unpin(&self, host: &str) {
+        let Ok(mut pins) = self.pins.lock() else {
+            return;
+        };
+        pins.retain(|(known, _)| known != host);
+        self.flush(&pins);
+    }
 }
 
 #[cfg(test)]
