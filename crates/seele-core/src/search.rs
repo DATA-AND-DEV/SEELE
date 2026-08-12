@@ -337,14 +337,17 @@ mod tests {
     #[test]
     fn resuming_past_the_end_lands_on_the_last_match() {
         // The message the cursor was in was deleted, or edited until the term
-        // left it. Falling out of range would be an index nobody can draw.
-        let mut after = Search::new(["sync"], "sync");
+        // left it. Falling out of range would be an index nobody can draw. Three
+        // matches, not one: with a single match, cursor 0 is simultaneously
+        // "first" and "last", and a `resume_at` that is a complete no-op would
+        // pass just as well as the fallback this test exists to prove.
+        let mut after = Search::new(["sync", "sync", "sync"], "sync");
         after.resume_at(Match {
             message: 40,
             start: 0,
             end: 4,
         });
-        assert_eq!(after.position(), (1, 1));
+        assert_eq!(after.position(), (3, 3));
     }
 
     #[test]

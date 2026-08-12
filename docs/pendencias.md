@@ -264,3 +264,41 @@ isso seria trocar a verificação pelo seu retrato.
 **Quando dói.** Na primeira vez que alguém abrir o app depois de M5 — que é
 tarde demais para descobrir que uma das três está torta. Ver
 `docs/teste-duas-maquinas.md`, que é o roteiro onde este passo cabe.
+
+## 14 · A janela reemite caractere em casamentos sobrepostos
+
+**Sintoma.** No app (GUI), buscar um termo cujas ocorrências se sobrepõem —
+"aa" em "aaa" — não só realça errado: o corpo da mensagem sai reescrito.
+`occurrences` devolve `(0,2)` e `(1,3)`; `corpoComRealce`
+(`apps/seele-app/ui/seele.js`) desenha os dois intervalos sem descontar a
+sobreposição, e o caractere do índice 1 sai dentro de dois `<mark>` — "aaa"
+que a pessoa escreveu aparece como "aaaa" na tela. É texto do usuário saindo
+errado, não só a cor do realce.
+
+**O que se sabe.** O terminal já resolve o mesmo caso. `ui.rs` (linhas
+546-553) guarda `if start < cursor { continue; }` depois de já ter lido
+`ordinal` de `*seen`, então pula só o desenho e mantém a contagem certa.
+`corpoComRealce` não tem guarda equivalente nenhuma.
+
+**O que ficou tentado.** Nenhum conserto nesta passada. Um registro anterior
+(`.superpowers/sdd/2026-08-10-navegacao-gui-tui/final-fix-report.md`, achado
+5) deu como motivo que consertar mexeria na numeração dos ordinais que o
+realce corrente (`I1`) acabou de amarrar — **esse motivo está errado**. O
+ordinal de `corpoComRealce` vem do índice do `.entries()` sobre `intervalos`,
+não de um contador manual que a sobreposição pudesse atrapalhar; um
+`continue` cedo, logo depois de ler `ordinal`, deixaria a numeração
+exatamente como está — a mesma forma que `ui.rs` já usa do outro lado. O
+conserto em si é barato.
+
+**Por que não foi resolvido.** O que falta não é a dificuldade do conserto, é
+prová-lo. `apps/seele-app/tests/frontend.rs` só confere o script como texto —
+nomes de comando existentes, ids que aparecem na página — porque o projeto
+não tem runtime de JavaScript no conjunto de testes: não há como executar
+`corpoComRealce` e afirmar sobre o DOM que ela produz sem abrir uma janela.
+Trocar o comportamento de um caminho que desenha toda mensagem, sem forma de
+provar que o resultado bate, é um risco diferente de escrever o `continue`
+em si.
+
+**Quando dói.** Buscar um termo curto que se repete dentro de si mesmo — "aa",
+"ll", "oo" — num corpo que o contém sobreposto. Raro, e visível assim que
+acontece: a mensagem na tela deixa de ser a mensagem que a pessoa escreveu.

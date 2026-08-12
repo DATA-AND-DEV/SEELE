@@ -1246,11 +1246,24 @@ mod tests {
             ofertada > esperada,
             "the offered fingerprint did not stay below the expected one:\n{screen}"
         );
+        let esperada_line = screen.lines().nth(esperada);
+        let ofertada_line = screen.lines().nth(ofertada);
+        // If the fingerprint wrapped onto the next row, "aaa"/"bbb" is not on
+        // the label's own row at all, and comparing two `None`s below would
+        // pass without ever looking at either fingerprint.
+        assert!(
+            esperada_line.is_some_and(|line| line.find("aaa").is_some()),
+            "the expected fingerprint did not stay on its own label's row:\n{screen}"
+        );
+        assert!(
+            ofertada_line.is_some_and(|line| line.find("bbb").is_some()),
+            "the offered fingerprint did not stay on its own label's row:\n{screen}"
+        );
         // Same prefix, same width, same column: that is what "side by side"
         // means when the values themselves are unreadable strings.
         assert_eq!(
-            screen.lines().nth(esperada).map(|line| line.find("aaa")),
-            screen.lines().nth(ofertada).map(|line| line.find("bbb")),
+            esperada_line.and_then(|line| line.find("aaa")),
+            ofertada_line.and_then(|line| line.find("bbb")),
             "the two fingerprints do not start in the same column:\n{screen}"
         );
     }

@@ -330,6 +330,14 @@ function desenharMensagens(snapshot) {
  * noutra mensagem. Sem ele todas as ocorrências saíam idênticas e o piloto não
  * enxergava onde estava dentro de uma mensagem que casa três vezes. A ordem
  * desta lista é a mesma em que o core contou, e é o que faz o índice bater.
+ *
+ * **Casamentos sobrepostos reemitem caractere.** Para "aa" em "aaa",
+ * `occurrences` devolve `(0,2)` e `(1,3)`. Nesta função, ao contrário de
+ * `ui.rs` no terminal, não há guarda para `start < cursor`: o segundo
+ * casamento fatia `caracteres.slice(1, 3)` sem descontar que o índice 1 já
+ * saiu no primeiro `<mark>`, e o caractere sobreposto é desenhado duas vezes —
+ * "aaa" digitado pela pessoa vira "aaaa" na tela. `docs/pendencias.md` #14
+ * registra isto; não é corrigido aqui.
  */
 function corpoComRealce(corpo, intervalos, aceso = null) {
   if (!intervalos || intervalos.length === 0) return [document.createTextNode(corpo)];
