@@ -684,8 +684,15 @@ impl Motor {
 ///
 /// Devolve o veredito quando a conexão pode seguir, e o erro quando ela tem que
 /// cair. Uma função à parte de [`Enlace::conectar`] porque tudo aqui é decisão
-/// sobre valores: um teste consegue exercer os quatro desfechos sem um Dogma de
-/// verdade do outro lado, e sem isso a fiação inteira ficava sem guarda.
+/// sobre valores, e sem isso a fiação inteira ficava sem guarda.
+///
+/// Os cinco desfechos são exercidos por teste, sem Dogma do outro lado — e os
+/// dois de `PinDecision::Matches` importam tanto quanto os de primeiro contato:
+/// é neles que mora a política de **não** derrubar. Um link velho contra um
+/// servidor já conhecido avisa e segue, porque o TOFU já provou que é o mesmo
+/// servidor de ontem; recusar ali trancaria a pessoa para fora de um Dogma que
+/// ela usa. Enquanto `Matches` não tinha teste, alargar esta função para
+/// recusar também nesse caso passava a suíte inteira.
 fn conferir(
     destino: &Destino,
     pin: &PinDecision,
@@ -898,6 +905,54 @@ mod tests {
                 fingerprint: "aaaa1111".into()
             }
         );
+        assert_eq!(loja.pinned("casa"), Some("aaaa1111".into()));
+    }
+
+    #[test]
+    fn um_convite_velho_contra_um_pin_que_bate_avisa_e_nao_derruba() {
+        // A metade oposta da recusa, e a que some sem ninguém notar: com pin
+        // estabelecido, o TOFU já provou que este é o servidor de ontem, então
+        // quem está errado é o link. Derrubar aqui trancaria a pessoa para fora
+        // de um Dogma que ela usa porque um amigo mandou um link velho.
+        let loja = crate::tofu::MemoryPinStore::new();
+        loja.pin("casa", "aaaa1111".into());
+        let decisao = PinDecision::Matches {
+            fingerprint: "aaaa1111".into(),
+        };
+
+        let veredito = conferir(&destino_de_teste(Some("bbbb2222")), &decisao, &loja)
+            .expect("um link velho não derruba um servidor já conhecido");
+
+        assert_eq!(
+            veredito,
+            Verdict::InviteDisagrees {
+                expected: "bbbb2222".into(),
+                offered: "aaaa1111".into(),
+            }
+        );
+        // Esta é a asserção que segura a política: sem ela o teste passa mesmo
+        // se o aviso virar recusa, porque o veredito continuaria o mesmo e só o
+        // efeito mudaria.
+        assert_eq!(
+            loja.pinned("casa"),
+            Some("aaaa1111".into()),
+            "o aviso desfez o pin, e a próxima visita entraria cega"
+        );
+    }
+
+    #[test]
+    fn um_convite_que_concorda_com_o_pin_nao_tem_nada_a_dizer() {
+        // Completa a tabela: pin bate, link concorda, nada acontece.
+        let loja = crate::tofu::MemoryPinStore::new();
+        loja.pin("casa", "aaaa1111".into());
+        let decisao = PinDecision::Matches {
+            fingerprint: "aaaa1111".into(),
+        };
+
+        let veredito = conferir(&destino_de_teste(Some("aaaa1111")), &decisao, &loja)
+            .expect("não havia nada de errado para recusar");
+
+        assert_eq!(veredito, Verdict::Known);
         assert_eq!(loja.pinned("casa"), Some("aaaa1111".into()));
     }
 
