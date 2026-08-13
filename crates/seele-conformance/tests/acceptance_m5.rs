@@ -52,14 +52,18 @@ fn home(name: &str) -> String {
 }
 
 fn connect(address: SocketAddr, nickname: &str) -> Result<Arc<Plug>, PlugError> {
+    // The verdict `connect` now returns is exercised by `seele-ffi`'s own unit
+    // tests; every test here only needs the live handle.
     Plug::connect(ConnectConfig {
         server: address.to_string(),
         nickname: nickname.to_owned(),
         home: home(nickname),
         join_secret: None,
+        expected_fingerprint: None,
         // No sound card on a CI box, and the text half needs none.
         audio: false,
     })
+    .map(|(plug, _trust)| plug)
 }
 
 /// Records what the shell would have been woken for.
@@ -386,6 +390,7 @@ async fn a_name_that_does_not_resolve_says_so_specifically() -> Result<()> {
             nickname: "ninguem".into(),
             home: home("unresolvable"),
             join_secret: None,
+            expected_fingerprint: None,
             audio: false,
         })
     })

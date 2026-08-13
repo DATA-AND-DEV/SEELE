@@ -145,11 +145,17 @@ async fn connect(
         home,
         audio,
         join_secret: join_secret.filter(|s| !s.trim().is_empty()),
+        // O `convite` guardado é o candidato natural, mas ligá-lo aqui é
+        // trabalho da Task 5: esta tarefa só faz o valor caber no tipo.
+        expected_fingerprint: None,
     };
 
     // `connect` blocks on a QUIC handshake. Running it on the async runtime's
     // worker would stall every other command until it finished or timed out.
-    let plug = tauri::async_runtime::spawn_blocking(move || Plug::connect(config))
+    // O veredito também volta daqui, mas ainda não tem para onde ir: nenhum
+    // campo do app o guarda e nenhuma tela o lê. Ligar os dois é o que a
+    // Task 5 faz; por ora o comportamento fica o mesmo de antes.
+    let (plug, _trust) = tauri::async_runtime::spawn_blocking(move || Plug::connect(config))
         .await
         .map_err(|_| PlugError::Unreachable)??;
 

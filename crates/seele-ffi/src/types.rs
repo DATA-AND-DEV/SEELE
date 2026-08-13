@@ -191,10 +191,14 @@ impl From<seele_core::DisconnectReason> for EndReason {
     }
 }
 
-/// What the server's certificate turned out to be. ADR 0003.
+/// What the server's certificate turned out to be. ADR 0003, ADR 0006.
+///
+/// Mirrors `seele_core::tofu::Verdict` one variant at a time — see the `From`
+/// impl below — so the shell sees every distinction the core makes and none
+/// it doesn't.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum Trust {
-    /// Never seen before. The fingerprint was pinned.
+    /// Nothing was pinned and no invite vouched for anything. Pinned blind.
     ///
     /// `specs/08-seguranca.md` wants this stated rather than accepted in
     /// silence, which is why it is a value the shell must handle and not a log
@@ -203,8 +207,58 @@ pub enum Trust {
         /// What was pinned. Show it — somebody may want to check it elsewhere.
         fingerprint: String,
     },
-    /// Matches what was pinned before.
+    /// Nothing was pinned, and the invite confirmed what the server offered.
+    ///
+    /// This is what ADR 0006 invented the link to produce.
+    FirstContactVerified {
+        /// What was pinned, now vouched for.
+        fingerprint: String,
+    },
+    /// The pin matches and nothing contradicts it. Nothing to say.
     Known,
+    /// First contact, and the invite named a different key. Refused.
+    ///
+    /// The core drops the connection when this happens, so in practice this
+    /// arm never crosses the boundary — it exists to keep the match exhaustive.
+    InviteRefused {
+        /// What the link promised.
+        expected: String,
+        /// What the server offered.
+        offered: String,
+    },
+    /// The pin is the usual one, but the invite names a different key.
+    ///
+    /// The connection stands: trust on first use already established that this
+    /// is the same server as before, so the link is what is wrong.
+    InviteDisagrees {
+        /// What the link promised.
+        expected: String,
+        /// What the server offered, and what stays pinned.
+        offered: String,
+    },
+}
+
+impl From<seele_core::tofu::Verdict> for Trust {
+    fn from(verdict: seele_core::tofu::Verdict) -> Self {
+        use seele_core::tofu::Verdict;
+
+        // An exhaustive match rather than a blanket conversion: when the core
+        // grows a sixth verdict this stops compiling, instead of silently
+        // mapping it onto one that already exists.
+        match verdict {
+            Verdict::FirstContact { fingerprint } => Self::FirstContact { fingerprint },
+            Verdict::FirstContactVerified { fingerprint } => {
+                Self::FirstContactVerified { fingerprint }
+            }
+            Verdict::Known => Self::Known,
+            Verdict::InviteRefused { expected, offered } => {
+                Self::InviteRefused { expected, offered }
+            }
+            Verdict::InviteDisagrees { expected, offered } => {
+                Self::InviteDisagrees { expected, offered }
+            }
+        }
+    }
 }
 
 /// One pilot in a Cage.
@@ -370,11 +424,6 @@ pub struct Snapshot {
 /// reimplementing the fold that `seele_core::state` already does.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub enum Event {
-    /// The connection reached PADRÃO: AZUL.
-    Connected {
-        /// What the certificate turned out to be.
-        trust: Trust,
-    },
     /// Somebody joined, left, or changed state.
     RosterChanged,
     /// A message arrived, changed, or went away.
@@ -543,6 +592,43 @@ mod tests {
             };
             assert_eq!(band, expected, "ratio {ratio}");
         }
+    }
+
+    #[test]
+    fn every_verdict_the_core_produces_has_a_shell_facing_twin() {
+        // Trust used to have two variants where the core now has five, and
+        // folding five into two would throw away exactly the information this
+        // work exists to create.
+        use seele_core::tofu::Verdict;
+
+        let cases = [
+            Verdict::FirstContact {
+                fingerprint: "a".into(),
+            },
+            Verdict::FirstContactVerified {
+                fingerprint: "a".into(),
+            },
+            Verdict::Known,
+            Verdict::InviteRefused {
+                expected: "b".into(),
+                offered: "a".into(),
+            },
+            Verdict::InviteDisagrees {
+                expected: "b".into(),
+                offered: "a".into(),
+            },
+        ];
+
+        let seen: std::collections::BTreeSet<String> = cases
+            .iter()
+            .map(|verdict| format!("{:?}", Trust::from(verdict.clone())))
+            .collect();
+
+        assert_eq!(
+            seen.len(),
+            cases.len(),
+            "two verdicts collapsed into one Trust"
+        );
     }
 
     #[test]

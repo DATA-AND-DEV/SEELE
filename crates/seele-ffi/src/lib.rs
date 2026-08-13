@@ -43,8 +43,8 @@ use std::time::{Duration, Instant};
 
 use seele_core::enlace::Enlace;
 use seele_core::{
-    identity, CageId, ClientMessageId, FilePinStore, LineId, PinDecision, Room, SyncBand,
-    SyncInputs, SyncRatio, Voice,
+    identity, CageId, ClientMessageId, FilePinStore, LineId, Room, SyncBand, SyncInputs, SyncRatio,
+    Voice,
 };
 
 pub use types::{
@@ -88,6 +88,8 @@ pub struct ConnectConfig {
     ///
     /// `None` num Dogma aberto, que é o padrão.
     pub join_secret: Option<String>,
+    /// A impressão digital que o convite prometeu, quando veio de um link.
+    pub expected_fingerprint: Option<String>,
     /// Whether to open the microphone and speakers at all.
     ///
     /// False on a machine with no sound card, which is most servers and every
@@ -198,7 +200,7 @@ impl Plug {
     ///
     /// Every failure is a [`PlugError`] variant, never a string: a shell has to
     /// be able to write its own sentence for each one.
-    pub fn connect(config: ConnectConfig) -> Result<Arc<Self>, PlugError> {
+    pub fn connect(config: ConnectConfig) -> Result<(Arc<Self>, Trust), PlugError> {
         let (address, server_name, pin_key) = resolve(&config.server)?;
 
         let home = PathBuf::from(&config.home);
@@ -268,8 +270,7 @@ impl Plug {
             commands: command_tx,
             shared,
         });
-        plug.shared.notify(&Event::Connected { trust });
-        Ok(plug)
+        Ok((plug, trust))
     }
 
     /// Puts the plug into a Cage.
@@ -661,8 +662,7 @@ async fn drive(
         chave_do_pin: pin_key.clone(),
         apelido: config.nickname.clone(),
         segredo: config.join_secret.clone(),
-        // Filled in from the invite's `fp=` by a later task.
-        impressao_esperada: None,
+        impressao_esperada: config.expected_fingerprint.clone(),
     };
     let mut client = match seele_core::enlace::Enlace::conectar(destino, key, pins).await {
         Ok(client) => client,
@@ -673,20 +673,12 @@ async fn drive(
         }
     };
 
-    let trust = match client.pin_decision() {
-        PinDecision::FirstContact { fingerprint } => Trust::FirstContact {
-            fingerprint: fingerprint.clone(),
-        },
-        PinDecision::Matches { .. } => Trust::Known,
-        PinDecision::Changed { pinned, offered } => {
-            let error = PlugError::PinChanged {
-                pinned: pinned.clone(),
-                offered: offered.clone(),
-            };
-            let _ = ready.send(Err(error));
-            return;
-        }
-    };
+    // `Enlace::conectar` already returned `Err` above for anything that would
+    // have made this a `PinDecision::Changed` or a refused invite — see
+    // `seele_core::tofu::verdict`'s own note that `Changed` never reaches a
+    // caller as a verdict. What is left here is a verdict the shell is allowed
+    // to see, not one that had to be turned back into a connection error.
+    let trust = Trust::from(client.veredito().clone());
 
     if let Ok(mut room) = shared.room.lock() {
         room.adopt(client.sessao(), &config.nickname);
