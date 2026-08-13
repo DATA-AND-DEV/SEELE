@@ -82,6 +82,7 @@ fn destino(endereco: SocketAddr, apelido: &str) -> Destino {
         chave_do_pin: endereco.to_string(),
         apelido: apelido.to_owned(),
         segredo: None,
+        impressao_esperada: None,
     }
 }
 

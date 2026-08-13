@@ -49,6 +49,7 @@ use crate::battery::{Action, Battery, Link};
 use crate::client::{Client, ConnectError, MediaChannel, SessionInfo};
 use crate::tofu::PinDecision;
 use crate::tofu::PinStore;
+use crate::tofu::{verdict, Verdict};
 
 /// Onde ficar batendo, e com que credencial.
 #[derive(Debug, Clone)]
@@ -63,6 +64,11 @@ pub struct Destino {
     pub apelido: String,
     /// Convite de uso único ou senha do Dogma.
     pub segredo: Option<String>,
+    /// A impressão digital que o convite prometeu, quando veio de um link.
+    ///
+    /// `None` para quem digitou o endereço à mão — aí não há o que conferir, e
+    /// o primeiro contato segue sendo cego, como sempre foi.
+    pub impressao_esperada: Option<String>,
 }
 
 /// O que a casca precisa saber.
@@ -155,6 +161,8 @@ pub struct Enlace {
     restante: Option<Duration>,
     /// O que o TOFU decidiu no primeiro contato. ADR 0003.
     pin: PinDecision,
+    /// O que a conferência com o convite concluiu. ADR 0006.
+    veredito: Verdict,
     /// O último tempo de ida e volta, em microssegundos. Zero é desconhecido.
     ///
     /// Um átomo e não um aviso: a barra de telemetria lê isto quatro vezes por
@@ -185,13 +193,15 @@ impl Enlace {
     ///
     /// # Errors
     ///
-    /// Devolve o motivo de não ter conseguido conectar.
+    /// Devolve o motivo de não ter conseguido conectar, incluindo
+    /// [`ConnectError::ConviteNaoConfere`] quando o link prometia outra
+    /// identidade.
     pub async fn conectar(
         destino: Destino,
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
     ) -> Result<Self, ConnectError> {
-        let cliente = Client::connect(
+        let mut cliente = Client::connect(
             destino.servidor,
             &destino.nome_tls,
             &destino.chave_do_pin,
@@ -202,9 +212,29 @@ impl Enlace {
         )
         .await?;
 
+        let pin = cliente.pin_decision().clone();
+        let veredito = verdict(&pin, destino.impressao_esperada.as_deref());
+
+        // O efeito vem **antes** de qualquer saída, e por isso está aqui e não
+        // depois do `if`: o verificador fixa a chave dentro do retorno de
+        // chamada do TLS, então devolver o erro sem desfazer o pin deixaria a
+        // visita seguinte — sem link para conferir — ver `Matches` e entrar sem
+        // hesitar no servidor que acabou de ser rejeitado.
+        aplicar_veredito(&veredito, pins.as_ref(), &destino.chave_do_pin);
+
+        if let Verdict::InviteRefused { expected, offered } = &veredito {
+            // Derrubar, não só relatar: seguir conectado a quem o convite
+            // desmente é exatamente o que a conferência existe para impedir.
+            let erro = ConnectError::ConviteNaoConfere {
+                esperada: expected.clone(),
+                oferecida: offered.clone(),
+            };
+            cliente.disconnect();
+            return Err(erro);
+        }
+
         let sessao = cliente.session().clone();
         let media = cliente.media();
-        let pin = cliente.pin_decision().clone();
         let rtt = Arc::new(std::sync::atomic::AtomicU64::new(0));
 
         let (comandos_tx, comandos_rx) = mpsc::channel(COMANDOS);
@@ -234,6 +264,7 @@ impl Enlace {
             estado: Link::Online,
             restante: None,
             pin,
+            veredito,
             rtt,
             tarefa,
         })
@@ -283,6 +314,12 @@ impl Enlace {
     #[must_use]
     pub fn pin_decision(&self) -> &PinDecision {
         &self.pin
+    }
+
+    /// O que a conferência de identidade concluiu nesta conexão.
+    #[must_use]
+    pub fn veredito(&self) -> &Verdict {
+        &self.veredito
     }
 
     /// O último tempo de ida e volta medido.
@@ -635,6 +672,17 @@ impl Motor {
     }
 }
 
+/// Aplica o que o veredito manda fazer com o pin.
+///
+/// Separado da decisão porque a decisão é uma tabela pura e isto é um efeito.
+/// Só a recusa tem efeito: ela desfaz o pin que o verificador escreveu antes
+/// de alguém poder julgar.
+fn aplicar_veredito(veredito: &Verdict, pins: &dyn PinStore, chave_do_pin: &str) {
+    if matches!(veredito, Verdict::InviteRefused { .. }) {
+        pins.unpin(chave_do_pin);
+    }
+}
+
 /// Se insistir pode dar em outra coisa.
 ///
 /// Uma credencial rejeitada ou um banimento não mudam de resposta por
@@ -642,7 +690,9 @@ impl Motor {
 fn vale_insistir(erro: &ConnectError) -> bool {
     !matches!(
         erro,
-        ConnectError::PinChanged { .. } | ConnectError::Refused { .. }
+        ConnectError::PinChanged { .. }
+            | ConnectError::Refused { .. }
+            | ConnectError::ConviteNaoConfere { .. }
     )
 }
 
@@ -658,8 +708,46 @@ mod tests {
             pinned: "a".into(),
             offered: "b".into(),
         }));
+        // Um convite que não confere também não melhora com repetição: seria o
+        // mesmo link errado contra o mesmo servidor a cada backoff.
+        assert!(!vale_insistir(&ConnectError::ConviteNaoConfere {
+            esperada: "a".into(),
+            oferecida: "b".into(),
+        }));
         assert!(vale_insistir(&ConnectError::Unreachable));
         assert!(vale_insistir(&ConnectError::HandshakeTimeout));
+    }
+
+    #[test]
+    fn uma_recusa_desfaz_o_pin_que_o_verificador_acabou_de_escrever() {
+        // Sem isto a recusa é decorativa: a visita seguinte, sem link para
+        // conferir, veria `Matches` e entraria no servidor recém-rejeitado.
+        let loja = crate::tofu::MemoryPinStore::new();
+        loja.pin("casa", "aaaa1111".into());
+
+        let decisao = PinDecision::FirstContact {
+            fingerprint: "aaaa1111".into(),
+        };
+        let veredito = crate::tofu::verdict(&decisao, Some("bbbb2222"));
+
+        aplicar_veredito(&veredito, &loja, "casa");
+
+        assert_eq!(loja.pinned("casa"), None, "a recusa deixou o pin para trás");
+    }
+
+    #[test]
+    fn um_veredito_que_nao_recusa_deixa_o_pin_onde_esta() {
+        let loja = crate::tofu::MemoryPinStore::new();
+        loja.pin("casa", "aaaa1111".into());
+
+        let decisao = PinDecision::Matches {
+            fingerprint: "aaaa1111".into(),
+        };
+        let veredito = crate::tofu::verdict(&decisao, Some("bbbb2222"));
+
+        aplicar_veredito(&veredito, &loja, "casa");
+
+        assert_eq!(loja.pinned("casa"), Some("aaaa1111".into()));
     }
 
     #[test]
@@ -704,6 +792,7 @@ mod tests {
                 chave_do_pin: "127.0.0.1:1".into(),
                 apelido: "piloto".into(),
                 segredo: None,
+                impressao_esperada: None,
             },
             chave: SigningKey::from_bytes(&[7; 32]),
             pins: Arc::new(crate::tofu::MemoryPinStore::new()),

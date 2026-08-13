@@ -437,6 +437,17 @@ pub enum PlugError {
         /// What was offered now.
         offered: String,
     },
+    /// The invite named one key and the server offered another.
+    ///
+    /// ADR 0006, and deliberately not [`PlugError::PinChanged`]: nothing was
+    /// ever pinned here, so the shell's key-change alarm would name the wrong
+    /// culprit. What failed is the link, not the server's continuity.
+    InviteMismatch {
+        /// What the link promised.
+        expected: String,
+        /// What the server offered.
+        offered: String,
+    },
     /// The server refused the session, and said why.
     Refused {
         /// The enumerated reason.

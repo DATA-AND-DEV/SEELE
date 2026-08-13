@@ -50,6 +50,7 @@ fn destino(endereco: SocketAddr) -> Destino {
         chave_do_pin: endereco.to_string(),
         apelido: "ayanami".into(),
         segredo: None,
+        impressao_esperada: None,
     }
 }
 

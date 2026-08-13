@@ -484,6 +484,8 @@ async fn sessao(
         chave_do_pin: args.pin_key.clone(),
         apelido: args.nickname.clone(),
         segredo: args.join_secret.clone(),
+        // A Task 3 preenche isto com o `fp=` do link.
+        impressao_esperada: None,
     };
     let mut client = match Enlace::conectar(destino, key, pins).await {
         Ok(client) => client,

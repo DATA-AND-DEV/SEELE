@@ -661,6 +661,8 @@ async fn drive(
         chave_do_pin: pin_key.clone(),
         apelido: config.nickname.clone(),
         segredo: config.join_secret.clone(),
+        // Filled in from the invite's `fp=` by a later task.
+        impressao_esperada: None,
     };
     let mut client = match seele_core::enlace::Enlace::conectar(destino, key, pins).await {
         Ok(client) => client,
@@ -949,6 +951,13 @@ fn classify_connect_failure(error: &seele_core::ConnectError) -> PlugError {
         seele_core::ConnectError::PinChanged { pinned, offered } => PlugError::PinChanged {
             pinned: pinned.clone(),
             offered: offered.clone(),
+        },
+        seele_core::ConnectError::ConviteNaoConfere {
+            esperada,
+            oferecida,
+        } => PlugError::InviteMismatch {
+            expected: esperada.clone(),
+            offered: oferecida.clone(),
         },
         seele_core::ConnectError::HandshakeTimeout => PlugError::HandshakeTimeout,
         seele_core::ConnectError::Refused { reason } => PlugError::Refused {
