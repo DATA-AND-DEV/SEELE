@@ -420,11 +420,11 @@ Uma recusa tem de **derrubar a conexão**, não só relatar. **Não reúse `Conn
     /// Distinta de [`ConnectError::PinChanged`] de propósito: lá a chave de um
     /// servidor conhecido mudou, que é o alerta do ADR 0003. Aqui nunca houve
     /// chave conhecida, e quem discorda é o link.
-    ConviteNaoConfere {
+    InviteMismatch {
         /// O que o link prometeu.
-        esperada: String,
+        expected: String,
         /// O que o servidor ofereceu.
-        oferecida: String,
+        offered: String,
     },
 ```
 
@@ -433,10 +433,10 @@ E inclua-a em `vale_insistir` (linha 642-647), ao lado de `PinChanged` e `Refuse
 ```rust
         ConnectError::PinChanged { .. }
             | ConnectError::Refused { .. }
-            | ConnectError::ConviteNaoConfere { .. }
+            | ConnectError::InviteMismatch { .. }
 ```
 
-Acrescente também um caso ao teste `insistir_contra_recusa_nao_muda_a_resposta` (linha 653), afirmando `!vale_insistir(&ConnectError::ConviteNaoConfere { … })`.
+Acrescente também um caso ao teste `insistir_contra_recusa_nao_muda_a_resposta` (linha 653), afirmando `!vale_insistir(&ConnectError::InviteMismatch { … })`.
 
 - [ ] **Step 6: Rodar tudo**
 
