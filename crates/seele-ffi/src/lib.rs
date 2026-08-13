@@ -633,6 +633,32 @@ fn resolve(target: &str) -> Result<(SocketAddr, String, String), PlugError> {
     Ok((address, server_name, with_port))
 }
 
+/// Turns a [`ConnectConfig`] and what [`resolve`] made of it into a
+/// [`seele_core::enlace::Destino`].
+///
+/// Pulled apart from `drive` for the same reason `seele_core::enlace` pulls
+/// `conferir` apart from `Enlace::conectar`: everything here is a decision on
+/// values, and a decision on values does not need a QUIC socket to test.
+/// Without this split, whether `expected_fingerprint` actually reaches
+/// `impressao_esperada` could only be checked by a live handshake — which is
+/// exactly the gap `every_expected_fingerprint_reaches_the_destino_it_promised`
+/// below closes.
+fn build_destino(
+    config: &ConnectConfig,
+    address: SocketAddr,
+    server_name: &str,
+    pin_key: &str,
+) -> seele_core::enlace::Destino {
+    seele_core::enlace::Destino {
+        servidor: address,
+        nome_tls: server_name.to_owned(),
+        chave_do_pin: pin_key.to_owned(),
+        apelido: config.nickname.clone(),
+        segredo: config.join_secret.clone(),
+        impressao_esperada: config.expected_fingerprint.clone(),
+    }
+}
+
 /// The driver: connects, then pumps until told to stop.
 #[allow(
     clippy::too_many_arguments,
@@ -656,14 +682,7 @@ async fn drive(
     // `Enlace` e não `Client`: é a sessão que atravessa quedas, com a bateria
     // interna dentro. Antes disto, o app pulava de "conectado" para "encerrado"
     // no primeiro soluço de rede.
-    let destino = seele_core::enlace::Destino {
-        servidor: address,
-        nome_tls: server_name.clone(),
-        chave_do_pin: pin_key.clone(),
-        apelido: config.nickname.clone(),
-        segredo: config.join_secret.clone(),
-        impressao_esperada: config.expected_fingerprint.clone(),
-    };
+    let destino = build_destino(&config, address, &server_name, &pin_key);
     let mut client = match seele_core::enlace::Enlace::conectar(destino, key, pins).await {
         Ok(client) => client,
         Err(error) => {
@@ -979,6 +998,33 @@ mod tests {
             "TLS gets the name the certificate carries"
         );
         assert_eq!(pin, "127.0.0.1:8383", "the pin is filed under the address");
+    }
+
+    #[test]
+    fn every_expected_fingerprint_reaches_the_destino_it_promised() {
+        // `drive` builds this immediately before a real QUIC connection, so
+        // this is the only way to check the wiring without a live server —
+        // and the only thing standing between an invite's `fp=` and the
+        // refusal ADR 0006 exists to produce.
+        let (address, name, pin) = resolve("localhost:8383").expect("resolve");
+
+        let with_fingerprint = ConnectConfig {
+            server: "localhost:8383".into(),
+            nickname: "shinji".into(),
+            home: "/tmp/does-not-matter".into(),
+            join_secret: None,
+            expected_fingerprint: Some("aaaa1111".into()),
+            audio: false,
+        };
+        let destino = build_destino(&with_fingerprint, address, &name, &pin);
+        assert_eq!(destino.impressao_esperada, Some("aaaa1111".into()));
+
+        let without = ConnectConfig {
+            expected_fingerprint: None,
+            ..with_fingerprint
+        };
+        let destino = build_destino(&without, address, &name, &pin);
+        assert_eq!(destino.impressao_esperada, None);
     }
 
     #[test]
