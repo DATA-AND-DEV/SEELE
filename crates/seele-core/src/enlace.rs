@@ -194,14 +194,18 @@ impl Enlace {
     /// # Errors
     ///
     /// Devolve o motivo de não ter conseguido conectar, incluindo
-    /// [`ConnectError::ConviteNaoConfere`] quando o link prometia outra
+    /// [`ConnectError::InviteMismatch`] quando o link prometia outra
     /// identidade.
     pub async fn conectar(
         destino: Destino,
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
     ) -> Result<Self, ConnectError> {
-        let mut cliente = Client::connect(
+        // Antes de o TLS ter chance de escrever qualquer coisa. Ver
+        // [`desfazer_pin_orfao`].
+        let fixado_antes = pins.pinned(&destino.chave_do_pin);
+
+        let resultado = Client::connect(
             destino.servidor,
             &destino.nome_tls,
             &destino.chave_do_pin,
@@ -210,28 +214,32 @@ impl Enlace {
             Arc::clone(&pins),
             destino.segredo.as_deref(),
         )
-        .await?;
+        .await;
+
+        let mut cliente = match resultado {
+            Ok(cliente) => cliente,
+            Err(erro) => {
+                desfazer_pin_orfao(
+                    pins.as_ref(),
+                    &destino.chave_do_pin,
+                    fixado_antes.as_deref(),
+                );
+                return Err(erro);
+            }
+        };
 
         let pin = cliente.pin_decision().clone();
-        let veredito = verdict(&pin, destino.impressao_esperada.as_deref());
-
-        // O efeito vem **antes** de qualquer saída, e por isso está aqui e não
-        // depois do `if`: o verificador fixa a chave dentro do retorno de
-        // chamada do TLS, então devolver o erro sem desfazer o pin deixaria a
-        // visita seguinte — sem link para conferir — ver `Matches` e entrar sem
-        // hesitar no servidor que acabou de ser rejeitado.
-        aplicar_veredito(&veredito, pins.as_ref(), &destino.chave_do_pin);
-
-        if let Verdict::InviteRefused { expected, offered } = &veredito {
-            // Derrubar, não só relatar: seguir conectado a quem o convite
-            // desmente é exatamente o que a conferência existe para impedir.
-            let erro = ConnectError::ConviteNaoConfere {
-                esperada: expected.clone(),
-                oferecida: offered.clone(),
-            };
-            cliente.disconnect();
-            return Err(erro);
-        }
+        let veredito = match conferir(&destino, &pin, pins.as_ref()) {
+            Ok(veredito) => veredito,
+            Err(erro) => {
+                // Derrubar, não só relatar. E explicitamente, não por `Drop`:
+                // `Client::connect` deixa uma tarefa de leitura dona do
+                // `RecvStream`, então soltar o `Client` não derruba a conexão de
+                // forma confiável.
+                cliente.disconnect();
+                return Err(erro);
+            }
+        };
 
         let sessao = cliente.session().clone();
         let media = cliente.media();
@@ -672,13 +680,73 @@ impl Motor {
     }
 }
 
+/// Confere o que o convite prometeu contra o que o servidor ofereceu.
+///
+/// Devolve o veredito quando a conexão pode seguir, e o erro quando ela tem que
+/// cair. Uma função à parte de [`Enlace::conectar`] porque tudo aqui é decisão
+/// sobre valores: um teste consegue exercer os quatro desfechos sem um Dogma de
+/// verdade do outro lado, e sem isso a fiação inteira ficava sem guarda.
+fn conferir(
+    destino: &Destino,
+    pin: &PinDecision,
+    pins: &dyn PinStore,
+) -> Result<Verdict, ConnectError> {
+    let veredito = verdict(pin, destino.impressao_esperada.as_deref());
+
+    // O efeito vem **antes** de qualquer saída, e por isso está aqui e não
+    // dentro do `if`: o verificador fixa a chave dentro do retorno de chamada
+    // do TLS, então devolver o erro sem desfazer o pin deixaria a visita
+    // seguinte — sem link para conferir — ver `Matches` e entrar sem hesitar no
+    // servidor que acabou de ser rejeitado.
+    aplicar_veredito(&veredito, pins, &destino.chave_do_pin);
+
+    if let Verdict::InviteRefused { expected, offered } = &veredito {
+        return Err(ConnectError::InviteMismatch {
+            expected: expected.clone(),
+            offered: offered.clone(),
+        });
+    }
+    Ok(veredito)
+}
+
 /// Aplica o que o veredito manda fazer com o pin.
 ///
 /// Separado da decisão porque a decisão é uma tabela pura e isto é um efeito.
 /// Só a recusa tem efeito: ela desfaz o pin que o verificador escreveu antes
 /// de alguém poder julgar.
+///
+/// # Por que apagar aqui é seguro
+///
+/// `InviteRefused` nasce de duas decisões, e só uma delas chega aqui. De
+/// `PinDecision::FirstContact` — nada estava fixado antes, então o `unpin`
+/// remove exatamente o que este aperto de mão acabou de escrever. De
+/// `PinDecision::Changed` também, e **essa** apagaria um pin antigo e legítimo,
+/// que é o oposto do ADR 0003; ela não chega porque o verificador reprova a
+/// chave trocada no TLS e a falha sobe como [`ConnectError::PinChanged`], sem
+/// nunca virar veredito. Se algum dia `Changed` passar a chegar até aqui, esta
+/// função precisa distinguir as duas antes de apagar nada.
 fn aplicar_veredito(veredito: &Verdict, pins: &dyn PinStore, chave_do_pin: &str) {
     if matches!(veredito, Verdict::InviteRefused { .. }) {
+        pins.unpin(chave_do_pin);
+    }
+}
+
+/// Desfaz o pin que sobrou de um aperto de mão que não terminou.
+///
+/// O `TofuVerifier` fixa a chave dentro do TLS, e o aperto de mão continua
+/// depois disso — abrir o fluxo de controle, o prazo, a credencial, a resposta.
+/// Qualquer uma dessas saídas devolve erro com o pin já escrito.
+///
+/// O que isso estragava: o link promete `B`, o servidor daquele endereço
+/// oferece `A` e falha o aperto de mão. `A` fica fixado. Na tentativa seguinte,
+/// com o mesmo link, a decisão é `Matches { A }` e o veredito vira
+/// `InviteDisagrees` em vez de `InviteRefused` — a conexão é **permitida**, sem
+/// desfazer nada e sem erro. Uma falha de aperto de mão convertia a conferência
+/// de *recusar* para *avisar*, para sempre, naquele endereço.
+///
+/// Só apaga o que este aperto escreveu: se já havia pin antes, ele fica.
+fn desfazer_pin_orfao(pins: &dyn PinStore, chave_do_pin: &str, fixado_antes: Option<&str>) {
+    if fixado_antes.is_none() && pins.pinned(chave_do_pin).is_some() {
         pins.unpin(chave_do_pin);
     }
 }
@@ -692,7 +760,7 @@ fn vale_insistir(erro: &ConnectError) -> bool {
         erro,
         ConnectError::PinChanged { .. }
             | ConnectError::Refused { .. }
-            | ConnectError::ConviteNaoConfere { .. }
+            | ConnectError::InviteMismatch { .. }
     )
 }
 
@@ -710,9 +778,9 @@ mod tests {
         }));
         // Um convite que não confere também não melhora com repetição: seria o
         // mesmo link errado contra o mesmo servidor a cada backoff.
-        assert!(!vale_insistir(&ConnectError::ConviteNaoConfere {
-            esperada: "a".into(),
-            oferecida: "b".into(),
+        assert!(!vale_insistir(&ConnectError::InviteMismatch {
+            expected: "a".into(),
+            offered: "b".into(),
         }));
         assert!(vale_insistir(&ConnectError::Unreachable));
         assert!(vale_insistir(&ConnectError::HandshakeTimeout));
@@ -746,6 +814,116 @@ mod tests {
         let veredito = crate::tofu::verdict(&decisao, Some("bbbb2222"));
 
         aplicar_veredito(&veredito, &loja, "casa");
+
+        assert_eq!(loja.pinned("casa"), Some("aaaa1111".into()));
+    }
+
+    /// Um destino de teste onde a chave do pin e o nome TLS são **diferentes**.
+    ///
+    /// Diferentes de propósito: confundir os dois já custou caro a este projeto
+    /// uma vez — dois Dogmas numa LAN dividindo a entrada `localhost`, e o
+    /// segundo parecendo o primeiro com a chave trocada (`tofu.rs`). Um teste
+    /// em que os dois valores são iguais não pega essa troca.
+    fn destino_de_teste(impressao_esperada: Option<&str>) -> Destino {
+        Destino {
+            servidor: "127.0.0.1:1".parse().expect("endereço"),
+            nome_tls: "localhost".into(),
+            chave_do_pin: "casa".into(),
+            apelido: "piloto".into(),
+            segredo: None,
+            impressao_esperada: impressao_esperada.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn um_convite_que_nao_confere_derruba_a_conexao_e_desfaz_o_pin() {
+        let loja = crate::tofu::MemoryPinStore::new();
+        loja.pin("casa", "aaaa1111".into());
+        let decisao = PinDecision::FirstContact {
+            fingerprint: "aaaa1111".into(),
+        };
+
+        let erro = conferir(&destino_de_teste(Some("bbbb2222")), &decisao, &loja)
+            .expect_err("um convite que não confere tinha que derrubar a conexão");
+
+        // Quem prometeu é o link, quem ofereceu é o servidor. Trocar os dois
+        // faria a casca acusar o lado errado.
+        assert_eq!(
+            erro,
+            ConnectError::InviteMismatch {
+                expected: "bbbb2222".into(),
+                offered: "aaaa1111".into(),
+            }
+        );
+        // Sob a **chave do pin**, não sob o nome TLS.
+        assert_eq!(loja.pinned("casa"), None, "a recusa deixou o pin para trás");
+    }
+
+    #[test]
+    fn um_convite_que_confere_deixa_seguir_e_diz_que_foi_conferido() {
+        let loja = crate::tofu::MemoryPinStore::new();
+        loja.pin("casa", "aaaa1111".into());
+        let decisao = PinDecision::FirstContact {
+            fingerprint: "aaaa1111".into(),
+        };
+
+        let veredito = conferir(&destino_de_teste(Some("aaaa1111")), &decisao, &loja)
+            .expect("o convite confere; não havia o que recusar");
+
+        assert_eq!(
+            veredito,
+            Verdict::FirstContactVerified {
+                fingerprint: "aaaa1111".into()
+            }
+        );
+        assert_eq!(loja.pinned("casa"), Some("aaaa1111".into()));
+    }
+
+    #[test]
+    fn sem_convite_o_primeiro_contato_segue_cego_como_sempre_foi() {
+        // Quem digitou o endereço à mão não tem o que conferir, e recusar aqui
+        // trancaria para fora todo mundo que não veio de um link.
+        let loja = crate::tofu::MemoryPinStore::new();
+        loja.pin("casa", "aaaa1111".into());
+        let decisao = PinDecision::FirstContact {
+            fingerprint: "aaaa1111".into(),
+        };
+
+        let veredito = conferir(&destino_de_teste(None), &decisao, &loja)
+            .expect("sem convite não há o que recusar");
+
+        assert_eq!(
+            veredito,
+            Verdict::FirstContact {
+                fingerprint: "aaaa1111".into()
+            }
+        );
+        assert_eq!(loja.pinned("casa"), Some("aaaa1111".into()));
+    }
+
+    #[test]
+    fn um_aperto_de_mao_que_falhou_nao_deixa_o_pin_que_o_tls_escreveu() {
+        // O verificador fixa dentro do retorno de chamada do TLS, e o aperto de
+        // mão ainda tem quatro saídas de erro depois disso. O pin que sobrasse
+        // de uma delas faria a visita seguinte ver `Matches`, e aí um convite
+        // que **não** confere viraria `InviteDisagrees` — de recusar para
+        // avisar, sem ninguém decidir isso.
+        let loja = crate::tofu::MemoryPinStore::new();
+        loja.pin("casa", "aaaa1111".into());
+
+        desfazer_pin_orfao(&loja, "casa", None);
+
+        assert_eq!(loja.pinned("casa"), None);
+    }
+
+    #[test]
+    fn um_pin_que_ja_existia_sobrevive_a_um_aperto_que_falhou() {
+        // Só o que este aperto escreveu é órfão. Apagar um pin antigo porque a
+        // rede caiu jogaria fora a memória de que o ADR 0003 depende.
+        let loja = crate::tofu::MemoryPinStore::new();
+        loja.pin("casa", "aaaa1111".into());
+
+        desfazer_pin_orfao(&loja, "casa", Some("aaaa1111"));
 
         assert_eq!(loja.pinned("casa"), Some("aaaa1111".into()));
     }

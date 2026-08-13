@@ -952,13 +952,12 @@ fn classify_connect_failure(error: &seele_core::ConnectError) -> PlugError {
             pinned: pinned.clone(),
             offered: offered.clone(),
         },
-        seele_core::ConnectError::ConviteNaoConfere {
-            esperada,
-            oferecida,
-        } => PlugError::InviteMismatch {
-            expected: esperada.clone(),
-            offered: oferecida.clone(),
-        },
+        seele_core::ConnectError::InviteMismatch { expected, offered } => {
+            PlugError::InviteMismatch {
+                expected: expected.clone(),
+                offered: offered.clone(),
+            }
+        }
         seele_core::ConnectError::HandshakeTimeout => PlugError::HandshakeTimeout,
         seele_core::ConnectError::Refused { reason } => PlugError::Refused {
             reason: (*reason).into(),

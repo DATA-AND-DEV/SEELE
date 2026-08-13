@@ -78,14 +78,12 @@ pub enum ConnectError {
     ///
     /// Deliberately distinct from [`ConnectError::PinChanged`]: there a known
     /// server's key changed, which is the ADR 0003 alarm. Here nothing was ever
-    /// known, and the party that disagrees is the link. The name is Portuguese
-    /// because ADR 0006's invite check lives in `enlace.rs`, which ADR 0023
-    /// keeps in Portuguese, and this variant is that check's only outcome.
-    ConviteNaoConfere {
+    /// known, and the party that disagrees is the link.
+    InviteMismatch {
         /// What the link promised.
-        esperada: String,
+        expected: String,
         /// What the server offered.
-        oferecida: String,
+        offered: String,
     },
 }
 
