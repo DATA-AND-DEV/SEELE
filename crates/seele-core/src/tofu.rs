@@ -61,11 +61,11 @@ pub enum PinDecision {
     },
 }
 
-/// O que a conferência concluiu — já decidido, para a casca só desenhar.
+/// What the check concluded — already decided, for the shell to only draw.
 ///
-/// Cinco variantes porque são cinco coisas distintas a dizer. `PinDecision`
-/// descreve o que o TOFU viu; isto descreve o que fazer a respeito, e é a
-/// diferença entre as duas que faz a regra existir num lugar só.
+/// Five variants because there are five distinct things to say. `PinDecision`
+/// describes what the TOFU verifier saw; this describes what to do about it,
+/// and the gap between the two is why this type exists at all.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verdict {
     /// Nothing was pinned and no invite vouched for anything. Pinned blind.
@@ -504,6 +504,14 @@ mod tests {
                 fingerprint: "abcdef".into()
             }
         );
+    }
+
+    #[test]
+    fn the_comparison_ignores_case_for_a_matching_pin_too() {
+        let decision = PinDecision::Matches {
+            fingerprint: "abcdef".into(),
+        };
+        assert_eq!(verdict(&decision, Some("ABCDEF")), Verdict::Known);
     }
 
     #[test]

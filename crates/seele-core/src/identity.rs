@@ -250,6 +250,29 @@ mod tests {
     }
 
     #[test]
+    fn an_unpin_survives_the_process_that_made_it() {
+        // The opposite of `a_pin_survives_the_process_that_made_it`: a
+        // refusal undoes the pin the verifier already wrote so the next
+        // visit is a clean first contact again. If `unpin` forgot to flush,
+        // the pin would come back on the next launch and the refusal would
+        // silently undo itself on restart — exactly the decorative refusal
+        // this feature exists to remove.
+        let dir = scratch("unpin");
+        let path = dir.join("pins");
+
+        {
+            let store = FilePinStore::open(path.clone()).expect("open");
+            store.pin("seele.exemplo", "abc123".into());
+            store.unpin("seele.exemplo");
+        }
+
+        let reopened = FilePinStore::open(path).expect("reopen");
+        assert_eq!(reopened.pinned("seele.exemplo"), None);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn repinning_a_host_replaces_rather_than_appends() {
         // A file with two entries for one host answers differently depending on
         // which one is found first, which is a coin flip on a security check.
