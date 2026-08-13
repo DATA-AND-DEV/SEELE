@@ -47,17 +47,26 @@ struct Session {
     busca: Mutex<Option<seele_ffi::search::Search>>,
     /// O último `seele://` lido, **inteiro** — impressão digital inclusive.
     ///
-    /// A impressão não atravessa a ponte: `specs/06-clientes-gui.md:19` diz que
-    /// se o frontend precisa saber o que é uma impressão digital, algo está
-    /// errado. Mas jogá-la fora aqui seria pior. `seele-proto/src/uri.rs` chama
-    /// `fp` "o motivo principal de isto existir": é o que transforma o primeiro
-    /// contato de cego em verificado, e é a razão de o ADR 0006 ter fechado.
+    /// A impressão é o que `connect` entrega como
+    /// [`seele_ffi::ConnectConfig::expected_fingerprint`]: é ela que transforma
+    /// o primeiro contato de cego em verificado, e é a razão de o ADR 0006 ter
+    /// fechado — `seele-proto/src/uri.rs` chama `fp` "o motivo principal de isto
+    /// existir".
     ///
-    /// Este app ainda não sabe conferir — [`seele_ffi::ConnectConfig`] não tem
-    /// campo por onde ela passe, e o `Trust::FirstContact` sai antes de a casca
-    /// se inscrever. Guardar aqui é o que faz o conserto ser ligar dois pontos
-    /// em vez de descobrir onde o valor se perdeu; o `plug` já confere, e a tela
-    /// diz que este não confere em vez de calar.
+    /// # Uma decisão que se inverteu
+    ///
+    /// Este campo dizia que a impressão **não** atravessa a ponte. Era a
+    /// resposta certa enquanto este app não sabia conferir nada: sem
+    /// `expected_fingerprint` na FFI, mandar a string ao frontend não daria a
+    /// ninguém nada para fazer com ela além de reescrever a comparação em
+    /// JavaScript, que é exatamente o que `specs/06-clientes-gui.md:19` proíbe.
+    ///
+    /// O que mudou foi o outro lado: [`seele_ffi::Plug::connect`] devolve o
+    /// veredito já decidido, em Rust, com a comparação feita. A string que
+    /// atravessa agora não é uma entrada de decisão — é o que uma pessoa lê e
+    /// confere por outro canal, do mesmo jeito que o `PinChanged` já mandava as
+    /// duas impressões porque a coisa toda é um humano compará-las (ADR 0003).
+    /// O frontend continua sem decidir nada.
     convite: Mutex<Option<seele_ffi::uri::Convite>>,
 }
 
@@ -109,6 +118,23 @@ fn config_dir(app: &AppHandle) -> String {
         .unwrap_or_else(|_| ".seele".to_owned())
 }
 
+/// O que uma conexão bem-sucedida entrega à tela.
+///
+/// O veredito vem **junto** do `Snapshot`, e não por evento: `Plug::connect` só
+/// devolve o `Arc<Plug>` depois de a identidade estar decidida, então uma casca
+/// que se inscrevesse para ouvi-lo chegaria sempre tarde demais.
+#[derive(Debug, serde::Serialize)]
+struct Entrada {
+    /// A tela inteira, como sempre.
+    snapshot: Snapshot,
+    /// O que a chave deste Dogma acabou de ser.
+    ///
+    /// `crates/seele-core/src/tofu.rs` é explícito: a casca tem que dizer o que
+    /// acabou de confiar. Um pin que se estabelece invisível é um pin que
+    /// ninguém sabe que devia conferir.
+    veredito: seele_ffi::Trust,
+}
+
 #[tauri::command]
 async fn connect(
     app: AppHandle,
@@ -117,21 +143,31 @@ async fn connect(
     nickname: String,
     audio: bool,
     join_secret: Option<String>,
-) -> Result<Snapshot, PlugError> {
+) -> Result<Entrada, PlugError> {
     if session.plug().is_ok() {
         return Err(PlugError::AlreadyConnected);
     }
 
     // O convite guardado vale para o Dogma dele e para nenhum outro. Quem cola
     // um link e depois troca o endereço no campo deixaria para trás uma
-    // confirmação de identidade que não é deste servidor — e o dia em que a FFI
-    // souber conferi-la seria o dia em que uma sobra dessas viraria uma recusa
-    // que ninguém consegue explicar.
-    if let Ok(mut slot) = session.convite.lock() {
-        if slot.as_ref().is_some_and(|convite| convite.alvo != server) {
-            *slot = None;
+    // confirmação de identidade que não é deste servidor — e agora que a FFI
+    // sabe conferi-la, uma sobra dessas seria uma recusa que ninguém consegue
+    // explicar.
+    //
+    // O que sobrevive ao descarte é o que vai conferir esta conexão.
+    let esperada = match session.convite.lock() {
+        Ok(mut slot) => {
+            if slot.as_ref().is_some_and(|convite| convite.alvo != server) {
+                *slot = None;
+            }
+            slot.as_ref()
+                .and_then(|convite| convite.impressao_digital.clone())
         }
-    }
+        // Sem o cadeado não há convite a ler. Entrar sem a confirmação é o
+        // comportamento de quem digitou o endereço à mão, e é o pior que pode
+        // acontecer aqui: nunca uma conferência contra um valor duvidoso.
+        Err(_) => None,
+    };
 
     let home = config_dir(&app);
     // Guardados antes de a configuração levar os originais para a outra thread:
@@ -145,17 +181,15 @@ async fn connect(
         home,
         audio,
         join_secret: join_secret.filter(|s| !s.trim().is_empty()),
-        // O `convite` guardado é o candidato natural, mas ligá-lo aqui é
-        // trabalho da Task 5: esta tarefa só faz o valor caber no tipo.
-        expected_fingerprint: None,
+        expected_fingerprint: esperada,
     };
 
     // `connect` blocks on a QUIC handshake. Running it on the async runtime's
     // worker would stall every other command until it finished or timed out.
-    // O veredito também volta daqui, mas ainda não tem para onde ir: nenhum
-    // campo do app o guarda e nenhuma tela o lê. Ligar os dois é o que a
-    // Task 5 faz; por ora o comportamento fica o mesmo de antes.
-    let (plug, _trust) = tauri::async_runtime::spawn_blocking(move || Plug::connect(config))
+    // O veredito volta daqui junto do handle: é o único lugar de onde ele pode
+    // vir, porque quem se inscreve para ouvir eventos só tem o `Arc<Plug>`
+    // depois que esta linha termina.
+    let (plug, veredito) = tauri::async_runtime::spawn_blocking(move || Plug::connect(config))
         .await
         .map_err(|_| PlugError::Unreachable)??;
 
@@ -194,7 +228,7 @@ async fn connect(
         }
     }
 
-    Ok(snapshot)
+    Ok(Entrada { snapshot, veredito })
 }
 
 /// Este endereço é a própria máquina?
@@ -306,6 +340,15 @@ async fn disconnect(session: State<'_, Session>) -> Result<(), ()> {
     // is what makes the next `connect` allowed.
     drop(plug);
 
+    // O convite morre com a sessão que ele abriu. Enquanto nada era conferido
+    // isto era inerte; deixou de ser no momento em que `expected_fingerprint`
+    // passou a sair daqui — quem sai, digita outro endereço e entra de novo
+    // levaria a impressão prometida por um link anterior para um Dogma que
+    // nunca a prometeu, e a recusa apareceria sem nada na tela que a explique.
+    if let Ok(mut slot) = session.convite.lock() {
+        *slot = None;
+    }
+
     // Quem hospedava para de hospedar ao sair, e quem estava dentro é
     // derrubado. É o comportamento certo: o anfitrião fechou. `encerrar`
     // espera a porta voltar, para hospedar de novo em seguida funcionar.
@@ -415,28 +458,23 @@ fn esquecer(app: AppHandle, alvo: String) -> Result<(), ()> {
 
 /// O que um `seele://` colado diz à tela de entrada.
 ///
-/// Deliberadamente **não** é o `Convite` inteiro do core. Ele carrega a
-/// impressão digital do certificado, e `specs/06-clientes-gui.md:19` é
-/// inegociável: se o frontend precisa saber o que é uma impressão digital, algo
-/// está errado. O que atravessa a ponte é o endereço a preencher e o token a
-/// devolver no `connect` — as duas coisas que a tela tem o que fazer com.
+/// Deliberadamente **não** é o `Convite` inteiro do core: o que a tela de
+/// entrada tem o que fazer com é o endereço a preencher e o token a devolver no
+/// `connect`. A impressão digital do link fica em [`Session::convite`], que é de
+/// onde `connect` a tira para conferir — mandá-la para cá seria mandar ao
+/// frontend a **entrada** de uma comparação, e é isso que
+/// `specs/06-clientes-gui.md:19` proíbe. O que ele recebe sobre identidade é o
+/// veredito de depois, em [`Entrada::veredito`].
+///
+/// Não há mais campo dizendo que a conferência ficou pendente porque não fica:
+/// o link que traz `fp` é conferido no `connect` seguinte, e o resultado tem
+/// frase própria na tela.
 #[derive(Debug, serde::Serialize)]
 struct ConviteLido {
     /// O endereço do Dogma, para o campo DOGMA.
     alvo: String,
     /// O convite de uso único, quando o link trouxe um.
     token: Option<String>,
-    /// O link trouxe uma confirmação de identidade que este app não confere.
-    ///
-    /// Só *que* existe, nunca *qual* — a segunda metade é a que o frontend não
-    /// pode saber. Um booleano é o suficiente para a tela dizer o que tem que
-    /// dizer, e é tudo o que ela recebe.
-    ///
-    /// Existe porque silêncio aqui é a falha, não a falta do recurso: quem cola
-    /// um link que traz a confirmação supõe estar protegido **por causa dela**.
-    /// A afordância é nova nesta versão; "antes também não conferia" não vale
-    /// como resposta para algo que antes não dava para fazer.
-    conferencia_pendente: bool,
 }
 
 /// Lê um `seele://` colado.
@@ -452,7 +490,6 @@ fn analisar_convite(session: State<'_, Session>, link: String) -> Result<Convite
     let lido = ConviteLido {
         alvo: convite.alvo.clone(),
         token: convite.token.clone(),
-        conferencia_pendente: convite.impressao_digital.is_some(),
     };
 
     // Guardado inteiro deste lado da ponte. Ver o campo em `Session`.

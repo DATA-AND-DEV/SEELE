@@ -94,12 +94,12 @@
     </ol>
 
     <!--
-      Ressalva, não falha: laranja e `role="status"`. O vermelho e o `alert` do
-      `#boot-erro` são para o que impede de entrar; usar o mesmo tratamento aqui
-      ensinaria a fechar sem ler, que é exatamente o que este aviso não pode
-      virar.
+      Só o que impede de entrar mora nesta tela: um erro de conexão devolve a
+      pessoa para cá, e é aqui que ele é lido. A ressalva que ficava ao lado
+      dizia que esta janela não sabia conferir a confirmação de identidade de um
+      convite — ela sabe agora, e o que sai da conferência é um veredito, que
+      nasce depois desta tela sumir. Ele está em `#veredito`, na sessão.
     -->
-    <p id="boot-aviso" class="aviso" role="status" hidden></p>
     <p id="boot-erro" class="erro" role="alert" hidden></p>
   </div>
 </section>
@@ -133,6 +133,27 @@
     <span class="kanji" lang="ja">警告</span>
     <span id="banner-texto"></span>
     <button id="banner-fechar" class="botao-fantasma" type="button">dispensar</button>
+  </div>
+
+  <!--
+    O que a chave deste Dogma acabou de ser. `crates/seele-core/src/tofu.rs`
+    manda a casca dizer o que acabou de confiar, e o `plug` no terminal já diz;
+    esta janela fixava em silêncio.
+
+    Laranja e `role="status"`, nunca o vermelho do banner: `specs/08-seguranca.md`
+    reserva o tratamento impossível-de-ignorar à **troca** de chave, que é o que
+    impede de entrar. Um primeiro contato e um convite que não corresponde não
+    impedem nada — gastar o alerta neles é ensinar a fechar sem ler.
+
+    Na sessão e não na tela de entrada, que é onde a ressalva laranja ficava:
+    os três vereditos que têm frase nascem de uma conexão que **deu certo**, e
+    `#tela-boot` é escondida no mesmo instante. Escrito lá, o veredito seria
+    escrito para ninguém. O que sobra para a entrada é o `#boot-erro`, que é
+    onde a recusa de um convite é lida, porque essa impede de entrar.
+  -->
+  <div id="veredito" class="veredito" role="status" hidden>
+    <span id="veredito-texto" class="veredito-texto"></span>
+    <button id="veredito-fechar" class="botao-fantasma" type="button">dispensar</button>
   </div>
 
   <!--

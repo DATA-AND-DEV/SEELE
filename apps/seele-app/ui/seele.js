@@ -145,11 +145,77 @@ function fraseDeErro(erro) {
         "Confirme por outro canal antes de continuar."
       );
     }
+    // O convite prometeu uma chave e o Dogma ofertou outra. Não é troca de
+    // chave — nada estava fixado aqui — então a frase acusa o link, e não a
+    // continuidade do servidor. A conexão já caiu quando isto chega: o core
+    // derruba e desfaz o pin, e é por isso que este caso é `#boot-erro` e não
+    // o veredito laranja da sessão.
+    if (erro.InviteMismatch) {
+      return (
+        "ESTE NÃO É O DOGMA DO CONVITE.\n" +
+        `esperada: ${erro.InviteMismatch.expected}\n` +
+        `ofertada: ${erro.InviteMismatch.offered}\n` +
+        "Confirme o link com quem o mandou."
+      );
+    }
     if (erro.Refused) {
       return MOTIVOS[erro.Refused.reason] ?? "SESSÃO RECUSADA";
     }
   }
   return FRASES[erro] ?? "FALHA DESCONHECIDA";
+}
+
+/**
+ * A frase de um veredito de identidade, ou `null` quando não há o que dizer.
+ *
+ * A comparação já aconteceu — em Rust, dentro do `connect`, antes de isto ser
+ * chamado. O que chega aqui é o resultado dela mais a impressão digital para
+ * uma pessoa conferir por outro canal, que é a única coisa que se faz com uma
+ * impressão digital (ADR 0003). Nada nesta função compara nada.
+ *
+ * `Known` não vira frase de propósito: repetir "a chave é a mesma de sempre" a
+ * cada entrada é ensinar a não ler a linha no dia em que ela não for.
+ *
+ * A recusa de um convite que aponta para outra chave não chega como veredito —
+ * ela derruba a conexão, e a frase dela vive em `fraseDeErro`.
+ */
+function fraseDoVeredito(veredito) {
+  if (!veredito || veredito === "Known") return null;
+
+  // `tofu.rs`: a casca tem que dizer o que acabou de confiar. Fixar em
+  // silêncio é fixar sem ninguém saber que havia o que conferir.
+  if (veredito.FirstContact) {
+    return (
+      "PRIMEIRO CONTATO — CHAVE FIXADA\n" +
+      `${veredito.FirstContact.fingerprint}\n` +
+      "Ninguém confirmou que é esta. Confira com quem hospeda, por outro canal."
+    );
+  }
+  // É para produzir exatamente isto que o link do ADR 0006 existe. Não há nada
+  // a fazer, e por isso a frase não pede nada.
+  if (veredito.FirstContactVerified) {
+    return (
+      "PRIMEIRO CONTATO VERIFICADO — O CONVITE CONFIRMOU A CHAVE\n" +
+      veredito.FirstContactVerified.fingerprint
+    );
+  }
+  // O Dogma é o mesmo de sempre; o link é que não é dele. Ressalva, não queda.
+  if (veredito.InviteDisagrees) {
+    return (
+      "O CONVITE NÃO CORRESPONDE A ESTE DOGMA.\n" +
+      `esperada: ${veredito.InviteDisagrees.expected}\n` +
+      `ofertada: ${veredito.InviteDisagrees.offered}\n` +
+      "Você entrou no Dogma de sempre. O link é que não leva a ele."
+    );
+  }
+  return null;
+}
+
+/** Acende — ou apaga — a faixa de veredito da sessão. */
+function mostrarVeredito(veredito) {
+  const frase = fraseDoVeredito(veredito);
+  $("veredito-texto").textContent = frase ?? "";
+  $("veredito").hidden = frase === null;
 }
 
 /**
@@ -170,8 +236,6 @@ const FRASES = {
 
     // Por que um texto colado não é um convite. O Rust devolve o nome da
     // falha; a frase é daqui, como todas as outras.
-    ConferenciaPendente:
-      "ESTE CONVITE TRAZ UMA CONFIRMAÇÃO DE IDENTIDADE DO DOGMA, E ESTA JANELA AINDA NÃO SABE CONFERI-LA.\nDá para entrar, mas sem essa garantia. O `plug` no terminal confere.",
     EsquemaDesconhecido: "ISTO NÃO PARECE UM CONVITE SEELE",
     SemEndereco: "ESTE CONVITE NÃO TRAZ ENDEREÇO NENHUM",
     EnderecoInvalido: "O ENDEREÇO DENTRO DESTE CONVITE NÃO É UM ENDEREÇO",
@@ -527,8 +591,9 @@ async function desenharVisitados() {
  * Lê o `seele://` colado no campo CONVITE.
  *
  * Quem lê o link é o Rust: um segundo analisador aqui seria um segundo conjunto
- * de casos de borda para discordar do primeiro, e a impressão digital que o link
- * carrega nem chega a atravessar a ponte.
+ * de casos de borda para discordar do primeiro. A confirmação de identidade que
+ * o link carrega fica lá também, guardada até o `connect` conferi-la — o que
+ * volta para cá é o veredito, depois, e nunca o valor a comparar.
  */
 async function lerConvite() {
   const campo = $("campo-convite");
@@ -544,17 +609,10 @@ async function lerConvite() {
     $("campo-servidor").value = convite.alvo;
     convitePendente = convite;
     erro.hidden = true;
-    // Um link que traz a confirmação de identidade do Dogma e um que não traz
-    // parecem iguais na tela, e só um deles protege. Calar sobre isso deixaria
-    // quem colou o link supondo a proteção justamente por causa dela.
-    const aviso = $("boot-aviso");
-    aviso.textContent = FRASES.ConferenciaPendente;
-    aviso.hidden = !convite.conferencia_pendente;
   } catch (falha) {
     // O resto do formulário fica intacto: quem colou errado não perde o que já
     // tinha digitado nos outros campos.
     convitePendente = null;
-    $("boot-aviso").hidden = true;
     erro.textContent = fraseDeErro(falha);
     erro.hidden = false;
   }
@@ -571,7 +629,6 @@ async function lerConvite() {
 function limparConvite() {
   $("campo-convite").value = "";
   convitePendente = null;
-  $("boot-aviso").hidden = true;
 }
 
 async function conectar(evento) {
@@ -587,12 +644,17 @@ async function conectar(evento) {
   for (const id of ["sub-melchior", "sub-balthasar", "sub-casper"]) $(id).textContent = "…";
 
   try {
-    const snapshot = await invoke("connect", {
+    // A entrada traz duas coisas: a tela, e o que a chave deste Dogma acabou
+    // de ser. A segunda vem do mesmo `connect` porque é lá que ela é decidida —
+    // um ouvinte inscrito depois chegaria sempre tarde.
+    const { snapshot, veredito } = await invoke("connect", {
       server: $("campo-servidor").value.trim(),
       nickname: $("campo-apelido").value.trim(),
       audio: $("campo-audio").checked,
       // O token do convite, quando o link trouxe um. `join_secret` do outro
-      // lado: a ponte do Tauri converte para camelCase.
+      // lado: a ponte do Tauri converte para camelCase. A confirmação de
+      // identidade do mesmo link não passa por aqui: ela ficou no Rust, que é
+      // quem confere.
       joinSecret: convitePendente?.token ?? null,
     });
 
@@ -600,6 +662,7 @@ async function conectar(evento) {
 
     $("tela-boot").hidden = true;
     $("tela-sessao").hidden = false;
+    mostrarVeredito(veredito);
     desenhar(snapshot);
 
     // Entrar no primeiro Cage e abrir a primeira Linha é o que um cliente
@@ -801,6 +864,7 @@ $("busca-anterior").addEventListener("click", async () =>
 $("form-mensagem").addEventListener("submit", enviar);
 $("lista-canais").addEventListener("click", alternarCanal);
 $("banner-fechar").addEventListener("click", () => ($("banner").hidden = true));
+$("veredito-fechar").addEventListener("click", () => ($("veredito").hidden = true));
 
 $("botao-mudo").addEventListener("click", async () => {
   const snapshot = await invoke("snapshot");
@@ -892,6 +956,9 @@ async function ejetar() {
   $("tela-boot").hidden = false;
   $("convite").hidden = true;
   $("bateria").hidden = true;
+  // O veredito era sobre a chave daquela sessão. Deixá-lo aceso sobre a
+  // próxima seria dizer de um Dogma o que se apurou de outro.
+  mostrarVeredito(null);
   document.body.classList.remove("na-bateria");
   desenhado = null;
   linhaAberta = null;
@@ -919,6 +986,7 @@ $("botao-voltar").addEventListener("click", async () => {
   // O `disconnect` também derruba o Dogma hospedado. A caixa some junto, ou
   // ficaria oferecendo um link que não leva mais a lugar nenhum.
   $("convite").hidden = true;
+  mostrarVeredito(null);
   desenhado = null;
   linhaAberta = null;
   await encerrarBusca();

@@ -139,21 +139,19 @@ input:focus {
 
 .subsistemas b { color: var(--seele-fosforo); margin-left: 8px; }
 
+/* `pre-line` porque dois destes erros carregam duas impressões digitais para
+   uma pessoa comparar — a chave que mudou (ADR 0003) e o convite que não leva a
+   este Dogma. Sem a quebra as duas refluem no mesmo parágrafo, que é exatamente
+   a forma em que a comparação não acontece; `anywhere` porque são 64 caracteres
+   sem espaço nenhum onde quebrar. */
 .erro, .fim-motivo {
   margin: 16px 0 0;
   color: var(--seele-vermelho-alerta);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 
 .fim-motivo { margin-bottom: 32px; color: var(--seele-osso); }
-
-/* Ressalva, não falha. Laranja institucional e não o vermelho de alerta: o
-   vermelho é do que impede de entrar, e gastá-lo numa ressalva ensina a fechar
-   sem ler. `white-space: pre-line` porque a segunda linha diz o que fazer. */
-.aviso {
-  margin: 16px 0 0;
-  color: var(--seele-laranja-nerv);
-  white-space: pre-line;
-}
 
 /* ---------- topo ---------- */
 
@@ -203,6 +201,31 @@ input:focus {
   background: var(--seele-laranja-fraco);
   border-bottom-color: var(--seele-laranja-nerv);
   color: var(--seele-laranja-nerv);
+}
+
+/* O veredito de identidade. Mesma geometria do banner e a cor institucional:
+   ressalva, não queda. O vermelho é do `.banner`, e `--seele-vermelho-alerta`
+   está marcado "EXCLUSIVO alerta e queda" na folha de tokens.
+
+   `pre-line` porque a impressão digital vai em linha própria: são 64
+   caracteres para comparar com outro canal, e reflui-los no meio de uma frase
+   é a única forma em que ninguém consegue compará-los. */
+.veredito {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--seele-laranja-fraco);
+  border-bottom: 1px solid var(--seele-laranja-nerv);
+  color: var(--seele-laranja-nerv);
+  flex: 0 0 auto;
+}
+
+.veredito-texto {
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-dado);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 
 .botao-fantasma {

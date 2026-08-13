@@ -141,11 +141,15 @@ fn the_page_loads_only_files_that_are_shipped() {
     );
 }
 
-/// Strips `//` comments and HTML comments.
+/// Strips `//`, `/* */` and HTML comments.
 ///
-/// The check below is about what the code *does*, and a comment explaining that
+/// The checks below are about what the code *does*. A comment explaining that
 /// the frontend must not know what an `ssrc` is would otherwise fail the test
-/// that enforces it.
+/// that enforces it — and, in the other direction, a doc comment naming a
+/// verdict would satisfy the test that demands the verdict be *handled*. Block
+/// comments are stripped for that second reason: every explanation in
+/// `seele.js` is a `/** */`, and a guard a comment can satisfy is a guard that
+/// cannot fail.
 fn without_comments(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
@@ -157,6 +161,18 @@ fn without_comments(text: &str) -> String {
         }
     }
     out.push_str(rest);
+
+    let mut without_blocks = String::with_capacity(out.len());
+    let mut rest = out.as_str();
+    while let Some(start) = rest.find("/*") {
+        without_blocks.push_str(&rest[..start]);
+        match rest[start..].find("*/") {
+            Some(end) => rest = &rest[start + end + 2..],
+            None => return without_blocks,
+        }
+    }
+    without_blocks.push_str(rest);
+    let out = without_blocks;
 
     out.lines()
         .map(|line| match line.find("//") {
@@ -437,6 +453,208 @@ fn the_event_name_the_script_branches_on_is_the_one_the_bridge_sends() {
     assert!(
         read("ui/seele.js").contains("payload === \"MessagesChanged\""),
         "nothing in the script rebuilds the search when the message list changes"
+    );
+}
+
+/// The body of a top-level `fn`, comments stripped.
+///
+/// Two of the checks below are about one statement being inside one function,
+/// and `main.rs` as a whole says the word either way — the paragraph explaining
+/// why the invite dies in `disconnect` would satisfy a search for `convite`
+/// long after the line itself was deleted. Scoping and stripping is what makes
+/// those checks able to fail.
+///
+/// `\n}\n` terminates: every brace inside a body is indented.
+fn body_of(source: &str, signature: &str) -> String {
+    let Some(after) = source.split(signature).nth(1) else {
+        panic!("main.rs no longer has `{signature}`");
+    };
+    let Some(body) = after.split("\n}\n").next() else {
+        panic!("unterminated `{signature}`");
+    };
+    without_comments(body)
+}
+
+/// Does the text name `word` on its own, rather than inside a longer name?
+///
+/// The distinction is the whole point of the test below. `FirstContact` is a
+/// prefix of `FirstContactVerified`, so a plain `contains` would call a verdict
+/// handled when the only thing left in the file is the *other* one — which is
+/// precisely the deletion this has to catch.
+fn names(text: &str, word: &str) -> bool {
+    let edge = |character: Option<char>| {
+        character.is_none_or(|character| !character.is_alphanumeric() && character != '_')
+    };
+    text.match_indices(word).any(|(at, _)| {
+        edge(text[..at].chars().next_back()) && edge(text[at + word.len()..].chars().next())
+    })
+}
+
+#[test]
+fn every_verdict_the_bridge_can_send_has_its_own_sentence_in_the_page() {
+    // A variant with no sentence is a blank screen at the moment it most needs
+    // to say something — and this shell spent its whole life pinning keys in
+    // silence, so the failure is not hypothetical.
+    //
+    // It serialises the real `Trust` rather than listing strings, so renaming a
+    // variant breaks this instead of leaving a dead branch behind. Comments are
+    // stripped first, and that is load-bearing rather than tidy: the doc comment
+    // on `fraseDoVeredito` says `Known` in prose, so deleting the branch that
+    // handles it would leave this green on the strength of an explanation.
+    //
+    // `InviteRefused` is left out on purpose — the core drops the connection,
+    // so it reaches the shell as a `PlugError`. The test below covers it.
+    let script = without_comments(&read("ui/seele.js"));
+
+    for verdict in [
+        seele_ffi::Trust::FirstContact {
+            fingerprint: "a".into(),
+        },
+        seele_ffi::Trust::FirstContactVerified {
+            fingerprint: "a".into(),
+        },
+        seele_ffi::Trust::Known,
+        seele_ffi::Trust::InviteDisagrees {
+            expected: "b".into(),
+            offered: "a".into(),
+        },
+    ] {
+        let Ok(json) = serde_json::to_string(&verdict) else {
+            panic!("Trust does not serialise, so no shell can read it at all");
+        };
+        // The variant name, exactly as serde writes it on the wire.
+        let Some(name) = json.trim_matches('"').split("\":").next() else {
+            panic!("unexpected shape: {json}");
+        };
+        let name = name.trim_start_matches('{').trim_matches('"');
+
+        assert!(
+            names(&script, name),
+            "the verdict {name} has no handling in the script, so it lands on a \
+             screen that says nothing"
+        );
+    }
+}
+
+#[test]
+fn the_refused_invite_reaches_the_screen_with_both_fingerprints() {
+    // The fifth verdict never crosses as a `Trust`: the core drops the
+    // connection, so it arrives as the error below and its sentence lives on
+    // the `#boot-erro` path. Both prints have to be in it — an accusation that
+    // shows one of the two is an accusation nobody can check.
+    let refusal = seele_ffi::PlugError::InviteMismatch {
+        expected: "bbbb".into(),
+        offered: "aaaa".into(),
+    };
+    let Ok(json) = serde_json::to_string(&refusal) else {
+        panic!("PlugError does not serialise, so no shell can read it at all");
+    };
+    let script = without_comments(&read("ui/seele.js"));
+
+    assert!(
+        names(&script, "InviteMismatch"),
+        "nothing in the script reads the refusal, so a link that names another \
+         Dogma fails with a sentence about nothing: {json}"
+    );
+    for field in ["expected", "offered"] {
+        assert!(
+            json.contains(&format!("\"{field}\"")),
+            "the refusal no longer carries `{field}`: {json}"
+        );
+        assert!(
+            names(&script, field),
+            "the script never names `{field}`, so the reader gets half a comparison"
+        );
+    }
+}
+
+#[test]
+fn the_informative_verdicts_do_not_spend_the_alarm_reserved_for_a_key_change() {
+    // `specs/08-seguranca.md` reserves the impossible-to-ignore treatment for a
+    // key that changed, and `tokens.css:19` marks the red "EXCLUSIVO alerta e
+    // queda". A first contact and a link that names another Dogma stop nobody
+    // from entering; dressing them as an alarm is what teaches people to
+    // dismiss the alarm on the day it means the other thing.
+    let page = without_comments(&read("ui/index.html"));
+    let css = without_comments(&read("ui/seele.css"));
+
+    let tag = page
+        .split("id=\"veredito\"")
+        .nth(1)
+        .and_then(|rest| rest.split('>').next())
+        .unwrap_or_default();
+    assert!(
+        tag.contains("role=\"status\""),
+        "the verdict is announced as an alert, which is the treatment reserved \
+         for what stops you entering: {tag}"
+    );
+
+    let rule = css
+        .split(".veredito")
+        .nth(1)
+        .and_then(|rest| rest.split('}').next())
+        .unwrap_or_default();
+    assert!(
+        !rule.is_empty(),
+        "the stylesheet has no rule for the verdict band"
+    );
+    assert!(
+        !rule.contains("vermelho"),
+        "the verdict band is painted in the colour the tokens reserve for alarm \
+         and collapse:\n{rule}"
+    );
+}
+
+#[test]
+fn the_comparison_stays_in_rust_and_only_its_verdict_crosses() {
+    // `specs/06-clientes-gui.md:19`. The fingerprint crosses the bridge now,
+    // which is a reversal — but it crosses as the *output* of a decision, to be
+    // read by a person. What must never cross is the input: the value to check
+    // against comes off `Session::convite` and goes straight into the FFI.
+    let script = without_comments(&read("ui/seele.js"));
+    let connect = body_of(&read("src/main.rs"), "async fn connect");
+
+    // Scoped to the body and blind to the variable that carries the value: what
+    // matters is that the field is filled from the stored invite, not what the
+    // local is called on the way.
+    assert!(
+        connect.contains("impressao_digital") && connect.contains("session.convite"),
+        "`connect` never reads the invite's fingerprint, so a pasted link is \
+         parsed and thrown away exactly as before"
+    );
+    assert!(
+        connect.contains("expected_fingerprint") && !connect.contains("expected_fingerprint: None"),
+        "`connect` hands the FFI no fingerprint to check against, so every \
+         connection is as blind as a typed address"
+    );
+    assert!(
+        !script.contains("expected_fingerprint") && !script.contains("expectedFingerprint"),
+        "the frontend is feeding the comparison its input, which is the \
+         comparison moving to JavaScript one argument at a time"
+    );
+    assert!(
+        !script.contains("impressao_digital"),
+        "the frontend reads the parsed invite's own field, so the whole `Convite` \
+         crossed the bridge instead of the verdict"
+    );
+    assert!(
+        !script.contains("conferencia_pendente"),
+        "the script still branches on a pending check that no longer exists, so \
+         that branch is dead and the screen it drew is gone"
+    );
+}
+
+#[test]
+fn leaving_forgets_the_invite_that_let_us_in() {
+    // Inert while nothing was checked, and not inert any more: the fingerprint
+    // that `connect` checks against comes from this slot. Left behind, the next
+    // connection to a different Dogma would be checked against the previous
+    // link's promise and refused for a reason nobody could explain.
+    let body = body_of(&read("src/main.rs"), "async fn disconnect");
+    assert!(
+        body.contains("session.convite"),
+        "`disconnect` drops the plug and the hosting but keeps the invite, so a \
+         fingerprint from a previous link outlives the session it belonged to"
     );
 }
 
