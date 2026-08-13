@@ -31,8 +31,8 @@ use ratatui::Terminal;
 use seele_core::conhecidos::Conhecidos;
 use seele_core::enlace::{Aviso, Destino, Enlace, Fechado, Motivo};
 use seele_core::{
-    identity, CageId, ClientMessageId, FilePinStore, LineId, PinDecision, Room, SyncInputs,
-    SyncRatio, Voice, VoiceMode,
+    identity, CageId, ClientMessageId, ConnectError, FilePinStore, LineId, Room, SyncInputs,
+    SyncRatio, Verdict, Voice, VoiceMode,
 };
 use seele_tui::app::{Action, Alert, App, ChatLine, Key, Mode, Node, Screen};
 use seele_tui::command::{self, Command};
@@ -478,20 +478,12 @@ async fn sessao(
     // `Enlace` e não `Client`: um `Client` é uma conexão e acaba quando ela
     // cai; o enlace é a **sessão**, que atravessa quedas. É ele que carrega a
     // bateria interna e a reconexão de `specs/07-tema-evangelion.md`.
-    let destino = Destino {
-        servidor: args.server,
-        nome_tls: args.server_name.clone(),
-        chave_do_pin: args.pin_key.clone(),
-        apelido: args.nickname.clone(),
-        segredo: args.join_secret.clone(),
-        // A Task 3 preenche isto com o `fp=` do link.
-        impressao_esperada: None,
-    };
+    let destino = construir_destino(args);
     let mut client = match Enlace::conectar(destino, key, pins).await {
         Ok(client) => client,
         Err(error) => {
             runtime.app.screen = Screen::Lost {
-                reason: format!("NÃO FOI POSSÍVEL ALCANÇAR O DOGMA: {error}"),
+                reason: motivo_de_conexao_perdida(&error),
             };
             // Um endereço que não atende é o caso mais comum de todos, e
             // justamente o que mais precisa da lista: escolher um Dogma morto
@@ -501,37 +493,12 @@ async fn sessao(
         }
     };
 
-    // Quando o link trouxe a impressão digital, ela é conferida aqui — e é o
-    // que transforma o primeiro contato de cego em verificado. Sem isso o ADR
-    // 0003 depende de a pessoa conferir por outro canal, o que ninguém faz.
-    if let Some(esperada) = &args.expected_fingerprint {
-        let oferecida = match client.pin_decision() {
-            PinDecision::FirstContact { fingerprint } => fingerprint.clone(),
-            PinDecision::Matches { .. } => esperada.clone(),
-            PinDecision::Changed { offered, .. } => offered.clone(),
-        };
-        if !oferecida.eq_ignore_ascii_case(esperada) {
-            runtime.app.screen = Screen::Lost {
-                reason: format!(
-                    "ESTE NÃO É O DOGMA DO CONVITE.\n\nesperada:  {esperada}\nofertada:  {oferecida}"
-                ),
-            };
-            // A conexão existe e está errada: soltar antes de esperar a porta
-            // é o que evita o Dogma hospedado aqui esperar por nós mesmos.
-            drop(client);
-            return fim_de_sessao(terminal, key_rx, &mut runtime, &mut hospedagem).await;
-        }
-    }
-
-    // ADR 0003 and specs/08-seguranca.md: first contact is stated, not accepted
-    // in silence. A pin that establishes itself invisibly is a pin nobody knows
-    // to check.
-    if let PinDecision::FirstContact { fingerprint } = client.pin_decision() {
-        runtime.app.alert = Some(Alert {
-            text: format!("PRIMEIRO CONTATO — CHAVE FIXADA {fingerprint}"),
-            blocking: false,
-        });
-    }
+    // O core já decidiu o que este aperto de mão significa — `Enlace::veredito`
+    // vem pronto, e esta casca só desenha o que ele diz. `Verdict::InviteRefused`
+    // não aparece aqui: a recusa derruba a conexão antes de existir um `Enlace`
+    // para perguntar, e o `Err` acima já ganhou frase em
+    // [`motivo_de_conexao_perdida`].
+    runtime.app.alert = alerta_do_veredito(client.veredito());
 
     let cage = args.cage;
     // Um enlace que fecha antes mesmo de a sessão subir é uma sessão que
@@ -755,6 +722,24 @@ async fn sessao(
     }
 }
 
+/// Monta o `Destino` a partir do que a linha de comando ou a tela de conexão
+/// já resolveram.
+///
+/// Função à parte, e pura, para que o fio de `args.expected_fingerprint` até
+/// `Destino::impressao_esperada` seja conferível sem Dogma do outro lado — o
+/// mesmo motivo que fez `seele_core::enlace::conferir` sair de dentro de
+/// `Enlace::conectar`.
+fn construir_destino(args: &Args) -> Destino {
+    Destino {
+        servidor: args.server,
+        nome_tls: args.server_name.clone(),
+        chave_do_pin: args.pin_key.clone(),
+        apelido: args.nickname.clone(),
+        segredo: args.join_secret.clone(),
+        impressao_esperada: args.expected_fingerprint.clone(),
+    }
+}
+
 /// Os três pedidos que põem uma sessão de pé.
 ///
 /// Juntos porque falham juntos e pelo mesmo motivo: se o enlace fechou, nenhum
@@ -763,6 +748,54 @@ async fn entrar(client: &Enlace, cage: CageId, line: LineId) -> Result<(), Fecha
     client.inserir_plug(cage).await?;
     client.abrir_linha(line).await?;
     client.historico(line, 50).await
+}
+
+/// O texto da tela de fim quando `Enlace::conectar` falha.
+///
+/// Função à parte, e pura, porque um dos erros merece frase própria: um
+/// convite que não confere carrega duas impressões de 64 caracteres, e são
+/// elas que a pessoa tem que comparar. `\n\n` e `\n` separam as duas em linhas
+/// próprias — `render_lost` preserva quebra de linha — porque reflui-las no
+/// mesmo parágrafo é a única forma em que ninguém consegue compará-las.
+fn motivo_de_conexao_perdida(error: &ConnectError) -> String {
+    match error {
+        ConnectError::InviteMismatch { expected, offered } => {
+            format!("ESTE NÃO É O DOGMA DO CONVITE.\n\nesperada:  {expected}\nofertada:  {offered}")
+        }
+        _ => format!("NÃO FOI POSSÍVEL ALCANÇAR O DOGMA: {error}"),
+    }
+}
+
+/// O alerta a mostrar a partir do veredito de identidade — pura, e por isso
+/// testável sem Dogma do outro lado.
+///
+/// `Verdict::InviteRefused` não produz alerta aqui: a recusa derruba a conexão
+/// antes de existir um `Enlace` para perguntar `veredito()`, e o `ConnectError`
+/// correspondente já ganhou frase em [`motivo_de_conexao_perdida`]. O braço
+/// fica pela exaustão do `match` — se um dia a recusa parar de derrubar a
+/// conexão, isto para de compilar sozinho, em vez de silenciosamente não
+/// alertar ninguém.
+fn alerta_do_veredito(veredito: &Verdict) -> Option<Alert> {
+    let text = match veredito {
+        // ADR 0003 and specs/08-seguranca.md: first contact is stated, not
+        // accepted in silence. A pin that establishes itself invisibly is a
+        // pin nobody knows to check.
+        Verdict::FirstContact { fingerprint } => {
+            format!("PRIMEIRO CONTATO — CHAVE FIXADA {fingerprint}")
+        }
+        // ADR 0006: é para produzir exatamente isto que o link existe.
+        Verdict::FirstContactVerified { fingerprint } => {
+            format!("PRIMEIRO CONTATO VERIFICADO — O CONVITE CONFIRMOU {fingerprint}")
+        }
+        Verdict::InviteDisagrees { expected, offered } => format!(
+            "O CONVITE NÃO CORRESPONDE A ESTE DOGMA — esperada: {expected}  ofertada: {offered}"
+        ),
+        Verdict::Known | Verdict::InviteRefused { .. } => return None,
+    };
+    Some(Alert {
+        text,
+        blocking: false,
+    })
 }
 
 /// Põe na tela o fim de uma sessão cujo enlace fechou no meio de um pedido.
@@ -1318,6 +1351,125 @@ fn clock_short() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn args_de_teste(expected_fingerprint: Option<String>) -> Args {
+        Args {
+            server: SocketAddr::from(([127, 0, 0, 1], 8383)),
+            server_name: "localhost".to_owned(),
+            pin_key: "127.0.0.1:8383".to_owned(),
+            nickname: "piloto".to_owned(),
+            cage: CageId(1),
+            line: LineId(1),
+            no_audio: true,
+            join_secret: None,
+            expected_fingerprint,
+            hospedar: false,
+        }
+    }
+
+    #[test]
+    fn a_impressao_do_link_chega_ao_destino() {
+        let args = args_de_teste(Some("aaaa1111".to_owned()));
+        let destino = construir_destino(&args);
+        assert_eq!(destino.impressao_esperada, Some("aaaa1111".to_owned()));
+    }
+
+    #[test]
+    fn sem_link_o_destino_nao_tem_impressao_para_conferir() {
+        let args = args_de_teste(None);
+        let destino = construir_destino(&args);
+        assert_eq!(destino.impressao_esperada, None);
+    }
+
+    #[test]
+    fn a_recusa_do_convite_diz_as_duas_impressoes_em_linhas_proprias() {
+        // Guarda o alinhamento de que `render_lost` depende: reflui-las no
+        // mesmo parágrafo é a única forma em que ninguém consegue comparar
+        // dois hexadecimais de 64 caracteres.
+        let expected = "a".repeat(64);
+        let offered = "b".repeat(64);
+        let motivo = motivo_de_conexao_perdida(&ConnectError::InviteMismatch {
+            expected: expected.clone(),
+            offered: offered.clone(),
+        });
+
+        let linha_esperada = motivo.lines().find(|linha| linha.contains(&expected));
+        let linha_ofertada = motivo.lines().find(|linha| linha.contains(&offered));
+        let (Some(linha_esperada), Some(linha_ofertada)) = (linha_esperada, linha_ofertada) else {
+            panic!("uma das duas impressões sumiu do motivo:\n{motivo}");
+        };
+        assert_ne!(
+            linha_esperada, linha_ofertada,
+            "as duas impressões caíram na mesma linha, a forma em que não dá para compará-las"
+        );
+    }
+
+    #[test]
+    fn qualquer_outro_erro_de_conexao_usa_a_frase_generica() {
+        let motivo = motivo_de_conexao_perdida(&ConnectError::Unreachable);
+        assert!(motivo.contains("NÃO FOI POSSÍVEL ALCANÇAR O DOGMA"));
+    }
+
+    #[test]
+    fn primeiro_contato_alerta_com_a_impressao_fixada() {
+        let veredito = Verdict::FirstContact {
+            fingerprint: "aaaa1111".to_owned(),
+        };
+        let Some(alerta) = alerta_do_veredito(&veredito) else {
+            panic!("primeiro contato ficou sem alerta");
+        };
+        assert!(alerta.text.contains("aaaa1111"));
+        assert!(!alerta.blocking);
+    }
+
+    #[test]
+    fn primeiro_contato_verificado_nao_e_o_mesmo_texto_do_primeiro_contato_cego() {
+        // Um convite que confirmou a chave é notícia diferente de uma chave
+        // fixada sem nada para conferir — trocar os dois ramos entre si é o
+        // defeito que este teste existe para pegar.
+        let cego = alerta_do_veredito(&Verdict::FirstContact {
+            fingerprint: "aaaa1111".into(),
+        });
+        let verificado = alerta_do_veredito(&Verdict::FirstContactVerified {
+            fingerprint: "aaaa1111".into(),
+        });
+        let (Some(cego), Some(verificado)) = (cego, verificado) else {
+            panic!("um dos dois vereditos ficou sem alerta");
+        };
+        assert_ne!(cego.text, verificado.text);
+    }
+
+    #[test]
+    fn um_dogma_ja_conhecido_nao_gera_alerta() {
+        assert!(alerta_do_veredito(&Verdict::Known).is_none());
+    }
+
+    #[test]
+    fn um_convite_recusado_tambem_nao_gera_alerta_aqui() {
+        // Este veredito nunca chega até aqui em produção — a recusa derruba a
+        // conexão antes de existir um `Enlace` para perguntar `veredito()` —,
+        // mas o braço existe para o `match` continuar exaustivo, e por isso é
+        // testado.
+        let veredito = Verdict::InviteRefused {
+            expected: "a".into(),
+            offered: "b".into(),
+        };
+        assert!(alerta_do_veredito(&veredito).is_none());
+    }
+
+    #[test]
+    fn um_link_que_discorda_de_um_dogma_conhecido_mostra_as_duas_impressoes() {
+        let veredito = Verdict::InviteDisagrees {
+            expected: "aaaa1111".into(),
+            offered: "bbbb2222".into(),
+        };
+        let Some(alerta) = alerta_do_veredito(&veredito) else {
+            panic!("o desacordo do convite ficou sem alerta");
+        };
+        assert!(alerta.text.contains("aaaa1111"));
+        assert!(alerta.text.contains("bbbb2222"));
+        assert!(!alerta.blocking);
+    }
 
     fn evento(kind: KeyEventKind) -> Event {
         Event::Key(KeyEvent::new_with_kind(
