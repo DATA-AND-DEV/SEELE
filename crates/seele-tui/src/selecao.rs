@@ -182,7 +182,7 @@ impl Selecao {
             // onde se parou. Uma tecla e pronto — é para isso que a lista
             // existe.
             Item::Visitado(conhecido) => {
-                self.rascunho.alvo.clone_from(&conhecido.alvo);
+                self.apontar_para(conhecido.alvo.clone());
                 self.rascunho.apelido.clone_from(&conhecido.apelido);
                 self.rascunho.cage = conhecido.cage.unwrap_or(1);
                 Resultado::Pronto(Box::new(self.rascunho.clone()))
@@ -197,11 +197,39 @@ impl Selecao {
             }
             Item::Hospedar => {
                 self.rascunho.hospedar = true;
-                self.rascunho.alvo = AQUI.to_owned();
+                self.apontar_para(AQUI.to_owned());
                 self.perguntar_apelido();
                 Resultado::Segue
             }
         }
+    }
+
+    /// Aponta o rascunho para outro endereço, largando o que era do anterior.
+    ///
+    /// Um convite vale para o Dogma dele e para mais nenhum. A impressão
+    /// digital e o token vieram de um link que fala de um endereço só, e
+    /// arrastá-los para o Dogma seguinte produz as duas piores telas que este
+    /// cliente tem: contra um Dogma ainda não fixado, uma recusa
+    /// ("ESTE NÃO É O DOGMA DO CONVITE") que ninguém pediu e que não há como
+    /// desfazer sem reiniciar; contra um já fixado, uma acusação laranja contra
+    /// o Dogma de todo dia. O token faz o par disso do outro lado — um Dogma
+    /// que nunca pediu credencial nenhuma responderia `CredentialRejected`.
+    ///
+    /// O app já tem esta disciplina (`apps/seele-app/src/main.rs` descarta o
+    /// convite guardado quando o endereço no campo não é o dele, e
+    /// `specs/06-clientes-gui.md` a descreve como comportamento de produto);
+    /// aqui era a única casca sem ela, porque o Esc na pergunta do apelido
+    /// preserva o rascunho de propósito.
+    ///
+    /// Voltar ao **mesmo** endereço não larga nada: aí o convite continua sendo
+    /// daquele Dogma, e limpá-lo seria perder a conferência que o link existe
+    /// para fazer.
+    fn apontar_para(&mut self, alvo: String) {
+        if self.rascunho.alvo != alvo {
+            self.rascunho.impressao_digital = None;
+            self.rascunho.convite = None;
+        }
+        self.rascunho.alvo = alvo;
     }
 
     fn esquecer_o_do_cursor(&mut self) -> Resultado {
@@ -261,14 +289,14 @@ impl Selecao {
                     self.aviso = Some("um endereço, ou Esc para voltar".to_owned());
                     return Resultado::Segue;
                 }
-                self.rascunho.alvo = com_porta(resposta);
+                self.apontar_para(com_porta(resposta));
                 self.perguntar_apelido();
                 Resultado::Segue
             }
 
             Pergunta::Link => match seele_core::uri::analisar(resposta) {
                 Ok(convite) => {
-                    self.rascunho.alvo = com_porta(&convite.alvo);
+                    self.apontar_para(com_porta(&convite.alvo));
                     self.rascunho.impressao_digital = convite.impressao_digital;
                     self.rascunho.convite = convite.token;
                     if let Some(numero) = convite.cage {
@@ -561,6 +589,100 @@ mod tests {
         assert_eq!(escolha.impressao_digital, Some("ab".repeat(32)));
         assert_eq!(escolha.convite, Some("A1B2C3D4".to_owned()));
         assert_eq!(escolha.apelido, APELIDO_PADRAO);
+    }
+
+    /// Um convite de exemplo, com impressão digital e token.
+    fn link_de_teste(alvo: &str) -> String {
+        format!("seele://{alvo}?fp={}&convite=A1B2C3D4", "ab".repeat(32))
+    }
+
+    #[test]
+    fn o_convite_colado_nao_segue_para_outro_dogma() {
+        // O caminho mais curto até o defeito, e o que o reproduziu: colar um
+        // convite, apertar Esc na pergunta do apelido — que preserva o rascunho
+        // de propósito — e entrar num Dogma da lista. A impressão digital ia
+        // junto, e `plug` acusava de impostor um Dogma que o convite nem cita.
+        let mut selecao = Selecao::nova(vec![conhecido("outro:8383", "ayanami", None)]);
+
+        selecao.tecla(KeyCode::Char('c'));
+        digitar(&mut selecao, &link_de_teste("dogma-do-link:8383"));
+        assert_eq!(selecao.tecla(KeyCode::Enter), Resultado::Segue);
+        assert_eq!(selecao.tecla(KeyCode::Esc), Resultado::Segue);
+
+        let Resultado::Pronto(escolha) = selecao.tecla(KeyCode::Enter) else {
+            panic!("não escolheu");
+        };
+        assert_eq!(escolha.alvo, "outro:8383");
+        assert_eq!(
+            escolha.impressao_digital, None,
+            "a impressão do link foi cobrada de um Dogma que ele não menciona"
+        );
+        assert_eq!(
+            escolha.convite, None,
+            "o token foi mandado a um Dogma que não pediu credencial nenhuma"
+        );
+    }
+
+    #[test]
+    fn digitar_outro_endereco_depois_do_convite_tambem_larga_o_que_era_dele() {
+        // Mesmo defeito pela porta ao lado: Esc, `n`, e um endereço à mão.
+        let mut selecao = Selecao::nova(Vec::new());
+
+        selecao.tecla(KeyCode::Char('c'));
+        digitar(&mut selecao, &link_de_teste("dogma-do-link:8383"));
+        selecao.tecla(KeyCode::Enter);
+        selecao.tecla(KeyCode::Esc);
+
+        selecao.tecla(KeyCode::Char('n'));
+        digitar(&mut selecao, "outro:8383");
+        assert_eq!(selecao.tecla(KeyCode::Enter), Resultado::Segue);
+
+        let Resultado::Pronto(escolha) = selecao.tecla(KeyCode::Enter) else {
+            panic!("não escolheu");
+        };
+        assert_eq!(escolha.alvo, "outro:8383");
+        assert_eq!(escolha.impressao_digital, None);
+        assert_eq!(escolha.convite, None);
+    }
+
+    #[test]
+    fn hospedar_depois_de_um_convite_nao_confere_o_convite_contra_si_mesmo() {
+        // O Dogma que sobe aqui é deste computador; um convite de outro lugar
+        // não tem nada a dizer sobre ele.
+        let mut selecao = Selecao::nova(Vec::new());
+
+        selecao.tecla(KeyCode::Char('c'));
+        digitar(&mut selecao, &link_de_teste("dogma-do-link:8383"));
+        selecao.tecla(KeyCode::Enter);
+        selecao.tecla(KeyCode::Esc);
+
+        selecao.tecla(KeyCode::Char('h'));
+        let Resultado::Pronto(escolha) = selecao.tecla(KeyCode::Enter) else {
+            panic!("não escolheu");
+        };
+        assert_eq!(escolha.alvo, AQUI);
+        assert_eq!(escolha.impressao_digital, None);
+        assert_eq!(escolha.convite, None);
+    }
+
+    #[test]
+    fn voltar_ao_mesmo_endereco_do_convite_mantem_a_conferencia() {
+        // O outro lado da regra: o convite é daquele Dogma, e continua sendo
+        // dele. Limpá-lo aqui perderia a conferência que o link existe para
+        // fazer — que é o defeito oposto, e igualmente caro.
+        let mut selecao = Selecao::nova(vec![conhecido("dogma-do-link:8383", "ayanami", None)]);
+
+        selecao.tecla(KeyCode::Char('c'));
+        digitar(&mut selecao, &link_de_teste("dogma-do-link:8383"));
+        selecao.tecla(KeyCode::Enter);
+        selecao.tecla(KeyCode::Esc);
+
+        let Resultado::Pronto(escolha) = selecao.tecla(KeyCode::Enter) else {
+            panic!("não escolheu");
+        };
+        assert_eq!(escolha.alvo, "dogma-do-link:8383");
+        assert_eq!(escolha.impressao_digital, Some("ab".repeat(32)));
+        assert_eq!(escolha.convite, Some("A1B2C3D4".to_owned()));
     }
 
     #[test]
