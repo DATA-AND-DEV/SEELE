@@ -31,7 +31,9 @@ em 64, e 48 cai dentro dela.
   solta, tudo laranja e nada preto. Não é a arte de placa com a placa retirada:
   sem a placa atrás, o contorno preto e a cinta preta somem numa barra de
   tarefas escura e sobra um anel laranja oco, que não é um plug. É a exceção
-  nomeada da regra 6.
+  nomeada da regra 6. Sem placa não há folga a respeitar, então a marca vai à
+  mesma extensão de 824 em 1024 que a placa ocupa do outro lado — as duas
+  famílias pesam igual num lançador.
 
 A regra que separa as duas é mecânica: no desenho de ícone, o que está pintado
 de negro é a marca, e o que está nas cores de placa é profundidade que só
@@ -94,18 +96,77 @@ AMOSTRAS = 240
 # Cada tamanho pedido e o desenho de que ele sai.
 FAIXA = {16: 16, 32: 32, 48: 32, 64: 64, 128: 128, 256: 128, 512: 128, 1024: 128}
 
+# Quanto do quadro a marca solta ocupa na sua maior dimensão. É o mesmo 824 de
+# `PLACA`: as duas famílias saem com o mesmo peso visual, que é o que faz o
+# ícone transparente assentar ao lado dos vizinhos numa barra de tarefas em vez
+# de desenhar dois terços da altura deles. A marca é alta e estreita, então quem
+# encosta nos 80,5% é a altura; a largura sai proporcional, por volta de 44%.
+SOLTA = PLACA
+
 ATRIBUTO = re.compile(r'([\w:-]+)="([^"]*)"')
 ELEMENTO = re.compile(r"<(?:polygon|rect)\b[^>]*?/?>")
+TRANSLADO = re.compile(r"^translate\(\s*([-\d.]+)[\s,]+([-\d.]+)\s*\)$")
 
 
-def bloco(faixa: int) -> tuple[str, str]:
+def caixa(filhos: str) -> tuple[float, float, float, float]:
+    """A caixa que a arte realmente ocupa: `(x0, y0, x1, y1)`.
+
+    Medida da geometria, não do `viewBox`. É a diferença que importa aqui: o
+    `viewBox` de uma faixa é o quadro em que o desenho foi feito, e a marca
+    dentro dele traz a folga que existia para ela sentar numa placa. Ninguém
+    consegue ver essa folga lendo o arquivo — ela é a subtração de dois números
+    que não estão escritos em lugar nenhum — e foi por isso que a família solta
+    saiu do tamanho errado sem que nada reclamasse.
+
+    O traço entra na conta pela metade de cada lado, que é como o SVG desenha
+    `stroke`: centrado na borda da forma.
+    """
+    x0 = y0 = float("inf")
+    x1 = y1 = float("-inf")
+    for elemento in ELEMENTO.findall(filhos):
+        a = dict(ATRIBUTO.findall(elemento))
+
+        tx = ty = 0.0
+        if "transform" in a:
+            movimento = TRANSLADO.match(a["transform"].strip())
+            if not movimento:
+                raise SystemExit(
+                    f"transform que esta medição não sabe ler: {a['transform']!r}. "
+                    "Medir a caixa errada é pior que não medir."
+                )
+            tx, ty = float(movimento.group(1)), float(movimento.group(2))
+
+        meio_traco = (
+            float(a.get("stroke-width", 0)) / 2 if a.get("stroke", "none") != "none" else 0.0
+        )
+
+        if "points" in a:
+            pontos = [tuple(map(float, p.split(","))) for p in a["points"].split()]
+            axs = [p[0] for p in pontos]
+            ays = [p[1] for p in pontos]
+            ax0, ax1, ay0, ay1 = min(axs), max(axs), min(ays), max(ays)
+        else:
+            ax0, ay0 = float(a["x"]), float(a["y"])
+            ax1, ay1 = ax0 + float(a["width"]), ay0 + float(a["height"])
+
+        x0 = min(x0, ax0 + tx - meio_traco)
+        y0 = min(y0, ay0 + ty - meio_traco)
+        x1 = max(x1, ax1 + tx + meio_traco)
+        y1 = max(y1, ay1 + ty + meio_traco)
+
+    if x0 > x1 or y0 > y1:
+        raise SystemExit("a arte não tem nenhuma forma para medir")
+    return x0, y0, x1, y1
+
+
+def bloco(faixa: int) -> tuple[str, str, tuple[float, float, float, float]]:
     """As duas construções da faixa, em coordenadas do bloco quadrado.
 
-    Devolve (com placa, solta). O arquivo de origem põe a marca num `<svg>`
-    interno com `x`, `y`, `width`, `height` e `viewBox` próprios; aqui isso vira
-    um `transform` equivalente. É de propósito: `<svg>` aninhado depende de
-    `overflow="visible"` para não cortar traço grosso, e um `transform` não
-    depende de nada.
+    Devolve (com placa, solta, caixa da solta). O arquivo de origem põe a marca
+    num `<svg>` interno com `x`, `y`, `width`, `height` e `viewBox` próprios;
+    aqui isso vira um `transform` equivalente. É de propósito: `<svg>` aninhado
+    depende de `overflow="visible"` para não cortar traço grosso, e um
+    `transform` não depende de nada.
     """
     texto = (AQUI / f"icone-app-{faixa}.svg").read_text(encoding="utf-8")
     _, _, interno = texto.split("<svg", 2)
@@ -123,7 +184,11 @@ def bloco(faixa: int) -> tuple[str, str]:
     ty = y + (altura - ca * escala) / 2 - cy * escala
     posto = f'<g transform="translate({tx:.6g} {ty:.6g}) scale({escala:.6g})">%s</g>'
 
-    return posto % filhos, posto % soltar(filhos)
+    solta = soltar(filhos)
+    cx0, cy0, cx1, cy1 = caixa(solta)
+    medida = (cx0 * escala + tx, cy0 * escala + ty, cx1 * escala + tx, cy1 * escala + ty)
+
+    return posto % filhos, posto % solta, medida
 
 
 def soltar(filhos: str) -> str:
@@ -171,7 +236,7 @@ def superelipse() -> str:
 
 def arte(faixa: int, com_placa: bool) -> str:
     """O conteúdo do SVG de `GRANDE` píxeis, sem fundo."""
-    com, solta = bloco(faixa)
+    com, solta, medida = bloco(faixa)
     if com_placa:
         # A marca escala com a placa de 824, não com o quadro de 1024: escalada
         # pelo quadro ela transborda a placa.
@@ -179,9 +244,23 @@ def arte(faixa: int, com_placa: bool) -> str:
             f'<path d="{superelipse()}" fill="{LARANJA}"/>'
             f'<g transform="translate({FOLGA} {FOLGA}) scale({PLACA / faixa:.6g})">{com}</g>'
         )
-    # Sem placa não há de que se afastar, e o alvo transparente ganha o quadro
-    # inteiro — que é a proporção que a barra de tarefas espera.
-    return f'<g transform="scale({GRANDE / faixa:.6g})">{solta}</g>'
+    # Sem placa, quem escala é a marca — e não o bloco em volta dela.
+    #
+    # Escalar o bloco é o que se fazia antes, e enchia o quadro com o *bloco*: a
+    # marca ficava com a folga que tinha para sentar dentro de uma placa, e saía
+    # com 34% da largura e 63% da altura do quadro. Numa barra de tarefas isso é
+    # dois terços da altura do vizinho — a imagem espelhada do "grande demais"
+    # que a exceção do macOS existe para resolver. Aqui a caixa medida da arte é
+    # que vai a `SOLTA`, centrada no quadro, e as quatro faixas passam a sair
+    # com a mesma extensão. O traço acompanha porque é a mesma `scale`: o peso
+    # por faixa continua sendo o que o desenho da faixa pediu, só que na
+    # proporção certa.
+    x0, y0, x1, y1 = medida
+    largura, altura = x1 - x0, y1 - y0
+    escala = SOLTA / max(largura, altura)
+    tx = (GRANDE - largura * escala) / 2 - x0 * escala
+    ty = (GRANDE - altura * escala) / 2 - y0 * escala
+    return f'<g transform="translate({tx:.6g} {ty:.6g}) scale({escala:.6g})">{solta}</g>'
 
 
 def pixeis(png: bytes) -> tuple[int, list[bytes]]:
@@ -352,9 +431,16 @@ def conferir(png: bytes, nome: str, lado: int, com_placa: bool) -> None:
       placa dos dois lados, então uma arte encolhida no canto reprova. A sonda
       do meio cai sobre a cinta e só se exige que seja escura: a 16 px a cinta
       tem 1,7 pixel de largura e nenhum pixel dela é negro puro.
-    - **Sem placa**: os cantos vazios e o pixel do meio no laranja exato,
-      opaco. Ali não há placa para mascarar nada — se a arte não desenhou, ou
-      desenhou encolhida, o meio vem transparente.
+    - **Sem placa**: os cantos vazios, o pixel do meio no laranja exato e
+      opaco, e a **extensão vertical da tinta** na coluna do meio. As duas
+      primeiras sondas não bastam: uma marca encolhida e centrada acerta o meio
+      e os cantos exatamente como a certa, que é a falha que esta família
+      atravessou inteira — 63% de altura passando por ícone. Então mede-se do
+      primeiro ao último pixel com alfa na coluna central e exige-se entre 75% e
+      95% do lado. O alvo é 80,5%; medido nos tamanhos que saem daqui, a conta
+      dá de 80,9% (512) a 87,5% (16), porque um pixel de borda meio coberto
+      ainda conta como tinta. Encolher para os 63% de antes reprova em todas as
+      faixas menos a de 16, que já nascia quase no tamanho.
     """
     largura, linhas = pixeis(png)
     if (largura, len(linhas)) != (lado, lado):
@@ -396,11 +482,24 @@ def conferir(png: bytes, nome: str, lado: int, com_placa: bool) -> None:
                 f"{nome}: o meio é #{bytes(meio[:3]).hex()}, claro demais "
                 "para ser a cinta. A marca não desenhou sobre a placa."
             )
-    elif meio[:3] != laranja or meio[3] != 255:
-        raise SystemExit(
-            f"{nome}: o meio é #{bytes(meio[:3]).hex()} com alfa {meio[3]}, "
-            "não o laranja opaco da marca. A marca não preencheu o quadro."
-        )
+    else:
+        if meio[:3] != laranja or meio[3] != 255:
+            raise SystemExit(
+                f"{nome}: o meio é #{bytes(meio[:3]).hex()} com alfa {meio[3]}, "
+                "não o laranja opaco da marca. A marca não preencheu o quadro."
+            )
+
+        coluna = [y for y in range(lado) if px(lado // 2, y)[3]]
+        if not coluna:
+            raise SystemExit(f"{nome}: a coluna do meio não tem tinta nenhuma.")
+        extensao = (coluna[-1] - coluna[0] + 1) / lado
+        if not 0.75 <= extensao <= 0.95:
+            raise SystemExit(
+                f"{nome}: a marca ocupa {extensao:.1%} da altura do quadro, fora da "
+                f"faixa de 75% a 95% que um ícone transparente precisa entregar "
+                f"(alvo {SOLTA / GRANDE:.1%}). Centrada e do tamanho errado ela "
+                "acerta o meio e os cantos e mesmo assim sai menor que os vizinhos."
+            )
 
 
 def cartela() -> None:
