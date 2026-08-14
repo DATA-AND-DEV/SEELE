@@ -107,11 +107,22 @@ dois campos é a marca; a moldura não é.
    cor desconhecida. Vale dizer isso em vez de deixar a tensão sem explicação —
    um fundo transparente é, literalmente, a marca sobre o que o sistema puser
    atrás. É por causa disso que o alvo transparente usa a **construção solta,
-   tudo laranja e nada preto**, a mesma de `muda.svg`: `#F2521F` fica em 4,1:1
-   sobre superfície escura e 3,9:1 sobre clara, então a marca não depende do
-   que está atrás dela. A alternativa errada seria pegar a arte de ícone e só
-   tirar a placa: o contorno preto e a cinta preta somem numa barra escura e
-   sobra um anel laranja oco, que não é um plug.
+   tudo laranja e nada preto**, a mesma de `muda.svg`. **E o que sustenta a
+   exceção é a convenção, não uma razão de contraste** — porque a razão não
+   sustenta. Medido pela fórmula de luminância relativa da sRGB, `#F2521F` fica
+   em **5,71:1** sobre `--seele-negro-painel` (`#0A0806`), que é o número que
+   `design/seele-tokens.css` e o ADR 0014 já registram para este par, e em
+   **5,86:1** sobre `--seele-negro-absoluto` (`#050403`). Do lado claro não há
+   número bom: sobre **branco puro** dá **3,50:1**, e isso é o **teto** — nenhuma
+   superfície clara faz melhor —; sobre o próprio `--seele-osso` (`#EAE3CF`) cai
+   para **2,73:1**, abaixo do critério de 3:1 para elemento não textual. Numa
+   barra de tarefas clara a marca solta fica pouco acima do mínimo, e sobre um
+   creme fica abaixo dele. O que decide a favor da construção solta é a
+   alternativa: pegar a arte de ícone e só tirar a placa faz o contorno preto e
+   a cinta preta sumirem numa barra escura, e sobra um anel laranja oco, que não
+   é um plug. Uma forma reconhecível com contraste apertado no claro é melhor
+   que uma forma que deixa de ser a marca no escuro — mas é uma troca, e está
+   escrita aqui como troca.
 7. **Fontes: Noto Sans JP 900 e Saira Condensed 900. Sem substituição.**
 8. Abaixo do mínimo, **trocar de forma** — nunca reduzir mais.
 
