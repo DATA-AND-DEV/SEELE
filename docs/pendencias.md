@@ -3,6 +3,11 @@
 O que está quebrado ou frouxo e ainda não foi resolvido. Ordenado por quanto
 atrapalha na prática, não por dificuldade.
 
+Uma entrada que fecha **não sai da lista e não é renumerada**: os números são
+citados de fora — "pendência #9" aparece em `docs/` e em `specs/` — e renumerar
+faria cada citação apontar para outra coisa. Ela fica no lugar, marcada como
+fechada, com a data e com o que a substituiu.
+
 ## 1 · Rajada de mensagens grandes perde entrega
 
 **Sintoma.** Dez mensagens de ~3,9 KB enviadas em rajada, sem o receptor ler no

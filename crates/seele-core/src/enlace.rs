@@ -232,10 +232,22 @@ impl Enlace {
         let veredito = match conferir(&destino, &pin, pins.as_ref()) {
             Ok(veredito) => veredito,
             Err(erro) => {
-                // Derrubar, não só relatar. E explicitamente, não por `Drop`:
-                // `Client::connect` deixa uma tarefa de leitura dona do
-                // `RecvStream`, então soltar o `Client` não derruba a conexão de
-                // forma confiável.
+                // Derrubar, não só relatar. E explicitamente, não por `Drop`.
+                //
+                // Soltar o `Client` **acaba** fechando a conexão — medido em
+                // ~85 ms contra um Dogma de verdade, com e sem esta linha —, mas
+                // pelo caminho longo: `Client::connect` deixa uma tarefa de
+                // leitura dona do `RecvStream`, e ela só descobre que ninguém
+                // escuta quando o servidor manda o quadro seguinte. Contra um
+                // Dogma que fala (telemetria a cada segundo) isso é rápido;
+                // contra um que emudeceu, é o tempo ocioso do QUIC inteiro,
+                // com uma sessão de pé do lado de quem acabou de ser recusado.
+                //
+                // Ou seja: a conclusão não mudou, o motivo sim. Fechar aqui não
+                // depende de o servidor dizer nada. A medição, e o que ela
+                // implica para quem tenta testar esta linha, está em
+                // `crates/seele-conformance/tests/convite.rs` — apagá-la não
+                // deixa nenhum teste vermelho, e isso está dito lá por escrito.
                 cliente.disconnect();
                 return Err(erro);
             }

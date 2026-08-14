@@ -44,7 +44,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use seele_core::enlace::{Aviso, Destino, Enlace};
-use seele_core::{ConnectError, Link, MemoryPinStore, PinStore, Verdict};
+use seele_core::{ConnectError, MemoryPinStore, PinStore, Verdict};
 use seele_proto::control::ServerMessage;
 use seele_proto::ids::{CageId, ClientMessageId, LineId};
 use seele_server::casper::Location;
@@ -190,7 +190,6 @@ async fn a_impressao_que_o_convite_promete_verifica_o_primeiro_contato() -> Resu
         },
         "o convite conferia e o enlace não disse que conferiu"
     );
-    assert_eq!(enlace.estado(), Link::Online);
 
     // Conferir não substitui fixar: o TOFU do ADR 0003 continua valendo, e a
     // visita seguinte tem que reconhecer este servidor.
@@ -319,9 +318,14 @@ async fn um_link_velho_contra_um_dogma_ja_conhecido_avisa_e_nao_derruba() -> Res
 
     // Que o construtor devolva `Ok` não prova que a sessão está viva: a queda é
     // um `close` na conexão, e um enlace derrubado só se denuncia quando alguém
-    // fala com ele. Sem isto, trocar o aviso por uma recusa não faria este
-    // teste ficar vermelho da forma que importa.
-    assert_eq!(segundo.estado(), Link::Online);
+    // fala com ele. Falar é a asserção; sem ela, trocar o aviso por uma recusa
+    // não faria este teste ficar vermelho da forma que importa.
+    //
+    // `enlace.estado()` **não** serve para isso, e a tentação é grande porque a
+    // linha existe no `ejetar.rs`: `Enlace::conectar` põe `Link::Online` sem
+    // condição no caminho de `Ok`, e o campo só muda dentro de `proximo()`.
+    // Antes de alguém drenar avisos, a asserção não tem como reprovar — e este
+    // é o arquivo que existe para provar uma coisa, não para parecer que prova.
     falar_e_ouvir(&mut segundo, "o link estava velho, o Dogma é o mesmo").await?;
 
     // E o aviso não desfaz nada. Desfixar aqui é o erro simétrico: a visita
