@@ -29,6 +29,26 @@ pub const MIN_WIDTH: u16 = 80;
 /// The smallest terminal height `specs/05-cliente-tui.md` supports.
 pub const MIN_HEIGHT: u16 = 24;
 
+/// The tallest the alert band is ever allowed to get, in rows.
+///
+/// Four rows is one more than the tallest notice this client generates — an
+/// invite verdict is a sentence and two fingerprints — and the fourth row is
+/// there so the `[enter]` hint of a blocking alert always has somewhere to go.
+///
+/// The cap is a bound on *remote* input, not a layout preference.
+/// `Alert.text` is `notice.operator_text` straight off the wire
+/// (`crate::view`), and the only thing between a server and this band is
+/// `seele_proto::control::MAX_ALERT_TEXT_LEN` — 512 bytes, with no filter on
+/// newlines or control characters anywhere along the way. Forty short
+/// `\n`-separated lines is a legal notice, and a band that sized itself to it
+/// would take eighteen of the twenty-two rows a minimum terminal has, leave
+/// MENSAGENS one line of content, and push the `[enter]` hint off the bottom —
+/// turning the one alert `specs/08-seguranca.md` says must be impossible to
+/// miss into one with no visible way out. An absolute cap is what makes the
+/// band's height a property of this client instead of a property of whoever is
+/// on the other end.
+pub const MAX_ALERT_ROWS: usize = 4;
+
 /// Display width of a string, in terminal cells.
 ///
 /// The only correct way to ask. See the module docs.
@@ -175,10 +195,15 @@ pub fn render(frame: &mut Frame<'_>, app: &App, theme: Theme) {
     // fingerprints*, and at the 80 columns `specs/05-cliente-tui.md` supports a
     // single row shows the first of the two and none of the second — which is
     // the one shape in which a comparison cannot be made.
+    // Bounded at the source by `MAX_ALERT_ROWS`, so what comes back is at most
+    // four rows however much text a server sent.
     let alert = alert_rows(app, theme, inner.width);
     // Never at the cost of the panels: three rows of session and one of
     // telemetry come first, and an alert taller than what is left gets cut
-    // instead of pushing the conversation off the screen.
+    // instead of pushing the conversation off the screen. With the cap in place
+    // this can no longer bind — at the 24 rows `specs/05-cliente-tui.md`
+    // supports there are seventeen to spare — and it stays as the guarantee
+    // that the arithmetic, not the alert, is what the panels answer to.
     let ceiling = inner.height.saturating_sub(battery_rows + 4);
     let alert_height = u16::try_from(alert.len()).unwrap_or(u16::MAX).min(ceiling);
     let [battery, banner, panels, bar] = Layout::vertical([
@@ -868,6 +893,8 @@ fn render_lost(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect, reaso
 /// `\n` in the text is a row break, exactly as in [`render_lost`], and anything
 /// longer than the width wraps on whitespace — so a fingerprint, being one
 /// unbroken word of 64 cells, always lands whole on a row of its own.
+///
+/// And it stops at [`MAX_ALERT_ROWS`], because the text is not ours.
 fn alert_rows(app: &App, theme: Theme, width: u16) -> Vec<Line<'static>> {
     let Some(alert) = &app.alert else {
         return Vec::new();
@@ -894,6 +921,16 @@ fn alert_rows(app: &App, theme: Theme, width: u16) -> Vec<Line<'static>> {
         rows.push(String::new());
     }
 
+    // The cut is marked. A band that silently drops the tail of a notice reads
+    // as the whole notice, and the reader has no way to tell that a server sent
+    // more than this — `…` is the difference between short and truncated.
+    if rows.len() > MAX_ALERT_ROWS {
+        rows.truncate(MAX_ALERT_ROWS);
+        if let Some(last) = rows.last_mut() {
+            *last = truncate(&format!("{} …", last.trim_end()), budget);
+        }
+    }
+
     let mut lines: Vec<Line<'static>> = rows
         .into_iter()
         .map(|row| Line::from(Span::styled(row, theme.alert())))
@@ -910,10 +947,16 @@ fn alert_rows(app: &App, theme: Theme, width: u16) -> Vec<Line<'static>> {
                 line.spans.push(Span::styled(mark, theme.label()));
             }
         } else {
+            // A row of its own, and the cap pays for it: the text can be cut,
+            // the way out cannot. Popping a row of a notice already at the cap
+            // is the whole reason `MAX_ALERT_ROWS` is one taller than anything
+            // this client writes.
+            lines.truncate(MAX_ALERT_ROWS.saturating_sub(1));
             lines.push(Line::from(Span::styled(mark, theme.label())));
         }
     }
 
+    debug_assert!(lines.len() <= MAX_ALERT_ROWS);
     lines
 }
 
@@ -1392,6 +1435,50 @@ mod tests {
         assert!(
             screen.contains("harmônicos"),
             "the panels went away:\n{screen}"
+        );
+    }
+
+    #[test]
+    fn a_long_operator_notice_cannot_take_the_screen_from_the_panels() {
+        // `Alert.text` is `notice.operator_text` off the wire, capped only at
+        // 512 bytes and filtered for nothing. Forty short lines is a legal
+        // notice, and a band that sized itself to the text gave it eighteen of
+        // the twenty-two rows: MENSAGENS down to one line of content and the
+        // `[enter]` hint of a *blocking* alert clipped off the bottom, which is
+        // the one thing `specs/08-seguranca.md` says cannot be missed.
+        let mut app = populated();
+        app.alert = Some(Alert {
+            text: (0..40)
+                .map(|n| format!("linha{n:02}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            blocking: true,
+        });
+        let screen = draw(&app, Palette::True, (MIN_WIDTH, MIN_HEIGHT));
+
+        let banda = screen.lines().filter(|row| row.contains("linha")).count();
+        assert!(
+            banda <= MAX_ALERT_ROWS,
+            "the band took {banda} rows of the {MAX_ALERT_ROWS} it is allowed:\n{screen}"
+        );
+        // The way out survives the cap. Enter and Esc dismiss either way; a
+        // hint nobody can see is the same as no hint.
+        assert!(
+            screen.contains("[enter]"),
+            "the way out was cut off the screen:\n{screen}"
+        );
+        // And the panels kept their rows: the roster, the tree and the history
+        // are all still readable.
+        for kept in ["harmônicos", "ayanami", "#geral"] {
+            assert!(
+                screen.contains(kept),
+                "`{kept}` was pushed off by the alert:\n{screen}"
+            );
+        }
+        // Cut, and saying so.
+        assert!(
+            screen.contains('…'),
+            "the band dropped the tail of the notice without marking it:\n{screen}"
         );
     }
 

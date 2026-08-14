@@ -79,7 +79,7 @@ Tecla dedicada configurável não resolveria: o problema não é *qual* tecla, �
 3. **PADRÃO: AZUL** — operação normal.
 4. **Falando** — destaque no roster, indicador de nível.
 5. **Bateria interna** — desconectado, contagem 04:59 regressiva, interface esmaecida mas legível, tentativas listadas.
-6. **Alerta** — banner 警告 para menção direta ou evento crítico. Ocupa as linhas que o texto pedir, e nunca as da conversa: um veredito de convite carrega duas impressões digitais de 64 caracteres, e em 80 colunas elas não cabem numa linha só — mostrar metade de uma comparação é o mesmo que não mostrar nenhuma.
+6. **Alerta** — banner 警告 para menção direta ou evento crítico. Ocupa as linhas que o texto pedir, **até quatro**, e essas linhas saem mesmo das da conversa — os painéis têm piso de três linhas e a barra de telemetria fica fora da conta. Cresce porque um veredito de convite carrega duas impressões digitais de 64 caracteres, e em 80 colunas elas não cabem numa linha só: mostrar metade de uma comparação é o mesmo que não mostrar nenhuma. Para em quatro porque o texto do alerta pode vir do operador do outro lado — 512 bytes sem filtro de quebra de linha —, e uma banda que se dimensiona ao que o servidor mandar é o servidor decidindo quanto da conversa você enxerga. O que passar disso é cortado com `…`, e a dica `[enter]` do alerta bloqueante nunca é o que se corta.
 
 ### A tela de conexão não é o sétimo
 
