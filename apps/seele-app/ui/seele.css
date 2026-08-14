@@ -407,6 +407,62 @@ input:focus {
 
 .falha-local { color: var(--seele-vermelho-alerta); font-size: 11px; }
 
+/* ---------- a varredura ----------
+   O comp v2 declara `.magi-scan` e o keyframe `magiVarredura` e nunca liga um
+   ao outro: o elemento está na página, a regra ficou solta. `docs/tokens-achados.md`
+   registrou a lacuna e disse o preço de fechá-la — "se você quiser a varredura,
+   ela vira exceção única e explícita ao tema". É o que ela é agora, e o ADR 0014
+   é onde isso está escrito.
+
+   Geometria do comp, seguida de perto: fixa, `inset: 0`, `z-index: 9`, e a
+   mesma textura de duas em duas células verticais.
+
+   `opacity` no elemento em vez de `rgba(0, 0, 0, 0.34)` porque nesta folha cor
+   literal não entra (`tests/tokens.rs`). O negro absoluto a 34% dá o mesmo
+   véu, e sai de token. */
+.varredura {
+  position: fixed;
+  inset: 0;
+  /* Ela cobre a janela inteira, inclusive todo botão. Sem isto o app fica
+     bonito e inoperante. */
+  pointer-events: none;
+  z-index: 9;
+  background: repeating-linear-gradient(
+    180deg,
+    transparent 0 2px,
+    var(--seele-negro-absoluto) 2px 4px
+  );
+  opacity: 0.34;
+}
+
+/* A faixa que desce. Altura de 5vh porque é o que o keyframe do comp pede: de
+   -100% a 2000% são 21 alturas de percurso, e a faixa só cruza uma tela inteira
+   e sai se uma altura for um vinte avos da janela. */
+.varredura::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 5vh;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    var(--seele-osso-apagado),
+    transparent
+  );
+  /* Sobre os 34% do pai, isto dá ~4% de véu claro. `specs/07` chama movimento
+     decorativo de erro; o que se negocia aqui é o quanto ele se faz notar, e a
+     resposta é quase nada. */
+  opacity: 0.12;
+  animation: seele-varredura 7000ms linear infinite;
+}
+
+@keyframes seele-varredura {
+  from { transform: translateY(-100%); }
+  to   { transform: translateY(2000%); }
+}
+
 /* ---------- acessibilidade ---------- */
 
 /* specs/05-cliente-tui.md: modo sem cor, e daltonismo é comum no público. Aqui
@@ -420,6 +476,16 @@ input:focus {
 /* Nenhuma animação carrega informação, então desligar todas não perde nada. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
+
+  /* A varredura para; ela não some. A textura é o fundo da interface, e retirá-la
+     de quem pediu menos movimento entregaria uma tela **diferente** — a
+     preferência é sobre movimento, não sobre aparência.
+
+     A faixa fica estacionada no meio da janela. Sem isto ela pararia sem
+     `transform` nenhum, colada na borda de cima — o único ponto do percurso em
+     que ela parece cortada, e não pousada. Parado é para parecer parado, não
+     interrompido. */
+  .varredura::after { transform: translateY(900%); }
 }
 
 /* ---- convite, para quem está hospedando ---- */

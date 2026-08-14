@@ -77,3 +77,27 @@ e o arquivo com cara de fonte de verdade.
 A regra é curta: onde um `magi-tokens` discordar do `tokens.css`, quem está
 desatualizado é o `magi-tokens`. Ele não é para ser sincronizado nem consertado;
 é para ser reconhecido como o que veio antes.
+
+## Revisão em M5 — a varredura passa a existir, como exceção nomeada
+
+Status: aceito · reverte "não adotado" do bloco original
+
+O bloco de cima diz que a varredura animada do v2 ficou de fora por contrariar
+"movimento é diagnóstico" de `specs/07`, e `docs/tokens-achados.md` deixou a
+porta aberta com uma condição: "se você quiser a varredura, ela vira exceção
+única e explícita ao tema, não um detalhe herdado por acidente". A varredura foi
+querida. Isto é a condição sendo cumprida.
+
+Ela é a única animação do produto que não diagnostica nada, e é o único lugar
+onde `specs/07` abre exceção. O que a torna aceitável não é ser bonita, é ser
+inofensiva: fica atrás de `pointer-events: none`, não intercepta clique nenhum;
+é `aria-hidden`, então não existe para quem escuta a tela; e sob
+`prefers-reduced-motion: reduce` ela **para sem sumir** — a textura permanece,
+a faixa estaciona no meio da janela. Quem pede menos movimento recebe a mesma
+tela parada, não uma tela diferente.
+
+O comp declara um irmão, `magiPiscar`, também sem uso. Ele continua sem uso e
+sem decisão. Uma exceção nomeada não abre precedente para a próxima.
+
+Custo de reverter: **baixo**. É um elemento em `ui/index.html` e um bloco em
+`ui/seele.css`; tirar os dois devolve a interface parada de antes.
