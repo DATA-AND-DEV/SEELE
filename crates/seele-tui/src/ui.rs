@@ -876,25 +876,6 @@ fn render_lost(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect, reaso
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-/// Lays the alert out into screen rows, one [`Line`] each.
-///
-/// Returns empty when there is no alert, which is what makes the band take no
-/// rows at all rather than an empty one.
-///
-/// The band grew a second and a third row for one reason: `ADR 0006`'s two
-/// invite verdicts carry two sixty-four-character fingerprints, and the whole
-/// point of showing them is that they be read against each other. On one row at
-/// 80 columns the sentence plus `esperada:` already spends the budget, so the
-/// offered fingerprint — the half that says what the Dogma actually is — was
-/// never on the screen. `render_lost` reached the same conclusion for the
-/// refusal, and the app's band carries `white-space: pre-line`; this is the
-/// same rule in the third shell.
-///
-/// `\n` in the text is a row break, exactly as in [`render_lost`], and anything
-/// longer than the width wraps on whitespace — so a fingerprint, being one
-/// unbroken word of 64 cells, always lands whole on a row of its own.
-///
-/// And it stops at [`MAX_ALERT_ROWS`], because the text is not ours.
 /// The band's last row, carrying `…` when there was something after it.
 ///
 /// Separate from the band because it is asked twice: once to measure the row
@@ -914,6 +895,25 @@ fn marked(row: &str, cut: bool, budget: usize) -> String {
     truncate(&with_mark, budget)
 }
 
+/// Lays the alert out into screen rows, one [`Line`] each.
+///
+/// Returns empty when there is no alert, which is what makes the band take no
+/// rows at all rather than an empty one.
+///
+/// The band grew a second and a third row for one reason: `ADR 0006`'s two
+/// invite verdicts carry two sixty-four-character fingerprints, and the whole
+/// point of showing them is that they be read against each other. On one row at
+/// 80 columns the sentence plus `esperada:` already spends the budget, so the
+/// offered fingerprint — the half that says what the Dogma actually is — was
+/// never on the screen. `render_lost` reached the same conclusion for the
+/// refusal, and the app's band carries `white-space: pre-line`; this is the
+/// same rule in the third shell.
+///
+/// `\n` in the text is a row break, exactly as in [`render_lost`], and anything
+/// longer than the width wraps on whitespace — so a fingerprint, being one
+/// unbroken word of 64 cells, always lands whole on a row of its own.
+///
+/// And it stops at [`MAX_ALERT_ROWS`], because the text is not ours.
 fn alert_rows(app: &App, theme: Theme, width: u16) -> Vec<Line<'static>> {
     let Some(alert) = &app.alert else {
         return Vec::new();
