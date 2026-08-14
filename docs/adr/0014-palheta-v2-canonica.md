@@ -23,3 +23,36 @@ Quatro achados viraram trabalho de M4 e estão em `docs/tokens-achados.md`: `oss
 Não adotado: a varredura animada do v2 (`seeleVarredura`), por contrariar "movimento é diagnóstico" de `specs/07`. A textura estática de scanline foi mantida.
 
 Custo de reverter: **baixo** agora, **médio** depois que M4 começar a construir telas.
+
+## Revisão em M5 — a palheta ganhou seis placas, e o JSON não as carrega de propósito
+
+Status: aceito · a decisão acima continua valendo, isto acrescenta seis valores a ela
+
+O ícone de aplicativo de M5 precisou de uma coisa que a palheta congelada não tinha. `docs/marca.md` proíbe sombra e gradiente, e a profundidade do plug é feita de **cor plana deslocada**: cada placa atrás da marca é um degrau de laranja, três escalonando sobre o negro e três sobre o laranja. São cores da arte, e sem elas o ícone não se desenha.
+
+Decisão: `design/seele-tokens.css` passa a declarar seis valores novos, num bloco próprio e rotulado como da marca:
+
+| token | hex | onde |
+|---|---|---|
+| `--seele-placa-negro-1` | `#A83A10` | placa mais próxima, sobre negro |
+| `--seele-placa-negro-2` | `#7A2A0B` | |
+| `--seele-placa-negro-3` | `#4A1806` | placa mais distante, sobre negro |
+| `--seele-placa-laranja-1` | `#FFA070` | placa mais distante, sobre laranja |
+| `--seele-placa-laranja-2` | `#C4400F` | |
+| `--seele-placa-laranja-3` | `#8E2A08` | placa mais próxima, sobre laranja |
+
+Elas não revogam nada: as catorze cores de interface seguem exatamente como estavam, e **nenhuma superfície do produto se pinta com uma placa**. O bloco existe para que a marca desenhada não seja o único lugar do repositório com hexadecimal solto — `apps/seele-app/tests/tokens.rs` reprova literal de cor na folha de estilo, e sem token declarado a arte da marca não teria como entrar no app.
+
+**E `design/seele-tokens.json` deliberadamente não as carrega.** Isto é o que a próxima pessoa precisa ler antes de "consertar" a diferença. Todo item de `cor` no JSON tem `ansi256` e `ansi16`, porque o consumidor dele é `crates/seele-tui/src/theme.rs`, que traduz o arquivo à mão em constantes de terminal — cada cor ali existe para poder ser desenhada num terminal degradando de truecolor para 256 e para 16. As placas nunca serão desenhadas num terminal: `docs/marca.md` é explícito de que dentro da TUI a marca é a forma latina, e o plug com profundidade não aparece. Inventar seis índices ANSI para cores que a TUI não pode pintar seria pior que a ausência delas — seriam seis valores calculados, versionados e conferidos por teste sem nenhum consumidor, e o primeiro a mexer no tema teria seis cores plausíveis à disposição para usar por engano.
+
+O par não está fora de sincronia; ele é assimétrico por decisão. **O CSS é a folha de tudo que se pinta, o JSON é a folha do que o terminal precisa saber pintar** — e as placas só existem do primeiro lado.
+
+Alternativa descartada: pôr as seis no JSON com `ansi256: null`. Custaria um campo opcional num arquivo em que hoje todo campo é obrigatório, e um `null` num arquivo de tokens é um convite a alguém preenchê-lo.
+
+Consequências:
+
+- Quem regenerar o par a partir do JSON precisa **preservar o bloco de placas do CSS**. Ele não sai do JSON e não voltaria sozinho.
+- `docs/marca.md` lista as seis na tabela de cores da marca, e o teste que confere que a marca não usa cor fora da lista é o que mantém as duas listas iguais.
+- Se algum dia a TUI precisar mesmo de uma placa, este ADR é o lugar de registrar a virada — e aí as seis ganham índice, calculado pelo mesmo método de vizinho em CIELAB restrito a 16–255.
+
+Custo de reverter: **baixo**. Nenhuma superfície depende delas; tirar as seis linhas do CSS custa o ícone de aplicativo, não a interface.
