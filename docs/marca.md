@@ -11,28 +11,53 @@ existe e o que a tela precisa dizer.** Nunca gosto.
 
 ## As três formas
 
-### Marca reduzida — o plug
+### Marca reduzida solta — o plug com o nome
 
 `design/marca/reduzida.svg`
 
 O contorno do Entry Plug com `ゼーレ` na faixa laranja. Onde não cabe texto e a
-marca precisa ser reconhecida de relance.
+marca precisa ser reconhecida de relance **dentro da interface**, sobre o negro
+do produto:
 
-- Ícone de aplicativo e de dock
-- Favicon e aba do navegador
 - Avatar do Dogma na lista
 - Indicador de plug inserido
+- Cabeçalho de painel onde o nome já foi dito uma vez
 
-**Tamanho mínimo: 32 px de largura.** Abaixo disso a forma muda, e é a única
-troca automática do sistema — está implementada como um `if` em
-`design/marca/gerar-icones.py` e conferida em `apps/seele-app/tests/marca.rs`.
+**Tamanho mínimo: 32 px de largura.** Abaixo disso a forma muda.
+
+### Ícone de app — o plug sem o nome
+
+`design/marca/icone-app-16.svg`, `-32`, `-64`, `-128`
+
+O mesmo plug com a **cinta vazia**, e quatro arquivos em vez de um. Não é a
+marca reduzida solta encolhida, e a diferença não é gosto: é aritmética. A cinta
+tem 38 de 162 de altura e o nome ocupa a largura toda dela — a 128 px cada
+katakana teria seis pixels de largura, e três borrões numa cinta não são um
+nome. Então no ícone o nome não entra em tamanho nenhum. Ele fica na
+inicialização, na assinatura e na cartela, que é onde há espaço para lê-lo.
+
+Cada faixa é um desenho próprio, com traço mais grosso conforme o orçamento de
+pixel encolhe e placas de profundidade que vão sumindo até sobrar a silhueta:
+
+| Faixa | Bloco | Arquivo | Traço |
+| --- | --- | --- | --- |
+| 4 placas | 128 e acima | `icone-app-128.svg` | 7 |
+| 2 placas | 64 a 127 | `icone-app-64.svg` | 9 |
+| 1 placa | 32 a 63 | `icone-app-32.svg` | 12 |
+| muda | abaixo de 32 | `icone-app-16.svg` | 16 |
+
+Cada tamanho gerado sai do arquivo da sua faixa, **nunca** da redução do maior:
+reduzir o de 128 até 16 devolve um traço de meio pixel, que é como um ícone fica
+cinza no dock. `design/marca/gerar-icones.py` faz a escolha por tabela e
+`apps/seele-app/tests/marca.rs` confere as quatro faixas.
 
 ### Forma muda
 
 `design/marca/muda.svg`
 
 O mesmo plug, traço mais grosso, uma barra no lugar do nome. A silhueta continua
-legível a 16 px. É a forma de favicon e a de qualquer ícone abaixo de 32 px.
+legível a 16 px. É a forma de favicon, a da bandeja do sistema, e a construção
+que os ícones transparentes usam em toda faixa (regra 6).
 
 ### Assinatura — o logotipo
 
@@ -59,6 +84,16 @@ dois campos é a marca; a moldura não é.
 ## As regras
 
 1. **`border-radius` nunca.** Nem no ícone de app, nem em máscara do sistema.
+   **Exceção nomeada: o `.icns` do macOS e os PNGs que o alimentam.** Ali a
+   placa laranja é uma superelipse de 824 num quadro de 1024 — a grade de ícone
+   da Apple, `|x/a|^n + |y/b|^n = 1` com `n = 5`, desenhada como caminho fechado
+   em `design/marca/gerar-icones.py`. O motivo é que o macOS **não** recorta
+   ícone de aplicativo: entrega o quadro como está, e um quadrado sangrado fica
+   visivelmente maior e mais duro que todo vizinho no Dock — o único ícone da
+   fila que parece não pertencer a ela. Isto é uma exceção decidida, não uma
+   deriva: quem encontrar a curva no gerador e quiser endireitá-la está
+   revogando esta linha, não corrigindo um deslize. Fora do `.icns` — Windows,
+   Linux, favicon, bandeja, interface — continua canto reto.
 2. **Uma forma por tela.** Se o plug está no canto, o logotipo não aparece ali.
    Repetir duas formas é o erro mais comum e o que mais barateia a marca.
 3. **O `ー` é o único glifo laranja da assinatura.**
@@ -66,10 +101,23 @@ dois campos é a marca; a moldura não é.
    ela não pode significar erro.
 5. **Área livre** ao redor de qualquer forma: metade da largura do plug.
 6. Sem sombra, gradiente, contorno extra, ou marca sobre imagem.
+   **Segunda exceção nomeada: os ícones transparentes de Windows e de Linux.**
+   A regra existe contra a marca sobre fotografia, onde o fundo tem detalhe e
+   compete com ela. Barra de tarefas não é fotografia: é uma superfície lisa de
+   cor desconhecida. Vale dizer isso em vez de deixar a tensão sem explicação —
+   um fundo transparente é, literalmente, a marca sobre o que o sistema puser
+   atrás. É por causa disso que o alvo transparente usa a **construção solta,
+   tudo laranja e nada preto**, a mesma de `muda.svg`: `#F2521F` fica em 4,1:1
+   sobre superfície escura e 3,9:1 sobre clara, então a marca não depende do
+   que está atrás dela. A alternativa errada seria pegar a arte de ícone e só
+   tirar a placa: o contorno preto e a cinta preta somem numa barra escura e
+   sobra um anel laranja oco, que não é um plug.
 7. **Fontes: Noto Sans JP 900 e Saira Condensed 900. Sem substituição.**
 8. Abaixo do mínimo, **trocar de forma** — nunca reduzir mais.
 
-Duas cores: laranja sobre preto, ou preto sobre laranja.
+Duas cores: laranja sobre preto, ou preto sobre laranja. As placas de
+profundidade não são uma terceira: são a mesma dupla escalonada em cor plana
+deslocada, que é como esta marca dá volume sem sombra e sem gradiente.
 
 ### As cores são as dos tokens congelados
 
@@ -80,10 +128,20 @@ Duas cores: laranja sobre preto, ou preto sobre laranja.
 | Texto do logotipo | `#EAE3CF` | `--seele-osso` |
 | Descritor | `#7A7061` | `--seele-osso-apagado` |
 | Borda 1px | `#241F19` | `--seele-linha` |
+| Placa 1 sobre negro | `#A83A10` | `--seele-placa-negro-1` |
+| Placa 2 sobre negro | `#7A2A0B` | `--seele-placa-negro-2` |
+| Placa 3 sobre negro | `#4A1806` | `--seele-placa-negro-3` |
+| Placa 1 sobre laranja | `#FFA070` | `--seele-placa-laranja-1` |
+| Placa 2 sobre laranja | `#C4400F` | `--seele-placa-laranja-2` |
+| Placa 3 sobre laranja | `#8E2A08` | `--seele-placa-laranja-3` |
 
 Não são valores novos: são os mesmos de `apps/seele-app/ui/tokens.css`,
 congelados em M0.12. Um teste confere que a marca não introduz nenhuma cor fora
 dessa lista.
+
+As seis placas entraram com o ícone de app e são da marca desenhada, não da
+interface: nenhuma superfície do produto se pinta com elas, e por isso elas não
+têm índice ANSI — no terminal a marca é a forma latina.
 
 ---
 

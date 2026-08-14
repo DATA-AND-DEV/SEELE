@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="SEELE">
+  <title>SEELE · ícone 128px — 4 placas</title>
+  <rect width="128" height="128" fill="#F2521F"></rect>
+  <svg x="36" y="18" width="56" height="92" viewBox="-6 -14 112 184" overflow="visible">
+    <polygon points="4,26 26,4 62,4 84,26 84,136 62,158 26,158 4,136" transform="translate(15,-11)" fill="none" stroke="#FFA070" stroke-width="5"></polygon>
+    <polygon points="4,26 26,4 62,4 84,26 84,136 62,158 26,158 4,136" transform="translate(10,-7)" fill="#F2521F" stroke="#C4400F" stroke-width="5"></polygon>
+    <polygon points="4,26 26,4 62,4 84,26 84,136 62,158 26,158 4,136" transform="translate(5,-4)" fill="#F2521F" stroke="#8E2A08" stroke-width="5"></polygon>
+    <polygon points="4,26 26,4 62,4 84,26 84,136 62,158 26,158 4,136" fill="#F2521F" stroke="#050403" stroke-width="7"></polygon>
+    <rect x="1" y="58" width="86" height="4" fill="#8E2A08"></rect>
+    <rect x="1" y="62" width="86" height="38" fill="#050403"></rect>
+  </svg>
+</svg>

@@ -23,6 +23,18 @@
   --seele-padrao-azul:    #2F8FE0;   /* ansi  32 · PADRÃO: AZUL ·  5,83:1 AA */
   --seele-azul-fraco:     #04182B;   /* ansi 233 */
 
+  /* ---- placas da marca (docs/marca.md) ----
+     A profundidade do ícone de app é cor plana deslocada, nunca sombra: as três
+     primeiras escalonam sobre o negro, as três seguintes sobre o laranja. Sem
+     índice ANSI de propósito — são da marca desenhada, e no terminal a marca é
+     a forma latina. Nenhuma superfície do app se pinta com elas. */
+  --seele-placa-negro-1:  #A83A10;   /* placa mais próxima, sobre negro */
+  --seele-placa-negro-2:  #7A2A0B;
+  --seele-placa-negro-3:  #4A1806;   /* placa mais distante, sobre negro */
+  --seele-placa-laranja-1:#FFA070;   /* placa mais distante, sobre laranja */
+  --seele-placa-laranja-2:#C4400F;
+  --seele-placa-laranja-3:#8E2A08;   /* placa mais próxima, sobre laranja */
+
   /* ---- faixas da Taxa de Sincronização (specs/07) ----
      Nunca transmitidas só por cor: o número acompanha sempre (specs/05). */
   --seele-sync-nominal:   var(--seele-fosforo);        /* >= 90 */

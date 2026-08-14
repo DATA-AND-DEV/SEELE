@@ -73,6 +73,10 @@ fn a_marca_nunca_usa_o_vermelho_de_falha() {
         "design/marca/reduzida.svg",
         "design/marca/muda.svg",
         "design/marca/cartela.svg",
+        "design/marca/icone-app-16.svg",
+        "design/marca/icone-app-32.svg",
+        "design/marca/icone-app-64.svg",
+        "design/marca/icone-app-128.svg",
     ] {
         let svg = ler(arquivo).to_uppercase();
         assert!(!svg.contains(vermelho), "{arquivo} usa o vermelho de falha");
@@ -83,13 +87,21 @@ fn a_marca_nunca_usa_o_vermelho_de_falha() {
 fn a_marca_so_usa_cores_que_os_tokens_definem() {
     // A folha de marca e os tokens congelados em M0.12 dizem os mesmos valores.
     // Se um dia divergirem, é aqui que se descobre — e não numa tela.
-    // Laranja, negro, osso e o apagado do descritor. Todos em tokens.css.
-    let permitidas = ["#F2521F", "#050403", "#EAE3CF", "#7A7061"];
+    // Laranja, negro, osso e o apagado do descritor, mais as seis placas que o
+    // ícone de app usa para dar profundidade em cor plana. Todas em tokens.css.
+    let permitidas = [
+        "#F2521F", "#050403", "#EAE3CF", "#7A7061", "#A83A10", "#7A2A0B", "#4A1806", "#FFA070",
+        "#C4400F", "#8E2A08",
+    ];
     for arquivo in [
         "design/marca/assinatura.svg",
         "design/marca/reduzida.svg",
         "design/marca/muda.svg",
         "design/marca/cartela.svg",
+        "design/marca/icone-app-16.svg",
+        "design/marca/icone-app-32.svg",
+        "design/marca/icone-app-64.svg",
+        "design/marca/icone-app-128.svg",
     ] {
         let svg = ler(arquivo).to_uppercase();
         for achado in svg
@@ -121,23 +133,73 @@ fn o_favicon_e_a_forma_muda() {
 }
 
 #[test]
-fn o_icone_de_32_e_muda_e_o_de_128_tem_o_nome() {
-    // A troca de forma é a única decisão que o gerador toma sozinho, então é a
-    // que mais merece um teste. Comparar bytes basta: se os dois tamanhos
-    // saíssem da mesma forma, a arte escalada seria a mesma e o teste passaria
-    // — por isso o critério é o **tamanho** do arquivo, que denuncia a
-    // diferença de conteúdo entre uma silhueta e uma silhueta com três glifos.
-    let icones = raiz().join("apps/seele-app/icons");
-    let pequeno = std::fs::metadata(icones.join("32x32.png")).expect("32x32.png");
-    let grande = std::fs::metadata(icones.join("128x128.png")).expect("128x128.png");
+fn o_icone_de_app_tem_a_cinta_vazia_e_um_desenho_por_faixa() {
+    // Aqui morava `o_icone_de_32_e_muda_e_o_de_128_tem_o_nome`, que comparava o
+    // tamanho em bytes do PNG de 32 com o de 128 para provar que só o maior
+    // trazia ゼーレ dentro da cinta. A arte de ícone não traz o nome em tamanho
+    // nenhum: a 128 px cada katakana teria seis pixels de largura, então a
+    // cinta vai vazia em toda faixa e o nome fica na assinatura e na cartela. A
+    // asserção velha ficou falsa por decisão de desenho, não por regressão, e
+    // um teste que se conserta afrouxando não vale o arquivo em que está.
+    //
+    // O que passou a valer, e é o que se confere: são quatro desenhos, um por
+    // faixa, e o traço engrossa conforme o bloco encolhe. Glifo é a única coisa
+    // que a marca desenha com `<path>` — um `<path>` num arquivo de ícone é o
+    // nome voltando para dentro da cinta.
+    let mut traco_maior = 0u32;
+    for faixa in [128, 64, 32, 16] {
+        let arquivo = format!("design/marca/icone-app-{faixa}.svg");
+        let svg = ler(&arquivo);
+        assert!(
+            !svg.contains("<text"),
+            "{arquivo} desenha a marca como texto"
+        );
+        assert!(
+            !svg.contains("<path"),
+            "{arquivo} traz um glifo dentro da cinta; no ícone ela vai vazia"
+        );
 
-    assert!(pequeno.len() > 0 && grande.len() > 0, "ícone vazio");
-    assert!(
-        grande.len() > pequeno.len() * 2,
-        "o ícone de 128 não parece trazer o nome dentro: {} contra {} bytes",
-        grande.len(),
-        pequeno.len()
-    );
+        // O contorno do plug é o traço pintado de negro. As placas de
+        // profundidade têm as suas próprias cores e não contam aqui.
+        let marcador = "stroke=\"#050403\" stroke-width=\"";
+        let inicio = svg
+            .find(marcador)
+            .unwrap_or_else(|| panic!("{arquivo} não tem o contorno do plug em negro"))
+            + marcador.len();
+        let resto = &svg[inicio..];
+        let fim = resto
+            .find('"')
+            .unwrap_or_else(|| panic!("{arquivo} tem stroke-width sem fechar"));
+        let traco: u32 = resto[..fim]
+            .parse()
+            .unwrap_or_else(|_| panic!("{arquivo} tem stroke-width que não é inteiro"));
+
+        assert!(
+            traco > traco_maior,
+            "o traço de {faixa} é {traco} e o da faixa maior era {traco_maior}: \
+             o desenho menor precisa do traço mais grosso, senão some ao reduzir"
+        );
+        traco_maior = traco;
+    }
+}
+
+#[test]
+fn os_icones_de_windows_e_linux_carregam_alfa() {
+    // Regra 6 da folha ganhou uma exceção nomeada: fora do macOS o ícone é
+    // transparente e a marca vai toda laranja, para não depender da cor da
+    // barra de tarefas atrás dela. Um PNG sem canal alfa aqui é a placa de
+    // volta ou um fundo colado — nenhum dos dois apareceria neste sistema
+    // operacional, e sim no de quem baixou o release. O byte 25 de um PNG é o
+    // tipo de cor, e 6 é RGBA.
+    for arquivo in ["32x32.png", "128x128.png", "128x128@2x.png", "icon.png"] {
+        let png = std::fs::read(raiz().join("apps/seele-app/icons").join(arquivo))
+            .unwrap_or_else(|_| panic!("não li o ícone {arquivo}"));
+        assert_eq!(&png[0..4], b"\x89PNG", "{arquivo} não é um PNG");
+        assert_eq!(
+            png[25], 6,
+            "{arquivo} não é RGBA: o ícone perdeu a transparência"
+        );
+    }
 }
 
 #[test]

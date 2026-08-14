@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="SEELE">
+  <title>SEELE · ícone 64px — 2 placas</title>
+  <rect width="64" height="64" fill="#F2521F"></rect>
+  <svg x="18" y="9" width="28" height="46" viewBox="-6 -14 112 184" overflow="visible">
+    <polygon points="4,26 26,4 62,4 84,26 84,136 62,158 26,158 4,136" transform="translate(12,-9)" fill="#F2521F" stroke="#C4400F" stroke-width="7"></polygon>
+    <polygon points="4,26 26,4 62,4 84,26 84,136 62,158 26,158 4,136" fill="#F2521F" stroke="#050403" stroke-width="9"></polygon>
+    <rect x="1" y="60" width="86" height="40" fill="#050403"></rect>
+  </svg>
+</svg>
