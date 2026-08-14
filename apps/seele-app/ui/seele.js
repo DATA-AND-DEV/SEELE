@@ -214,8 +214,12 @@ function fraseDoVeredito(veredito) {
 /** Acende — ou apaga — a faixa de veredito da sessão. */
 function mostrarVeredito(veredito) {
   const frase = fraseDoVeredito(veredito);
-  $("veredito-texto").textContent = frase ?? "";
+  // Mostrar a faixa **antes** de escrever nela. Um `role="status"` só é lido
+  // quando o texto muda com a região já visível: escrever primeiro e revelar
+  // depois faz vários leitores de tela tratarem a mudança como conteúdo que
+  // sempre esteve ali, e o veredito passa calado por quem mais precisa dele.
   $("veredito").hidden = frase === null;
+  $("veredito-texto").textContent = frase ?? "";
 }
 
 /**
@@ -504,12 +508,15 @@ function desenharEnlace(link) {
   const restam = Math.max(0, bateria.remaining_seconds);
   const minutos = String(Math.floor(restam / 60)).padStart(2, "0");
   const segundos = String(restam % 60).padStart(2, "0");
+  // Visível primeiro, escrita depois — a mesma ordem da faixa de veredito, e
+  // pela mesma razão: um `role="status"` escondido no instante em que o texto
+  // muda não anuncia nada.
+  faixa.hidden = false;
   $("bateria-conta").textContent = `${minutos}:${segundos}`;
   // As tentativas listadas, que a spec pede por nome. Zero ainda é informação:
   // quer dizer que a primeira está em curso.
   $("bateria-tentativas").textContent =
     bateria.attempts === 0 ? "reconectando…" : `${bateria.attempts} tentativas`;
-  faixa.hidden = false;
   document.body.classList.add("na-bateria");
 }
 
@@ -571,8 +578,8 @@ async function desenharVisitados() {
           // silêncio e uma linha que teima em voltar.
           console.warn("esquecer:", falha);
           const erro = $("boot-erro");
-          erro.textContent = "NÃO CONSEGUI REESCREVER A LISTA DE VISITADOS";
           erro.hidden = false;
+          erro.textContent = "NÃO CONSEGUI REESCREVER A LISTA DE VISITADOS";
         }
         await desenharVisitados();
       });
@@ -613,8 +620,10 @@ async function lerConvite() {
     // O resto do formulário fica intacto: quem colou errado não perde o que já
     // tinha digitado nos outros campos.
     convitePendente = null;
-    erro.textContent = fraseDeErro(falha);
+    // Revelar antes de escrever: `#boot-erro` é `role="alert"`, e um alerta
+    // escrito enquanto ainda está escondido não é anunciado por leitor de tela.
     erro.hidden = false;
+    erro.textContent = fraseDeErro(falha);
   }
 }
 
@@ -673,8 +682,8 @@ async function conectar(evento) {
     await atualizar();
   } catch (falha) {
     for (const id of ["sub-melchior", "sub-balthasar", "sub-casper"]) $(id).textContent = "·";
-    erro.textContent = fraseDeErro(falha);
     erro.hidden = false;
+    erro.textContent = fraseDeErro(falha);
   } finally {
     botao.disabled = false;
   }
@@ -924,8 +933,8 @@ async function hospedar() {
     $("convite").hidden = false;
     await conectar();
   } catch (falha) {
-    erro.textContent = fraseDeErro(falha);
     erro.hidden = false;
+    erro.textContent = fraseDeErro(falha);
   } finally {
     botao.disabled = false;
   }

@@ -327,8 +327,10 @@ seele://192.168.0.7:8383?fp=782cc791…&convite=2QKPAXPP97W5459H3TPA
 ```
 
 Ele carrega a impressão digital do certificado, então quem recebe **não precisa
-conferi-la por outro canal** — o cliente compara sozinho e recusa se não bater.
-Do outro lado, `plug --url "seele://…"`.
+conferi-la por outro canal** — o cliente compara sozinho: num Dogma que ele
+ainda não conhece, **recusa** se não bater; num Dogma que ele já conhece, avisa
+que o link não é daquele servidor e entra assim mesmo, porque a chave de ontem
+já provou quem é. Do outro lado, `plug --url "seele://…"`.
 
 A senha do Dogma nunca viaja no link, e isso é decisão registrada: senha vale
 para sempre, convite gasto não vale nada.
