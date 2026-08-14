@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use seele_ffi::{ConnectConfig, Event, EventListener, Pattern, Plug, PlugError, Snapshot};
+use seele_ffi::{ConnectConfig, Event, EventListener, Pattern, Plug, PlugError, Snapshot, Trust};
 use seele_server::casper::Location;
 use seele_server::{DogmaConfig, Server};
 
@@ -52,8 +52,17 @@ fn home(name: &str) -> String {
 }
 
 fn connect(address: SocketAddr, nickname: &str) -> Result<Arc<Plug>, PlugError> {
-    // The verdict `connect` now returns is exercised by `seele-ffi`'s own unit
-    // tests; every test here only needs the live handle.
+    // `seele-ffi`'s unit tests cover the two ends of this — what goes into
+    // `Destino`, and how a `Verdict` maps to a `Trust` — and neither of them
+    // touches the one line that puts the second inside the value `connect`
+    // hands back. Replacing that line with a constant `Trust::Known` left the
+    // whole workspace green: the shell would announce nothing on first contact
+    // and nothing on a disagreeing link, pinning every key in silence, which is
+    // the defect this branch exists to remove.
+    //
+    // `home()` is wiped per nickname, so every connection here is a genuine
+    // first contact with a Dogma that was just born. Saying so out loud is what
+    // makes the constant impossible.
     Plug::connect(ConnectConfig {
         server: address.to_string(),
         nickname: nickname.to_owned(),
@@ -63,7 +72,14 @@ fn connect(address: SocketAddr, nickname: &str) -> Result<Arc<Plug>, PlugError> 
         // No sound card on a CI box, and the text half needs none.
         audio: false,
     })
-    .map(|(plug, _trust)| plug)
+    .map(|(plug, trust)| {
+        assert!(
+            matches!(trust, Trust::FirstContact { .. }),
+            "a fresh home against a fresh Dogma is first contact, and the shell \
+             was told {trust:?}"
+        );
+        plug
+    })
 }
 
 /// Records what the shell would have been woken for.
