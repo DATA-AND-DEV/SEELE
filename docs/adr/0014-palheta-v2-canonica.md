@@ -56,3 +56,24 @@ Consequências:
 - Se algum dia a TUI precisar mesmo de uma placa, este ADR é o lugar de registrar a virada — e aí as seis ganham índice, calculado pelo mesmo método de vizinho em CIELAB restrito a 16–255.
 
 Custo de reverter: **baixo**. Nenhuma superfície depende delas; tirar as seis linhas do CSS custa o ícone de aplicativo, não a interface.
+
+## Qual arquivo é o canônico, e o que fazer ao achar um `magi-tokens`
+
+Status: aceito · não muda nenhuma cor, diz onde elas moram
+
+O arquivo de tokens do produto é `apps/seele-app/ui/tokens.css`, cópia byte a
+byte de `design/seele-tokens.css` e conferida como tal por
+`apps/seele-app/tests/tokens.rs`. É esse par que a decisão acima congelou, e é
+contra ele que qualquer tela se mede.
+
+Um export de design pode trazer `magi-tokens.css` ou `magi-tokens.json`. **Eles
+são históricos.** Carregam a palheta v1 — `#FF6B00`, `#E01B24`, `#3DF57A` — que
+é exatamente o que este ADR substituiu por `#F2521F`, `#FF1A1A` e `#6BFFB6`. Ler
+um deles como autoridade não é hipótese: já aconteceu, e a conclusão foi que o
+app estava com as cores erradas quando o app estava com as cores certas. O
+sintoma é convincente ao contrário — três cores, todas próximas, todas plausíveis,
+e o arquivo com cara de fonte de verdade.
+
+A regra é curta: onde um `magi-tokens` discordar do `tokens.css`, quem está
+desatualizado é o `magi-tokens`. Ele não é para ser sincronizado nem consertado;
+é para ser reconhecido como o que veio antes.
