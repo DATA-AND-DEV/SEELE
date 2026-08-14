@@ -526,12 +526,37 @@ impl Client {
         self.last_rtt
     }
 
-    /// Closes the connection.
+    /// Closes the connection: the pilot ejected.
     pub fn disconnect(&mut self) {
+        self.close(EJECTED);
+    }
+
+    /// Closes the connection, naming what closed it.
+    ///
+    /// The reason travels in the QUIC `CONNECTION_CLOSE` frame and is what the
+    /// Dogma's log records, so it is the only trace the other side keeps of why
+    /// a session that had already completed the handshake went away. Every
+    /// close that is not a pilot leaving has to say so here: an invite that did
+    /// not match used to be recorded as an ejection, which is the one reading
+    /// that hides a refusal.
+    pub fn close(&mut self, reason: &[u8]) {
         self.pattern = Pattern::Offline;
-        self.connection.close(0_u32.into(), b"ejected");
+        self.connection.close(0_u32.into(), reason);
     }
 }
+
+/// A pilot left. The ordinary end of a session.
+const EJECTED: &[u8] = b"ejected";
+
+/// The client refused the server: the invite named a different key.
+///
+/// `seele_core::enlace::Enlace::conectar` drops the connection when
+/// `tofu::verdict` returns `InviteRefused`, and this is what the Dogma sees.
+/// The string matters more than it looks: `docs/pendencias.md` #12 accepted
+/// that the explicit drop has no automatic guard precisely because this reason
+/// is the one remaining observable difference between dropping the connection
+/// and letting it die on its own.
+pub const INVITE_REFUSED: &[u8] = b"invite refused";
 
 /// Decides what a failed QUIC connection actually was.
 ///

@@ -248,7 +248,13 @@ impl Enlace {
                 // implica para quem tenta testar esta linha, está em
                 // `crates/seele-conformance/tests/convite.rs` — apagá-la não
                 // deixa nenhum teste vermelho, e isso está dito lá por escrito.
-                cliente.disconnect();
+                //
+                // E fecha **dizendo o que foi**: o motivo viaja no
+                // `CONNECTION_CLOSE` e é o que fica no log do Dogma. Fechar
+                // como `ejected` faria uma recusa de convite parecer um piloto
+                // saindo, que é o único jeito de esconder a recusa de quem tem
+                // o log na mão.
+                cliente.close(crate::client::INVITE_REFUSED);
                 return Err(erro);
             }
         };

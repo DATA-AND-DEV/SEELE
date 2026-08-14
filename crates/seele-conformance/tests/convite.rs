@@ -245,13 +245,17 @@ async fn a_impressao_que_nao_confere_derruba_a_conexao_e_desfaz_o_pin() -> Resul
     // milissegundos.
     //
     // O que esta asserção **não** distingue, e vale dito para ninguém confiar
-    // demais nela: apagar o `cliente.disconnect()` de `Enlace::conectar` não a
-    // deixa vermelha. Medido — 84 ms com a queda explícita, 87 ms sem ela.
-    // Soltar o `Client` acaba fechando a conexão pelo caminho longo (a tarefa
-    // leitora só se descobre sozinha quando o Dogma fala de novo), então o que
-    // se guarda aqui é o **resultado** — não sobra sessão —, e não qual das
-    // duas coisas o produziu. A queda explícita continua sendo a certa: ela não
-    // depende de o servidor dizer alguma coisa.
+    // demais nela: apagar o `cliente.close(INVITE_REFUSED)` de
+    // `Enlace::conectar` não a deixa vermelha. Medido — 84 ms com a queda
+    // explícita, 87 ms sem ela. Soltar o `Client` acaba fechando a conexão pelo
+    // caminho longo (a tarefa leitora só se descobre sozinha quando o Dogma
+    // fala de novo), então o que se guarda aqui é o **resultado** — não sobra
+    // sessão —, e não qual das duas coisas o produziu. A queda explícita
+    // continua sendo a certa: ela não depende de o servidor dizer alguma coisa,
+    // e agora carrega no `CONNECTION_CLOSE` o motivo certo — `invite refused` e
+    // não `ejected`, que é a diferença que o log do operador guarda. Essa
+    // diferença continua sem teste: nada em `seele-server` expõe o motivo de
+    // fechamento a quem escreve um teste daqui.
     tokio::time::timeout(Duration::from_secs(10), servidor.wait_idle())
         .await
         .expect("a conexão recusada continuou de pé no Dogma");
