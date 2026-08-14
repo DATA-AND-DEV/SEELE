@@ -895,6 +895,25 @@ fn render_lost(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect, reaso
 /// unbroken word of 64 cells, always lands whole on a row of its own.
 ///
 /// And it stops at [`MAX_ALERT_ROWS`], because the text is not ours.
+/// The band's last row, carrying `…` when there was something after it.
+///
+/// Separate from the band because it is asked twice: once to measure the row
+/// the `[enter]` hint wants to share, and once to write it. Measuring the
+/// unmarked row and writing the marked one is how a hint gets promised a seat
+/// that the mark had already taken.
+fn marked(row: &str, cut: bool, budget: usize) -> String {
+    if !cut {
+        return row.to_string();
+    }
+    let base = row.trim_end();
+    let with_mark = if base.is_empty() {
+        "…".to_string()
+    } else {
+        format!("{base} …")
+    };
+    truncate(&with_mark, budget)
+}
+
 fn alert_rows(app: &App, theme: Theme, width: u16) -> Vec<Line<'static>> {
     let Some(alert) = &app.alert else {
         return Vec::new();
@@ -921,14 +940,45 @@ fn alert_rows(app: &App, theme: Theme, width: u16) -> Vec<Line<'static>> {
         rows.push(String::new());
     }
 
+    // Every row this band drops has to be accounted for before anything is
+    // marked, because there are two ways to lose one and they compound. The
+    // cap is the obvious one. The other is the `[enter]` row: at the cap, a
+    // last row too wide to share with the hint pays for the hint's row with
+    // itself. Marking after the first and before the second is what put a `…`
+    // on a row that was then deleted — the band came back reading like the
+    // whole notice, twenty of sixty-four words and a way out.
+    let mut cut = rows.len() > MAX_ALERT_ROWS;
+    rows.truncate(MAX_ALERT_ROWS);
+
+    // Does the way out fit beside the text, or does it need a row? Asked
+    // against the marked row, because the mark is two cells the hint no longer
+    // has. `specs/08-seguranca.md` wants the blocking alert impossible to
+    // ignore, and a hint clipped off the right edge is ignorable.
+    let mark = "  [enter]";
+    let mut hint_of_its_own = false;
+    if alert.blocking {
+        let last = rows
+            .last()
+            .map_or(0, |row| self::width(&marked(row, cut, budget)));
+        if last + self::width(mark) > budget {
+            hint_of_its_own = true;
+            // The text can be cut, the way out cannot. Dropping a row of a
+            // notice already at the cap is the whole reason `MAX_ALERT_ROWS`
+            // is one taller than anything this client writes — and the row it
+            // drops is a cut like any other, so it is marked like one. Below
+            // the cap the hint's row is free and nothing is lost.
+            if rows.len() >= MAX_ALERT_ROWS {
+                rows.truncate(MAX_ALERT_ROWS - 1);
+                cut = true;
+            }
+        }
+    }
+
     // The cut is marked. A band that silently drops the tail of a notice reads
     // as the whole notice, and the reader has no way to tell that a server sent
     // more than this — `…` is the difference between short and truncated.
-    if rows.len() > MAX_ALERT_ROWS {
-        rows.truncate(MAX_ALERT_ROWS);
-        if let Some(last) = rows.last_mut() {
-            *last = truncate(&format!("{} …", last.trim_end()), budget);
-        }
+    if let Some(last) = rows.last_mut() {
+        *last = marked(last, cut, budget);
     }
 
     let mut lines: Vec<Line<'static>> = rows
@@ -936,23 +986,11 @@ fn alert_rows(app: &App, theme: Theme, width: u16) -> Vec<Line<'static>> {
         .map(|row| Line::from(Span::styled(row, theme.alert())))
         .collect();
 
-    // The way out belongs to the last row, and gets one of its own when it
-    // would not fit — `specs/08-seguranca.md` wants the blocking alert
-    // impossible to ignore, and a hint clipped off the right edge is ignorable.
     if alert.blocking {
-        let mark = "  [enter]";
-        let last = lines.last().map_or(0, Line::width);
-        if last + self::width(mark) <= budget {
-            if let Some(line) = lines.last_mut() {
-                line.spans.push(Span::styled(mark, theme.label()));
-            }
-        } else {
-            // A row of its own, and the cap pays for it: the text can be cut,
-            // the way out cannot. Popping a row of a notice already at the cap
-            // is the whole reason `MAX_ALERT_ROWS` is one taller than anything
-            // this client writes.
-            lines.truncate(MAX_ALERT_ROWS.saturating_sub(1));
+        if hint_of_its_own {
             lines.push(Line::from(Span::styled(mark, theme.label())));
+        } else if let Some(line) = lines.last_mut() {
+            line.spans.push(Span::styled(mark, theme.label()));
         }
     }
 
@@ -1114,6 +1152,21 @@ mod tests {
             bitrate: 32_000,
         };
         app
+    }
+
+    /// The alert band's own rows, cut out of the screen.
+    ///
+    /// `screen.contains('…')` is not an assertion about the band: `populated()`
+    /// draws `▸ Terceira Tóqu…` in DOGMA on every single frame, so the whole
+    /// screen always has an ellipsis in it and the check passes with a band
+    /// that marked nothing. The band lives between the frame's top border and
+    /// the first row of the panels, and that is the only region worth asking.
+    fn band_rows(screen: &str) -> Vec<&str> {
+        screen
+            .lines()
+            .skip(1)
+            .take_while(|row| !row.contains('┌'))
+            .collect()
     }
 
     #[test]
@@ -1475,10 +1528,68 @@ mod tests {
                 "`{kept}` was pushed off by the alert:\n{screen}"
             );
         }
-        // Cut, and saying so.
+        // Cut, and saying so — asked of the band and not of the screen.
         assert!(
-            screen.contains('…'),
+            band_rows(&screen).iter().any(|row| row.contains('…')),
             "the band dropped the tail of the notice without marking it:\n{screen}"
+        );
+    }
+
+    #[test]
+    fn a_blocking_notice_that_fills_the_band_keeps_its_mark() {
+        // The blocking path used to undo the mark it had just written: the `…`
+        // went onto row four, and then the hint — which no longer fitted on a
+        // row that wide — took row four for itself by dropping it. What was
+        // left was twenty of sixty-four words and a `[enter]`, reading exactly
+        // like the whole notice. 512 bytes of unbroken prose is a legal notice:
+        // `seele_proto::control::MAX_ALERT_TEXT_LEN` is the only filter there
+        // is, and `crate::view` takes both the text and `blocking` off the wire.
+        let mut app = populated();
+        app.alert = Some(Alert {
+            text: vec!["palavra"; 64].join(" "),
+            blocking: true,
+        });
+        let screen = draw(&app, Palette::True, (MIN_WIDTH, MIN_HEIGHT));
+        let band = band_rows(&screen);
+
+        assert!(
+            band.iter().any(|row| row.contains('…')),
+            "the band cut sixty-four words down to a bandful and said nothing:\n{screen}"
+        );
+        assert!(
+            screen.contains("[enter]"),
+            "the way out was cut off the screen:\n{screen}"
+        );
+        assert!(
+            band.len() <= MAX_ALERT_ROWS,
+            "the band took {} rows of the {MAX_ALERT_ROWS} it is allowed:\n{screen}",
+            band.len()
+        );
+    }
+
+    #[test]
+    fn a_blocking_notice_of_exactly_four_rows_marks_the_row_the_hint_costs() {
+        // The case that never got a marker at all: at exactly `MAX_ALERT_ROWS`
+        // the cap does not fire, so nothing was marked — and then the hint,
+        // needing a row of its own because row four is wide, deleted row four
+        // outright. A whole row of the notice disappeared from a band that
+        // still looked complete.
+        let wide = "x".repeat(70);
+        let mut app = populated();
+        app.alert = Some(Alert {
+            text: format!("primeira\nsegunda\nterceira\n{wide}"),
+            blocking: true,
+        });
+        let screen = draw(&app, Palette::True, (MIN_WIDTH, MIN_HEIGHT));
+        let band = band_rows(&screen);
+
+        assert!(
+            band.iter().any(|row| row.contains('…')),
+            "a row of the notice was dropped for the hint with nothing to say so:\n{screen}"
+        );
+        assert!(
+            screen.contains("[enter]"),
+            "the way out was cut off the screen:\n{screen}"
         );
     }
 
