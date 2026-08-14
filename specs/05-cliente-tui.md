@@ -79,7 +79,7 @@ Tecla dedicada configurável não resolveria: o problema não é *qual* tecla, �
 3. **PADRÃO: AZUL** — operação normal.
 4. **Falando** — destaque no roster, indicador de nível.
 5. **Bateria interna** — desconectado, contagem 04:59 regressiva, interface esmaecida mas legível, tentativas listadas.
-6. **Alerta** — banner 警告 para menção direta ou evento crítico.
+6. **Alerta** — banner 警告 para menção direta ou evento crítico. Ocupa as linhas que o texto pedir, e nunca as da conversa: um veredito de convite carrega duas impressões digitais de 64 caracteres, e em 80 colunas elas não cabem numa linha só — mostrar metade de uma comparação é o mesmo que não mostrar nenhuma.
 
 ### A tela de conexão não é o sétimo
 

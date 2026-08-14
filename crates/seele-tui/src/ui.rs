@@ -168,10 +168,22 @@ pub fn render(frame: &mut Frame<'_>, app: &App, theme: Theme) {
     // specs/05-cliente-tui.md wants the countdown and the attempts both visible,
     // and an alert can arrive while the link is down.
     let battery_rows = u16::from(matches!(app.screen, Screen::InternalBattery { .. }));
-    let alert_rows = u16::from(app.alert.is_some());
+    // The alert asks for as many rows as its text needs at this width, and the
+    // rows are laid out here because the layout is what decides how tall the
+    // band is. A one-row band was fine while every alert was a sentence; the
+    // invite verdicts are a sentence *and two sixty-four-character
+    // fingerprints*, and at the 80 columns `specs/05-cliente-tui.md` supports a
+    // single row shows the first of the two and none of the second — which is
+    // the one shape in which a comparison cannot be made.
+    let alert = alert_rows(app, theme, inner.width);
+    // Never at the cost of the panels: three rows of session and one of
+    // telemetry come first, and an alert taller than what is left gets cut
+    // instead of pushing the conversation off the screen.
+    let ceiling = inner.height.saturating_sub(battery_rows + 4);
+    let alert_height = u16::try_from(alert.len()).unwrap_or(u16::MAX).min(ceiling);
     let [battery, banner, panels, bar] = Layout::vertical([
         Constraint::Length(battery_rows),
-        Constraint::Length(alert_rows),
+        Constraint::Length(alert_height),
         Constraint::Min(3),
         Constraint::Length(1),
     ])
@@ -184,8 +196,16 @@ pub fn render(frame: &mut Frame<'_>, app: &App, theme: Theme) {
     {
         render_battery(frame, theme, battery, remaining, attempts);
     }
-    if app.alert.is_some() {
-        render_alert(frame, app, theme, banner);
+    if alert_height > 0 {
+        frame.render_widget(
+            Paragraph::new(
+                alert
+                    .into_iter()
+                    .take(alert_height as usize)
+                    .collect::<Vec<_>>(),
+            ),
+            banner,
+        );
     }
 
     let [dogma, tree, messages] = Layout::horizontal([
@@ -831,22 +851,70 @@ fn render_lost(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect, reaso
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-fn render_alert(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
-    let Some(alert) = &app.alert else { return };
+/// Lays the alert out into screen rows, one [`Line`] each.
+///
+/// Returns empty when there is no alert, which is what makes the band take no
+/// rows at all rather than an empty one.
+///
+/// The band grew a second and a third row for one reason: `ADR 0006`'s two
+/// invite verdicts carry two sixty-four-character fingerprints, and the whole
+/// point of showing them is that they be read against each other. On one row at
+/// 80 columns the sentence plus `esperada:` already spends the budget, so the
+/// offered fingerprint — the half that says what the Dogma actually is — was
+/// never on the screen. `render_lost` reached the same conclusion for the
+/// refusal, and the app's band carries `white-space: pre-line`; this is the
+/// same rule in the third shell.
+///
+/// `\n` in the text is a row break, exactly as in [`render_lost`], and anything
+/// longer than the width wraps on whitespace — so a fingerprint, being one
+/// unbroken word of 64 cells, always lands whole on a row of its own.
+fn alert_rows(app: &App, theme: Theme, width: u16) -> Vec<Line<'static>> {
+    let Some(alert) = &app.alert else {
+        return Vec::new();
+    };
+    let budget = width as usize;
 
-    let mut spans = Vec::new();
+    // 警告 rides on the first row instead of being a column of its own: an
+    // indent that wide would push `esperada:  <64 hex>` past 80 columns and
+    // split the very value it prefixes.
+    let mut text = alert.text.clone();
     if theme.kanji() {
-        spans.push(Span::styled("警告 ", theme.alert()));
-    }
-    spans.push(Span::styled(
-        truncate(&alert.text, area.width as usize),
-        theme.alert(),
-    ));
-    if alert.blocking {
-        spans.push(Span::styled("  [enter]", theme.label()));
+        text.insert_str(0, "警告 ");
     }
 
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+    let mut rows: Vec<String> = Vec::new();
+    for paragraph in text.split('\n') {
+        if paragraph.trim().is_empty() {
+            rows.push(String::new());
+            continue;
+        }
+        rows.extend(wrap(paragraph, budget));
+    }
+    if rows.is_empty() {
+        rows.push(String::new());
+    }
+
+    let mut lines: Vec<Line<'static>> = rows
+        .into_iter()
+        .map(|row| Line::from(Span::styled(row, theme.alert())))
+        .collect();
+
+    // The way out belongs to the last row, and gets one of its own when it
+    // would not fit — `specs/08-seguranca.md` wants the blocking alert
+    // impossible to ignore, and a hint clipped off the right edge is ignorable.
+    if alert.blocking {
+        let mark = "  [enter]";
+        let last = lines.last().map_or(0, Line::width);
+        if last + self::width(mark) <= budget {
+            if let Some(line) = lines.last_mut() {
+                line.spans.push(Span::styled(mark, theme.label()));
+            }
+        } else {
+            lines.push(Line::from(Span::styled(mark, theme.label())));
+        }
+    }
+
+    lines
 }
 
 /// The help overlay. `specs/09-roadmap.md` accepts M4 on somebody outside the
@@ -1291,6 +1359,67 @@ mod tests {
 
         assert!(screen.contains("A CHAVE DO SERVIDOR MUDOU"), "{screen}");
         assert!(screen.contains("[enter]"), "no way out shown:\n{screen}");
+    }
+
+    #[test]
+    fn an_invite_verdict_shows_both_fingerprints_whole_at_eighty_columns() {
+        // The alert exists so the two values can be compared, and a comparison
+        // needs both halves on the screen. On one row the offered fingerprint
+        // never appeared at all: label plus the expected value already spend
+        // the 80 columns `specs/05-cliente-tui.md` supports.
+        let expected = "a".repeat(64);
+        let offered = "b".repeat(64);
+        let mut app = populated();
+        app.alert = Some(Alert {
+            text: format!(
+                "O CONVITE NÃO CORRESPONDE A ESTE DOGMA.\nesperada:  {expected}\nofertada:  {offered}"
+            ),
+            blocking: false,
+        });
+        let screen = draw(&app, Palette::True, (MIN_WIDTH, MIN_HEIGHT));
+
+        // Whole, and on a row each — a fingerprint split across two rows is as
+        // uncomparable as one that is missing.
+        for fingerprint in [&expected, &offered] {
+            assert!(
+                screen.lines().any(|row| row.contains(fingerprint.as_str())),
+                "a fingerprint was cut or missing:\n{screen}"
+            );
+        }
+        assert!(screen.contains("O CONVITE NÃO CORRESPONDE"), "{screen}");
+        // And the conversation is still there: the band takes rows, it does not
+        // take the screen.
+        assert!(
+            screen.contains("harmônicos"),
+            "the panels went away:\n{screen}"
+        );
+    }
+
+    #[test]
+    fn a_one_line_alert_still_takes_a_single_row() {
+        // The band grows with the text and no further: nothing that fits gets a
+        // blank row underneath it.
+        let mut app = populated();
+        app.alert = Some(Alert {
+            text: "A CHAVE DO SERVIDOR MUDOU".into(),
+            blocking: false,
+        });
+        let screen = draw(&app, Palette::True, (MIN_WIDTH, MIN_HEIGHT));
+
+        let rows: Vec<&str> = screen.lines().collect();
+        let Some(index) = rows
+            .iter()
+            .position(|row| row.contains("A CHAVE DO SERVIDOR MUDOU"))
+        else {
+            panic!("the alert never made it to the screen:\n{screen}");
+        };
+        let Some(next) = rows.get(index + 1) else {
+            panic!("the alert was the last row on the screen:\n{screen}");
+        };
+        assert!(
+            next.contains('┌') || next.contains('│') || next.contains('─'),
+            "a blank row under a one-line alert — the band grew for nothing:\n{screen}"
+        );
     }
 
     #[test]

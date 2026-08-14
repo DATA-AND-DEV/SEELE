@@ -787,8 +787,13 @@ fn alerta_do_veredito(veredito: &Verdict) -> Option<Alert> {
         Verdict::FirstContactVerified { fingerprint } => {
             format!("PRIMEIRO CONTATO VERIFICADO — O CONVITE CONFIRMOU {fingerprint}")
         }
+        // Uma linha por impressão, pela mesma razão de
+        // [`motivo_de_conexao_perdida`]: são elas que a pessoa tem que comparar,
+        // e lado a lado na mesma linha nenhuma das duas cabe inteira em 80
+        // colunas. A faixa de alerta preserva o `\n` e cresce o quanto o texto
+        // pedir — ver `ui::alert_rows`.
         Verdict::InviteDisagrees { expected, offered } => format!(
-            "O CONVITE NÃO CORRESPONDE A ESTE DOGMA — esperada: {expected}  ofertada: {offered}"
+            "O CONVITE NÃO CORRESPONDE A ESTE DOGMA.\nesperada:  {expected}\nofertada:  {offered}"
         ),
         Verdict::Known | Verdict::InviteRefused { .. } => return None,
     };
@@ -1459,16 +1464,29 @@ mod tests {
 
     #[test]
     fn um_link_que_discorda_de_um_dogma_conhecido_mostra_as_duas_impressoes() {
+        // Com os 64 caracteres de verdade, que é o tamanho em que o alerta
+        // deixa de caber numa linha só. `ui::alert_rows` é quem desenha isto em
+        // mais de uma linha; aqui se guarda o que ele precisa receber.
+        let expected = "a".repeat(64);
+        let offered = "b".repeat(64);
         let veredito = Verdict::InviteDisagrees {
-            expected: "aaaa1111".into(),
-            offered: "bbbb2222".into(),
+            expected: expected.clone(),
+            offered: offered.clone(),
         };
         let Some(alerta) = alerta_do_veredito(&veredito) else {
             panic!("o desacordo do convite ficou sem alerta");
         };
-        assert!(alerta.text.contains("aaaa1111"));
-        assert!(alerta.text.contains("bbbb2222"));
         assert!(!alerta.blocking);
+
+        let linha_esperada = alerta.text.lines().find(|linha| linha.contains(&expected));
+        let linha_ofertada = alerta.text.lines().find(|linha| linha.contains(&offered));
+        let (Some(linha_esperada), Some(linha_ofertada)) = (linha_esperada, linha_ofertada) else {
+            panic!("uma das duas impressões sumiu do alerta:\n{}", alerta.text);
+        };
+        assert_ne!(
+            linha_esperada, linha_ofertada,
+            "as duas impressões caíram na mesma linha, a forma em que não dá para compará-las"
+        );
     }
 
     fn evento(kind: KeyEventKind) -> Event {
