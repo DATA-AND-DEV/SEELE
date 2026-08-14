@@ -51,13 +51,19 @@ reduzir o de 128 até 16 devolve um traço de meio pixel, que é como um ícone 
 cinza no dock. `design/marca/gerar-icones.py` faz a escolha por tabela e
 `apps/seele-app/tests/marca.rs` confere as quatro faixas.
 
+**A placa laranja vai em todo sistema.** As placas de profundidade são o que
+esta arte tem de novo e só significam alguma coisa sobre ela; entregar dois dos
+três sistemas sem placa era jogar isso fora. O que muda é o enquadramento, e só
+ele: no macOS a placa é recortada na superelipse da regra 1, com a folga da
+grade da Apple; em Windows e Linux ela é o quadro inteiro, de canto reto e
+opaca, sangrada até a borda. A marca dentro dela está no mesmo lugar nas duas.
+
 ### Forma muda
 
 `design/marca/muda.svg`
 
 O mesmo plug, traço mais grosso, uma barra no lugar do nome. A silhueta continua
-legível a 16 px. É a forma de favicon, a da bandeja do sistema, e a construção
-que os ícones transparentes usam em toda faixa (regra 6).
+legível a 16 px. É a forma de favicon e a da bandeja do sistema.
 
 ### Assinatura — o logotipo
 
@@ -101,28 +107,6 @@ dois campos é a marca; a moldura não é.
    ela não pode significar erro.
 5. **Área livre** ao redor de qualquer forma: metade da largura do plug.
 6. Sem sombra, gradiente, contorno extra, ou marca sobre imagem.
-   **Segunda exceção nomeada: os ícones transparentes de Windows e de Linux.**
-   A regra existe contra a marca sobre fotografia, onde o fundo tem detalhe e
-   compete com ela. Barra de tarefas não é fotografia: é uma superfície lisa de
-   cor desconhecida. Vale dizer isso em vez de deixar a tensão sem explicação —
-   um fundo transparente é, literalmente, a marca sobre o que o sistema puser
-   atrás. É por causa disso que o alvo transparente usa a **construção solta,
-   tudo laranja e nada preto**, a mesma de `muda.svg`. **E o que sustenta a
-   exceção é a convenção, não uma razão de contraste** — porque a razão não
-   sustenta. Medido pela fórmula de luminância relativa da sRGB, `#F2521F` fica
-   em **5,71:1** sobre `--seele-negro-painel` (`#0A0806`), que é o número que
-   `design/seele-tokens.css` e o ADR 0014 já registram para este par, e em
-   **5,86:1** sobre `--seele-negro-absoluto` (`#050403`). Do lado claro não há
-   número bom: sobre **branco puro** dá **3,50:1**, e isso é o **teto** — nenhuma
-   superfície clara faz melhor —; sobre o próprio `--seele-osso` (`#EAE3CF`) cai
-   para **2,73:1**, abaixo do critério de 3:1 para elemento não textual. Numa
-   barra de tarefas clara a marca solta fica pouco acima do mínimo, e sobre um
-   creme fica abaixo dele. O que decide a favor da construção solta é a
-   alternativa: pegar a arte de ícone e só tirar a placa faz o contorno preto e
-   a cinta preta sumirem numa barra escura, e sobra um anel laranja oco, que não
-   é um plug. Uma forma reconhecível com contraste apertado no claro é melhor
-   que uma forma que deixa de ser a marca no escuro — mas é uma troca, e está
-   escrita aqui como troca.
 7. **Fontes: Noto Sans JP 900 e Saira Condensed 900. Sem substituição.**
 8. Abaixo do mínimo, **trocar de forma** — nunca reduzir mais.
 
@@ -149,6 +133,14 @@ deslocada, que é como esta marca dá volume sem sombra e sem gradiente.
 Não são valores novos: são os mesmos de `apps/seele-app/ui/tokens.css`,
 congelados em M0.12. Um teste confere que a marca não introduz nenhuma cor fora
 dessa lista.
+
+O par em que a marca vive é laranja sobre o negro do produto, e ele tem número:
+medido pela fórmula de luminância relativa da sRGB, `#F2521F` fica em **5,71:1**
+sobre `--seele-negro-painel` (`#0A0806`) e em **5,86:1** sobre
+`--seele-negro-absoluto` (`#050403`). São os mesmos valores que
+`design/seele-tokens.css` e o ADR 0014 registram para este par. Fora do produto
+a marca não é entregue sobre fundo desconhecido: no ícone ela vem sempre sobre a
+própria placa.
 
 As seis placas entraram com o ícone de app e são da marca desenhada, não da
 interface: nenhuma superfície do produto se pinta com elas, e por isso elas não

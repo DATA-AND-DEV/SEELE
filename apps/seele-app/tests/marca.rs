@@ -184,20 +184,23 @@ fn o_icone_de_app_tem_a_cinta_vazia_e_um_desenho_por_faixa() {
 }
 
 #[test]
-fn os_icones_de_windows_e_linux_carregam_alfa() {
-    // Regra 6 da folha ganhou uma exceção nomeada: fora do macOS o ícone é
-    // transparente e a marca vai toda laranja, para não depender da cor da
-    // barra de tarefas atrás dela. Um PNG sem canal alfa aqui é a placa de
-    // volta ou um fundo colado — nenhum dos dois apareceria neste sistema
-    // operacional, e sim no de quem baixou o release. O byte 25 de um PNG é o
-    // tipo de cor, e 6 é RGBA.
+fn os_icones_de_windows_e_linux_sao_png_de_32_bits() {
+    // Windows e Linux recebem a **arte de placa**, de canto reto e opaca,
+    // sangrada até a borda: a mesma que o macOS recebe recortada na superelipse.
+    // O que dá para conferir daqui sem um decodificador é o formato — assinatura
+    // de PNG e tipo de cor 6 (RGBA) no byte 25, que é o que o gerador escreve
+    // para as duas famílias e o que o `.ico` embute. A garantia de pixel — canto
+    // na cor da placa, cinta desenhada por cima dela — é do `conferir()` de
+    // `design/marca/gerar-icones.py`, que reprova antes de qualquer arquivo ser
+    // escrito. Foi uma falha do `qlmanage` que a pediu: tamanho certo, arte num
+    // canto, branco no resto.
     for arquivo in ["32x32.png", "128x128.png", "128x128@2x.png", "icon.png"] {
         let png = std::fs::read(raiz().join("apps/seele-app/icons").join(arquivo))
             .unwrap_or_else(|_| panic!("não li o ícone {arquivo}"));
         assert_eq!(&png[0..4], b"\x89PNG", "{arquivo} não é um PNG");
         assert_eq!(
             png[25], 6,
-            "{arquivo} não é RGBA: o ícone perdeu a transparência"
+            "{arquivo} não é RGBA: não é o que o gerador escreve"
         );
     }
 }
