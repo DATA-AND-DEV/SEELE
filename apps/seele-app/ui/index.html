@@ -9,6 +9,11 @@
   dentro, ゼーレ vira três borrões; sem ele, a silhueta ainda se lê a 16px.
 -->
 <link rel="icon" href="marca-muda.svg" type="image/svg+xml">
+<!--
+  As três faces vêm antes dos tokens porque `tokens.css` só as **nomeia**:
+  quem as serve é `fontes.css`. Procedência em `fontes/PROCEDENCIA.md`.
+-->
+<link rel="stylesheet" href="fontes.css">
 <link rel="stylesheet" href="tokens.css">
 <link rel="stylesheet" href="seele.css">
 </head>
@@ -30,10 +35,13 @@
       Uma forma por tela — por isso a sessão usa a palavra latina no topo e
       nunca ゼーレ.
 
-      SVG com os glifos em contorno, e não texto: o app não embarca fonte
-      nenhuma, e deixar `ゼーレ` como texto entregaria a marca à Hiragino no
-      macOS e à Yu Gothic no Windows. Substituir a face japonesa é justamente
-      o que a folha de marca proíbe.
+      SVG com os glifos em contorno, e não texto. O app embarca a Noto Sans JP
+      desde M5 (`fontes.css`), então o motivo mudou de "não há face" para o que
+      sempre foi o verdadeiro: a assinatura é **desenho**, com o espacejamento
+      da folha de marca dentro dela. Como texto ela ficaria à mercê de qualquer
+      substituição — atualização da face, `font-display` errando o instante,
+      uma máquina sem o arquivo — e substituir a face japonesa é justamente o
+      que a folha de marca proíbe. O contorno não tem esse jeito de falhar.
     -->
     <h1 class="boot-marca">
       <img src="marca-assinatura.svg" alt="SEELE" class="marca-assinatura" width="292" height="95">

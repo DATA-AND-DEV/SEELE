@@ -46,9 +46,11 @@ body { overflow: hidden; }
 }
 
 /* ---- a marca ----
-   docs/marca.md. A assinatura é uma imagem porque os glifos vêm em contorno:
-   o app não embarca fonte, e deixar ゼーレ como texto entregaria a marca à
-   face japonesa que o sistema tiver à mão. */
+   docs/marca.md. A assinatura é uma imagem porque os glifos vêm em contorno,
+   com o espacejamento da folha dentro do desenho. O app passou a embarcar a
+   Noto Sans JP (`fontes.css`), e mesmo assim a assinatura continua desenho:
+   como texto ela dependeria de a face certa estar carregada no instante certo,
+   e a folha de marca proíbe substituir a face japonesa. */
 .boot-marca {
   margin: 0 0 32px;
   display: flex;

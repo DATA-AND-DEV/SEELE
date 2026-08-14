@@ -127,7 +127,10 @@ fn the_page_loads_only_files_that_are_shipped() {
     // simply render an unstyled window.
     let page = read("ui/index.html");
 
-    for asset in ["tokens.css", "seele.css", "seele.js"] {
+    // `fontes.css` is on this list for the same reason as the other three, and
+    // it is the one whose absence would be hardest to notice: the page would
+    // still render, in Arial Narrow. `tests/fontes.rs` guards what is inside it.
+    for asset in ["fontes.css", "tokens.css", "seele.css", "seele.js"] {
         assert!(page.contains(asset), "index.html never loads {asset}");
         assert!(
             app_dir().join("ui").join(asset).exists(),

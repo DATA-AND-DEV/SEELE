@@ -1,0 +1,94 @@
+/* SEELE · Entry Plug — as três faces, embarcadas.
+   Procedência, versão, licença e resumo de cada arquivo: `fontes/PROCEDENCIA.md`.
+
+   `tokens.css` nomeia as três desde M0.12, e até aqui nenhuma era servida: toda
+   `font-family` caía no segundo item da pilha — Arial Narrow no lugar da Saira,
+   a monoespaçada do sistema no lugar do Plex, Hiragino ou Yu Gothic no lugar do
+   Noto. Falha silenciosa: a tela abria, só abria com outra tipografia.
+
+   O comp carrega as três do Google Fonts. O app não pode: a CSP é
+   `default-src 'self'` (`tests/frontend.rs`), e um produto que se hospeda
+   sozinho não pede letra emprestada a um terceiro toda vez que alguém abre a
+   janela. Então ele as carrega.
+
+   `font-display: block` nas oito regras, e é decisão, não descuido. `swap`
+   pinta com a face de reserva e troca no meio — numa interface da NERV, um
+   instante de Arial Narrow é pior que um instante de nada. `block` segura o
+   texto invisível pelo período curto e desenha uma vez só; os arquivos são
+   locais, então o período curto é o tempo de ler disco.
+
+   Sem `unicode-range`: cada face é pedida por nome em `tokens.css`, não por
+   faixa, e as três já chegam recortadas exatamente ao que o produto desenha. */
+
+/* ---- Saira Condensed · cartelas e cabeçalhos (--seele-display) ---- */
+
+@font-face {
+  font-family: "Saira Condensed";
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url("fontes/saira-condensed-500.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Saira Condensed";
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("fontes/saira-condensed-700.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Saira Condensed";
+  font-style: normal;
+  font-weight: 900;
+  font-display: block;
+  src: url("fontes/saira-condensed-900.woff2") format("woff2");
+}
+
+/* ---- IBM Plex Mono · todo dado, e tudo que alguém digita (--seele-mono) ---- */
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("fontes/ibm-plex-mono-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url("fontes/ibm-plex-mono-500.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url("fontes/ibm-plex-mono-600.woff2") format("woff2");
+}
+
+/* ---- Noto Sans JP · o acento em kanji (--seele-jp) ----
+   Trinta e um glifos, que é o japonês inteiro do produto. `specs/07` mantém o
+   kanji como acento tipográfico, nunca como informação necessária — e é por
+   isso que 31 glifos bastam e que a lista é fechada. */
+
+@font-face {
+  font-family: "Noto Sans JP";
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("fontes/noto-sans-jp-700.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Noto Sans JP";
+  font-style: normal;
+  font-weight: 900;
+  font-display: block;
+  src: url("fontes/noto-sans-jp-900.woff2") format("woff2");
+}
