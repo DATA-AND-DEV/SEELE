@@ -196,49 +196,47 @@ própria, e não um remendo no fim de uma tarefa de teste.
 exatamente o que a tela de seleção convida a fazer. Some assim que qualquer
 pessoa entra ou sai, porque aí o roster é reconstruído.
 
-## 12 · O app lê a impressão digital do convite e não a confere
+## 12 · Fechada em 2026-08-13 · A conferência da impressão digital do convite
 
-**Sintoma.** Colar um `seele://` com impressão digital no app conecta como se
-não houvesse impressão nenhuma: o primeiro contato é cego, fixa a chave que
-vier e segue. O `plug` com o mesmo link recusa o Dogma que não bate, com a
-esperada e a ofertada lado a lado (`crates/seele-tui/src/main.rs`).
+**O que era.** O app lia a impressão digital de um `seele://` e não a conferia:
+colar um link com impressão conectava como se não houvesse impressão nenhuma.
+O `plug` conferia — ou parecia conferir: comparava a impressão esperada com ela
+mesma, porque `PinDecision::Matches` não carregava a ofertada, e era um teste
+que não tinha como reprovar. Duas cascas, dois comportamentos, nenhum dos dois
+o que o ADR 0006 desenhou.
 
-**O que se sabe.** A impressão chega inteira ao Rust — `analisar_convite`
-guarda o `Convite` em `Session::convite` — e para ali. `seele_ffi::ConnectConfig`
-não tem campo por onde ela passe até o `Enlace`, e o `Trust::FirstContact` sai
-antes de a casca conseguir se inscrever nos eventos, então nem dá para conferir
-depois pelo aviso. O que atravessa a ponte é um booleano, `conferencia_pendente`:
-só *que* existe, nunca *qual* — a segunda metade é a que `specs/06-clientes-gui.md:19`
-não deixa o frontend saber.
+**O que ficou no lugar.** Uma decisão só, em `seele-core`, com cinco desfechos
+nomeados (`tofu::Verdict`). A impressão do link atravessa a ponte
+(`ConnectConfig::expected_fingerprint` → `Destino::impressao_esperada`) e a
+comparação acontece antes de haver sessão. No primeiro contato, um convite que
+não confere **recusa**: derruba a conexão e desfaz o pin que o TLS já tinha
+escrito — sem essa segunda metade a recusa seria decorativa, porque a visita
+seguinte, sem link para conferir, entraria calada no servidor recusado. Contra
+um Dogma já fixado, um convite que discorda **avisa** e não derruba: o TOFU já
+provou que é o servidor de ontem, e trancar alguém para fora por causa de um
+link velho seria o erro oposto. As duas cascas leem o mesmo veredito; o `plug`
+não compara mais nada por conta própria.
 
-**O que ficou tentado.** Nada de conferência. O que foi feito foi não calar: a
-tela diz que a conferência está pendente sempre que o link trouxe uma. Quem cola
-um link supõe estar protegido **por causa dela**, e a afordância de colar é nova
-— "antes também não conferia" não vale como resposta para algo que antes não
-dava para fazer.
+**A segunda ponta, do mesmo fio, também fechou.** O `Session::convite` morre
+com a sessão que ele abriu e é descartado quando o endereço no campo não é o do
+convite. Enquanto nada era conferido isso era inerte; deixou de ser no mesmo
+dia em que a conferência passou a existir.
 
-**Por que não foi resolvido.** O conserto é na `seele-ffi` e no `Enlace`, não no
-app: um campo de impressão esperada no `ConnectConfig` e a recusa antes do
-`FirstContact`, que é onde o `plug` já a faz. Mexer nisso é mexer na decisão de
-confiança do ADR 0003 para as duas cascas, e isso é tarefa própria — não um
-remendo no fim de uma tarefa de tela.
+**Como se sabe que não é enfeite.** `crates/seele-conformance/tests/convite.rs`
+prova os três desfechos contra um Dogma de verdade — a impressão certa
+verificando, a errada recusando e desfixando, e o link velho avisando sobre uma
+sessão que continua falando. Cada um foi visto ficar vermelho com a política
+desligada antes de ser dado por bom.
 
-**Uma segunda ponta, do mesmo fio.** O `Session::convite` é limpo só quando
-alguém troca o endereço no campo — nunca ao desconectar ou ejetar. Quem cola um
-link, entra, sai e entra de novo no mesmo endereço sem colar nada reaproveita a
-impressão digital do convite anterior. Hoje é inerte, porque nada confere nada;
-vira defeito no dia em que a FFI passar a conferir, que é o mesmo dia em que o
-resto desta pendência fecha.
-
-**Quando dói.** Toda vez que alguém cola no app um convite que trazia a
-confirmação de identidade. É o caminho que o ADR 0006 desenhou para transformar
-o primeiro contato de cego em verificado, e no app ele ainda não transforma.
+**O que sobrou, e é de outra entrada.** A faixa de veredito da janela nunca foi
+desenhada para um humano — é a mesma ausência da pendência 13, e é lá que ela
+está contada.
 
 ## 13 · As três telas novas do app nunca foram vistas por ninguém
 
 **Sintoma.** Não há sintoma relatado, e é justamente esse o problema. Três
-regiões da janela — a lista de Dogmas visitados na tela de entrada, o campo
-CONVITE com o aviso de conferência pendente, e a barra de busca com o contador
+regiões da janela — a lista de Dogmas visitados na tela de entrada, a faixa de
+veredito de identidade que a sessão acende, e a barra de busca com o contador
 `[n/m]` — foram escritas, testadas por fora e **nunca desenhadas para um
 humano**. O ambiente onde este ramo foi feito não consegue capturar tela, e
 `cargo tauri dev` abre uma janela que ninguém está lá para olhar.
@@ -251,7 +249,7 @@ sobre os mesmos tipos que atravessam a ponte. Nada disso alcança o que só o
 olho alcança: se o contador cabe ao lado do campo em janela estreita, se a
 lista de visitados empurra o formulário para fora da tela quando tem vinte
 entradas, se o realce corrente se distingue do resto de verdade e não só no
-papel, se o aviso do convite aparece onde alguém vai ler.
+papel, se a faixa de veredito aparece onde alguém vai ler.
 
 **O que ficou tentado.** Nada — e a ausência é o registro. `specs/06-clientes-gui.md`
 já descreve as três como prontas, e é essa diferença entre "descrito" e "visto"

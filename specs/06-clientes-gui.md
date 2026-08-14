@@ -36,14 +36,37 @@ segundo analisador de URI em JavaScript, nem lista de atalhos lida do disco
 pelo frontend: seriam dois conjuntos de casos de borda para discordar do
 primeiro, e o requisito acima não é negociável.
 
-**O que o app ainda não faz com o convite.** Um `seele://` pode carregar a
-impressão digital do certificado, e é ela que transforma o primeiro contato de
-cego em verificado (ADR 0006). O app **lê** a impressão e **não a confere** —
-`ConnectConfig` não tem campo por onde ela passe. A impressão fica do lado
-Rust, nunca cruza a ponte, e a tela diz que a conferência está pendente em vez
-de calar: quem cola um link supõe estar protegido por causa dela, e silêncio
-aqui seria a falha. O `plug` confere. A assimetria entre as duas cascas é a
-pendência 12.
+**A impressão digital do convite.** Um `seele://` pode carregar a impressão
+digital do certificado, e é ela que transforma o primeiro contato de cego em
+verificado (ADR 0006). O app a confere. A impressão lida do link atravessa a
+ponte como `ConnectConfig::expected_fingerprint`, vira a impressão esperada do
+`Destino`, e a comparação acontece em `seele-core` — antes de haver sessão,
+uma vez só, para as duas cascas. O `plug` lê o mesmo resultado; não há duas
+conferências para discordar uma da outra.
+
+O que volta da conferência é um veredito, não um booleano: primeiro contato
+cego, primeiro contato verificado, Dogma já conhecido, convite que discorda de
+um Dogma conhecido, e convite que não confere no primeiro contato. Os dois
+últimos são coisas diferentes e a tela os trata como tais. Um convite que não
+confere no primeiro contato **recusa**: a conexão cai, a chave que o TLS tinha
+acabado de fixar é desfeita, e a tela de entrada mostra a esperada e a ofertada
+lado a lado. Um convite que discorda de um Dogma já fixado **avisa**: o TOFU já
+provou que é o servidor de sempre, então quem está errado é o link, a sessão
+entra, e a ressalva fica visível dentro dela. Primeiro contato — verificado ou
+cego — também aparece: o app diz o que acabou de fixar, porque fixar em
+silêncio é fixar sem ninguém saber que havia o que conferir. Só o Dogma já
+conhecido, sem nada que o contradiga, não vira frase; repetir "a chave é a
+mesma de sempre" a cada entrada ensina a não ler a linha no dia em que ela não
+for.
+
+Nenhuma frase dessas é escrita em Rust e nenhuma comparação é feita em
+JavaScript — a fronteira é a mesma de sempre: o núcleo decide, a casca desenha.
+
+O convite guardado vale para o Dogma dele e para nenhum outro. Trocar o
+endereço no campo descarta a impressão do link anterior, e a sessão que ele
+abriu leva-a embora ao terminar. Sem isso, quem cola um link, entra, sai e
+volta a entrar noutro endereço levaria consigo uma promessa que aquele servidor
+nunca fez, e a recusa apareceria sem nada na tela que a explicasse.
 
 ### Hospedar pelo app
 
