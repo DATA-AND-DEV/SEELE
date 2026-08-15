@@ -1143,11 +1143,14 @@ mod tests {
             total_isolation: false,
             speaking: false,
             presence: Presence::Available,
-            sync_ratio: 42,
+            sync_ratio: 72,
         }));
 
+        // 72 rather than a critical number on purpose: `SyncBand::Critical` is
+        // the `Default`, so a shell that received it could not tell a banded
+        // ratio from a field nobody filled in.
         let pilot = &cages_of(&room)[0].pilots[0];
-        assert_eq!(pilot.sync_ratio, 42);
+        assert_eq!(pilot.sync_ratio, 72);
         assert_eq!(pilot.sync_band, types::SyncBand::Degraded);
     }
 

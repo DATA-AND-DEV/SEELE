@@ -4540,6 +4540,7 @@ version = "0.0.0"
 dependencies = [
  "seele-core",
  "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]

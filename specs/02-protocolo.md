@@ -102,7 +102,7 @@ sync = 100
      − penalidade_perda(perda_pct)     # até 30 pontos, mais agressiva
 ```
 
-Suavizada com média móvel exponencial (α ≈ 0,2) para não piscar. Faixas: ≥ 90 nominal · 70–89 aceitável · 40–69 degradado · < 40 crítico. Cada faixa tem cor própria — ver `07`.
+Suavizada com média móvel exponencial (α ≈ 0,2) para não piscar. Faixas: ≥ 85 nominal · 60–84 degradado · < 60 crítico. Cada faixa tem cor própria — ver `07`.
 
 ## Keepalive e queda
 

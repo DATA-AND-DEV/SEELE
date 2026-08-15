@@ -58,7 +58,9 @@ Valores definitivos saem do trabalho no Claude Design; estas são as **restriç�
 | Identidade verificada | Azul (PADRÃO: AZUL) |
 | Texto corrido | Off-white levemente amarelado. Branco puro é errado |
 
-Faixas da Taxa de Sincronização: **≥ 90** nominal (verde) · **70–89** aceitável (off-white) · **40–69** degradado (laranja) · **< 40** crítico (vermelho).
+Faixas da Taxa de Sincronização: **≥ 85** nominal (fósforo) · **60–84** degradado (laranja NERV) · **< 60** crítico (vermelho).
+
+Eram quatro — `≥ 90` nominal, `70–89` aceitável em off-white, `40–69` degradado, `< 40` crítico. O comp v2 (`design/Entry Plug v2.dc.html`) banda o mesmo número em três, corta em 85 e 60, e **não usa osso em escala de sincronia nenhuma**; o comp é posterior a esta tabela e o dono decidiu que ele vence. A consequência que importa: 80 lia-se como "fora do nominal, mas tudo bem" e agora se lê como degradado — laranja, a cor de ir olhar. É o objetivo da mudança, não um efeito colateral dela.
 
 ## Tipografia
 

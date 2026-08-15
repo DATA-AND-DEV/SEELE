@@ -16,6 +16,12 @@ seele-core = { path = "../seele-core" }
 tokio = { version = "1.53.1", features = ["full"] }
 tracing = "0.1.44"
 
+[dev-dependencies]
+# Só para ler de volta o JSON que a casca gráfica lê. A faixa cruza esta
+# fronteira **pelo nome**, e um teste que compara enums em Rust não vê o nome
+# mudar. Já está na árvore via `seele-app`, então não acrescenta superfície.
+serde_json = "1.0.151"
+
 [lints]
 workspace = true
 

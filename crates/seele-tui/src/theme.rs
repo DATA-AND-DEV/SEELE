@@ -268,14 +268,14 @@ impl Theme {
 
     /// Style for a Sync Ratio in a given band.
     ///
-    /// `specs/07-tema-evangelion.md` gives each band a colour; the caller is
+    /// `design/Entry Plug v2.dc.html` gives each band a colour — phosphor,
+    /// orange, red — and bone appears in no sync scale at all. The caller is
     /// expected to print [`Self::sync_mark`] beside it, because the number and
     /// the mark are what survive when the colour does not.
     #[must_use]
     pub fn sync(self, band: SyncBand) -> Style {
         match band {
             SyncBand::Nominal => self.fg(PHOSPHOR),
-            SyncBand::Acceptable => self.fg(BONE),
             SyncBand::Degraded => self.fg(NERV),
             SyncBand::Critical => self.alert(),
         }
@@ -291,7 +291,6 @@ impl Theme {
     pub fn sync_mark(band: SyncBand) -> &'static str {
         match band {
             SyncBand::Nominal => "█",
-            SyncBand::Acceptable => "▓",
             SyncBand::Degraded => "▒",
             SyncBand::Critical => "░",
         }
@@ -393,12 +392,11 @@ mod tests {
         // sharing a mark would put the no-colour mode back where it started.
         let marks = [
             Theme::sync_mark(SyncBand::Nominal),
-            Theme::sync_mark(SyncBand::Acceptable),
             Theme::sync_mark(SyncBand::Degraded),
             Theme::sync_mark(SyncBand::Critical),
         ];
         let unique: std::collections::HashSet<&&str> = marks.iter().collect();
-        assert_eq!(unique.len(), 4, "two bands share a mark: {marks:?}");
+        assert_eq!(unique.len(), 3, "two bands share a mark: {marks:?}");
     }
 
     #[test]
@@ -414,12 +412,7 @@ mod tests {
     #[test]
     fn mono_style_carries_no_colour_anywhere() {
         let mono = Theme::with_palette(Palette::Mono);
-        for band in [
-            SyncBand::Nominal,
-            SyncBand::Acceptable,
-            SyncBand::Degraded,
-            SyncBand::Critical,
-        ] {
+        for band in [SyncBand::Nominal, SyncBand::Degraded, SyncBand::Critical] {
             assert!(
                 mono.sync(band).fg.is_none(),
                 "a colour leaked into the no-colour mode"

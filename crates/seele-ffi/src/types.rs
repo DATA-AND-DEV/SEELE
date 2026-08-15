@@ -58,22 +58,25 @@ pub enum Pattern {
 /// Which band a Sync Ratio falls into.
 ///
 /// Carried as an enum beside the number so a shell never has to know the
-/// thresholds. Two shells with two copies of "90 is nominal" is two shells that
+/// thresholds. Two shells with two copies of "85 is nominal" is two shells that
 /// disagree the day one of them is updated.
+///
+/// Three bands, from `design/Entry Plug v2.dc.html`. The fourth — `Acceptable`
+/// — is gone, and it is gone from the JSON the webview reads too: a shell that
+/// still branches on `"Acceptable"` now falls through to whatever it does with
+/// an unknown band, and never to a colour it drew last week.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
 pub enum SyncBand {
-    /// 90 and above.
+    /// 85 and above.
     Nominal,
-    /// 70 to 89.
-    Acceptable,
-    /// 40 to 69.
+    /// 60 to 84.
     Degraded,
-    /// Below 40.
+    /// Below 60.
     ///
     /// The default, because an unmeasured ratio is zero and zero is critical by
-    /// the thresholds in `specs/07-tema-evangelion.md`. Defaulting to nominal
-    /// would be a reassurance nobody measured — worse than an alarm, because an
-    /// alarm gets checked.
+    /// the thresholds the comp sets. Defaulting to nominal would be a
+    /// reassurance nobody measured — worse than an alarm, because an alarm gets
+    /// checked.
     #[default]
     Critical,
 }
@@ -82,7 +85,6 @@ impl From<seele_core::SyncBand> for SyncBand {
     fn from(band: seele_core::SyncBand) -> Self {
         match band {
             seele_core::SyncBand::Nominal => Self::Nominal,
-            seele_core::SyncBand::Acceptable => Self::Acceptable,
             seele_core::SyncBand::Degraded => Self::Degraded,
             seele_core::SyncBand::Critical => Self::Critical,
         }
@@ -579,18 +581,40 @@ mod tests {
 
     #[test]
     fn the_bands_agree_with_the_core() {
-        // Two shells with two copies of "90 is nominal" is two shells that
+        // Two shells with two copies of "85 is nominal" is two shells that
         // disagree the day one of them is updated. The core decides; this only
         // relabels.
         for ratio in 0..=100u8 {
             let band: SyncBand = seele_core::SyncBand::of(ratio).into();
             let expected = match ratio {
-                90..=255 => SyncBand::Nominal,
-                70..=89 => SyncBand::Acceptable,
-                40..=69 => SyncBand::Degraded,
+                85..=255 => SyncBand::Nominal,
+                60..=84 => SyncBand::Degraded,
                 _ => SyncBand::Critical,
             };
             assert_eq!(band, expected, "ratio {ratio}");
+        }
+    }
+
+    #[test]
+    fn the_band_a_shell_reads_is_spelled_the_way_the_comp_bands_it() {
+        // The desktop shell branches on this string. The edges are what a
+        // shell would get wrong if it kept its own thresholds, so the edges
+        // are what is pinned — 84 and 85, 59 and 60.
+        let json = |ratio: u8| {
+            let band: SyncBand = seele_core::SyncBand::of(ratio).into();
+            serde_json::to_string(&band).expect("a bare enum always serialises")
+        };
+
+        assert_eq!(json(85), "\"Nominal\"");
+        assert_eq!(json(84), "\"Degraded\"");
+        assert_eq!(json(60), "\"Degraded\"");
+        assert_eq!(json(59), "\"Critical\"");
+        assert_eq!(json(0), "\"Critical\"");
+        assert_eq!(json(100), "\"Nominal\"");
+
+        // And nothing anywhere in the range still says the fourth band's name.
+        for ratio in 0..=100u8 {
+            assert_ne!(json(ratio), "\"Acceptable\"", "ratio {ratio}");
         }
     }
 

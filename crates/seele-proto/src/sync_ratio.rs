@@ -65,31 +65,54 @@ pub const LOSS_MAX_PENALTY: f32 = 30.0;
 /// jumps around is noise a user learns to ignore.
 pub const SMOOTHING: f32 = 0.2;
 
+/// Floor of [`SyncBand::Nominal`], in points.
+///
+/// `design/Entry Plug v2.dc.html`: `if (v >= 85) return FOS`.
+pub const NOMINAL_FLOOR: u8 = 85;
+/// Floor of [`SyncBand::Degraded`], in points. Below this the ratio is critical.
+///
+/// `design/Entry Plug v2.dc.html`: `if (v >= 60) return LAR`.
+pub const DEGRADED_FLOOR: u8 = 60;
+
 /// What band a Sync Ratio falls into.
 ///
 /// `specs/07-tema-evangelion.md` gives each a colour. The colour is **not** here:
 /// that is the shell's decision, and `specs/05-cliente-tui.md` requires a
 /// no-colour mode where the band still has to be conveyable.
+///
+/// # Three bands, not four
+///
+/// This used to have a fourth band — `Acceptable`, 70 to 89, drawn in bone —
+/// taken from the table in `specs/07-tema-evangelion.md`. The v2 comp
+/// (`design/Entry Plug v2.dc.html`) bands the same number in three, at 85 and
+/// 60, and uses bone in no sync scale at all:
+///
+/// ```text
+/// function corSync(v){ if (v >= 85) return FOS; if (v >= 60) return LAR; return VER; }
+/// ```
+///
+/// The comp is later than that table and the owner decided it wins, so the
+/// bands are three and the spec was corrected to match. The consequence worth
+/// knowing: a ratio of 80 used to read as merely off-nominal and now reads as
+/// degraded — orange, the colour of "go and look". That is the point of the
+/// change, not a side effect of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum SyncBand {
-    /// Below 40. Something is wrong.
+    /// Below [`DEGRADED_FLOOR`]. Something is wrong.
     Critical,
-    /// 40 to 69.
+    /// [`DEGRADED_FLOOR`] to one below [`NOMINAL_FLOOR`].
     Degraded,
-    /// 70 to 89.
-    Acceptable,
-    /// 90 and above.
+    /// [`NOMINAL_FLOOR`] and above.
     Nominal,
 }
 
 impl SyncBand {
-    /// Which band a ratio falls into. `specs/07-tema-evangelion.md`.
+    /// Which band a ratio falls into. `design/Entry Plug v2.dc.html`.
     #[must_use]
     pub fn of(ratio: u8) -> Self {
         match ratio {
-            90..=u8::MAX => Self::Nominal,
-            70..=89 => Self::Acceptable,
-            40..=69 => Self::Degraded,
+            NOMINAL_FLOOR.. => Self::Nominal,
+            DEGRADED_FLOOR.. => Self::Degraded,
             _ => Self::Critical,
         }
     }
@@ -278,17 +301,42 @@ mod tests {
     }
 
     #[test]
-    fn the_bands_match_the_theme_document() {
-        // specs/07-tema-evangelion.md: >= 90 nominal, 70-89 aceitável,
-        // 40-69 degradado, < 40 crítico.
-        assert_eq!(SyncBand::of(100), SyncBand::Nominal);
-        assert_eq!(SyncBand::of(90), SyncBand::Nominal);
-        assert_eq!(SyncBand::of(89), SyncBand::Acceptable);
-        assert_eq!(SyncBand::of(70), SyncBand::Acceptable);
-        assert_eq!(SyncBand::of(69), SyncBand::Degraded);
-        assert_eq!(SyncBand::of(40), SyncBand::Degraded);
-        assert_eq!(SyncBand::of(39), SyncBand::Critical);
+    fn the_bands_break_where_the_comp_breaks_them() {
+        // design/Entry Plug v2.dc.html: >= 85 fósforo, 60-85 laranja,
+        // < 60 vermelho. Only the two edges and the two ends are asserted —
+        // a test that checked 98 and 20 would have passed against the four
+        // bands this replaced, and so would have proved nothing.
+        assert_eq!(SyncBand::of(84), SyncBand::Degraded);
+        assert_eq!(SyncBand::of(85), SyncBand::Nominal);
+        assert_eq!(SyncBand::of(59), SyncBand::Critical);
+        assert_eq!(SyncBand::of(60), SyncBand::Degraded);
+
+        // The ends. 100 is the ceiling the ratio is clamped to; 255 is the
+        // ceiling the *type* has, and a shell that got one must not fall off
+        // the top of the match.
         assert_eq!(SyncBand::of(0), SyncBand::Critical);
+        assert_eq!(SyncBand::of(100), SyncBand::Nominal);
+        assert_eq!(SyncBand::of(u8::MAX), SyncBand::Nominal);
+    }
+
+    #[test]
+    fn there_is_no_band_between_degraded_and_nominal() {
+        // The fourth band was `Acceptable`, 70 to 89. It crossed the FFI by
+        // name into a JSON object the desktop shell reads, and this enum
+        // derives `Deserialize`. Removing it has to be *loud*: a stored or
+        // relayed "Acceptable" must fail to parse rather than land on a
+        // neighbour and quietly redraw 80 as fine.
+        use serde::de::{value::StrDeserializer, IntoDeserializer};
+
+        let gone: StrDeserializer<'_, serde::de::value::Error> = "Acceptable".into_deserializer();
+        assert!(
+            SyncBand::deserialize(gone).is_err(),
+            "a band that no longer exists was accepted by name"
+        );
+        let alive: StrDeserializer<'_, serde::de::value::Error> = "Degraded".into_deserializer();
+        assert_eq!(SyncBand::deserialize(alive), Ok(SyncBand::Degraded));
+
+        assert_eq!(SyncBand::of(80), SyncBand::Degraded);
     }
 
     #[test]
@@ -299,15 +347,18 @@ mod tests {
         let lan = raw(inputs(2.0, 0.3, 0.0)).round() as u8;
         assert_eq!(SyncBand::of(lan), SyncBand::Nominal, "lan scored {lan}");
 
+        // Both of these were "at least acceptable" under the four bands. Under
+        // the three from the comp the claim is the same one — not critical, a
+        // connection nobody has to go and fix — and both in fact clear 85.
         let wifi = raw(inputs(28.0, 4.7, 0.0109)).round() as u8;
         assert!(
-            SyncBand::of(wifi) >= SyncBand::Acceptable,
+            SyncBand::of(wifi) >= SyncBand::Degraded,
             "household wifi scored {wifi}"
         );
 
         let regional = raw(inputs(75.0, 4.5, 0.0061)).round() as u8;
         assert!(
-            SyncBand::of(regional) >= SyncBand::Acceptable,
+            SyncBand::of(regional) >= SyncBand::Degraded,
             "regional internet scored {regional}"
         );
 
