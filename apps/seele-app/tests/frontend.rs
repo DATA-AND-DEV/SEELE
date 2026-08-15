@@ -1084,3 +1084,82 @@ fn attribute(tag: &str, name: &str) -> Option<String> {
     let (value, _) = after.split_once('"')?;
     Some(value.to_owned())
 }
+
+/// The class names a stylesheet *defines* — the first class of every selector
+/// that starts a line.
+///
+/// The first class and not all of them, because that first one is the owner:
+/// `.busca .botao-fantasma` is `tela-sessao.css` refining a primitive it did not
+/// invent, and only `.busca` says whose rule it is.
+fn classes_defined_in(css: &str) -> BTreeSet<String> {
+    let mut found = BTreeSet::new();
+    for line in css.lines() {
+        let Some(rest) = line.strip_prefix('.') else {
+            continue;
+        };
+        let name: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+            .collect();
+        if !name.is_empty() {
+            found.insert(name);
+        }
+    }
+    found
+}
+
+#[test]
+fn no_two_screens_claim_the_same_class_name() {
+    // The screens are one stylesheet each, loaded one after another into one
+    // flat namespace — so two screens choosing the same name is not a clash the
+    // browser reports, it is the later sheet quietly winning every tie.
+    //
+    // This is not hypothetical. `tela-boot.css` calls the polygon diagram
+    // `.magi`; the session footer called its three lights `.magi` too, and it
+    // loads second. The boot diagram — `position: relative`, absolutely placed
+    // children — silently also got `display: flex; align-items: stretch`, and
+    // worse, the footer's `.magi li` (one class, one type) outranked the
+    // diagram's own `.magi-no` (one class) on the very `<li>`s it was meant to
+    // paint. Nothing failed. The boot screen just came out wrong.
+    //
+    // A name that a *shared* sheet owns is a different thing and stays legal: a
+    // screen writing `.ausente[title] { cursor: help }` is refining a primitive
+    // from `base.css` on purpose, which is what the load order exists for.
+    let shared: BTreeSet<String> = ["base.css", "acessibilidade.css"]
+        .iter()
+        .flat_map(|name| classes_defined_in(&read(&format!("ui/{name}"))))
+        .collect();
+
+    let screens: Vec<String> = ui_files(".css")
+        .into_iter()
+        .filter(|name| name.starts_with("tela-"))
+        .collect();
+    assert!(
+        screens.len() >= 2,
+        "there is nothing to collide: ui/ ships {} screen stylesheets",
+        screens.len()
+    );
+
+    let mut owner: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    let mut clashes: Vec<String> = Vec::new();
+    for sheet in &screens {
+        for class in classes_defined_in(&read(&format!("ui/{sheet}"))) {
+            if shared.contains(&class) {
+                continue;
+            }
+            match owner.get(&class) {
+                Some(first) => clashes.push(format!(".{class} — {first} and {sheet}")),
+                None => {
+                    owner.insert(class, sheet.clone());
+                }
+            }
+        }
+    }
+
+    assert!(
+        clashes.is_empty(),
+        "two screen stylesheets define the same class, and the one that loads \
+         later wins every tie between them:\n{}",
+        clashes.join("\n")
+    );
+}

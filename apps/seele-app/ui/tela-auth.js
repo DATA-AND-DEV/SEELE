@@ -68,6 +68,9 @@ function entrarNaAutenticacao(snapshot, veredito, endereco) {
   $("tela-auth").hidden = false;
 
   $("auth-endereco").textContent = endereco || AUSENTE;
+  // A sessão precisa do mesmo endereço para a porta do cabeçalho, e este é o
+  // último ponto do caminho que ainda o tem: o `Snapshot` não o carrega.
+  guardarAlvoDoDogma(endereco);
   desenharPadrao(snapshot);
   desenharDogmaDaEntrada(snapshot);
 
