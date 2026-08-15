@@ -882,3 +882,58 @@ fn the_frontend_never_names_a_protocol_concept() {
         }
     }
 }
+
+/// Every screen carries an id, and the app opens on exactly one of them.
+///
+/// Screens are swapped by assigning `.hidden` on the section directly, so the
+/// *initial* state is in the markup and nowhere else — no script sets it on
+/// load. A screen added without `hidden` therefore does not fail, does not
+/// throw, and does not warn: it renders stacked below whichever screen is
+/// supposed to be showing, and the window looks like boot with a second screen
+/// nailed underneath. That is the failure this catches, and it is the one a
+/// fifth screen is most likely to arrive with.
+#[test]
+fn the_app_opens_on_exactly_one_screen() {
+    let page = read("ui/index.html");
+
+    let mut screens = Vec::new();
+    for rest in page.split("<section ").skip(1) {
+        let Some(end) = rest.find('>') else { continue };
+        let tag = &rest[..end];
+
+        let classes = attribute(tag, "class").unwrap_or_default();
+        if !classes.split_whitespace().any(|class| class == "tela") {
+            continue;
+        }
+
+        let Some(id) = attribute(tag, "id") else {
+            panic!("a `<section class=\"tela\">` has no id, so no script can reach it: <{tag}>");
+        };
+        screens.push((id, tag.contains("hidden")));
+    }
+
+    assert!(
+        screens.len() >= 4,
+        "found {} screens; boot, sessao, auth and fim are all supposed to be in the page",
+        screens.len()
+    );
+
+    let open: Vec<&str> = screens
+        .iter()
+        .filter(|(_, hidden)| !hidden)
+        .map(|(id, _)| id.as_str())
+        .collect();
+
+    assert_eq!(
+        open,
+        ["tela-boot"],
+        "the app has to open on boot and on nothing else, but these screens start visible: {open:?}"
+    );
+}
+
+/// The value of `name="…"` in an already-isolated opening tag.
+fn attribute(tag: &str, name: &str) -> Option<String> {
+    let (_, after) = tag.split_once(&format!("{name}=\""))?;
+    let (value, _) = after.split_once('"')?;
+    Some(value.to_owned())
+}

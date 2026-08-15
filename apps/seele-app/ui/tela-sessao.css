@@ -106,7 +106,10 @@
   font-size: 10px;
   font-weight: normal;
   letter-spacing: var(--seele-tracking-rotulo);
-  color: var(--seele-osso-apagado);
+  /* Título de painel passa pelo nome semântico, e não por `osso-apagado`
+     direto: a pendência de contraste de `docs/tokens-achados.md` sobre essa cor
+     tem que caber numa linha de `tokens.css` quando for decidida. */
+  color: var(--seele-rotulo-painel);
   border-bottom: 1px solid var(--seele-linha);
   flex: 0 0 auto;
 }

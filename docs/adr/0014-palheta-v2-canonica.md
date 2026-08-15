@@ -101,3 +101,34 @@ sem decisão. Uma exceção nomeada não abre precedente para a próxima.
 
 Custo de reverter: **baixo**. É um elemento em `ui/index.html` e um bloco em
 `ui/seele.css`; tirar os dois devolve a interface parada de antes.
+
+## Revisão em M5 — dois nomes novos: `rotulo-painel` e `laranja-carga`
+
+Status: aceito · acrescenta, não repinta
+
+Nenhuma cor mudou de valor. Os dois nomes que entram são de naturezas
+diferentes, e só o primeiro é uma decisão.
+
+**`--seele-rotulo-painel`** é semântico e hoje é um apelido: vale
+`var(--seele-osso-apagado)`, exatamente o que os rótulos já valiam. Ele existe
+porque `docs/tokens-achados.md` registra uma pendência sobre essa cor — 4,11:1,
+que passa só como texto grande, enquanto a escala tipográfica põe rótulo de
+painel em 9–10px — e diz que a correção é subir a cor ou garantir que nada
+necessário dependa só dela. Título de painel é informação necessária: é o que
+diz qual painel é aquele. Enquanto a decisão não vem, todo título passa pelo
+nome semântico, e o dia em que ela vier é **uma linha** em `seele-tokens.css` e
+não uma varredura por seis folhas. O rótulo secundário que não é título de
+painel continua em `osso-apagado`; separar os dois é justamente o ponto.
+
+**`--seele-laranja-carga`** (`#2B0F05`) é transcrição. O inventário do comp,
+§11.5, lista cinco literais que o v2 usa e que nenhum arquivo de token nomeia; é
+o primeiro deles a ser desenhado no produto, no polígono MAGI que ainda não
+acendeu. Não é `laranja-fraco #331704`: o v1 usava `#331704` ali e o v2
+escureceu o valor, e os dois convivem no mesmo desenho. Inline ele seria cor
+literal numa folha, que `apps/seele-app/tests/tokens.rs` recusa — e com razão,
+porque uma cor que existe num cliente e não no outro é a forma como as duas
+paletas se separam.
+
+Custo de reverter: **baixo** para o segundo (um token e um seletor). Para o
+primeiro, reverter é trocar o nome de volta por `osso-apagado` em cada título —
+que é precisamente o trabalho que ele existe para evitar.

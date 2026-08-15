@@ -31,18 +31,6 @@
 .campo { display: flex; flex-direction: column; gap: 4px; }
 .campo-linha { flex-direction: row; align-items: center; gap: 8px; }
 
-.subsistemas {
-  list-style: none;
-  margin: 32px 0 0;
-  padding: 0;
-  display: flex;
-  gap: 32px;
-  font-size: 11px;
-  color: var(--seele-osso-apagado);
-}
-
-.subsistemas b { color: var(--seele-fosforo); margin-left: 8px; }
-
 /* `pre-line` porque dois destes erros carregam duas impressões digitais para
    uma pessoa comparar — a chave que mudou (ADR 0003) e o convite que não leva a
    este Dogma. Sem a quebra as duas refluem no mesmo parágrafo, que é exatamente
@@ -102,3 +90,305 @@
 .visitado .botao-fantasma { opacity: 0; }
 .visitado:hover .botao-fantasma,
 .visitado:focus-within .botao-fantasma { opacity: 1; }
+
+/* ---- a sequência de inicialização ----
+   Transcrição do painel A·01 do comp v2 (`design/Entry Plug v2.dc.html`), com
+   as coordenadas dele preservadas. `docs/../inventário §13` registra que o
+   diagrama MAGI é posicionamento absoluto em pixels e porcentagens arbitrários
+   e que nada nele alinha a célula de 8×16 — é desenho, não layout, e arredondá-lo
+   para a grade seria redesenhá-lo. O que **é** layout aqui (a grade de colunas,
+   os paddings, os gaps) continua em múltiplos de 8. */
+
+.boot-grade {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 420px;
+  min-height: 0;
+}
+
+.boot-sequencia {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 64px 64px 32px;
+  border-right: 1px solid var(--seele-linha);
+  overflow: auto;
+}
+
+/* A coordenada do A·01 é a única que flutua: as outras encabeçam um painel com
+   borda, e esta paira sobre a coluna aberta. */
+.coordenada-solta { position: absolute; top: 16px; left: 64px; }
+
+/* A hachura da borda esquerda. O passo de 16px é a altura de célula, e é a
+   única coisa do desenho decorativo desta tela que a respeita. */
+.hachura {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 12px;
+  border-right: 1px solid var(--seele-linha);
+  background: repeating-linear-gradient(
+    180deg,
+    var(--seele-linha) 0 1px,
+    transparent 1px 16px
+  );
+}
+
+.boot-corpo { display: flex; align-items: flex-start; gap: 40px; }
+
+.boot-ficha { flex-shrink: 0; width: 300px; }
+
+.boot-kanji {
+  margin: 0;
+  font-family: var(--seele-jp);
+  font-weight: 900;
+  font-size: 60px;
+  line-height: 0.92;
+  letter-spacing: 0.03em;
+  color: var(--seele-laranja-nerv);
+}
+
+/* A régua tripla do frame original: dois traços de borda e um terceiro feito de
+   sombra deslocada. `specs/07` proíbe sombra como profundidade; esta não é
+   profundidade, é o terceiro traço — cor plana, deslocamento inteiro, zero
+   desfoque. Herda a cor de quem a hospeda, como no comp. */
+.regua-tripla {
+  display: block;
+  height: 5px;
+  color: var(--seele-laranja-nerv);
+  border-top: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  box-shadow: 0 3px 0 -1px currentColor;
+}
+
+.boot-kanji + .regua-tripla { margin: 12px 0 16px; }
+.boot-meta + .regua-tripla { margin: 16px 0 12px; }
+
+.boot-meta {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: var(--seele-t-corpo);
+  letter-spacing: 0.16em;
+  color: var(--seele-laranja-nerv);
+}
+
+/* O comp põe `MAGI` em 44px nesta linha; aqui vai a assinatura, e ela vem de
+   `base.css` com 32px de margem embaixo, que é a do cartão centrado que esta
+   tela deixou de ser. */
+.boot-ficha .boot-marca { margin: 0 0 4px; }
+.boot-ficha .marca-assinatura { height: 48px; }
+
+.boot-sistema {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  color: var(--seele-rotulo-painel);
+}
+
+/* ---- o diagrama dos três ---- */
+
+.magi {
+  flex: 1;
+  position: relative;
+  height: 360px;
+  min-width: 440px;
+}
+
+.magi-haste {
+  position: absolute;
+  left: 50%;
+  top: 132px;
+  width: 5px;
+  height: 74px;
+  margin-left: -2px;
+  background: var(--seele-laranja-nerv);
+}
+
+.magi-diagonal {
+  position: absolute;
+  top: 264px;
+  width: 11%;
+  height: 5px;
+  background: var(--seele-laranja-nerv);
+}
+
+.magi-diagonal-esquerda { left: 39%; transform: rotate(18deg); transform-origin: 100% 50%; }
+.magi-diagonal-direita  { left: 50%; transform: rotate(-18deg); transform-origin: 0 50%; }
+
+.magi-nos { list-style: none; margin: 0; padding: 0; }
+
+/* Bloco em carga: preenchimento escuro com o nome em laranja. Aceso: bloco de
+   fósforo com o nome em negro — a regra de inversão do §12, a mesma da cartela
+   de padrão e da pastilha de estado. O que diz qual dos dois é a marca de texto
+   ao lado do nome, nunca a cor sozinha (`specs/05-cliente-tui.md`). */
+.magi-no {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--seele-laranja-carga);
+  color: var(--seele-laranja-nerv);
+}
+
+.magi-no[data-estado="ok"] {
+  background: var(--seele-fosforo);
+  color: var(--seele-negro-absoluto);
+}
+
+.magi-balthasar {
+  left: 26%;
+  top: 0;
+  width: 48%;
+  height: 144px;
+  clip-path: polygon(0 0, 100% 0, 100% 70%, 84% 100%, 16% 100%, 0 70%);
+}
+
+.magi-casper {
+  left: 0;
+  top: 168px;
+  width: 40%;
+  height: 150px;
+  clip-path: polygon(0 20%, 20% 0, 100% 0, 100% 78%, 80% 100%, 0 100%);
+}
+
+.magi-melchior {
+  right: 0;
+  top: 196px;
+  width: 40%;
+  height: 150px;
+  clip-path: polygon(0 0, 80% 0, 100% 22%, 100% 100%, 20% 100%, 0 78%);
+}
+
+.magi-nome {
+  font-family: var(--seele-display);
+  font-weight: 700;
+  font-size: 34px;
+  letter-spacing: 0.02em;
+}
+
+.magi-estado { font-family: var(--seele-mono); font-size: 13px; font-weight: normal; }
+
+/* O fundo opaco é o que "corta" os conectores por trás — no comp é a mesma
+   técnica, e é por isso que ele tem `padding: 0 8px`. */
+.magi-centro {
+  position: absolute;
+  left: 50%;
+  top: 216px;
+  transform: translateX(-50%);
+  padding: 0 8px;
+  background: var(--seele-negro-absoluto);
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: var(--seele-t-titulo);
+  line-height: 1;
+  letter-spacing: 0.06em;
+  color: var(--seele-laranja-nerv);
+}
+
+/* O selo. No comp a borda é fósforo em todo estado, por fidelidade ao
+   `ALL GREEN` do frame — mas lá ele tem `bootPct` por trás. Sem medida, verde
+   afirmaria o que ninguém apurou, então a borda é a de painel apagado. */
+.magi-selo {
+  position: absolute;
+  right: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 6px 10px;
+  border: 2px solid var(--seele-linha-forte);
+}
+
+.magi-selo-rotulo {
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  color: var(--seele-rotulo-painel);
+}
+
+.magi-selo-marca { font-size: 26px; line-height: 1; }
+
+/* ---- a Taxa de Sincronização ---- */
+
+.sync { margin-top: 32px; }
+
+.sync-topo {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+
+.sync-valor {
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 40px;
+  line-height: 1;
+}
+
+/* O comp desenha 46 blocos de 15px. Aqui não há o que preencher, e preencher
+   com `░` seria pior que vazio: `░` é a marca da faixa crítica em
+   `base.js`, e um trilho inteiro dela afirmaria uma sincronia despencada. O
+   trilho vazio não afirma nada. */
+.sync-trilho {
+  display: block;
+  height: 16px;
+  border: 1px solid var(--seele-linha);
+}
+
+.sync-escala {
+  margin-top: 8px;
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.14em;
+  color: var(--seele-rotulo-painel);
+}
+
+.sync-nota {
+  margin: 8px 0 0;
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: 0.18em;
+  color: var(--seele-osso-apagado);
+}
+
+/* ---- B·01, o registro de carga ---- */
+
+.boot-registro {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--seele-negro-painel);
+}
+
+.boot-registro > .coordenada {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--seele-linha);
+  flex: 0 0 auto;
+}
+
+.registro-corpo { flex: 1; min-height: 0; padding: 16px; overflow-y: auto; }
+
+.registro-rodape {
+  border-top: 1px solid var(--seele-linha);
+  padding: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.concordancia {
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 22px;
+  letter-spacing: 0.08em;
+}

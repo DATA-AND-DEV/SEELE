@@ -30,6 +30,7 @@
 <link rel="stylesheet" href="tela-boot.css">
 <link rel="stylesheet" href="tela-sessao.css">
 <link rel="stylesheet" href="tela-fim.css">
+<link rel="stylesheet" href="tela-auth.css">
 <link rel="stylesheet" href="acessibilidade.css">
 </head>
 <body>
@@ -52,10 +53,47 @@
   no rodapé.
 -->
 
-<!-- Boot. Dura o tempo real da conexão; nada aqui espera de propósito. -->
+<!--
+  Boot — a sequência de inicialização. Dura o tempo real da conexão; nada aqui
+  espera de propósito.
+
+  Duas colunas, como o comp v2 (`design/Entry Plug v2.dc.html`, painéis A·01 e
+  B·01): à esquerda a ficha da máquina e o diagrama MAGI, à direita o registro
+  de carga. O que o comp põe no registro são dez linhas de log com carimbo de
+  tempo, e nenhuma delas tem dado por trás (§16 do inventário: não existe
+  progresso de conexão no protocolo). Dez literais fixos desenhados como se
+  fossem eventos seriam dado falso, então o painel carrega o que **é** o
+  registro de carga desta janela: para onde você já foi, e o formulário que
+  começa a carga.
+-->
 <section id="tela-boot" class="tela">
-  <div class="boot">
-    <!--
+  <div class="boot-grade">
+
+    <!-- ---------------- A·01 ---------------- -->
+    <div class="boot-sequencia">
+      <!-- A hachura da borda esquerda: passo de 16px, que é a altura de célula. -->
+      <span class="hachura" aria-hidden="true"></span>
+      <p class="coordenada coordenada-solta">A·01 / SEQUÊNCIA DE INICIALIZAÇÃO</p>
+
+      <div class="boot-corpo">
+        <div class="boot-ficha">
+          <p class="boot-kanji kanji" lang="ja">起動検査</p>
+          <span class="regua-tripla" aria-hidden="true"></span>
+          <!--
+            Ficção de cenário, e o inventário a classifica assim (§16, **F**):
+            citação do frame original do Eva. Não bindam a nada e não deveriam —
+            é a única categoria de literal que pode ficar fixa sem mentir,
+            porque não afirma nada sobre esta máquina.
+          -->
+          <ul class="boot-meta">
+            <li>CODE : 0447</li>
+            <li>FILE : ENTRY_PLUG.INIT</li>
+            <li>EX_MODE : ON</li>
+            <li>PRIORITY : A——</li>
+          </ul>
+          <span class="regua-tripla" aria-hidden="true"></span>
+
+          <!--
       Assinatura, a forma da marca para onde o nome precisa ser dito com
       espaço: sequência de inicialização, autenticação, erro de tela cheia.
       Uma forma por tela — por isso a sessão usa a palavra latina no topo e
@@ -69,72 +107,166 @@
       uma máquina sem o arquivo — e substituir a face japonesa é justamente o
       que a folha de marca proíbe. O contorno não tem esse jeito de falhar.
     -->
-    <h1 class="boot-marca">
-      <img src="marca-assinatura.svg" alt="SEELE" class="marca-assinatura" width="292" height="95">
-      <span class="marca-legenda">SEELE</span>
-    </h1>
+          <h1 class="boot-marca">
+            <img src="marca-assinatura.svg" alt="SEELE" class="marca-assinatura" width="292" height="95">
+            <span class="marca-legenda">SEELE</span>
+          </h1>
+          <!--
+            O comp escreve `MAGI` em 44px nesta linha, porque lá MAGI é o nome
+            do produto. Aqui o nome do produto é SEELE, e `docs/marca.md` manda
+            a assinatura desenhada nas telas onde o nome precisa de espaço. MAGI
+            continua sendo o nome dos três subsistemas, e está no diagrama ao
+            lado — que é onde ele nomeia alguma coisa.
+          -->
+          <p class="boot-sistema">SISTEMA DE SINCRONIZAÇÃO ·
+            <span class="kanji" lang="ja">第三新東京市</span></p>
+        </div>
 
-    <!--
-      Onde você já esteve. Some inteira quando não há visitado nenhum — o estado
-      vazio da tela é exatamente o de antes desta seção existir, e um cabeçalho
-      sobre uma lista vazia é pior que nenhum cabeçalho.
-    -->
-    <section id="visitados" class="visitados" hidden>
-      <h2 class="visitados-titulo rotulo">ONDE VOCÊ JÁ ESTEVE</h2>
-      <ul id="lista-visitados" class="lista-visitados"></ul>
-    </section>
+        <!--
+          O diagrama dos três. Desenho, não layout: o inventário (§13) registra
+          que nada nele alinha célula nenhuma, e a transcrição preserva as
+          coordenadas do comp em vez de arredondá-las para a grade de 8×16.
 
-    <form id="form-conectar" class="boot-form" autocomplete="off">
-      <label class="campo">
-        <span class="rotulo">DOGMA</span>
-        <input id="campo-servidor" name="servidor" value="127.0.0.1:8383"
-               spellcheck="false" autocapitalize="off" required>
-      </label>
-      <label class="campo">
-        <span class="rotulo">PILOTO</span>
-        <input id="campo-apelido" name="apelido" value="piloto"
-               spellcheck="false" autocapitalize="off" maxlength="32" required>
-      </label>
+          O estado de cada polígono é o mesmo que a lista de subsistemas já
+          mostrava — `·` parado, `…` durante a tentativa, `ok` depois. Ele
+          continua escrito dentro do bloco: `specs/05-cliente-tui.md` proíbe
+          informação que só a cor carregue, e "acesa" e "apagada" seriam
+          exatamente isso. O que este estado **não** é: saúde por subsistema.
+          Ela não existe no protocolo (§16), e os três acendem juntos porque o
+          fato que eles relatam é um só — a conexão.
+        -->
+        <div class="magi">
+          <span class="magi-haste" aria-hidden="true"></span>
+          <span class="magi-diagonal magi-diagonal-esquerda" aria-hidden="true"></span>
+          <span class="magi-diagonal magi-diagonal-direita" aria-hidden="true"></span>
+
+          <ol class="magi-nos" aria-label="subsistemas">
+            <li class="magi-no magi-balthasar">
+              <span class="magi-nome">BALTHASAR·2</span>
+              <b id="sub-balthasar" class="magi-estado">·</b>
+            </li>
+            <li class="magi-no magi-casper">
+              <span class="magi-nome">CASPER·3</span>
+              <b id="sub-casper" class="magi-estado">·</b>
+            </li>
+            <li class="magi-no magi-melchior">
+              <span class="magi-nome">MELCHIOR·1</span>
+              <b id="sub-melchior" class="magi-estado">·</b>
+            </li>
+          </ol>
+
+          <span class="magi-centro">MAGI</span>
+
+          <!--
+            O selo. O comp o pinta sempre em fósforo, por fidelidade ao
+            `ALL GREEN` do frame original (Q7 do inventário), e o conteúdo dele
+            deriva do `bootPct`, que não existe aqui. Um selo verde sobre uma
+            medida que ninguém tomou afirma `ALL GREEN` — é a única razão pela
+            qual esta é a exceção deliberada à Q7: sem medida, o selo é
+            apagado, e diz que é.
+          -->
+          <div class="magi-selo">
+            <span class="magi-selo-rotulo">SEM MEDIDA</span>
+            <span class="magi-selo-marca ausente">——</span>
+          </div>
+        </div>
+      </div>
+
       <!--
-        Um link colado preenche o endereço, e o token viaja com ele até o
-        `connect`. Quem recebeu um convite não precisa saber separar o endereço
-        do resto à mão.
+        A Taxa de Sincronização. No comp ela sobe de 7 em 7 a cada 900 ms — um
+        cronômetro de protótipo, sem nada por trás (§16: `bootPct` exige
+        mudança de protocolo). Aqui a moldura fica e o valor falta: trilho
+        vazio, `——` no lugar do número, e a escala inteira. Um `0` seria a
+        resposta certa se houvesse campo medindo zero; aqui não há campo.
       -->
-      <label class="campo">
-        <span class="rotulo">CONVITE</span>
-        <input id="campo-convite" name="convite" placeholder="cole um seele://…"
-               spellcheck="false" autocapitalize="off">
-      </label>
-      <label class="campo campo-linha">
-        <input id="campo-audio" type="checkbox" checked>
-        <span class="rotulo">inserir plug com áudio</span>
-      </label>
-      <button id="botao-conectar" type="submit" class="botao">INSERIR PLUG</button>
+      <div class="sync">
+        <div class="sync-topo">
+          <span class="rotulo">TAXA DE SINCRONIZAÇÃO</span>
+          <span class="sync-valor ausente">——</span>
+        </div>
+        <span class="sync-trilho" aria-hidden="true"></span>
+        <div class="sync-escala">
+          <span>0</span><span>25</span><span>50</span><span>75</span><span>100</span>
+        </div>
+        <p class="sync-nota">NÃO MEDIDA — a conexão não relata progresso</p>
+      </div>
+    </div>
+
+    <!-- ---------------- B·01 ---------------- -->
+    <div class="boot-registro">
+      <h2 class="coordenada">B·01 / REGISTRO DE CARGA</h2>
+
+      <div class="registro-corpo">
+        <!--
+          Onde você já esteve. Some inteira quando não há visitado nenhum — o
+          estado vazio da tela é exatamente o de antes desta seção existir, e um
+          cabeçalho sobre uma lista vazia é pior que nenhum cabeçalho.
+        -->
+        <section id="visitados" class="visitados" hidden>
+          <h3 class="visitados-titulo rotulo">ONDE VOCÊ JÁ ESTEVE</h3>
+          <ul id="lista-visitados" class="lista-visitados"></ul>
+        </section>
+
+        <form id="form-conectar" class="boot-form" autocomplete="off">
+          <label class="campo">
+            <span class="rotulo">DOGMA</span>
+            <input id="campo-servidor" name="servidor" value="127.0.0.1:8383"
+                   spellcheck="false" autocapitalize="off" required>
+          </label>
+          <label class="campo">
+            <span class="rotulo">PILOTO</span>
+            <input id="campo-apelido" name="apelido" value="piloto"
+                   spellcheck="false" autocapitalize="off" maxlength="32" required>
+          </label>
+          <!--
+            Um link colado preenche o endereço, e o token viaja com ele até o
+            `connect`. Quem recebeu um convite não precisa saber separar o
+            endereço do resto à mão.
+          -->
+          <label class="campo">
+            <span class="rotulo">CONVITE</span>
+            <input id="campo-convite" name="convite" placeholder="cole um seele://…"
+                   spellcheck="false" autocapitalize="off">
+          </label>
+          <label class="campo campo-linha">
+            <input id="campo-audio" type="checkbox" checked>
+            <span class="rotulo">inserir plug com áudio</span>
+          </label>
+          <button id="botao-conectar" type="submit" class="botao">INSERIR PLUG</button>
+          <!--
+            Sem isto, hospedar exige abrir um terminal — e num produto cujo
+            argumento é "hospede você mesmo", exigir linha de comando de quem
+            hospeda exclui justamente quem mais ganharia. Mesmo servidor do
+            `seeled`, dentro deste processo, vivo enquanto a janela estiver
+            aberta.
+          -->
+          <button id="botao-hospedar" type="button" class="botao botao-secundario">
+            HOSPEDAR AQUI
+          </button>
+        </form>
+
+        <!--
+          Só o que impede de entrar mora nesta tela: um erro de conexão devolve
+          a pessoa para cá, e é aqui que ele é lido. A ressalva que ficava ao
+          lado dizia que esta janela não sabia conferir a confirmação de
+          identidade de um convite — ela sabe agora, e o que sai da conferência
+          é um veredito, que nasce depois desta tela sumir. Ele está no aperto
+          de mão, em `#tela-auth`.
+        -->
+        <p id="boot-erro" class="erro" role="alert" hidden></p>
+      </div>
+
       <!--
-        Sem isto, hospedar exige abrir um terminal — e num produto cujo
-        argumento é "hospede você mesmo", exigir linha de comando de quem
-        hospeda exclui justamente quem mais ganharia. Mesmo servidor do
-        `seeled`, dentro deste processo, vivo enquanto a janela estiver aberta.
+        `— / 3` é a forma do próprio comp para "ainda não": ele escreve
+        `3 / 3` quando o boot fecha e `— / 3` antes. Aqui não há o depois —
+        votação dos três subsistemas é o mesmo dado ausente dos polígonos —
+        então a linha fica na forma que o comp usa para a ausência.
       -->
-      <button id="botao-hospedar" type="button" class="botao botao-secundario">
-        HOSPEDAR AQUI
-      </button>
-    </form>
-
-    <ol class="subsistemas" aria-label="subsistemas">
-      <li><span>MELCHIOR</span><b id="sub-melchior">·</b></li>
-      <li><span>BALTHASAR</span><b id="sub-balthasar">·</b></li>
-      <li><span>CASPER</span><b id="sub-casper">·</b></li>
-    </ol>
-
-    <!--
-      Só o que impede de entrar mora nesta tela: um erro de conexão devolve a
-      pessoa para cá, e é aqui que ele é lido. A ressalva que ficava ao lado
-      dizia que esta janela não sabia conferir a confirmação de identidade de um
-      convite — ela sabe agora, e o que sai da conferência é um veredito, que
-      nasce depois desta tela sumir. Ele está em `#veredito`, na sessão.
-    -->
-    <p id="boot-erro" class="erro" role="alert" hidden></p>
+      <div class="registro-rodape">
+        <span class="rotulo">CONCORDÂNCIA DOS TRÊS</span>
+        <span class="concordancia ausente">— / 3</span>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -300,6 +432,108 @@
   </footer>
 </section>
 
+<!--
+  Autenticação — a entrada em Dogma Central, painéis A·02, B·02 e C·02.
+
+  Passo próprio, e não uma tarja dentro da sessão (Q8 do inventário: "Tela
+  própria, como o comp. Dá lugar para o aperto de mão aparecer"). Hoje o único
+  vestígio do aperto de mão na janela é o `PADRÃO: AZUL` do cabeçalho da
+  sessão, que aparece depois de tudo já ter acontecido. Aqui ele é a etapa: o
+  `connect` já correu — é ele o aperto de mão — e esta tela é onde o veredito
+  dele é lido antes de o plug entrar.
+
+  Daí o botão de dois passos, que é o do comp com trabalho de verdade nos dois
+  lados: VERIFICAR IDENTIDADE lê o que o `connect` decidiu e escreve no B·02;
+  INSERIR PLUG é o que leva à sessão. Ninguém entra num Cage sem que a
+  impressão digital do Dogma tenha passado por uma tela.
+-->
+<section id="tela-auth" class="tela" hidden>
+  <div class="auth-grade">
+
+    <!-- ---------------- A·02 ---------------- -->
+    <div class="auth-entrada">
+      <p class="coordenada">A·02 / ENTRADA EM DOGMA CENTRAL</p>
+
+      <div class="auth-corpo">
+        <!--
+          A cartela de padrão: bloco sólido invertido, e não contorno — é a
+          regra de inversão que o v2 endureceu (§12 do inventário). O valor é
+          `Snapshot.pattern`, que já é exatamente `Offline` / `Orange` / `Blue`.
+        -->
+        <div id="auth-padrao" class="cartela-padrao" data-padrao="Offline">
+          <span id="auth-padrao-rotulo" class="cartela-padrao-rotulo">PADRÃO: DESLIGADO</span>
+          <span id="auth-padrao-kanji" class="cartela-padrao-kanji kanji" lang="ja"></span>
+        </div>
+        <p id="auth-padrao-nota" class="auth-nota"></p>
+
+        <div class="campo campo-auth">
+          <span class="rotulo">ENDEREÇO DO DOGMA CENTRAL</span>
+          <!--
+            Marcado à esquerda em laranja, como no comp: dos dois campos, só
+            este tem a marca. Lá é um `input`; aqui é leitura, porque o endereço
+            já foi digitado no boot e o aperto de mão já chegou a ele. Um campo
+            editável aqui ofereceria trocar de Dogma sem desfazer a conexão
+            que está aberta.
+          -->
+          <output id="auth-endereco" class="auth-valor auth-valor-marcado">——</output>
+        </div>
+
+        <div class="campo campo-auth">
+          <span class="rotulo">CHAVE DE IDENTIDADE · MELCHIOR</span>
+          <!--
+            A nossa chave não atravessa a FFI. `Trust` carrega a impressão
+            digital **do servidor**, e a identidade local fica em disco, sem
+            comando que a leia (§16: comando novo). O campo fica, vazio e
+            dizendo que está.
+          -->
+          <output id="auth-chave" class="auth-valor ausente">——</output>
+        </div>
+
+        <button id="auth-botao" class="botao botao-auth" type="button">VERIFICAR IDENTIDADE</button>
+        <p class="legenda-ausente">—— valor que este protocolo não carrega</p>
+      </div>
+    </div>
+
+    <!-- ---------------- B·02 ---------------- -->
+    <div class="auth-aperto">
+      <h2 class="coordenada">B·02 / APERTO DE MÃO — MELCHIOR</h2>
+      <!--
+        O comp traz oito linhas com carimbo de tempo, e §16 diz que nenhuma
+        delas tem stream por trás. O que sobra e é verdade são os fatos que esta
+        janela **observou**: o endereço que ela resolveu, o veredito que o
+        `connect` devolveu, e o padrão em que a sessão ficou. O carimbo é o
+        relógio local no instante da observação — estado da casca, que o
+        inventário classifica como **L**, e não um tempo que veio do Dogma.
+      -->
+      <ol id="auth-registro" class="registro-linhas"></ol>
+    </div>
+
+    <!-- ---------------- C·02 ---------------- -->
+    <div class="auth-dogma">
+      <h2 class="coordenada">C·02 / DOGMA</h2>
+      <div class="auth-dogma-corpo">
+        <div>
+          <p id="auth-dogma-nome" class="auth-dogma-nome">——</p>
+          <p class="auth-dogma-sub">DOGMA CENTRAL</p>
+        </div>
+        <dl class="auth-pares">
+          <div class="auth-par"><dt class="rotulo">CAGES</dt><dd id="auth-cages">——</dd></div>
+          <div class="auth-par"><dt class="rotulo">LINHAS</dt><dd id="auth-linhas">——</dd></div>
+          <div class="auth-par"><dt class="rotulo">CODEC</dt><dd id="auth-codec">——</dd></div>
+          <!--
+            Duas linhas que o comp preenche e o protocolo não tem: não existe
+            população total do Dogma, e "rota" não é um conceito em lugar
+            nenhum do core (§16, as duas exigem mudança de protocolo). Ficam
+            desenhadas e vazias, porque apagá-las esconderia a lacuna.
+          -->
+          <div class="auth-par"><dt class="rotulo">OPERADORES</dt><dd class="ausente">——</dd></div>
+          <div class="auth-par"><dt class="rotulo">ROTA</dt><dd class="ausente">——</dd></div>
+        </dl>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- Sessão encerrada. Diz por quê; um app que fecha calado vira suporte. -->
 <section id="tela-fim" class="tela" hidden>
   <div class="boot">
@@ -326,5 +560,6 @@
 <script src="tela-boot.js"></script>
 <script src="tela-sessao.js"></script>
 <script src="tela-fim.js"></script>
+<script src="tela-auth.js"></script>
 </body>
 </html>

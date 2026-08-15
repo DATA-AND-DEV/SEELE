@@ -9,6 +9,10 @@
 function mostrarFim(motivo) {
   $("tela-sessao").hidden = true;
   $("tela-boot").hidden = true;
+  // A autenticação também: uma sessão pode acabar com o plug ainda fora, e
+  // quem ficasse nela veria o Dogma acabar por trás de um botão que promete
+  // entrar nele.
+  $("tela-auth").hidden = true;
   $("tela-fim").hidden = false;
   $("fim-motivo").textContent = MOTIVOS[motivo] ?? "ENLACE ENCERRADO";
 }
@@ -27,5 +31,6 @@ $("botao-voltar").addEventListener("click", async () => {
   linhaAberta = null;
   await encerrarBusca();
   limparConvite();
+  subsistemas("", "·");
   await desenharVisitados();
 });

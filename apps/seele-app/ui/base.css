@@ -56,6 +56,44 @@ body { overflow: hidden; }
   color: var(--seele-osso-apagado);
 }
 
+/* ---------- coordenada de painel ----------
+   `A·01`, `B·02`, `C·02` — o nome de cada painel, na tipografia que o comp usa
+   para eles: 9px, tracking de 0.2em.
+
+   A cor sai de `--seele-rotulo-painel` e nunca de `osso-apagado` direto, e a
+   diferença não é de estilo. `docs/tokens-achados.md` mede `osso-apagado` em
+   4,11:1, que passa só como texto grande, e põe a correção pendente em duas
+   opções: subir a cor, ou garantir que nada necessário dependa dela sozinha.
+   Título de painel é o que diz **qual** painel é aquele — informação
+   necessária. Passando por um nome semântico, a decisão, quando vier, é uma
+   linha em `tokens.css` e não uma varredura por todas as folhas. */
+.coordenada {
+  margin: 0;
+  font-size: var(--seele-t-micro);
+  font-weight: normal;
+  letter-spacing: 0.2em;
+  color: var(--seele-rotulo-painel);
+}
+
+/* ---------- o valor que não existe ----------
+   Metade do que o comp desenha não tem dado por trás (§16 do inventário do
+   comp: 23 de ~48 valores). Onde não há fonte, a moldura fica e o valor falta,
+   escrito com o travessão duplo — nunca com um número plausível, e nunca com um
+   zero, que é uma medida como qualquer outra.
+
+   `crates/seele-core/src/state.rs` guarda o outro lado desta mesma regra em
+   `an_unmeasured_sync_ratio_reads_as_zero_and_not_as_perfect`: lá existe campo,
+   e um campo sem medida vale zero porque zero é uma pergunta. Aqui não existe
+   campo nenhum, e um zero seria indistinguível de uma medida de verdade. */
+.ausente { color: var(--seele-osso-apagado); }
+
+.legenda-ausente {
+  margin: 0;
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.14em;
+  color: var(--seele-osso-apagado);
+}
+
 /* ---------- o cartão da entrada ----------
    `.boot` e `.boot-marca` não são da tela de entrada: são o cartão centrado que
    `#tela-boot` e `#tela-fim` já dividem hoje, e que a tela de autenticação vai

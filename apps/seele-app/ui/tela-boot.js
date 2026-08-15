@@ -1,11 +1,37 @@
 // SEELE · Entry Plug — a tela de entrada (`#tela-boot`).
 //
-// Onde você já esteve, o convite colado, e a inserção do plug — mais hospedar
-// aqui dentro, que é a mesma inserção com um Dogma que este processo acabou de
-// subir. Sai daqui para `#tela-sessao`, e é `tela-sessao.js` que desenha o que
-// chega do `connect`.
+// Onde você já esteve, o convite colado, e a conexão — mais hospedar aqui
+// dentro, que é a mesma conexão com um Dogma que este processo acabou de subir.
+// Sai daqui para `#tela-auth`, que é onde o veredito da chave é lido antes de o
+// plug entrar em Cage nenhum.
+//
+// A tela é a transcrição dos painéis A·01 e B·01 do comp v2: a ficha da
+// máquina, o diagrama dos três subsistemas, a Taxa de Sincronização e o registro
+// de carga. Do que o comp anima aqui, nada tem dado por trás — o `bootPct` que
+// sobe de 7 em 7 é um cronômetro de protótipo, e o registro de dez linhas
+// carimbadas descreve um stream de progresso que o protocolo não tem. O que
+// esta tela move é o que ela realmente sabe: os três blocos, durante a
+// tentativa de conexão, pelo tempo real dela.
 
 "use strict";
+
+/**
+ * O estado dos três blocos MAGI.
+ *
+ * O que eles relatam é **a tentativa de conexão**, e não saúde por subsistema —
+ * essa não existe em lugar nenhum do protocolo (§16 do inventário do comp), e é
+ * por isso que os três mudam juntos: o fato é um só. A marca de texto dentro de
+ * cada bloco é o que diz qual estado é qual, porque a cor sozinha não pode
+ * (`specs/05-cliente-tui.md`), e `specs/07-tema-evangelion.md` só admite
+ * movimento que diagnostique — este dura o tempo real da conexão e para com ela.
+ */
+function subsistemas(estado, marca) {
+  for (const id of ["sub-melchior", "sub-balthasar", "sub-casper"]) {
+    const alvo = $(id);
+    alvo.textContent = marca;
+    alvo.parentElement.dataset.estado = estado;
+  }
+}
 
 /** O convite lido do último `seele://` colado, se houver. */
 let convitePendente = null;
@@ -122,7 +148,7 @@ async function conectar(evento) {
   // Os três subsistemas reportam enquanto a conexão acontece. Duram o tempo
   // real dela: `specs/05-cliente-tui.md` chama animação decorativa que atrasa
   // o usuário de falha de design.
-  for (const id of ["sub-melchior", "sub-balthasar", "sub-casper"]) $(id).textContent = "…";
+  subsistemas("carga", "…");
 
   try {
     // A entrada traz duas coisas: a tela, e o que a chave deste Dogma acabou
@@ -139,21 +165,17 @@ async function conectar(evento) {
       joinSecret: convitePendente?.token ?? null,
     });
 
-    for (const id of ["sub-melchior", "sub-balthasar", "sub-casper"]) $(id).textContent = "ok";
+    subsistemas("ok", "ok");
 
-    $("tela-boot").hidden = true;
-    $("tela-sessao").hidden = false;
-    mostrarVeredito(veredito);
+    // Daqui em diante quem manda é `#tela-auth`: o veredito da chave é lido
+    // numa tela antes de o plug entrar em Cage nenhum, e a inserção mudou de
+    // lugar junto com ele. Enquanto isso não acontece, a sessão continua
+    // desenhada com o que o `connect` já devolveu — quem chegar nela não espera
+    // o primeiro tique do laço de snapshot.
     desenhar(snapshot);
-
-    // Entrar no primeiro Cage e abrir a primeira Linha é o que um cliente
-    // acabado de conectar deve fazer — chegar numa tela vazia é chegar sem
-    // saber o que fazer.
-    if (snapshot.cages.length > 0) await invoke("insert_plug", { cage: snapshot.cages[0].id });
-    if (snapshot.lines.length > 0) await invoke("open_line", { line: snapshot.lines[0].id });
-    await atualizar();
+    entrarNaAutenticacao(snapshot, veredito, $("campo-servidor").value.trim());
   } catch (falha) {
-    for (const id of ["sub-melchior", "sub-balthasar", "sub-casper"]) $(id).textContent = "·";
+    subsistemas("", "·");
     erro.hidden = false;
     erro.textContent = fraseDeErro(falha);
   } finally {

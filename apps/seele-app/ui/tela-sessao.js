@@ -447,6 +447,9 @@ async function ejetar() {
   // O convite não sobrevive à sessão que ele abriu: quem sai, digita outro
   // endereço e aperta INSERT mandaria o token do Dogma anterior ao novo.
   limparConvite();
+  // E os três blocos do boot voltam a apagar. Deixá-los acesos seria a tela de
+  // entrada afirmando uma conexão que acabou de ser desfeita.
+  subsistemas("", "·");
   // Quem acabou de sair de um Dogma tem que vê-lo na lista.
   await desenharVisitados();
 }

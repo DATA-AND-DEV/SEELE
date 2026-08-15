@@ -12,7 +12,12 @@
    acompanham toda Taxa de Sincronização. */
 @media (prefers-contrast: more) {
   .lista .piloto { color: var(--seele-osso); }
-  .rotulo, .painel-titulo { color: var(--seele-osso); }
+  /* `.coordenada` entra pela mesma razão que `.painel-titulo`: é o nome do
+     painel, e sem ele não dá para dizer qual painel é aquele. */
+  .rotulo, .painel-titulo, .coordenada { color: var(--seele-osso); }
+  /* O valor ausente sobe junto, ou o travessão que diz "não existe" some
+     justamente para quem pediu mais contraste — e a ausência vira silêncio. */
+  .ausente, .legenda-ausente { color: var(--seele-osso); }
 }
 
 /* Nenhuma animação carrega informação, então desligar todas não perde nada. */

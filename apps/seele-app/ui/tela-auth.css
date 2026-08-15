@@ -1,0 +1,196 @@
+/* SEELE · Entry Plug — a entrada em Dogma Central (`#tela-auth`).
+   Só o que esta tela usa. A coordenada de painel, o travessão de valor ausente,
+   `.campo`, `.rotulo` e `.botao` vêm de `base.css`, que carrega antes.
+
+   Transcrição dos painéis A·02, B·02 e C·02 do comp v2. As três colunas são as
+   do comp; o que mudou é o que entra nelas, e a diferença está no `index.html`:
+   metade do que o comp escreve aqui não tem dado por trás, e o que não tem
+   aparece com a moldura desenhada e o valor faltando. */
+
+.auth-grade {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(300px, 460px) minmax(220px, 1fr) 300px;
+  min-height: 0;
+}
+
+/* ---- A·02, a entrada ---- */
+
+.auth-entrada {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 16px;
+  padding: 48px 40px;
+  border-right: 1px solid var(--seele-linha);
+  overflow: auto;
+}
+
+.auth-corpo { display: flex; flex-direction: column; gap: 24px; }
+
+/* A cartela de padrão: bloco sólido de cor com o texto em negro, e nunca texto
+   colorido sobre fundo escuro. É a regra de inversão que o v2 endureceu (§12 do
+   inventário) — a mesma do polígono aceso, da pastilha de estado e do botão
+   primário, e a ênfase inversa da TUI dita em pixels.
+
+   O rótulo é escrito por extenso (`PADRÃO: AZUL`), então a cor não carrega a
+   informação sozinha; `specs/05-cliente-tui.md` não deixaria. */
+.cartela-padrao {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 14px 20px;
+  background: var(--seele-osso-apagado);
+}
+
+.cartela-padrao[data-padrao="Blue"] { background: var(--seele-padrao-azul); }
+.cartela-padrao[data-padrao="Orange"] { background: var(--seele-laranja-nerv); }
+
+.cartela-padrao-rotulo {
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 34px;
+  letter-spacing: 0.06em;
+  color: var(--seele-negro-absoluto);
+}
+
+.cartela-padrao-kanji {
+  font-weight: 900;
+  font-size: 15px;
+  color: var(--seele-negro-absoluto);
+}
+
+/* A nota pertence à cartela, e por isso encosta nela: os 24px de `gap` da
+   coluna menos 16 dão os 8px que o comp usa entre as duas. */
+.auth-nota {
+  margin: -16px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--seele-osso-apagado);
+}
+
+/* Os dois campos são leitura, e por isso `output` e não `input`: o endereço já
+   foi digitado no boot, e a chave local não atravessa a FFI. A moldura é a do
+   comp, inclusive a marca laranja à esquerda — que só o primeiro campo tem. */
+.campo-auth { gap: 8px; }
+
+.auth-valor {
+  padding: 12px;
+  background: var(--seele-negro-painel);
+  border: 1px solid var(--seele-linha);
+  border-left: 2px solid var(--seele-linha);
+  font-size: var(--seele-t-dado);
+  overflow-wrap: anywhere;
+}
+
+.auth-valor-marcado { border-left-color: var(--seele-laranja-nerv); }
+
+.botao-auth {
+  width: 100%;
+  padding: 14px;
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: var(--seele-t-secao);
+  letter-spacing: 0.2em;
+}
+
+/* O botão veste o padrão da sessão, como no comp. Enquanto não há sessão ele é
+   o laranja de `base.css`; ele não fica cinza junto com a cartela, porque um
+   botão apagado é um botão que parece desligado, e este é o único caminho para
+   fora desta tela. */
+.botao-auth[data-padrao="Blue"] {
+  background: var(--seele-padrao-azul);
+  border-color: var(--seele-padrao-azul);
+}
+
+/* ---- B·02, o aperto de mão ---- */
+
+.auth-aperto {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--seele-linha);
+}
+
+.auth-aperto > .coordenada,
+.auth-dogma > .coordenada {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--seele-linha);
+  flex: 0 0 auto;
+}
+
+.registro-linhas {
+  list-style: none;
+  margin: 0;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* `min-width: 0` e `overflow-wrap: anywhere` no texto, e não na linha: uma
+   impressão digital são 64 caracteres sem espaço nenhum onde quebrar, e sem
+   isto ela empurra a coluna inteira. Foi a correção que o v2 fez neste painel. */
+.registro-linha { display: flex; gap: 12px; min-width: 0; }
+
+.registro-hora { flex-shrink: 0; color: var(--seele-linha-forte); }
+
+.registro-texto { min-width: 0; overflow-wrap: anywhere; white-space: pre-line; }
+
+.registro-texto[data-tom="atencao"] { color: var(--seele-laranja-nerv); }
+.registro-texto[data-tom="apagado"] { color: var(--seele-osso-apagado); }
+.registro-texto[data-tom="azul"] { color: var(--seele-padrao-azul); }
+
+/* ---- C·02, a ficha do Dogma ---- */
+
+.auth-dogma {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--seele-negro-painel);
+}
+
+.auth-dogma-corpo {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+}
+
+.auth-dogma-nome {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 30px;
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+}
+
+.auth-dogma-sub {
+  margin: 0;
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: 0.16em;
+  color: var(--seele-osso-apagado);
+}
+
+.auth-pares {
+  margin: 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--seele-linha);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.auth-par { display: flex; justify-content: space-between; gap: 8px; }
+
+.auth-par dt { letter-spacing: 0.16em; }
+
+.auth-par dd { margin: 0; }
