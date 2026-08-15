@@ -940,8 +940,21 @@ fn translate(
                 cage: *left,
                 pilot: *pilot,
             }),
-        Event::PilotState(state) => {
-            (state.pilot != self_pilot).then_some(ServerMessage::PilotState(*state))
-        }
+        // Echoed back to the pilot it describes, unlike the two above.
+        //
+        // "They already know" is true of joining and leaving — the client asked
+        // for both — and false of everything in here. The Sync Ratio is measured
+        // by the *server*, from QUIC's own view of the path, and this broadcast
+        // is the only thing that carries it; `speaking` is decided by whether
+        // audio is actually arriving, which is likewise the server's to know.
+        // Filtering self out left every client's own roster row frozen at
+        // `Pilot::new`'s defaults for the life of the session: nought per cent,
+        // which by the three bands reads as critical, beside a telemetry bar
+        // measuring the same connection at a hundred.
+        //
+        // The two flags it also carries are the pilot's own, so echoing them
+        // costs nothing: the server is repeating what this client just said, and
+        // a client that folds them back in lands on the value it sent.
+        Event::PilotState(state) => Some(ServerMessage::PilotState(*state)),
     }
 }
