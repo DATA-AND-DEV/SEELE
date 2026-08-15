@@ -35,6 +35,11 @@ seele.db-shm
 # Acompanhantes do app, copiados pelo release a partir de target/.
 apps/seele-app/binaries/
 
+# Capturas de tela que o parceiro humano deixa na raiz para consulta. São dele,
+# e um `git add -A` distraído durante um merge já as versionou uma vez — 3,2 MB
+# de binário num commit de CSS.
+/Captura de Tela*.png
+
 # Ferramenta local: preferências da máquina e os worktrees que o agente abre
 # aqui dentro. Os worktrees são cópias de trabalho do próprio repositório — um
 # `git add -A` distraído versionaria o repositório dentro dele mesmo.
