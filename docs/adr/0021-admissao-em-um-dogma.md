@@ -28,7 +28,7 @@ Consequências:
 
 - Um Dogma exposto na internet tem como se fechar, o que antes não tinha.
 - O convite é o que torna uma URL compartilhável defensável: um token gasto que vaze depois não vale nada. Ver ADR 0006.
-- **Não resolve abuso de quem já entrou.** Um convidado legítimo pode inundar de mensagens; não há limitação de taxa (dívida registrada, `DisconnectReason::RateLimited` existe e nunca é enviado).
+- **Não resolve abuso de quem já entrou.** Um convidado legítimo pode inundar de mensagens; não há limitação de taxa (dívida registrada, `DisconnectReason::RateLimited` existe e nunca é enviado). — *Fechado depois, pelo ADR 0025: dois baldes de fichas, um por endereço antes de autenticar e outro por conexão depois, com aviso antes da porta.*
 - A senha em Argon2id custa alguns milissegundos por handshake, de propósito. Não é caminho quente.
 
 Custo de reverter: **baixo**. Um módulo, uma migração aditiva, e um campo opcional no `Hello` que Dogmas abertos ignoram.

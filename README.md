@@ -348,15 +348,20 @@ Verificado, com 489 testes automáticos:
   simulado
 - reinício do servidor sem expulsar quem já estava conectado
 - senha e convite fechando a porta; convite servindo a uma pessoa só
+- limitação de taxa nas duas pontas: quem bate à porta em laço é recusado com
+  motivo, e quem inunda de mensagens é avisado antes de ser derrubado
 - a mesma sessão retomada entre o `plug` e o app, com autor e horário
 - app desktop: 18 MB de binário, 112 MB de RSS, 191 ms até a janela
 
 Não verificado: **voz por microfone de verdade entre duas máquinas de verdade.**
 É a validação que falta, e `docs/teste-duas-maquinas.md` é o roteiro dela.
 
-O que está frouxo está escrito em `docs/pendencias.md`, com nome e motivo. As
-duas que mais importam: **não há limitação de taxa** (bloqueia expor à
-internet), e rajadas de mensagens grandes perdem entrega.
+O que está frouxo está escrito em `docs/pendencias.md`, com nome e motivo. A que
+mais importa hoje: **rajadas de mensagens grandes perdem entrega**. A limitação
+de taxa, que era a outra, fechou — ADR 0025 — e com ela caiu a última trava que
+segurava expor um Dogma à internet. O que continua faltando para isso é
+alcançar o anfitrião de fora (pendência #4), que é problema de rede e não de
+segurança.
 
 ---
 
