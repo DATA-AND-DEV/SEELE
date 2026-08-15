@@ -212,6 +212,11 @@ pub struct Dogma {
     pub slots: Arc<Mutex<Slots>>,
     /// Who is sitting in which Cage right now — gap G15.
     pub occupancy: Arc<Mutex<Occupancy>>,
+    /// Quantos apertos de mão cada endereço ainda pode gastar.
+    ///
+    /// Antes de autenticar, portanto sem identidade nenhuma para contar: a
+    /// chave é o endereço de origem. Ver [`crate::taxa`].
+    pub portaria: Arc<Mutex<crate::taxa::Portaria>>,
 }
 
 /// Starts the batching writer.

@@ -102,13 +102,43 @@ cobra em troca. Nada disso está implementado.
 
 **É o que mais separa o SEELE de "dá para usar com os amigos" hoje.**
 
-## 5 · Não há limitação de taxa
+## 5 · Fechada em 2026-08-15 · Não havia limitação de taxa
 
-`DisconnectReason::RateLimited` existe no protocolo e **nunca é enviado**. Um
-convidado legítimo pode inundar o Dogma de mensagens ou de handshakes.
+**O que era.** `DisconnectReason::RateLimited` existia no protocolo e **nunca
+era enviado**. Um convidado legítimo podia inundar o Dogma de mensagens, e
+qualquer um podia bater à porta em laço — cada tentativa comprando um Argon2id
+inteiro de CPU do anfitrião, que o ADR 0021 escolheu caro de propósito.
 
-Não atrapalha rede local. **Bloqueia expor à internet**, e é a dívida mais
-séria de segurança depois do ADR 0021.
+**O que ficou no lugar.** Um balde de fichas, em `crates/seele-server/src/taxa.rs`,
+consultado em três lugares. ADR 0025 conta as escolhas; em resumo:
+
+- **Antes de autenticar**, por endereço de origem, no primeiro instante de cada
+  conexão: trinta apertos de mão de rajada, trinta por minuto de reposição.
+  Estourar responde `RateLimited` **com motivo**, antes de o `Hello` ser lido.
+- **Depois de autenticar**, por conexão: sessenta quadros de controle de
+  rajada, vinte por segundo. O primeiro excedente rende `AlertReason::RateLimited`
+  — variante nova, porque derrubar calado é o que faz alguém achar que o
+  produto quebrou —, os seguintes são descartados, e ao ducentésimo a conexão
+  cai com `RateLimited`.
+- **A mídia** já tinha limite, em janela fixa de um segundo; passou a usar o
+  mesmo balde, e com isso perdeu a borda que deixava passar o dobro da taxa na
+  virada da janela.
+
+**Como se sabe que não é enfeite.**
+`crates/seele-conformance/tests/limite_de_taxa.rs` cobra as duas pontas contra
+um Dogma de verdade, e o mecanismo tem teste próprio com o tempo entrando por
+parâmetro — nenhum `sleep`, nada dependendo de a máquina estar desocupada. Cada
+teste foi visto reprovar com o código sabotado antes de ser dado por bom: o
+balde que nunca esvazia, a portaria que sempre deixa passar, o vigia que só
+passa, o que nunca avisa, o que nunca derruba, e o balde reescrito de volta
+como janela fixa.
+
+**O que continua de fora.** O balde é consultado depois de o QUIC ter feito o
+aperto de mão TLS: quem só abre conexões e não fala ainda gasta uma assinatura
+por tentativa. Fechar isso é `Incoming::refuse()` do quinn, antes de qualquer
+cripto, e tem o custo de recusar sem conseguir dizer por quê. Fica anotado no
+ADR 0025 como o degrau seguinte, para o dia em que um Dogma for de fato
+inundado.
 
 ## 6 · Apelido é validado só por tamanho
 

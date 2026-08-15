@@ -19,7 +19,7 @@
 //! routing trivially parallel." No `Mutex` appears in this module.
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use seele_proto::ids::{CageId, PilotId, Ssrc};
 use seele_proto::transport::MAX_FRAMES_PER_SECOND;
@@ -87,10 +87,15 @@ struct Member {
     ssrc: Ssrc,
     may_speak: bool,
     outbound: mpsc::Sender<Vec<u8>>,
-    /// Start of the current rate-limiting window.
-    window_started: Instant,
-    /// Frames seen in the current window.
-    window_frames: u32,
+    /// This sender's media budget.
+    ///
+    /// A token bucket rather than the fixed one-second window this used to
+    /// keep: a fixed window admits the whole limit at the end of one window and
+    /// the whole limit at the start of the next — twice the contracted rate,
+    /// and always at the same instant of the clock, which is the instant an
+    /// attacker synchronises with. `crate::taxa` explains the choice once for
+    /// the three places that limit anything.
+    orcamento: crate::taxa::Balde,
 }
 
 /// The state of one voice channel.
@@ -142,6 +147,15 @@ impl Cage {
 
     /// Applies one command.
     pub fn handle(&mut self, command: CageCommand) {
+        self.handle_at(command, Instant::now());
+    }
+
+    /// Applies one command as of a given instant.
+    ///
+    /// The clock is a parameter so the rate limit can be tested at the edge —
+    /// what happens at the last frame of the budget — without a `sleep` and
+    /// without depending on how busy the machine is.
+    pub fn handle_at(&mut self, command: CageCommand, now: Instant) {
         match command {
             CageCommand::Join {
                 pilot,
@@ -156,8 +170,11 @@ impl Cage {
                         ssrc,
                         may_speak,
                         outbound,
-                        window_started: Instant::now(),
-                        window_frames: 0,
+                        orcamento: crate::taxa::Balde::novo(
+                            MAX_FRAMES_PER_SECOND,
+                            f64::from(MAX_FRAMES_PER_SECOND),
+                            now,
+                        ),
                     },
                 );
             }
@@ -166,7 +183,7 @@ impl Cage {
                     self.by_ssrc.remove(&member.ssrc);
                 }
             }
-            CageCommand::Datagram { from, bytes } => self.forward(from, &bytes),
+            CageCommand::Datagram { from, bytes } => self.forward(from, &bytes, now),
         }
     }
 
@@ -184,7 +201,7 @@ impl Cage {
     /// be checked against each other. Without this line a pilot could put
     /// somebody else's `ssrc` in their own datagrams and every listener would
     /// attribute the audio to the wrong person.
-    fn forward(&mut self, from: Ssrc, bytes: &[u8]) {
+    fn forward(&mut self, from: Ssrc, bytes: &[u8], now: Instant) {
         let Some(pilot) = self.by_ssrc.get(&from).copied() else {
             self.drops.not_a_member += 1;
             return;
@@ -211,14 +228,11 @@ impl Cage {
         }
 
         // specs/04-servidor-seele.md: a per-sender frames-per-second limit, so a
-        // malicious client cannot saturate the Cage.
-        let now = Instant::now();
-        if now.duration_since(member.window_started) >= Duration::from_secs(1) {
-            member.window_started = now;
-            member.window_frames = 0;
-        }
-        member.window_frames += 1;
-        if member.window_frames > MAX_FRAMES_PER_SECOND {
+        // malicious client cannot saturate the Cage. Dropping rather than
+        // disconnecting, as the spec says: audio that arrives too fast is a
+        // stuttering sender far more often than an attack, and cutting somebody
+        // off mid-sentence for it would be the wrong trade.
+        if !member.orcamento.tentar(now) {
             self.drops.rate_limited += 1;
             return;
         }
@@ -401,11 +415,17 @@ mod tests {
         let _alice = member(&mut cage, 1, 100, true);
         let mut bob = member(&mut cage, 2, 200, true);
 
+        // One instant for the whole flood: the budget must come from elapsed
+        // time, not from how long the loop took to run.
+        let now = Instant::now();
         for seq in 0..(MAX_FRAMES_PER_SECOND * 3) {
-            cage.handle(CageCommand::Datagram {
-                from: Ssrc(100),
-                bytes: datagram(100, seq as u16),
-            });
+            cage.handle_at(
+                CageCommand::Datagram {
+                    from: Ssrc(100),
+                    bytes: datagram(100, seq as u16),
+                },
+                now,
+            );
         }
 
         let received = std::iter::from_fn(|| bob.try_recv().ok()).count();
@@ -424,17 +444,60 @@ mod tests {
         let _alice = member(&mut cage, 1, 100, true);
         let mut bob = member(&mut cage, 2, 200, true);
 
+        let start = Instant::now();
         for seq in 0..seele_proto::transport::NOMINAL_FRAMES_PER_SECOND {
-            cage.handle(CageCommand::Datagram {
-                from: Ssrc(100),
-                bytes: datagram(100, seq as u16),
-            });
+            // Twenty milliseconds apart, which is what a 20 ms frame is.
+            cage.handle_at(
+                CageCommand::Datagram {
+                    from: Ssrc(100),
+                    bytes: datagram(100, seq as u16),
+                },
+                start + std::time::Duration::from_millis(u64::from(seq) * 20),
+            );
         }
 
         assert_eq!(cage.drops().rate_limited, 0);
         assert_eq!(
             std::iter::from_fn(|| bob.try_recv().ok()).count(),
             seele_proto::transport::NOMINAL_FRAMES_PER_SECOND as usize
+        );
+    }
+
+    #[test]
+    fn the_limit_has_no_edge_to_synchronise_with() {
+        // What the fixed one-second window used to allow: the whole budget at
+        // the end of one window and the whole budget at the start of the next,
+        // twice the contracted rate inside a couple of milliseconds — and
+        // always at the same instant of the clock, which is the instant an
+        // attacker lines up with.
+        let mut cage = Cage::new(CageId(1));
+        let _alice = member(&mut cage, 1, 100, true);
+        let mut bob = member(&mut cage, 2, 200, true);
+
+        let start = Instant::now();
+        let edge = start + std::time::Duration::from_millis(999);
+        let just_after = start + std::time::Duration::from_millis(1_001);
+        for (seq, when) in std::iter::repeat_n(edge, MAX_FRAMES_PER_SECOND as usize)
+            .chain(std::iter::repeat_n(
+                just_after,
+                MAX_FRAMES_PER_SECOND as usize,
+            ))
+            .enumerate()
+        {
+            cage.handle_at(
+                CageCommand::Datagram {
+                    from: Ssrc(100),
+                    bytes: datagram(100, seq as u16),
+                },
+                when,
+            );
+        }
+
+        let received = std::iter::from_fn(|| bob.try_recv().ok()).count();
+        assert!(
+            received <= MAX_FRAMES_PER_SECOND as usize + 2,
+            "{received} frames passed across the window edge, and the limit is \
+             {MAX_FRAMES_PER_SECOND}/s"
         );
     }
 

@@ -29,6 +29,7 @@ pub fn alert(reason: AlertReason) -> &'static str {
         AlertReason::PermissionDenied => "PERMISSÃO NEGADA",
         AlertReason::CageFull => "CAGE LOTADO",
         AlertReason::OperatorNotice => "AVISO DO OPERADOR",
+        AlertReason::RateLimited => "VOCÊ ESTÁ FALANDO RÁPIDO DEMAIS PARA O DOGMA",
     }
 }
 
@@ -85,7 +86,7 @@ pub fn worth_retrying(reason: DisconnectReason) -> bool {
 mod tests {
     use super::*;
 
-    const ALERTS: [AlertReason; 7] = [
+    const ALERTS: [AlertReason; 8] = [
         AlertReason::Mentioned,
         AlertReason::SubsystemChanged,
         AlertReason::SyncDegraded,
@@ -93,6 +94,7 @@ mod tests {
         AlertReason::PermissionDenied,
         AlertReason::CageFull,
         AlertReason::OperatorNotice,
+        AlertReason::RateLimited,
     ];
 
     const DISCONNECTS: [DisconnectReason; 11] = [

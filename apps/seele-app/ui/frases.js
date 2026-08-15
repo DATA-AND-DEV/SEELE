@@ -40,6 +40,10 @@ const AVISOS = {
   PermissionDenied: "PERMISSÃO NEGADA",
   CageFull: "CAGE LOTADO",
   OperatorNotice: "AVISO DO OPERADOR",
+  // O aviso que o Dogma manda **antes** de derrubar. É o único da lista que
+  // pede uma mudança de comportamento de quem o lê, e por isso ele existe:
+  // derrubar sem ter avisado é o que faz o produto parecer quebrado.
+  RateLimited: "VOCÊ ESTÁ FALANDO RÁPIDO DEMAIS PARA O DOGMA",
 };
 
 /**

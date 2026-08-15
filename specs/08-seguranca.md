@@ -46,6 +46,8 @@ Independente da escolha:
 - Mensagem de falha uniforme (não revelar se a conta existe).
 - Sessões com expiração e revogação server-side.
 
+**Limitação de taxa decidida em M5** (ADR 0025), em balde de fichas e não em janela fixa. Antes de autenticar, por endereço de origem: trinta apertos de mão de rajada, trinta por minuto, consultados antes de o `Hello` ser lido — é o que impede que cada pacote de quem varre a rede compre um Argon2id de CPU do anfitrião. Depois de autenticar, por **conexão** e não por identidade: a mesma pessoa em duas máquinas são duas conexões legítimas, e quem abre conexões em série para diluir o limite esbarra antes no balde por endereço. Sessenta quadros de controle de rajada, vinte por segundo; o primeiro excedente rende `AlertReason::RateLimited` e o ducentésimo derruba com `DisconnectReason::RateLimited` — avisar antes de derrubar, porque derrubar calado é como um produto passa a parecer quebrado. O limite de quadros de mídia da tabela de ameaças acima usa o mesmo balde, descartando em vez de desconectar.
+
 ## Autorização
 
 Toda ação é verificada no servidor, sempre, mesmo que o cliente já esconda o botão. A interface esconder é conveniência; o servidor negar é a segurança. Cobrir isso com testes explícitos: para cada permissão, um teste de cliente sem ela tentando a ação.

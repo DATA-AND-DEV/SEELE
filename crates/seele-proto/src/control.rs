@@ -343,6 +343,17 @@ pub enum AlertReason {
     CageFull,
     /// The operator is saying something.
     OperatorNotice,
+    /// The client is sending control frames faster than its budget.
+    ///
+    /// Sent **before** [`DisconnectReason::RateLimited`], not instead of it: a
+    /// client that is merely badly written gets told, and only one that keeps
+    /// going after being told is disconnected. Dropping somebody with no
+    /// explanation is how a product comes to look broken.
+    ///
+    /// Appended last on purpose. A build one protocol version older does not
+    /// know this variant and fails to decode the frame — which costs a
+    /// connection that was already exceeding its budget, and nothing else.
+    RateLimited,
 }
 
 /// Client to server.
