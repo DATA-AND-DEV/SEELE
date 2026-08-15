@@ -17,6 +17,38 @@ fn repo_root() -> PathBuf {
         .join("..")
 }
 
+/// Every stylesheet the window loads except the two that declare rather than
+/// paint, concatenated.
+///
+/// It is a directory listing and not a list of names on purpose. The stylesheet
+/// is six files now, one per screen plus a shared layer, and four more screens
+/// are on the way: a rule against colour literals that has to be told about each
+/// new file is a rule that stops holding on the first file somebody forgets.
+/// `tokens.css` is the one place a literal belongs, and `fontes.css` declares
+/// faces and paints nothing.
+fn stylesheets() -> String {
+    let ui = repo_root().join("apps/seele-app/ui");
+    let entries = std::fs::read_dir(&ui).expect("apps/seele-app/ui must exist");
+    let mut sheets: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "css"))
+        .filter(|path| {
+            !matches!(
+                path.file_name().and_then(|name| name.to_str()),
+                Some("tokens.css") | Some("fontes.css")
+            )
+        })
+        .collect();
+    sheets.sort();
+    assert!(!sheets.is_empty(), "ui/ ships no stylesheet at all");
+    sheets
+        .iter()
+        .map(|path| std::fs::read_to_string(path).expect("the stylesheet must exist"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[test]
 fn the_served_tokens_are_the_frozen_tokens() {
     let root = repo_root();
@@ -38,8 +70,7 @@ fn the_stylesheet_uses_no_colour_the_tokens_do_not_define() {
     // specs/07-tema-evangelion.md fixes the palette, and ADR 0014 makes v2
     // canonical. A hex literal in the stylesheet is a colour that exists in one
     // of the two clients and not the other.
-    let css = std::fs::read_to_string(repo_root().join("apps/seele-app/ui/seele.css"))
-        .expect("the stylesheet must exist");
+    let css = stylesheets();
 
     let literals: Vec<&str> = css
         .lines()
@@ -112,7 +143,7 @@ fn opacity_of(css: &str, selector: &str) -> f64 {
         .nth(1)
         .and_then(|rest| rest.split('}').next())
     else {
-        panic!("seele.css has no rule for `{selector}`");
+        panic!("no stylesheet in ui/ has a rule for `{selector}`");
     };
     let Some(value) = rule.split("opacity:").nth(1).and_then(|rest| {
         rest.split(';')
@@ -142,8 +173,7 @@ fn the_scanline_does_not_take_a_token_below_the_contrast_it_already_had() {
     let root = repo_root();
     let tokens = std::fs::read_to_string(root.join("apps/seele-app/ui/tokens.css"))
         .expect("the tokens the window loads must exist");
-    let css = std::fs::read_to_string(root.join("apps/seele-app/ui/seele.css"))
-        .expect("the stylesheet must exist");
+    let css = stylesheets();
 
     let veil = opacity_of(&css, ".varredura");
     let black = token(&tokens, "negro-absoluto");

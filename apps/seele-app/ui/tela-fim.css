@@ -1,0 +1,31 @@
+/* SEELE · Entry Plug — a tela de sessão encerrada (`#tela-fim`).
+   Duas regras. O cartão é o mesmo da entrada e vive em `base.css`; o que muda é
+   a cartela vermelha no lugar da assinatura e o motivo escrito abaixo dela. */
+
+.boot-marca.fim {
+  color: var(--seele-vermelho-alerta);
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  letter-spacing: var(--seele-tracking-cartela);
+  font-size: 32px;
+  line-height: 32px;
+  display: block;
+}
+
+/* Mesmo tratamento do `.erro` da entrada — `pre-line` e `overflow-wrap:
+   anywhere` —, e a mesma razão: um motivo de queda pode trazer impressão
+   digital, que são 64 caracteres sem espaço nenhum onde quebrar. Osso e não
+   vermelho: aqui a sessão já acabou, e a cor de alerta é reservada ao que
+   impede de entrar (`tokens.css:19`).
+
+   Era um par de regras — `.erro, .fim-motivo` e depois `.fim-motivo` — e a
+   segunda só existia para desfazer duas declarações da primeira. Separadas as
+   duas telas, o valor resolvido é este: `margin: 16px 0 0` seguido de
+   `margin-bottom: 32px` é `margin: 16px 0 32px`, e o vermelho nunca chegava a
+   pintar nada. */
+.fim-motivo {
+  margin: 16px 0 32px;
+  color: var(--seele-osso);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}

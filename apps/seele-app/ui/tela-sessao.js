@@ -1,21 +1,11 @@
-// SEELE · Entry Plug — a casca desktop.
+// SEELE · Entry Plug — a tela de operação (`#tela-sessao`).
 //
-// Este arquivo desenha e nada mais. `specs/06-clientes-gui.md`: "Nenhuma lógica
-// de protocolo em JavaScript. Se o frontend precisa saber o que é um `ssrc`,
-// algo está errado." Nada aqui sabe o que é um ssrc, o que faz uma Taxa de
-// Sincronização ser crítica, ou quando reconectar. Tudo isso chega decidido
-// dentro do snapshot.
-//
-// O padrão é o mesmo de `seele-tui::view`: projetar o snapshot inteiro a cada
-// mudança. Não há estado derivado nem cache — a tela é função de um valor que
-// chega pronto. ADR 0019 explica por que isso dispensa framework.
+// O projetor: cada `desenhar*` recebe o snapshot inteiro e escreve a tela, sem
+// estado derivado. Também a busca, a faixa de veredito, a bateria interna, o
+// push-to-talk e a caixa de convite de quem hospeda — tudo que só existe
+// enquanto há sessão.
 
 "use strict";
-
-const { invoke } = window.__TAURI__.core;
-const { listen } = window.__TAURI__.event;
-
-const $ = (id) => document.getElementById(id);
 
 /** O último snapshot desenhado, para não redesenhar o que não mudou. */
 let desenhado = null;
@@ -25,8 +15,6 @@ let linhaAberta = null;
 let falando = false;
 /** Volume por apelido, para o deslizante não pular de volta a cada redesenho. */
 const volumes = new Map();
-/** O convite lido do último `seele://` colado, se houver. */
-let convitePendente = null;
 /**
  * Os casamentos da busca corrente, agrupados por índice de mensagem.
  *
@@ -45,125 +33,7 @@ let casamentosPorMensagem = new Map();
  */
 let ocorrenciaAtual = null;
 
-// ---------------------------------------------------------------- utilidades
-
-/**
- * O horário local de um instante do servidor.
- *
- * A FFI entrega **segundos** — a unidade está no nome do campo porque errá-la
- * já desenhou toda mensagem como 1970 uma vez.
- */
-function relogio(segundos) {
-  if (!segundos) return "--:--";
-  const quando = new Date(segundos * 1000);
-  return quando.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-/**
- * Quanto tempo faz, em palavras curtas.
- *
- * A data exata não ajuda a escolher para onde voltar; "ontem" ajuda.
- */
-function quando(segundos) {
-  if (!segundos) return "—";
-  const dias = Math.floor((Date.now() / 1000 - segundos) / 86400);
-  if (dias <= 0) return "hoje";
-  if (dias === 1) return "ontem";
-  return `${dias} dias`;
-}
-
-/**
- * A marca de bloco de uma faixa da Taxa de Sincronização.
- *
- * `specs/05-cliente-tui.md`: nenhuma informação transmitida só por cor. A marca
- * é a metade que sobrevive sem cor nenhuma, e é desenhada em toda paleta — uma
- * marca que só aparece quando piora é uma marca que ninguém aprendeu a ler.
- */
-function marcaSync(faixa) {
-  return { Nominal: "█", Acceptable: "▓", Degraded: "▒", Critical: "░" }[faixa] ?? "░";
-}
-
-/** Substitui os filhos de um elemento por uma lista nova. */
-function repovoar(pai, filhos) {
-  pai.replaceChildren(...filhos);
-}
-
-function elemento(tag, classe, texto) {
-  const nodo = document.createElement(tag);
-  if (classe) nodo.className = classe;
-  if (texto !== undefined) nodo.textContent = texto;
-  return nodo;
-}
-
-/**
- * A frase para um motivo de fim de sessão.
- *
- * O protocolo carrega enums justamente para que cada casca escreva as suas
- * (`specs/02-protocolo.md`). Este é o mesmo conjunto de frases do `plug`, em
- * português, porque é o mesmo produto.
- */
-const MOTIVOS = {
-  Incompatible: "VERSÃO INCOMPATÍVEL COM ESTE DOGMA",
-  CredentialRejected: "CREDENCIAL RECUSADA",
-  HandshakeTimeout: "TEMPO ESGOTADO NA SINCRONIZAÇÃO INICIAL",
-  Kicked: "DESCONECTADO POR UM OPERADOR",
-  Banned: "ACESSO BARRADO POR UM OPERADOR",
-  DogmaFull: "DOGMA LOTADO",
-  ScheduledMaintenance: "MANUTENÇÃO PROGRAMADA",
-  ServerShuttingDown: "O DOGMA ESTÁ ENCERRANDO",
-  Timeout: "ENLACE PERDIDO",
-  ProtocolViolation: "PROTOCOLO VIOLADO",
-  RateLimited: "LIMITE DE MENSAGENS EXCEDIDO",
-  LinkLost: "ENLACE PERDIDO",
-};
-
-const AVISOS = {
-  Mentioned: "VOCÊ FOI CHAMADO",
-  SubsystemChanged: "UM SUBSISTEMA MUDOU DE ESTADO",
-  SyncDegraded: "TAXA DE SINCRONIZAÇÃO EM QUEDA",
-  CageEntryRefused: "ENTRADA NO CAGE RECUSADA",
-  PermissionDenied: "PERMISSÃO NEGADA",
-  CageFull: "CAGE LOTADO",
-  OperatorNotice: "AVISO DO OPERADOR",
-};
-
-/**
- * A frase para uma falha de conexão.
- *
- * O erro chega como enum — nunca como texto — e é aqui que ele vira uma frase.
- * Um `PinChanged` carrega as duas impressões digitais porque a coisa toda é um
- * humano compará-las (ADR 0003).
- */
-function fraseDeErro(erro) {
-  if (typeof erro === "string") return FRASES[erro] ?? erro;
-  if (erro && typeof erro === "object") {
-    if (erro.PinChanged) {
-      return (
-        "A CHAVE DO SERVIDOR MUDOU.\n" +
-        `fixada:   ${erro.PinChanged.pinned}\n` +
-        `ofertada: ${erro.PinChanged.offered}\n` +
-        "Confirme por outro canal antes de continuar."
-      );
-    }
-    // O convite prometeu uma chave e o Dogma ofertou outra. Não é troca de
-    // chave — nada estava fixado aqui — então a frase acusa o link, e não a
-    // continuidade do servidor. A conexão já caiu quando isto chega: o core
-    // derruba e desfaz o pin, e é por isso que este caso é `#boot-erro` e não
-    // o veredito laranja da sessão.
-    if (erro.InviteMismatch) {
-      return (
-        "ESTE NÃO É O DOGMA DO CONVITE.\n" +
-        `esperada: ${erro.InviteMismatch.expected}\n` +
-        `ofertada: ${erro.InviteMismatch.offered}\n` +
-        "Confirme o link com quem o mandou."
-      );
-    }
-    if (erro.Refused) {
-      return MOTIVOS[erro.Refused.reason] ?? "SESSÃO RECUSADA";
-    }
-  }
-  return FRASES[erro] ?? "FALHA DESCONHECIDA";
-}
+// ------------------------------------------------------------------ veredito
 
 /**
  * A frase de um veredito de identidade, ou `null` quando não há o que dizer.
@@ -221,38 +91,6 @@ function mostrarVeredito(veredito) {
   $("veredito").hidden = frase === null;
   $("veredito-texto").textContent = frase ?? "";
 }
-
-/**
- * Enum → frase. A fronteira erro→texto do produto fica aqui, e é por isso que
- * nenhuma mensagem para gente é escrita em Rust.
- */
-const FRASES = {
-    NotConnected: "SEM CONEXÃO",
-    AlreadyConnected: "JÁ HÁ UMA SESSÃO ABERTA",
-    UnresolvableHost: "NÃO CONSEGUI RESOLVER ESSE ENDEREÇO",
-    Unreachable: "NADA RESPONDEU NESSE ENDEREÇO",
-    HandshakeTimeout: "TEMPO ESGOTADO NA SINCRONIZAÇÃO INICIAL",
-    IdentityUnavailable: "NÃO CONSEGUI LER OU GRAVAR A IDENTIDADE EM DISCO",
-    NoAudioDevice: "SEM DISPOSITIVO DE ÁUDIO",
-    UnknownPilot: "NÃO CONHEÇO ESSE PILOTO",
-    UnknownChannel: "NÃO CONHEÇO ESSE CANAL",
-    LinkLost: "ENLACE PERDIDO",
-
-    // Por que um texto colado não é um convite. O Rust devolve o nome da
-    // falha; a frase é daqui, como todas as outras.
-    EsquemaDesconhecido: "ISTO NÃO PARECE UM CONVITE SEELE",
-    SemEndereco: "ESTE CONVITE NÃO TRAZ ENDEREÇO NENHUM",
-    EnderecoInvalido: "O ENDEREÇO DENTRO DESTE CONVITE NÃO É UM ENDEREÇO",
-    ImpressaoDigitalInvalida: "ESTE CONVITE CHEGOU CORTADO OU ADULTERADO",
-    TokenInvalido: "O CONVITE DENTRO DESTE LINK NÃO É UM CONVITE",
-    CageInvalido: "O CAGE DESTE CONVITE NÃO É UM NÚMERO",
-
-    // Hospedar aqui dentro.
-    JaHospedando: "JÁ ESTOU HOSPEDANDO NESTA JANELA",
-    PortaOcupada:
-      "A PORTA 8383 JÁ ESTÁ EM USO.\nQuase sempre é outro SEELE aberto — feche o outro e tente de novo.",
-    NaoSubiu: "NÃO CONSEGUI SUBIR O DOGMA AQUI",
-};
 
 // ------------------------------------------------------------------- desenho
 
@@ -520,174 +358,7 @@ function desenharEnlace(link) {
   document.body.classList.add("na-bateria");
 }
 
-function mostrarFim(motivo) {
-  $("tela-sessao").hidden = true;
-  $("tela-boot").hidden = true;
-  $("tela-fim").hidden = false;
-  $("fim-motivo").textContent = MOTIVOS[motivo] ?? "ENLACE ENCERRADO";
-}
-
 // --------------------------------------------------------------------- ações
-
-async function atualizar() {
-  try {
-    desenhar(await invoke("snapshot"));
-  } catch (erro) {
-    // Sem sessão. Não é uma falha: é o estado antes de conectar e depois de sair.
-    if (erro !== "NotConnected") console.warn("snapshot:", erro);
-  }
-}
-
-/**
- * A lista de Dogmas onde este piloto já esteve.
- *
- * Quem já entrou uma vez não deveria ter que redigitar um endereço IP. A lista
- * chega pronta do Rust, do mais recente para o mais antigo — a única ordem útil
- * numa lista de atalhos.
- */
-async function desenharVisitados() {
-  const lista = await invoke("conhecidos");
-  const secao = $("visitados");
-  // Sem visitados, a seção some inteira: a tela volta a ser exatamente a de
-  // antes desta seção existir, e o estado vazio não piora.
-  secao.hidden = lista.length === 0;
-  if (lista.length === 0) return;
-
-  repovoar(
-    $("lista-visitados"),
-    lista.map((conhecido) => {
-      const linha = elemento("li", "visitado");
-      const ir = elemento("button", "visitado-ir", conhecido.alvo);
-      ir.type = "button";
-      ir.title = `entrar em ${conhecido.alvo} como ${conhecido.apelido}`;
-      ir.addEventListener("click", () => {
-        $("campo-servidor").value = conhecido.alvo;
-        $("campo-apelido").value = conhecido.apelido;
-        // Escolher da lista não é usar o convite colado.
-        limparConvite();
-        conectar();
-      });
-      const esquecer = elemento("button", "botao-fantasma", "esquecer");
-      esquecer.type = "button";
-      esquecer.addEventListener("click", async () => {
-        try {
-          await invoke("esquecer", { alvo: conhecido.alvo });
-        } catch (falha) {
-          // A lista não pôde ser reescrita — disco cheio, permissão. A linha
-          // continua ali, e dizer isso é melhor que uma promessa recusada em
-          // silêncio e uma linha que teima em voltar.
-          console.warn("esquecer:", falha);
-          const erro = $("boot-erro");
-          erro.hidden = false;
-          erro.textContent = "NÃO CONSEGUI REESCREVER A LISTA DE VISITADOS";
-        }
-        await desenharVisitados();
-      });
-      linha.append(
-        ir,
-        elemento("span", "visitado-apelido", conhecido.apelido),
-        elemento("span", "visitado-quando", quando(conhecido.visto_em)),
-        esquecer,
-      );
-      return linha;
-    }),
-  );
-}
-
-/**
- * Lê o `seele://` colado no campo CONVITE.
- *
- * Quem lê o link é o Rust: um segundo analisador aqui seria um segundo conjunto
- * de casos de borda para discordar do primeiro. A confirmação de identidade que
- * o link carrega fica lá também, guardada até o `connect` conferi-la — o que
- * volta para cá é o veredito, depois, e nunca o valor a comparar.
- */
-async function lerConvite() {
-  const campo = $("campo-convite");
-  const link = campo.value.trim();
-  const erro = $("boot-erro");
-  if (link === "") {
-    limparConvite();
-    return;
-  }
-
-  try {
-    const convite = await invoke("analisar_convite", { link });
-    $("campo-servidor").value = convite.alvo;
-    convitePendente = convite;
-    erro.hidden = true;
-  } catch (falha) {
-    // O resto do formulário fica intacto: quem colou errado não perde o que já
-    // tinha digitado nos outros campos.
-    convitePendente = null;
-    // Revelar antes de escrever: `#boot-erro` é `role="alert"`, e um alerta
-    // escrito enquanto ainda está escondido não é anunciado por leitor de tela.
-    erro.hidden = false;
-    erro.textContent = fraseDeErro(falha);
-  }
-}
-
-/**
- * Esquece o convite colado, campo e tudo.
- *
- * O token vale para o Dogma daquele link. Deixá-lo para trás numa troca de
- * endereço manda a credencial de um servidor para outro, que a recusa — e a
- * recusa aparece como "credencial rejeitada" num Dogma que nunca pediu
- * credencial nenhuma.
- */
-function limparConvite() {
-  $("campo-convite").value = "";
-  convitePendente = null;
-}
-
-async function conectar(evento) {
-  evento?.preventDefault();
-  const botao = $("botao-conectar");
-  const erro = $("boot-erro");
-
-  botao.disabled = true;
-  erro.hidden = true;
-  // Os três subsistemas reportam enquanto a conexão acontece. Duram o tempo
-  // real dela: `specs/05-cliente-tui.md` chama animação decorativa que atrasa
-  // o usuário de falha de design.
-  for (const id of ["sub-melchior", "sub-balthasar", "sub-casper"]) $(id).textContent = "…";
-
-  try {
-    // A entrada traz duas coisas: a tela, e o que a chave deste Dogma acabou
-    // de ser. A segunda vem do mesmo `connect` porque é lá que ela é decidida —
-    // um ouvinte inscrito depois chegaria sempre tarde.
-    const { snapshot, veredito } = await invoke("connect", {
-      server: $("campo-servidor").value.trim(),
-      nickname: $("campo-apelido").value.trim(),
-      audio: $("campo-audio").checked,
-      // O token do convite, quando o link trouxe um. `join_secret` do outro
-      // lado: a ponte do Tauri converte para camelCase. A confirmação de
-      // identidade do mesmo link não passa por aqui: ela ficou no Rust, que é
-      // quem confere.
-      joinSecret: convitePendente?.token ?? null,
-    });
-
-    for (const id of ["sub-melchior", "sub-balthasar", "sub-casper"]) $(id).textContent = "ok";
-
-    $("tela-boot").hidden = true;
-    $("tela-sessao").hidden = false;
-    mostrarVeredito(veredito);
-    desenhar(snapshot);
-
-    // Entrar no primeiro Cage e abrir a primeira Linha é o que um cliente
-    // acabado de conectar deve fazer — chegar numa tela vazia é chegar sem
-    // saber o que fazer.
-    if (snapshot.cages.length > 0) await invoke("insert_plug", { cage: snapshot.cages[0].id });
-    if (snapshot.lines.length > 0) await invoke("open_line", { line: snapshot.lines[0].id });
-    await atualizar();
-  } catch (falha) {
-    for (const id of ["sub-melchior", "sub-balthasar", "sub-casper"]) $(id).textContent = "·";
-    erro.hidden = false;
-    erro.textContent = fraseDeErro(falha);
-  } finally {
-    botao.disabled = false;
-  }
-}
 
 async function enviar(evento) {
   evento.preventDefault();
@@ -750,9 +421,33 @@ function segurarFala(segurando) {
   invoke("set_talking", { talking: segurando }).catch(() => {});
 }
 
-function digitando() {
-  const ativo = document.activeElement;
-  return ativo && (ativo.tagName === "INPUT" || ativo.tagName === "TEXTAREA");
+/** Ejeta e volta para a tela de entrada, sem fechar o programa. */
+async function ejetar() {
+  await invoke("disconnect");
+  $("tela-sessao").hidden = true;
+  $("tela-fim").hidden = true;
+  $("tela-boot").hidden = false;
+  $("convite").hidden = true;
+  $("bateria").hidden = true;
+  // O veredito era sobre a chave daquela sessão. Deixá-lo aceso sobre a
+  // próxima seria dizer de um Dogma o que se apurou de outro.
+  mostrarVeredito(null);
+  document.body.classList.remove("na-bateria");
+  desenhado = null;
+  linhaAberta = null;
+  await encerrarBusca();
+  // O convite não sobrevive à sessão que ele abriu: quem sai, digita outro
+  // endereço e aperta INSERT mandaria o token do Dogma anterior ao novo.
+  limparConvite();
+  // Quem acabou de sair de um Dogma tem que vê-lo na lista.
+  await desenharVisitados();
+}
+
+/** Zera o campo, o cursor no Rust e o realce. */
+async function encerrarBusca() {
+  $("campo-busca").value = "";
+  await invoke("busca_limpar");
+  limparBusca();
 }
 
 // --------------------------------------------------------------------- busca
@@ -848,18 +543,6 @@ async function refazerBusca() {
 
 // ------------------------------------------------------------------- ligação
 
-$("form-conectar").addEventListener("submit", conectar);
-$("campo-convite").addEventListener("change", lerConvite);
-// `paste` dispara antes de o valor entrar no campo; o tique seguinte já o tem.
-$("campo-convite").addEventListener("paste", () => setTimeout(lerConvite, 0));
-
-// Digitar outro endereço à mão desfaz o convite. `lerConvite` escreve neste
-// campo por código, e atribuição não dispara `input` — só o teclado chega aqui.
-$("campo-servidor").addEventListener("input", limparConvite);
-
-// A tela de entrada é a primeira coisa que aparece, e a lista faz parte dela.
-desenharVisitados().catch((falha) => console.warn("conhecidos:", falha));
-
 $("form-busca").addEventListener("submit", (evento) => evento.preventDefault());
 
 $("campo-busca").addEventListener("input", refazerBusca);
@@ -913,35 +596,6 @@ $("botao-falar").addEventListener("pointerdown", () => segurarFala(true));
 $("botao-falar").addEventListener("pointerup", () => segurarFala(false));
 $("botao-falar").addEventListener("pointerleave", () => segurarFala(false));
 
-/**
- * Vira anfitrião: sobe o Dogma dentro deste app e entra nele.
- *
- * Duas etapas de propósito. `hospedar` põe o servidor de pé e devolve o link;
- * conectar é o caminho de sempre, com o endereço que ele devolveu. Um Dogma
- * hospedado aqui e um do outro lado do mundo entram pela mesma porta.
- */
-async function hospedar() {
-  const botao = $("botao-hospedar");
-  const erro = $("boot-erro");
-  botao.disabled = true;
-  erro.hidden = true;
-
-  try {
-    const anfitriao = await invoke("hospedar");
-    $("campo-servidor").value = anfitriao.aqui;
-    $("convite-link").value = anfitriao.convite;
-    $("convite").hidden = false;
-    await conectar();
-  } catch (falha) {
-    erro.hidden = false;
-    erro.textContent = fraseDeErro(falha);
-  } finally {
-    botao.disabled = false;
-  }
-}
-
-$("botao-hospedar").addEventListener("click", hospedar);
-
 $("convite-copiar").addEventListener("click", async () => {
   const campo = $("convite-link");
   // `select()` antes de tudo: se a área de transferência for negada, a pessoa
@@ -957,51 +611,7 @@ $("convite-copiar").addEventListener("click", async () => {
   }
 });
 
-/** Ejeta e volta para a tela de entrada, sem fechar o programa. */
-async function ejetar() {
-  await invoke("disconnect");
-  $("tela-sessao").hidden = true;
-  $("tela-fim").hidden = true;
-  $("tela-boot").hidden = false;
-  $("convite").hidden = true;
-  $("bateria").hidden = true;
-  // O veredito era sobre a chave daquela sessão. Deixá-lo aceso sobre a
-  // próxima seria dizer de um Dogma o que se apurou de outro.
-  mostrarVeredito(null);
-  document.body.classList.remove("na-bateria");
-  desenhado = null;
-  linhaAberta = null;
-  await encerrarBusca();
-  // O convite não sobrevive à sessão que ele abriu: quem sai, digita outro
-  // endereço e aperta INSERT mandaria o token do Dogma anterior ao novo.
-  limparConvite();
-  // Quem acabou de sair de um Dogma tem que vê-lo na lista.
-  await desenharVisitados();
-}
-
-/** Zera o campo, o cursor no Rust e o realce. */
-async function encerrarBusca() {
-  $("campo-busca").value = "";
-  await invoke("busca_limpar");
-  limparBusca();
-}
-
 $("botao-trocar").addEventListener("click", ejetar);
-
-$("botao-voltar").addEventListener("click", async () => {
-  await invoke("disconnect");
-  $("tela-fim").hidden = true;
-  $("tela-boot").hidden = false;
-  // O `disconnect` também derruba o Dogma hospedado. A caixa some junto, ou
-  // ficaria oferecendo um link que não leva mais a lugar nenhum.
-  $("convite").hidden = true;
-  mostrarVeredito(null);
-  desenhado = null;
-  linhaAberta = null;
-  await encerrarBusca();
-  limparConvite();
-  await desenharVisitados();
-});
 
 // A barra de espaço fala, exceto enquanto se digita — a mesma colisão que a TUI
 // resolve mantendo o push-to-talk fora do modo de inserção (decisão D19).

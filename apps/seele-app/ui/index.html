@@ -15,7 +15,22 @@
 -->
 <link rel="stylesheet" href="fontes.css">
 <link rel="stylesheet" href="tokens.css">
-<link rel="stylesheet" href="seele.css">
+<!--
+  Uma folha comum, uma por tela, e as preferências do sistema por último. A
+  ordem não é arrumação: dividir uma folha reordena regras, e ordem é o que
+  decide empate de especificidade. `base.css` precisa vir antes das telas porque
+  toda tela refina primitivos dele (`.busca .botao-fantasma`, `.compor input`,
+  `.visitados-titulo` sobre `.rotulo`), e `acessibilidade.css` precisa vir por
+  último porque suas regras de contraste empatam com as que sobrescrevem e só
+  ganham por serem as últimas. `apps/seele-app/tests/frontend.rs` confere isto.
+
+  Uma tela nova acrescenta um `tela-<nome>.css` **entre** as duas pontas.
+-->
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="tela-boot.css">
+<link rel="stylesheet" href="tela-sessao.css">
+<link rel="stylesheet" href="tela-fim.css">
+<link rel="stylesheet" href="acessibilidade.css">
 </head>
 <body>
 
@@ -25,7 +40,7 @@
 
   `aria-hidden` porque não há nada a anunciar: é textura, não conteúdo, e um
   leitor de tela que a mencionasse estaria lendo a moldura da imagem. Não
-  intercepta clique nenhum (`pointer-events: none` em `seele.css`), o que
+  intercepta clique nenhum (`pointer-events: none` em `base.css`), o que
   importa porque ela cobre todo botão da janela.
 -->
 <div class="varredura" aria-hidden="true"></div>
@@ -283,6 +298,21 @@
   </div>
 </section>
 
-<script src="seele.js"></script>
+<!--
+  Sem módulo e sem `import` (ADR 0019): seis scripts clássicos dividindo o mesmo
+  escopo global. O que a divisão muda não é quem enxerga quem — é **quando** cada
+  coisa passa a existir. `base.js` primeiro porque todo o resto o chama;
+  `frases.js` antes das telas; e cada `tela-<nome>.js` registra os
+  seus próprios ouvintes no seu rodapé, porque `addEventListener` lê a função na
+  hora em que a linha roda. Referência cruzada entre telas só de dentro de um
+  manipulador, que é sempre depois dos seis.
+
+  Uma tela nova acrescenta um `tela-<nome>.js` no fim desta lista.
+-->
+<script src="base.js"></script>
+<script src="frases.js"></script>
+<script src="tela-boot.js"></script>
+<script src="tela-sessao.js"></script>
+<script src="tela-fim.js"></script>
 </body>
 </html>

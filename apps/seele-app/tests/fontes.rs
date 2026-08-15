@@ -2,9 +2,9 @@
 //!
 //! This is a guard written against a defect that was live, not an imagined one.
 //! `ui/tokens.css` has named `Saira Condensed`, `IBM Plex Mono` and
-//! `Noto Sans JP` since M0.12, and `ui/seele.css` has been asking for all three
-//! ever since — while the app shipped none of them. Every rule fell through to
-//! the second entry of its stack: Arial Narrow where the display face belonged,
+//! `Noto Sans JP` since M0.12, and the sheets in `ui/` have been asking for all
+//! three ever since — while the app shipped none of them. Every rule fell through
+//! to the second entry of its stack: Arial Narrow where the display face belonged,
 //! the system monospace where the data face belonged, Hiragino or Yu Gothic
 //! where the brand's Japanese belonged.
 //!

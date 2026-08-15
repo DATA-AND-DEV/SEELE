@@ -1,0 +1,104 @@
+/* SEELE · Entry Plug — a tela de entrada (`#tela-boot`).
+   Só o que esta tela usa. O cartão em volta (`.boot`, `.boot-marca`), os campos
+   e os botões são de `base.css`, que carrega antes — e é a ordem que faz
+   `.visitados-titulo` ganhar de `.rotulo` no elemento que tem as duas classes. */
+
+/* ---- a marca ----
+   docs/marca.md. A assinatura é uma imagem porque os glifos vêm em contorno,
+   com o espacejamento da folha dentro do desenho. O app passou a embarcar a
+   Noto Sans JP (`fontes.css`), e mesmo assim a assinatura continua desenho:
+   como texto ela dependeria de a face certa estar carregada no instante certo,
+   e a folha de marca proíbe substituir a face japonesa. */
+.marca-assinatura {
+  display: block;
+  /* Mínimo da folha de marca é 28px de altura; aqui sobra espaço, então usa o
+     tamanho da cartela. */
+  height: 72px;
+  width: auto;
+}
+
+/* Legenda latina: opcional pela folha, e presente aqui porque a tela de
+   entrada é onde alguém aprende como o produto se chama. */
+.marca-legenda {
+  font-size: 11px;
+  letter-spacing: 0.44em;
+  padding-left: 0.44em;
+  color: var(--seele-osso-apagado);
+}
+
+.boot-form { display: flex; flex-direction: column; gap: 16px; }
+
+.campo { display: flex; flex-direction: column; gap: 4px; }
+.campo-linha { flex-direction: row; align-items: center; gap: 8px; }
+
+.subsistemas {
+  list-style: none;
+  margin: 32px 0 0;
+  padding: 0;
+  display: flex;
+  gap: 32px;
+  font-size: 11px;
+  color: var(--seele-osso-apagado);
+}
+
+.subsistemas b { color: var(--seele-fosforo); margin-left: 8px; }
+
+/* `pre-line` porque dois destes erros carregam duas impressões digitais para
+   uma pessoa comparar — a chave que mudou (ADR 0003) e o convite que não leva a
+   este Dogma. Sem a quebra as duas refluem no mesmo parágrafo, que é exatamente
+   a forma em que a comparação não acontece; `anywhere` porque são 64 caracteres
+   sem espaço nenhum onde quebrar. */
+.erro {
+  margin: 16px 0 0;
+  color: var(--seele-vermelho-alerta);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+/* ---- onde você já esteve ----
+   Acima do formulário porque é o caminho mais curto para a maioria: quem abre o
+   app quase sempre volta para onde já foi. Fica escondida enquanto a lista está
+   vazia, e a tela de entrada é então exatamente a de antes desta seção existir. */
+.visitados { margin-bottom: 32px; }
+
+.visitados-titulo {
+  margin: 0 0 8px;
+  font: inherit;
+  font-size: var(--seele-t-rotulo);
+  font-weight: normal;
+}
+
+.lista-visitados { list-style: none; margin: 0; padding: 0; }
+
+.visitado {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  height: 24px;
+}
+
+/* O endereço inteiro é o alvo do clique, e não um ícone ao lado: o que se quer
+   apertar é o nome do lugar. */
+.visitado-ir {
+  font: inherit;
+  color: var(--seele-osso);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: start;
+}
+
+.visitado-ir:hover { color: var(--seele-laranja-nerv); }
+.visitado-ir:focus-visible { outline: 1px solid var(--seele-laranja-nerv); outline-offset: 2px; }
+
+.visitado-apelido, .visitado-quando {
+  font-size: var(--seele-t-rotulo);
+  color: var(--seele-osso-apagado);
+}
+
+/* Esquecer só aparece quando a linha é apontada: uma lista de atalhos com um
+   botão de apagar em cada linha é uma lista que se olha com cuidado. */
+.visitado .botao-fantasma { opacity: 0; }
+.visitado:hover .botao-fantasma,
+.visitado:focus-within .botao-fantasma { opacity: 1; }

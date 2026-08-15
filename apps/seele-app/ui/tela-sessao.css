@@ -1,0 +1,382 @@
+/* SEELE · Entry Plug — a tela de operação (`#tela-sessao`).
+   O cabeçalho, as faixas que a interrompem, os três painéis, a busca e a
+   telemetria. Carrega depois de `base.css`, e depende disso: `.compor input`,
+   `.busca input`, `.convite-link` e `.volume` refinam o `input` de lá, e
+   `.busca .botao-fantasma` e `.botao-falar[data-ativo]` refinam botões de lá. */
+
+/* ---------- topo ---------- */
+
+.topo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--seele-linha-forte);
+  background: var(--seele-negro-painel);
+  flex: 0 0 auto;
+}
+
+.marca {
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  letter-spacing: var(--seele-tracking-cartela);
+  color: var(--seele-laranja-nerv);
+}
+
+.topo .kanji { color: var(--seele-osso-apagado); font-size: 11px; }
+
+.regua { width: 16px; height: 1px; background: var(--seele-linha-forte); }
+.regua-larga { flex: 1; }
+
+.padrao { font-size: 11px; letter-spacing: 0.1em; color: var(--seele-padrao-azul); }
+.padrao[data-padrao="Orange"] { color: var(--seele-laranja-nerv); }
+.padrao[data-padrao="Offline"] { color: var(--seele-osso-apagado); }
+
+.relogio { color: var(--seele-osso-apagado); font-variant-numeric: tabular-nums; }
+
+/* ---------- banner ---------- */
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--seele-vermelho-fraco);
+  border-bottom: 1px solid var(--seele-vermelho-alerta);
+  color: var(--seele-vermelho-alerta);
+  flex: 0 0 auto;
+}
+
+.banner[data-severidade="Info"] {
+  background: var(--seele-laranja-fraco);
+  border-bottom-color: var(--seele-laranja-nerv);
+  color: var(--seele-laranja-nerv);
+}
+
+/* O veredito de identidade. Mesma geometria do banner e a cor institucional:
+   ressalva, não queda. O vermelho é do `.banner`, e `--seele-vermelho-alerta`
+   está marcado "EXCLUSIVO alerta e queda" na folha de tokens.
+
+   `pre-line` porque a impressão digital vai em linha própria: são 64
+   caracteres para comparar com outro canal, e reflui-los no meio de uma frase
+   é a única forma em que ninguém consegue compará-los. */
+.veredito {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--seele-laranja-fraco);
+  border-bottom: 1px solid var(--seele-laranja-nerv);
+  color: var(--seele-laranja-nerv);
+  flex: 0 0 auto;
+}
+
+.veredito-texto {
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-dado);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- painéis ---------- */
+
+.paineis {
+  flex: 1 1 auto;
+  display: grid;
+  /* As mesmas larguras assimétricas do `plug`: 18 e 24 células, o resto para a
+     conversa. specs/05-cliente-tui.md. */
+  grid-template-columns: 176px 232px 1fr;
+  min-height: 0;
+}
+
+.painel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+}
+
+.painel-mensagens { border-right: none; }
+
+.painel-titulo {
+  margin: 0;
+  padding: 8px 16px;
+  font-size: 10px;
+  font-weight: normal;
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-osso-apagado);
+  border-bottom: 1px solid var(--seele-linha);
+  flex: 0 0 auto;
+}
+
+.lista {
+  list-style: none;
+  margin: 0;
+  padding: 8px 0;
+  overflow-y: auto;
+  flex: 1 1 auto;
+}
+
+.lista li {
+  padding: 0 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lista .cage, .lista .linha { cursor: pointer; }
+.lista .cage:hover, .lista .linha:hover { background: var(--seele-linha); }
+.lista .aberto { color: var(--seele-laranja-nerv); }
+
+.lista .piloto { padding-left: 32px; color: var(--seele-osso-apagado); }
+.lista .piloto.falando { color: var(--seele-osso); }
+
+.presenca { width: 8px; }
+.lista .piloto.falando .presenca { color: var(--seele-fosforo); }
+
+.sync { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+/* A faixa vem do core; a cor só a acompanha. O número e a marca de bloco estão
+   sempre presentes — specs/05: nenhuma informação só por cor. */
+.sync[data-faixa="Nominal"] { color: var(--seele-sync-nominal); }
+.sync[data-faixa="Acceptable"] { color: var(--seele-sync-aceitavel); }
+.sync[data-faixa="Degraded"] { color: var(--seele-sync-degradado); }
+.sync[data-faixa="Critical"] { color: var(--seele-sync-critico); }
+
+.marca-estado {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: var(--seele-osso-apagado);
+}
+
+/* O volume por pessoa fica escondido até a linha ser apontada: `specs/03-audio.md`
+   pede o controle, e um deslizante por piloto sempre visível transformaria o
+   roster numa mesa de som. */
+.volume {
+  width: 56px;
+  margin-left: 8px;
+  accent-color: var(--seele-laranja-nerv);
+  opacity: 0;
+}
+
+.lista .piloto:hover .volume,
+.lista .piloto:focus-within .volume { opacity: 1; }
+
+/* ---------- mensagens ---------- */
+
+.mensagens {
+  list-style: none;
+  margin: 0;
+  padding: 8px 16px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+}
+
+.mensagens li { margin-bottom: 8px; }
+
+.mensagens .cabeca {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--seele-osso-apagado);
+}
+
+.mensagens .propria .cabeca { color: var(--seele-laranja-nerv); }
+.mensagens .corpo { white-space: pre-wrap; overflow-wrap: anywhere; }
+.mensagens .editada { color: var(--seele-osso-apagado); font-size: 11px; }
+.mensagens .local .corpo { color: var(--seele-fosforo); }
+
+.compor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--seele-linha);
+  flex: 0 0 auto;
+}
+
+.compor .prompt { color: var(--seele-laranja-nerv); }
+.compor input { border: none; background: none; padding: 0; }
+
+/* ---------- telemetria ---------- */
+
+.telemetria {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 32px;
+  padding: 0 16px;
+  border-top: 1px solid var(--seele-linha-forte);
+  background: var(--seele-negro-painel);
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.metrica { display: flex; gap: 8px; align-items: baseline; }
+.espaco { flex: 1; }
+
+.botao-estado {
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: var(--seele-osso-apagado);
+  background: none;
+  border: 1px solid var(--seele-linha-forte);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.botao-estado[data-ativo="sim"] {
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
+}
+
+#botao-falar[data-ativo="sim"] {
+  background: var(--seele-fosforo);
+  border-color: var(--seele-fosforo);
+}
+
+.falha-local { color: var(--seele-vermelho-alerta); font-size: 11px; }
+
+/* ---- convite, para quem está hospedando ---- */
+.convite {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--seele-linha);
+  background: var(--seele-laranja-fraco);
+  font-size: var(--seele-t-dado);
+}
+
+.convite-rotulo {
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-laranja-nerv);
+}
+
+/* O link inteiro, selecionável. Um campo que corta o fim do endereço produz
+   convites que não funcionam e ninguém entende por quê. */
+.convite-link {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: var(--seele-osso);
+  background: var(--seele-negro-absoluto);
+  border: 1px solid var(--seele-linha-forte);
+  padding: 4px 8px;
+}
+
+.convite-copiado { color: var(--seele-fosforo); }
+
+.convite-nota {
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-osso-apagado);
+}
+
+/* ---- bateria interna ----
+   `specs/07-tema-evangelion.md`: contagem em vermelho, interface esmaecida mas
+   **ainda legível**. Esmaecer não é esconder: o histórico continua ali para
+   leitura, e é isso que separa "segurando a sessão" de "caiu". */
+.bateria {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding: 8px 16px;
+  border-bottom: var(--seele-b) solid var(--seele-vermelho-alerta);
+  background: var(--seele-vermelho-fraco);
+  color: var(--seele-vermelho-alerta);
+}
+
+.bateria-titulo {
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+}
+
+/* A contagem é o que diz se vale esperar ou ir consertar o wifi, então é o
+   maior elemento da faixa. */
+.bateria-conta {
+  font-size: var(--seele-t-secao);
+  font-variant-numeric: tabular-nums;
+}
+
+.bateria-tentativas {
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-osso-apagado);
+}
+
+/* Esmaecido, e não desabilitado: dá para ler e rolar o que já foi dito. */
+.na-bateria .paineis { opacity: 0.55; }
+.na-bateria .compor { opacity: 0.4; }
+
+/* ---- o botão de falar diz o que fazer ---- */
+.botao-falar { min-width: 152px; }
+.botao-falar[data-ativo="sim"] {
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-fosforo);
+}
+
+/* ---- a busca no painel de mensagens ---- */
+.busca {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 16px;
+  border-bottom: 1px solid var(--seele-linha);
+  flex: 0 0 auto;
+}
+
+.busca .prompt { color: var(--seele-laranja-nerv); }
+.busca input { flex: 1; min-width: 0; border: none; background: none; padding: 0; }
+.busca .botao-fantasma { margin-left: 0; }
+
+/* O contador é o acompanhante textual do realce: `specs/05-cliente-tui.md`
+   proíbe informação transmitida só por cor, e "[2/7]" é a mesma informação sem
+   depender de enxergar o laranja.
+
+   Osso, e não osso-apagado. O `tokens.css` anota o apagado como "4,11:1 só
+   texto grande", e 10px não é texto grande — o mínimo que vale aqui é 4,5:1.
+   Um rótulo secundário podia viver com isso; este elemento não, porque ele é
+   precisamente a metade não-cromática de que o realce não pode abrir mão. Osso
+   sobre o painel dá 15,60:1. */
+.busca-contador {
+  font-size: var(--seele-t-rotulo);
+  color: var(--seele-osso);
+  font-variant-numeric: tabular-nums;
+}
+
+/* O realce, e o realce onde o cursor está — duas coisas, e a diferença entre
+   elas nunca é só a cor (`specs/05-cliente-tui.md:144`).
+
+   O terminal resolveu isto com REVERSED contra o acento puro (`ui.rs`), e aqui
+   é a mesma ideia com o que o navegador tem: o corrente inverte o bloco e
+   engrossa o traço. Sem cor nenhuma continuam distintos — um é texto claro
+   sobre bloco escuro, o outro é texto escuro sobre bloco claro e em negrito.
+
+   O texto do realce era o laranja sobre o laranja-fraco, o par de menor
+   contraste da tela: um trecho **achado** ficava mais difícil de ler do que o
+   corpo em volta, que é o contrário do que um realce é para fazer. Osso sobre
+   laranja-fraco dá 12,95:1, e o laranja fica onde ele diz o mesmo sem custar
+   legibilidade — no sublinhado e no bloco do corrente. */
+.realce {
+  background: var(--seele-laranja-fraco);
+  color: var(--seele-osso);
+  text-decoration: underline;
+  text-decoration-color: var(--seele-laranja-nerv);
+}
+
+.realce-atual {
+  background: var(--seele-laranja-nerv);
+  color: var(--seele-negro-absoluto);
+  font-weight: var(--seele-cartela);
+  text-decoration-color: var(--seele-negro-absoluto);
+}

@@ -1,0 +1,31 @@
+/* SEELE · Entry Plug — as preferências do sistema, por último.
+   Última folha da lista de propósito. As duas regras de contraste sobrescrevem
+   `.rotulo` (de `base.css`), `.painel-titulo` e `.lista .piloto` (de
+   `tela-sessao.css`) com **a mesma especificidade** — elas ganham por ordem de
+   fonte, e só por isso. Mover este arquivo para antes das folhas de tela
+   desliga o modo de mais contraste em silêncio. */
+
+/* ---------- acessibilidade ---------- */
+
+/* specs/05-cliente-tui.md: modo sem cor, e daltonismo é comum no público. Aqui
+   a forma e o texto continuam suficientes — a marca de bloco e o número
+   acompanham toda Taxa de Sincronização. */
+@media (prefers-contrast: more) {
+  .lista .piloto { color: var(--seele-osso); }
+  .rotulo, .painel-titulo { color: var(--seele-osso); }
+}
+
+/* Nenhuma animação carrega informação, então desligar todas não perde nada. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+
+  /* A varredura para; ela não some. A textura é o fundo da interface, e retirá-la
+     de quem pediu menos movimento entregaria uma tela **diferente** — a
+     preferência é sobre movimento, não sobre aparência.
+
+     A faixa fica estacionada no meio da janela. Sem isto ela pararia sem
+     `transform` nenhum, colada na borda de cima — o único ponto do percurso em
+     que ela parece cortada, e não pousada. Parado é para parecer parado, não
+     interrompido. */
+  .varredura::after { transform: translateY(900%); }
+}

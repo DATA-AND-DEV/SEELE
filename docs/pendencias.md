@@ -273,7 +273,7 @@ tarde demais para descobrir que uma das três está torta. Ver
 **Sintoma.** No app (GUI), buscar um termo cujas ocorrências se sobrepõem —
 "aa" em "aaa" — não só realça errado: o corpo da mensagem sai reescrito.
 `occurrences` devolve `(0,2)` e `(1,3)`; `corpoComRealce`
-(`apps/seele-app/ui/seele.js`) desenha os dois intervalos sem descontar a
+(`apps/seele-app/ui/tela-sessao.js`) desenha os dois intervalos sem descontar a
 sobreposição, e o caractere do índice 1 sai dentro de dois `<mark>` — "aaa"
 que a pessoa escreveu aparece como "aaaa" na tela. É texto do usuário saindo
 errado, não só a cor do realce.

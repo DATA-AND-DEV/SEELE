@@ -1,0 +1,228 @@
+/* SEELE · Entry Plug — a camada comum a toda tela.
+   Consome `tokens.css`, congelado em M0.12 (ADR 0014). Nenhuma cor literal
+   aparece aqui: se um valor não está nos tokens, ele não é do produto.
+
+   Célula de terminal: 8px × 16px. Todo espaçamento é múltiplo de célula, e é o
+   que mantém a resposta para "como isso ficaria em 80×24 monocromático?"
+   — specs/06-clientes-gui.md.
+
+   ---- o que mora aqui e o que não ----
+
+   Aqui: a zeragem, a moldura, a tipografia, os primitivos de formulário e de
+   botão, e a varredura. Ou seja, o que **mais de uma tela** usa. O que só uma
+   tela usa mora em `tela-<nome>.css`, e é isso que permite quatro telas novas
+   sem quatro pessoas editando o mesmo arquivo.
+
+   ---- ordem de carga, e por que ela não é gosto ----
+
+   `index.html` carrega, nesta ordem: `fontes.css`, `tokens.css`, este arquivo,
+   as folhas de tela, e `acessibilidade.css` por último. Dividir uma folha
+   reordena regras, e reordenar decide empates de especificidade. Duas
+   dependências reais:
+
+   - toda regra de tela que refina um primitivo daqui (`.busca .botao-fantasma`,
+     `.compor input`, `.visitados-titulo` sobre `.rotulo`) precisa vir **depois**;
+   - `acessibilidade.css` sobrescreve `.rotulo`, `.painel-titulo` e
+     `.lista .piloto` com a mesma especificidade, e só ganha por ser o último.
+
+   `apps/seele-app/tests/frontend.rs` confere essa ordem. */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--seele-negro-absoluto);
+  color: var(--seele-osso);
+  font-family: var(--seele-mono);
+  font-size: 13px;
+  line-height: 16px;
+  /* Zero border-radius e zero sombra em todo o arquivo: é regra de tema
+     (specs/07-tema-evangelion.md), não gosto. */
+  -webkit-font-smoothing: antialiased;
+}
+
+body { overflow: hidden; }
+
+.tela { height: 100vh; display: flex; flex-direction: column; }
+[hidden] { display: none !important; }
+
+.kanji { font-family: var(--seele-jp); }
+
+.rotulo {
+  font-size: 10px;
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--seele-osso-apagado);
+}
+
+/* ---------- o cartão da entrada ----------
+   `.boot` e `.boot-marca` não são da tela de entrada: são o cartão centrado que
+   `#tela-boot` e `#tela-fim` já dividem hoje, e que a tela de autenticação vai
+   dividir amanhã. O que é só da entrada — a assinatura, o formulário, os
+   visitados — está em `tela-boot.css`; o que é só do fim está em `tela-fim.css`. */
+
+.boot {
+  margin: auto;
+  width: 480px;
+  padding: 32px;
+  border: 1px solid var(--seele-linha-forte);
+  background: var(--seele-negro-painel);
+}
+
+.boot-marca {
+  margin: 0 0 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* ---------- campos e botões ----------
+   Primitivos, e por isso comuns: a entrada e a sessão usam os dois. */
+
+input[type="text"], input:not([type]) {
+  width: 100%;
+}
+
+input {
+  font: inherit;
+  color: var(--seele-osso);
+  background: var(--seele-negro-absoluto);
+  border: 1px solid var(--seele-linha);
+  padding: 8px;
+}
+
+input:focus {
+  outline: none;
+  border-color: var(--seele-laranja-nerv);
+}
+
+.botao {
+  font: inherit;
+  letter-spacing: var(--seele-tracking-rotulo);
+  padding: 8px 16px;
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-laranja-nerv);
+  border: 1px solid var(--seele-laranja-nerv);
+  cursor: pointer;
+}
+
+/* Hospedar é a alternativa, não o caminho principal: quem abre o app quase
+   sempre vai entrar num Dogma que já existe. Contorno em vez de campo sólido,
+   sem virar um botão escondido. */
+.botao-secundario {
+  color: var(--seele-laranja-nerv);
+  background: none;
+}
+
+.botao:disabled { opacity: 0.5; cursor: default; }
+.botao:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
+
+.botao-fantasma {
+  margin-left: auto;
+  font: inherit;
+  font-size: 11px;
+  color: inherit;
+  background: none;
+  border: 1px solid currentColor;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+/* ---------- a varredura ----------
+   O comp v2 declara `.magi-scan` e o keyframe `magiVarredura` e nunca liga um
+   ao outro: o elemento está na página, a regra ficou solta. `docs/tokens-achados.md`
+   registrou a lacuna e disse o preço de fechá-la — "se você quiser a varredura,
+   ela vira exceção única e explícita ao tema". É o que ela é agora, e o ADR 0014
+   é onde isso está escrito.
+
+   Geometria do comp, seguida de perto: fixa, `inset: 0`, `z-index: 9`, e a
+   mesma textura de duas em duas células verticais.
+
+   `opacity` no elemento em vez de `rgba(0, 0, 0, 0.34)` porque nesta folha cor
+   literal não entra (`tests/tokens.rs`). O negro absoluto sai de token.
+
+   ---- por que 6% e não os 34% do comp ----
+
+   Ela é a primeira coisa nesta interface que se põe *sobre* o texto: `inset: 0`
+   e `z-index: 9` cobrem a janela inteira, então nas linhas escuras da textura o
+   véu escurece o glifo e o fundo juntos, e contraste é razão — escurecer os dois
+   não a preserva, derruba. Medido por WCAG 2.1 (luminância relativa sRGB),
+   sobre `negro-painel`, que é o pior caso porque é a superfície mais clara:
+
+   | token             | sem véu | véu 34% | véu 6% |
+   |-------------------|---------|---------|--------|
+   | `osso-apagado`    |  4,11:1 |  2,35:1 | 3,74:1 |
+   | `vermelho-alerta` |  5,16:1 |  2,70:1 | 4,63:1 |
+   | `laranja-nerv`    |  5,71:1 |  2,97:1 | 5,13:1 |
+
+   A 34% não é só o `osso-apagado` — que `docs/tokens-achados.md` já registra
+   reprovando AA e valendo só como texto grande — que piora: ele cai para 2,35:1
+   e perde até o piso de 3:1 do texto grande. O `vermelho-alerta` cai para
+   2,70:1, e ele é a cor cuja aprovação em AA o ADR 0014 usa como o argumento
+   mais forte a favor da paleta v2. Uma textura decorativa desfazendo em silêncio
+   a única correção de acessibilidade que a revisão da paleta trouxe é o preço
+   que ninguém escolheu pagar.
+
+   6% passa com folga, não é o teto: a `vermelho-alerta` chega a 4,63:1 ≥ 4,5 e a
+   `osso-apagado` a 3,74:1 ≥ 3:1. O teto de verdade é α ≈ 7,55% — onde a
+   `vermelho-alerta` cruza 4,5:1 e vira a primeira a reprovar; a 8% inteiro ela já
+   está em 4,4630:1. 6% foi escolhido abaixo desse teto de propósito, para deixar
+   margem. O que resta de custo está escrito em `docs/tokens-achados.md`: nenhum
+   véu diferente de zero sai de graça, porque o véu apaga glifo e fundo ao mesmo
+   tempo.
+
+   E quase nada se perde de aparência, porque o véu é negro absoluto sobre um
+   fundo de negro absoluto: em `html, body` a textura é **exatamente** um no-op
+   em qualquer opacidade, e a única superfície onde ela chega a aparecer é o
+   painel, que a 34% ia de (10 · 8 · 6) a (8,3 · 6,6 · 5,0) — menos de dois
+   níveis de 255. A textura nunca foi visível onde deveria estar; ela era
+   visível no texto. É isso que 6% devolve. */
+.varredura {
+  position: fixed;
+  inset: 0;
+  /* Ela cobre a janela inteira, inclusive todo botão. Sem isto o app fica
+     bonito e inoperante. */
+  pointer-events: none;
+  z-index: 9;
+  background: repeating-linear-gradient(
+    180deg,
+    transparent 0 2px,
+    var(--seele-negro-absoluto) 2px 4px
+  );
+  opacity: 0.06;
+}
+
+/* A faixa que desce. Altura de 5vh porque é o que o keyframe do comp pede: de
+   -100% a 2000% são 21 alturas de percurso, e a faixa só cruza uma tela inteira
+   e sai se uma altura for um vinte avos da janela. */
+.varredura::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 5vh;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    var(--seele-osso-apagado),
+    transparent
+  );
+  /* `opacity` do pai multiplica a do filho, então isto é 0,68 × 0,06 ≈ **4%**
+     de véu claro — o mesmo 4% que a faixa sempre teve, quando o par era
+     0,12 × 0,34. O número ficou feio para que a aparência não mudasse: baixar o
+     pai a 6% por contraste não é motivo para a faixa desbotar junto, porque ela
+     clareia, e clarear não é o que estava derrubando a razão.
+
+     `specs/07` chama movimento decorativo de erro; o que se negocia aqui é o
+     quanto ele se faz notar, e a resposta é quase nada. */
+  opacity: 0.68;
+  animation: seele-varredura 7000ms linear infinite;
+}
+
+@keyframes seele-varredura {
+  from { transform: translateY(-100%); }
+  to   { transform: translateY(2000%); }
+}

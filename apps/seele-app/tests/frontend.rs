@@ -25,6 +25,72 @@ fn read(relative: &str) -> String {
         .unwrap_or_else(|error| panic!("{relative}: {error}"))
 }
 
+/// Every file directly in `ui/` with this extension, by name.
+///
+/// The frontend is six scripts and six stylesheets rather than one of each, so
+/// every check below that used to read `ui/seele.js` has to read all of them —
+/// and it has to find them by looking, not by a list somebody has to remember to
+/// extend. A seventh screen that nobody adds here would otherwise arrive with
+/// every guard in this file silently blind to it.
+///
+/// Sorted by name so the result is stable; the *load* order is asserted
+/// separately, against `index.html`, which is the only place it is real.
+fn ui_files(extension: &str) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(app_dir().join("ui")) else {
+        panic!("ui/ must exist: it is the whole frontend");
+    };
+    let mut found: Vec<String> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.ends_with(extension))
+        .collect();
+    found.sort();
+    assert!(!found.is_empty(), "ui/ ships no {extension} at all");
+    found
+}
+
+/// Every script the window loads, concatenated.
+fn scripts() -> String {
+    ui_files(".js")
+        .iter()
+        .map(|name| read(&format!("ui/{name}")))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Every stylesheet the window loads, concatenated in load order.
+///
+/// Load order, and not alphabetical: two of the checks below read a rule out of
+/// this text, and one of them (`.veredito`) would find the wrong block if the
+/// sheets were stitched in an order the browser never uses. `tokens.css` and
+/// `fontes.css` are left out — they are declarations, not rules, and
+/// `tests/tokens.rs` and `tests/fontes.rs` own them.
+fn styles() -> String {
+    let page = read("ui/index.html");
+    linked_assets(&page, "href")
+        .into_iter()
+        .filter(|name| name.ends_with(".css") && name != "tokens.css" && name != "fontes.css")
+        .map(|name| read(&format!("ui/{name}")))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The files an attribute loads, in the order the page names them.
+///
+/// Comments are stripped first, and that is the whole point rather than tidiness:
+/// the block above the `<link>` list names half of these files in prose, so a
+/// check that read the raw page could be satisfied by the paragraph explaining
+/// the tag it was meant to guard.
+fn linked_assets(page: &str, attribute: &str) -> Vec<String> {
+    let page = without_comments(page);
+    let needle = format!("{attribute}=\"");
+    page.split(&needle)
+        .skip(1)
+        .filter_map(|piece| piece.split('"').next())
+        .map(str::to_owned)
+        .collect()
+}
+
 /// Every `invoke("name")` in the script.
 fn invoked_commands(script: &str) -> BTreeSet<String> {
     let mut found = BTreeSet::new();
@@ -56,7 +122,7 @@ fn registered_commands(source: &str) -> BTreeSet<String> {
 fn every_command_the_frontend_calls_is_registered() {
     // A typo here is a promise rejected at runtime with a message nobody reads,
     // in a build that succeeded.
-    let script = read("ui/seele.js");
+    let script = scripts();
     let source = read("src/main.rs");
 
     let called = invoked_commands(&script);
@@ -77,7 +143,7 @@ fn no_command_is_registered_and_never_called() {
     // The other direction. A command nobody calls is either dead weight or a
     // feature that was wired on one side only — and the second is the one worth
     // catching.
-    let called = invoked_commands(&read("ui/seele.js"));
+    let called = invoked_commands(&scripts());
     let registered = registered_commands(&read("src/main.rs"));
 
     let unused: Vec<&String> = registered.difference(&called).collect();
@@ -91,7 +157,7 @@ fn no_command_is_registered_and_never_called() {
 fn every_element_the_script_reaches_for_exists_in_the_page() {
     // `$("nao-existe")` returns null, and the next line throws. In a page with
     // no build step, nothing else would have said so.
-    let script = read("ui/seele.js");
+    let script = scripts();
     let page = read("ui/index.html");
 
     let mut wanted = BTreeSet::new();
@@ -127,38 +193,119 @@ fn the_page_loads_only_files_that_are_shipped() {
     // simply render an unstyled window.
     let page = read("ui/index.html");
 
-    // `fontes.css` is on this list for the same reason as the other three, and
-    // it is the one whose absence would be hardest to notice: the page would
-    // still render, in Arial Narrow. `tests/fontes.rs` guards what is inside it.
+    // Both directions, and both matter now that the frontend is eleven files
+    // instead of four.
     //
-    // The attribute, not the bare name. A bare `contains` was an implicit tag
-    // check only while each name appeared exactly once in the file; the comment
-    // above the `<link>` block now names `tokens.css` and `fontes.css` in prose,
-    // and with that the assertion became satisfiable by the explanation of the
-    // tag it was meant to guard. Deleting the `fontes.css` link left all
-    // nineteen tests green. Same defect class as the one `without_comments`
-    // exists for, one file over: a guard a comment can satisfy is a guard that
-    // cannot fail.
-    for (asset, attribute) in [
-        ("fontes.css", "href"),
-        ("tokens.css", "href"),
-        ("seele.css", "href"),
-        ("seele.js", "src"),
-    ] {
-        assert!(
-            page.contains(&format!("{attribute}=\"{asset}\"")),
-            "index.html never loads {asset}"
-        );
+    // Outwards: everything the page names has to be on disk. `fontes.css` is
+    // the one whose absence would be hardest to notice — the page would still
+    // render, in Arial Narrow. `tests/fontes.rs` guards what is inside it.
+    //
+    // Inwards: every sheet and every script in `ui/` has to be *loaded*. This
+    // is the half the split made necessary. A `tela-chamada.css` that nobody
+    // links is a screen with no styling and no error anywhere, and the old
+    // hard-coded list of four would have said nothing about it.
+    //
+    // The attribute, not the bare name, and on the comment-stripped page. A
+    // bare `contains` was an implicit tag check only while each name appeared
+    // exactly once in the file; the comment above the `<link>` block names
+    // several of these files in prose, and with that the assertion became
+    // satisfiable by the explanation of the tag it was meant to guard. Deleting
+    // the `fontes.css` link once left all nineteen tests green. Same defect
+    // class as the one `without_comments` exists for, one file over: a guard a
+    // comment can satisfy is a guard that cannot fail.
+    let stylesheets = linked_assets(&page, "href");
+    let sources = linked_assets(&page, "src");
+
+    for asset in stylesheets.iter().chain(sources.iter()) {
         assert!(
             app_dir().join("ui").join(asset).exists(),
             "index.html loads {asset}, which is not in ui/"
         );
     }
 
+    for (extension, loaded) in [(".css", &stylesheets), (".js", &sources)] {
+        for shipped in ui_files(extension) {
+            assert!(
+                loaded.contains(&shipped),
+                "ui/ ships {shipped}, and index.html never loads it — so it is a \
+                 file nobody sees and every guard in this suite reads"
+            );
+        }
+    }
+
     assert!(
         !page.contains("http://") && !page.contains("https://"),
         "the page references something off the machine, which the CSP blocks"
     );
+}
+
+#[test]
+fn the_shared_layer_loads_before_the_screens_and_accessibility_loads_last() {
+    // Splitting one stylesheet into six reorders every rule in it, and order is
+    // what decides a specificity tie. Two ties in this page are decided by
+    // nothing else:
+    //
+    // - `acessibilidade.css` sets `.rotulo`, `.painel-titulo` and
+    //   `.lista .piloto` under `prefers-contrast: more`, against the very rules
+    //   it is correcting, at the same specificity. Move that file up and the
+    //   high-contrast mode stops working — silently, and only for the people who
+    //   asked for it.
+    // - every screen sheet refines a primitive from `base.css` at equal or
+    //   higher specificity (`.compor input`, `.busca .botao-fantasma`,
+    //   `.visitados-titulo` over `.rotulo`). Move `base.css` down and those
+    //   refinements lose.
+    //
+    // The scripts have the same shape of hazard for a different reason: they
+    // share one global scope, so what changes when they are split is not
+    // visibility but *when* each name comes to exist. `base.js` is executed by
+    // every other file's top level; a screen that loads before it registers a
+    // listener on a function that is not there yet, and the page dies on load.
+    let page = read("ui/index.html");
+    let sheets = linked_assets(&page, "href");
+    let sources = linked_assets(&page, "src");
+
+    let position = |list: &[String], name: &str| {
+        list.iter()
+            .position(|entry| entry == name)
+            .unwrap_or_else(|| panic!("index.html never loads {name}"))
+    };
+
+    let base = position(&sheets, "base.css");
+    let accessibility = position(&sheets, "acessibilidade.css");
+    for (at, sheet) in sheets.iter().enumerate() {
+        if !sheet.starts_with("tela-") {
+            continue;
+        }
+        assert!(
+            at > base,
+            "{sheet} is loaded before base.css, so every rule it refines wins over it"
+        );
+        assert!(
+            at < accessibility,
+            "{sheet} is loaded after acessibilidade.css, which silently turns off \
+             the high-contrast rules that only win by being last"
+        );
+    }
+    let last_sheet = sheets
+        .iter()
+        .rposition(|entry| entry.ends_with(".css"))
+        .unwrap_or_default();
+    assert_eq!(
+        accessibility, last_sheet,
+        "acessibilidade.css is not the last stylesheet the page loads"
+    );
+
+    let base = position(&sources, "base.js");
+    for (at, source) in sources.iter().enumerate() {
+        if !source.ends_with(".js") || source == "base.js" {
+            continue;
+        }
+        assert!(
+            at > base,
+            "{source} is loaded before base.js, whose helpers it calls the moment \
+             it registers a listener"
+        );
+    }
 }
 
 /// Strips `//`, `/* */` and HTML comments.
@@ -252,7 +399,7 @@ fn neither_side_of_the_bridge_collapses_whitespace() {
     // both callers on raw bodies — the failure it guards is a silent one-per-run
     // offset drift, invisible until somebody pastes a message with two lines.
     let source = read("src/main.rs");
-    let script = read("ui/seele.js");
+    let script = scripts();
 
     assert!(
         !source.contains("search::normalize"),
@@ -269,7 +416,7 @@ fn the_script_reads_the_field_names_a_match_actually_serialises() {
     // `Match` carries no `serde(rename)`, so the payload says `message`,
     // `start`, `end`. Portuguese names would destructure to `undefined`, slice
     // to nothing, and paint empty marks — with no error anywhere.
-    let script = read("ui/seele.js");
+    let script = scripts();
 
     for field in ["message", "start", "end"] {
         assert!(
@@ -339,7 +486,7 @@ fn the_search_command_puts_the_cursor_back_after_rebuilding() {
     // `Session::busca`, and `specs/06-clientes-gui.md:19` keeps decisions like
     // this one out of the frontend.
     let source = read("src/main.rs");
-    let script = read("ui/seele.js");
+    let script = scripts();
 
     assert!(
         source.contains("resume_at"),
@@ -399,8 +546,8 @@ fn the_current_occurrence_is_not_marked_out_by_colour_alone() {
     // has to use one of them. A rule that only swaps hues would leave the
     // cursor invisible on a monochrome display — which is the same failure as
     // not marking it at all, for the people it happens to.
-    let script = read("ui/seele.js");
-    let css = read("ui/seele.css");
+    let script = scripts();
+    let css = styles();
 
     assert!(
         script.contains("realce-atual"),
@@ -436,7 +583,7 @@ fn the_visited_list_hides_itself_when_it_is_empty() {
     // back to, the entry screen must be exactly what it was before the section
     // existed.
     let page = read("ui/index.html");
-    let script = read("ui/seele.js");
+    let script = scripts();
 
     let section = page
         .split("id=\"visitados\"")
@@ -471,7 +618,7 @@ fn the_event_name_the_script_branches_on_is_the_one_the_bridge_sends() {
     );
 
     assert!(
-        read("ui/seele.js").contains("payload === \"MessagesChanged\""),
+        scripts().contains("payload === \"MessagesChanged\""),
         "nothing in the script rebuilds the search when the message list changes"
     );
 }
@@ -524,7 +671,7 @@ fn every_verdict_the_bridge_can_send_has_its_own_sentence_in_the_page() {
     //
     // `InviteRefused` is left out on purpose — the core drops the connection,
     // so it reaches the shell as a `PlugError`. The test below covers it.
-    let script = without_comments(&read("ui/seele.js"));
+    let script = without_comments(&scripts());
 
     for verdict in [
         seele_ffi::Trust::FirstContact {
@@ -569,7 +716,7 @@ fn the_refused_invite_reaches_the_screen_with_both_fingerprints() {
     let Ok(json) = serde_json::to_string(&refusal) else {
         panic!("PlugError does not serialise, so no shell can read it at all");
     };
-    let script = without_comments(&read("ui/seele.js"));
+    let script = without_comments(&scripts());
 
     assert!(
         names(&script, "InviteMismatch"),
@@ -596,7 +743,7 @@ fn the_informative_verdicts_do_not_spend_the_alarm_reserved_for_a_key_change() {
     // from entering; dressing them as an alarm is what teaches people to
     // dismiss the alarm on the day it means the other thing.
     let page = without_comments(&read("ui/index.html"));
-    let css = without_comments(&read("ui/seele.css"));
+    let css = without_comments(&styles());
 
     let tag = page
         .split("id=\"veredito\"")
@@ -631,7 +778,7 @@ fn the_comparison_stays_in_rust_and_only_its_verdict_crosses() {
     // which is a reversal — but it crosses as the *output* of a decision, to be
     // read by a person. What must never cross is the input: the value to check
     // against comes off `Session::convite` and goes straight into the FFI.
-    let script = without_comments(&read("ui/seele.js"));
+    let script = without_comments(&scripts());
     let connect = body_of(&read("src/main.rs"), "async fn connect");
 
     // Scoped to the body and blind to the variable that carries the value: what
@@ -682,7 +829,7 @@ fn leaving_forgets_the_invite_that_let_us_in() {
 fn the_frontend_never_names_a_protocol_concept() {
     // `specs/06-clientes-gui.md`, in one sentence: "Se o frontend precisa saber
     // o que é um `ssrc`, algo está errado." This is that sentence as a test.
-    let script = without_comments(&read("ui/seele.js"));
+    let script = without_comments(&scripts());
     let page = without_comments(&read("ui/index.html"));
 
     for forbidden in ["ssrc", "opus_frame", "datagram", "quic", "postcard"] {
