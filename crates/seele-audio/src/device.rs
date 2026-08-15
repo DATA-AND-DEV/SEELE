@@ -107,6 +107,18 @@ pub enum DeviceError {
     #[error("no default input device")]
     NoInputDevice,
 
+    /// A capture device was asked for by name and the host does not offer it.
+    ///
+    /// Its own variant rather than [`DeviceError::NoInputDevice`] because the
+    /// two are different sentences for a person: "there is no microphone" and
+    /// "the microphone you picked was unplugged" ask for different next steps.
+    /// `specs/02-protocolo.md` wants enumerated reasons for exactly this.
+    #[error("no capture device named {name}")]
+    CaptureDeviceGone {
+        /// What was asked for.
+        name: String,
+    },
+
     /// The host reports no default output.
     #[error("no default output device")]
     NoOutputDevice,
@@ -159,6 +171,64 @@ pub struct AudioIo {
     pub capture_rate_hz: u32,
     /// Native playback rate. Same caveat as [`AudioIo::capture_rate_hz`].
     pub playback_rate_hz: u32,
+
+    /// What the capture device that actually opened calls itself.
+    ///
+    /// The device that opened, not the one that was asked for — those differ
+    /// whenever `None` was asked for, which is most of the time. An interface
+    /// that draws the request instead of this is an interface that tells a
+    /// person their microphone is "default".
+    ///
+    /// `None` when the backend opened a device and then would not name it. Not
+    /// a failure and not a placeholder: it is a device with no name to show,
+    /// and an interface must draw that as unmeasured rather than invent one.
+    pub capture_name: Option<String>,
+}
+
+/// One capture device the host is offering right now.
+///
+/// The name is the whole identity: `cpal` has no stable device id across
+/// backends, so the name is what a preference can be written down as and what a
+/// later run has to match. That is also why [`CaptureDevice::default`] is
+/// carried rather than derived — "the default" is a moving target, and a shell
+/// that wants to say *which* one is current cannot recompute it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaptureDevice {
+    /// What the host calls it.
+    pub name: String,
+    /// Whether this is the one [`open_default`] would take.
+    pub default: bool,
+}
+
+/// Every capture device the host will name.
+///
+/// Returns an empty list rather than an error when the host will not enumerate.
+/// A shell has one honest thing to draw either way — no devices — and turning
+/// "the backend is unhappy" into a second empty state buys nothing. What a
+/// caller must not do is read an empty list as "there is no microphone": the
+/// default device can still open when enumeration fails, which is why
+/// [`open_default`] does not consult this function.
+///
+/// Devices whose name the backend refuses to give are dropped. A row that
+/// cannot be labelled cannot be picked, and drawing a blank one would be a
+/// control that does nothing.
+#[must_use]
+pub fn capture_devices() -> Vec<CaptureDevice> {
+    let host = cpal::default_host();
+    let default = host
+        .default_input_device()
+        .and_then(|device| device.name().ok());
+
+    let Ok(devices) = host.input_devices() else {
+        return Vec::new();
+    };
+    devices
+        .filter_map(|device| device.name().ok())
+        .map(|name| CaptureDevice {
+            default: default.as_ref() == Some(&name),
+            name,
+        })
+        .collect()
 }
 
 /// Opens the default input and output devices and starts both streams.
@@ -174,11 +244,42 @@ pub struct AudioIo {
 /// Returns [`DeviceError`] if a device is missing, will not describe itself,
 /// speaks a format this build does not convert, or refuses to open or start.
 pub fn open_default(ring_ms: u32) -> Result<AudioIo, DeviceError> {
+    open(None, ring_ms)
+}
+
+/// Opens a named capture device, or the default one when `capture` is `None`.
+///
+/// Playback stays on the default device. That is not an oversight: the comp
+/// draws an output picker too, but nothing in the product reads a playback
+/// preference back, and shipping half a pair of controls is worse than shipping
+/// one that works. See `docs/tela-inventario-camadas.md`.
+///
+/// # Errors
+///
+/// [`DeviceError::CaptureDeviceGone`] when `capture` names a device the host is
+/// not offering — an unplugged interface, or a preference written down by an
+/// older run. Otherwise the same failures as [`open_default`].
+pub fn open(capture: Option<&str>, ring_ms: u32) -> Result<AudioIo, DeviceError> {
     let host = cpal::default_host();
 
-    let input_device = host
-        .default_input_device()
-        .ok_or(DeviceError::NoInputDevice)?;
+    let input_device = match capture {
+        // Enumerating and matching by name rather than trusting an index: the
+        // list a person picked from is minutes old by the time the pick lands,
+        // and an index into a list that changed underneath points at a
+        // different microphone rather than at nothing.
+        Some(wanted) => host
+            .input_devices()
+            .ok()
+            .and_then(|mut devices| {
+                devices.find(|device| device.name().is_ok_and(|name| name == wanted))
+            })
+            .ok_or_else(|| DeviceError::CaptureDeviceGone {
+                name: wanted.to_owned(),
+            })?,
+        None => host
+            .default_input_device()
+            .ok_or(DeviceError::NoInputDevice)?,
+    };
     let output_device = host
         .default_output_device()
         .ok_or(DeviceError::NoOutputDevice)?;
@@ -199,6 +300,7 @@ pub fn open_default(ring_ms: u32) -> Result<AudioIo, DeviceError> {
                 source,
             })?;
 
+    let capture_name = input_device.name().ok();
     let capture_rate_hz = in_config.sample_rate();
     let playback_rate_hz = out_config.sample_rate();
 
@@ -309,5 +411,6 @@ pub fn open_default(ring_ms: u32) -> Result<AudioIo, DeviceError> {
         counters,
         capture_rate_hz,
         playback_rate_hz,
+        capture_name,
     })
 }

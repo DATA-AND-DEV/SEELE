@@ -105,6 +105,42 @@ struct Controls {
     gains: Mutex<HashMap<u32, f32>>,
 }
 
+/// One microphone the machine is offering.
+///
+/// Its own type rather than a re-export of `seele_audio::device::CaptureDevice`
+/// for the same reason [`DeviceRates`] is its own type: ADR 0002 keeps
+/// `seele-ffi` and `seele-tui` from naming `seele-audio` at all, and a
+/// re-export would make them name it through this crate's front door.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaptureDevice {
+    /// What the machine calls it. This is the whole identity — see
+    /// `seele_audio::device::CaptureDevice`.
+    pub name: String,
+    /// Whether this is the one a session with no preference would take.
+    pub default: bool,
+}
+
+/// Every microphone the machine will name, right now.
+///
+/// Answerable with no session: picking a microphone is a thing a person does
+/// before connecting as often as during, and making the list depend on a live
+/// [`Voice`] would put the control behind the door it is meant to open.
+///
+/// An empty list means the host would not enumerate, **not** that there is no
+/// microphone — the default device still opens when enumeration fails. An
+/// interface must not read this as "no audio"; [`crate::Voice::start`] failing
+/// is what means that.
+#[must_use]
+pub fn capture_devices() -> Vec<CaptureDevice> {
+    device::capture_devices()
+        .into_iter()
+        .map(|found| CaptureDevice {
+            name: found.name,
+            default: found.default,
+        })
+        .collect()
+}
+
 /// What the devices turned out to be.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DeviceRates {
@@ -122,6 +158,11 @@ pub struct Voice {
     controls: Arc<Controls>,
     telemetry: Arc<Mutex<AudioTelemetry>>,
     rates: DeviceRates,
+    /// The microphone this path actually opened.
+    ///
+    /// Read off the device rather than remembered from the request, so that a
+    /// path started with no preference can still say which microphone it got.
+    capture_name: Option<String>,
     /// Se a máquina está derrubando áudio **agora**.
     ///
     /// Mora aqui porque é uma derivada: precisa lembrar o que viu da última
@@ -138,14 +179,34 @@ impl Voice {
     /// Fails if no input or output device can be opened, or if the encoder
     /// refuses the configuration.
     pub fn start(media: MediaChannel, ssrc: Ssrc) -> Result<Self> {
+        Self::start_on(None, media, ssrc)
+    }
+
+    /// Opens a named capture device and starts the pipeline.
+    ///
+    /// `capture` is a name from [`capture_devices`]. `None` is the host's
+    /// default, which is what [`Voice::start`] takes.
+    ///
+    /// Switching device is this function plus dropping the old handle: the
+    /// pipeline owns its `AudioIo` for the life of its thread, and `cpal`'s
+    /// streams are not `Send` on every backend, so a running path cannot have a
+    /// device swapped underneath it. Stopping and restarting is not a shortcut
+    /// around that — it is the only shape the audio layer allows.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the named device is gone, if no device can be opened at all, or
+    /// if the encoder refuses the configuration.
+    pub fn start_on(capture: Option<&str>, media: MediaChannel, ssrc: Ssrc) -> Result<Self> {
         // Opened here rather than on the audio thread so that "there is no
         // microphone" is a return value the interface can show, instead of a
         // thread that quietly dies.
-        let io = device::open_default(RING_MS)?;
+        let io = device::open(capture, RING_MS)?;
         let rates = DeviceRates {
             capture_hz: io.capture_rate_hz,
             playback_hz: io.playback_rate_hz,
         };
+        let capture_name = io.capture_name.clone();
 
         let controls = Arc::new(Controls {
             at_field: AtomicBool::new(false),
@@ -181,6 +242,7 @@ impl Voice {
             controls,
             telemetry,
             rates,
+            capture_name,
             falha_local: Mutex::new(FalhaLocal::new()),
         })
     }
@@ -189,6 +251,16 @@ impl Voice {
     #[must_use]
     pub fn rates(&self) -> DeviceRates {
         self.rates
+    }
+
+    /// The microphone this path is actually capturing from.
+    ///
+    /// `None` when the backend would not name the device it opened. Audio is
+    /// still running in that case — an interface must draw an unnamed device,
+    /// not a missing one.
+    #[must_use]
+    pub fn capture_name(&self) -> Option<&str> {
+        self.capture_name.as_deref()
     }
 
     /// Mutes the microphone — A.T. Field.
