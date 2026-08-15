@@ -68,7 +68,7 @@ Monoespaçada para todo dado, número, endereço e log. Display condensada e pes
 
 ## Movimento
 
-Só a sequência de boot é generosa. No resto, movimento é diagnóstico: a barra de sincronização respira, o indicador de fala pulsa com a voz, a contagem da bateria desce. Sem transição decorativa. `prefers-reduced-motion` respeitado, e a TUI oferece desligar animação por completo.
+Só a sequência de boot é generosa. No resto, movimento é diagnóstico: a barra de sincronização respira, o indicador de fala pulsa com a voz, a contagem da bateria desce. Sem transição decorativa, com **uma exceção nomeada**: a varredura — a faixa que desce sobre a scanline, herdada do comp v2 e aceita em M5 pelo ADR 0014. Ela não diagnostica nada, e o que a torna admissível é ser inofensiva: `pointer-events: none`, `aria-hidden`, e sob `prefers-reduced-motion` ela para sem sumir. É a única; qualquer outra volta a ser erro, e abrir a segunda exige emendar este parágrafo de novo. `prefers-reduced-motion` respeitado, e a TUI oferece desligar animação por completo.
 
 Nenhuma animação pode atrasar o usuário. Se a conexão fecha em 200 ms, o boot dura 200 ms.
 

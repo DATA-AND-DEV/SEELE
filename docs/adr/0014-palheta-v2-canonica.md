@@ -20,7 +20,7 @@ Consequências:
 
 Quatro achados viraram trabalho de M4 e estão em `docs/tokens-achados.md`: `osso-apagado` reprovando AA para texto pequeno, painel e fundo colapsando no mesmo ansi 232, linhas abaixo do critério de componente não textual, e a ausência de modo sem cor.
 
-Não adotado: a varredura animada do v2 (`seeleVarredura`), por contrariar "movimento é diagnóstico" de `specs/07`. A textura estática de scanline foi mantida.
+Não adotado: a varredura animada do v2 (`seeleVarredura`), por contrariar "movimento é diagnóstico" de `specs/07`. A textura estática de scanline foi mantida. — **Revertido em M5; ver "Revisão em M5 — a varredura passa a existir, como exceção nomeada", no fim deste ADR.** A varredura está no ar, textura e animação, e a segunda metade desta frase nunca foi verdade: nenhuma scanline existiu na folha até M5.
 
 Custo de reverter: **baixo** agora, **médio** depois que M4 começar a construir telas.
 
