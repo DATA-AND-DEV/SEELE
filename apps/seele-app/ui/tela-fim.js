@@ -9,6 +9,10 @@
 function mostrarFim(motivo) {
   $("tela-sessao").hidden = true;
   $("tela-boot").hidden = true;
+  // A sessão pode acabar com a configuração aberta por cima dela. Toda `.tela`
+  // tem a altura da janela, então duas visíveis não se sobrepõem: empilham, e a
+  // segunda fica abaixo da dobra onde ninguém a encontra.
+  abandonarDogma();
   $("tela-fim").hidden = false;
   $("fim-motivo").textContent = MOTIVOS[motivo] ?? "ENLACE ENCERRADO";
 }

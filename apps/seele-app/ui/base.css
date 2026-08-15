@@ -116,6 +116,23 @@ input:focus {
   background: none;
 }
 
+/* ---------- o que deu errado ----------
+   Comum desde que o Terminal Dogma passou a ter uma recusa própria para
+   escrever: um microfone que sumiu entre desenhar a lista e clicar nela. Duas
+   telas usam, então mora aqui.
+
+   `pre-line` porque dois dos erros da entrada carregam duas impressões digitais
+   para uma pessoa comparar — a chave que mudou (ADR 0003) e o convite que não
+   leva a este Dogma. Sem a quebra as duas refluem no mesmo parágrafo, que é
+   exatamente a forma em que a comparação não acontece; `anywhere` porque são 64
+   caracteres sem espaço nenhum onde quebrar. */
+.erro {
+  margin: 16px 0 0;
+  color: var(--seele-vermelho-alerta);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
 .botao:disabled { opacity: 0.5; cursor: default; }
 .botao:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
 

@@ -30,7 +30,7 @@
 // `let` no topo de um script clássico é ligação de escopo de script, dividida
 // entre todos eles: `tela-fim.js` escreve em `desenhado`, que `tela-sessao.js`
 // declara. Isso vale porque só acontece dentro de um manipulador, muito depois
-// de os seis arquivos terem rodado.
+// de todos os arquivos terem rodado.
 
 "use strict";
 

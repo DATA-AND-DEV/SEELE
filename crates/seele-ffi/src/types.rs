@@ -378,6 +378,28 @@ pub struct Message {
     pub edited: bool,
 }
 
+/// One microphone this machine is offering.
+///
+/// Two strings and not one, because they answer two different questions. The id
+/// is what a preference is written down as — the core documents it as stable
+/// across runs, unplugs and reboots — and the name is what a person reads. Two
+/// microphones of the same model report the same name, so a shell that stored
+/// the name would leave the second one unpickable.
+///
+/// A shell shows `name` and sends back `id`. It never parses either.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct CaptureDevice {
+    /// The stable handle to send back. Not for a person to read.
+    pub id: String,
+    /// What the machine calls it.
+    pub name: String,
+    /// Whether this is the one a session with no preference would take.
+    ///
+    /// Carried rather than derived: "the default" is a moving target, and a
+    /// shell cannot recompute which row is the machine's own choice.
+    pub default: bool,
+}
+
 /// Connection quality.
 #[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize)]
 pub struct Telemetry {
@@ -454,6 +476,18 @@ pub struct Snapshot {
     pub voice_mode: VoiceMode,
     /// Whether audio is running at all.
     pub audio_available: bool,
+    /// The microphone this session is actually capturing from.
+    ///
+    /// The device that **opened**, not the one that was asked for — those are
+    /// different whenever nothing was asked for, which is most of the time. A
+    /// screen that drew the request would tell a person their microphone is
+    /// called "default".
+    ///
+    /// `None` when there is no audio, or when the machine opened a device and
+    /// then would not describe it. The second is not a failure: audio is
+    /// running, and a shell must draw an unnamed device rather than a missing
+    /// one. [`Snapshot::audio_available`] is what tells the two apart.
+    pub capture: Option<CaptureDevice>,
     /// Set once the session is over.
     pub ended: Option<EndReason>,
 }
@@ -547,6 +581,13 @@ pub enum PlugError {
     IdentityUnavailable,
     /// No usable microphone or speaker.
     NoAudioDevice,
+    /// The chosen microphone is not one this machine is offering any more.
+    ///
+    /// Its own variant rather than [`PlugError::NoAudioDevice`] because the two
+    /// ask different things of the person reading them: "this machine has no
+    /// microphone" and "the one you picked was unplugged" have different next
+    /// steps, and the second one has a list to pick from again.
+    CaptureDeviceGone,
     /// The named pilot is not in this Cage.
     UnknownPilot,
     /// No Cage or Line by that name or number.

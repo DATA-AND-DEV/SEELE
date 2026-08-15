@@ -29,6 +29,7 @@
 <link rel="stylesheet" href="base.css">
 <link rel="stylesheet" href="tela-boot.css">
 <link rel="stylesheet" href="tela-sessao.css">
+<link rel="stylesheet" href="tela-dogma.css">
 <link rel="stylesheet" href="tela-fim.css">
 <link rel="stylesheet" href="acessibilidade.css">
 </head>
@@ -121,6 +122,17 @@
       </button>
     </form>
 
+    <!--
+      A entrada para o Terminal Dogma, daqui e da sessão. Daqui porque escolher
+      microfone é coisa que se faz **antes** de entrar tanto quanto durante, e
+      uma configuração que só existisse com sessão aberta poria o controle atrás
+      da porta que ele serve para abrir: quem descobre que o microfone está
+      errado descobre justamente ao tentar falar.
+    -->
+    <button id="botao-dogma" type="button" class="botao-fantasma dogma-entrada">
+      TERMINAL DOGMA
+    </button>
+
     <ol class="subsistemas" aria-label="subsistemas">
       <li><span>MELCHIOR</span><b id="sub-melchior">·</b></li>
       <li><span>BALTHASAR</span><b id="sub-balthasar">·</b></li>
@@ -150,6 +162,13 @@
     <span id="padrao" class="padrao">PADRÃO: AZUL</span>
     <span class="regua regua-larga"></span>
     <time id="relogio" class="relogio">--:--:--</time>
+    <!--
+      A mesma tela da entrada, alcançada de dentro da sessão. Trocar de microfone
+      no meio de uma conversa é o caso que importa — é falando que se descobre
+      que a máquina abriu o errado — e a troca vale na hora, sem sair do Dogma.
+    -->
+    <button id="botao-dogma-sessao" class="botao-fantasma" type="button"
+            title="configuração local desta máquina">DOGMA</button>
     <!--
       A saída. Sem isto o app tinha três telas soltas e nenhum caminho entre
       elas: quem entrava num Dogma só saía fechando o programa.
@@ -300,6 +319,75 @@
   </footer>
 </section>
 
+<!--
+  Terminal Dogma — a configuração local. §7 do comp.
+
+  Nasce escondida, como toda tela que não é a de entrada, e volta para a tela de
+  onde foi aberta.
+
+  ---- o que o comp desenha e esta tela não ----
+
+  O comp põe cinco itens na coluna: ÁUDIO, ATALHOS, TEMA, CHAVES e TUI. O
+  próprio inventário registra que ali eles "levam ao **mesmo** painel de áudio" —
+  são um desenho de para onde a tela cresce, não cinco telas. Dos cinco, só
+  ÁUDIO tem alguma coisa atrás: atalhos e tema não existem no produto, e as
+  chaves não têm comando que as leia. Quatro botões que não levam a lugar nenhum
+  seriam quatro promessas, e a mesma folha que escolheu não desenhar meia
+  configuração de saída não vai desenhar quatro seções vazias.
+
+  Pela mesma razão faltam SAÍDA e SUPRESSÃO do painel de captura: nada no
+  produto lê preferência de saída, e não há supressão de ruído nenhuma para
+  ligar (ADR 0007 tirou DSP externo do v1). O que está aqui está ligado.
+-->
+<section id="tela-dogma" class="tela" hidden>
+  <div class="dogma">
+    <nav class="dogma-coluna" aria-label="seções da configuração">
+      <h1 class="dogma-marca">
+        <span class="dogma-marca-terminal">TERMINAL</span>
+        <span class="dogma-marca-dogma">DOGMA</span>
+        <span class="dogma-marca-nota">CONFIGURAÇÃO LOCAL</span>
+      </h1>
+      <span class="dogma-secao" aria-current="page">ÁUDIO</span>
+    </nav>
+
+    <div class="dogma-corpo">
+      <header class="dogma-faixa">
+        <h2 class="dogma-titulo">DISPOSITIVOS DE ÁUDIO</h2>
+        <!--
+          O comp diz "ALTERAÇÕES APLICAM NA PRÓXIMA INSERÇÃO DE PLUG". Aqui não
+          é verdade, e uma ressalva que descreve outro programa é pior que
+          nenhuma: a troca vale na hora, e o que fica gravado é para a próxima
+          vez que a janela abrir.
+        -->
+        <span class="dogma-nota">A ESCOLHA VALE AGORA E FICA GRAVADA NESTA MÁQUINA</span>
+        <button id="dogma-fechar" class="botao-fantasma" type="button">VOLTAR</button>
+      </header>
+
+      <section class="dogma-painel" aria-label="captura">
+        <h3 class="rotulo">CAPTURA</h3>
+        <ul id="lista-microfones" class="microfones"></ul>
+        <!--
+          Revelado antes de escrito: `role="alert"` não anuncia o que foi escrito
+          enquanto o elemento ainda estava escondido.
+        -->
+        <p id="dogma-erro" class="erro" role="alert" hidden></p>
+
+        <h3 class="rotulo">NÍVEL</h3>
+        <!--
+          O medidor de entrada, do mesmo `input_level` que a telemetria da
+          sessão desenha. `role="status"` e não um rótulo mudo: o número ao lado
+          é o acompanhante textual dos blocos, porque `specs/05-cliente-tui.md`
+          proíbe informação transmitida só por forma ou cor.
+
+          `—` quando não há sessão: um medidor parado em zero diz "seu microfone
+          não capta nada", que é uma frase diferente e falsa.
+        -->
+        <p id="dogma-nivel" class="medidor" role="status">—</p>
+      </section>
+    </div>
+  </div>
+</section>
+
 <!-- Sessão encerrada. Diz por quê; um app que fecha calado vira suporte. -->
 <section id="tela-fim" class="tela" hidden>
   <div class="boot">
@@ -310,13 +398,13 @@
 </section>
 
 <!--
-  Sem módulo e sem `import` (ADR 0019): seis scripts clássicos dividindo o mesmo
+  Sem módulo e sem `import` (ADR 0019): scripts clássicos dividindo o mesmo
   escopo global. O que a divisão muda não é quem enxerga quem — é **quando** cada
   coisa passa a existir. `base.js` primeiro porque todo o resto o chama;
   `glifos.js` e `frases.js` antes das telas; e cada `tela-<nome>.js` registra os
   seus próprios ouvintes no seu rodapé, porque `addEventListener` lê a função na
   hora em que a linha roda. Referência cruzada entre telas só de dentro de um
-  manipulador, que é sempre depois dos seis.
+  manipulador, que é sempre depois de todos eles.
 
   Uma tela nova acrescenta um `tela-<nome>.js` no fim desta lista.
 -->
@@ -325,6 +413,7 @@
 <script src="frases.js"></script>
 <script src="tela-boot.js"></script>
 <script src="tela-sessao.js"></script>
+<script src="tela-dogma.js"></script>
 <script src="tela-fim.js"></script>
 </body>
 </html>

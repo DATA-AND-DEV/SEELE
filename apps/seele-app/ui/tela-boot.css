@@ -43,18 +43,6 @@
 
 .subsistemas b { color: var(--seele-fosforo); margin-left: 8px; }
 
-/* `pre-line` porque dois destes erros carregam duas impressões digitais para
-   uma pessoa comparar — a chave que mudou (ADR 0003) e o convite que não leva a
-   este Dogma. Sem a quebra as duas refluem no mesmo parágrafo, que é exatamente
-   a forma em que a comparação não acontece; `anywhere` porque são 64 caracteres
-   sem espaço nenhum onde quebrar. */
-.erro {
-  margin: 16px 0 0;
-  color: var(--seele-vermelho-alerta);
-  white-space: pre-line;
-  overflow-wrap: anywhere;
-}
-
 /* ---- onde você já esteve ----
    Acima do formulário porque é o caminho mais curto para a maioria: quem abre o
    app quase sempre volta para onde já foi. Fica escondida enquanto a lista está
