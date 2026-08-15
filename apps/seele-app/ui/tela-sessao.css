@@ -1,16 +1,44 @@
 /* SEELE · Entry Plug — a tela de operação (`#tela-sessao`).
-   O cabeçalho, as faixas que a interrompem, os três painéis, a busca e a
-   telemetria. Carrega depois de `base.css`, e depende disso: `.compor input`,
-   `.busca input`, `.convite-link` e `.volume` refinam o `input` de lá, e
-   `.busca .botao-fantasma` e `.botao-falar[data-ativo]` refinam botões de lá. */
 
-/* ---------- topo ---------- */
+   A composição do comp v2, tela `principal` (`.superpowers/sdd/comp-inventario.md`
+   §3): cabeçalho, quatro colunas, rodapé de telemetria. Carrega depois de
+   `base.css`, e depende disso: `.compor input`, `.busca input`, `.convite-link`
+   e `.volume` refinam o `input` de lá, e `.busca .botao-fantasma` e
+   `.botao-falar[data-ativo]` refinam botões de lá.
+
+   Nenhuma cor literal aqui — nem em regra nem em comentário. `tests/tokens.rs`
+   cobra isso lendo o arquivo inteiro, e é por isso que os hexadecimais do comp
+   estão citados por **nome de token** e nunca por valor.
+
+   ---- as quatro colunas ----
+
+   O comp abre com uma quinta, de 56px, com a trilha de Dogmas. Ela não existe:
+   `Session` guarda um `Plug` só. As quatro que ficam são `224px 240px 1fr
+   320px`. O comp pede 316px na última; 320 é o múltiplo de 8 mais próximo, e
+   esta folha segue a célula de 8×16 mesmo onde o comp não segue — o inventário
+   §13 mede a diferença e conclui que a regra descreve a TUI, que é o cliente
+   com quem esta janela tem que combinar.
+
+   ---- peso 900 ----
+
+   A Saira Condensed do comp é 900 em 48 lugares, e `--seele-cartela` é 700: os
+   tokens não nomeiam o peso mais usado do desenho (inventário §11.5). Ele
+   aparece aqui escrito, e não inventado como token novo — nomear um token de
+   tipografia é decisão da folha de tokens, não desta. */
+
+/* ---------- topo ----------
+
+   48px, onde o comp põe 56. Mesma aritmética das colunas, logo acima: 56 não é
+   múltiplo da célula de 16 e 48 é, e das duas alturas vizinhas que o são, 48
+   é a que não empurra a conversa para baixo. As outras três faixas da tela — a
+   barra da Linha, o compositor e a telemetria — já batem com o comp na régua,
+   porque 40 e 48 são múltiplos dos dois lados. */
 
 .topo {
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 32px;
+  gap: 16px;
+  height: 48px;
   padding: 0 16px;
   border-bottom: 1px solid var(--seele-linha-forte);
   background: var(--seele-negro-painel);
@@ -19,21 +47,37 @@
 
 .marca {
   font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  letter-spacing: var(--seele-tracking-cartela);
+  font-weight: 900;
+  font-size: 20px;
+  letter-spacing: 0.06em;
   color: var(--seele-laranja-nerv);
 }
 
-.topo .kanji { color: var(--seele-osso-apagado); font-size: 11px; }
+.topo-kanji { color: var(--seele-osso-apagado); font-size: 12px; }
 
 .regua { width: 16px; height: 1px; background: var(--seele-linha-forte); }
 .regua-larga { flex: 1; }
 
-.padrao { font-size: 11px; letter-spacing: 0.1em; color: var(--seele-padrao-azul); }
+/* A cartela de padrão do comp é Saira 900 com tracking largo: ela é a primeira
+   coisa que se lê ao voltar para a janela, e era 11px de texto corrido. */
+.padrao {
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 16px;
+  letter-spacing: 0.12em;
+  color: var(--seele-padrao-azul);
+}
 .padrao[data-padrao="Orange"] { color: var(--seele-laranja-nerv); }
 .padrao[data-padrao="Offline"] { color: var(--seele-osso-apagado); }
 
-.relogio { color: var(--seele-osso-apagado); font-variant-numeric: tabular-nums; }
+.topo-piloto { font-size: var(--seele-t-rotulo); color: var(--seele-osso-apagado); }
+
+.relogio {
+  font-size: var(--seele-t-dado);
+  letter-spacing: 0.08em;
+  color: var(--seele-osso);
+  font-variant-numeric: tabular-nums;
+}
 
 /* ---------- banner ---------- */
 
@@ -55,8 +99,8 @@
 }
 
 /* O veredito de identidade. Mesma geometria do banner e a cor institucional:
-   ressalva, não queda. O vermelho é do `.banner`, e `--seele-vermelho-alerta`
-   está marcado "EXCLUSIVO alerta e queda" na folha de tokens.
+   ressalva, não queda. O vermelho é do `.banner`, e o token de vermelho está
+   marcado "EXCLUSIVO alerta e queda" na folha de tokens.
 
    `pre-line` porque a impressão digital vai em linha própria: são 64
    caracteres para comparar com outro canal, e reflui-los no meio de uma frase
@@ -79,14 +123,12 @@
   overflow-wrap: anywhere;
 }
 
-/* ---------- painéis ---------- */
+/* ---------- as quatro colunas ---------- */
 
 .paineis {
   flex: 1 1 auto;
   display: grid;
-  /* As mesmas larguras assimétricas do `plug`: 18 e 24 células, o resto para a
-     conversa. specs/05-cliente-tui.md. */
-  grid-template-columns: 176px 232px 1fr;
+  grid-template-columns: 224px 240px 1fr 320px;
   min-height: 0;
 }
 
@@ -98,140 +140,224 @@
   background: var(--seele-negro-painel);
 }
 
-.painel-mensagens { border-right: none; }
+.painel-sync { border-right: none; }
 
+/* O título de painel.
+
+   A cor sai de `--seele-rotulo-painel` e nunca de `osso-apagado` direto.
+   `docs/tokens-achados.md` mede aquela cor em 4,11:1 — que passa só como texto
+   grande — e a escala põe rótulo de painel em 9–10px, que não é texto grande;
+   o achado deixa a correção pendente entre subir a cor e garantir que nada
+   necessário dependa só dela. Enquanto ela não vem, o valor é o do comp, que
+   pinta todos os 25 rótulos de `0.2em` desta tela em `osso-apagado`, e o nome
+   semântico é o único lugar a mudar no dia da decisão. Quem quiser mais
+   contraste já o recebe: `acessibilidade.css` sobe `.painel-titulo` para osso
+   sob `prefers-contrast: more`. */
 .painel-titulo {
   margin: 0;
-  padding: 8px 16px;
-  font-size: 10px;
+  padding: 12px 16px 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-micro);
   font-weight: normal;
-  letter-spacing: var(--seele-tracking-rotulo);
-  /* Título de painel passa pelo nome semântico, e não por `osso-apagado`
-     direto: a pendência de contraste de `docs/tokens-achados.md` sobre essa cor
-     tem que caber numa linha de `tokens.css` quando for decidida. */
+  letter-spacing: 0.2em;
   color: var(--seele-rotulo-painel);
-  border-bottom: 1px solid var(--seele-linha);
   flex: 0 0 auto;
 }
 
-.lista {
-  list-style: none;
-  margin: 0;
-  padding: 8px 0;
-  overflow-y: auto;
-  flex: 1 1 auto;
+.painel-dogma .painel-titulo,
+.painel-canais > .painel-titulo:first-of-type {
+  border-bottom: 1px solid var(--seele-linha);
+  padding-bottom: 12px;
 }
 
-.lista li {
-  padding: 0 16px;
-  height: 16px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.lista .cage, .lista .linha { cursor: pointer; }
-.lista .cage:hover, .lista .linha:hover { background: var(--seele-linha); }
-.lista .aberto { color: var(--seele-laranja-nerv); }
-
-.lista .piloto { padding-left: 32px; color: var(--seele-osso-apagado); }
-.lista .piloto.falando { color: var(--seele-osso); }
-
-.presenca { width: 8px; }
-.lista .piloto.falando .presenca { color: var(--seele-fosforo); }
-
-.sync { margin-left: auto; font-variant-numeric: tabular-nums; }
-
-/* A faixa vem do core; a cor só a acompanha. O número e a marca de bloco estão
-   sempre presentes — specs/05: nenhuma informação só por cor. */
-.sync[data-faixa="Nominal"] { color: var(--seele-sync-nominal); }
-.sync[data-faixa="Acceptable"] { color: var(--seele-sync-aceitavel); }
-.sync[data-faixa="Degraded"] { color: var(--seele-sync-degradado); }
-.sync[data-faixa="Critical"] { color: var(--seele-sync-critico); }
-
-.marca-estado {
-  font-size: 10px;
-  letter-spacing: 0.05em;
+/* A coordenada (`B·03`, `C·05`). Ela continua no apagado de propósito: o achado
+   de contraste manda garantir que **informação necessária** não dependa dessa
+   cor, e a coordenada não é necessária para operar o painel — ela é o endereço
+   do painel numa conversa sobre a tela. O comp a desenha ainda mais fraca. */
+.painel-codigo {
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.02em;
   color: var(--seele-osso-apagado);
 }
 
-/* O volume por pessoa fica escondido até a linha ser apontada: `specs/03-audio.md`
-   pede o controle, e um deslizante por piloto sempre visível transformaria o
-   roster numa mesa de som. */
-.volume {
-  width: 56px;
-  margin-left: 8px;
-  accent-color: var(--seele-laranja-nerv);
-  opacity: 0;
-}
+.espaco { flex: 1; }
 
-.lista .piloto:hover .volume,
-.lista .piloto:focus-within .volume { opacity: 1; }
+/* ---------- o valor que ninguém mediu ----------
+   Metade do que o comp desenha não tem dado por trás. A moldura fica; o valor
+   sai como travessão, e o `title` diz o que faltaria.
 
-/* ---------- mensagens ---------- */
+   A cor é `.ausente`, de `base.css`, e não uma classe própria desta tela: são o
+   mesmo conceito, e a cópia local ficava de fora do realce que
+   `acessibilidade.css` dá a `.ausente` sob `prefers-contrast: more` — quem pede
+   mais contraste perdia justamente o travessão que diz "isto não existe".
 
-.mensagens {
-  list-style: none;
-  margin: 0;
-  padding: 8px 16px;
-  overflow-y: auto;
-  flex: 1 1 auto;
-}
+   O que fica aqui é só o cursor, e preso a `[title]`: cursor de ajuda sem
+   tooltip promete uma explicação que não vem. */
+.ausente[title] { cursor: help; }
 
-.mensagens li { margin-bottom: 8px; }
+/* ---------- coluna 1: a ficha do Dogma ---------- */
 
-.mensagens .cabeca {
+.ficha {
+  padding: 16px;
   display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+}
+
+.dogma-nome {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 30px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: var(--seele-osso);
+  overflow-wrap: anywhere;
+}
+
+.dogma-sub {
+  margin: 0;
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: 0.16em;
+  color: var(--seele-osso-apagado);
+}
+
+.resumo {
+  margin: 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--seele-linha);
+  display: flex;
+  flex-direction: column;
   gap: 8px;
   font-size: 11px;
-  color: var(--seele-osso-apagado);
 }
 
-.mensagens .propria .cabeca { color: var(--seele-laranja-nerv); }
-.mensagens .corpo { white-space: pre-wrap; overflow-wrap: anywhere; }
-.mensagens .editada { color: var(--seele-osso-apagado); font-size: 11px; }
-.mensagens .local .corpo { color: var(--seele-fosforo); }
+.resumo-linha { display: flex; justify-content: space-between; gap: 8px; }
+.resumo-linha dt { color: var(--seele-osso-apagado); }
+.resumo-linha dd { margin: 0; color: var(--seele-osso); text-align: right; }
 
-.compor {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border-top: 1px solid var(--seele-linha);
+/* ---------- coluna 2: Cages e Linhas ---------- */
+
+.canais {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   flex: 0 0 auto;
 }
 
-.compor .prompt { color: var(--seele-laranja-nerv); }
-.compor input { border: none; background: none; padding: 0; }
+/* A marca de 2px à esquerda é o estado, e é a mesma técnica do comp: uma barra
+   de cor na borda em vez de um fundo inteiro, para que a lista continue legível
+   com metade das linhas marcadas. */
+.canais li {
+  border-top: 1px solid var(--seele-linha);
+  border-left: 2px solid transparent;
+  padding: 10px 14px;
+  cursor: pointer;
+}
 
-/* ---------- telemetria ---------- */
+.canais li:hover { background: var(--seele-linha); }
+.canais .aberto { border-left-color: var(--seele-laranja-nerv); }
 
-.telemetria {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  height: 32px;
-  padding: 0 16px;
-  border-top: 1px solid var(--seele-linha-forte);
-  background: var(--seele-negro-painel);
+.cage { display: flex; flex-direction: column; gap: 4px; }
+
+.canal-cabeca { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+
+.cage-nome {
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  color: var(--seele-osso);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cage.aberto .cage-nome { color: var(--seele-laranja-nerv); }
+
+/* `4/8` — o acompanhante textual da barra. `specs/05-cliente-tui.md`: a barra
+   é forma, e a forma sozinha não é informação suficiente. */
+.cage-ocupacao {
+  font-size: var(--seele-t-rotulo);
+  color: var(--seele-osso-apagado);
   font-variant-numeric: tabular-nums;
   flex: 0 0 auto;
 }
 
-.metrica { display: flex; gap: 8px; align-items: baseline; }
-.espaco { flex: 1; }
+.barra {
+  display: block;
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: 0.04em;
+  line-height: 16px;
+  color: var(--seele-linha-forte);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.cage.aberto .barra { color: var(--seele-laranja-nerv); }
+
+.linha {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.linha-rotulo {
+  font-size: var(--seele-t-dado);
+  color: var(--seele-osso);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.linha.aberto .linha-rotulo { color: var(--seele-laranja-nerv); }
+
+.painel-titulo-linhas {
+  border-top: 1px solid var(--seele-linha);
+  margin-top: 16px;
+  padding-top: 20px;
+}
+
+/* A tira do operador. */
+.operador {
+  border-top: 1px solid var(--seele-linha);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.operador-rotulo {
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.2em;
+  color: var(--seele-rotulo-painel);
+}
+
+.operador-nome {
+  font-size: var(--seele-t-dado);
+  color: var(--seele-padrao-azul);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operador .botao-estado { width: 100%; text-align: left; }
 
 .botao-estado {
   font: inherit;
-  font-size: 11px;
-  letter-spacing: 0.05em;
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: 0.14em;
   color: var(--seele-osso-apagado);
   background: none;
   border: 1px solid var(--seele-linha-forte);
-  padding: 2px 8px;
+  padding: 8px;
   cursor: pointer;
 }
 
@@ -241,12 +367,389 @@
   border-color: var(--seele-laranja-nerv);
 }
 
-#botao-falar[data-ativo="sim"] {
-  background: var(--seele-fosforo);
-  border-color: var(--seele-fosforo);
+.botao-estado:disabled { opacity: 0.5; cursor: default; }
+
+/* ---------- coluna 3: a Linha aberta ---------- */
+
+.painel-linha { background: var(--seele-negro-absoluto); }
+
+.linha-barra {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 40px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--seele-linha);
+  flex: 0 0 auto;
 }
 
-.falha-local { color: var(--seele-vermelho-alerta); font-size: 11px; }
+.linha-nome {
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: 16px;
+  letter-spacing: 0.1em;
+  color: var(--seele-osso);
+  white-space: nowrap;
+}
+
+.linha-registro {
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: 0.16em;
+  color: var(--seele-osso-apagado);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- mensagens ---------- */
+
+.mensagens {
+  list-style: none;
+  margin: 0;
+  padding: 16px 16px 8px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* A grade do comp: 76px para a hora, o resto para autor e corpo, e uma marca de
+   1px à esquerda. A marca é onde o comp separa mensagem de sistema e de alerta;
+   `Message` não tem tipo, então aqui ela só separa a própria das outras. */
+.mensagem {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 12px;
+  border-left: 1px solid var(--seele-linha);
+  padding-left: 12px;
+}
+
+.mensagem.propria { border-left-color: var(--seele-linha-forte); }
+
+.mensagem-hora {
+  font-size: 11px;
+  padding-top: 2px;
+  color: var(--seele-osso-apagado);
+  font-variant-numeric: tabular-nums;
+}
+
+.mensagem-conteudo { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.mensagem-autor {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--seele-osso-apagado);
+}
+
+.mensagem.propria .mensagem-autor { color: var(--seele-laranja-nerv); }
+
+/* `pre-wrap`, e isto é contratual: a busca do outro lado da ponte indexou esta
+   string com as quebras de linha dentro, e colapsá-las aqui deslocaria o realce
+   em toda mensagem de mais de uma linha. */
+.mensagem .corpo {
+  font-size: var(--seele-t-corpo);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+.mensagens .editada { color: var(--seele-osso-apagado); font-size: 11px; }
+
+.compor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  height: 48px;
+  border-top: 1px solid var(--seele-linha);
+  flex: 0 0 auto;
+}
+
+.compor .prompt { color: var(--seele-laranja-nerv); font-size: var(--seele-t-corpo); }
+
+.compor input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  padding: 8px 0;
+  font-size: var(--seele-t-corpo);
+}
+
+/* A dica é a instrução, e é por isso que ela está na tela e não num manual. */
+.compor-dica {
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.16em;
+  color: var(--seele-osso-apagado);
+  flex: 0 0 auto;
+}
+
+/* ---------- coluna 4: Taxa de Sincronização ---------- */
+
+/* A cartela invertida. O inventário §12 endurece essa regra no v2: cabeçalho de
+   painel de sincronia é **bloco sólido de cor com texto no negro absoluto**, e
+   nunca texto colorido sobre fundo escuro. É a ênfase invertida da TUI. */
+.sync-cartela {
+  margin: 0;
+  padding: 8px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  background: var(--seele-laranja-nerv);
+  color: var(--seele-negro-absoluto);
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 15px;
+  letter-spacing: 0.14em;
+  flex: 0 0 auto;
+}
+
+.sync-kanji {
+  font-weight: 900;
+  font-size: var(--seele-t-dado);
+  letter-spacing: 0;
+}
+
+.sync-media {
+  padding: 16px;
+  border-bottom: 1px solid var(--seele-linha);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+
+.sync-media-legenda { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+
+.sync-media-rotulo {
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.2em;
+  color: var(--seele-rotulo-painel);
+}
+
+.sync-amostra { font-size: 11px; color: var(--seele-osso-apagado); }
+
+/* O bloco de 52px, invertido: o fundo é a faixa, o texto é o negro absoluto.
+   A marca de bloco vai junto, em face monoespaçada, porque a Saira Condensed
+   não tem `U+2588` — e sem ela a faixa seria cor e nada mais, que é o que
+   `specs/05-cliente-tui.md` proíbe.
+
+   Sem `magiRespiro`. O comp anima este bloco em 2400ms infinitos, e
+   `specs/07-tema-evangelion.md` diz que movimento é diagnóstico: a varredura é
+   a única exceção nomeada, e uma média que pulsa igual estando em 98 ou em 41
+   não diagnostica nada. */
+.sync-media-bloco {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 10px 0;
+  background: var(--seele-linha);
+  color: var(--seele-osso-apagado);
+  flex: 0 0 auto;
+}
+
+.sync-media-bloco[data-faixa] { color: var(--seele-negro-absoluto); }
+.sync-media-bloco[data-faixa="Nominal"] { background: var(--seele-sync-nominal); }
+.sync-media-bloco[data-faixa="Degraded"] { background: var(--seele-sync-degradado); }
+.sync-media-bloco[data-faixa="Critical"] { background: var(--seele-sync-critico); }
+
+.sync-marca {
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.sync-media-valor {
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 52px;
+  line-height: 0.86;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Sem faixa não há bloco invertido: um travessão num campo laranja pareceria
+   uma medida. Ele volta a ser texto apagado sobre o painel. */
+.sync-media-bloco:not([data-faixa]) .sync-media-valor { font-size: var(--seele-t-secao); }
+
+.roster {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1 1 auto;
+}
+
+.roster .piloto {
+  border-bottom: 1px solid var(--seele-linha);
+  border-left: 2px solid transparent;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Quem está falando ganha a marca e o fundo, como no comp. */
+.roster .piloto.falando {
+  border-left-color: var(--seele-fosforo);
+  background: var(--seele-fosforo-fraco);
+}
+
+.piloto-cabeca { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+
+.piloto-identidade { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+
+.piloto-nome {
+  font-size: var(--seele-t-dado);
+  letter-spacing: 0.06em;
+  color: var(--seele-osso);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.piloto-tag { font-size: var(--seele-t-micro); letter-spacing: 0.1em; }
+
+.piloto-sync { display: flex; align-items: baseline; gap: 6px; flex: 0 0 auto; }
+
+.piloto-sync-valor {
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 26px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A faixa pinta a marca, o número e a barra — nunca o nome, que precisa ser
+   legível em qualquer estado. O acompanhante não-cromático é a marca de bloco,
+   que é diferente em cada uma das três faixas. */
+.piloto[data-faixa="Nominal"] .piloto-sync,
+.piloto[data-faixa="Nominal"] .barra { color: var(--seele-sync-nominal); }
+.piloto[data-faixa="Degraded"] .piloto-sync,
+.piloto[data-faixa="Degraded"] .barra { color: var(--seele-sync-degradado); }
+.piloto[data-faixa="Critical"] .piloto-sync,
+.piloto[data-faixa="Critical"] .barra { color: var(--seele-sync-critico); }
+
+.piloto .barra { font-size: 11px; letter-spacing: 0.02em; }
+
+.piloto-rodape {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.12em;
+}
+
+.piloto-atraso { color: var(--seele-osso-apagado); }
+.rotulo-micro { font-weight: normal; }
+
+.piloto-estados { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+/* A pastilha de estado: bloco sólido, texto no negro absoluto (inventário §12).
+
+   `EM ESCUTA` não ganha bloco, e a ausência é do comp e não economia daqui: o
+   `estadoFundo` dele é `transparent` e o `estadoTxt` é o apagado, contra o
+   laranja e o fósforo dos outros dois. É o que separa os dois estados que
+   mudam alguma coisa do repouso, que é onde toda linha está quase sempre —
+   seis pastilhas sólidas empilhadas não distinguiriam nada. Sem contorno
+   tampouco: uma moldura em volta do repouso é o mesmo peso por outro meio. */
+.pastilha {
+  padding: 2px 6px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--seele-negro-absoluto);
+}
+
+.pastilha[data-estado="at"] { background: var(--seele-laranja-nerv); }
+.pastilha[data-estado="fala"] { background: var(--seele-fosforo); }
+.pastilha[data-estado="surdo"] { background: var(--seele-osso); }
+.pastilha[data-estado="escuta"] {
+  background: none;
+  color: var(--seele-osso-apagado);
+}
+
+/* O volume por pessoa fica escondido até a linha ser apontada: `specs/03-audio.md`
+   pede o controle, e um deslizante por piloto sempre visível transformaria o
+   roster numa mesa de som. */
+.volume {
+  width: 100%;
+  accent-color: var(--seele-laranja-nerv);
+  opacity: 0;
+}
+
+.roster .piloto:hover .volume,
+.roster .piloto:focus-within .volume { opacity: 1; }
+
+/* ---------- rodapé de telemetria ---------- */
+
+.telemetria {
+  display: flex;
+  align-items: stretch;
+  height: 40px;
+  border-top: 1px solid var(--seele-linha-forte);
+  background: var(--seele-negro-painel);
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.metrica {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  border-right: 1px solid var(--seele-linha);
+  white-space: nowrap;
+}
+
+.metrica .rotulo {
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.18em;
+  font-weight: normal;
+  color: var(--seele-osso-apagado);
+}
+
+.metrica span { font-size: 12px; color: var(--seele-osso); }
+
+.falha-local {
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  color: var(--seele-vermelho-alerta);
+  font-size: 11px;
+}
+
+/* As três luzes. O quadrado é vazado porque não há leitura: o protocolo sabe
+   dizer que **algo** mudou de subsistema (`NoticeReason::SubsystemChanged`) e
+   não qual nem para qual estado. Três quadrados cheios em fósforo seriam três
+   afirmações de saúde que ninguém mediu. */
+.magi {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.magi li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  border-left: 1px solid var(--seele-linha);
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.14em;
+  color: var(--seele-osso-apagado);
+}
+
+.magi-marca {
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--seele-osso-apagado);
+}
 
 /* ---- convite, para quem está hospedando ---- */
 .convite {
@@ -322,10 +825,10 @@
 .na-bateria .compor { opacity: 0.4; }
 
 /* ---- o botão de falar diz o que fazer ---- */
-.botao-falar { min-width: 152px; }
 .botao-falar[data-ativo="sim"] {
   color: var(--seele-negro-absoluto);
   background: var(--seele-fosforo);
+  border-color: var(--seele-fosforo);
 }
 
 /* ---- a busca no painel de mensagens ---- */
@@ -346,11 +849,10 @@
    proíbe informação transmitida só por cor, e "[2/7]" é a mesma informação sem
    depender de enxergar o laranja.
 
-   Osso, e não osso-apagado. O `tokens.css` anota o apagado como "4,11:1 só
-   texto grande", e 10px não é texto grande — o mínimo que vale aqui é 4,5:1.
-   Um rótulo secundário podia viver com isso; este elemento não, porque ele é
-   precisamente a metade não-cromática de que o realce não pode abrir mão. Osso
-   sobre o painel dá 15,60:1. */
+   Osso, e não osso-apagado. O `tokens.css` anota o apagado como "só texto
+   grande", e 10px não é texto grande — o mínimo que vale aqui é 4,5:1. Um
+   rótulo secundário podia viver com isso; este elemento não, porque ele é
+   precisamente a metade não-cromática de que o realce não pode abrir mão. */
 .busca-contador {
   font-size: var(--seele-t-rotulo);
   color: var(--seele-osso);
@@ -363,13 +865,7 @@
    O terminal resolveu isto com REVERSED contra o acento puro (`ui.rs`), e aqui
    é a mesma ideia com o que o navegador tem: o corrente inverte o bloco e
    engrossa o traço. Sem cor nenhuma continuam distintos — um é texto claro
-   sobre bloco escuro, o outro é texto escuro sobre bloco claro e em negrito.
-
-   O texto do realce era o laranja sobre o laranja-fraco, o par de menor
-   contraste da tela: um trecho **achado** ficava mais difícil de ler do que o
-   corpo em volta, que é o contrário do que um realce é para fazer. Osso sobre
-   laranja-fraco dá 12,95:1, e o laranja fica onde ele diz o mesmo sem custar
-   legibilidade — no sublinhado e no bloco do corrente. */
+   sobre bloco escuro, o outro é texto escuro sobre bloco claro e em negrito. */
 .realce {
   background: var(--seele-laranja-fraco);
   color: var(--seele-osso);

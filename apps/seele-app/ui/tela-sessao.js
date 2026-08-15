@@ -4,6 +4,24 @@
 // estado derivado. Também a busca, a faixa de veredito, a bateria interna, o
 // push-to-talk e a caixa de convite de quem hospeda — tudo que só existe
 // enquanto há sessão.
+//
+// ---- o que esta tela desenha, e o que ela recusa a desenhar ----
+//
+// A composição é a do comp v2 (`design/Entry Plug v2.dc.html`, tela
+// `principal`), inventariada em `.superpowers/sdd/comp-inventario.md` §3.
+// Quatro colunas: a ficha do Dogma, os canais, a Linha aberta, a Taxa de
+// Sincronização.
+//
+// Boa parte do que o comp desenha não tem dado por trás — o inventário §16
+// conta 23 valores nessa situação. A regra seguida aqui é uma só: **desenhar a
+// moldura e deixar o valor visivelmente não medido**. Nada de número plausível,
+// nada de campo apagado da tela. `crates/seele-core/src/state.rs` guarda essa
+// mesma ideia num teste cujo nome é a frase inteira — uma taxa não medida lê
+// zero, e não cem. Um travessão com `title` é o oposto de um número inventado:
+// ele diz que ninguém mediu, e diz por quê.
+//
+// O que ficou sem dado, e o que cada um exigiria, está em
+// `.superpowers/sdd/tela-dogma.md`.
 
 "use strict";
 
@@ -13,6 +31,26 @@ let desenhado = null;
 let linhaAberta = null;
 /** Se a barra de espaço já está segurando o microfone. */
 let falando = false;
+/**
+ * Quando esta sessão começou a ser desenhada, para o campo `UPTIME`.
+ *
+ * O inventário §16 classifica o uptime como **local**: não é um valor que
+ * atravesse a fronteira, é o relógio desta máquina contando desde a conexão.
+ * O instante registrado é o do primeiro snapshot desenhado, que é a primeira
+ * volta de IPC depois de `connect` — a diferença para o instante da conexão é o
+ * tempo de um `await`, e não vale um campo novo no protocolo para corrigir.
+ *
+ * `null` fora de sessão, e zerado ao ejetar: um uptime que sobrevive à sessão
+ * conta o tempo de outro Dogma.
+ *
+ * `comeco`, e a escolha da palavra não é gosto: `tests/frontend.rs` proíbe a
+ * tradução portuguesa de `start` em qualquer script, porque é assim que o campo
+ * de um `Match` chegaria se alguém traduzisse os nomes que a busca serializa —
+ * e ali a tradução desenha `<mark>` vazio, calada, sem erro em lugar nenhum. O
+ * guarda é literal de propósito, e a palavra que ele veta não tem sinônimo
+ * seguro: este relógio não tem nada a ver com busca e mesmo assim o reprovava.
+ */
+let comecoDaSessao = null;
 /** Volume por apelido, para o deslizante não pular de volta a cada redesenho. */
 const volumes = new Map();
 /**
@@ -32,6 +70,49 @@ let casamentosPorMensagem = new Map();
  * livre para discordar.
  */
 let ocorrenciaAtual = null;
+
+// ------------------------------------------------- o valor que ninguém mediu
+
+/** O que se escreve onde havia para escrever um número e não há. */
+const SEM_MEDIDA = "—";
+
+/**
+ * Marca um campo como não medido, e diz o que faltaria para medi-lo.
+ *
+ * O travessão é o mesmo que `quando()` já usava em `base.js`, e é deliberado
+ * que ele **não** se pareça com um valor: um `0`, um `--` ou um `···` no lugar
+ * de uma contagem de operadores seriam lidos como "zero operadores", "ainda
+ * carregando" e "medindo", e nenhuma das três é verdade. A verdade é que este
+ * produto não tem por onde saber.
+ *
+ * O motivo vai no `title` e não num rodapé: ele responde a uma pergunta que só
+ * quem reparou no travessão está fazendo.
+ */
+function naoMedido(nodo, motivo) {
+  nodo.textContent = SEM_MEDIDA;
+  nodo.classList.add("ausente");
+  nodo.title = motivo;
+}
+
+/** O contrário: um valor que existe, no mesmo campo. */
+function medido(nodo, texto) {
+  nodo.textContent = texto;
+  nodo.classList.remove("ausente");
+  nodo.removeAttribute("title");
+}
+
+/**
+ * A barra de blocos do comp: `n` células, cheias na proporção de `pct`.
+ *
+ * Igual à `blocos()` do comp e à da TUI, e a igualdade é o ponto — 20 blocos
+ * são 5% cada nos dois clientes, e quem aprendeu a ler a barra no terminal lê
+ * a mesma barra aqui. Nunca sozinha: o número que ela desenha está sempre ao
+ * lado (`specs/05-cliente-tui.md`).
+ */
+function blocos(pct, total) {
+  const cheios = Math.max(0, Math.min(total, Math.round((pct / 100) * total)));
+  return "█".repeat(cheios) + "░".repeat(total - cheios);
+}
 
 // ------------------------------------------------------------------ veredito
 
@@ -102,10 +183,16 @@ function desenhar(snapshot) {
     return;
   }
 
+  // O primeiro quadro da sessão é onde o uptime começa a contar.
+  if (comecoDaSessao === null) comecoDaSessao = Date.now();
+
   desenharTopo(snapshot);
-  desenharDogma(snapshot);
+  desenharFicha(snapshot);
   desenharCanais(snapshot);
+  desenharOperador(snapshot);
+  desenharLinha(snapshot);
   desenharMensagens(snapshot);
+  desenharSync(snapshot);
   desenharTelemetria(snapshot);
   desenharAviso(snapshot);
 
@@ -120,84 +207,134 @@ function desenharTopo(snapshot) {
     Orange: "PADRÃO: LARANJA",
     Blue: "PADRÃO: AZUL",
   }[snapshot.pattern];
+
+  $("topo-piloto").textContent = snapshot.nickname;
 }
 
-function desenharDogma(snapshot) {
-  if (desenhado && desenhado.dogma === snapshot.dogma) return;
-  const item = elemento("li", "aberto", snapshot.dogma || "—");
-  repovoar($("lista-dogma"), [item]);
+/**
+ * A ficha da sala — `C·02 / DOGMA`.
+ *
+ * Cinco campos, três medidos. `OPERADORES` e `ROTA` continuam desenhados e
+ * vazios: ver o bloco no topo deste arquivo.
+ */
+function desenharFicha(snapshot) {
+  $("dogma-nome").textContent = snapshot.dogma || SEM_MEDIDA;
+
+  // O `Snapshot` só conhece quem está sentado em Cage. Não há população do
+  // Dogma em lugar nenhum do protocolo, e somar os assentos ocupados daria uma
+  // contagem menor com cara de contagem certa.
+  naoMedido(
+    $("resumo-operadores"),
+    "o protocolo não carrega a população do Dogma, só quem está sentado em Cage",
+  );
+
+  // Estes dois o snapshot tem inteiros: `cages` e `lines` chegam completos.
+  medido($("resumo-cages"), String(snapshot.cages.length).padStart(2, "0"));
+  medido($("resumo-linhas"), String(snapshot.lines.length).padStart(2, "0"));
+
+  const codec = $("resumo-codec");
+  if (!snapshot.audio_available) {
+    // Ausência conhecida, e não medida por falta: esta sessão não tem áudio, e
+    // dizer "SEM ÁUDIO" é um fato, não um buraco.
+    medido(codec, "SEM ÁUDIO");
+  } else {
+    medido(codec, `OPUS ${Math.round(snapshot.telemetry.bitrate_bps / 1000)}k`);
+  }
+
+  // O comp mostra `BALTHASAR·01` em sete lugares. O conceito de rota não existe
+  // no core — nem por Dogma, nem por piloto.
+  naoMedido($("resumo-rota"), "o protocolo não tem o conceito de rota");
 }
 
+/**
+ * Os Cages e as Linhas, em duas listas com cabeçalho próprio.
+ *
+ * A ocupação de **todo** Cage é desenhável hoje, e não só a do ocupado:
+ * `cages_of` popula `pilots` a partir de `room.roster(cage.id)` para cada Cage
+ * (inventário §16). Era o que o app escondia num `title=`.
+ */
 function desenharCanais(snapshot) {
-  const linhas = [];
-
-  for (const cage of snapshot.cages) {
+  const cages = snapshot.cages.map((cage) => {
     const item = elemento("li", cage.occupied_by_us ? "cage aberto" : "cage");
-    // O triângulo de abertura, desenhado (`ui/glifos.js`). Sem nome acessível:
-    // ele vem imediatamente antes do nome do Cage, e anunciá-lo seria uma
-    // palavra a mais em cada linha do painel.
-    const abertura = elemento("span", null);
-    abertura.append(glifo(cage.occupied_by_us ? "aberto" : "fechado"));
-    item.append(abertura, elemento("span", null, cage.name));
     item.dataset.cage = String(cage.id);
-    item.title = `${cage.pilots.length}/${cage.limit}`;
-    linhas.push(item);
 
-    // Pilotos aninhados sob o Cage que está aberto, como no `plug`.
-    if (!cage.occupied_by_us) continue;
-    for (const piloto of cage.pilots) {
-      const linha = elemento("li", piloto.speaking ? "piloto falando" : "piloto");
-      // A bolinha cheia e a vazada, desenhadas. `.presenca` continua com uma
-      // célula de largura e a cor continua vindo de
-      // `.lista .piloto.falando .presenca`, porque o desenho pinta com
-      // `currentColor`.
-      const presenca = elemento("span", "presenca");
-      presenca.append(glifo(piloto.speaking ? "falando" : "silencio"));
-      linha.append(
-        presenca,
-        elemento("span", null, piloto.nickname + (piloto.is_self ? " (você)" : "")),
-      );
+    const cabeca = elemento("span", "canal-cabeca");
+    cabeca.append(elemento("span", "cage-nome", cage.name));
 
-      // A.T. Field e isolamento total têm marcador textual além da cor.
-      if (piloto.at_field) linha.append(elemento("span", "marca-estado", "A.T."));
-      else if (piloto.total_isolation) linha.append(elemento("span", "marca-estado", "SURDO"));
+    // A ocupação é o acompanhante textual da barra: a barra sozinha é forma, e
+    // `4/8` é o número que sobrevive a qualquer paleta.
+    const ocupacao = cage.limit > 0 ? (cage.pilots.length / cage.limit) * 100 : 0;
+    cabeca.append(elemento("span", "cage-ocupacao", `${cage.pilots.length}/${cage.limit}`));
 
-      const sync = elemento(
-        "span",
-        "sync",
-        `${marcaSync(piloto.sync_band)}${String(piloto.sync_ratio).padStart(3, " ")}%`,
-      );
-      sync.dataset.faixa = piloto.sync_band;
-      linha.append(sync);
+    const barra = elemento("span", "barra", blocos(ocupacao, 12));
+    barra.setAttribute("aria-hidden", "true");
 
-      // Volume por pessoa (`specs/03-audio.md`). Não para nós mesmos: baixar o
-      // próprio volume não faz nada, porque a própria voz nunca entra na mistura.
-      if (!piloto.is_self && snapshot.audio_available) {
-        const volume = document.createElement("input");
-        volume.type = "range";
-        volume.className = "volume";
-        volume.min = "0";
-        volume.max = "200";
-        volume.step = "10";
-        volume.value = String(volumes.get(piloto.nickname) ?? 100);
-        volume.title = `volume de ${piloto.nickname}`;
-        volume.dataset.piloto = piloto.nickname;
-        linha.append(volume);
-      }
+    item.append(cabeca, barra);
+    return item;
+  });
+  repovoar($("lista-cages"), cages);
 
-      linhas.push(linha);
-    }
-  }
-
-  for (const linha of snapshot.lines) {
+  const linhas = snapshot.lines.map((linha) => {
     const item = elemento("li", linha.open ? "linha aberto" : "linha");
-    item.append(elemento("span", null, "─"), elemento("span", null, `LINHA ${linha.name}`));
     item.dataset.linha = String(linha.id);
-    linhas.push(item);
-    if (linha.open) linhaAberta = linha.id;
-  }
+    item.append(elemento("span", "linha-rotulo", linha.name));
 
-  repovoar($("lista-canais"), linhas);
+    // As pendências por Linha são a marca laranja do comp. `Line` é
+    // `{id, name, open}` — não há contagem de não-lidas nem marca d'água de
+    // leitura em lugar nenhum do core.
+    const pendencias = elemento("span", null);
+    naoMedido(pendencias, "o protocolo não carrega pendências por Linha");
+    item.append(pendencias);
+
+    if (linha.open) linhaAberta = linha.id;
+    return item;
+  });
+  repovoar($("lista-linhas"), linhas);
+}
+
+/** A tira do operador, no rodapé da coluna de canais. */
+function desenharOperador(snapshot) {
+  $("operador-nome").textContent = snapshot.nickname;
+
+  // Os rótulos são os do comp: o botão diz em que estado o A.T. Field está, e
+  // não o que apertá-lo vai fazer. Um botão escrito com o verbo é um botão que
+  // ninguém sabe ler quando volta a olhar para a tela.
+  const mudo = $("botao-mudo");
+  mudo.textContent = snapshot.at_field ? "A.T. FIELD ATIVO" : "A.T. FIELD INATIVO";
+  mudo.dataset.ativo = snapshot.at_field ? "sim" : "nao";
+
+  const surdo = $("botao-surdo");
+  surdo.textContent = snapshot.total_isolation ? "ISOLAMENTO TOTAL" : "OUVINDO";
+  surdo.dataset.ativo = snapshot.total_isolation ? "sim" : "nao";
+
+  const voz = $("botao-voz");
+  // "MODO:" na frente porque `TECLA` sozinho não diz que é um seletor — e um
+  // seletor que ninguém reconhece como seletor é um botão que ninguém aperta.
+  voz.textContent = { PushToTalk: "MODO: TECLA", VoiceActivated: "MODO: VOZ", Open: "MODO: ABERTO" }[
+    snapshot.voice_mode
+  ] ?? "TECLA";
+  voz.disabled = !snapshot.audio_available;
+  voz.dataset.ativo = snapshot.voice_mode === "Open" ? "sim" : "nao";
+
+  const falar = $("botao-falar");
+  falar.dataset.ativo = snapshot.speaking ? "sim" : "nao";
+  // O rótulo é a instrução. Um botão escrito "FALAR" que não faz nada ao ser
+  // clicado é pior que nenhum botão: ensina a coisa errada.
+  $("falar-rotulo").textContent = snapshot.speaking
+    ? "NO AR"
+    : { PushToTalk: "SEGURE ESPAÇO", VoiceActivated: "FALE", Open: "MICROFONE ABERTO" }[
+        snapshot.voice_mode
+      ] ?? "SEGURE ESPAÇO";
+  falar.disabled = !snapshot.audio_available;
+  falar.title = snapshot.audio_available
+    ? "segure a barra de espaço, ou este botão"
+    : "esta sessão não tem áudio";
+}
+
+/** A barra de 40px da Linha aberta. */
+function desenharLinha(snapshot) {
+  const aberta = snapshot.lines.find((linha) => linha.open);
+  $("linha-nome").textContent = `LINHA ${aberta ? aberta.name : SEM_MEDIDA}`;
 }
 
 function desenharMensagens(snapshot) {
@@ -207,13 +344,17 @@ function desenharMensagens(snapshot) {
   const noFim = lista.scrollHeight - lista.scrollTop - lista.clientHeight < 32;
 
   const itens = snapshot.messages.map((mensagem, indice) => {
-    const item = elemento("li", mensagem.own ? "propria" : null);
-    const cabeca = elemento("div", "cabeca");
-    cabeca.append(
-      elemento("span", null, relogio(mensagem.at_seconds)),
-      elemento("span", null, mensagem.author_nickname),
-    );
-    if (mensagem.edited) cabeca.append(elemento("span", "editada", "editada"));
+    // A grade do comp: uma coluna de 76px para a hora, o resto para autor e
+    // corpo. A marca de 2px à esquerda é onde o comp distingue mensagem de
+    // sistema e de alerta — `Message` não tem tipo (inventário §16), então só
+    // duas larguras existem aqui: a própria e a dos outros.
+    const item = elemento("li", mensagem.own ? "mensagem propria" : "mensagem");
+    item.append(elemento("span", "mensagem-hora", relogio(mensagem.at_seconds)));
+
+    const conteudo = elemento("span", "mensagem-conteudo");
+    const cabeca = elemento("span", "mensagem-autor", mensagem.author_nickname);
+    conteudo.append(cabeca);
+    if (mensagem.edited) conteudo.append(elemento("span", "editada", "editada"));
 
     // O corpo **cru**, e isto não é detalhe de pintura. `.mensagens .corpo` é
     // `white-space: pre-wrap`: esta janela mostra quebra de linha e espaço
@@ -221,10 +362,12 @@ function desenharMensagens(snapshot) {
     // ponte recebeu. Colapsar aqui deslocaria o realce em toda mensagem de mais
     // de uma linha; colapsar dos dois lados alinharia o realce achatando a
     // conversa, que é o preço errado a pagar por um índice.
-    const corpo = elemento("div", "corpo");
+    const corpo = elemento("span", "corpo");
     const aceso = ocorrenciaAtual?.indice === indice ? ocorrenciaAtual.ordinal : null;
     corpo.append(...corpoComRealce(mensagem.body, casamentosPorMensagem.get(indice), aceso));
-    item.append(cabeca, corpo);
+    conteudo.append(corpo);
+
+    item.append(conteudo);
     return item;
   });
 
@@ -272,53 +415,210 @@ function corpoComRealce(corpo, intervalos, aceso = null) {
   return pedacos;
 }
 
+// ------------------------------------------------- taxa de sincronização
+
+/**
+ * O painel da direita: a média do Cage e uma linha por piloto.
+ *
+ * A média **não é calculada aqui**. Ela chega em `cage.sync` já com faixa e com
+ * o tamanho da amostra, decidida uma vez no core — `types.rs` argumenta que
+ * duas cascas com duas cópias de "85 é nominal" são duas cascas que discordam
+ * no dia em que uma delas for atualizada, e o comp faz exatamente essa cópia
+ * (`corSync(media)` na casca). `null` quando o Cage está vazio: um Cage sem
+ * ninguém não tem média, e zero pintaria toda sala parada de vermelho.
+ */
+function desenharSync(snapshot) {
+  const cage = snapshot.cages.find((c) => c.occupied_by_us);
+
+  desenharMedia(cage);
+
+  // Dentro de um Cage, o roster é quem está nele. Fora, é o próprio operador:
+  // a Taxa de Sincronização é a medida que `specs/05-cliente-tui.md` chama de
+  // permanente, e sumir com ela porque ninguém inseriu o plug ainda seria
+  // escondê-la justo enquanto se decide em qual Cage entrar.
+  const pilotos = cage
+    ? cage.pilots.map((piloto) => ({
+        nome: piloto.nickname + (piloto.is_self ? " (você)" : ""),
+        ratio: piloto.sync_ratio,
+        faixa: piloto.sync_band,
+        falando: piloto.speaking,
+        atField: piloto.at_field,
+        isolado: piloto.total_isolation,
+        // O deslizante é dos outros: baixar o próprio volume não faz nada,
+        // porque a própria voz nunca entra na mistura (`specs/03-audio.md`).
+        volume: piloto.is_self ? null : piloto.nickname,
+      }))
+    : [
+        {
+          nome: `${snapshot.nickname} (você)`,
+          ratio: snapshot.telemetry.sync_ratio,
+          faixa: snapshot.telemetry.sync_band,
+          falando: snapshot.speaking,
+          atField: snapshot.at_field,
+          isolado: snapshot.total_isolation,
+          volume: null,
+        },
+      ];
+
+  repovoar(
+    $("lista-roster"),
+    pilotos.map((piloto) => linhaDoRoster(piloto, snapshot.audio_available)),
+  );
+}
+
+/** O bloco invertido de 52px, e a legenda ao lado dele. */
+function desenharMedia(cage) {
+  const bloco = $("sync-media-bloco");
+  const valor = $("sync-media-valor");
+  const marca = $("sync-media-marca");
+  const amostra = $("sync-amostra");
+
+  if (!cage || !cage.sync) {
+    // Sem plug inserido, ou num Cage vazio. Não é uma média baixa: é a ausência
+    // de qualquer coisa para tirar média de.
+    delete bloco.dataset.faixa;
+    marca.textContent = "";
+    naoMedido(valor, cage ? "este Cage está vazio" : "nenhum plug inserido");
+    naoMedido(amostra, cage ? "este Cage está vazio" : "nenhum plug inserido");
+    return;
+  }
+
+  const sync = cage.sync;
+  bloco.dataset.faixa = sync.band;
+  // A marca de bloco é a metade que sobrevive sem cor. Ela fica em face
+  // monoespaçada ao lado do número porque a Saira Condensed, que desenha o
+  // número, não tem `U+2588`.
+  marca.textContent = marcaSync(sync.band);
+  medido(valor, String(sync.ratio));
+  medido(amostra, `${sync.pilots} ${sync.pilots === 1 ? "PLUG" : "PLUGS"}`);
+}
+
+/**
+ * Uma linha do roster.
+ *
+ * Quatro faixas de informação, e todas as quatro têm acompanhante textual: o
+ * número ao lado da marca de bloco, a barra de 20 blocos, o atraso, e a
+ * pastilha de estado. Nenhuma delas depende de enxergar a cor
+ * (`specs/05-cliente-tui.md`).
+ */
+function linhaDoRoster(piloto, temAudio) {
+  const item = elemento("li", piloto.falando ? "piloto falando" : "piloto");
+  item.dataset.faixa = piloto.faixa;
+
+  const cabeca = elemento("span", "piloto-cabeca");
+  const identidade = elemento("span", "piloto-identidade");
+  identidade.append(elemento("span", "piloto-nome", piloto.nome));
+
+  // `MELCHIOR·01` no comp. `Pilot` não tem o subsistema que atende o piloto, e
+  // o protocolo não carrega qual seria.
+  const tag = elemento("span", "piloto-tag");
+  naoMedido(tag, "o protocolo não diz qual subsistema atende cada piloto");
+  identidade.append(tag);
+
+  const numero = elemento("span", "piloto-sync");
+  // A marca de bloco antes do número, pela mesma razão que na média: a Saira
+  // desenha o número e não tem o bloco.
+  numero.append(
+    elemento("span", "sync-marca", marcaSync(piloto.faixa)),
+    // Inteiro, e não `98.4`: `sync_ratio` é `u8` em todo ponto onde existe, e
+    // uma casa decimal aqui seria precisão inventada no último passo.
+    elemento("span", "piloto-sync-valor", String(piloto.ratio)),
+  );
+
+  cabeca.append(identidade, numero);
+
+  const barra = elemento("span", "barra", blocos(piloto.ratio, 20));
+  barra.setAttribute("aria-hidden", "true");
+
+  const rodape = elemento("span", "piloto-rodape");
+  const atraso = elemento("span", "piloto-atraso");
+  atraso.append(elemento("b", "rotulo-micro", "ATRASO"), document.createTextNode(" "));
+  const valorAtraso = elemento("span", null);
+  // `Telemetry` é a **nossa** conexão. Latência por par não atravessa a
+  // fronteira e não é derivável de nada que atravesse.
+  naoMedido(valorAtraso, "o RTT medido é o desta máquina, não o de cada piloto");
+  atraso.append(valorAtraso);
+
+  const estados = elemento("span", "piloto-estados");
+  // A pastilha do comp: bloco sólido com texto no negro absoluto, e não texto
+  // colorido. `PLUG EJETADO` é o quarto estado do comp e não aparece aqui —
+  // quem sai some de `cage.pilots`, e manter a lápide exigiria ou um campo de
+  // estado no `Pilot`, ou esta casca lembrando de quem estava ali, que é
+  // exatamente o estado derivado que o topo de `base.js` proíbe.
+  const estado = piloto.atField
+    ? "A.T. FIELD ATIVO"
+    : piloto.falando
+      ? "TRANSMITINDO"
+      : "EM ESCUTA";
+  const pastilha = elemento("span", "pastilha", estado);
+  pastilha.dataset.estado = piloto.atField ? "at" : piloto.falando ? "fala" : "escuta";
+  estados.append(pastilha);
+
+  // O isolamento total não existe no comp e existe no produto. Segunda
+  // pastilha, e não uma troca da primeira: estar surdo e estar transmitindo são
+  // dois fatos ao mesmo tempo, e um deles apagando o outro esconderia metade.
+  if (piloto.isolado) {
+    const surdez = elemento("span", "pastilha", "ISOLAMENTO TOTAL");
+    surdez.dataset.estado = "surdo";
+    estados.append(surdez);
+  }
+
+  rodape.append(atraso, estados);
+  item.append(cabeca, barra, rodape);
+
+  // Volume por pessoa (`specs/03-audio.md`).
+  if (piloto.volume !== null && temAudio) {
+    const volume = document.createElement("input");
+    volume.type = "range";
+    volume.className = "volume";
+    volume.min = "0";
+    volume.max = "200";
+    volume.step = "10";
+    volume.value = String(volumes.get(piloto.volume) ?? 100);
+    volume.title = `volume de ${piloto.volume}`;
+    volume.dataset.piloto = piloto.volume;
+    item.append(volume);
+  }
+
+  return item;
+}
+
+// ---------------------------------------------------------------- telemetria
+
 function desenharTelemetria(snapshot) {
   const tel = snapshot.telemetry;
 
-  const sync = $("tel-sync");
-  sync.textContent = `${marcaSync(tel.sync_band)} ${tel.sync_ratio}%`;
-  sync.dataset.faixa = tel.sync_band;
-  sync.className = "sync";
+  medido($("tel-rtt"), `${Math.round(tel.rtt_ms)}ms`);
+  medido($("tel-jit"), `${Math.round(tel.jitter_ms)}ms`);
+  medido($("tel-loss"), `${(tel.loss_fraction * 100).toFixed(1)}%`);
 
-  $("tel-rtt").textContent = `${Math.round(tel.rtt_ms)}ms`;
-  $("tel-jit").textContent = `${Math.round(tel.jitter_ms)}ms`;
-  $("tel-loss").textContent = `${(tel.loss_fraction * 100).toFixed(1)}%`;
-  $("tel-opus").textContent = tel.audio_available === false ? "—" : `${Math.round(tel.bitrate_bps / 1000)}k`;
+  // `snapshot.audio_available`, e não `tel.audio_available`: o campo é do
+  // `Snapshot` e nunca existiu no `Telemetry`. A comparação antiga lia
+  // `undefined === false`, que é sempre falso — a sessão sem áudio imprimia
+  // `0k` como se fosse uma medida.
+  medido(
+    $("tel-codec"),
+    snapshot.audio_available ? `OPUS ${Math.round(tel.bitrate_bps / 1000)}k` : "SEM ÁUDIO",
+  );
+
+  medido($("tel-uptime"), duracao(comecoDaSessao));
+
+  const cage = snapshot.cages.find((c) => c.occupied_by_us);
+  medido($("tel-cage"), cage ? cage.name : "SEM PLUG");
 
   $("tel-local").hidden = !tel.local_fault;
 
   desenharEnlace(snapshot.link);
+}
 
-  const mudo = $("botao-mudo");
-  mudo.textContent = snapshot.at_field ? "A.T. ON" : "A.T. OFF";
-  mudo.dataset.ativo = snapshot.at_field ? "sim" : "nao";
-
-  const surdo = $("botao-surdo");
-  surdo.textContent = snapshot.total_isolation ? "SURDO" : "OUVINDO";
-  surdo.dataset.ativo = snapshot.total_isolation ? "sim" : "nao";
-
-  const voz = $("botao-voz");
-  // "MODO:" na frente porque `TECLA` sozinho não diz que é um seletor — e um
-  // seletor que ninguém reconhece como seletor é um botão que ninguém aperta.
-  voz.textContent = { PushToTalk: "MODO: TECLA", VoiceActivated: "MODO: VOZ", Open: "MODO: ABERTO" }[
-    snapshot.voice_mode
-  ] ?? "TECLA";
-  voz.disabled = !snapshot.audio_available;
-  voz.dataset.ativo = snapshot.voice_mode === "Open" ? "sim" : "nao";
-
-  const falar = $("botao-falar");
-  falar.dataset.ativo = snapshot.speaking ? "sim" : "nao";
-  // O rótulo é a instrução. Um botão escrito "FALAR" que não faz nada ao ser
-  // clicado é pior que nenhum botão: ensina a coisa errada.
-  $("falar-rotulo").textContent = snapshot.speaking
-    ? "NO AR"
-    : { PushToTalk: "SEGURE ESPAÇO", VoiceActivated: "FALE", Open: "MICROFONE ABERTO" }[
-        snapshot.voice_mode
-      ] ?? "SEGURE ESPAÇO";
-  falar.disabled = !snapshot.audio_available;
-  falar.title = snapshot.audio_available
-    ? "segure a barra de espaço, ou este botão"
-    : "esta sessão não tem áudio";
+/** `HH:MM:SS` desde um instante local, ou o travessão antes de haver um. */
+function duracao(desde) {
+  if (desde === null) return SEM_MEDIDA;
+  const total = Math.max(0, Math.floor((Date.now() - desde) / 1000));
+  const horas = String(Math.floor(total / 3600)).padStart(2, "0");
+  const minutos = String(Math.floor((total % 3600) / 60)).padStart(2, "0");
+  const segundos = String(total % 60).padStart(2, "0");
+  return `${horas}:${minutos}:${segundos}`;
 }
 
 function desenharAviso(snapshot) {
@@ -386,10 +686,6 @@ async function enviar(evento) {
 }
 
 async function alternarCanal(evento) {
-  // O deslizante de volume vive dentro de uma linha de piloto; um clique nele
-  // não é um clique no canal.
-  if (evento.target.classList.contains("volume")) return;
-
   const item = evento.target.closest("li");
   if (!item) return;
   try {
@@ -443,6 +739,9 @@ async function ejetar() {
   document.body.classList.remove("na-bateria");
   desenhado = null;
   linhaAberta = null;
+  // O mesmo argumento do veredito, para o relógio: um uptime que sobrevive à
+  // sessão conta o tempo passado noutro Dogma.
+  comecoDaSessao = null;
   await encerrarBusca();
   // O convite não sobrevive à sessão que ele abriu: quem sai, digita outro
   // endereço e aperta INSERT mandaria o token do Dogma anterior ao novo.
@@ -565,7 +864,10 @@ $("busca-anterior").addEventListener("click", async () =>
   desenharBusca(await invoke("busca_andar", { adiante: false })),
 );
 $("form-mensagem").addEventListener("submit", enviar);
-$("lista-canais").addEventListener("click", alternarCanal);
+// Duas listas, um manipulador: os Cages e as Linhas ganharam cabeçalhos
+// próprios (`B·03` e `B·04`) e deixaram de caber numa lista só.
+$("lista-cages").addEventListener("click", alternarCanal);
+$("lista-linhas").addEventListener("click", alternarCanal);
 $("banner-fechar").addEventListener("click", () => ($("banner").hidden = true));
 $("veredito-fechar").addEventListener("click", () => ($("veredito").hidden = true));
 
@@ -582,7 +884,8 @@ $("botao-surdo").addEventListener("click", async () => {
 });
 
 // O deslizante manda enquanto arrasta: ouvir o efeito é o que diz onde parar.
-$("lista-canais").addEventListener("input", (evento) => {
+// Ele mora no roster agora, que é onde o piloto está.
+$("lista-roster").addEventListener("input", (evento) => {
   const alvo = evento.target;
   if (!alvo.classList.contains("volume")) return;
   const percent = Number(alvo.value);
@@ -701,7 +1004,9 @@ setInterval(() => {
   $("relogio").textContent = new Date().toLocaleTimeString();
 }, 1000);
 
-// A telemetria muda sozinha entre eventos — nível de entrada, RTT, deriva.
+// A telemetria muda sozinha entre eventos — nível de entrada, RTT, deriva. O
+// uptime anda junto: ele é redesenhado por `desenharTelemetria`, e não por um
+// segundo temporizador que contaria em paralelo e sairia de fase.
 setInterval(() => {
   if (!$("tela-sessao").hidden) atualizar();
 }, 500);

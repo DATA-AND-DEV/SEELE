@@ -53,12 +53,17 @@
      (inventário do comp, §11.5) e os dois convivem no mesmo desenho. */
   --seele-laranja-carga:  #2B0F05;   /* ansi 234 · bloco em carga */
 
-  /* ---- faixas da Taxa de Sincronização (specs/07) ----
-     Nunca transmitidas só por cor: o número acompanha sempre (specs/05). */
-  --seele-sync-nominal:   var(--seele-fosforo);        /* >= 90 */
-  --seele-sync-aceitavel: var(--seele-osso);           /* 70–89 */
-  --seele-sync-degradado: var(--seele-laranja-nerv);   /* 40–69 */
-  --seele-sync-critico:   var(--seele-vermelho-alerta);/* < 40  */
+  /* ---- faixas da Taxa de Sincronização (specs/07, ADR 0024) ----
+     Três, e não quatro: os cortes são os do comp v2, e quem os decide é o core
+     (`seele_core::SyncBand`). Nunca transmitidas só por cor — a marca de bloco
+     e o número acompanham sempre (specs/05).
+
+     A quarta faixa, `aceitavel`, em osso, foi retirada junto com o
+     `SyncBand::Acceptable` que ela pintava: um token sem consumidor é uma cor
+     à disposição de quem for usá-la por engano. */
+  --seele-sync-nominal:   var(--seele-fosforo);        /* >= 85 */
+  --seele-sync-degradado: var(--seele-laranja-nerv);   /* 60–84 */
+  --seele-sync-critico:   var(--seele-vermelho-alerta);/* < 60  */
 
   /* ---- tipografia ---- */
   --seele-display: "Saira Condensed", "Arial Narrow", sans-serif; /* cartelas, cabeçalhos */
