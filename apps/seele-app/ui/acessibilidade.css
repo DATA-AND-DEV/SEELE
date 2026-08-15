@@ -1,6 +1,6 @@
 /* SEELE · Entry Plug — as preferências do sistema, por último.
    Última folha da lista de propósito. As duas regras de contraste sobrescrevem
-   `.rotulo` (de `base.css`), `.painel-titulo` e `.lista .piloto` (de
+   `.rotulo` (de `base.css`), `.painel-titulo` e `.roster .piloto` (de
    `tela-sessao.css`) com **a mesma especificidade** — elas ganham por ordem de
    fonte, e só por isso. Mover este arquivo para antes das folhas de tela
    desliga o modo de mais contraste em silêncio. */
@@ -11,7 +11,7 @@
    a forma e o texto continuam suficientes — a marca de bloco e o número
    acompanham toda Taxa de Sincronização. */
 @media (prefers-contrast: more) {
-  .lista .piloto { color: var(--seele-osso); }
+  .roster .piloto { color: var(--seele-osso); }
   .rotulo, .painel-titulo { color: var(--seele-osso); }
 }
 

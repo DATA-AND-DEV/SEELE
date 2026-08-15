@@ -72,9 +72,14 @@ function quando(segundos) {
  * `specs/05-cliente-tui.md`: nenhuma informação transmitida só por cor. A marca
  * é a metade que sobrevive sem cor nenhuma, e é desenhada em toda paleta — uma
  * marca que só aparece quando piora é uma marca que ninguém aprendeu a ler.
+ *
+ * Três entradas, as mesmas três de `seele-tui::theme` (ADR 0024). A quarta,
+ * `Acceptable`, saiu com a faixa: ela não chega mais do core, e o `?? "░"` a
+ * levaria para crítico — que é a leitura certa para um nome que este cliente
+ * não conhece, e a errada para um que ele conhecia semana passada.
  */
 function marcaSync(faixa) {
-  return { Nominal: "█", Acceptable: "▓", Degraded: "▒", Critical: "░" }[faixa] ?? "░";
+  return { Nominal: "█", Degraded: "▒", Critical: "░" }[faixa] ?? "░";
 }
 
 /** Substitui os filhos de um elemento por uma lista nova. */

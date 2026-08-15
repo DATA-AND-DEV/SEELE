@@ -140,15 +140,20 @@
 
 <!-- Operação. -->
 <section id="tela-sessao" class="tela" hidden>
+  <!--
+    O cabeçalho do comp tem sete blocos. Três não entram, e cada ausência tem
+    motivo: o `MG` é a marca do outro produto, o `CODE : 0447 · EX_MODE : ON` é
+    ficção de cenário que o inventário §16 marca como "não bindam a nada e não
+    deveriam", e o nome do Dogma mudou de lugar — ele agora encabeça a ficha
+    `C·02 / DOGMA`, e repeti-lo aqui seria o mesmo dado duas vezes na mesma tela.
+  -->
   <header class="topo">
     <span class="marca">SEELE</span>
     <span class="regua"></span>
-    <span class="kanji" lang="ja">同期率</span>
-    <span class="regua"></span>
-    <span class="kanji" lang="ja">第3新東京市</span>
-    <span class="regua"></span>
     <span id="padrao" class="padrao">PADRÃO: AZUL</span>
+    <span id="topo-piloto" class="topo-piloto"></span>
     <span class="regua regua-larga"></span>
+    <span class="kanji topo-kanji" lang="ja">同期率</span>
     <time id="relogio" class="relogio">--:--:--</time>
     <!--
       A saída. Sem isto o app tinha três telas soltas e nenhum caminho entre
@@ -216,23 +221,100 @@
     <span class="convite-nota">o Dogma acaba quando esta janela fechar</span>
   </div>
 
+  <!--
+    Quatro colunas, na ordem do comp: a ficha do Dogma, os canais, a Linha
+    aberta, e a Taxa de Sincronização. O comp abre com uma quinta, de 56px, com
+    a trilha `T3 / NV / GH / +` — vários Dogmas ao mesmo tempo. Ela não existe
+    aqui e não é questão de desenho: `Session` guarda **um** `Plug` e `connect`
+    devolve `AlreadyConnected` se já houver um (inventário §16, "mudança de
+    arquitetura"). Uma trilha com um botão só seria a promessa de um produto
+    diferente.
+  -->
   <main class="paineis">
-    <section class="painel painel-dogma" aria-label="Dogma">
-      <h2 class="painel-titulo">DOGMA</h2>
-      <ul id="lista-dogma" class="lista"></ul>
+    <!--
+      A ficha da sala. `C·02 / DOGMA` é a coordenada do comp, escrita como ele a
+      escreve — é o único painel cujo código vem colado no nome, e a
+      inconsistência é do comp, não daqui.
+    -->
+    <section class="painel painel-dogma" aria-labelledby="titulo-dogma">
+      <h2 id="titulo-dogma" class="painel-titulo">C·02 / DOGMA</h2>
+      <div class="ficha">
+        <p id="dogma-nome" class="dogma-nome">—</p>
+        <p class="dogma-sub">DOGMA CENTRAL</p>
+        <!--
+          Cinco campos, e só três são medidos. Os outros dois ficam desenhados
+          com o valor em branco de propósito: apagar a linha esconderia que o
+          produto ainda não conta operadores nem sabe por onde o áudio saiu, e
+          preenchê-la com um número plausível seria pior. `crates/seele-core/src/state.rs`
+          tem um teste com nome inteiro sobre isso — uma taxa não medida lê
+          zero, e nunca cem.
+        -->
+        <dl class="resumo">
+          <div class="resumo-linha">
+            <dt>OPERADORES</dt><dd id="resumo-operadores">—</dd>
+          </div>
+          <div class="resumo-linha">
+            <dt>CAGES</dt><dd id="resumo-cages">—</dd>
+          </div>
+          <div class="resumo-linha">
+            <dt>LINHAS</dt><dd id="resumo-linhas">—</dd>
+          </div>
+          <div class="resumo-linha">
+            <dt>CODEC</dt><dd id="resumo-codec">—</dd>
+          </div>
+          <div class="resumo-linha">
+            <dt>ROTA</dt><dd id="resumo-rota">—</dd>
+          </div>
+        </dl>
+      </div>
     </section>
 
     <section class="painel painel-canais" aria-label="Cages e Linhas">
-      <h2 class="painel-titulo">CAGES / LINHAS</h2>
-      <ul id="lista-canais" class="lista lista-canais"></ul>
+      <h2 class="painel-titulo">
+        <span>CAGES</span><span class="painel-codigo">B·03</span>
+      </h2>
+      <ul id="lista-cages" class="canais"></ul>
+
+      <h2 class="painel-titulo painel-titulo-linhas">
+        <span>LINHAS</span><span class="painel-codigo">B·04</span>
+      </h2>
+      <ul id="lista-linhas" class="canais"></ul>
+
+      <span class="espaco"></span>
+
+      <!--
+        A tira do operador. No comp ela traz o rótulo, o apelido e o botão de
+        A.T. Field; aqui traz também os outros três controles de voz, que o comp
+        não tem e o produto não pode perder — `specs/03-audio.md` e o ADR 0016.
+        Eles ficam juntos porque são a mesma pergunta em quatro níveis: como o
+        microfone abre, se ele está aberto agora, se ele está cortado, e se você
+        ouve.
+      -->
+      <div class="operador">
+        <span class="operador-rotulo">OPERADOR</span>
+        <span id="operador-nome" class="operador-nome">—</span>
+        <button id="botao-falar" class="botao-estado botao-falar" type="button">
+          <span id="falar-rotulo">SEGURE ESPAÇO</span>
+        </button>
+        <button id="botao-voz" class="botao-estado" type="button"
+                title="como o microfone abre">MODO: TECLA</button>
+        <button id="botao-mudo" class="botao-estado" type="button">A.T. FIELD INATIVO</button>
+        <button id="botao-surdo" class="botao-estado" type="button">OUVINDO</button>
+      </div>
     </section>
 
-    <section class="painel painel-mensagens" aria-label="Mensagens">
-      <h2 class="painel-titulo">MENSAGENS</h2>
+    <section class="painel painel-linha" aria-label="Registro da Linha">
+      <div class="linha-barra">
+        <span id="linha-nome" class="linha-nome">LINHA —</span>
+        <span class="linha-registro">REGISTRO ATIVO · SEM RETENÇÃO</span>
+        <span class="espaco"></span>
+        <span class="painel-codigo">C·05</span>
+      </div>
       <!--
         A busca. `[1/3]` não é enfeite: `specs/05-cliente-tui.md` proíbe
         informação transmitida só por cor, e o contador é o acompanhante
-        textual do realce.
+        textual do realce. O comp não tem busca; o produto tem, e uma janela
+        que sabe rolar mil mensagens e não sabe achar uma é uma janela pior.
       -->
       <form id="form-busca" class="busca" autocomplete="off">
         <span class="prompt">/</span>
@@ -256,47 +338,86 @@
       </form>
       <ol id="lista-mensagens" class="mensagens"></ol>
       <form id="form-mensagem" class="compor" autocomplete="off">
-        <!-- Decoração ao lado do campo, então sem nome acessível. -->
-        <span class="prompt" data-glifo="avancar"></span>
-        <input id="campo-mensagem" name="mensagem" placeholder="escrever…"
+        <!--
+          O sinal de maior, e não o triângulo desenhado: o comp escreve `>` aqui,
+          e ele é ASCII — a face de dados tem o glifo, então não há segunda face
+          no meio da linha e não há motivo para desenhá-lo. Decoração ao lado do
+          campo, então sem nome acessível.
+        -->
+        <span class="prompt" aria-hidden="true">&gt;</span>
+        <input id="campo-mensagem" name="mensagem" placeholder="transmitir na linha"
                maxlength="4000" autocomplete="off">
+        <span class="compor-dica">ENTER TRANSMITE</span>
       </form>
+    </section>
+
+    <!--
+      A quarta coluna. A cartela é bloco sólido com texto no negro absoluto, e
+      não texto colorido sobre fundo escuro: o inventário §12 endurece essa
+      regra no v2, e ela é o `ÊNFASE ▸ inverso` da TUI.
+    -->
+    <section class="painel painel-sync" aria-labelledby="titulo-sync">
+      <h2 id="titulo-sync" class="sync-cartela">
+        <span>TAXA DE SINCRONIZAÇÃO</span>
+        <span class="kanji sync-kanji" lang="ja">同期率</span>
+      </h2>
+      <div class="sync-media">
+        <div class="sync-media-legenda">
+          <span class="sync-media-rotulo">MÉDIA DO CAGE</span>
+          <span id="sync-amostra" class="sync-amostra">—</span>
+        </div>
+        <!--
+          A média chega do core já com faixa (`Cage.sync`), e é por isso que
+          este bloco não calcula nada: `types.rs` argumenta que uma casca que
+          conhece os limiares é uma casca que vai discordar da outra no dia em
+          que uma das duas for atualizada.
+
+          A marca de bloco fica ao lado do número, em face monoespaçada, porque
+          o número sozinho é Saira e a Saira não tem `U+2588`. É ela que carrega
+          a faixa quando não há cor — `specs/05-cliente-tui.md`.
+        -->
+        <span id="sync-media-bloco" class="sync-media-bloco">
+          <span id="sync-media-marca" class="sync-marca"></span>
+          <span id="sync-media-valor" class="sync-media-valor">—</span>
+        </span>
+      </div>
+      <ul id="lista-roster" class="roster"></ul>
     </section>
   </main>
 
   <!--
     Permanente, não escondida em menu. `specs/05-cliente-tui.md` chama isso de
     "a diferença de caráter em relação a um cliente de chat comum", e a versão
-    gráfica não teria licença para escondê-la.
+    gráfica não teria licença para escondê-la. Seis campos, nos nomes e na ordem
+    do comp — o app dizia `SYNC RTT JIT LOSS OPUS`, que é a mesma medida com
+    nome de log.
+
+    `SYNC` saiu daqui e não se perdeu: ele é a coluna inteira à direita agora, e
+    a linha do próprio operador está sempre nela.
   -->
   <footer class="telemetria">
-    <span class="metrica"><b class="rotulo">SYNC</b> <span id="tel-sync">·</span></span>
-    <span class="metrica"><b class="rotulo">RTT</b> <span id="tel-rtt">·</span></span>
-    <span class="metrica"><b class="rotulo">JIT</b> <span id="tel-jit">·</span></span>
-    <span class="metrica"><b class="rotulo">LOSS</b> <span id="tel-loss">·</span></span>
-    <span class="metrica"><b class="rotulo">OPUS</b> <span id="tel-opus">·</span></span>
+    <span class="metrica"><b class="rotulo">ATRASO</b> <span id="tel-rtt">·</span></span>
+    <span class="metrica"><b class="rotulo">JITTER</b> <span id="tel-jit">·</span></span>
+    <span class="metrica"><b class="rotulo">DISTÚRBIO</b> <span id="tel-loss">·</span></span>
+    <span class="metrica"><b class="rotulo">CODEC</b> <span id="tel-codec">·</span></span>
+    <span class="metrica"><b class="rotulo">UPTIME</b> <span id="tel-uptime">·</span></span>
+    <span class="metrica"><b class="rotulo">CAGE</b> <span id="tel-cage">·</span></span>
     <span class="espaco"></span>
-    <!--
-      Três controles, e a hierarquia agora é visível: **como** o microfone abre,
-      **se** ele está aberto, e **se** você ouve. Antes eram quatro botões no
-      mesmo peso — FALAR, TECLA, A.T. OFF, OUVINDO — todos sobre áudio em níveis
-      diferentes, e ninguém descobria que precisava segurar espaço.
-
-      `specs/03-audio.md` escolhe push-to-talk como padrão "mais previsível, sem
-      falso positivo", e o ADR 0016 recusou VAD como padrão porque transmitir
-      uma sala por engano é a falha mais cara. A decisão continua; o que muda é
-      que agora ela está escrita na tela.
-    -->
-    <button id="botao-falar" class="botao-estado botao-falar" type="button">
-      <span id="falar-rotulo">SEGURE ESPAÇO</span>
-    </button>
-    <button id="botao-voz" class="botao-estado" type="button"
-            title="como o microfone abre">MODO: TECLA</button>
-    <button id="botao-mudo" class="botao-estado" type="button">A.T. OFF</button>
-    <button id="botao-surdo" class="botao-estado" type="button">OUVINDO</button>
     <span id="tel-local" class="falha-local" hidden title="a máquina, não a rede">
       ÁUDIO LOCAL FALHANDO
     </span>
+    <!--
+      As três luzes do comp. O quadrado é vazado, e vazado é o estado: o
+      protocolo prova que a ideia existe (`NoticeReason::SubsystemChanged`) e
+      não carrega **qual** subsistema nem **em que estado**, então hoje só se
+      pode dizer "algo mudou". Três luzes acesas em fósforo seriam três
+      afirmações de saúde que ninguém mediu.
+    -->
+    <ol class="magi" aria-label="subsistemas — estado não medido">
+      <li><span class="magi-marca" aria-hidden="true"></span>MELCHIOR</li>
+      <li><span class="magi-marca" aria-hidden="true"></span>BALTHASAR</li>
+      <li><span class="magi-marca" aria-hidden="true"></span>CASPER</li>
+    </ol>
   </footer>
 </section>
 

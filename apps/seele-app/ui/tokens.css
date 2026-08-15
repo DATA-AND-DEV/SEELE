@@ -35,12 +35,30 @@
   --seele-placa-laranja-2:#C4400F;
   --seele-placa-laranja-3:#8E2A08;   /* placa mais próxima, sobre laranja */
 
-  /* ---- faixas da Taxa de Sincronização (specs/07) ----
-     Nunca transmitidas só por cor: o número acompanha sempre (specs/05). */
-  --seele-sync-nominal:   var(--seele-fosforo);        /* >= 90 */
-  --seele-sync-aceitavel: var(--seele-osso);           /* 70–89 */
-  --seele-sync-degradado: var(--seele-laranja-nerv);   /* 40–69 */
-  --seele-sync-critico:   var(--seele-vermelho-alerta);/* < 40  */
+  /* ---- rótulo de painel ----
+     A coordenada de cada painel (`A·01`, `B·02`, `C·02`) e todo título de
+     painel passam por este nome, e nunca por `osso-apagado` direto.
+
+     Não é sinônimo por gosto. `docs/tokens-achados.md` mede `osso-apagado` em
+     4,11:1 — passa só como texto grande — e a escala tipográfica põe rótulo de
+     painel em 9–10px, que não é texto grande. O arquivo diz qual é a correção
+     pendente: ou subir a cor, ou garantir que nenhuma informação necessária
+     dependa só dela. Título de painel é informação necessária: é o que diz
+     **qual** painel é aquele. Enquanto a decisão não vem, este nome é o único
+     lugar a mudar quando ela vier — e hoje ele vale exatamente o que valia. */
+  --seele-rotulo-painel:  var(--seele-osso-apagado);
+
+  /* ---- faixas da Taxa de Sincronização (specs/07, ADR 0024) ----
+     Três, e não quatro: os cortes são os do comp v2, e quem os decide é o core
+     (`seele_core::SyncBand`). Nunca transmitidas só por cor — a marca de bloco
+     e o número acompanham sempre (specs/05).
+
+     A quarta faixa, `aceitavel`, em osso, foi retirada junto com o
+     `SyncBand::Acceptable` que ela pintava: um token sem consumidor é uma cor
+     à disposição de quem for usá-la por engano. */
+  --seele-sync-nominal:   var(--seele-fosforo);        /* >= 85 */
+  --seele-sync-degradado: var(--seele-laranja-nerv);   /* 60–84 */
+  --seele-sync-critico:   var(--seele-vermelho-alerta);/* < 60  */
 
   /* ---- tipografia ---- */
   --seele-display: "Saira Condensed", "Arial Narrow", sans-serif; /* cartelas, cabeçalhos */

@@ -39,13 +39,12 @@
 //
 // ---- nome acessível ----
 //
-// Decoração ao lado de um rótulo de verdade não ganha nome: o triângulo do
-// Cage vem antes do nome do Cage, a bolinha vem antes do apelido, e anunciar
-// "triângulo apontando para baixo" antes de cada linha é ruído. Onde o glifo é
-// o **conteúdo** do elemento, o nome é obrigatório — os dois botões da busca
-// não têm mais nada dentro, e o ⌘ é a única coisa numa frase que diz qual
-// tecla apertar. Os dois botões trazem o nome no `aria-label` do próprio
-// botão; o ⌘ traz o seu aqui.
+// Decoração ao lado de um rótulo de verdade não ganha nome: um triângulo que
+// vem antes do nome do Cage é forma, e anunciar "triângulo apontando para
+// baixo" antes de cada linha é ruído. Onde o glifo é o **conteúdo** do
+// elemento, o nome é obrigatório — os dois botões da busca não têm mais nada
+// dentro, e o ⌘ é a única coisa numa frase que diz qual tecla apertar. Os dois
+// botões trazem o nome no `aria-label` do próprio botão; o ⌘ traz o seu aqui.
 
 "use strict";
 
@@ -56,9 +55,15 @@ const SVG = "http://www.w3.org/2000/svg";
  *
  * `fill` não aparece: ele vem de `.glifo` em `base.css`, e é `currentColor`, de
  * modo que toda regra que já pintava o caractere continua pintando o desenho —
- * `.lista .piloto.falando .presenca`, `.compor .prompt`, a cor herdada do
- * `.botao-fantasma`. As figuras vazadas trazem `fill="none"` como atributo de
- * apresentação, que vence a herança sem vencer regra nenhuma.
+ * hoje, a cor herdada do `.botao-fantasma` nos dois botões da busca. As figuras
+ * vazadas trazem `fill="none"` como atributo de apresentação, que vence a
+ * herança sem vencer regra nenhuma.
+ *
+ * Quatro dos seis estão sem consumidor desde que a tela de sessão passou a
+ * seguir o comp v2: lá o Cage aberto é uma borda de 2px e não um triângulo, e
+ * quem fala é uma borda mais um fundo e não uma bolinha. Ficam desenhados
+ * porque o que os justifica é a face, não a tela — a Plex Mono continua sem
+ * eles, e a próxima tela que precisar de um triângulo não deve inventar o seu.
  */
 const GLIFOS = {
   // ▸ e ◂ — as formas *small*. Aresta de 7, altura de 5, centradas em (8,8).
