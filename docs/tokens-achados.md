@@ -46,6 +46,9 @@ com tracking de 0,22em** — que é texto pequeno.
 muito de vermelho e verde. **Trabalho de M4:** ou subir `osso-apagado` para
 ≥ 4,5:1, ou aceitar e garantir que nenhuma informação necessária use só ele.
 
+**Adendo M5:** a varredura passou a cobrir a janela inteira, e um véu cobra
+deste número. Ver "O que a varredura custa de contraste", no fim deste arquivo.
+
 ## 4. Em 256 cores, o painel some dentro do fundo
 
 `negro-absoluto` (`#050403`) e `negro-painel` (`#0A0806`) mapeiam **ambos para
@@ -90,3 +93,54 @@ decorativa" e "movimento é diagnóstico".
 Adotei a textura estática e **deixei a animação de fora**. Se você quiser a
 varredura, ela vira exceção única e explícita ao tema, não um detalhe herdado
 por acidente.
+
+> **Correção (M5).** A frase acima está errada em dois tempos, e o segundo é
+> culpa deste documento. Nada de textura foi adotado em M0.12: até `4a7ca88`,
+> `apps/seele-app/ui/seele.css` não tinha scanline nenhuma — nem estática, nem
+> animada. "Adotei a textura estática" descrevia uma intenção como se fosse
+> código. E desde M5 a condição do parágrafo foi cumprida: a varredura existe,
+> inteira, textura e animação, como exceção nomeada — ADR 0014, revisão em M5.
+
+## O que a varredura custa de contraste (M5)
+
+A varredura é `position: fixed; inset: 0; z-index: 9`: a primeira coisa nesta
+interface pintada **sobre** o texto. Nas linhas escuras da textura o véu escurece
+o glifo e a superfície juntos, e contraste é razão — escurecer os dois não
+preserva a razão, derruba. Por isso não existe véu de graça: qualquer opacidade
+maior que zero custa, e o que se escolhe é quanto.
+
+Números por WCAG 2.1 (luminância relativa sRGB, composição em sRGB como o
+navegador faz), sobre `negro-painel` — a mais clara das duas superfícies, e
+portanto o pior caso para texto claro:
+
+| token | sem véu | véu a 34% (o do comp) | véu a 6% (o que está no ar) |
+|---|---|---|---|
+| `osso-apagado` | 4,11:1 | **2,35:1** | 3,74:1 |
+| `vermelho-alerta` | 5,16:1 | **2,70:1** | 4,63:1 |
+| `laranja-nerv` | 5,72:1 | **2,97:1** | 5,13:1 |
+
+A 34%, que é o valor do comp, o estrago não era o achado 3 ficando pior: era o
+`osso-apagado` perdendo até o piso de 3:1 que ainda o mantinha válido como texto
+grande, e o `vermelho-alerta` caindo a 2,70:1 — a cor cuja aprovação em AA o
+achado 2 registra como o argumento mais forte a favor da paleta v2, desfeita em
+silêncio por uma textura decorativa.
+
+Está no ar a 6%: o maior valor redondo em que todo token que passava em AA
+continua passando, e em que o `osso-apagado` continua valendo pelo critério que
+já era o dele. **O custo que resta** é o da coluna da direita: `osso-apagado` de
+4,11:1 para 3,74:1, `vermelho-alerta` de 5,16:1 para 4,63:1, `laranja-nerv` de
+5,72:1 para 5,13:1. Ninguém muda de classificação, mas a folga do vermelho
+encolheu — o que M4 fizer com `osso-apagado` tem agora um segundo número para
+respeitar.
+
+Quase nada se perdeu de aparência ao descer de 34% para 6%, e a razão é
+desconfortável: o véu é `negro-absoluto` sobre um fundo de `negro-absoluto`.
+Em `html, body` a textura é **exatamente** um no-op em qualquer opacidade. A
+única superfície onde ela chegava a aparecer é o painel, e mesmo a 34% ele ia de
+(10 · 8 · 6) a (8,3 · 6,6 · 5,0) — menos de dois níveis de 255. A textura nunca
+foi visível onde deveria estar. Ela era visível no texto.
+
+`apps/seele-app/tests/tokens.rs` mede isto: lê a opacidade que a folha declara,
+refaz a conta e reprova se algum dos três cair abaixo do critério que já
+cumpria. Subir a varredura de novo é possível, mas passa a ser uma decisão, não
+uma edição.

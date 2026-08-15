@@ -418,8 +418,42 @@ input:focus {
    mesma textura de duas em duas células verticais.
 
    `opacity` no elemento em vez de `rgba(0, 0, 0, 0.34)` porque nesta folha cor
-   literal não entra (`tests/tokens.rs`). O negro absoluto a 34% dá o mesmo
-   véu, e sai de token. */
+   literal não entra (`tests/tokens.rs`). O negro absoluto sai de token.
+
+   ---- por que 6% e não os 34% do comp ----
+
+   Ela é a primeira coisa nesta interface que se põe *sobre* o texto: `inset: 0`
+   e `z-index: 9` cobrem a janela inteira, então nas linhas escuras da textura o
+   véu escurece o glifo e o fundo juntos, e contraste é razão — escurecer os dois
+   não a preserva, derruba. Medido por WCAG 2.1 (luminância relativa sRGB),
+   sobre `negro-painel`, que é o pior caso porque é a superfície mais clara:
+
+   | token             | sem véu | véu 34% | véu 6% |
+   |-------------------|---------|---------|--------|
+   | `osso-apagado`    |  4,11:1 |  2,35:1 | 3,74:1 |
+   | `vermelho-alerta` |  5,16:1 |  2,70:1 | 4,63:1 |
+   | `laranja-nerv`    |  5,72:1 |  2,97:1 | 5,13:1 |
+
+   A 34% não é só o `osso-apagado` — que `docs/tokens-achados.md` já registra
+   reprovando AA e valendo só como texto grande — que piora: ele cai para 2,35:1
+   e perde até o piso de 3:1 do texto grande. O `vermelho-alerta` cai para
+   2,70:1, e ele é a cor cuja aprovação em AA o ADR 0014 usa como o argumento
+   mais forte a favor da paleta v2. Uma textura decorativa desfazendo em silêncio
+   a única correção de acessibilidade que a revisão da paleta trouxe é o preço
+   que ninguém escolheu pagar.
+
+   6% é o maior valor redondo em que todo token que passava em AA continua
+   passando (`vermelho-alerta` 4,63:1 ≥ 4,5), e em que o `osso-apagado` continua
+   valendo pelo critério que já era o dele (3,74:1 ≥ 3:1). O que resta de custo
+   está escrito em `docs/tokens-achados.md`: nenhum véu diferente de zero sai de
+   graça, porque o véu apaga glifo e fundo ao mesmo tempo.
+
+   E quase nada se perde de aparência, porque o véu é negro absoluto sobre um
+   fundo de negro absoluto: em `html, body` a textura é **exatamente** um no-op
+   em qualquer opacidade, e a única superfície onde ela chega a aparecer é o
+   painel, que a 34% ia de (10 · 8 · 6) a (8,3 · 6,6 · 5,0) — menos de dois
+   níveis de 255. A textura nunca foi visível onde deveria estar; ela era
+   visível no texto. É isso que 6% devolve. */
 .varredura {
   position: fixed;
   inset: 0;
@@ -432,7 +466,7 @@ input:focus {
     transparent 0 2px,
     var(--seele-negro-absoluto) 2px 4px
   );
-  opacity: 0.34;
+  opacity: 0.06;
 }
 
 /* A faixa que desce. Altura de 5vh porque é o que o keyframe do comp pede: de
@@ -451,10 +485,15 @@ input:focus {
     var(--seele-osso-apagado),
     transparent
   );
-  /* Sobre os 34% do pai, isto dá ~4% de véu claro. `specs/07` chama movimento
-     decorativo de erro; o que se negocia aqui é o quanto ele se faz notar, e a
-     resposta é quase nada. */
-  opacity: 0.12;
+  /* `opacity` do pai multiplica a do filho, então isto é 0,68 × 0,06 ≈ **4%**
+     de véu claro — o mesmo 4% que a faixa sempre teve, quando o par era
+     0,12 × 0,34. O número ficou feio para que a aparência não mudasse: baixar o
+     pai a 6% por contraste não é motivo para a faixa desbotar junto, porque ela
+     clareia, e clarear não é o que estava derrubando a razão.
+
+     `specs/07` chama movimento decorativo de erro; o que se negocia aqui é o
+     quanto ele se faz notar, e a resposta é quase nada. */
+  opacity: 0.68;
   animation: seele-varredura 7000ms linear infinite;
 }
 
