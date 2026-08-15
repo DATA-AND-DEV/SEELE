@@ -38,6 +38,7 @@ pub mod frame;
 pub mod hospedagem;
 pub mod melchior;
 pub mod session;
+pub mod taxa;
 pub mod tls;
 
 /// Length of an Ed25519 public key, in bytes.
@@ -159,6 +160,7 @@ impl Server {
             writes,
             slots: Arc::new(tokio::sync::Mutex::new(dogma::Slots::default())),
             occupancy: Arc::new(tokio::sync::Mutex::new(dogma::Occupancy::default())),
+            portaria: Arc::new(tokio::sync::Mutex::new(taxa::Portaria::nova())),
         });
 
         // Held seats have to be released even if nobody reconnects, or a Dogma

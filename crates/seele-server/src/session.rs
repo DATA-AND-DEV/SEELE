@@ -47,6 +47,7 @@ use crate::casper::messages::{Messages, PendingMessage, DEFAULT_PAGE};
 use crate::casper::Casper;
 use crate::dogma::{Dogma, Event};
 use crate::melchior::{self, Melchior};
+use crate::taxa::{Veredito, Vigia};
 use crate::{frame, DogmaConfig, PUBLIC_KEY_LEN};
 
 /// Bytes of nonce the client signs.
@@ -142,10 +143,45 @@ pub async fn serve(
     dogma: Arc<Dogma>,
     cage: mpsc::Sender<CageCommand>,
 ) -> Result<()> {
-    let (mut send, mut recv) = connection
-        .accept_bi()
+    // O balde de antes de autenticar, consultado antes de qualquer trabalho.
+    //
+    // Aqui, e não depois do `Hello`, porque o que se protege é justamente o
+    // trabalho que vem depois: ler e decodificar o quadro, e sobretudo o
+    // Argon2id da admissão, que o ADR 0021 escolheu caro de propósito. Um
+    // pacote que compra dezenas de milissegundos de CPU alheia é amplificação
+    // boa demais para deixar de graça num Dogma exposto.
+    let admitido = {
+        let ip = connection.remote_address().ip();
+        dogma.portaria.lock().await.permitir(ip, Instant::now())
+    };
+
+    // Com prazo. Uma conexão que nunca abre o fluxo de controle segurava esta
+    // tarefa até o tempo ocioso do QUIC recolhê-la; o orçamento do aperto de
+    // mão em `specs/02-protocolo.md` é de dez segundos, e vale para a espera
+    // inteira e não só para a parte depois do primeiro quadro.
+    let (mut send, mut recv) = tokio::time::timeout(HANDSHAKE_TIMEOUT, connection.accept_bi())
         .await
+        .with_context(|| format!("client opened no control stream in {HANDSHAKE_TIMEOUT:?}"))?
         .context("client never opened the control stream")?;
+
+    if !admitido {
+        // Recusado com motivo, e não em silêncio: quem estoura este balde por
+        // engano — um cliente com laço de reconexão defeituoso, uma casa
+        // inteira saindo do mesmo NAT — precisa poder ler o que houve.
+        // `worth_retrying` no `seele-tui` já trata `RateLimited` como coisa que
+        // não se repete na hora, então o aviso também serve para o laço parar.
+        tracing::warn!(peer = %connection.remote_address(), "handshake refused: rate limited");
+        let _ = frame::write(
+            &mut send,
+            &ServerMessage::Disconnecting {
+                reason: DisconnectReason::RateLimited,
+            },
+        )
+        .await;
+        let _ = send.finish();
+        despedir(&connection, &mut send, b"rate limited").await;
+        bail!("handshake refused: too many attempts from this address");
+    }
 
     let outcome = tokio::time::timeout(
         HANDSHAKE_TIMEOUT,
@@ -164,7 +200,7 @@ pub async fn serve(
             )
             .await;
             let _ = send.finish();
-            despedir(&connection, &mut send).await;
+            despedir(&connection, &mut send, b"handshake refused").await;
             bail!("handshake refused: {}", failure.detail);
         }
         Err(_elapsed) => {
@@ -176,7 +212,7 @@ pub async fn serve(
             )
             .await;
             let _ = send.finish();
-            despedir(&connection, &mut send).await;
+            despedir(&connection, &mut send, b"handshake refused").await;
             bail!("handshake exceeded {HANDSHAKE_TIMEOUT:?}");
         }
     };
@@ -214,11 +250,11 @@ pub async fn serve(
 /// prova de que ele leu. O prazo existe porque um cliente que sumiu no meio da
 /// recusa não pode segurar a tarefa: um segundo é muito mais do que o
 /// loopback precisa e pouco para quem não está mais lá.
-async fn despedir(connection: &quinn::Connection, send: &mut quinn::SendStream) {
+async fn despedir(connection: &quinn::Connection, send: &mut quinn::SendStream, motivo: &[u8]) {
     let _ = tokio::time::timeout(Duration::from_secs(1), send.stopped()).await;
     // Fechar com motivo, em vez de deixar cair: dá ao outro lado um encerramento
     // limpo em vez de um tempo esgotado.
-    connection.close(0_u32.into(), b"handshake refused");
+    connection.close(0_u32.into(), motivo);
 }
 
 /// A handshake that did not succeed, with the reason to send back.
@@ -541,6 +577,10 @@ async fn run_session(
     // Abortada ao sair por qualquer caminho, inclusive por `?`.
     let _leitora = AbortaAoSair(leitora);
 
+    // Um vigia por conexão. Estado local da sessão, sem mapa nem tranca: nada
+    // fora desta conexão precisa saber quantos quadros ela gastou.
+    let mut vigia = Vigia::novo(Instant::now());
+
     let (outbound_tx, mut outbound_rx) = mpsc::channel::<Vec<u8>>(OUTBOUND_DEPTH);
     let mut events = dogma.events.subscribe();
     let mut lines: Vec<LineId> = Vec::new();
@@ -593,6 +633,40 @@ async fn run_session(
             // perde a corrida. É a propriedade que o `frame::read` não tem.
             incoming = entrada.recv() => {
                 let Some(message) = incoming else { break };
+
+                // O balde de depois de autenticar. O ADR 0021 fechou a porta e
+                // deixou escrito o que não resolvia: "um convidado legítimo
+                // pode inundar de mensagens". É aqui.
+                //
+                // Julgado antes de o quadro ser executado, e não depois: o
+                // ponto é não gastar o Dogma com ele.
+                match vigia.avaliar(Instant::now()) {
+                    Veredito::Passa => {}
+                    Veredito::Avisa => {
+                        tracing::warn!(pilot = %session.pilot, "control frames over budget");
+                        frame::write(&mut send, &ServerMessage::Alert {
+                            severity: AlertSeverity::Warning,
+                            reason: AlertReason::RateLimited,
+                            operator_text: None,
+                        }).await?;
+                        continue;
+                    }
+                    Veredito::Descarta => continue,
+                    Veredito::Derruba => {
+                        tracing::warn!(
+                            pilot = %session.pilot,
+                            descartados = vigia.descartados(),
+                            "disconnecting: rate limited"
+                        );
+                        let _ = frame::write(&mut send, &ServerMessage::Disconnecting {
+                            reason: DisconnectReason::RateLimited,
+                        }).await;
+                        let _ = send.finish();
+                        despedir(&connection, &mut send, b"rate limited").await;
+                        break;
+                    }
+                }
+
                 match message {
                     ClientMessage::InsertPlug { cage: id, password } => {
                         // A senha do Cage era declarada no protocolo, relatada
