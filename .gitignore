@@ -34,3 +34,8 @@ seele.db-shm
 
 # Acompanhantes do app, copiados pelo release a partir de target/.
 apps/seele-app/binaries/
+
+# Ferramenta local: preferências da máquina e os worktrees que o agente abre
+# aqui dentro. Os worktrees são cópias de trabalho do próprio repositório — um
+# `git add -A` distraído versionaria o repositório dentro dele mesmo.
+/.claude/
