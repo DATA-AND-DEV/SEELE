@@ -9,9 +9,9 @@
    ---- o que mora aqui e o que não ----
 
    Aqui: a zeragem, a moldura, a tipografia, os primitivos de formulário e de
-   botão, e a varredura. Ou seja, o que **mais de uma tela** usa. O que só uma
-   tela usa mora em `tela-<nome>.css`, e é isso que permite quatro telas novas
-   sem quatro pessoas editando o mesmo arquivo.
+   botão, os glifos desenhados e a varredura. Ou seja, o que **mais de uma tela**
+   usa. O que só uma tela usa mora em `tela-<nome>.css`, e é isso que permite
+   quatro telas novas sem quatro pessoas editando o mesmo arquivo.
 
    ---- ordem de carga, e por que ela não é gosto ----
 
@@ -128,6 +128,36 @@ input:focus {
   border: 1px solid currentColor;
   padding: 2px 8px;
   cursor: pointer;
+}
+
+/* ---------- os glifos desenhados ----------
+   `docs/marca.md` explica o precedente: os katakana da marca estão em contorno
+   porque como texto eles virariam Hiragino no macOS e Yu Gothic no Windows. O
+   argumento é o mesmo aqui, uma camada abaixo. A IBM Plex Mono não traz
+   `U+25B8`, `U+25C2`, `U+25BC`, `U+25B6`, `U+25CF`, `U+25CB` nem `U+2318` —
+   conferido contra a face embarcada: 1049 entradas de cmap, e exatamente um
+   glifo em `U+25A0`–`U+25CF`. Cada um deles caía na monoespaçada do sistema, o
+   que punha uma segunda face no meio de uma linha numa interface monoespaçada.
+
+   `ui/glifos.js` desenha os seis. A caixa é `1em` quadrada em toda ocorrência,
+   e o tamanho ótico de cada figura é escolhido dentro do `viewBox` de 16 — um
+   triângulo cheio pesa mais que a letra ao lado se for desenhado na altura de
+   caixa alta, e `▸` e `●` não são coisas do mesmo peso.
+
+   `vertical-align: -0.2em` põe o centro da caixa a `0.3em` da linha de base, que
+   é o meio entre o centro da altura-x (`0.258em`) e o da caixa alta (`0.349em`)
+   da IBM Plex Mono. Em todo lugar onde eles aparecem a entrelinha é 16px e a
+   caixa cabe dentro da haste da linha, então nenhuma linha cresce.
+
+   `fill` fica no CSS, e não no atributo, para que a cor continue vindo da regra
+   que já pintava o caractere. As figuras vazadas trazem `fill="none"` como
+   atributo de apresentação, que vence a herança sem vencer regra nenhuma. */
+
+.glifo {
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.2em;
+  fill: currentColor;
 }
 
 /* ---------- a varredura ----------

@@ -23,7 +23,7 @@
 // `apps/seele-app/tests/frontend.rs` confere:
 //
 //   1. `base.js` primeiro: todo o resto o usa em tempo de execução;
-//   2. `frases.js` antes das telas;
+//   2. `glifos.js` e `frases.js` antes das telas;
 //   3. cada `tela-<nome>.js` registra os **seus** ouvintes no seu próprio rodapé,
 //      porque `addEventListener(…, funcao)` lê a função na hora, e não depois.
 //

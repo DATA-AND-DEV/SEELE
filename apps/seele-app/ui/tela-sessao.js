@@ -133,10 +133,12 @@ function desenharCanais(snapshot) {
 
   for (const cage of snapshot.cages) {
     const item = elemento("li", cage.occupied_by_us ? "cage aberto" : "cage");
-    item.append(
-      elemento("span", null, cage.occupied_by_us ? "▼" : "▶"),
-      elemento("span", null, cage.name),
-    );
+    // O triângulo de abertura, desenhado (`ui/glifos.js`). Sem nome acessível:
+    // ele vem imediatamente antes do nome do Cage, e anunciá-lo seria uma
+    // palavra a mais em cada linha do painel.
+    const abertura = elemento("span", null);
+    abertura.append(glifo(cage.occupied_by_us ? "aberto" : "fechado"));
+    item.append(abertura, elemento("span", null, cage.name));
     item.dataset.cage = String(cage.id);
     item.title = `${cage.pilots.length}/${cage.limit}`;
     linhas.push(item);
@@ -145,8 +147,14 @@ function desenharCanais(snapshot) {
     if (!cage.occupied_by_us) continue;
     for (const piloto of cage.pilots) {
       const linha = elemento("li", piloto.speaking ? "piloto falando" : "piloto");
+      // A bolinha cheia e a vazada, desenhadas. `.presenca` continua com uma
+      // célula de largura e a cor continua vindo de
+      // `.lista .piloto.falando .presenca`, porque o desenho pinta com
+      // `currentColor`.
+      const presenca = elemento("span", "presenca");
+      presenca.append(glifo(piloto.speaking ? "falando" : "silencio"));
       linha.append(
-        elemento("span", "presenca", piloto.speaking ? "●" : "○"),
+        presenca,
         elemento("span", null, piloto.nickname + (piloto.is_self ? " (você)" : "")),
       );
 
@@ -607,7 +615,14 @@ $("convite-copiar").addEventListener("click", async () => {
     botao.textContent = "copiado";
     botao.classList.add("convite-copiado");
   } catch {
-    botao.textContent = "copie com ⌘C";
+    // A tecla desenhada, e com nome: ela não está ao lado de um rótulo, ela é
+    // metade da instrução. Sem nome a frase chegaria a um leitor de tela como
+    // "copie com C", que manda apertar a tecla errada.
+    botao.replaceChildren(
+      document.createTextNode("copie com "),
+      glifo("comando", "Command"),
+      document.createTextNode("C"),
+    );
   }
 });
 

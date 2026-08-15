@@ -826,6 +826,47 @@ fn leaving_forgets_the_invite_that_let_us_in() {
 }
 
 #[test]
+fn the_page_never_draws_a_glyph_the_data_face_does_not_have() {
+    // The embedded IBM Plex Mono has 1049 cmap entries and exactly one glyph in
+    // U+25A0–U+25CF, so every one of these fell through to whatever monospace
+    // the machine happens to have — SF Mono, Consolas, something else — putting
+    // a second face in the middle of a line, in an interface whose whole claim
+    // is that every line is a grid.
+    //
+    // `docs/marca.md` settled the same argument one layer up: the brand's three
+    // katakana are outlines and not text, because as text the mark would be
+    // Hiragino on macOS and Yu Gothic on Windows. `ui/glifos.js` is that answer
+    // applied to the interface's own six.
+    //
+    // Comments are stripped first, and that is load-bearing rather than tidy:
+    // the files that explain these characters have to be able to name them, and
+    // a comment draws nothing. What this catches is a seventh screen typing one
+    // back into a template string.
+    let script = without_comments(&scripts());
+    let page = without_comments(&read("ui/index.html"));
+
+    for glyph in [
+        '\u{25B8}', // ▸ small right-pointing triangle
+        '\u{25C2}', // ◂ small left-pointing triangle
+        '\u{25BC}', // ▼ down-pointing triangle
+        '\u{25B6}', // ▶ right-pointing triangle
+        '\u{25CF}', // ● black circle
+        '\u{25CB}', // ○ white circle
+        '\u{2318}', // ⌘ place of interest sign
+    ] {
+        for (name, text) in [("the scripts", &script), ("index.html", &page)] {
+            assert!(
+                !text.contains(glyph),
+                "{name} draws U+{:04X} as a character, and the data face has no glyph \
+                 for it — it falls through to the system monospace, mid-line. \
+                 `glifo()` in ui/glifos.js draws it instead.",
+                u32::from(glyph)
+            );
+        }
+    }
+}
+
+#[test]
 fn the_frontend_never_names_a_protocol_concept() {
     // `specs/06-clientes-gui.md`, in one sentence: "Se o frontend precisa saber
     // o que é um `ssrc`, algo está errado." This is that sentence as a test.
@@ -833,7 +874,7 @@ fn the_frontend_never_names_a_protocol_concept() {
     let page = without_comments(&read("ui/index.html"));
 
     for forbidden in ["ssrc", "opus_frame", "datagram", "quic", "postcard"] {
-        for (name, text) in [("seele.js", &script), ("index.html", &page)] {
+        for (name, text) in [("the scripts", &script), ("index.html", &page)] {
             assert!(
                 !text.to_lowercase().contains(forbidden),
                 "{name} names `{forbidden}`, which is protocol knowledge in a shell"

@@ -239,14 +239,25 @@
         <input id="campo-busca" name="busca" placeholder="buscar…"
                spellcheck="false" autocomplete="off">
         <span id="busca-contador" class="busca-contador"></span>
+        <!--
+          `data-glifo` e não o contorno escrito aqui: o desenho mora uma vez só,
+          em `ui/glifos.js`, e duas cópias de um contorno é uma que fica para
+          trás. `aria-label` no botão, e não no desenho, porque aqui o glifo é
+          tudo o que o botão diz — antes o nome acessível era o próprio
+          caractere, e "triângulo pequeno apontando para a esquerda" não é o
+          nome de nada que se possa apertar.
+        -->
         <button id="busca-anterior" class="botao-fantasma" type="button"
-                title="ocorrência anterior">◂</button>
+                title="ocorrência anterior" aria-label="ocorrência anterior"
+                data-glifo="recuar"></button>
         <button id="busca-proxima" class="botao-fantasma" type="button"
-                title="próxima ocorrência">▸</button>
+                title="próxima ocorrência" aria-label="próxima ocorrência"
+                data-glifo="avancar"></button>
       </form>
       <ol id="lista-mensagens" class="mensagens"></ol>
       <form id="form-mensagem" class="compor" autocomplete="off">
-        <span class="prompt">▸</span>
+        <!-- Decoração ao lado do campo, então sem nome acessível. -->
+        <span class="prompt" data-glifo="avancar"></span>
         <input id="campo-mensagem" name="mensagem" placeholder="escrever…"
                maxlength="4000" autocomplete="off">
       </form>
@@ -302,7 +313,7 @@
   Sem módulo e sem `import` (ADR 0019): seis scripts clássicos dividindo o mesmo
   escopo global. O que a divisão muda não é quem enxerga quem — é **quando** cada
   coisa passa a existir. `base.js` primeiro porque todo o resto o chama;
-  `frases.js` antes das telas; e cada `tela-<nome>.js` registra os
+  `glifos.js` e `frases.js` antes das telas; e cada `tela-<nome>.js` registra os
   seus próprios ouvintes no seu rodapé, porque `addEventListener` lê a função na
   hora em que a linha roda. Referência cruzada entre telas só de dentro de um
   manipulador, que é sempre depois dos seis.
@@ -310,6 +321,7 @@
   Uma tela nova acrescenta um `tela-<nome>.js` no fim desta lista.
 -->
 <script src="base.js"></script>
+<script src="glifos.js"></script>
 <script src="frases.js"></script>
 <script src="tela-boot.js"></script>
 <script src="tela-sessao.js"></script>
