@@ -110,4 +110,12 @@ const FRASES = {
     PortaOcupada:
       "A PORTA 8383 JÁ ESTÁ EM USO.\nQuase sempre é outro SEELE aberto — feche o outro e tente de novo.",
     NaoSubiu: "NÃO CONSEGUI SUBIR O DOGMA AQUI",
+
+    // Escolher microfone, no Terminal Dogma. Duas frases e não uma porque pedem
+    // coisas diferentes de quem lê: a primeira não tem conserto na tela, e a
+    // segunda tem — a lista está logo acima, e o que sumiu entre desenhá-la e
+    // clicar nela pode ser trocado por outro sem sair daqui.
+    NaoGravei: "NÃO CONSEGUI GRAVAR ESSE AJUSTE NESTA MÁQUINA",
+    DispositivoSumiu:
+      "ESSE MICROFONE NÃO ESTÁ MAIS AQUI.\nA escolha ficou gravada; escolha outro para agora.",
 };

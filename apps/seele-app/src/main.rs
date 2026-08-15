@@ -182,6 +182,12 @@ async fn connect(
         audio,
         join_secret: join_secret.filter(|s| !s.trim().is_empty()),
         expected_fingerprint: esperada,
+        // O microfone escolhido no Terminal Dogma, lido do disco a cada
+        // conexão em vez de guardado em memória: quem escolheu ontem não
+        // escolhe de novo hoje, e quem nunca escolheu continua no padrão da
+        // máquina. Um dispositivo que sumiu não impede de entrar — a FFI cai
+        // para o padrão e a tela mostra o que abriu de verdade.
+        capture_device: preferencias(&app).and_then(|p| p.capture().map(str::to_owned)),
     };
 
     // `connect` blocks on a QUIC handshake. Running it on the async runtime's
@@ -423,6 +429,98 @@ fn set_volume(
     percent: u16,
 ) -> Result<(), PlugError> {
     session.plug()?.set_volume(nickname, percent)
+}
+
+/// Os ajustes desta máquina, ou nada quando o disco não deixa lê-los.
+///
+/// `Option` e não `Result` porque nenhum chamador tem o que fazer com o motivo:
+/// sem o arquivo, todo ajuste é o padrão, e é exatamente onde o app já estava
+/// antes de o Terminal Dogma existir. A mesma política da lista de visitados.
+fn preferencias(app: &AppHandle) -> Option<seele_ffi::preferences::Preferences> {
+    seele_ffi::preferences::Preferences::open(
+        std::path::PathBuf::from(config_dir(app)).join("preferences"),
+    )
+    .ok()
+}
+
+/// Os microfones que esta máquina está oferecendo agora.
+///
+/// Respondível sem sessão: escolher microfone é coisa que se faz antes de
+/// conectar tanto quanto durante, e pendurar a lista num `Plug` vivo poria o
+/// controle atrás da porta que ele existe para abrir.
+///
+/// Lista vazia significa que a máquina não quis enumerar — **não** que não há
+/// microfone. Quem desenha "sem áudio" a partir disto está escrevendo a frase
+/// errada; `snapshot.audio_available` é a que quer dizer isso.
+#[tauri::command]
+fn microfones() -> Vec<seele_ffi::CaptureDevice> {
+    seele_ffi::capture_devices()
+}
+
+/// Qual microfone está escolhido, ou `None` para o padrão da máquina.
+///
+/// Vem do disco e não do `Snapshot`: são duas perguntas diferentes. Esta é "o
+/// que foi escolhido", que tem resposta sem sessão nenhuma; `snapshot.capture`
+/// é "o que abriu de verdade", que só existe com áudio de pé. As duas divergem
+/// justamente quando importa — um dispositivo escolhido e desconectado.
+#[tauri::command]
+fn microfone_escolhido(app: AppHandle) -> Option<String> {
+    preferencias(&app).and_then(|p| p.capture().map(str::to_owned))
+}
+
+/// Por que não deu para escolher esse microfone.
+///
+/// Enum, e não frase, pela mesma razão que [`FalhaAoHospedar`]: a fronteira
+/// erro→texto do produto está no frontend, e uma mensagem escrita aqui seria uma
+/// frase que nenhum tradutor alcança.
+///
+/// Duas e não uma porque pedem coisas diferentes de quem está na frente da tela.
+/// Uma não tem conserto ali — o disco recusou —, e a outra tem: a lista está
+/// logo acima, e o que sumiu entre desenhá-la e clicar nela pode ser trocado por
+/// outro. Nenhuma delas é `PlugError::IdentityUnavailable`, que era o que este
+/// comando devolvia: a frase daquela fala de identidade em disco, e acusar a
+/// chave do piloto por causa de um arquivo de ajustes manda quem lê procurar no
+/// lugar errado.
+#[derive(Debug, serde::Serialize)]
+enum FalhaAoEscolher {
+    /// O ajuste não pôde ser gravado nesta máquina.
+    NaoGravei,
+    /// O microfone não está mais aqui.
+    DispositivoSumiu,
+}
+
+/// Escolhe o microfone: grava no disco e, se houver sessão, troca agora.
+///
+/// As duas metades, e nesta ordem, porque falham de jeitos diferentes. A
+/// escrita é o que faz a escolha valer amanhã; a troca é o que faz valer agora.
+/// Se a troca falhar — o dispositivo saiu do lugar entre desenhar a lista e
+/// clicar nela — a escolha continua gravada, e é a certa: quem religar a
+/// interface volta ao microfone que queria sem escolher de novo.
+///
+/// Sem sessão não é falha. Escolher microfone na tela de entrada é o caminho
+/// normal, e é para ela que a próxima conexão vai olhar.
+#[tauri::command]
+fn escolher_microfone(
+    app: AppHandle,
+    session: State<'_, Session>,
+    dispositivo: Option<String>,
+) -> Result<(), FalhaAoEscolher> {
+    let Some(mut ajustes) = preferencias(&app) else {
+        return Err(FalhaAoEscolher::NaoGravei);
+    };
+    if let Err(erro) = ajustes.set_capture(dispositivo.as_deref()) {
+        tracing::warn!(%erro, "não consegui gravar o microfone escolhido");
+        return Err(FalhaAoEscolher::NaoGravei);
+    }
+
+    let Ok(plug) = session.plug() else {
+        // Sem sessão a escolha está gravada, e era tudo o que havia para fazer.
+        return Ok(());
+    };
+    plug.set_capture_device(dispositivo).map_err(|erro| {
+        tracing::warn!(%erro, "não consegui trocar o microfone da sessão");
+        FalhaAoEscolher::DispositivoSumiu
+    })
 }
 
 /// Onde fica a lista de Dogmas visitados.
@@ -675,6 +773,9 @@ fn main() {
             set_talking,
             set_voice_mode,
             set_volume,
+            microfones,
+            microfone_escolhido,
+            escolher_microfone,
             conhecidos,
             esquecer,
             analisar_convite,

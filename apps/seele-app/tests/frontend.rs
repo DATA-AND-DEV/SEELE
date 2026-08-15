@@ -867,6 +867,153 @@ fn the_page_never_draws_a_glyph_the_data_face_does_not_have() {
 }
 
 #[test]
+fn the_microphone_list_reads_the_field_names_a_device_actually_serialises() {
+    // Same defect class as the `Match` guard above, one screen over. The picker
+    // is untyped JavaScript reading three names off the wire; a `serde(rename)`
+    // or a Portuguese field name would draw every row `undefined`, send back
+    // `undefined` when one is clicked, and fail nowhere.
+    let device = seele_ffi::CaptureDevice {
+        id: "coreaudio:alguma-coisa".into(),
+        name: "Scarlett Solo".into(),
+        default: true,
+    };
+    let Ok(json) = serde_json::to_string(&device) else {
+        panic!("CaptureDevice does not serialise, so no shell can read it at all");
+    };
+    let script = without_comments(&scripts());
+
+    for field in ["id", "name", "default"] {
+        assert!(
+            json.contains(&format!("\"{field}\"")),
+            "a capture device no longer carries `{field}`: {json}"
+        );
+        assert!(
+            names(&script, field),
+            "the picker never names `{field}`, which is what a capture device \
+             serialises to"
+        );
+    }
+    for wrong in ["dispositivo.nome", "dispositivo.padrao"] {
+        assert!(
+            !script.contains(wrong),
+            "the picker reads `{wrong}` off a capture device, which serialises no \
+             such field"
+        );
+    }
+}
+
+#[test]
+fn the_picker_sends_back_the_id_and_never_the_name() {
+    // The one mistake this screen can make silently. Two microphones of the same
+    // model report the same name, so a picker that sent the name back would work
+    // on every machine with one interface and pick the wrong device on the
+    // machines the feature exists for.
+    //
+    // Scoped to the function that builds a row, because the file as a whole says
+    // both words either way — the paragraph explaining why the id is not shown
+    // would otherwise satisfy a search for it.
+    let body = body_of(&scripts(), "function linhaDeMicrofone");
+
+    assert!(
+        body.contains("dataset.dispositivo = id"),
+        "a row no longer carries the id it stands for, so nothing can be sent back"
+    );
+    assert!(
+        !body.contains("escolher(nome"),
+        "the picker hands back the name, and two microphones of one model share it"
+    );
+}
+
+#[test]
+fn the_screen_says_which_microphone_is_open_and_not_only_which_was_chosen() {
+    // The two diverge exactly when this screen is worth opening: an interface
+    // chosen yesterday and unplugged today reads as chosen, while something else
+    // is actually capturing. A screen that drew only the preference would call
+    // the choice reality and leave somebody talking into the wrong microphone
+    // while looking at a row that says it is the right one.
+    // Scoped to the one function that marks a row. The file as a whole says both
+    // words either way — the paragraph explaining the distinction would satisfy
+    // a search for it — and `EM USO` in particular appears in an unrelated
+    // sentence about port 8383 two files over, which is enough to make an
+    // unscoped `contains` a guard that cannot fail. Found by breaking the code
+    // on purpose and watching this pass.
+    let body = body_of(&scripts(), "function marcarLinhas");
+
+    assert!(
+        body.contains("snapshot?.capture?.id") || body.contains("snapshot.capture.id"),
+        "nothing in the picker reads which device actually opened, so it draws the \
+         preference and calls it reality"
+    );
+    assert!(
+        body.contains("EM USO") && body.contains("ESCOLHIDO"),
+        "the picker has one word for both states, so it cannot show them apart:\n{body}"
+    );
+
+    // And the bridge has to still answer the other half.
+    assert!(
+        read("src/main.rs").contains("microfone_escolhido"),
+        "the bridge no longer answers which microphone was chosen"
+    );
+}
+
+/// The variants of one `enum` declared in `main.rs`.
+///
+/// Serde writes a fieldless variant as its own name, so these are exactly the
+/// strings the frontend receives when the command rejects.
+fn variants_of(source: &str, name: &str) -> Vec<String> {
+    let Some(after) = source.split(&format!("enum {name} {{")).nth(1) else {
+        panic!("main.rs no longer declares `enum {name}`");
+    };
+    let Some(block) = after.split("\n}").next() else {
+        panic!("unterminated `enum {name}`");
+    };
+    let found: Vec<String> = without_comments(block)
+        .lines()
+        .map(str::trim)
+        .filter_map(|line| line.strip_suffix(','))
+        .filter(|line| {
+            !line.is_empty()
+                && line
+                    .chars()
+                    .all(|character| character.is_alphanumeric() || character == '_')
+        })
+        .map(str::to_owned)
+        .collect();
+    assert!(!found.is_empty(), "`enum {name}` came out with no variants");
+    found
+}
+
+#[test]
+fn every_refusal_the_bridge_writes_itself_has_a_sentence_in_the_page() {
+    // Two of this shell's commands answer with an enum of their own rather than
+    // a `PlugError` — hosting, and choosing a microphone — because their
+    // failures are local ones the FFI has no business naming. That freedom costs
+    // exactly this guard: a variant added here with no sentence over there lands
+    // on a screen that says nothing, or worse, prints the name of a Rust variant
+    // at somebody.
+    //
+    // The refusal most likely to be met is the one this was written for: the
+    // list is drawn, an interface is unplugged, and then a row is clicked.
+    //
+    // Comments are stripped from both sides. The paragraph in `main.rs`
+    // explaining why a variant exists must not count as declaring it, and the
+    // paragraph in `frases.js` explaining a sentence must not count as writing
+    // it.
+    let source = read("src/main.rs");
+    let script = without_comments(&scripts());
+
+    for enumeration in ["FalhaAoHospedar", "FalhaAoEscolher"] {
+        for variant in variants_of(&source, enumeration) {
+            assert!(
+                names(&script, &variant),
+                "`{enumeration}::{variant}` reaches the page with no sentence written \
+                 for it, so the screen either says nothing or says `{variant}`"
+            );
+        }
+    }
+}
+
+#[test]
 fn the_frontend_never_names_a_protocol_concept() {
     // `specs/06-clientes-gui.md`, in one sentence: "Se o frontend precisa saber
     // o que é um `ssrc`, algo está errado." This is that sentence as a test.

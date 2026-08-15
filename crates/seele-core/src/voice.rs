@@ -105,6 +105,51 @@ struct Controls {
     gains: Mutex<HashMap<u32, f32>>,
 }
 
+/// One microphone the machine is offering.
+///
+/// Its own type rather than a re-export of `seele_audio::device::CaptureDevice`
+/// for the same reason [`DeviceRates`] is its own type: ADR 0002 keeps
+/// `seele-ffi` and `seele-tui` from naming `seele-audio` at all, and a
+/// re-export would make them name it through this crate's front door.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaptureDevice {
+    /// The stable handle a preference is written down as. Never shown to a
+    /// person — see `seele_audio::device::CaptureDevice` for why it is not the
+    /// name.
+    pub id: String,
+    /// What the machine calls it, for a person to read.
+    pub name: String,
+    /// Whether this is the one a session with no preference would take.
+    pub default: bool,
+}
+
+/// Every microphone the machine will describe, right now.
+///
+/// Answerable with no session: picking a microphone is a thing a person does
+/// before connecting as often as during, and making the list depend on a live
+/// [`Voice`] would put the control behind the door it is meant to open.
+///
+/// An empty list means the host would not enumerate, **not** that there is no
+/// microphone — the default device still opens when enumeration fails. An
+/// interface must not read this as "no audio"; [`crate::Voice::start`] failing
+/// is what means that.
+#[must_use]
+pub fn capture_devices() -> Vec<CaptureDevice> {
+    device::capture_devices()
+        .into_iter()
+        .map(into_core)
+        .collect()
+}
+
+/// The audio layer's device, as this crate's own.
+fn into_core(found: device::CaptureDevice) -> CaptureDevice {
+    CaptureDevice {
+        id: found.id,
+        name: found.name,
+        default: found.default,
+    }
+}
+
 /// What the devices turned out to be.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DeviceRates {
@@ -122,6 +167,11 @@ pub struct Voice {
     controls: Arc<Controls>,
     telemetry: Arc<Mutex<AudioTelemetry>>,
     rates: DeviceRates,
+    /// The microphone this path actually opened.
+    ///
+    /// Read off the device rather than remembered from the request, so that a
+    /// path started with no preference can still say which microphone it got.
+    capture: Option<CaptureDevice>,
     /// Se a máquina está derrubando áudio **agora**.
     ///
     /// Mora aqui porque é uma derivada: precisa lembrar o que viu da última
@@ -138,14 +188,35 @@ impl Voice {
     /// Fails if no input or output device can be opened, or if the encoder
     /// refuses the configuration.
     pub fn start(media: MediaChannel, ssrc: Ssrc) -> Result<Self> {
+        Self::start_on(None, media, ssrc)
+    }
+
+    /// Opens a chosen capture device and starts the pipeline.
+    ///
+    /// `capture` is a [`CaptureDevice::id`] from [`capture_devices`], never a
+    /// name. `None` is the machine's default, which is what [`Voice::start`]
+    /// takes.
+    ///
+    /// Switching device is this function plus dropping the old handle: the
+    /// pipeline owns its `AudioIo` for the life of its thread, and `cpal`'s
+    /// streams are not `Send` on every backend, so a running path cannot have a
+    /// device swapped underneath it. Stopping and restarting is not a shortcut
+    /// around that — it is the only shape the audio layer allows.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the named device is gone, if no device can be opened at all, or
+    /// if the encoder refuses the configuration.
+    pub fn start_on(capture: Option<&str>, media: MediaChannel, ssrc: Ssrc) -> Result<Self> {
         // Opened here rather than on the audio thread so that "there is no
         // microphone" is a return value the interface can show, instead of a
         // thread that quietly dies.
-        let io = device::open_default(RING_MS)?;
+        let io = device::open(capture, RING_MS)?;
         let rates = DeviceRates {
             capture_hz: io.capture_rate_hz,
             playback_hz: io.playback_rate_hz,
         };
+        let capture = io.capture.clone().map(into_core);
 
         let controls = Arc::new(Controls {
             at_field: AtomicBool::new(false),
@@ -181,6 +252,7 @@ impl Voice {
             controls,
             telemetry,
             rates,
+            capture,
             falha_local: Mutex::new(FalhaLocal::new()),
         })
     }
@@ -189,6 +261,55 @@ impl Voice {
     #[must_use]
     pub fn rates(&self) -> DeviceRates {
         self.rates
+    }
+
+    /// The microphone this path is actually capturing from.
+    ///
+    /// `None` when the backend would not describe the device it opened. Audio is
+    /// still running in that case — an interface must draw an unnamed device,
+    /// not a missing one.
+    #[must_use]
+    pub fn capture(&self) -> Option<&CaptureDevice> {
+        self.capture.as_ref()
+    }
+
+    /// Starts a second path on another microphone, carrying this one's settings.
+    ///
+    /// The returned [`Voice`] is the live one; dropping `self` is what stops the
+    /// old device. Deliberately in that order: the new path is opened **before**
+    /// the old one is given up, so a microphone that turns out to be gone leaves
+    /// the session where it was instead of silent. The cost is a moment with two
+    /// playback streams open, which every backend this ships on allows.
+    ///
+    /// # What has to survive, and why it is decided here
+    ///
+    /// A.T. Field, Isolamento total, the mode, the held key and every per-talker
+    /// volume. Left to a shell, this list would be written once per shell and
+    /// each copy would forget a different item — and the item that hurts is
+    /// A.T. Field: a switch that quietly unmutes a microphone is a switch that
+    /// puts a room on the air.
+    ///
+    /// # Errors
+    ///
+    /// The same as [`Voice::start_on`]. On failure nothing has changed and
+    /// `self` is still running.
+    pub fn switch_capture(
+        &self,
+        capture: Option<&str>,
+        media: MediaChannel,
+        ssrc: Ssrc,
+    ) -> Result<Self> {
+        let fresh = Self::start_on(capture, media, ssrc)?;
+        fresh.set_at_field(self.at_field());
+        fresh.set_total_isolation(self.total_isolation());
+        fresh.set_mode(self.mode());
+        fresh.set_key_held(self.controls.key_held.load(Ordering::Relaxed));
+        if let Ok(gains) = self.controls.gains.lock() {
+            for (talker, gain) in gains.iter() {
+                fresh.set_gain(*talker, *gain);
+            }
+        }
+        Ok(fresh)
     }
 
     /// Mutes the microphone — A.T. Field.

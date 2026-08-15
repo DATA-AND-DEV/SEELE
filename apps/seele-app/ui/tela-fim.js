@@ -13,6 +13,10 @@ function mostrarFim(motivo) {
   // quem ficasse nela veria o Dogma acabar por trás de um botão que promete
   // entrar nele.
   $("tela-auth").hidden = true;
+  // E a configuração, que abre por cima da sessão. Toda `.tela` tem a altura da
+  // janela, então duas visíveis não se sobrepõem: empilham, e a segunda fica
+  // abaixo da dobra onde ninguém a encontra.
+  abandonarDogma();
   $("tela-fim").hidden = false;
   $("fim-motivo").textContent = MOTIVOS[motivo] ?? "ENLACE ENCERRADO";
 }
