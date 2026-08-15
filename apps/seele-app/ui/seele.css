@@ -432,7 +432,7 @@ input:focus {
    |-------------------|---------|---------|--------|
    | `osso-apagado`    |  4,11:1 |  2,35:1 | 3,74:1 |
    | `vermelho-alerta` |  5,16:1 |  2,70:1 | 4,63:1 |
-   | `laranja-nerv`    |  5,72:1 |  2,97:1 | 5,13:1 |
+   | `laranja-nerv`    |  5,71:1 |  2,97:1 | 5,13:1 |
 
    A 34% não é só o `osso-apagado` — que `docs/tokens-achados.md` já registra
    reprovando AA e valendo só como texto grande — que piora: ele cai para 2,35:1
@@ -442,11 +442,13 @@ input:focus {
    a única correção de acessibilidade que a revisão da paleta trouxe é o preço
    que ninguém escolheu pagar.
 
-   6% é o maior valor redondo em que todo token que passava em AA continua
-   passando (`vermelho-alerta` 4,63:1 ≥ 4,5), e em que o `osso-apagado` continua
-   valendo pelo critério que já era o dele (3,74:1 ≥ 3:1). O que resta de custo
-   está escrito em `docs/tokens-achados.md`: nenhum véu diferente de zero sai de
-   graça, porque o véu apaga glifo e fundo ao mesmo tempo.
+   6% passa com folga, não é o teto: a `vermelho-alerta` chega a 4,63:1 ≥ 4,5 e a
+   `osso-apagado` a 3,74:1 ≥ 3:1. O teto de verdade é α ≈ 7,55% — onde a
+   `vermelho-alerta` cruza 4,5:1 e vira a primeira a reprovar; a 8% inteiro ela já
+   está em 4,4630:1. 6% foi escolhido abaixo desse teto de propósito, para deixar
+   margem. O que resta de custo está escrito em `docs/tokens-achados.md`: nenhum
+   véu diferente de zero sai de graça, porque o véu apaga glifo e fundo ao mesmo
+   tempo.
 
    E quase nada se perde de aparência, porque o véu é negro absoluto sobre um
    fundo de negro absoluto: em `html, body` a textura é **exatamente** um no-op

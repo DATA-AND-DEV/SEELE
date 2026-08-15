@@ -117,7 +117,7 @@ portanto o pior caso para texto claro:
 |---|---|---|---|
 | `osso-apagado` | 4,11:1 | **2,35:1** | 3,74:1 |
 | `vermelho-alerta` | 5,16:1 | **2,70:1** | 4,63:1 |
-| `laranja-nerv` | 5,72:1 | **2,97:1** | 5,13:1 |
+| `laranja-nerv` | 5,71:1 | **2,97:1** | 5,13:1 |
 
 A 34%, que é o valor do comp, o estrago não era o achado 3 ficando pior: era o
 `osso-apagado` perdendo até o piso de 3:1 que ainda o mantinha válido como texto
@@ -125,11 +125,15 @@ grande, e o `vermelho-alerta` caindo a 2,70:1 — a cor cuja aprovação em AA o
 achado 2 registra como o argumento mais forte a favor da paleta v2, desfeita em
 silêncio por uma textura decorativa.
 
-Está no ar a 6%: o maior valor redondo em que todo token que passava em AA
-continua passando, e em que o `osso-apagado` continua valendo pelo critério que
-já era o dele. **O custo que resta** é o da coluna da direita: `osso-apagado` de
+Está no ar a 6%, e há folga: nem esse é o teto. `vermelho-alerta` (4,5456:1) e
+`osso-apagado` (3,6813:1) ainda passam a 7%; 8% inteiro é a primeira reprovação
+(`vermelho-alerta` cai a 4,4630:1). O teto de verdade é α ≈ 7,55%, onde
+`vermelho-alerta` cruza 4,5:1 — é a cor que decide, porque é a que menos folga
+tem. 6% foi escolhido abaixo desse teto de propósito, com margem, não por ser o
+maior valor redondo que ainda passava. **O custo que resta** é o da coluna da
+direita: `osso-apagado` de
 4,11:1 para 3,74:1, `vermelho-alerta` de 5,16:1 para 4,63:1, `laranja-nerv` de
-5,72:1 para 5,13:1. Ninguém muda de classificação, mas a folga do vermelho
+5,71:1 para 5,13:1. Ninguém muda de classificação, mas a folga do vermelho
 encolheu — o que M4 fizer com `osso-apagado` tem agora um segundo número para
 respeitar.
 
@@ -140,7 +144,17 @@ Em `html, body` a textura é **exatamente** um no-op em qualquer opacidade. A
 (10 · 8 · 6) a (8,3 · 6,6 · 5,0) — menos de dois níveis de 255. A textura nunca
 foi visível onde deveria estar. Ela era visível no texto.
 
-`apps/seele-app/tests/tokens.rs` mede isto: lê a opacidade que a folha declara,
-refaz a conta e reprova se algum dos três cair abaixo do critério que já
-cumpria. Subir a varredura de novo é possível, mas passa a ser uma decisão, não
-uma edição.
+`apps/seele-app/tests/tokens.rs` mede isto para o véu estático (`.varredura`,
+6%): lê a opacidade que a folha declara, refaz a conta e reprova se algum dos
+três cair abaixo do critério que já cumpria. Subir o véu de novo é possível, mas
+passa a ser uma decisão, não uma edição.
+
+O teste **não** mede a faixa que desce (`.varredura::after`). Dentro da faixa de
+5vh, a opacidade efetiva é 0,68 × 0,06 ≈ 4% de `osso-apagado` — uma cor clara —
+somada por cima do véu já aplicado, e por isso *clareia* em vez de escurecer.
+Sobre o painel velado, isso deixa `vermelho-alerta` em ≈4,39:1, abaixo do piso
+de 4,5:1, e `osso-apagado` em ≈3,66:1. Não é regressão: a faixa sempre teve
+~4% de `osso-apagado` (0,12 × 0,34 antes, 0,68 × 0,06 agora), e a mudança de M5
+só melhorou o número, nunca piorou. A faixa também é transitória e ocupa 5vh da
+janela. Por isso a faixa não muda — mas o número fica registrado aqui em vez de
+não examinado, porque a frase acima só cobre o que o teste de fato cobre.
