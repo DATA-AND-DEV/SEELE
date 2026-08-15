@@ -284,6 +284,40 @@ pub struct Pilot {
     pub is_self: bool,
 }
 
+/// The average Sync Ratio of a Cage, already banded — **MÉDIA DO CAGE**.
+///
+/// The comp computes this in the shell and colours it there. It is computed in
+/// the core instead, for the reason at the top of this module: a shell that
+/// knows the thresholds is a shell that will disagree with the other one. What
+/// arrives here is the number, the band and the size of the sample, and drawing
+/// is all that is left to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct CageSync {
+    /// The average, 0 to 100, rounded to a whole point.
+    ///
+    /// The comp prints `82.4`; the datum is a `u8` at every point it exists, so
+    /// this is `82`. A decimal here would be precision invented at the last
+    /// step, not carried from the measurement.
+    pub ratio: u8,
+    /// Which band the average falls into.
+    pub band: SyncBand,
+    /// How many pilots it averages — the comp's `5 PLUGS`.
+    pub pilots: u32,
+}
+
+impl From<seele_core::CageSync> for CageSync {
+    fn from(sync: seele_core::CageSync) -> Self {
+        Self {
+            ratio: sync.ratio,
+            band: sync.band.into(),
+            // A Cage holds at most `limit` pilots and `limit` is a `u16`. The
+            // saturation is unreachable and is here so the conversion cannot
+            // panic on a server that says otherwise.
+            pilots: u32::try_from(sync.pilots).unwrap_or(u32::MAX),
+        }
+    }
+}
+
 /// A voice channel.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Cage {
@@ -299,6 +333,11 @@ pub struct Cage {
     pub occupied_by_us: bool,
     /// Who is inside, in arrival order.
     pub pilots: Vec<Pilot>,
+    /// The average Sync Ratio of everybody inside, or `None` if nobody is.
+    ///
+    /// `None` rather than zero: an empty Cage has nothing to average, and zero
+    /// would draw every idle room in the critical colour.
+    pub sync: Option<CageSync>,
 }
 
 /// A text channel.

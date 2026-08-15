@@ -39,6 +39,11 @@ fn project_channels(room: &Room, app: &mut App) {
         tree.push(Node::Cage {
             name: cage.name.clone(),
             open,
+            // The core's average, not one folded here. `seele-ffi` hands the
+            // desktop shell the same value from the same method: two shells
+            // averaging the same roster separately is the second implementation
+            // `specs/01-arquitetura.md` says is in the wrong place.
+            sync: room.cage_sync(cage.id),
         });
         if !open {
             continue;
@@ -234,6 +239,56 @@ mod tests {
             .filter(|node| matches!(node, Node::Cage { .. }))
             .count();
         assert_eq!(cages, 2);
+    }
+
+    #[test]
+    fn the_cage_row_carries_the_core_s_average_and_not_one_of_its_own() {
+        // The terminal must not average anything: the desktop shell reads the
+        // same value from `Room::cage_sync` through `seele-ffi`, and a mean
+        // computed twice is a mean that will disagree once.
+        let mut room = room();
+        room.apply(&joined(3, "ayanami"));
+        room.apply(&ServerMessage::PilotState(PilotState {
+            pilot: PilotId(3),
+            at_field: false,
+            total_isolation: false,
+            speaking: false,
+            presence: Presence::Available,
+            sync_ratio: 90,
+        }));
+        room.apply(&ServerMessage::PilotState(PilotState {
+            pilot: PilotId(7),
+            at_field: false,
+            total_isolation: false,
+            speaking: false,
+            presence: Presence::Available,
+            sync_ratio: 60,
+        }));
+
+        let mut app = App::new();
+        project(&room, &mut app);
+
+        let occupied = app
+            .tree
+            .iter()
+            .find_map(|node| match node {
+                Node::Cage { name, sync, .. } if name.contains("CAGE-01") => Some(*sync),
+                _ => None,
+            })
+            .expect("the open Cage");
+        assert_eq!(occupied, room.cage_sync(CAGE));
+        assert_eq!(occupied.map(|sync| sync.ratio), Some(75));
+
+        // And the Cage nobody is in has nothing, rather than a zero.
+        let empty = app
+            .tree
+            .iter()
+            .find_map(|node| match node {
+                Node::Cage { name, sync, .. } if name.contains("CAGE-02") => Some(*sync),
+                _ => None,
+            })
+            .expect("the closed Cage");
+        assert_eq!(empty, None);
     }
 
     #[test]

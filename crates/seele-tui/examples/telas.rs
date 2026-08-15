@@ -80,6 +80,7 @@ fn operando() -> App {
         Node::Cage {
             name: "CAGE-01 CENTRAL".into(),
             open: true,
+            sync: None,
         },
         Node::Pilot(RosterEntry {
             nickname: "ayanami".into(),
@@ -105,6 +106,7 @@ fn operando() -> App {
         Node::Cage {
             name: "CAGE-02 TESTE".into(),
             open: false,
+            sync: None,
         },
         Node::Line {
             name: "#geral".into(),

@@ -39,7 +39,7 @@ pub use battery::{Battery, Link};
 pub use client::{Client, ConnectError, MediaChannel, Pattern, SessionInfo};
 pub use ed25519_dalek::SigningKey;
 pub use identity::FilePinStore;
-pub use state::{Changed, Ended, Message, Notice, Pilot, Room};
+pub use state::{CageSync, Changed, Ended, Message, Notice, Pilot, Room};
 pub use tofu::{MemoryPinStore, PinDecision, PinStore, Verdict};
 pub use voice::{DeviceRates, Voice, VoiceMode};
 

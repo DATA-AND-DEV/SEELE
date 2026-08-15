@@ -48,8 +48,8 @@ use seele_core::{
 };
 
 pub use types::{
-    Cage, EndReason, Event, Line, LinkState, Message, Notice, NoticeReason, Pattern, Pilot,
-    PlugError, Severity, Snapshot, SyncBand as Band, Telemetry, Trust, VoiceMode,
+    Cage, CageSync, EndReason, Event, Line, LinkState, Message, Notice, NoticeReason, Pattern,
+    Pilot, PlugError, Severity, Snapshot, SyncBand as Band, Telemetry, Trust, VoiceMode,
 };
 
 /// O que a casca gráfica precisa do core além de um [`Plug`] vivo.
@@ -556,6 +556,10 @@ fn cages_of(room: &Room) -> Vec<Cage> {
                     is_self: room.me == Some(pilot.id),
                 })
                 .collect(),
+            // Off the core, not folded here: the terminal draws the same number
+            // from the same method, and a mean computed in two shells is a mean
+            // two shells will one day round differently.
+            sync: room.cage_sync(cage.id).map(Into::into),
         })
         .collect()
 }
@@ -1152,6 +1156,51 @@ mod tests {
         let pilot = &cages_of(&room)[0].pilots[0];
         assert_eq!(pilot.sync_ratio, 72);
         assert_eq!(pilot.sync_band, types::SyncBand::Degraded);
+    }
+
+    #[test]
+    fn the_cages_average_crosses_already_banded() {
+        // MÉDIA DO CAGE. The comp computes it in the shell; here the shell gets
+        // the number, the band and the sample size and has nothing left to
+        // decide. A Cage nobody is in carries `None`, not a critical zero.
+        use seele_core::{
+            CageInfo, PilotId, PilotProfile, PilotState, Presence, ServerMessage, Ssrc,
+        };
+
+        let mut room = Room::new();
+        room.cages = vec![CageInfo {
+            id: CageId(1),
+            name: "CAGE-01".into(),
+            limit: 20,
+            password_required: false,
+            line: None,
+        }];
+        assert_eq!(cages_of(&room)[0].sync, None, "an empty Cage");
+
+        for (id, sync) in [(3_u64, 84_u8), (4, 85)] {
+            room.apply(&ServerMessage::PilotJoined {
+                cage: CageId(1),
+                profile: PilotProfile {
+                    id: PilotId(id),
+                    nickname: format!("piloto {id}"),
+                    roles: Vec::new(),
+                },
+                ssrc: Ssrc(u32::try_from(id * 10).expect("ssrc")),
+            });
+            room.apply(&ServerMessage::PilotState(PilotState {
+                pilot: PilotId(id),
+                at_field: false,
+                total_isolation: false,
+                speaking: false,
+                presence: Presence::Available,
+                sync_ratio: sync,
+            }));
+        }
+
+        let average = cages_of(&room)[0].sync.expect("two pilots are seated");
+        assert_eq!(average.ratio, 85);
+        assert_eq!(average.band, types::SyncBand::Nominal);
+        assert_eq!(average.pilots, 2);
     }
 
     #[test]

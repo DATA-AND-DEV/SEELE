@@ -11,7 +11,7 @@
 //! matters is that a keystroke means different things in different modes, and
 //! the one place that gets decided is [`App::on_key`].
 
-use seele_core::{Link, Pattern, SyncBand};
+use seele_core::{CageSync, Link, Pattern, SyncBand};
 
 /// Which input mode the client is in. `specs/05-cliente-tui.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,6 +139,13 @@ pub enum Node {
         name: String,
         /// Whether its pilots are showing.
         open: bool,
+        /// The average Sync Ratio of everybody in it, already banded by the
+        /// core, or `None` when nobody is.
+        ///
+        /// The comp's **MÉDIA DO CAGE**. Taken whole from `seele_core`: the
+        /// number, the band and the sample all arrive decided, and this shell
+        /// only chooses where on the row to put them.
+        sync: Option<CageSync>,
     },
     /// A pilot inside the Cage above.
     Pilot(RosterEntry),
@@ -668,6 +675,7 @@ mod tests {
             Node::Cage {
                 name: "CAGE-01 CENTRAL".into(),
                 open: true,
+                sync: None,
             },
             Node::Pilot(RosterEntry {
                 nickname: "ayanami".into(),
@@ -679,6 +687,7 @@ mod tests {
             Node::Cage {
                 name: "CAGE-02 TESTE".into(),
                 open: false,
+                sync: None,
             },
             Node::Line {
                 name: "#geral".into(),
@@ -1096,6 +1105,7 @@ mod tree_tests {
             Node::Cage {
                 name: "CAGE-01".into(),
                 open: true,
+                sync: None,
             },
             Node::Pilot(RosterEntry {
                 nickname: "ayanami".into(),
@@ -1137,6 +1147,7 @@ mod tree_tests {
             Node::Cage {
                 name: "CAGE-01".into(),
                 open: true,
+                sync: None,
             },
             Node::Pilot(RosterEntry {
                 nickname: "ayanami".into(),

@@ -376,16 +376,8 @@ fn render_tree(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
     for (index, node) in app.tree.iter().enumerate() {
         let selected = index == app.selected && app.focus == Panel::Channels;
         lines.push(match node {
-            Node::Cage { name, open } => {
-                let arrow = if *open { "▼ " } else { "▶ " };
-                Line::from(Span::styled(
-                    truncate(&format!("{arrow}{name}"), budget),
-                    if selected {
-                        theme.accent()
-                    } else {
-                        theme.body()
-                    },
-                ))
+            Node::Cage { name, open, sync } => {
+                cage_line(name, *open, *sync, selected, budget, theme)
             }
             Node::Line { name } => Line::from(Span::styled(
                 truncate(&format!("─ LINHA {name}"), budget),
@@ -400,6 +392,48 @@ fn render_tree(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
     }
 
     frame.render_widget(Paragraph::new(lines).style(dim(theme, app)), inner);
+}
+
+/// One Cage row: the name, and the room's average Sync Ratio when it has one.
+///
+/// The comp labels this **MÉDIA DO CAGE**. There is no room for the label in a
+/// panel this narrow, so what identifies it is its place: the same column as
+/// every pilot's number, on the row the pilots hang under. An empty Cage prints
+/// nothing rather than a zero — see [`seele_core::Room::cage_sync`].
+fn cage_line(
+    name: &str,
+    open: bool,
+    sync: Option<seele_core::CageSync>,
+    selected: bool,
+    budget: usize,
+    theme: Theme,
+) -> Line<'static> {
+    let arrow = if open { "▼ " } else { "▶ " };
+    let style = if selected {
+        theme.accent()
+    } else {
+        theme.body()
+    };
+
+    let Some(sync) = sync else {
+        return Line::from(Span::styled(
+            truncate(&format!("{arrow}{name}"), budget),
+            style,
+        ));
+    };
+
+    // Mark and number, as everywhere else: specs/05-cliente-tui.md forbids
+    // carrying this by colour alone, and an average is no exception.
+    let right = format!("{}{:>3}%", Theme::sync_mark(sync.band), sync.ratio);
+    let left_budget = budget.saturating_sub(width(&right) + 1);
+    let left = format!("{arrow}{}", truncate(name, left_budget));
+    let gap = budget.saturating_sub(width(&left) + width(&right));
+
+    Line::from(vec![
+        Span::styled(left, style),
+        Span::raw(" ".repeat(gap)),
+        Span::styled(right, theme.sync(sync.band)),
+    ])
 }
 
 /// One pilot row: presence, name, and the Sync Ratio with its mark.
@@ -1119,6 +1153,7 @@ mod tests {
             Node::Cage {
                 name: "CAGE-01 CENTRAL".into(),
                 open: true,
+                sync: None,
             },
             Node::Pilot(RosterEntry {
                 nickname: "ayanami".into(),
@@ -1167,6 +1202,48 @@ mod tests {
             .skip(1)
             .take_while(|row| !row.contains('┌'))
             .collect()
+    }
+
+    #[test]
+    fn a_cages_row_carries_the_average_of_the_room() {
+        // MÉDIA DO CAGE, in the same column as every pilot's number. The mark
+        // travels with it: specs/05-cliente-tui.md forbids carrying a band by
+        // colour alone, and an average is not an exception to that.
+        let mut app = populated();
+        app.tree[0] = Node::Cage {
+            name: "CAGE-01 CENTRAL".into(),
+            open: true,
+            // 98 and 44, which is what the two pilots below it read.
+            sync: Some(seele_core::CageSync {
+                ratio: 71,
+                band: seele_core::SyncBand::of(71),
+                pilots: 2,
+            }),
+        };
+        let screen = draw(&app, Palette::True, (MIN_WIDTH, MIN_HEIGHT));
+
+        let row = screen
+            .lines()
+            .find(|row| row.contains("CAGE-01"))
+            .expect("the Cage row");
+        assert!(row.contains("▒ 71%"), "no average on the Cage row: {row:?}");
+        assert!(row.contains("CAGE-01"), "the name was eaten: {row:?}");
+    }
+
+    #[test]
+    fn a_cage_nobody_is_in_shows_no_number_at_all() {
+        // An empty Cage has no average — not a zero, which the bands would
+        // paint red and which would read as a room in trouble.
+        let screen = draw(&populated(), Palette::True, (MIN_WIDTH, MIN_HEIGHT));
+
+        let row = screen
+            .lines()
+            .find(|row| row.contains("CAGE-01"))
+            .expect("the Cage row");
+        assert!(
+            !row.contains('%'),
+            "an empty Cage was given a number: {row:?}"
+        );
     }
 
     #[test]

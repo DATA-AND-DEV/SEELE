@@ -29,6 +29,7 @@ use std::collections::HashMap;
 
 use seele_proto::control::{CageInfo, LineInfo, PilotState};
 use seele_proto::ids::{CageId, LineId, MessageId, PilotId, Ssrc};
+use seele_proto::sync_ratio::SyncBand;
 use seele_proto::ServerMessage;
 
 use crate::client::SessionInfo;
@@ -105,6 +106,32 @@ pub struct Notice {
     pub reason: seele_proto::control::AlertReason,
     /// The operator's own words, when they have any.
     pub operator_text: Option<String>,
+}
+
+/// The average Sync Ratio of a Cage, already banded.
+///
+/// The comp (`design/Entry Plug v2.dc.html`) draws this as **MÉDIA DO CAGE**, a
+/// number in the band's colour with the sample size beside it, and computes
+/// both in the shell. Here it is computed once, in the core, for the same
+/// reason `seele_ffi::types` gives for carrying a band beside every pilot's
+/// number: a threshold known by two shells is a threshold two shells disagree
+/// about the day one of them is updated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CageSync {
+    /// The mean of the seated pilots' ratios, 0 to 100.
+    ///
+    /// Rounded to the nearest point, ties up. The comp prints `82.4`, but the
+    /// datum is a `u8` at every point it exists — on the wire, in
+    /// [`Pilot::sync_ratio`], in the smoothing — so a decimal here would be
+    /// precision invented at the last step. `82` is what is known.
+    pub ratio: u8,
+    /// Which band that mean falls into.
+    pub band: SyncBand,
+    /// How many pilots it is the mean of — the comp's `5 PLUGS`.
+    ///
+    /// Carried so a shell can say what the number is an average *of* without
+    /// counting the roster a second time and getting a different answer.
+    pub pilots: usize,
 }
 
 /// Why the session ended, if it has.
@@ -247,6 +274,60 @@ impl Room {
         self.current_cage
             .into_iter()
             .flat_map(|cage| self.roster(cage))
+    }
+
+    /// The average Sync Ratio of a Cage, banded, or `None` if nobody is in it.
+    ///
+    /// # An empty Cage has no average
+    ///
+    /// Not zero. Zero is a measurement, and by the bands it is a critical one:
+    /// a Dogma with four idle Cages would show four red rooms nobody is in,
+    /// and the one Cage that is genuinely in trouble would stop standing out.
+    /// `None` says "nothing to average", which is the truth, and leaves the
+    /// shell to draw the absence — the comp draws `——` for a plug with no
+    /// number, and this is the same case one level up.
+    ///
+    /// # An ejected pilot does not count
+    ///
+    /// Ejecting a plug leaves the Cage: the pilot comes out of `seats` — via
+    /// [`Self::enter_cage`] for this client, or `PilotLeft` for anybody else —
+    /// while staying in `pilots`, because their name is still needed for what
+    /// they already said. This averages the *seats*, so somebody who left stops
+    /// counting the moment they leave and cannot drag the room's number down
+    /// from outside it. There is no third state: this client has no notion of a
+    /// pilot who is in the Cage but ejected.
+    #[must_use]
+    pub fn cage_sync(&self, cage: CageId) -> Option<CageSync> {
+        let mut total: u32 = 0;
+        let mut pilots: usize = 0;
+        for pilot in self.roster(cage) {
+            total += u32::from(pilot.sync_ratio);
+            pilots += 1;
+        }
+
+        let count = u32::try_from(pilots).ok()?;
+        if count == 0 {
+            return None;
+        }
+
+        // Integer arithmetic, ties up: `(2a + n) / 2n` is the mean rounded to
+        // the nearest point without a float ever holding the value. A float
+        // would round the same way here and invite a `.1` onto the screen
+        // later, which is precision the datum does not carry.
+        let mean = (2 * total + count) / (2 * count);
+        let ratio = u8::try_from(mean).unwrap_or(u8::MAX);
+
+        Some(CageSync {
+            ratio,
+            band: SyncBand::of(ratio),
+            pilots,
+        })
+    }
+
+    /// The average for whichever Cage this client is in.
+    #[must_use]
+    pub fn current_cage_sync(&self) -> Option<CageSync> {
+        self.current_cage.and_then(|cage| self.cage_sync(cage))
     }
 
     /// A pilot's media source, addressed by nickname.
@@ -827,5 +908,107 @@ mod tests {
         assert_eq!(room.ssrc_of("ayanami"), Some(Ssrc(30)));
         assert_eq!(room.ssrc_of("AYANAMI"), Some(Ssrc(30)));
         assert_eq!(room.ssrc_of("ninguém"), None);
+    }
+
+    /// Seats a pilot in `CAGE` and gives them a Sync Ratio.
+    fn seated_with(room: &mut Room, id: u64, nickname: &str, sync: u8) {
+        room.apply(&joined(id, nickname));
+        room.apply(&ServerMessage::PilotState(PilotState {
+            pilot: PilotId(id),
+            at_field: false,
+            total_isolation: false,
+            speaking: false,
+            presence: Presence::Available,
+            sync_ratio: sync,
+        }));
+    }
+
+    /// The Cage seen by somebody whose own plug is elsewhere, so the fixture's
+    /// own zero does not have to be reasoned about in every average.
+    fn watching() -> Room {
+        let mut room = Room::new();
+        room.apply(&session());
+        room
+    }
+
+    #[test]
+    fn an_empty_cage_has_no_average_rather_than_a_zero() {
+        // Zero is a measurement, and by the bands a critical one. Four idle
+        // Cages drawn in red is four alarms nobody set, and the Cage that is
+        // genuinely in trouble stops standing out among them.
+        let room = room();
+        assert_eq!(room.cage_sync(CageId(9)), None, "a Cage nobody is in");
+        assert_eq!(watching().cage_sync(CAGE), None, "a Cage nobody has sat in");
+
+        // And the pilot's own Cage, before anybody is in it, has no average
+        // either — including no average of nobody.
+        let mut alone = watching();
+        assert_eq!(alone.current_cage_sync(), None, "no Cage entered yet");
+        alone.enter_cage(CAGE);
+        assert_eq!(
+            alone.current_cage_sync().map(|sync| sync.pilots),
+            Some(1),
+            "the pilot sitting in it is one pilot"
+        );
+    }
+
+    #[test]
+    fn the_average_is_the_seated_pilots_rounded_to_a_whole_point() {
+        // 90 + 81 + 78 = 249, over three, is 83 exactly. The band is read off
+        // the average and not off the members: two of these three are nominal
+        // on their own, and together the room is degraded.
+        let mut room = watching();
+        seated_with(&mut room, 3, "ayanami", 90);
+        seated_with(&mut room, 4, "asuka", 81);
+        seated_with(&mut room, 5, "shinji", 78);
+
+        let average = room.cage_sync(CAGE).expect("three pilots are seated");
+        assert_eq!(average.ratio, 83);
+        assert_eq!(average.band, SyncBand::Degraded);
+        assert_eq!(average.pilots, 3);
+    }
+
+    #[test]
+    fn a_half_point_rounds_up_and_never_lands_between_two_numbers() {
+        // 84 and 85 average to 84.5. The comp would print 84.5; the datum is a
+        // u8 everywhere it exists, so the answer is 85 — and 85 is the nominal
+        // floor, which is exactly the tie where guessing changes the colour of
+        // the room.
+        let mut room = watching();
+        seated_with(&mut room, 3, "ayanami", 84);
+        seated_with(&mut room, 4, "asuka", 85);
+
+        let average = room.cage_sync(CAGE).expect("two pilots are seated");
+        assert_eq!(average.ratio, 85);
+        assert_eq!(average.band, SyncBand::Nominal);
+        assert_eq!(average.pilots, 2);
+        assert_eq!(room.current_cage_sync(), None, "our plug is elsewhere");
+    }
+
+    #[test]
+    fn a_pilot_who_ejected_stops_counting_towards_the_room() {
+        // Ejecting leaves the seats and keeps the name. Somebody who walked out
+        // with a dying connection must not go on dragging the room's number
+        // down from outside it — and this client has no third state where a
+        // pilot is in the Cage but ejected.
+        let mut room = watching();
+        seated_with(&mut room, 3, "ayanami", 90);
+        seated_with(&mut room, 4, "asuka", 20);
+
+        assert_eq!(room.cage_sync(CAGE).map(|sync| sync.ratio), Some(55));
+
+        room.apply(&ServerMessage::PilotLeft {
+            cage: CAGE,
+            pilot: PilotId(4),
+        });
+
+        let average = room.cage_sync(CAGE).expect("ayanami is still seated");
+        assert_eq!(average.ratio, 90, "somebody who left is still counted");
+        assert_eq!(average.pilots, 1);
+        assert_eq!(
+            room.name_of(PilotId(4)),
+            "asuka",
+            "the name left with the seat"
+        );
     }
 }
