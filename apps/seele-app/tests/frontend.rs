@@ -130,8 +130,25 @@ fn the_page_loads_only_files_that_are_shipped() {
     // `fontes.css` is on this list for the same reason as the other three, and
     // it is the one whose absence would be hardest to notice: the page would
     // still render, in Arial Narrow. `tests/fontes.rs` guards what is inside it.
-    for asset in ["fontes.css", "tokens.css", "seele.css", "seele.js"] {
-        assert!(page.contains(asset), "index.html never loads {asset}");
+    //
+    // The attribute, not the bare name. A bare `contains` was an implicit tag
+    // check only while each name appeared exactly once in the file; the comment
+    // above the `<link>` block now names `tokens.css` and `fontes.css` in prose,
+    // and with that the assertion became satisfiable by the explanation of the
+    // tag it was meant to guard. Deleting the `fontes.css` link left all
+    // nineteen tests green. Same defect class as the one `without_comments`
+    // exists for, one file over: a guard a comment can satisfy is a guard that
+    // cannot fail.
+    for (asset, attribute) in [
+        ("fontes.css", "href"),
+        ("tokens.css", "href"),
+        ("seele.css", "href"),
+        ("seele.js", "src"),
+    ] {
+        assert!(
+            page.contains(&format!("{attribute}=\"{asset}\"")),
+            "index.html never loads {asset}"
+        );
         assert!(
             app_dir().join("ui").join(asset).exists(),
             "index.html loads {asset}, which is not in ui/"
