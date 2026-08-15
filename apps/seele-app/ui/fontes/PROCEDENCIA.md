@@ -127,11 +127,27 @@ variante terminal-safe do comp, que é desenhada em mono.
 
 **Nem tudo que se pediu existe na face.** A faixa `U+25A0-25CF` foi pedida
 inteira e devolveu **um** glifo: `▸ ◂ ▶ ◀ ▼ ▴ ▾ ● ○` não estão no `cmap` do IBM
-Plex Mono. `≡` e `⌘` também não. `ui/index.html` desenha `▸` no prompt de
-composição e `◂`/`▸` nos
-botões de busca: esses três caracteres continuam caindo na monoespaçada do
-sistema, **hoje e depois deste commit**. Embarcar a face não conserta isso; só
-trocar o caractere, ou desenhar o triângulo, conserta.
+Plex Mono. `≡` e `⌘` também não. Isso é ausência **na face**, não recorte do
+subconjunto: o `IBMPlexMono-Regular.otf` 2.005 de onde estas saíram tem 1049
+entradas de `cmap` e exatamente um glifo em `U+25A0-25CF`. Prova pelo contrário:
+`█ ▓ ▒ ░ ─ → · —` foram pedidos pela mesma linha, existem na face e viajam
+embarcados.
+
+Seis caracteres, em seis lugares, caem na monoespaçada do sistema — **hoje e
+depois deste commit**:
+
+| caractere | onde | o que desenha |
+|---|---|---|
+| `▸` | `ui/index.html:234` | o prompt de composição |
+| `◂` | `ui/index.html:228` | busca: ocorrência anterior |
+| `▸` | `ui/index.html:230` | busca: próxima ocorrência |
+| `▼` / `▶` | `ui/seele.js:299` | Cage aberto / fechado |
+| `●` / `○` | `ui/seele.js:311` | piloto falando / calado |
+| `⌘` | `ui/seele.js:956` | a dica de cópia do convite |
+
+Embarcar a face não conserta nada disto; só trocar o caractere, ou desenhar o
+triângulo, conserta. E qual glifo a interface desenha é decisão de desenho — o
+comp usa estes —, então fica com quem desenha, não com quem empacota a fonte.
 
 ### Noto Sans JP
 
