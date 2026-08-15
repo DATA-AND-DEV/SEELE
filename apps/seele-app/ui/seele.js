@@ -125,6 +125,7 @@ const AVISOS = {
   PermissionDenied: "PERMISSÃO NEGADA",
   CageFull: "CAGE LOTADO",
   OperatorNotice: "AVISO DO OPERADOR",
+  RateLimited: "VOCÊ ESTÁ FALANDO RÁPIDO DEMAIS PARA O DOGMA",
 };
 
 /**
