@@ -1,0 +1,46 @@
+{
+  "$meta": {
+    "produto": "MAGI · Entry Plug",
+    "celula": { "largura": 8, "altura": 16, "nota": "TUI: 1 célula = 8×16px. Todo espaçamento é múltiplo." },
+    "regras": ["border-radius: 0 em qualquer lugar", "nenhuma sombra", "superfície = linha 1px + vazio"]
+  },
+  "cor": {
+    "negro-absoluto":   { "hex": "#050403", "uso": "fundo do app" },
+    "negro-painel":     { "hex": "#0A0806", "uso": "superfície de painel" },
+    "linha":            { "hex": "#241F19", "uso": "borda 1px padrão" },
+    "linha-forte":      { "hex": "#3A322A", "uso": "painel ativo, réguas, marcas de escala" },
+    "osso":             { "hex": "#EAE3CF", "uso": "texto corrido" },
+    "osso-apagado":     { "hex": "#7A7061", "uso": "rótulo secundário, log inativo" },
+    "laranja-nerv":     { "hex": "#FF6B00", "uso": "acento primário institucional", "ansi256": 208, "ansi16": "yellow-bold" },
+    "laranja-fraco":    { "hex": "#331704", "uso": "preenchimento laranja" },
+    "vermelho-alerta":  { "hex": "#E01B24", "uso": "EXCLUSIVO alerta e queda de conexão", "ansi256": 160, "ansi16": "red-bold" },
+    "vermelho-fraco":   { "hex": "#2C0508" },
+    "fosforo":          { "hex": "#3DF57A", "uso": "telemetria e valores nominais", "ansi256": 84, "ansi16": "green-bold" },
+    "fosforo-fraco":    { "hex": "#06220F" },
+    "padrao-azul":      { "hex": "#2F8FE0", "uso": "identidade verificada", "ansi256": 68, "ansi16": "blue-bold" },
+    "azul-fraco":       { "hex": "#04182B" }
+  },
+  "tipografia": {
+    "display": { "familia": "Saira Condensed", "peso": 700, "caixa": "alta", "tracking": "0.02em", "uso": "cartelas e cabeçalhos" },
+    "mono":    { "familia": "IBM Plex Mono", "uso": "todo dado, endereço, número, log", "tabular": true },
+    "jp":      { "familia": "Noto Sans JP", "peso": 700, "uso": "acento em kanji — nunca informação operacional" },
+    "escala": {
+      "cartela": 56, "titulo": 28, "secao": 18, "corpo": 14,
+      "dado": 13, "rotulo": 10, "micro": 9
+    },
+    "tracking": { "cartela": "0.02em", "rotulo": "0.22em" }
+  },
+  "espacamento": { "e1": 8, "e2": 16, "e3": 24, "e4": 32, "e6": 48, "e8": 64 },
+  "borda": { "padrao": 1, "forte": 2, "raio": 0 },
+  "movimento": {
+    "respiro-sync": "2400ms ease-in-out infinite",
+    "pulso-fala": "derivado de amplitude real",
+    "bateria": "1000ms tick regressivo",
+    "regra": "movimento é diagnóstico. respeita prefers-reduced-motion"
+  },
+  "terminal": {
+    "box": ["│", "─", "┌", "┐", "└", "┘", "├", "┤", "┬", "┴", "┼", "╭", "╮"],
+    "barra": ["█", "▓", "▒", "░", "▁", "▂", "▃", "▄", "▅", "▆", "▇"],
+    "enfase": ["cor", "negrito", "inverso", "sublinhado"]
+  }
+}

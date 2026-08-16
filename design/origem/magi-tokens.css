@@ -1,0 +1,54 @@
+/* MAGI · Entry Plug — tokens de design
+   Célula de terminal: 8px × 16px. Todo espaçamento é múltiplo de célula.
+   Zero border-radius. Zero sombra. */
+
+:root {
+  /* ---- cor ---- */
+  --magi-negro-absoluto: #050403;   /* fundo. nunca cinza-carvão neutro */
+  --magi-negro-painel:   #0A0806;   /* superfície de painel, 1 passo acima do fundo */
+  --magi-linha:          #241F19;   /* borda 1px padrão */
+  --magi-linha-forte:    #3A322A;   /* borda de painel ativo / régua */
+  --magi-osso:           #EAE3CF;   /* texto corrido. off-white amarelado */
+  --magi-osso-apagado:   #7A7061;   /* rótulo secundário, log inativo */
+  --magi-laranja-nerv:   #FF6B00;   /* acento primário institucional */
+  --magi-laranja-fraco:  #331704;   /* preenchimento de estado laranja */
+  --magi-vermelho-alerta:#E01B24;   /* EXCLUSIVO: alerta e perda de conexão */
+  --magi-vermelho-fraco: #2C0508;
+  --magi-fosforo:        #3DF57A;   /* telemetria e valores nominais */
+  --magi-fosforo-fraco:  #06220F;
+  --magi-padrao-azul:    #2F8FE0;   /* identidade verificada — PADRÃO: AZUL */
+  --magi-azul-fraco:     #04182B;
+
+  /* ---- tipografia ---- */
+  --magi-display: "Saira Condensed", "Arial Narrow", sans-serif; /* cartelas, cabeçalhos */
+  --magi-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace; /* todo dado */
+  --magi-jp: "Noto Sans JP", "Hiragino Kaku Gothic ProN", sans-serif; /* acento em kanji */
+
+  --magi-cartela: 700;   /* peso de cartela */
+  --magi-tracking-cartela: 0.02em;
+  --magi-tracking-rotulo: 0.22em;
+
+  --magi-t-cartela: 56px;
+  --magi-t-titulo: 28px;
+  --magi-t-secao: 18px;
+  --magi-t-corpo: 14px;
+  --magi-t-dado: 13px;
+  --magi-t-rotulo: 10px;   /* uppercase, tracking largo */
+  --magi-t-micro: 9px;     /* réguas e coordenadas */
+
+  /* ---- espaçamento: múltiplos de célula ---- */
+  --magi-celula-x: 8px;
+  --magi-celula-y: 16px;
+  --magi-e1: 8px;
+  --magi-e2: 16px;
+  --magi-e3: 24px;
+  --magi-e4: 32px;
+  --magi-e6: 48px;
+  --magi-e8: 64px;
+
+  /* ---- borda ---- */
+  --magi-b: 1px;
+  --magi-b-forte: 2px;
+  --magi-raio: 0;
+  --magi-sombra: none;
+}

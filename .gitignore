@@ -5,7 +5,10 @@
 # macOS
 .DS_Store
 
-# The Claude Design zip is already extracted into design/. Do not version both copies.
+# Os zips que a ferramenta de design exporta. O conteúdo entra em `design/`, e o
+# arquivo comprimido não fica junto: duas cópias da mesma coisa são uma que vai
+# ficar para trás. Os dois que existiam foram conferidos arquivo por arquivo e
+# apagados — o que neles não estava versionado está em `design/origem/`.
 /*.zip
 
 # Local audio measurement artifacts (M1) — produced by a rig, never committed.
