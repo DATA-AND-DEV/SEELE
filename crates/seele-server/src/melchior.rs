@@ -156,6 +156,25 @@ impl<'a> Melchior<'a> {
                 "UPDATE pilots SET last_seen_at = ?1 WHERE id = ?2",
                 params![now_seconds(), id],
             )?;
+            // Uma conta que já existe assume o comando **se ele nunca foi de
+            // ninguém** — e essa condição não é a mesma que «está vago agora».
+            //
+            // O problema: contas criadas antes de o comando existir nunca
+            // passaram por `seat_the_arrival`, então o assento ficava vazio para
+            // sempre. Num Dogma real, com histórico real, o formulário de criar
+            // sala não aparecia para ninguém e não havia como fazer aparecer; a
+            // única saída era entrar com um apelido nunca usado, que é uma
+            // resposta absurda para «administre o seu próprio Dogma».
+            //
+            // Por que não «vago agora»: um operador revoga o comando de alguém,
+            // essa pessoa reconecta, e recuperaria o papel sozinha. A revogação
+            // viraria decoração. Foi um teste deste arquivo que pegou isso.
+            //
+            // A marca em `config` é o que separa as duas: ela é escrita na
+            // primeira vez que o assento é ocupado e nunca sai. Sem marca, o
+            // Dogma nunca teve Comandante; com marca, quem não tem o papel não
+            // o tem por decisão de alguém.
+            self.claim_never_held_commandership(id)?;
             return self.pilot(PilotId(id as u64));
         }
 
@@ -214,7 +233,47 @@ impl<'a> Melchior<'a> {
     /// pilot row". A Dogma whose Comandante account was deleted has no
     /// Comandante again, and the next arrival should be able to take the seat
     /// rather than leave the Dogma permanently unadministrable.
-    fn seat_the_arrival(&self, pilot_row: i64) -> Result<()> {
+    /// The key that remembers the seat was taken once, whoever holds it now.
+    const SEAT_TAKEN: &'static str = "commandership_claimed";
+
+    /// Takes the Comandante seat only if it has **never** been held.
+    ///
+    /// Runs on the reconnect path, where "empty right now" is the wrong
+    /// question. An operator who revokes somebody's Comandante would see the
+    /// role come back the next time that person connected, and the revocation
+    /// would be decoration — a test in this file says so, and it is right.
+    ///
+    /// What this asks instead is whether the seat was *ever* occupied. A Dogma
+    /// that gained accounts before the commandership existed answers no, and
+    /// the next arrival may take it. A Dogma whose Comandante was demoted
+    /// answers yes, forever, and nobody takes it back by reconnecting.
+    ///
+    /// The mark is written inside the same transaction as the claim: a claim
+    /// that succeeded without leaving the mark would let the next reconnect
+    /// claim again.
+    fn claim_never_held_commandership(&self, pilot_row: i64) -> Result<bool> {
+        let ja: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT value FROM config WHERE key = ?1",
+                [Self::SEAT_TAKEN],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if ja.is_some() {
+            return Ok(false);
+        }
+        self.claim_vacant_commandership(pilot_row)
+    }
+
+    /// Takes the Comandante seat if nobody holds it. Says whether it did.
+    ///
+    /// One statement, conditional on the role being unheld — the same shape
+    /// `crate::admissao` uses to spend an invite exactly once. SQLite serialises
+    /// writers, so of two clients racing for a virgin Dogma the second sees the
+    /// first's row, inserts nothing, and reports zero rows changed. Neither a
+    /// check-then-insert in Rust nor two statements would survive that.
+    fn claim_vacant_commandership(&self, pilot_row: i64) -> Result<bool> {
         let claimed = self.connection.execute(
             "INSERT INTO pilot_roles (pilot_id, role_id)
              SELECT ?1, ?2
@@ -222,10 +281,20 @@ impl<'a> Melchior<'a> {
             params![pilot_row, i64::from(COMMANDER_ROLE.get())],
         )?;
         if claimed > 0 {
-            tracing::info!(
-                pilot = pilot_row,
-                "the first account took the commandership"
-            );
+            // A marca, e não só o papel: ela é o que distingue «nunca teve
+            // Comandante» de «teve e não tem mais», e o caminho de reconexão
+            // depende dessa diferença.
+            self.connection.execute(
+                "INSERT OR IGNORE INTO config (key, value) VALUES (?1, '1')",
+                [Self::SEAT_TAKEN],
+            )?;
+            tracing::info!(pilot = pilot_row, "this account took the commandership");
+        }
+        Ok(claimed > 0)
+    }
+
+    fn seat_the_arrival(&self, pilot_row: i64) -> Result<()> {
+        if self.claim_vacant_commandership(pilot_row)? {
             return Ok(());
         }
 
@@ -510,6 +579,68 @@ mod tests {
         let anfitriao = melchior.register_or_find(&[1; 32], "anfitriao").unwrap();
         assert_eq!(anfitriao.roles, vec![COMMANDER]);
         assert!(melchior.may(anfitriao.id, Permission::ManageCages).unwrap());
+    }
+
+    #[test]
+    fn an_account_older_than_the_commandership_can_still_take_it() {
+        // O caso que este conserto existe para resolver, e ele veio de um Dogma
+        // de verdade: contas criadas **antes** de o comando existir nunca
+        // passaram por `seat_the_arrival`, então o assento ficou vazio e nunca
+        // marcado. O formulário de criar sala não aparecia para ninguém e não
+        // havia como fazer aparecer — a única saída era entrar com um apelido
+        // nunca usado, que é uma resposta absurda para «administre o seu
+        // próprio Dogma».
+        //
+        // O cenário é encenado como o banco antigo de verdade era: a linha do
+        // piloto escrita à mão, com o papel de Piloto e nada mais. Encená-lo
+        // revogando o comando de uma conta nova seria outro caso — aquele deixa
+        // a marca, e a marca é justamente o que impede a revogação de ser
+        // desfeita.
+        let casper = store();
+        let melchior = Melchior::new(&casper);
+        casper
+            .connection()
+            .execute(
+                "INSERT INTO pilots (nickname, public_key, created_at, last_seen_at)
+                 VALUES ('anfitriao', ?1, 0, 0)",
+                [&[1u8; 32][..]],
+            )
+            .unwrap();
+        let antigo = casper.connection().last_insert_rowid();
+        casper
+            .connection()
+            .execute(
+                "INSERT INTO pilot_roles (pilot_id, role_id) VALUES (?1, ?2)",
+                params![antigo, i64::from(PILOT.get())],
+            )
+            .unwrap();
+
+        let de_volta = melchior.register_or_find(&[1; 32], "anfitriao").unwrap();
+        assert!(
+            de_volta.roles.contains(&COMMANDER),
+            "uma conta anterior ao comando não conseguiu assumi-lo, e o Dogma fica \
+             inadministrável para sempre: {de_volta:?}"
+        );
+        assert!(melchior.may(de_volta.id, Permission::ManageCages).unwrap());
+    }
+
+    #[test]
+    fn a_revoked_commander_does_not_get_it_back_by_reconnecting() {
+        // A outra metade, e a razão de a marca existir. «Assume se estiver
+        // vago» desfaria toda revogação na reconexão seguinte, e a revogação
+        // viraria decoração. Um teste vizinho já dizia isso; este diz por que a
+        // marca é o que separa os dois casos.
+        let casper = store();
+        let melchior = Melchior::new(&casper);
+        let dono = melchior.register_or_find(&[1; 32], "anfitriao").unwrap();
+        assert!(dono.roles.contains(&COMMANDER));
+
+        melchior.revoke_role(dono.id, COMMANDER).unwrap();
+        let de_novo = melchior.register_or_find(&[1; 32], "anfitriao").unwrap();
+        assert!(
+            !de_novo.roles.contains(&COMMANDER),
+            "reconectar desfez a revogação: {de_novo:?}"
+        );
     }
 
     #[test]
