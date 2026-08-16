@@ -112,7 +112,15 @@ fn linked_assets(page: &str, attribute: &str) -> Vec<String> {
 }
 
 /// Every `invoke("name")` in the script.
+///
+/// Comments stripped first, for the reason `linked_assets` strips them: prose
+/// about this boundary tends to quote the boundary. A doc comment explaining
+/// that "every `invoke("…")` is tied to a registered command" made this helper
+/// report a command literally named `…`, and the guard then accused the
+/// frontend of calling something main.rs does not register — a true statement
+/// about a call that does not exist.
 fn invoked_commands(script: &str) -> BTreeSet<String> {
+    let script = without_comments(script);
     let mut found = BTreeSet::new();
     for piece in script.split("invoke(\"").skip(1) {
         if let Some(name) = piece.split('"').next() {
@@ -168,7 +176,7 @@ fn every_command_the_frontend_calls_is_registered() {
 /// `saidas` / `saida_escolhida` / `escolher_saida` are the SAÍDA DE SOM half of
 /// the Terminal Dogma. The core, the settings file and the bridge are all done
 /// and tested; only the panel is missing.
-const AGUARDANDO_TELA: &[&str] = &["escolher_saida", "saida_escolhida", "saidas"];
+const AGUARDANDO_TELA: &[&str] = &[];
 
 #[test]
 fn no_command_is_registered_and_never_called() {
@@ -1000,7 +1008,7 @@ fn the_picker_sends_back_the_id_and_never_the_name() {
     // Scoped to the function that builds a row, because the file as a whole says
     // both words either way — the paragraph explaining why the id is not shown
     // would otherwise satisfy a search for it.
-    let body = body_of(&scripts(), "function linhaDeMicrofone");
+    let body = body_of(&scripts(), "function linhaDeDispositivo");
 
     assert!(
         body.contains("dataset.dispositivo = id"),
@@ -1032,9 +1040,14 @@ fn the_screen_says_which_microphone_is_open_and_not_only_which_was_chosen() {
         "nothing in the picker reads which device actually opened, so it draws the \
          preference and calls it reality"
     );
+
+    // As duas palavras desceram para a função que marca **uma** lista, quando a
+    // saída de som passou a ser escolhível e as duas listas passaram a ser
+    // desenhadas pelo mesmo código. O que o teste exige não mudou.
+    let uma = body_of(&scripts(), "function marcarUmaLista");
     assert!(
-        body.contains("EM USO") && body.contains("ESCOLHIDO"),
-        "the picker has one word for both states, so it cannot show them apart:\n{body}"
+        uma.contains("EM USO") && uma.contains("ESCOLHIDO"),
+        "the picker has one word for both states, so it cannot show them apart:\n{uma}"
     );
 
     // And the bridge has to still answer the other half.
@@ -2336,42 +2349,67 @@ fn the_settings_screen_omits_what_the_product_lacks_instead_of_drawing_it_dead()
 }
 
 #[test]
-fn the_output_row_is_the_one_dead_control_and_it_says_why() {
-    // The exception the omission rule allows, and the reason it is an exception:
-    // `seele-audio/src/device.rs` already opens an output stream on the system
-    // default, so there *is* a device playing sound right now. Deleting the row
-    // would hide a device in use. What does not exist is enumerating the others.
+fn both_sides_of_the_audio_picker_are_drawn_by_the_same_code() {
+    // The output row used to be one dead control with a `title` explaining that
+    // the machine could not enumerate speakers. It can now, so that guard was
+    // retired — a disabled row asserting a limitation that no longer exists is
+    // a test that keeps a bug alive.
     //
-    // So it is drawn, it is disabled, and it says why — the same three things
-    // `the_two_buttons_with_no_command_behind_them_cannot_be_pressed` asks of
-    // every button with no command behind it.
-    let page = read("ui/index.html");
-    let tag = tag_with_id(&page, "saida-padrao");
-
-    assert!(
-        tag.contains("disabled"),
-        "the output row is pressable, and there is nothing behind it — a button \
-         that looks like it acts and does nothing: <{tag}>"
-    );
-    assert!(
-        tag.contains("title=\""),
-        "the output row is disabled and says nothing about why, which reads as a \
-         bug rather than as a gap: <{tag}>"
-    );
-
+    // What replaces it is the risk the wiring actually introduced. Input and
+    // output are picked in exactly the same dance — list, read the choice,
+    // choose, and show what *opened* rather than what was asked for — and the
+    // cheapest way to add the second one is to copy the first. Two copies drift
+    // on the first fix somebody makes to one side only, and the drift is
+    // invisible: both lists keep drawing, one of them just stops telling the
+    // truth about which device is open.
     let script = without_comments(&scripts());
+
     assert!(
-        !script.contains("$(\"saida-padrao\")"),
-        "a script reaches for the output row, so the disabled button grew a \
-         listener — which is the comp's mistake, one layer down"
+        !script.contains("desenharMicrofones") && !script.contains("linhaDeMicrofone"),
+        "a capture-only drawing function is back, which is how the two sides start \
+         to differ"
     );
 
-    // And the list it will be filled into has to still be there, or the wiring
-    // has nowhere to land when the enumeration arrives.
+    let tabela = body_of(&scripts(), "const LADOS");
+    for comando in [
+        "microfones",
+        "saidas",
+        "microfone_escolhido",
+        "saida_escolhida",
+        "escolher_microfone",
+        "escolher_saida",
+    ] {
+        assert!(
+            tabela.contains(comando),
+            "`{comando}` is not in the LADOS table, so one side of the picker is \
+             wired somewhere else and can be changed without the other:\n{tabela}"
+        );
+    }
+
+    // The whole point of the screen: what was chosen and what opened are two
+    // different questions, and both sides have to answer the second one.
+    let marcar = body_of(&scripts(), "function marcarLinhas");
+    for campo in ["capture", "playback"] {
+        assert!(
+            marcar.contains(campo),
+            "`marcarLinhas` never reads `snapshot.{campo}`, so that side draws the \
+             preference and calls it reality:\n{marcar}"
+        );
+    }
+
+    // And nothing may seed rows in the markup: a hard-coded device is one this
+    // machine may not have.
+    let page = without_comments(&read("ui/index.html"));
+    let Some(after) = page.split("id=\"lista-saidas\"").nth(1) else {
+        panic!("the output list is gone, and with it the only place the enumeration can be drawn");
+    };
+    let Some(lista) = after.split("</ul>").next() else {
+        panic!("the output list is never closed");
+    };
     assert!(
-        page.contains("id=\"lista-saidas\""),
-        "the output list is gone, and with it the only place the enumeration can \
-         be drawn"
+        !lista.contains("<li"),
+        "the output list ships a row in the markup, which names a device before \
+         anybody asked this machine what it has:{lista}"
     );
 }
 

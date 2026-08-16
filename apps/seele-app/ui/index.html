@@ -1372,18 +1372,15 @@
             <div class="dogma-bloco-corpo">
               <div class="dogma-campo">
                 <h4 class="rotulo">DISPOSITIVO DE SAÍDA</h4>
-                <ul id="lista-saidas" class="dogma-dispositivos">
-                  <li>
-                    <button id="saida-padrao" class="dogma-dispositivo" type="button" disabled
-                            data-escolhido="sim"
-                            title="Esta máquina ainda não sabe listar as saídas de som: o plug abre a saída padrão do sistema e não tem como enumerar as outras. Enquanto isso, trocar de saída se faz no sistema operacional.">
-                      <span class="dogma-dispositivo-nome">PADRÃO DA MÁQUINA</span>
-                      <span class="dogma-dispositivo-marca">EM USO</span>
-                    </button>
-                  </li>
-                </ul>
-                <p class="dica">Só há uma por enquanto. Para trocar, troque a
-                  saída padrão do sistema.</p>
+                <!--
+                  Vazia na marcação, como a de microfones: quem a preenche é
+                  `desenharDispositivos()`, e semear linhas aqui seria desenhar
+                  aparelhos que talvez não existam nesta máquina.
+                -->
+                <ul id="lista-saidas" class="dogma-dispositivos"></ul>
+                <p class="dica">Onde você ouve os outros. Trocar vale na hora,
+                  e o que estiver tocando muda de aparelho sem sair da
+                  conversa.</p>
               </div>
             </div>
           </div>

@@ -36,7 +36,42 @@ let telaDeOrigem = null;
  * seguinte. A verdade mora no disco, do lado do Rust; isto é uma cópia da
  * última resposta dele, e toda escolha o consulta de novo.
  */
-let microfoneEscolhido = null;
+const escolhidoDe = { captura: null, saida: null };
+
+/**
+ * Os dois lados do áudio, e como cada um se pergunta ao Rust.
+ *
+ * Uma tabela e não duas cópias do mesmo desenho. Entrada e saída se escolhem
+ * exatamente do mesmo jeito — listar, ler o escolhido, escolher, e mostrar o
+ * que **abriu** e não o que foi pedido — e duas implementações paralelas dessa
+ * mesma dança divergiriam na primeira correção que alguém fizesse só de um
+ * lado. O `seele-audio` fez a mesma escolha na camada dele, com `Wanted` e
+ * `DeviceChoice` carregando os dois lados juntos em vez de dois `Option` em
+ * fila, e pelo mesmo motivo.
+ *
+ * Os comandos entram como chamadas escritas, e não como nomes em variável, e
+ * isso não é estilo. `tests/frontend.rs` amarra cada `invoke("…")` a um comando
+ * registrado em `main.rs`, nos dois sentidos, procurando o literal no texto —
+ * um nome guardado numa variável some desse laço, e o guarda passa a dizer que
+ * seis comandos vivos nunca são chamados. A primeira versão desta tabela fez
+ * exatamente isso.
+ */
+const LADOS = [
+  {
+    chave: "captura",
+    lista: "lista-microfones",
+    listar: () => invoke("microfones"),
+    lerEscolhido: () => invoke("microfone_escolhido"),
+    escolher: (dispositivo) => invoke("escolher_microfone", { dispositivo }),
+  },
+  {
+    chave: "saida",
+    lista: "lista-saidas",
+    listar: () => invoke("saidas"),
+    lerEscolhido: () => invoke("saida_escolhida"),
+    escolher: (dispositivo) => invoke("escolher_saida", { dispositivo }),
+  },
+];
 
 /** Quantos blocos o medidor de entrada tem. 26, como no comp. */
 const BLOCOS_DO_MEDIDOR = 26;
@@ -89,25 +124,29 @@ function abrirSecao(id) {
  * apontando para um aparelho que não existe mais e sem nada na tela que a
  * desfaça.
  */
-async function desenharMicrofones() {
-  const [dispositivos, escolhido] = await Promise.all([
-    invoke("microfones"),
-    invoke("microfone_escolhido"),
-  ]);
-  microfoneEscolhido = escolhido ?? null;
+async function desenharDispositivos() {
+  await Promise.all(LADOS.map(desenharUmLado));
+}
 
-  const lista = $("lista-microfones");
+async function desenharUmLado(lado) {
+  const [dispositivos, escolhido] = await Promise.all([
+    lado.listar(),
+    lado.lerEscolhido(),
+  ]);
+  escolhidoDe[lado.chave] = escolhido ?? null;
+
+  const lista = $(lado.lista);
   if (dispositivos.length === 0) {
-    // Lista vazia é "a máquina não quis enumerar", e não "não há microfone".
+    // Lista vazia é "a máquina não quis enumerar", e não "não há aparelho".
     // Quem escreve a segunda frase aqui mente para quem tem áudio funcionando.
     const vazio = elemento("li", "dogma-dispositivos-vazio", "ESTA MÁQUINA NÃO LISTOU DISPOSITIVO NENHUM");
     repovoar(lista, [vazio]);
     return;
   }
 
-  const linhas = [linhaDeMicrofone("", "PADRÃO DA MÁQUINA", false)];
+  const linhas = [linhaDeDispositivo(lado, "", "PADRÃO DA MÁQUINA", false)];
   for (const dispositivo of dispositivos) {
-    linhas.push(linhaDeMicrofone(dispositivo.id, dispositivo.name, dispositivo.default));
+    linhas.push(linhaDeDispositivo(lado, dispositivo.id, dispositivo.name, dispositivo.default));
   }
   repovoar(lista, linhas);
   // Marcadas na mesma tarefa em que nascem. Deixar para o snapshot seguinte
@@ -117,18 +156,13 @@ async function desenharMicrofones() {
 }
 
 /**
- * Uma linha da lista. `id` vazio é o padrão da máquina, que não é dispositivo
- * nenhum: é a ausência de escolha, e precisa ser escolhível de volta.
- *
- * ---- a lista de saídas, quando ela vier ----
- *
- * `#lista-saidas` está desenhada com a mesma forma e, hoje, com uma linha só:
- * `seele-audio/src/device.rs` abre a saída padrão e ainda não sabe enumerar as
- * outras. Quando a enumeração chegar, o preenchimento é este mesmo, com os três
- * comandos irmãos dos de captura — `saidas`, `saida_escolhida` e
- * `escolher_saida` —, e a linha desabilitada de `index.html` sai no lugar.
+ * Uma linha da lista, de qualquer um dos dois lados. `id` vazio é o padrão da
+ * máquina, que não é dispositivo nenhum: é a ausência de escolha, e precisa ser
+ * escolhível de volta — sem ela, quem experimentou uma interface e a
+ * desconectou ficaria com uma preferência apontando para um aparelho que não
+ * existe mais e sem nada na tela que a desfaça.
  */
-function linhaDeMicrofone(id, nome, ehPadrao) {
+function linhaDeDispositivo(lado, id, nome, ehPadrao) {
   const linha = elemento("li");
   const botao = elemento("button", "dogma-dispositivo");
   botao.type = "button";
@@ -140,7 +174,7 @@ function linhaDeMicrofone(id, nome, ehPadrao) {
   );
   // O id sai daqui exatamente como entrou. Nada nesta janela o interpreta —
   // vazio vira `null`, que é como o Rust escreve "o padrão da máquina".
-  botao.addEventListener("click", () => escolher(id === "" ? null : id));
+  botao.addEventListener("click", () => escolher(lado, id === "" ? null : id));
 
   linha.append(botao);
   return linha;
@@ -163,11 +197,17 @@ function linhaDeMicrofone(id, nome, ehPadrao) {
  * informação transmitida só por cor.
  */
 function marcarLinhas(snapshot) {
-  const aberto = snapshot?.capture?.id ?? null;
+  // Os dois campos são lidos aqui, e não na tabela `LADOS`, porque são a coisa
+  // que esta função existe para comparar: `capture` e `playback` são o que o
+  // `Snapshot` diz ter **aberto**, contra o que ficou gravado.
+  marcarUmaLista("captura", $("lista-microfones"), snapshot?.capture?.id ?? null);
+  marcarUmaLista("saida", $("lista-saidas"), snapshot?.playback?.id ?? null);
+}
 
-  for (const botao of $("lista-microfones").querySelectorAll(".dogma-dispositivo")) {
+function marcarUmaLista(chave, lista, aberto) {
+  for (const botao of lista.querySelectorAll(".dogma-dispositivo")) {
     const id = botao.dataset.dispositivo === "" ? null : botao.dataset.dispositivo;
-    const escolhido = microfoneEscolhido === id;
+    const escolhido = escolhidoDe[chave] === id;
     botao.dataset.escolhido = escolhido ? "sim" : "nao";
 
     let marca = "";
@@ -248,18 +288,18 @@ function desenharIdentidade(snapshot) {
 // --------------------------------------------------------------------- ações
 
 /** Escolhe um microfone, ou volta para o padrão da máquina com `null`. */
-async function escolher(id) {
+async function escolher(lado, id) {
   const erro = $("dogma-erro");
   erro.hidden = true;
   try {
-    await invoke("escolher_microfone", { dispositivo: id });
+    await lado.escolher(id);
   } catch (falha) {
     // Revelar antes de escrever: `role="alert"` não anuncia o que já estava na
     // página enquanto ela estava escondida.
     erro.hidden = false;
     erro.textContent = fraseDeErro(falha);
   }
-  await desenharMicrofones();
+  await desenharDispositivos();
   await atualizarDogma();
 }
 
@@ -280,7 +320,7 @@ async function abrirDogma(origem) {
   $("tela-dogma").hidden = false;
   $("dogma-erro").hidden = true;
   $("dogma-voltar-texto").textContent = VOLTA[origem] ?? "VOLTAR";
-  await desenharMicrofones();
+  await desenharDispositivos();
   await atualizarDogma();
 }
 
