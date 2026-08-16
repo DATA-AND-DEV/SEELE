@@ -142,7 +142,7 @@ pub async fn serve(
     config: Arc<DogmaConfig>,
     registry: Arc<Registry>,
     dogma: Arc<Dogma>,
-    cage: mpsc::Sender<CageCommand>,
+    cages: Arc<crate::cage::Cages>,
 ) -> Result<()> {
     // O balde de antes de autenticar, consultado antes de qualquer trabalho.
     //
@@ -227,13 +227,12 @@ pub async fn serve(
         "pattern blue"
     );
 
-    let result = run_session(connection, send, recv, &session, &dogma, &cage).await;
+    let result = run_session(connection, send, recv, &session, &dogma, &cages).await;
 
-    let _ = cage
-        .send(CageCommand::Leave {
-            pilot: session.pilot,
-        })
-        .await;
+    // Out of every room, not out of the one this connection remembers. The loop
+    // above can end at any `?`, and a path that returns early does not know
+    // where the pilot was sitting.
+    cages.leave_everywhere(session.pilot).await;
     tracing::info!(pilot = %session.pilot, "session ended");
     result
 }
@@ -519,7 +518,7 @@ async fn run_session(
     recv: quinn::RecvStream,
     session: &Session,
     dogma: &Dogma,
-    cage: &mpsc::Sender<CageCommand>,
+    cages: &crate::cage::Cages,
 ) -> Result<()> {
     // Uma tarefa é dona do fluxo de leitura e entrega quadros inteiros por um
     // canal.
@@ -592,13 +591,16 @@ async fn run_session(
 
     // A reclaimed seat means the pilot was already in a Cage when they dropped.
     if let Some(reclaimed) = session.reclaimed_cage {
-        cage.send(CageCommand::Join {
-            pilot: session.pilot,
-            ssrc: session.ssrc,
-            may_speak: session.may_speak,
-            outbound: outbound_tx.clone(),
-        })
-        .await?;
+        cages
+            .of(reclaimed)
+            .await
+            .send(CageCommand::Join {
+                pilot: session.pilot,
+                ssrc: session.ssrc,
+                may_speak: session.may_speak,
+                outbound: outbound_tx.clone(),
+            })
+            .await?;
         current_cage = Some(reclaimed);
         dogma.occupancy.lock().await.seat(
             reclaimed,
@@ -670,7 +672,11 @@ async fn run_session(
                             }).await?;
                             continue;
                         }
-                        cage.send(CageCommand::Join {
+                        // Out of the old room before into the new one. Without
+                        // this a pilot who walks from one Cage to another is
+                        // still a member of the first, and goes on hearing it.
+                        cages.leave_everywhere(session.pilot).await;
+                        cages.of(id).await.send(CageCommand::Join {
                             pilot: session.pilot,
                             ssrc: session.ssrc,
                             may_speak: session.may_speak,
@@ -724,7 +730,7 @@ async fn run_session(
                         });
                     }
                     ClientMessage::EjectPlug => {
-                        cage.send(CageCommand::Leave { pilot: session.pilot }).await?;
+                        cages.leave_everywhere(session.pilot).await;
                         if let Some(id) = current_cage.take() {
                             dogma.occupancy.lock().await.vacate(id, session.pilot);
                             let _ = dogma.events.send(Event::PilotLeft {
@@ -912,11 +918,12 @@ async fn run_session(
 
             datagram = connection.read_datagram() => {
                 let Ok(bytes) = datagram else { break };
-                if current_cage.is_none() {
-                    continue;
-                }
+                // Into the room this connection is actually in. Sending to a
+                // fixed Cage was correct while a Dogma had one and became a
+                // crossed wire the moment it could have two.
+                let Some(id) = current_cage else { continue };
                 last_datagram = Some(Instant::now());
-                let _ = cage.send(CageCommand::Datagram {
+                let _ = cages.of(id).await.send(CageCommand::Datagram {
                     from: session.ssrc,
                     bytes: bytes.to_vec(),
                 }).await;

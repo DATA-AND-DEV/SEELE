@@ -275,6 +275,76 @@ pub fn spawn(id: CageId) -> mpsc::Sender<CageCommand> {
     tx
 }
 
+/// Every Cage task this Dogma is running.
+///
+/// # Why this had to exist the moment a Dogma could grow a second room
+///
+/// The Dogma used to spawn exactly one Cage task, at boot, for the one Cage in
+/// `DogmaConfig` — and every session held that single sender. That was correct
+/// while a Dogma had one room and *silently wrong* the instant it could have
+/// two: two pilots in two different rooms would have had their datagrams
+/// delivered to each other, because there was only ever one room to deliver
+/// into. A voice channel that is not a channel is worse than a missing feature,
+/// because it looks like it works.
+///
+/// # Lazily, not at boot
+///
+/// A Cage task is a channel and a `HashMap`; the cost of one nobody has entered
+/// is not worth a boot-time scan of CASPER that would then be stale the first
+/// time somebody made a room. The task appears the first time a pilot walks in
+/// and lives until the Dogma stops.
+pub struct Cages {
+    tasks: tokio::sync::Mutex<HashMap<CageId, mpsc::Sender<CageCommand>>>,
+}
+
+impl Default for Cages {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Cages {
+    /// A Dogma with no Cage task running yet.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            tasks: tokio::sync::Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// The way in to one Cage, starting its task if this is the first arrival.
+    pub async fn of(&self, id: CageId) -> mpsc::Sender<CageCommand> {
+        self.tasks
+            .lock()
+            .await
+            .entry(id)
+            .or_insert_with(|| spawn(id))
+            .clone()
+    }
+
+    /// Takes a pilot out of every Cage.
+    ///
+    /// Broadcast rather than aimed, and deliberately so. A session can end at
+    /// any `?` in the middle of the loop, which is a path that does not know
+    /// which room the pilot was in; tracking that separately would be a second
+    /// copy of a fact, and the copy that goes stale is the one that leaves
+    /// somebody's `ssrc` receiving audio in a room they left. `Leave` for a
+    /// pilot who is not there is a no-op, and `specs/04-servidor-seele.md` sizes
+    /// a Dogma at five active Cages, so the fan-out is five sends.
+    pub async fn leave_everywhere(&self, pilot: PilotId) {
+        let tasks: Vec<mpsc::Sender<CageCommand>> =
+            self.tasks.lock().await.values().cloned().collect();
+        for task in tasks {
+            let _ = task.send(CageCommand::Leave { pilot }).await;
+        }
+    }
+
+    /// How many Cage tasks are running. For tests and for tooling.
+    pub async fn running(&self) -> usize {
+        self.tasks.lock().await.len()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -523,6 +593,110 @@ mod tests {
             bytes: datagram(200, 1),
         });
         assert_eq!(cage.drops().not_a_member, 1);
+    }
+
+    #[tokio::test]
+    async fn two_rooms_do_not_hear_each_other() {
+        // The whole reason [`Cages`] exists. With one task for the whole Dogma
+        // — which is what there was — a pilot in the room made at nine o'clock
+        // and a pilot in the room made at ten would have been delivered each
+        // other's audio, because there was only ever one room to deliver into.
+        let cages = Cages::new();
+        let primeiro = cages.of(CageId(1)).await;
+        let segundo = cages.of(CageId(2)).await;
+
+        let (alice_tx, mut alice) = mpsc::channel(8);
+        primeiro
+            .send(CageCommand::Join {
+                pilot: PilotId(1),
+                ssrc: Ssrc(100),
+                may_speak: true,
+                outbound: alice_tx,
+            })
+            .await
+            .unwrap();
+
+        let (bob_tx, mut bob) = mpsc::channel(8);
+        segundo
+            .send(CageCommand::Join {
+                pilot: PilotId(2),
+                ssrc: Ssrc(200),
+                may_speak: true,
+                outbound: bob_tx,
+            })
+            .await
+            .unwrap();
+
+        segundo
+            .send(CageCommand::Datagram {
+                from: Ssrc(200),
+                bytes: datagram(200, 1),
+            })
+            .await
+            .unwrap();
+
+        // Long enough for a delivery that was going to happen to have happened.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(
+            alice.try_recv().is_err(),
+            "a pilot in Cage 1 heard somebody talking in Cage 2"
+        );
+        assert!(bob.try_recv().is_err(), "bob heard himself");
+    }
+
+    #[tokio::test]
+    async fn the_same_cage_is_asked_for_twice_and_started_once() {
+        // Two pilots walking into the same room must find the same room. A
+        // registry that spawned per request would give each of them a private
+        // copy of a Cage they both believe they are in.
+        let cages = Cages::new();
+        let _ = cages.of(CageId(1)).await;
+        let _ = cages.of(CageId(1)).await;
+        let _ = cages.of(CageId(2)).await;
+        assert_eq!(cages.running().await, 2);
+    }
+
+    #[tokio::test]
+    async fn leaving_everywhere_reaches_the_room_the_pilot_was_actually_in() {
+        // A session can end at any `?`, on a path that does not know where the
+        // pilot was sitting. Aiming the `Leave` at a remembered Cage would leave
+        // a departed pilot's ssrc receiving audio whenever that memory was
+        // wrong.
+        let cages = Cages::new();
+        let sala = cages.of(CageId(7)).await;
+
+        let (alice_tx, mut alice) = mpsc::channel(8);
+        sala.send(CageCommand::Join {
+            pilot: PilotId(1),
+            ssrc: Ssrc(100),
+            may_speak: true,
+            outbound: alice_tx,
+        })
+        .await
+        .unwrap();
+        let (bob_tx, _bob) = mpsc::channel(8);
+        sala.send(CageCommand::Join {
+            pilot: PilotId(2),
+            ssrc: Ssrc(200),
+            may_speak: true,
+            outbound: bob_tx,
+        })
+        .await
+        .unwrap();
+
+        cages.leave_everywhere(PilotId(1)).await;
+
+        sala.send(CageCommand::Datagram {
+            from: Ssrc(200),
+            bytes: datagram(200, 1),
+        })
+        .await
+        .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(
+            alice.try_recv().is_err(),
+            "a pilot whose session ended is still being delivered audio"
+        );
     }
 
     #[test]

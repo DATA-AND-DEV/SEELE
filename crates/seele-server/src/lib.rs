@@ -115,7 +115,7 @@ pub struct Server {
     fingerprint: String,
     registry: Arc<session::Registry>,
     dogma: Arc<dogma::Dogma>,
-    cage: tokio::sync::mpsc::Sender<cage::CageCommand>,
+    cages: Arc<cage::Cages>,
 }
 
 impl Server {
@@ -177,7 +177,11 @@ impl Server {
             }
         });
 
-        let cage = cage::spawn(config.cage);
+        // Uma tarefa por Cage, criada quando alguém entra. Antes havia
+        // exatamente uma, a do Cage do `DogmaConfig`, e toda sessão segurava
+        // esse único remetente: correto enquanto um Dogma tinha uma sala,
+        // silenciosamente errado no instante em que passou a poder ter duas.
+        let cages = Arc::new(cage::Cages::new());
 
         Ok(Self {
             endpoint,
@@ -185,7 +189,7 @@ impl Server {
             fingerprint,
             registry: Arc::new(session::Registry::new()),
             dogma,
-            cage,
+            cages,
         })
     }
 
@@ -248,7 +252,7 @@ impl Server {
             let config = Arc::clone(&self.config);
             let registry = Arc::clone(&self.registry);
             let dogma = Arc::clone(&self.dogma);
-            let cage = self.cage.clone();
+            let cages = Arc::clone(&self.cages);
 
             tokio::spawn(async move {
                 let connection = match incoming.await {
@@ -261,7 +265,7 @@ impl Server {
                 let peer = connection.remote_address();
                 tracing::info!(%peer, "pattern orange");
 
-                if let Err(error) = session::serve(connection, config, registry, dogma, cage).await
+                if let Err(error) = session::serve(connection, config, registry, dogma, cages).await
                 {
                     tracing::info!(%peer, %error, "session closed");
                 }
