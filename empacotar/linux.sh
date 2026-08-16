@@ -1,0 +1,127 @@
+#!/bin/sh
+# Empacota o `.deb` do Linux sem o GitHub Actions, num contêiner.
+#
+# Faz o mesmo que o job `linux` de `.github/workflows/release.yml`. Roda de
+# qualquer sistema que tenha Docker — a compilação acontece dentro do contêiner,
+# e nada além do `entrega/` sai dele.
+#
+#   ./empacotar/linux.sh 0.1.2
+#
+# **Numa máquina Apple Silicon isto é emulado.** `tauri.linux.conf.json` fixa os
+# caminhos do `.deb` em `x86_64-unknown-linux-gnu`, então o alvo é x86_64 e o
+# Docker o executa por emulação — conte com algo entre trinta e noventa minutos,
+# contra dez ou quinze num x86_64 nativo. Não há defeito nisso; é o preço de
+# compilar para outra arquitetura.
+#
+# O `target/` do repositório não é reaproveitado: ele foi construído para o
+# sistema desta máquina, e misturar os dois só produz recompilação confusa. O
+# contêiner usa `target-linux/`, que fica ao lado.
+
+set -eu
+
+VERSAO="${1:-}"
+if [ -z "$VERSAO" ]; then
+    echo "uso: $0 <versão>    (por exemplo: $0 0.1.2)" >&2
+    exit 1
+fi
+
+# A mesma regra do workflow: o formato do instalador não representa
+# pré-lançamento por extenso, e conferir aqui custa um segundo em vez de uma
+# compilação inteira.
+if ! printf '%s' "$VERSAO" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$'; then
+    echo "a versão «$VERSAO» não serve para o instalador." >&2
+    echo "Aceito: X.Y.Z, ou X.Y.Z-N com N só de dígitos." >&2
+    exit 1
+fi
+
+RAIZ="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
+
+if ! command -v docker >/dev/null 2>&1; then
+    echo "este script precisa do Docker. Sem ele, compile num Linux x86_64 de verdade" >&2
+    echo "seguindo os mesmos passos — estão no corpo do contêiner, logo abaixo." >&2
+    exit 1
+fi
+
+echo "→ compilando em contêiner x86_64 (emulado se esta máquina for ARM)"
+
+docker run --rm -i \
+    --platform linux/amd64 \
+    -v "$RAIZ:/work" \
+    -w /work \
+    -e CARGO_TARGET_DIR=/work/target-linux \
+    -e VERSAO="$VERSAO" \
+    -e DEBIAN_FRONTEND=noninteractive \
+    rust:1-bookworm sh -s <<'DENTRO'
+set -eu
+
+# As mesmas dependências de `.github/actions/deps-linux`. `libwebkit2gtk` é o
+# motor que o Tauri usa no Linux, e `libasound2` é o que o áudio abre.
+apt-get update -qq
+apt-get install --no-install-recommends -y -qq \
+    pkg-config libasound2-dev libwebkit2gtk-4.1-dev libgtk-3-dev \
+    libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \
+    libjavascriptcoregtk-4.1-dev libxdo-dev file >/dev/null
+
+CONFIG=apps/seele-app/tauri.conf.json
+cp "$CONFIG" /tmp/tauri.conf.json.original
+trap 'cp /tmp/tauri.conf.json.original "$CONFIG"' EXIT
+
+# A versão que aparece no pacote. Sem isto o `.deb` diria 0.0.0, que é a versão
+# do workspace.
+python3 - <<PY
+import json, pathlib
+caminho = pathlib.Path("$CONFIG")
+config = json.loads(caminho.read_text())
+config["version"] = "$VERSAO"
+caminho.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n")
+print("versão gravada:", config["version"])
+PY
+
+# A CLI primeiro, como no workflow: é o produto principal e o que menos pode
+# falhar.
+echo "→ compilando seeled e plug"
+cargo build --release --bin seeled --bin plug
+
+# No Linux os dois **não** vão embutidos como acompanhantes do Tauri: o
+# `deb.files` de `tauri.linux.conf.json` os instala em `/usr/bin`, e é por isso
+# que o empacotamento abaixo não recebe `--config tauri.release.conf.json`.
+# Receber os dois faria o `.deb` carregar os binários duas vezes.
+mkdir -p apps/seele-app/binaries
+for b in plug seeled; do
+    cp "/work/target-linux/release/$b" "apps/seele-app/binaries/$b-x86_64-unknown-linux-gnu"
+done
+
+echo "→ instalando a CLI do Tauri"
+cargo install tauri-cli --version "^2" --locked --quiet
+
+# `.deb` e não AppImage: é o único formato que instala `plug` e `seeled` em
+# `/usr/bin`, e o pedido era um arquivo que traga as duas metades.
+echo "→ empacotando o .deb"
+cd apps/seele-app
+cargo tauri build --bundles deb
+cd /work
+
+DESTINO=entrega
+mkdir -p "$DESTINO"
+encontrados=$(find target-linux -type f -name '*.deb' | wc -l | tr -d ' ')
+if [ "$encontrados" != "1" ]; then
+    echo "esperava exatamente um .deb e achei $encontrados" >&2
+    find target-linux -type f -name '*.deb' >&2
+    exit 1
+fi
+find target-linux -type f -name '*.deb' -exec cp {} "$DESTINO/" \;
+
+# O arquivo da CLI, que é o que o `install.sh` baixa.
+tar -czf "$DESTINO/seele-cli-$VERSAO-linux.tar.gz" -C target-linux/release seeled plug
+
+echo
+echo "--- entrega ---"
+cd "$DESTINO"
+for f in *.deb "seele-cli-$VERSAO-linux.tar.gz"; do
+    [ -f "$f" ] && sha256sum "$f"
+done
+DENTRO
+
+echo
+echo "pronto. Os arquivos estão em entrega/, e as somas acima são as que devem"
+echo "constar do SHA256SUMS."

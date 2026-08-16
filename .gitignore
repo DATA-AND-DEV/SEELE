@@ -38,6 +38,11 @@ seele.db-shm
 # Acompanhantes do app, copiados pelo release a partir de target/.
 apps/seele-app/binaries/
 
+# Saída dos scripts de `empacotar/`: os instaladores prontos e o alvo separado
+# que o contêiner do Linux usa para não se misturar com o build desta máquina.
+/entrega/
+/target-linux/
+
 # Capturas de tela que o parceiro humano deixa na raiz para consulta. São dele,
 # e um `git add -A` distraído durante um merge já as versionou uma vez — 3,2 MB
 # de binário num commit de CSS.
