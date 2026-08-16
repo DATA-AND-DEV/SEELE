@@ -103,6 +103,89 @@ const GLIFOS = {
       },
     ],
   ],
+
+  // ---- os oito do comp v3 ----
+  //
+  // Todos medidos antes de desenhados: li o `cmap` de
+  // `fontes/ibm-plex-mono-400.woff2` com `fontTools` e nenhum dos oito está lá,
+  // entre os 499 pontos de código que a face tem. O método foi conferido no
+  // mesmo teste com três controles — `⌘` e `●` deram ausentes, coerente com
+  // estarem proibidos aqui, e `█` deu presente, coerente com as barras de
+  // blocos o usarem. Ver `.superpowers/sdd/comp-inventario-v3.md` §5.
+
+  // ⌕ — a lupa da busca: aro e cabo, sem preenchimento.
+  buscar: [
+    ["circle", { cx: "7", cy: "7", r: "3.6", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],
+    ["path", { d: "M9.7 9.7L13 13", stroke: "currentColor", "stroke-width": "1.3", fill: "none" }],
+  ],
+
+  // ⚙ — a engrenagem que abre a configuração. Aro, furo e seis dentes retos:
+  // dente curvo em 16px vira mancha, e a folha de marca não usa curva decorativa.
+  engrenagem: [
+    ["circle", { cx: "8", cy: "8", r: "3.1", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],
+    [
+      "path",
+      {
+        d:
+          "M8 1.9v2.1M8 12v2.1M14.1 8h-2.1M4 8H1.9" +
+          "M12.3 3.7l-1.5 1.5M5.2 10.8l-1.5 1.5" +
+          "M12.3 12.3l-1.5-1.5M5.2 5.2L3.7 3.7",
+        stroke: "currentColor",
+        "stroke-width": "1.3",
+        fill: "none",
+      },
+    ],
+  ],
+
+  // ▤ — voltar às Linhas. O quadrado com preenchimento horizontal do Unicode é
+  // literalmente uma lista, que é para onde o botão leva.
+  linhas: [
+    ["rect", { x: "2.5", y: "3", width: "11", height: "10", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],
+    ["path", { d: "M4.8 6h6.4M4.8 8h6.4M4.8 10h6.4", stroke: "currentColor", "stroke-width": "1.1", fill: "none" }],
+  ],
+
+  // ⏻ — sair da jaula. O símbolo de energia: haste vertical e aro aberto no
+  // topo. O arco é longo e no sentido de baixo, para a abertura ficar em cima.
+  desligar: [
+    ["path", { d: "M4.8 4.8A4.5 4.5 0 1 0 11.2 4.8", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],
+    ["path", { d: "M8 2.2v5.4", stroke: "currentColor", "stroke-width": "1.3", fill: "none" }],
+  ],
+
+  // ◍ — a seção de áudio. Aro com a faixa vertical cheia do próprio glifo, que
+  // ao lado de "MICROFONE E SOM" lê como nível.
+  audio: [
+    ["circle", { cx: "8", cy: "8", r: "5", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],
+    ["rect", { x: "6.6", y: "4.4", width: "2.8", height: "7.2" }],
+  ],
+
+  // ⌨ — a seção de atalhos. Moldura e teclas, canto reto como tudo aqui.
+  teclado: [
+    ["rect", { x: "1.8", y: "4.5", width: "12.4", height: "7", fill: "none", stroke: "currentColor", "stroke-width": "1.2" }],
+    [
+      "path",
+      {
+        d: "M4 6.7h1.2M6.6 6.7h1.2M9.2 6.7h1.2M11.8 6.7h1.2M4 9.3h8.9",
+        stroke: "currentColor",
+        "stroke-width": "1.1",
+        fill: "none",
+      },
+    ],
+  ],
+
+  // ◧ — a seção de aparência. Metade cheia, metade vazia: é o próprio glifo do
+  // Unicode e é a melhor imagem possível de "tema".
+  aparencia: [
+    ["rect", { x: "2.5", y: "2.5", width: "11", height: "11", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],
+    ["rect", { x: "3.2", y: "3.2", width: "4.8", height: "9.6" }],
+  ],
+
+  // ⚿ — a seção de identidade. Chave de palhetão quadrado: anel, haste e dois
+  // dentes. É a chave Ed25519 do ADR 0004, e não um cadeado — o produto não
+  // tranca nada aqui, ele prova quem é.
+  chave: [
+    ["circle", { cx: "5.2", cy: "5.2", r: "2.6", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],
+    ["path", { d: "M7 7l5.4 5.4M10.2 10.2l-1.6 1.6M12.4 12.4l-1.6 1.6", stroke: "currentColor", "stroke-width": "1.3", fill: "none" }],
+  ],
 };
 
 /**

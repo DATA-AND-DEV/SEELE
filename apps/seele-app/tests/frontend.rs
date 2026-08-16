@@ -889,6 +889,18 @@ fn the_page_never_draws_a_glyph_the_data_face_does_not_have() {
         '\u{25CF}', // ● black circle
         '\u{25CB}', // ○ white circle
         '\u{2318}', // ⌘ place of interest sign
+        // The eight the v3 comp introduces. Every one measured against the
+        // shipped face rather than assumed from its Unicode block: the `cmap`
+        // of `fontes/ibm-plex-mono-400.woff2` has 499 codepoints and none of
+        // these is among them. `ui/glifos.js` draws all eight.
+        '\u{2315}', // ⌕ telephone recorder — drawn as the search lens
+        '\u{2328}', // ⌨ keyboard
+        '\u{23FB}', // ⏻ power on/off symbol
+        '\u{25A4}', // ▤ square with horizontal fill
+        '\u{25CD}', // ◍ circle with vertical fill
+        '\u{25E7}', // ◧ square with left half black
+        '\u{2699}', // ⚙ gear
+        '\u{26BF}', // ⚿ squared key
     ] {
         for (name, text) in [("the scripts", &script), ("index.html", &page)] {
             assert!(
