@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use seele_ffi::{ConnectConfig, Event, EventListener, Pattern, Plug, PlugError, Snapshot, Trust};
+use seele_ffi::{ConnectConfig, Event, EventListener, Pattern, Plug, PlugError, Trust};
 use seele_server::casper::Location;
 use seele_server::{DogmaConfig, Server};
 
@@ -105,15 +105,15 @@ impl Recorder {
 }
 
 /// Polls the snapshot until it says what the test is waiting for.
-fn until<F: Fn(&Snapshot) -> bool>(plug: &Plug, done: F) -> bool {
+fn until<F: Fn(&Plug) -> bool>(plug: &Plug, done: F) -> bool {
     let deadline = Instant::now() + WAIT;
     while Instant::now() < deadline {
-        if done(&plug.snapshot()) {
+        if done(plug) {
             return true;
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    done(&plug.snapshot())
+    done(plug)
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -145,7 +145,8 @@ async fn entering_a_cage_puts_us_on_our_own_roster() -> Result<()> {
     plug.insert_plug(CAGE)?;
 
     assert!(
-        until(&plug, |snapshot| {
+        until(&plug, |plug| {
+            let snapshot = plug.snapshot();
             snapshot
                 .cages
                 .iter()
@@ -176,8 +177,8 @@ async fn two_shells_hold_a_conversation() -> Result<()> {
     speaker.send_message(LINE, "sync caiu aqui".into())?;
 
     assert!(
-        until(&listener, |snapshot| {
-            snapshot.messages.iter().any(|m| m.body == "sync caiu aqui")
+        until(&listener, |plug| {
+            plug.messages().iter().any(|m| m.body == "sync caiu aqui")
         }),
         "the message never reached the other shell"
     );
@@ -187,9 +188,8 @@ async fn two_shells_hold_a_conversation() -> Result<()> {
     );
 
     // Attribution, and the server's own clock rather than the arrival time.
-    let snapshot = listener.snapshot();
-    let message = snapshot
-        .messages
+    let mensagens = listener.messages();
+    let message = mensagens
         .iter()
         .find(|m| m.body == "sync caiu aqui")
         .expect("message");
@@ -216,7 +216,8 @@ async fn an_at_field_is_visible_to_everybody_else() -> Result<()> {
     muted.insert_plug(CAGE)?;
     watcher.insert_plug(CAGE)?;
     assert!(
-        until(&watcher, |snapshot| {
+        until(&watcher, |plug| {
+            let snapshot = plug.snapshot();
             snapshot
                 .cages
                 .iter()
@@ -228,7 +229,8 @@ async fn an_at_field_is_visible_to_everybody_else() -> Result<()> {
     muted.set_at_field(true)?;
 
     assert!(
-        until(&watcher, |snapshot| {
+        until(&watcher, |plug| {
+            let snapshot = plug.snapshot();
             snapshot.cages.iter().any(|cage| {
                 cage.pilots
                     .iter()
@@ -255,7 +257,7 @@ async fn a_second_client_resumes_the_conversation_with_its_history() -> Result<(
     first.open_line(LINE)?;
     first.send_message(LINE, "primeira coisa dita".into())?;
     assert!(
-        until(&first, |snapshot| !snapshot.messages.is_empty()),
+        until(&first, |plug| !plug.messages().is_empty()),
         "the message was never committed"
     );
     // Ending the first session is what makes this a resumption rather than two
@@ -267,18 +269,16 @@ async fn a_second_client_resumes_the_conversation_with_its_history() -> Result<(
     second.open_line(LINE)?;
 
     assert!(
-        until(&second, |snapshot| {
-            snapshot
-                .messages
+        until(&second, |plug| {
+            plug.messages()
                 .iter()
                 .any(|m| m.body == "primeira coisa dita")
         }),
         "a client that arrived late saw an empty room"
     );
 
-    let snapshot = second.snapshot();
-    let message = snapshot
-        .messages
+    let mensagens = second.messages();
+    let message = mensagens
         .iter()
         .find(|m| m.body == "primeira coisa dita")
         .expect("message");
@@ -352,18 +352,14 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
     desktop.open_line(LINE)?;
 
     assert!(
-        until(&desktop, |snapshot| {
-            snapshot
-                .messages
-                .iter()
-                .any(|m| m.body == "dito no terminal")
+        until(&desktop, |plug| {
+            plug.messages().iter().any(|m| m.body == "dito no terminal")
         }),
         "o app abriu a Linha e não viu o que o terminal disse"
     );
 
-    let snapshot = desktop.snapshot();
-    let mensagem = snapshot
-        .messages
+    let mensagens = desktop.messages();
+    let mensagem = mensagens
         .iter()
         .find(|m| m.body == "dito no terminal")
         .expect("mensagem");
@@ -440,7 +436,7 @@ async fn dropping_the_handle_disconnects() -> Result<()> {
     let (address, server) = start().await?;
     let plug = tokio::task::spawn_blocking(move || connect(address, "aoba")).await??;
     plug.insert_plug(CAGE)?;
-    assert!(until(&plug, |snapshot| snapshot.pattern == Pattern::Blue));
+    assert!(until(&plug, |plug| plug.snapshot().pattern == Pattern::Blue));
 
     drop(plug);
     // Nothing to assert beyond not hanging: a handle whose driver thread

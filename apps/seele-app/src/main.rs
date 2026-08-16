@@ -374,6 +374,17 @@ fn snapshot(session: State<'_, Session>) -> Result<Snapshot, PlugError> {
     Ok(session.plug()?.snapshot())
 }
 
+/// A conversa da Linha aberta.
+///
+/// Fora do `snapshot` de propósito. Aquele é lido a cada quadro de interface, e
+/// carregar a conversa junto fazia o custo crescer com a sessão — uma conversa
+/// longa ficava lenta de escrever. A tela pede este quando o
+/// `messages_revision` do snapshot muda, e só então.
+#[tauri::command]
+fn messages(session: State<'_, Session>) -> Result<Vec<seele_ffi::Message>, PlugError> {
+    Ok(session.plug()?.messages())
+}
+
 #[tauri::command]
 fn insert_plug(session: State<'_, Session>, cage: u32) -> Result<(), PlugError> {
     session.plug()?.insert_plug(cage)
@@ -694,11 +705,13 @@ impl BuscaEstado {
 /// decide nada sobre busca (`specs/06-clientes-gui.md:19`).
 #[tauri::command]
 fn buscar(session: State<'_, Session>, termo: String) -> Result<BuscaEstado, PlugError> {
-    let snapshot = session.plug()?.snapshot();
-    let mut busca = seele_ffi::search::Search::new(
-        snapshot.messages.iter().map(|mensagem| &mensagem.body),
-        &termo,
-    );
+    // `messages()` e não `snapshot()`: a conversa saiu do snapshot, que agora
+    // carrega só a revisão dela. Aqui a lista inteira é mesmo necessária — é o
+    // que se busca —, e este comando roda quando alguém digita, não a cada
+    // quadro.
+    let mensagens = session.plug()?.messages();
+    let mut busca =
+        seele_ffi::search::Search::new(mensagens.iter().map(|mensagem| &mensagem.body), &termo);
 
     let Ok(mut slot) = session.busca.lock() else {
         // Sem o cadeado não há cursor anterior a carregar nem onde guardar o
@@ -764,6 +777,7 @@ fn main() {
             hospedar,
             disconnect,
             snapshot,
+            messages,
             insert_plug,
             eject_plug,
             open_line,

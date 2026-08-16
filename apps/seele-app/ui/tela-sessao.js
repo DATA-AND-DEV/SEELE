@@ -205,7 +205,7 @@ function desenhar(snapshot) {
   desenharCanais(snapshot);
   desenharOperador(snapshot);
   desenharLinha(snapshot);
-  desenharMensagens(snapshot);
+  sincronizarMensagens(snapshot.messages_revision);
   desenharSync(snapshot);
   desenharTelemetria(snapshot);
   desenharAviso(snapshot);
@@ -387,7 +387,47 @@ function desenharLinha(snapshot) {
   $("linha-nome").textContent = `LINHA ${aberta ? aberta.name : SEM_MEDIDA}`;
 }
 
-function desenharMensagens(snapshot) {
+/**
+ * A conversa que esta tela tem em mãos, e qual revisão ela é.
+ *
+ * O `snapshot` não a carrega mais. Ele carregava, e o preço era clonar em Rust
+ * cada apelido e cada corpo já ditos, serializar tudo em JSON e reconstruir
+ * todos os nós do DOM — a cada 500 ms e a cada evento. O custo crescia com a
+ * conversa, então uma sessão longa ficava lenta de escrever. Apareceu num teste
+ * entre duas máquinas, que é onde uma conversa dura o bastante.
+ *
+ * Agora o snapshot diz só um número, e este módulo busca a lista quando ele
+ * muda. `seele_core::Changed` já sabia disto desde sempre — a documentação dele
+ * diz que uma casca que compara dois snapshots para descobrir que chegou
+ * mensagem é uma casca refazendo o trabalho do core. Era o que esta fazia.
+ */
+let mensagens = [];
+let revisaoDesenhada = null;
+let buscandoMensagens = false;
+
+/**
+ * Busca e redesenha a conversa, se ela mudou desde a última vez.
+ *
+ * A guarda contra chamadas simultâneas importa: o tique de 500 ms e o evento de
+ * mensagem chegam por caminhos diferentes e podem se cruzar, e duas buscas em
+ * voo escreveriam a lista duas vezes — a segunda possivelmente com dados mais
+ * velhos que a primeira.
+ */
+async function sincronizarMensagens(revisao) {
+  if (revisao === revisaoDesenhada || buscandoMensagens) return;
+  buscandoMensagens = true;
+  try {
+    mensagens = await invoke("messages");
+    revisaoDesenhada = revisao;
+    desenharMensagens();
+  } catch (erro) {
+    if (erro !== "NotConnected") console.warn("messages:", erro);
+  } finally {
+    buscandoMensagens = false;
+  }
+}
+
+function desenharMensagens() {
   const lista = $("lista-mensagens");
 
   // Sem layout não há o que redesenhar, e insistir corrompe a leitura de quem
@@ -406,7 +446,7 @@ function desenharMensagens(snapshot) {
   // meio de uma leitura é pior do que não acompanhar.
   const noFim = lista.scrollHeight - lista.scrollTop - lista.clientHeight < 32;
 
-  const itens = snapshot.messages.map((mensagem, indice) => {
+  const itens = mensagens.map((mensagem, indice) => {
     // A grade do comp: uma coluna de 76px para a hora, o resto para autor e
     // corpo. A marca de 2px à esquerda é onde o comp distingue mensagem de
     // sistema e de alerta — `Message` não tem tipo (inventário §16), então só
@@ -807,6 +847,11 @@ async function ejetar() {
   // que sobrevive põe no cabeçalho do próximo a porta do anterior.
   comecoDaSessao = null;
   alvoDoDogma = null;
+  // A conversa e a revisão pela mesma razão. A revisão do próximo Dogma começa
+  // em zero, e guardar a do anterior faria a primeira sincronização concluir
+  // que nada mudou — a tela abriria com o histórico de outra sessão na frente.
+  mensagens = [];
+  revisaoDesenhada = null;
   await encerrarBusca();
   // O convite não sobrevive à sessão que ele abriu: quem sai, digita outro
   // endereço e aperta INSERT mandaria o token do Dogma anterior ao novo.
@@ -851,7 +896,7 @@ function desenharBusca(estado) {
   // parece uma busca que não rodou.
   $("busca-contador").textContent = `[${estado.posicao}/${estado.total}]`;
   guardarCasamentos(estado);
-  if (desenhado) desenharMensagens(desenhado);
+  desenharMensagens();
   if (estado.atual) {
     // A ocorrência, e não a mensagem. Rolar até a mensagem punha na tela a
     // linha certa e nada dentro dela: numa mensagem que casa três vezes,
@@ -867,7 +912,7 @@ function limparBusca() {
   casamentosPorMensagem = new Map();
   ocorrenciaAtual = null;
   $("busca-contador").textContent = "";
-  if (desenhado) desenharMensagens(desenhado);
+  desenharMensagens();
 }
 
 /** Há uma busca de pé? */
@@ -997,7 +1042,7 @@ $("convite-copiar").addEventListener("click", async () => {
   }
 });
 
-$("botao-trocar").addEventListener("click", ejetar);
+$("botao-desconectar").addEventListener("click", ejetar);
 
 // A barra de espaço fala, exceto enquanto se digita — a mesma colisão que a TUI
 // resolve mantendo o push-to-talk fora do modo de inserção (decisão D19).

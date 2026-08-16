@@ -463,8 +463,21 @@ pub struct Snapshot {
     pub cages: Vec<Cage>,
     /// Text channels.
     pub lines: Vec<Line>,
-    /// The conversation in the open Line, oldest first.
-    pub messages: Vec<Message>,
+    /// How many times the conversation has changed, this session.
+    ///
+    /// Not the conversation itself. This snapshot is read on every interface
+    /// frame — twice a second, plus once per event — and carrying the history
+    /// meant cloning every nickname and every body already said, serialising
+    /// the lot to JSON, and pushing it across the bridge each time. The cost
+    /// grows with the conversation, so a long session gets steadily slower to
+    /// type into. That is not a tuning problem; it is the shape of the loop,
+    /// and it showed up the first time two machines talked for a while.
+    ///
+    /// The number itself means nothing — only the difference does. A shell
+    /// keeps the last one it drew and calls [`Plug::messages`] when it moves.
+    /// `seele_core::Changed` already said when that was, and this is the shell
+    /// finally being able to act on it.
+    pub messages_revision: u64,
     /// Measurements.
     pub telemetry: Telemetry,
     /// The last thing worth surfacing.
@@ -754,5 +767,61 @@ mod tests {
 
         // Everything else is a bare variant, which is what makes it localisable.
         assert_eq!(format!("{}", PlugError::Unreachable), "Unreachable");
+    }
+
+    /// The snapshot must stay cheap, and "cheap" means it carries no list that
+    /// grows with the session.
+    ///
+    /// This reads the source because the property is invisible to the compiler
+    /// and to any assertion about one value: a `Snapshot` carrying the whole
+    /// conversation type-checks, serialises, and passes every other test here.
+    /// What it does *not* do is stay the same size as a session goes on — and
+    /// that only shows up as a person noticing the app got slower to type into,
+    /// after a long conversation, on two machines. It took a real test between
+    /// two machines to find it the first time, and the cost of finding it that
+    /// way again is another release.
+    ///
+    /// The narrow rule: no `Vec<…>` field here may hold [`Message`]. Anything
+    /// else that grows without bound belongs to the same family, but a rule
+    /// written wider than the thing it guards is a rule people argue with.
+    #[test]
+    fn the_snapshot_does_not_carry_the_conversation() {
+        let source = include_str!("types.rs");
+        let Some(after) = source.split("pub struct Snapshot {").nth(1) else {
+            panic!("`Snapshot` is no longer declared here; this guard has to move with it");
+        };
+        let Some(body) = after.split("\n}").next() else {
+            panic!("`Snapshot` is never closed");
+        };
+
+        let campos: Vec<&str> = body
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.starts_with("//") && line.contains(known_field_marker()))
+            .collect();
+
+        for campo in &campos {
+            assert!(
+                !campo.contains("Vec<Message>"),
+                "`Snapshot` carries the conversation again: `{campo}`\n\
+                 Reading this costs one clone of every nickname and body already \
+                 said, on every interface frame — twice a second — so a long \
+                 session gets steadily slower. Use `messages_revision` and \
+                 `Plug::messages`, which exist for exactly this."
+            );
+        }
+
+        assert!(
+            campos
+                .iter()
+                .any(|campo| campo.contains("messages_revision")),
+            "`messages_revision` is gone, and with it the only way a shell can \
+             tell that the history moved without being handed all of it"
+        );
+    }
+
+    /// What a field declaration looks like, so a doc line is not mistaken for one.
+    fn known_field_marker() -> &'static str {
+        "pub "
     }
 }

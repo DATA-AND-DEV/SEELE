@@ -188,6 +188,18 @@ struct Shared {
     link_battery: AtomicBool,
     link_seconds: std::sync::atomic::AtomicU64,
     link_attempts: std::sync::atomic::AtomicU32,
+    /// Quantas vezes o histórico mudou desde que esta sessão começou.
+    ///
+    /// Existe para o [`Snapshot`] poder dizer "mudou" sem carregar a conversa
+    /// inteira. Antes ele carregava: cada quadro de interface clonava todo
+    /// apelido e todo corpo já dito, serializava em JSON e atravessava a ponte
+    /// — duas vezes por segundo, custando proporcionalmente ao tamanho da
+    /// conversa. Numa sessão longa isso é atraso que só cresce, e foi assim que
+    /// apareceu num teste entre duas máquinas.
+    ///
+    /// O número em si não significa nada; só a diferença significa. A casca
+    /// guarda o último que desenhou e busca o histórico quando ele muda.
+    messages_revision: std::sync::atomic::AtomicU64,
 }
 
 impl Shared {
@@ -268,6 +280,7 @@ impl Plug {
             link_battery: AtomicBool::new(false),
             link_seconds: std::sync::atomic::AtomicU64::new(0),
             link_attempts: std::sync::atomic::AtomicU32::new(0),
+            messages_revision: std::sync::atomic::AtomicU64::new(0),
             room: Mutex::new(Room::new()),
             listeners: Mutex::new(Vec::new()),
             voice: Mutex::new(None),
@@ -509,11 +522,32 @@ impl Plug {
         }
     }
 
+    /// The conversation in the open Line, oldest first.
+    ///
+    /// Separate from [`Plug::snapshot`] because the two change at completely
+    /// different rates. Telemetry moves on its own and wants reading twice a
+    /// second; the history only moves when somebody says something. Carrying
+    /// both in one value meant paying for the conversation on every frame —
+    /// cloning each nickname and body, serialising the lot — so a session got
+    /// slower the longer it went on. Ask for this when
+    /// [`Snapshot::messages_revision`] changes, and not otherwise.
+    #[must_use]
+    pub fn messages(&self) -> Vec<Message> {
+        self.shared
+            .room
+            .lock()
+            .map(|room| messages_of(&room))
+            .unwrap_or_default()
+    }
+
     /// Everything the interface needs, in one value.
     ///
     /// Cheap enough to call on every frame of a redraw, and deliberately a copy:
     /// a shell holding a borrow into live state is a shell that can see the
     /// roster change halfway through drawing it.
+    ///
+    /// "Cheap" is now true. It used to carry the whole conversation, which made
+    /// the cost grow with the session — see [`Snapshot::messages_revision`].
     #[must_use]
     pub fn snapshot(&self) -> Snapshot {
         let room = match self.shared.room.lock() {
@@ -544,7 +578,7 @@ impl Plug {
             nickname,
             cages: cages_of(&room),
             lines: lines_of(&room),
-            messages: messages_of(&room),
+            messages_revision: self.shared.messages_revision.load(Ordering::Relaxed),
             telemetry: Telemetry {
                 rtt_ms,
                 jitter_ms: room.telemetry.as_ref().map_or(0.0, |t| t.jitter_ms),
@@ -1022,6 +1056,9 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
         shared.notify(&Event::RosterChanged);
     }
     if changed.messages {
+        // A revisão sobe **antes** do aviso, ou a casca que reagir ao evento
+        // ainda leria a anterior e concluiria que não há nada a buscar.
+        shared.messages_revision.fetch_add(1, Ordering::Relaxed);
         shared.notify(&Event::MessagesChanged);
     }
     if changed.channels {
@@ -1440,6 +1477,7 @@ mod tests {
             link_battery: AtomicBool::new(false),
             link_seconds: std::sync::atomic::AtomicU64::new(0),
             link_attempts: std::sync::atomic::AtomicU32::new(0),
+            messages_revision: std::sync::atomic::AtomicU64::new(0),
             room: Mutex::new(Room::new()),
             listeners: Mutex::new(Vec::new()),
             voice: Mutex::new(None),
@@ -1563,6 +1601,7 @@ mod tests {
             link_battery: AtomicBool::new(false),
             link_seconds: std::sync::atomic::AtomicU64::new(0),
             link_attempts: std::sync::atomic::AtomicU32::new(0),
+            messages_revision: std::sync::atomic::AtomicU64::new(0),
             room: Mutex::new(Room::new()),
             listeners: Mutex::new(Vec::new()),
             voice: Mutex::new(None),

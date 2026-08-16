@@ -246,10 +246,6 @@
 }
 
 /* O `+` fica no apagado forte do comp: é a saída, não o lugar onde se está. */
-.trilha-mais { color: var(--seele-linha-forte); }
-.trilha-mais:hover,
-.trilha-mais:focus-visible { color: var(--seele-laranja-nerv); }
-
 .painel {
   display: flex;
   flex-direction: column;

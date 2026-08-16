@@ -332,6 +332,15 @@
             title="a grade do Cage, um cartão por piloto">CHAMADA</button>
     <button id="botao-dogma-sessao" class="botao-fantasma" type="button"
             title="configuração local desta máquina">DOGMA</button>
+    <!--
+      A saída, escrita. «DESCONECTAR» e não «SAIR» porque esta tela já tem um
+      botão chamado `DOGMA`, e «sair do Dogma» ao lado dele leria como sair da
+      configuração. E não «EJETAR», que é o vocabulário do tema mas não diz a
+      quem chega o que vai acontecer — o produto tem uma tela inteira chamada
+      Entry Plug, e ejetar pode ser lida como ejetar alguém.
+    -->
+    <button id="botao-desconectar" class="botao-fantasma" type="button"
+            title="encerrar esta sessão e voltar à tela de entrada">DESCONECTAR</button>
   </header>
 
   <!--
@@ -564,20 +573,20 @@
       <button id="trilha-dogma" class="trilha-item trilha-atual" type="button"
               aria-current="true" disabled>—</button>
       <!--
-        O `+` do comp: entrar noutro Dogma. Com um `Plug` só, entrar noutro é
-        sair deste — então este botão **é** o antigo `EJETAR` do cabeçalho, e
-        não um segundo caminho para a mesma coisa. Dois controles com a mesma
-        ação numa tela é a definição de um a mais, e o que decidiu qual fica foi
-        o comp: a coluna de Dogmas é onde ele põe a pergunta "em qual estou, e
-        como vou para outro".
+        Aqui havia um `+`, o do comp, que era o único caminho para sair do
+        Dogma. Um teste entre duas máquinas encontrou o que isso significa na
+        prática: a pessoa não achou como sair.
 
-        `+` é ASCII e a face de dados o tem, então não passa por `glifo()`. Mas
-        um `+` sozinho não é o nome de nada que se possa apertar, e por isso o
-        `aria-label` diz a frase inteira.
+        O argumento que o pôs aqui não era ruim — com um `Plug` só, "entrar
+        noutro" e "sair deste" são a mesma ação, e dois controles para uma ação
+        é um a mais. O que ele errou foi escolher o lado errado da troca: um
+        `aria-label` correto não torna um glifo de 56px descobrível para quem
+        enxerga, e o comp desenha a coluna assumindo vários Dogmas, que não é o
+        caso deste produto.
+
+        A ação foi para o cabeçalho, escrita, junto de `CHAMADA` e `DOGMA`, que
+        é onde esta tela já põe o que se pode apertar.
       -->
-      <button id="botao-trocar" class="trilha-item trilha-mais" type="button"
-              title="sair deste Dogma e entrar noutro"
-              aria-label="sair deste Dogma e entrar noutro">+</button>
     </nav>
 
     <section class="painel painel-canais" aria-label="Cages e Linhas">
