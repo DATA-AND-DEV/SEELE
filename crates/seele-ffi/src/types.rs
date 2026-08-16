@@ -530,6 +530,19 @@ pub struct Snapshot {
     /// hears nothing has this line and nothing else to tell them the pick did
     /// not take.
     pub playback: Option<PlaybackDevice>,
+    /// Whether this pilot may make and rename Cages and Lines.
+    ///
+    /// So a shell can decide whether the control exists at all. `ManageCages`
+    /// as MELCHIOR resolved it, sent down in the handshake — a single boolean
+    /// and not the permission list, because this is the one a screen asks
+    /// about, and a list would invite each shell to start deciding things out
+    /// of it.
+    ///
+    /// **Convenience, never enforcement.** `specs/08-seguranca.md`: "A
+    /// interface esconder é conveniência; o servidor negar é a segurança." A
+    /// shell that ignores this and asks anyway gets a `NoticeRaised` carrying
+    /// `PermissionDenied`, and nothing is created.
+    pub may_manage_cages: bool,
     /// Set once the session is over.
     pub ended: Option<EndReason>,
 }

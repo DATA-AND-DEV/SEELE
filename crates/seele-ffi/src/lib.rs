@@ -170,9 +170,28 @@ enum Command {
     InsertPlug(CageId),
     EjectPlug,
     OpenLine(LineId),
-    Send { line: LineId, body: String },
+    Send {
+        line: LineId,
+        body: String,
+    },
     SetAtField(bool),
     SetTotalIsolation(bool),
+    CreateCage {
+        name: String,
+        limit: u16,
+        line: Option<LineId>,
+    },
+    CreateLine {
+        name: String,
+    },
+    RenameCage {
+        cage: CageId,
+        name: String,
+    },
+    RenameLine {
+        line: LineId,
+        name: String,
+    },
     Shutdown,
 }
 
@@ -402,6 +421,86 @@ impl Plug {
         self.command(Command::Send {
             line: LineId(line),
             body,
+        })
+    }
+
+    /// Asks the Dogma to make a Cage.
+    ///
+    /// Asks. It does not decide, and it does not report back whether it worked
+    /// — because it cannot: the answer comes from the Dogma, arrives on the
+    /// event stream, and reaches the shell as [`Event::ChannelsChanged`] when
+    /// the room exists or [`Event::NoticeRaised`] carrying
+    /// [`NoticeReason::PermissionDenied`] when it does not. Returning a result
+    /// here would mean this method waiting on a round trip, which is the one
+    /// thing every other command on this object promises not to do.
+    ///
+    /// `line` binds a text channel to the room; `None` leaves it a voice room
+    /// only, which `specs/04-servidor-seele.md` allows.
+    ///
+    /// The empty-name case returns `Ok` without sending anything, the same way
+    /// [`Plug::send_message`] swallows an empty body: a person who pressed the
+    /// button with nothing typed has not asked for anything, and answering that
+    /// with an error would put a red message on a screen where nothing went
+    /// wrong.
+    ///
+    /// # Errors
+    ///
+    /// [`PlugError::NotConnected`] once the session is over.
+    pub fn create_cage(
+        &self,
+        name: String,
+        limit: u16,
+        line: Option<u32>,
+    ) -> Result<(), PlugError> {
+        if name.trim().is_empty() {
+            return Ok(());
+        }
+        self.command(Command::CreateCage {
+            name,
+            limit,
+            line: line.map(LineId),
+        })
+    }
+
+    /// Asks the Dogma to make a Line.
+    ///
+    /// # Errors
+    ///
+    /// [`PlugError::NotConnected`] once the session is over.
+    pub fn create_line(&self, name: String) -> Result<(), PlugError> {
+        if name.trim().is_empty() {
+            return Ok(());
+        }
+        self.command(Command::CreateLine { name })
+    }
+
+    /// Asks the Dogma to rename a Cage.
+    ///
+    /// # Errors
+    ///
+    /// [`PlugError::NotConnected`] once the session is over.
+    pub fn rename_cage(&self, cage: u32, name: String) -> Result<(), PlugError> {
+        if name.trim().is_empty() {
+            return Ok(());
+        }
+        self.command(Command::RenameCage {
+            cage: CageId(cage),
+            name,
+        })
+    }
+
+    /// Asks the Dogma to rename a Line.
+    ///
+    /// # Errors
+    ///
+    /// [`PlugError::NotConnected`] once the session is over.
+    pub fn rename_line(&self, line: u32, name: String) -> Result<(), PlugError> {
+        if name.trim().is_empty() {
+            return Ok(());
+        }
+        self.command(Command::RenameLine {
+            line: LineId(line),
+            name,
         })
     }
 
@@ -668,6 +767,9 @@ impl Plug {
             audio_available: audio.available,
             capture: audio.capture,
             playback: audio.playback,
+            may_manage_cages: room
+                .permissions
+                .contains(&seele_core::Permission::ManageCages),
             ended: room.ended.map(|end| end.reason.into()),
         }
     }
@@ -1242,6 +1344,32 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
                 return false;
             }
         }
+        // Nothing is written into the local `Room` here, unlike entering a Cage
+        // or opening a Line. Those two are facts about this client, which the
+        // server confirms by silence; a room is a fact about the Dogma, and the
+        // only honest source for it is the Dogma saying it exists. Writing it in
+        // optimistically would draw a room for the person who asked even when
+        // the server refused them.
+        Command::CreateCage { name, limit, line } => {
+            if client.criar_cage(name, limit, line).await.is_err() {
+                return false;
+            }
+        }
+        Command::CreateLine { name } => {
+            if client.criar_linha(name).await.is_err() {
+                return false;
+            }
+        }
+        Command::RenameCage { cage, name } => {
+            if client.renomear_cage(cage, name).await.is_err() {
+                return false;
+            }
+        }
+        Command::RenameLine { line, name } => {
+            if client.renomear_linha(line, name).await.is_err() {
+                return false;
+            }
+        }
         Command::Shutdown => return false,
     }
     true
@@ -1529,21 +1657,7 @@ mod tests {
             }
         }
 
-        let shared = Arc::new(Shared {
-            link_battery: AtomicBool::new(false),
-            link_seconds: std::sync::atomic::AtomicU64::new(0),
-            link_attempts: std::sync::atomic::AtomicU32::new(0),
-            messages_revision: std::sync::atomic::AtomicU64::new(0),
-            room: Mutex::new(Room::new()),
-            listeners: Mutex::new(Vec::new()),
-            voice: Mutex::new(None),
-            media: Mutex::new(None),
-            nickname: Mutex::new("ayanami".into()),
-            pattern: AtomicU8::new(0),
-            rtt_micros: std::sync::atomic::AtomicU64::new(0),
-            sync_ratio: AtomicU8::new(0),
-            running: AtomicBool::new(true),
-        });
+        let shared = bare_shared();
         let recorder = Arc::new(Recorder::default());
         shared
             .listeners
@@ -1567,6 +1681,180 @@ mod tests {
         };
         assert_eq!(notice.severity, Severity::Critical);
         assert_eq!(notice.reason, NoticeReason::PermissionDenied);
+    }
+
+    /// A `Shared` with nothing in it, for the folds below.
+    fn bare_shared() -> Arc<Shared> {
+        Arc::new(Shared {
+            link_battery: AtomicBool::new(false),
+            link_seconds: std::sync::atomic::AtomicU64::new(0),
+            link_attempts: std::sync::atomic::AtomicU32::new(0),
+            messages_revision: std::sync::atomic::AtomicU64::new(0),
+            room: Mutex::new(Room::new()),
+            listeners: Mutex::new(Vec::new()),
+            voice: Mutex::new(None),
+            media: Mutex::new(None),
+            nickname: Mutex::new("ayanami".into()),
+            pattern: AtomicU8::new(0),
+            rtt_micros: std::sync::atomic::AtomicU64::new(0),
+            sync_ratio: AtomicU8::new(0),
+            running: AtomicBool::new(true),
+        })
+    }
+
+    #[test]
+    fn a_room_made_now_reaches_the_shell_as_a_channel_change() {
+        // The bridge invents nothing: the Dogma says a Cage exists, the room
+        // folds it in, and the shell is told to redraw the list it already
+        // knows how to draw. If this stopped firing, the person who made the
+        // room would be looking at the old list with no way to know.
+        use seele_core::{CageInfo, ServerMessage};
+
+        #[derive(Default)]
+        struct Recorder(Mutex<Vec<Event>>);
+        impl EventListener for Recorder {
+            fn on_event(&self, event: Event) {
+                if let Ok(mut seen) = self.0.lock() {
+                    seen.push(event);
+                }
+            }
+        }
+
+        let shared = bare_shared();
+        let recorder = Arc::new(Recorder::default());
+        shared
+            .listeners
+            .lock()
+            .unwrap()
+            .push(Arc::clone(&recorder) as Arc<dyn EventListener>);
+
+        fold(
+            &shared,
+            &ServerMessage::CageCreated {
+                cage: CageInfo {
+                    id: CageId(2),
+                    name: "CAGE-02 SALA DOS FUNDOS".into(),
+                    limit: 8,
+                    password_required: false,
+                    line: None,
+                },
+            },
+        );
+
+        assert_eq!(
+            *recorder.0.lock().unwrap(),
+            vec![Event::ChannelsChanged],
+            "the shell was not told the channel list moved"
+        );
+        let room = shared.room.lock().unwrap();
+        assert_eq!(cages_of(&room).len(), 1);
+        assert_eq!(cages_of(&room)[0].name, "CAGE-02 SALA DOS FUNDOS");
+    }
+
+    #[test]
+    fn the_snapshot_says_whether_this_pilot_may_make_rooms() {
+        // What a screen asks before drawing the control. Convenience, never
+        // enforcement — but a shell with no way to ask has only two options,
+        // and both are bad: hide the feature from the host, or offer everybody
+        // a button that mostly answers "no".
+        use seele_core::{Permission, ServerMessage, SessionId, Ssrc};
+
+        let shared = bare_shared();
+        fold(
+            &shared,
+            &ServerMessage::Session {
+                id: SessionId(1),
+                pilot: seele_core::PilotId(7),
+                ssrc: Ssrc(700),
+                dogma: "Terceira Tóquio".into(),
+                cages: Vec::new(),
+                lines: Vec::new(),
+                roles: Vec::new(),
+                permissions: vec![Permission::Speak],
+            },
+        );
+        assert!(
+            !shared
+                .room
+                .lock()
+                .unwrap()
+                .permissions
+                .contains(&Permission::ManageCages),
+            "a pilot who may only speak was told they may manage Cages"
+        );
+
+        fold(
+            &shared,
+            &ServerMessage::Session {
+                id: SessionId(1),
+                pilot: seele_core::PilotId(7),
+                ssrc: Ssrc(700),
+                dogma: "Terceira Tóquio".into(),
+                cages: Vec::new(),
+                lines: Vec::new(),
+                roles: Vec::new(),
+                permissions: vec![Permission::Speak, Permission::ManageCages],
+            },
+        );
+        // And the field the screen actually reads, not only the list behind it.
+        // Asserting on `room.permissions` alone would pass with
+        // `may_manage_cages` hardcoded either way — measured, and it did.
+        let (commands, _queue) = tokio::sync::mpsc::unbounded_channel();
+        let plug = Plug {
+            commands,
+            shared: Arc::clone(&shared),
+        };
+        assert!(plug.snapshot().may_manage_cages);
+
+        fold(
+            &shared,
+            &ServerMessage::Session {
+                id: SessionId(1),
+                pilot: seele_core::PilotId(7),
+                ssrc: Ssrc(700),
+                dogma: "Terceira Tóquio".into(),
+                cages: Vec::new(),
+                lines: Vec::new(),
+                roles: Vec::new(),
+                permissions: vec![Permission::Speak],
+            },
+        );
+        assert!(
+            !plug.snapshot().may_manage_cages,
+            "the snapshot went on offering the control after the permission went away"
+        );
+    }
+
+    #[test]
+    fn asking_for_a_room_with_no_name_asks_for_nothing() {
+        // The same swallow `send_message` does for an empty body. Somebody who
+        // pressed the button with nothing typed has not asked for anything, and
+        // answering that with a red message puts an error on a screen where
+        // nothing went wrong. The check is here as well as in `seele-proto`
+        // because the proto one would arrive as a dropped connection rather
+        // than as nothing happening.
+        let (commands, mut queue) = tokio::sync::mpsc::unbounded_channel();
+        let plug = Plug {
+            commands,
+            shared: bare_shared(),
+        };
+
+        for blank in ["", "   ", "\t\n"] {
+            plug.create_cage(blank.into(), 8, None).unwrap();
+            plug.create_line(blank.into()).unwrap();
+            plug.rename_cage(1, blank.into()).unwrap();
+            plug.rename_line(1, blank.into()).unwrap();
+        }
+        assert!(
+            queue.try_recv().is_err(),
+            "a blank name was sent to the Dogma"
+        );
+
+        plug.create_cage("CAGE-02".into(), 8, None).unwrap();
+        assert!(
+            matches!(queue.try_recv(), Ok(Command::CreateCage { .. })),
+            "a real name was swallowed too"
+        );
     }
 
     #[test]
