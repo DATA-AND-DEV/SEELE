@@ -449,3 +449,122 @@ async fn dropping_the_handle_disconnects() -> Result<()> {
     server.shutdown();
     Ok(())
 }
+
+/// A shell asks for a room and the Dogma makes one.
+///
+/// The bridge's own unit tests stop at the command queue: they prove the right
+/// `Command` is enqueued and that a blank name is swallowed, and they cannot
+/// see the arm on the driver thread that turns it into a frame. Gutting that
+/// arm — keeping the `match` branch and dropping the `await` inside it — left
+/// `seele-ffi` and `seele-conformance` entirely green until this test existed.
+/// The button would have done nothing at all, silently, in the shipped app.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_shell_asks_for_a_room_and_the_dogma_makes_it() -> Result<()> {
+    let (address, server) = start().await?;
+    let plug = tokio::task::spawn_blocking(move || connect(address, "anfitria")).await??;
+
+    // The first account on a Dogma is its Comandante, which is what makes this
+    // shell the one that may ask. The field exists so a screen can decide
+    // whether to draw the control at all.
+    assert!(
+        plug.snapshot().may_manage_cages,
+        "the shell that hosted this Dogma was not told it may make rooms"
+    );
+
+    let recorder = Arc::new(Recorder::default());
+    plug.subscribe(Arc::clone(&recorder) as Arc<dyn EventListener>);
+
+    plug.create_line("planejamento".into())?;
+    plug.create_cage("CAGE-02 SALA DOS FUNDOS".into(), 8, None)?;
+
+    assert!(
+        until(&plug, |plug| plug
+            .snapshot()
+            .cages
+            .iter()
+            .any(|cage| cage.name == "CAGE-02 SALA DOS FUNDOS")),
+        "the room never reached the snapshot the screen reads"
+    );
+    assert!(
+        until(&plug, |plug| plug
+            .snapshot()
+            .lines
+            .iter()
+            .any(|line| line.name == "planejamento")),
+        "the Line never reached the snapshot"
+    );
+    assert!(
+        recorder.saw(|event| matches!(event, Event::ChannelsChanged)),
+        "nothing woke the shell to redraw the channel list"
+    );
+
+    // And the room is a room: somebody can walk into it. A Cage that exists in
+    // a list and cannot be entered is a row, not a channel.
+    plug.insert_plug(2)?;
+    assert!(until(&plug, |plug| plug
+        .snapshot()
+        .cages
+        .iter()
+        .any(|cage| cage.id == 2 && cage.occupied_by_us)));
+
+    drop(plug);
+    server.shutdown();
+    Ok(())
+}
+
+/// A shell that asks without the permission is refused by the Dogma.
+///
+/// `may_manage_cages` is convenience — `specs/08-seguranca.md` puts the
+/// security in the server refusing — so this shell ignores it and asks anyway,
+/// which is exactly what a hostile client would do. What comes back is an
+/// enumerated notice and no room.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_shell_without_the_permission_is_refused_by_the_dogma() -> Result<()> {
+    let (address, server) = start().await?;
+
+    // Whoever connects first hosts. This one is the guest.
+    let anfitria = tokio::task::spawn_blocking(move || connect(address, "anfitria2")).await??;
+    let convidado = tokio::task::spawn_blocking(move || connect(address, "convidado")).await??;
+
+    assert!(
+        !convidado.snapshot().may_manage_cages,
+        "the guest was told it may make rooms, and this test measures nothing"
+    );
+
+    let recorder = Arc::new(Recorder::default());
+    convidado.subscribe(Arc::clone(&recorder) as Arc<dyn EventListener>);
+
+    convidado.create_cage("CAGE-DO-INTRUSO".into(), 8, None)?;
+
+    assert!(
+        until(&convidado, |_| {
+            recorder.saw(|event| matches!(
+            event,
+            Event::NoticeRaised { notice } if notice.reason == seele_ffi::NoticeReason::PermissionDenied
+        ))
+        }),
+        "the Dogma refused in silence, which looks exactly like a Dogma that is broken"
+    );
+
+    // The half that proves the refusal was the server's: the host is connected
+    // the whole time and never sees the room appear. A shell that had merely
+    // hidden its own button would produce the same screen for the guest and no
+    // difference at all here.
+    let antes = anfitria.snapshot().cages.len();
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(
+        anfitria.snapshot().cages.len(),
+        antes,
+        "the intruder's room was announced to the host"
+    );
+    assert!(!convidado
+        .snapshot()
+        .cages
+        .iter()
+        .any(|cage| cage.name == "CAGE-DO-INTRUSO"));
+
+    drop(anfitria);
+    drop(convidado);
+    server.shutdown();
+    Ok(())
+}
