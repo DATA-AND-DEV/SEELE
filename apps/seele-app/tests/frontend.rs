@@ -20,9 +20,29 @@ fn app_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
+/// A file from `apps/seele-app/`, with its line endings normalised to `\n`.
+///
+/// The normalisation is not tidiness. Git on Windows checks out with CRLF by
+/// default and this repository ships no `.gitattributes`, so the very same
+/// commit reaches a Windows runner with every `\n` spelled `\r\n`. Several
+/// guards below cut text at a line boundary — `body_of` looks for `"\n}\n"` to
+/// find where a function ends — and against CRLF that needle is simply never
+/// found. `split` then returns the *whole remaining file* as the first piece,
+/// so a guard scoped to one function silently widens to everything after it and
+/// starts reporting its neighbours.
+///
+/// That is exactly how this was found: `a_pilot_card_…` passed on macOS and
+/// failed on Windows, accusing the call screen of drawing a per-pilot waveform
+/// out of `input_level` — a line that lives in a different function further
+/// down the same file.
+///
+/// Every guard here asks about **content**, and content does not change with
+/// how a checkout spells its newlines. So the spelling is settled once, here,
+/// rather than in each guard that happens to cut on a line.
 fn read(relative: &str) -> String {
     std::fs::read_to_string(app_dir().join(relative))
         .unwrap_or_else(|error| panic!("{relative}: {error}"))
+        .replace("\r\n", "\n")
 }
 
 /// Every file directly in `ui/` with this extension, by name.
