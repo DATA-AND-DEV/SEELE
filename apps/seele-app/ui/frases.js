@@ -81,7 +81,32 @@ function fraseDeErro(erro) {
       return MOTIVOS[erro.Refused.reason] ?? "SESSÃO RECUSADA";
     }
   }
-  return FRASES[erro] ?? "FALHA DESCONHECIDA";
+  return FRASES[erro] ?? desconhecida(erro);
+}
+
+/**
+ * A frase para uma falha que este arquivo não sabe nomear.
+ *
+ * Ela **diz o que era**, e isso não é preguiça de escrever a frase certa: é o
+ * reconhecimento de que a lista acima vai ficar para trás. O Rust ganha
+ * variantes de erro — três entraram só hoje — e a cada uma que chega sem frase
+ * a tela escrevia "FALHA DESCONHECIDA", que é um beco sem saída para quem lê e
+ * para quem conserta. Uma pessoa relatando "não consigo reconectar" não tinha o
+ * que me contar além disso.
+ *
+ * O conteúdo é seguro de mostrar: os erros que atravessam esta ponte são enums
+ * de protocolo e endereços, nunca segredo — o convite e a chave nunca viram
+ * erro, viram veredito.
+ */
+function desconhecida(erro) {
+  let detalhe;
+  try {
+    detalhe = typeof erro === "object" ? JSON.stringify(erro) : String(erro);
+  } catch {
+    // Um objeto com ciclo. Raro, e ainda assim melhor dizer o tipo que nada.
+    detalhe = Object.prototype.toString.call(erro);
+  }
+  return `FALHA QUE ESTA TELA NÃO SABE NOMEAR:\n${detalhe}`;
 }
 
 /**

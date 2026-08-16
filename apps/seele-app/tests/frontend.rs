@@ -2517,3 +2517,50 @@ fn no_two_scripts_declare_the_same_top_level_name() {
         clashes.join("\n")
     );
 }
+
+#[test]
+fn the_nickname_field_remembers_what_it_was_called_last_time() {
+    // The name was being saved the whole time — `Conhecido` carries `apelido`
+    // and `Conhecidos::listar` sorts newest first — and the entry screen simply
+    // never read it, so every launch went back to the literal `piloto` written
+    // in the markup. Reported from a real session, and it is the kind of thing
+    // no static check would have found: the field had a value, it was just the
+    // wrong one.
+    let body = body_of(&scripts(), "async function desenharVisitados");
+
+    assert!(
+        body.contains("campo-apelido"),
+        "the entry screen draws the visited list without ever reading the name it \
+         records, so the field goes back to its markup default every launch"
+    );
+    assert!(
+        body.contains("defaultValue"),
+        "the field is filled unconditionally, which overwrites whatever the person \
+         had already typed. `defaultValue` is the DOM answering «is this still \
+         what the markup said?»:\n{body}"
+    );
+}
+
+#[test]
+fn a_failure_this_screen_cannot_name_still_says_what_it_was() {
+    // `FRASES` is a list of hand-written sentences, and the Rust side keeps
+    // growing error variants — three landed today alone. Every variant that
+    // arrives without a sentence used to reach a dead end that read «FALHA
+    // DESCONHECIDA», which tells the person nothing and tells whoever has to fix
+    // it less: somebody reporting «I cannot reconnect» had nothing else to pass
+    // on.
+    let script = without_comments(&scripts());
+
+    assert!(
+        !script.contains("\"FALHA DESCONHECIDA\""),
+        "an unnamed failure is still drawn as a dead end, so the one screen that \
+         sees the error keeps it to itself"
+    );
+
+    let body = body_of(&scripts(), "function desconhecida");
+    assert!(
+        body.contains("JSON.stringify") && body.contains("erro"),
+        "the fallback names no detail, so it is the dead end under another \
+         wording:\n{body}"
+    );
+}

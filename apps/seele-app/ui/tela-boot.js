@@ -51,6 +51,19 @@ async function desenharVisitados() {
   secao.hidden = lista.length === 0;
   if (lista.length === 0) return;
 
+  // O apelido da última visita vira o padrão do campo.
+  //
+  // `Conhecidos::listar` ordena do mais recente para o mais antigo, então o
+  // primeiro é o nome com que esta pessoa entrou por último. Sem isto o campo
+  // volta a `piloto` a cada abertura do app — o nome estava gravado o tempo
+  // todo, e a tela é que não o lia.
+  //
+  // Só quando o campo ainda está como a marcação o deixou. `defaultValue` é
+  // exatamente essa pergunta, respondida pelo DOM: quem já digitou alguma coisa
+  // não tem o que digitou trocado por baixo.
+  const campo = $("campo-apelido");
+  if (campo.value === campo.defaultValue) campo.value = lista[0].apelido;
+
   repovoar(
     $("lista-visitados"),
     lista.map((conhecido) => {
