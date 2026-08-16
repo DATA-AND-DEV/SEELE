@@ -54,13 +54,21 @@ docker run --rm -i \
     rust:1-bookworm sh -s <<'DENTRO'
 set -eu
 
-# As mesmas dependências de `.github/actions/deps-linux`. `libwebkit2gtk` é o
-# motor que o Tauri usa no Linux, e `libasound2` é o que o áudio abre.
+# As dependências de `.github/actions/deps-linux`, **mais** as que aquela ação
+# não precisa listar. Ela roda no runner do GitHub, que já vem com clang, cmake e
+# um compilador C; a imagem `rust:bookworm` vem só com o compilador. Sem
+# `libclang-dev` a compilação chega até a crate do Opus e morre em `bindgen`
+# com "Unable to find libclang" — depois de vários minutos, que sob emulação
+# são muitos.
+#
+# `libwebkit2gtk` é o motor que o Tauri usa no Linux; `libasound2` é o que o
+# áudio abre.
 apt-get update -qq
 apt-get install --no-install-recommends -y -qq \
     pkg-config libasound2-dev libwebkit2gtk-4.1-dev libgtk-3-dev \
     libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \
-    libjavascriptcoregtk-4.1-dev libxdo-dev file >/dev/null
+    libjavascriptcoregtk-4.1-dev libxdo-dev file \
+    clang libclang-dev cmake >/dev/null
 
 CONFIG=apps/seele-app/tauri.conf.json
 cp "$CONFIG" /tmp/tauri.conf.json.original
