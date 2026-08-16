@@ -1437,6 +1437,51 @@ fn classes_defined_in(css: &str) -> BTreeSet<String> {
 }
 
 #[test]
+fn the_hint_layer_is_defined_once_and_never_by_a_screen() {
+    // `LEGENDAS SIMPLES` is the v3 comp's answer to an interface nobody could
+    // work out: a short line beside each control saying what it does, shown by
+    // default. It is one class toggled on `<body>` and one rule in `base.css`,
+    // and it has to stay one.
+    //
+    // The failure this catches is a screen writing its own `.dica { display:
+    // block }`. That screen's hints then ignore the toggle — they show while
+    // the rest of the app has them off — and nothing fails: the page loads, the
+    // hint is legible, and only somebody who turned the mode off and looked at
+    // every screen would notice one kept talking.
+    //
+    // Refining is still allowed and is the point of the load order: a screen
+    // may write `.painel .dica { margin-top: 4px }`, because the owner of that
+    // rule is `.painel`. What it may not do is claim `.dica` itself. Same rule
+    // the collision guard below applies, narrowed to the classes that carry a
+    // behaviour rather than a look.
+    let shared = classes_defined_in(&read("ui/base.css"));
+    for name in ["dica", "dica-linha"] {
+        assert!(
+            shared.contains(name),
+            "`.{name}` is not defined in base.css, so the hint layer has no shared \
+             owner and each screen is free to invent one"
+        );
+    }
+
+    let not_a_screen = ["base.css", "acessibilidade.css", "tokens.css", "fontes.css"];
+    for name in ui_files(".css") {
+        if not_a_screen.contains(&name.as_str()) {
+            continue;
+        }
+        let owned = classes_defined_in(&read(&format!("ui/{name}")));
+        for hint in ["dica", "dica-linha"] {
+            assert!(
+                !owned.contains(hint),
+                "{name} claims `.{hint}`, which base.css owns. A screen that \
+                 redefines it opts itself out of the simple-captions toggle, and \
+                 nothing about that failure is visible — the hint just keeps \
+                 showing after somebody turned the mode off."
+            );
+        }
+    }
+}
+
+#[test]
 fn no_two_screens_claim_the_same_class_name() {
     // The screens are one stylesheet each, loaded one after another into one
     // flat namespace — so two screens choosing the same name is not a clash the

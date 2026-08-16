@@ -109,3 +109,48 @@ function digitando() {
   const ativo = document.activeElement;
   return ativo && (ativo.tagName === "INPUT" || ativo.tagName === "TEXTAREA");
 }
+
+// ------------------------------------------------------- legendas simples
+
+/**
+ * Onde a escolha fica gravada.
+ *
+ * No `localStorage` da janela, e **não** em `seele_core::preferences`, onde o
+ * microfone escolhido mora. A diferença é o que a preferência governa: o
+ * microfone é do produto e o terminal precisa da mesma resposta, então ela é do
+ * core. Isto governa quanto texto explicativo esta janela desenha — é estado de
+ * exibição de uma casca gráfica, e o `plug` não tem o que fazer com ele.
+ *
+ * No dia em que o terminal quiser algo parecido, a decisão muda de lugar junto
+ * com o argumento, e não porque foi conveniente.
+ */
+const CHAVE_LEGENDAS = "seele.legendas-simples";
+
+/**
+ * Se as legendas explicativas estão ligadas. **Ligadas por omissão**, como no
+ * comp: quem já sabe usar desliga uma vez, e quem não sabe não precisa
+ * descobrir que existe um modo para ele.
+ */
+function legendasSimples() {
+  try {
+    return localStorage.getItem(CHAVE_LEGENDAS) !== "0";
+  } catch {
+    // Armazenamento negado é um caso real em webview restrita. O padrão vale, e
+    // o que se perde é lembrar da escolha — nunca a tela.
+    return true;
+  }
+}
+
+/** Liga ou desliga as legendas, e lembra. */
+function aplicarLegendas(ativo) {
+  document.body.classList.toggle("legendas-simples", ativo);
+  try {
+    localStorage.setItem(CHAVE_LEGENDAS, ativo ? "1" : "0");
+  } catch {
+    // Ver acima: não lembrar é aceitável, não desenhar não é.
+  }
+}
+
+// Aplicado antes de qualquer tela desenhar, para não haver um quadro em que as
+// dicas piscam e somem.
+aplicarLegendas(legendasSimples());

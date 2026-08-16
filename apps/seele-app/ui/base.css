@@ -311,3 +311,29 @@ input:focus {
   from { transform: translateY(-100%); }
   to   { transform: translateY(2000%); }
 }
+
+/* ---------- legendas simples ----------
+
+   O comp v3 carrega uma segunda camada de texto — uma linha curta ao lado de
+   cada controle, dizendo o que ele faz — e a mostra **por omissão**. É a
+   resposta ao que um teste de LAN encontrou: a interface era bonita e ninguém
+   sabia usá-la.
+
+   Uma classe no `body` e não uma reescrita por tela: assim a dica mora ao lado
+   do controle que ela explica, na marcação, e não numa tabela paralela que
+   alguém vai esquecer de atualizar quando o controle mudar.
+
+   `.dica` some quando o modo está desligado, e some de verdade — `display:none`
+   e não `opacity`, porque um leitor de tela deve parar de anunciá-la junto. */
+.dica {
+  display: none;
+  font-size: var(--seele-t-micro);
+  line-height: 1.35;
+  color: var(--seele-rotulo-painel);
+}
+
+body.legendas-simples .dica { display: block; }
+
+/* Em linha, para dicas que acompanham um rótulo em vez de ficarem sob ele. */
+body.legendas-simples .dica-linha { display: inline; }
+.dica-linha { display: none; }
