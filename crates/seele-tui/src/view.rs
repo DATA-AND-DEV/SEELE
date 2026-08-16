@@ -188,6 +188,7 @@ mod tests {
                 name: "geral".into(),
             }],
             roles: Vec::new(),
+            permissions: Vec::new(),
         });
         room.enter_cage(CAGE);
         room.open_line(LINE);

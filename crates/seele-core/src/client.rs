@@ -114,6 +114,12 @@ pub struct SessionInfo {
     /// Carried through rather than dropped: an interface that knows the Cages
     /// but not the Lines can only ever open whichever Line it was started with.
     pub lines: Vec<seele_proto::control::LineInfo>,
+    /// What this pilot may do, as MELCHIOR resolved it.
+    ///
+    /// So a shell can decide whether to offer a control at all. **Convenience,
+    /// never enforcement** — `specs/08-seguranca.md` puts the security in the
+    /// server refusing, and it refuses again whatever this list says.
+    pub permissions: Vec<seele_proto::control::Permission>,
 }
 
 /// The media half of a connection, usable independently of the control stream.
@@ -648,6 +654,7 @@ async fn handshake(
             dogma,
             cages,
             lines,
+            permissions,
             ..
         } => Ok(SessionInfo {
             id,
@@ -656,6 +663,7 @@ async fn handshake(
             dogma,
             cages,
             lines,
+            permissions,
         }),
         ServerMessage::Disconnecting { reason } => Err(ConnectError::Refused { reason }),
         other => {

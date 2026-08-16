@@ -1402,6 +1402,7 @@ mod tests {
             }],
             lines: Vec::new(),
             roles: Vec::new(),
+            permissions: Vec::new(),
         });
         room.enter_cage(CageId(1));
         room.apply(&ServerMessage::PilotJoined {

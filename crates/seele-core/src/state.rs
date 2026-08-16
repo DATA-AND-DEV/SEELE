@@ -27,7 +27,7 @@
 
 use std::collections::HashMap;
 
-use seele_proto::control::{CageInfo, LineInfo, PilotState};
+use seele_proto::control::{CageInfo, LineInfo, Permission, PilotState};
 use seele_proto::ids::{CageId, LineId, MessageId, PilotId, Ssrc};
 use seele_proto::sync_ratio::SyncBand;
 use seele_proto::ServerMessage;
@@ -154,6 +154,12 @@ pub struct Room {
     pub cages: Vec<CageInfo>,
     /// Text channels visible to this pilot.
     pub lines: Vec<LineInfo>,
+    /// What this pilot may do, as MELCHIOR resolved it.
+    ///
+    /// Here so a shell can ask "should this control exist at all" without
+    /// re-deriving `specs/04-servidor-seele.md`'s "negadas vencem concedidas"
+    /// for itself. **Convenience, never enforcement**: the server checks again.
+    pub permissions: Vec<Permission>,
     /// The Cage this pilot's plug is in.
     pub current_cage: Option<CageId>,
     /// The Line being read.
@@ -223,6 +229,7 @@ impl Room {
         self.dogma = info.dogma.clone();
         self.cages = info.cages.clone();
         self.lines = info.lines.clone();
+        self.permissions = info.permissions.clone();
         self.pilots.insert(
             info.pilot,
             Pilot::new(info.pilot, nickname.to_owned(), Some(info.ssrc)),
@@ -395,6 +402,7 @@ impl Room {
                 dogma,
                 cages,
                 lines,
+                permissions,
                 ..
             } => {
                 self.me = Some(*pilot);
@@ -402,6 +410,7 @@ impl Room {
                 self.dogma.clone_from(dogma);
                 self.cages.clone_from(cages);
                 self.lines.clone_from(lines);
+                self.permissions.clone_from(permissions);
                 self.pilots
                     .entry(*pilot)
                     .or_insert_with(|| Pilot::new(*pilot, format!("piloto {}", pilot.0), None))
@@ -524,6 +533,45 @@ impl Room {
                 changed.ended = true;
             }
 
+            // A room somebody made while this client was already connected.
+            //
+            // Appended rather than re-sorted: the server sends these in the
+            // order it made them and lists them in that same order at the next
+            // handshake, so appending is what keeps the list this client is
+            // looking at and the list it would get on reconnecting identical.
+            //
+            // Idempotent by identifier, like `MessageReceived` above. Nothing
+            // sends one twice today; a client that reconnects and folds an old
+            // event in would otherwise show the same room in the list twice, and
+            // a duplicated room is one nobody can tell their friends to join.
+            ServerMessage::CageCreated { cage } => {
+                if !self.cages.iter().any(|known| known.id == cage.id) {
+                    self.cages.push(cage.clone());
+                    changed.channels = true;
+                }
+            }
+
+            ServerMessage::LineCreated { line } => {
+                if !self.lines.iter().any(|known| known.id == line.id) {
+                    self.lines.push(line.clone());
+                    changed.channels = true;
+                }
+            }
+
+            ServerMessage::CageRenamed { cage, name } => {
+                if let Some(known) = self.cages.iter_mut().find(|known| known.id == *cage) {
+                    known.name.clone_from(name);
+                    changed.channels = true;
+                }
+            }
+
+            ServerMessage::LineRenamed { line, name } => {
+                if let Some(known) = self.lines.iter_mut().find(|known| known.id == *line) {
+                    known.name.clone_from(name);
+                    changed.channels = true;
+                }
+            }
+
             // Consumed by the handshake and by the round-trip measurement, both
             // of which are over before any shell is watching.
             ServerMessage::Challenge { .. } | ServerMessage::Pong { .. } => {}
@@ -573,6 +621,7 @@ mod tests {
                 name: "geral".into(),
             }],
             roles: Vec::new(),
+            permissions: Vec::new(),
         }
     }
 
@@ -636,6 +685,7 @@ mod tests {
             dogma: "Terceira Tóquio".into(),
             cages: Vec::new(),
             lines: Vec::new(),
+            permissions: Vec::new(),
         };
         room.adopt(&info, "ayanami");
         room.enter_cage(CAGE);
@@ -1010,5 +1060,143 @@ mod tests {
             "asuka",
             "the name left with the seat"
         );
+    }
+
+    // ---- rooms made while this client was already connected ----
+
+    #[test]
+    fn a_cage_made_now_joins_the_list_without_a_reconnection() {
+        // The whole point of announcing it. Folding this into the next
+        // handshake only would mean the person who made the room has to tell
+        // everybody to reconnect before they can walk into it.
+        let mut room = Room::new();
+        room.apply(&session());
+        assert_eq!(room.cages.len(), 1);
+
+        let changed = room.apply(&ServerMessage::CageCreated {
+            cage: CageInfo {
+                id: CageId(2),
+                name: "CAGE-02 SALA DOS FUNDOS".into(),
+                limit: 8,
+                password_required: false,
+                line: None,
+            },
+        });
+
+        assert!(
+            changed.channels,
+            "nothing told the shell to redraw the list"
+        );
+        assert_eq!(room.cages.len(), 2);
+        assert_eq!(room.cages[1].id, CageId(2));
+        assert_eq!(room.cages[1].name, "CAGE-02 SALA DOS FUNDOS");
+    }
+
+    #[test]
+    fn a_line_made_now_joins_the_list_without_a_reconnection() {
+        let mut room = Room::new();
+        room.apply(&session());
+
+        let changed = room.apply(&ServerMessage::LineCreated {
+            line: LineInfo {
+                id: LineId(2),
+                name: "planejamento".into(),
+            },
+        });
+
+        assert!(changed.channels);
+        assert_eq!(room.lines.len(), 2);
+        assert_eq!(room.lines[1].name, "planejamento");
+    }
+
+    #[test]
+    fn the_same_room_announced_twice_appears_once() {
+        // Idempotent by identifier, like `MessageReceived`. A room listed twice
+        // is a room nobody can tell a friend to join by name.
+        let mut room = Room::new();
+        room.apply(&session());
+        let made = ServerMessage::CageCreated {
+            cage: CageInfo {
+                id: CageId(2),
+                name: "CAGE-02".into(),
+                limit: 8,
+                password_required: false,
+                line: None,
+            },
+        };
+
+        room.apply(&made);
+        let again = room.apply(&made);
+
+        assert_eq!(room.cages.len(), 2);
+        assert!(
+            !again.channels,
+            "a repeat told the shell to redraw a list that did not change"
+        );
+    }
+
+    #[test]
+    fn a_rename_keeps_the_room_in_its_place() {
+        // The alternative — remove and re-append — reads, to everybody
+        // watching, as the room being destroyed and a new one made, and moves
+        // it under the cursor of whoever was about to click it.
+        let mut room = Room::new();
+        room.apply(&session());
+        room.apply(&ServerMessage::CageCreated {
+            cage: CageInfo {
+                id: CageId(2),
+                name: "CAGE-02".into(),
+                limit: 8,
+                password_required: false,
+                line: None,
+            },
+        });
+
+        let changed = room.apply(&ServerMessage::CageRenamed {
+            cage: CAGE,
+            name: "CAGE-01 PONTE".into(),
+        });
+
+        assert!(changed.channels);
+        assert_eq!(room.cages.len(), 2, "the rename made a second room");
+        assert_eq!(room.cages[0].id, CAGE);
+        assert_eq!(room.cages[0].name, "CAGE-01 PONTE");
+        assert_eq!(room.cages[0].limit, 20, "the rename rewrote the rest of it");
+    }
+
+    #[test]
+    fn renaming_a_room_this_client_never_heard_of_changes_nothing() {
+        let mut room = Room::new();
+        room.apply(&session());
+
+        let changed = room.apply(&ServerMessage::LineRenamed {
+            line: LineId(404),
+            name: "fantasma".into(),
+        });
+
+        assert!(!changed.channels);
+        assert_eq!(room.lines.len(), 1);
+        assert_eq!(room.lines[0].name, "geral");
+    }
+
+    #[test]
+    fn the_session_carries_what_this_pilot_may_do() {
+        // A shell asking "should this control exist" must not have to intersect
+        // the role catalogue itself: "negadas vencem concedidas" is one rule and
+        // it lives on the server.
+        let mut room = Room::new();
+        room.apply(&ServerMessage::Session {
+            id: SessionId(1),
+            pilot: PilotId(7),
+            ssrc: Ssrc(700),
+            dogma: "Terceira Tóquio".into(),
+            cages: Vec::new(),
+            lines: Vec::new(),
+            roles: Vec::new(),
+            permissions: vec![Permission::ManageCages, Permission::Speak],
+        });
+
+        assert!(room.permissions.contains(&Permission::ManageCages));
+        assert!(!room.permissions.contains(&Permission::Ban));
     }
 }

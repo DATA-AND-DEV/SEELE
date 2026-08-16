@@ -43,6 +43,7 @@ use seele_proto::transport::HANDSHAKE_TIMEOUT;
 use tokio::sync::mpsc;
 
 use crate::cage::CageCommand;
+use crate::casper::channels::Channels;
 use crate::casper::messages::{Messages, PendingMessage, DEFAULT_PAGE};
 use crate::casper::Casper;
 use crate::dogma::{Dogma, Event};
@@ -411,6 +412,9 @@ async fn handshake(
             reason: DisconnectReason::ServerShuttingDown,
             detail: format!("could not read the Dogma: {error}"),
         })?;
+        // Resolved here rather than left for the shell to work out from `roles`:
+        // "negadas vencem concedidas" is one rule and belongs in one place.
+        let permissions = melchior.permissions(pilot.id).unwrap_or_default();
 
         Account {
             id: pilot.id,
@@ -420,6 +424,7 @@ async fn handshake(
             cages,
             lines,
             roles,
+            permissions,
         }
     };
 
@@ -448,6 +453,7 @@ async fn handshake(
             cages: account.cages,
             lines: account.lines,
             roles: account.roles,
+            permissions: account.permissions,
         },
     )
     .await
@@ -476,40 +482,18 @@ struct Account {
     cages: Vec<CageInfo>,
     lines: Vec<LineInfo>,
     roles: Vec<Role>,
+    permissions: Vec<Permission>,
 }
 
 /// Reads the Cage and Line tree, and the roles, out of CASPER.
 fn read_dogma(casper: &Casper) -> Result<(Vec<CageInfo>, Vec<LineInfo>, Vec<Role>)> {
     let connection = casper.connection();
 
-    let mut cage_statement = connection.prepare(
-        "SELECT id, name, member_limit, password_hash IS NOT NULL, line_id
-         FROM cages ORDER BY position, id",
-    )?;
-    let cages = cage_statement
-        .query_map([], |row| {
-            Ok(CageInfo {
-                id: CageId(row.get::<_, i64>(0)? as u32),
-                name: row.get(1)?,
-                limit: row.get::<_, i64>(2)? as u16,
-                password_required: row.get(3)?,
-                line: row.get::<_, Option<i64>>(4)?.map(|id| LineId(id as u32)),
-            })
-        })?
-        .filter_map(Result::ok)
-        .collect();
-
-    let mut line_statement =
-        connection.prepare("SELECT id, name FROM lines ORDER BY position, id")?;
-    let lines = line_statement
-        .query_map([], |row| {
-            Ok(LineInfo {
-                id: LineId(row.get::<_, i64>(0)? as u32),
-                name: row.get(1)?,
-            })
-        })?
-        .filter_map(Result::ok)
-        .collect();
+    // The same reader the creating verbs use, so the tree the handshake sends
+    // and the tree a new room lands in cannot drift apart.
+    let channels = Channels::new(casper);
+    let cages = channels.cages()?;
+    let lines = channels.lines()?;
 
     let mut role_statement = connection.prepare("SELECT id, name, permissions FROM roles")?;
     let roles = role_statement
@@ -838,6 +822,88 @@ async fn run_session(
                             sync_ratio: last_ratio,
                         });
                     }
+                    // ---- rooms, made by whoever hosts ----
+                    //
+                    // The permission is read **now**, from MELCHIOR, and not
+                    // from anything the handshake cached. `may_speak` and
+                    // `may_write` are cached because they are consulted per
+                    // audio frame and per message; these four are consulted
+                    // once in a while, and a Comandante who revoked somebody's
+                    // ManageCages a minute ago should not have to wait for that
+                    // person to reconnect before it means anything.
+                    //
+                    // Denial answers with `PermissionDenied` rather than
+                    // silence. specs/08-seguranca.md makes the server the
+                    // security and the hidden button the convenience — but a
+                    // refusal nobody is told about is indistinguishable from a
+                    // Dogma that is broken.
+                    ClientMessage::CreateCage { name, limit, line } => {
+                        if !pode(dogma, session.pilot, Permission::ManageCages).await {
+                            recusar(&mut send, session.pilot, "CreateCage").await?;
+                            continue;
+                        }
+                        let feito = {
+                            let guard = dogma.casper.lock().await;
+                            Channels::new(&guard).create_cage(&name, limit, line)
+                        };
+                        match feito {
+                            Ok(cage) => {
+                                tracing::info!(pilot = %session.pilot, cage = %cage.id, "cage created");
+                                let _ = dogma.events.send(Event::CageCreated { cage });
+                            }
+                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                        }
+                    }
+                    ClientMessage::CreateLine { name } => {
+                        if !pode(dogma, session.pilot, Permission::ManageCages).await {
+                            recusar(&mut send, session.pilot, "CreateLine").await?;
+                            continue;
+                        }
+                        let feito = {
+                            let guard = dogma.casper.lock().await;
+                            Channels::new(&guard).create_line(&name)
+                        };
+                        match feito {
+                            Ok(line) => {
+                                tracing::info!(pilot = %session.pilot, line = %line.id, "line created");
+                                let _ = dogma.events.send(Event::LineCreated { line });
+                            }
+                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                        }
+                    }
+                    ClientMessage::RenameCage { cage: id, name } => {
+                        if !pode(dogma, session.pilot, Permission::ManageCages).await {
+                            recusar(&mut send, session.pilot, "RenameCage").await?;
+                            continue;
+                        }
+                        let feito = {
+                            let guard = dogma.casper.lock().await;
+                            Channels::new(&guard).rename_cage(id, &name)
+                        };
+                        match feito {
+                            Ok(name) => {
+                                let _ = dogma.events.send(Event::CageRenamed { cage: id, name });
+                            }
+                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                        }
+                    }
+                    ClientMessage::RenameLine { line: id, name } => {
+                        if !pode(dogma, session.pilot, Permission::ManageCages).await {
+                            recusar(&mut send, session.pilot, "RenameLine").await?;
+                            continue;
+                        }
+                        let feito = {
+                            let guard = dogma.casper.lock().await;
+                            Channels::new(&guard).rename_line(id, &name)
+                        };
+                        match feito {
+                            Ok(name) => {
+                                let _ = dogma.events.send(Event::LineRenamed { line: id, name });
+                            }
+                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                        }
+                    }
+
                     // The handshake is over. Repeating it is a protocol
                     // violation, not a re-authentication.
                     ClientMessage::Response { .. } | ClientMessage::Hello { .. } => break,
@@ -920,6 +986,59 @@ async fn run_session(
     }
 
     Ok(())
+}
+
+/// Asks MELCHIOR, right now, whether this pilot may do something.
+///
+/// Every call takes the CASPER lock, which is the point: the answer is the one
+/// that is true at the instant the verb is used, not the one that was true when
+/// the connection opened. `specs/08-seguranca.md`: "Toda ação é verificada no
+/// servidor, sempre." Control verbs are rare enough that the lock costs nothing
+/// worth measuring — the frame budget in [`crate::taxa`] already caps how often
+/// one connection can ask.
+///
+/// A database error reads as denial. The alternative is to let a Dogma whose
+/// disk is failing hand out `ManageCages` to whoever asks while it fails.
+async fn pode(dogma: &Dogma, pilot: PilotId, permission: Permission) -> bool {
+    let guard = dogma.casper.lock().await;
+    Melchior::new(&guard)
+        .may(pilot, permission)
+        .unwrap_or(false)
+}
+
+/// Tells a client the server said no, and why.
+async fn recusar(send: &mut quinn::SendStream, pilot: PilotId, verbo: &str) -> Result<()> {
+    tracing::warn!(%pilot, verbo, "refused: the pilot does not have ManageCages");
+    frame::write(
+        send,
+        &ServerMessage::Alert {
+            severity: AlertSeverity::Warning,
+            reason: AlertReason::PermissionDenied,
+            operator_text: None,
+        },
+    )
+    .await
+}
+
+/// Tells a client the room could not be made, without saying what the database
+/// thinks about it.
+///
+/// `CageEntryRefused` is the nearest enumerated reason for "that room is not
+/// there" — `specs/02-protocolo.md` allows no free-form string on the wire, and
+/// inventing a variant for every way a write can fail would be inventing an
+/// error language. The detail goes to the operator's log, which is where a
+/// developer will look for it.
+async fn nao_deu(send: &mut quinn::SendStream, erro: &anyhow::Error) -> Result<()> {
+    tracing::warn!(%erro, "a room could not be made");
+    frame::write(
+        send,
+        &ServerMessage::Alert {
+            severity: AlertSeverity::Warning,
+            reason: AlertReason::CageEntryRefused,
+            operator_text: None,
+        },
+    )
+    .await
 }
 
 /// How long after the last datagram a pilot still counts as speaking.
@@ -1030,5 +1149,22 @@ fn translate(
         // costs nothing: the server is repeating what this client just said, and
         // a client that folds them back in lands on the value it sent.
         Event::PilotState(state) => Some(ServerMessage::PilotState(*state)),
+
+        // Unfiltered, and to the pilot who caused it as well.
+        //
+        // Unlike a Cage arrival, a new room is not something a client can infer
+        // from having asked: the identifier is the server's to assign, and the
+        // maker needs it as much as everybody else does. Filtering self out here
+        // would leave whoever made the room as the one person who cannot see it.
+        Event::CageCreated { cage } => Some(ServerMessage::CageCreated { cage: cage.clone() }),
+        Event::LineCreated { line } => Some(ServerMessage::LineCreated { line: line.clone() }),
+        Event::CageRenamed { cage, name } => Some(ServerMessage::CageRenamed {
+            cage: *cage,
+            name: name.clone(),
+        }),
+        Event::LineRenamed { line, name } => Some(ServerMessage::LineRenamed {
+            line: *line,
+            name: name.clone(),
+        }),
     }
 }
