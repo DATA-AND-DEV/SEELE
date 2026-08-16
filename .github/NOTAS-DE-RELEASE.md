@@ -45,6 +45,40 @@ Se você baixou o instalador do seu sistema, **não precisa deles**.
 
 ---
 
+## Como conferir que o arquivo é o que diz ser
+
+Duas perguntas diferentes, e cada uma tem a sua resposta.
+
+**"O arquivo chegou inteiro?"** — o `SHA256SUMS` desta página responde.
+
+```sh
+sha256sum -c SHA256SUMS --ignore-missing        # Linux
+shasum -a 256 -c SHA256SUMS --ignore-missing    # macOS
+```
+
+```powershell
+Get-FileHash .\SEELE_*-setup.exe -Algorithm SHA256   # Windows, e compare à mão
+```
+
+**"E como sei que este arquivo veio daquele código?"** — essa a soma **não**
+responde. Quem confere só o hash está confiando em quem escreveu a página que
+publicou o hash. Para essa há atestado de procedência, assinado pelo GitHub, que
+amarra cada arquivo ao commit e à execução do workflow que o produziu:
+
+```sh
+gh attestation verify SEELE_1.2.3_x64-setup.exe --repo DATA-AND-DEV/SEELE
+```
+
+Ele imprime o commit, o workflow e o repositório de origem. Se alguém trocar o
+arquivo em qualquer ponto entre a compilação e o seu disco, isto acusa — e
+acusa sem depender de nada que esta página diga.
+
+O que o atestado **não** faz é dizer que o software é bom. Ele diz de onde veio.
+As duas coisas são frequentemente confundidas, inclusive pelos avisos do sistema
+operacional na seção abaixo.
+
+---
+
 ## Nada aqui é assinado
 
 **Este é o aviso mais importante desta página.** Os binários não têm assinatura

@@ -315,6 +315,13 @@ jobs:
     name: publicar
     needs: [versao, empacotar]
     runs-on: ubuntu-24.04
+    # Declaradas no job, e não no topo do arquivo: só este publica, e só ele
+    # precisa assinar. `id-token` é o que deixa o runner provar ao GitHub quem
+    # ele é; `attestations` é o que deixa gravar o atestado no repositório.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
 
@@ -322,6 +329,27 @@ jobs:
         with:
           path: entrega
           merge-multiple: true
+
+      # Procedência, e não segurança — a diferença importa e o instalador não a
+      # explica.
+      #
+      # Nada aqui é assinado com certificado de código: o SmartScreen e o
+      # Gatekeeper vão reclamar de qualquer forma, e as NOTAS-DE-RELEASE dizem o
+      # que fazer. O que este passo resolve é outra pergunta, que a soma de
+      # verificação sozinha **não** responde: o `SHA256SUMS` prova que o arquivo
+      # baixado é o que esta página publicou, mas quem confere só ele ainda está
+      # confiando em quem escreveu a página. O atestado é assinado pelo GitHub e
+      # amarra cada arquivo ao commit e à execução que o produziu.
+      #
+      #   gh attestation verify SEELE_x.y.z_x64-setup.exe --repo DATA-AND-DEV/SEELE
+      #
+      # Roda **antes** do `SHA256SUMS` de propósito: neste ponto `entrega/` tem
+      # exatamente os artefatos do build, e nada mais. Atestar o manifesto junto
+      # seria atestar um arquivo que descreve os outros em vez dos outros.
+      - name: Atestar a procedência
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: entrega/*
 
       # As somas são o que torna o instalador por `curl` defensável: sem elas,
       # quem roda o script está confiando no canal, e não no conteúdo.
