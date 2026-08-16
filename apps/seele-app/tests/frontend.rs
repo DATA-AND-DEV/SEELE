@@ -1411,21 +1411,45 @@ fn the_state_of_a_pilot_is_a_word_and_never_only_a_colour() {
         "the card writes no state chip, so the halo is the only thing marking who \
          is speaking"
     );
-    let words = |statement: &str| {
-        statement
-            .split('"')
-            .skip(1)
-            .step_by(2)
-            .filter(|word| !word.trim().is_empty())
-            .count()
-    };
-    assert!(
-        chips.iter().any(|statement| statement.contains("at_field")
+    // A statement that tells the three states apart in words: it has to look at
+    // the microphone and at the voice, and have a word for each way out.
+    let tells_them_apart = |statement: &str| {
+        statement.contains("at_field")
             && statement.contains("speaking")
-            && words(statement) >= 3),
-        "no state chip on this card branches on both the microphone and the voice \
-         with a word for each. Either a state is being told apart by paint alone, \
-         or two of them come out reading the same:\n{}",
+            && statement
+                .split('"')
+                .skip(1)
+                .step_by(2)
+                .filter(|word| !word.trim().is_empty())
+                .count()
+                >= 3
+    };
+
+    // Either the chip is written with the words in place, or it is written from
+    // a local that carries them. Following the local matters: assigning `""` to
+    // the chip while a perfectly good ternary sits unused above it is the exact
+    // shape of "marked by paint alone", and it would read as fine in a diff.
+    let straight = chips.iter().copied().any(tells_them_apart);
+    let through_a_local = paint.split(';').any(|declaration| {
+        tells_them_apart(declaration)
+            && declaration
+                .split('=')
+                .next()
+                .and_then(|left| left.split_whitespace().last())
+                .is_some_and(|name| {
+                    chips.iter().any(|chip| {
+                        chip.split('=')
+                            .nth(1)
+                            .is_some_and(|value| value.contains(name))
+                    })
+                })
+    });
+    assert!(
+        straight || through_a_local,
+        "no state chip on this card is written from a value that branches on both \
+         the microphone and the voice with a word for each. Either a state is \
+         being told apart by paint alone, or two of them come out reading the \
+         same:\n{}",
         chips.join("\n")
     );
 

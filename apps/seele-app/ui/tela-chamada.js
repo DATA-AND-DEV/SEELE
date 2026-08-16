@@ -293,8 +293,21 @@ function pintarCartao(cartao, piloto, temAudio) {
   // transmitida só por cor, e o estado de quem está na sala é informação: o
   // halo laranja de quem transmite e a pastilha dizem a mesma coisa, e são
   // duas porque uma delas não chega a quem não vê a cor.
+  //
+  // `OUVINDO` some quando a pessoa está com o som desligado, e só então: as
+  // duas pastilhas ficam lado a lado, e `OUVINDO · SEM SOM` é uma contradição
+  // lida em meio segundo. Quem está surdo e calado tem um estado só a
+  // declarar, e é o segundo.
   const pastilhas = cartao.querySelectorAll(".chamada-pastilha");
-  pastilhas[0].textContent = piloto.at_field ? "MUDO" : piloto.speaking ? "FALANDO" : "OUVINDO";
+  const microfone = piloto.at_field
+    ? "MUDO"
+    : piloto.speaking
+      ? "FALANDO"
+      : piloto.total_isolation
+        ? ""
+        : "OUVINDO";
+  pastilhas[0].textContent = microfone;
+  pastilhas[0].hidden = microfone === "";
   pastilhas[0].dataset.estado = piloto.at_field ? "at" : piloto.speaking ? "fala" : "escuta";
 
   // O isolamento total não existe no comp e existe no produto. Segunda
