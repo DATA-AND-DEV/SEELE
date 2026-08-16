@@ -836,18 +836,39 @@
 </section>
 
 <!--
-  Chamada — a grade do Cage. Tela `chamada` do comp v2, inventário §6, que a
-  tabela de lacunas §15 registrava como ausente por inteiro.
+  Chamada — a grade do Cage, redesenhada segundo o comp v3
+  (`design/Entry Plug v3.dc.html`, linhas 209–336; inventário §7).
 
   Tela própria, e não camada: ela **substitui** a conversa em vez de se pôr
   sobre ela, e é assim no comp (`ehChamada` é exclusivo de `ehPrincipal`). Ler a
   Linha e olhar quem está falando são duas coisas que ninguém faz ao mesmo
-  tempo, e um cartão por pessoa não cabe ao lado de um histórico.
+  tempo, e um cartão por pessoa não cabe ao lado de um histórico. O guarda
+  `the_alert_and_the_battery_are_layers_over_the_session_and_not_screens` prende
+  a decisão pelo outro lado: esta seção fica **fora** de `#tela-sessao`.
 
   Nasce escondida, como toda tela que não é a de entrada — o guarda
   `the_app_opens_on_exactly_one_screen` em `tests/frontend.rs` cobra isso, e a
   falha que ele pega é silenciosa: uma tela sem `hidden` não dá erro, ela
   empilha embaixo da que devia estar na frente.
+
+  ---- o que o v3 mudou aqui, e por quê ----
+
+  O v2 foi replicado fielmente e reprovado por um teste entre duas máquinas:
+  fiel e difícil de usar ao mesmo tempo. Três consertos desta tela vêm daí, e
+  cada um está escrito ao lado do controle que ele conserta:
+
+  1. o estado de cada piloto é **palavra**, e não só cor (`specs/05`);
+  2. o volume tem `−`, `+` e células clicáveis, no lugar de um deslizante que
+     só existia quando o ponteiro passava por cima — um controle que aparece no
+     hover é um controle escondido;
+  3. os dois botões de saída dizem, em palavras, qual deles sai do Cage.
+
+  ---- as dicas ----
+
+  Cada `.dica` é a camada `LEGENDAS SIMPLES` do v3 (inventário §2), ligada por
+  omissão e definida uma única vez em `base.css`. Ela mora **ao lado** do
+  controle que explica, na marcação, e não numa tabela paralela que alguém vai
+  esquecer de atualizar quando o controle mudar.
 -->
 <section id="tela-chamada" class="tela" hidden>
   <div class="chamada">
@@ -856,58 +877,110 @@
     <div class="chamada-cage">
       <div class="chamada-barra">
         <!--
-          O nome do Cage é cartela: bloco sólido laranja com texto no negro
-          absoluto (inventário §12, e o v2 nomeia este caso explicitamente).
-        -->
-        <span id="chamada-nome" class="chamada-cartela">——</span>
+          `JAULA 01` no comp: placa laranja com texto no negro absoluto
+          (inventário §12 — no v2 tudo que é cartela é inversão, e o nome do
+          Cage nesta tela é nomeado ali explicitamente).
 
-        <!--
-          `PLUG INSERIDO · 00:14:22` no comp. O inventário classifica como
-          **L** — cronômetro local, desde o `insert_plug` — mas o relógio teria
-          que nascer no instante da inserção, e a inserção acontece na tela de
-          operação. Um cronômetro que começasse a contar ao abrir esta tela
-          diria que o plug entrou agora, que é pior que não dizer nada.
+          Sem o número. O comp escreve `JAULA 01` porque o protótipo numera as
+          suas três salas; o produto não tem número de exibição por Cage, e
+          `Cage.id` é identificador de protocolo — escrevê-lo aqui seria pôr um
+          endereço interno onde vai um nome. A placa diz que tipo de lugar é
+          este, e o nome ao lado diz qual.
         -->
-        <span class="chamada-campo">
-          <span class="rotulo">PLUG INSERIDO</span>
-          <span id="chamada-plug">——</span>
-        </span>
+        <span class="chamada-placa">JAULA</span>
+        <div class="chamada-quem">
+          <span id="chamada-nome" class="chamada-nome">——</span>
+          <span class="dica">quem está nesta jaula ouve o seu microfone</span>
+        </div>
 
         <span class="chamada-vao"></span>
 
-        <!-- `BALTHASAR·01 NOMINAL` no comp; rota não é conceito em lugar
-             nenhum do core (§16). -->
-        <span class="chamada-campo">
-          <span class="rotulo">ROTA</span>
-          <span id="chamada-rota">——</span>
+        <!--
+          O rótulo de conexão do comp. Ponto colorido **e** palavra: a cor
+          sozinha não diz nada a quem não a vê (`specs/05-cliente-tui.md`), e é
+          o mesmo par que o roster usa para faixa de sincronia.
+        -->
+        <span id="chamada-enlace" class="chamada-enlace" data-enlace="nenhum">
+          <span class="chamada-enlace-marca" aria-hidden="true"></span>
+          <span id="chamada-conexao">SEM SESSÃO</span>
         </span>
+
+        <!--
+          `duracao` no comp é o tempo de chamada, e este produto não o tem: o
+          protocolo não carrega quando o plug entrou, e um cronômetro que
+          começasse a contar ao abrir esta tela diria que ele entrou agora.
+
+          O que existe é o relógio local desde o primeiro quadro da sessão — o
+          mesmo `UPTIME` da tela de operação, lido do mesmo lugar para que os
+          dois nunca discordem. Por isso o rótulo diz `EM SESSÃO` e não
+          `EM CHAMADA`: o campo é honesto sobre o que está contando.
+        -->
+        <div class="chamada-tempo">
+          <span class="chamada-campo">
+            <span class="rotulo">EM SESSÃO</span>
+            <span id="chamada-duracao">--:--:--</span>
+          </span>
+          <span class="dica">desde que esta janela entrou no Dogma</span>
+        </div>
       </div>
 
       <!--
-        Um cartão por piloto. O comp corta em `slice(0,4)` e é sempre 2×2; aqui
-        a grade tem duas colunas e rola, porque um Cage tem `limit` assentos e
-        nada garante que sejam quatro. Esconder o quinto piloto é a única forma
-        de esta tela mentir sobre quem está na sala.
+        Um cartão por piloto. O comp corta o roster em `slice(0,4)` e é sempre
+        2×2; aqui a grade se acomoda à largura e rola, porque um Cage tem
+        `limit` assentos e nada garante que sejam quatro. Esconder o quinto
+        piloto é a única forma de esta tela mentir sobre quem está na sala.
       -->
       <ol id="chamada-grade" class="chamada-grade" aria-label="pilotos no Cage"></ol>
 
       <div class="chamada-acoes">
         <!--
-          Os rótulos dizem em que estado a coisa **está**, e não o que apertar
-          vai fazer — a mesma regra da tira do operador na tela de operação. Um
-          botão escrito com o verbo é um botão que ninguém sabe ler quando volta
-          a olhar para a tela.
+          Os dois primeiros dizem em que estado a coisa **está**, e o v3 os
+          escreve em palavra corrente: `MICROFONE DESLIGADO` onde o v2 dizia
+          `A.T. FIELD ATIVO`. O nome do tema não some — ele fica na dica, que é
+          onde alguém o aprende sem precisar dele para operar o botão.
         -->
         <button id="chamada-at" class="chamada-acao chamada-acao-at" type="button"
-                data-ativo="nao">A.T. FIELD INATIVO</button>
-        <button id="chamada-surdez" class="chamada-acao chamada-acao-surdez" type="button"
-                data-ativo="nao">SURDEZ TOTAL</button>
-        <span class="chamada-vao"></span>
-        <button id="chamada-voltar" class="chamada-acao chamada-acao-voltar" type="button">
-          VOLTAR À LINHA
+                data-ativo="nao">
+          <span class="chamada-acao-texto">
+            <span id="chamada-at-titulo" class="chamada-acao-titulo">MICROFONE LIGADO</span>
+            <span id="chamada-at-dica" class="dica">clique para silenciar você</span>
+          </span>
         </button>
+
+        <button id="chamada-surdez" class="chamada-acao chamada-acao-surdez" type="button"
+                data-ativo="nao">
+          <span class="chamada-acao-texto">
+            <span id="chamada-surdez-titulo" class="chamada-acao-titulo">SOM LIGADO</span>
+            <span id="chamada-surdez-dica" class="dica">clique para não ouvir ninguém</span>
+          </span>
+        </button>
+
+        <!--
+          Os dois de saída, e a distinção entre eles é o achado do v3
+          (inventário §7.1). No protótipo os dois chamam `ir('principal')` e o
+          que os separa é só o que prometem; aqui eles fazem coisas diferentes
+          de verdade — um troca de tela, o outro chama `eject_plug` — e as duas
+          dicas dizem qual é qual. Hoje quem aperta o que leva de volta às
+          Linhas não sabe se continua ouvindo; estas duas linhas são a resposta.
+
+          O glifo vem de `ui/glifos.js` e não do teclado: ▤ e ⏻ não estão na
+          face embarcada (inventário §5), e digitados cairiam na monoespaçada do
+          sistema no meio da linha.
+        -->
+        <button id="chamada-voltar" class="chamada-acao chamada-acao-voltar" type="button">
+          <span class="chamada-acao-glifo" data-glifo="linhas"></span>
+          <span class="chamada-acao-texto">
+            <span class="chamada-acao-titulo">VER LINHAS</span>
+            <span class="dica">volta para as Linhas e continua na chamada</span>
+          </span>
+        </button>
+
         <button id="chamada-ejetar" class="chamada-acao chamada-acao-ejetar" type="button">
-          EJETAR PLUG
+          <span class="chamada-acao-glifo" data-glifo="desligar"></span>
+          <span class="chamada-acao-texto">
+            <span class="chamada-acao-titulo">SAIR DA JAULA</span>
+            <span class="dica">tira o seu plug: você para de ouvir e de ser ouvido</span>
+          </span>
         </button>
       </div>
     </div>
@@ -921,47 +994,32 @@
       <div class="chamada-bloco chamada-bloco-falando">
         <p class="rotulo">FALANDO AGORA</p>
         <p id="chamada-falando-nome" class="chamada-falando-nome">——</p>
-        <p class="chamada-nota">
-          Halo laranja e a etiqueta TRANSMITINDO marcam a mesma coisa, e são
-          duas porque a cor sozinha não serve. A.T. Field cala a captura sem
-          sair do Cage.
+        <p class="dica">
+          A moldura laranja no cartão marca quem está com o microfone aberto
+          agora. A palavra ao lado do nome diz a mesma coisa, para quem não vê a
+          cor.
         </p>
       </div>
 
       <!--
-        Os cinco eventos com carimbo do comp. Não há histórico de entrada, saída
-        nem A.T. Field em lugar nenhum do core: `Event::RosterChanged` diz que
-        mudou, não o quê (§16). A seção fica porque ela é metade do que um
-        monitor de Cage é.
+        `EVENTOS` do comp, com uma diferença que o inventário §9.8 deixou em
+        aberto e esta tela responde: só entra aqui o que **esta janela viu
+        passar**. O Dogma não guarda histórico de entrada, saída nem A.T. Field
+        — `Event::RosterChanged` diz que mudou, nunca o quê — então uma lista
+        que começasse cheia estaria inventando o passado.
+
+        O que sobra, e é verdade: os avisos que o core levantou desde que a
+        janela abriu, e as duas chaves que esta pessoa virou aqui dentro.
       -->
       <div class="chamada-bloco chamada-bloco-eventos">
-        <p class="rotulo">EVENTOS DO CAGE</p>
-        <p class="ausente" title="o protocolo avisa que o roster mudou, nunca o que mudou nele">——</p>
-        <p class="legenda-ausente">—— valor que este protocolo não carrega</p>
+        <p class="rotulo">EVENTOS</p>
+        <p class="dica">
+          O que esta janela viu acontecer, desde que abriu. O Dogma não guarda
+          histórico, então não há nada anterior a mostrar.
+        </p>
+        <ol id="chamada-eventos" class="chamada-eventos"
+            aria-label="eventos vistos por esta janela"></ol>
       </div>
-
-      <dl class="chamada-pe">
-        <div class="chamada-par">
-          <dt>ATRASO DE SINAL</dt>
-          <dd id="chamada-atraso" class="chamada-atraso">·</dd>
-        </div>
-        <div class="chamada-par">
-          <dt>DISTÚRBIO HARMÔNICO</dt>
-          <dd id="chamada-disturbio">·</dd>
-        </div>
-        <!--
-          `OPUS 96k / 48kHz` no comp. A primeira metade é medida
-          (`bitrate_bps`); a segunda não atravessa a fronteira (§16) — é
-          constante do produto hoje, e não um valor que alguém tenha lido.
-        -->
-        <div class="chamada-par">
-          <dt>CODEC</dt>
-          <dd>
-            <span id="chamada-codec">·</span> /
-            <span class="ausente" title="a taxa de amostragem não atravessa a fronteira">——</span>
-          </dd>
-        </div>
-      </dl>
     </aside>
   </div>
 </section>

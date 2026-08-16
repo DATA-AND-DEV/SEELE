@@ -1,9 +1,8 @@
 /* SEELE · Entry Plug — a tela de chamada (`#tela-chamada`).
 
-   O comp v2, tela `chamada` (`.superpowers/sdd/comp-inventario.md` §6): a grade
-   de quem está no Cage, com forma de onda por pessoa, sincronia, volume, e o
-   monitor do Cage à direita. O inventário §15 a registrava como **ausente por
-   inteiro**.
+   O comp v3, tela `chamada` (`design/Entry Plug v3.dc.html` 209–336, e
+   `.superpowers/sdd/comp-inventario-v3.md` §7): a grade de quem está no Cage,
+   um cartão por piloto, e o monitor do Cage à direita.
 
    Tela própria, e não uma camada — ao contrário do alerta e da bateria. Ela
    substitui a conversa em vez de se sobrepor a ela, e é assim no comp
@@ -12,23 +11,28 @@
 
    Carrega depois de `base.css` e antes de `acessibilidade.css`, como toda folha
    de tela. Nenhuma cor literal, nem em regra nem em comentário: `tests/tokens.rs`
-   lê o arquivo inteiro, e os hexadecimais do comp estão citados por nome de
-   token.
+   lê o arquivo inteiro, e as cores do comp estão citadas por nome de token.
+
+   Toda classe daqui começa por `chamada-`. Não é arrumação: as folhas de tela
+   entram num namespace único e plano, e `no_two_screens_claim_the_same_class_name`
+   reprova duas telas que escolham o mesmo nome — o prefixo é o que garante que
+   o cartão desta tela e o cartão de outra nunca sejam a mesma regra.
 
    ---- as duas colunas ----
 
-   O comp pede `1fr 316px`. Aqui é `1fr 320px`, pela mesma aritmética que
-   `tela-sessao.css` já aplicou à quarta coluna dela: 320 é o múltiplo de 8 mais
-   próximo de 316, e as duas colunas de 320 alinham entre as duas telas — a
-   Taxa de Sincronização e o Monitor do Cage ocupam a mesma faixa da janela, e
-   trocar de tela não desloca a borda.
+   O comp v3 pede `minmax(0,1fr) 328px`. Aqui é `1fr 320px`, pela mesma
+   aritmética que `tela-sessao.css` já aplicou à quarta coluna dela: 320 é o
+   múltiplo de 8 mais próximo, e as duas colunas de 320 alinham entre as duas
+   telas — a Taxa de Sincronização e o Monitor do Cage ocupam a mesma faixa da
+   janela, e trocar de tela não desloca a borda.
 
-   ---- as barras de 48px ----
+   ---- as alturas ----
 
-   O comp põe 56px na barra de cima e 64px na de ações. 56 não é múltiplo da
+   O comp põe 60px na barra de cima e 68px na de ações. 60 não é múltiplo da
    célula de 16 e 48 é; a barra de ações fica em 64, que é múltiplo dos dois
-   lados. Mesma decisão, mesmo argumento e mesmo lugar que `.topo` em
-   `tela-sessao.css`, e é o que faz o cabeçalho não pular ao trocar de tela. */
+   lados e cabe título mais dica. Mesma decisão, mesmo argumento e mesmo lugar
+   que `.topo` em `tela-sessao.css`, e é o que faz o cabeçalho não pular ao
+   trocar de tela. */
 
 .chamada {
   flex: 1 1 auto;
@@ -50,57 +54,114 @@
 .chamada-barra {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 16px;
   height: 48px;
-  padding: 0 20px;
+  padding: 0 16px;
   border-bottom: var(--seele-b) solid var(--seele-linha);
   background: var(--seele-negro-painel);
   flex: 0 0 auto;
 }
 
-/* O nome do Cage é cartela: bloco sólido laranja com texto no negro absoluto.
-   Inventário §12 — no v2 tudo que é cartela é inversão, e o nome do Cage nesta
-   tela é nomeado ali explicitamente como um dos casos. */
-.chamada-cartela {
+/* A placa: bloco sólido laranja com texto no negro absoluto. Inventário §12 —
+   no v2 tudo que é cartela é inversão, e o nome do Cage nesta tela é nomeado
+   ali explicitamente como um dos casos. Ela diz que tipo de lugar é este; o
+   nome ao lado diz qual. */
+.chamada-placa {
   font-family: var(--seele-display);
   font-weight: 900;
   font-size: var(--seele-t-secao);
   letter-spacing: 0.06em;
-  padding: 5px 10px;
+  padding: 4px 10px;
   color: var(--seele-negro-absoluto);
   background: var(--seele-laranja-nerv);
   white-space: nowrap;
   flex: 0 0 auto;
 }
 
-/* Sem plug inserido não há Cage para nomear, e uma cartela laranja em volta de
-   um travessão pareceria o nome de um Cage chamado `——`. Ela volta a ser
-   contorno. */
-.chamada-cartela.ausente {
-  background: none;
+.chamada-quem {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.chamada-nome {
+  font-size: var(--seele-t-corpo);
+  color: var(--seele-osso);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chamada-vao { flex: 1; }
+
+/* O rótulo de conexão do comp: ponto e palavra dentro de um contorno. A cor do
+   ponto e a da palavra andam juntas e nenhuma das duas está sozinha — trocar a
+   cor sem trocar a palavra é o que `specs/05-cliente-tui.md` proíbe. */
+.chamada-enlace {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
   border: var(--seele-b) solid var(--seele-linha-forte);
+  font-size: 11px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  color: var(--seele-osso-apagado);
+}
+
+.chamada-enlace-marca {
+  width: 6px;
+  height: 6px;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+
+.chamada-enlace[data-enlace="no-ar"] { color: var(--seele-fosforo); }
+
+/* A queda é a única coisa nesta tela que gasta o vermelho, e é o que
+   `tokens.css` reserva para ele: alerta e queda. */
+.chamada-enlace[data-enlace="bateria"] {
+  color: var(--seele-vermelho-alerta);
+  border-color: var(--seele-vermelho-alerta);
+}
+
+.chamada-tempo {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  flex: 0 0 auto;
 }
 
 .chamada-campo {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  font-size: var(--seele-t-rotulo);
-  letter-spacing: 0.18em;
-  color: var(--seele-osso-apagado);
+  font-size: var(--seele-t-dado);
+  font-variant-numeric: tabular-nums;
+  color: var(--seele-osso);
 }
 
 .chamada-barra .rotulo { font-size: var(--seele-t-rotulo); letter-spacing: 0.18em; }
 
-.chamada-vao { flex: 1; }
+/* As duas dicas da barra ficam numa linha só. A barra tem altura fixa para
+   alinhar com o cabeçalho da tela de operação, e uma dica que quebrasse em duas
+   linhas vazaria dela — o corte é o último recurso e, no comprimento em que as
+   duas estão escritas, não chega a acontecer. */
+.chamada-barra .dica {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* ---------- a grade de cartões ----------
 
-   O comp corta o roster em `slice(0,4)` e é sempre 2×2. Aqui a grade tem duas
-   colunas e rola: um Cage tem `limit` assentos e nada garante que sejam quatro,
-   e esconder o quinto piloto é a única forma de esta tela mentir sobre quem
-   está na sala. `grid-auto-rows` guarda a altura mínima do cartão do comp para
-   que dois pilotos não virem duas faixas achatadas. */
+   O comp corta o roster em `slice(0,4)` e é sempre 2×2. Aqui a grade se acomoda
+   à largura e rola: um Cage tem `limit` assentos e nada garante que sejam
+   quatro, e esconder o quinto piloto é a única forma de esta tela mentir sobre
+   quem está na sala. `auto-fit` com um mínimo de 304px é o
+   `minmax(300px,1fr)` do comp arredondado para a grade de 8. */
 .chamada-grade {
   list-style: none;
   margin: 0;
@@ -109,8 +170,9 @@
   min-height: 0;
   overflow-y: auto;
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  grid-auto-rows: minmax(224px, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(304px, 1fr));
+  grid-auto-rows: minmax(160px, auto);
+  align-content: start;
 }
 
 .chamada-cartao {
@@ -118,17 +180,20 @@
   flex-direction: column;
   justify-content: space-between;
   gap: 16px;
-  padding: 24px;
+  padding: 16px;
   min-width: 0;
   border-right: var(--seele-b) solid var(--seele-linha);
   border-bottom: var(--seele-b) solid var(--seele-linha);
 }
 
 /* O halo do comp: `inset 0 0 0 2px` em laranja quando a pessoa transmite, mais
-   o fundo de bloco em carga. Nunca sozinho — a etiqueta do canto diz
+   o fundo de bloco em carga. Nunca sozinho — a pastilha do canto diz
    `TRANSMITINDO` em palavra, que é o acompanhante textual que
-   `specs/05-cliente-tui.md` exige de toda faixa colorida. */
-.chamada-cartao.falando {
+   `specs/05-cliente-tui.md` exige de toda faixa colorida.
+
+   `[data-fala]` e não uma classe `.falando`: nome curto num namespace plano é
+   nome que outra tela vai querer também. */
+.chamada-cartao[data-fala="sim"] {
   background: var(--seele-laranja-carga);
   box-shadow: inset 0 0 0 var(--seele-b-forte) var(--seele-laranja-nerv);
 }
@@ -145,166 +210,261 @@
   color: var(--seele-osso-apagado);
 }
 
-.cartao-topo {
+.chamada-cartao-topo {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 8px;
 }
 
-.cartao-identidade {
+.chamada-cartao-identidade {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* O avatar de iniciais do v3. Quadrado de 40px — 5 células —, contorno e não
+   bloco, porque o bloco sólido é da placa e da pastilha de quem fala, e três
+   inversões no mesmo cartão não distinguem mais nada. */
+.chamada-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: var(--seele-t-secao);
+  letter-spacing: 0.02em;
+  border: var(--seele-b) solid var(--seele-linha-forte);
+  color: var(--seele-osso-apagado);
+}
+
+.chamada-cartao[data-fala="sim"] .chamada-avatar {
+  border-color: var(--seele-laranja-nerv);
+  color: var(--seele-laranja-nerv);
+}
+
+.chamada-cartao-quem {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
 }
 
 /* Saira 700, e não 900: o inventário §12 reserva o 700 para nome próprio dentro
-   de lista, e 22px é o tamanho que o comp dá ao nome no cartão de chamada. */
-.cartao-nome {
+   de lista. */
+.chamada-cartao-nome {
   font-family: var(--seele-display);
   font-weight: var(--seele-cartela);
-  font-size: 22px;
-  letter-spacing: 0.08em;
+  font-size: 20px;
+  letter-spacing: 0.04em;
+  line-height: 1;
   color: var(--seele-osso);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.cartao-tag {
-  font-size: var(--seele-t-micro);
-  letter-spacing: 0.16em;
-}
+.chamada-cartao[data-fala="sim"] .chamada-cartao-nome { color: var(--seele-laranja-nerv); }
 
-/* A etiqueta do canto. Contorno, e não bloco sólido: no comp ela é
-   `border:1px solid` com texto colorido, e é o único elemento do cartão que não
-   é cartela — o cartão inteiro já é a inversão quando a pessoa fala. */
-.cartao-estado {
-  padding: 4px 8px;
-  font-size: var(--seele-t-micro);
-  letter-spacing: 0.14em;
-  border: var(--seele-b) solid var(--seele-linha-forte);
-  color: var(--seele-osso-apagado);
-  white-space: nowrap;
+.chamada-cartao-estados {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
   flex: 0 0 auto;
 }
 
-.cartao-estado[data-estado="at"] {
+/* A pastilha do canto: o mesmo estado que a dica escreve em frase, na forma
+   curta. Contorno por omissão; sólida só quando a pessoa transmite, que é o
+   único estado que o comp inverte. */
+.chamada-pastilha {
+  padding: 3px 8px;
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.1em;
+  border: var(--seele-b) solid var(--seele-linha-forte);
+  color: var(--seele-osso-apagado);
+  white-space: nowrap;
+}
+
+.chamada-pastilha[data-estado="at"] {
   border-color: var(--seele-laranja-nerv);
   color: var(--seele-laranja-nerv);
 }
 
-.cartao-estado[data-estado="fala"] {
+.chamada-pastilha[data-estado="fala"] {
   border-color: var(--seele-laranja-nerv);
   background: var(--seele-laranja-nerv);
   color: var(--seele-negro-absoluto);
 }
 
-/* ---------- a forma de onda que não existe ----------
-
-   26 barras animadas no comp, e o inventário §16 é curto sobre elas:
-   `Telemetry.input_level` é escalar e é **só a nossa** entrada. Amplitude por
-   fonte não atravessa a fronteira e não é derivável de nada que atravesse.
-
-   A moldura de 64px fica, porque ela é metade do que este cartão é — e o
-   travessão dentro dela diz que ninguém mediu. Vinte e seis barras desenhadas
-   no mínimo seriam 26 afirmações de silêncio; vinte e seis barras oscilando
-   seriam 26 mentiras animadas. */
-.cartao-onda {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 64px;
-  border: var(--seele-b) solid var(--seele-linha);
-  font-size: var(--seele-t-dado);
+.chamada-pastilha[data-estado="surdo"] {
+  border-color: var(--seele-osso-apagado);
+  color: var(--seele-osso-apagado);
 }
 
-.cartao-base {
+/* ---------- sincronização ---------- */
+
+.chamada-cartao-sync {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
-.cartao-sync {
+.chamada-cartao-linha {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
   gap: 8px;
 }
 
-.cartao-sync .rotulo {
+.chamada-cartao-linha .rotulo {
   font-size: var(--seele-t-micro);
-  letter-spacing: 0.2em;
+  letter-spacing: 0.14em;
 }
 
-.cartao-numero { display: flex; align-items: baseline; gap: 6px; }
+.chamada-cartao-numero { display: flex; align-items: baseline; gap: 6px; }
 
 /* A marca de bloco fica em face monoespaçada ao lado do número porque a Saira
    Condensed, que desenha o número, não tem `U+2588`. É ela que carrega a faixa
    quando não há cor (`specs/05-cliente-tui.md`) — mesma construção do roster da
    tela de operação. */
-.cartao-marca {
+.chamada-cartao-marca {
   font-family: var(--seele-mono);
   font-size: 11px;
   line-height: 1;
 }
 
-.cartao-valor {
+.chamada-cartao-valor {
   font-family: var(--seele-display);
   font-weight: 900;
-  font-size: 30px;
+  font-size: 26px;
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 
-.cartao-barra { font-size: 11px; letter-spacing: 0.02em; }
+.chamada-cartao-barra {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+}
 
 /* A faixa pinta o número e a barra, nunca o nome. As três são as do core
    (`SyncBand`), decididas lá — esta folha não conhece limiar nenhum. */
-.chamada-cartao[data-faixa="Nominal"] .cartao-numero,
-.chamada-cartao[data-faixa="Nominal"] .cartao-barra { color: var(--seele-sync-nominal); }
-.chamada-cartao[data-faixa="Degraded"] .cartao-numero,
-.chamada-cartao[data-faixa="Degraded"] .cartao-barra { color: var(--seele-sync-degradado); }
-.chamada-cartao[data-faixa="Critical"] .cartao-numero,
-.chamada-cartao[data-faixa="Critical"] .cartao-barra { color: var(--seele-sync-critico); }
+.chamada-cartao[data-faixa="Nominal"] .chamada-cartao-numero,
+.chamada-cartao[data-faixa="Nominal"] .chamada-cartao-barra { color: var(--seele-sync-nominal); }
+.chamada-cartao[data-faixa="Degraded"] .chamada-cartao-numero,
+.chamada-cartao[data-faixa="Degraded"] .chamada-cartao-barra { color: var(--seele-sync-degradado); }
+.chamada-cartao[data-faixa="Critical"] .chamada-cartao-numero,
+.chamada-cartao[data-faixa="Critical"] .chamada-cartao-barra { color: var(--seele-sync-critico); }
 
-/* A linha de volume. `VOL ▓▓▓ 82%` no comp; aqui o valor falta, porque
-   `set_volume` escreve e **nada lê** (inventário §16, "comando novo"). O que a
-   casca tem é a última coisa que ela mesma mandou, que se perde ao reconectar —
-   desenhar isso como leitura seria desenhar a própria lembrança como medida.
-   O controle que existe continua onde estava: no deslizante do roster. */
-.cartao-vol {
+/* ---------- volume ----------
+
+   O conserto de usabilidade mais direto do v3. No v2 o volume por pessoa era um
+   deslizante que só aparecia quando o ponteiro passava por cima da linha do
+   roster, e um controle que só existe no hover é um controle escondido: ele não
+   está no caminho de quem navega por teclado, não aparece em toque nenhum, e
+   quem não passou o mouse ali por acaso nunca soube que existia.
+
+   Aqui ele é `−`, dez células e `+`, sempre visíveis e todos alcançáveis por
+   `Tab`. O comp desenha doze células de 0 a 100; aqui são dez porque a escala
+   deste produto vai a 200 — `set_volume` aceita até o dobro —, e dez células de
+   vinte pontos põem o normal exatamente na quinta, com números redondos em
+   todas. Nada nesta seção pode voltar a depender de `:hover` para **existir**:
+   o hover pode realçar, nunca revelar. */
+.chamada-volume {
   display: flex;
   align-items: center;
   gap: 8px;
   padding-top: 8px;
   border-top: var(--seele-b) solid var(--seele-linha);
-  font-size: 11px;
 }
 
-.cartao-vol .rotulo {
+.chamada-volume .rotulo {
   font-size: var(--seele-t-micro);
-  letter-spacing: 0.16em;
+  letter-spacing: 0.1em;
+  flex: 0 0 auto;
 }
 
-/* ---------- a barra de ações ---------- */
-
-.chamada-acoes {
+.chamada-vol-passo {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
   display: flex;
-  align-items: stretch;
-  height: 64px;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  font-size: var(--seele-t-corpo);
+  line-height: 1;
+  color: var(--seele-osso);
+  background: none;
+  border: var(--seele-b) solid var(--seele-linha-forte);
+  cursor: pointer;
+}
+
+.chamada-vol-passo:hover { border-color: var(--seele-laranja-nerv); color: var(--seele-laranja-nerv); }
+.chamada-vol-passo:focus-visible { outline: var(--seele-b-forte) solid var(--seele-osso); outline-offset: 1px; }
+
+.chamada-vol-celas {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Cada célula é um botão, e é o alvo de clique inteiro: clicar na sétima põe o
+   volume no que a sétima vale. 16px de altura é uma célula de terminal. */
+.chamada-vol-cela {
+  flex: 1 1 auto;
+  height: 16px;
+  min-width: 4px;
+  padding: 0;
+  border: 0;
+  background: var(--seele-linha-forte);
+  cursor: pointer;
+}
+
+.chamada-vol-cela[data-cheia="sim"] { background: var(--seele-laranja-nerv); }
+.chamada-vol-cela:hover { background: var(--seele-osso); }
+.chamada-vol-cela:focus-visible { outline: var(--seele-b-forte) solid var(--seele-osso); outline-offset: 1px; }
+
+.chamada-vol-valor {
+  width: 40px;
+  flex: 0 0 auto;
+  text-align: right;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--seele-osso);
+}
+
+/* ---------- a barra de ações ----------
+
+   Quatro colunas iguais, como no comp: o microfone, o som, ver as Linhas e sair
+   da jaula. Cada uma com título e dica, e a dica é o que responde a pergunta
+   que o teste de LAN encontrou sem resposta — voltar para as Linhas quer dizer
+   parar de ouvir? */
+.chamada-acoes {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-height: 64px;
   border-top: var(--seele-b) solid var(--seele-linha);
   background: var(--seele-negro-painel);
   flex: 0 0 auto;
 }
 
 .chamada-acao {
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  font-size: 17px;
-  letter-spacing: 0.14em;
-  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 14px;
+  font: inherit;
+  text-align: left;
   color: var(--seele-osso);
   background: none;
   border: 0;
@@ -312,13 +472,43 @@
   cursor: pointer;
 }
 
+.chamada-acao:last-child { border-right: 0; }
 .chamada-acao:disabled { color: var(--seele-osso-apagado); cursor: default; }
 .chamada-acao:focus-visible { outline: var(--seele-b-forte) solid var(--seele-osso); outline-offset: -4px; }
 
-/* O A.T. Field. O rótulo diz em que estado ele **está**, e não o que apertá-lo
-   vai fazer — a mesma regra da tira do operador na tela de operação. Aceso, ele
-   é cartela: bloco sólido laranja com texto no negro absoluto. */
-.chamada-acao-at { font-weight: 900; padding: 0 28px; }
+.chamada-acao-glifo {
+  font-size: var(--seele-t-secao);
+  line-height: 1;
+  color: var(--seele-osso-apagado);
+  flex: 0 0 auto;
+}
+
+.chamada-acao-texto {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.chamada-acao-titulo {
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: 16px;
+  letter-spacing: 0.06em;
+  line-height: 1.05;
+}
+
+/* A dica do rodapé é o texto que separa os dois botões de saída um do outro, e
+   ela tem que caber em duas linhas sem empurrar a barra. */
+.chamada-acao .dica { line-height: 1.3; text-align: left; }
+
+/* Os dois botões de estado. O rótulo diz em que estado a coisa **está** — a
+   mesma regra da tira do operador na tela de operação —, e aceso ele é cartela:
+   bloco sólido com texto no negro absoluto. */
+/* No título, e não no botão: o título tem peso próprio e venceria a herança —
+   a regra ficaria escrita, correta e sem efeito nenhum. */
+.chamada-acao-at .chamada-acao-titulo { font-weight: 900; }
 
 .chamada-acao-at[data-ativo="sim"] {
   background: var(--seele-laranja-nerv);
@@ -330,19 +520,21 @@
   color: var(--seele-negro-absoluto);
 }
 
-.chamada-acao-voltar {
-  color: var(--seele-osso-apagado);
-  border-right: 0;
-  border-left: var(--seele-b) solid var(--seele-linha);
-}
+/* A dica herda a cor do botão invertido, senão ela ficaria em cinza sobre
+   laranja — o pior contraste do arquivo. */
+.chamada-acao[data-ativo="sim"] .dica { color: inherit; }
 
+/* Sair é a única coisa vermelha da tela, e `tokens.css` reserva o vermelho para
+   alerta e queda: sair do Cage é a queda voluntária. */
 .chamada-acao-ejetar {
-  font-weight: 900;
-  padding: 0 32px;
   background: var(--seele-vermelho-alerta);
   color: var(--seele-negro-absoluto);
-  border-right: 0;
 }
+
+.chamada-acao-ejetar .chamada-acao-titulo { font-weight: 900; }
+.chamada-acao-ejetar .chamada-acao-glifo,
+.chamada-acao-ejetar .dica { color: inherit; }
+.chamada-acao-ejetar:disabled { color: var(--seele-negro-absoluto); opacity: 0.5; }
 
 /* ---------- coluna 2: o monitor do Cage ---------- */
 
@@ -365,7 +557,7 @@
   font-size: var(--seele-t-micro);
   font-weight: normal;
   letter-spacing: 0.2em;
-  /* Laranja, e é do comp: dos rótulos de 9px desta tela, só este é aceso — ele
+  /* Aceso, e é do comp: dos rótulos de 9px desta tela, só este é laranja — ele
      é o nome do painel inteiro. */
   color: var(--seele-laranja-nerv);
   flex: 0 0 auto;
@@ -382,7 +574,7 @@
 .chamada-bloco {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   padding: 16px;
 }
 
@@ -395,15 +587,15 @@
   letter-spacing: 0.2em;
 }
 
-/* Quem está falando agora, em 30px. Vem de `pilots.filter(speaking)`, que o
+/* Quem está falando agora, em 26px. Vem de `pilots.filter(speaking)`, que o
    snapshot carrega inteiro — é medida, não ausência, e por isso o silêncio se
    escreve `NINGUÉM` e não com travessão. */
 .chamada-falando-nome {
   margin: 0;
   font-family: var(--seele-display);
   font-weight: 900;
-  font-size: 30px;
-  line-height: 1;
+  font-size: 26px;
+  line-height: 1.1;
   letter-spacing: 0.04em;
   color: var(--seele-laranja-nerv);
   overflow-wrap: anywhere;
@@ -411,36 +603,32 @@
 
 .chamada-falando-nome.ausente { font-size: var(--seele-t-secao); }
 
-.chamada-nota {
-  margin: 0;
-  font-size: 11px;
-  line-height: 1.6;
-  color: var(--seele-osso-apagado);
-}
+/* ---------- os eventos ---------- */
 
-/* ---------- o rodapé do monitor ---------- */
-
-.chamada-pe {
+.chamada-eventos {
+  list-style: none;
   margin: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 12px 16px;
-  border-top: var(--seele-b) solid var(--seele-linha);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  flex: 0 0 auto;
+  gap: 8px;
 }
 
-.chamada-par { display: flex; justify-content: space-between; gap: 8px; }
-.chamada-par dt { color: var(--seele-osso-apagado); }
-.chamada-par dd { margin: 0; color: var(--seele-osso); text-align: right; }
+.chamada-evento {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+}
 
-/* `ATRASO DE SINAL` é o RTT desta conexão, e ele é o único campo desta tela
-   que o comp pinta em fósforo. A faixa dele não vem do core — `SyncBand` é da
-   sincronia, não da latência —, então a cor aqui é do nome do campo e não de um
-   limiar que esta folha estaria inventando.
+.chamada-evento-hora {
+  flex: 0 0 auto;
+  color: var(--seele-osso-apagado);
+  font-variant-numeric: tabular-nums;
+}
 
-   `:not(.ausente)` porque um travessão em fósforo pareceria uma medida boa: a
-   ausência tem cor própria, e ela é a de `base.css`. */
-.chamada-par dd.chamada-atraso:not(.ausente) { color: var(--seele-fosforo); }
+.chamada-evento-texto { color: var(--seele-osso); overflow-wrap: anywhere; }
+
+/* Aviso do core é o único evento que muda de cor, e ele muda porque o core já
+   decidiu a severidade — esta folha não classifica nada. */
+.chamada-evento[data-tom="aviso"] .chamada-evento-texto { color: var(--seele-laranja-nerv); }
