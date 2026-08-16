@@ -10,14 +10,24 @@
    cobra isso lendo o arquivo inteiro, e é por isso que os hexadecimais do comp
    estão citados por **nome de token** e nunca por valor.
 
-   ---- as quatro colunas ----
+   ---- a medida é a do comp, e não a da célula ----
 
-   O comp abre com uma quinta, de 56px, com a trilha de Dogmas. Ela não existe:
-   `Session` guarda um `Plug` só. As quatro que ficam são `224px 240px 1fr
-   320px`. O comp pede 316px na última; 320 é o múltiplo de 8 mais próximo, e
-   esta folha segue a célula de 8×16 mesmo onde o comp não segue — o inventário
-   §13 mede a diferença e conclui que a regra descreve a TUI, que é o cliente
-   com quem esta janela tem que combinar.
+   As colunas são `56px 240px 1fr 316px` e o cabeçalho tem 56px, que é o que o
+   comp escreve. Nada aqui é arredondado para a célula de 8×16 dos tokens.
+
+   Houve uma versão desta folha que arredondava — 316 virava 320, 56 virava 48 —
+   com o argumento de que a célula é a régua do produto e os dois clientes
+   deviam bater em pixel. O argumento está errado por duas razões. A primeira é
+   que o inventário §13 mediu o comp inteiro e concluiu que a afirmação da
+   célula **descreve a TUI**: o comp obedece a 4px com exceções, lista `56px`
+   entre o que respeita, e usa a célula como orientação e não como restrição. A
+   segunda é que arredondar é redesenhar — 316 e 320 não são o mesmo desenho, e
+   quem decidiu 316 foi quem desenhou.
+
+   A regra, para não refazerem a conta: **o app replica o comp; a TUI segue a
+   célula do terminal; não se tenta alinhar os dois em pixel.** Os dois clientes
+   combinam no que se lê — os mesmos nomes, a mesma ordem, as mesmas barras de
+   blocos —, e não na largura de uma coluna que o terminal não tem.
 
    ---- peso 900 ----
 
@@ -28,35 +38,102 @@
 
 /* ---------- topo ----------
 
-   48px, onde o comp põe 56. Mesma aritmética das colunas, logo acima: 56 não é
-   múltiplo da célula de 16 e 48 é, e das duas alturas vizinhas que o são, 48
-   é a que não empurra a conversa para baixo. As outras três faixas da tela — a
-   barra da Linha, o compositor e a telemetria — já batem com o comp na régua,
-   porque 40 e 48 são múltiplos dos dois lados. */
+   56px e blocos divididos por borda, como o comp: cada bloco tem a altura toda
+   e uma divisória de 1px, e não é o `gap` que os separa. É o que faz o
+   cabeçalho parecer um painel de instrumentos em vez de uma barra de ícones. */
 
 .topo {
   display: flex;
-  align-items: center;
-  gap: 16px;
-  height: 48px;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--seele-linha-forte);
+  align-items: stretch;
+  height: 56px;
+  border-bottom: 1px solid var(--seele-linha);
   background: var(--seele-negro-painel);
   flex: 0 0 auto;
+}
+
+/* O quadrado de 56×56 onde o comp põe o `MG`. */
+.topo-marca {
+  width: 56px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid var(--seele-linha);
 }
 
 .marca {
   font-family: var(--seele-display);
   font-weight: 900;
-  font-size: 20px;
+  font-size: 16px;
   letter-spacing: 0.06em;
   color: var(--seele-laranja-nerv);
 }
 
+/* Um bloco qualquer do cabeçalho: altura toda, divisória à direita. */
+.topo-bloco {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 20px;
+  border-right: 1px solid var(--seele-linha);
+  flex: 0 0 auto;
+}
+
+/* O último bloco tem a divisória do outro lado — é o que fecha a fileira. */
+.topo-bloco-fim {
+  gap: 20px;
+  border-right: none;
+  border-left: 1px solid var(--seele-linha);
+}
+
+/* `TÓQUIO-3` sobre `DOGMA CENTRAL · 7743`: duas linhas, empilhadas e centradas
+   na altura do cabeçalho. */
+.topo-dogma {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 0 20px;
+  border-right: 1px solid var(--seele-linha);
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.dogma-nome {
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 20px;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  color: var(--seele-osso);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dogma-sub {
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.2em;
+  color: var(--seele-osso-apagado);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .topo-kanji { color: var(--seele-osso-apagado); font-size: 12px; }
 
-.regua { width: 16px; height: 1px; background: var(--seele-linha-forte); }
-.regua-larga { flex: 1; }
+/* A régua do comp, que lá é um par cercando `CODE : 0447 · EX_MODE : ON`. Com
+   a ficção fora, sobra uma, e ela é o vão entre os blocos e o relógio. */
+.regua-larga {
+  flex: 1;
+  align-self: center;
+  height: 1px;
+  margin: 0 20px;
+  background: var(--seele-linha-forte);
+  min-width: 16px;
+}
+
+.topo .botao-fantasma { align-self: center; margin-right: 16px; }
 
 /* A cartela de padrão do comp é Saira 900 com tracking largo: ela é a primeira
    coisa que se lê ao voltar para a janela, e era 11px de texto corrido. */
@@ -128,9 +205,50 @@
 .paineis {
   flex: 1 1 auto;
   display: grid;
-  grid-template-columns: 224px 240px 1fr 320px;
+  grid-template-columns: 56px 240px 1fr 316px;
   min-height: 0;
 }
+
+/* ---------- coluna 1: a trilha de Dogmas ----------
+   Botões de 56px de altura numa coluna de 56px de largura, com a marca de 2px
+   na borda esquerda — a mesma técnica de estado que os Cages e as Linhas usam
+   logo ao lado, e é de propósito que seja a mesma: são três listas de coisas
+   em que se está ou não se está. */
+.trilha {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+}
+
+.trilha-item {
+  height: 56px;
+  flex: 0 0 auto;
+  border: 0;
+  border-bottom: 1px solid var(--seele-linha);
+  border-left: 2px solid transparent;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--seele-osso-apagado);
+  cursor: pointer;
+}
+
+/* O Dogma em que se está. Desabilitado porque apertá-lo seria entrar onde já se
+   está — mas ele não é decoração: é o rótulo da coluna, e `aria-current` diz
+   isso a quem escuta a tela. O `opacity` de `.botao-estado:disabled` não vale
+   aqui; um item apagado seria o contrário do que ele significa. */
+.trilha-atual {
+  border-left-color: var(--seele-laranja-nerv);
+  color: var(--seele-laranja-nerv);
+  cursor: default;
+}
+
+/* O `+` fica no apagado forte do comp: é a saída, não o lugar onde se está. */
+.trilha-mais { color: var(--seele-linha-forte); }
+.trilha-mais:hover,
+.trilha-mais:focus-visible { color: var(--seele-laranja-nerv); }
 
 .painel {
   display: flex;
@@ -168,7 +286,6 @@
   flex: 0 0 auto;
 }
 
-.painel-dogma .painel-titulo,
 .painel-canais > .painel-titulo:first-of-type {
   border-bottom: 1px solid var(--seele-linha);
   padding-bottom: 12px;
@@ -199,48 +316,6 @@
    tooltip promete uma explicação que não vem. */
 .ausente[title] { cursor: help; }
 
-/* ---------- coluna 1: a ficha do Dogma ---------- */
-
-.ficha {
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  overflow-y: auto;
-}
-
-.dogma-nome {
-  margin: 0;
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 30px;
-  line-height: 1;
-  letter-spacing: 0.04em;
-  color: var(--seele-osso);
-  overflow-wrap: anywhere;
-}
-
-.dogma-sub {
-  margin: 0;
-  font-size: var(--seele-t-rotulo);
-  letter-spacing: 0.16em;
-  color: var(--seele-osso-apagado);
-}
-
-.resumo {
-  margin: 0;
-  padding-top: 16px;
-  border-top: 1px solid var(--seele-linha);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 11px;
-}
-
-.resumo-linha { display: flex; justify-content: space-between; gap: 8px; }
-.resumo-linha dt { color: var(--seele-osso-apagado); }
-.resumo-linha dd { margin: 0; color: var(--seele-osso); text-align: right; }
-
 /* ---------- coluna 2: Cages e Linhas ---------- */
 
 .canais {
@@ -254,16 +329,23 @@
    de cor na borda em vez de um fundo inteiro, para que a lista continue legível
    com metade das linhas marcadas. */
 .canais li {
-  border-top: 1px solid var(--seele-linha);
   border-left: 2px solid transparent;
-  padding: 10px 14px;
   cursor: pointer;
 }
 
 .canais li:hover { background: var(--seele-linha); }
 .canais .aberto { border-left-color: var(--seele-laranja-nerv); }
 
-.cage { display: flex; flex-direction: column; gap: 4px; }
+/* Padding e divisória diferentes nas duas listas, como no comp: o Cage tem duas
+   linhas de conteúdo e ganha `10px 14px` mais um `border-top` que o separa do
+   anterior; a Linha tem uma e fica em `8px 14px`, sem divisória. */
+.cage {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-top: 1px solid var(--seele-linha);
+  padding: 10px 14px;
+}
 
 .canal-cabeca { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 
@@ -306,6 +388,7 @@
   justify-content: space-between;
   align-items: baseline;
   gap: 8px;
+  padding: 8px 14px;
 }
 
 .linha-rotulo {
@@ -725,8 +808,15 @@
 /* As três luzes. O quadrado é vazado porque não há leitura: o protocolo sabe
    dizer que **algo** mudou de subsistema (`NoticeReason::SubsystemChanged`) e
    não qual nem para qual estado. Três quadrados cheios em fósforo seriam três
-   afirmações de saúde que ninguém mediu. */
-.magi {
+   afirmações de saúde que ninguém mediu.
+
+   `.luzes` e não `.magi`, que seria o nome óbvio: `tela-boot.css` já tem um
+   `.magi`, que é o diagrama de polígonos daquela tela, e esta folha carrega
+   depois dela. Duas telas com o mesmo nome de classe não é ambiguidade de
+   leitura — é a última regra vencendo o empate, e o `.magi li` daqui alcançava
+   os `<li>` do diagrama de lá com especificidade maior que a do `.magi-no` que
+   deveria pintá-los. */
+.luzes {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -734,7 +824,7 @@
   align-items: stretch;
 }
 
-.magi li {
+.luzes li {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -745,7 +835,7 @@
   color: var(--seele-osso-apagado);
 }
 
-.magi-marca {
+.luz-marca {
   width: 6px;
   height: 6px;
   border: 1px solid var(--seele-osso-apagado);

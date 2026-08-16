@@ -29,6 +29,21 @@
 let desenhado = null;
 /** A Linha aberta, para saber para onde vai o que se digita. */
 let linhaAberta = null;
+/**
+ * O endereço que esta janela discou, para a porta do cabeçalho.
+ *
+ * Não vem do `Snapshot`: o protocolo não carrega para onde nos conectamos. Quem
+ * o tem é a tela de autenticação, que o recebeu da tela de entrada, e ela o
+ * entrega aqui no instante em que abre a sessão. `null` fora de sessão, e
+ * apagado ao ejetar — um endereço que sobrevive à sessão diz do próximo Dogma
+ * a porta do anterior.
+ */
+let alvoDoDogma = null;
+
+/** A tela de autenticação diz em que endereço esta sessão está começando. */
+function guardarAlvoDoDogma(endereco) {
+  alvoDoDogma = endereco || null;
+}
 /** Se a barra de espaço já está segurando o microfone. */
 let falando = false;
 /**
@@ -187,7 +202,6 @@ function desenhar(snapshot) {
   if (comecoDaSessao === null) comecoDaSessao = Date.now();
 
   desenharTopo(snapshot);
-  desenharFicha(snapshot);
   desenharCanais(snapshot);
   desenharOperador(snapshot);
   desenharLinha(snapshot);
@@ -199,6 +213,13 @@ function desenhar(snapshot) {
   desenhado = snapshot;
 }
 
+/**
+ * O cabeçalho: a marca, o Dogma, o padrão, o piloto e o relógio.
+ *
+ * O bloco do Dogma é o `TÓQUIO-3 / DOGMA CENTRAL · 7743` do comp (§3.1). Ele
+ * mora aqui e em mais lugar nenhum — a ficha `C·02 / DOGMA` que já o mostrou
+ * era um painel que o comp não desenha, e saiu junto com a trilha voltando.
+ */
 function desenharTopo(snapshot) {
   const padrao = $("padrao");
   padrao.dataset.padrao = snapshot.pattern;
@@ -209,41 +230,70 @@ function desenharTopo(snapshot) {
   }[snapshot.pattern];
 
   $("topo-piloto").textContent = snapshot.nickname;
+
+  const nome = snapshot.dogma;
+  const rotulo = $("dogma-nome");
+  const trilha = $("trilha-dogma");
+  if (nome) {
+    medido(rotulo, nome);
+    // O `title` porque o nome pode ser mais largo que o bloco e sair em
+    // reticências: o cabeçalho é o único lugar onde ele está por extenso.
+    rotulo.title = nome;
+    // A trilha leva a sigla, porque 56px não cabem um nome. O nome inteiro fica
+    // no nome acessível dela, que é o que um leitor de tela anuncia.
+    trilha.textContent = sigla(nome);
+    trilha.setAttribute("aria-label", nome);
+    trilha.title = nome;
+  } else {
+    // Um Dogma sem nome é o servidor não tendo mandado um, e não um nome vazio.
+    naoMedido(rotulo, "este Dogma não anunciou nome");
+    trilha.textContent = SEM_MEDIDA;
+    trilha.setAttribute("aria-label", "Dogma sem nome");
+    trilha.removeAttribute("title");
+  }
+
+  desenharPortaDoDogma();
 }
 
 /**
- * A ficha da sala — `C·02 / DOGMA`.
+ * `DOGMA CENTRAL · 7743` — a segunda linha do bloco do Dogma.
  *
- * Cinco campos, três medidos. `OPERADORES` e `ROTA` continuam desenhados e
- * vazios: ver o bloco no topo deste arquivo.
+ * A porta sai do endereço que esta janela discou, e não do `Snapshot`: o
+ * protocolo não carrega para onde nos conectamos, e o inventário §3.5
+ * classifica o campo como **S** justamente por isso — "a casca já tem o alvo".
+ *
+ * Quando o alvo não nomeia porta, a linha fica só `DOGMA CENTRAL`. A porta
+ * efetiva nesse caso é a padrão do produto (ADR 0005), e escrevê-la aqui seria
+ * pôr uma constante de protocolo dentro do JavaScript, que é exatamente o que
+ * `specs/06-clientes-gui.md` proíbe. O motivo vai no `title`.
  */
-function desenharFicha(snapshot) {
-  $("dogma-nome").textContent = snapshot.dogma || SEM_MEDIDA;
-
-  // O `Snapshot` só conhece quem está sentado em Cage. Não há população do
-  // Dogma em lugar nenhum do protocolo, e somar os assentos ocupados daria uma
-  // contagem menor com cara de contagem certa.
-  naoMedido(
-    $("resumo-operadores"),
-    "o protocolo não carrega a população do Dogma, só quem está sentado em Cage",
-  );
-
-  // Estes dois o snapshot tem inteiros: `cages` e `lines` chegam completos.
-  medido($("resumo-cages"), String(snapshot.cages.length).padStart(2, "0"));
-  medido($("resumo-linhas"), String(snapshot.lines.length).padStart(2, "0"));
-
-  const codec = $("resumo-codec");
-  if (!snapshot.audio_available) {
-    // Ausência conhecida, e não medida por falta: esta sessão não tem áudio, e
-    // dizer "SEM ÁUDIO" é um fato, não um buraco.
-    medido(codec, "SEM ÁUDIO");
+function desenharPortaDoDogma() {
+  const sub = $("dogma-sub");
+  const porta = /:(\d+)$/.exec(alvoDoDogma ?? "");
+  if (porta) {
+    sub.textContent = `DOGMA CENTRAL · ${porta[1]}`;
+    sub.removeAttribute("title");
   } else {
-    medido(codec, `OPUS ${Math.round(snapshot.telemetry.bitrate_bps / 1000)}k`);
+    sub.textContent = "DOGMA CENTRAL";
+    sub.title = "o endereço não nomeou porta; esta sessão está na porta padrão";
   }
+}
 
-  // O comp mostra `BALTHASAR·01` em sete lugares. O conceito de rota não existe
-  // no core — nem por Dogma, nem por piloto.
-  naoMedido($("resumo-rota"), "o protocolo não tem o conceito de rota");
+/**
+ * A sigla de um Dogma, para a coluna de 56px.
+ *
+ * `TÓQUIO-3` vira `T3`, como no comp. A primeira letra de cada corrida de
+ * letras ou algarismos, até três — e é abreviação de desenho, nunca um dado: o
+ * nome inteiro está no cabeçalho e no nome acessível do botão. Uma sigla que
+ * fosse a única forma do nome na tela seria informação perdida.
+ */
+function sigla(nome) {
+  const partes = nome.toUpperCase().match(/[\p{L}\p{N}]+/gu);
+  if (!partes) return "—";
+  return partes
+    .map((parte) => [...parte][0])
+    .join("")
+    .slice(0, 3);
 }
 
 /**
@@ -739,9 +789,11 @@ async function ejetar() {
   document.body.classList.remove("na-bateria");
   desenhado = null;
   linhaAberta = null;
-  // O mesmo argumento do veredito, para o relógio: um uptime que sobrevive à
-  // sessão conta o tempo passado noutro Dogma.
+  // O mesmo argumento do veredito, para o relógio e para o endereço: um uptime
+  // que sobrevive à sessão conta o tempo passado noutro Dogma, e um endereço
+  // que sobrevive põe no cabeçalho do próximo a porta do anterior.
   comecoDaSessao = null;
+  alvoDoDogma = null;
   await encerrarBusca();
   // O convite não sobrevive à sessão que ele abriu: quem sai, digita outro
   // endereço e aperta INSERT mandaria o token do Dogma anterior ao novo.

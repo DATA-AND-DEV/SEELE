@@ -291,20 +291,33 @@
 <!-- Operação. -->
 <section id="tela-sessao" class="tela" hidden>
   <!--
-    O cabeçalho do comp tem sete blocos. Três não entram, e cada ausência tem
-    motivo: o `MG` é a marca do outro produto, o `CODE : 0447 · EX_MODE : ON` é
-    ficção de cenário que o inventário §16 marca como "não bindam a nada e não
-    deveriam", e o nome do Dogma mudou de lugar — ele agora encabeça a ficha
-    `C·02 / DOGMA`, e repeti-lo aqui seria o mesmo dado duas vezes na mesma tela.
+    O cabeçalho do comp tem sete blocos, e cinco entram. Os dois que ficam de
+    fora: o `MG`, que é a marca do outro produto — no lugar dele, no mesmo
+    quadrado de 56px, vai a nossa —, e o `CODE : 0447 · EX_MODE : ON`, que o
+    inventário §16 marca como ficção de cenário, "não bindam a nada e não
+    deveriam". O par de réguas que o cercava vira uma régua só, que é o que
+    sobra quando o texto entre elas sai.
   -->
   <header class="topo">
-    <span class="marca">SEELE</span>
-    <span class="regua"></span>
-    <span id="padrao" class="padrao">PADRÃO: AZUL</span>
-    <span id="topo-piloto" class="topo-piloto"></span>
-    <span class="regua regua-larga"></span>
-    <span class="kanji topo-kanji" lang="ja">同期率</span>
-    <time id="relogio" class="relogio">--:--:--</time>
+    <span class="topo-marca marca">SEELE</span>
+    <!--
+      O bloco que o comp escreve `TÓQUIO-3 / DOGMA CENTRAL · 7743`. Ele voltou
+      para cá quando a ficha `C·02 / DOGMA` saiu: aquele painel não existe no
+      comp, e o nome do Dogma é a primeira coisa que o desenho diz.
+    -->
+    <span class="topo-dogma">
+      <span id="dogma-nome" class="dogma-nome">—</span>
+      <span id="dogma-sub" class="dogma-sub">DOGMA CENTRAL</span>
+    </span>
+    <span class="topo-bloco">
+      <span id="padrao" class="padrao">PADRÃO: AZUL</span>
+      <span id="topo-piloto" class="topo-piloto"></span>
+    </span>
+    <span class="regua-larga" aria-hidden="true"></span>
+    <span class="topo-bloco topo-bloco-fim">
+      <span class="kanji topo-kanji" lang="ja">同期率</span>
+      <time id="relogio" class="relogio">--:--:--</time>
+    </span>
     <!--
       A mesma tela da entrada, alcançada de dentro da sessão. Trocar de microfone
       no meio de uma conversa é o caso que importa — é falando que se descobre
@@ -319,12 +332,6 @@
             title="a grade do Cage, um cartão por piloto">CHAMADA</button>
     <button id="botao-dogma-sessao" class="botao-fantasma" type="button"
             title="configuração local desta máquina">DOGMA</button>
-    <!--
-      A saída. Sem isto o app tinha três telas soltas e nenhum caminho entre
-      elas: quem entrava num Dogma só saía fechando o programa.
-    -->
-    <button id="botao-trocar" class="botao-fantasma" type="button"
-            title="ejetar e escolher outro Dogma">EJETAR</button>
   </header>
 
   <!--
@@ -535,52 +542,43 @@
   </div>
 
   <!--
-    Quatro colunas, na ordem do comp: a ficha do Dogma, os canais, a Linha
-    aberta, e a Taxa de Sincronização. O comp abre com uma quinta, de 56px, com
-    a trilha `T3 / NV / GH / +` — vários Dogmas ao mesmo tempo. Ela não existe
-    aqui e não é questão de desenho: `Session` guarda **um** `Plug` e `connect`
-    devolve `AlreadyConnected` se já houver um (inventário §16, "mudança de
-    arquitetura"). Uma trilha com um botão só seria a promessa de um produto
-    diferente.
+    As quatro colunas do comp, nas larguras dele: a trilha de Dogmas, os canais,
+    a Linha aberta, e a Taxa de Sincronização.
   -->
   <main class="paineis">
     <!--
-      A ficha da sala. `C·02 / DOGMA` é a coordenada do comp, escrita como ele a
-      escreve — é o único painel cujo código vem colado no nome, e a
-      inconsistência é do comp, não daqui.
+      A trilha de Dogmas. O comp desenha quatro botões — `T3 / NV / GH / +` —
+      porque lá se está em vários Dogmas ao mesmo tempo. Aqui ela tem um, e é o
+      que o produto tem: `Session` guarda **um** `Plug`, e `connect` devolve
+      `AlreadyConnected` se já houver um (inventário §16, "mudança de
+      arquitetura"). A trilha fica com o que existe em vez de ser trocada por um
+      painel que o comp não tem — quando o segundo Plug existir, ela já é o
+      lugar dele.
+
+      A sigla é do comp: `TÓQUIO-3` vira `T3` porque a coluna tem 56px e não
+      cabe um nome. Ela é abreviação de desenho e não um dado — o nome inteiro
+      está escrito no cabeçalho, a dois centímetros daqui, e também no
+      `aria-label` deste botão, que é o que um leitor de tela anuncia.
     -->
-    <section class="painel painel-dogma" aria-labelledby="titulo-dogma">
-      <h2 id="titulo-dogma" class="painel-titulo">C·02 / DOGMA</h2>
-      <div class="ficha">
-        <p id="dogma-nome" class="dogma-nome">—</p>
-        <p class="dogma-sub">DOGMA CENTRAL</p>
-        <!--
-          Cinco campos, e só três são medidos. Os outros dois ficam desenhados
-          com o valor em branco de propósito: apagar a linha esconderia que o
-          produto ainda não conta operadores nem sabe por onde o áudio saiu, e
-          preenchê-la com um número plausível seria pior. `crates/seele-core/src/state.rs`
-          tem um teste com nome inteiro sobre isso — uma taxa não medida lê
-          zero, e nunca cem.
-        -->
-        <dl class="resumo">
-          <div class="resumo-linha">
-            <dt>OPERADORES</dt><dd id="resumo-operadores">—</dd>
-          </div>
-          <div class="resumo-linha">
-            <dt>CAGES</dt><dd id="resumo-cages">—</dd>
-          </div>
-          <div class="resumo-linha">
-            <dt>LINHAS</dt><dd id="resumo-linhas">—</dd>
-          </div>
-          <div class="resumo-linha">
-            <dt>CODEC</dt><dd id="resumo-codec">—</dd>
-          </div>
-          <div class="resumo-linha">
-            <dt>ROTA</dt><dd id="resumo-rota">—</dd>
-          </div>
-        </dl>
-      </div>
-    </section>
+    <nav class="trilha" aria-label="Dogmas">
+      <button id="trilha-dogma" class="trilha-item trilha-atual" type="button"
+              aria-current="true" disabled>—</button>
+      <!--
+        O `+` do comp: entrar noutro Dogma. Com um `Plug` só, entrar noutro é
+        sair deste — então este botão **é** o antigo `EJETAR` do cabeçalho, e
+        não um segundo caminho para a mesma coisa. Dois controles com a mesma
+        ação numa tela é a definição de um a mais, e o que decidiu qual fica foi
+        o comp: a coluna de Dogmas é onde ele põe a pergunta "em qual estou, e
+        como vou para outro".
+
+        `+` é ASCII e a face de dados o tem, então não passa por `glifo()`. Mas
+        um `+` sozinho não é o nome de nada que se possa apertar, e por isso o
+        `aria-label` diz a frase inteira.
+      -->
+      <button id="botao-trocar" class="trilha-item trilha-mais" type="button"
+              title="sair deste Dogma e entrar noutro"
+              aria-label="sair deste Dogma e entrar noutro">+</button>
+    </nav>
 
     <section class="painel painel-canais" aria-label="Cages e Linhas">
       <h2 class="painel-titulo">
@@ -726,10 +724,10 @@
       pode dizer "algo mudou". Três luzes acesas em fósforo seriam três
       afirmações de saúde que ninguém mediu.
     -->
-    <ol class="magi" aria-label="subsistemas — estado não medido">
-      <li><span class="magi-marca" aria-hidden="true"></span>MELCHIOR</li>
-      <li><span class="magi-marca" aria-hidden="true"></span>BALTHASAR</li>
-      <li><span class="magi-marca" aria-hidden="true"></span>CASPER</li>
+    <ol class="luzes" aria-label="subsistemas — estado não medido">
+      <li><span class="luz-marca" aria-hidden="true"></span>MELCHIOR</li>
+      <li><span class="luz-marca" aria-hidden="true"></span>BALTHASAR</li>
+      <li><span class="luz-marca" aria-hidden="true"></span>CASPER</li>
     </ol>
   </footer>
 </section>
