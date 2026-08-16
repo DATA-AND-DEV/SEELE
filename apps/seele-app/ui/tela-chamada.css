@@ -145,6 +145,16 @@
 
 .chamada-barra .rotulo { font-size: var(--seele-t-rotulo); letter-spacing: 0.18em; }
 
+/* As duas dicas da barra ficam numa linha só. A barra tem altura fixa para
+   alinhar com o cabeçalho da tela de operação, e uma dica que quebrasse em duas
+   linhas vazaria dela — o corte é o último recurso e, no comprimento em que as
+   duas estão escritas, não chega a acontecer. */
+.chamada-barra .dica {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ---------- a grade de cartões ----------
 
    O comp corta o roster em `slice(0,4)` e é sempre 2×2. Aqui a grade se acomoda
