@@ -57,7 +57,45 @@ O projeto fixa a versão do toolchain e os componentes de que precisa em
 `rust-toolchain.toml` — o rustup instala tudo sozinho na primeira compilação,
 inclusive o `llvm-tools`, que o codec Opus usa para renomear símbolos.
 
-### 1.3 Git
+**O `llvm-tools` não dispensa a seção 1.3.** São coisas diferentes com nomes
+parecidos, e a confusão custa uma compilação inteira.
+
+### 1.3 LLVM
+
+```powershell
+winget install LLVM.LLVM
+```
+
+Ou <https://releases.llvm.org/>. Depois **feche e reabra o terminal**.
+
+O codec Opus gera suas ligações com `bindgen`, que carrega `libclang.dll` em
+tempo de execução. O `llvm-tools` do rustup traz as ferramentas tipo binutils
+que renomeiam símbolos — não traz essa biblioteca.
+
+Sem ela a compilação falha assim, e falha **tarde**: depois de baixar 52 MB de
+Opus e compilá-lo inteiro com o MSBuild.
+
+```
+Unable to find libclang: "couldn't find any valid shared libraries matching:
+['clang.dll', 'libclang.dll'], set the `LIBCLANG_PATH` environment variable…"
+```
+
+Se instalou fora do padrão, aponte antes de compilar:
+
+```powershell
+$env:LIBCLANG_PATH = 'D:\caminho\para\LLVM\bin'
+```
+
+`empacotar\windows.ps1` procura sozinho nos lugares usuais — inclusive dentro do
+Visual Studio, se você marcou *C++ Clang tools for Windows* — e reprova na
+largada se não achar, em vez de deixar você descobrir depois do Opus.
+
+> Isto entrou nesta lista tarde. Os runners do GitHub já vêm com LLVM, então o
+> CI nunca precisou dizer que ele era necessário, e a lista foi escrita a partir
+> do que o CI instalava. A mesma ausência derrubou o contêiner de empacotamento
+> do Linux, pelo mesmo motivo.
+
+### 1.4 Git
 
 <https://git-scm.com/download/win>, padrões.
 

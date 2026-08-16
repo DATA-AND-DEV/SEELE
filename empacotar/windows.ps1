@@ -79,6 +79,59 @@ else {
     Write-Warning "não achei o vswhere; seguindo sem conferir o linker do MSVC."
 }
 
+# ------------------------------------------------- e o libclang, existe?
+#
+# A crate do Opus gera suas ligações com `bindgen`, que carrega `libclang.dll`
+# em tempo de execução. O `llvm-tools` que o `rustup` instala **não** serve: ele
+# traz as ferramentas tipo binutils que renomeiam símbolos, e não a biblioteca
+# que o bindgen usa para ler cabeçalhos C.
+#
+# Isto não está na lista de pré-requisitos histórica porque o runner do GitHub
+# já vem com LLVM — a mesma razão pela qual o contêiner do Linux também quebrou
+# aqui. Quem tem uma máquina limpa não tem.
+#
+# A falha, quando vem, vem tarde: depois de baixar 52 MB de Opus e compilá-lo
+# inteiro com o MSBuild, que é onde mais dói.
+if (-not $env:LIBCLANG_PATH -or -not (Test-Path (Join-Path $env:LIBCLANG_PATH "libclang.dll"))) {
+    $candidatos = @(
+        "$env:ProgramFiles\LLVM\bin",
+        "${env:ProgramFiles(x86)}\LLVM\bin"
+    ) + @(
+        # O componente «C++ Clang tools for Windows» do Build Tools põe o LLVM
+        # dentro da instalação do Visual Studio, e não em Program Files.
+        if ($comCpp) { Join-Path $comCpp "VC\Tools\Llvm\x64\bin" }
+    )
+
+    $achado = $candidatos | Where-Object { $_ -and (Test-Path (Join-Path $_ "libclang.dll")) } | Select-Object -First 1
+
+    if ($achado) {
+        # Definido só para este processo: mexer no ambiente da máquina é decisão
+        # de quem usa a máquina, não de um script de empacotamento.
+        $env:LIBCLANG_PATH = $achado
+        Write-Host "→ libclang: $achado" -ForegroundColor DarkGray
+    }
+    else {
+        Write-Error @"
+o libclang não está instalado, e o codec Opus não compila sem ele.
+
+  winget install LLVM.LLVM
+
+ou baixe em https://releases.llvm.org/ . Depois abra um terminal novo e rode
+este script de novo — ele acha o LLVM sozinho em C:\Program Files\LLVM.
+
+Se instalou noutro lugar, aponte antes de rodar:
+  `$env:LIBCLANG_PATH = 'D:\caminho\para\LLVM\bin'
+
+Cuidado com a confusão comum: o ``llvm-tools`` que o rustup instala **não**
+serve. Ele traz as ferramentas que renomeiam símbolos, não a biblioteca que o
+bindgen carrega para ler cabeçalhos C. `docs/windows.md` seção 1.4.
+"@
+    }
+}
+else {
+    Write-Host "→ libclang: $env:LIBCLANG_PATH" -ForegroundColor DarkGray
+}
+
 $Config = "apps\seele-app\tauri.conf.json"
 $Original = Get-Content $Config -Raw
 
