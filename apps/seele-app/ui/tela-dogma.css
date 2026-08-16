@@ -213,6 +213,14 @@
   color: var(--seele-osso-apagado);
 }
 
+/* O painel de uma seção. Quatro deles, um só visível — `hidden` em `base.css`
+   é `display: none !important`, então esconder não deixa a grade com buracos. */
+.dogma-painel-secao {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
 /* ---------- um bloco ---------- */
 
 .dogma-bloco {
