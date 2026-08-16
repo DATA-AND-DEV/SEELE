@@ -114,6 +114,12 @@ pub struct SessionInfo {
     /// Carried through rather than dropped: an interface that knows the Cages
     /// but not the Lines can only ever open whichever Line it was started with.
     pub lines: Vec<seele_proto::control::LineInfo>,
+    /// What this pilot may do, as MELCHIOR resolved it.
+    ///
+    /// So a shell can decide whether to offer a control at all. **Convenience,
+    /// never enforcement** — `specs/08-seguranca.md` puts the security in the
+    /// server refusing, and it refuses again whatever this list says.
+    pub permissions: Vec<seele_proto::control::Permission>,
 }
 
 /// The media half of a connection, usable independently of the control stream.
@@ -436,6 +442,81 @@ impl Client {
         frame::write(&mut self.send, &ClientMessage::SetPresence(presence)).await
     }
 
+    /// Asks the Dogma to make a Cage.
+    ///
+    /// Asks, and nothing more. Nothing here checks whether this pilot may:
+    /// `specs/08-seguranca.md` puts the decision on the server, and a core that
+    /// refused on its own would be a second authority to keep in step with the
+    /// first. What comes back is a `CageCreated` on the event stream if it
+    /// happened, or an `Alert` carrying `PermissionDenied` if it did not.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn create_cage(
+        &mut self,
+        name: &str,
+        limit: u16,
+        line: Option<LineId>,
+    ) -> Result<()> {
+        frame::write(
+            &mut self.send,
+            &ClientMessage::CreateCage {
+                name: name.to_owned(),
+                limit,
+                line,
+            },
+        )
+        .await
+    }
+
+    /// Asks the Dogma to make a Line.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn create_line(&mut self, name: &str) -> Result<()> {
+        frame::write(
+            &mut self.send,
+            &ClientMessage::CreateLine {
+                name: name.to_owned(),
+            },
+        )
+        .await
+    }
+
+    /// Asks the Dogma to rename a Cage.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn rename_cage(&mut self, cage: CageId, name: &str) -> Result<()> {
+        frame::write(
+            &mut self.send,
+            &ClientMessage::RenameCage {
+                cage,
+                name: name.to_owned(),
+            },
+        )
+        .await
+    }
+
+    /// Asks the Dogma to rename a Line.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn rename_line(&mut self, line: LineId, name: &str) -> Result<()> {
+        frame::write(
+            &mut self.send,
+            &ClientMessage::RenameLine {
+                line,
+                name: name.to_owned(),
+            },
+        )
+        .await
+    }
+
     /// Asks for a page of history, oldest of the page first on the wire.
     ///
     /// # Errors
@@ -648,6 +729,7 @@ async fn handshake(
             dogma,
             cages,
             lines,
+            permissions,
             ..
         } => Ok(SessionInfo {
             id,
@@ -656,6 +738,7 @@ async fn handshake(
             dogma,
             cages,
             lines,
+            permissions,
         }),
         ServerMessage::Disconnecting { reason } => Err(ConnectError::Refused { reason }),
         other => {

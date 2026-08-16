@@ -173,10 +173,18 @@ fn every_command_the_frontend_calls_is_registered() {
 /// below make sure it is: the moment the page calls one of these, this test
 /// fails and says to take it off the list. Nothing rots quietly.
 ///
-/// `saidas` / `saida_escolhida` / `escolher_saida` are the SAÍDA DE SOM half of
-/// the Terminal Dogma. The core, the settings file and the bridge are all done
-/// and tested; only the panel is missing.
-const AGUARDANDO_TELA: &[&str] = &[];
+/// `criar_cage` / `criar_linha` / `renomear_cage` / `renomear_linha` are the
+/// rooms a host makes after the first one. The protocol carries them, MELCHIOR
+/// checks `ManageCages` on each, CASPER writes them and the Dogma announces
+/// them to everybody already connected — proven end to end in
+/// `seele-conformance`. What is missing is the panel that offers them, and
+/// `Snapshot::may_manage_cages` is the field it should ask before drawing it.
+const AGUARDANDO_TELA: &[&str] = &[
+    "criar_cage",
+    "criar_linha",
+    "renomear_cage",
+    "renomear_linha",
+];
 
 #[test]
 fn no_command_is_registered_and_never_called() {

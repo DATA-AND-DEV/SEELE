@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use seele_proto::control::{PilotProfile, PilotState};
+use seele_proto::control::{CageInfo, LineInfo, PilotProfile, PilotState};
 use seele_proto::ids::{CageId, LineId, MessageId, PilotId, Ssrc};
 use tokio::sync::{broadcast, mpsc, Mutex};
 
@@ -75,6 +75,35 @@ pub enum Event {
     },
     /// A pilot's state changed, including their Sync Ratio.
     PilotState(PilotState),
+    /// A Cage was created.
+    ///
+    /// Announced to **everybody**, the pilot who asked included, and this is the
+    /// difference between a feature and a demonstration: a room that only shows
+    /// up on the next handshake is a room whose maker has to tell their friends
+    /// to reconnect before they can use it.
+    CageCreated {
+        /// The Cage, as it now exists.
+        cage: CageInfo,
+    },
+    /// A Line was created.
+    LineCreated {
+        /// The Line, as it now exists.
+        line: LineInfo,
+    },
+    /// A Cage was renamed.
+    CageRenamed {
+        /// Which Cage.
+        cage: CageId,
+        /// Its new name.
+        name: String,
+    },
+    /// A Line was renamed.
+    LineRenamed {
+        /// Which Line.
+        line: LineId,
+        /// Its new name.
+        name: String,
+    },
 }
 
 /// A Cage seat held open for a pilot who dropped.

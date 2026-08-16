@@ -409,6 +409,46 @@ fn send_message(session: State<'_, Session>, line: u32, body: String) -> Result<
     session.plug()?.send_message(line, body)
 }
 
+/// Pede ao Dogma que faça um Cage.
+///
+/// Devolve assim que o pedido entra na fila, e **não** quando a sala existe.
+/// Quem responde isso é o Dogma, e a resposta chega pela mesma porta que todo o
+/// resto: `ChannelsChanged` se ele fez, `NoticeRaised` com `PermissionDenied`
+/// se recusou. A tela redesenha a lista pelo evento, como já faz quando alguém
+/// entra num Cage — não há caminho novo a aprender.
+///
+/// A tela pode consultar `Snapshot::may_manage_cages` para decidir se mostra o
+/// botão. Isso é conveniência: mandar o pedido sem ter a permissão não cria
+/// nada, e a `specs/08-seguranca.md` põe a segurança nessa recusa e não no
+/// botão escondido.
+#[tauri::command]
+fn criar_cage(
+    session: State<'_, Session>,
+    name: String,
+    limit: u16,
+    line: Option<u32>,
+) -> Result<(), PlugError> {
+    session.plug()?.create_cage(name, limit, line)
+}
+
+/// Pede ao Dogma que faça uma Linha.
+#[tauri::command]
+fn criar_linha(session: State<'_, Session>, name: String) -> Result<(), PlugError> {
+    session.plug()?.create_line(name)
+}
+
+/// Pede ao Dogma que renomeie um Cage.
+#[tauri::command]
+fn renomear_cage(session: State<'_, Session>, cage: u32, name: String) -> Result<(), PlugError> {
+    session.plug()?.rename_cage(cage, name)
+}
+
+/// Pede ao Dogma que renomeie uma Linha.
+#[tauri::command]
+fn renomear_linha(session: State<'_, Session>, line: u32, name: String) -> Result<(), PlugError> {
+    session.plug()?.rename_line(line, name)
+}
+
 #[tauri::command]
 fn set_at_field(session: State<'_, Session>, on: bool) -> Result<(), PlugError> {
     session.plug()?.set_at_field(on)
@@ -840,6 +880,10 @@ fn main() {
             eject_plug,
             open_line,
             send_message,
+            criar_cage,
+            criar_linha,
+            renomear_cage,
+            renomear_linha,
             set_at_field,
             set_total_isolation,
             set_talking,

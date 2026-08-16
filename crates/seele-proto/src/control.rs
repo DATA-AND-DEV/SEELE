@@ -58,6 +58,21 @@ pub const MAX_NICKNAME_LEN: usize = 32;
 /// Longest client name, in bytes.
 pub const MAX_CLIENT_NAME_LEN: usize = 64;
 
+/// Longest Cage or Line name, in bytes.
+///
+/// A name is a label in a list, not a description. Long enough for
+/// `CAGE-01 CENTRAL` several times over, short enough that no shell has to
+/// decide where to cut one off.
+pub const MAX_CHANNEL_NAME_LEN: usize = 48;
+
+/// Largest number of pilots a Cage may be created with.
+///
+/// `specs/04-servidor-seele.md` sizes the target at "50 sessões e 5 Cages
+/// ativos em 1 vCPU / 512 MB", so this is five times the whole Dogma: generous
+/// rather than tight, and there to stop a `u16` of 65 535 being written into a
+/// room nobody could fill.
+pub const MAX_CAGE_LIMIT: u16 = 250;
+
 /// Longest operator-supplied alert text, in bytes.
 pub const MAX_ALERT_TEXT_LEN: usize = 512;
 
@@ -436,6 +451,46 @@ pub enum ClientMessage {
         /// Client timestamp, echoed back.
         timestamp: u64,
     },
+
+    // ---- rooms, made by whoever hosts ----
+    //
+    // Appended last, for the reason [`AlertReason::RateLimited`] gives: a build
+    // one protocol version older does not know these variants and refuses the
+    // frame rather than misreading it as something it does understand.
+    //
+    // All four need [`Permission::ManageCages`]. `specs/04-servidor-seele.md`
+    // enumerates one permission for channels and not two — there is no
+    // `gerenciar_linhas` — so the one it names covers both kinds, and the
+    // server checks it on every one of these.
+    /// Creates a Cage.
+    CreateCage {
+        /// What to call it.
+        name: String,
+        /// How many pilots may be inside at once.
+        limit: u16,
+        /// A Line to bind to it, if any. `specs/04-servidor-seele.md` makes the
+        /// association optional.
+        line: Option<LineId>,
+    },
+    /// Creates a Line.
+    CreateLine {
+        /// What to call it.
+        name: String,
+    },
+    /// Renames a Cage.
+    RenameCage {
+        /// Which Cage.
+        cage: CageId,
+        /// The new name.
+        name: String,
+    },
+    /// Renames a Line.
+    RenameLine {
+        /// Which Line.
+        line: LineId,
+        /// The new name.
+        name: String,
+    },
 }
 
 /// Server to client.
@@ -469,6 +524,20 @@ pub enum ServerMessage {
         lines: Vec<LineInfo>,
         /// Roles defined on this Dogma.
         roles: Vec<Role>,
+        /// What **this** pilot may do, as MELCHIOR resolved it.
+        ///
+        /// `roles` above is the Dogma's catalogue of roles; nothing on the wire
+        /// ever told a client which of them it holds, so no shell could tell
+        /// whether to offer a control at all. Resolved server-side rather than
+        /// sent as role identifiers for the shell to intersect, because
+        /// "negadas vencem concedidas" (`specs/04-servidor-seele.md`) is a rule
+        /// that would then be re-implemented in every shell, and wrongly in at
+        /// least one of them.
+        ///
+        /// This is **convenience, never enforcement**. `specs/08-seguranca.md`:
+        /// "A interface esconder é conveniência; o servidor negar é a
+        /// segurança." Every action is checked again when it is asked for.
+        permissions: Vec<Permission>,
     },
     /// A pilot entered a Cage.
     PilotJoined {
@@ -568,6 +637,39 @@ pub enum ServerMessage {
         /// Enumerated reason. Never generic — `specs/02-protocolo.md`.
         reason: DisconnectReason,
     },
+
+    // ---- rooms, made by whoever hosts ----
+    //
+    // Appended last, for the same reason as their client-side counterparts.
+    //
+    // Sent to **everybody connected**, the pilot who asked included. Without
+    // that, a Cage made at nine o'clock is a Cage nobody sees until they
+    // reconnect — and "reconnect to see the room I just told you about" is the
+    // kind of instruction that makes a product feel broken rather than new.
+    /// A Cage was created.
+    CageCreated {
+        /// The Cage, as it now exists.
+        cage: CageInfo,
+    },
+    /// A Line was created.
+    LineCreated {
+        /// The Line, as it now exists.
+        line: LineInfo,
+    },
+    /// A Cage was renamed.
+    CageRenamed {
+        /// Which Cage.
+        cage: CageId,
+        /// Its new name.
+        name: String,
+    },
+    /// A Line was renamed.
+    LineRenamed {
+        /// Which Line.
+        line: LineId,
+        /// Its new name.
+        name: String,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -639,6 +741,32 @@ fn check(field: &'static str, len: usize, limit: usize) -> Result<(), ControlErr
     Ok(())
 }
 
+/// Bounds a Cage or Line name at both ends.
+///
+/// The upper bound is [`MAX_CHANNEL_NAME_LEN`], like every other text field.
+/// The lower one is the half that is easy to leave out: a name that is empty,
+/// or only spaces, produces a row in the channel list with nothing in it — a
+/// thing the shell draws, the person clicks, and nobody can refer to out loud.
+/// Refused here rather than trimmed here, because trimming on the way *in*
+/// would mean the sender and the receiver disagree about what was sent.
+fn check_name(field: &'static str, name: &str) -> Result<(), ControlError> {
+    if name.trim().is_empty() {
+        return Err(ControlError::FieldOutOfRange { field });
+    }
+    check(field, name.len(), MAX_CHANNEL_NAME_LEN)
+}
+
+/// Bounds how many pilots a Cage may hold.
+///
+/// Zero is refused: a Cage nobody may enter is not a Cage, and a limit of zero
+/// is far more often a field left at its default than a deliberate choice.
+fn check_cage_limit(limit: u16) -> Result<(), ControlError> {
+    if limit == 0 || limit > MAX_CAGE_LIMIT {
+        return Err(ControlError::FieldOutOfRange { field: "limit" });
+    }
+    Ok(())
+}
+
 /// Rejects `NaN`, infinities and values outside a sane range.
 fn check_range(field: &'static str, value: f32, min: f32, max: f32) -> Result<(), ControlError> {
     if !value.is_finite() || value < min || value > max {
@@ -703,6 +831,13 @@ impl Validate for ClientMessage {
                 MAX_NICKNAME_LEN,
             ),
             Self::SendMessage { body, .. } => check("body", body.len(), MAX_BODY_LEN),
+            Self::CreateCage { name, limit, .. } => {
+                check_name("name", name)?;
+                check_cage_limit(*limit)
+            }
+            Self::CreateLine { name }
+            | Self::RenameCage { name, .. }
+            | Self::RenameLine { name, .. } => check_name("name", name),
             Self::EjectPlug
             | Self::JoinLine { .. }
             | Self::FetchHistory { .. }
@@ -718,7 +853,30 @@ impl Validate for ServerMessage {
     fn validate(&self) -> Result<(), ControlError> {
         match self {
             Self::Challenge { nonce } => check("nonce", nonce.len(), MAX_PROOF_LEN),
-            Self::Session { dogma, .. } => check("dogma", dogma.len(), MAX_CLIENT_NAME_LEN),
+            Self::Session {
+                dogma,
+                cages,
+                lines,
+                ..
+            } => {
+                check("dogma", dogma.len(), MAX_CLIENT_NAME_LEN)?;
+                // The same bound the creating verb enforces, applied to the
+                // tree on the way out. A Cage whose name came from an older
+                // build, or straight from somebody's `sqlite3` prompt, must not
+                // travel further than one a client could have asked for.
+                for cage in cages {
+                    check_name("name", &cage.name)?;
+                }
+                for line in lines {
+                    check_name("name", &line.name)?;
+                }
+                Ok(())
+            }
+            Self::CageCreated { cage } => check_name("name", &cage.name),
+            Self::LineCreated { line } => check_name("name", &line.name),
+            Self::CageRenamed { name, .. } | Self::LineRenamed { name, .. } => {
+                check_name("name", name)
+            }
             Self::PilotJoined { profile, .. } => {
                 check("nickname", profile.nickname.len(), MAX_NICKNAME_LEN)
             }
@@ -777,6 +935,7 @@ mod tests {
                 name: "Pilot".into(),
                 permissions: vec![Permission::InsertPlug, Permission::Speak],
             }],
+            permissions: vec![Permission::InsertPlug, Permission::Speak],
         }
     }
 
@@ -934,6 +1093,211 @@ mod tests {
         // handshake that needed several kilobytes would be a design smell.
         assert!(encode(&hello()).unwrap().len() < 64);
         assert!(encode(&session()).unwrap().len() < 256);
+    }
+
+    #[test]
+    fn the_session_says_what_this_pilot_may_do() {
+        // `roles` is the Dogma's catalogue; nothing ever said which of them this
+        // connection holds. Without this field a shell has no honest way to
+        // decide whether to offer a control at all, and the only alternative is
+        // to offer everything and let the server refuse — which teaches people
+        // that half the buttons do nothing.
+        let frame = encode(&session()).unwrap();
+        let ServerMessage::Session { permissions, .. } = decode::<ServerMessage>(&frame).unwrap()
+        else {
+            panic!("not a session");
+        };
+        assert_eq!(permissions, vec![Permission::InsertPlug, Permission::Speak]);
+    }
+
+    #[test]
+    fn the_room_making_verbs_round_trip() {
+        for message in [
+            ClientMessage::CreateCage {
+                name: "CAGE-02 SALA DOS FUNDOS".into(),
+                limit: 8,
+                line: Some(LineId(1)),
+            },
+            ClientMessage::CreateLine {
+                name: "planejamento".into(),
+            },
+            ClientMessage::RenameCage {
+                cage: CageId(2),
+                name: "CAGE-02 CENTRAL".into(),
+            },
+            ClientMessage::RenameLine {
+                line: LineId(3),
+                name: "avisos".into(),
+            },
+        ] {
+            let frame = encode(&message).unwrap();
+            assert_eq!(decode::<ClientMessage>(&frame).unwrap(), message);
+        }
+    }
+
+    #[test]
+    fn the_room_making_announcements_round_trip() {
+        for message in [
+            ServerMessage::CageCreated {
+                cage: CageInfo {
+                    id: CageId(2),
+                    name: "CAGE-02 SALA DOS FUNDOS".into(),
+                    limit: 8,
+                    password_required: false,
+                    line: Some(LineId(1)),
+                },
+            },
+            ServerMessage::LineCreated {
+                line: LineInfo {
+                    id: LineId(3),
+                    name: "planejamento".into(),
+                },
+            },
+            ServerMessage::CageRenamed {
+                cage: CageId(2),
+                name: "CAGE-02 CENTRAL".into(),
+            },
+            ServerMessage::LineRenamed {
+                line: LineId(3),
+                name: "avisos".into(),
+            },
+        ] {
+            let frame = encode(&message).unwrap();
+            assert_eq!(decode::<ServerMessage>(&frame).unwrap(), message);
+        }
+    }
+
+    #[test]
+    fn a_room_with_no_name_is_refused_in_both_directions() {
+        // A blank name draws a row in the channel list with nothing in it: a
+        // thing the shell paints, the person clicks, and nobody can name out
+        // loud. Whitespace counts as blank — " " is not a name, it is a name
+        // somebody forgot to type.
+        for blank in ["", " ", "\t\n  "] {
+            let ask = ClientMessage::CreateCage {
+                name: blank.into(),
+                limit: 8,
+                line: None,
+            };
+            assert!(
+                matches!(
+                    encode(&ask),
+                    Err(ControlError::FieldOutOfRange { field: "name" })
+                ),
+                "accepted a Cage named {blank:?}"
+            );
+
+            // And now the way a hostile peer would build it, skipping the
+            // encoder entirely.
+            let mut frame = vec![PROTOCOL_VERSION];
+            frame = postcard::to_extend(&ask, frame).unwrap();
+            assert!(
+                matches!(
+                    decode::<ClientMessage>(&frame),
+                    Err(ControlError::FieldOutOfRange { field: "name" })
+                ),
+                "accepted a hand-rolled Cage named {blank:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_oversized_room_name_is_refused() {
+        let long = ClientMessage::CreateLine {
+            name: "n".repeat(MAX_CHANNEL_NAME_LEN + 1),
+        };
+        assert!(matches!(
+            encode(&long),
+            Err(ControlError::FieldTooLong { field: "name", .. })
+        ));
+        // Exactly at the limit is a name, not an overflow.
+        assert!(encode(&ClientMessage::CreateLine {
+            name: "n".repeat(MAX_CHANNEL_NAME_LEN),
+        })
+        .is_ok());
+    }
+
+    #[test]
+    fn a_cage_that_holds_nobody_or_everybody_is_refused() {
+        // Zero is far more often a field left at its default than a decision,
+        // and a room nobody may enter is not a room. The ceiling stops a u16 of
+        // 65 535 being written into a Dogma sized for fifty.
+        for limit in [0, MAX_CAGE_LIMIT + 1, u16::MAX] {
+            let ask = ClientMessage::CreateCage {
+                name: "CAGE-02".into(),
+                limit,
+                line: None,
+            };
+            assert!(
+                matches!(
+                    encode(&ask),
+                    Err(ControlError::FieldOutOfRange { field: "limit" })
+                ),
+                "accepted a Cage for {limit} pilots"
+            );
+
+            let mut frame = vec![PROTOCOL_VERSION];
+            frame = postcard::to_extend(&ask, frame).unwrap();
+            assert!(
+                matches!(
+                    decode::<ClientMessage>(&frame),
+                    Err(ControlError::FieldOutOfRange { field: "limit" })
+                ),
+                "accepted a hand-rolled Cage for {limit} pilots"
+            );
+        }
+
+        for limit in [1, MAX_CAGE_LIMIT] {
+            assert!(
+                encode(&ClientMessage::CreateCage {
+                    name: "CAGE-02".into(),
+                    limit,
+                    line: None,
+                })
+                .is_ok(),
+                "refused a Cage for {limit} pilots"
+            );
+        }
+    }
+
+    #[test]
+    fn a_blank_name_never_leaves_the_dogma_inside_a_session() {
+        // The tree on the way out gets the same bound the verb enforces on the
+        // way in. A row written straight into the database by hand must not
+        // reach a shell that has no sentence for it.
+        let ServerMessage::Session {
+            id,
+            pilot,
+            ssrc,
+            dogma,
+            lines,
+            roles,
+            permissions,
+            ..
+        } = session()
+        else {
+            panic!("not a session");
+        };
+        let blank = ServerMessage::Session {
+            id,
+            pilot,
+            ssrc,
+            dogma,
+            cages: vec![CageInfo {
+                id: CageId(9),
+                name: "   ".into(),
+                limit: 4,
+                password_required: false,
+                line: None,
+            }],
+            lines,
+            roles,
+            permissions,
+        };
+        assert!(matches!(
+            encode(&blank),
+            Err(ControlError::FieldOutOfRange { field: "name" })
+        ));
     }
 
     proptest! {

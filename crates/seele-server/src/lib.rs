@@ -90,6 +90,35 @@ impl Default for DogmaConfig {
 /// M2 kept these in the config struct; M3 keeps them in CASPER so a restart
 /// finds the same room rather than rebuilding it. Idempotent, because it runs
 /// on every boot.
+///
+/// # A Dogma opens with somewhere to go
+///
+/// This is what stops a fresh Dogma being a screen that does not explain
+/// itself. A room with no Cage offers nowhere to speak and no Line to write in;
+/// the person who pressed **HOSPEDAR AQUI** looks at an empty list and has no
+/// way to tell a working Dogma from a broken one. So the first boot writes a
+/// Line called `geral` and one Cage bound to it, and there is somewhere to
+/// stand from the first second.
+///
+/// # Why here, and not in the migration
+///
+/// A migration would look cheaper — one more `INSERT` in migration 1 — and it
+/// is the wrong place, for two reasons that only show up later.
+///
+/// **A migration is irreversible and append-only** ([`casper::schema`]). The
+/// name of a Cage is not: `ClientMessage::RenameCage` exists, and the whole
+/// point of hosting your own Dogma is that the rooms are yours. Seeded content
+/// baked into a schema version would be a name the operator can change and the
+/// history of the schema still claims.
+///
+/// **The Cage's name and limit come from [`DogmaConfig`]**, which a migration
+/// cannot see. Migrations run inside CASPER, before there is a config to
+/// consult, and passing one in would make "which SQL is this database at" depend
+/// on a runtime value.
+///
+/// `INSERT OR IGNORE` is what keeps it honest on the second boot: a Cage that
+/// has since been renamed keeps its new name, because the conflicting insert is
+/// skipped rather than applied.
 fn seed(casper: &mut casper::Casper, config: &DogmaConfig) -> Result<()> {
     let connection = casper.connection();
     connection.execute(
@@ -115,7 +144,7 @@ pub struct Server {
     fingerprint: String,
     registry: Arc<session::Registry>,
     dogma: Arc<dogma::Dogma>,
-    cage: tokio::sync::mpsc::Sender<cage::CageCommand>,
+    cages: Arc<cage::Cages>,
 }
 
 impl Server {
@@ -177,7 +206,11 @@ impl Server {
             }
         });
 
-        let cage = cage::spawn(config.cage);
+        // Uma tarefa por Cage, criada quando alguém entra. Antes havia
+        // exatamente uma, a do Cage do `DogmaConfig`, e toda sessão segurava
+        // esse único remetente: correto enquanto um Dogma tinha uma sala,
+        // silenciosamente errado no instante em que passou a poder ter duas.
+        let cages = Arc::new(cage::Cages::new());
 
         Ok(Self {
             endpoint,
@@ -185,7 +218,7 @@ impl Server {
             fingerprint,
             registry: Arc::new(session::Registry::new()),
             dogma,
-            cage,
+            cages,
         })
     }
 
@@ -248,7 +281,7 @@ impl Server {
             let config = Arc::clone(&self.config);
             let registry = Arc::clone(&self.registry);
             let dogma = Arc::clone(&self.dogma);
-            let cage = self.cage.clone();
+            let cages = Arc::clone(&self.cages);
 
             tokio::spawn(async move {
                 let connection = match incoming.await {
@@ -261,7 +294,7 @@ impl Server {
                 let peer = connection.remote_address();
                 tracing::info!(%peer, "pattern orange");
 
-                if let Err(error) = session::serve(connection, config, registry, dogma, cage).await
+                if let Err(error) = session::serve(connection, config, registry, dogma, cages).await
                 {
                     tracing::info!(%peer, %error, "session closed");
                 }
@@ -292,5 +325,90 @@ impl Server {
     /// fechar uma conversa e abrir outra.
     pub async fn wait_idle(&self) {
         self.endpoint.wait_idle().await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::casper::channels::Channels;
+    use crate::casper::{Casper, Location};
+
+    fn born(config: &DogmaConfig) -> Casper {
+        let mut casper = Casper::open(&config.database).expect("open");
+        seed(&mut casper, config).expect("seed");
+        casper
+    }
+
+    #[test]
+    fn a_new_dogma_opens_with_somewhere_to_go() {
+        // A Dogma with no Cage offers nowhere to speak and no Line to write in.
+        // The person who pressed HOSPEDAR AQUI would look at an empty list with
+        // no way to tell a working Dogma from a broken one — and "hospede você
+        // mesmo" would be a claim rather than a thing that happens.
+        let config = DogmaConfig::default();
+        let casper = born(&config);
+        let channels = Channels::new(&casper);
+
+        let lines = channels.lines().expect("lines");
+        assert_eq!(lines.len(), 1, "a Dogma opened with no Line: {lines:?}");
+        assert_eq!(lines[0].name, "geral");
+
+        let cages = channels.cages().expect("cages");
+        assert_eq!(cages.len(), 1, "a Dogma opened with no Cage: {cages:?}");
+        assert_eq!(cages[0].name, config.cage_name);
+        assert_eq!(cages[0].limit, config.cage_limit);
+        assert_eq!(
+            cages[0].line,
+            Some(lines[0].id),
+            "the opening Cage has no Line attached to it"
+        );
+        assert!(
+            !cages[0].password_required,
+            "the opening Cage is locked, and nobody has the key"
+        );
+    }
+
+    #[test]
+    fn a_second_boot_does_not_add_a_second_set_of_rooms() {
+        // `seed` runs on every boot. Not being idempotent would mean a Dogma
+        // that has been restarted twenty times shows twenty `geral`s.
+        let directory = tempfile::tempdir().expect("tempdir");
+        let config = DogmaConfig {
+            database: Location::File(directory.path().join("dogma.db")),
+            ..DogmaConfig::default()
+        };
+
+        drop(born(&config));
+        let casper = born(&config);
+
+        let channels = Channels::new(&casper);
+        assert_eq!(channels.lines().expect("lines").len(), 1);
+        assert_eq!(channels.cages().expect("cages").len(), 1);
+    }
+
+    #[test]
+    fn a_renamed_opening_cage_keeps_its_new_name_across_a_restart() {
+        // The seed and `RenameCage` write the same row, and a seed that
+        // overwrote would undo the rename on the next restart — silently, and
+        // only for the room the Dogma came with, which is the hardest kind of
+        // bug to believe when somebody reports it.
+        let directory = tempfile::tempdir().expect("tempdir");
+        let config = DogmaConfig {
+            database: Location::File(directory.path().join("dogma.db")),
+            ..DogmaConfig::default()
+        };
+
+        let casper = born(&config);
+        let cage = Channels::new(&casper).cages().expect("cages")[0].id;
+        Channels::new(&casper)
+            .rename_cage(cage, "CAGE-01 PONTE")
+            .expect("rename");
+        drop(casper);
+
+        let casper = born(&config);
+        let cages = Channels::new(&casper).cages().expect("cages");
+        assert_eq!(cages.len(), 1);
+        assert_eq!(cages[0].name, "CAGE-01 PONTE");
     }
 }

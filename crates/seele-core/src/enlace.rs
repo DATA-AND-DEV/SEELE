@@ -146,6 +146,22 @@ enum Comando {
     },
     AtField(bool),
     Isolamento(bool),
+    CriarCage {
+        nome: String,
+        limite: u16,
+        linha: Option<LineId>,
+    },
+    CriarLinha {
+        nome: String,
+    },
+    RenomearCage {
+        cage: CageId,
+        nome: String,
+    },
+    RenomearLinha {
+        linha: LineId,
+        nome: String,
+    },
     Sair,
 }
 
@@ -437,6 +453,64 @@ impl Enlace {
         self.mandar(Comando::Isolamento(ligado)).await
     }
 
+    /// Pede ao Dogma que faça um Cage.
+    ///
+    /// Pede, e só. Nada aqui confere se este piloto pode: a `specs/08-seguranca.md`
+    /// põe a decisão no servidor, e um core que recusasse por conta própria
+    /// seria uma segunda autoridade para manter de acordo com a primeira. A
+    /// resposta chega como aviso — `CageCreated` se aconteceu, `Alert` com
+    /// `PermissionDenied` se não.
+    ///
+    /// **Não** é refeito ao reconectar, ao contrário do Cage e da Linha
+    /// abertos. Aqueles são onde a pessoa estava, e voltar sem eles é voltar
+    /// para outro lugar; este é uma coisa que se faz uma vez. Repetido depois de
+    /// uma queda, ele criaria uma sala minutos mais tarde, do nada, e mais uma
+    /// se a pessoa já tivesse pedido de novo à mão.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn criar_cage(
+        &self,
+        nome: String,
+        limite: u16,
+        linha: Option<LineId>,
+    ) -> Result<(), Fechado> {
+        self.mandar(Comando::CriarCage {
+            nome,
+            limite,
+            linha,
+        })
+        .await
+    }
+
+    /// Pede ao Dogma que faça uma Linha.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn criar_linha(&self, nome: String) -> Result<(), Fechado> {
+        self.mandar(Comando::CriarLinha { nome }).await
+    }
+
+    /// Pede ao Dogma que renomeie um Cage.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn renomear_cage(&self, cage: CageId, nome: String) -> Result<(), Fechado> {
+        self.mandar(Comando::RenomearCage { cage, nome }).await
+    }
+
+    /// Pede ao Dogma que renomeie uma Linha.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn renomear_linha(&self, linha: LineId, nome: String) -> Result<(), Fechado> {
+        self.mandar(Comando::RenomearLinha { linha, nome }).await
+    }
+
     /// Encerra por vontade própria.
     pub async fn sair(&self) {
         let _ = self.mandar(Comando::Sair).await;
@@ -671,6 +745,14 @@ impl Motor {
             }
             Comando::AtField(ligado) => cliente.set_at_field(ligado).await,
             Comando::Isolamento(ligado) => cliente.set_total_isolation(ligado).await,
+            Comando::CriarCage {
+                nome,
+                limite,
+                linha,
+            } => cliente.create_cage(&nome, limite, linha).await,
+            Comando::CriarLinha { nome } => cliente.create_line(&nome).await,
+            Comando::RenomearCage { cage, nome } => cliente.rename_cage(cage, &nome).await,
+            Comando::RenomearLinha { linha, nome } => cliente.rename_line(linha, &nome).await,
             Comando::Sair => return,
         };
         if resultado.is_err() {
@@ -686,6 +768,12 @@ impl Motor {
             Comando::AbrirLinha(linha) => self.linha = Some(*linha),
             Comando::AtField(ligado) => self.at_field = *ligado,
             Comando::Isolamento(ligado) => self.isolamento = *ligado,
+            // Fazer uma sala **não** entra aqui, e é uma ausência deliberada.
+            // O que se refaz ao reconectar é onde a pessoa estava — o Cage, a
+            // Linha, os dois silêncios —, porque voltar sem isso é voltar para
+            // outro lugar. Uma sala é uma coisa que se faz uma vez; repetida
+            // depois de uma queda, ela apareceria minutos mais tarde do nada, e
+            // duplicada se a pessoa já tivesse pedido de novo à mão.
             _ => {}
         }
     }

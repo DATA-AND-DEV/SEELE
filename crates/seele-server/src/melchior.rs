@@ -39,7 +39,7 @@ use crate::casper::{now_seconds, Casper};
 pub const COMMANDER_ROLE: RoleId = RoleId(1);
 /// The Operador role.
 pub const OPERATOR_ROLE: RoleId = RoleId(2);
-/// The Piloto role, which every new account arrives with.
+/// The Piloto role, which every account after the first arrives with.
 pub const PILOT_ROLE: RoleId = RoleId(3);
 /// The Observador role: may listen and read, and nothing else.
 pub const OBSERVER_ROLE: RoleId = RoleId(4);
@@ -177,15 +177,65 @@ impl<'a> Melchior<'a> {
             params![nickname, public_key, now_seconds()],
         )?;
         let id = self.connection.last_insert_rowid();
-
-        // Everybody arrives as a Pilot. specs/04 makes that the normal-use role;
-        // an operator promotes from there.
-        self.connection.execute(
-            "INSERT INTO pilot_roles (pilot_id, role_id) VALUES (?1, 3)",
-            params![id],
-        )?;
+        self.seat_the_arrival(id)?;
 
         self.pilot(PilotId(id as u64))
+    }
+
+    /// Gives a freshly created account its opening role.
+    ///
+    /// # The first account created on a Dogma becomes the Comandante
+    ///
+    /// Every account used to arrive as a Piloto, which meant **nobody ever
+    /// became a Comandante**. Migration 1 seeds the role with `ManageCages`,
+    /// `ManageRoles` and `AdministerDogma`, and nothing granted it: a Dogma
+    /// shipped with three permissions no account in it could ever hold, so
+    /// every verb behind them was unreachable by construction.
+    ///
+    /// Whoever hosts is whoever connects to their own Dogma first — they press
+    /// the button and then they connect, in that order, and nobody else has the
+    /// address yet. That fact is enough to answer "who hosts" with no
+    /// configuration file, no flag, and no question on screen, all three of
+    /// which would have to be answered by the person least equipped to answer
+    /// them: someone who just wants to talk to their friends tonight.
+    ///
+    /// # The race
+    ///
+    /// Two clients reaching a virgin Dogma at the same moment must not both
+    /// become Comandante, and must not both miss. The claim is therefore **one
+    /// statement**, conditional on nobody holding the role yet — the same shape
+    /// `crate::admissao` uses to spend an invite exactly once with
+    /// `UPDATE … WHERE usado_em IS NULL`. SQLite serialises writers, so the
+    /// second claim to run sees the first one's row, inserts nothing, and
+    /// reports zero rows changed; that account then takes the Piloto role like
+    /// anybody else.
+    ///
+    /// Deliberately keyed on *the role being unheld*, not on "is this the first
+    /// pilot row". A Dogma whose Comandante account was deleted has no
+    /// Comandante again, and the next arrival should be able to take the seat
+    /// rather than leave the Dogma permanently unadministrable.
+    fn seat_the_arrival(&self, pilot_row: i64) -> Result<()> {
+        let claimed = self.connection.execute(
+            "INSERT INTO pilot_roles (pilot_id, role_id)
+             SELECT ?1, ?2
+             WHERE NOT EXISTS (SELECT 1 FROM pilot_roles WHERE role_id = ?2)",
+            params![pilot_row, i64::from(COMMANDER_ROLE.get())],
+        )?;
+        if claimed > 0 {
+            tracing::info!(
+                pilot = pilot_row,
+                "the first account took the commandership"
+            );
+            return Ok(());
+        }
+
+        // Everybody after the first arrives as a Pilot. specs/04 makes that the
+        // normal-use role; a Comandante promotes from there.
+        self.connection.execute(
+            "INSERT INTO pilot_roles (pilot_id, role_id) VALUES (?1, ?2)",
+            params![pilot_row, i64::from(PILOT_ROLE.get())],
+        )?;
+        Ok(())
     }
 
     /// Loads one account.
@@ -409,13 +459,22 @@ mod tests {
         Casper::open(&Location::Memory).unwrap()
     }
 
+    /// An account holding exactly one named role, whatever it arrived with.
+    ///
+    /// Normalising rather than assuming: the first account on a Dogma arrives as
+    /// a Comandante and every one after it as a Piloto, so a fixture that only
+    /// added a role would hand back a Comandante whenever it happened to be
+    /// called first — and the permission matrix below would pass for the wrong
+    /// reason, which is the worst way for it to pass.
     fn pilot_with(casper: &Casper, nickname: &str, key: u8, role: RoleId) -> PilotId {
         let melchior = Melchior::new(casper);
         let pilot = melchior.register_or_find(&[key; 32], nickname).unwrap();
-        if role != PILOT {
-            melchior.revoke_role(pilot.id, PILOT).unwrap();
-            melchior.grant_role(pilot.id, role).unwrap();
+        for held in [COMMANDER, OPERATOR, PILOT, OBSERVER] {
+            if held != role {
+                melchior.revoke_role(pilot.id, held).unwrap();
+            }
         }
+        melchior.grant_role(pilot.id, role).unwrap();
         pilot.id
     }
 
@@ -441,11 +500,100 @@ mod tests {
     }
 
     #[test]
-    fn everybody_arrives_as_a_pilot() {
+    fn the_first_account_becomes_the_commander() {
+        // Whoever hosts is whoever connects to their own Dogma first. Without
+        // this, migration 1 seeds a Comandante role that no account can ever
+        // hold, and ManageCages / ManageRoles / AdministerDogma are unreachable
+        // by construction — every verb behind them dead on arrival.
         let casper = store();
         let melchior = Melchior::new(&casper);
-        let pilot = melchior.register_or_find(&[1; 32], "shinji").unwrap();
-        assert_eq!(pilot.roles, vec![PILOT]);
+        let anfitriao = melchior.register_or_find(&[1; 32], "anfitriao").unwrap();
+        assert_eq!(anfitriao.roles, vec![COMMANDER]);
+        assert!(melchior.may(anfitriao.id, Permission::ManageCages).unwrap());
+    }
+
+    #[test]
+    fn the_second_account_is_only_a_pilot() {
+        // The half that makes the rule a rule. "First account is Comandante"
+        // implemented as "every account is Comandante" passes the test above and
+        // hands the Dogma to whoever walks in.
+        let casper = store();
+        let melchior = Melchior::new(&casper);
+        melchior.register_or_find(&[1; 32], "anfitriao").unwrap();
+
+        let convidado = melchior.register_or_find(&[2; 32], "shinji").unwrap();
+        assert_eq!(convidado.roles, vec![PILOT]);
+        for permission in [
+            Permission::ManageCages,
+            Permission::ManageRoles,
+            Permission::AdministerDogma,
+        ] {
+            assert!(
+                !melchior.may(convidado.id, permission).unwrap(),
+                "the second account arrived holding {permission:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn two_arrivals_at_once_produce_exactly_one_commander() {
+        // Not "neither", which leaves the Dogma unadministrable forever, and not
+        // "both", which hands a stranger every permission there is. Two real
+        // connections on the same file, because the claim's whole correctness is
+        // that SQLite serialises the two writers and the second sees the first's
+        // row — a single-connection test could not tell that apart from a check
+        // done in Rust before the insert, which would race.
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("dogma.db");
+        Casper::open(&Location::File(file.clone())).unwrap();
+
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let chegantes: Vec<_> = [(1_u8, "ayanami"), (2_u8, "shinji")]
+            .into_iter()
+            .map(|(key, nickname)| {
+                let file = file.clone();
+                let barrier = std::sync::Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    let casper = Casper::open(&Location::File(file)).unwrap();
+                    barrier.wait();
+                    Melchior::new(&casper)
+                        .register_or_find(&[key; 32], nickname)
+                        .unwrap()
+                        .roles
+                })
+            })
+            .collect();
+
+        let papeis: Vec<Vec<RoleId>> = chegantes
+            .into_iter()
+            .map(|chegante| chegante.join().unwrap())
+            .collect();
+
+        let comandantes = papeis
+            .iter()
+            .filter(|roles| roles.contains(&COMMANDER))
+            .count();
+        assert_eq!(comandantes, 1, "roles handed out: {papeis:?}");
+        assert_eq!(
+            papeis.iter().filter(|roles| roles.contains(&PILOT)).count(),
+            1,
+            "roles handed out: {papeis:?}"
+        );
+    }
+
+    #[test]
+    fn a_returning_account_does_not_claim_the_commandership_again() {
+        // `register_or_find` runs on every handshake. Seating on the *find* path
+        // as well as the create path would let the second pilot take the seat
+        // the moment the first one's account was deleted mid-session — and, more
+        // ordinarily, would re-grant a role an operator had just revoked.
+        let casper = store();
+        let melchior = Melchior::new(&casper);
+        let anfitriao = melchior.register_or_find(&[1; 32], "anfitriao").unwrap();
+        melchior.revoke_role(anfitriao.id, COMMANDER).unwrap();
+
+        let de_novo = melchior.register_or_find(&[1; 32], "anfitriao").unwrap();
+        assert!(de_novo.roles.is_empty(), "roles came back: {de_novo:?}");
     }
 
     // ---- the permission matrix ----
@@ -532,18 +680,18 @@ mod tests {
         // Without an explicit denial the sentence has nothing to mean, and
         // giving somebody Observer alongside Pilot would quietly do nothing.
         let casper = store();
+        let pilot = pilot_with(&casper, "silenciado", 3, PILOT);
         let melchior = Melchior::new(&casper);
-        let pilot = melchior.register_or_find(&[3; 32], "silenciado").unwrap();
-        assert!(melchior.may(pilot.id, Permission::Speak).unwrap());
+        assert!(melchior.may(pilot, Permission::Speak).unwrap());
 
-        melchior.grant_role(pilot.id, OBSERVER).unwrap();
+        melchior.grant_role(pilot, OBSERVER).unwrap();
 
         assert!(
-            !melchior.may(pilot.id, Permission::Speak).unwrap(),
+            !melchior.may(pilot, Permission::Speak).unwrap(),
             "the Observer denial did not beat the Pilot grant"
         );
         // And the permissions the two roles agree on survive.
-        assert!(melchior.may(pilot.id, Permission::ReadLine).unwrap());
+        assert!(melchior.may(pilot, Permission::ReadLine).unwrap());
     }
 
     #[test]
@@ -613,17 +761,17 @@ mod tests {
         // The default has to be denial. A pilot whose roles were all revoked
         // must not fall through to some implicit baseline.
         let casper = store();
+        let pilot = pilot_with(&casper, "sem-papel", 5, PILOT);
         let melchior = Melchior::new(&casper);
-        let pilot = melchior.register_or_find(&[5; 32], "sem-papel").unwrap();
-        melchior.revoke_role(pilot.id, PILOT).unwrap();
+        melchior.revoke_role(pilot, PILOT).unwrap();
 
         for permission in ALL {
             assert!(
-                !melchior.may(pilot.id, *permission).unwrap(),
+                !melchior.may(pilot, *permission).unwrap(),
                 "a roleless pilot had {permission:?}"
             );
         }
-        assert!(melchior.permissions(pilot.id).unwrap().is_empty());
+        assert!(melchior.permissions(pilot).unwrap().is_empty());
     }
 
     #[test]
