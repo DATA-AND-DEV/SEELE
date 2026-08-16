@@ -132,7 +132,26 @@ else {
     Write-Host "→ libclang: $env:LIBCLANG_PATH" -ForegroundColor DarkGray
 }
 
-$Config = "apps\seele-app\tauri.conf.json"
+# --------------------------------------------------- escrever JSON sem BOM
+#
+# `Set-Content -Encoding UTF8` no Windows PowerShell 5.1 grava UTF-8 **com**
+# BOM, e o Tauri recusa o `tauri.conf.json` assim: o parser tropeça no primeiro
+# byte e diz "expected value at line 1 column 1", que não parece ter nada a ver.
+#
+# Este script precisa das duas coisas opostas ao mesmo tempo: o `.ps1` **tem**
+# que ter BOM, ou o 5.1 lê os acentos como ANSI e imprime «compilaÃ§Ã£o»; o
+# `.json` **não** pode ter. Usar o mesmo mecanismo para os dois é o erro que
+# estava aqui.
+#
+# O caminho é absoluto de propósito: `[System.IO.File]` resolve relativo contra
+# o diretório do processo .NET, que o `Set-Location` do PowerShell **não**
+# altera. Com caminho relativo isto escreveria fora do repositório.
+function Write-Utf8SemBom([string]$Caminho, [string]$Texto) {
+    $semBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Caminho, $Texto, $semBom)
+}
+
+$Config = Join-Path $Raiz "apps\seele-app\tauri.conf.json"
 $Original = Get-Content $Config -Raw
 
 try {
@@ -143,7 +162,7 @@ try {
     Write-Host "→ gravando a versão $Versao" -ForegroundColor Cyan
     $json = $Original | ConvertFrom-Json
     $json.version = $Versao
-    $json | ConvertTo-Json -Depth 100 | Set-Content $Config -Encoding UTF8
+    Write-Utf8SemBom $Config (($json | ConvertTo-Json -Depth 100) + "`n")
 
     # ------------------------------------------------------------------ CLI
     #
@@ -211,6 +230,6 @@ finally {
     # A versão gravada é para o artefato, não para o repositório: deixá-la no
     # arquivo faria o próximo `git status` acusar uma mudança que ninguém pediu,
     # e um commit distraído fixaria no repositório o número de um release.
-    Set-Content $Config -Value $Original -NoNewline -Encoding UTF8
+    Write-Utf8SemBom $Config $Original
     Write-Host "→ $Config devolvido ao que era" -ForegroundColor DarkGray
 }
