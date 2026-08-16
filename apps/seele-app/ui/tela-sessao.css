@@ -5,7 +5,7 @@
    rodapé de telemetria. Carrega depois de `base.css`, e depende disso:
    `.compor input`, `.busca input`, `.convite-link` e `.volume` refinam o
    `input` de lá; `.busca .botao-fantasma` e `.botao-falar[data-ativo]` refinam
-   botões de lá; e `.canais-cabeca .dica`, `.operador .dica` e `.compor .dica`
+   botões de lá; e `.canais-cabeca .dica`, `.operador-frase` e `.compor-dica`
    refinam a camada de legendas simples de lá — **refinam**, nunca reivindicam,
    que é o que `the_hint_layer_is_defined_once_and_never_by_a_screen` cobra.
 
