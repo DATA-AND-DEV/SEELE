@@ -1266,3 +1266,40 @@
   font-weight: var(--seele-cartela);
   text-decoration-color: var(--seele-negro-absoluto);
 }
+
+/* ---------- criar sala ----------
+
+   Debaixo de cada lista, e não num botão de barra: a ação pertence ao lugar que
+   ela muda, e quem quer uma sala nova está olhando as que já existem.
+
+   Aparece só para quem pode — `Snapshot.may_manage_cages`. Esconder não é o que
+   protege: o servidor recusa `CreateCage` de quem não tem `ManageCages`, e há
+   conformidade provando. Isto é não oferecer o que não ia funcionar. */
+.criar {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: end;
+  padding: 12px 16px 16px;
+  border-bottom: 1px solid var(--seele-linha);
+}
+
+.criar-campo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* Os lugares cabem em quatro dígitos; o nome fica com o resto. */
+.criar-campo-numero { grid-column: 1; width: 88px; }
+.criar-campo-numero + .botao-fantasma { grid-column: 2; }
+
+.criar input {
+  width: 100%;
+  min-width: 0;
+}
+
+/* A dica ocupa a largura inteira, embaixo dos dois campos. */
+.criar .dica { grid-column: 1 / -1; }

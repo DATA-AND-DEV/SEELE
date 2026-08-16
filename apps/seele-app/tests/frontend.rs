@@ -173,18 +173,15 @@ fn every_command_the_frontend_calls_is_registered() {
 /// below make sure it is: the moment the page calls one of these, this test
 /// fails and says to take it off the list. Nothing rots quietly.
 ///
-/// `criar_cage` / `criar_linha` / `renomear_cage` / `renomear_linha` are the
-/// rooms a host makes after the first one. The protocol carries them, MELCHIOR
-/// checks `ManageCages` on each, CASPER writes them and the Dogma announces
-/// them to everybody already connected — proven end to end in
-/// `seele-conformance`. What is missing is the panel that offers them, and
-/// `Snapshot::may_manage_cages` is the field it should ask before drawing it.
-const AGUARDANDO_TELA: &[&str] = &[
-    "criar_cage",
-    "criar_linha",
-    "renomear_cage",
-    "renomear_linha",
-];
+/// `renomear_cage` / `renomear_linha` are the other half of managing rooms.
+/// Creating them is drawn — the session screen offers both forms to whoever
+/// `Snapshot::may_manage_cages` says may create — and renaming is not: it was
+/// not asked for, and a rename control is a different shape from a create one
+/// (it belongs on the room, not under the list).
+///
+/// They stay here rather than being deleted, because deleting them would take
+/// the verbs down with the only thing that remembers they exist.
+const AGUARDANDO_TELA: &[&str] = &["renomear_cage", "renomear_linha"];
 
 #[test]
 fn no_command_is_registered_and_never_called() {
@@ -2616,4 +2613,41 @@ fn the_three_subsystems_look_different_while_they_are_loading() {
         script.contains("subsistemas(\"carga\""),
         "nothing puts the three subsystems into the loading state any more"
     );
+}
+
+#[test]
+fn creating_a_room_is_offered_by_permission_and_sized_by_the_dogma() {
+    let body = body_of(&scripts(), "function desenharCanais");
+
+    // Offered, not enforced. The server refuses `CreateCage` from anybody
+    // without `ManageCages`, and `seele-conformance` proves the refusal comes
+    // from there — this is the shell not putting up a control that would fail.
+    // The distinction matters because the opposite reading (hide it and call it
+    // secured) is the one the `plug` walks straight through.
+    assert!(
+        body.contains("may_manage_cages"),
+        "the screen offers the create forms without asking whether this pilot may \
+         create, so it either hides them from the host or shows them to everybody"
+    );
+
+    // The size of a new room is the Dogma's answer, not a number typed in here.
+    // Whoever hosts already chose one when they set the Dogma up, and repeating
+    // their choice beats inventing a default in JavaScript.
+    assert!(
+        body.contains("cages[0].limit") || body.contains("limit"),
+        "the default seat count no longer comes from a room that already exists, \
+         so the shell is deciding how big a room should be:\n{body}"
+    );
+
+    // And the two commands have to be reached by their written names, or the
+    // guard that ties calls to registered commands goes blind — which it did,
+    // twice in one day, in this very file and in the settings screen.
+    let script = without_comments(&scripts());
+    for comando in ["invoke(\"criar_cage\"", "invoke(\"criar_linha\""] {
+        assert!(
+            script.contains(comando),
+            "`{comando}…` is not written out anywhere, so the command name reaches \
+             `invoke` through a variable and no static check can follow it"
+        );
+    }
 }

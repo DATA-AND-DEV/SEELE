@@ -422,6 +422,25 @@ function desenharCanais(snapshot) {
     return item;
   });
   repovoar($("lista-linhas"), linhas);
+
+  // Os dois formulários de criar sala só aparecem para quem pode criar. Quem
+  // responde é o servidor, em `may_manage_cages`, resolvido pelo MELCHIOR a
+  // partir das permissões desta conexão. Esconder aqui não impede ninguém de
+  // nada — `CreateCage` de quem não tem `ManageCages` é recusado lá, e há teste
+  // de conformidade provando que a recusa é de lá. Isto é não oferecer o que
+  // não ia funcionar.
+  const pode = snapshot.may_manage_cages === true;
+  $("criar-cage").hidden = !pode;
+  $("criar-linha").hidden = !pode;
+
+  // O tamanho padrão da sala nova vem de uma sala que já existe, e não de um
+  // número escrito no JavaScript: quem hospeda já disse que tamanho quer
+  // quando montou o Dogma, e repetir a escolha dele é mais honesto que
+  // inventar quinze. Só enquanto o campo estiver como a marcação o deixou.
+  const lugares = $("campo-cage-limite");
+  if (pode && lugares.value === lugares.defaultValue && snapshot.cages.length > 0) {
+    lugares.value = String(snapshot.cages[0].limit);
+  }
 }
 
 /**
@@ -1138,6 +1157,59 @@ $("form-mensagem").addEventListener("submit", enviar);
 // próprios (`B·03` e `B·04`) e deixaram de caber numa lista só.
 $("lista-cages").addEventListener("click", alternarCanal);
 $("lista-linhas").addEventListener("click", alternarCanal);
+
+/**
+ * Pede uma sala nova ao Dogma.
+ *
+ * Não há resposta a esperar, e isso é do desenho e não descuido: o servidor
+ * anuncia a sala a **todos** os conectados, inclusive a quem pediu, e o anúncio
+ * chega pela mesma porta de sempre. A tela redesenha porque a lista mudou, e
+ * não porque este botão voltou.
+ *
+ * Quando a permissão falta, o que volta é um aviso de `PermissionDenied`, pelo
+ * mesmo caminho de qualquer outro aviso. O formulário nem devia estar visível
+ * nesse caso — mas quem chegar aqui assim mesmo é recusado pelo servidor, que é
+ * onde a regra vale.
+ */
+/// Recebe o pedido **já feito**, e não o nome do comando.
+///
+/// Parece indireção à toa e não é. `tests/frontend.rs` amarra cada `invoke("…")`
+/// literal a um comando registrado em `main.rs`, nos dois sentidos, procurando o
+/// texto — um nome de comando que chega por parâmetro some desse laço, e o
+/// guarda passa a dizer que o comando vivo nunca é chamado. Foi exatamente o que
+/// aconteceu na primeira versão desta função, e antes dela na tabela de
+/// dispositivos do Terminal Dogma. Duas vezes no mesmo dia: o literal fica no
+/// lugar da chamada, sempre.
+async function pedirSala(pedido, campo, rotulo) {
+  try {
+    await pedido;
+    // Limpo só depois de o pedido ter saído. Limpar antes perderia o que a
+    // pessoa escreveu se a chamada estourasse.
+    campo.value = "";
+  } catch (falha) {
+    console.warn(`${rotulo}:`, falha);
+  }
+}
+
+$("criar-cage").addEventListener("submit", (evento) => {
+  evento.preventDefault();
+  const nome = $("campo-cage-nome");
+  pedirSala(
+    invoke("criar_cage", {
+      name: nome.value.trim(),
+      limit: Number($("campo-cage-limite").value),
+      line: null,
+    }),
+    nome,
+    "criar_cage",
+  );
+});
+
+$("criar-linha").addEventListener("submit", (evento) => {
+  evento.preventDefault();
+  const nome = $("campo-linha-nome");
+  pedirSala(invoke("criar_linha", { name: nome.value.trim() }), nome, "criar_linha");
+});
 $("banner-fechar").addEventListener("click", () => ($("banner").hidden = true));
 $("veredito-fechar").addEventListener("click", () => ($("veredito").hidden = true));
 

@@ -618,6 +618,35 @@
       </div>
       <ul id="lista-cages" class="canais"></ul>
 
+      <!--
+        Criar sala só aparece para quem pode criar. `Snapshot.may_manage_cages`
+        é a resposta do servidor, resolvida no MELCHIOR — a casca pergunta e
+        obedece, e não decide.
+
+        Esconder o formulário **não** é o que impede alguém de criar: o servidor
+        recusa `CreateCage` de quem não tem `ManageCages`, e há teste de
+        conformidade provando que a recusa é de lá. Isto aqui é só não oferecer
+        o que não vai funcionar.
+      -->
+      <form id="criar-cage" class="criar" hidden>
+        <label class="criar-campo">
+          <span class="rotulo">NOVA JAULA</span>
+          <input id="campo-cage-nome" name="nome" maxlength="48" required
+                 spellcheck="false" autocomplete="off" placeholder="nome da sala">
+        </label>
+        <label class="criar-campo criar-campo-numero">
+          <span class="rotulo">LUGARES</span>
+          <!--
+            O padrão vem do Dogma e não daqui: `desenharCanais` o copia do
+            limite de um Cage que já existe. Um número escrito neste arquivo
+            seria a casca decidindo o tamanho de uma sala.
+          -->
+          <input id="campo-cage-limite" name="lugares" type="number" min="1" max="250" required>
+        </label>
+        <button type="submit" class="botao-fantasma">CRIAR</button>
+        <span class="dica">Uma sala de voz nova, que todo mundo neste Dogma vai ver.</span>
+      </form>
+
       <div class="canais-cabeca canais-cabeca-linhas">
         <h2 class="painel-titulo">
           <span>LINHAS</span><span class="painel-codigo">B·04</span>
@@ -625,6 +654,16 @@
         <span class="dica">Salas de texto. Abra uma para ler e escrever.</span>
       </div>
       <ul id="lista-linhas" class="canais"></ul>
+
+      <form id="criar-linha" class="criar" hidden>
+        <label class="criar-campo">
+          <span class="rotulo">NOVA LINHA</span>
+          <input id="campo-linha-nome" name="nome" maxlength="48" required
+                 spellcheck="false" autocomplete="off" placeholder="nome da sala">
+        </label>
+        <button type="submit" class="botao-fantasma">CRIAR</button>
+        <span class="dica">Uma sala de texto nova. O histórico dela começa vazio.</span>
+      </form>
 
       <span class="espaco"></span>
 
