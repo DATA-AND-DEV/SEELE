@@ -1,4 +1,4 @@
-# Empacota o instalador do Windows sem o GitHub Actions.
+﻿# Empacota o instalador do Windows sem o GitHub Actions.
 #
 # Faz o mesmo que o job `windows` de `.github/workflows/release.yml`, na ordem
 # dele e pelas mesmas razões. Existe porque o Tauri não cross-compila: o
@@ -39,6 +39,44 @@ a versão «$Versao» não serve para o instalador.
 Aceito: X.Y.Z, ou X.Y.Z-N com N só de dígitos.
 Não serve: -dev, -rc1, -beta.2, +metadados, ou o «v» na frente.
 "@
+}
+
+# ------------------------------------------------- o linker existe mesmo?
+#
+# O Rust no Windows usa o linker da Microsoft, e sem ele a compilação morre —
+# mas morre tarde, depois de baixar e compilar dezenas de crates. Numa máquina
+# recém-preparada isso é um quarto de hora perdido para descobrir uma coisa que
+# se sabe em um segundo.
+#
+# `link.exe` **não** é procurado no PATH de propósito: ele só está lá dentro de
+# um Developer Command Prompt, e o Rust o encontra pelo registro. Quem sabe
+# responder é o `vswhere`, que acompanha qualquer instalador moderno do Visual
+# Studio.
+$VsWhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+if (Test-Path $VsWhere) {
+    $comCpp = & $VsWhere -products * -latest -property installationPath `
+        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 2>$null
+    if (-not $comCpp) {
+        Write-Error @"
+o linker do MSVC não está instalado, e sem ele nada compila.
+
+Baixe **Build Tools for Visual Studio** em
+  https://visualstudio.microsoft.com/downloads/   (seção «Tools for Visual Studio»)
+
+e no instalador marque:
+  - Desenvolvimento para desktop com C++
+  - dentro dele, confira que o Windows 10/11 SDK está marcado
+
+São cerca de 3 GB. `docs/windows.md` seção 1.1 tem o passo a passo.
+O VS Code não serve — é outro produto.
+"@
+    }
+    Write-Host "→ linker do MSVC: ok" -ForegroundColor DarkGray
+}
+else {
+    # Sem o `vswhere` não dá para afirmar nem que está nem que não está, e
+    # barrar por não saber seria pior que deixar seguir.
+    Write-Warning "não achei o vswhere; seguindo sem conferir o linker do MSVC."
 }
 
 $Config = "apps\seele-app\tauri.conf.json"
