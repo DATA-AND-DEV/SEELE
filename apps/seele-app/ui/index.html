@@ -24,11 +24,17 @@
   último porque suas regras de contraste empatam com as que sobrescrevem e só
   ganham por serem as últimas. `apps/seele-app/tests/frontend.rs` confere isto.
 
-  Uma tela nova acrescenta um `tela-<nome>.css` **entre** as duas pontas.
+  Uma tela nova acrescenta um `tela-<nome>.css` **entre** as duas pontas, e uma
+  camada — o que se sobrepõe a uma tela em vez de substituí-la — um
+  `camada-<nome>.css` no mesmo intervalo. As duas camadas vêm depois de
+  `tela-sessao.css` porque é sobre ela que elas se põem.
 -->
 <link rel="stylesheet" href="base.css">
 <link rel="stylesheet" href="tela-boot.css">
 <link rel="stylesheet" href="tela-sessao.css">
+<link rel="stylesheet" href="camada-alerta.css">
+<link rel="stylesheet" href="camada-bateria.css">
+<link rel="stylesheet" href="tela-chamada.css">
 <link rel="stylesheet" href="tela-dogma.css">
 <link rel="stylesheet" href="tela-fim.css">
 <link rel="stylesheet" href="tela-auth.css">
@@ -304,6 +310,13 @@
       no meio de uma conversa é o caso que importa — é falando que se descobre
       que a máquina abriu o errado — e a troca vale na hora, sem sair do Dogma.
     -->
+    <!--
+      A grade do Cage — a tela `chamada` do comp. Ela é a mesma sala vista de
+      outro ângulo: aqui está a conversa escrita, lá estão as pessoas. Alcançada
+      daqui e só daqui, porque não faz sentido fora de uma sessão.
+    -->
+    <button id="botao-chamada" class="botao-fantasma" type="button"
+            title="a grade do Cage, um cartão por piloto">CHAMADA</button>
     <button id="botao-dogma-sessao" class="botao-fantasma" type="button"
             title="configuração local desta máquina">DOGMA</button>
     <!--
@@ -315,14 +328,104 @@
   </header>
 
   <!--
-    O banner é o único lugar que pode roubar a atenção. `specs/08-seguranca.md`
-    quer o aviso de chave trocada impossível de ignorar; usar o mesmo tratamento
-    para uma menção ensinaria a fechar sem ler.
+    A sobreposição de alerta — a tela `alerta` do comp v2, inventário §4.
+
+    Camada, e não tela: o inventário registra na linha 281 que `alerta` e
+    `bateria` são camadas sobre a operação, e `ehPrincipal` é verdadeiro nas
+    três. Trocar de tela para dizer que algo aconteceu apagaria a conversa que o
+    aviso é sobre.
+
+    O elemento continua sendo o `#banner` que `desenharAviso` já escrevia, com
+    os mesmos três ids e o mesmo `data-severidade`: o que mudou foi a forma —
+    de faixa de uma linha para a caixa de 720px que o comp desenha, com as três
+    células de metadado e os dois botões. Nenhuma linha de `tela-sessao.js`
+    precisou mudar para isso.
+
+    ---- por que laranja, e não vermelho ----
+
+    A ficha `BANNER DE ALERTA` do próprio comp diz: "laranja para menção e
+    identidade; vermelho apenas quando a conexão cai". O vermelho desta
+    interface é o da bateria, e `tokens.css` o marca "EXCLUSIVO alerta e queda".
+    O que distingue um `Notice` informativo de um crítico é a palavra na cartela
+    de severidade, e não a cor — `specs/05-cliente-tui.md` proíbe informação que
+    só a cor carregue.
+
+    ---- as três células ----
+
+    Nenhuma delas tem dado por trás, e o inventário §4 é explícito: "tudo nesta
+    caixa é literal no HTML — não há uma única interpolação". Estado de chave
+    por piloto e rota são mudanças de protocolo; a sincronia que o comp mostra é
+    a do piloto **acusado**, e o `Notice` não carrega de quem ele é. A moldura
+    fica e o valor falta, que é a única forma de a lacuna continuar visível.
   -->
-  <div id="banner" class="banner" role="alert" hidden>
-    <span class="kanji" lang="ja">警告</span>
-    <span id="banner-texto"></span>
-    <button id="banner-fechar" class="botao-fantasma" type="button">dispensar</button>
+  <div id="banner" class="camada-alerta" role="alert" hidden>
+    <div class="alerta-caixa">
+      <div class="alerta-cabeca">
+        <div class="alerta-marca">
+          <!--
+            Acento, e só. O comp escreve na ficha dele: "o kanji é acento — a
+            palavra ALERTA carrega a informação". Quem ouve a tela já recebe
+            ALERTA em latim ao lado, então anunciar o kanji seria ler a mesma
+            coisa duas vezes em duas línguas.
+          -->
+          <span class="kanji alerta-kanji" lang="ja" aria-hidden="true">警告</span>
+          <span class="alerta-palavra">ALERTA</span>
+        </div>
+        <div class="alerta-dizeres">
+          <p class="alerta-eixo">
+            <span>DOGMA · AVISO</span>
+            <!--
+              A severidade em palavra. As três estão na marcação e o
+              `data-severidade` que `desenharAviso` escreve na caixa escolhe
+              qual aparece — sem `content:` de CSS, porque este é o
+              acompanhante textual da cor e ele não pode depender de uma árvore
+              de acessibilidade expor texto gerado.
+            -->
+            <span class="alerta-severidade" data-para="Info">INFORMATIVO</span>
+            <span class="alerta-severidade" data-para="Warning">ATENÇÃO</span>
+            <span class="alerta-severidade" data-para="Critical">CRÍTICO</span>
+          </p>
+          <p id="banner-texto" class="alerta-frase"></p>
+        </div>
+      </div>
+
+      <div class="alerta-corpo">
+        <div class="alerta-celulas">
+          <span class="alerta-celula">
+            <span class="alerta-rotulo">CHAVE</span>
+            <span class="ausente" title="o protocolo não carrega estado de chave por piloto">——</span>
+          </span>
+          <span class="alerta-celula">
+            <span class="alerta-rotulo">ROTA</span>
+            <span class="ausente" title="o protocolo não tem o conceito de rota">——</span>
+          </span>
+          <span class="alerta-celula">
+            <span class="alerta-rotulo">SINCRONIA</span>
+            <span class="ausente" title="a sincronia desta célula é a do piloto acusado, e o aviso não diz de quem é">——</span>
+          </span>
+        </div>
+
+        <div class="alerta-botoes">
+          <button id="banner-fechar" class="botao alerta-reconhecer" type="button">RECONHECER</button>
+          <!--
+            O segundo botão do comp, desabilitado. Duas razões, e as duas do
+            inventário: não existe verbo de moderação — `EndReason::Kicked`
+            existe do lado de quem apanha, e não há como emitir (§16) — e o
+            rótulo é ambíguo em português (Q6): "ejetar o plug **do** operador"
+            pode ser a ação sobre outra pessoa ou a saída ordenada por quem
+            está aqui. No comp ele chama `fecharAlerta()` e não ejeta ninguém,
+            o que é a pior das três leituras possíveis. Quem quer sair tem
+            EJETAR no cabeçalho, que faz o que diz.
+          -->
+          <button id="alerta-ejetar" class="alerta-ejetar" type="button" disabled
+                  title="não há comando de moderação no protocolo: dá para receber uma ejeção, não para ordenar uma">
+            EJETAR PLUG DO OPERADOR
+          </button>
+        </div>
+
+        <p class="legenda-ausente">—— valor que este protocolo não carrega</p>
+      </div>
+    </div>
   </div>
 
   <!--
@@ -352,11 +455,70 @@
     histórico continua ali para leitura. Por isso isto é uma faixa **sobre** a
     sessão, e não uma tela que substitui o que estava escrito.
   -->
-  <div id="bateria" class="bateria" role="status" hidden>
-    <span class="kanji" lang="ja">警告</span>
-    <span class="bateria-titulo">BATERIA INTERNA</span>
-    <time id="bateria-conta" class="bateria-conta">04:59</time>
-    <span id="bateria-tentativas" class="bateria-tentativas">reconectando…</span>
+  <div id="bateria" class="camada-bateria" role="status" hidden>
+    <div class="bateria-caixa">
+      <div class="bateria-cabeca">
+        <span class="bateria-nome">BATERIA INTERNA</span>
+        <!-- Acento. `BATERIA INTERNA` ao lado já diz tudo o que ele diz. -->
+        <span class="kanji bateria-kanji" lang="ja" aria-hidden="true">内部電源</span>
+      </div>
+
+      <div class="bateria-corpo">
+        <time id="bateria-conta">--:--</time>
+        <div class="bateria-dizeres">
+          <p class="rotulo">ENERGIA RESTANTE ANTES DA EJEÇÃO FORÇADA</p>
+          <!--
+            A frase do comp menos o nome de rota. Ele escreve "Conexão com
+            BALTHASAR perdida", e o inventário §5 classifica a frase inteira
+            como **F/P**: ela é da casca, mas nomeia uma rota que não existe em
+            lugar nenhum do core. Sem o nome, o que sobra é verdade inteira.
+          -->
+          <p class="bateria-frase">Conexão perdida. Sessão mantida em memória local. Áudio suspenso.</p>
+          <!--
+            A barra de 28 blocos, vazia. `remaining_seconds` chega; o **total**
+            não (§16, "mudança de protocolo (menor)"). O único denominador
+            disponível seria o 299 literal do comp, que é a casca chutando a
+            spec e ficando errada no dia em que a spec mudar — e a contagem ao
+            lado já é a mesma informação, sem precisar de denominador nenhum.
+          -->
+          <p class="bateria-barra ausente"
+             title="o protocolo diz quanto falta, nunca de quanto era o total">——</p>
+        </div>
+      </div>
+
+      <div class="bateria-pe">
+        <p class="rotulo">TENTATIVAS DE RECONEXÃO</p>
+        <!-- A contagem é real: `InternalBattery.attempts`. É o único valor que
+             o protocolo carrega sobre as tentativas. -->
+        <p id="bateria-tentativas">reconectando…</p>
+        <!--
+          As três colunas do comp — quando, por onde, e no que deu. Nenhuma
+          delas atravessa: `InternalBattery` é `{remaining_seconds, attempts}`.
+          A moldura fica porque apagá-la esconderia que este produto não sabe
+          dizer **por que** cada tentativa falhou, que é justamente o que se
+          quer saber olhando para esta caixa.
+        -->
+        <p class="rotulo bateria-colunas">
+          <span>QUANDO</span><span>ROTA</span><span>DESFECHO</span>
+        </p>
+        <p class="bateria-tentativa">
+          <span class="ausente" title="o protocolo não carimba as tentativas">——</span>
+          <span class="ausente" title="o protocolo não tem o conceito de rota">——</span>
+          <span class="ausente" title="o protocolo carrega quantas foram, nunca no que cada uma deu">——</span>
+        </p>
+        <!--
+          `FORÇAR REINSERÇÃO DE PLUG`, desabilitado. O inventário §5 o
+          classifica como **C**: reconectar já é do core — é ele que está
+          tentando, e é dele que vem a contagem acima — mas não existe verbo de
+          "tenta agora". Um botão apertável prometeria acelerar o que já corre.
+        -->
+        <button id="bateria-forcar" class="bateria-forcar" type="button" disabled
+                title="o core já está tentando sozinho; não há comando de tentar agora">
+          FORÇAR REINSERÇÃO DE PLUG
+        </button>
+        <p class="legenda-ausente">—— valor que este protocolo não carrega</p>
+      </div>
+    </div>
   </div>
 
   <!--
@@ -573,6 +735,137 @@
 </section>
 
 <!--
+  Chamada — a grade do Cage. Tela `chamada` do comp v2, inventário §6, que a
+  tabela de lacunas §15 registrava como ausente por inteiro.
+
+  Tela própria, e não camada: ela **substitui** a conversa em vez de se pôr
+  sobre ela, e é assim no comp (`ehChamada` é exclusivo de `ehPrincipal`). Ler a
+  Linha e olhar quem está falando são duas coisas que ninguém faz ao mesmo
+  tempo, e um cartão por pessoa não cabe ao lado de um histórico.
+
+  Nasce escondida, como toda tela que não é a de entrada — o guarda
+  `the_app_opens_on_exactly_one_screen` em `tests/frontend.rs` cobra isso, e a
+  falha que ele pega é silenciosa: uma tela sem `hidden` não dá erro, ela
+  empilha embaixo da que devia estar na frente.
+-->
+<section id="tela-chamada" class="tela" hidden>
+  <div class="chamada">
+
+    <!-- ---------------- a coluna do Cage ---------------- -->
+    <div class="chamada-cage">
+      <div class="chamada-barra">
+        <!--
+          O nome do Cage é cartela: bloco sólido laranja com texto no negro
+          absoluto (inventário §12, e o v2 nomeia este caso explicitamente).
+        -->
+        <span id="chamada-nome" class="chamada-cartela">——</span>
+
+        <!--
+          `PLUG INSERIDO · 00:14:22` no comp. O inventário classifica como
+          **L** — cronômetro local, desde o `insert_plug` — mas o relógio teria
+          que nascer no instante da inserção, e a inserção acontece na tela de
+          operação. Um cronômetro que começasse a contar ao abrir esta tela
+          diria que o plug entrou agora, que é pior que não dizer nada.
+        -->
+        <span class="chamada-campo">
+          <span class="rotulo">PLUG INSERIDO</span>
+          <span id="chamada-plug">——</span>
+        </span>
+
+        <span class="chamada-vao"></span>
+
+        <!-- `BALTHASAR·01 NOMINAL` no comp; rota não é conceito em lugar
+             nenhum do core (§16). -->
+        <span class="chamada-campo">
+          <span class="rotulo">ROTA</span>
+          <span id="chamada-rota">——</span>
+        </span>
+      </div>
+
+      <!--
+        Um cartão por piloto. O comp corta em `slice(0,4)` e é sempre 2×2; aqui
+        a grade tem duas colunas e rola, porque um Cage tem `limit` assentos e
+        nada garante que sejam quatro. Esconder o quinto piloto é a única forma
+        de esta tela mentir sobre quem está na sala.
+      -->
+      <ol id="chamada-grade" class="chamada-grade" aria-label="pilotos no Cage"></ol>
+
+      <div class="chamada-acoes">
+        <!--
+          Os rótulos dizem em que estado a coisa **está**, e não o que apertar
+          vai fazer — a mesma regra da tira do operador na tela de operação. Um
+          botão escrito com o verbo é um botão que ninguém sabe ler quando volta
+          a olhar para a tela.
+        -->
+        <button id="chamada-at" class="chamada-acao chamada-acao-at" type="button"
+                data-ativo="nao">A.T. FIELD INATIVO</button>
+        <button id="chamada-surdez" class="chamada-acao chamada-acao-surdez" type="button"
+                data-ativo="nao">SURDEZ TOTAL</button>
+        <span class="chamada-vao"></span>
+        <button id="chamada-voltar" class="chamada-acao chamada-acao-voltar" type="button">
+          VOLTAR À LINHA
+        </button>
+        <button id="chamada-ejetar" class="chamada-acao chamada-acao-ejetar" type="button">
+          EJETAR PLUG
+        </button>
+      </div>
+    </div>
+
+    <!-- ---------------- D·04 / MONITOR DO CAGE ---------------- -->
+    <aside class="chamada-monitor" aria-labelledby="titulo-monitor">
+      <h2 id="titulo-monitor" class="chamada-titulo">
+        <span>MONITOR DO CAGE</span><span class="chamada-codigo">D·04</span>
+      </h2>
+
+      <div class="chamada-bloco chamada-bloco-falando">
+        <p class="rotulo">FALANDO AGORA</p>
+        <p id="chamada-falando-nome" class="chamada-falando-nome">——</p>
+        <p class="chamada-nota">
+          Halo laranja e a etiqueta TRANSMITINDO marcam a mesma coisa, e são
+          duas porque a cor sozinha não serve. A.T. Field cala a captura sem
+          sair do Cage.
+        </p>
+      </div>
+
+      <!--
+        Os cinco eventos com carimbo do comp. Não há histórico de entrada, saída
+        nem A.T. Field em lugar nenhum do core: `Event::RosterChanged` diz que
+        mudou, não o quê (§16). A seção fica porque ela é metade do que um
+        monitor de Cage é.
+      -->
+      <div class="chamada-bloco chamada-bloco-eventos">
+        <p class="rotulo">EVENTOS DO CAGE</p>
+        <p class="ausente" title="o protocolo avisa que o roster mudou, nunca o que mudou nele">——</p>
+        <p class="legenda-ausente">—— valor que este protocolo não carrega</p>
+      </div>
+
+      <dl class="chamada-pe">
+        <div class="chamada-par">
+          <dt>ATRASO DE SINAL</dt>
+          <dd id="chamada-atraso" class="chamada-atraso">·</dd>
+        </div>
+        <div class="chamada-par">
+          <dt>DISTÚRBIO HARMÔNICO</dt>
+          <dd id="chamada-disturbio">·</dd>
+        </div>
+        <!--
+          `OPUS 96k / 48kHz` no comp. A primeira metade é medida
+          (`bitrate_bps`); a segunda não atravessa a fronteira (§16) — é
+          constante do produto hoje, e não um valor que alguém tenha lido.
+        -->
+        <div class="chamada-par">
+          <dt>CODEC</dt>
+          <dd>
+            <span id="chamada-codec">·</span> /
+            <span class="ausente" title="a taxa de amostragem não atravessa a fronteira">——</span>
+          </dd>
+        </div>
+      </dl>
+    </aside>
+  </div>
+</section>
+
+<!--
   Autenticação — a entrada em Dogma Central, painéis A·02, B·02 e C·02.
 
   Passo próprio, e não uma tarja dentro da sessão (Q8 do inventário: "Tela
@@ -768,6 +1061,14 @@
 <script src="frases.js"></script>
 <script src="tela-boot.js"></script>
 <script src="tela-sessao.js"></script>
+<!--
+  Depois de `tela-sessao.js`, e não é gosto: a chamada usa `naoMedido`,
+  `medido`, `SEM_MEDIDA` e `blocos`, que são declarados lá. Declaração de função
+  sobe dentro do escopo de script, mas `const SEM_MEDIDA` não — e o corpo de
+  topo deste arquivo não os toca, então a ordem só importa para quem vier depois
+  mexer nele.
+-->
+<script src="tela-chamada.js"></script>
 <script src="tela-dogma.js"></script>
 <script src="tela-fim.js"></script>
 <script src="tela-auth.js"></script>

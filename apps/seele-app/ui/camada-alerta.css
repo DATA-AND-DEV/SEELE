@@ -1,0 +1,244 @@
+/* SEELE · Entry Plug — a sobreposição de alerta (`#banner`).
+
+   O comp v2, tela `alerta` (`.superpowers/sdd/comp-inventario.md` §4). Não é
+   uma tela: o inventário registra na linha 281 que `alerta` e `bateria` são
+   **camadas sobre a operação**, e `ehPrincipal` é verdadeiro nas três. Por isso
+   isto continua sendo um `<div>` dentro de `#tela-sessao`, e não uma quinta
+   `<section class="tela">` — trocar de tela apagaria a conversa que o aviso é
+   sobre.
+
+   ---- por que uma folha própria ----
+
+   O elemento é o `#banner` que já existia, e o desenho dele é todo daqui. A
+   `tela-sessao.css` continua com as regras de `.banner`, que este arquivo não
+   sobrescreve nem apaga: a marcação deixou de trazer aquela classe, então
+   aquelas regras não casam com nada. Elas são lixo a recolher por quem estiver
+   com aquele arquivo aberto, e não uma briga de ordem de carga.
+
+   ---- o que muda em relação à faixa de uma linha ----
+
+   O comp pede uma caixa de 720px com três células de metadado e dois botões, e
+   o app tinha uma faixa de uma linha. A geometria abaixo é a do comp, valor por
+   valor, inclusive os `padding` de 20px e 12px que não são múltiplos da célula
+   de 8×16 — o inventário §13 mede essa divergência e conclui que a regra de
+   célula descreve a TUI, e que o espaçamento **interno de componente** do
+   gráfico é múltiplo de 2. É a mesma licença que `tela-sessao.css` já toma em
+   `10px 14px` e `2px 6px`.
+
+   Nenhuma cor literal aqui, nem em regra nem em comentário: `tests/tokens.rs`
+   lê o arquivo inteiro. Os hexadecimais do comp estão citados por nome de
+   token. */
+
+/* ---------- o véu ----------
+
+   `rgba(5,4,3,0.72)` no comp, escrito aqui como o token pintando um
+   pseudo-elemento a 72% — a folha não pode trazer o literal, e `opacity` no
+   próprio `.camada-alerta` desbotaria a caixa junto com o fundo.
+
+   O comp também põe o corpo do app a `opacity: 0.5` **por baixo** deste véu.
+   Não está aqui: 50% embaixo de 72% de negro é uma diferença que não chega ao
+   olho, e a única forma de acender aquela classe seria de dentro de
+   `tela-sessao.js`. O véu sozinho faz o trabalho de dizer que a tela está
+   suspensa. */
+
+.camada-alerta {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.camada-alerta::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--seele-negro-absoluto);
+  opacity: 0.72;
+}
+
+/* ---------- a caixa ----------
+   720px e borda de 2px, como o comp. `--seele-b-forte` é exatamente esses 2px,
+   e o nome é o que diz que ela é a borda de painel ativo e não uma borda
+   qualquer. */
+.alerta-caixa {
+  position: relative;
+  width: 720px;
+  max-width: calc(100vw - 32px);
+  border: var(--seele-b-forte) solid var(--seele-laranja-nerv);
+  background: var(--seele-negro-absoluto);
+}
+
+/* ---------- a cabeça ----------
+   Bloco sólido com texto no negro absoluto — a regra de inversão que o v2
+   endureceu (inventário §12): cabeça de alerta é cartela, e cartela nunca é
+   texto colorido sobre fundo escuro. */
+.alerta-cabeca {
+  display: flex;
+  align-items: stretch;
+  border-bottom: var(--seele-b) solid var(--seele-laranja-nerv);
+}
+
+.alerta-marca {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  background: var(--seele-laranja-nerv);
+  color: var(--seele-negro-absoluto);
+  flex: 0 0 auto;
+}
+
+/* O kanji é acento e nada mais. O comp o diz na própria ficha de banner: "o
+   kanji é acento — a palavra ALERTA carrega a informação". Daí `aria-hidden` na
+   marcação: quem ouve a tela já recebeu ALERTA em latim. */
+.alerta-kanji {
+  font-weight: 900;
+  font-size: 44px;
+  line-height: 1;
+}
+
+.alerta-palavra {
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 34px;
+  letter-spacing: 0.1em;
+}
+
+.alerta-dizeres {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 20px;
+}
+
+.alerta-eixo {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: 0.2em;
+  color: var(--seele-osso-apagado);
+}
+
+/* ---------- a severidade, em palavra ----------
+
+   `specs/05-cliente-tui.md` proíbe informação transmitida só por cor ou só por
+   forma, e a severidade de um `Notice` é informação: `Info`, `Warning` e
+   `Critical` são três coisas diferentes que o core decidiu. Uma borda mais
+   grossa não as separa para quem não enxerga a diferença.
+
+   As três palavras estão na marcação e o `data-severidade` que `desenharAviso`
+   escreve na caixa escolhe qual aparece. Sem `content:` de CSS de propósito —
+   texto gerado é texto que nem toda árvore de acessibilidade expõe, e este é o
+   acompanhante textual, ou seja, exatamente a metade que não pode sumir.
+
+   A caixa inteira é laranja nas três, e isso é do comp: a ficha
+   `BANNER DE ALERTA` dele diz "laranja para menção e identidade; vermelho
+   apenas quando a conexão cai". O vermelho desta interface é da bateria, e
+   `tokens.css` o marca "EXCLUSIVO alerta e queda". */
+.alerta-severidade {
+  display: none;
+  padding: 2px 6px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  background: var(--seele-laranja-nerv);
+  color: var(--seele-negro-absoluto);
+}
+
+#banner[data-severidade="Info"] .alerta-severidade[data-para="Info"],
+#banner[data-severidade="Warning"] .alerta-severidade[data-para="Warning"],
+#banner[data-severidade="Critical"] .alerta-severidade[data-para="Critical"] {
+  display: inline-block;
+}
+
+/* A frase do aviso: `operator_text` quando o Dogma mandou uma, e a frase da
+   razão enumerada quando não. É o único valor desta caixa que tem dado por
+   trás — ver o bloco das células, logo abaixo. */
+.alerta-frase {
+  margin: 0;
+  font-size: var(--seele-t-corpo);
+  line-height: 1.55;
+  color: var(--seele-osso);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- o corpo ---------- */
+
+.alerta-corpo {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+}
+
+/* A borda por gap: `gap: 1px` sobre o fundo de linha, cada célula pintando o
+   negro absoluto por cima. É a técnica do comp, e o inventário §13 a registra
+   como deliberada e incompatível com a grade de célula. */
+.alerta-celulas {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  border: var(--seele-b) solid var(--seele-linha);
+  background: var(--seele-linha);
+}
+
+.alerta-celula {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  background: var(--seele-negro-absoluto);
+  font-size: 12px;
+}
+
+.alerta-rotulo {
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.18em;
+  color: var(--seele-osso-apagado);
+}
+
+/* ---------- os dois botões ----------
+   `RECONHECER` é sólido e faz o que diz: fecha. `EJETAR PLUG DO OPERADOR` é o
+   secundário do comp, em Saira 700 contra 900, e chega aqui desabilitado — ver
+   a marcação. */
+.alerta-botoes { display: flex; gap: 8px; }
+
+.alerta-reconhecer {
+  flex: 1;
+  padding: 12px;
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 16px;
+  letter-spacing: 0.16em;
+  border: 0;
+}
+
+.alerta-ejetar {
+  flex: 1;
+  padding: 12px;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: 16px;
+  letter-spacing: 0.16em;
+  color: var(--seele-osso);
+  background: none;
+  border: var(--seele-b) solid var(--seele-linha-forte);
+  cursor: pointer;
+}
+
+/* Um botão desabilitado que continua parecendo apertável é pior que nenhum
+   botão: ele promete uma ação a cada vez que alguém tenta. O cursor de ajuda
+   leva ao `title`, que é onde está escrito o que faltaria. */
+.alerta-ejetar:disabled {
+  color: var(--seele-osso-apagado);
+  border-color: var(--seele-linha);
+  cursor: help;
+}
+
+.alerta-corpo .legenda-ausente { margin-top: 4px; }

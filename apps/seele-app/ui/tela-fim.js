@@ -17,6 +17,10 @@ function mostrarFim(motivo) {
   // janela, então duas visíveis não se sobrepõem: empilham, e a segunda fica
   // abaixo da dobra onde ninguém a encontra.
   abandonarDogma();
+  // A chamada pela mesma razão, e ela é a mais provável das duas: um operador
+  // que derruba alguém derruba quem está num Cage, que é exatamente quem está
+  // olhando esta tela.
+  abandonarChamada();
   $("tela-fim").hidden = false;
   $("fim-motivo").textContent = MOTIVOS[motivo] ?? "ENLACE ENCERRADO";
 }

@@ -1,0 +1,220 @@
+/* SEELE · Entry Plug — a sobreposição de bateria interna (`#bateria`).
+
+   O comp v2, tela `bateria` (`.superpowers/sdd/comp-inventario.md` §5). Camada
+   sobre a operação, como o alerta, e pela mesma razão (inventário, linha 281):
+   `specs/07-tema-evangelion.md` proíbe fechar ou trocar de tela quando a
+   conexão cai — a interface esmaece, conta cinco minutos, e o histórico
+   continua ali para leitura. Uma tela que substituísse a conversa seria
+   exatamente o que a spec veta.
+
+   **Sem véu**, e a diferença para o alerta é do comp: lá o corpo do app fica
+   atrás de `rgba(5,4,3,0.72)`, aqui ele fica só esmaecido. Ler o que já foi
+   dito é a coisa que esta caixa não pode atrapalhar.
+
+   ---- o esmaecimento fica em 0,55, e o comp pede 0,34 ----
+
+   Divergência deliberada, e a única desta folha. `.na-bateria .paineis` vive em
+   `tela-sessao.css` a `0.55` e não é tocada aqui. O comp põe `opacidadeApp` em
+   `0.34`, e a 34% o osso sobre o painel cai bem abaixo de 4,5:1 — a mesma
+   aritmética que `tests/tokens.rs` já institucionalizou para a varredura, onde
+   um véu de 34% derrubava `vermelho-alerta` de 5,16:1 para 2,70:1. `specs/07`
+   pede a interface "esmaecida mas **ainda legível**", e as duas metades dessa
+   frase não cabem juntas em 34%. Fica 55%, que é o que já estava.
+
+   Nenhuma cor literal aqui, nem em regra nem em comentário — os hexadecimais do
+   comp estão citados por nome de token, e `tests/tokens.rs` lê o arquivo
+   inteiro. */
+
+.camada-bateria {
+  position: fixed;
+  inset: 0;
+  /* Acima do alerta: a queda de conexão é o fato mais forte que esta janela
+     pode relatar, e as duas caixas podem estar acesas ao mesmo tempo. */
+  z-index: 21;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Sem véu, mas também sem interceptar o que não é a caixa: quem quiser rolar
+     o histórico por baixo continua podendo. */
+  pointer-events: none;
+}
+
+.bateria-caixa {
+  pointer-events: auto;
+  width: 680px;
+  max-width: calc(100vw - 32px);
+  border: var(--seele-b-forte) solid var(--seele-vermelho-alerta);
+  background: var(--seele-negro-absoluto);
+}
+
+/* ---------- a cabeça ----------
+   Bloco sólido vermelho com texto no negro absoluto: cartela, e cartela é
+   inversão (inventário §12). */
+.bateria-cabeca {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  background: var(--seele-vermelho-alerta);
+  color: var(--seele-negro-absoluto);
+}
+
+.bateria-nome {
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 24px;
+  letter-spacing: 0.14em;
+}
+
+/* Acento, e nada mais: `内部電源` não carrega informação que `BATERIA INTERNA`
+   não carregue ao lado (inventário §12, a regra de uso da face japonesa). Daí
+   `aria-hidden` na marcação. */
+.bateria-kanji { font-weight: 900; font-size: 16px; }
+
+/* ---------- o corpo de cima ---------- */
+
+.bateria-corpo {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  padding: 24px 20px;
+  border-bottom: var(--seele-b) solid var(--seele-linha);
+}
+
+/* A contagem, em 92px — o maior número desta interface, e o comp o quer assim
+   porque ele é a única coisa nesta caixa que responde à pergunta que se está
+   fazendo: dá tempo de consertar o wifi?
+
+   ---- a piscada ----
+
+   `magiRespiro 1000ms steps(2,end)`, do comp, que é o respiro de 2400ms virado
+   numa piscada dura de 1 Hz. `specs/07-tema-evangelion.md` chama movimento
+   decorativo de erro, e esta não é: ela bate a um por segundo sobre um número
+   que decrementa a um por segundo, ou seja, ela **é** o segundo passando. Um
+   contador parado e um contador correndo se parecem numa foto; com a piscada,
+   não.
+
+   `acessibilidade.css` carrega depois e desliga toda animação sob
+   `prefers-reduced-motion: reduce`. O número continua lá, e continua contando —
+   o que se perde é só a batida. */
+#bateria-conta {
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 92px;
+  line-height: 0.82;
+  letter-spacing: 0;
+  color: var(--seele-vermelho-alerta);
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+  animation: seele-tique-bateria 1000ms steps(2, end) infinite;
+}
+
+@keyframes seele-tique-bateria {
+  0%   { opacity: 1; }
+  50%  { opacity: 0.55; }
+  100% { opacity: 1; }
+}
+
+.bateria-dizeres {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.bateria-dizeres .rotulo { letter-spacing: 0.2em; }
+
+/* A frase é da casca, e é a do comp menos o nome de rota. O comp escreve
+   "Conexão com BALTHASAR perdida"; o inventário §5 classifica a frase inteira
+   como **F/P** — "a frase é da casca, mas nomeia uma rota que não existe".
+   Tirando o nome, o que sobra é verdade inteira. */
+.bateria-frase {
+  margin: 0;
+  font-size: var(--seele-t-dado);
+  line-height: 1.6;
+  color: var(--seele-osso);
+}
+
+/* A barra de 28 blocos do comp. Ela fica desenhada e vazia: `remaining_seconds`
+   chega, o **total** não (inventário §16, "mudança de protocolo (menor)"). Uma
+   barra precisa de denominador, e o único disponível seria o 299 literal do
+   comp — que é a casca chutando a spec e ficando errada no dia em que a spec
+   mudar. A contagem ao lado é a mesma informação sem denominador nenhum. */
+.bateria-barra {
+  margin: 0;
+  font-size: var(--seele-t-dado);
+  letter-spacing: 0.02em;
+}
+
+/* ---------- o corpo de baixo: as tentativas ---------- */
+
+.bateria-pe {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 20px;
+}
+
+.bateria-pe .rotulo {
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.2em;
+}
+
+/* A contagem de tentativas é real — `InternalBattery.attempts` — e é a única
+   coisa que o protocolo carrega sobre elas. Fica em osso e em corpo de dado,
+   porque é o valor medido desta seção. */
+#bateria-tentativas {
+  font-size: var(--seele-t-dado);
+  color: var(--seele-osso);
+}
+
+/* A linha de uma tentativa, nas três colunas do comp — `64px` para o tempo,
+   `150px` para a rota, o resto para o desfecho. As três chegam vazias:
+   `InternalBattery` carrega `attempts: u32` e mais nada (inventário §16).
+   A moldura fica porque apagá-la esconderia que o produto não sabe dizer
+   **por que** cada tentativa falhou, que é justamente o que se quer saber
+   olhando para esta caixa. */
+.bateria-colunas,
+.bateria-tentativa {
+  margin: 0;
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+}
+
+/* O cabeçalho de coluna não está no comp: lá as quatro linhas são literais com
+   `−00:04 BALTHASAR·01 SEM RESPOSTA` e a forma se lê sozinha. Com as três
+   colunas vazias ela não se leria — três travessões em fila não dizem o que
+   cada um deixou de ser. */
+.bateria-colunas { letter-spacing: 0.16em; }
+
+.bateria-colunas > :first-child,
+.bateria-tentativa > :first-child { width: 64px; flex: 0 0 auto; }
+.bateria-colunas > :nth-child(2),
+.bateria-tentativa > :nth-child(2) { width: 150px; flex: 0 0 auto; }
+
+/* `FORÇAR REINSERÇÃO DE PLUG`, desabilitado. O inventário §5 o classifica como
+   **C**: reconectar já é do core — é ele que está tentando, e é dele que vem a
+   contagem acima —, mas não existe verbo de "tenta agora". Um botão que
+   parecesse apertável prometeria acelerar o que já está correndo. */
+.bateria-forcar {
+  margin-top: 12px;
+  padding: 12px;
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 16px;
+  letter-spacing: 0.16em;
+  color: var(--seele-vermelho-alerta);
+  background: none;
+  border: var(--seele-b) solid var(--seele-vermelho-alerta);
+  cursor: pointer;
+}
+
+.bateria-forcar:disabled {
+  color: var(--seele-osso-apagado);
+  border-color: var(--seele-linha-forte);
+  cursor: help;
+}
+
+.bateria-pe .legenda-ausente { margin-top: 4px; }

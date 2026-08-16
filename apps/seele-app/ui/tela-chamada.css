@@ -1,0 +1,446 @@
+/* SEELE · Entry Plug — a tela de chamada (`#tela-chamada`).
+
+   O comp v2, tela `chamada` (`.superpowers/sdd/comp-inventario.md` §6): a grade
+   de quem está no Cage, com forma de onda por pessoa, sincronia, volume, e o
+   monitor do Cage à direita. O inventário §15 a registrava como **ausente por
+   inteiro**.
+
+   Tela própria, e não uma camada — ao contrário do alerta e da bateria. Ela
+   substitui a conversa em vez de se sobrepor a ela, e é assim no comp
+   (`ehChamada` é exclusivo de `ehPrincipal`): olhar quem está falando e ler a
+   Linha são duas coisas diferentes que ninguém faz ao mesmo tempo.
+
+   Carrega depois de `base.css` e antes de `acessibilidade.css`, como toda folha
+   de tela. Nenhuma cor literal, nem em regra nem em comentário: `tests/tokens.rs`
+   lê o arquivo inteiro, e os hexadecimais do comp estão citados por nome de
+   token.
+
+   ---- as duas colunas ----
+
+   O comp pede `1fr 316px`. Aqui é `1fr 320px`, pela mesma aritmética que
+   `tela-sessao.css` já aplicou à quarta coluna dela: 320 é o múltiplo de 8 mais
+   próximo de 316, e as duas colunas de 320 alinham entre as duas telas — a
+   Taxa de Sincronização e o Monitor do Cage ocupam a mesma faixa da janela, e
+   trocar de tela não desloca a borda.
+
+   ---- as barras de 48px ----
+
+   O comp põe 56px na barra de cima e 64px na de ações. 56 não é múltiplo da
+   célula de 16 e 48 é; a barra de ações fica em 64, que é múltiplo dos dois
+   lados. Mesma decisão, mesmo argumento e mesmo lugar que `.topo` em
+   `tela-sessao.css`, e é o que faz o cabeçalho não pular ao trocar de tela. */
+
+.chamada {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  min-height: 0;
+}
+
+.chamada-cage {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-right: var(--seele-b) solid var(--seele-linha);
+}
+
+/* ---------- a barra de cima ---------- */
+
+.chamada-barra {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  height: 48px;
+  padding: 0 20px;
+  border-bottom: var(--seele-b) solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+  flex: 0 0 auto;
+}
+
+/* O nome do Cage é cartela: bloco sólido laranja com texto no negro absoluto.
+   Inventário §12 — no v2 tudo que é cartela é inversão, e o nome do Cage nesta
+   tela é nomeado ali explicitamente como um dos casos. */
+.chamada-cartela {
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: var(--seele-t-secao);
+  letter-spacing: 0.06em;
+  padding: 5px 10px;
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-laranja-nerv);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+/* Sem plug inserido não há Cage para nomear, e uma cartela laranja em volta de
+   um travessão pareceria o nome de um Cage chamado `——`. Ela volta a ser
+   contorno. */
+.chamada-cartela.ausente {
+  background: none;
+  border: var(--seele-b) solid var(--seele-linha-forte);
+}
+
+.chamada-campo {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: 0.18em;
+  color: var(--seele-osso-apagado);
+}
+
+.chamada-barra .rotulo { font-size: var(--seele-t-rotulo); letter-spacing: 0.18em; }
+
+.chamada-vao { flex: 1; }
+
+/* ---------- a grade de cartões ----------
+
+   O comp corta o roster em `slice(0,4)` e é sempre 2×2. Aqui a grade tem duas
+   colunas e rola: um Cage tem `limit` assentos e nada garante que sejam quatro,
+   e esconder o quinto piloto é a única forma de esta tela mentir sobre quem
+   está na sala. `grid-auto-rows` guarda a altura mínima do cartão do comp para
+   que dois pilotos não virem duas faixas achatadas. */
+.chamada-grade {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  grid-auto-rows: minmax(224px, 1fr);
+}
+
+.chamada-cartao {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 24px;
+  min-width: 0;
+  border-right: var(--seele-b) solid var(--seele-linha);
+  border-bottom: var(--seele-b) solid var(--seele-linha);
+}
+
+/* O halo do comp: `inset 0 0 0 2px` em laranja quando a pessoa transmite, mais
+   o fundo de bloco em carga. Nunca sozinho — a etiqueta do canto diz
+   `TRANSMITINDO` em palavra, que é o acompanhante textual que
+   `specs/05-cliente-tui.md` exige de toda faixa colorida. */
+.chamada-cartao.falando {
+  background: var(--seele-laranja-carga);
+  box-shadow: inset 0 0 0 var(--seele-b-forte) var(--seele-laranja-nerv);
+}
+
+/* Um Cage vazio, ou nenhum plug inserido. Ocupa a grade inteira. */
+.chamada-vazio {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-osso-apagado);
+}
+
+.cartao-topo {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.cartao-identidade {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* Saira 700, e não 900: o inventário §12 reserva o 700 para nome próprio dentro
+   de lista, e 22px é o tamanho que o comp dá ao nome no cartão de chamada. */
+.cartao-nome {
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: 22px;
+  letter-spacing: 0.08em;
+  color: var(--seele-osso);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cartao-tag {
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.16em;
+}
+
+/* A etiqueta do canto. Contorno, e não bloco sólido: no comp ela é
+   `border:1px solid` com texto colorido, e é o único elemento do cartão que não
+   é cartela — o cartão inteiro já é a inversão quando a pessoa fala. */
+.cartao-estado {
+  padding: 4px 8px;
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.14em;
+  border: var(--seele-b) solid var(--seele-linha-forte);
+  color: var(--seele-osso-apagado);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.cartao-estado[data-estado="at"] {
+  border-color: var(--seele-laranja-nerv);
+  color: var(--seele-laranja-nerv);
+}
+
+.cartao-estado[data-estado="fala"] {
+  border-color: var(--seele-laranja-nerv);
+  background: var(--seele-laranja-nerv);
+  color: var(--seele-negro-absoluto);
+}
+
+/* ---------- a forma de onda que não existe ----------
+
+   26 barras animadas no comp, e o inventário §16 é curto sobre elas:
+   `Telemetry.input_level` é escalar e é **só a nossa** entrada. Amplitude por
+   fonte não atravessa a fronteira e não é derivável de nada que atravesse.
+
+   A moldura de 64px fica, porque ela é metade do que este cartão é — e o
+   travessão dentro dela diz que ninguém mediu. Vinte e seis barras desenhadas
+   no mínimo seriam 26 afirmações de silêncio; vinte e seis barras oscilando
+   seriam 26 mentiras animadas. */
+.cartao-onda {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 64px;
+  border: var(--seele-b) solid var(--seele-linha);
+  font-size: var(--seele-t-dado);
+}
+
+.cartao-base {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cartao-sync {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.cartao-sync .rotulo {
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.2em;
+}
+
+.cartao-numero { display: flex; align-items: baseline; gap: 6px; }
+
+/* A marca de bloco fica em face monoespaçada ao lado do número porque a Saira
+   Condensed, que desenha o número, não tem `U+2588`. É ela que carrega a faixa
+   quando não há cor (`specs/05-cliente-tui.md`) — mesma construção do roster da
+   tela de operação. */
+.cartao-marca {
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.cartao-valor {
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 30px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.cartao-barra { font-size: 11px; letter-spacing: 0.02em; }
+
+/* A faixa pinta o número e a barra, nunca o nome. As três são as do core
+   (`SyncBand`), decididas lá — esta folha não conhece limiar nenhum. */
+.chamada-cartao[data-faixa="Nominal"] .cartao-numero,
+.chamada-cartao[data-faixa="Nominal"] .cartao-barra { color: var(--seele-sync-nominal); }
+.chamada-cartao[data-faixa="Degraded"] .cartao-numero,
+.chamada-cartao[data-faixa="Degraded"] .cartao-barra { color: var(--seele-sync-degradado); }
+.chamada-cartao[data-faixa="Critical"] .cartao-numero,
+.chamada-cartao[data-faixa="Critical"] .cartao-barra { color: var(--seele-sync-critico); }
+
+/* A linha de volume. `VOL ▓▓▓ 82%` no comp; aqui o valor falta, porque
+   `set_volume` escreve e **nada lê** (inventário §16, "comando novo"). O que a
+   casca tem é a última coisa que ela mesma mandou, que se perde ao reconectar —
+   desenhar isso como leitura seria desenhar a própria lembrança como medida.
+   O controle que existe continua onde estava: no deslizante do roster. */
+.cartao-vol {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: var(--seele-b) solid var(--seele-linha);
+  font-size: 11px;
+}
+
+.cartao-vol .rotulo {
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.16em;
+}
+
+/* ---------- a barra de ações ---------- */
+
+.chamada-acoes {
+  display: flex;
+  align-items: stretch;
+  height: 64px;
+  border-top: var(--seele-b) solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+  flex: 0 0 auto;
+}
+
+.chamada-acao {
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: 17px;
+  letter-spacing: 0.14em;
+  padding: 0 24px;
+  color: var(--seele-osso);
+  background: none;
+  border: 0;
+  border-right: var(--seele-b) solid var(--seele-linha);
+  cursor: pointer;
+}
+
+.chamada-acao:disabled { color: var(--seele-osso-apagado); cursor: default; }
+.chamada-acao:focus-visible { outline: var(--seele-b-forte) solid var(--seele-osso); outline-offset: -4px; }
+
+/* O A.T. Field. O rótulo diz em que estado ele **está**, e não o que apertá-lo
+   vai fazer — a mesma regra da tira do operador na tela de operação. Aceso, ele
+   é cartela: bloco sólido laranja com texto no negro absoluto. */
+.chamada-acao-at { font-weight: 900; padding: 0 28px; }
+
+.chamada-acao-at[data-ativo="sim"] {
+  background: var(--seele-laranja-nerv);
+  color: var(--seele-negro-absoluto);
+}
+
+.chamada-acao-surdez[data-ativo="sim"] {
+  background: var(--seele-osso);
+  color: var(--seele-negro-absoluto);
+}
+
+.chamada-acao-voltar {
+  color: var(--seele-osso-apagado);
+  border-right: 0;
+  border-left: var(--seele-b) solid var(--seele-linha);
+}
+
+.chamada-acao-ejetar {
+  font-weight: 900;
+  padding: 0 32px;
+  background: var(--seele-vermelho-alerta);
+  color: var(--seele-negro-absoluto);
+  border-right: 0;
+}
+
+/* ---------- coluna 2: o monitor do Cage ---------- */
+
+.chamada-monitor {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--seele-negro-painel);
+}
+
+.chamada-titulo {
+  margin: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: var(--seele-b) solid var(--seele-linha);
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-micro);
+  font-weight: normal;
+  letter-spacing: 0.2em;
+  /* Laranja, e é do comp: dos rótulos de 9px desta tela, só este é aceso — ele
+     é o nome do painel inteiro. */
+  color: var(--seele-laranja-nerv);
+  flex: 0 0 auto;
+}
+
+/* A coordenada continua apagada de propósito: ela é o endereço do painel numa
+   conversa sobre a tela, e não informação necessária para operá-lo. Mesmo
+   argumento que `.painel-codigo` na tela de operação. */
+.chamada-codigo {
+  letter-spacing: 0.02em;
+  color: var(--seele-osso-apagado);
+}
+
+.chamada-bloco {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+.chamada-bloco-falando { border-bottom: var(--seele-b) solid var(--seele-linha); }
+.chamada-bloco-eventos { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+
+.chamada-monitor .rotulo {
+  margin: 0;
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.2em;
+}
+
+/* Quem está falando agora, em 30px. Vem de `pilots.filter(speaking)`, que o
+   snapshot carrega inteiro — é medida, não ausência, e por isso o silêncio se
+   escreve `NINGUÉM` e não com travessão. */
+.chamada-falando-nome {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 30px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: var(--seele-laranja-nerv);
+  overflow-wrap: anywhere;
+}
+
+.chamada-falando-nome.ausente { font-size: var(--seele-t-secao); }
+
+.chamada-nota {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--seele-osso-apagado);
+}
+
+/* ---------- o rodapé do monitor ---------- */
+
+.chamada-pe {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 16px;
+  border-top: var(--seele-b) solid var(--seele-linha);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.chamada-par { display: flex; justify-content: space-between; gap: 8px; }
+.chamada-par dt { color: var(--seele-osso-apagado); }
+.chamada-par dd { margin: 0; color: var(--seele-osso); text-align: right; }
+
+/* `ATRASO DE SINAL` é o RTT desta conexão, e ele é o único campo desta tela
+   que o comp pinta em fósforo. A faixa dele não vem do core — `SyncBand` é da
+   sincronia, não da latência —, então a cor aqui é do nome do campo e não de um
+   limiar que esta folha estaria inventando.
+
+   `:not(.ausente)` porque um travessão em fósforo pareceria uma medida boa: a
+   ausência tem cor própria, e ela é a de `base.css`. */
+.chamada-par dd.chamada-atraso:not(.ausente) { color: var(--seele-fosforo); }

@@ -272,8 +272,24 @@ fn the_shared_layer_loads_before_the_screens_and_accessibility_loads_last() {
 
     let base = position(&sheets, "base.css");
     let accessibility = position(&sheets, "acessibilidade.css");
+    // Every sheet between the two ends, and not only the ones named `tela-`.
+    // The prefix was the rule while every sheet was a screen; the alert and the
+    // battery are *layers* over the session rather than screens of their own,
+    // so they are named `camada-` — and under the old filter they were the one
+    // kind of file this check silently skipped. A guard that has to be told
+    // about each new naming convention is a guard that stops holding on the
+    // first convention somebody adds.
     for (at, sheet) in sheets.iter().enumerate() {
-        if !sheet.starts_with("tela-") {
+        // `href` also carries the favicon, which is an SVG and has no place in a
+        // cascade order at all. `tokens.css` and `fontes.css` declare rather
+        // than paint and belong *before* `base.css` on purpose — the same two
+        // `styles()` leaves out, for the same reason.
+        if !sheet.ends_with(".css")
+            || matches!(
+                sheet.as_str(),
+                "base.css" | "acessibilidade.css" | "tokens.css" | "fontes.css"
+            )
+        {
             continue;
         }
         assert!(
@@ -1083,4 +1099,284 @@ fn attribute(tag: &str, name: &str) -> Option<String> {
     let (_, after) = tag.split_once(&format!("{name}=\""))?;
     let (value, _) = after.split_once('"')?;
     Some(value.to_owned())
+}
+
+/// The opening tag of the element carrying `id`.
+///
+/// Comments are stripped first for the reason the rest of this file strips
+/// them: several of these ids are named in the prose above the element they
+/// belong to, and a check satisfied by an explanation is a check that cannot
+/// fail.
+fn tag_with_id(page: &str, id: &str) -> String {
+    let page = without_comments(page);
+    let Some(after) = page.split(&format!("id=\"{id}\"")).nth(1) else {
+        panic!("index.html has no element with id `{id}`");
+    };
+    let Some(rest) = after.split('>').next() else {
+        panic!("unterminated tag for id `{id}`");
+    };
+    rest.to_owned()
+}
+
+#[test]
+fn the_alert_and_the_battery_are_layers_over_the_session_and_not_screens() {
+    // The comp's inventory settles this on line 281: `alerta` and `bateria` are
+    // layers over `principal`, and `ehPrincipal` is true for all three. They are
+    // not screens.
+    //
+    // Promoting either to a `<section class="tela">` is the tempting mistake —
+    // both are full-window overlays now, and both would *look* right as
+    // screens. What breaks is invisible in a screenshot: `specs/07` forbids this
+    // client from replacing the conversation when the link drops ("a interface
+    // esmaece … e o histórico continua ali para leitura"), and a screen replaces
+    // it by definition. So the guard is structural: they have to live inside
+    // `#tela-sessao`.
+    //
+    // The call screen pins the opposite decision in the same test, because the
+    // two are decided together and drift apart otherwise: it *does* replace the
+    // conversation, so it must not be nested in the session.
+    let page = read("ui/index.html");
+    let Some(after) = page.split("id=\"tela-sessao\"").nth(1) else {
+        panic!("index.html no longer has the session screen");
+    };
+    let Some(session) = after.split("<section ").next() else {
+        panic!("the session screen is never closed by another section");
+    };
+
+    for id in ["banner", "bateria"] {
+        assert!(
+            session.contains(&format!("id=\"{id}\"")),
+            "`{id}` is drawn outside `#tela-sessao`, so it is a screen and not a \
+             layer — and a screen replaces the history that specs/07 says has to \
+             stay readable while the link is down"
+        );
+    }
+
+    assert!(
+        !session.contains("id=\"tela-chamada\""),
+        "the call screen is nested inside the session, so it is a layer — but it \
+         replaces the Line's history instead of sitting over it, which is the one \
+         thing a layer must not do"
+    );
+}
+
+#[test]
+fn the_severity_of_a_notice_reads_without_colour() {
+    // `specs/05-cliente-tui.md` forbids information carried by colour alone, and
+    // the severity of a `Notice` is information: the core decided between three
+    // values and the shell has to show which one. The alert box is one orange
+    // box for all three — the comp's own legend says orange for mention and
+    // identity, red only for a dropped link — so nothing about the box's paint
+    // separates them. The word has to.
+    //
+    // Built from the real enum, so renaming a variant fails here instead of
+    // leaving a `data-para` that matches nothing and a chip that never shows.
+    let page = without_comments(&read("ui/index.html"));
+    let css = styles();
+
+    let mut words = BTreeSet::new();
+    for severity in [
+        seele_ffi::Severity::Info,
+        seele_ffi::Severity::Warning,
+        seele_ffi::Severity::Critical,
+    ] {
+        let Ok(json) = serde_json::to_string(&severity) else {
+            panic!("Severity does not serialise, so no shell can read it at all");
+        };
+        let name = json.trim_matches('"').to_owned();
+
+        let marker = format!("data-para=\"{name}\">");
+        let Some(word) = page
+            .split(&marker)
+            .nth(1)
+            .and_then(|rest| rest.split('<').next())
+        else {
+            panic!(
+                "the page has no chip for severity `{name}`, so that severity \
+                 arrives with nothing but the same orange box as the other two"
+            );
+        };
+        assert!(
+            !word.trim().is_empty(),
+            "the chip for severity `{name}` is empty"
+        );
+        assert!(
+            css.contains(&format!("data-severidade=\"{name}\"")),
+            "nothing in the stylesheet reveals the chip for severity `{name}`, so \
+             the word is in the markup and never on the screen"
+        );
+        words.insert(word.trim().to_owned());
+    }
+
+    assert_eq!(
+        words.len(),
+        3,
+        "two severities are written with the same word, so the box cannot tell \
+         them apart at all: {words:?}"
+    );
+}
+
+#[test]
+fn the_two_buttons_with_no_command_behind_them_cannot_be_pressed() {
+    // Both are drawn because the comp draws them, and both are disabled because
+    // nothing in this product can carry them out. `EJETAR PLUG DO OPERADOR` has
+    // no moderation verb — `EndReason::Kicked` exists for the person receiving
+    // one, and there is no way to emit it — and `FORÇAR REINSERÇÃO DE PLUG` has
+    // no "try now": the core is already retrying, which is where the attempt
+    // count above the button comes from.
+    //
+    // The comp wires both to a handler that closes the box, which is the worst
+    // of the available readings: a button that looks like it acts, and does
+    // nothing. Enabling either of these here reproduces exactly that.
+    let page = read("ui/index.html");
+
+    for id in ["alerta-ejetar", "bateria-forcar"] {
+        let tag = tag_with_id(&page, id);
+        assert!(
+            tag.contains("disabled"),
+            "`{id}` is pressable, and there is no command behind it — so it is a \
+             button that looks like it acts and does nothing: <{tag}>"
+        );
+        assert!(
+            tag.contains("title=\""),
+            "`{id}` is disabled and says nothing about why, which reads as a bug \
+             rather than as a gap: <{tag}>"
+        );
+    }
+
+    // And nothing may quietly wire them up instead of enabling them.
+    let script = without_comments(&scripts());
+    for id in ["alerta-ejetar", "bateria-forcar"] {
+        assert!(
+            !script.contains(&format!("$(\"{id}\")")),
+            "a script reaches for `{id}`, so the disabled button grew a listener \
+             — which is the comp's mistake, one layer down"
+        );
+    }
+}
+
+#[test]
+fn the_alert_box_does_not_spend_the_red_reserved_for_a_dropped_link() {
+    // `tokens.css:19` marks the red "EXCLUSIVO alerta e queda", and the comp's
+    // own banner legend narrows it further: "laranja para menção e identidade;
+    // vermelho apenas quando a conexão cai". The battery box is the red one.
+    //
+    // The tempting change is to escalate `Severity::Critical` to red, and it is
+    // exactly what teaches people to read the battery's red as "some notice",
+    // on the day it means the session is being held in memory.
+    //
+    // Comments are stripped from both sides, and that is load-bearing rather
+    // than tidy: the alert sheet has to be able to write down *why* it is not
+    // red, and the paragraph saying so names the token. A guard a comment can
+    // trip is as broken as a guard a comment can satisfy.
+    let sheet = without_comments(&read("ui/camada-alerta.css"));
+    assert!(
+        !sheet.contains("vermelho"),
+        "the alert layer paints with the token reserved for alarm and collapse, \
+         which is the battery's colour and nothing else's"
+    );
+    assert!(
+        without_comments(&read("ui/camada-bateria.css")).contains("vermelho"),
+        "the battery layer no longer uses the red that is the whole point of it"
+    );
+}
+
+#[test]
+fn a_pilot_card_passes_the_band_through_and_never_measures_anything_itself() {
+    // Two failures in one function, both silent.
+    //
+    // The first is the one `crates/seele-ffi/src/types.rs:58-79` argues against
+    // by name: the comp calls `corSync(media)` in the shell, and a shell that
+    // knows "85 is nominal" is a shell that will disagree with the terminal the
+    // day one of the two is updated. The band arrives decided; this card may
+    // only pass it on.
+    //
+    // The second is drawing what nobody measured. `Telemetry.input_level` is a
+    // scalar and it is *ours* — amplitude per pilot does not cross — and
+    // `set_volume` writes with nothing reading back. Twenty-six bars driven by
+    // our own microphone would animate convincingly under somebody else's name.
+    //
+    // Scoped to the function that builds one card, because the file as a whole
+    // says all of these words either way: the paragraph explaining why the
+    // waveform is empty would satisfy an unscoped search for it.
+    let body = body_of(&scripts(), "function cartaoDoPiloto");
+
+    assert!(
+        body.contains("piloto.sync_band"),
+        "the card no longer reads the band the core decided"
+    );
+    for threshold in ["Nominal", "Degraded", "Critical"] {
+        assert!(
+            !body.contains(threshold),
+            "the card names the band `{threshold}` itself, which is the shell \
+             deciding a threshold the core already decided"
+        );
+    }
+
+    assert!(
+        !body.contains("input_level"),
+        "the card draws a per-pilot waveform out of this machine's own input \
+         level, which is one number, and ours"
+    );
+    for missing in ["SEM_DADO.onda", "SEM_DADO.volume"] {
+        assert!(
+            body.contains(missing),
+            "the card no longer marks `{missing}` as unmeasured, so it is either \
+             drawing a value nothing carries or hiding that the gap exists"
+        );
+    }
+}
+
+#[test]
+fn the_battery_bar_stays_empty_because_nothing_carries_its_total() {
+    // `remaining_seconds` crosses; the total does not. The comp divides by a
+    // literal 299, which is the shell guessing the spec and being wrong the day
+    // the spec changes — and the count beside the bar is already the same
+    // information with no denominator at all.
+    //
+    // Two halves, because either one alone passes while the defect is present:
+    // the element has to be marked absent, *and* no script may fill it.
+    let page = without_comments(&read("ui/index.html"));
+    let script = without_comments(&scripts());
+
+    let Some(after) = page.split("class=\"bateria-barra").nth(1) else {
+        panic!(
+            "index.html no longer draws the battery bar at all — the frame is \
+                what makes the gap visible"
+        );
+    };
+    let Some(tag) = after.split('>').next() else {
+        panic!("unterminated battery bar tag");
+    };
+    assert!(
+        tag.contains("ausente"),
+        "the battery bar is drawn as a measured value: <{tag}>"
+    );
+    assert!(
+        tag.contains("title=\""),
+        "the battery bar is empty and says nothing about why: <{tag}>"
+    );
+    assert!(
+        !script.contains("bateria-barra"),
+        "a script writes into the battery bar, so it is being filled from a \
+         denominator this protocol never sent"
+    );
+}
+
+#[test]
+fn ending_the_session_takes_the_call_screen_down_with_it() {
+    // Every `.tela` is `height: 100vh`, so two visible ones do not overlap: they
+    // stack, and the second sits below the fold where nobody finds it. A session
+    // can end with the call screen open — that is precisely who gets kicked, the
+    // person sitting in a Cage — and `mostrarFim` picks the next screen on its
+    // own.
+    //
+    // Scoped to `mostrarFim`, because `tela-chamada.js` names the function in
+    // its own declaration and in the paragraph above it either way.
+    let body = body_of(&scripts(), "function mostrarFim");
+    assert!(
+        body.contains("abandonarChamada"),
+        "the end-of-session screen does not take the call screen down, so the two \
+         stack and the reason the session ended lands below the fold"
+    );
 }
