@@ -325,11 +325,31 @@ input:focus {
 
    `.dica` some quando o modo está desligado, e some de verdade — `display:none`
    e não `opacity`, porque um leitor de tela deve parar de anunciá-la junto. */
+/* Tamanho e cor de texto que se lê, e não de régua.
+
+   A primeira versão desta regra saiu em `t-micro` (9px) e `rotulo-painel`, que
+   resolve em `osso-apagado`. Os dois estavam errados pelo mesmo motivo, e o
+   motivo é o propósito da camada: ela existe para explicar o app a quem não o
+   conhece, e foi escrita para ficar **ligada por omissão**. Desenhá-la no
+   tamanho das coordenadas e numa cor que o próprio token anota como «4,11:1 só
+   texto grande» é escrever a explicação em letra que a pessoa explicada não lê.
+
+   `docs/tokens-achados.md` já tinha decidido isto sem saber: a pendência do
+   `osso-apagado` diz que a saída é subir a cor **ou garantir que nada
+   necessário dependa só dela**. Uma dica é necessária por definição.
+
+   A hierarquia contra o rótulo que ela explica continua existindo, e vem da
+   tipografia em vez da legibilidade: o rótulo é Saira em caixa alta com
+   tracking largo, a dica é monoespaçada em caixa baixa. Isso separa os dois sem
+   precisar que um deles seja difícil de ler.
+
+   Isto diverge do comp, que desenha a dica apagada. A maquete foi feita sem os
+   números de contraste desta paleta; a folha de achados foi feita com eles. */
 .dica {
   display: none;
-  font-size: var(--seele-t-micro);
-  line-height: 1.35;
-  color: var(--seele-rotulo-painel);
+  font-size: var(--seele-t-dado);
+  line-height: 1.4;
+  color: var(--seele-osso);
 }
 
 body.legendas-simples .dica { display: block; }

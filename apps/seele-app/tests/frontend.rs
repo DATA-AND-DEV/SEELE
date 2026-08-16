@@ -1477,6 +1477,40 @@ fn classes_defined_in(css: &str) -> BTreeSet<String> {
 }
 
 #[test]
+fn the_hint_layer_is_not_painted_in_the_colour_reserved_for_large_text() {
+    // The hint layer explains the app to somebody who does not know it, and it
+    // is on by default. Painting it in `osso-apagado` — which `tokens.css`
+    // annotates in its own line as "4,11:1 só texto grande" — writes the
+    // explanation in type the explained person cannot read.
+    //
+    // `docs/tokens-achados.md` settled this before the layer existed: the
+    // pending choice on that colour is to raise it *or* to make sure nothing
+    // necessary depends on it alone. A hint is necessary by definition.
+    //
+    // The check is on the token name and not on a computed ratio, deliberately.
+    // A ratio computed here would have to be recomputed the day the palette
+    // moves, and would then measure a number nobody had decided; the name is
+    // what the decision was actually about.
+    let sheet = read("ui/base.css");
+    let Some(after) = sheet.split("\n.dica {").nth(1) else {
+        panic!("base.css no longer declares `.dica`, so the hint layer has no owner");
+    };
+    let Some(rule) = after.split('}').next() else {
+        panic!("the `.dica` rule is never closed");
+    };
+
+    for dim in ["osso-apagado", "rotulo-painel"] {
+        assert!(
+            !rule.contains(dim),
+            "`.dica` is painted with `{dim}`, which tokens.css marks as large-text \
+             only at 4,11:1. This layer is small, prose, and on by default — it is \
+             the one thing on screen that has to be legible to somebody who does \
+             not already know the app.\n{rule}"
+        );
+    }
+}
+
+#[test]
 fn the_hint_layer_is_defined_once_and_never_by_a_screen() {
     // `LEGENDAS SIMPLES` is the v3 comp's answer to an interface nobody could
     // work out: a short line beside each control saying what it does, shown by
