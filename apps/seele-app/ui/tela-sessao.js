@@ -726,11 +726,9 @@ function linhaDoRoster(piloto, temAudio) {
   const identidade = elemento("span", "piloto-identidade");
   identidade.append(elemento("span", "piloto-nome", piloto.nome));
 
-  // `MELCHIOR·01` no comp. `Pilot` não tem o subsistema que atende o piloto, e
-  // o protocolo não carrega qual seria.
-  const tag = elemento("span", "piloto-tag");
-  naoMedido(tag, "o protocolo não diz qual subsistema atende cada piloto");
-  identidade.append(tag);
+  // `MELCHIOR·01`, o subsistema por piloto, não entra. O protocolo não diz qual
+  // atende quem, e um travessão explicado em toda linha do roster é o ruído que
+  // o v3 veio tirar desta tela.
 
   const numero = elemento("span", "piloto-sync");
   // A marca de bloco antes do número, pela mesma razão que na média: a Saira
@@ -747,15 +745,11 @@ function linhaDoRoster(piloto, temAudio) {
   const barra = elemento("span", "barra", blocos(piloto.ratio, 20));
   barra.setAttribute("aria-hidden", "true");
 
+  // O `ATRASO` por piloto do comp não entra. `Telemetry` é a **nossa** conexão:
+  // `rtt_ms` é um número só, e latência por par não atravessa a fronteira nem é
+  // derivável de nada que atravesse (inventário v3 §1.3). O rodapé fica com o
+  // que existe.
   const rodape = elemento("span", "piloto-rodape");
-  const atraso = elemento("span", "piloto-atraso");
-  atraso.append(elemento("b", "rotulo-micro", "ATRASO"), document.createTextNode(" "));
-  const valorAtraso = elemento("span", null);
-  // `Telemetry` é a **nossa** conexão. Latência por par não atravessa a
-  // fronteira e não é derivável de nada que atravesse.
-  naoMedido(valorAtraso, "o RTT medido é o desta máquina, não o de cada piloto");
-  atraso.append(valorAtraso);
-
   const estados = elemento("span", "piloto-estados");
   // A pastilha do comp: bloco sólido com texto no negro absoluto, e não texto
   // colorido. `PLUG EJETADO` é o quarto estado do comp e não aparece aqui —
@@ -780,7 +774,7 @@ function linhaDoRoster(piloto, temAudio) {
     estados.append(surdez);
   }
 
-  rodape.append(atraso, estados);
+  rodape.append(estados);
   item.append(cabeca, barra, rodape);
 
   // Volume por pessoa (`specs/03-audio.md`).

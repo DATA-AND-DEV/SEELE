@@ -993,8 +993,6 @@
   white-space: nowrap;
 }
 
-.piloto-tag { font-size: var(--seele-t-micro); letter-spacing: 0.1em; }
-
 .piloto-sync { display: flex; align-items: baseline; gap: 6px; flex: 0 0 auto; }
 
 .piloto-sync-valor {
@@ -1017,17 +1015,17 @@
 
 .piloto .barra { font-size: 11px; letter-spacing: 0.02em; }
 
+/* `flex-end` e não `space-between`: o `ATRASO` que ocupava a esquerda saiu com
+   a regra de omissão, e um `space-between` de um filho só o encosta à esquerda,
+   que é onde as pastilhas não estavam. */
 .piloto-rodape {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   gap: 8px;
   font-size: var(--seele-t-micro);
   letter-spacing: 0.12em;
 }
-
-.piloto-atraso { color: var(--seele-osso-apagado); }
-.rotulo-micro { font-weight: normal; }
 
 .piloto-estados { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 
