@@ -306,8 +306,8 @@
       comp, e o nome do Dogma é a primeira coisa que o desenho diz.
     -->
     <span class="topo-dogma">
-      <span id="dogma-nome" class="dogma-nome">—</span>
-      <span id="dogma-sub" class="dogma-sub">DOGMA CENTRAL</span>
+      <span id="topo-dogma-nome" class="topo-dogma-nome">—</span>
+      <span id="topo-dogma-sub" class="topo-dogma-sub">DOGMA CENTRAL</span>
     </span>
     <span class="topo-bloco">
       <span id="padrao" class="padrao">PADRÃO: AZUL</span>
@@ -330,8 +330,13 @@
     -->
     <button id="botao-chamada" class="botao-fantasma" type="button"
             title="a grade do Cage, um cartão por piloto">CHAMADA</button>
-    <button id="botao-dogma-sessao" class="botao-fantasma" type="button"
-            title="configuração local desta máquina">DOGMA</button>
+    <!--
+      O `DOGMA` que ficava aqui virou a engrenagem no rodapé da coluna de
+      canais, que é onde o comp v3 a põe: a configuração é do operador, e o
+      operador está lá embaixo. O `id` não mudou — `tela-dogma.js` registra o
+      ouvinte dele por nome, e mudar o nome só para mudar de lugar quebraria
+      outra tela sem necessidade.
+    -->
     <!--
       A saída, escrita. «DESCONECTAR» e não «SAIR» porque esta tela já tem um
       botão chamado `DOGMA`, e «sair do Dogma» ao lado dele leria como sair da
@@ -551,68 +556,122 @@
   </div>
 
   <!--
-    As quatro colunas do comp, nas larguras dele: a trilha de Dogmas, os canais,
-    a Linha aberta, e a Taxa de Sincronização.
+    As quatro colunas do comp v3, nas larguras dele — `60px 268px minmax(0,1fr)
+    328px`: a trilha de Dogmas, os canais, a Linha aberta, e a Taxa de
+    Sincronização.
   -->
   <main class="paineis">
     <!--
-      A trilha de Dogmas. O comp desenha quatro botões — `T3 / NV / GH / +` —
-      porque lá se está em vários Dogmas ao mesmo tempo. Aqui ela tem um, e é o
-      que o produto tem: `Session` guarda **um** `Plug`, e `connect` devolve
+      A trilha de Dogmas (comp v3 §6.1). O comp desenha um cabeçalho `REDES`,
+      um botão de 56px por Dogma, e um `+` de 48px. Aqui há um Dogma, e é o que
+      o produto tem: `Session` guarda **um** `Plug`, e `connect` devolve
       `AlreadyConnected` se já houver um (inventário §16, "mudança de
-      arquitetura"). A trilha fica com o que existe em vez de ser trocada por um
-      painel que o comp não tem — quando o segundo Plug existir, ela já é o
-      lugar dele.
+      arquitetura"). A trilha fica com o que existe — quando o segundo Plug
+      existir, ela já é o lugar dele.
 
-      A sigla é do comp: `TÓQUIO-3` vira `T3` porque a coluna tem 56px e não
+      A sigla é do comp: `TÓQUIO-3` vira `T3` porque a coluna tem 60px e não
       cabe um nome. Ela é abreviação de desenho e não um dado — o nome inteiro
       está escrito no cabeçalho, a dois centímetros daqui, e também no
       `aria-label` deste botão, que é o que um leitor de tela anuncia.
     -->
-    <nav class="trilha" aria-label="Dogmas">
+    <nav class="trilha" aria-labelledby="trilha-titulo">
+      <h2 id="trilha-titulo" class="trilha-titulo">REDES</h2>
       <button id="trilha-dogma" class="trilha-item trilha-atual" type="button"
               aria-current="true" disabled>—</button>
       <!--
-        Aqui havia um `+`, o do comp, que era o único caminho para sair do
-        Dogma. Um teste entre duas máquinas encontrou o que isso significa na
-        prática: a pessoa não achou como sair.
+        O `+`, de volta — e com **um** significado, que é a correção do comp v3.
 
-        O argumento que o pôs aqui não era ruim — com um `Plug` só, "entrar
-        noutro" e "sair deste" são a mesma ação, e dois controles para uma ação
-        é um a mais. O que ele errou foi escolher o lado errado da troca: um
-        `aria-label` correto não torna um glifo de 56px descobrível para quem
-        enxerga, e o comp desenha a coluna assumindo vários Dogmas, que não é o
-        caso deste produto.
+        No v2 ele acumulava "entrar noutro Dogma" e "sair deste", e um teste
+        entre duas máquinas encontrou o que isso significa na prática: a pessoa
+        não achou como sair. A resposta daquela vez foi tirar o `+` da tela e
+        pôr `DESCONECTAR` escrito no cabeçalho. O `DESCONECTAR` fica onde está;
+        o que volta aqui é só a metade que ele nunca teve: acrescentar.
 
-        A ação foi para o cabeçalho, escrita, junto de `CHAMADA` e `DOGMA`, que
-        é onde esta tela já põe o que se pode apertar.
+        Desabilitado, e por um motivo que o `title` diz: acrescentar um segundo
+        Dogma é ter dois `Plug` ao mesmo tempo, e este produto tem um. Um botão
+        apertável aqui prometeria uma segunda sessão que `connect` recusa com
+        `AlreadyConnected` — é o mesmo caso de `EJETAR PLUG DO OPERADOR` e de
+        `FORÇAR REINSERÇÃO DE PLUG`, e recebe o mesmo tratamento: a moldura
+        fica, a promessa não.
       -->
+      <button id="trilha-adicionar" class="trilha-mais" type="button" disabled
+              aria-label="Adicionar Dogma Central"
+              title="este produto mantém um Plug por vez: para trocar de Dogma, use DESCONECTAR">+</button>
     </nav>
 
+    <!--
+      A coluna de canais (comp v3 §6.2), que é onde o v3 mais muda: cada Cage
+      passa a mostrar **quem está dentro** antes de se entrar nele, e entrar
+      virou um botão rotulado em vez do clique na linha.
+
+      As dicas ficam na marcação, ao lado do controle que elas explicam, e não
+      numa tabela paralela que alguém esquece de atualizar quando o controle
+      muda. `.dica` mora em `base.css`, e `body.legendas-simples` — ligada por
+      omissão — é quem a mostra.
+    -->
     <section class="painel painel-canais" aria-label="Cages e Linhas">
-      <h2 class="painel-titulo">
-        <span>CAGES</span><span class="painel-codigo">B·03</span>
-      </h2>
+      <div class="canais-cabeca">
+        <h2 class="painel-titulo">
+          <span>CAGES</span><span class="painel-codigo">B·03</span>
+        </h2>
+        <span class="dica">Salas de voz. Entre em uma para falar e ouvir.</span>
+      </div>
       <ul id="lista-cages" class="canais"></ul>
 
-      <h2 class="painel-titulo painel-titulo-linhas">
-        <span>LINHAS</span><span class="painel-codigo">B·04</span>
-      </h2>
+      <div class="canais-cabeca canais-cabeca-linhas">
+        <h2 class="painel-titulo">
+          <span>LINHAS</span><span class="painel-codigo">B·04</span>
+        </h2>
+        <span class="dica">Salas de texto. Abra uma para ler e escrever.</span>
+      </div>
       <ul id="lista-linhas" class="canais"></ul>
 
       <span class="espaco"></span>
 
       <!--
-        A tira do operador. No comp ela traz o rótulo, o apelido e o botão de
-        A.T. Field; aqui traz também os outros três controles de voz, que o comp
-        não tem e o produto não pode perder — `specs/03-audio.md` e o ADR 0016.
-        Eles ficam juntos porque são a mesma pergunta em quatro níveis: como o
-        microfone abre, se ele está aberto agora, se ele está cortado, e se você
-        ouve.
+        A tira do operador. No comp v3 ela traz o apelido, uma marca de
+        identidade e um `⚙` para a configuração; aqui traz também os quatro
+        controles de voz, que o comp não tem e o produto não pode perder —
+        `specs/03-audio.md` e o ADR 0016. Eles ficam juntos porque são a mesma
+        pergunta em quatro níveis: como o microfone abre, se ele está aberto
+        agora, se ele está cortado, e se você ouve.
       -->
       <div class="operador">
-        <span class="operador-rotulo">OPERADOR</span>
-        <span id="operador-nome" class="operador-nome">—</span>
+        <div class="operador-topo">
+          <span class="operador-quem">
+            <span class="operador-rotulo">OPERADOR</span>
+            <span id="operador-nome" class="operador-nome">—</span>
+          </span>
+          <!--
+            O `⚙` do comp, desenhado e não digitado: `U+2699` não está entre os
+            499 pontos de código da face embarcada, e digitá-lo cairia na
+            monoespaçada do sistema no meio da coluna. `glifos.js` o desenha, e
+            `data-glifo` o traz para cá sem uma segunda cópia do contorno.
+
+            O nome acessível vai no botão porque o glifo é tudo o que ele diz; a
+            dica ao lado é a mesma frase para quem enxerga, e é o que impede o
+            botão de ser forma e nada mais (`specs/05-cliente-tui.md`).
+          -->
+          <button id="botao-dogma-sessao" class="operador-config" type="button"
+                  aria-label="Abrir configurações"
+                  title="configuração local desta máquina"
+                  data-glifo="engrenagem"></button>
+        </div>
+        <!--
+          A frase do §1.2 do inventário v3, dita **uma vez**.
+
+          O comp desenha um selo `verif` por piloto e outro por mensagem, e os
+          dois saíram: o CASPER vincula o apelido à identidade que o reivindicou
+          primeiro e o MELCHIOR recusa qualquer outra (ADR 0017), então o selo
+          seria verdadeiro em toda linha — e um selo que todo mundo tem é um
+          selo que ninguém aprende a ler, no dia em que aparecesse um falso.
+
+          O que sobrou é a informação, e ela é nova para quem chega. Aqui, ao
+          lado do próprio nome, que é onde ela responde à pergunta que a faz
+          existir: "este nome é mesmo dele?".
+        -->
+        <span class="dica operador-frase">Os nomes deste Dogma são vinculados a
+          chaves: ninguém consegue usar o nome de outra pessoa.</span>
         <button id="botao-falar" class="botao-estado botao-falar" type="button">
           <span id="falar-rotulo">SEGURE ESPAÇO</span>
         </button>
