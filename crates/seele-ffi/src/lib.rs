@@ -49,8 +49,8 @@ use seele_core::{
 
 pub use types::{
     Cage, CageSync, CaptureDevice, EndReason, Event, Line, LinkState, Message, Notice,
-    NoticeReason, Pattern, Pilot, PlugError, Severity, Snapshot, SyncBand as Band, Telemetry,
-    Trust, VoiceMode,
+    NoticeReason, Pattern, Pilot, PlaybackDevice, PlugError, Severity, Snapshot, SyncBand as Band,
+    Telemetry, Trust, VoiceMode,
 };
 
 /// O que a casca gráfica precisa do core além de um [`Plug`] vivo.
@@ -86,6 +86,24 @@ pub fn capture_devices() -> Vec<CaptureDevice> {
     seele_core::capture_devices()
         .into_iter()
         .map(|found| CaptureDevice {
+            id: found.id,
+            name: found.name,
+            default: found.default,
+        })
+        .collect()
+}
+
+/// Every place this machine will play sound, right now.
+///
+/// The twin of [`capture_devices`], a free function for the same reason, and
+/// with the same warning about an empty list: the machine would not enumerate,
+/// **not** that there is nowhere to play. [`Snapshot::audio_available`] is still
+/// the one that means "no audio".
+#[must_use]
+pub fn playback_devices() -> Vec<PlaybackDevice> {
+    seele_core::playback_devices()
+        .into_iter()
+        .map(|found| PlaybackDevice {
             id: found.id,
             name: found.name,
             default: found.default,
@@ -130,6 +148,12 @@ pub struct ConnectConfig {
     /// falls back to the default rather than turning a stale preference into a
     /// Dogma nobody can enter.
     pub capture_device: Option<String>,
+    /// Where the sound comes out, as a [`PlaybackDevice::id`].
+    ///
+    /// `None` is the machine's default. Falls back the same way its twin does,
+    /// and independently of it: a headset left in another room must not cost
+    /// somebody the microphone they chose.
+    pub playback_device: Option<String>,
 }
 
 /// What a shell implements to be told things changed.
@@ -156,14 +180,15 @@ enum Command {
 struct Shared {
     room: Mutex<Room>,
     listeners: Mutex<Vec<Arc<dyn EventListener>>>,
-    voice: Mutex<Option<Voice>>,
-    /// Which microphone this session was told to use, if any.
+    /// The voice path, which is also where the chosen devices are remembered.
     ///
-    /// Remembered rather than read back off the live [`Voice`], because it has
-    /// to outlive it: a reconnection opens a fresh path, and without this the
-    /// chosen microphone would silently revert to the machine's default at the
-    /// worst possible moment — the one where the network just came back.
-    capture: Mutex<Option<String>>,
+    /// Remembered there and not here, on purpose. This crate used to keep its
+    /// own copy of the chosen microphone, and a second copy of a fact is a
+    /// second copy that can disagree — a switch that took but was not recorded
+    /// here would be undone by the next reconnection, silently. `Voice` keeps
+    /// what it asked for and hands it back through `reopen`, so there is one
+    /// answer and the layer that acts on it is the layer that holds it.
+    voice: Mutex<Option<Voice>>,
     /// What it takes to open a voice path on the connection that is up now.
     ///
     /// Here, and not only on the driver thread, so that switching microphone can
@@ -284,7 +309,6 @@ impl Plug {
             room: Mutex::new(Room::new()),
             listeners: Mutex::new(Vec::new()),
             voice: Mutex::new(None),
-            capture: Mutex::new(None),
             media: Mutex::new(None),
             nickname: Mutex::new(config.nickname.clone()),
             pattern: AtomicU8::new(pattern_byte(Pattern::Offline)),
@@ -430,7 +454,7 @@ impl Plug {
     /// `device` is a [`CaptureDevice::id`] from [`capture_devices`]; `None` goes
     /// back to the machine's default. The choice is remembered, so a
     /// reconnection reopens the same microphone rather than quietly falling back
-    /// to the default one.
+    /// to the default one. The chosen sound output is left where it is.
     ///
     /// Takes effect **now**, not on the next Cage. That is worth the extra
     /// mechanism: somebody opens this screen because the microphone they are
@@ -449,6 +473,63 @@ impl Plug {
     /// has no audio at all — a session joined with the audio box unticked has no
     /// voice path to move.
     pub fn set_capture_device(&self, device: Option<String>) -> Result<(), PlugError> {
+        // The new path opens before the old one is dropped, so a microphone that
+        // turns out to be gone leaves the session speaking instead of silent.
+        // `switch_capture` is what carries A.T. Field and the rest across — in
+        // the core, so the terminal client gets the same list of what survives,
+        // and the chosen output with it.
+        self.switch_device(|running, media, ssrc| {
+            running
+                .switch_capture(device.as_deref(), media, ssrc)
+                .map_err(|error| {
+                    tracing::warn!(%error, "could not open the chosen microphone");
+                    PlugError::CaptureDeviceGone
+                })
+        })
+    }
+
+    /// Switches this session to another sound output.
+    ///
+    /// `device` is a [`PlaybackDevice::id`] from [`playback_devices`]; `None`
+    /// goes back to the machine's default. The microphone stays where it is.
+    ///
+    /// Takes effect **now**, for the reason its twin does and one more: somebody
+    /// changes output in the middle of a conversation they cannot hear, and
+    /// "leave the Dogma and come back" is not an instruction you can give
+    /// somebody who is already unable to follow what is being said.
+    ///
+    /// Isolamento total survives the switch. That is decided in
+    /// `Voice::switch_playback`, not here, so the terminal cannot decide it
+    /// differently — and it matters because changing output is exactly what
+    /// somebody does when they cannot hear anything, muted speakers included.
+    ///
+    /// # Errors
+    ///
+    /// [`PlugError::PlaybackDeviceGone`] when the machine is not offering that
+    /// device any more, in which case **nothing changed** and the sound is still
+    /// coming out of the old one. [`PlugError::NoAudioDevice`] when this session
+    /// has no audio at all.
+    pub fn set_playback_device(&self, device: Option<String>) -> Result<(), PlugError> {
+        self.switch_device(|running, media, ssrc| {
+            running
+                .switch_playback(device.as_deref(), media, ssrc)
+                .map_err(|error| {
+                    tracing::warn!(%error, "could not open the chosen sound output");
+                    PlugError::PlaybackDeviceGone
+                })
+        })
+    }
+
+    /// Replaces the live voice path with one the caller reopens.
+    ///
+    /// Shared by both switches so that the order stays one decision: open the
+    /// new path, and only then let go of the old. Written twice, one copy would
+    /// eventually drop first and leave somebody with no audio at all on the one
+    /// path where the device turned out to be missing.
+    fn switch_device(
+        &self,
+        reopen: impl FnOnce(&Voice, MediaChannel, Ssrc) -> Result<Voice, PlugError>,
+    ) -> Result<(), PlugError> {
         let Ok(mut voice) = self.shared.voice.lock() else {
             return Err(PlugError::NoAudioDevice);
         };
@@ -460,22 +541,8 @@ impl Plug {
             return Err(PlugError::NotConnected);
         };
 
-        // The new path opens before the old one is dropped, so a microphone that
-        // turns out to be gone leaves the session speaking instead of silent.
-        // `switch_capture` is what carries A.T. Field and the rest across — in
-        // the core, so the terminal client gets the same list of what survives.
-        let fresh = running
-            .switch_capture(device.as_deref(), media, ssrc)
-            .map_err(|error| {
-                tracing::warn!(%error, "could not open the chosen microphone");
-                PlugError::CaptureDeviceGone
-            })?;
+        let fresh = reopen(running, media, ssrc)?;
         *voice = Some(fresh);
-        drop(voice);
-
-        if let Ok(mut slot) = self.shared.capture.lock() {
-            *slot = device;
-        }
         Ok(())
     }
 
@@ -600,6 +667,7 @@ impl Plug {
             voice_mode: audio.mode,
             audio_available: audio.available,
             capture: audio.capture,
+            playback: audio.playback,
             ended: room.ended.map(|end| end.reason.into()),
         }
     }
@@ -642,6 +710,11 @@ impl Plug {
                 name: device.name.clone(),
                 default: device.default,
             }),
+            playback: voice.playback().map(|device| PlaybackDevice {
+                id: device.id.clone(),
+                name: device.name.clone(),
+                default: device.default,
+            }),
         }
     }
 }
@@ -662,6 +735,7 @@ struct AudioState {
     local_fault: bool,
     bitrate_bps: u32,
     capture: Option<CaptureDevice>,
+    playback: Option<PlaybackDevice>,
 }
 
 impl AudioState {
@@ -682,6 +756,7 @@ impl AudioState {
             local_fault: false,
             bitrate_bps: 0,
             capture: None,
+            playback: None,
         }
     }
 }
@@ -869,29 +944,20 @@ async fn drive(
         .store(pattern_byte(Pattern::Blue), Ordering::Relaxed);
 
     remember_media(&shared, client.media(), client.sessao().ssrc);
-    if let Ok(mut slot) = shared.capture.lock() {
-        slot.clone_from(&config.capture_device);
-    }
 
     if config.audio {
-        // Falls back to the default device rather than refusing the session: a
-        // preference written down last week names a microphone that may be in
-        // another room by now, and turning that into a Dogma nobody can enter
-        // would make the picker the most dangerous control in the app. The
-        // screen shows what actually opened, so the fallback is visible.
-        let opened = Voice::start_on(
-            config.capture_device.as_deref(),
+        // `start_preferring` and not `start_on`: it falls back to the machine's
+        // own device, per side, rather than refusing the session. A preference
+        // written down last week names a device that may be in another room by
+        // now, and turning that into a Dogma nobody can enter would make the
+        // picker the most dangerous control in the app. The screen shows what
+        // actually opened, so the fallback is visible — and per side, so a
+        // headset left behind does not also throw away the microphone.
+        let opened = Voice::start_preferring(
+            &chosen_devices(&config),
             client.media(),
             client.sessao().ssrc,
-        )
-        .or_else(|error| {
-            if config.capture_device.is_some() {
-                tracing::warn!(%error, "the chosen microphone is gone; falling back to the default");
-                Voice::start(client.media(), client.sessao().ssrc)
-            } else {
-                Err(error)
-            }
-        });
+        );
         match opened {
             Ok(voice) => {
                 if let Ok(mut slot) = shared.voice.lock() {
@@ -936,25 +1002,15 @@ async fn drive(
                         // Conexão nova, `ssrc` novo, canal de mídia novo: sem
                         // reabrir, a voz sairia por uma conexão morta.
                         remember_media(&shared, (*media).clone(), sessao.ssrc);
-                        // No microfone escolhido, e não no padrão da máquina.
-                        // Sem `shared.capture`, voltar do ar trocaria o
-                        // microfone de quem está no meio de uma conversa — e
-                        // trocaria calado, que é a pior parte.
-                        let escolhido = shared
-                            .capture
-                            .lock()
-                            .ok()
-                            .and_then(|slot| slot.clone());
                         if let Ok(mut slot) = shared.voice.lock() {
                             if let Some(atual) = slot.as_ref() {
-                                // `switch_capture` e não `start_on`, porque os
-                                // controles têm que atravessar a reabertura.
-                                // `Voice::switch_capture` nomeia a lista na
-                                // própria documentação — A.T. Field, Isolamento
-                                // total, o modo, a tecla segura, cada ganho por
-                                // interlocutor — e diz que ela mora no core
-                                // justamente para que nenhuma casca esqueça um
-                                // item. Esta esquecia todos.
+                                // `reopen` e não `start_on`, porque os controles
+                                // têm que atravessar a reabertura. A lista mora
+                                // em `Voice::switch_capture` — A.T. Field,
+                                // Isolamento total, o modo, a tecla segura, cada
+                                // ganho por interlocutor — e está lá justamente
+                                // para que nenhuma casca esqueça um item. Esta
+                                // esquecia todos.
                                 //
                                 // O que torna isto pior que "volta desmutado" é
                                 // que `Enlace::tentar` **restaura** o A.T. Field
@@ -962,31 +1018,17 @@ async fn drive(
                                 // pessoa muda enquanto o portão local voltava
                                 // aberto, e o indicador que todo mundo lê
                                 // passava a mentir.
-                                let reaberta = atual
-                                    .switch_capture(
-                                        escolhido.as_deref(),
-                                        (*media).clone(),
-                                        sessao.ssrc,
-                                    )
-                                    .or_else(|error| {
-                                        if escolhido.is_some() {
-                                            // O mesmo recuo que o caminho de
-                                            // conexão faz, e pelo mesmo motivo:
-                                            // uma interface que reenumerou
-                                            // enquanto estávamos fora do ar não
-                                            // pode custar a voz do resto da
-                                            // sessão.
-                                            tracing::warn!(%error, "the chosen microphone is gone after reconnecting; falling back to the default");
-                                            atual.switch_capture(
-                                                None,
-                                                (*media).clone(),
-                                                sessao.ssrc,
-                                            )
-                                        } else {
-                                            Err(error)
-                                        }
-                                    });
-                                match reaberta {
+                                //
+                                // `reopen` também é quem sabe **o que** reabrir:
+                                // a voz guarda os dois dispositivos que pediu, e
+                                // volta pedindo os mesmos. Sem isso, voltar do ar
+                                // trocaria o microfone e a saída de quem está no
+                                // meio de uma conversa — e trocaria calado, que é
+                                // a pior parte. O recuo por lado é o mesmo do
+                                // caminho de conexão: uma interface que sumiu
+                                // enquanto estávamos fora do ar não pode custar a
+                                // voz do resto da sessão.
+                                match atual.reopen((*media).clone(), sessao.ssrc) {
                                     Ok(voice) => *slot = Some(voice),
                                     // A mesma degradação do caminho de conexão:
                                     // a metade de texto continua funcionando, e
@@ -1036,6 +1078,18 @@ async fn drive(
         *media = None;
     }
     client.sair().await;
+}
+
+/// Os dois dispositivos que a casca pediu, como o core os lê.
+///
+/// Uma função e não dois campos soltos no ponto de chamada: os dois são
+/// `Option<String>`, e trocá-los compilaria — a pessoa acabaria com a voz
+/// saindo pelo microfone.
+fn chosen_devices(config: &ConnectConfig) -> seele_core::DeviceChoice {
+    seele_core::DeviceChoice {
+        capture: config.capture_device.clone(),
+        playback: config.playback_device.clone(),
+    }
 }
 
 /// Guarda por onde a voz sai, para quem for reabri-la.
@@ -1275,6 +1329,7 @@ mod tests {
             expected_fingerprint: Some("aaaa1111".into()),
             audio: false,
             capture_device: None,
+            playback_device: None,
         };
         let destino = build_destino(&with_fingerprint, address, &name, &pin);
         assert_eq!(destino.impressao_esperada, Some("aaaa1111".into()));
@@ -1481,7 +1536,6 @@ mod tests {
             room: Mutex::new(Room::new()),
             listeners: Mutex::new(Vec::new()),
             voice: Mutex::new(None),
-            capture: Mutex::new(None),
             media: Mutex::new(None),
             nickname: Mutex::new("ayanami".into()),
             pattern: AtomicU8::new(0),
@@ -1548,6 +1602,64 @@ mod tests {
     }
 
     #[test]
+    fn a_playback_device_crosses_with_both_halves_of_its_identity() {
+        // The twin of the check above, for the same reason and with the same
+        // skip: CI has no sound card, and a test that passes on a machine with
+        // no speakers passes on every machine.
+        let found = playback_devices();
+        if found.is_empty() {
+            eprintln!("skipped: this machine lists no playback device");
+            return;
+        }
+
+        for device in &found {
+            assert!(
+                !device.id.is_empty(),
+                "a device with no id cannot be chosen"
+            );
+            assert!(
+                !device.name.is_empty(),
+                "a device with no name cannot be labelled"
+            );
+        }
+        assert!(
+            found.iter().filter(|device| device.default).count() <= 1,
+            "two outputs both claim to be the machine's default"
+        );
+    }
+
+    #[test]
+    fn the_two_device_lists_are_not_the_same_list() {
+        // Both are `Vec<_>` of three strings, and the two functions differ by one
+        // word. A `playback_devices` that forwarded to the capture side would
+        // compile, serialise, and draw a list of microphones under SAÍDA DE SOM
+        // — and every pick from it would be refused by a machine that has no
+        // such output.
+        let (microphones, speakers) = (capture_devices(), playback_devices());
+        if microphones.is_empty() || speakers.is_empty() {
+            eprintln!(
+                "skipped: this machine lists {} microphones and {} outputs, and telling the \
+                 two lists apart needs one of each",
+                microphones.len(),
+                speakers.len()
+            );
+            return;
+        }
+
+        let ids: Vec<&str> = microphones
+            .iter()
+            .map(|device| device.id.as_str())
+            .collect();
+        assert!(
+            speakers
+                .iter()
+                .any(|device| !ids.contains(&device.id.as_str())),
+            "every listed output is also a listed microphone, so one list is the other: \
+             {ids:?}"
+        );
+    }
+
+    #[test]
     fn a_capture_device_serialises_the_field_names_a_shell_reads() {
         // The desktop shell is untyped JavaScript reading these three names off
         // the wire. A `serde(rename)` added here would leave every row drawn
@@ -1570,6 +1682,29 @@ mod tests {
     }
 
     #[test]
+    fn a_playback_device_serialises_the_field_names_a_shell_reads() {
+        // Its own test and not an addition to the one above, because the two
+        // types are separate declarations: a `serde(rename)` on this one would
+        // leave every row under SAÍDA DE SOM drawn `undefined` while the
+        // microphone list next to it kept working, which is the version of this
+        // failure that takes longest to believe.
+        let device = PlaybackDevice {
+            id: "coreaudio:alguma-saida".into(),
+            name: "Fones de ouvido".into(),
+            default: true,
+        };
+        let Ok(json) = serde_json::to_string(&device) else {
+            panic!("PlaybackDevice does not serialise, so no shell can read it at all");
+        };
+        for field in ["\"id\"", "\"name\"", "\"default\""] {
+            assert!(
+                json.contains(field),
+                "a playback device no longer carries {field}: {json}"
+            );
+        }
+    }
+
+    #[test]
     fn a_snapshot_with_no_audio_names_no_microphone() {
         // The two have to agree, always: a screen that read a device off a
         // session with no voice path would draw a microphone that is not open.
@@ -1577,6 +1712,10 @@ mod tests {
         let quiet = AudioState::silent();
         assert!(!quiet.available);
         assert_eq!(quiet.capture, None);
+        assert_eq!(
+            quiet.playback, None,
+            "a session with no audio must not name an output it is not playing through"
+        );
         assert_eq!(
             quiet.mode,
             VoiceMode::PushToTalk,
@@ -1605,7 +1744,6 @@ mod tests {
             room: Mutex::new(Room::new()),
             listeners: Mutex::new(Vec::new()),
             voice: Mutex::new(None),
-            capture: Mutex::new(None),
             media: Mutex::new(None),
             nickname: Mutex::new("ayanami".into()),
             pattern: AtomicU8::new(0),

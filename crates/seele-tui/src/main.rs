@@ -692,12 +692,12 @@ async fn sessao(
                         // esta pessoa muda enquanto o portão local volta aberto.
                         // Esta casca esquecia todos, e a gráfica também.
                         //
-                        // `reopen` e não `switch_capture(None, ...)`: pede de
-                        // volta os dispositivos que esta voz pediu, em vez de
-                        // pedir o padrão da máquina. Hoje o terminal não escolhe
-                        // nenhum dos dois, mas escrever o padrão aqui é deixar
-                        // pronta uma reconexão que desfaz uma escolha assim que
-                        // ela existir.
+                        // `reopen` e não uma troca de um lado só: pede de volta
+                        // os dois dispositivos que esta voz pediu, em vez do
+                        // padrão da máquina. Hoje o terminal não escolhe nenhum
+                        // dos dois, mas escrever o padrão aqui é deixar pronta
+                        // uma reconexão que desfaz uma escolha assim que ela
+                        // existir.
                         if let Some(atual) = runtime.voice.as_ref() {
                             runtime.voice = atual.reopen(*media, sessao.ssrc).ok();
                         }

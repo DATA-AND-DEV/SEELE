@@ -17,9 +17,15 @@
 //! que ser reaberta. Reabrir com [`seele_core::Voice::start`] ou `start_on`
 //! constrói controles zerados: A.T. Field desligado, Isolamento total
 //! desligado, modo de volta em `PushToTalk`, ganhos por interlocutor perdidos.
-//! `Voice::switch_capture` existe para carregar tudo isso por cima da
-//! reabertura, e a documentação dele diz, com todas as letras, que a lista mora
-//! no core "justamente para que nenhuma casca esqueça um item".
+//! `Voice::switch_capture` e as irmãs dela existem para carregar tudo isso por
+//! cima da reabertura, e a documentação diz, com todas as letras, que a lista
+//! mora no core "justamente para que nenhuma casca esqueça um item".
+//!
+//! Numa reconexão a chamada certa é `reopen`: ela carrega os controles **e**
+//! pede de volta os dois dispositivos que aquela voz pediu. `switch_capture` e
+//! `switch_playback` também carregam os controles, mas cada uma manda o outro
+//! lado para um valor escolhido pela casca — numa reconexão isso é a casca
+//! decidindo por onde a pessoa ouve, calada, no pior momento possível.
 //!
 //! As duas cascas esqueciam todos. E o que torna isto pior que "volta
 //! desmutado" é a assimetria: `Enlace::tentar` **restaura** `at_field` no
@@ -71,19 +77,33 @@ fn nenhuma_casca_reabre_a_voz_jogando_fora_os_controles() {
         let braco = braco_da_reconexao(&fonte, caminho);
 
         assert!(
-            braco.contains("switch_capture"),
-            "a casca `{casca}` reabre a voz na reconexão sem `switch_capture`, então A.T. \
-             Field, Isolamento total, o modo e os ganhos voltam zerados. O roster continua \
+            braco.contains("reopen"),
+            "a casca `{casca}` reabre a voz na reconexão sem `reopen`, então A.T. Field, \
+             Isolamento total, o modo e os ganhos voltam zerados. O roster continua \
              mostrando quem estava mudo como mudo — `Enlace::tentar` restaura isso no \
              servidor — e o microfone volta aberto."
         );
 
-        for errada in ["Voice::start_on(", "Voice::start("] {
+        for errada in [
+            "Voice::start_on(",
+            "Voice::start(",
+            "Voice::start_preferring(",
+        ] {
             assert!(
                 !braco.contains(errada),
                 "a casca `{casca}` chama `{errada}` no braço da reconexão. Ela constrói \
                  controles zerados; quem carrega os de agora por cima da reabertura é \
-                 `switch_capture`."
+                 `reopen`."
+            );
+        }
+
+        for um_lado_so in ["switch_capture(", "switch_playback("] {
+            assert!(
+                !braco.contains(um_lado_so),
+                "a casca `{casca}` chama `{um_lado_so}` no braço da reconexão. Ela carrega os \
+                 controles, mas manda o outro dispositivo para o que a casca escrever ali — \
+                 e o que a casca escreve numa reconexão não é a escolha da pessoa. `reopen` \
+                 pede de volta os dois que aquela voz pediu."
             );
         }
     }
