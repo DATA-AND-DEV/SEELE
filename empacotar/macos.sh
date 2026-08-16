@@ -33,15 +33,20 @@ cd "$RAIZ"
 ALVO="$(rustc -vV | sed -n 's/^host: //p')"
 echo "→ alvo desta máquina: $ALVO"
 
-CONFIG=apps/seele-app/tauri.conf.json
+# Absoluto de propósito. Aqui os `cd` acontecem só dentro de subshells, então o
+# relativo funcionaria — mas o script irmão do Linux tinha exatamente esta linha
+# em relativo, trocava de diretório antes de sair, e a restauração errava o alvo
+# em silêncio, deixando a versão do release gravada no repositório. Não vale
+# manter a fragilidade só porque neste arquivo ela ainda não disparou.
+CONFIG="$RAIZ/apps/seele-app/tauri.conf.json"
 cp "$CONFIG" "$CONFIG.original"
 # A versão gravada é para o artefato, não para o repositório: um commit
 # distraído fixaria no código o número de um release.
 trap 'mv "$CONFIG.original" "$CONFIG"' EXIT INT TERM
 
-python3 - "$VERSAO" <<'PY'
+python3 - "$VERSAO" "$CONFIG" <<'PY'
 import json, pathlib, sys
-caminho = pathlib.Path("apps/seele-app/tauri.conf.json")
+caminho = pathlib.Path(sys.argv[2])
 config = json.loads(caminho.read_text())
 config["version"] = sys.argv[1]
 caminho.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n")

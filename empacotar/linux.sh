@@ -70,9 +70,13 @@ apt-get install --no-install-recommends -y -qq \
     libjavascriptcoregtk-4.1-dev libxdo-dev file \
     clang libclang-dev cmake >/dev/null
 
-CONFIG=apps/seele-app/tauri.conf.json
+# Absoluto, e não relativo: este script troca de diretório mais adiante, e o
+# `trap` roda com o diretório que estiver valendo na saída. Com caminho relativo
+# a restauração erra o alvo e falha caladamente — foi o que aconteceu, e o
+# `tauri.conf.json` ficou com a versão do release gravada no repositório.
+CONFIG=/work/apps/seele-app/tauri.conf.json
 cp "$CONFIG" /tmp/tauri.conf.json.original
-trap 'cp /tmp/tauri.conf.json.original "$CONFIG"' EXIT
+trap 'cp /tmp/tauri.conf.json.original "$CONFIG"' EXIT INT TERM
 
 # A versão que aparece no pacote. Sem isto o `.deb` diria 0.0.0, que é a versão
 # do workspace.
