@@ -1,117 +1,210 @@
 /* SEELE · Entry Plug — o Terminal Dogma (`#tela-dogma`).
-   A configuração local: o que é desta máquina e não deste Dogma. §7 do comp.
+   A configuração local: o que é desta máquina e não deste Dogma. §8 do comp v3.
 
    Carrega depois de `base.css` e depende disso: `.dogma-entrada`, o botão que
-   abre esta tela lá da entrada, refina o `.botao-fantasma` de lá, e `.microfone`
-   refina o `.botao` — os dois perderiam o empate na ordem inversa.
+   abre esta tela lá da entrada, refina o `.botao-fantasma` de lá, e
+   `.dogma-painel .rotulo` refina o `.rotulo` — os dois perderiam o empate na
+   ordem inversa.
 
    ---- a grade ----
 
-   O comp desenha `220px 1fr`, e é o que está aqui. 220 não é múltiplo de 8, o
-   que é a mesma divergência que `docs/tokens-achados.md` já registrou entre a
-   célula de 8×16 dos tokens e a grade de 4px que o comp desenha; a largura vem
-   do comp porque é ela que faz `CONFIGURAÇÃO LOCAL` caber em uma linha. Todo o
-   resto do espaçamento aqui é célula. */
+   O comp v3 desenha `250px minmax(0,1fr)`. Aqui são 248px, que é 31 células de
+   8 — o mesmo arredondamento que `docs/tokens-achados.md` já registra entre a
+   célula de 8×16 dos tokens e a grade de 4px do comp, e dois pixels não mudam
+   onde TERMINAL DOGMA quebra. Todo o resto do espaçamento aqui é célula.
+
+   ---- toda classe daqui começa por `dogma-` ----
+
+   Não é gosto nem verbosidade. As folhas de tela caem num só espaço de nomes,
+   na ordem em que `index.html` as carrega, e duas telas escolhendo o mesmo nome
+   não é um conflito que o navegador reporte: é a folha de baixo ganhando todo
+   empate em silêncio. `no_two_screens_claim_the_same_class_name` guarda isso, e
+   o prefixo é o que faz esta folha nunca precisar dele. As versões anteriores
+   desta tela chamavam a lista de `.microfone` e o medidor de `.medidor`, dois
+   nomes que qualquer tela com áudio dentro escolheria também.
+
+   O que **não** ganha prefixo é o que esta folha não inventou: `.rotulo`,
+   `.erro`, `.ausente`, `.botao-fantasma`, `.dica` e `.dica-linha` são de
+   `base.css`, e refiná-los é para isso que a ordem de carga existe. Reivindicar
+   `.dica` seria opor esta tela ao interruptor de legendas simples, e
+   `the_hint_layer_is_defined_once_and_never_by_a_screen` reprova. */
 
 .dogma {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: 248px minmax(0, 1fr);
 }
 
-/* ---------- a coluna ---------- */
+/* ---------- a coluna das seções ---------- */
 
 .dogma-coluna {
   background: var(--seele-negro-painel);
   border-right: 1px solid var(--seele-linha-forte);
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .dogma-marca {
-  margin: 0;
-  padding: 24px 16px;
+  padding: 16px;
+  border-bottom: 1px solid var(--seele-linha);
   display: flex;
   flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* `line-height: 1` porque a cartela é 22px numa página de entrelinha 16: sem
+   isto a linha da marca cresce e empurra a primeira seção meia célula. */
+.dogma-marca-titulo {
+  margin: 0;
   font-family: var(--seele-display);
   font-weight: var(--seele-cartela);
-  letter-spacing: 0.06em;
-}
-
-/* `line-height: 1` nas duas palavras, e é o que faz TERMINAL e DOGMA lerem como
-   uma cartela de duas linhas em vez de dois títulos empilhados. */
-.dogma-marca-terminal,
-.dogma-marca-dogma {
-  font-size: var(--seele-t-titulo);
+  font-size: 22px;
   line-height: 1;
+  letter-spacing: 0.06em;
+  color: var(--seele-laranja-nerv);
 }
 
-.dogma-marca-terminal { color: var(--seele-laranja-nerv); }
-.dogma-marca-dogma { color: var(--seele-osso); }
+.dogma-secoes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  flex-shrink: 0;
+}
 
-.dogma-marca-nota {
-  margin-top: 8px;
-  font-family: var(--seele-mono);
-  font-weight: normal;
-  font-size: var(--seele-t-micro);
-  letter-spacing: 0.2em;
+/* Uma seção. Botão de verdade — e não o `<span>` que esta tela usava quando só
+   havia uma —, porque agora as quatro levam a painéis diferentes. */
+.dogma-secao {
+  width: 100%;
+  min-height: 56px;
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font: inherit;
+  text-align: left;
+  color: var(--seele-osso);
+  background: none;
+  /* A marca laranja da esquerda é o que o comp usa para dizer "esta". Reservada
+     em transparente nas outras para que acender não empurre o texto 2px. */
+  border: none;
+  border-bottom: 1px solid var(--seele-linha);
+  border-left: 2px solid transparent;
+  cursor: pointer;
+}
+
+.dogma-secao:hover { background: var(--seele-negro-absoluto); }
+.dogma-secao:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: -2px; }
+
+/* A seção aberta. Nunca só pela cor: `aria-current` é o que um leitor de tela
+   anuncia, e a barra da esquerda é o que sobra em monocromático —
+   `specs/05-cliente-tui.md` proíbe informação transmitida só por cor. */
+.dogma-secao[aria-current="true"] {
+  border-left-color: var(--seele-laranja-nerv);
+  background: var(--seele-laranja-fraco);
+  color: var(--seele-laranja-nerv);
+}
+
+.dogma-secao-icone {
+  flex-shrink: 0;
+  font-size: 16px;
+  line-height: 1;
   color: var(--seele-osso-apagado);
 }
 
-/* A seção corrente. `span` e não `button` porque hoje há uma só, e um botão que
-   não leva a lugar nenhum é uma promessa: quando ATALHOS ou CHAVES existirem,
-   estes viram botões e ganham `:hover` e `:focus-visible` junto. */
-.dogma-secao {
-  padding: 12px 16px;
-  border-top: 1px solid var(--seele-linha);
-  border-bottom: 1px solid var(--seele-linha);
-  border-left: 2px solid var(--seele-laranja-nerv);
+.dogma-secao[aria-current="true"] .dogma-secao-icone { color: var(--seele-laranja-nerv); }
+
+.dogma-secao-texto {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dogma-secao-nome {
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: 15px;
+  line-height: 1;
+  letter-spacing: 0.1em;
+}
+
+/* A porta de saída, colada no rodapé da coluna. `margin-top: auto` e não um
+   espaçador vazio: um `<div>` só para empurrar é um elemento que um leitor de
+   tela percorre sem nada a dizer. */
+.dogma-voltar {
+  margin-top: auto;
+  width: 100%;
+  min-height: 48px;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: inherit;
   font-size: 12px;
   letter-spacing: 0.1em;
-  color: var(--seele-osso);
+  text-align: left;
+  color: var(--seele-osso-apagado);
+  background: none;
+  border: none;
+  border-top: 1px solid var(--seele-linha);
+  cursor: pointer;
 }
+
+.dogma-voltar:hover { color: var(--seele-laranja-nerv); }
+.dogma-voltar:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: -2px; }
 
 /* ---------- o corpo ---------- */
 
 .dogma-corpo {
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
 .dogma-faixa {
-  display: flex;
-  align-items: center;
-  gap: 16px;
   padding: 16px 24px;
   border-bottom: 1px solid var(--seele-linha);
-  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
+/* Onde o comp punha SALVAR, DESCARTAR e «alterações não salvas», esta faixa tem
+   título e subtítulo e mais nada. A escolha vale na hora e a tela mostra o que
+   está valendo — a lista de microfones diz qual abriu, e não qual foi pedido —,
+   de modo que não há estado sujo para um rótulo reportar nem nada pendente para
+   um botão confirmar. §8.1 do inventário do comp v3 registra a decisão. */
 .dogma-titulo {
   margin: 0;
   font-family: var(--seele-display);
   font-weight: var(--seele-cartela);
-  font-size: 22px;
-  letter-spacing: 0.1em;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: 0.08em;
   color: var(--seele-osso);
 }
 
-.dogma-nota {
-  font-size: var(--seele-t-micro);
-  letter-spacing: 0.2em;
-  color: var(--seele-osso-apagado);
-}
-
 .dogma-painel {
+  min-height: 0;
   padding: 24px;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  /* O comp trava o painel em 860px. Uma linha de 13px monoespaçado atravessando
+     uma janela de 1600 é uma linha que ninguém termina de ler. */
+  max-width: 860px;
 }
 
 .dogma-painel .rotulo {
   display: block;
-  margin: 0 0 8px;
+  margin: 0;
   font: inherit;
   font-size: var(--seele-t-rotulo);
   font-weight: normal;
@@ -120,12 +213,49 @@
   color: var(--seele-osso-apagado);
 }
 
-.dogma-painel .rotulo + * { margin-top: 0; }
+/* ---------- um bloco ---------- */
 
-/* ---------- a lista de microfones ---------- */
+.dogma-bloco {
+  border: 1px solid var(--seele-linha);
+  display: flex;
+  flex-direction: column;
+}
 
-.microfones {
-  margin: 0 0 24px;
+.dogma-bloco-topo {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--seele-linha);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dogma-bloco-nome {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: 15px;
+  line-height: 1;
+  letter-spacing: 0.12em;
+  color: var(--seele-laranja-nerv);
+}
+
+.dogma-bloco-corpo {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.dogma-campo {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ---------- as listas de dispositivo ---------- */
+
+.dogma-dispositivos {
+  margin: 0;
   padding: 0;
   list-style: none;
   /* `gap: 1px` sobre a cor de linha é a técnica de borda do comp: uma régua de
@@ -137,7 +267,7 @@
   border: 1px solid var(--seele-linha);
 }
 
-.microfone {
+.dogma-dispositivo {
   width: 100%;
   display: flex;
   align-items: baseline;
@@ -148,47 +278,47 @@
   text-align: left;
   color: var(--seele-osso);
   background: var(--seele-negro-painel);
-  /* A marca laranja da esquerda é o que o comp usa para dizer "esta". Reservada
-     em transparente nas outras para que acender não empurre o texto 2px. */
   border: none;
   border-left: 2px solid transparent;
   cursor: pointer;
 }
 
-.microfone:hover { background: var(--seele-negro-absoluto); }
-.microfone:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: -2px; }
+.dogma-dispositivo:hover:not(:disabled) { background: var(--seele-negro-absoluto); }
+.dogma-dispositivo:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: -2px; }
 
 /* O escolhido. Nunca só pela cor: o rótulo `EM USO` vem junto, desenhado pelo
    JavaScript, porque `specs/05-cliente-tui.md` proíbe informação transmitida só
    por cor e uma marca laranja sozinha é exatamente isso. */
-.microfone[data-escolhido="sim"] {
+.dogma-dispositivo[data-escolhido="sim"] {
   border-left-color: var(--seele-laranja-nerv);
   background: var(--seele-laranja-fraco);
 }
 
-.microfone-nome { flex: 1; overflow-wrap: anywhere; }
+.dogma-dispositivo-nome { flex: 1; overflow-wrap: anywhere; }
 
-.microfone-marca {
+.dogma-dispositivo-marca {
   font-size: 11px;
   letter-spacing: 0.1em;
   color: var(--seele-osso-apagado);
 }
 
-.microfone[data-escolhido="sim"] .microfone-marca { color: var(--seele-laranja-nerv); }
+.dogma-dispositivo[data-escolhido="sim"] .dogma-dispositivo-marca {
+  color: var(--seele-laranja-nerv);
+}
 
 /* Nada para escolher. Uma lista vazia não quer dizer "sem microfone" — quer
    dizer que a máquina não quis enumerar —, e a frase que o JavaScript escreve
    aqui diz isso. */
-.microfones-vazio {
+.dogma-dispositivos-vazio {
   padding: 12px;
   font-size: var(--seele-t-dado);
   color: var(--seele-osso-apagado);
   background: var(--seele-negro-painel);
 }
 
-/* ---------- o medidor ---------- */
+/* ---------- o medidor de entrada ---------- */
 
-.medidor {
+.dogma-medidor {
   margin: 0;
   font-size: 11px;
   line-height: 1.6;
@@ -198,7 +328,230 @@
 }
 
 /* Sem sessão não há nível, e um medidor apagado não é um medidor em zero. */
-.medidor[data-vivo="nao"] { color: var(--seele-osso-apagado); }
+.dogma-medidor[data-vivo="nao"] { color: var(--seele-osso-apagado); }
+
+/* ---------- os modos do microfone ---------- */
+
+.dogma-modos {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dogma-modo {
+  flex: 1;
+  min-width: 168px;
+  min-height: 56px;
+  padding: 8px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  font: inherit;
+  text-align: left;
+  color: var(--seele-osso);
+  background: none;
+  border: 1px solid var(--seele-linha-forte);
+  cursor: pointer;
+}
+
+.dogma-modo:hover:not(:disabled) { border-color: var(--seele-laranja-nerv); }
+.dogma-modo:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
+
+.dogma-modo[aria-pressed="true"] {
+  border-color: var(--seele-laranja-nerv);
+  background: var(--seele-laranja-fraco);
+  color: var(--seele-laranja-nerv);
+}
+
+.dogma-modo-nome {
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: 14px;
+  line-height: 1;
+  letter-spacing: 0.1em;
+}
+
+.dogma-modo-desc {
+  font-size: var(--seele-t-micro);
+  line-height: 1.35;
+  color: var(--seele-osso-apagado);
+}
+
+.dogma-modo[aria-pressed="true"] .dogma-modo-desc { color: var(--seele-laranja-nerv); }
+
+/* ---------- uma chave de comportamento ---------- */
+
+.dogma-chaves {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dogma-chave {
+  padding: 12px 16px;
+  border-top: 1px solid var(--seele-linha);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.dogma-chave:first-child { border-top: none; }
+
+.dogma-chave-texto {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dogma-chave-nome { font-size: var(--seele-t-dado); }
+
+/* Descrição sempre visível, e **não** uma `.dica`. A chave que este bloco
+   governa é a das próprias dicas: escrita como `.dica`, a explicação de como
+   religá-las sumiria junto com elas no instante em que alguém as desligasse. */
+.dogma-chave-desc {
+  font-size: var(--seele-t-micro);
+  line-height: 1.35;
+  color: var(--seele-osso-apagado);
+}
+
+/* SIM | NÃO, os dois sempre desenhados: o par diz qual é o outro estado, o que
+   um interruptor de um lado só não diz. `role="switch"` e `aria-checked` são o
+   que atravessa para quem não vê o preenchimento. */
+.dogma-interruptor {
+  flex-shrink: 0;
+  min-height: 32px;
+  display: flex;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 1px solid var(--seele-linha-forte);
+  cursor: pointer;
+}
+
+.dogma-interruptor:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
+.dogma-interruptor[aria-checked="true"] { border-color: var(--seele-laranja-nerv); }
+
+.dogma-interruptor-lado {
+  min-width: 48px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--seele-osso-apagado);
+}
+
+.dogma-interruptor[aria-checked="true"] .dogma-interruptor-lado[data-lado="sim"] {
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-laranja-nerv);
+}
+
+.dogma-interruptor[aria-checked="false"] .dogma-interruptor-lado[data-lado="nao"] {
+  color: var(--seele-osso);
+  background: var(--seele-linha-forte);
+}
+
+/* ---------- a tabela de atalhos ---------- */
+
+.dogma-atalhos {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dogma-atalho {
+  padding: 12px 16px;
+  border-top: 1px solid var(--seele-linha);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.dogma-atalho:first-child { border-top: none; }
+
+.dogma-atalho-texto {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dogma-atalho-acao { font-size: var(--seele-t-dado); }
+
+.dogma-atalho-desc {
+  font-size: var(--seele-t-micro);
+  line-height: 1.35;
+  color: var(--seele-osso-apagado);
+}
+
+/* A tecla desenhada como tecla. Contorno e fundo do painel, porque ela é a
+   única coisa nesta lista que a pessoa vai procurar com o olho. */
+.dogma-atalho-tecla {
+  flex-shrink: 0;
+  padding: 8px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  color: var(--seele-laranja-nerv);
+  background: var(--seele-negro-absoluto);
+  border: 1px solid var(--seele-linha-forte);
+}
+
+/* ---------- prosa e pares ---------- */
+
+/* Uma frase que o produto tem para dizer, e que não é o rótulo de controle
+   nenhum. `60ch` porque abaixo disso a linha de 13px monoespaçado ainda é uma
+   linha que se lê de ponta a ponta sem perder a próxima. */
+.dogma-frase {
+  margin: 0;
+  max-width: 60ch;
+  font-size: var(--seele-t-dado);
+  line-height: 1.6;
+  color: var(--seele-osso);
+}
+
+.dogma-par {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--seele-linha);
+}
+
+.dogma-par-valor {
+  font-size: var(--seele-t-dado);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- o que ainda não tem comando atrás ----------
+   Um controle desabilitado aqui é a exceção, não a convenção: esta tela omite o
+   que não existe em vez de desenhá-lo morto. O que sobra desabilitado é o que
+   **existe pela metade** — a saída de som, que o plug já abre e ainda não sabe
+   enumerar —, e nesse caso apagar a linha esconderia um aparelho que está
+   tocando som agora.
+
+   `title` obrigatório junto, sempre: um controle apagado que não diz por quê
+   se lê como defeito, e não como lacuna. */
+.dogma-dispositivo:disabled,
+.dogma-modo:disabled,
+.dogma-interruptor:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.dogma-dispositivo[title]:disabled,
+.dogma-modo[title]:disabled,
+.dogma-interruptor[title]:disabled {
+  cursor: help;
+}
 
 /* ---------- a porta, lá da entrada ----------
    Refina o `.botao-fantasma` de `base.css`, cujo `margin-left: auto` o
