@@ -1397,11 +1397,38 @@ fn the_state_of_a_pilot_is_a_word_and_never_only_a_colour() {
     let paint = body_of(&script, "function pintarCartao");
     let sentence = body_of(&script, "function fraseDoEstado");
 
+    // The chip, and what it says. Reaching for the element is not enough — an
+    // empty chip is a card marked by paint alone, and it looks fine in a
+    // screenshot taken by somebody who sees the orange. So the statement that
+    // fills it has to branch on the microphone and on the voice, and every
+    // branch has to be a word.
+    let chips: Vec<&str> = paint
+        .split(';')
+        .filter(|statement| statement.contains("pastilha") && statement.contains("textContent"))
+        .collect();
     assert!(
-        paint.contains("chamada-pastilha"),
+        !chips.is_empty(),
         "the card writes no state chip, so the halo is the only thing marking who \
          is speaking"
     );
+    let words = |statement: &str| {
+        statement
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .filter(|word| !word.trim().is_empty())
+            .count()
+    };
+    assert!(
+        chips.iter().any(|statement| statement.contains("at_field")
+            && statement.contains("speaking")
+            && words(statement) >= 3),
+        "no state chip on this card branches on both the microphone and the voice \
+         with a word for each. Either a state is being told apart by paint alone, \
+         or two of them come out reading the same:\n{}",
+        chips.join("\n")
+    );
+
     assert!(
         paint.contains("fraseDoEstado"),
         "the card no longer writes the state as a sentence beside the name, which \
@@ -1448,9 +1475,17 @@ fn the_volume_control_does_not_hide_behind_the_pointer() {
         "the volume control no longer offers a minus and a plus"
     );
     assert!(
-        build.contains("CELULAS_DE_VOLUME") && build.contains("elemento(\"button\""),
+        build.contains("CELULAS_DE_VOLUME"),
+        "the volume control no longer draws a row of cells to click"
+    );
+    assert!(
+        build
+            .split(';')
+            .any(|statement| statement.contains("elemento(\"button\"")
+                && statement.contains("vol-cela")),
         "the volume cells are not buttons, so they are neither clickable nor \
-         reachable by keyboard"
+         reachable by keyboard — which is the hidden control again, wearing the \
+         shape of the fix"
     );
     assert!(
         scripts().contains("set_volume"),
@@ -1505,10 +1540,15 @@ fn the_two_ways_out_of_the_call_say_which_one_leaves_the_cage() {
     else {
         panic!("nothing is listening on `chamada-ejetar` at all");
     };
+    // The call, and not the word. The handler names `eject_plug` in the string
+    // it logs a failure with, so a `contains` on the bare name stays green with
+    // the command itself deleted — which is exactly the state where the red
+    // button looks like it leaves and does not. Found by breaking it on purpose
+    // and watching this pass.
     assert!(
-        exit.contains("eject_plug"),
+        exit.contains("invoke(\"eject_plug\")"),
         "`SAIR DA JAULA` does not eject the plug, so leaving the Cage has no \
-         button anywhere on this screen"
+         button anywhere on this screen:{exit}"
     );
 
     // And both have to say, in the markup and beside themselves, what they do.
