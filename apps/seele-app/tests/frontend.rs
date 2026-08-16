@@ -1328,10 +1328,16 @@ fn a_pilot_card_passes_the_band_through_and_never_measures_anything_itself() {
     // `set_volume` writes with nothing reading back. Twenty-six bars driven by
     // our own microphone would animate convincingly under somebody else's name.
     //
-    // Scoped to the function that builds one card, because the file as a whole
-    // says all of these words either way: the paragraph explaining why the
-    // waveform is empty would satisfy an unscoped search for it.
-    let body = body_of(&scripts(), "function cartaoDoPiloto");
+    // Scoped to the two functions that make one card — the skeleton and the
+    // values written over it — because the file as a whole says all of these
+    // words either way: the paragraph explaining why the waveform is gone would
+    // satisfy an unscoped search for it.
+    let script = scripts();
+    let body = format!(
+        "{}\n{}",
+        body_of(&script, "function cartaoDoPiloto"),
+        body_of(&script, "function pintarCartao")
+    );
 
     assert!(
         body.contains("piloto.sync_band"),
@@ -1345,18 +1351,227 @@ fn a_pilot_card_passes_the_band_through_and_never_measures_anything_itself() {
         );
     }
 
-    assert!(
-        !body.contains("input_level"),
-        "the card draws a per-pilot waveform out of this machine's own input \
-         level, which is one number, and ours"
-    );
-    for missing in ["SEM_DADO.onda", "SEM_DADO.volume"] {
+    // The v3 answer to the second failure is stronger than the v2 one, and this
+    // is where the two differ. v2 drew the waveform and the per-pilot delay as
+    // empty frames with a dash and a `title` saying what was missing; v3 drops
+    // them, because on a screen whose whole point is being easy to read an
+    // explained dash is noise — somebody entering a Cage wants to know who is
+    // talking, not which fields this protocol does not carry yet. The record of
+    // the gap lives in the inventory (§1.3, §7), which is where anybody looks
+    // before trying to draw them again.
+    //
+    // So: neither the value nor the frame. Drawing them from what *does* cross
+    // would be worse than either — `input_level` is ours and scalar, `rtt_ms` is
+    // ours and one number, and both would animate convincingly under somebody
+    // else's name.
+    for ours in ["input_level", "rtt_ms"] {
         assert!(
-            body.contains(missing),
-            "the card no longer marks `{missing}` as unmeasured, so it is either \
-             drawing a value nothing carries or hiding that the gap exists"
+            !body.contains(ours),
+            "the card draws a per-pilot value out of `{ours}`, which is this \
+             machine's own measurement and one number"
         );
     }
+    for empty in ["naoMedido", "SEM_DADO", "SEM_MEDIDA"] {
+        assert!(
+            !body.contains(empty),
+            "the card draws an empty field marked `{empty}`. On this screen the \
+             decision is to omit what has no data rather than frame it: a dash \
+             with an explanation is one more thing to read on the screen that \
+             exists for not having to read much"
+        );
+    }
+}
+
+#[test]
+fn the_state_of_a_pilot_is_a_word_and_never_only_a_colour() {
+    // `specs/05-cliente-tui.md` forbids information carried by colour alone, and
+    // who is transmitting is information: the comp marks it with an orange halo
+    // around the card and nothing else. A halo is invisible to anybody who does
+    // not see the hue, and this card carries three facts that way — the
+    // microphone, the voice, and the ears.
+    //
+    // The v3 answer is two registers of the same fact, and this guard is that
+    // both exist: the chip, in one word, and the plain sentence beside the name,
+    // which is what `LEGENDAS SIMPLES` is for.
+    let script = scripts();
+    let paint = body_of(&script, "function pintarCartao");
+    let sentence = body_of(&script, "function fraseDoEstado");
+
+    assert!(
+        paint.contains("chamada-pastilha"),
+        "the card writes no state chip, so the halo is the only thing marking who \
+         is speaking"
+    );
+    assert!(
+        paint.contains("fraseDoEstado"),
+        "the card no longer writes the state as a sentence beside the name, which \
+         is the half a newcomer reads"
+    );
+
+    // All three facts, in the sentence. The colour version of any one of them
+    // would be a fact only some readers get.
+    for fact in ["at_field", "speaking", "total_isolation"] {
+        assert!(
+            sentence.contains(fact),
+            "the sentence beside the name never mentions `{fact}`, so that state \
+             reaches the screen as paint and nothing else"
+        );
+    }
+}
+
+#[test]
+fn the_volume_control_does_not_hide_behind_the_pointer() {
+    // The defect this screen exists to fix, in one rule. `tela-sessao.css` gives
+    // the per-pilot slider `opacity: 0` and reveals it on `:hover`, which is the
+    // definition of a hidden control: it is not on the path of anybody using a
+    // keyboard, it never appears under touch, and whoever did not sweep the
+    // pointer across that row by accident never learned it was there.
+    //
+    // Two halves, because either alone passes with the defect present. The
+    // control has to *exist* — minus, plus, and cells that are real buttons —
+    // and no rule of this sheet may use the pointer to bring anything into
+    // being. Highlighting on hover stays legal; that is what `background` and
+    // `border-color` in those rules are.
+    let script = scripts();
+    // Comments stripped, and that is load-bearing rather than tidy: the sheet
+    // has to be able to write down *why* nothing here hangs off `:hover`, and
+    // the paragraph saying so names the word. A guard a comment can trip is as
+    // broken as a guard a comment can satisfy.
+    let sheet = without_comments(&read("ui/tela-chamada.css"));
+
+    let build = body_of(&script, "function controleDeVolume");
+    // U+2212, which the embedded face does have — the inventory measured it
+    // (§5). The ASCII hyphen is a different character and a different width in a
+    // monospaced face, beside a `+` that is ASCII.
+    assert!(
+        build.contains('\u{2212}') && build.contains('+'),
+        "the volume control no longer offers a minus and a plus"
+    );
+    assert!(
+        build.contains("CELULAS_DE_VOLUME") && build.contains("elemento(\"button\""),
+        "the volume cells are not buttons, so they are neither clickable nor \
+         reachable by keyboard"
+    );
+    assert!(
+        scripts().contains("set_volume"),
+        "nothing sends the chosen volume anywhere"
+    );
+
+    for rule in sheet.split('}') {
+        let Some((selector, declarations)) = rule.split_once('{') else {
+            continue;
+        };
+        if !selector.contains(":hover") {
+            continue;
+        }
+        for reveal in ["opacity", "visibility", "display"] {
+            assert!(
+                !declarations.contains(reveal),
+                "`{}` uses the pointer to decide whether something exists \
+                 (`{reveal}`), which is the hidden control this screen was \
+                 redrawn to fix — hover may highlight, never reveal",
+                selector.trim()
+            );
+        }
+    }
+}
+
+#[test]
+fn the_two_ways_out_of_the_call_say_which_one_leaves_the_cage() {
+    // The v3 comp's finding, and the inventory settles it in §7.1: changing
+    // screen is not leaving the Cage. The prototype collapses the two — both
+    // buttons call `ir('principal')` — and what separates them there is only
+    // what they promise. Here they have to differ for real, and say so.
+    //
+    // The failure without this guard is the one the LAN test found: somebody
+    // presses the button that goes back to the Lines and cannot tell whether
+    // they are still being heard.
+    let page = without_comments(&read("ui/index.html"));
+    let script = scripts();
+
+    // `VER LINHAS` is navigation. Whatever it runs must not pull the plug.
+    let leaving = body_of(&script, "function fecharChamada");
+    assert!(
+        !leaving.contains("eject_plug"),
+        "`VER LINHAS` ejects the plug, so the two buttons do the same thing again \
+         and the screen's own words are wrong"
+    );
+
+    // `SAIR DA JAULA` is the eject, and nothing else on this screen is.
+    let Some(exit) = script
+        .split("$(\"chamada-ejetar\").addEventListener")
+        .nth(1)
+        .and_then(|rest| rest.split("\n});").next())
+    else {
+        panic!("nothing is listening on `chamada-ejetar` at all");
+    };
+    assert!(
+        exit.contains("eject_plug"),
+        "`SAIR DA JAULA` does not eject the plug, so leaving the Cage has no \
+         button anywhere on this screen"
+    );
+
+    // And both have to say, in the markup and beside themselves, what they do.
+    let hint_of = |id: &str| {
+        let Some(button) = page
+            .split(&format!("id=\"{id}\""))
+            .nth(1)
+            .and_then(|rest| rest.split("</button>").next())
+        else {
+            panic!("index.html has no `{id}` button");
+        };
+        let Some(hint) = button
+            .split("class=\"dica\">")
+            .nth(1)
+            .and_then(|rest| rest.split('<').next())
+        else {
+            panic!(
+                "`{id}` carries no hint beside it, so the distinction between \
+                 changing screen and leaving the Cage is nowhere on the screen"
+            );
+        };
+        hint.split_whitespace().collect::<Vec<_>>().join(" ")
+    };
+
+    let back = hint_of("chamada-voltar");
+    let out = hint_of("chamada-ejetar");
+    assert!(
+        !back.is_empty() && !out.is_empty(),
+        "one of the two exits explains itself with an empty line"
+    );
+    assert_ne!(
+        back, out,
+        "both exits are explained with the same sentence, which is the prototype's \
+         collapse written out in words"
+    );
+}
+
+#[test]
+fn no_event_in_the_call_monitor_is_older_than_the_window() {
+    // The comp fills `EVENTOS` with five lines of history — `IKARI.S entrou`,
+    // `HORAKI.H saiu` — and the inventory left open how much of that the Dogma
+    // keeps. It keeps none: `Event::RosterChanged` says the roster changed and
+    // never what changed in it, and there is no record of arrivals, departures
+    // or A.T. Field anywhere in the core.
+    //
+    // So the list may only carry what this window watched go by, and the
+    // tempting way to make it look full is a seeded line in the markup that
+    // nobody ever measured. An empty list under a heading that explains why is
+    // the honest version, and this is what keeps it that way.
+    let page = without_comments(&read("ui/index.html"));
+
+    let Some(list) = page
+        .split("id=\"chamada-eventos\"")
+        .nth(1)
+        .and_then(|rest| rest.split("</ol>").next())
+    else {
+        panic!("index.html no longer has the events list");
+    };
+    assert!(
+        !list.contains("<li"),
+        "the events list ships with lines already in it, and this product has no \
+         history to have taken them from:{list}"
+    );
 }
 
 #[test]
