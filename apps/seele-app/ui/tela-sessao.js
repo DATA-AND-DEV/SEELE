@@ -7,18 +7,29 @@
 //
 // ---- o que esta tela desenha, e o que ela recusa a desenhar ----
 //
-// A composição é a do comp v2 (`design/Entry Plug v2.dc.html`, tela
-// `principal`), inventariada em `.superpowers/sdd/comp-inventario.md` §3.
-// Quatro colunas: a ficha do Dogma, os canais, a Linha aberta, a Taxa de
-// Sincronização.
+// A composição é a do comp **v3** (`design/Entry Plug v3.dc.html`, tela
+// `principal`), inventariada em `.superpowers/sdd/comp-inventario-v3.md` §6.
+// Quatro colunas — a trilha de Dogmas, os canais, a Linha aberta, a Taxa de
+// Sincronização — em `60px 268px minmax(0,1fr) 328px`.
 //
-// Boa parte do que o comp desenha não tem dado por trás — o inventário §16
-// conta 23 valores nessa situação. A regra seguida aqui é uma só: **desenhar a
-// moldura e deixar o valor visivelmente não medido**. Nada de número plausível,
-// nada de campo apagado da tela. `crates/seele-core/src/state.rs` guarda essa
-// mesma ideia num teste cujo nome é a frase inteira — uma taxa não medida lê
-// zero, e não cem. Um travessão com `title` é o oposto de um número inventado:
-// ele diz que ninguém mediu, e diz por quê.
+// O que o v3 muda de fundo, e é do que trata metade deste arquivo: cada Cage
+// mostra **quem está dentro** antes de se entrar nele, entrar e sair viraram
+// botões com rótulo, as mensagens ganharam avatar de iniciais, e a busca deixou
+// de viver aberta.
+//
+// ---- a regra do valor que não existe, e a inversão do v3 ----
+//
+// O v2 mandava desenhar a moldura e deixar o valor visivelmente não medido: um
+// travessão com `title`, nunca um número plausível.
+// `crates/seele-core/src/state.rs` guarda a outra metade dessa ideia num teste
+// cujo nome é a frase inteira — uma taxa não medida lê zero, e não cem.
+//
+// Ela continua valendo onde a ausência **responde** a uma pergunta que a tela
+// acabou de fazer: a média sem plug inserido, a barra da bateria, as três
+// células do alerta. E ela foi invertida onde a ausência se repetia por
+// fileira — pendências por Linha, subsistema por piloto, atraso por piloto —,
+// porque meia dúzia de travessões explicados numa tela que existe para ser
+// simples é ruído, não honestidade. Ver o cabeçalho de `tela-sessao.css`.
 //
 // O que ficou sem dado, e o que cada um exigiria, está em
 // `.superpowers/sdd/tela-dogma.md`.
@@ -297,7 +308,7 @@ function sigla(nome) {
 }
 
 /**
- * As iniciais de um apelido, para o avatar e para o ponto de presença.
+ * As iniciais de um apelido, para o avatar das mensagens.
  *
  * `IKARI.S` vira `IS`, como no comp. Sem ponto, as duas primeiras letras;
  * com uma letra só, essa letra. Por ponto de código e não por índice de unidade
@@ -306,8 +317,16 @@ function sigla(nome) {
  *
  * É desenho e nunca dado: o nome inteiro está sempre ao lado, e o avatar sai
  * `aria-hidden` por isso mesmo.
+ *
+ * `iniciaisDoApelido` e não `iniciais`, que é o nome do comp: os scripts desta
+ * janela dividem **um** escopo global (ADR 0019, e o topo de `base.js`), e a
+ * tela de chamada desenha o mesmo avatar por cartão. Duas declarações de
+ * `function iniciais` no mesmo escopo não são erro em lugar nenhum — a última
+ * carregada simplesmente vence, e as duas telas passam a usar a regra de uma
+ * delas. Quando a segunda existir, o lugar deste desenho é `base.js`, como o
+ * `relogio` e o `marcaSync` que já moram lá.
  */
-function iniciais(apelido) {
+function iniciaisDoApelido(apelido) {
   const partes = apelido.split(".").filter((parte) => parte.length > 0);
   const primeira = [...(partes[0] ?? "")];
   const segunda = [...(partes[1] ?? "")];
@@ -562,7 +581,7 @@ function desenharMensagens() {
     //
     // O `m.selo` do comp, ao lado do autor, **não** entra: ver o §1.2 do
     // inventário v3 e a frase no rodapé da coluna de canais.
-    const avatar = elemento("span", "mensagem-avatar", iniciais(mensagem.author_nickname));
+    const avatar = elemento("span", "mensagem-avatar", iniciaisDoApelido(mensagem.author_nickname));
     avatar.setAttribute("aria-hidden", "true");
     item.append(avatar);
 
