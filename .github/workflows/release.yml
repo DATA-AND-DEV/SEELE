@@ -374,12 +374,30 @@ jobs:
           set -eu
           tag="${{ needs.versao.outputs.tag }}"
 
-          # Apaga o release anterior desta tag, se houver, e **não** a tag.
+          # Apaga o **rascunho** anterior desta tag, se houver, e não a tag.
           # `--cleanup-tag` apagaria justamente a tag que disparou este
           # workflow, e o release seguinte nasceria apontando para o commit
           # padrão do repositório em vez do que foi marcado.
-          gh release view "$tag" >/dev/null 2>&1 \
-            && gh release delete "$tag" --yes || true
+          #
+          # Só rascunho, e isso é a diferença que importa. Reexecutar não deve
+          # acumular rascunhos duplicados — era o que este trecho resolvia —,
+          # mas um release **publicado** é decisão tomada por uma pessoa, e
+          # apagá-lo aqui contradiz a linha escrita três abaixo. O caso concreto
+          # não é hipotético: quando a cota de Actions acabou, os instaladores
+          # foram montados à mão em duas máquinas e publicados pelo navegador.
+          # Um disparo deste workflow na mesma tag varreria aquilo sem perguntar.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            if [ "$(gh release view "$tag" --json isDraft --jq .isDraft)" = "true" ]; then
+              gh release delete "$tag" --yes
+            else
+              echo "::error::já existe um release **publicado** em $tag, e este workflow não o apaga."
+              {
+                echo "Publique noutra versão, ou remova o release à mão se a intenção é mesmo substituí-lo."
+                echo "Rascunhos são substituídos sem cerimônia; publicados, não."
+              } >&2
+              exit 1
+            fi
+          fi
 
           gh release create "$tag" \
             --draft \
