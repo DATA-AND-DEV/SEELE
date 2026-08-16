@@ -158,6 +158,18 @@ fn every_command_the_frontend_calls_is_registered() {
     );
 }
 
+/// Commands whose Rust half is finished and whose screen is not drawn yet.
+///
+/// Empty is the resting state. An entry here is a promise that a screen is
+/// coming, and it is meant to be deleted by whoever draws it — the assertions
+/// below make sure it is: the moment the page calls one of these, this test
+/// fails and says to take it off the list. Nothing rots quietly.
+///
+/// `saidas` / `saida_escolhida` / `escolher_saida` are the SAÍDA DE SOM half of
+/// the Terminal Dogma. The core, the settings file and the bridge are all done
+/// and tested; only the panel is missing.
+const AGUARDANDO_TELA: &[&str] = &["escolher_saida", "saida_escolhida", "saidas"];
+
 #[test]
 fn no_command_is_registered_and_never_called() {
     // The other direction. A command nobody calls is either dead weight or a
@@ -166,11 +178,39 @@ fn no_command_is_registered_and_never_called() {
     let called = invoked_commands(&scripts());
     let registered = registered_commands(&read("src/main.rs"));
 
-    let unused: Vec<&String> = registered.difference(&called).collect();
+    let unused: Vec<&String> = registered
+        .difference(&called)
+        .filter(|name| !AGUARDANDO_TELA.contains(&name.as_str()))
+        .collect();
     assert!(
         unused.is_empty(),
-        "main.rs registers commands the frontend never calls: {unused:?}"
+        "main.rs registers commands the frontend never calls: {unused:?}\n\
+         If one of these is deliberately waiting for a screen, say so in \
+         AGUARDANDO_TELA rather than deleting this check."
     );
+}
+
+#[test]
+fn nothing_waits_for_a_screen_that_already_draws_it() {
+    // What keeps the exception above from becoming a hole. The list has to shrink
+    // on its own, and the person who makes it shrink is the one who wires the
+    // screen — they will be told here, by name, on the run where it starts
+    // working.
+    let called = invoked_commands(&scripts());
+    let registered = registered_commands(&read("src/main.rs"));
+
+    for esperando in AGUARDANDO_TELA {
+        assert!(
+            !called.contains(*esperando),
+            "the page calls `{esperando}` now, so it is not waiting for a screen any more: \
+             take it out of AGUARDANDO_TELA and let the check above cover it again"
+        );
+        assert!(
+            registered.contains(*esperando),
+            "AGUARDANDO_TELA names `{esperando}`, which main.rs does not register. \
+             A waiting list that names nothing is a waiting list nobody is reading"
+        );
+    }
 }
 
 #[test]
