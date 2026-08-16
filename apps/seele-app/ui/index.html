@@ -682,12 +682,34 @@
       </div>
     </section>
 
+    <!--
+      A Linha aberta (comp v3 §6.3): `#`, o nome, e um `BUSCAR` rotulado.
+
+      O que o comp desenha e não entra é `linhaDesc`, a descrição por Linha —
+      o protocolo não tem o campo, e o `REGISTRO ATIVO · SEM RETENÇÃO` que
+      ficava aqui era exatamente ele, escrito à mão. Sai da tela em vez de
+      virar travessão: ver o cabeçalho de `tela-sessao.css`.
+    -->
     <section class="painel painel-linha" aria-label="Registro da Linha">
       <div class="linha-barra">
-        <span id="linha-nome" class="linha-nome">LINHA —</span>
-        <span class="linha-registro">REGISTRO ATIVO · SEM RETENÇÃO</span>
+        <span class="linha-barra-cerquilha" aria-hidden="true">#</span>
+        <span id="linha-nome" class="linha-nome">—</span>
         <span class="espaco"></span>
         <span class="painel-codigo">C·05</span>
+        <!--
+          `BUSCAR` com rótulo, que é o remédio do v3 para todo controle que era
+          só forma: a barra de busca vivia aberta debaixo do cabeçalho, ocupando
+          40px em toda sessão para uma coisa que se faz uma vez por hora.
+
+          A tecla `/` continua abrindo, como no terminal. O botão é a mesma
+          porta para quem não sabe que ela existe — que é a pessoa inteira para
+          quem o v3 foi desenhado.
+        -->
+        <button id="botao-buscar" class="linha-buscar" type="button"
+                aria-controls="form-busca" aria-expanded="false"
+                title="procurar no que já foi dito nesta Linha">
+          <span data-glifo="buscar"></span><span>BUSCAR</span>
+        </button>
       </div>
       <!--
         A busca. `[1/3]` não é enfeite: `specs/05-cliente-tui.md` proíbe
@@ -695,7 +717,7 @@
         textual do realce. O comp não tem busca; o produto tem, e uma janela
         que sabe rolar mil mensagens e não sabe achar uma é uma janela pior.
       -->
-      <form id="form-busca" class="busca" autocomplete="off">
+      <form id="form-busca" class="busca" autocomplete="off" hidden>
         <span class="prompt">/</span>
         <input id="campo-busca" name="busca" placeholder="buscar…"
                spellcheck="false" autocomplete="off">
@@ -714,6 +736,8 @@
         <button id="busca-proxima" class="botao-fantasma" type="button"
                 title="próxima ocorrência" aria-label="próxima ocorrência"
                 data-glifo="avancar"></button>
+        <button id="busca-fechar" class="botao-fantasma" type="button"
+                title="fechar a busca">fechar</button>
       </form>
       <ol id="lista-mensagens" class="mensagens"></ol>
       <form id="form-mensagem" class="compor" autocomplete="off">
@@ -723,10 +747,18 @@
           no meio da linha e não há motivo para desenhá-lo. Decoração ao lado do
           campo, então sem nome acessível.
         -->
-        <span class="prompt" aria-hidden="true">&gt;</span>
-        <input id="campo-mensagem" name="mensagem" placeholder="transmitir na linha"
-               maxlength="4000" autocomplete="off">
-        <span class="compor-dica">ENTER TRANSMITE</span>
+        <span class="compor-caixa">
+          <span class="prompt" aria-hidden="true">&gt;</span>
+          <input id="campo-mensagem" name="mensagem" placeholder="transmitir na linha"
+                 maxlength="4000" autocomplete="off">
+        </span>
+        <!--
+          `ENTER TRANSMITE` era um rótulo permanente de 9px ao lado do campo.
+          Virou dica: ela diz a mesma coisa em português e some para quem
+          desligou as legendas simples, que é justamente quem já sabe.
+        -->
+        <span class="dica compor-dica">Enter também envia</span>
+        <button id="botao-enviar" class="compor-enviar" type="submit">ENVIAR</button>
       </form>
     </section>
 

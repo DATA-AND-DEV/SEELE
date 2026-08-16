@@ -656,32 +656,68 @@
 
 .painel-linha { background: var(--seele-negro-absoluto); }
 
+/* 52px no v3, contra os 40px do v2: o botão `BUSCAR` tem 34px de altura e não
+   cabia numa barra de 40. */
 .linha-barra {
   display: flex;
   align-items: center;
-  gap: 16px;
-  height: 40px;
-  padding: 0 16px;
+  gap: 12px;
+  min-height: 52px;
+  padding: 6px 16px;
   border-bottom: 1px solid var(--seele-linha);
+  flex: 0 0 auto;
+}
+
+.linha-barra-cerquilha {
+  font-size: 16px;
+  color: var(--seele-laranja-nerv);
   flex: 0 0 auto;
 }
 
 .linha-nome {
   font-family: var(--seele-display);
   font-weight: var(--seele-cartela);
-  font-size: 16px;
-  letter-spacing: 0.1em;
+  font-size: 17px;
+  letter-spacing: 0.06em;
   color: var(--seele-osso);
-  white-space: nowrap;
-}
-
-.linha-registro {
-  font-size: var(--seele-t-rotulo);
-  letter-spacing: 0.16em;
-  color: var(--seele-osso-apagado);
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Sem Linha aberta a frase é uma frase — em minúscula, na tipografia de dado,
+   para não parecer o nome de uma Linha chamada "nenhuma linha aberta". */
+.linha-nome-vazio {
+  font-family: var(--seele-mono);
+  font-weight: normal;
+  font-size: var(--seele-t-dado);
+  letter-spacing: 0;
+  color: var(--seele-osso-apagado);
+}
+
+/* `BUSCAR` com rótulo. Contorno e não campo sólido: ele é a segunda coisa desta
+   coluna, e o compositor lá embaixo é a primeira. */
+.linha-buscar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 12px;
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--seele-osso-apagado);
+  background: none;
+  border: 1px solid var(--seele-linha-forte);
+  cursor: pointer;
+}
+
+.linha-buscar:hover,
+.linha-buscar[aria-expanded="true"] {
+  color: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
 }
 
 /* ---------- mensagens ---------- */
@@ -694,38 +730,67 @@
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
-/* A grade do comp: 76px para a hora, o resto para autor e corpo, e uma marca de
-   1px à esquerda. A marca é onde o comp separa mensagem de sistema e de alerta;
-   `Message` não tem tipo, então aqui ela só separa a própria das outras. */
+/* A grade do comp v3: 34px de avatar, o resto para autor, hora e corpo, com uma
+   marca de 2px à esquerda. A marca é onde o comp separa mensagem de sistema e
+   de alerta; `Message` não tem tipo, então aqui ela só separa a própria das
+   outras. */
 .mensagem {
   display: grid;
-  grid-template-columns: 76px 1fr;
+  grid-template-columns: 34px minmax(0, 1fr);
   gap: 12px;
-  border-left: 1px solid var(--seele-linha);
+  border-left: 2px solid var(--seele-linha);
   padding-left: 12px;
 }
 
 .mensagem.propria { border-left-color: var(--seele-linha-forte); }
 
+/* O avatar de iniciais. Contorno e não bloco cheio: cheio, uma conversa de seis
+   pessoas vira seis quadrados sólidos numa coluna, e o que se lê passa a ser a
+   coluna de quadrados. */
+.mensagem-avatar {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 14px;
+  color: var(--seele-osso-apagado);
+  border: 1px solid var(--seele-linha-forte);
+}
+
+.mensagem.propria .mensagem-avatar {
+  color: var(--seele-padrao-azul);
+  border-color: var(--seele-padrao-azul);
+}
+
+.mensagem-conteudo { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+
+.mensagem-cabeca { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; }
+
+.mensagem-autor {
+  font-size: var(--seele-t-dado);
+  letter-spacing: 0.04em;
+  color: var(--seele-osso-apagado);
+}
+
+.mensagem.propria .mensagem-autor { color: var(--seele-padrao-azul); }
+
+/* O comp pinta a hora mais fraca ainda que o apagado. Aqui ela fica no apagado:
+   `docs/tokens-achados.md` já mede aquele em 4,11:1 e o classifica como
+   texto-grande-só, e descer mais é pôr um dado real abaixo do piso de 3:1 que
+   `.varredura` foi calibrada para preservar. A hierarquia que o comp queria
+   sai do tamanho — 10px contra os 13px do nome —, não de mais um degrau de
+   cinza. */
 .mensagem-hora {
-  font-size: 11px;
-  padding-top: 2px;
+  font-size: var(--seele-t-rotulo);
   color: var(--seele-osso-apagado);
   font-variant-numeric: tabular-nums;
 }
-
-.mensagem-conteudo { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-
-.mensagem-autor {
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  color: var(--seele-osso-apagado);
-}
-
-.mensagem.propria .mensagem-autor { color: var(--seele-laranja-nerv); }
 
 /* `pre-wrap`, e isto é contratual: a busca do outro lado da ponte indexou esta
    string com as quebras de linha dentro, e colapsá-las aqui deslocaria o realce
@@ -740,17 +805,18 @@
 
 .mensagens .editada { color: var(--seele-osso-apagado); font-size: 11px; }
 
+/* O compositor do v3: o campo numa moldura própria, e `ENVIAR` com rótulo ao
+   lado dela. 44px de altura nos dois, que é o que o comp escreve. */
 .compor {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 16px;
-  height: 48px;
+  gap: 10px;
+  padding: 12px 16px;
   border-top: 1px solid var(--seele-linha);
   flex: 0 0 auto;
 }
 
-.compor .prompt { color: var(--seele-laranja-nerv); font-size: var(--seele-t-corpo); }
+.compor .prompt { color: var(--seele-laranja-nerv); font-size: var(--seele-t-corpo); flex: 0 0 auto; }
 
 .compor input {
   flex: 1;
@@ -761,12 +827,45 @@
   font-size: var(--seele-t-corpo);
 }
 
+/* A moldura em volta do `>` e do campo, para o botão sólido ao lado ter contra
+   o que se destacar. `focus-within` e não `:focus` no campo: a borda é da
+   caixa, e o que recebe o foco é o `<input>` dentro dela. */
+.compor-caixa {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 12px;
+  min-height: 44px;
+  border: 1px solid var(--seele-linha-forte);
+  background: var(--seele-negro-painel);
+}
+
+.compor-caixa:focus-within { border-color: var(--seele-laranja-nerv); }
+
 /* A dica é a instrução, e é por isso que ela está na tela e não num manual. */
-.compor-dica {
-  font-size: var(--seele-t-micro);
-  letter-spacing: 0.16em;
-  color: var(--seele-osso-apagado);
+.compor-dica { flex: 0 0 auto; }
+
+/* `ENVIAR` com rótulo, no lugar do `▸` sozinho do v2. Campo sólido: é a ação
+   principal desta coluna e a única desta fileira. */
+.compor-enviar {
+  min-height: 44px;
+  padding: 0 20px;
   flex: 0 0 auto;
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 15px;
+  letter-spacing: 0.14em;
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-laranja-nerv);
+  border: 1px solid var(--seele-laranja-nerv);
+  cursor: pointer;
+}
+
+.compor-enviar:hover {
+  color: var(--seele-laranja-nerv);
+  background: none;
 }
 
 /* ---------- coluna 4: Taxa de Sincronização ---------- */

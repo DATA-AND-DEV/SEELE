@@ -470,10 +470,21 @@ function desenharOperador(snapshot) {
     : "esta sessão não tem áudio";
 }
 
-/** A barra de 40px da Linha aberta. */
+/**
+ * A barra da Linha aberta: `#` e o nome, como no comp v3.
+ *
+ * `LINHA geral` virou `# geral`: a palavra estava dizendo o que o `#` ao lado
+ * já dizia, e o cabeçalho da coluna tem um botão a mais agora.
+ *
+ * Sem Linha aberta a frase é uma frase, e não um travessão: nenhuma Linha
+ * aberta é um estado que o produto conhece e sabe nomear, ao contrário de um
+ * campo que ninguém mediu.
+ */
 function desenharLinha(snapshot) {
   const aberta = snapshot.lines.find((linha) => linha.open);
-  $("linha-nome").textContent = `LINHA ${aberta ? aberta.name : SEM_MEDIDA}`;
+  const nome = $("linha-nome");
+  nome.textContent = aberta ? aberta.name : "nenhuma linha aberta";
+  nome.classList.toggle("linha-nome-vazio", !aberta);
 }
 
 /**
@@ -536,17 +547,31 @@ function desenharMensagens() {
   const noFim = lista.scrollHeight - lista.scrollTop - lista.clientHeight < 32;
 
   const itens = mensagens.map((mensagem, indice) => {
-    // A grade do comp: uma coluna de 76px para a hora, o resto para autor e
-    // corpo. A marca de 2px à esquerda é onde o comp distingue mensagem de
-    // sistema e de alerta — `Message` não tem tipo (inventário §16), então só
-    // duas larguras existem aqui: a própria e a dos outros.
+    // A grade do comp v3: 34px de avatar, o resto para autor, hora e corpo. A
+    // hora saiu da coluna própria de 76px e foi para o lado do nome — é o que
+    // devolveu a largura que o avatar ocupa, e é onde o comp a põe.
+    //
+    // A marca de 2px à esquerda é onde o comp distingue mensagem de sistema e
+    // de alerta — `Message` não tem tipo (inventário §16), então só duas
+    // larguras existem aqui: a própria e a dos outros.
     const item = elemento("li", mensagem.own ? "mensagem propria" : "mensagem");
-    item.append(elemento("span", "mensagem-hora", relogio(mensagem.at_seconds)));
+
+    // O avatar de iniciais. Desenho e não dado: o nome inteiro está a doze
+    // pixels dali, então ele sai `aria-hidden` — anunciar `KM` antes de
+    // `KATSURAGI.M` é ler a mesma coisa duas vezes, uma delas em código.
+    //
+    // O `m.selo` do comp, ao lado do autor, **não** entra: ver o §1.2 do
+    // inventário v3 e a frase no rodapé da coluna de canais.
+    const avatar = elemento("span", "mensagem-avatar", iniciais(mensagem.author_nickname));
+    avatar.setAttribute("aria-hidden", "true");
+    item.append(avatar);
 
     const conteudo = elemento("span", "mensagem-conteudo");
-    const cabeca = elemento("span", "mensagem-autor", mensagem.author_nickname);
+    const cabeca = elemento("span", "mensagem-cabeca");
+    cabeca.append(elemento("span", "mensagem-autor", mensagem.author_nickname));
+    cabeca.append(elemento("span", "mensagem-hora", relogio(mensagem.at_seconds)));
+    if (mensagem.edited) cabeca.append(elemento("span", "editada", "editada"));
     conteudo.append(cabeca);
-    if (mensagem.edited) conteudo.append(elemento("span", "editada", "editada"));
 
     // O corpo **cru**, e isto não é detalhe de pintura. `.mensagens .corpo` é
     // `white-space: pre-wrap`: esta janela mostra quebra de linha e espaço
@@ -946,7 +971,9 @@ async function ejetar() {
   // que nada mudou — a tela abriria com o histórico de outra sessão na frente.
   mensagens = [];
   revisaoDesenhada = null;
-  await encerrarBusca();
+  // Fecha a barra, e não só zera o termo: aberta, ela abriria a próxima sessão
+  // já com o cursor num campo de busca sobre uma conversa que não existe.
+  await alternarBusca(false);
   // O convite não sobrevive à sessão que ele abriu: quem sai, digita outro
   // endereço e aperta INSERT mandaria o token do Dogma anterior ao novo.
   limparConvite();
@@ -962,6 +989,30 @@ async function encerrarBusca() {
   $("campo-busca").value = "";
   await invoke("busca_limpar");
   limparBusca();
+}
+
+/**
+ * Abre ou fecha a barra de busca.
+ *
+ * Ela ficava aberta o tempo todo, gastando 40px da coluna em toda sessão para
+ * uma coisa que se faz uma vez por hora. O v3 põe um `BUSCAR` rotulado no
+ * cabeçalho da Linha, e a tecla `/` continua valendo — as duas portas levam
+ * aqui.
+ *
+ * Fechar encerra a busca de verdade, e não só esconde: um realce aceso atrás de
+ * uma barra fechada é a tela afirmando um termo que ninguém consegue mais ler
+ * nem mudar.
+ */
+async function alternarBusca(abrir) {
+  const barra = $("form-busca");
+  const querAbrir = abrir ?? barra.hidden;
+  barra.hidden = !querAbrir;
+  $("botao-buscar").setAttribute("aria-expanded", querAbrir ? "true" : "false");
+  if (querAbrir) {
+    $("campo-busca").focus();
+    return;
+  }
+  await encerrarBusca();
 }
 
 // --------------------------------------------------------------------- busca
@@ -1067,6 +1118,8 @@ $("busca-proxima").addEventListener("click", async () =>
 $("busca-anterior").addEventListener("click", async () =>
   desenharBusca(await invoke("busca_andar", { adiante: false })),
 );
+$("botao-buscar").addEventListener("click", () => alternarBusca());
+$("busca-fechar").addEventListener("click", () => alternarBusca(false));
 $("form-mensagem").addEventListener("submit", enviar);
 // Duas listas, um manipulador: os Cages e as Linhas ganharam cabeçalhos
 // próprios (`B·03` e `B·04`) e deixaram de caber numa lista só.
@@ -1146,14 +1199,15 @@ window.addEventListener("keydown", (evento) => {
   // engoliria a tecla para focar um campo que está escondido.
   if (evento.key === "/" && !digitando() && !$("tela-sessao").hidden) {
     evento.preventDefault();
-    $("campo-busca").focus();
+    // Abre a barra antes de focar: `focus()` num campo dentro de um `hidden`
+    // não faz nada e não avisa, e a tecla passaria a não fazer nada.
+    alternarBusca(true);
     return;
   }
   if (evento.target === $("campo-busca")) {
     if (evento.key === "Escape") {
       evento.preventDefault();
-      encerrarBusca();
-      $("campo-busca").blur();
+      alternarBusca(false);
       return;
     }
     if (evento.key === "Enter") {
