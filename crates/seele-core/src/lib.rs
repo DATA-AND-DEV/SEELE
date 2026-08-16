@@ -42,7 +42,10 @@ pub use ed25519_dalek::SigningKey;
 pub use identity::FilePinStore;
 pub use state::{CageSync, Changed, Ended, Message, Notice, Pilot, Room};
 pub use tofu::{MemoryPinStore, PinDecision, PinStore, Verdict};
-pub use voice::{capture_devices, CaptureDevice, DeviceRates, Voice, VoiceMode};
+pub use voice::{
+    capture_devices, playback_devices, CaptureDevice, DeviceChoice, DeviceRates, PlaybackDevice,
+    Voice, VoiceMode,
+};
 
 /// The surface a shell is allowed to see.
 ///
