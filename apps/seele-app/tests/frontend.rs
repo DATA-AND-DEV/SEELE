@@ -1823,3 +1823,74 @@ fn no_two_screens_claim_the_same_class_name() {
         clashes.join("\n")
     );
 }
+
+/// The names a script declares at its top level.
+///
+/// Column zero and nothing else: anything indented is inside a function and
+/// belongs to that function.
+fn globals_declared_in(script: &str) -> BTreeSet<String> {
+    let mut found = BTreeSet::new();
+    for line in without_comments(script).lines() {
+        let Some(rest) = ["const ", "let ", "var ", "function ", "class "]
+            .iter()
+            .find_map(|keyword| line.strip_prefix(keyword))
+        else {
+            continue;
+        };
+        // `const { invoke } = window.__TAURI__.core` binds through a pattern
+        // rather than a name, and this does not try to read patterns.
+        let name: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '$')
+            .collect();
+        if !name.is_empty() {
+            found.insert(name);
+        }
+    }
+    found
+}
+
+#[test]
+fn no_two_scripts_declare_the_same_top_level_name() {
+    // The same hazard as the stylesheet check above, on the other half of the
+    // split, and the failures are worse. ADR 0019 chose no modules, so the nine
+    // scripts share one scope — and what changes when a file is split is not
+    // visibility, it is what happens when two of them pick one name:
+    //
+    // - two top-level `const`s or `let`s with one name is a `SyntaxError`, and
+    //   it kills the *whole* second script. Every listener it was going to
+    //   register is never registered, so a screen's buttons simply do nothing.
+    //   Nothing else in this suite would notice: the page loads, the markup is
+    //   there, and only the console says why.
+    // - two `function`s with one name is silent. The one that loads later wins
+    //   every call, including the calls made from the file that declared the
+    //   other one — which is `.magi` in `no_two_screens_claim_the_same_class_name`,
+    //   one layer down and harder to see.
+    //
+    // Sharing on purpose stays legal and is how this frontend works: a screen
+    // *reads* `medido`, `blocos`, `volumes` and `comecoDaSessao` from the file
+    // that declares them. What it may not do is declare them again.
+    let mut owner: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    let mut clashes: Vec<String> = Vec::new();
+
+    for name in ui_files(".js") {
+        for global in globals_declared_in(&read(&format!("ui/{name}"))) {
+            match owner.get(&global) {
+                Some(first) => clashes.push(format!("`{global}` — {first} and {name}")),
+                None => {
+                    owner.insert(global, name.clone());
+                }
+            }
+        }
+    }
+
+    assert!(!owner.is_empty(), "no script declares anything at all");
+    assert!(
+        clashes.is_empty(),
+        "two scripts declare the same top-level name into the one scope they \
+         share. For `const` and `let` that is a SyntaxError that takes the whole \
+         second file down, listeners included; for `function` it is silent, and \
+         the later file wins every call:\n{}",
+        clashes.join("\n")
+    );
+}
