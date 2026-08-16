@@ -7,18 +7,29 @@
 //
 // ---- o que esta tela desenha, e o que ela recusa a desenhar ----
 //
-// A composição é a do comp v2 (`design/Entry Plug v2.dc.html`, tela
-// `principal`), inventariada em `.superpowers/sdd/comp-inventario.md` §3.
-// Quatro colunas: a ficha do Dogma, os canais, a Linha aberta, a Taxa de
-// Sincronização.
+// A composição é a do comp **v3** (`design/Entry Plug v3.dc.html`, tela
+// `principal`), inventariada em `.superpowers/sdd/comp-inventario-v3.md` §6.
+// Quatro colunas — a trilha de Dogmas, os canais, a Linha aberta, a Taxa de
+// Sincronização — em `60px 268px minmax(0,1fr) 328px`.
 //
-// Boa parte do que o comp desenha não tem dado por trás — o inventário §16
-// conta 23 valores nessa situação. A regra seguida aqui é uma só: **desenhar a
-// moldura e deixar o valor visivelmente não medido**. Nada de número plausível,
-// nada de campo apagado da tela. `crates/seele-core/src/state.rs` guarda essa
-// mesma ideia num teste cujo nome é a frase inteira — uma taxa não medida lê
-// zero, e não cem. Um travessão com `title` é o oposto de um número inventado:
-// ele diz que ninguém mediu, e diz por quê.
+// O que o v3 muda de fundo, e é do que trata metade deste arquivo: cada Cage
+// mostra **quem está dentro** antes de se entrar nele, entrar e sair viraram
+// botões com rótulo, as mensagens ganharam avatar de iniciais, e a busca deixou
+// de viver aberta.
+//
+// ---- a regra do valor que não existe, e a inversão do v3 ----
+//
+// O v2 mandava desenhar a moldura e deixar o valor visivelmente não medido: um
+// travessão com `title`, nunca um número plausível.
+// `crates/seele-core/src/state.rs` guarda a outra metade dessa ideia num teste
+// cujo nome é a frase inteira — uma taxa não medida lê zero, e não cem.
+//
+// Ela continua valendo onde a ausência **responde** a uma pergunta que a tela
+// acabou de fazer: a média sem plug inserido, a barra da bateria, as três
+// células do alerta. E ela foi invertida onde a ausência se repetia por
+// fileira — pendências por Linha, subsistema por piloto, atraso por piloto —,
+// porque meia dúzia de travessões explicados numa tela que existe para ser
+// simples é ruído, não honestidade. Ver o cabeçalho de `tela-sessao.css`.
 //
 // O que ficou sem dado, e o que cada um exigiria, está em
 // `.superpowers/sdd/tela-dogma.md`.
@@ -232,7 +243,7 @@ function desenharTopo(snapshot) {
   $("topo-piloto").textContent = snapshot.nickname;
 
   const nome = snapshot.dogma;
-  const rotulo = $("dogma-nome");
+  const rotulo = $("topo-dogma-nome");
   const trilha = $("trilha-dogma");
   if (nome) {
     medido(rotulo, nome);
@@ -268,7 +279,7 @@ function desenharTopo(snapshot) {
  * `specs/06-clientes-gui.md` proíbe. O motivo vai no `title`.
  */
 function desenharPortaDoDogma() {
-  const sub = $("dogma-sub");
+  const sub = $("topo-dogma-sub");
   const porta = /:(\d+)$/.exec(alvoDoDogma ?? "");
   if (porta) {
     sub.textContent = `DOGMA CENTRAL · ${porta[1]}`;
@@ -280,7 +291,7 @@ function desenharPortaDoDogma() {
 }
 
 /**
- * A sigla de um Dogma, para a coluna de 56px.
+ * A sigla de um Dogma, para a coluna de 60px.
  *
  * `TÓQUIO-3` vira `T3`, como no comp. A primeira letra de cada corrida de
  * letras ou algarismos, até três — e é abreviação de desenho, nunca um dado: o
@@ -297,49 +308,146 @@ function sigla(nome) {
 }
 
 /**
+ * As iniciais de um apelido, para o avatar das mensagens.
+ *
+ * `IKARI.S` vira `IS`, como no comp. Sem ponto, as duas primeiras letras;
+ * com uma letra só, essa letra. Por ponto de código e não por índice de unidade
+ * de código — um apelido que comece com emoji devolveria meio par substituto,
+ * que é um caractere de substituição desenhado no lugar da inicial.
+ *
+ * É desenho e nunca dado: o nome inteiro está sempre ao lado, e o avatar sai
+ * `aria-hidden` por isso mesmo.
+ *
+ * `iniciaisDoApelido` e não `iniciais`, que é o nome do comp: os scripts desta
+ * janela dividem **um** escopo global (ADR 0019, e o topo de `base.js`), e a
+ * tela de chamada desenha o mesmo avatar por cartão. Duas declarações de
+ * `function iniciais` no mesmo escopo não são erro em lugar nenhum — a última
+ * carregada simplesmente vence, e as duas telas passam a usar a regra de uma
+ * delas. Quando a segunda existir, o lugar deste desenho é `base.js`, como o
+ * `relogio` e o `marcaSync` que já moram lá.
+ */
+function iniciaisDoApelido(apelido) {
+  const partes = apelido.split(".").filter((parte) => parte.length > 0);
+  const primeira = [...(partes[0] ?? "")];
+  const segunda = [...(partes[1] ?? "")];
+  return ((primeira[0] ?? "") + (segunda[0] ?? primeira[1] ?? "")).toUpperCase();
+}
+
+/**
  * Os Cages e as Linhas, em duas listas com cabeçalho próprio.
  *
- * A ocupação de **todo** Cage é desenhável hoje, e não só a do ocupado:
- * `cages_of` popula `pilots` a partir de `room.roster(cage.id)` para cada Cage
- * (inventário §16). Era o que o app escondia num `title=`.
+ * ---- ver quem está dentro antes de entrar ----
+ *
+ * A mudança de fundo do v3 (§6.2), e ela não custa protocolo nenhum: `cages_of`
+ * popula `Cage.pilots` a partir de `room.roster(cage.id)` para **todo** Cage, e
+ * não só para o ocupado. O produto sabia quem estava em cada sala e desenhava
+ * uma barra de blocos no lugar dos nomes.
+ *
+ * ---- entrar é um botão, e sair também ----
+ *
+ * No v2 a linha inteira era o alvo do clique, sem rótulo e sem foco de teclado
+ * — o ouvinte estava no `<ul>` e nenhum `<li>` era apertável. Agora cada Cage
+ * traz um botão de 38px que diz o que faz.
+ *
+ * O comp escreve `VOCÊ ESTÁ AQUI` no Cage ocupado e não liga o botão a nada.
+ * Aqui ele diz `SAIR DA JAULA` e ejeta, e a divergência é deliberada: `sair`
+ * ganhou lugar próprio no v3 justamente porque no v2 ninguém o achava, e o
+ * único outro lugar em que ele existe é a tela de chamada. Trocar um botão
+ * mudo por um botão morto seria repetir o erro que o v3 corrige. Que se está
+ * dentro continua dito, e por duas vias: a marca laranja na borda do Cage e o
+ * `(você)` ao lado do próprio nome na lista de quem está lá.
  */
 function desenharCanais(snapshot) {
   const cages = snapshot.cages.map((cage) => {
     const item = elemento("li", cage.occupied_by_us ? "cage aberto" : "cage");
-    item.dataset.cage = String(cage.id);
 
     const cabeca = elemento("span", "canal-cabeca");
     cabeca.append(elemento("span", "cage-nome", cage.name));
-
-    // A ocupação é o acompanhante textual da barra: a barra sozinha é forma, e
-    // `4/8` é o número que sobrevive a qualquer paleta.
-    const ocupacao = cage.limit > 0 ? (cage.pilots.length / cage.limit) * 100 : 0;
+    // `4/8` — a ocupação em número. Ela não acompanha mais uma barra de blocos:
+    // a lista de nomes logo abaixo é a mesma informação com os nomes dentro,
+    // e duas leituras da mesma coisa numa coluna de 268px é uma a mais.
     cabeca.append(elemento("span", "cage-ocupacao", `${cage.pilots.length}/${cage.limit}`));
 
-    const barra = elemento("span", "barra", blocos(ocupacao, 12));
-    barra.setAttribute("aria-hidden", "true");
+    const dentro = elemento("ul", "cage-dentro");
+    if (cage.pilots.length === 0) {
+      // Palavra, e não travessão: um Cage vazio é uma medida, e o produto a
+      // tem. O travessão é para o que ninguém mediu.
+      dentro.append(elemento("li", "cage-vazio", "ninguém aqui"));
+    } else {
+      dentro.append(...cage.pilots.map(linhaDeQuemEstaDentro));
+    }
 
-    item.append(cabeca, barra);
+    const entrar = elemento(
+      "button",
+      "cage-entrar",
+      cage.occupied_by_us ? "SAIR DA JAULA" : "ENTRAR NA JAULA",
+    );
+    entrar.type = "button";
+    entrar.dataset.cage = String(cage.id);
+    entrar.dataset.dentro = cage.occupied_by_us ? "sim" : "nao";
+    entrar.title = cage.occupied_by_us
+      ? "tirar o plug: você para de ouvir e de falar nesta jaula"
+      : `entrar e falar com quem está em ${cage.name}`;
+
+    item.append(cabeca, dentro, entrar);
     return item;
   });
   repovoar($("lista-cages"), cages);
 
   const linhas = snapshot.lines.map((linha) => {
-    const item = elemento("li", linha.open ? "linha aberto" : "linha");
-    item.dataset.linha = String(linha.id);
-    item.append(elemento("span", "linha-rotulo", linha.name));
+    const item = elemento("li", null);
 
-    // As pendências por Linha são a marca laranja do comp. `Line` é
-    // `{id, name, open}` — não há contagem de não-lidas nem marca d'água de
-    // leitura em lugar nenhum do core.
-    const pendencias = elemento("span", null);
-    naoMedido(pendencias, "o protocolo não carrega pendências por Linha");
-    item.append(pendencias);
+    // Botão de verdade, e não um `<li>` com `cursor: pointer`: o ouvinte estava
+    // no `<ul>`, então a lista inteira era inalcançável pelo teclado e nenhum
+    // leitor de tela a anunciava como algo que se aperta.
+    const botao = elemento("button", linha.open ? "linha aberto" : "linha");
+    botao.type = "button";
+    botao.dataset.linha = String(linha.id);
+    if (linha.open) botao.setAttribute("aria-current", "true");
 
+    // O `#` é ASCII e está na face, então é caractere e não desenho. Decoração
+    // ao lado do nome, e por isso sem nome acessível.
+    const cerquilha = elemento("span", "linha-cerquilha", "#");
+    cerquilha.setAttribute("aria-hidden", "true");
+    botao.append(cerquilha, elemento("span", "linha-rotulo", linha.name));
+
+    // A contagem de pendências do comp não entra. `Line` é `{id, name, open}` —
+    // não há contagem de não-lidas nem marca d'água de leitura em lugar nenhum
+    // do core —, e um travessão explicado ao lado de cada Linha seria meia
+    // dúzia de perguntas que ninguém fez, numa tela que existe para ser
+    // simples. Ver o cabeçalho de `tela-sessao.css`.
+
+    item.append(botao);
     if (linha.open) linhaAberta = linha.id;
     return item;
   });
   repovoar($("lista-linhas"), linhas);
+}
+
+/**
+ * Uma pessoa na lista de quem está dentro de um Cage.
+ *
+ * O comp marca o estado com um ponto colorido e nada mais.
+ * `specs/05-cliente-tui.md` proíbe informação que só a cor carregue, e um ponto
+ * é também só forma — então o que muda o estado vira **palavra**: `fala` e
+ * `mudo`. O repouso não ganha palavra nenhuma, pela mesma razão que a pastilha
+ * `EM ESCUTA` do roster não ganha bloco: é onde toda linha está quase sempre, e
+ * marcá-lo é não marcar nada.
+ *
+ * O glifo continua, desenhado e `aria-hidden`: ele é o que dá a varredura da
+ * coluna de relance, e quem escuta a tela já recebe a palavra.
+ */
+function linhaDeQuemEstaDentro(piloto) {
+  const item = elemento("li", "cage-piloto");
+  item.append(glifo(piloto.speaking ? "falando" : "silencio"));
+  item.append(elemento("span", "cage-piloto-nome", piloto.nickname));
+  if (piloto.is_self) item.append(elemento("span", "cage-piloto-eu", "(você)"));
+  if (piloto.at_field) {
+    item.append(elemento("span", "cage-piloto-marca", "mudo"));
+  } else if (piloto.speaking) {
+    item.append(elemento("span", "cage-piloto-marca", "fala"));
+  }
+  return item;
 }
 
 /** A tira do operador, no rodapé da coluna de canais. */
@@ -381,10 +489,21 @@ function desenharOperador(snapshot) {
     : "esta sessão não tem áudio";
 }
 
-/** A barra de 40px da Linha aberta. */
+/**
+ * A barra da Linha aberta: `#` e o nome, como no comp v3.
+ *
+ * `LINHA geral` virou `# geral`: a palavra estava dizendo o que o `#` ao lado
+ * já dizia, e o cabeçalho da coluna tem um botão a mais agora.
+ *
+ * Sem Linha aberta a frase é uma frase, e não um travessão: nenhuma Linha
+ * aberta é um estado que o produto conhece e sabe nomear, ao contrário de um
+ * campo que ninguém mediu.
+ */
 function desenharLinha(snapshot) {
   const aberta = snapshot.lines.find((linha) => linha.open);
-  $("linha-nome").textContent = `LINHA ${aberta ? aberta.name : SEM_MEDIDA}`;
+  const nome = $("linha-nome");
+  nome.textContent = aberta ? aberta.name : "nenhuma linha aberta";
+  nome.classList.toggle("linha-nome-vazio", !aberta);
 }
 
 /**
@@ -447,17 +566,31 @@ function desenharMensagens() {
   const noFim = lista.scrollHeight - lista.scrollTop - lista.clientHeight < 32;
 
   const itens = mensagens.map((mensagem, indice) => {
-    // A grade do comp: uma coluna de 76px para a hora, o resto para autor e
-    // corpo. A marca de 2px à esquerda é onde o comp distingue mensagem de
-    // sistema e de alerta — `Message` não tem tipo (inventário §16), então só
-    // duas larguras existem aqui: a própria e a dos outros.
+    // A grade do comp v3: 34px de avatar, o resto para autor, hora e corpo. A
+    // hora saiu da coluna própria de 76px e foi para o lado do nome — é o que
+    // devolveu a largura que o avatar ocupa, e é onde o comp a põe.
+    //
+    // A marca de 2px à esquerda é onde o comp distingue mensagem de sistema e
+    // de alerta — `Message` não tem tipo (inventário §16), então só duas
+    // larguras existem aqui: a própria e a dos outros.
     const item = elemento("li", mensagem.own ? "mensagem propria" : "mensagem");
-    item.append(elemento("span", "mensagem-hora", relogio(mensagem.at_seconds)));
+
+    // O avatar de iniciais. Desenho e não dado: o nome inteiro está a doze
+    // pixels dali, então ele sai `aria-hidden` — anunciar `KM` antes de
+    // `KATSURAGI.M` é ler a mesma coisa duas vezes, uma delas em código.
+    //
+    // O `m.selo` do comp, ao lado do autor, **não** entra: ver o §1.2 do
+    // inventário v3 e a frase no rodapé da coluna de canais.
+    const avatar = elemento("span", "mensagem-avatar", iniciaisDoApelido(mensagem.author_nickname));
+    avatar.setAttribute("aria-hidden", "true");
+    item.append(avatar);
 
     const conteudo = elemento("span", "mensagem-conteudo");
-    const cabeca = elemento("span", "mensagem-autor", mensagem.author_nickname);
+    const cabeca = elemento("span", "mensagem-cabeca");
+    cabeca.append(elemento("span", "mensagem-autor", mensagem.author_nickname));
+    cabeca.append(elemento("span", "mensagem-hora", relogio(mensagem.at_seconds)));
+    if (mensagem.edited) cabeca.append(elemento("span", "editada", "editada"));
     conteudo.append(cabeca);
-    if (mensagem.edited) conteudo.append(elemento("span", "editada", "editada"));
 
     // O corpo **cru**, e isto não é detalhe de pintura. `.mensagens .corpo` é
     // `white-space: pre-wrap`: esta janela mostra quebra de linha e espaço
@@ -612,11 +745,9 @@ function linhaDoRoster(piloto, temAudio) {
   const identidade = elemento("span", "piloto-identidade");
   identidade.append(elemento("span", "piloto-nome", piloto.nome));
 
-  // `MELCHIOR·01` no comp. `Pilot` não tem o subsistema que atende o piloto, e
-  // o protocolo não carrega qual seria.
-  const tag = elemento("span", "piloto-tag");
-  naoMedido(tag, "o protocolo não diz qual subsistema atende cada piloto");
-  identidade.append(tag);
+  // `MELCHIOR·01`, o subsistema por piloto, não entra. O protocolo não diz qual
+  // atende quem, e um travessão explicado em toda linha do roster é o ruído que
+  // o v3 veio tirar desta tela.
 
   const numero = elemento("span", "piloto-sync");
   // A marca de bloco antes do número, pela mesma razão que na média: a Saira
@@ -633,15 +764,11 @@ function linhaDoRoster(piloto, temAudio) {
   const barra = elemento("span", "barra", blocos(piloto.ratio, 20));
   barra.setAttribute("aria-hidden", "true");
 
+  // O `ATRASO` por piloto do comp não entra. `Telemetry` é a **nossa** conexão:
+  // `rtt_ms` é um número só, e latência por par não atravessa a fronteira nem é
+  // derivável de nada que atravesse (inventário v3 §1.3). O rodapé fica com o
+  // que existe.
   const rodape = elemento("span", "piloto-rodape");
-  const atraso = elemento("span", "piloto-atraso");
-  atraso.append(elemento("b", "rotulo-micro", "ATRASO"), document.createTextNode(" "));
-  const valorAtraso = elemento("span", null);
-  // `Telemetry` é a **nossa** conexão. Latência por par não atravessa a
-  // fronteira e não é derivável de nada que atravesse.
-  naoMedido(valorAtraso, "o RTT medido é o desta máquina, não o de cada piloto");
-  atraso.append(valorAtraso);
-
   const estados = elemento("span", "piloto-estados");
   // A pastilha do comp: bloco sólido com texto no negro absoluto, e não texto
   // colorido. `PLUG EJETADO` é o quarto estado do comp e não aparece aqui —
@@ -666,7 +793,7 @@ function linhaDoRoster(piloto, temAudio) {
     estados.append(surdez);
   }
 
-  rodape.append(atraso, estados);
+  rodape.append(estados);
   item.append(cabeca, barra, rodape);
 
   // Volume por pessoa (`specs/03-audio.md`).
@@ -788,15 +915,20 @@ async function enviar(evento) {
   }
 }
 
+/**
+ * Entrar num Cage, sair dele, ou abrir uma Linha.
+ *
+ * O alvo é um `<button>` com `data-cage` ou `data-linha`, e não mais a linha
+ * inteira: no v2 o ouvinte estava no `<ul>` e o que se apertava era um `<li>`,
+ * que nenhum teclado alcança e nenhum leitor de tela anuncia como apertável.
+ */
 async function alternarCanal(evento) {
-  const item = evento.target.closest("li");
+  const item = evento.target.closest("button[data-cage], button[data-linha]");
   if (!item) return;
   try {
     if (item.dataset.cage) {
-      // Clicar no Cage em que já se está é sair dele — a mesma tecla entra e
-      // sai, como no `plug`.
       const cage = Number(item.dataset.cage);
-      if (item.classList.contains("aberto")) {
+      if (item.dataset.dentro === "sim") {
         await invoke("eject_plug");
       } else {
         await invoke("insert_plug", { cage });
@@ -852,7 +984,9 @@ async function ejetar() {
   // que nada mudou — a tela abriria com o histórico de outra sessão na frente.
   mensagens = [];
   revisaoDesenhada = null;
-  await encerrarBusca();
+  // Fecha a barra, e não só zera o termo: aberta, ela abriria a próxima sessão
+  // já com o cursor num campo de busca sobre uma conversa que não existe.
+  await alternarBusca(false);
   // O convite não sobrevive à sessão que ele abriu: quem sai, digita outro
   // endereço e aperta INSERT mandaria o token do Dogma anterior ao novo.
   limparConvite();
@@ -868,6 +1002,30 @@ async function encerrarBusca() {
   $("campo-busca").value = "";
   await invoke("busca_limpar");
   limparBusca();
+}
+
+/**
+ * Abre ou fecha a barra de busca.
+ *
+ * Ela ficava aberta o tempo todo, gastando 40px da coluna em toda sessão para
+ * uma coisa que se faz uma vez por hora. O v3 põe um `BUSCAR` rotulado no
+ * cabeçalho da Linha, e a tecla `/` continua valendo — as duas portas levam
+ * aqui.
+ *
+ * Fechar encerra a busca de verdade, e não só esconde: um realce aceso atrás de
+ * uma barra fechada é a tela afirmando um termo que ninguém consegue mais ler
+ * nem mudar.
+ */
+async function alternarBusca(abrir) {
+  const barra = $("form-busca");
+  const querAbrir = abrir ?? barra.hidden;
+  barra.hidden = !querAbrir;
+  $("botao-buscar").setAttribute("aria-expanded", querAbrir ? "true" : "false");
+  if (querAbrir) {
+    $("campo-busca").focus();
+    return;
+  }
+  await encerrarBusca();
 }
 
 // --------------------------------------------------------------------- busca
@@ -973,6 +1131,8 @@ $("busca-proxima").addEventListener("click", async () =>
 $("busca-anterior").addEventListener("click", async () =>
   desenharBusca(await invoke("busca_andar", { adiante: false })),
 );
+$("botao-buscar").addEventListener("click", () => alternarBusca());
+$("busca-fechar").addEventListener("click", () => alternarBusca(false));
 $("form-mensagem").addEventListener("submit", enviar);
 // Duas listas, um manipulador: os Cages e as Linhas ganharam cabeçalhos
 // próprios (`B·03` e `B·04`) e deixaram de caber numa lista só.
@@ -1052,14 +1212,15 @@ window.addEventListener("keydown", (evento) => {
   // engoliria a tecla para focar um campo que está escondido.
   if (evento.key === "/" && !digitando() && !$("tela-sessao").hidden) {
     evento.preventDefault();
-    $("campo-busca").focus();
+    // Abre a barra antes de focar: `focus()` num campo dentro de um `hidden`
+    // não faz nada e não avisa, e a tecla passaria a não fazer nada.
+    alternarBusca(true);
     return;
   }
   if (evento.target === $("campo-busca")) {
     if (evento.key === "Escape") {
       evento.preventDefault();
-      encerrarBusca();
-      $("campo-busca").blur();
+      alternarBusca(false);
       return;
     }
     if (evento.key === "Enter") {

@@ -1522,6 +1522,244 @@ fn the_hint_layer_is_defined_once_and_never_by_a_screen() {
 }
 
 #[test]
+fn the_cage_says_who_is_inside_and_says_their_state_in_words() {
+    // The v3 comp's biggest single gain, and it costs no protocol: `cages_of`
+    // already fills `Cage.pilots` from `room.roster(cage.id)` for *every* Cage,
+    // not only the occupied one. The app spent that on a block bar — twelve
+    // characters standing in for the four names it had in hand.
+    //
+    // The second half is the part that would rot silently. The comp marks who
+    // is talking with a coloured dot and nothing else, and
+    // `specs/05-cliente-tui.md` forbids information carried by colour alone —
+    // a dot is carried by shape alone too, which is the same failure wearing
+    // the other hat. So the states that change something have to be a *word*.
+    // Deleting the words leaves a screen that still looks right in a
+    // screenshot and says nothing to anybody reading it without colour.
+    //
+    // Scoped to the two functions that build the rows, because the file as a
+    // whole says all of these words either way: the paragraph explaining why
+    // the word is there would satisfy an unscoped search for it.
+    let lista = body_of(&scripts(), "function desenharCanais");
+    let dentro = body_of(&scripts(), "function linhaDeQuemEstaDentro");
+
+    assert!(
+        lista.contains("cage.pilots") && lista.contains("linhaDeQuemEstaDentro"),
+        "the Cage list no longer draws who is inside, so the one thing the v3 \
+         added to this column is a block bar again"
+    );
+    assert!(
+        dentro.contains("piloto.speaking") && dentro.contains("piloto.at_field"),
+        "the row inside a Cage reads neither who is talking nor who is muted, \
+         which is everything it was drawn to say"
+    );
+    for word in ["fala", "mudo"] {
+        assert!(
+            dentro.contains(&format!("\"{word}\"")),
+            "the state `{word}` is drawn without a word beside the glyph, so it \
+             reaches a monochrome screen — and a colour-blind reader — as a dot \
+             that means nothing:\n{dentro}"
+        );
+    }
+}
+
+#[test]
+fn entering_and_leaving_a_cage_are_labelled_buttons_and_not_a_click_on_the_row() {
+    // What the v2 shipped: a `<li>` with `cursor: pointer` and one listener on
+    // the `<ul>`. Nothing about it said it could be pressed, no keyboard could
+    // reach it, and no screen reader announced it as anything at all. The LAN
+    // test found the same defect one column over, on the `+` that was the only
+    // way out of a Dogma — this is that finding applied here.
+    //
+    // Leaving is asserted beside entering on purpose. The comp writes
+    // `VOCÊ ESTÁ AQUI` on the occupied Cage and wires it to nothing, and taking
+    // that literally would trade a mute button for a dead one: this screen
+    // would lose its only way out of a Cage, and gain a button that looks like
+    // it acts.
+    let handler = body_of(&scripts(), "async function alternarCanal");
+    let lista = body_of(&scripts(), "function desenharCanais");
+
+    assert!(
+        handler.contains("button[data-cage]") && handler.contains("button[data-linha]"),
+        "the channel handler is looking for something other than a button, so \
+         whatever it finds is not focusable and announces as nothing:\n{handler}"
+    );
+    assert!(
+        !handler.contains("closest(\"li\")"),
+        "the channel handler is back to catching the row, which is the shape \
+         that has no keyboard and no accessible name"
+    );
+    for label in ["ENTRAR NA JAULA", "SAIR DA JAULA"] {
+        assert!(
+            lista.contains(label),
+            "the Cage no longer offers `{label}`, so one half of the pair the v3 \
+             split apart has gone missing again"
+        );
+    }
+    assert!(
+        lista.contains("eject_plug") || handler.contains("eject_plug"),
+        "nothing on this screen takes the plug out, and the only other way out \
+         lives on a screen reached from here"
+    );
+}
+
+#[test]
+fn the_session_screen_omits_what_nothing_measures_rather_than_a_dash_per_row() {
+    // The v2 rule was: draw the frame, leave the value visibly unmeasured, put
+    // the reason in a `title`. It is the right rule where the absence answers a
+    // question the screen just asked — the average with no plug in, the battery
+    // bar, the alert's three cells — and all of those stay.
+    //
+    // It is the wrong rule *per row*. A dash beside every Line and two more
+    // inside every pilot card is half a dozen explained em-dashes on a screen
+    // whose entire purpose is being simple, each one asking to be read and none
+    // of them answering anything. The v3 inverts it here: what has no data
+    // leaves the screen.
+    //
+    // Guarded as "these two builders draw no dash", plus a control that the
+    // helper is still in use elsewhere — otherwise deleting `naoMedido`
+    // outright would satisfy this and quietly take the honest gaps with it.
+    let script = scripts();
+    let canais = body_of(&script, "function desenharCanais");
+    let piloto = body_of(&script, "function linhaDoRoster");
+    let media = body_of(&script, "function desenharMedia");
+
+    for (name, body) in [("desenharCanais", &canais), ("linhaDoRoster", &piloto)] {
+        assert!(
+            !body.contains("naoMedido"),
+            "`{name}` draws an unmeasured value once per row, which is the noise \
+             the v3 took off this screen:\n{body}"
+        );
+    }
+    assert!(
+        media.contains("naoMedido"),
+        "the Sync average no longer marks itself unmeasured when there is no \
+         plug in — that gap is an answer to a question the panel just asked, and \
+         it is the one this rule does not touch"
+    );
+}
+
+#[test]
+fn the_bound_name_is_stated_once_and_never_worn_as_a_badge() {
+    // The v3 comp draws a `verif` seal per pilot and another per message. Both
+    // are gone, and the reasoning is in §1.2 of its inventory: the CASPER binds
+    // a nickname to the identity that claimed it first and the MELCHIOR refuses
+    // any other (ADR 0017), so the seal would be true on every line forever — and
+    // a badge everybody wears is a badge nobody learns to read, on the day one
+    // of them is missing.
+    //
+    // What replaced it is one sentence. Two failure modes, and this catches
+    // both: the sentence quietly disappearing in a later edit, and the seal
+    // creeping back in per message.
+    let page = without_comments(&read("ui/index.html"));
+    let mensagens = body_of(&scripts(), "function desenharMensagens");
+
+    let sentence = "ninguém consegue usar o nome de outra pessoa";
+    assert_eq!(
+        page.matches(sentence).count(),
+        1,
+        "the sentence about names being bound to keys is either gone from the \
+         page or said more than once — it is worth exactly one telling, which is \
+         the whole reason the per-line seal was dropped for it"
+    );
+    assert!(
+        page.contains("class=\"dica operador-frase\""),
+        "the sentence is no longer part of the simple-captions layer, so it \
+         stays on screen for the people who turned that layer off — who are \
+         precisely the people it was not written for"
+    );
+    assert!(
+        !mensagens.contains("selo"),
+        "a per-message seal is back beside the author, and it will read `true` \
+         on every message this product can ever draw:\n{mensagens}"
+    );
+}
+
+#[test]
+fn the_search_starts_closed_and_opens_from_something_that_says_buscar() {
+    // The search bar used to live open, spending 40px of the Line column on
+    // every session for something done once an hour. The v3 puts a labelled
+    // `BUSCAR` in the Line's header instead.
+    //
+    // Which creates one way to get this exactly wrong, and it is silent:
+    // `focus()` on an input inside a `hidden` element does nothing and reports
+    // nothing, so pressing `/` would simply stop working — with the field still
+    // in the page, the listener still bound, and no error anywhere.
+    let page = read("ui/index.html");
+    let script = without_comments(&scripts());
+
+    let tag = tag_with_id(&page, "form-busca");
+    assert!(
+        tag.contains("hidden"),
+        "the search bar starts open, so the header button that opens it is \
+         either a no-op or a second way to do what is already done: <{tag}>"
+    );
+    assert!(
+        script.contains("$(\"botao-buscar\")"),
+        "nothing opens the search, so the bar the markup hides can never come back"
+    );
+
+    // Focusing the field is legal in exactly one place — after the bar has been
+    // revealed — so the check is "nowhere else", with that one body cut out.
+    let opener = body_of(&scripts(), "async function alternarBusca");
+    let Some(revealed) = opener.find("barra.hidden =") else {
+        panic!("`alternarBusca` no longer reveals the bar at all:\n{opener}");
+    };
+    let Some(focused) = opener.find(".focus()") else {
+        panic!("`alternarBusca` reveals the bar and never puts the cursor in it");
+    };
+    assert!(
+        revealed < focused,
+        "`alternarBusca` focuses the field before revealing the bar, and \
+         `focus()` inside a `hidden` element does nothing and reports nothing"
+    );
+
+    let elsewhere = script.replace(&opener, "");
+    assert!(
+        !elsewhere.contains("$(\"campo-busca\").focus()"),
+        "something outside `alternarBusca` focuses the search field directly, so \
+         it lands on a field inside a `hidden` element — which does nothing and \
+         says nothing, and the `/` key just stops working"
+    );
+}
+
+#[test]
+fn the_add_dogma_button_promises_nothing_this_product_can_do() {
+    // The v3 gives the `+` one meaning — add — and hands leaving to
+    // `DESCONECTAR`, which is where the LAN test's finding put it. Adding is
+    // still not a thing this product does: `Session` holds one `Plug` and
+    // `connect` answers `AlreadyConnected` when there is one.
+    //
+    // So it is drawn and disabled, for the same reason as
+    // `EJETAR PLUG DO OPERADOR` and `FORÇAR REINSERÇÃO DE PLUG` — and it needs
+    // the same guard, because the tempting edit is to wire it to the entry
+    // screen and call that "adding a Dogma", which is leaving with a friendlier
+    // label. That is the exact conflation the v3 took apart.
+    let page = read("ui/index.html");
+    let tag = tag_with_id(&page, "trilha-adicionar");
+
+    assert!(
+        tag.contains("disabled"),
+        "the `+` is pressable, and a second Dogma is a second Plug this product \
+         does not have: <{tag}>"
+    );
+    assert!(
+        tag.contains("title=\""),
+        "the `+` is disabled and says nothing about why, which reads as a bug \
+         rather than as a gap: <{tag}>"
+    );
+    assert!(
+        tag.contains("aria-label=\""),
+        "the `+` is a glyph with no accessible name, so it announces as `+`: <{tag}>"
+    );
+    assert!(
+        !without_comments(&scripts()).contains("$(\"trilha-adicionar\")"),
+        "a script reaches for the `+`, so the disabled button grew a listener — \
+         and the only thing it could be wired to is leaving, which is the \
+         conflation the v3 exists to undo"
+    );
+}
+
+#[test]
 fn no_two_screens_claim_the_same_class_name() {
     // The screens are one stylesheet each, loaded one after another into one
     // flat namespace — so two screens choosing the same name is not a clash the

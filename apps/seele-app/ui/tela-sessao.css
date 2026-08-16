@@ -1,10 +1,13 @@
 /* SEELE · Entry Plug — a tela de operação (`#tela-sessao`).
 
-   A composição do comp v2, tela `principal` (`.superpowers/sdd/comp-inventario.md`
-   §3): cabeçalho, quatro colunas, rodapé de telemetria. Carrega depois de
-   `base.css`, e depende disso: `.compor input`, `.busca input`, `.convite-link`
-   e `.volume` refinam o `input` de lá, e `.busca .botao-fantasma` e
-   `.botao-falar[data-ativo]` refinam botões de lá.
+   A composição do comp **v3**, tela `principal`
+   (`.superpowers/sdd/comp-inventario-v3.md` §6): cabeçalho, quatro colunas,
+   rodapé de telemetria. Carrega depois de `base.css`, e depende disso:
+   `.compor input`, `.busca input`, `.convite-link` e `.volume` refinam o
+   `input` de lá; `.busca .botao-fantasma` e `.botao-falar[data-ativo]` refinam
+   botões de lá; e `.canais-cabeca .dica`, `.operador-frase` e `.compor-dica`
+   refinam a camada de legendas simples de lá — **refinam**, nunca reivindicam,
+   que é o que `the_hint_layer_is_defined_once_and_never_by_a_screen` cobra.
 
    Nenhuma cor literal aqui — nem em regra nem em comentário. `tests/tokens.rs`
    cobra isso lendo o arquivo inteiro, e é por isso que os hexadecimais do comp
@@ -12,22 +15,43 @@
 
    ---- a medida é a do comp, e não a da célula ----
 
-   As colunas são `56px 240px 1fr 316px` e o cabeçalho tem 56px, que é o que o
-   comp escreve. Nada aqui é arredondado para a célula de 8×16 dos tokens.
+   As colunas são `60px 268px minmax(0,1fr) 328px` e o cabeçalho tem 56px, que é
+   o que o comp v3 escreve. Nada aqui é arredondado para a célula de 8×16 dos
+   tokens.
 
-   Houve uma versão desta folha que arredondava — 316 virava 320, 56 virava 48 —
-   com o argumento de que a célula é a régua do produto e os dois clientes
-   deviam bater em pixel. O argumento está errado por duas razões. A primeira é
-   que o inventário §13 mediu o comp inteiro e concluiu que a afirmação da
-   célula **descreve a TUI**: o comp obedece a 4px com exceções, lista `56px`
-   entre o que respeita, e usa a célula como orientação e não como restrição. A
-   segunda é que arredondar é redesenhar — 316 e 320 não são o mesmo desenho, e
-   quem decidiu 316 foi quem desenhou.
+   Houve uma versão desta folha que arredondava — o `316` do v2 virava 320, o
+   `56` virava 48 — com o argumento de que a célula é a régua do produto e os
+   dois clientes deviam bater em pixel. O argumento está errado por duas razões.
+   A primeira é que o inventário do v2 §13 mediu o comp inteiro e concluiu que a
+   afirmação da célula **descreve a TUI**: o comp obedece a 4px com exceções,
+   lista `56px` entre o que respeita, e usa a célula como orientação e não como
+   restrição. A segunda é que arredondar é redesenhar — 316 e 320 não são o
+   mesmo desenho, e quem decidiu 316 foi quem desenhou. O v3 decidiu 328, e vale
+   o mesmo.
 
    A regra, para não refazerem a conta: **o app replica o comp; a TUI segue a
    célula do terminal; não se tenta alinhar os dois em pixel.** Os dois clientes
    combinam no que se lê — os mesmos nomes, a mesma ordem, as mesmas barras de
    blocos —, e não na largura de uma coluna que o terminal não tem.
+
+   ---- o que o v3 omite, e por que omitir é a regra nova ----
+
+   O v2 mandava desenhar a moldura e deixar o valor visivelmente não medido: um
+   travessão com `title`, nunca um número plausível. O v3 **inverte isso nesta
+   tela**, de propósito. Numa tela que existe para ser simples, meia dúzia de
+   travessões explicados é ruído — cada um pede uma leitura e nenhum entrega
+   informação. O que não tem dado sai da tela em vez de virar um campo vazio.
+
+   Saíram por essa regra: a descrição por Linha (`linhaDesc` — o protocolo não
+   tem o campo), a população do Dogma (`412 operadores` — não existe), a
+   contagem de pendências por Linha (`Line` é `{id, name, open}`), o atraso por
+   piloto no roster (`rtt_ms` é **nosso**, um número só) e o subsistema por
+   piloto (`MELCHIOR·01` — o protocolo não diz qual atende quem).
+
+   A convenção do travessão **continua valendo** onde a moldura é a informação:
+   a média sem plug inserido, a barra da bateria, as três células do alerta. A
+   diferença é que ali a ausência é a resposta a uma pergunta que a tela acabou
+   de fazer; aqui era uma pergunta que ninguém fez.
 
    ---- peso 900 ----
 
@@ -99,7 +123,11 @@
   flex: 0 1 auto;
 }
 
-.dogma-nome {
+/* `topo-` no nome, e não `.dogma-nome`: o Terminal Dogma é uma tela inteira com
+   folha própria, e `no_two_screens_claim_the_same_class_name` decide empates
+   entre duas folhas de tela pela ordem de carga, em silêncio. Este é o nome do
+   Dogma **no cabeçalho da sessão**, e o prefixo diz de quem ele é. */
+.topo-dogma-nome {
   font-family: var(--seele-display);
   font-weight: 900;
   font-size: 20px;
@@ -111,7 +139,7 @@
   white-space: nowrap;
 }
 
-.dogma-sub {
+.topo-dogma-sub {
   font-size: var(--seele-t-micro);
   letter-spacing: 0.2em;
   color: var(--seele-osso-apagado);
@@ -205,20 +233,39 @@
 .paineis {
   flex: 1 1 auto;
   display: grid;
-  grid-template-columns: 56px 240px 1fr 316px;
+  grid-template-columns: 60px 268px minmax(0, 1fr) 328px;
   min-height: 0;
 }
 
 /* ---------- coluna 1: a trilha de Dogmas ----------
-   Botões de 56px de altura numa coluna de 56px de largura, com a marca de 2px
-   na borda esquerda — a mesma técnica de estado que os Cages e as Linhas usam
-   logo ao lado, e é de propósito que seja a mesma: são três listas de coisas
-   em que se está ou não se está. */
+   60px de largura no v3, contra os 56px do v2, e o mesmo botão de 56px de
+   altura por Dogma. A marca de 2px na borda esquerda é a mesma técnica de
+   estado que os Cages usam logo ao lado, e é de propósito que seja a mesma:
+   são duas listas de coisas em que se está ou não se está. */
 .trilha {
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--seele-linha);
   background: var(--seele-negro-painel);
+  overflow-y: auto;
+}
+
+/* `REDES`, a faixa de 24px que o v3 põe no alto da trilha. Ela é o que diz que
+   esta coluna de siglas é uma lista de Dogmas e não um menu — sem ela, `T3`
+   sozinho num quadrado não é o nome de nada. */
+.trilha-titulo {
+  margin: 0;
+  height: 24px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid var(--seele-linha);
+  font-family: var(--seele-mono);
+  font-size: 8px;
+  font-weight: normal;
+  letter-spacing: 0.16em;
+  color: var(--seele-rotulo-painel);
 }
 
 .trilha-item {
@@ -226,10 +273,11 @@
   flex: 0 0 auto;
   border: 0;
   border-bottom: 1px solid var(--seele-linha);
-  border-left: 2px solid transparent;
+  border-left: 3px solid transparent;
   background: none;
-  font: inherit;
-  font-size: 12px;
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 15px;
   letter-spacing: 0.06em;
   color: var(--seele-osso-apagado);
   cursor: pointer;
@@ -241,11 +289,27 @@
    aqui; um item apagado seria o contrário do que ele significa. */
 .trilha-atual {
   border-left-color: var(--seele-laranja-nerv);
+  background: var(--seele-laranja-fraco);
   color: var(--seele-laranja-nerv);
   cursor: default;
 }
 
-/* O `+` fica no apagado forte do comp: é a saída, não o lugar onde se está. */
+/* O `+` de 48px. Apagado e desabilitado: ele nomeia uma capacidade que este
+   produto não tem, e o `title` diz qual. Sem `opacity`, que faria dele um
+   controle meio apagado ao lado de um controle apagado — a diferença entre "o
+   Dogma em que estou" e "o que não dá para fazer" tem que continuar legível. */
+.trilha-mais {
+  height: 48px;
+  flex: 0 0 auto;
+  border: 0;
+  border-bottom: 1px solid var(--seele-linha);
+  background: none;
+  font: inherit;
+  font-size: 18px;
+  color: var(--seele-linha-forte);
+  cursor: default;
+}
+
 .painel {
   display: flex;
   flex-direction: column;
@@ -282,9 +346,23 @@
   flex: 0 0 auto;
 }
 
-.painel-canais > .painel-titulo:first-of-type {
+/* O cabeçalho de uma das duas listas: o título e a dica que o explica.
+
+   A dica é `.dica`, de `base.css`, e esta folha só a **refina** — margem e
+   recuo, nada que decida se ela aparece. Quem decide é `body.legendas-simples`,
+   e uma tela que reivindicasse `.dica` se desligaria daquele interruptor em
+   silêncio (`the_hint_layer_is_defined_once_and_never_by_a_screen`). */
+.canais-cabeca {
+  flex: 0 0 auto;
   border-bottom: 1px solid var(--seele-linha);
-  padding-bottom: 12px;
+}
+
+.canais-cabeca .painel-titulo { padding-bottom: 2px; }
+.canais-cabeca .dica { padding: 0 16px 12px; }
+
+.canais-cabeca-linhas {
+  border-top: 1px solid var(--seele-linha);
+  margin-top: 16px;
 }
 
 /* A coordenada (`B·03`, `C·05`). Ela continua no apagado de propósito: o achado
@@ -321,27 +399,27 @@
   flex: 0 0 auto;
 }
 
-/* A marca de 2px à esquerda é o estado, e é a mesma técnica do comp: uma barra
-   de cor na borda em vez de um fundo inteiro, para que a lista continue legível
-   com metade das linhas marcadas. */
-.canais li {
-  border-left: 2px solid transparent;
-  cursor: pointer;
-}
+/* A marca de 3px à esquerda é o estado, e é a mesma técnica do comp v3: uma
+   barra de cor na borda em vez de um fundo inteiro, para que a lista continue
+   legível com metade das linhas marcadas. Ela vai no elemento que **é** o item
+   — o `<li>` do Cage, o `<button>` da Linha — e não num ancestral comum: a
+   Linha virou botão para ganhar teclado, e um marcador no `<li>` em volta dela
+   ficaria de fora do foco que ele acompanha. */
+.cage, .linha { border-left: 3px solid transparent; }
+.cage.aberto, .linha.aberto { border-left-color: var(--seele-laranja-nerv); }
 
-.canais li:hover { background: var(--seele-linha); }
-.canais .aberto { border-left-color: var(--seele-laranja-nerv); }
-
-/* Padding e divisória diferentes nas duas listas, como no comp: o Cage tem duas
-   linhas de conteúdo e ganha `10px 14px` mais um `border-top` que o separa do
-   anterior; a Linha tem uma e fica em `8px 14px`, sem divisória. */
+/* O Cage tem quatro faixas de conteúdo agora — nome, ocupação, quem está
+   dentro, e o botão — e ganha `10px 12px` mais um `border-top` que o separa do
+   anterior, como no comp v3. */
 .cage {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
   border-top: 1px solid var(--seele-linha);
-  padding: 10px 14px;
+  padding: 10px 12px;
 }
+
+.cage.aberto { background: var(--seele-laranja-fraco); }
 
 .canal-cabeca { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 
@@ -349,7 +427,7 @@
   font-family: var(--seele-display);
   font-weight: var(--seele-cartela);
   font-size: 15px;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   color: var(--seele-osso);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -358,13 +436,90 @@
 
 .cage.aberto .cage-nome { color: var(--seele-laranja-nerv); }
 
-/* `4/8` — o acompanhante textual da barra. `specs/05-cliente-tui.md`: a barra
-   é forma, e a forma sozinha não é informação suficiente. */
+/* `4/8` — a ocupação em número, e sozinha: a barra de blocos que a acompanhava
+   saiu junto com o v2. A lista de nomes logo abaixo diz o mesmo com os nomes
+   dentro, e duas leituras da mesma medida numa coluna de 268px é uma a mais. */
 .cage-ocupacao {
   font-size: var(--seele-t-rotulo);
   color: var(--seele-osso-apagado);
   font-variant-numeric: tabular-nums;
   flex: 0 0 auto;
+}
+
+/* ---- quem está dentro ----
+   O ganho maior do v3, e ele não custa protocolo: `Cage.pilots` já vinha
+   populado para todo Cage, e o app o gastava numa barra de blocos.
+
+   A palavra ao lado do nome é o que separa isto de um enfeite: o glifo dá a
+   varredura de relance, e `fala`/`mudo` é a mesma informação sem depender de
+   enxergar forma nem cor (`specs/05-cliente-tui.md`). */
+.cage-dentro {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cage-piloto {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: var(--seele-osso-apagado);
+}
+
+.cage-piloto-nome {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cage-piloto-eu { color: var(--seele-padrao-azul); flex: 0 0 auto; }
+
+.cage-piloto-marca {
+  margin-left: auto;
+  flex: 0 0 auto;
+  letter-spacing: 0.08em;
+  color: var(--seele-laranja-nerv);
+}
+
+.cage-vazio { color: var(--seele-linha-forte); font-size: 11px; }
+
+/* O botão de 38px, com rótulo. Contorno enquanto se está de fora, sólido
+   enquanto se está dentro — a mesma ênfase invertida do resto da interface,
+   dizendo qual dos dois é o estado corrente. */
+.cage-entrar {
+  width: 100%;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 14px;
+  letter-spacing: 0.14em;
+  color: var(--seele-laranja-nerv);
+  background: none;
+  border: 1px solid var(--seele-laranja-nerv);
+  cursor: pointer;
+}
+
+.cage-entrar:hover {
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-laranja-nerv);
+}
+
+.cage-entrar[data-dentro="sim"] {
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-laranja-nerv);
+}
+
+.cage-entrar[data-dentro="sim"]:hover {
+  color: var(--seele-laranja-nerv);
+  background: none;
 }
 
 .barra {
@@ -379,39 +534,61 @@
 
 .cage.aberto .barra { color: var(--seele-laranja-nerv); }
 
+/* A Linha, agora um botão de 40px que ocupa a fileira inteira. `text-align`
+   explícito porque um `<button>` centra por omissão, e uma lista de nomes
+   centrados não é uma lista. */
 .linha {
+  width: 100%;
+  min-height: 40px;
   display: flex;
-  justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
-  padding: 8px 14px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: var(--seele-t-dado);
+  text-align: left;
+  color: var(--seele-osso-apagado);
+  background: none;
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+  cursor: pointer;
 }
 
+.linha:hover { background: var(--seele-linha); }
+.linha.aberto { background: var(--seele-linha); color: var(--seele-osso); }
+
+/* O `#` do comp: fraco enquanto a Linha está fechada, laranja na aberta. Ele é
+   decoração ao lado do nome — quem escuta a tela recebe o nome, e "sinal de
+   número" antes de cada item seria ruído em toda linha da lista.
+
+   `linha-forte` e não a placa de marca com que o comp o pinta: as seis placas
+   são do ícone do app, e `tokens.css` escreve na cara delas que nenhuma
+   superfície do produto se pinta com elas. */
+.linha-cerquilha { color: var(--seele-linha-forte); flex: 0 0 auto; }
+.linha.aberto .linha-cerquilha { color: var(--seele-laranja-nerv); }
+
 .linha-rotulo {
-  font-size: var(--seele-t-dado);
-  color: var(--seele-osso);
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.linha.aberto .linha-rotulo { color: var(--seele-laranja-nerv); }
-
-.painel-titulo-linhas {
-  border-top: 1px solid var(--seele-linha);
-  margin-top: 16px;
-  padding-top: 20px;
-}
-
 /* A tira do operador. */
 .operador {
   border-top: 1px solid var(--seele-linha);
-  padding: 12px 14px;
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
   gap: 6px;
   flex: 0 0 auto;
+  background: var(--seele-negro-painel);
 }
+
+.operador-topo { display: flex; align-items: center; gap: 10px; }
+
+.operador-quem { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 
 .operador-rotulo {
   font-size: var(--seele-t-micro);
@@ -426,6 +603,33 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* O `⚙` do comp v3, 38×38 e contornado. O glifo é o conteúdo inteiro do botão,
+   então o nome acessível é obrigatório e vive no `aria-label` do próprio botão
+   — a dica ao lado é a metade que quem enxerga recebe. */
+.operador-config {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  color: var(--seele-osso-apagado);
+  background: none;
+  border: 1px solid var(--seele-linha-forte);
+  cursor: pointer;
+}
+
+.operador-config:hover {
+  color: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
+}
+
+/* A frase de identidade (inventário v3 §1.2), dita uma vez. Ela quebra em duas
+   ou três linhas de 268px e não é para caber numa: é uma frase, e não um
+   rótulo. */
+.operador-frase { margin-bottom: 2px; }
 
 .operador .botao-estado { width: 100%; text-align: left; }
 
@@ -452,32 +656,68 @@
 
 .painel-linha { background: var(--seele-negro-absoluto); }
 
+/* 52px no v3, contra os 40px do v2: o botão `BUSCAR` tem 34px de altura e não
+   cabia numa barra de 40. */
 .linha-barra {
   display: flex;
   align-items: center;
-  gap: 16px;
-  height: 40px;
-  padding: 0 16px;
+  gap: 12px;
+  min-height: 52px;
+  padding: 6px 16px;
   border-bottom: 1px solid var(--seele-linha);
+  flex: 0 0 auto;
+}
+
+.linha-barra-cerquilha {
+  font-size: 16px;
+  color: var(--seele-laranja-nerv);
   flex: 0 0 auto;
 }
 
 .linha-nome {
   font-family: var(--seele-display);
   font-weight: var(--seele-cartela);
-  font-size: 16px;
-  letter-spacing: 0.1em;
+  font-size: 17px;
+  letter-spacing: 0.06em;
   color: var(--seele-osso);
-  white-space: nowrap;
-}
-
-.linha-registro {
-  font-size: var(--seele-t-rotulo);
-  letter-spacing: 0.16em;
-  color: var(--seele-osso-apagado);
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Sem Linha aberta a frase é uma frase — em minúscula, na tipografia de dado,
+   para não parecer o nome de uma Linha chamada "nenhuma linha aberta". */
+.linha-nome-vazio {
+  font-family: var(--seele-mono);
+  font-weight: normal;
+  font-size: var(--seele-t-dado);
+  letter-spacing: 0;
+  color: var(--seele-osso-apagado);
+}
+
+/* `BUSCAR` com rótulo. Contorno e não campo sólido: ele é a segunda coisa desta
+   coluna, e o compositor lá embaixo é a primeira. */
+.linha-buscar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 12px;
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--seele-osso-apagado);
+  background: none;
+  border: 1px solid var(--seele-linha-forte);
+  cursor: pointer;
+}
+
+.linha-buscar:hover,
+.linha-buscar[aria-expanded="true"] {
+  color: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
 }
 
 /* ---------- mensagens ---------- */
@@ -490,38 +730,67 @@
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
-/* A grade do comp: 76px para a hora, o resto para autor e corpo, e uma marca de
-   1px à esquerda. A marca é onde o comp separa mensagem de sistema e de alerta;
-   `Message` não tem tipo, então aqui ela só separa a própria das outras. */
+/* A grade do comp v3: 34px de avatar, o resto para autor, hora e corpo, com uma
+   marca de 2px à esquerda. A marca é onde o comp separa mensagem de sistema e
+   de alerta; `Message` não tem tipo, então aqui ela só separa a própria das
+   outras. */
 .mensagem {
   display: grid;
-  grid-template-columns: 76px 1fr;
+  grid-template-columns: 34px minmax(0, 1fr);
   gap: 12px;
-  border-left: 1px solid var(--seele-linha);
+  border-left: 2px solid var(--seele-linha);
   padding-left: 12px;
 }
 
 .mensagem.propria { border-left-color: var(--seele-linha-forte); }
 
+/* O avatar de iniciais. Contorno e não bloco cheio: cheio, uma conversa de seis
+   pessoas vira seis quadrados sólidos numa coluna, e o que se lê passa a ser a
+   coluna de quadrados. */
+.mensagem-avatar {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 14px;
+  color: var(--seele-osso-apagado);
+  border: 1px solid var(--seele-linha-forte);
+}
+
+.mensagem.propria .mensagem-avatar {
+  color: var(--seele-padrao-azul);
+  border-color: var(--seele-padrao-azul);
+}
+
+.mensagem-conteudo { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+
+.mensagem-cabeca { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; }
+
+.mensagem-autor {
+  font-size: var(--seele-t-dado);
+  letter-spacing: 0.04em;
+  color: var(--seele-osso-apagado);
+}
+
+.mensagem.propria .mensagem-autor { color: var(--seele-padrao-azul); }
+
+/* O comp pinta a hora mais fraca ainda que o apagado. Aqui ela fica no apagado:
+   `docs/tokens-achados.md` já mede aquele em 4,11:1 e o classifica como
+   texto-grande-só, e descer mais é pôr um dado real abaixo do piso de 3:1 que
+   `.varredura` foi calibrada para preservar. A hierarquia que o comp queria
+   sai do tamanho — 10px contra os 13px do nome —, não de mais um degrau de
+   cinza. */
 .mensagem-hora {
-  font-size: 11px;
-  padding-top: 2px;
+  font-size: var(--seele-t-rotulo);
   color: var(--seele-osso-apagado);
   font-variant-numeric: tabular-nums;
 }
-
-.mensagem-conteudo { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-
-.mensagem-autor {
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  color: var(--seele-osso-apagado);
-}
-
-.mensagem.propria .mensagem-autor { color: var(--seele-laranja-nerv); }
 
 /* `pre-wrap`, e isto é contratual: a busca do outro lado da ponte indexou esta
    string com as quebras de linha dentro, e colapsá-las aqui deslocaria o realce
@@ -536,17 +805,18 @@
 
 .mensagens .editada { color: var(--seele-osso-apagado); font-size: 11px; }
 
+/* O compositor do v3: o campo numa moldura própria, e `ENVIAR` com rótulo ao
+   lado dela. 44px de altura nos dois, que é o que o comp escreve. */
 .compor {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 16px;
-  height: 48px;
+  gap: 10px;
+  padding: 12px 16px;
   border-top: 1px solid var(--seele-linha);
   flex: 0 0 auto;
 }
 
-.compor .prompt { color: var(--seele-laranja-nerv); font-size: var(--seele-t-corpo); }
+.compor .prompt { color: var(--seele-laranja-nerv); font-size: var(--seele-t-corpo); flex: 0 0 auto; }
 
 .compor input {
   flex: 1;
@@ -557,12 +827,45 @@
   font-size: var(--seele-t-corpo);
 }
 
+/* A moldura em volta do `>` e do campo, para o botão sólido ao lado ter contra
+   o que se destacar. `focus-within` e não `:focus` no campo: a borda é da
+   caixa, e o que recebe o foco é o `<input>` dentro dela. */
+.compor-caixa {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 12px;
+  min-height: 44px;
+  border: 1px solid var(--seele-linha-forte);
+  background: var(--seele-negro-painel);
+}
+
+.compor-caixa:focus-within { border-color: var(--seele-laranja-nerv); }
+
 /* A dica é a instrução, e é por isso que ela está na tela e não num manual. */
-.compor-dica {
-  font-size: var(--seele-t-micro);
-  letter-spacing: 0.16em;
-  color: var(--seele-osso-apagado);
+.compor-dica { flex: 0 0 auto; }
+
+/* `ENVIAR` com rótulo, no lugar do `▸` sozinho do v2. Campo sólido: é a ação
+   principal desta coluna e a única desta fileira. */
+.compor-enviar {
+  min-height: 44px;
+  padding: 0 20px;
   flex: 0 0 auto;
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 15px;
+  letter-spacing: 0.14em;
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-laranja-nerv);
+  border: 1px solid var(--seele-laranja-nerv);
+  cursor: pointer;
+}
+
+.compor-enviar:hover {
+  color: var(--seele-laranja-nerv);
+  background: none;
 }
 
 /* ---------- coluna 4: Taxa de Sincronização ---------- */
@@ -690,8 +993,6 @@
   white-space: nowrap;
 }
 
-.piloto-tag { font-size: var(--seele-t-micro); letter-spacing: 0.1em; }
-
 .piloto-sync { display: flex; align-items: baseline; gap: 6px; flex: 0 0 auto; }
 
 .piloto-sync-valor {
@@ -714,17 +1015,17 @@
 
 .piloto .barra { font-size: 11px; letter-spacing: 0.02em; }
 
+/* `flex-end` e não `space-between`: o `ATRASO` que ocupava a esquerda saiu com
+   a regra de omissão, e um `space-between` de um filho só o encosta à esquerda,
+   que é onde as pastilhas não estavam. */
 .piloto-rodape {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   gap: 8px;
   font-size: var(--seele-t-micro);
   letter-spacing: 0.12em;
 }
-
-.piloto-atraso { color: var(--seele-osso-apagado); }
-.rotulo-micro { font-weight: normal; }
 
 .piloto-estados { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 
