@@ -2564,3 +2564,48 @@ fn a_failure_this_screen_cannot_name_still_says_what_it_was() {
          wording:\n{body}"
     );
 }
+
+#[test]
+fn the_three_subsystems_look_different_while_they_are_loading() {
+    // `subsistemas("carga", "…")` writes `data-estado="carga"` on all three
+    // MAGI nodes while the connection is happening, and for a long time no rule
+    // matched it: the attribute changed, the screen did not. Loading looked
+    // exactly like idle, which is the one thing a loading state must not do.
+    //
+    // The check is on the rule existing and on the state surviving without
+    // motion — not on the animation itself. Somebody who turns motion off is
+    // still owed the difference between "waiting" and "not started".
+    let sheet = read("ui/tela-boot.css");
+    let Some(after) = sheet.split("[data-estado=\"carga\"]").nth(1) else {
+        panic!(
+            "no rule paints the loading state, so the three subsystems look the same \
+             whether or not anything is happening"
+        );
+    };
+    let Some(rule) = after.split('}').next() else {
+        panic!("the loading rule is never closed");
+    };
+
+    assert!(
+        rule.contains("background") || rule.contains("color"),
+        "the loading rule changes no paint, so it is a selector that does \
+         nothing:\n{rule}"
+    );
+
+    // The state has to be readable with the animation gone. `acessibilidade.css`
+    // kills every animation under `prefers-reduced-motion`, so anything carried
+    // *only* by the keyframes disappears for those readers.
+    assert!(
+        !rule.trim_start().starts_with("animation"),
+        "the loading state is carried by the animation before it is carried by \
+         the paint, so it vanishes entirely under prefers-reduced-motion:\n{rule}"
+    );
+
+    // And the word still has to say it, for anybody reading with no colour at
+    // all — `specs/05-cliente-tui.md`.
+    let script = without_comments(&scripts());
+    assert!(
+        script.contains("subsistemas(\"carga\""),
+        "nothing puts the three subsystems into the loading state any more"
+    );
+}

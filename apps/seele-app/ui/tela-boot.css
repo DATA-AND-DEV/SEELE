@@ -237,6 +237,42 @@
   color: var(--seele-laranja-nerv);
 }
 
+/* ---- os três carregando ----
+
+   `subsistemas("carga", "…")` já punha `data-estado="carga"` e não havia regra
+   nenhuma para ele: enquanto a conexão acontecia, os três polígonos ficavam
+   exatamente iguais aos parados. O estado existia no atributo e não na tela.
+
+   Azul e não laranja porque laranja é o acento institucional e já pinta o
+   repouso; o azul é o mesmo `PADRÃO: AZUL` que o cabeçalho da sessão usa para
+   dizer "o aperto de mão foi até o fim", e usá-lo aqui é a mesma frase mais
+   cedo.
+
+   O movimento não é decoração — `specs/07` chama decorativo de erro, e com
+   razão. Este pulso diz uma coisa que nada mais na tela diz: que a espera
+   continua viva. Some sob `prefers-reduced-motion`, e some sem perder a
+   informação: a cor de repouso da regra já é azul, então parado continua
+   distinguível de carregando. E a marca de texto (`·` → `…` → `ok`) carrega o
+   estado sem cor nenhuma, que é o que `specs/05` exige. */
+.magi-no[data-estado="carga"] {
+  background: var(--seele-azul-fraco);
+  color: var(--seele-padrao-azul);
+  animation: seele-magi-carga 1200ms ease-in-out infinite;
+}
+
+/* Escalonados na ordem em que o diagrama os lê. Os três em uníssono piscariam
+   como um alarme; em sequência lê-se como uma coisa sendo percorrida. */
+.magi-melchior[data-estado="carga"]  { animation-delay: 0ms; }
+.magi-balthasar[data-estado="carga"] { animation-delay: 200ms; }
+.magi-casper[data-estado="carga"]    { animation-delay: 400ms; }
+
+@keyframes seele-magi-carga {
+  50% {
+    background: var(--seele-padrao-azul);
+    color: var(--seele-negro-absoluto);
+  }
+}
+
 .magi-no[data-estado="ok"] {
   background: var(--seele-fosforo);
   color: var(--seele-negro-absoluto);
