@@ -403,6 +403,24 @@ pub struct CaptureDevice {
     pub default: bool,
 }
 
+/// One place this machine will play sound.
+///
+/// The twin of [`CaptureDevice`], with the same two strings for the same two
+/// questions, and its own type rather than a shared one carrying a direction:
+/// both ids are strings, so only the type stops a shell sending a microphone
+/// where an output belongs.
+///
+/// A shell shows `name` and sends back `id`. It never parses either.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct PlaybackDevice {
+    /// The stable handle to send back. Not for a person to read.
+    pub id: String,
+    /// What the machine calls it.
+    pub name: String,
+    /// Whether this is the one a session with no preference would take.
+    pub default: bool,
+}
+
 /// Connection quality.
 #[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize)]
 pub struct Telemetry {
@@ -504,6 +522,14 @@ pub struct Snapshot {
     /// running, and a shell must draw an unnamed device rather than a missing
     /// one. [`Snapshot::audio_available`] is what tells the two apart.
     pub capture: Option<CaptureDevice>,
+    /// Where this session is actually playing.
+    ///
+    /// The device that **opened**, read the same way [`Snapshot::capture`] is
+    /// read, and needed more than that one: falling back to the machine's own
+    /// speakers makes no sound of its own. A person who picked a headset and
+    /// hears nothing has this line and nothing else to tell them the pick did
+    /// not take.
+    pub playback: Option<PlaybackDevice>,
     /// Set once the session is over.
     pub ended: Option<EndReason>,
 }
@@ -604,6 +630,13 @@ pub enum PlugError {
     /// microphone" and "the one you picked was unplugged" have different next
     /// steps, and the second one has a list to pick from again.
     CaptureDeviceGone,
+    /// The chosen output is not one this machine is offering any more.
+    ///
+    /// Its own variant rather than [`PlugError::CaptureDeviceGone`] because a
+    /// shell writes one sentence per variant, and "the microphone you picked was
+    /// unplugged" is the wrong sentence to read after choosing a headset. The
+    /// two point at opposite halves of the screen.
+    PlaybackDeviceGone,
     /// The named pilot is not in this Cage.
     UnknownPilot,
     /// No Cage or Line by that name or number.

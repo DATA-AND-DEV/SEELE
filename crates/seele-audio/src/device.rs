@@ -12,7 +12,9 @@
 //! does not name a device has to come back as [`DeviceError::CaptureDeviceGone`]
 //! on a machine with no sound card as surely as on one with six, so that much is
 //! testable everywhere. Everything below it that needs a microphone says so and
-//! skips.
+//! skips. [`DeviceError::side`] is the second such piece: which half of the pair
+//! a failure blames is a total function over the enum, and a caller deciding
+//! which preference to give up depends on it being right.
 
 use std::num::NonZeroU16;
 use std::sync::Arc;
@@ -129,6 +131,18 @@ pub enum DeviceError {
     #[error("no default output device")]
     NoOutputDevice,
 
+    /// A playback device was asked for by id and the host does not offer it.
+    ///
+    /// The twin of [`DeviceError::CaptureDeviceGone`], and separate from
+    /// [`DeviceError::NoOutputDevice`] for the same reason: "this machine has no
+    /// speakers" and "the headset you picked was unplugged" are two different
+    /// sentences with two different next steps.
+    #[error("no playback device with id {id}")]
+    PlaybackDeviceGone {
+        /// What was asked for, as [`PlaybackDevice::id`] spells it.
+        id: String,
+    },
+
     /// The device speaks a sample format this build does not convert yet.
     ///
     /// Only `f32` is handled today. Integer formats arrive with task M1.4, which
@@ -153,6 +167,24 @@ pub enum DeviceError {
         #[source]
         source: cpal::Error,
     },
+}
+
+impl DeviceError {
+    /// Which half of the pair this failure is about.
+    ///
+    /// Total over the enum on purpose. A caller holding one preference per side
+    /// has to know which one a failure blames before it can give that one up:
+    /// dropping the other would keep the device that would not open and throw
+    /// away a choice that was fine. There is nothing here a shell should print —
+    /// this is for deciding what to try next.
+    #[must_use]
+    pub fn side(&self) -> Side {
+        match self {
+            Self::NoInputDevice | Self::CaptureDeviceGone { .. } => Side::Input,
+            Self::NoOutputDevice | Self::PlaybackDeviceGone { .. } => Side::Output,
+            Self::UnsupportedSampleFormat { side, .. } | Self::Device { side, .. } => *side,
+        }
+    }
 }
 
 /// Everything the processing thread needs to talk to the devices.
@@ -189,6 +221,14 @@ pub struct AudioIo {
     /// Not a failure and not a placeholder: it is a device with nothing to show,
     /// and an interface must draw that as unmeasured rather than invent a name.
     pub capture: Option<CaptureDevice>,
+
+    /// The playback device that actually opened.
+    ///
+    /// Same rule as [`AudioIo::capture`], and it matters more here: the fallback
+    /// to the default output is the one a person cannot hear happening. What
+    /// they can do is read this line and see the name is not the one they
+    /// picked.
+    pub playback: Option<PlaybackDevice>,
 }
 
 /// One capture device the host is offering right now.
@@ -212,6 +252,39 @@ pub struct CaptureDevice {
     pub name: String,
     /// Whether this is the one [`open_default`] would take.
     pub default: bool,
+}
+
+/// One playback device the host is offering right now.
+///
+/// The twin of [`CaptureDevice`], and its own type rather than a shared one with
+/// a direction field: an input id and an output id are both strings that parse
+/// as a [`cpal::DeviceId`], so nothing but the type stops one being passed where
+/// the other belongs. `cpal` would then hand back a device that cannot open the
+/// stream being asked of it, and the failure would arrive as a build error about
+/// a configuration rather than as "that is a microphone".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlaybackDevice {
+    /// The stable handle, as [`cpal::DeviceId`] writes itself. Never shown.
+    pub id: String,
+    /// What the host calls it, for a person to read.
+    pub name: String,
+    /// Whether this is the one [`open_default`] would take.
+    pub default: bool,
+}
+
+/// Which devices [`open`] should ask the host for.
+///
+/// A struct with two named fields rather than two `Option<&str>` arguments, and
+/// that is the whole reason it exists: the two are the same type, so a call site
+/// that swapped them would compile, run, and fail by asking the speakers to
+/// record. `Default` is both sides on the machine's own choice.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Wanted<'a> {
+    /// Which microphone, as a [`CaptureDevice::id`]. `None` is the default.
+    pub capture: Option<&'a str>,
+    /// Where the sound comes out, as a [`PlaybackDevice::id`]. `None` is the
+    /// default.
+    pub playback: Option<&'a str>,
 }
 
 /// Describes one device, or gives up on it.
@@ -244,17 +317,86 @@ pub fn capture_devices() -> Vec<CaptureDevice> {
     let Ok(devices) = host.input_devices() else {
         return Vec::new();
     };
+    described(devices, default.as_ref())
+        .into_iter()
+        .map(|(id, name, default)| CaptureDevice { id, name, default })
+        .collect()
+}
+
+/// Every playback device the host will describe.
+///
+/// The twin of [`capture_devices`], with the same reading of an empty list: the
+/// host would not enumerate, **not** that there is nowhere to play. The default
+/// output still opens when enumeration fails, which is why [`open`] with no
+/// `playback` asked for never consults this.
+#[must_use]
+pub fn playback_devices() -> Vec<PlaybackDevice> {
+    let host = cpal::default_host();
+    let default = host
+        .default_output_device()
+        .and_then(|device| device.id().ok());
+
+    let Ok(devices) = host.output_devices() else {
+        return Vec::new();
+    };
+    described(devices, default.as_ref())
+        .into_iter()
+        .map(|(id, name, default)| PlaybackDevice { id, name, default })
+        .collect()
+}
+
+/// Every device in `devices` this host will describe, and which one is default.
+///
+/// Shared by both sides rather than written twice: the two lists answer the same
+/// three questions, and the one thing that must not drift between them is which
+/// rows get dropped. A side that kept the rows without an id would be a side
+/// whose picks do not survive a restart.
+fn described(
+    devices: impl Iterator<Item = cpal::Device>,
+    default: Option<&cpal::DeviceId>,
+) -> Vec<(String, String, bool)> {
     devices
         .filter_map(|device| {
-            let is_default = device.id().ok().as_ref() == default.as_ref();
+            let is_default = device.id().ok().as_ref() == default;
             let (id, name) = describe(&device)?;
-            Some(CaptureDevice {
-                id,
-                name,
-                default: is_default,
-            })
+            Some((id, name, is_default))
         })
         .collect()
+}
+
+/// Finds the device an id names, or takes the host's default for that side.
+///
+/// The id is refused rather than quietly ignored. Falling back here would put
+/// the decision in the wrong place: this function cannot tell a preference
+/// written down last week from a row a person clicked ten seconds ago, and only
+/// one of those may be silently replaced.
+fn resolve(
+    host: &cpal::Host,
+    wanted: Option<&str>,
+    side: Side,
+) -> Result<cpal::Device, DeviceError> {
+    let Some(wanted) = wanted else {
+        return match side {
+            Side::Input => host
+                .default_input_device()
+                .ok_or(DeviceError::NoInputDevice),
+            Side::Output => host
+                .default_output_device()
+                .ok_or(DeviceError::NoOutputDevice),
+        };
+    };
+    wanted
+        .parse::<cpal::DeviceId>()
+        .ok()
+        .and_then(|id| host.device_by_id(&id))
+        .ok_or_else(|| match side {
+            Side::Input => DeviceError::CaptureDeviceGone {
+                id: wanted.to_owned(),
+            },
+            Side::Output => DeviceError::PlaybackDeviceGone {
+                id: wanted.to_owned(),
+            },
+        })
 }
 
 /// Opens the default input and output devices and starts both streams.
@@ -270,46 +412,29 @@ pub fn capture_devices() -> Vec<CaptureDevice> {
 /// Returns [`DeviceError`] if a device is missing, will not describe itself,
 /// speaks a format this build does not convert, or refuses to open or start.
 pub fn open_default(ring_ms: u32) -> Result<AudioIo, DeviceError> {
-    open(None, ring_ms)
+    open(Wanted::default(), ring_ms)
 }
 
-/// Opens a chosen capture device, or the default one when `capture` is `None`.
+/// Opens the chosen devices, taking the host's default for each side left unset.
 ///
-/// `capture` is a [`CaptureDevice::id`], never a name. An id and not an index
-/// because the list a person picked from is minutes old by the time the pick
-/// lands, and an index into a list that changed underneath points at a
-/// *different* microphone rather than at nothing; an id and not a name because
-/// two microphones of the same model share a name, and the second one would be
-/// unpickable.
-///
-/// Playback stays on the default device. That is not an oversight: nothing in
-/// the product reads a playback preference back, and shipping half a pair of
-/// controls is worse than shipping one that works.
+/// Each half of `wanted` is an id — a [`CaptureDevice::id`] or a
+/// [`PlaybackDevice::id`] — never a name. An id and not an index because the
+/// list a person picked from is minutes old by the time the pick lands, and an
+/// index into a list that changed underneath points at a *different* device
+/// rather than at nothing; an id and not a name because two interfaces of the
+/// same model share a name, and the second one would be unpickable.
 ///
 /// # Errors
 ///
-/// [`DeviceError::CaptureDeviceGone`] when `capture` names a device the host is
-/// not offering — an unplugged interface, a preference written down by an older
-/// run, or an id from another host. Otherwise the same failures as
-/// [`open_default`].
-pub fn open(capture: Option<&str>, ring_ms: u32) -> Result<AudioIo, DeviceError> {
+/// [`DeviceError::CaptureDeviceGone`] or [`DeviceError::PlaybackDeviceGone`]
+/// when an id names a device the host is not offering — an unplugged interface,
+/// a preference written down by an older run, or an id from another host.
+/// Otherwise the same failures as [`open_default`].
+pub fn open(wanted: Wanted<'_>, ring_ms: u32) -> Result<AudioIo, DeviceError> {
     let host = cpal::default_host();
 
-    let input_device = match capture {
-        Some(wanted) => wanted
-            .parse::<cpal::DeviceId>()
-            .ok()
-            .and_then(|id| host.device_by_id(&id))
-            .ok_or_else(|| DeviceError::CaptureDeviceGone {
-                id: wanted.to_owned(),
-            })?,
-        None => host
-            .default_input_device()
-            .ok_or(DeviceError::NoInputDevice)?,
-    };
-    let output_device = host
-        .default_output_device()
-        .ok_or(DeviceError::NoOutputDevice)?;
+    let input_device = resolve(&host, wanted.capture, Side::Input)?;
+    let output_device = resolve(&host, wanted.playback, Side::Output)?;
 
     let in_config = input_device
         .default_input_config()
@@ -332,6 +457,14 @@ pub fn open(capture: Option<&str>, ring_ms: u32) -> Result<AudioIo, DeviceError>
     let capture = describe(&input_device).map(|(id, name)| CaptureDevice {
         default: host
             .default_input_device()
+            .and_then(|device| device.id().ok())
+            .is_some_and(|default| default.to_string() == id),
+        id,
+        name,
+    });
+    let playback = describe(&output_device).map(|(id, name)| PlaybackDevice {
+        default: host
+            .default_output_device()
             .and_then(|device| device.id().ok())
             .is_some_and(|default| default.to_string() == id),
         id,
@@ -448,6 +581,7 @@ pub fn open(capture: Option<&str>, ring_ms: u32) -> Result<AudioIo, DeviceError>
         capture_rate_hz,
         playback_rate_hz,
         capture,
+        playback,
     })
 }
 
@@ -470,6 +604,38 @@ mod tests {
         Some(found)
     }
 
+    /// The same, for the other side of the pair.
+    fn speakers_or_skip(what: &str) -> Option<Vec<PlaybackDevice>> {
+        let found = playback_devices();
+        if found.is_empty() {
+            eprintln!("skipped {what}: this machine lists no playback device");
+            return None;
+        }
+        Some(found)
+    }
+
+    /// Asks for a capture device by id, with the machine's own speakers.
+    fn open_capture(id: &str) -> Result<AudioIo, DeviceError> {
+        open(
+            Wanted {
+                capture: Some(id),
+                playback: None,
+            },
+            100,
+        )
+    }
+
+    /// Asks for a playback device by id, with the machine's own microphone.
+    fn open_playback(id: &str) -> Result<AudioIo, DeviceError> {
+        open(
+            Wanted {
+                capture: None,
+                playback: Some(id),
+            },
+            100,
+        )
+    }
+
     #[test]
     fn an_id_that_names_no_device_is_an_enum_and_not_a_panic() {
         // Needs no sound card: nothing that is not `host:device` can name a
@@ -481,7 +647,7 @@ mod tests {
         // that was unplugged — all three arrive here as a string that has to
         // come back as a variant somebody can write a sentence for, rather than
         // as a client that will not start.
-        let refused = open(Some("isto nao e um dispositivo"), 100);
+        let refused = open_capture("isto nao e um dispositivo");
         assert!(
             matches!(refused, Err(DeviceError::CaptureDeviceGone { .. })),
             "an unparseable id came back as something other than a missing device"
@@ -489,16 +655,84 @@ mod tests {
     }
 
     #[test]
+    fn a_playback_id_that_names_no_device_is_an_enum_and_not_a_panic() {
+        // Needs no sound card, for the same reason its twin does not. And it
+        // matters more on this side: the fallback that follows a refusal is
+        // silent by construction — nobody hears the speakers they did not pick
+        // — so the refusal itself is the only thing there is to act on.
+        let refused = open_playback("isto tambem nao e um dispositivo");
+        assert!(
+            matches!(refused, Err(DeviceError::PlaybackDeviceGone { .. })),
+            "an unparseable playback id came back as something other than a missing device"
+        );
+    }
+
+    #[test]
     fn a_refusal_carries_the_id_that_was_asked_for() {
         // Without it the log line says a device is gone and never says which,
         // which is exactly the report nobody can act on.
-        let Err(DeviceError::CaptureDeviceGone { id }) = open(Some("alsa:hw:99,99"), 100) else {
+        let Err(DeviceError::CaptureDeviceGone { id }) = open_capture("alsa:hw:99,99") else {
             // A machine that really does have `hw:99,99` would land here. It
             // does not exist, but saying so beats an `unwrap`.
             eprintln!("skipped: this machine claims to have alsa:hw:99,99");
             return;
         };
         assert_eq!(id, "alsa:hw:99,99");
+    }
+
+    #[test]
+    fn a_playback_refusal_carries_the_id_that_was_asked_for() {
+        let Err(DeviceError::PlaybackDeviceGone { id }) = open_playback("alsa:hw:98,98") else {
+            eprintln!("skipped: this machine claims to have alsa:hw:98,98");
+            return;
+        };
+        assert_eq!(id, "alsa:hw:98,98");
+    }
+
+    #[test]
+    fn every_failure_blames_exactly_one_side() {
+        // The whole point of `side`: a caller holding one preference per side
+        // gives up the one that failed. Blame the wrong half and it keeps the
+        // device that would not open while discarding a choice that was fine —
+        // and on the audio side that is a session that comes up silent for a
+        // reason nothing in it explains.
+        //
+        // Written out one variant at a time rather than looped, because the
+        // value of the test is the pairing, and a loop would have to carry the
+        // answer next to the question anyway.
+        let both_sides = [
+            (DeviceError::NoInputDevice, Side::Input),
+            (
+                DeviceError::CaptureDeviceGone { id: "x".into() },
+                Side::Input,
+            ),
+            (DeviceError::NoOutputDevice, Side::Output),
+            (
+                DeviceError::PlaybackDeviceGone { id: "x".into() },
+                Side::Output,
+            ),
+            (
+                DeviceError::UnsupportedSampleFormat {
+                    side: Side::Input,
+                    format: cpal::SampleFormat::F64,
+                },
+                Side::Input,
+            ),
+            (
+                DeviceError::UnsupportedSampleFormat {
+                    side: Side::Output,
+                    format: cpal::SampleFormat::F64,
+                },
+                Side::Output,
+            ),
+        ];
+        for (error, side) in both_sides {
+            assert_eq!(
+                error.side(),
+                side,
+                "`{error}` blames the wrong half of the pair"
+            );
+        }
     }
 
     #[test]
@@ -515,6 +749,13 @@ mod tests {
             assert!(
                 !device.name.is_empty(),
                 "a device with no name cannot be labelled, so it is a row that does nothing"
+            );
+        }
+        if found.len() < 2 {
+            // Said out loud, because the line below cannot fail with one row
+            // and a check that cannot fail reads like a check that passed.
+            eprintln!(
+                "the capture default check proves nothing here: this machine lists one microphone"
             );
         }
         assert!(
@@ -551,5 +792,106 @@ mod tests {
                 device.id
             );
         }
+    }
+
+    #[test]
+    fn every_listed_output_is_labelled_and_at_most_one_is_the_default() {
+        let Some(found) = speakers_or_skip("the playback labelling check") else {
+            return;
+        };
+
+        for device in &found {
+            assert!(
+                !device.id.is_empty(),
+                "a device with no id cannot be chosen"
+            );
+            assert!(
+                !device.name.is_empty(),
+                "a device with no name cannot be labelled, so it is a row that does nothing"
+            );
+        }
+        if found.len() < 2 {
+            eprintln!(
+                "the playback default check proves nothing here: this machine lists one output"
+            );
+        }
+        assert!(
+            found.iter().filter(|device| device.default).count() <= 1,
+            "two outputs both claim to be the machine's default, so a screen \
+             marking the current row would mark two"
+        );
+    }
+
+    #[test]
+    fn every_listed_output_id_finds_its_device_again() {
+        // The same contract the capture list has to keep, and the same reason:
+        // the id is what gets written to disk, and the next run has to turn it
+        // back into the same speakers.
+        let Some(found) = speakers_or_skip("the playback round-trip check") else {
+            return;
+        };
+        let host = cpal::default_host();
+
+        for device in &found {
+            let Ok(id) = device.id.parse::<cpal::DeviceId>() else {
+                panic!("the id {:?} does not parse back", device.id);
+            };
+            let Some(again) = host.device_by_id(&id) else {
+                panic!(
+                    "the id {:?} finds no device on the host that listed it",
+                    device.id
+                );
+            };
+            assert_eq!(
+                describe(&again).map(|(_, name)| name),
+                Some(device.name.clone()),
+                "the id {:?} came back as a different device",
+                device.id
+            );
+        }
+    }
+
+    #[test]
+    fn a_listed_output_opens_and_reports_itself() {
+        // The two halves this feature is made of, together: an id off the list
+        // opens, and what comes back names the device that opened rather than
+        // the request. A picker built on either half alone is a picker that
+        // shows a row it did not open, or opens a device it cannot name.
+        let (Some(speakers), Some(_)) = (
+            speakers_or_skip("the playback open check"),
+            microphones_or_skip("the playback open check"),
+        ) else {
+            return;
+        };
+        // Deliberately not the machine's default. Asking for the default proves
+        // nothing: an `open` that dropped the request on the floor and took the
+        // default anyway would pass, and dropping the request on the floor is
+        // the entire failure this guards against.
+        let Some(wanted) = speakers.iter().find(|device| !device.default) else {
+            eprintln!(
+                "skipped the playback open check: this machine offers only its default output, \
+                 so asking for one proves nothing"
+            );
+            return;
+        };
+
+        let opened = match open_playback(&wanted.id) {
+            Ok(opened) => opened,
+            // A device that is listed and will not open is a real machine
+            // state — exclusive-mode outputs and virtual devices both do it —
+            // and this test has no way to tell that from a defect.
+            Err(error) => {
+                eprintln!(
+                    "skipped: this machine would not open {:?}: {error}",
+                    wanted.name
+                );
+                return;
+            }
+        };
+        assert_eq!(
+            opened.playback.as_ref().map(|device| device.id.as_str()),
+            Some(wanted.id.as_str()),
+            "the stream opened on a device other than the one asked for"
+        );
     }
 }

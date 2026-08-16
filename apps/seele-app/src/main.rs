@@ -188,6 +188,10 @@ async fn connect(
         // máquina. Um dispositivo que sumiu não impede de entrar — a FFI cai
         // para o padrão e a tela mostra o que abriu de verdade.
         capture_device: preferencias(&app).and_then(|p| p.capture().map(str::to_owned)),
+        // A saída de som, pela mesma política e lida do mesmo lugar. Os dois
+        // ajustes são independentes: um fone que ficou na outra sala não pode
+        // custar o microfone que a pessoa escolheu.
+        playback_device: preferencias(&app).and_then(|p| p.playback().map(str::to_owned)),
     };
 
     // `connect` blocks on a QUIC handshake. Running it on the async runtime's
@@ -534,6 +538,60 @@ fn escolher_microfone(
     })
 }
 
+/// Por onde esta máquina está oferecendo tocar som agora.
+///
+/// O irmão de [`microfones`], respondível sem sessão pelo mesmo motivo. E a
+/// mesma advertência sobre lista vazia: significa que a máquina não quis
+/// enumerar, **não** que não há onde tocar.
+#[tauri::command]
+fn saidas() -> Vec<seele_ffi::PlaybackDevice> {
+    seele_ffi::playback_devices()
+}
+
+/// Qual saída está escolhida, ou `None` para o padrão da máquina.
+///
+/// Do disco e não do `Snapshot`, pela mesma razão que [`microfone_escolhido`], e
+/// aqui a diferença entre as duas perguntas é a única coisa visível: cair para o
+/// alto-falante da máquina não faz barulho nenhum próprio. Quem escolheu um fone
+/// e não ouve nada tem `snapshot.playback` — o que abriu — para comparar com
+/// isto, o que foi pedido.
+#[tauri::command]
+fn saida_escolhida(app: AppHandle) -> Option<String> {
+    preferencias(&app).and_then(|p| p.playback().map(str::to_owned))
+}
+
+/// Escolhe a saída de som: grava no disco e, se houver sessão, troca agora.
+///
+/// As duas metades e nesta ordem, pelas mesmas razões que [`escolher_microfone`]
+/// dá. Uma diferença de peso está do outro lado, no core: trocar de saída não
+/// desliga o Isolamento total. Quem mexe neste controle costuma ser exatamente
+/// quem não está ouvindo nada, e às vezes o motivo de não ouvir é que se mutou —
+/// uma troca que desmutasse calada poria um Dogma dentro de uma sala que estava
+/// em silêncio.
+#[tauri::command]
+fn escolher_saida(
+    app: AppHandle,
+    session: State<'_, Session>,
+    dispositivo: Option<String>,
+) -> Result<(), FalhaAoEscolher> {
+    let Some(mut ajustes) = preferencias(&app) else {
+        return Err(FalhaAoEscolher::NaoGravei);
+    };
+    if let Err(erro) = ajustes.set_playback(dispositivo.as_deref()) {
+        tracing::warn!(%erro, "não consegui gravar a saída de som escolhida");
+        return Err(FalhaAoEscolher::NaoGravei);
+    }
+
+    let Ok(plug) = session.plug() else {
+        // Sem sessão a escolha está gravada, e era tudo o que havia para fazer.
+        return Ok(());
+    };
+    plug.set_playback_device(dispositivo).map_err(|erro| {
+        tracing::warn!(%erro, "não consegui trocar a saída de som da sessão");
+        FalhaAoEscolher::DispositivoSumiu
+    })
+}
+
 /// Onde fica a lista de Dogmas visitados.
 fn caminho_dos_conhecidos(app: &AppHandle) -> std::path::PathBuf {
     std::path::PathBuf::from(config_dir(app)).join("conhecidos")
@@ -790,6 +848,9 @@ fn main() {
             microfones,
             microfone_escolhido,
             escolher_microfone,
+            saidas,
+            saida_escolhida,
+            escolher_saida,
             conhecidos,
             esquecer,
             analisar_convite,

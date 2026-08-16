@@ -684,16 +684,22 @@ async fn sessao(
                     // precisa recomeçar por cima do canal certo, ou o áudio
                     // sairia por uma conexão que já morreu.
                     Aviso::Reconectado { media, sessao } => {
-                        // `switch_capture` e não `start`: os controles têm que
-                        // atravessar a reabertura. A lista está no `voice.rs` e
-                        // mora lá justamente para que nenhuma casca esqueça um
-                        // item — o A.T. Field é o que dói, porque `Enlace`
-                        // restaura o silêncio no servidor e o roster continua
-                        // mostrando esta pessoa muda enquanto o portão local
-                        // volta aberto. Esta casca esquecia todos, e a gráfica
-                        // também.
+                        // `reopen` e não `start`: os controles têm que atravessar
+                        // a reabertura. A lista está no `voice.rs` e mora lá
+                        // justamente para que nenhuma casca esqueça um item — o
+                        // A.T. Field é o que dói, porque `Enlace` restaura o
+                        // silêncio no servidor e o roster continua mostrando
+                        // esta pessoa muda enquanto o portão local volta aberto.
+                        // Esta casca esquecia todos, e a gráfica também.
+                        //
+                        // `reopen` e não uma troca de um lado só: pede de volta
+                        // os dois dispositivos que esta voz pediu, em vez do
+                        // padrão da máquina. Hoje o terminal não escolhe nenhum
+                        // dos dois, mas escrever o padrão aqui é deixar pronta
+                        // uma reconexão que desfaz uma escolha assim que ela
+                        // existir.
                         if let Some(atual) = runtime.voice.as_ref() {
-                            runtime.voice = atual.switch_capture(None, *media, sessao.ssrc).ok();
+                            runtime.voice = atual.reopen(*media, sessao.ssrc).ok();
                         }
                         runtime.room.adopt(&sessao, &args.nickname);
                         view::project(&runtime.room, &mut runtime.app);

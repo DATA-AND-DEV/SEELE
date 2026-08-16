@@ -141,12 +141,89 @@ pub fn capture_devices() -> Vec<CaptureDevice> {
         .collect()
 }
 
+/// One place the machine will play sound.
+///
+/// The twin of [`CaptureDevice`], and its own type for the same reason that one
+/// is: an input id and an output id are both strings, and only the type stops
+/// one being handed to the wrong half of [`Voice::start_on`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlaybackDevice {
+    /// The stable handle a preference is written down as. Never shown.
+    pub id: String,
+    /// What the machine calls it, for a person to read.
+    pub name: String,
+    /// Whether this is the one a session with no preference would take.
+    pub default: bool,
+}
+
+/// Every output the machine will describe, right now.
+///
+/// The twin of [`capture_devices`], answerable with no session for the same
+/// reason, and with the same reading of an empty list: the machine would not
+/// enumerate, **not** that there is nowhere to play.
+#[must_use]
+pub fn playback_devices() -> Vec<PlaybackDevice> {
+    device::playback_devices()
+        .into_iter()
+        .map(playback_into_core)
+        .collect()
+}
+
 /// The audio layer's device, as this crate's own.
 fn into_core(found: device::CaptureDevice) -> CaptureDevice {
     CaptureDevice {
         id: found.id,
         name: found.name,
         default: found.default,
+    }
+}
+
+/// The same, for the other side of the pair.
+fn playback_into_core(found: device::PlaybackDevice) -> PlaybackDevice {
+    PlaybackDevice {
+        id: found.id,
+        name: found.name,
+        default: found.default,
+    }
+}
+
+/// Which devices to open, as ids.
+///
+/// One value rather than two arguments, because the two are the same type: a
+/// call that swapped them would compile and then ask the speakers to record.
+/// `Default` is the machine's own choice on both sides, which is what every
+/// session took before there was a screen to choose on.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DeviceChoice {
+    /// Which microphone, as a [`CaptureDevice::id`].
+    pub capture: Option<String>,
+    /// Where the sound comes out, as a [`PlaybackDevice::id`].
+    pub playback: Option<String>,
+}
+
+impl DeviceChoice {
+    /// The same choice, as the audio layer asks for it.
+    fn wanted(&self) -> device::Wanted<'_> {
+        device::Wanted {
+            capture: self.capture.as_deref(),
+            playback: self.playback.as_deref(),
+        }
+    }
+
+    /// The same choice with one side given up, or `None` when there is nothing
+    /// left to give up on that side.
+    ///
+    /// `None` is what ends the ladder in [`open_preferring`]: a side already on
+    /// the machine's default that still will not open is not a stale
+    /// preference, it is no audio, and retrying the same thing forever is the
+    /// one behaviour worse than saying so.
+    fn without(&self, side: device::Side) -> Option<Self> {
+        let mut fallen_back = self.clone();
+        let given_up = match side {
+            device::Side::Input => fallen_back.capture.take(),
+            device::Side::Output => fallen_back.playback.take(),
+        };
+        given_up.map(|_| fallen_back)
     }
 }
 
@@ -157,6 +234,40 @@ pub struct DeviceRates {
     pub capture_hz: u32,
     /// Native playback rate.
     pub playback_hz: u32,
+}
+
+/// Opens `chosen`, giving up the preference each failure blames, one at a time.
+///
+/// The rule this encodes, and the reason it is one function rather than a
+/// pattern each shell repeats: **a preference written down yesterday never
+/// stops somebody entering today**. A device moves, gets unplugged, or belongs
+/// to a machine the settings file was copied from, and none of those may cost a
+/// person the session.
+///
+/// It gives up the blamed side only. Giving up both would mean a headset left in
+/// another room silently discarding a microphone choice that was working, and
+/// the person would have two things to fix instead of none.
+///
+/// Terminates because each round either returns or empties one of the two
+/// preferences, and a side with nothing left to give up returns the failure.
+fn open_preferring(chosen: &DeviceChoice) -> Result<AudioIo, device::DeviceError> {
+    let mut asking = chosen.clone();
+    loop {
+        let failure = match device::open(asking.wanted(), RING_MS) {
+            Ok(io) => return Ok(io),
+            Err(failure) => failure,
+        };
+        let Some(less) = asking.without(failure.side()) else {
+            // Already on the machine's own device for the side that failed.
+            // Nothing here is stale, and there is nothing left to try.
+            return Err(failure);
+        };
+        tracing::warn!(
+            %failure,
+            "the chosen device is not available; falling back to the machine's own"
+        );
+        asking = less;
+    }
 }
 
 /// A running voice path.
@@ -172,6 +283,21 @@ pub struct Voice {
     /// Read off the device rather than remembered from the request, so that a
     /// path started with no preference can still say which microphone it got.
     capture: Option<CaptureDevice>,
+    /// Where this path is actually playing.
+    ///
+    /// Same rule as [`Voice::capture`], and it carries more weight here: a
+    /// fallback to the machine's default output makes no sound of its own, so
+    /// reading this line is the only way to find out it happened.
+    playback: Option<PlaybackDevice>,
+    /// What was *asked* for, which is not what opened.
+    ///
+    /// Kept so that changing one side does not quietly reset the other:
+    /// [`Voice::switch_playback`] has to reopen the microphone that is running,
+    /// and the only faithful way to do that is to ask for it again exactly as
+    /// this path did. The ask and not the result, because a preference that fell
+    /// back to the default is still the preference — plugging the interface back
+    /// in has to restore it, not require it to be made again.
+    chosen: DeviceChoice,
     /// Se a máquina está derrubando áudio **agora**.
     ///
     /// Mora aqui porque é uma derivada: precisa lembrar o que viu da última
@@ -188,14 +314,21 @@ impl Voice {
     /// Fails if no input or output device can be opened, or if the encoder
     /// refuses the configuration.
     pub fn start(media: MediaChannel, ssrc: Ssrc) -> Result<Self> {
-        Self::start_on(None, media, ssrc)
+        Self::start_on(&DeviceChoice::default(), media, ssrc)
     }
 
-    /// Opens a chosen capture device and starts the pipeline.
+    /// Opens the chosen devices and starts the pipeline.
     ///
-    /// `capture` is a [`CaptureDevice::id`] from [`capture_devices`], never a
-    /// name. `None` is the machine's default, which is what [`Voice::start`]
-    /// takes.
+    /// Each half of `chosen` is an id from [`capture_devices`] or
+    /// [`playback_devices`], never a name. Both `None` is the machine's own
+    /// choice, which is what [`Voice::start`] takes.
+    ///
+    /// **Strict**: a device that is not there is an error, not a fallback. That
+    /// is what a person clicking a row needs — the pick either took or it did
+    /// not, and a screen that reports "done" after quietly opening something
+    /// else is a screen that lies about the one thing it exists to do. A
+    /// preference read off disk wants the opposite, and that is
+    /// [`Voice::start_preferring`].
     ///
     /// Switching device is this function plus dropping the old handle: the
     /// pipeline owns its `AudioIo` for the life of its thread, and `cpal`'s
@@ -205,18 +338,54 @@ impl Voice {
     ///
     /// # Errors
     ///
-    /// Fails if the named device is gone, if no device can be opened at all, or
-    /// if the encoder refuses the configuration.
-    pub fn start_on(capture: Option<&str>, media: MediaChannel, ssrc: Ssrc) -> Result<Self> {
+    /// Fails if either named device is gone, if no device can be opened at all,
+    /// or if the encoder refuses the configuration.
+    pub fn start_on(chosen: &DeviceChoice, media: MediaChannel, ssrc: Ssrc) -> Result<Self> {
         // Opened here rather than on the audio thread so that "there is no
         // microphone" is a return value the interface can show, instead of a
         // thread that quietly dies.
-        let io = device::open(capture, RING_MS)?;
+        let io = device::open(chosen.wanted(), RING_MS)?;
+        Self::around(io, chosen.clone(), media, ssrc)
+    }
+
+    /// Opens the chosen devices, giving up one preference at a time.
+    ///
+    /// For a choice read off disk, where [`Voice::start_on`] is for a row
+    /// somebody just clicked. A preference written down last week names a device
+    /// that may be in another room by now, and turning that into a session
+    /// nobody can join would make the picker the most dangerous control in the
+    /// product. So each side that will not open falls back to the machine's own,
+    /// and [`Voice::capture`] and [`Voice::playback`] report what actually
+    /// opened — the fallback is visible, and it is visible as a name rather than
+    /// as the word "default".
+    ///
+    /// One side at a time, and the side the failure blames: giving up both
+    /// because the speakers moved would throw away a microphone choice that was
+    /// fine. The ask is remembered whole either way, so the next reopening tries
+    /// the real preference again.
+    ///
+    /// # Errors
+    ///
+    /// Fails when a side is already on the machine's own device and still will
+    /// not open. That is not a stale preference; it is no audio, and this is
+    /// where saying so belongs.
+    pub fn start_preferring(
+        chosen: &DeviceChoice,
+        media: MediaChannel,
+        ssrc: Ssrc,
+    ) -> Result<Self> {
+        let io = open_preferring(chosen)?;
+        Self::around(io, chosen.clone(), media, ssrc)
+    }
+
+    /// Wraps devices that are already open in a running pipeline.
+    fn around(io: AudioIo, chosen: DeviceChoice, media: MediaChannel, ssrc: Ssrc) -> Result<Self> {
         let rates = DeviceRates {
             capture_hz: io.capture_rate_hz,
             playback_hz: io.playback_rate_hz,
         };
         let capture = io.capture.clone().map(into_core);
+        let playback = io.playback.clone().map(playback_into_core);
 
         let controls = Arc::new(Controls {
             at_field: AtomicBool::new(false),
@@ -253,6 +422,8 @@ impl Voice {
             telemetry,
             rates,
             capture,
+            playback,
+            chosen,
             falha_local: Mutex::new(FalhaLocal::new()),
         })
     }
@@ -273,7 +444,32 @@ impl Voice {
         self.capture.as_ref()
     }
 
+    /// Where this path is actually playing.
+    ///
+    /// `None` under the same two conditions as [`Voice::capture`], and read for
+    /// the same reason: what opened, never what was asked for. It is the only
+    /// evidence a person gets that a chosen output was not there — nothing about
+    /// falling back to the machine's speakers announces itself.
+    #[must_use]
+    pub fn playback(&self) -> Option<&PlaybackDevice> {
+        self.playback.as_ref()
+    }
+
+    /// Which devices this path asked for, which is not what it got.
+    ///
+    /// The ask survives a fallback on purpose — see [`Voice::chosen`] — so this
+    /// is what to hand back to [`Voice::reopen`], and never what to draw.
+    #[must_use]
+    pub fn chosen(&self) -> &DeviceChoice {
+        &self.chosen
+    }
+
     /// Starts a second path on another microphone, carrying this one's settings.
+    ///
+    /// The output stays where it is, asked for exactly as this path asked for
+    /// it. Reopening on the machine's default instead would make changing
+    /// microphone silently undo a choice made on the other half of the same
+    /// screen.
     ///
     /// The returned [`Voice`] is the live one; dropping `self` is what stops the
     /// old device. Deliberately in that order: the new path is opened **before**
@@ -299,7 +495,83 @@ impl Voice {
         media: MediaChannel,
         ssrc: Ssrc,
     ) -> Result<Self> {
-        let fresh = Self::start_on(capture, media, ssrc)?;
+        self.switch_to(
+            &DeviceChoice {
+                capture: capture.map(str::to_owned),
+                playback: self.chosen.playback.clone(),
+            },
+            media,
+            ssrc,
+        )
+    }
+
+    /// Starts a second path on another output, carrying this one's settings.
+    ///
+    /// The twin of [`Voice::switch_capture`], and it exists rather than being
+    /// left to each shell for the reason written there: the list of what has to
+    /// survive a reopening lives here, once, so that no shell forgets an item.
+    /// The item that hurts on this side is Isolamento total — somebody who
+    /// changed output because they could not hear anything is, often enough,
+    /// somebody whose speakers are muted, and a switch that quietly unmutes them
+    /// puts a Dogma into a room that had been silent.
+    ///
+    /// The microphone stays where it is, asked for exactly as this path asked
+    /// for it.
+    ///
+    /// # Errors
+    ///
+    /// The same as [`Voice::start_on`]. On failure nothing has changed and
+    /// `self` is still running — which on this side means the sound is still
+    /// coming out of the old device rather than out of nowhere.
+    pub fn switch_playback(
+        &self,
+        playback: Option<&str>,
+        media: MediaChannel,
+        ssrc: Ssrc,
+    ) -> Result<Self> {
+        self.switch_to(
+            &DeviceChoice {
+                capture: self.chosen.capture.clone(),
+                playback: playback.map(str::to_owned),
+            },
+            media,
+            ssrc,
+        )
+    }
+
+    /// Opens the same devices again on a new connection, carrying the settings.
+    ///
+    /// For a reconnection, where the ssrc and the media channel are both new and
+    /// the voice path therefore has to be rebuilt. The **ask** is repeated, not
+    /// the result: a preference that had fallen back gets another chance, which
+    /// is what a person who plugged the interface back in expects.
+    ///
+    /// Falls back per side like [`Voice::start_preferring`], because a
+    /// reconnection is not a moment to charge somebody the rest of their voice
+    /// for a device that moved while they were off the air.
+    ///
+    /// # Errors
+    ///
+    /// The same as [`Voice::start_preferring`]. On failure nothing has changed
+    /// and `self` is still running, though on a connection that is now dead.
+    pub fn reopen(&self, media: MediaChannel, ssrc: Ssrc) -> Result<Self> {
+        let fresh = Self::start_preferring(&self.chosen, media, ssrc)?;
+        self.carry_over(&fresh);
+        Ok(fresh)
+    }
+
+    /// Reopens on `chosen` and carries every control across.
+    ///
+    /// The one place that list is written. Both switches and the reopening go
+    /// through here, so an item added to it is added for all three at once.
+    fn switch_to(&self, chosen: &DeviceChoice, media: MediaChannel, ssrc: Ssrc) -> Result<Self> {
+        let fresh = Self::start_on(chosen, media, ssrc)?;
+        self.carry_over(&fresh);
+        Ok(fresh)
+    }
+
+    /// Puts this path's controls onto a freshly opened one.
+    fn carry_over(&self, fresh: &Self) {
         fresh.set_at_field(self.at_field());
         fresh.set_total_isolation(self.total_isolation());
         fresh.set_mode(self.mode());
@@ -309,7 +581,6 @@ impl Voice {
                 fresh.set_gain(*talker, *gain);
             }
         }
-        Ok(fresh)
     }
 
     /// Mutes the microphone — A.T. Field.
@@ -633,5 +904,53 @@ mod tests {
     fn an_unknown_byte_falls_back_to_the_safe_mode() {
         // Whatever goes wrong, it must not end with an open microphone.
         assert_eq!(VoiceMode::from_byte(200), VoiceMode::PushToTalk);
+    }
+
+    /// A choice with a preference on each side.
+    fn both_chosen() -> DeviceChoice {
+        DeviceChoice {
+            capture: Some("o microfone".to_owned()),
+            playback: Some("a caixa".to_owned()),
+        }
+    }
+
+    #[test]
+    fn giving_up_one_side_leaves_the_other_alone() {
+        // The rule the fallback is made of. A headset left in another room must
+        // not cost somebody the microphone they picked: they would arrive at a
+        // Dogma with two things wrong and nothing saying the second was a
+        // consequence of the first.
+        let sem_saida = both_chosen()
+            .without(device::Side::Output)
+            .expect("there was an output preference to give up");
+        assert_eq!(sem_saida.capture.as_deref(), Some("o microfone"));
+        assert_eq!(sem_saida.playback, None);
+
+        let sem_microfone = both_chosen()
+            .without(device::Side::Input)
+            .expect("there was a capture preference to give up");
+        assert_eq!(sem_microfone.capture, None);
+        assert_eq!(sem_microfone.playback.as_deref(), Some("a caixa"));
+    }
+
+    #[test]
+    fn a_side_already_on_the_default_has_nothing_left_to_give_up() {
+        // What ends the ladder in `open_preferring`. Without it, a machine with
+        // no sound card at all would be asked the same question forever instead
+        // of being told it has no sound card — a hang where there should be a
+        // sentence, and on the path that opens every session.
+        assert_eq!(DeviceChoice::default().without(device::Side::Input), None);
+        assert_eq!(DeviceChoice::default().without(device::Side::Output), None);
+    }
+
+    #[test]
+    fn the_ask_crosses_into_the_audio_layer_on_the_side_it_was_made() {
+        // Both halves are `Option<String>`, so nothing but this catches a swap
+        // — and a swap is silent until somebody wonders why picking a headset
+        // muted their microphone.
+        let chosen = both_chosen();
+        let wanted = chosen.wanted();
+        assert_eq!(wanted.capture, Some("o microfone"));
+        assert_eq!(wanted.playback, Some("a caixa"));
     }
 }
