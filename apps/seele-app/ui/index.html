@@ -975,70 +975,399 @@
 </section>
 
 <!--
-  Terminal Dogma — a configuração local. §7 do comp.
+  Terminal Dogma — a configuração local. §8 do comp v3.
 
   Nasce escondida, como toda tela que não é a de entrada, e volta para a tela de
-  onde foi aberta.
+  onde foi aberta — da entrada e da sessão, que são os dois lugares de onde se
+  chega aqui.
+
+  ---- não há SALVAR, e a ausência é a decisão ----
+
+  O comp v3 desenha `DESCARTAR`, `SALVAR` e um rótulo de «alterações não
+  salvas». Nada disso está aqui, e o inventário do comp registra por quê (§8.1):
+  a escolha vale na hora. Um `SALVAR` num painel de áudio promete que nada muda
+  até apertá-lo, e isso é falso para som — você precisa ouvir o efeito para
+  saber se escolheu certo, e um microfone que só troca depois de salvar é um
+  microfone que você testa às cegas.
+
+  No lugar, o que já existe: a tela mostra o que **está valendo**, não o que foi
+  pedido. A lista de microfones diz qual abriu, e não qual foi escolhido, que é
+  a diferença que importa no dia em que o aparelho escolhido sumiu.
 
   ---- o que o comp desenha e esta tela não ----
 
-  O comp põe cinco itens na coluna: ÁUDIO, ATALHOS, TEMA, CHAVES e TUI. O
-  próprio inventário registra que ali eles "levam ao **mesmo** painel de áudio" —
-  são um desenho de para onde a tela cresce, não cinco telas. Dos cinco, só
-  ÁUDIO tem alguma coisa atrás: atalhos e tema não existem no produto, e as
-  chaves não têm comando que as leia. Quatro botões que não levam a lugar nenhum
-  seriam quatro promessas, e a mesma folha que escolheu não desenhar meia
-  configuração de saída não vai desenhar quatro seções vazias.
+  A regra desta tela é omitir o que não existe, e não desenhá-lo vazio. É o
+  contrário da convenção que a tela de autenticação segue — lá a moldura fica e
+  o valor falta, porque a lacuna é do protocolo e vale mostrar. Aqui não: numa
+  tela que existe para ser simples, meia dúzia de controles apagados com
+  explicação ao lado é ruído, e cada um deles é uma promessa.
 
-  Pela mesma razão faltam SAÍDA e SUPRESSÃO do painel de captura: nada no
-  produto lê preferência de saída, e não há supressão de ruído nenhuma para
-  ligar (ADR 0007 tirou DSP externo do v1). O que está aqui está ligado.
+  Ficaram de fora, e cada um por um motivo escrito:
+
+  - **REDUÇÃO DE RUÍDO** — o ADR 0007 tirou DSP em C/C++ do v1 e pôs fone de
+    ouvido como requisito documentado. O controle existiria para não fazer nada.
+  - **TEMA** — o ADR 0014 congela a paleta. Um segundo tema é uma segunda
+    paleta canônica, e essa é decisão de ADR, não de tela.
+  - **GANHO DE ENTRADA** — `Voice::set_gain` é ganho por interlocutor, do lado
+    da reprodução. Ganho de captura é outra coisa e não existe.
+  - **VOLUME GERAL** — `mixer.set_master` existe, e é o que o Isolamento total
+    aciona: é o mudo, não um nível. Expô-lo sem cuidado quebraria a surdez.
+  - **ENTRAR MUDO** e **AVISO SONORO** — o primeiro é barato (o mecanismo é o
+    `set_at_field`, falta lembrar a escolha) e o segundo não tem nada atrás.
+    Barato ainda não é construído.
+  - **COPIAR CHAVE PÚBLICA** e **GERAR NOVA CHAVE** — a chave está em disco
+    (ADR 0017) e não há comando que a leia. A segunda, além disso, custa o
+    apelido em **todo** Dogma já visitado, porque o CASPER vincula o apelido à
+    identidade que o reivindicou; ela não entra sem uma confirmação que diga
+    essa frase, e não «tem certeza?».
+  - **TROCAR A TECLA DE UM ATALHO** — os atalhos existem e são fixos: não há
+    tabela editável nem lugar para guardá-la. A lista abaixo é o que eles são.
 -->
 <section id="tela-dogma" class="tela" hidden>
   <div class="dogma">
+
     <nav class="dogma-coluna" aria-label="seções da configuração">
-      <h1 class="dogma-marca">
-        <span class="dogma-marca-terminal">TERMINAL</span>
-        <span class="dogma-marca-dogma">DOGMA</span>
-        <span class="dogma-marca-nota">CONFIGURAÇÃO LOCAL</span>
-      </h1>
-      <span class="dogma-secao" aria-current="page">ÁUDIO</span>
+      <div class="dogma-marca">
+        <h1 class="dogma-marca-titulo">TERMINAL DOGMA</h1>
+        <p class="dica">Ajustes deste computador, e não deste Dogma.</p>
+      </div>
+
+      <!--
+        As quatro seções do comp, com ícone, nome e descrição. O ícone é desenho
+        e não caractere: `◍`, `⌨`, `◧` e `⚿` não estão na IBM Plex Mono
+        embarcada — medido no cmap, 499 pontos de código —, e digitá-los põe uma
+        segunda face no meio da linha. `ui/glifos.js` desenha os quatro.
+
+        `data-titulo` e `data-sub` viajam com o botão em vez de morarem numa
+        tabela paralela em JavaScript: o texto do cabeçalho fica ao lado do
+        botão que o abre, e não há duas listas para alguém manter em dia.
+      -->
+      <ul class="dogma-secoes">
+        <li>
+          <button id="secao-audio" class="dogma-secao" type="button"
+                  data-painel="painel-audio"
+                  data-titulo="MICROFONE E SOM"
+                  data-sub="Escolha os aparelhos e ouça antes de entrar em uma jaula">
+            <span class="dogma-secao-icone" data-glifo="audio"></span>
+            <span class="dogma-secao-texto">
+              <span class="dogma-secao-nome">ÁUDIO</span>
+              <span class="dica">Microfone e som</span>
+            </span>
+          </button>
+        </li>
+        <li>
+          <button id="secao-atalhos" class="dogma-secao" type="button"
+                  data-painel="painel-atalhos"
+                  data-titulo="ATALHOS"
+                  data-sub="Teclas para agir sem tirar a mão do teclado">
+            <span class="dogma-secao-icone" data-glifo="teclado"></span>
+            <span class="dogma-secao-texto">
+              <span class="dogma-secao-nome">ATALHOS</span>
+              <span class="dica">Teclas de acesso</span>
+            </span>
+          </button>
+        </li>
+        <li>
+          <button id="secao-aparencia" class="dogma-secao" type="button"
+                  data-painel="painel-aparencia"
+                  data-titulo="APARÊNCIA E COMPORTAMENTO"
+                  data-sub="Como o app se parece e o que ele faz sozinho">
+            <span class="dogma-secao-icone" data-glifo="aparencia"></span>
+            <span class="dogma-secao-texto">
+              <span class="dogma-secao-nome">APARÊNCIA</span>
+              <span class="dica">Legendas e comportamento</span>
+            </span>
+          </button>
+        </li>
+        <li>
+          <button id="secao-identidade" class="dogma-secao" type="button"
+                  data-painel="painel-identidade"
+                  data-titulo="IDENTIDADE"
+                  data-sub="A chave que prova quem você é nos Dogmas Centrais">
+            <span class="dogma-secao-icone" data-glifo="chave"></span>
+            <span class="dogma-secao-texto">
+              <span class="dogma-secao-nome">IDENTIDADE</span>
+              <span class="dica">Sua chave</span>
+            </span>
+          </button>
+        </li>
+      </ul>
+
+      <!--
+        O comp escreve `VOLTAR AO DOGMA`, e daqui isso só é verdade metade das
+        vezes: esta tela também é aberta da entrada, onde não há Dogma nenhum
+        para voltar. O texto é escrito ao abrir, pela tela que abriu.
+      -->
+      <button id="dogma-fechar" class="dogma-voltar" type="button">
+        <span data-glifo="recuar"></span>
+        <span id="dogma-voltar-texto">VOLTAR</span>
+      </button>
     </nav>
 
     <div class="dogma-corpo">
       <header class="dogma-faixa">
-        <h2 class="dogma-titulo">DISPOSITIVOS DE ÁUDIO</h2>
         <!--
-          O comp diz "ALTERAÇÕES APLICAM NA PRÓXIMA INSERÇÃO DE PLUG". Aqui não
-          é verdade, e uma ressalva que descreve outro programa é pior que
-          nenhuma: a troca vale na hora, e o que fica gravado é para a próxima
-          vez que a janela abrir.
+          Título e subtítulo da seção aberta, escritos do `data-titulo` e do
+          `data-sub` do botão. Vazios na marcação de propósito: preenchê-los aqui
+          seria uma terceira cópia das mesmas duas frases.
         -->
-        <span class="dogma-nota">A ESCOLHA VALE AGORA E FICA GRAVADA NESTA MÁQUINA</span>
-        <button id="dogma-fechar" class="botao-fantasma" type="button">VOLTAR</button>
+        <h2 id="dogma-titulo" class="dogma-titulo"></h2>
+        <p id="dogma-subtitulo" class="dica"></p>
       </header>
 
-      <section class="dogma-painel" aria-label="captura">
-        <h3 class="rotulo">CAPTURA</h3>
-        <ul id="lista-microfones" class="microfones"></ul>
-        <!--
-          Revelado antes de escrito: `role="alert"` não anuncia o que foi escrito
-          enquanto o elemento ainda estava escondido.
-        -->
-        <p id="dogma-erro" class="erro" role="alert" hidden></p>
+      <div class="dogma-painel">
 
-        <h3 class="rotulo">NÍVEL</h3>
-        <!--
-          O medidor de entrada, do mesmo `input_level` que a telemetria da
-          sessão desenha. `role="status"` e não um rótulo mudo: o número ao lado
-          é o acompanhante textual dos blocos, porque `specs/05-cliente-tui.md`
-          proíbe informação transmitida só por forma ou cor.
+        <!-- ---------------------------------------------------------- ÁUDIO -->
+        <section id="painel-audio" class="dogma-painel-secao" aria-labelledby="secao-audio">
 
-          `—` quando não há sessão: um medidor parado em zero diz "seu microfone
-          não capta nada", que é uma frase diferente e falsa.
+          <div class="dogma-bloco">
+            <div class="dogma-bloco-topo">
+              <h3 class="dogma-bloco-nome">MICROFONE</h3>
+              <p class="dica">O que os outros ouvem de você</p>
+            </div>
+            <div class="dogma-bloco-corpo">
+
+              <div class="dogma-campo">
+                <h4 class="rotulo">DISPOSITIVO DE ENTRADA</h4>
+                <ul id="lista-microfones" class="dogma-dispositivos"></ul>
+                <!--
+                  Revelado antes de escrito: `role="alert"` não anuncia o que foi
+                  escrito enquanto o elemento ainda estava escondido.
+                -->
+                <p id="dogma-erro" class="erro" role="alert" hidden></p>
+                <p class="dica">A troca vale agora e fica gravada nesta máquina.
+                  A lista diz qual microfone <em>abriu</em>, que nem sempre é o
+                  que foi escolhido.</p>
+              </div>
+
+              <div class="dogma-campo">
+                <h4 class="rotulo">NÍVEL DE ENTRADA</h4>
+                <!--
+                  O medidor, do mesmo `input_level` que a telemetria da sessão
+                  desenha. `role="status"` e não um rótulo mudo: o número ao lado
+                  é o acompanhante textual dos blocos, porque
+                  `specs/05-cliente-tui.md` proíbe informação transmitida só por
+                  forma ou cor.
+
+                  `—` quando não há sessão: um medidor parado em zero diz "seu
+                  microfone não capta nada", que é uma frase diferente e falsa. O
+                  comp desenha um botão TESTAR ao lado, e não há teste nenhum
+                  atrás dele — o nível só existe com áudio de pé.
+                -->
+                <p id="dogma-nivel" class="dogma-medidor" role="status">—</p>
+                <p class="dica">Fale normalmente. Os blocos sobem enquanto você
+                  fala, e só há nível com uma sessão aberta.</p>
+              </div>
+
+              <!--
+                Como o microfone abre. O comp trata isto como uma chave de sim ou
+                não — «falar só enquanto segura a tecla» —, e o produto tem três
+                modos, não dois: `specs/03-audio.md` faz da tecla o padrão porque
+                ela nunca dispara sozinha. Uma chave de dois lados esconderia o
+                terceiro estado, que é justamente o perigoso.
+
+                É da sessão e não do disco: `set_voice_mode` fala com um plug
+                inserido. Sem sessão os três ficam apagados, com o motivo no
+                `title` — a exceção que esta tela abre para um controle morto, e
+                ela é temporária por natureza, não estrutural.
+              -->
+              <div class="dogma-campo">
+                <h4 class="rotulo">COMO O MICROFONE ABRE</h4>
+                <div class="dogma-modos" role="group" aria-label="como o microfone abre">
+                  <button id="dogma-modo-tecla" class="dogma-modo" type="button"
+                          data-modo="PushToTalk" aria-pressed="false">
+                    <span class="dogma-modo-nome">TECLA</span>
+                    <span class="dogma-modo-desc">abre só enquanto você segura</span>
+                  </button>
+                  <button id="dogma-modo-voz" class="dogma-modo" type="button"
+                          data-modo="VoiceActivated" aria-pressed="false">
+                    <span class="dogma-modo-nome">VOZ</span>
+                    <span class="dogma-modo-desc">abre quando você fala</span>
+                  </button>
+                  <button id="dogma-modo-aberto" class="dogma-modo" type="button"
+                          data-modo="Open" aria-pressed="false">
+                    <span class="dogma-modo-nome">ABERTO</span>
+                    <span class="dogma-modo-desc">fica aberto o tempo todo</span>
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!--
+            SAÍDA DE SOM — desenhada, e ainda não escolhível.
+
+            `seele-audio/src/device.rs` já abre um fluxo de saída e conhece a
+            direção `Output`; o que ele não sabe fazer é **enumerar**. Então há
+            exatamente um aparelho tocando som agora, e ele é o padrão da
+            máquina: apagar esta linha esconderia um dispositivo que está em uso.
+            É por isso que ela é a única desabilitada nesta tela — a regra de
+            omitir vale para o que não existe, e a saída existe pela metade.
+
+            Desabilitada **e** dizendo por quê, que é o que
+            `the_two_buttons_with_no_command_behind_them_cannot_be_pressed` exige
+            de todo botão sem comando atrás.
+
+            Quando a enumeração chegar, a lista é a mesma forma da de cima e é
+            preenchida do mesmo jeito.
+          -->
+          <div class="dogma-bloco">
+            <div class="dogma-bloco-topo">
+              <h3 class="dogma-bloco-nome">SAÍDA DE SOM</h3>
+              <p class="dica">Por onde você ouve os outros</p>
+            </div>
+            <div class="dogma-bloco-corpo">
+              <div class="dogma-campo">
+                <h4 class="rotulo">DISPOSITIVO DE SAÍDA</h4>
+                <ul id="lista-saidas" class="dogma-dispositivos">
+                  <li>
+                    <button id="saida-padrao" class="dogma-dispositivo" type="button" disabled
+                            data-escolhido="sim"
+                            title="Esta máquina ainda não sabe listar as saídas de som: o plug abre a saída padrão do sistema e não tem como enumerar as outras. Enquanto isso, trocar de saída se faz no sistema operacional.">
+                      <span class="dogma-dispositivo-nome">PADRÃO DA MÁQUINA</span>
+                      <span class="dogma-dispositivo-marca">EM USO</span>
+                    </button>
+                  </li>
+                </ul>
+                <p class="dica">Só há uma por enquanto. Para trocar, troque a
+                  saída padrão do sistema.</p>
+              </div>
+            </div>
+          </div>
+
+        </section>
+
+        <!-- ------------------------------------------------------- ATALHOS -->
+        <!--
+          Uma lista, e não uma tabela de teclas trocáveis. O comp escreve «Clique
+          em uma tecla para trocá-la», e não há onde guardar a troca: os atalhos
+          do app e do `plug` são fixos. O que esta seção faz é o que ninguém
+          fazia — dizer quais são.
+
+          `data-tecla` carrega o nome que o navegador dá à tecla, e não o nome
+          que a pessoa lê. É o que liga cada linha ao ouvinte que a atende, e é o
+          que `every_key_the_shortcut_table_names_is_one_a_script_listens_for`
+          confere: uma linha aqui que nenhum script escuta é documentação
+          mentindo, que é pior que documentação nenhuma.
         -->
-        <p id="dogma-nivel" class="medidor" role="status">—</p>
-      </section>
+        <section id="painel-atalhos" class="dogma-painel-secao"
+                 aria-labelledby="secao-atalhos" hidden>
+          <div class="dogma-bloco">
+            <div class="dogma-bloco-topo">
+              <h3 class="dogma-bloco-nome">ATALHOS DE TECLADO</h3>
+              <p class="dica">São fixos: não há onde guardar uma troca</p>
+            </div>
+            <ul class="dogma-atalhos">
+              <li class="dogma-atalho">
+                <span class="dogma-atalho-texto">
+                  <span class="dogma-atalho-acao">Falar enquanto segura</span>
+                  <span class="dogma-atalho-desc">o microfone abre com a tecla
+                    pressionada, fora de um campo de texto</span>
+                </span>
+                <kbd class="dogma-atalho-tecla" data-tecla="Space">ESPAÇO</kbd>
+              </li>
+              <li class="dogma-atalho">
+                <span class="dogma-atalho-texto">
+                  <span class="dogma-atalho-acao">Buscar na Linha aberta</span>
+                  <span class="dogma-atalho-desc">põe o cursor na busca, como no
+                    terminal</span>
+                </span>
+                <kbd class="dogma-atalho-tecla" data-tecla="/">/</kbd>
+              </li>
+              <li class="dogma-atalho">
+                <span class="dogma-atalho-texto">
+                  <span class="dogma-atalho-acao">Andar na busca</span>
+                  <span class="dogma-atalho-desc">com SHIFT, volta para a
+                    ocorrência anterior</span>
+                </span>
+                <kbd class="dogma-atalho-tecla" data-tecla="Enter">ENTER</kbd>
+              </li>
+              <li class="dogma-atalho">
+                <span class="dogma-atalho-texto">
+                  <span class="dogma-atalho-acao">Fechar o que está por cima</span>
+                  <span class="dogma-atalho-desc">a busca, a chamada, ou esta
+                    tela</span>
+                </span>
+                <kbd class="dogma-atalho-tecla" data-tecla="Escape">ESC</kbd>
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <!-- ----------------------------------------------------- APARÊNCIA -->
+        <section id="painel-aparencia" class="dogma-painel-secao"
+                 aria-labelledby="secao-aparencia" hidden>
+          <div class="dogma-bloco">
+            <div class="dogma-bloco-topo">
+              <h3 class="dogma-bloco-nome">COMPORTAMENTO</h3>
+            </div>
+            <ul class="dogma-chaves">
+              <li class="dogma-chave">
+                <span class="dogma-chave-texto">
+                  <span id="dogma-legendas-nome" class="dogma-chave-nome">Legendas
+                    simples</span>
+                  <!--
+                    Descrição em `.dogma-chave-desc` e não em `.dica`, e é a
+                    única do arquivo assim. A chave que esta linha governa é a
+                    das próprias dicas: escrita como `.dica`, a explicação de
+                    como religá-las sumiria junto com elas no instante em que
+                    alguém as desligasse, e o interruptor de volta ficaria sem
+                    legenda nenhuma.
+                  -->
+                  <span class="dogma-chave-desc">Uma linha curta ao lado de cada
+                    controle, dizendo o que ele faz. Fica ligada até você
+                    desligar.</span>
+                </span>
+                <button id="dogma-legendas" class="dogma-interruptor" type="button"
+                        role="switch" aria-checked="true"
+                        aria-labelledby="dogma-legendas-nome">
+                  <span class="dogma-interruptor-lado" data-lado="sim">SIM</span>
+                  <span class="dogma-interruptor-lado" data-lado="nao">NÃO</span>
+                </button>
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <!-- ---------------------------------------------------- IDENTIDADE -->
+        <!--
+          Uma seção sem controle nenhum, e é o estado honesto: a chave está em
+          disco (ADR 0017) e não há comando que a leia, então não há tipo, nem
+          impressão digital, nem data de criação para mostrar, nem como copiar a
+          pública. Desenhá-las vazias seria quatro molduras dizendo «faltou».
+
+          O que sobrou é o que o produto de fato tem para dizer aqui, e é novo
+          para quem chega: o CASPER vincula o apelido à identidade que o
+          reivindicou primeiro, e o MELCHIOR recusa qualquer outra. O inventário
+          do comp v3 (§1.2) trocou o selo por linha por exatamente esta frase,
+          dita uma vez — um selo que todo mundo tem é um selo que ninguém
+          aprende a ler.
+        -->
+        <section id="painel-identidade" class="dogma-painel-secao"
+                 aria-labelledby="secao-identidade" hidden>
+          <div class="dogma-bloco">
+            <div class="dogma-bloco-topo">
+              <h3 class="dogma-bloco-nome">SUA IDENTIDADE</h3>
+              <p class="dica">A chave que prova quem você é nos Dogmas</p>
+            </div>
+            <div class="dogma-bloco-corpo">
+              <div class="dogma-par">
+                <span class="rotulo">APELIDO EM USO</span>
+                <span id="dogma-apelido" class="dogma-par-valor ausente">——</span>
+              </div>
+              <p class="dogma-frase">Neste Dogma os apelidos são presos a chaves.
+                O seu ficou reservado para a sua chave no dia em que você entrou
+                pela primeira vez, e ninguém mais consegue usá-lo.</p>
+              <p class="dogma-frase">A chave mora nesta máquina, num arquivo só
+                seu. Perdê-la ou trocá-la custa o apelido em <em>todo</em> Dogma
+                que você já visitou, e não há como recuperá-lo sem um operador de
+                cada um deles.</p>
+            </div>
+          </div>
+        </section>
+
+      </div>
     </div>
   </div>
 </section>

@@ -1584,3 +1584,276 @@ fn no_two_screens_claim_the_same_class_name() {
         clashes.join("\n")
     );
 }
+
+// ---------------------------------------------------------------------------
+// The Terminal Dogma — the settings screen, rebuilt against the v3 comp.
+// ---------------------------------------------------------------------------
+
+/// The markup of one screen, cut out of the page by the id of the next one.
+///
+/// Cut by the *following* screen and not by `</section>`, because the settings
+/// screen nests four `<section>`s of its own — one panel per section button —
+/// and the first closing tag would end the slice a third of the way in.
+fn screen_markup(page: &str, id: &str, next_id: &str) -> String {
+    let page = without_comments(page);
+    let Some(after) = page.split(&format!("id=\"{id}\"")).nth(1) else {
+        panic!("index.html has no screen with id `{id}`");
+    };
+    let Some(body) = after.split(&format!("id=\"{next_id}\"")).next() else {
+        panic!("`{next_id}` no longer follows `{id}`, so this slice has no end");
+    };
+    body.to_owned()
+}
+
+/// Every `data-glifo="…"` in the page, in document order.
+fn drawn_glyphs(page: &str) -> Vec<String> {
+    without_comments(page)
+        .split("data-glifo=\"")
+        .skip(1)
+        .filter_map(|piece| piece.split('"').next())
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn every_glyph_the_page_asks_for_is_one_glifos_js_can_draw() {
+    // `glifo()` throws on an unknown name, and the loop at the bottom of
+    // `glifos.js` runs over every `[data-glifo]` in the page — so one typo
+    // anywhere takes the *whole* script file down with it, and every listener
+    // registered after it is never attached. The window then renders, looks
+    // right, and does nothing when clicked.
+    //
+    // This is the guard the v3 comp made worth having: the settings screen alone
+    // asks for four of the eight new drawings by name, in markup, with nothing
+    // between the attribute and the runtime.
+    let page = read("ui/index.html");
+    let script = read("ui/glifos.js");
+
+    let Some(table) = script.split("const GLIFOS = {").nth(1) else {
+        panic!("glifos.js no longer declares `GLIFOS`, and nothing can be drawn");
+    };
+    let Some(table) = table.split("\n};").next() else {
+        panic!("`GLIFOS` is never closed");
+    };
+    let table = without_comments(table);
+
+    let asked = drawn_glyphs(&page);
+    assert!(!asked.is_empty(), "the page draws no glyph at all");
+
+    for name in asked {
+        assert!(
+            table.contains(&format!("{name}: [")),
+            "index.html asks for the glyph `{name}`, which `glifos.js` cannot \
+             draw. `glifo()` throws, and it throws inside the loop at the bottom \
+             of that file — so every listener registered after it is never \
+             attached, and the window comes out looking right and doing nothing."
+        );
+    }
+}
+
+#[test]
+fn every_section_of_the_settings_screen_carries_the_panel_and_the_heading_it_opens() {
+    // The four sections are buttons in markup and the heading strings travel
+    // *with* them, on `data-titulo` and `data-sub`, rather than in a table in
+    // JavaScript. That is the whole reason this can be checked at all — and the
+    // failure it catches is the one a fifth section would arrive with: a button
+    // whose `data-painel` names a panel that is not in the page, which reads as
+    // a section that opens nothing and blanks the heading on the way.
+    let page = read("ui/index.html");
+    let dogma = screen_markup(&page, "tela-dogma", "tela-fim");
+
+    let mut sections = Vec::new();
+    for rest in dogma.split("<button ").skip(1) {
+        let Some(end) = rest.find('>') else { continue };
+        let tag = &rest[..end];
+        if attribute(tag, "class").as_deref() != Some("dogma-secao") {
+            continue;
+        }
+        let Some(id) = attribute(tag, "id") else {
+            panic!("a section button has no id, so no script can mark it: <{tag}>");
+        };
+        for name in ["data-painel", "data-titulo", "data-sub"] {
+            assert!(
+                attribute(tag, name).is_some(),
+                "the section `{id}` carries no `{name}`, so opening it leaves the \
+                 heading of the panel empty: <{tag}>"
+            );
+        }
+        let panel = attribute(tag, "data-painel").unwrap_or_default();
+        assert!(
+            page.contains(&format!("id=\"{panel}\"")),
+            "the section `{id}` opens `{panel}`, which is not in the page"
+        );
+        sections.push(id);
+    }
+
+    assert_eq!(
+        sections,
+        [
+            "secao-audio",
+            "secao-atalhos",
+            "secao-aparencia",
+            "secao-identidade"
+        ],
+        "the settings screen is the four sections of the v3 comp, in this order"
+    );
+}
+
+#[test]
+fn every_key_the_shortcut_table_names_is_one_a_script_listens_for() {
+    // The shortcuts section is a *list of what the keys are*, because they are
+    // fixed: there is no editable table and nowhere to save a rebinding. A list
+    // like that has exactly one way to fail, and it fails silently — the key it
+    // names stops being the key that acts, and the screen goes on documenting a
+    // program that no longer exists. Nothing about that is visible from the
+    // page, from the script, or from a running window.
+    //
+    // `data-tecla` carries the name the *browser* gives the key, not the word a
+    // person reads, so this compares the row against the listener rather than
+    // against another label.
+    let page = read("ui/index.html");
+    let script = without_comments(&scripts());
+
+    let mut keys = Vec::new();
+    for piece in without_comments(&page).split("data-tecla=\"").skip(1) {
+        let Some(key) = piece.split('"').next() else {
+            continue;
+        };
+        keys.push(key.to_owned());
+    }
+
+    assert!(
+        keys.len() >= 4,
+        "the shortcuts section lists {} keys; it is documentation, and an empty \
+         list of shortcuts is the same as not having the section",
+        keys.len()
+    );
+
+    for key in keys {
+        assert!(
+            script.contains(&format!("\"{key}\"")),
+            "the shortcuts section says `{key}` does something, and no script \
+             listens for it — so the screen documents a program this is not"
+        );
+    }
+}
+
+#[test]
+fn the_settings_screen_omits_what_the_product_lacks_instead_of_drawing_it_dead() {
+    // This screen deliberately inverts the convention the auth screen follows.
+    // There, the frame stays and the value is missing, because the gap is the
+    // protocol's and worth showing. Here it does not: on a screen whose entire
+    // purpose is being simple, half a dozen greyed-out controls with an
+    // explanation beside each is noise, and every one of them is a promise.
+    //
+    // Each word below is a control the v3 comp draws and this product cannot
+    // carry out. Two of them would take a written decision back:
+    //
+    // - `RUÍDO` — ADR 0007 kept C/C++ DSP out of v1 and made headphones a
+    //   documented requirement. The control would exist to do nothing.
+    // - `TEMA` — ADR 0014 freezes the palette, and a second theme is a second
+    //   canonical palette.
+    //
+    // And `SALVAR`/`DESCARTAR` are the third: the choice applies now, so there
+    // is nothing pending for a button to confirm (comp inventory §8.1). A
+    // `SALVAR` on an audio panel promises that nothing changes until it is
+    // pressed, which is false for sound — you have to hear the effect to know
+    // you chose right.
+    //
+    // Comments are stripped, and that is the point: the paragraphs above the
+    // markup have to be able to say *why* each of these is absent.
+    let page = read("ui/index.html");
+    let dogma = screen_markup(&page, "tela-dogma", "tela-fim");
+
+    for absent in [
+        "SALVAR",
+        "DESCARTAR",
+        "RUÍDO",
+        "TEMA",
+        "GANHO",
+        "VOLUME",
+        "GERAR",
+        "COPIAR",
+    ] {
+        assert!(
+            !names(&dogma, absent),
+            "the settings screen draws `{absent}`, which nothing in this product \
+             can carry out. The rule here is to omit, not to draw it dead — and \
+             two of these would take an ADR back."
+        );
+    }
+}
+
+#[test]
+fn the_output_row_is_the_one_dead_control_and_it_says_why() {
+    // The exception the omission rule allows, and the reason it is an exception:
+    // `seele-audio/src/device.rs` already opens an output stream on the system
+    // default, so there *is* a device playing sound right now. Deleting the row
+    // would hide a device in use. What does not exist is enumerating the others.
+    //
+    // So it is drawn, it is disabled, and it says why — the same three things
+    // `the_two_buttons_with_no_command_behind_them_cannot_be_pressed` asks of
+    // every button with no command behind it.
+    let page = read("ui/index.html");
+    let tag = tag_with_id(&page, "saida-padrao");
+
+    assert!(
+        tag.contains("disabled"),
+        "the output row is pressable, and there is nothing behind it — a button \
+         that looks like it acts and does nothing: <{tag}>"
+    );
+    assert!(
+        tag.contains("title=\""),
+        "the output row is disabled and says nothing about why, which reads as a \
+         bug rather than as a gap: <{tag}>"
+    );
+
+    let script = without_comments(&scripts());
+    assert!(
+        !script.contains("$(\"saida-padrao\")"),
+        "a script reaches for the output row, so the disabled button grew a \
+         listener — which is the comp's mistake, one layer down"
+    );
+
+    // And the list it will be filled into has to still be there, or the wiring
+    // has nowhere to land when the enumeration arrives.
+    assert!(
+        page.contains("id=\"lista-saidas\""),
+        "the output list is gone, and with it the only place the enumeration can \
+         be drawn"
+    );
+}
+
+#[test]
+fn the_switch_that_hides_the_captions_never_hides_its_own_caption() {
+    // One line in the whole screen writes its description as `.dogma-chave-desc`
+    // instead of `.dica`, and it is the one that governs `.dica` itself.
+    //
+    // Written as a hint, the sentence explaining what simple captions are would
+    // disappear at the exact moment somebody turned them off — leaving an
+    // unlabelled SIM/NÃO pair as the only way back, on the screen a person just
+    // arrived at because they could not work the interface out. Nothing fails:
+    // the page loads, the switch works, and the way back is invisible.
+    let page = without_comments(&read("ui/index.html"));
+
+    let Some(after) = page.split("class=\"dogma-chave\"").nth(1) else {
+        panic!("the behaviour switch is gone from the settings screen");
+    };
+    let Some(row) = after.split("</li>").next() else {
+        panic!("the behaviour switch row is never closed");
+    };
+
+    assert!(
+        row.contains("dogma-chave-desc"),
+        "the captions switch has no always-visible description:\n{row}"
+    );
+    assert!(
+        !row.contains("class=\"dica\""),
+        "the captions switch explains itself with a `.dica`, which is the very \
+         thing it turns off — so the way back disappears with it:\n{row}"
+    );
+    assert!(
+        row.contains("role=\"switch\"") && row.contains("aria-checked"),
+        "the switch carries no state anybody who cannot see the fill can read:\n{row}"
+    );
+}
