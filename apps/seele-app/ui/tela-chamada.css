@@ -506,7 +506,9 @@
 /* Os dois botões de estado. O rótulo diz em que estado a coisa **está** — a
    mesma regra da tira do operador na tela de operação —, e aceso ele é cartela:
    bloco sólido com texto no negro absoluto. */
-.chamada-acao-at { font-weight: 900; }
+/* No título, e não no botão: o título tem peso próprio e venceria a herança —
+   a regra ficaria escrita, correta e sem efeito nenhum. */
+.chamada-acao-at .chamada-acao-titulo { font-weight: 900; }
 
 .chamada-acao-at[data-ativo="sim"] {
   background: var(--seele-laranja-nerv);
@@ -521,8 +523,6 @@
 /* A dica herda a cor do botão invertido, senão ela ficaria em cinza sobre
    laranja — o pior contraste do arquivo. */
 .chamada-acao[data-ativo="sim"] .dica { color: inherit; }
-
-.chamada-acao-voltar .chamada-acao-titulo { font-weight: var(--seele-cartela); }
 
 /* Sair é a única coisa vermelha da tela, e `tokens.css` reserva o vermelho para
    alerta e queda: sair do Cage é a queda voluntária. */
