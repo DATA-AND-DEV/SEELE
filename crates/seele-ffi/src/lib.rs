@@ -912,9 +912,56 @@ async fn drive(
                             .ok()
                             .and_then(|slot| slot.clone());
                         if let Ok(mut slot) = shared.voice.lock() {
-                            if slot.is_some() {
-                                *slot =
-                                    Voice::start_on(escolhido.as_deref(), *media, sessao.ssrc).ok();
+                            if let Some(atual) = slot.as_ref() {
+                                // `switch_capture` e não `start_on`, porque os
+                                // controles têm que atravessar a reabertura.
+                                // `Voice::switch_capture` nomeia a lista na
+                                // própria documentação — A.T. Field, Isolamento
+                                // total, o modo, a tecla segura, cada ganho por
+                                // interlocutor — e diz que ela mora no core
+                                // justamente para que nenhuma casca esqueça um
+                                // item. Esta esquecia todos.
+                                //
+                                // O que torna isto pior que "volta desmutado" é
+                                // que `Enlace::tentar` **restaura** o A.T. Field
+                                // no servidor: o roster continuava mostrando a
+                                // pessoa muda enquanto o portão local voltava
+                                // aberto, e o indicador que todo mundo lê
+                                // passava a mentir.
+                                let reaberta = atual
+                                    .switch_capture(
+                                        escolhido.as_deref(),
+                                        (*media).clone(),
+                                        sessao.ssrc,
+                                    )
+                                    .or_else(|error| {
+                                        if escolhido.is_some() {
+                                            // O mesmo recuo que o caminho de
+                                            // conexão faz, e pelo mesmo motivo:
+                                            // uma interface que reenumerou
+                                            // enquanto estávamos fora do ar não
+                                            // pode custar a voz do resto da
+                                            // sessão.
+                                            tracing::warn!(%error, "the chosen microphone is gone after reconnecting; falling back to the default");
+                                            atual.switch_capture(
+                                                None,
+                                                (*media).clone(),
+                                                sessao.ssrc,
+                                            )
+                                        } else {
+                                            Err(error)
+                                        }
+                                    });
+                                match reaberta {
+                                    Ok(voice) => *slot = Some(voice),
+                                    // A mesma degradação do caminho de conexão:
+                                    // a metade de texto continua funcionando, e
+                                    // `audio_available` diz qual metade é esta.
+                                    Err(error) => {
+                                        tracing::warn!(%error, "no audio device after reconnecting; text only");
+                                        *slot = None;
+                                    }
+                                }
                             }
                         }
                         shared.notify(&Event::TelemetryChanged);

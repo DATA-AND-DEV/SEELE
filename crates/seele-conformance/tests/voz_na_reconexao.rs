@@ -1,0 +1,90 @@
+//! As duas cascas têm que devolver a voz com os controles que ela tinha.
+//!
+//! # Por que este teste lê código-fonte
+//!
+//! O defeito que ele guarda não aparece em nenhum tipo e não quebra nenhuma
+//! asserção de comportamento que caiba aqui: [`seele_core::Voice`] precisa de
+//! hardware de áudio, e conformidade roda sem placa de som. O que sobra para
+//! afirmar é a chamada — e ela é exatamente onde o erro esteve, duas vezes.
+//!
+//! É a mesma escolha que `apps/seele-app/tests/frontend.rs` já fez para o
+//! JavaScript: quando o defeito é "a casca chamou a função errada" e o
+//! compilador aceita as duas, o texto é o que resta.
+//!
+//! # O defeito, e por que ele é grave
+//!
+//! Numa reconexão o `ssrc` e o canal de mídia são novos, então a voz **tem**
+//! que ser reaberta. Reabrir com [`seele_core::Voice::start`] ou `start_on`
+//! constrói controles zerados: A.T. Field desligado, Isolamento total
+//! desligado, modo de volta em `PushToTalk`, ganhos por interlocutor perdidos.
+//! `Voice::switch_capture` existe para carregar tudo isso por cima da
+//! reabertura, e a documentação dele diz, com todas as letras, que a lista mora
+//! no core "justamente para que nenhuma casca esqueça um item".
+//!
+//! As duas cascas esqueciam todos. E o que torna isto pior que "volta
+//! desmutado" é a assimetria: `Enlace::tentar` **restaura** `at_field` no
+//! servidor ao reconectar, então o roster continua mostrando a pessoa muda,
+//! enquanto o portão local — `speaking = open && !at_field`, em `voice.rs` —
+//! volta aberto. O indicador que todo mundo lê passa a mentir, e a primeira vez
+//! que essa pessoa encosta na tecla de falar ela transmite achando que está
+//! calada.
+
+use std::path::{Path, PathBuf};
+
+/// A raiz do repositório, a partir deste crate.
+fn raiz() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| panic!("este crate mora em crates/<nome>, e não moram mais"))
+}
+
+/// O trecho que trata `Aviso::Reconectado`, do braço até o começo do seguinte.
+///
+/// Recortado, e não o arquivo inteiro: as duas cascas mencionam `Voice::start`
+/// no caminho de conexão, que é onde ele está certo. Um teste que lesse o
+/// arquivo todo reprovaria o código correto, e um que buscasse só a menção
+/// passaria com o braço errado — os dois falham do jeito que não se percebe.
+fn braco_da_reconexao(fonte: &str, arquivo: &str) -> String {
+    let Some(inicio) = fonte.find("Aviso::Reconectado") else {
+        panic!("{arquivo} não trata `Aviso::Reconectado`; se o evento mudou de nome, este teste tem que mudar junto");
+    };
+    let resto = fonte
+        .get(inicio + "Aviso::Reconectado".len()..)
+        .unwrap_or("");
+    let fim = resto.find("Aviso::").unwrap_or(resto.len());
+    resto.get(..fim).unwrap_or("").to_owned()
+}
+
+#[test]
+fn nenhuma_casca_reabre_a_voz_jogando_fora_os_controles() {
+    let raiz = raiz();
+    let cascas = [
+        ("seele-ffi", "crates/seele-ffi/src/lib.rs"),
+        ("plug", "crates/seele-tui/src/main.rs"),
+    ];
+
+    for (casca, caminho) in cascas {
+        let fonte = std::fs::read_to_string(raiz.join(caminho))
+            .unwrap_or_else(|erro| panic!("{caminho}: {erro}"));
+        let braco = braco_da_reconexao(&fonte, caminho);
+
+        assert!(
+            braco.contains("switch_capture"),
+            "a casca `{casca}` reabre a voz na reconexão sem `switch_capture`, então A.T. \
+             Field, Isolamento total, o modo e os ganhos voltam zerados. O roster continua \
+             mostrando quem estava mudo como mudo — `Enlace::tentar` restaura isso no \
+             servidor — e o microfone volta aberto."
+        );
+
+        for errada in ["Voice::start_on(", "Voice::start("] {
+            assert!(
+                !braco.contains(errada),
+                "a casca `{casca}` chama `{errada}` no braço da reconexão. Ela constrói \
+                 controles zerados; quem carrega os de agora por cima da reabertura é \
+                 `switch_capture`."
+            );
+        }
+    }
+}
