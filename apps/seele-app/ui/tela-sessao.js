@@ -389,6 +389,19 @@ function desenharLinha(snapshot) {
 
 function desenharMensagens(snapshot) {
   const lista = $("lista-mensagens");
+
+  // Sem layout não há o que redesenhar, e insistir corrompe a leitura de quem
+  // volta. A chamada e o Terminal Dogma abrem por cima da sessão, e um evento
+  // que chegue com uma delas aberta cai aqui com a lista em `display: none` —
+  // onde `scrollHeight`, `scrollTop` e `clientHeight` valem todos 0. A conta
+  // abaixo vira `0 - 0 - 0 < 32`, isto é, "estava no fim", para justamente
+  // quem tinha subido para ler. O `repovoar` seguinte ainda troca todos os
+  // filhos, o que zera a rolagem de qualquer forma.
+  //
+  // A lista é redesenhada ao voltar — `fecharChamada` e `fecharDogma` pedem
+  // isso —, então sair daqui não deixa nada velho na tela.
+  if (lista.clientHeight === 0) return;
+
   // Só rola sozinho se já estava no fim: puxar alguém de volta para baixo no
   // meio de uma leitura é pior do que não acompanhar.
   const noFim = lista.scrollHeight - lista.scrollTop - lista.clientHeight < 32;

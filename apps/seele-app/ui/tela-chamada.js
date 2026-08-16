@@ -235,6 +235,12 @@ async function abrirChamada() {
 function fecharChamada() {
   $("tela-chamada").hidden = true;
   $("tela-sessao").hidden = false;
+  // A sessão não foi redesenhada enquanto esteve por baixo — `desenharMensagens`
+  // sai cedo quando a lista está sem layout, porque ali não dá para saber se a
+  // pessoa estava lendo o histórico ou acompanhando o fim. Redesenhar agora é o
+  // outro lado desse acordo, e sem ele a Linha volta parada no instante em que
+  // a chamada abriu.
+  atualizar().catch((falha) => console.warn("voltar da chamada:", falha));
 }
 
 /**

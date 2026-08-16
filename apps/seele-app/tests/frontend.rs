@@ -1426,9 +1426,17 @@ fn no_two_screens_claim_the_same_class_name() {
         .flat_map(|name| classes_defined_in(&read(&format!("ui/{name}"))))
         .collect();
 
+    // Everything that is *not* one of the four sheets below, rather than
+    // everything named `tela-*`. The prefix spelling had this guard blind to
+    // `camada-alerta.css` and `camada-bateria.css` the day they landed — 464
+    // lines of new CSS that could neither report a collision nor be reported
+    // for one — and it was blind silently, which is the same failure the guard
+    // exists to catch, one level up. A guard whose coverage depends on the next
+    // author picking a blessed prefix is a guard with a hole in it.
+    let not_a_screen = ["base.css", "acessibilidade.css", "tokens.css", "fontes.css"];
     let screens: Vec<String> = ui_files(".css")
         .into_iter()
-        .filter(|name| name.starts_with("tela-"))
+        .filter(|name| !not_a_screen.contains(&name.as_str()))
         .collect();
     assert!(
         screens.len() >= 2,

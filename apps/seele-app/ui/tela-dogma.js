@@ -173,8 +173,15 @@ async function abrirDogma(origem) {
 /** Fecha e devolve para a tela que a abriu. */
 function fecharDogma() {
   $("tela-dogma").hidden = true;
-  $(telaDeOrigem ?? "tela-boot").hidden = false;
+  const volta = telaDeOrigem ?? "tela-boot";
+  $(volta).hidden = false;
   telaDeOrigem = null;
+  // Só quando se volta para a sessão: `desenharMensagens` sai cedo enquanto a
+  // lista está sem layout, e redesenhar aqui é o outro lado desse acordo. Vindo
+  // da tela de entrada não há sessão nenhuma a redesenhar.
+  if (volta === "tela-sessao") {
+    atualizar().catch((falha) => console.warn("voltar do Terminal Dogma:", falha));
+  }
 }
 
 /**
