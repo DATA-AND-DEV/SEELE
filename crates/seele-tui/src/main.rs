@@ -52,6 +52,12 @@ struct Args {
     server: SocketAddr,
     server_name: String,
     pin_key: String,
+    /// The invite's other addresses for the same Dogma, in try order.
+    ///
+    /// Text, not resolved addresses: an alternative that does not resolve is
+    /// dropped when the attempt list is built, and dropping one is not a reason
+    /// to refuse a link whose first address is fine.
+    alternativos: Vec<String>,
     nickname: String,
     cage: CageId,
     line: LineId,
@@ -75,6 +81,9 @@ impl Args {
             server,
             server_name,
             pin_key,
+            // A known Dogma is one address, the one it was reached at. The
+            // list is a property of an invite, not of a place already visited.
+            alternativos: Vec::new(),
             nickname: escolha.apelido.clone(),
             cage: CageId(escolha.cage),
             line: LineId(1),
@@ -103,6 +112,7 @@ fn parse_args() -> Result<Option<Args>> {
     let mut join_secret: Option<String> = None;
     let mut expected_fingerprint: Option<String> = None;
     let mut hospedar = false;
+    let mut alternativos: Vec<String> = Vec::new();
     let mut argv = std::env::args().skip(1);
 
     while let Some(flag) = argv.next() {
@@ -114,6 +124,7 @@ fn parse_args() -> Result<Option<Args>> {
                 let texto = argv.next().context("--url needs a seele:// link")?;
                 let convite = seele_core::uri::analisar(&texto)
                     .map_err(|erro| anyhow!("link inválido: {erro}"))?;
+                alternativos = convite.alternativos;
                 target = convite.alvo;
                 expected_fingerprint = convite.impressao_digital;
                 join_secret = convite.token;
@@ -149,6 +160,7 @@ fn parse_args() -> Result<Option<Args>> {
         server,
         server_name,
         pin_key,
+        alternativos,
         nickname,
         cage,
         line,
@@ -193,10 +205,22 @@ fn frase_do_alcance(alcance: &seele_server::alcance::Alcance) -> String {
             "Este link é IPv6 e alcança de qualquer lugar — mas só quem também \
              tiver IPv6.{motivo}"
         ),
+        // O caso do relato de campo: a VPN é o único caminho que sai desta
+        // máquina, e ela não aceita entrada. Frase própria porque o que se faz
+        // a respeito é diferente — aqui a resposta é desligar a VPN.
+        Degrau::RedeLocalOuVpn => format!(
+            "ATENÇÃO: este link só funciona na sua rede, ou para quem estiver \
+             na mesma VPN que você.{motivo}\n\
+             O único endereço que sai desta máquina vem de uma VPN, e VPN de \
+             navegação (WARP, Proton, Nord) não aceita conexão de entrada. \
+             Para alcançar de fora: desligue a VPN e encaminhe a porta {} no \
+             roteador à mão.",
+            alcance.alvo().port()
+        ),
         Degrau::SoRedeLocal => format!(
             "ATENÇÃO: este link só funciona para quem estiver na sua rede.{motivo}\n\
              Para alcançar de fora: encaminhe a porta {} no roteador à mão, ou \
-             use uma VPN.",
+             use uma VPN de rede (Tailscale, WireGuard) nos dois lados.",
             alcance.alvo().port()
         ),
     }
@@ -537,8 +561,8 @@ async fn sessao(
     // `Enlace` e não `Client`: um `Client` é uma conexão e acaba quando ela
     // cai; o enlace é a **sessão**, que atravessa quedas. É ele que carrega a
     // bateria interna e a reconexão de `specs/07-tema-evangelion.md`.
-    let destino = construir_destino(args);
-    let mut client = match Enlace::conectar(destino, key, pins).await {
+    let destinos = construir_destinos(args);
+    let mut client = match Enlace::conectar_entre(destinos, key, pins).await {
         Ok(client) => client,
         Err(error) => {
             runtime.app.screen = Screen::Lost {
@@ -796,22 +820,50 @@ async fn sessao(
     }
 }
 
-/// Monta o `Destino` a partir do que a linha de comando ou a tela de conexão
-/// já resolveram.
+/// Monta os `Destino` a partir do que a linha de comando ou a tela de conexão
+/// já resolveram, na ordem em que se tenta.
 ///
 /// Função à parte, e pura, para que o fio de `args.expected_fingerprint` até
 /// `Destino::impressao_esperada` seja conferível sem Dogma do outro lado — o
 /// mesmo motivo que fez `seele_core::enlace::conferir` sair de dentro de
 /// `Enlace::conectar`.
-fn construir_destino(args: &Args) -> Destino {
-    Destino {
+///
+/// Um convite pode trazer vários endereços do mesmo Dogma (ADR 0006), e todos
+/// carregam a mesma credencial e a mesma impressão digital esperada: é o mesmo
+/// Dogma, por caminhos diferentes. O que muda de um para o outro é a chave do
+/// pin, que é o endereço — dois Dogmas distintos no mesmo endereço continuam
+/// sendo dois arquivos diferentes de confiança, como sempre foram.
+///
+/// Um alternativo que não resolve é **descartado**, e não vira erro: o convite
+/// pode ter sido gerado numa máquina com um IPv6 que a nossa não sabe alcançar,
+/// e recusar o link inteiro por causa disso seria trocar um caminho a menos por
+/// nenhum caminho.
+fn construir_destinos(args: &Args) -> Vec<Destino> {
+    let mut destinos = vec![Destino {
         servidor: args.server,
         nome_tls: args.server_name.clone(),
         chave_do_pin: args.pin_key.clone(),
         apelido: args.nickname.clone(),
         segredo: args.join_secret.clone(),
         impressao_esperada: args.expected_fingerprint.clone(),
+    }];
+    for alternativo in &args.alternativos {
+        // Um endereço que não resolve some da lista, e some calado: esta casca
+        // é um terminal em modo alternativo, e escrever nele por fora do
+        // desenho suja a tela. O efeito que importa é o endereço não ser
+        // tentado.
+        if let Ok((servidor, nome_tls, chave_do_pin)) = resolve(alternativo) {
+            destinos.push(Destino {
+                servidor,
+                nome_tls,
+                chave_do_pin,
+                apelido: args.nickname.clone(),
+                segredo: args.join_secret.clone(),
+                impressao_esperada: args.expected_fingerprint.clone(),
+            });
+        }
     }
+    destinos
 }
 
 /// Os três pedidos que põem uma sessão de pé.
@@ -1535,21 +1587,79 @@ mod tests {
             join_secret: None,
             expected_fingerprint,
             hospedar: false,
+            alternativos: Vec::new(),
+        }
+    }
+
+    fn args_com_alternativos(alternativos: Vec<String>) -> Args {
+        Args {
+            alternativos,
+            ..args_de_teste(None)
         }
     }
 
     #[test]
     fn a_impressao_do_link_chega_ao_destino() {
         let args = args_de_teste(Some("aaaa1111".to_owned()));
-        let destino = construir_destino(&args);
+        let destino = construir_destinos(&args).remove(0);
         assert_eq!(destino.impressao_esperada, Some("aaaa1111".to_owned()));
     }
 
     #[test]
     fn sem_link_o_destino_nao_tem_impressao_para_conferir() {
         let args = args_de_teste(None);
-        let destino = construir_destino(&args);
+        let destino = construir_destinos(&args).remove(0);
         assert_eq!(destino.impressao_esperada, None);
+    }
+
+    #[test]
+    fn os_outros_enderecos_do_convite_viram_destinos_com_a_mesma_credencial() {
+        // Um convite com vários endereços é **um** Dogma por caminhos
+        // diferentes: mesma impressão esperada, mesmo apelido, mesmo convite de
+        // uso único. O que muda é a chave do pin, que é o endereço.
+        let args = args_com_alternativos(vec![
+            "192.168.0.30:8383".to_owned(),
+            "[::1]:8383".to_owned(),
+        ]);
+        let destinos = construir_destinos(&args);
+        assert_eq!(destinos.len(), 3, "os alternativos não viraram destinos");
+        assert_eq!(
+            destinos.first().map(|destino| destino.servidor),
+            Some(args.server),
+            "a ordem mudou"
+        );
+        assert!(
+            destinos
+                .iter()
+                .all(|destino| destino.apelido == args.nickname),
+            "um dos endereços entraria com outra credencial"
+        );
+        let chaves: std::collections::HashSet<&str> = destinos
+            .iter()
+            .map(|destino| destino.chave_do_pin.as_str())
+            .collect();
+        assert_eq!(
+            chaves.len(),
+            3,
+            "dois endereços arquivam o pin no mesmo lugar"
+        );
+    }
+
+    #[test]
+    fn um_endereco_alternativo_que_nao_resolve_e_descartado_sem_derrubar_o_link() {
+        // Perder um caminho não pode custar todos: o convite pode ter sido
+        // gerado numa máquina cujo endereço esta aqui não sabe alcançar.
+        let args = args_com_alternativos(vec!["nao-existe.invalid:8383".to_owned()]);
+        let destinos = construir_destinos(&args);
+        assert_eq!(
+            destinos.len(),
+            1,
+            "um alternativo que não resolve entrou na lista de tentativas"
+        );
+        assert_eq!(
+            destinos.first().map(|destino| destino.servidor),
+            Some(args.server)
+        );
     }
 
     #[test]

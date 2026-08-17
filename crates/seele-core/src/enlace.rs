@@ -224,7 +224,101 @@ impl std::fmt::Debug for Enlace {
 /// Fila de comandos. Controle é raro; isto é folga, não capacidade.
 const COMANDOS: usize = 32;
 
+/// Quanto tempo cada endereço do convite ganha antes de o próximo ser tentado.
+///
+/// Quatro segundos. O número sai de duas contas em sentidos opostos. Para
+/// baixo: um aperto de mão QUIC numa rede doméstica com perda cabe folgado em
+/// quatro segundos, e cortar antes disso descartaria um endereço que ia dar
+/// certo. Para cima: um endereço que não volta — o público visto de dentro da
+/// própria casa, o de uma VPN que não aceita entrada — gasta o prazo inteiro,
+/// e ele é multiplicado pelo número de candidatos antes de a sala abrir.
+///
+/// É por isso que a ordem do convite importa mais que este número: com a rede
+/// de casa em primeiro, o caso comum nunca chega a esperar nada disto.
+const PRAZO_POR_CANDIDATO: Duration = Duration::from_secs(4);
+
 impl Enlace {
+    /// Conecta no primeiro endereço que atender, tentando um de cada vez.
+    ///
+    /// Um convite pode trazer vários endereços do mesmo Dogma — ADR 0006 — e
+    /// eles não são intercambiáveis: o da rede de casa não é alcançável de
+    /// fora, e o público que o roteador abriu costuma não voltar para dentro,
+    /// porque a maioria dos roteadores domésticos não faz *hairpin*.
+    ///
+    /// # Em série, e não em corrida
+    ///
+    /// Uma corrida abriria vários apertos de mão contra o mesmo Dogma para
+    /// descartar todos menos um — e cada aperto de mão fixa chave, gasta o
+    /// convite de uso único do ADR 0021 e aparece no log de quem hospeda como
+    /// uma tentativa. Em série nada disso acontece: no caso comum, o primeiro
+    /// endereço é o da rede local e responde antes de o segundo ser cogitado.
+    ///
+    /// # O prazo, e por que a lista de um não tem nenhum
+    ///
+    /// Com mais de um candidato, cada um vale [`PRAZO_POR_CANDIDATO`]: um
+    /// endereço que não volta não pode segurar a fila. Com um só, não há fila —
+    /// e aí o caminho é exatamente o de antes, sem prazo novo e sem mudança de
+    /// comportamento para um convite antigo.
+    ///
+    /// # Que erro sai quando nenhum entra
+    ///
+    /// O de quem **respondeu**, se algum respondeu: "a chave deste Dogma
+    /// mudou" diz o que aconteceu, e "não alcancei" de um endereço que nunca ia
+    /// voltar não diz nada. Sem nenhuma resposta, sai o erro do primeiro
+    /// candidato, que é o endereço que a pessoa mais provavelmente esperava
+    /// usar.
+    ///
+    /// # Errors
+    ///
+    /// O mesmo de [`Enlace::conectar`], escolhido como acima.
+    pub async fn conectar_entre(
+        destinos: Vec<Destino>,
+        chave: SigningKey,
+        pins: Arc<dyn PinStore>,
+    ) -> Result<Self, ConnectError> {
+        let mut candidatos = destinos.into_iter().peekable();
+        let Some(primeiro) = candidatos.next() else {
+            // Ninguém chama assim, e devolver um erro é melhor que entrar num
+            // laço que termina sem resposta nenhuma.
+            return Err(ConnectError::Unreachable);
+        };
+        if candidatos.peek().is_none() {
+            return Self::conectar(primeiro, chave, pins).await;
+        }
+
+        let mut primeira_falha: Option<ConnectError> = None;
+        let mut respondeu: Option<ConnectError> = None;
+        for destino in std::iter::once(primeiro).chain(candidatos) {
+            let onde = destino.servidor;
+            let chave_do_pin = destino.chave_do_pin.clone();
+            let fixado_antes = pins.pinned(&chave_do_pin);
+            let tentativa = Self::conectar(destino, chave.clone(), Arc::clone(&pins));
+
+            let falha = match tokio::time::timeout(PRAZO_POR_CANDIDATO, tentativa).await {
+                Ok(Ok(enlace)) => return Ok(enlace),
+                Ok(Err(erro)) => erro,
+                Err(_) => {
+                    // O aperto de mão foi cancelado no meio, e o `conectar` não
+                    // chegou à limpeza dele. O pin que o TLS possa ter escrito
+                    // some aqui, pelo motivo escrito em `desfazer_pin_orfao`.
+                    desfazer_pin_orfao(pins.as_ref(), &chave_do_pin, fixado_antes.as_deref());
+                    ConnectError::HandshakeTimeout
+                }
+            };
+            tracing::info!(%onde, erro = %falha, "este endereço do convite não deu; indo ao próximo");
+            if respondeu.is_none() && alguem_respondeu(&falha) {
+                respondeu = Some(falha.clone());
+            }
+            if primeira_falha.is_none() {
+                primeira_falha = Some(falha);
+            }
+        }
+
+        Err(respondeu
+            .or(primeira_falha)
+            .unwrap_or(ConnectError::Unreachable))
+    }
+
     /// Conecta pela primeira vez.
     ///
     /// A primeira conexão falha para fora: quem não conseguiu entrar não tem
@@ -1020,6 +1114,24 @@ fn desfazer_pin_orfao(pins: &dyn PinStore, chave_do_pin: &str, fixado_antes: Opt
     if fixado_antes.is_none() && pins.pinned(chave_do_pin).is_some() {
         pins.unpin(chave_do_pin);
     }
+}
+
+/// Se este erro veio de alguém que **respondeu**.
+///
+/// A diferença decide qual erro sobra quando nenhum candidato entra. Um Dogma
+/// que recusou o convite, ou cuja chave mudou, disse alguma coisa sobre o
+/// mundo; um "não alcancei" de um endereço que nunca ia voltar não disse nada,
+/// e mostrá-lo no lugar do outro manda a pessoa procurar problema de rede
+/// enquanto o Dogma está ali, recusando.
+fn alguem_respondeu(erro: &ConnectError) -> bool {
+    matches!(
+        erro,
+        ConnectError::PinChanged { .. }
+            | ConnectError::InviteMismatch { .. }
+            | ConnectError::Refused { .. }
+            | ConnectError::TlsRefused
+            | ConnectError::ProtocolViolation
+    )
 }
 
 /// Se insistir pode dar em outra coisa.

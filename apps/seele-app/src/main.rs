@@ -176,18 +176,28 @@ async fn connect(
     // explicar.
     //
     // O que sobrevive ao descarte é o que vai conferir esta conexão.
-    let esperada = match session.convite.lock() {
+    //
+    // Os outros endereços do convite saem daqui pelo mesmo caminho e pela mesma
+    // razão: eles pertencem ao Dogma daquele link, e quem trocou o endereço no
+    // campo está indo a outro lugar — tentar os alternativos do link anterior
+    // seria bater à porta de um Dogma que ninguém pediu.
+    let (esperada, alternativos) = match session.convite.lock() {
         Ok(mut slot) => {
             if slot.as_ref().is_some_and(|convite| convite.alvo != server) {
                 *slot = None;
             }
-            slot.as_ref()
-                .and_then(|convite| convite.impressao_digital.clone())
+            (
+                slot.as_ref()
+                    .and_then(|convite| convite.impressao_digital.clone()),
+                slot.as_ref()
+                    .map(|convite| convite.alternativos.clone())
+                    .unwrap_or_default(),
+            )
         }
         // Sem o cadeado não há convite a ler. Entrar sem a confirmação é o
         // comportamento de quem digitou o endereço à mão, e é o pior que pode
         // acontecer aqui: nunca uma conferência contra um valor duvidoso.
-        Err(_) => None,
+        Err(_) => (None, Vec::new()),
     };
 
     let home = config_dir(&app);
@@ -198,6 +208,7 @@ async fn connect(
     let casa = home.clone();
     let config = ConnectConfig {
         server,
+        alternate_servers: alternativos,
         nickname,
         home,
         audio,
