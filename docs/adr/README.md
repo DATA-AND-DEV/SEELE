@@ -25,11 +25,17 @@ Formato e regra de criação em `specs/10-convencoes.md`: toda decisão marcada
 ## O que ainda não tem ADR
 
 Decisões em aberto que vencem depois de M1 e por isso não foram escritas ainda —
-ver `docs/plano-m0-m1.md`, seção 4.2: IPv6/NAT traversal (M2), política acima de
+ver `docs/plano-m0-m1.md`, seção 4.2: política acima de
 20 falantes (M3), limite de mensagem e anexos (M3), endpoint de saúde (M3),
 recarga a quente de config (M3), compressão de histórico (M3), PTT global (M4),
 tecla de PTT (M4), leitor de tela (M4), framework do frontend desktop (M5),
 plataforma mobile (M6).
+
+**IPv6/NAT traversal saiu desta lista**: virou o [0022](0022-alcancar-um-dogma-pela-internet.md),
+aceito, com os degraus 2 (IPv6) e 3 (UPnP) construídos. O degrau 4 — furo de NAT
+com ponto de encontro — continua sem decisão de propósito: ele custa uma
+conversa sobre o metadado que o ponto de encontro aprende, e o 0022 existe para
+que essa conversa aconteça antes do código.
 
 Postura de direitos sobre Evangelion (`07`) também não tem ADR: a recomendação é
 repositório privado até M4, o que tira a decisão do caminho crítico.
