@@ -128,8 +128,37 @@ impl Default for DogmaConfig {
 /// `INSERT OR IGNORE` is what keeps it honest on the second boot: a Cage that
 /// has since been renamed keeps its new name, because the conflicting insert is
 /// skipped rather than applied.
+///
+/// # Why a flag, and not only `INSERT OR IGNORE`
+///
+/// Because the identifiers are written out by hand, `INSERT OR IGNORE` means
+/// "unless row 1 is taken" — and once a Line can be **destroyed**, row 1 stops
+/// being taken. A Dogma whose operator destroyed `geral` on purpose, after a
+/// confirmation promising that nothing brings it back, would find it again at
+/// the next restart: same name, same identifier, empty. That is the product
+/// contradicting its own confirmation with a `systemctl restart`, and it is not
+/// a case `INSERT OR IGNORE` can tell apart from a first boot.
+///
+/// So the question this asks changed from "is row 1 free" to "has this database
+/// ever been seeded", which is the question it always meant. The flag survives
+/// deletion because nothing deletes it.
+///
+/// A database seeded by an older build has no flag and still has its rooms:
+/// the first boot on this code writes the flag and the two inserts do nothing,
+/// which is what `INSERT OR IGNORE` was already for.
+const SEMEADO: &str = "semeado";
+
 fn seed(casper: &mut casper::Casper, config: &DogmaConfig) -> Result<()> {
     let connection = casper.connection();
+    let ja: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM configuracao WHERE chave = ?1",
+        [SEMEADO],
+        |linha| linha.get(0),
+    )?;
+    if ja > 0 {
+        return Ok(());
+    }
+
     connection.execute(
         "INSERT OR IGNORE INTO lines (id, name) VALUES (1, 'geral')",
         [],
@@ -142,6 +171,10 @@ fn seed(casper: &mut casper::Casper, config: &DogmaConfig) -> Result<()> {
             config.cage_name,
             i64::from(config.cage_limit)
         ],
+    )?;
+    connection.execute(
+        "INSERT INTO configuracao (chave, valor) VALUES (?1, '1')",
+        [SEMEADO],
     )?;
     Ok(())
 }
@@ -444,5 +477,99 @@ mod tests {
         let cages = Channels::new(&casper).cages().expect("cages");
         assert_eq!(cages.len(), 1);
         assert_eq!(cages[0].name, "CAGE-01 PONTE");
+    }
+
+    #[test]
+    fn a_destroyed_opening_line_does_not_come_back_at_the_next_boot() {
+        // The confirmation in front of `apagar_linha` promises that no screen
+        // of this product brings the Line back. A `systemctl restart` is not a
+        // screen, and it was bringing this one back: the seed writes `lines`
+        // row 1 by hand, `INSERT OR IGNORE` means "unless row 1 is taken", and
+        // destroying the Line is precisely what makes row 1 free again. Same
+        // name, same identifier, empty — the product contradicting its own
+        // confirmation.
+        let directory = tempfile::tempdir().expect("tempdir");
+        let config = DogmaConfig {
+            database: Location::File(directory.path().join("dogma.db")),
+            ..DogmaConfig::default()
+        };
+
+        let casper = born(&config);
+        let channels = Channels::new(&casper);
+        let line = channels.lines().expect("lines")[0].id;
+        // The Cage bound to it is unbound by the delete; nothing else here
+        // depends on that, and the Cage is not what this test is about.
+        channels.delete_line(line).expect("delete");
+        drop(casper);
+
+        let casper = born(&config);
+        assert!(
+            Channels::new(&casper).lines().expect("lines").is_empty(),
+            "a Line destroyed on purpose was written back by the next boot"
+        );
+    }
+
+    #[test]
+    fn a_destroyed_opening_cage_does_not_come_back_at_the_next_boot() {
+        // The same for the Cage, which the seed also writes by identifier. It
+        // takes a second room to get here at all, because the last Cage is
+        // refused — and that is the shape a real Dogma has when somebody
+        // destroys the one it came with: they made theirs first.
+        let directory = tempfile::tempdir().expect("tempdir");
+        let config = DogmaConfig {
+            database: Location::File(directory.path().join("dogma.db")),
+            ..DogmaConfig::default()
+        };
+
+        let casper = born(&config);
+        let channels = Channels::new(&casper);
+        let inicial = channels.cages().expect("cages")[0].id;
+        channels
+            .create_cage("CAGE-02 PONTE", 8, None)
+            .expect("cage");
+        channels.delete_cage(inicial).expect("delete");
+        drop(casper);
+
+        let casper = born(&config);
+        let cages = Channels::new(&casper).cages().expect("cages");
+        assert_eq!(
+            cages.len(),
+            1,
+            "the opening Cage was written back: {cages:?}"
+        );
+        assert_eq!(cages[0].name, "CAGE-02 PONTE");
+    }
+
+    #[test]
+    fn a_dogma_seeded_by_an_older_build_is_not_seeded_twice() {
+        // The upgrade path. A database from before the flag has its rooms and
+        // no flag; the first boot on this code has to write the flag and leave
+        // the rooms exactly as they are, which is what `INSERT OR IGNORE` was
+        // already doing on its own.
+        let directory = tempfile::tempdir().expect("tempdir");
+        let config = DogmaConfig {
+            database: Location::File(directory.path().join("dogma.db")),
+            ..DogmaConfig::default()
+        };
+
+        let casper = born(&config);
+        // Forget that this database was ever seeded, which is exactly the state
+        // an older build leaves behind.
+        casper
+            .connection()
+            .execute("DELETE FROM configuracao WHERE chave = ?1", [SEMEADO])
+            .expect("forget");
+        Channels::new(&casper)
+            .rename_line(
+                Channels::new(&casper).lines().expect("lines")[0].id,
+                "avisos",
+            )
+            .expect("rename");
+        drop(casper);
+
+        let casper = born(&config);
+        let lines = Channels::new(&casper).lines().expect("lines");
+        assert_eq!(lines.len(), 1, "a second `geral` appeared: {lines:?}");
+        assert_eq!(lines[0].name, "avisos");
     }
 }

@@ -134,6 +134,27 @@ pub enum Event {
         /// Where to.
         cage: CageId,
     },
+
+    // ---- unmaking a room ----
+    //
+    // Both halves of the bus at once, and they are the first events that are.
+    // Everything above is either something every connection **forwards** to its
+    // client (a room was made) or something one connection **does to itself**
+    // (you were kicked). These are both: every client has to stop drawing the
+    // room, and the ones who were standing in it have to be turned out and told.
+    //
+    // Which is why the sessions concerned act on them in the loop and then
+    // `continue`, rather than letting `translate` write the same frame twice.
+    /// A Cage was destroyed.
+    CageDeleted {
+        /// Which Cage.
+        cage: CageId,
+    },
+    /// A Line was destroyed, and everything written in it with it.
+    LineDeleted {
+        /// Which Line.
+        line: LineId,
+    },
 }
 
 /// A Cage seat held open for a pilot who dropped.
