@@ -43,7 +43,7 @@ use seele_proto::transport::HANDSHAKE_TIMEOUT;
 use tokio::sync::mpsc;
 
 use crate::cage::CageCommand;
-use crate::casper::channels::Channels;
+use crate::casper::channels::{Channels, LastCage};
 use crate::casper::messages::{Messages, PendingMessage, DEFAULT_PAGE};
 use crate::casper::Casper;
 use crate::dogma::{Dogma, Event};
@@ -1049,6 +1049,88 @@ async fn run_session(
                         });
                     }
 
+                    // ---- unmaking a room ----
+                    //
+                    // `AdministerDogma`, and not the `ManageCages` the four
+                    // room verbs above use. Creating and renaming are mistakes
+                    // one survives; this is the one room verb that ends
+                    // somebody else's writing, and no screen of this product
+                    // brings it back. `specs/04-servidor-seele.md` calls
+                    // `gerenciar_cages` "criar e configurar Cages" and
+                    // `administrar_dogma` "todo o resto sobre o Dogma";
+                    // destroying every message six people wrote is not
+                    // configuration. Read now, from MELCHIOR, like all the
+                    // others.
+                    ClientMessage::DeleteCage { cage: id } => {
+                        if !pode(dogma, session.pilot, Permission::AdministerDogma).await {
+                            recusar(&mut send, session.pilot, "DeleteCage").await?;
+                            continue;
+                        }
+                        let feito = {
+                            let guard = dogma.casper.lock().await;
+                            Channels::new(&guard).delete_cage(id)
+                        };
+                        match feito {
+                            Ok(()) => {
+                                tracing::info!(by = %session.pilot, cage = %id, "cage destroyed");
+                                let _ = dogma.events.send(Event::CageDeleted { cage: id });
+                            }
+                            // The only refusal here with a sentence of its own.
+                            // Everything else a write can fail with is the
+                            // database's business and goes to the operator's log.
+                            Err(erro) if erro.downcast_ref::<LastCage>().is_some() => {
+                                frame::write(&mut send, &ServerMessage::Alert {
+                                    severity: AlertSeverity::Warning,
+                                    reason: AlertReason::LastCage,
+                                    operator_text: None,
+                                }).await?;
+                            }
+                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                        }
+                    }
+                    ClientMessage::DeleteLine { line: id } => {
+                        if !pode(dogma, session.pilot, Permission::AdministerDogma).await {
+                            recusar(&mut send, session.pilot, "DeleteLine").await?;
+                            continue;
+                        }
+                        let feito = {
+                            let guard = dogma.casper.lock().await;
+                            Channels::new(&guard).delete_line(id)
+                        };
+                        match feito {
+                            Ok(()) => {
+                                tracing::info!(by = %session.pilot, line = %id, "line destroyed");
+                                let _ = dogma.events.send(Event::LineDeleted { line: id });
+                            }
+                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                        }
+                    }
+                    // A read, answered straight down this connection rather
+                    // than over the bus: it is nobody else's business how heavy
+                    // a Line looked to the person about to be asked whether
+                    // they mean it.
+                    //
+                    // No permission. Answering tells a pilot how much is in a
+                    // Line they may already read, and refusing would only mean
+                    // the confirmation they are shown is the vaguer one.
+                    ClientMessage::WeighLine { line: id } => {
+                        let pesado = {
+                            let guard = dogma.casper.lock().await;
+                            Channels::new(&guard).weigh_line(id)
+                        };
+                        match pesado {
+                            Ok(peso) => {
+                                frame::write(&mut send, &ServerMessage::LineWeighed {
+                                    line: id,
+                                    messages: peso.messages,
+                                    authors: peso.authors,
+                                    oldest_at_seconds: peso.oldest_at_seconds,
+                                }).await?;
+                            }
+                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                        }
+                    }
+
                     // The handshake is over. Repeating it is a protocol
                     // violation, not a re-authentication.
                     ClientMessage::Response { .. } | ClientMessage::Hello { .. } => break,
@@ -1181,6 +1263,56 @@ async fn run_session(
                         frame::write(&mut send, &ServerMessage::Alert {
                             severity: AlertSeverity::Info,
                             reason: AlertReason::MovedByOperator,
+                            operator_text: None,
+                        }).await?;
+                        continue;
+                    }
+                    // A Cage does not vanish from under the feet of the people
+                    // speaking in it. The plug comes out first — the same
+                    // bookkeeping `EjectPlug` does, because it is the same
+                    // thing happening without being asked for — and only then
+                    // does this client hear that the room is gone.
+                    //
+                    // Order matters in the other direction too: `PilotLeft`
+                    // goes out before `CageDeleted` reaches anybody, so no
+                    // client is ever holding a roster for a room it has already
+                    // been told to forget.
+                    Event::CageDeleted { cage: id } if current_cage == Some(*id) => {
+                        cages.leave_everywhere(session.pilot).await;
+                        current_cage = None;
+                        dogma.occupancy.lock().await.vacate(*id, session.pilot);
+                        let _ = dogma.events.send(Event::PilotLeft {
+                            cage: *id,
+                            pilot: session.pilot,
+                        });
+                        frame::write(&mut send, &ServerMessage::CageDeleted {
+                            cage: *id,
+                        }).await?;
+                        // And then the sentence. Two frames for the reason
+                        // `MovedToCage` gives: one is state this client has to
+                        // fold in or go on sending voice into a room that is
+                        // not there, the other is what the person should be
+                        // told, and only a shell knows how to say it.
+                        frame::write(&mut send, &ServerMessage::Alert {
+                            severity: AlertSeverity::Warning,
+                            reason: AlertReason::CageDeleted,
+                            operator_text: None,
+                        }).await?;
+                        continue;
+                    }
+                    // The same for a Line this connection had open. It is
+                    // dropped from `lines` here rather than left to rot: that
+                    // list is what `translate` filters message traffic by, and
+                    // a Line that stayed in it would make this connection the
+                    // one that still asks about a room that is gone.
+                    Event::LineDeleted { line: id } if lines.contains(id) => {
+                        lines.retain(|aberta| aberta != id);
+                        frame::write(&mut send, &ServerMessage::LineDeleted {
+                            line: *id,
+                        }).await?;
+                        frame::write(&mut send, &ServerMessage::Alert {
+                            severity: AlertSeverity::Warning,
+                            reason: AlertReason::LineDeleted,
                             operator_text: None,
                         }).await?;
                         continue;
@@ -1603,5 +1735,17 @@ fn translate(event: &Event, lines: &[LineId], self_pilot: PilotId) -> Option<Ser
         // inventing something would be a second way to say what those already
         // say.
         Event::SessionEnded { .. } | Event::PilotMoved { .. } => None,
+
+        // Unfiltered, like the four announcements above and for the same
+        // reason: a room that goes on being drawn until the next handshake is a
+        // room people keep trying to walk into. The pilot who asked included —
+        // they need to stop drawing it as much as anybody.
+        //
+        // The connections that were *inside* the Cage, or had the Line open,
+        // never get here: the loop answers them itself and `continue`s, because
+        // they have a plug to pull and a sentence to be told and this function
+        // knows about neither.
+        Event::CageDeleted { cage } => Some(ServerMessage::CageDeleted { cage: *cage }),
+        Event::LineDeleted { line } => Some(ServerMessage::LineDeleted { line: *line }),
     }
 }

@@ -3370,6 +3370,12 @@ const VERBOS_DE_MODERACAO: &[&str] = &[
     "banir_piloto",
     "remover_mensagem",
     "mover_piloto",
+    // Destroying a room goes through the same machine, and belongs on the same
+    // list. It is the most consequential of the six — a kick lasts a session, a
+    // ban is undone by whoever holds the Dogma's file, and this ends what other
+    // people wrote with nothing anywhere that brings it back.
+    "apagar_cage",
+    "apagar_linha",
 ];
 
 #[test]
@@ -3909,6 +3915,311 @@ fn the_host_is_told_how_far_the_link_they_are_about_to_send_reaches() {
             !mostrar.contains(classe) || folha_bruta.contains(classe),
             "`mostrarAlcance` sets `{classe}`, which no stylesheet defines — so \
              the distinction it draws is invisible"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Destroying a room — the confirmation that says the size of the damage.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_line_confirmation_counts_what_it_is_about_to_destroy() {
+    // The requirement this whole path exists to satisfy, and the one a screen
+    // can quietly fail: the box promises to destroy a specific number of
+    // messages, written by a specific number of people, since a specific day.
+    // All three have to be **counted**, in the Dogma's database, at the moment
+    // of asking.
+    //
+    // The tempting wrong version is right there and free: this window already
+    // holds a page of history, so `mensagens.length` would compile, render, and
+    // read as a real number. It would be low by whatever the Line's whole past
+    // is — and a number that is nearly right in a box promising to destroy 1.847
+    // messages is worse than no number at all.
+    //
+    // So the sentence must be built out of the answer to `peso_da_linha` and
+    // nothing else.
+    let frase = body_of(&scripts(), "function consequenciaDeApagarLinha");
+
+    for (what, needle) in [
+        ("how many messages", "peso.messages"),
+        ("how many people wrote them", "peso.authors"),
+        ("since when", "peso.oldest_at_seconds"),
+    ] {
+        assert!(
+            frase.contains(needle),
+            "the Line confirmation never says {what}, so it promises destruction \
+             without saying how much:\n{frase}"
+        );
+    }
+    assert!(
+        !frase.contains("mensagens.length") && !frase.contains("messages.length"),
+        "the Line confirmation counts the page this window happens to be \
+         holding, which is low by the whole of the Line's past:\n{frase}"
+    );
+
+    // And the count reaches it from the Dogma, through the one command that
+    // waits for an answer. Scoped to the door that opens the box, because the
+    // file explains the rule in prose as well and an unscoped search would be
+    // satisfied by the paragraph.
+    let layer = without_comments(&read("ui/camada-moderar.js"));
+    let Some(porta) = layer
+        .split("$(\"lista-linhas\").addEventListener")
+        .nth(1)
+        .and_then(|resto| resto.split("\n});").next())
+    else {
+        panic!("nothing listens for a press on the Line list in the moderation layer");
+    };
+    assert!(
+        porta.contains("invoke(\"peso_da_linha\""),
+        "the box about destroying a Line opens without asking the Dogma what is \
+         in it, so its numbers came from somewhere this window guessed:\n{porta}"
+    );
+
+    // The order is the assertion: asked first, box second. A box opened before
+    // the answer arrives is a box with a blank where the number goes.
+    let pesa = porta
+        .find("invoke(\"peso_da_linha\"")
+        .expect("the weigh call was just asserted");
+    let abre = porta
+        .find("abrirConfirmacao(")
+        .expect("the door opens no confirmation at all");
+    assert!(
+        pesa < abre,
+        "the confirmation is opened before the count is asked for:\n{porta}"
+    );
+}
+
+#[test]
+fn a_count_that_did_not_arrive_stops_the_question_instead_of_rounding_it() {
+    // The other half of "counted, never estimated", and the half a screen fails
+    // by being helpful. When the Dogma does not answer, there is no honest
+    // version of this box: what is left is «apagar a Linha?», which is the
+    // confirmation that adds nothing and teaches people to press twice.
+    //
+    // So the failure path must not reach `abrirConfirmacao`, and must not
+    // invent a zero either — «isto destrói 0 mensagens» about a Line full of
+    // them is the worst sentence this screen could produce.
+    let layer = without_comments(&read("ui/camada-moderar.js"));
+    let Some(porta) = layer
+        .split("$(\"lista-linhas\").addEventListener")
+        .nth(1)
+        .and_then(|resto| resto.split("\n});").next())
+    else {
+        panic!("nothing listens for a press on the Line list in the moderation layer");
+    };
+
+    let Some(falhou) = porta
+        .split("} catch (falha) {")
+        .nth(1)
+        .and_then(|resto| resto.split("\n  }").next())
+    else {
+        panic!(
+            "the weigh call is not wrapped in a `catch`, so a Dogma that does not \
+             answer leaves the press doing nothing at all:\n{porta}"
+        );
+    };
+    assert!(
+        !falhou.contains("abrirConfirmacao("),
+        "a Line whose count never arrived is still offered for destruction, with \
+         whatever number the sentence fell back to:\n{falhou}"
+    );
+    assert!(
+        falhou.contains("abrirRecusa("),
+        "the count failing says nothing to whoever pressed, so a press that was \
+         refused looks exactly like one that was ignored:\n{falhou}"
+    );
+
+    // And the refusal arms nothing: no act, and no button that could run one.
+    let recusa = body_of(&scripts(), "function abrirRecusa");
+    assert!(
+        recusa.contains("atoArmado = null"),
+        "the box that refuses to ask leaves an act armed behind it:\n{recusa}"
+    );
+    assert!(
+        recusa.contains("$(\"moderar-confirmar\").hidden = true"),
+        "the box that refuses to ask still shows the button that confirms, which \
+         is a button with nothing behind it in front of somebody who came here to \
+         destroy something:\n{recusa}"
+    );
+    // Which means the confirm button has to come back for the boxes that do have
+    // an act. `armarAto` is where every one of them passes.
+    let armar = body_of(&scripts(), "function armarAto");
+    assert!(
+        armar.contains("$(\"moderar-confirmar\").hidden = false"),
+        "nothing brings the confirm button back after a refusal hid it, so the \
+         next act in this session is a sentence nobody can agree to:\n{armar}"
+    );
+}
+
+#[test]
+fn destroying_a_room_says_what_it_does_to_the_people_and_to_the_other_room() {
+    // The two things the person pressing does not experience, and therefore the
+    // two a confirmation has to say out loud.
+    //
+    // For a Cage: people are turned out of it in the middle of speaking, and
+    // they are told. And the half that is easiest to get wrong from the other
+    // direction — the Line bound to it is **not** destroyed with it. Without
+    // that line, somebody who wanted a conversation gone destroys the Cage, sees
+    // the Line still there, and concludes the product did not do what it said.
+    let cage = body_of(&scripts(), "function consequenciaDeApagarCage");
+    for (what, needle) in [
+        ("how many people are inside", "cage.pilots.length"),
+        (
+            "that it happens mid-sentence",
+            "no meio do que estiverem falando",
+        ),
+        ("that they are told", "aviso"),
+        ("that the bound Line survives", "não é apagada junto"),
+        (
+            "that nothing here brings it back",
+            "Nenhuma tela deste produto",
+        ),
+    ] {
+        assert!(
+            cage.contains(needle),
+            "the Cage confirmation never says {what}:\n{cage}"
+        );
+    }
+
+    // For a Line: whoever is reading it loses it from the screen at that
+    // instant, and any Cage bound to it comes out with no Line — a change
+    // nobody asked for, which is exactly the kind this product names.
+    let linha = body_of(&scripts(), "function consequenciaDeApagarLinha");
+    for (what, needle) in [
+        (
+            "that no screen brings the writing back",
+            "Nenhuma tela deste produto",
+        ),
+        ("what happens to whoever is reading it", "perde da tela"),
+        ("which rooms come out without a Line", "sem Linha"),
+    ] {
+        assert!(
+            linha.contains(needle),
+            "the Line confirmation never says {what}:\n{linha}"
+        );
+    }
+
+    // The empty Line has a branch of its own: there is no "written since" when
+    // nobody wrote, and a sentence that says "destroys 0 messages since
+    // Invalid Date" is a sentence that was never read by its author.
+    assert!(
+        linha.contains("peso.messages === 0"),
+        "the Line confirmation has one sentence for a Line with a past and a \
+         Line with none, so the empty one reads as a date that does not \
+         exist:\n{linha}"
+    );
+}
+
+#[test]
+fn the_last_cage_is_offered_disabled_with_the_reason_written_on_it() {
+    // A Dogma with no Cage has nowhere to speak. The Dogma refuses the press,
+    // and this window has to say why *before* it — a control that vanishes on
+    // the last room teaches nothing, because an absence is not something anybody
+    // reads. `moderar-acao-mover` hides instead, and the difference is real: it
+    // hides when its **object** does not exist, and this room does.
+    let porta = body_of(&scripts(), "function botaoDeApagarCage");
+    assert!(
+        porta.contains("botao.disabled = ultimo"),
+        "the last Cage is offered for destruction like any other, so the only \
+         thing between a Dogma and having nowhere to speak is a refusal that \
+         arrives after the press:\n{porta}"
+    );
+    assert!(
+        porta.contains("botao.title = ultimo"),
+        "the disabled control says nothing about why it is disabled, which is a \
+         dead button and a shrug:\n{porta}"
+    );
+    assert!(
+        porta.contains("único Cage"),
+        "the reason the last Cage stays is not written anywhere a person \
+         reads:\n{porta}"
+    );
+
+    // And the count comes from the Dogma's list, not from anything this file
+    // decides: one Cage left is one Cage in `snapshot.cages`.
+    let desenho = body_of(&scripts(), "function desenharCanais");
+    assert!(
+        desenho.contains("snapshot.cages.length === 1"),
+        "nothing tells the delete control which Cage is the last one:\n{desenho}"
+    );
+}
+
+#[test]
+fn destroying_a_room_is_offered_by_the_permission_that_destroys_it() {
+    // The decision, asserted where a person meets it. Making a room and
+    // renaming one are mistakes a Dogma survives; destroying one ends what other
+    // people wrote. `specs/04-servidor-seele.md` enumerates `gerenciar_cages`
+    // and `administrar_dogma` separately, so a role that builds rooms without
+    // being able to unmake them is a role somebody can actually write — and
+    // gating both on one boolean makes it impossible to offer correctly.
+    //
+    // Scoped to the two functions that draw the controls, because the file
+    // explains the distinction in prose too and an unscoped search for either
+    // name would be satisfied by the paragraph that says why they differ.
+    for porta in ["function botaoDeApagarCage", "function botaoDeApagarLinha"] {
+        let corpo = body_of(&scripts(), porta);
+        assert!(
+            corpo.contains("may_delete_rooms"),
+            "`{porta}` does not consult the permission that destroys rooms:\n{corpo}"
+        );
+        assert!(
+            !corpo.contains("may_manage_cages"),
+            "`{porta}` is offered by the permission to *make* rooms, which is a \
+             different permission for a different thing:\n{corpo}"
+        );
+    }
+
+    // And it is a permission of its own on the bridge, rather than a second
+    // reading of one that was already there.
+    let types = read("../../crates/seele-ffi/src/types.rs");
+    assert!(
+        types.contains("may_delete_rooms"),
+        "the snapshot has no field for the permission that destroys rooms, so \
+         whatever the screen is reading is somebody else's answer"
+    );
+}
+
+#[test]
+fn a_room_that_stopped_existing_has_a_sentence_and_not_a_shrug() {
+    // Somebody is standing in the Cage, or reading the Line, when it stops
+    // existing. The plug is already out and the conversation is already off the
+    // screen by the time this arrives — so without the sentence what is left is
+    // a room that vanished on its own, which from where the reader sits is
+    // indistinguishable from a window that lost track of where it was.
+    //
+    // The third is not about a room that went: it is the refusal, and the only
+    // one of the three that has to teach what to do next.
+    let frases = read("ui/frases.js");
+    let Some(avisos) = frases
+        .split("const AVISOS = {")
+        .nth(1)
+        .and_then(|resto| resto.split("\n};").next())
+    else {
+        panic!("`AVISOS` is gone from ui/frases.js");
+    };
+    let avisos = without_comments(avisos);
+
+    for reason in ["CageDeleted", "LineDeleted", "LastCage"] {
+        assert!(
+            avisos.contains(&format!("{reason}:")),
+            "the Dogma can raise `{reason}` and `AVISOS` has no sentence for it, \
+             so it reaches the person as the word AVISO and nothing else"
+        );
+    }
+    assert!(
+        avisos.contains("Faça outra sala antes"),
+        "the refusal of the last Cage does not say what to do about it, which \
+         makes it a wall rather than an answer"
+    );
+
+    // Every one of the three has to be a reason the bridge can actually produce.
+    let types = read("../../crates/seele-ffi/src/types.rs");
+    for reason in ["CageDeleted", "LineDeleted", "LastCage"] {
+        assert!(
+            types.contains(reason),
+            "`AVISOS` writes a sentence for `{reason}`, which `NoticeReason` \
+             cannot be — a sentence nobody will ever read"
         );
     }
 }
