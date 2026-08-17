@@ -64,6 +64,7 @@ const AUSENTE = "——";
 function entrarNaAutenticacao(snapshot, veredito, endereco) {
   aperto = { snapshot, veredito };
 
+  guardarFoco("tela-boot");
   $("tela-boot").hidden = true;
   $("tela-auth").hidden = false;
 
@@ -86,6 +87,10 @@ function entrarNaAutenticacao(snapshot, veredito, endereco) {
   // aperto de mão que o core faz inteiro do lado de lá, sem relatar nenhuma.
   repovoar($("auth-registro"), []);
   registrar(`RESOLVENDO ${endereco || AUSENTE}`, "apagado");
+
+  // No fim, e não junto do `hidden`: o alvo é o `auth-botao`, e ele acabou de
+  // ser reescrito e reabilitado duas dúzias de linhas acima.
+  abrirTela("tela-auth");
 }
 
 /** A cartela de padrão, a nota que a acompanha, e o botão que a veste. */
@@ -214,6 +219,10 @@ async function inserirPlug() {
     // quem chegou depois, e é `role="status"`, que esta lista não é.
     mostrarVeredito(aperto?.veredito ?? null);
     await atualizar();
+    // Depois do desenho, e sem `data-foco`: a operação recebe o foco na própria
+    // `<section>`. Ver a marcação dela — focar o compositor aqui desligaria o
+    // push-to-talk no primeiro segundo de sessão.
+    abrirTela("tela-sessao");
   } catch (falha) {
     registrar(fraseDeErro(falha), "atencao");
   } finally {

@@ -1014,6 +1014,10 @@ async function ejetar() {
   subsistemas("", "·");
   // Quem acabou de sair de um Dogma tem que vê-lo na lista.
   await desenharVisitados();
+  // E o teclado sai junto. Sem isto o foco fica no `<body>`: quem apertou
+  // DESCONECTAR com a tecla volta para a entrada tendo de tabular a tela toda
+  // até o campo de endereço, que é a única coisa que se faz nela.
+  abrirTela("tela-boot");
 }
 
 /** Zera o campo, o cursor no Rust e o realce. */

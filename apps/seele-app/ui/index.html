@@ -54,6 +54,23 @@
 <div class="varredura" aria-hidden="true"></div>
 
 <!--
+  O que a troca de tela diz a quem não a vê.
+
+  Fora das telas de propósito, e pela mesma razão que a varredura: ela pertence
+  à janela, não a nenhuma delas — e uma região viva dentro de uma `.tela` some
+  junto com ela no instante exato em que teria algo a dizer.
+
+  Sem largura e sem altura, e nunca `display: none`: escondida assim ela
+  continua sendo lida, e escondida daquela outra forma pararia de ser. É a única
+  coisa nesta página desenhada para não ser vista.
+
+  `role="status"`, que é `aria-live="polite"` com nome: a mudança de tela não
+  interrompe o que estiver sendo lido, ela entra depois. O `role="alert"` do
+  banner é o oposto disso, e é o que ele deve ser.
+-->
+<p id="anuncio" class="anuncio" role="status" aria-atomic="true"></p>
+
+<!--
   A composição é a mesma do `plug` de propósito. `specs/06-clientes-gui.md`:
   "Alguém que usa a TUI deve abrir o app e saber onde tudo está sem procurar."
   Mesmo cabeçalho, mesmos três painéis na mesma ordem, mesma barra permanente
@@ -73,7 +90,23 @@
   registro de carga desta janela: para onde você já foi, e o formulário que
   começa a carga.
 -->
-<section id="tela-boot" class="tela">
+<!--
+  `tabindex`, `data-foco` e `data-anuncio` em toda `.tela`, e o mesmo trio nas
+  seis. Eles são o que `abrirTela` de `base.js` lê para pôr o teclado onde a
+  tela começa e dizer, para quem não vê, que ela mudou.
+
+  Na marcação e não numa tabela em JavaScript, pela razão de sempre nesta
+  página: o alvo do foco fica ao lado da tela de que ele é, e não numa segunda
+  lista que alguém vai esquecer de atualizar no dia em que o botão mudar de
+  nome. `data-painel` e `data-titulo` do Terminal Dogma seguem a mesma regra.
+
+  `tabindex="-1"` põe a `<section>` ao alcance de `focus()` sem pô-la na ordem
+  de tabulação: é onde o foco pousa quando a tela não nomeia um controle melhor,
+  e nunca uma parada a mais para quem tabula.
+-->
+<section id="tela-boot" class="tela" tabindex="-1"
+         data-foco="campo-servidor"
+         data-anuncio="Entrada. Escolha o Dogma Central e insira o plug.">
   <div class="boot-grade">
 
     <!-- ---------------- A·01 ---------------- -->
@@ -289,7 +322,16 @@
 </section>
 
 <!-- Operação. -->
-<section id="tela-sessao" class="tela" hidden>
+<!--
+  Sem `data-foco`, e a ausência é a escolha. Esta tela não tem **uma** ação: são
+  quatro colunas, e o único controle plausível para receber o foco ao entrar é
+  o compositor de mensagem — um `<input>`, que faz `digitando()` valer e
+  desliga o push-to-talk da barra de espaço exatamente no instante em que a
+  pessoa acaba de entrar num Cage. O foco fica na própria `<section>`, de onde
+  um Tab alcança a primeira coisa da tela.
+-->
+<section id="tela-sessao" class="tela" tabindex="-1" hidden
+         data-anuncio="Operação. Cages, Linhas e a conversa da Linha aberta.">
   <!--
     O cabeçalho do comp tem sete blocos, e cinco entram. Os dois que ficam de
     fora: o `MG`, que é a marca do outro produto — no lugar dele, no mesmo
@@ -923,7 +965,9 @@
   controle que explica, na marcação, e não numa tabela paralela que alguém vai
   esquecer de atualizar quando o controle mudar.
 -->
-<section id="tela-chamada" class="tela" hidden>
+<section id="tela-chamada" class="tela" tabindex="-1" hidden
+         data-foco="chamada-at"
+         data-anuncio="Chamada. Um cartão por piloto no Cage.">
   <div class="chamada">
 
     <!-- ---------------- a coluna do Cage ---------------- -->
@@ -1092,7 +1136,9 @@
   INSERIR PLUG é o que leva à sessão. Ninguém entra num Cage sem que a
   impressão digital do Dogma tenha passado por uma tela.
 -->
-<section id="tela-auth" class="tela" hidden>
+<section id="tela-auth" class="tela" tabindex="-1" hidden
+         data-foco="auth-botao"
+         data-anuncio="Aperto de mão. Verifique a identidade deste Dogma.">
   <div class="auth-grade">
 
     <!-- ---------------- A·02 ---------------- -->
@@ -1228,7 +1274,9 @@
   - **TROCAR A TECLA DE UM ATALHO** — os atalhos existem e são fixos: não há
     tabela editável nem lugar para guardá-la. A lista abaixo é o que eles são.
 -->
-<section id="tela-dogma" class="tela" hidden>
+<section id="tela-dogma" class="tela" tabindex="-1" hidden
+         data-foco="secao-audio"
+         data-anuncio="Terminal Dogma. Configuração deste computador.">
   <div class="dogma">
 
     <nav class="dogma-coluna" aria-label="seções da configuração">
@@ -1575,7 +1623,15 @@
 </section>
 
 <!-- Sessão encerrada. Diz por quê; um app que fecha calado vira suporte. -->
-<section id="tela-fim" class="tela" hidden>
+<!--
+  O anúncio desta tela é escrito por `mostrarFim`, com o motivo dentro: o
+  `data-anuncio` daqui é o que sobra quando não há motivo nomeado. Uma sessão
+  que acaba sozinha é a única troca de tela que ninguém pediu, e dizer só «tela
+  de fim» a quem não a vê seria esconder justamente a parte que importa.
+-->
+<section id="tela-fim" class="tela" tabindex="-1" hidden
+         data-foco="botao-voltar"
+         data-anuncio="Enlace encerrado.">
   <div class="boot">
     <h1 class="boot-marca fim">ENLACE ENCERRADO</h1>
     <p id="fim-motivo" class="fim-motivo"></p>

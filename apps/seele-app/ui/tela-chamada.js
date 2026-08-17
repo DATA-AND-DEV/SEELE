@@ -467,9 +467,17 @@ function desenharAcoesDaChamada(snapshot) {
 
 /** Abre a chamada por cima da operação. */
 async function abrirChamada() {
+  // Antes do `hidden`, com a operação ainda na tela: depois dela sumir o foco
+  // já é o `<body>` e não há mais o que lembrar. É o que devolve o botão
+  // CHAMADA a quem o apertou, na hora de voltar.
+  guardarFoco("tela-sessao");
   $("tela-sessao").hidden = true;
   $("tela-chamada").hidden = false;
+  // E o foco só **depois** do desenho: `desenharAcoesDaChamada` é quem tira o
+  // `disabled` da chave do microfone, e um botão desabilitado recusa o foco em
+  // silêncio.
   await atualizarChamada();
+  abrirTela("tela-chamada");
 }
 
 /**
@@ -481,8 +489,12 @@ async function abrirChamada() {
  * `eject_plug`, e a dica de cada um diz qual é qual.
  */
 function fecharChamada() {
+  guardarFoco("tela-chamada");
   $("tela-chamada").hidden = true;
   $("tela-sessao").hidden = false;
+  // Devolve o CHAMADA do cabeçalho a quem o apertou. Quem chegou aqui pelo
+  // Escape volta para onde estava, que é o que a tecla promete.
+  voltarParaTela("tela-sessao");
   // A sessão não foi redesenhada enquanto esteve por baixo — `desenharMensagens`
   // sai cedo quando a lista está sem layout, porque ali não dá para saber se a
   // pessoa estava lendo o histórico ou acompanhando o fim. Redesenhar agora é o

@@ -315,6 +315,9 @@ async function escolherModo(modo) {
 
 /** Abre a configuração, lembrando de onde. */
 async function abrirDogma(origem) {
+  // Com a tela de origem ainda visível, ou não há foco a lembrar: é o que
+  // devolve a engrenagem — ou o TERMINAL DOGMA da entrada — a quem a apertou.
+  guardarFoco(origem);
   telaDeOrigem = origem;
   $(origem).hidden = true;
   $("tela-dogma").hidden = false;
@@ -322,14 +325,19 @@ async function abrirDogma(origem) {
   $("dogma-voltar-texto").textContent = VOLTA[origem] ?? "VOLTAR";
   await desenharDispositivos();
   await atualizarDogma();
+  abrirTela("tela-dogma");
 }
 
 /** Fecha e devolve para a tela que a abriu. */
 function fecharDogma() {
+  guardarFoco("tela-dogma");
   $("tela-dogma").hidden = true;
   const volta = telaDeOrigem ?? "tela-boot";
   $(volta).hidden = false;
   telaDeOrigem = null;
+  // A mesma porta, dos dois lados: quem entrou pela engrenagem da sessão sai
+  // nela, e quem entrou pelo TERMINAL DOGMA da entrada sai nele.
+  voltarParaTela(volta);
   // Só quando se volta para a sessão: `desenharMensagens` sai cedo enquanto a
   // lista está sem layout, e redesenhar aqui é o outro lado desse acordo. Vindo
   // da tela de entrada não há sessão nenhuma a redesenhar.

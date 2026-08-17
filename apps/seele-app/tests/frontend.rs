@@ -2813,3 +2813,227 @@ fn every_list_the_dogma_fills_lives_inside_something_that_scrolls() {
         trapped.join("\n")
     );
 }
+
+// ---------------------------------------------------------------------------
+// Carrying the keyboard across a change of screen.
+// ---------------------------------------------------------------------------
+
+/// The screens, as (id, opening tag, markup up to the next screen).
+///
+/// Cut on `<section id="tela-` rather than on `</section>`, because the settings
+/// screen nests four `<section>`s of its own and the first closing tag would end
+/// that slice a third of the way in. `split` hands back exactly the text between
+/// two screens, which is what "inside this screen" has to mean here.
+fn screens_of(page: &str) -> Vec<(String, String, String)> {
+    let page = without_comments(page);
+    let mut found = Vec::new();
+    for piece in page.split("<section id=\"tela-").skip(1) {
+        let Some(name) = piece.split('"').next() else {
+            continue;
+        };
+        let Some(tag) = piece.split('>').next() else {
+            continue;
+        };
+        // The delimiter is put back so the tag reads as it does in the page —
+        // an assertion that quotes half an opening tag sends the next reader
+        // looking for a string that is not there.
+        found.push((
+            format!("tela-{name}"),
+            format!("section id=\"tela-{tag}"),
+            piece.to_owned(),
+        ));
+    }
+    assert!(
+        found.len() >= 4,
+        "found {} screens; boot, sessao, auth and fim are all supposed to be in \
+         the page — or they stopped being written `<section id=\"tela-…`",
+        found.len()
+    );
+    found
+}
+
+/// A script cut into its top-level statements, by brace depth.
+///
+/// Coarser than "one function each", and that is deliberate: two of the nine
+/// transitions in this frontend do not live in a named function at all — the
+/// EJETAR of the end screen and the Escape handlers are arrow functions passed
+/// straight to `addEventListener`. A cut that only knew about `function` would
+/// have been blind to exactly the transitions nobody wrote a name for.
+fn top_level_chunks(script: &str) -> Vec<String> {
+    let script = without_comments(script);
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+    let mut depth: i32 = 0;
+    for line in script.lines() {
+        current.push_str(line);
+        current.push('\n');
+        depth += i32::try_from(line.matches('{').count()).unwrap_or(0);
+        depth -= i32::try_from(line.matches('}').count()).unwrap_or(0);
+        if depth > 0 {
+            continue;
+        }
+        depth = 0;
+        if !current.trim().is_empty() {
+            chunks.push(std::mem::take(&mut current));
+        }
+        current.clear();
+    }
+    if !current.trim().is_empty() {
+        chunks.push(current);
+    }
+    chunks
+}
+
+/// Whether this piece of script pulls a whole screen back into view.
+///
+/// `$("…")` with a screen id, or `$(…)` with a variable — `fecharDogma` reveals
+/// `$(volta)` and `abrirDogma` hides `$(origem)`, and a check that only read
+/// literals would miss the one transition that has two possible destinations.
+/// A variable inside `$()` is only ever a screen here; everything else that
+/// toggles `hidden` — the banner, the battery, the invite, an error line —
+/// holds its element in a variable and writes `erro.hidden`, never `$(erro)`.
+fn reveals_a_screen(chunk: &str, screens: &BTreeSet<String>) -> bool {
+    for piece in chunk.split("$(").skip(1) {
+        let Some((argument, rest)) = piece.split_once(')') else {
+            continue;
+        };
+        if !rest.trim_start().starts_with(".hidden = false") {
+            continue;
+        }
+        let argument = argument.trim();
+        match argument
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+        {
+            Some(id) => {
+                if screens.contains(id) {
+                    return true;
+                }
+            }
+            None => return true,
+        }
+    }
+    false
+}
+
+#[test]
+fn every_transition_that_puts_a_screen_on_hands_it_the_keyboard() {
+    // Hiding the ancestor of the focused element drops focus on `<body>`. If
+    // nothing then focuses anything on the screen that arrives, three things
+    // break at once and none of them errors: somebody who opened the call from
+    // the keyboard lands at the top of the document and has to tab back down to
+    // the button they pressed; closing does not give that button back; and a
+    // screen reader announces nothing at all, because from where it stands
+    // nothing happened. WCAG 2.4.3.
+    //
+    // Before this, `.focus()` appeared exactly once in the whole frontend — the
+    // `/` shortcut of the search — and every screen change was a bare `hidden`.
+    let page = read("ui/index.html");
+    let screens: BTreeSet<String> = screens_of(&page).into_iter().map(|(id, _, _)| id).collect();
+
+    let mut deaf: Vec<String> = Vec::new();
+    let mut transitions = 0;
+    for name in ui_files(".js") {
+        for chunk in top_level_chunks(&read(&format!("ui/{name}"))) {
+            if !reveals_a_screen(&chunk, &screens) {
+                continue;
+            }
+            transitions += 1;
+            if chunk.contains("abrirTela(") || chunk.contains("voltarParaTela(") {
+                continue;
+            }
+            let head = chunk.lines().next().unwrap_or_default().trim().to_owned();
+            deaf.push(format!("ui/{name}: {head}"));
+        }
+    }
+
+    // A count, because the way this guard goes quiet is not somebody deleting a
+    // `abrirTela` — it is somebody writing a transition the cut above cannot
+    // see, and then nothing is reported because nothing was read.
+    assert!(
+        transitions >= 8,
+        "only {transitions} places in the frontend reveal a screen; there are \
+         nine — into auth, into the session, into and out of the call, into and \
+         out of the settings, into the end screen, and the two ways back to the \
+         entrance"
+    );
+
+    assert!(
+        deaf.is_empty(),
+        "these transitions reveal a screen and leave the focus on <body>, so the \
+         keyboard lands at the top of the document and a screen reader is told \
+         nothing:\n{}",
+        deaf.join("\n")
+    );
+}
+
+#[test]
+fn every_screen_says_where_the_focus_lands_and_what_to_announce() {
+    let page = read("ui/index.html");
+
+    // The live region first: it is the half of this that is not about the
+    // keyboard, and it has to be *outside* every screen. Inside one, it would be
+    // hidden away at the exact moment it had something to say — a `hidden`
+    // ancestor takes the whole subtree out of the accessibility tree.
+    let anuncio = tag_with_id(&page, "anuncio");
+    assert!(
+        anuncio.contains("role=\"status\""),
+        "the announcement region is not a live region any more, so a change of \
+         screen is announced to nobody: <{anuncio}>"
+    );
+    for (id, _, markup) in screens_of(&page) {
+        assert!(
+            !markup.contains("id=\"anuncio\""),
+            "the announcement region moved inside #{id}, where a `hidden` on the \
+             screen takes it out of the accessibility tree along with everything \
+             else — and a screen being hidden is exactly when it has to speak"
+        );
+    }
+
+    // And it has to stay readable while being invisible. `display: none` and
+    // `visibility: hidden` remove an element from the accessibility tree, which
+    // is the one thing this element cannot afford.
+    let base = without_comments(&read("ui/base.css"));
+    let Some((_, rule)) = base.split_once(".anuncio {") else {
+        panic!("base.css no longer styles `.anuncio`, so it is a visible paragraph")
+    };
+    let rule = rule.split('}').next().unwrap_or_default();
+    for banned in ["display: none", "visibility: hidden"] {
+        assert!(
+            !rule.contains(banned),
+            "`.anuncio` hides itself with `{banned}`, which takes it out of the \
+             accessibility tree — it would be invisible *and* silent:\n{rule}"
+        );
+    }
+
+    for (id, tag, markup) in screens_of(&page) {
+        // Focusable at all. Without this the fallback in `abrirTela` — focus the
+        // screen itself when it names no better control — silently does nothing,
+        // and the focus stays on `<body>` exactly as before.
+        assert!(
+            tag.contains("tabindex=\"-1\""),
+            "#{id} cannot receive focus, so a transition into it has nowhere to \
+             put the keyboard: <{tag}>"
+        );
+
+        assert!(
+            attribute(&tag, "data-anuncio").is_some_and(|frase| !frase.trim().is_empty()),
+            "#{id} does not say what to announce when it opens, so somebody who \
+             cannot see it is told nothing: <{tag}>"
+        );
+
+        // `data-foco` is optional — the session leaves it out on purpose, and the
+        // markup says why. What it may not be is a name of nothing, or a name of
+        // something on another screen: `focus()` on either does nothing and says
+        // nothing, which is the failure this whole pair of guards is about.
+        let Some(alvo) = attribute(&tag, "data-foco") else {
+            continue;
+        };
+        assert!(
+            markup.contains(&format!("id=\"{alvo}\"")),
+            "#{id} sends the focus to `#{alvo}`, which is not inside it — \
+             `focus()` on something hidden or absent fails silently, and the \
+             keyboard would stay on <body>"
+        );
+    }
+}
