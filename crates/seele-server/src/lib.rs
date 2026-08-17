@@ -31,6 +31,7 @@ use anyhow::{Context, Result};
 use seele_proto::ids::CageId;
 
 pub mod admissao;
+pub mod alcance;
 pub mod cage;
 pub mod casper;
 pub mod dogma;
@@ -54,6 +55,11 @@ pub struct DogmaConfig {
     /// What this Dogma is called.
     pub name: String,
     /// Where to listen. UDP; QUIC needs no second port.
+    ///
+    /// O padrão é `[::]`, e a diferença importa: um socket IPv6 de pilha dupla
+    /// atende as duas famílias, e `0.0.0.0` atende só IPv4. Era `0.0.0.0` até o
+    /// degrau 2 do ADR 0022 — e por isso um Dogma não atendia em IPv6 nem
+    /// quando as duas pontas tinham. Ver [`alcance::abrir_escuta`].
     pub listen: SocketAddr,
     /// The one Cage M2 offers.
     pub cage: CageId,
@@ -75,7 +81,10 @@ impl Default for DogmaConfig {
     fn default() -> Self {
         Self {
             name: "Dogma".into(),
-            listen: SocketAddr::from(([0, 0, 0, 0], seele_proto::transport::DEFAULT_PORT)),
+            listen: SocketAddr::from((
+                std::net::Ipv6Addr::UNSPECIFIED,
+                seele_proto::transport::DEFAULT_PORT,
+            )),
             cage: CageId(1),
             cage_name: "CAGE-01 CENTRAL".into(),
             cage_limit: 15,
@@ -141,6 +150,7 @@ fn seed(casper: &mut casper::Casper, config: &DogmaConfig) -> Result<()> {
 pub struct Server {
     endpoint: quinn::Endpoint,
     config: Arc<DogmaConfig>,
+    pilha: alcance::Pilha,
     fingerprint: String,
     registry: Arc<session::Registry>,
     dogma: Arc<dogma::Dogma>,
@@ -176,8 +186,21 @@ impl Server {
         let fingerprint = identity.fingerprint();
         let server_config = tls::server_config(identity)?;
 
-        let endpoint = quinn::Endpoint::server(server_config, config.listen)
-            .with_context(|| format!("could not bind {}", config.listen))?;
+        // Não é `Endpoint::server`: aquele faz um `UdpSocket::bind` cru e herda
+        // o padrão do sistema para `IPV6_V6ONLY`, que difere entre Linux, macOS
+        // e Windows. A própria documentação dele avisa. Ver
+        // [`alcance::abrir_escuta`], onde a opção é escrita e conferida.
+        let (socket, pilha) = alcance::abrir_escuta(config.listen)?;
+        let runtime = quinn::default_runtime()
+            .ok_or_else(|| anyhow::anyhow!("não há runtime assíncrono para o QUIC"))?;
+        let endpoint = quinn::Endpoint::new(
+            quinn::EndpointConfig::default(),
+            Some(server_config),
+            socket,
+            runtime,
+        )
+        .with_context(|| format!("could not bind {}", config.listen))?;
+        tracing::info!(?pilha, escuta = %endpoint.local_addr()?, "o Dogma está atendendo");
 
         let casper = Arc::new(tokio::sync::Mutex::new(casper));
 
@@ -215,6 +238,7 @@ impl Server {
         Ok(Self {
             endpoint,
             config: Arc::new(config),
+            pilha,
             fingerprint,
             registry: Arc::new(session::Registry::new()),
             dogma,
@@ -235,6 +259,16 @@ impl Server {
     #[must_use]
     pub fn fingerprint(&self) -> &str {
         &self.fingerprint
+    }
+
+    /// Que famílias de endereço esta escuta alcança. Degrau 2 do ADR 0022.
+    ///
+    /// Quem hospeda precisa poder dizer isto a quem está na frente da tela: um
+    /// Dogma que caiu para IPv4 é um Dogma que ninguém só-IPv6 alcança, e essa
+    /// é a diferença entre "não conecta" e "não conecta **porque**".
+    #[must_use]
+    pub fn pilha(&self) -> alcance::Pilha {
+        self.pilha
     }
 
     /// A impressão digital lida direto do banco, sem subir servidor.

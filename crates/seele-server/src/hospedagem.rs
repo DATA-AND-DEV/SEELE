@@ -55,9 +55,10 @@ impl Hospedagem {
     /// `porta` zero deixa o sistema escolher — útil para teste, e ruim para uso
     /// real, onde o anfitrião precisa dizer aos amigos onde bater.
     ///
-    /// Escuta em `0.0.0.0` de propósito: um Dogma hospedado que só aceitasse
+    /// Escuta em `[::]` de propósito: um Dogma hospedado que só aceitasse
     /// `localhost` não serviria para nada além de falar consigo mesmo, e o
-    /// ponto todo é receber gente.
+    /// ponto todo é receber gente. `[::]` e não `0.0.0.0` porque o segundo
+    /// atende só IPv4 — degrau 2 do ADR 0022, ver [`crate::alcance`].
     ///
     /// # Errors
     ///
@@ -65,7 +66,7 @@ impl Hospedagem {
     pub async fn iniciar(porta: u16, banco: Location, nome: &str) -> Result<Self> {
         let config = DogmaConfig {
             name: nome.to_owned(),
-            listen: SocketAddr::from(([0, 0, 0, 0], porta)),
+            listen: SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, porta)),
             database: banco,
             ..DogmaConfig::default()
         };

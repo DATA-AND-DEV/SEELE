@@ -786,6 +786,11 @@ fn nome_da_falha(erro: &seele_ffi::uri::ErroDeUri) -> &'static str {
         Falha::EsquemaDesconhecido => "EsquemaDesconhecido",
         Falha::SemEndereco => "SemEndereco",
         Falha::EnderecoInvalido => "EnderecoInvalido",
+        // Falta a frase em `ui/frases.js`, e de propósito: outro agente está
+        // naquele diretório agora. Até ela chegar, `desconhecida()` mostra o
+        // nome em vez de um beco sem saída — que é o que aquele fallback existe
+        // para fazer. A frase a escrever é sobre pôr o IPv6 entre colchetes.
+        Falha::EnderecoIpv6SemColchetes => "EnderecoIpv6SemColchetes",
         Falha::ImpressaoDigitalInvalida => "ImpressaoDigitalInvalida",
         Falha::TokenInvalido => "TokenInvalido",
         Falha::CageInvalido => "CageInvalido",

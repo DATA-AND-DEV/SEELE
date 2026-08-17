@@ -34,7 +34,10 @@ async fn main() -> Result<()> {
 
     let listen: SocketAddr = std::env::args()
         .nth(1)
-        .unwrap_or_else(|| format!("0.0.0.0:{}", seele_proto::transport::DEFAULT_PORT))
+        // `[::]` e não `0.0.0.0`: o segundo atende só IPv4, e um Dogma que não
+        // atende em IPv6 não tem o degrau 2 do ADR 0022 nem quando as duas
+        // pontas têm IPv6. Ver `seele_server::alcance`.
+        .unwrap_or_else(|| format!("[::]:{}", seele_proto::transport::DEFAULT_PORT))
         .parse()
         .context("could not parse the listen address")?;
 
@@ -59,10 +62,24 @@ async fn main() -> Result<()> {
     // thing anybody does with a self-hosted voice server is try it from a
     // second computer.
     if bound.ip().is_unspecified() {
-        if let Some(lan) = lan_address() {
+        let lan = lan_address();
+        // O IPv6 global vem junto e vem primeiro, porque é o único dos dois que
+        // funciona **de fora** sem encaminhar porta nenhuma — degrau 2 do
+        // ADR 0022. O da LAN continua ali para quem está na mesma rede.
+        let global = seele_server::alcance::endereco_de_saida_v6();
+        if lan.is_some() || global.is_some() {
             println!();
             println!("na outra máquina:");
-            println!("  plug --server {lan}:{}", bound.port());
+        }
+        if let Some(seis) = global {
+            println!(
+                "  plug --server [{seis}]:{}   (pela internet, se o",
+                bound.port()
+            );
+            println!("                             firewall do roteador deixar entrar)");
+        }
+        if let Some(lan) = lan {
+            println!("  plug --server {lan}:{}   (na mesma rede)", bound.port());
         }
     }
     println!("certificate fingerprint: {}", server.fingerprint());
@@ -95,7 +112,7 @@ fn politica_aberta(server: &seele_server::Server) -> bool {
 fn uso() {
     println!("seeled — o servidor SEELE (um Dogma)");
     println!();
-    println!("  seeled [endereço]              sobe o Dogma (padrão 0.0.0.0:8383)");
+    println!("  seeled [endereço]              sobe o Dogma (padrão [::]:8383)");
     println!("  seeled senha <senha>           exige esta senha para entrar");
     println!("  seeled senha --remover         volta a aceitar qualquer um");
     println!("  seeled convite [para quem]     gera um convite de uso único");
