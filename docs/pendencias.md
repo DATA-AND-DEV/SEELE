@@ -55,8 +55,9 @@ vivem". A aritmética supõe que a perda **é** a deriva, e isso só vale com o 
 encostado no fundo *e* a diferença saindo toda em amostra perdida. Medido neste
 Mac com `cargo run --release -p seele-audio --example ritmo`, que dá voltas com a
 forma do laço de voz contra o dispositivo de verdade: o cristal da saída está a
-**13 ppm** do relógio desta máquina, não a centenas. A deriva existe, é o que a
-malha cancela, e **não era ela que estava produzindo a perda**.
+**12 ppm** do relógio desta máquina, não a centenas — e a malha, que chega ao
+número por outro caminho, pediu 9. A deriva existe, é o que a malha cancela, e
+**não era ela que estava produzindo a perda**.
 
 O que produzia era o anel não ter reserva nenhuma. Sem malha, o fundo do anel
 mediu **zero em todos os intervalos de dez segundos**, do primeiro ao último: o
@@ -75,8 +76,9 @@ pendência mede.
 
 **Medido depois**, com o mesmo `ritmo`, dez minutos, a máquina compilando Rust
 no meio: `falta` **zero**, `anel cheio` **zero**, fundo entre 494 e 733
-amostras, razão estável entre +5 e +24 ppm, nenhum grampo. Sem a malha, na mesma
-máquina: 258 amostras perdidas em sessenta segundos e fundo zero o tempo todo.
+amostras, razão estável entre +4 e +24 ppm, nenhum grampo, uma reposição (a do
+arranque). Sem a malha, na mesma máquina: 258 amostras perdidas em sessenta
+segundos, e fundo zero o tempo todo.
 
 **Sintoma.** "ÁUDIO LOCAL FALHANDO" acende sozinho e volta a acender depois de
 apagar, com o áudio audivelmente bom.
@@ -122,11 +124,10 @@ mesmo. O `drift.rs` já documentava que a correção certa é **reamostrar** —
 anel de reprodução era a tarefa M1.8.
 
 A parte que faltava a esta leitura, e que só apareceu ao medir, está no alto
-desta seção: a deriva aqui é de treze partes por milhão, e sozinha ela não
-produzia a perda. O que ela faz é **drenar qualquer reserva** — treze ppm são
-0,6 amostra por segundo, e um alvo de 21 ms leva pouco mais de vinte minutos
-para secar. Uma reserva sem malha que a segure é uma reserva que dura o começo
-da conversa. É por isso que as duas metades do conserto são uma coisa só, e é
+desta seção: a deriva aqui é de doze partes por milhão, e sozinha ela não
+produzia a perda. O que ela faz é **drenar qualquer reserva** — doze ppm são
+0,6 amostra por segundo, e um alvo de 21 ms leva meia hora para secar. Uma
+reserva sem malha que a segure é uma reserva que dura o começo da conversa. É por isso que as duas metades do conserto são uma coisa só, e é
 por isso que `specs/09-roadmap.md` pede dez minutos e não um.
 
 **O que o `:sync` mostra agora.** Além de `LAÇO volta … · reposição … · anel …`,

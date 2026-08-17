@@ -333,7 +333,7 @@ temporizador por volta — contra o dispositivo de verdade. Neste Mac, saída a
 | amostras faltando | **258** | **0** | **0** |
 | anel cheio | 0 | 0 | 0 |
 | fundo do anel, por intervalo | **0 em todos** | 487 a 754 | 494 a 733 |
-| razão pedida | — | −20 a +1 ppm | +5 a +24 ppm |
+| razão pedida | — | −20 a +1 ppm | +4 a +24 ppm |
 | grampos | — | 0 | 0 |
 | reposições | — | 1 (o arranque) | 1 (o arranque) |
 
@@ -346,12 +346,22 @@ servido inteiro ou o resto é inventado. Perda **por evento**, e não por
 vazamento uniforme, que é o que explica a tabela da pendência 2 ter 0 num
 intervalo de dez segundos e 128 no seguinte.
 
-**A deriva desta máquina é de 13 ppm**, medida por outro caminho na mesma
-corrida: o dispositivo pediu 2 880 000 quadros em 60,001 s. Não são as centenas
-de ppm que a pendência 2 supunha ao dividir a perda pelo tempo. Treze ppm são
-0,6 amostra por segundo — sozinhos não perdem nada, e drenam uma reserva de
-21 ms em pouco mais de vinte minutos. É por isso que reserva e malha são a mesma
+**A deriva desta máquina é de 12 ppm**, e ela foi medida por dois caminhos que
+não se falam. Pela contagem de quadros: o dispositivo pediu 28 800 512 quadros
+em 600,003 s de `Instant`, que dão 48 000,6 Hz — **+12 ppm**. Pela malha, que
+chegou lá olhando profundidade de anel e nada mais: **+9 ppm**. Três partes por
+milhão de diferença entre uma leitura de contador e uma malha de controle é a
+melhor evidência que este trabalho tem de que a malha está medindo o que diz
+medir.
+
+Não são as centenas de ppm que a pendência 2 supunha ao dividir a perda pelo
+tempo. Doze ppm são 0,6 amostra por segundo — sozinhos não perdem nada, e drenam
+uma reserva de 21 ms em meia hora. É por isso que reserva e malha são a mesma
 correção: a reserva para a perda de hoje, a malha faz a reserva durar.
+
+A corrida de sessenta segundos dá −13 ppm pela contagem, e isso **não** contradiz
+o número acima: um bloco de 512 quadros em 60 s são 178 ppm de quantização. Só a
+corrida longa tem resolução para o dígito.
 
 ### A malha, e por que ela é lenta
 
