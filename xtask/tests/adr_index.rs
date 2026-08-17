@@ -10,6 +10,12 @@
 //! still looks authoritative, so somebody reading it concludes the decision was
 //! never written down and makes it again — differently.
 
+#![allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "num teste, o pânico é o relatório"
+)]
+
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
