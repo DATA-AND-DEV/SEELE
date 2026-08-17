@@ -35,14 +35,30 @@ import sys
 # carrega e no qual o app não se encontra.
 POR_SUFIXO = {
     # O `.app` compactado, e não o `.dmg`: imagem de disco é coisa que uma
-    # pessoa monta e arrasta. O universal serve os dois Macs, e cada um pergunta
-    # pelo seu.
-    ".app.tar.gz": ["darwin-aarch64", "darwin-x86_64"],
+    # pessoa monta e arrasta. Quais Macs ele serve é o `alvos_do_mac` que diz.
+    ".app.tar.gz": None,
     # No Windows e no Linux o instalador **é** o pacote de atualização: o mesmo
     # arquivo que uma pessoa baixaria à mão.
     ".exe": ["windows-x86_64"],
     ".deb": ["linux-x86_64"],
 }
+
+
+def alvos_do_mac(nome: str) -> list[str]:
+    """Quais Macs este pacote serve, lido do nome do arquivo.
+
+    O workflow produz um binário universal e o chama de `_universal`; ele serve
+    os dois, e cada máquina pergunta pelo seu. Mas `empacotar/macos.sh` compila
+    **só a arquitetura da máquina onde roda** — está escrito no cabeçalho dele —
+    e um release montado assim, oferecido aos dois, entregaria a um Mac Intel um
+    app que não abre. A conferência não é hipotética: foi a falta de CI que
+    obrigou a empacotar à mão, e é nesse dia que este arquivo é escrito.
+    """
+    if "aarch64" in nome or "arm64" in nome:
+        return ["darwin-aarch64"]
+    if "x86_64" in nome or "intel" in nome:
+        return ["darwin-x86_64"]
+    return ["darwin-aarch64", "darwin-x86_64"]
 
 
 def montar(entrega: pathlib.Path, tag: str, repo: str) -> dict | None:
@@ -58,7 +74,7 @@ def montar(entrega: pathlib.Path, tag: str, repo: str) -> dict | None:
         for sufixo, alvos in POR_SUFIXO.items():
             if pacote.name.endswith(sufixo):
                 url = f"https://github.com/{repo}/releases/download/{tag}/{pacote.name}"
-                for alvo in alvos:
+                for alvo in alvos or alvos_do_mac(pacote.name):
                     plataformas[alvo] = {
                         "url": url,
                         "signature": assinatura.read_text().strip(),
