@@ -43,8 +43,8 @@ use std::time::{Duration, Instant};
 
 use seele_core::enlace::Enlace;
 use seele_core::{
-    identity, CageId, ClientMessageId, FilePinStore, LineId, MediaChannel, Room, Ssrc, SyncBand,
-    SyncInputs, SyncRatio, Voice,
+    identity, CageId, ClientMessageId, FilePinStore, LineId, MediaChannel, MessageId, PilotId,
+    Room, Ssrc, SyncBand, SyncInputs, SyncRatio, Voice,
 };
 
 pub use types::{
@@ -191,6 +191,21 @@ enum Command {
     RenameLine {
         line: LineId,
         name: String,
+    },
+    KickPilot {
+        pilot: PilotId,
+    },
+    BanPilot {
+        pilot: PilotId,
+        reason: Option<String>,
+        expires_at: Option<i64>,
+    },
+    RemoveMessage {
+        message: MessageId,
+    },
+    MovePilot {
+        pilot: PilotId,
+        cage: CageId,
     },
     Shutdown,
 }
@@ -526,6 +541,75 @@ impl Plug {
         })
     }
 
+    /// Asks the Dogma to end a pilot's session — `expulsar`.
+    ///
+    /// Asks, and reports nothing back, for the same reason [`Plug::create_cage`]
+    /// gives: the answer comes from the Dogma. The roster losing them arrives as
+    /// [`Event::RosterChanged`]; a refusal arrives as [`Event::NoticeRaised`]
+    /// carrying [`NoticeReason::PermissionDenied`].
+    ///
+    /// A shell may read [`Snapshot::may_kick`] to decide whether to draw the
+    /// control. That is **convenience, never enforcement** — pressing it
+    /// without the permission removes nobody.
+    ///
+    /// # Errors
+    ///
+    /// [`PlugError::NotConnected`] once the session is over.
+    pub fn kick_pilot(&self, pilot: u64) -> Result<(), PlugError> {
+        self.command(Command::KickPilot {
+            pilot: PilotId(pilot),
+        })
+    }
+
+    /// Asks the Dogma to bar a pilot from returning — `banir`.
+    ///
+    /// `expires_at` is seconds since the Unix epoch; `None` is permanent. The
+    /// `reason` is for whoever hosts, in their own records, and never reaches
+    /// the person barred.
+    ///
+    /// # Errors
+    ///
+    /// [`PlugError::NotConnected`] once the session is over.
+    pub fn ban_pilot(
+        &self,
+        pilot: u64,
+        reason: Option<String>,
+        expires_at: Option<i64>,
+    ) -> Result<(), PlugError> {
+        self.command(Command::BanPilot {
+            pilot: PilotId(pilot),
+            reason,
+            expires_at,
+        })
+    }
+
+    /// Asks the Dogma to take a message off its Line — `remover_mensagem`.
+    ///
+    /// It goes away for everybody, this client included, when the Dogma says so.
+    /// An author removing their own needs no permission, which is why a shell
+    /// drawing this control on one's own message may draw it for anybody.
+    ///
+    /// # Errors
+    ///
+    /// [`PlugError::NotConnected`] once the session is over.
+    pub fn remove_message(&self, message: u64) -> Result<(), PlugError> {
+        self.command(Command::RemoveMessage {
+            message: MessageId(message),
+        })
+    }
+
+    /// Asks the Dogma to move a pilot into a Cage — `mover_piloto`.
+    ///
+    /// # Errors
+    ///
+    /// [`PlugError::NotConnected`] once the session is over.
+    pub fn move_pilot(&self, pilot: u64, cage: u32) -> Result<(), PlugError> {
+        self.command(Command::MovePilot {
+            pilot: PilotId(pilot),
+            cage: CageId(cage),
+        })
+    }
+
     /// Mutes or unmutes the microphone — A.T. Field.
     ///
     /// Announced to the Dogma as well as applied locally: the roster shows it,
@@ -793,6 +877,14 @@ impl Plug {
             may_manage_cages: room
                 .permissions
                 .contains(&seele_core::Permission::ManageCages),
+            may_kick: room.permissions.contains(&seele_core::Permission::Kick),
+            may_ban: room.permissions.contains(&seele_core::Permission::Ban),
+            may_remove_message: room
+                .permissions
+                .contains(&seele_core::Permission::RemoveMessage),
+            may_move_pilot: room
+                .permissions
+                .contains(&seele_core::Permission::MovePilot),
             ended: room.ended.map(|end| end.reason.into()),
         }
     }
@@ -1397,6 +1489,37 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
                 return false;
             }
         }
+        // Nothing is written into the local `Room` for these either, and for a
+        // sharper version of the reason above: what a moderation verb changes
+        // is somebody **else's** session. The only honest source for "they are
+        // gone" is the `PilotLeft` the Dogma sends when it is true. Marking it
+        // here would draw a roster the person who pressed the button is alone
+        // in believing — and draw it identically whether the server did it or
+        // refused, which is the exact difference the button exists to expose.
+        Command::KickPilot { pilot } => {
+            if client.expulsar(pilot).await.is_err() {
+                return false;
+            }
+        }
+        Command::BanPilot {
+            pilot,
+            reason,
+            expires_at,
+        } => {
+            if client.banir(pilot, reason, expires_at).await.is_err() {
+                return false;
+            }
+        }
+        Command::RemoveMessage { message } => {
+            if client.remover_mensagem(message).await.is_err() {
+                return false;
+            }
+        }
+        Command::MovePilot { pilot, cage } => {
+            if client.mover_piloto(pilot, cage).await.is_err() {
+                return false;
+            }
+        }
         Command::Shutdown => return false,
     }
     true
@@ -1849,6 +1972,72 @@ mod tests {
         assert!(
             !plug.snapshot().may_manage_cages,
             "the snapshot went on offering the control after the permission went away"
+        );
+    }
+
+    #[test]
+    fn the_snapshot_answers_each_moderation_verb_on_its_own() {
+        // Four permissions, four questions, four booleans — and not one
+        // `may_moderate`. `specs/04-servidor-seele.md` enumerates them
+        // separately and a role may carry any subset, so collapsing them here
+        // would draw the ban control for somebody who may only kick, and put a
+        // shell in the position of teaching people that half its buttons say no.
+        use seele_core::{Permission, ServerMessage, SessionId, Ssrc};
+
+        let shared = bare_shared();
+        let (commands, _queue) = tokio::sync::mpsc::unbounded_channel();
+        let plug = Plug {
+            commands,
+            shared: Arc::clone(&shared),
+        };
+
+        let sessao = |permissions: Vec<Permission>| ServerMessage::Session {
+            id: SessionId(1),
+            pilot: seele_core::PilotId(7),
+            ssrc: Ssrc(700),
+            dogma: "Terceira Tóquio".into(),
+            cages: Vec::new(),
+            lines: Vec::new(),
+            roles: Vec::new(),
+            permissions,
+        };
+
+        fold(&shared, &sessao(vec![Permission::Speak]));
+        let nada = plug.snapshot();
+        assert!(!nada.may_kick);
+        assert!(!nada.may_ban);
+        assert!(!nada.may_remove_message);
+        assert!(!nada.may_move_pilot);
+
+        // An Operador holding exactly one of the four. The assertion that
+        // matters is the three `false`s beside the one `true`.
+        fold(&shared, &sessao(vec![Permission::Speak, Permission::Kick]));
+        let so_expulsa = plug.snapshot();
+        assert!(so_expulsa.may_kick);
+        assert!(
+            !so_expulsa.may_ban && !so_expulsa.may_remove_message && !so_expulsa.may_move_pilot,
+            "one moderation permission lit up the other three"
+        );
+
+        fold(
+            &shared,
+            &sessao(vec![
+                Permission::Kick,
+                Permission::Ban,
+                Permission::RemoveMessage,
+                Permission::MovePilot,
+            ]),
+        );
+        let tudo = plug.snapshot();
+        assert!(tudo.may_kick && tudo.may_ban && tudo.may_remove_message && tudo.may_move_pilot);
+
+        // And they go away again. A snapshot that latched would go on offering
+        // a control after a Comandante revoked it.
+        fold(&shared, &sessao(Vec::new()));
+        let depois = plug.snapshot();
+        assert!(
+            !depois.may_kick && !depois.may_ban && !depois.may_remove_message,
+            "the snapshot went on offering the controls after the permissions went away"
         );
     }
 
