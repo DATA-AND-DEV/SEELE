@@ -3753,7 +3753,7 @@ fn every_failure_the_rust_side_can_name_has_a_sentence_here() {
 
 #[test]
 fn every_rung_of_the_reachability_ladder_has_a_sentence() {
-    // `Anfitriao.alcance` crosses as one of three stable names from
+    // `Anfitriao.alcance` crosses as one of four stable names from
     // `seele_server::alcance::Degrau`, and the sentence is here. Same seam as
     // `nome_da_falha` above, and the same failure if it drifts — except worse,
     // because this one is not an error: hosting succeeded, and the missing
@@ -3762,7 +3762,12 @@ fn every_rung_of_the_reachability_ladder_has_a_sentence() {
     // ADR 0022 asks for exactly this to be said out loud rather than left for
     // the person to discover as "it doesn't connect".
     let frases = read("ui/frases.js");
-    for degrau in ["PortaNoRoteador", "Ipv6Direto", "SoRedeLocal"] {
+    for degrau in [
+        "PortaNoRoteador",
+        "Ipv6Direto",
+        "RedeLocalOuVpn",
+        "SoRedeLocal",
+    ] {
         assert!(
             frases.contains(&format!("{degrau}:")),
             "the ladder can stop at `{degrau}` and no sentence says what that \
@@ -3786,6 +3791,45 @@ fn every_rung_of_the_reachability_ladder_has_a_sentence() {
         frase.to_lowercase().contains("roteador") || frase.to_lowercase().contains("vpn"),
         "the LAN-only sentence names the problem and no way out — ADR 0022 asks \
          for the way out to be written down:\n{frase}"
+    );
+}
+
+#[test]
+fn the_vpn_rung_names_the_vpn_and_says_what_to_do_about_it() {
+    // The rung that exists because of a field failure: a Windows host with
+    // Cloudflare WARP had a global IPv6 — the tunnel's — and the ladder read it
+    // as "reachable from anywhere", printed under a link that accepts no
+    // inbound connection at all. The rung is only worth its own name if the
+    // sentence says the thing the other three cannot: that a VPN is why, and
+    // that turning it off is the way out.
+    let frases = read("ui/frases.js");
+    let Some(depois) = frases.split("RedeLocalOuVpn:").nth(1) else {
+        panic!("no sentence for RedeLocalOuVpn");
+    };
+    // Bounded to this entry's own text, and comment-free: the block above it in
+    // `frases.js` explains the field failure using every one of these words, so
+    // an unscoped search would be satisfied by the justification instead of the
+    // sentence.
+    let frase: String = depois
+        .split("SoRedeLocal:")
+        .next()
+        .unwrap_or_default()
+        .lines()
+        .filter(|linha| !linha.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        frase.to_lowercase().contains("vpn"),
+        "the sentence never says a VPN is why the link reaches no further, which          is the only thing this rung knows that `SoRedeLocal` does not:\n{frase}"
+    );
+    assert!(
+        frase.to_lowercase().contains("desligue") || frase.to_lowercase().contains("desligar"),
+        "the sentence names the cause and withholds the fix — ADR 0022 asks for          the way out to be written down:\n{frase}"
+    );
+    assert!(
+        !frase.to_lowercase().contains("alcança de qualquer lugar"),
+        "the VPN rung repeats the promise that was the bug:\n{frase}"
     );
 }
 
@@ -3870,6 +3914,15 @@ fn the_host_is_told_how_far_the_link_they_are_about_to_send_reaches() {
         "`mostrarAlcance` treats every rung alike, so the one that means `your \
          friends cannot reach this` looks exactly like the two that mean they \
          can:\n{mostrar}"
+    );
+    // And the rung that looks like good news and is not: a host on a browsing
+    // VPN has an address that reads as global and accepts nobody. Drawing it
+    // like the two rungs that do reach outside is the same lie the ladder used
+    // to tell, moved one layer up.
+    assert!(
+        mostrar.contains("RedeLocalOuVpn"),
+        "`mostrarAlcance` draws the VPN rung as if it reached the world, which \
+         is exactly the promise this rung exists to stop making:\n{mostrar}"
     );
 
     // And the colour it may not spend. `tokens.css` reserves red for alarm and

@@ -91,6 +91,7 @@ fn nascer(nome: &str) -> String {
 fn conectar(endereco: SocketAddr, apelido: &str) -> Result<Arc<Plug>, PlugError> {
     Plug::connect(ConnectConfig {
         server: endereco.to_string(),
+        alternate_servers: Vec::new(),
         nickname: apelido.to_owned(),
         home: casa(apelido),
         join_secret: None,

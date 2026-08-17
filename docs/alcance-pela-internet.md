@@ -17,10 +17,30 @@ ele tenta e depois **conta o que conseguiu**, junto do link.
 |---|---|---|
 | **3 — porta no roteador** | O SEELE pediu a porta ao seu roteador (UPnP) e ele abriu | praticamente todo mundo |
 | **2 — IPv6 direto** | Sua máquina tem endereço IPv6 público; não há NAT no caminho | só quem também tiver IPv6 |
+| **1 — rede local, ou a mesma VPN** | Nenhum dos dois deu, e o único endereço que sai daqui é de uma VPN | quem estiver na sua casa, ou na mesma VPN |
 | **1 — só a rede local** | Nenhum dos dois deu | só quem estiver na sua casa |
 
 Nada disso passa por servidor nosso nem de terceiro. O degrau 3 é uma conversa
 entre o seu computador e o **seu** roteador; o degrau 2 nem isso.
+
+## O link leva mais de um endereço, de propósito
+
+A sua máquina tem vários endereços, e **nenhum deles serve para todo mundo**: o
+da sua rede não é alcançável de fora, e o público que o roteador abriu quase
+sempre não volta para dentro da sua própria casa (a maioria dos roteadores
+domésticos não faz isso — chama-se *hairpin*, e é a explicação de "funciona
+para o meu amigo do outro estado e não para quem está na sala ao lado").
+
+Por isso o link carrega todos, na ordem em que valem a pena: **o da sua rede
+primeiro**, depois o global, depois a porta do roteador, e uma VPN por último.
+Quem recebe tenta um de cada vez e para no primeiro que atender. Na mesma casa a
+conexão sai imediatamente, sem esperar por um caminho que não volta.
+
+Isto mudou na versão seguinte à 0.5.0, e vale saber por quê: a 0.5.0 punha no
+link **só** o endereço do degrau mais alto, e com isso quebrou o caso que sempre
+funcionou — os dois na mesma rede. Um link antigo, de um endereço só, continua
+sendo aceito, e um cliente antigo lê o primeiro endereço do link novo e ignora o
+resto.
 
 ## O que a tela te diz, e o que fazer com cada resposta
 
@@ -49,6 +69,39 @@ Duas coisas podem atrapalhar mesmo com IPv6 dos dois lados:
   **8383/UDP**.
 - **Endereços que mudam.** Muitos provedores trocam o prefixo IPv6 de tempos em
   tempos. Um link gerado ontem pode não valer hoje. Gere um novo.
+
+### "Este link funciona na sua rede, ou para quem estiver na mesma VPN"
+
+Você está com uma **VPN ligada**, e ela é o único caminho que sai desta máquina.
+
+Isto não é a VPN atrapalhando por acaso: é o que uma VPN faz. Ela captura o
+tráfego de saída, e o endereço que ela te dá é dela, não da sua casa. VPN de
+navegação — Cloudflare WARP, Proton, Nord, Mullvad — **não aceita conexão de
+entrada**: você alcança o mundo por ela, o mundo não te alcança.
+
+Pior: o endereço IPv6 que uma dessas VPNs te dá é um endereço global de
+verdade, e por fora não há como distinguir. Até a versão seguinte à 0.5.0 o
+SEELE olhava para ele, concluía "degrau 2" e escrevia "alcança de qualquer
+lugar" embaixo de um link que não aceitava ninguém. Era exatamente o silêncio
+que este documento existe para não deixar acontecer — só que com uma frase
+confiante em cima.
+
+O que fazer:
+
+- **Se quem vai entrar está na sua rede**, nada. O link leva também o endereço
+  da sua casa, e é o primeiro que ele tenta.
+- **Se quem vai entrar está longe**, desligue a VPN e hospede de novo — aí o
+  SEELE volta a poder pedir a porta ao roteador, e o degrau 3 entra em jogo.
+- **Ou ponham os dois na mesma VPN**, e aí o endereço da VPN passa a servir. É
+  a diferença entre uma VPN de navegação e uma **VPN de rede** (Tailscale,
+  WireGuard, ZeroTier): a segunda existe para os dois lados se enxergarem, e
+  funciona inclusive com CGNAT dos dois lados.
+
+Um detalhe que morde na hora de conferir: com VPN ligada, o endereço que o
+comando de rede da sua máquina mostra como "o meu" costuma ser o do túnel. O
+endereço que interessa é o da placa de rede — o `192.168.x.x` ou `10.x.x.x`. O
+SEELE agora procura pelas interfaces, e não pelo caminho de saída, exatamente
+por isso.
 
 ### "Este link só funciona na sua rede"
 
@@ -105,6 +158,52 @@ outra pessoa. O ADR 0022 põe isso fora de escopo por decisão. Um produto que
 existe para não ter ninguém no meio não passa a ter ninguém no meio para cobrir
 os últimos casos.
 
+## O firewall da sua máquina — o Windows, principalmente
+
+Tudo acima é sobre o caminho até a sua máquina. Falta a última porta, que é a
+da própria máquina, e no Windows ela é fechada por padrão.
+
+**A caixa "Permitir que este aplicativo se comunique nas redes" pode nunca
+aparecer.** Se você está esperando por ela, pare de esperar: para escuta UDP de
+programa de console ela não aparece mesmo, e o pacote é descartado sem aviso
+nenhum, dos dois lados. Foi assim num caso real, e o dono da máquina teve de
+abrir a porta à mão.
+
+São duas coisas, e as duas precisam estar certas:
+
+**1. A rede tem de ser "Particular".** Uma rede marcada como "Pública" bloqueia
+praticamente toda entrada, e o Windows marca assim toda rede nova. Confira e
+corrija no PowerShell, como administrador:
+
+```powershell
+Get-NetConnectionProfile
+Set-NetConnectionProfile -Name "<o nome da sua rede>" -NetworkCategory Private
+```
+
+**2. A porta 8383/UDP tem de ter regra de entrada.** Também no PowerShell, como
+administrador:
+
+```powershell
+New-NetFirewallRule -DisplayName "SEELE Dogma" -Direction Inbound `
+  -Protocol UDP -LocalPort 8383 -Action Allow -Profile Private
+```
+
+Para conferir que o Dogma está mesmo escutando, e **em quê**:
+
+```powershell
+Get-NetUDPEndpoint -LocalPort 8383
+```
+
+Se aparecer `0.0.0.0`, ele está atendendo só em IPv4 nesta máquina — o Windows
+abre socket IPv6 sem IPv4 junto por padrão, e o SEELE recua para IPv4 quando a
+pilha dupla não sai. Isso é esperado, e a partir da versão seguinte à 0.5.0 o
+link deixa de anunciar endereço IPv6 quando isso acontece (anunciava, e ninguém
+entrava por ele: não havia nada escutando ali).
+
+No macOS e no Linux o caso é bem mais raro. No macOS, se o firewall estiver
+ligado, ele pergunta na primeira execução e basta permitir; no Linux, `ufw allow
+8383/udp` ou o equivalente do seu firewall.
+
 ## As saídas que sempre funcionam
 
 Em ordem de trabalho, do menos ao mais:
@@ -129,10 +228,15 @@ forwarding*) e crie uma regra:
 Depois disso o link do degrau 1 passa a funcionar de fora — é o degrau 1 do
 ADR 0022, o que sempre funcionou.
 
-**4. Uma VPN entre vocês.** Tailscale, WireGuard, ZeroTier. Funciona hoje,
-funciona em qualquer situação, inclusive CGNAT dos dois lados. Não é a resposta
-oficial do projeto porque transfere o problema para outro produto e outra conta
-— mas se você tem pressa, é o que eu recomendaria.
+**4. Uma VPN de rede entre vocês.** Tailscale, WireGuard, ZeroTier. Funciona
+hoje, funciona em qualquer situação, inclusive CGNAT dos dois lados. Não é a
+resposta oficial do projeto porque transfere o problema para outro produto e
+outra conta — mas se você tem pressa, é o que eu recomendaria.
+
+**Não confunda com VPN de navegação** (WARP, Proton, Nord): aquelas escondem
+você e não deixam ninguém entrar, e ligadas na máquina que hospeda elas
+**atrapalham** — veja a seção sobre isso acima. As duas coisas se chamam "VPN" e
+fazem trabalhos opostos aqui.
 
 **5. Hospedar numa VPS.** Uma máquina virtual barata tem endereço público e
 nenhum NAT. É o caminho de quem hospeda a sério, e é para isso que o `seeled`
@@ -152,7 +256,11 @@ CGNAT com certeza: essa faixa existe só para isso.
 
 ## Para quem for mexer no código
 
-A escada está em `crates/seele-server/src/alcance.rs`, e o degrau 3 em
-`crates/seele-server/src/alcance/porta.rs`. Os motivos de recusa são o enum
+A escada está em `crates/seele-server/src/alcance.rs`, o degrau 3 em
+`crates/seele-server/src/alcance/porta.rs`, e a descoberta de endereços — a que
+pergunta às interfaces em vez de à rota padrão, por causa da VPN — em
+`crates/seele-server/src/alcance/interfaces.rs`. A lista de endereços dentro do
+link é o `alt=` do `crates/seele-proto/src/uri.rs`, e quem tenta um de cada vez
+é `Enlace::conectar_entre`, em `crates/seele-core/src/enlace.rs`. Os motivos de recusa são o enum
 `FalhaAoAbrir`, e cada um vira uma das frases desta página. As frases que a
 pessoa lê no app estão em `apps/seele-app/ui/frases.js`, como todas as outras.

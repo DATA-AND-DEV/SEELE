@@ -10,6 +10,19 @@
 //!
 //! **Endereço** — obrigatório. Sem ele não há nada.
 //!
+//! **`alt`, os outros endereços do mesmo Dogma** — opcional, e a resposta a um
+//! defeito de campo. Uma máquina tem vários endereços, e nenhum deles serve
+//! para todo mundo: o da rede de casa não é alcançável de fora, o público que o
+//! roteador abriu costuma não voltar para dentro — muitos roteadores domésticos
+//! não fazem *hairpin* —, e o de uma VPN só serve a quem estiver na mesma VPN.
+//! Enquanto o convite levava **um** endereço, alguma dessas situações sempre
+//! perdia, e quem descobria era o amigo do outro lado, como "não conecta".
+//!
+//! O primeiro endereço continua sendo o do texto principal, e é ele que um
+//! cliente antigo lê — por isso ele é o da rede local, que é o caso comum e o
+//! que sempre funcionou. Os outros vêm em `alt`, separados por vírgula, na
+//! ordem em que se tenta.
+//!
 //! **`fp`, a impressão digital** — opcional e o motivo principal de isto
 //! existir. O ADR 0003 fixa a chave do servidor no primeiro contato, e até aqui
 //! esse primeiro contato era **cego**: o cliente aceitava o que aparecesse e
@@ -39,11 +52,30 @@ pub const ESQUEMA: &str = "seele://";
 /// Porta padrão, quando o texto não traz uma.
 pub const PORTA_PADRAO: u16 = crate::transport::DEFAULT_PORT;
 
+/// Quantos endereços cabem num convite.
+///
+/// Quatro, contando o principal. Cada um custa a quem recebe uma tentativa com
+/// prazo antes de a sala abrir, e o link é para colar numa conversa. Um convite
+/// que traga mais que isto não é recusado — os excedentes são ignorados, pela
+/// mesma razão que um parâmetro desconhecido é: recusar link novo é o que faz
+/// cliente velho virar parede.
+pub const LIMITE_DE_ALVOS: usize = 4;
+
 /// Um convite para entrar num Dogma.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Convite {
     /// `host` ou `host:porta`, como estava escrito.
+    ///
+    /// O primeiro endereço a tentar, e o único que um cliente anterior a este
+    /// campo enxerga. Por isso ele é o da rede local: é o caso comum e o que
+    /// sempre funcionou.
     pub alvo: String,
+    /// Os outros endereços do mesmo Dogma, na ordem em que se tenta.
+    ///
+    /// Vazio num convite antigo, e é assim que a compatibilidade se resolve nos
+    /// dois sentidos: um convite de antes vira uma lista de um, e um cliente de
+    /// antes lê `alt` como parâmetro desconhecido e o ignora.
+    pub alternativos: Vec<String>,
     /// Impressão digital esperada do certificado, se o link a trouxe.
     pub impressao_digital: Option<String>,
     /// Token de uso único, se o link o trouxe.
@@ -58,10 +90,42 @@ impl Convite {
     pub fn novo(alvo: impl Into<String>) -> Self {
         Self {
             alvo: alvo.into(),
+            alternativos: Vec::new(),
             impressao_digital: None,
             token: None,
             cage: None,
         }
+    }
+
+    /// Acrescenta os outros endereços do mesmo Dogma, na ordem de tentativa.
+    ///
+    /// Endereço repetido é descartado, e a lista inteira cabe em
+    /// [`LIMITE_DE_ALVOS`] contando o principal — quem monta o convite não
+    /// precisa saber o limite de cor.
+    #[must_use]
+    pub fn com_alternativos<T: Into<String>>(
+        mut self,
+        alternativos: impl IntoIterator<Item = T>,
+    ) -> Self {
+        for alternativo in alternativos {
+            let alternativo = alternativo.into();
+            if alternativo == self.alvo || self.alternativos.contains(&alternativo) {
+                continue;
+            }
+            if self.alternativos.len() + 1 >= LIMITE_DE_ALVOS {
+                break;
+            }
+            self.alternativos.push(alternativo);
+        }
+        self
+    }
+
+    /// Todos os endereços deste convite, na ordem em que se tenta.
+    ///
+    /// O principal primeiro. É o que quem conecta percorre, e num convite
+    /// antigo tem um item só — o caminho de antes, sem desvio.
+    pub fn candidatos(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.alvo.as_str()).chain(self.alternativos.iter().map(String::as_str))
     }
 
     /// Acrescenta a impressão digital do certificado.
@@ -93,6 +157,16 @@ impl Convite {
     /// falha para um montado à mão com [`Convite::novo`].
     pub fn endereco(&self) -> Result<Alvo<'_>, ErroDeUri> {
         separar(&self.alvo)
+    }
+
+    /// Todos os endereços já separados em máquina e porta, na ordem.
+    ///
+    /// # Errors
+    ///
+    /// O mesmo de [`Convite::endereco`], e pelo mesmo motivo: não falha para um
+    /// convite vindo de [`analisar`].
+    pub fn enderecos(&self) -> Result<Vec<Alvo<'_>>, ErroDeUri> {
+        self.candidatos().map(separar).collect()
     }
 }
 
@@ -133,6 +207,14 @@ impl fmt::Display for Convite {
         write!(formatador, "{ESQUEMA}{}", self.alvo)?;
 
         let mut separador = '?';
+        // Antes da impressão digital e do token de propósito: um link cortado
+        // na colagem perde o fim, e o fim tem de ser a parte cuja falta é
+        // recusada em voz alta — a impressão digital — e não a que sumiria
+        // calada, custando um endereço a quem tentar.
+        if !self.alternativos.is_empty() {
+            write!(formatador, "{separador}alt={}", self.alternativos.join(","))?;
+            separador = '&';
+        }
         if let Some(impressao) = &self.impressao_digital {
             write!(formatador, "{separador}fp={impressao}")?;
             separador = '&';
@@ -186,6 +268,22 @@ pub fn analisar(texto: &str) -> Result<Convite, ErroDeUri> {
             "convite" => {
                 validar_token(valor)?;
                 convite.token = Some(valor.to_ascii_uppercase());
+            }
+            // Os outros endereços do mesmo Dogma. Cada um é validado como o
+            // principal: este texto termina num `connect` igual ao outro.
+            "alt" => {
+                for alternativo in valor.split(',').filter(|parte| !parte.is_empty()) {
+                    validar_alvo(alternativo)?;
+                    if alternativo == convite.alvo
+                        || convite.alternativos.iter().any(|ja| ja == alternativo)
+                    {
+                        continue;
+                    }
+                    if convite.alternativos.len() + 1 >= LIMITE_DE_ALVOS {
+                        break;
+                    }
+                    convite.alternativos.push(alternativo.to_owned());
+                }
             }
             "cage" => {
                 convite.cage = Some(valor.parse().map_err(|_| ErroDeUri::CageInvalido)?);
@@ -420,6 +518,99 @@ mod tests {
                 "passou: {ruim}"
             );
         }
+    }
+
+    #[test]
+    fn um_convite_com_varios_enderecos_vai_e_volta_na_ordem() {
+        // A ordem **é** o conteúdo: o primeiro é o da rede de casa, e é ele que
+        // faz quem está na sala ao lado entrar sem esperar o prazo de um
+        // endereço público que não volta para dentro.
+        let original = Convite::novo("192.168.0.30:8383")
+            .com_alternativos(["[2001:db8::1]:8383", "203.0.113.7:9000"])
+            .com_impressao_digital(FP);
+
+        let texto = original.to_string();
+        let lido = analisar(&texto).expect("analisar");
+        assert_eq!(lido, original, "o convite não voltou igual: {texto}");
+        assert_eq!(
+            lido.candidatos().collect::<Vec<_>>(),
+            vec![
+                "192.168.0.30:8383",
+                "[2001:db8::1]:8383",
+                "203.0.113.7:9000"
+            ],
+            "a ordem dos endereços mudou ao atravessar o link: {texto}"
+        );
+        assert_eq!(lido.enderecos().expect("separar todos").len(), 3);
+    }
+
+    #[test]
+    fn um_convite_de_um_endereco_so_continua_sendo_o_de_antes() {
+        // Compatibilidade para trás, e ela é literal: um convite gerado por uma
+        // versão anterior tem de virar exatamente o que virava, uma lista de
+        // um, sem `alt` nenhum no texto.
+        let antigo = "seele://dogma.exemplo:8383";
+        let lido = analisar(antigo).expect("analisar");
+        assert!(lido.alternativos.is_empty());
+        assert_eq!(
+            lido.candidatos().collect::<Vec<_>>(),
+            vec!["dogma.exemplo:8383"]
+        );
+        assert_eq!(lido.to_string(), antigo, "o convite antigo mudou de forma");
+    }
+
+    #[test]
+    fn um_cliente_que_nao_conhece_alt_le_o_primeiro_endereco() {
+        // Compatibilidade para frente. Um cliente anterior a este campo cai na
+        // regra do parâmetro desconhecido e usa `alvo` — que por isso é o
+        // endereço da rede local, e não o do degrau mais alto: quem tem cliente
+        // velho volta a ter o comportamento que sempre funcionou, em vez de um
+        // endereço público que a casa dele não devolve para dentro.
+        let texto = Convite::novo("192.168.0.30:8383")
+            .com_alternativos(["203.0.113.7:9000"])
+            .to_string();
+        let (antes, _) = texto.split_once("alt=").expect("o link não tem `alt`");
+        let como_o_velho_veria = antes.trim_end_matches(['?', '&']);
+        let velho = analisar(como_o_velho_veria).expect("analisar sem o alt");
+        assert_eq!(velho.alvo, "192.168.0.30:8383");
+    }
+
+    #[test]
+    fn um_endereco_alternativo_torto_e_recusado_como_o_principal() {
+        // Este texto termina num `connect` igual ao outro. Um alternativo que
+        // passasse sem conferência seria uma segunda porta de entrada com
+        // metade da validação da primeira.
+        for ruim in ["host 8383", "host;rm -rf /", "host|nc atacante 1"] {
+            assert_eq!(
+                analisar(&format!("seele://192.168.0.30:8383?alt={ruim}")),
+                Err(ErroDeUri::EnderecoInvalido),
+                "passou como alternativo: {ruim}"
+            );
+        }
+        // E um IPv6 cru continua dizendo o que fazer, também aqui.
+        assert_eq!(
+            analisar("seele://192.168.0.30:8383?alt=2001:db8::1"),
+            Err(ErroDeUri::EnderecoIpv6SemColchetes)
+        );
+    }
+
+    #[test]
+    fn o_link_nao_cresce_sem_limite_nem_repete_endereco() {
+        // Cada endereço custa uma tentativa com prazo a quem recebe. E um
+        // excedente é **ignorado**, não recusado: recusar link novo é o que faz
+        // cliente velho virar parede, e a mesma regra vale para nós.
+        let muitos: Vec<String> = (1..=9).map(|n| format!("192.168.0.{n}:8383")).collect();
+        let convite = Convite::novo("192.168.0.30:8383").com_alternativos(muitos.clone());
+        assert_eq!(convite.candidatos().count(), LIMITE_DE_ALVOS);
+
+        let texto = format!("seele://192.168.0.30:8383?alt={}", muitos.join(","));
+        let lido = analisar(&texto).expect("o excedente derrubou o link inteiro");
+        assert_eq!(lido.candidatos().count(), LIMITE_DE_ALVOS);
+
+        // Repetir o principal em `alt` é desperdício de tentativa, não erro.
+        let repetido = Convite::novo("192.168.0.30:8383")
+            .com_alternativos(["192.168.0.30:8383", "192.168.0.30:8383"]);
+        assert_eq!(repetido.candidatos().count(), 1);
     }
 
     #[test]

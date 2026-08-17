@@ -730,3 +730,62 @@ esperava o prazo inteiro por um eco que nunca vinha.
 
 Da mesma família da pendência 1 — destruía dado em silêncio —, por mecanismo
 diferente.
+
+## 20 · Fechada em 2026-08-17 · O convite anunciava um endereço que ninguém na mesma rede alcança
+
+**Sintoma, de campo e não hipotético.** Um Windows hospedando e um Mac na mesma
+casa. O Windows entra no Mac sem esforço; **o Mac não entra no Windows**. O link
+saía com cara de certo e com a frase «alcança de qualquer lugar» embaixo dele.
+
+**Três defeitos independentes, com o mesmo sintoma.**
+
+1. **A escada declarava degrau que o socket não servia.** `Escada::subir`
+   recebia só a porta. Naquela máquina a pilha dupla falhou e o Dogma recuou
+   para `0.0.0.0` — comportamento certo, e medido: `Get-NetUDPEndpoint` mostrou
+   `0.0.0.0:8383`. A escada, sem saber disso, achou o IPv6 global da máquina e
+   declarou degrau 2. O convite anunciava um endereço IPv6 onde ninguém
+   escutava. Independe de VPN: morde qualquer máquina cuja pilha dupla falhe, ou
+   seja, Windows e os BSD. O predicado necessário — `Pilha::alcanca_ipv6` — já
+   existia e não era perguntado a ninguém.
+2. **A descoberta de endereço seguia a rota padrão**, que o Cloudflare WARP
+   capturava. `endereco_de_saida_v4` abre um socket UDP e lê o `local_addr`, o
+   que responde «qual endereço meu o sistema usaria para sair» — com VPN, o do
+   túnel. O `192.168.0.30` da Ethernet não existia para o produto: nem no
+   convite, nem no pedido de porta ao roteador, que mandava encaminhar para um
+   endereço inexistente naquela rede. E o IPv6 do túnel é um unicast global de
+   verdade, então passava por «IPv6 direto» sem nada que o distinguisse.
+3. **O convite levava um endereço só**, o do degrau mais alto. Enquanto for um
+   só, alguma situação sempre perde: o de fora não serve para quem está dentro —
+   a maioria dos roteadores domésticos não faz *hairpin* — e o de dentro não
+   serve para quem está fora. Isto tirou o caso que **já funcionava**: até a
+   0.4.x o convite levava o endereço da rede local.
+
+**Como fechou.** Os três consertos são diferentes e estão nos commits desta
+entrada. `Escada::subir` passou a receber uma `Escuta` (porta e `Pilha`), e todo
+endereço que entra num `Alcance` passa por um construtor privado que pergunta ao
+socket — não dá para afirmar alcance sem perguntar, porque não há outro caminho
+até o endereço. A descoberta passou a enumerar interfaces (`if-addrs`, um crate,
+`libc` como única dependência), classificando placa de rede, túnel e ponte
+virtual; o degrau 3 escolhe o endereço interno contra a sub-rede do roteador,
+que é conta exata e não heurística. E o `seele://` ganhou `alt=`, com a lista
+ordenada — rede de casa primeiro — e o cliente tentando um de cada vez.
+
+Um degrau novo apareceu junto, `RedeLocalOuVpn`, para o caso em que o único
+endereço que sai da máquina é de uma VPN: o que a pessoa faz a respeito é
+desligar a VPN, e não mexer no roteador, e é esse o critério que o projeto usa
+para separar variantes.
+
+**A metade que não é código.** O firewall do Windows era a outra metade do
+sintoma e foi resolvido à mão pelo dono: perfil da rede para `Private` e regra
+de entrada UDP 8383. A caixa «Permitir que este aplicativo se comunique» **nunca
+apareceu**, e é o esperado para escuta UDP de programa de console — quem espera
+por ela espera para sempre. Está documentado em `docs/alcance-pela-internet.md`,
+junto com a VPN.
+
+**O que ficou de fora, e é pequeno.** Um Dogma hospedado numa máquina com IPv4
+público direto — uma VPS, ou uma casa sem NAT — e sem UPnP continua caindo em
+`SoRedeLocal`, cuja frase diz «só funciona na sua rede» quando na verdade
+funciona de qualquer lugar. É um erro na direção segura (promete menos do que
+entrega), não mudou nesta rodada, e a classificação de endereços que entrou
+agora deixa o conserto barato: falta só o degrau que lê «este endereço é global e
+está numa placa de rede».

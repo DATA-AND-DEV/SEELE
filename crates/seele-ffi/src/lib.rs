@@ -122,6 +122,13 @@ const HISTORY_PAGE: u16 = 50;
 pub struct ConnectConfig {
     /// `host` or `host:port`.
     pub server: String,
+    /// The invite's other addresses for the same Dogma, in try order.
+    ///
+    /// Empty for an address typed by hand, and for every invite written before
+    /// ADR 0006 grew the field. One address per entry, same syntax as
+    /// [`ConnectConfig::server`]; one that does not resolve is dropped rather
+    /// than refused, because losing a path is not a reason to lose the link.
+    pub alternate_servers: Vec<String>,
     /// How to appear in the roster.
     pub nickname: String,
     /// Where the identity and the pins live. ADR 0017.
@@ -395,6 +402,16 @@ impl Plug {
     /// be able to write its own sentence for each one.
     pub fn connect(config: ConnectConfig) -> Result<(Arc<Self>, Trust), PlugError> {
         let (address, server_name, pin_key) = resolve(&config.server)?;
+        // The invite's other addresses, resolved here so the driver thread gets
+        // values. An alternative that does not resolve is dropped: the first
+        // address is the one the person is most likely on the same network as,
+        // and refusing the whole link over a spare would trade one path fewer
+        // for no path at all.
+        let alternates: Vec<(SocketAddr, String, String)> = config
+            .alternate_servers
+            .iter()
+            .filter_map(|alternate| resolve(alternate).ok())
+            .collect();
 
         let home = PathBuf::from(&config.home);
         let key = identity::load_or_create(&home.join("identity.key")).map_err(|error| {
@@ -447,6 +464,7 @@ impl Plug {
                     address,
                     server_name,
                     pin_key,
+                    alternates,
                     key,
                     pins,
                     thread_shared,
@@ -1244,6 +1262,7 @@ async fn drive(
     address: SocketAddr,
     server_name: String,
     pin_key: String,
+    alternates: Vec<(SocketAddr, String, String)>,
     key: seele_core::SigningKey,
     pins: Arc<FilePinStore>,
     shared: Arc<Shared>,
@@ -1257,8 +1276,13 @@ async fn drive(
     // `Enlace` e não `Client`: é a sessão que atravessa quedas, com a bateria
     // interna dentro. Antes disto, o app pulava de "conectado" para "encerrado"
     // no primeiro soluço de rede.
-    let destino = build_destino(&config, address, &server_name, &pin_key);
-    let mut client = match seele_core::enlace::Enlace::conectar(destino, key, pins).await {
+    let destinos = std::iter::once((address, server_name.clone(), pin_key.clone()))
+        .chain(alternates)
+        .map(|(address, server_name, pin_key)| {
+            build_destino(&config, address, &server_name, &pin_key)
+        })
+        .collect();
+    let mut client = match seele_core::enlace::Enlace::conectar_entre(destinos, key, pins).await {
         Ok(client) => client,
         Err(error) => {
             tracing::warn!(%error, "could not reach the Dogma");
@@ -1806,6 +1830,7 @@ mod tests {
 
         let with_fingerprint = ConnectConfig {
             server: "localhost:8383".into(),
+            alternate_servers: Vec::new(),
             nickname: "shinji".into(),
             home: "/tmp/does-not-matter".into(),
             join_secret: None,

@@ -19,10 +19,11 @@
 //! roteador do anfitrião. Ninguém mais aprende que a conversa existe, que é a
 //! diferença entre estes dois degraus e o quarto.
 
-use std::net::{SocketAddr, UdpSocket};
+use std::net::{IpAddr, SocketAddr, UdpSocket};
 
 use anyhow::{Context, Result};
 
+pub mod interfaces;
 pub mod porta;
 
 /// Que famílias de endereço a escuta de um Dogma alcança de fato.
@@ -52,6 +53,82 @@ impl Pilha {
     #[must_use]
     pub fn alcanca_ipv4(self) -> bool {
         matches!(self, Self::Dupla | Self::SoIpv4)
+    }
+}
+
+/// A escuta que o Dogma abriu **de verdade**, e a única fonte do que a escada
+/// pode prometer.
+///
+/// # Por que a escada deixou de receber só a porta
+///
+/// Ela recebia `local: u16`, e por isso não tinha como saber em que famílias o
+/// socket atende. Numa máquina em que a pilha dupla falha — Windows e os BSD,
+/// pelo quadro de [`abrir_escuta`] — o Dogma recua para `0.0.0.0`, e a escada
+/// continuava consultando o IPv6 global da máquina, achando um, e declarando
+/// [`Degrau::Ipv6Direto`]. O convite anunciava um endereço IPv6 em que ninguém
+/// estava escutando: nem um par com IPv6 nativo e firewall aberto entraria.
+///
+/// Foi medido em campo, num Windows hospedando: `Get-NetUDPEndpoint` mostrou
+/// `0.0.0.0:8383`, e o convite saiu com o IPv6 da máquina.
+///
+/// O predicado que faltava já existia — [`Pilha::alcanca_ipv6`] — e não era
+/// perguntado a ninguém. Por isso este tipo, e não um parâmetro a mais: todo
+/// endereço que entra num [`Alcance`] passa por [`Escuta::anunciar`], que é
+/// privado ao módulo e é o único caminho até um candidato. Não dá para afirmar
+/// alcance sem perguntar ao socket, porque não há como montar o endereço sem
+/// passar por aqui.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Escuta {
+    porta: u16,
+    pilha: Pilha,
+}
+
+impl Escuta {
+    /// A escuta de um Dogma: a porta em que ele atende e o que o socket serve.
+    ///
+    /// Os dois vêm do socket já aberto — ver [`crate::Server::local_addr`] e
+    /// [`crate::Server::pilha`].
+    #[must_use]
+    pub fn nova(porta: u16, pilha: Pilha) -> Self {
+        Self { porta, pilha }
+    }
+
+    /// A porta em que o Dogma atende.
+    #[must_use]
+    pub fn porta(self) -> u16 {
+        self.porta
+    }
+
+    /// O que este socket serve.
+    #[must_use]
+    pub fn pilha(self) -> Pilha {
+        self.pilha
+    }
+
+    /// Se quem chegar neste endereço vai encontrar alguém atendendo.
+    #[must_use]
+    pub fn serve(self, endereco: IpAddr) -> bool {
+        match endereco {
+            IpAddr::V4(_) => self.pilha.alcanca_ipv4(),
+            IpAddr::V6(_) => self.pilha.alcanca_ipv6(),
+        }
+    }
+
+    /// O endereço pronto para o convite, ou `None` se a escuta não o serve.
+    ///
+    /// Privado de propósito: é a guarda do módulo inteiro, e uma guarda que
+    /// outro arquivo pode contornar não é guarda.
+    fn anunciar(self, endereco: IpAddr) -> Option<SocketAddr> {
+        self.serve(endereco)
+            .then(|| SocketAddr::new(endereco, self.porta))
+    }
+
+    /// O mesmo, para um endereço que já traz a porta dele.
+    ///
+    /// É o caso do degrau 3: o roteador pode ter aberto uma porta externa
+    /// diferente da interna, e é a dele que vai no convite.
+    fn anunciar_com_porta(self, alvo: SocketAddr) -> Option<SocketAddr> {
+        self.serve(alvo.ip()).then_some(alvo)
     }
 }
 
@@ -213,6 +290,51 @@ fn global_v6(endereco: std::net::Ipv6Addr) -> bool {
         && primeiro & 0xfe00 != 0xfc00
 }
 
+/// Os endereços desta máquina, com o truque antigo como rede de segurança.
+///
+/// A enumeração é a resposta certa e pode não existir — um sistema que recuse
+/// `getifaddrs`, um contêiner apertado. Quando ela vem vazia, o endereço da
+/// rota padrão ainda acerta em toda máquina **sem** VPN, que é a maioria; é
+/// pior que enumerar e muito melhor que convidar para o loopback.
+fn descobrir_enderecos() -> Vec<interfaces::Achado> {
+    let achados = interfaces::descobrir();
+    if !achados.is_empty() {
+        return achados;
+    }
+    tracing::warn!("sem enumeração de interfaces; caindo no endereço da rota padrão");
+    endereco_de_saida_v4()
+        .map(|ip| interfaces::Achado {
+            ip,
+            // Nada se sabe da sub-rede nem da interface por este caminho, e
+            // `None`/`Fisica` é o que menos promete: sem máscara o degrau 3 não
+            // afirma que este endereço está na rede do roteador.
+            mascara: None,
+            origem: interfaces::Origem::Fisica,
+        })
+        .into_iter()
+        .collect()
+}
+
+/// O endereço desta máquina **na rede de casa**, sem consultar a rota padrão.
+///
+/// É o que se manda para quem está na mesma rede, e é a pergunta que
+/// [`endereco_de_saida_v4`] responde errado quando há VPN: aquela devolve o
+/// endereço do túnel, que é o da rota padrão, e ninguém na sala ao lado alcança
+/// aquilo. Aqui a placa de rede é procurada entre as interfaces, e o truque
+/// antigo fica como recuo para quando não há enumeração nenhuma.
+#[must_use]
+pub fn endereco_de_rede_local() -> Option<IpAddr> {
+    interfaces::descobrir()
+        .into_iter()
+        .find(|achado| {
+            achado.ip.is_ipv4()
+                && achado.classe() == interfaces::Origem::Fisica
+                && achado.e_da_rede_local()
+        })
+        .map(|achado| achado.ip)
+        .or_else(endereco_de_saida_v4)
+}
+
 /// O endereço desta máquina na rede local que ela usaria para sair.
 ///
 /// Sem dependência e sem enumerar interfaces: conectar um socket UDP escolhe
@@ -246,10 +368,31 @@ pub enum Degrau {
     /// Alcança quem também tem IPv6 — se o firewall do roteador deixar entrar,
     /// e isso não dá para saber daqui.
     Ipv6Direto,
+    /// **Degrau 1, com uma VPN no meio.** Não há endereço desta máquina que
+    /// alcance de fora, e o único que sai daqui é o de um túnel.
+    ///
+    /// Variante própria, e não um `SoRedeLocal` com sorte, porque **o que a
+    /// pessoa pode fazer a respeito é diferente**: aqui a resposta é desligar a
+    /// VPN, ou pôr os dois lados na mesma. É o critério que `porta::FalhaAoAbrir`
+    /// já usa para ter quatro variantes em vez de uma.
+    ///
+    /// Foi a situação do relato que originou este módulo: um Windows com
+    /// Cloudflare WARP, cujo IPv6 de túnel passava por IPv6 global e fazia a
+    /// escada declarar o degrau 2 — anunciando "alcança de qualquer lugar" para
+    /// um endereço que não aceita entrada nenhuma.
+    RedeLocalOuVpn,
     /// **Degrau 1.** Só quem estiver na mesma rede. É o que sempre existiu, e
     /// continua sendo a resposta honesta quando os dois de cima não deram.
     SoRedeLocal,
 }
+
+/// Quantos endereços cabem num convite.
+///
+/// Quatro. Cada um custa uma tentativa a quem recebe, e o prazo de cada
+/// tentativa é tempo de espera antes de a sala abrir. Quatro cobre o caso
+/// gordo — rede de casa, IPv6, porta do roteador, túnel — sem transformar o
+/// link numa parede de texto para colar numa conversa.
+const LIMITE_DE_CANDIDATOS: usize = 4;
 
 impl Degrau {
     /// O nome estável que atravessa para a casca.
@@ -258,6 +401,7 @@ impl Degrau {
         match self {
             Self::PortaNoRoteador => "PortaNoRoteador",
             Self::Ipv6Direto => "Ipv6Direto",
+            Self::RedeLocalOuVpn => "RedeLocalOuVpn",
             Self::SoRedeLocal => "SoRedeLocal",
         }
     }
@@ -267,6 +411,10 @@ impl Degrau {
     /// "Chance", e não "certeza", e a diferença é honesta: no degrau 2 o
     /// firewall do roteador ainda pode recusar a entrada, e ninguém daqui sabe
     /// disso sem alguém do outro lado tentando.
+    ///
+    /// [`Degrau::RedeLocalOuVpn`] responde `false`: um endereço de VPN comum
+    /// não aceita entrada, e prometer que aceita é a mentira que o relato de
+    /// campo pegou.
     #[must_use]
     pub fn alcanca_de_fora(self) -> bool {
         matches!(self, Self::PortaNoRoteador | Self::Ipv6Direto)
@@ -274,19 +422,169 @@ impl Degrau {
 }
 
 /// Até onde este Dogma é alcançável, e por quê.
+///
+/// Campos privados de propósito: o único construtor é [`Alcance::decidir`], que
+/// passa cada endereço pela [`Escuta`]. Um campo público deixaria escrever um
+/// alvo que o socket não atende — que é exatamente o defeito que este módulo
+/// acabou tendo.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Alcance {
-    /// O endereço a pôr no `seele://`.
-    pub alvo: SocketAddr,
+    /// Os endereços a pôr no `seele://`, na ordem em que o cliente os tenta.
+    ///
+    /// Nunca vazio, e cada um servido pela escuta.
+    ///
+    /// # Por que mais de um
+    ///
+    /// Enquanto era um só, alguma situação sempre perdia: o endereço de fora
+    /// não serve para quem está dentro — muitos roteadores domésticos não fazem
+    /// *hairpin* —, e o de dentro não serve para quem está fora. A escada
+    /// escolhia o degrau mais alto e jogava o resto fora, e foi assim que
+    /// 0.5.0 perdeu o caso que sempre funcionou: os dois na mesma casa.
+    ///
+    /// A ordem é a que faz o caso comum ser o mais rápido: rede local primeiro,
+    /// endereço global depois, porta do roteador em seguida, túnel por último.
+    /// Tentar um endereço público antes faria quem está na sala ao lado esperar
+    /// o prazo de um caminho que não volta.
+    alvos: Vec<SocketAddr>,
     /// Qual degrau o produziu.
-    pub degrau: Degrau,
+    degrau: Degrau,
     /// Por que o degrau 3 não deu — quando não deu.
     ///
     /// Guardado mesmo quando o degrau 2 salvou o dia: "funcionou por IPv6, e a
     /// porta não abriu porque o roteador está atrás de CGNAT" são duas
     /// informações, e a segunda é a que explica por que um amigo só-IPv4 não
     /// entra.
-    pub porta_recusada: Option<String>,
+    porta_recusada: Option<String>,
+}
+
+impl Alcance {
+    /// A escada inteira decidida sobre valores, sem tocar na rede.
+    ///
+    /// Separada de [`Escada::subir`] pelo mesmo motivo que o `seele-ffi` separa
+    /// `build_destino` do `drive`: o que aqui se decide são valores, e uma
+    /// decisão sobre valores não precisa de roteador para ser testada. A
+    /// combinação que mordeu em campo — escuta só-IPv4 e IPv6 global na máquina
+    /// — é encenável em duas linhas por causa desta separação.
+    ///
+    /// `mapeada` é o que o degrau 3 abriu e `achados` são os endereços que as
+    /// interfaces desta máquina têm. Cada um ainda pode ser recusado aqui, se a
+    /// escuta não o servir.
+    fn decidir(
+        escuta: Escuta,
+        mapeada: Option<SocketAddr>,
+        achados: &[interfaces::Achado],
+        porta_recusada: Option<String>,
+    ) -> Self {
+        // A ordem de tentativa, e o motivo de cada posição:
+        //
+        // 0. a rede de casa — o caso comum, e o único com resposta imediata;
+        // 1. um endereço global desta máquina — IPv6 nativo, ou o IPv4 de uma
+        //    VPS. Alcança de fora e também de dentro;
+        // 2. a porta que o roteador abriu — alcança de fora, e de dentro só se
+        //    o roteador fizer *hairpin*, que muitos não fazem;
+        // 3. um túnel — dois pares na mesma Tailscale se acham por aqui, e
+        //    ninguém mais;
+        // 4. uma ponte de contêiner — não sai desta máquina, e está aqui só
+        //    porque a lista de nomes que a reconhece é heurística.
+        let mut candidatos: Vec<(u8, SocketAddr)> = Vec::new();
+        for achado in achados {
+            let Some(alvo) = escuta.anunciar(achado.ip) else {
+                continue;
+            };
+            let ordem = match (achado.classe(), achado.e_da_rede_local()) {
+                (interfaces::Origem::Fisica, true) => 0,
+                (interfaces::Origem::Fisica, false) => 1,
+                (interfaces::Origem::Tunel, _) => 3,
+                (interfaces::Origem::Virtual, _) => 4,
+            };
+            candidatos.push((ordem, alvo));
+        }
+        let externo = mapeada.and_then(|alvo| escuta.anunciar_com_porta(alvo));
+        if let Some(externo) = externo {
+            candidatos.push((2, externo));
+        }
+
+        // Estável: dentro de uma classe vale a ordem em que a máquina listou as
+        // interfaces, que é a ordem em que o próprio sistema as prefere.
+        candidatos.sort_by_key(|(ordem, _)| *ordem);
+        let mut alvos: Vec<SocketAddr> = Vec::new();
+        for (_, alvo) in candidatos {
+            if !alvos.contains(&alvo) {
+                alvos.push(alvo);
+            }
+        }
+        alvos.truncate(LIMITE_DE_CANDIDATOS);
+
+        // Sem rede não há para onde convidar, e o loopback é o que sobra. Qual
+        // dos dois depende da escuta pelo mesmo motivo de tudo acima: numa
+        // escuta só-IPv6 o `127.0.0.1` não atende.
+        if alvos.is_empty() {
+            let recuo = escuta
+                .anunciar(IpAddr::from([127, 0, 0, 1]))
+                .or_else(|| escuta.anunciar(IpAddr::from(std::net::Ipv6Addr::LOCALHOST)))
+                .unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], escuta.porta())));
+            alvos.push(recuo);
+        }
+
+        // O degrau é lido dos candidatos que sobraram, e não do caminho que os
+        // produziu: assim não há como dizer que se alcança por um endereço que
+        // não está no convite.
+        let degrau = if externo.is_some() {
+            Degrau::PortaNoRoteador
+        } else if achados.iter().any(|achado| {
+            matches!(achado.ip, IpAddr::V6(seis) if global_v6(seis))
+                && achado.classe() == interfaces::Origem::Fisica
+                && escuta.serve(achado.ip)
+        }) {
+            Degrau::Ipv6Direto
+        } else if achados
+            .iter()
+            .any(|achado| achado.classe() == interfaces::Origem::Tunel && escuta.serve(achado.ip))
+        {
+            Degrau::RedeLocalOuVpn
+        } else {
+            Degrau::SoRedeLocal
+        };
+
+        Self {
+            alvos,
+            degrau,
+            porta_recusada: if degrau == Degrau::PortaNoRoteador {
+                None
+            } else {
+                porta_recusada
+            },
+        }
+    }
+
+    /// O primeiro endereço a tentar, e o que um cliente velho vai ler.
+    #[must_use]
+    pub fn alvo(&self) -> SocketAddr {
+        self.alvos
+            .first()
+            .copied()
+            // Inalcançável: `decidir` nunca deixa a lista vazia. O recuo é o
+            // mesmo endereço que ele usaria, e não um `unwrap`.
+            .unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], 0)))
+    }
+
+    /// Todos os endereços do convite, na ordem em que se tenta.
+    #[must_use]
+    pub fn alvos(&self) -> &[SocketAddr] {
+        &self.alvos
+    }
+
+    /// Em que degrau da escada este Dogma parou.
+    #[must_use]
+    pub fn degrau(&self) -> Degrau {
+        self.degrau
+    }
+
+    /// Por que o degrau 3 não deu, quando não deu.
+    #[must_use]
+    pub fn porta_recusada(&self) -> Option<&str> {
+        self.porta_recusada.as_deref()
+    }
 }
 
 /// A escada do ADR 0022, subida uma vez, com o que ela abriu preso junto.
@@ -310,68 +608,53 @@ impl std::fmt::Debug for Escada {
 impl Escada {
     /// Sobe a escada e para no degrau mais alto que funcionar.
     ///
-    /// A ordem é a do ADR 0022, e a escolha de qual endereço vai no convite
-    /// segue dela. O degrau 3 vem primeiro **quando dá**, porque um IPv4
-    /// público alcança praticamente todo cliente; o degrau 2 vem depois, porque
-    /// um IPv6 global alcança de qualquer lugar mas só quem também tem IPv6.
+    /// O degrau mais alto vira a **frase**; os endereços de todos os degraus
+    /// viram os candidatos do convite, em ordem. Ver [`Alcance`].
     ///
-    /// `local` é a porta em que o Dogma está atendendo.
-    pub async fn subir(local: u16) -> Self {
-        let v4 = endereco_de_saida_v4();
+    /// `escuta` é onde o Dogma está atendendo **de fato** — porta e famílias.
+    /// Nenhum degrau é declarado sem que ela o sirva; ver [`Escuta`].
+    pub async fn subir(escuta: Escuta) -> Self {
+        let achados = descobrir_enderecos();
 
-        // Degrau 3. Só faz sentido pedir se sabemos para onde o roteador deve
-        // encaminhar, e é o endereço IPv4 desta máquina na rede.
-        let (mapeada, recusa) = match v4 {
-            Some(ip) => match porta::abrir(SocketAddr::new(ip, local)).await {
+        // Degrau 3. Duas condições, e a segunda é nova: além de saber para onde
+        // o roteador deve encaminhar, a escuta tem de atender em IPv4 — um
+        // mapeamento para uma máquina que só atende IPv6 abriria uma porta que
+        // não leva a lugar nenhum, com o mesmo sucesso mentiroso do CGNAT.
+        let (mapeada, recusa) = if escuta.pilha().alcanca_ipv4() {
+            match porta::abrir(&achados, escuta.porta()).await {
                 Ok(aberta) => (Some(aberta), None),
                 Err(falha) => {
                     tracing::info!(%falha, "o degrau 3 não deu");
                     (None, Some(falha.to_string()))
                 }
-            },
-            None => (
+            }
+        } else {
+            (
                 None,
-                Some("esta máquina não está numa rede IPv4".to_owned()),
-            ),
+                Some("esta escuta não atende em IPv4, então não há porta IPv4 a pedir".to_owned()),
+            )
         };
 
-        if let Some(aberta) = mapeada {
-            let alcance = Alcance {
-                alvo: aberta.externo(),
-                degrau: Degrau::PortaNoRoteador,
-                porta_recusada: None,
-            };
-            return Self {
-                alcance,
-                porta: Some(aberta),
-            };
-        }
-
-        // Degrau 2.
-        if let Some(seis) = endereco_de_saida_v6() {
-            return Self {
-                alcance: Alcance {
-                    alvo: SocketAddr::new(seis.into(), local),
-                    degrau: Degrau::Ipv6Direto,
-                    porta_recusada: recusa,
-                },
-                porta: None,
-            };
-        }
-
-        // Degrau 1. A resposta honesta, e a que sempre funcionou.
-        let alvo = v4.map_or_else(
-            || SocketAddr::from(([127, 0, 0, 1], local)),
-            |ip| SocketAddr::new(ip, local),
+        let alcance = Alcance::decidir(
+            escuta,
+            mapeada.as_ref().map(porta::PortaAberta::externo),
+            &achados,
+            recusa,
         );
-        Self {
-            alcance: Alcance {
-                alvo,
-                degrau: Degrau::SoRedeLocal,
-                porta_recusada: recusa,
-            },
-            porta: None,
-        }
+        // A porta só é guardada se ela produziu o degrau. Um mapeamento que a
+        // escuta não serve é devolvido na hora, e não largado: uma regra de
+        // encaminhamento que sobra no roteador aponta para uma máquina que não
+        // atende, e some só quando o prazo vence.
+        let porta = match mapeada {
+            Some(aberta) if alcance.degrau() == Degrau::PortaNoRoteador => Some(aberta),
+            Some(aberta) => {
+                tracing::warn!("o roteador abriu uma porta que esta escuta não atende; devolvendo");
+                aberta.fechar().await;
+                None
+            }
+            None => None,
+        };
+        Self { alcance, porta }
     }
 
     /// Até onde este Dogma chega.
@@ -478,29 +761,28 @@ mod testes {
         // afirma é o que vale nas três — que há sempre um degrau, que o alvo é
         // um endereço aonde alguém poderia ir, e que quando a escada não chegou
         // ao topo ela diz **por quê**.
-        let escada = Escada::subir(8383).await;
+        let escada = Escada::subir(Escuta::nova(8383, Pilha::Dupla)).await;
         let alcance = escada.alcance().clone();
-        eprintln!("esta rede parou em {:?}", alcance.degrau);
+        eprintln!("esta rede parou em {:?}", alcance.degrau());
 
-        assert_eq!(alcance.alvo.port(), 8383, "a escada trocou a porta");
+        assert_eq!(alcance.alvo().port(), 8383, "a escada trocou a porta");
         assert!(
-            !alcance.alvo.ip().is_unspecified(),
+            !alcance.alvo().ip().is_unspecified(),
             "convidou para o curinga, que não é lugar nenhum: {}",
-            alcance.alvo
+            alcance.alvo()
         );
 
-        match alcance.degrau {
+        match alcance.degrau() {
             Degrau::PortaNoRoteador => {
-                assert!(alcance.porta_recusada.is_none(), "abriu e reclamou junto");
-                assert!(alcance.degrau.alcanca_de_fora());
+                assert!(alcance.porta_recusada().is_none(), "abriu e reclamou junto");
+                assert!(alcance.degrau().alcanca_de_fora());
             }
             // O ponto todo do ADR 0022: quando o degrau 3 não deu, a razão não
             // pode sumir. É ela que explica a quem hospeda por que um amigo não
             // entra, e sem ela sobra "não conecta".
-            Degrau::Ipv6Direto | Degrau::SoRedeLocal => {
+            Degrau::Ipv6Direto | Degrau::RedeLocalOuVpn | Degrau::SoRedeLocal => {
                 let motivo = alcance
-                    .porta_recusada
-                    .as_deref()
+                    .porta_recusada()
                     .expect("o degrau 3 não deu e ninguém disse por quê");
                 assert!(motivo.len() > 20, "o motivo não explica nada: {motivo}");
             }
@@ -514,8 +796,8 @@ mod testes {
         // O alvo pode ser IPv4 ou IPv6 dependendo do degrau, e um IPv6 sem
         // colchetes não atravessa o `seele://`. Como o degrau varia com a rede,
         // este é o teste que pega o caso IPv6 na máquina de quem o tiver.
-        let escada = Escada::subir(8383).await;
-        let alvo = escada.alcance().alvo;
+        let escada = Escada::subir(Escuta::nova(8383, Pilha::Dupla)).await;
+        let alvo = escada.alcance().alvo();
         escada.descer().await;
 
         let convite = seele_proto::uri::Convite::novo(alvo.to_string()).to_string();
@@ -528,6 +810,262 @@ mod testes {
             Some(alvo.ip()),
             "o endereço mudou ao atravessar o convite: {convite}"
         );
+    }
+
+    /// O IPv6 global de uma máquina qualquer, para as encenações abaixo.
+    fn um_ipv6_global() -> Ipv6Addr {
+        // Documentação (RFC 3849), e passa em `global_v6` — que é justamente o
+        // ponto: `global_v6` não distingue este de um IPv6 de verdade, e não
+        // tem como. Quem decide se ele serve é a escuta.
+        "2001:db8::1".parse().unwrap_or(Ipv6Addr::UNSPECIFIED)
+    }
+
+    /// Um endereço achado numa placa de rede de verdade.
+    fn na_placa(ip: &str) -> interfaces::Achado {
+        interfaces::Achado {
+            ip: ip.parse().unwrap_or(IpAddr::from([0, 0, 0, 0])),
+            mascara: None,
+            origem: interfaces::Origem::Fisica,
+        }
+    }
+
+    /// O mesmo, numa interface de túnel — WARP, Tailscale, WireGuard.
+    fn no_tunel(ip: &str) -> interfaces::Achado {
+        interfaces::Achado {
+            ip: ip.parse().unwrap_or(IpAddr::from([0, 0, 0, 0])),
+            mascara: None,
+            origem: interfaces::Origem::Tunel,
+        }
+    }
+
+    #[test]
+    fn uma_escuta_so_ipv4_nunca_declara_um_degrau_de_ipv6() {
+        // O defeito de campo, encenado sem rede nenhuma: um Windows onde a
+        // pilha dupla falhou (`Get-NetUDPEndpoint` mostrou `0.0.0.0:8383`) e
+        // que **tem** IPv6 global. A escada declarava degrau 2 e o convite saía
+        // com um endereço IPv6 em que ninguém estava escutando — nem um par com
+        // IPv6 nativo e firewall aberto entraria.
+        let alcance = Alcance::decidir(
+            Escuta::nova(8383, Pilha::SoIpv4),
+            None,
+            &[na_placa("192.168.0.30"), na_placa("2001:db8::1")],
+            Some("o roteador não respondeu ao pedido de porta".to_owned()),
+        );
+
+        assert_ne!(
+            alcance.degrau(),
+            Degrau::Ipv6Direto,
+            "prometeu IPv6 numa escuta que só atende IPv4: {:?}",
+            alcance.alvos()
+        );
+        assert!(
+            alcance.alvos().iter().all(SocketAddr::is_ipv4),
+            "o convite levaria um endereço que este socket não atende: {:?}",
+            alcance.alvos()
+        );
+        assert_eq!(
+            alcance.alvo(),
+            SocketAddr::from(([192, 168, 0, 30], 8383)),
+            "sobrou o degrau 1, e ele tem de ser o endereço da máquina na rede"
+        );
+    }
+
+    #[test]
+    fn uma_escuta_so_ipv6_nunca_anuncia_o_ipv4_da_maquina() {
+        // A mesma guarda na outra família, e ela não é simétrica de graça: o
+        // degrau 1 sempre caía no IPv4 da máquina, e num socket IPv6 puro esse
+        // endereço não atende. O loopback de recurso muda de família junto.
+        let alcance = Alcance::decidir(
+            Escuta::nova(8383, Pilha::SoIpv6),
+            None,
+            &[na_placa("192.168.0.30")],
+            None,
+        );
+        assert!(
+            alcance.alvos().iter().all(SocketAddr::is_ipv6),
+            "anunciou IPv4 numa escuta que só atende IPv6: {:?}",
+            alcance.alvos()
+        );
+    }
+
+    #[test]
+    fn uma_porta_aberta_que_a_escuta_nao_atende_nao_vira_degrau_3() {
+        // O mesmo raciocínio no degrau 3, que é onde é mais fácil esquecê-lo:
+        // um roteador pode responder com endereço externo IPv6, e mapear para
+        // uma escuta que não atende IPv6 é abrir uma porta que não leva a
+        // lugar nenhum — o "sucesso mentiroso" que `porta` existe para evitar.
+        let externo = SocketAddr::new(um_ipv6_global().into(), 9000);
+        let alcance = Alcance::decidir(
+            Escuta::nova(8383, Pilha::SoIpv4),
+            Some(externo),
+            &[na_placa("192.168.0.30")],
+            None,
+        );
+        assert_ne!(alcance.degrau(), Degrau::PortaNoRoteador);
+        assert!(!alcance.alvos().contains(&externo));
+    }
+
+    #[test]
+    fn uma_escuta_de_pilha_dupla_continua_subindo_a_escada_inteira() {
+        // A outra metade da guarda: ela recusa o que o socket não serve e não
+        // pode recusar mais nada. Sem esta, "nunca prometa nada" passaria nos
+        // três testes acima.
+        let escuta = Escuta::nova(8383, Pilha::Dupla);
+        let externo = SocketAddr::from(([203, 0, 113, 7], 9000));
+
+        let tres = Alcance::decidir(
+            escuta,
+            Some(externo),
+            &[na_placa("192.168.0.30"), na_placa("2001:db8::1")],
+            None,
+        );
+        assert_eq!(tres.degrau(), Degrau::PortaNoRoteador);
+        assert!(
+            tres.alvos().contains(&externo),
+            "o degrau 3 perdeu a porta do roteador: {:?}",
+            tres.alvos()
+        );
+
+        let dois = Alcance::decidir(
+            escuta,
+            None,
+            &[na_placa("192.168.0.30"), na_placa("2001:db8::1")],
+            Some("nenhum roteador respondeu".to_owned()),
+        );
+        assert_eq!(dois.degrau(), Degrau::Ipv6Direto);
+        assert!(dois
+            .alvos()
+            .contains(&SocketAddr::new(um_ipv6_global().into(), 8383)));
+        assert!(
+            dois.porta_recusada().is_some(),
+            "o degrau 2 salvou o dia e engoliu o motivo de o 3 não ter dado"
+        );
+    }
+
+    #[test]
+    fn a_rede_de_casa_e_sempre_o_primeiro_candidato() {
+        // A ordem é o que faz o caso comum ser rápido. Um endereço público com
+        // prazo longo na frente faria quem está na sala ao lado esperar por um
+        // caminho que muitos roteadores domésticos não fazem voltar — eles não
+        // fazem *hairpin*.
+        let escuta = Escuta::nova(8383, Pilha::Dupla);
+        let externo = SocketAddr::from(([203, 0, 113, 7], 9000));
+        let alcance = Alcance::decidir(
+            escuta,
+            Some(externo),
+            &[
+                na_placa("2001:db8::1"),
+                na_placa("192.168.0.30"),
+                no_tunel("172.16.0.2"),
+            ],
+            None,
+        );
+
+        assert_eq!(
+            alcance.alvo(),
+            SocketAddr::from(([192, 168, 0, 30], 8383)),
+            "o primeiro candidato não é o da rede de casa: {:?}",
+            alcance.alvos()
+        );
+        let posicao = |procurado: SocketAddr| {
+            alcance
+                .alvos()
+                .iter()
+                .position(|alvo| *alvo == procurado)
+                .unwrap_or(usize::MAX)
+        };
+        assert!(
+            posicao(SocketAddr::new(um_ipv6_global().into(), 8383)) < posicao(externo),
+            "a porta do roteador veio antes do IPv6, e ela só volta de fora: {:?}",
+            alcance.alvos()
+        );
+        assert!(
+            posicao(externo) < posicao(SocketAddr::from(([172, 16, 0, 2], 8383))),
+            "o túnel não é o último: {:?}",
+            alcance.alvos()
+        );
+    }
+
+    #[test]
+    fn o_convite_leva_a_rede_de_casa_mesmo_quando_o_degrau_e_mais_alto() {
+        // O que 0.5.0 perdeu, e o motivo de haver mais de um candidato: com a
+        // porta aberta no roteador, o convite passou a levar **só** o endereço
+        // externo — e quem estava na mesma casa deixou de entrar, porque o
+        // roteador não devolve o próprio endereço para dentro.
+        let alcance = Alcance::decidir(
+            Escuta::nova(8383, Pilha::Dupla),
+            Some(SocketAddr::from(([203, 0, 113, 7], 9000))),
+            &[na_placa("192.168.0.30")],
+            None,
+        );
+        assert_eq!(alcance.degrau(), Degrau::PortaNoRoteador);
+        assert!(
+            alcance
+                .alvos()
+                .contains(&SocketAddr::from(([192, 168, 0, 30], 8383))),
+            "o degrau 3 jogou fora o endereço da rede local: {:?}",
+            alcance.alvos()
+        );
+    }
+
+    #[test]
+    fn um_ipv6_de_tunel_nao_vira_promessa_de_alcance() {
+        // O relato inteiro numa asserção: o IPv6 do WARP é um unicast global de
+        // verdade, passa em `global_v6`, e a escada declarava degrau 2 —
+        // escrevendo "alcança de qualquer lugar" embaixo de um link que não
+        // aceita entrada nenhuma. O endereço continua no convite, por último,
+        // porque dois pares na mesma VPN se acham por ele.
+        let alcance = Alcance::decidir(
+            Escuta::nova(8383, Pilha::Dupla),
+            None,
+            &[
+                na_placa("192.168.0.30"),
+                no_tunel("2606:4700:110:8a3f::2"),
+                no_tunel("172.16.0.2"),
+            ],
+            Some("nenhum roteador respondeu ao pedido de porta".to_owned()),
+        );
+
+        assert_eq!(alcance.degrau(), Degrau::RedeLocalOuVpn);
+        assert!(
+            !alcance.degrau().alcanca_de_fora(),
+            "prometeu alcance de fora por um endereço de VPN"
+        );
+        assert_eq!(alcance.alvo(), SocketAddr::from(([192, 168, 0, 30], 8383)));
+        assert!(
+            alcance
+                .alvos()
+                .iter()
+                .any(|alvo| alvo.ip().to_string() == "2606:4700:110:8a3f::2"),
+            "o endereço do túnel sumiu do convite: {:?}",
+            alcance.alvos()
+        );
+    }
+
+    #[test]
+    fn o_convite_nao_cresce_sem_limite() {
+        // Cada candidato custa uma tentativa a quem recebe, e o link é para
+        // colar numa conversa.
+        let muitos: Vec<interfaces::Achado> = (0..12)
+            .map(|n| na_placa(&format!("192.168.0.{n}")))
+            .collect();
+        let alcance = Alcance::decidir(Escuta::nova(8383, Pilha::Dupla), None, &muitos, None);
+        assert!(
+            alcance.alvos().len() <= LIMITE_DE_CANDIDATOS,
+            "o convite levou {} endereços",
+            alcance.alvos().len()
+        );
+    }
+
+    #[test]
+    fn sem_endereco_nenhum_o_alvo_ainda_e_um_lugar() {
+        // Uma máquina sem rede. Não há convite útil a montar, e um `0.0.0.0`
+        // ou uma lista vazia seriam pior que o loopback: o primeiro é um
+        // endereço que não é lugar nenhum, e a segunda quebraria quem lê.
+        let alcance = Alcance::decidir(Escuta::nova(8383, Pilha::Dupla), None, &[], None);
+        assert_eq!(alcance.alvos().len(), 1);
+        assert!(alcance.alvo().ip().is_loopback());
+        assert_eq!(alcance.degrau(), Degrau::SoRedeLocal);
     }
 
     #[test]

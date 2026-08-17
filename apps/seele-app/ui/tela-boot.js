@@ -203,17 +203,21 @@ async function conectar(evento) {
  * nome estável — `PortaNoRoteador`, `Ipv6Direto` ou `SoRedeLocal` —, e a frase
  * mora no `FRASES`, que é onde moram todas.
  *
- * Só o degrau mais baixo ganha destaque, e é o único que precisa: os outros dois
- * são boas notícias, e uma boa notícia gritada vira ruído que se aprende a
- * ignorar — inclusive no dia em que a notícia for ruim.
+ * Só os degraus que **não** alcançam de fora ganham destaque, e são os únicos
+ * que precisam: os outros são boas notícias, e uma boa notícia gritada vira
+ * ruído que se aprende a ignorar — inclusive no dia em que a notícia for ruim.
+ *
+ * `RedeLocalOuVpn` conta como perto: quem hospeda com uma VPN de navegação
+ * ligada tem um endereço que parece alcançar o mundo e não aceita ninguém.
  */
 function mostrarAlcance(alcance, portaRecusada) {
   const onde = $("convite-alcance");
   const frase = fraseDeErro(alcance);
+  const soPerto = alcance === "SoRedeLocal" || alcance === "RedeLocalOuVpn";
 
   onde.textContent = frase;
-  onde.classList.toggle("convite-alcance-curto", alcance === "SoRedeLocal");
-  onde.classList.toggle("convite-alcance-longe", alcance !== "SoRedeLocal");
+  onde.classList.toggle("convite-alcance-curto", soPerto);
+  onde.classList.toggle("convite-alcance-longe", !soPerto);
 
   // O que o roteador respondeu, quando ele respondeu alguma coisa. Vai embaixo
   // e menor: é a pista de quem for investigar, não a mensagem de quem só quer

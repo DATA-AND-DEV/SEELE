@@ -65,6 +65,7 @@ fn connect(address: SocketAddr, nickname: &str) -> Result<Arc<Plug>, PlugError> 
     // makes the constant impossible.
     Plug::connect(ConnectConfig {
         server: address.to_string(),
+        alternate_servers: Vec::new(),
         nickname: nickname.to_owned(),
         home: home(nickname),
         join_secret: None,
@@ -407,6 +408,7 @@ async fn a_name_that_does_not_resolve_says_so_specifically() -> Result<()> {
     let failure = tokio::task::spawn_blocking(|| {
         Plug::connect(ConnectConfig {
             server: "nao-existe.invalid:8383".into(),
+            alternate_servers: Vec::new(),
             nickname: "ninguem".into(),
             home: home("unresolvable"),
             join_secret: None,
