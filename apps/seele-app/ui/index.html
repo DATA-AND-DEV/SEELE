@@ -610,62 +610,76 @@
       omissão — é quem a mostra.
     -->
     <section class="painel painel-canais" aria-label="Cages e Linhas">
-      <div class="canais-cabeca">
-        <h2 class="painel-titulo">
-          <span>CAGES</span><span class="painel-codigo">B·03</span>
-        </h2>
-        <span class="dica">Salas de voz. Entre em uma para falar e ouvir.</span>
-      </div>
-      <ul id="lista-cages" class="canais"></ul>
-
       <!--
-        Criar sala só aparece para quem pode criar. `Snapshot.may_manage_cages`
-        é a resposta do servidor, resolvida no MELCHIOR — a casca pergunta e
-        obedece, e não decide.
+        As duas listas, os dois cabeçalhos e os dois formulários dentro de um
+        contêiner que rola, e a tira do operador **fora** dele.
 
-        Esconder o formulário **não** é o que impede alguém de criar: o servidor
-        recusa `CreateCage` de quem não tem `ManageCages`, e há teste de
-        conformidade provando que a recusa é de lá. Isto aqui é só não oferecer
-        o que não vai funcionar.
+        A divisão é o conserto de um defeito que só aparece com Dogma cheio: as
+        duas listas são desenhadas do `Snapshot`, e nada no protocolo limita
+        quantos Cages ou quantas Linhas um Dogma tem. Sem este `<div>` a coluna
+        crescia além da janela e os de baixo simplesmente não existiam — `body`
+        é `overflow: hidden` em `base.css`, então nem a página rolava.
+
+        O operador fica de fora porque ele não é lista: os quatro controles de
+        voz e a engrenagem têm que estar alcançáveis com a lista rolada até o
+        fim, que é justamente quando a pessoa está procurando onde entrar.
       -->
-      <form id="criar-cage" class="criar" hidden>
-        <label class="criar-campo">
-          <span class="rotulo">NOVA JAULA</span>
-          <input id="campo-cage-nome" name="nome" maxlength="48" required
-                 spellcheck="false" autocomplete="off" placeholder="nome da sala">
-        </label>
-        <label class="criar-campo criar-campo-numero">
-          <span class="rotulo">LUGARES</span>
-          <!--
-            O padrão vem do Dogma e não daqui: `desenharCanais` o copia do
-            limite de um Cage que já existe. Um número escrito neste arquivo
-            seria a casca decidindo o tamanho de uma sala.
-          -->
-          <input id="campo-cage-limite" name="lugares" type="number" min="1" max="250" required>
-        </label>
-        <button type="submit" class="botao-fantasma">CRIAR</button>
-        <span class="dica">Uma sala de voz nova, que todo mundo neste Dogma vai ver.</span>
-      </form>
+      <div class="canais-rolagem">
+        <div class="canais-cabeca">
+          <h2 class="painel-titulo">
+            <span>CAGES</span><span class="painel-codigo">B·03</span>
+          </h2>
+          <span class="dica">Salas de voz. Entre em uma para falar e ouvir.</span>
+        </div>
+        <ul id="lista-cages" class="canais"></ul>
 
-      <div class="canais-cabeca canais-cabeca-linhas">
-        <h2 class="painel-titulo">
-          <span>LINHAS</span><span class="painel-codigo">B·04</span>
-        </h2>
-        <span class="dica">Salas de texto. Abra uma para ler e escrever.</span>
+        <!--
+          Criar sala só aparece para quem pode criar. `Snapshot.may_manage_cages`
+          é a resposta do servidor, resolvida no MELCHIOR — a casca pergunta e
+          obedece, e não decide.
+
+          Esconder o formulário **não** é o que impede alguém de criar: o servidor
+          recusa `CreateCage` de quem não tem `ManageCages`, e há teste de
+          conformidade provando que a recusa é de lá. Isto aqui é só não oferecer
+          o que não vai funcionar.
+        -->
+        <form id="criar-cage" class="criar" hidden>
+          <label class="criar-campo">
+            <span class="rotulo">NOVA JAULA</span>
+            <input id="campo-cage-nome" name="nome" maxlength="48" required
+                   spellcheck="false" autocomplete="off" placeholder="nome da sala">
+          </label>
+          <label class="criar-campo criar-campo-numero">
+            <span class="rotulo">LUGARES</span>
+            <!--
+              O padrão vem do Dogma e não daqui: `desenharCanais` o copia do
+              limite de um Cage que já existe. Um número escrito neste arquivo
+              seria a casca decidindo o tamanho de uma sala.
+            -->
+            <input id="campo-cage-limite" name="lugares" type="number" min="1" max="250" required>
+          </label>
+          <button type="submit" class="botao-fantasma">CRIAR</button>
+          <span class="dica">Uma sala de voz nova, que todo mundo neste Dogma vai ver.</span>
+        </form>
+
+        <div class="canais-cabeca canais-cabeca-linhas">
+          <h2 class="painel-titulo">
+            <span>LINHAS</span><span class="painel-codigo">B·04</span>
+          </h2>
+          <span class="dica">Salas de texto. Abra uma para ler e escrever.</span>
+        </div>
+        <ul id="lista-linhas" class="canais"></ul>
+
+        <form id="criar-linha" class="criar" hidden>
+          <label class="criar-campo">
+            <span class="rotulo">NOVA LINHA</span>
+            <input id="campo-linha-nome" name="nome" maxlength="48" required
+                   spellcheck="false" autocomplete="off" placeholder="nome da sala">
+          </label>
+          <button type="submit" class="botao-fantasma">CRIAR</button>
+          <span class="dica">Uma sala de texto nova. O histórico dela começa vazio.</span>
+        </form>
       </div>
-      <ul id="lista-linhas" class="canais"></ul>
-
-      <form id="criar-linha" class="criar" hidden>
-        <label class="criar-campo">
-          <span class="rotulo">NOVA LINHA</span>
-          <input id="campo-linha-nome" name="nome" maxlength="48" required
-                 spellcheck="false" autocomplete="off" placeholder="nome da sala">
-        </label>
-        <button type="submit" class="botao-fantasma">CRIAR</button>
-        <span class="dica">Uma sala de texto nova. O histórico dela começa vazio.</span>
-      </form>
-
-      <span class="espaco"></span>
 
       <!--
         A tira do operador. No comp v3 ela traz o apelido, uma marca de
