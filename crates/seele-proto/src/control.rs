@@ -400,6 +400,20 @@ pub enum AlertReason {
     /// other says the conversation you were reading was destroyed. A shell
     /// given one reason for both would have to write the vaguer of the two.
     LineDeleted,
+
+    /// The Cage asked about is the only one the Dogma has, so it stays.
+    ///
+    /// A refusal with a sentence of its own, and that is the whole reason it
+    /// exists: the nearest existing reason is [`Self::CageEntryRefused`], which
+    /// every shell writes as "entry refused" — a sentence about walking into a
+    /// room, in front of somebody who was trying to destroy one. What this has
+    /// to say is "make another room first", and no other variant says it.
+    ///
+    /// The app disables the control on the last Cage and says as much in a
+    /// `title`, which is where the reader meets this first. This is the half
+    /// that survives an older shell, and `specs/08-seguranca.md` puts the rule
+    /// on the server for exactly that reason.
+    LastCage,
 }
 
 /// Client to server.
@@ -1730,8 +1744,17 @@ mod tests {
             reason: AlertReason::LineDeleted,
             operator_text: None,
         };
+        // And the refusal of the last Cage is a third sentence, not either of
+        // these two: "make another room first" is not "the room is gone".
+        let ultimo = ServerMessage::Alert {
+            severity: AlertSeverity::Warning,
+            reason: AlertReason::LastCage,
+            operator_text: None,
+        };
         assert_ne!(cage, line);
-        for alert in [cage, line] {
+        assert_ne!(cage, ultimo);
+        assert_ne!(line, ultimo);
+        for alert in [cage, line, ultimo] {
             let frame = encode(&alert).unwrap();
             assert_eq!(decode::<ServerMessage>(&frame).unwrap(), alert);
         }
