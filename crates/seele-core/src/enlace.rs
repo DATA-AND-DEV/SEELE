@@ -177,6 +177,15 @@ enum Comando {
         piloto: PilotId,
         cage: CageId,
     },
+    ApagarCage {
+        cage: CageId,
+    },
+    ApagarLinha {
+        linha: LineId,
+    },
+    PesarLinha {
+        linha: LineId,
+    },
     Sair,
 }
 
@@ -587,6 +596,46 @@ impl Enlace {
         self.mandar(Comando::MoverPiloto { piloto, cage }).await
     }
 
+    /// Pede ao Dogma que destrua um Cage.
+    ///
+    /// Pede, e só, como todo verbo daqui. Quem recusa é o Dogma: sem
+    /// `administrar_dogma` volta `Alert` com `PermissionDenied`, e no único
+    /// Cage que resta volta `Alert` com `LastCage`, que é frase diferente.
+    ///
+    /// **Não** é refeito ao reconectar, como os verbos de sala e de moderação e
+    /// pelo mesmo motivo, com uma ponta a mais: repetido minutos depois, este
+    /// destruiria a sala que alguém fez no lugar da que sumiu.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn apagar_cage(&self, cage: CageId) -> Result<(), Fechado> {
+        self.mandar(Comando::ApagarCage { cage }).await
+    }
+
+    /// Pede ao Dogma que destrua uma Linha, e tudo que foi escrito nela.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn apagar_linha(&self, linha: LineId) -> Result<(), Fechado> {
+        self.mandar(Comando::ApagarLinha { linha }).await
+    }
+
+    /// Pergunta quanto custaria destruir uma Linha. Não destrói nada.
+    ///
+    /// A resposta chega como `LineWeighed` no fluxo de avisos, como toda
+    /// resposta deste enlace. É o que enche a caixa de confirmação com número
+    /// contado no banco — uma casca segura uma página de histórico e chutaria
+    /// para baixo por todo o passado da Linha.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn pesar_linha(&self, linha: LineId) -> Result<(), Fechado> {
+        self.mandar(Comando::PesarLinha { linha }).await
+    }
+
     /// Encerra por vontade própria.
     pub async fn sair(&self) {
         let _ = self.mandar(Comando::Sair).await;
@@ -849,6 +898,9 @@ impl Motor {
             }
             Comando::RemoverMensagem { mensagem } => cliente.remove_message(mensagem).await,
             Comando::MoverPiloto { piloto, cage } => cliente.move_pilot(piloto, cage).await,
+            Comando::ApagarCage { cage } => cliente.delete_cage(cage).await,
+            Comando::ApagarLinha { linha } => cliente.delete_line(linha).await,
+            Comando::PesarLinha { linha } => cliente.weigh_line(linha).await,
             Comando::Sair => return,
         };
         if resultado.is_err() {
@@ -873,6 +925,13 @@ impl Motor {
             // pedido de novo à mão. Expulsar é pior: refeito depois de cinco
             // minutos de bateria, derrubaria de novo alguém que já tinha
             // voltado, e ninguém entenderia por quê.
+            //
+            // Apagar é o pior dos três, e por isso vale escrevê-lo: refeito
+            // depois da queda, ele destruiria a sala que alguém fez no lugar da
+            // que sumiu — e a confirmação que autorizou o primeiro pedido dizia
+            // o tamanho de **outro** estrago. Pesar uma Linha também não volta:
+            // é uma pergunta, e a resposta que interessava era a de quando a
+            // caixa estava aberta.
             _ => {}
         }
     }

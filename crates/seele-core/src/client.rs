@@ -675,6 +675,49 @@ impl Client {
         self.pattern = Pattern::Offline;
         self.connection.close(0_u32.into(), reason);
     }
+
+    // ---- unmaking a room ----
+    //
+    // Appended at the end of the impl on purpose, and not beside `rename_cage`
+    // where they belong by subject: `crates/seele-core/src/client.rs` is being
+    // worked on elsewhere at the same time, around the message and event paths
+    // in the middle of this file. Three additions with nothing above or below
+    // them is the smallest thing that can be added here.
+    //
+    // Asks, and nothing more, like every other verb in here. Nothing checks
+    // whether this pilot may — `specs/08-seguranca.md` puts that on the server,
+    // and a core that refused on its own would be a second authority to keep in
+    // step with the first.
+
+    /// Asks the Dogma to destroy a Cage.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn delete_cage(&mut self, cage: CageId) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::DeleteCage { cage }).await
+    }
+
+    /// Asks the Dogma to destroy a Line, and everything written in it.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn delete_line(&mut self, line: LineId) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::DeleteLine { line }).await
+    }
+
+    /// Asks what destroying a Line would cost. Destroys nothing.
+    ///
+    /// The answer arrives as a `LineWeighed` on the event stream, like every
+    /// other answer this client gets.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn weigh_line(&mut self, line: LineId) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::WeighLine { line }).await
+    }
 }
 
 /// A pilot left. The ordinary end of a session.

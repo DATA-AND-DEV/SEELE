@@ -591,6 +591,53 @@ impl Room {
                 changed.roster = true;
             }
 
+            // A room somebody destroyed. Dropped rather than marked, because
+            // there is nothing left for a mark to be about: the confirmation in
+            // front of the verb promised destruction, and a client that kept
+            // the row greyed out would be the one screen in the product still
+            // claiming the room is there.
+            //
+            // The seats go with it. Whoever was inside was turned out by the
+            // server, which announces each of them as a `PilotLeft` — but the
+            // announcement is per pilot and this map is per Cage, so a Cage
+            // whose last `PilotLeft` was lost to a reconnection would leave
+            // people seated in a room nobody can see. Clearing it here needs no
+            // announcement to be complete.
+            ServerMessage::CageDeleted { cage } => {
+                let before = self.cages.len();
+                self.cages.retain(|known| known.id != *cage);
+                self.seats.remove(cage);
+                if self.current_cage == Some(*cage) {
+                    // Not moved anywhere: this client is in no Cage now, which
+                    // is the truth. Choosing another room for somebody would be
+                    // putting them in a conversation they never asked to be in.
+                    self.current_cage = None;
+                }
+                changed.channels = self.cages.len() != before;
+                changed.roster = true;
+            }
+
+            // The same, and the messages go too. A Line that is gone leaves no
+            // conversation behind: keeping what was drawn would leave the last
+            // page of a destroyed Line readable under the heading of whatever
+            // the shell shows next.
+            ServerMessage::LineDeleted { line } => {
+                let before = self.lines.len();
+                self.lines.retain(|known| known.id != *line);
+                changed.channels = self.lines.len() != before;
+                if self.current_line == Some(*line) {
+                    self.current_line = None;
+                    self.messages.clear();
+                    changed.messages = true;
+                }
+            }
+
+            // An answer to a question, and nothing about the room. It is read
+            // where it was asked for — the shell holds it only as long as the
+            // box it fills is open — so folding it into the room would be
+            // storing a number whose whole value is being fresh.
+            ServerMessage::LineWeighed { .. } => {}
+
             // Consumed by the handshake and by the round-trip measurement, both
             // of which are over before any shell is watching.
             ServerMessage::Challenge { .. } | ServerMessage::Pong { .. } => {}
@@ -1196,6 +1243,121 @@ mod tests {
         assert!(!changed.channels);
         assert_eq!(room.lines.len(), 1);
         assert_eq!(room.lines[0].name, "geral");
+    }
+
+    // ---- rooms destroyed while this client was looking at them ----
+
+    #[test]
+    fn a_destroyed_cage_leaves_the_list_and_takes_its_seats_with_it() {
+        // Dropped rather than greyed out. The confirmation in front of the verb
+        // promised destruction; a client still drawing the row would be the one
+        // screen in the product claiming the room is there.
+        let mut room = room();
+        room.apply(&joined(3, "ayanami"));
+        assert_eq!(room.roster(CAGE).count(), 2, "this client and ayanami");
+
+        let changed = room.apply(&ServerMessage::CageDeleted { cage: CAGE });
+
+        assert!(
+            changed.channels,
+            "nothing told the shell to redraw the list"
+        );
+        assert!(room.cages.is_empty(), "the destroyed Cage is still listed");
+        assert_eq!(
+            room.roster(CAGE).count(),
+            0,
+            "people are still seated in a room nobody can see"
+        );
+    }
+
+    #[test]
+    fn the_plug_comes_out_of_a_cage_that_no_longer_exists() {
+        // And lands nowhere. Choosing another room for somebody would put them
+        // in a conversation they never asked to be in — with a live microphone.
+        let mut room = room();
+        assert_eq!(room.current_cage, Some(CAGE));
+
+        room.apply(&ServerMessage::CageDeleted { cage: CAGE });
+
+        assert_eq!(room.current_cage, None);
+        assert_eq!(room.current_roster().count(), 0);
+    }
+
+    #[test]
+    fn destroying_some_other_cage_leaves_this_plug_where_it_is() {
+        // The half that a `retain` over the wrong field would break silently:
+        // most of these announcements are about a room this client is not in.
+        let mut room = room();
+        room.apply(&ServerMessage::CageCreated {
+            cage: CageInfo {
+                id: CageId(2),
+                name: "CAGE-02".into(),
+                limit: 8,
+                password_required: false,
+                line: None,
+            },
+        });
+
+        let changed = room.apply(&ServerMessage::CageDeleted { cage: CageId(2) });
+
+        assert!(changed.channels);
+        assert_eq!(room.cages.len(), 1);
+        assert_eq!(room.current_cage, Some(CAGE), "the wrong plug came out");
+    }
+
+    #[test]
+    fn a_destroyed_line_takes_the_conversation_off_the_screen() {
+        // Keeping what was drawn would leave the last page of a destroyed Line
+        // readable under the heading of whatever the shell shows next — which
+        // is the one thing a verb that promises destruction may not do.
+        let mut room = room();
+        room.apply(&said(1, 3, "isto some junto"));
+        assert_eq!(room.messages.len(), 1);
+
+        let changed = room.apply(&ServerMessage::LineDeleted { line: LINE });
+
+        assert!(changed.channels);
+        assert!(changed.messages, "the shell was not told to clear the list");
+        assert!(room.lines.is_empty());
+        assert_eq!(room.current_line, None);
+        assert!(
+            room.messages.is_empty(),
+            "a destroyed Line left its conversation on screen"
+        );
+    }
+
+    #[test]
+    fn destroying_a_room_this_client_never_heard_of_changes_nothing() {
+        let mut room = room();
+        let cage = room.apply(&ServerMessage::CageDeleted { cage: CageId(404) });
+        let line = room.apply(&ServerMessage::LineDeleted { line: LineId(404) });
+
+        assert!(!cage.channels);
+        assert!(!line.channels);
+        assert_eq!(room.cages.len(), 1);
+        assert_eq!(room.lines.len(), 1);
+        assert_eq!(room.current_cage, Some(CAGE));
+        assert_eq!(room.current_line, Some(LINE));
+    }
+
+    #[test]
+    fn the_weight_of_a_line_is_read_where_it_was_asked_for_and_not_stored() {
+        // Its whole value is being fresh: it is the number in a sentence about
+        // what is about to be destroyed, counted at the instant of asking. Kept
+        // in the room, it would be a count somebody reads a minute later.
+        let mut room = room();
+        let before = room.clone();
+
+        let changed = room.apply(&ServerMessage::LineWeighed {
+            line: LINE,
+            messages: 1_847,
+            authors: 6,
+            oldest_at_seconds: Some(1_678_600_000),
+        });
+
+        assert!(!changed.any(), "weighing a Line changed the room");
+        assert_eq!(room.lines, before.lines);
+        assert_eq!(room.messages.len(), before.messages.len());
     }
 
     // ---- moved by somebody else's hand ----
