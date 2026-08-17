@@ -201,8 +201,7 @@ fn medir(segundos: u64, com_malha: bool) -> Result<(), DeviceError> {
         reason = "uma contagem de quadros de áudio, muito abaixo do limite de f64"
     )]
     let pedidas_por_segundo = pedidas as f64 / decorrido;
-    let desvio_ppm =
-        (pedidas_por_segundo / f64::from(io.playback_rate_hz) - 1.0) * 1e6;
+    let desvio_ppm = (pedidas_por_segundo / f64::from(io.playback_rate_hz) - 1.0) * 1e6;
 
     println!(
         "\nbloco do dispositivo {} quadros · alvo da reserva {:.1} ms · reposição {}",

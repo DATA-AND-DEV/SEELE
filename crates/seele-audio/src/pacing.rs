@@ -893,24 +893,44 @@ mod tests {
     }
 
     #[test]
-    fn nada_e_corrigido_durante_o_aquecimento() {
+    fn nada_e_corrigido_durante_o_aquecimento_e_tudo_e_corrigido_depois() {
         // O anel começa vazio e enche até o alvo. Nada nesse trecho é deriva, e
         // corrigir ali seria corrigir o arranque.
+        //
+        // Os quatro segundos e os seis estão escritos à mão de propósito. Um
+        // laço limitado por `WARMUP_MS` não roda volta nenhuma se alguém zerar a
+        // constante — passaria em silêncio justamente na mudança que este teste
+        // existe para pegar. Foi o que aconteceu quando ele foi escrito assim.
         let start = Instant::now();
         let mut pacer = RingPacer::new(RATE, CAPACITY);
         let alvo = pacer.target_samples();
 
-        let mut at_ms = 0.0_f64;
-        while at_ms < WARMUP_MS - 20.0 {
-            let pacing =
-                pacer.observe(alvo / 4, BURST, start + Duration::from_millis(at_ms as u64));
+        let mut at_ms = 0_u64;
+        while at_ms < 4_000 {
+            let pacing = pacer.observe(alvo / 4, BURST, start + Duration::from_millis(at_ms));
             assert_eq!(
                 pacing.ratio, None,
                 "corrigiu {at_ms} ms depois de abrir, ainda dentro do aquecimento"
             );
-            at_ms += 20.0;
+            at_ms += 20;
         }
         assert!(!pacer.metrics().correcting);
+
+        // E passado o aquecimento, com o mesmo anel raso, ela corrige — senão o
+        // teste acima estaria satisfeito por uma malha que não faz nada.
+        while at_ms < 6_000 {
+            pacer.observe(alvo / 4, BURST, start + Duration::from_millis(at_ms));
+            at_ms += 20;
+        }
+        assert!(
+            pacer.metrics().correcting,
+            "o aquecimento não terminou nunca"
+        );
+        assert!(
+            pacer.metrics().ppm > 0.0,
+            "o anel estava raso e a malha não pediu mais amostras: {:+.0} ppm",
+            pacer.metrics().ppm
+        );
     }
 
     #[test]
