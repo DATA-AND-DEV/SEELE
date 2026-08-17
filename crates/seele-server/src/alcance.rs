@@ -315,6 +315,26 @@ fn descobrir_enderecos() -> Vec<interfaces::Achado> {
         .collect()
 }
 
+/// O endereço desta máquina **na rede de casa**, sem consultar a rota padrão.
+///
+/// É o que se manda para quem está na mesma rede, e é a pergunta que
+/// [`endereco_de_saida_v4`] responde errado quando há VPN: aquela devolve o
+/// endereço do túnel, que é o da rota padrão, e ninguém na sala ao lado alcança
+/// aquilo. Aqui a placa de rede é procurada entre as interfaces, e o truque
+/// antigo fica como recuo para quando não há enumeração nenhuma.
+#[must_use]
+pub fn endereco_de_rede_local() -> Option<IpAddr> {
+    interfaces::descobrir()
+        .into_iter()
+        .find(|achado| {
+            achado.ip.is_ipv4()
+                && achado.classe() == interfaces::Origem::Fisica
+                && achado.e_da_rede_local()
+        })
+        .map(|achado| achado.ip)
+        .or_else(endereco_de_saida_v4)
+}
+
 /// O endereço desta máquina na rede local que ela usaria para sair.
 ///
 /// Sem dependência e sem enumerar interfaces: conectar um socket UDP escolhe

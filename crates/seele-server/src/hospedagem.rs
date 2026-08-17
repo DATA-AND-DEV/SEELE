@@ -83,9 +83,10 @@ impl Hospedagem {
         // Custa até `alcance::porta::PROCURA` no pior caso, e o pior caso é o
         // comum: numa rede sem UPnP a busca esgota o prazo inteiro. Foi por
         // isso que aquele prazo é curto.
-        // A escuta inteira, e não só a porta: numa máquina em que a pilha dupla
-        // falhou o Dogma atende só em IPv4, e a escada não pode prometer um
-        // degrau que este socket não serve. Ver `alcance::Escuta`.
+        //
+        // A escuta **inteira**, e não só a porta: numa máquina em que a pilha
+        // dupla falhou o Dogma atende só em IPv4, e a escada não pode prometer
+        // um degrau que este socket não serve. Ver `alcance::Escuta`.
         let escada = crate::alcance::Escada::subir(crate::alcance::Escuta::nova(
             endereco.port(),
             server.pilha(),
@@ -151,25 +152,33 @@ impl Hospedagem {
     /// Sem rede, cai no endereço de escuta — que não serve para convidar
     /// ninguém, mas é a resposta honesta, e quem chamou pode dizer isso.
     ///
-    /// # Qual dos endereços entra aqui
+    /// # Quais endereços entram aqui
     ///
-    /// O do degrau mais alto que a escada do ADR 0022 alcançou, e não mais
-    /// sempre o da rede local. Um IPv4 público vindo do roteador alcança
-    /// praticamente todo cliente; um IPv6 global alcança de qualquer lugar,
-    /// mas só quem também tem IPv6; o da LAN só alcança quem está na sala ao
-    /// lado. O link carrega a porta, então uma porta externa diferente da
-    /// interna — o roteador pode ter dado outra — não atrapalha quem recebe.
+    /// **Todos** os que a escada do ADR 0022 achou, na ordem em que se tenta:
+    /// rede de casa primeiro, endereço global depois, porta do roteador em
+    /// seguida, túnel por último. Ver `alcance::Alcance`.
+    ///
+    /// Foi um endereço só até 0.5.0, e essa é a história do defeito: com um
+    /// endereço só, alguma situação sempre perde. Escolher o degrau mais alto
+    /// fazia o link deixar de funcionar para quem estava na mesma casa — a
+    /// maioria dos roteadores domésticos não devolve para dentro o próprio
+    /// endereço externo.
     ///
     /// `SocketAddr` e nunca `format!("{ip}:{porta}")`: o `Display` do
-    /// `SocketAddr` põe os colchetes num IPv6, e agora que este endereço pode
-    /// **ser** IPv6 isso deixou de ser detalhe.
+    /// `SocketAddr` põe os colchetes num IPv6, e agora que estes endereços
+    /// podem **ser** IPv6 isso deixou de ser detalhe.
     #[must_use]
     pub fn convite(&self) -> String {
-        let alvo = self.alcance().map_or_else(
-            || self.endereco_na_rede().unwrap_or(self.endereco).to_string(),
-            |alcance| alcance.alvo().to_string(),
+        let alvos: Vec<String> = self.alcance().map_or_else(
+            || vec![self.endereco_na_rede().unwrap_or(self.endereco).to_string()],
+            |alcance| alcance.alvos().iter().map(SocketAddr::to_string).collect(),
         );
-        seele_proto::uri::Convite::novo(alvo)
+        let (primeiro, resto) = alvos.split_first().map_or_else(
+            || (self.endereco.to_string(), &[][..]),
+            |(um, resto)| (um.clone(), resto),
+        );
+        seele_proto::uri::Convite::novo(primeiro)
+            .com_alternativos(resto.to_vec())
             .com_impressao_digital(self.impressao_digital())
             .to_string()
     }
@@ -214,16 +223,14 @@ impl Drop for Hospedagem {
     }
 }
 
-/// O endereço desta máquina na rede que ela usaria para sair.
+/// O endereço desta máquina na rede de casa.
 ///
-/// Sem dependência e sem enumerar interfaces: conectar um socket UDP escolhe
-/// uma rota e associa um endereço local sem enviar pacote nenhum, que é
-/// exatamente a pergunta — "qual dos meus endereços outra pessoa veria". O
-/// alvo é TEST-NET-3 (`203.0.113.0/24`, RFC 5737), reservado para
-/// documentação, então nada é insinuado sobre alcançar um host real.
+/// Pergunta às interfaces, e não à rota padrão: com uma VPN ligada a rota
+/// padrão é a do túnel, e o endereço que ela devolve não é alcançável por
+/// ninguém na mesma sala. Ver `alcance::endereco_de_rede_local`.
 #[must_use]
 pub fn endereco_de_rede() -> Option<std::net::IpAddr> {
-    crate::alcance::endereco_de_saida_v4()
+    crate::alcance::endereco_de_rede_local()
 }
 
 #[cfg(test)]
@@ -287,6 +294,29 @@ mod tests {
         assert!(
             !convite.contains("0.0.0.0"),
             "convidou para o nada: {convite}"
+        );
+    }
+
+    #[tokio::test]
+    async fn o_convite_leva_o_endereco_da_rede_local_quando_ele_existe() {
+        // O defeito de campo, do lado de quem gera o link: em 0.5.0 o convite
+        // levava só o endereço do degrau mais alto, e quem estava na mesma casa
+        // deixou de conseguir entrar. Agora o endereço da rede local está
+        // sempre lá — e é o primeiro, porque é o caso comum.
+        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa")
+            .await
+            .expect("subir");
+        let convite = hospedagem.convite();
+        let lido = seele_proto::uri::analisar(&convite).expect("o convite não se lê de volta");
+
+        let Some(rede) = hospedagem.endereco_na_rede() else {
+            eprintln!("pulado: esta máquina não tem endereço de rede local");
+            return;
+        };
+        let candidatos: Vec<&str> = lido.candidatos().collect();
+        assert!(
+            candidatos.contains(&rede.to_string().as_str()),
+            "o convite não leva o endereço da rede local ({rede}): {candidatos:?}"
         );
     }
 

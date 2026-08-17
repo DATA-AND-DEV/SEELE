@@ -197,16 +197,13 @@ fn definir_senha(argumentos: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// This machine's address on the network it would reach the world through.
+/// This machine's address on the network somebody in the next room can reach.
 ///
-/// No dependency and no interface enumeration: connecting a UDP socket picks a
-/// route and binds a local address without sending a single packet, which is
-/// exactly the question being asked — "which of my addresses would somebody
-/// else see". The target is TEST-NET-3 (`203.0.113.0/24`, RFC 5737), reserved
-/// for documentation, so nothing is implied about reaching a real host.
+/// Asked of the interfaces, not of the default route. A VPN captures the
+/// default route, and the address it hands back is the tunnel's — reachable by
+/// nobody on the local network. That was a real field failure, and it is why
+/// this is one call into `seele_server::alcance` instead of the four lines of
+/// UDP trickery that used to live here.
 fn lan_address() -> Option<std::net::IpAddr> {
-    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
-    socket.connect("203.0.113.1:80").ok()?;
-    let local = socket.local_addr().ok()?.ip();
-    (!local.is_loopback() && !local.is_unspecified()).then_some(local)
+    seele_server::alcance::endereco_de_rede_local()
 }
