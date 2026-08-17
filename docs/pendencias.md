@@ -457,7 +457,28 @@ humana; nenhuma das duas é trabalho de código.
 **Quando dói.** Toda instalação. É o primeiro contato de quem baixa, e a frase
 do macOS — a que oferece "Mover para o Lixo" — é a mais assustadora das três.
 
-## 17 · O botão de atualizar existe em Rust e não tem tela
+## 17 · Fechada em 2026-08-17 · O botão de atualizar existe em Rust e não tem tela
+
+**Como fechou.** A tela existe: quinta seção do Terminal Dogma, `ATUALIZAÇÃO`.
+Procurar não baixa, instalar instala o que a última procura mostrou, e nenhuma
+das duas roda sozinha — o ADR 0026 pede as três coisas. O aviso que esta
+pendência exigia está escrito antes do ato, com a parte que mais importa: se
+houver um Dogma hospedado naquela janela, quem estiver dentro cai junto.
+
+O andamento vem pelo canal `seele://atualizacao`. Quando o pacote traz `total`,
+é barra com porcentagem; quando não traz, é travessão com o motivo no `title` —
+a mesma resposta que a barra da bateria já dava para a mesma falta, em vez de uma
+barra fingindo medir o que ninguém mediu. As seis variantes de `FalhaAoAtualizar`
+têm frase própria, e duas delas dizem para **não** tentar de novo.
+
+Os dois nomes saíram de `AGUARDANDO_TELA`, que foi o que o teste daquela lista
+existia para cobrar.
+
+**O que segue aberto e não é isto:** a pendência **16** — a assinatura ainda
+espera credencial. Esta tela sabe atualizar; o que ela vai buscar só é confiável
+depois que houver chave.
+
+---
 
 **Sintoma.** Não há como atualizar sem baixar o instalador de novo. Foi a segunda
 queixa: «botão de atualizar para não precisar ficar baixando o exe no github toda
