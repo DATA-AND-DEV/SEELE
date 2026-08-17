@@ -3839,7 +3839,10 @@ fn the_host_is_told_how_far_the_link_they_are_about_to_send_reaches() {
     // Scoped to the two functions that own this, because the page says all of
     // these words either way — the comment above the markup explaining why the
     // reach sits next to the link would satisfy an unscoped search for it.
-    let hospedar = body_of(&scripts(), "async function hospedar");
+    // On the comment-stripped source, like every other body read in this file:
+    // `body_of` over the raw script would let a comment inside `hospedar`
+    // mentioning `mostrarAlcance(` stand in for the call itself.
+    let hospedar = body_of(&script, "async function hospedar");
     assert!(
         hospedar.contains("mostrarAlcance("),
         "`hospedar` shows the invite without ever saying how far it goes:\n{hospedar}"
@@ -3850,7 +3853,7 @@ fn the_host_is_told_how_far_the_link_they_are_about_to_send_reaches() {
          rung it climbed is thrown away at the boundary:\n{hospedar}"
     );
 
-    let mostrar = body_of(&scripts(), "function mostrarAlcance");
+    let mostrar = body_of(&script, "function mostrarAlcance");
     assert!(
         mostrar.contains("fraseDeErro(") || mostrar.contains("FRASES"),
         "`mostrarAlcance` writes its own wording instead of reading the one in \
