@@ -13,6 +13,10 @@ publish.workspace = true
 [dependencies]
 anyhow = "1.0.104"
 ed25519-dalek = "3.0.0"
+# UPnP IGD — degrau 3 do ADR 0022. Escolhido depois de medir a árvore de cada
+# candidato; `alcance::porta` registra por que este e não os outros, e o que ele
+# arrasta junto que não deveria.
+igd-next = { version = "0.17.1", default-features = false, features = ["aio_tokio"] }
 seele-proto = { path = "../seele-proto" }
 quinn = "0.11.11"
 rand = "0.10.2"

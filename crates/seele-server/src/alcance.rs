@@ -23,6 +23,8 @@ use std::net::{SocketAddr, UdpSocket};
 
 use anyhow::{Context, Result};
 
+pub mod porta;
+
 /// Que famílias de endereço a escuta de um Dogma alcança de fato.
 ///
 /// Existe para poder ser **dita**. Um Dogma que perdeu o IPv6 porque a máquina
