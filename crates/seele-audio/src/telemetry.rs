@@ -87,6 +87,35 @@ pub struct LocalTelemetry {
 
     /// Quantas vezes o atraso passou do que dá para repor e o relógio reacertou.
     pub playout_resyncs: u64,
+
+    /// Correção de compasso em vigor, em partes por milhão do nominal.
+    ///
+    /// Em regime isto **é** a diferença entre o relógio desta máquina e o
+    /// cristal do dispositivo de saída, medida — positivo é dispositivo rápido.
+    /// Umas dezenas de ppm é o normal de dois cristais quaisquer. Zero durante
+    /// o aquecimento, e zero num caminho de áudio sem malha própria.
+    pub pacing_ppm: f64,
+
+    /// Profundidade do anel de reprodução, alisada, em milissegundos.
+    pub pacing_depth_ms: f64,
+
+    /// Profundidade que a malha está segurando, em milissegundos.
+    ///
+    /// A distância entre esta e [`Self::pacing_depth_ms`] é o deslocamento que
+    /// o controle proporcional deixa de pé, e ele vale `deriva × τ`: alguns
+    /// milissegundos. Uma distância de dezenas significa que a malha não está
+    /// dando conta, e aí o número a olhar é o de grampos.
+    pub pacing_target_ms: f64,
+
+    /// Quantas vezes a razão pedida saiu da faixa e foi grampeada.
+    ///
+    /// Zero é o normal. Crescendo, a causa não é deriva de cristal.
+    pub pacing_clamps: u64,
+
+    /// Quantas vezes o anel foi achado vazio e recebeu silêncio até o alvo.
+    ///
+    /// Uma no arranque é o normal — o anel começa vazio.
+    pub pacing_primes: u64,
 }
 
 impl LocalTelemetry {
@@ -110,6 +139,11 @@ impl LocalTelemetry {
             playout_worst_lateness_ms: 0.0,
             playout_catchup_frames: 0,
             playout_resyncs: 0,
+            pacing_ppm: 0.0,
+            pacing_depth_ms: 0.0,
+            pacing_target_ms: 0.0,
+            pacing_clamps: 0,
+            pacing_primes: 0,
         }
     }
 
@@ -124,6 +158,22 @@ impl LocalTelemetry {
         self.playout_worst_lateness_ms = playout.worst_lateness_ms;
         self.playout_catchup_frames = playout.catchup_frames;
         self.playout_resyncs = playout.resyncs;
+        self
+    }
+
+    /// Anexa o que a malha de compasso mediu.
+    ///
+    /// Separado de [`Self::assemble`] pela mesma razão que
+    /// [`Self::with_playout`]: a malha é conduzida pelo laço de voz, que é quem
+    /// olha o anel antes de empurrar. Sem esta chamada os campos ficam zerados,
+    /// que é o que um caminho de áudio sem malha própria deve mesmo relatar.
+    #[must_use]
+    pub fn with_pacing(mut self, pacing: crate::pacing::PacingMetrics) -> Self {
+        self.pacing_ppm = pacing.ppm;
+        self.pacing_depth_ms = pacing.depth_ms;
+        self.pacing_target_ms = pacing.target_ms;
+        self.pacing_clamps = pacing.clamps;
+        self.pacing_primes = pacing.primes;
         self
     }
 
@@ -477,6 +527,30 @@ mod tests {
         assert_eq!(local.capture_overruns, 2);
         assert_eq!(local.playback_underruns, 5);
         assert_eq!(local.device_errors, 1);
+    }
+
+    #[test]
+    fn o_compasso_chega_inteiro_e_nao_conta_como_tropeco() {
+        // Duas coisas de uma vez, e a segunda é a que importa. A malha de
+        // compasso corrigindo 40 ppm é a máquina **funcionando**, não falhando:
+        // se estes números entrassem em `tropecos`, "ÁUDIO LOCAL FALHANDO"
+        // acenderia justamente porque a deriva está sendo corrigida, que é o
+        // defeito da pendência 2 de volta com outro nome.
+        let local = LocalTelemetry::default().with_pacing(crate::pacing::PacingMetrics {
+            ppm: -42.0,
+            depth_ms: 19.5,
+            target_ms: 21.3,
+            clamps: 7,
+            primes: 1,
+            ..crate::pacing::PacingMetrics::default()
+        });
+
+        assert!((local.pacing_ppm + 42.0).abs() < 1e-9);
+        assert!((local.pacing_depth_ms - 19.5).abs() < 1e-9);
+        assert!((local.pacing_target_ms - 21.3).abs() < 1e-9);
+        assert_eq!(local.pacing_clamps, 7);
+        assert_eq!(local.pacing_primes, 1);
+        assert_eq!(local.tropecos(), 0);
     }
 
     #[test]

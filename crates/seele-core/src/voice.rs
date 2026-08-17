@@ -30,6 +30,7 @@ use seele_audio::drift::DriftTracker;
 use seele_audio::gate::{GateConfig, GateMode, VoiceGate};
 use seele_audio::jitter::{Decision, JitterBuffer, JitterConfig};
 use seele_audio::mixer::Mixer;
+use seele_audio::pacing::RingPacer;
 use seele_audio::playout::PlayoutClock;
 use seele_audio::resample::RateConverter;
 use seele_audio::telemetry::{AudioTelemetry, FalhaLocal, LocalTelemetry, SourceTelemetry};
@@ -754,12 +755,26 @@ async fn pipeline(
     let Ok(mut encoder) = VoiceEncoder::with_defaults() else {
         return;
     };
+    // A saída é **ajustável** e a entrada não, e a assimetria é o M1.8. O
+    // dispositivo de saída consome no ritmo do cristal dele enquanto este laço
+    // produz no ritmo do `Instant`, e a diferença só cabe no anel entre os dois:
+    // ela o encosta no fundo ou no topo e o deixa lá. Corrigir isso é reamostrar
+    // por algumas partes por milhão, o que exige um filtro para guiar mesmo com
+    // 48 kHz dos dois lados — que é o caso comum, e é onde a deriva se esconde.
+    //
+    // A captura não precisa: este laço a drena inteira a cada volta, então a
+    // diferença de cristal de lá não se acumula em anel nenhum. Ela sai daqui
+    // como quadros ligeiramente mais rápidos ou mais lentos, e quem a corrige é
+    // o `DriftTracker` de quem recebe.
     let (Ok(mut to_pipeline), Ok(mut to_device)) = (
         RateConverter::new(io.capture_rate_hz, SAMPLE_RATE_HZ),
-        RateConverter::new(SAMPLE_RATE_HZ, io.playback_rate_hz),
+        RateConverter::new_adjustable(SAMPLE_RATE_HZ, io.playback_rate_hz),
     ) else {
         return;
     };
+    let anel_de_saida = io.to_device.buffer().capacity();
+    let mut ritmo = RingPacer::new(io.playback_rate_hz, anel_de_saida);
+    let mut ritmo_avisado = false;
 
     let mut gate = VoiceGate::new(GateConfig::default(), GateMode::PushToTalk);
     let mut mixer = Mixer::new();
@@ -908,6 +923,35 @@ async fn pipeline(
                 }
             }
 
+            // O compasso, uma vez por volta e **antes** de empurrar: o que
+            // interessa é o fundo do vale, que é onde o dispositivo fica sem
+            // amostra. Ver `seele_audio::pacing`, que é onde a malha está.
+            let profundidade = anel_de_saida.saturating_sub(io.to_device.slots());
+            let compasso = ritmo.observe(
+                profundidade,
+                io.counters.playback_burst_frames(),
+                Instant::now(),
+            );
+            for _ in 0..compasso.prime_samples {
+                if io.to_device.push(0.0).is_err() {
+                    controls.anel_cheio.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+            if let Some(razao) = compasso.ratio {
+                // Uma linha por sessão, e ela responde em vez de sugerir: se o
+                // reamostrador recusa a razão, a deriva fica sem correção e o
+                // anel volta a encostar numa parede — mas o áudio continua
+                // saindo, então nada mais avisaria.
+                if to_device.adjust_ratio(razao).is_err() && !ritmo_avisado {
+                    ritmo_avisado = true;
+                    tracing::warn!(
+                        razao,
+                        "o reamostrador recusou a razão de compasso; a deriva de relógio \
+                         entre esta máquina e o dispositivo fica sem correção"
+                    );
+                }
+            }
+
             for _ in 0..vencidos {
                 let mut decoded: Vec<(u32, Vec<f32>)> = Vec::new();
                 for source in &mut sources {
@@ -971,7 +1015,8 @@ async fn pipeline(
                     encoder.bitrate_bps(),
                     controls.speaking.load(Ordering::Relaxed),
                 )
-                .with_playout(playout.metrics()),
+                .with_playout(playout.metrics())
+                .with_pacing(ritmo.metrics()),
                 sources: sources
                     .iter()
                     .map(|source| SourceTelemetry::assemble(source.ssrc, source.buffer.metrics()))

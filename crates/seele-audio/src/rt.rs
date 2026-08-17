@@ -122,6 +122,7 @@ pub struct StreamCounters {
     frames_played: AtomicU64,
     capture_overruns: AtomicU64,
     playback_underruns: AtomicU64,
+    playback_burst_frames: AtomicU64,
     stream_errors: AtomicU64,
 }
 
@@ -143,8 +144,22 @@ impl StreamCounters {
             frames_played: self.frames_played.load(Ordering::Relaxed),
             capture_overruns: self.capture_overruns.load(Ordering::Relaxed),
             playback_underruns: self.playback_underruns.load(Ordering::Relaxed),
+            playback_burst_frames: usize::try_from(
+                self.playback_burst_frames.load(Ordering::Relaxed),
+            )
+            .unwrap_or(usize::MAX),
             stream_errors: self.stream_errors.load(Ordering::Relaxed),
         }
+    }
+
+    /// The largest block the playback device has ever asked for at once.
+    ///
+    /// Its own reader because the pacing loop wants this and nothing else, once
+    /// per turn — see [`crate::pacing::RingPacer::observe`]. Zero until the
+    /// first callback has run.
+    #[must_use]
+    pub fn playback_burst_frames(&self) -> usize {
+        usize::try_from(self.playback_burst_frames.load(Ordering::Relaxed)).unwrap_or(usize::MAX)
     }
 
     /// Records a device-level stream error.
@@ -168,6 +183,14 @@ pub struct StreamMetrics {
     pub capture_overruns: u64,
     /// Frames the playback callback had to invent because the ring was empty.
     pub playback_underruns: u64,
+    /// The largest block the playback device has ever asked for at once.
+    ///
+    /// **A device takes its block whole.** With less than one block in the ring
+    /// the callback invents the remainder no matter how full the ring is on
+    /// average, which makes this number the floor under any reserve the
+    /// processing thread tries to hold — see [`crate::pacing::RingPacer`]. Zero
+    /// until the first callback has run.
+    pub playback_burst_frames: usize,
     /// Errors reported by the device itself, such as a disconnection.
     pub stream_errors: u64,
 }
@@ -234,6 +257,9 @@ pub struct PlaybackSource {
     channels: NonZeroU16,
     /// Last sample written, kept so an underrun can fade instead of cutting.
     last: f32,
+    /// Largest block seen so far, so the shared counter is written once per new
+    /// maximum instead of once per callback.
+    largest_burst: usize,
 }
 
 impl PlaybackSource {
@@ -253,6 +279,19 @@ impl PlaybackSource {
         let channels = usize::from(self.channels.get());
         let mut played = 0_u64;
         let mut underruns = 0_u64;
+
+        // How much this device takes at once is the floor under any reserve the
+        // processing thread holds in the ring: the block is served whole or the
+        // remainder is invented. Published on a new maximum only — after warm-up
+        // this is a comparison and nothing else, which is what the callback can
+        // afford.
+        let burst = interleaved.len() / channels;
+        if burst > self.largest_burst {
+            self.largest_burst = burst;
+            self.counters
+                .playback_burst_frames
+                .store(u64::try_from(burst).unwrap_or(u64::MAX), Ordering::Relaxed);
+        }
 
         let mut frames = interleaved.chunks_exact_mut(channels);
         for frame in frames.by_ref() {
@@ -327,6 +366,7 @@ pub fn playback_path(
             counters,
             channels,
             last: 0.0,
+            largest_burst: 0,
         },
     )
 }
@@ -494,6 +534,42 @@ mod tests {
         source.on_playback(&mut buffer);
 
         assert_eq!(buffer.last(), Some(&0.0), "the remainder must be silenced");
+    }
+
+    #[test]
+    fn the_largest_block_the_device_asked_for_is_reported() {
+        // The reserve the processing thread holds in the ring is measured in
+        // these blocks (see `crate::pacing`), because a block is served whole:
+        // half a block in the ring is half a block of invented silence. A device
+        // that asks for 128 frames and one that asks for 2048 need reserves that
+        // differ by sixteen times, and neither number is guessable from here.
+        let counters = StreamCounters::shared();
+        let (mut producer, mut source) = playback_path(4_096, STEREO, Arc::clone(&counters));
+        for _ in 0..4_000 {
+            assert!(producer.push(0.0).is_ok());
+        }
+        assert_eq!(
+            counters.snapshot().playback_burst_frames,
+            0,
+            "no callback has run yet, so there is nothing to report"
+        );
+
+        let mut small = [0.0_f32; 256];
+        source.on_playback(&mut small);
+        assert_eq!(
+            counters.snapshot().playback_burst_frames,
+            128,
+            "256 interleaved stereo slots are 128 frames"
+        );
+
+        let mut large = [0.0_f32; 1_024];
+        source.on_playback(&mut large);
+        assert_eq!(counters.snapshot().playback_burst_frames, 512);
+
+        // The largest, not the latest: a reserve sized by the last block would
+        // shrink under the one big block that is exactly what it must survive.
+        source.on_playback(&mut small);
+        assert_eq!(counters.snapshot().playback_burst_frames, 512);
     }
 
     #[test]

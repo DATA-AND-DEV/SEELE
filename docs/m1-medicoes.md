@@ -314,6 +314,77 @@ Banda morta de 10 ppm e teto de 500 ppm: abaixo da banda morta o buffer absorve
 sem notar, e acima do teto não é cristal — é emissor reiniciando relógio, e
 dirigir forte naquilo piora.
 
+### O outro relógio: o do dispositivo de saída
+
+Tudo acima é a deriva do **falante do outro lado da rede**, medida por trânsito
+de pacote. Há uma segunda, dentro desta máquina e sem rede nenhuma: o laço de voz
+produz 48 000 amostras por segundo de `Instant` e o dispositivo consome no ritmo
+do cristal dele. A diferença só cabe no anel entre os dois, e sem alvo o anel
+encosta numa parede e fica lá. É a pendência 2, e a malha que a segura está em
+`crates/seele-audio/src/pacing.rs` (ADR 0028).
+
+`cargo run --release -p seele-audio --example ritmo`, que dá voltas com a forma
+do laço de voz — quadros vencidos por `PlayoutClock`, duas esperas de
+temporizador por volta — contra o dispositivo de verdade. Neste Mac, saída a
+48 kHz, bloco de **512 quadros**, anel de 100 ms:
+
+| | sem malha, 60 s | com malha, 60 s | com malha, 600 s |
+|---|---|---|---|
+| amostras faltando | **258** | **0** | **0** |
+| anel cheio | 0 | 0 | 0 |
+| fundo do anel, por intervalo | **0 em todos** | 487 a 754 | 494 a 733 |
+| razão pedida | — | −20 a +1 ppm | +4 a +24 ppm |
+| grampos | — | 0 | 0 |
+| reposições | — | 1 (o arranque) | 1 (o arranque) |
+
+A corrida de dez minutos foi feita com a máquina compilando Rust no meio, o que
+é o pior caso honesto: volta do laço mais longa é vale mais fundo.
+
+**O fundo zero em todos os intervalos é o achado.** Não havia reserva nenhuma, e
+a perda saía quando o retorno de chamada calhava de cair no fundo — o bloco é
+servido inteiro ou o resto é inventado. Perda **por evento**, e não por
+vazamento uniforme, que é o que explica a tabela da pendência 2 ter 0 num
+intervalo de dez segundos e 128 no seguinte.
+
+**A deriva desta máquina é de 12 ppm**, e ela foi medida por dois caminhos que
+não se falam. Pela contagem de quadros: o dispositivo pediu 28 800 512 quadros
+em 600,003 s de `Instant`, que dão 48 000,6 Hz — **+12 ppm**. Pela malha, que
+chegou lá olhando profundidade de anel e nada mais: **+9 ppm**. Três partes por
+milhão de diferença entre uma leitura de contador e uma malha de controle é a
+melhor evidência que este trabalho tem de que a malha está medindo o que diz
+medir.
+
+Não são as centenas de ppm que a pendência 2 supunha ao dividir a perda pelo
+tempo. Doze ppm são 0,6 amostra por segundo — sozinhos não perdem nada, e drenam
+uma reserva de 21 ms em meia hora. É por isso que reserva e malha são a mesma
+correção: a reserva para a perda de hoje, a malha faz a reserva durar.
+
+A corrida de sessenta segundos dá −13 ppm pela contagem, e isso **não** contradiz
+o número acima: um bloco de 512 quadros em 60 s são 178 ppm de quantização. Só a
+corrida longa tem resolução para o dígito.
+
+### A malha, e por que ela é lenta
+
+Proporcional e só proporcional, com constante de tempo de 30 s: o erro de
+profundidade é devolvido ao longo dela. A planta já é um integrador — a
+profundidade é a integral da diferença de taxas —, e proporcional sobre
+integrador é primeira ordem, que é aproximação monótona sem sobressinal. Um termo
+integral poria um segundo polo, e dois polos de tempos parecidos é ringing;
+oscilação de taxa de amostragem é *wow*, audível como variação de tom, e o
+defeito que se está consertando é inaudível.
+
+Trinta segundos são mil e quinhentas serrilhas do próprio laço (um quadro de
+20 ms empurrado de uma vez, cinquenta vezes por segundo): a malha não consegue
+perseguir nenhuma delas nem sob provocação. O preço é um deslocamento em regime
+de `deriva × τ` — 400 ppm dão 12 ms, menos que um quadro —, e o que ele **não**
+deixa é erro de taxa: em regime a razão vale exatamente a deriva.
+
+Provado em tempo simulado, com anel, blocos de dispositivo e dispersão na volta
+do laço: a razão converge para a deriva com o sinal certo, o erro atravessa o
+alvo no máximo **uma vez** depois de um empurrão de meio anel, e o absurdo é
+grampeado em ±500 ppm e contado. Cada um desses testes foi visto reprovar com o
+código sabotado — sinal invertido, grampo removido, τ de 1 s no lugar de 30.
+
 
 ---
 

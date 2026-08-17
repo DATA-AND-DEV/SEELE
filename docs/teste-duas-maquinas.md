@@ -171,9 +171,33 @@ Ao fim, `:sync` nos dois. Anote:
 - estalos ouvidos, e mais ou menos quando
 - Taxa de Sincronização no início e no fim
 - `OPUS` na barra mudou de valor?
+- a linha `LOCAL`: o `saída` **cresceu** ao longo dos dez minutos?
+- a linha `RITMO`: quantos ppm, o `anel` longe do alvo, e quanto de `grampo`
 
-Se aparecer estalo regular a cada poucos minutos, é deriva de clock — e é a
-primeira coisa a olhar, porque foi corrigida sem hardware real para conferir.
+As duas últimas são a pendência 2, e agora têm resposta com número. `saída`
+crescendo é amostra que o dispositivo pediu e não tinha; `RITMO` diz por quê, e
+cada resposta manda para um lugar diferente:
+
+- **ppm de dezenas, anel perto do alvo, grampo zero**: a malha está segurando a
+  deriva. É o normal, mesmo com o `saída` tendo crescido no arranque.
+- **grampo crescendo**: a razão pedida saiu da faixa em que cristal vive, então
+  a causa não é deriva — taxa diferente da anunciada (`:audio` diz a taxa), ou
+  dispositivo trocado.
+- **reposição crescendo**: o anel raspou o fundo de novo. Aí é a volta do laço,
+  que é a pendência 15, e o número a pedir é o `LAÇO volta`.
+
+Antes do soak, cada máquina pode dar o próprio veredito sozinha, em um minuto e
+sem a outra:
+
+```
+cargo run --release -p seele-audio --example ritmo
+cargo run --release -p seele-audio --example ritmo -- --sem-malha
+```
+
+Ele dá voltas com a forma do laço de voz contra o dispositivo daquela máquina e
+imprime a perda por intervalo, o fundo do anel e a deriva medida. Neste Mac,
+sem a malha: 258 amostras perdidas em 60 s, fundo zero em todos os intervalos.
+Com ela: zero em dez minutos.
 
 ### 5.2 · Perda induzida de 5%
 

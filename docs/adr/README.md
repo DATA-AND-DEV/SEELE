@@ -33,6 +33,7 @@ Formato e regra de criação em `specs/10-convencoes.md`: toda decisão marcada
 | [0025](0025-limitacao-de-taxa-em-dois-baldes.md) | Limitação de taxa: dois baldes, e um aviso antes da porta | aceito | `08` — limitação de taxa |
 | [0026](0026-duas-assinaturas-e-um-botao-de-atualizar.md) | Duas assinaturas, e um botão de atualizar | aceito | `01` — distribuição |
 | [0027](0027-anexos-com-teto-e-o-mais-velho-sai.md) | Anexos com teto total, e o mais velho sai | **proposto** | `02` — política de anexos (D14) |
+| [0028](0028-a-reserva-do-anel-de-reproducao.md) | A reserva do anel de reprodução, e o que ela custa de latência | aceito | — (pendência 2, e revisão do `0009`) |
 
 ## O que ainda não tem ADR
 
