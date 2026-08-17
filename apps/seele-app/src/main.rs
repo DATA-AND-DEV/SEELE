@@ -948,9 +948,10 @@ fn classificar_atualizacao(erro: &tauri_plugin_updater::Error) -> FalhaAoAtualiz
         // Sem endpoint não há de onde buscar, e isso é configuração de
         // empacotamento, igual à chave ausente. Mesma tela.
         Falha::EmptyEndpoints => FalhaAoAtualizar::NaoConfigurado,
-        Falha::Reqwest(_) | Falha::Network(_) | Falha::ReleaseNotFound | Falha::Serialization(_) => {
-            FalhaAoAtualizar::NaoAlcancei
-        }
+        Falha::Reqwest(_)
+        | Falha::Network(_)
+        | Falha::ReleaseNotFound
+        | Falha::Serialization(_) => FalhaAoAtualizar::NaoAlcancei,
         Falha::TargetNotFound(_)
         | Falha::TargetsNotFound(_)
         | Falha::UnsupportedOs
