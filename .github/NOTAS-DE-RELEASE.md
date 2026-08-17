@@ -170,13 +170,21 @@ Duas coisas que economizam tempo:
 
 ---
 
-## O que ainda não foi validado
+## O que já foi validado, e o que não
 
-Este projeto nunca foi usado por duas pessoas reais em duas máquinas reais. O
-que está testado é o que roda sem hardware: 457 testes automáticos, incluindo
-áudio simulado sob perda de pacote e um soak de dez minutos em tempo simulado.
+**Duas máquinas reais, em rede local, já conversaram** — um Mac hospedando e um
+Windows conectando, com voz por microfone de verdade. Isso deixou de ser
+hipótese. O que aquele teste encontrou está em `docs/pendencias.md`, com nome e
+número, e o que ele **não** cobriu continua valendo como aviso:
 
-Não testado: voz por microfone de verdade, latência boca-a-ouvido, e o
-comportamento em Windows e Linux além do que a integração contínua compila.
+- **Fora da rede local, ainda não.** Alcançar um Dogma pela internet é assunto
+  do ADR 0022, e não do que está nesta página.
+- **Latência boca-a-ouvido nunca foi medida.** «Funcionou» não é medição.
+- **Linux só foi compilado, não usado.** A integração contínua garante que ele
+  constrói; ninguém falou por ele ainda.
 
-`docs/teste-duas-maquinas.md` é o roteiro para produzir essas medições.
+O resto é o que roda sem hardware: a bateria de testes automáticos do
+repositório, incluindo áudio simulado sob perda de pacote e um soak de dez
+minutos em tempo simulado.
+
+`docs/teste-duas-maquinas.md` é o roteiro para produzir as medições que faltam.
