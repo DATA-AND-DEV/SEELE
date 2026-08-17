@@ -152,6 +152,16 @@ impl StreamCounters {
         }
     }
 
+    /// The largest block the playback device has ever asked for at once.
+    ///
+    /// Its own reader because the pacing loop wants this and nothing else, once
+    /// per turn — see [`crate::pacing::RingPacer::observe`]. Zero until the
+    /// first callback has run.
+    #[must_use]
+    pub fn playback_burst_frames(&self) -> usize {
+        usize::try_from(self.playback_burst_frames.load(Ordering::Relaxed)).unwrap_or(usize::MAX)
+    }
+
     /// Records a device-level stream error.
     ///
     /// Called from `cpal`'s error callback, which is the seam device hot-swap

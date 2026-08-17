@@ -1306,6 +1306,30 @@ async fn run_command(
                         anel_cheio,
                     ),
                 );
+                // A outra metade da mesma pergunta, e a que o `anel` sozinho não
+                // respondia: **por que** o anel estava cheio, ou vazio.
+                //
+                // `ppm` é a diferença medida entre o relógio desta máquina e o
+                // cristal do dispositivo de saída — dezenas é o normal de dois
+                // cristais quaisquer, e é o que a malha está cancelando. `anel`
+                // contra o alvo diz se ela está dando conta; alguns
+                // milissegundos de distância são o preço do controle lento, e
+                // dezenas significam que não é deriva. `grampo` crescendo diz
+                // isso com número: a razão pedida saiu da faixa em que cristal
+                // vive, então a causa é outra — taxa diferente da anunciada,
+                // dispositivo trocado. `reposição` é o anel tendo raspado o
+                // fundo; uma no arranque é o normal, porque ele começa vazio.
+                note(
+                    runtime,
+                    format!(
+                        "RITMO {:+.0}ppm · anel {:.1}ms de {:.1}ms · grampo {} · reposição {}",
+                        local.pacing_ppm,
+                        local.pacing_depth_ms,
+                        local.pacing_target_ms,
+                        local.pacing_clamps,
+                        local.pacing_primes,
+                    ),
+                );
             }
         }
 
