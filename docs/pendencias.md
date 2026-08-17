@@ -40,7 +40,43 @@ própria, não um remendo no fim de outra.
 **Quando dói.** Colar um texto longo, ou um cliente reconectando e recebendo
 histórico em rajada. Não apareceu em uso normal.
 
-## 2 · A reprodução perde amostras devagar, o tempo todo
+## 2 · Estreitada em 2026-08-17 · A reprodução perde amostras devagar, o tempo todo
+
+**O que foi feito.** O anel de reprodução ganhou **alvo**, e uma malha que o
+segura ali reamostrando — `crates/seele-audio/src/pacing.rs`, tarefa M1.8. Ver
+o ADR 0027 para a decisão e para o que ela custa de latência, e o
+`docs/m1-medicoes.md` para os números. O que ainda não foi visto é o `:sync` de
+um `plug --hospedar` de verdade parar de crescer; o que foi medido está abaixo.
+
+**Uma conta desta seção estava errada, e o erro importa.** Aqui se lia que
+"centenas de amostras por dezena de segundos dão algo da ordem de algumas
+centenas de partes por milhão, que é a faixa em que dois relógios independentes
+vivem". A aritmética supõe que a perda **é** a deriva, e isso só vale com o anel
+encostado no fundo *e* a diferença saindo toda em amostra perdida. Medido neste
+Mac com `cargo run --release -p seele-audio --example ritmo`, que dá voltas com a
+forma do laço de voz contra o dispositivo de verdade: o cristal da saída está a
+**13 ppm** do relógio desta máquina, não a centenas. A deriva existe, é o que a
+malha cancela, e **não era ela que estava produzindo a perda**.
+
+O que produzia era o anel não ter reserva nenhuma. Sem malha, o fundo do anel
+mediu **zero em todos os intervalos de dez segundos**, do primeiro ao último: o
+anel raspa o fundo o tempo todo, e a perda sai quando o retorno de chamada do
+dispositivo calha de cair lá. O bloco dele é de 512 quadros e é servido inteiro
+ou o resto é inventado, então basta uma volta do laço atrasar para a próxima
+chamada não achar o bloco. Isso explica a tabela abaixo de um jeito que deriva
+constante não explica: 0 num intervalo de dez segundos e 128 no seguinte é
+perda **por evento**, e não por vazamento uniforme.
+
+E dá uma explicação candidata para a diferença TECLA/ABERTO que ficou sem
+nenhuma: em ABERTO o portão está aberto, então o laço codifica e envia cinquenta
+quadros por segundo que em TECLA ele não envia. Volta mais longa, vale mais
+fundo, mais perda. Não está medido nos dois modos — quem for fechar esta
+pendência mede.
+
+**Medido depois**, com o mesmo `ritmo`, dez minutos, a máquina compilando Rust
+no meio: `falta` **zero**, `anel cheio` **zero**, fundo entre 494 e 733
+amostras, razão estável entre +5 e +24 ppm, nenhum grampo. Sem a malha, na mesma
+máquina: 258 amostras perdidas em sessenta segundos e fundo zero o tempo todo.
 
 **Sintoma.** "ÁUDIO LOCAL FALHANDO" acende sozinho e volta a acender depois de
 apagar, com o áudio audivelmente bom.
@@ -79,20 +115,27 @@ dispositivos rodam a 48 kHz e os dois conversores são passagem direta
 taxa nem contagem de canais explicam o que se mediu aqui. Continuam de pé para
 uma máquina cujo dispositivo **não** rode a 48 kHz — o `:audio` diz a taxa.
 
-**O que sobrou, e é a explicação mais provável.** Deriva de relógio. O laço
-produz 48 000 amostras por segundo de `Instant`; o dispositivo consome no ritmo
-do cristal dele, e os dois não são o mesmo. As centenas de amostras por dezena
-de segundos medidas acima dão algo da ordem de algumas centenas de partes por
-milhão, que é a faixa em que dois relógios independentes vivem. O `drift.rs` já
-documenta que a correção certa é **reamostrar** — `RateConverter::adjust_ratio`
-existe e tem teste — e não descartar. Ligar isso ao anel de reprodução é a
-tarefa M1.8, e é tarefa própria.
+**O que sobrou.** Deriva de relógio — o laço produz 48 000 amostras por segundo
+de `Instant`, o dispositivo consome no ritmo do cristal dele, e os dois não são o
+mesmo. O `drift.rs` já documentava que a correção certa é **reamostrar** —
+`RateConverter::adjust_ratio` existe e tem teste — e não descartar. Ligar isso ao
+anel de reprodução era a tarefa M1.8.
 
-**Por que não foi resolvido agora.** O que faltava para medir já não falta: o
-`:sync` mostra `LAÇO volta … · reposição … · anel …`, e o `anel` conta a outra
-ponta — o que a mistura produziu e o dispositivo recusou, que também era um
-`let _ =`. Falta a correção de deriva em si, que é reamostragem contínua guiada
-pela profundidade do anel, e não um remendo.
+A parte que faltava a esta leitura, e que só apareceu ao medir, está no alto
+desta seção: a deriva aqui é de treze partes por milhão, e sozinha ela não
+produzia a perda. O que ela faz é **drenar qualquer reserva** — treze ppm são
+0,6 amostra por segundo, e um alvo de 21 ms leva pouco mais de vinte minutos
+para secar. Uma reserva sem malha que a segure é uma reserva que dura o começo
+da conversa. É por isso que as duas metades do conserto são uma coisa só, e é
+por isso que `specs/09-roadmap.md` pede dez minutos e não um.
+
+**O que o `:sync` mostra agora.** Além de `LAÇO volta … · reposição … · anel …`,
+a linha `RITMO {ppm} · anel {ms} de {alvo} · grampo … · reposição …`. O `anel`
+dizia que o anel estava cheio ou vazio e nunca por quê; as três respostas
+possíveis mandam para consertos diferentes — deriva sendo cancelada, razão fora
+da faixa em que cristal vive (aí não é deriva: taxa diferente da anunciada,
+dispositivo trocado), ou anel raspando o fundo (aí é a volta do laço, que é a
+pendência 15).
 
 ## 3 · O instalador do Windows não põe `plug` no `PATH`
 
