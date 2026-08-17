@@ -508,6 +508,21 @@ mod tests {
                 ..pending("padrão azul confirmado")
             }])
             .unwrap();
+
+        // Edited before the collision, and this is what makes the check bite.
+        // `created_at` cannot tell the two sources apart here — both writes land
+        // in the same second, so `now` and the stored stamp are equal whichever
+        // one the answer was built from, and a mutation swapping them survives.
+        // `edited_at` has no such tie: on disk it is `Some` and on the incoming
+        // message it is structurally `None`.
+        let edited = messages
+            .edit(
+                first.first().expect("the first send stored something").id,
+                PilotId(1),
+                "padrão azul confirmado",
+            )
+            .unwrap();
+
         let again = messages
             .append_batch(&[PendingMessage {
                 client_message_id: key,
@@ -522,6 +537,11 @@ mod tests {
              would read it and history would never show it"
         );
         assert_eq!(first.first().map(|m| m.id), Some(stored.id));
+        assert_eq!(
+            stored.edited_at, edited.edited_at,
+            "the answer says the message was never edited, and the row on disk \
+             says it was: the answer is still being built from what arrived"
+        );
 
         // And the disk agrees with what was answered — the half that would still
         // be wrong if the answer were built from the incoming message.
