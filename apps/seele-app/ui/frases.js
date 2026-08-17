@@ -168,11 +168,18 @@ const FRASES = {
     // Nenhuma promete alcance. Mesmo com a porta aberta o firewall do outro
     // lado pode recusar, e "deve funcionar" é o que dá para prometer.
     PortaNoRoteador:
-      "O ROTEADOR ABRIU A PORTA.\nEste link deve funcionar pela internet.",
+      "O ROTEADOR ABRIU A PORTA.\nEste link deve funcionar pela internet, e também para quem estiver na sua rede — ele leva os dois endereços.",
     Ipv6Direto:
-      "ESTE LINK É IPv6.\nAlcança de qualquer lugar, mas só quem também tiver IPv6. Quem não tiver precisa estar na sua rede.",
+      "ESTE LINK LEVA UM ENDEREÇO IPv6.\nAlcança de qualquer lugar, se o firewall do seu roteador deixar entrar, mas só quem também tiver IPv6. O endereço da sua rede vai junto, para quem estiver perto.",
+    // O degrau que nasceu de um defeito de campo: um Windows com Cloudflare
+    // WARP tinha IPv6 global — do túnel —, e a escada declarava «alcança de
+    // qualquer lugar» embaixo de um link que não aceita entrada nenhuma. Frase
+    // própria porque o que se faz a respeito é diferente das outras três: aqui
+    // a saída é desligar a VPN, e não mexer no roteador.
+    RedeLocalOuVpn:
+      "ESTE LINK FUNCIONA NA SUA REDE, OU PARA QUEM ESTIVER NA MESMA VPN QUE VOCÊ.\nO único endereço que sai desta máquina vem de uma VPN, e VPN de navegação (WARP, Proton, Nord) não aceita conexão de entrada. Para alcançar de fora: desligue a VPN e encaminhe a porta 8383 no roteador à mão.",
     SoRedeLocal:
-      "ESTE LINK SÓ FUNCIONA NA SUA REDE.\nNão consegui abrir a porta no roteador. Para alcançar de fora: encaminhe a porta 8383 no roteador à mão, ou use uma VPN.",
+      "ESTE LINK SÓ FUNCIONA NA SUA REDE.\nNão consegui abrir a porta no roteador. Para alcançar de fora: encaminhe a porta 8383 no roteador à mão, ou ponha os dois lados na mesma VPN de rede (Tailscale, WireGuard).",
 
     // Escolher microfone, no Terminal Dogma. Duas frases e não uma porque pedem
     // coisas diferentes de quem lê: a primeira não tem conserto na tela, e a
