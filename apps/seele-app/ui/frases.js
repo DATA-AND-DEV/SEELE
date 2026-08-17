@@ -145,6 +145,21 @@ const FRASES = {
       "A PORTA 8383 JÁ ESTÁ EM USO.\nQuase sempre é outro SEELE aberto — feche o outro e tente de novo.",
     NaoSubiu: "NÃO CONSEGUI SUBIR O DOGMA AQUI",
 
+    // Até onde o convite chega — a escada do ADR 0022. Vai junto do link, e não
+    // numa tela de diagnóstico, porque é aí que a informação vale: um link que
+    // só funciona na rede de casa e um link que funciona pela internet são o
+    // **mesmo texto**. Sem estas frases o anfitrião manda o primeiro achando
+    // que mandou o segundo, e quem descobre é o amigo, como "não conecta".
+    //
+    // Nenhuma promete alcance. Mesmo com a porta aberta o firewall do outro
+    // lado pode recusar, e "deve funcionar" é o que dá para prometer.
+    PortaNoRoteador:
+      "O ROTEADOR ABRIU A PORTA.\nEste link deve funcionar pela internet.",
+    Ipv6Direto:
+      "ESTE LINK É IPv6.\nAlcança de qualquer lugar, mas só quem também tiver IPv6. Quem não tiver precisa estar na sua rede.",
+    SoRedeLocal:
+      "ESTE LINK SÓ FUNCIONA NA SUA REDE.\nNão consegui abrir a porta no roteador. Para alcançar de fora: encaminhe a porta 8383 no roteador à mão, ou use uma VPN.",
+
     // Escolher microfone, no Terminal Dogma. Duas frases e não uma porque pedem
     // coisas diferentes de quem lê: a primeira não tem conserto na tela, e a
     // segunda tem — a lista está logo acima, e o que sumiu entre desenhá-la e

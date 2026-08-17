@@ -169,6 +169,40 @@ fn parse_args() -> Result<Option<Args>> {
 /// Keying the pin by the TLS label instead was a real bug. Both shells mapped
 /// every IP address to `localhost`, so two Dogmas on a LAN shared one entry and
 /// the second one contacted looked like the first one's key had changed.
+/// Até onde o link chega, dito em uma ou duas frases.
+///
+/// Um link que só funciona na rede de casa e um link que funciona pela internet
+/// são o **mesmo texto**, e é por isso que isto existe: sem a frase o anfitrião
+/// manda o primeiro achando que mandou o segundo, e a descoberta acontece do
+/// outro lado, como "não conecta". O ADR 0022 pede que isto seja dito.
+///
+/// Nenhuma delas promete alcance: mesmo no melhor caso o firewall do outro lado
+/// pode recusar. "Deve funcionar" é a promessa honesta.
+fn frase_do_alcance(alcance: &seele_server::alcance::Alcance) -> String {
+    use seele_server::alcance::Degrau;
+
+    let motivo = alcance
+        .porta_recusada
+        .as_deref()
+        .map_or_else(String::new, |motivo| format!("\n{motivo}."));
+
+    match alcance.degrau {
+        Degrau::PortaNoRoteador => {
+            "O roteador abriu a porta: este link deve funcionar pela internet.".to_owned()
+        }
+        Degrau::Ipv6Direto => format!(
+            "Este link é IPv6 e alcança de qualquer lugar — mas só quem também \
+             tiver IPv6.{motivo}"
+        ),
+        Degrau::SoRedeLocal => format!(
+            "ATENÇÃO: este link só funciona para quem estiver na sua rede.{motivo}\n\
+             Para alcançar de fora: encaminhe a porta {} no roteador à mão, ou \
+             use uma VPN.",
+            alcance.alvo.port()
+        ),
+    }
+}
+
 /// The split is `seele_core::uri::separar` and not `rsplit_once(':')`: the port
 /// separator and an IPv6's own separator are the same character, and doing it by
 /// hand here made `[2001:db8::1]:8383` resolve to nothing. ADR 0022, step 2.
@@ -543,6 +577,7 @@ async fn sessao(
             &mut runtime,
             "hospedando. `:convite` mostra o link.".to_owned(),
         );
+        runtime.app.alcance = dogma.alcance().map(frase_do_alcance);
         runtime.app.convite = Some(convite);
         // Aberta de saída: a primeira coisa que o anfitrião precisa é o link.
         runtime.app.convite_visivel = true;

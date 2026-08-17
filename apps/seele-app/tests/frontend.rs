@@ -3114,6 +3114,44 @@ fn every_failure_the_rust_side_can_name_has_a_sentence_here() {
 }
 
 #[test]
+fn every_rung_of_the_reachability_ladder_has_a_sentence() {
+    // `Anfitriao.alcance` crosses as one of three stable names from
+    // `seele_server::alcance::Degrau`, and the sentence is here. Same seam as
+    // `nome_da_falha` above, and the same failure if it drifts — except worse,
+    // because this one is not an error: hosting succeeded, and the missing
+    // sentence would be the one that says the link only works on the LAN.
+    //
+    // ADR 0022 asks for exactly this to be said out loud rather than left for
+    // the person to discover as "it doesn't connect".
+    let frases = read("ui/frases.js");
+    for degrau in ["PortaNoRoteador", "Ipv6Direto", "SoRedeLocal"] {
+        assert!(
+            frases.contains(&format!("{degrau}:")),
+            "the ladder can stop at `{degrau}` and no sentence says what that \
+             means for the link the person is about to send"
+        );
+    }
+
+    // The one that matters most is the bad one: it has to warn, and it has to
+    // say what to do instead. A rung that only names itself leaves the host
+    // exactly as stuck as no message at all.
+    let Some(depois) = frases.split("SoRedeLocal:").nth(1) else {
+        panic!("no sentence for SoRedeLocal");
+    };
+    let frase: String = depois.chars().take(400).collect();
+    assert!(
+        frase.to_lowercase().contains("rede"),
+        "the LAN-only sentence never says the link is limited to the local \
+         network:\n{frase}"
+    );
+    assert!(
+        frase.to_lowercase().contains("roteador") || frase.to_lowercase().contains("vpn"),
+        "the LAN-only sentence names the problem and no way out — ADR 0022 asks \
+         for the way out to be written down:\n{frase}"
+    );
+}
+
+#[test]
 fn the_ipv6_sentence_teaches_the_fix_with_an_address_that_would_work() {
     // This failure has a sentence of its own, rather than falling into
     // `EnderecoInvalido`, for one reason: it is fixable by the person reading
