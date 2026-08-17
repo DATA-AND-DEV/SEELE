@@ -157,6 +157,45 @@ impl MediaChannel {
     }
 }
 
+/// How often flow control stopped either end of a connection.
+///
+/// Four counters and not `quinn::ConnectionStats` itself, deliberately. The
+/// whole of `ConnectionStats` is quinn's type, and returning it would put the
+/// version of a transport crate into this crate's public API — a shell that
+/// reads one number would then have to be recompiled because a field it never
+/// touched moved. These four are the ones that answer a question somebody
+/// actually asks: **was the burst held back by the window, and in which
+/// direction?**
+///
+/// `blocked` frames are QUIC's way of saying "I have data and no permission to
+/// send it". Received means the peer said it about us — our side was not
+/// draining fast enough. Sent means we said it about them.
+///
+/// Zero on both sides is the ordinary reading: nothing was ever held back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FlowControl {
+    /// `STREAM_DATA_BLOCKED` this end sent: one stream of ours ran out of room.
+    pub stream_blocked_sent: u64,
+    /// `STREAM_DATA_BLOCKED` this end received: the peer ran out of room on one
+    /// stream, because this end was not reading it.
+    pub stream_blocked_received: u64,
+    /// `DATA_BLOCKED` this end sent: the whole connection ran out of room.
+    pub connection_blocked_sent: u64,
+    /// `DATA_BLOCKED` this end received.
+    pub connection_blocked_received: u64,
+}
+
+impl From<&quinn::ConnectionStats> for FlowControl {
+    fn from(stats: &quinn::ConnectionStats) -> Self {
+        Self {
+            stream_blocked_sent: stats.frame_tx.stream_data_blocked,
+            stream_blocked_received: stats.frame_rx.stream_data_blocked,
+            connection_blocked_sent: stats.frame_tx.data_blocked,
+            connection_blocked_received: stats.frame_rx.data_blocked,
+        }
+    }
+}
+
 /// A connected, verified client.
 pub struct Client {
     connection: quinn::Connection,
@@ -646,6 +685,23 @@ impl Client {
         let stamp = self.pending_ping.map_or(1, |(previous, _)| previous + 1);
         self.pending_ping = Some((stamp, std::time::Instant::now()));
         frame::write(&mut self.send, &ClientMessage::Ping { timestamp: stamp }).await
+    }
+
+    /// What the transport says about flow control on this connection.
+    ///
+    /// Read from `quinn`'s own frame counters rather than instrumented by hand:
+    /// the numbers that decide whether a burst was held back by the QUIC window
+    /// are already counted one layer down, and a second count kept up here would
+    /// only ever disagree with the first.
+    ///
+    /// This exists because of `docs/pendencias.md` #1, whose first suspicion was
+    /// the flow-control window at the start of a connection. A suspicion like
+    /// that is either killed with a number or carried for ever — and the number
+    /// has to be readable from the machine where the symptom reproduces, which
+    /// is not necessarily the machine anybody is developing on.
+    #[must_use]
+    pub fn flow_control(&self) -> FlowControl {
+        FlowControl::from(&self.connection.stats())
     }
 
     /// The most recent round trip, if a ping has been answered.

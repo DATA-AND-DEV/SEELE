@@ -293,6 +293,52 @@ impl Occupancy {
     }
 }
 
+/// How far behind the event bus a session was allowed to fall, counted.
+///
+/// The bus is a fixed ring ([`broadcast`]). A session that stops draining it —
+/// because it is stuck writing to a peer that stopped reading — eventually falls
+/// off the back of the ring, and `recv` reports `Lagged(n)`: **n events that
+/// existed and no longer do**, for that connection. Committed messages among
+/// them are gone from that pilot's view of the conversation for as long as the
+/// session lasts.
+///
+/// It used to be swallowed by a `let Ok(event) = event else { continue }`, which
+/// is why `docs/pendencias.md` #1 could be measured from the outside and never
+/// explained: nothing anywhere counted it. A number that can be read is the
+/// difference between "the burst lost messages" and "the burst lost 371 events
+/// on this connection at this second".
+///
+/// Process-wide rather than per-session on purpose: an operator reading a log
+/// wants to know whether this Dogma has ever done it at all, and a counter that
+/// dies with the connection that incremented it answers that with silence.
+#[derive(Debug, Default)]
+pub struct Atrasos {
+    eventos: std::sync::atomic::AtomicU64,
+    sessoes: std::sync::atomic::AtomicU64,
+}
+
+impl Atrasos {
+    /// Records one session falling `quantos` events behind.
+    pub fn registrar(&self, quantos: u64) {
+        self.eventos
+            .fetch_add(quantos, std::sync::atomic::Ordering::Relaxed);
+        self.sessoes
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// How many events the bus dropped before a session could read them.
+    #[must_use]
+    pub fn eventos(&self) -> u64 {
+        self.eventos.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// How many sessions it happened to. Zero is the only good answer.
+    #[must_use]
+    pub fn sessoes(&self) -> u64 {
+        self.sessoes.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
 /// One message on its way to the batch, with somewhere to report the outcome.
 pub struct WriteRequest {
     /// What to write.
@@ -316,6 +362,8 @@ pub struct Dogma {
     /// Antes de autenticar, portanto sem identidade nenhuma para contar: a
     /// chave é o endereço de origem. Ver [`crate::taxa`].
     pub portaria: Arc<Mutex<crate::taxa::Portaria>>,
+    /// How often the bus outran a session. See [`Atrasos`].
+    pub atrasos: Arc<Atrasos>,
 }
 
 /// Starts the batching writer.
