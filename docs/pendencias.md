@@ -108,17 +108,45 @@ quebra o instalador inteiro — que é pior do que não ter `PATH`.
 No macOS o problema é o mesmo e a saída está nas notas de release: dois
 `ln -s`. No Linux o `.deb` já instala em `/usr/bin`.
 
-## 4 · Só dá para conectar na mesma rede
+## 4 · Estreitada em 2026-08-17 · Em CGNAT sem IPv6, ainda só na mesma rede
 
-Fora da rede local, só funciona com o anfitrião alcançável de fora: VPS, porta
-encaminhada à mão, ou VPN. Atrás de um roteador doméstico, não conecta — e a
-mensagem não explica isso, que é metade do problema.
+**O que era.** Fora da rede local, só funcionava com o anfitrião alcançável de
+fora: VPS, porta encaminhada à mão, ou VPN. Atrás de um roteador doméstico não
+conectava — e a mensagem não explicava isso, que era metade do problema.
 
-O ADR 0022 mapeia a escada de saídas, do que não custa terceiro nenhum (IPv6,
-UPnP) ao que custa (ponto de encontro, retransmissão), e diz o que cada degrau
-cobra em troca. Nada disso está implementado.
+**O que ficou no lugar.** Os degraus 2 e 3 do ADR 0022, em
+`crates/seele-server/src/alcance.rs`. Ao hospedar, o SEELE sobe uma escada e
+para no degrau mais alto que funcionar, sem que ninguém configure nada:
 
-**É o que mais separa o SEELE de "dá para usar com os amigos" hoje.**
+- **Degrau 3 — UPnP.** Pede a porta ao próprio roteador do anfitrião. Nenhum
+  terceiro em lugar nenhum. Resolve boa parte das casas.
+- **Degrau 2 — IPv6.** A escuta era `0.0.0.0`, que atende **só IPv4**: o Dogma
+  não estava em IPv6 nem quando as duas pontas tinham. Agora é `[::]` com pilha
+  dupla escrita à mão, e o cliente também deixou de ligar só em IPv4.
+- **Degrau 1.** Continua sendo a resposta quando os dois de cima não dão.
+
+O endereço que entra no `seele://` passa a ser o do degrau alcançado, e não
+mais sempre o da rede local.
+
+**O que ainda não tem saída.** **CGNAT sem IPv6 e sem UPnP.** Nesse caso o
+roteador da casa abriria a porta de boa vontade, e o endereço dele também é
+privado: não há para onde apontar. É o que o ADR 0022 já dizia que ficaria de
+fora antes do degrau 4, e continua verdade. O degrau 4 — ponto de encontro —
+não foi feito de propósito: ele custa uma decisão sobre metadado que o ADR quer
+tomar em voz alta. O degrau 5, retransmissão, está fora de escopo por decisão.
+
+**O que mudou é que agora isso é dito.** A escada não falha em silêncio: cada
+recusa é uma variante nomeada com frase própria, ela aparece junto do link — e
+não numa tela de diagnóstico —, e `docs/alcance-pela-internet.md` explica caso
+a caso o que fazer. Um link que só funciona na rede de casa e um link que
+funciona pela internet são o mesmo texto, e era isso que fazia o anfitrião
+mandar o primeiro achando que mandou o segundo.
+
+**Uma coisa que o ADR não previa.** Ele trata CGNAT como um caso em que UPnP
+não funciona. Não é: o roteador atende o pedido e **abriria a porta com
+sucesso**, na WAN dele, que não sai para a internet. Não é um erro que se possa
+mostrar — é um sucesso mentiroso. Por isso o endereço externo é conferido antes
+de mapear. Na primeira rede real em que rodou, era exatamente esse o caso.
 
 ## 5 · Fechada em 2026-08-15 · Não havia limitação de taxa
 
