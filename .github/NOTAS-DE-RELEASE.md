@@ -127,8 +127,22 @@ xattr -dr com.apple.quarantine ./plug ./seeled
 chmod +x ./plug ./seeled
 ```
 
-**Windows.** O SmartScreen vai mostrar "O Windows protegeu o computador".
-Clique em **Mais informações** → **Executar assim mesmo**.
+**Windows.** Duas defesas diferentes podem aparecer, e elas não são a mesma
+coisa.
+
+O **SmartScreen** mostra "O Windows protegeu o computador". Clique em **Mais
+informações** → **Executar assim mesmo**.
+
+O **Smart App Control** é outro, e mais duro: ele **não deixa executar**, e não
+oferece "executar assim mesmo". Ele é do Windows 11, só liga em instalação
+limpa, e por isso duas máquinas parecidas se comportam diferente. Se for o seu
+caso, a saída honesta é **esperar uma versão assinada** ou **compilar do
+código-fonte** — `docs/windows.md` tem o passo a passo.
+
+Existe a opção de desligar o Smart App Control, e ela não está aqui de
+recomendação: **é caminho sem volta.** Uma vez desligado, só reinstalando o
+Windows para religá-lo, e isso é um preço grande demais por um programa de
+conversar com amigos.
 
 **Linux.** Nada reclama. Para o AppImage, `chmod +x` antes de executar.
 

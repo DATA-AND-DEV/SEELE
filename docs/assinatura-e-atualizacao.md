@@ -18,7 +18,7 @@ Confundir as duas é o erro que faz o trabalho todo parecer redundante.
 
 | | quem confere | o que ela responde | sem ela |
 |---|---|---|---|
-| **do sistema operacional** | Windows e macOS, na hora de abrir | «quem produziu este arquivo?» | o SmartScreen e o Gatekeeper reclamam |
+| **do sistema operacional** | Windows e macOS, na hora de abrir | «quem produziu este arquivo?» | o SmartScreen reclama e o Smart App Control **bloqueia** |
 | **do projeto** | o próprio SEELE, na hora de atualizar | «este pacote veio de vocês?» | o botão de atualizar não existe |
 
 Um instalador com assinatura Authenticode perfeita continua sendo **qualquer**
@@ -29,6 +29,35 @@ buraco da outra. ADR 0026.
 **Faça a do projeto primeiro.** Ela é gratuita, leva cinco minutos, e é a que
 resolve a queixa que custou um teste real — as duas máquinas em versões
 diferentes.
+
+### E no Windows são três defesas, não uma
+
+Este documento dizia «SmartScreen» em todo lugar, como se fosse uma coisa só.
+Não é, e a diferença decide se assinar é conforto ou se é o que torna o programa
+instalável. A pergunta veio de quem estava pagando a conta, o que é a hora certa
+de ela vir.
+
+| | o que faz | assinar resolve? |
+|---|---|---|
+| **SmartScreen** | avisa: «O Windows protegeu o computador» | **sim**, e há contorno sem assinar — *Mais informações → Executar assim mesmo* |
+| **Smart App Control** | **impede a execução**, e não oferece «executar assim mesmo» | **sim, e é a única saída** |
+| **Defender Antivírus** | varre em busca de malware | **não.** Se ele acusar, é falso positivo, e o caminho é submeter a amostra à Microsoft |
+
+O **Smart App Control** é o que mais surpreende, e foi o que apareceu no primeiro
+teste com máquina de outra pessoa. Ele é do Windows 11, só liga em instalação
+limpa, e passa um tempo em avaliação antes de se ligar sozinho — então duas
+máquinas iguais se comportam diferente e ninguém entende por quê. Quando está
+ligado não há caixa a dispensar: o programa não abre.
+
+Uma consequência prática: **desligar o Smart App Control é caminho sem volta.**
+Depois de desligado, só reinstalando o Windows para religá-lo. Não é conselho a
+dar a quem só queria conversar com um amigo — o que se dá é um instalador
+assinado.
+
+E vale dizer o que a assinatura **não** compra: reputação é acumulada, então um
+certificado novo pode continuar tomando aviso do SmartScreen nas primeiras
+instalações, até o serviço ver o arquivo circular. O Smart App Control é o caso
+em que a assinatura vale imediatamente.
 
 ---
 
