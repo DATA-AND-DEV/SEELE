@@ -115,3 +115,82 @@ fn o_script_do_windows_mantem_o_bom_que_ele_proprio_precisa() {
         "o tauri.conf.json ganhou um BOM, e o Tauri recusa o arquivo assim"
     );
 }
+
+#[test]
+fn a_chave_publica_do_atualizador_decodifica_no_que_ela_diz_ser() {
+    // Vazia é estado legítimo — é o que diz «este build não atualiza ninguém», e
+    // o app tem frase própria para isso. O que não pode é ser **quase** uma
+    // chave.
+    //
+    // Isto existe porque aconteceu. A chave foi colada com um `%` no fim: o
+    // marcador que o zsh imprime quando a saída não termina em nova linha, e que
+    // vem junto numa cópia feita do terminal. Com ele o valor não é base64
+    // válido, e a chave pública é **compilada dentro de cada executável** — o
+    // erro viajaria para o computador de cada pessoa antes de alguém notar.
+    //
+    // Uma linha a mais de descuido, e o conserto seria pedir a todo mundo que
+    // reinstalasse à mão: exatamente o problema que o atualizador existe para
+    // acabar.
+    let config = raiz().join("apps/seele-app/tauri.conf.json");
+    let corpo = std::fs::read_to_string(&config).expect("o tauri.conf.json tem que ser legível");
+
+    let Some(depois) = corpo.split("\"pubkey\": \"").nth(1) else {
+        panic!("o tauri.conf.json não tem campo `pubkey`");
+    };
+    let chave = depois.split('"').next().unwrap_or_default();
+
+    if chave.is_empty() {
+        return; // sem chave, e isso é dito na tela
+    }
+
+    let bytes = base64_decodificar(chave).unwrap_or_else(|erro| {
+        panic!(
+            "a `pubkey` não é base64 válido ({erro}).\n\
+             O suspeito de sempre é um caractere a mais colado do terminal — o \
+             `%` do zsh, um espaço, uma quebra de linha.\n\
+             valor: {chave}"
+        )
+    });
+    let texto = String::from_utf8(bytes).expect("uma chave minisign é texto");
+
+    assert!(
+        texto.starts_with("untrusted comment:"),
+        "a `pubkey` decodifica, mas não no que uma chave minisign é:\n{texto}"
+    );
+    assert_eq!(
+        texto.lines().count(),
+        2,
+        "uma chave minisign tem duas linhas — o comentário e a chave:\n{texto}"
+    );
+}
+
+/// Base64 padrão, sem dependência.
+///
+/// Trinta linhas contra uma crate nova num `xtask` que hoje não tem nenhuma: a
+/// conta é a mesma que o resto do repositório faz, e aqui ela dá para este lado.
+fn base64_decodificar(entrada: &str) -> Result<Vec<u8>, String> {
+    const ALFABETO: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    let mut acumulado: u32 = 0;
+    let mut bits = 0_u32;
+    let mut saida = Vec::new();
+
+    for (posicao, byte) in entrada.bytes().enumerate() {
+        if byte == b'=' {
+            break;
+        }
+        let valor = ALFABETO
+            .iter()
+            .position(|candidato| *candidato == byte)
+            .ok_or_else(|| format!("caractere `{}` na posição {posicao}", byte as char))?;
+        acumulado = (acumulado << 6) | u32::try_from(valor).map_err(|erro| erro.to_string())?;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            let oitava = u8::try_from((acumulado >> bits) & 0xFF).map_err(|e| e.to_string())?;
+            saida.push(oitava);
+        }
+    }
+
+    Ok(saida)
+}

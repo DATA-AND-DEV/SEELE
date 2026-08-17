@@ -53,7 +53,7 @@
       "endpoints": [
         "https://github.com/DATA-AND-DEV/SEELE/releases/latest/download/latest.json"
       ],
-      "pubkey": "",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJFMzRCNjhFNTkyMjBENDkKUldSSkRTSlpqclkwdnFQZGdLMnhhbUkzeEN1Vi8zb2NFWFBQN1EyMnI3QVZXUG9PVWZVc21BclcK",
       "windows": {
         "installMode": "passive"
       }
