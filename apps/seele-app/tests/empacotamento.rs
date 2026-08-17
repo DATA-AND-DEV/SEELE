@@ -126,3 +126,71 @@ fn o_bundle_do_macos_e_assinado() {
          nunca ficaria guardada"
     );
 }
+
+/// O `tauri.conf.json` já analisado.
+fn config() -> serde_json::Value {
+    serde_json::from_str(&ler("tauri.conf.json")).expect("tauri.conf.json não é JSON válido")
+}
+
+#[test]
+fn o_atualizador_esta_declarado_na_configuracao() {
+    // Isto não é arranjo: `tauri_plugin_updater` declara o bloco
+    // `plugins.updater` como **obrigatório**, com `pubkey` sem valor padrão.
+    // Sem ele a inicialização do plugin falha, `Builder::run` devolve erro, e
+    // `main` sai com código 1 — a janela não abre. Um app que não abre por
+    // falta de três linhas de JSON é o tipo de defeito que ninguém suspeita,
+    // porque o sintoma não fala de atualização.
+    let config = config();
+    let updater = &config["plugins"]["updater"];
+    assert!(
+        updater.is_object(),
+        "tauri.conf.json não declara `plugins.updater`.\n\
+         O plugin exige o bloco: sem ele o app não chega a abrir a janela."
+    );
+    assert!(
+        updater
+            .get("pubkey")
+            .and_then(serde_json::Value::as_str)
+            .is_some(),
+        "`plugins.updater` sem `pubkey`. Vazia é o estado de repouso — enquanto \
+         a chave do projeto não existir —, ausente não é."
+    );
+
+    // O endereço tem que ser https, e a recusa acontece **só em release**: em
+    // desenvolvimento o plugin avisa e segue, então um `http` passaria por todo
+    // teste local e quebraria no arquivo que as pessoas baixam.
+    let enderecos = updater["endpoints"]
+        .as_array()
+        .expect("`plugins.updater.endpoints` tem que ser uma lista");
+    assert!(!enderecos.is_empty(), "o atualizador não tem onde procurar");
+    for endereco in enderecos {
+        let endereco = endereco.as_str().unwrap_or_default();
+        assert!(
+            endereco.starts_with("https://"),
+            "o endereço `{endereco}` não é https, e o plugin recusa isso em release"
+        );
+    }
+}
+
+#[test]
+fn o_repositorio_nao_pede_artefatos_de_atualizacao() {
+    // A outra metade, e a mais fácil de errar no dia em que a chave existir.
+    //
+    // `createUpdaterArtifacts` ligado faz a CLI do Tauri **exigir**
+    // `TAURI_SIGNING_PRIVATE_KEY` no ambiente, e falhar sem ela — depois de
+    // compilar tudo. Ligado no arquivo do repositório, quem clonou e rodou
+    // `cargo tauri build` só para ver o app na própria máquina levaria um erro
+    // sobre uma chave privada que não é dele e que ele não deveria ter.
+    //
+    // Quem liga isto é o `release.yml`, quando o segredo existe, e os scripts
+    // de `empacotar/`, quando a variável está no ambiente. Nenhum dos dois
+    // comita o arquivo: os dois o devolvem ao que era ao terminar.
+    let config = config();
+    assert!(
+        config["bundle"].get("createUpdaterArtifacts").is_none(),
+        "tauri.conf.json liga `createUpdaterArtifacts`.\n\
+         Com ele o empacotamento exige a chave privada do projeto, e quem \
+         clonou o repositório não a tem — o build passa a falhar no fim.\n\
+         Quem liga isto é o release, com o segredo no ambiente."
+    );
+}
