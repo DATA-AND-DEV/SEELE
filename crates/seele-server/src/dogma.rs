@@ -104,6 +104,36 @@ pub enum Event {
         /// Its new name.
         name: String,
     },
+
+    // ---- moderation ----
+    //
+    // These two are the odd ones on this bus: every other event is something a
+    // connection **forwards** to its client, and these are something a
+    // connection **does to itself**. They are here anyway because a Dogma has no
+    // other way for one session to reach another — there is no map of live
+    // sessions, deliberately, since `specs/04-servidor-seele.md` puts Cage state
+    // in a task per Cage with no global lock. The bus already reaches every
+    // connection; adding a registry of sessions beside it would be a second way
+    // to find somebody, and the two would disagree the first time one of them
+    // leaked.
+    //
+    // Addressed to one pilot, delivered to all, acted on by the one. At fifty
+    // sessions that is forty-nine cheap comparisons, once, when an operator
+    // presses a button.
+    /// An operator ended a pilot's session.
+    SessionEnded {
+        /// Whose.
+        pilot: PilotId,
+        /// Which of the enumerated reasons to send them.
+        reason: seele_proto::control::DisconnectReason,
+    },
+    /// An operator moved a pilot into a Cage.
+    PilotMoved {
+        /// Who.
+        pilot: PilotId,
+        /// Where to.
+        cage: CageId,
+    },
 }
 
 /// A Cage seat held open for a pilot who dropped.

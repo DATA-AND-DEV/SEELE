@@ -131,6 +131,8 @@ pub enum NoticeReason {
     OperatorNotice,
     /// The client is sending control frames faster than its budget.
     RateLimited,
+    /// An operator moved this pilot's plug into another Cage.
+    MovedByOperator,
 }
 
 impl From<seele_core::AlertReason> for NoticeReason {
@@ -144,6 +146,7 @@ impl From<seele_core::AlertReason> for NoticeReason {
             seele_core::AlertReason::CageFull => Self::CageFull,
             seele_core::AlertReason::OperatorNotice => Self::OperatorNotice,
             seele_core::AlertReason::RateLimited => Self::RateLimited,
+            seele_core::AlertReason::MovedByOperator => Self::MovedByOperator,
         }
     }
 }
@@ -733,6 +736,7 @@ mod tests {
             seele_core::AlertReason::CageFull,
             seele_core::AlertReason::OperatorNotice,
             seele_core::AlertReason::RateLimited,
+            seele_core::AlertReason::MovedByOperator,
         ];
         let mapped: std::collections::HashSet<NoticeReason> =
             all.into_iter().map(NoticeReason::from).collect();

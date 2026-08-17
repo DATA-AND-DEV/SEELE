@@ -369,6 +369,16 @@ pub enum AlertReason {
     /// know this variant and fails to decode the frame — which costs a
     /// connection that was already exceeding its budget, and nothing else.
     RateLimited,
+
+    /// An operator moved this pilot's plug into another Cage.
+    ///
+    /// Its own reason rather than [`Self::OperatorNotice`], because the shell
+    /// has a specific sentence to write and `OperatorNotice` would have it
+    /// write "the operator is saying something" beside a room that changed on
+    /// its own. Being moved without being told is the case this exists to stop.
+    ///
+    /// Appended after `RateLimited`, for the reason that variant gives.
+    MovedByOperator,
 }
 
 /// Client to server.
@@ -490,6 +500,85 @@ pub enum ClientMessage {
         line: LineId,
         /// The new name.
         name: String,
+    },
+
+    // ---- moderation ----
+    //
+    // Appended last, for the reason [`AlertReason::RateLimited`] gives.
+    //
+    // `specs/04-servidor-seele.md` enumerates `expulsar`, `banir`,
+    // `remover_mensagem` and `mover_piloto`, migration 1 seeds all four on the
+    // Comandante and the Operador, and until now **no message carried any of
+    // them**. The permissions existed and there was nothing to ask for: the
+    // app's `EJETAR PLUG DO OPERADOR` has been drawn and disabled since v2 for
+    // exactly that reason.
+    //
+    // One permission each, checked by MELCHIOR at the instant the verb is used
+    // — not from anything the handshake cached. `specs/08-seguranca.md`: "Toda
+    // ação é verificada no servidor, sempre, mesmo que o cliente já esconda o
+    // botão."
+    /// Ends a pilot's session. `expulsar` — [`Permission::Kick`].
+    ///
+    /// This session, and nothing beyond it: the pilot may reconnect at once.
+    /// Barring a return is [`Self::BanPilot`], and the two are separate verbs
+    /// because they are separate decisions — "leave the room" is not "never
+    /// come back", and an operator who wanted the first and got the second has
+    /// no way to take it back except by finding the row.
+    KickPilot {
+        /// Who.
+        pilot: PilotId,
+    },
+    /// Bars a pilot from returning. `banir` — [`Permission::Ban`].
+    ///
+    /// Ends their session too: a ban that let the offender stay until they
+    /// chose to leave would be a ban that does nothing to the thing that
+    /// prompted it.
+    BanPilot {
+        /// Who.
+        pilot: PilotId,
+        /// The operator's own words, for the operator's own record.
+        ///
+        /// Not a hole in the enumerated-reasons rule, and the same exception
+        /// [`ServerMessage::Alert::operator_text`] documents: an operator
+        /// writing about their own Dogma is data, not an error reason. It is
+        /// **not** sent to the person banned — `specs/08-seguranca.md` wants
+        /// uniform failures, and the refusal they meet on the way back in is
+        /// the same [`DisconnectReason::Banned`] whatever this says.
+        reason: Option<String>,
+        /// When the ban lifts, in seconds since the Unix epoch. `None` is
+        /// permanent.
+        expires_at: Option<i64>,
+    },
+    /// Takes a message off the Line. `remover_mensagem` —
+    /// [`Permission::RemoveMessage`].
+    ///
+    /// The permission is worded "delete somebody **else's** message", so an
+    /// author removing their own does not need it. That is not a courtesy: a
+    /// Dogma where taking back your own typo requires an operator is a Dogma
+    /// where people ask an operator about typos.
+    ///
+    /// Carries no Line. The identifier is the server's own and globally
+    /// unique, so the Line to announce the removal on is read out of the stored
+    /// row rather than taken from the asker — a field the client fills in is a
+    /// field the client can fill in wrong, and this one would aim somebody
+    /// else's announcement.
+    RemoveMessage {
+        /// Which message.
+        message: MessageId,
+    },
+    /// Moves a pilot into a Cage. `mover_piloto` — [`Permission::MovePilot`].
+    ///
+    /// The pilot is told, and told *what happened*: they get
+    /// [`ServerMessage::MovedToCage`] so their client follows, and an
+    /// [`ServerMessage::Alert`] carrying [`AlertReason::MovedByOperator`] so
+    /// they read a sentence rather than finding themselves somewhere else with
+    /// no explanation. Being moved silently is indistinguishable from a client
+    /// that lost track of which room it was in.
+    MovePilot {
+        /// Who.
+        pilot: PilotId,
+        /// Where to.
+        cage: CageId,
     },
 }
 
@@ -670,6 +759,30 @@ pub enum ServerMessage {
         /// Its new name.
         name: String,
     },
+
+    // ---- moderation ----
+    //
+    // Three of the four verbs need no announcement of their own: a kick and a
+    // ban both end with [`Self::Disconnecting`], which already enumerates
+    // `Kicked` and `Banned`; a removal is [`Self::MessageRemoved`], which every
+    // shell already folds in. Only being moved had nothing that could say it.
+    /// This pilot's plug is now in a different Cage, by somebody else's hand.
+    ///
+    /// Sent only to the pilot who was moved. Everybody else learns it the
+    /// ordinary way, as a [`Self::PilotLeft`] from the old Cage and a
+    /// [`Self::PilotJoined`] in the new one — there is nothing special about a
+    /// move from outside, and inventing a second way to say "somebody is in
+    /// that room now" would mean every shell learning both.
+    ///
+    /// What makes this its own message is that the moved client has to change
+    /// **its own** idea of where it is, and that is a fact no `PilotJoined` has
+    /// ever carried: a client sets its current Cage on the way *out*, when it
+    /// asks. Without this it would keep sending voice into the room it thought
+    /// it was in and drawing that room's roster around itself.
+    MovedToCage {
+        /// Where the plug is now.
+        cage: CageId,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -838,13 +951,23 @@ impl Validate for ClientMessage {
             Self::CreateLine { name }
             | Self::RenameCage { name, .. }
             | Self::RenameLine { name, .. } => check_name("name", name),
+            // The operator's own words about their own Dogma, bounded like the
+            // other place they cross the wire.
+            Self::BanPilot { reason, .. } => check(
+                "reason",
+                reason.as_ref().map_or(0, String::len),
+                MAX_ALERT_TEXT_LEN,
+            ),
             Self::EjectPlug
             | Self::JoinLine { .. }
             | Self::FetchHistory { .. }
             | Self::SetAtField(_)
             | Self::SetTotalIsolation(_)
             | Self::SetPresence(_)
-            | Self::Ping { .. } => Ok(()),
+            | Self::Ping { .. }
+            | Self::KickPilot { .. }
+            | Self::RemoveMessage { .. }
+            | Self::MovePilot { .. } => Ok(()),
         }
     }
 }
@@ -893,7 +1016,8 @@ impl Validate for ServerMessage {
             Self::PilotLeft { .. }
             | Self::MessageRemoved { .. }
             | Self::Pong { .. }
-            | Self::Disconnecting { .. } => Ok(()),
+            | Self::Disconnecting { .. }
+            | Self::MovedToCage { .. } => Ok(()),
         }
     }
 }
@@ -1298,6 +1422,92 @@ mod tests {
             encode(&blank),
             Err(ControlError::FieldOutOfRange { field: "name" })
         ));
+    }
+
+    // ---- moderation ----
+
+    #[test]
+    fn the_moderation_verbs_round_trip() {
+        for message in [
+            ClientMessage::KickPilot { pilot: PilotId(42) },
+            ClientMessage::BanPilot {
+                pilot: PilotId(42),
+                reason: Some("inundou a Linha".into()),
+                expires_at: Some(1_700_000_000),
+            },
+            ClientMessage::BanPilot {
+                pilot: PilotId(42),
+                reason: None,
+                expires_at: None,
+            },
+            ClientMessage::RemoveMessage {
+                message: MessageId(9),
+            },
+            ClientMessage::MovePilot {
+                pilot: PilotId(42),
+                cage: CageId(2),
+            },
+        ] {
+            let frame = encode(&message).unwrap();
+            assert_eq!(decode::<ClientMessage>(&frame).unwrap(), message);
+        }
+    }
+
+    #[test]
+    fn being_moved_round_trips() {
+        // The one moderation verb that needed an announcement of its own. A
+        // kick and a ban end in `Disconnecting`, a removal is
+        // `MessageRemoved`; only "you are somewhere else now" had nothing that
+        // could say it, because a client sets its own Cage on the way out.
+        let moved = ServerMessage::MovedToCage { cage: CageId(3) };
+        let frame = encode(&moved).unwrap();
+        assert_eq!(decode::<ServerMessage>(&frame).unwrap(), moved);
+    }
+
+    #[test]
+    fn an_oversized_ban_reason_is_refused_in_both_directions() {
+        // The operator's own words are still a bounded field. Enforced on the
+        // way out so we cannot send one, and on the way in so a peer cannot
+        // skip the check by hand-rolling a frame — the same pair every other
+        // text field gets.
+        let long = ClientMessage::BanPilot {
+            pilot: PilotId(1),
+            reason: Some("x".repeat(MAX_ALERT_TEXT_LEN + 1)),
+            expires_at: None,
+        };
+        assert!(matches!(
+            encode(&long),
+            Err(ControlError::FieldTooLong {
+                field: "reason",
+                ..
+            })
+        ));
+
+        let mut frame = vec![PROTOCOL_VERSION];
+        frame = postcard::to_extend(&long, frame).unwrap();
+        assert!(matches!(
+            decode::<ClientMessage>(&frame),
+            Err(ControlError::FieldTooLong {
+                field: "reason",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn moderation_asks_for_a_pilot_and_never_for_a_sentence() {
+        // specs/02-protocolo.md: no free-form string reaches the interface. A
+        // kick that carried "why" as text would be a second error language
+        // growing beside the enumerated one, written by whoever is angriest.
+        // The one string here is the ban's operator note, which never leaves
+        // the Dogma — the person barred meets `DisconnectReason::Banned` and
+        // nothing else.
+        let frame = encode(&ClientMessage::KickPilot { pilot: PilotId(42) }).unwrap();
+        assert!(
+            frame.len() < 32,
+            "a kick got big enough to be carrying prose: {} bytes",
+            frame.len()
+        );
     }
 
     proptest! {

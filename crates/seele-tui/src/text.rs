@@ -30,6 +30,7 @@ pub fn alert(reason: AlertReason) -> &'static str {
         AlertReason::CageFull => "CAGE LOTADO",
         AlertReason::OperatorNotice => "AVISO DO OPERADOR",
         AlertReason::RateLimited => "VOCÊ ESTÁ FALANDO RÁPIDO DEMAIS PARA O DOGMA",
+        AlertReason::MovedByOperator => "UM OPERADOR MOVEU O SEU PLUG",
     }
 }
 
@@ -86,7 +87,7 @@ pub fn worth_retrying(reason: DisconnectReason) -> bool {
 mod tests {
     use super::*;
 
-    const ALERTS: [AlertReason; 8] = [
+    const ALERTS: [AlertReason; 9] = [
         AlertReason::Mentioned,
         AlertReason::SubsystemChanged,
         AlertReason::SyncDegraded,
@@ -95,6 +96,7 @@ mod tests {
         AlertReason::CageFull,
         AlertReason::OperatorNotice,
         AlertReason::RateLimited,
+        AlertReason::MovedByOperator,
     ];
 
     const DISCONNECTS: [DisconnectReason; 11] = [
