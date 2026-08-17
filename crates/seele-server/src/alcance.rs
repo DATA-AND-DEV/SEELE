@@ -23,6 +23,7 @@ use std::net::{IpAddr, SocketAddr, UdpSocket};
 
 use anyhow::{Context, Result};
 
+pub mod interfaces;
 pub mod porta;
 
 /// Que famílias de endereço a escuta de um Dogma alcança de fato.
