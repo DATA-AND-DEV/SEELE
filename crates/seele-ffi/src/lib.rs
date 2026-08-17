@@ -48,7 +48,7 @@ use seele_core::{
 };
 
 pub use types::{
-    Cage, CageSync, CaptureDevice, EndReason, Event, Line, LinkState, Message, Notice,
+    Cage, CageSync, CaptureDevice, EndReason, Event, Line, LineWeight, LinkState, Message, Notice,
     NoticeReason, Pattern, Pilot, PlaybackDevice, PlugError, Severity, Snapshot, SyncBand as Band,
     Telemetry, Trust, VoiceMode,
 };
@@ -207,6 +207,22 @@ enum Command {
         pilot: PilotId,
         cage: CageId,
     },
+    DeleteCage {
+        cage: CageId,
+    },
+    DeleteLine {
+        line: LineId,
+    },
+    /// The one command that carries somewhere to answer.
+    ///
+    /// Everything else on this queue is a thing to do, confirmed — when it is
+    /// confirmed at all — by the Dogma announcing it to everybody. This is a
+    /// question, and its answer is only useful to the caller who asked, while
+    /// the box it fills is still open.
+    WeighLine {
+        line: LineId,
+        answer: tokio::sync::oneshot::Sender<LineWeight>,
+    },
     Shutdown,
 }
 
@@ -259,6 +275,18 @@ struct Shared {
     /// O número em si não significa nada; só a diferença significa. A casca
     /// guarda o último que desenhou e busca o histórico quando ele muda.
     messages_revision: std::sync::atomic::AtomicU64,
+    /// Quem está esperando o peso de uma Linha, e por qual Linha.
+    ///
+    /// A única pergunta com resposta deste crate. Todo o resto que a casca pede
+    /// é ordem — o Dogma confirma anunciando a mudança a todo mundo —, e este é
+    /// o número de uma frase que só serve a quem perguntou, enquanto a caixa
+    /// que ela enche estiver aberta.
+    ///
+    /// Uma lista e não um mapa por Linha: duas caixas sobre a mesma Linha ao
+    /// mesmo tempo não acontecem numa janela só, e se acontecessem um mapa
+    /// atenderia uma e deixaria a outra esperando para sempre. Aqui as duas
+    /// recebem a mesma resposta.
+    pending_weights: Mutex<Vec<(LineId, tokio::sync::oneshot::Sender<LineWeight>)>>,
 }
 
 impl Shared {
@@ -305,6 +333,27 @@ impl Shared {
         } else {
             LinkState::Online
         }
+    }
+
+    /// Entrega o peso a quem perguntou por aquela Linha.
+    ///
+    /// Quem sobrar na lista é de outra Linha e continua esperando. Ninguém fica
+    /// esperando para sempre: o remetente é largado quando a tarefa do enlace
+    /// termina, e um `oneshot` largado acorda quem espera com erro — que é como
+    /// esta ponte já diz "não há sessão".
+    fn answer_weight(&self, weight: LineWeight) {
+        let Ok(mut pending) = self.pending_weights.lock() else {
+            return;
+        };
+        let mut esperando = Vec::new();
+        for (line, answer) in pending.drain(..) {
+            if line.get() == weight.line {
+                let _ = answer.send(weight);
+            } else {
+                esperando.push((line, answer));
+            }
+        }
+        *pending = esperando;
     }
 
     fn notify(&self, event: &Event) {
@@ -371,6 +420,7 @@ impl Plug {
             rtt_micros: std::sync::atomic::AtomicU64::new(0),
             sync_ratio: AtomicU8::new(0),
             running: AtomicBool::new(false),
+            pending_weights: Mutex::new(Vec::new()),
         });
 
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -608,6 +658,66 @@ impl Plug {
             pilot: PilotId(pilot),
             cage: CageId(cage),
         })
+    }
+
+    /// Asks the Dogma to destroy a Cage — `apagar_cage`.
+    ///
+    /// Everybody inside is turned out of it and told; the Line bound to it, if
+    /// there is one, is left alone. The Dogma refuses the last Cage, and says so
+    /// with [`NoticeReason::LastCage`] rather than with the sentence it uses for
+    /// a refused entry.
+    ///
+    /// Asks, and nothing more. Nothing is removed from this client's own idea of
+    /// the Dogma until the Dogma says the room is gone — a room removed
+    /// optimistically would vanish off the screen of the person who asked
+    /// whether or not it worked, and the refusal is the case they most need to
+    /// see did not happen.
+    ///
+    /// # Errors
+    ///
+    /// [`PlugError::NotConnected`] once the session is over.
+    pub fn delete_cage(&self, cage: u32) -> Result<(), PlugError> {
+        self.command(Command::DeleteCage { cage: CageId(cage) })
+    }
+
+    /// Asks the Dogma to destroy a Line, and everything written in it —
+    /// `apagar_linha`.
+    ///
+    /// # Errors
+    ///
+    /// [`PlugError::NotConnected`] once the session is over.
+    pub fn delete_line(&self, line: u32) -> Result<(), PlugError> {
+        self.command(Command::DeleteLine { line: LineId(line) })
+    }
+
+    /// Asks what destroying a Line would cost, and waits for the answer.
+    ///
+    /// The one call on this handle that waits, and the reason is the sentence it
+    /// feeds: a confirmation promising to destroy 1.847 messages by 6 people
+    /// written since a certain day has to have counted them, in the Dogma's own
+    /// database, at the moment of asking. This client holds one page of history
+    /// and would guess low by whatever the Line's whole past is — and a number
+    /// that is nearly right in that box is worse than no number at all.
+    ///
+    /// So the caller waits, and a shell that cannot get an answer must not open
+    /// the box: there is no honest version of it without these three numbers.
+    ///
+    /// Destroys nothing, and needs no permission — the Dogma answers about a
+    /// Line the asker may already read.
+    ///
+    /// # Errors
+    ///
+    /// [`PlugError::NotConnected`] once the session is over, and equally if it
+    /// ends while the question is in flight: the driver drops what it was going
+    /// to answer with, and this returns rather than waiting for a Dogma that is
+    /// no longer there.
+    pub async fn weigh_line(&self, line: u32) -> Result<LineWeight, PlugError> {
+        let (answer, resposta) = tokio::sync::oneshot::channel();
+        self.command(Command::WeighLine {
+            line: LineId(line),
+            answer,
+        })?;
+        resposta.await.map_err(|_| PlugError::NotConnected)
     }
 
     /// Mutes or unmutes the microphone — A.T. Field.
@@ -885,6 +995,9 @@ impl Plug {
             may_move_pilot: room
                 .permissions
                 .contains(&seele_core::Permission::MovePilot),
+            may_delete_rooms: room
+                .permissions
+                .contains(&seele_core::Permission::AdministerDogma),
             ended: room.ended.map(|end| end.reason.into()),
         }
     }
@@ -1211,7 +1324,23 @@ async fn drive(
 
             aviso = client.proximo() => {
                 match aviso {
-                    seele_core::enlace::Aviso::Mensagem(message) => fold(&shared, &message),
+                    seele_core::enlace::Aviso::Mensagem(message) => {
+                        // A resposta a uma pergunta, e não um fato sobre a
+                        // sala: ela vai para quem perguntou e não entra no
+                        // `Room`. Antes do `fold` porque é onde ela para —
+                        // `Room::apply` não tem arm que a guarde, de propósito.
+                        if let seele_core::ServerMessage::LineWeighed {
+                            line, messages, authors, oldest_at_seconds,
+                        } = message.as_ref() {
+                            shared.answer_weight(LineWeight {
+                                line: line.get(),
+                                messages: *messages,
+                                authors: *authors,
+                                oldest_at_seconds: *oldest_at_seconds,
+                            });
+                        }
+                        fold(&shared, &message);
+                    }
                     // Cair não encerra: começa a bateria interna, e a casca
                     // esmaece em vez de fechar.
                     seele_core::enlace::Aviso::Estado { estado, restante } => {
@@ -1300,6 +1429,14 @@ async fn drive(
     // nenhuma por trás.
     if let Ok(mut media) = shared.media.lock() {
         *media = None;
+    }
+    // Quem estava esperando o peso de uma Linha é acordado, e não deixado
+    // pendurado. Largar o remetente é o que faz `weigh_line` devolver
+    // `NotConnected` em vez de esperar uma resposta que não vem mais — e o que
+    // impede uma caixa de confirmação de ficar aberta e muda depois de a sessão
+    // acabar debaixo dela.
+    if let Ok(mut pending) = shared.pending_weights.lock() {
+        pending.clear();
     }
     client.sair().await;
 }
@@ -1521,6 +1658,33 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
         }
         Command::MovePilot { pilot, cage } => {
             if client.mover_piloto(pilot, cage).await.is_err() {
+                return false;
+            }
+        }
+        // Nothing is written into the local `Room` for these either, and here
+        // the reason is at its sharpest: a room removed optimistically would
+        // vanish off the screen of the person who asked whether or not the
+        // Dogma agreed — and the one case where it refuses, the last Cage, is
+        // exactly the case they most need to see did not happen.
+        Command::DeleteCage { cage } => {
+            if client.apagar_cage(cage).await.is_err() {
+                return false;
+            }
+        }
+        Command::DeleteLine { line } => {
+            if client.apagar_linha(line).await.is_err() {
+                return false;
+            }
+        }
+        // The question, and where to put the answer. Registered **before** the
+        // ask goes out: the Dogma is on the other side of a socket that can be
+        // faster than this thread's next line, and a reply arriving before its
+        // slot exists is a reply with nowhere to go.
+        Command::WeighLine { line, answer } => {
+            if let Ok(mut pending) = shared.pending_weights.lock() {
+                pending.push((line, answer));
+            }
+            if client.pesar_linha(line).await.is_err() {
                 return false;
             }
         }
@@ -1853,6 +2017,7 @@ mod tests {
             rtt_micros: std::sync::atomic::AtomicU64::new(0),
             sync_ratio: AtomicU8::new(0),
             running: AtomicBool::new(true),
+            pending_weights: Mutex::new(Vec::new()),
         })
     }
 
@@ -2042,6 +2207,158 @@ mod tests {
         assert!(
             !depois.may_kick && !depois.may_ban && !depois.may_remove_message,
             "the snapshot went on offering the controls after the permissions went away"
+        );
+    }
+
+    #[test]
+    fn destroying_a_room_is_a_permission_of_its_own_and_not_the_one_that_makes_them() {
+        // The decision this whole path turns on, asserted where a shell reads
+        // it. Making and renaming a room are mistakes a Dogma survives;
+        // destroying one ends what other people wrote. A role that may build
+        // rooms without being able to unmake them is a role somebody can
+        // actually write — `specs/04-servidor-seele.md` enumerates
+        // `gerenciar_cages` and `administrar_dogma` separately — and a single
+        // boolean for both would make it impossible to offer correctly.
+        use seele_core::{Permission, ServerMessage, SessionId, Ssrc};
+
+        let shared = bare_shared();
+        let (commands, _queue) = tokio::sync::mpsc::unbounded_channel();
+        let plug = Plug {
+            commands,
+            shared: Arc::clone(&shared),
+        };
+
+        let sessao = |permissions: Vec<Permission>| ServerMessage::Session {
+            id: SessionId(1),
+            pilot: seele_core::PilotId(7),
+            ssrc: Ssrc(700),
+            dogma: "Terceira Tóquio".into(),
+            cages: Vec::new(),
+            lines: Vec::new(),
+            roles: Vec::new(),
+            permissions,
+        };
+
+        // The role that builds and does not destroy. This is the pair the
+        // separation exists for, and the one a single boolean would get wrong.
+        fold(&shared, &sessao(vec![Permission::ManageCages]));
+        let constroi = plug.snapshot();
+        assert!(constroi.may_manage_cages);
+        assert!(
+            !constroi.may_delete_rooms,
+            "the permission to make a room was read as the permission to destroy one"
+        );
+
+        // And the reverse, so the two are not simply the same field read twice.
+        fold(&shared, &sessao(vec![Permission::AdministerDogma]));
+        let administra = plug.snapshot();
+        assert!(administra.may_delete_rooms);
+        assert!(!administra.may_manage_cages);
+
+        // Never the moderation permissions either: somebody trusted to remove a
+        // person for the evening is not thereby trusted with the Dogma's past.
+        fold(
+            &shared,
+            &sessao(vec![
+                Permission::Kick,
+                Permission::Ban,
+                Permission::RemoveMessage,
+                Permission::MovePilot,
+            ]),
+        );
+        assert!(
+            !plug.snapshot().may_delete_rooms,
+            "a moderation permission lit up the one that destroys rooms"
+        );
+
+        // And it goes away again, like the five beside it.
+        fold(&shared, &sessao(Vec::new()));
+        assert!(!plug.snapshot().may_delete_rooms);
+    }
+
+    #[test]
+    fn the_weight_of_a_line_reaches_the_caller_who_asked_for_it() {
+        // The number in the confirmation, and the one call on this bridge that
+        // waits for an answer. A shell that cannot get these three numbers must
+        // not open the box at all, so the wiring that carries them is worth
+        // pinning: the question registers a slot, the Dogma's reply fills it,
+        // and the caller wakes with the counts unrounded.
+        let shared = bare_shared();
+        let (commands, mut queue) = tokio::sync::mpsc::unbounded_channel();
+        let plug = Plug {
+            commands,
+            shared: Arc::clone(&shared),
+        };
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            let pergunta = tokio::spawn({
+                let shared = Arc::clone(&shared);
+                async move {
+                    // The driver's half, by hand: take the command off the
+                    // queue, park the sender, then let the answer arrive.
+                    let Some(Command::WeighLine { line, answer }) = queue.recv().await else {
+                        panic!("nothing asked the Dogma to weigh anything");
+                    };
+                    shared
+                        .pending_weights
+                        .lock()
+                        .expect("pending")
+                        .push((line, answer));
+                    shared.answer_weight(LineWeight {
+                        line: 7,
+                        messages: 1_847,
+                        authors: 6,
+                        oldest_at_seconds: Some(1_678_600_000),
+                    });
+                }
+            });
+
+            let peso = plug.weigh_line(7).await.expect("weight");
+            pergunta.await.expect("driver");
+
+            assert_eq!(peso.messages, 1_847);
+            assert_eq!(peso.authors, 6);
+            assert_eq!(peso.oldest_at_seconds, Some(1_678_600_000));
+        });
+
+        // And nothing was kept: the weight's whole value is being fresh, so
+        // asking for it left the room exactly as it was.
+        assert!(shared.room.lock().expect("room").lines.is_empty());
+        assert!(shared.pending_weights.lock().expect("pending").is_empty());
+    }
+
+    #[test]
+    fn a_weight_for_another_line_leaves_this_caller_waiting() {
+        // Two boxes cannot be open at once in one window, but a reply landing
+        // against the wrong slot would be the kind of mistake that fills a
+        // confirmation with somebody else's numbers — which is the exact
+        // failure the counted number exists to rule out.
+        let shared = bare_shared();
+        let (answer, mut resposta) = tokio::sync::oneshot::channel();
+        shared
+            .pending_weights
+            .lock()
+            .expect("pending")
+            .push((seele_core::LineId(7), answer));
+
+        shared.answer_weight(LineWeight {
+            line: 9,
+            messages: 3,
+            authors: 1,
+            oldest_at_seconds: None,
+        });
+
+        assert!(
+            resposta.try_recv().is_err(),
+            "a count for another Line was handed to the box asking about this one"
+        );
+        assert_eq!(
+            shared.pending_weights.lock().expect("pending").len(),
+            1,
+            "the question was dropped without being answered"
         );
     }
 
@@ -2259,6 +2576,7 @@ mod tests {
             rtt_micros: std::sync::atomic::AtomicU64::new(0),
             sync_ratio: AtomicU8::new(0),
             running: AtomicBool::new(true),
+            pending_weights: Mutex::new(Vec::new()),
         });
         let counter = Arc::new(Counter(std::sync::atomic::AtomicUsize::new(0)));
         shared

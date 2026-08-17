@@ -133,6 +133,12 @@ pub enum NoticeReason {
     RateLimited,
     /// An operator moved this pilot's plug into another Cage.
     MovedByOperator,
+    /// The Cage this pilot's plug was in no longer exists.
+    CageDeleted,
+    /// A Line this pilot had open no longer exists.
+    LineDeleted,
+    /// The Cage asked about is the only one the Dogma has, so it stays.
+    LastCage,
 }
 
 impl From<seele_core::AlertReason> for NoticeReason {
@@ -147,8 +153,35 @@ impl From<seele_core::AlertReason> for NoticeReason {
             seele_core::AlertReason::OperatorNotice => Self::OperatorNotice,
             seele_core::AlertReason::RateLimited => Self::RateLimited,
             seele_core::AlertReason::MovedByOperator => Self::MovedByOperator,
+            seele_core::AlertReason::CageDeleted => Self::CageDeleted,
+            seele_core::AlertReason::LineDeleted => Self::LineDeleted,
+            seele_core::AlertReason::LastCage => Self::LastCage,
         }
     }
+}
+
+/// What a Line holds, as the confirmation in front of destroying it needs it.
+///
+/// Counted in the Dogma's database at the instant of asking, and carried across
+/// the bridge unrounded. A shell cannot work these out for itself: it holds one
+/// page of history and would guess low by whatever the Line's whole past is,
+/// and a number that is nearly right in a box promising to destroy 1.847
+/// messages is worse than no number at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct LineWeight {
+    /// Which Line was weighed.
+    pub line: u32,
+    /// How many messages are in it that anybody can read.
+    pub messages: u32,
+    /// How many distinct pilots wrote them.
+    pub authors: u32,
+    /// When the oldest was written, in seconds since the Unix epoch.
+    ///
+    /// `None` when the Line is empty — the one case where the sentence has no
+    /// date to give and has to say something else instead. Turning it into a
+    /// date somebody reads is a shell's job, like every other timestamp that
+    /// crosses here.
+    pub oldest_at_seconds: Option<i64>,
 }
 
 /// Why a session ended.
@@ -585,6 +618,19 @@ pub struct Snapshot {
     pub may_remove_message: bool,
     /// Whether this pilot may move somebody between Cages — `mover_piloto`.
     pub may_move_pilot: bool,
+    /// Whether this pilot may destroy Cages and Lines — `administrar_dogma`.
+    ///
+    /// Its own boolean, and deliberately not [`Snapshot::may_manage_cages`].
+    /// Making a room and renaming one are mistakes a Dogma survives; destroying
+    /// one ends what other people wrote, and no screen of this product brings
+    /// it back. `specs/04-servidor-seele.md` calls `gerenciar_cages` "criar e
+    /// configurar Cages" and `administrar_dogma` "todo o resto sobre o Dogma",
+    /// so a role that may build rooms without being able to unmake them is a
+    /// role somebody can actually write — and a single boolean for both would
+    /// make that role impossible to offer correctly.
+    ///
+    /// **Convenience, never enforcement**, like the five above it.
+    pub may_delete_rooms: bool,
     /// Set once the session is over.
     pub ended: Option<EndReason>,
 }
@@ -759,6 +805,9 @@ mod tests {
             seele_core::AlertReason::OperatorNotice,
             seele_core::AlertReason::RateLimited,
             seele_core::AlertReason::MovedByOperator,
+            seele_core::AlertReason::CageDeleted,
+            seele_core::AlertReason::LineDeleted,
+            seele_core::AlertReason::LastCage,
         ];
         let mapped: std::collections::HashSet<NoticeReason> =
             all.into_iter().map(NoticeReason::from).collect();
