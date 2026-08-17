@@ -789,3 +789,49 @@ funciona de qualquer lugar. É um erro na direção segura (promete menos do que
 entrega), não mudou nesta rodada, e a classificação de endereços que entrou
 agora deixa o conserto barato: falta só o degrau que lê «este endereço é global e
 está numa placa de rede».
+
+## 21 · MODs estão desenhados e não construídos
+
+**Sintoma.** Não dá para mudar nada da aparência do produto. A tela de
+configurações não oferece `TEMA` — e há teste cobrando que ela não ofereça
+(`the_settings_screen_omits_what_the_product_lacks_instead_of_drawing_it_dead`,
+`apps/seele-app/tests/frontend.rs`) —, porque `apps/seele-app/ui/index.html`
+registra que «um segundo tema é uma segunda paleta canônica, e essa é decisão de
+ADR, não de tela». `specs/00-visao-geral.md` põe «marketplace de plugins» como
+não-objetivo de v1.
+
+**O que se sabe.** Tudo o que dá para saber sem escrever código está no
+**ADR 0029**, que está **proposto** e não aceito. Em resumo: um MOD é um arquivo
+de valores em JSON, um por vez, no diretório do ADR 0017; ele **nunca escreve um
+seletor** e nunca traz código, e é por isso que a CSP não afrouxa, que o conjunto
+fechado de arquivos de `ui/` não muda, e que os quatro guardas do vermelho
+continuam de pé — todos eles perguntam se uma regra *nomeia* o token, e nenhum
+pergunta que cor o token guarda.
+
+A palheta congelada do ADR 0014 vira o **piso**: o produto mede contraste e
+distância em CIELAB na instalação, contra os valores que o próprio MOD declara,
+com os pisos que cada token já cumpria — e recusa **por token**, mantendo o
+nosso, sem interruptor para ignorar. O papel não se move: `vermelho-alerta`
+continua sendo a única cor de alerta e de queda, porque quem decide isso são os
+seletores.
+
+O esquema é fechado e só cresce; **a versão 1 traz uma capacidade só, `cor`**,
+pela regra de que uma capacidade entra quando a tabela e o consumidor dela já
+existem — glifo, frase, som, atalho, comando e painel são recusados um a um com o
+motivo. O `plug` fica com a palheta congelada em v1. Um MOD **não acompanha um
+Dogma**: a sala pode recomendar, e instalar continua sendo ato de quem instala.
+
+**O que ficou tentado.** Nada de código, de propósito — a mesma postura da
+pendência 18 e do degrau 4 do ADR 0022: as perguntas caras aqui não são de
+implementação. O indexador aprende metadado (quem baixou o quê, e quando), e por
+isso é catálogo estático com busca no cliente, sem consulta automática ao abrir,
+espelhável, opcional e trocável.
+
+**Por que não foi resolvido.** Falta a decisão humana sobre um ADR proposto. O
+ponto mais provável de ser derrubado está isolado de propósito: v1 com uma
+capacidade só. E cinco coisas o próprio ADR nomeia como sem saída boa — feio não
+se mede, distinção aos pares não é olho, o esquema só cresce, o indexador sabe
+quem baixou o quê, e julgar exige ler.
+
+**Quando dói.** Não dói em uso; dói em pedido. É a diferença entre um produto que
+as pessoas usam e um que elas fazem seu.
