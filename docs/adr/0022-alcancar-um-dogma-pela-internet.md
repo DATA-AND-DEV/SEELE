@@ -3,7 +3,9 @@
 **Estado:** aceito
 **Data:** 2026-08-10
 **Degraus 2 e 3 implementados:** 2026-08-17 — ver "O que a implementação
-ensinou", no fim. Os degraus 4 e 5 continuam exatamente como estão escritos
+ensinou", no fim, e "O que a primeira máquina de outra pessoa ensinou", logo
+depois: três decisões deste ADR foram corrigidas por um relato de campo, e a
+maior delas é que o convite não pode carregar um endereço só. Os degraus 4 e 5 continuam exatamente como estão escritos
 aqui: o 4 esperando a conversa sobre metadado, o 5 fora de escopo por decisão.
 
 ## Contexto
@@ -233,3 +235,56 @@ aparece **junto do link** e não numa tela de diagnóstico, e
 
 O motivo de aparecer junto do link é concreto: um link que só funciona na rede
 de casa e um link que funciona pela internet são o **mesmo texto**.
+
+## O que a primeira máquina de outra pessoa ensinou
+
+Escrito em 2026-08-17, depois de o primeiro relato de campo chegar: um Windows
+hospedando, um Mac na mesma casa, e o Mac não entrava. Três coisas decididas
+aqui estavam erradas, e vale nomear cada uma.
+
+### "O degrau mais alto vai no convite" era o erro
+
+Está escrito acima que o `seele://` "não muda de forma: muda o que vai dentro", e
+a implementação leu isso como *um* endereço, o do degrau mais alto alcançado.
+Isso **tirou um caso que já funcionava**: antes desta escada existir, o convite
+levava o endereço da rede local, e os dois na mesma casa entravam sempre.
+
+A escada continua sendo a coisa certa para decidir **o que dizer** a quem
+hospeda. O que ela não pode fazer é decidir o que **descartar**: os endereços dos
+degraus mais baixos continuam valendo, para outras pessoas. O convite passou a
+levar todos, na ordem em que valem a pena, e o ADR 0006 registra a forma. A
+escada ficou com o papel que só ela tem — a frase.
+
+### Um degrau só pode ser declarado se a escuta o servir
+
+O degrau 2 é "a máquina tem IPv6 global". Faltava a outra metade da conjunção: o
+**socket** também precisa atender em IPv6. Na máquina do relato a pilha dupla
+falhou e o Dogma recuou para IPv4 — o comportamento que este ADR já previa e que
+funcionou —, e a escada, que recebia só a porta, seguiu perguntando pelo IPv6
+global da máquina e declarando o degrau 2. O convite anunciava um endereço onde
+nada escutava.
+
+Não é um esquecimento pontual: era o tipo que permitia. `Pilha::alcanca_ipv6`
+existia, e nada obrigava a perguntar. Agora a escada recebe a escuta inteira e
+todo endereço passa por um construtor privado que confere — a afirmação e a
+prova da afirmação viraram a mesma chamada.
+
+### "Descobrir o próprio endereço" não é perguntar pela rota padrão
+
+Os dois degraus daqui precisam saber o endereço da máquina, e os dois usavam o
+mesmo truque: abrir um socket UDP, `connect` num endereço de documentação, ler o
+`local_addr`. Isso responde "qual endereço meu o sistema usaria para sair", que
+**não** é a pergunta — e uma VPN captura exatamente essa resposta.
+
+Com Cloudflare WARP ligado, o endereço devolvido era o do túnel. O convite saía
+com ele, e o UPnP mandava o roteador encaminhar a porta para um endereço que não
+existe naquela rede. O conserto foi enumerar interfaces, o que custou um crate
+(`if-addrs`) neste daemon que tem de caber em 1 vCPU — e é uma conta que o
+próprio degrau 3 já tinha feito ao recusar o `portmapper` por 31 crates. Aqui é
+um, com `libc` como única dependência, e paga um caso medido.
+
+Junto veio um degrau novo, o do endereço de VPN. Um IPv6 de túnel é um unicast
+global de verdade e não há como distingui-lo pela faixa; quem sabe é a interface.
+Sem essa distinção a escada escrevia "alcança de qualquer lugar" embaixo de um
+link que não aceita entrada nenhuma — a forma mais convincente do silêncio que
+este ADR existe para não produzir, porque vem com uma frase confiante em cima.

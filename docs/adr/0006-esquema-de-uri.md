@@ -7,10 +7,13 @@ Contexto: entrar num Dogma exigia passar endereço, porta e — depois do ADR 00
 Decisão: um esquema de URI que carrega o que faz falta.
 
 ```
-seele://dogma.exemplo:8383/?fp=<impressão>&convite=<token>&cage=<n>
+seele://dogma.exemplo:8383/?alt=<outros>&fp=<impressão>&convite=<token>&cage=<n>
 ```
 
 - **endereço** — obrigatório.
+- **`alt`** — os outros endereços do mesmo Dogma, separados por vírgula, na
+  ordem em que se tenta. Acrescentado em 2026-08-17; ver "O endereço nunca
+  podia ser um só", no fim.
 - **`fp`** — a impressão digital do certificado. É o principal motivo disto existir: o cliente compara antes de fixar, então o primeiro contato passa a ser verificado, e um servidor no meio do caminho não passa.
 - **`convite`** — token de uso único do ADR 0021.
 - **`cage`** — em qual Cage entrar ao conectar.
@@ -36,3 +39,53 @@ Consequências:
 - O link revela que existe um Dogma naquele endereço. Para quem já tem o endereço, não é novidade.
 
 Custo de reverter: **baixo**. Um módulo em `seele-proto` e uma opção `--url` no cliente.
+
+## O endereço nunca podia ser um só
+
+Escrito em 2026-08-17, depois de um defeito de campo. Este ADR dizia "endereço —
+obrigatório" e parava aí, no singular, e o singular estava errado desde sempre:
+**uma máquina tem vários endereços, e nenhum deles serve para todo mundo.**
+
+- O da rede de casa é o único que serve para quem está na sala ao lado, e não é
+  alcançável de fora.
+- O público que o roteador abriu (degrau 3 do ADR 0022) serve de fora e quase
+  nunca volta para dentro da própria casa: a maioria dos roteadores domésticos
+  não faz *hairpin*.
+- O de uma VPN serve para quem estiver na mesma VPN, e para mais ninguém.
+
+Enquanto o link levava um endereço só, escolher qualquer um deles perdia alguma
+situação — e o ADR 0022, ao mandar pôr no convite o endereço do **degrau mais
+alto**, escolheu justamente o que perdia o caso mais comum de todos. Foi assim
+que 0.5.0 quebrou "os dois estão na mesma rede", que era o único caso que sempre
+tinha funcionado.
+
+### A forma, e as quatro combinações de versão
+
+`alt=` carrega os endereços restantes, separados por vírgula, cada um validado
+exatamente como o principal — este texto termina num `connect` igual ao outro. O
+máximo é quatro endereços contando o principal: cada um custa a quem recebe uma
+tentativa com prazo antes de a sala abrir.
+
+**O primeiro endereço é o da rede local**, e essa é a decisão que faz a
+compatibilidade funcionar em vez de ser declarada:
+
+| | Convite antigo | Convite novo |
+|---|---|---|
+| **Cliente antigo** | como sempre foi | lê `alt` como parâmetro desconhecido e o ignora; usa o endereço da rede local, que é o comportamento de antes da 0.5.0 |
+| **Cliente novo** | uma lista de um item, e o caminho de antes: sem prazo novo, sem tentativa extra | tenta um de cada vez, na ordem, e para no primeiro que atender |
+
+A regra que faz a linha de cima funcionar é a que este ADR já tinha: *parâmetro
+desconhecido é ignorado em vez de recusado*. Ela foi escrita para poder
+acrescentar um campo depois, e é a primeira vez que ela paga.
+
+### A ordem é conteúdo, e não arrumação
+
+Rede local, depois endereço global, depois a porta do roteador, e túnel por
+último. Pôr o público na frente faria quem está na mesma casa esperar o prazo
+inteiro de um caminho que não volta — o custo cairia inteiro sobre o caso mais
+comum, para beneficiar o mais raro.
+
+Em série, e não em corrida: cada aperto de mão fixa chave (ADR 0003), gasta o
+convite de uso único (ADR 0021) e aparece no log de quem hospeda. Abrir três
+para descartar dois seria pagar isso três vezes, e no caso comum o primeiro
+responde antes de o segundo ser cogitado.
