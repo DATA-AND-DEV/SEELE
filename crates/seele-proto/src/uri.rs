@@ -84,6 +84,16 @@ impl Convite {
         self.cage = Some(cage);
         self
     }
+
+    /// O alvo separado em máquina e porta. Ver [`separar`].
+    ///
+    /// # Errors
+    ///
+    /// Não falha para um convite vindo de [`analisar`], que já validou o alvo;
+    /// falha para um montado à mão com [`Convite::novo`].
+    pub fn endereco(&self) -> Result<Alvo<'_>, ErroDeUri> {
+        separar(&self.alvo)
+    }
 }
 
 /// Por que um texto não é um convite.
@@ -95,6 +105,12 @@ pub enum ErroDeUri {
     SemEndereco,
     /// O endereço tem caractere que endereço não tem.
     EnderecoInvalido,
+    /// Um IPv6 escrito sem colchetes.
+    ///
+    /// Erro próprio, e não [`ErroDeUri::EnderecoInvalido`], porque a correção é
+    /// específica e quem colou o endereço consegue fazê-la: `2001:db8::1` vira
+    /// `[2001:db8::1]`. Ver [`separar`].
+    EnderecoIpv6SemColchetes,
     /// A impressão digital não é hexadecimal de 64 caracteres.
     ImpressaoDigitalInvalida,
     /// O token tem caractere fora do alfabeto de convites.
@@ -184,10 +200,87 @@ pub fn analisar(texto: &str) -> Result<Convite, ErroDeUri> {
     Ok(convite)
 }
 
+/// Um alvo já separado em máquina e porta.
+///
+/// `maquina` vem **sem colchetes**: `[2001:db8::1]:8383` devolve
+/// `2001:db8::1`. É a forma que `(maquina, porta).to_socket_addrs()` aceita e a
+/// forma que se compara com um [`std::net::IpAddr`] — as duas coisas que quem
+/// chama vai fazer em seguida.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Alvo<'a> {
+    /// Nome ou endereço, sem colchetes e sem porta.
+    pub maquina: &'a str,
+    /// A porta escrita, ou [`PORTA_PADRAO`] se o texto não trouxe uma.
+    pub porta: u16,
+}
+
+/// Separa `host[:porta]` em máquina e porta, entendendo IPv6.
+///
+/// # Por que isto não é um `rsplit_once(':')`
+///
+/// O separador de porta e o separador de um IPv6 são o mesmo caractere, e as
+/// cascas resolviam isso com `rsplit_once(':')` — que em `[2001:db8::1]:8383`
+/// devolve a máquina com colchetes (que nenhum resolvedor aceita) e em
+/// `2001:db8::1` devolve `2001:db8:` na porta `1`, um endereço que não existe.
+/// A regra da RFC 3986 é a dos colchetes, e ela mora aqui, uma vez.
+///
+/// # Errors
+///
+/// [`ErroDeUri::EnderecoIpv6SemColchetes`] quando o texto tem mais de um `:` e
+/// nenhum colchete — o caso de quem copiou o endereço de um `ip addr` e colou
+/// cru. [`ErroDeUri::EnderecoInvalido`] para o resto.
+pub fn separar(alvo: &str) -> Result<Alvo<'_>, ErroDeUri> {
+    if let Some(depois_do_colchete) = alvo.strip_prefix('[') {
+        let (dentro, resto) = depois_do_colchete
+            .split_once(']')
+            .ok_or(ErroDeUri::EnderecoInvalido)?;
+        if dentro.is_empty() {
+            return Err(ErroDeUri::EnderecoInvalido);
+        }
+        let porta = if resto.is_empty() {
+            PORTA_PADRAO
+        } else {
+            resto
+                .strip_prefix(':')
+                .ok_or(ErroDeUri::EnderecoInvalido)?
+                .parse()
+                .map_err(|_| ErroDeUri::EnderecoInvalido)?
+        };
+        return Ok(Alvo {
+            maquina: dentro,
+            porta,
+        });
+    }
+
+    match alvo.rsplit_once(':') {
+        // Dois `:` e nenhum colchete só pode ser um IPv6 escrito cru. Tratá-lo
+        // como `host:porta` produziria uma máquina que não existe e uma porta
+        // que não foi pedida, e o erro apareceria muito longe daqui.
+        Some((antes, _)) if antes.contains(':') => Err(ErroDeUri::EnderecoIpv6SemColchetes),
+        Some((maquina, porta)) => {
+            if maquina.is_empty() {
+                return Err(ErroDeUri::EnderecoInvalido);
+            }
+            Ok(Alvo {
+                maquina,
+                porta: porta.parse().map_err(|_| ErroDeUri::EnderecoInvalido)?,
+            })
+        }
+        None => Ok(Alvo {
+            maquina: alvo,
+            porta: PORTA_PADRAO,
+        }),
+    }
+}
+
 /// Só o que aparece num `host[:porta]`.
 ///
 /// Estreito por escolha. Este texto vira endereço de conexão, e a lista curta é
 /// mais fácil de defender do que a lista de tudo que já foi visto por aí.
+///
+/// A separação faz parte da validação de propósito: um `Convite` que saiu de
+/// [`analisar`] sempre se separa, e quem chama [`separar`] depois não precisa
+/// tratar um erro que não pode acontecer.
 fn validar_alvo(alvo: &str) -> Result<(), ErroDeUri> {
     if alvo.len() > 255 {
         return Err(ErroDeUri::EnderecoInvalido);
@@ -200,12 +293,7 @@ fn validar_alvo(alvo: &str) -> Result<(), ErroDeUri> {
     }
     // Uma porta que não é número transformaria o erro num `connect` estranho
     // lá adiante, longe daqui.
-    if let Some((_, porta)) = alvo.rsplit_once(':') {
-        if !porta.is_empty() && porta.parse::<u16>().is_err() && !alvo.ends_with(']') {
-            return Err(ErroDeUri::EnderecoInvalido);
-        }
-    }
-    Ok(())
+    separar(alvo).map(|_| ())
 }
 
 /// SHA-256 em hexadecimal: 64 caracteres, nada mais.
@@ -366,5 +454,99 @@ mod tests {
             analisar("seele://host:porta"),
             Err(ErroDeUri::EnderecoInvalido)
         );
+    }
+
+    #[test]
+    fn um_ipv6_se_separa_sem_os_colchetes_e_com_a_porta_escrita() {
+        // Os colchetes são sintaxe de URI, não parte do endereço: nenhum
+        // resolvedor aceita `[2001:db8::1]` e todo `IpAddr` aceita
+        // `2001:db8::1`. Quem separava com `rsplit_once(':')` entregava o
+        // primeiro.
+        let alvo = separar("[2001:db8::1]:8383").expect("separar");
+        assert_eq!(alvo.maquina, "2001:db8::1");
+        assert_eq!(alvo.porta, 8383);
+        assert!(
+            alvo.maquina.parse::<std::net::IpAddr>().is_ok(),
+            "a máquina não é um endereço: {}",
+            alvo.maquina
+        );
+    }
+
+    #[test]
+    fn um_ipv6_sem_porta_fica_com_a_porta_padrao() {
+        let alvo = separar("[2001:db8::1]").expect("separar");
+        assert_eq!(alvo.maquina, "2001:db8::1");
+        assert_eq!(alvo.porta, PORTA_PADRAO);
+    }
+
+    #[test]
+    fn um_ipv6_sem_colchetes_diz_que_faltam_os_colchetes() {
+        // O caso real: a pessoa roda `ip addr`, copia o endereço e cola cru.
+        // `rsplit_once(':')` lia `2001:db8::1` como a máquina `2001:db8:` na
+        // porta `1` — um endereço que não existe, e um erro que só aparecia lá
+        // adiante, num `connect` que ninguém liga a este texto.
+        for cru in ["2001:db8::1", "::1", "fe80::1%eth0"] {
+            assert_eq!(
+                separar(cru),
+                Err(ErroDeUri::EnderecoIpv6SemColchetes),
+                "passou cru: {cru}"
+            );
+        }
+    }
+
+    #[test]
+    fn um_nome_e_um_ipv4_continuam_se_separando_como_antes() {
+        assert_eq!(
+            separar("dogma.exemplo:8383"),
+            Ok(Alvo {
+                maquina: "dogma.exemplo",
+                porta: 8383
+            })
+        );
+        assert_eq!(
+            separar("192.0.2.10"),
+            Ok(Alvo {
+                maquina: "192.0.2.10",
+                porta: PORTA_PADRAO
+            })
+        );
+    }
+
+    #[test]
+    fn um_alvo_que_analisar_aceitou_sempre_se_separa() {
+        // A invariante que faz `Convite::endereco` não precisar ser tratada
+        // como falha provável: a validação e a separação são a mesma regra.
+        for bom in [
+            "seele://host",
+            "seele://host:8383",
+            "seele://[2001:db8::1]",
+            "seele://[2001:db8::1]:8383",
+            "seele://192.0.2.10:1",
+        ] {
+            let convite = analisar(bom).unwrap_or_else(|erro| panic!("{bom}: {erro:?}"));
+            assert!(convite.endereco().is_ok(), "analisou e não separa: {bom}");
+        }
+    }
+
+    #[test]
+    fn um_ipv6_cru_no_link_e_recusado_com_o_motivo() {
+        // O link inteiro, não só a separação: é `analisar` que a casca chama, e
+        // é ele que tem de dizer o que fazer. `EnderecoInvalido` mandaria a
+        // pessoa procurar um caractere errado que não existe.
+        assert_eq!(
+            analisar("seele://2001:db8::1"),
+            Err(ErroDeUri::EnderecoIpv6SemColchetes)
+        );
+    }
+
+    #[test]
+    fn um_colchete_sem_fecho_nao_passa() {
+        for torto in ["[2001:db8::1", "[]:8383", "[2001:db8::1]8383"] {
+            assert_eq!(
+                separar(torto),
+                Err(ErroDeUri::EnderecoInvalido),
+                "passou: {torto}"
+            );
+        }
     }
 }
