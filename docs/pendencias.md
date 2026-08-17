@@ -8,17 +8,11 @@ citados de fora — "pendência #9" aparece em `docs/` e em `specs/` — e renum
 faria cada citação apontar para outra coisa. Ela fica no lugar, marcada como
 fechada, com a data e com o que a substituiu.
 
-## 1 · Rajada de mensagens grandes perde entrega
+## 1 · Estreitada em 2026-08-17 · Rajada perde entrega quando um par para de ler
 
-**Sintoma.** Dez mensagens de ~3,9 KB enviadas em rajada, sem o receptor ler no
-meio: só duas chegam. As mesmas dez, com o receptor drenando entre lotes,
-chegam todas. Corpos pequenos chegam todos em qualquer ordem.
-
-**O que se sabe.** Não é o tamanho isolado — 10 de 3900 bytes com drenagem
-entre lotes entregam 10/10. Suspeitas na ordem: janela de controle de fluxo do
-QUIC no começo da conexão, a fila da tarefa que grava em lote, ou a tarefa
-leitora do cliente morrendo em silêncio e o erro sendo engolido por um
-`if let Ok(Ok(_))`.
+**Sintoma original.** Dez mensagens de ~3,9 KB enviadas em rajada, sem o
+receptor ler no meio: só duas chegam. As mesmas dez, com o receptor drenando
+entre lotes, chegam todas. Corpos pequenos chegam todos em qualquer ordem.
 
 **Uma afirmação daqui estava errada.** Esta seção dizia "não é o conserto de
 cancelamento: o comportamento é idêntico antes e depois". Aquela comparação foi
@@ -27,15 +21,74 @@ continuou lendo quadro dentro de um `select!` até o defeito derrubar o
 `acceptance_m5` no Linux e ser diagnosticado de verdade. Descartar o
 cancelamento com meia correção na mão não valia nada, e a frase saiu.
 
-**O que ficou tentado.** `crates/seele-conformance/tests/rajada.rs` roda o
-cenário da pendência. Ele passa — inclusive com a sessão sabotada de volta ao
-código antigo —, então **não reproduz o sintoma no macOS**. Não confirma nem
-descarta o cancelamento como causa; serve como rede, e roda nos três sistemas.
+### O que foi encontrado, medido e consertado
 
-**Por que não foi resolvido.** Precisa de instrumentação dos dois lados, e o
-`Casper::connection()` é `pub(crate)`, então um teste de conformidade não
-consegue conferir o que foi gravado. Investigar isto direito é uma tarefa
-própria, não um remendo no fim de outra.
+**O caminho que reproduz é o par que para de ler.** A sessão escreve para o par
+de dentro do mesmo `select!` em que lê o barramento de eventos. Quando o par
+para de ler, a janela do QUIC fecha, a escrita bloqueia, e **enquanto ela está
+bloqueada ninguém tira evento do barramento**. O barramento é um `broadcast` de
+anel fixo: passado o anel, o mais antigo é descartado e a leitura seguinte
+devolve `Lagged(n)`. Um `let Ok(event) = event else { continue }` transformava
+isso em nada — a sessão seguia, calada, com um buraco permanente no que aquele
+piloto vê, e sem um número em lugar nenhum.
+
+Medido em `crates/seele-server/tests/par_lento.rs`, que **reprovava antes do
+conserto**: 969 de 1160 mensagens chegam, 191 somem, o piloto segue conectado e
+nenhum dos dois lados fica sabendo. As 1160 estão gravadas em CASPER — o que se
+perde é a entrega, não a mensagem.
+
+**O conserto** é encerrar a sessão com `DisconnectReason::FellBehind`, contando
+em `Dogma::atrasos` quantos eventos morreram. Não é castigo: o buraco não tem
+remendo no lugar, porque evento não tem endereço — o Dogma não sabe dizer quais
+faltaram e o cliente não sabe pedir. Reconectar e buscar histórico repõe tudo, é
+caminho que já existe, e a bateria interna o percorre sozinha.
+
+### O que **não** reproduziu, e isso importa
+
+**O sintoma original — dez mensagens, duas chegando — não reproduz no macOS.**
+Nem com o `Client`, nem com um par cru. Mais do que isso: com as duas tarefas
+leitoras dedicadas no lugar, a condição da pendência ("sem o receptor ler no
+meio") deixou de ser alcançável pelo `Client` — a tarefa leitora dele drena o
+fluxo para um canal sem limite, então um cliente que não chama `next_event`
+continua esvaziando a janela do QUIC. Quem ainda para de ler é outro par: um
+cliente de terceiro, ou uma casca cuja tarefa travou.
+
+Isso deixa a causa do 10/2 **provável e não provada**: o cancelamento dos dois
+lados explica cada observação registrada aqui, inclusive a de corpo pequeno
+chegar sempre (quadro que cabe num pacote termina a leitura sem ceder, então
+nunca é cancelado no meio). O mecanismo está provado em
+`crates/seele-core/src/frame.rs`; o que não está é que fosse ele o autor deste
+sintoma.
+
+### As três suspeitas, uma a uma
+
+1. **Janela de controle de fluxo no começo da conexão — morta com medida.** A
+   janela por stream do quinn abre em 1,25 MB; dez corpos de 3,9 KB são 39 KB.
+   `tests/rajada.rs` afirma que nenhum dos dois lados jamais emitiu
+   `STREAM_DATA_BLOCKED` nessa rajada, via `Client::flow_control`.
+2. **A fila da tarefa que grava em lote — não descarta.** `Dogma::post` é canal
+   limitado com `send().await`: cheio, ele faz contrapressão até a sessão, e a
+   contrapressão volta pelo QUIC. Falha de transação já era registrada em log.
+   Nenhum caminho ali perde calado.
+3. **A tarefa leitora do cliente morrendo em silêncio — meia verdade.** A tarefa
+   registra o erro e fecha o canal, e o `next_event` seguinte falha, então a
+   morte é observável. O que engolia eram os **testes**: dois `if let Ok(Ok(_))`
+   no m4 e no m5 trocavam um enlace caído por um prazo esgotado com a frase
+   errada. Consertados.
+
+### O que ficou instrumentado
+
+`Dogma::atrasos` (eventos e sessões), `Client::flow_control` (os quadros
+`*_BLOCKED` dos dois sentidos, lidos do quinn), um aviso no fim de cada sessão
+com quantas vezes o controle de fluxo prendeu a escrita para aquele cliente, e
+`Server::quantas_mensagens` / `Server::mensagens_da_linha`, que abrem a pergunta
+"o que o Dogma gravou" sem tornar público o `Casper::connection()` — que era o
+obstáculo anotado aqui, e cuja abertura entregaria uma `rusqlite::Connection` e
+faria do esquema o contrato.
+
+**O que continua aberto.** Se o 10/2 tinha outra causa, ela reaparece na máquina
+onde reproduzia — e agora há com que medir lá. Quem pegar isto: rode
+`par_lento.rs` e `rajada.rs` no Linux, e leia `atrasos` e `flow_control`.
 
 **Quando dói.** Colar um texto longo, ou um cliente reconectando e recebendo
 histórico em rajada. Não apareceu em uso normal.
