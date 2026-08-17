@@ -182,6 +182,11 @@ fn every_command_the_frontend_calls_is_registered() {
 /// They stay here rather than being deleted, because deleting them would take
 /// the verbs down with the only thing that remembers they exist.
 ///
+/// `procurar_atualizacao` / `instalar_atualizacao` are the two halves of the
+/// in-app update (ADR 0026). The Rust side is finished; the screen is not, and
+/// it is not a button that can be drawn casually — `instalar_atualizacao`
+/// closes and reopens SEELE, so whoever draws it has a warning to write first,
+/// and a progress bar to feed off the `seele://atualizacao` channel.
 /// The four moderation verbs are the same case, one step earlier. `expulsar` /
 /// `banir` / `remover_mensagem` / `mover_piloto` are what
 /// `specs/04-servidor-seele.md` gives the Comandante and the Operador, and
@@ -197,6 +202,8 @@ const AGUARDANDO_TELA: &[&str] = &[
     "banir_piloto",
     "remover_mensagem",
     "mover_piloto",
+    "procurar_atualizacao",
+    "instalar_atualizacao",
 ];
 
 #[test]

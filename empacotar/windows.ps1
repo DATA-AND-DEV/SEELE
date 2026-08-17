@@ -12,6 +12,14 @@
 #
 # Ao final, `entrega\` tem o instalador e o zip da CLI, com as somas SHA-256
 # impressas para conferir contra o que for publicado.
+#
+# Para que o instalador saia atualizável, defina a chave do projeto antes:
+#
+#   $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content ~\.tauri\seele.key -Raw
+#   $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = '…'
+#
+# Sem ela sai o `.exe` de sempre, para baixar à mão.
+# `docs/assinatura-e-atualizacao.md` diz de onde a chave vem.
 
 [CmdletBinding()]
 param(
@@ -162,6 +170,28 @@ try {
     Write-Host "→ gravando a versão $Versao" -ForegroundColor Cyan
     $json = $Original | ConvertFrom-Json
     $json.version = $Versao
+
+    # ------------------------------------------- o pacote de atualização
+    #
+    # No Windows o `.exe` do NSIS **é** o pacote de atualização: o mesmo arquivo
+    # que uma pessoa baixaria à mão. O que falta é a assinatura ao lado dele, e
+    # ela só sai com as duas metades da chave do projeto — a pública, que vive
+    # no repositório em `plugins.updater.pubkey`, e a privada, que vem do
+    # ambiente. Uma só das duas quebra o empacotamento no último passo.
+    $publica = ""
+    if ($json.plugins -and $json.plugins.updater) { $publica = "$($json.plugins.updater.pubkey)".Trim() }
+    $privada = "$env:TAURI_SIGNING_PRIVATE_KEY".Trim()
+    if ($privada -and $publica) {
+        # `Add-Member -Force` porque a chave pode não existir no arquivo: o
+        # `ConvertFrom-Json` do 5.1 devolve um objeto fixo, e atribuir a uma
+        # propriedade ausente falha em vez de criá-la.
+        $json.bundle | Add-Member -NotePropertyName createUpdaterArtifacts -NotePropertyValue $true -Force
+        Write-Host "→ com pacote de atualização" -ForegroundColor Cyan
+    }
+    elseif ($privada -or $publica) {
+        Write-Warning "só metade da chave do atualizador; este instalador não atualiza ninguém."
+    }
+
     Write-Utf8SemBom $Config (($json | ConvertTo-Json -Depth 100) + "`n")
 
     # ------------------------------------------------------------------ CLI
@@ -224,6 +254,13 @@ $(if ($instaladores.Count -eq 0) { 'Nenhum: o empacotamento disse que deu certo 
     }
     Copy-Item $instaladores[0].FullName $Destino -Force
 
+    # A assinatura do atualizador fica ao lado do instalador, com o mesmo nome e
+    # `.sig` no fim. Só existe quando a chave do projeto estava no ambiente.
+    $assinatura = "$($instaladores[0].FullName).sig"
+    if (Test-Path $assinatura) {
+        Copy-Item $assinatura $Destino -Force
+    }
+
     # O zip da CLI **não** é um segundo instalador: é o que o `install.ps1`
     # baixa. Sem ele o instalador de uma linha para de funcionar.
     Compress-Archive `
@@ -238,9 +275,17 @@ $(if ($instaladores.Count -eq 0) { 'Nenhum: o empacotamento disse que deu certo 
     }
     Write-Host @"
 
-Suba os dois arquivos no Releases. As somas acima são as que devem constar do
+Suba os arquivos no Releases. As somas acima são as que devem constar do
 SHA256SUMS — confira-as depois do upload, baixando de volta.
 "@ -ForegroundColor Green
+
+    if (Test-Path (Join-Path $Destino "*.exe.sig")) {
+        Write-Host @"
+Depois de reunir os três sistemas em entrega\, monte o manifesto:
+  python3 empacotar\manifesto.py entrega v$Versao
+Sem ele o botão de atualizar do app não acha este release.
+"@ -ForegroundColor Green
+    }
 }
 finally {
     # A versão gravada é para o artefato, não para o repositório: deixá-la no

@@ -43,6 +43,17 @@ curl -fsSL https://raw.githubusercontent.com/DATA-AND-DEV/SEELE/main/install.sh 
 
 Se você baixou o instalador do seu sistema, **não precisa deles**.
 
+### E o `latest.json`, os `.sig` e o `.app.tar.gz`?
+
+Também não são para você. São o que o **próprio SEELE** procura para se
+atualizar: o `latest.json` diz qual é a versão nova, e cada `.sig` é a assinatura
+que o app confere antes de instalar qualquer coisa. O `.app.tar.gz` é o mesmo app
+do `.dmg`, num formato que o atualizador sabe trocar de lugar sozinho.
+
+Se estiverem nesta página, esta versão atualiza sozinha a partir da próxima. Se
+não estiverem, ela não atualiza — e continua tudo funcionando como antes, com o
+instalador baixado à mão.
+
 ---
 
 ## Como conferir que o arquivo é o que diz ser
@@ -79,13 +90,17 @@ operacional na seção abaixo.
 
 ---
 
-## Nada aqui é assinado
+## Se o sistema reclamar ao abrir
 
-**Este é o aviso mais importante desta página.** Os binários não têm assinatura
-de código, porque assinar exige certificado pago da Apple e de uma autoridade
-Windows. O sistema operacional vai reclamar, e a reclamação não significa que o
-arquivo esteja corrompido ou infectado — significa que ninguém pagou para
-garantir quem o produziu.
+**Este é o aviso mais importante desta página.** Assinar exige certificado pago —
+da Apple num lado, de uma autoridade Windows no outro —, e enquanto não houver um
+o sistema operacional vai reclamar. A reclamação não significa que o arquivo
+esteja corrompido ou infectado: significa que ninguém pagou para garantir quem o
+produziu.
+
+Se o aviso não aparecer, esta versão já saiu assinada, e você pode pular esta
+seção inteira. Ela continua aqui porque a assinatura entra por sistema e por
+versão, e o silêncio de um não é o silêncio do outro.
 
 **macOS.** É a reclamação mais dura das três, e a mais assustadora: o sistema
 diz que **não consegue verificar se o app contém malware**, e o botão que

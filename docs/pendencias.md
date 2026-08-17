@@ -433,3 +433,51 @@ duas esperas de temporizador, e custou 3,39 ms de p50 aqui.
 **Quando dói.** Sempre, em qualquer máquina cujo laço de voz não feche uma
 volta em 20 ms — e a folga neste Mac era de 3,5x, não das dez que a forma
 antiga supunha.
+
+## 16 · A assinatura está pronta e não há credencial para ela
+
+**Sintoma.** O SmartScreen mostra "O Windows protegeu o computador" e o
+Gatekeeper diz que não consegue verificar se o app contém malware. Foi essa a
+queixa que originou este trabalho: «Windows com erro com o controle inteligente,
+precisamos urgentemente assegurar a confiabilidade do sistema».
+
+**O que se sabe.** Não falta código. O `release.yml` já escreve o `signCommand`
+do Azure Artifact Signing quando os três segredos existem, já instala a
+ferramenta que assina, e já achava a identidade da Apple do mesmo jeito. O que
+falta é comprar: uma conta paga da Apple, uma assinatura do Azure, e uma
+validação de identidade que a Microsoft faz por gente e demora dias.
+
+**O que ficou tentado.** ADR 0026 e `docs/assinatura-e-atualizacao.md`, que é o
+passo a passo inteiro — de criar a conta a nomear cada segredo. Escrito porque
+quem vai fazer isso é uma pessoa, uma vez, e não vai lembrar.
+
+**Por que não foi resolvido.** Depende de cartão de crédito e de validação
+humana; nenhuma das duas é trabalho de código.
+
+**Quando dói.** Toda instalação. É o primeiro contato de quem baixa, e a frase
+do macOS — a que oferece "Mover para o Lixo" — é a mais assustadora das três.
+
+## 17 · O botão de atualizar existe em Rust e não tem tela
+
+**Sintoma.** Não há como atualizar sem baixar o instalador de novo. Foi a segunda
+queixa: «botão de atualizar para não precisar ficar baixando o exe no github toda
+vez», e já custou um teste real — as duas máquinas ficaram em versões diferentes.
+
+**O que se sabe.** A metade em Rust está pronta e testada de compilação:
+`procurar_atualizacao` e `instalar_atualizacao`, em `apps/seele-app/src/main.rs`,
+com o andamento do download saindo pelo canal `seele://atualizacao`. Os dois
+nomes estão em `AGUARDANDO_TELA`, em `apps/seele-app/tests/frontend.rs`, e o
+teste que lê essa lista falha no dia em que a tela chamar um deles — que é o
+lembrete de tirá-lo de lá.
+
+**O que ficou tentado.** Nada de interface: `apps/seele-app/ui/` estava sendo
+reescrito por outro trabalho ao mesmo tempo, e desenhar por cima seria conflito
+garantido.
+
+**Por que não foi resolvido.** Falta a tela, e ela não é um botão qualquer:
+`instalar_atualizacao` **fecha e reabre o SEELE** nos três sistemas, então quem a
+desenhar tem um aviso a escrever antes — e, se houver um Dogma hospedado naquela
+janela, dizer que quem estiver dentro dele cai junto.
+
+**Quando dói.** Em toda versão nova, em toda máquina. E dói em silêncio: quem não
+souber que saiu versão nova simplesmente continua na antiga.

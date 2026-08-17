@@ -16,6 +16,14 @@
 # O `target/` do repositório não é reaproveitado: ele foi construído para o
 # sistema desta máquina, e misturar os dois só produz recompilação confusa. O
 # contêiner usa `target-linux/`, que fica ao lado.
+#
+# Para que o `.deb` saia atualizável, exporte a chave do projeto antes:
+#
+#   export TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/seele.key)"
+#   export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=…
+#
+# Ela atravessa para dentro do contêiner. Sem ela sai o `.deb` de sempre.
+# `docs/assinatura-e-atualizacao.md` diz de onde a chave vem.
 
 set -eu
 
@@ -51,6 +59,8 @@ docker run --rm -i \
     -e CARGO_TARGET_DIR=/work/target-linux \
     -e VERSAO="$VERSAO" \
     -e DEBIAN_FRONTEND=noninteractive \
+    -e TAURI_SIGNING_PRIVATE_KEY="${TAURI_SIGNING_PRIVATE_KEY:-}" \
+    -e TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" \
     rust:1-bookworm sh -s <<'DENTRO'
 set -eu
 
@@ -81,10 +91,23 @@ trap 'cp /tmp/tauri.conf.json.original "$CONFIG"' EXIT INT TERM
 # A versão que aparece no pacote. Sem isto o `.deb` diria 0.0.0, que é a versão
 # do workspace.
 python3 - <<PY
-import json, pathlib
+import json, os, pathlib
 caminho = pathlib.Path("$CONFIG")
 config = json.loads(caminho.read_text())
 config["version"] = "$VERSAO"
+
+# No Linux o `.deb` **é** o pacote de atualização: o mesmo arquivo que uma
+# pessoa baixaria à mão. O que falta é a assinatura ao lado dele, e ela só sai
+# com as duas metades da chave do projeto — a pública do repositório e a privada
+# do ambiente.
+privada = os.environ.get("TAURI_SIGNING_PRIVATE_KEY", "").strip()
+publica = config.get("plugins", {}).get("updater", {}).get("pubkey", "").strip()
+if privada and publica:
+    config["bundle"]["createUpdaterArtifacts"] = True
+    print("com pacote de atualização")
+elif privada or publica:
+    print("só metade da chave do atualizador; este .deb não atualiza ninguém")
+
 caminho.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n")
 print("versão gravada:", config["version"])
 PY
@@ -123,17 +146,24 @@ if [ "$encontrados" != "1" ]; then
 fi
 find target-linux -type f -name '*.deb' -exec cp {} "$DESTINO/" \;
 
+# A assinatura do atualizador, quando este empacotamento teve a chave.
+find target-linux -type f -name '*.deb.sig' -exec cp {} "$DESTINO/" \; 2>/dev/null || true
+
 # O arquivo da CLI, que é o que o `install.sh` baixa.
 tar -czf "$DESTINO/seele-cli-$VERSAO-linux.tar.gz" -C target-linux/release seeled plug
 
 echo
 echo "--- entrega ---"
 cd "$DESTINO"
-for f in *.deb "seele-cli-$VERSAO-linux.tar.gz"; do
-    [ -f "$f" ] && sha256sum "$f"
-done
+sha256sum *
 DENTRO
 
 echo
 echo "pronto. Os arquivos estão em entrega/, e as somas acima são as que devem"
 echo "constar do SHA256SUMS."
+if ls "$RAIZ"/entrega/*.deb.sig >/dev/null 2>&1; then
+    echo
+    echo "Depois de reunir os três sistemas em entrega/, monte o manifesto:"
+    echo "  python3 empacotar/manifesto.py entrega v$VERSAO"
+    echo "Sem ele o botão de atualizar do app não acha este release."
+fi

@@ -33,6 +33,14 @@ use tauri::{AppHandle, Emitter, Manager, State};
 /// this list the first time one is added.
 const EVENT_CHANNEL: &str = "seele://event";
 
+/// O canal por onde o download de uma atualização diz por onde vai.
+///
+/// Separado do [`EVENT_CHANNEL`] de propósito: aquele carrega `Event`, que é o
+/// que a FFI emite sobre a conversa, e um andamento de download não é um evento
+/// de sessão. Quem estiver ouvindo a conversa não deve ter que peneirar bytes
+/// baixados, e quem baixa não precisa estar em sessão nenhuma.
+const CANAL_DE_ATUALIZACAO: &str = "seele://atualizacao";
+
 /// Everything the commands share.
 #[derive(Default)]
 struct Session {
@@ -68,6 +76,17 @@ struct Session {
     /// duas impressões porque a coisa toda é um humano compará-las (ADR 0003).
     /// O frontend continua sem decidir nada.
     convite: Mutex<Option<seele_ffi::uri::Convite>>,
+    /// A versão nova que a pessoa acabou de ver, esperando o «instalar».
+    ///
+    /// Guardada entre os dois comandos porque **quem decide é ela**: procurar
+    /// não baixa nada, e instalar não procura de novo. Sem este campo, apertar
+    /// «instalar» refaria a consulta, e o que seria instalado poderia não ser o
+    /// que estava escrito na tela quando a pessoa leu e concordou.
+    ///
+    /// Some(_) é a única forma de [`instalar_atualizacao`] ter o que instalar, e
+    /// é por isso que ele recusa com [`FalhaAoAtualizar::NadaEscolhido`] em vez
+    /// de silenciosamente ir procurar.
+    atualizacao: Mutex<Option<tauri_plugin_updater::Update>>,
 }
 
 impl Session {
@@ -895,6 +914,242 @@ fn busca_limpar(session: State<'_, Session>) {
     }
 }
 
+// ------------------------------------------------------------- atualização
+//
+// Duas metades, e a divisão é a decisão: `procurar_atualizacao` só olha, e
+// `instalar_atualizacao` só instala o que já foi olhado. Nada aqui roda sozinho.
+//
+// **Não há consulta automática ao abrir.** Num produto cujo argumento é que o
+// servidor é seu, um app que fala com o github.com a cada arranque sem ninguém
+// pedir contradiz o argumento — e o que o parceiro pediu foi um *botão*, não uma
+// vigilância. Quem quiser saber aperta; quem não apertar nunca sai daqui.
+//
+// ADR 0026 registra as duas assinaturas em jogo e por que são duas.
+
+/// O que uma versão nova diz de si, antes de baixar um byte.
+#[derive(Debug, serde::Serialize)]
+struct VersaoNova {
+    /// A versão que está sendo oferecida.
+    versao: String,
+    /// A que está rodando agora, para a tela poder escrever «de X para Y».
+    instalada: String,
+    /// As notas do release, quando o manifesto trouxe alguma.
+    notas: Option<String>,
+}
+
+/// Quanto do pacote já veio.
+///
+/// `total` é `Option` porque o servidor pode não mandar `Content-Length`. Uma
+/// tela que assumir cem por cento conhecido desenha uma barra que trava; sem o
+/// total, o desenho certo é o indeterminado.
+#[derive(Debug, Clone, serde::Serialize)]
+struct Andamento {
+    /// Bytes recebidos até agora.
+    baixados: u64,
+    /// Bytes ao todo, quando o servidor disse quantos são.
+    total: Option<u64>,
+}
+
+/// Por que não deu para atualizar.
+///
+/// Enum e não frase, pela mesma razão de [`FalhaAoHospedar`]: a fronteira
+/// erro→texto está no frontend. Seis e não uma porque pedem seis coisas
+/// diferentes de quem está na frente da tela — de «não há nada a fazer, este app
+/// não foi empacotado com atualizador» a «tente de novo daqui a pouco».
+#[derive(Debug, serde::Serialize)]
+enum FalhaAoAtualizar {
+    /// Este app saiu sem chave de atualização, e por isso não atualiza.
+    ///
+    /// Não é defeito nem erro de rede: é um build feito antes de a chave do
+    /// projeto existir, ou um build de quem compilou do código-fonte. A tela
+    /// certa aqui é a que manda baixar da página de releases — o caminho que
+    /// sempre existiu — e **não** a que manda tentar de novo.
+    NaoConfigurado,
+    /// Não deu para alcançar o manifesto, ou ele não era o que se esperava.
+    NaoAlcancei,
+    /// Há versão nova, mas não para este sistema ou esta arquitetura.
+    SemPacoteParaEsteSistema,
+    /// O pacote baixado **não** foi assinado com a chave deste projeto.
+    ///
+    /// A falha mais séria da lista, e a única que não é para tentar de novo. O
+    /// canal de atualização é onde comprometer um produto é mais barato, e este
+    /// é o ponto em que a tentativa é recusada. O pacote é descartado sem
+    /// tocar em nada instalado.
+    AssinaturaRecusada,
+    /// O pacote chegou inteiro e conferido, e a troca dos arquivos falhou.
+    NaoInstalei,
+    /// Pediram para instalar sem ter procurado antes.
+    NadaEscolhido,
+}
+
+/// Traduz a falha do plugin para o que a tela tem que dizer.
+///
+/// Um `match` e não o `Display` do plugin: aquelas mensagens são em inglês,
+/// escritas para quem desenvolve, e algumas dizem «Updater does not have any
+/// endpoints set», que não é frase para ninguém ler. Escrito aqui, a próxima
+/// variante do plugin cai no ramo final em vez de virar texto cru na tela.
+fn classificar_atualizacao(erro: &tauri_plugin_updater::Error) -> FalhaAoAtualizar {
+    use tauri_plugin_updater::Error as Falha;
+    match erro {
+        // Sem endpoint não há de onde buscar, e isso é configuração de
+        // empacotamento, igual à chave ausente. Mesma tela.
+        Falha::EmptyEndpoints => FalhaAoAtualizar::NaoConfigurado,
+        Falha::Reqwest(_)
+        | Falha::Network(_)
+        | Falha::ReleaseNotFound
+        | Falha::Serialization(_) => FalhaAoAtualizar::NaoAlcancei,
+        Falha::TargetNotFound(_)
+        | Falha::TargetsNotFound(_)
+        | Falha::UnsupportedOs
+        | Falha::UnsupportedArch => FalhaAoAtualizar::SemPacoteParaEsteSistema,
+        Falha::Minisign(_) | Falha::Base64(_) | Falha::SignatureUtf8(_) => {
+            FalhaAoAtualizar::AssinaturaRecusada
+        }
+        // Tudo o mais é a troca dos arquivos dando errado: descompactar, mover,
+        // permissão negada, o instalador do sistema recusando. O que sobrou de
+        // comum a esses casos é que o app continua sendo o de antes.
+        _ => FalhaAoAtualizar::NaoInstalei,
+    }
+}
+
+/// Este app foi empacotado com uma chave de atualização?
+///
+/// A pergunta é sobre a `pubkey` do `plugins.updater`, e ela existe porque o
+/// plugin **não** a confere na hora de procurar: uma chave vazia atravessa o
+/// `check()` inteira e só falha lá na frente, ao conferir o pacote já baixado.
+/// Sem esta conferência, um app sem chave ofereceria a atualização, gastaria o
+/// download e recusaria no fim — três minutos para chegar à resposta que se
+/// tinha antes de começar.
+fn tem_chave_de_atualizacao(app: &AppHandle) -> bool {
+    app.config()
+        .plugins
+        .0
+        .get("updater")
+        .and_then(|updater| updater.get("pubkey"))
+        .and_then(|chave| chave.as_str())
+        .is_some_and(|chave| !chave.trim().is_empty())
+}
+
+/// Pergunta ao release se há versão mais nova. **Não baixa nada.**
+///
+/// `Ok(None)` é a resposta boa e comum: já se está na última. A tela distingue
+/// isso de falha porque são coisas diferentes — uma pede um «você está em dia», a
+/// outra pede um motivo.
+///
+/// O que atravessa a rede aqui é um GET de um JSON pequeno. Enquanto ele
+/// acontece o app segue inteiro: a consulta roda no runtime assíncrono, sem
+/// tocar na sessão nem na janela, e um erro volta como valor.
+#[tauri::command]
+async fn procurar_atualizacao(
+    app: AppHandle,
+    session: State<'_, Session>,
+) -> Result<Option<VersaoNova>, FalhaAoAtualizar> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    if !tem_chave_de_atualizacao(&app) {
+        return Err(FalhaAoAtualizar::NaoConfigurado);
+    }
+
+    let atualizador = app
+        .updater()
+        .map_err(|erro| classificar_atualizacao(&erro))?;
+    let achado = atualizador
+        .check()
+        .await
+        .map_err(|erro| classificar_atualizacao(&erro))?;
+
+    let Some(nova) = achado else {
+        // Em dia. O que estava guardado de uma consulta anterior morre aqui: se
+        // ainda estivesse lá, um «instalar» seguinte instalaria uma versão que
+        // esta consulta acabou de dizer que não é a de agora.
+        if let Ok(mut slot) = session.atualizacao.lock() {
+            *slot = None;
+        }
+        return Ok(None);
+    };
+
+    let resposta = VersaoNova {
+        versao: nova.version.clone(),
+        instalada: nova.current_version.clone(),
+        notas: nova.body.clone(),
+    };
+
+    if let Ok(mut slot) = session.atualizacao.lock() {
+        *slot = Some(nova);
+    }
+
+    Ok(Some(resposta))
+}
+
+/// Baixa, confere a assinatura, instala e reabre o app.
+///
+/// # O que acontece se falhar no meio
+///
+/// A ordem é a resposta, e ela é do plugin: o pacote inteiro é baixado **para a
+/// memória** e a assinatura é conferida **antes** de qualquer arquivo instalado
+/// ser tocado. Então uma queda de rede, um download truncado ou um pacote
+/// adulterado terminam com o app exatamente como estava — não há meia
+/// instalação possível nesses caminhos. A troca em disco, que é a parte
+/// destrutiva, só começa depois de o pacote estar completo e conferido, e o
+/// próprio plugin guarda o app anterior num diretório temporário para devolvê-lo
+/// se a troca falhar no meio.
+///
+/// O que a tela precisa saber: qualquer variante de [`FalhaAoAtualizar`] que
+/// volte daqui deixa uma janela viva e um SEELE utilizável. Não há estado
+/// «quebrado pela metade» a explicar.
+///
+/// # Isto fecha e reabre o app
+///
+/// No Windows não há escolha: o instalador do NSIS não roda com o programa
+/// aberto, então o plugin o dispara e encerra este processo — o `/R` do modo
+/// passivo é o que reabre. Nos outros dois o processo continua vivo depois da
+/// troca, mas rodando o código antigo que já está na memória, e reabrir é a
+/// única forma de a atualização valer.
+///
+/// Uniformizado de propósito: uma ação que às vezes fecha a janela e às vezes
+/// não é uma ação que ninguém consegue avisar direito. **A tela tem que dizer
+/// antes que o SEELE vai fechar e abrir de novo** — e, se houver um Dogma
+/// hospedado nesta janela, que quem estiver dentro dele cai junto.
+#[tauri::command]
+async fn instalar_atualizacao(
+    app: AppHandle,
+    session: State<'_, Session>,
+) -> Result<(), FalhaAoAtualizar> {
+    // Tirado do lugar, e não emprestado: instalar é uma vez. Se falhar, quem
+    // quiser tentar de novo procura de novo — e a consulta nova é justamente o
+    // que confirma que a versão ainda é aquela.
+    let nova = session
+        .atualizacao
+        .lock()
+        .ok()
+        .and_then(|mut slot| slot.take())
+        .ok_or(FalhaAoAtualizar::NadaEscolhido)?;
+
+    let relator = app.clone();
+    let mut baixados: u64 = 0;
+    let pacote = nova
+        .download(
+            move |pedaco, total| {
+                baixados = baixados.saturating_add(pedaco as u64);
+                // Uma emissão perdida é uma barra que para de andar, e não uma
+                // instalação perdida. Não vale derrubar o download por causa
+                // dela.
+                let _ = relator.emit(CANAL_DE_ATUALIZACAO, Andamento { baixados, total });
+            },
+            || {},
+        )
+        .await
+        .map_err(|erro| classificar_atualizacao(&erro))?;
+
+    // Daqui para baixo é a parte que mexe em disco.
+    nova.install(pacote)
+        .map_err(|erro| classificar_atualizacao(&erro))?;
+
+    // Só se chega aqui fora do Windows: lá o `install` acima já encerrou este
+    // processo. `restart` não volta, e é por isso que não há `Ok(())` depois.
+    app.restart()
+}
+
 fn main() {
     // Marca de arranque. `specs/06-clientes-gui.md` aceita M5 com inicialização
     // abaixo de 2 s, e um critério que ninguém mede é um critério que passa a
@@ -911,6 +1166,16 @@ fn main() {
     // A window that cannot open is not a case with a graceful path: there is
     // nowhere left to show the reason. It goes to the log and to the exit code.
     let started = tauri::Builder::default()
+        // O atualizador. Registrado sempre, inclusive num build sem chave: o
+        // plugin não fala com a rede por conta própria — quem o aciona são os
+        // dois comandos lá em cima, e os dois recusam antes de sair da máquina
+        // se a `pubkey` do `tauri.conf.json` estiver vazia.
+        //
+        // A chave e os endereços vêm do arquivo de configuração e não daqui.
+        // Fixá-los em código faria um build de quem clonou o repositório
+        // apontar para o nosso release sem que nada no repositório dissesse
+        // isso — e é justamente o que o `tauri.conf.json` diz por escrito.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Session::default())
         .setup(move |_app| {
             tracing::info!(millis = arranque.elapsed().as_millis(), "janela pronta");
@@ -951,6 +1216,8 @@ fn main() {
             buscar,
             busca_andar,
             busca_limpar,
+            procurar_atualizacao,
+            instalar_atualizacao,
         ])
         .run(tauri::generate_context!());
 
