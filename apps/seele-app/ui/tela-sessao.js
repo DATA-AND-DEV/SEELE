@@ -403,7 +403,17 @@ function desenharCanais(snapshot) {
       ? "tirar o plug: você para de ouvir e de falar nesta jaula"
       : `entrar e falar com quem está em ${cage.name}`;
 
-    item.append(cabeca, dentro, entrar);
+    // Os dois botões da sala numa fileira só. Com um deles ausente — que é o
+    // caso de quem não administra o Dogma — a fileira tem um filho de
+    // `flex: 1`, e sai idêntica ao botão de largura cheia de antes.
+    const botoes = elemento("div", "cage-botoes");
+    botoes.append(entrar);
+    // O último Cage vem desabilitado e não escondido: a razão de ele não poder
+    // ir embora é coisa que se lê, e uma ausência não se lê.
+    const apagar = botaoDeApagarCage(cage, snapshot, snapshot.cages.length === 1);
+    if (apagar) botoes.append(apagar);
+
+    item.append(cabeca, dentro, botoes);
     return item;
   });
   repovoar($("lista-cages"), cages);
@@ -432,6 +442,13 @@ function desenharCanais(snapshot) {
     // simples. Ver o cabeçalho de `tela-sessao.css`.
 
     item.append(botao);
+    // Irmão do botão, e não filho: um `<button>` dentro de outro não é
+    // marcação válida, e o alvo do clique de abrir a Linha é a fileira inteira.
+    const apagar = botaoDeApagarLinha(linha, snapshot);
+    if (apagar) {
+      item.className = "linha-fileira";
+      item.append(apagar);
+    }
     if (linha.open) linhaAberta = linha.id;
     return item;
   });

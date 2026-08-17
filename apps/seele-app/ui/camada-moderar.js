@@ -142,6 +142,54 @@ function botaoDeRemoverMensagem(mensagem, pode) {
 }
 
 /**
+ * O botão que destrói um Cage, ou `null` quando não há o que oferecer.
+ *
+ * `may_delete_rooms` e não `may_manage_cages`, e a diferença é a decisão inteira:
+ * fazer uma sala é um erro que o Dogma sobrevive, destruir uma acaba com o que
+ * outra pessoa escreveu. A `specs/04-servidor-seele.md` enumera
+ * `gerenciar_cages` e `administrar_dogma` separados justamente para que exista
+ * um papel que ergue salas sem poder derrubá-las.
+ *
+ * ---- o último Cage vem desabilitado, e não escondido ----
+ *
+ * Um Dogma sem Cage nenhum não tem onde falar, e o Dogma recusa o pedido. Some
+ * quem tem o objeto ausente — mover sem destino, moderar sem ninguém —, e aqui o
+ * objeto existe: a sala está ali, e a razão de ela não poder ir embora é uma
+ * coisa que se aprende lendo, não notando uma ausência.
+ */
+function botaoDeApagarCage(cage, snapshot, ultimo) {
+  if (snapshot.may_delete_rooms !== true) return null;
+  const botao = elemento("button", "cage-apagar", "APAGAR");
+  botao.type = "button";
+  botao.dataset.apagarCage = String(cage.id);
+  botao.setAttribute("aria-label", `apagar o Cage ${cage.name}`);
+  botao.disabled = ultimo;
+  botao.title = ultimo
+    ? `${cage.name} é o único Cage deste Dogma, e um Dogma sem Cage não tem onde falar. Faça outra sala antes.`
+    : `destruir ${cage.name} e pôr para fora quem estiver dentro`;
+  return botao;
+}
+
+/**
+ * O botão que destrói uma Linha, ou `null` quando não há o que oferecer.
+ *
+ * Sem o par desabilitado do Cage: a última Linha pode ir. Um Dogma sem Linha
+ * nenhuma continua sendo o que este produto é — a `specs/04-servidor-seele.md`
+ * faz a Linha presa a um Cage **opcional**, então uma sala de voz sem texto é
+ * uma configuração que o produto já prevê. Sem Cage não há onde falar; sem
+ * Linha há.
+ */
+function botaoDeApagarLinha(linha, snapshot) {
+  if (snapshot.may_delete_rooms !== true) return null;
+  const botao = elemento("button", "linha-apagar", "APAGAR");
+  botao.type = "button";
+  botao.dataset.apagarLinha = String(linha.id);
+  botao.setAttribute("aria-label", `apagar a Linha ${linha.name}`);
+  botao.title = `destruir #${linha.name} e tudo que foi escrito nela`;
+  return botao;
+}
+
+/**
  * O segundo botão da caixa de alerta, que o comp desenha e o v2 deixou morto.
  *
  * A ambiguidade do rótulo do comp (Q6 do inventário — «ejetar o plug **do**
@@ -268,6 +316,10 @@ function armarAto(rotulo, consequencia, executar) {
   $("moderar-confirmacao").hidden = false;
   $("moderar-consequencia").textContent = consequencia;
   $("moderar-confirmar").textContent = rotulo;
+  // Revelado aqui, e não só escondido em `abrirRecusa`: aquela é a única caixa
+  // deste arquivo sem ato, e o botão que ela esconde tem que voltar para a
+  // próxima que tiver um. Aqui porque é por onde os atos passam — todos.
+  $("moderar-confirmar").hidden = false;
   $("moderar-cancelar").focus();
 }
 
@@ -288,6 +340,27 @@ function desarmarAto() {
 // ---------------------------------------------------------------- navegação
 
 /**
+ * O estado do Dogma agora, ou `null` quando não há sessão.
+ *
+ * Toda porta desta camada começa por aqui, e nenhuma delas desenha a partir do
+ * que a lista de trás mostrava: a lista é redesenhada duas vezes por segundo, e
+ * o Cage que estava na linha clicada pode ter deixado de existir entre o clique
+ * e este quadro. Uma caixa escrita a partir da tela seria uma caixa sobre uma
+ * sala que já não está lá.
+ *
+ * `NotConnected` sai calado. A sessão acabar enquanto alguém escolhia o que
+ * fazer não é falha desta camada, e a tela de fim já está subindo por cima.
+ */
+async function lerSnapshot() {
+  try {
+    return await invoke("snapshot");
+  } catch (falha) {
+    if (falha !== "NotConnected") console.warn("moderar:", falha);
+    return null;
+  }
+}
+
+/**
  * Abre a caixa. `alvo` é o id de quem a porta nomeou, ou `null`.
  *
  * O foco entra e o anúncio sai, como em toda troca de tela desta janela — uma
@@ -295,12 +368,7 @@ function desarmarAto() {
  * teclado no elemento de trás, apertando coisas que não estão mais na frente.
  */
 async function abrirModeracao(alvo) {
-  let snapshot = null;
-  try {
-    snapshot = await invoke("snapshot");
-  } catch (falha) {
-    if (falha !== "NotConnected") console.warn("moderar:", falha);
-  }
+  const snapshot = await lerSnapshot();
   if (!snapshot) return;
 
   focoAntesDeModerar = document.activeElement;
@@ -335,6 +403,34 @@ function abrirConfirmacao(titulo, consequencia, rotulo, executar) {
   $("moderar").hidden = false;
   armarAto(rotulo, consequencia, executar);
   anunciar(consequencia);
+}
+
+/**
+ * A caixa aberta dizendo por que **não** vai perguntar nada.
+ *
+ * Existe por causa de um caso só, e é o caso que decide a honestidade desta
+ * tela: a contagem de uma Linha não chegou. Sem os três números não há versão
+ * honesta da confirmação — o que sobraria é «apagar a Linha?», que é a pergunta
+ * que não informa nada e treina a apertar duas vezes.
+ *
+ * Então nada é armado. A caixa aparece com a frase e um botão de fechar, e o
+ * ato não existe: não há `atoArmado`, logo o CONFIRMAR não tem o que rodar, e
+ * ele sai da frente para não haver o que apertar por engano.
+ */
+function abrirRecusa(titulo, frase) {
+  focoAntesDeModerar = document.activeElement;
+  alvoPreferido = null;
+  caixaComEscolha = false;
+  atoArmado = null;
+  $("moderar-titulo").textContent = titulo;
+  $("moderar-escolha").hidden = true;
+  $("moderar-confirmacao").hidden = false;
+  $("moderar-consequencia").textContent = frase;
+  $("moderar-confirmar").hidden = true;
+  $("moderar-erro").hidden = true;
+  $("moderar").hidden = false;
+  $("moderar-cancelar").focus();
+  anunciar(frase);
 }
 
 /** Fecha e devolve o teclado a quem abriu. */
@@ -439,6 +535,85 @@ function consequenciaDeMover(quem, destino) {
   );
 }
 
+/**
+ * A frase de consequência de apagar um Cage.
+ *
+ * Diz as três coisas que quem aperta não vive: quanta gente é posta para fora,
+ * que isso acontece no meio do que estiverem falando, e que cada uma é avisada.
+ * E a que mais engana: a Linha presa ao Cage **não** vai junto. Sem essa linha,
+ * quem quer acabar com uma conversa apaga o Cage, olha a Linha ainda ali, e
+ * conclui que o produto não fez o que disse.
+ */
+function consequenciaDeApagarCage(cage, linhaPresa) {
+  const dentro = cage.pilots.length;
+  const gente =
+    dentro === 0
+      ? `Não há ninguém dentro de ${cage.name} agora.`
+      : `Isto põe ${dentro} ${dentro === 1 ? "pessoa" : "pessoas"} para fora de ` +
+        `${cage.name} agora, no meio do que estiverem falando, e cada uma recebe ` +
+        `um aviso dizendo o que aconteceu.`;
+  const texto = linhaPresa
+    ? `\nA Linha #${linhaPresa.name} continua, com tudo que foi escrito nela: ela não é apagada junto.`
+    : "";
+  return `${gente}${texto}\nNenhuma tela deste produto traz este Cage de volta.`;
+}
+
+/**
+ * A frase de consequência de apagar uma Linha.
+ *
+ * Os três números são requisito e não enfeite: quantas mensagens, de quanta
+ * gente, desde quando. Eles vêm de `peso_da_linha`, contados no banco do Dogma
+ * no instante de perguntar — esta janela segura uma página de histórico e
+ * chutaria para baixo por todo o passado da Linha, e um número quase certo numa
+ * caixa que promete destruir mil e oitocentas mensagens é pior que nenhum.
+ *
+ * A Linha vazia tem ramo próprio porque não tem data para dar: «escritas desde»
+ * não existe quando ninguém escreveu.
+ */
+function consequenciaDeApagarLinha(linha, peso, cagesPresos) {
+  const escrito =
+    peso.messages === 0
+      ? `Ninguém escreveu nada em #${linha.name} ainda.`
+      : `Isto destrói ${peso.messages.toLocaleString()} ` +
+        `${peso.messages === 1 ? "mensagem" : "mensagens"} de ${peso.authors} ` +
+        `${peso.authors === 1 ? "pessoa" : "pessoas"}, ` +
+        `${peso.messages === 1 ? "escrita" : "escritas"} desde ` +
+        `${dataDeInicio(peso.oldest_at_seconds)}. Nenhuma tela deste produto ` +
+        `as traz de volta.`;
+  // Um Cage que apontava para esta Linha sobrevive e sai sem Linha nenhuma. É
+  // uma mudança que ninguém pediu, e as caixas deste produto nomeiam o que
+  // fazem.
+  const soltos =
+    cagesPresos.length === 0
+      ? ""
+      : `\n${cagesPresos.map((cage) => cage.name).join(", ")} ` +
+        `${cagesPresos.length === 1 ? "fica" : "ficam"} sem Linha, e ` +
+        `${cagesPresos.length === 1 ? "continua" : "continuam"} de pé.`;
+  return (
+    `${escrito}${soltos}\n` +
+    `Quem estiver lendo #${linha.name} agora a perde da tela no mesmo instante.`
+  );
+}
+
+/**
+ * A data a partir da qual há coisa escrita, como uma pessoa a lê.
+ *
+ * O ano entra quando não é este. `12/03` é o que se quer ler quando foi este
+ * ano e é uma mentira por omissão quando foi há três — e o número que a caixa
+ * promete destruir merece uma data que não precise de contexto.
+ */
+function dataDeInicio(segundos) {
+  if (!segundos) return "sempre";
+  const quandoFoi = new Date(segundos * 1000);
+  const mesmoAno = quandoFoi.getFullYear() === new Date().getFullYear();
+  return quandoFoi.toLocaleDateString(
+    [],
+    mesmoAno
+      ? { day: "2-digit", month: "2-digit" }
+      : { day: "2-digit", month: "2-digit", year: "numeric" },
+  );
+}
+
 // ------------------------------------------------------------------- ligação
 
 // Delegação, e não um ouvinte por botão: as linhas dos Cages são refeitas a
@@ -462,6 +637,70 @@ $("lista-mensagens").addEventListener("click", (evento) => {
       `«${mensagem.body}»`,
     "REMOVER",
     () => invoke("remover_mensagem", { message: mensagem.id }),
+  );
+});
+
+// Apagar uma sala passa por esta mesma máquina, e não por uma caixa própria: a
+// regra é a mesma — dizer a consequência **é** a confirmação — e uma segunda
+// forma de confirmar seria uma segunda forma de esquecer de escrever a frase.
+//
+// Delegação como as duas de cima, e pelo mesmo motivo: as duas listas são
+// refeitas a cada snapshot, duas vezes por segundo.
+$("lista-cages").addEventListener("click", async (evento) => {
+  const alvo = evento.target.closest("button[data-apagar-cage]");
+  if (!alvo) return;
+  const id = Number(alvo.dataset.apagarCage);
+  const snapshot = await lerSnapshot();
+  if (!snapshot) return;
+  const cage = snapshot.cages.find((c) => c.id === id);
+  if (!cage) return;
+  // A Linha presa é lida do Cage, e não adivinhada pelo nome: um Dogma pode ter
+  // uma Linha chamada como a sala e nenhuma ligação entre as duas.
+  const presa = snapshot.lines.find((linha) => linha.id === cage.line) ?? null;
+  abrirConfirmacao(
+    `APAGAR O CAGE ${cage.name} ?`,
+    consequenciaDeApagarCage(cage, presa),
+    `APAGAR ${cage.name}`,
+    () => invoke("apagar_cage", { cage: id }),
+  );
+});
+
+$("lista-linhas").addEventListener("click", async (evento) => {
+  const alvo = evento.target.closest("button[data-apagar-linha]");
+  if (!alvo) return;
+  const id = Number(alvo.dataset.apagarLinha);
+  const snapshot = await lerSnapshot();
+  if (!snapshot) return;
+  const linha = snapshot.lines.find((l) => l.id === id);
+  if (!linha) return;
+
+  // O peso vem antes da caixa, e a caixa não abre sem ele. Os três números são
+  // a confirmação inteira; sem eles o que sobraria é «apagar a Linha?», que é a
+  // pergunta que não informa nada.
+  let peso = null;
+  try {
+    peso = await invoke("peso_da_linha", { line: id });
+  } catch (falha) {
+    abrirRecusa(
+      `APAGAR A LINHA #${linha.name} ?`,
+      `Não consegui contar o que há dentro de #${linha.name}, então não vou ` +
+        `perguntar se você quer apagá-la.\n` +
+        `Esta caixa existe para dizer quantas mensagens, de quanta gente e ` +
+        `desde quando — e um número inventado seria pior que nenhum.\n` +
+        `${fraseDeErro(falha)}`,
+    );
+    return;
+  }
+
+  abrirConfirmacao(
+    `APAGAR A LINHA #${linha.name} ?`,
+    consequenciaDeApagarLinha(
+      linha,
+      peso,
+      snapshot.cages.filter((cage) => cage.line === id),
+    ),
+    `APAGAR #${linha.name}`,
+    () => invoke("apagar_linha", { line: id }),
   );
 });
 

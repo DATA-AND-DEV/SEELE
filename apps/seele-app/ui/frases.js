@@ -44,6 +44,20 @@ const AVISOS = {
   // pede uma mudança de comportamento de quem o lê, e por isso ele existe:
   // derrubar sem ter avisado é o que faz o produto parecer quebrado.
   RateLimited: "VOCÊ ESTÁ FALANDO RÁPIDO DEMAIS PARA O DOGMA",
+
+  // ---- uma sala deixou de existir ----
+  //
+  // Três frases e não uma, porque pedem coisas diferentes de quem lê. As duas
+  // primeiras chegam a quem estava dentro: o plug já saiu e a conversa já saiu
+  // da tela quando isto aparece, e sem a frase o que sobra é uma sala que sumiu
+  // sozinha — indistinguível de uma janela que perdeu a conta de onde estava.
+  //
+  // A terceira não é sobre uma sala que foi: é uma recusa, e a única desta
+  // lista que ensina o que fazer em seguida.
+  CageDeleted: "A JAULA EM QUE VOCÊ ESTAVA FOI APAGADA",
+  LineDeleted: "A LINHA QUE VOCÊ LIA FOI APAGADA, COM TUDO QUE HAVIA NELA",
+  LastCage:
+    "ESTE É O ÚNICO CAGE DO DOGMA, E ELE FICA.\nUm Dogma sem Cage nenhum não tem onde falar. Faça outra sala antes de apagar esta.",
 };
 
 /**

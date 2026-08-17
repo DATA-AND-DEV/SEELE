@@ -551,6 +551,56 @@
   background: none;
 }
 
+/* ---- destruir uma sala ----
+
+   Os dois botões do Cage numa fileira. `ENTRAR NA JAULA` fica com o espaço, e
+   `APAGAR` toma o que o rótulo dele precisa: o que se faz nesta lista o dia
+   inteiro é entrar e sair, e apagar é o que se faz uma vez.
+
+   Sem vermelho. `tokens.css` marca essa cor «EXCLUSIVO alerta e queda», e
+   destruir uma sala é a coisa mais grave desta janela sem ser uma queda de
+   enlace — o vermelho gasto aqui é o vermelho que ninguém lê no dia em que a
+   bateria interna acender. O que separa este botão do outro é a moldura fraca
+   e o texto apagado, e não uma cor de alarme. */
+.cage-botoes { display: flex; gap: 6px; }
+.cage-botoes .cage-entrar { flex: 1; width: auto; }
+
+.cage-apagar, .linha-apagar {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 0 10px;
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  color: var(--seele-osso-apagado);
+  background: none;
+  border: 1px solid var(--seele-linha-forte);
+  cursor: pointer;
+}
+
+.cage-apagar:hover, .linha-apagar:hover {
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-osso-apagado);
+  border-color: var(--seele-osso-apagado);
+}
+
+/* O último Cage. Desabilitado e legível — o `title` diz por que, e um controle
+   apagado a ponto de não se ler é um controle que não explica nada. */
+.cage-apagar:disabled {
+  color: var(--seele-linha-forte);
+  border-color: var(--seele-linha);
+  cursor: not-allowed;
+}
+
+.cage-apagar:disabled:hover { color: var(--seele-linha-forte); background: none; }
+
+/* A fileira da Linha, quando ela tem um botão de apagar ao lado. Sem ele o
+   `<li>` continua sendo o que era: um único botão de largura cheia. */
+.linha-fileira { display: flex; align-items: stretch; }
+.linha-fileira .linha { min-width: 0; flex: 1; }
+.linha-apagar { min-height: 40px; }
+
 .barra {
   display: block;
   font-size: var(--seele-t-rotulo);
