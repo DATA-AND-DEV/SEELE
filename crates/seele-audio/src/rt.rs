@@ -546,7 +546,11 @@ mod tests {
 
         let mut small = [0.0_f32; 256];
         source.on_playback(&mut small);
-        assert_eq!(counters.snapshot().playback_burst_frames, 128, "256 interleaved stereo slots are 128 frames");
+        assert_eq!(
+            counters.snapshot().playback_burst_frames,
+            128,
+            "256 interleaved stereo slots are 128 frames"
+        );
 
         let mut large = [0.0_f32; 1_024];
         source.on_playback(&mut large);

@@ -57,6 +57,15 @@
 //! consegue ver nenhuma delas, e é isso que se quer: deriva de cristal acumula
 //! ao longo de minutos, então a correção pode e deve ser lenta.
 //!
+//! # Sinal
+//!
+//! **Positivo é dispositivo rápido.** Um cristal que corre à frente do relógio
+//! desta máquina pede mais amostras por segundo do que o laço produz, o anel
+//! esvazia, e a correção é produzir mais — razão acima de 1,0. O contrário
+//! enche o anel e a razão fica abaixo de 1,0. Trocar este sinal dobraria a
+//! deriva em vez de cancelá-la, e o sintoma seria idêntico ao de não haver
+//! correção nenhuma, que é como esta classe de defeito sobrevive a uma revisão.
+//!
 //! # E tem limite
 //!
 //! [`MAX_CORRECTION_PPM`] é dez vezes o que um cristal de consumo erra. Uma
@@ -144,9 +153,11 @@ const TARGET_BURSTS: usize = 2;
 pub struct PacingMetrics {
     /// Correção em vigor, em partes por milhão do nominal.
     ///
-    /// Em regime, isto **é** a deriva medida entre o relógio desta máquina e o
-    /// cristal do dispositivo, com o sinal invertido: é quanto se está pedindo
-    /// a mais ou a menos para cancelá-la.
+    /// Em regime isto **é** a diferença entre os dois relógios, medida.
+    /// **Positivo é dispositivo rápido**: ele consome mais amostras por segundo
+    /// do que o laço produz, e o que se está fazendo é produzir essa diferença a
+    /// mais. Errar este sinal dobraria a deriva em vez de cancelá-la, e o
+    /// sintoma seria indistinguível de não haver correção nenhuma.
     pub ppm: f64,
 
     /// Profundidade alisada do anel, em milissegundos.
@@ -280,7 +291,9 @@ impl RingPacer {
             if gap_ms.is_some() {
                 self.metrics.stalls = self.metrics.stalls.saturating_add(1);
             }
-            self.reseed(depth_as_f64(depth), now);
+            self.smoothed = depth_as_f64(depth);
+            self.settled_at = Some(now);
+            self.metrics.correcting = false;
         }
 
         // Anel vazio não é medida, é dispositivo faminto: o retorno de chamada
@@ -288,7 +301,13 @@ impl RingPacer {
         // nada que não estivesse sendo pago.
         if depth == 0 {
             self.metrics.primes = self.metrics.primes.saturating_add(1);
-            self.reseed(depth_as_f64(self.target), now);
+            // A reposição **não** reinicia o aquecimento, e a parada reinicia. A
+            // diferença é o que se sabe depois de cada uma: depois de repor, a
+            // profundidade vale o alvo por construção, então a medida fica
+            // conhecida em vez de ficar inválida. Reiniciar aqui deixaria cego
+            // exatamente o caso em que o anel raspa o fundo de novo e de novo —
+            // que é quando o grampo tem que aparecer e ser contado.
+            self.smoothed = depth_as_f64(self.target);
             self.metrics.depth_ms = self.as_ms(self.smoothed);
             return Pacing {
                 prime_samples: self.target,
@@ -329,13 +348,6 @@ impl RingPacer {
         }
     }
 
-    /// Recomeça a medida a partir de um valor conhecido.
-    fn reseed(&mut self, depth: f64, now: Instant) {
-        self.smoothed = depth;
-        self.settled_at = Some(now);
-        self.metrics.correcting = false;
-    }
-
     /// A reserva, que é uma propriedade do dispositivo e não um palpite.
     ///
     /// Dois blocos do dispositivo, com dois limites: nunca menos que um quadro,
@@ -365,6 +377,7 @@ fn depth_as_f64(samples: usize) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::netsim::Pcg32;
     use std::time::Duration;
 
     /// Um anel e um dispositivo, em tempo simulado.
@@ -446,8 +459,18 @@ mod tests {
     /// Como uma corrida foi conduzida.
     struct Run {
         seconds: u64,
-        /// Duração da volta do laço, em milissegundos.
+        /// Duração mínima da volta do laço, em milissegundos.
         turn_ms: f64,
+        /// Quanto a volta varia por cima do mínimo, em milissegundos.
+        ///
+        /// **Não é enfeite.** Um laço perfeitamente periódico aliasa contra a
+        /// grade de blocos do dispositivo: a profundidade lida sempre na mesma
+        /// fase esconde a tendência verdadeira, e a malha estabiliza uns por
+        /// cento fora da deriva com o anel passeando dentro de um bloco. Nenhuma
+        /// máquina é periódica assim — a volta medida na pendência 15 vai de
+        /// 5,65 ms de p50 a 22 ms de pior caso —, e um simulador sem essa
+        /// dispersão mede uma patologia que só ele tem.
+        turn_spread_ms: f64,
         corrected: bool,
     }
 
@@ -455,13 +478,21 @@ mod tests {
         fn new(seconds: u64) -> Self {
             Self {
                 seconds,
-                turn_ms: 5.0,
+                turn_ms: 4.0,
+                turn_spread_ms: 3.0,
                 corrected: true,
             }
         }
 
         fn uncorrected(mut self) -> Self {
             self.corrected = false;
+            self
+        }
+
+        /// Uma volta sem dispersão nenhuma, para medir o alias de propósito.
+        fn metronomic(mut self) -> Self {
+            self.turn_ms = 5.0;
+            self.turn_spread_ms = 0.0;
             self
         }
     }
@@ -513,10 +544,12 @@ mod tests {
         let mut next_frame_ms = 0.0_f64;
         let mut next_sample_ms = 0.0_f64;
         let mut second = 0_u64;
+        let mut rng = Pcg32::new(20_260_814);
 
         while elapsed_ms < (plan.seconds as f64) * 1000.0 {
-            machine.consume(plan.turn_ms);
-            elapsed_ms += plan.turn_ms;
+            let turn_ms = plan.turn_ms + rng.next_unit() * plan.turn_spread_ms;
+            machine.consume(turn_ms);
+            elapsed_ms += turn_ms;
             let now = start + Duration::from_nanos((elapsed_ms * 1e6) as u64);
 
             // Quantos quadros venceram, como o `PlayoutClock` responde.
@@ -602,39 +635,54 @@ mod tests {
 
     #[test]
     fn a_razao_converge_para_a_deriva_do_cristal() {
-        // Em regime a correção **é** a deriva, com o sinal trocado. Errar o sinal
+        // Em regime a correção **é** a deriva: um dispositivo que consome 250
+        // ppm a mais precisa que se produzam 250 ppm a mais. Errar este sinal
         // dobraria a deriva em vez de cancelá-la, e o sintoma seria idêntico ao
         // de não haver correção nenhuma — que é como esta classe de defeito
         // sobrevive a uma revisão.
+        //
+        // A folga de 30 ppm não é frouxidão: a profundidade é lida uma vez por
+        // quadro contra uma grade de blocos do dispositivo que passeia por baixo,
+        // e a leitura carrega meia grade de ondulação. O que a folga **não**
+        // permite é sinal trocado nem meia correção.
         for drift_ppm in [100.0, 250.0, -100.0, -250.0] {
-            let trace = plain(drift_ppm, &Run::new(600));
+            let trace = plain(drift_ppm, &Run::new(900));
             let ppm = trace.metrics.ppm;
             assert!(
-                (ppm + drift_ppm).abs() < 30.0,
-                "{drift_ppm} ppm de cristal deviam pedir {:+.0} ppm de correção, pediram {ppm:+.0}",
-                -drift_ppm
+                (ppm - drift_ppm).abs() < 30.0,
+                "{drift_ppm} ppm de cristal deviam pedir {drift_ppm:+.0} ppm de correção, \
+                 pediram {ppm:+.0}"
             );
         }
     }
 
     #[test]
-    fn a_correcao_e_pequena_demais_para_ser_ouvida() {
-        // Reamostrar por 250 ppm é 0,004 de um semitom. O que seria audível é a
-        // razão **se mexendo** depressa, e o que este teste trava é a velocidade
-        // dela: nada que se mova menos que alguns ppm por segundo produz wow.
+    fn a_correcao_nao_se_mexe_depressa_o_bastante_para_ser_ouvida() {
+        // Reamostrar por 250 ppm é 0,004 de um semitom, e ninguém ouve uma
+        // afinação constante fora por isso. O que **é** audível é a razão se
+        // mexendo: variação de tom é wow, e wow é a regressão que este conserto
+        // não pode introduzir num defeito que era inaudível.
+        //
+        // Medido depois do primeiro minuto de propósito. O degrau do fim do
+        // aquecimento é uma mudança única de umas dezenas de ppm — 0,001 de um
+        // semitom, uma vez por sessão —, e travá-lo junto com o regime mediria
+        // duas coisas diferentes com o mesmo número.
         let trace = plain(250.0, &Run::new(600));
         let maior_passo = trace
             .ppm
+            .iter()
+            .skip(60)
+            .collect::<Vec<_>>()
             .windows(2)
             .map(|par| match par {
-                [antes, depois] => (depois - antes).abs(),
+                [antes, depois] => (*depois - *antes).abs(),
                 _ => 0.0,
             })
             .fold(0.0, f64::max);
         assert!(
-            maior_passo < 40.0,
+            maior_passo < 15.0,
             "a razão andou {maior_passo:.0} ppm num segundo, o que é rápido demais para uma \
-             deriva que leva minutos"
+             deriva que leva minutos para acumular"
         );
     }
 
@@ -684,14 +732,15 @@ mod tests {
     #[test]
     fn o_absurdo_e_grampeado_e_contado() {
         // Um dispositivo 5% fora não tem cristal ruim: tem taxa diferente da
-        // anunciada, ou foi trocado embaixo do laço. Obedecer ao número que a
-        // profundidade pede ali estragaria o áudio de vez — e o conserto certo é
-        // outro, então o que este módulo deve fazer é grampear e **contar**.
-        let trace = plain(50_000.0, &Run::new(300));
+        // anunciada — 44,1 kHz dizendo 48 —, ou foi trocado embaixo do laço.
+        // Obedecer ao que a profundidade pede ali estragaria o áudio de vez, e o
+        // conserto certo é outro. O que este módulo deve fazer é grampear e
+        // **contar**: o contador crescendo é o aviso de que a causa não é esta.
+        let trace = plain(-50_000.0, &Run::new(300));
 
         assert!(
             trace.metrics.clamps > 0,
-            "grampeou e não contou: o contador é o único aviso de que a causa não é deriva"
+            "grampeou e não contou, e o contador é o único aviso de que a causa não é deriva"
         );
         for ppm in &trace.ppm {
             assert!(
@@ -699,6 +748,52 @@ mod tests {
                 "pediu {ppm:+.0} ppm, além do teto de {MAX_CORRECTION_PPM:.0}"
             );
         }
+    }
+
+    #[test]
+    fn o_absurdo_na_outra_direcao_aparece_como_reposicao_e_nao_como_deriva() {
+        // A mesma taxa errada, com o sinal contrário, não sai pelo grampo — e é
+        // certo que não saia. O anel raspa o fundo a cada meio segundo, e a cada
+        // vez a profundidade volta a valer o alvo por construção: a malha nunca
+        // chega a **ver** um erro grande, porque o erro é reposto antes de
+        // crescer. O que cresce, e é o que se tem que olhar, é a reposição.
+        //
+        // Fixar aqui que a razão continua dentro da faixa é o que impede o
+        // conserto errado: pedir 5% ao reamostrador seria trocar um dispositivo
+        // com a taxa errada por áudio irreconhecível.
+        let trace = plain(50_000.0, &Run::new(300));
+
+        assert!(
+            trace.metrics.primes > 10,
+            "o anel raspou o fundo o tempo todo e a reposição não contou ({})",
+            trace.metrics.primes
+        );
+        for ppm in &trace.ppm {
+            assert!(
+                ppm.abs() <= MAX_CORRECTION_PPM,
+                "pediu {ppm:+.0} ppm, além do teto de {MAX_CORRECTION_PPM:.0}"
+            );
+        }
+    }
+
+    #[test]
+    fn nem_o_pior_alias_tira_o_anel_das_duas_paredes() {
+        // O caso patológico da medida: um laço perfeitamente periódico contra
+        // uma grade de blocos perfeitamente periódica. A profundidade é lida
+        // sempre na mesma fase, a tendência verdadeira fica escondida, e a malha
+        // estabiliza uns por cento fora da deriva com o anel passeando dentro de
+        // um bloco.
+        //
+        // Nenhuma máquina é periódica assim, e mesmo assim o que importa
+        // continua valendo: o anel não encosta em parede nenhuma e não se perde
+        // uma amostra. Uma malha que dependesse de a medida ser limpa para não
+        // perder áudio seria uma malha que funciona só no simulador.
+        let trace = plain(100.0, &Run::new(600).metronomic());
+        assert_eq!(
+            trace.lost_between(120, 599),
+            0,
+            "com a medida aliasada o anel encostou numa parede"
+        );
     }
 
     #[test]
@@ -716,7 +811,7 @@ mod tests {
             "a malha desistiu de corrigir com o encanamento em silêncio"
         );
         assert!(
-            (trace.metrics.ppm + 150.0).abs() < 30.0,
+            (trace.metrics.ppm - 150.0).abs() < 30.0,
             "no silêncio a correção virou {:+.0} ppm",
             trace.metrics.ppm
         );
@@ -807,7 +902,8 @@ mod tests {
 
         let mut at_ms = 0.0_f64;
         while at_ms < WARMUP_MS - 20.0 {
-            let pacing = pacer.observe(alvo / 4, BURST, start + Duration::from_millis(at_ms as u64));
+            let pacing =
+                pacer.observe(alvo / 4, BURST, start + Duration::from_millis(at_ms as u64));
             assert_eq!(
                 pacing.ratio, None,
                 "corrigiu {at_ms} ms depois de abrir, ainda dentro do aquecimento"
