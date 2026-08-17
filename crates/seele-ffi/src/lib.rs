@@ -1754,6 +1754,26 @@ fn classify_connect_failure(error: &seele_core::ConnectError) -> PlugError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_chave_de_mensagem_nao_comeca_num_valor_fixo() {
+        // Pendência 19, a metade do app. Aqui o contador é do processo, e era
+        // *entre* processos que a repetição acontecia: reabrir o SEELE fazia a
+        // primeira mensagem ser lida como reenvio da primeira mensagem da
+        // abertura anterior, e ela não era gravada.
+        //
+        // Só dá para observar o sorteio uma vez por processo, então o que se
+        // afirma é a propriedade que sobrevive a isso: o valor não é pequeno, e
+        // o contador anda.
+        let primeira = super::next_client_message_id();
+        let segunda = super::next_client_message_id();
+
+        assert!(
+            primeira > u64::from(u32::MAX),
+            "a metade alta não foi sorteada: {primeira}"
+        );
+        assert_eq!(segunda, primeira + 1, "o contador não anda de um em um");
+    }
+
     use super::*;
 
     #[test]

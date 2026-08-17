@@ -1487,6 +1487,41 @@ fn clock_short() -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::primeira_chave_de_mensagem;
+
+    #[test]
+    fn a_chave_de_uma_sessao_nao_e_a_mesma_de_outra() {
+        // Pendência 19. O servidor deduplica por `(author_id,
+        // client_message_id)`, e o `author_id` vem da chave em disco — ele é o
+        // mesmo em todas as sessões desta máquina, para sempre. Se a outra
+        // metade recomeçar num valor fixo, a mensagem 1 de hoje é lida como
+        // reenvio da mensagem 1 de ontem e **não é gravada**.
+        //
+        // Nada mais neste repositório cobre isto: o teste de conformidade que
+        // encena reconexão fala pelo `Enlace` do core e passa a chave na mão,
+        // então ele nunca chega aqui. Foi assim que a mutação «volta a começar
+        // em 1» sobreviveu.
+        let primeira = primeira_chave_de_mensagem();
+        let segunda = primeira_chave_de_mensagem();
+
+        assert_ne!(
+            primeira, segunda,
+            "duas sessões nasceriam com a mesma chave, e a segunda não gravaria nada"
+        );
+        assert!(
+            primeira > u64::from(u16::MAX),
+            "a chave nasceu num valor pequeno, que é o que um contador reiniciado dá: {primeira}"
+        );
+
+        // A metade baixa é o contador, e ela precisa de espaço para andar: uma
+        // sessão que estoure a própria metade invade a de outra.
+        assert_eq!(
+            primeira & 0xFFFF_FFFF,
+            1,
+            "a metade baixa não começa em 1, então o espaço de contagem da sessão não é inteiro"
+        );
+    }
+
     use super::*;
 
     fn args_de_teste(expected_fingerprint: Option<String>) -> Args {
