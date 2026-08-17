@@ -361,4 +361,55 @@ mod tests {
             "DTX is not engaging on pure silence: smallest frame {smallest} bytes"
         );
     }
+
+    /// O menor datagrama que um caminho de QUIC vivo é obrigado a carregar.
+    ///
+    /// A RFC 9000 §14.1 exige que o pacote Initial seja preenchido até 1200
+    /// bytes de carga UDP, e que toda ponta aceite esse tamanho. Um caminho que
+    /// não entregue 1200 bytes **não completa o aperto de mão**: não há sessão,
+    /// não há texto, não há nada. Subtraindo uma folga generosa de cabeçalho de
+    /// pacote QUIC e de quadro DATAGRAM, sobra isto.
+    const PISO_DE_DATAGRAMA_DO_QUIC: usize = 1200 - 64;
+
+    #[test]
+    fn nenhum_quadro_de_voz_chega_perto_do_piso_de_datagrama_do_quic() {
+        // **Isto elimina uma hipótese, com número.**
+        //
+        // A explicação mais bonita para "o texto atravessa inteiro e a voz
+        // pica, num sentido só" é a fragmentação: o texto vai em fluxo e se
+        // adapta ao caminho sozinho, a voz vai em datagrama e um datagrama que
+        // não cabe é recusado inteiro. Um adaptador virtual do lado do Windows
+        // baixando o MTU efetivo fecharia a história.
+        //
+        // Só que a história não fecha na aritmética. Um quadro de 20 ms no teto
+        // de bitrate deste build são dezenas de bytes, não mil e duzentos; e um
+        // caminho que não carregue 1200 bytes não teria deixado o QUIC apertar
+        // a mão, então não haveria texto para atravessar. As duas metades do
+        // sintoma não podem ser explicadas pela mesma causa.
+        //
+        // O teste mede em vez de argumentar: codifica áudio de verdade no pior
+        // caso que este build produz e compara com o piso.
+        let mut encoder = VoiceEncoder::new(MAX_BITRATE_BPS).expect("encoder");
+        let mut maior = 0_usize;
+        for volta in 0..200 {
+            // Amplitude cheia e alternando, para o codec não achar economia.
+            let amplitude = if volta % 2 == 0 { 0.99 } else { 0.5 };
+            let payload = encoder.encode(&tone(amplitude)).expect("encode");
+            maior = maior.max(payload.len() + seele_proto::HEADER_LEN);
+        }
+
+        assert!(
+            maior < PISO_DE_DATAGRAMA_DO_QUIC,
+            "o maior datagrama de voz deste build tem {maior} bytes, e o piso que \
+             todo caminho de QUIC vivo carrega é {PISO_DE_DATAGRAMA_DO_QUIC} — se \
+             isto deixar de valer, a hipótese de fragmentação volta a estar viva"
+        );
+
+        // E com folga, que é o que torna a eliminação segura em vez de
+        // apertada. Medido: 272 bytes contra um piso de 1136.
+        assert!(
+            maior * 3 < PISO_DE_DATAGRAMA_DO_QUIC,
+            "a folga contra o piso do QUIC encolheu para menos de 3x: {maior} bytes"
+        );
+    }
 }
