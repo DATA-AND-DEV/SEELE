@@ -36,7 +36,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{CageId, ClientMessageId, LineId, MessageId, PilotId, RoleId, SessionId, Ssrc};
+use crate::ids::{
+    AttachmentId, CageId, ClientMessageId, LineId, MessageId, PilotId, RoleId, SessionId, Ssrc,
+};
 use crate::version::PROTOCOL_VERSION;
 
 /// Largest control frame this build will accept, including the version byte.
@@ -75,6 +77,98 @@ pub const MAX_CAGE_LIMIT: u16 = 250;
 
 /// Longest operator-supplied alert text, in bytes.
 pub const MAX_ALERT_TEXT_LEN: usize = 512;
+
+/// Longest sender-chosen file name, in bytes.
+///
+/// The name never reaches the filesystem — ADR 0027 stores a blob under the
+/// SHA-256 of its own content — so this bounds what a shell has to draw rather
+/// than what a path may hold. Long enough for anything a camera or a phone
+/// produces, short enough that no shell has to decide where to cut one off.
+pub const MAX_FILE_NAME_LEN: usize = 255;
+
+/// Longest declared content type, in bytes.
+///
+/// A claim, not a fact. `image/png` is ten bytes; the slack is for parameters
+/// nobody here reads.
+pub const MAX_DECLARED_TYPE_LEN: usize = 128;
+
+/// Whether an attachment's bytes are still there.
+///
+/// Enumerated, and not a sentence: ADR 0027 makes expiry a state the shell
+/// presents however it presents every other enumerated reason. The row survives
+/// the bytes precisely so this can be said at all — a message whose attachment
+/// row had been deleted would draw as a message with nothing in it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AttachmentState {
+    /// The bytes are on the Dogma and may be fetched.
+    Available,
+    /// The bytes were evicted to keep the Dogma under its ceiling.
+    ///
+    /// The name and the size are still here, which is the point.
+    Expired,
+}
+
+/// A file hanging off a message, as a client sees it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttachmentInfo {
+    /// What to ask for when downloading.
+    pub id: AttachmentId,
+    /// The name the sender gave it.
+    pub file_name: String,
+    /// The type the sender claimed.
+    ///
+    /// **A claim.** ADR 0027: only a short list of image types is ever drawn
+    /// inline, and only when the bytes agree with the claim. Everything else is
+    /// a file with a name and a size. This is not about trusting the file; it
+    /// is about which decoder the bytes go to.
+    pub declared_type: String,
+    /// How many bytes it was.
+    pub byte_size: u64,
+    /// Whether the bytes are still there.
+    pub state: AttachmentState,
+}
+
+/// Why a Dogma would not take, or would not hand back, a file.
+///
+/// Every one of these is a refusal somebody is waiting on, so each says
+/// something a shell can turn into a different sentence. A single
+/// "attachment failed" would leave a person retrying a file that will never fit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AttachmentRefusal {
+    /// The pilot lacks [`Permission::AttachFile`].
+    NotAllowed,
+    /// Larger than this Dogma's per-file limit.
+    ///
+    /// Carries the limit, because "too big" without a number sends somebody to
+    /// try again with a file that is also too big.
+    TooLarge {
+        /// The largest file this Dogma accepts, in bytes.
+        limit: u64,
+    },
+    /// Every byte of the ceiling is held by transfers already under way.
+    ///
+    /// Distinct from [`Self::TooLarge`]: this one passes if it is tried again
+    /// in a moment, and the other never will.
+    NoRoom,
+    /// The stream ended before the declared number of bytes arrived, or carried
+    /// more.
+    SizeMismatch,
+    /// The bytes did not hash to what the header declared.
+    ///
+    /// The one question ADR 0027 says a Dogma can answer about a file: did it
+    /// arrive whole. It says nothing about whether the file is good.
+    HashDidNotMatch,
+    /// The pilot is sending bytes faster than their budget.
+    RateLimited,
+    /// This Dogma is not storing attachments at all.
+    Unavailable,
+    /// No such attachment, or it belongs to a Line this pilot may not read.
+    NotFound,
+    /// The bytes were evicted to keep the Dogma under its ceiling.
+    Expired,
+    /// The header was not a header, or a field was outside its bounds.
+    Malformed,
+}
 
 /// Length of an Ed25519 public key, in bytes. ADR 0004.
 pub const PUBLIC_KEY_LEN: usize = 32;

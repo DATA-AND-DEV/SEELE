@@ -194,6 +194,52 @@ pub const MIGRATIONS: &[Migration] = &[
             CREATE INDEX convites_por_prazo ON convites(expira_em) WHERE usado_em IS NULL;
         "#,
     },
+    Migration {
+        version: 3,
+        description: "attachments: rows that outlive their bytes (ADR 0027)",
+        sql: r#"
+            -- ADR 0027. The bytes live in `anexos/`, beside the database and
+            -- not inside it; this table is the index over them, and it is the
+            -- **truth**: a file missing from the directory reads exactly as an
+            -- expired one, which is a state the design already has.
+            CREATE TABLE attachments (
+                id            INTEGER PRIMARY KEY,
+                message_id    INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+                -- SHA-256 of the content, lowercase hex. This is also the file
+                -- name on disk: no byte anybody else chose ever reaches the
+                -- filesystem. Not UNIQUE — two pilots sending the same picture
+                -- get two rows and one blob, which is the whole of the
+                -- deduplication.
+                content_hash  TEXT    NOT NULL,
+                -- The name the sender gave it. A column, never a path.
+                file_name     TEXT    NOT NULL,
+                -- The type the sender claimed. A claim, not a fact: nothing
+                -- decides what to decode from this alone.
+                declared_type TEXT    NOT NULL,
+                byte_size     INTEGER NOT NULL,
+                created_at    INTEGER NOT NULL,
+                -- NULL while the bytes exist. Expiring stamps this and deletes
+                -- the blob; the row stays so the message can still say that a
+                -- file was here, with its name and its size. A row deleted
+                -- instead would render as a message with nothing in it, and
+                -- nobody would know there had been a file at all.
+                --
+                -- The consequence is written in the ADR and accepted: this
+                -- table never loses rows, only bytes, so it grows forever.
+                expired_at    INTEGER
+            ) STRICT;
+
+            -- Eviction asks one question — "which live attachment is the
+            -- oldest" — and asks it on the way in to every transfer.
+            CREATE INDEX attachments_oldest_live
+                ON attachments (created_at, id) WHERE expired_at IS NULL;
+            -- "How many live rows still point at these bytes." The answer is
+            -- what decides whether deleting a row may delete the blob.
+            CREATE INDEX attachments_by_hash ON attachments (content_hash);
+            -- Drawing a page of history joins this per message.
+            CREATE INDEX attachments_by_message ON attachments (message_id);
+        "#,
+    },
 ];
 
 #[cfg(test)]

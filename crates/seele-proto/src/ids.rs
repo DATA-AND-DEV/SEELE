@@ -101,6 +101,17 @@ id_type!(
     u32
 );
 
+id_type!(
+    /// A file hanging off a message.
+    ///
+    /// The row, and not the bytes. ADR 0027 keeps the two apart on purpose:
+    /// expiring an attachment deletes the bytes and **keeps this row**, so the
+    /// message can still say that a file was here and what it was called. Two
+    /// pilots who sent the same file have two of these and one blob.
+    AttachmentId,
+    u64
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;
