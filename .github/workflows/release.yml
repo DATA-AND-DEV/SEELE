@@ -105,9 +105,16 @@ jobs:
           - os: windows-2022
             nome: windows
             bundles: nsis
+          # `app,dmg` e não só `dmg`. O `.app` sempre foi construído — o `.dmg`
+          # é uma imagem com ele dentro —, mas pedi-lo **por nome** é o que faz
+          # o empacotador tratá-lo como alvo e produzir o `.app.tar.gz` que o
+          # atualizador baixa. Sem isto o bundler emite «no updater-enabled
+          # targets were built» e o macOS fica sendo o único sistema que não
+          # atualiza sozinho. O `.app` solto não vai para o release: o passo de
+          # reunir escolhe por extensão, e diretório não é arquivo.
           - os: macos-15
             nome: macos
-            bundles: dmg
+            bundles: app,dmg
 
     steps:
       - uses: actions/checkout@v4
@@ -129,16 +136,40 @@ jobs:
       # A versão vive no tauri.conf.json, e é ela que aparece no instalador e no
       # "Sobre" do sistema. Gravada aqui para que o arquivo baixado não diga
       # 0.0.0 quando a tag diz outra coisa.
-      - name: Gravar a versão
+      #
+      # E, junto com ela, **tudo o que depende de haver credencial**. Está tudo
+      # neste passo de propósito: são três decisões da mesma forma — «existe o
+      # segredo? então ligue; senão siga sem» — e espalhá-las por três lugares
+      # faria com que descobrir por que um build saiu sem assinatura exigisse
+      # ler três lugares. `docs/assinatura-e-atualizacao.md` é o passo a passo
+      # de obter cada uma.
+      #
+      # Os segredos entram por `env` e não interpolados no corpo do Python: um
+      # valor com aspas fecharia a string e o que viesse depois seria código.
+      # Nenhum destes segredos é escolhido por quem abre um PR, mas a forma
+      # certa custa o mesmo que a errada.
+      - name: Gravar a versão e o que houver de credencial
+        id: gravar
         shell: bash
+        env:
+          VERSAO: ${{ needs.versao.outputs.numero }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          AZURE_ENDPOINT: ${{ secrets.AZURE_ENDPOINT }}
+          AZURE_ARTIFACT_SIGNING_ACCOUNT: ${{ secrets.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           python3 - <<'PY'
-          import json, pathlib
+          import json, os, pathlib
+
           caminho = pathlib.Path("apps/seele-app/tauri.conf.json")
           config = json.loads(caminho.read_text())
-          config["version"] = "${{ needs.versao.outputs.numero }}"
+          config["version"] = os.environ["VERSAO"]
 
-          # A identidade de assinatura, quando houver uma de verdade.
+          def segredo(nome):
+              return os.environ.get(nome, "").strip()
+
+          # ------------------------------------------------------------ macOS
           #
           # O padrão no arquivo é `-`, que é assinatura ad-hoc. Não vale para o
           # Gatekeeper — só a notarização vale —, mas **é o que faz a permissão
@@ -149,13 +180,67 @@ jobs:
           # Escrito aqui em vez de confiar na precedência da variável de
           # ambiente, que eu não conferi. Explícito não tem precedência para
           # errar.
-          identidade = "${{ secrets.APPLE_SIGNING_IDENTITY }}".strip()
+          identidade = segredo("APPLE_SIGNING_IDENTITY")
           if identidade:
               config["bundle"].setdefault("macOS", {})["signingIdentity"] = identidade
 
+          # ---------------------------------------------------------- Windows
+          #
+          # Azure Artifact Signing — o nome novo do Trusted Signing. É o único
+          # caminho barato para uma assinatura que o SmartScreen aceite: sem
+          # token físico, sem HSM na mesa, na ordem de dez dólares por mês. A
+          # assinatura acontece na nuvem e o certificado nunca sai de lá.
+          #
+          # As três partes juntas ou nenhuma: um `signCommand` com endereço e
+          # sem conta falha **no fim do build**, depois de compilar tudo.
+          endereco = segredo("AZURE_ENDPOINT")
+          conta = segredo("AZURE_ARTIFACT_SIGNING_ACCOUNT")
+          perfil = segredo("AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE")
+          assina_windows = bool(endereco and conta and perfil)
+          if assina_windows:
+              # Forma de objeto, e não a string com espaços: uma conta ou um
+              # perfil com espaço no nome viraria dois argumentos.
+              #
+              # `-d SEELE` é o nome que o Windows mostra no aviso de elevação.
+              # Sem ele o instalador se apresenta como uma cadeia aleatória de
+              # caracteres, que é pior do que não assinar.
+              config["bundle"].setdefault("windows", {})["signCommand"] = {
+                  "cmd": "artifact-signing-cli",
+                  "args": ["-e", endereco, "-a", conta, "-c", perfil, "-d", "SEELE", "%1"],
+              }
+          elif endereco or conta or perfil:
+              print("::warning::só parte da credencial do Windows está configurada; o instalador sai sem assinatura.")
+
+          # ------------------------------------------------------ atualizador
+          #
+          # Outra assinatura, e é preciso não confundir: esta é **do projeto**,
+          # e é o que faz o app recusar um pacote que não veio daqui. A do
+          # sistema operacional, acima, é o que faz o sistema deixar abrir. Uma
+          # não substitui a outra, e o canal de atualização é justamente onde
+          # comprometer um produto é mais barato.
+          #
+          # As duas metades juntas ou nada: a pública vive no repositório, em
+          # `plugins.updater.pubkey`, e a privada é segredo. Ligar os artefatos
+          # de atualização com só uma delas é build que quebra no último passo,
+          # ou — pior — release que sai com assinatura que nenhum app aceita.
+          privada = segredo("TAURI_SIGNING_PRIVATE_KEY")
+          publica = config.get("plugins", {}).get("updater", {}).get("pubkey", "").strip()
+          atualizador = bool(privada and publica)
+          if atualizador:
+              config["bundle"]["createUpdaterArtifacts"] = True
+          elif privada or publica:
+              print("::warning::só metade da chave do atualizador existe; este release não atualiza ninguém.")
+
           caminho.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as saida:
+              saida.write(f"assinar_windows={'sim' if assina_windows else 'nao'}\n")
+              saida.write(f"atualizador={'sim' if atualizador else 'nao'}\n")
+
           print("versão gravada:", config["version"])
-          print("assinatura:", config["bundle"].get("macOS", {}).get("signingIdentity"))
+          print("assinatura macOS:", config["bundle"].get("macOS", {}).get("signingIdentity"))
+          print("assinatura Windows:", "sim" if assina_windows else "não")
+          print("artefatos de atualização:", "sim" if atualizador else "não")
           PY
 
       # ---------------------------------------------------------------- CLI
@@ -227,6 +312,37 @@ jobs:
       - name: Instalar a CLI do Tauri
         run: cargo install tauri-cli --version "^2" --locked
 
+      # A ferramenta que assina no Windows, instalada só quando há credencial
+      # para ela usar. Sem este `if` seriam dois minutos de compilação em todo
+      # release para nada.
+      #
+      # Ela é uma casca em volta do `signtool` da Microsoft: pede um token ao
+      # Azure com as três variáveis `AZURE_CLIENT_*` e chama o `signtool` com o
+      # dispositor de assinatura da nuvem. Por isso precisa das duas coisas
+      # abaixo — a CLI do Azure, que o runner já traz, e o `signtool`, que vem
+      # com o Windows SDK numa pasta cujo nome muda a cada versão.
+      #
+      # O caminho padrão da ferramenta fixa uma versão do SDK (`10.0.26100.0`),
+      # e o runner não é obrigado a ter aquela. Procurar aqui é a diferença
+      # entre um erro na terceira linha e um erro depois de vinte minutos de
+      # compilação.
+      - name: Preparar a assinatura do Windows
+        if: matrix.nome == 'windows' && steps.gravar.outputs.assinar_windows == 'sim'
+        shell: pwsh
+        run: |
+          cargo install artifact-signing-cli --locked
+          $kits = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+          $signtool = Get-ChildItem -Path $kits -Directory -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending |
+            ForEach-Object { Join-Path $_.FullName "x64\signtool.exe" } |
+            Where-Object { Test-Path $_ } |
+            Select-Object -First 1
+          if (-not $signtool) {
+            Write-Error "não achei o signtool.exe em $kits; a assinatura do Windows não teria como acontecer."
+          }
+          Write-Host "signtool: $signtool"
+          "SIGNTOOL_PATH=$signtool" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       # Assinatura e notarização da Apple, se houver credencial.
       #
       # Sem elas o Gatekeeper recusa abrir o app baixado — "não foi possível
@@ -244,6 +360,11 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # A chave do projeto. Só é lida quando `createUpdaterArtifacts` está
+          # ligado, e ele só liga quando esta chave e a pública existem — ver o
+          # passo de gravar a versão. Vazia, este par de linhas não faz nada.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: cargo tauri build --config tauri.release.conf.json --target universal-apple-darwin --bundles ${{ matrix.bundles }}
 
       # O Windows recebe o `--config` dos acompanhantes; o Linux não, porque lá
@@ -252,11 +373,24 @@ jobs:
       - name: Empacotar o app (Windows)
         if: matrix.nome == 'windows'
         working-directory: apps/seele-app
+        env:
+          # As três que a ferramenta de assinatura troca por um token no Azure.
+          # Ela as lê do ambiente sozinha; não aparecem no `signCommand`, e é
+          # bom que não apareçam — argumento de linha de comando é visível para
+          # qualquer processo da máquina.
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: cargo tauri build --config tauri.release.conf.json --bundles ${{ matrix.bundles }}
 
       - name: Empacotar o app (Linux)
         if: matrix.nome == 'linux'
         working-directory: apps/seele-app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: cargo tauri build --bundles ${{ matrix.bundles }}
 
       # ------------------------------------------------------------- reunir
@@ -288,6 +422,54 @@ jobs:
             echo "Um arquivo por sistema é o combinado; ver a matriz deste workflow." >&2
             ls -la "$destino" >&2
             exit 1
+          fi
+
+          # ---------------------------------------- o que o app baixa sozinho
+          #
+          # Só existe quando este release foi construído com a chave do projeto.
+          # Sem ela o `entrega/` acaba aqui, e o release sai como sempre saiu:
+          # um instalador por sistema, para baixar à mão.
+          #
+          # Estes arquivos **não** são para uma pessoa baixar. Eles são o que o
+          # botão de atualizar dentro do app procura, e as NOTAS-DE-RELEASE
+          # dizem isso para quem chegar na página e se perguntar o que são.
+          if [ "${{ steps.gravar.outputs.atualizador }}" = "sim" ]; then
+            if [ "${{ matrix.nome }}" = "macos" ]; then
+              # O macOS atualiza a partir do `.app` compactado, e não do `.dmg`:
+              # imagem de disco é coisa que uma pessoa monta e arrasta, e o
+              # atualizador precisa de algo que ele saiba abrir e trocar de
+              # lugar sozinho.
+              #
+              # Renomeado para carregar a versão. O empacotador o chama de
+              # `SEELE.app.tar.gz`, sem número, e numa página de release isso é
+              # um arquivo que não diz de que versão é. A assinatura vale sobre
+              # os bytes, não sobre o nome, então renomear não a invalida.
+              tarball=$(find "$raiz" -type f -name '*.app.tar.gz' | head -n 1)
+              if [ -z "$tarball" ]; then
+                echo "::error::o empacotador não deixou o .app.tar.gz que o atualizador baixa."
+                echo "A matriz deste job pede \`app,dmg\` justamente para que ele exista." >&2
+                exit 1
+              fi
+              cp "$tarball" "$destino/SEELE_${versao}_universal.app.tar.gz"
+              cp "${tarball}.sig" "$destino/SEELE_${versao}_universal.app.tar.gz.sig"
+            else
+              # Windows e Linux atualizam pelo **próprio instalador** — o mesmo
+              # `.exe` e o mesmo `.deb` que já estão sendo publicados. O que
+              # falta é a assinatura ao lado deles.
+              find "$raiz" -type f \( -name '*.exe.sig' -o -name '*.deb.sig' \) \
+                -exec cp {} "$destino/" \; 2>/dev/null || true
+            fi
+
+            # A conferência que importa: um release que se anuncia como
+            # atualizável e chega sem assinatura é um release que todo app vai
+            # recusar em silêncio, depois de baixar. Melhor falhar aqui.
+            assinaturas=$(find "$destino" -maxdepth 1 -type f -name '*.sig' | wc -l | tr -d ' ')
+            if [ "$assinaturas" != "1" ]; then
+              echo "::error::esperava uma assinatura de atualização e achei ${assinaturas}."
+              echo "Ela sai do \`cargo tauri build\` com TAURI_SIGNING_PRIVATE_KEY no ambiente." >&2
+              ls -la "$destino" >&2
+              exit 1
+            fi
           fi
 
           # O arquivo da CLI **não** é um segundo instalador: é o que o
@@ -350,6 +532,30 @@ jobs:
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: entrega/*
+
+      # O manifesto que o botão de atualizar procura.
+      #
+      # Mora **no próprio release**, e não num servidor nosso: o endereço
+      # gravado no app é
+      #
+      #   https://github.com/…/releases/latest/download/latest.json
+      #
+      # e `releases/latest` significa, para o GitHub, o último release
+      # **publicado e não pré-lançamento**. Rascunho não entra. É a propriedade
+      # que faz a decisão de lançar continuar sendo de uma pessoa: enquanto o
+      # rascunho não for publicado à mão, nenhum app do mundo enxerga a versão
+      # nova. Não há botão a apertar nem serviço a hospedar para isso valer.
+      #
+      # Gerado depois do atestado de propósito. Ele descreve os outros arquivos,
+      # como o `SHA256SUMS` — atestar um manifesto seria atestar a descrição em
+      # vez do que ela descreve. Antes das somas, para que elas o cubram.
+      #
+      # O mesmo script que `empacotar/` usa quando o release é montado à mão.
+      # Não há segunda cópia da regra: um release feito sem CI que saísse sem
+      # manifesto deixaria todo mundo sem atualização até o seguinte, e quem o
+      # montou não teria como saber.
+      - name: Manifesto de atualização
+        run: python3 empacotar/manifesto.py entrega "${{ needs.versao.outputs.tag }}" --repo "$GITHUB_REPOSITORY"
 
       # As somas são o que torna o instalador por `curl` defensável: sem elas,
       # quem roda o script está confiando no canal, e não no conteúdo.
