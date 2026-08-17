@@ -34,6 +34,7 @@
 <link rel="stylesheet" href="tela-sessao.css">
 <link rel="stylesheet" href="camada-alerta.css">
 <link rel="stylesheet" href="camada-bateria.css">
+<link rel="stylesheet" href="camada-moderar.css">
 <link rel="stylesheet" href="tela-chamada.css">
 <link rel="stylesheet" href="tela-dogma.css">
 <link rel="stylesheet" href="tela-fim.css">
@@ -471,18 +472,38 @@
         <div class="alerta-botoes">
           <button id="banner-fechar" class="botao alerta-reconhecer" type="button">RECONHECER</button>
           <!--
-            O segundo botão do comp, desabilitado. Duas razões, e as duas do
-            inventário: não existe verbo de moderação — `EndReason::Kicked`
-            existe do lado de quem apanha, e não há como emitir (§16) — e o
-            rótulo é ambíguo em português (Q6): "ejetar o plug **do** operador"
-            pode ser a ação sobre outra pessoa ou a saída ordenada por quem
-            está aqui. No comp ele chama `fecharAlerta()` e não ejeta ninguém,
-            o que é a pior das três leituras possíveis. Quem quer sair tem
-            EJETAR no cabeçalho, que faz o que diz.
+            O segundo botão do comp, que passou a vida desabilitado porque não
+            havia verbo de moderação — `EndReason::Kicked` existia do lado de
+            quem apanha e não havia como emitir. Há agora, e este botão é o que
+            estava esperando.
+
+            ---- o rótulo mudou, e é a resposta à Q6 do inventário ----
+
+            "EJETAR PLUG DO OPERADOR" é ambíguo em português: tanto pode ser o
+            ato sobre outra pessoa quanto a saída ordenada por quem está aqui. A
+            segunda leitura está atendida e escrita — DESCONECTAR, no cabeçalho,
+            que faz o que diz —, então o que sobrou para este botão é a
+            primeira, e o rótulo passou a dizê-la.
+
+            ---- por que ele abre a escolha em vez de agir ----
+
+            Porque esta caixa não tem sujeito. Um `Notice` carrega severidade e
+            motivo, e nunca de quem ele é — é a mesma lacuna que deixa as três
+            células acima vazias. Um botão que expulsasse daqui teria de
+            adivinhar quem, e adivinhar quem sai de uma sessão é a última coisa
+            que um produto deve fazer. Ele abre a moderação, onde a pessoa é
+            escolhida por nome.
+
+            Nasce desabilitado e é ligado por `atualizarPortaDoAlerta`, do
+            snapshot: antes do primeiro quadro esta janela não sabe que
+            permissões tem, e um botão que nasce apertável promete o que talvez
+            não possa cumprir. Sem permissão nenhuma ele fica apagado e o
+            `title` diz por quê, que é a convenção desta janela para toda
+            lacuna.
           -->
           <button id="alerta-ejetar" class="alerta-ejetar" type="button" disabled
-                  title="não há comando de moderação no protocolo: dá para receber uma ejeção, não para ordenar uma">
-            EJETAR PLUG DO OPERADOR
+                  title="este Dogma não deu a você nenhuma permissão de moderação">
+            MODERAR UM PILOTO
           </button>
         </div>
 
@@ -585,6 +606,135 @@
   </div>
 
   <!--
+    A moderação — os quatro verbos da `specs/04-servidor-seele.md`.
+
+    Camada, e não tela, pela razão que vale para o alerta e para a bateria: a
+    `specs/07` não deixa esta janela trocar a conversa por outra coisa, e
+    moderar é uma decisão que se toma **olhando** para a sala. Uma tela cheia
+    apagaria quem está falando no instante em que se decide o que fazer com
+    alguém.
+
+    ---- por que uma caixa, e não três botões na linha da pessoa ----
+
+    Expulsar e banir são irreversíveis para quem sofre, e banir não tem desfazer
+    em lugar nenhum deste produto: `unban` não é verbo do protocolo. Isso decide
+    a forma — é preciso uma superfície larga o bastante para escrever a
+    consequência, com o nome de quem vai sofrê-la dentro da frase, antes de o
+    ato sair. «Tem certeza?» não é confirmação; dizer o que vai acontecer é.
+
+    ---- as duas listas são `select`, e não `ul` ----
+
+    Nada nelas é lista de leitura: são escolhas, e uma escolha é o que um
+    `select` é. Ele também resolve de graça o que o guarda
+    `every_list_the_dogma_fills_lives_inside_something_that_scrolls` cobra de
+    toda lista que o Dogma preenche — um Dogma com quarenta pilotos não estica
+    esta caixa para fora da janela, porque quem rola é o próprio controle.
+
+    ---- nenhuma cor de alarme aqui ----
+
+    `tokens.css` marca o vermelho «EXCLUSIVO alerta e queda». Moderar é sério e
+    não é queda de enlace: gastar o vermelho aqui é ensinar a lê-lo como
+    «alguma coisa importante» no dia em que ele quiser dizer que a sessão está
+    sendo segurada na memória. O acento é o laranja institucional.
+  -->
+  <div id="moderar" class="camada-moderar" role="dialog" aria-modal="true"
+       aria-labelledby="moderar-titulo" hidden>
+    <div class="moderar-caixa">
+      <div class="moderar-cabeca">
+        <!-- Acento. `MODERAÇÃO` ao lado já diz tudo o que ele diz. -->
+        <span class="kanji moderar-kanji" lang="ja" aria-hidden="true">指揮</span>
+        <h2 id="moderar-titulo" class="moderar-titulo">MODERAÇÃO</h2>
+      </div>
+
+      <div id="moderar-escolha" class="moderar-corpo">
+        <span class="dica">O que se faz aqui vale para a sessão de outra pessoa,
+          e ela não é consultada antes.</span>
+
+        <!--
+          Nenhuma jaula com gente dentro além de você. Não é falha nem permissão
+          que falta, e por isso não é erro: é um Dogma vazio. Os três verbos
+          somem inteiros em vez de ficarem apagados — não há o que explicar
+          sobre um controle cujo objeto não existe.
+        -->
+        <p id="moderar-vazio" class="moderar-vazio" hidden>
+          Não há mais ninguém em jaula nenhuma deste Dogma.
+        </p>
+
+        <div id="moderar-sobre" class="moderar-sobre">
+          <label class="moderar-campo">
+            <span class="rotulo">QUEM</span>
+            <select id="moderar-quem" class="moderar-select"></select>
+          </label>
+
+          <div id="moderar-acao-expulsar" class="moderar-acao">
+            <button id="moderar-expulsar" class="moderar-verbo" type="button">EXPULSAR</button>
+            <span class="dica">Encerra a sessão da pessoa agora. Ela pode entrar
+              de novo em seguida — expulsar não barra a volta.</span>
+          </div>
+
+          <div id="moderar-acao-banir" class="moderar-acao">
+            <label class="moderar-campo">
+              <span class="rotulo">ATÉ QUANDO</span>
+              <!--
+                O prazo existe aqui por um motivo e não por completude: um
+                banimento com prazo é o único que se desfaz sozinho. Não há
+                verbo de `unban` no protocolo, então «para sempre» quer dizer
+                mesmo para sempre, do lado de fora deste produto.
+              -->
+              <select id="moderar-ate" class="moderar-select">
+                <option value="">para sempre</option>
+                <option value="1">1 dia</option>
+                <option value="7">7 dias</option>
+                <option value="30">30 dias</option>
+              </select>
+            </label>
+            <label class="moderar-campo">
+              <span class="rotulo">MOTIVO</span>
+              <input id="moderar-motivo" name="motivo" maxlength="200"
+                     spellcheck="false" autocomplete="off"
+                     placeholder="opcional, e só para o seu registro">
+            </label>
+            <button id="moderar-banir" class="moderar-verbo" type="button">BANIR</button>
+            <span class="dica">Encerra a sessão e barra a volta. O motivo fica
+              com quem hospeda e nunca chega a quem foi banido.</span>
+          </div>
+
+          <div id="moderar-acao-mover" class="moderar-acao">
+            <label class="moderar-campo">
+              <span class="rotulo">MOVER PARA</span>
+              <select id="moderar-para" class="moderar-select"></select>
+            </label>
+            <button id="moderar-mover" class="moderar-verbo" type="button">MOVER</button>
+            <span class="dica">Tira a pessoa da jaula em que ela está e a põe na
+              escolhida. Ela continua na sessão.</span>
+          </div>
+        </div>
+      </div>
+
+      <!--
+        A confirmação, e ela é a frase — não a pergunta. O texto é escrito pelo
+        próprio ato, com o nome de quem sofre dentro, e o botão repete o verbo
+        em vez de dizer «OK»: um botão chamado OK ao lado de um parágrafo é um
+        botão que se aperta sem ler o parágrafo.
+      -->
+      <div id="moderar-confirmacao" class="moderar-confirmacao" hidden>
+        <p id="moderar-consequencia" class="moderar-consequencia"></p>
+        <!--
+          Revelado antes de escrito: `role="alert"` não anuncia o que foi
+          escrito enquanto o elemento ainda estava escondido.
+        -->
+        <p id="moderar-erro" class="erro" role="alert" hidden></p>
+        <div class="moderar-botoes">
+          <button id="moderar-cancelar" class="moderar-cancelar" type="button">CANCELAR</button>
+          <button id="moderar-confirmar" class="botao moderar-confirmar" type="button">CONFIRMAR</button>
+        </div>
+      </div>
+
+      <button id="moderar-fechar" class="moderar-fechar" type="button">FECHAR</button>
+    </div>
+  </div>
+
+  <!--
     O link de convite, para quem está hospedando. Fica de fora do painel de
     mensagens de propósito: são uns noventa caracteres, e num painel estreito
     ele quebra em duas linhas. Um convite que não dá para copiar inteiro não
@@ -632,9 +782,10 @@
         Desabilitado, e por um motivo que o `title` diz: acrescentar um segundo
         Dogma é ter dois `Plug` ao mesmo tempo, e este produto tem um. Um botão
         apertável aqui prometeria uma segunda sessão que `connect` recusa com
-        `AlreadyConnected` — é o mesmo caso de `EJETAR PLUG DO OPERADOR` e de
-        `FORÇAR REINSERÇÃO DE PLUG`, e recebe o mesmo tratamento: a moldura
-        fica, a promessa não.
+        `AlreadyConnected` — é o mesmo caso de `FORÇAR REINSERÇÃO DE PLUG`, e
+        recebe o mesmo tratamento: a moldura fica, a promessa não. (O terceiro
+        desta lista era o botão da caixa de alerta, e ele saiu dela: os verbos
+        de moderação chegaram, e ele passou a chamar um.)
       -->
       <button id="trilha-adicionar" class="trilha-mais" type="button" disabled
               aria-label="Adicionar Dogma Central"
@@ -1483,8 +1634,8 @@
             omitir vale para o que não existe, e a saída existe pela metade.
 
             Desabilitada **e** dizendo por quê, que é o que
-            `the_two_buttons_with_no_command_behind_them_cannot_be_pressed` exige
-            de todo botão sem comando atrás.
+            `the_button_with_no_command_behind_it_cannot_be_pressed_and_the_one_that_grew_one_asks_first`
+            exige de todo botão sem comando atrás.
 
             Quando a enumeração chegar, a lista é a mesma forma da de cima e é
             preenchida do mesmo jeito.
@@ -1776,6 +1927,13 @@
 <script src="frases.js"></script>
 <script src="tela-boot.js"></script>
 <script src="tela-sessao.js"></script>
+<!--
+  A moderação depois da operação porque ela lê `mensagens`, que é declarado lá —
+  e só de dentro de um manipulador, que é sempre depois de todos os arquivos.
+  Ela é camada e não tela, então não há `tela-` no nome: o que se sobrepõe à
+  operação em vez de substituí-la se chama `camada-`, como o alerta e a bateria.
+-->
+<script src="camada-moderar.js"></script>
 <!--
   Depois de `tela-sessao.js`, e não é gosto: a chamada usa `naoMedido`,
   `medido`, `SEM_MEDIDA` e `blocos`, que são declarados lá. Declaração de função

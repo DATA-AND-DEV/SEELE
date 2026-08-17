@@ -21,6 +21,10 @@ function mostrarFim(motivo) {
   // que derruba alguém derruba quem está num Cage, que é exatamente quem está
   // olhando esta tela.
   abandonarChamada();
+  // E a moderação, que é camada e não tela: escondida junto com a sessão ela
+  // não empilha, mas continuaria aberta — e reapareceria sobre a **próxima**
+  // sessão, armada com um ato sobre alguém de um Dogma que já ficou para trás.
+  abandonarModeracao();
   $("tela-fim").hidden = false;
   const frase = MOTIVOS[motivo] ?? null;
   $("fim-motivo").textContent = frase ?? "ENLACE ENCERRADO";

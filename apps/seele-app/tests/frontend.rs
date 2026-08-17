@@ -199,22 +199,7 @@ fn every_command_the_frontend_calls_is_registered() {
 /// between the person and the room they are renaming. Doing it badly now would
 /// cost more than the wait.
 ///
-/// The four moderation verbs are a different case, and a temporary one.
-/// `expulsar` / `banir` / `remover_mensagem` / `mover_piloto` are what
-/// `specs/04-servidor-seele.md` gives the Comandante and the Operador, and
-/// until recently no protocol message carried any of them — which is why the
-/// `EJETAR PLUG DO OPERADOR` control has been drawn and **disabled** since v2:
-/// there was nothing to call. There is now, and `Snapshot::may_kick`,
-/// `may_ban`, `may_remove_message` and `may_move_pilot` say whether to enable
-/// it. Whoever wires that takes the names off this list.
-const AGUARDANDO_TELA: &[&str] = &[
-    "renomear_cage",
-    "renomear_linha",
-    "expulsar_piloto",
-    "banir_piloto",
-    "remover_mensagem",
-    "mover_piloto",
-];
+const AGUARDANDO_TELA: &[&str] = &["renomear_cage", "renomear_linha"];
 
 #[test]
 fn no_command_is_registered_and_never_called() {
@@ -1340,40 +1325,110 @@ fn the_severity_of_a_notice_reads_without_colour() {
 }
 
 #[test]
-fn the_two_buttons_with_no_command_behind_them_cannot_be_pressed() {
-    // Both are drawn because the comp draws them, and both are disabled because
-    // nothing in this product can carry them out. `EJETAR PLUG DO OPERADOR` has
-    // no moderation verb — `EndReason::Kicked` exists for the person receiving
-    // one, and there is no way to emit it — and `FORÇAR REINSERÇÃO DE PLUG` has
-    // no "try now": the core is already retrying, which is where the attempt
-    // count above the button comes from.
+fn the_button_with_no_command_behind_it_cannot_be_pressed_and_the_one_that_grew_one_asks_first() {
+    // This guard used to cover two buttons and now covers one and a half, and
+    // the rewrite *is* the record of what changed.
     //
-    // The comp wires both to a handler that closes the box, which is the worst
-    // of the available readings: a button that looks like it acts, and does
-    // nothing. Enabling either of these here reproduces exactly that.
+    // `FORÇAR REINSERÇÃO DE PLUG` has not moved: there is still no "try now" in
+    // this product. The core is already retrying — that is where the attempt
+    // count above the button comes from — so a pressable button there would
+    // promise to speed up something that is already running. The comp wires it
+    // to a handler that closes the box, which is the worst of the available
+    // readings: a button that looks like it acts, and does nothing.
+    //
+    // The other one moved. `EJETAR PLUG DO OPERADOR` was disabled because
+    // `EndReason::Kicked` existed only for the person receiving one and nothing
+    // could emit it; `expulsar_piloto`, `banir_piloto`, `remover_mensagem` and
+    // `mover_piloto` are what changed that. So the question about it is no
+    // longer "is it disabled" — it is "does it stay honest now that it does
+    // something", and that has three halves:
+    //
+    // - it still *starts* disabled in the markup. Before the first snapshot this
+    //   window does not know which permissions it has, and a button born
+    //   pressable promises what it may not be able to carry out;
+    // - something turns it on from the snapshot, and from the moderation
+    //   booleans rather than from `may_manage_cages` or from nothing at all;
+    // - and it opens the choosing, rather than acting. A `Notice` carries a
+    //   severity and a reason and never *whose* it is — the same gap that leaves
+    //   the three cells of that box empty — so a button that ejected from there
+    //   would have to guess who, and guessing who leaves a session is the last
+    //   thing a product should do.
     let page = read("ui/index.html");
-
-    for id in ["alerta-ejetar", "bateria-forcar"] {
-        let tag = tag_with_id(&page, id);
-        assert!(
-            tag.contains("disabled"),
-            "`{id}` is pressable, and there is no command behind it — so it is a \
-             button that looks like it acts and does nothing: <{tag}>"
-        );
-        assert!(
-            tag.contains("title=\""),
-            "`{id}` is disabled and says nothing about why, which reads as a bug \
-             rather than as a gap: <{tag}>"
-        );
-    }
-
-    // And nothing may quietly wire them up instead of enabling them.
     let script = without_comments(&scripts());
-    for id in ["alerta-ejetar", "bateria-forcar"] {
+
+    let forcar = tag_with_id(&page, "bateria-forcar");
+    assert!(
+        forcar.contains("disabled"),
+        "`bateria-forcar` is pressable, and there is no command behind it — so it \
+         is a button that looks like it acts and does nothing: <{forcar}>"
+    );
+    assert!(
+        forcar.contains("title=\""),
+        "`bateria-forcar` is disabled and says nothing about why, which reads as a \
+         bug rather than as a gap: <{forcar}>"
+    );
+    assert!(
+        !script.contains("$(\"bateria-forcar\")"),
+        "a script reaches for `bateria-forcar`, so the disabled button grew a \
+         listener — which is the comp's mistake, one layer down"
+    );
+
+    let ejetar = tag_with_id(&page, "alerta-ejetar");
+    assert!(
+        ejetar.contains("disabled"),
+        "`alerta-ejetar` is born pressable. It is now a real control, but which \
+         permissions this session has is not known until the first snapshot — so \
+         between the window opening and that frame it would be promising \
+         moderation nobody has: <{ejetar}>"
+    );
+    assert!(
+        ejetar.contains("title=\""),
+        "`alerta-ejetar` can still end up disabled — a Dogma that gave this pilot \
+         no moderation at all — and a disabled control that says nothing about \
+         why reads as a bug: <{ejetar}>"
+    );
+
+    // Scoped to the one function that owns the button's state, because the whole
+    // script says all of these words either way — the paragraph explaining why
+    // the alert box has no subject would satisfy an unscoped search for it.
+    let porta = body_of(&scripts(), "function atualizarPortaDoAlerta");
+    assert!(
+        porta.contains("$(\"alerta-ejetar\")"),
+        "nothing reaches for `alerta-ejetar`, so the button that finally has a \
+         command behind it is never turned on:\n{porta}"
+    );
+    assert!(
+        porta.contains("podeModerarPilotos") || porta.contains("may_kick"),
+        "`alerta-ejetar` is enabled without asking whether this session may \
+         moderate anybody, so it offers what the Dogma will refuse:\n{porta}"
+    );
+    assert!(
+        porta.contains("title"),
+        "`alerta-ejetar` can be left disabled without the reason being rewritten, \
+         so the `title` in the markup outlives the state it explains:\n{porta}"
+    );
+
+    // And what the press does: open the choosing, never act.
+    let Some(aperto) = script
+        .split("$(\"alerta-ejetar\").addEventListener")
+        .nth(1)
+        .and_then(|rest| rest.split("\n});").next())
+    else {
+        panic!("nothing is listening on `alerta-ejetar` at all");
+    };
+    assert!(
+        aperto.contains("abrirModeracao("),
+        "`alerta-ejetar` does something other than open the moderation:{aperto}"
+    );
+    for verbo in [
+        "invoke(\"expulsar_piloto\"",
+        "invoke(\"banir_piloto\"",
+        "invoke(\"mover_piloto\"",
+    ] {
         assert!(
-            !script.contains(&format!("$(\"{id}\")")),
-            "a script reaches for `{id}`, so the disabled button grew a listener \
-             — which is the comp's mistake, one layer down"
+            !aperto.contains(verbo),
+            "`alerta-ejetar` calls `{verbo}…` straight from the alert box, which \
+             has no subject — so it is acting on a pilot it guessed:{aperto}"
         );
     }
 }
@@ -3302,5 +3357,338 @@ fn the_update_is_only_ever_asked_for_by_a_press() {
         !tick.contains("procurar"),
         "the half-second loop of the settings screen asks whether there is a new \
          version, which is an automatic check wearing a meter's clothes:\n{tick}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Moderation — the four verbs of `specs/04-servidor-seele.md`.
+// ---------------------------------------------------------------------------
+
+/// The four commands that act on a person or on what they said.
+const VERBOS_DE_MODERACAO: &[&str] = &[
+    "expulsar_piloto",
+    "banir_piloto",
+    "remover_mensagem",
+    "mover_piloto",
+];
+
+#[test]
+fn no_moderation_act_reaches_the_dogma_without_a_sentence_that_says_what_it_costs() {
+    // The rule this whole layer exists for. Kicking and banning are
+    // irreversible **for the person on the receiving end**, removing a message
+    // takes it away from everybody, and moving somebody takes them out of where
+    // they were without their asking. None of the four can be one press away.
+    //
+    // And a second press is not the answer either: «tem certeza?» adds no
+    // information to somebody who already decided once, so it trains people to
+    // press twice. What a confirmation is *for* is saying what will happen, with
+    // the name of whoever it happens to inside the sentence — which is why
+    // `armarAto` takes the sentence as an argument rather than a flag.
+    //
+    // So every one of the four has to reach the bridge from inside a chunk that
+    // arms an act, and there must be no other path. Every chunk that names the
+    // command is checked, not just the first — a second, unguarded call is
+    // exactly the shape this would otherwise miss.
+    let layer = read("ui/camada-moderar.js");
+    let script = without_comments(&scripts());
+
+    for verbo in VERBOS_DE_MODERACAO {
+        let needle = format!("invoke(\"{verbo}\"");
+        assert!(
+            script.contains(&needle),
+            "nothing calls `{verbo}`, so the verb is registered and unreachable"
+        );
+
+        let mut armed = 0;
+        for chunk in top_level_chunks(&layer) {
+            if !chunk.contains(&needle) {
+                continue;
+            }
+            armed += 1;
+            assert!(
+                chunk.contains("armarAto(") || chunk.contains("abrirConfirmacao("),
+                "`{verbo}` is sent without arming a confirmation first, so an \
+                 irreversible act is one press away:\n{chunk}"
+            );
+        }
+        assert!(
+            armed > 0,
+            "`{verbo}` is called from outside ui/camada-moderar.js, where the \
+             confirmation lives — so whatever calls it is not going through one"
+        );
+    }
+
+    // The other end of the same wire: the box's confirm button is the only thing
+    // that runs an armed act, and it runs the one that was armed.
+    let Some(confirmar) = script
+        .split("$(\"moderar-confirmar\").addEventListener")
+        .nth(1)
+        .and_then(|rest| rest.split("\n});").next())
+    else {
+        panic!("nothing is listening on `moderar-confirmar` at all");
+    };
+    assert!(
+        confirmar.contains("atoArmado") && confirmar.contains("executar()"),
+        "the confirm button does not run the act that was armed, so the sentence \
+         the reader agreed to and the command that goes out are two different \
+         things:{confirmar}"
+    );
+
+    // And the message path goes through the same door.
+    let mensagem = body_of(&scripts(), "function abrirConfirmacao");
+    assert!(
+        mensagem.contains("armarAto("),
+        "`abrirConfirmacao` opens the box without arming anything, so a second \
+         confirmation shape grew beside the first:\n{mensagem}"
+    );
+
+    assert!(
+        !script.to_lowercase().contains("tem certeza"),
+        "something in the page asks «tem certeza?», which is the confirmation \
+         that adds nothing: it does not say what happens, so it teaches people \
+         to press twice"
+    );
+}
+
+#[test]
+fn the_ban_says_that_nothing_in_this_product_undoes_it() {
+    // The sharpest edge of the four, and the one a screen can hide by accident.
+    // There is no `unban` verb in this protocol: a permanent ban is undone only
+    // by somebody with the Dogma's own file, by hand, on the machine hosting it.
+    // A confirmation that says «bar this person?» and stops there is describing a
+    // reversible act, and this one is not.
+    //
+    // The timed ban is in the same sentence for the same reason, from the other
+    // side: it *is* the one that undoes itself, and that is exactly the fact
+    // that makes it worth offering. Whoever is about to press has to be told
+    // which of the two is about to happen.
+    let body = body_of(&scripts(), "function consequenciaDeBanir");
+
+    assert!(
+        body.contains("ate === null") || body.contains("ate == null"),
+        "the ban sentence does not branch on whether there is an expiry, so a \
+         ban that lifts itself and a ban that never does read the same:\n{body}"
+    );
+    for (what, needle) in [
+        ("that it is forever", "para sempre"),
+        (
+            "that no screen here undoes it",
+            "Nenhuma tela deste produto desfaz",
+        ),
+        ("who can undo it, and how", "arquivo do Dogma"),
+        ("when a timed one lifts", "cai sozinha"),
+    ] {
+        assert!(
+            body.contains(needle),
+            "the ban confirmation never says {what}. Without it the sentence \
+             describes a reversible act, and this is the one act in this product \
+             that no screen of it can take back:\n{body}"
+        );
+    }
+
+    // The name of the person, in the sentence. A consequence written about
+    // nobody is a consequence about the wrong person just as easily.
+    assert!(
+        body.contains("quem.nome"),
+        "the ban confirmation does not name who it is about:\n{body}"
+    );
+}
+
+#[test]
+fn moving_somebody_says_they_did_not_ask_and_that_both_rooms_watch_it_happen() {
+    // The act that is easiest to underrate of the four, because nobody is
+    // disconnected by it. It takes a person out of where they were without their
+    // asking, they get a notice about it, and the two rooms watch them leave and
+    // arrive. All three are things the person pressing does not experience, and
+    // all three are the reason it deserves the same confirmation as the others.
+    let body = body_of(&scripts(), "function consequenciaDeMover");
+
+    for (what, needle) in [
+        ("that the person did not ask for it", "sem ter pedido"),
+        ("that they are told", "aviso"),
+        ("which room they are taken from", "quem.cage"),
+        ("which room they land in", "destino"),
+    ] {
+        assert!(
+            body.contains(needle),
+            "the move confirmation never says {what}:\n{body}"
+        );
+    }
+    assert!(
+        body.contains("continua na sessão"),
+        "the move confirmation does not say the person stays connected, so it \
+         reads like a kick with extra steps:\n{body}"
+    );
+}
+
+#[test]
+fn each_moderation_verb_is_offered_by_its_own_permission() {
+    // `Snapshot` carries four booleans and not one, and the reason is on the
+    // wire: `specs/04-servidor-seele.md` enumerates four permissions and a role
+    // may hold any subset. A Dogma can hand somebody `Kick` and nothing else.
+    //
+    // Gating the three on one boolean is the cheap version and it fails in both
+    // directions at once — it offers `banir` to somebody who may only kick, and
+    // hides `mover` from somebody who may only move. Neither shows up in a
+    // build, and the first is only found by a refusal in front of a person.
+    //
+    // Scoped to the function that draws the box, because the file says all four
+    // names either way: the paragraph explaining why there are four would
+    // satisfy an unscoped search for them.
+    let body = body_of(&scripts(), "function desenharModeracao");
+
+    for (bloco, permissao) in [
+        ("moderar-acao-expulsar", "may_kick"),
+        ("moderar-acao-banir", "may_ban"),
+        ("moderar-acao-mover", "may_move_pilot"),
+    ] {
+        assert!(
+            body.split(';')
+                .any(|statement| statement.contains(bloco) && statement.contains(permissao)),
+            "`{bloco}` is not decided by `{permissao}`, so a role that carries \
+             some of the four moderation permissions is offered the wrong ones:\n{body}"
+        );
+    }
+    assert!(
+        !body.contains("may_manage_cages"),
+        "the moderation box is offered by the room-management permission, which \
+         is a different permission for a different thing:\n{body}"
+    );
+
+    // The fourth lives on the message, and it is the one with an exception: your
+    // own message needs no permission at all, because the permission in
+    // `specs/04` reads «de outra pessoa».
+    let mensagem = body_of(&scripts(), "function botaoDeRemoverMensagem");
+    assert!(
+        mensagem.contains("mensagem.own"),
+        "removing a message consults only the permission, so somebody with no \
+         moderation cannot take back what they themselves said:\n{mensagem}"
+    );
+    assert!(
+        scripts().contains("may_remove_message"),
+        "nothing reads `may_remove_message`, so the control is either shown to \
+         everybody or to nobody"
+    );
+
+    // And never on yourself: kicking yourself is DESCONECTAR, banning yourself
+    // is not a thing, and moving yourself is ENTRAR NA JAULA.
+    let porta = body_of(&scripts(), "function botaoDeModerar");
+    assert!(
+        porta.contains("piloto.is_self"),
+        "the moderation door is drawn on one's own row too:\n{porta}"
+    );
+}
+
+#[test]
+fn the_moderation_is_a_layer_over_the_session_and_never_replaces_it() {
+    // Same decision as the alert and the battery, and for the same written
+    // reason: `specs/07-tema-evangelion.md` does not let this client replace the
+    // conversation, and moderating is a decision taken while *looking* at the
+    // room. A full screen would blank out who is talking at the exact moment
+    // somebody is deciding what to do about a person.
+    //
+    // Structural, and not a screenshot: it has to live inside `#tela-sessao`.
+    let page = read("ui/index.html");
+    let Some(after) = page.split("id=\"tela-sessao\"").nth(1) else {
+        panic!("index.html no longer has the session screen");
+    };
+    let Some(session) = after.split("<section ").next() else {
+        panic!("the session screen is never closed by another section");
+    };
+    assert!(
+        session.contains("id=\"moderar\""),
+        "`moderar` is drawn outside `#tela-sessao`, so it is a screen and not a \
+         layer — and a screen replaces the history that specs/07 says has to stay \
+         readable"
+    );
+
+    let tag = tag_with_id(&page, "moderar");
+    assert!(
+        tag.contains("hidden"),
+        "the moderation box is not hidden in the markup, so it is on the screen \
+         from the first frame of every session: <{tag}>"
+    );
+    assert!(
+        tag.contains("role=\"dialog\"") && tag.contains("aria-modal"),
+        "the moderation box does not announce itself as a modal dialog, so a \
+         screen reader reads it as more of the page it is covering: <{tag}>"
+    );
+}
+
+#[test]
+fn the_moderation_does_not_spend_the_red_reserved_for_alarm_and_collapse() {
+    // `tokens.css:19` marks the red "EXCLUSIVO alerta e queda". Moderation is
+    // the most serious thing this window offers and it is still not a dropped
+    // link — and the red spent here is the red nobody reads on the day the
+    // internal battery lights up. The accent is the institutional orange.
+    //
+    // Comments stripped, and that is load-bearing rather than tidy: the sheet
+    // has to be able to write down *why* it is not red, and the paragraph saying
+    // so names the token. A guard a comment can trip is as broken as a guard a
+    // comment can satisfy.
+    let sheet = without_comments(&read("ui/camada-moderar.css"));
+    assert!(
+        !sheet.contains("vermelho"),
+        "the moderation layer paints with the token reserved for alarm and \
+         collapse, which is the battery's colour and nothing else's"
+    );
+
+    // The one red it may show is the text of a failure, and that comes from
+    // `.erro` in base.css — the same band of seriousness as a connection error,
+    // and never the frame of the box.
+    let page = without_comments(&read("ui/index.html"));
+    assert!(
+        page.contains("id=\"moderar-erro\" class=\"erro\""),
+        "the moderation box writes its failures somewhere other than the shared \
+         `.erro`, so it either invented a second red or says nothing when a \
+         command is refused"
+    );
+}
+
+#[test]
+fn opening_the_moderation_carries_the_keyboard_and_closing_gives_it_back() {
+    // A modal that appears without taking the focus leaves whoever navigates by
+    // keyboard on the element behind it, pressing things that are no longer in
+    // front — and a screen reader is told nothing at all, because from where it
+    // stands nothing happened. WCAG 2.4.3, the same rule `abrirTela` exists for.
+    //
+    // Closing is the half that is easy to forget, and it has a trap of its own:
+    // the button that opened the box is a row of `#lista-cages`, and that list is
+    // thrown away and rebuilt twice a second — so by the time the box closes the
+    // element may not be in the document any more. `focus()` on a node outside
+    // the tree does nothing and reports nothing, which is the original defect
+    // reintroduced from the inside.
+    let abrir = body_of(&scripts(), "async function abrirModeracao");
+    assert!(
+        abrir.contains(".focus()"),
+        "opening the moderation leaves the focus on whatever was behind it:\n{abrir}"
+    );
+    assert!(
+        abrir.contains("anunciar("),
+        "opening the moderation announces nothing, so somebody who cannot see it \
+         is not told the box is there:\n{abrir}"
+    );
+
+    let fechar = body_of(&scripts(), "function fecharModeracao");
+    assert!(
+        fechar.contains("focoAntesDeModerar"),
+        "closing the moderation does not give the keyboard back to whoever opened \
+         it, so the focus lands on <body>:\n{fechar}"
+    );
+    assert!(
+        fechar.contains("focavel("),
+        "closing the moderation focuses the opener without checking it is still \
+         in the page — and the row it lives on is rebuilt twice a second, so \
+         `focus()` on it does nothing and says nothing:\n{fechar}"
+    );
+
+    // And a session that ends with the box open must not leave it armed for the
+    // next one: the act inside it names somebody from a Dogma already left.
+    let fim = body_of(&scripts(), "function mostrarFim");
+    assert!(
+        fim.contains("abandonarModeracao"),
+        "the end-of-session screen leaves the moderation box open, so it comes \
+         back over the *next* session armed with an act on somebody from the \
+         previous Dogma:\n{fim}"
     );
 }
