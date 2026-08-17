@@ -30,6 +30,7 @@ pub mod jitter;
 pub mod latency;
 pub mod mixer;
 pub mod netsim;
+pub mod pacing;
 pub mod playout;
 pub mod resample;
 pub mod rt;
