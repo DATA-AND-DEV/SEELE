@@ -22,7 +22,14 @@ function mostrarFim(motivo) {
   // olhando esta tela.
   abandonarChamada();
   $("tela-fim").hidden = false;
-  $("fim-motivo").textContent = MOTIVOS[motivo] ?? "ENLACE ENCERRADO";
+  const frase = MOTIVOS[motivo] ?? null;
+  $("fim-motivo").textContent = frase ?? "ENLACE ENCERRADO";
+  // A única troca de tela que ninguém pediu, e a única cujo anúncio carrega o
+  // motivo: quem não vê a tela precisa do porquê junto, ou fica com um botão
+  // EJETAR focado e nenhuma explicação de por que ele apareceu. Sem motivo
+  // nomeado, o `data-anuncio` da tela já diz o que há para dizer — repeti-lo
+  // aqui seria anunciar «enlace encerrado» duas vezes na mesma frase.
+  abrirTela("tela-fim", frase ? `Enlace encerrado. ${frase}` : undefined);
 }
 
 // ------------------------------------------------------------------- ligação
@@ -41,4 +48,7 @@ $("botao-voltar").addEventListener("click", async () => {
   limparConvite();
   subsistemas("", "·");
   await desenharVisitados();
+  // Depois do redesenho, porque a lista de visitados acabou de mudar de
+  // tamanho e o campo de endereço é o alvo desta tela.
+  abrirTela("tela-boot");
 });

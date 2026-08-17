@@ -392,6 +392,35 @@
 
 /* ---------- coluna 2: Cages e Linhas ---------- */
 
+/* O que rola nesta coluna, e o que não rola.
+
+   Dentro: os dois cabeçalhos, as duas listas e os dois formulários de criar.
+   Fora: a tira do operador, que fica presa no pé.
+
+   O `min-height: 0` é a metade difícil disto em flexbox e ela já estava, no
+   `.painel` genérico logo acima; a outra metade é este `overflow-y`, e sem ela
+   `min-height: 0` não faz nada visível — o conteúdo passa da borda do painel e
+   `body { overflow: hidden }` de `base.css` garante que nem a janela role atrás
+   dele. Com dois Cages ninguém percebe. Com trinta, os de baixo não existem, e
+   foi assim que o defeito foi encontrado: por alguém usando.
+
+   As duas listas dividem **um** contêiner em vez de rolarem cada uma no seu.
+   Duas áreas de rolagem numa coluna de 268px dão duas janelinhas de meia dúzia
+   de linhas cada, e a pessoa que procura uma Linha passa a ter de descobrir
+   qual das duas rola. Aqui o cabeçalho `LINHAS` sobe junto com o conteúdo, que
+   é o que uma coluna de canais faz em qualquer cliente de chat.
+
+   Coluna flex, e não bloco: é o que mantém o `flex: 0 0 auto` dos filhos
+   dizendo o que já dizia — não encolha para caber. Dentro de um contêiner que
+   rola, isso é exatamente a instrução certa. */
+.canais-rolagem {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
 .canais {
   list-style: none;
   margin: 0;

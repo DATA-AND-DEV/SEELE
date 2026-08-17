@@ -110,6 +110,132 @@ function digitando() {
   return ativo && (ativo.tagName === "INPUT" || ativo.tagName === "TEXTAREA");
 }
 
+// ------------------------------------------------------------ trocar de tela
+//
+// Toda transição desta janela é um `hidden` que sobe numa `<section class="tela">`
+// e desce noutra. Isso desenha certo e deixa o teclado para trás.
+//
+// Esconder o ancestral do elemento focado devolve o foco ao `<body>`, e nada
+// foca nada na tela que entra. As três consequências foram medidas com gente
+// usando: quem abre a chamada pelo teclado cai no começo do documento e tabula
+// até o botão de volta; quem volta não recebe o botão que apertou; e um leitor
+// de tela não anuncia mudança nenhuma, porque do ponto de vista dele nada
+// aconteceu. É WCAG 2.4.3 — a ordem do foco tem que preservar sentido.
+//
+// Três funções fecham isso, e as telas as chamam em volta do `hidden` que já
+// escreviam. Nenhuma delas decide qual é a tela seguinte: isso continua sendo
+// da tela que troca, e é a única coisa que ela sabe e este arquivo não.
+
+/**
+ * Onde o foco estava quando cada tela saiu de cena.
+ *
+ * Chaveado pela tela **deixada**, porque é isso que a volta pergunta: o que
+ * estava focado da última vez que esta tela esteve na frente? Guarda o
+ * elemento e não um `id` de propósito — metade dos controles desta janela é
+ * desenhada pelo JavaScript e não tem `id` nenhum, e o botão de um Cage é
+ * reconstruído a cada snapshot.
+ */
+const focoDeVolta = new Map();
+
+/**
+ * Se dá para pôr o foco nisto agora.
+ *
+ * `focus()` num elemento escondido não faz nada e não avisa: o foco fica onde
+ * estava, que depois de um `hidden` é o `<body>` — exatamente a falha que estas
+ * funções existem para consertar, reintroduzida por dentro. Daí a conferência
+ * antes, e não um `try`.
+ *
+ * `getClientRects()` vazio é uma resposta só para os três casos que a volta
+ * encontra: escondido, arrancado da árvore no redesenho, e dentro de uma tela
+ * que ainda não apareceu.
+ */
+function focavel(alvo) {
+  return (
+    Boolean(alvo) &&
+    alvo.isConnected &&
+    !alvo.disabled &&
+    alvo.getClientRects().length > 0
+  );
+}
+
+/**
+ * Diz, para quem não vê, que a tela mudou.
+ *
+ * Um `role="status"` fora das telas, escrito **depois** de a troca acontecer.
+ * Zerar antes não é higiene: uma região viva anuncia o que mudou nela, e
+ * escrever a mesma frase por cima dela mesma não é mudança — sem isto, a
+ * segunda visita seguida à mesma tela seria silenciosa, que é justo o caso de
+ * quem abre e fecha a configuração para conferir uma coisa.
+ */
+function anunciar(frase) {
+  const alvo = $("anuncio");
+  alvo.textContent = "";
+  // Num quadro à parte: zerar e escrever na mesma volta do laço de eventos é
+  // uma mudança só, e o leitor de tela só vê o resultado dela.
+  requestAnimationFrame(() => {
+    alvo.textContent = frase;
+  });
+}
+
+/**
+ * Lembra o foco de uma tela, antes de escondê-la.
+ *
+ * Chamada com a tela ainda visível, ou não há foco nenhum para guardar.
+ */
+function guardarFoco(tela) {
+  const raiz = $(tela);
+  const ativo = document.activeElement;
+  if (ativo && ativo !== document.body && raiz.contains(ativo)) {
+    focoDeVolta.set(tela, ativo);
+  } else {
+    focoDeVolta.delete(tela);
+  }
+}
+
+/**
+ * Entra numa tela: põe o foco nela e anuncia a mudança.
+ *
+ * Não é o primeiro elemento. Cada tela nomeia o seu alvo em `data-foco`, ao
+ * lado de si mesma na marcação, e escolhe o que ela existe para fazer — a
+ * autenticação escolhe VERIFICAR IDENTIDADE, o fim escolhe EJETAR, a chamada
+ * escolhe a chave do microfone. Tabular até lá seria atravessar um cabeçalho
+ * inteiro para chegar na única coisa que a tela pede.
+ *
+ * Sem `data-foco` o foco vai para a própria `<section>`, que carrega
+ * `tabindex="-1"`. É o caso da operação, e é escolha e não omissão: aquela tela
+ * não tem uma ação, tem quatro colunas — e o único controle plausível ali é um
+ * campo de texto, que ligaria `digitando()` e desligaria o push-to-talk da
+ * barra de espaço no instante em que a pessoa entra no Dogma.
+ *
+ * Chamada **depois** de a tela desenhar, porque um botão ainda desabilitado
+ * não aceita foco; `focavel` cobre o resto e cai na `<section>`.
+ */
+function abrirTela(tela, frase) {
+  const raiz = $(tela);
+  const preferido = raiz.dataset.foco ? $(raiz.dataset.foco) : null;
+  (focavel(preferido) ? preferido : raiz).focus();
+  anunciar(frase ?? raiz.dataset.anuncio ?? "");
+}
+
+/**
+ * Volta para uma tela, devolvendo o foco a quem saiu dela.
+ *
+ * A outra metade de `guardarFoco`: quem apertou CHAMADA no cabeçalho recebe o
+ * CHAMADA de volta ao fechar, e não o começo do documento. Sem o que guardar —
+ * primeira visita, ou um controle que o redesenho arrancou — a tela é aberta
+ * como qualquer outra.
+ */
+function voltarParaTela(tela) {
+  const guardado = focoDeVolta.get(tela);
+  focoDeVolta.delete(tela);
+  if (!focavel(guardado)) {
+    abrirTela(tela);
+    return;
+  }
+  guardado.focus();
+  anunciar($(tela).dataset.anuncio ?? "");
+}
+
 // ------------------------------------------------------- legendas simples
 
 /**

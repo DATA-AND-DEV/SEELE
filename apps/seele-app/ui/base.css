@@ -47,6 +47,50 @@ body { overflow: hidden; }
 .tela { height: 100vh; display: flex; flex-direction: column; }
 [hidden] { display: none !important; }
 
+/* ---------- a tela que acabou de entrar ----------
+
+   Toda `.tela` carrega `tabindex="-1"` e recebe o foco quando ela não nomeia um
+   controle melhor em `data-foco` — é como o teclado atravessa uma troca de tela
+   sem cair no `<body>`.
+
+   O anel não aparece nessa pousada: `:focus-visible` é a heurística do
+   navegador para "isto veio do teclado", e um contorno em volta da janela
+   inteira toda vez que uma tela abre é ruído, não sinal — quem trocou de tela
+   já sabe que trocou. Sob a heurística ele volta, e aí ele é a resposta a
+   "onde eu estou?" de quem só tem o teclado.
+
+   `linha-forte`, e não o osso de `.botao:focus-visible`: um anel de 100vh na
+   cor mais clara da paleta compete com a tela que ele emoldura. Este é o único
+   foco desta interface que cerca uma tela inteira em vez de um controle. */
+.tela:focus { outline: none; }
+
+.tela:focus-visible {
+  outline: 2px solid var(--seele-linha-forte);
+  outline-offset: -2px;
+}
+
+/* ---------- o que se lê e não se vê ----------
+
+   A região viva que anuncia a troca de tela. Escondida do olho e nunca da
+   árvore de acessibilidade: `display: none` e `visibility: hidden` tiram o
+   elemento das duas, e um `role="status"` invisível **daquele** jeito é um
+   `role="status"` que não anuncia nada.
+
+   Um pixel recortado é a forma que sobra. Sem `width: 0`, que em alguns
+   leitores derruba o nó junto; sem `text-indent` negativo, que arrasta a caixa
+   de rolagem da página quando o texto é longo. */
+.anuncio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .kanji { font-family: var(--seele-jp); }
 
 .rotulo {
