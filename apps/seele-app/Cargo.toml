@@ -17,19 +17,27 @@ seele-ffi = { path = "../../crates/seele-ffi" }
 seele-server = { path = "../../crates/seele-server" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
+# Não é escolha de arquitetura: `tauri::generate_context!` gera código que
+# nomeia `serde_json` sempre que o `tauri.conf.json` tem um bloco `plugins`, e
+# passou a ter quando o atualizador entrou. Era dependência só de teste — os
+# guardas de `tests/frontend.rs` continuam usando esta mesma.
+serde_json = "1.0.151"
 tauri = { version = "2", features = [] }
+# Atualização pelo próprio app. ADR 0026.
+#
+# Fixado no minor porque o plugin expõe o `reqwest` dele na API pública
+# (`configure_client`) e o próprio README avisa que a versão do reqwest muda em
+# lançamentos menores. `rustls-tls` é o padrão e é o que queremos: a alternativa
+# arrastaria OpenSSL para uma árvore que o `deny.toml` já diz que não o quer.
+tauri-plugin-updater = { version = "2.10", default-features = false, features = [
+    "rustls-tls",
+    "zip",
+] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
-
-# Só para os guardas de `tests/frontend.rs`: o frontend ramifica no *texto* que
-# um `Event` vira na ponte, e comparar com o texto de verdade é a única forma de
-# uma variante renomeada quebrar a compilação em vez de virar um ramo morto.
-# Mesma versão que o `seele-server` já traz para a árvore.
-[dev-dependencies]
-serde_json = "1.0.151"
 
 [lints]
 workspace = true

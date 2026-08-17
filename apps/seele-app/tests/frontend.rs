@@ -181,7 +181,18 @@ fn every_command_the_frontend_calls_is_registered() {
 ///
 /// They stay here rather than being deleted, because deleting them would take
 /// the verbs down with the only thing that remembers they exist.
-const AGUARDANDO_TELA: &[&str] = &["renomear_cage", "renomear_linha"];
+///
+/// `procurar_atualizacao` / `instalar_atualizacao` are the two halves of the
+/// in-app update (ADR 0026). The Rust side is finished; the screen is not, and
+/// it is not a button that can be drawn casually — `instalar_atualizacao`
+/// closes and reopens SEELE, so whoever draws it has a warning to write first,
+/// and a progress bar to feed off the `seele://atualizacao` channel.
+const AGUARDANDO_TELA: &[&str] = &[
+    "renomear_cage",
+    "renomear_linha",
+    "procurar_atualizacao",
+    "instalar_atualizacao",
+];
 
 #[test]
 fn no_command_is_registered_and_never_called() {
