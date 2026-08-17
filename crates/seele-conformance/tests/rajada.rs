@@ -13,9 +13,9 @@
 //! daí em diante o servidor lê corpo como se fosse tamanho.
 //!
 //! **Isto é a hipótese, e este teste não a confirma.** Ele passa nesta máquina
-//! com a correção *e sem ela*: sabotei a sessão de volta para a leitura direta
+//! com a correção *e sem ela*: a sessão sabotada de volta para a leitura direta
 //! dentro do `select!` e as dez mensagens continuaram chegando. Ou seja, não
-//! reproduzi aqui o sintoma que a pendência registra — o que também quer dizer
+//! reproduz aqui o sintoma que a pendência registra — o que também quer dizer
 //! que o cancelamento continua sem ser descartado nem confirmado como a causa
 //! dela.
 //!
@@ -25,7 +25,25 @@
 //!
 //! O mecanismo do cancelamento, esse sim, está provado em
 //! `crates/seele-core/src/frame.rs`, e a regra que impede a volta está em
-//! `tests/cancelamento.rs`.
+//! `tests/cancelamento.rs`. A **outra** metade da pendência — a que reproduz,
+//! reprova sem conserto e destrói entrega de verdade — está em
+//! `crates/seele-server/tests/par_lento.rs`: um par que para de ler.
+//!
+//! # O que este teste passou a medir, além de contar
+//!
+//! Verde aqui nunca provou nada, porque já era verde antes. Então ele deixou de
+//! olhar só uma perna do caminho:
+//!
+//! **As duas pernas, separadas.** Mensagem que nunca entrou e mensagem que
+//! entrou e não saiu não têm nada em comum além do sintoma, e contar só o que
+//! chegou não distingue as duas. Agora se pergunta ao Dogma quantas ele gravou.
+//!
+//! **A primeira suspeita da pendência, em número.** Ela era "a janela de
+//! controle de fluxo do QUIC no começo da conexão". A janela de fluxo por
+//! stream do quinn abre em 1,25 MB; dez corpos de 3,9 KB são 39 KB, uma ordem e
+//! meia de grandeza abaixo. A asserção de que nenhum dos dois lados nunca disse
+//! `STREAM_DATA_BLOCKED` é essa suspeita morrendo com uma medida em vez de com
+//! um argumento — e é o alarme para quem um dia encolher a janela.
 
 #![allow(clippy::expect_used, reason = "num teste, o pânico é o relatório")]
 
@@ -119,6 +137,28 @@ async fn uma_rajada_de_mensagens_grandes_chega_inteira() -> Result<()> {
     assert_eq!(
         chegaram, QUANTAS,
         "pendência nº 1: a rajada perdeu entrega de novo"
+    );
+
+    // A outra perna. Se um dia isto e a linha acima discordarem, a discordância
+    // é o diagnóstico: menos aqui é mensagem que o Dogma nunca aceitou, menos
+    // ali é mensagem que ele aceitou e não entregou.
+    assert_eq!(
+        server.quantas_mensagens(LineId(LINE)).await?,
+        QUANTAS as u64,
+        "pendência nº 1: a rajada não chegou nem a ser gravada"
+    );
+
+    // E o barramento não passou à frente de ninguém: nenhuma sessão ficou com
+    // um buraco calado, que é o defeito de `seele-server/tests/par_lento.rs`.
+    assert_eq!(server.dogma().atrasos.eventos(), 0);
+
+    // A primeira suspeita da pendência, medida. Trinta e nove kilobytes contra
+    // uma janela de 1,25 MB: nunca houve bloqueio, em nenhum dos dois sentidos.
+    let fluxo = ouvinte.flow_control();
+    assert_eq!(
+        fluxo,
+        seele_core::FlowControl::default(),
+        "o controle de fluxo entrou na história desta rajada: {fluxo:?}"
     );
 
     server.shutdown();

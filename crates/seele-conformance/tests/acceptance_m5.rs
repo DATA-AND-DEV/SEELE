@@ -338,10 +338,16 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
     // caminho todo (lote, transação, difusão) leva centenas de milissegundos.
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline && room.messages.is_empty() {
-        if let Ok(Ok(message)) =
-            tokio::time::timeout(Duration::from_millis(500), terminal.next_event()).await
-        {
-            room.apply(&message);
+        match tokio::time::timeout(Duration::from_millis(500), terminal.next_event()).await {
+            Ok(Ok(message)) => {
+                room.apply(&message);
+            }
+            // O enlace caiu: é informação, e engoli-la — que era o que este
+            // `if let Ok(Ok(_))` fazia — troca a causa real por um prazo
+            // esgotado dizendo outra coisa. `docs/pendencias.md` #1 aponta este
+            // padrão como um dos motivos de ela ter ficado sem diagnóstico.
+            Ok(Err(erro)) => panic!("o enlace caiu antes da confirmação: {erro}"),
+            Err(_) => {}
         }
     }
     assert_eq!(room.messages.len(), 1, "a mensagem não foi confirmada");

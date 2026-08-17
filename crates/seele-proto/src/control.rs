@@ -328,6 +328,26 @@ pub enum DisconnectReason {
     ProtocolViolation,
     /// The client exceeded its frame budget. `specs/04-servidor-seele.md`.
     RateLimited,
+
+    /// This connection fell so far behind the Dogma's events that some were lost.
+    ///
+    /// The bus a Dogma broadcasts on is a fixed ring. A connection that stops
+    /// draining it — because the peer stopped reading and the writes back to it
+    /// blocked — eventually falls off the back, and the events that scrolled
+    /// past **no longer exist** for that session. Committed messages are among
+    /// them.
+    ///
+    /// Ending the session is the cure rather than the punishment. The hole
+    /// cannot be patched in place: events are not addressable, so the server
+    /// cannot say which ones were missed, and the client cannot ask for them.
+    /// What it *can* do is reconnect and fetch history, which is a path that
+    /// already exists and is already exercised — and which is exactly what the
+    /// internal battery does on its own. `docs/pendencias.md` #1 is what
+    /// happened while this was silent instead: the pilot stayed connected with
+    /// a gap in the conversation that neither end could name.
+    ///
+    /// Appended last, for the reason [`AlertReason::RateLimited`] gives.
+    FellBehind,
 }
 
 /// How loud an alert is.

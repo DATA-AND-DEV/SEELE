@@ -37,7 +37,7 @@ pub mod tofu;
 pub mod voice;
 
 pub use battery::{Battery, Link};
-pub use client::{Client, ConnectError, MediaChannel, Pattern, SessionInfo};
+pub use client::{Client, ConnectError, FlowControl, MediaChannel, Pattern, SessionInfo};
 pub use ed25519_dalek::SigningKey;
 pub use identity::FilePinStore;
 pub use state::{CageSync, Changed, Ended, Message, Notice, Pilot, Room};

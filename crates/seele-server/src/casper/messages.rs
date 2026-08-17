@@ -255,6 +255,26 @@ impl<'a> Messages<'a> {
         Ok(rows.filter_map(Result::ok).collect())
     }
 
+    /// How many messages a Line holds, removed ones excluded.
+    ///
+    /// Not a page: [`Self::history`] is capped at [`MAX_PAGE`], because a client
+    /// scrolls and a screen holds a screenful. The question "how many are there"
+    /// has no page in it, and answering it by counting the rows of a capped page
+    /// gives the cap back as if it were the answer — which is how a test that
+    /// checks nothing at all comes to look green.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a database error.
+    pub fn count(&self, line: LineId) -> Result<u64> {
+        let total: i64 = self.casper.connection().query_row(
+            "SELECT COUNT(*) FROM messages WHERE line_id = ?1 AND deleted_at IS NULL",
+            params![i64::from(line.get())],
+            |row| row.get(0),
+        )?;
+        Ok(total.unsigned_abs())
+    }
+
     /// Rewrites a message's body.
     ///
     /// # Errors

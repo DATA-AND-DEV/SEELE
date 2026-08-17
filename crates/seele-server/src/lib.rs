@@ -213,6 +213,7 @@ impl Server {
             slots: Arc::new(tokio::sync::Mutex::new(dogma::Slots::default())),
             occupancy: Arc::new(tokio::sync::Mutex::new(dogma::Occupancy::default())),
             portaria: Arc::new(tokio::sync::Mutex::new(taxa::Portaria::nova())),
+            atrasos: Arc::new(dogma::Atrasos::default()),
         });
 
         // Held seats have to be released even if nobody reconnects, or a Dogma
@@ -341,6 +342,57 @@ impl Server {
     #[must_use]
     pub fn dogma(&self) -> &Arc<dogma::Dogma> {
         &self.dogma
+    }
+
+    /// How many messages CASPER holds on a Line.
+    ///
+    /// The counterpart of [`Self::mensagens_da_linha`], and the one that answers
+    /// "did anything get lost": a page is capped, a count is not. See
+    /// [`casper::messages::Messages::count`].
+    ///
+    /// # Errors
+    ///
+    /// Fails if the database is busy or does not answer.
+    pub async fn quantas_mensagens(&self, line: seele_proto::ids::LineId) -> Result<u64> {
+        let mut guard = self.dogma.casper.lock().await;
+        casper::messages::Messages::new(&mut guard).count(line)
+    }
+
+    /// What CASPER actually recorded on a Line, newest first.
+    ///
+    /// One page, capped at [`casper::messages::MAX_PAGE`] like every other
+    /// reader of history — [`Self::quantas_mensagens`] is what counts.
+    ///
+    /// # Why this exists, and why it is not `Casper::connection()`
+    ///
+    /// `docs/pendencias.md` #1 is a delivery bug, and a delivery bug has two
+    /// legs: what the Dogma **took in** and what it **handed out**. Measuring
+    /// only the second leg cannot tell a message that was never stored from one
+    /// that was stored and never sent, and those two have nothing in common but
+    /// the symptom. So a test needs to see the first leg.
+    ///
+    /// The pendência recorded the obstacle as `Casper::connection()` being
+    /// `pub(crate)`. Making it public would have worked and would have been the
+    /// wrong trade: it hands out a `rusqlite::Connection`, and from that moment
+    /// the schema is the contract. A test that writes its own `SELECT` goes on
+    /// passing after a migration renames a column and starts asserting about a
+    /// table nobody meant it to know.
+    ///
+    /// This asks the question instead of the storage: *what is on this Line?*
+    /// It goes through [`casper::messages::Messages`] — the same reader the
+    /// session uses for `FetchHistory` — so a test and a client see the same
+    /// answer by construction, and the schema stays behind the crate wall.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the database is busy or does not answer.
+    pub async fn mensagens_da_linha(
+        &self,
+        line: seele_proto::ids::LineId,
+        limite: u16,
+    ) -> Result<Vec<casper::messages::StoredMessage>> {
+        let mut guard = self.dogma.casper.lock().await;
+        casper::messages::Messages::new(&mut guard).history(line, None, limite)
     }
 
     /// Stops accepting and closes the endpoint.
