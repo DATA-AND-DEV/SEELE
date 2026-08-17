@@ -111,11 +111,33 @@ largada se não achar, em vez de deixar você descobrir depois do Opus.
 
 ## 2 · Compilar
 
+**Clone perto da raiz do disco.** `C:\SEELE` serve; `C:\Users\voce\Downloads\SEELE`
+não.
+
+O Windows corta caminho em 260 caracteres por padrão, e a árvore de dependências
+do Tauri é funda: `target\release\build\<crate>-<hash>\out\...` some com uns
+cento e poucos sozinho. Passar do limite **não** dá um erro sobre caminho — dá
+este, que aponta para o lugar errado:
+
+```
+error[E0463]: can't find crate for `tauri`
+```
+
+O crate está no `Cargo.lock`, é dependência comum e sem condicional de
+plataforma, e a mensagem faz procurar em tudo isso antes de desconfiar da pasta.
+Foi encontrado assim: a mesma árvore compilava no macOS e falhava aqui, e mover
+de `Downloads` para `C:\SEELE` resolveu sem mais nada.
+
+Quem quiser manter caminhos longos pode ligar o suporte a eles no Windows 10
+1607+ (`LongPathsEnabled` na política de sistema de arquivos), mas nem toda
+ferramenta da cadeia o respeita. Clonar perto da raiz é a resposta que não
+depende disso.
+
 Nos dois PCs:
 
 ```powershell
-git clone <url-do-repo> SEELE
-cd SEELE
+git clone <url-do-repo> C:\SEELE
+cd C:\SEELE
 cargo build --release --bin seeled --bin plug
 ```
 

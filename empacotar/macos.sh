@@ -79,12 +79,22 @@ echo "→ empacotando o .dmg"
 
 DESTINO=entrega
 mkdir -p "$DESTINO"
-encontrados=$(find target -type f -name '*.dmg' -newer "$CONFIG.original" 2>/dev/null | wc -l | tr -d ' ')
-if [ "$encontrados" = "0" ]; then
-    echo "nenhum .dmg novo apareceu; veja target/release/bundle" >&2
+# Filtrado pela versão, e não por horário de modificação.
+#
+# O `-newer` funcionava e funcionava por sorte: ele responde «apareceu depois
+# que comecei», que é quase sempre a mesma coisa que «é o desta execução» e não
+# é a mesma pergunta. O `target/bundle` acumula versões, e o irmão deste script
+# no Windows reprovou exatamente assim — dois instaladores lado a lado, um de
+# cada versão. A versão está no nome do arquivo; é a resposta direta.
+padrao="*_${VERSAO}_*.dmg"
+encontrados=$(find target -type f -name "$padrao" | wc -l | tr -d ' ')
+if [ "$encontrados" != "1" ]; then
+    echo "esperava exatamente um .dmg de $VERSAO e achei $encontrados." >&2
+    echo "Procurei por «$padrao» em target/." >&2
+    find target -type f -name "$padrao" >&2
     exit 1
 fi
-find target -type f -name '*.dmg' -newer "$CONFIG.original" -exec cp {} "$DESTINO/" \;
+find target -type f -name "$padrao" -exec cp {} "$DESTINO/" \;
 
 tar -czf "$DESTINO/seele-cli-$VERSAO-macos.tar.gz" -C "target/$ALVO/release" seeled plug
 

@@ -202,9 +202,25 @@ try {
     $Destino = "entrega"
     New-Item -ItemType Directory -Force -Path $Destino | Out-Null
 
-    $instaladores = @(Get-ChildItem -Path "target\release\bundle" -Recurse -Filter "*-setup.exe")
+    # Filtrado pela versão desta execução, e não «qualquer coisa que termine em
+    # -setup.exe».
+    #
+    # O `target\bundle` acumula: empacotar 0.4.2 depois de 0.4.0 deixa os dois
+    # lado a lado, e a conferência de «exatamente um» reprovava com os dois
+    # presentes. Ela estava certa em recusar ambiguidade e errada em não saber
+    # desfazê-la — a versão está no nome do arquivo, e é a resposta.
+    #
+    # Apagar o diretório antes seria a outra saída, e é pior: o instalador
+    # anterior é de alguém, e um script de empacotamento que apaga entrega
+    # passada é um que apaga a entrega que você ainda não subiu.
+    $padrao = "*_${Versao}_*-setup.exe"
+    $instaladores = @(Get-ChildItem -Path "target\release\bundle" -Recurse -Filter $padrao)
     if ($instaladores.Count -ne 1) {
-        throw "esperava exatamente um instalador e achei $($instaladores.Count). Veja target\release\bundle."
+        throw @"
+esperava exatamente um instalador de $Versao e achei $($instaladores.Count).
+Procurei por «$padrao» em target\release\bundle.
+$(if ($instaladores.Count -eq 0) { 'Nenhum: o empacotamento disse que deu certo mas não deixou arquivo com esta versão.' } else { 'Mais de um: ' + ($instaladores.FullName -join ', ') })
+"@
     }
     Copy-Item $instaladores[0].FullName $Destino -Force
 
