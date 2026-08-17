@@ -257,15 +257,28 @@
    um teste entre duas máquinas — «um controle que só existe no hover é um
    controle escondido»: fora do caminho de quem usa teclado, invisível em toque,
    e desconhecido de quem nunca passou o mouse ali por acaso. Um controle que
-   encerra a sessão de alguém não é lugar de repetir esse erro. */
+   encerra a sessão de alguém não é lugar de repetir esse erro.
+
+   ---- por que os dois são desenhados em `osso`, e não no apagado ----
+
+   A linha em volta deles é `osso-apagado`, que é a cor do que é secundário
+   naquela coluna, e a primeira versão destes dois seguiu a vizinhança.
+   `docs/tokens-achados.md` mede o `osso-apagado` em 4,11:1 e é explícito sobre
+   a saída: subir a cor **ou** garantir que nada necessário dependa só dela. O
+   rótulo de um controle é necessário por definição — é ele que diz o que o
+   botão faz —, e o mesmo argumento já tirou a camada de dicas daquele token em
+   `base.css`. A hierarquia contra o texto ao lado vem do tamanho e da forma:
+   contorno sem preenchimento, caixa alta curta, e nenhum peso. */
 
 .moderar-porta {
   margin-left: auto;
+  flex: 0 0 auto;
   font: inherit;
-  font-size: 9px;
-  letter-spacing: 0.14em;
+  font-size: var(--seele-t-rotulo);
+  line-height: 1.2;
+  letter-spacing: 0.1em;
   padding: 0 4px;
-  color: var(--seele-osso-apagado);
+  color: var(--seele-osso);
   background: none;
   border: var(--seele-b) solid var(--seele-linha-forte);
   cursor: pointer;
@@ -275,9 +288,10 @@
 .moderar-porta:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 1px; }
 
 .moderar-remover {
+  margin-left: auto;
   font: inherit;
   font-size: 11px;
-  color: var(--seele-osso-apagado);
+  color: var(--seele-osso);
   background: none;
   border: 0;
   padding: 0;
@@ -285,5 +299,5 @@
   text-decoration: underline;
 }
 
-.moderar-remover:hover { color: var(--seele-osso); }
+.moderar-remover:hover { color: var(--seele-laranja-nerv); }
 .moderar-remover:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }

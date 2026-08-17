@@ -70,6 +70,17 @@ let caixaComEscolha = false;
 /** Onde cada piloto está, por id, para as frases de consequência. */
 const ondeEstaOPiloto = new Map();
 
+/**
+ * As salas do Dogma, como estavam quando a caixa abriu.
+ *
+ * Guardadas porque o destino de uma mudança depende de **quem** está escolhido:
+ * a jaula em que a pessoa já está não é destino nenhum, e quem está escolhido
+ * muda sem a caixa fechar. Uma cópia do instante da abertura e não uma leitura
+ * a cada quadro — a lista por baixo é redesenhada duas vezes por segundo, e
+ * refazer as opções nesse ritmo apagaria a escolha de quem está escolhendo.
+ */
+let salasDoDogma = [];
+
 /** Quantos dias vale cada opção de banimento. Vazio é para sempre. */
 const SEGUNDOS_POR_DIA = 86400;
 
@@ -168,13 +179,18 @@ function atualizarPortaDoAlerta(snapshot) {
  */
 function desenharModeracao(snapshot) {
   ondeEstaOPiloto.clear();
+  salasDoDogma = snapshot.cages;
 
   const quem = $("moderar-quem");
   const opcoes = [];
   for (const cage of snapshot.cages) {
     for (const piloto of cage.pilots) {
       if (piloto.is_self) continue;
-      ondeEstaOPiloto.set(String(piloto.id), { nome: piloto.nickname, cage: cage.name });
+      ondeEstaOPiloto.set(String(piloto.id), {
+        nome: piloto.nickname,
+        cage: cage.name,
+        cageId: cage.id,
+      });
       const opcao = elemento("option", null, `${piloto.nickname} — ${cage.name}`);
       opcao.value = String(piloto.id);
       opcoes.push(opcao);
@@ -200,17 +216,30 @@ function desenharModeracao(snapshot) {
   // banir, e quem só move não vê nenhum dos dois.
   $("moderar-acao-expulsar").hidden = !snapshot.may_kick;
   $("moderar-acao-banir").hidden = !snapshot.may_ban;
-  $("moderar-acao-mover").hidden = !snapshot.may_move_pilot;
+  // Mover some também quando não há para onde: um Dogma de uma jaula só não
+  // tem destino, e um controle cujo objeto não existe é ruído, não lacuna.
+  $("moderar-acao-mover").hidden = !snapshot.may_move_pilot || desenharDestinos() === 0;
+}
 
-  const para = $("moderar-para");
+/**
+ * As jaulas para onde dá para mover quem está escolhido, e quantas são.
+ *
+ * A jaula em que a pessoa já está fica de fora: mover alguém para onde ela já
+ * está não faz nada, e uma opção que não faz nada é uma opção que alguém vai
+ * escolher — e depois vai perguntar por que não aconteceu nada.
+ */
+function desenharDestinos() {
+  const escolhido = ondeEstaOPiloto.get($("moderar-quem").value);
+  const destinos = salasDoDogma.filter((cage) => cage.id !== escolhido?.cageId);
   repovoar(
-    para,
-    snapshot.cages.map((cage) => {
+    $("moderar-para"),
+    destinos.map((cage) => {
       const opcao = elemento("option", null, `${cage.name} — ${cage.pilots.length}/${cage.limit}`);
       opcao.value = String(cage.id);
       return opcao;
     }),
   );
+  return destinos.length;
 }
 
 /** Quem está escolhido agora, com o nome e a sala em que está. */
@@ -481,6 +510,10 @@ $("moderar-mover").addEventListener("click", () => {
     invoke("mover_piloto", { pilot: quem.id, cage: Number(para.value) }),
   );
 });
+
+// Trocar de pessoa refaz os destinos: a jaula em que ela está não é destino, e
+// quem está escolhido muda sem a caixa fechar.
+$("moderar-quem").addEventListener("change", desenharDestinos);
 
 $("moderar-cancelar").addEventListener("click", desarmarAto);
 $("moderar-fechar").addEventListener("click", fecharModeracao);
