@@ -57,6 +57,12 @@ pub fn disconnect(reason: DisconnectReason) -> &'static str {
         DisconnectReason::Timeout => "ENLACE PERDIDO",
         DisconnectReason::ProtocolViolation => "PROTOCOLO VIOLADO",
         DisconnectReason::RateLimited => "LIMITE DE MENSAGENS EXCEDIDO",
+        // Diz o que houve com a conversa, e não o que houve com o barramento.
+        // Quem lê isto quer saber se perdeu alguma coisa: perdeu, e voltar é o
+        // que a traz de volta.
+        DisconnectReason::FellBehind => {
+            "ESTE ENLACE FICOU PARA TRÁS; RECONECTANDO PARA NÃO FALTAR MENSAGEM"
+        }
     }
 }
 
@@ -72,7 +78,11 @@ pub fn worth_retrying(reason: DisconnectReason) -> bool {
         | DisconnectReason::ScheduledMaintenance
         | DisconnectReason::ServerShuttingDown
         | DisconnectReason::DogmaFull
-        | DisconnectReason::HandshakeTimeout => true,
+        | DisconnectReason::HandshakeTimeout
+        // Reconectar **é** o conserto aqui: a sessão perdeu evento e só uma
+        // sincronização inteira a repõe. Tratar isto como recusa deixaria o
+        // piloto de fora justamente do caso em que voltar resolve.
+        | DisconnectReason::FellBehind => true,
 
         DisconnectReason::Banned
         | DisconnectReason::Kicked
@@ -99,7 +109,7 @@ mod tests {
         AlertReason::MovedByOperator,
     ];
 
-    const DISCONNECTS: [DisconnectReason; 11] = [
+    const DISCONNECTS: [DisconnectReason; 12] = [
         DisconnectReason::Incompatible,
         DisconnectReason::CredentialRejected,
         DisconnectReason::HandshakeTimeout,
@@ -111,6 +121,7 @@ mod tests {
         DisconnectReason::Timeout,
         DisconnectReason::ProtocolViolation,
         DisconnectReason::RateLimited,
+        DisconnectReason::FellBehind,
     ];
 
     #[test]

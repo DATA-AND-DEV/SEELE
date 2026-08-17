@@ -38,7 +38,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use ed25519_dalek::{Signer, SigningKey};
-use seele_proto::control::{ClientMessage, ServerMessage};
+use seele_proto::control::{ClientMessage, DisconnectReason, ServerMessage};
 use seele_proto::ids::{ClientMessageId, LineId};
 use seele_server::casper::Location;
 use seele_server::{frame, DogmaConfig, Server};
@@ -282,13 +282,25 @@ async fn o_dogma_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Result
          desligado {desligado:?}"
     );
 
-    // O que ninguém pode aceitar: o par volta a ler, segue conectado, e falta
-    // conversa no meio sem uma palavra de nenhum dos dois lados.
+    // Uma das duas, e nunca a terceira: ou chegou tudo, ou o Dogma disse, com
+    // esse nome, que ficou faltando. O que ninguém pode aceitar é o par voltar
+    // a ler, seguir conectado, e faltar conversa no meio sem uma palavra de
+    // nenhum dos dois lados.
     assert!(
-        chegaram == ditas || desligado.is_some(),
+        chegaram == ditas || desligado == Some(DisconnectReason::FellBehind),
         "pendência nº 1: {chegaram} de {ditas} chegaram e o Dogma não disse nada — \
          {perdidos} eventos morreram no barramento"
     );
+
+    // E o que houve ficou contado. Desligamento sem número por trás seria a
+    // mesma cegueira com outra roupa: ninguém sabe se aconteceu uma vez ou mil.
+    if desligado.is_some() {
+        assert!(
+            perdidos > 0,
+            "a sessão foi encerrada por ter ficado para trás e o contador marcou zero"
+        );
+        assert!(servidor.dogma().atrasos.sessoes() > 0);
+    }
 
     // O que se perdeu foi a **entrega**, e não a mensagem: tudo o que os
     // falantes disseram está em CASPER, que é o que faz de reconectar um

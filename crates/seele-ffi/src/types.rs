@@ -177,6 +177,11 @@ pub enum EndReason {
     ProtocolViolation,
     /// The client exceeded its frame budget.
     RateLimited,
+    /// This connection fell behind the Dogma's events and lost some.
+    ///
+    /// Reconnecting is the repair, not a refusal: the session's view of the
+    /// conversation has a hole in it that only a full resync fills.
+    FellBehind,
     /// The link died without the server saying why.
     LinkLost,
 }
@@ -195,6 +200,7 @@ impl From<seele_core::DisconnectReason> for EndReason {
             seele_core::DisconnectReason::Timeout => Self::Timeout,
             seele_core::DisconnectReason::ProtocolViolation => Self::ProtocolViolation,
             seele_core::DisconnectReason::RateLimited => Self::RateLimited,
+            seele_core::DisconnectReason::FellBehind => Self::FellBehind,
         }
     }
 }
@@ -732,6 +738,7 @@ mod tests {
             seele_core::DisconnectReason::Timeout,
             seele_core::DisconnectReason::ProtocolViolation,
             seele_core::DisconnectReason::RateLimited,
+            seele_core::DisconnectReason::FellBehind,
         ];
         let mapped: std::collections::HashSet<EndReason> =
             all.into_iter().map(EndReason::from).collect();

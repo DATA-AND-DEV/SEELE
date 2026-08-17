@@ -1086,7 +1086,57 @@ async fn run_session(
             }
 
             event = events.recv() => {
-                let Ok(event) = event else { continue };
+                let event = match event {
+                    Ok(event) => event,
+                    // O barramento passou à frente desta sessão.
+                    //
+                    // Acontece quando as escritas para este par bloqueiam — o
+                    // par parou de ler, a janela do QUIC fechou — e enquanto
+                    // elas estão bloqueadas ninguém tira evento do barramento.
+                    // Passado o anel, o `broadcast` descarta o mais antigo:
+                    // `quantos` eventos que existiram e não existem mais **para
+                    // esta conexão**, mensagens já gravadas em CASPER entre
+                    // eles.
+                    //
+                    // Aqui havia um `let Ok(event) = event else { continue }`, e
+                    // era a pendência nº 1 inteira: a sessão seguia, calada, com
+                    // um buraco permanente no que aquele piloto vê. Ninguém dos
+                    // dois lados ficava sabendo, e não havia número nenhum para
+                    // olhar depois.
+                    //
+                    // Encerrar é o conserto, e não o castigo. O buraco não tem
+                    // remendo no lugar: evento não tem endereço, então o Dogma
+                    // não sabe dizer quais faltaram e o cliente não sabe pedir.
+                    // Reconectar e buscar histórico, sim — é caminho que já
+                    // existe, já testado, e é o que a bateria interna faz
+                    // sozinha. O assento fica reservado pela janela de graça
+                    // como em qualquer queda, então voltar não custa o lugar.
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(quantos)) => {
+                        dogma.atrasos.registrar(quantos);
+                        tracing::warn!(
+                            pilot = %session.pilot,
+                            quantos,
+                            "o barramento passou à frente desta sessão; encerrando para ela ressincronizar"
+                        );
+                        // Com prazo, ao contrário das outras despedidas: este é
+                        // o caminho de um par que parou de ler, e escrever para
+                        // quem não lê não termina nunca. Sem o prazo, o conserto
+                        // trocaria uma sessão com buraco por uma sessão presa.
+                        let _ = tokio::time::timeout(
+                            Duration::from_secs(1),
+                            frame::write(&mut send, &ServerMessage::Disconnecting {
+                                reason: DisconnectReason::FellBehind,
+                            }),
+                        ).await;
+                        let _ = send.finish();
+                        despedir(&connection, &mut send, b"fell behind").await;
+                        break;
+                    }
+                    // O barramento fechou: o Dogma está indo embora. Era um
+                    // `continue`, que num canal fechado é um laço quente para
+                    // sempre — `recv` volta na hora, com o mesmo erro.
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                };
 
                 // Two events are aimed at **this** connection rather than
                 // forwarded by it. They are on the same bus as everything else
@@ -1209,6 +1259,23 @@ async fn run_session(
             recusados,
             "o transporte recusou quadros de voz para este cliente; \
              o caminho até ele não comporta o tamanho do datagrama"
+        );
+    }
+
+    // E quantas vezes o controle de fluxo prendeu esta sessão.
+    //
+    // Lido do quinn, que já conta: um `STREAM_DATA_BLOCKED` enviado por este
+    // lado quer dizer que o Dogma tinha quadro para escrever e o par não tinha
+    // deixado espaço — quer dizer, **o par parou de ler**. É a primeira
+    // suspeita de `docs/pendencias.md` #1 virada em número, e é o número que
+    // separa "a rede está ruim" de "aquele cliente travou e o Dogma ficou
+    // esperando por ele".
+    let bloqueios = connection.stats().frame_tx.stream_data_blocked;
+    if bloqueios > 0 {
+        tracing::warn!(
+            pilot = %session.pilot,
+            bloqueios,
+            "o fluxo de controle para este cliente encheu; ele parou de ler"
         );
     }
 
