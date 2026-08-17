@@ -33,6 +33,11 @@
 //! - `entregue sem repor` é o que a versão anterior deste código teria posto no
 //!   anel: se der 64%, 36% do áudio desta máquina era silêncio inventado.
 //!
+//! Ele mede duas formas: a que o laço tem hoje (espera de mídia **mais**
+//! soneca, duas esperas de temporizador por volta) e a mesma sem a soneca. A
+//! diferença entre as duas é a única alavanca real contra um temporizador
+//! grosso, porque cada espera é arredondada para cima uma vez.
+//!
 //! Rodar com:
 //! `cargo run --release --package seele-core --example cadencia`
 
@@ -52,70 +57,115 @@ const SONECA: Duration = Duration::from_millis(2);
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    println!(
-        "medindo {} s da volta do laço de voz ({} ms de espera de mídia + {} ms de soneca)\n",
-        DURACAO.as_secs(),
-        ESPERA_DE_MIDIA.as_millis(),
-        SONECA.as_millis()
-    );
+    let com_soneca = medir(Some(SONECA)).await;
+    let sem_soneca = medir(None).await;
 
+    relatar(
+        "COMO O LAÇO É HOJE — espera de mídia mais soneca, duas esperas por volta",
+        &com_soneca,
+    );
+    println!();
+    relatar(
+        "SE A SONECA SAIR — só a espera de mídia, uma espera por volta",
+        &sem_soneca,
+    );
+    println!();
+    println!(
+        "A soneca custa {:.2} ms de volta no p50 e {:.2} ms no pior caso, e a volta \n\
+         é feita de esperas de temporizador: onde o temporizador do sistema for \n\
+         grosso, cada uma delas é arredondada para cima antes de somar.",
+        com_soneca.p50 - sem_soneca.p50,
+        com_soneca.pior - sem_soneca.pior
+    );
+}
+
+/// O que uma corrida mediu.
+struct Medida {
+    voltas: usize,
+    p50: f64,
+    p99: f64,
+    pior: f64,
+    metrics: seele_audio::playout::PlayoutMetrics,
+    /// Quadros que a forma antiga — um por conferida — teria produzido.
+    sem_repor: u64,
+}
+
+/// Dá voltas com a forma do laço de voz e mede quanto cada uma durou.
+///
+/// `soneca` é a soneca do fim da volta; `None` é a mesma volta sem ela, que é a
+/// única alavanca real contra um temporizador grosso — cada espera é arredondada
+/// para cima uma vez, então duas esperas custam dois arredondamentos.
+async fn medir(soneca: Option<Duration>) -> Medida {
     let inicio = Instant::now();
     let mut relogio = PlayoutClock::new(inicio, FRAME_MS);
-    let mut voltas: Vec<f64> = Vec::with_capacity(4096);
+    let mut voltas: Vec<f64> = Vec::with_capacity(16_384);
     let mut sem_repor = 0_u64;
     let mut anterior = inicio;
 
     while anterior.duration_since(inicio) < DURACAO {
         // A mesma forma do laço de verdade: uma espera curta por mídia que na
-        // prática expira quase sempre, e uma soneca no fim. O canal aqui nunca
-        // entrega nada, que é o caso de quem está calado — e é justamente
-        // quando o áudio dos outros tem que sair sem falhar.
+        // prática expira quase sempre. O canal aqui nunca entrega nada, que é o
+        // caso de quem está calado — e é justamente quando o áudio dos outros
+        // tem que sair sem falhar.
         let _ = tokio::time::timeout(ESPERA_DE_MIDIA, std::future::pending::<()>()).await;
 
         let agora = Instant::now();
-        let vencidos = relogio.due(agora);
-        if vencidos > 0 {
-            // O que a versão anterior teria produzido: um, nunca mais.
+        if relogio.due(agora) > 0 {
+            // O que a forma antiga teria produzido: um, nunca mais.
             sem_repor += 1;
         }
         voltas.push((agora - anterior).as_secs_f64() * 1000.0);
         anterior = agora;
 
-        tokio::time::sleep(SONECA).await;
+        if let Some(soneca) = soneca {
+            tokio::time::sleep(soneca).await;
+        }
     }
 
-    let medido = relogio.metrics();
     voltas.sort_by(f64::total_cmp);
+    Medida {
+        voltas: voltas.len(),
+        p50: percentil(&voltas, 0.50),
+        p99: percentil(&voltas, 0.99),
+        pior: percentil(&voltas, 1.0),
+        metrics: relogio.metrics(),
+        sem_repor,
+    }
+}
 
-    println!("voltas             {}", voltas.len());
-    println!("volta p50          {:.2} ms", percentil(&voltas, 0.50));
-    println!("volta p99          {:.2} ms", percentil(&voltas, 0.99));
-    println!("volta pior         {:.2} ms", percentil(&voltas, 1.0));
-    println!("quadro             {FRAME_MS} ms");
-    println!();
-    println!("atraso pior        {:.2} ms", medido.worst_lateness_ms);
-    println!("quadros devidos    {}", medido.frames_due);
-    println!("reposição          {}", medido.catchup_frames);
-    println!("reacertos          {}", medido.resyncs);
+/// Imprime uma medida, com veredito.
+fn relatar(titulo: &str, medida: &Medida) {
+    println!("{titulo}");
+    println!("  voltas             {}", medida.voltas);
+    println!("  volta p50          {:.2} ms", medida.p50);
+    println!("  volta p99          {:.2} ms", medida.p99);
+    println!("  volta pior         {:.2} ms", medida.pior);
+    println!(
+        "  atraso pior        {:.2} ms",
+        medida.metrics.worst_lateness_ms
+    );
+    println!("  quadros devidos    {}", medida.metrics.frames_due);
+    println!("  reposição          {}", medida.metrics.catchup_frames);
+    println!("  reacertos          {}", medida.metrics.resyncs);
 
-    if medido.frames_due > 0 {
-        let fracao = sem_repor as f64 / medido.frames_due as f64 * 100.0;
-        println!("entregue sem repor {fracao:.1}%");
-        println!();
-        if fracao > 99.0 {
-            println!(
-                "VEREDITO: esta máquina acompanha o relógio. A volta cabe dentro de um \
-                 quadro, então o áudio picotado que ela ouvir não nasce aqui."
-            );
-        } else {
-            println!(
-                "VEREDITO: esta máquina NÃO acompanha o relógio pela via normal. Sem \
-                 reposição ela entregaria {fracao:.1}% do áudio ao alto-falante, e os \
-                 outros {:.1}% sairiam como silêncio — audivelmente picotado, e sem \
-                 nada na rede que explicasse.",
-                100.0 - fracao
-            );
-        }
+    if medida.metrics.frames_due == 0 {
+        return;
+    }
+    let fracao = medida.sem_repor as f64 / medida.metrics.frames_due as f64 * 100.0;
+    println!("  entregue sem repor {fracao:.1}%");
+    if fracao > 99.0 {
+        println!(
+            "  VEREDITO: acompanha o relógio. A volta cabe dentro de um quadro, então o\n\
+             \x20           áudio picotado que esta máquina ouvir não nasce aqui."
+        );
+    } else {
+        println!(
+            "  VEREDITO: NÃO acompanha o relógio pela via normal. Sem reposição esta\n\
+             \x20           máquina entregaria {fracao:.1}% do áudio ao alto-falante, e os\n\
+             \x20           outros {:.1}% sairiam como silêncio — audivelmente picotado, e\n\
+             \x20           sem nada na rede que explicasse.",
+            100.0 - fracao
+        );
     }
 }
 
