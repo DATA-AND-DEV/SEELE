@@ -249,7 +249,7 @@ pub fn render(frame: &mut Frame<'_>, app: &App, theme: Theme) {
         render_help(frame, theme, area);
     } else if app.convite_visivel {
         if let Some(convite) = &app.convite {
-            render_convite(frame, theme, area, convite);
+            render_convite(frame, theme, area, convite, app.alcance.as_deref());
         }
     }
 }
@@ -259,9 +259,23 @@ pub fn render(frame: &mut Frame<'_>, app: &App, theme: Theme) {
 /// Largura inteira de propósito. O painel de mensagens tem cinquenta colunas e
 /// o link tem uns noventa; ali ele quebraria em duas linhas, e um link quebrado
 /// é um link que ninguém copia — que é a única coisa que se faz com ele.
-fn render_convite(frame: &mut Frame<'_>, theme: Theme, area: Rect, convite: &str) {
+fn render_convite(
+    frame: &mut Frame<'_>,
+    theme: Theme,
+    area: Rect,
+    convite: &str,
+    alcance: Option<&str>,
+) {
     let largura = area.width.saturating_sub(4).max(20);
-    let altura = 9;
+    // A caixa cresce com a frase de alcance em vez de cortá-la. Um aviso de
+    // "este link só funciona na sua rede" que não cabe na caixa é um aviso que
+    // não foi dado — e é justamente o que o ADR 0022 manda não deixar acontecer.
+    let alcance_linhas: Vec<String> = alcance
+        .into_iter()
+        .flat_map(|frase| frase.split('\n'))
+        .flat_map(|linha| wrap(linha, largura.saturating_sub(2).max(20) as usize))
+        .collect();
+    let altura = 9 + u16::try_from(alcance_linhas.len()).unwrap_or(0) + 1;
     let caixa = centred(area, largura, altura);
 
     let block = Block::default()
@@ -283,6 +297,12 @@ fn render_convite(frame: &mut Frame<'_>, theme: Theme, area: Rect, convite: &str
     ];
     for pedaco in wrap(convite, budget) {
         lines.push(Line::from(Span::styled(pedaco, theme.accent())));
+    }
+    if !alcance_linhas.is_empty() {
+        lines.push(Line::from(""));
+        for linha in &alcance_linhas {
+            lines.push(Line::from(Span::styled(linha.clone(), theme.label())));
+        }
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(

@@ -277,6 +277,27 @@ struct Anfitriao {
     aqui: String,
     /// O link para mandar aos amigos. ADR 0006.
     convite: String,
+    /// Até onde esse link chega: em qual degrau da escada do ADR 0022 parou.
+    ///
+    /// Nome estável e não frase, igual a [`FalhaAoHospedar`] e pelo mesmo
+    /// motivo: a frase mora no `FRASES` do JavaScript. Os nomes são
+    /// `PortaNoRoteador`, `Ipv6Direto` e `SoRedeLocal`, e os três já têm frase
+    /// escrita lá.
+    ///
+    /// Por que isto cruza a fronteira: um link que só funciona na rede de casa e
+    /// um link que funciona pela internet **são o mesmo texto**. Sem este campo
+    /// o anfitrião manda o primeiro achando que mandou o segundo, e a descoberta
+    /// acontece do outro lado, como "não conecta". O ADR 0022 pede que seja dito
+    /// em vez de deixar a pessoa descobrindo sozinha.
+    alcance: &'static str,
+    /// Por que a porta não abriu no roteador, quando não abriu.
+    ///
+    /// Esta **é** uma frase pronta, e é a exceção consciente à regra acima: o
+    /// texto vem do roteador (`RoteadorRecusou` carrega o que ele respondeu) e
+    /// nenhuma lista fechada de frases cobriria o que cada modelo inventa. Vai
+    /// para a tela como detalhe secundário, embaixo da frase que o `alcance`
+    /// escolheu.
+    porta_recusada: Option<String>,
 }
 
 /// Por que não deu para hospedar.
@@ -329,9 +350,12 @@ async fn hospedar(
     .await
     .map_err(|erro| classificar(&erro))?;
 
+    let alcance = dogma.alcance();
     let anfitriao = Anfitriao {
         aqui: format!("127.0.0.1:{PORTA_PADRAO}"),
         convite: dogma.convite(),
+        alcance: alcance.map_or("SoRedeLocal", |alcance| alcance.degrau.nome()),
+        porta_recusada: alcance.and_then(|alcance| alcance.porta_recusada.clone()),
     };
 
     session
@@ -786,6 +810,11 @@ fn nome_da_falha(erro: &seele_ffi::uri::ErroDeUri) -> &'static str {
         Falha::EsquemaDesconhecido => "EsquemaDesconhecido",
         Falha::SemEndereco => "SemEndereco",
         Falha::EnderecoInvalido => "EnderecoInvalido",
+        // Falta a frase em `ui/frases.js`, e de propósito: outro agente está
+        // naquele diretório agora. Até ela chegar, `desconhecida()` mostra o
+        // nome em vez de um beco sem saída — que é o que aquele fallback existe
+        // para fazer. A frase a escrever é sobre pôr o IPv6 entre colchetes.
+        Falha::EnderecoIpv6SemColchetes => "EnderecoIpv6SemColchetes",
         Falha::ImpressaoDigitalInvalida => "ImpressaoDigitalInvalida",
         Falha::TokenInvalido => "TokenInvalido",
         Falha::CageInvalido => "CageInvalido",

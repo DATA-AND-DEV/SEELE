@@ -32,6 +32,8 @@ use crate::{DogmaConfig, Server};
 pub struct Hospedagem {
     server: Arc<Server>,
     endereco: SocketAddr,
+    /// A escada do ADR 0022, já subida, com a porta do roteador presa nela.
+    escada: Option<crate::alcance::Escada>,
     /// A tarefa que aceita conexões.
     ///
     /// Guardada para poder ser esperada: ela segura uma referência ao servidor,
@@ -55,9 +57,10 @@ impl Hospedagem {
     /// `porta` zero deixa o sistema escolher — útil para teste, e ruim para uso
     /// real, onde o anfitrião precisa dizer aos amigos onde bater.
     ///
-    /// Escuta em `0.0.0.0` de propósito: um Dogma hospedado que só aceitasse
+    /// Escuta em `[::]` de propósito: um Dogma hospedado que só aceitasse
     /// `localhost` não serviria para nada além de falar consigo mesmo, e o
-    /// ponto todo é receber gente.
+    /// ponto todo é receber gente. `[::]` e não `0.0.0.0` porque o segundo
+    /// atende só IPv4 — degrau 2 do ADR 0022, ver [`crate::alcance`].
     ///
     /// # Errors
     ///
@@ -65,13 +68,23 @@ impl Hospedagem {
     pub async fn iniciar(porta: u16, banco: Location, nome: &str) -> Result<Self> {
         let config = DogmaConfig {
             name: nome.to_owned(),
-            listen: SocketAddr::from(([0, 0, 0, 0], porta)),
+            listen: SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, porta)),
             database: banco,
             ..DogmaConfig::default()
         };
 
         let server = Arc::new(Server::bind(config).await?);
         let endereco = server.local_addr()?;
+
+        // A escada do ADR 0022, aqui e não no `Server`: quem hospeda de dentro
+        // do cliente é justamente quem está atrás de um roteador doméstico. Um
+        // `seeled` numa VPS já é o degrau 1 e não tem o que pedir a ninguém.
+        //
+        // Custa até `alcance::porta::PROCURA` no pior caso, e o pior caso é o
+        // comum: numa rede sem UPnP a busca esgota o prazo inteiro. Foi por
+        // isso que aquele prazo é curto.
+        let escada = crate::alcance::Escada::subir(endereco.port()).await;
+        tracing::info!(alcance = ?escada.alcance(), "escada do ADR 0022 subida");
 
         // O laço de aceitação numa tarefa própria: quem chamou tem interface
         // para desenhar, e o `run` só volta quando o Dogma acaba.
@@ -85,8 +98,18 @@ impl Hospedagem {
         Ok(Self {
             server,
             endereco,
+            escada: Some(escada),
             aceitando: Some(aceitando),
         })
+    }
+
+    /// Até onde este Dogma é alcançável, e por qual degrau do ADR 0022.
+    ///
+    /// É o que permite à casca dizer "só na sua rede, e foi por isto" em vez de
+    /// deixar quem hospeda achando que abriu para o mundo.
+    #[must_use]
+    pub fn alcance(&self) -> Option<&crate::alcance::Alcance> {
+        self.escada.as_ref().map(crate::alcance::Escada::alcance)
     }
 
     /// Onde o Dogma está escutando.
@@ -120,11 +143,25 @@ impl Hospedagem {
     ///
     /// Sem rede, cai no endereço de escuta — que não serve para convidar
     /// ninguém, mas é a resposta honesta, e quem chamou pode dizer isso.
+    ///
+    /// # Qual dos endereços entra aqui
+    ///
+    /// O do degrau mais alto que a escada do ADR 0022 alcançou, e não mais
+    /// sempre o da rede local. Um IPv4 público vindo do roteador alcança
+    /// praticamente todo cliente; um IPv6 global alcança de qualquer lugar,
+    /// mas só quem também tem IPv6; o da LAN só alcança quem está na sala ao
+    /// lado. O link carrega a porta, então uma porta externa diferente da
+    /// interna — o roteador pode ter dado outra — não atrapalha quem recebe.
+    ///
+    /// `SocketAddr` e nunca `format!("{ip}:{porta}")`: o `Display` do
+    /// `SocketAddr` põe os colchetes num IPv6, e agora que este endereço pode
+    /// **ser** IPv6 isso deixou de ser detalhe.
     #[must_use]
     pub fn convite(&self) -> String {
-        let alvo = self
-            .endereco_na_rede()
-            .map_or_else(|| self.endereco.to_string(), |rede| rede.to_string());
+        let alvo = self.alcance().map_or_else(
+            || self.endereco_na_rede().unwrap_or(self.endereco).to_string(),
+            |alcance| alcance.alvo.to_string(),
+        );
         seele_proto::uri::Convite::novo(alvo)
             .com_impressao_digital(self.impressao_digital())
             .to_string()
@@ -142,6 +179,11 @@ impl Hospedagem {
     /// tarefa de aceitação soltar a referência dela, e o driver do QUIC
     /// devolver o socket depois que a última referência some.
     pub async fn encerrar(mut self) {
+        // Primeiro a porta do roteador. Uma regra deixada para trás aponta para
+        // uma máquina que não vai mais atender, e só some quando o prazo vence.
+        if let Some(escada) = self.escada.take() {
+            escada.descer().await;
+        }
         self.server.shutdown();
         self.server.wait_idle().await;
         if let Some(aceitando) = self.aceitando.take() {
@@ -174,10 +216,7 @@ impl Drop for Hospedagem {
 /// documentação, então nada é insinuado sobre alcançar um host real.
 #[must_use]
 pub fn endereco_de_rede() -> Option<std::net::IpAddr> {
-    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
-    socket.connect("203.0.113.1:80").ok()?;
-    let local = socket.local_addr().ok()?.ip();
-    (!local.is_loopback() && !local.is_unspecified()).then_some(local)
+    crate::alcance::endereco_de_saida_v4()
 }
 
 #[cfg(test)]

@@ -13,6 +13,10 @@ publish.workspace = true
 [dependencies]
 anyhow = "1.0.104"
 ed25519-dalek = "3.0.0"
+# UPnP IGD — degrau 3 do ADR 0022. Escolhido depois de medir a árvore de cada
+# candidato; `alcance::porta` registra por que este e não os outros, e o que ele
+# arrasta junto que não deveria.
+igd-next = { version = "0.17.1", default-features = false, features = ["aio_tokio"] }
 seele-proto = { path = "../seele-proto" }
 quinn = "0.11.11"
 rand = "0.10.2"
@@ -27,6 +31,10 @@ rusqlite = { version = "0.40.1", features = ["bundled"] }
 rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "logging", "tls12"] }
 serde = "1.0.229"
 serde_json = "1.0.151"
+# Só por causa de `IPV6_V6ONLY`, cujo padrão difere entre Linux, macOS e
+# Windows — ver `alcance::abrir_escuta`. A std não expõe a opção, e o quinn já
+# traz este crate (via `quinn-udp`), então nada novo entra na árvore.
+socket2 = "0.6.5"
 thiserror = "2.0.19"
 tokio = { version = "1.53.1", features = ["full"] }
 tracing = "0.1.44"

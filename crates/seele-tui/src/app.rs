@@ -288,6 +288,15 @@ pub struct App {
     /// quebrado em duas linhas é um convite que ninguém consegue copiar, e
     /// copiar é a única coisa que se faz com ele.
     pub convite: Option<String>,
+    /// Até onde esse link chega, já em português.
+    ///
+    /// Sai junto com o convite e não numa tela de diagnóstico, porque é aí que
+    /// a informação vale: um link que só funciona na rede de casa e um link que
+    /// funciona pela internet **são o mesmo texto**, e sem esta frase o
+    /// anfitrião manda o primeiro achando que mandou o segundo. O ADR 0022 pede
+    /// exatamente isto — dizer, em vez de deixar a pessoa descobrindo sozinha
+    /// por que "não conecta".
+    pub alcance: Option<String>,
     /// Se a sobreposição do convite está aberta.
     pub convite_visivel: bool,
     /// Wall-clock time for the title bar, already formatted.
@@ -331,6 +340,7 @@ impl App {
             total_isolation: false,
             help: false,
             convite: None,
+            alcance: None,
             convite_visivel: false,
             clock: "--:--:--".into(),
             quit: false,

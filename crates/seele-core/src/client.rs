@@ -228,11 +228,7 @@ impl Client {
         transport.keep_alive_interval(Some(KEEPALIVE));
         client_config.transport_config(Arc::new(transport));
 
-        let mut endpoint =
-            quinn::Endpoint::client(SocketAddr::from(([0, 0, 0, 0], 0))).map_err(|error| {
-                tracing::error!(%error, "could not open a local QUIC endpoint");
-                ConnectError::LocalEndpoint
-            })?;
+        let mut endpoint = local_endpoint()?;
         endpoint.set_default_client_config(client_config);
 
         let connection = endpoint
@@ -693,6 +689,53 @@ const EJECTED: &[u8] = b"ejected";
 /// is the one remaining observable difference between dropping the connection
 /// and letting it die on its own.
 pub const INVITE_REFUSED: &[u8] = b"invite refused";
+
+/// The local socket a client sends from.
+///
+/// # Why `[::]` and not `0.0.0.0`
+///
+/// An IPv4 socket cannot send to an IPv6 destination at all. A client bound to
+/// `0.0.0.0` therefore could not reach a Dogma over IPv6 no matter what the
+/// Dogma did — which is the other half of why step 2 of ADR 0022 had not
+/// started, and the half that no amount of work on the server would have fixed.
+///
+/// An IPv6 socket with `IPV6_V6ONLY` cleared reaches both families, and quinn
+/// does both halves of that itself, which is why this is short: `client` clears
+/// the option when the address is IPv6, and `connect` rewrites an IPv4
+/// destination into its IPv4-mapped form (`::ffff:a.b.c.d`) before the socket
+/// sees it. Its own documentation calls `[::]:0` "a reasonable default to
+/// maximize the ability to connect".
+///
+/// # Why the fallback is not decoration
+///
+/// A machine with IPv6 switched off cannot open an `AF_INET6` socket, so the
+/// bind itself fails. Falling back leaves such a machine working exactly as it
+/// did before this change — IPv4 only, which is all it ever had.
+///
+/// # What is deliberately not checked here
+///
+/// The server reads `IPV6_V6ONLY` back after setting it (`alcance::abrir_escuta`
+/// in `seele-server`), because a Dogma that silently stops answering half the
+/// internet is a bug nobody can diagnose from the outside. This side does not:
+/// quinn owns the socket and does not lend it out, and on the four targets
+/// `deny.toml` builds for — Linux, the two macOS, Windows — clearing the option
+/// works. A platform that refuses it would leave a client that reaches IPv6 and
+/// not IPv4, and that is the trade being taken knowingly rather than missed.
+fn local_endpoint() -> Result<quinn::Endpoint, ConnectError> {
+    match quinn::Endpoint::client(SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, 0))) {
+        Ok(endpoint) => Ok(endpoint),
+        Err(error) => {
+            tracing::info!(
+                %error,
+                "no IPv6 on this machine: falling back to an IPv4-only local socket"
+            );
+            quinn::Endpoint::client(SocketAddr::from(([0, 0, 0, 0], 0))).map_err(|error| {
+                tracing::error!(%error, "could not open a local QUIC endpoint");
+                ConnectError::LocalEndpoint
+            })
+        }
+    }
+}
 
 /// Decides what a failed QUIC connection actually was.
 ///
