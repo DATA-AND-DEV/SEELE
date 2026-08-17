@@ -149,25 +149,51 @@ impl<'a> Messages<'a> {
         for message in pending {
             // An existing idempotency key means this is a retry, not a new
             // message. Returning the original is what makes the send idempotent.
+            //
+            // **The original, and not the one that just arrived.** This used to
+            // select the id alone and then build the answer out of the incoming
+            // message — old id, new body, new timestamp. For an honest retry the
+            // two bodies are equal and nothing showed. When they differ, the row
+            // is never written and yet the new body is broadcast under the old
+            // row's id: whoever has the window open reads the new text, whoever
+            // fetches history afterwards reads the old one, and neither is told.
+            // A message quietly changing content between two readers is worse
+            // than a message that fails to send.
+            //
+            // Bodies differ under the defect below, which is real and open:
+            // `client_message_id` restarts at 1 every session (`seele-tui`) or
+            // every process (`seele-ffi`), while `author_id` is derived from the
+            // key on disk and never changes. So after a reconnection a pilot's
+            // messages 1, 2, 3… are all read as retries of the *previous*
+            // session's. See pendency 19; the key itself is what has to change,
+            // and this is only the half that is right either way.
             if let Some(key) = message.client_message_id {
-                let existing: Option<i64> = transaction
+                let existing: Option<(i64, String, i64, Option<i64>, Option<i64>)> = transaction
                     .query_row(
-                        "SELECT id FROM messages
+                        "SELECT id, body, created_at, edited_at, replies_to FROM messages
                          WHERE author_id = ?1 AND client_message_id = ?2",
                         params![message.author.get() as i64, key.get() as i64],
-                        |row| row.get(0),
+                        |row| {
+                            Ok((
+                                row.get(0)?,
+                                row.get(1)?,
+                                row.get(2)?,
+                                row.get(3)?,
+                                row.get(4)?,
+                            ))
+                        },
                     )
                     .optional()?;
-                if let Some(id) = existing {
+                if let Some((id, body, created_at, edited_at, replies_to)) = existing {
                     stored.push(StoredMessage {
                         id: MessageId(id as u64),
                         line: message.line,
                         author: message.author,
                         author_nickname: message.author_nickname.clone(),
-                        body: message.body.clone(),
-                        created_at: now,
-                        edited_at: None,
-                        replies_to: message.replies_to,
+                        body,
+                        created_at,
+                        edited_at,
+                        replies_to: replies_to.map(|id| MessageId(id as u64)),
                         client_message_id: message.client_message_id,
                     });
                     continue;
@@ -453,6 +479,58 @@ mod tests {
 
         assert_eq!(first.first().map(|m| m.id), second.first().map(|m| m.id));
         assert_eq!(messages.history(LineId(1), None, 50).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_key_that_comes_back_with_another_body_answers_with_the_one_on_disk() {
+        // The test above uses the same body twice, so it never sees this: what
+        // came back was the *incoming* message wearing the stored row's id.
+        // Equal bodies made the substitution invisible.
+        //
+        // Different bodies is not a hypothetical. `client_message_id` restarts
+        // at 1 every session in `seele-tui` and every process in `seele-ffi`,
+        // while `author_id` is derived from the key on disk and never changes —
+        // so after a reconnection message 1 of the new session is read as a
+        // retry of message 1 of the old one, and the bodies have nothing to do
+        // with each other (pendency 19).
+        //
+        // What must not happen is the halves diverging: the new body announced
+        // live under an id whose row on disk holds the old text. Whoever has the
+        // window open and whoever opens it a minute later would be reading two
+        // different messages with the same id, and nothing anywhere would say so.
+        let mut casper = store();
+        let mut messages = Messages::new(&mut casper);
+        let key = Some(ClientMessageId(7));
+
+        let first = messages
+            .append_batch(&[PendingMessage {
+                client_message_id: key,
+                ..pending("padrão azul confirmado")
+            }])
+            .unwrap();
+        let again = messages
+            .append_batch(&[PendingMessage {
+                client_message_id: key,
+                ..pending("ISTO É DE OUTRA SESSÃO")
+            }])
+            .unwrap();
+
+        let stored = again.first().expect("the retry answers with something");
+        assert_eq!(
+            stored.body, "padrão azul confirmado",
+            "the answer carries a body that is on nobody's disk: live listeners \
+             would read it and history would never show it"
+        );
+        assert_eq!(first.first().map(|m| m.id), Some(stored.id));
+
+        // And the disk agrees with what was answered — the half that would still
+        // be wrong if the answer were built from the incoming message.
+        let page = messages.history(LineId(1), None, 50).unwrap();
+        assert_eq!(page.len(), 1, "the second send must not have been written");
+        assert_eq!(
+            page.first().map(|m| m.body.as_str()),
+            Some(stored.body.as_str())
+        );
     }
 
     #[test]

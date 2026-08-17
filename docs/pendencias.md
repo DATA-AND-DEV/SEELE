@@ -618,3 +618,53 @@ entre conexões, e o fato de que quem hospeda lê tudo.
 
 **Quando dói.** Nos primeiros cinco minutos de quem chega. É a lacuna que uma
 pessoa nota sem ninguém apontar.
+
+## 19 · A chave de idempotência reinicia, e a identidade não
+
+**Sintoma.** Depois de reconectar, as mensagens de um piloto **não são
+gravadas**. A primeira mensagem da sessão nova é tratada como reenvio da
+primeira mensagem da sessão anterior, a segunda como reenvio da segunda, e assim
+por diante. Ninguém é avisado dos dois lados.
+
+**O mecanismo.** `Messages::append_batch` deduplica por `(author_id,
+client_message_id)`. As duas metades dessa chave têm tempos de vida diferentes, e
+é exatamente aí que ela quebra:
+
+- `author_id` vem da chave Ed25519 **em disco** (ADR 0004) e é a mesma para
+  sempre;
+- `client_message_id` **recomeça em 1** — em `crates/seele-tui/src/main.rs` a
+  cada sessão (`next_message_id: 1`, em dois lugares), e em
+  `crates/seele-ffi/src/lib.rs` a cada processo (um `AtomicU64::new(1)` estático).
+
+Então a chave que deveria ser única por mensagem se repete a cada reconexão.
+
+**Como foi encontrada.** Não pelo sintoma: o agente que investigou a pendência 1
+esbarrou nela lendo o caminho de escrita. Ela nunca apareceu num teste porque o
+teste de idempotência que existia (`a_retried_send_does_not_post_twice`) reenvia
+**o mesmo corpo** — e com corpos iguais a troca é invisível.
+
+**Metade já consertada.** O caminho de deduplicação montava a resposta com a
+mensagem que **chegou**: id da linha antiga, corpo novo, carimbo novo. Ou seja, o
+corpo novo era anunciado ao vivo sob o id de uma linha que no disco guarda o
+texto velho — quem estava com a janela aberta lia uma coisa e quem abrisse um
+minuto depois lia outra, com o mesmo id, sem nada em lugar nenhum dizendo isso.
+Agora a resposta é a linha realmente gravada, e há teste com corpos diferentes.
+
+Isso conserta a **divergência**, e não a perda: a mensagem nova continua não
+sendo escrita.
+
+**O que falta decidir, e é por isso que não foi feito junto.** Onde fica a
+fronteira da idempotência. `specs/02-protocolo.md` diz «idempotente por
+`client_msg_id`», e o propósito é reenvio depois de confirmação perdida — o que
+acontece sempre **dentro de uma conexão**. Duas saídas, e nenhuma é óbvia:
+
+1. **A chave passa a ser única de verdade**, sorteada pelo cliente por sessão em
+   vez de contada a partir de 1. `rand` já está em `seele-tui`; em `seele-ffi`
+   não está.
+2. **O servidor limita a busca à sessão corrente**, por exemplo com um
+   `created_at >= início da sessão`. Não muda cliente nem esquema — mas junta
+   duas sessões simultâneas da mesma identidade, que é raro e não impossível.
+
+**Quando dói.** Em toda reconexão, que é o caminho mais comum deste produto: cair
+o wi-fi, fechar o notebook, ser expulso e voltar. Da mesma família da pendência
+1 — destrói dado em silêncio —, por mecanismo diferente.
