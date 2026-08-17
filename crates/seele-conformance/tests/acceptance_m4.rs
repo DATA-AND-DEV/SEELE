@@ -359,10 +359,15 @@ async fn a_newcomer_can_hold_a_conversation_with_only_the_help_screen() -> Resul
     let deadline = Instant::now() + WAIT;
     let mut heard = false;
     while Instant::now() < deadline && !heard {
-        if let Ok(Ok(ServerMessage::MessageReceived { body, .. })) =
-            tokio::time::timeout(Duration::from_millis(500), listener.next_event()).await
-        {
-            heard = body == "olá";
+        match tokio::time::timeout(Duration::from_millis(500), listener.next_event()).await {
+            Ok(Ok(ServerMessage::MessageReceived { body, .. })) => heard = body == "olá",
+            Ok(Ok(_)) => {}
+            // A dead link is information, and swallowing it — which is what an
+            // `if let Ok(Ok(_))` here did — turns the real cause into an expired
+            // deadline reporting the wrong thing. `docs/pendencias.md` #1 names
+            // this pattern as one of the reasons it stayed undiagnosed.
+            Ok(Err(error)) => panic!("the link died before the message arrived: {error}"),
+            Err(_) => {}
         }
     }
     assert!(heard, "the message never reached the other pilot");
