@@ -41,13 +41,26 @@ fn numbers_on_disk() -> BTreeSet<String> {
 fn every_adr_on_disk_is_listed_in_the_index() {
     let readme = std::fs::read_to_string(adr_dir().join("README.md")).expect("README must exist");
 
-    // The link, not the bare number. A bare `contains("0022")` would be
-    // satisfied by the paragraph further down that *talks about* 0022 in prose —
-    // and that paragraph existed while the table row did not, which is exactly
-    // the state this test has to be able to fail in.
+    // Table rows only, and this is the whole subtlety.
+    //
+    // The first version of this searched the *whole file* for `[NNNN](`,
+    // reasoning that a link is stricter than a bare number. It is — and it still
+    // failed to catch anything, because the prose below the table links the same
+    // ADRs it discusses: the paragraph beginning "IPv6/NAT traversal saiu desta
+    // lista" carries a real `[0022](…)`. Deleting 0022's row left the test green.
+    //
+    // That prose paragraph is exactly the state this test exists to fail in: it
+    // was written while the row was missing. A guard the surrounding text can
+    // satisfy is a guard that cannot fail.
+    let rows: String = readme
+        .lines()
+        .filter(|line| line.starts_with("| ["))
+        .collect::<Vec<_>>()
+        .join("\n");
+
     let missing: Vec<String> = numbers_on_disk()
         .into_iter()
-        .filter(|number| !readme.contains(&format!("[{number}](")))
+        .filter(|number| !rows.contains(&format!("[{number}](")))
         .collect();
 
     assert!(
