@@ -165,8 +165,9 @@ Microsoft Entra ID:
    segredo que expira derruba a assinatura sem aviso, e a data é a única coisa
    deste documento que tem prazo.
 3. Volte à conta de assinatura → **Access control (IAM)** → **Add role
-   assignment** → papel **Trusted Signing Certificate Profile Signer** →
-   atribua ao app registration criado.
+   assignment** → o papel cujo nome termina em **Certificate Profile Signer**
+   (a Microsoft o chamava de "Trusted Signing Certificate Profile Signer" antes
+   da troca de nome do serviço) → atribua ao app registration criado.
 
 O passo 3 é o que costuma faltar: sem ele o app registration existe, autentica, e
 recebe "acesso negado" na hora de assinar.

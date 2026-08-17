@@ -318,9 +318,9 @@ jobs:
       #
       # Ela é uma casca em volta do `signtool` da Microsoft: pede um token ao
       # Azure com as três variáveis `AZURE_CLIENT_*` e chama o `signtool` com o
-      # dispositor de assinatura da nuvem. Por isso precisa das duas coisas
-      # abaixo — a CLI do Azure, que o runner já traz, e o `signtool`, que vem
-      # com o Windows SDK numa pasta cujo nome muda a cada versão.
+      # dispositor de assinatura da nuvem. Por isso precisa de três coisas que o
+      # runner do Windows já traz — a CLI do Azure, o .NET 8 e o `signtool`, que
+      # vem com o Windows SDK numa pasta cujo nome muda a cada versão.
       #
       # O caminho padrão da ferramenta fixa uma versão do SDK (`10.0.26100.0`),
       # e o runner não é obrigado a ter aquela. Procurar aqui é a diferença
