@@ -356,8 +356,8 @@ async fn hospedar(
     let anfitriao = Anfitriao {
         aqui: format!("127.0.0.1:{PORTA_PADRAO}"),
         convite: dogma.convite(),
-        alcance: alcance.map_or("SoRedeLocal", |alcance| alcance.degrau.nome()),
-        porta_recusada: alcance.and_then(|alcance| alcance.porta_recusada.clone()),
+        alcance: alcance.map_or("SoRedeLocal", |alcance| alcance.degrau().nome()),
+        porta_recusada: alcance.and_then(|alcance| alcance.porta_recusada().map(str::to_owned)),
     };
 
     session

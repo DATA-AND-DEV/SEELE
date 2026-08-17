@@ -83,7 +83,14 @@ impl Hospedagem {
         // Custa até `alcance::porta::PROCURA` no pior caso, e o pior caso é o
         // comum: numa rede sem UPnP a busca esgota o prazo inteiro. Foi por
         // isso que aquele prazo é curto.
-        let escada = crate::alcance::Escada::subir(endereco.port()).await;
+        // A escuta inteira, e não só a porta: numa máquina em que a pilha dupla
+        // falhou o Dogma atende só em IPv4, e a escada não pode prometer um
+        // degrau que este socket não serve. Ver `alcance::Escuta`.
+        let escada = crate::alcance::Escada::subir(crate::alcance::Escuta::nova(
+            endereco.port(),
+            server.pilha(),
+        ))
+        .await;
         tracing::info!(alcance = ?escada.alcance(), "escada do ADR 0022 subida");
 
         // O laço de aceitação numa tarefa própria: quem chamou tem interface
@@ -160,7 +167,7 @@ impl Hospedagem {
     pub fn convite(&self) -> String {
         let alvo = self.alcance().map_or_else(
             || self.endereco_na_rede().unwrap_or(self.endereco).to_string(),
-            |alcance| alcance.alvo.to_string(),
+            |alcance| alcance.alvo().to_string(),
         );
         seele_proto::uri::Convite::novo(alvo)
             .com_impressao_digital(self.impressao_digital())

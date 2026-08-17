@@ -182,11 +182,10 @@ fn frase_do_alcance(alcance: &seele_server::alcance::Alcance) -> String {
     use seele_server::alcance::Degrau;
 
     let motivo = alcance
-        .porta_recusada
-        .as_deref()
+        .porta_recusada()
         .map_or_else(String::new, |motivo| format!("\n{motivo}."));
 
-    match alcance.degrau {
+    match alcance.degrau() {
         Degrau::PortaNoRoteador => {
             "O roteador abriu a porta: este link deve funcionar pela internet.".to_owned()
         }
@@ -198,7 +197,7 @@ fn frase_do_alcance(alcance: &seele_server::alcance::Alcance) -> String {
             "ATENÇÃO: este link só funciona para quem estiver na sua rede.{motivo}\n\
              Para alcançar de fora: encaminhe a porta {} no roteador à mão, ou \
              use uma VPN.",
-            alcance.alvo.port()
+            alcance.alvo().port()
         ),
     }
 }
