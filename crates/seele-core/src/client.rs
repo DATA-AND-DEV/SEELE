@@ -517,6 +517,61 @@ impl Client {
         .await
     }
 
+    /// Asks the Dogma to end a pilot's session.
+    ///
+    /// Asks, like the four above, and for the same reason: nothing here checks
+    /// whether this pilot may. `specs/08-seguranca.md` puts that on the server,
+    /// and a core that refused on its own would be a second authority to keep
+    /// in step with the first — and the one that would drift, because it is the
+    /// one nobody re-reads.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn kick_pilot(&mut self, pilot: PilotId) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::KickPilot { pilot }).await
+    }
+
+    /// Asks the Dogma to bar a pilot from returning.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn ban_pilot(
+        &mut self,
+        pilot: PilotId,
+        reason: Option<&str>,
+        expires_at: Option<i64>,
+    ) -> Result<()> {
+        frame::write(
+            &mut self.send,
+            &ClientMessage::BanPilot {
+                pilot,
+                reason: reason.map(str::to_owned),
+                expires_at,
+            },
+        )
+        .await
+    }
+
+    /// Asks the Dogma to take a message off its Line.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn remove_message(&mut self, message: MessageId) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::RemoveMessage { message }).await
+    }
+
+    /// Asks the Dogma to move a pilot into a Cage.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn move_pilot(&mut self, pilot: PilotId, cage: CageId) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::MovePilot { pilot, cage }).await
+    }
+
     /// Asks for a page of history, oldest of the page first on the wire.
     ///
     /// # Errors

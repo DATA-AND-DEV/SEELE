@@ -449,6 +449,52 @@ fn renomear_linha(session: State<'_, Session>, line: u32, name: String) -> Resul
     session.plug()?.rename_line(line, name)
 }
 
+/// Pede ao Dogma que acabe com a sessão de alguém — `expulsar`.
+///
+/// Devolve quando o pedido entra na fila, e não quando a pessoa saiu. Quem
+/// responde isso é o Dogma: `RosterChanged` quando ela sai de fato,
+/// `NoticeRaised` com `PermissionDenied` quando ele recusa. É o mesmo caminho
+/// dos verbos de sala, e não há porta nova a aprender.
+///
+/// A tela pode consultar `Snapshot::may_kick` para decidir se desenha o botão —
+/// é o que faltava para o `EJETAR PLUG DO OPERADOR`, desenhado e desabilitado
+/// desde o v2 porque não havia o que chamar. Isso é conveniência: mandar o
+/// pedido sem a permissão não expulsa ninguém, e a `specs/08-seguranca.md` põe
+/// a segurança nessa recusa e não no botão escondido.
+#[tauri::command]
+fn expulsar_piloto(session: State<'_, Session>, pilot: u64) -> Result<(), PlugError> {
+    session.plug()?.kick_pilot(pilot)
+}
+
+/// Pede ao Dogma que impeça alguém de voltar — `banir`.
+///
+/// `expires_at` em segundos desde a época; `None` é para sempre. O `reason` é
+/// para o registro de quem hospeda e nunca chega a quem foi banido.
+#[tauri::command]
+fn banir_piloto(
+    session: State<'_, Session>,
+    pilot: u64,
+    reason: Option<String>,
+    expires_at: Option<i64>,
+) -> Result<(), PlugError> {
+    session.plug()?.ban_pilot(pilot, reason, expires_at)
+}
+
+/// Pede ao Dogma que tire uma mensagem da Linha.
+///
+/// Sem permissão nenhuma quando a mensagem é de quem pede: a permissão do
+/// `specs/04-servidor-seele.md` diz «de outra pessoa».
+#[tauri::command]
+fn remover_mensagem(session: State<'_, Session>, message: u64) -> Result<(), PlugError> {
+    session.plug()?.remove_message(message)
+}
+
+/// Pede ao Dogma que mova alguém para um Cage — `mover_piloto`.
+#[tauri::command]
+fn mover_piloto(session: State<'_, Session>, pilot: u64, cage: u32) -> Result<(), PlugError> {
+    session.plug()?.move_pilot(pilot, cage)
+}
+
 #[tauri::command]
 fn set_at_field(session: State<'_, Session>, on: bool) -> Result<(), PlugError> {
     session.plug()?.set_at_field(on)
@@ -884,6 +930,10 @@ fn main() {
             criar_linha,
             renomear_cage,
             renomear_linha,
+            expulsar_piloto,
+            banir_piloto,
+            remover_mensagem,
+            mover_piloto,
             set_at_field,
             set_total_isolation,
             set_talking,

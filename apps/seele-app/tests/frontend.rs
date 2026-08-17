@@ -181,7 +181,23 @@ fn every_command_the_frontend_calls_is_registered() {
 ///
 /// They stay here rather than being deleted, because deleting them would take
 /// the verbs down with the only thing that remembers they exist.
-const AGUARDANDO_TELA: &[&str] = &["renomear_cage", "renomear_linha"];
+///
+/// The four moderation verbs are the same case, one step earlier. `expulsar` /
+/// `banir` / `remover_mensagem` / `mover_piloto` are what
+/// `specs/04-servidor-seele.md` gives the Comandante and the Operador, and
+/// until now no protocol message carried any of them — which is why the
+/// `EJETAR PLUG DO OPERADOR` control has been drawn and **disabled** since v2:
+/// there was nothing to call. There is now, and `Snapshot::may_kick`,
+/// `may_ban`, `may_remove_message` and `may_move_pilot` say whether to enable
+/// it. Whoever wires that takes the name off this list.
+const AGUARDANDO_TELA: &[&str] = &[
+    "renomear_cage",
+    "renomear_linha",
+    "expulsar_piloto",
+    "banir_piloto",
+    "remover_mensagem",
+    "mover_piloto",
+];
 
 #[test]
 fn no_command_is_registered_and_never_called() {

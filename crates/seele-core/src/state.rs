@@ -572,6 +572,25 @@ impl Room {
                 }
             }
 
+            // Somebody with the permission moved this plug.
+            //
+            // The same bookkeeping [`Self::enter_cage`] does when *this* client
+            // asks, and it has to be here as well as there: entering a Cage is
+            // recorded on the way out, when the client sends the request, and a
+            // move is a Cage this client never asked for. Without this the
+            // person is drawn in the room they left, sending voice into it,
+            // reading its roster.
+            //
+            // The sentence that says it happened arrives separately, as an
+            // `Alert` carrying `MovedByOperator`. Two frames rather than one
+            // because they are two different things: this is where the plug is,
+            // that is what the person should be told, and only the shell knows
+            // how to say the second.
+            ServerMessage::MovedToCage { cage } => {
+                self.enter_cage(*cage);
+                changed.roster = true;
+            }
+
             // Consumed by the handshake and by the round-trip measurement, both
             // of which are over before any shell is watching.
             ServerMessage::Challenge { .. } | ServerMessage::Pong { .. } => {}
@@ -1177,6 +1196,36 @@ mod tests {
         assert!(!changed.channels);
         assert_eq!(room.lines.len(), 1);
         assert_eq!(room.lines[0].name, "geral");
+    }
+
+    // ---- moved by somebody else's hand ----
+
+    #[test]
+    fn being_moved_takes_the_plug_with_it() {
+        // `enter_cage` is called on the way out, when this client asks. A move
+        // is a Cage nobody here asked for, so without an arm of its own the
+        // person stays drawn in the room they left — sending voice into it and
+        // reading its roster — while everybody else sees them somewhere new.
+        let mut room = room();
+        room.apply(&joined(3, "ayanami"));
+        assert_eq!(room.current_cage, Some(CAGE));
+
+        let changed = room.apply(&ServerMessage::MovedToCage { cage: CageId(2) });
+
+        assert!(changed.roster, "nothing told the shell to redraw");
+        assert_eq!(room.current_cage, Some(CageId(2)));
+        assert_eq!(
+            room.current_roster().count(),
+            1,
+            "the moved pilot is not in the room they were moved to"
+        );
+        assert_eq!(
+            room.roster(CAGE)
+                .map(|p| p.nickname.as_str())
+                .collect::<Vec<_>>(),
+            ["ayanami"],
+            "a copy was left behind in the old Cage"
+        );
     }
 
     #[test]

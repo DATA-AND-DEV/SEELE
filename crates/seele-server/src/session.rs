@@ -233,6 +233,28 @@ pub async fn serve(
     // above can end at any `?`, and a path that returns early does not know
     // where the pilot was sitting.
     cages.leave_everywhere(session.pilot).await;
+
+    // And **announced**, which it was not. `Event::PilotLeft` was sent only
+    // from the `EjectPlug` branch, so a pilot who closed their client, lost
+    // their network or hit any `?` in the loop stayed in everybody else's
+    // roster until they reconnected. Nobody saw it while a client only drew the
+    // Cage it was sitting in and only learned of that Cage's arrivals; now that
+    // every Cage is drawn with the people in it, a ghost is a ghost on screen.
+    //
+    // Here rather than at the end of `run_session` for the same reason as the
+    // line above: this is the one place every exit path passes through.
+    for cage in dogma
+        .occupancy
+        .lock()
+        .await
+        .vacate_everywhere(session.pilot)
+    {
+        let _ = dogma.events.send(Event::PilotLeft {
+            cage,
+            pilot: session.pilot,
+        });
+    }
+
     tracing::info!(pilot = %session.pilot, "session ended");
     result
 }
@@ -615,6 +637,45 @@ async fn run_session(
         tracing::info!(pilot = %session.pilot, "seat reclaimed");
     }
 
+    // Who is already seated, in **every** Cage — the whole picture, once.
+    //
+    // The wider half of gap G15. The narrow half was closed inside
+    // `InsertPlug`: walk into an occupied Cage and the server listed the people
+    // in *that* Cage. Every other Cage stayed empty on the client for the whole
+    // session, because nothing had ever carried who was in it — and the screen
+    // in `design/Entry Plug v3.dc.html` draws occupants under all of them. That
+    // is the defect reported from a real session as the Cages showing empty
+    // when they were not.
+    //
+    // Sent as `PilotJoined`, which is what the client already folds in, so this
+    // needs no new message and no new arm in any of the three shells. From this
+    // connection's point of view every one of these people did just arrive: it
+    // is the moment it learned about them.
+    //
+    // After `events.subscribe()` above, deliberately. Subscribing first and
+    // snapshotting second can duplicate an arrival — the client is idempotent
+    // about that — while the other order would drop one, and a dropped arrival
+    // is a person who is in the room and not on the screen, which is the whole
+    // bug again.
+    for (cage, occupant) in dogma.occupancy.lock().await.everywhere() {
+        if occupant.pilot == session.pilot {
+            continue;
+        }
+        frame::write(
+            &mut send,
+            &ServerMessage::PilotJoined {
+                cage,
+                profile: PilotProfile {
+                    id: occupant.pilot,
+                    nickname: occupant.nickname.clone(),
+                    roles: Vec::new(),
+                },
+                ssrc: occupant.ssrc,
+            },
+        )
+        .await?;
+    }
+
     loop {
         tokio::select! {
             // `recv` num canal é cancel-safe: nada é consumido pelo ramo que
@@ -674,62 +735,8 @@ async fn run_session(
                             }).await?;
                             continue;
                         }
-                        // Out of the old room before into the new one. Without
-                        // this a pilot who walks from one Cage to another is
-                        // still a member of the first, and goes on hearing it.
-                        cages.leave_everywhere(session.pilot).await;
-                        cages.of(id).await.send(CageCommand::Join {
-                            pilot: session.pilot,
-                            ssrc: session.ssrc,
-                            may_speak: session.may_speak,
-                            outbound: outbound_tx.clone(),
-                        }).await?;
+                        assentar(dogma, cages, session, &outbound_tx, id).await?;
                         current_cage = Some(id);
-
-                        // Who was already here — gap G15. The protocol
-                        // announces arrivals going forward and nothing else, so
-                        // without this a pilot walking into an occupied Cage
-                        // sees an empty room until somebody else moves.
-                        //
-                        // Sent as `PilotJoined` on purpose: from this client's
-                        // point of view that is exactly what happened, and it
-                        // needs no new message the other two shells would also
-                        // have to learn.
-                        {
-                            let mut occupancy = dogma.occupancy.lock().await;
-                            for occupant in occupancy.in_cage(id) {
-                                if occupant.pilot == session.pilot {
-                                    continue;
-                                }
-                                frame::write(&mut send, &ServerMessage::PilotJoined {
-                                    cage: id,
-                                    profile: PilotProfile {
-                                        id: occupant.pilot,
-                                        nickname: occupant.nickname.clone(),
-                                        roles: Vec::new(),
-                                    },
-                                    ssrc: occupant.ssrc,
-                                }).await?;
-                            }
-                            occupancy.seat(
-                                id,
-                                crate::dogma::Occupant {
-                                    pilot: session.pilot,
-                                    nickname: session.nickname.clone(),
-                                    ssrc: session.ssrc,
-                                },
-                            );
-                        }
-
-                        let _ = dogma.events.send(Event::PilotJoined {
-                            cage: id,
-                            profile: PilotProfile {
-                                id: session.pilot,
-                                nickname: session.nickname.clone(),
-                                roles: Vec::new(),
-                            },
-                            ssrc: session.ssrc,
-                        });
                     }
                     ClientMessage::EjectPlug => {
                         cages.leave_everywhere(session.pilot).await;
@@ -912,6 +919,136 @@ async fn run_session(
                         }
                     }
 
+                    // ---- moderation ----
+                    //
+                    // `specs/04-servidor-seele.md` names the four permissions
+                    // and migration 1 seeds them on the Comandante and the
+                    // Operador; until now nothing on the wire could ask for
+                    // any of them, so the app's `EJETAR PLUG DO OPERADOR` sat
+                    // drawn and disabled with nothing to call.
+                    //
+                    // Read from MELCHIOR **now**, like the four room verbs
+                    // above and for the same reason: an operator whose Kick was
+                    // revoked a minute ago should not keep it until the next
+                    // reconnection. And denial answers, because a refusal
+                    // nobody is told about is indistinguishable from a Dogma
+                    // that is broken.
+                    ClientMessage::KickPilot { pilot: alvo } => {
+                        if !moderavel(dogma, session.pilot, alvo, Permission::Kick).await {
+                            recusar(&mut send, session.pilot, "KickPilot").await?;
+                            continue;
+                        }
+                        tracing::info!(by = %session.pilot, %alvo, "kicked");
+                        // The target's own session does the disconnecting. It
+                        // owns its stream and its cleanup, and reaching into
+                        // another connection from here would need a second way
+                        // to find one — see the note on `Event::SessionEnded`.
+                        let _ = dogma.events.send(Event::SessionEnded {
+                            pilot: alvo,
+                            reason: DisconnectReason::Kicked,
+                        });
+                    }
+                    ClientMessage::BanPilot { pilot: alvo, reason, expires_at } => {
+                        // Banning yourself locks a Dogma whose only Comandante
+                        // is you, and there is no verb to undo it from outside.
+                        if alvo == session.pilot
+                            || !moderavel(dogma, session.pilot, alvo, Permission::Ban).await
+                        {
+                            recusar(&mut send, session.pilot, "BanPilot").await?;
+                            continue;
+                        }
+                        // MELCHIOR checks the permission again inside `ban`.
+                        // Not redundant on purpose: the check above is what
+                        // produces the enumerated refusal a client can read,
+                        // and the one in there is what no future caller can
+                        // forget. specs/08-seguranca.md asks for the second.
+                        let gravado = {
+                            let guard = dogma.casper.lock().await;
+                            Melchior::new(&guard).ban(
+                                alvo,
+                                session.pilot,
+                                reason.as_deref(),
+                                expires_at,
+                            )
+                        };
+                        match gravado {
+                            Ok(()) => {
+                                tracing::info!(by = %session.pilot, %alvo, ?expires_at, "banned");
+                                // A ban that let the offender stay until they
+                                // chose to leave would do nothing about what
+                                // prompted it. The handshake refuses them from
+                                // here on; this is the session they are in now.
+                                let _ = dogma.events.send(Event::SessionEnded {
+                                    pilot: alvo,
+                                    reason: DisconnectReason::Banned,
+                                });
+                            }
+                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                        }
+                    }
+                    ClientMessage::RemoveMessage { message: id } => {
+                        // The permission is worded "delete somebody **else's**
+                        // message", so an author taking back their own does not
+                        // need it — a Dogma where fixing your own typo needs an
+                        // operator is a Dogma where people ask an operator
+                        // about typos.
+                        let alvo = {
+                            let mut guard = dogma.casper.lock().await;
+                            Messages::new(&mut guard).one(id).ok().flatten()
+                        };
+                        let Some(alvo) = alvo else {
+                            // Already gone, or never there. Answered rather
+                            // than ignored: a removal that silently does
+                            // nothing looks exactly like one that worked.
+                            nao_deu(&mut send, &anyhow::anyhow!("no such message")).await?;
+                            continue;
+                        };
+                        let seu = alvo.author == session.pilot;
+                        if !seu && !pode(dogma, session.pilot, Permission::RemoveMessage).await {
+                            recusar(&mut send, session.pilot, "RemoveMessage").await?;
+                            continue;
+                        }
+                        // Soft in CASPER, gone on screen — and the two are one
+                        // decision, not two. `Messages::remove` clears the body
+                        // and stamps `deleted_at`; `history` filters those out
+                        // and `Room::apply` drops the line. So the message
+                        // **disappears** for everybody, and what survives is a
+                        // row that keeps replies pointing at it from dangling
+                        // and keeps an operator able to answer "what was
+                        // removed and by whom". A visible "removed by operator"
+                        // stub was the alternative, and it preserves the
+                        // disruption along with the fact of it.
+                        let feito = {
+                            let mut guard = dogma.casper.lock().await;
+                            Messages::new(&mut guard).remove(id)
+                        };
+                        match feito {
+                            Ok(()) => {
+                                tracing::info!(by = %session.pilot, %id, own = seu, "message removed");
+                                // The Line comes from the stored row, never
+                                // from the asker: a Line the client filled in
+                                // is a Line the client can fill in wrong, and
+                                // it would aim somebody else's announcement.
+                                let _ = dogma.events.send(Event::MessageRemoved {
+                                    line: alvo.line,
+                                    id,
+                                });
+                            }
+                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                        }
+                    }
+                    ClientMessage::MovePilot { pilot: alvo, cage: destino } => {
+                        if !moderavel(dogma, session.pilot, alvo, Permission::MovePilot).await {
+                            recusar(&mut send, session.pilot, "MovePilot").await?;
+                            continue;
+                        }
+                        tracing::info!(by = %session.pilot, %alvo, cage = %destino, "moved");
+                        let _ = dogma.events.send(Event::PilotMoved {
+                            pilot: alvo,
+                            cage: destino,
+                        });
+                    }
+
                     // The handshake is over. Repeating it is a protocol
                     // violation, not a re-authentication.
                     ClientMessage::Response { .. } | ClientMessage::Hello { .. } => break,
@@ -950,7 +1087,58 @@ async fn run_session(
 
             event = events.recv() => {
                 let Ok(event) = event else { continue };
-                if let Some(message) = translate(&event, &lines, current_cage, session.pilot) {
+
+                // Two events are aimed at **this** connection rather than
+                // forwarded by it. They are on the same bus as everything else
+                // because a Dogma has no other way for one session to reach
+                // another — see the note beside `Event::SessionEnded`.
+                match &event {
+                    Event::SessionEnded { pilot, reason } if *pilot == session.pilot => {
+                        tracing::info!(pilot = %session.pilot, ?reason, "session ended by an operator");
+                        // Told, and then closed. `specs/02-protocolo.md` wants
+                        // a specific reason and `despedir` is what makes sure
+                        // it reaches the other end before the connection dies
+                        // — without it the client reads a transport error and
+                        // says "não foi possível alcançar o Dogma", sending
+                        // somebody to look for a network problem.
+                        // And the seat is **not** held. The grace period exists
+                        // for a train going into a tunnel; applied here it
+                        // would put a kicked pilot straight back into the Cage
+                        // they were removed from the moment they reconnected,
+                        // which is the whole verb undone by a feature meant for
+                        // something else.
+                        current_cage = None;
+                        let _ = frame::write(&mut send, &ServerMessage::Disconnecting {
+                            reason: *reason,
+                        }).await;
+                        let _ = send.finish();
+                        despedir(&connection, &mut send, b"moderated").await;
+                        break;
+                    }
+                    Event::PilotMoved { pilot, cage: destino } if *pilot == session.pilot => {
+                        assentar(dogma, cages, session, &outbound_tx, *destino).await?;
+                        current_cage = Some(*destino);
+                        // Where the plug is now, and then that somebody put it
+                        // there. Two frames because they are two different
+                        // things: one is state this client has to fold in or go
+                        // on speaking into the room it left, the other is a
+                        // sentence only a shell knows how to write. Being moved
+                        // in silence is indistinguishable from a client that
+                        // lost track of where it was.
+                        frame::write(&mut send, &ServerMessage::MovedToCage {
+                            cage: *destino,
+                        }).await?;
+                        frame::write(&mut send, &ServerMessage::Alert {
+                            severity: AlertSeverity::Info,
+                            reason: AlertReason::MovedByOperator,
+                            operator_text: None,
+                        }).await?;
+                        continue;
+                    }
+                    _ => {}
+                }
+
+                if let Some(message) = translate(&event, &lines, session.pilot) {
                     frame::write(&mut send, &message).await?;
                 }
             }
@@ -1000,11 +1188,13 @@ async fn run_session(
     if let Some(id) = current_cage {
         let mut slots = dogma.slots.lock().await;
         slots.reserve(session.pilot, id, session.ssrc, Instant::now());
-        // The seat is held, but the pilot is not in the room. Leaving them in
-        // the occupancy would show everybody a roster with somebody who left,
-        // for five minutes.
-        dogma.occupancy.lock().await.vacate(id, session.pilot);
     }
+    // Coming out of the occupancy — and being announced — is `serve`'s job, and
+    // it happens the moment this returns. It used to happen here, which meant
+    // it did not happen at all on any path that left the loop through a `?`:
+    // the seat was cleared for a clean shutdown and kept for ever for a broken
+    // pipe, which is the case that actually occurs. Doing it there costs the
+    // few microseconds between this line and that one, and covers every exit.
 
     // Dito só quando aconteceu, e uma vez.
     //
@@ -1022,6 +1212,78 @@ async fn run_session(
         );
     }
 
+    Ok(())
+}
+
+/// Puts this connection's plug into a Cage, and tells the Dogma.
+///
+/// One function because there are two ways in — the pilot asks
+/// ([`ClientMessage::InsertPlug`]) or somebody with [`Permission::MovePilot`]
+/// decides — and the bookkeeping either way is identical: out of the old room
+/// before into the new one, the occupancy rewritten, the departure and the
+/// arrival both announced. Written twice, the copy that gets a line added is
+/// never both of them, and the half that goes stale is the one that leaves
+/// somebody in a room they are not in.
+async fn assentar(
+    dogma: &Dogma,
+    cages: &crate::cage::Cages,
+    session: &Session,
+    outbound: &mpsc::Sender<Vec<u8>>,
+    destino: CageId,
+) -> Result<()> {
+    // Out of the old room before into the new one. Without this a pilot who
+    // walks from one Cage to another is still a member of the first, and goes
+    // on hearing it.
+    cages.leave_everywhere(session.pilot).await;
+    cages
+        .of(destino)
+        .await
+        .send(CageCommand::Join {
+            pilot: session.pilot,
+            ssrc: session.ssrc,
+            may_speak: session.may_speak,
+            outbound: outbound.clone(),
+        })
+        .await?;
+
+    // No burst of "who is already here": this connection was handed every
+    // Cage's occupants when it started, and has been told about every arrival
+    // and departure since, wherever it happened. Repeating the room it is
+    // walking into would be telling it something it already knows.
+    let saiu_de = {
+        let mut occupancy = dogma.occupancy.lock().await;
+        let mut saiu_de = occupancy.vacate_everywhere(session.pilot);
+        saiu_de.retain(|anterior| *anterior != destino);
+        occupancy.seat(
+            destino,
+            crate::dogma::Occupant {
+                pilot: session.pilot,
+                nickname: session.nickname.clone(),
+                ssrc: session.ssrc,
+            },
+        );
+        saiu_de
+    };
+
+    // Walking from one Cage to another is a departure and an arrival, and both
+    // have to be said. Without the first, everybody watching the old room keeps
+    // the pilot in it for ever — invisible while a client only drew its own
+    // Cage, and a ghost now that it draws all of them.
+    for anterior in saiu_de {
+        let _ = dogma.events.send(Event::PilotLeft {
+            cage: anterior,
+            pilot: session.pilot,
+        });
+    }
+    let _ = dogma.events.send(Event::PilotJoined {
+        cage: destino,
+        profile: PilotProfile {
+            id: session.pilot,
+            nickname: session.nickname.clone(),
+            roles: Vec::new(),
+        },
+        ssrc: session.ssrc,
+    });
     Ok(())
 }
 
@@ -1043,9 +1305,51 @@ async fn pode(dogma: &Dogma, pilot: PilotId, permission: Permission) -> bool {
         .unwrap_or(false)
 }
 
+/// Whether this pilot may aim a moderation verb at that one.
+///
+/// Two questions, and both have to be yes.
+///
+/// The first is the permission, asked of MELCHIOR at the instant the verb is
+/// used — `specs/08-seguranca.md`: "Toda ação é verificada no servidor,
+/// sempre."
+///
+/// The second is not in `specs/04-servidor-seele.md`, and is here because
+/// leaving it out has a name: **an Operador could ban the Comandante.** The
+/// spec gives Operador "moderação", which includes `expulsar` and `banir`, and
+/// gives Comandante everything — so promoting a friend to Operador for the
+/// evening would hand them the ability to lock you out of the Dogma you are
+/// hosting, permanently, with a verb the spec says they should have. That is
+/// not moderation; it is a coup with the right permission attached.
+///
+/// So: somebody holding [`Permission::AdministerDogma`] can only be kicked,
+/// banned or moved by somebody who holds it too. Between two Comandantes it
+/// does nothing, which is right — they already trust each other with the whole
+/// Dogma. It matters exactly at the line the spec draws between the two roles,
+/// and it matters more once ADR 0022 puts a Dogma on the open internet, where
+/// "the person I promoted" is not always somebody sitting in the same room.
+async fn moderavel(dogma: &Dogma, quem: PilotId, alvo: PilotId, permission: Permission) -> bool {
+    if !pode(dogma, quem, permission).await {
+        return false;
+    }
+    if quem == alvo {
+        return true;
+    }
+    let guard = dogma.casper.lock().await;
+    let melchior = Melchior::new(&guard);
+    // A database error reads as denial, like `pode`: a Dogma whose disk is
+    // failing must not answer "nobody here is an administrator".
+    let alvo_administra = melchior
+        .may(alvo, Permission::AdministerDogma)
+        .unwrap_or(true);
+    let quem_administra = melchior
+        .may(quem, Permission::AdministerDogma)
+        .unwrap_or(false);
+    !alvo_administra || quem_administra
+}
+
 /// Tells a client the server said no, and why.
 async fn recusar(send: &mut quinn::SendStream, pilot: PilotId, verbo: &str) -> Result<()> {
-    tracing::warn!(%pilot, verbo, "refused: the pilot does not have ManageCages");
+    tracing::warn!(%pilot, verbo, "refused: the server said no");
     frame::write(
         send,
         &ServerMessage::Alert {
@@ -1117,12 +1421,7 @@ fn announce(dogma: &Dogma, session: &Session, state: &AnnouncedState) {
 }
 
 /// Decides whether an event concerns this connection, and what to send.
-fn translate(
-    event: &Event,
-    lines: &[LineId],
-    cage: Option<CageId>,
-    self_pilot: PilotId,
-) -> Option<ServerMessage> {
+fn translate(event: &Event, lines: &[LineId], self_pilot: PilotId) -> Option<ServerMessage> {
     match event {
         Event::MessagePosted(message) => {
             lines
@@ -1153,23 +1452,48 @@ fn translate(
                     id: *id,
                 })
         }
+        // Every Cage, and not only the one this connection is sitting in.
+        //
+        // The filter that used to be here — `cage == Some(*joined)` — is what
+        // made four rooms out of five permanently empty on screen: a client was
+        // told about arrivals in its own Cage and about nothing else, so the
+        // occupants the v3 layout draws under every other Cage were data it had
+        // never been sent. Reported from a real session as the Cages showing
+        // empty when they were not.
+        //
+        // Weighed against a count on `CageInfo` and against a snapshot the
+        // client asks for. The count is cheaper and loses the names the screen
+        // is built around; the snapshot keeps the names and goes stale the
+        // instant it lands, which is the same bug moving more slowly. This is
+        // the only one of the three that is still true a second later.
+        //
+        // What it costs is that everybody learns where everybody is. That was
+        // already the case: `Event::PilotState` — speaking, Sync Ratio, both
+        // mutes — has always gone to every connection unfiltered, so a client
+        // was already being told about pilots it had no seat for, and drew them
+        // as ghosts with no room. `specs/04-servidor-seele.md` sizes a Dogma at
+        // fifty pilots and five Cages, and the Cage list itself is not filtered
+        // per pilot, so this reveals nothing that walking into the room would
+        // not. ADR 0022 opens a Dogma to the internet; what changes there is who
+        // may hold an account, which is `crate::admissao`'s question, not this
+        // one.
+        //
         // Not echoed to the pilot who caused it: they already know.
         Event::PilotJoined {
             cage: joined,
             profile,
             ssrc,
-        } => (cage == Some(*joined) && profile.id != self_pilot).then(|| {
-            ServerMessage::PilotJoined {
-                cage: *joined,
-                profile: profile.clone(),
-                ssrc: *ssrc,
-            }
+        } => (profile.id != self_pilot).then(|| ServerMessage::PilotJoined {
+            cage: *joined,
+            profile: profile.clone(),
+            ssrc: *ssrc,
         }),
-        Event::PilotLeft { cage: left, pilot } => (cage == Some(*left) && *pilot != self_pilot)
-            .then_some(ServerMessage::PilotLeft {
+        Event::PilotLeft { cage: left, pilot } => {
+            (*pilot != self_pilot).then_some(ServerMessage::PilotLeft {
                 cage: *left,
                 pilot: *pilot,
-            }),
+            })
+        }
         // Echoed back to the pilot it describes, unlike the two above.
         //
         // "They already know" is true of joining and leaving — the client asked
@@ -1203,5 +1527,14 @@ fn translate(
             line: *line,
             name: name.clone(),
         }),
+
+        // Acted on by the connection they name, in the loop, and carrying
+        // nothing for anybody else. A move is visible to everybody as the
+        // `PilotLeft` and `PilotJoined` that `assentar` sends, and a session
+        // ending is visible as the `PilotLeft` that `serve` sends when the
+        // connection is gone — so there is nothing to translate here, and
+        // inventing something would be a second way to say what those already
+        // say.
+        Event::SessionEnded { .. } | Event::PilotMoved { .. } => None,
     }
 }

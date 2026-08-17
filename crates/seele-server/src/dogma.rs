@@ -104,6 +104,36 @@ pub enum Event {
         /// Its new name.
         name: String,
     },
+
+    // ---- moderation ----
+    //
+    // These two are the odd ones on this bus: every other event is something a
+    // connection **forwards** to its client, and these are something a
+    // connection **does to itself**. They are here anyway because a Dogma has no
+    // other way for one session to reach another — there is no map of live
+    // sessions, deliberately, since `specs/04-servidor-seele.md` puts Cage state
+    // in a task per Cage with no global lock. The bus already reaches every
+    // connection; adding a registry of sessions beside it would be a second way
+    // to find somebody, and the two would disagree the first time one of them
+    // leaked.
+    //
+    // Addressed to one pilot, delivered to all, acted on by the one. At fifty
+    // sessions that is forty-nine cheap comparisons, once, when an operator
+    // presses a button.
+    /// An operator ended a pilot's session.
+    SessionEnded {
+        /// Whose.
+        pilot: PilotId,
+        /// Which of the enumerated reasons to send them.
+        reason: seele_proto::control::DisconnectReason,
+    },
+    /// An operator moved a pilot into a Cage.
+    PilotMoved {
+        /// Who.
+        pilot: PilotId,
+        /// Where to.
+        cage: CageId,
+    },
 }
 
 /// A Cage seat held open for a pilot who dropped.
@@ -180,12 +210,25 @@ pub struct Occupant {
 ///
 /// Separate from [`Slots`], which holds seats for pilots who are *away*. This
 /// is who is actually there, and it exists to answer one question the protocol
-/// could not: **who was already here when I walked in.**
+/// could not: **who was already here before I was watching.**
 ///
 /// `specs/02-protocolo.md` announces arrivals going forward and nothing else,
 /// so a pilot entering an occupied Cage saw an empty room until somebody moved.
 /// Gap G15, found by running two clients where the second started after the
 /// first had already sat down.
+///
+/// # Why the whole map, and not one Cage
+///
+/// G15 was closed for the Cage the pilot walked into, and only that one. The
+/// screen `design/Entry Plug v3.dc.html` draws occupants under **every** Cage,
+/// and for the other four that data had never existed on the client at all:
+/// they were drawn empty, always, however many people were in them. Reported
+/// from a real session as "o sistema de cages não está bem implementado,
+/// mostra que as cages estão vazias quando não deveriam estar".
+///
+/// So [`Occupancy::everywhere`] hands back the entire picture, and a connection
+/// is given it once, at the start of its session. Everything after that is the
+/// unfiltered `PilotJoined` / `PilotLeft` broadcast.
 #[derive(Debug, Default)]
 pub struct Occupancy {
     by_cage: HashMap<CageId, Vec<Occupant>>,
@@ -198,7 +241,7 @@ impl Occupancy {
     /// re-enters the same Cage, and a roster with the same person twice is a
     /// roster nobody trusts.
     pub fn seat(&mut self, cage: CageId, occupant: Occupant) {
-        self.vacate_everywhere(occupant.pilot);
+        let _ = self.vacate_everywhere(occupant.pilot);
         self.by_cage.entry(cage).or_default().push(occupant);
     }
 
@@ -209,17 +252,44 @@ impl Occupancy {
         }
     }
 
-    /// Removes a pilot from wherever they were. Used when a connection drops.
-    pub fn vacate_everywhere(&mut self, pilot: PilotId) {
-        for seated in self.by_cage.values_mut() {
+    /// Removes a pilot from wherever they were, and says where that was.
+    ///
+    /// The Cages come back because somebody has to announce the departure and
+    /// the caller does not always know the room: a session can end at any `?`
+    /// in the middle of its loop, and that path has no idea where the pilot was
+    /// sitting. Returning the answer here is what lets one call at the end of a
+    /// connection both clear the seat and tell everybody about it — the same
+    /// reasoning `crate::cage::Cages::leave_everywhere` gives for being
+    /// broadcast rather than aimed.
+    pub fn vacate_everywhere(&mut self, pilot: PilotId) -> Vec<CageId> {
+        let mut vacated = Vec::new();
+        for (cage, seated) in &mut self.by_cage {
+            let before = seated.len();
             seated.retain(|occupant| occupant.pilot != pilot);
+            if seated.len() != before {
+                vacated.push(*cage);
+            }
         }
+        vacated
     }
 
     /// Who is in a Cage, in the order they arrived.
     #[must_use]
     pub fn in_cage(&self, cage: CageId) -> Vec<Occupant> {
         self.by_cage.get(&cage).cloned().unwrap_or_default()
+    }
+
+    /// Everybody seated anywhere, with the Cage they are seated in.
+    ///
+    /// Flattened rather than handed back as a map, because the only caller
+    /// walks it once to write a frame per occupant, and a map would make that
+    /// caller nest two loops to say one thing.
+    #[must_use]
+    pub fn everywhere(&self) -> Vec<(CageId, Occupant)> {
+        self.by_cage
+            .iter()
+            .flat_map(|(cage, seated)| seated.iter().map(|occupant| (*cage, occupant.clone())))
+            .collect()
     }
 }
 
@@ -411,5 +481,79 @@ mod tests {
         slots.reserve(PilotId(1), CageId(1), Ssrc(1), now);
         assert_eq!(slots.sweep(now + Duration::from_secs(30)), 0);
         assert_eq!(slots.held(), 1);
+    }
+
+    // ---- who is in which Cage ----
+
+    fn occupant(pilot: u64, nickname: &str) -> Occupant {
+        Occupant {
+            pilot: PilotId(pilot),
+            nickname: nickname.to_owned(),
+            ssrc: Ssrc(u32::try_from(pilot * 10).expect("ssrc")),
+        }
+    }
+
+    #[test]
+    fn the_whole_dogma_is_readable_at_once_and_not_one_room_at_a_time() {
+        // The half of gap G15 that was missing. `in_cage` answered "who is in
+        // the room I am walking into"; nothing answered "who is in the other
+        // four", and the v3 layout draws those four with their occupants under
+        // them. They were drawn empty however many people were in them.
+        let mut occupancy = Occupancy::default();
+        occupancy.seat(CageId(1), occupant(1, "ayanami"));
+        occupancy.seat(CageId(1), occupant(2, "shinji"));
+        occupancy.seat(CageId(2), occupant(3, "asuka"));
+
+        let mut everywhere: Vec<(u32, u64)> = occupancy
+            .everywhere()
+            .into_iter()
+            .map(|(cage, seated)| (cage.0, seated.pilot.0))
+            .collect();
+        everywhere.sort_unstable();
+
+        assert_eq!(everywhere, [(1, 1), (1, 2), (2, 3)]);
+    }
+
+    #[test]
+    fn leaving_says_which_rooms_were_left() {
+        // The caller that needs this is the end of a connection, which does not
+        // know where the pilot was sitting: a session can end at any `?`. If
+        // this said nothing, the departure could not be announced, and the
+        // pilot would stay on everybody's screen until they came back.
+        let mut occupancy = Occupancy::default();
+        occupancy.seat(CageId(7), occupant(1, "ayanami"));
+
+        assert_eq!(occupancy.vacate_everywhere(PilotId(1)), vec![CageId(7)]);
+        assert!(occupancy.everywhere().is_empty());
+    }
+
+    #[test]
+    fn leaving_a_room_nobody_was_in_announces_nothing() {
+        // The other half, and the one that keeps a departure from being sent
+        // twice: `serve` calls this after every session, including the ones that
+        // already left through `EjectPlug` and said so.
+        let mut occupancy = Occupancy::default();
+        occupancy.seat(CageId(7), occupant(1, "ayanami"));
+        occupancy.vacate(CageId(7), PilotId(1));
+
+        assert!(
+            occupancy.vacate_everywhere(PilotId(1)).is_empty(),
+            "a pilot who had already left was announced as leaving again"
+        );
+    }
+
+    #[test]
+    fn walking_between_rooms_reports_the_room_that_was_left() {
+        // What `InsertPlug` needs in order to tell the old room. Seating alone
+        // clears the previous seat silently, and a silent clear is a pilot who
+        // stays in the first Cage on every other client for ever.
+        let mut occupancy = Occupancy::default();
+        occupancy.seat(CageId(1), occupant(1, "ayanami"));
+
+        assert_eq!(occupancy.vacate_everywhere(PilotId(1)), vec![CageId(1)]);
+        occupancy.seat(CageId(2), occupant(1, "ayanami"));
+
+        assert_eq!(occupancy.in_cage(CageId(1)).len(), 0);
+        assert_eq!(occupancy.in_cage(CageId(2)).len(), 1);
     }
 }

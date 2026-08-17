@@ -42,7 +42,7 @@ use std::time::{Duration, Instant};
 
 use ed25519_dalek::SigningKey;
 use seele_proto::control::ServerMessage;
-use seele_proto::ids::{CageId, ClientMessageId, LineId};
+use seele_proto::ids::{CageId, ClientMessageId, LineId, MessageId, PilotId};
 use tokio::sync::mpsc;
 
 use crate::battery::{Action, Battery, Link};
@@ -161,6 +161,21 @@ enum Comando {
     RenomearLinha {
         linha: LineId,
         nome: String,
+    },
+    Expulsar {
+        piloto: PilotId,
+    },
+    Banir {
+        piloto: PilotId,
+        motivo: Option<String>,
+        expira_em: Option<i64>,
+    },
+    RemoverMensagem {
+        mensagem: MessageId,
+    },
+    MoverPiloto {
+        piloto: PilotId,
+        cage: CageId,
     },
     Sair,
 }
@@ -511,6 +526,67 @@ impl Enlace {
         self.mandar(Comando::RenomearLinha { linha, nome }).await
     }
 
+    /// Pede ao Dogma que acabe com a sessão de alguém.
+    ///
+    /// Pede, e só — como os verbos de sala, e pela mesma razão: a
+    /// `specs/08-seguranca.md` põe a decisão no servidor, e um core que
+    /// recusasse por conta própria seria uma segunda autoridade para manter de
+    /// acordo com a primeira. Esconder o botão é conveniência; quem nega é o
+    /// Dogma, e ele responde com `Alert` de `PermissionDenied` quando nega.
+    ///
+    /// **Não** é refeito ao reconectar, como os verbos de sala e pelo mesmo
+    /// motivo: expulsar é coisa que se faz uma vez, e repetida minutos depois
+    /// derrubaria alguém que já tinha voltado.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn expulsar(&self, piloto: PilotId) -> Result<(), Fechado> {
+        self.mandar(Comando::Expulsar { piloto }).await
+    }
+
+    /// Pede ao Dogma que impeça alguém de voltar.
+    ///
+    /// `expira_em` em segundos desde a época; `None` é para sempre. O `motivo`
+    /// é para o registro de quem hospeda e nunca chega a quem foi banido — a
+    /// `specs/08-seguranca.md` quer falha uniforme, e a recusa que essa pessoa
+    /// encontra na volta é a mesma qualquer que seja o texto.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn banir(
+        &self,
+        piloto: PilotId,
+        motivo: Option<String>,
+        expira_em: Option<i64>,
+    ) -> Result<(), Fechado> {
+        self.mandar(Comando::Banir {
+            piloto,
+            motivo,
+            expira_em,
+        })
+        .await
+    }
+
+    /// Pede ao Dogma que tire uma mensagem da Linha.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn remover_mensagem(&self, mensagem: MessageId) -> Result<(), Fechado> {
+        self.mandar(Comando::RemoverMensagem { mensagem }).await
+    }
+
+    /// Pede ao Dogma que mova alguém para um Cage.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn mover_piloto(&self, piloto: PilotId, cage: CageId) -> Result<(), Fechado> {
+        self.mandar(Comando::MoverPiloto { piloto, cage }).await
+    }
+
     /// Encerra por vontade própria.
     pub async fn sair(&self) {
         let _ = self.mandar(Comando::Sair).await;
@@ -598,6 +674,14 @@ impl Motor {
             if let Some(evento) = houve_evento {
                 match evento {
                     Ok(mensagem) => {
+                        // O que a reconexão vai refazer também muda quando
+                        // **outra pessoa** decide. Sem isto, alguém movido por
+                        // um operador voltaria, depois de uma queda, para o
+                        // Cage de onde foi tirado: o motor refaz o último Cage
+                        // que este cliente pediu, e ele não pediu este.
+                        if let ServerMessage::MovedToCage { cage } = mensagem {
+                            self.cage = Some(cage);
+                        }
                         if matches!(mensagem, ServerMessage::Pong { .. }) {
                             self.bateria.on_pong();
                             if let Some(medido) = self.cliente.as_ref().and_then(Client::rtt) {
@@ -753,6 +837,18 @@ impl Motor {
             Comando::CriarLinha { nome } => cliente.create_line(&nome).await,
             Comando::RenomearCage { cage, nome } => cliente.rename_cage(cage, &nome).await,
             Comando::RenomearLinha { linha, nome } => cliente.rename_line(linha, &nome).await,
+            Comando::Expulsar { piloto } => cliente.kick_pilot(piloto).await,
+            Comando::Banir {
+                piloto,
+                motivo,
+                expira_em,
+            } => {
+                cliente
+                    .ban_pilot(piloto, motivo.as_deref(), expira_em)
+                    .await
+            }
+            Comando::RemoverMensagem { mensagem } => cliente.remove_message(mensagem).await,
+            Comando::MoverPiloto { piloto, cage } => cliente.move_pilot(piloto, cage).await,
             Comando::Sair => return,
         };
         if resultado.is_err() {
@@ -768,12 +864,15 @@ impl Motor {
             Comando::AbrirLinha(linha) => self.linha = Some(*linha),
             Comando::AtField(ligado) => self.at_field = *ligado,
             Comando::Isolamento(ligado) => self.isolamento = *ligado,
-            // Fazer uma sala **não** entra aqui, e é uma ausência deliberada.
-            // O que se refaz ao reconectar é onde a pessoa estava — o Cage, a
-            // Linha, os dois silêncios —, porque voltar sem isso é voltar para
-            // outro lugar. Uma sala é uma coisa que se faz uma vez; repetida
-            // depois de uma queda, ela apareceria minutos mais tarde do nada, e
-            // duplicada se a pessoa já tivesse pedido de novo à mão.
+            // Fazer uma sala e moderar alguém **não** entram aqui, e a ausência
+            // é deliberada nos dois casos. O que se refaz ao reconectar é onde
+            // a pessoa estava — o Cage, a Linha, os dois silêncios —, porque
+            // voltar sem isso é voltar para outro lugar. Fazer uma sala é coisa
+            // que se faz uma vez; repetida depois de uma queda, ela apareceria
+            // minutos mais tarde do nada, e duplicada se a pessoa já tivesse
+            // pedido de novo à mão. Expulsar é pior: refeito depois de cinco
+            // minutos de bateria, derrubaria de novo alguém que já tinha
+            // voltado, e ninguém entenderia por quê.
             _ => {}
         }
     }
@@ -1120,6 +1219,35 @@ mod tests {
             id: ClientMessageId(1),
         });
         assert_eq!(motor.linha, None);
+    }
+
+    #[test]
+    fn moderar_nao_e_lembrado() {
+        // Um `Expulsar` guardado seria refeito ao voltar da bateria: cinco
+        // minutos depois, alguém que já tinha reconectado cairia de novo, sem
+        // ninguém ter pedido nada. O mesmo para banir.
+        let mut motor = motor_de_teste();
+        motor.lembrar(&Comando::InserirPlug(CageId(2)));
+
+        motor.lembrar(&Comando::Expulsar { piloto: PilotId(9) });
+        motor.lembrar(&Comando::Banir {
+            piloto: PilotId(9),
+            motivo: None,
+            expira_em: None,
+        });
+        motor.lembrar(&Comando::MoverPiloto {
+            piloto: PilotId(9),
+            cage: CageId(5),
+        });
+        motor.lembrar(&Comando::RemoverMensagem {
+            mensagem: MessageId(1),
+        });
+
+        assert_eq!(
+            motor.cage,
+            Some(CageId(2)),
+            "moderar outra pessoa mexeu em onde este cliente está"
+        );
     }
 
     fn motor_de_teste() -> Motor {

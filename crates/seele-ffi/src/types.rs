@@ -131,6 +131,8 @@ pub enum NoticeReason {
     OperatorNotice,
     /// The client is sending control frames faster than its budget.
     RateLimited,
+    /// An operator moved this pilot's plug into another Cage.
+    MovedByOperator,
 }
 
 impl From<seele_core::AlertReason> for NoticeReason {
@@ -144,6 +146,7 @@ impl From<seele_core::AlertReason> for NoticeReason {
             seele_core::AlertReason::CageFull => Self::CageFull,
             seele_core::AlertReason::OperatorNotice => Self::OperatorNotice,
             seele_core::AlertReason::RateLimited => Self::RateLimited,
+            seele_core::AlertReason::MovedByOperator => Self::MovedByOperator,
         }
     }
 }
@@ -560,6 +563,28 @@ pub struct Snapshot {
     /// shell that ignores this and asks anyway gets a `NoticeRaised` carrying
     /// `PermissionDenied`, and nothing is created.
     pub may_manage_cages: bool,
+    /// Whether this pilot may end somebody else's session — `expulsar`.
+    ///
+    /// One boolean per moderation verb rather than the permission list, for the
+    /// reason [`Snapshot::may_manage_cages`] gives: a list invites each shell to
+    /// start deciding things out of it, and four separate controls ask four
+    /// separate questions. They are separate on the wire too —
+    /// `specs/04-servidor-seele.md` enumerates four permissions and a role may
+    /// carry any subset.
+    ///
+    /// **Convenience, never enforcement.** The app's `EJETAR PLUG DO OPERADOR`
+    /// has been drawn and disabled since v2; this is what may enable it, and
+    /// the server refusing is still what makes it safe.
+    pub may_kick: bool,
+    /// Whether this pilot may bar somebody from returning — `banir`.
+    pub may_ban: bool,
+    /// Whether this pilot may take somebody else's message off a Line.
+    ///
+    /// Only somebody else's: removing one's own needs no permission, so a shell
+    /// offering the control on a message the reader wrote does not consult this.
+    pub may_remove_message: bool,
+    /// Whether this pilot may move somebody between Cages — `mover_piloto`.
+    pub may_move_pilot: bool,
     /// Set once the session is over.
     pub ended: Option<EndReason>,
 }
@@ -733,6 +758,7 @@ mod tests {
             seele_core::AlertReason::CageFull,
             seele_core::AlertReason::OperatorNotice,
             seele_core::AlertReason::RateLimited,
+            seele_core::AlertReason::MovedByOperator,
         ];
         let mapped: std::collections::HashSet<NoticeReason> =
             all.into_iter().map(NoticeReason::from).collect();
