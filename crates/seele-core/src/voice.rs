@@ -109,14 +109,23 @@ struct Controls {
     /// idênticas ao ouvinte e têm consertos opostos». Isto é a que restava: o
     /// quadro foi codificado, estava pronto, e **nunca saiu desta máquina**.
     ///
-    /// Um datagrama do QUIC não é fragmentado. O texto viaja num fluxo e se
-    /// adapta ao caminho sozinho; a voz viaja em datagrama, e um datagrama que
-    /// não cabe no caminho é recusado inteiro. Por isso um enlace pode entregar
-    /// todo o texto e picotar o áudio, e só num sentido.
-    ///
     /// Era descartado com `let _ =`. Soava exatamente como perda de rede e não
     /// deixava rastro nenhum — nem log, nem contador —, então a pergunta «é a
     /// rede ou é daqui?» não tinha como ser respondida por ninguém.
+    ///
+    /// # O que este contador **não** é
+    ///
+    /// Ele nasceu apostando que a causa do picote era o datagrama não caber no
+    /// caminho — o texto viaja em fluxo e se adapta sozinho, a voz viaja em
+    /// datagrama e um que não cabe é recusado inteiro. A aposta estava errada, e
+    /// `seele_audio::codec` a mata com número em vez de argumento: um quadro no
+    /// teto do bitrate são 272 bytes, e a RFC 9000 §14.1 exige que todo caminho
+    /// entregue 1200 — um que não entregasse nunca teria deixado o QUIC apertar
+    /// a mão, e não haveria texto atravessando para comparar.
+    ///
+    /// O contador fica porque a pergunta que ele responde continua valendo e não
+    /// tinha resposta: *este áudio sumiu antes de sair daqui?* Só a hipótese que
+    /// motivou o contador morreu, e não o contador.
     recusados: std::sync::atomic::AtomicU64,
     /// Amostras que a mistura produziu e o anel do dispositivo não aceitou.
     ///
