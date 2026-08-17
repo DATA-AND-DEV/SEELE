@@ -23,6 +23,7 @@
 )]
 
 pub mod control;
+pub mod encontro;
 pub mod ids;
 pub mod media;
 pub mod sync_ratio;
