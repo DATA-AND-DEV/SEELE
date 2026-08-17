@@ -31,6 +31,15 @@ pub fn alert(reason: AlertReason) -> &'static str {
         AlertReason::OperatorNotice => "AVISO DO OPERADOR",
         AlertReason::RateLimited => "VOCÊ ESTÁ FALANDO RÁPIDO DEMAIS PARA O DOGMA",
         AlertReason::MovedByOperator => "UM OPERADOR MOVEU O SEU PLUG",
+        // O plug já saiu e a conversa já saiu da tela quando isto chega. Sem a
+        // frase, o que resta é uma sala que sumiu sozinha — que de onde se lê é
+        // igualzinho a um cliente que perdeu a conta de onde estava.
+        AlertReason::CageDeleted => "A JAULA EM QUE VOCÊ ESTAVA FOI APAGADA",
+        AlertReason::LineDeleted => "A LINHA QUE VOCÊ LIA FOI APAGADA, COM TUDO QUE HAVIA NELA",
+        // A única recusa desta lista, e a única que ensina o passo seguinte.
+        AlertReason::LastCage => {
+            "ESTE É O ÚNICO CAGE DO DOGMA. FAÇA OUTRA SALA ANTES DE APAGAR ESTA"
+        }
     }
 }
 
@@ -87,7 +96,7 @@ pub fn worth_retrying(reason: DisconnectReason) -> bool {
 mod tests {
     use super::*;
 
-    const ALERTS: [AlertReason; 9] = [
+    const ALERTS: [AlertReason; 12] = [
         AlertReason::Mentioned,
         AlertReason::SubsystemChanged,
         AlertReason::SyncDegraded,
@@ -97,6 +106,12 @@ mod tests {
         AlertReason::OperatorNotice,
         AlertReason::RateLimited,
         AlertReason::MovedByOperator,
+        AlertReason::CageDeleted,
+        AlertReason::LineDeleted,
+        // The one that reads closest to `CageEntryRefused`, and the reason it
+        // is not that: "entry refused" is a sentence about walking into a room,
+        // in front of somebody who was trying to destroy one.
+        AlertReason::LastCage,
     ];
 
     const DISCONNECTS: [DisconnectReason; 11] = [

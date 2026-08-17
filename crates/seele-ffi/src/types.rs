@@ -370,6 +370,14 @@ pub struct Cage {
     pub password_required: bool,
     /// Whether this pilot's plug is in it.
     pub occupied_by_us: bool,
+    /// The Line bound to it, if any. `specs/04-servidor-seele.md` makes the
+    /// association optional.
+    ///
+    /// Carried so a shell can say what destroying that Line would do to this
+    /// room. The Cage survives it and comes out with no Line attached, which is
+    /// a change nobody asked for — and a product whose confirmations name their
+    /// consequences has to be able to name that one.
+    pub line: Option<u32>,
     /// Who is inside, in arrival order.
     pub pilots: Vec<Pilot>,
     /// The average Sync Ratio of everybody inside, or `None` if nobody is.

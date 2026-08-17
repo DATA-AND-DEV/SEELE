@@ -1109,6 +1109,7 @@ fn cages_of(room: &Room) -> Vec<Cage> {
             limit: cage.limit,
             password_required: cage.password_required,
             occupied_by_us: room.current_cage == Some(cage.id),
+            line: cage.line.map(|line| line.0),
             pilots: room
                 .roster(cage.id)
                 .map(|pilot| Pilot {

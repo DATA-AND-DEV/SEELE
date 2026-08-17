@@ -23,7 +23,9 @@
 
 use std::sync::{Arc, Mutex};
 
-use seele_ffi::{ConnectConfig, Event, EventListener, Plug, PlugError, Snapshot, VoiceMode};
+use seele_ffi::{
+    ConnectConfig, Event, EventListener, LineWeight, Plug, PlugError, Snapshot, VoiceMode,
+};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 /// The name the webview listens on.
@@ -536,6 +538,51 @@ fn remover_mensagem(session: State<'_, Session>, message: u64) -> Result<(), Plu
 #[tauri::command]
 fn mover_piloto(session: State<'_, Session>, pilot: u64, cage: u32) -> Result<(), PlugError> {
     session.plug()?.move_pilot(pilot, cage)
+}
+
+/// Pede ao Dogma que destrua um Cage — `apagar_cage`.
+///
+/// Quem estiver dentro é posto para fora e avisado; a Linha presa a ele, se
+/// houver, fica onde está. O Dogma recusa o último Cage e diz isso com
+/// `LastCage`, que é frase diferente da de entrada recusada.
+///
+/// A tela pode consultar `Snapshot::may_delete_rooms` para decidir se desenha o
+/// controle — e é campo próprio, não `may_manage_cages`: fazer sala e destruir
+/// sala são permissões diferentes na `specs/04-servidor-seele.md`, e é preciso
+/// poder oferecer uma sem a outra. Isso é conveniência; quem nega é o servidor.
+#[tauri::command]
+fn apagar_cage(session: State<'_, Session>, cage: u32) -> Result<(), PlugError> {
+    session.plug()?.delete_cage(cage)
+}
+
+/// Pede ao Dogma que destrua uma Linha, e tudo que foi escrito nela —
+/// `apagar_linha`.
+#[tauri::command]
+fn apagar_linha(session: State<'_, Session>, line: u32) -> Result<(), PlugError> {
+    session.plug()?.delete_line(line)
+}
+
+/// Pergunta quanto custaria destruir uma Linha. Não destrói nada.
+///
+/// O único comando desta janela que **espera** o Dogma responder, e a razão é a
+/// frase que ele alimenta: a caixa de confirmação promete um número exato de
+/// mensagens, de gente e uma data, e os três são contados no banco no instante
+/// de perguntar. A janela segura uma página de histórico e chutaria para baixo
+/// por todo o passado da Linha — e um número quase certo numa caixa que promete
+/// destruição é pior que nenhum.
+///
+/// Por isso `async`: um comando síncrono do Tauri roda na thread principal, e
+/// esperar ali travaria a janela inteira enquanto a pergunta atravessa a rede.
+///
+/// Quem não conseguir resposta **não abre a caixa**. Não há versão honesta dela
+/// sem os três números.
+#[tauri::command]
+async fn peso_da_linha(session: State<'_, Session>, line: u32) -> Result<LineWeight, PlugError> {
+    // O `Arc` sai do cadeado antes do `await`, e é de propósito: `Session::plug`
+    // devolve um clone justamente para que nada segure o `Mutex` atravessando um
+    // ponto de espera.
+    let plug = session.plug()?;
+    plug.weigh_line(line).await
 }
 
 #[tauri::command]
@@ -1228,6 +1275,9 @@ fn main() {
             banir_piloto,
             remover_mensagem,
             mover_piloto,
+            apagar_cage,
+            apagar_linha,
+            peso_da_linha,
             set_at_field,
             set_total_isolation,
             set_talking,
