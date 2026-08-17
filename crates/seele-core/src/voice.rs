@@ -30,6 +30,7 @@ use seele_audio::drift::DriftTracker;
 use seele_audio::gate::{GateConfig, GateMode, VoiceGate};
 use seele_audio::jitter::{Decision, JitterBuffer, JitterConfig};
 use seele_audio::mixer::Mixer;
+use seele_audio::playout::PlayoutClock;
 use seele_audio::resample::RateConverter;
 use seele_audio::telemetry::{AudioTelemetry, FalhaLocal, LocalTelemetry, SourceTelemetry};
 use seele_audio::{FRAME_MS, FRAME_SAMPLES, SAMPLE_RATE_HZ};
@@ -117,6 +118,16 @@ struct Controls {
     /// deixava rastro nenhum — nem log, nem contador —, então a pergunta «é a
     /// rede ou é daqui?» não tinha como ser respondida por ninguém.
     recusados: std::sync::atomic::AtomicU64,
+    /// Amostras que a mistura produziu e o anel do dispositivo não aceitou.
+    ///
+    /// A gêmea de [`Controls::recusados`], do outro lado do laço: aquela conta
+    /// o que não saiu da máquina, esta conta o que não chegou ao alto-falante.
+    /// Também estava sendo descartada com `let _ =`, e também soa exatamente
+    /// como perda de rede para quem está ouvindo.
+    ///
+    /// Conta **amostras**, não quadros: o anel é de amostras e é aí que a
+    /// recusa acontece. Dividir por 48 dá milissegundos de áudio perdidos.
+    anel_cheio: std::sync::atomic::AtomicU64,
     /// Per-talker volume. Read once per 20 ms frame, so a lock is affordable
     /// here in a way it would not be inside a device callback.
     gains: Mutex<HashMap<u32, f32>>,
@@ -416,6 +427,7 @@ impl Voice {
             speaking: AtomicBool::new(false),
             stop: AtomicBool::new(false),
             recusados: std::sync::atomic::AtomicU64::new(0),
+            anel_cheio: std::sync::atomic::AtomicU64::new(0),
             gains: Mutex::new(HashMap::new()),
         });
         let telemetry = Arc::new(Mutex::new(AudioTelemetry::default()));
@@ -662,6 +674,18 @@ impl Voice {
         self.controls.recusados.load(Ordering::Relaxed)
     }
 
+    /// Quantas amostras a reprodução produziu e o anel do dispositivo recusou.
+    ///
+    /// A gêmea de [`Voice::quadros_recusados`], na outra ponta do laço. Zero é
+    /// o normal. Acima disso o áudio está se perdendo **depois** de decodificado
+    /// e antes do alto-falante, e a causa é sempre a mesma: a mistura entregou
+    /// mais depressa do que o dispositivo consumiu. Dividir por 48 dá
+    /// milissegundos.
+    #[must_use]
+    pub fn amostras_recusadas_pelo_anel(&self) -> u64 {
+        self.controls.anel_cheio.load(Ordering::Relaxed)
+    }
+
     /// Whether this pilot is transmitting right now.
     #[must_use]
     pub fn speaking(&self) -> bool {
@@ -739,7 +763,11 @@ async fn pipeline(
 
     let (mut seq, mut timestamp) = (0_u16, 0_u32);
     let started = Instant::now();
-    let mut next_playout = Instant::now();
+    // Não é `Instant + 20 ms` somado à mão. Este laço faz outras cinco coisas
+    // entre duas conferidas do prazo, e quanto tempo isso custa é do sistema
+    // operacional — ver `seele_audio::playout`, que é onde a conta está.
+    let mut playout = PlayoutClock::new(Instant::now(), FRAME_MS);
+    let mut atraso_avisado = false;
     let mut next_telemetry = Instant::now() + TELEMETRY_EVERY;
 
     while !controls.stop.load(Ordering::Relaxed) {
@@ -848,9 +876,13 @@ async fn pipeline(
         }
 
         // ---- playout ----
-        if Instant::now() >= next_playout {
-            next_playout += Duration::from_millis(u64::from(FRAME_MS));
-
+        //
+        // **Quantos** venceram, e não se um venceu. A diferença é o defeito que
+        // `seele_audio::playout` documenta: um quadro por volta é bastante
+        // enquanto a volta durar menos que um quadro, e é um vazamento
+        // permanente assim que ela durar mais.
+        let vencidos = playout.due(Instant::now());
+        if vencidos > 0 {
             // Isolamento total silences the mix rather than stopping the
             // pipeline: the jitter buffers keep draining, so unmuting lands the
             // pilot in the present instead of replaying the last ten seconds.
@@ -859,34 +891,63 @@ async fn pipeline(
             } else {
                 1.0
             });
+            // Fora do laço de quadros: os ganhos não mudam dentro de 20 ms, e
+            // este é o único cadeado desta volta.
             if let Ok(gains) = controls.gains.lock() {
                 for (talker, gain) in gains.iter() {
                     mixer.set_gain(*talker, *gain);
                 }
             }
 
-            let mut decoded: Vec<(u32, Vec<f32>)> = Vec::new();
-            for source in &mut sources {
-                let samples = match source.buffer.tick() {
-                    Decision::Play(payload) => source.decoder.decode(&payload).ok(),
-                    Decision::Conceal => source.decoder.conceal().ok(),
-                    Decision::Silence | Decision::Comfort | Decision::Starved => None,
-                };
-                if let Some(samples) = samples {
-                    decoded.push((source.ssrc, samples));
+            for _ in 0..vencidos {
+                let mut decoded: Vec<(u32, Vec<f32>)> = Vec::new();
+                for source in &mut sources {
+                    let samples = match source.buffer.tick() {
+                        Decision::Play(payload) => source.decoder.decode(&payload).ok(),
+                        Decision::Conceal => source.decoder.conceal().ok(),
+                        Decision::Silence | Decision::Comfort | Decision::Starved => None,
+                    };
+                    if let Some(samples) = samples {
+                        decoded.push((source.ssrc, samples));
+                    }
+                }
+                let borrowed: Vec<(u32, &[f32])> = decoded
+                    .iter()
+                    .map(|(talker, samples)| (*talker, samples.as_slice()))
+                    .collect();
+                mixer.mix(&borrowed, &mut mixed);
+
+                for_device.clear();
+                if to_device.push(&mixed, &mut for_device).is_ok() {
+                    for sample in for_device.drain(..) {
+                        if io.to_device.push(sample).is_err() {
+                            // Terceiro lugar onde áudio se perdia dentro desta
+                            // máquina sem deixar rastro. Contado por amostra e
+                            // não registrado em log, pela mesma razão que os
+                            // quadros recusados: acontece aos milhares.
+                            controls.anel_cheio.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
                 }
             }
-            let borrowed: Vec<(u32, &[f32])> = decoded
-                .iter()
-                .map(|(talker, samples)| (*talker, samples.as_slice()))
-                .collect();
-            mixer.mix(&borrowed, &mut mixed);
+        }
 
-            for_device.clear();
-            if to_device.push(&mixed, &mut for_device).is_ok() {
-                for sample in for_device.drain(..) {
-                    let _ = io.to_device.push(sample);
-                }
+        // Uma linha, uma vez por sessão, e ela responde a pergunta em vez de
+        // sugerir: se a volta deste laço passa de um quadro, o áudio que sai
+        // desta máquina pica **por causa disto**, e nada no áudio recebido
+        // explicaria o buraco. Uma vez porque a condição, quando é verdade, é
+        // verdade cinquenta vezes por segundo.
+        if !atraso_avisado {
+            let medido = playout.metrics();
+            if medido.worst_lateness_ms > f64::from(FRAME_MS) {
+                atraso_avisado = true;
+                tracing::warn!(
+                    volta_ms = medido.worst_lateness_ms,
+                    quadro_ms = FRAME_MS,
+                    reposicoes = medido.catchup_frames,
+                    "o laço de voz demorou mais que um quadro entre duas conferidas; \
+                     a reprodução está sendo mantida em dia por reposição"
+                );
             }
         }
 
@@ -900,7 +961,8 @@ async fn pipeline(
                     mixer.metrics(),
                     encoder.bitrate_bps(),
                     controls.speaking.load(Ordering::Relaxed),
-                ),
+                )
+                .with_playout(playout.metrics()),
                 sources: sources
                     .iter()
                     .map(|source| SourceTelemetry::assemble(source.ssrc, source.buffer.metrics()))

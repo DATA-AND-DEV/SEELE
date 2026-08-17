@@ -64,6 +64,29 @@ pub struct LocalTelemetry {
     pub playback_underruns: u64,
     /// Device-level errors, such as a disconnection.
     pub device_errors: u64,
+
+    /// A volta mais longa que o laço de voz deu entre dois quadros, em ms.
+    ///
+    /// Não é uma medida sobre o áudio: é quanto tempo a máquina levou para
+    /// voltar a conferir o prazo de reprodução. Abaixo de um quadro (20 ms) o
+    /// laço acompanha o relógio sozinho. Acima, ele só acompanha porque o
+    /// [`crate::playout::PlayoutClock`] repõe — e antes de haver reposição, ele
+    /// não acompanhava: entregava 20 ms de áudio por volta enquanto a volta
+    /// custava mais que 20 ms, e o anel de reprodução esvaziava na diferença.
+    ///
+    /// **É o número a pedir de quem relata áudio picotado.** Ele separa "a rede
+    /// está perdendo pacote" de "esta máquina não consegue empurrar cinquenta
+    /// quadros por segundo", que soam idênticos e têm consertos opostos.
+    pub playout_worst_lateness_ms: f64,
+
+    /// Quadros de reprodução que foram reposição de atraso, não o quadro da vez.
+    ///
+    /// Zero é o normal. Crescendo, significa que a volta do laço está passando
+    /// de 20 ms com frequência.
+    pub playout_catchup_frames: u64,
+
+    /// Quantas vezes o atraso passou do que dá para repor e o relógio reacertou.
+    pub playout_resyncs: u64,
 }
 
 impl LocalTelemetry {
@@ -84,7 +107,24 @@ impl LocalTelemetry {
             capture_overruns: stream.capture_overruns,
             playback_underruns: stream.playback_underruns,
             device_errors: stream.stream_errors,
+            playout_worst_lateness_ms: 0.0,
+            playout_catchup_frames: 0,
+            playout_resyncs: 0,
         }
+    }
+
+    /// Anexa o que o relógio de reprodução mediu.
+    ///
+    /// Separado de [`Self::assemble`] porque o relógio não vive neste crate: ele
+    /// é conferido pelo laço de voz, que é quem sabe quanto tempo a volta
+    /// dele levou. Sem esta chamada os três campos ficam zerados, que é o que
+    /// um caminho de áudio sem laço próprio deve mesmo relatar.
+    #[must_use]
+    pub fn with_playout(mut self, playout: crate::playout::PlayoutMetrics) -> Self {
+        self.playout_worst_lateness_ms = playout.worst_lateness_ms;
+        self.playout_catchup_frames = playout.catchup_frames;
+        self.playout_resyncs = playout.resyncs;
+        self
     }
 
     /// Quantas coisas deram errado nesta máquina, desde que o áudio começou.
