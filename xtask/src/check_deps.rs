@@ -46,6 +46,15 @@ use cargo_metadata::{DependencyKind, MetadataCommand};
 /// new crate sits in the graph.
 const RULES: &[(&str, &[&str])] = &[
     ("seele-proto", &[]),
+    // O ponto de encontro do degrau 4 do ADR 0022. Uma folha, ao lado de
+    // `seele-audio`: vê o formato do que passa pelo fio e mais nada.
+    //
+    // A aresta que importa é a que **não** existe. Este processo apresenta duas
+    // máquinas e sai do caminho; se um dia ele precisar de `seele-core` ou de
+    // `seele-server`, quer dizer que deixou de ser uma apresentação e virou
+    // parte da conversa — que é o degrau 5, e o ADR 0022 o deixou de fora por
+    // decisão. A tabela é onde essa mudança teria de ser argumentada.
+    ("seele-encontro", &["seele-proto"]),
     ("seele-audio", &["seele-proto"]),
     ("seele-core", &["seele-proto", "seele-audio"]),
     // The daemon speaks the wire format and nothing else.
@@ -246,6 +255,16 @@ mod tests {
         // argue about, not a table entry to copy.
         assert_eq!(evaluate("seele-server", &[edge("seele-core")]).len(), 1);
         assert_eq!(evaluate("seele-core", &[edge("seele-server")]).len(), 1);
+    }
+
+    #[test]
+    fn the_meeting_point_sees_the_wire_format_and_nothing_else() {
+        // ADR 0022, degrau 4: o ponto de encontro participa da apresentação e
+        // não da conversa. Uma aresta daqui para o servidor ou para o cliente
+        // seria a assinatura de que ele passou a participar da conversa.
+        assert!(evaluate("seele-encontro", &[edge("seele-proto")]).is_empty());
+        assert_eq!(evaluate("seele-encontro", &[edge("seele-core")]).len(), 1);
+        assert_eq!(evaluate("seele-encontro", &[edge("seele-server")]).len(), 1);
     }
 
     #[test]

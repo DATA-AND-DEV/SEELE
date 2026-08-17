@@ -4697,6 +4697,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "seele-encontro"
+version = "0.0.0"
+dependencies = [
+ "seele-proto",
+]
+
+[[package]]
 name = "seele-ffi"
 version = "0.0.0"
 dependencies = [
