@@ -457,6 +457,57 @@ mod tests {
     }
 
     #[test]
+    fn todo_socketaddr_atravessa_o_convite_e_volta_igual() {
+        // O lado de **quem gera**, que é o que faltava: os testes acima todos
+        // olhavam para quem lê. Um convite recusado com uma frase bonita não
+        // vale nada se fomos nós que o escrevemos torto.
+        //
+        // Quem monta um convite tem um `SocketAddr` na mão, e a única forma
+        // segura de escrevê-lo é o `Display` dele — que põe os colchetes. Este
+        // teste é o contrato entre as duas pontas.
+        for texto in [
+            "192.0.2.10:8383",
+            "127.0.0.1:1",
+            "[2001:db8::1]:8383",
+            "[::1]:8383",
+            // Forma longa: o `Display` encolhe, e a comparação é por endereço.
+            "[2001:db8:0:0:0:0:0:1]:65535",
+        ] {
+            let endereco: std::net::SocketAddr = texto
+                .parse()
+                .unwrap_or_else(|_| panic!("teste torto: {texto}"));
+            let convite = Convite::novo(endereco.to_string()).to_string();
+            let lido = analisar(&convite).unwrap_or_else(|erro| {
+                panic!("geramos um convite que não se lê: {convite} ({erro:?})")
+            });
+            let alvo = lido.endereco().expect("o alvo gerado não se separa");
+            assert_eq!(alvo.porta, endereco.port(), "a porta mudou em {convite}");
+            assert_eq!(
+                alvo.maquina.parse::<std::net::IpAddr>().ok(),
+                Some(endereco.ip()),
+                "o endereço mudou em {convite}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_interpolacao_a_mao_e_justamente_a_que_nao_passa() {
+        // É o que dá dente ao teste acima: `format!("{ip}:{porta}")` parece
+        // certo, compila, e escreve um endereço que o analisador recusa. Foi
+        // encontrado gerando convite no `seeled`, não lendo.
+        let ip: std::net::IpAddr = "2001:db8::1".parse().expect("endereço de teste");
+        let a_mao = format!("{ip}:{}", PORTA_PADRAO);
+        assert_eq!(
+            analisar(&format!("{ESQUEMA}{a_mao}")),
+            Err(ErroDeUri::EnderecoIpv6SemColchetes),
+            "a forma torta passou: {a_mao}"
+        );
+
+        let certo = std::net::SocketAddr::new(ip, PORTA_PADRAO).to_string();
+        assert!(analisar(&format!("{ESQUEMA}{certo}")).is_ok(), "{certo}");
+    }
+
+    #[test]
     fn um_ipv6_se_separa_sem_os_colchetes_e_com_a_porta_escrita() {
         // Os colchetes são sintaxe de URI, não parte do endereço: nenhum
         // resolvedor aceita `[2001:db8::1]` e todo `IpAddr` aceita

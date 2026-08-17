@@ -1065,16 +1065,12 @@ fn pattern_from_byte(byte: u8) -> Pattern {
 /// Three values because they are three things — see the same function in
 /// `seele-tui`, and `TofuVerifier::new` for why keying the pin by the TLS label
 /// was wrong.
+/// The split is `seele_core::uri::separar` and not `rsplit_once(':')`: the port
+/// separator and an IPv6's own separator are the same character, and doing it by
+/// hand here made `[2001:db8::1]:8383` resolve to nothing. ADR 0022, step 2.
 fn resolve(target: &str) -> Result<(SocketAddr, String, String), PlugError> {
-    let with_port = if target.contains(':') {
-        target.to_owned()
-    } else {
-        format!("{target}:{}", seele_core::DEFAULT_PORT)
-    };
-    let host = with_port
-        .rsplit_once(':')
-        .map_or_else(|| with_port.clone(), |(host, _)| host.to_owned());
-    let address = with_port
+    let alvo = seele_core::uri::separar(target).map_err(|_| PlugError::UnresolvableHost)?;
+    let address = (alvo.maquina, alvo.porta)
         .to_socket_addrs()
         .map_err(|_| PlugError::UnresolvableHost)?
         .next()
@@ -1082,12 +1078,20 @@ fn resolve(target: &str) -> Result<(SocketAddr, String, String), PlugError> {
 
     // TLS gets the name the M2 certificate carries; the pin gets the address,
     // which is what actually tells one server from another.
-    let server_name = if host.parse::<std::net::IpAddr>().is_ok() {
+    let server_name = if alvo.maquina.parse::<std::net::IpAddr>().is_ok() {
         "localhost".to_owned()
     } else {
-        host
+        alvo.maquina.to_owned()
     };
-    Ok((address, server_name, with_port))
+    // The pin key is written back in the canonical form rather than as typed, so
+    // `[::1]:8383` and `[::1]` file under one entry instead of two. An IPv6 goes
+    // back into its brackets: without them the key is ambiguous with `host:port`.
+    let pin_key = if address.is_ipv6() && alvo.maquina.contains(':') {
+        format!("[{}]:{}", alvo.maquina, alvo.porta)
+    } else {
+        format!("{}:{}", alvo.maquina, alvo.porta)
+    };
+    Ok((address, server_name, pin_key))
 }
 
 /// Turns a [`ConnectConfig`] and what [`resolve`] made of it into a

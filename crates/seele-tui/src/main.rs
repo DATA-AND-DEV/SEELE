@@ -169,16 +169,18 @@ fn parse_args() -> Result<Option<Args>> {
 /// Keying the pin by the TLS label instead was a real bug. Both shells mapped
 /// every IP address to `localhost`, so two Dogmas on a LAN shared one entry and
 /// the second one contacted looked like the first one's key had changed.
+/// The split is `seele_core::uri::separar` and not `rsplit_once(':')`: the port
+/// separator and an IPv6's own separator are the same character, and doing it by
+/// hand here made `[2001:db8::1]:8383` resolve to nothing. ADR 0022, step 2.
 fn resolve(target: &str) -> Result<(SocketAddr, String, String)> {
-    let with_port = if target.contains(':') {
-        target.to_owned()
-    } else {
-        format!("{target}:8383")
-    };
-    let host = with_port
-        .rsplit_once(':')
-        .map_or(with_port.clone(), |(host, _)| host.to_owned());
-    let address = with_port
+    let alvo = seele_core::uri::separar(target).map_err(|erro| match erro {
+        seele_core::uri::ErroDeUri::EnderecoIpv6SemColchetes => anyhow!(
+            "{target} é um IPv6 e precisa de colchetes: escreva [{target}] \
+             (o `:` que separa a porta é o mesmo que separa o endereço)"
+        ),
+        outro => anyhow!("não consegui entender {target}: {outro}"),
+    })?;
+    let address = (alvo.maquina, alvo.porta)
         .to_socket_addrs()
         .with_context(|| format!("não consegui resolver {target}"))?
         .next()
@@ -187,12 +189,20 @@ fn resolve(target: &str) -> Result<(SocketAddr, String, String)> {
     // An IP is not a name the M2 server's certificate carries, so TLS is handed
     // the name it does carry. The pin, meanwhile, is filed under the address —
     // which is the thing that actually distinguishes one server from another.
-    let server_name = if host.parse::<std::net::IpAddr>().is_ok() {
+    let server_name = if alvo.maquina.parse::<std::net::IpAddr>().is_ok() {
         "localhost".to_owned()
     } else {
-        host
+        alvo.maquina.to_owned()
     };
-    Ok((address, server_name, with_port))
+    // Canonical rather than as typed, so `[::1]` and `[::1]:8383` file the same
+    // pin instead of two. The brackets go back on: without them the key would be
+    // ambiguous with `host:port`.
+    let pin_key = if address.is_ipv6() && alvo.maquina.contains(':') {
+        format!("[{}]:{}", alvo.maquina, alvo.porta)
+    } else {
+        format!("{}:{}", alvo.maquina, alvo.porta)
+    };
+    Ok((address, server_name, pin_key))
 }
 
 /// Where this client keeps its identity and its pins.

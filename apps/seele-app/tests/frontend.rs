@@ -3060,3 +3060,89 @@ fn every_screen_says_where_the_focus_lands_and_what_to_announce() {
         );
     }
 }
+
+#[test]
+fn every_failure_the_rust_side_can_name_has_a_sentence_here() {
+    // `nome_da_falha` in `src/main.rs` turns each `ErroDeUri` variant into a
+    // stable name, and `FRASES` in `ui/frases.js` turns that name into the
+    // sentence somebody reads. The two lists are joined by nothing but
+    // convention, and the seam is invisible: a new variant compiles, reaches the
+    // screen, misses `FRASES`, and falls through to the `desconhecida()`
+    // fallback — which prints a JSON blob of an English identifier.
+    //
+    // Not hypothetical. `EnderecoIpv6SemColchetes` arrived with step 2 of
+    // ADR 0022 and did exactly that until this test existed.
+    //
+    // The fallback is still the right thing to have — it beats a dead end — but
+    // it is a net, not a destination, and nothing was checking how often we
+    // landed in it.
+    let rust = read("src/main.rs");
+    let Some(corpo) = rust.split("fn nome_da_falha").nth(1) else {
+        panic!(
+            "`nome_da_falha` is gone from src/main.rs, so the names the screen \
+             keys off are now produced somewhere this test cannot see"
+        );
+    };
+    let Some(corpo) = corpo.split("\n}").next() else {
+        panic!("`nome_da_falha` is never closed");
+    };
+
+    // The names are the string literals on the right of each match arm.
+    let nomes: Vec<&str> = corpo
+        .split("=> \"")
+        .skip(1)
+        .filter_map(|resto| resto.split('"').next())
+        .collect();
+    assert!(
+        nomes.len() >= 6,
+        "found only {} failure names, so the match arms are no longer being read \
+         correctly and this test has stopped guarding anything: {nomes:?}",
+        nomes.len()
+    );
+
+    let frases = read("ui/frases.js");
+    let sem_frase: Vec<&&str> = nomes
+        .iter()
+        .filter(|nome| !frases.contains(&format!("{nome}:")))
+        .collect();
+    assert!(
+        sem_frase.is_empty(),
+        "the Rust side can name these failures and `FRASES` has no sentence for \
+         them, so each one reaches the person as a JSON blob of an English \
+         identifier: {sem_frase:?}"
+    );
+}
+
+#[test]
+fn the_ipv6_sentence_teaches_the_fix_with_an_address_that_would_work() {
+    // This failure has a sentence of its own, rather than falling into
+    // `EnderecoInvalido`, for one reason: it is fixable by the person reading
+    // it. The address is fine; the punctuation is missing. So the sentence has
+    // to actually show the bracketed form — naming a problem whose fix you
+    // withhold is worse than the generic message it was split away from.
+    //
+    // And the example has to be an address that would work once bracketed. A
+    // link-local (`fe80::`) example teaches the brackets and hands back an
+    // address that still reaches nothing without a zone index, trading one dead
+    // end for another.
+    let frases = read("ui/frases.js");
+    let Some(depois) = frases.split("EnderecoIpv6SemColchetes:").nth(1) else {
+        panic!("no sentence for EnderecoIpv6SemColchetes");
+    };
+    let frase: String = depois.chars().take(400).collect();
+
+    assert!(
+        frase.contains('[') && frase.contains(']'),
+        "the sentence never shows the bracketed form, so it names the problem and \
+         withholds the fix:\n{frase}"
+    );
+    assert!(
+        !frase.to_lowercase().contains("fe80"),
+        "the example is a link-local address, which reaches nothing without a \
+         zone index even once it is bracketed:\n{frase}"
+    );
+    assert!(
+        !frase.contains('\u{2026}'),
+        "a draft ellipsis leaked into a sentence somebody reads:\n{frase}"
+    );
+}

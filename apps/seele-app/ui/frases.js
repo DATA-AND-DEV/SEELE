@@ -130,6 +130,11 @@ const FRASES = {
     EsquemaDesconhecido: "ISTO NÃO PARECE UM CONVITE SEELE",
     SemEndereco: "ESTE CONVITE NÃO TRAZ ENDEREÇO NENHUM",
     EnderecoInvalido: "O ENDEREÇO DENTRO DESTE CONVITE NÃO É UM ENDEREÇO",
+    // Frase própria, e não o `EnderecoInvalido` acima, porque esta falha tem
+    // conserto na mão de quem lê: falta pontuação, não falta endereço. Mandar
+    // procurar um caractere errado seria mandar procurar o que não existe.
+    EnderecoIpv6SemColchetes:
+      "FALTAM OS COLCHETES NESTE ENDEREÇO IPV6.\nO «:» que separa a porta é o mesmo que separa um endereço IPv6, então o endereço vai entre colchetes: seele://[2001:db8::1]:8383",
     ImpressaoDigitalInvalida: "ESTE CONVITE CHEGOU CORTADO OU ADULTERADO",
     TokenInvalido: "O CONVITE DENTRO DESTE LINK NÃO É UM CONVITE",
     CageInvalido: "O CAGE DESTE CONVITE NÃO É UM NÚMERO",

@@ -147,7 +147,12 @@ fn criar_convite(argumentos: &[String]) -> anyhow::Result<()> {
     let impressao = seele_server::Server::fingerprint_do_banco(&casper).ok();
     let alvo = lan_address().map_or_else(
         || format!("SEU-ENDERECO:{}", seele_proto::transport::DEFAULT_PORT),
-        |ip| format!("{ip}:{}", seele_proto::transport::DEFAULT_PORT),
+        // `SocketAddr` e não `format!("{ip}:{porta}")`: o `Display` do
+        // `SocketAddr` põe os colchetes quando o endereço é IPv6, e a
+        // interpolação à mão escreveria `2001:db8::1:8383` — exatamente a forma
+        // que o cliente agora recusa. Gerar torto e recusar educadamente seria
+        // pôr uma frase bonita em cima de um defeito nosso.
+        |ip| SocketAddr::new(ip, seele_proto::transport::DEFAULT_PORT).to_string(),
     );
 
     let mut convite = seele_proto::uri::Convite::novo(alvo).com_token(&token);
