@@ -133,8 +133,8 @@ impl PlayoutClock {
         }
 
         // `period` nunca é zero — ver `new`.
-        let elapsed = u128::from(late.as_nanos());
-        let period = u128::from(self.period.as_nanos()).max(1);
+        let elapsed = late.as_nanos();
+        let period = self.period.as_nanos().max(1);
         let overdue = u32::try_from(elapsed / period).unwrap_or(u32::MAX);
         let frames = overdue.saturating_add(1);
 

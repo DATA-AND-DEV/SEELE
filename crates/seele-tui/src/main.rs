@@ -1216,8 +1216,18 @@ async fn run_command(
             // Os tropeços desta máquina, separados dos da rede. Sem isto, "ÁUDIO
             // LOCAL FALHANDO" é um aviso sem número atrás: dá para ver que
             // acendeu e não dá para ver o que subiu, nem se ainda está subindo.
-            if let Some(voice) = runtime.voice.as_ref() {
-                let local = voice.telemetry().local;
+            // Lido de uma vez, antes de qualquer `note`: cada `note` toma o
+            // `runtime` emprestado por inteiro, e segurar a voz por cima disso
+            // não compila.
+            let medido = runtime.voice.as_ref().map(|voice| {
+                (
+                    voice.telemetry().local,
+                    voice.falha_local(),
+                    voice.quadros_recusados(),
+                    voice.amostras_recusadas_pelo_anel(),
+                )
+            });
+            if let Some((local, falhando, recusados, anel_cheio)) = medido {
                 note(
                     runtime,
                     format!(
@@ -1225,7 +1235,30 @@ async fn run_command(
                         local.capture_overruns,
                         local.playback_underruns,
                         local.device_errors,
-                        if voice.falha_local() { "sim" } else { "não" }
+                        if falhando { "sim" } else { "não" }
+                    ),
+                );
+                // A linha que responde "é a rede ou é esta máquina?".
+                //
+                // `volta` é quanto tempo o laço de voz levou, no pior caso,
+                // entre duas conferidas do prazo de reprodução. Abaixo de 20 ms
+                // esta máquina acompanha o relógio sozinha; acima, ela só está
+                // em dia porque a reposição a segura — e antes de haver
+                // reposição, era aí que o áudio sumia, com o som de perda de
+                // rede e sem nada na rede para achar.
+                //
+                // `recusa` e `anel` são as duas pontas onde áudio se perde
+                // **dentro** desta máquina: o que não saiu para o transporte e
+                // o que não chegou ao dispositivo. As duas eram `let _ =`.
+                note(
+                    runtime,
+                    format!(
+                        "LAÇO volta {:.1}ms · reposição {} · reacerto {} · recusa {} · anel {}",
+                        local.playout_worst_lateness_ms,
+                        local.playout_catchup_frames,
+                        local.playout_resyncs,
+                        recusados,
+                        anel_cheio,
                     ),
                 );
             }
