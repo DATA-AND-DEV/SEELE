@@ -379,6 +379,27 @@ pub enum AlertReason {
     ///
     /// Appended after `RateLimited`, for the reason that variant gives.
     MovedByOperator,
+
+    /// The Cage this pilot's plug was in no longer exists.
+    ///
+    /// Its own reason rather than [`Self::OperatorNotice`], for the reason
+    /// [`Self::MovedByOperator`] gives: the shell has a specific sentence to
+    /// write, and being turned out of a room in the middle of speaking is the
+    /// case this exists to explain. Sent only to the pilots who were inside —
+    /// everybody else learns the room is gone from
+    /// [`ServerMessage::CageDeleted`] and has nothing to be told about it.
+    ///
+    /// Appended after `MovedByOperator`, for the reason that variant gives.
+    CageDeleted,
+
+    /// A Line this pilot had open no longer exists, and neither does anything
+    /// written in it.
+    ///
+    /// Separate from [`Self::CageDeleted`] because the two sentences are not
+    /// the same sentence: one says the room you were speaking in is gone, the
+    /// other says the conversation you were reading was destroyed. A shell
+    /// given one reason for both would have to write the vaguer of the two.
+    LineDeleted,
 }
 
 /// Client to server.
@@ -579,6 +600,78 @@ pub enum ClientMessage {
         pilot: PilotId,
         /// Where to.
         cage: CageId,
+    },
+
+    // ---- unmaking a room ----
+    //
+    // Appended last, for the reason [`AlertReason::RateLimited`] gives.
+    //
+    // # Why these are not [`Permission::ManageCages`]
+    //
+    // The four verbs above them are: creating a room and renaming one are both
+    // things a mistake survives — the wrong name is renamed again, the room
+    // nobody wanted is destroyed. Destroying is the one room verb that ends
+    // somebody **else's** writing, and no screen of this product brings it
+    // back.
+    //
+    // `specs/04-servidor-seele.md` enumerates `gerenciar_cages` as "criar e
+    // configurar Cages" and `administrar_dogma` as "todo o resto sobre o
+    // Dogma". Destroying every message six people wrote is not configuration.
+    // So it sits on [`Permission::AdministerDogma`], which migration 1 seeds on
+    // the Comandante alone — and the separation is real rather than notional
+    // the moment an operator makes a role that may build rooms without being
+    // able to unmake them. It is deliberately **not** the moderation
+    // permissions either: `specs/04` gives the Operador `expulsar` and `banir`,
+    // and somebody trusted to remove a person for the evening is not thereby
+    // trusted to destroy the Dogma's history.
+    /// Destroys a Cage. `apagar_cage` — [`Permission::AdministerDogma`].
+    ///
+    /// Everybody inside is turned out of it: a Cage does not vanish from under
+    /// the feet of the people speaking in it. They are told, with
+    /// [`AlertReason::CageDeleted`], for the reason
+    /// [`AlertReason::MovedByOperator`] gives.
+    ///
+    /// A Line bound to the Cage is **not** destroyed with it.
+    /// `specs/04-servidor-seele.md` makes Cages and Lines independent, and the
+    /// association optional; destroying a voice room is no statement about the
+    /// writing that happened to hang off it.
+    ///
+    /// The server refuses the last one. A Dogma with no Cage has nowhere to
+    /// speak, which is the product's first sentence — and the refusal is a
+    /// refusal rather than a silence, so a shell can say why.
+    DeleteCage {
+        /// Which Cage.
+        cage: CageId,
+    },
+    /// Destroys a Line and everything written in it. `apagar_linha` —
+    /// [`Permission::AdministerDogma`].
+    ///
+    /// Not a soft delete, unlike [`Self::RemoveMessage`]. That one keeps a row
+    /// so replies do not dangle and an operator can answer "what was removed";
+    /// this destroys the Line those rows hang from, so there is nothing left
+    /// for either to be about.
+    ///
+    /// Any Cage bound to this Line keeps existing and loses the binding.
+    DeleteLine {
+        /// Which Line.
+        line: LineId,
+    },
+    /// Asks what destroying a Line would cost, without destroying anything.
+    ///
+    /// A read, and the only verb in this enum that exists for a **sentence**: a
+    /// confirmation that says "this destroys 1.847 messages by 6 people,
+    /// written since 12/03" needs those three numbers counted in the database
+    /// at the instant of asking. A client cannot count them for itself — it
+    /// holds one page of history and would guess low by whatever the Line's
+    /// whole past is — and a number that is nearly right in a box promising
+    /// destruction is worse than no number at all.
+    ///
+    /// Needs no permission. Answering it tells a pilot how much is in a Line
+    /// they may already read, and refusing it would only mean the confirmation
+    /// they see is the vaguer one.
+    WeighLine {
+        /// Which Line.
+        line: LineId,
     },
 }
 
@@ -783,6 +876,49 @@ pub enum ServerMessage {
         /// Where the plug is now.
         cage: CageId,
     },
+
+    // ---- unmaking a room ----
+    //
+    // Appended last, for the reason [`AlertReason::RateLimited`] gives.
+    //
+    // Sent to **everybody connected**, the pilot who asked included, exactly
+    // like the four announcements above: a room that goes on being drawn until
+    // the next handshake is a room people keep trying to walk into.
+    /// A Cage was destroyed.
+    CageDeleted {
+        /// Which Cage.
+        cage: CageId,
+    },
+    /// A Line was destroyed, and everything written in it with it.
+    LineDeleted {
+        /// Which Line.
+        line: LineId,
+    },
+    /// What destroying a Line would cost, counted now.
+    ///
+    /// The answer to [`ClientMessage::WeighLine`], and the numbers a
+    /// confirmation is built out of. Counted at the moment of asking rather
+    /// than carried on [`LineInfo`], because a count on the room list would be
+    /// stale by every message sent since it was drawn — and stale is the one
+    /// thing a number in this particular sentence may not be.
+    LineWeighed {
+        /// Which Line.
+        line: LineId,
+        /// How many messages are in it that anybody can read.
+        ///
+        /// Messages already taken off the Line by [`ClientMessage::RemoveMessage`]
+        /// are not counted. They are gone from every screen already, so
+        /// counting them would inflate what the reader is told they are about
+        /// to lose by a number only the database can see.
+        messages: u32,
+        /// How many distinct pilots wrote them.
+        authors: u32,
+        /// When the oldest one was written, in seconds since the Unix epoch.
+        ///
+        /// `None` when the Line is empty, which is the one case where the
+        /// sentence has no date to give and must say something else instead.
+        oldest_at_seconds: Option<i64>,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -967,7 +1103,10 @@ impl Validate for ClientMessage {
             | Self::Ping { .. }
             | Self::KickPilot { .. }
             | Self::RemoveMessage { .. }
-            | Self::MovePilot { .. } => Ok(()),
+            | Self::MovePilot { .. }
+            | Self::DeleteCage { .. }
+            | Self::DeleteLine { .. }
+            | Self::WeighLine { .. } => Ok(()),
         }
     }
 }
@@ -1017,7 +1156,10 @@ impl Validate for ServerMessage {
             | Self::MessageRemoved { .. }
             | Self::Pong { .. }
             | Self::Disconnecting { .. }
-            | Self::MovedToCage { .. } => Ok(()),
+            | Self::MovedToCage { .. }
+            | Self::CageDeleted { .. }
+            | Self::LineDeleted { .. }
+            | Self::LineWeighed { .. } => Ok(()),
         }
     }
 }
@@ -1508,6 +1650,91 @@ mod tests {
             "a kick got big enough to be carrying prose: {} bytes",
             frame.len()
         );
+    }
+
+    // ---- unmaking a room ----
+
+    #[test]
+    fn the_deleting_verbs_round_trip() {
+        for message in [
+            ClientMessage::DeleteCage { cage: CageId(2) },
+            ClientMessage::DeleteLine { line: LineId(7) },
+            ClientMessage::WeighLine { line: LineId(7) },
+        ] {
+            let frame = encode(&message).unwrap();
+            assert_eq!(decode::<ClientMessage>(&frame).unwrap(), message);
+        }
+    }
+
+    #[test]
+    fn the_weight_of_a_line_survives_the_wire_exactly() {
+        // Exactly, and that is the whole test: these three numbers are the
+        // sentence a person reads before destroying something that no screen of
+        // this product brings back. A count that arrives one off, or a date that
+        // arrives as a default because `None` was flattened somewhere, produces
+        // a confirmation that lies with total confidence.
+        for weighed in [
+            ServerMessage::LineWeighed {
+                line: LineId(7),
+                messages: 1_847,
+                authors: 6,
+                oldest_at_seconds: Some(1_678_600_000),
+            },
+            // The empty Line, which is the case with no date to give.
+            ServerMessage::LineWeighed {
+                line: LineId(7),
+                messages: 0,
+                authors: 0,
+                oldest_at_seconds: None,
+            },
+        ] {
+            let frame = encode(&weighed).unwrap();
+            assert_eq!(decode::<ServerMessage>(&frame).unwrap(), weighed);
+        }
+    }
+
+    #[test]
+    fn a_destroyed_room_is_announced_by_identifier_and_nothing_else() {
+        // Unlike `CageCreated`, which carries the whole row: there is no row
+        // any more, and everything a client needs to stop drawing the room it
+        // already has. A frame carrying the name of a room that no longer
+        // exists would be inviting some shell to keep it.
+        for gone in [
+            ServerMessage::CageDeleted { cage: CageId(2) },
+            ServerMessage::LineDeleted { line: LineId(7) },
+        ] {
+            let frame = encode(&gone).unwrap();
+            assert_eq!(decode::<ServerMessage>(&frame).unwrap(), gone);
+            assert!(
+                frame.len() < 16,
+                "a deletion announcement got big enough to be carrying a room: {} bytes",
+                frame.len()
+            );
+        }
+    }
+
+    #[test]
+    fn being_turned_out_of_a_room_has_its_own_reason_for_each_kind() {
+        // Two reasons and not one, because they are two sentences: the room you
+        // were speaking in is gone, and the conversation you were reading was
+        // destroyed. A shell handed one reason for both writes the vaguer of the
+        // two, which is the shape `OperatorNotice` already has and the reason
+        // neither of these is it.
+        let cage = ServerMessage::Alert {
+            severity: AlertSeverity::Warning,
+            reason: AlertReason::CageDeleted,
+            operator_text: None,
+        };
+        let line = ServerMessage::Alert {
+            severity: AlertSeverity::Warning,
+            reason: AlertReason::LineDeleted,
+            operator_text: None,
+        };
+        assert_ne!(cage, line);
+        for alert in [cage, line] {
+            let frame = encode(&alert).unwrap();
+            assert_eq!(decode::<ServerMessage>(&frame).unwrap(), alert);
+        }
     }
 
     proptest! {
