@@ -67,14 +67,32 @@ isso**: os contadores crescem igual nos dois modos. O laço drena a captura
 incondicionalmente, a cada 2 ms. A diferença que aparece na interface entre
 TECLA e ABERTO ainda não tem explicação.
 
-**Suspeitas, na ordem.** O laço de reprodução empurra um quadro de 20 ms por
-tica e recupera atraso somando 20 ms ao alvo — se uma volta passar do prazo,
-ele não repõe o que ficou para trás. Depois: contagem de canais do dispositivo
-de saída, e a conversão de taxa quando o dispositivo não roda a 48 kHz.
+**A primeira suspeita era certa, e foi consertada.** Ela dizia: "o laço de
+reprodução empurra um quadro de 20 ms por tica e recupera atraso somando 20 ms
+ao alvo — se uma volta passar do prazo, ele não repõe o que ficou para trás".
+Era isso mesmo. O conserto está contado na pendência 15, que é onde o mesmo
+defeito ficou grande o bastante para ser ouvido; aqui ele só vazava devagar.
 
-**Por que não foi resolvido agora.** Precisa de instrumentação dentro do
-retorno de chamada de áudio, e chutar aqui produziria um conserto que parece
-funcionar. O `:sync` já mostra os números, que é o começo.
+**Duas das outras suspeitas caíram, medidas.** Nesta máquina os dois
+dispositivos rodam a 48 kHz e os dois conversores são passagem direta
+(`cargo run -p seele-audio --example device_smoke`), então nem conversão de
+taxa nem contagem de canais explicam o que se mediu aqui. Continuam de pé para
+uma máquina cujo dispositivo **não** rode a 48 kHz — o `:audio` diz a taxa.
+
+**O que sobrou, e é a explicação mais provável.** Deriva de relógio. O laço
+produz 48 000 amostras por segundo de `Instant`; o dispositivo consome no ritmo
+do cristal dele, e os dois não são o mesmo. As centenas de amostras por dezena
+de segundos medidas acima dão algo da ordem de algumas centenas de partes por
+milhão, que é a faixa em que dois relógios independentes vivem. O `drift.rs` já
+documenta que a correção certa é **reamostrar** — `RateConverter::adjust_ratio`
+existe e tem teste — e não descartar. Ligar isso ao anel de reprodução é a
+tarefa M1.8, e é tarefa própria.
+
+**Por que não foi resolvido agora.** O que faltava para medir já não falta: o
+`:sync` mostra `LAÇO volta … · reposição … · anel …`, e o `anel` conta a outra
+ponta — o que a mistura produziu e o dispositivo recusou, que também era um
+`let _ =`. Falta a correção de deriva em si, que é reamostragem contínua guiada
+pela profundidade do anel, e não um remendo.
 
 ## 3 · O instalador do Windows não põe `plug` no `PATH`
 
@@ -335,3 +353,83 @@ em si.
 **Quando dói.** Buscar um termo curto que se repete dentro de si mesmo — "aa",
 "ll", "oo" — num corpo que o contém sobreposto. Raro, e visível assim que
 acontece: a mensagem na tela deixa de ser a mensagem que a pessoa escreveu.
+
+## 15 · Uma máquina ouve picotado e a outra não
+
+**Sintoma.** Duas máquinas na mesma rede, o Mac hospedando o Dogma e o Windows
+conectando. O Windows fala e o Mac ouve perfeitamente; o Mac fala e o Windows
+ouve picotado. O texto atravessa inteiro nos dois sentidos, o tempo todo.
+
+**O primeiro erro foi de leitura, e custou uma rodada.** A assimetria foi lida
+como sendo do **sentido** — servidor → cliente falha, cliente → servidor não —
+e daí se concluiu que o trecho suspeito era o servidor reenviando. Só que em
+cada metade do teste **uma máquina só está reproduzindo**. "O Mac fala e o
+Windows pica" e "a reprodução do Windows pica" produzem exatamente a mesma
+observação, e a segunda leitura reabre o caminho de recepção inteiro, que a
+primeira tinha descartado. Nada no relato distingue as duas.
+
+**Medido.** Com `cargo run --release -p seele-core --example cadencia`, que dá
+voltas com a mesma forma do laço de voz — sem microfone, sem rede, sem outra
+máquina:
+
+| | p50 | p99 | pior |
+|---|---|---|---|
+| volta do laço, neste Mac | 5,65 ms | 5,70 ms | 22,44 ms* |
+| a mesma volta sem a soneca | 2,26 ms | 2,30 ms | 7,90 ms |
+
+\* numa corrida com a máquina ocupada; numa ociosa o pior caso foi 5,80 ms.
+
+**O defeito que isso encontrou.** O laço de voz conferia `if agora >= próximo`
+e produzia **um** quadro de 20 ms. Isso se sustenta enquanto a volta durar bem
+menos que 20 ms: cada volta entrega 20 ms de áudio gastando cinco de relógio, e
+qualquer atraso é reposto. Assim que a volta passar de 20 ms, a mesma linha
+vira vazamento permanente — 20 ms de áudio por volta, custando mais que 20 ms
+de relógio —, e o anel de reprodução esvazia na diferença, para sempre.
+Medido em teste: com uma volta de 31 ms saem **322 quadros onde o relógio pedia
+499**, 64,5% do áudio, e os outros 35,5% saem como silêncio inventado pelo
+retorno de chamada. É picotado, e nada no áudio recebido explica o buraco.
+
+E a volta não dura o mesmo em toda parte. Ela é feita de duas esperas de
+temporizador — `timeout(1 ms)` pela mídia e `sleep(2 ms)` no fim —, e cada uma
+é arredondada para cima pela granularidade do temporizador do sistema antes de
+somar. Onde essa granularidade é fina, 5,65 ms. Onde é grossa, dezenas.
+
+**O que foi eliminado.**
+
+- **Fragmentação de datagrama.** Era a hipótese principal, e ela é bonita: o
+  texto vai em fluxo e se adapta ao caminho sozinho, a voz vai em datagrama e
+  um datagrama que não cabe é recusado inteiro. A aritmética não fecha. Medido
+  em `codec.rs`: o maior datagrama de voz que este build produz, com áudio de
+  verdade no teto de bitrate, tem **272 bytes**. A RFC 9000 §14.1 exige 1200
+  bytes de carga UDP no pacote Initial, então um caminho que não os entregue
+  **não completa o aperto de mão** — não haveria texto atravessando para
+  comparar. As duas metades do sintoma não podem ter a mesma causa. Está travado
+  em teste, com folga de 3x, para o dia em que alguém aumentar o quadro.
+- **Conversão de taxa neste Mac.** Os dois dispositivos rodam a 48 kHz e os dois
+  conversores são passagem direta (`device_smoke`). Não foi eliminada do lado
+  do Windows: o `:audio` diz a taxa daquela máquina, e ninguém olhou.
+
+**O que ficou no lugar.** O laço passa a perguntar **quantos** quadros venceram
+(`seele_audio::playout::PlayoutClock`) e produz todos, com teto de quatro para
+não despejar uma hibernação inteira no anel. Isso torna a reprodução correta
+independentemente de quanto a volta durar, que é a propriedade que faltava.
+
+**E o que torna a próxima medição conclusiva.** Três coisas, e nenhuma delas
+depende de hardware:
+
+- `:sync` ganhou `LAÇO volta … · reposição … · reacerto … · recusa … · anel …`.
+  `volta` acima de 20 ms diz, com número, que a máquina não acompanha o
+  relógio pela via normal.
+- um `tracing::warn!` uma vez por sessão quando a volta passa de um quadro.
+- `examples/cadencia` roda em dez segundos, em qualquer máquina, e dá veredito.
+
+**O que falta.** Rodar o `cadencia` no Windows. Se a volta de lá couber dentro
+de um quadro, este diagnóstico está errado e a suspeita seguinte é a fila de
+saída do servidor — o `cage.rs` conta `drops.subscriber_lagging` e **`drops()`
+só é lido em teste**, então nada em produção mostra aquilo. Se a volta não
+couber, a alavanca já está medida: tirar a soneca do fim do laço tira uma das
+duas esperas de temporizador, e custou 3,39 ms de p50 aqui.
+
+**Quando dói.** Sempre, em qualquer máquina cujo laço de voz não feche uma
+volta em 20 ms — e a folga neste Mac era de 3,5x, não das dez que a forma
+antiga supunha.
