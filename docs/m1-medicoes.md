@@ -321,7 +321,7 @@ de pacote. Há uma segunda, dentro desta máquina e sem rede nenhuma: o laço de
 produz 48 000 amostras por segundo de `Instant` e o dispositivo consome no ritmo
 do cristal dele. A diferença só cabe no anel entre os dois, e sem alvo o anel
 encosta numa parede e fica lá. É a pendência 2, e a malha que a segura está em
-`crates/seele-audio/src/pacing.rs` (ADR 0027).
+`crates/seele-audio/src/pacing.rs` (ADR 0028).
 
 `cargo run --release -p seele-audio --example ritmo`, que dá voltas com a forma
 do laço de voz — quadros vencidos por `PlayoutClock`, duas esperas de

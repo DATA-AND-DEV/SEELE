@@ -44,7 +44,7 @@ histórico em rajada. Não apareceu em uso normal.
 
 **O que foi feito.** O anel de reprodução ganhou **alvo**, e uma malha que o
 segura ali reamostrando — `crates/seele-audio/src/pacing.rs`, tarefa M1.8. Ver
-o ADR 0027 para a decisão e para o que ela custa de latência, e o
+o ADR 0028 para a decisão e para o que ela custa de latência, e o
 `docs/m1-medicoes.md` para os números. O que ainda não foi visto é o `:sync` de
 um `plug --hospedar` de verdade parar de crescer; o que foi medido está abaixo.
 

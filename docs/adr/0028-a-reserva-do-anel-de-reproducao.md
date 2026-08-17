@@ -1,4 +1,4 @@
-# 0027 — A reserva do anel de reprodução, e o que ela custa de latência
+# 0028 — A reserva do anel de reprodução, e o que ela custa de latência
 
 Status: aceito
 

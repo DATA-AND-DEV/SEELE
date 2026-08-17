@@ -21,6 +21,18 @@ Formato e regra de criação em `specs/10-convencoes.md`: toda decisão marcada
 | [0013](0013-idioma-de-manifestos-e-ci.md) | Manifestos e CI em inglês | aceito por default | — (lacuna em `10`) |
 | [0014](0014-palheta-v2-canonica.md) | Palheta v2 como canônica | aceito por default | `07` — tokens de cor |
 | [0015](0015-vad-sem-webrtc.md) | VAD por energia, sem `webrtc-vad` | aceito por default | `03` — ativação por voz |
+| [0016](0016-ptt-trava-quando-o-terminal-nao-reporta-soltura.md) | Push-to-talk vira trava onde o terminal não reporta soltura | aceito | `03` — push-to-talk |
+| [0017](0017-identidade-e-pins-em-disco.md) | Identidade e pins gravados em disco, sem senha | aceito | `08` — guarda da identidade |
+| [0018](0018-seele-ffi-sem-uniffi-por-enquanto.md) | `seele-ffi` com a forma que o `uniffi` exige, sem a dependência | aceito | `01` — ponte para o app |
+| [0019](0019-frontend-sem-framework-e-sem-npm.md) | Frontend do desktop sem framework e sem npm | aceito | `05` — frontend desktop |
+| [0020](0020-o-que-o-tauri-traz-junto.md) | O que o Tauri traz junto, e por que aceitamos | aceito | `01` — dependências do app |
+| [0021](0021-admissao-em-um-dogma.md) | Quem entra num Dogma: convite de uso único, senha como alternativa | aceito | `08` — admissão |
+| [0022](0022-alcancar-um-dogma-pela-internet.md) | Alcançar um Dogma pela internet | **aceito** | `01` — alcance fora da rede local |
+| [0023](0023-idioma-dentro-do-seele-core.md) | Idioma dentro do `seele-core` | aceito | `10` — idioma |
+| [0024](0024-faixas-de-sincronia-em-tres-e-a-media-no-core.md) | Faixas de sincronia em três, e a média do Cage no core | aceito | `03` — sincronia |
+| [0025](0025-limitacao-de-taxa-em-dois-baldes.md) | Limitação de taxa: dois baldes, e um aviso antes da porta | aceito | `08` — limitação de taxa |
+| [0026](0026-duas-assinaturas-e-um-botao-de-atualizar.md) | Duas assinaturas, e um botão de atualizar | aceito | `01` — distribuição |
+| [0028](0028-a-reserva-do-anel-de-reproducao.md) | A reserva do anel de reprodução, e o que ela custa de latência | aceito | — (pendência 2, e revisão do `0009`) |
 
 ## O que ainda não tem ADR
 
