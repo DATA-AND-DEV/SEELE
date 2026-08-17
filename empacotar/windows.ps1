@@ -159,8 +159,33 @@ function Write-Utf8SemBom([string]$Caminho, [string]$Texto) {
     [System.IO.File]::WriteAllText($Caminho, $Texto, $semBom)
 }
 
+# ------------------------------------------------------ ler JSON como UTF-8
+#
+# E a leitura tinha o mesmo defeito da escrita, na direção contrária.
+#
+# `Get-Content -Raw` **sem `-Encoding`** no Windows PowerShell 5.1 lê o arquivo
+# na página de código ANSI do sistema — cp1252 numa máquina brasileira. O
+# `tauri.conf.json` é UTF-8 sem BOM, e sem BOM não há o que o 5.1 detecte: ele
+# supõe ANSI e pronto.
+#
+# O estrago é silencioso e sobrevive ao empacotamento. O título da janela é
+# `SEELE · Entry Plug`; o `·` é `C2 B7` em UTF-8, lido como cp1252 vira os dois
+# caracteres `Â` e `·`, e a escrita — que está correta — grava esse par como
+# UTF-8 de verdade. O arquivo passa a conter `SEELE Â· Entry Plug`, e foi assim
+# que ele apareceu na barra de título de um Windows de verdade.
+#
+# O comentário logo acima já dizia que «o 5.1 lê os acentos como ANSI», sobre o
+# próprio `.ps1`. O mesmo raciocínio valia uma linha abaixo e não foi aplicado.
+#
+# `[System.IO.File]::ReadAllText` decodifica UTF-8 e retira o BOM se houver, que
+# é o que se quer nos dois casos. O caminho é absoluto pelo mesmo motivo escrito
+# acima: o .NET não enxerga o `Set-Location` do PowerShell.
+function Read-Utf8([string]$Caminho) {
+    [System.IO.File]::ReadAllText($Caminho)
+}
+
 $Config = Join-Path $Raiz "apps\seele-app\tauri.conf.json"
-$Original = Get-Content $Config -Raw
+$Original = Read-Utf8 $Config
 
 try {
     # ------------------------------------------------------- gravar a versão
