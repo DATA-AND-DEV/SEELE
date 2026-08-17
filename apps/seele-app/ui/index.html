@@ -1286,7 +1286,8 @@
       </div>
 
       <!--
-        As quatro seções do comp, com ícone, nome e descrição. O ícone é desenho
+        As quatro seções do comp, mais a de atualização, que é posterior a ele.
+        Cada uma com ícone, nome e descrição. O ícone é desenho
         e não caractere: `◍`, `⌨`, `◧` e `⚿` não estão na IBM Plex Mono
         embarcada — medido no cmap, 499 pontos de código —, e digitá-los põe uma
         segunda face no meio da linha. `ui/glifos.js` desenha os quatro.
@@ -1341,6 +1342,29 @@
             <span class="dogma-secao-texto">
               <span class="dogma-secao-nome">IDENTIDADE</span>
               <span class="dica">Sua chave</span>
+            </span>
+          </button>
+        </li>
+        <!--
+          A quinta, e a única que o comp v3 não desenha: ele foi feito antes de
+          existir um botão de atualizar. Ela é desta tela e não de outra pelo
+          mesmo argumento que põe o microfone aqui — o que se ajusta aqui é
+          **deste computador**, e qual SEELE está instalado nele é a coisa mais
+          desta máquina que existe.
+
+          E aqui, e não na sessão, por uma segunda razão: instalar fecha a
+          janela. Esta tela é alcançável da entrada, sem sessão nenhuma aberta,
+          que é de onde atualizar não custa a conversa de ninguém.
+        -->
+        <li>
+          <button id="secao-atualizacao" class="dogma-secao" type="button"
+                  data-painel="painel-atualizacao"
+                  data-titulo="VERSÃO E ATUALIZAÇÃO"
+                  data-sub="Pergunte se há versão nova, e instale-a sem sair daqui">
+            <span class="dogma-secao-icone" data-glifo="atualizar"></span>
+            <span class="dogma-secao-texto">
+              <span class="dogma-secao-nome">ATUALIZAÇÃO</span>
+              <span class="dica">Versão nova</span>
             </span>
           </button>
         </li>
@@ -1613,6 +1637,103 @@
                 seu. Perdê-la ou trocá-la custa o apelido em <em>todo</em> Dogma
                 que você já visitou, e não há como recuperá-lo sem um operador de
                 cada um deles.</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- --------------------------------------------------- ATUALIZAÇÃO -->
+        <!--
+          O botão de atualizar do ADR 0026, e o desenho dele é a decisão daquele
+          ADR posta na tela: **quem decide é a pessoa**. Não há consulta ao
+          abrir, não há aviso que aparece sozinho, e não há instalação
+          silenciosa. Quem quiser saber aperta.
+
+          ---- não há campo de «versão instalada» ----
+
+          Pela regra desta tela: o que o produto não sabe dizer não é desenhado
+          vazio, é omitido. Nenhum comando responde qual versão está rodando —
+          `procurar_atualizacao` traz a instalada **junto** com a nova, e só
+          quando há uma nova. Uma moldura `VERSÃO` com travessão perguntaria uma
+          coisa que ninguém precisa saber enquanto está em dia.
+
+          ---- o aviso vem antes do botão, e não depois ----
+
+          Instalar fecha e reabre o SEELE nos três sistemas: no Windows não há
+          escolha, porque o instalador do NSIS não roda com o programa aberto, e
+          nos outros dois o processo seguiria vivo rodando o código velho. Uma
+          ação que fecha a janela de alguém tem que dizer isso **antes** de ser
+          apertada, e tem que dizer a parte que não é sobre quem aperta: um
+          Dogma hospedado nesta janela cai junto, com todo mundo que estiver
+          dentro dele.
+        -->
+        <section id="painel-atualizacao" class="dogma-painel-secao"
+                 aria-labelledby="secao-atualizacao" hidden>
+          <div class="dogma-bloco">
+            <div class="dogma-bloco-topo">
+              <h3 class="dogma-bloco-nome">VERSÃO NOVA</h3>
+              <p class="dica">Nada é consultado sozinho — só quando você pedir</p>
+            </div>
+            <div class="dogma-bloco-corpo">
+
+              <div class="dogma-campo">
+                <button id="atualizacao-procurar" class="botao" type="button">
+                  PROCURAR ATUALIZAÇÃO
+                </button>
+                <p class="dica">Pergunta à página de releases se saiu versão
+                  mais nova. Nada é baixado nem trocado agora.</p>
+                <!--
+                  Revelado por conta própria: começa vazio, e um `role="status"`
+                  escreve quando a resposta chega. É a resposta boa e comum —
+                  «você está em dia» — que mora aqui.
+                -->
+                <p id="atualizacao-estado" class="dogma-atualizacao-estado" role="status"></p>
+                <!--
+                  Revelado antes de escrito: `role="alert"` não anuncia o que
+                  foi escrito enquanto o elemento ainda estava escondido.
+                -->
+                <p id="atualizacao-erro" class="erro" role="alert" hidden></p>
+              </div>
+
+              <div id="atualizacao-achado" class="dogma-campo" hidden>
+                <div id="atualizacao-notas-bloco" class="dogma-campo" hidden>
+                  <h4 class="rotulo">O QUE MUDA</h4>
+                  <p id="atualizacao-notas" class="dogma-atualizacao-notas"></p>
+                </div>
+
+                <div class="dogma-atualizacao-aviso">
+                  <h4 class="rotulo">ANTES DE INSTALAR</h4>
+                  <p>O SEELE <strong>fecha e abre de novo</strong>. É assim nos
+                    três sistemas: no Windows o instalador não roda com o
+                    programa aberto, e nos outros dois a janela que ficasse de pé
+                    continuaria rodando o programa velho.</p>
+                  <p>Uma sessão aberta cai junto. E se este computador estiver
+                    <strong>hospedando um Dogma nesta janela</strong>, ele cai
+                    também: todo mundo que estiver dentro sai na hora, sem aviso
+                    prévio nenhum da sua parte.</p>
+                  <p>Falhar no meio não deixa meia instalação: o pacote é
+                    conferido inteiro antes de qualquer arquivo ser tocado, e
+                    qualquer erro daqui devolve este SEELE inteiro e utilizável.</p>
+                </div>
+
+                <button id="atualizacao-instalar" class="botao" type="button">
+                  INSTALAR E REABRIR
+                </button>
+              </div>
+
+              <!--
+                O andamento do download, que chega pelo canal
+                `seele://atualizacao`. O total é opcional — o servidor pode não
+                dizer quantos bytes são —, e sem ele a barra fica marcada como
+                não medida em vez de fingir uma porcentagem: é a mesma decisão
+                que a barra da bateria interna toma, pelo mesmo motivo. A
+                contagem ao lado é verdade nos dois casos.
+              -->
+              <div id="atualizacao-andamento" class="dogma-campo" hidden>
+                <h4 class="rotulo">BAIXANDO</h4>
+                <p id="atualizacao-barra" class="dogma-atualizacao-barra"></p>
+                <p id="atualizacao-baixados" class="dogma-atualizacao-baixados"></p>
+              </div>
+
             </div>
           </div>
         </section>

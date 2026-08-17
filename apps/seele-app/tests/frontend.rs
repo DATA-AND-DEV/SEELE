@@ -182,19 +182,31 @@ fn every_command_the_frontend_calls_is_registered() {
 /// They stay here rather than being deleted, because deleting them would take
 /// the verbs down with the only thing that remembers they exist.
 ///
-/// `procurar_atualizacao` / `instalar_atualizacao` are the two halves of the
-/// in-app update (ADR 0026). The Rust side is finished; the screen is not, and
-/// it is not a button that can be drawn casually — `instalar_atualizacao`
-/// closes and reopens SEELE, so whoever draws it has a warning to write first,
-/// and a progress bar to feed off the `seele://atualizacao` channel.
-/// The four moderation verbs are the same case, one step earlier. `expulsar` /
-/// `banir` / `remover_mensagem` / `mover_piloto` are what
+/// The day the four moderation verbs were wired, these two were looked at again
+/// and left. The reason is specific rather than a shrug, and it is about the
+/// shape the control has to have: a rename belongs *on the room*, which means an
+/// editable name in the row — and every row of `#lista-cages` and `#lista-linhas`
+/// is thrown away and rebuilt by `desenharCanais` on every snapshot, twice a
+/// second. A field there cannot hold a cursor for two frames, let alone a
+/// selection. Making it possible means the channel column adopting the call
+/// screen's repaint-don't-rebuild discipline, which changes the one list every
+/// other screen reads.
+///
+/// The other shape — a rename dialog, like the moderation layer — does work
+/// today, and was rejected on purpose: moderation needs a dialog because it
+/// needs a surface wide enough to spell out a consequence before an irreversible
+/// act. Renaming is reversible and trivial, so the dialog would be pure distance
+/// between the person and the room they are renaming. Doing it badly now would
+/// cost more than the wait.
+///
+/// The four moderation verbs are a different case, and a temporary one.
+/// `expulsar` / `banir` / `remover_mensagem` / `mover_piloto` are what
 /// `specs/04-servidor-seele.md` gives the Comandante and the Operador, and
-/// until now no protocol message carried any of them — which is why the
+/// until recently no protocol message carried any of them — which is why the
 /// `EJETAR PLUG DO OPERADOR` control has been drawn and **disabled** since v2:
 /// there was nothing to call. There is now, and `Snapshot::may_kick`,
 /// `may_ban`, `may_remove_message` and `may_move_pilot` say whether to enable
-/// it. Whoever wires that takes the name off this list.
+/// it. Whoever wires that takes the names off this list.
 const AGUARDANDO_TELA: &[&str] = &[
     "renomear_cage",
     "renomear_linha",
@@ -202,8 +214,6 @@ const AGUARDANDO_TELA: &[&str] = &[
     "banir_piloto",
     "remover_mensagem",
     "mover_piloto",
-    "procurar_atualizacao",
-    "instalar_atualizacao",
 ];
 
 #[test]
@@ -2285,9 +2295,16 @@ fn every_section_of_the_settings_screen_carries_the_panel_and_the_heading_it_ope
             "secao-audio",
             "secao-atalhos",
             "secao-aparencia",
-            "secao-identidade"
+            "secao-identidade",
+            // The fifth is not the comp's — it predates the update button
+            // existing at all (ADR 0026). It lands here because what this screen
+            // adjusts is *this machine*, and which SEELE is installed on it is
+            // the most machine-local fact there is; and last because it is the
+            // one section nobody opens on a normal day.
+            "secao-atualizacao",
         ],
-        "the settings screen is the four sections of the v3 comp, in this order"
+        "the settings screen is the four sections of the v3 comp plus the update \
+         one, in this order"
     );
 }
 
@@ -3059,4 +3076,231 @@ fn every_screen_says_where_the_focus_lands_and_what_to_announce() {
              keyboard would stay on <body>"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// The update button — ADR 0026.
+// ---------------------------------------------------------------------------
+
+/// The sentence `ui/frases.js` writes for one enum variant.
+///
+/// Comments stripped first, for the reason the rest of this file strips them:
+/// the block above these entries explains *why* there are six sentences and not
+/// one, and a check satisfied by that explanation is a check that cannot fail.
+///
+/// An entry ends at `",` followed by a line break, which is what closes the last
+/// piece of a sentence whether it is written on one line or concatenated over
+/// four — the `+` ending every intermediate piece is what keeps this from
+/// stopping early.
+fn sentence_for(variant: &str) -> String {
+    let file = without_comments(&read("ui/frases.js"));
+    let Some(after) = file.split(&format!("\n    {variant}:")).nth(1) else {
+        panic!(
+            "frases.js writes no sentence for `{variant}`, so that failure reaches \
+             a screen that either says nothing or says `{variant}`"
+        );
+    };
+    let Some(sentence) = after.split("\",\n").next() else {
+        panic!("the sentence for `{variant}` is never closed");
+    };
+    sentence.trim().to_owned()
+}
+
+#[test]
+fn every_way_the_update_can_fail_asks_something_different_of_the_reader() {
+    // Six variants, and ADR 0026 is explicit that they are six because they ask
+    // six different things of whoever is in front of the screen: `NaoConfigurado`
+    // means *this executable will never update* and there is nothing to retry,
+    // `AssinaturaRecusada` means a package arrived signed by somebody else and
+    // retrying is precisely the wrong move, and `NaoAlcancei` means try again in
+    // a minute. One sentence for all six would send everybody back to the same
+    // button, including the two cases where pressing it again is wrong.
+    //
+    // So this asserts distinctness and not merely presence. A copy-pasted
+    // sentence is the failure mode: it looks written, it reads fine, and it
+    // quietly collapses two different situations into one instruction.
+    let source = read("src/main.rs");
+    let script = without_comments(&scripts());
+
+    let variants = variants_of(&source, "FalhaAoAtualizar");
+    assert_eq!(
+        variants.len(),
+        6,
+        "`FalhaAoAtualizar` has {} variants; ADR 0026 wrote six on purpose: {variants:?}",
+        variants.len()
+    );
+
+    let mut written: BTreeSet<String> = BTreeSet::new();
+    for variant in &variants {
+        assert!(
+            names(&script, variant),
+            "`FalhaAoAtualizar::{variant}` reaches the page with no sentence \
+             written for it, so the screen either says nothing or says `{variant}`"
+        );
+        let sentence = sentence_for(variant);
+        assert!(
+            !sentence.is_empty(),
+            "the sentence for `{variant}` is empty"
+        );
+        assert!(
+            written.insert(sentence.clone()),
+            "two ways the update can fail are written with the same sentence, so \
+             the screen cannot tell them apart — and two of these six must not \
+             send the reader back to the same button:\n{sentence}"
+        );
+    }
+}
+
+/// The markup of one panel of the settings screen, cut out by its id.
+///
+/// The panels nest no `<section>` of their own, so the first closing tag is
+/// theirs. Comments stripped: the paragraph above this panel explains, at
+/// length, exactly what the panel has to say — and a guard an explanation can
+/// satisfy is a guard that cannot fail.
+fn panel_markup(page: &str, id: &str) -> String {
+    let page = without_comments(page);
+    let Some(after) = page.split(&format!("id=\"{id}\"")).nth(1) else {
+        panic!("index.html has no panel with id `{id}`");
+    };
+    let Some(body) = after.split("</section>").next() else {
+        panic!("the panel `{id}` is never closed");
+    };
+    body.to_owned()
+}
+
+#[test]
+fn the_update_screen_says_the_window_closes_and_that_a_hosted_dogma_falls_with_it() {
+    // `instalar_atualizacao` closes and reopens SEELE on all three systems — on
+    // Windows there is no choice, because the NSIS installer will not run with
+    // the program open. An action that closes somebody's window has to say so
+    // *before* it is pressed.
+    //
+    // The second half is the one that is easy to leave out, and it is the one
+    // that costs other people: this app can host a Dogma inside the very window
+    // that is about to be replaced (`hospedar`), and everybody inside it drops
+    // when it goes. Whoever presses the button knows they are closing their own
+    // window; nothing but this sentence tells them whose else.
+    let page = read("ui/index.html");
+    let painel = panel_markup(&page, "painel-atualizacao");
+
+    for (what, needle) in [
+        (
+            "that the window closes and comes back",
+            "fecha e abre de novo",
+        ),
+        ("that a Dogma hosted here falls too", "hospedando um Dogma"),
+        (
+            "that a failure leaves no half installation",
+            "meia instalação",
+        ),
+    ] {
+        assert!(
+            painel.contains(needle),
+            "the update panel never says {what}. Installing is the one action in \
+             this app that takes the window down, and on the day it takes a room \
+             full of people with it, this paragraph is the only warning there was."
+        );
+    }
+
+    // And it has to be above the button, not beside the failure afterwards.
+    let Some(warning) = painel.find("ANTES DE INSTALAR") else {
+        panic!("the update panel no longer heads its warning");
+    };
+    let Some(button) = painel.find("id=\"atualizacao-instalar\"") else {
+        panic!("the update panel has no install button");
+    };
+    assert!(
+        warning < button,
+        "the warning about closing the window is drawn after the button that \
+         closes it, so it is read by whoever already pressed"
+    );
+}
+
+#[test]
+fn the_download_bar_is_left_unmeasured_when_the_package_carries_no_total() {
+    // `Andamento::total` is an `Option` because the server may send no
+    // `Content-Length`. A bar drawn against a denominator nobody sent is a bar
+    // that stalls somewhere and lies about how much is left — the same defect
+    // the battery bar exists to avoid, and it gets the same answer here: the
+    // frame stays, the value is marked absent, and the count beside it carries
+    // the truth.
+    //
+    // Scoped to the one function that draws it, because the file says all of
+    // these words either way — the paragraph explaining why there is no bar
+    // would satisfy an unscoped search for it.
+    let body = body_of(&scripts(), "function desenharAndamentoDoDownload");
+
+    let Some(guard) = body.find("!andamento.total") else {
+        panic!(
+            "nothing branches on whether the package announced a total, so the \
+             bar is drawn against a denominator that may not exist:\n{body}"
+        );
+    };
+    let Some(unmeasured) = body.find("naoMedido(") else {
+        panic!("the missing total is not marked absent anywhere:\n{body}");
+    };
+    let Some(bar) = body.find("blocos(") else {
+        panic!("nothing draws the bar at all:\n{body}");
+    };
+
+    assert!(
+        guard < unmeasured && unmeasured < bar,
+        "the block bar is drawn before the missing total is ruled out, so a \
+         package with no announced size still gets a percentage:\n{body}"
+    );
+    assert!(
+        body[unmeasured..bar].contains("return"),
+        "the unmeasured branch falls through into the bar, so one frame says \
+         both «not measured» and «47%»:\n{body}"
+    );
+    assert!(
+        body.contains("${parte}%"),
+        "the bar has no number beside it, and `specs/05-cliente-tui.md` forbids \
+         information carried by shape alone — a wall of blocks is shape:\n{body}"
+    );
+}
+
+#[test]
+fn the_update_is_only_ever_asked_for_by_a_press() {
+    // ADR 0026: "nenhuma consulta automática ao abrir". In a product whose whole
+    // argument is that the server is yours, an app that talks to github.com on
+    // every launch contradicts the argument — and what was asked for was a
+    // *button*.
+    //
+    // The tempting change is small and invisible: one call from the half-second
+    // tick this screen already runs, or one from `abrirDogma`, and the app
+    // quietly phones home whenever anybody opens the settings. So the check is
+    // that the search is reachable from exactly two places — where it is
+    // declared, and where a click is bound to it — and from nowhere else.
+    let file = read("ui/tela-dogma.js");
+
+    let mut places = Vec::new();
+    for chunk in top_level_chunks(&file) {
+        if !chunk.contains("procurarAtualizacao") && !chunk.contains("procurar_atualizacao") {
+            continue;
+        }
+        let head = chunk.lines().next().unwrap_or_default().trim().to_owned();
+        places.push(head.clone());
+        assert!(
+            head.starts_with("async function procurarAtualizacao")
+                || chunk.contains("addEventListener(\"click\""),
+            "something other than a press reaches the update check: {head}"
+        );
+    }
+    assert_eq!(
+        places.len(),
+        2,
+        "the update check is reachable from {} places; there are two — the \
+         declaration and the click: {places:?}",
+        places.len()
+    );
+
+    // And the tick that keeps the input meter alive must not have grown a second
+    // job. It runs twice a second for as long as this screen is open.
+    let tick = body_of(&scripts(), "async function atualizarDogma");
+    assert!(
+        !tick.contains("procurar"),
+        "the half-second loop of the settings screen asks whether there is a new \
+         version, which is an automatic check wearing a meter's clothes:\n{tick}"
+    );
 }
