@@ -21,15 +21,23 @@ Formato e regra de criação em `specs/10-convencoes.md`: toda decisão marcada
 | [0013](0013-idioma-de-manifestos-e-ci.md) | Manifestos e CI em inglês | aceito por default | — (lacuna em `10`) |
 | [0014](0014-palheta-v2-canonica.md) | Palheta v2 como canônica | aceito por default | `07` — tokens de cor |
 | [0015](0015-vad-sem-webrtc.md) | VAD por energia, sem `webrtc-vad` | aceito por default | `03` — ativação por voz |
+| [0027](0027-anexos-com-teto-e-o-mais-velho-sai.md) | Anexos com teto total, e o mais velho sai | **proposto** | `02` — política de anexos (D14) |
+
+Os ADRs 0016 a 0026 existem em `docs/adr/` e nunca foram acrescentados a esta
+tabela. A lacuna é anterior a este arquivo estar sendo mexido e continua aberta.
 
 ## O que ainda não tem ADR
 
 Decisões em aberto que vencem depois de M1 e por isso não foram escritas ainda —
 ver `docs/plano-m0-m1.md`, seção 4.2: política acima de
-20 falantes (M3), limite de mensagem e anexos (M3), endpoint de saúde (M3),
+20 falantes (M3), endpoint de saúde (M3),
 recarga a quente de config (M3), compressão de histórico (M3), PTT global (M4),
 tecla de PTT (M4), leitor de tela (M4), framework do frontend desktop (M5),
 plataforma mobile (M6).
+
+**Anexos saíram desta lista**: viraram o [0027](0027-anexos-com-teto-e-o-mais-velho-sai.md),
+**proposto**, e ele desfaz metade da D14 — o teto de corpo de 4 KiB continua, e
+o "sem anexos em v1" não. Nada foi construído; ver pendência 18.
 
 **IPv6/NAT traversal saiu desta lista**: virou o [0022](0022-alcancar-um-dogma-pela-internet.md),
 aceito, com os degraus 2 (IPv6) e 3 (UPnP) construídos. O degrau 4 — furo de NAT

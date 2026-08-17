@@ -530,3 +530,38 @@ janela, dizer que quem estiver dentro dele cai junto.
 
 **Quando dói.** Em toda versão nova, em toda máquina. E dói em silêncio: quem não
 souber que saiu versão nova simplesmente continua na antiga.
+
+## 18 · Anexos estão desenhados e não construídos
+
+**Sintoma.** Não dá para mandar imagem, nem áudio, nem arquivo. Foi o item 6 da
+lista que veio do teste em rede local, e é a maior lacuna funcional que sobrou
+depois que a limitação de taxa fechou (pendência 5) e a escada de alcance subiu
+dois degraus (pendência 4).
+
+**O que se sabe.** Tudo o que dá para saber sem escrever código está no
+**ADR 0027**, que está **proposto** e não aceito: o Dogma guarda os anexos com
+teto total fixo — 1 GiB por padrão, escolhido por quem hospeda — e ao encher
+descarta o mais antigo, com a mensagem passando a dizer que o arquivo expirou. O
+motivo da escolha é que um Dogma doméstico roda no notebook de alguém, e o pior
+caso de disco tem que ser conhecido no dia um.
+
+O ADR também decide o caminho: fluxo QUIC unidirecional próprio por
+transferência, nunca o fluxo de controle — hoje existe **um** fluxo bidirecional
+por conexão, e ele carrega aperto de mão, presença, comandos, texto e histórico
+juntos. `MAX_DATAGRAM_LEN` não tem nada a ver com isto: aquilo é voz.
+
+**O que ficou tentado.** Nada de código, de propósito. O que existe é o
+documento, e ele existe antes do código pelo mesmo motivo que o ADR 0022 existiu
+antes do degrau 4: as perguntas caras aqui não são de implementação. Quem
+hospeda passa a poder ler toda foto que chega (`specs/08-seguranca.md` já põe
+"vazamento de histórico por acesso ao disco do servidor" fora de escopo em v1, e
+manda documentar), e um Dogma doméstico não varre vírus e não vai varrer.
+
+**Por que não foi resolvido.** Falta a decisão humana sobre um ADR proposto, e
+faltam quatro coisas que o próprio ADR nomeia como sem saída boa: justiça sob
+teto global — uma pessoa com a permissão esvazia o histórico de anexos de todo
+mundo sem estourar disco nenhum —, retomada de transferência caída, concorrência
+entre conexões, e o fato de que quem hospeda lê tudo.
+
+**Quando dói.** Nos primeiros cinco minutos de quem chega. É a lacuna que uma
+pessoa nota sem ninguém apontar.
