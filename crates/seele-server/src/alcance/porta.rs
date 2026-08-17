@@ -140,6 +140,17 @@ pub enum FalhaAoAbrir {
     },
     /// O roteador respondeu e não disse qual é o endereço externo dele.
     SemEnderecoExterno(String),
+    /// O roteador respondeu, e nenhum endereço desta máquina está na rede dele.
+    ///
+    /// É o que uma VPN produz quando ela é a única coisa com endereço IPv4
+    /// utilizável aqui: o roteador responde de `192.168.0.1` e o único endereço
+    /// da máquina é o `172.16.0.2` do túnel. Pedir o mapeamento assim mesmo
+    /// abriria a porta apontando para um endereço que não existe naquela rede —
+    /// e o roteador diria `Ok`.
+    SemEnderecoNaRedeDoRoteador {
+        /// De onde o roteador respondeu.
+        roteador: IpAddr,
+    },
 }
 
 impl std::fmt::Display for FalhaAoAbrir {
@@ -162,6 +173,12 @@ impl std::fmt::Display for FalhaAoAbrir {
             Self::SemEnderecoExterno(motivo) => write!(
                 f,
                 "o roteador não disse qual é o endereço externo dele: {motivo}"
+            ),
+            Self::SemEnderecoNaRedeDoRoteador { roteador } => write!(
+                f,
+                "o roteador respondeu de {roteador} e nenhum endereço desta \
+                 máquina está na rede dele — costuma ser uma VPN ligada, que \
+                 fica com todo o tráfego e deixa a placa de rede sem uso"
             ),
         }
     }
@@ -227,16 +244,28 @@ impl Drop for PortaAberta {
     }
 }
 
-/// Pede ao roteador que abra `interno.port()` e o encaminhe para `interno`.
+/// Pede ao roteador que abra `porta` e a encaminhe para esta máquina.
 ///
-/// `interno` tem de ser o endereço **desta máquina na rede local** — não o de
-/// escuta. Um `[::]` ou `0.0.0.0` não diz ao roteador para onde encaminhar.
+/// # Qual endereço vai no pedido, e por que não é o da rota padrão
+///
+/// O roteador precisa de um endereço **na rede dele** para encaminhar. Antes
+/// isto recebia um `SocketAddr` pronto, montado com o endereço da rota padrão —
+/// e com uma VPN ligada esse endereço é o do túnel. O roteador aceitava, abria
+/// a porta, e encaminhava para um endereço que não existe na LAN: mais um
+/// sucesso mentiroso, da mesma família do CGNAT que este módulo já vigia.
+///
+/// Agora entram todos os endereços da máquina ([`super::interfaces`]) e a
+/// escolha é feita **depois** de o roteador responder, contra a sub-rede dele —
+/// que é a pergunta certa e tem resposta exata, sem heurística nenhuma.
 ///
 /// # Errors
 ///
 /// [`FalhaAoAbrir`], sempre dizendo qual dos casos foi. Ver o cabeçalho do
 /// módulo: falhar em silêncio é o defeito que isto existe para não ter.
-pub async fn abrir(interno: SocketAddr) -> Result<PortaAberta, FalhaAoAbrir> {
+pub async fn abrir(
+    candidatos: &[super::interfaces::Achado],
+    porta: u16,
+) -> Result<PortaAberta, FalhaAoAbrir> {
     let opcoes = SearchOptions {
         timeout: Some(PROCURA),
         single_search_timeout: Some(PROCURA),
@@ -259,6 +288,14 @@ pub async fn abrir(interno: SocketAddr) -> Result<PortaAberta, FalhaAoAbrir> {
     if !global(externo) {
         return Err(FalhaAoAbrir::SemSaidaParaInternet { externo });
     }
+
+    let endereco_do_roteador = roteador.addr.ip();
+    let interno = escolher_interno(candidatos, endereco_do_roteador).ok_or({
+        FalhaAoAbrir::SemEnderecoNaRedeDoRoteador {
+            roteador: endereco_do_roteador,
+        }
+    })?;
+    let interno = SocketAddr::new(interno, porta);
 
     let porta = mapear(&roteador, interno).await?;
     let externo = SocketAddr::new(externo, porta);
@@ -353,6 +390,30 @@ async fn renovar(roteador: Gateway<Tokio>, interno: SocketAddr, porta: u16) {
             Err(erro) => tracing::warn!(%erro, porta, "não deu para renovar o mapeamento"),
         }
     }
+}
+
+/// Qual endereço desta máquina o roteador consegue alcançar.
+///
+/// A conta é exata quando a enumeração trouxe a máscara: o roteador encaminha
+/// para dentro da rede dele, e só um endereço na sub-rede dele serve. Quando
+/// não há máscara — o recuo para o truque da rota padrão —, sobra o primeiro
+/// endereço de placa de rede na faixa privada, que é o que aquele truque teria
+/// devolvido de qualquer forma.
+///
+/// Nunca um endereço de túnel: é exatamente o que fazia o roteador encaminhar a
+/// porta para lugar nenhum.
+fn escolher_interno(candidatos: &[super::interfaces::Achado], roteador: IpAddr) -> Option<IpAddr> {
+    use super::interfaces::Origem;
+
+    candidatos
+        .iter()
+        .find(|achado| achado.na_mesma_rede(roteador))
+        .or_else(|| {
+            candidatos.iter().find(|achado| {
+                achado.ip.is_ipv4() && achado.classe() == Origem::Fisica && achado.e_da_rede_local()
+            })
+        })
+        .map(|achado| achado.ip)
 }
 
 /// Se este endereço é um em que alguém de fora conseguiria bater.
@@ -489,16 +550,86 @@ mod testes {
         );
     }
 
+    /// A máquina do relato: WARP com a rota padrão, Ethernet com a rede de
+    /// casa. Os dois endereços IPv4 são privados — é o que torna a faixa
+    /// inútil aqui e a sub-rede do roteador a única pergunta que decide.
+    fn a_maquina_do_relato() -> Vec<super::super::interfaces::Achado> {
+        use super::super::interfaces::{Achado, Origem};
+        vec![
+            Achado {
+                ip: IpAddr::from([172, 16, 0, 2]),
+                mascara: Some(IpAddr::from([255, 255, 255, 255])),
+                origem: Origem::Tunel,
+            },
+            Achado {
+                ip: IpAddr::from([192, 168, 0, 30]),
+                mascara: Some(IpAddr::from([255, 255, 255, 0])),
+                origem: Origem::Fisica,
+            },
+        ]
+    }
+
+    #[test]
+    fn o_roteador_recebe_o_endereco_da_rede_dele_e_nao_o_do_tunel() {
+        // O defeito de campo no degrau 3: com a VPN ligada, o endereço pedido
+        // ao roteador era o do túnel. O roteador dizia `Ok` e encaminhava a
+        // porta para um endereço que não existe na rede dele.
+        let escolhido = escolher_interno(&a_maquina_do_relato(), IpAddr::from([192, 168, 0, 1]));
+        assert_eq!(escolhido, Some(IpAddr::from([192, 168, 0, 30])));
+    }
+
+    #[test]
+    fn sem_nenhum_endereco_na_rede_do_roteador_o_pedido_nao_e_feito() {
+        // Só o túnel. Não há para onde encaminhar, e inventar um endereço aqui
+        // seria abrir uma porta que não leva a lugar nenhum — com sucesso.
+        let so_tunel: Vec<_> = a_maquina_do_relato()
+            .into_iter()
+            .filter(|achado| achado.classe() == super::super::interfaces::Origem::Tunel)
+            .collect();
+        assert_eq!(
+            escolher_interno(&so_tunel, IpAddr::from([192, 168, 0, 1])),
+            None
+        );
+    }
+
+    #[test]
+    fn sem_mascara_sobra_a_placa_de_rede_na_faixa_privada() {
+        // O recuo, para quando a enumeração de interfaces não existe: é o
+        // mesmo endereço que o truque da rota padrão devolveria, e nunca o do
+        // túnel.
+        use super::super::interfaces::{Achado, Origem};
+        let candidatos = [
+            Achado {
+                ip: IpAddr::from([172, 16, 0, 2]),
+                mascara: None,
+                origem: Origem::Tunel,
+            },
+            Achado {
+                ip: IpAddr::from([192, 168, 0, 30]),
+                mascara: None,
+                origem: Origem::Fisica,
+            },
+        ];
+        assert_eq!(
+            escolher_interno(&candidatos, IpAddr::from([192, 168, 0, 1])),
+            Some(IpAddr::from([192, 168, 0, 30]))
+        );
+    }
+
     #[tokio::test]
     async fn pedir_porta_numa_rede_sem_roteador_falha_dizendo_isso() {
         // O teste que quase não pode existir: precisa de rede de verdade. Então
         // ele afirma só o que vale nas duas situações — que a resposta chega
         // dentro do prazo e que, se for falha, é uma falha **nomeada**. Nunca
         // "passou calado".
-        let interno = SocketAddr::from(([192, 0, 2, 10], 8383));
+        let candidatos = [super::super::interfaces::Achado {
+            ip: IpAddr::from([192, 0, 2, 10]),
+            mascara: Some(IpAddr::from([255, 255, 255, 0])),
+            origem: super::super::interfaces::Origem::Fisica,
+        }];
         let prazo = PROCURA + Duration::from_secs(5);
 
-        let Ok(resultado) = tokio::time::timeout(prazo, abrir(interno)).await else {
+        let Ok(resultado) = tokio::time::timeout(prazo, abrir(&candidatos, 8383)).await else {
             panic!("o pedido de porta não voltou em {prazo:?}, e travaria quem apertou HOSPEDAR");
         };
 
