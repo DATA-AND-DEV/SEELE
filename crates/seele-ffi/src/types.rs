@@ -443,6 +443,23 @@ pub struct Telemetry {
     /// The two sound identical to a listener and have opposite fixes, so the
     /// core separates them and the shell can say which one it is.
     pub local_fault: bool,
+    /// Voice frames this machine produced and never managed to send.
+    ///
+    /// The third kind of loss, and the one that had no name. `loss_fraction`
+    /// is the network's, reported by the Dogma. `local_fault` is this machine's
+    /// capture or playback stumbling. This is neither: the frame was encoded,
+    /// it was ready, and the transport refused it.
+    ///
+    /// A QUIC datagram is not fragmented. Text travels on a stream and adapts
+    /// to the path by itself; voice travels in datagrams, and a datagram that
+    /// does not fit the path is refused whole. That is how a link can deliver
+    /// every message and still chop the audio — and in one direction only,
+    /// because the path is not the same both ways.
+    ///
+    /// Zero is normal. Anything else means the audio is being lost **before it
+    /// leaves**, which sounds identical to network loss and has the opposite
+    /// fix.
+    pub frames_refused: u64,
 }
 
 /// Something worth surfacing.

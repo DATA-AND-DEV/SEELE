@@ -100,6 +100,23 @@ struct Controls {
     bitrate: AtomicU32,
     speaking: AtomicBool,
     stop: AtomicBool,
+    /// Quadros que a Voice produziu e o transporte recusou.
+    ///
+    /// Terceira categoria, e ela faltava. `Telemetry` já distingue perda de
+    /// rede (`loss_fraction`, que vem do servidor) de falha da máquina
+    /// (`local_fault`, captura ou reprodução engasgando) porque «as duas soam
+    /// idênticas ao ouvinte e têm consertos opostos». Isto é a que restava: o
+    /// quadro foi codificado, estava pronto, e **nunca saiu desta máquina**.
+    ///
+    /// Um datagrama do QUIC não é fragmentado. O texto viaja num fluxo e se
+    /// adapta ao caminho sozinho; a voz viaja em datagrama, e um datagrama que
+    /// não cabe no caminho é recusado inteiro. Por isso um enlace pode entregar
+    /// todo o texto e picotar o áudio, e só num sentido.
+    ///
+    /// Era descartado com `let _ =`. Soava exatamente como perda de rede e não
+    /// deixava rastro nenhum — nem log, nem contador —, então a pergunta «é a
+    /// rede ou é daqui?» não tinha como ser respondida por ninguém.
+    recusados: std::sync::atomic::AtomicU64,
     /// Per-talker volume. Read once per 20 ms frame, so a lock is affordable
     /// here in a way it would not be inside a device callback.
     gains: Mutex<HashMap<u32, f32>>,
@@ -398,6 +415,7 @@ impl Voice {
             bitrate: AtomicU32::new(DEFAULT_BITRATE_BPS),
             speaking: AtomicBool::new(false),
             stop: AtomicBool::new(false),
+            recusados: std::sync::atomic::AtomicU64::new(0),
             gains: Mutex::new(HashMap::new()),
         });
         let telemetry = Arc::new(Mutex::new(AudioTelemetry::default()));
@@ -631,6 +649,19 @@ impl Voice {
         }
     }
 
+    /// Quantos quadros de voz o transporte recusou desde que esta voz abriu.
+    ///
+    /// Zero é o normal. Qualquer coisa acima disso significa que o áudio está
+    /// sendo perdido **antes de sair desta máquina**, e a diferença importa:
+    /// perda de rede e recusa de envio soam idênticas e têm consertos opostos.
+    /// A causa mais provável é o datagrama não caber no caminho — o QUIC não o
+    /// fragmenta, ao contrário do fluxo por onde o texto viaja, e é por isso
+    /// que um enlace pode entregar todo o texto e picotar a voz num sentido só.
+    #[must_use]
+    pub fn quadros_recusados(&self) -> u64 {
+        self.controls.recusados.load(Ordering::Relaxed)
+    }
+
     /// Whether this pilot is transmitting right now.
     #[must_use]
     pub fn speaking(&self) -> bool {
@@ -805,7 +836,13 @@ async fn pipeline(
             };
             if let Ok(len) = header.encode_datagram(&payload, &mut datagram) {
                 if let Some(bytes) = datagram.get(..len) {
-                    let _ = media.send(bytes.to_vec());
+                    if media.send(bytes.to_vec()).is_err() {
+                        // Contado e não registrado em log: isto acontece por
+                        // quadro, cinquenta vezes por segundo, e um log por
+                        // quadro afogaria o arquivo no exato momento em que
+                        // alguém precisa lê-lo.
+                        controls.recusados.fetch_add(1, Ordering::Relaxed);
+                    }
                 }
             }
         }

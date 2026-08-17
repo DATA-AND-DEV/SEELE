@@ -565,6 +565,8 @@ async fn run_session(
     let mut vigia = Vigia::novo(Instant::now());
 
     let (outbound_tx, mut outbound_rx) = mpsc::channel::<Vec<u8>>(OUTBOUND_DEPTH);
+    // Quadros de voz que o transporte recusou nesta sessão. Ver o `select!`.
+    let mut recusados: u64 = 0;
     let mut events = dogma.events.subscribe();
     let mut lines: Vec<LineId> = Vec::new();
     let mut current_cage: Option<CageId> = None;
@@ -931,7 +933,19 @@ async fn run_session(
 
             outbound = outbound_rx.recv() => {
                 let Some(bytes) = outbound else { break };
-                let _ = connection.send_datagram(bytes.into());
+                // Contado, e não descartado. Um datagrama do QUIC não é
+                // fragmentado: o texto viaja num fluxo e se adapta ao caminho
+                // sozinho, a voz viaja aqui e um datagrama que não cabe é
+                // recusado inteiro. É assim que um enlace entrega toda a
+                // conversa escrita e ainda pica a voz — e num sentido só,
+                // porque o caminho de ida não é o de volta.
+                //
+                // Contado por sessão e dito uma vez ao fim, e não por quadro:
+                // isto passa cinquenta vezes por segundo, e um log por quadro
+                // afogaria o arquivo no instante em que alguém precisa lê-lo.
+                if connection.send_datagram(bytes.into()).is_err() {
+                    recusados = recusados.saturating_add(1);
+                }
             }
 
             event = events.recv() => {
@@ -990,6 +1004,22 @@ async fn run_session(
         // the occupancy would show everybody a roster with somebody who left,
         // for five minutes.
         dogma.occupancy.lock().await.vacate(id, session.pilot);
+    }
+
+    // Dito só quando aconteceu, e uma vez.
+    //
+    // Zero é o normal e não merece linha nenhuma; qualquer outro número
+    // significa que a voz **saiu deste Dogma pela metade** para aquele cliente,
+    // e que quem ouviu culpou a rede. Sem esta linha não havia como saber: a
+    // recusa era descartada, e recusa de envio soa exatamente igual a perda de
+    // rede — com o conserto no lado oposto.
+    if recusados > 0 {
+        tracing::warn!(
+            pilot = %session.pilot,
+            recusados,
+            "o transporte recusou quadros de voz para este cliente; \
+             o caminho até ele não comporta o tamanho do datagrama"
+        );
     }
 
     Ok(())

@@ -776,6 +776,7 @@ impl Plug {
                 sync_band: SyncBand::of(sync_ratio).into(),
                 input_level: audio.input_level,
                 local_fault: audio.local_fault,
+                frames_refused: audio.frames_refused,
             },
             notice: room.notice.as_ref().map(|notice| Notice {
                 severity: notice.severity.into(),
@@ -828,6 +829,7 @@ impl Plug {
             total_isolation: voice.total_isolation(),
             input_level: telemetry.local.input_level,
             local_fault: voice.falha_local(),
+            frames_refused: voice.quadros_recusados(),
             bitrate_bps: telemetry.local.bitrate_bps,
             capture: voice.capture().map(|device| CaptureDevice {
                 id: device.id.clone(),
@@ -857,6 +859,7 @@ struct AudioState {
     total_isolation: bool,
     input_level: f32,
     local_fault: bool,
+    frames_refused: u64,
     bitrate_bps: u32,
     capture: Option<CaptureDevice>,
     playback: Option<PlaybackDevice>,
@@ -878,6 +881,7 @@ impl AudioState {
             total_isolation: false,
             input_level: 0.0,
             local_fault: false,
+            frames_refused: 0,
             bitrate_bps: 0,
             capture: None,
             playback: None,
