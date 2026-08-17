@@ -1,0 +1,303 @@
+/* SEELE · Entry Plug — a moderação (`#moderar`), camada sobre a operação.
+
+   Os quatro verbos da `specs/04-servidor-seele.md`. Camada e não tela, pela
+   mesma razão que o alerta e a bateria: `specs/07` não deixa esta janela trocar
+   a conversa por outra coisa, e moderar é uma decisão que se toma olhando para
+   a sala.
+
+   Carrega depois de `tela-sessao.css` e depende disso: `.moderar-porta` e
+   `.moderar-remover` moram dentro da linha de um Cage e da linha de uma
+   mensagem, que aquela folha desenha, e as duas refinam o espaçamento de lá.
+
+   ---- toda classe daqui começa por `moderar-` ----
+
+   As folhas caem num só espaço de nomes, na ordem em que `index.html` as
+   carrega, e duas escolhendo o mesmo nome não é conflito que o navegador
+   reporte: é a de baixo ganhando todo empate em silêncio.
+   `no_two_screens_claim_the_same_class_name` guarda isso, e o prefixo é o que
+   faz esta folha nunca precisar dele.
+
+   ---- nenhuma cor de alarme, e a decisão não é estética ----
+
+   `tokens.css` marca o vermelho «EXCLUSIVO alerta e queda». Moderar é o ato
+   mais sério que esta janela oferece e ainda assim não é queda de enlace — e o
+   vermelho gasto aqui é o vermelho que ninguém lê no dia em que a bateria
+   interna acende. O acento é o laranja institucional, que é o que esta
+   interface usa para dizer «isto é do produto, e é para você olhar».
+
+   O único vermelho desta caixa é o `.erro` de `base.css`, e ele é do texto de
+   uma falha — a mesma faixa de gravidade de um erro de conexão, e nunca a
+   moldura da caixa.
+
+   Nenhuma cor literal aqui, nem em regra nem em comentário: `tests/tokens.rs`
+   lê o arquivo inteiro. */
+
+/* ---------- o véu ----------
+   A mesma técnica da camada de alerta: o token pintando um pseudo-elemento, e
+   não `opacity` no próprio contêiner — aquilo desbotaria a caixa junto com o
+   fundo, e é a caixa que precisa ser lida. */
+
+.camada-moderar {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.camada-moderar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--seele-negro-absoluto);
+  opacity: 0.72;
+}
+
+/* ---------- a caixa ----------
+   `overflow-y: auto` e altura limitada porque o que ela mostra vem do Dogma: a
+   frase de consequência cresce com o nome e com a jaula, e um Dogma com muitas
+   salas estica o campo de destino. Sem isto a caixa passaria da janela num
+   corpo com `overflow: hidden`, e o botão de confirmar sairia de vista — que é
+   o pior lugar possível para um botão sumir. */
+.moderar-caixa {
+  position: relative;
+  width: 640px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  border: var(--seele-b-forte) solid var(--seele-laranja-nerv);
+  background: var(--seele-negro-absoluto);
+}
+
+/* ---------- a cabeça ----------
+   Bloco sólido com texto no negro absoluto, que é a regra de inversão do v2:
+   cartela nunca é texto colorido sobre fundo escuro. */
+.moderar-cabeca {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  background: var(--seele-laranja-nerv);
+  color: var(--seele-negro-absoluto);
+}
+
+/* O kanji é acento. `MODERAÇÃO` ao lado carrega a informação, e é por isso que
+   ele sai `aria-hidden` na marcação: quem ouve a tela receberia a mesma coisa
+   duas vezes, uma delas em japonês. */
+.moderar-kanji {
+  font-weight: 900;
+  font-size: 32px;
+  line-height: 1;
+}
+
+.moderar-titulo {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 26px;
+  line-height: 1;
+  letter-spacing: 0.12em;
+}
+
+/* ---------- o corpo ---------- */
+
+.moderar-corpo {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+}
+
+.moderar-vazio {
+  margin: 0;
+  font-size: var(--seele-t-corpo);
+  line-height: 1.55;
+  color: var(--seele-osso-apagado);
+}
+
+.moderar-sobre {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.moderar-campo {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* O `select` é o único desta janela, e por isso ele é desenhado aqui e não em
+   `base.css`: um primitivo compartilhado por um consumidor é um primitivo
+   inventado cedo demais. O dia em que uma segunda tela precisar de um, ele
+   desce para lá com este bloco inteiro. */
+.moderar-select {
+  font: inherit;
+  font-size: var(--seele-t-dado);
+  color: var(--seele-osso);
+  background: var(--seele-negro-painel);
+  border: var(--seele-b) solid var(--seele-linha-forte);
+  padding: 8px;
+  border-radius: var(--seele-raio);
+}
+
+.moderar-select:focus-visible {
+  outline: 2px solid var(--seele-osso);
+  outline-offset: 2px;
+}
+
+/* Um verbo por bloco, separados por régua: eles fazem coisas diferentes e
+   irreversíveis, e três botões encostados são três botões que se erra. */
+.moderar-acao {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 16px;
+  border-top: var(--seele-b) solid var(--seele-linha);
+}
+
+.moderar-verbo {
+  align-self: flex-start;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: 15px;
+  letter-spacing: 0.16em;
+  padding: 8px 16px;
+  color: var(--seele-osso);
+  background: none;
+  border: var(--seele-b) solid var(--seele-linha-forte);
+  cursor: pointer;
+}
+
+.moderar-verbo:hover { border-color: var(--seele-laranja-nerv); }
+.moderar-verbo:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
+
+/* ---------- a confirmação ----------
+   Ela ocupa a caixa inteira quando aparece, e a escolha some por baixo: o que
+   está em jogo aqui é uma frase que precisa ser lida, e um formulário ao lado
+   dela é a coisa que se olha em vez de ler. */
+
+.moderar-confirmacao {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+}
+
+/* `pre-line` porque a consequência vem em duas partes: o que acontece, e o que
+   **não** acontece. As duas no mesmo parágrafo refluem numa parede, e a segunda
+   é justamente a que as pessoas não leem. */
+.moderar-consequencia {
+  margin: 0;
+  font-size: var(--seele-t-corpo);
+  line-height: 1.6;
+  color: var(--seele-osso);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.moderar-botoes {
+  display: flex;
+  gap: 8px;
+}
+
+/* CANCELAR primeiro e em contorno, CONFIRMAR depois e sólido. A ordem é a que
+   põe a saída antes da porta: quem tabula chega ao que não faz nada primeiro, e
+   é onde `armarAto` também põe o foco. */
+.moderar-cancelar {
+  flex: 1;
+  font: inherit;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: 16px;
+  letter-spacing: 0.16em;
+  padding: 12px;
+  color: var(--seele-osso);
+  background: none;
+  border: var(--seele-b) solid var(--seele-linha-forte);
+  cursor: pointer;
+}
+
+.moderar-cancelar:hover { border-color: var(--seele-osso); }
+.moderar-cancelar:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
+
+.moderar-confirmar {
+  flex: 1;
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 16px;
+  letter-spacing: 0.16em;
+  padding: 12px;
+  border: 0;
+}
+
+.moderar-fechar {
+  width: 100%;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: var(--seele-tracking-rotulo);
+  padding: 8px;
+  color: var(--seele-osso-apagado);
+  background: none;
+  border: 0;
+  border-top: var(--seele-b) solid var(--seele-linha);
+  cursor: pointer;
+}
+
+.moderar-fechar:hover { color: var(--seele-osso); }
+.moderar-fechar:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: -2px; }
+
+/* ---------- as portas ----------
+
+   Os dois controles que abrem esta caixa, e os dois moram na tela de operação:
+   um na linha de quem está dentro de um Cage, outro na linha de uma mensagem.
+
+   Visíveis, e não revelados pelo ponteiro. A tela de chamada aprendeu isto por
+   um teste entre duas máquinas — «um controle que só existe no hover é um
+   controle escondido»: fora do caminho de quem usa teclado, invisível em toque,
+   e desconhecido de quem nunca passou o mouse ali por acaso. Um controle que
+   encerra a sessão de alguém não é lugar de repetir esse erro.
+
+   ---- por que os dois são desenhados em `osso`, e não no apagado ----
+
+   A linha em volta deles é `osso-apagado`, que é a cor do que é secundário
+   naquela coluna, e a primeira versão destes dois seguiu a vizinhança.
+   `docs/tokens-achados.md` mede o `osso-apagado` em 4,11:1 e é explícito sobre
+   a saída: subir a cor **ou** garantir que nada necessário dependa só dela. O
+   rótulo de um controle é necessário por definição — é ele que diz o que o
+   botão faz —, e o mesmo argumento já tirou a camada de dicas daquele token em
+   `base.css`. A hierarquia contra o texto ao lado vem do tamanho e da forma:
+   contorno sem preenchimento, caixa alta curta, e nenhum peso. */
+
+.moderar-porta {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: var(--seele-t-rotulo);
+  line-height: 1.2;
+  letter-spacing: 0.1em;
+  padding: 0 4px;
+  color: var(--seele-osso);
+  background: none;
+  border: var(--seele-b) solid var(--seele-linha-forte);
+  cursor: pointer;
+}
+
+.moderar-porta:hover { color: var(--seele-laranja-nerv); border-color: var(--seele-laranja-nerv); }
+.moderar-porta:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 1px; }
+
+.moderar-remover {
+  margin-left: auto;
+  font: inherit;
+  font-size: 11px;
+  color: var(--seele-osso);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.moderar-remover:hover { color: var(--seele-laranja-nerv); }
+.moderar-remover:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }

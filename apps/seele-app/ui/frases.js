@@ -147,4 +147,43 @@ const FRASES = {
     NaoGravei: "NÃO CONSEGUI GRAVAR ESSE AJUSTE NESTA MÁQUINA",
     DispositivoSumiu:
       "ESSE MICROFONE NÃO ESTÁ MAIS AQUI.\nA escolha ficou gravada; escolha outro para agora.",
+
+    // ---- atualizar (ADR 0026) ----
+    //
+    // Seis variantes e seis frases, e a divisão não é zelo: elas pedem coisas
+    // diferentes de quem está na frente da tela. Duas delas mandam **não**
+    // tentar de novo — uma porque não há o que tentar neste executável, outra
+    // porque tentar de novo é justamente o que não se faz com um pacote que
+    // chegou assinado por outra pessoa. Escrever «não deu» nas seis mandaria
+    // todo mundo apertar o botão de novo, inclusive nesses dois casos.
+    //
+    // As seis dizem, cada uma à sua maneira, que **esta máquina continua como
+    // estava**. Não é consolo: o pacote é conferido inteiro antes de qualquer
+    // arquivo instalado ser tocado, então não existe meia instalação nesses
+    // caminhos, e quem lê um erro de atualizador precisa saber disso antes de
+    // sair procurando o que ficou quebrado.
+    NaoConfigurado:
+      "ESTE SEELE SAIU SEM CHAVE DE ATUALIZAÇÃO.\n" +
+      "Não é defeito: é um executável feito antes da chave existir, ou compilado do código-fonte. " +
+      "Não adianta tentar de novo — baixe a versão nova da página de releases, como sempre.",
+    NaoAlcancei:
+      "NÃO CONSEGUI PERGUNTAR SE HÁ VERSÃO NOVA.\n" +
+      "A página de releases não respondeu, ou respondeu algo que não entendi. " +
+      "Nada foi baixado e nada mudou nesta máquina; tente de novo daqui a pouco.",
+    SemPacoteParaEsteSistema:
+      "HÁ VERSÃO NOVA, MAS NÃO PARA ESTE SISTEMA.\n" +
+      "O release não traz pacote para este sistema operacional ou para este processador. " +
+      "Nada foi tocado aqui.",
+    AssinaturaRecusada:
+      "O PACOTE BAIXADO NÃO FOI ASSINADO POR ESTE PROJETO.\n" +
+      "Ele foi jogado fora sem tocar em nada instalado, e o SEELE continua o de antes. " +
+      "Esta é a única falha desta lista que não é para tentar de novo: baixe da página de releases " +
+      "e confira com quem hospeda de onde veio o que você estava atualizando.",
+    NaoInstalei:
+      "O PACOTE CHEGOU INTEIRO E CONFERIDO, E A TROCA DOS ARQUIVOS FALHOU.\n" +
+      "O SEELE continua o de antes, inteiro e utilizável — não há meia instalação. " +
+      "Feche outras cópias abertas e tente de novo.",
+    NadaEscolhido:
+      "NÃO HÁ VERSÃO NOVA ESCOLHIDA PARA INSTALAR.\n" +
+      "Procure de novo: instalar sempre instala o que a última procura mostrou na tela.",
 };

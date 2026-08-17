@@ -561,6 +561,81 @@
   cursor: help;
 }
 
+/* ---------- atualizar (ADR 0026) ----------
+
+   A quinta seção, e a única que o comp v3 não desenha — ele é anterior ao botão
+   de atualizar existir. Por isso não há geometria dele a seguir aqui: o que há
+   são os primitivos desta própria folha (`.dogma-bloco`, `.dogma-campo`,
+   `.rotulo`) reusados, que é o que mantém a seção parecendo parte da tela em vez
+   de um enxerto.
+
+   Nada aqui é vermelho, e a decisão é do `tokens.css`: o vermelho é
+   «EXCLUSIVO alerta e queda». Uma atualização que falha não derruba enlace
+   nenhum — ela devolve este SEELE exatamente como estava —, e o texto da falha
+   já sai vermelho porque `.erro` é de `base.css` e é a mesma faixa de gravidade
+   de um erro de conexão. O aviso de antes de instalar é laranja: ele é o acento
+   institucional avisando, e não um alarme. */
+
+.dogma-atualizacao-estado {
+  margin: 0;
+  font-size: var(--seele-t-dado);
+  line-height: 1.6;
+  color: var(--seele-osso);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+/* As notas do release chegam como o autor as escreveu, com as quebras de linha
+   dele. `pre-line` é o que as preserva sem virar `<pre>`, que reflui mal numa
+   coluna estreita. */
+.dogma-atualizacao-notas {
+  margin: 0;
+  max-width: 72ch;
+  font-size: var(--seele-t-dado);
+  line-height: 1.6;
+  color: var(--seele-osso);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+/* O aviso do que instalar custa. Moldura laranja e não vermelha: ele não
+   relata falha nenhuma, ele diz o preço de uma ação que ainda não aconteceu. */
+.dogma-atualizacao-aviso {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--seele-laranja-nerv);
+  background: var(--seele-laranja-fraco);
+}
+
+.dogma-atualizacao-aviso p {
+  margin: 0;
+  max-width: 72ch;
+  font-size: var(--seele-t-dado);
+  line-height: 1.6;
+  color: var(--seele-osso);
+}
+
+/* A barra de blocos do download, na mesma face e no mesmo desenho das outras
+   deste produto. Quando o servidor não diz o total ela vira travessão e ganha
+   `.ausente` de `base.css` — a mesma forma que a barra da bateria interna usa
+   para a mesma falta. */
+.dogma-atualizacao-barra {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  letter-spacing: 0.04em;
+  color: var(--seele-fosforo);
+  overflow-wrap: anywhere;
+}
+
+.dogma-atualizacao-baixados {
+  margin: 0;
+  font-size: var(--seele-t-dado);
+  color: var(--seele-osso);
+}
+
 /* ---------- a porta, lá da entrada ----------
    Refina o `.botao-fantasma` de `base.css`, cujo `margin-left: auto` o
    empurraria para a direita dentro do cartão da entrada. */

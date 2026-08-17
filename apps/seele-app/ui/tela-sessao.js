@@ -80,6 +80,15 @@ let comecoDaSessao = null;
 /** Volume por apelido, para o deslizante não pular de volta a cada redesenho. */
 const volumes = new Map();
 /**
+ * Se esta sessão pode tirar a mensagem **de outra pessoa** da Linha.
+ *
+ * Um campo de módulo e não um parâmetro porque `desenharMensagens` é chamado de
+ * três lugares — o snapshot, a busca e a limpeza dela — e só um deles tem um
+ * snapshot em mãos. Apagar a **própria** mensagem não consulta isto: não pede
+ * permissão nenhuma, e a da `specs/04` diz «de outra pessoa».
+ */
+let podeRemoverMensagem = false;
+/**
  * Os casamentos da busca corrente, agrupados por índice de mensagem.
  *
  * Vem prontos do Rust. Os deslocamentos são em **caracteres** e valem sobre o
@@ -211,6 +220,11 @@ function desenhar(snapshot) {
 
   // O primeiro quadro da sessão é onde o uptime começa a contar.
   if (comecoDaSessao === null) comecoDaSessao = Date.now();
+
+  // Antes de qualquer desenho: `desenharMensagens` a lê, e ela chega do
+  // servidor como `may_remove_message` — resolvida no MELCHIOR a partir das
+  // permissões desta conexão, e não decidida aqui.
+  podeRemoverMensagem = snapshot.may_remove_message === true;
 
   desenharTopo(snapshot);
   desenharCanais(snapshot);
@@ -374,7 +388,7 @@ function desenharCanais(snapshot) {
       // tem. O travessão é para o que ninguém mediu.
       dentro.append(elemento("li", "cage-vazio", "ninguém aqui"));
     } else {
-      dentro.append(...cage.pilots.map(linhaDeQuemEstaDentro));
+      dentro.append(...cage.pilots.map((piloto) => linhaDeQuemEstaDentro(piloto, snapshot)));
     }
 
     const entrar = elemento(
@@ -456,7 +470,7 @@ function desenharCanais(snapshot) {
  * O glifo continua, desenhado e `aria-hidden`: ele é o que dá a varredura da
  * coluna de relance, e quem escuta a tela já recebe a palavra.
  */
-function linhaDeQuemEstaDentro(piloto) {
+function linhaDeQuemEstaDentro(piloto, snapshot) {
   const item = elemento("li", "cage-piloto");
   item.append(glifo(piloto.speaking ? "falando" : "silencio"));
   item.append(elemento("span", "cage-piloto-nome", piloto.nickname));
@@ -466,6 +480,13 @@ function linhaDeQuemEstaDentro(piloto) {
   } else if (piloto.speaking) {
     item.append(elemento("span", "cage-piloto-marca", "fala"));
   }
+  // A porta da moderação, quando esta sessão tem algum verbo sobre gente. Ela
+  // mora aqui e em mais lugar nenhum porque esta é a única lista desta janela
+  // que mostra **todo mundo em toda sala** — o roster e a grade da chamada
+  // mostram só o Cage ocupado, e moderar é justamente o que se faz com quem
+  // está noutra. `camada-moderar.js` decide se há o que oferecer.
+  const porta = botaoDeModerar(piloto, snapshot);
+  if (porta) item.append(porta);
   return item;
 }
 
@@ -609,6 +630,13 @@ function desenharMensagens() {
     cabeca.append(elemento("span", "mensagem-autor", mensagem.author_nickname));
     cabeca.append(elemento("span", "mensagem-hora", relogio(mensagem.at_seconds)));
     if (mensagem.edited) cabeca.append(elemento("span", "editada", "editada"));
+    // Tirar a mensagem da Linha, quando esta sessão pode tirar esta mensagem.
+    // Desenhado e nunca revelado pelo ponteiro: um controle que só existe no
+    // hover é um controle escondido, e o v3 gastou uma tela inteira desfazendo
+    // essa lição. `camada-moderar.js` decide se há o que oferecer, e pergunta
+    // primeiro se a mensagem é da própria pessoa — essa não pede permissão.
+    const remover = botaoDeRemoverMensagem(mensagem, podeRemoverMensagem);
+    if (remover) cabeca.append(remover);
     conteudo.append(cabeca);
 
     // O corpo **cru**, e isto não é detalhe de pintura. `.mensagens .corpo` é
@@ -872,6 +900,12 @@ function duracao(desde) {
 
 function desenharAviso(snapshot) {
   const banner = $("banner");
+  // O segundo botão da caixa, antes de qualquer coisa: ele nasce desabilitado
+  // na marcação porque antes do primeiro quadro esta janela não sabe que
+  // permissões tem, e é aqui que o snapshot o liga ou o deixa apagado com o
+  // motivo no `title`. Fora do `if` de propósito — o estado dele tem que estar
+  // certo no instante em que a caixa aparecer, e não no quadro seguinte.
+  atualizarPortaDoAlerta(snapshot);
   if (!snapshot.notice) {
     banner.hidden = true;
     return;
@@ -987,6 +1021,9 @@ async function ejetar() {
   $("tela-boot").hidden = false;
   $("convite").hidden = true;
   $("bateria").hidden = true;
+  // A moderação pela mesma razão que a bateria: aberta, ela voltaria por cima
+  // da próxima sessão com um ato armado sobre alguém do Dogma anterior.
+  abandonarModeracao();
   // O veredito era sobre a chave daquela sessão. Deixá-lo aceso sobre a
   // próxima seria dizer de um Dogma o que se apurou de outro.
   mostrarVeredito(null);

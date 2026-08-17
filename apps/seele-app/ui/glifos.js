@@ -179,6 +179,23 @@ const GLIFOS = {
     ["rect", { x: "3.2", y: "3.2", width: "4.8", height: "9.6" }],
   ],
 
+  // ⤓ — a seção de atualização. Seta para baixo pousando sobre uma linha: é a
+  // imagem de instalar, e não a de baixar. A diferença importa aqui, porque o
+  // que este botão leva a fazer não é guardar um arquivo — é trocar o programa
+  // que está rodando e reabri-lo.
+  //
+  // Desenhada e não digitada pela razão dos outros oito: `U+2913` não está entre
+  // os pontos de código da face embarcada, e digitá-lo poria a monoespaçada do
+  // sistema no meio da coluna de seções.
+  atualizar: [
+    ["path", { d: "M8 2.2v6.6", stroke: "currentColor", "stroke-width": "1.3", fill: "none" }],
+    [
+      "path",
+      { d: "M4.9 5.9L8 9L11.1 5.9", stroke: "currentColor", "stroke-width": "1.3", fill: "none" },
+    ],
+    ["path", { d: "M3 12.4h10", stroke: "currentColor", "stroke-width": "1.3", fill: "none" }],
+  ],
+
   // ⚿ — a seção de identidade. Chave de palhetão quadrado: anel, haste e dois
   // dentes. É a chave Ed25519 do ADR 0004, e não um cadeado — o produto não
   // tranca nada aqui, ele prova quem é.

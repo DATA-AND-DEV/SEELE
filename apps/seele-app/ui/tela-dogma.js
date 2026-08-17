@@ -1,7 +1,10 @@
 // SEELE · Entry Plug — o Terminal Dogma (`#tela-dogma`).
 //
-// A configuração local: o que é desta máquina e não deste Dogma. Quatro seções
-// — ÁUDIO, ATALHOS, APARÊNCIA, IDENTIDADE —, que é a forma do comp v3, §8.
+// A configuração local: o que é desta máquina e não deste Dogma. Cinco seções —
+// ÁUDIO, ATALHOS, APARÊNCIA, IDENTIDADE e ATUALIZAÇÃO. As quatro primeiras são
+// a forma do comp v3, §8; a quinta é o botão de atualizar do ADR 0026, que é
+// posterior ao comp e cai aqui porque qual SEELE está instalado é a coisa mais
+// **desta máquina** que existe.
 //
 // Alcançável das duas telas vivas, e volta para a que a abriu. Escolher
 // microfone antes de conectar é tão comum quanto durante, e uma configuração
@@ -380,6 +383,159 @@ async function atualizarDogma() {
   desenharIdentidade(snapshot);
 }
 
+// --------------------------------------------------------------- atualizar
+//
+// ADR 0026, e o desenho é a decisão daquele ADR: **quem decide é a pessoa**.
+// Duas metades — procurar só olha, instalar só instala o que já foi olhado — e
+// nenhuma das duas roda sozinha. Não há consulta ao abrir a janela, não há
+// consulta no laço de meio segundo desta tela, e não há instalação silenciosa.
+// Num produto cujo argumento é que o servidor é seu, um app que fala com o
+// github.com a cada arranque contradiz o argumento.
+//
+// O que este arquivo **não** decide: se há versão nova, se o pacote é
+// legítimo, e o que fazer quando não é. Tudo isso é do Rust, e chega aqui como
+// `Option<VersaoNova>` ou como uma das seis variantes de `FalhaAoAtualizar`,
+// que viram frase em `frases.js` como todo o resto.
+
+/** Quantos blocos a barra do download tem. Vinte, como a do roster. */
+const BLOCOS_DO_DOWNLOAD = 20;
+
+/** Quantos bytes tem um megabyte, para a contagem ao lado da barra. */
+const BYTES_POR_MEGA = 1024 * 1024;
+
+/** `4,2 MB` — o tamanho como uma pessoa o lê, no idioma da máquina. */
+function emMegabytes(bytes) {
+  const mega = bytes / BYTES_POR_MEGA;
+  return `${mega.toLocaleString(undefined, {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  })} MB`;
+}
+
+/**
+ * O andamento do download, do canal `seele://atualizacao`.
+ *
+ * `total` é opcional porque o servidor pode não mandar o tamanho, e é aí que
+ * está a única decisão desta função: **sem total não há barra**. Uma barra
+ * desenhada sobre um denominador inventado trava em algum lugar e mente sobre
+ * quanto falta; o travessão e a contagem ao lado dizem a verdade inteira — já
+ * vieram tantos megabytes, e ninguém disse de quantos.
+ *
+ * É a mesma resposta que a barra da bateria interna dá para a mesma falta, e
+ * ela usa o mesmo `naoMedido` de `tela-sessao.js` para dizê-lo.
+ */
+function desenharAndamentoDoDownload(andamento) {
+  $("atualizacao-andamento").hidden = false;
+  const barra = $("atualizacao-barra");
+  const contagem = $("atualizacao-baixados");
+
+  if (!andamento.total) {
+    naoMedido(
+      barra,
+      "o servidor não disse de quantos bytes é o pacote: dá para dizer quanto já veio, nunca quanto falta",
+    );
+    contagem.textContent = `${emMegabytes(andamento.baixados)} até agora`;
+    return;
+  }
+
+  const parte = Math.max(0, Math.min(100, Math.round((andamento.baixados / andamento.total) * 100)));
+  // A porcentagem ao lado dos blocos, sempre: `specs/05-cliente-tui.md` proíbe
+  // informação que só a forma carregue, e uma parede de blocos é forma.
+  medido(barra, `${blocos(parte, BLOCOS_DO_DOWNLOAD)} ${parte}%`);
+  contagem.textContent = `${emMegabytes(andamento.baixados)} de ${emMegabytes(andamento.total)}`;
+}
+
+/**
+ * Escreve o que a consulta achou — ou que não achou nada.
+ *
+ * Não achar nada é a resposta boa e comum, e ela tem frase própria: «você está
+ * na última versão» é uma coisa diferente de «não consegui perguntar», e as
+ * duas caindo no mesmo lugar da tela seriam a mesma tela para um sucesso e uma
+ * falha.
+ */
+function desenharAchado(nova) {
+  const achado = $("atualizacao-achado");
+  if (!nova) {
+    achado.hidden = true;
+    $("atualizacao-estado").textContent = "VOCÊ ESTÁ NA ÚLTIMA VERSÃO.";
+    return;
+  }
+
+  // «da X para a Y», e não uma seta: a face de dados embarcada não tem seta, e
+  // as duas versões escritas por extenso são o que uma pessoa compara.
+  $("atualizacao-estado").textContent =
+    `HÁ VERSÃO NOVA: da ${nova.instalada} para a ${nova.versao}.`;
+
+  // As notas são opcionais — o manifesto pode não trazer nenhuma. O bloco some
+  // inteiro nesse caso, porque um cabeçalho «O QUE MUDA» sobre o vazio é pior
+  // que nenhum cabeçalho.
+  const notas = (nova.notas ?? "").trim();
+  $("atualizacao-notas-bloco").hidden = notas === "";
+  $("atualizacao-notas").textContent = notas;
+
+  achado.hidden = false;
+}
+
+/** Pergunta se há versão nova. Não baixa nada. */
+async function procurarAtualizacao() {
+  const botao = $("atualizacao-procurar");
+  const erro = $("atualizacao-erro");
+  botao.disabled = true;
+  erro.hidden = true;
+  $("atualizacao-estado").textContent = "PROCURANDO…";
+  try {
+    desenharAchado(await invoke("procurar_atualizacao"));
+  } catch (falha) {
+    $("atualizacao-estado").textContent = "";
+    $("atualizacao-achado").hidden = true;
+    // Revelado antes de escrito, como todo `role="alert"` desta janela.
+    erro.hidden = false;
+    erro.textContent = fraseDeErro(falha);
+  } finally {
+    botao.disabled = false;
+  }
+}
+
+/**
+ * Baixa, confere a assinatura, instala e reabre.
+ *
+ * **Não há caminho de sucesso depois do `await`.** Quando dá certo, o processo
+ * é encerrado e reaberto — no Windows pelo próprio instalador, nos outros dois
+ * por `app.restart()` —, então a única linha que roda depois é a do erro. O
+ * aviso do que isso custa está na marcação, acima do botão, e é lido antes de
+ * ele ser apertado.
+ */
+async function instalarAtualizacao() {
+  const instalar = $("atualizacao-instalar");
+  const procurar = $("atualizacao-procurar");
+  const erro = $("atualizacao-erro");
+  instalar.disabled = true;
+  procurar.disabled = true;
+  erro.hidden = true;
+  $("atualizacao-estado").textContent =
+    "BAIXANDO E CONFERINDO A ASSINATURA. O SEELE VAI FECHAR E ABRIR DE NOVO SOZINHO.";
+  $("atualizacao-andamento").hidden = false;
+  naoMedido($("atualizacao-barra"), "o download ainda não relatou nada");
+  $("atualizacao-baixados").textContent = "";
+
+  try {
+    await invoke("instalar_atualizacao");
+  } catch (falha) {
+    // Qualquer falha daqui deixa este SEELE inteiro: o pacote é conferido antes
+    // de qualquer arquivo instalado ser tocado. As seis frases dizem isso.
+    $("atualizacao-andamento").hidden = true;
+    $("atualizacao-estado").textContent = "";
+    erro.hidden = false;
+    erro.textContent = fraseDeErro(falha);
+    instalar.disabled = false;
+    procurar.disabled = false;
+    // A escolha foi consumida do lado do Rust — `instalar_atualizacao` a tira
+    // do lugar em vez de emprestá-la. Quem quiser tentar de novo procura de
+    // novo, e a consulta nova é o que confirma que a versão ainda é aquela.
+    $("atualizacao-achado").hidden = true;
+  }
+}
+
 // ------------------------------------------------------------------- ligação
 
 $("botao-dogma").addEventListener("click", () => abrirDogma("tela-boot"));
@@ -401,6 +557,17 @@ $("dogma-legendas").addEventListener("click", () => {
   const ligado = !legendasSimples();
   aplicarLegendas(ligado);
   $("dogma-legendas").setAttribute("aria-checked", ligado);
+});
+
+$("atualizacao-procurar").addEventListener("click", procurarAtualizacao);
+$("atualizacao-instalar").addEventListener("click", instalarAtualizacao);
+
+// O andamento do download. Um canal separado do `seele://event` da conversa, e
+// a separação é do Rust: aquele carrega o que a FFI emite sobre a sessão, e
+// bytes baixados não são evento de sessão nenhuma — quem baixa não precisa
+// estar em sessão, e quem está em sessão não deve peneirar bytes.
+listen("seele://atualizacao", (evento) => {
+  desenharAndamentoDoDownload(evento.payload);
 });
 
 // Escape fecha, que é o que uma tela sobreposta faz. Só com ela na frente, ou

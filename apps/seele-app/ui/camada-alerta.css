@@ -204,9 +204,16 @@
 }
 
 /* ---------- os dois botões ----------
-   `RECONHECER` é sólido e faz o que diz: fecha. `EJETAR PLUG DO OPERADOR` é o
-   secundário do comp, em Saira 700 contra 900, e chega aqui desabilitado — ver
-   a marcação. */
+   `RECONHECER` é sólido e faz o que diz: fecha. O segundo é o secundário do
+   comp, em Saira 700 contra 900, e passou a vida desabilitado por não haver
+   verbo de moderação para ele chamar. Há agora: ele abre a caixa de moderação,
+   onde a pessoa é escolhida por nome — esta caixa não tem sujeito, porque um
+   `Notice` nunca diz de quem é. O rótulo mudou junto, e a marcação explica por
+   quê.
+
+   Ele continua nascendo desabilitado e continua podendo ficar assim: sem
+   nenhuma das três permissões sobre gente, a regra de `:disabled` abaixo é o
+   que ele veste, e o `title` diz o motivo. */
 .alerta-botoes { display: flex; gap: 8px; }
 
 .alerta-reconhecer {
