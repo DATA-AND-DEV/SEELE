@@ -133,10 +133,14 @@ impl<'a> Melchior<'a> {
 
     /// Finds the account for a public key, creating it on first sight.
     ///
-    /// ADR 0004 makes the key the identity. The nickname is a label attached to
-    /// it, so a returning pilot keeps their account even if they ask for a
-    /// different name — and a **different** key asking for a taken name is
-    /// refused rather than silently given somebody else's history.
+    /// ADR 0004 makes the key the identity, and the nickname a label attached to
+    /// it. A returning pilot therefore keeps their **account** whatever name
+    /// they ask for, and the name they ask for becomes the label — the account
+    /// survives a rename, which is the opposite of the name owning the account.
+    ///
+    /// A **different** key asking for a taken name is refused rather than
+    /// silently given somebody else's history, and that refusal is what stops
+    /// renaming from being the way to take somebody's name.
     ///
     /// # Errors
     ///
@@ -156,6 +160,24 @@ impl<'a> Melchior<'a> {
                 "UPDATE pilots SET last_seen_at = ?1 WHERE id = ?2",
                 params![now_seconds(), id],
             )?;
+            // O apelido pedido passa a valer, e isto é conserto e não recurso.
+            //
+            // Antes, uma conta que voltava mantinha o nome com que foi criada e
+            // o pedido era descartado em silêncio: quem entrou uma vez como
+            // `piloto` era `piloto` para sempre, para todo mundo, sem nada na
+            // tela dizendo por quê. Encontrado num teste entre duas máquinas —
+            // a pessoa trocou de nome e a outra continuou vendo o antigo.
+            //
+            // O histórico acompanha sozinho: `casper::messages` resolve o autor
+            // por `JOIN pilots` e lê o nome de agora, em vez de guardar uma
+            // cópia por mensagem. Uma mensagem antiga passa a ser exibida com o
+            // nome novo, que é o que uma pessoa espera de «mudei meu nome».
+            //
+            // O que **não** muda é a proteção do ADR 0017: o nome continua
+            // pertencendo a uma chave. Pedir um nome que é de outra pessoa é a
+            // mesma recusa de sempre — a de baixo —, e não passa a ser
+            // permitida por a conta já existir.
+            self.rename(PilotId(id as u64), nickname)?;
             // Uma conta que já existe assume o comando **se ele nunca foi de
             // ninguém** — e essa condição não é a mesma que «está vago agora».
             //
@@ -233,6 +255,47 @@ impl<'a> Melchior<'a> {
     /// pilot row". A Dogma whose Comandante account was deleted has no
     /// Comandante again, and the next arrival should be able to take the seat
     /// rather than leave the Dogma permanently unadministrable.
+    /// Points an account at a different display name.
+    ///
+    /// Does nothing when the name is already the one held — the common case, on
+    /// every reconnect, and not worth a write.
+    ///
+    /// # Errors
+    ///
+    /// [`Refusal::NicknameTaken`] when the name belongs to a **different** key.
+    /// ADR 0017 makes the name property of the key that claimed it, and that is
+    /// the whole protection: without this check, renaming would be the way to
+    /// take somebody else's name and inherit how they are addressed.
+    fn rename(&self, pilot: PilotId, nickname: &str) -> Result<()> {
+        let atual: String = self.connection.query_row(
+            "SELECT nickname FROM pilots WHERE id = ?1",
+            [pilot.get() as i64],
+            |row| row.get(0),
+        )?;
+        if atual == nickname {
+            return Ok(());
+        }
+
+        let dono: Option<i64> = self
+            .connection
+            .query_row(
+                "SELECT id FROM pilots WHERE nickname = ?1",
+                [nickname],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if dono.is_some_and(|dono| dono != pilot.get() as i64) {
+            return Err(Refusal::NicknameTaken.into());
+        }
+
+        self.connection.execute(
+            "UPDATE pilots SET nickname = ?1 WHERE id = ?2",
+            params![nickname, pilot.get() as i64],
+        )?;
+        tracing::info!(pilot = pilot.get(), "this account changed its name");
+        Ok(())
+    }
+
     /// The key that remembers the seat was taken once, whoever holds it now.
     const SEAT_TAKEN: &'static str = "commandership_claimed";
 
@@ -579,6 +642,53 @@ mod tests {
         let anfitriao = melchior.register_or_find(&[1; 32], "anfitriao").unwrap();
         assert_eq!(anfitriao.roles, vec![COMMANDER]);
         assert!(melchior.may(anfitriao.id, Permission::ManageCages).unwrap());
+    }
+
+    #[test]
+    fn a_returning_key_takes_the_name_it_asks_for() {
+        // Encontrado num teste entre duas máquinas: a pessoa entrou como
+        // `piloto`, trocou o nome, e a outra continuou vendo `piloto` — nas
+        // mensagens e no roster. O pedido era descartado em silêncio, e não
+        // havia nada na tela dizendo por quê.
+        //
+        // O histórico acompanha sem trabalho nenhum: `casper::messages` resolve
+        // o autor por `JOIN pilots`, então o nome exibido é o de agora e não uma
+        // cópia congelada por mensagem.
+        let casper = store();
+        let melchior = Melchior::new(&casper);
+
+        let antes = melchior.register_or_find(&[1; 32], "piloto").unwrap();
+        let depois = melchior.register_or_find(&[1; 32], "ikari").unwrap();
+
+        assert_eq!(depois.id, antes.id, "trocar de nome criou uma conta nova");
+        assert_eq!(
+            depois.nickname, "ikari",
+            "o nome pedido foi descartado, e a pessoa continua sendo chamada do \
+             nome antigo para todo mundo"
+        );
+    }
+
+    #[test]
+    fn renaming_is_not_a_way_to_take_somebody_elses_name() {
+        // A outra metade, e a razão de o ADR 0017 existir. Sem esta recusa,
+        // renomear seria o caminho para herdar como outra pessoa é chamada — e
+        // a proteção que existe na criação de conta seria contornável por
+        // qualquer um que já tivesse uma.
+        let casper = store();
+        let melchior = Melchior::new(&casper);
+
+        melchior.register_or_find(&[1; 32], "ikari").unwrap();
+        let outra = melchior.register_or_find(&[2; 32], "ayanami").unwrap();
+
+        assert!(
+            melchior.register_or_find(&[2; 32], "ikari").is_err(),
+            "uma conta renomeou-se para o nome de outra pessoa"
+        );
+        let ainda = melchior.register_or_find(&[2; 32], "ayanami").unwrap();
+        assert_eq!(
+            ainda.nickname, outra.nickname,
+            "a tentativa recusada mexeu no nome de quem tentou"
+        );
     }
 
     #[test]

@@ -247,6 +247,28 @@ struct Shared {
 }
 
 impl Shared {
+    /// Says the conversation moved: bumps the revision, then notifies.
+    ///
+    /// One call and not two, because the two must never happen apart. They did:
+    /// `Command::OpenLine` clears the room's messages and emitted the event
+    /// **without** bumping the revision, so a shell that refetches only when the
+    /// number moves — which is the whole point of the number — swallowed it.
+    /// Switching Line kept the previous Line's conversation on screen until
+    /// somebody said something.
+    ///
+    /// That was a regression of the fix that stopped the snapshot carrying the
+    /// whole history: before it, the shell re-read every message twice a second
+    /// and a cleared list showed up on the next tick regardless. Making the
+    /// shell smarter made this notification load-bearing, and it was not
+    /// carrying its half.
+    ///
+    /// The bump comes first. A shell reacting to the event would otherwise read
+    /// the old number and conclude there is nothing to fetch.
+    fn messages_changed(&self) {
+        self.messages_revision.fetch_add(1, Ordering::Relaxed);
+        self.notify(&Event::MessagesChanged);
+    }
+
     /// Guarda onde o enlace está, para o `Snapshot` contar à casca.
     fn gravar_enlace(&self, estado: seele_core::Link, restante: Option<std::time::Duration>) {
         let na_bateria = matches!(estado, seele_core::Link::InternalBattery { .. });
@@ -1212,10 +1234,7 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
         shared.notify(&Event::RosterChanged);
     }
     if changed.messages {
-        // A revisão sobe **antes** do aviso, ou a casca que reagir ao evento
-        // ainda leria a anterior e concluiria que não há nada a buscar.
-        shared.messages_revision.fetch_add(1, Ordering::Relaxed);
-        shared.notify(&Event::MessagesChanged);
+        shared.messages_changed();
     }
     if changed.channels {
         shared.notify(&Event::ChannelsChanged);
@@ -1320,7 +1339,11 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             if client.historico(line, HISTORY_PAGE).await.is_err() {
                 return false;
             }
-            shared.notify(&Event::MessagesChanged);
+            // A Linha trocou, então a conversa trocou — mesmo que nenhuma
+            // mensagem nova tenha chegado. `Room::open_line` limpou a lista, e
+            // sem isto a tela continuaria mostrando a conversa da Linha
+            // anterior sob o nome da nova.
+            shared.messages_changed();
         }
         Command::Send { line, body } => {
             // specs/02-protocolo.md: idempotent by client_msg_id, so a resend
@@ -2050,5 +2073,62 @@ mod tests {
         fold(&shared, &ServerMessage::Pong { timestamp: 1 });
 
         assert_eq!(counter.0.load(Ordering::Relaxed), 0);
+    }
+}
+
+#[cfg(test)]
+mod aviso_de_mensagens {
+    /// `Event::MessagesChanged` may only be raised by `Shared::messages_changed`.
+    ///
+    /// The two halves — bump the revision, then tell the shell — have to move
+    /// together, and they did not: `Command::OpenLine` clears the room's
+    /// messages and raised the event **without** the bump. A shell that
+    /// refetches only when the number moves, which is the entire point of the
+    /// number, swallowed it, and switching Line left the previous Line's
+    /// conversation on screen under the new heading.
+    ///
+    /// Nothing about that failed. The event fired, the listener ran, the guard
+    /// compared two equal numbers and correctly concluded there was nothing to
+    /// do. Every part behaved; the pair was wrong.
+    ///
+    /// Reading the source is the only way to state "one door and no other" —
+    /// a behavioural test would have to know every future caller in advance.
+    #[test]
+    fn nobody_raises_the_event_without_moving_the_revision() {
+        let fonte = include_str!("lib.rs");
+        let Some(depois) = fonte.split("fn messages_changed(&self)").nth(1) else {
+            panic!(
+                "`messages_changed` is gone, and with it the only place the two halves are tied"
+            );
+        };
+        let Some(corpo) = depois.split("\n    }").next() else {
+            panic!("`messages_changed` is never closed");
+        };
+        assert!(
+            corpo.contains("fetch_add") && corpo.contains("Event::MessagesChanged"),
+            "the one function that ties the revision to the notice no longer does \
+             both:\n{corpo}"
+        );
+
+        // Everything else may only reach it through that function.
+        //
+        // Scanned up to the first `#[cfg(test)]` and no further, and comments
+        // dropped. Both exclusions are load-bearing rather than tidy: this very
+        // test names the event three times in its own assertions, and the
+        // paragraphs above name it because that is what they are about. A guard
+        // its own text can trip is as broken as one its own text can satisfy.
+        let producao = fonte.split("#[cfg(test)]").next().unwrap_or(fonte);
+        let sem_comentarios: String = producao
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mencoes = sem_comentarios.matches("Event::MessagesChanged").count();
+        assert_eq!(
+            mencoes, 1,
+            "`Event::MessagesChanged` is raised somewhere other than \
+             `messages_changed`, which is how the revision and the notice came \
+             apart the first time"
+        );
     }
 }
