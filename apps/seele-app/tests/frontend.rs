@@ -3866,19 +3866,36 @@ fn the_host_is_told_how_far_the_link_they_are_about_to_send_reaches() {
     // And the colour it may not spend. `tokens.css` reserves red for alarm and
     // collapse; a link that reaches only the home network is neither — it works,
     // and works less far than the host probably wanted.
-    // On the comment-stripped sheet. The paragraph above the rule explaining
-    // *why* there is no red here contains the word, so the guard read its own
-    // justification as the violation — the same defect class `without_comments`
-    // exists for, and it took one run to walk into it.
+    //
+    // Two things this assertion got wrong on the way in, both worth keeping
+    // written down because both produced a green test over a broken rule:
+    //
+    // - it read the sheet *with* comments, so the paragraph above the rule
+    //   explaining why there is no red here was itself the match. The guard
+    //   failed on its own justification. Same defect class `without_comments`
+    //   exists for, one file over;
+    // - it then read `split(…).nth(1)`, which is the text between the *first*
+    //   and *second* occurrence of the selector — that is the base rule alone,
+    //   and it stops exactly before `.convite-alcance-curto`, which is the one
+    //   rule that actually carries a colour decision. Painting the short rung
+    //   red passed. Every rule whose selector starts with the prefix has to be
+    //   read, not the first one.
     let folha = without_comments(&styles());
-    let Some(bloco) = folha.split(".convite-alcance").nth(1) else {
-        panic!("`.convite-alcance` has no styling at all");
-    };
-    let bloco: String = bloco.chars().take(600).collect();
+    let mut regras = 0;
+    for trecho in folha.split(".convite-alcance").skip(1) {
+        let corpo = trecho.split('}').next().unwrap_or_default();
+        regras += 1;
+        assert!(
+            !corpo.contains("vermelho"),
+            "a `.convite-alcance…` rule spends the red that tokens.css reserves \
+             for alarm and collapse:\n.convite-alcance{corpo}}}"
+        );
+    }
     assert!(
-        !bloco.contains("vermelho"),
-        "the reach sentence spends the red that tokens.css reserves for alarm and \
-         collapse:\n{bloco}"
+        regras >= 3,
+        "found {regras} `.convite-alcance…` rules, and there are at least three: \
+         the sentence itself and the two that tell the rungs apart. A count this \
+         low means the selector was renamed and this whole check went quiet"
     );
 
     // Both directions of the same thing: the script must not invent a class the
