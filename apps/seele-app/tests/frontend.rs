@@ -3816,3 +3816,79 @@ fn the_ipv6_sentence_teaches_the_fix_with_an_address_that_would_work() {
         "a draft ellipsis leaked into a sentence somebody reads:\n{frase}"
     );
 }
+
+#[test]
+fn the_host_is_told_how_far_the_link_they_are_about_to_send_reaches() {
+    // The last unwired half of ADR 0022, and the half the whole ladder is for.
+    // The Rust side climbs the rungs, the sentences exist in `FRASES`, and the
+    // `alcance` field crosses the boundary — and none of that reaches anybody if
+    // the page never draws it. A link that only works on the home network and a
+    // link that works over the internet are the same text, so a host with no
+    // sentence sends the first believing they sent the second, and the person
+    // who finds out is their friend, on the other side, as "it won't connect".
+    let page = read("ui/index.html");
+    let script = without_comments(&scripts());
+
+    let alcance = tag_with_id(&page, "convite-alcance");
+    assert!(
+        alcance.contains("hidden"),
+        "`convite-alcance` is born visible, so it holds a reserved empty space \
+         before `hospedar` has said which rung it stopped on: <{alcance}>"
+    );
+
+    // Scoped to the two functions that own this, because the page says all of
+    // these words either way — the comment above the markup explaining why the
+    // reach sits next to the link would satisfy an unscoped search for it.
+    let hospedar = body_of(&scripts(), "async function hospedar");
+    assert!(
+        hospedar.contains("mostrarAlcance("),
+        "`hospedar` shows the invite without ever saying how far it goes:\n{hospedar}"
+    );
+    assert!(
+        hospedar.contains("alcance"),
+        "`hospedar` never reads `alcance` off what the Rust side answered, so the \
+         rung it climbed is thrown away at the boundary:\n{hospedar}"
+    );
+
+    let mostrar = body_of(&scripts(), "function mostrarAlcance");
+    assert!(
+        mostrar.contains("fraseDeErro(") || mostrar.contains("FRASES"),
+        "`mostrarAlcance` writes its own wording instead of reading the one in \
+         `frases.js`, which is the file every other sentence lives in:\n{mostrar}"
+    );
+    assert!(
+        mostrar.contains("SoRedeLocal"),
+        "`mostrarAlcance` treats every rung alike, so the one that means `your \
+         friends cannot reach this` looks exactly like the two that mean they \
+         can:\n{mostrar}"
+    );
+
+    // And the colour it may not spend. `tokens.css` reserves red for alarm and
+    // collapse; a link that reaches only the home network is neither — it works,
+    // and works less far than the host probably wanted.
+    // On the comment-stripped sheet. The paragraph above the rule explaining
+    // *why* there is no red here contains the word, so the guard read its own
+    // justification as the violation — the same defect class `without_comments`
+    // exists for, and it took one run to walk into it.
+    let folha = without_comments(&styles());
+    let Some(bloco) = folha.split(".convite-alcance").nth(1) else {
+        panic!("`.convite-alcance` has no styling at all");
+    };
+    let bloco: String = bloco.chars().take(600).collect();
+    assert!(
+        !bloco.contains("vermelho"),
+        "the reach sentence spends the red that tokens.css reserves for alarm and \
+         collapse:\n{bloco}"
+    );
+
+    // Both directions of the same thing: the script must not invent a class the
+    // sheet never styles, which renders as unstyled text and says nothing.
+    let folha_bruta = styles();
+    for classe in ["convite-alcance-curto", "convite-alcance-longe"] {
+        assert!(
+            !mostrar.contains(classe) || folha_bruta.contains(classe),
+            "`mostrarAlcance` sets `{classe}`, which no stylesheet defines — so \
+             the distinction it draws is invisible"
+        );
+    }
+}

@@ -197,6 +197,38 @@ async function conectar(evento) {
 }
 
 /**
+ * Diz até onde o link recém-criado chega, embaixo dele.
+ *
+ * O `alcance` é o degrau da escada do ADR 0022 em que o servidor parou, como
+ * nome estável — `PortaNoRoteador`, `Ipv6Direto` ou `SoRedeLocal` —, e a frase
+ * mora no `FRASES`, que é onde moram todas.
+ *
+ * Só o degrau mais baixo ganha destaque, e é o único que precisa: os outros dois
+ * são boas notícias, e uma boa notícia gritada vira ruído que se aprende a
+ * ignorar — inclusive no dia em que a notícia for ruim.
+ */
+function mostrarAlcance(alcance, portaRecusada) {
+  const onde = $("convite-alcance");
+  const frase = fraseDeErro(alcance);
+
+  onde.textContent = frase;
+  onde.classList.toggle("convite-alcance-curto", alcance === "SoRedeLocal");
+  onde.classList.toggle("convite-alcance-longe", alcance !== "SoRedeLocal");
+
+  // O que o roteador respondeu, quando ele respondeu alguma coisa. Vai embaixo
+  // e menor: é a pista de quem for investigar, não a mensagem de quem só quer
+  // mandar o link.
+  if (portaRecusada) {
+    const detalhe = document.createElement("span");
+    detalhe.className = "convite-alcance-detalhe";
+    detalhe.textContent = `o roteador respondeu: ${portaRecusada}`;
+    onde.append(detalhe);
+  }
+
+  onde.hidden = false;
+}
+
+/**
  * Vira anfitrião: sobe o Dogma dentro deste app e entra nele.
  *
  * Duas etapas de propósito. `hospedar` põe o servidor de pé e devolve o link;
@@ -213,6 +245,7 @@ async function hospedar() {
     const anfitriao = await invoke("hospedar");
     $("campo-servidor").value = anfitriao.aqui;
     $("convite-link").value = anfitriao.convite;
+    mostrarAlcance(anfitriao.alcance, anfitriao.porta_recusada);
     $("convite").hidden = false;
     await conectar();
   } catch (falha) {

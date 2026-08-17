@@ -740,11 +740,27 @@
     ele quebra em duas linhas. Um convite que não dá para copiar inteiro não
     serve para nada, e copiar é a única coisa que se faz com ele.
   -->
+  <!--
+    O convite, e **até onde ele chega** (ADR 0022).
+
+    As duas coisas juntas de propósito, e não numa tela de diagnóstico à parte:
+    um link que só funciona na rede de casa e um link que funciona pela internet
+    são o mesmo texto. Separá-los é o que faz o anfitrião mandar o primeiro
+    achando que mandou o segundo — e quem descobre é o amigo, do outro lado,
+    como «não conecta».
+
+    `#convite-alcance` nasce vazio e escondido: antes de `hospedar` responder,
+    esta janela não sabe em que degrau parou, e um lugar reservado com texto de
+    exemplo mentiria durante o intervalo.
+  -->
   <div id="convite" class="convite" hidden>
-    <span class="convite-rotulo">CONVITE</span>
-    <input id="convite-link" class="convite-link" readonly spellcheck="false">
-    <button id="convite-copiar" class="botao-fantasma" type="button">copiar</button>
-    <span class="convite-nota">o Dogma acaba quando esta janela fechar</span>
+    <div class="convite-linha">
+      <span class="convite-rotulo">CONVITE</span>
+      <input id="convite-link" class="convite-link" readonly spellcheck="false">
+      <button id="convite-copiar" class="botao-fantasma" type="button">copiar</button>
+      <span class="convite-nota">o Dogma acaba quando esta janela fechar</span>
+    </div>
+    <p id="convite-alcance" class="convite-alcance" hidden></p>
   </div>
 
   <!--

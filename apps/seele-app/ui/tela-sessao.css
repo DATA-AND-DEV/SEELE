@@ -1169,13 +1169,19 @@
 
 /* ---- convite, para quem está hospedando ---- */
 .convite {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   padding: 8px 16px;
   border-bottom: 1px solid var(--seele-linha);
   background: var(--seele-laranja-fraco);
   font-size: var(--seele-t-dado);
+}
+
+/* A fila que antes era o bloco inteiro. Ela virou filha quando o alcance passou
+   a ser dito embaixo dela: o `align-items: center` que alinha rótulo, campo e
+   botão é exatamente o que empilharia mal uma frase de duas linhas. */
+.convite-linha {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .convite-rotulo {
@@ -1201,6 +1207,35 @@
 .convite-nota {
   font-size: var(--seele-t-rotulo);
   letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-osso-apagado);
+}
+
+/* Até onde o link chega (ADR 0022).
+   `pre-line` porque as três frases do `FRASES` são duas linhas — um título em
+   caixa alta e a explicação —, e o `\n` entre elas é a divisão. */
+.convite-alcance {
+  margin: 6px 0 0;
+  white-space: pre-line;
+  color: var(--seele-osso);
+}
+
+/* Nenhum vermelho aqui, e é decisão e não descuido: `tokens.css` reserva o
+   vermelho a alerta e queda, e um link que só alcança a rede de casa não é
+   nenhum dos dois — ele funciona, e funciona menos longe do que a pessoa
+   provavelmente quer.
+
+   O laranja já é a cor deste bloco, então chamar atenção com ele não introduz
+   vocabulário novo: é o mesmo bloco falando mais alto. */
+.convite-alcance-curto { color: var(--seele-laranja-nerv); }
+.convite-alcance-longe { color: var(--seele-fosforo); }
+
+/* O que o roteador respondeu, quando respondeu. Secundário de propósito: é
+   texto que o modelo do roteador inventou, útil para quem for investigar e
+   ruído para quem só queria o link. */
+.convite-alcance-detalhe {
+  display: block;
+  margin-top: 4px;
+  font-size: var(--seele-t-rotulo);
   color: var(--seele-osso-apagado);
 }
 
