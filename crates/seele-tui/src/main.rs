@@ -414,6 +414,22 @@ struct Runtime<'a> {
     next_message_id: u64,
 }
 
+/// The first idempotency key of a session, drawn rather than counted from one.
+///
+/// `Messages::append_batch` deduplicates on `(author_id, client_message_id)`.
+/// The two halves used to have different lifetimes: `author_id` comes from the
+/// Ed25519 key on disk (ADR 0004) and never changes, while this counter started
+/// at 1 on every session. So after reconnecting, message 1 of the new session
+/// was read as a retry of message 1 of the old one and **was never written** —
+/// a pilot who dropped their wi-fi and came back could not speak, and neither
+/// end was told (pendency 19).
+///
+/// The high half is random and the low half counts, which leaves four billion
+/// messages in a session before the two could ever meet.
+fn primeira_chave_de_mensagem() -> u64 {
+    (u64::from(rand::random::<u32>()) << 32) | 1
+}
+
 /// The outer loop: choose, talk, eject, choose again.
 ///
 /// The whole session lives inside one turn of this loop, and `Enlace` and
@@ -484,7 +500,7 @@ async fn sessao(
         sync: SyncRatio::new(),
         holds,
         latched: false,
-        next_message_id: 1,
+        next_message_id: primeira_chave_de_mensagem(),
     };
 
     // The boot screen goes up before the connection is attempted and comes down

@@ -663,7 +663,7 @@ entre conexões, e o fato de que quem hospeda lê tudo.
 **Quando dói.** Nos primeiros cinco minutos de quem chega. É a lacuna que uma
 pessoa nota sem ninguém apontar.
 
-## 19 · A chave de idempotência reinicia, e a identidade não
+## 19 · Fechada em 2026-08-17 · A chave de idempotência reinicia, e a identidade não
 
 **Sintoma.** Depois de reconectar, as mensagens de um piloto **não são
 gravadas**. A primeira mensagem da sessão nova é tratada como reenvio da
@@ -709,6 +709,24 @@ acontece sempre **dentro de uma conexão**. Duas saídas, e nenhuma é óbvia:
    `created_at >= início da sessão`. Não muda cliente nem esquema — mas junta
    duas sessões simultâneas da mesma identidade, que é raro e não impossível.
 
-**Quando dói.** Em toda reconexão, que é o caminho mais comum deste produto: cair
-o wi-fi, fechar o notebook, ser expulso e voltar. Da mesma família da pendência
-1 — destrói dado em silêncio —, por mecanismo diferente.
+**Quando doía.** Em toda reconexão, que é o caminho mais comum deste produto:
+cair o wi-fi, fechar o notebook, ser expulso e voltar.
+
+**Como fechou, e o que apareceu no caminho.** Escolhida a saída 1: a chave passa
+a ser sorteada. `seele-tui` sorteia por sessão e `seele-ffi` no arranque do
+processo — a metade alta é sorteada, a baixa conta, o que deixa quatro bilhões de
+mensagens antes de as duas poderem se encontrar. A saída 2 foi recusada por
+juntar duas sessões simultâneas da mesma identidade.
+
+Isto deixou de ser risco latente no meio do conserto. `seele-conformance/tests/
+ejetar.rs::a_mesma_pessoa_volta_pela_tela_de_selecao` conecta a mesma identidade
+duas vezes e fixava `ClientMessageId(1)` nas duas — e **passava por causa do
+defeito**: o servidor devolvia o corpo que chegou vestindo o id da linha antiga,
+então o eco batia e ninguém via que nada tinha sido escrito. Consertado o eco, o
+teste caiu, e o que ele caiu provando é que **um piloto que reconecta não
+conseguia falar**. O teste agora usa chave que não se repete, que é o que um
+cliente correto faz. Ele também passou a rodar em 0,8 s em vez de 15: antes
+esperava o prazo inteiro por um eco que nunca vinha.
+
+Da mesma família da pendência 1 — destruía dado em silêncio —, por mecanismo
+diferente.

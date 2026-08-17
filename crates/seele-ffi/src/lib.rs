@@ -1700,7 +1700,23 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
 /// same number would collide in the server's idempotency check, and the second
 /// message would be silently dropped as a resend of the first.
 fn next_client_message_id() -> u64 {
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    // Drawn at process start, not counted from one — and the difference is a
+    // defect, not tidiness.
+    //
+    // `Messages::append_batch` deduplicates on `(author_id, client_message_id)`.
+    // `author_id` comes from the Ed25519 key on disk (ADR 0004) and never
+    // changes; this counter used to restart at 1 on every launch. So the first
+    // message after reopening the app was read as a retry of the first message
+    // of the previous launch and **was never written**, with neither end told
+    // (pendency 19). Process-wide was never the scope that mattered: the reuse
+    // happened *between* processes.
+    //
+    // The high half is random and the low half counts, which leaves four
+    // billion messages before the two halves could meet.
+    static NEXT: std::sync::LazyLock<std::sync::atomic::AtomicU64> =
+        std::sync::LazyLock::new(|| {
+            std::sync::atomic::AtomicU64::new((u64::from(rand::random::<u32>()) << 32) | 1)
+        });
     NEXT.fetch_add(1, Ordering::Relaxed)
 }
 

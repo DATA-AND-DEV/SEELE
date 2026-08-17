@@ -102,6 +102,28 @@ where
     None
 }
 
+/// Uma chave de idempotência que nunca se repete nesta suíte.
+///
+/// Fixar `ClientMessageId(1)` aqui era o defeito, e ele escondia outro. As duas
+/// conexões deste arquivo são a **mesma identidade** — mesma semente, logo mesmo
+/// `author_id` —, e `Messages::append_batch` deduplica por `(author_id,
+/// client_message_id)`. Então a segunda mensagem era lida como reenvio da
+/// primeira e nunca era gravada.
+///
+/// O teste passava assim mesmo porque o servidor devolvia o **corpo que
+/// chegou** vestindo o id da linha antiga: o eco batia, e ninguém via que nada
+/// tinha sido escrito. Consertado o eco, este teste caiu — e o que ele estava
+/// exercitando era o defeito (pendência 19), não a volta pela tela de seleção.
+///
+/// Um cliente correto não reusa a chave entre sessões, e desde a pendência 19 os
+/// dois deste repositório sorteiam a metade alta no arranque. Esta função é o
+/// mesmo contrato, do jeito que um teste pode tê-lo: determinística e sem
+/// repetição.
+fn proxima_chave() -> ClientMessageId {
+    static PROXIMA: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    ClientMessageId(PROXIMA.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+}
+
 /// Conecta e prova que a sessão **serve**, e não só que o construtor devolveu
 /// `Ok`.
 ///
@@ -124,7 +146,7 @@ async fn conectar_e_falar(
     enlace.inserir_plug(CageId(CAGE)).await?;
     enlace.abrir_linha(LineId(LINE)).await?;
     enlace
-        .dizer(LineId(LINE), o_que.to_owned(), ClientMessageId(1))
+        .dizer(LineId(LINE), o_que.to_owned(), proxima_chave())
         .await?;
 
     let ouviu = esperar(&mut enlace, Duration::from_secs(15), |aviso| {

@@ -4690,6 +4690,7 @@ dependencies = [
 name = "seele-ffi"
 version = "0.0.0"
 dependencies = [
+ "rand 0.10.2",
  "seele-core",
  "serde",
  "serde_json",

@@ -107,6 +107,13 @@ pub enum MessageRefusal {
     NotTheAuthor,
 }
 
+/// What the idempotency lookup reads back: `(id, body, created_at, edited_at,
+/// replies_to)`.
+///
+/// Named rather than written inline because the tuple is what an existing row
+/// *is* here, and the answer to a retry is built out of it field by field.
+type StoredRow = (i64, String, i64, Option<i64>, Option<i64>);
+
 /// Message storage, over CASPER.
 pub struct Messages<'a> {
     casper: &'a mut Casper,
@@ -168,7 +175,7 @@ impl<'a> Messages<'a> {
             // session's. See pendency 19; the key itself is what has to change,
             // and this is only the half that is right either way.
             if let Some(key) = message.client_message_id {
-                let existing: Option<(i64, String, i64, Option<i64>, Option<i64>)> = transaction
+                let existing: Option<StoredRow> = transaction
                     .query_row(
                         "SELECT id, body, created_at, edited_at, replies_to FROM messages
                          WHERE author_id = ?1 AND client_message_id = ?2",

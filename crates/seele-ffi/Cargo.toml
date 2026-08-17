@@ -12,6 +12,9 @@ publish.workspace = true
 [dependencies]
 # The Tauri shell talks to its webview in JSON. See the note in `types`.
 serde = { version = "1", features = ["derive"] }
+# A chave de idempotência da mensagem é sorteada no arranque do processo, e
+# não contada a partir de 1 — ver `next_client_message_id` e a pendência 19.
+rand = "0.10"
 seele-core = { path = "../seele-core" }
 tokio = { version = "1.53.1", features = ["full"] }
 tracing = "0.1.44"
