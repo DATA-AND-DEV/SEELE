@@ -483,11 +483,15 @@ fn send_message(session: State<'_, Session>, line: u32, body: String) -> Result<
 
 // ---------------------------------------------------------------- anexos
 //
-// ADR 0027. Três comandos, e o que **não** existe entre eles é a decisão: não
+// ADR 0027. Quatro comandos, e o que **não** existe entre eles é a decisão: não
 // há `abrir_anexo`. Nenhum cliente do SEELE abre arquivo, e este é o único
 // ponto do desenho em que dá para ser estrito — então ele é estrito. Salvar é
 // um ato de quem recebeu, num lugar que a pessoa escolheu, e o que acontece
 // depois é com ela e com o sistema operacional dela.
+//
+// O quarto é o seletor, e ele entrou depois: o ADR 0027 tinha decidido que
+// escolher um arquivo era arrastá-lo, e o primeiro dono a usar isto clicou no
+// botão ARQUIVO esperando um seletor. A emenda do ADR conta o resto.
 
 /// O que se sabe de um arquivo antes de mandá-lo.
 #[derive(serde::Serialize)]
@@ -529,6 +533,46 @@ fn descrever_arquivo(caminho: String) -> Result<ArquivoEscolhido, PlugError> {
         nome,
         tamanho: meta.len(),
     })
+}
+
+/// Abre o seletor de arquivos do sistema e descreve o que a pessoa escolheu.
+///
+/// `Ok(None)` é desistir, e é o caso mais comum de todos: quem abre um seletor
+/// fecha um seletor. Não é falha e não vira frase de erro em lugar nenhum.
+///
+/// **Fora da linha principal, e não por gosto.** O diálogo é modal e roda no
+/// laço de eventos da janela; a versão bloqueante deste seletor trava esse laço
+/// se for chamada de dentro dele, e é o que aconteceria num comando síncrono.
+/// Então este é `async`, o seletor é o não-bloqueante, e a resposta volta por um
+/// canal — a janela continua desenhando enquanto o diálogo está aberto.
+///
+/// Nenhum filtro de extensão. É a mesma decisão do `tipo_alegado` logo abaixo,
+/// pelo mesmo motivo do ADR 0027: uma lista de extensões aqui esconderia
+/// justamente o arquivo que alguém quer mandar, e um `rename` a contorna.
+#[tauri::command]
+async fn escolher_arquivo(app: AppHandle) -> Result<Option<ArquivoEscolhido>, PlugError> {
+    use tauri_plugin_dialog::DialogExt as _;
+
+    let (envia, mut recebe) = tauri::async_runtime::channel(1);
+    app.dialog()
+        .file()
+        .set_title("Escolha um arquivo para anexar")
+        .pick_file(move |escolha| {
+            // `try_send` e não `blocking_send`: isto roda no laço de eventos da
+            // janela, e o canal tem espaço para este único envio. Bloquear aqui
+            // seria trocar um travamento por outro.
+            let _ = envia.try_send(escolha);
+        });
+
+    let Some(Some(escolha)) = recebe.recv().await else {
+        return Ok(None);
+    };
+    let Ok(caminho) = escolha.into_path() else {
+        // Só o Android devolve `content://`, e este binário não roda lá. Um
+        // caminho que não é caminho é recusado em vez de virar texto.
+        return Err(PlugError::NotConnected);
+    };
+    descrever_arquivo(caminho.display().to_string()).map(Some)
 }
 
 /// O tipo que a extensão sugere.
@@ -1415,6 +1459,12 @@ fn main() {
         // apontar para o nosso release sem que nada no repositório dissesse
         // isso — e é justamente o que o `tauri.conf.json` diz por escrito.
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // O seletor de arquivos. Registrado para que `escolher_arquivo` possa
+        // chamá-lo daqui de dentro; a página **não** o alcança — não há
+        // permissão de `dialog` em `capabilities/janela.json`, e é a decisão:
+        // quem abre um diálogo neste app é um comando desta casca, com o título
+        // escrito aqui, e não uma linha de JavaScript.
+        .plugin(tauri_plugin_dialog::init())
         .manage(Session::default())
         .setup(move |_app| {
             tracing::info!(millis = arranque.elapsed().as_millis(), "janela pronta");
@@ -1461,6 +1511,7 @@ fn main() {
             procurar_atualizacao,
             instalar_atualizacao,
             descrever_arquivo,
+            escolher_arquivo,
             enviar_anexo,
             salvar_anexo,
             pasta_de_downloads,

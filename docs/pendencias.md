@@ -662,11 +662,22 @@ que uma mensagem cujo anexo saiu diz «este arquivo expirou» em vez de aparecer
 vazia. A consequência está escrita no ADR e é aceita: a tabela de anexos nunca
 perde linha.
 
-**Duas coisas que o ADR descreve e que não foram construídas** estão anotadas no
-alto dele: a prévia embutida de imagem — que exige conferir os bytes contra o
-tipo alegado antes de escolher um decodificador, e enquanto não existir todo
-anexo é um arquivo com nome e tamanho — e um seletor de arquivos nativo, que
-custaria um crate a mais.
+**Uma coisa que o ADR descreve e que não foi construída** está anotada no alto
+dele: a prévia embutida de imagem — que exige conferir os bytes contra o tipo
+alegado antes de escolher um decodificador, e enquanto não existir todo anexo é
+um arquivo com nome e tamanho.
+
+**A segunda era o seletor de arquivos nativo, e ela caiu em 2026-08-18.** O
+relato de campo: o dono arrastou um arquivo e não aconteceu nada, e clicou no
+botão ARQUIVO e não abriu nada. Eram dois defeitos sem causa comum. O arrastar
+estava morto porque este app não tinha arquivo de capacidade nenhum e `listen()`
+é chamada ao plugin `event`, que a ACL da Tauri v2 recusava — **todo** ouvinte
+do frontend estava morto, e só este apareceu porque os outros têm um laço de
+500 ms ao lado que redesenha a tela de qualquer jeito. O botão não abria nada
+porque o ADR tinha decidido que escolher era arrastar. Arrastar não se descobre
+sozinho: o seletor entrou, custou três crates contados nos três alvos, e a
+última seção do ADR 0027 registra a reversão, o custo e a saída sem dependência
+que foi procurada e não existe.
 
 **O que segue aberto e não é isto:** as quatro coisas que o próprio ADR nomeia
 como sem saída boa. Justiça sob teto global — uma pessoa com a permissão esvazia

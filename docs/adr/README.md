@@ -47,9 +47,11 @@ plataforma mobile (M6).
 
 **Anexos saíram desta lista**: viraram o [0027](0027-anexos-com-teto-e-o-mais-velho-sai.md),
 aceito e construído, e ele desfaz metade da D14 — o teto de corpo de 4 KiB
-continua, e o "sem anexos em v1" não. O que ele decide está de pé; a prévia
-embutida de imagem e um seletor de arquivos nativo não foram construídos, e
-estão anotados no alto dele. Ver pendência 18.
+continua, e o "sem anexos em v1" não. O que ele decide está de pé, com uma
+exceção que ele mesmo registra: «nenhuma dependência nova» caiu, e o seletor de
+arquivos nativo existe desde 2026-08-18 — o botão ARQUIVO não abria nada, e o
+primeiro dono a usar o app clicou nele. A prévia embutida de imagem continua não
+construída, anotada no alto dele. Ver pendência 18.
 
 **IPv6/NAT traversal saiu desta lista**: virou o [0022](0022-alcancar-um-dogma-pela-internet.md),
 aceito, com os degraus 2 (IPv6) e 3 (UPnP) construídos. O degrau 4 — furo de NAT

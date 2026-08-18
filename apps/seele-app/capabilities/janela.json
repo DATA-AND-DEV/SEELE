@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "janela",
+  "description": "What the one window is allowed to ask of the core plugins. Everything else this shell does goes through its own commands in `src/main.rs`, which are not plugin commands and are not gated here. Two entries, and the list is short on purpose: a capability is the only thing standing between a page and a plugin, so it grants what is used and is re-read when that changes.",
+  "windows": ["main"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

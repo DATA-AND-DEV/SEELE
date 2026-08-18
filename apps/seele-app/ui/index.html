@@ -1052,16 +1052,17 @@
         -->
         <span class="dica compor-dica">Enter também envia</span>
         <!--
-          Arrastar é como se escolhe um arquivo aqui, e o botão existe para
-          dizer isso — descoberta por acaso não é descoberta. Ele não abre
-          seletor nenhum: um seletor de arquivos nativo custaria um crate a mais
-          numa árvore que o ADR 0026 acabou de contar crate a crate, e o
-          ADR 0027 fecha dizendo que nenhuma dependência nova entra por causa
-          de anexos. Então ele instrui, e o `title` diz a mesma coisa por
-          extenso.
+          Abre o seletor de arquivos do sistema. Antes ele não abria: o ADR 0027
+          tinha decidido que escolher um arquivo era arrastá-lo para a conversa,
+          e este botão só dizia essa instrução em voz alta. O primeiro dono a
+          usar o app clicou aqui esperando um seletor, não viu nada acontecer, e
+          a emenda do ADR registra a reversão e o que ela custou.
+
+          Arrastar continua valendo, e o `title` diz isso: são dois caminhos
+          para a mesma coisa, e só um deles se descobre sozinho.
         -->
         <button id="botao-anexar" class="compor-anexar" type="button"
-                title="arraste um arquivo para a conversa para anexá-lo">ARQUIVO</button>
+                title="escolher um arquivo; arrastar para a conversa também anexa">ARQUIVO</button>
         <button id="botao-enviar" class="compor-enviar" type="submit">ENVIAR</button>
       </form>
     </section>
