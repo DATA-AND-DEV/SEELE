@@ -113,6 +113,7 @@ fn name_to_permission(name: &str) -> Option<Permission> {
         "ManageCages" => Permission::ManageCages,
         "ManageRoles" => Permission::ManageRoles,
         "AdministerDogma" => Permission::AdministerDogma,
+        "AttachFile" => Permission::AttachFile,
         _ => return None,
     })
 }
@@ -485,6 +486,7 @@ impl<'a> Melchior<'a> {
             Permission::ManageCages,
             Permission::ManageRoles,
             Permission::AdministerDogma,
+            Permission::AttachFile,
         ];
         let mut held = Vec::new();
         for permission in all {
@@ -585,6 +587,7 @@ mod tests {
         Permission::ManageCages,
         Permission::ManageRoles,
         Permission::AdministerDogma,
+        Permission::AttachFile,
     ];
 
     fn store() -> Casper {

@@ -278,6 +278,26 @@ pub enum Permission {
     ManageRoles,
     /// Everything else about the Dogma.
     AdministerDogma,
+
+    /// Put a file on the Dogma's disk. ADR 0027.
+    ///
+    /// **Not folded into [`Self::WriteLine`].** "May write" and "may put a
+    /// gigabyte on my laptop" are different questions, and the point of hosting
+    /// for your own friends is being able to answer the second one separately.
+    /// The permission is what the ceiling cannot do: the ceiling bounds the
+    /// disk, and nothing bounds *whose* history gets pushed out of it — so the
+    /// only real lever over that is deciding who may push.
+    ///
+    /// Appended last, for the reason [`AlertReason::RateLimited`] gives: a build
+    /// one protocol version older refuses the frame rather than reading this as
+    /// a permission it already understands.
+    ///
+    /// Migration 3 seeds it on Commander, Operator and Pilot, and **denies it
+    /// explicitly on Observer** rather than merely leaving it out — the schema
+    /// already writes why on the Observer's line: denying on purpose makes
+    /// granting Observer to somebody who is also a Pilot *silence* them,
+    /// instead of quietly doing nothing.
+    AttachFile,
 }
 
 /// A role and the permissions it carries.

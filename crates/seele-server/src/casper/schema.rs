@@ -238,6 +238,39 @@ pub const MIGRATIONS: &[Migration] = &[
             CREATE INDEX attachments_by_hash ON attachments (content_hash);
             -- Drawing a page of history joins this per message.
             CREATE INDEX attachments_by_message ON attachments (message_id);
+
+            -- `Permission::AttachFile` is the thirteenth variant, and the
+            -- thirteenth variant is mechanical in the code and **not**
+            -- mechanical in the database: the seeded roles are JSON inside a
+            -- column, and a Dogma that already exists needs its rows brought
+            -- forward or nobody there may ever send a file.
+            --
+            -- Not folded into WriteLine. "May write" and "may put a gigabyte on
+            -- my laptop" are separate questions, and answering the second one
+            -- separately is most of the point of hosting for your own friends.
+            --
+            -- Written against the roles that still carry their seeded names
+            -- rather than against identifiers, and guarded by `NOT EXISTS`, so
+            -- that this is idempotent and so that a role somebody rebuilt by
+            -- hand is not overwritten by a migration.
+            UPDATE roles SET permissions = json_insert(permissions, '$[#]', 'AttachFile')
+             WHERE name IN ('Commander', 'Operator', 'Pilot')
+               AND NOT EXISTS (
+                   SELECT 1 FROM json_each(roles.permissions) WHERE value = 'AttachFile'
+               );
+
+            -- Denied on purpose, and not merely absent. Migration 1 wrote the
+            -- reason on the Observer's line and it holds here word for word:
+            -- an explicit denial is what makes granting Observer to somebody
+            -- who is also a Pilot take the ability away, instead of quietly
+            -- doing nothing. `specs/04-servidor-seele.md`: negadas vencem
+            -- concedidas — a sentence that is empty without a denial to win
+            -- with.
+            UPDATE roles SET denials = json_insert(denials, '$[#]', 'AttachFile')
+             WHERE name = 'Observer'
+               AND NOT EXISTS (
+                   SELECT 1 FROM json_each(roles.denials) WHERE value = 'AttachFile'
+               );
         "#,
     },
 ];
