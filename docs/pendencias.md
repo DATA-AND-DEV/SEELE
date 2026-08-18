@@ -988,7 +988,7 @@ quem baixou o quê, e julgar exige ler.
 **Quando dói.** Não dói em uso; dói em pedido. É a diferença entre um produto que
 as pessoas usam e um que elas fazem seu.
 
-## 23 · A portaria decide, e ninguém avisa quem hospeda que há alguém batendo
+## 23 · Estreitada em 2026-08-18 · A portaria decide, e o aviso só alcança quem está com a janela aberta
 
 **O que existe.** A portaria do **ADR 0030** está construída inteira: a camada no
 servidor (`crates/seele-server/src/portaria.rs`, migração 4), as duas razões de
@@ -996,27 +996,60 @@ protocolo, os sete comandos e a tela (`apps/seele-app/ui/camada-portaria.js`).
 Quem hospeda pelo botão HOSPEDAR AQUI fecha o Dogma, gera convite e decide quem
 entra sem abrir terminal, que era o buraco relatado.
 
+**O que foi feito depois, em 2026-08-18, e o que sobrou.**
+
+Um teste de verdade entre duas casas encontrou o buraco pelos dois lados de uma
+vez: o amigo bateu, recebeu a frase certa, e ficou esperando; quem hospeda
+olhava uma tela onde nada indicava nada. Dos dois lados parecia que o produto
+não funcionava. Os itens 1 e 2 abaixo tratavam de metades disso, e as duas
+metades foram construídas.
+
+**1 · O toque no ombro — feito dentro da janela, e não fora dela.** Um pedido
+pendente é uma linha em SQLite e sobrevive à janela minimizada, ao app fechado e
+à máquina reiniciada; nada se perde por ninguém olhar. O que faltava era
+qualquer coisa que *chamasse*.
+
+O chip PORTA já contava os pendentes a cada cinco segundos, e ele **mora dentro
+de `#tela-sessao`**: entrar numa jaula ou abrir o Terminal Dogma esconde a
+`<section>` inteira e leva o número junto, que é justamente quando quem hospeda
+está ocupado com outra coisa. Agora há uma faixa (`#portaria-batendo`, em
+`camada-portaria.*`) fora de todas as telas, como a região viva e a varredura,
+e ela sobrevive a toda troca de tela.
+
+Ela é o mínimo que ainda é ver: sem `role="alert"`, sem modal, sem `focus()` e
+sem desabilitar nada — quem hospeda pode estar falando numa jaula, e o
+push-to-talk morre no instante em que o foco cai num campo de texto. Quem fala
+por ela é o `#anuncio` que já existe, **uma vez por aparição** e não a cada
+leitura. DEPOIS cala estas batidas, e a faixa volta quando o número sobe.
+
+**O que continua faltando é o toque no ombro com a janela fechada**, que é uma
+notificação do sistema, do `tauri-plugin-notification` — que **não está nas
+dependências**. Vale antes de o produto ser usado por quem hospeda o dia inteiro
+com a janela minimizada; enquanto ela estiver aberta, em qualquer tela, a faixa
+resolve.
+
+**2 · Quem espera tenta de novo à mão — feito, e não na tela de fim.** O desenho
+recusa segurar a conexão de propósito — um prazo fabricaria a resposta «ninguém
+atendeu», que quem a recebe não sabe o que fazer com ela —, e por isso
+`AdmissionPending` derruba na hora. Faltava o cliente **oferecendo** tentar de
+novo.
+
+Esta entrada previa um botão na tela de fim. Ele foi para a tela de entrada em
+Dogma Central (`#tela-auth`, `data-modo="espera"`), e o motivo é que a tela de
+fim é sobre uma sessão que houve: aqui não houve nenhuma, e o que a pessoa
+precisa não é de um botão solto mas de uma tela que diga *o que aconteceu*, *o
+que fazer agora* e *o que não adianta fazer* — que o pedido não vence, que nada
+está esperando desta ponta, que a aprovação não puxa ninguém de volta, e que
+bater sem parar é o que o balde do ADR 0025 freia. A mesma tela perdeu, na
+mesma passagem, os quatro campos que eram travessão em toda entrada: a contagem
+de operadores, a rota, o codec e a chave local.
+
+Repetição automática foi recusada em `seele-tui/src/text.rs` (`worth_retrying`)
+e continua recusada: seria uma bateria batendo na porta de outra pessoa por
+tempo indeterminado. `nothing_on_the_waiting_screen_knocks_again_by_itself` é o
+guarda que impede alguém de reintroduzi-la achando que ajuda.
+
 **O que falta, em ordem de quanto atrapalha.**
-
-**1 · O toque no ombro.** Um pedido pendente é uma linha em SQLite e sobrevive à
-janela minimizada, ao app fechado e à máquina reiniciada — nada se perde por
-ninguém olhar. Mas nada *chama*. Enquanto a janela está aberta, o botão da porta
-conta os pendentes a cada cinco segundos; com a janela minimizada, quem bateu
-espera até quem hospeda lembrar de olhar. O conserto é uma notificação do
-sistema, e ela é do `tauri-plugin-notification` — que **não está nas
-dependências**, e o `Cargo.toml` do app é território de outro trabalho agora.
-Vale antes de o produto ser usado por quem hospeda o dia inteiro com a janela
-fechada.
-
-**2 · Quem espera tenta de novo à mão.** O desenho recusa segurar a conexão de
-propósito — um prazo fabricaria a resposta «ninguém atendeu», que quem a recebe
-não sabe o que fazer com ela — e por isso `AdmissionPending` derruba na hora,
-com a frase mandando tentar depois. O que não existe é o cliente **oferecendo**
-tentar de novo: hoje a pessoa reabre a entrada e aperta de novo. Um botão TENTAR
-DE NOVO na tela de fim, com o endereço já preenchido, é barato e não muda o
-protocolo. Repetição automática foi recusada em `seele-tui/src/text.rs`
-(`worth_retrying`) e continua recusada: seria uma bateria batendo na porta de
-outra pessoa por tempo indeterminado.
 
 **3 · Pedido não vence, e a tabela não é varrida.** `portaria` guarda uma linha
 por impressão digital, para sempre, inclusive de quem nunca entrou e nunca vai
@@ -1049,9 +1082,10 @@ portaria o tornaria constante, porque uma batida pendente é o caminho projetado
 A corrida entre dois clientes com o mesmo convite continua sendo perdida no mesmo
 `UPDATE ... WHERE usado_em IS NULL`.
 
-**Quando dói.** O item 1 dói no primeiro uso real entre duas casas: quem bate
-espera sem que ninguém saiba que ele bateu. Os itens 3 e 4 não doem em nada que
-exista hoje.
+**Quando dói.** O item 1 doía no primeiro uso real entre duas casas, e foi ali
+que ele apareceu: quem bate esperava sem que ninguém soubesse que ele bateu. O
+que sobrou dele só dói com a janela minimizada. Os itens 3 e 4 não doem em nada
+que exista hoje.
 
 
 ## 24 · Várias sessões estão desenhadas e não construídas

@@ -5616,3 +5616,324 @@ fn the_content_security_policy_did_not_move_to_make_room_for_a_picture() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Quem bate à porta, dos dois lados — ADR 0030, pendência 23.
+//
+// A portaria decidia e ninguém do outro lado ficava sabendo. Num teste entre
+// duas casas o amigo bateu, leu a frase certa e ficou esperando; quem hospeda
+// olhava uma tela onde nada indicava nada. Os cinco guardas abaixo são as cinco
+// maneiras de reintroduzir metade daquilo sem que nada mais reclame.
+// ---------------------------------------------------------------------------
+
+/// The entry screen, cut out of the page.
+///
+/// `screens_of` hands back everything from a section to the end of the file,
+/// which is fine for asking what a screen *has* and useless for asking what it
+/// no longer has — every earlier screen would answer for the later ones. This
+/// cuts at the closing tag, and `#tela-auth` nests no other `</section>`.
+fn entry_screen() -> String {
+    let page = without_comments(&read("ui/index.html"));
+    let Some(after) = page.split("id=\"tela-auth\"").nth(1) else {
+        panic!("index.html no longer has the entry screen");
+    };
+    let Some(screen) = after.split("</section>").next() else {
+        panic!("#tela-auth is never closed");
+    };
+    screen.to_owned()
+}
+
+#[test]
+fn the_knock_notice_never_takes_the_keyboard_from_somebody_mid_sentence() {
+    // The half of this feature that is easiest to get wrong by being helpful.
+    // Whoever hosts is very often *talking* — the button that hosts drops them
+    // straight into a session, and the push-to-talk of the call screen is a key
+    // that stops working the moment focus lands in a text field. A modal, an
+    // `alert` role, or a bare `focus()` on a band that appears every time
+    // somebody knocks is worse than the silence it replaces.
+    let page = without_comments(&read("ui/index.html"));
+
+    // Outside every screen, checked by position rather than by asking each
+    // screen whether it contains it: `screens_of` runs each piece to the end of
+    // the file, so "not inside the last screen" is a question it cannot answer.
+    // Before the first `<section id="tela-` is exact.
+    let Some(faixa) = page.find("id=\"portaria-batendo\"") else {
+        panic!("the page no longer has the band that says somebody is knocking");
+    };
+    let Some(primeira) = page.find("<section id=\"tela-") else {
+        panic!("index.html no longer draws screens");
+    };
+    assert!(
+        faixa < primeira,
+        "the knock band moved inside a screen, where a `hidden` on that section \
+         takes it off the page along with everything else — and whoever hosts is \
+         inside a cage or in the settings exactly when somebody knocks"
+    );
+
+    let tag = tag_with_id(&read("ui/index.html"), "portaria-batendo");
+    for roubo in ["role=\"alert\"", "aria-modal", "autofocus"] {
+        assert!(
+            !tag.contains(roubo),
+            "the knock band carries `{roubo}`, which interrupts whoever is \
+             reading or talking: <{tag}>"
+        );
+    }
+
+    // And the script that reveals it must not reach for the keyboard either.
+    // Scoped to the function body, with comments already stripped by `body_of`:
+    // the paragraph above it says `focus()` in prose, and a guard its own
+    // rationale can satisfy is a guard that cannot fail.
+    let corpo = body_of(&scripts(), "function avisarQueBatem");
+    for roubo in ["focus(", "disabled", "abrirTela("] {
+        assert!(
+            !corpo.contains(roubo),
+            "the knock band reaches for `{roubo}` when it appears, so it takes \
+             over from whoever was in the middle of something:\n{corpo}"
+        );
+    }
+
+    // It still has to appear, or the guard above is guarding nothing.
+    assert!(
+        corpo.contains("faixa.hidden"),
+        "nothing shows or hides the band, so it is markup that never runs:\n{corpo}"
+    );
+    assert!(
+        corpo.contains("anunciar("),
+        "the band appears and says nothing to somebody who cannot see it, which \
+         is the same silence this exists to end:\n{corpo}"
+    );
+}
+
+#[test]
+fn the_knock_is_read_out_once_per_appearance_and_not_once_per_poll() {
+    // The door is read every five seconds. A live region written on every read
+    // says "somebody is knocking" twelve times a minute at somebody wearing
+    // headphones — which is how a person learns not to hear the thirteenth, and
+    // it is the argument ADR 0003 makes about the key-change warning.
+    //
+    // So the sentence belongs to the *transition* into view: it is guarded by
+    // the band having been hidden, and it happens before the line that stops it
+    // being hidden.
+    let corpo = body_of(&scripts(), "function avisarQueBatem");
+
+    let Some(fala) = corpo.find("anunciar(") else {
+        panic!("the band no longer says anything out loud:\n{corpo}");
+    };
+    let Some(escreve) = corpo.find("faixa.hidden = !") else {
+        panic!("the band's visibility is no longer decided in one place:\n{corpo}");
+    };
+    assert!(
+        fala < escreve,
+        "the announcement is written after the band is revealed, so it asks \
+         whether the band was hidden about a band it has just shown — and the \
+         sentence is never said:\n{corpo}"
+    );
+
+    // The condition itself, and not the words somewhere above it. The earlier
+    // `faixa.hidden = true` of the empty-queue branch sits in the same body, so
+    // a check for the name alone passes with the guard deleted.
+    let Some(inicio) = corpo[..fala].rfind("if (") else {
+        panic!("the announcement is behind no condition at all:\n{corpo}");
+    };
+    let guarda = &corpo[inicio..fala];
+    assert!(
+        guarda.contains("faixa.hidden"),
+        "the announcement does not ask whether the band was already showing, so \
+         the same knock is read out on every five-second poll:\n{guarda}"
+    );
+    assert!(
+        guarda.contains("mostrar"),
+        "the announcement does not ask whether the band is going to be shown, so \
+         it speaks for knocks that DEPOIS already silenced:\n{guarda}"
+    );
+
+    // And reading the queue silences it. Without this the band comes straight
+    // back the moment the layer closes, over exactly the people just read.
+    let fila = body_of(&scripts(), "function desenharFila");
+    assert!(
+        fila.contains("calarBatidas("),
+        "opening the door and reading the queue leaves the band armed, so it \
+         reappears about the knocks whoever hosts has just looked at:\n{fila}"
+    );
+}
+
+#[test]
+fn nothing_on_the_waiting_screen_knocks_again_by_itself() {
+    // The trap this screen is one step away from. ADR 0030 refuses to hold the
+    // connection open on purpose: a deadline manufactures "nobody answered",
+    // which is an answer nobody can act on. A screen that retries on a timer
+    // turns "nothing waits" into waiting under another name — and it knocks on
+    // somebody else's Dogma forever, against the per-address bucket of ADR
+    // 0025. `seele-tui`'s `worth_retrying` refused the same thing.
+    let tela = without_comments(&read("ui/tela-auth.js"));
+
+    for relogio in ["setInterval(", "setTimeout(", "requestAnimationFrame("] {
+        assert!(
+            !tela.contains(relogio),
+            "the entry screen schedules `{relogio}`, and the only thing it has \
+             to schedule is another knock on a door that has not answered yet"
+        );
+    }
+
+    // And every path into a knock is a press. Counted over top-level chunks so
+    // a call added anywhere else — a listener on the screen becoming visible, a
+    // retry inside a `catch` — is reported with its text.
+    let mut declaracoes = 0;
+    let mut por_clique = 0;
+    let mut outros: Vec<String> = Vec::new();
+    for chunk in top_level_chunks(&read("ui/tela-auth.js")) {
+        if !chunk.contains("baterDeNovo") {
+            continue;
+        }
+        if chunk.contains("async function baterDeNovo") {
+            declaracoes += 1;
+        } else if chunk.contains("addEventListener(\"click\"") {
+            por_clique += 1;
+        } else {
+            outros.push(chunk);
+        }
+    }
+    assert_eq!(
+        declaracoes, 1,
+        "the function that knocks again is declared {declaracoes} times, so this \
+         guard is reading something other than the one that runs"
+    );
+    assert!(
+        por_clique >= 1,
+        "nothing presses the button that knocks again, so trying again is not \
+         offered at all — and an approval never pulls anybody back by itself"
+    );
+    assert!(
+        outros.is_empty(),
+        "something other than a press knocks again:\n{}",
+        outros.join("\n")
+    );
+}
+
+#[test]
+fn the_waiting_screen_says_what_happened_what_to_do_and_what_is_useless() {
+    // The three questions somebody who has just been dropped is holding, and
+    // the third is the one a shell never writes down: the decision is durable
+    // and does not expire, nothing on this side is waiting, and the approval
+    // will not pull anybody back — so trying again later is the whole method,
+    // and trying again now, over and over, is how you get rate-limited out.
+    let bloco = {
+        let tela = entry_screen();
+        let Some(after) = tela.split("id=\"auth-espera\"").nth(1) else {
+            panic!("the entry screen has no block for somebody waiting:\n{tela}");
+        };
+        let Some(bloco) = after.split("</div>").next() else {
+            panic!("the waiting block is never closed");
+        };
+        bloco.to_owned()
+    };
+
+    for (needle, o_que) in [
+        ("não vence", "that the request does not expire"),
+        (
+            "puxar de volta",
+            "that nothing pulls them back when it is decided",
+        ),
+        ("tentativa por vez", "that knocking is one press at a time"),
+        (
+            "outro canal",
+            "that asking whoever hosts directly is faster",
+        ),
+    ] {
+        assert!(
+            bloco.contains(needle),
+            "the waiting screen never says {o_que}, which is the half of this \
+             that a line of red error text could not carry:\n{bloco}"
+        );
+    }
+
+    // What happened comes from the enum, through the one place enums become
+    // sentences. A second wording written here would be a second thing to keep
+    // in step with `MOTIVOS`, which is what the end screen reads.
+    let corpo = body_of(&scripts(), "function levarParaAEspera");
+    assert!(
+        corpo.contains("fraseDeErro(") && corpo.contains("auth-espera-frase"),
+        "the waiting screen writes its own account of what happened instead of \
+         the sentence the refusal already has:\n{corpo}"
+    );
+    assert!(
+        corpo.contains("AdmissionPending"),
+        "nothing routes a pending knock to this screen, so it is a screen \
+         nobody arrives at:\n{corpo}"
+    );
+
+    // A decided refusal is a wall with the reason on it, and not a button that
+    // keeps working. Same shape as the last cage: drawn, disabled, explained —
+    // a button that vanishes is a button somebody hunts for.
+    assert!(
+        corpo.contains("AdmissionDenied") && corpo.contains("disabled"),
+        "a decided refusal leaves the try-again button live, so the screen \
+         invites knocking on a door that has already answered:\n{corpo}"
+    );
+    assert!(
+        corpo.contains("auth-parede"),
+        "the refusal disables the button and says nothing about why, which \
+         reads as the window being broken:\n{corpo}"
+    );
+
+    // Only a pending knock takes the entrance over. Everything else stays on
+    // the boot screen, where another Dogma can be chosen — and the boot screen
+    // writes its own red line only when this screen did not take the failure.
+    let conectar = body_of(&scripts(), "async function conectar");
+    let Some(desvio) = conectar.find("levarParaAEspera(") else {
+        panic!("nothing sends a pending knock anywhere:\n{conectar}");
+    };
+    let Some(linha) = conectar.find("erro.textContent = fraseDeErro(") else {
+        panic!("the entrance no longer writes why a connection failed:\n{conectar}");
+    };
+    assert!(
+        desvio < linha,
+        "the entrance writes its error line before asking whether the failure \
+         belongs to the waiting screen, so both say it at once:\n{conectar}"
+    );
+}
+
+#[test]
+fn the_entrance_screen_stopped_drawing_the_four_values_this_protocol_never_carried() {
+    // The convention it drops was a good one applied too far: draw the frame,
+    // write the value as missing, and the gap stays visible. That serves a gap
+    // somebody means to close. These four never closed — there is no population
+    // count and no "route" anywhere in the core, the codec has no value until a
+    // plug is inside a cage and nobody is yet, and the local key does not cross
+    // the FFI — so what the screen showed was seven fields with four dashes,
+    // which reads as a broken window rather than as an honest one.
+    let tela = entry_screen();
+
+    for morto in [
+        "OPERADORES",
+        "ROTA",
+        "auth-chave",
+        "auth-codec",
+        "legenda-ausente",
+    ] {
+        assert!(
+            !tela.contains(morto),
+            "`{morto}` is back on the entry screen, a frame drawn around a value \
+             this protocol does not carry"
+        );
+    }
+
+    // The ones that are real stay, or this passes by deleting the panel.
+    for vivo in ["auth-cages", "auth-linhas", "auth-dogma-nome"] {
+        assert!(
+            tela.contains(vivo),
+            "`{vivo}` left the entry screen too, and that one comes straight out \
+             of the snapshot"
+        );
+    }
+
+    // And nothing writes into the ones that went. A script still filling an
+    // element that is not in the page throws on the line after `$()`.
+    let script = without_comments(&scripts());
+    for morto in ["auth-chave", "auth-codec"] {
+        assert!(
+            !script.contains(morto),
+            "a script still fills `{morto}`, which is no longer in the page"
+        );
+    }
+}

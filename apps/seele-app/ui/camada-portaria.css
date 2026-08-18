@@ -242,3 +242,46 @@
   gap: var(--seele-e1);
   flex-wrap: wrap;
 }
+
+/* ---------- a faixa de quem está batendo ----------
+
+   Fixa na janela e não dentro de tela nenhuma, pelo motivo escrito no
+   `index.html`: o chip PORTA vive em `#tela-sessao` e some junto com ela.
+
+   `z-index: 19`, logo abaixo do véu do alerta (20), da bateria (21), desta
+   camada (25) e da moderação (30). É a ordem certa em todos os quatro casos:
+   quando qualquer um deles está aberto, ele é o que está sendo lido, e uma
+   faixa por cima do véu seria a única coisa acesa numa tela que está suspensa.
+
+   Sem `position: fixed` no topo: o cabeçalho da sessão está lá. Embaixo, e a
+   48px, que é o que passa por cima da barra de telemetria de 40px sem a
+   cobrir — ela é permanente por decisão de `specs/05-cliente-tui.md`, e tapar
+   uma medida para avisar de outra coisa é trocar um buraco por outro.
+
+   Laranja institucional, nunca o vermelho: ver o cabeçalho desta folha. */
+.portaria-batendo {
+  position: fixed;
+  left: 50%;
+  bottom: var(--seele-e6);
+  transform: translateX(-50%);
+  z-index: 19;
+  display: flex;
+  align-items: center;
+  gap: var(--seele-e2);
+  max-width: calc(100vw - var(--seele-e4));
+  padding: var(--seele-e1) var(--seele-e2);
+  background: var(--seele-negro-painel);
+  border: var(--seele-b-forte) solid var(--seele-laranja-nerv);
+}
+
+.portaria-batendo-marca {
+  display: inline-flex;
+  align-items: center;
+  color: var(--seele-laranja-nerv);
+}
+
+.portaria-batendo-texto {
+  margin: 0;
+  color: var(--seele-osso);
+  letter-spacing: 0.08em;
+}
