@@ -46,3 +46,38 @@ O que já havia: `signingIdentity: "-"` no macOS (ad-hoc, que não vale para o G
 - **Uma dependência a mais na árvore do desktop**, e ela não custou exceção nenhuma no `deny.toml`: `reqwest`, `rustls` e `ring` já estavam lá. O que entra de novo é `minisign-verify`, que é pequeno e é exatamente o que confere a assinatura.
 
 Custo de reverter: **baixo** enquanto ninguém tiver atualizado por aqui. Depois do primeiro release assinado, trocar de chave exige que todo mundo reinstale à mão — que é o mesmo custo de perdê-la.
+
+---
+
+## O que a primeira pessoa a apertar o botão ensinou
+
+O botão foi apertado num app de verdade, num release que ainda não existia, e
+respondeu **«a página de releases não respondeu»**. A página tinha respondido, e
+respondido corretamente: não havia nada publicado.
+
+O erro estava no agrupamento. `ReleaseNotFound` foi escrito junto de
+`Reqwest`, `Network` e `Serialization` sob a mesma variante `NaoAlcancei`,
+porque os quatro são «não consegui o manifesto». São — e é a pergunta errada. A
+pergunta certa é **o que a pessoa faz a seguir**, que é o critério que este
+próprio ADR usou para escrever seis variantes em vez de uma:
+
+- rede que falhou: **tente de novo daqui a pouco**;
+- página que respondeu «nada publicado»: **não adianta tentar de novo**, e a sua
+  conexão está boa.
+
+Mandar conferir a conexão por causa do segundo manda a pessoa procurar defeito
+onde não há. Então são **sete** variantes, e a nova é `NadaPublicado`.
+
+Vale registrar o padrão, porque este ADR é o segundo a cair nele no mesmo dia. O
+ADR 0022 teve exatamente o mesmo conserto: o ponto de encontro padrão, que
+ninguém publicou ainda, dizia «o nome não resolve, ou esta máquina está sem
+DNS» — culpando a máquina de quem hospeda por uma pendência nossa.
+
+**As duas vezes o defeito foi o mesmo:** uma pendência de infraestrutura nossa
+apareceu na tela vestida de falha da máquina de quem estava usando. É um viés
+com direção — quem escreve a frase sabe que o serviço ainda não existe, e por
+isso não pensa nele como uma das causas possíveis. Quem lê não sabe, e assume a
+única causa que a frase oferece.
+
+O teste que conta as variantes é o que obriga a próxima a vir acompanhada de
+frase e de motivo, em vez de chegar calada e dividir a redação de outra.

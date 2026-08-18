@@ -1518,6 +1518,19 @@ enum FalhaAoAtualizar {
     NaoConfigurado,
     /// Não deu para alcançar o manifesto, ou ele não era o que se esperava.
     NaoAlcancei,
+    /// A página de releases respondeu, e não há release com manifesto nela.
+    ///
+    /// Separado de [`Self::NaoAlcancei`] porque a diferença é tudo para quem
+    /// lê. Ali a rede falhou e tentar de novo faz sentido; aqui a rede
+    /// funcionou perfeitamente e a resposta foi «não há nada publicado» —
+    /// tentar de novo não muda nada, e mandar a pessoa conferir a conexão a
+    /// manda procurar defeito onde não há.
+    ///
+    /// É o estado normal de um projeto que ainda não publicou release nenhum
+    /// com `latest.json` ao lado, e foi assim que ele apareceu: o botão
+    /// respondeu «a página de releases não respondeu» sobre uma página que
+    /// tinha respondido.
+    NadaPublicado,
     /// Há versão nova, mas não para este sistema ou esta arquitetura.
     SemPacoteParaEsteSistema,
     /// O pacote baixado **não** foi assinado com a chave deste projeto.
@@ -1545,10 +1558,12 @@ fn classificar_atualizacao(erro: &tauri_plugin_updater::Error) -> FalhaAoAtualiz
         // Sem endpoint não há de onde buscar, e isso é configuração de
         // empacotamento, igual à chave ausente. Mesma tela.
         Falha::EmptyEndpoints => FalhaAoAtualizar::NaoConfigurado,
-        Falha::Reqwest(_)
-        | Falha::Network(_)
-        | Falha::ReleaseNotFound
-        | Falha::Serialization(_) => FalhaAoAtualizar::NaoAlcancei,
+        // `ReleaseNotFound` saiu daqui: ele é a resposta bem-sucedida «não há
+        // release publicado», e não uma falha de rede. Ver `NadaPublicado`.
+        Falha::ReleaseNotFound => FalhaAoAtualizar::NadaPublicado,
+        Falha::Reqwest(_) | Falha::Network(_) | Falha::Serialization(_) => {
+            FalhaAoAtualizar::NaoAlcancei
+        }
         Falha::TargetNotFound(_)
         | Falha::TargetsNotFound(_)
         | Falha::UnsupportedOs

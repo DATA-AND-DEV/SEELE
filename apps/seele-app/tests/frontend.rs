@@ -3183,11 +3183,23 @@ fn every_way_the_update_can_fail_asks_something_different_of_the_reader() {
     let source = read("src/main.rs");
     let script = without_comments(&scripts());
 
+    // Seven, and it was six until the first person pressed the button.
+    //
+    // ADR 0026 wrote six deliberately, and one of them — `NaoAlcancei` — was
+    // carrying two situations that ask opposite things of the reader. A network
+    // that failed is worth retrying; a releases page that answered «nothing is
+    // published» is not, and telling somebody to check their connection over it
+    // sends them hunting for a fault that does not exist. The seventh,
+    // `NadaPublicado`, is that split. See the closing section of ADR 0026.
+    //
+    // The number is asserted rather than merely counted so that the next
+    // variant also has to come with the sentence and the reason, instead of
+    // arriving silently and sharing somebody else's wording.
     let variants = variants_of(&source, "FalhaAoAtualizar");
     assert_eq!(
         variants.len(),
-        6,
-        "`FalhaAoAtualizar` has {} variants; ADR 0026 wrote six on purpose: {variants:?}",
+        7,
+        "`FalhaAoAtualizar` has {} variants; ADR 0026 accounts for seven: {variants:?}",
         variants.len()
     );
 

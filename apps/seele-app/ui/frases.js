@@ -270,6 +270,17 @@ const FRASES = {
       "NÃO CONSEGUI PERGUNTAR SE HÁ VERSÃO NOVA.\n" +
       "A página de releases não respondeu, ou respondeu algo que não entendi. " +
       "Nada foi baixado e nada mudou nesta máquina; tente de novo daqui a pouco.",
+    // Separada da de cima, e a diferença é tudo para quem lê: ali a rede
+    // falhou e tentar de novo faz sentido; aqui a rede funcionou e a resposta
+    // foi «não há nada publicado». Mandar conferir a conexão seria mandar
+    // procurar defeito onde não há — e foi assim que este caso apareceu, com o
+    // botão dizendo que a página não respondeu sobre uma página que respondeu.
+    NadaPublicado:
+      "AINDA NÃO HÁ VERSÃO PUBLICADA PARA BAIXAR.\n" +
+      "A página de releases respondeu, e não há release com manifesto de " +
+      "atualização nela. Não é problema da sua conexão e não adianta tentar de " +
+      "novo: enquanto não sair uma versão nova por este caminho, este app " +
+      "continua sendo o mais recente que existe.",
     SemPacoteParaEsteSistema:
       "HÁ VERSÃO NOVA, MAS NÃO PARA ESTE SISTEMA.\n" +
       "O release não traz pacote para este sistema operacional ou para este processador. " +
