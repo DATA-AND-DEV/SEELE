@@ -742,22 +742,43 @@ fn a_arvore_suja_impede_o_empacotamento() {
     // sair. Começar sujo é perder a única forma de distinguir resto do script de
     // trabalho de quem estava editando — e foi assim que a versão de um release
     // vazou para um commit.
+    // Duas metades, e a segunda é a que a primeira versão deste guarda não tinha.
+    //
+    // Sujeira **fora** desses caminhos não confunde ninguém, e barrá-la parou o
+    // dono na primeira execução por causa de um documento que vive editado — com
+    // o script sugerindo `git stash` num arquivo dele. O escopo certo é o que a
+    // própria mensagem sempre disse: o que estes scripts reescrevem.
     let bancada = Bancada::nova();
     escrever(
         &bancada.repo.join("um-rascunho.txt"),
         "meu trabalho\n",
         false,
     );
+    // `--conferir` porque a pergunta aqui é só «isto barra?». Deixar a execução
+    // seguir empacotaria na bancada e sujaria a segunda metade do teste.
+    let livre = bancada.rodar(&["1.2.3", "--conferir"], &[]);
+    assert!(
+        !livre.texto.contains("não commitado"),
+        "sujeira fora do que o empacotamento escreve barrou o empacotamento:\n{}",
+        livre.texto
+    );
+
+    // E agora onde importa.
+    escrever(
+        &bancada.repo.join("empacotar/rascunho.sh"),
+        "# meio de um conserto\n",
+        false,
+    );
     let saida = bancada.rodar(&["1.2.3"], &[]);
 
     assert_eq!(
         saida.estado, 1,
-        "árvore suja tem que reprovar:\n{}",
+        "sujeira no que o empacotamento escreve tem que reprovar:\n{}",
         saida.texto
     );
     assert!(
-        saida.texto.contains("não está limpa"),
-        "a mensagem tem que dizer que a árvore está suja:\n{}",
+        saida.texto.contains("não commitado"),
+        "a mensagem tem que dizer o que está sujo:\n{}",
         saida.texto
     );
     assert!(saida.nada_foi_empacotado(), "compilou com a árvore suja");

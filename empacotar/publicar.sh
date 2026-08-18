@@ -572,7 +572,12 @@ conferir_entrega() {
     # certo têm de continuar ali. O que não pode é o `.dmg` de 0.4.0 subir junto
     # com o release de 0.4.1 — o `SHA256SUMS` cobriria os dois e a página
     # ofereceria duas versões com o mesmo nome de release.
-    ce_restos=$(find "$RAIZ/entrega" -type f ! -name "*$VERSAO*" 2>/dev/null)
+    #
+    # O `.DS_Store` fica de fora: ele não é entrega de ninguém, é um arquivo que
+    # o Finder escreve sozinho em toda pasta que alguém abriu. Barrar por causa
+    # dele manda a pessoa «mover a entrega passada» de um arquivo que ela não
+    # criou e que vai voltar sozinho na próxima vez que ela olhar a pasta.
+    ce_restos=$(find "$RAIZ/entrega" -type f ! -name "*$VERSAO*" ! -name ".DS_Store" 2>/dev/null)
     if [ -n "$ce_restos" ]; then
         morrer "entrega/ tem arquivos de outra versão:" \
             "$ce_restos" \
