@@ -5,8 +5,12 @@
 **Degraus 2 e 3 implementados:** 2026-08-17 — ver "O que a implementação
 ensinou", no fim, e "O que a primeira máquina de outra pessoa ensinou", logo
 depois: três decisões deste ADR foram corrigidas por um relato de campo, e a
-maior delas é que o convite não pode carregar um endereço só. Os degraus 4 e 5 continuam exatamente como estão escritos
-aqui: o 4 esperando a conversa sobre metadado, o 5 fora de escopo por decisão.
+maior delas é que o convite não pode carregar um endereço só.
+
+**Degrau 4 implementado:** 2026-08-17, depois da conversa sobre metadado que
+esta página pedia — a decisão foi **construir, com um ponto de encontro nosso por
+padrão, e trocável**. Ver "O que o degrau 4 ensinou", no fim. O degrau 5 continua
+exatamente como está escrito aqui: fora de escopo por decisão.
 
 ## Contexto
 
@@ -72,11 +76,16 @@ mecanismo único. Cada degrau vale por si e nenhum depende do seguinte.
    infraestrutura, e resolve boa parte das casas.
 4. **Furo de NAT com ponto de encontro.** Um serviço minúsculo apresenta os
    dois; o tráfego é direto. É o degrau que dá "manda o link e funciona".
+   Construído — `crates/seele-encontro/` é o serviço, e ele cabe num laço.
 5. **Retransmissão.** Explicitamente **fora de escopo por enquanto** — ver
    abaixo.
 
 O `seele://` já existe e não muda de forma: muda o que vai dentro. Hoje leva
 endereço e impressão digital; no degrau 4 levaria um bilhete de encontro.
+
+O bilhete ficou sendo `enc=<ponto de encontro>/<onde avisar o anfitrião>`, e a
+segunda metade é o que permite ao serviço no meio não guardar nada. Ver "O que o
+degrau 4 ensinou".
 
 ## Consequências
 
@@ -105,7 +114,9 @@ dela. Quem cair nesse caso tem o degrau 1, que sempre funcionou.
 
 **O que isto não resolve.** CGNAT sem IPv6 e sem UPnP continua sem saída antes
 do degrau 4. Vale dizer isso na documentação em vez de deixar a pessoa
-descobrindo sozinha por que "não conecta".
+descobrindo sozinha por que "não conecta". *(Com o degrau 4 construído, este é
+justamente o caso que ele cobre — e o que sobra sem saída é NAT simétrico dos
+dois lados.)*
 
 ## Alternativas consideradas
 
@@ -131,6 +142,147 @@ resolvidos, e não pede decisão nenhuma sobre metadado. Depois o 2, que é
 sobretudo conferir que nada no caminho assume IPv4. O degrau 4 só depois de
 uma conversa explícita sobre o que o ponto de encontro aprende — e este ADR
 existe para que essa conversa aconteça antes do código, e não depois.
+
+## O que o degrau 4 ensinou
+
+Escrito no dia em que ele foi construído, depois da conversa sobre metadado que
+este ADR existia para provocar. A decisão foi **construir**, com um ponto de
+encontro nosso por padrão e trocável, sabendo o custo e contra as alternativas de
+não construir e de construir sem padrão.
+
+O que segue é o que só apareceu ao escrever o código.
+
+### "Sem estado" e o bilhete são a mesma decisão
+
+Este ADR pede que o ponto de encontro seja "sem estado, não guarda nada". A
+primeira forma óbvia do bilhete — um identificador opaco, um número de "quarto" —
+**contradiz isso**: alguém teria de traduzir aquele número para o endereço do
+anfitrião, e essa tradução é uma tabela. Um serviço com tabela tem o que perder
+num reinício, o que vazar num descuido e o que entregar sob intimação.
+
+A saída foi pôr os dois endereços no próprio bilhete: o do ponto de encontro e o
+do anfitrião, como ele é visto de fora. Com isso o serviço no meio virou uma
+**função sem `self`** — `seele_proto::encontro::responder` recebe um datagrama e
+devolve outro, e não existe onde guardar nada. "Sem estado" deixou de ser uma
+promessa de comportamento e virou uma propriedade do tipo.
+
+O preço é real e está na documentação em vez de implícito: quem tem o link
+aprende o endereço público de quem hospeda sem precisar conectar. Quem conecta
+aprenderia de qualquer jeito.
+
+### Um ponto de encontro é um refletor, e este ADR não tinha pensado nisso
+
+"Um serviço minúsculo diz a cada lado qual é o endereço público do outro" é a
+descrição certa, e ela esconde uma consequência: para contar a um lado sobre o
+outro, o serviço manda um pacote para um endereço **escolhido por quem pediu**.
+Isso é um refletor, e um refletor na internet aberta é uma arma se alguém não
+tiver o cuidado de:
+
+- **não amplificar** — todo datagrama tem 96 bytes, pedido e resposta, com
+  enchimento, para que o ganho de banda de quem abusar seja no máximo 1:1;
+- **não alcançar rede que não é da internet** — refletir para `192.168.x.x` ou
+  para o loopback é uma forma de bater em máquinas que não estão na internet a
+  partir de uma que está;
+- **não alcançar porta de serviço** — DNS e NTP respondem a qualquer coisa, e um
+  pacote nosso batendo lá em nome de outra pessoa começa uma reflexão em cadeia.
+
+As três são testes, e cada uma reprova sozinha quando quebrada de propósito.
+
+### O furo é uma propriedade do socket, não da mensagem
+
+A parte que mais mudou o desenho. O NAT mapeia por **porta interna**: o pacote
+que abre o caminho tem de sair da mesma porta em que o QUIC vai falar, ou o
+roteador abre caminho para o socket errado e o aperto de mão continua batendo
+numa porta fechada.
+
+Só que quem lê o socket do Dogma é o quinn, e ele não o empresta. Daí duas
+peças que não estavam previstas aqui:
+
+- **um espelho do socket**, um segundo descritor para o mesmo socket, criado
+  antes de o quinn tomar conta dele e usado **só para escrever**;
+- **uma escuta de avisos** separada, que é para onde o ponto de encontro
+  responde, porque ler do socket do Dogma roubaria pacotes do QUIC.
+
+Do lado de quem entra o problema é o mesmo e a solução é menor: o cliente abre o
+próprio socket, bate no ponto de encontro por ele e **entrega esse socket ao
+quinn**. É por isso que `Client` ganhou um construtor que adota socket pronto.
+
+### Quem entra não lê nada do ponto de encontro, e isso é a defesa
+
+"Não consegue se passar por ninguém" tinha uma forma mais forte do que a
+esperada, e ela é estrutural: **quem recebe o convite nunca lê resposta nenhuma
+do ponto de encontro**. Os endereços que ele tenta vieram todos do `seele://`, e
+a impressão digital contra a qual o Dogma é conferido também. Um ponto de
+encontro hostil consegue não avisar o anfitrião — e é o teto do que ele consegue.
+
+Não é uma verificação a mais; é a ausência de um caminho. Foi mais barato de
+construir do que qualquer verificação seria, e é mais fácil de conferir lendo.
+
+### O prazo é de um segundo, e o motivo é o mesmo do degrau 3
+
+A escolha foi um segundo para tudo — DNS e as duas perguntas —, e não um por
+etapa. A conta é a mesma que encurtou a busca de UPnP: uma ida e volta a um
+servidor na internet custa entre 20 ms e 200 ms, então um segundo cabe cinco
+vezes o pior caso plausível **e** uma pergunta repetida no meio; e, com o ponto
+de encontro fora do ar, esse número é pago inteiro por todo anfitrião de rede
+difícil, no caminho que já ia terminar em más notícias.
+
+A diferença para o degrau 3 é que lá a espera era multicast na rede local, onde
+"ninguém responde" é o caso comum; aqui é um pacote unicast, que ou volta rápido
+ou está bloqueado.
+
+Do lado de quem entra não há espera nenhuma: o aviso é de mão única, e o primeiro
+endereço do convite é o da rede de casa — o tempo que ele leva para falhar, quando
+falha, já é tempo de sobra para o furo abrir do outro lado.
+
+### O degrau 4 fica acima do 2 na frase e abaixo do 3 na ordem
+
+A escada deste ADR é uma lista numerada, e a implementação precisou de duas
+ordens diferentes:
+
+- **na ordem de tentar**, o 4 vem **depois** do 3, porque o 3 não põe terceiro
+  nenhum no caminho. E não é tentado quando a máquina já tem endereço IPv4
+  público — numa VPS o degrau 1 já resolveu tudo, e perguntar seria pagar
+  metadado por um caminho que já existe;
+- **na frase que a pessoa lê**, o 4 vale mais que o 2, porque alcança quem tem
+  IPv4, que é quase todo mundo, enquanto o IPv6 direto só alcança quem também
+  tem IPv6.
+
+### O que a marca do aviso resolveu, e o que ela não é
+
+Um Dogma que furasse NAT para qualquer endereço que aparecesse seria um refletor
+com dono. O aviso, então, carrega uma marca: os primeiros dígitos da impressão
+digital do Dogma, que estão no `seele://` e em nenhum outro lugar.
+
+Não é autenticação e não tenta ser — quem tem o link, tem. É o que separa "alguém
+com o convite" de "a internet batendo na porta", e vem com uma segunda cinta: uma
+janela de furos, para que nem quem tem o link faça o Dogma mandar pacotes sem
+parar.
+
+### O que continua não funcionando, e está escrito
+
+**NAT simétrico dos dois lados não fura.** O mapeamento muda a cada destino,
+então o endereço que o ponto de encontro viu não é por onde o outro lado
+chegaria. A frase do degrau 4 diz "deve funcionar" e não "funciona", como as
+outras, e nomeia a saída: encaminhar a porta à mão, ou uma VPN de rede.
+
+**O nome padrão ainda não está no ar.** `encontro.seele.app` é o endereço
+reservado para o ponto de encontro do projeto, e enquanto ele não existir a
+resolução falha em milissegundos, a escada cai para o degrau de baixo e a frase é
+a mesma de antes deste degrau existir. Quem quiser o degrau 4 hoje sobe o seu —
+`docs/ponto-de-encontro.md` são dez linhas de comando. Dizer isto aqui é
+preferível a um degrau que promete e não entrega em silêncio.
+
+### As quatro propriedades, e como cada uma virou teste
+
+Este ADR listou quatro mitigações como parte da decisão. Onde cada uma é cobrada:
+
+| Propriedade | Onde é cobrada |
+|---|---|
+| **opcional** | `SEELE_ENCONTRO=nao` desliga o degrau, e nenhum pacote sai — `alcance::encontro`; e `hospedagem` prova que com o ponto fora do ar o Dogma sobe igual, com os mesmos endereços no link |
+| **trocável** | o endereço viaja no `enc=` do convite, e o teste do `uri` cobra as duas metades; o ambiente troca o ponto sem versão nova de nada |
+| **sem estado** | `responder` é função livre: um `LEVE` funciona sem nenhum `ONDE` antes, e dois processos diferentes respondem byte a byte igual |
+| **não lê nem se passa por ninguém** | a resposta é montada campo a campo e nunca copiada do pedido; e quem entra não lê resposta nenhuma do ponto de encontro |
 
 ## O que a implementação ensinou
 
