@@ -32,10 +32,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use seele_core::client::{AttachmentRequest, Sent};
+use seele_core::client::{AttachmentRequest, Previewed, Sent};
+use seele_core::preview::{data_uri, judge, ImageFormat, Verdict, PREVIEW_LIMIT};
 use seele_core::{Client, MemoryPinStore};
 use seele_proto::control::{AttachmentRefusal, AttachmentState, ServerMessage};
-use seele_proto::ids::{ClientMessageId, LineId};
+use seele_proto::ids::{AttachmentId, ClientMessageId, LineId};
 use seele_server::casper::attachments::per_file_limit;
 use seele_server::casper::Location;
 use seele_server::{DogmaConfig, Server};
@@ -415,5 +416,241 @@ async fn um_dogma_que_nao_guarda_arquivo_diz_isso_em_vez_de_deixar_pendurado() -
     .expect("o Dogma disse que não guarda arquivo, em vez de calar");
     assert_eq!(razao, AttachmentRefusal::Unavailable);
     assert_eq!(servidor.quantas_mensagens(LINHA).await?, 0);
+    Ok(())
+}
+
+// ------------------------------------------------------ a prévia, ADR 0027
+//
+// A metade da regra do ADR 0027 que ficou escrita e não construída: só uma
+// lista curta de tipos de imagem é desenhada embutida, e **só quando os bytes
+// concordam com a alegação**. Estes quatro encenam a coisa inteira contra um
+// Dogma de verdade — um arquivo escrito em disco, subido pela rede, buscado de
+// volta e julgado —, porque ler o código e concluir que ele decide certo é
+// exatamente o que não prova nada aqui.
+
+/// Escreve um arquivo que **começa** por `assinatura` e é preenchido depois.
+///
+/// O recheio é constante e não importa: quem decide o que este arquivo é são os
+/// primeiros bytes, e é sobre isso que estes testes são.
+fn arquivo_com(casa: &Path, nome: &str, assinatura: &[u8], tamanho: usize) -> std::path::PathBuf {
+    let caminho = casa.join(nome);
+    let mut bytes = assinatura.to_vec();
+    bytes.resize(tamanho.max(assinatura.len()), 0x5A);
+    std::fs::write(&caminho, bytes).expect("escrever o arquivo");
+    caminho
+}
+
+/// Um pedido com o tipo alegado escolhido por quem manda — que é o ponto.
+fn pedido_alegando<'a>(
+    caminho: &'a Path,
+    nome: &'a str,
+    alegado: &'a str,
+    chave: u64,
+) -> AttachmentRequest<'a> {
+    AttachmentRequest {
+        declared_type: alegado,
+        ..pedido(caminho, nome, chave)
+    }
+}
+
+/// Manda um arquivo e devolve o anexo como quem recebe o vê.
+async fn mandar_e_receber(
+    quem_manda: &Client,
+    quem_espera: &mut Client,
+    pedido: &AttachmentRequest<'_>,
+) -> Result<seele_proto::control::AttachmentInfo> {
+    let fim = quem_manda
+        .transfers()
+        .send_attachment(pedido, |_, _| {})
+        .await?;
+    assert!(matches!(fim, Sent::Delivered { .. }), "{fim:?}");
+    let corpo = pedido.body.to_owned();
+    ate(quem_espera, |evento| match evento {
+        ServerMessage::MessageReceived {
+            body, attachment, ..
+        } if *body == corpo => attachment.clone(),
+        _ => None,
+    })
+    .await
+    .ok_or_else(|| anyhow::anyhow!("a mensagem com anexo não chegou"))
+}
+
+/// Pede um anexo e o traz para a memória, como a prévia faz.
+async fn prever(cliente: &mut Client, anexo: AttachmentId, limite: u64) -> Result<Previewed> {
+    let transferencias = cliente.transfers();
+    cliente.fetch_attachment(anexo).await?;
+    transferencias
+        .preview_attachment(anexo, limite, ESPERA)
+        .await
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn um_arquivo_cujos_bytes_discordam_do_nome_nao_e_desenhado() -> Result<()> {
+    // O teste que mais importa deste trabalho. O arquivo se chama `foto.png` e
+    // é alegado `image/png` — as duas coisas escritas por quem mandou —, e os
+    // bytes dele são de um JPEG.
+    let (endereco, _servidor, casa) = dogma(64 * 1024).await?;
+    let quem_manda = entrar(endereco, 7).await?;
+    let mut quem_espera = entrar(endereco, 9).await?;
+
+    let jpeg = arquivo_com(casa.path(), "foto.png", &[0xFF, 0xD8, 0xFF, 0xE0], 900);
+    let anexo = mandar_e_receber(
+        &quem_manda,
+        &mut quem_espera,
+        &pedido_alegando(&jpeg, "foto.png", "image/png", 1),
+    )
+    .await?;
+    assert_eq!(anexo.declared_type, "image/png");
+
+    let Previewed::Whole(bytes) = prever(&mut quem_espera, anexo.id, PREVIEW_LIMIT).await? else {
+        panic!("um arquivo de 900 bytes não cabe numa prévia");
+    };
+
+    let veredito = judge(&anexo.declared_type, &bytes);
+    assert_eq!(
+        veredito,
+        Verdict::Disagrees {
+            claimed: ImageFormat::Png,
+            found: Some(ImageFormat::Jpeg),
+        },
+        "os bytes discordam do nome e o veredito não disse isso"
+    );
+
+    // E a parte que uma asserção sobre a variante não cobre: nada foi desenhado
+    // como se fosse o que o arquivo diz ser, **e nada foi desenhado como o que
+    // ele por acaso é**. Desenhá-lo como JPEG seria concluir que o nome não
+    // decide nada e o arquivo de quem mandou decide tudo.
+    assert!(
+        !matches!(veredito, Verdict::Draw(_)),
+        "um arquivo que não é o que diz ser foi desenhado assim mesmo"
+    );
+
+    // E não desenhar não é esconder: os bytes continuam lá, para salvar.
+    let destino = casa.path().join("salvo.png");
+    quem_espera
+        .download_attachment(anexo.id, &destino, ESPERA, |_, _| {})
+        .await?;
+    assert_eq!(std::fs::read(&destino)?.len(), 900);
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn um_programa_com_nome_de_imagem_tambem_nao_e_desenhado() -> Result<()> {
+    // O caso mais afiado do mesmo defeito: os bytes não são de imagem nenhuma.
+    // `MZ` é o começo de um executável do Windows, e o arquivo se chama
+    // `gatinho.png`.
+    let (endereco, _servidor, casa) = dogma(64 * 1024).await?;
+    let quem_manda = entrar(endereco, 7).await?;
+    let mut quem_espera = entrar(endereco, 9).await?;
+
+    let programa = arquivo_com(casa.path(), "gatinho.png", b"MZ\x90\x00\x03\x00", 700);
+    let anexo = mandar_e_receber(
+        &quem_manda,
+        &mut quem_espera,
+        &pedido_alegando(&programa, "gatinho.png", "image/png", 1),
+    )
+    .await?;
+
+    let Previewed::Whole(bytes) = prever(&mut quem_espera, anexo.id, PREVIEW_LIMIT).await? else {
+        panic!("um arquivo de 700 bytes não cabe numa prévia");
+    };
+    assert_eq!(
+        judge(&anexo.declared_type, &bytes),
+        Verdict::Disagrees {
+            claimed: ImageFormat::Png,
+            found: None,
+        }
+    );
+
+    // E o nome chegou como saiu. O ADR 0027 é explícito: não renomeia, não corta
+    // extensão — um arquivo que mente é pior do que um arquivo que se apresenta.
+    assert_eq!(anexo.file_name, "gatinho.png");
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn um_arquivo_que_e_o_que_diz_ser_vira_uma_figura() -> Result<()> {
+    // O outro ramo, pela mesma porta: os bytes concordam com a alegação, e o
+    // tipo de mídia do `data:` sai do que foi **achado**.
+    let (endereco, _servidor, casa) = dogma(64 * 1024).await?;
+    let quem_manda = entrar(endereco, 7).await?;
+    let mut quem_espera = entrar(endereco, 9).await?;
+
+    let png = arquivo_com(
+        casa.path(),
+        "foto.png",
+        &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A],
+        900,
+    );
+    let anexo = mandar_e_receber(
+        &quem_manda,
+        &mut quem_espera,
+        &pedido_alegando(&png, "foto.png", "image/png", 1),
+    )
+    .await?;
+
+    let Previewed::Whole(bytes) = prever(&mut quem_espera, anexo.id, PREVIEW_LIMIT).await? else {
+        panic!("um arquivo de 900 bytes não cabe numa prévia");
+    };
+    let Verdict::Draw(formato) = judge(&anexo.declared_type, &bytes) else {
+        panic!("bytes que concordam com o nome não foram desenhados");
+    };
+    assert_eq!(formato, ImageFormat::Png);
+
+    let uri = data_uri(formato, &bytes);
+    assert!(
+        uri.starts_with("data:image/png;base64,"),
+        "o tipo de mídia do data: não saiu do que foi achado nos bytes"
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn um_arquivo_maior_que_o_limite_da_previa_nao_e_baixado() -> Result<()> {
+    // O limite da prévia é decidido **separado** do limite por arquivo, porque
+    // as duas coisas protegem máquinas diferentes: aquele é o disco de quem
+    // hospeda, este é a memória de quem lê. Aqui o Dogma aceita o arquivo de bom
+    // grado — ele cabe no teto dele — e a prévia o recusa assim mesmo.
+    let teto = 128 * 1024 * 1024_u64;
+    let (endereco, _servidor, casa) = dogma(teto).await?;
+    let quem_manda = entrar(endereco, 7).await?;
+    let mut quem_espera = entrar(endereco, 9).await?;
+
+    let tamanho = usize::try_from(PREVIEW_LIMIT).unwrap() + 4096;
+    assert!(
+        u64::try_from(tamanho).unwrap() < per_file_limit(teto),
+        "o arquivo deste teste tem de caber no Dogma para a recusa ser da prévia"
+    );
+    let enorme = arquivo_com(
+        casa.path(),
+        "panorama.png",
+        &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A],
+        tamanho,
+    );
+    let anexo = mandar_e_receber(
+        &quem_manda,
+        &mut quem_espera,
+        &pedido_alegando(&enorme, "panorama.png", "image/png", 1),
+    )
+    .await?;
+    assert_eq!(anexo.state, AttachmentState::Available);
+
+    let previa = prever(&mut quem_espera, anexo.id, PREVIEW_LIMIT).await?;
+    assert_eq!(
+        previa,
+        Previewed::TooBig {
+            byte_size: u64::try_from(tamanho).unwrap()
+        },
+        "um arquivo acima do limite da prévia foi trazido assim mesmo"
+    );
+
+    // E a conexão sobrevive a ter cortado aquele fluxo: salvar o mesmo arquivo
+    // continua funcionando, que é a diferença entre recusar uma prévia e perder
+    // o anexo.
+    let destino = casa.path().join("panorama.png");
+    let baixados = quem_espera
+        .download_attachment(anexo.id, &destino, ESPERA, |_, _| {})
+        .await?;
+    assert_eq!(baixados, u64::try_from(tamanho).unwrap());
     Ok(())
 }
