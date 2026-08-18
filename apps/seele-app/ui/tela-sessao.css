@@ -5,9 +5,9 @@
    rodapé de telemetria. Carrega depois de `base.css`, e depende disso:
    `.compor input`, `.busca input`, `.convite-link` e `.volume` refinam o
    `input` de lá; `.busca .botao-fantasma` e `.botao-falar[data-ativo]` refinam
-   botões de lá; e `.canais-cabeca .dica`, `.operador-frase` e `.compor-dica`
-   refinam a camada de legendas simples de lá — **refinam**, nunca reivindicam,
-   que é o que `the_hint_layer_is_defined_once_and_never_by_a_screen` cobra.
+   botões de lá; e `.canais-cabeca .nota`, `.operador-frase` e `.compor-nota`
+   refinam a `.nota` de lá — **refinam**, nunca reivindicam, que é o que
+   `the_note_beside_a_control_is_defined_once_and_never_by_a_screen` cobra.
 
    Nenhuma cor literal aqui — nem em regra nem em comentário. `tests/tokens.rs`
    cobra isso lendo o arquivo inteiro, e é por isso que os hexadecimais do comp
@@ -346,19 +346,20 @@
   flex: 0 0 auto;
 }
 
-/* O cabeçalho de uma das duas listas: o título e a dica que o explica.
+/* O cabeçalho de uma das duas listas: o título e a nota que o explica.
 
-   A dica é `.dica`, de `base.css`, e esta folha só a **refina** — margem e
-   recuo, nada que decida se ela aparece. Quem decide é `body.legendas-simples`,
-   e uma tela que reivindicasse `.dica` se desligaria daquele interruptor em
-   silêncio (`the_hint_layer_is_defined_once_and_never_by_a_screen`). */
+   A nota é `.nota`, de `base.css`, e esta folha só a **refina** — margem e
+   recuo, nada que decida se ela aparece. Uma tela que reivindicasse `.nota`
+   passaria a decidir sozinha se aquela frase existe, que é como a explicação de
+   um controle some de uma tela só e de mais nenhuma
+   (`the_note_beside_a_control_is_defined_once_and_never_by_a_screen`). */
 .canais-cabeca {
   flex: 0 0 auto;
   border-bottom: 1px solid var(--seele-linha);
 }
 
 .canais-cabeca .painel-titulo { padding-bottom: 2px; }
-.canais-cabeca .dica { padding: 0 16px 12px; }
+.canais-cabeca .nota { padding: 0 16px 12px; }
 
 .canais-cabeca-linhas {
   border-top: 1px solid var(--seele-linha);
@@ -685,7 +686,7 @@
 
 /* O `⚙` do comp v3, 38×38 e contornado. O glifo é o conteúdo inteiro do botão,
    então o nome acessível é obrigatório e vive no `aria-label` do próprio botão
-   — a dica ao lado é a metade que quem enxerga recebe. */
+   — a nota ao lado é a metade que quem enxerga recebe. */
 .operador-config {
   width: 38px;
   height: 38px;
@@ -923,8 +924,8 @@
 
 .compor-caixa:focus-within { border-color: var(--seele-laranja-nerv); }
 
-/* A dica é a instrução, e é por isso que ela está na tela e não num manual. */
-.compor-dica { flex: 0 0 auto; }
+/* A nota é a instrução, e é por isso que ela está na tela e não num manual. */
+.compor-nota { flex: 0 0 auto; }
 
 /* `ENVIAR` com rótulo, no lugar do `▸` sozinho do v2. Campo sólido: é a ação
    principal desta coluna e a única desta fileira. */
@@ -1614,5 +1615,5 @@
   min-width: 0;
 }
 
-/* A dica ocupa a largura inteira, embaixo dos dois campos. */
-.criar .dica { grid-column: 1 / -1; }
+/* A nota ocupa a largura inteira, embaixo dos dois campos. */
+.criar .nota { grid-column: 1 / -1; }

@@ -1737,7 +1737,7 @@ fn the_two_ways_out_of_the_call_say_which_one_leaves_the_cage() {
             panic!("index.html has no `{id}` button");
         };
         let Some(hint) = button
-            .split("class=\"dica\">")
+            .split("class=\"nota\">")
             .nth(1)
             .and_then(|rest| rest.split('<').next())
         else {
@@ -1865,85 +1865,6 @@ fn classes_defined_in(css: &str) -> BTreeSet<String> {
         }
     }
     found
-}
-
-#[test]
-fn the_hint_layer_is_not_painted_in_the_colour_reserved_for_large_text() {
-    // The hint layer explains the app to somebody who does not know it, and it
-    // is on by default. Painting it in `osso-apagado` — which `tokens.css`
-    // annotates in its own line as "4,11:1 só texto grande" — writes the
-    // explanation in type the explained person cannot read.
-    //
-    // `docs/tokens-achados.md` settled this before the layer existed: the
-    // pending choice on that colour is to raise it *or* to make sure nothing
-    // necessary depends on it alone. A hint is necessary by definition.
-    //
-    // The check is on the token name and not on a computed ratio, deliberately.
-    // A ratio computed here would have to be recomputed the day the palette
-    // moves, and would then measure a number nobody had decided; the name is
-    // what the decision was actually about.
-    let sheet = read("ui/base.css");
-    let Some(after) = sheet.split("\n.dica {").nth(1) else {
-        panic!("base.css no longer declares `.dica`, so the hint layer has no owner");
-    };
-    let Some(rule) = after.split('}').next() else {
-        panic!("the `.dica` rule is never closed");
-    };
-
-    for dim in ["osso-apagado", "rotulo-painel"] {
-        assert!(
-            !rule.contains(dim),
-            "`.dica` is painted with `{dim}`, which tokens.css marks as large-text \
-             only at 4,11:1. This layer is small, prose, and on by default — it is \
-             the one thing on screen that has to be legible to somebody who does \
-             not already know the app.\n{rule}"
-        );
-    }
-}
-
-#[test]
-fn the_hint_layer_is_defined_once_and_never_by_a_screen() {
-    // `LEGENDAS SIMPLES` is the v3 comp's answer to an interface nobody could
-    // work out: a short line beside each control saying what it does, shown by
-    // default. It is one class toggled on `<body>` and one rule in `base.css`,
-    // and it has to stay one.
-    //
-    // The failure this catches is a screen writing its own `.dica { display:
-    // block }`. That screen's hints then ignore the toggle — they show while
-    // the rest of the app has them off — and nothing fails: the page loads, the
-    // hint is legible, and only somebody who turned the mode off and looked at
-    // every screen would notice one kept talking.
-    //
-    // Refining is still allowed and is the point of the load order: a screen
-    // may write `.painel .dica { margin-top: 4px }`, because the owner of that
-    // rule is `.painel`. What it may not do is claim `.dica` itself. Same rule
-    // the collision guard below applies, narrowed to the classes that carry a
-    // behaviour rather than a look.
-    let shared = classes_defined_in(&read("ui/base.css"));
-    for name in ["dica", "dica-linha"] {
-        assert!(
-            shared.contains(name),
-            "`.{name}` is not defined in base.css, so the hint layer has no shared \
-             owner and each screen is free to invent one"
-        );
-    }
-
-    let not_a_screen = ["base.css", "acessibilidade.css", "tokens.css", "fontes.css"];
-    for name in ui_files(".css") {
-        if not_a_screen.contains(&name.as_str()) {
-            continue;
-        }
-        let owned = classes_defined_in(&read(&format!("ui/{name}")));
-        for hint in ["dica", "dica-linha"] {
-            assert!(
-                !owned.contains(hint),
-                "{name} claims `.{hint}`, which base.css owns. A screen that \
-                 redefines it opts itself out of the simple-captions toggle, and \
-                 nothing about that failure is visible — the hint just keeps \
-                 showing after somebody turned the mode off."
-            );
-        }
-    }
 }
 
 #[test]
@@ -2087,10 +2008,9 @@ fn the_bound_name_is_stated_once_and_never_worn_as_a_badge() {
          the whole reason the per-line seal was dropped for it"
     );
     assert!(
-        page.contains("class=\"dica operador-frase\""),
-        "the sentence is no longer part of the simple-captions layer, so it \
-         stays on screen for the people who turned that layer off — who are \
-         precisely the people it was not written for"
+        page.contains("class=\"nota operador-frase\""),
+        "the sentence is no longer drawn as a `.nota`, so it is either styled by \
+         nothing at all or by a rule some screen invented for itself"
     );
     assert!(
         !mensagens.contains("selo"),
@@ -2355,17 +2275,23 @@ fn every_section_of_the_settings_screen_carries_the_panel_and_the_heading_it_ope
         [
             "secao-audio",
             "secao-atalhos",
-            "secao-aparencia",
+            // APARÊNCIA was the third and is not here. It held exactly one
+            // control — the simple-captions switch — and that layer stopped
+            // being a mode: the note beside a control is part of the control and
+            // is always on screen now. What was left was a settings section with
+            // nothing to settle, which promises an adjustment that does not
+            // exist; this screen's own rule is to omit what it does not have
+            // rather than draw it dead.
             "secao-identidade",
-            // The fifth is not the comp's — it predates the update button
+            // The last is not the comp's — it predates the update button
             // existing at all (ADR 0026). It lands here because what this screen
             // adjusts is *this machine*, and which SEELE is installed on it is
             // the most machine-local fact there is; and last because it is the
             // one section nobody opens on a normal day.
             "secao-atualizacao",
         ],
-        "the settings screen is the four sections of the v3 comp plus the update \
-         one, in this order"
+        "the settings screen is three of the four sections of the v3 comp plus \
+         the update one, in this order"
     );
 }
 
@@ -2519,39 +2445,16 @@ fn both_sides_of_the_audio_picker_are_drawn_by_the_same_code() {
     );
 }
 
-#[test]
-fn the_switch_that_hides_the_captions_never_hides_its_own_caption() {
-    // One line in the whole screen writes its description as `.dogma-chave-desc`
-    // instead of `.dica`, and it is the one that governs `.dica` itself.
-    //
-    // Written as a hint, the sentence explaining what simple captions are would
-    // disappear at the exact moment somebody turned them off — leaving an
-    // unlabelled SIM/NÃO pair as the only way back, on the screen a person just
-    // arrived at because they could not work the interface out. Nothing fails:
-    // the page loads, the switch works, and the way back is invisible.
-    let page = without_comments(&read("ui/index.html"));
-
-    let Some(after) = page.split("class=\"dogma-chave\"").nth(1) else {
-        panic!("the behaviour switch is gone from the settings screen");
-    };
-    let Some(row) = after.split("</li>").next() else {
-        panic!("the behaviour switch row is never closed");
-    };
-
-    assert!(
-        row.contains("dogma-chave-desc"),
-        "the captions switch has no always-visible description:\n{row}"
-    );
-    assert!(
-        !row.contains("class=\"dica\""),
-        "the captions switch explains itself with a `.dica`, which is the very \
-         thing it turns off — so the way back disappears with it:\n{row}"
-    );
-    assert!(
-        row.contains("role=\"switch\"") && row.contains("aria-checked"),
-        "the switch carries no state anybody who cannot see the fill can read:\n{row}"
-    );
-}
+// `the_switch_that_hides_the_captions_never_hides_its_own_caption` stood here.
+// It guarded one row of the APARÊNCIA section: the simple-captions switch had to
+// write its own description outside the layer it turned off, or the way back
+// vanished with it.
+//
+// The switch is gone, the section is gone, and the layer is not a mode any more —
+// the note beside a control is part of the control and is always on screen. A
+// guard for a row that cannot exist is a guard that passes for the wrong reason,
+// so it went with them. What replaced it lives at the bottom of this file:
+// `the_captions_mode_does_not_come_back_by_accident`.
 
 /// The names a script declares at its top level.
 ///
@@ -4577,9 +4480,17 @@ fn saving_says_out_loud_what_this_product_does_not_promise() {
     // viruses**. Both are true, and both belong in front of the person before
     // they press, not on a help page.
     let salvar = js_function(&read("ui/tela-sessao.js"), "function salvarAnexo(");
+    // `abrirConfirmacao(` and not `armarAto(`, and the difference is the whole
+    // defect this line used to hold in place. `armarAto` writes the sentence
+    // into `#moderar` and focuses CANCELAR; it never *reveals* `#moderar`. So
+    // this assertion passed, in green, while pressing SALVAR did nothing at all
+    // — no box, no error, no console line, because `focus()` inside a `hidden`
+    // element is a silent no-op. Only the three doors of `camada-moderar.js`
+    // open the box, and saving has to go through one of them.
     assert!(
-        salvar.contains("armarAto("),
-        "saving skips the confirmation every consequential act goes through"
+        salvar.contains("abrirConfirmacao("),
+        "saving arms an act without opening the box that would show it, so the \
+         button is silent and the confirmation is never read: {salvar}"
     );
     assert!(
         salvar.contains("não varre vírus"),
@@ -5313,14 +5224,12 @@ fn every_reason_a_session_can_end_with_has_a_sentence_in_the_page() {
     }
 }
 
-// ------------------------------------------------ the preview, ADR 0027
-//
-// The half of ADR 0027's rule that had been written and not built: a short list
-// of image types is drawn inline, and only when the **bytes** agree with the
-// claim. Every guard below is about a way this can go wrong quietly — a preview
-// fetched by scrolling, a media type composed in the page, a refusal written
-// only where nobody can see it, or a preview that has drifted into being an
-// open.
+// ---------------------------------------------------------------------------
+// What the owner asked for after installing the app and using it. Four guards,
+// and three of them guard an **absence** — the hardest kind to keep, because
+// nothing about a deleted thing coming back is visible in a diff that only adds
+// lines.
+// ---------------------------------------------------------------------------
 
 #[test]
 fn a_preview_is_asked_for_by_a_press_and_by_nothing_else() {
@@ -5936,4 +5845,344 @@ fn the_entrance_screen_stopped_drawing_the_four_values_this_protocol_never_carri
             "a script still fills `{morto}`, which is no longer in the page"
         );
     }
+}
+
+#[test]
+fn the_note_beside_a_control_is_not_painted_in_the_colour_reserved_for_large_text() {
+    // The note beside a control is, on several screens, the only thing that says
+    // what the control does. Painting it in `osso-apagado` — which `tokens.css`
+    // annotates in its own line as "4,11:1 só texto grande" — writes the
+    // explanation in type the explained person cannot read.
+    //
+    // `docs/tokens-achados.md` settled this before the class existed: the
+    // pending choice on that colour is to raise it *or* to make sure nothing
+    // necessary depends on it alone. A note is necessary by definition.
+    //
+    // The check is on the token name and not on a computed ratio, deliberately.
+    // A ratio computed here would have to be recomputed the day the palette
+    // moves, and would then measure a number nobody had decided; the name is
+    // what the decision was actually about.
+    let sheet = read("ui/base.css");
+    let Some(after) = sheet.split("\n.nota {").nth(1) else {
+        panic!("base.css no longer declares `.nota`, so nothing owns the note beside a control");
+    };
+    let Some(rule) = after.split('}').next() else {
+        panic!("the `.nota` rule is never closed");
+    };
+
+    for dim in ["osso-apagado", "rotulo-painel"] {
+        assert!(
+            !rule.contains(dim),
+            "`.nota` is painted with `{dim}`, which tokens.css marks as large-text \
+             only at 4,11:1. These are small prose lines nobody can turn off any \
+             more — they are the one thing on screen that has to be legible to \
+             somebody who does not already know the app.\n{rule}"
+        );
+    }
+}
+
+#[test]
+fn the_note_beside_a_control_is_defined_once_and_never_by_a_screen() {
+    // `.nota` is the short line beside a control saying what pressing it causes.
+    // On the call screen it is the *only* thing separating VER LINHAS from SAIR
+    // DA JAULA; in the moderation box it is the only thing that says a ban has
+    // no undo. One class, one rule in `base.css`, and it has to stay one.
+    //
+    // The failure this catches is a screen writing its own `.nota { … }`. That
+    // screen's notes then answer to nobody: the day a rule here changes how
+    // these lines are drawn — or whether they are drawn at all — every screen
+    // follows except that one, and nothing about the divergence is visible
+    // without opening each screen and comparing.
+    //
+    // This is not hypothetical for this class in particular. It *was* a mode
+    // once, hidden behind a switch, and a screen claiming the class would have
+    // silently opted out of the switch. The switch is gone and the argument
+    // survived it, because it was never really about the switch.
+    //
+    // Refining is still allowed and is the point of the load order: a screen may
+    // write `.painel .nota { margin-top: 4px }`, because the owner of that rule
+    // is `.painel`. What it may not do is claim `.nota` itself.
+    let shared = classes_defined_in(&read("ui/base.css"));
+    assert!(
+        shared.contains("nota"),
+        "`.nota` is not defined in base.css, so the note beside a control has no \
+         shared owner and each screen is free to invent one"
+    );
+
+    let not_a_screen = ["base.css", "acessibilidade.css", "tokens.css", "fontes.css"];
+    for name in ui_files(".css") {
+        if not_a_screen.contains(&name.as_str()) {
+            continue;
+        }
+        let owned = classes_defined_in(&read(&format!("ui/{name}")));
+        assert!(
+            !owned.contains("nota"),
+            "{name} claims `.nota`, which base.css owns. A screen that redefines \
+             it decides on its own whether the explanation of a control appears, \
+             and nothing about that failure is visible — the line either keeps \
+             showing or stops showing on exactly one screen."
+        );
+    }
+}
+
+#[test]
+fn the_captions_mode_does_not_come_back_by_accident() {
+    // `LEGENDAS SIMPLES` was a second copy of the interface: every explanatory
+    // line beside a control could be switched off from the settings screen, and
+    // it was on by default, so nobody ever saw the other copy — least of all
+    // whoever wrote a new line and never read the app without it.
+    //
+    // On the call screen the two exits are told apart by nothing but those
+    // lines; in the moderation box the only sentence saying a ban has no undo is
+    // one of them. A mode that hides them is a mode in which this product lies
+    // by omission to whoever turned it on.
+    //
+    // So the mode is gone and the lines stayed, always visible, as `.nota`. The
+    // way this rots is somebody reintroducing "just a toggle" — and the failure
+    // is silent by construction, because a hidden line looks exactly like a line
+    // nobody ever wrote.
+    //
+    // Read with comments stripped, and that is not tidiness: the paragraph in
+    // `base.js` explaining what was removed names every one of these words. A
+    // check satisfied by the note explaining a removal is a check that can never
+    // fail again.
+    let mut source = String::new();
+    for name in ui_files(".js") {
+        source.push_str(&without_comments(&read(&format!("ui/{name}"))));
+        source.push('\n');
+    }
+    for name in ui_files(".css") {
+        source.push_str(&without_comments(&read(&format!("ui/{name}"))));
+        source.push('\n');
+    }
+    source.push_str(&without_comments(&read("ui/index.html")));
+
+    for gone in [
+        "legendasSimples",
+        "aplicarLegendas",
+        "legendas-simples",
+        "CHAVE_LEGENDAS",
+        "dogma-legendas",
+        "dogma-interruptor",
+        "dogma-chave",
+    ] {
+        assert!(
+            !source.contains(gone),
+            "`{gone}` is back in the frontend, and the simple-captions mode comes \
+             with it: the explanation of a control becomes something a person can \
+             switch off, and nothing on screen ever says it was switched"
+        );
+    }
+
+    // And the class it toggled. Written as the forms the class actually takes,
+    // and not as the bare Portuguese noun: the point is the class, and a
+    // sentence that happens to use the word «dica» is not the layer.
+    for gone in [
+        "class=\"dica",
+        ".dica ",
+        ".dica{",
+        ".dica {",
+        "dica-linha",
+        "\"dica\")",
+    ] {
+        assert!(
+            !source.contains(gone),
+            "`{gone}` is back in the frontend: the class the captions mode toggled \
+             has an owner again, and the toggle is one rule away from it"
+        );
+    }
+
+    // The other half, and it is what makes this a guard rather than a grep: the
+    // text those lines carried has to still be on screen. Removing the mode by
+    // deleting the sentences would pass everything above, and it is the one
+    // outcome worse than the mode.
+    let page = without_comments(&read("ui/index.html"));
+    let notes = page.matches("class=\"nota").count();
+    assert!(
+        notes >= 20,
+        "the page draws {notes} notes beside controls. The mode was removed by \
+         deleting the sentences instead of by making them permanent."
+    );
+}
+
+#[test]
+fn the_alert_box_has_one_way_out_and_the_keyboard_can_take_it() {
+    // The alert box used to close two ways: a `RECONHECER` as wide as the box at
+    // the bottom, whose entire job was `hidden = true`. Two controls for one act
+    // in one box is somebody reading both to work out which is the real one —
+    // and `RECONHECER` reads as if it records something, which it never did.
+    //
+    // What is left is the conventional `×` in the corner, and that raises the
+    // bar rather than lowering it: a glyph is not a word, and a box covering the
+    // whole window that only closes under the pointer is worse than the
+    // redundancy it replaced. The four halves below are one invariant.
+    let page = without_comments(&read("ui/index.html"));
+    let Some(after) = page.split("id=\"banner\"").nth(1) else {
+        panic!("index.html no longer has the alert box");
+    };
+    let Some(caixa) = after.split("id=\"veredito\"").next() else {
+        panic!("`#veredito` no longer follows the alert box, so this slice has no end");
+    };
+
+    // Every button in the box, by id and by the words on it.
+    let mut buttons: Vec<(String, String)> = Vec::new();
+    for piece in caixa.split("<button ").skip(1) {
+        let Some(end) = piece.find('>') else { continue };
+        let tag = &piece[..end];
+        let Some(id) = attribute(tag, "id") else {
+            panic!("a button in the alert box has no id: <{tag}>");
+        };
+        let label = piece[end + 1..]
+            .split("</button>")
+            .next()
+            .unwrap_or_default()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        buttons.push((id, label));
+    }
+
+    assert!(
+        buttons.iter().any(|(id, _)| id == "banner-fechar"),
+        "the alert box has no `#banner-fechar`, so the one thing that closed it \
+         is gone: {buttons:?}"
+    );
+
+    // Nothing else in the box may be a second way out. The vocabulary is what a
+    // dismissing button gets called in this window, and a new one arriving under
+    // any of these words is the redundancy coming back under another label —
+    // which is how it arrived the first time.
+    for (id, label) in &buttons {
+        if id == "banner-fechar" {
+            continue;
+        }
+        let shouting = label.to_uppercase();
+        for dismissal in ["FECHAR", "RECONHECER", "DISPENSAR", "ENTENDI", "CANCELAR"] {
+            assert!(
+                !shouting.contains(dismissal),
+                "`{id}` is a second way to close the alert box — it says «{label}», \
+                 and `#banner-fechar` already does that. One box, one way out."
+            );
+        }
+    }
+
+    // The `×` is a glyph, so the accessible name has to be written out.
+    let fechar = tag_with_id(&read("ui/index.html"), "banner-fechar");
+    let nome = attribute(&fechar, "aria-label").unwrap_or_default();
+    assert!(
+        nome.len() > 3,
+        "`#banner-fechar` draws a glyph and carries no accessible name, so the \
+         only way out of this box is announced as a multiplication sign: <{fechar}>"
+    );
+
+    // And it has to be visible when the keyboard lands on it.
+    assert!(
+        read("ui/camada-alerta.css").contains(".alerta-fechar:focus-visible"),
+        "the only way out of the alert box has no focus ring, so somebody \
+         tabbing to it cannot tell they are on it"
+    );
+
+    // Escape closes it, because the pointer must not be the only way. Scoped to
+    // the branch and not to the word: `Escape` is named in the shortcuts section
+    // and in four other handlers, and an unscoped search would be satisfied by
+    // any of them.
+    let script = without_comments(&scripts());
+    let branches: Vec<&str> = script
+        .split("evento.key === \"Escape\"")
+        .skip(1)
+        .map(|rest| rest.split("\n  }").next().unwrap_or_default())
+        .collect();
+    assert!(
+        branches
+            .iter()
+            .any(|branch| branch.contains("$(\"banner\")")),
+        "no Escape handler closes the alert box. It covers the whole window, it \
+         has one small `×`, and without this the keyboard is stuck behind it."
+    );
+}
+
+#[test]
+fn nothing_arms_an_act_in_a_box_it_never_opened() {
+    // The defect behind «o botão de salvar anexo não funciona», generalised.
+    //
+    // `armarAto` writes a consequence into `#moderar`, swaps its body for the
+    // confirmation and focuses CANCELAR. It does **not** reveal `#moderar` — the
+    // three doors of `camada-moderar.js` do that, and they also record the focus
+    // to give back and whether CANCELAR closes the box or steps back to a list.
+    //
+    // `salvarAnexo` called the middle instead of a door, and the result was the
+    // quietest failure available: pressing SALVAR did nothing. No error, no
+    // console line, no frame — `focus()` inside a `hidden` element is a silent
+    // no-op — and the act sat armed in a box nobody would ever see. The guard
+    // covering saving asserted that `armarAto(` was called, so it stayed green
+    // for as long as the button was dead.
+    //
+    // The rule that would have caught it: only the file that owns the box may
+    // reach for its middle. Everybody else goes through a door.
+    for name in ui_files(".js") {
+        if name == "camada-moderar.js" {
+            continue;
+        }
+        let source = without_comments(&read(&format!("ui/{name}")));
+        assert!(
+            !source.contains("armarAto("),
+            "{name} calls `armarAto(`, which arms a confirmation without opening \
+             the box that would show it. The button goes silent and nothing \
+             anywhere says why. Call `abrirConfirmacao` or `abrirRecusa`."
+        );
+    }
+
+    // And the door saving goes through is one of the two that reveal the box.
+    let salvar = js_function(&read("ui/tela-sessao.js"), "function salvarAnexo(");
+    assert!(
+        salvar.contains("abrirConfirmacao(") || salvar.contains("abrirRecusa("),
+        "saving an attachment reaches no door of the moderation layer, so \
+         whatever it does happens inside a box that never opens:\n{salvar}"
+    );
+}
+
+#[test]
+fn saving_never_writes_to_a_path_this_window_cannot_name() {
+    // The destination comes from `pasta_de_downloads`, read once at load. On the
+    // Rust side that is `download_dir()`, falling back to `home_dir()`, falling
+    // back to `unwrap_or_default()` — an empty string. The shell held it in
+    // `pastaDeDestino` and built `${pastaDeDestino}/${nome}`, so an empty folder
+    // produced a bare file name: a **relative** path, written wherever the
+    // process happened to be started from.
+    //
+    // That is the worst of the outcomes available here. The file is written for
+    // real, so nothing fails; the sentence the person confirmed named a place
+    // that is not where it went; and nobody finds it afterwards. A refusal that
+    // says so is the only honest branch, and it has to come before the path is
+    // ever assembled.
+    let salvar = js_function(&read("ui/tela-sessao.js"), "function salvarAnexo(");
+
+    let Some(guard) = salvar.find("pastaDeDestino === \"\"") else {
+        panic!(
+            "`salvarAnexo` never asks whether it knows the destination folder, so \
+             an empty one becomes a relative path and the file lands somewhere \
+             this window cannot name:\n{salvar}"
+        );
+    };
+    let Some(path) = salvar.find("${pastaDeDestino}") else {
+        panic!("`salvarAnexo` no longer builds the destination from the folder:\n{salvar}");
+    };
+    assert!(
+        guard < path,
+        "`salvarAnexo` builds the path before checking that it has a folder to \
+         build it from, so the check cannot stop anything:\n{salvar}"
+    );
+
+    // And the empty case has to *say* so rather than return in silence, which is
+    // the failure this area keeps producing.
+    assert!(
+        salvar.contains("abrirRecusa("),
+        "with no destination folder, saving gives up without a word — the same \
+         silence the broken button had:\n{salvar}"
+    );
+    assert!(
+        salvar.contains("Nada foi gravado"),
+        "the refusal does not say that nothing was written, which is the one \
+         thing somebody who just pressed SALVAR needs to know:\n{salvar}"
+    );
 }

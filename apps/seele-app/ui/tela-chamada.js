@@ -205,7 +205,7 @@ function cartaoDoPiloto(piloto) {
   avatar.setAttribute("aria-hidden", "true");
 
   const quem = elemento("div", "chamada-cartao-quem");
-  quem.append(elemento("span", "chamada-cartao-nome"), elemento("span", "dica"));
+  quem.append(elemento("span", "chamada-cartao-nome"), elemento("span", "nota"));
   identidade.append(avatar, quem);
 
   const estados = elemento("div", "chamada-cartao-estados");
@@ -285,9 +285,10 @@ function pintarCartao(cartao, piloto, temAudio) {
   cartao.querySelector(".chamada-avatar").textContent = iniciaisDoCartao(piloto.nickname);
   cartao.querySelector(".chamada-cartao-nome").textContent =
     piloto.nickname + (piloto.is_self ? " (você)" : "");
-  // O estado em frase, ao lado do estado em palavra: é a camada
-  // `LEGENDAS SIMPLES` do v3 aplicada ao dado mais importante do cartão.
-  cartao.querySelector(".dica").textContent = fraseDoEstado(piloto);
+  // O estado em frase, ao lado do estado em palavra, e sempre visível: é o dado
+  // mais importante do cartão, e não havia versão desta tela em que escondê-lo
+  // fosse defensável.
+  cartao.querySelector(".nota").textContent = fraseDoEstado(piloto);
 
   // A palavra, e não só a cor. `specs/05-cliente-tui.md` proíbe informação
   // transmitida só por cor, e o estado de quem está na sala é informação: o
@@ -439,7 +440,7 @@ function desenharEventosDaChamada() {
 /** Os quatro botões da barra de ações. */
 function desenharAcoesDaChamada(snapshot) {
   // O rótulo diz em que estado a coisa **está**, e não o que apertá-la vai
-  // fazer; a dica diz o que apertá-la vai fazer. Um botão com o verbo no rótulo
+  // fazer; a nota diz o que apertá-la vai fazer. Um botão com o verbo no rótulo
   // é um botão que ninguém sabe ler quando volta a olhar para a tela — e uma
   // chave sem o verbo em lugar nenhum é uma chave que ninguém arrisca virar.
   const at = $("chamada-at");
@@ -447,7 +448,7 @@ function desenharAcoesDaChamada(snapshot) {
   at.dataset.ativo = calado ? "sim" : "nao";
   at.disabled = !snapshot;
   $("chamada-at-titulo").textContent = calado ? "MICROFONE DESLIGADO" : "MICROFONE LIGADO";
-  $("chamada-at-dica").textContent = calado
+  $("chamada-at-nota").textContent = calado
     ? "clique para voltar a falar"
     : "clique para silenciar você — é o A.T. Field";
 
@@ -456,7 +457,7 @@ function desenharAcoesDaChamada(snapshot) {
   surdez.dataset.ativo = surdo ? "sim" : "nao";
   surdez.disabled = !snapshot;
   $("chamada-surdez-titulo").textContent = surdo ? "SOM DESLIGADO" : "SOM LIGADO";
-  $("chamada-surdez-dica").textContent = surdo
+  $("chamada-surdez-nota").textContent = surdo
     ? "clique para voltar a ouvir"
     : "clique para não ouvir ninguém — é o Isolamento total";
 
@@ -486,7 +487,7 @@ async function abrirChamada() {
  * Metade da distinção que o v3 traz (inventário §7.1): trocar de tela não é
  * sair do Cage. No protótipo os dois botões do rodapé chamam a mesma coisa e o
  * que os separa é só o que prometem; aqui um troca de tela e o outro chama
- * `eject_plug`, e a dica de cada um diz qual é qual.
+ * `eject_plug`, e a nota de cada um diz qual é qual.
  */
 function fecharChamada() {
   guardarFoco("tela-chamada");

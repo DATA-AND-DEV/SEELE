@@ -462,13 +462,30 @@
     de severidade, e não a cor — `specs/05-cliente-tui.md` proíbe informação que
     só a cor carregue.
 
-    ---- as três células ----
+    ---- as três células saíram, e o fechamento é um só ----
 
-    Nenhuma delas tem dado por trás, e o inventário §4 é explícito: "tudo nesta
-    caixa é literal no HTML — não há uma única interpolação". Estado de chave
-    por piloto e rota são mudanças de protocolo; a sincronia que o comp mostra é
-    a do piloto **acusado**, e o `Notice` não carrega de quem ele é. A moldura
-    fica e o valor falta, que é a única forma de a lacuna continuar visível.
+    O comp desenha CHAVE, ROTA e SINCRONIA nesta caixa, e nenhuma das três tem
+    dado por trás — o inventário §4 é explícito: "tudo nesta caixa é literal no
+    HTML". Elas ficaram desenhadas e vazias por uma razão boa e escrita: a
+    moldura fica para que a lacuna do protocolo continue visível.
+
+    Visível **para quem?** Essa era a pergunta que faltava. Três células
+    permanentemente vazias, com um `title` cada dizendo «o protocolo não carrega
+    estado de chave por piloto», são um bilhete de quem escreve o protocolo para
+    quem escreve o protocolo — colado dentro da caixa que interrompe a conversa
+    de alguém para dizer o que acabou de acontecer. A lacuna continua registrada
+    onde ela é trabalho: no inventário do comp e no §16. Aqui saiu, e com ela a
+    legenda que explicava o travessão.
+
+    O que sobrou é o que a caixa sempre existiu para dizer: a severidade em
+    palavra, a frase do aviso, e o verbo que se pode chamar a partir dela.
+
+    O fechamento é o `×` do canto, e é o único. Antes era o RECONHECER de baixo
+    — um botão de 720px de largura cujo trabalho inteiro era `hidden = true`,
+    numa caixa que já tinha por onde sair. `aria-label` porque o glifo não é uma
+    palavra, `Escape` porque toda coisa que se põe por cima nesta janela fecha
+    com ele, e anel de foco porque um `×` que só o ponteiro alcança é pior que a
+    redundância que ele substituiu.
   -->
   <div id="banner" class="camada-alerta" role="alert" hidden>
     <div class="alerta-caixa">
@@ -499,26 +516,12 @@
           </p>
           <p id="banner-texto" class="alerta-frase"></p>
         </div>
+        <button id="banner-fechar" class="alerta-fechar" type="button"
+                aria-label="Fechar o alerta">×</button>
       </div>
 
       <div class="alerta-corpo">
-        <div class="alerta-celulas">
-          <span class="alerta-celula">
-            <span class="alerta-rotulo">CHAVE</span>
-            <span class="ausente" title="o protocolo não carrega estado de chave por piloto">——</span>
-          </span>
-          <span class="alerta-celula">
-            <span class="alerta-rotulo">ROTA</span>
-            <span class="ausente" title="o protocolo não tem o conceito de rota">——</span>
-          </span>
-          <span class="alerta-celula">
-            <span class="alerta-rotulo">SINCRONIA</span>
-            <span class="ausente" title="a sincronia desta célula é a do piloto acusado, e o aviso não diz de quem é">——</span>
-          </span>
-        </div>
-
         <div class="alerta-botoes">
-          <button id="banner-fechar" class="botao alerta-reconhecer" type="button">RECONHECER</button>
           <!--
             O segundo botão do comp, que passou a vida desabilitado porque não
             havia verbo de moderação — `EndReason::Kicked` existia do lado de
@@ -536,8 +539,7 @@
             ---- por que ele abre a escolha em vez de agir ----
 
             Porque esta caixa não tem sujeito. Um `Notice` carrega severidade e
-            motivo, e nunca de quem ele é — é a mesma lacuna que deixa as três
-            células acima vazias. Um botão que expulsasse daqui teria de
+            motivo, e nunca de quem ele é. Um botão que expulsasse daqui teria de
             adivinhar quem, e adivinhar quem sai de uma sessão é a última coisa
             que um produto deve fazer. Ele abre a moderação, onde a pessoa é
             escolhida por nome.
@@ -554,8 +556,6 @@
             MODERAR UM PILOTO
           </button>
         </div>
-
-        <p class="legenda-ausente">—— valor que este protocolo não carrega</p>
       </div>
     </div>
   </div>
@@ -612,9 +612,13 @@
             disponível seria o 299 literal do comp, que é a casca chutando a
             spec e ficando errada no dia em que a spec mudar — e a contagem ao
             lado já é a mesma informação, sem precisar de denominador nenhum.
+
+            O `title` diz a consequência e não o mecanismo: quem passa o
+            ponteiro numa barra vazia quer saber se ela vai encher, e não que
+            campo falta no protocolo.
           -->
           <p class="bateria-barra ausente"
-             title="o protocolo diz quanto falta, nunca de quanto era o total">——</p>
+             title="o tempo que falta é conhecido; de quanto ele partiu, não — por isso a barra fica vazia">——</p>
         </div>
       </div>
 
@@ -624,20 +628,20 @@
              o protocolo carrega sobre as tentativas. -->
         <p id="bateria-tentativas">reconectando…</p>
         <!--
-          As três colunas do comp — quando, por onde, e no que deu. Nenhuma
-          delas atravessa: `InternalBattery` é `{remaining_seconds, attempts}`.
-          A moldura fica porque apagá-la esconderia que este produto não sabe
-          dizer **por que** cada tentativa falhou, que é justamente o que se
-          quer saber olhando para esta caixa.
+          As três colunas do comp — QUANDO, ROTA e DESFECHO — saíram, e com elas
+          a linha de três travessões embaixo e a legenda que a explicava.
+
+          Elas ficaram desenhadas e vazias enquanto o argumento foi «a moldura
+          fica para a lacuna continuar visível». A lacuna é real —
+          `InternalBattery` é `{remaining_seconds, attempts}` e nada mais —, mas
+          o que estava na tela não era a lacuna: eram três `title` dizendo «o
+          protocolo não carimba as tentativas», numa caixa que aparece quando o
+          enlace cai e a pessoa quer saber se volta. Um bilhete sobre o desenho
+          do protocolo, entregue no pior momento possível para lê-lo.
+
+          O que sobrou desta metade da caixa é a única coisa medida: quantas
+          tentativas houve. Ela é verdade inteira e chega do core.
         -->
-        <p class="rotulo bateria-colunas">
-          <span>QUANDO</span><span>ROTA</span><span>DESFECHO</span>
-        </p>
-        <p class="bateria-tentativa">
-          <span class="ausente" title="o protocolo não carimba as tentativas">——</span>
-          <span class="ausente" title="o protocolo não tem o conceito de rota">——</span>
-          <span class="ausente" title="o protocolo carrega quantas foram, nunca no que cada uma deu">——</span>
-        </p>
         <!--
           `FORÇAR REINSERÇÃO DE PLUG`, desabilitado. O inventário §5 o
           classifica como **C**: reconectar já é do core — é ele que está
@@ -645,10 +649,9 @@
           "tenta agora". Um botão apertável prometeria acelerar o que já corre.
         -->
         <button id="bateria-forcar" class="bateria-forcar" type="button" disabled
-                title="o core já está tentando sozinho; não há comando de tentar agora">
+                title="o SEELE já está tentando sozinho, agora; não há como pedir que ele tente mais depressa">
           FORÇAR REINSERÇÃO DE PLUG
         </button>
-        <p class="legenda-ausente">—— valor que este protocolo não carrega</p>
       </div>
     </div>
   </div>
@@ -695,7 +698,7 @@
       </div>
 
       <div id="moderar-escolha" class="moderar-corpo">
-        <span class="dica">O que se faz aqui vale para a sessão de outra pessoa,
+        <span class="nota">O que se faz aqui vale para a sessão de outra pessoa,
           e ela não é consultada antes.</span>
 
         <!--
@@ -716,7 +719,7 @@
 
           <div id="moderar-acao-expulsar" class="moderar-acao">
             <button id="moderar-expulsar" class="moderar-verbo" type="button">EXPULSAR</button>
-            <span class="dica">Encerra a sessão da pessoa agora. Ela pode entrar
+            <span class="nota">Encerra a sessão da pessoa agora. Ela pode entrar
               de novo em seguida — expulsar não barra a volta.</span>
           </div>
 
@@ -743,7 +746,7 @@
                      placeholder="opcional, e só para o seu registro">
             </label>
             <button id="moderar-banir" class="moderar-verbo" type="button">BANIR</button>
-            <span class="dica">Encerra a sessão e barra a volta. O motivo fica
+            <span class="nota">Encerra a sessão e barra a volta. O motivo fica
               com quem hospeda e nunca chega a quem foi banido.</span>
           </div>
 
@@ -753,7 +756,7 @@
               <select id="moderar-para" class="moderar-select"></select>
             </label>
             <button id="moderar-mover" class="moderar-verbo" type="button">MOVER</button>
-            <span class="dica">Tira a pessoa da jaula em que ela está e a põe na
+            <span class="nota">Tira a pessoa da jaula em que ela está e a põe na
               escolhida. Ela continua na sessão.</span>
           </div>
         </div>
@@ -899,11 +902,11 @@
         -->
         <div class="portaria-rolagem">
           <h3 class="portaria-secao">QUEM ESTÁ BATENDO</h3>
-          <p id="portaria-fila-vazia" class="dica" hidden>Ninguém esperando.</p>
+          <p id="portaria-fila-vazia" class="nota" hidden>Ninguém esperando.</p>
           <ul id="portaria-fila" class="portaria-lista"></ul>
 
           <h3 class="portaria-secao">JÁ DECIDIDOS</h3>
-          <p id="portaria-decididos-vazio" class="dica" hidden>Nada decidido ainda.</p>
+          <p id="portaria-decididos-vazio" class="nota" hidden>Nada decidido ainda.</p>
           <ul id="portaria-decididos" class="portaria-lista"></ul>
         </div>
       </div>
@@ -960,10 +963,10 @@
       passa a mostrar **quem está dentro** antes de se entrar nele, e entrar
       virou um botão rotulado em vez do clique na linha.
 
-      As dicas ficam na marcação, ao lado do controle que elas explicam, e não
+      As notas ficam na marcação, ao lado do controle que elas explicam, e não
       numa tabela paralela que alguém esquece de atualizar quando o controle
-      muda. `.dica` mora em `base.css`, e `body.legendas-simples` — ligada por
-      omissão — é quem a mostra.
+      muda. `.nota` mora em `base.css`, e aparece sempre: dizer o que uma sala de
+      voz é não é ajuda de iniciante, é o rótulo da coluna terminando a frase.
     -->
     <section class="painel painel-canais" aria-label="Cages e Linhas">
       <!--
@@ -985,7 +988,7 @@
           <h2 class="painel-titulo">
             <span>CAGES</span><span class="painel-codigo">B·03</span>
           </h2>
-          <span class="dica">Salas de voz. Entre em uma para falar e ouvir.</span>
+          <span class="nota">Salas de voz. Entre em uma para falar e ouvir.</span>
         </div>
         <ul id="lista-cages" class="canais"></ul>
 
@@ -1015,14 +1018,14 @@
             <input id="campo-cage-limite" name="lugares" type="number" min="1" max="250" required>
           </label>
           <button type="submit" class="botao-fantasma">CRIAR</button>
-          <span class="dica">Uma sala de voz nova, que todo mundo neste Dogma vai ver.</span>
+          <span class="nota">Uma sala de voz nova, que todo mundo neste Dogma vai ver.</span>
         </form>
 
         <div class="canais-cabeca canais-cabeca-linhas">
           <h2 class="painel-titulo">
             <span>LINHAS</span><span class="painel-codigo">B·04</span>
           </h2>
-          <span class="dica">Salas de texto. Abra uma para ler e escrever.</span>
+          <span class="nota">Salas de texto. Abra uma para ler e escrever.</span>
         </div>
         <ul id="lista-linhas" class="canais"></ul>
 
@@ -1033,7 +1036,7 @@
                    spellcheck="false" autocomplete="off" placeholder="nome da sala">
           </label>
           <button type="submit" class="botao-fantasma">CRIAR</button>
-          <span class="dica">Uma sala de texto nova. O histórico dela começa vazio.</span>
+          <span class="nota">Uma sala de texto nova. O histórico dela começa vazio.</span>
         </form>
       </div>
 
@@ -1058,7 +1061,7 @@
             `data-glifo` o traz para cá sem uma segunda cópia do contorno.
 
             O nome acessível vai no botão porque o glifo é tudo o que ele diz, e
-            a dica logo abaixo é a mesma frase para quem enxerga: uma engrenagem
+            a nota logo abaixo é a mesma frase para quem enxerga: uma engrenagem
             é forma, e `specs/05-cliente-tui.md` não aceita forma sozinha mais
             do que aceita cor sozinha.
           -->
@@ -1067,7 +1070,7 @@
                   title="configuração local desta máquina"
                   data-glifo="engrenagem"></button>
         </div>
-        <span class="dica">A engrenagem abre a configuração deste computador:
+        <span class="nota">A engrenagem abre a configuração deste computador:
           microfone, som e identidade.</span>
         <!--
           A frase do §1.2 do inventário v3, dita **uma vez**.
@@ -1082,7 +1085,7 @@
           lado do próprio nome, que é onde ela responde à pergunta que a faz
           existir: "este nome é mesmo dele?".
         -->
-        <span class="dica operador-frase">Os nomes deste Dogma são vinculados a
+        <span class="nota operador-frase">Os nomes deste Dogma são vinculados a
           chaves: ninguém consegue usar o nome de outra pessoa.</span>
         <button id="botao-falar" class="botao-estado botao-falar" type="button">
           <span id="falar-rotulo">SEGURE ESPAÇO</span>
@@ -1194,10 +1197,9 @@
         </span>
         <!--
           `ENTER TRANSMITE` era um rótulo permanente de 9px ao lado do campo.
-          Virou dica: ela diz a mesma coisa em português e some para quem
-          desligou as legendas simples, que é justamente quem já sabe.
+          Virou nota: a mesma coisa em português, no tamanho em que se lê.
         -->
-        <span class="dica compor-dica">Enter também envia</span>
+        <span class="nota compor-nota">Enter também envia</span>
         <!--
           Abre o seletor de arquivos do sistema. Antes ele não abria: o ADR 0027
           tinha decidido que escolher um arquivo era arrastá-lo para a conversa,
@@ -1312,12 +1314,14 @@
      hover é um controle escondido;
   3. os dois botões de saída dizem, em palavras, qual deles sai do Cage.
 
-  ---- as dicas ----
+  ---- as notas ----
 
-  Cada `.dica` é a camada `LEGENDAS SIMPLES` do v3 (inventário §2), ligada por
-  omissão e definida uma única vez em `base.css`. Ela mora **ao lado** do
-  controle que explica, na marcação, e não numa tabela paralela que alguém vai
-  esquecer de atualizar quando o controle mudar.
+  Cada `.nota` mora **ao lado** do controle que explica, na marcação, e não numa
+  tabela paralela que alguém vai esquecer de atualizar quando o controle mudar.
+  Ela é definida uma única vez em `base.css` e aparece sempre — era a camada
+  `LEGENDAS SIMPLES` do v3 (inventário §2), com um interruptor que a escondia, e
+  o interruptor saiu: numa tela cujos dois botões de saída se distinguem **só**
+  por estas frases, escondê-las é desfazer o conserto que o v3 trouxe.
 -->
 <section id="tela-chamada" class="tela" tabindex="-1" hidden
          data-foco="chamada-at"
@@ -1341,7 +1345,7 @@
         <span class="chamada-placa">JAULA</span>
         <div class="chamada-quem">
           <span id="chamada-nome" class="chamada-nome">——</span>
-          <span class="dica">quem está nesta jaula ouve o seu microfone</span>
+          <span class="nota">quem está nesta jaula ouve o seu microfone</span>
         </div>
 
         <span class="chamada-vao"></span>
@@ -1371,7 +1375,7 @@
             <span class="rotulo">EM SESSÃO</span>
             <span id="chamada-duracao">--:--:--</span>
           </span>
-          <span class="dica">desde que esta janela entrou no Dogma</span>
+          <span class="nota">desde que esta janela entrou no Dogma</span>
         </div>
       </div>
 
@@ -1387,14 +1391,14 @@
         <!--
           Os dois primeiros dizem em que estado a coisa **está**, e o v3 os
           escreve em palavra corrente: `MICROFONE DESLIGADO` onde o v2 dizia
-          `A.T. FIELD ATIVO`. O nome do tema não some — ele fica na dica, que é
+          `A.T. FIELD ATIVO`. O nome do tema não some — ele fica na nota, que é
           onde alguém o aprende sem precisar dele para operar o botão.
         -->
         <button id="chamada-at" class="chamada-acao chamada-acao-at" type="button"
                 data-ativo="nao">
           <span class="chamada-acao-texto">
             <span id="chamada-at-titulo" class="chamada-acao-titulo">MICROFONE LIGADO</span>
-            <span id="chamada-at-dica" class="dica">clique para silenciar você</span>
+            <span id="chamada-at-nota" class="nota">clique para silenciar você</span>
           </span>
         </button>
 
@@ -1402,7 +1406,7 @@
                 data-ativo="nao">
           <span class="chamada-acao-texto">
             <span id="chamada-surdez-titulo" class="chamada-acao-titulo">SOM LIGADO</span>
-            <span id="chamada-surdez-dica" class="dica">clique para não ouvir ninguém</span>
+            <span id="chamada-surdez-nota" class="nota">clique para não ouvir ninguém</span>
           </span>
         </button>
 
@@ -1411,7 +1415,7 @@
           (inventário §7.1). No protótipo os dois chamam `ir('principal')` e o
           que os separa é só o que prometem; aqui eles fazem coisas diferentes
           de verdade — um troca de tela, o outro chama `eject_plug` — e as duas
-          dicas dizem qual é qual. Hoje quem aperta o que leva de volta às
+          notas dizem qual é qual. Hoje quem aperta o que leva de volta às
           Linhas não sabe se continua ouvindo; estas duas linhas são a resposta.
 
           O glifo vem de `ui/glifos.js` e não do teclado: ▤ e ⏻ não estão na
@@ -1422,7 +1426,7 @@
           <span class="chamada-acao-glifo" data-glifo="linhas"></span>
           <span class="chamada-acao-texto">
             <span class="chamada-acao-titulo">VER LINHAS</span>
-            <span class="dica">volta para as Linhas e continua na chamada</span>
+            <span class="nota">volta para as Linhas e continua na chamada</span>
           </span>
         </button>
 
@@ -1430,7 +1434,7 @@
           <span class="chamada-acao-glifo" data-glifo="desligar"></span>
           <span class="chamada-acao-texto">
             <span class="chamada-acao-titulo">SAIR DA JAULA</span>
-            <span class="dica">tira o seu plug: você para de ouvir e de ser ouvido</span>
+            <span class="nota">tira o seu plug: você para de ouvir e de ser ouvido</span>
           </span>
         </button>
       </div>
@@ -1445,7 +1449,7 @@
       <div class="chamada-bloco chamada-bloco-falando">
         <p class="rotulo">FALANDO AGORA</p>
         <p id="chamada-falando-nome" class="chamada-falando-nome">——</p>
-        <p class="dica">
+        <p class="nota">
           A moldura laranja no cartão marca quem está com o microfone aberto
           agora. A palavra ao lado do nome diz a mesma coisa, para quem não vê a
           cor.
@@ -1464,7 +1468,7 @@
       -->
       <div class="chamada-bloco chamada-bloco-eventos">
         <p class="rotulo">EVENTOS</p>
-        <p class="dica">
+        <p class="nota">
           O que esta janela viu acontecer, desde que abriu. O Dogma não guarda
           histórico, então não há nada anterior a mostrar.
         </p>
@@ -1699,7 +1703,7 @@
     <nav class="dogma-coluna" aria-label="seções da configuração">
       <div class="dogma-marca">
         <h1 class="dogma-marca-titulo">TERMINAL DOGMA</h1>
-        <p class="dica">Ajustes deste computador, e não deste Dogma.</p>
+        <p class="nota">Ajustes deste computador, e não deste Dogma.</p>
       </div>
 
       <!--
@@ -1722,7 +1726,7 @@
             <span class="dogma-secao-icone" data-glifo="audio"></span>
             <span class="dogma-secao-texto">
               <span class="dogma-secao-nome">ÁUDIO</span>
-              <span class="dica">Microfone e som</span>
+              <span class="nota">Microfone e som</span>
             </span>
           </button>
         </li>
@@ -1734,22 +1738,17 @@
             <span class="dogma-secao-icone" data-glifo="teclado"></span>
             <span class="dogma-secao-texto">
               <span class="dogma-secao-nome">ATALHOS</span>
-              <span class="dica">Teclas de acesso</span>
+              <span class="nota">Teclas de acesso</span>
             </span>
           </button>
         </li>
-        <li>
-          <button id="secao-aparencia" class="dogma-secao" type="button"
-                  data-painel="painel-aparencia"
-                  data-titulo="APARÊNCIA E COMPORTAMENTO"
-                  data-sub="Como o app se parece e o que ele faz sozinho">
-            <span class="dogma-secao-icone" data-glifo="aparencia"></span>
-            <span class="dogma-secao-texto">
-              <span class="dogma-secao-nome">APARÊNCIA</span>
-              <span class="dica">Legendas e comportamento</span>
-            </span>
-          </button>
-        </li>
+        <!--
+          APARÊNCIA saiu, e a ausência é a mesma regra que já governa esta tela:
+          omitir o que não existe em vez de desenhá-lo vazio. Ela tinha uma chave
+          só — LEGENDAS SIMPLES —, e aquela camada de texto deixou de ser um modo
+          para virar parte do controle que ela explica. Uma seção de configuração
+          com nada dentro promete um ajuste que não há.
+        -->
         <li>
           <button id="secao-identidade" class="dogma-secao" type="button"
                   data-painel="painel-identidade"
@@ -1758,7 +1757,7 @@
             <span class="dogma-secao-icone" data-glifo="chave"></span>
             <span class="dogma-secao-texto">
               <span class="dogma-secao-nome">IDENTIDADE</span>
-              <span class="dica">Sua chave</span>
+              <span class="nota">Sua chave</span>
             </span>
           </button>
         </li>
@@ -1781,7 +1780,7 @@
             <span class="dogma-secao-icone" data-glifo="atualizar"></span>
             <span class="dogma-secao-texto">
               <span class="dogma-secao-nome">ATUALIZAÇÃO</span>
-              <span class="dica">Versão nova</span>
+              <span class="nota">Versão nova</span>
             </span>
           </button>
         </li>
@@ -1806,7 +1805,7 @@
           seria uma terceira cópia das mesmas duas frases.
         -->
         <h2 id="dogma-titulo" class="dogma-titulo"></h2>
-        <p id="dogma-subtitulo" class="dica"></p>
+        <p id="dogma-subtitulo" class="nota"></p>
       </header>
 
       <div class="dogma-painel">
@@ -1817,7 +1816,7 @@
           <div class="dogma-bloco">
             <div class="dogma-bloco-topo">
               <h3 class="dogma-bloco-nome">MICROFONE</h3>
-              <p class="dica">O que os outros ouvem de você</p>
+              <p class="nota">O que os outros ouvem de você</p>
             </div>
             <div class="dogma-bloco-corpo">
 
@@ -1829,7 +1828,7 @@
                   escrito enquanto o elemento ainda estava escondido.
                 -->
                 <p id="dogma-erro" class="erro" role="alert" hidden></p>
-                <p class="dica">A troca vale agora e fica gravada nesta máquina.
+                <p class="nota">A troca vale agora e fica gravada nesta máquina.
                   A lista diz qual microfone <em>abriu</em>, que nem sempre é o
                   que foi escolhido.</p>
               </div>
@@ -1849,7 +1848,7 @@
                   atrás dele — o nível só existe com áudio de pé.
                 -->
                 <p id="dogma-nivel" class="dogma-medidor" role="status">—</p>
-                <p class="dica">Fale normalmente. Os blocos sobem enquanto você
+                <p class="nota">Fale normalmente. Os blocos sobem enquanto você
                   fala, e só há nível com uma sessão aberta.</p>
               </div>
 
@@ -1909,7 +1908,7 @@
           <div class="dogma-bloco">
             <div class="dogma-bloco-topo">
               <h3 class="dogma-bloco-nome">SAÍDA DE SOM</h3>
-              <p class="dica">Por onde você ouve os outros</p>
+              <p class="nota">Por onde você ouve os outros</p>
             </div>
             <div class="dogma-bloco-corpo">
               <div class="dogma-campo">
@@ -1920,7 +1919,7 @@
                   aparelhos que talvez não existam nesta máquina.
                 -->
                 <ul id="lista-saidas" class="dogma-dispositivos"></ul>
-                <p class="dica">Onde você ouve os outros. Trocar vale na hora,
+                <p class="nota">Onde você ouve os outros. Trocar vale na hora,
                   e o que estiver tocando muda de aparelho sem sair da
                   conversa.</p>
               </div>
@@ -1947,7 +1946,7 @@
           <div class="dogma-bloco">
             <div class="dogma-bloco-topo">
               <h3 class="dogma-bloco-nome">ATALHOS DE TECLADO</h3>
-              <p class="dica">São fixos: não há onde guardar uma troca</p>
+              <p class="nota">São fixos: não há onde guardar uma troca</p>
             </div>
             <ul class="dogma-atalhos">
               <li class="dogma-atalho">
@@ -1986,41 +1985,6 @@
           </div>
         </section>
 
-        <!-- ----------------------------------------------------- APARÊNCIA -->
-        <section id="painel-aparencia" class="dogma-painel-secao"
-                 aria-labelledby="secao-aparencia" hidden>
-          <div class="dogma-bloco">
-            <div class="dogma-bloco-topo">
-              <h3 class="dogma-bloco-nome">COMPORTAMENTO</h3>
-            </div>
-            <ul class="dogma-chaves">
-              <li class="dogma-chave">
-                <span class="dogma-chave-texto">
-                  <span id="dogma-legendas-nome" class="dogma-chave-nome">Legendas
-                    simples</span>
-                  <!--
-                    Descrição em `.dogma-chave-desc` e não em `.dica`, e é a
-                    única do arquivo assim. A chave que esta linha governa é a
-                    das próprias dicas: escrita como `.dica`, a explicação de
-                    como religá-las sumiria junto com elas no instante em que
-                    alguém as desligasse, e o interruptor de volta ficaria sem
-                    legenda nenhuma.
-                  -->
-                  <span class="dogma-chave-desc">Uma linha curta ao lado de cada
-                    controle, dizendo o que ele faz. Fica ligada até você
-                    desligar.</span>
-                </span>
-                <button id="dogma-legendas" class="dogma-interruptor" type="button"
-                        role="switch" aria-checked="true"
-                        aria-labelledby="dogma-legendas-nome">
-                  <span class="dogma-interruptor-lado" data-lado="sim">SIM</span>
-                  <span class="dogma-interruptor-lado" data-lado="nao">NÃO</span>
-                </button>
-              </li>
-            </ul>
-          </div>
-        </section>
-
         <!-- ---------------------------------------------------- IDENTIDADE -->
         <!--
           Uma seção sem controle nenhum, e é o estado honesto: a chave está em
@@ -2040,7 +2004,7 @@
           <div class="dogma-bloco">
             <div class="dogma-bloco-topo">
               <h3 class="dogma-bloco-nome">SUA IDENTIDADE</h3>
-              <p class="dica">A chave que prova quem você é nos Dogmas</p>
+              <p class="nota">A chave que prova quem você é nos Dogmas</p>
             </div>
             <div class="dogma-bloco-corpo">
               <div class="dogma-par">
@@ -2088,7 +2052,7 @@
           <div class="dogma-bloco">
             <div class="dogma-bloco-topo">
               <h3 class="dogma-bloco-nome">VERSÃO NOVA</h3>
-              <p class="dica">Nada é consultado sozinho — só quando você pedir</p>
+              <p class="nota">Nada é consultado sozinho — só quando você pedir</p>
             </div>
             <div class="dogma-bloco-corpo">
 
@@ -2096,7 +2060,7 @@
                 <button id="atualizacao-procurar" class="botao" type="button">
                   PROCURAR ATUALIZAÇÃO
                 </button>
-                <p class="dica">Pergunta à página de releases se saiu versão
+                <p class="nota">Pergunta à página de releases se saiu versão
                   mais nova. Nada é baixado nem trocado agora.</p>
                 <!--
                   Revelado por conta própria: começa vazio, e um `role="status"`

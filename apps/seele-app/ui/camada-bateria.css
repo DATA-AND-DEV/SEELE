@@ -169,30 +169,18 @@
   color: var(--seele-osso);
 }
 
-/* A linha de uma tentativa, nas três colunas do comp — `64px` para o tempo,
-   `150px` para a rota, o resto para o desfecho. As três chegam vazias:
-   `InternalBattery` carrega `attempts: u32` e mais nada (inventário §16).
-   A moldura fica porque apagá-la esconderia que o produto não sabe dizer
-   **por que** cada tentativa falhou, que é justamente o que se quer saber
-   olhando para esta caixa. */
-.bateria-colunas,
-.bateria-tentativa {
-  margin: 0;
-  display: flex;
-  gap: 16px;
-  font-size: 12px;
-}
+/* ---------- o que saiu daqui ----------
 
-/* O cabeçalho de coluna não está no comp: lá as quatro linhas são literais com
-   `−00:04 BALTHASAR·01 SEM RESPOSTA` e a forma se lê sozinha. Com as três
-   colunas vazias ela não se leria — três travessões em fila não dizem o que
-   cada um deixou de ser. */
-.bateria-colunas { letter-spacing: 0.16em; }
+   `.bateria-colunas` e `.bateria-tentativa` desenhavam QUANDO, ROTA e DESFECHO
+   com três travessões embaixo, e a legenda que os explicava. Nenhum dos três
+   atravessa: `InternalBattery` carrega `attempts: u32` e mais nada
+   (inventário §16).
 
-.bateria-colunas > :first-child,
-.bateria-tentativa > :first-child { width: 64px; flex: 0 0 auto; }
-.bateria-colunas > :nth-child(2),
-.bateria-tentativa > :nth-child(2) { width: 150px; flex: 0 0 auto; }
+   O argumento para desenhá-los vazios era manter a lacuna visível. O que estava
+   visível eram três `title` sobre o que o protocolo carimba, dentro da caixa que
+   aparece quando o enlace cai — a hora em que quem lê quer saber se volta, e
+   nunca a hora de ler uma nota sobre formato de mensagem. A lacuna continua
+   registrada onde é trabalho; a tela ficou com o que é medido. */
 
 /* `FORÇAR REINSERÇÃO DE PLUG`, desabilitado. O inventário §5 o classifica como
    **C**: reconectar já é do core — é ele que está tentando, e é dele que vem a
@@ -216,5 +204,3 @@
   border-color: var(--seele-linha-forte);
   cursor: help;
 }
-
-.bateria-pe .legenda-ausente { margin-top: 4px; }

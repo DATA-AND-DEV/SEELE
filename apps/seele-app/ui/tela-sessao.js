@@ -1404,10 +1404,52 @@ async function verPrevia(anexo) {
  * ninguém pode descobrir depois: **quem hospeda o Dogma pôde ler este
  * arquivo**, e o SEELE não varre vírus. As duas coisas são verdade e as duas
  * têm de estar escritas antes de a pessoa apertar, não numa página de ajuda.
+ *
+ * ---- por que `abrirConfirmacao` e não `armarAto` ----
+ *
+ * Porque `armarAto` **não abre a caixa**. Ele escreve a frase dentro de
+ * `#moderar`, troca o corpo dela pela confirmação e põe o foco no CANCELAR — e
+ * mais nada. Quem revela `#moderar` são as três portas de `camada-moderar.js`
+ * (`abrirModeracao`, `abrirConfirmacao`, `abrirRecusa`), e esta função chamava o
+ * miolo direto, por fora das três.
+ *
+ * O resultado era o defeito relatado: apertar SALVAR não fazia absolutamente
+ * nada. Nenhum erro no console, nenhuma linha vermelha, nenhum quadro piscando
+ * — a caixa continuava com `hidden`, o `focus()` num elemento escondido não faz
+ * nada e não avisa, e o ato ficava armado numa caixa que ninguém veria. O botão
+ * ficou assim desde que existe.
+ *
+ * Chamar a porta e não o miolo também é o que devolve o resto do acordo:
+ * `focoAntesDeModerar` guarda quem apertou SALVAR, e `caixaComEscolha = false`
+ * é o que faz CANCELAR fechar a caixa em vez de voltar para uma lista de
+ * pilotos que este caminho nunca mostrou.
+ *
+ * ---- sem pasta de destino não há pergunta a fazer ----
+ *
+ * `pastaDeDestino` vem de `pasta_de_downloads`, lido uma vez no carregamento, e
+ * o Rust devolve `""` quando a máquina não sabe dizer nem downloads nem home.
+ * Com a cadeia vazia o destino virava o nome do arquivo sozinho — um caminho
+ * relativo, que grava onde quer que o processo tenha sido iniciado. É o pior
+ * desfecho possível: o arquivo é gravado de verdade, a frase promete um lugar
+ * que não é aquele, e ninguém acha o arquivo depois. Então esta é a única
+ * recusa deste caminho, e ela é dita em voz alta.
  */
 function salvarAnexo(anexo, nome) {
-  const destino = pastaDeDestino ? `${pastaDeDestino}/${nome}` : nome;
-  armarAto(
+  if (pastaDeDestino === "") {
+    abrirRecusa(
+      "SALVAR EM DISCO",
+      "Esta máquina não disse onde ficam os arquivos baixados, e sem isso o " +
+        "SEELE só saberia gravar «" +
+        nome +
+        "» num lugar que ele não consegue nomear para você — e um arquivo que " +
+        "ninguém sabe onde foi parar é um arquivo perdido.\n" +
+        "Nada foi gravado.",
+    );
+    return;
+  }
+
+  const destino = `${pastaDeDestino}/${nome}`;
+  abrirConfirmacao(
     "SALVAR EM DISCO",
     `Grava «${nome}» em ${destino}.\n` +
       "O SEELE não confere se este arquivo é seguro: ele não varre vírus e não " +
@@ -1415,6 +1457,7 @@ function salvarAnexo(anexo, nome) {
       "marcado com a quarentena do sistema ao ser gravado, e é o seu sistema " +
       "operacional que vai parar você na frente dele se for o caso.\n" +
       "Nenhuma tela do SEELE abre este arquivo. Abrir é um ato seu, fora daqui.",
+    "SALVAR EM DISCO",
     () => invoke("salvar_anexo", { anexo, destino }),
   );
 }
@@ -1752,7 +1795,21 @@ $("criar-linha").addEventListener("submit", (evento) => {
   const nome = $("campo-linha-nome");
   pedirSala(invoke("criar_linha", { name: nome.value.trim() }), nome, "criar_linha");
 });
+// O `×` da caixa de alerta, e o único fechamento dela: o `RECONHECER` de baixo
+// saiu, porque duas portas para o mesmo ato numa caixa de 720px é a pessoa
+// procurando qual das duas é a certa. O `id` não mudou junto com a forma — é o
+// mesmo elemento, noutro canto.
 $("banner-fechar").addEventListener("click", () => ($("banner").hidden = true));
+// E o mesmo fechamento pela tecla. Com o `×` sozinho, `Escape` deixou de ser
+// conveniência: uma caixa que cobre a janela inteira e só se fecha com o
+// ponteiro é pior que a redundância que ela perdeu. Só com ela na frente, ou a
+// tecla seria engolida de quem está fechando uma busca atrás dela.
+window.addEventListener("keydown", (evento) => {
+  if (evento.key === "Escape" && !$("banner").hidden) {
+    evento.preventDefault();
+    $("banner").hidden = true;
+  }
+});
 $("veredito-fechar").addEventListener("click", () => ($("veredito").hidden = true));
 
 $("botao-mudo").addEventListener("click", async () => {
