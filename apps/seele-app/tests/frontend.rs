@@ -6186,3 +6186,204 @@ fn saving_never_writes_to_a_path_this_window_cannot_name() {
          thing somebody who just pressed SALVAR needs to know:\n{salvar}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// The ruler: one sentence, and a second one only when it changes what somebody
+// does. A third does not exist.
+// ---------------------------------------------------------------------------
+
+/// The longest a sentence in `ui/frases.js` may be, in characters.
+///
+/// Measured, not guessed. After the cut that produced this guard the eighty-one
+/// sentences average 60 characters and the median is 44; the longest is 173 —
+/// `FRASES.FuroDeNat`, the one rung of the ladder with a third party in it,
+/// held at that length by
+/// `the_nat_punching_rung_promises_nothing_it_cannot_keep_and_names_its_cost`,
+/// which requires it to name the meeting point, what it learns, what it does
+/// not, the way out, and where to switch it. 180 is that sentence plus the
+/// slack of rewording one clause.
+///
+/// The number exists because prose comes back. The sentences this replaced ran
+/// to 425 characters, and every one of them was written a clause at a time —
+/// each addition true, each defensible on the day, and the sum three paragraphs
+/// under a button nobody read to the end. A reviewer can be talked out of "this
+/// is too long"; a number cannot.
+const LIMITE_DE_FRASE: usize = 180;
+
+/// The dictionaries of `ui/frases.js`, which is where sentences live.
+///
+/// Not every string this product shows is here. A confirmation that spends the
+/// window on an irreversible act is written next to the act, in
+/// `camada-moderar.js` and `camada-portaria.js`, and those were measured when
+/// they were written — a ban, a deleted Linha, an update that takes a hosted
+/// Dogma down with the window. Nor the two `fraseDeErro` composes for a changed
+/// key: those are two fingerprints with a line either side, and a fingerprint is
+/// as long as it is. What this guards is the prose.
+const DICIONARIOS: [&str; 6] = [
+    "MOTIVOS",
+    "AVISOS",
+    "FRASES",
+    "ANEXOS",
+    "TRANSFERENCIAS",
+    "PREVIAS",
+];
+
+/// Every string literal on one line, joined, with `\n` turned into a real break.
+///
+/// The entries are written both ways — one literal on one line, and four joined
+/// by `+` across four lines — so counting has to see the text somebody reads and
+/// not the source that produces it. Counting the source would let a sentence
+/// grow by being split into more pieces, which is exactly the move this exists
+/// to stop.
+fn literals_in(line: &str) -> String {
+    let mut out = String::new();
+    let mut chars = line.chars();
+    while let Some(quote) = chars.next() {
+        if quote != '"' {
+            continue;
+        }
+        loop {
+            match chars.next() {
+                None | Some('"') => break,
+                Some('\\') => match chars.next() {
+                    Some('n') => out.push('\n'),
+                    Some(other) => out.push(other),
+                    None => break,
+                },
+                Some(other) => out.push(other),
+            }
+        }
+    }
+    out
+}
+
+/// Every sentence one dictionary of `ui/frases.js` writes, as (variant, text).
+///
+/// An entry opens at `Name:` at the start of a line and runs until the next one
+/// does, which is what holds a sentence together across the `+` that joins its
+/// pieces. Feed it comment-free source: the blocks above these entries quote the
+/// sentences they explain, and a length read off an explanation is a length read
+/// off the wrong thing.
+fn sentences_of(file: &str, dictionary: &str) -> Vec<(String, String)> {
+    let Some(after) = file.split(&format!("const {dictionary} = {{")).nth(1) else {
+        panic!("`{dictionary}` is gone from ui/frases.js");
+    };
+    let Some(block) = after.split("\n};").next() else {
+        panic!("`{dictionary}` in ui/frases.js is never closed");
+    };
+
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut current: Option<(String, String)> = None;
+    for line in block.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        // ASCII only, so the byte index below lands on a character boundary and
+        // a line opening with a word like `Não` is not read as a variant name.
+        let name: String = trimmed
+            .chars()
+            .take_while(|letter| letter.is_ascii_alphanumeric() || *letter == '_')
+            .collect();
+        let opens = !name.is_empty() && trimmed[name.len()..].starts_with(':');
+        let text = if opens {
+            if let Some(done) = current.take() {
+                out.push(done);
+            }
+            current = Some((name.clone(), String::new()));
+            &trimmed[name.len() + 1..]
+        } else {
+            trimmed
+        };
+        if let Some((_, sentence)) = current.as_mut() {
+            sentence.push_str(&literals_in(text));
+        }
+    }
+    if let Some(done) = current.take() {
+        out.push(done);
+    }
+    out
+}
+
+#[test]
+fn no_sentence_the_screen_writes_runs_past_the_length_that_gets_read() {
+    // The defect this guards is not a bug and never looks like one. Every
+    // sentence it replaced was true, and several were expensive to find out —
+    // what a meeting point learns, why two networks refuse to punch, the
+    // difference between a releases page that did not answer and one that
+    // answered «nothing published». Each arrived as one more clause, and the sum
+    // was three paragraphs under a button.
+    //
+    // So this does not ask whether a sentence is good. It asks whether it is
+    // short, which is the half of the question a machine can hold.
+    let file = without_comments(&read("ui/frases.js"));
+
+    let mut counted = 0usize;
+    let mut longest = (String::new(), 0usize);
+    for dictionary in DICIONARIOS {
+        for (variant, sentence) in sentences_of(&file, dictionary) {
+            counted += 1;
+            let length = sentence.chars().count();
+            assert!(
+                length <= LIMITE_DE_FRASE,
+                "`{dictionary}.{variant}` is {length} characters and the limit is \
+                 {LIMITE_DE_FRASE}. The rule it broke: one sentence saying the \
+                 state and, in the active voice, what to do — and a second only \
+                 when it changes what the person does. If what is here is worth \
+                 keeping, it goes to docs/ and the screen points at it:\n{sentence}"
+            );
+            if length > longest.1 {
+                longest = (format!("{dictionary}.{variant}"), length);
+            }
+        }
+    }
+
+    // The parser has to have found the sentences, or the loop above asserted
+    // nothing at all in perfect silence — the failure every guard in this file
+    // that reads another file has to answer for.
+    assert!(
+        counted >= 70,
+        "only {counted} sentences were read out of ui/frases.js, so the entries \
+         are no longer being found and this guard is measuring an empty list"
+    );
+
+    // And the ceiling has to stay a measurement. If every sentence drops far
+    // under it, the number stopped describing this file and became just a
+    // number — and a number nobody re-measures is the room prose grows back
+    // into.
+    assert!(
+        longest.1 * 2 > LIMITE_DE_FRASE,
+        "the longest sentence is now {} characters ({}), less than half the \
+         {LIMITE_DE_FRASE} this guard allows. Lower the limit to what the file \
+         actually needs, or it is holding a door open",
+        longest.1,
+        longest.0
+    );
+}
+
+#[test]
+fn no_sentence_the_screen_writes_reaches_a_third_line() {
+    // The shape the rule takes on screen: a line in capitals that says the
+    // state, and one under it that says what to do. Characters alone would let
+    // three short lines through, and three lines is the thing itself — the
+    // FuroDeNat sentence that started this was three lines and 425 characters,
+    // and the third was the one nobody was ever going to read.
+    //
+    // The two composed sentences keep to this by construction. `fraseDeAnexo`
+    // and `fraseDePrevia` fold the byte limit into the headline instead of
+    // adding a line, because the number is what qualifies the «too big»: it
+    // belongs to the sentence that says it, not under it.
+    let file = without_comments(&read("ui/frases.js"));
+
+    for dictionary in DICIONARIOS {
+        for (variant, sentence) in sentences_of(&file, dictionary) {
+            let lines = sentence.lines().count();
+            assert!(
+                lines <= 2,
+                "`{dictionary}.{variant}` is written on {lines} lines. The third \
+                 is the one that justifies, contextualises, or answers the \
+                 question nobody has asked yet — and it belongs in docs/:\n{sentence}"
+            );
+        }
+    }
+}

@@ -401,8 +401,11 @@ function fraseDePrevia(previa) {
       "— continua aqui, para salvar."
     );
   }
+  // O número entra no título, e não numa linha nova. Uma terceira linha é a
+  // redação que esta tela acabou de perder, e o máximo é justamente o que
+  // qualifica o «grande demais» — ele pertence à frase que o diz.
   if (nome === "TooBig" && typeof razao.limit === "number") {
-    return `${PREVIAS.TooBig}\nUma prévia baixa no máximo ${emBytes(razao.limit)}.`;
+    return PREVIAS.TooBig.replace(".\n", `: O MÁXIMO É ${emBytes(razao.limit)}.\n`);
   }
   return PREVIAS[nome] ?? `FALHA NÃO IDENTIFICADA (${nome})`;
 }
@@ -411,7 +414,8 @@ function fraseDePrevia(previa) {
  * A frase de uma recusa de anexo.
  *
  * `TooLarge` chega com o limite dentro, porque «grande demais» sem número manda
- * a pessoa tentar de novo com um arquivo que também é grande demais.
+ * a pessoa tentar de novo com um arquivo que também é grande demais. Ele entra
+ * no título, e não numa linha nova: é o que qualifica o «demais».
  */
 function fraseDeAnexo(razao) {
   if (razao && typeof razao === "object") {
@@ -419,7 +423,7 @@ function fraseDeAnexo(razao) {
     const base = ANEXOS[nome];
     if (!base) return `FALHA NÃO IDENTIFICADA (${nome})`;
     if (nome === "TooLarge" && typeof razao[nome]?.limit === "number") {
-      return `${base}\nO limite deste Dogma é ${emBytes(razao[nome].limit)} por arquivo.`;
+      return base.replace(".\n", `: O LIMITE É ${emBytes(razao[nome].limit)} POR ARQUIVO.\n`);
     }
     return base;
   }
