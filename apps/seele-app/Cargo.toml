@@ -36,6 +36,13 @@ tauri-plugin-updater = { version = "2.10", default-features = false, features = 
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 
+[dev-dependencies]
+# `test` traz o runtime falso, e nada mais: a lista de features do `tauri` diz
+# `test = []`. É o que deixa `tests/permissoes.rs` construir o app de verdade —
+# com este `tauri.conf.json` e com a ACL gerada dele — e fazer a mesma chamada
+# de IPC que o frontend faz, sem servidor gráfico nenhum.
+tauri = { version = "2", features = ["test"] }
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
