@@ -67,9 +67,9 @@ fn main() -> ExitCode {
             Ok(ponto) => {
                 eprintln!("ponto de encontro atendendo em {escuta}");
                 linhas.push(std::thread::spawn(move || {
-                    if let Err(erro) = ponto.servir() {
-                        eprintln!("a escuta {escuta} parou: {erro}");
-                    }
+                    // `servir` só volta com erro: o `Ok` dele é `Infallible`.
+                    let Err(erro) = ponto.servir();
+                    eprintln!("a escuta {escuta} parou: {erro}");
                 }));
             }
             // Uma VPS sem IPv6 é o caso comum, e ficar de pé só com IPv4 é o

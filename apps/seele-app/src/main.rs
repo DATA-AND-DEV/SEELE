@@ -873,6 +873,10 @@ fn nome_da_falha(erro: &seele_ffi::uri::ErroDeUri) -> &'static str {
         // nome em vez de um beco sem saída — que é o que aquele fallback existe
         // para fazer. A frase a escrever é sobre pôr o IPv6 entre colchetes.
         Falha::EnderecoIpv6SemColchetes => "EnderecoIpv6SemColchetes",
+        // Degrau 4 do ADR 0022: o `enc` do convite veio pela metade ou com um
+        // endereço que não é um. Nome próprio porque a frase é própria — meio
+        // bilhete não leva a lugar nenhum, e o resto do link continua bom.
+        Falha::BilheteInvalido => "BilheteInvalido",
         Falha::ImpressaoDigitalInvalida => "ImpressaoDigitalInvalida",
         Falha::TokenInvalido => "TokenInvalido",
         Falha::CageInvalido => "CageInvalido",

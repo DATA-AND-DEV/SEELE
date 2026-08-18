@@ -23,6 +23,23 @@
 //! que sempre funcionou. Os outros vêm em `alt`, separados por vírgula, na
 //! ordem em que se tenta.
 //!
+//! **`enc`, o bilhete de encontro** — opcional, e o degrau 4 do ADR 0022. Duas
+//! metades separadas por `/`: o endereço do **ponto de encontro** e o endereço
+//! onde o anfitrião espera o aviso de que alguém quer entrar.
+//!
+//! ```text
+//! ?enc=encontro.exemplo:8384/198.51.100.7:41234
+//! ```
+//!
+//! As duas metades estão aqui, e não uma só, porque o ADR 0022 exige que o ponto
+//! de encontro seja **trocável**: quem hospeda aponta para o seu, e o endereço
+//! dele viaja no link. Um endereço compilado no cliente faria de "trocável" uma
+//! frase que ninguém consegue exercer.
+//!
+//! Um cliente que não conhece este campo cai na regra do parâmetro desconhecido
+//! e o ignora. Ele perde o degrau 4 e continua tendo todos os endereços do
+//! `alt`, que é exatamente o que ele tinha antes de este campo existir.
+//!
 //! **`fp`, a impressão digital** — opcional e o motivo principal de isto
 //! existir. O ADR 0003 fixa a chave do servidor no primeiro contato, e até aqui
 //! esse primeiro contato era **cego**: o cliente aceitava o que aparecesse e
@@ -76,6 +93,12 @@ pub struct Convite {
     /// dois sentidos: um convite de antes vira uma lista de um, e um cliente de
     /// antes lê `alt` como parâmetro desconhecido e o ignora.
     pub alternativos: Vec<String>,
+    /// Onde bater para que o anfitrião fure o NAT, se o link trouxe um bilhete.
+    ///
+    /// Degrau 4 do ADR 0022. `None` num convite de um Dogma que não precisou
+    /// dele — o que alcança de fora por IPv6 ou por porta no roteador não tem
+    /// terceiro nenhum no meio, e não deve ganhar um.
+    pub bilhete: Option<Bilhete>,
     /// Impressão digital esperada do certificado, se o link a trouxe.
     pub impressao_digital: Option<String>,
     /// Token de uso único, se o link o trouxe.
@@ -91,10 +114,18 @@ impl Convite {
         Self {
             alvo: alvo.into(),
             alternativos: Vec::new(),
+            bilhete: None,
             impressao_digital: None,
             token: None,
             cage: None,
         }
+    }
+
+    /// Acrescenta o bilhete de encontro. Degrau 4 do ADR 0022.
+    #[must_use]
+    pub fn com_bilhete(mut self, bilhete: Bilhete) -> Self {
+        self.bilhete = Some(bilhete);
+        self
     }
 
     /// Acrescenta os outros endereços do mesmo Dogma, na ordem de tentativa.
@@ -170,6 +201,99 @@ impl Convite {
     }
 }
 
+/// O bilhete de encontro: onde bater, e para quem. Degrau 4 do ADR 0022.
+///
+/// # Por que duas metades e não um identificador
+///
+/// A alternativa óbvia era um número opaco — um "quarto" — que o ponto de
+/// encontro traduzisse para o endereço do anfitrião. Isso obrigaria o ponto de
+/// encontro a **guardar** essa tradução, e o ADR 0022 aceita este degrau com a
+/// condição de ele ser sem estado. Escrevendo os dois endereços no bilhete, o
+/// serviço no meio não precisa lembrar de nada — e o que ele não guarda ninguém
+/// consegue tomar dele.
+///
+/// O preço está escrito em `docs/alcance-pela-internet.md`: quem tem o link
+/// aprende o endereço público de quem hospeda sem precisar conectar. Quem
+/// conecta aprenderia de qualquer forma, e um link é para dar a quem se convida.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Bilhete {
+    /// O ponto de encontro: `host[:porta]`.
+    ///
+    /// Vem do anfitrião e não do cliente, e é isso que faz o serviço ser
+    /// trocável.
+    pub ponto: String,
+    /// Onde o anfitrião espera o aviso, como o ponto de encontro o vê.
+    ///
+    /// É para cá que quem quer entrar manda o `LEVE` de [`crate::encontro`]: o
+    /// ponto de encontro repassa para este endereço o endereço de quem bateu, e
+    /// é assim que o anfitrião sabe para onde furar.
+    pub aviso: String,
+}
+
+impl Bilhete {
+    /// Um bilhete, se as duas metades forem endereços.
+    ///
+    /// # Errors
+    ///
+    /// O mesmo [`ErroDeUri`] de um alvo torto: este texto acaba num `send_to`
+    /// como qualquer outro endereço do convite.
+    pub fn novo(ponto: impl Into<String>, aviso: impl Into<String>) -> Result<Self, ErroDeUri> {
+        let (ponto, aviso) = (ponto.into(), aviso.into());
+        validar_alvo(&ponto)?;
+        validar_alvo(&aviso)?;
+        Ok(Self { ponto, aviso })
+    }
+
+    /// Lê a forma que viaja no link: `ponto/aviso`.
+    ///
+    /// # Errors
+    ///
+    /// [`ErroDeUri::BilheteInvalido`] se não houver as duas metades, e o erro do
+    /// endereço se alguma delas não for um.
+    pub fn ler(texto: &str) -> Result<Self, ErroDeUri> {
+        // A barra não aparece em nenhum dos dois lados — nem num nome, nem num
+        // IPv6 entre colchetes —, então ela separa sem ambiguidade.
+        let (ponto, aviso) = texto.split_once('/').ok_or(ErroDeUri::BilheteInvalido)?;
+        if ponto.is_empty() || aviso.is_empty() {
+            return Err(ErroDeUri::BilheteInvalido);
+        }
+        Self::novo(ponto, aviso)
+    }
+
+    /// O ponto de encontro, separado em máquina e porta.
+    ///
+    /// A porta padrão aqui **não** é a do Dogma: um ponto de encontro atende na
+    /// [`crate::encontro::PORTA_PADRAO`].
+    ///
+    /// # Errors
+    ///
+    /// Não falha para um bilhete que veio de [`Bilhete::ler`].
+    pub fn ponto(&self) -> Result<Alvo<'_>, ErroDeUri> {
+        separar_com(&self.ponto, crate::encontro::PORTA_PADRAO)
+    }
+
+    /// Onde o anfitrião espera o aviso.
+    ///
+    /// # Errors
+    ///
+    /// [`ErroDeUri::BilheteInvalido`] se esta metade for um nome: o `LEVE` do
+    /// ponto de encontro carrega um endereço, e ninguém no caminho resolve nome.
+    pub fn aviso(&self) -> Result<std::net::SocketAddr, ErroDeUri> {
+        let alvo = separar(&self.aviso)?;
+        let ip: std::net::IpAddr = alvo
+            .maquina
+            .parse()
+            .map_err(|_| ErroDeUri::BilheteInvalido)?;
+        Ok(std::net::SocketAddr::new(ip, alvo.porta))
+    }
+}
+
+impl fmt::Display for Bilhete {
+    fn fmt(&self, formatador: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatador, "{}/{}", self.ponto, self.aviso)
+    }
+}
+
 /// Por que um texto não é um convite.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ErroDeUri {
@@ -185,6 +309,12 @@ pub enum ErroDeUri {
     /// específica e quem colou o endereço consegue fazê-la: `2001:db8::1` vira
     /// `[2001:db8::1]`. Ver [`separar`].
     EnderecoIpv6SemColchetes,
+    /// O bilhete de encontro não tem as duas metades, ou uma delas não serve.
+    ///
+    /// Erro próprio porque a correção é diferente: aqui não falta pontuação num
+    /// endereço, falta metade do bilhete — e meio bilhete não leva a lugar
+    /// nenhum. Ver [`Bilhete`].
+    BilheteInvalido,
     /// A impressão digital não é hexadecimal de 64 caracteres.
     ImpressaoDigitalInvalida,
     /// O token tem caractere fora do alfabeto de convites.
@@ -213,6 +343,12 @@ impl fmt::Display for Convite {
         // calada, custando um endereço a quem tentar.
         if !self.alternativos.is_empty() {
             write!(formatador, "{separador}alt={}", self.alternativos.join(","))?;
+            separador = '&';
+        }
+        // Ao lado do `alt`, e pelo mesmo motivo: é endereço, e o que se perde
+        // ao perdê-lo é um caminho a tentar, não a verificação da identidade.
+        if let Some(bilhete) = &self.bilhete {
+            write!(formatador, "{separador}enc={bilhete}")?;
             separador = '&';
         }
         if let Some(impressao) = &self.impressao_digital {
@@ -285,6 +421,9 @@ pub fn analisar(texto: &str) -> Result<Convite, ErroDeUri> {
                     convite.alternativos.push(alternativo.to_owned());
                 }
             }
+            // O bilhete de encontro. Validado como os outros endereços, e pelo
+            // mesmo motivo: as duas metades terminam num `send_to`.
+            "enc" => convite.bilhete = Some(Bilhete::ler(valor)?),
             "cage" => {
                 convite.cage = Some(valor.parse().map_err(|_| ErroDeUri::CageInvalido)?);
             }
@@ -328,6 +467,15 @@ pub struct Alvo<'a> {
 /// nenhum colchete — o caso de quem copiou o endereço de um `ip addr` e colou
 /// cru. [`ErroDeUri::EnderecoInvalido`] para o resto.
 pub fn separar(alvo: &str) -> Result<Alvo<'_>, ErroDeUri> {
+    separar_com(alvo, PORTA_PADRAO)
+}
+
+/// O mesmo, dizendo qual é a porta de quem não escreveu uma.
+///
+/// Existe porque nem todo endereço que atravessa um convite é um Dogma: o ponto
+/// de encontro do degrau 4 atende noutra porta, e herdar a 8383 ali mandaria o
+/// pedido para o lugar errado sem ninguém ter escrito nada errado.
+fn separar_com(alvo: &str, padrao: u16) -> Result<Alvo<'_>, ErroDeUri> {
     if let Some(depois_do_colchete) = alvo.strip_prefix('[') {
         let (dentro, resto) = depois_do_colchete
             .split_once(']')
@@ -336,7 +484,7 @@ pub fn separar(alvo: &str) -> Result<Alvo<'_>, ErroDeUri> {
             return Err(ErroDeUri::EnderecoInvalido);
         }
         let porta = if resto.is_empty() {
-            PORTA_PADRAO
+            padrao
         } else {
             resto
                 .strip_prefix(':')
@@ -366,7 +514,7 @@ pub fn separar(alvo: &str) -> Result<Alvo<'_>, ErroDeUri> {
         }
         None => Ok(Alvo {
             maquina: alvo,
-            porta: PORTA_PADRAO,
+            porta: padrao,
         }),
     }
 }
@@ -611,6 +759,96 @@ mod tests {
         let repetido = Convite::novo("192.168.0.30:8383")
             .com_alternativos(["192.168.0.30:8383", "192.168.0.30:8383"]);
         assert_eq!(repetido.candidatos().count(), 1);
+    }
+
+    #[test]
+    fn um_bilhete_de_encontro_vai_e_volta_com_as_duas_metades() {
+        // Duas metades e não uma: o endereço do ponto de encontro viaja no link
+        // justamente para que ele seja trocável, que é a condição sob a qual o
+        // ADR 0022 aceitou o degrau 4.
+        let bilhete = Bilhete::novo("encontro.exemplo:8384", "198.51.100.7:41234").expect("bom");
+        let original = Convite::novo("192.168.0.30:8383")
+            .com_alternativos(["198.51.100.7:8383"])
+            .com_bilhete(bilhete.clone())
+            .com_impressao_digital(FP);
+
+        let texto = original.to_string();
+        let lido = analisar(&texto).expect("o convite com bilhete não se lê de volta");
+        assert_eq!(lido, original, "o bilhete não voltou igual: {texto}");
+        assert_eq!(lido.bilhete, Some(bilhete));
+    }
+
+    #[test]
+    fn o_ponto_de_encontro_sem_porta_nao_herda_a_porta_do_dogma() {
+        // Os dois lados do bilhete são endereços e **não** são o mesmo serviço:
+        // 8383 é onde um Dogma atende, e um ponto de encontro atende noutra
+        // porta. Herdar a do Dogma mandaria o pedido para o lugar errado sem
+        // ninguém ter escrito nada errado.
+        let bilhete = Bilhete::novo("encontro.exemplo", "198.51.100.7:41234").expect("bom");
+        let ponto = bilhete.ponto().expect("separar o ponto");
+        assert_eq!(ponto.maquina, "encontro.exemplo");
+        assert_eq!(ponto.porta, crate::encontro::PORTA_PADRAO);
+        assert_ne!(ponto.porta, PORTA_PADRAO, "o ponto herdou a porta do Dogma");
+    }
+
+    #[test]
+    fn o_aviso_do_bilhete_e_um_endereco_e_nao_um_nome() {
+        // O `LEVE` do ponto de encontro carrega um `SocketAddr`, e ele vem
+        // daqui. Um nome deste lado seria um nome que alguém teria de resolver
+        // no meio do caminho — e o ponto de encontro não resolve nada.
+        let bilhete = Bilhete::novo("encontro.exemplo:8384", "[2001:db8::1]:41234").expect("bom");
+        assert_eq!(
+            bilhete.aviso().expect("ler o aviso"),
+            "[2001:db8::1]:41234".parse().expect("endereço de teste")
+        );
+
+        let com_nome = Bilhete::novo("encontro.exemplo:8384", "casa.exemplo:41234").expect("bom");
+        assert_eq!(com_nome.aviso(), Err(ErroDeUri::BilheteInvalido));
+    }
+
+    #[test]
+    fn um_bilhete_pela_metade_ou_torto_e_recusado() {
+        // As duas metades acabam num `send_to`. Um bilhete sem a barra, ou com
+        // um endereço que não é um, é recusado aqui e não lá adiante.
+        for ruim in [
+            "sobarra",
+            "/198.51.100.7:41234",
+            "encontro.exemplo:8384/",
+            "encontro.exemplo:8384/tem espaço:1",
+            "encontro.exemplo:8384/198.51.100.7|nc atacante 1",
+        ] {
+            assert!(
+                analisar(&format!("seele://192.168.0.30:8383?enc={ruim}")).is_err(),
+                "passou como bilhete: {ruim}"
+            );
+        }
+        // E um IPv6 cru continua dizendo o que fazer, também aqui.
+        assert_eq!(
+            analisar("seele://192.168.0.30:8383?enc=encontro.exemplo:8384/2001:db8::1"),
+            Err(ErroDeUri::EnderecoIpv6SemColchetes)
+        );
+    }
+
+    #[test]
+    fn um_cliente_que_nao_conhece_enc_perde_o_degrau_4_e_nada_mais() {
+        // Compatibilidade para frente, exercitada como a do `alt` foi: um
+        // cliente anterior a este campo cai na regra do parâmetro desconhecido.
+        // O que ele perde é o furo de NAT; o que ele mantém é a lista inteira de
+        // endereços e a impressão digital, que é exatamente o que ele tinha.
+        let texto = Convite::novo("192.168.0.30:8383")
+            .com_alternativos(["198.51.100.7:41234"])
+            .com_bilhete(Bilhete::novo("encontro.exemplo:8384", "198.51.100.7:41234").expect("bom"))
+            .com_impressao_digital(FP)
+            .to_string();
+
+        // O que o velho enxerga: o mesmo texto, com `enc` caindo na cláusula
+        // `_ => {}` do `analisar` dele.
+        let como_o_velho_veria = texto.replace("enc=", "seiladoque=");
+        let velho = analisar(&como_o_velho_veria).expect("o link novo derrubou o cliente velho");
+        assert_eq!(velho.alvo, "192.168.0.30:8383");
+        assert_eq!(velho.candidatos().count(), 2, "o velho perdeu endereços");
+        assert_eq!(velho.impressao_digital.as_deref(), Some(FP));
+        assert_eq!(velho.bilhete, None);
     }
 
     #[test]
