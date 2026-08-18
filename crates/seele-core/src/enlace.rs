@@ -1481,6 +1481,77 @@ mod tests {
         assert_eq!(motor.cage, None);
     }
 
+    #[tokio::test]
+    async fn o_aperto_de_mao_sai_da_mesma_porta_que_bateu_no_ponto_de_encontro() {
+        // O degrau 4 do ADR 0022 em uma asserção, e é **a** asserção: o NAT
+        // mapeia por porta interna, então o anfitrião fura o caminho para a
+        // porta de onde o aviso saiu. Se o aperto de mão sair de outra porta, o
+        // furo abre para a porta errada e a conexão continua batendo numa porta
+        // fechada — em quase todo roteador doméstico, que filtra por endereço
+        // **e** porta.
+        //
+        // Não precisa de NAT nenhum para ser provado: bastam dois sockets no
+        // loopback, um fazendo de ponto de encontro e outro fazendo de Dogma.
+        // Nenhum dos dois responde nada — o que se mede é de onde os pacotes
+        // saíram, e é isso que o outro lado usaria.
+        let ponto = tokio::net::UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("o loopback não abriu");
+        let dogma = tokio::net::UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("o loopback não abriu");
+        let onde_o_dogma_atende = dogma.local_addr().expect("endereço");
+
+        let bilhete = seele_proto::uri::Bilhete::novo(
+            ponto.local_addr().expect("endereço").to_string(),
+            "45.33.32.156:41234",
+        )
+        .expect("bilhete de teste");
+        let destino = Destino {
+            servidor: onde_o_dogma_atende,
+            nome_tls: "localhost".into(),
+            chave_do_pin: onde_o_dogma_atende.to_string(),
+            apelido: "piloto".into(),
+            segredo: None,
+            // Uma impressão digital de verdade: é dela que sai a marca do
+            // aviso, e sem ela não se bate em ponto de encontro nenhum.
+            impressao_esperada: Some(
+                "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9".to_owned(),
+            ),
+        };
+
+        // Ninguém atende do outro lado, então isto nunca volta com sucesso. O
+        // que interessa acontece nos primeiros milissegundos, e a tarefa é
+        // abandonada no fim.
+        let tentativa = tokio::spawn(Enlace::conectar_entre_com_bilhete(
+            vec![destino],
+            Some(bilhete),
+            SigningKey::from_bytes(&[7; 32]),
+            Arc::new(crate::tofu::MemoryPinStore::new()),
+        ));
+
+        let mut balde = [0_u8; 1500];
+        let prazo = Duration::from_secs(5);
+
+        let (_, de_quem_bateu) = tokio::time::timeout(prazo, ponto.recv_from(&mut balde))
+            .await
+            .expect("nada chegou ao ponto de encontro")
+            .expect("o ponto de encontro não leu");
+        let (_, de_quem_conecta) = tokio::time::timeout(prazo, dogma.recv_from(&mut balde))
+            .await
+            .expect("nada chegou ao Dogma")
+            .expect("o Dogma não leu");
+
+        tentativa.abort();
+
+        assert_eq!(
+            de_quem_bateu.port(),
+            de_quem_conecta.port(),
+            "o aviso saiu de {de_quem_bateu} e o aperto de mão de {de_quem_conecta}: o \
+             anfitrião furaria o caminho para uma porta que o QUIC não usa"
+        );
+    }
+
     #[test]
     fn dizer_nao_e_lembrado() {
         // Só estado é restaurado. Reenviar mensagens numa reconexão duplicaria
