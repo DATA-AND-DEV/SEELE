@@ -206,9 +206,15 @@ fn parse_args() -> Result<Option<Args>> {
 fn frase_do_alcance(alcance: &seele_server::alcance::Alcance) -> String {
     use seele_server::alcance::Degrau;
 
-    let motivo = alcance
-        .porta_recusada()
-        .map_or_else(String::new, |motivo| format!("\n{motivo}."));
+    // Os dois motivos, quando houve dois. O degrau 4 tentado e falhado é
+    // informação de quem hospeda: "o roteador não abriu **e** o ponto de
+    // encontro não respondeu" explica um link limitado melhor que qualquer uma
+    // das duas metades sozinha.
+    let motivo: String = [alcance.porta_recusada(), alcance.encontro_recusado()]
+        .into_iter()
+        .flatten()
+        .map(|motivo| format!("\n{motivo}."))
+        .collect();
 
     match alcance.degrau() {
         Degrau::PortaNoRoteador => {

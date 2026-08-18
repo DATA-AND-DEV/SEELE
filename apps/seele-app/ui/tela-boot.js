@@ -210,7 +210,7 @@ async function conectar(evento) {
  * `RedeLocalOuVpn` conta como perto: quem hospeda com uma VPN de navegação
  * ligada tem um endereço que parece alcançar o mundo e não aceita ninguém.
  */
-function mostrarAlcance(alcance, portaRecusada) {
+function mostrarAlcance(alcance, portaRecusada, encontroRecusado) {
   const onde = $("convite-alcance");
   const frase = fraseDeErro(alcance);
   const soPerto = alcance === "SoRedeLocal" || alcance === "RedeLocalOuVpn";
@@ -226,6 +226,17 @@ function mostrarAlcance(alcance, portaRecusada) {
     const detalhe = document.createElement("span");
     detalhe.className = "convite-alcance-detalhe";
     detalhe.textContent = `o roteador respondeu: ${portaRecusada}`;
+    onde.append(detalhe);
+  }
+
+  // E por que o degrau 4 não deu, quando ele chegou a ser tentado. Mesma
+  // discrição e mesmo motivo: numa casa em que nem o roteador abriu a porta nem
+  // o ponto de encontro respondeu, são **duas** informações, e quem for
+  // investigar precisa das duas.
+  if (encontroRecusado) {
+    const detalhe = document.createElement("span");
+    detalhe.className = "convite-alcance-detalhe";
+    detalhe.textContent = `o ponto de encontro: ${encontroRecusado}`;
     onde.append(detalhe);
   }
 
@@ -249,7 +260,11 @@ async function hospedar() {
     const anfitriao = await invoke("hospedar");
     $("campo-servidor").value = anfitriao.aqui;
     $("convite-link").value = anfitriao.convite;
-    mostrarAlcance(anfitriao.alcance, anfitriao.porta_recusada);
+    mostrarAlcance(
+      anfitriao.alcance,
+      anfitriao.porta_recusada,
+      anfitriao.encontro_recusado,
+    );
     $("convite").hidden = false;
     await conectar();
   } catch (falha) {

@@ -300,8 +300,8 @@ struct Anfitriao {
     ///
     /// Nome estável e não frase, igual a [`FalhaAoHospedar`] e pelo mesmo
     /// motivo: a frase mora no `FRASES` do JavaScript. Os nomes são
-    /// `PortaNoRoteador`, `Ipv6Direto` e `SoRedeLocal`, e os três já têm frase
-    /// escrita lá.
+    /// `PortaNoRoteador`, `FuroDeNat`, `Ipv6Direto`, `RedeLocalOuVpn` e
+    /// `SoRedeLocal`, e os cinco já têm frase escrita lá.
     ///
     /// Por que isto cruza a fronteira: um link que só funciona na rede de casa e
     /// um link que funciona pela internet **são o mesmo texto**. Sem este campo
@@ -317,6 +317,14 @@ struct Anfitriao {
     /// para a tela como detalhe secundário, embaixo da frase que o `alcance`
     /// escolheu.
     porta_recusada: Option<String>,
+    /// Por que o ponto de encontro não deu, quando ele chegou a ser tentado.
+    ///
+    /// Degrau 4 do ADR 0022, e o mesmo raciocínio do campo acima: é detalhe
+    /// secundário, e é o que explica a quem hospeda por que sobrou um link de
+    /// rede local numa casa em que o roteador também não abriu a porta. `None`
+    /// quando ninguém pediu ponto de encontro nenhum — desligá-lo é uma escolha,
+    /// não uma falha a explicar.
+    encontro_recusado: Option<String>,
 }
 
 /// Por que não deu para hospedar.
@@ -375,6 +383,8 @@ async fn hospedar(
         convite: dogma.convite(),
         alcance: alcance.map_or("SoRedeLocal", |alcance| alcance.degrau().nome()),
         porta_recusada: alcance.and_then(|alcance| alcance.porta_recusada().map(str::to_owned)),
+        encontro_recusado: alcance
+            .and_then(|alcance| alcance.encontro_recusado().map(str::to_owned)),
     };
 
     session
