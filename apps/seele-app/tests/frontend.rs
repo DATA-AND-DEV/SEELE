@@ -199,7 +199,30 @@ fn every_command_the_frontend_calls_is_registered() {
 /// between the person and the room they are renaming. Doing it badly now would
 /// cost more than the wait.
 ///
-const AGUARDANDO_TELA: &[&str] = &["renomear_cage", "renomear_linha"];
+/// The seven of ADR 0030 are here for one commit and no longer.
+///
+/// They are the Rust half of the doorkeeper — closing the Dogma with a password,
+/// minting an invite, switching the doorkeeper on, reading the queue, deciding a
+/// knock, and undoing a decision — and they landed before the layer that calls
+/// them so that each commit builds and passes on its own. The reason is not
+/// design hesitation: it is that the screen is the next commit, and a half-built
+/// window pushed alongside the commands would leave neither reviewable.
+///
+/// `nothing_waits_for_a_screen_that_already_draws_it` below is what collects on
+/// this. The moment `camada-portaria.js` calls one of them, it fails by name and
+/// says to take it out — which is the point of writing them down instead of
+/// deleting the check.
+const AGUARDANDO_TELA: &[&str] = &[
+    "renomear_cage",
+    "renomear_linha",
+    "estado_da_porta",
+    "definir_senha_do_dogma",
+    "criar_convite_do_dogma",
+    "ligar_portaria",
+    "pedidos_da_portaria",
+    "decidir_pedido",
+    "revogar_admissao",
+];
 
 #[test]
 fn no_command_is_registered_and_never_called() {

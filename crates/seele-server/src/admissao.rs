@@ -107,6 +107,22 @@ impl Politica {
         self.senha_hash.is_none() && !self.aceita_convites
     }
 
+    /// Se há senha do Dogma configurada.
+    ///
+    /// Para a tela de quem hospeda dizer **qual** camada está de pé, e não só se
+    /// a porta está aberta: «sem senha e sem convites» e «com senha» pedem
+    /// coisas diferentes de quem está olhando. O hash em si não sai daqui.
+    #[must_use]
+    pub fn tem_senha(&self) -> bool {
+        self.senha_hash.is_some()
+    }
+
+    /// Se existe pelo menos um convite emitido.
+    #[must_use]
+    pub fn aceita_convites(&self) -> bool {
+        self.aceita_convites
+    }
+
     /// Confere um segredo **sem gastar nada**.
     ///
     /// A metade que só olha. Devolve o [`Passe`] com o que ainda falta gastar
