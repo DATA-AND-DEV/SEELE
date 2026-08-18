@@ -118,4 +118,11 @@ Suavizada com média móvel exponencial (α ≈ 0,2) para não piscar. Faixas: �
   para v1; retransmissão seletiva continua fora de escopo. Ver
   `docs/adr/0010-fec-do-opus.md` e `03-audio.md`.
 - **[EM ABERTO]** Compressão do histórico de texto em transferências grandes.
-- **[EM ABERTO]** Limite de tamanho de mensagem e política de anexos (v1 tem anexos? provavelmente não).
+- ~~Limite de tamanho de mensagem e política de anexos~~ — **resolvido**: as
+  duas metades foram decididas separadamente, e uma delas mudou de resposta. O
+  teto de corpo é 4 KiB e continua sendo (`MAX_BODY_LEN`); "sem anexos em v1"
+  deixou de valer. **O Dogma guarda anexo, com teto total fixo, e ao encher o
+  mais velho sai** — 1 GiB por padrão, escolhido por quem hospeda com `seeled
+  anexos`. Cada transferência abre um fluxo QUIC unidirecional próprio e nunca
+  o de controle; a resposta volta pelo controle como razão enumerada. Ver
+  `docs/adr/0027-anexos-com-teto-e-o-mais-velho-sai.md`.

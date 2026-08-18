@@ -947,6 +947,142 @@
   background: none;
 }
 
+/* `ARQUIVO` ao lado de `ENVIAR`, e fantasma contra ele: escolher um arquivo é
+   preparar, e transmitir é o ato. Duas ações sólidas lado a lado deixariam a
+   fileira sem uma principal. */
+.compor-anexar {
+  min-height: 44px;
+  padding: 0 14px;
+  flex: 0 0 auto;
+  font-family: var(--seele-display);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  color: var(--seele-osso-apagado);
+  background: none;
+  border: 1px solid var(--seele-linha-forte);
+  cursor: pointer;
+}
+
+.compor-anexar:hover {
+  color: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
+}
+
+/* ---------- anexos (ADR 0027) ---------- */
+
+/* O arquivo escolhido, acima do campo e fora da conversa.
+
+   Fora dela porque enquanto sobe **não há mensagem**: o Dogma só publica quando
+   os bytes chegam inteiros, então não existe linha na Linha em que pendurar
+   isto. É a metade que o ADR paga de propósito, e desenhar uma mensagem
+   fantasma aqui seria desfazer a escolha. */
+.anexo-pendente {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+}
+
+.anexo-linha {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.anexo-nome {
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-dado);
+  color: var(--seele-osso);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.anexo-tamanho {
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-rotulo);
+  color: var(--seele-osso-apagado);
+  flex: 0 0 auto;
+}
+
+/* A barra por bytes. `appearance: none` porque o desenho nativo do
+   `<progress>` traz o azul do sistema, que não é cor deste produto. */
+.anexo-barra {
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border: none;
+  background: var(--seele-linha);
+}
+
+.anexo-barra::-webkit-progress-bar { background: var(--seele-linha); }
+.anexo-barra::-webkit-progress-value { background: var(--seele-laranja-nerv); }
+.anexo-barra::-moz-progress-bar { background: var(--seele-laranja-nerv); }
+
+/* O estado, e **é aqui que a queda aparece**. Osso apagado, não vermelho: o
+   vermelho é exclusivo de alerta e de queda de enlace neste produto, e uma
+   transferência que caiu é um contratempo de um arquivo, não a sessão indo
+   embora. Chamá-la de vermelha ensinaria a ignorar o vermelho. */
+.anexo-estado {
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-rotulo);
+  color: var(--seele-osso-apagado);
+  white-space: pre-line;
+}
+
+/* O bloco embaixo de uma mensagem que tem arquivo. */
+.anexo {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--seele-linha-forte);
+  background: var(--seele-negro-painel);
+}
+
+.anexo-arquivo {
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-dado);
+  color: var(--seele-osso);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+/* Expirado: a moldura tracejada é o que diz «houve um arquivo aqui e ele não
+   está mais», sem gastar cor. O nome e o tamanho continuam legíveis, porque é
+   exatamente isso que o Dogma guardou a linha para poder dizer. */
+.anexo-expirado {
+  border-style: dashed;
+  color: var(--seele-osso-apagado);
+}
+
+.anexo-expirado .anexo-arquivo { color: var(--seele-osso-apagado); }
+
+/* SALVAR, e nunca ABRIR. O ADR 0027 não dá a cliente nenhum do SEELE um botão
+   que abre arquivo, e esta é a única ação que este bloco oferece. */
+.anexo-salvar {
+  padding: 3px 10px;
+  font-family: var(--seele-display);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: var(--seele-osso-apagado);
+  background: none;
+  border: 1px solid var(--seele-linha-forte);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.anexo-salvar:hover {
+  color: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
+}
+
 /* ---------- coluna 4: Taxa de Sincronização ---------- */
 
 /* A cartela invertida. O inventário §12 endurece essa regra no v2: cabeçalho de

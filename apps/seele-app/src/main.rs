@@ -481,6 +481,138 @@ fn send_message(session: State<'_, Session>, line: u32, body: String) -> Result<
     session.plug()?.send_message(line, body)
 }
 
+// ---------------------------------------------------------------- anexos
+//
+// ADR 0027. Três comandos, e o que **não** existe entre eles é a decisão: não
+// há `abrir_anexo`. Nenhum cliente do SEELE abre arquivo, e este é o único
+// ponto do desenho em que dá para ser estrito — então ele é estrito. Salvar é
+// um ato de quem recebeu, num lugar que a pessoa escolheu, e o que acontece
+// depois é com ela e com o sistema operacional dela.
+
+/// O que se sabe de um arquivo antes de mandá-lo.
+#[derive(serde::Serialize)]
+struct ArquivoEscolhido {
+    /// O caminho nesta máquina. Nunca sai daqui: o Dogma guarda o blob sob o
+    /// hash do conteúdo, então nada deste caminho atravessa a rede.
+    caminho: String,
+    /// O nome que vai junto. **Não renomeado e sem extensão cortada** — o ADR
+    /// 0027 é explícito: renomear `.exe` para parecer inofensivo faz o arquivo
+    /// mentir, e mentir é a última coisa que ajuda aqui.
+    nome: String,
+    /// Quantos bytes.
+    tamanho: u64,
+    /// O tipo alegado, deduzido da extensão. **Alegação**, e é assim que ela
+    /// atravessa: ninguém decide o que decodificar só por causa disto.
+    tipo: String,
+}
+
+/// Lê nome, tamanho e tipo alegado de um arquivo que alguém escolheu.
+///
+/// Antes de mandar, para a tela poder mostrar o que vai e a pessoa poder
+/// desistir. O tamanho é o que faz a barra ser barra: ele é sempre conhecido —
+/// quem escolheu o arquivo sabe o tamanho dele —, então esta janela nunca
+/// mostra um travessão no lugar de um andamento.
+#[tauri::command]
+fn descrever_arquivo(caminho: String) -> Result<ArquivoEscolhido, PlugError> {
+    let alvo = std::path::PathBuf::from(&caminho);
+    let meta = std::fs::metadata(&alvo).map_err(|_| PlugError::NotConnected)?;
+    if !meta.is_file() {
+        return Err(PlugError::NotConnected);
+    }
+    let nome = alvo
+        .file_name()
+        .map(|nome| nome.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "arquivo".to_owned());
+    Ok(ArquivoEscolhido {
+        tipo: tipo_alegado(&nome),
+        caminho,
+        nome,
+        tamanho: meta.len(),
+    })
+}
+
+/// O tipo que a extensão sugere.
+///
+/// Uma **alegação**, e o único uso dela é registro: o Dogma a guarda como
+/// alegação e nenhuma tela deste app decide o que desenhar por causa dela. Não
+/// há lista de extensões proibidas, e não vai haver: o ADR 0027 explica por
+/// que uma lista dessas é pior que lista nenhuma — contorna-se com um
+/// `rename`, quebra mandar um build deste próprio projeto a um amigo, e faz o
+/// que passou parecer conferido.
+fn tipo_alegado(nome: &str) -> String {
+    let extensao = nome
+        .rsplit_once('.')
+        .map(|(_, fim)| fim.to_ascii_lowercase());
+    match extensao.as_deref() {
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("pdf") => "application/pdf",
+        Some("txt" | "md") => "text/plain",
+        Some("opus") => "audio/opus",
+        Some("mp3") => "audio/mpeg",
+        Some("wav") => "audio/wav",
+        Some("mp4") => "video/mp4",
+        _ => "application/octet-stream",
+    }
+    .to_owned()
+}
+
+/// Manda um arquivo, num fluxo só dele.
+///
+/// Devolve a chave de idempotência da mensagem, na hora, porque a tela precisa
+/// dela **agora**: é por ela que a barra encontra a própria subida entre os
+/// eventos que chegam, e é ela que torna uma retentativa segura em vez de uma
+/// segunda mensagem.
+///
+/// A mensagem só aparece na Linha quando os bytes chegam inteiros. Enquanto
+/// sobe, quem a vê é só quem enviou — o custo que o ADR 0027 aceita para que
+/// «ainda não chegou» e «expirou» nunca sejam duas ausências parecidas na
+/// mesma tela.
+#[tauri::command]
+fn enviar_anexo(
+    session: State<'_, Session>,
+    line: u32,
+    body: String,
+    caminho: String,
+    nome: String,
+    tipo: String,
+) -> Result<u64, PlugError> {
+    session
+        .plug()?
+        .send_attachment(line, body, caminho, nome, tipo)
+}
+
+/// Salva um anexo onde quem recebeu escolheu.
+///
+/// O arquivo é marcado com a quarentena do próprio sistema ao ser gravado —
+/// `com.apple.quarantine` no macOS, o fluxo `Zone.Identifier` no Windows —, que
+/// é o que faz o Gatekeeper e o SmartScreen pararem o arquivo na frente de quem
+/// for abri-lo. Não é antivírus: **este produto não varre vírus e não vai
+/// varrer.** É a guarda que o sistema já tem, e que só funciona se quem grava a
+/// acionar.
+#[tauri::command]
+fn salvar_anexo(session: State<'_, Session>, anexo: u64, destino: String) -> Result<(), PlugError> {
+    session.plug()?.save_attachment(anexo, destino)
+}
+
+/// Onde os arquivos salvos vão parar, por padrão.
+///
+/// A pasta de downloads do sistema. Escrita inteira na tela antes de qualquer
+/// botão de salvar, e essa é a parte que importa: sem um seletor de arquivos
+/// nativo — que custaria um crate novo numa árvore que o ADR 0026 acabou de
+/// contar — o lugar tem de estar **visível** em vez de suposto.
+#[tauri::command]
+fn pasta_de_downloads(app: AppHandle) -> String {
+    use tauri::Manager as _;
+    app.path()
+        .download_dir()
+        .or_else(|_| app.path().home_dir())
+        .map(|pasta| pasta.display().to_string())
+        .unwrap_or_default()
+}
+
 /// Pede ao Dogma que faça um Cage.
 ///
 /// Devolve assim que o pedido entra na fila, e **não** quando a sala existe.
@@ -1328,6 +1460,10 @@ fn main() {
             busca_limpar,
             procurar_atualizacao,
             instalar_atualizacao,
+            descrever_arquivo,
+            enviar_anexo,
+            salvar_anexo,
+            pasta_de_downloads,
         ])
         .run(tauri::generate_context!());
 

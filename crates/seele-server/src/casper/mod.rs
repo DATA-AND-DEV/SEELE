@@ -24,6 +24,7 @@
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 
+pub mod attachments;
 pub mod channels;
 pub mod messages;
 pub mod schema;
@@ -217,6 +218,111 @@ mod tests {
         assert!(!permissions("Observer").contains("Speak"));
         assert!(permissions("Observer").contains("ReadLine"));
         assert!(!permissions("Observer").contains("WriteLine"));
+    }
+
+    #[test]
+    fn the_three_roles_that_may_speak_may_also_attach_and_the_observer_is_denied() {
+        // ADR 0027 puts `AttachFile` on Commander, Operator and Pilot, and
+        // denies it on Observer **explicitly**. The difference between denying
+        // and omitting is the whole of "negadas vencem concedidas": an omission
+        // does nothing when the same person also holds Pilot.
+        let casper = memory();
+        let column = |role: &str, column: &str| -> String {
+            casper
+                .connection()
+                .query_row(
+                    &format!("SELECT {column} FROM roles WHERE name = ?1"),
+                    [role],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        for role in ["Commander", "Operator", "Pilot"] {
+            assert!(
+                column(role, "permissions").contains("AttachFile"),
+                "{role} may write and may not attach"
+            );
+        }
+        assert!(!column("Observer", "permissions").contains("AttachFile"));
+        assert!(
+            column("Observer", "denials").contains("AttachFile"),
+            "the Observer is merely missing the permission, so holding Pilot \
+             alongside would grant it back"
+        );
+    }
+
+    #[test]
+    fn a_dogma_that_predates_attachments_gets_the_permission_at_the_next_boot() {
+        // The upgrade path, which is the case that matters: the roles are JSON
+        // inside a column, so the thirteenth variant is free in the code and
+        // costs a migration in the database. Without this, nobody on a Dogma
+        // that already exists could ever send a file.
+        let directory = tempfile::tempdir().unwrap();
+        let file = Location::File(directory.path().join("dogma.db"));
+
+        {
+            let casper = Casper::open(&file).unwrap();
+            // Rewind to exactly what migration 1 left behind, and forget that
+            // migration 3 ever ran.
+            casper
+                .connection()
+                .execute_batch(
+                    "UPDATE roles SET permissions = replace(permissions, ',\"AttachFile\"', ''),
+                                      denials     = replace(denials,     ',\"AttachFile\"', '');
+                     DELETE FROM schema_version WHERE version = 3;
+                     DROP TABLE attachments;",
+                )
+                .unwrap();
+            assert!(!casper
+                .connection()
+                .query_row::<String, _, _>(
+                    "SELECT permissions FROM roles WHERE name = 'Pilot'",
+                    [],
+                    |row| row.get(0)
+                )
+                .unwrap()
+                .contains("AttachFile"));
+        }
+
+        let casper = Casper::open(&file).unwrap();
+        let pilot: String = casper
+            .connection()
+            .query_row(
+                "SELECT permissions FROM roles WHERE name = 'Pilot'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            pilot.contains("AttachFile"),
+            "the old Dogma was left behind"
+        );
+    }
+
+    #[test]
+    fn the_permission_is_not_added_twice_by_a_second_boot() {
+        // `migrate` skips applied versions, so this can only happen if somebody
+        // reruns the statement — but a migration that is not idempotent is a
+        // migration nobody may ever replay, and the guard is one clause.
+        let casper = memory();
+        casper
+            .connection()
+            .execute_batch(
+                schema::MIGRATIONS[2]
+                    .sql
+                    .rsplit_once("CREATE INDEX attachments_by_message ON attachments (message_id);")
+                    .map_or("", |(_, rest)| rest),
+            )
+            .unwrap();
+        let pilot: String = casper
+            .connection()
+            .query_row(
+                "SELECT permissions FROM roles WHERE name = 'Pilot'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(pilot.matches("AttachFile").count(), 1);
     }
 
     #[test]

@@ -429,6 +429,8 @@ pub struct Message {
     pub own: bool,
     /// Whether it has been edited since.
     pub edited: bool,
+    /// The file hanging off it, if any. ADR 0027.
+    pub attachment: Option<Attachment>,
 }
 
 /// One microphone this machine is offering.
@@ -674,6 +676,156 @@ pub enum Event {
         /// Why.
         reason: EndReason,
     },
+    /// A file moved, finished moving, or stopped moving. ADR 0027.
+    ///
+    /// Its own event and not folded into [`Self::MessagesChanged`]: while a
+    /// file is going up there is no message yet — the Dogma publishes it only
+    /// once the bytes have arrived whole — so there is nothing for a message
+    /// event to be about. What the screen has is a bar.
+    TransferChanged {
+        /// Where it is.
+        transfer: Transfer,
+    },
+}
+
+/// Where one file is on its way.
+///
+/// Enumerated, and the shell writes the sentence. The one that has to be
+/// written and cannot be inferred is [`Transfer::Fell`]: ADR 0027 has no
+/// resumption, so trying again starts from zero, and whoever is waiting has to
+/// be told rather than left to discover it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "kind")]
+pub enum Transfer {
+    /// Going up.
+    Sending {
+        /// The message's idempotency key, which is how a screen finds its own.
+        client_message_id: u64,
+        /// Bytes gone.
+        done: u64,
+        /// Bytes in total. **Always known** — whoever chose the file knows how
+        /// big it is — so this is always a bar and never a bar pretending to
+        /// measure something nobody measured.
+        total: u64,
+    },
+    /// Every byte went out. The message appears on the Line next.
+    Sent {
+        /// Which message.
+        client_message_id: u64,
+    },
+    /// The Dogma cut the stream: it refused. The reason is still travelling.
+    ///
+    /// Two variants for one refusal, and it is not a duplication: this one is
+    /// what the *sending* end observes — the stream stopped — and it arrives
+    /// first, because it is a fact about a socket. [`Self::RefusedBecause`] is
+    /// the reason, which comes back on the control stream as an enumerated
+    /// value. A screen that waited for the second would show nothing while the
+    /// first was already true.
+    Refused {
+        /// Which message.
+        client_message_id: u64,
+    },
+    /// The Dogma said **why** it refused.
+    RefusedBecause {
+        /// Which message.
+        client_message_id: u64,
+        /// The enumerated reason.
+        reason: AttachmentRefusal,
+    },
+    /// A file that was asked for is not coming, and why.
+    ///
+    /// The expected reason is [`AttachmentRefusal::Expired`]: the bytes were
+    /// evicted to keep the Dogma under its ceiling, the row survived, and this
+    /// is what turns that row into a sentence on somebody's screen.
+    Unavailable {
+        /// Which attachment.
+        attachment: u64,
+        /// The enumerated reason.
+        reason: AttachmentRefusal,
+    },
+    /// The link fell in the middle. **Trying again starts from zero.**
+    Fell {
+        /// Which message.
+        client_message_id: u64,
+    },
+    /// Coming down.
+    Receiving {
+        /// Which attachment.
+        attachment: u64,
+        /// Bytes arrived.
+        done: u64,
+        /// Bytes in total.
+        total: u64,
+    },
+    /// On the receiver's disk, where they chose.
+    Saved {
+        /// Which attachment.
+        attachment: u64,
+        /// Where it went.
+        path: String,
+    },
+    /// It did not save.
+    NotSaved {
+        /// Which attachment.
+        attachment: u64,
+    },
+}
+
+/// Why a Dogma would not take, or would not hand back, a file.
+///
+/// Mirrored here rather than re-exported from the wire, like every other
+/// enumeration that crosses this boundary: the shape a shell matches on is this
+/// crate's promise, and a variant renamed on the wire should break a build here
+/// rather than silently change what a screen writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum AttachmentRefusal {
+    /// The pilot lacks the permission to attach.
+    NotAllowed,
+    /// Larger than this Dogma's per-file limit.
+    TooLarge {
+        /// The largest file this Dogma accepts, in bytes. Carried because "too
+        /// big" with no number sends somebody to try again with a file that is
+        /// also too big.
+        limit: u64,
+    },
+    /// Every byte of the ceiling is held by transfers already under way.
+    NoRoom,
+    /// The stream ended before the declared number of bytes arrived.
+    SizeMismatch,
+    /// The bytes did not hash to what was declared.
+    HashDidNotMatch,
+    /// Bytes are going up faster than the budget allows.
+    RateLimited,
+    /// This Dogma is not storing attachments at all.
+    Unavailable,
+    /// No such attachment, or it is in a Line this pilot may not read.
+    NotFound,
+    /// The bytes were evicted to keep the Dogma under its ceiling.
+    Expired,
+    /// The header was not a header.
+    Malformed,
+}
+
+/// A file hanging off a message, as a screen sees it.
+///
+/// ADR 0027. Present **even when the bytes are gone**, which is the whole
+/// reason the Dogma keeps the row after deleting the blob: a message that had a
+/// picture and now draws as an empty line leaves nobody able to tell there had
+/// been one.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Attachment {
+    /// What to ask for when saving it.
+    pub id: u64,
+    /// The name the sender gave it.
+    pub file_name: String,
+    /// The type the sender claimed. **A claim**, and the shell treats it as one:
+    /// only a short list of image types is ever drawn, and everything else is a
+    /// name and a size with no preview and no way to open it.
+    pub declared_type: String,
+    /// How many bytes it was.
+    pub byte_size: u64,
+    /// Whether the bytes are still on the Dogma.
+    pub expired: bool,
 }
 
 /// Onde o enlace está.

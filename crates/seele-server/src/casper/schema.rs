@@ -194,6 +194,85 @@ pub const MIGRATIONS: &[Migration] = &[
             CREATE INDEX convites_por_prazo ON convites(expira_em) WHERE usado_em IS NULL;
         "#,
     },
+    Migration {
+        version: 3,
+        description: "attachments: rows that outlive their bytes (ADR 0027)",
+        sql: r#"
+            -- ADR 0027. The bytes live in `anexos/`, beside the database and
+            -- not inside it; this table is the index over them, and it is the
+            -- **truth**: a file missing from the directory reads exactly as an
+            -- expired one, which is a state the design already has.
+            CREATE TABLE attachments (
+                id            INTEGER PRIMARY KEY,
+                message_id    INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+                -- SHA-256 of the content, lowercase hex. This is also the file
+                -- name on disk: no byte anybody else chose ever reaches the
+                -- filesystem. Not UNIQUE — two pilots sending the same picture
+                -- get two rows and one blob, which is the whole of the
+                -- deduplication.
+                content_hash  TEXT    NOT NULL,
+                -- The name the sender gave it. A column, never a path.
+                file_name     TEXT    NOT NULL,
+                -- The type the sender claimed. A claim, not a fact: nothing
+                -- decides what to decode from this alone.
+                declared_type TEXT    NOT NULL,
+                byte_size     INTEGER NOT NULL,
+                created_at    INTEGER NOT NULL,
+                -- NULL while the bytes exist. Expiring stamps this and deletes
+                -- the blob; the row stays so the message can still say that a
+                -- file was here, with its name and its size. A row deleted
+                -- instead would render as a message with nothing in it, and
+                -- nobody would know there had been a file at all.
+                --
+                -- The consequence is written in the ADR and accepted: this
+                -- table never loses rows, only bytes, so it grows forever.
+                expired_at    INTEGER
+            ) STRICT;
+
+            -- Eviction asks one question — "which live attachment is the
+            -- oldest" — and asks it on the way in to every transfer.
+            CREATE INDEX attachments_oldest_live
+                ON attachments (created_at, id) WHERE expired_at IS NULL;
+            -- "How many live rows still point at these bytes." The answer is
+            -- what decides whether deleting a row may delete the blob.
+            CREATE INDEX attachments_by_hash ON attachments (content_hash);
+            -- Drawing a page of history joins this per message.
+            CREATE INDEX attachments_by_message ON attachments (message_id);
+
+            -- `Permission::AttachFile` is the thirteenth variant, and the
+            -- thirteenth variant is mechanical in the code and **not**
+            -- mechanical in the database: the seeded roles are JSON inside a
+            -- column, and a Dogma that already exists needs its rows brought
+            -- forward or nobody there may ever send a file.
+            --
+            -- Not folded into WriteLine. "May write" and "may put a gigabyte on
+            -- my laptop" are separate questions, and answering the second one
+            -- separately is most of the point of hosting for your own friends.
+            --
+            -- Written against the roles that still carry their seeded names
+            -- rather than against identifiers, and guarded by `NOT EXISTS`, so
+            -- that this is idempotent and so that a role somebody rebuilt by
+            -- hand is not overwritten by a migration.
+            UPDATE roles SET permissions = json_insert(permissions, '$[#]', 'AttachFile')
+             WHERE name IN ('Commander', 'Operator', 'Pilot')
+               AND NOT EXISTS (
+                   SELECT 1 FROM json_each(roles.permissions) WHERE value = 'AttachFile'
+               );
+
+            -- Denied on purpose, and not merely absent. Migration 1 wrote the
+            -- reason on the Observer's line and it holds here word for word:
+            -- an explicit denial is what makes granting Observer to somebody
+            -- who is also a Pilot take the ability away, instead of quietly
+            -- doing nothing. `specs/04-servidor-seele.md`: negadas vencem
+            -- concedidas — a sentence that is empty without a denial to win
+            -- with.
+            UPDATE roles SET denials = json_insert(denials, '$[#]', 'AttachFile')
+             WHERE name = 'Observer'
+               AND NOT EXISTS (
+                   SELECT 1 FROM json_each(roles.denials) WHERE value = 'AttachFile'
+               );
+        "#,
+    },
 ];
 
 #[cfg(test)]

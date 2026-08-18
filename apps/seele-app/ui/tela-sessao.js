@@ -666,6 +666,10 @@ function desenharMensagens() {
     const aceso = ocorrenciaAtual?.indice === indice ? ocorrenciaAtual.ordinal : null;
     corpo.append(...corpoComRealce(mensagem.body, casamentosPorMensagem.get(indice), aceso));
     conteudo.append(corpo);
+    // O arquivo, embaixo do texto. ADR 0027: o texto sobrevive ao arquivo, e é
+    // por isso que este bloco continua aparecendo depois de os bytes irem
+    // embora — com o nome, o tamanho, e a frase que diz o que houve.
+    if (mensagem.attachment) conteudo.append(blocoDeAnexo(mensagem.attachment));
 
     item.append(conteudo);
     return item;
@@ -972,7 +976,19 @@ async function enviar(evento) {
   evento.preventDefault();
   const campo = $("campo-mensagem");
   const corpo = campo.value.trim();
-  if (!corpo || linhaAberta === null) return;
+  if (linhaAberta === null) return;
+
+  // Com arquivo escolhido, o caminho é outro: o corpo viaja **junto** com o
+  // arquivo, num fluxo só deles, e a mensagem só aparece na Linha quando os
+  // bytes chegam inteiros. Um `send_message` separado publicaria o texto
+  // primeiro e deixaria a foto aparecendo minutos depois, sem nada dizendo que
+  // as duas coisas eram uma.
+  if (anexoPendente) {
+    campo.value = "";
+    await subirAnexo(corpo);
+    return;
+  }
+  if (!corpo) return;
 
   // Limpa antes de esperar a resposta: um campo que só esvazia depois do ida e
   // volta parece travado numa rede ruim, que é justo quando não pode parecer.
@@ -983,6 +999,242 @@ async function enviar(evento) {
     campo.value = corpo;
     console.warn("send_message:", falha);
   }
+}
+
+// ------------------------------------------------------------------ anexos
+//
+// ADR 0027. Três coisas moram aqui e nenhuma quarta: escolher um arquivo,
+// vê-lo subir, e salvar um que chegou. **Não há abrir.** Nenhum cliente do
+// SEELE abre arquivo, e é o único ponto deste desenho em que dá para ser
+// estrito — então ele é estrito.
+
+/** O arquivo escolhido e ainda não mandado, ou `null`. */
+let anexoPendente = null;
+
+/** A chave da mensagem cuja subida está em andamento, ou `null`. */
+let subindo = null;
+
+/** Onde os arquivos salvos vão, escrito por extenso antes de qualquer botão. */
+let pastaDeDestino = "";
+
+/**
+ * Guarda um arquivo para ir junto da próxima mensagem.
+ *
+ * O tamanho vem junto porque é ele que faz a barra ser barra: o total aqui é
+ * **sempre** conhecido — quem escolheu o arquivo sabe o tamanho dele —, então
+ * esta tela nunca mostra um travessão no lugar de um andamento. É a metade da
+ * regra do ADR 0026 que este caminho nunca precisa da outra.
+ */
+async function escolherAnexo(caminho) {
+  try {
+    anexoPendente = await invoke("descrever_arquivo", { caminho });
+  } catch (falha) {
+    console.warn("descrever_arquivo:", falha);
+    anunciar("NÃO CONSEGUI LER ESSE ARQUIVO");
+    return;
+  }
+  $("anexo-nome").textContent = anexoPendente.nome;
+  $("anexo-tamanho").textContent = emBytes(anexoPendente.tamanho);
+  $("anexo-barra").hidden = true;
+  $("anexo-estado").textContent = "";
+  $("anexo-pendente").hidden = false;
+  $("campo-mensagem").focus();
+}
+
+/** Desiste do arquivo escolhido. Nada foi mandado, então nada é desfeito. */
+function tirarAnexo() {
+  anexoPendente = null;
+  subindo = null;
+  $("anexo-pendente").hidden = true;
+  $("anexo-barra").hidden = true;
+  $("anexo-estado").textContent = "";
+}
+
+/**
+ * Manda o arquivo escolhido, com o que estiver escrito no campo.
+ *
+ * A chave de idempotência volta na hora e é guardada aqui: é por ela que o
+ * andamento que chega encontra esta subida, e é ela que torna uma retentativa
+ * segura em vez de uma segunda mensagem.
+ */
+async function subirAnexo(corpo) {
+  const arquivo = anexoPendente;
+  if (!arquivo) return;
+  $("anexo-barra").hidden = false;
+  $("anexo-barra").value = 0;
+  $("anexo-estado").textContent = "SUBINDO";
+  try {
+    subindo = await invoke("enviar_anexo", {
+      line: linhaAberta,
+      body: corpo,
+      caminho: arquivo.caminho,
+      nome: arquivo.nome,
+      tipo: arquivo.tipo,
+    });
+  } catch (falha) {
+    console.warn("enviar_anexo:", falha);
+    $("anexo-estado").textContent = TRANSFERENCIAS.Fell;
+  }
+}
+
+/**
+ * Redesenha o andamento de uma transferência.
+ *
+ * **A queda tem frase própria e ela diz que recomeça do zero.** O ADR 0027 não
+ * tem retomada, e uma barra que simplesmente voltasse ao começo deixaria isso
+ * para a pessoa descobrir — que é a diferença entre um produto que avisa e um
+ * que surpreende.
+ */
+function transferenciaAndou(transfer) {
+  if (!transfer || typeof transfer !== "object") return;
+  const tipo = transfer.kind;
+
+  if (tipo === "Sending") {
+    if (transfer.client_message_id !== subindo) return;
+    $("anexo-barra").hidden = false;
+    $("anexo-barra").max = transfer.total || 1;
+    $("anexo-barra").value = transfer.done;
+    const porcento = transfer.total
+      ? Math.floor((transfer.done * 100) / transfer.total)
+      : 0;
+    $("anexo-estado").textContent = `SUBINDO ${porcento}%`;
+    return;
+  }
+
+  if (tipo === "Sent") {
+    if (transfer.client_message_id !== subindo) return;
+    // O arquivo saiu inteiro. A mensagem aparece na Linha em seguida, pelo
+    // caminho de sempre — o Dogma publica quando os bytes chegam, e é o
+    // `MessagesChanged` que a desenha.
+    tirarAnexo();
+    anunciar(TRANSFERENCIAS.Sent);
+    return;
+  }
+
+  if (tipo === "Refused" || tipo === "Fell") {
+    if (transfer.client_message_id !== subindo) return;
+    $("anexo-barra").hidden = true;
+    // `Refused` deixa a frase para o aviso que vem pelo controle, que é o que
+    // sabe **por que**; `Fell` não tem aviso nenhum a caminho, então a frase é
+    // aqui ou em lugar nenhum.
+    $("anexo-estado").textContent =
+      tipo === "Fell" ? TRANSFERENCIAS.Fell : TRANSFERENCIAS.Refused;
+    anunciar($("anexo-estado").textContent);
+    subindo = null;
+    return;
+  }
+
+  // A razão, que veio pelo controle. Chega depois do `Refused` acima, e é essa
+  // ordem que faz a tela dizer «recusado» na hora e **por que** um instante
+  // depois, em vez de ficar calada até a segunda metade chegar.
+  if (tipo === "RefusedBecause") {
+    if (transfer.client_message_id !== subindo) return;
+    $("anexo-barra").hidden = true;
+    $("anexo-estado").textContent = fraseDeAnexo(transfer.reason);
+    anunciar($("anexo-estado").textContent);
+    subindo = null;
+    return;
+  }
+
+  // Um arquivo pedido que não vem. O motivo esperado é `Expired`, e é assim que
+  // «este arquivo expirou» chega a uma tela que já estava desenhada quando os
+  // bytes saíram do Dogma.
+  if (tipo === "Unavailable") {
+    const alvo = document.querySelector(
+      `[data-anexo-estado="${transfer.attachment}"]`,
+    );
+    const frase = fraseDeAnexo(transfer.reason);
+    if (alvo) alvo.textContent = frase;
+    anunciar(frase);
+    return;
+  }
+
+  if (tipo === "Receiving") {
+    const alvo = document.querySelector(
+      `[data-anexo-estado="${transfer.attachment}"]`,
+    );
+    if (!alvo) return;
+    const porcento = transfer.total
+      ? Math.floor((transfer.done * 100) / transfer.total)
+      : 0;
+    alvo.textContent = `SALVANDO ${porcento}%`;
+    return;
+  }
+
+  if (tipo === "Saved" || tipo === "NotSaved") {
+    const alvo = document.querySelector(
+      `[data-anexo-estado="${transfer.attachment}"]`,
+    );
+    const frase =
+      tipo === "Saved"
+        ? `${TRANSFERENCIAS.Saved} — ${transfer.path}`
+        : TRANSFERENCIAS.NotSaved;
+    if (alvo) alvo.textContent = frase;
+    anunciar(frase);
+  }
+}
+
+/**
+ * O bloco que uma mensagem com arquivo ganha embaixo do corpo.
+ *
+ * Nome, tamanho, e um dos dois desfechos. **Nenhuma prévia**, e a ausência é
+ * escolhida: o ADR 0027 só deixa desenhar imagem embutida quando os **bytes**
+ * concordam com o tipo alegado, e conferir isso exige baixá-los e olhar os
+ * primeiros deles. Enquanto essa conferência não existir, todo anexo é o outro
+ * ramo da regra — um arquivo com nome e tamanho —, que é o lado seguro: nada
+ * aqui manda bytes de ninguém para um decodificador.
+ *
+ * E **não há botão de abrir**, em nenhum ramo. Salvar é o único verbo, e o que
+ * a pessoa faz com o arquivo depois é com ela e com o sistema dela.
+ */
+function blocoDeAnexo(anexo) {
+  const bloco = elemento("span", "anexo");
+  const nome = elemento("span", "anexo-arquivo", anexo.file_name);
+  bloco.append(glifo("anexo", ""), nome);
+  bloco.append(elemento("span", "anexo-tamanho", emBytes(anexo.byte_size)));
+
+  const estado = elemento("span", "anexo-estado");
+  estado.dataset.anexoEstado = String(anexo.id);
+  if (anexo.expired) {
+    // O ADR guarda a linha depois de apagar os bytes exatamente para esta
+    // frase existir. Sem ela, uma mensagem que teve foto viraria uma mensagem
+    // com nada, e ninguém saberia que houve uma.
+    estado.textContent = "ESTE ARQUIVO EXPIROU";
+    bloco.classList.add("anexo-expirado");
+  } else {
+    const salvar = elemento("button", "anexo-salvar", "SALVAR");
+    salvar.type = "button";
+    salvar.dataset.anexoSalvar = String(anexo.id);
+    salvar.dataset.anexoNome = anexo.file_name;
+    salvar.title = pastaDeDestino
+      ? `salvar em ${pastaDeDestino}`
+      : "salvar em disco";
+    bloco.append(salvar);
+  }
+  bloco.append(estado);
+  return bloco;
+}
+
+/**
+ * Salva um anexo, com a consequência dita antes do ato.
+ *
+ * A frase de consequência é onde esta janela cumpre a parte do ADR 0027 que
+ * ninguém pode descobrir depois: **quem hospeda o Dogma pôde ler este
+ * arquivo**, e o SEELE não varre vírus. As duas coisas são verdade e as duas
+ * têm de estar escritas antes de a pessoa apertar, não numa página de ajuda.
+ */
+function salvarAnexo(anexo, nome) {
+  const destino = pastaDeDestino ? `${pastaDeDestino}/${nome}` : nome;
+  armarAto(
+    "SALVAR EM DISCO",
+    `Grava «${nome}» em ${destino}.\n` +
+      "O SEELE não confere se este arquivo é seguro: ele não varre vírus e não " +
+      "vai varrer. Ele confere só que o arquivo chegou inteiro. O arquivo é " +
+      "marcado com a quarentena do sistema ao ser gravado, e é o seu sistema " +
+      "operacional que vai parar você na frente dele se for o caso.\n" +
+      "Nenhuma tela do SEELE abre este arquivo. Abrir é um ato seu, fora daqui.",
+    () => invoke("salvar_anexo", { anexo, destino }),
+  );
 }
 
 /**
@@ -1211,6 +1463,36 @@ $("busca-anterior").addEventListener("click", async () =>
 $("botao-buscar").addEventListener("click", () => alternarBusca());
 $("busca-fechar").addEventListener("click", () => alternarBusca(false));
 $("form-mensagem").addEventListener("submit", enviar);
+
+// Arrastar é como se escolhe um arquivo. Não há seletor nativo, e a ausência é
+// uma decisão: um seletor custaria um crate a mais na árvore, e o ADR 0027
+// fecha dizendo que nenhuma dependência nova entra por causa de anexos. O
+// botão ARQUIVO existe para ensinar isto — descoberta por acaso não é
+// descoberta — e o `title` dele diz a mesma frase por extenso.
+listen("tauri://drag-drop", (evento) => {
+  const caminhos = evento?.payload?.paths;
+  if (!Array.isArray(caminhos) || caminhos.length === 0) return;
+  if ($("tela-sessao").hidden || linhaAberta === null) return;
+  // Um por vez, e o primeiro. Uma mensagem carrega um arquivo — o ADR 0027 dá
+  // ao anexo uma linha por mensagem —, e pegar cinco calado deixaria quatro
+  // deles sumindo sem explicação.
+  if (caminhos.length > 1) anunciar("UM ARQUIVO POR MENSAGEM; PEGUEI O PRIMEIRO");
+  escolherAnexo(caminhos[0]);
+});
+$("anexo-tirar").addEventListener("click", tirarAnexo);
+$("botao-anexar").addEventListener("click", () => {
+  anunciar("ARRASTE UM ARQUIVO PARA A CONVERSA PARA ANEXÁ-LO");
+});
+$("lista-mensagens").addEventListener("click", (evento) => {
+  const botao = evento.target.closest("button[data-anexo-salvar]");
+  if (!botao) return;
+  salvarAnexo(Number(botao.dataset.anexoSalvar), botao.dataset.anexoNome);
+});
+invoke("pasta_de_downloads")
+  .then((pasta) => {
+    pastaDeDestino = pasta;
+  })
+  .catch((falha) => console.warn("pasta_de_downloads:", falha));
 // Duas listas, um manipulador: os Cages e as Linhas ganharam cabeçalhos
 // próprios (`B·03` e `B·04`) e deixaram de caber numa lista só.
 $("lista-cages").addEventListener("click", alternarCanal);
@@ -1389,6 +1671,14 @@ listen("seele://event", (evento) => {
   //
   // Só com uma busca de pé, e só neste evento: refazer a busca a cada tique de
   // telemetria seria uma volta de IPC por nada, duas vezes por segundo.
+  // O andamento de um arquivo. Não passa por `atualizar()`: enquanto sobe não
+  // existe mensagem nenhuma na Linha — o Dogma só publica quando os bytes
+  // chegam inteiros —, então não há snapshot que carregue esta informação.
+  if (payload && typeof payload === "object" && payload.TransferChanged) {
+    transferenciaAndou(payload.TransferChanged.transfer);
+    return;
+  }
+
   if (payload === "MessagesChanged" && buscaAtiva()) {
     soltarCasamentos();
     atualizar()

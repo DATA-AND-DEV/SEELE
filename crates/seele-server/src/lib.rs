@@ -41,6 +41,7 @@ pub mod melchior;
 pub mod session;
 pub mod taxa;
 pub mod tls;
+pub mod transfer;
 
 /// Length of an Ed25519 public key, in bytes.
 pub const PUBLIC_KEY_LEN: usize = seele_proto::control::PUBLIC_KEY_LEN;
@@ -75,6 +76,20 @@ pub struct DogmaConfig {
     pub observers: Vec<String>,
     /// Where CASPER keeps the database.
     pub database: crate::casper::Location,
+    /// Where the attachment blobs live. ADR 0027.
+    ///
+    /// `None` derives it: `anexos/` beside the database file. Beside it, and
+    /// **not inside it** — a blob in SQLite frees pages without shrinking the
+    /// file, so the worst case on disk would become the historical high-water
+    /// mark rather than the ceiling, which is the one property this whole
+    /// decision was taken for.
+    ///
+    /// Nothing to derive from means no attachments: a Dogma in memory has no
+    /// directory to own, and the honest answer to a transfer is
+    /// `AttachmentRefusal::Unavailable` rather than a folder appearing in
+    /// whatever directory the process happened to start in. Tests that want
+    /// attachments say where.
+    pub anexos: Option<std::path::PathBuf>,
 }
 
 impl Default for DogmaConfig {
@@ -90,7 +105,27 @@ impl Default for DogmaConfig {
             cage_limit: 15,
             observers: Vec::new(),
             database: crate::casper::Location::Memory,
+            anexos: None,
         }
+    }
+}
+
+/// Where the blobs go, given where the database is.
+///
+/// `anexos/` beside `seele.db`. A database with no file — the in-memory one
+/// tests use — has nowhere to put them, and says so instead of guessing.
+#[must_use]
+pub fn diretorio_de_anexos(config: &DogmaConfig) -> Option<std::path::PathBuf> {
+    if let Some(escolhido) = &config.anexos {
+        return Some(escolhido.clone());
+    }
+    match &config.database {
+        casper::Location::File(path) => Some(
+            path.parent()
+                .unwrap_or_else(|| std::path::Path::new("."))
+                .join("anexos"),
+        ),
+        casper::Location::Memory => None,
     }
 }
 
@@ -254,6 +289,17 @@ impl Server {
         .with_context(|| format!("could not bind {}", config.listen))?;
         tracing::info!(?pilha, escuta = %endpoint.local_addr()?, "o Dogma está atendendo");
 
+        // Before the mutex, because opening it sweeps the directory against the
+        // table and both are still ours alone at this point. ADR 0027 wants the
+        // ceiling standing before the first connection, not after.
+        let anexos = match diretorio_de_anexos(&config) {
+            Some(root) => Some(Arc::new(transfer::Vault::open(root, &casper)?)),
+            None => {
+                tracing::info!("anexos: sem diretório, este Dogma não guarda arquivo");
+                None
+            }
+        };
+
         let casper = Arc::new(tokio::sync::Mutex::new(casper));
 
         let (events, _) = tokio::sync::broadcast::channel(1024);
@@ -266,6 +312,7 @@ impl Server {
             occupancy: Arc::new(tokio::sync::Mutex::new(dogma::Occupancy::default())),
             portaria: Arc::new(tokio::sync::Mutex::new(taxa::Portaria::nova())),
             atrasos: Arc::new(dogma::Atrasos::default()),
+            anexos,
         });
 
         // Held seats have to be released even if nobody reconnects, or a Dogma

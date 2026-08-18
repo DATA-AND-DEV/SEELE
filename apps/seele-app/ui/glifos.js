@@ -203,6 +203,26 @@ const GLIFOS = {
     ["circle", { cx: "5.2", cy: "5.2", r: "2.6", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],
     ["path", { d: "M7 7l5.4 5.4M10.2 10.2l-1.6 1.6M12.4 12.4l-1.6 1.6", stroke: "currentColor", "stroke-width": "1.3", fill: "none" }],
   ],
+
+  // ▤ — um arquivo pendurado numa mensagem. ADR 0027. Uma folha com o canto
+  // dobrado, e não um clipe de papel: o clipe é o desenho de «anexar», que é um
+  // verbo, e o que este glifo marca é um substantivo — o arquivo que está ali.
+  // O canto dobrado é o que distingue uma folha de um retângulo qualquer.
+  anexo: [
+    [
+      "path",
+      {
+        d: "M4 2.5h5l3 3v8h-8Z",
+        fill: "none",
+        stroke: "currentColor",
+        "stroke-width": "1.3",
+      },
+    ],
+    [
+      "path",
+      { d: "M9 2.5v3h3", fill: "none", stroke: "currentColor", "stroke-width": "1.3" },
+    ],
+  ],
 };
 
 /**

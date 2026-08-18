@@ -4324,3 +4324,409 @@ fn the_nat_punching_rung_promises_nothing_it_cannot_keep_and_names_its_cost() {
          off:\n{frase}"
     );
 }
+
+// ---------------------------------------------------------------- anexos
+//
+// ADR 0027. Every check below reads the source **with the comments stripped**
+// and scoped to one function's body, and that is not fussiness: this file has
+// been fooled seven times in one day by an assertion satisfied by prose — a
+// sentence in a doc comment, or a string in a `console.warn` sitting beside the
+// `invoke` that had been deleted. A guard that a comment can satisfy guards a
+// comment.
+
+/// One JavaScript function's body, comments removed.
+///
+/// Braces are counted rather than split on, because every one of these bodies
+/// contains nested blocks and object literals. Reading to the first `\n}` would
+/// stop at the first `if`.
+fn js_function(source: &str, signature: &str) -> String {
+    let source = without_comments(source);
+    let Some(at) = source.find(signature) else {
+        panic!("`{signature}` is gone from the screen that had it");
+    };
+    let after = &source[at + signature.len()..];
+    let Some(open) = after.find('{') else {
+        panic!("`{signature}` has no body");
+    };
+    let mut depth = 0_i32;
+    for (index, character) in after[open..].char_indices() {
+        match character {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return after[open..=open + index].to_owned();
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("unterminated `{signature}`");
+}
+
+#[test]
+fn a_file_goes_on_its_own_path_and_never_through_send_message() {
+    // ADR 0027: the body travels **with** the file, on the transfer's own
+    // stream, and the message is published only once the bytes have arrived
+    // whole. A separate `send_message` would put the text on the Line first and
+    // let the picture turn up minutes later with nothing saying the two were
+    // one thing.
+    let corpo = js_function(&read("ui/tela-sessao.js"), "async function enviar(");
+    assert!(
+        corpo.contains("subirAnexo("),
+        "sending no longer takes the attachment path at all: {corpo}"
+    );
+    let subir = js_function(&read("ui/tela-sessao.js"), "async function subirAnexo(");
+    assert!(
+        subir.contains("invoke(\"enviar_anexo\""),
+        "`subirAnexo` no longer calls `enviar_anexo`, so nothing sends a file"
+    );
+    assert!(
+        !subir.contains("send_message"),
+        "the file path also posts the text separately, which publishes the \
+         message before the file exists"
+    );
+}
+
+#[test]
+fn the_bar_measures_bytes_and_never_pretends() {
+    // ADR 0026 fixed the shape and ADR 0027 inherits the easy half of it: here
+    // the total is **always** known, because whoever chose the file knows how
+    // big it is. So this path is always a bar with a percentage, and there is no
+    // branch in it that falls back to a dash.
+    let andou = js_function(&read("ui/tela-sessao.js"), "function transferenciaAndou(");
+    assert!(
+        andou.contains("anexo-barra") && andou.contains("transfer.done"),
+        "the progress bar is no longer driven by bytes: {andou}"
+    );
+    assert!(
+        andou.contains("100) / transfer.total") || andou.contains("* 100"),
+        "the bar no longer computes a percentage from the real total"
+    );
+
+    // And the element really is a `<progress>` with a value, not a decorative
+    // div somebody widens.
+    let pagina = without_comments(&read("ui/index.html"));
+    assert!(
+        pagina.contains("<progress id=\"anexo-barra\""),
+        "the upload bar stopped being a `<progress>`"
+    );
+}
+
+#[test]
+fn a_transfer_that_falls_says_that_trying_again_starts_from_zero() {
+    // The sentence ADR 0027 requires and that nothing else in this product has
+    // ever had to say: **there is no resumption.** A bar that simply returned to
+    // the start would leave that for the person to work out, which is the
+    // difference between a product that warns and one that surprises.
+    let frases = without_comments(&read("ui/frases.js"));
+    let Some(bloco) = frases
+        .split("const TRANSFERENCIAS = {")
+        .nth(1)
+        .and_then(|resto| resto.split("\n};").next())
+    else {
+        panic!("`TRANSFERENCIAS` is gone from ui/frases.js");
+    };
+    assert!(
+        bloco.contains("Fell:"),
+        "a fallen transfer has no sentence, so it is a bar that stopped"
+    );
+    // Everything from `Fell:` to the next key. Not the first line after it: the
+    // sentence is several lines of concatenated string, and reading one line
+    // would let the half that matters live outside what is asserted about.
+    let depois = bloco.split("Fell:").nth(1).unwrap_or_default();
+    let caiu: String = depois
+        .lines()
+        .take_while(|line| {
+            let trimmed = line.trim_start();
+            !(line.starts_with("  ")
+                && trimmed.split(':').next().is_some_and(|word| {
+                    !word.is_empty() && word.chars().all(char::is_alphanumeric)
+                })
+                && trimmed.contains(':'))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        caiu.contains("do começo") || caiu.contains("inteiro outra vez"),
+        "the sentence for a fallen transfer does not say that trying again \
+         starts from zero: {caiu}"
+    );
+
+    // And the screen reaches for it on `Fell` and not on `Refused`: a refusal
+    // has an explanation already travelling on the control stream, and a fall
+    // has nothing coming ever.
+    let andou = js_function(&read("ui/tela-sessao.js"), "function transferenciaAndou(");
+    assert!(
+        andou.contains("TRANSFERENCIAS.Fell"),
+        "nothing on the screen writes the sentence for a fallen transfer"
+    );
+}
+
+#[test]
+fn every_refusal_the_dogma_can_send_has_a_sentence() {
+    // A refusal reaching somebody as the word FALHA is a refusal that teaches
+    // nothing. Read against the enum itself, so a variant added on the wire
+    // without a sentence fails here rather than in front of a person.
+    let control = read("../../crates/seele-proto/src/control.rs");
+    let Some(enumeracao) = control
+        .split("pub enum AttachmentRefusal {")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}").next())
+    else {
+        panic!("`AttachmentRefusal` is gone from the protocol");
+    };
+    let variantes: Vec<String> = without_comments(enumeracao)
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.ends_with(',') || line.ends_with('{'))
+        .filter_map(|line| {
+            let name = line.trim_end_matches([',', ' ', '{']);
+            name.chars()
+                .next()
+                .filter(char::is_ascii_uppercase)
+                .map(|_| name.to_owned())
+        })
+        .collect();
+    assert!(
+        variantes.len() >= 8,
+        "the variant list came back too short to be the enum: {variantes:?}"
+    );
+
+    let frases = without_comments(&read("ui/frases.js"));
+    let Some(bloco) = frases
+        .split("const ANEXOS = {")
+        .nth(1)
+        .and_then(|resto| resto.split("\n};").next())
+    else {
+        panic!("`ANEXOS` is gone from ui/frases.js");
+    };
+    for variante in &variantes {
+        assert!(
+            bloco.contains(&format!("{variante}:")),
+            "the Dogma can refuse with `{variante}` and `ANEXOS` has no \
+             sentence for it"
+        );
+    }
+
+    // The one that carries a number carries it into the sentence: "too big"
+    // with no number sends somebody to try again with a file that is also too
+    // big.
+    let frase = js_function(&read("ui/frases.js"), "function fraseDeAnexo(");
+    assert!(
+        frase.contains("limit"),
+        "the sentence for a file that is too large never mentions the limit"
+    );
+}
+
+#[test]
+fn no_screen_of_this_product_opens_a_file() {
+    // The one point of ADR 0027 where it is possible to be strict, and it is
+    // strict. Guarding for the absence of a thing, so it is read against the
+    // whole frontend rather than one function: an "open" button added anywhere
+    // is the failure.
+    let mut fonte = String::new();
+    for name in ui_files(".js") {
+        fonte.push_str(&without_comments(&read(&format!("ui/{name}"))));
+    }
+    fonte.push_str(&without_comments(&read("ui/index.html")));
+
+    for proibido in ["abrir_anexo", "openPath", "shell.open", "revealItemInDir"] {
+        assert!(
+            !fonte.contains(proibido),
+            "the frontend reaches for `{proibido}`: no client of the SEELE opens \
+             a file, and this is the only place in the whole design where being \
+             strict is possible"
+        );
+    }
+
+    // And the block a message draws offers exactly one verb.
+    let bloco = js_function(&read("ui/tela-sessao.js"), "function blocoDeAnexo(");
+    assert!(
+        bloco.contains("anexo-salvar"),
+        "an attachment offers no way to save it: {bloco}"
+    );
+    assert!(
+        !bloco.to_lowercase().contains("abrir"),
+        "the attachment block offers something other than saving: {bloco}"
+    );
+}
+
+#[test]
+fn saving_says_out_loud_what_this_product_does_not_promise() {
+    // ADR 0027 has two things nobody may discover afterwards: **whoever hosts
+    // the Dogma could read this file**, and **the SEELE does not scan for
+    // viruses**. Both are true, and both belong in front of the person before
+    // they press, not on a help page.
+    let salvar = js_function(&read("ui/tela-sessao.js"), "function salvarAnexo(");
+    assert!(
+        salvar.contains("armarAto("),
+        "saving skips the confirmation every consequential act goes through"
+    );
+    assert!(
+        salvar.contains("não varre vírus"),
+        "the confirmation does not say that this product does not scan for \
+         viruses, which is the thing it must not let anybody assume: {salvar}"
+    );
+    assert!(
+        salvar.contains("quarentena"),
+        "the confirmation does not mention the quarantine mark, which is the \
+         one concrete guard this product can point at"
+    );
+    assert!(
+        salvar.contains("chegou inteiro"),
+        "the confirmation does not separate the question that has an answer \
+         from the one that does not"
+    );
+    // And it says where the file lands, because there is no native chooser and
+    // therefore no dialog to read the destination off.
+    assert!(
+        salvar.contains("destino"),
+        "the confirmation does not say where the file will be written"
+    );
+}
+
+#[test]
+fn there_is_no_blocklist_of_extensions_anywhere_in_the_frontend() {
+    // ADR 0027 refuses one on purpose, and refusing it is a decision that has to
+    // survive somebody adding one "just to be safe": a list is worked around
+    // with a `rename`, it breaks sending a friend a build of this very project,
+    // and — worse than both — it makes whatever got through look checked.
+    let mut fonte = String::new();
+    for name in ui_files(".js") {
+        fonte.push_str(&without_comments(&read(&format!("ui/{name}"))));
+    }
+    fonte.push_str(&without_comments(&read("src/main.rs")));
+
+    for suspeito in [".exe\"", ".bat\"", ".scr\"", ".cmd\"", ".ps1\""] {
+        assert!(
+            !fonte.contains(suspeito),
+            "something in the shell names `{suspeito}`, which is how a blocklist \
+             of extensions starts — and ADR 0027 explains why one is worse than \
+             none"
+        );
+    }
+}
+
+#[test]
+fn a_message_whose_file_expired_still_says_what_the_file_was() {
+    // The whole reason the Dogma keeps the attachment row after deleting the
+    // bytes. Without this the message renders as a message with nothing in it,
+    // and nobody learns there was ever a file.
+    let bloco = js_function(&read("ui/tela-sessao.js"), "function blocoDeAnexo(");
+    assert!(
+        bloco.contains("EXPIROU"),
+        "an expired attachment says nothing, so it is indistinguishable from a \
+         message that never had one: {bloco}"
+    );
+    assert!(
+        bloco.contains("anexo.file_name") && bloco.contains("anexo.byte_size"),
+        "the name and the size are not drawn, so the sentence has nothing to be \
+         about"
+    );
+    // The name and the size are drawn **before** the branch, so they survive it.
+    let antes = bloco.split("anexo.expired").next().unwrap_or_default();
+    assert!(
+        antes.contains("anexo.file_name"),
+        "the name is only drawn on the branch where the bytes are still there"
+    );
+}
+
+#[test]
+fn the_enumerated_reason_reaches_the_screen_and_is_not_only_carried() {
+    // `ANEXOS` having a sentence for every variant is half of it. The half that
+    // has been forgotten in this repository before is the other one: a
+    // dictionary nobody looks up. `AttachmentRefusal` crossed the wire, reached
+    // `Room`, reached the bridge — and if no screen called `fraseDeAnexo`, every
+    // one of those sentences would be dead text.
+    let sessao = read("ui/tela-sessao.js");
+    let andou = js_function(&sessao, "function transferenciaAndou(");
+    assert!(
+        andou.contains("fraseDeAnexo("),
+        "no screen turns the refusal into a sentence, so `ANEXOS` is a \
+         dictionary nobody looks up: {andou}"
+    );
+    assert!(
+        andou.contains("RefusedBecause") && andou.contains("Unavailable"),
+        "the screen handles neither of the two shapes the reason arrives in"
+    );
+
+    // And the bridge really emits them, rather than collecting them in a queue
+    // that nothing drains.
+    let ponte = without_comments(&read("../../crates/seele-ffi/src/lib.rs"));
+    assert!(
+        ponte.contains("drain_transfers()"),
+        "the bridge collects the reasons and never hands them on"
+    );
+    assert!(
+        ponte.contains("Transfer::RefusedBecause") && ponte.contains("Transfer::Unavailable"),
+        "the bridge has no way to carry an enumerated refusal to a shell"
+    );
+}
+
+#[test]
+fn the_bridge_maps_every_refusal_the_wire_can_carry() {
+    // Mirrored rather than re-exported, so this is where the two lists can
+    // drift. A variant added on the wire and forgotten here would compile —
+    // `refusal_of` matches exhaustively, so it would not — but a variant added
+    // to the bridge and never produced would be a sentence nobody can reach.
+    let control = read("../../crates/seele-proto/src/control.rs");
+    let Some(enumeracao) = control
+        .split("pub enum AttachmentRefusal {")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}").next())
+    else {
+        panic!("`AttachmentRefusal` is gone from the protocol");
+    };
+    let ponte = without_comments(&read("../../crates/seele-ffi/src/types.rs"));
+    let Some(espelho) = ponte
+        .split("pub enum AttachmentRefusal {")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}").next())
+    else {
+        panic!("the bridge no longer mirrors `AttachmentRefusal`");
+    };
+
+    for line in without_comments(enumeracao).lines() {
+        let line = line.trim();
+        let name = line.trim_end_matches([',', ' ', '{']);
+        if name.is_empty() || !name.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+            continue;
+        }
+        assert!(
+            espelho.contains(name),
+            "the wire can refuse with `{name}` and the bridge has no variant \
+             for it, so it would reach a shell as nothing"
+        );
+    }
+}
+
+#[test]
+fn the_name_travels_as_it_was_and_the_type_is_carried_as_a_claim() {
+    // ADR 0027: **não renomeia, não corta extensão.** Renaming an `.exe` to
+    // look harmless makes the file lie, and lying is the last thing that helps
+    // here. The declared type is registered as a claim and nothing downstream
+    // decides what to decode from it alone.
+    let main = without_comments(&read("src/main.rs"));
+    let descrever = body_of(&main, "fn descrever_arquivo(caminho: String)");
+    for suspeito in ["trim_end_matches", "replace(", "sanitiz", "strip_suffix"] {
+        assert!(
+            !descrever.contains(suspeito),
+            "`descrever_arquivo` reaches for `{suspeito}`: the name a person \
+             gave a file has to travel as it is"
+        );
+    }
+    assert!(
+        descrever.contains("file_name()"),
+        "the name is no longer read off the path as it stands: {descrever}"
+    );
+
+    // And the type really is derived from the extension and used for nothing
+    // but the record — the whole reason it is called a claim.
+    let tipo = body_of(&main, "fn tipo_alegado(nome: &str) -> String");
+    assert!(
+        tipo.contains("application/octet-stream"),
+        "an unknown extension no longer falls back to «bytes», which is the \
+         only honest answer when nothing is known: {tipo}"
+    );
+}

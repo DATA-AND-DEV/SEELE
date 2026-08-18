@@ -48,9 +48,9 @@ use seele_core::{
 };
 
 pub use types::{
-    Cage, CageSync, CaptureDevice, EndReason, Event, Line, LineWeight, LinkState, Message, Notice,
-    NoticeReason, Pattern, Pilot, PlaybackDevice, PlugError, Severity, Snapshot, SyncBand as Band,
-    Telemetry, Trust, VoiceMode,
+    Attachment, AttachmentRefusal, Cage, CageSync, CaptureDevice, EndReason, Event, Line,
+    LineWeight, LinkState, Message, Notice, NoticeReason, Pattern, Pilot, PlaybackDevice,
+    PlugError, Severity, Snapshot, SyncBand as Band, Telemetry, Transfer, Trust, VoiceMode,
 };
 
 /// O que a casca gráfica precisa do core além de um [`Plug`] vivo.
@@ -236,6 +236,16 @@ enum Command {
         line: LineId,
         answer: tokio::sync::oneshot::Sender<LineWeight>,
     },
+    /// A file, on a stream of its own. ADR 0027.
+    ///
+    /// Boxed because it is much larger than every other variant here, and an
+    /// enum is as big as its largest arm — a path, three strings and two ids on
+    /// every queued keystroke would be paid by all of them.
+    Attach(Box<seele_core::enlace::Anexo>),
+    SaveAttachment {
+        attachment: seele_core::AttachmentId,
+        destination: std::path::PathBuf,
+    },
     Shutdown,
 }
 
@@ -354,6 +364,35 @@ impl Shared {
     /// esperando para sempre: o remetente é largado quando a tarefa do enlace
     /// termina, e um `oneshot` largado acorda quem espera com erro — que é como
     /// esta ponte já diz "não há sessão".
+    /// Takes the transfer reasons the room collected, and empties the queue.
+    ///
+    /// Drained rather than read: two transfers can be in the air at once, and
+    /// the second one failing must not erase the reason the first one did. The
+    /// `Room` keeps them in order and this hands them on in order.
+    fn drain_transfers(&self) -> Vec<Transfer> {
+        let Ok(mut room) = self.room.lock() else {
+            return Vec::new();
+        };
+        room.transfers
+            .drain(..)
+            .map(|aviso| match aviso {
+                seele_core::TransferNotice::Refused {
+                    client_message_id,
+                    reason,
+                } => Transfer::RefusedBecause {
+                    client_message_id: client_message_id.get(),
+                    reason: refusal_of(reason),
+                },
+                seele_core::TransferNotice::Unavailable { attachment, reason } => {
+                    Transfer::Unavailable {
+                        attachment: attachment.get(),
+                        reason: refusal_of(reason),
+                    }
+                }
+            })
+            .collect()
+    }
+
     fn answer_weight(&self, weight: LineWeight) {
         let Ok(mut pending) = self.pending_weights.lock() else {
             return;
@@ -518,6 +557,61 @@ impl Plug {
     /// [`PlugError::NotConnected`] once the session is over.
     pub fn open_line(&self, line: u32) -> Result<(), PlugError> {
         self.command(Command::OpenLine(LineId(line)))
+    }
+
+    /// Sends a file, on a stream of its own. ADR 0027.
+    ///
+    /// Asks, and does not wait: the bar comes back as
+    /// [`Event::TransferChanged`], and the message appears on the Line only
+    /// once the bytes have arrived whole. While it is going up, the only person
+    /// who can see it is the sender — the cost ADR 0027 takes on purpose, so
+    /// that "not arrived yet" and "expired" are never two similar absences on
+    /// the same screen.
+    ///
+    /// `declared_type` is a **claim**, passed through as one.
+    ///
+    /// # Errors
+    ///
+    /// [`PlugError::NotConnected`] once the session is over.
+    pub fn send_attachment(
+        &self,
+        line: u32,
+        body: String,
+        path: String,
+        file_name: String,
+        declared_type: String,
+    ) -> Result<u64, PlugError> {
+        // The key is taken here rather than on the queue, unlike `Send`: the
+        // shell needs it **now**, to hang a bar on. Nothing else about a
+        // message has ever had to be known before it was sent.
+        let id = next_client_message_id();
+        self.command(Command::Attach(Box::new(seele_core::enlace::Anexo {
+            linha: LineId(line),
+            id: ClientMessageId(id),
+            corpo: body,
+            caminho: std::path::PathBuf::from(path),
+            nome: file_name,
+            tipo: declared_type,
+        })))?;
+        Ok(id)
+    }
+
+    /// Saves an attachment where the person receiving it chose.
+    ///
+    /// **Where they chose, and nowhere else.** ADR 0027 gives no client of the
+    /// SEELE a button that opens a file: saving is an act of the person who
+    /// received it, in a place they picked. The file is marked with the
+    /// operating system's own quarantine on the way down — which is not
+    /// antivirus, and this product does not have one.
+    ///
+    /// # Errors
+    ///
+    /// [`PlugError::NotConnected`] once the session is over.
+    pub fn save_attachment(&self, attachment: u64, destination: String) -> Result<(), PlugError> {
+        self.command(Command::SaveAttachment {
+            attachment: seele_core::AttachmentId(attachment),
+            destination: std::path::PathBuf::from(destination),
+        })
     }
 
     /// Says something in a Line.
@@ -1178,8 +1272,73 @@ fn messages_of(room: &Room) -> Vec<Message> {
             body: message.body.clone(),
             own: message.own,
             edited: message.edited,
+            attachment: message.attachment.as_ref().map(|anexo| Attachment {
+                id: anexo.id.get(),
+                file_name: anexo.file_name.clone(),
+                declared_type: anexo.declared_type.clone(),
+                byte_size: anexo.byte_size,
+                // Flattened to a boolean, and it is the whole state: the wire
+                // enum has two variants and a third would be a state the design
+                // does not have. ADR 0027 argues for exactly two — "this file
+                // has not arrived yet" was deliberately never made a state, so
+                // that it could not be confused with this one.
+                expired: anexo.state == seele_core::AttachmentState::Expired,
+            }),
         })
         .collect()
+}
+
+/// Maps a wire refusal onto this crate's own.
+fn refusal_of(reason: seele_core::AttachmentRefusal) -> AttachmentRefusal {
+    match reason {
+        seele_core::AttachmentRefusal::NotAllowed => AttachmentRefusal::NotAllowed,
+        seele_core::AttachmentRefusal::TooLarge { limit } => AttachmentRefusal::TooLarge { limit },
+        seele_core::AttachmentRefusal::NoRoom => AttachmentRefusal::NoRoom,
+        seele_core::AttachmentRefusal::SizeMismatch => AttachmentRefusal::SizeMismatch,
+        seele_core::AttachmentRefusal::HashDidNotMatch => AttachmentRefusal::HashDidNotMatch,
+        seele_core::AttachmentRefusal::RateLimited => AttachmentRefusal::RateLimited,
+        seele_core::AttachmentRefusal::Unavailable => AttachmentRefusal::Unavailable,
+        seele_core::AttachmentRefusal::NotFound => AttachmentRefusal::NotFound,
+        seele_core::AttachmentRefusal::Expired => AttachmentRefusal::Expired,
+        seele_core::AttachmentRefusal::Malformed => AttachmentRefusal::Malformed,
+    }
+}
+
+/// Turns one step of a transfer into what a shell draws.
+fn transfer_of(estado: &seele_core::enlace::Transferencia) -> Transfer {
+    use seele_core::enlace::Transferencia;
+    match estado {
+        Transferencia::Subindo { id, feito, total } => Transfer::Sending {
+            client_message_id: id.get(),
+            done: *feito,
+            total: *total,
+        },
+        Transferencia::Subiu { id } => Transfer::Sent {
+            client_message_id: id.get(),
+        },
+        Transferencia::Recusada { id } => Transfer::Refused {
+            client_message_id: id.get(),
+        },
+        Transferencia::Caiu { id } => Transfer::Fell {
+            client_message_id: id.get(),
+        },
+        Transferencia::Baixando {
+            anexo,
+            feito,
+            total,
+        } => Transfer::Receiving {
+            attachment: anexo.get(),
+            done: *feito,
+            total: *total,
+        },
+        Transferencia::Salvo { anexo, caminho } => Transfer::Saved {
+            attachment: anexo.get(),
+            path: caminho.display().to_string(),
+        },
+        Transferencia::NaoSalvou { anexo } => Transfer::NotSaved {
+            attachment: anexo.get(),
+        },
+    }
 }
 
 fn pattern_byte(pattern: Pattern) -> u8 {
@@ -1378,6 +1537,18 @@ async fn drive(
                             });
                         }
                         fold(&shared, &message);
+                        // A razão de uma recusa, que o `Room` guardou ao dobrar
+                        // a mensagem. Drenada em vez de lida: duas
+                        // transferências podem estar no ar, e a segunda falhar
+                        // não pode apagar o motivo da primeira.
+                        for aviso in shared.drain_transfers() {
+                            shared.notify(&Event::TransferChanged { transfer: aviso });
+                        }
+                    }
+                    seele_core::enlace::Aviso::Transferencia(estado) => {
+                        shared.notify(&Event::TransferChanged {
+                            transfer: transfer_of(&estado),
+                        });
                     }
                     // Cair não encerra: começa a bateria interna, e a casca
                     // esmaece em vez de fechar.
@@ -1629,6 +1800,19 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
                 .await
                 .is_err()
             {
+                return false;
+            }
+        }
+        Command::Attach(anexo) => {
+            if client.anexar(*anexo).await.is_err() {
+                return false;
+            }
+        }
+        Command::SaveAttachment {
+            attachment,
+            destination,
+        } => {
+            if client.salvar_anexo(attachment, destination).await.is_err() {
                 return false;
             }
         }

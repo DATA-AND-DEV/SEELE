@@ -1,7 +1,26 @@
 # ADR 0027 — Anexos: o Dogma guarda, com teto, e o mais velho sai
 
-**Estado:** proposto
+**Estado:** aceito
 **Data:** 2026-08-17
+**Construído:** 2026-08-17
+
+Tudo o que este documento decide está de pé. Duas coisas que ele descreve **não
+foram construídas**, e ficam aqui em vez de ficarem por descobrir:
+
+- **A prévia embutida de imagem.** A regra escrita abaixo — desenhar só uma
+  lista curta de tipos de imagem, e só quando os bytes concordam com a alegação
+  — exige baixar os bytes e olhar os primeiros deles antes de escolher um
+  decodificador. Enquanto essa conferência não existir, **todo** anexo é o outro
+  ramo da mesma regra: um arquivo com nome e tamanho, sem prévia. É o lado
+  seguro, e não é o lado completo.
+- **Um seletor de arquivos nativo.** Escolher um arquivo no app é arrastá-lo
+  para a conversa, e salvar grava na pasta de downloads do sistema, escrita por
+  extenso na confirmação. Um seletor nativo custaria um crate a mais na árvore,
+  e a lista de consequências abaixo diz que nenhuma dependência nova entra por
+  causa disto.
+
+As quatro coisas de «o que fica sem saída» continuam sem saída, e nenhuma delas
+foi tocada.
 
 ## Contexto
 

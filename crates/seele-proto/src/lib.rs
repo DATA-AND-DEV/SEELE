@@ -22,6 +22,7 @@
     allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)
 )]
 
+pub mod attachment;
 pub mod control;
 pub mod encontro;
 pub mod ids;

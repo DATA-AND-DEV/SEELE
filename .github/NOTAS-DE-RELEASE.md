@@ -152,6 +152,43 @@ código-fonte, que é a coisa que este produto foi feito para permitir. Veja
 
 ---
 
+## Mandar arquivo, e o que isso significa
+
+Dá para mandar imagem, áudio e arquivo. Duas coisas sobre isso, e as duas
+precisam ser lidas antes da primeira foto — não depois.
+
+**Uma foto mandada num Dogma é uma foto no notebook de alguém, e quem hospeda
+pode vê-la.** Não é um defeito nem uma brecha: é como este produto funciona. Os
+arquivos ficam numa pasta `anexos/` ao lado do banco de dados, em claro, na
+máquina de quem hospeda. Em trânsito continua tudo cifrado, e no disco de quem
+hospeda continua legível. Quem entra num Dogma tem de saber disso.
+
+**O SEELE não varre vírus, e não vai varrer.** Ele responde a uma pergunta só
+sobre um arquivo — *chegou inteiro?* — e é a mesma primeira pergunta desta
+página, com a mesma resposta: a soma confere. As outras duas perguntas — de onde
+veio, e se é bom — ele não responde sobre um arquivo que alguém mandou, porque
+não há workflow nenhum que tenha produzido a foto de outra pessoa. **Não há
+lista de extensões proibidas**, de propósito: uma lista é contornada com um
+`rename`, quebra mandar a um amigo um build deste próprio projeto, e faz o que
+passou parecer conferido — que é pior que não conferir nada.
+
+O que ele faz: nenhuma tela do SEELE abre arquivo, em nenhum sistema. Salvar é
+um ato seu, num lugar que você escolheu, e o arquivo é marcado com a quarentena
+do próprio sistema ao ser gravado — a mesma marca que o navegador põe, e a que
+faz o Gatekeeper e o SmartScreen pararem o arquivo na sua frente. Reentregar um
+arquivo entre amigos aqui é como entregar um pendrive na mão, com a mesma
+quantidade de conferência.
+
+**Quem hospeda escolhe quanto disco isso pode ocupar.** O padrão é 1 GiB, e o
+Dogma nunca passa disso: ao encher, o anexo mais antigo sai e a mensagem passa a
+dizer que o arquivo expirou — o texto fica. Para mudar:
+
+```sh
+./seeled anexos 2G
+```
+
+---
+
 ## Como testar rápido
 
 Numa máquina:

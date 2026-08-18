@@ -788,6 +788,15 @@ async fn sessao(
                             .await;
                         }
                     }
+                    // O terminal não manda arquivo — não há seletor de
+                    // arquivos numa tela de texto, e inventar um caminho
+                    // digitado à mão seria outra tela. Ele **desenha** o que
+                    // chega: `view::project` põe o anexo na linha da mensagem,
+                    // com o nome, o tamanho e a palavra que diz se o arquivo
+                    // ainda está lá. Então não há transferência própria para
+                    // acompanhar, e este ramo existe para dizer isso em vez de
+                    // deixar um `_ =>` engolir uma variante nova amanhã.
+                    Aviso::Transferencia(_) => {}
                     // A queda não encerra nada. `specs/07-tema-evangelion.md`:
                     // a interface esmaece e continua legível, a contagem desce,
                     // e o histórico fica ali para leitura.

@@ -36,7 +36,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{CageId, ClientMessageId, LineId, MessageId, PilotId, RoleId, SessionId, Ssrc};
+use crate::ids::{
+    AttachmentId, CageId, ClientMessageId, LineId, MessageId, PilotId, RoleId, SessionId, Ssrc,
+};
 use crate::version::PROTOCOL_VERSION;
 
 /// Largest control frame this build will accept, including the version byte.
@@ -75,6 +77,98 @@ pub const MAX_CAGE_LIMIT: u16 = 250;
 
 /// Longest operator-supplied alert text, in bytes.
 pub const MAX_ALERT_TEXT_LEN: usize = 512;
+
+/// Longest sender-chosen file name, in bytes.
+///
+/// The name never reaches the filesystem — ADR 0027 stores a blob under the
+/// SHA-256 of its own content — so this bounds what a shell has to draw rather
+/// than what a path may hold. Long enough for anything a camera or a phone
+/// produces, short enough that no shell has to decide where to cut one off.
+pub const MAX_FILE_NAME_LEN: usize = 255;
+
+/// Longest declared content type, in bytes.
+///
+/// A claim, not a fact. `image/png` is ten bytes; the slack is for parameters
+/// nobody here reads.
+pub const MAX_DECLARED_TYPE_LEN: usize = 128;
+
+/// Whether an attachment's bytes are still there.
+///
+/// Enumerated, and not a sentence: ADR 0027 makes expiry a state the shell
+/// presents however it presents every other enumerated reason. The row survives
+/// the bytes precisely so this can be said at all — a message whose attachment
+/// row had been deleted would draw as a message with nothing in it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AttachmentState {
+    /// The bytes are on the Dogma and may be fetched.
+    Available,
+    /// The bytes were evicted to keep the Dogma under its ceiling.
+    ///
+    /// The name and the size are still here, which is the point.
+    Expired,
+}
+
+/// A file hanging off a message, as a client sees it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttachmentInfo {
+    /// What to ask for when downloading.
+    pub id: AttachmentId,
+    /// The name the sender gave it.
+    pub file_name: String,
+    /// The type the sender claimed.
+    ///
+    /// **A claim.** ADR 0027: only a short list of image types is ever drawn
+    /// inline, and only when the bytes agree with the claim. Everything else is
+    /// a file with a name and a size. This is not about trusting the file; it
+    /// is about which decoder the bytes go to.
+    pub declared_type: String,
+    /// How many bytes it was.
+    pub byte_size: u64,
+    /// Whether the bytes are still there.
+    pub state: AttachmentState,
+}
+
+/// Why a Dogma would not take, or would not hand back, a file.
+///
+/// Every one of these is a refusal somebody is waiting on, so each says
+/// something a shell can turn into a different sentence. A single
+/// "attachment failed" would leave a person retrying a file that will never fit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AttachmentRefusal {
+    /// The pilot lacks [`Permission::AttachFile`].
+    NotAllowed,
+    /// Larger than this Dogma's per-file limit.
+    ///
+    /// Carries the limit, because "too big" without a number sends somebody to
+    /// try again with a file that is also too big.
+    TooLarge {
+        /// The largest file this Dogma accepts, in bytes.
+        limit: u64,
+    },
+    /// Every byte of the ceiling is held by transfers already under way.
+    ///
+    /// Distinct from [`Self::TooLarge`]: this one passes if it is tried again
+    /// in a moment, and the other never will.
+    NoRoom,
+    /// The stream ended before the declared number of bytes arrived, or carried
+    /// more.
+    SizeMismatch,
+    /// The bytes did not hash to what the header declared.
+    ///
+    /// The one question ADR 0027 says a Dogma can answer about a file: did it
+    /// arrive whole. It says nothing about whether the file is good.
+    HashDidNotMatch,
+    /// The pilot is sending bytes faster than their budget.
+    RateLimited,
+    /// This Dogma is not storing attachments at all.
+    Unavailable,
+    /// No such attachment, or it belongs to a Line this pilot may not read.
+    NotFound,
+    /// The bytes were evicted to keep the Dogma under its ceiling.
+    Expired,
+    /// The header was not a header, or a field was outside its bounds.
+    Malformed,
+}
 
 /// Length of an Ed25519 public key, in bytes. ADR 0004.
 pub const PUBLIC_KEY_LEN: usize = 32;
@@ -184,6 +278,26 @@ pub enum Permission {
     ManageRoles,
     /// Everything else about the Dogma.
     AdministerDogma,
+
+    /// Put a file on the Dogma's disk. ADR 0027.
+    ///
+    /// **Not folded into [`Self::WriteLine`].** "May write" and "may put a
+    /// gigabyte on my laptop" are different questions, and the point of hosting
+    /// for your own friends is being able to answer the second one separately.
+    /// The permission is what the ceiling cannot do: the ceiling bounds the
+    /// disk, and nothing bounds *whose* history gets pushed out of it — so the
+    /// only real lever over that is deciding who may push.
+    ///
+    /// Appended last, for the reason [`AlertReason::RateLimited`] gives: a build
+    /// one protocol version older refuses the frame rather than reading this as
+    /// a permission it already understands.
+    ///
+    /// Migration 3 seeds it on Commander, Operator and Pilot, and **denies it
+    /// explicitly on Observer** rather than merely leaving it out — the schema
+    /// already writes why on the Observer's line: denying on purpose makes
+    /// granting Observer to somebody who is also a Pilot *silence* them,
+    /// instead of quietly doing nothing.
+    AttachFile,
 }
 
 /// A role and the permissions it carries.
@@ -707,6 +821,30 @@ pub enum ClientMessage {
         /// Which Line.
         line: LineId,
     },
+
+    // ---- attachments ----
+    //
+    // Appended last, for the reason [`AlertReason::RateLimited`] gives.
+    //
+    // Only one verb, and that is the shape of ADR 0027: **sending** a file does
+    // not cross the control stream at all. It opens its own unidirectional
+    // stream, because twenty megabytes on the ordered control stream stop every
+    // presence event and every line of text behind them. What comes back here
+    // is the answer.
+    /// Asks for an attachment's bytes.
+    ///
+    /// The Dogma opens a unidirectional stream back and writes an
+    /// `attachment::AttachmentDelivery` followed by the file. When it will not,
+    /// it answers [`ServerMessage::AttachmentUnavailable`] here, with an
+    /// enumerated reason — which is how «this file expired» reaches a screen at
+    /// all.
+    ///
+    /// Needs [`Permission::ReadLine`] and nothing more: a file hanging off a
+    /// message somebody may read is part of that message.
+    FetchAttachment {
+        /// Which attachment.
+        attachment: AttachmentId,
+    },
 }
 
 /// Server to client.
@@ -812,6 +950,19 @@ pub enum ServerMessage {
         /// Echo of the sender's identifier, so a client can match its own
         /// pending send instead of showing it twice.
         client_message_id: Option<ClientMessageId>,
+        /// The file hanging off it, if any. ADR 0027.
+        ///
+        /// Carried with the message rather than fetched per message, for the
+        /// reason `author_nickname` is: a client reading history would
+        /// otherwise need one round trip per line to find out whether there is
+        /// a file at all.
+        ///
+        /// **The text survives the file.** When the bytes have been evicted
+        /// this is still `Some`, with the name, the size, and
+        /// [`AttachmentState::Expired`] — which is the entire reason the row
+        /// outlives the blob. A `None` here would draw as a message with
+        /// nothing in it and nobody would learn a file had been there.
+        attachment: Option<AttachmentInfo>,
     },
     /// A message was edited.
     MessageEdited {
@@ -953,6 +1104,39 @@ pub enum ServerMessage {
         /// sentence has no date to give and must say something else instead.
         oldest_at_seconds: Option<i64>,
     },
+
+    // ---- attachments ----
+    //
+    // Appended last, for the reason [`AlertReason::RateLimited`] gives.
+    //
+    // Neither of these carries bytes. A file goes on its own unidirectional
+    // stream in both directions; what crosses control is the **reason**, which
+    // is where `specs/02-protocolo.md` says every reason already lives.
+    /// A transfer was not taken, and why.
+    ///
+    /// Sent only to the pilot who was sending, and nothing is published: no
+    /// half message, and no message pointing at a file that does not exist.
+    /// Keyed by `client_message_id` rather than by anything the server assigned,
+    /// because at the moment of refusal the server has assigned nothing — the
+    /// sender's own key is the only name the two ends share.
+    AttachmentRefused {
+        /// Which of the sender's messages this was.
+        client_message_id: ClientMessageId,
+        /// Why. Enumerated, so the shell writes a different sentence for a file
+        /// that will never fit and one that would fit in a minute.
+        reason: AttachmentRefusal,
+    },
+    /// A file that was asked for is not coming.
+    ///
+    /// The expected case is [`AttachmentRefusal::Expired`]: the bytes were
+    /// evicted to keep the Dogma under its ceiling, the row survived, and this
+    /// is what turns that row into a sentence on somebody's screen.
+    AttachmentUnavailable {
+        /// Which attachment.
+        attachment: AttachmentId,
+        /// Why.
+        reason: AttachmentRefusal,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -1018,6 +1202,19 @@ pub trait Validate {
 }
 
 fn check(field: &'static str, len: usize, limit: usize) -> Result<(), ControlError> {
+    check_bounds(field, len, limit)
+}
+
+/// Refuses a field longer than its documented limit.
+///
+/// Public because [`crate::attachment`] validates the header of a transfer with
+/// the same rules, on a different stream. One implementation rather than two
+/// that drift.
+///
+/// # Errors
+///
+/// Returns [`ControlError::FieldTooLong`] when `len` exceeds `limit`.
+pub fn check_bounds(field: &'static str, len: usize, limit: usize) -> Result<(), ControlError> {
     if len > limit {
         return Err(ControlError::FieldTooLong { field, len, limit });
     }
@@ -1140,7 +1337,8 @@ impl Validate for ClientMessage {
             | Self::MovePilot { .. }
             | Self::DeleteCage { .. }
             | Self::DeleteLine { .. }
-            | Self::WeighLine { .. } => Ok(()),
+            | Self::WeighLine { .. }
+            | Self::FetchAttachment { .. } => Ok(()),
         }
     }
 }
@@ -1176,9 +1374,27 @@ impl Validate for ServerMessage {
             Self::PilotJoined { profile, .. } => {
                 check("nickname", profile.nickname.len(), MAX_NICKNAME_LEN)
             }
-            Self::MessageReceived { body, .. } | Self::MessageEdited { body, .. } => {
-                check("body", body.len(), MAX_BODY_LEN)
+            Self::MessageReceived {
+                body, attachment, ..
+            } => {
+                check("body", body.len(), MAX_BODY_LEN)?;
+                // The same bounds the transfer header enforces, applied on the
+                // way out. A name that came from an older build, or straight
+                // from somebody's `sqlite3` prompt, must not travel further
+                // than one a sender could have declared.
+                match attachment {
+                    Some(attachment) => {
+                        check("file_name", attachment.file_name.len(), MAX_FILE_NAME_LEN)?;
+                        check(
+                            "declared_type",
+                            attachment.declared_type.len(),
+                            MAX_DECLARED_TYPE_LEN,
+                        )
+                    }
+                    None => Ok(()),
+                }
             }
+            Self::MessageEdited { body, .. } => check("body", body.len(), MAX_BODY_LEN),
             Self::Alert { operator_text, .. } => check(
                 "operator_text",
                 operator_text.as_ref().map_or(0, String::len),
@@ -1193,7 +1409,9 @@ impl Validate for ServerMessage {
             | Self::MovedToCage { .. }
             | Self::CageDeleted { .. }
             | Self::LineDeleted { .. }
-            | Self::LineWeighed { .. } => Ok(()),
+            | Self::LineWeighed { .. }
+            | Self::AttachmentRefused { .. }
+            | Self::AttachmentUnavailable { .. } => Ok(()),
         }
     }
 }
