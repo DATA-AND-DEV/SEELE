@@ -201,6 +201,19 @@ fn frase_do_alcance(alcance: &seele_server::alcance::Alcance) -> String {
         Degrau::PortaNoRoteador => {
             "O roteador abriu a porta: este link deve funcionar pela internet.".to_owned()
         }
+        // Degrau 4. "Deve funcionar" e não "funciona", e a diferença é a razão
+        // de a escada continuar existindo: com NAT simétrico dos dois lados o
+        // furo não abre, e a saída continua sendo encaminhar a porta à mão.
+        Degrau::FuroDeNat => format!(
+            "Um ponto de encontro apresentou esta máquina: o link deve \
+             funcionar pela internet sem mexer no roteador.{motivo}\n\
+             Se não funcionar, as duas redes são do tipo que não deixa furar — \
+             aí encaminhe a porta {} no roteador à mão.\n\
+             O ponto de encontro fica sabendo que endereço falou com o seu, e \
+             quando; nunca o que foi dito. Para usar o seu, ou nenhum: \
+             docs/ponto-de-encontro.md.",
+            alcance.alvo().port()
+        ),
         Degrau::Ipv6Direto => format!(
             "Este link é IPv6 e alcança de qualquer lugar — mas só quem também \
              tiver IPv6.{motivo}"

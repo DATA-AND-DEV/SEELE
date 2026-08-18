@@ -430,7 +430,7 @@ fn global(endereco: IpAddr) -> bool {
 /// por ele. A faixa que importa aqui e que não tem método na std é a
 /// `100.64.0.0/10`: a RFC 6598 a reservou para CGNAT, e é exatamente o caso que
 /// o ADR 0022 diz não ter saída antes do degrau 4.
-fn global_v4(endereco: Ipv4Addr) -> bool {
+pub(super) fn global_v4(endereco: Ipv4Addr) -> bool {
     let [a, b, _, _] = endereco.octets();
     // 100.64.0.0/10 — CGNAT.
     let cgnat = a == 100 && (64..128).contains(&b);

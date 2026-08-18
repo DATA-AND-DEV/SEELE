@@ -182,6 +182,21 @@ pub fn aqui(marca: &Marca, origem: SocketAddr) -> Vec<u8> {
     encher(format!("{MAGIA} AQUI {marca} {origem}"))
 }
 
+/// Monta um `FURO`: o pacote que abre o caminho, mandado de uma ponta à outra.
+///
+/// **Não é para o ponto de encontro**, e ele não responde a isto — `analisar`
+/// não conhece este verbo. É o pacote que o anfitrião manda ao endereço que o
+/// aviso trouxe, para que o roteador dele passe a ter uma saída registrada para
+/// lá. Quem recebe descarta: do outro lado quem está lendo o socket é o QUIC.
+///
+/// Existe como verbo nomeado por uma razão só: quem estiver olhando um
+/// `tcpdump` para entender por que uma conexão não sobe merece ver o que é
+/// aquele pacote de 96 bytes, em vez de bytes anônimos.
+#[must_use]
+pub fn furo(marca: &Marca) -> Vec<u8> {
+    encher(format!("{MAGIA} FURO {marca}"))
+}
+
 /// Completa a linha até [`TAMANHO`], para que nada amplifique.
 fn encher(mut linha: String) -> Vec<u8> {
     linha.push('\n');
@@ -520,6 +535,18 @@ mod testes {
             !resposta.datagrama.windows(2).any(|par| par == b"XY"),
             "bytes escolhidos por quem pediu chegaram a quem recebe"
         );
+    }
+
+    #[test]
+    fn o_pacote_do_furo_nao_e_coisa_do_ponto_de_encontro() {
+        // O furo vai de uma ponta à outra e nunca ao meio. Um ponto de encontro
+        // que respondesse a ele estaria a um passo de repassar pacote entre as
+        // duas pontas — que é retransmissão, e o ADR 0022 a deixou fora de
+        // escopo por decisão.
+        let pacote = furo(&marca("abc"));
+        assert_eq!(responder(&pacote, de("45.33.32.156:41234")), None);
+        assert_eq!(analisar(&pacote), None);
+        assert_eq!(ler_aqui(&pacote), None);
     }
 
     #[test]
