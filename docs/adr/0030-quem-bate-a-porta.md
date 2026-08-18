@@ -59,7 +59,21 @@ impede que gerar chaves novas vire uma fila de pedidos infinita. As três camada
 mais o balde compõem: cada uma cobre o flanco que a anterior deliberadamente
 deixou aberto.
 
-**Um convite consumido não aprova ninguém.** Ele aparece no pedido, ao lado da
+**O convite passa a ser gasto por quem entra, não por quem bate.** Isto é uma
+correção dentro do 0021, encontrada ao construir isto e não antes: o convite era
+consumido na camada do segredo, então um handshake que morresse depois dela —
+assinatura ruim, piloto banido, a rede caindo entre dois quadros — queimava o
+convite de alguém que nunca entrou. Era raro o bastante para nunca ter aparecido.
+Com portaria deixa de ser raro e passa a ser **o caso normal**: uma batida
+pendente é o caminho projetado, a pessoa é mandada tentar de novo, e o convite
+que ela tinha já não valia nada — aprovada ou não, ficava para fora para sempre.
+
+A conferência e o gasto viraram duas metades. A proteção contra dois clientes
+com o mesmo convite no mesmo instante não estava na conferência e sim no
+`UPDATE ... WHERE usado_em IS NULL`, que continua sendo uma operação só: os dois
+conferem com sucesso, e só um vê linha alterada.
+
+**Um convite conferido não aprova ninguém.** Ele aparece no pedido, ao lado da
 observação que quem hospeda escreveu ao gerá-lo — `criar_convite(casper,
 observacao)` já guarda esse campo e nada o lia. «Chegou com o convite *para o
 Rafael*» é a melhor prova que existe do outro lado, e ainda assim é prova, não
@@ -219,11 +233,17 @@ Dogma aberto que alcança além do loopback diz isso numa banda de alerta, porqu
   senha, gerar convite, e decidir quem entra. Era o buraco relatado.
 - **Um Dogma hospedado pelo app deixa de ser aberto por padrão** sem que o padrão
   do `seeled` mude.
-- Uma pessoa não aprovada ainda **cria conta e reserva o apelido** ao bater:
-  `register_or_find` roda antes da portaria, porque é ele que transforma a chave
-  provada em conta. É pequeno e é real — dá para ocupar um apelido sem nunca
-  entrar. Anotado nas pendências, não consertado aqui: mexer na ordem daquele
-  trecho mexe no caminho do banimento junto.
+- **Quem não passa pela portaria não vira conta.** Ela roda antes de
+  `register_or_find`, e essa ordem é o que impede uma batida recusada de reservar
+  um apelido para sempre — o ADR 0017 prende o nome à chave, e um pedido negado
+  não deve deixar um nome ocupado por alguém que jamais entrou. O custo é que
+  quem está banido **e** desconhecido é respondido como pendente em vez de
+  banido, e aparece na fila: quem hospeda vê e recusa. Barulho pequeno, e do lado
+  certo — a decisão continua com quem hospeda.
+- Uma pessoa aprovada cujo apelido tenha sido tomado por outra chave nesse meio
+  tempo é recusada por `register_or_find`, e não pela portaria. É a regra do ADR
+  0017 valendo como sempre valeu; a aprovação continua de pé para quando ela
+  escolher outro nome.
 - A fila de pedidos é metadado que o Dogma passa a guardar: quem tentou entrar e
   quando, inclusive de quem nunca entrou. É informação que ele já teria no log;
   a diferença é que agora tem tabela e prazo de vida nenhum. Limpar pedidos

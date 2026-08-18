@@ -273,6 +273,75 @@ pub const MIGRATIONS: &[Migration] = &[
                );
         "#,
     },
+    Migration {
+        version: 4,
+        description: "portaria: TOFU aplicado a gente, uma linha por impressão digital (ADR 0030)",
+        sql: r#"
+            -- ADR 0030. A terceira camada de admissão, e a única que decide
+            -- sobre **gente** em vez de sobre um segredo: quem hospeda vê quem
+            -- bateu e escolhe.
+
+            -- A chave é a impressão digital, e não `pilot_id`, de propósito.
+            --
+            -- A conta é consequência da chave — `register_or_find` a cria a
+            -- partir dela — e uma decisão sobre quem entra tem que sobreviver à
+            -- conta ser apagada, renomeada ou recriada. É também o que a pessoa
+            -- que aprova está olhando na tela, então é o que fica gravado: o que
+            -- se decide e o que se guarda são a mesma string.
+            --
+            -- Sem FOREIGN KEY para `pilots` pelo mesmo motivo. Um pedido de
+            -- alguém que nunca virou conta é um estado normal aqui, não órfão.
+            CREATE TABLE portaria (
+                impressao   TEXT PRIMARY KEY,
+
+                -- 'pendente' | 'admitido' | 'recusado'.
+                --
+                -- Texto e não inteiro porque este banco é lido à mão pelo dono
+                -- da máquina no dia em que a tela não bastar, e é ele quem tem a
+                -- autoridade final sobre a própria porta.
+                veredito    TEXT    NOT NULL,
+
+                -- O apelido **pedido** na batida, guardado como foi digitado.
+                --
+                -- Não é identidade e esta coluna não finge que seja: ela existe
+                -- para quem hospeda reconhecer o pedido, e a linha de cima do
+                -- cartão continua sendo a impressão. Congelado no momento da
+                -- batida em vez de lido de `pilots` na hora de mostrar, porque o
+                -- que se decidiu foi sobre o que estava escrito ali.
+                apelido     TEXT    NOT NULL DEFAULT '',
+
+                -- Com que segredo chegou: 'aberto' | 'senha' | 'convite'.
+                -- Prova exibida a quem decide, nunca decisão por si — ADR 0030
+                -- recusa aprovar sozinho quem traz convite válido.
+                segredo     TEXT    NOT NULL DEFAULT 'aberto',
+
+                -- A observação que quem hospeda escreveu ao gerar o convite.
+                -- `criar_convite` já guardava este campo e nada o lia; «chegou
+                -- com o convite *para o Rafael*» é a melhor prova que existe.
+                observacao  TEXT    NOT NULL DEFAULT '',
+
+                bateu_em    INTEGER NOT NULL,
+                -- Quantas vezes bateu. Tentar de novo é o caminho normal quando
+                -- o pedido está pendente, e não deve virar uma fila de linhas.
+                batidas     INTEGER NOT NULL DEFAULT 1,
+                -- NULL enquanto ninguém decidiu.
+                decidido_em INTEGER
+            ) STRICT;
+
+            -- A fila que a tela desenha: pendentes, mais antigo primeiro.
+            CREATE INDEX portaria_pendentes
+                ON portaria (bateu_em) WHERE decidido_em IS NULL;
+
+            -- O interruptor. Ausente = desligada, que é o comportamento de
+            -- antes desta migração — um Dogma que já existe não muda de
+            -- comportamento por ter sido migrado.
+            --
+            -- O `seeled` continua subindo sem portaria (ADR 0021 mantém o padrão
+            -- aberto, e este ADR não mexe nele). Quem liga é o botão HOSPEDAR
+            -- AQUI, na primeira vez que sobe um Dogma, porque quem apertou um
+            -- botão não aceitou cerimônia nenhuma.
+        "#,
+    },
 ];
 
 #[cfg(test)]

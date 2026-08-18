@@ -334,14 +334,18 @@ async fn handshake(
     // ou convite vencido. `specs/08-seguranca.md` exige falha uniforme: um erro
     // que distingue os casos conta a quem está adivinhando qual palpite chegou
     // mais perto. O motivo real vai para o log do operador.
-    {
-        let mut guard = dogma.casper.lock().await;
+    // Conferido aqui e **gasto depois**, quando a portaria também tiver dito
+    // que sim. Ver `admissao::Passe`: quem bate numa porta com portaria é
+    // mandado tentar de novo, e queimar o convite dele nesta linha o deixaria
+    // de fora para sempre — inclusive depois de aprovado.
+    let (passe, chegada) = {
+        let guard = dogma.casper.lock().await;
         let politica = crate::admissao::Politica::carregar(&guard).map_err(|error| Refusal {
             reason: DisconnectReason::CredentialRejected,
             detail: format!("could not read the admission policy: {error}"),
         })?;
-        match politica.admitir(&mut guard, join_secret.as_deref()) {
-            Ok(Ok(())) => {}
+        let passe = match politica.avaliar(&guard, join_secret.as_deref()) {
+            Ok(Ok(passe)) => passe,
             Ok(Err(recusa)) => {
                 return Err(Refusal {
                     reason: DisconnectReason::CredentialRejected,
@@ -354,8 +358,13 @@ async fn handshake(
                     detail: format!("could not evaluate admission: {error}"),
                 });
             }
-        }
-    }
+        };
+        // Só o nome do que acabou de acontecer, para o cartão que a portaria
+        // mostra lá embaixo. Nada aqui decide: a decisão foi a linha acima.
+        let chegada =
+            crate::portaria::como_chegou(&guard, politica.aberto(), join_secret.as_deref());
+        (passe, chegada)
+    };
 
     let key: [u8; PUBLIC_KEY_LEN] = public_key.clone().try_into().map_err(|_| Refusal {
         reason: DisconnectReason::CredentialRejected,
@@ -407,6 +416,74 @@ async fn handshake(
             reason: DisconnectReason::CredentialRejected,
             detail: "signature did not verify".into(),
         })?;
+
+    // A portaria — ADR 0030. A terceira camada, e a única que decide sobre
+    // gente em vez de sobre um segredo.
+    //
+    // **Aqui**, e não junto com `admissao` lá em cima, porque só agora a chave
+    // foi provada. Fixar uma impressão digital que ninguém demonstrou não é
+    // TOFU, é fixar um palpite: qualquer um encheria a fila com chaves alheias,
+    // e quem hospeda aprovaria uma pessoa e admitiria outra. O que impede a fila
+    // de encher com chaves próprias, que são de graça, é o balde por endereço do
+    // ADR 0025, que responde antes de o `Hello` ser lido.
+    //
+    // **Antes de `register_or_find`**, e isto vale um parágrafo: quem não passa
+    // por aqui não vira conta. Se fosse depois, alguém que nunca foi aprovado
+    // ocuparia um apelido para sempre — o ADR 0017 prende o nome à chave, e uma
+    // batida recusada teria reservado o nome de alguém que jamais entrou.
+    //
+    // Nada espera. Um pedido pendente derruba a conexão neste instante e fica
+    // gravado; ver o cabeçalho de `portaria`.
+    {
+        let mut guard = dogma.casper.lock().await;
+        let impressao = seele_proto::transport::key_fingerprint(&public_key);
+        let (segredo, observacao) = chegada;
+        match crate::portaria::bater(&mut guard, &impressao, &nickname, segredo, &observacao) {
+            Ok(crate::portaria::Resposta::Entra) => {
+                // Entrou de verdade: agora o convite é gasto. Perder a corrida
+                // aqui é o mesmo caso de sempre — dois clientes com o mesmo
+                // convite no mesmo instante — e a recusa dele continua uniforme.
+                match crate::admissao::gastar(&mut guard, &passe) {
+                    Ok(Ok(())) => {}
+                    Ok(Err(recusa)) => {
+                        return Err(Refusal {
+                            reason: DisconnectReason::CredentialRejected,
+                            detail: format!("admissão recusada ao gastar: {recusa:?}"),
+                        });
+                    }
+                    Err(error) => {
+                        return Err(Refusal {
+                            reason: DisconnectReason::CredentialRejected,
+                            detail: format!("could not spend the invite: {error}"),
+                        });
+                    }
+                }
+            }
+            Ok(crate::portaria::Resposta::Pendente) => {
+                tracing::info!(%impressao, %nickname, "knock waiting for the host");
+                return Err(Refusal {
+                    reason: DisconnectReason::AdmissionPending,
+                    detail: format!("portaria: {impressao} aguarda decisão"),
+                });
+            }
+            Ok(crate::portaria::Resposta::Recusado) => {
+                return Err(Refusal {
+                    reason: DisconnectReason::AdmissionDenied,
+                    detail: format!("portaria: {impressao} foi recusada"),
+                });
+            }
+            // Um banco que não responde não é prova de que a porta pode abrir,
+            // e a falha aqui cai para o lado fechado como em `cage_liberado`.
+            // Pendente e não recusado: a máquina falhou, não a pessoa.
+            Err(error) => {
+                tracing::error!(%error, "could not consult the doorkeeper");
+                return Err(Refusal {
+                    reason: DisconnectReason::AdmissionPending,
+                    detail: format!("could not consult the doorkeeper: {error}"),
+                });
+            }
+        }
+    }
 
     // MELCHIOR turns the proven key into an account.
     let account = {

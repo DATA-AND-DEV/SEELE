@@ -72,6 +72,15 @@ pub fn disconnect(reason: DisconnectReason) -> &'static str {
         DisconnectReason::FellBehind => {
             "ESTE ENLACE FICOU PARA TRÁS; RECONECTANDO PARA NÃO FALTAR MENSAGEM"
         }
+        // ADR 0030. As duas únicas desta lista sobre uma entrada que ainda pode
+        // dar certo, e por isso as duas únicas que dizem o que fazer em seguida.
+        //
+        // Nenhuma delas fala em aguardar: nada está aguardando. A conexão caiu
+        // no mesmo instante e o que ficou de pé é o pedido, do outro lado.
+        DisconnectReason::AdmissionPending => {
+            "QUEM HOSPEDA AINDA NÃO DECIDIU SOBRE VOCÊ; O PEDIDO FICOU GUARDADO"
+        }
+        DisconnectReason::AdmissionDenied => "QUEM HOSPEDA RECUSOU A SUA ENTRADA",
     }
 }
 
@@ -98,7 +107,15 @@ pub fn worth_retrying(reason: DisconnectReason) -> bool {
         | DisconnectReason::CredentialRejected
         | DisconnectReason::Incompatible
         | DisconnectReason::ProtocolViolation
-        | DisconnectReason::RateLimited => false,
+        | DisconnectReason::RateLimited
+        // ADR 0030, e a pendente é a que engana. Voltar sozinho *funcionaria*
+        // — no minuto em que quem hospeda aprovasse —, e é exatamente por isso
+        // que não deve: seria uma bateria batendo na porta de outra pessoa por
+        // tempo indeterminado, que é a espera sem fim que o ADR recusa, com o
+        // agravante de a máquina fazê-la sozinha. Quem foi mandado tentar de
+        // novo tenta quando quiser.
+        | DisconnectReason::AdmissionPending
+        | DisconnectReason::AdmissionDenied => false,
     }
 }
 

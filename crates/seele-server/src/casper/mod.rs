@@ -264,13 +264,26 @@ mod tests {
             let casper = Casper::open(&file).unwrap();
             // Rewind to exactly what migration 1 left behind, and forget that
             // migration 3 ever ran.
+            //
+            // `>= 3`, and not `= 3`, and this cost a green test once. `migrate`
+            // asks the database for its version with `MAX(version)` and skips
+            // everything at or below it, so deleting the row for 3 while 4 sits
+            // beside it rewinds nothing at all: the maximum is still 4 and
+            // migration 3 is skipped exactly as before. The rewind has to forget
+            // **every** version above the one being replayed, or this test goes
+            // on passing by never running the thing it is about.
+            //
+            // Found when migration 4 landed (ADR 0030). Every migration after 3
+            // has to drop its own tables here too, for the same reason
+            // `attachments` is dropped: the replay re-runs their `CREATE TABLE`.
             casper
                 .connection()
                 .execute_batch(
                     "UPDATE roles SET permissions = replace(permissions, ',\"AttachFile\"', ''),
                                       denials     = replace(denials,     ',\"AttachFile\"', '');
-                     DELETE FROM schema_version WHERE version = 3;
-                     DROP TABLE attachments;",
+                     DELETE FROM schema_version WHERE version >= 3;
+                     DROP TABLE attachments;
+                     DROP TABLE portaria;",
                 )
                 .unwrap();
             assert!(!casper
