@@ -115,6 +115,28 @@ de escrita em lugar nenhum — não há o que persistir.
 Reiniciá-lo no meio de uma apresentação custa a repetição de um datagrama de 96
 bytes. Não há estado para perder porque não há estado.
 
+### Conferir que ele está mesmo no ar
+
+`systemctl status` responde «o processo está de pé», que é uma pergunta
+diferente de «alguém de fora alcança esta porta». Entre as duas há o firewall do
+provedor, o firewall da máquina e a regra da porta — e cada um deles já quebrou
+isto numa máquina de verdade.
+
+De **outra** máquina:
+
+```sh
+cargo run -p seele-encontro --example sondar -- <endereço>:8384
+```
+
+Ele fala o protocolo mesmo, e não um `ping`: um serviço que responde a ICMP e
+recusa datagrama de 96 bytes está tão quebrado quanto um desligado, e só isto
+distingue os dois. As duas famílias são tentadas em separado, porque um ponto de
+encontro que atende IPv4 e não IPv6 apresenta mal justamente os pares que mais
+precisam dele.
+
+Quando dá certo, ele imprime **o seu endereço visto de fora** — que é
+literalmente o serviço que este ponto de encontro presta.
+
 ## O que ele **não** resolve
 
 **NAT simétrico dos dois lados não fura.** Nesse caso o mapeamento do roteador
