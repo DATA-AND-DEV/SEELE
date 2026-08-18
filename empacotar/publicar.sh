@@ -506,22 +506,37 @@ conferir_arvore() {
             "O release aponta para um commit, e sem repositório não há commit a apontar."
     fi
 
-    sujeira=$(git -C "$RAIZ" status --porcelain 2>/dev/null)
+    # Só o que o empacotamento escreve, e não a árvore inteira.
+    #
+    # A conferência larga bloqueava um repositório onde havia trabalho em curso
+    # em qualquer arquivo — inclusive um que o empacotamento nunca toca. Ela
+    # parou o dono na primeira execução por causa de um documento de marca que
+    # vive editado, e a saída que ela sugeria era `git stash` num arquivo dele.
+    #
+    # O motivo escrito logo abaixo é a medida certa do escopo: o que precisa
+    # estar limpo é o que estes scripts reescrevem e devolvem, para que um resto
+    # deixado por uma execução que morreu no meio seja distinguível do que já
+    # estava aí. Fora desses caminhos, sujeira não confunde ninguém.
+    sujeira=$(git -C "$RAIZ" status --porcelain -- \
+        "$CONFIG_TAURI" \
+        "apps/seele-app/tauri.release.conf.json" \
+        "apps/seele-app/binaries" \
+        "empacotar" 2>/dev/null)
     if [ -n "$sujeira" ]; then
-        morrer "a árvore não está limpa:" \
+        morrer "há trabalho não commitado no que o empacotamento escreve:" \
             "$sujeira" \
             "" \
             "Não é preciosismo. Os empacotadores gravam a versão no $CONFIG_TAURI e a" \
             "devolvem ao sair; se algo morrer no meio, a única forma de eu saber o que é" \
-            "resto meu e o que é trabalho seu é ter começado do limpo. Commite ou guarde" \
-            "o que está aí (git stash) e rode de novo."
+            "resto meu e o que é trabalho seu é ter começado do limpo nestes caminhos." \
+            "O resto da árvore não me interessa: commite ou guarde só isto."
     fi
 
     COMMIT=$(git -C "$RAIZ" rev-parse HEAD 2>/dev/null)
     if [ -z "$COMMIT" ]; then
         morrer "não consegui ler o commit de HEAD."
     fi
-    passo "árvore limpa em $COMMIT"
+    passo "o que o empacotamento escreve está limpo, em $COMMIT"
 }
 
 conferir_config_tauri() {
