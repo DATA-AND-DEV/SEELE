@@ -42,7 +42,7 @@ use std::time::{Duration, Instant};
 
 use ed25519_dalek::SigningKey;
 use seele_proto::control::ServerMessage;
-use seele_proto::ids::{CageId, ClientMessageId, LineId, MessageId, PilotId};
+use seele_proto::ids::{AttachmentId, CageId, ClientMessageId, LineId, MessageId, PilotId};
 use tokio::sync::mpsc;
 
 use crate::battery::{Action, Battery, Link};
@@ -94,6 +94,8 @@ pub enum Aviso {
         /// A sessão nova. O `ssrc` muda a cada conexão (falha G1).
         sessao: Box<SessionInfo>,
     },
+    /// Uma transferência andou. ADR 0027.
+    Transferencia(Transferencia),
     /// Acabou. Ou os cinco minutos passaram, ou não vale a pena tentar.
     Encerrado(Motivo),
 }
@@ -113,6 +115,7 @@ impl std::fmt::Debug for Aviso {
                 .debug_struct("Reconectado")
                 .field("sessao", sessao)
                 .finish(),
+            Self::Transferencia(estado) => f.debug_tuple("Transferencia").field(estado).finish(),
             Self::Encerrado(motivo) => f.debug_tuple("Encerrado").field(motivo).finish(),
         }
     }
@@ -186,7 +189,101 @@ enum Comando {
     PesarLinha {
         linha: LineId,
     },
+    Anexar(Box<Anexo>),
+    SalvarAnexo {
+        anexo: AttachmentId,
+        destino: std::path::PathBuf,
+    },
     Sair,
+}
+
+/// Quanto tempo se espera o Dogma abrir o fluxo de um anexo pedido.
+///
+/// Uma recusa nunca abre fluxo nenhum — a razão vem pelo controle —, então sem
+/// prazo esta espera seria para sempre. Dez segundos é muito mais do que um
+/// Dogma doméstico leva para começar a mandar e pouco para deixar uma tela
+/// esperando por bytes que não vêm.
+const ESPERA_DE_ANEXO: Duration = Duration::from_secs(10);
+
+/// Um arquivo para mandar, com a mensagem que vai junto.
+///
+/// ADR 0027. O corpo viaja com o arquivo e não num `Dizer` separado: a
+/// mensagem só é publicada quando os bytes chegam inteiros, e duas metades da
+/// mesma mensagem em dois caminhos teriam uma ordem para errar.
+#[derive(Debug, Clone)]
+pub struct Anexo {
+    /// Em que Linha.
+    pub linha: LineId,
+    /// A chave de idempotência da mensagem. É por ela que a tela reconhece a
+    /// própria subida, e é ela que torna uma retentativa segura.
+    pub id: ClientMessageId,
+    /// O que a pessoa escreveu ao lado do arquivo. Pode ser vazio.
+    pub corpo: String,
+    /// Onde o arquivo está nesta máquina. Nunca sai daqui.
+    pub caminho: std::path::PathBuf,
+    /// Que nome dar a ele do outro lado.
+    pub nome: String,
+    /// Que tipo alegar que ele é. Alegação, e tratada como tal.
+    pub tipo: String,
+}
+
+/// Onde uma transferência está.
+///
+/// Enumerado, e é o que a tela precisa para não mentir: enquanto sobe, uma
+/// barra com o total — que é sempre conhecido, porque quem escolheu o arquivo
+/// sabe o tamanho dele. **Se cair, [`Transferencia::Caiu`]**, e a frase dessa
+/// variante tem de dizer que recomeçar recomeça do zero: o ADR 0027 não tem
+/// retomada, e isso precisa ser dito a quem está esperando em vez de
+/// descoberto.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Transferencia {
+    /// Subindo, com quantos bytes já foram de quantos.
+    Subindo {
+        /// Qual mensagem.
+        id: ClientMessageId,
+        /// Bytes que já saíram.
+        feito: u64,
+        /// Bytes ao todo. Sempre conhecido.
+        total: u64,
+    },
+    /// Todos os bytes saíram. A mensagem aparece na Linha em seguida.
+    Subiu {
+        /// Qual mensagem.
+        id: ClientMessageId,
+    },
+    /// O Dogma cortou o fluxo: recusou. A razão vem pelo controle, como
+    /// `ServerMessage::AttachmentRefused`.
+    Recusada {
+        /// Qual mensagem.
+        id: ClientMessageId,
+    },
+    /// O enlace caiu no meio. **Recomeçar recomeça do zero.**
+    Caiu {
+        /// Qual mensagem.
+        id: ClientMessageId,
+    },
+    /// Baixando, com quantos bytes já vieram de quantos.
+    Baixando {
+        /// Qual anexo.
+        anexo: AttachmentId,
+        /// Bytes que já chegaram.
+        feito: u64,
+        /// Bytes ao todo.
+        total: u64,
+    },
+    /// O arquivo está no disco de quem recebeu, onde a pessoa escolheu.
+    Salvo {
+        /// Qual anexo.
+        anexo: AttachmentId,
+        /// Onde ficou.
+        caminho: std::path::PathBuf,
+    },
+    /// Não deu para salvar. Se o motivo for do Dogma, ele vem pelo controle
+    /// como `ServerMessage::AttachmentUnavailable`.
+    NaoSalvou {
+        /// Qual anexo.
+        anexo: AttachmentId,
+    },
 }
 
 /// A sessão com um Dogma, viva através de quedas.
@@ -730,6 +827,37 @@ impl Enlace {
         self.mandar(Comando::PesarLinha { linha }).await
     }
 
+    /// Manda um arquivo, num fluxo só dele.
+    ///
+    /// Volta assim que a transferência foi enfileirada, e não quando ela
+    /// terminou: o andamento chega por [`Aviso::Transferencia`], e a mensagem
+    /// só aparece na Linha depois de os bytes chegarem inteiros. É por isso que
+    /// enquanto sobe só quem enviou a vê.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn anexar(&self, anexo: Anexo) -> Result<(), Fechado> {
+        self.mandar(Comando::Anexar(Box::new(anexo))).await
+    }
+
+    /// Pede um anexo e grava onde quem recebeu escolheu.
+    ///
+    /// **Onde a pessoa escolheu, e em lugar nenhum mais.** O ADR 0027 não dá a
+    /// cliente nenhum do SEELE um botão que abre arquivo; salvar é um ato de
+    /// quem recebeu.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn salvar_anexo(
+        &self,
+        anexo: AttachmentId,
+        destino: std::path::PathBuf,
+    ) -> Result<(), Fechado> {
+        self.mandar(Comando::SalvarAnexo { anexo, destino }).await
+    }
+
     /// Encerra por vontade própria.
     pub async fn sair(&self) {
         let _ = self.mandar(Comando::Sair).await;
@@ -995,6 +1123,72 @@ impl Motor {
             Comando::ApagarCage { cage } => cliente.delete_cage(cage).await,
             Comando::ApagarLinha { linha } => cliente.delete_line(linha).await,
             Comando::PesarLinha { linha } => cliente.weigh_line(linha).await,
+
+            // Numa tarefa própria, e não aqui dentro. Executar vinte megabytes
+            // no laço de comandos devolveria, dentro do cliente, exatamente o
+            // bloqueio de cabeça de fila que o fluxo próprio existe para
+            // evitar: ninguém conseguiria dizer uma frase enquanto o arquivo
+            // sobe. `Transfers` é clonável para isto.
+            Comando::Anexar(anexo) => {
+                let transferencias = cliente.transfers();
+                let avisos = self.avisos.clone();
+                let id = anexo.id;
+                tokio::spawn(async move {
+                    let andamento = |feito, total| {
+                        let _ = avisos.send(Aviso::Transferencia(Transferencia::Subindo {
+                            id,
+                            feito,
+                            total,
+                        }));
+                    };
+                    let pedido = crate::client::AttachmentRequest {
+                        line: anexo.linha,
+                        client_message_id: anexo.id,
+                        body: &anexo.corpo,
+                        replies_to: None,
+                        path: &anexo.caminho,
+                        file_name: &anexo.nome,
+                        declared_type: &anexo.tipo,
+                    };
+                    let fim = match transferencias.send_attachment(&pedido, andamento).await {
+                        Ok(crate::client::Sent::Delivered { .. }) => Transferencia::Subiu { id },
+                        Ok(crate::client::Sent::Stopped { .. }) => Transferencia::Recusada { id },
+                        Ok(crate::client::Sent::Interrupted { .. }) | Err(_) => {
+                            Transferencia::Caiu { id }
+                        }
+                    };
+                    let _ = avisos.send(Aviso::Transferencia(fim));
+                });
+                Ok(())
+            }
+
+            Comando::SalvarAnexo { anexo, destino } => {
+                let transferencias = cliente.transfers();
+                let avisos = self.avisos.clone();
+                let pedido = cliente.fetch_attachment(anexo).await;
+                tokio::spawn(async move {
+                    let andamento = |feito, total| {
+                        let _ = avisos.send(Aviso::Transferencia(Transferencia::Baixando {
+                            anexo,
+                            feito,
+                            total,
+                        }));
+                    };
+                    let fim = match transferencias
+                        .receive_attachment(anexo, &destino, ESPERA_DE_ANEXO, andamento)
+                        .await
+                    {
+                        Ok(_) => Transferencia::Salvo {
+                            anexo,
+                            caminho: destino,
+                        },
+                        Err(_) => Transferencia::NaoSalvou { anexo },
+                    };
+                    let _ = avisos.send(Aviso::Transferencia(fim));
+                });
+                pedido
+            }
+
             Comando::Sair => return,
         };
         if resultado.is_err() {

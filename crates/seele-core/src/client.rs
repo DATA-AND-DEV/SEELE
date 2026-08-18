@@ -572,205 +572,64 @@ impl Client {
 
     // ---- attachments, ADR 0027 ----
 
-    /// Sends a file on a stream of its own, and reports the bytes as they go.
+    /// The file-moving half of this connection.
     ///
-    /// **Never on the control stream.** Twenty megabytes written there stop
-    /// every presence event and every line of text from everybody behind them
-    /// until the last byte goes through; the control stream is the one that may
-    /// not queue.
-    ///
-    /// The message is published on the Line **only once the bytes have
-    /// arrived whole**, so while this is running the only person who can see it
-    /// is the sender. That is the trade ADR 0027 takes on purpose: without it,
-    /// "the file has not arrived yet" and "the file expired" would be two
-    /// similar absences on the same screen.
-    ///
-    /// `progress` is called with `(sent, total)` after each block. The total is
-    /// always known — whoever chose the file knows how big it is — so a shell
-    /// always has a real bar and never one pretending to measure something
-    /// nobody measured.
-    ///
-    /// **A transfer that falls starts again from zero.** There is no resumption
-    /// (ADR 0027), and a shell must say so rather than let it be discovered. The
-    /// retry is safe: it is keyed by the same `client_message_id` that already
-    /// makes a send idempotent, so an attempt that had in fact succeeded is
-    /// recognised instead of stored twice.
-    ///
-    /// # Errors
-    ///
-    /// Fails if the file cannot be read or the stream is closed. A **refusal**
-    /// is not a failure here: it comes back later as
-    /// [`ServerMessage::AttachmentRefused`] on the control stream, because
-    /// `specs/02-protocolo.md` keeps every reason enumerated and on control.
-    pub async fn send_attachment(
-        &mut self,
-        request: &AttachmentRequest<'_>,
-        mut progress: impl FnMut(u64, u64),
-    ) -> Result<Sent> {
-        use seele_proto::attachment::{AttachmentHeader, ContentDigest, BLOCK_LEN};
-        use tokio::io::AsyncReadExt;
-
-        // Two passes over a local file: one to know the digest, one to send it.
-        // The header has to carry the hash, and the hash is not known until the
-        // last byte — and holding the file in memory to avoid the second read
-        // is the thing this design refuses everywhere else.
-        let mut file = tokio::fs::File::open(request.path).await?;
-        let declared_len = file.metadata().await?.len();
-        let mut digest = ContentDigest::new();
-        let mut block = vec![0_u8; BLOCK_LEN];
-        loop {
-            let read = file.read(&mut block).await?;
-            if read == 0 {
-                break;
-            }
-            digest.feed(block.get(..read).unwrap_or_default());
-        }
-        let content_hash = digest.finish();
-
-        let mut stream = self.connection.open_uni().await?;
-        // Below the control stream, so that sending a picture cannot delay
-        // somebody else's `Pong` on this connection. It says nothing about
-        // another connection — see ADR 0027 on what has no way out.
-        stream.set_priority(TRANSFER_PRIORITY)?;
-        let header = AttachmentHeader {
-            line: request.line,
-            client_message_id: request.client_message_id,
-            body: request.body.to_owned(),
-            replies_to: request.replies_to,
-            file_name: request.file_name.to_owned(),
-            declared_type: request.declared_type.to_owned(),
-            declared_len,
-            content_hash,
-        };
-        // Validated here rather than on arrival alone, so a file with an
-        // unusable name fails before a byte leaves this machine.
-        if let Err(error) = frame::write(&mut stream, &header).await {
-            return Ok(interpret_any(&error, 0));
-        }
-
-        let mut file = tokio::fs::File::open(request.path).await?;
-        let mut sent = 0_u64;
-        progress(0, declared_len);
-        loop {
-            let read = file.read(&mut block).await?;
-            if read == 0 {
-                break;
-            }
-            // A write that fails is not this end's failure. The Dogma refusing
-            // stops the stream **before** taking the bytes — which is the right
-            // thing for it to do, and the reason is already travelling on the
-            // control stream — and a link that fell looks almost the same here.
-            // Telling them apart is what lets a shell say "the file will never
-            // fit" in one case and "it fell, and starting again starts from
-            // zero" in the other.
-            if let Err(error) = stream
-                .write_all(block.get(..read).unwrap_or_default())
-                .await
-            {
-                return Ok(interpret(&error, sent));
-            }
-            sent = sent.saturating_add(read as u64);
-            progress(sent, declared_len);
-        }
-        if stream.finish().is_err() {
-            return Ok(Sent::Stopped { bytes: sent });
-        }
-        // Waits for the peer to acknowledge the end of the stream. Without it,
-        // returning would drop the send half and the last blocks could still be
-        // unsent — which reads, from the other end, as a transfer that fell.
-        //
-        // `Ok(Some(code))` is the peer having sent `STOP_SENDING`, which is a
-        // refusal that happened to arrive after the last block went out. Reading
-        // it as success was a real defect and an intermittent one: on a small
-        // file the whole thing fits in one write, so whether the refusal shows
-        // up as a failed `write_all` or as a stop code here is a race with the
-        // network. Only `Ok(None)` — the stream read to its end — is delivery.
-        match stream.stopped().await {
-            Ok(None) => Ok(Sent::Delivered { bytes: sent }),
-            Ok(Some(_)) => Ok(Sent::Stopped { bytes: sent }),
-            Err(_) => Ok(Sent::Interrupted { bytes: sent }),
+    /// Handed out separately for the reason [`Self::media`] is: a transfer that
+    /// takes half a minute must not be a transfer during which nothing else can
+    /// be said. A caller holding one of these can move a file while the control
+    /// stream goes on carrying presence and text — which is the whole point of
+    /// the transfer having a stream of its own, and would be given straight back
+    /// by an API that made the caller borrow the whole client for the duration.
+    #[must_use]
+    pub fn transfers(&self) -> Transfers {
+        Transfers {
+            connection: self.connection.clone(),
         }
     }
 
-    /// Asks for an attachment and writes it where the receiver chose.
+    /// Asks the Dogma for an attachment's bytes.
     ///
-    /// **The destination is the caller's**, and there is no other kind: ADR 0027
-    /// gives no client of the SEELE a button that opens a file. Saving is an act
-    /// of the person who received it, in a place they picked.
+    /// The bytes arrive on a stream of their own; [`Transfers::receive_attachment`]
+    /// is what reads them. A refusal arrives here instead, as
+    /// [`ServerMessage::AttachmentUnavailable`], with the enumerated reason —
+    /// and the expected one is `Expired`.
     ///
-    /// The file is marked with the operating system's own quarantine on the way
-    /// down — `com.apple.quarantine`, or the `Zone.Identifier` stream — so that
-    /// Gatekeeper and SmartScreen stop it in front of whoever opens it later.
-    /// That is not antivirus, and this product does not have one; it is the
-    /// guard the system already has, and it only works if whoever writes the
-    /// file turns it on.
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn fetch_attachment(
+        &mut self,
+        attachment: seele_proto::ids::AttachmentId,
+    ) -> Result<()> {
+        frame::write(
+            &mut self.send,
+            &ClientMessage::FetchAttachment { attachment },
+        )
+        .await
+    }
+
+    /// Asks for an attachment and waits for it, in one call.
+    ///
+    /// The convenience shape, for a caller with one download in the air. A
+    /// caller that may have two uses [`Self::fetch_attachment`] and
+    /// [`Transfers::receive_attachment`] and matches them itself.
     ///
     /// # Errors
     ///
     /// Fails if the file cannot be written, if the bytes do not hash to what the
-    /// Dogma said, or if nothing arrives inside `wait`. A refusal arrives
-    /// separately, as [`ServerMessage::AttachmentUnavailable`] on the control
-    /// stream — that is where the enumerated reason lives, and the expected one
-    /// is `Expired`.
+    /// Dogma said, or if nothing arrives inside `wait`.
     pub async fn download_attachment(
         &mut self,
         attachment: seele_proto::ids::AttachmentId,
         destination: &std::path::Path,
         wait: std::time::Duration,
-        mut progress: impl FnMut(u64, u64),
+        progress: impl FnMut(u64, u64),
     ) -> Result<u64> {
-        use seele_proto::attachment::{AttachmentDelivery, ContentDigest, BLOCK_LEN};
-        use tokio::io::AsyncWriteExt;
-
-        frame::write(
-            &mut self.send,
-            &ClientMessage::FetchAttachment { attachment },
-        )
-        .await?;
-
-        // The Dogma opens the stream, so this waits for it. A refusal never
-        // opens one, which is why there is a deadline: the reason is on its way
-        // through `next_event` and this call must not hang for ever waiting for
-        // bytes that were never coming.
-        let mut stream = tokio::time::timeout(wait, self.connection.accept_uni())
+        let transfers = self.transfers();
+        self.fetch_attachment(attachment).await?;
+        transfers
+            .receive_attachment(attachment, destination, wait, progress)
             .await
-            .map_err(|_| anyhow::anyhow!("o Dogma não mandou o arquivo em {wait:?}"))??;
-
-        let delivery: AttachmentDelivery = frame::read(&mut stream).await?;
-        anyhow::ensure!(
-            delivery.attachment == attachment,
-            "o Dogma mandou o anexo {} no lugar de {attachment}",
-            delivery.attachment
-        );
-
-        let mut file = tokio::fs::File::create(destination).await?;
-        let mut digest = ContentDigest::new();
-        let mut block = vec![0_u8; BLOCK_LEN];
-        let mut got = 0_u64;
-        progress(0, delivery.byte_size);
-        while let Some(read) = stream.read(&mut block).await? {
-            if read == 0 {
-                break;
-            }
-            let piece = block.get(..read).unwrap_or_default();
-            file.write_all(piece).await?;
-            digest.feed(piece);
-            got = got.saturating_add(read as u64);
-            progress(got, delivery.byte_size);
-        }
-        file.flush().await?;
-        drop(file);
-
-        // The same question the Dogma asked on the way in: did it arrive whole.
-        // It says nothing about the file being good, and nothing here pretends
-        // it does.
-        if digest.finish() != delivery.content_hash || got != delivery.byte_size {
-            let _ = tokio::fs::remove_file(destination).await;
-            anyhow::bail!("o arquivo não chegou inteiro e foi descartado");
-        }
-
-        quarantine(destination);
-        Ok(got)
     }
 
     /// Takes the plug out of whatever Cage it is in.
@@ -1282,5 +1141,215 @@ async fn handshake(
             tracing::warn!(?other, "expected Session");
             Err(ConnectError::ProtocolViolation)
         }
+    }
+}
+
+/// The file-moving half of a connection, usable while the control stream is busy.
+///
+/// The same shape as [`MediaChannel`], and for the same reason: ADR 0027 gives
+/// every transfer a stream of its own precisely so that moving twenty megabytes
+/// does not stop anything else, and an API that made a caller hold the whole
+/// client for the duration would hand that back at the last step.
+///
+/// Cloneable, so a shell can put a transfer on a task of its own.
+#[derive(Clone)]
+pub struct Transfers {
+    connection: quinn::Connection,
+}
+
+impl Transfers {
+    /// Sends a file on a stream of its own, and reports the bytes as they go.
+    ///
+    /// **Never on the control stream.** Twenty megabytes written there stop
+    /// every presence event and every line of text from everybody behind them
+    /// until the last byte goes through; the control stream is the one that may
+    /// not queue.
+    ///
+    /// The message is published on the Line **only once the bytes have
+    /// arrived whole**, so while this is running the only person who can see it
+    /// is the sender. That is the trade ADR 0027 takes on purpose: without it,
+    /// "the file has not arrived yet" and "the file expired" would be two
+    /// similar absences on the same screen.
+    ///
+    /// `progress` is called with `(sent, total)` after each block. The total is
+    /// always known — whoever chose the file knows how big it is — so a shell
+    /// always has a real bar and never one pretending to measure something
+    /// nobody measured.
+    ///
+    /// **A transfer that falls starts again from zero.** There is no resumption
+    /// (ADR 0027), and a shell must say so rather than let it be discovered. The
+    /// retry is safe: it is keyed by the same `client_message_id` that already
+    /// makes a send idempotent, so an attempt that had in fact succeeded is
+    /// recognised instead of stored twice.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the file cannot be read or the stream is closed. A **refusal**
+    /// is not a failure here: it comes back later as
+    /// [`ServerMessage::AttachmentRefused`] on the control stream, because
+    /// `specs/02-protocolo.md` keeps every reason enumerated and on control.
+    pub async fn send_attachment(
+        &self,
+        request: &AttachmentRequest<'_>,
+        mut progress: impl FnMut(u64, u64),
+    ) -> Result<Sent> {
+        use seele_proto::attachment::{AttachmentHeader, ContentDigest, BLOCK_LEN};
+        use tokio::io::AsyncReadExt;
+
+        // Two passes over a local file: one to know the digest, one to send it.
+        // The header has to carry the hash, and the hash is not known until the
+        // last byte — and holding the file in memory to avoid the second read
+        // is the thing this design refuses everywhere else.
+        let mut file = tokio::fs::File::open(request.path).await?;
+        let declared_len = file.metadata().await?.len();
+        let mut digest = ContentDigest::new();
+        let mut block = vec![0_u8; BLOCK_LEN];
+        loop {
+            let read = file.read(&mut block).await?;
+            if read == 0 {
+                break;
+            }
+            digest.feed(block.get(..read).unwrap_or_default());
+        }
+        let content_hash = digest.finish();
+
+        let mut stream = self.connection.open_uni().await?;
+        // Below the control stream, so that sending a picture cannot delay
+        // somebody else's `Pong` on this connection. It says nothing about
+        // another connection — see ADR 0027 on what has no way out.
+        stream.set_priority(TRANSFER_PRIORITY)?;
+        let header = AttachmentHeader {
+            line: request.line,
+            client_message_id: request.client_message_id,
+            body: request.body.to_owned(),
+            replies_to: request.replies_to,
+            file_name: request.file_name.to_owned(),
+            declared_type: request.declared_type.to_owned(),
+            declared_len,
+            content_hash,
+        };
+        // Validated here rather than on arrival alone, so a file with an
+        // unusable name fails before a byte leaves this machine.
+        if let Err(error) = frame::write(&mut stream, &header).await {
+            return Ok(interpret_any(&error, 0));
+        }
+
+        let mut file = tokio::fs::File::open(request.path).await?;
+        let mut sent = 0_u64;
+        progress(0, declared_len);
+        loop {
+            let read = file.read(&mut block).await?;
+            if read == 0 {
+                break;
+            }
+            // A write that fails is not this end's failure. The Dogma refusing
+            // stops the stream **before** taking the bytes — which is the right
+            // thing for it to do, and the reason is already travelling on the
+            // control stream — and a link that fell looks almost the same here.
+            // Telling them apart is what lets a shell say "the file will never
+            // fit" in one case and "it fell, and starting again starts from
+            // zero" in the other.
+            if let Err(error) = stream
+                .write_all(block.get(..read).unwrap_or_default())
+                .await
+            {
+                return Ok(interpret(&error, sent));
+            }
+            sent = sent.saturating_add(read as u64);
+            progress(sent, declared_len);
+        }
+        if stream.finish().is_err() {
+            return Ok(Sent::Stopped { bytes: sent });
+        }
+        // Waits for the peer to acknowledge the end of the stream. Without it,
+        // returning would drop the send half and the last blocks could still be
+        // unsent — which reads, from the other end, as a transfer that fell.
+        //
+        // `Ok(Some(code))` is the peer having sent `STOP_SENDING`, which is a
+        // refusal that happened to arrive after the last block went out. Reading
+        // it as success was a real defect and an intermittent one: on a small
+        // file the whole thing fits in one write, so whether the refusal shows
+        // up as a failed `write_all` or as a stop code here is a race with the
+        // network. Only `Ok(None)` — the stream read to its end — is delivery.
+        match stream.stopped().await {
+            Ok(None) => Ok(Sent::Delivered { bytes: sent }),
+            Ok(Some(_)) => Ok(Sent::Stopped { bytes: sent }),
+            Err(_) => Ok(Sent::Interrupted { bytes: sent }),
+        }
+    }
+
+    /// Asks for an attachment and writes it where the receiver chose.
+    ///
+    /// **The destination is the caller's**, and there is no other kind: ADR 0027
+    /// gives no client of the SEELE a button that opens a file. Saving is an act
+    /// of the person who received it, in a place they picked.
+    ///
+    /// The file is marked with the operating system's own quarantine on the way
+    /// down — `com.apple.quarantine`, or the `Zone.Identifier` stream — so that
+    /// Gatekeeper and SmartScreen stop it in front of whoever opens it later.
+    /// That is not antivirus, and this product does not have one; it is the
+    /// guard the system already has, and it only works if whoever writes the
+    /// file turns it on.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the file cannot be written, if the bytes do not hash to what the
+    /// Dogma said, or if nothing arrives inside `wait`. A refusal arrives
+    /// separately, as [`ServerMessage::AttachmentUnavailable`] on the control
+    /// stream — that is where the enumerated reason lives, and the expected one
+    /// is `Expired`.
+    pub async fn receive_attachment(
+        &self,
+        attachment: seele_proto::ids::AttachmentId,
+        destination: &std::path::Path,
+        wait: std::time::Duration,
+        mut progress: impl FnMut(u64, u64),
+    ) -> Result<u64> {
+        use seele_proto::attachment::{AttachmentDelivery, ContentDigest, BLOCK_LEN};
+        use tokio::io::AsyncWriteExt;
+
+        // The Dogma opens the stream, so this waits for it. A refusal never
+        // opens one, which is why there is a deadline: the reason is on its way
+        // through `next_event` and this call must not hang for ever waiting for
+        // bytes that were never coming.
+        let mut stream = tokio::time::timeout(wait, self.connection.accept_uni())
+            .await
+            .map_err(|_| anyhow::anyhow!("o Dogma não mandou o arquivo em {wait:?}"))??;
+
+        let delivery: AttachmentDelivery = frame::read(&mut stream).await?;
+        anyhow::ensure!(
+            delivery.attachment == attachment,
+            "o Dogma mandou o anexo {} no lugar de {attachment}",
+            delivery.attachment
+        );
+
+        let mut file = tokio::fs::File::create(destination).await?;
+        let mut digest = ContentDigest::new();
+        let mut block = vec![0_u8; BLOCK_LEN];
+        let mut got = 0_u64;
+        progress(0, delivery.byte_size);
+        while let Some(read) = stream.read(&mut block).await? {
+            if read == 0 {
+                break;
+            }
+            let piece = block.get(..read).unwrap_or_default();
+            file.write_all(piece).await?;
+            digest.feed(piece);
+            got = got.saturating_add(read as u64);
+            progress(got, delivery.byte_size);
+        }
+        file.flush().await?;
+        drop(file);
+
+        // The same question the Dogma asked on the way in: did it arrive whole.
+        // It says nothing about the file being good, and nothing here pretends
+        // it does.
+        if digest.finish() != delivery.content_hash || got != delivery.byte_size {
+            let _ = tokio::fs::remove_file(destination).await;
+            anyhow::bail!("o arquivo não chegou inteiro e foi descartado");
+        }
+
+        quarantine(destination);
+        Ok(got)
     }
 }

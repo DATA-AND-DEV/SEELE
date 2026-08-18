@@ -129,7 +129,7 @@ async fn ate<T>(
 #[tokio::test(flavor = "current_thread")]
 async fn um_arquivo_sobe_inteiro_e_a_mensagem_so_aparece_depois() -> Result<()> {
     let (endereco, servidor, casa) = dogma(64 * 1024).await?;
-    let mut quem_manda = entrar(endereco, 7).await?;
+    let quem_manda = entrar(endereco, 7).await?;
     let mut quem_espera = entrar(endereco, 9).await?;
 
     let caminho = arquivo(casa.path(), "foto.png", 3_000, 0xAB);
@@ -140,6 +140,7 @@ async fn um_arquivo_sobe_inteiro_e_a_mensagem_so_aparece_depois() -> Result<()> 
 
     let mut andamento = Vec::new();
     let enviados = quem_manda
+        .transfers()
         .send_attachment(&pedido(&caminho, "foto.png", 1), |feito, total| {
             andamento.push((feito, total));
         })
@@ -193,6 +194,7 @@ async fn um_arquivo_grande_demais_e_recusado_com_razao_e_nao_em_silencio() -> Re
     let caminho = arquivo(casa.path(), "grande.bin", grande, 1);
 
     let fim = cliente
+        .transfers()
         .send_attachment(&pedido(&caminho, "grande.bin", 1), |_, _| {})
         .await?;
     assert!(
@@ -244,6 +246,7 @@ async fn o_dogma_enche_sem_passar_do_teto_e_a_mensagem_diz_que_o_arquivo_expirou
             u8::try_from(numero).unwrap(),
         );
         cliente
+            .transfers()
             .send_attachment(&pedido(&caminho, &nome, numero + 1), |_, _| {})
             .await?;
 
@@ -319,6 +322,7 @@ async fn a_mesma_foto_de_duas_pessoas_e_um_arquivo_so() -> Result<()> {
     for semente in [7_u8, 9] {
         let mut cliente = entrar(endereco, semente).await?;
         cliente
+            .transfers()
             .send_attachment(&pedido(&caminho, "igual.png", 1), |_, _| {})
             .await?;
         ate(&mut cliente, |evento| match evento {
@@ -360,6 +364,7 @@ async fn quem_nao_pode_anexar_e_recusado_com_razao() -> Result<()> {
     let mut cliente = entrar(endereco, 7).await?;
     let caminho = arquivo(casa.path(), "foto.png", 500, 3);
     let fim = cliente
+        .transfers()
         .send_attachment(&pedido(&caminho, "foto.png", 1), |_, _| {})
         .await?;
     assert!(matches!(fim, Sent::Stopped { .. }), "{fim:?}");

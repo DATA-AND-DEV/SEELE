@@ -37,10 +37,13 @@ pub mod tofu;
 pub mod voice;
 
 pub use battery::{Battery, Link};
-pub use client::{Client, ConnectError, FlowControl, MediaChannel, Pattern, SessionInfo};
+pub use client::{
+    AttachmentRequest, Client, ConnectError, FlowControl, MediaChannel, Pattern, Sent, SessionInfo,
+    Transfers,
+};
 pub use ed25519_dalek::SigningKey;
 pub use identity::FilePinStore;
-pub use state::{CageSync, Changed, Ended, Message, Notice, Pilot, Room};
+pub use state::{CageSync, Changed, Ended, Message, Notice, Pilot, Room, TransferNotice};
 pub use tofu::{MemoryPinStore, PinDecision, PinStore, Verdict};
 pub use voice::{
     capture_devices, playback_devices, CaptureDevice, DeviceChoice, DeviceRates, PlaybackDevice,
@@ -60,11 +63,12 @@ pub use voice::{
 /// and that belongs in the core.
 pub use seele_audio::telemetry::{AudioTelemetry, LocalTelemetry, SourceTelemetry};
 pub use seele_proto::control::{
-    AlertReason, AlertSeverity, CageInfo, DisconnectReason, LineInfo, Permission, PilotProfile,
-    PilotState, Presence, ServerMessage, Subsystem, SubsystemHealth, Telemetry,
+    AlertReason, AlertSeverity, AttachmentInfo, AttachmentRefusal, AttachmentState, CageInfo,
+    DisconnectReason, LineInfo, Permission, PilotProfile, PilotState, Presence, ServerMessage,
+    Subsystem, SubsystemHealth, Telemetry,
 };
 pub use seele_proto::ids::{
-    CageId, ClientMessageId, LineId, MessageId, PilotId, RoleId, SessionId, Ssrc,
+    AttachmentId, CageId, ClientMessageId, LineId, MessageId, PilotId, RoleId, SessionId, Ssrc,
 };
 pub use seele_proto::sync_ratio::{SyncBand, SyncInputs, SyncRatio};
 pub use seele_proto::transport::DEFAULT_PORT;
