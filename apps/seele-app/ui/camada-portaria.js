@@ -411,23 +411,27 @@ function fecharPortaria() {
 // ------------------------------------------------------------------ ouvintes
 
 /**
- * O rótulo do botão fechado, sozinho.
+ * Uma leitura da porta, e as duas coisas que ela move.
  *
- * O que sobra da pergunta «e se ninguém estiver olhando?». A resposta forte é do
- * servidor — o pedido é uma linha em SQLite e sobrevive à janela minimizada, ao
- * app fechado e à máquina reiniciada, então nada se perde por ninguém olhar.
- * Isto aqui é a resposta fraca e barata: enquanto a janela está aberta, o botão
- * conta quantos estão esperando, sem que seja preciso abrir a camada para
- * descobrir.
+ * A resposta forte à pergunta «e se ninguém estiver olhando?» é do servidor: o
+ * pedido é uma linha em SQLite e sobrevive à janela minimizada, ao app fechado e
+ * à máquina reiniciada, então nada se perde por ninguém olhar. Estas duas são as
+ * respostas baratas, e são complementares.
+ *
+ * O **rótulo do botão** carrega o estado da porta e o número de quem espera —
+ * é o que se lê sem procurar, para quem está olhando a sessão. A **faixa**
+ * chama, e chama de qualquer tela: ver `avisarQueBatem` logo abaixo, e o motivo
+ * de ela existir apesar do rótulo.
  *
  * Cinco segundos, e não o quarto de segundo de `atualizar()`: ninguém bate à
  * porta quatro vezes por segundo, e uma consulta ao banco do Dogma por quadro
  * seria pagar caro por um número que muda uma vez por dia. Quando não se está
- * hospedando, `estado_da_porta` responde `hospedando: false` na hora e o rótulo
- * volta a ser a palavra sem estado.
+ * hospedando, `estado_da_porta` responde `hospedando: false` na hora, o rótulo
+ * volta a ser a palavra sem estado e a faixa some.
  *
- * O toque no ombro de verdade — uma notificação do sistema quando a janela não
- * está em foco — não está aqui, e está anotado nas pendências.
+ * O toque no ombro com a **janela fechada** — uma notificação do sistema — não
+ * está aqui: ela é do `tauri-plugin-notification`, que não está nas
+ * dependências. É o que sobrou da pendência 23, item 1.
  */
 async function atualizarPorta() {
   try {

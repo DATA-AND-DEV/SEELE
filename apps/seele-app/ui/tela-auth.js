@@ -328,6 +328,10 @@ function levarParaAEspera(falha, endereco) {
   const botao = $("auth-botao");
   botao.dataset.passo = "tentar";
   botao.textContent = "TENTAR ENTRAR DE NOVO";
+  // O botão veste o padrão da sessão, e aqui não há sessão nenhuma. Sem isto
+  // ele guardaria o azul da última que houve — um `PADRÃO: AZUL` pintado num
+  // botão que existe porque a entrada foi negada.
+  botao.dataset.padrao = "Offline";
   botao.disabled = recusado;
   $("auth-parede").hidden = !recusado;
   $("auth-parede").textContent = recusado
