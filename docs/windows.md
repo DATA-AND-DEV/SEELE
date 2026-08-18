@@ -250,11 +250,112 @@ também não vai.
 
 ---
 
+## 7 · Deixar que o Mac empacote aqui, por SSH
+
+Esta seção não é para usar o SEELE: é para **produzir** o instalador do Windows
+sem o GitHub Actions. O Tauri não cross-compila — o empacotador NSIS e o WebView2
+precisam de Windows de verdade —, então o `empacotar/publicar.sh` do Mac monta o
+macOS e o Linux lá e vem buscar o Windows aqui.
+
+Quem faz isso é o **OpenSSH Server**, que o Windows 10 e o 11 já trazem como
+recurso opcional. Ele vem **desligado de fábrica**; sem ligá-lo, o script do Mac
+não tem como chegar aqui e para no começo dizendo isso.
+
+### 7.1 Ligar o servidor
+
+PowerShell **como administrador**:
+
+```powershell
+Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+Set-Service -Name sshd -StartupType Automatic
+Start-Service sshd
+```
+
+A primeira linha baixa o recurso da Microsoft; as outras duas o põem no ar agora
+e nas próximas vezes que a máquina ligar. O instalador cria sozinho a regra de
+firewall para a porta 22 — confira, porque numa máquina com firewall de terceiro
+ela não aparece:
+
+```powershell
+Get-NetFirewallRule -Name *ssh* | Format-Table Name, Enabled, Direction
+```
+
+### 7.2 Deixar a chave do Mac entrar
+
+No **Mac**, se ainda não houver uma:
+
+```sh
+ssh-keygen -t ed25519          # se ~/.ssh/id_ed25519.pub não existir
+cat ~/.ssh/id_ed25519.pub      # é esta linha que vai para o Windows
+```
+
+**Aqui está a pegadinha que custa mais tempo nesta página.** O OpenSSH do Windows
+lê a chave de dois lugares diferentes conforme a conta, e para uma conta de
+administrador **não é** a pasta do usuário:
+
+| a conta é… | o arquivo é |
+|---|---|
+| comum | `C:\Users\<você>\.ssh\authorized_keys` |
+| **administrador** | `C:\ProgramData\ssh\administrators_authorized_keys` |
+
+Quase toda conta pessoal de Windows é administradora, então quase sempre é o
+segundo. E ele exige permissões estreitas — com permissão folgada o `sshd`
+**ignora o arquivo em silêncio**, que é o pior modo de falhar que existe:
+
+```powershell
+$arquivo = "$env:ProgramData\ssh\administrators_authorized_keys"
+Add-Content $arquivo "cole-aqui-a-linha-do-Mac"
+icacls $arquivo /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F"
+```
+
+Do Mac, confira antes de qualquer outra coisa:
+
+```sh
+ssh usuario@maquina-windows powershell -Command "echo ok"
+```
+
+Se isso imprimir `ok`, o resto funciona.
+
+### 7.3 O shell padrão é o `cmd`, e isso importa
+
+O OpenSSH do Windows entrega uma sessão de **`cmd`**, não de PowerShell. Quem
+esquece disso manda uma linha de PowerShell por SSH e recebe erros que não fazem
+sentido, porque as aspas foram comidas por outro interpretador no caminho.
+
+O `empacotar/publicar.sh` não depende de o shell padrão ser um ou outro: ele
+manda o PowerShell em `-EncodedCommand`, que é base64 de UTF-16LE — sem aspas,
+sem acento, sem `&`, sem nada que o `cmd` possa interpretar. Você não precisa
+trocar o shell padrão da máquina, e é melhor não trocar: mudar isso muda o
+comportamento de todo mundo que entra por SSH aqui.
+
+### 7.4 O repositório, e o que fica desta máquina
+
+O script espera um clone em `C:\SEELE` (ou onde `--repo-windows` disser),
+**no mesmo commit** do Mac — ele confere antes de compilar, porque três pacotes
+de códigos diferentes são três releases com o mesmo número:
+
+```powershell
+git -C C:\SEELE fetch --all
+git -C C:\SEELE checkout <o commit que o Mac disser>
+```
+
+E a chave de assinatura do projeto **não fica aqui**. Ela vive no Mac e atravessa
+pela entrada padrão do SSH a cada empacotamento, dentro do canal cifrado: não é
+gravada em disco nesta máquina e não aparece em linha de comando nenhuma — no
+Windows a linha de comando de um processo é legível por outros processos, e o
+`sshd` com `LogLevel VERBOSE` a escreveria no log de eventos. Uma chave que
+existe em dois discos é uma chave com duas chances de vazar, e esta é a que deixa
+assinar atualização para todo SEELE instalado.
+
+---
+
 ## Quando der errado
 
 | sintoma | causa mais provável |
 |---|---|
 | `link.exe not found` | Build Tools sem "Desktop com C++" (passo 1.1) |
+| SSH pede senha e a chave está no lugar | conta de administrador lê `C:\ProgramData\ssh\administrators_authorized_keys`, não a pasta do usuário (passo 7.2) |
+| SSH entra e o `cargo` "não existe" | o Rust foi instalado noutra conta: ele precisa estar no PATH de quem atende o SSH (passo 7.4) |
 | Erro no build do `shiguredo_opus` | `curl`/`tar` ausentes, ou sem saída para a internet |
 | `llvm-nm` não encontrado | `rustup component add llvm-tools` |
 | Cliente fica em PADRÃO: LARANJA e não passa | firewall — a regra é **UDP** |

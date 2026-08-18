@@ -84,9 +84,27 @@ Ele imprime o commit, o workflow e o repositório de origem. Se alguém trocar o
 arquivo em qualquer ponto entre a compilação e o seu disco, isto acusa — e
 acusa sem depender de nada que esta página diga.
 
-O que o atestado **não** faz é dizer que o software é bom. Ele diz de onde veio.
-As duas coisas são frequentemente confundidas, inclusive pelos avisos do sistema
-operacional na seção abaixo.
+**Nem toda versão tem atestado, e é preciso dizer isso aqui.** Ele é assinado
+pela infraestrutura que compila, e existe só para os pacotes que saíram do
+workflow. Quando a cota de Actions acaba — já aconteceu —, os instaladores são
+montados nas máquinas de quem publica, e para esses **não há atestado nem há
+como haver**: não existe execução de workflow a que amarrá-los. Nessas versões o
+comando acima responde que não encontrou atestado, e essa resposta significa
+«esta versão não veio do CI», e não «este arquivo foi adulterado».
+
+Como saber em qual das duas você está: **as versões montadas à mão dizem isso no
+fim desta página**, numa seção chamada "Como esta versão foi montada". Se ela não
+estiver aí, esta versão saiu do workflow e o atestado existe.
+
+O que continua valendo numa versão montada à mão é o que já estava dito acima —
+o `SHA256SUMS` responde «o arquivo chegou inteiro» — mais uma coisa: os `.sig`
+respondem «veio de quem tem a chave do projeto», que é a assinatura que o próprio
+SEELE confere antes de instalar uma atualização. O que se perde é exatamente
+«veio daquele código», e não há como fingir que não.
+
+O que o atestado **não** faz, quando existe, é dizer que o software é bom. Ele
+diz de onde veio. As duas coisas são frequentemente confundidas, inclusive pelos
+avisos do sistema operacional na seção abaixo.
 
 ---
 
