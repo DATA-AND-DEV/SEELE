@@ -158,17 +158,16 @@ impl std::fmt::Display for FalhaAoAbrir {
         match self {
             Self::NenhumRoteador => write!(
                 f,
-                "nenhum roteador respondeu ao pedido de porta (UPnP desligado, \
-                 ou uma rede que não deixa o pedido chegar)"
+                "nenhum roteador respondeu ao pedido de porta — ligue o UPnP, se \
+                 o seu tiver"
             ),
             Self::RoteadorRecusou(motivo) => {
                 write!(f, "o roteador recusou abrir a porta: {motivo}")
             }
             Self::SemSaidaParaInternet { externo } => write!(
                 f,
-                "o roteador respondeu, e o endereço dele ({externo}) não sai para \
-                 a internet — abrir a porta ali daria certo e não adiantaria \
-                 nada. É CGNAT da operadora, ou um segundo roteador acima deste"
+                "o endereço do roteador ({externo}) não sai para a internet: é \
+                 CGNAT da operadora, ou um segundo roteador acima deste"
             ),
             Self::SemEnderecoExterno(motivo) => write!(
                 f,
@@ -177,8 +176,7 @@ impl std::fmt::Display for FalhaAoAbrir {
             Self::SemEnderecoNaRedeDoRoteador { roteador } => write!(
                 f,
                 "o roteador respondeu de {roteador} e nenhum endereço desta \
-                 máquina está na rede dele — costuma ser uma VPN ligada, que \
-                 fica com todo o tráfego e deixa a placa de rede sem uso"
+                 máquina está na rede dele — costuma ser uma VPN ligada"
             ),
         }
     }

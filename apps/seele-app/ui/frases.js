@@ -36,9 +36,10 @@ const MOTIVOS = {
   // Encontrado pelo guarda que confere `EndReason` contra esta lista.
   //
   // Diz o que houve com a conversa, e não o que houve com o barramento: quem lê
-  // quer saber se perdeu alguma coisa. Perdeu, e voltar é o que a traz de volta.
+  // quer saber se perdeu alguma coisa. Perdeu, e voltar é o que a traz de volta
+  // — «repõe o que faltou» diz as duas coisas numa frase só.
   FellBehind:
-    "ESTE ENLACE FICOU PARA TRÁS DO DOGMA.\nAlgumas mensagens não chegaram a esta janela. Entrar de novo busca o histórico e repõe o que faltou.",
+    "ESTE ENLACE FICOU PARA TRÁS DO DOGMA.\nEntrar de novo busca o histórico e repõe o que faltou.",
 
   // ---- a portaria do ADR 0030 ----
   //
@@ -54,11 +55,13 @@ const MOTIVOS = {
   // mesmo instante, e o que ficou de pé é o pedido, do outro lado. Uma frase
   // que dissesse «aguarde» descreveria uma barra girando que não existe.
   AdmissionPending:
-    "QUEM HOSPEDA AINDA NÃO DECIDIU SOBRE VOCÊ.\nO seu pedido ficou guardado no Dogma, com a sua impressão digital. " +
-    "Ele não vence — tente entrar de novo quando quem hospeda tiver olhado.",
+    "QUEM HOSPEDA AINDA NÃO DECIDIU SOBRE VOCÊ.\n" +
+    "O pedido ficou guardado e não vence: tente entrar de novo mais tarde.",
+  // «Não foi a senha nem o convite» fica porque muda o que a pessoa faz: sem
+  // ela, a primeira reação é conferir os dois, e não há nada errado com eles.
   AdmissionDenied:
-    "QUEM HOSPEDA RECUSOU A SUA ENTRADA.\nNão é banimento, e não foi a sua senha nem o seu convite: " +
-    "foi uma decisão sobre a sua chave. Fale com quem hospeda por outro canal.",
+    "QUEM HOSPEDA RECUSOU A SUA ENTRADA.\n" +
+    "Não foi a senha nem o convite: fale com quem hospeda por outro canal.",
 
   LinkLost: "ENLACE PERDIDO",
 };
@@ -88,7 +91,7 @@ const AVISOS = {
   CageDeleted: "A JAULA EM QUE VOCÊ ESTAVA FOI APAGADA",
   LineDeleted: "A LINHA QUE VOCÊ LIA FOI APAGADA, COM TUDO QUE HAVIA NELA",
   LastCage:
-    "ESTE É O ÚNICO CAGE DO DOGMA, E ELE FICA.\nUm Dogma sem Cage nenhum não tem onde falar. Faça outra sala antes de apagar esta.",
+    "ESTE É O ÚNICO CAGE DO DOGMA, E ELE FICA.\nFaça outra sala antes de apagar esta.",
 };
 
 /**
@@ -179,12 +182,12 @@ const FRASES = {
     // conserto na mão de quem lê: falta pontuação, não falta endereço. Mandar
     // procurar um caractere errado seria mandar procurar o que não existe.
     EnderecoIpv6SemColchetes:
-      "FALTAM OS COLCHETES NESTE ENDEREÇO IPV6.\nO «:» que separa a porta é o mesmo que separa um endereço IPv6, então o endereço vai entre colchetes: seele://[2001:db8::1]:8383",
+      "FALTAM OS COLCHETES NESTE ENDEREÇO IPV6.\nEle vai assim: seele://[2001:db8::1]:8383",
     // Degrau 4 do ADR 0022: o `enc` do link veio pela metade. Frase própria e
     // não `EnderecoInvalido` porque o que falta é outra coisa, e porque o resto
     // do link continua bom — o que se perde é o furo de NAT, não o Dogma.
     BilheteInvalido:
-      "A PARTE DESTE CONVITE QUE SERVE PARA FURAR O NAT VEIO PELA METADE.\nO resto do link pode estar bom: tente de novo com o link inteiro, ou peça outro a quem hospeda.",
+      "ESTE CONVITE VEIO CORTADO NA PARTE QUE FURA O NAT.\nTente de novo com o link inteiro, ou peça outro a quem hospeda.",
     ImpressaoDigitalInvalida: "ESTE CONVITE CHEGOU CORTADO OU ADULTERADO",
     TokenInvalido: "O CONVITE DENTRO DESTE LINK NÃO É UM CONVITE",
     CageInvalido: "O CAGE DESTE CONVITE NÃO É UM NÚMERO",
@@ -202,7 +205,7 @@ const FRASES = {
     // tem porta nenhuma para mexer. A frase diz isso em vez de deixar a pessoa
     // procurando o que fez de errado.
     NaoEstaHospedando:
-      "ESTA JANELA NÃO ESTÁ HOSPEDANDO NENHUM DOGMA.\nA porta que se abre e fecha aqui é a do Dogma que roda nesta máquina. No Dogma de outra pessoa, quem decide quem entra é quem o hospeda.",
+      "ESTA JANELA NÃO ESTÁ HOSPEDANDO NENHUM DOGMA.\nNo Dogma de outra pessoa, quem decide quem entra é quem o hospeda.",
     BancoNaoRespondeu: "O DOGMA DESTA MÁQUINA NÃO RESPONDEU",
 
     // Até onde o convite chega — a escada do ADR 0022. Vai junto do link, e não
@@ -213,32 +216,40 @@ const FRASES = {
     //
     // Nenhuma promete alcance. Mesmo com a porta aberta o firewall do outro
     // lado pode recusar, e "deve funcionar" é o que dá para prometer.
-    PortaNoRoteador:
-      "O ROTEADOR ABRIU A PORTA.\nEste link deve funcionar pela internet, e também para quem estiver na sua rede — ele leva os dois endereços.",
-    // Degrau 4, o que faz «manda o link e funciona» valer numa casa com CGNAT
-    // ou com o UPnP desligado. «Deve funcionar» como as outras, e por um motivo
-    // a mais: com NAT simétrico dos dois lados o furo não abre, e a saída
-    // continua sendo encaminhar a porta à mão — o ADR 0022 deixou retransmissão
-    // fora de escopo por decisão, então esta frase não pode prometer o que
-    // nenhum código nosso entrega.
     //
-    // A segunda linha diz o que o ponto de encontro aprende. Um produto que se
-    // vende como «sem serviço no meio» acabou de ganhar um serviço no meio,
-    // opcional — e dizer isso aqui, na tela em que o link aparece, é a
-    // diferença entre honestidade e propaganda.
+    // Uma frase, e uma segunda só quando ela muda o que a pessoa faz. Que o
+    // link leva também o endereço da rede de casa era verdade em três destas
+    // quatro e não fazia ninguém agir: quem está perto entra do mesmo jeito,
+    // sem ler nada. Foi para `docs/alcance-pela-internet.md`, com o resto do
+    // que estas frases carregavam — as marcas de VPN, o NAT simétrico, o
+    // Tailscale.
+    PortaNoRoteador:
+      "O ROTEADOR ABRIU A PORTA.\nEste link deve funcionar pela internet e na sua rede.",
+    // Degrau 4, o que faz «manda o link e funciona» valer numa casa com CGNAT
+    // ou com o UPnP desligado. «Deve funcionar» como as outras: com NAT
+    // simétrico dos dois lados o furo não abre, e o ADR 0022 deixou
+    // retransmissão fora de escopo por decisão.
+    //
+    // A **única** da escada com um terceiro no meio, e a única que ainda gasta
+    // duas linhas cheias. Um produto que se vende como «sem serviço no meio»
+    // ganhou um serviço no meio, opcional, e o que ele aprende é dito aqui — na
+    // tela em que o link aparece — porque a alternativa é a pessoa descobrir
+    // depois. O guarda `the_nat_punching_rung_promises_nothing_it_cannot_keep`
+    // cobra as duas metades, e ele tem razão: isto não encolhe mais.
     FuroDeNat:
-      "UM PONTO DE ENCONTRO APRESENTOU ESTA MÁQUINA: O LINK DEVE FUNCIONAR PELA INTERNET, SEM MEXER NO ROTEADOR.\nSe não funcionar, as duas redes são do tipo que não deixa furar — aí encaminhe a porta 8383 no roteador à mão. O endereço da sua rede vai junto, para quem estiver perto.\nO ponto de encontro fica sabendo que endereço falou com o seu, e quando; nunca o que foi dito. Para usar o seu, ou nenhum: docs/ponto-de-encontro.md.",
+      "UM PONTO DE ENCONTRO ABRIU O CAMINHO: SABE QUEM FALOU, NUNCA O QUE FOI DITO (docs/ponto-de-encontro.md).\n" +
+      "Deve funcionar pela internet; se não, abra a porta 8383 no roteador.",
     Ipv6Direto:
-      "ESTE LINK LEVA UM ENDEREÇO IPv6.\nAlcança de qualquer lugar, se o firewall do seu roteador deixar entrar, mas só quem também tiver IPv6. O endereço da sua rede vai junto, para quem estiver perto.",
+      "ESTE LINK LEVA UM ENDEREÇO IPv6.\nSó alcança quem também tiver IPv6, e se o seu roteador deixar entrar.",
     // O degrau que nasceu de um defeito de campo: um Windows com Cloudflare
     // WARP tinha IPv6 global — do túnel —, e a escada declarava «alcança de
     // qualquer lugar» embaixo de um link que não aceita entrada nenhuma. Frase
     // própria porque o que se faz a respeito é diferente das outras três: aqui
     // a saída é desligar a VPN, e não mexer no roteador.
     RedeLocalOuVpn:
-      "ESTE LINK FUNCIONA NA SUA REDE, OU PARA QUEM ESTIVER NA MESMA VPN QUE VOCÊ.\nO único endereço que sai desta máquina vem de uma VPN, e VPN de navegação (WARP, Proton, Nord) não aceita conexão de entrada. Para alcançar de fora: desligue a VPN e encaminhe a porta 8383 no roteador à mão.",
+      "ESTE LINK SÓ ALCANÇA A SUA REDE, OU QUEM ESTIVER NA MESMA VPN.\nPara alcançar de fora, desligue a VPN e encaminhe a porta 8383 no roteador.",
     SoRedeLocal:
-      "ESTE LINK SÓ FUNCIONA NA SUA REDE.\nNão consegui abrir a porta no roteador. Para alcançar de fora: encaminhe a porta 8383 no roteador à mão, ou ponha os dois lados na mesma VPN de rede (Tailscale, WireGuard).",
+      "ESTE LINK SÓ FUNCIONA NA SUA REDE.\nPara alcançar de fora, encaminhe a porta 8383 no roteador à mão.",
 
     // Escolher microfone, no Terminal Dogma. Duas frases e não uma porque pedem
     // coisas diferentes de quem lê: a primeira não tem conserto na tela, e a
@@ -257,19 +268,17 @@ const FRASES = {
     // chegou assinado por outra pessoa. Escrever «não deu» nas seis mandaria
     // todo mundo apertar o botão de novo, inclusive nesses dois casos.
     //
-    // As seis dizem, cada uma à sua maneira, que **esta máquina continua como
-    // estava**. Não é consolo: o pacote é conferido inteiro antes de qualquer
-    // arquivo instalado ser tocado, então não existe meia instalação nesses
-    // caminhos, e quem lê um erro de atualizador precisa saber disso antes de
-    // sair procurando o que ficou quebrado.
+    // Uma só ainda diz que **esta máquina continua como estava**: a que falha
+    // depois de mexer em arquivo instalado. Nas outras seis nada chegou a ser
+    // instalado, e dizê-lo era tranquilizar sobre um susto que a própria frase
+    // inventava. Por que o pacote é conferido inteiro antes de qualquer arquivo
+    // ser tocado: `docs/assinatura-e-atualizacao.md`.
     NaoConfigurado:
       "ESTE SEELE SAIU SEM CHAVE DE ATUALIZAÇÃO.\n" +
-      "Não é defeito: é um executável feito antes da chave existir, ou compilado do código-fonte. " +
-      "Não adianta tentar de novo — baixe a versão nova da página de releases, como sempre.",
+      "Não adianta tentar de novo: baixe a versão nova da página de releases.",
     NaoAlcancei:
       "NÃO CONSEGUI PERGUNTAR SE HÁ VERSÃO NOVA.\n" +
-      "A página de releases não respondeu, ou respondeu algo que não entendi. " +
-      "Nada foi baixado e nada mudou nesta máquina; tente de novo daqui a pouco.",
+      "A página de releases não respondeu; tente de novo daqui a pouco.",
     // Separada da de cima, e a diferença é tudo para quem lê: ali a rede
     // falhou e tentar de novo faz sentido; aqui a rede funcionou e a resposta
     // foi «não há nada publicado». Mandar conferir a conexão seria mandar
@@ -277,26 +286,17 @@ const FRASES = {
     // botão dizendo que a página não respondeu sobre uma página que respondeu.
     NadaPublicado:
       "AINDA NÃO HÁ VERSÃO PUBLICADA PARA BAIXAR.\n" +
-      "A página de releases respondeu, e não há release com manifesto de " +
-      "atualização nela. Não é problema da sua conexão e não adianta tentar de " +
-      "novo: enquanto não sair uma versão nova por este caminho, este app " +
-      "continua sendo o mais recente que existe.",
+      "Não é a sua conexão, e não adianta tentar de novo: este app é o mais recente que existe.",
     SemPacoteParaEsteSistema:
-      "HÁ VERSÃO NOVA, MAS NÃO PARA ESTE SISTEMA.\n" +
-      "O release não traz pacote para este sistema operacional ou para este processador. " +
-      "Nada foi tocado aqui.",
+      "HÁ VERSÃO NOVA, MAS NÃO PARA ESTE SISTEMA NEM PARA ESTE PROCESSADOR.",
     AssinaturaRecusada:
       "O PACOTE BAIXADO NÃO FOI ASSINADO POR ESTE PROJETO.\n" +
-      "Ele foi jogado fora sem tocar em nada instalado, e o SEELE continua o de antes. " +
-      "Esta é a única falha desta lista que não é para tentar de novo: baixe da página de releases " +
-      "e confira com quem hospeda de onde veio o que você estava atualizando.",
+      "Ele foi jogado fora, e não é para tentar de novo: baixe da página de releases.",
     NaoInstalei:
-      "O PACOTE CHEGOU INTEIRO E CONFERIDO, E A TROCA DOS ARQUIVOS FALHOU.\n" +
-      "O SEELE continua o de antes, inteiro e utilizável — não há meia instalação. " +
-      "Feche outras cópias abertas e tente de novo.",
+      "A TROCA DOS ARQUIVOS FALHOU, E NÃO HÁ MEIA INSTALAÇÃO.\n" +
+      "Feche outras cópias do SEELE e tente de novo.",
     NadaEscolhido:
-      "NÃO HÁ VERSÃO NOVA ESCOLHIDA PARA INSTALAR.\n" +
-      "Procure de novo: instalar sempre instala o que a última procura mostrou na tela.",
+      "NÃO HÁ VERSÃO NOVA ESCOLHIDA PARA INSTALAR.\n" + "Procure de novo antes de instalar.",
 };
 
 /**
@@ -312,41 +312,30 @@ const FRASES = {
 const ANEXOS = {
   NotAllowed:
     "VOCÊ NÃO PODE ANEXAR ARQUIVO NESTE DOGMA.\n" +
-    "Escrever e anexar são permissões separadas: quem hospeda pode deixar você " +
-    "falar sem deixar você pôr arquivo no disco dele. Peça a permissão a quem hospeda.",
+    "Peça a permissão a quem hospeda.",
   TooLarge:
     "ESTE ARQUIVO É GRANDE DEMAIS PARA ESTE DOGMA.\n" +
-    "Cada Dogma tem um teto de disco escolhido por quem hospeda, e o limite por " +
-    "arquivo é uma fração dele — para uma subida sozinha não poder esvaziar o " +
-    "histórico de todo mundo. Tentar de novo com o mesmo arquivo dá no mesmo.",
+    "Tentar de novo com o mesmo arquivo dá no mesmo.",
   NoRoom:
-    "O DOGMA ESTÁ COM O TETO INTEIRO OCUPADO POR TRANSFERÊNCIAS EM ANDAMENTO.\n" +
-    "Nada foi perdido e nada foi apagado. Tente de novo daqui a pouco.",
+    "O DISCO DESTE DOGMA ESTÁ TOMADO POR TRANSFERÊNCIAS EM ANDAMENTO.\n" +
+    "Tente de novo daqui a pouco.",
   SizeMismatch:
-    "O ARQUIVO NÃO CHEGOU INTEIRO, E O DOGMA NÃO O GUARDOU.\n" +
-    "Nada foi publicado na Linha. Mandar de novo manda o arquivo inteiro outra vez, " +
-    "do começo.",
+    "O ARQUIVO NÃO CHEGOU INTEIRO, E NADA FOI PUBLICADO NA LINHA.\n" +
+    "Mandar de novo manda o arquivo inteiro outra vez, do começo.",
   HashDidNotMatch:
     "O QUE CHEGOU NÃO É O QUE SAIU DAQUI, E O DOGMA RECUSOU.\n" +
-    "É a única pergunta que um Dogma consegue responder sobre um arquivo — se ele " +
-    "chegou inteiro — e a resposta foi não. Nada foi publicado na Linha.",
+    "Nada foi publicado na Linha.",
   RateLimited:
     "VOCÊ ESTÁ MANDANDO ARQUIVO MAIS RÁPIDO DO QUE ESTE DOGMA ACEITA.\n" +
-    "Não é castigo e não é limite de tamanho: é ritmo. Espere um pouco e mande de novo.",
-  Unavailable:
-    "ESTE DOGMA NÃO GUARDA ARQUIVO.\n" +
-    "Quem hospeda não deu a ele um lugar para guardar. Só texto e voz por aqui.",
-  NotFound:
-    "ESTE ARQUIVO NÃO EXISTE NESTE DOGMA.\n" +
-    "Ou ele nunca existiu, ou está numa Linha que você não pode ler.",
+    "Espere um pouco e mande de novo.",
+  Unavailable: "ESTE DOGMA NÃO GUARDA ARQUIVO.\nSó texto e voz por aqui.",
+  NotFound: "ESTE ARQUIVO NÃO EXISTE NESTE DOGMA, OU ESTÁ NUMA LINHA QUE VOCÊ NÃO PODE LER.",
   Expired:
-    "ESTE ARQUIVO EXPIROU.\n" +
-    "O Dogma guarda anexos até um teto de disco, e ao encher o mais antigo sai. " +
-    "O texto da mensagem continua; os bytes não. Peça a quem mandou para mandar de novo.",
+    "ESTE ARQUIVO EXPIROU, E O DOGMA APAGOU OS BYTES PARA ABRIR ESPAÇO.\n" +
+    "Peça a quem mandou para mandar de novo.",
   Malformed:
-    "O DOGMA NÃO ENTENDEU O PEDIDO DE ARQUIVO.\n" +
-    "Nada foi publicado na Linha. Se acontecer de novo, as duas pontas podem estar " +
-    "em versões diferentes do SEELE.",
+    "O DOGMA NÃO ENTENDEU O PEDIDO DE ARQUIVO, E NADA FOI PUBLICADO NA LINHA.\n" +
+    "Se acontecer de novo, as duas pontas podem estar em versões diferentes.",
 };
 
 /**
@@ -361,13 +350,10 @@ const TRANSFERENCIAS = {
   Sent: "ARQUIVO ENTREGUE",
   Refused: "O DOGMA RECUSOU O ARQUIVO",
   Fell:
-    "A TRANSFERÊNCIA CAIU.\n" +
-    "Nada foi publicado na Linha, e não há de onde continuar: mandar de novo manda " +
-    "o arquivo inteiro outra vez, do começo.",
+    "A TRANSFERÊNCIA CAIU, E NÃO HÁ DE ONDE CONTINUAR.\n" +
+    "Mandar de novo manda o arquivo inteiro outra vez, do começo.",
   Saved: "ARQUIVO SALVO",
-  NotSaved:
-    "NÃO DEU PARA SALVAR O ARQUIVO.\n" +
-    "Nada foi gravado pela metade. Tente de novo.",
+  NotSaved: "NÃO DEU PARA SALVAR O ARQUIVO.\nNada foi gravado pela metade; tente de novo.",
 };
 
 /**
@@ -386,18 +372,11 @@ const TRANSFERENCIAS = {
 const PREVIAS = {
   TooBig:
     "ESTE ARQUIVO É GRANDE DEMAIS PARA UMA PRÉVIA.\n" +
-    "Não é o teto do Dogma e não tem nada de errado com ele: desenhar uma imagem " +
-    "custa memória e tempo nesta máquina, e uma grande o bastante trava esta " +
-    "janela. Salve o arquivo e abra-o no seu sistema, fora daqui.",
+    "Salve-o e abra no seu sistema, fora daqui.",
   NotAPicture:
     "ESTE ARQUIVO NÃO É UMA DAS IMAGENS QUE ESTA JANELA DESENHA.\n" +
-    "Desenhar um formato é entregar bytes de outra pessoa a um decodificador, e " +
-    "esta janela entrega quatro. Documento, som, vídeo e programa ficam como " +
-    "nome e tamanho, para salvar.",
-  DidNotArrive:
-    "A PRÉVIA NÃO VEIO.\n" +
-    "Ou os bytes já saíram do Dogma, ou a busca caiu no meio, ou o que chegou não " +
-    "era o que saiu. Nada foi desenhado pela metade. Tente de novo daqui a pouco.",
+    "Ele continua aqui, com nome e tamanho, para salvar.",
+  DidNotArrive: "A PRÉVIA NÃO VEIO.\nTente de novo daqui a pouco.",
 };
 
 /**
@@ -415,18 +394,18 @@ function fraseDePrevia(previa) {
   if (nome === "Disagrees") {
     const achado = previa.found
       ? `os primeiros bytes dele são de «${previa.found}»`
-      : "os primeiros bytes dele não são de nenhuma imagem que esta janela desenha";
+      : "os primeiros bytes dele não são de imagem nenhuma";
     return (
       "ESTE ARQUIVO NÃO É O QUE DIZ SER.\n" +
-      `Ele se apresentou como «${previa.claimed}», e ${achado}. ` +
-      "Isto não é erro de transferência: o arquivo chegou inteiro e o hash fechou. " +
-      "O que não fecha é o que ele diz ser com o que ele é, e o nome de um arquivo " +
-      "é texto que quem mandou escolheu. Nada foi desenhado; o arquivo continua " +
-      "aqui, com o nome que veio, para salvar se você quiser."
+      `Ele chegou inteiro, se apresentou como «${previa.claimed}», e ${achado} ` +
+      "— continua aqui, para salvar."
     );
   }
+  // O número entra no título, e não numa linha nova. Uma terceira linha é a
+  // redação que esta tela acabou de perder, e o máximo é justamente o que
+  // qualifica o «grande demais» — ele pertence à frase que o diz.
   if (nome === "TooBig" && typeof razao.limit === "number") {
-    return `${PREVIAS.TooBig}\nUma prévia baixa no máximo ${emBytes(razao.limit)}.`;
+    return PREVIAS.TooBig.replace(".\n", `: O MÁXIMO É ${emBytes(razao.limit)}.\n`);
   }
   return PREVIAS[nome] ?? `FALHA NÃO IDENTIFICADA (${nome})`;
 }
@@ -435,7 +414,8 @@ function fraseDePrevia(previa) {
  * A frase de uma recusa de anexo.
  *
  * `TooLarge` chega com o limite dentro, porque «grande demais» sem número manda
- * a pessoa tentar de novo com um arquivo que também é grande demais.
+ * a pessoa tentar de novo com um arquivo que também é grande demais. Ele entra
+ * no título, e não numa linha nova: é o que qualifica o «demais».
  */
 function fraseDeAnexo(razao) {
   if (razao && typeof razao === "object") {
@@ -443,7 +423,7 @@ function fraseDeAnexo(razao) {
     const base = ANEXOS[nome];
     if (!base) return `FALHA NÃO IDENTIFICADA (${nome})`;
     if (nome === "TooLarge" && typeof razao[nome]?.limit === "number") {
-      return `${base}\nO limite deste Dogma é ${emBytes(razao[nome].limit)} por arquivo.`;
+      return base.replace(".\n", `: O LIMITE É ${emBytes(razao[nome].limit)} POR ARQUIVO.\n`);
     }
     return base;
   }

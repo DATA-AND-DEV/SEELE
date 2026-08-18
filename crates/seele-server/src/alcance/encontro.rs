@@ -198,18 +198,18 @@ impl std::fmt::Display for FalhaNoEncontro {
             Self::NaoResolve(nome) if nome == PONTO_PADRAO => write!(
                 f,
                 "o ponto de encontro padrão «{nome}» ainda não está no ar — é \
-                 pendência nossa, não desta máquina. Para usar o degrau 4 hoje, \
-                 aponte {VARIAVEL} para um que você suba"
+                 pendência nossa, não desta máquina; aponte {VARIAVEL} para um \
+                 que você suba"
             ),
             Self::NaoResolve(nome) => write!(
                 f,
-                "não achei o ponto de encontro «{nome}» — o nome não resolve, \
-                 ou esta máquina está sem DNS"
+                "não achei o ponto de encontro «{nome}»: o nome não resolve, ou \
+                 esta máquina está sem DNS"
             ),
             Self::SemResposta => write!(
                 f,
-                "o ponto de encontro não respondeu a tempo — pode estar fora do \
-                 ar, ou esta rede não deixa UDP sair"
+                "o ponto de encontro não respondeu a tempo — fora do ar, ou esta \
+                 rede não deixa UDP sair"
             ),
             Self::SemEscutaDeAvisos(erro) => write!(
                 f,
@@ -218,8 +218,7 @@ impl std::fmt::Display for FalhaNoEncontro {
             Self::SemSocketDoDogma => write!(
                 f,
                 "não consegui falar com o ponto de encontro pelo mesmo socket em \
-                 que o Dogma atende, e um furo aberto para outro socket não \
-                 serve para nada"
+                 que o Dogma atende"
             ),
         }
     }
