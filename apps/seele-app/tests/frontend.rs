@@ -4730,3 +4730,38 @@ fn the_name_travels_as_it_was_and_the_type_is_carried_as_a_claim() {
          only honest answer when nothing is known: {tipo}"
     );
 }
+
+#[test]
+fn the_reason_a_rung_failed_is_not_prefixed_by_a_label_it_already_carries() {
+    // From a real screen, on a real network: the detail line under the invite
+    // read «o roteador respondeu: o roteador respondeu, e o endereço dele
+    // (100.65.128.5) não sai para a internet».
+    //
+    // The label was added here without reading the sentences it would sit in
+    // front of. All four `FalhaAoAbrir` variants name the router, and every
+    // `FalhaNoEncontro` names the rendezvous — they are written as whole
+    // explanations, because that is what `specs` asks of a failure.
+    //
+    // So the rule is the absence: this function must not build the detail text
+    // by concatenating anything in front of the reason it was handed.
+    let mostrar = body_of(&without_comments(&scripts()), "function mostrarAlcance");
+
+    for prefixo in ["o roteador respondeu:", "o ponto de encontro:"] {
+        assert!(
+            !mostrar.contains(prefixo),
+            "`mostrarAlcance` glues `{prefixo}` in front of a sentence that already \
+             says it, and the screen stutters:\n{mostrar}"
+        );
+    }
+
+    // And the positive half, so the fix cannot be «delete the line». The reason
+    // still has to reach the page.
+    assert!(
+        mostrar.contains("portaRecusada") && mostrar.contains("encontroRecusado"),
+        "one of the two reasons stopped being drawn at all:\n{mostrar}"
+    );
+    assert!(
+        mostrar.contains("convite-alcance-detalhe"),
+        "the reason is drawn without the class that makes it secondary:\n{mostrar}"
+    );
+}

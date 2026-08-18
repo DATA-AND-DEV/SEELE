@@ -150,6 +150,25 @@ impl std::fmt::Display for FalhaNoEncontro {
                 f,
                 "o ponto de encontro está desligado nesta máquina ({VARIAVEL})"
             ),
+            // Duas frases, e a diferença não é zelo: elas apontam para pessoas
+            // diferentes.
+            //
+            // Quando o nome é o **nosso** e ele não resolve, a causa é que
+            // ninguém o publicou ainda — pendência 21, e é tarefa de infra
+            // nossa. Dizer «o nome não resolve, ou esta máquina está sem DNS»
+            // manda quem hospeda procurar defeito no próprio computador por uma
+            // coisa que não é dele. Apareceu exatamente assim numa tela de
+            // verdade, e é o tipo de mentira por omissão que o ADR 0022 existe
+            // para não deixar acontecer.
+            //
+            // Quando o nome é um que a pessoa escolheu, aí sim a suspeita é do
+            // lado dela, e a frase antiga é a certa.
+            Self::NaoResolve(nome) if nome == PONTO_PADRAO => write!(
+                f,
+                "o ponto de encontro padrão «{nome}» ainda não está no ar — é \
+                 pendência nossa, não desta máquina. Para usar o degrau 4 hoje, \
+                 aponte {VARIAVEL} para um que você suba"
+            ),
             Self::NaoResolve(nome) => write!(
                 f,
                 "não achei o ponto de encontro «{nome}» — o nome não resolve, \
@@ -524,6 +543,44 @@ async fn furar(dogma: &std::net::UdpSocket, destino: SocketAddr, marca: &Marca) 
 
 #[cfg(test)]
 mod testes {
+    #[test]
+    fn o_ponto_padrao_que_nao_resolve_nao_culpa_a_maquina_de_quem_hospeda() {
+        // Apareceu numa tela de verdade: «o nome não resolve, ou esta máquina
+        // está sem DNS», sobre o nosso próprio endereço, que ninguém publicou
+        // ainda. Quem lê procura defeito no próprio computador por uma
+        // pendência nossa — a 21.
+        let nosso = super::FalhaNoEncontro::NaoResolve(super::PONTO_PADRAO.to_owned()).to_string();
+
+        // A frase acusadora inteira, e não o pedaço `esta máquina`.
+        //
+        // A primeira versão desta asserção procurava só o pedaço — e reprovou o
+        // próprio conserto, porque a frase nova diz «não desta máquina», que é o
+        // contrário. Um guarda que casa com o texto que o desmente é um guarda
+        // que não sabe o que está lendo.
+        assert!(
+            !nosso.contains("está sem DNS"),
+            "a frase do ponto padrão joga a suspeita para o lado de quem hospeda: {nosso}"
+        );
+        assert!(
+            nosso.contains("pendência nossa") || nosso.contains("não está no ar"),
+            "a frase não diz que a causa é nossa: {nosso}"
+        );
+        assert!(
+            nosso.contains(super::VARIAVEL),
+            "a frase não diz o que fazer para usar o degrau 4 hoje: {nosso}"
+        );
+
+        // E o outro lado da mesma moeda: um nome que a pessoa escolheu e não
+        // resolve **é** suspeita do lado dela, e a frase antiga é a certa.
+        let dela =
+            super::FalhaNoEncontro::NaoResolve("encontro.davi.exemplo".to_owned()).to_string();
+        assert!(
+            dela.contains("esta máquina") || dela.contains("não resolve"),
+            "um ponto escolhido pela pessoa perdeu a frase que aponta para o lado dela: {dela}"
+        );
+        assert_ne!(nosso, dela, "as duas situações dizem a mesma coisa");
+    }
+
     use super::*;
 
     #[test]
