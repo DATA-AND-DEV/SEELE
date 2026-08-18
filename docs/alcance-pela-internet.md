@@ -52,15 +52,23 @@ resto.
 
 ## O que a tela te diz, e o que fazer com cada resposta
 
+A tela diz **uma frase**, e uma segunda só quando ela muda o que você faz. É de
+propósito: um aviso de três parágrafos embaixo de um link é um aviso que ninguém
+lê. O porquê de cada resposta, as marcas de roteador e de VPN, e as saídas que
+não cabem numa frase estão aqui — esta página é a versão longa, e ela existe
+justamente para a tela poder ser curta.
+
 ### "O roteador abriu a porta"
 
-Deu certo. O link deve funcionar pela internet.
+Deu certo. O link deve funcionar pela internet, e também na sua rede: ele leva os
+dois endereços, e a tela não gasta uma linha dizendo isso porque quem está perto
+entra sem precisar ler nada.
 
 *Deve*, e não *vai*: ainda existe a chance de um firewall no caminho do seu
 amigo recusar a saída. É raro. Se ele não entrar, peça para tentar de outra
 rede — do celular na rede móvel, por exemplo.
 
-### "Um ponto de encontro apresentou esta máquina"
+### "Um ponto de encontro abriu o caminho"
 
 O degrau 4. Você está numa rede em que o roteador não abriu a porta — CGNAT, dois
 roteadores, UPnP desligado —, e o SEELE conseguiu assim mesmo: um serviço
@@ -78,10 +86,11 @@ encaminhar a porta à mão, ou uma VPN de rede entre vocês.
 O link continua levando o endereço da sua rede junto, então quem estiver na sua
 casa entra pelo caminho de sempre, sem passar por ponto de encontro nenhum.
 
-### "Este link é IPv6"
+### "Este link leva um endereço IPv6"
 
 O seu computador tem um endereço IPv6 público, e o link usa ele. Funciona **de
-qualquer lugar, para quem também tiver IPv6**.
+qualquer lugar, para quem também tiver IPv6**. O endereço da sua rede vai junto,
+como em todos os degraus, então quem está na sua casa entra do mesmo jeito.
 
 No Brasil isso cobre boa parte da internet móvel e uma fatia crescente da fixa.
 Se o seu amigo não tiver IPv6, ele vai precisar estar na sua rede, ou você vai
@@ -96,7 +105,7 @@ Duas coisas podem atrapalhar mesmo com IPv6 dos dois lados:
 - **Endereços que mudam.** Muitos provedores trocam o prefixo IPv6 de tempos em
   tempos. Um link gerado ontem pode não valer hoje. Gere um novo.
 
-### "Este link funciona na sua rede, ou para quem estiver na mesma VPN"
+### "Este link só alcança a sua rede, ou quem estiver na mesma VPN"
 
 Você está com uma **VPN ligada**, e ela é o único caminho que sai desta máquina.
 
@@ -137,8 +146,8 @@ possíveis são estes.
 
 #### "Nenhum roteador respondeu ao pedido de porta"
 
-Quase sempre é **UPnP desligado**. Muitos roteadores vêm assim de fábrica, e
-alguns provedores desligam de propósito.
+Quase sempre é **UPnP desligado** — é o que a frase manda ligar. Muitos
+roteadores vêm assim de fábrica, e alguns provedores desligam de propósito.
 
 Entre na configuração do roteador (normalmente `192.168.0.1` ou `192.168.1.1`
 no navegador) e procure por **UPnP** — pode estar escrito "UPnP", "Universal
@@ -154,7 +163,20 @@ Ele ouviu e disse não. Alguns roteadores só aceitam pedidos de UPnP de
 dispositivos numa lista, e outros têm a função quebrada. A saída é encaminhar a
 porta à mão — veja abaixo.
 
-#### "O endereço dele não sai para a internet"
+#### "Nenhum endereço desta máquina está na rede dele"
+
+O roteador respondeu — de `192.168.x.x`, digamos — e o único endereço que esta
+máquina tem é o de um túnel, `172.16.x.x`. **Costuma ser uma VPN ligada**: ela
+fica com todo o tráfego de saída e deixa a placa de rede sem uso, então a
+máquina não tem endereço nenhum na rede em que o roteador encaminharia.
+
+Pedir o mapeamento assim mesmo abriria a porta apontando para um endereço que
+não existe naquela rede — e o roteador diria `Ok`. É outro sucesso mentiroso, da
+mesma família do CGNAT, e é por isso que a pergunta vem antes do pedido.
+
+A saída é a mesma da seção sobre VPN, acima: desligue a VPN e hospede de novo.
+
+#### "O endereço do roteador não sai para a internet"
 
 Este é o caso sem saída fácil, e vale entender por quê.
 

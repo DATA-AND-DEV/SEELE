@@ -12,6 +12,44 @@ atualizar e o silêncio do SmartScreen.
 
 ---
 
+## O que o botão de atualizar diz quando não dá, e por quê
+
+São sete respostas possíveis, e na tela cada uma é **uma frase** — o estado, e o
+que fazer. O porquê fica aqui, porque ele não muda o que a pessoa faz e cabia
+mal embaixo de um botão.
+
+Duas delas mandam **não** tentar de novo, e as duas são as que mais custam se
+alguém insistir:
+
+| A tela diz | O que houve | Por que não adianta insistir |
+|---|---|---|
+| «este SEELE saiu sem chave de atualização» | Este executável foi compilado antes de a chave do projeto existir, ou saiu do código-fonte na sua máquina | Não há chave dentro dele para conferir pacote nenhum. Não é defeito, e nenhuma versão futura conserta **este** binário: baixe o instalador novo da página de releases |
+| «o pacote baixado não foi assinado por este projeto» | O pacote chegou inteiro e a assinatura não é a nossa | Apertar de novo baixa o mesmo pacote da mesma origem. Baixe da página de releases, e — se o SEELE que você está atualizando veio de outro lugar — confira com quem o hospedou de onde ele veio |
+
+As outras cinco:
+
+| A tela diz | O que houve |
+|---|---|
+| «não consegui perguntar se há versão nova» | A rede falhou, ou a página de releases respondeu algo que o app não entendeu. Nada foi baixado. Tentar de novo faz sentido |
+| «ainda não há versão publicada para baixar» | A rede **funcionou**. A página respondeu, e não há nela nenhum release com manifesto de atualização. Enquanto não sair um por este caminho, este app é o mais recente que existe |
+| «há versão nova, mas não para este sistema nem para este processador» | O release existe e não traz pacote para este sistema operacional ou esta arquitetura |
+| «a troca dos arquivos falhou» | O pacote chegou inteiro e conferido, e a substituição dos arquivos não completou. Quase sempre é outra cópia do SEELE aberta |
+| «não há versão nova escolhida para instalar» | Instalar sempre instala o que a última procura encontrou, e não houve procura |
+
+**A diferença entre as duas primeiras da segunda tabela é a que este projeto
+errou uma vez**, e vale escrever: o botão dizia «a página não respondeu» sobre
+uma página que tinha respondido perfeitamente. Mandar conferir a conexão é
+mandar procurar defeito onde não há. São variantes separadas por isso.
+
+**Só uma das sete fala em «meia instalação»**, a da troca de arquivos, e é a
+única em que ela poderia existir. Nas outras seis nada instalado chega a ser
+tocado: o pacote é baixado inteiro para a memória e a assinatura é conferida
+**antes** do primeiro arquivo. Rede que cai, download truncado, pacote
+adulterado — os três terminam com o app exatamente como estava, e uma frase que
+tranquilizasse sobre isso estaria inventando o susto que ela vem acalmar.
+
+---
+
 ## São duas assinaturas, e elas não se substituem
 
 Confundir as duas é o erro que faz o trabalho todo parecer redundante.
