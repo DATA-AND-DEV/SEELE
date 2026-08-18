@@ -792,6 +792,77 @@ mod tests {
     }
 
     #[test]
+    fn a_page_of_history_carries_the_files_hanging_off_it() {
+        // Joined once for the page rather than asked per row: a screenful is
+        // fifty round trips through SQLite otherwise, and the shell has no way
+        // to know a message has a file until it is told.
+        use crate::casper::attachments::Attachments;
+
+        let mut casper = store();
+        let stored = Messages::new(&mut casper)
+            .append_batch(&[pending("com foto"), pending("sem nada")])
+            .unwrap();
+        let com_foto = stored[0].id;
+        Attachments::new(&casper)
+            .record(com_foto, &"a".repeat(64), "foto.png", "image/png", 2_048)
+            .unwrap();
+
+        let page = Messages::new(&mut casper)
+            .history(LineId(1), None, 50)
+            .unwrap();
+        let com = page.iter().find(|m| m.id == com_foto).expect("a mensagem");
+        let anexo = com.attachment.as_ref().expect("o anexo veio junto");
+        assert_eq!(anexo.file_name, "foto.png");
+        assert_eq!(anexo.byte_size, 2_048);
+        assert_eq!(
+            anexo.state,
+            seele_proto::control::AttachmentState::Available
+        );
+        assert!(
+            page.iter()
+                .find(|m| m.id != com_foto)
+                .and_then(|m| m.attachment.as_ref())
+                .is_none(),
+            "uma mensagem sem arquivo ganhou um"
+        );
+    }
+
+    #[test]
+    fn the_text_survives_the_file_and_the_page_still_says_what_it_was() {
+        // ADR 0027, and this is where a reader meets it: the bytes are gone,
+        // the row is not, and the page carries the name and the size with a
+        // state that says «expirou». A `None` here would draw as a message with
+        // nothing in it, and nobody would learn a file had been there.
+        use crate::casper::attachments::Attachments;
+
+        let mut casper = store();
+        let stored = Messages::new(&mut casper)
+            .append_batch(&[pending("olha isto")])
+            .unwrap();
+        let id = stored[0].id;
+        let anexo = Attachments::new(&casper)
+            .record(id, &"b".repeat(64), "recibo.pdf", "application/pdf", 900)
+            .unwrap();
+        Attachments::new(&casper).expire(anexo.id).unwrap();
+
+        let page = Messages::new(&mut casper)
+            .history(LineId(1), None, 50)
+            .unwrap();
+        let mensagem = page.first().expect("a mensagem continua no histórico");
+        assert_eq!(
+            mensagem.body, "olha isto",
+            "o texto foi embora com o arquivo"
+        );
+        let carregado = mensagem.attachment.as_ref().expect("a linha sobreviveu");
+        assert_eq!(
+            carregado.state,
+            seele_proto::control::AttachmentState::Expired
+        );
+        assert_eq!(carregado.file_name, "recibo.pdf");
+        assert_eq!(carregado.byte_size, 900);
+    }
+
+    #[test]
     fn unlimited_retention_prunes_nothing() {
         // specs/04-servidor-seele.md defaults to unlimited. A sweep that deleted
         // anything at the default would be a data-loss bug in a config nobody
