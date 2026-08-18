@@ -4,8 +4,9 @@
 **Data:** 2026-08-17
 **Construído:** 2026-08-17
 
-Tudo o que este documento decide está de pé. Duas coisas que ele descreve **não
-foram construídas**, e ficam aqui em vez de ficarem por descobrir:
+Tudo o que este documento decide está de pé. Duas coisas que ele descreve não
+tinham sido construídas, e as duas foram construídas depois. Ficam aqui, com a
+data, em vez de sumirem do texto:
 
 - **A prévia embutida de imagem.** A regra escrita abaixo — desenhar só uma
   lista curta de tipos de imagem, e só quando os bytes concordam com a alegação
@@ -13,6 +14,13 @@ foram construídas**, e ficam aqui em vez de ficarem por descobrir:
   decodificador. Enquanto essa conferência não existir, **todo** anexo é o outro
   ramo da mesma regra: um arquivo com nome e tamanho, sem prévia. É o lado
   seguro, e não é o lado completo.
+
+  **Isto foi construído em 2026-08-18**, pelo mesmo relato de campo que trouxe
+  o seletor: *preview de imagem/documento anexo*. A conferência existe, são
+  quatro formatos com o motivo de cada um escrito, e a seção «O que os
+  primeiros bytes decidem» conta o que entrou, o que ficou de fora, e o que
+  acontece quando os bytes discordam do nome. A regra não foi pulada: ela foi
+  construída.
 - **Um seletor de arquivos nativo.** Escolher um arquivo no app é arrastá-lo
   para a conversa, e salvar grava na pasta de downloads do sistema, escrita por
   extenso na confirmação. Um seletor nativo custaria um crate a mais na árvore,
@@ -20,8 +28,9 @@ foram construídas**, e ficam aqui em vez de ficarem por descobrir:
   causa disto.
 
   **Isto foi revertido em 2026-08-18**, pela primeira pessoa que usou. O
-  seletor existe, custou três crates contados, e a última seção deste
-  documento conta o resto. Escolher continua sendo arrastar **também**.
+  seletor existe, custou três crates contados, e a seção «O que a primeira
+  pessoa a anexar um arquivo ensinou» conta o resto. Escolher continua sendo
+  arrastar **também**.
 
 As quatro coisas de «o que fica sem saída» continuam sem saída, e nenhuma delas
 foi tocada.
@@ -437,8 +446,14 @@ pessoa. Está escrito aqui para que ninguém precise descobrir sozinho.
   **Esta consequência caiu em 2026-08-18**, e só ela: as três dependências que
   entraram são do seletor de arquivos, e nenhuma delas toca o caminho dos bytes
   que o resto desta lista descreve. O `blake3` continua fora pelo mesmo motivo
-  de sempre, que não era o teto de dependências e sim o ganho. A última seção
-  conta o que foi medido e por que a decisão virou.
+  de sempre, que não era o teto de dependências e sim o ganho. A seção «O que a
+  primeira pessoa a anexar um arquivo ensinou» conta o que foi medido e por que
+  a decisão virou.
+
+  **A prévia, no mesmo dia, não custou nenhuma.** Quem decodifica é o motor do
+  WebView, que já está no processo; o base64 são vinte linhas em vez de um
+  crate; e farejar quatro assinaturas de doze bytes não é trabalho de
+  biblioteca. A conta está na seção «O que os primeiros bytes decidem».
 - **A versão de protocolo sobe.** Variante nova em `ClientMessage`, em
   `ServerMessage`, em `Permission` e em `AlertReason`, todas no fim da
   enumeração. Um cliente uma versão atrás recusa o quadro em vez de o ler
@@ -611,3 +626,219 @@ evento de arrastar, que o diálogo apareça na tela, e que a pessoa consiga
 apertar o botão dele. Os três dependem de um servidor gráfico e de um gesto
 humano. O que dá para cobrar é tudo o que acontece **antes** deles, e é isso que
 está coberto.
+
+## O que os primeiros bytes decidem
+
+Escrito em 2026-08-18, depois do mesmo relato de campo: *preview de
+imagem/documento anexo*. Todo anexo aparecia como nome e tamanho, e nada mais —
+o lado seguro da regra que este ADR escreveu, e não o lado completo. O que
+segue é o outro lado, construído.
+
+O que **não** mudou é o começo desta seção: a regra é a mesma. Só uma lista
+curta de tipos de imagem é desenhada embutida, e só quando os bytes concordam
+com a alegação. Nenhuma linha abaixo afrouxa isso; elas todas explicam como ela
+foi cumprida.
+
+### O nome é texto que a outra pessoa escolheu
+
+É a frase que carrega tudo. Um anexo chega com um nome e um tipo declarado, e
+os dois foram escritos por quem mandou. Desenhar uma imagem porque o nome
+termina em `.png` é entregar a escolha do decodificador à ortografia de um
+estranho — e escolher decodificador é exatamente a única coisa que este ADR já
+tinha dito que a alegação não pode fazer.
+
+Então a decisão sai dos **primeiros doze bytes**, em
+`crates/seele-core/src/preview.rs`, e o tipo de mídia que a janela recebe é
+escrito a partir do que foi **achado**, nunca do que foi alegado. O veredito não
+carrega uma `String` vinda da rede: carrega uma variante de um enum fechado, e o
+`data:` inteiro é montado do lado do Rust, tipo de mídia incluído. A página não
+junta bytes com tipo. Uma página que juntasse poderia juntar com a alegação, e é
+por isso que ela não junta.
+
+**As duas metades têm de concordar.** Farejar sozinho faria o nome virar
+enfeite; a alegação sozinha seria confiar em quem mandou. Só desenha quando as
+duas dizem a mesma coisa — o que significa, dito por extenso, que bytes de PNG
+perfeitos chegando como `application/octet-stream` **não** são desenhados. É a
+palavra «concordam» levada a sério nas duas direções.
+
+### Quatro formatos, e o motivo de cada um
+
+Cada formato que se desenha é um decodificador que vai ler bytes de terceiro. O
+motor do WebView faz esse trabalho, mas escolher entregar um formato a ele é uma
+decisão, não um acaso. Então cada um vem com a razão:
+
+- **PNG** e **JPEG** — o que uma captura de tela e uma câmera produzem. Sem os
+  dois o recurso não existe.
+- **GIF** — o que as pessoas de fato colam numa conversa.
+- **WebP** — o que o «salvar imagem» de um navegador escreve hoje. Deixá-lo de
+  fora faria «salvei da web e mandei» ser a única coisa que não desenha.
+
+E o que ficou de fora, com o motivo, porque uma lista que ninguém defendeu
+cresce:
+
+- **SVG** é marcação, não imagem: vai para o mesmo interpretador da página, pode
+  carregar script, e não tem assinatura para farejar porque é texto.
+- **PDF** é um documento com um interpretador atrás. Todo o argumento deste ADR
+  sobre para qual decodificador os bytes vão pesa mais aqui do que em qualquer
+  outro lugar.
+- **HEIC** e **AVIF** são farejados por marca dentro de uma caixa ISO-BMFF que o
+  `mp4` divide com eles, então separar foto de contêiner de vídeo é confiar numa
+  cadeia de quatro bytes; e o suporte deles difere entre os três alvos, o que
+  faria o mesmo arquivo desenhar no macOS e não no Linux. Um produto, três
+  sistemas.
+- **BMP**, **ICO** e **TIFF** têm assinatura de dois bytes ou menos — `BM` é o
+  começo de muito arquivo de texto — e ninguém manda nenhum dos três.
+
+### Quando os bytes discordam do nome
+
+É o caso interessante, e ele ganhou resposta própria em vez de virar um ramo do
+erro. **Não é erro de transferência.** As `NOTAS-DE-RELEASE.md` deste projeto
+separam duas perguntas, e a seção «O que se recusa a receber», acima, diz que um
+anexo alcançava só a primeira: *o arquivo chegou inteiro?* O hash respondeu sim
+a ela. A segunda — *e ele é o que diz ser?* — passa a ter resposta para os
+quatro formatos, e quando a resposta é não ela merece a frase dela.
+
+O que a janela faz: escreve, na caixa do anexo, o que o arquivo **disse** que
+era e o que os primeiros bytes dele **são**; diz que ele chegou inteiro e que o
+hash fechou, para ninguém tentar de novo achando que foi a rede; e deixa o
+arquivo onde estava, com o nome que veio, e o botão de salvar. **Não desenhar é
+diferente de esconder**, e a diferença está na tela.
+
+Duas coisas que o desenho recusa de propósito, e que são o mesmo erro em
+direções opostas:
+
+- **Não desenha como o que ele diz ser.** Óbvio, e é a regra.
+- **Não desenha como o que ele por acaso é.** Um JPEG chamado `foto.png` não
+  vira uma figura «porque no fim das contas era uma imagem mesmo». Desenhá-lo
+  seria concluir que o nome não decide nada e que o arquivo de quem mandou
+  decide tudo — que é o oráculo pelo lado avesso.
+
+E o nome continua chegando como saiu: não renomeia, não corta extensão. Um
+arquivo que mente é pior do que um que se apresenta.
+
+### O teto da prévia, que não é o teto do arquivo
+
+O teto por arquivo é uma fração do teto de disco que quem hospeda escolheu, e
+protege o **disco dele**: no padrão de 1 GiB são 64 MiB. Desenhar é outra coisa.
+Uma imagem de 64 MiB decodificada inteira se mede em gigabytes de pixels, e a
+janela que tentasse pararia de responder — e a máquina que para é a de **quem
+lê**, que não é a mesma máquina nem o mesmo recurso.
+
+Então o limite da prévia é **4 MiB**, constante no cliente e não número que o
+Dogma manda. Quanto de memória esta janela gasta não é de quem hospeda decidir.
+Quatro mebibytes ficam acima de toda fotografia que um telefone produz e de toda
+captura de tela que um portátil tira, que é para o que uma prévia serve.
+
+A conferência acontece contra o tamanho **declarado no cabeçalho**, antes de um
+byte do corpo ser lido, e o fluxo é cortado em vez de drenado — a mesma forma da
+conferência do teto do Dogma, e pelo mesmo motivo: ler vinte megabytes e depois
+decidir não olhar para eles custa o download inteiro.
+
+O que esse número limita e o que ele **não** limita, dito em vez de suposto: ele
+limita o download e os bytes que ficam na janela. Ele **não** limita os pixels
+que a decodificação produz — para isso seria preciso ler a dimensão no cabeçalho
+de cada um dos quatro formatos, que são quatro analisadores a mais, e não foi
+construído. O tamanho **desenhado** é limitado na folha de estilo; o
+decodificado não é.
+
+### Quando a busca acontece
+
+O anexo mora no Dogma. **Ver é baixar**, e essa frase é toda a decisão: se toda
+imagem de uma Linha fosse buscada ao rolar a conversa, o teto de disco de quem
+hospeda viraria banda de todo mundo — um giga de saída por vez que alguém
+abrisse a Linha, multiplicado por quantas pessoas a abrissem.
+
+Então a busca acontece **ao apertar um botão, e em nenhum outro momento**. O
+botão só é oferecido quando o tipo alegado é um dos quatro e o arquivo cabe no
+limite da prévia, e isso é conveniência e não é a regra: quem pedisse assim
+mesmo receberia uma recusa enumerada, porque a regra é aplicada onde os bytes
+estão.
+
+O que voltou fica guardado por anexo, **inclusive quando é recusa**. A lista de
+mensagens é reconstruída inteira a cada atualização, e sem isso rolar a conversa
+apagaria toda figura já desenhada e pagaria o download de novo. E bytes que
+discordaram de um nome não discordam menos na segunda tentativa: repetir a busca
+gastaria a saída de quem hospeda para chegar à mesma conclusão.
+
+### Prever não é abrir, e a linha fica escrita
+
+É onde este trabalho podia errar feio, então a linha é desenhada em código e não
+deixada ao bom senso:
+
+- **Nada toca o sistema de arquivos.** Os bytes vêm para a memória e param ali.
+  Não há arquivo, não há caminho, não há marca de quarentena a pôr porque não há
+  o que marcar. Um cache em disco teria feito o ato de salvar acontecer sem
+  ninguém pedir, e salvar é um ato de quem recebeu, num lugar que a pessoa
+  escolheu.
+- **Nada fora da janela é acionado.** Nenhum `open`, nenhum `shell`, nenhum
+  gerenciador de arquivos. Continua não existindo `abrir_anexo`, e os dois
+  guardas de ausência que cobravam isso continuam cobrando, agora sobre um
+  frontend que tem uma figura dentro.
+- **Salvar continua sendo o único verbo com destino**, e continua tendo a
+  confirmação que diz em voz alta as duas coisas que este produto não promete.
+  A prévia não ganhou confirmação nenhuma e não devia: ela não deixa nada em
+  lugar nenhum.
+- **Um anexo expirado não ganha botão nenhum.** Não há bytes para desenhar nem
+  para salvar, e o que ele diz continua sendo que expirou.
+
+### A CSP não mexeu, e isso era critério
+
+`default-src 'self'`, e o ADR 0029 fez disto critério explícito: se desenhar
+exigisse afrouxar a política, a resposta seria não. Não exigiu. A política já
+trazia `img-src 'self' data:` e o `data:` é o caminho inteiro — a figura chega
+como URI montado no Rust, e nada é buscado de host nenhum. Um guarda lê o
+`tauri.conf.json` e reprova se `blob:`, `unsafe-inline`, `unsafe-eval` ou um
+`https:` aparecerem ali.
+
+### Nenhuma dependência nova, e a conta do base64
+
+Zero crates. A conta, na forma que o ADR 0022 usou crate a crate, o 0026 usou
+contando a árvore e a seção anterior usou contando três:
+
+- **`base64`** seria um crate. Há **duas** versões dele na árvore hoje, ambas
+  transitivas e nenhuma nossa para alcançar — depender de uma fixaria uma
+  terceira aresta por vinte linhas de transformação definida por RFC. O
+  codificador está escrito em `preview.rs`, **só codifica** — que é o total do
+  que se precisa —, e é conferido contra os vetores da RFC 4648 mais os 256
+  valores de byte. Um crate não se paga nesse tamanho.
+- **Nenhuma biblioteca de imagem.** Quem decodifica é o motor do WebView, que já
+  está no processo por causa do Tauri. Um `image` ou equivalente na árvore
+  significaria um segundo decodificador lendo bytes de terceiro num processo que
+  já tem um, e é o oposto de reduzir superfície.
+- **`infer` ou `tree_magic`**, para farejar, seriam um crate para quatro
+  assinaturas de no máximo doze bytes — e trariam junto centenas de formatos que
+  este produto recusa desenhar de propósito. A lista curta é o recurso, não a
+  limitação.
+
+`cargo deny check` continua com `bans ok, licenses ok, sources ok`, porque nada
+entrou.
+
+### O que ficou de fora, e não é acidente
+
+- **Documento não tem prévia.** O pedido dizia «imagem/documento», e PDF é a
+  metade que não entrou: não é imagem, é um documento com um interpretador
+  atrás, e desenhá-lo é entregar bytes de terceiro a esse interpretador. Ele
+  continua sendo nome, tamanho e salvar.
+- **Nenhuma miniatura, nenhum recorte, nenhuma rotação por EXIF.** Tudo isso é
+  ler mais do arquivo de outra pessoa do que os doze bytes que decidem.
+- **Nenhum limite de pixels**, pelo que a seção do teto já diz.
+- **Som e vídeo não tocam.** Um `<audio>` ou um `<video>` é o mesmo argumento do
+  decodificador com um contêiner por cima, e não foi pedido.
+
+### O que os guardas cobram
+
+O que mais importa está encenado e não lido: `crates/seele-conformance/tests/anexos.rs`
+sobe um Dogma de verdade, escreve um arquivo em disco cujos bytes são de um
+JPEG, manda-o pela rede chamado `foto.png` e alegado `image/png`, busca-o de
+volta e cobra que o veredito seja discordância — **e que não seja desenho, em
+nenhum dos dois sentidos**. O mesmo com um executável chamado `gatinho.png`. O
+ramo que desenha é encenado igual, e o arquivo acima do limite da prévia também,
+com a conexão continuando viva depois de o fluxo ter sido cortado.
+
+Do lado da página, os guardas cobram propriedades e não nomes: que
+`prever_anexo` seja chamado de um lugar só e que esse lugar seja o ouvinte de
+clique; que redesenhar a conversa não busque nada; que a página não monte
+`data:` nem leia `declared_type`; que os quatro tipos não estejam escritos duas
+vezes; que a frase da discordância diga «chegou inteiro»; que a recusa caia numa
+região que a folha de estilo não esconde; e que o caminho da prévia não alcance
+`salvar_anexo`, `destino` nem `armarAto`.
