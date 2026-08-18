@@ -219,24 +219,23 @@ function mostrarAlcance(alcance, portaRecusada, encontroRecusado) {
   onde.classList.toggle("convite-alcance-curto", soPerto);
   onde.classList.toggle("convite-alcance-longe", !soPerto);
 
-  // O que o roteador respondeu, quando ele respondeu alguma coisa. Vai embaixo
-  // e menor: é a pista de quem for investigar, não a mensagem de quem só quer
-  // mandar o link.
-  if (portaRecusada) {
+  // Por que cada degrau de cima não deu, quando chegou a ser tentado. Vai
+  // embaixo e menor: é a pista de quem for investigar, não a mensagem de quem
+  // só quer mandar o link. São duas linhas e não uma porque numa casa em que
+  // nem o roteador abriu a porta nem o ponto de encontro respondeu são **duas**
+  // informações, e quem for investigar precisa das duas.
+  //
+  // **Sem rótulo colado na frente**, e isto foi conserto: cada frase já se
+  // nomeia — as quatro do roteador dizem «roteador» e as do encontro dizem
+  // «ponto de encontro». Um `o roteador respondeu:` aqui produziu, numa tela de
+  // verdade, «o roteador respondeu: o roteador respondeu, e o endereço dele…».
+  // O rótulo só parecia necessário porque quem o escreveu não estava lendo a
+  // frase que ele ia prefixar.
+  for (const motivo of [portaRecusada, encontroRecusado]) {
+    if (!motivo) continue;
     const detalhe = document.createElement("span");
     detalhe.className = "convite-alcance-detalhe";
-    detalhe.textContent = `o roteador respondeu: ${portaRecusada}`;
-    onde.append(detalhe);
-  }
-
-  // E por que o degrau 4 não deu, quando ele chegou a ser tentado. Mesma
-  // discrição e mesmo motivo: numa casa em que nem o roteador abriu a porta nem
-  // o ponto de encontro respondeu, são **duas** informações, e quem for
-  // investigar precisa das duas.
-  if (encontroRecusado) {
-    const detalhe = document.createElement("span");
-    detalhe.className = "convite-alcance-detalhe";
-    detalhe.textContent = `o ponto de encontro: ${encontroRecusado}`;
+    detalhe.textContent = motivo;
     onde.append(detalhe);
   }
 
