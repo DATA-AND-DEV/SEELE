@@ -34,7 +34,7 @@ serde_json = "1.0.151"
 # Só por causa de `IPV6_V6ONLY`, cujo padrão difere entre Linux, macOS e
 # Windows — ver `alcance::abrir_escuta`. A std não expõe a opção, e o quinn já
 # traz este crate (via `quinn-udp`), então nada novo entra na árvore.
-socket2 = "0.6.5"
+socket2 = { workspace = true }
 thiserror = "2.0.19"
 tokio = { version = "1.53.1", features = ["full"] }
 tracing = "0.1.44"

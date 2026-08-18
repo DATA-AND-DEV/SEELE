@@ -4727,6 +4727,7 @@ name = "seele-encontro"
 version = "0.0.0"
 dependencies = [
  "seele-proto",
+ "socket2",
 ]
 
 [[package]]

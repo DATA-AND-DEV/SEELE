@@ -47,3 +47,8 @@ indexing_slicing = "warn"
 [workspace.dependencies]
 # Opus binding. See ADR 0008 for why this one and not `audiopus`.
 shiguredo_opus = "2026.2.0"
+# `IPV6_V6ONLY`, which `std` cannot say. Two crates need it for the same reason
+# and against the same defect — a socket whose family the system decides on its
+# own — so the version lives here, per the note above, rather than being
+# declared twice and drifting.
+socket2 = "0.6.5"

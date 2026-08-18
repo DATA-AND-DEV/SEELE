@@ -16,6 +16,13 @@ publish.workspace = true
 # aqui tornaria «o ponto de encontro é trocável» uma ficção educada.
 [dependencies]
 seele-proto = { path = "../seele-proto" }
+# Só para dizer `IPV6_V6ONLY` em voz alta — a `std` não tem como. Sem isso o
+# Linux faz o socket IPv6 de pilha dupla, ele colide com o IPv4 que já subiu, e
+# o serviço fica só-IPv4 sem que ninguém repare. Aconteceu numa VPS de verdade.
+#
+# Não cresce a árvore: `seele-server` já usa `socket2` pelo mesmo motivo, e pelo
+# mesmo defeito, um degrau abaixo.
+socket2 = { workspace = true }
 
 [lints]
 workspace = true
