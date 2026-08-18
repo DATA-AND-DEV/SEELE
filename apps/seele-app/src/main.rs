@@ -181,7 +181,7 @@ async fn connect(
     // razão: eles pertencem ao Dogma daquele link, e quem trocou o endereço no
     // campo está indo a outro lugar — tentar os alternativos do link anterior
     // seria bater à porta de um Dogma que ninguém pediu.
-    let (esperada, alternativos) = match session.convite.lock() {
+    let (esperada, alternativos, bilhete) = match session.convite.lock() {
         Ok(mut slot) => {
             if slot.as_ref().is_some_and(|convite| convite.alvo != server) {
                 *slot = None;
@@ -192,12 +192,17 @@ async fn connect(
                 slot.as_ref()
                     .map(|convite| convite.alternativos.clone())
                     .unwrap_or_default(),
+                // Degrau 4 do ADR 0022. Sai daqui pela mesma porta e pela mesma
+                // razão que os alternativos: o bilhete é do Dogma **daquele**
+                // link, e bater no ponto de encontro de outro seria apresentar
+                // esta máquina a um anfitrião que ninguém pediu.
+                slot.as_ref().and_then(|convite| convite.bilhete.clone()),
             )
         }
         // Sem o cadeado não há convite a ler. Entrar sem a confirmação é o
         // comportamento de quem digitou o endereço à mão, e é o pior que pode
         // acontecer aqui: nunca uma conferência contra um valor duvidoso.
-        Err(_) => (None, Vec::new()),
+        Err(_) => (None, Vec::new(), None),
     };
 
     let home = config_dir(&app);
@@ -214,6 +219,7 @@ async fn connect(
         audio,
         join_secret: join_secret.filter(|s| !s.trim().is_empty()),
         expected_fingerprint: esperada,
+        bilhete,
         // O microfone escolhido no Terminal Dogma, lido do disco a cada
         // conexão em vez de guardado em memória: quem escolheu ontem não
         // escolhe de novo hoje, e quem nunca escolheu continua no padrão da

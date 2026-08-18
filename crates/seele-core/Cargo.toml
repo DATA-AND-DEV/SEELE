@@ -20,6 +20,12 @@ quinn = "0.11.11"
 # instalar o Rust mais duas ferramentas de build.
 rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "logging", "tls12"] }
 tokio = { version = "1.53.1", features = ["full"] }
+# Só por causa do `IPV6_V6ONLY`, cujo padrão difere entre Linux, macOS e
+# Windows. O degrau 4 do ADR 0022 abre o próprio socket — o furo de NAT tem de
+# sair da mesma porta em que o QUIC vai falar —, e um socket aberto por nós não
+# herda o cuidado que o quinn tem com essa opção. O quinn já traz este crate
+# (via `quinn-udp`), então nada novo entra na árvore.
+socket2 = "0.6.5"
 ed25519-dalek = "3.0.0"
 rand = "0.10.2"
 anyhow = "1.0.104"

@@ -200,8 +200,8 @@ async function conectar(evento) {
  * Diz até onde o link recém-criado chega, embaixo dele.
  *
  * O `alcance` é o degrau da escada do ADR 0022 em que o servidor parou, como
- * nome estável — `PortaNoRoteador`, `Ipv6Direto` ou `SoRedeLocal` —, e a frase
- * mora no `FRASES`, que é onde moram todas.
+ * nome estável — `PortaNoRoteador`, `FuroDeNat`, `Ipv6Direto`, `RedeLocalOuVpn`
+ * ou `SoRedeLocal` —, e a frase mora no `FRASES`, que é onde moram todas.
  *
  * Só os degraus que **não** alcançam de fora ganham destaque, e são os únicos
  * que precisam: os outros são boas notícias, e uma boa notícia gritada vira

@@ -4691,6 +4691,7 @@ dependencies = [
  "seele-audio",
  "seele-proto",
  "serde",
+ "socket2",
  "thiserror 2.0.19",
  "tokio",
  "tracing",

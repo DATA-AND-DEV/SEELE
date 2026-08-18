@@ -70,6 +70,7 @@ fn connect(address: SocketAddr, nickname: &str) -> Result<Arc<Plug>, PlugError> 
         home: home(nickname),
         join_secret: None,
         expected_fingerprint: None,
+        bilhete: None,
         // No sound card on a CI box, and the text half needs none.
         audio: false,
         capture_device: None,
@@ -413,6 +414,7 @@ async fn a_name_that_does_not_resolve_says_so_specifically() -> Result<()> {
             home: home("unresolvable"),
             join_secret: None,
             expected_fingerprint: None,
+            bilhete: None,
             audio: false,
             capture_device: None,
             playback_device: None,

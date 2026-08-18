@@ -4276,3 +4276,51 @@ fn a_room_that_stopped_existing_has_a_sentence_and_not_a_shrug() {
         );
     }
 }
+
+#[test]
+fn the_nat_punching_rung_promises_nothing_it_cannot_keep_and_names_its_cost() {
+    // Degrau 4 do ADR 0022, added the day the rung was built. Two things are
+    // being asserted, and both are product decisions rather than wording.
+    //
+    // First: it must not promise. Symmetric NAT on both ends does not punch,
+    // and the ADR keeps relaying out of scope by decision — so the sentence has
+    // to say what to do when it fails, exactly like the LAN-only one does.
+    //
+    // Second, and the one that would be quietest if it drifted: this rung is
+    // the only one in the ladder with a third party in it. A product that sells
+    // itself as «sem serviço no meio» just gained a service in the middle, and
+    // the difference between saying so on the screen where the link appears and
+    // letting somebody find out later is the difference between honesty and
+    // advertising.
+    let frases = read("ui/frases.js");
+    let Some(depois) = frases.split("FuroDeNat:").nth(1) else {
+        panic!("the ladder can stop at `FuroDeNat` and no sentence says what that means");
+    };
+    let frase: String = depois.chars().take(800).collect();
+    let baixa = frase.to_lowercase();
+
+    assert!(
+        baixa.contains("deve funcionar"),
+        "the NAT-punching sentence promises the link works, and nothing here can \
+         promise that — two symmetric NATs do not punch:\n{frase}"
+    );
+    assert!(
+        baixa.contains("roteador"),
+        "the sentence names no way out for the case where the punch fails, which \
+         leaves the host as stuck as no message at all:\n{frase}"
+    );
+    assert!(
+        baixa.contains("ponto de encontro") && baixa.contains("nunca o que foi dito"),
+        "the sentence does not say what the meeting point learns. ADR 0022 accepts \
+         this rung only if the metadata is said out loud rather than discovered \
+         later:\n{frase}"
+    );
+
+    // And the person has to be told they can point somewhere else, or «opcional
+    // e trocável» is a sentence in a document nobody can act on.
+    assert!(
+        frase.contains("docs/ponto-de-encontro.md"),
+        "the sentence never says the meeting point can be changed or switched \
+         off:\n{frase}"
+    );
+}

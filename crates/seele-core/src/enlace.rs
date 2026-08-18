@@ -276,6 +276,66 @@ impl Enlace {
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
     ) -> Result<Self, ConnectError> {
+        Self::conectar_entre_com_bilhete(destinos, None, chave, pins).await
+    }
+
+    /// O mesmo, batendo antes no ponto de encontro do convite.
+    ///
+    /// Degrau 4 do ADR 0022. O bilhete vem do `enc` do `seele://` — ADR 0006 —,
+    /// e o que ele acrescenta é **um datagrama antes de tudo**: o ponto de
+    /// encontro conta ao anfitrião de onde viemos, o anfitrião manda alguns
+    /// pacotes para cá, e o roteador dele passa a deixar entrar o aperto de mão.
+    ///
+    /// # Por que todos os candidatos passam pelo mesmo socket
+    ///
+    /// Porque o furo é por porta. O anfitrião abriu caminho para a porta de onde
+    /// o aviso saiu, e um aperto de mão saindo de outra porta continuaria
+    /// batendo numa porta fechada. Cada tentativa recebe uma cópia daquele
+    /// socket — o original fica vivo aqui até o fim, para que a porta não seja
+    /// devolvida ao sistema entre uma tentativa e a seguinte.
+    ///
+    /// # O que acontece quando não dá para bater
+    ///
+    /// Conecta como sempre conectou. Um ponto de encontro fora do ar, um convite
+    /// sem impressão digital ou uma máquina sem rota nenhuma fazem o degrau 4
+    /// não acontecer — e nenhum dos endereços do convite depende dele.
+    ///
+    /// # Errors
+    ///
+    /// O mesmo de [`Enlace::conectar_entre`].
+    pub async fn conectar_entre_com_bilhete(
+        destinos: Vec<Destino>,
+        bilhete: Option<seele_proto::uri::Bilhete>,
+        chave: SigningKey,
+        pins: Arc<dyn PinStore>,
+    ) -> Result<Self, ConnectError> {
+        // Antes de qualquer tentativa, e sem esperar por resposta: o primeiro
+        // candidato é o da rede de casa, e o tempo que ele leva para falhar —
+        // quando falha — é tempo de sobra para o furo abrir do outro lado.
+        let furo = match &bilhete {
+            Some(bilhete) => {
+                let impressao = destinos
+                    .first()
+                    .and_then(|destino| destino.impressao_esperada.as_deref());
+                crate::encontro::bater(bilhete, impressao).await
+            }
+            None => None,
+        };
+        Self::tentar_entre(destinos, furo.as_ref(), bilhete, chave, pins).await
+    }
+
+    /// O laço de tentativas, com ou sem furo de NAT.
+    async fn tentar_entre(
+        destinos: Vec<Destino>,
+        furo: Option<&std::net::UdpSocket>,
+        bilhete: Option<seele_proto::uri::Bilhete>,
+        chave: SigningKey,
+        pins: Arc<dyn PinStore>,
+    ) -> Result<Self, ConnectError> {
+        // Uma cópia por tentativa, e o original vivo até o fim: um `Endpoint`
+        // fecha o socket dele ao ser recolhido, e sem o original a porta que o
+        // anfitrião furou voltaria para o sistema no meio do caminho.
+        let emprestar = || furo.and_then(|socket| socket.try_clone().ok());
         let mut candidatos = destinos.into_iter().peekable();
         let Some(primeiro) = candidatos.next() else {
             // Ninguém chama assim, e devolver um erro é melhor que entrar num
@@ -283,7 +343,7 @@ impl Enlace {
             return Err(ConnectError::Unreachable);
         };
         if candidatos.peek().is_none() {
-            return Self::conectar(primeiro, chave, pins).await;
+            return Self::conectar_por(emprestar(), bilhete, primeiro, chave, pins).await;
         }
 
         let mut primeira_falha: Option<ConnectError> = None;
@@ -292,7 +352,13 @@ impl Enlace {
             let onde = destino.servidor;
             let chave_do_pin = destino.chave_do_pin.clone();
             let fixado_antes = pins.pinned(&chave_do_pin);
-            let tentativa = Self::conectar(destino, chave.clone(), Arc::clone(&pins));
+            let tentativa = Self::conectar_por(
+                emprestar(),
+                bilhete.clone(),
+                destino,
+                chave.clone(),
+                Arc::clone(&pins),
+            );
 
             let falha = match tokio::time::timeout(PRAZO_POR_CANDIDATO, tentativa).await {
                 Ok(Ok(enlace)) => return Ok(enlace),
@@ -335,11 +401,27 @@ impl Enlace {
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
     ) -> Result<Self, ConnectError> {
+        Self::conectar_por(None, None, destino, chave, pins).await
+    }
+
+    /// O mesmo, pelo socket que já furou o NAT. Degrau 4 do ADR 0022.
+    ///
+    /// # Errors
+    ///
+    /// O mesmo de [`Enlace::conectar`].
+    async fn conectar_por(
+        local: Option<std::net::UdpSocket>,
+        bilhete: Option<seele_proto::uri::Bilhete>,
+        destino: Destino,
+        chave: SigningKey,
+        pins: Arc<dyn PinStore>,
+    ) -> Result<Self, ConnectError> {
         // Antes de o TLS ter chance de escrever qualquer coisa. Ver
         // [`desfazer_pin_orfao`].
         let fixado_antes = pins.pinned(&destino.chave_do_pin);
 
-        let resultado = Client::connect(
+        let resultado = Client::connect_por(
+            local,
             destino.servidor,
             &destino.nome_tls,
             &destino.chave_do_pin,
@@ -402,6 +484,12 @@ impl Enlace {
 
         let motor = Motor {
             destino,
+            // Guardado para a reconexão, e não só para a primeira entrada: uma
+            // reconexão sai de um socket novo, com uma porta nova, e o caminho
+            // que o anfitrião furou era para a porta velha. Sem bater de novo, a
+            // bateria de cinco minutos contaria até o fim contra uma porta
+            // fechada.
+            bilhete,
             chave,
             pins,
             cliente: Some(cliente),
@@ -763,6 +851,10 @@ impl std::error::Error for Fechado {}
 /// O que roda na tarefa: a conexão, a bateria, e a política entre as duas.
 struct Motor {
     destino: Destino,
+    /// O bilhete de encontro do convite, quando o link trouxe um.
+    ///
+    /// Degrau 4 do ADR 0022, e ele vale por reconexão: ver [`Motor::tentar`].
+    bilhete: Option<seele_proto::uri::Bilhete>,
     chave: SigningKey,
     pins: Arc<dyn PinStore>,
     cliente: Option<Client>,
@@ -904,7 +996,18 @@ impl Motor {
     /// se perder. O que não podia acontecer é isto rodar dentro do `select!` da
     /// casca, e não roda.
     async fn tentar(&mut self) {
-        let resultado = Client::connect(
+        // O degrau 4 de novo, e não só na primeira entrada. Esta tentativa sai
+        // de um socket novo — porta nova —, e o caminho que o anfitrião abriu
+        // era para a porta anterior. Sem bater no ponto de encontro outra vez, a
+        // reconexão bate numa porta fechada até a bateria acabar.
+        let furo = match &self.bilhete {
+            Some(bilhete) => {
+                crate::encontro::bater(bilhete, self.destino.impressao_esperada.as_deref()).await
+            }
+            None => None,
+        };
+        let resultado = Client::connect_por(
+            furo,
             self.destino.servidor,
             &self.destino.nome_tls,
             &self.destino.chave_do_pin,
@@ -1424,6 +1527,7 @@ mod tests {
     fn motor_de_teste() -> Motor {
         let (avisos, _) = mpsc::unbounded_channel();
         Motor {
+            bilhete: None,
             destino: Destino {
                 servidor: "127.0.0.1:1".parse().expect("endereço"),
                 nome_tls: "localhost".into(),

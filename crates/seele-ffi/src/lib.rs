@@ -142,6 +142,12 @@ pub struct ConnectConfig {
     pub join_secret: Option<String>,
     /// A impressão digital que o convite prometeu, quando veio de um link.
     pub expected_fingerprint: Option<String>,
+    /// O bilhete de encontro do link, quando ele trouxe um.
+    ///
+    /// Degrau 4 do ADR 0022: com ele, quem entra bate no ponto de encontro antes
+    /// de tentar os endereços, e o anfitrião fura o NAT para cá. `None` é o
+    /// caminho de sempre — e é o que um link sem `enc` produz.
+    pub bilhete: Option<seele_core::uri::Bilhete>,
     /// Whether to open the microphone and speakers at all.
     ///
     /// False on a machine with no sound card, which is most servers and every
@@ -1282,14 +1288,21 @@ async fn drive(
             build_destino(&config, address, &server_name, &pin_key)
         })
         .collect();
-    let mut client = match seele_core::enlace::Enlace::conectar_entre(destinos, key, pins).await {
-        Ok(client) => client,
-        Err(error) => {
-            tracing::warn!(%error, "could not reach the Dogma");
-            let _ = ready.send(Err(classify_connect_failure(&error)));
-            return;
-        }
-    };
+    // `conectar_entre_com_bilhete` e não `conectar_entre`: com um bilhete no
+    // link, quem entra bate no ponto de encontro antes de tentar endereço nenhum
+    // — degrau 4 do ADR 0022. Sem bilhete os dois caminhos são o mesmo.
+    let bilhete = config.bilhete.clone();
+    let mut client =
+        match seele_core::enlace::Enlace::conectar_entre_com_bilhete(destinos, bilhete, key, pins)
+            .await
+        {
+            Ok(client) => client,
+            Err(error) => {
+                tracing::warn!(%error, "could not reach the Dogma");
+                let _ = ready.send(Err(classify_connect_failure(&error)));
+                return;
+            }
+        };
 
     // `Enlace::conectar` already returned `Err` above for anything that would
     // have made this a `PinDecision::Changed` or a refused invite — see
@@ -1835,6 +1848,7 @@ mod tests {
             home: "/tmp/does-not-matter".into(),
             join_secret: None,
             expected_fingerprint: Some("aaaa1111".into()),
+            bilhete: None,
             audio: false,
             capture_device: None,
             playback_device: None,
@@ -1844,6 +1858,7 @@ mod tests {
 
         let without = ConnectConfig {
             expected_fingerprint: None,
+            bilhete: None,
             ..with_fingerprint
         };
         let destino = build_destino(&without, address, &name, &pin);
