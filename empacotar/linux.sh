@@ -37,7 +37,7 @@ fi
 # pré-lançamento por extenso, e conferir aqui custa um segundo em vez de uma
 # compilação inteira.
 if ! printf '%s' "$VERSAO" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$'; then
-    echo "a versão «$VERSAO» não serve para o instalador." >&2
+    echo "a versão «${VERSAO}» não serve para o instalador." >&2
     echo "Aceito: X.Y.Z, ou X.Y.Z-N com N só de dígitos." >&2
     exit 1
 fi

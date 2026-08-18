@@ -30,7 +30,7 @@ if [ -z "$VERSAO" ]; then
 fi
 
 if ! printf '%s' "$VERSAO" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$'; then
-    echo "a versão «$VERSAO» não serve para o instalador." >&2
+    echo "a versão «${VERSAO}» não serve para o instalador." >&2
     echo "Aceito: X.Y.Z, ou X.Y.Z-N com N só de dígitos." >&2
     exit 1
 fi
@@ -126,14 +126,23 @@ mkdir -p "$DESTINO"
 # no Windows reprovou exatamente assim — dois instaladores lado a lado, um de
 # cada versão. A versão está no nome do arquivo; é a resposta direta.
 padrao="*_${VERSAO}_*.dmg"
-encontrados=$(find target -type f -name "$padrao" | wc -l | tr -d ' ')
+# O `rw.NNNNN.<nome>.dmg` fica de fora.
+#
+# É a imagem de leitura e escrita que o `bundle_dmg.sh` monta para copiar o
+# `.app` para dentro, e que deveria sumir no fim. Quando o empacotamento é
+# interrompido — ou quando o `hdiutil` não desmonta —, ela sobra, casa com este
+# mesmo padrão, e vira um segundo «pacote» que não é pacote nenhum.
+#
+# Aconteceu, e o script parou dizendo que achou dois `.dmg` de 0.6.3 depois de a
+# assinatura já ter dado certo — a pior hora possível para parar.
+encontrados=$(find target -type f -name "$padrao" ! -name 'rw.*' | wc -l | tr -d ' ')
 if [ "$encontrados" != "1" ]; then
     echo "esperava exatamente um .dmg de $VERSAO e achei $encontrados." >&2
-    echo "Procurei por «$padrao» em target/." >&2
-    find target -type f -name "$padrao" >&2
+    echo "Procurei por «${padrao}» em target/." >&2
+    find target -type f -name "$padrao" ! -name 'rw.*' >&2
     exit 1
 fi
-find target -type f -name "$padrao" -exec cp {} "$DESTINO/" \;
+find target -type f -name "$padrao" ! -name 'rw.*' -exec cp {} "$DESTINO/" \;
 
 # O pacote de atualização e a assinatura dele, quando este empacotamento teve a
 # chave. O nome leva o alvo desta máquina de propósito: `empacotar/manifesto.py`
