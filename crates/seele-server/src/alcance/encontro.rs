@@ -55,11 +55,43 @@ use seele_proto::uri::Bilhete;
 /// é isto. Ele é trocável por `$SEELE_ENCONTRO`, e o endereço de quem hospeda
 /// viaja dentro do próprio convite — ver [`Bilhete`].
 ///
-/// Enquanto este nome não estiver no ar, a resolução falha em milissegundos
-/// (NXDOMAIN não espera prazo nenhum), a escada cai para o degrau de baixo e a
-/// frase que a pessoa lê é a mesma de antes deste degrau existir. Quem quiser o
-/// degrau 4 hoje sobe o seu — `docs/ponto-de-encontro.md` são dez linhas.
-pub const PONTO_PADRAO: &str = "encontro.seele.app";
+/// Um **nome** e não um endereço, porque isto está compilado dentro de cada
+/// executável do mundo: com um nome, trocar de VPS é um registro de DNS; com um
+/// IP, seria uma versão nova e todo mundo reinstalando.
+///
+/// E como DNS é mais uma coisa que pode estar ruim num dado dia, há uma rede
+/// embaixo — ver [`REDE_DO_PADRAO`]. Quando as duas falham, a escada cai para o
+/// degrau de baixo e a frase que a pessoa lê é a mesma de antes deste degrau
+/// existir. Quem quiser o seu próprio sobe em dez linhas —
+/// `docs/ponto-de-encontro.md`.
+pub const PONTO_PADRAO: &str = "encontro.seele.app.br";
+
+/// Os endereços do [`PONTO_PADRAO`], para quando o nome não resolver.
+///
+/// # Por que existir, e por que só para o nosso
+///
+/// O nome é o caminho principal porque ele é o que torna o servidor trocável:
+/// ele está compilado dentro de **cada executável do mundo**, e um IP gravado
+/// ali significaria que mudar de VPS quebra todo mundo até a próxima versão.
+///
+/// Mas DNS é mais uma coisa que pode estar ruim num dado dia — resolvedor do
+/// provedor caído, rede que sequestra consulta, zona em carência depois de uma
+/// mudança. Nesses casos o degrau 4 sumiria por um motivo que não tem nada a
+/// ver com ele.
+///
+/// **Isto vale só para o endereço padrão**, e a exceção é a parte importante: se
+/// alguém apontou `$SEELE_ENCONTRO` para o ponto de encontro dela e o nome não
+/// resolve, cair no nosso mandaria o metadado dessa pessoa para nós sem que ela
+/// tivesse pedido. Um recuo que atravessa uma escolha explícita de outra pessoa
+/// não é resiliência, é traição silenciosa.
+///
+/// IPv6 antes de IPv4, e a ordem é decidida pela máquina que pergunta: quem tem
+/// IPv6 global usa o IPv6, porque é justamente o par que só se alcança por lá
+/// que mais precisa deste degrau.
+const REDE_DO_PADRAO: [&str; 2] = [
+    "[2001:19f0:5400:2f6c:5400:6ff:fe94:68f5]:8384",
+    "45.32.222.33:8384",
+];
 
 /// A variável que troca o ponto de encontro, ou o desliga.
 ///
@@ -375,10 +407,39 @@ async fn resolver(texto: &str, ate: tokio::time::Instant) -> Result<SocketAddr, 
     let procura = tokio::time::timeout_at(ate, tokio::net::lookup_host((maquina, porta)))
         .await
         .map_err(|_| FalhaNoEncontro::NaoResolve(texto.to_owned()))?;
-    procura
-        .map_err(|erro| FalhaNoEncontro::NaoResolve(format!("{texto}: {erro}")))?
-        .next()
-        .ok_or_else(|| FalhaNoEncontro::NaoResolve(texto.to_owned()))
+    let achado = procura.ok().and_then(|mut achados| achados.next());
+    if let Some(alvo) = achado {
+        return Ok(alvo);
+    }
+
+    // O nome não resolveu. Se ele é o **nosso**, há uma rede embaixo; se é o de
+    // outra pessoa, não há — ver [`REDE_DO_PADRAO`].
+    if texto == PONTO_PADRAO {
+        if let Some(alvo) = rede_do_padrao() {
+            tracing::info!(%texto, %alvo, "o nome não resolveu; usando o endereço de reserva");
+            return Ok(alvo);
+        }
+    }
+    Err(FalhaNoEncontro::NaoResolve(texto.to_owned()))
+}
+
+/// O endereço de reserva que serve **esta** máquina.
+///
+/// IPv6 primeiro para quem tem IPv6 global, porque o par que só se alcança por
+/// lá é justamente o que mais precisa do degrau 4. Sem IPv6, IPv4 — que é o que
+/// toda máquina tem.
+fn rede_do_padrao() -> Option<SocketAddr> {
+    let tem_seis = super::endereco_de_saida_v6().is_some();
+    REDE_DO_PADRAO
+        .iter()
+        .filter_map(|texto| texto.parse::<SocketAddr>().ok())
+        .find(|alvo| alvo.is_ipv6() == tem_seis)
+        .or_else(|| {
+            REDE_DO_PADRAO
+                .iter()
+                .filter_map(|texto| texto.parse::<SocketAddr>().ok())
+                .next_back()
+        })
 }
 
 /// A escuta de avisos, na mesma família do ponto de encontro.
@@ -543,6 +604,47 @@ async fn furar(dogma: &std::net::UdpSocket, destino: SocketAddr, marca: &Marca) 
 
 #[cfg(test)]
 mod testes {
+    #[test]
+    fn a_rede_do_padrao_existe_e_serve_esta_maquina() {
+        // Se as duas linhas não forem endereços válidos, o recuo é decoração —
+        // ele existiria no código e nunca devolveria nada.
+        let escolhido = super::rede_do_padrao();
+        assert!(
+            escolhido.is_some(),
+            "nenhum endereço de reserva serve esta máquina"
+        );
+
+        // E a escolha acompanha a máquina: quem tem IPv6 global fala IPv6 com o
+        // ponto de encontro, porque é justamente o par que só se alcança por lá
+        // que mais precisa deste degrau.
+        let tem_seis = crate::alcance::endereco_de_saida_v6().is_some();
+        if tem_seis {
+            assert!(
+                escolhido.is_some_and(|alvo| alvo.is_ipv6()),
+                "esta máquina tem IPv6 global e o recuo escolheu IPv4"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn o_recuo_nunca_atravessa_o_ponto_que_outra_pessoa_escolheu() {
+        // A propriedade que vale mais que a resiliência.
+        //
+        // Se alguém apontou `$SEELE_ENCONTRO` para o ponto de encontro dela e o
+        // nome não resolve, cair no **nosso** mandaria o metadado dessa pessoa
+        // para nós sem que ela tivesse pedido. Um recuo que atravessa uma
+        // escolha explícita de outra pessoa não é resiliência.
+        let ate = tokio::time::Instant::now() + super::PRAZO;
+        let alheio = "encontro.invalido.invalid:8384";
+
+        let resultado = super::resolver(alheio, ate).await;
+
+        assert!(
+            resultado.is_err(),
+            "um ponto de encontro alheio que não resolve caiu no nosso: {resultado:?}"
+        );
+    }
+
     #[test]
     fn o_ponto_padrao_que_nao_resolve_nao_culpa_a_maquina_de_quem_hospeda() {
         // Apareceu numa tela de verdade: «o nome não resolve, ou esta máquina
