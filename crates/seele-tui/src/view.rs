@@ -75,14 +75,60 @@ fn project_messages(room: &Room, app: &mut App) {
         .map(|message| ChatLine {
             at: clock(message.at_seconds),
             author: message.author_nickname.clone(),
-            body: if message.edited {
-                format!("{} (editada)", message.body)
-            } else {
-                message.body.clone()
+            body: {
+                let mut body = if message.edited {
+                    format!("{} (editada)", message.body)
+                } else {
+                    message.body.clone()
+                };
+                // ADR 0027. Drawn on the line and never opened: this terminal
+                // has no button that opens a file and is not going to grow one.
+                // The word that matters is the one that says whether the bytes
+                // are still there — a message whose picture was evicted must
+                // not read as a message with nothing in it.
+                if let Some(anexo) = &message.attachment {
+                    if !body.is_empty() {
+                        body.push('\n');
+                    }
+                    body.push_str(&anexo_line(anexo));
+                }
+                body
             },
             own: message.own,
         })
         .collect();
+}
+
+/// The one line a terminal draws for a file.
+///
+/// Name, size, and whether it is still there. No preview, because a terminal
+/// has none to give, and no way to open it, because ADR 0027 gives no client of
+/// the SEELE one.
+fn anexo_line(anexo: &seele_core::AttachmentInfo) -> String {
+    let estado = if anexo.state == seele_core::AttachmentState::Expired {
+        " — ESTE ARQUIVO EXPIROU"
+    } else {
+        ""
+    };
+    format!(
+        "[ARQUIVO] {} · {}{estado}",
+        anexo.file_name,
+        tamanho(anexo.byte_size)
+    )
+}
+
+/// A byte count the way somebody reads one.
+fn tamanho(bytes: u64) -> String {
+    const MIB: f64 = 1024.0 * 1024.0;
+    const KIB: f64 = 1024.0;
+    let bytes = bytes as f64;
+    if bytes >= MIB {
+        format!("{:.1} MB", bytes / MIB)
+    } else if bytes >= KIB {
+        format!("{:.0} KB", bytes / KIB)
+    } else {
+        format!("{bytes:.0} B")
+    }
 }
 
 fn project_bar(room: &Room, app: &mut App) {
@@ -219,6 +265,89 @@ mod tests {
             client_message_id: None,
             attachment: None,
         }
+    }
+
+    fn com_anexo(id: u64, body: &str, expirado: bool) -> ServerMessage {
+        let ServerMessage::MessageReceived {
+            line,
+            author,
+            at_seconds,
+            author_nickname,
+            replies_to,
+            client_message_id,
+            ..
+        } = said(id, 1, body)
+        else {
+            unreachable!("said builds a MessageReceived")
+        };
+        ServerMessage::MessageReceived {
+            line,
+            id: MessageId(id),
+            author,
+            at_seconds,
+            author_nickname,
+            body: body.into(),
+            replies_to,
+            client_message_id,
+            attachment: Some(seele_core::AttachmentInfo {
+                id: seele_core::AttachmentId(7),
+                file_name: "harmonicos.png".into(),
+                declared_type: "image/png".into(),
+                byte_size: 2 * 1024 * 1024,
+                state: if expirado {
+                    seele_core::AttachmentState::Expired
+                } else {
+                    seele_core::AttachmentState::Available
+                },
+            }),
+        }
+    }
+
+    #[test]
+    fn a_message_with_a_file_says_the_name_and_the_size() {
+        // ADR 0027. The terminal draws it and never opens it: there is no
+        // button that opens a file in any client of the SEELE.
+        let mut room = room();
+        room.apply(&com_anexo(1, "olha isto", false));
+        let mut app = App::new();
+        project(&room, &mut app);
+
+        let linha = &app.messages[0].body;
+        assert!(linha.contains("olha isto"), "o texto sumiu: {linha}");
+        assert!(linha.contains("harmonicos.png"), "sem o nome: {linha}");
+        assert!(linha.contains("2.0 MB"), "sem o tamanho: {linha}");
+        assert!(
+            !linha.contains("EXPIROU"),
+            "um arquivo que está lá foi anunciado como ido: {linha}"
+        );
+    }
+
+    #[test]
+    fn a_message_whose_file_expired_says_so_instead_of_drawing_nothing() {
+        // A mensagem com o arquivo ido não pode ficar igual a uma mensagem sem
+        // arquivo nenhum: é para isso que o Dogma guarda a linha depois de
+        // apagar os bytes, e é aqui que essa decisão vira ou não vira uma
+        // frase na tela.
+        let mut room = room();
+        room.apply(&com_anexo(1, "recibo", true));
+        let mut app = App::new();
+        project(&room, &mut app);
+
+        let linha = &app.messages[0].body;
+        assert!(linha.contains("EXPIROU"), "não disse que expirou: {linha}");
+        assert!(
+            linha.contains("harmonicos.png") && linha.contains("2.0 MB"),
+            "o nome e o tamanho foram embora com os bytes: {linha}"
+        );
+    }
+
+    #[test]
+    fn a_message_with_no_file_gains_no_line() {
+        let mut room = room();
+        room.apply(&said(1, 1, "só texto"));
+        let mut app = App::new();
+        project(&room, &mut app);
+        assert_eq!(app.messages[0].body, "só texto");
     }
 
     #[test]

@@ -48,9 +48,9 @@ use seele_core::{
 };
 
 pub use types::{
-    Attachment, Cage, CageSync, CaptureDevice, EndReason, Event, Line, LineWeight, LinkState,
-    Message, Notice, NoticeReason, Pattern, Pilot, PlaybackDevice, PlugError, Severity, Snapshot,
-    SyncBand as Band, Telemetry, Transfer, Trust, VoiceMode,
+    Attachment, AttachmentRefusal, Cage, CageSync, CaptureDevice, EndReason, Event, Line,
+    LineWeight, LinkState, Message, Notice, NoticeReason, Pattern, Pilot, PlaybackDevice,
+    PlugError, Severity, Snapshot, SyncBand as Band, Telemetry, Transfer, Trust, VoiceMode,
 };
 
 /// O que a casca gráfica precisa do core além de um [`Plug`] vivo.
@@ -358,6 +358,35 @@ impl Shared {
     /// esperando para sempre: o remetente é largado quando a tarefa do enlace
     /// termina, e um `oneshot` largado acorda quem espera com erro — que é como
     /// esta ponte já diz "não há sessão".
+    /// Takes the transfer reasons the room collected, and empties the queue.
+    ///
+    /// Drained rather than read: two transfers can be in the air at once, and
+    /// the second one failing must not erase the reason the first one did. The
+    /// `Room` keeps them in order and this hands them on in order.
+    fn drain_transfers(&self) -> Vec<Transfer> {
+        let Ok(mut room) = self.room.lock() else {
+            return Vec::new();
+        };
+        room.transfers
+            .drain(..)
+            .map(|aviso| match aviso {
+                seele_core::TransferNotice::Refused {
+                    client_message_id,
+                    reason,
+                } => Transfer::RefusedBecause {
+                    client_message_id: client_message_id.get(),
+                    reason: refusal_of(reason),
+                },
+                seele_core::TransferNotice::Unavailable { attachment, reason } => {
+                    Transfer::Unavailable {
+                        attachment: attachment.get(),
+                        reason: refusal_of(reason),
+                    }
+                }
+            })
+            .collect()
+    }
+
     fn answer_weight(&self, weight: LineWeight) {
         let Ok(mut pending) = self.pending_weights.lock() else {
             return;
@@ -1253,6 +1282,22 @@ fn messages_of(room: &Room) -> Vec<Message> {
         .collect()
 }
 
+/// Maps a wire refusal onto this crate's own.
+fn refusal_of(reason: seele_core::AttachmentRefusal) -> AttachmentRefusal {
+    match reason {
+        seele_core::AttachmentRefusal::NotAllowed => AttachmentRefusal::NotAllowed,
+        seele_core::AttachmentRefusal::TooLarge { limit } => AttachmentRefusal::TooLarge { limit },
+        seele_core::AttachmentRefusal::NoRoom => AttachmentRefusal::NoRoom,
+        seele_core::AttachmentRefusal::SizeMismatch => AttachmentRefusal::SizeMismatch,
+        seele_core::AttachmentRefusal::HashDidNotMatch => AttachmentRefusal::HashDidNotMatch,
+        seele_core::AttachmentRefusal::RateLimited => AttachmentRefusal::RateLimited,
+        seele_core::AttachmentRefusal::Unavailable => AttachmentRefusal::Unavailable,
+        seele_core::AttachmentRefusal::NotFound => AttachmentRefusal::NotFound,
+        seele_core::AttachmentRefusal::Expired => AttachmentRefusal::Expired,
+        seele_core::AttachmentRefusal::Malformed => AttachmentRefusal::Malformed,
+    }
+}
+
 /// Turns one step of a transfer into what a shell draws.
 fn transfer_of(estado: &seele_core::enlace::Transferencia) -> Transfer {
     use seele_core::enlace::Transferencia;
@@ -1479,6 +1524,13 @@ async fn drive(
                             });
                         }
                         fold(&shared, &message);
+                        // A razão de uma recusa, que o `Room` guardou ao dobrar
+                        // a mensagem. Drenada em vez de lida: duas
+                        // transferências podem estar no ar, e a segunda falhar
+                        // não pode apagar o motivo da primeira.
+                        for aviso in shared.drain_transfers() {
+                            shared.notify(&Event::TransferChanged { transfer: aviso });
+                        }
                     }
                     seele_core::enlace::Aviso::Transferencia(estado) => {
                         shared.notify(&Event::TransferChanged {

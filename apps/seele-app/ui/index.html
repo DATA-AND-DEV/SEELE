@@ -1005,6 +1005,34 @@
                 title="fechar a busca">fechar</button>
       </form>
       <ol id="lista-mensagens" class="mensagens"></ol>
+      <!--
+        O arquivo escolhido, antes de ele subir. ADR 0027.
+
+        Fica **acima** do campo e não dentro dele: enquanto sobe, a mensagem não
+        existe na Linha — o Dogma só a publica quando os bytes chegam inteiros —,
+        então não há linha na conversa em que pendurar a barra. Este é o lugar
+        onde ela pode existir sem inventar uma mensagem que ainda não é.
+
+        `aria-live="polite"` porque o que muda aqui é o andamento e o desfecho,
+        e quem não está olhando para cá é justamente quem precisa ser avisado de
+        que a coisa caiu.
+      -->
+      <div id="anexo-pendente" class="anexo-pendente" hidden aria-live="polite">
+        <span class="anexo-linha">
+          <span id="anexo-nome" class="anexo-nome"></span>
+          <span id="anexo-tamanho" class="anexo-tamanho"></span>
+          <button id="anexo-tirar" class="botao-fantasma" type="button"
+                  title="tirar o arquivo">tirar</button>
+        </span>
+        <!--
+          Barra com porcentagem, sempre. O total aqui é sempre conhecido — quem
+          escolheu o arquivo sabe o tamanho dele —, então esta é a metade da
+          regra do ADR 0026 que nunca cai no travessão. Uma barra fingindo medir
+          o que ninguém mediu seria a outra metade, e ela não tem lugar aqui.
+        -->
+        <progress id="anexo-barra" class="anexo-barra" value="0" max="1" hidden></progress>
+        <span id="anexo-estado" class="anexo-estado"></span>
+      </div>
       <form id="form-mensagem" class="compor" autocomplete="off">
         <!--
           O sinal de maior, e não o triângulo desenhado: o comp escreve `>` aqui,
@@ -1023,6 +1051,17 @@
           desligou as legendas simples, que é justamente quem já sabe.
         -->
         <span class="dica compor-dica">Enter também envia</span>
+        <!--
+          Arrastar é como se escolhe um arquivo aqui, e o botão existe para
+          dizer isso — descoberta por acaso não é descoberta. Ele não abre
+          seletor nenhum: um seletor de arquivos nativo custaria um crate a mais
+          numa árvore que o ADR 0026 acabou de contar crate a crate, e o
+          ADR 0027 fecha dizendo que nenhuma dependência nova entra por causa
+          de anexos. Então ele instrui, e o `title` diz a mesma coisa por
+          extenso.
+        -->
+        <button id="botao-anexar" class="compor-anexar" type="button"
+                title="arraste um arquivo para a conversa para anexá-lo">ARQUIVO</button>
         <button id="botao-enviar" class="compor-enviar" type="submit">ENVIAR</button>
       </form>
     </section>

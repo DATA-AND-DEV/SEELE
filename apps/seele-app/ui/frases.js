@@ -228,3 +228,109 @@ const FRASES = {
       "NÃO HÁ VERSÃO NOVA ESCOLHIDA PARA INSTALAR.\n" +
       "Procure de novo: instalar sempre instala o que a última procura mostrou na tela.",
 };
+
+/**
+ * Por que um arquivo não foi aceito, ou não vem. ADR 0027.
+ *
+ * Dez variantes e dez frases, e a divisão não é zelo: elas mandam coisas
+ * diferentes de quem está esperando. Uma diz «tente de novo daqui a pouco»,
+ * outra diz «este arquivo nunca vai caber», e uma terceira diz «os bytes já
+ * foram embora, e o que sobrou é o nome». Escrever «não deu» nas dez faria
+ * todo mundo tentar de novo, inclusive nos casos em que tentar de novo é a
+ * coisa errada a fazer.
+ */
+const ANEXOS = {
+  NotAllowed:
+    "VOCÊ NÃO PODE ANEXAR ARQUIVO NESTE DOGMA.\n" +
+    "Escrever e anexar são permissões separadas: quem hospeda pode deixar você " +
+    "falar sem deixar você pôr arquivo no disco dele. Peça a permissão a quem hospeda.",
+  TooLarge:
+    "ESTE ARQUIVO É GRANDE DEMAIS PARA ESTE DOGMA.\n" +
+    "Cada Dogma tem um teto de disco escolhido por quem hospeda, e o limite por " +
+    "arquivo é uma fração dele — para uma subida sozinha não poder esvaziar o " +
+    "histórico de todo mundo. Tentar de novo com o mesmo arquivo dá no mesmo.",
+  NoRoom:
+    "O DOGMA ESTÁ COM O TETO INTEIRO OCUPADO POR TRANSFERÊNCIAS EM ANDAMENTO.\n" +
+    "Nada foi perdido e nada foi apagado. Tente de novo daqui a pouco.",
+  SizeMismatch:
+    "O ARQUIVO NÃO CHEGOU INTEIRO, E O DOGMA NÃO O GUARDOU.\n" +
+    "Nada foi publicado na Linha. Mandar de novo manda o arquivo inteiro outra vez, " +
+    "do começo.",
+  HashDidNotMatch:
+    "O QUE CHEGOU NÃO É O QUE SAIU DAQUI, E O DOGMA RECUSOU.\n" +
+    "É a única pergunta que um Dogma consegue responder sobre um arquivo — se ele " +
+    "chegou inteiro — e a resposta foi não. Nada foi publicado na Linha.",
+  RateLimited:
+    "VOCÊ ESTÁ MANDANDO ARQUIVO MAIS RÁPIDO DO QUE ESTE DOGMA ACEITA.\n" +
+    "Não é castigo e não é limite de tamanho: é ritmo. Espere um pouco e mande de novo.",
+  Unavailable:
+    "ESTE DOGMA NÃO GUARDA ARQUIVO.\n" +
+    "Quem hospeda não deu a ele um lugar para guardar. Só texto e voz por aqui.",
+  NotFound:
+    "ESTE ARQUIVO NÃO EXISTE NESTE DOGMA.\n" +
+    "Ou ele nunca existiu, ou está numa Linha que você não pode ler.",
+  Expired:
+    "ESTE ARQUIVO EXPIROU.\n" +
+    "O Dogma guarda anexos até um teto de disco, e ao encher o mais antigo sai. " +
+    "O texto da mensagem continua; os bytes não. Peça a quem mandou para mandar de novo.",
+  Malformed:
+    "O DOGMA NÃO ENTENDEU O PEDIDO DE ARQUIVO.\n" +
+    "Nada foi publicado na Linha. Se acontecer de novo, as duas pontas podem estar " +
+    "em versões diferentes do SEELE.",
+};
+
+/**
+ * O que aconteceu com um arquivo que estava subindo.
+ *
+ * `Caiu` é a que só existe porque o ADR 0027 mandou dizê-la: **não há
+ * retomada.** Uma transferência que cai recomeça do zero, e isso precisa ser
+ * dito a quem está esperando em vez de descoberto pela barra voltando ao
+ * começo.
+ */
+const TRANSFERENCIAS = {
+  Sent: "ARQUIVO ENTREGUE",
+  Refused: "O DOGMA RECUSOU O ARQUIVO",
+  Fell:
+    "A TRANSFERÊNCIA CAIU.\n" +
+    "Nada foi publicado na Linha, e não há de onde continuar: mandar de novo manda " +
+    "o arquivo inteiro outra vez, do começo.",
+  Saved: "ARQUIVO SALVO",
+  NotSaved:
+    "NÃO DEU PARA SALVAR O ARQUIVO.\n" +
+    "Nada foi gravado pela metade. Tente de novo.",
+};
+
+/**
+ * A frase de uma recusa de anexo.
+ *
+ * `TooLarge` chega com o limite dentro, porque «grande demais» sem número manda
+ * a pessoa tentar de novo com um arquivo que também é grande demais.
+ */
+function fraseDeAnexo(razao) {
+  if (razao && typeof razao === "object") {
+    const nome = Object.keys(razao)[0];
+    const base = ANEXOS[nome];
+    if (!base) return `FALHA NÃO IDENTIFICADA (${nome})`;
+    if (nome === "TooLarge" && typeof razao[nome]?.limit === "number") {
+      return `${base}\nO limite deste Dogma é ${emBytes(razao[nome].limit)} por arquivo.`;
+    }
+    return base;
+  }
+  return ANEXOS[razao] ?? `FALHA NÃO IDENTIFICADA (${razao})`;
+}
+
+/**
+ * Um número de bytes do jeito que alguém lê um.
+ *
+ * Binário, como o teto que quem hospeda escolheu: dizer «1 GB» para 2^30 seria
+ * mentir sobre o número que a pessoa digitou.
+ */
+function emBytes(bytes) {
+  const GIB = 1024 * 1024 * 1024;
+  const MIB = 1024 * 1024;
+  const KIB = 1024;
+  if (bytes >= GIB) return `${(bytes / GIB).toFixed(1)} GB`;
+  if (bytes >= MIB) return `${(bytes / MIB).toFixed(1)} MB`;
+  if (bytes >= KIB) return `${Math.round(bytes / KIB)} KB`;
+  return `${bytes} B`;
+}

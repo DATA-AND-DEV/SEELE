@@ -277,7 +277,7 @@ Coluna **Custo de reverter** = quanto custa mudar de ideia depois desse ponto.
 |---|---|---|---|---|
 | D12 | IPv6 / NAT traversal | `01` | M2 | IP público, escuta dual-stack, sem NAT traversal nem relay. É o modelo de VPS que `00` descreve |
 | D13 | Política acima de 20 falantes (N ativos) | `01`, `04` | M3 | Encaminhar os N mais recentes a falar, medido **no servidor** pela taxa de datagrams, não por energia reportada pelo cliente — `04` já reconhece que energia do cliente é pouco confiável |
-| D14 | Limite de mensagem / anexos | `02` | M3 | Sem anexos em v1. Teto de corpo em 4 KiB, fixado já em M0 porque `08` exige limite de tamanho antes de alocar |
+| D14 | Limite de mensagem / anexos | `02` | M3 | **Revisada.** O teto de corpo em 4 KiB fica, e foi fixado já em M0 porque `08` exige limite de tamanho antes de alocar. «Sem anexos em v1» caiu: o ADR 0027 os construiu com teto total fixo e despejo do mais antigo |
 | D15 | Endpoint de saúde | `04` | M3 | HTTP mínimo separado, atrás de bind configurável. Métricas Prometheus já são exigidas por `04`, então a superfície HTTP existe de qualquer jeito — não construa duas |
 | D16 | Recarga a quente de config | `04` | M3 | Não em v1, como `04` já suspeita |
 | D17 | Compressão de histórico | `02` | M3 | Não em v1. Não otimizar antes de medir (`10`) |

@@ -64,6 +64,38 @@ Esboço para pós-v1:
 
 **Não prometer E2EE em v1.** Documentar honestamente: em v1, o operador do servidor pode, em teoria, capturar mídia. Isso é aceitável para o modelo de uso (você hospeda para seu próprio grupo), mas precisa estar escrito.
 
+## Anexos: uma diferença de esforço que merece frase própria
+
+O ADR 0027 pôs arquivos no disco de quem hospeda, e isso não é uma ameaça nova —
+a linha «vazamento de histórico por acesso ao disco do servidor» acima já cobre
+o direito. É uma diferença de **esforço**, e é a diferença que faz alguém se
+surpreender: o histórico de texto está dentro de um SQLite e exige saber
+perguntar; um diretório `anexos/` é navegável por qualquer gerenciador de
+arquivos, e uma foto se lê de relance.
+
+**Guardado em claro, e documentado.** Cifra em repouso foi considerada e
+recusada: a chave teria de estar viva no mesmo disco, porque o Dogma precisa
+servir o arquivo a quem tem permissão a qualquer momento. Isso protege contra
+notebook roubado e contra nada mais — e contra notebook roubado a cifra de disco
+inteiro do sistema protege melhor, é o que a pessoa já tem, e ela pode ligar
+hoje.
+
+Em trânsito nada muda: TLS 1.3 dentro do QUIC, sem modo claro. **O arquivo não é
+legível na rede. É legível no disco de quem hospeda.**
+
+**Um Dogma não varre vírus.** Não há motor, não há base de assinaturas e não há
+caminho de atualização para uma. O que ele confere é se o arquivo chegou
+inteiro — tamanho contra o declarado, conteúdo contra o hash declarado — e é a
+única pergunta que ele consegue responder. **Não há lista de extensões
+proibidas**, de propósito: uma lista é contornada com um `rename`, quebra usos
+legítimos, e — pior que as duas coisas — faz o que passou parecer conferido.
+
+O que o produto pode fazer, e faz: ao gravar, marca o arquivo com a quarentena do
+próprio sistema (`com.apple.quarantine`, o fluxo `Zone.Identifier`), que é o que
+faz o Gatekeeper e o SmartScreen pararem o arquivo na frente de quem for
+abri-lo. E **nenhum cliente do SEELE abre arquivo**: salvar é um ato de quem
+recebeu, num lugar que a pessoa escolheu.
+
 ## Práticas de código
 
 - `#![forbid(unsafe_code)]` em todos os crates exceto `seele-ffi` e bindings de áudio, onde `unsafe` é justificado por comentário caso a caso.

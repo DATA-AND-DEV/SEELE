@@ -628,7 +628,55 @@ janela, dizer que quem estiver dentro dele cai junto.
 **Quando dói.** Em toda versão nova, em toda máquina. E dói em silêncio: quem não
 souber que saiu versão nova simplesmente continua na antiga.
 
-## 18 · Anexos estão desenhados e não construídos
+## 18 · Fechada em 2026-08-17 · Anexos estão desenhados e não construídos
+
+**Como fechou.** O ADR 0027 passou a aceito e foi construído inteiro, na ordem
+em que ele próprio se justifica — o teto antes de qualquer byte trafegar, e a
+tela por último.
+
+**O teto.** `crates/seele-server/src/casper/attachments.rs`. A conferência
+acontece contra o tamanho **declarado**, e o descarte também: receber e arrumar
+depois deixaria o disco acima do teto pelo tempo da transferência, que é a
+propriedade inteira que se perde. O que uma transferência em voo reserva conta
+como se já estivesse em disco — sem isso duas subidas simultâneas olham para o
+mesmo espaço livre e cada uma se acha cabível, que é o instante entre aceitar e
+despejar. O teto por arquivo é derivado (um dezesseis avos do total) e não
+configurado, para os dois números não poderem ser postos num par absurdo.
+
+Quem hospeda escolhe com `seeled anexos 2G`, gravado na tabela `configuracao`.
+Ausência da chave significa o padrão de 1 GiB, e nada é gravado: um Dogma que já
+existia sobe com o teto sem que nenhuma migração escreva por ele.
+
+**O caminho.** Um fluxo QUIC unidirecional por transferência, nos dois sentidos,
+com o controle acima de toda transferência dentro da mesma conexão. Nenhum lado
+segura o arquivo em memória. A resposta volta pelo controle como razão
+enumerada, e são dez.
+
+**A permissão é nova.** `Permission::AttachFile`, no fim da enumeração, com
+migração 3 trazendo os papéis semeados para a frente — Comandante, Operador e
+Piloto ganham, o Observador é **negado explicitamente**.
+
+**O texto sobrevive ao arquivo.** Expirar apaga os bytes e mantém a linha, e a
+página de histórico carrega o nome, o tamanho e um estado enumerado. É por isso
+que uma mensagem cujo anexo saiu diz «este arquivo expirou» em vez de aparecer
+vazia. A consequência está escrita no ADR e é aceita: a tabela de anexos nunca
+perde linha.
+
+**Duas coisas que o ADR descreve e que não foram construídas** estão anotadas no
+alto dele: a prévia embutida de imagem — que exige conferir os bytes contra o
+tipo alegado antes de escolher um decodificador, e enquanto não existir todo
+anexo é um arquivo com nome e tamanho — e um seletor de arquivos nativo, que
+custaria um crate a mais.
+
+**O que segue aberto e não é isto:** as quatro coisas que o próprio ADR nomeia
+como sem saída boa. Justiça sob teto global — uma pessoa com a permissão esvazia
+o histórico de anexos de todo mundo sem estourar disco nenhum, e o balde de bytes
+do `taxa.rs` **atrasa e não impede**; retomada de transferência caída, que
+recomeça do zero e agora ao menos diz isso; concorrência entre conexões, que a
+prioridade de fluxo não ordena; e o fato de que quem hospeda lê tudo. Nenhuma
+delas foi tocada, e nenhuma delas foi fingida como resolvida.
+
+---
 
 **Sintoma.** Não dá para mandar imagem, nem áudio, nem arquivo. Foi o item 6 da
 lista que veio do teste em rede local, e é a maior lacuna funcional que sobrou

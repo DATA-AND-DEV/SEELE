@@ -32,7 +32,7 @@ Formato e regra de criação em `specs/10-convencoes.md`: toda decisão marcada
 | [0024](0024-faixas-de-sincronia-em-tres-e-a-media-no-core.md) | Faixas de sincronia em três, e a média do Cage no core | aceito | `03` — sincronia |
 | [0025](0025-limitacao-de-taxa-em-dois-baldes.md) | Limitação de taxa: dois baldes, e um aviso antes da porta | aceito | `08` — limitação de taxa |
 | [0026](0026-duas-assinaturas-e-um-botao-de-atualizar.md) | Duas assinaturas, e um botão de atualizar | aceito | `01` — distribuição |
-| [0027](0027-anexos-com-teto-e-o-mais-velho-sai.md) | Anexos com teto total, e o mais velho sai | **proposto** | `02` — política de anexos (D14) |
+| [0027](0027-anexos-com-teto-e-o-mais-velho-sai.md) | Anexos com teto total, e o mais velho sai | aceito | `02` — política de anexos (D14) |
 | [0028](0028-a-reserva-do-anel-de-reproducao.md) | A reserva do anel de reprodução, e o que ela custa de latência | aceito | — (pendência 2, e revisão do `0009`) |
 
 ## O que ainda não tem ADR
@@ -45,8 +45,10 @@ tecla de PTT (M4), leitor de tela (M4), framework do frontend desktop (M5),
 plataforma mobile (M6).
 
 **Anexos saíram desta lista**: viraram o [0027](0027-anexos-com-teto-e-o-mais-velho-sai.md),
-**proposto**, e ele desfaz metade da D14 — o teto de corpo de 4 KiB continua, e
-o "sem anexos em v1" não. Nada foi construído; ver pendência 18.
+aceito e construído, e ele desfaz metade da D14 — o teto de corpo de 4 KiB
+continua, e o "sem anexos em v1" não. O que ele decide está de pé; a prévia
+embutida de imagem e um seletor de arquivos nativo não foram construídos, e
+estão anotados no alto dele. Ver pendência 18.
 
 **IPv6/NAT traversal saiu desta lista**: virou o [0022](0022-alcancar-um-dogma-pela-internet.md),
 aceito, com os degraus 2 (IPv6) e 3 (UPnP) construídos. O degrau 4 — furo de NAT
