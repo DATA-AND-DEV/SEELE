@@ -662,12 +662,47 @@ que uma mensagem cujo anexo saiu diz «este arquivo expirou» em vez de aparecer
 vazia. A consequência está escrita no ADR e é aceita: a tabela de anexos nunca
 perde linha.
 
-**Uma coisa que o ADR descreve e que não foi construída** está anotada no alto
-dele: a prévia embutida de imagem — que exige conferir os bytes contra o tipo
-alegado antes de escolher um decodificador, e enquanto não existir todo anexo é
-um arquivo com nome e tamanho.
+**A primeira coisa que o ADR descrevia e não estava construída era a prévia
+embutida de imagem, e ela caiu em 2026-08-18.** O relato de campo: *preview de
+imagem/documento anexo*. O que faltava era a conferência que o próprio ADR
+exige — os **bytes** contra o tipo alegado, antes de escolher decodificador — e
+ela existe agora em `crates/seele-core/src/preview.rs`.
 
-**A segunda era o seletor de arquivos nativo, e ela caiu em 2026-08-18.** O
+Quatro formatos, com o motivo de cada um escrito: PNG e JPEG porque sem eles o
+recurso não existe, GIF porque é o que se cola numa conversa, WebP porque é o
+que um navegador salva hoje. Fora ficaram SVG (marcação, não imagem), PDF
+(documento com um interpretador atrás), HEIC e AVIF (marca dentro de uma caixa
+que o `mp4` divide, e suporte desigual nos três alvos) e BMP/ICO/TIFF
+(assinatura de dois bytes, e ninguém manda).
+
+**As duas metades têm de concordar.** Farejar sozinho faria o nome virar
+enfeite; a alegação sozinha seria confiar em quem mandou. Quando elas discordam
+— um JPEG chamado `foto.png`, um executável chamado `gatinho.png` — não se
+desenha, **e não se desenha como o que o arquivo por acaso é**, que seria o
+mesmo erro pelo avesso. A caixa do anexo escreve o que ele disse ser e o que os
+bytes dele são, diz que ele chegou inteiro e que o hash fechou, e deixa o
+arquivo ali para salvar: não desenhar é diferente de esconder. É a separação que
+as `NOTAS-DE-RELEASE` fazem entre «chegou inteiro» e «é o que diz ser», e a
+segunda pergunta passa a ter resposta para estes quatro formatos.
+
+**A busca acontece ao apertar, nunca ao rolar.** O anexo mora no Dogma: ver é
+baixar, e uma Linha que buscasse toda imagem ao rolar transformaria o teto de
+disco de quem hospeda em banda de todo mundo. O que voltou fica guardado por
+anexo, inclusive quando é recusa.
+
+**O limite da prévia é 4 MiB, decidido separado do teto por arquivo**, que no
+padrão é 64 MiB: aquele protege o disco de quem hospeda, este a memória de quem
+lê. Conferido contra o tamanho declarado no cabeçalho, antes de um byte do
+corpo, com o fluxo cortado em vez de drenado.
+
+**Prever não é abrir e não é salvar**: os bytes vão para a memória e param ali,
+nada toca o sistema de arquivos, e continua não existindo `abrir_anexo`. A CSP
+não mexeu — `default-src 'self'` com `img-src 'self' data:` já bastava, e um
+guarda reprova se ela ganhar `blob:` ou um `unsafe-`. Nenhuma dependência nova:
+quem decodifica é o motor do WebView, e o base64 são vinte linhas conferidas
+contra a RFC 4648 em vez de um crate.
+
+**A segunda era o seletor de arquivos nativo, e ela caiu no mesmo dia.** O
 relato de campo: o dono arrastou um arquivo e não aconteceu nada, e clicou no
 botão ARQUIVO e não abriu nada. Eram dois defeitos sem causa comum. O arrastar
 estava morto porque este app não tinha arquivo de capacidade nenhum e `listen()`

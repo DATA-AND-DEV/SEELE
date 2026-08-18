@@ -5312,3 +5312,307 @@ fn every_reason_a_session_can_end_with_has_a_sentence_in_the_page() {
         );
     }
 }
+
+// ------------------------------------------------ the preview, ADR 0027
+//
+// The half of ADR 0027's rule that had been written and not built: a short list
+// of image types is drawn inline, and only when the **bytes** agree with the
+// claim. Every guard below is about a way this can go wrong quietly — a preview
+// fetched by scrolling, a media type composed in the page, a refusal written
+// only where nobody can see it, or a preview that has drifted into being an
+// open.
+
+#[test]
+fn a_preview_is_asked_for_by_a_press_and_by_nothing_else() {
+    // The attachment lives on the Dogma, so looking at it is downloading it. A
+    // Line that previewed every picture as it scrolled would turn whoever
+    // hosts' disk ceiling into everybody's uplink, once per person per time
+    // anybody opened the Line — and it would do it silently, because it would
+    // look exactly like the feature working.
+    let fonte = without_comments(&read("ui/tela-sessao.js"));
+    let chamadas = fonte.matches("invoke(\"prever_anexo\"").count();
+    assert_eq!(
+        chamadas, 1,
+        "`prever_anexo` is invoked from more than one place, and only one of \
+         them can be the button"
+    );
+
+    let ver = js_function(&read("ui/tela-sessao.js"), "async function verPrevia(");
+    assert!(
+        ver.contains("invoke(\"prever_anexo\""),
+        "the one call is not inside `verPrevia`, so it is somewhere a press \
+         does not control: {ver}"
+    );
+
+    // And the only caller of `verPrevia` is a click handler. Redrawing the list
+    // must not reach it: `desenharMensagens` runs on every snapshot tick.
+    let desenhar = js_function(&read("ui/tela-sessao.js"), "function desenharMensagens(");
+    assert!(
+        !desenhar.contains("verPrevia"),
+        "redrawing the conversation fetches previews, so scrolling downloads: \
+         {desenhar}"
+    );
+    let bloco = js_function(&read("ui/tela-sessao.js"), "function blocoDeAnexo(");
+    assert!(
+        !bloco.contains("verPrevia") && !bloco.contains("invoke("),
+        "drawing an attachment fetches its bytes, which is the whole thing this \
+         must not do: {bloco}"
+    );
+
+    // A press, and a press is a click on a button. Not a hover, not focus.
+    let chamadores: Vec<&str> = fonte
+        .lines()
+        .filter(|line| line.contains("verPrevia(") && !line.contains("function verPrevia"))
+        .collect();
+    assert_eq!(
+        chamadores.len(),
+        1,
+        "`verPrevia` is called from {} places: {chamadores:?}",
+        chamadores.len()
+    );
+    let Some(at) = fonte.find("$(\"lista-mensagens\").addEventListener(\"click\"") else {
+        panic!("the conversation no longer listens for a click at all");
+    };
+    let ouvinte: String = fonte[at..].chars().take(900).collect();
+    assert!(
+        ouvinte.contains("verPrevia("),
+        "the call to `verPrevia` is not inside the click handler on the \
+         conversation, so a press is not what triggers it: {ouvinte}"
+    );
+    assert!(
+        ouvinte.contains("data-anexo-previa"),
+        "the click handler does not look for the preview button: {ouvinte}"
+    );
+}
+
+#[test]
+fn a_preview_already_fetched_is_redrawn_and_never_fetched_twice() {
+    // The list is rebuilt whole on every update. Without somewhere to keep what
+    // came back, every redraw would either lose the picture or pay for it
+    // again — and paying again is somebody else's bandwidth.
+    let bloco = js_function(&read("ui/tela-sessao.js"), "function blocoDeAnexo(");
+    assert!(
+        bloco.contains("previas.get("),
+        "the attachment block does not read back a preview that was already \
+         fetched, so redrawing loses it: {bloco}"
+    );
+    let ver = js_function(&read("ui/tela-sessao.js"), "async function verPrevia(");
+    assert!(
+        ver.contains("previas.set("),
+        "nothing is kept after a fetch: {ver}"
+    );
+    // Refusals are kept too. Bytes that disagreed with a name do not disagree
+    // less the second time, and asking again spends the host's uplink to reach
+    // the same conclusion.
+    let guardar = ver.split("previas.set(").nth(1).unwrap_or_default();
+    let antes = ver.split("previas.set(").next().unwrap_or_default();
+    assert!(
+        !antes.contains("if (previa.image)") && !guardar.is_empty(),
+        "the preview is only kept when it produced a picture, so a refusal is \
+         re-fetched on every press: {ver}"
+    );
+}
+
+#[test]
+fn the_page_never_composes_the_media_type_a_picture_is_decoded_with() {
+    // The crux of ADR 0027's rule. The `data:` URI arrives whole from Rust,
+    // media type included, and that media type was written from what the bytes
+    // turned out to be. A page that joined a type to some bytes would be a page
+    // that could join the **sender's claim** to them, and the sender's claim is
+    // text somebody else chose.
+    let desenho = js_function(&read("ui/tela-sessao.js"), "function desenhoDaPrevia(");
+    assert!(
+        desenho.contains("previa.image"),
+        "the drawing does not use the URI that came back: {desenho}"
+    );
+    assert!(
+        !desenho.contains("data:"),
+        "the page builds a `data:` URI of its own, which is the one way the \
+         claim could reach a decoder: {desenho}"
+    );
+    assert!(
+        !desenho.contains("declared_type"),
+        "the drawing reads the type the sender declared: {desenho}"
+    );
+    assert!(
+        !desenho.contains("base64"),
+        "the page encodes or splices bytes itself: {desenho}"
+    );
+
+    // And nowhere in the frontend is a media type of one of the four written
+    // out at all: the list a screen offers previews for comes from Rust, so
+    // that two copies of it cannot drift into offering what the fetch refuses.
+    let mut fonte = String::new();
+    for name in ui_files(".js") {
+        fonte.push_str(&without_comments(&read(&format!("ui/{name}"))));
+    }
+    for tipo in ["image/png", "image/jpeg", "image/gif", "image/webp"] {
+        assert!(
+            !fonte.contains(tipo),
+            "the frontend writes out `{tipo}`, which is a second copy of a list \
+             that already lives in `seele-core::preview`"
+        );
+    }
+    let pode = js_function(&read("ui/tela-sessao.js"), "function podeOferecerPrevia(");
+    assert!(
+        pode.contains("regrasDePrevia"),
+        "the offer is decided from something other than the rules Rust sent: \
+         {pode}"
+    );
+}
+
+#[test]
+fn a_file_that_is_not_what_it_says_it_is_gets_its_own_sentence() {
+    // `NOTAS-DE-RELEASE.md` separates «did it arrive whole» from «is it what it
+    // says it is». The hash answers the first. This is the second, and its
+    // answer being no is not a transfer error, not something to retry, and not
+    // something to leave as a silence that reads like a defect.
+    let frase = js_function(&read("ui/frases.js"), "function fraseDePrevia(");
+    assert!(
+        frase.contains("Disagrees"),
+        "there is no sentence for a file whose bytes disagree with its name: \
+         {frase}"
+    );
+    assert!(
+        frase.contains("chegou inteiro"),
+        "the sentence does not separate the question that had an answer from \
+         the one that has just been answered: {frase}"
+    );
+    assert!(
+        frase.contains("previa.claimed") && frase.contains("previa.found"),
+        "the sentence does not say what the file claimed to be and what it \
+         turned out to be, which is the whole content of it: {frase}"
+    );
+    // And it says the file is still there. Not drawing is not hiding.
+    assert!(
+        frase.contains("salvar"),
+        "the sentence leaves somebody thinking the file is gone: {frase}"
+    );
+}
+
+#[test]
+fn the_reason_a_picture_was_not_drawn_is_written_where_it_can_be_seen() {
+    // ADR 0027 already paid once for a failure told only to `.anuncio`, which
+    // is a one-pixel box clipped off the screen. To somebody looking at the
+    // window, a refusal reported only there and nothing at all are the same
+    // event.
+    let desenho = js_function(&read("ui/tela-sessao.js"), "function desenhoDaPrevia(");
+    assert!(
+        desenho.contains("anexo-recusa") && desenho.contains("fraseDePrevia("),
+        "a preview that produced no picture writes no sentence into the block: \
+         {desenho}"
+    );
+    let ver = js_function(&read("ui/tela-sessao.js"), "async function verPrevia(");
+    assert!(
+        ver.contains("replaceWith(") || ver.contains("append("),
+        "the drawing is never put into the page: {ver}"
+    );
+
+    // And the region it lands in is not one of the clipped ones. Read as a
+    // property of the stylesheet, not by trusting the class name.
+    let folha = without_comments(&read("ui/tela-sessao.css"));
+    let bloco = folha
+        .split('}')
+        .find(|bloco| {
+            bloco
+                .split_once('{')
+                .is_some_and(|(seletor, _)| seletor.contains(".anexo-recusa"))
+        })
+        .unwrap_or_else(|| panic!("`.anexo-recusa` has no rule of its own"));
+    for escondido in ["clip-path", "display: none", "visibility: hidden"] {
+        assert!(
+            !bloco.contains(escondido),
+            "the refusal lands in a region the stylesheet hides with \
+             `{escondido}`: {bloco}"
+        );
+    }
+}
+
+#[test]
+fn a_preview_is_not_an_open_and_is_not_a_save() {
+    // The distance between drawing a picture and opening a file is where this
+    // could go wrong worst, so the line is written rather than assumed. A
+    // preview holds bytes in this window's memory: no path, no file, nothing
+    // handed to the operating system. Saving stays the one verb with a
+    // destination, and it keeps its confirmation.
+    let ver = js_function(&read("ui/tela-sessao.js"), "async function verPrevia(");
+    let desenho = js_function(&read("ui/tela-sessao.js"), "function desenhoDaPrevia(");
+    for corpo in [&ver, &desenho] {
+        for proibido in [
+            "salvar_anexo",
+            "pastaDeDestino",
+            "destino",
+            "armarAto(",
+            "download",
+        ] {
+            assert!(
+                !corpo.contains(proibido),
+                "the preview path reaches for `{proibido}`: previewing is not \
+                 saving, and it must not become it by accident: {corpo}"
+            );
+        }
+    }
+
+    // The block still offers both, and still offers no third thing. The guard
+    // for the absence of an open button reads the whole frontend; this one
+    // reads the block, because that is where a preview button could have
+    // replaced a save button rather than joined it.
+    let bloco = js_function(&read("ui/tela-sessao.js"), "function blocoDeAnexo(");
+    assert!(
+        bloco.contains("anexo-salvar") && bloco.contains("anexo-previa"),
+        "the attachment block lost one of its two verbs: {bloco}"
+    );
+    // And an expired attachment offers neither: there are no bytes to draw and
+    // none to save.
+    let expirado = bloco.split("if (anexo.expired)").nth(1).unwrap_or_default();
+    let ramo = expirado.split("} else {").next().unwrap_or_default();
+    assert!(
+        !ramo.contains("anexo-previa") && !ramo.contains("anexo-salvar"),
+        "an expired attachment is offered a button for bytes that are gone: \
+         {ramo}"
+    );
+}
+
+#[test]
+fn the_content_security_policy_did_not_move_to_make_room_for_a_picture() {
+    // ADR 0029 made this an explicit criterion: if drawing had needed the
+    // policy loosened, the answer would have been no. It did not — `data:` was
+    // already permitted for images and for nothing else — and this guard is
+    // what keeps the next picture from being worth an entry.
+    let config = read("tauri.conf.json");
+    let Some(at) = config.find("\"csp\"") else {
+        panic!("the window ships without a content security policy");
+    };
+    let rest = &config[at..];
+    let Some(open) = rest.find(": \"") else {
+        panic!("the csp entry has no value");
+    };
+    let value = &rest[open + 3..];
+    let Some(end) = value.find('"') else {
+        panic!("the csp value is not terminated");
+    };
+    let csp = &value[..end];
+
+    assert!(
+        csp.contains("default-src 'self'"),
+        "the default source is no longer `self`: {csp}"
+    );
+    assert!(
+        csp.contains("img-src 'self' data:"),
+        "images are drawn from somewhere other than this bundle and `data:`: \
+         {csp}"
+    );
+    for afrouxado in [
+        "blob:",
+        "unsafe-inline",
+        "unsafe-eval",
+        "img-src *",
+        "https:",
+    ] {
+        assert!(
+            !csp.contains(afrouxado),
+            "the policy gained `{afrouxado}`, and no picture is worth that: \
+             {csp}"
+        );
+    }
+}

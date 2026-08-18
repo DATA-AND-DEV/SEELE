@@ -841,6 +841,77 @@ pub struct Attachment {
     pub expired: bool,
 }
 
+/// What a window may draw for one attachment, and why. ADR 0027.
+///
+/// The answer to one press of one button, and never anything a screen gets by
+/// scrolling: the file lives on the Dogma, so looking at it is downloading it,
+/// and a Line that fetched every picture as it scrolled past would turn the
+/// host's disk ceiling into everybody's uplink.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Preview {
+    /// Which attachment this is about.
+    pub attachment: u64,
+    /// The picture, whole, as a `data:` URI — or nothing.
+    ///
+    /// **Composed on this side of the boundary, media type included, and the
+    /// media type came from the bytes.** A shell handed the bytes and a type to
+    /// join up would be a shell that could join them up with the sender's
+    /// claim, which is the one thing the whole design refuses.
+    pub image: Option<String>,
+    /// The type the sender claimed, so a sentence can quote it back.
+    pub claimed: String,
+    /// What the leading bytes turned out to be, when they are a picture this
+    /// product knows. `None` means they are not one.
+    pub found: Option<String>,
+    /// Why there is no picture. `None` exactly when [`Self::image`] is `Some`.
+    pub refusal: Option<PreviewRefusal>,
+}
+
+/// What a screen may offer a preview for, before it asks for one.
+///
+/// Both halves are advice and neither is the rule: the rule is applied where
+/// the bytes are, on the way down. A window that offers nothing here still
+/// cannot draw anything it should not, and a window that offers too much gets
+/// a refusal instead of a picture.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct PreviewRules {
+    /// The most a preview will pull down, in bytes.
+    pub limit: u64,
+    /// The media types that could be drawn, if their bytes agree.
+    pub types: Vec<String>,
+}
+
+/// Why a file was not drawn.
+///
+/// Four, and they are four because they ask different things of the person
+/// reading. One says the file is fine and this window will not spend the memory;
+/// another says the file is not what it claimed to be, which is not a transfer
+/// problem and not something to retry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "kind")]
+pub enum PreviewRefusal {
+    /// The bytes are not what the file said it was.
+    ///
+    /// `NOTAS-DE-RELEASE.md` separates "did it arrive whole" from "is it what
+    /// it says it is". The hash answered the first, with a yes. This is the
+    /// second, with a no — and not drawing is not the same as hiding: the file
+    /// is still on the screen, with its name, its size and its save button.
+    Disagrees,
+    /// Larger than this window will decode.
+    TooBig {
+        /// The most a preview will pull down, in bytes. Carried for the same
+        /// reason [`AttachmentRefusal::TooLarge`] carries one: "too big" with
+        /// no number is a sentence nobody can act on.
+        limit: u64,
+    },
+    /// Never a picture in the first place — a document, a build, a text file.
+    ///
+    /// A window should not have asked, and this is what it gets if it did.
+    NotAPicture,
+    /// The bytes never came: expired, gone, or they did not arrive whole.
+    DidNotArrive,
+}
+
 /// Onde o enlace está.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum LinkState {

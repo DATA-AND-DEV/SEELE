@@ -1083,6 +1083,69 @@
   border-color: var(--seele-laranja-nerv);
 }
 
+/* PRÉVIA, ao lado de SALVAR e nunca no lugar dele. Prever não é abrir e não é
+   salvar: os bytes vão para a memória desta janela, não para o disco. */
+.anexo-previa {
+  padding: 3px 10px;
+  font-family: var(--seele-display);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: var(--seele-osso-apagado);
+  background: none;
+  border: 1px solid var(--seele-linha-forte);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.anexo-previa:hover {
+  color: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
+}
+
+.anexo-previa[disabled] {
+  cursor: progress;
+  border-style: dashed;
+}
+
+/* A figura ocupa a linha inteira do bloco: `flex-basis: 100%` é o que a tira de
+   dentro da fileira do nome em vez de espremê-la ao lado dele. */
+.anexo-desenho {
+  flex: 0 0 100%;
+  display: block;
+  margin-top: 6px;
+  min-width: 0;
+}
+
+/* O teto de bytes da prévia limita o download; ele **não** limita os pixels que
+   a decodificação produz. Este limite é o outro: o que a janela desenha cabe na
+   conversa, venha a imagem com a dimensão que vier. */
+.anexo-desenho img {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border: 1px solid var(--seele-linha);
+  background: var(--seele-negro-absoluto);
+}
+
+/* Por que não há figura, escrito onde a pessoa está olhando. Uma recusa contada
+   só à caixa de um pixel do leitor de tela é, para quem enxerga, a mesma coisa
+   que nada ter acontecido — o ADR 0027 já pagou uma vez por isso. */
+.anexo-recusa {
+  flex: 0 0 100%;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-left: 2px solid var(--seele-laranja-nerv);
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-rotulo);
+  line-height: 1.5;
+  color: var(--seele-osso-apagado);
+  white-space: pre-line;
+}
+
 /* ---------- coluna 4: Taxa de Sincronização ---------- */
 
 /* A cartela invertida. O inventário §12 endurece essa regra no v2: cabeçalho de

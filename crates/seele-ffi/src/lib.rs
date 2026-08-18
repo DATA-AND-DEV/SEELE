@@ -50,7 +50,8 @@ use seele_core::{
 pub use types::{
     Attachment, AttachmentRefusal, Cage, CageSync, CaptureDevice, EndReason, Event, Line,
     LineWeight, LinkState, Message, Notice, NoticeReason, Pattern, Pilot, PlaybackDevice,
-    PlugError, Severity, Snapshot, SyncBand as Band, Telemetry, Transfer, Trust, VoiceMode,
+    PlugError, Preview, PreviewRefusal, PreviewRules, Severity, Snapshot, SyncBand as Band,
+    Telemetry, Transfer, Trust, VoiceMode,
 };
 
 /// O que a casca gráfica precisa do core além de um [`Plug`] vivo.
@@ -270,6 +271,15 @@ enum Command {
     SaveAttachment {
         attachment: seele_core::AttachmentId,
         destination: std::path::PathBuf,
+    },
+    /// A picture to look at, and where to put the verdict. ADR 0027.
+    ///
+    /// The second command here that carries somewhere to answer, and the same
+    /// argument as [`Command::WeighLine`]: the answer is only useful to the
+    /// caller who asked, while the box it fills is still open.
+    PreviewAttachment {
+        attachment: seele_core::AttachmentId,
+        answer: tokio::sync::oneshot::Sender<Preview>,
     },
     Shutdown,
 }
@@ -637,6 +647,58 @@ impl Plug {
             attachment: seele_core::AttachmentId(attachment),
             destination: std::path::PathBuf::from(destination),
         })
+    }
+
+    /// Fetches a small attachment and says whether a window may draw it.
+    ///
+    /// **On a press, never on a scroll**, and that is a decision this call
+    /// leaves no room to get wrong: it downloads. The file lives on the Dogma,
+    /// so looking at it costs the host's uplink, and a Line that previewed
+    /// everything as it scrolled would turn a 1 GiB disk ceiling into a 1 GiB
+    /// transfer every time somebody opened it.
+    ///
+    /// Nothing is written to disk on the way. Saving is a separate act with a
+    /// separate confirmation, and this is not it.
+    ///
+    /// The claim the sender made is read from this client's own history rather
+    /// than taken as an argument. The fewer hands a string somebody else chose
+    /// passes through before it is compared to the bytes, the better.
+    ///
+    /// # Errors
+    ///
+    /// [`PlugError::NotConnected`] once the session is over, and equally if it
+    /// ends while the fetch is in flight.
+    pub async fn preview_attachment(&self, attachment: u64) -> Result<Preview, PlugError> {
+        let (answer, caixa) = tokio::sync::oneshot::channel();
+        self.command(Command::PreviewAttachment {
+            attachment: seele_core::AttachmentId(attachment),
+            answer,
+        })?;
+        caixa.await.map_err(|_| PlugError::NotConnected)
+    }
+
+    /// What a screen needs to decide whether to offer a preview at all.
+    ///
+    /// Convenience, exactly like [`SessionInfo::permissions`] is: a window that
+    /// asks anyway gets [`PreviewRefusal::TooBig`] or
+    /// [`PreviewRefusal::NotAPicture`], so this saves a round trip and enforces
+    /// nothing.
+    ///
+    /// The four types come from here rather than being written out again in a
+    /// screen, because a second copy of the list is a second copy that can
+    /// disagree — and it would disagree by offering to draw something the fetch
+    /// then refuses.
+    ///
+    /// [`SessionInfo::permissions`]: seele_core::SessionInfo::permissions
+    #[must_use]
+    pub fn preview_rules() -> PreviewRules {
+        PreviewRules {
+            limit: seele_core::PREVIEW_LIMIT,
+            types: seele_core::ImageFormat::ALL
+                .iter()
+                .map(|format| format.media_type().to_owned())
+                .collect(),
+        }
     }
 
     /// Says something in a Line.
@@ -1935,9 +1997,87 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
                 return false;
             }
         }
+        // The claim is read out of this client's own history here, before
+        // anything is asked of the Dogma, and it never travels through the
+        // window: a page that handed it back could hand back a different one,
+        // and the whole of ADR 0027's rule is that the claim does not get to
+        // choose the decoder.
+        Command::PreviewAttachment { attachment, answer } => {
+            let claimed = declared_type_of(shared, attachment).unwrap_or_default();
+            let Ok(caixa) = client.prever_anexo(attachment).await else {
+                return false;
+            };
+            // In a task of its own, and not awaited here. This queue is what
+            // carries every keystroke of this session, and a download parked on
+            // it would stop anybody saying anything until the picture came
+            // down — the head-of-line block that ADR 0027 gave each transfer
+            // its own stream to avoid.
+            tokio::spawn(async move {
+                let _ = answer.send(preview_of(attachment.get(), &claimed, caixa.await.ok()));
+            });
+        }
         Command::Shutdown => return false,
     }
     true
+}
+
+/// The type the sender claimed for one attachment, out of the local history.
+fn declared_type_of(shared: &Shared, attachment: seele_core::AttachmentId) -> Option<String> {
+    let room = shared.room.lock().ok()?;
+    room.messages.iter().find_map(|message| {
+        message
+            .attachment
+            .as_ref()
+            .filter(|anexo| anexo.id == attachment)
+            .map(|anexo| anexo.declared_type.clone())
+    })
+}
+
+/// Turns fetched bytes into the verdict a window acts on.
+///
+/// Every branch that produces a picture goes through
+/// [`seele_core::preview::judge`], and the media type in the URI comes out of
+/// what that function found in the bytes. `claimed` is only ever quoted back
+/// into a sentence.
+fn preview_of(
+    attachment: u64,
+    claimed: &str,
+    fetched: Option<seele_core::enlace::Previa>,
+) -> Preview {
+    use seele_core::enlace::Previa;
+    use seele_core::preview::{data_uri, judge, Verdict};
+
+    let refused = |refusal: PreviewRefusal, found: Option<String>| Preview {
+        attachment,
+        image: None,
+        claimed: claimed.to_owned(),
+        found,
+        refusal: Some(refusal),
+    };
+
+    match fetched {
+        None | Some(Previa::NaoVeio) => refused(PreviewRefusal::DidNotArrive, None),
+        Some(Previa::GrandeDemais { .. }) => refused(
+            PreviewRefusal::TooBig {
+                limit: seele_core::PREVIEW_LIMIT,
+            },
+            None,
+        ),
+        Some(Previa::Bytes(bytes)) => match judge(claimed, &bytes) {
+            Verdict::Draw(format) => Preview {
+                attachment,
+                image: Some(data_uri(format, &bytes)),
+                claimed: claimed.to_owned(),
+                found: Some(format.media_type().to_owned()),
+                refusal: None,
+            },
+            Verdict::Disagrees { found, .. } => refused(
+                PreviewRefusal::Disagrees,
+                found.map(|format| format.media_type().to_owned()),
+            ),
+            Verdict::NotAPicture => refused(PreviewRefusal::NotAPicture, None),
+        },
+    }
 }
 
 /// A monotonic identifier for outgoing messages.
@@ -2931,5 +3071,100 @@ mod aviso_de_mensagens {
              `messages_changed`, which is how the revision and the notice came \
              apart the first time"
         );
+    }
+}
+
+#[cfg(test)]
+mod previa {
+    //! What a window is handed for one attachment. ADR 0027.
+    //!
+    //! This is the last place the bytes and the claim are both in scope, so it
+    //! is the last place the wrong one could be picked. The window past this
+    //! point gets a string and no choice.
+
+    use super::*;
+
+    const PNG: &[u8] = &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13];
+    const JPEG: &[u8] = &[0xFF, 0xD8, 0xFF, 0xE0, 0, 16, b'J', b'F', b'I', b'F', 0, 1];
+
+    #[test]
+    fn bytes_that_agree_with_the_claim_come_back_as_a_picture() {
+        // The claim is **shouted**, and the URI comes out lower case. A media
+        // type is case-insensitive, so this file agrees with itself and is
+        // drawn — and the spelling of the string a window receives is proof of
+        // which side of the agreement wrote it. With `image/png` on both sides
+        // the two are indistinguishable, and a URI spliced together from the
+        // claim would pass unnoticed.
+        let previa = preview_of(
+            7,
+            "IMAGE/PNG",
+            Some(seele_core::enlace::Previa::Bytes(PNG.to_vec())),
+        );
+        assert_eq!(previa.attachment, 7);
+        assert_eq!(previa.refusal, None);
+        assert_eq!(previa.found.as_deref(), Some("image/png"));
+        assert_eq!(
+            previa.image.as_deref(),
+            Some("data:image/png;base64,iVBORw0KGgoAAAAN"),
+            "the URI a window draws from was not written from the bytes"
+        );
+    }
+
+    #[test]
+    fn bytes_that_disagree_with_the_claim_come_back_with_no_picture_at_all() {
+        // The one that matters. A JPEG that called itself a PNG is refused, and
+        // the refusal carries both halves so a sentence can name them — but
+        // `image` is `None`, which is what a window acts on.
+        let previa = preview_of(
+            7,
+            "image/png",
+            Some(seele_core::enlace::Previa::Bytes(JPEG.to_vec())),
+        );
+        assert_eq!(previa.image, None, "a lying file was drawn anyway");
+        assert_eq!(previa.refusal, Some(PreviewRefusal::Disagrees));
+        assert_eq!(previa.claimed, "image/png");
+        assert_eq!(previa.found.as_deref(), Some("image/jpeg"));
+    }
+
+    #[test]
+    fn a_claim_never_reaches_the_string_a_window_draws_from() {
+        // Whatever the sender wrote, it is quoted into `claimed` and nowhere
+        // else. Here the claim is a whole `data:` URI of somebody's choosing,
+        // and the only thing it produces is a refusal.
+        let mentira = "data:image/png;base64,AAAA";
+        let previa = preview_of(
+            7,
+            mentira,
+            Some(seele_core::enlace::Previa::Bytes(PNG.to_vec())),
+        );
+        assert_eq!(previa.image, None);
+        assert_eq!(previa.refusal, Some(PreviewRefusal::NotAPicture));
+        assert_eq!(previa.claimed, mentira);
+    }
+
+    #[test]
+    fn a_file_over_the_limit_says_so_and_says_what_the_limit_is() {
+        let previa = preview_of(
+            7,
+            "image/png",
+            Some(seele_core::enlace::Previa::GrandeDemais { tamanho: 99 }),
+        );
+        assert_eq!(previa.image, None);
+        assert_eq!(
+            previa.refusal,
+            Some(PreviewRefusal::TooBig {
+                limit: seele_core::PREVIEW_LIMIT
+            }),
+            "«too big» with no number sends somebody nowhere"
+        );
+    }
+
+    #[test]
+    fn a_session_that_ended_mid_fetch_is_not_a_picture_and_not_a_panic() {
+        // The dropped channel. It reads as "the bytes did not come", which is
+        // true, and not as any of the three that say something about the file.
+        let previa = preview_of(7, "image/png", None);
+        assert_eq!(previa.image, None);
+        assert_eq!(previa.refusal, Some(PreviewRefusal::DidNotArrive));
     }
 }
