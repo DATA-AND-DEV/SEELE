@@ -401,11 +401,11 @@ while [ "$#" -gt 0 ]; do
         --sem-assinatura) SEM_ASSINATURA=sim; shift ;;
         --conferir) SO_CONFERIR=sim; shift ;;
         -h|--help|--ajuda) uso; exit 0 ;;
-        -*) uso >&2; morrer "não conheço a opção «$1»." ;;
+        -*) uso >&2; morrer "não conheço a opção «${1}»." ;;
         *)
             if [ -n "$VERSAO" ]; then
                 uso >&2
-                morrer "recebi duas versões: «$VERSAO» e «$1»."
+                morrer "recebi duas versões: «${VERSAO}» e «${1}»."
             fi
             VERSAO="$1"
             shift
@@ -423,7 +423,7 @@ fi
 for pulado in $(printf '%s' "$PULAR" | tr ',' ' '); do
     case " $SISTEMAS " in
         *" $pulado "*) ;;
-        *) morrer "não conheço o sistema «$pulado»." "Os que existem: $SISTEMAS." ;;
+        *) morrer "não conheço o sistema «${pulado}»." "Os que existem: $SISTEMAS." ;;
     esac
 done
 
@@ -465,7 +465,7 @@ conferir_versao() {
     # instalador não sabe representar pré-lançamento por extenso, e recusa
     # **depois** de compilar.
     if ! printf '%s' "$VERSAO" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$'; then
-        morrer "a versão «$VERSAO» não serve para o instalador." \
+        morrer "a versão «${VERSAO}» não serve para o instalador." \
             "Aceito: X.Y.Z, ou X.Y.Z-N com N só de dígitos." \
             "Não serve: -dev, -rc1, -beta.2, +metadados, ou o «v» na frente."
     fi
@@ -475,7 +475,7 @@ conferir_versao() {
 conferir_ferramentas() {
     for ferramenta in python3 curl git; do
         if ! command -v "$ferramenta" >/dev/null 2>&1; then
-            morrer "este script precisa do «$ferramenta» e ele não está no PATH."
+            morrer "este script precisa do «${ferramenta}» e ele não está no PATH."
         fi
     done
 
@@ -499,7 +499,7 @@ conferir_ferramentas() {
 
 conferir_arvore() {
     if ! git -C "$RAIZ" rev-parse --git-dir >/dev/null 2>&1; then
-        morrer "«$RAIZ» não é um repositório git." \
+        morrer "«${RAIZ}» não é um repositório git." \
             "O release aponta para um commit, e sem repositório não há commit a apontar."
     fi
 
@@ -664,7 +664,7 @@ Write-Output ('restos=' + \$restos.Count)")
     esac
     case "$cw_resposta" in
         *repositorio=ausente*)
-            morrer "em $WINDOWS não há repositório em «$REPO_WINDOWS»." \
+            morrer "em $WINDOWS não há repositório em «${REPO_WINDOWS}»." \
                 "Clone-o lá, ou aponte para onde ele está:" \
                 "  --repo-windows 'D:\\caminho\\SEELE'"
             ;;
@@ -788,7 +788,7 @@ print(json.load(open(sys.argv[1], encoding="utf-8")).get("login", "?"))' "$CORPO
     if ! python3 -c 'import json, sys
 dados = json.load(open(sys.argv[1], encoding="utf-8"))
 sys.exit(0 if dados.get("permissions", {}).get("push") else 1)' "$CORPO_API" 2>/dev/null; then
-        morrer "o token de «$cg_quem» enxerga $REPO mas não pode escrever nele." \
+        morrer "o token de «${cg_quem}» enxerga $REPO mas não pode escrever nele." \
             "Criar release é escrita. Dê-lhe **Contents: Read and write**."
     fi
     passo "token de $cg_quem, com escrita em $REPO"
@@ -1102,7 +1102,7 @@ for arquivo in "$RAIZ"/entrega/*; do
     # corrompê-lo, e os empacotadores nunca produziram um.
     case "$nome" in
         *[!A-Za-z0-9._-]*)
-            morrer "o arquivo «$nome» tem caractere que eu não sei pôr numa URL." \
+            morrer "o arquivo «${nome}» tem caractere que eu não sei pôr numa URL." \
                 "Renomeie-o antes de publicar."
             ;;
     esac
@@ -1117,7 +1117,7 @@ for arquivo in "$RAIZ"/entrega/*; do
         "$ENVIO/repos/$REPO/releases/$NOVO_ID/assets?name=$nome" 2>&1)
     envio_codigo=$(printf '%s\n' "$envio_bruto" | tail -n 1)
     if [ "$envio_codigo" != "201" ]; then
-        morrer "o envio de «$nome» falhou (HTTP $envio_codigo)." \
+        morrer "o envio de «${nome}» falhou (HTTP $envio_codigo)." \
             "$(printf '%s\n' "$envio_bruto" | sed '$d' | head -c 500)" \
             "" \
             "O rascunho ficou pela metade em:" \
