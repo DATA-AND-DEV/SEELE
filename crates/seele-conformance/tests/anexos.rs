@@ -379,3 +379,41 @@ async fn quem_nao_pode_anexar_e_recusado_com_razao() -> Result<()> {
     assert_eq!(servidor.quantas_mensagens(LINHA).await?, 0);
     Ok(())
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn um_dogma_que_nao_guarda_arquivo_diz_isso_em_vez_de_deixar_pendurado() -> Result<()> {
+    // Um Dogma em memória não tem diretório para chamar de seu, e a resposta
+    // certa é uma frase. Não aceitar o fluxo deixaria a barra do outro lado
+    // parada em zero até o tempo ocioso do QUIC recolher a conexão — que é a
+    // forma de falhar que este projeto recusa em toda outra porta.
+    let casa = tempfile::tempdir()?;
+    let config = DogmaConfig {
+        name: "Terceira Tóquio".into(),
+        listen: SocketAddr::from(([127, 0, 0, 1], 0)),
+        database: Location::Memory,
+        ..DogmaConfig::default()
+    };
+    let servidor = Arc::new(Server::bind(config).await?);
+    let endereco = servidor.local_addr()?;
+    let aceitando = Arc::clone(&servidor);
+    tokio::spawn(async move {
+        let _ = aceitando.run().await;
+    });
+
+    let mut cliente = entrar(endereco, 7).await?;
+    let caminho = arquivo(casa.path(), "foto.png", 500, 2);
+    cliente
+        .transfers()
+        .send_attachment(&pedido(&caminho, "foto.png", 1), |_, _| {})
+        .await?;
+
+    let razao = ate(&mut cliente, |evento| match evento {
+        ServerMessage::AttachmentRefused { reason, .. } => Some(*reason),
+        _ => None,
+    })
+    .await
+    .expect("o Dogma disse que não guarda arquivo, em vez de calar");
+    assert_eq!(razao, AttachmentRefusal::Unavailable);
+    assert_eq!(servidor.quantas_mensagens(LINHA).await?, 0);
+    Ok(())
+}

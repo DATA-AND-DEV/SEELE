@@ -118,6 +118,27 @@ pub enum Outcome {
     },
 }
 
+/// Reads only enough of a transfer to know whom to answer.
+///
+/// For the Dogma that has nowhere to keep files. The idempotency key is the
+/// only name the two ends share before the Dogma has assigned anything, so a
+/// refusal that could not name it would be a refusal addressed to nobody — and
+/// simply not accepting the stream would leave the sender's bar at zero until
+/// the connection went idle, which is the way of failing this project refuses
+/// at every other door.
+///
+/// The bytes are never read.
+///
+/// # Errors
+///
+/// Fails if the header is not a header.
+pub async fn quem_perguntou(stream: &mut quinn::RecvStream) -> Result<ClientMessageId> {
+    let header: AttachmentHeader = crate::frame::read(stream)
+        .await
+        .context("could not read the transfer header")?;
+    Ok(header.client_message_id)
+}
+
 /// Takes one arriving transfer, from its first byte to the row it becomes.
 ///
 /// # Errors

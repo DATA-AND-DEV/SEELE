@@ -614,24 +614,51 @@ async fn run_session(
     // — receber vinte megabytes ali dentro seria exatamente o bloqueio de
     // cabeça de fila que o fluxo próprio existe para evitar.
     //
-    // Guardada fora do `if`, senão o `AbortaAoSair` cairia no fim do bloco e
-    // mataria a tarefa no instante seguinte ao de a criar.
-    let mut _recebedora = None;
-    if let Some(anexos) = dogma.anexos.clone() {
+    // Aceita **sempre**, inclusive num Dogma que não guarda arquivo nenhum.
+    // Não aceitar deixaria o fluxo pendurado até o tempo ocioso do QUIC
+    // recolher a conexão, com a barra do outro lado parada em zero e nada
+    // sendo dito: exatamente a forma de falhar que este projeto recusa em toda
+    // outra porta. Sem diretório, a resposta é `Unavailable` — uma frase.
+    //
+    // Guardada fora do `let` seguinte pelo motivo de sempre: o `AbortaAoSair`
+    // cairia no fim de um bloco e mataria a tarefa no instante seguinte ao de
+    // a criar.
+    let recebedora = {
+        let anexos = dogma.anexos.clone();
         let entrada = Arc::clone(dogma);
         let avisos = avisos_tx.clone();
         let conexao = connection.clone();
         let piloto = session.pilot;
         let apelido = session.nickname.clone();
-        let recebedora = tokio::spawn(async move {
+        tokio::spawn(async move {
             while let Ok(mut fluxo) = conexao.accept_uni().await {
-                let anexos = Arc::clone(&anexos);
+                let anexos = anexos.clone();
                 let contexto = Arc::clone(&entrada);
                 let avisos = avisos.clone();
                 let apelido = apelido.clone();
                 // Uma tarefa por transferência: duas pessoas mandando ao mesmo
                 // tempo não se enfileiram uma atrás da outra.
                 tokio::spawn(async move {
+                    let Some(anexos) = anexos else {
+                        // O cabeçalho é lido só para saber a quem responder: a
+                        // chave de idempotência é o único nome que as duas
+                        // pontas compartilham antes de o Dogma ter atribuído
+                        // coisa alguma. Os bytes não são lidos.
+                        match crate::transfer::quem_perguntou(&mut fluxo).await {
+                            Ok(client_message_id) => {
+                                let _ = avisos
+                                    .send(ServerMessage::AttachmentRefused {
+                                        client_message_id,
+                                        reason: AttachmentRefusal::Unavailable,
+                                    })
+                                    .await;
+                            }
+                            Err(erro) => {
+                                tracing::debug!(%erro, "uma transferência chegou sem cabeçalho");
+                            }
+                        }
+                        return;
+                    };
                     match crate::transfer::receive(&anexos, &contexto, piloto, &apelido, &mut fluxo)
                         .await
                     {
@@ -657,9 +684,9 @@ async fn run_session(
                     }
                 });
             }
-        });
-        _recebedora = Some(AbortaAoSair(recebedora));
-    }
+        })
+    };
+    let _recebedora = AbortaAoSair(recebedora);
 
     let (outbound_tx, mut outbound_rx) = mpsc::channel::<Vec<u8>>(OUTBOUND_DEPTH);
     // Quadros de voz que o transporte recusou nesta sessão. Ver o `select!`.
