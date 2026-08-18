@@ -1018,6 +1018,26 @@ let subindo = null;
 let pastaDeDestino = "";
 
 /**
+ * O limite e os tipos que valem uma prévia, vindos do Rust. `null` até chegar.
+ *
+ * Enquanto for `null` nenhum botão de prévia é oferecido, e isso é o certo:
+ * oferecer antes de saber o limite seria oferecer a partir de um palpite.
+ */
+let regrasDePrevia = null;
+
+/**
+ * As prévias já buscadas, por identificador de anexo.
+ *
+ * Existe porque a lista de mensagens é reconstruída inteira a cada
+ * atualização. Sem o mapa, rolar a conversa apagaria toda figura já desenhada —
+ * e redesenhá-la custaria o download de novo, do disco de quem hospeda.
+ *
+ * Recusa também entra aqui. Um arquivo cujos bytes discordaram do nome não
+ * discorda menos na segunda tentativa.
+ */
+const previas = new Map();
+
+/**
  * Guarda um arquivo para ir junto da próxima mensagem.
  *
  * O tamanho vem junto porque é ele que faz a barra ser barra: o total aqui é
@@ -1237,15 +1257,26 @@ function transferenciaAndou(transfer) {
 /**
  * O bloco que uma mensagem com arquivo ganha embaixo do corpo.
  *
- * Nome, tamanho, e um dos dois desfechos. **Nenhuma prévia**, e a ausência é
- * escolhida: o ADR 0027 só deixa desenhar imagem embutida quando os **bytes**
- * concordam com o tipo alegado, e conferir isso exige baixá-los e olhar os
- * primeiros deles. Enquanto essa conferência não existir, todo anexo é o outro
- * ramo da regra — um arquivo com nome e tamanho —, que é o lado seguro: nada
- * aqui manda bytes de ninguém para um decodificador.
+ * Nome, tamanho, e o que dá para fazer com ele. A prévia entra por um botão e
+ * **nunca por rolar**: o arquivo mora no Dogma, então ver é baixar, e uma Linha
+ * que buscasse toda imagem enquanto a conversa rola transformaria o teto de
+ * disco de quem hospeda em banda de todo mundo — um giga de saída cada vez que
+ * alguém abrisse a Linha. Quem quer ver pede; quem só está lendo não paga.
  *
- * E **não há botão de abrir**, em nenhum ramo. Salvar é o único verbo, e o que
- * a pessoa faz com o arquivo depois é com ela e com o sistema dela.
+ * O botão só é oferecido quando o tipo alegado é um dos que esta janela
+ * desenha e o arquivo cabe no limite da prévia. Isso é conveniência e não é a
+ * regra: a regra é aplicada onde os bytes estão, e um pedido que passasse
+ * daqui receberia uma recusa em vez de uma figura. Quem decide o que desenhar
+ * são os primeiros bytes, e o tipo alegado é texto que a outra pessoa escolheu.
+ *
+ * Uma prévia já buscada é redesenhada do mapa e não é buscada de novo: esta
+ * lista é reconstruída inteira a cada atualização, e sem o mapa rolar a
+ * conversa custaria o download outra vez.
+ *
+ * E **não há botão de abrir**, em nenhum ramo, e prever não é abrir: o arquivo
+ * não toca o disco, não ganha caminho, e nada fora desta janela é acionado.
+ * Salvar continua sendo o único verbo com destino, e o que a pessoa faz com o
+ * arquivo depois é com ela e com o sistema dela.
  */
 function blocoDeAnexo(anexo) {
   const bloco = elemento("span", "anexo");
@@ -1270,9 +1301,100 @@ function blocoDeAnexo(anexo) {
       ? `salvar em ${pastaDeDestino}`
       : "salvar em disco";
     bloco.append(salvar);
+
+    const buscada = previas.get(anexo.id);
+    if (buscada) {
+      bloco.append(desenhoDaPrevia(buscada, anexo.file_name));
+    } else if (podeOferecerPrevia(anexo)) {
+      const ver = elemento("button", "anexo-previa", "PRÉVIA");
+      ver.type = "button";
+      ver.dataset.anexoPrevia = String(anexo.id);
+      ver.title = "baixa o arquivo e desenha, se os bytes forem de imagem";
+      bloco.append(ver);
+    }
   }
   bloco.append(estado);
   return bloco;
+}
+
+/**
+ * Se vale oferecer o botão para este anexo.
+ *
+ * As duas metades vêm do Rust, por `regras_de_previa`, e não estão escritas
+ * aqui: uma segunda cópia da lista de tipos discordaria da primeira algum dia,
+ * e discordaria oferecendo desenhar o que a busca depois recusa.
+ *
+ * O tipo alegado decide apenas se **há oferta**. Ele nunca decide o que
+ * desenhar — isso é dos bytes, e é do outro lado da ponte.
+ */
+function podeOferecerPrevia(anexo) {
+  if (anexo.expired || regrasDePrevia === null) return false;
+  const alegado = String(anexo.declared_type || "").trim().toLowerCase();
+  return (
+    regrasDePrevia.types.includes(alegado) && anexo.byte_size <= regrasDePrevia.limit
+  );
+}
+
+/**
+ * A figura, ou a frase que explica por que não há figura.
+ *
+ * `previa.image` é um `data:` inteiro montado no Rust, tipo de mídia incluído,
+ * a partir do que foi achado nos bytes. A página não junta tipo com bytes, e é
+ * de propósito: uma página que juntasse poderia juntar com a alegação de quem
+ * mandou, que é justamente o que todo este caminho recusa.
+ *
+ * `data:` e não URL porque a política de segurança de conteúdo desta janela é
+ * `default-src 'self'` e **não afrouxa**. Ela já permite `data:` em imagem, e
+ * nenhuma figura vale uma entrada nova nela.
+ */
+function desenhoDaPrevia(previa, nomeDoArquivo) {
+  if (previa.image) {
+    const figura = elemento("span", "anexo-desenho");
+    const imagem = document.createElement("img");
+    imagem.src = previa.image;
+    // O nome do arquivo é a única descrição honesta que existe aqui: ninguém
+    // deste lado sabe o que a figura mostra, e inventar uma legenda seria pior
+    // do que repetir o nome que já está doze pixels acima.
+    imagem.alt = nomeDoArquivo;
+    figura.append(imagem);
+    return figura;
+  }
+  return elemento("span", "anexo-recusa", fraseDePrevia(previa));
+}
+
+/**
+ * Busca os bytes de um anexo e desenha o que eles disserem que ele é.
+ *
+ * Uma vez por anexo e por pressão de botão. O que volta é guardado no mapa,
+ * inclusive quando é recusa: repetir a busca de um arquivo cujos bytes já
+ * discordaram do nome gastaria a banda de quem hospeda para chegar à mesma
+ * conclusão.
+ *
+ * A frase da recusa é escrita **no bloco**, que está na tela, e não só no
+ * anúncio para leitor de tela: o ADR 0027 já pagou uma vez por uma falha
+ * contada só numa caixa de um pixel, que para quem está olhando é o mesmo que
+ * coisa nenhuma acontecer.
+ */
+async function verPrevia(anexo) {
+  const botao = document.querySelector(`button[data-anexo-previa="${anexo}"]`);
+  if (botao) {
+    botao.disabled = true;
+    botao.textContent = "BAIXANDO";
+  }
+  let previa;
+  try {
+    previa = await invoke("prever_anexo", { anexo });
+  } catch (falha) {
+    console.warn("prever_anexo:", falha);
+    previa = { attachment: anexo, image: null, claimed: "", found: null,
+               refusal: { kind: "DidNotArrive" } };
+  }
+  previas.set(anexo, previa);
+  const nomeDoArquivo = botao?.closest(".anexo")?.querySelector(".anexo-arquivo")
+    ?.textContent ?? "";
+  const desenho = desenhoDaPrevia(previa, nomeDoArquivo);
+  if (botao) botao.replaceWith(desenho);
+  if (!previa.image) anunciar(fraseDePrevia(previa));
 }
 
 /**
@@ -1552,15 +1674,27 @@ listen("tauri://drag-drop", (evento) => {
 $("anexo-tirar").addEventListener("click", tirarAnexo);
 $("botao-anexar").addEventListener("click", abrirSeletorDeArquivo);
 $("lista-mensagens").addEventListener("click", (evento) => {
-  const botao = evento.target.closest("button[data-anexo-salvar]");
-  if (!botao) return;
-  salvarAnexo(Number(botao.dataset.anexoSalvar), botao.dataset.anexoNome);
+  const salvar = evento.target.closest("button[data-anexo-salvar]");
+  if (salvar) {
+    salvarAnexo(Number(salvar.dataset.anexoSalvar), salvar.dataset.anexoNome);
+    return;
+  }
+  // A prévia é buscada aqui e em nenhum outro lugar: no clique, e nunca na
+  // rolagem nem no redesenho. Ver é baixar, e o teto de disco de quem hospeda
+  // não pode virar banda de todo mundo por alguém abrir uma Linha.
+  const ver = evento.target.closest("button[data-anexo-previa]");
+  if (ver) verPrevia(Number(ver.dataset.anexoPrevia));
 });
 invoke("pasta_de_downloads")
   .then((pasta) => {
     pastaDeDestino = pasta;
   })
   .catch((falha) => console.warn("pasta_de_downloads:", falha));
+invoke("regras_de_previa")
+  .then((regras) => {
+    regrasDePrevia = regras;
+  })
+  .catch((falha) => console.warn("regras_de_previa:", falha));
 // Duas listas, um manipulador: os Cages e as Linhas ganharam cabeçalhos
 // próprios (`B·03` e `B·04`) e deixaram de caber numa lista só.
 $("lista-cages").addEventListener("click", alternarCanal);

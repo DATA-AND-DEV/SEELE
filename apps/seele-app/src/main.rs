@@ -24,7 +24,8 @@
 use std::sync::{Arc, Mutex};
 
 use seele_ffi::{
-    ConnectConfig, Event, EventListener, LineWeight, Plug, PlugError, Snapshot, VoiceMode,
+    ConnectConfig, Event, EventListener, LineWeight, Plug, PlugError, Preview, PreviewRules,
+    Snapshot, VoiceMode,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -677,6 +678,47 @@ fn enviar_anexo(
 #[tauri::command]
 fn salvar_anexo(session: State<'_, Session>, anexo: u64, destino: String) -> Result<(), PlugError> {
     session.plug()?.save_attachment(anexo, destino)
+}
+
+/// Baixa um anexo pequeno e diz se esta janela pode desenhá-lo.
+///
+/// A outra metade da regra do ADR 0027, e a que faltava: só uma lista curta de
+/// tipos de imagem é desenhada embutida, e **só quando os bytes concordam com a
+/// alegação**. O nome do arquivo e o tipo declarado são texto que a outra pessoa
+/// escolheu; os primeiros bytes é que dizem o que a coisa é, e é deles que sai o
+/// tipo de mídia que o `<img>` recebe.
+///
+/// **Prever não é abrir, e não é salvar.** Nada é gravado em disco em ponto
+/// nenhum deste caminho — não há arquivo, não há caminho, não há marca de
+/// quarentena a pôr, e nenhuma tela deste produto ganhou um botão que abre
+/// arquivo. Salvar continua sendo o único verbo com destino, e continua tendo a
+/// confirmação que diz em voz alta o que este produto não promete.
+///
+/// **Acontece ao apertar, nunca ao rolar.** O anexo está no Dogma: ver é baixar.
+/// Uma Linha que buscasse toda imagem enquanto a conversa rola transformaria o
+/// teto de disco de quem hospeda em banda de todo mundo, uma vez por vez que
+/// alguém abrisse a Linha.
+#[tauri::command]
+async fn prever_anexo(session: State<'_, Session>, anexo: u64) -> Result<Preview, PlugError> {
+    let plug = session.plug()?;
+    plug.preview_attachment(anexo).await
+}
+
+/// O que a tela precisa para decidir se oferece uma prévia.
+///
+/// Conveniência e não o limite: uma janela que pedisse assim mesmo receberia
+/// `TooBig` ou `NotAPicture`, e a decisão continua sendo tomada no lado que
+/// baixa e olha os bytes.
+///
+/// O número é do cliente e não do Dogma de propósito. O teto por arquivo é uma
+/// fração do teto de disco de quem hospeda e protege o disco **dele**; este
+/// protege a memória de quem está lendo, que é outra máquina. E a lista dos
+/// tipos vem daqui em vez de ser escrita de novo na página: duas cópias da
+/// mesma lista discordam um dia, e a discordância seria a tela oferecer
+/// desenhar o que a busca depois recusa.
+#[tauri::command]
+fn regras_de_previa() -> PreviewRules {
+    Plug::preview_rules()
 }
 
 /// Onde os arquivos salvos vão parar, por padrão.
@@ -1817,6 +1859,8 @@ fn main() {
             escolher_arquivo,
             enviar_anexo,
             salvar_anexo,
+            prever_anexo,
+            regras_de_previa,
             pasta_de_downloads,
             estado_da_porta,
             definir_senha_do_dogma,

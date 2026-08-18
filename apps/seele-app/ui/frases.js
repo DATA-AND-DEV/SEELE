@@ -371,6 +371,67 @@ const TRANSFERENCIAS = {
 };
 
 /**
+ * Por que um arquivo não foi desenhado. ADR 0027.
+ *
+ * Quatro, e a primeira é a que este caminho inteiro existe para poder dizer.
+ * As `NOTAS-DE-RELEASE` deste projeto separam duas perguntas — «o arquivo
+ * chegou inteiro?» e «como sei que ele é o que diz ser?» — e um anexo só
+ * alcançava a primeira. O hash respondeu sim a ela; a segunda tem resposta
+ * agora, e quando a resposta é não ela merece a frase própria em vez de virar
+ * um silêncio que se lê como defeito.
+ *
+ * **Não desenhar não é esconder.** Em todas as quatro o arquivo continua na
+ * tela, com nome, tamanho e o botão de salvar. O que ele perde é a figura.
+ */
+const PREVIAS = {
+  TooBig:
+    "ESTE ARQUIVO É GRANDE DEMAIS PARA UMA PRÉVIA.\n" +
+    "Não é o teto do Dogma e não tem nada de errado com ele: desenhar uma imagem " +
+    "custa memória e tempo nesta máquina, e uma grande o bastante trava esta " +
+    "janela. Salve o arquivo e abra-o no seu sistema, fora daqui.",
+  NotAPicture:
+    "ESTE ARQUIVO NÃO É UMA DAS IMAGENS QUE ESTA JANELA DESENHA.\n" +
+    "Desenhar um formato é entregar bytes de outra pessoa a um decodificador, e " +
+    "esta janela entrega quatro. Documento, som, vídeo e programa ficam como " +
+    "nome e tamanho, para salvar.",
+  DidNotArrive:
+    "A PRÉVIA NÃO VEIO.\n" +
+    "Ou os bytes já saíram do Dogma, ou a busca caiu no meio, ou o que chegou não " +
+    "era o que saiu. Nada foi desenhado pela metade. Tente de novo daqui a pouco.",
+};
+
+/**
+ * A frase de uma prévia que não virou figura.
+ *
+ * `Disagrees` é montada e não fixa, porque as duas metades da discordância são
+ * o conteúdo: o que o arquivo **disse** que era e o que os primeiros bytes dele
+ * **são**. Uma frase genérica aqui mandaria a pessoa tentar de novo, e tentar
+ * de novo é a coisa errada a fazer com um arquivo que se apresentou como uma
+ * coisa e é outra.
+ */
+function fraseDePrevia(previa) {
+  const razao = previa?.refusal;
+  const nome = razao?.kind;
+  if (nome === "Disagrees") {
+    const achado = previa.found
+      ? `os primeiros bytes dele são de «${previa.found}»`
+      : "os primeiros bytes dele não são de nenhuma imagem que esta janela desenha";
+    return (
+      "ESTE ARQUIVO NÃO É O QUE DIZ SER.\n" +
+      `Ele se apresentou como «${previa.claimed}», e ${achado}. ` +
+      "Isto não é erro de transferência: o arquivo chegou inteiro e o hash fechou. " +
+      "O que não fecha é o que ele diz ser com o que ele é, e o nome de um arquivo " +
+      "é texto que quem mandou escolheu. Nada foi desenhado; o arquivo continua " +
+      "aqui, com o nome que veio, para salvar se você quiser."
+    );
+  }
+  if (nome === "TooBig" && typeof razao.limit === "number") {
+    return `${PREVIAS.TooBig}\nUma prévia baixa no máximo ${emBytes(razao.limit)}.`;
+  }
+  return PREVIAS[nome] ?? `FALHA NÃO IDENTIFICADA (${nome})`;
+}
+
+/**
  * A frase de uma recusa de anexo.
  *
  * `TooLarge` chega com o limite dentro, porque «grande demais» sem número manda

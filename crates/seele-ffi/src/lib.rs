@@ -50,7 +50,8 @@ use seele_core::{
 pub use types::{
     Attachment, AttachmentRefusal, Cage, CageSync, CaptureDevice, EndReason, Event, Line,
     LineWeight, LinkState, Message, Notice, NoticeReason, Pattern, Pilot, PlaybackDevice,
-    PlugError, Severity, Snapshot, SyncBand as Band, Telemetry, Transfer, Trust, VoiceMode,
+    PlugError, Preview, PreviewRefusal, PreviewRules, Severity, Snapshot, SyncBand as Band,
+    Telemetry, Transfer, Trust, VoiceMode,
 };
 
 /// O que a casca gráfica precisa do core além de um [`Plug`] vivo.
@@ -270,6 +271,15 @@ enum Command {
     SaveAttachment {
         attachment: seele_core::AttachmentId,
         destination: std::path::PathBuf,
+    },
+    /// A picture to look at, and where to put the verdict. ADR 0027.
+    ///
+    /// The second command here that carries somewhere to answer, and the same
+    /// argument as [`Command::WeighLine`]: the answer is only useful to the
+    /// caller who asked, while the box it fills is still open.
+    PreviewAttachment {
+        attachment: seele_core::AttachmentId,
+        answer: tokio::sync::oneshot::Sender<Preview>,
     },
     Shutdown,
 }
@@ -637,6 +647,58 @@ impl Plug {
             attachment: seele_core::AttachmentId(attachment),
             destination: std::path::PathBuf::from(destination),
         })
+    }
+
+    /// Fetches a small attachment and says whether a window may draw it.
+    ///
+    /// **On a press, never on a scroll**, and that is a decision this call
+    /// leaves no room to get wrong: it downloads. The file lives on the Dogma,
+    /// so looking at it costs the host's uplink, and a Line that previewed
+    /// everything as it scrolled would turn a 1 GiB disk ceiling into a 1 GiB
+    /// transfer every time somebody opened it.
+    ///
+    /// Nothing is written to disk on the way. Saving is a separate act with a
+    /// separate confirmation, and this is not it.
+    ///
+    /// The claim the sender made is read from this client's own history rather
+    /// than taken as an argument. The fewer hands a string somebody else chose
+    /// passes through before it is compared to the bytes, the better.
+    ///
+    /// # Errors
+    ///
+    /// [`PlugError::NotConnected`] once the session is over, and equally if it
+    /// ends while the fetch is in flight.
+    pub async fn preview_attachment(&self, attachment: u64) -> Result<Preview, PlugError> {
+        let (answer, caixa) = tokio::sync::oneshot::channel();
+        self.command(Command::PreviewAttachment {
+            attachment: seele_core::AttachmentId(attachment),
+            answer,
+        })?;
+        caixa.await.map_err(|_| PlugError::NotConnected)
+    }
+
+    /// What a screen needs to decide whether to offer a preview at all.
+    ///
+    /// Convenience, exactly like [`SessionInfo::permissions`] is: a window that
+    /// asks anyway gets [`PreviewRefusal::TooBig`] or
+    /// [`PreviewRefusal::NotAPicture`], so this saves a round trip and enforces
+    /// nothing.
+    ///
+    /// The four types come from here rather than being written out again in a
+    /// screen, because a second copy of the list is a second copy that can
+    /// disagree — and it would disagree by offering to draw something the fetch
+    /// then refuses.
+    ///
+    /// [`SessionInfo::permissions`]: seele_core::SessionInfo::permissions
+    #[must_use]
+    pub fn preview_rules() -> PreviewRules {
+        PreviewRules {
+            limit: seele_core::PREVIEW_LIMIT,
+            types: seele_core::ImageFormat::ALL
+                .iter()
+                .map(|format| format.media_type().to_owned())
+                .collect(),
+        }
     }
 
     /// Says something in a Line.
@@ -1935,9 +1997,87 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
                 return false;
             }
         }
+        // The claim is read out of this client's own history here, before
+        // anything is asked of the Dogma, and it never travels through the
+        // window: a page that handed it back could hand back a different one,
+        // and the whole of ADR 0027's rule is that the claim does not get to
+        // choose the decoder.
+        Command::PreviewAttachment { attachment, answer } => {
+            let claimed = declared_type_of(shared, attachment).unwrap_or_default();
+            let Ok(caixa) = client.prever_anexo(attachment).await else {
+                return false;
+            };
+            // In a task of its own, and not awaited here. This queue is what
+            // carries every keystroke of this session, and a download parked on
+            // it would stop anybody saying anything until the picture came
+            // down — the head-of-line block that ADR 0027 gave each transfer
+            // its own stream to avoid.
+            tokio::spawn(async move {
+                let _ = answer.send(preview_of(attachment.get(), &claimed, caixa.await.ok()));
+            });
+        }
         Command::Shutdown => return false,
     }
     true
+}
+
+/// The type the sender claimed for one attachment, out of the local history.
+fn declared_type_of(shared: &Shared, attachment: seele_core::AttachmentId) -> Option<String> {
+    let room = shared.room.lock().ok()?;
+    room.messages.iter().find_map(|message| {
+        message
+            .attachment
+            .as_ref()
+            .filter(|anexo| anexo.id == attachment)
+            .map(|anexo| anexo.declared_type.clone())
+    })
+}
+
+/// Turns fetched bytes into the verdict a window acts on.
+///
+/// Every branch that produces a picture goes through
+/// [`seele_core::preview::judge`], and the media type in the URI comes out of
+/// what that function found in the bytes. `claimed` is only ever quoted back
+/// into a sentence.
+fn preview_of(
+    attachment: u64,
+    claimed: &str,
+    fetched: Option<seele_core::enlace::Previa>,
+) -> Preview {
+    use seele_core::enlace::Previa;
+    use seele_core::preview::{data_uri, judge, Verdict};
+
+    let refused = |refusal: PreviewRefusal, found: Option<String>| Preview {
+        attachment,
+        image: None,
+        claimed: claimed.to_owned(),
+        found,
+        refusal: Some(refusal),
+    };
+
+    match fetched {
+        None | Some(Previa::NaoVeio) => refused(PreviewRefusal::DidNotArrive, None),
+        Some(Previa::GrandeDemais { .. }) => refused(
+            PreviewRefusal::TooBig {
+                limit: seele_core::PREVIEW_LIMIT,
+            },
+            None,
+        ),
+        Some(Previa::Bytes(bytes)) => match judge(claimed, &bytes) {
+            Verdict::Draw(format) => Preview {
+                attachment,
+                image: Some(data_uri(format, &bytes)),
+                claimed: claimed.to_owned(),
+                found: Some(format.media_type().to_owned()),
+                refusal: None,
+            },
+            Verdict::Disagrees { found, .. } => refused(
+                PreviewRefusal::Disagrees,
+                found.map(|format| format.media_type().to_owned()),
+            ),
+            Verdict::NotAPicture => refused(PreviewRefusal::NotAPicture, None),
+        },
+    }
 }
 
 /// A monotonic identifier for outgoing messages.

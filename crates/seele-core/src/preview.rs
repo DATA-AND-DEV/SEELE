@@ -71,6 +71,14 @@ pub enum ImageFormat {
 }
 
 impl ImageFormat {
+    /// The whole list, in one place.
+    ///
+    /// Here so that a screen deciding whether to offer a preview asks this
+    /// crate instead of keeping a copy of the four. A second copy is a second
+    /// copy that can disagree, and the way it would disagree is a window
+    /// offering to draw something this module will then refuse.
+    pub const ALL: [Self; 4] = [Self::Png, Self::Jpeg, Self::Gif, Self::Webp];
+
     /// The media type, written by this product.
     #[must_use]
     pub const fn media_type(self) -> &'static str {
