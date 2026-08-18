@@ -1,0 +1,244 @@
+/* SEELE · Entry Plug — a portaria (ADR 0030).
+
+   ---- toda classe daqui começa por `portaria-` ----
+
+   As folhas caem num só espaço de nomes, na ordem em que `index.html` as
+   carrega, e duas telas escolhendo o mesmo nome não é um conflito que o
+   navegador reporte: é a folha de baixo ganhando todo empate em silêncio.
+   `no_two_screens_claim_the_same_class_name` guarda isso.
+
+   As classes compartilhadas de `base.css` — `.rotulo`, `.erro`, `.dica`,
+   `.botao-fantasma` — **não** são reivindicadas nem prefixadas aqui. Refinar
+   pela ordem da cascata é o que a folha de moderação faz, e por isso a de
+   acessibilidade continua ganhando os empates que precisa ganhar.
+
+   Nenhuma cor literal, nem em regra nem em comentário: `tests/tokens.rs` lê o
+   arquivo inteiro e `tokens.css` é o único lugar onde um literal pertence.
+
+   ---- sobre o vermelho ----
+
+   Esta camada gasta `--seele-vermelho-alerta` em **um** lugar: a banda de
+   `#portaria-alarme`. `tokens.css` o reserva a alerta e queda, e a folha de
+   moderação escreve por extenso que não o usa — moderar é o ato mais sério
+   desta janela e ainda assim não é um enlace caído.
+
+   Aqui é, e a diferença é o que a banda diz: um Dogma escancarado com endereço
+   alcançável da internet é a porta de casa aberta para a rua. Não é o estado
+   normal que o ADR 0021 defende — aquele é a rede local, e o script exige as
+   duas condições antes de revelar esta banda. O acento de tudo o mais continua
+   sendo o laranja institucional. */
+
+.camada-portaria {
+  position: fixed;
+  inset: 0;
+  /* Abaixo de `.camada-moderar`, que está em 30: as confirmações desta camada
+     são armadas naquela caixa, e ela tem que aparecer por cima desta. */
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--seele-e4);
+}
+
+/* O véu num pseudoelemento, e não `opacity` na caixa: apagar a caixa apagaria
+   o texto dentro dela junto, e é o texto que a pessoa veio ler. */
+.camada-portaria::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--seele-negro-absoluto);
+  opacity: 0.72;
+}
+
+.portaria-caixa {
+  position: relative;
+  width: 100%;
+  max-width: 720px;
+  max-height: calc(100vh - var(--seele-e8));
+  display: flex;
+  flex-direction: column;
+  background: var(--seele-negro-painel);
+  border: var(--seele-b-forte) solid var(--seele-laranja-nerv);
+  border-radius: var(--seele-raio);
+  box-shadow: var(--seele-sombra);
+}
+
+.portaria-cabeca {
+  display: flex;
+  align-items: center;
+  gap: var(--seele-e2);
+  padding: var(--seele-e1) var(--seele-e2);
+  background: var(--seele-laranja-nerv);
+  color: var(--seele-negro-absoluto);
+  flex: 0 0 auto;
+}
+
+.portaria-marca {
+  display: inline-flex;
+  align-items: center;
+}
+
+.portaria-titulo {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+}
+
+.portaria-fechar {
+  background: none;
+  border: var(--seele-b) solid var(--seele-negro-absoluto);
+  color: var(--seele-negro-absoluto);
+  padding: 0 var(--seele-e1);
+  cursor: pointer;
+}
+
+.portaria-corpo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--seele-e2);
+  /* `min-height: 0` é a metade difícil disto em flexbox, e sem ela o
+     `overflow-y` de `.portaria-rolagem` não faz nada visível: o conteúdo passa
+     da borda e `body { overflow: hidden }` de `base.css` garante que nem a
+     janela role atrás dele. */
+  min-height: 0;
+  padding: var(--seele-e3);
+}
+
+/* O único vermelho desta folha. Ver o cabeçalho. */
+.portaria-alarme {
+  margin: 0;
+  padding: var(--seele-e1) var(--seele-e2);
+  border: var(--seele-b-forte) solid var(--seele-vermelho-alerta);
+  background: var(--seele-vermelho-fraco);
+  color: var(--seele-osso);
+  /* A primeira linha é o que houve, a segunda o que fazer. `pre-line` é o que
+     mantém as duas separadas sem inventar dois elementos. */
+  white-space: pre-line;
+  flex: 0 0 auto;
+}
+
+.portaria-camadas {
+  display: flex;
+  flex-direction: column;
+  gap: var(--seele-e1);
+  flex: 0 0 auto;
+}
+
+.portaria-camada {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--seele-e1);
+  padding: var(--seele-e1);
+  border: var(--seele-b) solid var(--seele-linha);
+}
+
+/* O estado em palavras, e nunca só por cor ou por posição de um interruptor.
+   `specs/05-cliente-tui.md` pede a palavra, e aqui ela é o que separa «senha
+   definida» de «nenhuma — a senha não fecha nada». */
+.portaria-estado {
+  flex: 1 1 200px;
+  color: var(--seele-osso);
+}
+
+.portaria-senha,
+.portaria-observacao {
+  flex: 0 1 220px;
+  background: var(--seele-negro-absoluto);
+  border: var(--seele-b) solid var(--seele-linha-forte);
+  color: var(--seele-osso);
+  padding: var(--seele-e1);
+}
+
+.portaria-rolagem {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--seele-e1);
+}
+
+.portaria-secao {
+  margin: var(--seele-e2) 0 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.16em;
+  color: var(--seele-rotulo-painel);
+}
+
+.portaria-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--seele-e1);
+}
+
+.portaria-cartao {
+  display: flex;
+  flex-direction: column;
+  gap: var(--seele-e1);
+  padding: var(--seele-e2);
+  border: var(--seele-b) solid var(--seele-linha-forte);
+  background: var(--seele-negro-absoluto);
+}
+
+/* A identidade, e é por isso que ela é a linha grande e a primeira do cartão.
+   Monoespaçada e com `word-break` porque sessenta e quatro caracteres em grupos
+   de oito têm de caber sem que nenhum grupo se parta ao meio numa janela
+   estreita — um grupo partido é exatamente onde a conferência por olho erra. */
+.portaria-impressao {
+  margin: 0;
+  font-family: var(--seele-fonte-mono, monospace);
+  font-size: 0.8125rem;
+  letter-spacing: 0.04em;
+  color: var(--seele-osso);
+  word-break: break-word;
+}
+
+/* O apelido é afirmação, e o desenho diz isso antes da frase: «diz chamar-se»
+   apagado e pequeno, o nome sem destaque nenhum. Ele nunca é o título do
+   cartão — ADR 0030. */
+.portaria-apelido {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--seele-e1);
+}
+
+.portaria-diz {
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  color: var(--seele-osso-apagado);
+}
+
+.portaria-nome {
+  color: var(--seele-osso);
+}
+
+.portaria-contexto,
+.portaria-quando {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--seele-osso-apagado);
+}
+
+/* Palavra, e não só a cor da borda: `ADMITIDO` e `RECUSADO` têm de se ler numa
+   tela em escala de cinza e por um leitor de tela. */
+.portaria-veredito {
+  margin: 0;
+  align-self: flex-start;
+  padding: 0 var(--seele-e1);
+  border: var(--seele-b) solid var(--seele-laranja-nerv);
+  color: var(--seele-laranja-nerv);
+  font-size: 0.75rem;
+  letter-spacing: 0.16em;
+}
+
+.portaria-acoes {
+  display: flex;
+  gap: var(--seele-e1);
+  flex-wrap: wrap;
+}

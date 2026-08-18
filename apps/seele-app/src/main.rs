@@ -377,6 +377,24 @@ async fn hospedar(
     .await
     .map_err(|erro| classificar(&erro))?;
 
+    // A porta se fecha no mesmo gesto de hospedar, antes do primeiro pacote —
+    // ADR 0030. O `seeled` continua subindo aberto, porque quem digita `seeled`
+    // aceitou cerimônia; quem apertou um botão não, e para ele o padrão é
+    // perguntar.
+    //
+    // Semear, e não ligar: isto roda toda vez que a janela sobe um Dogma, e um
+    // interruptor que se rearma sozinho é um interruptor quebrado.
+    {
+        let banco = dogma.casper();
+        let mut casper = banco.lock().await;
+        if let Err(erro) = seele_server::portaria::semear_ligada(&mut casper) {
+            // Não impede de hospedar. Um Dogma no ar com a portaria desligada é
+            // o comportamento de antes deste ADR, e a tela diz em que estado a
+            // porta está — que é a metade que faltava de verdade.
+            tracing::warn!(%erro, "não consegui semear a portaria");
+        }
+    }
+
     let alcance = dogma.alcance();
     let anfitriao = Anfitriao {
         aqui: format!("127.0.0.1:{PORTA_PADRAO}"),
@@ -1075,6 +1093,256 @@ fn nome_da_falha(erro: &seele_ffi::uri::ErroDeUri) -> &'static str {
     }
 }
 
+// ---------------------------------------------------------------------------
+// A portaria — ADR 0030. A porta do Dogma que esta janela hospeda.
+// ---------------------------------------------------------------------------
+//
+// Estes comandos falam **direto com o CASPER do Dogma embutido**, e não pelo fio
+// como toda a moderação faz. Não é atalho; é o ADR 0030:
+//
+// - fechar a porta não pode depender de estar dentro, senão a defesa depende do
+//   canal que ela defende, e só fecha quem já tinha entrado enquanto estava
+//   aberto;
+// - a porta se fecha antes do primeiro pacote, no mesmo gesto de hospedar;
+// - e nenhum verbo novo de protocolo é nenhuma superfície nova exposta à
+//   internet para uma decisão que é, por definição, de quem está na máquina.
+//
+// O custo, que é real e está no ADR: isto não administra o Dogma de outra
+// pessoa. Quem está conectado ao Dogma de um amigo não vê nenhuma destas telas,
+// e é por isso que todas começam por `NaoEstaHospedando`.
+
+/// Por que um comando da portaria não deu.
+///
+/// Enum e não frase, como as vizinhas: a fronteira erro→texto é do frontend.
+#[derive(Debug, serde::Serialize)]
+enum FalhaNaPortaria {
+    /// Esta janela não está hospedando nada, então não há porta para mexer.
+    NaoEstaHospedando,
+    /// O banco do Dogma não respondeu.
+    BancoNaoRespondeu,
+}
+
+/// Em que estado está a porta do Dogma que esta janela hospeda.
+///
+/// Uma leitura só, porque as quatro coisas são lidas juntas e mostradas juntas:
+/// quem hospeda precisa ver **as três camadas ao mesmo tempo** para entender o
+/// que está valendo. Ver `portaria` em `seele-server` e o ADR 0030.
+#[derive(Debug, serde::Serialize)]
+struct EstadoDaPorta {
+    /// Se há um Dogma no ar nesta janela.
+    hospedando: bool,
+    /// Sem senha e sem convites: qualquer um que alcance a porta passa a
+    /// primeira camada. ADR 0021.
+    aberto: bool,
+    /// Se há senha do Dogma configurada.
+    tem_senha: bool,
+    /// Se há pelo menos um convite emitido.
+    aceita_convites: bool,
+    /// Se a portaria pergunta antes de deixar entrar quem nunca entrou.
+    portaria_ligada: bool,
+    /// Quantos pedidos esperam decisão. O número que o cartão mostra sem
+    /// desenhar a fila inteira.
+    pendentes: i64,
+    /// Até onde este Dogma é alcançável, pelo degrau do ADR 0022.
+    ///
+    /// É o que transforma «está aberto» em «está aberto **para a internet**»,
+    /// que são duas frases com urgências diferentes.
+    alcance: &'static str,
+}
+
+/// Um pedido, como o cartão o desenha.
+///
+/// A ordem dos campos aqui não é a ordem da tela, e a da tela é que importa: a
+/// impressão digital em primeiro lugar, o apelido abaixo e entre aspas. Ver o
+/// ADR 0030 — título é do que a pessoa é, e quem bateu ainda não é nada.
+#[derive(Debug, serde::Serialize)]
+struct PedidoNaTela {
+    /// SHA-256 da chave pública. **A identidade.**
+    impressao: String,
+    /// O apelido pedido. Texto que a pessoa digitou, e nada além disso.
+    apelido: String,
+    /// `aberto` | `senha` | `convite`.
+    segredo: String,
+    /// A observação que quem hospeda escreveu ao gerar o convite.
+    observacao: String,
+    /// Quando bateu pela primeira vez, em segundos.
+    bateu_em: i64,
+    /// Quantas vezes bateu.
+    batidas: i64,
+    /// `null` enquanto ninguém decidiu.
+    decidido_em: Option<i64>,
+    /// Se a decisão foi admitir.
+    admitido: bool,
+}
+
+/// O `Arc` do CASPER do Dogma hospedado, ou a recusa.
+///
+/// Clonado para fora do `Mutex` do app **antes** de qualquer `await`: segurar um
+/// `std::sync::MutexGuard` atravessando um ponto de espera trava os dois
+/// cadeados de uma vez e nem compila do lado do Tauri.
+fn casper_hospedado(
+    session: &State<'_, Session>,
+) -> Result<seele_server::hospedagem::CasperCompartilhado, FalhaNaPortaria> {
+    let aberto = session
+        .hospedagem
+        .lock()
+        .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
+    let dogma = aberto.as_ref().ok_or(FalhaNaPortaria::NaoEstaHospedando)?;
+    Ok(dogma.casper())
+}
+
+/// O estado das três camadas da porta.
+#[tauri::command]
+async fn estado_da_porta(session: State<'_, Session>) -> Result<EstadoDaPorta, FalhaNaPortaria> {
+    let (casper, alcance) = {
+        let aberto = session
+            .hospedagem
+            .lock()
+            .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
+        let Some(dogma) = aberto.as_ref() else {
+            // Não hospedar não é falha: é a resposta, e a tela desenha a partir
+            // dela em vez de mostrar um erro a quem não pediu nada.
+            return Ok(EstadoDaPorta {
+                hospedando: false,
+                aberto: false,
+                tem_senha: false,
+                aceita_convites: false,
+                portaria_ligada: false,
+                pendentes: 0,
+                alcance: "SoRedeLocal",
+            });
+        };
+        let alcance = dogma
+            .alcance()
+            .map_or("SoRedeLocal", |alcance| alcance.degrau().nome());
+        (dogma.casper(), alcance)
+    };
+
+    let casper = casper.lock().await;
+    let politica = seele_server::admissao::Politica::carregar(&casper)
+        .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
+    let portaria_ligada =
+        seele_server::portaria::ligada(&casper).map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
+    let pendentes = seele_server::portaria::pendentes(&casper)
+        .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
+
+    Ok(EstadoDaPorta {
+        hospedando: true,
+        aberto: politica.aberto(),
+        tem_senha: politica.tem_senha(),
+        aceita_convites: politica.aceita_convites(),
+        portaria_ligada,
+        pendentes,
+        alcance,
+    })
+}
+
+/// Põe ou tira a senha do Dogma. `None` tira. ADR 0021.
+#[tauri::command]
+async fn definir_senha_do_dogma(
+    session: State<'_, Session>,
+    senha: Option<String>,
+) -> Result<(), FalhaNaPortaria> {
+    let casper = casper_hospedado(&session)?;
+    let mut casper = casper.lock().await;
+    seele_server::admissao::definir_senha(&mut casper, senha.as_deref())
+        .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)
+}
+
+/// Gera um convite de uso único e devolve o link inteiro para mandar.
+///
+/// O link, e não o token cru: o token sozinho obriga quem recebe a saber o
+/// endereço por outro caminho, e é o link que a outra ponta já sabe colar.
+#[tauri::command]
+async fn criar_convite_do_dogma(
+    session: State<'_, Session>,
+    observacao: String,
+) -> Result<String, FalhaNaPortaria> {
+    let (casper, ..) = {
+        let aberto = session
+            .hospedagem
+            .lock()
+            .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
+        let dogma = aberto.as_ref().ok_or(FalhaNaPortaria::NaoEstaHospedando)?;
+        (dogma.casper(), ())
+    };
+
+    let token = {
+        let mut casper = casper.lock().await;
+        seele_server::admissao::criar_convite(&mut casper, &observacao)
+            .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?
+    };
+
+    let aberto = session
+        .hospedagem
+        .lock()
+        .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
+    let dogma = aberto.as_ref().ok_or(FalhaNaPortaria::NaoEstaHospedando)?;
+    Ok(dogma.convite_com_token(&token))
+}
+
+/// Liga ou desliga a portaria. ADR 0030.
+#[tauri::command]
+async fn ligar_portaria(session: State<'_, Session>, ligada: bool) -> Result<(), FalhaNaPortaria> {
+    let casper = casper_hospedado(&session)?;
+    let mut casper = casper.lock().await;
+    seele_server::portaria::ligar(&mut casper, ligada)
+        .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)
+}
+
+/// A fila e o histórico da portaria.
+#[tauri::command]
+async fn pedidos_da_portaria(
+    session: State<'_, Session>,
+) -> Result<Vec<PedidoNaTela>, FalhaNaPortaria> {
+    let casper = casper_hospedado(&session)?;
+    let casper = casper.lock().await;
+    let fila =
+        seele_server::portaria::pedidos(&casper).map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
+
+    Ok(fila
+        .into_iter()
+        .map(|pedido| PedidoNaTela {
+            impressao: pedido.impressao,
+            apelido: pedido.apelido,
+            segredo: pedido.segredo,
+            observacao: pedido.observacao,
+            bateu_em: pedido.bateu_em,
+            batidas: pedido.batidas,
+            decidido_em: pedido.decidido_em,
+            admitido: pedido.admitido,
+        })
+        .collect())
+}
+
+/// Quem hospeda decide sobre um pedido.
+#[tauri::command]
+async fn decidir_pedido(
+    session: State<'_, Session>,
+    impressao: String,
+    admitir: bool,
+) -> Result<(), FalhaNaPortaria> {
+    let casper = casper_hospedado(&session)?;
+    let mut casper = casper.lock().await;
+    seele_server::portaria::decidir(&mut casper, &impressao, admitir)
+        .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)
+}
+
+/// Desfaz uma decisão: a pessoa volta a ser desconhecida.
+///
+/// Não é banir e não derruba quem está dentro — ADR 0030. A frase que a tela
+/// mostra antes de fazer isto é que precisa dizer as duas coisas.
+#[tauri::command]
+async fn revogar_admissao(
+    session: State<'_, Session>,
+    impressao: String,
+) -> Result<(), FalhaNaPortaria> {
+    let casper = casper_hospedado(&session)?;
+    let mut casper = casper.lock().await;
+    seele_server::portaria::revogar(&mut casper, &impressao)
+        .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)
+}
+
 /// O que o frontend precisa saber sobre a busca corrente.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 struct BuscaEstado {
@@ -1515,6 +1783,13 @@ fn main() {
             enviar_anexo,
             salvar_anexo,
             pasta_de_downloads,
+            estado_da_porta,
+            definir_senha_do_dogma,
+            criar_convite_do_dogma,
+            ligar_portaria,
+            pedidos_da_portaria,
+            decidir_pedido,
+            revogar_admissao,
         ])
         .run(tauri::generate_context!());
 

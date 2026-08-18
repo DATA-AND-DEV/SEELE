@@ -29,6 +29,37 @@ const MOTIVOS = {
   Timeout: "ENLACE PERDIDO",
   ProtocolViolation: "PROTOCOLO VIOLADO",
   RateLimited: "LIMITE DE MENSAGENS EXCEDIDO",
+
+  // Faltava, e a falta era silenciosa: a ponte manda `FellBehind` desde que a
+  // pendência #1 foi fechada, e a tela de fim não tinha frase para ele — o
+  // motivo saía em branco justamente na queda que **não** é culpa de ninguém.
+  // Encontrado pelo guarda que confere `EndReason` contra esta lista.
+  //
+  // Diz o que houve com a conversa, e não o que houve com o barramento: quem lê
+  // quer saber se perdeu alguma coisa. Perdeu, e voltar é o que a traz de volta.
+  FellBehind:
+    "ESTE ENLACE FICOU PARA TRÁS DO DOGMA.\nAlgumas mensagens não chegaram a esta janela. Entrar de novo busca o histórico e repõe o que faltou.",
+
+  // ---- a portaria do ADR 0030 ----
+  //
+  // As duas únicas frases desta lista sobre uma entrada que ainda pode dar
+  // certo, e por isso as duas únicas que dizem o que fazer em seguida.
+  //
+  // Elas são separadas de propósito, e a separação é o ADR inteiro em duas
+  // linhas: «não decidiram ainda» e «decidiram que não» pedem coisas opostas de
+  // quem lê. Dobrar as duas em CREDENCIAL RECUSADA — que é onde caíam antes de
+  // existirem — mandaria embora quem só precisava esperar.
+  //
+  // Nenhuma das duas fala em esperar. Nada está esperando: a conexão caiu no
+  // mesmo instante, e o que ficou de pé é o pedido, do outro lado. Uma frase
+  // que dissesse «aguarde» descreveria uma barra girando que não existe.
+  AdmissionPending:
+    "QUEM HOSPEDA AINDA NÃO DECIDIU SOBRE VOCÊ.\nO seu pedido ficou guardado no Dogma, com a sua impressão digital. " +
+    "Ele não vence — tente entrar de novo quando quem hospeda tiver olhado.",
+  AdmissionDenied:
+    "QUEM HOSPEDA RECUSOU A SUA ENTRADA.\nNão é banimento, e não foi a sua senha nem o seu convite: " +
+    "foi uma decisão sobre a sua chave. Fale com quem hospeda por outro canal.",
+
   LinkLost: "ENLACE PERDIDO",
 };
 
@@ -163,6 +194,16 @@ const FRASES = {
     PortaOcupada:
       "A PORTA 8383 JÁ ESTÁ EM USO.\nQuase sempre é outro SEELE aberto — feche o outro e tente de novo.",
     NaoSubiu: "NÃO CONSEGUI SUBIR O DOGMA AQUI",
+
+    // A portaria — ADR 0030. As duas falam de uma porta que não existe daqui.
+    //
+    // `NaoEstaHospedando` não é engano de quem apertou: os comandos da portaria
+    // mexem no Dogma **desta** máquina, e quem está no Dogma de outra pessoa não
+    // tem porta nenhuma para mexer. A frase diz isso em vez de deixar a pessoa
+    // procurando o que fez de errado.
+    NaoEstaHospedando:
+      "ESTA JANELA NÃO ESTÁ HOSPEDANDO NENHUM DOGMA.\nA porta que se abre e fecha aqui é a do Dogma que roda nesta máquina. No Dogma de outra pessoa, quem decide quem entra é quem o hospeda.",
+    BancoNaoRespondeu: "O DOGMA DESTA MÁQUINA NÃO RESPONDEU",
 
     // Até onde o convite chega — a escada do ADR 0022. Vai junto do link, e não
     // numa tela de diagnóstico, porque é aí que a informação vale: um link que

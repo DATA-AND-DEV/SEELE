@@ -107,11 +107,57 @@ impl Politica {
         self.senha_hash.is_none() && !self.aceita_convites
     }
 
-    /// Decide se um segredo apresentado abre a porta.
+    /// Se há senha do Dogma configurada.
     ///
-    /// Consome o convite quando for o caso, e é por isso que precisa da
-    /// conexão: a decisão e o consumo têm de ser a mesma operação, ou dois
-    /// clientes usam o mesmo convite ao mesmo tempo.
+    /// Para a tela de quem hospeda dizer **qual** camada está de pé, e não só se
+    /// a porta está aberta: «sem senha e sem convites» e «com senha» pedem
+    /// coisas diferentes de quem está olhando. O hash em si não sai daqui.
+    #[must_use]
+    pub fn tem_senha(&self) -> bool {
+        self.senha_hash.is_some()
+    }
+
+    /// Se existe pelo menos um convite emitido.
+    #[must_use]
+    pub fn aceita_convites(&self) -> bool {
+        self.aceita_convites
+    }
+
+    /// Confere um segredo **sem gastar nada**.
+    ///
+    /// A metade que só olha. Devolve o [`Passe`] com o que ainda falta gastar
+    /// para a entrada valer — um convite, ou nada, quando foi a senha.
+    ///
+    /// # Errors
+    ///
+    /// Falha se o banco não responder. Recusa é `Ok(Err(_))`, não erro.
+    pub fn avaliar(&self, casper: &Casper, segredo: Option<&str>) -> Result<Result<Passe, Recusa>> {
+        if self.aberto() {
+            return Ok(Ok(Passe::livre()));
+        }
+
+        let Some(segredo) = segredo.filter(|s| !s.is_empty()) else {
+            return Ok(Err(Recusa::SegredoAusente));
+        };
+
+        if let Some(hash) = &self.senha_hash {
+            if verificar_senha(segredo, hash) {
+                return Ok(Ok(Passe::livre()));
+            }
+        }
+
+        if self.aceita_convites {
+            return Ok(conferir_convite(casper.connection(), segredo)?
+                .map(|()| Passe::com_convite(segredo)));
+        }
+
+        Ok(Err(Recusa::SegredoInvalido))
+    }
+
+    /// Decide se um segredo apresentado abre a porta, e gasta o que houver.
+    ///
+    /// As duas metades numa chamada só, para quem não tem nada a fazer entre
+    /// elas.
     ///
     /// # Errors
     ///
@@ -121,25 +167,75 @@ impl Politica {
         casper: &mut Casper,
         segredo: Option<&str>,
     ) -> Result<Result<(), Recusa>> {
-        if self.aberto() {
-            return Ok(Ok(()));
+        match self.avaliar(casper, segredo)? {
+            Ok(passe) => gastar(casper, &passe),
+            Err(recusa) => Ok(Err(recusa)),
         }
+    }
+}
 
-        let Some(segredo) = segredo.filter(|s| !s.is_empty()) else {
-            return Ok(Err(Recusa::SegredoAusente));
-        };
+/// O que uma entrada aprovada ainda deve, e só se completar.
+///
+/// Existe por causa da portaria do ADR 0030, e conserta um defeito que já
+/// estava aqui antes dela.
+///
+/// **O convite passava a ser gasto por quem *bate*, não por quem *entra*.** Um
+/// handshake que morresse depois desta camada — assinatura ruim, piloto banido,
+/// a rede caindo entre um quadro e outro — queimava o convite de alguém que
+/// nunca chegou a entrar, e essa pessoa não tinha como voltar. Era raro. Com a
+/// portaria deixa de ser: uma batida pendente é o caso **normal**, a pessoa é
+/// mandada tentar de novo, e o convite que ela tinha já não vale nada. Aprovada
+/// ou não, ela ficava para fora para sempre.
+///
+/// Separar em duas metades não desfaz a proteção contra dois clientes com o
+/// mesmo convite no mesmo instante: ela nunca esteve na conferência, e sim no
+/// `UPDATE ... WHERE usado_em IS NULL` de [`gastar`], que continua sendo uma
+/// operação só. Os dois passam por [`Politica::avaliar`]; só um vê linha
+/// alterada.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Passe {
+    /// O convite a gastar, quando foi por um que a porta abriu.
+    convite: Option<String>,
+}
 
-        if let Some(hash) = &self.senha_hash {
-            if verificar_senha(segredo, hash) {
-                return Ok(Ok(()));
-            }
+impl Passe {
+    /// Uma entrada que não deve nada: Dogma aberto, ou senha.
+    #[must_use]
+    fn livre() -> Self {
+        Self::default()
+    }
+
+    /// Uma entrada que deve o convite que a abriu.
+    fn com_convite(token: &str) -> Self {
+        Self {
+            convite: Some(token.to_owned()),
         }
+    }
+}
 
-        if self.aceita_convites {
-            return consumir_convite(casper.connection(), segredo);
-        }
+/// Gasta o que o passe deve. Idempotente para um passe livre.
+///
+/// # Errors
+///
+/// Falha se o banco não responder. Perder a corrida por um convite é
+/// `Ok(Err(Recusa::ConviteGasto))`, não erro.
+pub fn gastar(casper: &mut Casper, passe: &Passe) -> Result<Result<(), Recusa>> {
+    let Some(token) = &passe.convite else {
+        return Ok(Ok(()));
+    };
 
-        Ok(Err(Recusa::SegredoInvalido))
+    // `usado_em IS NULL` na cláusula: se dois clientes chegarem com o mesmo
+    // convite no mesmo instante, só um vê linha alterada. A conferência de
+    // `avaliar` sozinha seria uma corrida, e é por isso que ela não decide.
+    let alteradas = casper.connection().execute(
+        "UPDATE convites SET usado_em = ?1 WHERE token = ?2 AND usado_em IS NULL",
+        params![now_seconds(), token],
+    )?;
+
+    if alteradas == 1 {
+        Ok(Ok(()))
+    } else {
+        Ok(Err(Recusa::ConviteGasto))
     }
 }
 
@@ -226,8 +322,8 @@ pub fn definir_senha_cage(casper: &mut Casper, cage: CageId, senha: Option<&str>
     Ok(())
 }
 
-/// Consome um convite, se ele existir e ainda valer.
-fn consumir_convite(conexao: &Connection, token: &str) -> Result<Result<(), Recusa>> {
+/// Confere um convite, sem gastá-lo.
+fn conferir_convite(conexao: &Connection, token: &str) -> Result<Result<(), Recusa>> {
     let encontrado: Option<(i64, Option<i64>)> = conexao
         .query_row(
             "SELECT expira_em, usado_em FROM convites WHERE token = ?1",
@@ -242,24 +338,11 @@ fn consumir_convite(conexao: &Connection, token: &str) -> Result<Result<(), Recu
     if usado_em.is_some() {
         return Ok(Err(Recusa::ConviteGasto));
     }
-    let agora = now_seconds();
-    if agora > expira_em {
+    if now_seconds() > expira_em {
         return Ok(Err(Recusa::ConviteExpirado));
     }
 
-    // `usado_em IS NULL` na cláusula: se dois clientes chegarem com o mesmo
-    // convite no mesmo instante, só um vê linha alterada. A verificação acima
-    // sozinha seria uma corrida.
-    let alteradas = conexao.execute(
-        "UPDATE convites SET usado_em = ?1 WHERE token = ?2 AND usado_em IS NULL",
-        params![agora, token],
-    )?;
-
-    if alteradas == 1 {
-        Ok(Ok(()))
-    } else {
-        Ok(Err(Recusa::ConviteGasto))
-    }
+    Ok(Ok(()))
 }
 
 /// Argon2id com os parâmetros padrão do crate, que são os recomendados atuais.
@@ -407,6 +490,81 @@ mod tests {
                 .expect("admitir"),
             Err(Recusa::ConviteGasto)
         );
+    }
+
+    #[test]
+    fn conferir_um_convite_nao_o_gasta() {
+        // O defeito que a portaria do ADR 0030 tornou constante: quem bate e é
+        // mandado esperar não pode ter o convite queimado pela batida, ou volta
+        // aprovado e sem credencial nenhuma.
+        let mut casper = casper();
+        let token = criar_convite(&mut casper, "ayanami").expect("criar");
+        let politica = Politica::carregar(&casper).expect("política");
+
+        let passe = politica
+            .avaliar(&casper, Some(&token))
+            .expect("avaliar")
+            .expect("aceito");
+
+        // Conferido três vezes e ainda de pé.
+        for _ in 0..3 {
+            assert!(politica
+                .avaliar(&casper, Some(&token))
+                .expect("avaliar")
+                .is_ok());
+        }
+
+        assert_eq!(gastar(&mut casper, &passe).expect("gastar"), Ok(()));
+        // E depois de gasto, gasto.
+        assert_eq!(
+            politica
+                .avaliar(&casper, Some(&token))
+                .expect("avaliar")
+                .unwrap_err(),
+            Recusa::ConviteGasto
+        );
+    }
+
+    #[test]
+    fn dois_passes_do_mesmo_convite_nao_entram_os_dois() {
+        // A corrida que o `UPDATE ... WHERE usado_em IS NULL` existe para
+        // perder. Separar conferir de gastar não pode tê-la reaberto: os dois
+        // conferem com sucesso, e é o gasto que decide.
+        let mut casper = casper();
+        let token = criar_convite(&mut casper, "").expect("criar");
+        let politica = Politica::carregar(&casper).expect("política");
+
+        let primeiro = politica
+            .avaliar(&casper, Some(&token))
+            .expect("avaliar")
+            .expect("aceito");
+        let segundo = politica
+            .avaliar(&casper, Some(&token))
+            .expect("avaliar")
+            .expect("aceito");
+
+        assert_eq!(gastar(&mut casper, &primeiro).expect("gastar"), Ok(()));
+        assert_eq!(
+            gastar(&mut casper, &segundo).expect("gastar"),
+            Err(Recusa::ConviteGasto)
+        );
+    }
+
+    #[test]
+    fn um_passe_de_senha_nao_deve_nada() {
+        // Gastar tem que ser inócuo quando não houve convite, ou o caminho da
+        // senha passaria por um `UPDATE` sem alvo e leria zero linhas alteradas
+        // como recusa.
+        let mut casper = casper();
+        definir_senha(&mut casper, Some("terceiro impacto")).expect("definir");
+        let politica = Politica::carregar(&casper).expect("política");
+
+        let passe = politica
+            .avaliar(&casper, Some("terceiro impacto"))
+            .expect("avaliar")
+            .expect("aceito");
+        assert_eq!(gastar(&mut casper, &passe).expect("gastar"), Ok(()));
+        assert_eq!(gastar(&mut casper, &passe).expect("de novo"), Ok(()));
     }
 
     #[test]

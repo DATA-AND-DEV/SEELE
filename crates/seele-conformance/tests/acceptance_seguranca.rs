@@ -270,3 +270,265 @@ async fn um_dogma_novo_aceita_qualquer_um() -> Result<()> {
     servidor.shutdown();
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// A portaria — ADR 0030. TOFU aplicado a gente.
+// ---------------------------------------------------------------------------
+
+/// A razão que o Dogma deu, ou o pânico que diz o que ele deu no lugar.
+///
+/// Escrito assim, e não como `is_err()`, porque a portaria inteira existe para
+/// distinguir três respostas. Um teste que só perguntasse se falhou passaria com
+/// as três dobradas em `CredentialRejected`, que é exatamente o estado de antes
+/// deste ADR.
+fn razao(erro: Option<seele_core::ConnectError>) -> seele_proto::control::DisconnectReason {
+    match erro {
+        Some(seele_core::ConnectError::Refused { reason }) => reason,
+        outra => panic!("esperava uma recusa enumerada do Dogma, veio {outra:?}"),
+    }
+}
+
+/// A impressão digital de uma semente, como quem hospeda a vê na tela.
+fn impressao_de(semente: u8) -> String {
+    seele_proto::transport::key_fingerprint(
+        SigningKey::from_bytes(&[semente; 32])
+            .verifying_key()
+            .as_bytes(),
+    )
+}
+
+/// Um Dogma com portaria não deixa ninguém entrar por um caminho lateral.
+///
+/// O guarda central do ADR 0030, e ele encena cada tentativa em vez de ler o
+/// código. Cada bloco abaixo é uma porta dos fundos que alguém tentaria de
+/// verdade, e a mais perigosa é a terceira: um convite **válido e não gasto** é
+/// a credencial mais forte que este produto emite, e ainda assim não atravessa a
+/// portaria. Se atravessasse, a camada mais forte teria virado a mais fraca —
+/// bastaria vazar um convite para pular a decisão de quem hospeda.
+#[tokio::test]
+async fn um_dogma_com_portaria_nao_admite_ninguem_por_um_caminho_lateral() -> Result<()> {
+    use seele_proto::control::DisconnectReason;
+    use seele_server::portaria;
+
+    let pasta = tempfile::tempdir()?;
+    let banco = pasta.path().join("seele.db");
+
+    let token = {
+        let mut casper = Casper::open(&Location::File(banco.clone()))?;
+        portaria::ligar(&mut casper, true)?;
+        admissao::definir_senha(&mut casper, Some("terceiro impacto"))?;
+        admissao::criar_convite(&mut casper, "para a Rei")?
+    };
+
+    let (endereco, servidor) = subir(&banco).await?;
+
+    // 1. Sem segredo nenhum. Para antes da portaria, na camada do ADR 0021.
+    let sem_nada = conectar(
+        endereco,
+        "estranho",
+        9,
+        Arc::new(MemoryPinStore::new()),
+        None,
+    )
+    .await;
+    assert_eq!(
+        razao(sem_nada.err()),
+        DisconnectReason::CredentialRejected,
+        "quem não traz segredo tem que parar na camada do segredo, e a recusa \
+         dela é uniforme de propósito"
+    );
+
+    // 2. Com a senha certa. Passa a primeira camada e para na segunda.
+    let com_senha = conectar(
+        endereco,
+        "estranho",
+        9,
+        Arc::new(MemoryPinStore::new()),
+        Some("terceiro impacto"),
+    )
+    .await;
+    assert_eq!(
+        razao(com_senha.err()),
+        DisconnectReason::AdmissionPending,
+        "saber a senha atravessou a portaria; as camadas são conjuntivas e \
+         passar por uma não dispensa a outra"
+    );
+
+    // 3. Com um convite válido e não gasto. O caminho lateral mais perigoso.
+    let com_convite = conectar(
+        endereco,
+        "convidado",
+        8,
+        Arc::new(MemoryPinStore::new()),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(
+        razao(com_convite.err()),
+        DisconnectReason::AdmissionPending,
+        "um convite válido aprovou sozinho quem quem hospeda nunca viu — o ADR \
+         0030 recusa isso porque um link se encaminha"
+    );
+
+    // 4. Insistir. Uma porta que cede à repetição não é uma porta.
+    for _ in 0..5 {
+        let de_novo = conectar(
+            endereco,
+            "estranho",
+            9,
+            Arc::new(MemoryPinStore::new()),
+            Some("terceiro impacto"),
+        )
+        .await;
+        assert_eq!(razao(de_novo.err()), DisconnectReason::AdmissionPending);
+    }
+
+    // 5. Quem hospeda aprova **uma** chave, pelo banco, como a tela fará.
+    {
+        let mut casper = Casper::open(&Location::File(banco.clone()))?;
+        // Sete batidas da mesma pessoa são um pedido, não sete.
+        let fila = portaria::pedidos(&casper)?;
+        assert_eq!(fila.len(), 2, "a fila tem uma linha por pessoa: {fila:?}");
+        portaria::decidir(&mut casper, &impressao_de(9), true)?;
+    }
+
+    let entra = conectar(
+        endereco,
+        "estranho",
+        9,
+        Arc::new(MemoryPinStore::new()),
+        Some("terceiro impacto"),
+    )
+    .await;
+    assert!(
+        entra.is_ok(),
+        "a chave aprovada não entrou: {:?}",
+        entra.err()
+    );
+
+    // 6. A aprovação não vazou para o vizinho da fila.
+    let vizinho = conectar(
+        endereco,
+        "convidado",
+        8,
+        Arc::new(MemoryPinStore::new()),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(
+        razao(vizinho.err()),
+        DisconnectReason::AdmissionPending,
+        "aprovar uma chave abriu a porta para outra"
+    );
+
+    // 7. Nem para uma chave nova que se diz pelo mesmo apelido. O apelido é
+    //    texto que a pessoa digitou; a impressão digital é a identidade.
+    let homonimo = conectar(
+        endereco,
+        "estranho",
+        3,
+        Arc::new(MemoryPinStore::new()),
+        Some("terceiro impacto"),
+    )
+    .await;
+    assert_eq!(
+        razao(homonimo.err()),
+        DisconnectReason::AdmissionPending,
+        "uma chave nova entrou por se dizer pelo nome de alguém já admitido"
+    );
+
+    servidor.shutdown();
+    Ok(())
+}
+
+/// Recusado e «ainda não decidiram» são coisas diferentes para quem bate.
+///
+/// A recusa é sempre a mesma na camada do segredo, e `specs/08-seguranca.md`
+/// exige que seja: distinguir contaria a quem está adivinhando qual palpite
+/// chegou mais perto. Na portaria não há palpite — a chave foi provada — e
+/// dobrar as duas mandaria embora quem só precisava esperar.
+#[tokio::test]
+async fn quem_foi_recusado_ouve_outra_coisa_de_quem_so_espera() -> Result<()> {
+    use seele_proto::control::DisconnectReason;
+    use seele_server::portaria;
+
+    let pasta = tempfile::tempdir()?;
+    let banco = pasta.path().join("seele.db");
+
+    {
+        let mut casper = Casper::open(&Location::File(banco.clone()))?;
+        portaria::ligar(&mut casper, true)?;
+    }
+
+    let (endereco, servidor) = subir(&banco).await?;
+
+    // Duas pessoas batem.
+    for semente in [4_u8, 5_u8] {
+        let batida = conectar(
+            endereco,
+            &format!("piloto{semente}"),
+            semente,
+            Arc::new(MemoryPinStore::new()),
+            None,
+        )
+        .await;
+        assert_eq!(razao(batida.err()), DisconnectReason::AdmissionPending);
+    }
+
+    // Quem hospeda recusa uma e deixa a outra de pé.
+    {
+        let mut casper = Casper::open(&Location::File(banco.clone()))?;
+        portaria::decidir(&mut casper, &impressao_de(4), false)?;
+    }
+
+    let voltou = conectar(
+        endereco,
+        "piloto4",
+        4,
+        Arc::new(MemoryPinStore::new()),
+        None,
+    )
+    .await;
+    assert_eq!(
+        razao(voltou.err()),
+        DisconnectReason::AdmissionDenied,
+        "quem foi recusado ouviu a frase de quem só precisa esperar"
+    );
+
+    let esperando = conectar(
+        endereco,
+        "piloto5",
+        5,
+        Arc::new(MemoryPinStore::new()),
+        None,
+    )
+    .await;
+    assert_eq!(
+        razao(esperando.err()),
+        DisconnectReason::AdmissionPending,
+        "recusar uma pessoa recusou a outra junto"
+    );
+
+    // E recusar não é banir: revogar a decisão devolve a pessoa à fila em vez de
+    // deixá-la barrada para sempre.
+    {
+        let mut casper = Casper::open(&Location::File(banco.clone()))?;
+        portaria::revogar(&mut casper, &impressao_de(4))?;
+    }
+    let de_novo = conectar(
+        endereco,
+        "piloto4",
+        4,
+        Arc::new(MemoryPinStore::new()),
+        None,
+    )
+    .await;
+    assert_eq!(
+        razao(de_novo.err()),
+        DisconnectReason::AdmissionPending,
+        "revogar uma recusa tem que voltar a perguntar, não continuar recusando"
+    );
+
+    servidor.shutdown();
+    Ok(())
+}

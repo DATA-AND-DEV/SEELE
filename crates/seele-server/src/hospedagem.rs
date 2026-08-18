@@ -25,6 +25,14 @@ use anyhow::Result;
 use crate::casper::Location;
 use crate::{DogmaConfig, Server};
 
+/// O CASPER de um Dogma hospedado, compartilhado com quem o hospeda.
+///
+/// Apelido, e não o tipo escrito por extenso, porque quem chama é a casca do
+/// desktop e ela **não depende de `tokio`**. Sem este nome, expor o banco
+/// obrigaria o app a declarar a dependência só para escrever o tipo de uma
+/// variável — uma dependência inteira paga em nome de uma anotação.
+pub type CasperCompartilhado = Arc<tokio::sync::Mutex<crate::casper::Casper>>;
+
 /// Um Dogma rodando dentro deste processo.
 ///
 /// Descartar isto encerra o Dogma e derruba quem estiver conectado. É o
@@ -201,6 +209,43 @@ impl Hospedagem {
         {
             Some(bilhete) => convite.com_bilhete(bilhete).to_string(),
             None => convite.to_string(),
+        }
+    }
+
+    /// O CASPER deste Dogma, para quem hospeda mexer na própria porta.
+    ///
+    /// ADR 0030. É por aqui que a janela fecha o Dogma, gera convite e decide
+    /// quem entra — direto no banco da máquina, e não pelo fio como toda a
+    /// moderação faz.
+    ///
+    /// Três motivos, no ADR: fechar a porta não pode depender de estar dentro,
+    /// senão a defesa depende do canal que ela defende; a porta se fecha no
+    /// mesmo gesto de hospedar, antes do primeiro pacote; e nenhum verbo novo de
+    /// protocolo significa nenhuma superfície nova exposta à internet para uma
+    /// decisão que é, por definição, de quem está na máquina.
+    ///
+    /// Devolve o `Arc` em vez de travar aqui de propósito: quem chama está
+    /// segurando um `Mutex` de estado do app, e travar deste lado o faria
+    /// segurar os dois. Clonar é barato, e o `await` acontece depois de o outro
+    /// já ter sido solto.
+    #[must_use]
+    pub fn casper(&self) -> CasperCompartilhado {
+        Arc::clone(&self.server.dogma().casper)
+    }
+
+    /// O link para mandar a uma pessoa, com um convite de uso único dentro.
+    ///
+    /// Igual ao [`Self::convite`] em tudo — os mesmos endereços, na mesma ordem,
+    /// com a mesma impressão digital — mais o token. Reusa aquele em vez de
+    /// remontar porque duas construções do mesmo link é uma que vai ficar para
+    /// trás, que é o que o comentário dele já dizia.
+    #[must_use]
+    pub fn convite_com_token(&self, token: &str) -> String {
+        match seele_proto::uri::analisar(&self.convite()) {
+            Ok(convite) => convite.com_token(token).to_string(),
+            // O link que acabamos de montar não parsear é impossível na prática;
+            // devolver o sem token é melhor que entregar nada a quem convida.
+            Err(_) => self.convite(),
         }
     }
 

@@ -34,6 +34,7 @@
 <link rel="stylesheet" href="tela-sessao.css">
 <link rel="stylesheet" href="camada-alerta.css">
 <link rel="stylesheet" href="camada-bateria.css">
+<link rel="stylesheet" href="camada-portaria.css">
 <link rel="stylesheet" href="camada-moderar.css">
 <link rel="stylesheet" href="tela-chamada.css">
 <link rel="stylesheet" href="tela-dogma.css">
@@ -758,9 +759,108 @@
       <span class="convite-rotulo">CONVITE</span>
       <input id="convite-link" class="convite-link" readonly spellcheck="false">
       <button id="convite-copiar" class="botao-fantasma" type="button">copiar</button>
+      <!--
+        A porta, ao lado do link que a atravessa. ADR 0030.
+
+        Aqui, e não numa entrada de menu, porque este bloco só aparece para quem
+        está hospedando — e a porta do Dogma só é assunto de quem hospeda. Quem
+        entrou no Dogma de outra pessoa não vê esta linha, e não deve mesmo: a
+        portaria é estado da máquina que hospeda, e não um verbo de protocolo.
+
+        O rótulo do botão é escrito pelo script a cada leitura, porque ele
+        carrega o estado da porta — «PORTA · ABERTA» é a única coisa nesta
+        janela que diz que qualquer um entra, e um rótulo fixo esconderia
+        justamente isso.
+      -->
+      <button id="portaria-abrir" class="botao-fantasma" type="button">porta</button>
       <span class="convite-nota">o Dogma acaba quando esta janela fechar</span>
     </div>
     <p id="convite-alcance" class="convite-alcance" hidden></p>
+  </div>
+
+  <!--
+    A portaria — ADR 0030.
+
+    Camada sobre a sessão, e não tela, pela mesma razão escrita em `#moderar`:
+    decidir sobre quem está batendo é uma decisão tomada **olhando** o Dogma, e
+    uma tela apagaria a conversa no instante em que alguém decide sobre uma
+    pessoa. `specs/07-tema-evangelion.md` não deixa este cliente substituir a
+    conversa.
+
+    Fica dentro de `#tela-sessao` porque é para lá que HOSPEDAR AQUI leva: o
+    botão sobe o Dogma e **entra nele**, então quem hospeda pelo app está sempre
+    numa sessão.
+
+    Abaixo de `#moderar` na pilha (`z-index`), de propósito: as confirmações
+    desta camada são armadas na caixa de moderação — `armarAto` mora lá e é uma
+    só —, e ela tem que aparecer por cima desta.
+  -->
+  <div id="portaria" class="camada-portaria" role="dialog" aria-modal="true"
+       aria-labelledby="portaria-titulo" tabindex="-1" hidden>
+    <div class="portaria-caixa">
+      <div class="portaria-cabeca">
+        <span class="portaria-marca" data-glifo="chave"></span>
+        <h2 id="portaria-titulo" class="portaria-titulo">A PORTA DESTE DOGMA</h2>
+        <button id="portaria-fechar" class="portaria-fechar" type="button">FECHAR</button>
+      </div>
+
+      <div class="portaria-corpo">
+        <!--
+          A banda de alerta. Vermelho aqui e em nenhum outro lugar desta folha:
+          `tokens.css` reserva `--seele-vermelho-alerta` para alerta e queda, e
+          uma porta escancarada para a internet é exatamente uma dessas. Ela é
+          revelada pelo script só quando as duas coisas valem ao mesmo tempo —
+          nenhuma camada de pé **e** alcance além da rede local. Aberto numa rede
+          de casa é o padrão do ADR 0021 e não é alarme nenhum.
+        -->
+        <p id="portaria-alarme" class="portaria-alarme" role="alert" hidden></p>
+
+        <!-- As três camadas, sempre as três, e sempre em palavras. -->
+        <div class="portaria-camadas">
+          <div class="portaria-camada">
+            <span class="rotulo">SENHA DO DOGMA</span>
+            <span id="portaria-estado-senha" class="portaria-estado">——</span>
+            <input id="portaria-senha" class="portaria-senha" type="password"
+                   autocomplete="new-password" placeholder="uma senha para o grupo">
+            <button id="portaria-por-senha" class="botao-fantasma" type="button">DEFINIR</button>
+            <button id="portaria-tirar-senha" class="botao-fantasma" type="button">TIRAR</button>
+          </div>
+
+          <div class="portaria-camada">
+            <span class="rotulo">CONVITE DE USO ÚNICO</span>
+            <span id="portaria-estado-convites" class="portaria-estado">——</span>
+            <input id="portaria-observacao" class="portaria-observacao" type="text"
+                   placeholder="para quem é este convite">
+            <button id="portaria-gerar" class="botao-fantasma" type="button">GERAR</button>
+          </div>
+
+          <div class="portaria-camada">
+            <span class="rotulo">PORTARIA</span>
+            <span id="portaria-estado-portaria" class="portaria-estado">——</span>
+            <button id="portaria-ligar" class="botao-fantasma" type="button"
+                    aria-pressed="false">LIGAR</button>
+          </div>
+        </div>
+
+        <p id="portaria-erro" class="erro" role="alert" hidden></p>
+
+        <!--
+          A fila e o histórico dividem **um** contêiner que rola, e não um cada.
+          `every_list_the_dogma_fills_lives_inside_something_that_scrolls`: nada
+          limita quantas pessoas batem, e uma lista que passa da borda do painel
+          é uma lista cujas últimas linhas deixam de existir.
+        -->
+        <div class="portaria-rolagem">
+          <h3 class="portaria-secao">QUEM ESTÁ BATENDO</h3>
+          <p id="portaria-fila-vazia" class="dica" hidden>Ninguém esperando.</p>
+          <ul id="portaria-fila" class="portaria-lista"></ul>
+
+          <h3 class="portaria-secao">JÁ DECIDIDOS</h3>
+          <p id="portaria-decididos-vazio" class="dica" hidden>Nada decidido ainda.</p>
+          <ul id="portaria-decididos" class="portaria-lista"></ul>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!--
@@ -1990,6 +2090,15 @@
   operação em vez de substituí-la se chama `camada-`, como o alerta e a bateria.
 -->
 <script src="camada-moderar.js"></script>
+<!--
+  Depois de `camada-moderar.js`, e isto é ordem de verdade e não arrumação: a
+  portaria arma as confirmações dela com `abrirConfirmacao`, que é declarada
+  lá. Este arquivo registra os ouvintes dele no próprio rodapé, e
+  `addEventListener` lê a função na hora — mas as chamadas de dentro dos
+  ouvintes acontecem depois, então o que a ordem garante mesmo é que ninguém
+  precise pensar nisso.
+-->
+<script src="camada-portaria.js"></script>
 <!--
   Depois de `tela-sessao.js`, e não é gosto: a chamada usa `naoMedido`,
   `medido`, `SEM_MEDIDA` e `blocos`, que são declarados lá. Declaração de função

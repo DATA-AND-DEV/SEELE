@@ -199,6 +199,9 @@ fn every_command_the_frontend_calls_is_registered() {
 /// between the person and the room they are renaming. Doing it badly now would
 /// cost more than the wait.
 ///
+/// The seven of ADR 0030 were here for exactly one commit, and this is the note
+/// they left: `camada-portaria.js` draws all of them, so the check below said so
+/// by name and they came out. That is the list working the way it is meant to.
 const AGUARDANDO_TELA: &[&str] = &["renomear_cage", "renomear_linha"];
 
 #[test]
@@ -1126,7 +1129,10 @@ fn every_refusal_the_bridge_writes_itself_has_a_sentence_in_the_page() {
     let source = read("src/main.rs");
     let script = without_comments(&scripts());
 
-    for enumeration in ["FalhaAoHospedar", "FalhaAoEscolher"] {
+    // `FalhaNaPortaria` joined the two for the same reason: the doorkeeper's
+    // commands talk to this machine's own Dogma rather than across the bridge,
+    // so the FFI has no name for either of their failures.
+    for enumeration in ["FalhaAoHospedar", "FalhaAoEscolher", "FalhaNaPortaria"] {
         for variant in variants_of(&source, enumeration) {
             assert!(
                 names(&script, &variant),
@@ -4995,4 +5001,302 @@ fn the_button_that_stopped_inserting_the_plug_stopped_saying_it_does() {
         "the second step stopped naming itself at all, so the button keeps \
          whatever the first step wrote:\n{segundo}"
     );
+}
+// ---------------------------------------------------------------------------
+// The doorkeeper — ADR 0030.
+// ---------------------------------------------------------------------------
+
+/// The doorkeeper's acts, and which of them may not be one press away.
+///
+/// Three of the seven commands are here and four are not, and the split is the
+/// rule rather than a sample. An act belongs on this list when it **opens** the
+/// door or settles something about a person: refusing or admitting a knock
+/// lasts until it is undone, revoking sends somebody back to being unknown,
+/// and taking the password off or switching the doorkeeper off widens who may
+/// come in.
+///
+/// Setting a password, minting an invite and switching the doorkeeper *on* are
+/// deliberately absent. All three close the door, and demanding a confirmation
+/// to close it is teaching people to press twice for the act that harms nobody
+/// — the same reasoning that keeps «tem certeza?» out of this page.
+const ATOS_DA_PORTARIA: &[&str] = &["decidir_pedido", "revogar_admissao"];
+
+#[test]
+fn no_act_of_the_doorkeeper_reaches_the_dogma_without_a_sentence_that_says_what_it_costs() {
+    // The moderation rule, applied to the layer that decides who gets in. It is
+    // a separate test rather than six more names on `VERBOS_DE_MODERACAO`
+    // because that guard reads `ui/camada-moderar.js` and these live in their
+    // own file — pointing it at two files would make it pass whenever either
+    // one of them happened to arm something.
+    //
+    // Admitting is on the list beside refusing on purpose. An admission is the
+    // whole promise of TOFU: it is never asked again. That makes it as durable
+    // as the refusal, and a durable act with no sentence in front of it is the
+    // shape this whole layer exists to prevent.
+    let camada = read("ui/camada-portaria.js");
+    let script = without_comments(&scripts());
+
+    for verbo in ATOS_DA_PORTARIA {
+        let needle = format!("invoke(\"{verbo}\"");
+        assert!(
+            script.contains(&needle),
+            "nothing calls `{verbo}`, so the verb is registered and unreachable"
+        );
+
+        let mut armados = 0;
+        for chunk in top_level_chunks(&camada) {
+            if !chunk.contains(&needle) {
+                continue;
+            }
+            armados += 1;
+            let armado = chunk
+                .find("armarAto(")
+                .or_else(|| chunk.find("abrirConfirmacao("));
+            let Some(armado) = armado else {
+                panic!(
+                    "`{verbo}` is sent without arming a confirmation first, so a \
+                     decision about a person is one press away:\n{chunk}"
+                );
+            };
+
+            // And the arming has to come *before* the call, which is what makes
+            // this survive the trick it would otherwise fall for: a chunk that
+            // sends the verb outright and mentions `abrirConfirmacao(` beside
+            // it — in a `console.warn`, or in a second act further down —
+            // satisfies a bare `contains` while confirming nothing. Comments are
+            // already stripped by `top_level_chunks`; this is the half that
+            // stripping cannot do.
+            let Some(chamada) = chunk.find(&needle) else {
+                unreachable!("the chunk was selected for containing it");
+            };
+            assert!(
+                armado < chamada,
+                "`{verbo}` is sent before anything arms a confirmation, so the \
+                 sentence describes an act that already happened:\n{chunk}"
+            );
+        }
+        assert!(
+            armados > 0,
+            "`{verbo}` is called from outside ui/camada-portaria.js, where the \
+             confirmations are"
+        );
+    }
+
+    // The two that open the door. They are not sent from a chunk that also arms
+    // anything — the arming is in a named function the listener calls — so the
+    // check is that the *function* which sends them is the one that arms.
+    for (acao, funcao) in [
+        ("senha: null", "function perguntarETirarSenha"),
+        ("ligada: false", "function perguntarEDesligar"),
+    ] {
+        let corpo = body_of(&scripts(), funcao);
+        assert!(
+            corpo.contains("abrirConfirmacao("),
+            "`{funcao}` widens who may come in without saying so first:\n{corpo}"
+        );
+        assert!(
+            corpo.contains(acao),
+            "`{funcao}` no longer sends `{acao}`, so the confirmation and the \
+             act it describes have come apart:\n{corpo}"
+        );
+    }
+
+    // And the ones that close it must NOT be behind a confirmation, or the page
+    // is asking permission to be safer.
+    for funcao in ["portaria-por-senha", "portaria-gerar"] {
+        let script = without_comments(&scripts());
+        let Some(depois) = script
+            .split(&format!("$(\"{funcao}\").addEventListener"))
+            .nth(1)
+        else {
+            panic!("`{funcao}` has no listener any more");
+        };
+        let chunk: String = depois.chars().take(600).collect();
+        assert!(
+            !chunk.contains("abrirConfirmacao("),
+            "closing the door asks for confirmation, which trains people to \
+             press twice for the act that harms nobody:\n{chunk}"
+        );
+    }
+}
+
+#[test]
+fn a_knock_is_identified_by_its_fingerprint_and_never_by_the_name_it_claims() {
+    // The question ADR 0030 turns on, and the one a card can get wrong while
+    // looking fine. A nickname is text the person on the other side typed; the
+    // fingerprint is the identity. If the card leads with the nickname, whoever
+    // hosts approves a *name* — and `Rafae1` beside `Rafael` is a difference no
+    // code catches and no eye catches either, unless the line above it is the
+    // one that carries the authority.
+    //
+    // Scoped to the function that builds a card and read without comments: the
+    // paragraph above `cartao` explains exactly this, and a guard its own
+    // rationale can satisfy is a guard that cannot fail.
+    let corpo = body_of(&scripts(), "function cartao");
+
+    // The order inside `append`, and not the order the two are *declared* in.
+    //
+    // This guard was written the wrong way round first and a mutation walked
+    // straight through it: swapping the arguments of `append` — which is the
+    // whole defect — leaves `const impressao = …` above `const apelido = …`
+    // untouched, because declaring a variable is not putting it on a page. The
+    // check has to read the line that decides what the eye meets first.
+    let Some(ordem) = corpo.split("linha.append(").nth(1) else {
+        panic!("the card no longer appends its parts in one call:\n{corpo}");
+    };
+    let Some(ordem) = ordem.split(')').next() else {
+        panic!("the append is never closed:\n{corpo}");
+    };
+    let Some(impressao) = ordem.find("impressao") else {
+        panic!("the card no longer puts a fingerprint on the page:\n{ordem}");
+    };
+    let Some(apelido) = ordem.find("apelido") else {
+        panic!("the card no longer puts the claimed name on the page:\n{ordem}");
+    };
+    assert!(
+        impressao < apelido,
+        "the card puts the claimed nickname above the fingerprint, so whoever \
+         hosts is deciding about a name somebody typed:\n{ordem}"
+    );
+
+    // And the nickname is presented as a claim rather than as a fact.
+    assert!(
+        corpo.contains("diz chamar-se"),
+        "the card states the nickname flatly, so it reads as identity rather \
+         than as something the knocker asked to be called:\n{corpo}"
+    );
+    assert!(
+        corpo.contains("«") && corpo.contains("»"),
+        "the claimed nickname is not quoted, so nothing separates it from the \
+         page's own words:\n{corpo}"
+    );
+
+    // The fingerprint reaches the eye in groups. Sixty-four unbroken characters
+    // are not compared by a person: they lose their place halfway and conclude
+    // it matches.
+    let agrupar = body_of(&scripts(), "function agrupar");
+    assert!(
+        agrupar.contains("match("),
+        "the fingerprint is handed over as one unbroken run, which is the shape \
+         nobody actually checks:\n{agrupar}"
+    );
+}
+
+#[test]
+fn the_doorkeeper_spends_the_alarm_red_only_on_a_door_open_to_the_internet() {
+    // Two guards in one, from both directions.
+    //
+    // Outwards: `tokens.css` marks the red "EXCLUSIVO alerta e queda", and the
+    // moderation layer writes down that it does not spend it. This layer does,
+    // once — a Dogma with nothing closing it and an address reachable from
+    // outside is the front door open to the street.
+    //
+    // Inwards, and this is the half that matters: it must not fire on a Dogma
+    // that is merely open on a home network. That is the ADR 0021 default,
+    // defended there on purpose, and an alarm that goes off in the normal case
+    // is an alarm people learn to dismiss — which is precisely what ADR 0003
+    // says about the key-change warning it must never be confused with.
+    let corpo = body_of(&scripts(), "function desenharAlarme");
+
+    assert!(
+        corpo.contains("estado.aberto") && corpo.contains("portaria_ligada"),
+        "the alarm does not read whether anything is closing the door:\n{corpo}"
+    );
+    assert!(
+        corpo.contains("ALCANCA_DE_FORA"),
+        "the alarm fires without asking how far this Dogma is reachable, so it \
+         goes off on the local-network default that ADR 0021 defends:\n{corpo}"
+    );
+    assert!(
+        corpo.contains("!escancarada || !deFora") || corpo.contains("escancarada && deFora"),
+        "the two conditions are not required together, so the alarm reports one \
+         of them alone:\n{corpo}"
+    );
+
+    // `SoRedeLocal` is the rung that must never be in the list, and naming it
+    // here is what keeps somebody from "fixing" the list by adding everything.
+    let lista = body_of(&scripts(), "const ALCANCA_DE_FORA");
+    assert!(
+        !lista.contains("SoRedeLocal"),
+        "the local-network rung counts as reachable from outside, so every \
+         Dogma hosted on a laptop raises the alarm:\n{lista}"
+    );
+
+    // The red belongs to that band and to nothing else in the sheet.
+    let folha = without_comments(&read("ui/camada-portaria.css"));
+    let vermelhos = folha.matches("--seele-vermelho-alerta").count();
+    assert_eq!(
+        vermelhos, 1,
+        "the doorkeeper spends the alarm red somewhere other than the band for \
+         a door open to the internet, and that is the red nobody reads on the \
+         day the internal battery lights up"
+    );
+}
+
+#[test]
+fn every_reason_a_session_can_end_with_has_a_sentence_in_the_page() {
+    // Written while adding two of them, and it found that nothing had been
+    // guarding this at all: `EndReason` had twelve variants and `MOTIVOS`
+    // twelve entries, and the two lists agreed only because one person kept
+    // them in step by hand. A reason with no sentence reaches the end-of-session
+    // screen and prints nothing, or prints the name of a Rust variant at
+    // somebody who has just been disconnected and wants to know whether to try
+    // again.
+    //
+    // Read from the bridge's own source rather than from a list here, so the
+    // next variant fails this on the run it is added.
+    let ponte = std::fs::read_to_string(app_dir().join("../../crates/seele-ffi/src/types.rs"))
+        .expect("the bridge's types must be readable")
+        .replace("\r\n", "\n");
+
+    let script = without_comments(&scripts());
+    let Some(motivos) = script.split("const MOTIVOS = {").nth(1) else {
+        panic!("frases.js no longer declares MOTIVOS");
+    };
+    let Some(motivos) = motivos.split("\n};").next() else {
+        panic!("MOTIVOS is never closed");
+    };
+
+    let variantes = variants_of(&ponte, "EndReason");
+    assert!(
+        variantes.len() >= 12,
+        "`EndReason` came out with {} variants, so this guard is asserting \
+         against almost nothing",
+        variantes.len()
+    );
+
+    let mudas: Vec<&String> = variantes
+        .iter()
+        .filter(|variante| !motivos.contains(&format!("{variante}:")))
+        .collect();
+    assert!(
+        mudas.is_empty(),
+        "these ways a session can end reach the screen with no sentence written \
+         for them, so it says nothing or says the name of a Rust variant: \
+         {mudas:?}"
+    );
+
+    // The two the doorkeeper added are the ones worth naming here, because
+    // folding them into each other — or into `CredentialRejected`, which is
+    // where they landed before ADR 0030 — is the specific mistake this makes
+    // impossible. They ask opposite things of whoever reads them.
+    for (reason, needle) in [
+        ("AdmissionPending", "AINDA NÃO DECIDIU"),
+        ("AdmissionDenied", "RECUSOU"),
+    ] {
+        assert!(
+            motivos.contains(&format!("{reason}:")),
+            "`{reason}` has no sentence, so somebody who only had to wait is \
+             sent away"
+        );
+        let Some(frase) = motivos.split(&format!("{reason}:")).nth(1) else {
+            unreachable!("just asserted it is there");
+        };
+        let frase: String = frase.chars().take(400).collect();
+        assert!(
+            frase.contains(needle),
+            "the sentence for `{reason}` does not say «{needle}», so it reads \
+             like the other one:\n{frase}"
+        );
+    }
 }

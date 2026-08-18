@@ -38,6 +38,7 @@ pub mod dogma;
 pub mod frame;
 pub mod hospedagem;
 pub mod melchior;
+pub mod portaria;
 pub mod session;
 pub mod taxa;
 pub mod tls;

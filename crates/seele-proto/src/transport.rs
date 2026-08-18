@@ -121,8 +121,38 @@ mod tests {
 /// warning are exactly the users TOFU cannot protect.
 #[must_use]
 pub fn certificate_fingerprint(der: &[u8]) -> String {
+    hex_sha256(der)
+}
+
+/// Fingerprint of a person's Ed25519 public key: SHA-256, lowercase hex.
+///
+/// The mirror image of [`certificate_fingerprint`]. That one names the machine
+/// so whoever arrives can pin it (ADR 0003); this one names the *person* so
+/// whoever hosts can decide about them (ADR 0030). Same hash, same shape,
+/// deliberately: the two strings are read by the same eyes, out loud, over the
+/// same phone call, and one of them being formatted differently is one more
+/// thing that can be compared wrongly.
+///
+/// It is not the public key itself for the reason every fingerprint exists:
+/// what a person compares by eye has to be short enough that they finish, and
+/// a digest that differs anywhere differs visibly at the start.
+///
+/// Distinct from [`certificate_fingerprint`] as a function rather than reused,
+/// even though the bytes go through the same digest, because the two answer
+/// different questions and a call site that picks the wrong one would be
+/// reading a machine's identity as a person's.
+#[must_use]
+pub fn key_fingerprint(public_key: &[u8]) -> String {
+    hex_sha256(public_key)
+}
+
+/// SHA-256, lowercase hex, colon-free.
+///
+/// One body under both names above: two hex loops would be two places for the
+/// formatting to drift, and drift here reads as a key that changed.
+fn hex_sha256(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
-    let digest = Sha256::digest(der);
+    let digest = Sha256::digest(bytes);
     let mut out = String::with_capacity(digest.len() * 2);
     for byte in digest {
         use std::fmt::Write;
@@ -167,5 +197,32 @@ mod fingerprint_tests {
     fn an_empty_certificate_still_prints() {
         // A malformed peer must not make the pinning code panic.
         assert_eq!(certificate_fingerprint(&[]).len(), 64);
+    }
+
+    #[test]
+    fn a_person_prints_in_the_same_shape_as_a_machine() {
+        // ADR 0030 puts the two side by side in front of the same person: the
+        // Dogma's fingerprint on the entry screen, the knocker's on the host's
+        // approval card. One of them formatted differently — uppercase, or with
+        // colons — is one more way to compare two strings wrongly.
+        let pessoa = key_fingerprint(&[7_u8; 32]);
+        assert_eq!(pessoa.len(), 64);
+        assert!(pessoa.chars().all(|c| c.is_ascii_hexdigit()));
+        assert!(pessoa.chars().all(|c| !c.is_ascii_uppercase()));
+    }
+
+    #[test]
+    fn two_people_print_differently() {
+        // The property the doorkeeper rests on, and the same one TOFU rests on
+        // above: if two keys could print alike, approving one would admit the
+        // other.
+        assert_ne!(key_fingerprint(&[1_u8; 32]), key_fingerprint(&[2_u8; 32]));
+    }
+
+    #[test]
+    fn an_empty_key_still_prints() {
+        // `key_fingerprint` is called on whatever bytes arrived in the `Hello`,
+        // and a peer that sends none must not make the doorkeeper panic.
+        assert_eq!(key_fingerprint(&[]).len(), 64);
     }
 }

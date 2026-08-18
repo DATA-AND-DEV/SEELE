@@ -924,3 +924,69 @@ quem baixou o quê, e julgar exige ler.
 
 **Quando dói.** Não dói em uso; dói em pedido. É a diferença entre um produto que
 as pessoas usam e um que elas fazem seu.
+
+## 23 · A portaria decide, e ninguém avisa quem hospeda que há alguém batendo
+
+**O que existe.** A portaria do **ADR 0030** está construída inteira: a camada no
+servidor (`crates/seele-server/src/portaria.rs`, migração 4), as duas razões de
+protocolo, os sete comandos e a tela (`apps/seele-app/ui/camada-portaria.js`).
+Quem hospeda pelo botão HOSPEDAR AQUI fecha o Dogma, gera convite e decide quem
+entra sem abrir terminal, que era o buraco relatado.
+
+**O que falta, em ordem de quanto atrapalha.**
+
+**1 · O toque no ombro.** Um pedido pendente é uma linha em SQLite e sobrevive à
+janela minimizada, ao app fechado e à máquina reiniciada — nada se perde por
+ninguém olhar. Mas nada *chama*. Enquanto a janela está aberta, o botão da porta
+conta os pendentes a cada cinco segundos; com a janela minimizada, quem bateu
+espera até quem hospeda lembrar de olhar. O conserto é uma notificação do
+sistema, e ela é do `tauri-plugin-notification` — que **não está nas
+dependências**, e o `Cargo.toml` do app é território de outro trabalho agora.
+Vale antes de o produto ser usado por quem hospeda o dia inteiro com a janela
+fechada.
+
+**2 · Quem espera tenta de novo à mão.** O desenho recusa segurar a conexão de
+propósito — um prazo fabricaria a resposta «ninguém atendeu», que quem a recebe
+não sabe o que fazer com ela — e por isso `AdmissionPending` derruba na hora,
+com a frase mandando tentar depois. O que não existe é o cliente **oferecendo**
+tentar de novo: hoje a pessoa reabre a entrada e aperta de novo. Um botão TENTAR
+DE NOVO na tela de fim, com o endereço já preenchido, é barato e não muda o
+protocolo. Repetição automática foi recusada em `seele-tui/src/text.rs`
+(`worth_retrying`) e continua recusada: seria uma bateria batendo na porta de
+outra pessoa por tempo indeterminado.
+
+**3 · Pedido não vence, e a tabela não é varrida.** `portaria` guarda uma linha
+por impressão digital, para sempre, inclusive de quem nunca entrou e nunca vai
+entrar. Num Dogma exposto à internet, com portaria ligada, isso é uma linha por
+chave que bater — contida pelo balde por endereço do ADR 0025, que responde antes
+de o `Hello` ser lido, mas contida não é limitada. `convites` tem prazo e uma
+varredura; `portaria` não tem nenhum dos dois, e não há tela que apague em lote.
+
+**4 · Não administra o Dogma de outra pessoa.** Os sete comandos falam direto com
+o CASPER da máquina que hospeda, e isso é decisão do ADR 0030, não descuido: a
+alternativa era expor à internet a decisão sobre quem entra pela internet. O
+efeito é que um Comandante remoto continua sem fechar a porta da casa alheia —
+que é onde o ADR 0021 já tinha deixado a administração de verdade, na
+alternativa 3, e continua lá.
+
+**O que este trabalho encostou e não consertou.** `Melchior::unban` existe
+(`crates/seele-server/src/melchior.rs:541`) e **não tem verbo de protocolo**: um
+banimento só se desfaz por quem tem o arquivo do Dogma, à mão, e é isso que a
+frase de confirmação do banimento diz. A portaria **não piora** aquilo, porque
+não acrescenta verbo nenhum, e mostra a forma da saída: uma decisão que se desfaz
+é uma linha que se apaga, e `unban` já é literalmente `DELETE FROM bans`. Falta a
+ele só o caminho até a janela — e o caminho é o mesmo que estes sete comandos
+percorreram.
+
+**Uma coisa que mudou dentro do ADR 0021, e que vale saber.** O convite passou a
+ser gasto por quem **entra**, e não por quem **bate**
+(`admissao::Passe`/`gastar`). Era defeito antigo — um handshake que morresse
+depois daquela camada queimava o convite de alguém que nunca entrou — e a
+portaria o tornaria constante, porque uma batida pendente é o caminho projetado.
+A corrida entre dois clientes com o mesmo convite continua sendo perdida no mesmo
+`UPDATE ... WHERE usado_em IS NULL`.
+
+**Quando dói.** O item 1 dói no primeiro uso real entre duas casas: quem bate
+espera sem que ninguém saiba que ele bateu. Os itens 3 e 4 não doem em nada que
+exista hoje.
+
