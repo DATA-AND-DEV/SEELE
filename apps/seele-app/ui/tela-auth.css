@@ -103,6 +103,71 @@
   border-color: var(--seele-padrao-azul);
 }
 
+/* ---- a espera pela portaria (ADR 0030) ----
+
+   Um atributo na `<section>` e não sete `hidden` escritos por script: o que
+   muda entre os dois trabalhos desta tela são três painéis de uma vez, e um
+   estado que se lê no DOM é um estado que não sai do lugar sozinho.
+
+   Em `espera` não há sessão nenhuma. A cartela de padrão descreve
+   `Snapshot.pattern` e não há snapshot; a ficha do Dogma descreve um Dogma em
+   que ninguém entrou. As duas somem em vez de aparecerem vazias — que é
+   exatamente o que esta tela acabou de deixar de fazer com os quatro campos que
+   o protocolo não carrega.
+
+   Sobram duas colunas: o que aconteceu e o que fazer, à esquerda, e o registro
+   das tentativas, à direita. */
+
+.tela[data-modo="espera"] .auth-grade {
+  grid-template-columns: minmax(300px, 460px) minmax(220px, 1fr);
+}
+
+.tela[data-modo="espera"] .cartela-padrao,
+.tela[data-modo="espera"] .auth-nota,
+.tela[data-modo="espera"] .auth-dogma { display: none; }
+
+.tela[data-modo="aperto"] .auth-espera,
+.tela[data-modo="aperto"] .auth-voltar { display: none; }
+
+.auth-espera { display: flex; flex-direction: column; gap: 16px; }
+
+/* A razão que o Dogma mandou, virada frase em `frases.js`. Duas linhas — o que
+   houve e o que fazer —, e `pre-line` é o que as mantém separadas sem inventar
+   dois elementos, como na banda da portaria. */
+.auth-espera-frase {
+  margin: 0;
+  padding: 12px;
+  border-left: 2px solid var(--seele-laranja-nerv);
+  background: var(--seele-negro-painel);
+  font-size: var(--seele-t-dado);
+  line-height: 1.6;
+  white-space: pre-line;
+}
+
+.auth-espera-fatos {
+  margin: 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--seele-osso-apagado);
+}
+
+/* A parede: quem hospeda decidiu que não, e o botão fica desabilitado com o
+   motivo escrito embaixo. Laranja e não vermelho — uma recusa de porta não é
+   alerta nem queda, e `tokens.css` reserva o vermelho às duas. */
+.auth-parede {
+  margin: -16px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--seele-laranja-nerv);
+  white-space: pre-line;
+}
+
+.auth-voltar { align-self: flex-start; }
+
 /* ---- B·02, o aperto de mão ---- */
 
 .auth-aperto {

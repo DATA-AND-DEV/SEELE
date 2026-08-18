@@ -189,8 +189,14 @@ async function conectar(evento) {
     entrarNaAutenticacao(snapshot, veredito, $("campo-servidor").value.trim());
   } catch (falha) {
     subsistemas("", "·");
-    erro.hidden = false;
-    erro.textContent = fraseDeErro(falha);
+    // Uma batida que ficou pendente na portaria tem tela própria (ADR 0030), e
+    // uma falha que chega enquanto essa tela está na frente pertence a ela:
+    // `#boot-erro` estaria escondido atrás. `levarParaAEspera` responde se
+    // tratou a falha, e só o que sobra vira a linha vermelha daqui.
+    if (!levarParaAEspera(falha, $("campo-servidor").value.trim())) {
+      erro.hidden = false;
+      erro.textContent = fraseDeErro(falha);
+    }
   } finally {
     botao.disabled = false;
   }

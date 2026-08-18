@@ -217,6 +217,12 @@ function desenharFila(pedidos) {
   $("portaria-fila-vazia").hidden = esperando.length > 0;
   $("portaria-decididos-vazio").hidden = decididos.length > 0;
 
+  // Ver a fila já é ter sido avisado. Sem isto a faixa voltaria no instante em
+  // que esta camada fechasse, sobre exatamente a gente que acabou de ser lida —
+  // e um aviso que reaparece sozinho depois de atendido é o que ensina a
+  // dispensá-lo sem ler.
+  calarBatidas(esperando.length);
+
   repovoar(
     $("portaria-fila"),
     esperando.map((pedido) =>
@@ -392,7 +398,12 @@ function fecharPortaria() {
   if (focavel(focoAntesDaPortaria)) {
     focoAntesDaPortaria.focus();
   } else {
-    $("portaria-abrir").focus();
+    // `devolverFocoDaFaixa` e não `$("portaria-abrir").focus()` direto: a camada
+    // passou a ser aberta também pela faixa de quem está batendo, que aparece
+    // sobre qualquer tela — e quem hospeda de dentro de uma jaula tem o botão da
+    // porta escondido junto com a sessão. `focus()` nele não faria nada e não
+    // reportaria nada, que é o defeito original de volta.
+    devolverFocoDaFaixa();
   }
   focoAntesDaPortaria = null;
 }
@@ -420,10 +431,106 @@ function fecharPortaria() {
  */
 async function atualizarPorta() {
   try {
-    $("portaria-abrir").textContent = rotuloDaPorta(await invoke("estado_da_porta"));
+    const estado = await invoke("estado_da_porta");
+    $("portaria-abrir").textContent = rotuloDaPorta(estado);
+    avisarQueBatem(estado.hospedando ? estado.pendentes : 0);
   } catch (falha) {
     console.warn("estado_da_porta:", falha);
   }
+}
+
+// -------------------------------------------------- a faixa de quem está batendo
+//
+// A pendência 23, item 1, na metade que não precisa de dependência nova: o
+// pedido durava e nada *chamava*. O chip acima já contava — e ele mora dentro
+// de `#tela-sessao`, então some inteiro quando quem hospeda entra numa jaula ou
+// abre o Terminal Dogma, que é justo a hora em que ninguém está olhando para
+// ele. A faixa fica fora das telas e sobrevive a todas.
+//
+// O que ela **não** faz está escrito ao lado da marcação e vale repetir aqui,
+// porque é a parte que um conserto distraído desfaz: ela nunca chama `focus()`.
+// Quem hospeda pode estar falando numa jaula, e o push-to-talk depende de o
+// foco não estar num campo de texto. Um aviso que interrompe uma conversa é
+// pior que o silêncio que havia antes dele.
+
+/**
+ * Acima de quantos pendentes a faixa volta a aparecer.
+ *
+ * Zero quando ninguém está esperando. Sobe para o tamanho da fila quando quem
+ * hospeda a lê ou aperta DEPOIS — e é isso que faz DEPOIS calar **estas**
+ * batidas sem calar a próxima, que é a única promessa que um aviso dispensável
+ * pode fazer.
+ */
+let batidasCaladas = 0;
+
+/** O último número lido, que é o que DEPOIS precisa saber para calar. */
+let batidasAgora = 0;
+
+/**
+ * Mostra, esconde e — uma vez por aparição — diz em voz alta que há gente
+ * esperando.
+ *
+ * A frase é dita por `anunciar`, a região viva que a janela já tem, e não por
+ * um `aria-live` nesta faixa: duas regiões vivas com a mesma frase são a mesma
+ * frase lida duas vezes. Ela sai **uma vez por aparição**, e não a cada leitura
+ * de cinco segundos — repetir a mesma notícia doze vezes por minuto é como se
+ * ensina alguém a não ouvir a décima terceira.
+ */
+function avisarQueBatem(pendentes) {
+  batidasAgora = pendentes;
+  const faixa = $("portaria-batendo");
+
+  if (pendentes === 0) {
+    // Fila vazia zera a memória: quem bater depois disto é batida nova, e não a
+    // continuação de uma que já foi dispensada.
+    batidasCaladas = 0;
+    faixa.hidden = true;
+    return;
+  }
+
+  const frase =
+    pendentes === 1
+      ? "ALGUÉM ESTÁ BATENDO À PORTA DESTE DOGMA"
+      : `${pendentes} PESSOAS ESTÃO BATENDO À PORTA DESTE DOGMA`;
+  $("portaria-batendo-texto").textContent = frase;
+
+  const mostrar = pendentes > batidasCaladas;
+  // Antes de escrever o `hidden`, porque a pergunta é se ela **estava**
+  // escondida: é a transição que merece uma frase, não o estado.
+  if (mostrar && faixa.hidden) {
+    anunciar(`${frase}. Abra a porta do Dogma para decidir.`);
+  }
+  faixa.hidden = !mostrar;
+}
+
+/** Cala a faixa para uma fila deste tamanho. */
+function calarBatidas(pendentes) {
+  batidasCaladas = pendentes;
+  batidasAgora = pendentes;
+  $("portaria-batendo").hidden = true;
+}
+
+/**
+ * Para onde o teclado vai quando a faixa se fecha debaixo dele.
+ *
+ * A faixa nunca toma o foco — mas quem aperta DEPOIS está com o foco dentro
+ * dela, e esconder o ancestral do elemento focado devolve o foco ao `<body>`.
+ * É o mesmo defeito que `abrirTela` existe para consertar, entrando pela porta
+ * dos fundos.
+ *
+ * O botão da porta primeiro, que é o que continua sendo sobre este assunto; e,
+ * quando ele não está na frente — quem hospeda numa jaula não vê aquela linha
+ * —, a tela que estiver aberta, que carrega `tabindex="-1"` justamente para
+ * poder receber o foco nesse caso.
+ */
+function devolverFocoDaFaixa() {
+  const abrir = $("portaria-abrir");
+  if (focavel(abrir)) {
+    abrir.focus();
+    return;
+  }
+  const tela = document.querySelector(".tela:not([hidden])");
+  if (tela) tela.focus();
 }
 
 const PORTA_A_CADA_MS = 5000;
@@ -433,6 +540,18 @@ setInterval(() => {
 
 $("portaria-abrir").addEventListener("click", () => {
   abrirPortaria().catch((falha) => console.warn("portaria:", falha));
+});
+
+// Um clique da faixa até a decisão. `abrirPortaria` leva o teclado para dentro
+// da camada, e `fecharPortaria` o devolve — inclusive quando o botão que o
+// mandou já não está no documento, que é o caso desta faixa.
+$("portaria-batendo-ver").addEventListener("click", () => {
+  abrirPortaria().catch((falha) => console.warn("portaria:", falha));
+});
+
+$("portaria-batendo-depois").addEventListener("click", () => {
+  calarBatidas(batidasAgora);
+  devolverFocoDaFaixa();
 });
 
 $("portaria-fechar").addEventListener("click", fecharPortaria);

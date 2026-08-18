@@ -73,6 +73,53 @@
 <p id="anuncio" class="anuncio" role="status" aria-atomic="true"></p>
 
 <!--
+  Alguém está batendo — ADR 0030, e a metade dele que faltava.
+
+  A portaria decidia e nada avisava quem hospeda. No primeiro teste entre duas
+  casas o amigo bateu, leu a frase certa e ficou esperando, enquanto quem
+  hospeda olhava uma tela onde nada indicava nada — dos dois lados o produto
+  parecia não funcionar.
+
+  ---- por que fora das telas ----
+
+  O chip PORTA conta os pendentes desde o começo, e ele mora dentro de
+  `#tela-sessao`. Entrar numa jaula ou abrir o Terminal Dogma esconde aquela
+  `<section>` inteira, e o número vai junto: o único lugar onde a batida
+  aparecia some justamente quando quem hospeda está ocupado com outra coisa.
+  Esta faixa pertence à janela, como `#anuncio` e como a varredura, e por isso
+  sobrevive a toda troca de tela.
+
+  ---- o quanto ela interrompe ----
+
+  O mínimo que ainda é ver. Não é `role="alert"`, não é modal, não recebe foco
+  e não desabilita nada: quem hospeda pode estar falando numa jaula, e roubar o
+  foco no meio de uma frase é pior que o silêncio de antes. Quem fala por ela é
+  a região viva que já existe — `#anuncio`, `role="status"` —, uma vez por
+  aparição; duas regiões vivas com a mesma frase são a mesma frase dita duas
+  vezes.
+
+  O ADR 0026 decidiu que procurar atualização nunca acontece sozinha, porque
+  este produto não age sem alguém pedir. Isto não age: nada é decidido, nada sai
+  desta máquina, e o único botão abre uma tela. É o que torna um aviso
+  admissível onde um ato não seria, e é também o motivo de ele parar no aviso.
+
+  DEPOIS cala **estas** batidas, e não as próximas: a faixa volta quando o
+  número sobe. Um aviso que não se pode dispensar é um aviso que se aprende a
+  ignorar, e a promessa forte continua sendo do servidor — o pedido é uma linha
+  em SQLite e não vence.
+
+  Sem vermelho. `tokens.css` o reserva a alerta e queda, e alguém batendo à
+  porta não é nem uma nem outra: é a coisa mais comum que acontece num Dogma
+  fechado.
+-->
+<div id="portaria-batendo" class="portaria-batendo" hidden>
+  <span class="portaria-batendo-marca" data-glifo="chave"></span>
+  <p id="portaria-batendo-texto" class="portaria-batendo-texto"></p>
+  <button id="portaria-batendo-ver" class="botao-fantasma" type="button">VER QUEM É</button>
+  <button id="portaria-batendo-depois" class="botao-fantasma" type="button">DEPOIS</button>
+</div>
+
+<!--
   A composição é a mesma do `plug` de propósito. `specs/06-clientes-gui.md`:
   "Alguém que usa a TUI deve abrir o app e saber onde tudo está sem procurar."
   Mesmo cabeçalho, mesmos três painéis na mesma ordem, mesma barra permanente
@@ -1443,7 +1490,21 @@
   INSERIR PLUG é o que leva à sessão. Ninguém entra num Cage sem que a
   impressão digital do Dogma tenha passado por uma tela.
 -->
+<!--
+  `data-modo` é o que separa os dois trabalhos desta tela, e ele vale para a
+  `<section>` inteira porque muda três painéis de uma vez.
+
+  `aperto` — o caminho de sempre: o `connect` deu certo, e o veredito da chave é
+  lido antes de o plug entrar em Cage nenhum.
+
+  `espera` — o `connect` foi derrubado por `AdmissionPending`. Não há snapshot,
+  não há veredito e não há sessão: a cartela de padrão, a ficha do Dogma e o
+  botão de dois passos não têm o que dizer, e a folha os esconde em vez de
+  desenhá-los vazios. O que aparece no lugar é o que aconteceu, o que fazer, e
+  o que não adianta fazer.
+-->
 <section id="tela-auth" class="tela" tabindex="-1" hidden
+         data-modo="aperto"
          data-foco="auth-botao"
          data-anuncio="Aperto de mão. Verifique a identidade deste Dogma.">
   <div class="auth-grade">
@@ -1476,19 +1537,61 @@
           <output id="auth-endereco" class="auth-valor auth-valor-marcado">——</output>
         </div>
 
-        <div class="campo campo-auth">
-          <span class="rotulo">CHAVE DE IDENTIDADE · MELCHIOR</span>
-          <!--
-            A nossa chave não atravessa a FFI. `Trust` carrega a impressão
-            digital **do servidor**, e a identidade local fica em disco, sem
-            comando que a leia (§16: comando novo). O campo fica, vazio e
-            dizendo que está.
-          -->
-          <output id="auth-chave" class="auth-valor ausente">——</output>
+        <!--
+          A espera pela portaria — ADR 0030, e o trabalho novo desta tela.
+
+          Só aparece em `data-modo="espera"`, e aí ela é a tela: quem bateu num
+          Dogma com portaria é **derrubado no mesmo instante**, de propósito, e
+          antes disto o que ele via era uma linha de erro na tela de entrada.
+
+          As três coisas que quem espera precisa saber, e nesta ordem: o que
+          aconteceu — escrito pelo script, a partir da razão que o Dogma mandou,
+          porque enum vira frase num lugar só (`frases.js`) —, o que fazer
+          agora, e o que não adianta fazer.
+
+          A lista abaixo é prosa desta tela e não sai de enum nenhum: são as
+          consequências do desenho do ADR 0030 ditas para quem está do lado de
+          fora dele. A terceira é a que evita o pior conserto possível — uma
+          tela que tenta de novo sozinha transforma «nada espera» em espera com
+          outro nome, e ainda bate na porta de outra pessoa sem parar, contra os
+          baldes de fichas do ADR 0025.
+        -->
+        <div id="auth-espera" class="auth-espera">
+          <p id="auth-espera-frase" class="auth-espera-frase"></p>
+          <ul class="auth-espera-fatos">
+            <li>
+              O pedido não vence, e não se perde. Feche o SEELE e volte amanhã:
+              ele continua guardado no Dogma, com a sua impressão digital.
+            </li>
+            <li>
+              Não há nada esperando desta ponta. A conexão caiu no mesmo instante
+              em que o pedido ficou de pé, então ninguém vai te puxar de volta
+              quando a decisão sair — nem esta tela, nem o app fechado.
+            </li>
+            <li>
+              Tentar de novo é como você descobre que foi admitido, e é uma
+              tentativa por vez. Bater sem parar é o que o Dogma conta e freia,
+              e aí você fica de fora por tempo, por ter insistido.
+            </li>
+            <li>
+              Se quem hospeda estiver por perto, avisar por outro canal é mais
+              rápido do que qualquer botão desta tela.
+            </li>
+          </ul>
         </div>
 
         <button id="auth-botao" class="botao botao-auth" type="button">VERIFICAR IDENTIDADE</button>
-        <p class="legenda-ausente">—— valor que este protocolo não carrega</p>
+        <p id="auth-parede" class="auth-parede" hidden></p>
+
+        <!--
+          A saída para a entrada, e só em espera. No aperto de mão ela não existe
+          porque não há para onde voltar: a sessão está aberta e o caminho de
+          volta é encerrá-la. Aqui não há sessão nenhuma — quem espera precisa
+          poder trocar de Dogma, de apelido, ou simplesmente sair.
+        -->
+        <button id="auth-voltar" class="botao-fantasma auth-voltar" type="button">
+          VOLTAR À ENTRADA
+        </button>
       </div>
     </div>
 
@@ -1514,18 +1617,25 @@
           <p id="auth-dogma-nome" class="auth-dogma-nome">——</p>
           <p class="auth-dogma-sub">DOGMA CENTRAL</p>
         </div>
+        <!--
+          Duas linhas, e não sete.
+
+          O que saiu daqui e do painel ao lado: OPERADORES e ROTA, que o comp v2
+          preenche e o protocolo não tem — não existe população total do Dogma, e
+          "rota" não é conceito em lugar nenhum do core; CODEC, que só ganha
+          valor depois de o plug entrar num Cage, e nesta tela ninguém entrou
+          ainda; e a CHAVE DE IDENTIDADE local, que não atravessa a FFI.
+
+          A convenção anterior era manter a moldura e escrever a falta, para a
+          lacuna ficar visível. Ela vale para uma lacuna que se pretende fechar;
+          estas quatro não se fechavam, e quatro travessões de sete campos não
+          ensinam nada a ninguém — deixam uma tela que parece quebrada. A lacuna
+          está registrada onde lacuna se registra, que é aqui e no cabeçalho de
+          `tela-auth.js`, e não em quatro caixas vazias na frente de quem entra.
+        -->
         <dl class="auth-pares">
           <div class="auth-par"><dt class="rotulo">CAGES</dt><dd id="auth-cages">——</dd></div>
           <div class="auth-par"><dt class="rotulo">LINHAS</dt><dd id="auth-linhas">——</dd></div>
-          <div class="auth-par"><dt class="rotulo">CODEC</dt><dd id="auth-codec">——</dd></div>
-          <!--
-            Duas linhas que o comp preenche e o protocolo não tem: não existe
-            população total do Dogma, e "rota" não é um conceito em lugar
-            nenhum do core (§16, as duas exigem mudança de protocolo). Ficam
-            desenhadas e vazias, porque apagá-las esconderia a lacuna.
-          -->
-          <div class="auth-par"><dt class="rotulo">OPERADORES</dt><dd class="ausente">——</dd></div>
-          <div class="auth-par"><dt class="rotulo">ROTA</dt><dd class="ausente">——</dd></div>
         </dl>
       </div>
     </div>
