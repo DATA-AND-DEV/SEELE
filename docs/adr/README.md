@@ -35,6 +35,7 @@ Formato e regra de criação em `specs/10-convencoes.md`: toda decisão marcada
 | [0027](0027-anexos-com-teto-e-o-mais-velho-sai.md) | Anexos com teto total, e o mais velho sai | aceito | `02` — política de anexos (D14) |
 | [0028](0028-a-reserva-do-anel-de-reproducao.md) | A reserva do anel de reprodução, e o que ela custa de latência | aceito | — (pendência 2, e revisão do `0009`) |
 | [0029](0029-mods-declaram-valores-e-o-produto-mede.md) | MODs: declaram valores, e o produto mede antes de aplicar | **proposto** | — (pedido do dono; desfaz metade do não-objetivo de `00`) |
+| [0030](0030-quem-bate-a-porta.md) | Quem bate à porta: TOFU aplicado a gente, e a portaria de quem hospeda | **proposto** | — (pedido do dono; estende o `0021`) |
 
 ## O que ainda não tem ADR
 
