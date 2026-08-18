@@ -1405,4 +1405,101 @@ impl Transfers {
         quarantine(destination);
         Ok(got)
     }
+
+    /// Fetches an attachment **into memory**, small enough to look at.
+    ///
+    /// The other half of ADR 0027's preview rule: before anything can decide
+    /// whether the bytes agree with the claim, somebody has to have the bytes.
+    ///
+    /// **Nothing is written to disk, at any point.** That is the line between a
+    /// preview and a save, and it is drawn here rather than left to a caller:
+    /// saving is an act of the person who received the file, in a place they
+    /// picked, and a thumbnail that quietly left a copy in a cache directory
+    /// would have made that act happen without anybody asking for it. No
+    /// quarantine mark either, for the same reason — there is no file to mark.
+    ///
+    /// `limit` is checked against the **declared** size in the header, before a
+    /// single byte of the body is read, and the stream is stopped rather than
+    /// drained. It is the same shape as the Dogma's own ceiling check, for the
+    /// same reason: reading twenty megabytes and then deciding not to look at
+    /// them costs the whole download.
+    ///
+    /// # Errors
+    ///
+    /// Fails if nothing arrives inside `wait`, if the stream ends early, or if
+    /// the bytes do not hash to what the Dogma said. A refusal — the expected
+    /// one being `Expired` — arrives separately on the control stream.
+    pub async fn preview_attachment(
+        &self,
+        attachment: seele_proto::ids::AttachmentId,
+        limit: u64,
+        wait: std::time::Duration,
+    ) -> Result<Previewed> {
+        use seele_proto::attachment::{AttachmentDelivery, ContentDigest, BLOCK_LEN};
+
+        let mut stream = tokio::time::timeout(wait, self.connection.accept_uni())
+            .await
+            .map_err(|_| anyhow::anyhow!("o Dogma não mandou o arquivo em {wait:?}"))??;
+
+        let delivery: AttachmentDelivery = frame::read(&mut stream).await?;
+        anyhow::ensure!(
+            delivery.attachment == attachment,
+            "o Dogma mandou o anexo {} no lugar de {attachment}",
+            delivery.attachment
+        );
+
+        if delivery.byte_size > limit {
+            // Stopped, not drained: telling the sender to stop is what keeps a
+            // file nobody is going to look at off this link.
+            let _ = stream.stop(0_u32.into());
+            return Ok(Previewed::TooBig {
+                byte_size: delivery.byte_size,
+            });
+        }
+
+        let capacity = usize::try_from(delivery.byte_size).unwrap_or(0);
+        let mut bytes = Vec::with_capacity(capacity);
+        let mut digest = ContentDigest::new();
+        let mut block = vec![0_u8; BLOCK_LEN];
+        while let Some(read) = stream.read(&mut block).await? {
+            if read == 0 {
+                break;
+            }
+            let piece = block.get(..read).unwrap_or_default();
+            bytes.extend_from_slice(piece);
+            digest.feed(piece);
+            // A header that declared one size and a body that keeps coming is
+            // the one way the limit above could be walked past. It cannot.
+            anyhow::ensure!(
+                u64::try_from(bytes.len()).unwrap_or(u64::MAX) <= limit,
+                "o Dogma mandou mais bytes do que declarou"
+            );
+        }
+
+        // The same question as on the way down to disk, and it is asked here
+        // too: half a picture decodes into something, and something is worse
+        // than nothing.
+        anyhow::ensure!(
+            digest.finish() == delivery.content_hash
+                && u64::try_from(bytes.len()).unwrap_or(u64::MAX) == delivery.byte_size,
+            "o arquivo não chegou inteiro e foi descartado"
+        );
+        Ok(Previewed::Whole(bytes))
+    }
+}
+
+/// What came back from a preview fetch.
+///
+/// [`Previewed::TooBig`] is not an error and is enumerated for it: nothing went
+/// wrong, the file is simply larger than a window will decode, and whoever is
+/// looking deserves a different sentence from the one a broken transfer gets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Previewed {
+    /// The bytes, whole, hashed, and in memory only.
+    Whole(Vec<u8>),
+    /// Over the limit. Nothing was read, and the stream was stopped.
+    TooBig {
+        /// What the Dogma said it would have sent.
+        byte_size: u64,
+    },
 }

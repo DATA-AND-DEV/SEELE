@@ -32,6 +32,7 @@ pub mod enlace;
 pub mod frame;
 pub mod identity;
 pub mod preferences;
+pub mod preview;
 pub mod search;
 pub mod state;
 pub mod tofu;
@@ -39,11 +40,12 @@ pub mod voice;
 
 pub use battery::{Battery, Link};
 pub use client::{
-    AttachmentRequest, Client, ConnectError, FlowControl, MediaChannel, Pattern, Sent, SessionInfo,
-    Transfers,
+    AttachmentRequest, Client, ConnectError, FlowControl, MediaChannel, Pattern, Previewed, Sent,
+    SessionInfo, Transfers,
 };
 pub use ed25519_dalek::SigningKey;
 pub use identity::FilePinStore;
+pub use preview::{ImageFormat, Verdict as PreviewVerdict, PREVIEW_LIMIT};
 pub use state::{CageSync, Changed, Ended, Message, Notice, Pilot, Room, TransferNotice};
 pub use tofu::{MemoryPinStore, PinDecision, PinStore, Verdict};
 pub use voice::{

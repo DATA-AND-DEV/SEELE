@@ -194,6 +194,17 @@ enum Comando {
         anexo: AttachmentId,
         destino: std::path::PathBuf,
     },
+    /// Baixar um anexo pequeno **para a memória**, para olhar os bytes dele.
+    ///
+    /// O segundo comando deste enum que carrega para onde responder, e pelo
+    /// mesmo motivo do `PesarLinha`: a resposta só serve a quem perguntou,
+    /// enquanto a caixa que ela enche estiver aberta. Um `Aviso` levaria
+    /// megabytes pelo barramento de eventos, que existe para presença e
+    /// andamento.
+    PreverAnexo {
+        anexo: AttachmentId,
+        resposta: tokio::sync::oneshot::Sender<Previa>,
+    },
     Sair,
 }
 
@@ -225,6 +236,29 @@ pub struct Anexo {
     pub nome: String,
     /// Que tipo alegar que ele é. Alegação, e tratada como tal.
     pub tipo: String,
+}
+
+/// O que voltou de um pedido de prévia. ADR 0027.
+///
+/// **Nada disto encosta no disco.** É a linha entre prever e salvar: salvar é
+/// um ato de quem recebeu, num lugar que a pessoa escolheu, e uma miniatura que
+/// deixasse uma cópia num diretório de cache teria feito esse ato acontecer sem
+/// ninguém pedir.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Previa {
+    /// Os bytes, inteiros e conferidos contra o hash, só na memória.
+    Bytes(Vec<u8>),
+    /// Maior do que esta janela desenha. Nenhum byte foi lido.
+    ///
+    /// Enumerado e não erro: nada deu errado, e quem está olhando merece uma
+    /// frase diferente da que uma transferência quebrada recebe.
+    GrandeDemais {
+        /// O que o Dogma teria mandado.
+        tamanho: u64,
+    },
+    /// Não veio: expirou, não existe, ou não chegou inteiro. A razão, quando é
+    /// do Dogma, chega pelo controle como `ServerMessage::AttachmentUnavailable`.
+    NaoVeio,
 }
 
 /// Onde uma transferência está.
@@ -946,6 +980,32 @@ impl Enlace {
         self.mandar(Comando::SalvarAnexo { anexo, destino }).await
     }
 
+    /// Pede os bytes de um anexo **para a memória**, para olhar o começo deles.
+    ///
+    /// Devolve a caixa em que a resposta vai cair, e devolve **na hora**: quem
+    /// chama decide onde esperar. Esperar aqui dentro faria a fila de comandos
+    /// desta sessão parar pelo tempo de um download — ninguém conseguiria dizer
+    /// uma frase enquanto uma prévia baixa, que é exatamente o bloqueio de
+    /// cabeça de fila que o fluxo próprio de cada anexo existe para evitar.
+    ///
+    /// Um anexo maior que [`seele_core::preview::PREVIEW_LIMIT`] volta como
+    /// [`Previa::GrandeDemais`] sem que um byte do corpo seja lido.
+    ///
+    /// [`seele_core::preview::PREVIEW_LIMIT`]: crate::preview::PREVIEW_LIMIT
+    ///
+    /// # Errors
+    ///
+    /// [`Fechado`] quando a sessão já acabou.
+    pub async fn prever_anexo(
+        &self,
+        anexo: AttachmentId,
+    ) -> Result<tokio::sync::oneshot::Receiver<Previa>, Fechado> {
+        let (resposta, caixa) = tokio::sync::oneshot::channel();
+        self.mandar(Comando::PreverAnexo { anexo, resposta })
+            .await?;
+        Ok(caixa)
+    }
+
     /// Encerra por vontade própria.
     pub async fn sair(&self) {
         let _ = self.mandar(Comando::Sair).await;
@@ -1288,6 +1348,28 @@ impl Motor {
                         Err(_) => Transferencia::NaoSalvou { anexo },
                     };
                     let _ = avisos.send(Aviso::Transferencia(fim));
+                });
+                pedido
+            }
+
+            // A mesma forma do `SalvarAnexo`, com duas diferenças que são a
+            // decisão inteira: os bytes param na memória, e o teto que os
+            // limita é o desta janela — não o do disco de quem hospeda.
+            Comando::PreverAnexo { anexo, resposta } => {
+                let transferencias = cliente.transfers();
+                let pedido = cliente.fetch_attachment(anexo).await;
+                tokio::spawn(async move {
+                    let fim = match transferencias
+                        .preview_attachment(anexo, crate::preview::PREVIEW_LIMIT, ESPERA_DE_ANEXO)
+                        .await
+                    {
+                        Ok(crate::client::Previewed::Whole(bytes)) => Previa::Bytes(bytes),
+                        Ok(crate::client::Previewed::TooBig { byte_size }) => {
+                            Previa::GrandeDemais { tamanho: byte_size }
+                        }
+                        Err(_) => Previa::NaoVeio,
+                    };
+                    let _ = resposta.send(fim);
                 });
                 pedido
             }
