@@ -3073,3 +3073,98 @@ mod aviso_de_mensagens {
         );
     }
 }
+
+#[cfg(test)]
+mod previa {
+    //! What a window is handed for one attachment. ADR 0027.
+    //!
+    //! This is the last place the bytes and the claim are both in scope, so it
+    //! is the last place the wrong one could be picked. The window past this
+    //! point gets a string and no choice.
+
+    use super::*;
+
+    const PNG: &[u8] = &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13];
+    const JPEG: &[u8] = &[0xFF, 0xD8, 0xFF, 0xE0, 0, 16, b'J', b'F', b'I', b'F', 0, 1];
+
+    #[test]
+    fn bytes_that_agree_with_the_claim_come_back_as_a_picture() {
+        // The claim is **shouted**, and the URI comes out lower case. A media
+        // type is case-insensitive, so this file agrees with itself and is
+        // drawn — and the spelling of the string a window receives is proof of
+        // which side of the agreement wrote it. With `image/png` on both sides
+        // the two are indistinguishable, and a URI spliced together from the
+        // claim would pass unnoticed.
+        let previa = preview_of(
+            7,
+            "IMAGE/PNG",
+            Some(seele_core::enlace::Previa::Bytes(PNG.to_vec())),
+        );
+        assert_eq!(previa.attachment, 7);
+        assert_eq!(previa.refusal, None);
+        assert_eq!(previa.found.as_deref(), Some("image/png"));
+        assert_eq!(
+            previa.image.as_deref(),
+            Some("data:image/png;base64,iVBORw0KGgoAAAAN"),
+            "the URI a window draws from was not written from the bytes"
+        );
+    }
+
+    #[test]
+    fn bytes_that_disagree_with_the_claim_come_back_with_no_picture_at_all() {
+        // The one that matters. A JPEG that called itself a PNG is refused, and
+        // the refusal carries both halves so a sentence can name them — but
+        // `image` is `None`, which is what a window acts on.
+        let previa = preview_of(
+            7,
+            "image/png",
+            Some(seele_core::enlace::Previa::Bytes(JPEG.to_vec())),
+        );
+        assert_eq!(previa.image, None, "a lying file was drawn anyway");
+        assert_eq!(previa.refusal, Some(PreviewRefusal::Disagrees));
+        assert_eq!(previa.claimed, "image/png");
+        assert_eq!(previa.found.as_deref(), Some("image/jpeg"));
+    }
+
+    #[test]
+    fn a_claim_never_reaches_the_string_a_window_draws_from() {
+        // Whatever the sender wrote, it is quoted into `claimed` and nowhere
+        // else. Here the claim is a whole `data:` URI of somebody's choosing,
+        // and the only thing it produces is a refusal.
+        let mentira = "data:image/png;base64,AAAA";
+        let previa = preview_of(
+            7,
+            mentira,
+            Some(seele_core::enlace::Previa::Bytes(PNG.to_vec())),
+        );
+        assert_eq!(previa.image, None);
+        assert_eq!(previa.refusal, Some(PreviewRefusal::NotAPicture));
+        assert_eq!(previa.claimed, mentira);
+    }
+
+    #[test]
+    fn a_file_over_the_limit_says_so_and_says_what_the_limit_is() {
+        let previa = preview_of(
+            7,
+            "image/png",
+            Some(seele_core::enlace::Previa::GrandeDemais { tamanho: 99 }),
+        );
+        assert_eq!(previa.image, None);
+        assert_eq!(
+            previa.refusal,
+            Some(PreviewRefusal::TooBig {
+                limit: seele_core::PREVIEW_LIMIT
+            }),
+            "«too big» with no number sends somebody nowhere"
+        );
+    }
+
+    #[test]
+    fn a_session_that_ended_mid_fetch_is_not_a_picture_and_not_a_panic() {
+        // The dropped channel. It reads as "the bytes did not come", which is
+        // true, and not as any of the three that say something about the file.
+        let previa = preview_of(7, "image/png", None);
+        assert_eq!(previa.image, None);
+        assert_eq!(previa.refusal, Some(PreviewRefusal::DidNotArrive));
+    }
+}
