@@ -305,8 +305,15 @@ segundo. E ele exige permissões estreitas — com permissão folgada o `sshd`
 ```powershell
 $arquivo = "$env:ProgramData\ssh\administrators_authorized_keys"
 Add-Content $arquivo "cole-aqui-a-linha-do-Mac"
-icacls $arquivo /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F"
+icacls $arquivo /inheritance:r /grant "*S-1-5-32-544:F" /grant "*S-1-5-18:F"
 ```
+
+Os dois identificadores são o grupo de administradores (`S-1-5-32-544`) e o
+SISTEMA (`S-1-5-18`), e eles valem em qualquer Windows do mundo. **Não use os
+nomes** `Administrators` e `SYSTEM`: eles só existem no Windows em inglês, e num
+Windows em português a mesma linha responde «não foi feito mapeamento entre os
+nomes de conta e as identificações de segurança» — que é o erro certo dado de um
+jeito que não parece ter nada a ver com idioma. Foi assim que ele apareceu.
 
 Do Mac, confira antes de qualquer outra coisa:
 
