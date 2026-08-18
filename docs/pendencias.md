@@ -789,3 +789,34 @@ funciona de qualquer lugar. É um erro na direção segura (promete menos do que
 entrega), não mudou nesta rodada, e a classificação de endereços que entrou
 agora deixa o conserto barato: falta só o degrau que lê «este endereço é global e
 está numa placa de rede».
+
+## 21 · O degrau 4 está construído e o ponto de encontro padrão não está no ar
+
+**O que existe.** O furo de NAT do ADR 0022 foi construído em 2026-08-17: o
+serviço (`crates/seele-encontro/`), o lado de quem hospeda
+(`crates/seele-server/src/alcance/encontro.rs`), o lado de quem entra
+(`crates/seele-core/src/encontro.rs`) e o bilhete no `seele://` (`enc=`). Quem
+sobe o próprio ponto de encontro tem o degrau 4 funcionando hoje —
+`docs/ponto-de-encontro.md` são dez linhas de comando numa VPS.
+
+**O que falta.** O endereço padrão, `encontro.seele.app`, é um nome **reservado
+e ainda não publicado**. Enquanto ele não existir, a resolução falha em
+milissegundos, a escada cai para o degrau de baixo, e a frase que a pessoa lê é a
+mesma de antes deste degrau existir — ninguém fica esperando e ninguém recebe uma
+promessa falsa. Mas o «funciona sem mexer em nada» só vale de verdade para quem
+souber apontar o `SEELE_ENCONTRO`.
+
+Publicar o nome é uma tarefa de infraestrutura, não de código: uma VPS pequena, o
+binário, um registro DNS. Vale antes do próximo release que anunciar o degrau 4,
+ou o anúncio promete o que a instalação padrão não entrega.
+
+**O que fica sem saída mesmo com ele no ar.** NAT simétrico dos dois lados. O
+mapeamento muda a cada destino, o endereço que o ponto de encontro viu não é por
+onde o outro lado chegaria, e a resposta a isso seria retransmissão — que o ADR
+0022 põe fora de escopo por decisão. Nesse caso continuam valendo o
+encaminhamento de porta à mão e a VPN de rede, que é o que a frase do degrau 4
+diz.
+
+**O que nenhum teste automático cobre**, e onde está escrito o que fazer: o furo
+em si, que precisa de duas redes atrás de NATs diferentes. O roteiro está na
+seção 7 de `docs/teste-duas-maquinas.md`.
