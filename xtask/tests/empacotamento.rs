@@ -466,8 +466,11 @@ impl Bancada {
             &repo.join("empacotar/macos.sh"),
             r#"#!/bin/sh
 printf 'empacotei macos %s\n' "$1" >> "$SEELE_TESTE_DIARIO"
-[ "${FALSO_MACOS:-0}" = 0 ] || exit "${FALSO_MACOS}"
 raiz=$(dirname "$0")/..
+# O empacotador de verdade grava a versão aqui e a devolve ao sair. Este morre
+# antes de devolver, que é o que acontece quando alguém aperta Ctrl-C.
+[ -z "${FALSO_MACOS_SUJA:-}" ] || echo '{"versao gravada": true}' > "$raiz/apps/seele-app/tauri.conf.json"
+[ "${FALSO_MACOS:-0}" = 0 ] || exit "${FALSO_MACOS}"
 mkdir -p "$raiz/entrega"
 echo dmg > "$raiz/entrega/SEELE_$1_aarch64.dmg"
 "#,
@@ -1117,6 +1120,36 @@ fn com_parcial_o_release_sai_dizendo_quem_faltou() {
     assert!(
         saida.texto.contains("faltam sistemas neste release: macos"),
         "publicar faltando um sistema não pode ser silencioso:\n{}",
+        saida.texto
+    );
+}
+
+#[test]
+fn a_versao_gravada_nao_fica_no_repositorio() {
+    // O empacotador grava a versão no `tauri.conf.json` e a devolve ao sair —
+    // com o `trap` dele. Quando ele morre sem chegar lá, alguém tem de devolver,
+    // ou o número de um release fica gravado no repositório e entra no próximo
+    // commit distraído. Já aconteceu: é a razão de existir o teste
+    // `o_titulo_da_janela_atravessou_inteiro`.
+    let bancada = Bancada::nova();
+    let antes = std::fs::read_to_string(bancada.repo.join("apps/seele-app/tauri.conf.json"))
+        .expect("legível");
+
+    let saida = bancada.rodar(
+        &["1.2.3"],
+        &[("FALSO_MACOS", "1"), ("FALSO_MACOS_SUJA", "1")],
+    );
+
+    let depois = std::fs::read_to_string(bancada.repo.join("apps/seele-app/tauri.conf.json"))
+        .expect("legível");
+    assert_eq!(
+        antes, depois,
+        "o tauri.conf.json ficou com o resto do empacotamento:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("devolvido ao que era"),
+        "desfazer calado é quase tão ruim quanto não desfazer:\n{}",
         saida.texto
     );
 }
