@@ -19,6 +19,10 @@ foram construídas**, e ficam aqui em vez de ficarem por descobrir:
   e a lista de consequências abaixo diz que nenhuma dependência nova entra por
   causa disto.
 
+  **Isto foi revertido em 2026-08-18**, pela primeira pessoa que usou. O
+  seletor existe, custou três crates contados, e a última seção deste
+  documento conta o resto. Escolher continua sendo arrastar **também**.
+
 As quatro coisas de «o que fica sem saída» continuam sem saída, e nenhuma delas
 foi tocada.
 
@@ -429,6 +433,12 @@ pessoa. Está escrito aqui para que ninguém precise descobrir sozinho.
   digital do certificado — e o `quinn` já traz fluxo unidirecional e prioridade.
   O `blake3` seria mais rápido e não entra: o ganho não paga um crate a mais
   numa árvore que o ADR 0026 acabou de contar crate a crate.
+
+  **Esta consequência caiu em 2026-08-18**, e só ela: as três dependências que
+  entraram são do seletor de arquivos, e nenhuma delas toca o caminho dos bytes
+  que o resto desta lista descreve. O `blake3` continua fora pelo mesmo motivo
+  de sempre, que não era o teto de dependências e sim o ganho. A última seção
+  conta o que foi medido e por que a decisão virou.
 - **A versão de protocolo sobe.** Variante nova em `ClientMessage`, em
   `ServerMessage`, em `Permission` e em `AlertReason`, todas no fim da
   enumeração. Um cliente uma versão atrás recusa o quadro em vez de o ler
@@ -480,3 +490,124 @@ já os tem não quebra histórico nenhum, porque o estado de saída já existe. 
 anexo expira de uma vez, e cada mensagem passa a dizer «este arquivo expirou» —
 que é a frase que ela já saberia dizer. O estado de expirado é também a porta de
 saída, e isso não foi acidente.
+
+## O que a primeira pessoa a anexar um arquivo ensinou
+
+Escrito em 2026-08-18, depois do relato de campo: a 0.6.0 instalada num macOS
+de verdade, e duas queixas no mesmo fôlego — *arrastei um arquivo para a
+conversa e não aconteceu nada*, e *cliquei no botão ARQUIVO e não abriu nada*.
+
+Tudo o que este ADR desenhou estava construído: `enviar_anexo`,
+`descrever_arquivo`, `salvar_anexo`, a barra por bytes, as dez recusas com dez
+frases. Nada disso alcança ninguém com as duas portas de entrada fechadas, e
+elas estavam fechadas por dois motivos que não têm nada em comum. Vale separar,
+porque a mesma frase — «não aconteceu nada» — cobria as duas.
+
+### Arrastar não falhou no desenho, falhou na permissão
+
+`listen("tauri://drag-drop", …)` não é chamada de JavaScript. É chamada de IPC
+ao plugin `event`, e na Tauri v2 **todo** comando de plugin passa pelo sistema
+de capacidades antes de alcançar código nenhum
+(`tauri-2.11.5/src/webview/mod.rs`: se o comando é de plugin e a ACL resolvida é
+`None`, o pedido é recusado ali e não vai adiante). Este app não tinha
+`capabilities/` — o `gen/schemas/capabilities.json` gerado ao lado dele era
+`{}` —, então a chamada voltava com «event.listen not allowed», a promessa
+rejeitava para ninguém, e o ouvinte ficava escrito no arquivo sem nunca receber
+nada.
+
+**Todo** `listen(...)` do frontend estava morto pelo mesmo motivo: os dois laços
+de snapshot e o do atualizador junto. Só o arrastar foi notado, e a razão é o
+que torna este defeito instrutivo: os dois laços de snapshot têm um
+`setInterval` de 500 ms ao lado, que redesenha a tela de qualquer jeito. Uma
+rede de segurança escondeu a queda por meses; a única função sem rede foi a
+única a aparecer.
+
+**A suspeita natural estava errada, e fica escrita porque custa uma tarde.** A
+leitura razoável era que os eventos de arrastar da v2 são *da webview* e que um
+`listen()` global nunca os receberia — o nome do evento mudou de
+`tauri://file-drop` para `tauri://drag-drop` entre as versões, o que sugere que
+essa área mexeu. Na 2.11.5 não é assim: o `drag-drop` é emitido com filtro por
+webview, mas o casamento é feito por `match_any_or_filter`
+(`src/event/listener.rs`), e a primeira coisa que essa função faz é aceitar todo
+ouvinte cujo alvo é `EventTarget::Any` — que é exatamente o alvo que o `listen()`
+do JavaScript registra por omissão. O filtro só decide sobre ouvintes que
+pediram um alvo específico. E `dragDropEnabled` não precisava ser declarado:
+`tauri-utils` o inicializa em `true`.
+
+### O botão falhou no desenho, e o desenho era deste ADR
+
+O botão ARQUIVO não abria nada porque **não havia o que abrir**: a lista acima
+decidiu que escolher um arquivo era arrastá-lo, e o botão existia para ensinar
+isso, dizendo a instrução em voz alta. Ele clicou esperando um seletor.
+
+Arrastar-e-soltar não se descobre sozinho. Um botão escrito ARQUIVO promete um
+seletor a qualquer pessoa que já usou um computador, e um botão que promete uma
+coisa e faz outra é pior do que botão nenhum — porque ele consome a tentativa.
+
+E «nenhuma dependência nova» era **consequência escolhida por quem escreveu este
+ADR**, não restrição dada pelo dono. Uma consequência que custa a única porta de
+entrada que uma pessoa encontra sozinha é uma consequência cara demais.
+
+**O custo, medido como o ADR 0026 mediu.** `tauri-plugin-dialog 2.7.2` entra, e
+com ele entram exatamente três crates: ele, `tauri-plugin-fs 2.5.1` — de onde vem
+o tipo `FilePath` que o seletor devolve — e `rfd 0.16.0`. Três, e os **mesmos**
+três em cada um dos três alvos, contados com `cargo tree --no-dedupe` em
+`aarch64-apple-darwin`, `x86_64-unknown-linux-gnu` e `x86_64-pc-windows-msvc`: o
+`rfd` fala com a API nativa de cada sistema, e as três já estavam na árvore por
+causa do próprio Tauri. Licenças: `MIT` no `rfd`, `Apache-2.0 OR MIT` nos dois
+plugins — nenhuma exceção nova no `deny.toml`, e `cargo deny check` continua com
+`bans ok, licenses ok, sources ok`.
+
+**A saída sem dependência foi procurada e não existe.** `<input type="file">`
+numa webview Tauri devolve um `File` do navegador e **não** um caminho no disco,
+que é a única coisa que `descrever_arquivo` e `enviar_anexo` sabem usar — ler os
+bytes pelo JavaScript para reenviá-los pelo IPC seria carregar o arquivo inteiro
+na memória da janela, que é justamente o que a seção «Pedaços» acima proíbe do
+outro lado. Chamar o diálogo do sistema por fora — `osascript` no macOS,
+PowerShell no Windows, `zenity` no Linux — não custa crate e custa três caminhos
+de código, um binário externo por plataforma, e um Linux sem `zenity` instalado
+fica sem seletor. Três crates auditados são mais baratos que isso.
+
+**Quem abre o diálogo é a casca, e não a página.** O seletor é um comando desta
+casca, `escolher_arquivo`, com o título escrito no `main.rs` e uma coisa só que
+ele faz. `capabilities/janela.json` não dá à página permissão de `dialog`
+nenhuma — nem de `fs`, que veio junto na árvore —, e um teste confere isso pela
+**palavra** da recusa, porque um plugin ausente também falha e um guarda que só
+pedisse falha passaria vazio. Somar um plugin não pode alargar calado o que a
+página pode fazer.
+
+Escolher continua sendo arrastar **também**: quem arrasta espera que arrastar
+funcione, e agora funciona.
+
+### A terceira coisa, que ninguém relatou e que morde de novo
+
+Ao clicar no botão, ele não viu **nem o anúncio**. Não era o ouvinte: era o
+`anunciar(...)`. A `.anuncio` é uma caixa de um pixel com `clip-path:
+inset(50%)`, que existe para leitor de tela — quem enxerga não vê nada. Uma
+falha contada só ali e coisa nenhuma são o mesmo acontecimento para quem está
+olhando para a janela.
+
+O caminho de anexos tinha isso em toda recusa de leitura, e continuaria tendo
+depois do seletor. Agora a recusa é escrita na caixa do anexo, que já é
+`aria-live` e diz as duas coisas de uma vez. Um guarda lê as folhas de estilo,
+descobre **quais** regiões estão recortadas fora da tela, e reprova se tudo o
+que a recusa escreve cair dentro delas — a propriedade, e não o nome do
+elemento.
+
+### O que os guardas não pegavam, e agora pegam
+
+`tests/frontend.rs` sabia provar que o ouvinte estava **escrito** no arquivo.
+Nenhum teste deste repositório sabia perguntar se ele era **registrado**, e a
+distância entre as duas coisas era o defeito inteiro.
+
+`apps/seele-app/tests/permissoes.rs` é a metade que faltava: constrói o app de
+verdade — este `tauri.conf.json`, esta ACL gerada — com o runtime falso, põe uma
+webview na frente dele e faz a mesma chamada de IPC que a página faz. Sem o
+arquivo de capacidade, ele reprova com a frase exata que o macOS devolveu.
+
+Fica dito o que **não** dá para cobrar sem uma janela aberta, para ninguém
+escrever um teste que passa sempre no lugar: que o sistema operacional emita o
+evento de arrastar, que o diálogo apareça na tela, e que a pessoa consiga
+apertar o botão dele. Os três dependem de um servidor gráfico e de um gesto
+humano. O que dá para cobrar é tudo o que acontece **antes** deles, e é isso que
+está coberto.
