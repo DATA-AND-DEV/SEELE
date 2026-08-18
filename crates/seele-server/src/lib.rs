@@ -184,6 +184,8 @@ pub struct Server {
     endpoint: quinn::Endpoint,
     config: Arc<DogmaConfig>,
     pilha: alcance::Pilha,
+    /// O mesmo socket do endpoint, para escrever. Ver [`Server::espelho`].
+    espelho: Option<Arc<std::net::UdpSocket>>,
     fingerprint: String,
     registry: Arc<session::Registry>,
     dogma: Arc<dogma::Dogma>,
@@ -224,6 +226,23 @@ impl Server {
         // e Windows. A própria documentação dele avisa. Ver
         // [`alcance::abrir_escuta`], onde a opção é escrita e conferida.
         let (socket, pilha) = alcance::abrir_escuta(config.listen)?;
+        // Um segundo descritor para o **mesmo** socket, antes de o quinn tomar
+        // conta dele. É o que torna o degrau 4 do ADR 0022 possível: furar um
+        // NAT exige mandar pacotes da porta em que o QUIC atende, e o quinn não
+        // empresta o socket dele. Só para **escrever** — ler daqui roubaria
+        // pacotes do QUIC, e é por isso que o degrau 4 abre uma escuta própria
+        // para as respostas. Ver `alcance::encontro`.
+        //
+        // `try_clone` num socket UDP duplica o descritor, não o socket: as duas
+        // pontas apontam para a mesma fila e para o mesmo mapeamento de NAT, que
+        // é exatamente a propriedade de que o furo precisa.
+        let espelho = match socket.try_clone() {
+            Ok(copia) => Some(Arc::new(copia)),
+            Err(erro) => {
+                tracing::info!(%erro, "sem espelho do socket: o degrau 4 do ADR 0022 fica de fora");
+                None
+            }
+        };
         let runtime = quinn::default_runtime()
             .ok_or_else(|| anyhow::anyhow!("não há runtime assíncrono para o QUIC"))?;
         let endpoint = quinn::Endpoint::new(
@@ -273,6 +292,7 @@ impl Server {
             endpoint,
             config: Arc::new(config),
             pilha,
+            espelho,
             fingerprint,
             registry: Arc::new(session::Registry::new()),
             dogma,
@@ -293,6 +313,18 @@ impl Server {
     #[must_use]
     pub fn fingerprint(&self) -> &str {
         &self.fingerprint
+    }
+
+    /// O socket em que o Dogma atende, para **escrever**. Degrau 4 do ADR 0022.
+    ///
+    /// Furar um NAT exige mandar pacotes da porta em que o QUIC atende: o
+    /// roteador abre caminho por porta interna, e um pacote saído de outro
+    /// socket abriria caminho para o socket errado. Ver `alcance::encontro`.
+    ///
+    /// Só para escrever. Ler daqui roubaria pacotes do quinn, que é quem lê.
+    #[must_use]
+    pub fn espelho(&self) -> Option<Arc<std::net::UdpSocket>> {
+        self.espelho.clone()
     }
 
     /// Que famílias de endereço esta escuta alcança. Degrau 2 do ADR 0022.

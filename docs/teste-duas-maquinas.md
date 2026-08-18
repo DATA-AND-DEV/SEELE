@@ -265,6 +265,62 @@ O que checar a mais:
 
 ---
 
+## 7 · Furo de NAT, o degrau 4 (duas casas, não duas máquinas)
+
+Este é o único teste do repositório que **nenhuma máquina sozinha consegue
+fazer**, e é por isso que ele está escrito aqui em vez de estar em `cargo test`:
+ele precisa de duas redes **diferentes**, cada uma atrás do seu próprio NAT. Duas
+máquinas na mesma casa não servem — elas se acham pela rede local, que é o degrau
+1, e o degrau 4 nem chega a ser exercido.
+
+O jeito mais fácil de conseguir duas redes: uma máquina na sua casa e a outra no
+celular como roteador (4G/5G), que quase sempre é CGNAT — exatamente o caso sem
+saída antes deste degrau.
+
+**Antes**, suba um ponto de encontro numa VPS e aponte para ele — dez linhas em
+[`ponto-de-encontro.md`](ponto-de-encontro.md):
+
+```sh
+# na VPS
+./target/release/seele-encontro --barulhento
+```
+
+Na máquina A, em casa, com o UPnP do roteador **desligado** de propósito (é o que
+força a escada a chegar ao degrau 4):
+
+```sh
+SEELE_ENCONTRO=<endereço-da-vps>:8384 ./target/release/plug --hospedar
+```
+
+O que checar, em ordem:
+
+1. A frase embaixo do link diz **"um ponto de encontro apresentou esta
+   máquina"**. Se disser "só funciona na sua rede", o degrau 4 não subiu: o
+   terminal do `plug` diz por quê, e o `--barulhento` da VPS diz se o pedido
+   chegou lá.
+2. O link tem um `enc=` com **duas metades** separadas por `/`, e um endereço
+   público seu no `alt=`.
+3. Na máquina B, na outra rede, cole o link. Ela entra.
+4. Na VPS, o `--barulhento` mostra **duas** apresentações: a da máquina A se
+   descobrindo, e a da máquina B chegando. Nunca mais que isso — se aparecer
+   tráfego contínuo ali, alguma coisa está passando pelo ponto de encontro que
+   não deveria.
+5. **Desligue o ponto de encontro** e hospede de novo. O `plug` tem de subir na
+   mesma velocidade de antes (mais no máximo um segundo), com o link levando os
+   endereços de sempre e **sem** `enc=`. Este é o teste de que o degrau 4 não
+   virou ponto único de falha.
+6. Com a conversa de pé, derrube a rede da máquina B por uns segundos e deixe
+   voltar. A reconexão sai de uma porta nova, então ela bate no ponto de
+   encontro de novo — a sessão tem de voltar dentro dos cinco minutos da
+   bateria.
+
+**Se não abrir:** as duas redes podem ser NAT simétrico, e aí não há o que
+consertar aqui — é o caso que o ADR 0022 deixa para o encaminhamento de porta à
+mão. Vale anotar qual operadora e qual roteador de cada lado, porque essa
+informação é o que diz se vale a pena um degrau 5 algum dia.
+
+---
+
 ## Checklist de plataforma (M1.15)
 
 Uma coluna por máquina testada. Isto é o que `specs/09-roadmap.md` pede como

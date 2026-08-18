@@ -149,6 +149,11 @@ const FRASES = {
     // procurar um caractere errado seria mandar procurar o que não existe.
     EnderecoIpv6SemColchetes:
       "FALTAM OS COLCHETES NESTE ENDEREÇO IPV6.\nO «:» que separa a porta é o mesmo que separa um endereço IPv6, então o endereço vai entre colchetes: seele://[2001:db8::1]:8383",
+    // Degrau 4 do ADR 0022: o `enc` do link veio pela metade. Frase própria e
+    // não `EnderecoInvalido` porque o que falta é outra coisa, e porque o resto
+    // do link continua bom — o que se perde é o furo de NAT, não o Dogma.
+    BilheteInvalido:
+      "A PARTE DESTE CONVITE QUE SERVE PARA FURAR O NAT VEIO PELA METADE.\nO resto do link pode estar bom: tente de novo com o link inteiro, ou peça outro a quem hospeda.",
     ImpressaoDigitalInvalida: "ESTE CONVITE CHEGOU CORTADO OU ADULTERADO",
     TokenInvalido: "O CONVITE DENTRO DESTE LINK NÃO É UM CONVITE",
     CageInvalido: "O CAGE DESTE CONVITE NÃO É UM NÚMERO",
@@ -169,6 +174,19 @@ const FRASES = {
     // lado pode recusar, e "deve funcionar" é o que dá para prometer.
     PortaNoRoteador:
       "O ROTEADOR ABRIU A PORTA.\nEste link deve funcionar pela internet, e também para quem estiver na sua rede — ele leva os dois endereços.",
+    // Degrau 4, o que faz «manda o link e funciona» valer numa casa com CGNAT
+    // ou com o UPnP desligado. «Deve funcionar» como as outras, e por um motivo
+    // a mais: com NAT simétrico dos dois lados o furo não abre, e a saída
+    // continua sendo encaminhar a porta à mão — o ADR 0022 deixou retransmissão
+    // fora de escopo por decisão, então esta frase não pode prometer o que
+    // nenhum código nosso entrega.
+    //
+    // A segunda linha diz o que o ponto de encontro aprende. Um produto que se
+    // vende como «sem serviço no meio» acabou de ganhar um serviço no meio,
+    // opcional — e dizer isso aqui, na tela em que o link aparece, é a
+    // diferença entre honestidade e propaganda.
+    FuroDeNat:
+      "UM PONTO DE ENCONTRO APRESENTOU ESTA MÁQUINA: O LINK DEVE FUNCIONAR PELA INTERNET, SEM MEXER NO ROTEADOR.\nSe não funcionar, as duas redes são do tipo que não deixa furar — aí encaminhe a porta 8383 no roteador à mão. O endereço da sua rede vai junto, para quem estiver perto.\nO ponto de encontro fica sabendo que endereço falou com o seu, e quando; nunca o que foi dito. Para usar o seu, ou nenhum: docs/ponto-de-encontro.md.",
     Ipv6Direto:
       "ESTE LINK LEVA UM ENDEREÇO IPv6.\nAlcança de qualquer lugar, se o firewall do seu roteador deixar entrar, mas só quem também tiver IPv6. O endereço da sua rede vai junto, para quem estiver perto.",
     // O degrau que nasceu de um defeito de campo: um Windows com Cloudflare

@@ -181,7 +181,7 @@ async fn connect(
     // razão: eles pertencem ao Dogma daquele link, e quem trocou o endereço no
     // campo está indo a outro lugar — tentar os alternativos do link anterior
     // seria bater à porta de um Dogma que ninguém pediu.
-    let (esperada, alternativos) = match session.convite.lock() {
+    let (esperada, alternativos, bilhete) = match session.convite.lock() {
         Ok(mut slot) => {
             if slot.as_ref().is_some_and(|convite| convite.alvo != server) {
                 *slot = None;
@@ -192,12 +192,17 @@ async fn connect(
                 slot.as_ref()
                     .map(|convite| convite.alternativos.clone())
                     .unwrap_or_default(),
+                // Degrau 4 do ADR 0022. Sai daqui pela mesma porta e pela mesma
+                // razão que os alternativos: o bilhete é do Dogma **daquele**
+                // link, e bater no ponto de encontro de outro seria apresentar
+                // esta máquina a um anfitrião que ninguém pediu.
+                slot.as_ref().and_then(|convite| convite.bilhete.clone()),
             )
         }
         // Sem o cadeado não há convite a ler. Entrar sem a confirmação é o
         // comportamento de quem digitou o endereço à mão, e é o pior que pode
         // acontecer aqui: nunca uma conferência contra um valor duvidoso.
-        Err(_) => (None, Vec::new()),
+        Err(_) => (None, Vec::new(), None),
     };
 
     let home = config_dir(&app);
@@ -214,6 +219,7 @@ async fn connect(
         audio,
         join_secret: join_secret.filter(|s| !s.trim().is_empty()),
         expected_fingerprint: esperada,
+        bilhete,
         // O microfone escolhido no Terminal Dogma, lido do disco a cada
         // conexão em vez de guardado em memória: quem escolheu ontem não
         // escolhe de novo hoje, e quem nunca escolheu continua no padrão da
@@ -294,8 +300,8 @@ struct Anfitriao {
     ///
     /// Nome estável e não frase, igual a [`FalhaAoHospedar`] e pelo mesmo
     /// motivo: a frase mora no `FRASES` do JavaScript. Os nomes são
-    /// `PortaNoRoteador`, `Ipv6Direto` e `SoRedeLocal`, e os três já têm frase
-    /// escrita lá.
+    /// `PortaNoRoteador`, `FuroDeNat`, `Ipv6Direto`, `RedeLocalOuVpn` e
+    /// `SoRedeLocal`, e os cinco já têm frase escrita lá.
     ///
     /// Por que isto cruza a fronteira: um link que só funciona na rede de casa e
     /// um link que funciona pela internet **são o mesmo texto**. Sem este campo
@@ -311,6 +317,14 @@ struct Anfitriao {
     /// para a tela como detalhe secundário, embaixo da frase que o `alcance`
     /// escolheu.
     porta_recusada: Option<String>,
+    /// Por que o ponto de encontro não deu, quando ele chegou a ser tentado.
+    ///
+    /// Degrau 4 do ADR 0022, e o mesmo raciocínio do campo acima: é detalhe
+    /// secundário, e é o que explica a quem hospeda por que sobrou um link de
+    /// rede local numa casa em que o roteador também não abriu a porta. `None`
+    /// quando ninguém pediu ponto de encontro nenhum — desligá-lo é uma escolha,
+    /// não uma falha a explicar.
+    encontro_recusado: Option<String>,
 }
 
 /// Por que não deu para hospedar.
@@ -369,6 +383,8 @@ async fn hospedar(
         convite: dogma.convite(),
         alcance: alcance.map_or("SoRedeLocal", |alcance| alcance.degrau().nome()),
         porta_recusada: alcance.and_then(|alcance| alcance.porta_recusada().map(str::to_owned)),
+        encontro_recusado: alcance
+            .and_then(|alcance| alcance.encontro_recusado().map(str::to_owned)),
     };
 
     session
@@ -873,6 +889,10 @@ fn nome_da_falha(erro: &seele_ffi::uri::ErroDeUri) -> &'static str {
         // nome em vez de um beco sem saída — que é o que aquele fallback existe
         // para fazer. A frase a escrever é sobre pôr o IPv6 entre colchetes.
         Falha::EnderecoIpv6SemColchetes => "EnderecoIpv6SemColchetes",
+        // Degrau 4 do ADR 0022: o `enc` do convite veio pela metade ou com um
+        // endereço que não é um. Nome próprio porque a frase é própria — meio
+        // bilhete não leva a lugar nenhum, e o resto do link continua bom.
+        Falha::BilheteInvalido => "BilheteInvalido",
         Falha::ImpressaoDigitalInvalida => "ImpressaoDigitalInvalida",
         Falha::TokenInvalido => "TokenInvalido",
         Falha::CageInvalido => "CageInvalido",

@@ -4691,9 +4691,17 @@ dependencies = [
  "seele-audio",
  "seele-proto",
  "serde",
+ "socket2",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "seele-encontro"
+version = "0.0.0"
+dependencies = [
+ "seele-proto",
 ]
 
 [[package]]

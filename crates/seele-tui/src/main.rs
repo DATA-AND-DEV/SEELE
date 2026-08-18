@@ -66,6 +66,12 @@ struct Args {
     join_secret: Option<String>,
     /// Impressão digital esperada, quando veio num link.
     expected_fingerprint: Option<String>,
+    /// O bilhete de encontro do link, quando ele trouxe um.
+    ///
+    /// Degrau 4 do ADR 0022. Texto do `enc`, já lido: com ele, este cliente bate
+    /// no ponto de encontro antes de tentar endereço nenhum, e o anfitrião fura o
+    /// NAT para cá.
+    bilhete: Option<seele_core::uri::Bilhete>,
     /// Subir um Dogma neste processo e conectar nele.
     hospedar: bool,
 }
@@ -90,6 +96,10 @@ impl Args {
             no_audio: false,
             join_secret: escolha.convite.clone(),
             expected_fingerprint: escolha.impressao_digital.clone(),
+            // Um Dogma conhecido é um endereço a que já se chegou, e o bilhete é
+            // propriedade de um convite — ele envelhece com o mapeamento de NAT
+            // que o produziu. Quem volta a um lugar volta pelo endereço.
+            bilhete: None,
             hospedar: escolha.hospedar,
         })
     }
@@ -111,6 +121,7 @@ fn parse_args() -> Result<Option<Args>> {
     let mut no_audio = false;
     let mut join_secret: Option<String> = None;
     let mut expected_fingerprint: Option<String> = None;
+    let mut bilhete: Option<seele_core::uri::Bilhete> = None;
     let mut hospedar = false;
     let mut alternativos: Vec<String> = Vec::new();
     let mut argv = std::env::args().skip(1);
@@ -127,6 +138,7 @@ fn parse_args() -> Result<Option<Args>> {
                 alternativos = convite.alternativos;
                 target = convite.alvo;
                 expected_fingerprint = convite.impressao_digital;
+                bilhete = convite.bilhete;
                 join_secret = convite.token;
                 if let Some(numero) = convite.cage {
                     cage = CageId(numero);
@@ -167,6 +179,7 @@ fn parse_args() -> Result<Option<Args>> {
         no_audio,
         join_secret,
         expected_fingerprint,
+        bilhete,
         hospedar,
     }))
 }
@@ -193,14 +206,33 @@ fn parse_args() -> Result<Option<Args>> {
 fn frase_do_alcance(alcance: &seele_server::alcance::Alcance) -> String {
     use seele_server::alcance::Degrau;
 
-    let motivo = alcance
-        .porta_recusada()
-        .map_or_else(String::new, |motivo| format!("\n{motivo}."));
+    // Os dois motivos, quando houve dois. O degrau 4 tentado e falhado é
+    // informação de quem hospeda: "o roteador não abriu **e** o ponto de
+    // encontro não respondeu" explica um link limitado melhor que qualquer uma
+    // das duas metades sozinha.
+    let motivo: String = [alcance.porta_recusada(), alcance.encontro_recusado()]
+        .into_iter()
+        .flatten()
+        .map(|motivo| format!("\n{motivo}."))
+        .collect();
 
     match alcance.degrau() {
         Degrau::PortaNoRoteador => {
             "O roteador abriu a porta: este link deve funcionar pela internet.".to_owned()
         }
+        // Degrau 4. "Deve funcionar" e não "funciona", e a diferença é a razão
+        // de a escada continuar existindo: com NAT simétrico dos dois lados o
+        // furo não abre, e a saída continua sendo encaminhar a porta à mão.
+        Degrau::FuroDeNat => format!(
+            "Um ponto de encontro apresentou esta máquina: o link deve \
+             funcionar pela internet sem mexer no roteador.{motivo}\n\
+             Se não funcionar, as duas redes são do tipo que não deixa furar — \
+             aí encaminhe a porta {} no roteador à mão.\n\
+             O ponto de encontro fica sabendo que endereço falou com o seu, e \
+             quando; nunca o que foi dito. Para usar o seu, ou nenhum: \
+             docs/ponto-de-encontro.md.",
+            alcance.alvo().port()
+        ),
         Degrau::Ipv6Direto => format!(
             "Este link é IPv6 e alcança de qualquer lugar — mas só quem também \
              tiver IPv6.{motivo}"
@@ -562,19 +594,22 @@ async fn sessao(
     // cai; o enlace é a **sessão**, que atravessa quedas. É ele que carrega a
     // bateria interna e a reconexão de `specs/07-tema-evangelion.md`.
     let destinos = construir_destinos(args);
-    let mut client = match Enlace::conectar_entre(destinos, key, pins).await {
-        Ok(client) => client,
-        Err(error) => {
-            runtime.app.screen = Screen::Lost {
-                reason: motivo_de_conexao_perdida(&error),
-            };
-            // Um endereço que não atende é o caso mais comum de todos, e
-            // justamente o que mais precisa da lista: escolher um Dogma morto
-            // dos conhecidos jogava a pessoa para fora do cliente, longe da
-            // lista de onde ela acabou de escolher.
-            return fim_de_sessao(terminal, key_rx, &mut runtime, &mut hospedagem).await;
-        }
-    };
+    // Com bilhete, bater no ponto de encontro antes de tentar endereço nenhum —
+    // degrau 4 do ADR 0022. Sem bilhete, é o caminho de sempre.
+    let mut client =
+        match Enlace::conectar_entre_com_bilhete(destinos, args.bilhete.clone(), key, pins).await {
+            Ok(client) => client,
+            Err(error) => {
+                runtime.app.screen = Screen::Lost {
+                    reason: motivo_de_conexao_perdida(&error),
+                };
+                // Um endereço que não atende é o caso mais comum de todos, e
+                // justamente o que mais precisa da lista: escolher um Dogma morto
+                // dos conhecidos jogava a pessoa para fora do cliente, longe da
+                // lista de onde ela acabou de escolher.
+                return fim_de_sessao(terminal, key_rx, &mut runtime, &mut hospedagem).await;
+            }
+        };
 
     // O core já decidiu o que este aperto de mão significa — `Enlace::veredito`
     // vem pronto, e esta casca só desenha o que ele diz. `Verdict::InviteRefused`
@@ -1586,6 +1621,7 @@ mod tests {
             no_audio: true,
             join_secret: None,
             expected_fingerprint,
+            bilhete: None,
             hospedar: false,
             alternativos: Vec::new(),
         }

@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/seele-proto",
+    "crates/seele-encontro",
     "crates/seele-audio",
     "crates/seele-core",
     "crates/seele-server",

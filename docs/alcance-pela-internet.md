@@ -16,12 +16,20 @@ ele tenta e depois **conta o que conseguiu**, junto do link.
 | Degrau | O que é | Quem alcança você |
 |---|---|---|
 | **3 — porta no roteador** | O SEELE pediu a porta ao seu roteador (UPnP) e ele abriu | praticamente todo mundo |
+| **4 — furo de NAT** | Nenhum caminho direto, e um ponto de encontro apresentou as duas máquinas | quase todo mundo, e há casos em que não abre |
 | **2 — IPv6 direto** | Sua máquina tem endereço IPv6 público; não há NAT no caminho | só quem também tiver IPv6 |
-| **1 — rede local, ou a mesma VPN** | Nenhum dos dois deu, e o único endereço que sai daqui é de uma VPN | quem estiver na sua casa, ou na mesma VPN |
-| **1 — só a rede local** | Nenhum dos dois deu | só quem estiver na sua casa |
+| **1 — rede local, ou a mesma VPN** | Nenhum dos outros deu, e o único endereço que sai daqui é de uma VPN | quem estiver na sua casa, ou na mesma VPN |
+| **1 — só a rede local** | Nenhum dos outros deu | só quem estiver na sua casa |
 
-Nada disso passa por servidor nosso nem de terceiro. O degrau 3 é uma conversa
-entre o seu computador e o **seu** roteador; o degrau 2 nem isso.
+Os degraus 3, 2 e 1 não passam por servidor nosso nem de terceiro: o 3 é uma
+conversa entre o seu computador e o **seu** roteador, e o 2 nem isso.
+
+**O degrau 4 é o único com um terceiro no meio**, e é por isso que ele é o
+último a ser tentado — só quando nenhum dos outros resolveu. Ele é o que faz
+"manda o link e funciona" valer numa casa com CGNAT ou com UPnP desligado, e
+custa uma informação que antes não existia em lugar nenhum. A seção
+**[O que o ponto de encontro fica sabendo](#o-que-o-ponto-de-encontro-fica-sabendo)**
+diz exatamente o quê, e como não usar o nosso.
 
 ## O link leva mais de um endereço, de propósito
 
@@ -51,6 +59,24 @@ Deu certo. O link deve funcionar pela internet.
 *Deve*, e não *vai*: ainda existe a chance de um firewall no caminho do seu
 amigo recusar a saída. É raro. Se ele não entrar, peça para tentar de outra
 rede — do celular na rede móvel, por exemplo.
+
+### "Um ponto de encontro apresentou esta máquina"
+
+O degrau 4. Você está numa rede em que o roteador não abriu a porta — CGNAT, dois
+roteadores, UPnP desligado —, e o SEELE conseguiu assim mesmo: um serviço
+minúsculo contou a cada lado o endereço do outro, os dois mandaram pacote ao
+mesmo tempo, os roteadores abriram o caminho, e **daí em diante o tráfego é
+direto**. É o mesmo mecanismo do WebRTC, que é como funciona chamada de vídeo no
+navegador.
+
+*Deve funcionar*, e não *vai funcionar*, e desta vez o motivo é específico:
+quando as duas redes fazem **NAT simétrico** — o tipo que muda o endereço a cada
+destino —, o furo não abre. Não há o que ajustar na sua máquina; é o tipo do
+roteador dos dois lados. Se não entrar, as saídas são as do fim desta página:
+encaminhar a porta à mão, ou uma VPN de rede entre vocês.
+
+O link continua levando o endereço da sua rede junto, então quem estiver na sua
+casa entra pelo caminho de sempre, sem passar por ponto de encontro nenhum.
 
 ### "Este link é IPv6"
 
@@ -146,17 +172,58 @@ Duas causas:
 - **Dois roteadores.** Você tem um roteador seu ligado no roteador do
   provedor, ou mora num prédio que distribui internet por um roteador central.
 
-**Sem IPv6 e sem UPnP útil, o SEELE não tem saída aqui.** Isso está escrito no
-ADR 0022 e é uma consequência de como a internet funciona hoje, não um defeito
-que uma versão futura corrige de graça. O degrau 4 da escada — um ponto de
-encontro que apresenta os dois lados — resolveria, e ainda não existe: ele custa
-uma decisão sobre metadado que o projeto quer tomar em voz alta, e não de
-passagem.
+**É para este caso que o degrau 4 existe.** Quando um ponto de encontro está
+alcançável, o SEELE apresenta as duas máquinas e o furo de NAT costuma resolver
+justamente esta situação — que era, até ele existir, a que não tinha saída
+nenhuma. Se a tela disser "só funciona na sua rede" mesmo assim, o ponto de
+encontro não respondeu (fora do ar, ou uma rede que não deixa UDP sair) ou as
+duas redes são do tipo que não deixa furar.
+
+Não é mágica e não é garantia: leia
+**[O que o ponto de encontro fica sabendo](#o-que-o-ponto-de-encontro-fica-sabendo)**
+antes de decidir se você quer esse degrau ligado.
 
 O que **não** vai acontecer: retransmitir a sua conversa pelo servidor de
 outra pessoa. O ADR 0022 põe isso fora de escopo por decisão. Um produto que
 existe para não ter ninguém no meio não passa a ter ninguém no meio para cobrir
 os últimos casos.
+
+## O que o ponto de encontro fica sabendo
+
+Esta é a parte que este projeto não quer que você descubra depois.
+
+O degrau 4 põe um serviço no meio — só na **apresentação**, nunca na conversa —,
+e um serviço no meio aprende alguma coisa. O que ele aprende é isto:
+
+| Ele fica sabendo | Ele **não** fica sabendo |
+|---|---|
+| que o seu endereço falou com o endereço de outra pessoa, e quando | o que foi dito, em texto ou em voz |
+| o endereço público das duas máquinas | quem são vocês, que Dogma é, quais salas existem |
+| que houve uma tentativa de conexão | se ela deu certo |
+
+O conteúdo continua ponta a ponta: o TLS 1.3 e a impressão digital do ADR 0003
+são conferidos entre as duas máquinas, e o ponto de encontro não tem por onde ler
+nem por onde se passar por ninguém — quem entra nem lê resposta dele, porque os
+endereços que tenta vieram todos do link.
+
+Três coisas fazem parte da decisão, e não são promessas soltas:
+
+- **Ele não guarda nada.** Não há banco nem arquivo: a decisão dele é uma função
+  que recebe um datagrama e devolve outro. Por padrão ele nem imprime quem falou
+  com quem.
+- **Ele é opcional.** `SEELE_ENCONTRO=nao` na máquina que hospeda desliga o
+  degrau 4, e nenhum pacote sai dali para ponto de encontro nenhum. Tudo o que
+  funcionava continua igual.
+- **Ele é trocável.** O endereço do ponto de encontro viaja **dentro do link**,
+  então apontar para o seu não exige versão nova de nada nem que a outra pessoa
+  saiba que ele mudou. Subir um é uma linha de comando numa VPS barata:
+  [`ponto-de-encontro.md`](ponto-de-encontro.md).
+
+Uma última coisa que vale saber sobre o link: quando ele traz um bilhete de
+encontro, **quem tem o link aprende o seu endereço público sem precisar
+conectar**. Quem conecta aprenderia de qualquer forma, e um link é para dar a
+quem se convida — mas é um motivo a mais para não colar um `seele://` em lugar
+público.
 
 ## O firewall da sua máquina — o Windows, principalmente
 
@@ -257,8 +324,11 @@ CGNAT com certeza: essa faixa existe só para isso.
 ## Para quem for mexer no código
 
 A escada está em `crates/seele-server/src/alcance.rs`, o degrau 3 em
-`crates/seele-server/src/alcance/porta.rs`, e a descoberta de endereços — a que
-pergunta às interfaces em vez de à rota padrão, por causa da VPN — em
+`crates/seele-server/src/alcance/porta.rs`, o degrau 4 em
+`crates/seele-server/src/alcance/encontro.rs` (quem hospeda),
+`crates/seele-core/src/encontro.rs` (quem entra) e `crates/seele-encontro/` (o
+serviço), e a descoberta de endereços — a que pergunta às interfaces em vez de à
+rota padrão, por causa da VPN — em
 `crates/seele-server/src/alcance/interfaces.rs`. A lista de endereços dentro do
 link é o `alt=` do `crates/seele-proto/src/uri.rs`, e quem tenta um de cada vez
 é `Enlace::conectar_entre`, em `crates/seele-core/src/enlace.rs`. Os motivos de recusa são o enum

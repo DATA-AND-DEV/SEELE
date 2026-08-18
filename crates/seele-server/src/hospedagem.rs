@@ -87,10 +87,21 @@ impl Hospedagem {
         // A escuta **inteira**, e não só a porta: numa máquina em que a pilha
         // dupla falhou o Dogma atende só em IPv4, e a escada não pode prometer
         // um degrau que este socket não serve. Ver `alcance::Escuta`.
-        let escada = crate::alcance::Escada::subir(crate::alcance::Escuta::nova(
-            endereco.port(),
-            server.pilha(),
-        ))
+        //
+        // O degrau 4 vai junto, e ele é opcional em três sentidos: só é tentado
+        // se os degraus de cima não resolveram, só existe se o ambiente pedir
+        // (`$SEELE_ENCONTRO`), e só funciona com o socket do próprio Dogma — sem
+        // ele não há furo possível, e o degrau simplesmente não acontece.
+        //
+        // Custa até `alcance::encontro::PRAZO` a mais, e só no caminho que hoje
+        // termina em "só funciona na sua rede".
+        let convocacao = server.espelho().and_then(|socket| {
+            crate::alcance::encontro::Convocacao::do_ambiente(socket, server.fingerprint())
+        });
+        let escada = crate::alcance::Escada::subir(
+            crate::alcance::Escuta::nova(endereco.port(), server.pilha()),
+            convocacao,
+        )
         .await;
         tracing::info!(alcance = ?escada.alcance(), "escada do ADR 0022 subida");
 
@@ -177,10 +188,20 @@ impl Hospedagem {
             || (self.endereco.to_string(), &[][..]),
             |(um, resto)| (um.clone(), resto),
         );
-        seele_proto::uri::Convite::novo(primeiro)
+        let convite = seele_proto::uri::Convite::novo(primeiro)
             .com_alternativos(resto.to_vec())
-            .com_impressao_digital(self.impressao_digital())
-            .to_string()
+            .com_impressao_digital(self.impressao_digital());
+        // O bilhete de encontro só entra quando o degrau 4 deu — e ele só é
+        // tentado quando os de cima não deram. Um Dogma alcançável de fora não
+        // põe ponto de encontro nenhum no link de ninguém.
+        match self
+            .escada
+            .as_ref()
+            .and_then(crate::alcance::Escada::bilhete)
+        {
+            Some(bilhete) => convite.com_bilhete(bilhete).to_string(),
+            None => convite.to_string(),
+        }
     }
 
     /// Encerra o Dogma e devolve a porta.
@@ -317,6 +338,84 @@ mod tests {
         assert!(
             candidatos.contains(&rede.to_string().as_str()),
             "o convite não leva o endereço da rede local ({rede}): {candidatos:?}"
+        );
+    }
+
+    /// Um endereço para onde não há rota em lugar nenhum: TEST-NET-1 (RFC 5737).
+    ///
+    /// É o mais perto de "o ponto de encontro está fora do ar" que cabe num
+    /// teste sem rede — um pacote sai e nunca volta resposta.
+    const BURACO_NEGRO: &str = "192.0.2.1:8384";
+
+    #[tokio::test]
+    async fn um_ponto_de_encontro_fora_do_ar_nao_atrapalha_nada() {
+        // O requisito do ADR 0022 escrito como asserção, e ele é sobre o degrau
+        // 4 **não** poder virar ponto único de falha: com o ponto de encontro
+        // inalcançável, hospedar continua funcionando, o link continua saindo
+        // com os mesmos endereços de sempre, e a espera a mais é no máximo o
+        // prazo escolhido — não uma espera de rede sem fim.
+        let antes = std::env::var(crate::alcance::encontro::VARIAVEL).ok();
+        let restaurar = |valor: Option<String>| match valor {
+            Some(valor) => std::env::set_var(crate::alcance::encontro::VARIAVEL, valor),
+            None => std::env::remove_var(crate::alcance::encontro::VARIAVEL),
+        };
+
+        // Sem degrau 4 nenhum: é o Dogma de antes desta mudança, e é a régua.
+        std::env::set_var(crate::alcance::encontro::VARIAVEL, "nao");
+        let relogio = std::time::Instant::now();
+        let sem = Hospedagem::iniciar(0, Location::Memory, "Casa")
+            .await
+            .expect("subir sem ponto de encontro");
+        let sem_encontro = relogio.elapsed();
+        let convite_de_antes = sem.convite();
+        let degrau_de_antes = sem.alcance().map(crate::alcance::Alcance::degrau);
+        sem.encerrar().await;
+
+        // Com um ponto de encontro que não responde nunca.
+        std::env::set_var(crate::alcance::encontro::VARIAVEL, BURACO_NEGRO);
+        let relogio = std::time::Instant::now();
+        let com = Hospedagem::iniciar(0, Location::Memory, "Casa")
+            .await
+            .expect("hospedar falhou porque o ponto de encontro está fora do ar");
+        let com_encontro = relogio.elapsed();
+        let convite_de_agora = com.convite();
+        let degrau_de_agora = com.alcance().map(crate::alcance::Alcance::degrau);
+        com.encerrar().await;
+        restaurar(antes);
+
+        // Nada do que funcionava mudou: mesmo degrau, mesmos endereços.
+        assert_eq!(
+            degrau_de_agora, degrau_de_antes,
+            "o ponto de encontro fora do ar mudou o degrau da escada"
+        );
+        // As máquinas, e não as portas: cada `iniciar` pediu porta zero e o
+        // sistema deu uma diferente. O que a comparação cobra é que nenhum
+        // **endereço** tenha sumido do link.
+        let candidatos = |texto: &str| {
+            seele_proto::uri::analisar(texto)
+                .expect("o convite não se lê de volta")
+                .enderecos()
+                .expect("um endereço do convite não se separa")
+                .into_iter()
+                .map(|alvo| alvo.maquina.to_owned())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            candidatos(&convite_de_agora),
+            candidatos(&convite_de_antes),
+            "o ponto de encontro fora do ar tirou endereços do convite"
+        );
+        assert!(
+            !convite_de_agora.contains("enc="),
+            "o convite levou um bilhete para um ponto de encontro que não respondeu: \
+             {convite_de_agora}"
+        );
+
+        // E a espera a mais é a que foi escolhida, não uma espera de rede.
+        let folga = com_encontro.saturating_sub(sem_encontro);
+        assert!(
+            folga <= crate::alcance::encontro::PRAZO + std::time::Duration::from_millis(750),
+            "hospedar demorou {folga:?} a mais por causa de um ponto de encontro fora do ar"
         );
     }
 

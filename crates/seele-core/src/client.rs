@@ -243,6 +243,45 @@ impl Client {
         pins: Arc<dyn PinStore>,
         join_secret: Option<&str>,
     ) -> Result<Self, ConnectError> {
+        Self::connect_por(
+            None,
+            server,
+            server_name,
+            pin_key,
+            nickname,
+            signing_key,
+            pins,
+            join_secret,
+        )
+        .await
+    }
+
+    /// O mesmo, por um socket local já aberto.
+    ///
+    /// Existe por causa do degrau 4 do ADR 0022: furar um NAT exige que o aviso
+    /// ao ponto de encontro e o aperto de mão QUIC saiam da **mesma** porta
+    /// local, porque é por porta interna que o roteador do outro lado abre o
+    /// caminho. `None` é o caminho de sempre, e quem passa `Some` é
+    /// [`crate::enlace::Enlace::conectar_entre_com_bilhete`], com o socket que
+    /// [`crate::encontro::bater`] usou.
+    ///
+    /// # Errors
+    ///
+    /// O mesmo de [`Client::connect`].
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "um argumento a mais que o `connect` público, que já os tinha"
+    )]
+    pub(crate) async fn connect_por(
+        local: Option<std::net::UdpSocket>,
+        server: SocketAddr,
+        server_name: &str,
+        pin_key: &str,
+        nickname: &str,
+        signing_key: &SigningKey,
+        pins: Arc<dyn PinStore>,
+        join_secret: Option<&str>,
+    ) -> Result<Self, ConnectError> {
         let _ = rustls::crypto::ring::default_provider().install_default();
 
         let verifier = Arc::new(TofuVerifier::new(pins, pin_key.to_owned()));
@@ -267,7 +306,7 @@ impl Client {
         transport.keep_alive_interval(Some(KEEPALIVE));
         client_config.transport_config(Arc::new(transport));
 
-        let mut endpoint = local_endpoint()?;
+        let mut endpoint = local_endpoint(local)?;
         endpoint.set_default_client_config(client_config);
 
         let connection = endpoint
@@ -820,7 +859,21 @@ pub const INVITE_REFUSED: &[u8] = b"invite refused";
 /// `deny.toml` builds for — Linux, the two macOS, Windows — clearing the option
 /// works. A platform that refuses it would leave a client that reaches IPv6 and
 /// not IPv4, and that is the trade being taken knowingly rather than missed.
-fn local_endpoint() -> Result<quinn::Endpoint, ConnectError> {
+fn local_endpoint(local: Option<std::net::UdpSocket>) -> Result<quinn::Endpoint, ConnectError> {
+    // Um socket já aberto: o do degrau 4 do ADR 0022. Ele foi aberto com o mesmo
+    // cuidado que `Endpoint::client` teria tido — ver `crate::encontro` —, e vem
+    // pronto porque o furo de NAT já saiu dele.
+    if let Some(local) = local {
+        let runtime = quinn::default_runtime().ok_or_else(|| {
+            tracing::error!("não há runtime assíncrono para o QUIC");
+            ConnectError::LocalEndpoint
+        })?;
+        return quinn::Endpoint::new(quinn::EndpointConfig::default(), None, local, runtime)
+            .map_err(|error| {
+                tracing::warn!(%error, "could not adopt the rendezvous socket");
+                ConnectError::LocalEndpoint
+            });
+    }
     match quinn::Endpoint::client(SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, 0))) {
         Ok(endpoint) => Ok(endpoint),
         Err(error) => {

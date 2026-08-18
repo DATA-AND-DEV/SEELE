@@ -27,6 +27,7 @@
 pub mod battery;
 pub mod client;
 pub mod conhecidos;
+pub mod encontro;
 pub mod enlace;
 pub mod frame;
 pub mod identity;

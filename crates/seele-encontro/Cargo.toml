@@ -1,0 +1,29 @@
+[package]
+name = "seele-encontro"
+description = "O ponto de encontro do degrau 4 do ADR 0022: apresenta duas máquinas e sai."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# Uma dependência, e ela é o formato do que passa pelo fio — o mesmo motivo pelo
+# qual `seele-proto` existe. Nada de tokio, nada de rede assíncrona: este
+# processo trata um datagrama de 96 bytes por vez, sem estado nenhum entre um e
+# outro, e um laço bloqueante por família de endereço faz isso em duas linhas.
+# `cargo xtask check-deps` guarda a aresta (ADR 0002).
+#
+# O objetivo é que subir o seu seja uma linha. Uma árvore de dependências grande
+# aqui tornaria «o ponto de encontro é trocável» uma ficção educada.
+[dependencies]
+seele-proto = { path = "../seele-proto" }
+
+[lints]
+workspace = true
+
+[lib]
+name = "seele_encontro"
+path = "src/lib.rs"
+
+[[bin]]
+name = "seele-encontro"
+path = "src/main.rs"
