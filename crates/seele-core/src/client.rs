@@ -678,8 +678,16 @@ impl Client {
         // Waits for the peer to acknowledge the end of the stream. Without it,
         // returning would drop the send half and the last blocks could still be
         // unsent — which reads, from the other end, as a transfer that fell.
+        //
+        // `Ok(Some(code))` is the peer having sent `STOP_SENDING`, which is a
+        // refusal that happened to arrive after the last block went out. Reading
+        // it as success was a real defect and an intermittent one: on a small
+        // file the whole thing fits in one write, so whether the refusal shows
+        // up as a failed `write_all` or as a stop code here is a race with the
+        // network. Only `Ok(None)` — the stream read to its end — is delivery.
         match stream.stopped().await {
-            Ok(_) => Ok(Sent::Delivered { bytes: sent }),
+            Ok(None) => Ok(Sent::Delivered { bytes: sent }),
+            Ok(Some(_)) => Ok(Sent::Stopped { bytes: sent }),
             Err(_) => Ok(Sent::Interrupted { bytes: sent }),
         }
     }
