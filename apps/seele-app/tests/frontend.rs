@@ -4765,3 +4765,52 @@ fn the_reason_a_rung_failed_is_not_prefixed_by_a_label_it_already_carries() {
         "the reason is drawn without the class that makes it secondary:\n{mostrar}"
     );
 }
+
+#[test]
+fn arriving_at_a_dogma_opens_a_line_and_does_not_put_anybody_in_a_cage() {
+    // Both used to happen together on entry, with one good reason between them:
+    // arriving at an empty screen is arriving without knowing what to do. The
+    // reason still holds for one of the two and never held for the other.
+    //
+    // Reading text is passive — nobody hears you for having read something — so
+    // opening the first Line answers the empty screen and commits the person to
+    // nothing.
+    //
+    // Entering a Cage is not passive. It takes one of fifteen seats, shows the
+    // person as present, and puts a microphone at the disposal of a conversation
+    // they did not pick. From the person who actually used it: «não dá para você
+    // ficar fora de uma sala». They had never pressed anything.
+    let entrar = body_of(&without_comments(&scripts()), "async function inserirPlug");
+
+    assert!(
+        entrar.contains("open_line"),
+        "arriving no longer opens a Line, so the screen is empty again and the \
+         reason the automatic step existed is lost:\n{entrar}"
+    );
+    assert!(
+        !entrar.contains("insert_plug"),
+        "arriving puts the person inside a Cage without them pressing anything — \
+         a seat taken and a microphone offered to a conversation nobody \
+         chose:\n{entrar}"
+    );
+}
+
+#[test]
+fn the_button_that_stopped_inserting_the_plug_stopped_saying_it_does() {
+    // The other half, and the one that rots quietly: behaviour moves, the label
+    // stays. A button reading «INSERIR PLUG» that no longer inserts is worse
+    // than an unnamed one, because this particular promise is about a microphone.
+    let script = without_comments(&scripts());
+    let segundo = body_of(&script, "async function verificarIdentidade");
+
+    assert!(
+        !segundo.contains("INSERIR PLUG"),
+        "the second step still calls itself «INSERIR PLUG», and it no longer \
+         inserts anything:\n{segundo}"
+    );
+    assert!(
+        segundo.contains("botao.textContent"),
+        "the second step stopped naming itself at all, so the button keeps \
+         whatever the first step wrote:\n{segundo}"
+    );
+}

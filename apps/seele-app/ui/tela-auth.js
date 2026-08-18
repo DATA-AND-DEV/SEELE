@@ -184,7 +184,11 @@ async function verificarIdentidade() {
 
   const botao = $("auth-botao");
   botao.dataset.passo = "inserir";
-  botao.textContent = "INSERIR PLUG";
+  // «ENTRAR NO DOGMA», e não «INSERIR PLUG», porque inserir o plug deixou de
+  // acontecer aqui: entrar numa jaula virou ato à parte, apertado por quem
+  // quer voz. Um botão que promete uma coisa e faz outra é pior que um botão
+  // sem nome — e este prometia ligar o microfone.
+  botao.textContent = "ENTRAR NO DOGMA";
 }
 
 function tomDoPadrao(snapshot) {
@@ -194,20 +198,29 @@ function tomDoPadrao(snapshot) {
 }
 
 /**
- * O segundo passo: o plug entra, e a sessão começa.
+ * O segundo passo: a sessão começa.
  *
- * É o mesmo que a entrada fazia sozinha antes desta tela existir — entrar no
- * primeiro Cage e abrir a primeira Linha, porque chegar numa tela vazia é
- * chegar sem saber o que fazer.
+ * **A Linha abre sozinha; a jaula não.** As duas coisas já foram automáticas
+ * juntas, com um motivo bom — chegar numa tela vazia é chegar sem saber o que
+ * fazer. O motivo continua bom para uma delas e nunca foi bom para a outra.
+ *
+ * Texto é passivo: ninguém te ouve por você estar lendo, então abrir a primeira
+ * Linha resolve a tela vazia sem te comprometer com nada.
+ *
+ * Entrar numa jaula não é passivo. É ocupar uma das quinze vagas, aparecer na
+ * lista como presente, e pôr um microfone à disposição de uma conversa que você
+ * não escolheu. Quem chegou num Dogma para ler o que perdeu acordava dentro de
+ * uma sala de voz sem ter apertado nada — foi o relato de quem usou: «não dá
+ * para você ficar fora de uma sala».
+ *
+ * As duas coisas eram uma só aqui e são duas no modelo mental de quem usa.
+ * Agora são duas aqui também.
  */
 async function inserirPlug() {
   const botao = $("auth-botao");
   botao.disabled = true;
   try {
     const snapshot = aperto?.snapshot;
-    if (snapshot?.cages?.length > 0) {
-      await invoke("insert_plug", { cage: snapshot.cages[0].id });
-    }
     if (snapshot?.lines?.length > 0) {
       await invoke("open_line", { line: snapshot.lines[0].id });
     }
