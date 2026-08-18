@@ -36,6 +36,8 @@ Formato e regra de criação em `specs/10-convencoes.md`: toda decisão marcada
 | [0028](0028-a-reserva-do-anel-de-reproducao.md) | A reserva do anel de reprodução, e o que ela custa de latência | aceito | — (pendência 2, e revisão do `0009`) |
 | [0029](0029-mods-declaram-valores-e-o-produto-mede.md) | MODs: declaram valores, e o produto mede antes de aplicar | **proposto** | — (pedido do dono; desfaz metade do não-objetivo de `00`) |
 | [0030](0030-quem-bate-a-porta.md) | Quem bate à porta: TOFU aplicado a gente, e a portaria de quem hospeda | **proposto** | — (pedido do dono; estende o `0021`) |
+| [0031](0031-varios-dogmas-ao-mesmo-tempo.md) | Vários Dogmas ao mesmo tempo: a sessão é do Dogma, o microfone é da máquina | **proposto** | — (pedido do dono; o `+` da trilha) |
+| [0032](0032-personalizacao-de-um-dogma.md) | Personalização de um Dogma: nome, cor e ícone | **proposto** | — (pedido do dono; reusa a resolução do `0029`) |
 
 ## O que ainda não tem ADR
 
@@ -65,6 +67,14 @@ os punha como **não-objetivo** de v1 ("marketplace de plugins"), e a tela de
 configurações registrava que um segundo tema seria "decisão de ADR, não de tela".
 Viraram o [0029](0029-mods-declaram-valores-e-o-produto-mede.md), **proposto**,
 que desfaz metade daquele não-objetivo. Nada foi construído; ver pendência 21.
+
+**Várias sessões e personalização de Dogma também nunca estiveram nesta lista**,
+e o motivo é que ninguém as tinha pedido: o `+` da trilha estava desabilitado com
+a limitação escrita no `title`, e o nome de um Dogma hospedado pelo app era o
+literal `"Casa"`. Viraram o [0031](0031-varios-dogmas-ao-mesmo-tempo.md) e o
+[0032](0032-personalizacao-de-um-dogma.md), os dois **propostos**, e o segundo
+cita o primeiro na parte que compartilham — o corte entre o que é do Dogma e o
+que é desta máquina. Nada foi construído; ver pendências 24 e 25.
 
 Postura de direitos sobre Evangelion (`07`) também não tem ADR: a recomendação é
 repositório privado até M4, o que tira a decisão do caminho crítico.

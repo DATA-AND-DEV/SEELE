@@ -1018,3 +1018,152 @@ A corrida entre dois clientes com o mesmo convite continua sendo perdida no mesm
 espera sem que ninguém saiba que ele bateu. Os itens 3 e 4 não doem em nada que
 exista hoje.
 
+
+## 24 · Várias sessões estão desenhadas e não construídas
+
+**Sintoma.** Não dá para estar em dois Dogmas ao mesmo tempo. O `+` da trilha
+existe na tela, desabilitado, com a limitação escrita no `title`
+(`apps/seele-app/ui/index.html:906`): «este produto mantém um Plug por vez: para
+trocar de Dogma, use DESCONECTAR». `Session` guarda um
+`plug: Mutex<Option<Arc<Plug>>>` (`apps/seele-app/src/main.rs:49`) e `connect`
+recusa com `AlreadyConnected` (`main.rs:168-170`). Quem quer ler a Linha de outro
+Dogma desconecta deste.
+
+**O que se sabe.** Tudo o que dá para saber sem escrever código está no
+**ADR 0031**, que está **proposto** e não aceito. Em resumo: várias sessões, um
+caminho de voz. A sessão é do Dogma — Cages, Linhas, histórico, roster,
+telemetria, apelido, permissões. O microfone, a saída, o modo de voz, o A.T.
+Field, o isolamento total, a tecla, a chave, o atualizador e o MOD são desta
+máquina, e não se multiplicam.
+
+**A resposta sobre voz é não**, e é decisão e não limitação: não dá para estar em
+jaula de dois Dogmas ao mesmo tempo. O microfone é um e a pessoa é uma; a barra
+de espaço deixaria de ter referente (`ui/tela-sessao.js:1714-1723` é um `keydown`
+de janela sem alvo); e o orçamento do ADR 0009 é de um caminho, com 21 ms já
+gastos pelo ADR 0028. Entrar num Cage de outro Dogma **ejeta** o anterior, e o
+Cage que se deixou é nomeado.
+
+**Três achados no código mudaram o desenho**, e valem mesmo sem o ADR:
+
+1. **O áudio abre na conexão, não na entrada no Cage**
+   (`crates/seele-ffi/src/lib.rs:1507-1531`; `insert_plug` não toca áudio,
+   `lib.rs:565-567` e `1787-1795`). Três conexões abririam três `AudioIo` antes
+   de alguém falar. O ADR move a abertura para a entrada no primeiro Cage, o que
+   é melhoria de privacidade por si só.
+2. **A troca de sessão embaixo de um caminho de voz vivo já está construída.**
+   `Voice::reopen(media, ssrc)` (`lib.rs:1587-1626`) foi feito para reconexão e
+   carrega A.T. Field, isolamento, modo, tecla e ganhos (`voice.rs:603-625`).
+   Faltava o dono do caminho, não o mecanismo.
+3. **Nada no `Event` diz de qual sessão ele é.** O canal é um
+   (`main.rs:36`) e a `Bridge` emite o `Event` cru (`main.rs:110-116`). Com duas
+   sessões isso não quebra: desenha a mensagem do Dogma B na Linha do Dogma A,
+   calado. É o defeito mais barato de introduzir e mais caro de achar.
+
+**O tamanho, sem estimar para baixo.** O `Snapshot` **não** vira plural — nasce
+uma camada acima dele, para preservar `messages_revision` e porque as 28 funções
+de desenho continuam desenhando um Dogma cada. Ele **perde sete campos** de áudio
+para um bloco de máquina. O `main.rs` tem **51 `#[tauri::command]`**, dos quais
+**23 resolvem `session.plug()?`** e mais quatro alcançam o `Plug` de outra forma
+(`set_talking`, `escolher_microfone`, `escolher_saida` e o `connect`, que é onde a
+regra de uma sessão é aplicada). `apps/seele-app/ui/` são ~13 mil linhas, das
+quais `tela-sessao.js` sozinho são 1771; a janela lê **23 dos 24 campos** do
+`Snapshot`. Há ainda **23 variáveis de módulo no JavaScript que já são estado de
+sessão** sem nunca terem sido chamadas assim, e o **endereço do servidor não está
+no `Snapshot`** — ele sobrevive só no global `alvoDoDogma`
+(`ui/tela-auth.js:74`). Não há roteador: seis telas trocadas por `hidden`, e
+nenhum conceito de sessão corrente em que rotear. **Nada no protocolo, no
+servidor nem no banco muda** — é o que torna o custo grande em vez de perigoso.
+
+**Uma suposição que estava errada, conferida antes de virar decisão.** O
+`crates/seele-tui` **não consome `Snapshot`**: zero menções, e ele nem depende do
+`seele-ffi` — só de `seele-core` e `seele-server`, pela regra do ADR 0002. Mudar
+o `Snapshot` não custa nada ao terminal, ao contrário do que a primeira versão do
+ADR dizia. O terminal fica para trás de outro jeito: ele continua com um Dogma
+por processo, e a resposta dele são dois terminais com dois `$SEELE_HOME` — que
+dá duas identidades de brinde e não compartilha nem microfone, nem lista de
+visitados, nem trilha.
+
+**O teste que reprova no primeiro minuto tem nome:**
+`the_add_dogma_button_promises_nothing_this_product_can_do`
+(`apps/seele-app/tests/frontend.rs:2150-2183`), que exige `disabled`, `title`,
+`aria-label` e que **nenhum script mencione `$("trilha-adicionar")`**. É a moldura
+sendo cobrada como moldura; quando o `+` funcionar, ele vira o teste do
+contrário.
+
+**Um operador de outro Dogma pode inserir o seu plug.**
+`crates/seele-server/src/session.rs:1220-1230`: `MovePilot` transmite
+`PilotMoved` sem exigir que o piloto já esteja num Cage. A regra do ADR 0031 é
+que o servidor decide quem está na sala e **esta máquina decide para onde o
+microfone dela vai**: um plug inserido por outra pessoa entra no roster e não
+reivindica o caminho de voz.
+
+**Por que não foi resolvido.** Falta a decisão humana sobre um ADR proposto. E
+cinco coisas o próprio ADR nomeia como sem saída boa — uma chave para todos os
+Dogmas, uma pessoa só fala num lugar de cada vez, a placa em segundo plano conta
+que aconteceu e não o quê, o terminal não ganha nada pela segunda vez seguida, e
+não há número para quantos Dogmas cabem.
+
+**Quando dói.** Dói em uso, e não só em pedido: hoje ler a Linha de outro Dogma
+custa a conversa em que a pessoa está.
+
+## 25 · Personalização de um Dogma está desenhada e não construída, e o nome é o pedaço barato
+
+**Sintoma.** Um Dogma não tem nada além do nome, e nem o nome se escolhe pela
+janela: `hospedar` passa a string literal `"Casa"`
+(`apps/seele-app/src/main.rs:372-376`), então **todo Dogma hospedado pelo botão
+HOSPEDAR AQUI se chama Casa**, e é assim que ele aparece no cabeçalho de quem
+entra. `DogmaConfig::name` é campo de struct montada no `main.rs`
+(`crates/seele-server/src/lib.rs:57-58`).
+
+**O que se sabe.** Tudo o que dá para saber sem escrever código está no
+**ADR 0032**, que está **proposto** e não aceito. Ele divide o pedido em três,
+porque as três não são a mesma coisa.
+
+**O nome é o caso fácil, e vale dizer que é fácil.** O campo já viaja
+(`ServerMessage::Session.dogma`, `crates/seele-proto/src/control.rs:909`, com
+teto de 64 em `MAX_CLIENT_NAME_LEN`), já chega ao `Snapshot`
+(`crates/seele-ffi/src/types.rs:557`) e já é desenhado. Falta quem escreve: um
+valor na tabela `configuracao`, pelo mesmo critério que o ADR 0027 usou para o
+teto de anexos, e um acessor no `Hospedagem` falando direto com o CASPER local
+como o ADR 0030 fez com a portaria — **sem verbo novo de protocolo**. Renomear
+com o Dogma no ar precisa de um evento, ou o nome novo só vale na próxima
+conexão e a tela tem de dizer isso.
+
+**A cor: um Dogma não repinta a janela de quem entra.** É a mesma resposta do
+ADR 0029 sobre MODs, e mais firme aqui, porque lá havia pelo menos o ato de
+instalar em que pendurar o consentimento. O que um Dogma ganha é **a placa dele
+na trilha, 56 px, e mais nada** — aplicada por CSSOM num nó, nunca num token,
+nunca numa folha, nunca num seletor. E ele declara **um nome de uma lista
+fechada, nunca um valor**, que é o 0029 apertado em um grau: a lista é curta
+(`laranja-nerv`, `fosforo`, `padrao-azul`, `osso` — quatro), o vermelho não está
+nela, e a preferência local de quem olha vence, numa coluna a mais no
+`conhecidos`. Quatro é pouco e está escrito; o que torna isso custo estético e
+não funcional é a sigla na placa e a regra de `specs/05-cliente-tui.md:143`.
+
+**O ícone é recusado em v1**, com três razões: a prévia embutida de imagem de um
+anexo que alguém **pediu** ainda não está construída (ADR 0027, no alto dele); a
+CSP não freia isto, porque `img-src 'self' data:` já aceita imagem embutida
+(`apps/seele-app/tauri.conf.json:22`); e o quadro de aperto de mão tem 16 KiB
+(`MAX_FRAME_LEN`) e já carrega Cages, Linhas, papéis e permissões. A saída está
+escrita: fora do aperto de mão, endereçada por conteúdo, 128×128 e 16 KiB, lista
+curta de tipos com os bytes concordando com a alegação, sem animação, e nunca
+fora da placa.
+
+**A ordem, porque um depende do outro e o outro não.** O **nome** não depende de
+nada e pode ser construído sozinho hoje. A **cor** depende do ADR 0031: sem a
+trilha não existe superfície pequena o bastante para uma cor escolhida por outra
+pessoa, e a pergunta «um Dogma pode repintar a janela alheia» só tem resposta
+útil quando existe uma placa de 56 px para responder «pode pintar a dele». O
+**ícone** depende da conferência de bytes que o ADR 0027 deixou anotada. Os três
+não devem ser construídos juntos: juntá-los esconde o mais barato atrás do mais
+caro.
+
+**Por que não foi resolvido.** Falta a decisão humana sobre um ADR proposto. E
+quatro coisas o próprio ADR nomeia como sem saída boa — quatro cores é pouco e
+não há mais, a sigla é derivada e derivação erra, a cor não protege de imitação
+(só a impressão digital protege), e um nome escolhido por outra pessoa aparece na
+tela de quem entra sem moderação nenhuma.
+
+**Quando dói.** O nome dói hoje, em uso: todo Dogma hospedado pelo app tem o
+mesmo. A cor e o ícone doem em pedido, e a cor só passa a fazer sentido depois da
+pendência 24.
