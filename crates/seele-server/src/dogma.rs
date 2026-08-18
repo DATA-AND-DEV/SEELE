@@ -385,6 +385,13 @@ pub struct Dogma {
     pub portaria: Arc<Mutex<crate::taxa::Portaria>>,
     /// How often the bus outran a session. See [`Atrasos`].
     pub atrasos: Arc<Atrasos>,
+    /// The attachment store, its ceiling, and the byte budget. ADR 0027.
+    ///
+    /// `None` when this Dogma has nowhere to keep blobs, which is the in-memory
+    /// case. A transfer then meets `AttachmentRefusal::Unavailable` — a
+    /// sentence — rather than a directory appearing wherever the process
+    /// started.
+    pub anexos: Option<Arc<crate::transfer::Vault>>,
 }
 
 /// Starts the batching writer.

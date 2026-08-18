@@ -38,6 +38,8 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::time::Instant;
 
+use seele_proto::ids::PilotId;
+
 /// Quantos apertos de mão um mesmo endereço pode fazer em rajada.
 ///
 /// O pior caso honesto não é uma pessoa: é um NAT. A bateria interna do cliente
@@ -93,6 +95,38 @@ pub const QUADROS_POR_SEGUNDO: f64 = 20.0;
 /// ninguém do outro lado leu o aviso.
 pub const PACIENCIA: u32 = 200;
 
+/// Quantos bytes de anexo um piloto pode subir em rajada.
+///
+/// O ADR 0027 é explícito sobre o que este balde **não** é: ele não é um
+/// limite, é um retardo. O limite é o teto, e é o único mecanismo aqui que
+/// impede alguma coisa por construção.
+///
+/// Duzentos e cinquenta e seis mebibytes de rajada é o primeiro envio de
+/// qualquer pessoa passando na velocidade do enlace, sem espera nenhuma —
+/// mandar um vídeo para os amigos não pode ser uma coisa que o produto atrasa
+/// de propósito.
+pub const BYTES_DE_RAJADA: u32 = 256 * 1024 * 1024;
+
+/// Com que velocidade a rajada de bytes se repõe, por segundo.
+///
+/// A conta que escolhe o número: o teto padrão é 1 GiB, e o que este balde tem
+/// de comprar é **tempo para quem hospeda notar**. A 256 KiB/s sustentados, uma
+/// pessoa que gastou a rajada leva perto de uma hora para empurrar o gibibyte
+/// seguinte — ou seja, esvaziar o histórico de anexos de todo mundo
+/// repetidamente passa de «dois minutos» para «uma hora por vez», que é tempo
+/// de sobra para usar `Kick` ou `Ban`, que já existem.
+///
+/// Chamar isto de proteção seria exagero, e o ADR não chama. Uma foto de 3 MB é
+/// doze segundos de reposição; uma conversa normal nunca encosta nele.
+pub const BYTES_POR_SEGUNDO: f64 = 256.0 * 1024.0;
+
+/// Quantos pilotos a [`Vazao`] lembra ao mesmo tempo.
+///
+/// Pelo mesmo motivo que a [`Portaria`] tem teto: um balde por chave, sem teto,
+/// é memória do Dogma para quem tiver chaves de sobra. Um Dogma aberto
+/// (ADR 0021) aceita identidade nova a cada aperto de mão.
+pub const PILOTOS_LEMBRADOS: usize = 4096;
+
 /// Um balde de fichas.
 ///
 /// Uma ficha por evento. Elas voltam a `por_segundo` e o balde nunca passa de
@@ -135,13 +169,35 @@ impl Balde {
 
     /// Gasta uma ficha, se houver.
     pub fn tentar(&mut self, agora: Instant) -> bool {
+        self.gastar(1.0, agora)
+    }
+
+    /// Gasta várias fichas de uma vez, se houver todas.
+    ///
+    /// Uma ficha por evento serve para quadro, que é sempre do mesmo tamanho.
+    /// Não serve para byte: é justamente por contar **quadros** que o [`Vigia`]
+    /// é cego para um anexo de 20 MB, que é um quadro só. Este é o mesmo balde
+    /// com a unidade certa — e é tudo ou nada, porque meia transferência
+    /// autorizada não é autorização nenhuma.
+    pub fn gastar(&mut self, quantas: f64, agora: Instant) -> bool {
         self.repor(agora);
-        if self.fichas >= 1.0 {
-            self.fichas -= 1.0;
+        if self.fichas >= quantas {
+            self.fichas -= quantas;
             true
         } else {
             false
         }
+    }
+
+    /// Devolve fichas ao balde, sem passar da capacidade.
+    ///
+    /// Existe por causa de uma ordem que não dá para inverter: o balde é
+    /// consultado com o tamanho **declarado**, e o teto pode recusar depois
+    /// dele. Cobrar por uma transferência que nunca aconteceu faria a recusa
+    /// custar a quem foi recusado.
+    pub fn devolver(&mut self, quantas: f64, agora: Instant) {
+        self.repor(agora);
+        self.fichas = (self.fichas + quantas).min(self.capacidade);
     }
 
     /// Se o balde já voltou a estar cheio.
@@ -287,6 +343,70 @@ impl Vigia {
     #[must_use]
     pub fn descartados(&self) -> u32 {
         self.descartados
+    }
+}
+
+/// O balde de bytes, um por piloto.
+///
+/// O terceiro balde do ADR 0025, acrescentado pelo ADR 0027, no mesmo mecanismo
+/// e com o tempo entrando por parâmetro como os outros dois. Chave no piloto e
+/// não na conexão: uma pessoa abrindo cinco conexões para subir cinco arquivos
+/// ao mesmo tempo é exatamente o caso que um balde por conexão não pega, e a
+/// identidade aqui já está provada — isto acontece depois do desafio-resposta.
+#[derive(Debug, Default)]
+pub struct Vazao {
+    baldes: HashMap<PilotId, Balde>,
+}
+
+impl Vazao {
+    /// Uma vazão que não viu ninguém.
+    #[must_use]
+    pub fn nova() -> Self {
+        Self::default()
+    }
+
+    /// Se este piloto pode gastar `bytes` agora.
+    ///
+    /// Consultado com o tamanho **declarado**, antes de o primeiro byte ser
+    /// lido — pela mesma razão que o teto é: cobrar depois é cobrar por uma
+    /// coisa que já aconteceu.
+    pub fn permitir(&mut self, piloto: PilotId, bytes: u64, agora: Instant) -> bool {
+        // Uma transferência maior que a capacidade do balde nunca passaria, por
+        // mais que se esperasse. O teto por arquivo já a teria recusado com
+        // razão própria; aqui ela não pode virar espera infinita.
+        let custo = bytes as f64;
+        if custo > f64::from(BYTES_DE_RAJADA) {
+            return false;
+        }
+
+        if let Some(balde) = self.baldes.get_mut(&piloto) {
+            return balde.gastar(custo, agora);
+        }
+
+        if self.baldes.len() >= PILOTOS_LEMBRADOS {
+            self.baldes.retain(|_, balde| !balde.cheio(agora));
+        }
+        if self.baldes.len() >= PILOTOS_LEMBRADOS {
+            return false;
+        }
+
+        let mut balde = Balde::novo(BYTES_DE_RAJADA, BYTES_POR_SEGUNDO, agora);
+        let permitido = balde.gastar(custo, agora);
+        self.baldes.insert(piloto, balde);
+        permitido
+    }
+
+    /// Devolve o que uma transferência recusada mais adiante não gastou.
+    pub fn devolver(&mut self, piloto: PilotId, bytes: u64, agora: Instant) {
+        if let Some(balde) = self.baldes.get_mut(&piloto) {
+            balde.devolver(bytes as f64, agora);
+        }
+    }
+
+    /// Quantos pilotos estão sendo lembrados.
+    #[must_use]
+    pub fn lembrados(&self) -> usize {
+        self.baldes.len()
     }
 }
 
@@ -538,6 +658,127 @@ mod testes {
             assert_eq!(vigia.avaliar(depois), Veredito::Passa);
         }
         assert_eq!(vigia.avaliar(depois), Veredito::Avisa);
+    }
+
+    // ---- o balde de bytes, do ADR 0027 ----
+
+    fn piloto(numero: u64) -> PilotId {
+        PilotId(numero)
+    }
+
+    #[test]
+    fn o_vigia_de_quadros_e_cego_para_um_anexo_e_por_isso_ha_um_terceiro_balde() {
+        // O ADR 0027 diz isto em voz alta, e é a razão de este balde existir:
+        // sessenta quadros de rajada são sessenta anexos de 20 MB, ou seja
+        // 1,2 GB passando por um mecanismo que acha que contou tudo. Dizer
+        // "já temos limitação de taxa" seria falso, e este teste é onde a
+        // afirmação para de ser opinião.
+        let inicio = zero();
+        let mut vigia = Vigia::novo(inicio);
+        let mut vazao = Vazao::nova();
+
+        let anexo = 20 * 1024 * 1024_u64;
+        let mut quadros_que_passaram = 0_u32;
+        let mut bytes_que_passaram = 0_u64;
+        for _ in 0..QUADROS_DE_RAJADA {
+            if vigia.avaliar(inicio) == Veredito::Passa {
+                quadros_que_passaram += 1;
+            }
+            if vazao.permitir(piloto(1), anexo, inicio) {
+                bytes_que_passaram += anexo;
+            }
+        }
+        assert_eq!(
+            quadros_que_passaram, QUADROS_DE_RAJADA,
+            "o vigia devia deixar passar a rajada inteira: ele conta quadros"
+        );
+        assert!(
+            bytes_que_passaram < u64::from(quadros_que_passaram) * anexo,
+            "o balde de bytes deixou passar tanto quanto o de quadros, então \
+             ele não está contando bytes"
+        );
+    }
+
+    #[test]
+    fn uma_foto_nunca_encosta_no_balde_de_bytes() {
+        // Três megabytes é uma foto de celular. Vinte delas seguidas, sem
+        // espera nenhuma entre elas, e nada é barrado — senão o balde estaria
+        // atrapalhando justamente o uso que motivou o recurso.
+        let inicio = zero();
+        let mut vazao = Vazao::nova();
+        for numero in 0..20 {
+            assert!(
+                vazao.permitir(piloto(1), 3 * 1024 * 1024, inicio),
+                "a foto {numero} foi barrada"
+            );
+        }
+    }
+
+    #[test]
+    fn esvaziar_o_dogma_repetidamente_passa_a_custar_horas() {
+        // O que o ADR compra com este balde, medido em vez de afirmado: gasta a
+        // rajada, e o gibibyte seguinte leva o tempo que a reposição impõe.
+        let inicio = zero();
+        let mut vazao = Vazao::nova();
+        assert!(vazao.permitir(piloto(1), u64::from(BYTES_DE_RAJADA), inicio));
+
+        let gibibyte = 1024 * 1024 * 1024_u64;
+        let mut restante = gibibyte;
+        let mut segundos = 0_u64;
+        while restante > 0 {
+            segundos += 60;
+            let pedaco = restante.min(16 * 1024 * 1024);
+            if vazao.permitir(piloto(1), pedaco, inicio + Duration::from_secs(segundos)) {
+                restante -= pedaco;
+            }
+        }
+        assert!(
+            segundos > 40 * 60,
+            "o gibibyte seguinte saiu em {segundos} s, que não é «ao longo de horas»"
+        );
+    }
+
+    #[test]
+    fn o_balde_de_bytes_conta_por_piloto_e_nao_por_conexao() {
+        // Cinco conexões da mesma pessoa são cinco fluxos e um só orçamento; e
+        // a pessoa do lado não paga por ela.
+        let inicio = zero();
+        let mut vazao = Vazao::nova();
+        assert!(vazao.permitir(piloto(1), u64::from(BYTES_DE_RAJADA), inicio));
+        assert!(
+            !vazao.permitir(piloto(1), 1024 * 1024, inicio),
+            "a mesma identidade numa segunda conexão ganhou orçamento novo"
+        );
+        assert!(
+            vazao.permitir(piloto(2), 1024 * 1024, inicio),
+            "o vizinho pagou pelo abusador"
+        );
+    }
+
+    #[test]
+    fn uma_transferencia_recusada_depois_e_devolvida_ao_balde() {
+        // O balde é consultado com o tamanho declarado e o teto pode recusar em
+        // seguida. Cobrar por uma transferência que nunca aconteceu faria a
+        // recusa custar a quem foi recusado.
+        let inicio = zero();
+        let mut vazao = Vazao::nova();
+        let metade = u64::from(BYTES_DE_RAJADA / 2);
+        assert!(vazao.permitir(piloto(1), metade, inicio));
+        vazao.devolver(piloto(1), metade, inicio);
+        assert!(
+            vazao.permitir(piloto(1), u64::from(BYTES_DE_RAJADA), inicio),
+            "a rajada não voltou inteira depois de uma recusa"
+        );
+    }
+
+    #[test]
+    fn a_tabela_de_pilotos_tem_teto() {
+        let inicio = zero();
+        let mut vazao = Vazao::nova();
+        for numero in 0..PILOTOS_LEMBRADOS as u64 + 10 {
+            vazao.permitir(piloto(numero), u64::from(BYTES_DE_RAJADA), inicio);
+        }
+        assert_eq!(vazao.lembrados(), PILOTOS_LEMBRADOS);
     }
 
     #[test]

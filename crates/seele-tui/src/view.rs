@@ -217,6 +217,7 @@ mod tests {
             body: body.into(),
             replies_to: None,
             client_message_id: None,
+            attachment: None,
         }
     }
 

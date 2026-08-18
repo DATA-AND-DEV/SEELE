@@ -95,6 +95,14 @@ pub struct Message {
     pub own: bool,
     /// Whether it has been edited since.
     pub edited: bool,
+    /// The file hanging off it, if any. ADR 0027.
+    ///
+    /// **Still `Some` after the bytes are gone**, carrying
+    /// `AttachmentState::Expired` with the name and the size the file had. That
+    /// is the whole reason the Dogma keeps the row after deleting the blob: a
+    /// message that had a picture and now draws as an empty line would leave
+    /// nobody able to tell that there had ever been one.
+    pub attachment: Option<seele_proto::control::AttachmentInfo>,
 }
 
 /// Something the interface should surface, already carrying its severity.
@@ -106,6 +114,32 @@ pub struct Notice {
     pub reason: seele_proto::control::AlertReason,
     /// The operator's own words, when they have any.
     pub operator_text: Option<String>,
+}
+
+/// What became of a file this client was moving.
+///
+/// Its own kind rather than a [`Notice`]: an `AlertReason` is about the session
+/// and a shell draws it in the alert band, while these two are about **one
+/// message** and belong beside that message. ADR 0027 also wants the sentence
+/// for a fallen transfer to say that retrying starts from zero, which is a
+/// thing no alert has ever had to say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransferNotice {
+    /// A file this client was sending was not taken, and nothing was published.
+    Refused {
+        /// Which of this client's messages it was.
+        client_message_id: seele_proto::ids::ClientMessageId,
+        /// Why. Enumerated, so the shell writes a different sentence for a file
+        /// that will never fit and one that would fit in a minute.
+        reason: seele_proto::control::AttachmentRefusal,
+    },
+    /// A file this client asked for is not coming.
+    Unavailable {
+        /// Which attachment.
+        attachment: seele_proto::ids::AttachmentId,
+        /// Why. The expected reason is `Expired`.
+        reason: seele_proto::control::AttachmentRefusal,
+    },
 }
 
 /// The average Sync Ratio of a Cage, already banded.
@@ -174,6 +208,12 @@ pub struct Room {
     pub telemetry: Option<seele_proto::control::Telemetry>,
     /// The last thing worth surfacing.
     pub notice: Option<Notice>,
+    /// What became of the files this client has been moving, oldest first.
+    ///
+    /// A queue rather than one slot, unlike [`Self::notice`]: two transfers can
+    /// be in the air at once, and the second one failing must not erase the
+    /// reason the first one did. A shell drains it.
+    pub transfers: Vec<TransferNotice>,
     /// Set once the session is over.
     pub ended: Option<Ended>,
 }
@@ -194,6 +234,8 @@ pub struct Changed {
     pub telemetry: bool,
     /// A notice was raised.
     pub notice: bool,
+    /// A transfer was refused, or a file asked for is not coming.
+    pub transfers: bool,
     /// The session ended.
     pub ended: bool,
 }
@@ -202,7 +244,13 @@ impl Changed {
     /// Whether anything at all changed.
     #[must_use]
     pub fn any(self) -> bool {
-        self.roster || self.messages || self.channels || self.telemetry || self.notice || self.ended
+        self.roster
+            || self.messages
+            || self.channels
+            || self.telemetry
+            || self.notice
+            || self.transfers
+            || self.ended
     }
 }
 
@@ -463,6 +511,7 @@ impl Room {
                 author_nickname,
                 body,
                 replies_to,
+                attachment,
                 ..
             } => {
                 // Idempotent by server id: a history fetch that overlaps what is
@@ -487,6 +536,7 @@ impl Room {
                     replies_to: *replies_to,
                     own: Some(*author) == self.me,
                     edited: false,
+                    attachment: attachment.clone(),
                 });
                 // History arrives oldest-first per page, but a page fetched
                 // after live messages have landed would otherwise sit at the
@@ -526,6 +576,43 @@ impl Room {
                     operator_text: operator_text.clone(),
                 });
                 changed.notice = true;
+            }
+
+            // ---- attachments ----
+            //
+            // Neither of these carries bytes; the bytes have their own stream.
+            // What arrives here is the reason, which is the half a screen needs.
+            ServerMessage::AttachmentRefused {
+                client_message_id,
+                reason,
+            } => {
+                self.transfers.push(TransferNotice::Refused {
+                    client_message_id: *client_message_id,
+                    reason: *reason,
+                });
+                changed.transfers = true;
+            }
+
+            ServerMessage::AttachmentUnavailable { attachment, reason } => {
+                // Fold the answer back into the message, so the screen stops
+                // offering a file that is gone without anybody having to fetch
+                // the page again. The row on the Dogma already says this; the
+                // page this client is holding was drawn before it did.
+                if *reason == seele_proto::control::AttachmentRefusal::Expired {
+                    for message in &mut self.messages {
+                        if let Some(carried) = &mut message.attachment {
+                            if carried.id == *attachment {
+                                carried.state = seele_proto::control::AttachmentState::Expired;
+                                changed.messages = true;
+                            }
+                        }
+                    }
+                }
+                self.transfers.push(TransferNotice::Unavailable {
+                    attachment: *attachment,
+                    reason: *reason,
+                });
+                changed.transfers = true;
             }
 
             ServerMessage::Disconnecting { reason } => {
@@ -715,6 +802,7 @@ mod tests {
             body: body.into(),
             replies_to: None,
             client_message_id: None,
+            attachment: None,
         }
     }
 

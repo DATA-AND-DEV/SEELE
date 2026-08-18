@@ -34,8 +34,9 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context, Result};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use seele_proto::control::{
-    AlertReason, AlertSeverity, CageInfo, ClientMessage, DisconnectReason, LineInfo, Permission,
-    PilotProfile, PilotState, Presence, Role, ServerMessage, Subsystem, SubsystemHealth, Telemetry,
+    AlertReason, AlertSeverity, AttachmentRefusal, CageInfo, ClientMessage, DisconnectReason,
+    LineInfo, Permission, PilotProfile, PilotState, Presence, Role, ServerMessage, Subsystem,
+    SubsystemHealth, Telemetry,
 };
 use seele_proto::ids::{CageId, LineId, PilotId, RoleId, SessionId, Ssrc};
 use seele_proto::sync_ratio::{SyncInputs, SyncRatio};
@@ -63,6 +64,13 @@ const OUTBOUND_DEPTH: usize = 256;
 /// dizer uma frase — então um cliente honesto nunca chega perto disto; e um
 /// desonesto encontra contrapressão em vez de memória do Dogma para gastar.
 const ENTRADA_DEPTH: usize = 64;
+
+/// Quantas razões de transferência esperam para ir ao fluxo de controle.
+///
+/// Uma por transferência viva, e transferência viva é coisa que se conta nos
+/// dedos por conexão: o balde de bytes do ADR 0027 não deixa uma pessoa ter
+/// dezesseis subidas grandes acontecendo. Dezesseis é folga, não medida.
+const AVISOS_DEPTH: usize = 16;
 
 /// Aborta uma tarefa quando sai de escopo.
 ///
@@ -539,7 +547,7 @@ async fn run_session(
     mut send: quinn::SendStream,
     recv: quinn::RecvStream,
     session: &Session,
-    dogma: &Dogma,
+    dogma: &Arc<Dogma>,
     cages: &crate::cage::Cages,
 ) -> Result<()> {
     // Uma tarefa é dona do fluxo de leitura e entrega quadros inteiros por um
@@ -585,6 +593,73 @@ async fn run_session(
     // Um vigia por conexão. Estado local da sessão, sem mapa nem tranca: nada
     // fora desta conexão precisa saber quantos quadros ela gastou.
     let mut vigia = Vigia::novo(Instant::now());
+
+    // O controle fica acima de toda transferência, escrito e não implícito.
+    // Ordena só os nossos fluxos dentro **desta** conexão: duas pessoas subindo
+    // de conexões diferentes não se ordenam entre si, e o ADR 0027 põe isso na
+    // lista do que fica sem saída.
+    let _ = send.set_priority(crate::transfer::CONTROL_PRIORITY);
+
+    // Por onde uma tarefa de transferência devolve a razão de uma recusa ao
+    // fluxo de controle. `specs/02-protocolo.md` quer toda razão enumerada, e é
+    // no controle que as razões moram; uma transferência não pode escrever
+    // neste fluxo por conta própria porque ele é de quem está no `select!`.
+    //
+    // `recv` num canal é cancel-safe, que é a propriedade que todo ramo deste
+    // `select!` precisa ter — ver o comentário da tarefa leitora acima.
+    let (avisos_tx, mut avisos_rx) = mpsc::channel::<ServerMessage>(AVISOS_DEPTH);
+
+    // Uma tarefa que aceita os fluxos unidirecionais que chegam. Hoje só há um
+    // tipo: alguém mandando um arquivo. Ela vive fora do `select!` de propósito
+    // — receber vinte megabytes ali dentro seria exatamente o bloqueio de
+    // cabeça de fila que o fluxo próprio existe para evitar.
+    //
+    // Guardada fora do `if`, senão o `AbortaAoSair` cairia no fim do bloco e
+    // mataria a tarefa no instante seguinte ao de a criar.
+    let mut _recebedora = None;
+    if let Some(anexos) = dogma.anexos.clone() {
+        let entrada = Arc::clone(dogma);
+        let avisos = avisos_tx.clone();
+        let conexao = connection.clone();
+        let piloto = session.pilot;
+        let apelido = session.nickname.clone();
+        let recebedora = tokio::spawn(async move {
+            while let Ok(mut fluxo) = conexao.accept_uni().await {
+                let anexos = Arc::clone(&anexos);
+                let contexto = Arc::clone(&entrada);
+                let avisos = avisos.clone();
+                let apelido = apelido.clone();
+                // Uma tarefa por transferência: duas pessoas mandando ao mesmo
+                // tempo não se enfileiram uma atrás da outra.
+                tokio::spawn(async move {
+                    match crate::transfer::receive(&anexos, &contexto, piloto, &apelido, &mut fluxo)
+                        .await
+                    {
+                        Ok(crate::transfer::Outcome::Published(_)) => {}
+                        Ok(crate::transfer::Outcome::Refused {
+                            client_message_id,
+                            reason,
+                        }) => {
+                            let _ = avisos
+                                .send(ServerMessage::AttachmentRefused {
+                                    client_message_id,
+                                    reason,
+                                })
+                                .await;
+                        }
+                        Err(erro) => {
+                            // Sem `client_message_id` não há a quem responder:
+                            // o cabeçalho é justamente o que não foi lido. Uma
+                            // transferência que cai antes do cabeçalho é uma
+                            // transferência que o cliente sabe que caiu.
+                            tracing::debug!(%erro, "uma transferência terminou sem cabeçalho");
+                        }
+                    }
+                });
+            }
+        });
+        _recebedora = Some(AbortaAoSair(recebedora));
+    }
 
     let (outbound_tx, mut outbound_rx) = mpsc::channel::<Vec<u8>>(OUTBOUND_DEPTH);
     // Quadros de voz que o transporte recusou nesta sessão. Ver o `select!`.
@@ -795,6 +870,7 @@ async fn run_session(
                                 body: stored.body,
                                 replies_to: stored.replies_to,
                                 client_message_id: stored.client_message_id,
+                                attachment: stored.attachment,
                             }).await?;
                         }
                     }
@@ -1131,6 +1207,63 @@ async fn run_session(
                         }
                     }
 
+                    // ---- attachments ----
+                    //
+                    // Only the download crosses control, and only as an ask:
+                    // ADR 0027 puts the bytes on a stream of their own in both
+                    // directions. Sending is not here at all, because a sender
+                    // opens its own stream — see the `accept_uni` task above.
+                    ClientMessage::FetchAttachment { attachment } => {
+                        // ReadLine and nothing more: a file hanging off a
+                        // message somebody may read is part of that message,
+                        // and `Permission::AttachFile` is about putting bytes
+                        // on somebody's disk rather than about looking at them.
+                        if !pode(dogma, session.pilot, Permission::ReadLine).await {
+                            frame::write(&mut send, &ServerMessage::AttachmentUnavailable {
+                                attachment,
+                                reason: AttachmentRefusal::NotFound,
+                            }).await?;
+                            continue;
+                        }
+                        let Some(anexos) = dogma.anexos.clone() else {
+                            frame::write(&mut send, &ServerMessage::AttachmentUnavailable {
+                                attachment,
+                                reason: AttachmentRefusal::Unavailable,
+                            }).await?;
+                            continue;
+                        };
+                        // In a task of its own, so that a twenty-megabyte
+                        // download does not stop this loop from reading the
+                        // next control frame. That is the entire point of the
+                        // stream being separate, and doing the write here would
+                        // hand it back.
+                        let para_fora = connection.clone();
+                        let contexto = Arc::clone(dogma);
+                        let avisos = avisos_tx.clone();
+                        tokio::spawn(async move {
+                            match crate::transfer::deliver(
+                                &anexos, &contexto, &para_fora, attachment,
+                            ).await {
+                                Ok(Ok(bytes)) => {
+                                    tracing::debug!(%attachment, bytes, "attachment delivered");
+                                }
+                                Ok(Err(reason)) => {
+                                    let _ = avisos.send(ServerMessage::AttachmentUnavailable {
+                                        attachment,
+                                        reason,
+                                    }).await;
+                                }
+                                Err(erro) => {
+                                    tracing::warn!(%attachment, %erro, "attachment delivery failed");
+                                    let _ = avisos.send(ServerMessage::AttachmentUnavailable {
+                                        attachment,
+                                        reason: AttachmentRefusal::Unavailable,
+                                    }).await;
+                                }
+                            }
+                        });
+                    }
+
                     // The handshake is over. Repeating it is a protocol
                     // violation, not a re-authentication.
                     ClientMessage::Response { .. } | ClientMessage::Hello { .. } => break,
@@ -1148,6 +1281,14 @@ async fn run_session(
                     from: session.ssrc,
                     bytes: bytes.to_vec(),
                 }).await;
+            }
+
+            aviso = avisos_rx.recv() => {
+                // A razão de uma transferência recusada, ou de um arquivo que
+                // não vem. Escrita aqui porque este é o dono do fluxo de
+                // controle, e não pela tarefa que descobriu o motivo.
+                let Some(aviso) = aviso else { break };
+                frame::write(&mut send, &aviso).await?;
             }
 
             outbound = outbound_rx.recv() => {
@@ -1634,6 +1775,7 @@ fn translate(event: &Event, lines: &[LineId], self_pilot: PilotId) -> Option<Ser
                     body: message.body.clone(),
                     replies_to: message.replies_to,
                     client_message_id: message.client_message_id,
+                    attachment: message.attachment.clone(),
                 })
         }
         Event::MessageEdited { line, id, body } => {

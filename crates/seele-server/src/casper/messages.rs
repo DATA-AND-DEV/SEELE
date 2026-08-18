@@ -34,8 +34,10 @@
 
 use anyhow::{Context, Result};
 use rusqlite::{params, OptionalExtension};
+use seele_proto::control::AttachmentInfo;
 use seele_proto::ids::{ClientMessageId, LineId, MessageId, PilotId};
 
+use super::attachments::Attachments;
 use super::{now_seconds, Casper};
 
 /// Largest page a client may ask for.
@@ -94,6 +96,16 @@ pub struct StoredMessage {
     pub replies_to: Option<MessageId>,
     /// Echo of the sender's idempotency key.
     pub client_message_id: Option<ClientMessageId>,
+    /// The file hanging off it, if any. ADR 0027.
+    ///
+    /// Joined by the readers below rather than looked up per row, for the same
+    /// reason `author_nickname` is: a screenful of history would otherwise be
+    /// fifty round trips through SQLite to answer "does this one have a file".
+    ///
+    /// Still `Some` when the bytes have been evicted, carrying
+    /// [`AttachmentState::Expired`]. **The text survives the file**, and this
+    /// field is where that is true or not true.
+    pub attachment: Option<AttachmentInfo>,
 }
 
 /// Why a message operation was refused.
@@ -202,6 +214,15 @@ impl<'a> Messages<'a> {
                         edited_at,
                         replies_to: replies_to.map(|id| MessageId(id as u64)),
                         client_message_id: message.client_message_id,
+                        // Left empty here even for a retry that had a file, and
+                        // deliberately: the transaction above holds the only
+                        // borrow of the connection, and the caller that
+                        // publishes a transfer re-reads the row through
+                        // [`Self::one`] anyway. That is also where a retry of an
+                        // attachment is recognised — the row already having a
+                        // file is what stops a second one being written for the
+                        // same message.
+                        attachment: None,
                     });
                     continue;
                 }
@@ -230,6 +251,9 @@ impl<'a> Messages<'a> {
                 edited_at: None,
                 replies_to: message.replies_to,
                 client_message_id: message.client_message_id,
+                // Nothing yet: the row for a file is written after the bytes
+                // have landed, by the transfer that brought them.
+                attachment: None,
             });
         }
 
@@ -271,6 +295,7 @@ impl<'a> Messages<'a> {
 
         let rows = statement.query_map(params![i64::from(line.get()), before, limit], |row| {
             Ok(StoredMessage {
+                attachment: None,
                 id: MessageId(row.get::<_, i64>(0)? as u64),
                 line: LineId(row.get::<_, i64>(1)? as u32),
                 author: PilotId(row.get::<_, i64>(2)? as u64),
@@ -285,7 +310,16 @@ impl<'a> Messages<'a> {
             })
         })?;
 
-        Ok(rows.filter_map(Result::ok).collect())
+        let mut page: Vec<StoredMessage> = rows.filter_map(Result::ok).collect();
+        // One query for the page rather than one per row.
+        let ids: Vec<MessageId> = page.iter().map(|message| message.id).collect();
+        let found = Attachments::new(self.casper).for_messages(&ids)?;
+        for message in &mut page {
+            message.attachment = found
+                .get(&message.id)
+                .map(super::attachments::StoredAttachment::info);
+        }
+        Ok(page)
     }
 
     /// How many messages a Line holds, removed ones excluded.
@@ -369,7 +403,7 @@ impl<'a> Messages<'a> {
     ///
     /// Fails on a database error.
     pub fn one(&self, id: MessageId) -> Result<Option<StoredMessage>> {
-        Ok(self
+        let mut found = self
             .casper
             .connection()
             .query_row(
@@ -392,10 +426,17 @@ impl<'a> Messages<'a> {
                         client_message_id: row
                             .get::<_, Option<i64>>(7)?
                             .map(|id| ClientMessageId(id as u64)),
+                        attachment: None,
                     })
                 },
             )
-            .optional()?)
+            .optional()?;
+        if let Some(message) = &mut found {
+            message.attachment = Attachments::new(self.casper)
+                .of_message(message.id)?
+                .map(|attachment| attachment.info());
+        }
+        Ok(found)
     }
 
     /// Deletes messages older than the retention window.
