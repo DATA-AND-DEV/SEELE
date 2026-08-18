@@ -462,6 +462,41 @@ pub enum DisconnectReason {
     ///
     /// Appended last, for the reason [`AlertReason::RateLimited`] gives.
     FellBehind,
+
+    /// The knock reached the host and has not been decided yet. ADR 0030.
+    ///
+    /// The third admission layer is TOFU applied to people: a key nobody has
+    /// approved yet does not get in, and does not get turned away either — the
+    /// request is written down and the connection ends immediately.
+    ///
+    /// Nothing waits, and that is the design rather than a shortcut. Holding
+    /// the connection open would force a deadline, and a deadline manufactures
+    /// a third answer — "nobody was there" — that whoever knocked cannot act
+    /// on. A standing request the host can grant hours later is a stronger
+    /// promise than a bar that does not move, and it costs the Dogma nothing to
+    /// keep, which is the same argument [`Self::CredentialRejected`] makes for
+    /// refusing before the signature is checked.
+    ///
+    /// **This one is deliberately distinguishable**, unlike the refusals
+    /// `specs/08-seguranca.md` requires to be uniform. Those are uniform
+    /// because a caller guessing a secret would learn which guess landed
+    /// closer. Here nothing was guessed: the peer proved a key it holds, and
+    /// the answer is about that peer alone. That a Dogma has a doorkeeper is
+    /// not a secret worth keeping — somebody who is not told to wait leaves
+    /// believing the address was wrong.
+    ///
+    /// Appended last, for the reason [`AlertReason::RateLimited`] gives.
+    AdmissionPending,
+
+    /// The host looked at the knock and said no. ADR 0030.
+    ///
+    /// Distinct from [`Self::AdmissionPending`] for the reason that variant
+    /// gives, and distinct from [`Self::Banned`] because it is milder: a
+    /// refusal here is undone by the host approving the same key later, and it
+    /// never ended a session that was already running.
+    ///
+    /// Appended last, for the reason [`AlertReason::RateLimited`] gives.
+    AdmissionDenied,
 }
 
 /// How loud an alert is.
@@ -1845,6 +1880,46 @@ mod tests {
             let frame = encode(&message).unwrap();
             assert_eq!(decode::<ClientMessage>(&frame).unwrap(), message);
         }
+    }
+
+    #[test]
+    fn the_doorkeeper_reasons_round_trip_and_do_not_read_as_an_older_one() {
+        // ADR 0030. The round trip is the cheap half; the ordinals below are the
+        // half that matters.
+        //
+        // `postcard` writes an enum variant as its position, so a build one
+        // protocol version older reads byte 12 as whatever *it* has at 12. The
+        // two new reasons are appended, so an older build has nothing there and
+        // refuses the frame — which is the contract. What would break it is
+        // somebody inserting a variant above them to keep the list tidy: the
+        // reason a peer was told is «you fell behind» would silently become
+        // «the host said no», and neither end would report anything.
+        //
+        // Asserting the numbers rather than only the round trip is what makes
+        // that visible, because a round trip is self-referential: encode and
+        // decode move together, and a shifted list round-trips perfectly.
+        for (reason, ordinal) in [
+            (DisconnectReason::AdmissionPending, 12_u8),
+            (DisconnectReason::AdmissionDenied, 13_u8),
+        ] {
+            let message = ServerMessage::Disconnecting { reason };
+            let frame = encode(&message).unwrap();
+            assert_eq!(decode::<ServerMessage>(&frame).unwrap(), message);
+
+            let bare: Vec<u8> = postcard::to_extend(&reason, Vec::new()).unwrap();
+            assert_eq!(
+                bare.as_slice(),
+                &[ordinal],
+                "{reason:?} no longer sits where it was appended, so every peer \
+                 one version older now reads it as a different reason"
+            );
+        }
+
+        // And the neighbour that was last before them has not moved either.
+        assert_eq!(
+            postcard::to_extend(&DisconnectReason::FellBehind, Vec::new()).unwrap(),
+            vec![11_u8]
+        );
     }
 
     #[test]

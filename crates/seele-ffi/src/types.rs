@@ -215,6 +215,17 @@ pub enum EndReason {
     /// Reconnecting is the repair, not a refusal: the session's view of the
     /// conversation has a hole in it that only a full resync fills.
     FellBehind,
+    /// The host has not decided about this key yet. ADR 0030.
+    ///
+    /// Not a refusal: the request is written down on the hosting machine and
+    /// stays there. Trying again after the host has looked is what gets in, and
+    /// nothing was lost by the attempt.
+    AdmissionPending,
+    /// The host decided this key does not come in. ADR 0030.
+    ///
+    /// Milder than [`Self::Banned`]: the host can approve the same key later,
+    /// and this never ended a session that was already running.
+    AdmissionDenied,
     /// The link died without the server saying why.
     LinkLost,
 }
@@ -234,6 +245,8 @@ impl From<seele_core::DisconnectReason> for EndReason {
             seele_core::DisconnectReason::ProtocolViolation => Self::ProtocolViolation,
             seele_core::DisconnectReason::RateLimited => Self::RateLimited,
             seele_core::DisconnectReason::FellBehind => Self::FellBehind,
+            seele_core::DisconnectReason::AdmissionPending => Self::AdmissionPending,
+            seele_core::DisconnectReason::AdmissionDenied => Self::AdmissionDenied,
         }
     }
 }
@@ -945,6 +958,8 @@ mod tests {
             seele_core::DisconnectReason::ProtocolViolation,
             seele_core::DisconnectReason::RateLimited,
             seele_core::DisconnectReason::FellBehind,
+            seele_core::DisconnectReason::AdmissionPending,
+            seele_core::DisconnectReason::AdmissionDenied,
         ];
         let mapped: std::collections::HashSet<EndReason> =
             all.into_iter().map(EndReason::from).collect();

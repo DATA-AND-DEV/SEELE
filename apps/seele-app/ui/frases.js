@@ -29,6 +29,27 @@ const MOTIVOS = {
   Timeout: "ENLACE PERDIDO",
   ProtocolViolation: "PROTOCOLO VIOLADO",
   RateLimited: "LIMITE DE MENSAGENS EXCEDIDO",
+
+  // ---- a portaria do ADR 0030 ----
+  //
+  // As duas únicas frases desta lista sobre uma entrada que ainda pode dar
+  // certo, e por isso as duas únicas que dizem o que fazer em seguida.
+  //
+  // Elas são separadas de propósito, e a separação é o ADR inteiro em duas
+  // linhas: «não decidiram ainda» e «decidiram que não» pedem coisas opostas de
+  // quem lê. Dobrar as duas em CREDENCIAL RECUSADA — que é onde caíam antes de
+  // existirem — mandaria embora quem só precisava esperar.
+  //
+  // Nenhuma das duas fala em esperar. Nada está esperando: a conexão caiu no
+  // mesmo instante, e o que ficou de pé é o pedido, do outro lado. Uma frase
+  // que dissesse «aguarde» descreveria uma barra girando que não existe.
+  AdmissionPending:
+    "QUEM HOSPEDA AINDA NÃO DECIDIU SOBRE VOCÊ.\nO seu pedido ficou guardado no Dogma, com a sua impressão digital. " +
+    "Ele não vence — tente entrar de novo quando quem hospeda tiver olhado.",
+  AdmissionDenied:
+    "QUEM HOSPEDA RECUSOU A SUA ENTRADA.\nNão é banimento, e não foi a sua senha nem o seu convite: " +
+    "foi uma decisão sobre a sua chave. Fale com quem hospeda por outro canal.",
+
   LinkLost: "ENLACE PERDIDO",
 };
 
