@@ -1026,19 +1026,71 @@ let pastaDeDestino = "";
  * regra do ADR 0026 que este caminho nunca precisa da outra.
  */
 async function escolherAnexo(caminho) {
+  let arquivo;
   try {
-    anexoPendente = await invoke("descrever_arquivo", { caminho });
+    arquivo = await invoke("descrever_arquivo", { caminho });
   } catch (falha) {
     console.warn("descrever_arquivo:", falha);
-    anunciar("NÃO CONSEGUI LER ESSE ARQUIVO");
+    recusarAnexo("NÃO CONSEGUI LER ESSE ARQUIVO");
     return;
   }
-  $("anexo-nome").textContent = anexoPendente.nome;
-  $("anexo-tamanho").textContent = emBytes(anexoPendente.tamanho);
+  guardarAnexo(arquivo);
+}
+
+/**
+ * Abre o seletor de arquivos do sistema.
+ *
+ * O botão ARQUIVO chama isto, e antes ele não chamava nada: o ADR 0027 tinha
+ * decidido que escolher era arrastar, e o botão só dizia a instrução em voz
+ * alta. A emenda do ADR conta o que aconteceu com essa decisão na primeira
+ * pessoa que a usou.
+ *
+ * Desistir do seletor devolve `null` e não escreve nada em lugar nenhum: fechar
+ * um seletor é o caso mais comum de abrir um seletor, e não é falha de coisa
+ * nenhuma.
+ */
+async function abrirSeletorDeArquivo() {
+  let arquivo;
+  try {
+    arquivo = await invoke("escolher_arquivo");
+  } catch (falha) {
+    console.warn("escolher_arquivo:", falha);
+    recusarAnexo("NÃO CONSEGUI LER ESSE ARQUIVO");
+    return;
+  }
+  if (arquivo) guardarAnexo(arquivo);
+}
+
+/** Põe na tela o arquivo que vai junto da próxima mensagem. */
+function guardarAnexo(arquivo) {
+  anexoPendente = arquivo;
+  $("anexo-nome").textContent = arquivo.nome;
+  $("anexo-tamanho").textContent = emBytes(arquivo.tamanho);
   $("anexo-barra").hidden = true;
   $("anexo-estado").textContent = "";
   $("anexo-pendente").hidden = false;
   $("campo-mensagem").focus();
+}
+
+/**
+ * Diz, **onde dá para ver**, que o arquivo não entrou.
+ *
+ * `anunciar()` sozinho não servia aqui, e isto foi descoberto do pior jeito: a
+ * `.anuncio` é uma região de um pixel recortada fora da tela, para leitor de
+ * tela, e quem enxerga não vê nada. Uma falha anunciada só ali é uma falha que,
+ * para quem estava olhando, não aconteceu — que é exatamente a frase do relato
+ * que trouxe este arquivo.
+ *
+ * A caixa do anexo já é `aria-live`, então escrever nela diz as duas coisas de
+ * uma vez, e um segundo `anunciar()` leria a frase duas vezes.
+ */
+function recusarAnexo(frase) {
+  anexoPendente = null;
+  $("anexo-nome").textContent = "";
+  $("anexo-tamanho").textContent = "";
+  $("anexo-barra").hidden = true;
+  $("anexo-estado").textContent = frase;
+  $("anexo-pendente").hidden = false;
 }
 
 /** Desiste do arquivo escolhido. Nada foi mandado, então nada é desfeito. */
@@ -1464,11 +1516,14 @@ $("botao-buscar").addEventListener("click", () => alternarBusca());
 $("busca-fechar").addEventListener("click", () => alternarBusca(false));
 $("form-mensagem").addEventListener("submit", enviar);
 
-// Arrastar é como se escolhe um arquivo. Não há seletor nativo, e a ausência é
-// uma decisão: um seletor custaria um crate a mais na árvore, e o ADR 0027
-// fecha dizendo que nenhuma dependência nova entra por causa de anexos. O
-// botão ARQUIVO existe para ensinar isto — descoberta por acaso não é
-// descoberta — e o `title` dele diz a mesma frase por extenso.
+// Arrastar é o segundo jeito de escolher um arquivo, e não é mais o único: o
+// botão ARQUIVO abre o seletor do sistema. Este ouvinte continua porque quem
+// arrasta espera que arrastar funcione — não porque não haja alternativa.
+//
+// `listen()` não é chamada de JavaScript: é chamada de IPC ao plugin `event`, e
+// todo comando de plugin passa pela ACL. `capabilities/janela.json` é o que faz
+// esta linha ter efeito, e sem aquele arquivo isto aqui era um ouvinte escrito
+// que nunca recebia nada. `tests/permissoes.rs` guarda essa metade.
 listen("tauri://drag-drop", (evento) => {
   const caminhos = evento?.payload?.paths;
   if (!Array.isArray(caminhos) || caminhos.length === 0) return;
@@ -1480,9 +1535,7 @@ listen("tauri://drag-drop", (evento) => {
   escolherAnexo(caminhos[0]);
 });
 $("anexo-tirar").addEventListener("click", tirarAnexo);
-$("botao-anexar").addEventListener("click", () => {
-  anunciar("ARRASTE UM ARQUIVO PARA A CONVERSA PARA ANEXÁ-LO");
-});
+$("botao-anexar").addEventListener("click", abrirSeletorDeArquivo);
 $("lista-mensagens").addEventListener("click", (evento) => {
   const botao = evento.target.closest("button[data-anexo-salvar]");
   if (!botao) return;

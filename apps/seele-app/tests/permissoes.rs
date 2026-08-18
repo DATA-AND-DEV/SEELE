@@ -29,8 +29,15 @@ use tauri::WebviewWindowBuilder;
 /// needed. What is being asked here is decided before any pixel: the capability
 /// resolution happens in `Webview::on_message`, which the mock runtime reaches
 /// exactly as the real one does.
+///
+/// The plugins are the ones `main.rs` registers, and that is load-bearing: a
+/// call to a plugin that is not there comes back «plugin not found», which is
+/// an error like any other. A guard that only asks whether the call failed
+/// would then pass in a world where the ACL grants everything — so the plugin
+/// is here, and the guard reads the wording.
 fn app() -> tauri::App<MockRuntime> {
     mock_builder()
+        .plugin(tauri_plugin_dialog::init())
         .build(contexto())
         .expect("the desktop shell must build from its own configuration")
 }
@@ -138,6 +145,35 @@ fn the_shells_own_commands_stay_reachable_from_the_page() {
         erro.is_ok(),
         "the page can no longer call the shell's own commands: {erro:?}"
     );
+}
+
+#[test]
+fn the_page_cannot_open_a_dialog_of_its_own() {
+    // The file chooser is a Rust command — `escolher_arquivo` in `main.rs` —
+    // and the `dialog` plugin is registered so that command can reach it. The
+    // page is not given the same reach, and the difference is the whole of the
+    // decision: a dialog this shell opens has a title written in `main.rs` and
+    // one thing it can do, and a dialog the page can open is whatever the page
+    // asks for, including a save dialog aimed anywhere on the machine.
+    //
+    // The plugin also drags `tauri-plugin-fs` in with it, whose commands read
+    // and write files. None of that is granted either, and that is what this
+    // asserts: adding a plugin must not quietly widen what the page may do.
+    let app = app();
+    let webview = main_webview(&app);
+    for comando in ["plugin:dialog|open", "plugin:dialog|save"] {
+        let Err(erro) = call(&webview, comando, serde_json::json!({})) else {
+            panic!("the page opened `{comando}` on its own");
+        };
+        // The wording, and not merely the failure: an unregistered plugin also
+        // fails, and this guard was vacuous for exactly that reason until the
+        // plugin above was registered here.
+        assert!(
+            erro.contains("not allowed"),
+            "`{comando}` failed for some other reason than the ACL, so this \
+             guard is not measuring the ACL: {erro}"
+        );
+    }
 }
 
 #[test]

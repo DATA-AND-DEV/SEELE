@@ -23,6 +23,15 @@ serde = { version = "1", features = ["derive"] }
 # guardas de `tests/frontend.rs` continuam usando esta mesma.
 serde_json = "1.0.151"
 tauri = { version = "2", features = [] }
+# O seletor de arquivos. Emenda do ADR 0027, que tinha fechado dizendo que
+# nenhuma dependência nova entraria por causa de anexos — e o primeiro dono a
+# usar o app clicou no botão ARQUIVO esperando um seletor.
+#
+# Três crates, contados nos três alvos com `cargo tree --no-dedupe`: este,
+# `tauri-plugin-fs` (de onde vem o tipo `FilePath`) e `rfd`. Nada além disso, em
+# nenhum dos três: o `rfd` fala com a API do sistema em cada um deles, e as três
+# APIs já estavam na árvore por causa do próprio Tauri.
+tauri-plugin-dialog = "2.7"
 # Atualização pelo próprio app. ADR 0026.
 #
 # Fixado no minor porque o plugin expõe o `reqwest` dele na API pública

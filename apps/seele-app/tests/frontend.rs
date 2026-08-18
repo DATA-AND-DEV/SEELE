@@ -4578,8 +4578,9 @@ fn saving_says_out_loud_what_this_product_does_not_promise() {
         "the confirmation does not separate the question that has an answer \
          from the one that does not"
     );
-    // And it says where the file lands, because there is no native chooser and
-    // therefore no dialog to read the destination off.
+    // And it says where the file lands. Choosing a file to send now opens a
+    // system dialog; saving one that arrived still does not, so this side has
+    // no dialog to read the destination off and has to write it out.
     assert!(
         salvar.contains("destino"),
         "the confirmation does not say where the file will be written"
@@ -4729,6 +4730,161 @@ fn the_name_travels_as_it_was_and_the_type_is_carried_as_a_claim() {
         "an unknown extension no longer falls back to «bytes», which is the \
          only honest answer when nothing is known: {tipo}"
     );
+}
+
+/// Every element id a stretch of script writes to, in order.
+fn ids_reached_for(source: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = source;
+    while let Some(at) = rest.find("$(\"") {
+        rest = &rest[at + 3..];
+        let Some(end) = rest.find('"') else { break };
+        out.push(rest[..end].to_owned());
+        rest = &rest[end..];
+    }
+    out
+}
+
+/// Every element id that a stylesheet clips out of sight.
+///
+/// There is one such region and it is `#anuncio`: a one-pixel box with
+/// `clip-path: inset(50%)`, which exists so a screen reader hears what changed.
+/// Nothing written only there is visible to anybody looking at the screen —
+/// which is the whole of the bug this pair of guards was written for.
+///
+/// Found by reading the stylesheets rather than by naming the id, because the
+/// point is the *property*: a second hidden region added tomorrow has to be
+/// caught by the same rule.
+fn ids_clipped_off_screen() -> BTreeSet<String> {
+    let mut classes = BTreeSet::new();
+    for name in ui_files(".css") {
+        let folha = without_comments(&read(&format!("ui/{name}")));
+        for bloco in folha.split('}') {
+            let Some((seletor, regras)) = bloco.split_once('{') else {
+                continue;
+            };
+            if !regras.contains("clip-path: inset(50%)") {
+                continue;
+            }
+            for parte in seletor.split([',', ' ', '>']) {
+                if let Some(classe) = parte.trim().strip_prefix('.') {
+                    classes.insert(classe.to_owned());
+                }
+            }
+        }
+    }
+    assert!(
+        !classes.is_empty(),
+        "no stylesheet clips anything out of sight any more, so this guard is \
+         measuring nothing — if the screen-reader-only region moved, follow it"
+    );
+
+    let pagina = without_comments(&read("ui/index.html"));
+    let mut ids = BTreeSet::new();
+    for tag in pagina.split('<') {
+        let Some(tag) = tag.split('>').next() else {
+            continue;
+        };
+        let Some(id) = atributo(tag, "id") else {
+            continue;
+        };
+        let Some(class) = atributo(tag, "class") else {
+            continue;
+        };
+        if class.split_whitespace().any(|c| classes.contains(c)) {
+            ids.insert(id);
+        }
+    }
+    ids
+}
+
+/// One attribute of one opening tag, if it has it.
+fn atributo(tag: &str, nome: &str) -> Option<String> {
+    let agulha = format!("{nome}=\"");
+    let at = tag.find(&agulha)?;
+    let rest = &tag[at + agulha.len()..];
+    Some(rest[..rest.find('"')?].to_owned())
+}
+
+#[test]
+fn the_attachment_button_opens_a_chooser() {
+    // The decision this reverses is written down in ADR 0027 and was reverted by
+    // the first person to use it: the button announced «arraste um arquivo» and
+    // opened nothing, because dragging was the only way to choose a file. He
+    // clicked it expecting a chooser, and dragging is not something anybody
+    // discovers on their own.
+    let sessao = read("ui/tela-sessao.js");
+    let fonte = without_comments(&sessao);
+
+    // What the click is wired to, read off the registration itself rather than
+    // assumed.
+    let Some(at) = fonte.find("$(\"botao-anexar\").addEventListener(\"click\"") else {
+        panic!("nothing is listening for a press on the attachment button at all");
+    };
+    let registro = &fonte[at..at + fonte[at..].find(");").unwrap_or(0) + 1];
+
+    assert!(
+        registro.contains("abrirSeletorDeArquivo"),
+        "the attachment button no longer reaches the chooser: {registro}"
+    );
+
+    // And the chooser is a real one: a command that opens the system dialog,
+    // not a sentence describing how to drag.
+    let abrir = js_function(&sessao, "async function abrirSeletorDeArquivo(");
+    assert!(
+        abrir.contains("invoke(\"escolher_arquivo\""),
+        "the button opens nothing: whatever it calls does not ask the shell for \
+         a file chooser: {abrir}"
+    );
+    assert!(
+        abrir.contains("guardarAnexo("),
+        "a file is chosen and never lands on the screen: {abrir}"
+    );
+}
+
+#[test]
+fn a_file_that_cannot_be_read_says_so_where_it_can_be_seen() {
+    // The second half of the same report, and the subtler one. Both attachment
+    // failures used to be reported through `anunciar(…)` alone — and `.anuncio`
+    // is a one-pixel box clipped off the screen for screen readers. To the
+    // person who was looking at the window, a refused file and nothing at all
+    // are the same event.
+    let sessao = read("ui/tela-sessao.js");
+    let recusar = js_function(&sessao, "function recusarAnexo(");
+
+    let escondidos = ids_clipped_off_screen();
+    let escritos = ids_reached_for(&recusar);
+    assert!(
+        !escritos.is_empty(),
+        "the refusal writes to no element at all, so it is invisible again: \
+         {recusar}"
+    );
+    assert!(
+        escritos.iter().any(|id| !escondidos.contains(id)),
+        "every element the refusal writes to is clipped off the screen \
+         ({escondidos:?}), so nothing changes for somebody looking at it"
+    );
+    // And the box it writes into is opened by the same function: a phrase
+    // written into a `hidden` container is as invisible as the clipped one.
+    assert!(
+        recusar.contains(".hidden = false"),
+        "the refusal writes into a box it never unhides: {recusar}"
+    );
+
+    // Both ways of choosing a file route their failure through it. The drag was
+    // the one that had the bug; the chooser is new and would have grown the same
+    // one by copying its neighbour.
+    for entrada in [
+        "async function escolherAnexo(",
+        "async function abrirSeletorDeArquivo(",
+    ] {
+        let corpo = js_function(&sessao, entrada);
+        assert!(
+            corpo.contains("recusarAnexo("),
+            "`{entrada}` reports its failure some other way, and the only other \
+             way this file has is the clipped region: {corpo}"
+        );
+    }
 }
 
 #[test]
