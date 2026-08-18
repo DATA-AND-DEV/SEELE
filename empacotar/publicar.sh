@@ -473,7 +473,10 @@ conferir_versao() {
 }
 
 conferir_ferramentas() {
-    for ferramenta in python3 curl git; do
+    # O `shasum` entra nesta lista por um motivo de tempo, e não de higiene: ele
+    # só é usado no fim, depois de todos os builds. Descobrir a falta dele lá é
+    # descobri-la duas horas tarde demais.
+    for ferramenta in python3 curl git shasum; do
         if ! command -v "$ferramenta" >/dev/null 2>&1; then
             morrer "este script precisa do «${ferramenta}» e ele não está no PATH."
         fi
