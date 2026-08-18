@@ -106,7 +106,21 @@ if privada and publica:
     config["bundle"]["createUpdaterArtifacts"] = True
     print("com pacote de atualização")
 elif privada or publica:
-    print("só metade da chave do atualizador; este .deb não atualiza ninguém")
+    # Qual metade falta, e o que fazer — não só que falta uma.
+    #
+    # A mensagem antiga dizia «só metade da chave» e parava aí. Quem a lia sabia
+    # que algo estava incompleto e não sabia o quê nem onde, o que é a mesma
+    # falha que este produto passou o dia consertando na tela: a mensagem tem a
+    # informação e não a entrega.
+    if privada:
+        print("a chave privada está no ambiente e a pública não está no "
+              "tauri.conf.json (plugins.updater.pubkey).")
+    else:
+        print("a chave pública está no tauri.conf.json e a privada não está "
+              "no ambiente. Para assinar:")
+        print("  export TAURI_SIGNING_PRIVATE_KEY=\"$(cat ~/.tauri/seele.key)\"")
+        print("  export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=…")
+    print("Este .deb funciona normal; ele só não serve de origem para atualização.")
 
 caminho.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n")
 print("versão gravada:", config["version"])

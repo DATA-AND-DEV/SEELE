@@ -214,7 +214,21 @@ try {
         Write-Host "→ com pacote de atualização" -ForegroundColor Cyan
     }
     elseif ($privada -or $publica) {
-        Write-Warning "só metade da chave do atualizador; este instalador não atualiza ninguém."
+        # Qual metade falta, e o que fazer — não só que falta uma. A mensagem
+        # antiga parava em «só metade», que é ter a informação e não entregá-la.
+        if ($privada) {
+            Write-Warning "a chave privada está no ambiente e a pública não está no tauri.conf.json (plugins.updater.pubkey)."
+        }
+        else {
+            Write-Warning "a chave pública está no tauri.conf.json e a privada não está no ambiente. Para assinar:"
+            # `-Encoding UTF8` na instrução, e não por causa do guarda: sem ele, uma
+        # chave salva com BOM traz o BOM para dentro da string e o Tauri
+        # recusa a assinatura. É a mesma família do `%` do zsh que já entrou
+        # numa chave pública neste projeto.
+        Write-Warning '  $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content ~\.tauri\seele.key -Raw -Encoding UTF8'
+            Write-Warning '  $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = "…"'
+        }
+        Write-Warning "Este instalador funciona normal; ele só não serve de origem para atualização."
     }
 
     Write-Utf8SemBom $Config (($json | ConvertTo-Json -Depth 100) + "`n")
