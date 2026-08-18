@@ -393,6 +393,26 @@ async fn hospedar(
             // porta está — que é a metade que faltava de verdade.
             tracing::warn!(%erro, "não consegui semear a portaria");
         }
+
+        // E quem hospeda entra na própria casa.
+        //
+        // Sem isto a portaria tranca o dono para fora: o app conecta no Dogma
+        // que acabou de subir, o porteiro trata quem hospeda como desconhecido,
+        // e o pedido fica esperando a decisão de alguém que não consegue entrar
+        // para decidir. Foi o que aconteceu numa máquina de verdade, e é
+        // deadlock no caminho principal do produto.
+        //
+        // Aqui e não na primeira conexão: se dependesse dela seria a mesma
+        // corrida, porque a decisão precisa existir **antes** de haver alguém a
+        // decidir.
+        //
+        // Falhar aqui é grave o bastante para não hospedar. Um Dogma no ar em
+        // que o dono não entra não é meio funcional — é uma janela travada com
+        // uma frase pedindo que alguém decida.
+        let minha = seele_ffi::impressao_desta_maquina(&config_dir(&app))
+            .map_err(|_| FalhaAoHospedar::NaoSubiu)?;
+        seele_server::portaria::admitir_o_dono(&mut casper, &minha)
+            .map_err(|_| FalhaAoHospedar::NaoSubiu)?;
     }
 
     let alcance = dogma.alcance();

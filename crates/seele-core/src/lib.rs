@@ -68,6 +68,13 @@ pub use seele_proto::control::{
     DisconnectReason, LineInfo, Permission, PilotProfile, PilotState, Presence, ServerMessage,
     Subsystem, SubsystemHealth, Telemetry,
 };
+/// A impressão digital de uma chave pública, no formato que o produto mostra.
+///
+/// Reexportada porque a casca precisa dela para se reconhecer no próprio Dogma
+/// — quem hospeda tem de estar admitido antes de bater na própria porta — e a
+/// regra de dependência do ADR 0002 não deixa a casca ver `seele-proto`.
+pub use seele_proto::transport::key_fingerprint;
+
 pub use seele_proto::ids::{
     AttachmentId, CageId, ClientMessageId, LineId, MessageId, PilotId, RoleId, SessionId, Ssrc,
 };

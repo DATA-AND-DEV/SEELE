@@ -279,6 +279,39 @@ pub fn bater(
     }
 }
 
+/// Admite de saída quem hospeda, no próprio Dogma.
+///
+/// # Por que isto existe
+///
+/// A portaria trancou o dono para fora da própria casa, e o relato veio de um
+/// app instalado: apertar **HOSPEDAR AQUI** subia o Dogma, o app conectava
+/// nele, e o porteiro tratava quem hospeda como desconhecido — o pedido ficava
+/// esperando a decisão de alguém que não conseguia entrar para decidir.
+/// Deadlock no caminho principal do produto.
+///
+/// O desenho do ADR 0030 não tinha noção de dono porque o porteiro decide sobre
+/// **quem chega**, e quem hospeda não chega: já estava aqui.
+///
+/// Chamado no momento de hospedar, e não na primeira conexão: se dependesse da
+/// primeira conexão seria a mesma corrida, porque a decisão precisa existir
+/// antes de haver alguém a decidir.
+///
+/// # Errors
+///
+/// Falha se o banco não responder.
+pub fn admitir_o_dono(casper: &mut Casper, impressao: &str) -> Result<()> {
+    let agora = now_seconds();
+    casper.connection().execute(
+        "INSERT INTO portaria
+             (impressao, veredito, apelido, segredo, observacao, bateu_em, decidido_em)
+         VALUES (?1, 'admitido', '', 'aberto', 'quem hospeda', ?2, ?2)
+         ON CONFLICT(impressao) DO UPDATE
+            SET veredito = 'admitido', decidido_em = ?2",
+        params![impressao, agora],
+    )?;
+    Ok(())
+}
+
 /// Quem hospeda decide sobre um pedido.
 ///
 /// # Errors
@@ -380,6 +413,57 @@ mod tests {
 
     const AYANAMI: &str = "aaaa1111";
     const SORYU: &str = "bbbb2222";
+
+    #[test]
+    fn quem_hospeda_entra_na_propria_casa_sem_esperar_ninguem() {
+        // O defeito que fechou o produto. Apertar HOSPEDAR AQUI subia o Dogma,
+        // o app conectava nele, e o porteiro tratava quem hospeda como
+        // desconhecido — deixando o pedido esperando a decisão de alguém que
+        // não conseguia entrar para decidir.
+        let mut banco = casper();
+        ligar(&mut banco, true).unwrap();
+
+        admitir_o_dono(&mut banco, AYANAMI).unwrap();
+
+        assert_eq!(
+            bater(&mut banco, AYANAMI, "quem hospeda", Segredo::Aberto, "").unwrap(),
+            Resposta::Entra,
+            "quem hospeda bateu na própria porta e ficou esperando alguém abrir"
+        );
+
+        // E não é «a portaria deixou de valer»: qualquer outra pessoa continua
+        // esperando. Um conserto que abrisse a porta para todo mundo passaria
+        // na asserção de cima e falharia aqui.
+        assert_eq!(
+            bater(&mut banco, SORYU, "estranha", Segredo::Aberto, "").unwrap(),
+            Resposta::Pendente,
+            "admitir o dono abriu a porta para todo mundo"
+        );
+    }
+
+    #[test]
+    fn hospedar_de_novo_nao_desfaz_uma_recusa_que_ja_foi_dada() {
+        // Hospedar roda toda vez que a janela sobe um Dogma, sobre o mesmo
+        // banco. Tem de ser idempotente para o dono e inerte para todo o resto.
+        let mut banco = casper();
+        ligar(&mut banco, true).unwrap();
+
+        bater(&mut banco, SORYU, "indesejada", Segredo::Aberto, "").unwrap();
+        decidir(&mut banco, SORYU, false).unwrap();
+
+        admitir_o_dono(&mut banco, AYANAMI).unwrap();
+        admitir_o_dono(&mut banco, AYANAMI).unwrap();
+
+        assert_eq!(
+            bater(&mut banco, AYANAMI, "quem hospeda", Segredo::Aberto, "").unwrap(),
+            Resposta::Entra
+        );
+        assert_eq!(
+            bater(&mut banco, SORYU, "indesejada", Segredo::Aberto, "").unwrap(),
+            Resposta::Recusado,
+            "hospedar de novo desfez uma recusa que quem hospeda tinha dado"
+        );
+    }
 
     #[test]
     fn uma_portaria_desligada_deixa_tudo_como_estava() {

@@ -82,6 +82,31 @@ pub use seele_core::{conhecidos, preferences, search, uri};
 /// shell that draws "no audio" off an empty list is drawing the wrong sentence;
 /// [`Snapshot::audio_available`] is the one that means it.
 #[must_use]
+/// A impressão digital da identidade desta máquina.
+///
+/// A mesma chave com que este computador entra em qualquer Dogma, e a mesma
+/// impressão que o outro lado vê — `identity.key` sob o `home`, criada na
+/// primeira vez.
+///
+/// Existe porque quem hospeda precisa se reconhecer no próprio Dogma antes de
+/// bater na própria porta, e o app não pode calcular isso sozinho: a regra de
+/// dependência do ADR 0002 o deixa ver `seele-ffi` e `seele-server`, e nunca
+/// `seele-core` nem `seele-proto`. A ponte é aqui.
+///
+/// # Errors
+///
+/// Falha se a identidade não puder ser lida nem criada.
+pub fn impressao_desta_maquina(home: &str) -> Result<String, PlugError> {
+    let chave =
+        identity::load_or_create(&PathBuf::from(home).join("identity.key")).map_err(|error| {
+            tracing::warn!(%error, "identity unavailable");
+            PlugError::IdentityUnavailable
+        })?;
+    Ok(seele_core::key_fingerprint(
+        chave.verifying_key().as_bytes(),
+    ))
+}
+
 pub fn capture_devices() -> Vec<CaptureDevice> {
     seele_core::capture_devices()
         .into_iter()
