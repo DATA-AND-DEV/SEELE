@@ -849,7 +849,35 @@ entrega), não mudou nesta rodada, e a classificação de endereços que entrou
 agora deixa o conserto barato: falta só o degrau que lê «este endereço é global e
 está numa placa de rede».
 
-## 21 · O degrau 4 está construído e o ponto de encontro padrão não está no ar
+## 21 · Fechada em 2026-08-18 · O degrau 4 está construído e o ponto de encontro padrão não está no ar
+
+**Como fechou.** O ponto de encontro do projeto está no ar, numa VPS, e o
+`PONTO_PADRAO` aponta para `encontro.seele.app.br`. A partir daqui **ninguém
+precisa de variável de ambiente em máquina nenhuma**: quem hospeda já vem com o
+endereço compilado, e quem entra o recebe dentro do próprio convite, no `enc=`.
+
+Um nome e não um endereço, porque a constante viaja dentro de cada executável do
+mundo — com um nome, trocar de VPS é um registro de DNS; com um IP, seria versão
+nova e todo mundo reinstalando. Com uma rede de endereços embaixo, para o degrau
+não sumir por um DNS ruim num dado dia; e o recuo vale **só** para o endereço
+padrão, porque cair no nosso quando o de outra pessoa não resolve mandaria o
+metadado dela para nós sem que ela tivesse pedido.
+
+**Dois defeitos apareceram ao pôr no ar, e os dois eram nossos.** O serviço subia
+servindo **só IPv4** — ele abre uma escuta por família, e sem marcar o socket
+IPv6 como exclusivo o Linux o fazia de pilha dupla, colidindo com o IPv4 que já
+estava ligado. Ficava `active (running)` com metade do trabalho feito, e o log
+dizia exatamente isso desde o primeiro segundo. Foi achado por uma sonda nova
+(`cargo run -p seele-encontro --example sondar`), que fala o protocolo em vez de
+perguntar se o processo existe — e ela nasceu porque o documento mandava subir o
+seu e não oferecia forma nenhuma de conferir.
+
+**O que continua valendo:** NAT simétrico dos dois lados não fura, por decisão do
+ADR 0022, e a frase do degrau 4 diz «deve funcionar» e não «funciona».
+
+---
+
+## 21 (registro anterior) · O degrau 4 está construído e o ponto de encontro padrão não está no ar
 
 **O que existe.** O furo de NAT do ADR 0022 foi construído em 2026-08-17: o
 serviço (`crates/seele-encontro/`), o lado de quem hospeda
