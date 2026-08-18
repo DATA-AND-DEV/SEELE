@@ -54,7 +54,8 @@ fn nenhum_script_le_texto_sem_dizer_o_encoding() {
     // orquestrador daqui, que embute trechos de PowerShell para mandar por SSH.
     // O defeito é do PowerShell 5.1, e não do arquivo — ele viaja com o texto.
     for nome in ["empacotar/windows.ps1", "empacotar/publicar.sh"] {
-        let corpo = std::fs::read_to_string(raiz().join(nome)).expect("o script tem que ser legível");
+        let corpo =
+            std::fs::read_to_string(raiz().join(nome)).expect("o script tem que ser legível");
 
         for (numero, linha) in sem_comentario(&corpo).lines().enumerate() {
             if !linha.contains("Get-Content") {
@@ -498,7 +499,11 @@ echo deb > "$raiz/entrega/seele_$1_amd64.deb"
              \"chave-publica-de-mentira\" } }\n}\n",
             false,
         );
-        escrever(&repo.join(".github/NOTAS-DE-RELEASE.md"), "## notas\n", false);
+        escrever(
+            &repo.join(".github/NOTAS-DE-RELEASE.md"),
+            "## notas\n",
+            false,
+        );
         escrever(&repo.join(".gitignore"), "/entrega/\n/target/\n", false);
 
         // Os dublês das ferramentas caras, fora do repositório para não sujarem
@@ -709,9 +714,13 @@ fn a_versao_invalida_morre_antes_de_qualquer_pergunta_cara() {
     // é recusado pelo empacotador no último passo — este script o recusa no
     // primeiro.
     let bancada = Bancada::nova();
-    let saida = bancada.rodar(&["0.1.2-rc1", "--conferir"], &[]);
+    let saida = bancada.rodar(&["0.1.2-rc1"], &[]);
 
-    assert_eq!(saida.estado, 1, "versão inválida tem que reprovar:\n{}", saida.texto);
+    assert_eq!(
+        saida.estado, 1,
+        "versão inválida tem que reprovar:\n{}",
+        saida.texto
+    );
     assert!(
         saida.texto.contains("não serve para o instalador"),
         "a mensagem tem que dizer o que há de errado com a versão:\n{}",
@@ -731,10 +740,18 @@ fn a_arvore_suja_impede_o_empacotamento() {
     // trabalho de quem estava editando — e foi assim que a versão de um release
     // vazou para um commit.
     let bancada = Bancada::nova();
-    escrever(&bancada.repo.join("um-rascunho.txt"), "meu trabalho\n", false);
+    escrever(
+        &bancada.repo.join("um-rascunho.txt"),
+        "meu trabalho\n",
+        false,
+    );
     let saida = bancada.rodar(&["1.2.3"], &[]);
 
-    assert_eq!(saida.estado, 1, "árvore suja tem que reprovar:\n{}", saida.texto);
+    assert_eq!(
+        saida.estado, 1,
+        "árvore suja tem que reprovar:\n{}",
+        saida.texto
+    );
     assert!(
         saida.texto.contains("não está limpa"),
         "a mensagem tem que dizer que a árvore está suja:\n{}",
@@ -754,7 +771,11 @@ fn o_docker_fora_do_ar_reprova_antes_da_primeira_compilacao() {
     let bancada = Bancada::nova();
     let saida = bancada.rodar(&["1.2.3"], &[("FALSO_DOCKER", "caido")]);
 
-    assert_eq!(saida.estado, 1, "Docker caído tem que reprovar:\n{}", saida.texto);
+    assert_eq!(
+        saida.estado, 1,
+        "Docker caído tem que reprovar:\n{}",
+        saida.texto
+    );
     assert!(
         saida.texto.contains("não responde"),
         "a mensagem tem que dizer que o daemon não está no ar:\n{}",
@@ -770,7 +791,11 @@ fn o_windows_inalcancavel_reprova_antes_do_linux_emulado() {
     let bancada = Bancada::nova();
     let saida = bancada.rodar(&["1.2.3"], &[("FALSO_SSH", "recusa")]);
 
-    assert_eq!(saida.estado, 1, "Windows fora do ar tem que reprovar:\n{}", saida.texto);
+    assert_eq!(
+        saida.estado, 1,
+        "Windows fora do ar tem que reprovar:\n{}",
+        saida.texto
+    );
     assert!(
         saida.texto.contains("OpenSSH Server"),
         "a mensagem tem que apontar o recurso que costuma estar desligado:\n{}",
@@ -797,13 +822,20 @@ fn o_windows_noutro_commit_reprova() {
         &[("FALSO_SSH_HEAD", "0000000000000000000000000000000000000000")],
     );
 
-    assert_eq!(saida.estado, 1, "commit divergente tem que reprovar:\n{}", saida.texto);
+    assert_eq!(
+        saida.estado, 1,
+        "commit divergente tem que reprovar:\n{}",
+        saida.texto
+    );
     assert!(
         saida.texto.contains("noutro commit"),
         "a mensagem tem que dizer que os dois lados divergiram:\n{}",
         saida.texto
     );
-    assert!(saida.nada_foi_empacotado(), "compilou com os lados divergentes");
+    assert!(
+        saida.nada_foi_empacotado(),
+        "compilou com os lados divergentes"
+    );
 }
 
 #[test]
@@ -814,9 +846,15 @@ fn a_chave_pela_metade_reprova_e_sem_assinatura_libera() {
     let bancada = Bancada::nova();
 
     let saida = bancada.rodar(&["1.2.3"], &[("TAURI_SIGNING_PRIVATE_KEY", "")]);
-    assert_eq!(saida.estado, 1, "meia chave tem que reprovar:\n{}", saida.texto);
+    assert_eq!(
+        saida.estado, 1,
+        "meia chave tem que reprovar:\n{}",
+        saida.texto
+    );
     assert!(
-        saida.texto.contains("chave **privada** não está no ambiente"),
+        saida
+            .texto
+            .contains("chave **privada** não está no ambiente"),
         "a mensagem tem que dizer **qual** metade falta:\n{}",
         saida.texto
     );
@@ -843,7 +881,11 @@ fn o_token_recusado_reprova_antes_de_compilar() {
     let bancada = Bancada::nova();
     let saida = bancada.rodar(&["1.2.3"], &[("FALSO_TOKEN", "vencido")]);
 
-    assert_eq!(saida.estado, 1, "token recusado tem que reprovar:\n{}", saida.texto);
+    assert_eq!(
+        saida.estado, 1,
+        "token recusado tem que reprovar:\n{}",
+        saida.texto
+    );
     assert!(
         saida.texto.contains("não aceitou o token"),
         "a mensagem tem que dizer que a autenticação falhou:\n{}",
@@ -862,7 +904,11 @@ fn um_token_sem_escrita_reprova() {
     let bancada = Bancada::nova();
     let saida = bancada.rodar(&["1.2.3"], &[("FALSO_PUSH", "false")]);
 
-    assert_eq!(saida.estado, 1, "token sem escrita tem que reprovar:\n{}", saida.texto);
+    assert_eq!(
+        saida.estado, 1,
+        "token sem escrita tem que reprovar:\n{}",
+        saida.texto
+    );
     assert!(
         saida.texto.contains("não pode escrever"),
         "a mensagem tem que separar «enxerga» de «pode escrever»:\n{}",
@@ -883,13 +929,20 @@ fn um_release_ja_publicado_nao_e_substituido() {
         )],
     );
 
-    assert_eq!(saida.estado, 1, "release publicado tem que reprovar:\n{}", saida.texto);
+    assert_eq!(
+        saida.estado, 1,
+        "release publicado tem que reprovar:\n{}",
+        saida.texto
+    );
     assert!(
         saida.texto.contains("**publicado**"),
         "a mensagem tem que dizer que o que existe já foi publicado:\n{}",
         saida.texto
     );
-    assert!(saida.nada_foi_empacotado(), "compilou para não poder publicar");
+    assert!(
+        saida.nada_foi_empacotado(),
+        "compilou para não poder publicar"
+    );
 }
 
 #[test]
@@ -905,7 +958,11 @@ fn restos_de_outra_versao_nao_sobem_junto() {
     );
     let saida = bancada.rodar(&["1.2.3"], &[]);
 
-    assert_eq!(saida.estado, 1, "resto de outra versão tem que reprovar:\n{}", saida.texto);
+    assert_eq!(
+        saida.estado, 1,
+        "resto de outra versão tem que reprovar:\n{}",
+        saida.texto
+    );
     assert!(
         saida.texto.contains("arquivos de outra versão"),
         "a mensagem tem que nomear o problema:\n{}",
@@ -914,7 +971,10 @@ fn restos_de_outra_versao_nao_sobem_junto() {
     // E o arquivo de quem veio antes continua lá: quem apaga entrega passada
     // apaga a entrega que ainda não foi publicada.
     assert!(
-        bancada.repo.join("entrega/SEELE_0.9.9_aarch64.dmg").exists(),
+        bancada
+            .repo
+            .join("entrega/SEELE_0.9.9_aarch64.dmg")
+            .exists(),
         "o script apagou a entrega de outra versão em vez de reclamar dela"
     );
 }
@@ -955,7 +1015,11 @@ fn os_tres_correm_do_mais_barato_para_o_mais_caro() {
     let bancada = Bancada::nova();
     let saida = bancada.rodar(&["1.2.3"], &[]);
 
-    assert_eq!(saida.estado, 0, "a rodada inteira tinha que passar:\n{}", saida.texto);
+    assert_eq!(
+        saida.estado, 0,
+        "a rodada inteira tinha que passar:\n{}",
+        saida.texto
+    );
     let macos = saida.diario.find("empacotei macos");
     let windows = saida.diario.find("empacotei windows");
     let linux = saida.diario.find("empacotei linux");
@@ -984,7 +1048,11 @@ fn o_release_sai_rascunho_e_confessa_a_falta_de_procedencia() {
     let bancada = Bancada::nova();
     let saida = bancada.rodar(&["1.2.3"], &[]);
 
-    assert_eq!(saida.estado, 0, "a rodada inteira tinha que passar:\n{}", saida.texto);
+    assert_eq!(
+        saida.estado, 0,
+        "a rodada inteira tinha que passar:\n{}",
+        saida.texto
+    );
     assert!(
         saida.corpos.contains("\"draft\": true"),
         "o release tem que nascer rascunho:\n{}",
@@ -1036,7 +1104,11 @@ fn com_parcial_o_release_sai_dizendo_quem_faltou() {
     let bancada = Bancada::nova();
     let saida = bancada.rodar(&["1.2.3", "--parcial"], &[("FALSO_MACOS", "1")]);
 
-    assert_eq!(saida.estado, 0, "--parcial existe para isto:\n{}", saida.texto);
+    assert_eq!(
+        saida.estado, 0,
+        "--parcial existe para isto:\n{}",
+        saida.texto
+    );
     assert!(
         saida.diario.contains("SEELE/releases\n"),
         "com --parcial o rascunho tem que sair:\n{}",

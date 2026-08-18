@@ -257,8 +257,40 @@ pergunta pelo microfone a cada abertura e nunca lembra da resposta.
 
 ## Empacotar à mão, com as chaves
 
-Quando a cota de Actions acaba — já aconteceu —, `empacotar/` faz o mesmo. Para
-que o pacote saia atualizável, exporte a chave antes:
+Quando a cota de Actions acaba — já aconteceu —, `empacotar/` faz o mesmo.
+
+### O caminho de um comando
+
+`empacotar/publicar.sh` faz o `release.yml` inteiro a partir do Mac: os três
+sistemas, o manifesto, as somas e o rascunho no Releases.
+
+```sh
+export TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/seele.key)"
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD='a senha'
+export SEELE_GITHUB_TOKEN=…            # Contents: Read and write
+export SEELE_WINDOWS_SSH=voce@windows  # docs/windows.md, seção 7
+
+./empacotar/publicar.sh --conferir 0.1.2   # segundos: confere tudo e não compila
+./empacotar/publicar.sh 0.1.2              # a rodada inteira, uma a duas horas
+```
+
+O Windows é alcançado por SSH, e **a chave privada não vai para o disco de lá**:
+ela atravessa pela entrada padrão a cada empacotamento. Ligar o OpenSSH Server
+naquela máquina é a seção 7 de `docs/windows.md`.
+
+Rode o `--conferir` antes de sair da frente do computador. Ele responde em
+segundos a pergunta que, sem ele, custa noventa minutos de Linux emulado para
+ser respondida: está tudo no lugar para esta rodada terminar?
+
+O que sai é um **rascunho**, e o que ele perde por não vir do CI está escrito na
+saída do script e no corpo do release: não há atestado de procedência, e não há
+como haver — `gh attestation verify` vai dizer que não encontrou atestado, e isso
+é o esperado. As `NOTAS-DE-RELEASE.md` explicam isso a quem baixa.
+
+### Os três, um de cada vez
+
+Para rodar cada um por conta própria — ou quando um deles falhou e só ele precisa
+ser refeito. Para que o pacote saia atualizável, exporte a chave antes:
 
 ```sh
 export TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/seele.key)"
