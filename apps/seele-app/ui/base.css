@@ -356,48 +356,41 @@ input:focus {
   to   { transform: translateY(2000%); }
 }
 
-/* ---------- legendas simples ----------
+/* ---------- a nota ao lado de um controle ----------
 
-   O comp v3 carrega uma segunda camada de texto — uma linha curta ao lado de
-   cada controle, dizendo o que ele faz — e a mostra **por omissão**. É a
-   resposta ao que um teste de LAN encontrou: a interface era bonita e ninguém
-   sabia usá-la.
+   Uma linha curta ao lado de um controle, dizendo o que apertá-lo **causa**.
+   Ela mora na marcação, ao lado do controle que explica, e não numa tabela
+   paralela que alguém esquece de atualizar quando o controle muda.
 
-   Uma classe no `body` e não uma reescrita por tela: assim a dica mora ao lado
-   do controle que ela explica, na marcação, e não numa tabela paralela que
-   alguém vai esquecer de atualizar quando o controle mudar.
+   ---- não há interruptor, e a ausência é a decisão ----
 
-   `.dica` some quando o modo está desligado, e some de verdade — `display:none`
-   e não `opacity`, porque um leitor de tela deve parar de anunciá-la junto. */
-/* Tamanho e cor de texto que se lê, e não de régua.
+   Isto foi a camada `LEGENDAS SIMPLES` do comp v3: `.dica`, escondida por
+   omissão e revelada por `body.legendas-simples`, com uma chave no Terminal
+   Dogma para desligá-la. A chave saiu e a classe mudou de nome junto, porque as
+   duas eram a mesma suposição errada — a de que esta frase é ajuda para
+   iniciante, e não parte do controle.
 
-   A primeira versão desta regra saiu em `t-micro` (9px) e `rotulo-painel`, que
-   resolve em `osso-apagado`. Os dois estavam errados pelo mesmo motivo, e o
-   motivo é o propósito da camada: ela existe para explicar o app a quem não o
-   conhece, e foi escrita para ficar **ligada por omissão**. Desenhá-la no
-   tamanho das coordenadas e numa cor que o próprio token anota como «4,11:1 só
-   texto grande» é escrever a explicação em letra que a pessoa explicada não lê.
+   Uma frase que diz o que um botão faz com a sessão de outra pessoa não é ajuda
+   de iniciante; é a única coisa na tela que diz o que o botão faz. Um modo que
+   a esconde é um modo em que o produto passa a mentir por omissão para quem o
+   ligou, e a única forma de descobrir isso é desligá-lo e reler tela por tela.
+   O que sobrou aqui é o que sempre foi verdade: sempre visível, para todo mundo.
 
-   `docs/tokens-achados.md` já tinha decidido isto sem saber: a pendência do
-   `osso-apagado` diz que a saída é subir a cor **ou garantir que nada
-   necessário dependa só dela**. Uma dica é necessária por definição.
+   ---- por que não é `t-micro` em `osso-apagado` ----
 
-   A hierarquia contra o rótulo que ela explica continua existindo, e vem da
-   tipografia em vez da legibilidade: o rótulo é Saira em caixa alta com
-   tracking largo, a dica é monoespaçada em caixa baixa. Isso separa os dois sem
-   precisar que um deles seja difícil de ler.
+   A primeira versão saiu em 9px e numa cor que `docs/tokens-achados.md` anota
+   como «4,11:1 só texto grande». Os dois estavam errados pelo mesmo motivo:
+   escrever em letra ilegível a única explicação de um controle. Aquela folha já
+   tinha decidido isto — a pendência do `osso-apagado` diz que a saída é subir a
+   cor **ou garantir que nada necessário dependa só dela**.
 
-   Isto diverge do comp, que desenha a dica apagada. A maquete foi feita sem os
-   números de contraste desta paleta; a folha de achados foi feita com eles. */
-.dica {
-  display: none;
+   A hierarquia contra o rótulo que ela acompanha vem da tipografia e não da
+   legibilidade: o rótulo é Saira em caixa alta com tracking largo, a nota é
+   monoespaçada em caixa baixa. Isso separa os dois sem que um deles seja
+   difícil de ler. */
+.nota {
+  display: block;
   font-size: var(--seele-t-dado);
   line-height: 1.4;
   color: var(--seele-osso);
 }
-
-body.legendas-simples .dica { display: block; }
-
-/* Em linha, para dicas que acompanham um rótulo em vez de ficarem sob ele. */
-body.legendas-simples .dica-linha { display: inline; }
-.dica-linha { display: none; }

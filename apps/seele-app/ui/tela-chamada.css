@@ -30,7 +30,7 @@
 
    O comp põe 60px na barra de cima e 68px na de ações. 60 não é múltiplo da
    célula de 16 e 48 é; a barra de ações fica em 64, que é múltiplo dos dois
-   lados e cabe título mais dica. Mesma decisão, mesmo argumento e mesmo lugar
+   lados e cabe título mais nota. Mesma decisão, mesmo argumento e mesmo lugar
    que `.topo` em `tela-sessao.css`, e é o que faz o cabeçalho não pular ao
    trocar de tela. */
 
@@ -145,11 +145,11 @@
 
 .chamada-barra .rotulo { font-size: var(--seele-t-rotulo); letter-spacing: 0.18em; }
 
-/* As duas dicas da barra ficam numa linha só. A barra tem altura fixa para
-   alinhar com o cabeçalho da tela de operação, e uma dica que quebrasse em duas
+/* As duas notas da barra ficam numa linha só. A barra tem altura fixa para
+   alinhar com o cabeçalho da tela de operação, e uma nota que quebrasse em duas
    linhas vazaria dela — o corte é o último recurso e, no comprimento em que as
    duas estão escritas, não chega a acontecer. */
-.chamada-barra .dica {
+.chamada-barra .nota {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -278,7 +278,7 @@
   flex: 0 0 auto;
 }
 
-/* A pastilha do canto: o mesmo estado que a dica escreve em frase, na forma
+/* A pastilha do canto: o mesmo estado que a nota escreve em frase, na forma
    curta. Contorno por omissão; sólida só quando a pessoa transmite, que é o
    único estado que o comp inverte. */
 .chamada-pastilha {
@@ -445,7 +445,7 @@
 /* ---------- a barra de ações ----------
 
    Quatro colunas iguais, como no comp: o microfone, o som, ver as Linhas e sair
-   da jaula. Cada uma com título e dica, e a dica é o que responde a pergunta
+   da jaula. Cada uma com título e nota, e a nota é o que responde a pergunta
    que o teste de LAN encontrou sem resposta — voltar para as Linhas quer dizer
    parar de ouvir? */
 .chamada-acoes {
@@ -499,9 +499,9 @@
   line-height: 1.05;
 }
 
-/* A dica do rodapé é o texto que separa os dois botões de saída um do outro, e
+/* A nota do rodapé é o texto que separa os dois botões de saída um do outro, e
    ela tem que caber em duas linhas sem empurrar a barra. */
-.chamada-acao .dica { line-height: 1.3; text-align: left; }
+.chamada-acao .nota { line-height: 1.3; text-align: left; }
 
 /* Os dois botões de estado. O rótulo diz em que estado a coisa **está** — a
    mesma regra da tira do operador na tela de operação —, e aceso ele é cartela:
@@ -520,9 +520,9 @@
   color: var(--seele-negro-absoluto);
 }
 
-/* A dica herda a cor do botão invertido, senão ela ficaria em cinza sobre
+/* A nota herda a cor do botão invertido, senão ela ficaria em cinza sobre
    laranja — o pior contraste do arquivo. */
-.chamada-acao[data-ativo="sim"] .dica { color: inherit; }
+.chamada-acao[data-ativo="sim"] .nota { color: inherit; }
 
 /* Sair é a única coisa vermelha da tela, e `tokens.css` reserva o vermelho para
    alerta e queda: sair do Cage é a queda voluntária. */
@@ -533,7 +533,7 @@
 
 .chamada-acao-ejetar .chamada-acao-titulo { font-weight: 900; }
 .chamada-acao-ejetar .chamada-acao-glifo,
-.chamada-acao-ejetar .dica { color: inherit; }
+.chamada-acao-ejetar .nota { color: inherit; }
 .chamada-acao-ejetar:disabled { color: var(--seele-negro-absoluto); opacity: 0.5; }
 
 /* ---------- coluna 2: o monitor do Cage ---------- */

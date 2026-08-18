@@ -1,10 +1,15 @@
 // SEELE · Entry Plug — o Terminal Dogma (`#tela-dogma`).
 //
-// A configuração local: o que é desta máquina e não deste Dogma. Cinco seções —
-// ÁUDIO, ATALHOS, APARÊNCIA, IDENTIDADE e ATUALIZAÇÃO. As quatro primeiras são
-// a forma do comp v3, §8; a quinta é o botão de atualizar do ADR 0026, que é
-// posterior ao comp e cai aqui porque qual SEELE está instalado é a coisa mais
-// **desta máquina** que existe.
+// A configuração local: o que é desta máquina e não deste Dogma. Quatro seções —
+// ÁUDIO, ATALHOS, IDENTIDADE e ATUALIZAÇÃO. As três primeiras são a forma do
+// comp v3, §8; a última é o botão de atualizar do ADR 0026, que é posterior ao
+// comp e cai aqui porque qual SEELE está instalado é a coisa mais **desta
+// máquina** que existe.
+//
+// APARÊNCIA saiu. Ela era o comp inteiro numa chave só — LEGENDAS SIMPLES —, e
+// aquela camada deixou de ser um modo: a nota ao lado de um controle é parte do
+// controle e aparece sempre. Uma seção de configuração sem nada para configurar
+// é uma promessa de que há o que ajustar ali, e não havia.
 //
 // Alcançável das duas telas vivas, e volta para a que a abriu. Escolher
 // microfone antes de conectar é tão comum quanto durante, e uma configuração
@@ -550,15 +555,6 @@ for (const botao of document.querySelectorAll(".dogma-modo")) {
   botao.addEventListener("click", () => escolherModo(botao.dataset.modo));
 }
 
-// As legendas simples moram em `base.js`, e é de lá que vêm o `localStorage` e a
-// classe no `body`. Este botão é a única coisa em todo o app que as liga e
-// desliga; ele lê o estado de lá, e nunca guarda uma cópia.
-$("dogma-legendas").addEventListener("click", () => {
-  const ligado = !legendasSimples();
-  aplicarLegendas(ligado);
-  $("dogma-legendas").setAttribute("aria-checked", ligado);
-});
-
 $("atualizacao-procurar").addEventListener("click", procurarAtualizacao);
 $("atualizacao-instalar").addEventListener("click", instalarAtualizacao);
 
@@ -580,10 +576,8 @@ window.addEventListener("keydown", (evento) => {
 });
 
 // O estado inicial da tela, escrito uma vez com ela ainda escondida: a seção de
-// áudio aberta e o interruptor de legendas no que `base.js` já aplicou ao
-// `body`. Nenhum quadro chega a mostrar o cabeçalho vazio.
+// áudio aberta. Nenhum quadro chega a mostrar o cabeçalho vazio.
 abrirSecao("secao-audio");
-$("dogma-legendas").setAttribute("aria-checked", legendasSimples());
 
 // O nível de entrada muda sozinho, e é a única coisa viva nesta tela. Mesmo
 // meio segundo da telemetria da sessão, e só com a tela na frente: um `invoke`

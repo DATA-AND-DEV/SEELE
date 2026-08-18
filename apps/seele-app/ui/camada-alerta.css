@@ -17,9 +17,10 @@
 
    ---- o que muda em relação à faixa de uma linha ----
 
-   O comp pede uma caixa de 720px com três células de metadado e dois botões, e
-   o app tinha uma faixa de uma linha. A geometria abaixo é a do comp, valor por
-   valor, inclusive os `padding` de 20px e 12px que não são múltiplos da célula
+   O comp pede uma caixa de 720px e o app tinha uma faixa de uma linha. A
+   geometria abaixo é a do comp — menos as três células de metadado, que nunca
+   tiveram dado por trás e saíram com a legenda que as explicava; ver a marcação
+   —, valor por valor, inclusive os `padding` de 20px e 12px que não são da célula
    de 8×16 — o inventário §13 mede essa divergência e conclui que a regra de
    célula descreve a TUI, e que o espaçamento **interno de componente** do
    gráfico é múltiplo de 2. É a mesma licença que `tela-sessao.css` já toma em
@@ -78,6 +79,45 @@
   display: flex;
   align-items: stretch;
   border-bottom: var(--seele-b) solid var(--seele-laranja-nerv);
+}
+
+/* ---------- o fechamento, e é um só ----------
+
+   O `×` do canto. Antes o fechamento era o `RECONHECER` de baixo — um botão do
+   tamanho da caixa cujo trabalho inteiro era esconder a caixa —, e dois lugares
+   para o mesmo ato numa caixa deste tamanho é a pessoa procurando qual dos dois
+   é o certo.
+
+   Ele tem 44px de lado porque é o alvo mínimo que um ponteiro impreciso acerta,
+   e o glifo é menor que a caixa de propósito: o que cresce é a área de clique,
+   não o desenho.
+
+   O anel de foco não é enfeite. Ele é agora a **única** saída apontável desta
+   caixa, e `Escape` é a outra — quem navega por teclado precisa ver onde está
+   antes de apertar, e um `×` sem `:focus-visible` é um `×` que só o ponteiro
+   alcança. O `aria-label` está na marcação pela mesma razão: `×` não é palavra
+   nenhuma para quem ouve a tela. */
+.alerta-fechar {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--seele-osso-apagado);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.alerta-fechar:hover { color: var(--seele-osso); }
+
+.alerta-fechar:focus-visible {
+  outline: var(--seele-b-forte) solid var(--seele-osso);
+  outline-offset: -2px;
+  color: var(--seele-osso);
 }
 
 .alerta-marca {
@@ -177,54 +217,26 @@
   padding: 20px;
 }
 
-/* A borda por gap: `gap: 1px` sobre o fundo de linha, cada célula pintando o
-   negro absoluto por cima. É a técnica do comp, e o inventário §13 a registra
-   como deliberada e incompatível com a grade de célula. */
-.alerta-celulas {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1px;
-  border: var(--seele-b) solid var(--seele-linha);
-  background: var(--seele-linha);
-}
+/* ---------- o que saiu do corpo ----------
 
-.alerta-celula {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 12px;
-  background: var(--seele-negro-absoluto);
-  font-size: 12px;
-}
+   `.alerta-celulas`, `.alerta-celula` e `.alerta-rotulo` desenhavam CHAVE, ROTA
+   e SINCRONIA — três células que nunca tiveram dado por trás e existiam para
+   deixar uma lacuna do protocolo visível. Visível para quem escreve o protocolo,
+   e não para quem está lendo um aviso. A marcação explica a decisão inteira.
 
-.alerta-rotulo {
-  font-size: var(--seele-t-micro);
-  letter-spacing: 0.18em;
-  color: var(--seele-osso-apagado);
-}
+   `.alerta-reconhecer` desenhava o segundo fechamento desta caixa. Ele saiu com
+   o botão, e o `×` da cabeça é o que restou. */
 
-/* ---------- os dois botões ----------
-   `RECONHECER` é sólido e faz o que diz: fecha. O segundo é o secundário do
-   comp, em Saira 700 contra 900, e passou a vida desabilitado por não haver
-   verbo de moderação para ele chamar. Há agora: ele abre a caixa de moderação,
-   onde a pessoa é escolhida por nome — esta caixa não tem sujeito, porque um
-   `Notice` nunca diz de quem é. O rótulo mudou junto, e a marcação explica por
-   quê.
+/* ---------- o botão que sobrou ----------
+   O secundário do comp, em Saira 700 contra 900, que passou a vida desabilitado
+   por não haver verbo de moderação para ele chamar. Há agora: ele abre a caixa
+   de moderação, onde a pessoa é escolhida por nome — esta caixa não tem sujeito,
+   porque um `Notice` nunca diz de quem é.
 
    Ele continua nascendo desabilitado e continua podendo ficar assim: sem
    nenhuma das três permissões sobre gente, a regra de `:disabled` abaixo é o
    que ele veste, e o `title` diz o motivo. */
 .alerta-botoes { display: flex; gap: 8px; }
-
-.alerta-reconhecer {
-  flex: 1;
-  padding: 12px;
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 16px;
-  letter-spacing: 0.16em;
-  border: 0;
-}
 
 .alerta-ejetar {
   flex: 1;
@@ -247,5 +259,3 @@
   border-color: var(--seele-linha);
   cursor: help;
 }
-
-.alerta-corpo .legenda-ausente { margin-top: 4px; }
