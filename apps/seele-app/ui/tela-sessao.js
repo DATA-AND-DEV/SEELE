@@ -1050,6 +1050,14 @@ async function escolherAnexo(caminho) {
  * nenhuma.
  */
 async function abrirSeletorDeArquivo() {
+  // Sem Linha aberta não há para onde mandar, e `enviar` desiste calado. Um
+  // seletor que abre, escolhe, e deixa o arquivo parado sem explicação é o
+  // mesmo silêncio que trouxe este arquivo aqui — então a recusa vem antes do
+  // diálogo, e vem onde dá para ver.
+  if (linhaAberta === null) {
+    recusarAnexo("ABRA UMA LINHA ANTES DE ESCOLHER UM ARQUIVO");
+    return;
+  }
   let arquivo;
   try {
     arquivo = await invoke("escolher_arquivo");
@@ -1527,7 +1535,14 @@ $("form-mensagem").addEventListener("submit", enviar);
 listen("tauri://drag-drop", (evento) => {
   const caminhos = evento?.payload?.paths;
   if (!Array.isArray(caminhos) || caminhos.length === 0) return;
-  if ($("tela-sessao").hidden || linhaAberta === null) return;
+  // Fora desta tela, calado: quem está no Terminal Dogma não largou o arquivo
+  // aqui. Sem Linha aberta, **não** calado — o gesto foi nesta tela, e o
+  // silêncio é indistinguível de defeito.
+  if ($("tela-sessao").hidden) return;
+  if (linhaAberta === null) {
+    recusarAnexo("ABRA UMA LINHA ANTES DE ANEXAR UM ARQUIVO");
+    return;
+  }
   // Um por vez, e o primeiro. Uma mensagem carrega um arquivo — o ADR 0027 dá
   // ao anexo uma linha por mensagem —, e pegar cinco calado deixaria quatro
   // deles sumindo sem explicação.

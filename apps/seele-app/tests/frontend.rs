@@ -4888,6 +4888,32 @@ fn a_file_that_cannot_be_read_says_so_where_it_can_be_seen() {
 }
 
 #[test]
+fn a_file_offered_with_no_line_open_is_refused_out_loud() {
+    // Both doors give up when there is no Line to send to, and both used to give
+    // up with a bare `return`. From the outside that is the same event as the
+    // bug this whole file was written for: the person acts, and the window does
+    // not move.
+    let sessao = read("ui/tela-sessao.js");
+    for entrada in [
+        "listen(\"tauri://drag-drop\"",
+        "async function abrirSeletorDeArquivo(",
+    ] {
+        let corpo = js_function(&sessao, entrada);
+        let Some(depois) = corpo.split("linhaAberta === null").nth(1) else {
+            panic!("`{entrada}` no longer checks whether a Line is open at all");
+        };
+        // Only as far as the end of that branch: a `recusarAnexo` further down,
+        // on some other path, would say nothing about this one.
+        let ramo = depois.split('}').next().unwrap_or_default();
+        assert!(
+            ramo.contains("recusarAnexo("),
+            "`{entrada}` gives up in silence when no Line is open, which reads \
+             exactly like a broken button: {ramo}"
+        );
+    }
+}
+
+#[test]
 fn the_reason_a_rung_failed_is_not_prefixed_by_a_label_it_already_carries() {
     // From a real screen, on a real network: the detail line under the invite
     // read «o roteador respondeu: o roteador respondeu, e o endereço dele
