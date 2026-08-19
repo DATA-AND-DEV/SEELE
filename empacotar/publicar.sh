@@ -217,8 +217,8 @@ decidir() {
     d_falhas="$2"
     d_parcial="$3"
 
-    d_quantos_pedidos=$(printf '%s' "$d_pedidos" | wc -w | tr -d ' ')
-    d_quantos_falhas=$(printf '%s' "$d_falhas" | wc -w | tr -d ' ')
+    d_quantos_pedidos=$(printf '%s' "$d_pedidos" | wc -w | LC_ALL=C tr -d ' ')
+    d_quantos_falhas=$(printf '%s' "$d_falhas" | wc -w | LC_ALL=C tr -d ' ')
 
     if [ "$d_quantos_falhas" -eq 0 ]; then
         echo publicar
@@ -250,7 +250,7 @@ decidir() {
     printf 'Falharam: %s.\n' "$d_falhas"
     echo "O que deu certo continua em entrega/ — nada foi apagado."
     echo "Para retomar só o que falta, sem refazer o que já ficou pronto:"
-    printf '  %s <versão> --pular %s\n' "$0" "$(sem_falhas "$d_pedidos" "$d_falhas" | tr ' ' ',')"
+    printf '  %s <versão> --pular %s\n' "$0" "$(sem_falhas "$d_pedidos" "$d_falhas" | LC_ALL=C tr ' ' ',')"
     echo "Se a intenção é publicar faltando sistema, é --parcial, e ela custa: o"
     echo "latest.json sai sem eles e quem os usa deixa de receber atualização."
     return 1
@@ -285,7 +285,7 @@ no_windows() {
     fi
     ssh -o BatchMode=yes -o ConnectTimeout="${SEELE_SSH_TIMEOUT:-15}" "$WINDOWS" \
         powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass \
-        -EncodedCommand "$nw_codificado" </dev/null 2>&1 | tr -d '\r'
+        -EncodedCommand "$nw_codificado" </dev/null 2>&1 | LC_ALL=C tr -d '\r'
 }
 
 # O mesmo, para quando a saída é **dado**: a de erro fica na de erro, e o
@@ -420,7 +420,7 @@ fi
 
 # ------------------------------------------------------- quais sistemas
 
-for pulado in $(printf '%s' "$PULAR" | tr ',' ' '); do
+for pulado in $(printf '%s' "$PULAR" | LC_ALL=C tr ',' ' '); do
     case " $SISTEMAS " in
         *" $pulado "*) ;;
         *) morrer "não conheço o sistema «${pulado}»." "Os que existem: $SISTEMAS." ;;
@@ -1111,7 +1111,7 @@ if [ "$CODIGO_HTTP" != "201" ]; then
         "$(head -c 500 "$CORPO_API")" \
         "" \
         "Os arquivos continuam em entrega/. Para tentar só a publicação de novo:" \
-        "  $0 $VERSAO --pular $(printf '%s' "$SISTEMAS" | tr ' ' ',')"
+        "  $0 $VERSAO --pular $(printf '%s' "$SISTEMAS" | LC_ALL=C tr ' ' ',')"
 fi
 NOVO_ID=$(python3 -c 'import json, sys
 print(json.load(open(sys.argv[1], encoding="utf-8"))["id"])' "$CORPO_API")

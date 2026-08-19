@@ -148,7 +148,29 @@ find target -type f -name "$padrao" ! -name 'rw.*' -exec cp {} "$DESTINO/" \;
 # chave. O nome leva o alvo desta máquina de propósito: `empacotar/manifesto.py`
 # lê a arquitetura daí, e um pacote só-ARM oferecido a um Mac Intel instala um
 # app que não abre.
-tarball=$(find target -type f -name '*.app.tar.gz' | head -n 1)
+# Um, e exatamente um — nunca «o primeiro que aparecer».
+#
+# Este arquivo **não leva versão no nome**: ele é sempre `SEELE.app.tar.gz`. O
+# `head -n 1` que estava aqui pegava o primeiro que o `find` devolvesse em toda
+# a árvore, e o renomeava com a versão desta execução. Uma sobra de um
+# empacotamento antigo — um universal, um alvo diferente — seria publicada como
+# se fosse esta versão, assinada, e o atualizador a instalaria sem reclamar,
+# porque a assinatura estaria certa: errado é o *conteúdo*, e nenhuma
+# conferência do caminho pergunta isso.
+#
+# É o mesmo defeito que o `.dmg` e o `.deb` tiveram, na sua forma mais cara: lá
+# a contagem errada **parava** o empacotamento; aqui ela entregava o pacote
+# errado calada.
+tarballs=$(find target/release/bundle/macos -type f -name '*.app.tar.gz' 2>/dev/null)
+quantos_tarballs=$(printf '%s' "$tarballs" | grep -c . || true)
+if [ "$quantos_tarballs" -gt 1 ]; then
+    echo "achei $quantos_tarballs pacotes de atualização e não sei qual é o desta versão:" >&2
+    echo "$tarballs" >&2
+    echo "Eles não levam versão no nome. Limpe target/release/bundle/macos e" >&2
+    echo "empacote de novo." >&2
+    exit 1
+fi
+tarball=$(printf '%s' "$tarballs" | head -n 1)
 if [ -n "$tarball" ]; then
     cp "$tarball" "$DESTINO/SEELE_${VERSAO}_${ALVO}.app.tar.gz"
     cp "$tarball.sig" "$DESTINO/SEELE_${VERSAO}_${ALVO}.app.tar.gz.sig"

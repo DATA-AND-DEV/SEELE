@@ -152,16 +152,27 @@ cd /work
 
 DESTINO=entrega
 mkdir -p "$DESTINO"
-encontrados=$(find target-linux -type f -name '*.deb' | wc -l | tr -d ' ')
+# Filtrado pela versão, como o irmão do macOS.
+#
+# Sem isso ele conta todo `.deb` que já passou pela árvore: um `SEELE_0.2.0`
+# esquecido no `target-linux` reprovou o empacotamento do 0.6.4 depois de a
+# compilação inteira ter dado certo — e depois de a assinatura ter saído.
+#
+# O macOS foi consertado assim quando o mesmo defeito apareceu lá, e o comentário
+# de lá até cita o irmão do Windows tendo reprovado do mesmo jeito. Este ficou
+# para trás; três scripts com o mesmo defeito e dois consertos é como o terceiro
+# espera o pior momento.
+padrao="*_${VERSAO}_*.deb"
+encontrados=$(find target-linux -type f -name "$padrao" | wc -l | tr -d ' ')
 if [ "$encontrados" != "1" ]; then
-    echo "esperava exatamente um .deb e achei $encontrados" >&2
-    find target-linux -type f -name '*.deb' >&2
+    echo "esperava exatamente um .deb de ${VERSAO} e achei $encontrados" >&2
+    find target-linux -type f -name "$padrao" >&2
     exit 1
 fi
-find target-linux -type f -name '*.deb' -exec cp {} "$DESTINO/" \;
+find target-linux -type f -name "$padrao" -exec cp {} "$DESTINO/" \;
 
 # A assinatura do atualizador, quando este empacotamento teve a chave.
-find target-linux -type f -name '*.deb.sig' -exec cp {} "$DESTINO/" \; 2>/dev/null || true
+find target-linux -type f -name "${padrao}.sig" -exec cp {} "$DESTINO/" \; 2>/dev/null || true
 
 # O arquivo da CLI, que é o que o `install.sh` baixa.
 tar -czf "$DESTINO/seele-cli-$VERSAO-linux.tar.gz" -C target-linux/release seeled plug
