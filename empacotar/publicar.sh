@@ -737,7 +737,7 @@ sys.exit(1 if open(sys.argv[1], "rb").read(3) == b"\xef\xbb\xbf" else 0)' "$ct_c
     passo "$CONFIG_TAURI íntegro"
 }
 
-conferir_entrega() {
+limpar_entrega() {
     if [ ! -d "$RAIZ/entrega" ]; then
         passo "entrega/ ainda não existe; será criada"
         return 0
@@ -753,14 +753,26 @@ conferir_entrega() {
     # dele manda a pessoa «mover a entrega passada» de um arquivo que ela não
     # criou e que vai voltar sozinho na próxima vez que ela olhar a pasta.
     ce_restos=$(find "$RAIZ/entrega" -type f ! -name "*$VERSAO*" ! -name ".DS_Store" 2>/dev/null)
-    if [ -n "$ce_restos" ]; then
-        morrer "entrega/ tem arquivos de outra versão:" \
-            "$ce_restos" \
-            "" \
-            "Eles subiriam junto com o release de $VERSAO. Mova-os para outro lugar" \
-            "— são a entrega passada de alguém — e rode de novo."
+    if [ -z "$ce_restos" ]; then
+        passo "entrega/ sem restos de outra versão"
+        return 0
     fi
-    passo "entrega/ sem restos de outra versão"
+
+    # Apagados, e não movidos para o lado. Esta decisão foi revertida em
+    # 2026-08-20 a pedido de quem publica: antes o script parava aqui e mandava
+    # mover à mão, com o argumento de que «quem apaga entrega passada apaga a
+    # entrega que ainda não foi publicada».
+    #
+    # O argumento continua verdadeiro, e o preço foi aceito de olho aberto:
+    # parar era um passo manual em **toda** publicação, e o que se perde é
+    # reconstruível a partir do commit que o gerou. O que não foi aceito é
+    # apagar calado — daí o nome de cada arquivo na saída, um por linha.
+    passo "limpando entrega/ de outra versão"
+    printf '%s\n' "$ce_restos" | while IFS= read -r ce_um; do
+        [ -n "$ce_um" ] || continue
+        printf '     apagado: %s\n' "${ce_um#"$RAIZ/"}"
+        rm -f "$ce_um"
+    done
 }
 
 conferir_chave() {
@@ -838,8 +850,15 @@ if (Test-Path 'empacotar\\windows.ps1') { Write-Output 'script=presente' } else 
 if (Get-Command git) { Write-Output 'git=presente' } else { Write-Output 'git=ausente' }
 if (Get-Command cargo) { Write-Output 'cargo=presente' } else { Write-Output 'cargo=ausente' }
 Write-Output ('head=' + (git rev-parse HEAD))
+# O arquivo que o windows.ps1 grava e devolve ao sair: uma rodada que morreu
+# no meio o deixa editado, e essa é a sujeira que é nossa para desfazer.
+if (git status --porcelain -- '$CONFIG_TAURI') { git checkout -- '$CONFIG_TAURI'; Write-Output 'restaurei=sim' } else { Write-Output 'restaurei=nao' }
+# Depois de restaurar o que era nosso, o que sobrar é trabalho de quem está
+# naquela máquina — e apagar trabalho de alguém sem perguntar é o único
+# movimento daqui que não dá para desfazer.
 if (git status --porcelain) { Write-Output 'sujo=sim' } else { Write-Output 'sujo=nao' }
-\$restos = @(Get-ChildItem 'entrega' -File | Where-Object { \$_.Name -notlike '*$VERSAO*' })
+\$restos = @(Get-ChildItem 'entrega' -File -ErrorAction SilentlyContinue | Where-Object { \$_.Name -notlike '*$VERSAO*' })
+foreach (\$r in \$restos) { Write-Output ('apaguei=' + \$r.Name); Remove-Item \$r.FullName -Force }
 Write-Output ('restos=' + \$restos.Count)")
 
     case "$cw_resposta" in
@@ -889,32 +908,64 @@ Write-Output ('restos=' + \$restos.Count)")
             ;;
     esac
     case "$cw_resposta" in
-        *sujo=sim*)
-            morrer "a árvore do repositório em $WINDOWS não está limpa." \
-                "Lá o windows.ps1 grava a versão no $CONFIG_TAURI e a devolve ao sair;" \
-                "começar sujo é não poder distinguir resto meu de trabalho seu." \
-                "Rode lá:  git -C '$REPO_WINDOWS' status"
+        *restaurei=sim*)
+            passo "em $WINDOWS: $CONFIG_TAURI restaurado (resto de uma rodada interrompida)"
             ;;
     esac
     case "$cw_resposta" in
+        *sujo=sim*)
+            # Já restauramos o que era nosso, então isto é trabalho de quem está
+            # naquela máquina. Um `reset --hard` resolveria e apagaria sem volta;
+            # um `stash` resolveria e deixaria sedimento que ninguém limpa.
+            morrer "a árvore do repositório em $WINDOWS tem alteração que não é minha." \
+                "Restaurei o $CONFIG_TAURI, que é o que o windows.ps1 mexe. O que" \
+                "sobrou é seu, e eu não apago trabalho de ninguém sem perguntar." \
+                "Rode lá:  git -C '$REPO_WINDOWS' status"
+            ;;
+    esac
+    printf '%s\n' "$cw_resposta" | sed -n 's/^apaguei=/     apagado em '"$WINDOWS"': /p' | tr -d '\r'
+    case "$cw_resposta" in
         *restos=0*) ;;
         *restos=*)
-            morrer "o entrega\\ de $WINDOWS tem arquivos de outra versão." \
-                "Eu trago de lá tudo o que casa com $VERSAO; os outros ficariam para" \
-                "confundir o próximo. Mova-os e rode de novo."
+            passo "entrega\\ de $WINDOWS limpo de outra versão"
             ;;
     esac
 
-    cw_head=$(printf '%s\n' "$cw_resposta" | sed -n 's/^head=//p')
+    cw_head=$(printf '%s\n' "$cw_resposta" | sed -n 's/^head=//p' | tr -d '\r')
     if [ "$cw_head" != "$COMMIT" ]; then
-        morrer "o repositório de $WINDOWS está noutro commit." \
-            "  aqui: $COMMIT" \
-            "  lá:   ${cw_head:-desconhecido}" \
-            "" \
-            "Um release cujos três pacotes vêm de códigos diferentes é três releases com" \
-            "o mesmo número. Lá:" \
-            "  git -C '$REPO_WINDOWS' fetch --all" \
-            "  git -C '$REPO_WINDOWS' checkout $COMMIT"
+        # O Windows tem de estar no **mesmo commit**, e não na ponta do ramo: um
+        # release cujos três pacotes vêm de códigos diferentes é três releases
+        # com o mesmo número.
+        #
+        # É por isso que não é um `git pull` do outro lado. `pull` traz a ponta
+        # do ramo remoto, que só coincide com este `HEAD` por sorte — e, se este
+        # commit ainda não saiu daqui, ele **não existe no remoto** e nenhum
+        # `pull` o alcança. Daí a ordem ser: garantir que ele está lá, depois
+        # mandar buscar exatamente ele.
+        if ! git -C "$RAIZ" ls-remote --exit-code origin "$COMMIT" >/dev/null 2>&1; then
+            passo "empurrando $COMMIT para o origin (o Windows não alcança o que não saiu daqui)"
+            if ! git -C "$RAIZ" push origin HEAD >/dev/null 2>&1; then
+                morrer "não consegui empurrar $COMMIT para o origin." \
+                    "O Windows busca o commit pelo remoto, e ele não está lá." \
+                    "Rode:  git -C '$RAIZ' push origin HEAD"
+            fi
+        fi
+
+        passo "levando $WINDOWS ao commit $COMMIT"
+        cw_troca=$(no_windows "\$ErrorActionPreference = 'Stop'
+Set-Location '$REPO_WINDOWS'
+git fetch --all --quiet
+git checkout --quiet $COMMIT
+Write-Output ('head=' + (git rev-parse HEAD))")
+        cw_head=$(printf '%s\n' "$cw_troca" | sed -n 's/^head=//p' | tr -d '\r')
+        if [ "$cw_head" != "$COMMIT" ]; then
+            morrer "não consegui levar $WINDOWS ao commit deste release." \
+                "  aqui: $COMMIT" \
+                "  lá:   ${cw_head:-desconhecido}" \
+                "" \
+                "O que veio de lá:" \
+                "$cw_troca"
+        fi
     fi
     passo "Windows pronto, no mesmo commit"
 }
@@ -1046,7 +1097,7 @@ conferir_versao
 conferir_ferramentas
 conferir_arvore
 conferir_config_tauri
-conferir_entrega
+limpar_entrega
 conferir_chave
 conferir_docker
 conferir_windows

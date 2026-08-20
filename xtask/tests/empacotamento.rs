@@ -536,6 +536,16 @@ comando=$(printf '%s' "$codificado" | python3 -c 'import base64, sys
 sys.stdout.write(base64.b64decode(sys.stdin.read()).decode("utf-16-le"))' 2>/dev/null)
 
 case "$comando" in
+    *'fetch --all'*)
+        # A troca de commit. Casa por `fetch --all`, e não por `checkout`, porque
+        # a sonda também restaura um arquivo com `git checkout --` — casar pelo
+        # verbo faria a sonda inteira cair aqui e devolver meia resposta.
+        # Devolve a cabeça que a máquina teria DEPOIS de buscar; por padrão a
+        # mesma de antes, para o caminho de «não consegui levar» continuar
+        # exercitável.
+        printf 'head=%s\r\n' "${FALSO_SSH_HEAD_DEPOIS:-${FALSO_SSH_HEAD:-nenhum}}"
+        exit 0
+        ;;
     *-Versao*)
         cat > /dev/null
         printf 'empacotei windows\n' >> "$SEELE_TESTE_DIARIO"
@@ -622,6 +632,22 @@ esac
             "-m",
             "a bancada",
         ]);
+        // Um remoto de verdade, num diretório nu ao lado: sem ele o script não
+        // tem como conferir se o commit já saiu daqui, e o caminho do empurrão
+        // automático ficaria sem bancada.
+        let origem = base.join("origem.git");
+        let nu = Command::new("git")
+            .args(["init", "--bare", "-q"])
+            .arg(&origem)
+            .output()
+            .expect("o git tem que executar");
+        assert!(
+            nu.status.success(),
+            "o remoto de mentira tem que ser criável"
+        );
+        git(&["remote", "add", "origin", &origem.display().to_string()]);
+        git(&["push", "-q", "origin", "HEAD"]);
+
         let commit = git(&["rev-parse", "HEAD"]);
 
         Bancada {
@@ -838,8 +864,38 @@ fn o_windows_inalcancavel_reprova_antes_do_linux_emulado() {
 }
 
 #[test]
-fn o_windows_noutro_commit_reprova() {
-    // Três pacotes de códigos diferentes são três releases com o mesmo número.
+fn o_windows_noutro_commit_e_levado_ao_commit_certo() {
+    // Antes disto o script parava e mandava rodar `fetch` e `checkout` à mão na
+    // outra máquina. Era o passo manual mais caro dos quatro, porque acontecia
+    // depois de o SSH já estar de pé — quem publicava descobria que precisava
+    // ir até lá tendo tudo pronto para não ir.
+    let bancada = Bancada::nova();
+    let saida = bancada.rodar(
+        &["1.2.3"],
+        &[
+            ("FALSO_SSH_HEAD", "0000000000000000000000000000000000000000"),
+            ("FALSO_SSH_HEAD_DEPOIS", &bancada.commit.clone()),
+        ],
+    );
+
+    assert!(
+        saida.texto.contains("levando") || saida.texto.contains("commit"),
+        "o script tem que dizer que está levando a outra máquina ao commit:\n{}",
+        saida.texto
+    );
+    assert!(
+        !saida.texto.contains("noutro commit"),
+        "divergência que o próprio script resolve não é motivo de parada:\n{}",
+        saida.texto
+    );
+}
+
+#[test]
+fn o_windows_que_nao_chega_ao_commit_nao_compila_nada() {
+    // O outro lado da mesma moeda: se a troca não pegar — remoto fora do ar,
+    // `checkout` recusado, disco cheio —, o script tem de parar. Três pacotes de
+    // códigos diferentes são três releases com o mesmo número, e isso não
+    // deixou de valer só porque agora a reconciliação é automática.
     let bancada = Bancada::nova();
     let saida = bancada.rodar(
         &["1.2.3"],
@@ -848,12 +904,7 @@ fn o_windows_noutro_commit_reprova() {
 
     assert_eq!(
         saida.estado, 1,
-        "commit divergente tem que reprovar:\n{}",
-        saida.texto
-    );
-    assert!(
-        saida.texto.contains("noutro commit"),
-        "a mensagem tem que dizer que os dois lados divergiram:\n{}",
+        "commit que não convergiu tem que reprovar:\n{}",
         saida.texto
     );
     assert!(
@@ -970,10 +1021,20 @@ fn um_release_ja_publicado_nao_e_substituido() {
 }
 
 #[test]
-fn restos_de_outra_versao_nao_sobem_junto() {
-    // `entrega/` acumula, e tudo o que estiver lá vai para o release. O `.dmg`
+fn restos_de_outra_versao_sao_apagados_e_nomeados() {
+    // `entrega/` acumula, e tudo o que estiver lá vai para o release: o `.dmg`
     // de 0.9.9 dentro do release de 1.2.3 é uma página que oferece duas versões
     // com o mesmo nome.
+    //
+    // **Esta decisão foi revertida em 2026-08-20, a pedido de quem publica.**
+    // Antes o script parava e mandava mover os arquivos à mão, com o argumento
+    // de que «quem apaga entrega passada apaga a entrega que ainda não foi
+    // publicada». O argumento continua verdadeiro e o preço foi aceito: parar é
+    // um passo manual em toda publicação, e o que se perde é reconstruível a
+    // partir do commit que o gerou.
+    //
+    // O que **não** foi aceito é apagar calado. Cada arquivo removido é
+    // nomeado na saída, para quem estiver olhando ver o que sumiu.
     let bancada = Bancada::nova();
     escrever(
         &bancada.repo.join("entrega/SEELE_0.9.9_aarch64.dmg"),
@@ -982,24 +1043,138 @@ fn restos_de_outra_versao_nao_sobem_junto() {
     );
     let saida = bancada.rodar(&["1.2.3"], &[]);
 
-    assert_eq!(
-        saida.estado, 1,
-        "resto de outra versão tem que reprovar:\n{}",
-        saida.texto
-    );
     assert!(
-        saida.texto.contains("arquivos de outra versão"),
-        "a mensagem tem que nomear o problema:\n{}",
-        saida.texto
-    );
-    // E o arquivo de quem veio antes continua lá: quem apaga entrega passada
-    // apaga a entrega que ainda não foi publicada.
-    assert!(
-        bancada
+        !bancada
             .repo
             .join("entrega/SEELE_0.9.9_aarch64.dmg")
             .exists(),
-        "o script apagou a entrega de outra versão em vez de reclamar dela"
+        "a entrega de outra versão tinha que ter sido apagada:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("SEELE_0.9.9_aarch64.dmg"),
+        "o arquivo apagado tem que ser nomeado; apagar calado é pior que parar:\n{}",
+        saida.texto
+    );
+}
+
+#[test]
+fn a_entrega_da_versao_corrente_sobrevive_a_limpeza() {
+    // Retomar um sistema que falhou é o caso normal deste script, e nele os
+    // pacotes dos que deram certo têm de continuar ali — uma limpeza que os
+    // levasse junto faria toda retomada recompilar as duas horas que já tinham
+    // dado certo.
+    let bancada = Bancada::nova();
+    escrever(
+        &bancada.repo.join("entrega/SEELE_1.2.3_aarch64.dmg"),
+        "desta vez\n",
+        false,
+    );
+    escrever(
+        &bancada.repo.join("entrega/SEELE_0.9.9_aarch64.dmg"),
+        "de outra vez\n",
+        false,
+    );
+    let saida = bancada.rodar(&["1.2.3"], &[]);
+
+    assert!(
+        bancada
+            .repo
+            .join("entrega/SEELE_1.2.3_aarch64.dmg")
+            .exists(),
+        "a limpeza levou junto a entrega desta versão:\n{}",
+        saida.texto
+    );
+    assert!(
+        !bancada
+            .repo
+            .join("entrega/SEELE_0.9.9_aarch64.dmg")
+            .exists(),
+        "a de outra versão tinha que sair:\n{}",
+        saida.texto
+    );
+}
+
+#[test]
+fn o_arquivo_que_o_finder_escreve_nao_e_entrega_de_ninguem() {
+    // O `.DS_Store` volta sozinho toda vez que alguém abre a pasta. Nomeá-lo
+    // como «apagado» a cada publicação treinaria quem lê a ignorar a lista, que
+    // é o que faz a lista deixar de servir para o dia em que ela importar.
+    let bancada = Bancada::nova();
+    escrever(&bancada.repo.join("entrega/.DS_Store"), "finder\n", false);
+    let saida = bancada.rodar(&["1.2.3"], &[]);
+
+    assert!(
+        !saida.texto.contains(".DS_Store"),
+        "o .DS_Store não é entrega de ninguém e não entra na lista:\n{}",
+        saida.texto
+    );
+}
+
+#[test]
+fn a_limpeza_do_windows_restaura_so_o_arquivo_conhecido() {
+    // A sujeira do Windows é quase sempre um arquivo só: o `windows.ps1` grava
+    // a versão no `tauri.release.conf.json` e a devolve ao sair, então uma
+    // rodada que morreu no meio deixa ele editado. Restaurar **esse** arquivo é
+    // desfazer o que nós fizemos.
+    //
+    // `reset --hard` e `stash` foram recusados de propósito, e por motivos
+    // diferentes: o primeiro apaga trabalho de quem estava naquela máquina, sem
+    // aviso e sem volta; o segundo não apaga nada, mas deixa uma entrada de
+    // stash por rodada interrompida, e um sedimento que ninguém limpa é o que o
+    // ADR 0022 recusou nos mapeamentos de porta permanentes.
+    let corpo = std::fs::read_to_string(publicar()).expect("legível");
+    let limpo = sem_comentario(&corpo);
+
+    // Só as linhas de PowerShell. Sem este recorte o teste passaria vazio: o
+    // `git checkout --` do lado do Mac já existia antes desta mudança (é o
+    // mesmo conserto, na máquina de cá), e encontrá-lo não prova nada sobre o
+    // que se manda para o Windows.
+    let bloco_do_windows: String = limpo
+        .lines()
+        .filter(|linha| {
+            linha.contains("Set-Location")
+                || linha.contains("Write-Output")
+                || linha.contains("Remove-Item")
+                || linha.contains("git ")
+                    && (linha.contains("\\$") || linha.contains("REPO_WINDOWS"))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        bloco_do_windows.contains("git checkout -- '$CONFIG_TAURI'"),
+        "o Windows tem que restaurar o arquivo conhecido, e não outra coisa:\n\
+         {bloco_do_windows}"
+    );
+    for proibido in ["reset --hard", "git stash", "clean -fd"] {
+        assert!(
+            !limpo.contains(proibido),
+            "«{proibido}» apaga ou sedimenta trabalho de quem está naquela máquina"
+        );
+    }
+}
+
+#[test]
+fn o_commit_vai_para_o_remoto_antes_de_o_windows_buscar() {
+    // O Windows tem que estar no **mesmo commit**, não na ponta do ramo: um
+    // release cujos três pacotes vêm de códigos diferentes é três releases com
+    // o mesmo número. E um `git pull` lá não alcança um commit que ainda não
+    // saiu daqui — por isso o empurrão é deste lado, e antes.
+    let corpo = std::fs::read_to_string(publicar()).expect("legível");
+    let limpo = sem_comentario(&corpo);
+
+    assert!(
+        limpo.contains("ls-remote"),
+        "é preciso perguntar se o commit já está no remoto antes de empurrar"
+    );
+    assert!(
+        limpo.contains("git -C \"$RAIZ\" push"),
+        "sem o empurrão, o checkout do outro lado busca um commit que não existe lá"
+    );
+    assert!(
+        limpo.contains("checkout") && limpo.contains("fetch"),
+        "no Windows é fetch mais checkout do commit, e não pull do ramo"
     );
 }
 
@@ -1306,7 +1481,12 @@ fn docs_test_e_chore_nao_entram() {
          refactor(core): o laço fica legível\n",
     );
 
-    for fora in ["icacls", "se prova sem compilar", "folha da marca", "laço fica legível"] {
+    for fora in [
+        "icacls",
+        "se prova sem compilar",
+        "folha da marca",
+        "laço fica legível",
+    ] {
         assert!(
             !texto.contains(fora),
             "«{fora}» não é mudança do produto e não entra na página:\n{texto}"
