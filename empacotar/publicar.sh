@@ -353,7 +353,182 @@ if (git status --porcelain -- '$CONFIG_TAURI') {
     fi
 }
 
+# ------------------------------------------------ as notas de uma versão
+
+# Os escopos cujo conserto a pessoa que baixa o SEELE **sente**.
+#
+# A lista é escrita à mão de propósito. Um mapa automático precisaria de uma
+# regra, e a regra seria sempre alguma variação de "o que está em crates/ é
+# produto" — que é falsa: `ffi` é ponte e `xtask` é ferramenta, e os dois moram
+# lá. Uma lista curta que alguém revisa quando um escopo novo aparece é mais
+# honesta que uma heurística que erra em silêncio.
+ESCOPOS_DE_PRODUTO="alcance admissao anexos app atualizador audio balthasar
+cages cascas chamada cliente conformance convite core dogma encontro enlace
+entrada fontes frases hospedagem interface marca medida melchior mensagens
+moderar mods porta portaria proto seguranca server sessao spike sync taxa tela
+tofu tui ui uri varredura voz"
+
+# Os escopos que existem para **montar** o SEELE, e não para usá-lo.
+#
+# Continuam na página: quem publica, quem empacota noutra máquina e quem
+# desconfia de um pacote têm o que fazer com eles. Só não lideram.
+ESCOPOS_DE_FERRAMENTA="build ci deps empacotar ffi publicar release test
+testes xtask"
+
+# Em que seção um escopo entra.
+#
+# O padrão de um escopo desconhecido é **produto**, e a escolha tem um lado
+# barato e um caro: deixar um conserto de empacotamento à vista custa uma linha
+# feia numa página; enterrar uma mudança que a pessoa sente custa ela não saber
+# que existe. O erro barato é que vira padrão.
+#
+# E o desconhecido **avisa**, em `secao_do_escopo` não, mas em quem chama: um
+# padrão que decide calado é como uma tabela envelhece sem ninguém perceber.
+secao_do_escopo() {
+    for se_um in $ESCOPOS_DE_FERRAMENTA; do
+        [ "$1" = "$se_um" ] && { printf 'ferramenta'; return 0; }
+    done
+    for se_um in $ESCOPOS_DE_PRODUTO; do
+        [ "$1" = "$se_um" ] && { printf 'produto'; return 0; }
+    done
+    printf 'produto'
+    return 1
+}
+
+# O corpo do release, a partir dos assuntos dos commits da faixa.
+#
+# Lê da **entrada padrão** e escreve na saída, sem tocar em git, em disco nem em
+# rede. Isso não é purismo: a página de um release é o lugar onde ninguém
+# percebe um defeito até ele estar publicado, e uma função de texto puro se
+# prova alimentando texto — `--notas` a expõe inteira:
+#
+#   git log --no-merges --format='%s' v0.6.1..HEAD | ./empacotar/publicar.sh --notas
+#
+# Só `feat` e `fix` entram. `docs`, `test`, `chore` e `refactor` são verdade
+# sobre o commit e não são mudança do produto; quem quiser a verdade completa
+# tem o histórico, que continua sendo ela.
+notas_das_mudancas() {
+    ndm_produto=""
+    ndm_ferramenta=""
+    ndm_novos=""
+
+    while IFS= read -r ndm_linha; do
+        case "$ndm_linha" in
+            feat\(*\):\ *|fix\(*\):\ *)
+                ndm_resto="${ndm_linha#*\(}"
+                ndm_escopo="${ndm_resto%%\)*}"
+                ndm_assunto="${ndm_linha#*\): }"
+                ;;
+            feat:\ *|fix:\ *)
+                ndm_escopo=""
+                ndm_assunto="${ndm_linha#*: }"
+                ;;
+            *)
+                continue
+                ;;
+        esac
+
+        if [ -n "$ndm_escopo" ]; then
+            ndm_item="- **$ndm_escopo** — $ndm_assunto"
+            if ndm_secao=$(secao_do_escopo "$ndm_escopo"); then
+                :
+            else
+                # Desconhecido: entra em produto e é nomeado para quem publica
+                # classificar. Uma vez por escopo, não uma vez por commit.
+                case " $ndm_novos " in
+                    *" $ndm_escopo "*) : ;;
+                    *) ndm_novos="$ndm_novos $ndm_escopo" ;;
+                esac
+            fi
+        else
+            # Sem escopo é forma legítima de conventional commit, e descartá-la
+            # perderia mudança sem dizer nada.
+            ndm_item="- $ndm_assunto"
+            ndm_secao="produto"
+        fi
+
+        if [ "$ndm_secao" = "ferramenta" ]; then
+            ndm_ferramenta="$ndm_ferramenta$ndm_item
+"
+        else
+            ndm_produto="$ndm_produto$ndm_item
+"
+        fi
+    done
+
+    for ndm_um in $ndm_novos; do
+        # As chaves não são estilo: sem elas o `»` (0xC2 0xBB) entra no nome da
+        # variável em alguns shells, e o script morre com «unbound variable»
+        # apontando para um nome que ninguém escreveu. É o mesmo defeito que o
+        # empacotador do macOS já teve, e a mesma letra.
+        aviso "«${ndm_um}» é um escopo que a tabela de $0 não conhece." \
+            "Ele entrou em «O que mudou», que é o lado visível." \
+            "Classifique-o em ESCOPOS_DE_PRODUTO ou ESCOPOS_DE_FERRAMENTA."
+    done
+
+    if [ -z "$ndm_produto" ] && [ -z "$ndm_ferramenta" ]; then
+        # Uma versão só de papel e teste existe, e a página tem que dizer isso.
+        # Uma seção vazia parece defeito de script para quem lê.
+        printf '%s\n' \
+"_Esta versão não traz nenhuma mudança de produto: só documentação, testes e" \
+"arrumação interna. O histórico do repositório tem a lista completa._"
+        return 0
+    fi
+
+    if [ -n "$ndm_produto" ]; then
+        printf '%s\n\n' "## O que mudou"
+        printf '%s' "$ndm_produto"
+        printf '\n'
+    fi
+    if [ -n "$ndm_ferramenta" ]; then
+        printf '%s\n\n' "## Por baixo"
+        printf '%s' "$ndm_ferramenta"
+        printf '\n'
+    fi
+}
+
+# A tag da versão publicada antes desta.
+#
+# Lê a lista de tags da entrada padrão — de novo para ser testável sem
+# repositório. Devolve vazio quando não há anterior, que é o caso da primeira
+# publicação e **não** é erro: quem chama diz isso na página em vez de listar o
+# histórico inteiro fingindo que é novidade.
+tag_anterior() {
+    ta_atual="v${1:-}"
+    ta_melhor=""
+    while IFS= read -r ta_uma; do
+        case "$ta_uma" in
+            v[0-9]*) : ;;
+            *) continue ;;
+        esac
+        [ "$ta_uma" = "$ta_atual" ] && continue
+        if [ -z "$ta_melhor" ]; then
+            ta_melhor="$ta_uma"
+            continue
+        fi
+        # A maior das duas, por versão e não por texto: sem isto v0.10.0
+        # perderia para v0.9.0, e a faixa do release sairia errada justamente
+        # quando o projeto passasse de nove.
+        ta_maior=$(printf '%s\n%s\n' "${ta_melhor#v}" "${ta_uma#v}" \
+            | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)
+        ta_melhor="v$ta_maior"
+    done
+    printf '%s' "$ta_melhor"
+}
+
 # --------------------------------------------------- os argumentos da linha
+
+if [ "${1:-}" = "--notas" ]; then
+    # O corpo do release a partir dos assuntos, sozinho: sem git e sem rede.
+    notas_das_mudancas
+    exit 0
+fi
+
+if [ "${1:-}" = "--tag-anterior" ]; then
+    # A faixa, sozinha: recebe a lista de tags na entrada padrão.
+    tag_anterior "${2:-}"
+    exit 0
+fi
 
 if [ "${1:-}" = "--decidir" ]; then
     # A regra sozinha: sem repositório, sem rede, sem compilar nada.
@@ -1050,11 +1225,38 @@ fi
 # encontra atestado**, e uma pessoa cuidadosa que o rode sem este aviso conclui
 # adulteração onde só houve ausência de CI.
 NOTAS="$TEMPORARIO/corpo.md"
+
+# A faixa desta versão, e as mudanças dentro dela.
+#
+# Antes disto a página abria com 259 linhas explicando o que é o `plug` e onde
+# ele mora — texto que não muda de uma versão para a outra e que já está no
+# README. Quem chegava na página de uma versão nova para saber **o que mudou**
+# não achava em lugar nenhum, e o histórico do repositório, que é onde a
+# resposta sempre esteve, não é o lugar onde alguém procura depois de clicar num
+# link de download.
+ANTERIOR=$(git -C "$RAIZ" tag --list 'v*' | tag_anterior "$VERSAO")
+if [ -n "$ANTERIOR" ]; then
+    FAIXA="$ANTERIOR..HEAD"
+else
+    # A primeira publicação. Dizer isso é melhor que listar o histórico inteiro
+    # como se tudo fosse novidade desta versão.
+    FAIXA=""
+fi
+
 {
-    if [ -f "$RAIZ/.github/NOTAS-DE-RELEASE.md" ]; then
-        cat "$RAIZ/.github/NOTAS-DE-RELEASE.md"
-        printf '\n---\n\n'
+    if [ -n "$FAIXA" ]; then
+        git -C "$RAIZ" log --no-merges --format='%s' "$FAIXA" | notas_das_mudancas
+    else
+        printf '%s\n' \
+"_Primeira versão publicada: não há uma anterior contra a qual comparar. O" \
+"histórico do repositório tem tudo o que veio antes._"
+        printf '\n'
     fi
+    if [ -f "$RAIZ/.github/NOTAS-DE-RELEASE.md" ]; then
+        printf '\n---\n\n'
+        cat "$RAIZ/.github/NOTAS-DE-RELEASE.md"
+    fi
+    printf '\n---\n\n'
     printf '%s\n' \
 "## Como esta versão foi montada" \
 "" \

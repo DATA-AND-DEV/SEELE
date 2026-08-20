@@ -1187,3 +1187,261 @@ fn um_sistema_que_nao_existe_e_recusado() {
         saida.texto
     );
 }
+
+// ------------------------------------------------- as notas de uma versão
+
+/// O texto das mudanças, sozinho: sem repositório, sem rede, sem git.
+///
+/// `notas_das_mudancas` lê assuntos de commit da entrada padrão e escreve
+/// markdown na saída. Quem chama o `git log` é uma linha à parte, de propósito:
+/// uma função de texto puro se prova alimentando texto, e a página de um release
+/// é exatamente o lugar onde ninguém percebe um defeito até ele estar publicado.
+fn notas(assuntos: &str) -> String {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let mut filho = Command::new("sh")
+        .arg(publicar())
+        .arg("--notas")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("o orquestrador tem que executar");
+    if let Some(entrada) = filho.stdin.as_mut() {
+        entrada
+            .write_all(assuntos.as_bytes())
+            .expect("a entrada padrão aceita bytes");
+    }
+    let saida = filho.wait_with_output().expect("o filho termina");
+    String::from_utf8_lossy(&saida.stdout).into_owned()
+}
+
+#[test]
+fn as_mudancas_separam_o_que_a_pessoa_sente_do_que_e_ferramenta() {
+    // A página de um release existe para quem baixa. O conserto do `hdiutil` é
+    // verdade e não é notícia para essa pessoa; enterrá-lo seria mentir por
+    // omissão, e misturá-lo afoga o que ela veio ler. Duas seções resolvem as
+    // duas coisas ao mesmo tempo.
+    let texto = notas(
+        "feat(ui): a tela para de falar com quem construiu\n\
+         fix(empacotar): o rascunho do hdiutil não é pacote\n\
+         fix(alcance): as recusas dizem o que houve, e param\n",
+    );
+
+    let (em_cima, embaixo) = texto
+        .split_once("## Por baixo")
+        .unwrap_or_else(|| panic!("as duas seções têm que existir:\n{texto}"));
+
+    assert!(
+        em_cima.contains("a tela para de falar com quem construiu")
+            && em_cima.contains("as recusas dizem o que houve"),
+        "o que a pessoa sente lidera:\n{texto}"
+    );
+    assert!(
+        embaixo.contains("o rascunho do hdiutil não é pacote"),
+        "o conserto da ferramenta continua na página, embaixo:\n{texto}"
+    );
+    assert!(
+        !em_cima.contains("hdiutil"),
+        "ferramenta não sobe para a primeira seção:\n{texto}"
+    );
+}
+
+#[test]
+fn um_escopo_desconhecido_aparece_em_vez_de_sumir() {
+    // O padrão é o lado visível, e a escolha não é arbitrária: deixar um
+    // conserto de empacotamento à vista custa uma linha feia; enterrar uma
+    // mudança que a pessoa sente custa ela não saber que existe. O erro barato
+    // é o que fica sendo o padrão.
+    let texto = notas("feat(telepatia): o Dogma adivinha o que você ia dizer\n");
+
+    let em_cima = texto
+        .split("## Por baixo")
+        .next()
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        em_cima.contains("adivinha o que você ia dizer"),
+        "escopo que ninguém classificou ainda tem que aparecer, e aparecer em \
+         cima:\n{texto}"
+    );
+}
+
+#[test]
+fn um_escopo_desconhecido_pede_para_ser_classificado() {
+    // E o padrão avisa em vez de decidir calado: quem publica vê o nome do
+    // escopo novo e classifica. Sem isto, a tabela envelhece sem ninguém
+    // perceber, que é como uma decisão de curadoria vira acidente.
+    let mut filho = Command::new("sh")
+        .arg(publicar())
+        .arg("--notas")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("o orquestrador tem que executar");
+    if let Some(entrada) = filho.stdin.as_mut() {
+        use std::io::Write;
+        let _ = entrada.write_all(b"feat(telepatia): o Dogma adivinha\n");
+    }
+    let saida = filho.wait_with_output().expect("o filho termina");
+    let erro = String::from_utf8_lossy(&saida.stderr);
+
+    assert!(
+        erro.contains("telepatia"),
+        "o escopo novo tem que ser nomeado no aviso, ou ninguém sabe o que \
+         classificar:\n{erro}"
+    );
+}
+
+#[test]
+fn docs_test_e_chore_nao_entram() {
+    // Eles são verdade sobre o commit e não são mudança do produto. Quem quiser
+    // a verdade completa tem o histórico do git, que continua sendo ela.
+    let texto = notas(
+        "docs(windows): o icacls usa identificadores\n\
+         test(empacotar): a decisão se prova sem compilar nada\n\
+         chore: a folha da marca sai do repositório\n\
+         refactor(core): o laço fica legível\n",
+    );
+
+    for fora in ["icacls", "se prova sem compilar", "folha da marca", "laço fica legível"] {
+        assert!(
+            !texto.contains(fora),
+            "«{fora}» não é mudança do produto e não entra na página:\n{texto}"
+        );
+    }
+}
+
+#[test]
+fn sem_feat_nem_fix_na_faixa_nao_se_inventa_secao() {
+    // Uma versão só de documentação e teste existe, e a página dela tem que
+    // dizer isso — não uma seção «O que mudou» vazia, que parece defeito de
+    // script para quem lê.
+    let texto = notas("docs: só papel\nchore: só arrumação\n");
+
+    assert!(
+        !texto.contains("## O que mudou"),
+        "seção vazia é pior que seção nenhuma:\n{texto}"
+    );
+    assert!(
+        !texto.contains("## Por baixo"),
+        "e a de baixo também não:\n{texto}"
+    );
+    assert!(
+        texto.contains("nenhuma mudança de produto"),
+        "o silêncio tem que ser dito, ou parece que o script quebrou:\n{texto}"
+    );
+}
+
+#[test]
+fn o_assunto_atravessa_byte_a_byte() {
+    // O caminho é shell, e shell come `$`, barra invertida e crase quando quem
+    // escreve não toma cuidado. Um assunto que chega torto à página é o tipo de
+    // defeito que só aparece depois de publicado — e as aspas angulares deste
+    // projeto e o `»` do empacotador já moraram num commit real.
+    let torto = "fix(empacotar): o `»` não entra no $NOME, e a \\ fica";
+    let texto = notas(&format!("{torto}\n"));
+
+    assert!(
+        texto.contains("o `»` não entra no $NOME, e a \\ fica"),
+        "o assunto tem que atravessar sem ser mastigado:\n{texto}"
+    );
+}
+
+#[test]
+fn a_ordem_dentro_de_uma_secao_e_a_que_entrou() {
+    // O `git log` vem do mais novo para o mais velho, e a página herda isso sem
+    // reordenar: quem acompanha o projeto lê de cima e para quando reconhece.
+    let texto = notas(
+        "fix(alcance): terceiro\n\
+         fix(ui): segundo\n\
+         feat(core): primeiro\n",
+    );
+
+    let terceiro = texto.find("terceiro");
+    let segundo = texto.find("segundo");
+    let primeiro = texto.find("primeiro");
+    assert!(
+        terceiro < segundo && segundo < primeiro,
+        "a ordem do histórico tem que sobreviver:\n{texto}"
+    );
+}
+
+#[test]
+fn o_escopo_aparece_ao_lado_do_assunto() {
+    // «as recusas dizem o que houve» sozinho fica solto. Com o escopo na frente
+    // a frase ganha endereço, e os escopos deste projeto são vocabulário do
+    // produto — «alcance», «portaria», «encontro» são as palavras da
+    // documentação, não jargão de quem compila.
+    let texto = notas("fix(alcance): as recusas dizem o que houve\n");
+
+    assert!(
+        texto.contains("**alcance**"),
+        "o escopo tem que aparecer, e em negrito:\n{texto}"
+    );
+}
+
+#[test]
+fn um_feat_sem_escopo_nao_e_descartado() {
+    // `feat: x` sem parênteses é forma legítima de conventional commit, e um
+    // script que a ignorasse perderia mudança sem dizer nada.
+    let texto = notas("feat: o SEELE passa a caber num disquete\n");
+
+    assert!(
+        texto.contains("caber num disquete"),
+        "commit sem escopo é commit:\n{texto}"
+    );
+}
+
+/// A faixa do release, sozinha: recebe a lista de tags na entrada padrão.
+fn anterior(tags: &str, versao: &str) -> String {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let mut filho = Command::new("sh")
+        .arg(publicar())
+        .arg("--tag-anterior")
+        .arg(versao)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("o orquestrador tem que executar");
+    if let Some(entrada) = filho.stdin.as_mut() {
+        entrada.write_all(tags.as_bytes()).expect("aceita bytes");
+    }
+    let saida = filho.wait_with_output().expect("o filho termina");
+    String::from_utf8_lossy(&saida.stdout).into_owned()
+}
+
+#[test]
+fn a_faixa_comeca_na_versao_publicada_antes_desta() {
+    assert_eq!(anterior("v0.6.0\nv0.6.1\n0.2.0\n", "0.6.2"), "v0.6.1");
+}
+
+#[test]
+fn a_versao_sendo_publicada_nao_e_a_faixa_dela_mesma() {
+    // `publicar.sh` cria **rascunho**, e rascunho não cria tag — então em uso
+    // normal `v$VERSAO` não existe ainda. Mas uma segunda tentativa depois de
+    // publicar existe, e aí a tag está lá: sem esta linha a faixa seria
+    // `v0.6.2..HEAD`, que é vazia, e a página sairia dizendo que nada mudou.
+    assert_eq!(anterior("v0.6.1\nv0.6.2\n", "0.6.2"), "v0.6.1");
+}
+
+#[test]
+fn a_decima_versao_nao_perde_para_a_nona() {
+    // Ordenação de texto poria `v0.9.0` acima de `v0.10.0`, e a faixa do
+    // release sairia errada justamente quando o projeto passasse de nove — com
+    // o sintoma de a página listar mudanças de versões já publicadas.
+    assert_eq!(anterior("v0.9.0\nv0.10.0\nv0.8.3\n", "0.11.0"), "v0.10.0");
+}
+
+#[test]
+fn sem_tag_anterior_a_faixa_e_vazia_e_isso_nao_e_erro() {
+    // A primeira publicação. Devolver vazio deixa quem chama dizer isso na
+    // página, em vez de listar o histórico inteiro fingindo que é novidade.
+    assert_eq!(anterior("", "0.1.0"), "");
+    assert_eq!(anterior("0.2.0\n", "0.1.0"), "", "tag sem «v» não conta");
+}
