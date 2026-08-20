@@ -555,7 +555,11 @@ async fn atender(
                 mandar_pelo_dogma(&dogma, &encontro::leve(aviso, &minha_marca), ponto);
             }
             recebido = avisos.recv_from(&mut balde) => {
-                let Ok((lidos, _)) = recebido else { continue };
+                let Ok((lidos, origem)) = recebido else { continue };
+                if !aviso_e_do_ponto(origem, ponto) {
+                    tracing::debug!(%origem, "aviso de fora do ponto de encontro; ignorado");
+                    continue;
+                }
                 let Some((marca, endereco)) = balde.get(..lidos).and_then(encontro::ler_aqui)
                 else {
                     continue;
@@ -574,6 +578,21 @@ async fn atender(
             }
         }
     }
+}
+
+/// Se este aviso veio de onde o ponto de encontro atende.
+///
+/// A marca já separa "alguém com o convite" de "a internet batendo na porta", e
+/// continua sendo a cinta principal. Esta é a segunda, e ela fecha um caminho
+/// mais barato que o outro: um `AQUI` forjado direto nesta escuta não passa pelo
+/// ponto de encontro, então quem o manda não paga a ida até lá.
+///
+/// **Compara o endereço, não a porta.** Um ponto de encontro atrás de um
+/// balanceador responde de porta efêmera, e recusar isso quebraria topologias
+/// legítimas sem ganhar nada: quem consegue forjar um endereço de origem forja a
+/// porta junto.
+fn aviso_e_do_ponto(origem: SocketAddr, ponto: SocketAddr) -> bool {
+    origem.ip() == ponto.ip()
 }
 
 /// Se ainda cabe um furo na janela corrente.
@@ -788,6 +807,146 @@ mod testes {
         // O reavivamento cabe com folga no esquecimento mais apertado de NAT
         // que se vê por aí, que é de 30 segundos.
         const { assert!(REAVIVAR.as_secs() * 2 <= 30) };
+    }
+
+    #[tokio::test]
+    async fn um_aqui_de_origem_estranha_nao_vira_furo() {
+        // O `AQUI` é o único datagrama que faz o Dogma mandar pacote para um
+        // endereço que outra pessoa escolheu. Forjá-lo direto na escuta de avisos é
+        // mais barato que forjar um `LEVE`: não passa pelo ponto de encontro, então
+        // nem a marca nem a janela de furos são pagas duas vezes.
+        //
+        // A marca continua sendo a cinta principal — quem tem o link, tem. Esta é a
+        // segunda: o pacote também tem de ter vindo de onde o ponto de encontro
+        // atende.
+        let ponto = SocketAddr::from(([203, 0, 113, 7], encontro::PORTA_PADRAO));
+        let intruso = SocketAddr::from(([198, 51, 100, 9], 9000));
+
+        assert!(
+            !aviso_e_do_ponto(intruso, ponto),
+            "um AQUI que não veio do ponto de encontro não abre caminho nenhum"
+        );
+        assert!(aviso_e_do_ponto(ponto, ponto));
+        // A porta de origem não conta: um ponto de encontro atrás de um balanceador
+        // responde de porta efêmera, e recusar isso quebraria topologias legítimas
+        // sem baixar a superfície de abuso — quem forja endereço forja porta.
+        let mesma_maquina_outra_porta = SocketAddr::from(([203, 0, 113, 7], 40000));
+        assert!(aviso_e_do_ponto(mesma_maquina_outra_porta, ponto));
+    }
+
+    /// Sobe um `atender` de teste com sockets reais de loopback, para os dois
+    /// casos abaixo. Devolve a tarefa (para poder abortá-la ao fim do teste), o
+    /// endereço da escuta de avisos (para onde o `AQUI` é mandado), o socket que
+    /// receberia o `FURO`, o endereço dele, e a marca que um `AQUI` tem de
+    /// trazer para não ser tratado como ruído.
+    async fn subir_atender_de_teste(
+        ponto: SocketAddr,
+    ) -> (
+        tokio::task::JoinHandle<()>,
+        SocketAddr,
+        tokio::net::UdpSocket,
+        SocketAddr,
+        Marca,
+    ) {
+        let Ok(avisos) = tokio::net::UdpSocket::bind("127.0.0.1:0").await else {
+            panic!("não deu para abrir a escuta de avisos de teste");
+        };
+        let Ok(avisos_endereco) = avisos.local_addr() else {
+            panic!("a escuta de avisos de teste não tem endereço local");
+        };
+
+        let Ok(dogma) = std::net::UdpSocket::bind("127.0.0.1:0") else {
+            panic!("não deu para abrir o socket do Dogma de teste");
+        };
+
+        let Ok(alvo) = tokio::net::UdpSocket::bind("127.0.0.1:0").await else {
+            panic!("não deu para abrir o alvo do furo de teste");
+        };
+        let Ok(alvo_endereco) = alvo.local_addr() else {
+            panic!("o alvo do furo de teste não tem endereço local");
+        };
+
+        let Some(minha_marca) = Marca::nova("anfitriao") else {
+            panic!("marca de teste inválida");
+        };
+        let Some(de_quem_chega) = Marca::nova("visitante") else {
+            panic!("marca de teste inválida");
+        };
+
+        let tarefa = tokio::spawn(atender(
+            avisos,
+            Arc::new(dogma),
+            ponto,
+            avisos_endereco,
+            minha_marca,
+            de_quem_chega.clone(),
+        ));
+
+        (tarefa, avisos_endereco, alvo, alvo_endereco, de_quem_chega)
+    }
+
+    #[tokio::test]
+    async fn atender_recusa_furo_para_aqui_que_nao_veio_do_ponto() {
+        // `um_aqui_de_origem_estranha_nao_vira_furo`, acima, exercita
+        // `aviso_e_do_ponto` isolada — e uma função pura correta não garante que
+        // `atender` de fato a chame. Se alguém apagar por engano o `if
+        // !aviso_e_do_ponto(...) { continue; }` de dentro do laço, aquele teste
+        // continua passando, porque ele nunca roda `atender`. Este aqui roda.
+        //
+        // O `ponto` é `192.0.2.1` — TEST-NET-1, RFC 5737, reservado para
+        // documentação e que não existe em rede nenhuma. `atender` nunca manda
+        // nada para lá dentro da janela deste teste: ele só compara. O intruso
+        // manda do loopback, os IPs não batem, e tudo fica só nesta máquina —
+        // sem depender de segunda interface de rede nenhuma.
+        let ponto = SocketAddr::from(([192, 0, 2, 1], encontro::PORTA_PADRAO));
+        let (tarefa, avisos_endereco, alvo, alvo_endereco, marca) =
+            subir_atender_de_teste(ponto).await;
+
+        let Ok(intruso) = std::net::UdpSocket::bind("127.0.0.1:0") else {
+            tarefa.abort();
+            panic!("não deu para abrir o socket do intruso de teste");
+        };
+        let aviso_forjado = encontro::aqui(&marca, alvo_endereco);
+        let _ = intruso.send_to(&aviso_forjado, avisos_endereco);
+
+        let mut balde = [0_u8; encontro::TAMANHO];
+        let nada_chegou =
+            tokio::time::timeout(Duration::from_millis(300), alvo.recv_from(&mut balde)).await;
+        tarefa.abort();
+        assert!(
+            nada_chegou.is_err(),
+            "um AQUI que não veio do ponto de encontro furou mesmo assim"
+        );
+    }
+
+    #[tokio::test]
+    async fn atender_fura_para_aqui_que_veio_do_ponto() {
+        // O par do teste acima: sem este, um `atender` que recusasse *todo*
+        // `AQUI` passaria no teste hostil e ninguém notaria. Os dois juntos é
+        // que fazem a checagem de origem reprovar nos dois sentidos.
+        //
+        // O `ponto` de encontro de teste é um socket de loopback de verdade, e
+        // o `AQUI` sai exatamente dele — mesmo endereço que `atender` recebeu
+        // como `ponto`, então a checagem deixa passar.
+        let Ok(ponto_socket) = std::net::UdpSocket::bind("127.0.0.1:0") else {
+            panic!("não deu para abrir o ponto de encontro de teste");
+        };
+        let Ok(ponto) = ponto_socket.local_addr() else {
+            panic!("o ponto de encontro de teste não tem endereço local");
+        };
+        let (tarefa, avisos_endereco, alvo, alvo_endereco, marca) =
+            subir_atender_de_teste(ponto).await;
+
+        let aviso_legitimo = encontro::aqui(&marca, alvo_endereco);
+        let _ = ponto_socket.send_to(&aviso_legitimo, avisos_endereco);
+
+        let mut balde = [0_u8; encontro::TAMANHO];
+        let chegou = tokio::time::timeout(Duration::from_secs(1), alvo.recv_from(&mut balde)).await;
+        tarefa.abort();
+        let Ok(Ok((lidos, _))) = chegou else {
+            panic!("o FURO não chegou depois de um AQUI que veio do ponto de encontro");
+        };
+        assert!(lidos > 0, "o FURO chegou vazio");
     }
 
     #[test]
