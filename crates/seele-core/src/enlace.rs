@@ -36,7 +36,7 @@
 //! [`Aviso::Reconectado`] com o canal novo e reabre o áudio. É honesto: o
 //! caminho de áudio realmente recomeça.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -368,6 +368,37 @@ const COMANDOS: usize = 32;
 /// de casa em primeiro, o caso comum nunca chega a esperar nada disto.
 const PRAZO_POR_CANDIDATO: Duration = Duration::from_secs(4);
 
+/// Quanto se espera entre avisar o ponto de encontro e começar o aperto de mão.
+///
+/// É o que tem de caber entre o `LEVE` sair daqui e o `Initial` chegar ao NAT do
+/// outro lado: uma perna até o ponto, mais uma perna do ponto até o anfitrião —
+/// que somadas dão mais ou menos a ida e volta que o ADR 0022 mediu entre 20 e
+/// 200 ms.
+///
+/// **Erra-se para baixo de propósito.** Errar para baixo custa um PTO do quinn,
+/// que cabe folgado nos 4 s do candidato; errar para cima é pago sempre, por
+/// todo mundo, inclusive por quem ia conectar de qualquer jeito.
+const ESPERA_DO_FURO: Duration = Duration::from_millis(200);
+
+/// Quantos avisos saem por candidato que precisa de furo, e de quanto em quanto.
+///
+/// Três, espaçados, **enquanto o aperto de mão corre**. É a retentativa que não
+/// existia: antes eram dois avisos antes do laço, e um `AQUI` perdido custava a
+/// conexão inteira em silêncio — o anfitrião nunca furava, o candidato queimava
+/// os quatro segundos, e o erro que saía era o de outro endereço.
+const AVISOS_POR_CANDIDATO: u8 = 3;
+/// O intervalo entre eles.
+const INTERVALO_DO_AVISO: Duration = Duration::from_millis(700);
+
+/// O prazo de um candidato privado que não é desta rede.
+///
+/// Um `192.168.x.x` visto de outra casa não devolve ICMP nenhum: ele queima o
+/// prazo inteiro. Um segundo cabe dez idas e voltas de rede local e um PTO.
+///
+/// **Nunca descartar, só encurtar.** Um /16 configurado à mão ou uma VPN
+/// capturando a rota dão falso negativo, e falso negativo só custa velocidade.
+const PRAZO_DE_CANDIDATO_DISTANTE: Duration = Duration::from_secs(1);
+
 impl Enlace {
     /// Conecta no primeiro endereço que atender, tentando um de cada vez.
     ///
@@ -410,12 +441,27 @@ impl Enlace {
         Self::conectar_entre_com_bilhete(destinos, None, chave, pins).await
     }
 
-    /// O mesmo, batendo antes no ponto de encontro do convite.
+    /// O mesmo, avisando o ponto de encontro do convite a cada candidato.
     ///
     /// Degrau 4 do ADR 0022. O bilhete vem do `enc` do `seele://` — ADR 0006 —,
-    /// e o que ele acrescenta é **um datagrama antes de tudo**: o ponto de
-    /// encontro conta ao anfitrião de onde viemos, o anfitrião manda alguns
-    /// pacotes para cá, e o roteador dele passa a deixar entrar o aperto de mão.
+    /// e o que ele acrescenta é um datagrama **colado em cada tentativa que
+    /// precisa dele**: o ponto de encontro conta ao anfitrião de onde viemos, o
+    /// anfitrião manda um pacote para cá, e o roteador dele passa a deixar
+    /// entrar o aperto de mão que sai logo em seguida.
+    ///
+    /// # Por que colado, e não antes do laço
+    ///
+    /// Porque é o defeito que este ciclo existe para consertar. O aviso saía uma
+    /// vez, antes de tudo, e o furo do outro lado abre por menos de um segundo;
+    /// o primeiro candidato do convite é o da rede de casa, que de outra casa
+    /// queima o prazo inteiro. Quando a vez do candidato refletido chegava, o
+    /// furo tinha fechado havia segundos — quatro no melhor caso, doze no pior,
+    /// e um teste de campo com duas casas falhou exatamente assim.
+    ///
+    /// Agora `encontro::Batida::preparar` só abre o socket e resolve o nome.
+    /// **Nenhum pacote sai daqui**: quem manda é o laço, uma vez por candidato
+    /// que precisa de furo, e mais dois avisos espaçados enquanto o aperto de
+    /// mão corre.
     ///
     /// # Por que todos os candidatos passam pelo mesmo socket
     ///
@@ -440,25 +486,25 @@ impl Enlace {
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
     ) -> Result<Self, ConnectError> {
-        // Antes de qualquer tentativa, e sem esperar por resposta: o primeiro
-        // candidato é o da rede de casa, e o tempo que ele leva para falhar —
-        // quando falha — é tempo de sobra para o furo abrir do outro lado.
-        let furo = match &bilhete {
+        // Preparado antes do laço porque o socket tem de ser um só — o NAT
+        // mapeia por porta interna. Mas **nenhum pacote sai daqui**: o aviso é
+        // por candidato, e é essa mudança que conserta a corrida.
+        let batida = match &bilhete {
             Some(bilhete) => {
                 let impressao = destinos
                     .first()
                     .and_then(|destino| destino.impressao_esperada.as_deref());
-                crate::encontro::bater(bilhete, impressao).await
+                crate::encontro::Batida::preparar(bilhete, impressao).await
             }
             None => None,
         };
-        Self::tentar_entre(destinos, furo.as_ref(), bilhete, chave, pins).await
+        Self::tentar_entre(destinos, batida.as_ref(), bilhete, chave, pins).await
     }
 
     /// O laço de tentativas, com ou sem furo de NAT.
     async fn tentar_entre(
         destinos: Vec<Destino>,
-        furo: Option<&std::net::UdpSocket>,
+        batida: Option<&crate::encontro::Batida>,
         bilhete: Option<seele_proto::uri::Bilhete>,
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
@@ -466,7 +512,7 @@ impl Enlace {
         // Uma cópia por tentativa, e o original vivo até o fim: um `Endpoint`
         // fecha o socket dele ao ser recolhido, e sem o original a porta que o
         // anfitrião furou voltaria para o sistema no meio do caminho.
-        let emprestar = || furo.and_then(|socket| socket.try_clone().ok());
+        let emprestar = || batida.and_then(crate::encontro::Batida::emprestar_socket);
         let mut candidatos = destinos.into_iter().peekable();
         let Some(primeiro) = candidatos.next() else {
             // Ninguém chama assim, e devolver um erro é melhor que entrar num
@@ -474,7 +520,17 @@ impl Enlace {
             return Err(ConnectError::Unreachable);
         };
         if candidatos.peek().is_none() {
-            return Self::conectar_por(emprestar(), bilhete, primeiro, chave, pins).await;
+            // Um convite de um endereço só continua sem prazo novo — o caminho
+            // de antes, para um link antigo. Mas o aviso ele leva: um convite
+            // que traz **só** o endereço refletido é exatamente a casa que mais
+            // depende do degrau 4, e pular o aviso aqui deixaria sem furo quem
+            // não tem outra chance.
+            let repeticao = avisar_pelo_candidato(batida, primeiro.servidor).await;
+            let resultado = Self::conectar_por(emprestar(), bilhete, primeiro, chave, pins).await;
+            if let Some(repeticao) = repeticao {
+                repeticao.abort();
+            }
+            return resultado;
         }
 
         let mut primeira_falha: Option<ConnectError> = None;
@@ -483,6 +539,24 @@ impl Enlace {
             let onde = destino.servidor;
             let chave_do_pin = destino.chave_do_pin.clone();
             let fixado_antes = pins.pinned(&chave_do_pin);
+
+            // O aviso sai **agora**, para este candidato, e o aperto de mão sai
+            // logo atrás dele. É a coordenação inteira desta tarefa: o furo do
+            // outro lado dura menos de um segundo, e a única forma de o `Initial`
+            // caber dentro dele é os dois saírem juntos.
+            let repeticao = avisar_pelo_candidato(batida, onde).await;
+
+            // Um candidato privado de outra casa não devolve ICMP nenhum: ele
+            // queima o prazo inteiro sem nunca ter tido chance. Encurtar é o que
+            // faz quatro endereços mortos custarem quatro segundos em vez de
+            // dezesseis — e é só encurtar, nunca descartar, porque um /16 à mão
+            // ou uma VPN capturando a rota dão falso negativo.
+            let prazo = if e_de_outra_casa(onde) {
+                PRAZO_DE_CANDIDATO_DISTANTE
+            } else {
+                PRAZO_POR_CANDIDATO
+            };
+
             let tentativa = Self::conectar_por(
                 emprestar(),
                 bilhete.clone(),
@@ -491,8 +565,13 @@ impl Enlace {
                 Arc::clone(&pins),
             );
 
-            let falha = match tokio::time::timeout(PRAZO_POR_CANDIDATO, tentativa).await {
-                Ok(Ok(enlace)) => return Ok(enlace),
+            let falha = match tokio::time::timeout(prazo, tentativa).await {
+                Ok(Ok(enlace)) => {
+                    if let Some(repeticao) = repeticao {
+                        repeticao.abort();
+                    }
+                    return Ok(enlace);
+                }
                 Ok(Err(erro)) => erro,
                 Err(_) => {
                     // O aperto de mão foi cancelado no meio, e o `conectar` não
@@ -502,6 +581,13 @@ impl Enlace {
                     ConnectError::HandshakeTimeout
                 }
             };
+            // A repetição para quando o candidato termina, dando certo ou não:
+            // avisar sobre um candidato que já falhou gastaria furo da janela do
+            // anfitrião — sessenta por dez segundos — por um caminho que ninguém
+            // vai tentar de novo.
+            if let Some(repeticao) = repeticao {
+                repeticao.abort();
+            }
             tracing::info!(%onde, erro = %falha, "este endereço do convite não deu; indo ao próximo");
             if respondeu.is_none() && alguem_respondeu(&falha) {
                 respondeu = Some(falha.clone());
@@ -1186,14 +1272,28 @@ impl Motor {
     async fn tentar(&mut self) {
         // O degrau 4 de novo, e não só na primeira entrada. Esta tentativa sai
         // de um socket novo — porta nova —, e o caminho que o anfitrião abriu
-        // era para a porta anterior. Sem bater no ponto de encontro outra vez, a
+        // era para a porta anterior. Sem avisar o ponto de encontro outra vez, a
         // reconexão bate numa porta fechada até a bateria acabar.
-        let furo = match &self.bilhete {
+        //
+        // Aqui não há laço de candidatos: a reconexão volta ao endereço que
+        // atendeu. Mesmo assim o aviso passa pelo mesmo `avisar_pelo_candidato`
+        // da primeira entrada, e pela mesma razão — se o endereço que atendeu
+        // for o da rede de casa, não há furo a pedir, e pedir gastaria a janela
+        // do anfitrião a cada tica da bateria.
+        let batida = match &self.bilhete {
             Some(bilhete) => {
-                crate::encontro::bater(bilhete, self.destino.impressao_esperada.as_deref()).await
+                crate::encontro::Batida::preparar(
+                    bilhete,
+                    self.destino.impressao_esperada.as_deref(),
+                )
+                .await
             }
             None => None,
         };
+        let repeticao = avisar_pelo_candidato(batida.as_ref(), self.destino.servidor).await;
+        let furo = batida
+            .as_ref()
+            .and_then(crate::encontro::Batida::emprestar_socket);
         let resultado = Client::connect_por(
             furo,
             self.destino.servidor,
@@ -1205,6 +1305,12 @@ impl Motor {
             self.destino.segredo.as_deref(),
         )
         .await;
+
+        // Esta tentativa acabou, dando certo ou não, e o que a repetição
+        // avisaria daqui para a frente é sobre uma porta que já foi usada.
+        if let Some(repeticao) = repeticao {
+            repeticao.abort();
+        }
 
         let agora = self.inicio.elapsed();
         match resultado {
@@ -1495,6 +1601,262 @@ fn desfazer_pin_orfao(pins: &dyn PinStore, chave_do_pin: &str, fixado_antes: Opt
     }
 }
 
+/// Avisa o ponto de encontro por causa **deste** candidato, e deixa a repetição
+/// correndo enquanto o aperto de mão dele acontece.
+///
+/// É o conserto do ciclo em uma função. O aviso saía uma vez, antes do laço, e o
+/// furo que ele provoca do outro lado dura menos de um segundo; o aperto de mão
+/// que devia atravessar aquele furo chegava de quatro a doze segundos depois,
+/// porque o candidato da rede de casa vinha primeiro e gastava o prazo inteiro.
+/// Aqui o aviso sai colado no candidato que precisa dele, e nada sai pelos
+/// outros.
+///
+/// # O que devolve
+///
+/// A tarefa que repete o aviso, para quem chama abortá-la quando o candidato
+/// termina — avisar sobre um candidato que já falhou gastaria furo da janela do
+/// anfitrião por um caminho que ninguém vai tentar de novo.
+///
+/// `None` quando não houve aviso nenhum: sem bilhete, num candidato que não
+/// precisa de furo, ou quando o envio foi recusado. Nos três não há nada para
+/// abortar.
+///
+/// # Por que um aviso recusado não derruba nada
+///
+/// Porque ele é de **um** candidato. Um `ENETUNREACH` no caminho até o ponto de
+/// encontro não diz nada sobre o candidato seguinte, e transformar essa falha em
+/// erro de conexão trocaria um defeito por outro. O erro é registrado — e a
+/// linha só diz que avisou quando avisou, porque a versão anterior deste código
+/// afirmava «avisamos o ponto de encontro» mesmo quando o `send_to` tinha sido
+/// recusado, e um log que mente sobre isso custa a próxima investigação inteira.
+async fn avisar_pelo_candidato(
+    batida: Option<&crate::encontro::Batida>,
+    onde: SocketAddr,
+) -> Option<tokio::task::JoinHandle<()>> {
+    let batida = batida?;
+    // Só o candidato refletido depende de alguém ter furado o caminho. O da rede
+    // de casa não paga metadado, não gasta furo da janela do anfitrião, e não
+    // espera um milissegundo.
+    //
+    // A conta da janela mudou de tamanho com esta tarefa, e é bom que esteja
+    // escrita aqui, onde o gasto nasce. Cada aviso vira um furo do outro lado, e
+    // um candidato público custa `AVISOS_POR_CANDIDATO` avisos, não um: a
+    // repetição vive 1,4 s e o prazo de um candidato público morto é de 4,2 s,
+    // então ela sempre gasta os três. Um convite de quatro candidatos públicos
+    // custa **doze** furos a quem entra — onze a mais que antes desta tarefa.
+    // Por isso `FUROS_POR_JANELA`, do lado do anfitrião, subiu de 20 para 60 no
+    // mesmo commit: sem isso o teto passaria a barrar duas ou três entradas
+    // legítimas simultâneas em vez de barrar abuso.
+    //
+    // O que esta guarda economiza continua sendo o principal: um convite só de
+    // endereços de rede de casa não gasta furo nenhum.
+    if !e_publico(onde.ip()) {
+        return None;
+    }
+
+    if let Err(erro) = batida.avisar().await {
+        tracing::info!(
+            %erro,
+            ponto = %batida.ponto(),
+            candidato = %onde,
+            "não deu para avisar o ponto de encontro por este candidato; o aperto de mão vai assim mesmo"
+        );
+        return None;
+    }
+    tracing::info!(
+        ponto = %batida.ponto(),
+        aviso = %batida.aviso(),
+        candidato = %onde,
+        "degrau 4: avisamos o ponto de encontro de que estamos chegando"
+    );
+
+    // O tempo de o `LEVE` chegar ao ponto, virar `AQUI`, e o `FURO` sair do
+    // roteador do anfitrião. Depois disto o `Initial` do quinn encontra o
+    // caminho aberto.
+    tokio::time::sleep(ESPERA_DO_FURO).await;
+
+    // A cópia divide o mesmo socket — é o `Arc` de dentro da `Batida`. Um
+    // segundo socket faria o anfitrião furar para uma porta que o QUIC não usa.
+    let repetindo = batida.clone();
+    Some(tokio::spawn(async move {
+        for _ in 1..AVISOS_POR_CANDIDATO {
+            tokio::time::sleep(INTERVALO_DO_AVISO).await;
+            if let Err(erro) = repetindo.avisar().await {
+                tracing::debug!(%erro, "a repetição do aviso não saiu");
+            }
+        }
+    }))
+}
+
+/// Se este endereço é de uma rede privada — a de casa **ou** a de outra casa.
+///
+/// Sem loopback de propósito: `127.0.0.1` não é uma rede de ninguém, e as duas
+/// perguntas que se fazem com isto (precisa de furo? merece prazo curto?) têm
+/// resposta própria para ele.
+///
+/// # Por que `to_canonical` na entrada
+///
+/// Porque a forma mapeada **é** o caso comum, não a borda. Um ponto de encontro
+/// atrás de um socket de pilha dupla enxerga a origem de quem bateu como
+/// `::ffff:a.b.c.d`, e é essa origem que volta no `AQUI` e vira o candidato
+/// refletido do convite. Este crate já sabe disso — `encontro::mapear` existe
+/// exatamente por causa dela.
+///
+/// Sem canonizar, `::ffff:192.168.1.5` não casava com nenhum dos ramos: o de
+/// IPv4 nem era consultado, e o de IPv6 comparava `0x0000` contra `fc00`/`fe80`.
+/// O endereço da rede de casa de alguém passava por público, queimava três
+/// furos da janela do anfitrião, vazava metadado que ninguém pediu e ainda
+/// levava o prazo cheio de quatro segundos em vez de um.
+fn e_privado(ip: IpAddr) -> bool {
+    match ip.to_canonical() {
+        IpAddr::V4(quatro) => quatro.is_private() || quatro.is_link_local() || e_cgnat(quatro),
+        IpAddr::V6(seis) => {
+            let primeiro = seis.segments().first().copied().unwrap_or(0);
+            // `fc00::/7`, os endereços locais únicos da RFC 4193, e `fe80::/10`,
+            // o link-local — o par do `169.254.x.x` do outro lado.
+            (primeiro & 0xfe00) == 0xfc00 || (primeiro & 0xffc0) == 0xfe80
+        }
+    }
+}
+
+/// Se um candidato depende de alguém ter furado o caminho até ele.
+///
+/// A negação de "privado, loopback, sem destino ou multicast". Endereços de
+/// documentação (`203.0.113.x`, TEST-NET-3) contam como públicos, e é de
+/// propósito: eles são globais em tudo que importa aqui — o sistema os roteia
+/// para a porta de saída, e é isso que o furo cobre.
+///
+/// # As três últimas perguntas são feitas na forma escrita, e não na canônica
+///
+/// `e_privado` canoniza porque a forma mapeada de um endereço privado aparece no
+/// campo — é assim que o ponto de encontro reflete a origem de quem está atrás
+/// de pilha dupla. Loopback, "sem destino" e multicast **não** são canonizados,
+/// e isso é uma escolha, com preço conhecido.
+///
+/// O que ela compra: um candidato que é público para esta função e que ainda
+/// assim responde numa máquina só — `[::ffff:127.0.0.1]:porta`, um socket de
+/// verdade no loopback. É o que torna possível medir que o `Initial` sai
+/// **depois** do `LEVE`, e por quanto; sem ele isso exigiria duas casas e um NAT
+/// entre elas.
+///
+/// O que ela custa, e não é hipótese: o loopback mapeado **pode** entrar num
+/// convite. `alcance::anunciar_com_porta` empurra o endereço refletido para a
+/// lista conferindo só a família contra a pilha da escuta, sem filtro de
+/// loopback nenhum — então um Dogma cujo ponto de encontro roda na mesma
+/// máquina, atrás de socket de pilha dupla, observa `::ffff:127.0.0.1` como
+/// origem e publica isso. Quando acontece, quem entra gasta
+/// [`AVISOS_POR_CANDIDATO`] furos da janela do anfitrião (três, não um),
+/// 3 × 96 bytes de metadado que ninguém pediu, e [`ESPERA_DO_FURO`] a mais antes
+/// do aperto de mão; o Dogma fura contra o próprio loopback, e a conexão sobe
+/// assim mesmo, porque o candidato sempre foi alcançável sem furo nenhum.
+///
+/// O que ela **não** custa é segurança, e é por isso que o preço é aceitável: o
+/// destino do furo é `bilhete.aviso()`, fixado em `Batida::preparar` e embutido
+/// no datagrama. O candidato decide apenas **se** o `LEVE` sai, nunca **para
+/// onde** o anfitrião fura. Um candidato mal classificado não redireciona pacote
+/// contra terceiro nenhum.
+fn e_publico(ip: IpAddr) -> bool {
+    !e_privado(ip) && !ip.is_loopback() && !ip.is_unspecified() && !ip.is_multicast()
+}
+
+/// `100.64.0.0/10`, que a RFC 6598 reservou para CGNAT.
+fn e_cgnat(quatro: std::net::Ipv4Addr) -> bool {
+    let [a, b, ..] = quatro.octets();
+    a == 100 && (64..128).contains(&b)
+}
+
+/// Se este candidato é um endereço privado que **não** é desta rede.
+///
+/// A pergunta é feita com destino: `connect` num socket UDP não manda pacote
+/// nenhum, mas faz o núcleo escolher a rota, e `local_addr` conta **qual
+/// endereço meu o sistema usaria para alcançar aquele destino**.
+///
+/// Isto não é o truque que o ADR 0022 reprovou. Lá a pergunta era "qual é o meu
+/// endereço", respondida pela rota padrão, e uma VPN capturava a resposta. Aqui
+/// há destino, e é exatamente o que o `connect` responde.
+///
+/// Quem responde `true` ganha [`PRAZO_DE_CANDIDATO_DISTANTE`] em vez dos quatro
+/// segundos: um `192.168.x.x` visto de outra casa não devolve ICMP nenhum e
+/// queima o prazo inteiro sem nunca ter tido chance. **Nunca descartar, só
+/// encurtar** — um /16 configurado à mão ou uma VPN capturando a rota dão falso
+/// negativo, e falso negativo só custa velocidade.
+///
+/// # A escolha da família da sonda não tem falsificador nesta máquina
+///
+/// Dito de frente, porque é uma afirmação sem teste que reprove sozinho. A
+/// canonização do alvo, logo abaixo, existe por dois motivos, e só um deles é
+/// falsificável aqui: a comparação de faixa está defendida por `mesma_rede`, que
+/// canoniza por conta própria, mas **a família da sonda só erra numa máquina sem
+/// IPv6**. Ali o `bind` de `[::]:0` falha, esta função devolve `false` por
+/// omissão, e o candidato da outra casa volta a custar os quatro segundos
+/// inteiros.
+///
+/// Numa máquina de pilha dupla — a que roda estes testes — as duas defesas se
+/// sobrepõem, e tirar a canonização daqui não acende nada. A ironia é que a
+/// máquina sem IPv6 é exatamente a casa atrás de CGNAT que o degrau 4 existe
+/// para servir: o caso que mais depende desta linha é o único em que ela pode
+/// ser medida. Por isso ele está na lista do portão de campo, na seção 8.4 do
+/// spec deste ciclo, e não numa suíte que roda aqui.
+fn e_de_outra_casa(candidato: SocketAddr) -> bool {
+    if !e_privado(candidato.ip()) {
+        return false;
+    }
+    // Na forma canônica, e não na escrita, pelo mesmo motivo de `e_privado` —
+    // com um agravante próprio, que é a **família da sonda**. Um
+    // `::ffff:10.255.255.1` escrito como veio faria a sonda ser aberta em IPv6;
+    // numa máquina sem IPv6 o `bind` falha, esta função devolve `false` por
+    // omissão, e o candidato da outra casa volta a custar os quatro segundos
+    // inteiros. Com a forma canônica a sonda é v4, que é o que o destino é.
+    //
+    // (A comparação de faixa também precisa da forma canônica, e `mesma_rede`
+    // canoniza por conta própria — ver o doc dela. Aqui não se confia nisso: as
+    // duas coisas são defeitos diferentes e cada uma se defende.)
+    let alvo = SocketAddr::new(candidato.ip().to_canonical(), candidato.port());
+    // Da mesma família do destino: uma sonda IPv4 não tem o que responder sobre
+    // um `fd00::` e chamaria de distante o vizinho do lado.
+    let daqui_qualquer = if alvo.is_ipv4() {
+        SocketAddr::from(([0, 0, 0, 0], 0))
+    } else {
+        SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, 0))
+    };
+    let Ok(sonda) = std::net::UdpSocket::bind(daqui_qualquer) else {
+        return false;
+    };
+    if sonda.connect(alvo).is_err() {
+        // Sem rota para lá: é de outra casa, e o sistema já sabe disso.
+        return true;
+    }
+    let Ok(daqui) = sonda.local_addr() else {
+        return false;
+    };
+    !mesma_rede(daqui.ip(), alvo.ip())
+}
+
+/// Um /24 para IPv4 e um /64 para IPv6.
+///
+/// É chute quando a rede é /16, e o chute é para o lado seguro: um vizinho
+/// legítimo de outra faixa cai no prazo curto e ainda tem um segundo inteiro.
+///
+/// # Canoniza o que recebe, e não confia em quem chama
+///
+/// Sem isto, dois endereços na forma mapeada comparariam os quatro primeiros
+/// grupos de `::ffff:x` contra os de `::ffff:y` — `0:0:0:0` dos dois lados,
+/// iguais sempre — e **todo** par mapeado passaria por vizinho de porta. O
+/// único chamador de hoje já canoniza antes de chegar aqui, então este defeito
+/// é inalcançável; um segundo chamador o reabriria, e uma pré-condição que só o
+/// comentário guarda é a próxima linha de uma lista de revisão.
+fn mesma_rede(daqui: IpAddr, la: IpAddr) -> bool {
+    match (daqui.to_canonical(), la.to_canonical()) {
+        (IpAddr::V4(a), IpAddr::V4(b)) => {
+            a.octets().first_chunk::<3>() == b.octets().first_chunk::<3>()
+        }
+        (IpAddr::V6(a), IpAddr::V6(b)) => {
+            a.segments().first_chunk::<4>() == b.segments().first_chunk::<4>()
+        }
+        _ => false,
+    }
+}
+
 /// Se este erro veio de alguém que **respondeu**.
 ///
 /// A diferença decide qual erro sobra quando nenhum candidato entra. Um Dogma
@@ -1770,6 +2132,20 @@ mod tests {
         // loopback, um fazendo de ponto de encontro e outro fazendo de Dogma.
         // Nenhum dos dois responde nada — o que se mede é de onde os pacotes
         // saíram, e é isso que o outro lado usaria.
+        //
+        // # Por que o convite tem dois endereços, e por que o primeiro é público
+        //
+        // Porque desde o aviso por candidato **nem todo candidato avisa**: o da
+        // rede de casa não precisa de furo nenhum, e o loopback do Dogma de
+        // teste é ainda menos. Com um convite de um endereço só, no loopback,
+        // nada chegaria ao ponto de encontro e este teste mediria o silêncio.
+        //
+        // Então o convite traz `203.0.113.7` — TEST-NET-3, RFC 5737, público em
+        // tudo que importa aqui e onde não há Dogma nenhum — na frente, e o
+        // Dogma de teste atrás. O aviso sai por causa do primeiro; o aperto de
+        // mão que chega ao segundo é o do mesmo laço, pelo socket emprestado da
+        // mesma `Batida`. É exatamente a fiação de produção, e é a porta dela
+        // que se compara.
         let ponto = tokio::net::UdpSocket::bind("127.0.0.1:0")
             .await
             .expect("o loopback não abriu");
@@ -1783,10 +2159,10 @@ mod tests {
             "45.33.32.156:41234",
         )
         .expect("bilhete de teste");
-        let destino = Destino {
-            servidor: onde_o_dogma_atende,
+        let destino = |servidor: SocketAddr| Destino {
+            servidor,
             nome_tls: "localhost".into(),
-            chave_do_pin: onde_o_dogma_atende.to_string(),
+            chave_do_pin: servidor.to_string(),
             apelido: "piloto".into(),
             segredo: None,
             // Uma impressão digital de verdade: é dela que sai a marca do
@@ -1795,19 +2171,22 @@ mod tests {
                 "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9".to_owned(),
             ),
         };
+        let refletido: SocketAddr = "203.0.113.7:8383".parse().expect("endereço");
 
         // Ninguém atende do outro lado, então isto nunca volta com sucesso. O
-        // que interessa acontece nos primeiros milissegundos, e a tarefa é
+        // que interessa acontece nos primeiros segundos, e a tarefa é
         // abandonada no fim.
         let tentativa = tokio::spawn(Enlace::conectar_entre_com_bilhete(
-            vec![destino],
+            vec![destino(refletido), destino(onde_o_dogma_atende)],
             Some(bilhete),
             SigningKey::from_bytes(&[7; 32]),
             Arc::new(crate::tofu::MemoryPinStore::new()),
         ));
 
         let mut balde = [0_u8; 1500];
-        let prazo = Duration::from_secs(5);
+        // Folgado: o Dogma de teste é o **segundo** candidato, e só é tentado
+        // depois de o primeiro queimar o prazo dele.
+        let prazo = Duration::from_secs(15);
 
         let (_, de_quem_bateu) = tokio::time::timeout(prazo, ponto.recv_from(&mut balde))
             .await
@@ -1825,6 +2204,69 @@ mod tests {
             de_quem_conecta.port(),
             "o aviso saiu de {de_quem_bateu} e o aperto de mão de {de_quem_conecta}: o \
              anfitrião furaria o caminho para uma porta que o QUIC não usa"
+        );
+    }
+
+    /// Um ponto de encontro de teste que só anota quantos avisos chegaram.
+    async fn ponto_que_conta() -> Option<(SocketAddr, Arc<std::sync::Mutex<usize>>)> {
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.ok()?;
+        let onde = socket.local_addr().ok()?;
+        let quantos = Arc::new(std::sync::Mutex::new(0_usize));
+        let contador = Arc::clone(&quantos);
+        tokio::spawn(async move {
+            let mut balde = [0_u8; seele_proto::encontro::TAMANHO];
+            while socket.recv_from(&mut balde).await.is_ok() {
+                if let Ok(mut conta) = contador.lock() {
+                    *conta += 1;
+                }
+            }
+        });
+        Some((onde, quantos))
+    }
+
+    #[tokio::test]
+    async fn a_reconexao_tambem_para_a_repeticao_quando_a_tentativa_acaba() {
+        // O terceiro `abort`, e o mais caro de esquecer. Os outros dois estão
+        // no laço de candidatos e acontecem uma vez por entrada;
+        // este está em `Motor::tentar`, que roda **a cada tica da bateria** —
+        // cinco minutos de reconexão contra um endereço público gastariam três
+        // furos por tentativa em vez de um, contra uma janela que é de sessenta
+        // por dez segundos.
+        //
+        // Nada precisa cair para provar isto, e nada precisa reconectar. O que
+        // torna observável é a tentativa **acabar rápido**: com um nome TLS que
+        // o quinn recusa, `Endpoint::connect` devolve erro antes de qualquer
+        // pacote, muito antes de a repetição chegar ao segundo aviso — que
+        // sairia 700 ms depois do primeiro.
+        let Some((ponto, quantos)) = ponto_que_conta().await else {
+            return;
+        };
+        let Ok(bilhete) = seele_proto::uri::Bilhete::novo(ponto.to_string(), "45.33.32.156:41234")
+        else {
+            panic!("o bilhete de teste não se monta");
+        };
+
+        let mut motor = motor_de_teste();
+        motor.bilhete = Some(bilhete);
+        // Público **e** alcançável na forma mapeada: é o que faz a reconexão
+        // pedir furo. Com `127.0.0.1` na forma escrita não sairia aviso nenhum
+        // e este teste mediria o próprio silêncio.
+        motor.destino.servidor = "[::ffff:127.0.0.1]:9".parse().expect("endereço");
+        motor.destino.nome_tls = "nome inválido com espaço".into();
+        motor.destino.impressao_esperada =
+            Some("3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9".to_owned());
+
+        motor.tentar().await;
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+
+        let Ok(conta) = quantos.lock() else {
+            return;
+        };
+        assert_eq!(
+            *conta, 1,
+            "a tentativa de reconexão acabou na hora e mesmo assim saíram {} \
+             avisos: a repetição não foi abortada",
+            *conta
         );
     }
 

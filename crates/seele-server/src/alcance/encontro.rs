@@ -130,13 +130,28 @@ const REPETICAO: Duration = Duration::from_millis(300);
 /// bilhete vira um endereço para onde não chega mais aviso nenhum.
 const REAVIVAR: Duration = Duration::from_secs(15);
 
-/// Quantos pacotes o furo manda, e de quanto em quanto tempo.
+/// Quantos pacotes o Dogma manda para abrir o caminho.
 ///
-/// Cinco, espaçados: um só se perde, e o outro lado pode estar chegando alguns
-/// milissegundos depois. Não é mais que isso porque cada pacote é um pacote
-/// mandado para um endereço que quem tem o link escolheu.
-const PACOTES_DO_FURO: u8 = 5;
-/// O intervalo entre eles.
+/// **Um.** Eram cinco, e os cinco nunca compraram resistência a perda: o
+/// mapeamento de NAT nasce quando o pacote **sai** do roteador do anfitrião, não
+/// quando chega ao outro lado. O que os cinco compravam era cobertura temporal —
+/// e ela agora vem do aviso sair colado à tentativa, do outro lado, repetido
+/// enquanto o aperto de mão corre. Cada repetição de lá provoca um furo daqui,
+/// que é a mesma cobertura pelo lado que sabe quando ela é precisa.
+///
+/// A conta de segurança melhora junto. A origem de um UDP é forjável, então um
+/// `LEVE` forjado com o endereço de uma vítima faz o Dogma mandar pacotes para
+/// ela. Com cinco, o ganho era 5:1; com um, é **1:1**, que é o teto que o ADR
+/// 0022 fixou. Quem repete paga 96 bytes por repetição.
+const PACOTES_DO_FURO: u8 = 1;
+/// Quanto `furar` espera depois de mandar o pacote.
+///
+/// Com [`PACOTES_DO_FURO`] em um não há "entre eles" — era o intervalo entre os
+/// cinco, e ficou como a pausa que fecha a volta única do laço. Ela não é
+/// decoração: `furar` é aguardado dentro do braço do `select!` de `atender`, e
+/// portanto esta pausa serializa o furo da **próxima** pessoa que estiver
+/// entrando ao mesmo tempo. 120 ms de fila para uma segunda entrada simultânea é
+/// barato; tirar a pausa exigiria reescrever `furar`, e isso é de outra tarefa.
 const INTERVALO_DO_FURO: Duration = Duration::from_millis(120);
 
 /// Quantos furos cabem numa janela, para o Dogma não virar refletor.
@@ -144,7 +159,25 @@ const INTERVALO_DO_FURO: Duration = Duration::from_millis(120);
 /// A marca do aviso já limita quem consegue provocar um furo a quem tem o link
 /// (ver [`Marca`]), e isto é o segundo cinto: mesmo com o link, ninguém faz este
 /// processo mandar pacotes sem parar para um endereço escolhido.
-const FUROS_POR_JANELA: usize = 20;
+///
+/// # Por que sessenta, e não os vinte de antes
+///
+/// Porque o custo de uma entrada **legítima** mudou. Desde que o aviso passou a
+/// sair colado em cada candidato, quem entra manda três avisos por candidato
+/// público — e cada aviso é um furo daqui. Um convite de quatro candidatos custa
+/// doze furos a uma pessoa só; numa janela rolante de dez segundos, até nove
+/// deles caem juntos. Com o teto em vinte, duas ou três pessoas entrando ao
+/// mesmo tempo fechavam a janela **contra elas mesmas** — o limite passava a
+/// barrar o caso normal em vez do abuso, que é a definição de limite errado.
+///
+/// A conta que diz que subir é seguro: a janela existe para um varredor não
+/// fazer o Dogma jorrar pacote, e com a amplificação em 1:1 (ver
+/// [`PACOTES_DO_FURO`]) cada furo é um datagrama de
+/// [`encontro::TAMANHO`] = 96 bytes. Vinte por dez segundos são 1,9 kB; sessenta
+/// são 5,8 kB. Os dois são desprezíveis como vetor — o que a janela limita
+/// continua limitado, e o teto só deixou de barrar quem tem o link e está
+/// entrando de verdade.
+const FUROS_POR_JANELA: usize = 60;
 /// O tamanho dessa janela.
 const JANELA: Duration = Duration::from_secs(10);
 
@@ -608,10 +641,15 @@ fn cabe_mais_um_furo(furos: &mut Vec<tokio::time::Instant>) -> bool {
 
 /// Abre o caminho para um endereço, pelo socket do Dogma.
 ///
-/// Vários pacotes espaçados porque um se perde, e porque o outro lado pode estar
-/// chegando alguns milissegundos depois. O conteúdo é irrelevante para quem
-/// recebe — o quinn do outro lado descarta o que não for QUIC —, e é um `FURO`
-/// nomeado para que quem estiver olhando um `tcpdump` saiba o que é.
+/// **Um pacote por aviso**, e é o teto do ADR 0022: a origem de um UDP é
+/// forjável, então o que sai daqui não pode ser maior que o datagrama que o
+/// causou. A resistência a perda que os cinco pacotes de antes pareciam comprar
+/// vem hoje do outro lado — quem entra repete o aviso enquanto o aperto de mão
+/// corre, e cada repetição provoca uma volta destas. Ver [`PACOTES_DO_FURO`].
+///
+/// O conteúdo é irrelevante para quem recebe — o quinn do outro lado descarta o
+/// que não for QUIC —, e é um `FURO` nomeado para que quem estiver olhando um
+/// `tcpdump` saiba o que é.
 async fn furar(dogma: &std::net::UdpSocket, destino: SocketAddr, marca: &Marca) {
     let pacote = encontro::furo(marca);
     for _ in 0..PACOTES_DO_FURO {
@@ -783,6 +821,128 @@ mod testes {
         );
     }
 
+    #[tokio::test]
+    async fn a_janela_cabe_uma_entrada_legitima_inteira() {
+        // A propriedade que motivou o teto subir de vinte para sessenta, e que
+        // não tinha guarda nenhuma: com `FUROS_POR_JANELA = 1` os quinze testes
+        // deste crate ficavam verdes, e o limite podia ser dimensionado para
+        // qualquer número sem ninguém notar.
+        //
+        // O número é **doze**, e ele fica literal de propósito. Derivá-lo de
+        // `FUROS_POR_JANELA` seria a implicação que passa vazia — a mutação
+        // apagaria a premissa junto com o problema. A aritmética que o produz:
+        // um convite carrega no máximo `alcance::LIMITE_DE_CANDIDATOS` = 4
+        // endereços, e quem entra manda `AVISOS_POR_CANDIDATO` = 3 avisos por
+        // candidato que precisa de furo (o de `seele-core`, e é ele que fixa o
+        // gasto). Quatro vezes três são doze furos por **uma** pessoa entrando,
+        // no pior caso em que todos os quatro candidatos são públicos.
+        //
+        // Doze é o que uma entrada legítima custa. Se a janela barrar antes
+        // disso, ela deixou de limitar abuso e passou a limitar quem tem o link
+        // e está entrando de verdade — e a pessoa vê o degrau 4 falhar sem
+        // ninguém ter feito nada de errado.
+        const ENTRADA_LEGITIMA: usize = 12;
+
+        let Ok(ponto_socket) = std::net::UdpSocket::bind("127.0.0.1:0") else {
+            panic!("não deu para abrir o ponto de encontro de teste");
+        };
+        let Ok(ponto) = ponto_socket.local_addr() else {
+            panic!("o ponto de encontro de teste não tem endereço local");
+        };
+        let (tarefa, avisos_endereco, alvo, alvo_endereco, marca) =
+            subir_atender_de_teste(ponto).await;
+
+        let aviso_legitimo = encontro::aqui(&marca, alvo_endereco);
+        for _ in 0..ENTRADA_LEGITIMA {
+            let _ = ponto_socket.send_to(&aviso_legitimo, avisos_endereco);
+        }
+
+        // `furar` é aguardado dentro do braço do `select!` de `atender`, então
+        // os furos saem em fila, um a cada `INTERVALO_DO_FURO`. Doze levam
+        // ~1,4 s; o prazo aqui é folgado para não virar teste de máquina rápida.
+        let mut furos = 0_usize;
+        let mut balde = [0_u8; encontro::TAMANHO];
+        let ate = tokio::time::Instant::now() + Duration::from_secs(6);
+        while furos < ENTRADA_LEGITIMA && tokio::time::Instant::now() < ate {
+            let chegou =
+                tokio::time::timeout(Duration::from_millis(600), alvo.recv_from(&mut balde)).await;
+            match chegou {
+                Ok(Ok(_)) => furos += 1,
+                _ => break,
+            }
+        }
+        tarefa.abort();
+
+        assert_eq!(
+            furos, ENTRADA_LEGITIMA,
+            "a janela barrou uma entrada legítima: {furos} furos de \
+             {ENTRADA_LEGITIMA}. O teto tem de caber o que uma pessoa que tem o \
+             link custa, ou ele passa a barrar o caso normal em vez do abuso"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_janela_fecha_dentro_do_atender_e_nao_so_no_auxiliar() {
+        // O outro lado de `a_janela_cabe_uma_entrada_legitima_inteira`, e o que
+        // faltava para a propriedade existir de verdade: **o Dogma não vira
+        // refletor**. É a razão de o ADR 0022 ter aceitado construir o degrau 4,
+        // e ela não tinha fiação nenhuma.
+        //
+        // `a_janela_de_furos_fecha_e_depois_reabre` exercita `cabe_mais_um_furo`
+        // isolada, e uma função pura correta não garante que `atender` chegue a
+        // chamá-la: apagando o `if !cabe_mais_um_furo(…) { continue }` de dentro
+        // do laço, aquele teste continua verde e o teto some. Este aqui roda
+        // `atender`.
+        //
+        // O número de avisos sai de `FUROS_POR_JANELA` de propósito, e aqui isso
+        // **não** é a implicação que passa vazia: o que se afirma é que o teto
+        // vale onde ele está, seja onde for. Quem prende o teto por baixo é o
+        // outro teste, com o 12 literal — os dois juntos são um sanduíche, e
+        // mexer no valor sem mexer na aritmética acende um dos dois.
+        //
+        // Custa a fila de `INTERVALO_DO_FURO` × `FUROS_POR_JANELA`, que é o
+        // preço de sair do auxiliar puro. Está pago.
+        let alem_do_teto = FUROS_POR_JANELA + 1;
+
+        let Ok(ponto_socket) = std::net::UdpSocket::bind("127.0.0.1:0") else {
+            panic!("não deu para abrir o ponto de encontro de teste");
+        };
+        let Ok(ponto) = ponto_socket.local_addr() else {
+            panic!("o ponto de encontro de teste não tem endereço local");
+        };
+        let (tarefa, avisos_endereco, alvo, alvo_endereco, marca) =
+            subir_atender_de_teste(ponto).await;
+
+        let aviso_legitimo = encontro::aqui(&marca, alvo_endereco);
+        for _ in 0..alem_do_teto {
+            let _ = ponto_socket.send_to(&aviso_legitimo, avisos_endereco);
+        }
+
+        // Conta até parar de chegar. O prazo de cada leitura é cinco vezes o
+        // `INTERVALO_DO_FURO`, então a fila normal nunca o estoura — quem o
+        // estoura é o fim dos furos.
+        let mut furos = 0_usize;
+        let mut balde = [0_u8; encontro::TAMANHO];
+        let ate = tokio::time::Instant::now() + Duration::from_secs(40);
+        while furos <= alem_do_teto && tokio::time::Instant::now() < ate {
+            let chegou =
+                tokio::time::timeout(Duration::from_millis(600), alvo.recv_from(&mut balde)).await;
+            match chegou {
+                Ok(Ok(_)) => furos += 1,
+                _ => break,
+            }
+        }
+        tarefa.abort();
+
+        assert_eq!(
+            furos, FUROS_POR_JANELA,
+            "{alem_do_teto} avisos legítimos produziram {furos} furos, e o teto é \
+             de {FUROS_POR_JANELA}. Acima do teto, o Dogma vira refletor sem \
+             limite para quem tem o link; abaixo dele, a janela barra uma entrada \
+             que tinha direito de acontecer"
+        );
+    }
+
     #[test]
     fn a_janela_de_furos_fecha_e_depois_reabre() {
         // Sem isto, quem tem o link faz este Dogma mandar pacotes sem parar
@@ -947,6 +1107,65 @@ mod testes {
             panic!("o FURO não chegou depois de um AQUI que veio do ponto de encontro");
         };
         assert!(lidos > 0, "o FURO chegou vazio");
+    }
+
+    #[tokio::test]
+    async fn um_aviso_faz_sair_um_furo_e_nunca_um_segundo() {
+        // A propriedade que o ADR 0022 chama de inegociável, medida na saída e
+        // não na constante: quem abusa não ganha banda. Um `AQUI` de 96 bytes
+        // faz chegar à vítima escolhida **um** datagrama de 96 bytes, e nada
+        // além.
+        //
+        // Contar aqui, e não conferir `PACOTES_DO_FURO == 1`, é a diferença
+        // entre testar a propriedade e testar a própria constante. Uma asserção
+        // sobre o valor é tautologia, e uma segunda asserção derivada dele não
+        // pode reprovar sozinha: com a constante em um e o laço de `furar`
+        // mandando cinco por volta, os dois passavam verdes e a amplificação
+        // ficava sem guarda nenhuma. Isto é a mesma família de defeito que este
+        // ciclo vem consertando — o auxiliar puro conferido, a fiação nunca.
+        //
+        // O segundo prazo é de 300 ms de propósito: é mais que o dobro de
+        // `INTERVALO_DO_FURO`, então um laço que voltasse a mandar mais de um
+        // pacote entrega o segundo bem dentro dele.
+        let Ok(ponto_socket) = std::net::UdpSocket::bind("127.0.0.1:0") else {
+            panic!("não deu para abrir o ponto de encontro de teste");
+        };
+        let Ok(ponto) = ponto_socket.local_addr() else {
+            panic!("o ponto de encontro de teste não tem endereço local");
+        };
+        let (tarefa, avisos_endereco, alvo, alvo_endereco, marca) =
+            subir_atender_de_teste(ponto).await;
+
+        let aviso_legitimo = encontro::aqui(&marca, alvo_endereco);
+        assert_eq!(
+            aviso_legitimo.len(),
+            encontro::TAMANHO,
+            "o aviso que provoca o furo não tem o tamanho fixo do protocolo, e a \
+             conta de amplificação abaixo não fecha"
+        );
+        let _ = ponto_socket.send_to(&aviso_legitimo, avisos_endereco);
+
+        let mut balde = [0_u8; encontro::TAMANHO];
+        let primeiro =
+            tokio::time::timeout(Duration::from_secs(1), alvo.recv_from(&mut balde)).await;
+        let Ok(Ok((lidos, _))) = primeiro else {
+            tarefa.abort();
+            panic!("nenhum FURO saiu por um AQUI legítimo: não há o que contar");
+        };
+        assert_eq!(
+            lidos,
+            encontro::TAMANHO,
+            "o FURO que saiu não tem o tamanho do datagrama que o causou"
+        );
+
+        let segundo =
+            tokio::time::timeout(Duration::from_millis(300), alvo.recv_from(&mut balde)).await;
+        tarefa.abort();
+        assert!(
+            segundo.is_err(),
+            "um segundo FURO saiu pelo mesmo AQUI: o Dogma virou amplificador, \
+             que é o que o ADR 0022 não aceita em hipótese nenhuma"
+        );
     }
 
     #[test]

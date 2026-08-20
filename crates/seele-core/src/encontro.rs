@@ -143,13 +143,15 @@ impl Batida {
     /// disso é `WouldBlock`, e fingir que é viraria o mesmo sucesso mentiroso
     /// de antes, um nível acima.
     ///
-    /// O peso do erro muda com quem chama. Aqui no invólucro `bater`, uma
-    /// falha cancela a conexão inteira — é o que o código de antes desta
-    /// separação fazia, e não é desta tarefa mudar isso. Na Tarefa 7,
-    /// chamada uma vez por candidato dentro de um laço, a mesma falha não
-    /// pode ter esse peso: perder o aviso de **um** candidato não pode
-    /// derrubar os outros. Por isso a decisão fica de fora — `avisar` só
-    /// manda e informa.
+    /// O peso do erro muda com quem chama, e é por isso que a decisão fica de
+    /// fora. O invólucro `bater` que existia aqui até a Tarefa 7 cancelava a
+    /// conexão inteira ao primeiro envio recusado — ele mandava um aviso só,
+    /// antes do laço, e sem ele não havia degrau 4 nenhum. Quem chama hoje é o
+    /// laço de candidatos de [`crate::enlace`], uma vez por candidato que
+    /// precisa de furo, e ali a mesma falha não pode ter esse peso: um aviso
+    /// que não sai para o candidato 2 não tem nada a ver com o candidato 3, e
+    /// derrubar a conexão por causa dele trocaria um defeito por outro. Lá o
+    /// erro é registrado e o laço segue. `avisar` só manda e informa.
     pub(crate) async fn avisar(&self) -> std::io::Result<()> {
         // Mapeado aqui, a cada envio, e não uma vez só em `preparar`: é isto
         // que deixa `self.ponto` guardado na forma crua (ver o campo `ponto`,
@@ -167,59 +169,55 @@ impl Batida {
     /// continuaria batendo numa porta fechada.
     ///
     /// Devolve o `Arc`, não uma referência ao socket por dentro dele: é assim
-    /// que a tarefa de fundo da Tarefa 7 fica dona do mesmo socket sem precisar
-    /// de um `try_clone` que o `tokio::net::UdpSocket` nem oferece.
+    /// que a tarefa de fundo que repete o aviso fica dona do mesmo socket sem
+    /// precisar de um `try_clone` que o `tokio::net::UdpSocket` nem oferece.
     ///
-    /// Quem consome isto é o laço de candidatos, na Tarefa 7 — `bater`, o
-    /// invólucro temporário desta tarefa, não precisa mais dele depois que
-    /// `avisar` passou a esperar a própria prontidão do socket.
-    // Só sob `cfg(test)`, os próprios testes chamam `socket()` — fora dele, até
-    // a Tarefa 7 migrar o laço de candidatos para usá-lo, ele fica sem
-    // chamador nenhum. Por isso o `expect` também só se aplica fora de teste:
-    // dentro, a expectativa nunca se cumpriria (o lint não dispara porque o
-    // método está em uso), e um `expect` que nunca se cumpre é ele mesmo um
-    // aviso.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "consumido pelo laço de candidatos da Tarefa 7; até lá, só os testes o chamam"
-        )
-    )]
+    /// Quem conecta não usa isto e sim [`Batida::emprestar_socket`]: o quinn
+    /// adota um socket da `std`, não um do tokio.
+    ///
+    /// Por isso o método **só existe sob `cfg(test)`**. O laço de candidatos
+    /// empresta o descritor e nunca precisa do `Arc` em si; fora de teste isto
+    /// é código morto, e um `expect(dead_code)` renovado a cada rodada seria
+    /// só uma forma educada de manter código morto no lugar.
+    #[cfg(test)]
     pub(crate) fn socket(&self) -> &Arc<tokio::net::UdpSocket> {
         &self.socket
     }
-}
 
-/// Bate no ponto de encontro do convite, e devolve o socket por onde bateu.
-///
-/// invólucro temporário; some na tarefa do aviso por candidato — hoje só
-/// prepara e manda um aviso, para os chamadores em `enlace.rs` continuarem
-/// compilando enquanto não migram para `Batida::preparar` + `Batida::avisar`
-/// por tentativa.
-pub async fn bater(
-    bilhete: &Bilhete,
-    impressao_digital: Option<&str>,
-) -> Option<std::net::UdpSocket> {
-    let batida = Batida::preparar(bilhete, impressao_digital).await?;
-    if let Err(erro) = batida.avisar().await {
-        tracing::info!(%erro, ponto = %batida.ponto, "não deu para avisar o ponto de encontro");
-        return None;
+    /// Um segundo descritor para a **mesma** porta, na forma que o quinn adota.
+    ///
+    /// É o `try_clone` de sempre, e o motivo dele também: um `quinn::Endpoint`
+    /// fecha o socket que adotou quando é recolhido, e cada candidato do
+    /// convite monta um `Endpoint` novo. Sem uma cópia por tentativa, a porta
+    /// que o anfitrião acabou de furar voltaria para o sistema no meio do laço
+    /// — e a tentativa seguinte sairia de outra porta, para a qual ninguém
+    /// furou nada.
+    ///
+    /// A cópia é feita do descritor emprestado (`SockRef`), e não do
+    /// `tokio::net::UdpSocket`, porque o tokio não oferece `try_clone` e
+    /// desembrulhar o `Arc` mataria o original — que precisa continuar vivo
+    /// até o fim do laço, ou o sistema devolveria a porta furada assim que a
+    /// última tentativa terminasse.
+    ///
+    /// `None` quando o sistema recusa a cópia. Aí a tentativa sai de um socket
+    /// novo, como quem não bateu em ponto de encontro nenhum: pior, mas não
+    /// pior do que não tentar.
+    pub(crate) fn emprestar_socket(&self) -> Option<std::net::UdpSocket> {
+        let copia = socket2::SockRef::from(self.socket.as_ref())
+            .try_clone()
+            .ok()?;
+        Some(copia.into())
     }
-    tracing::info!(ponto = %batida.ponto, aviso = %batida.aviso, "degrau 4: avisamos o ponto de encontro de que estamos chegando");
 
-    let Batida { socket, .. } = batida;
-    // De volta a um socket da `std`, porque é isso que o quinn adota. Só dá
-    // para desembrulhar o `Arc` porque nada mais o segura por aqui — e é
-    // sempre assim hoje, com `bater` como único dono. Se um dia isto deixar de
-    // valer (por exemplo, a Tarefa 7 migrar mal e manter `bater` vivo com um
-    // clone rodando numa tarefa de fundo), o sintoma vira um `None` mudo sem
-    // este log — daí o `else`, em vez de só `.ok()?`.
-    let Ok(socket) = Arc::try_unwrap(socket) else {
-        tracing::debug!("o socket do degrau 4 ainda tinha outro dono ao desembrulhar");
-        return None;
-    };
-    socket.into_std().ok()
+    /// Onde o aviso foi mandado, para o log de quem chama.
+    pub(crate) fn ponto(&self) -> SocketAddr {
+        self.ponto
+    }
+
+    /// Para onde o anfitrião foi convidado a furar, para o log de quem chama.
+    pub(crate) fn aviso(&self) -> SocketAddr {
+        self.aviso
+    }
 }
 
 /// Onde o ponto de encontro atende.
@@ -300,8 +298,10 @@ mod testes {
         // etiqueta que o anfitrião não reconhece — rede gasta para produzir
         // silêncio. E é a asserção que garante que nenhum pacote sai daqui por
         // um link que não prometeu identidade nenhuma.
-        assert!(bater(&bilhete("192.0.2.1:8384"), None).await.is_none());
-        assert!(bater(&bilhete("192.0.2.1:8384"), Some("curto"))
+        assert!(Batida::preparar(&bilhete("192.0.2.1:8384"), None)
+            .await
+            .is_none());
+        assert!(Batida::preparar(&bilhete("192.0.2.1:8384"), Some("curto"))
             .await
             .is_none());
     }
@@ -312,8 +312,8 @@ mod testes {
         // único de falha. Um nome que não existe custa o que a resolução custa,
         // e nunca mais que o prazo.
         let comeco = std::time::Instant::now();
-        let batido = bater(&bilhete("nao-existe-mesmo.invalid:8384"), Some(FP)).await;
-        assert!(batido.is_none(), "um nome inexistente devolveu um socket");
+        let batida = Batida::preparar(&bilhete("nao-existe-mesmo.invalid:8384"), Some(FP)).await;
+        assert!(batida.is_none(), "um nome inexistente virou uma batida");
         assert!(
             comeco.elapsed() < PRAZO * 2,
             "a conexão ficou presa {:?} num ponto de encontro que não existe",
@@ -322,18 +322,37 @@ mod testes {
     }
 
     #[tokio::test]
-    async fn bater_devolve_o_socket_por_onde_bateu() {
+    async fn o_socket_emprestado_e_a_mesma_porta_de_onde_o_aviso_saiu() {
         // A propriedade que faz o furo funcionar: quem conecta em seguida tem de
-        // conectar **por este socket**, ou o anfitrião fura o caminho para a
+        // conectar **por esta porta**, ou o anfitrião fura o caminho para a
         // porta errada. O ponto de encontro aqui é um socket qualquer no
         // loopback: nada precisa responder, porque este lado não lê resposta.
-        let fingido = std::net::UdpSocket::bind("127.0.0.1:0").expect("loopback");
-        let onde = fingido.local_addr().expect("endereço");
+        //
+        // Isto é a metade de baixo da propriedade — que o descritor emprestado
+        // é o mesmo socket. A metade de cima, que o laço de candidatos
+        // realmente conecta por ele, é
+        // `o_aperto_de_mao_sai_da_mesma_porta_que_bateu_no_ponto_de_encontro`,
+        // em `enlace.rs`: um `emprestar_socket` correto que ninguém chamasse
+        // deixaria este teste verde e o furo quebrado do mesmo jeito.
+        let Ok(fingido) = std::net::UdpSocket::bind("127.0.0.1:0") else {
+            panic!("o loopback não abriu");
+        };
+        let Ok(onde) = fingido.local_addr() else {
+            panic!("o ponto de encontro de teste não tem endereço local");
+        };
 
-        let socket = bater(&bilhete(&onde.to_string()), Some(FP))
-            .await
-            .expect("bater num ponto de encontro que existe");
-        let local = socket.local_addr().expect("o socket não diz onde ligou");
+        let batida = Batida::preparar(&bilhete(&onde.to_string()), Some(FP)).await;
+        let Some(batida) = batida else {
+            panic!("preparar tem de dar certo com um ponto de encontro que existe");
+        };
+        let saiu = batida.avisar().await;
+        assert!(saiu.is_ok(), "o aviso não saiu: {saiu:?}");
+        let Some(socket) = batida.emprestar_socket() else {
+            panic!("o sistema recusou emprestar um segundo descritor da porta");
+        };
+        let Ok(local) = socket.local_addr() else {
+            panic!("o socket emprestado não diz onde ligou");
+        };
         assert_ne!(
             local.port(),
             0,
@@ -342,11 +361,12 @@ mod testes {
 
         // E o que chegou lá é um `LEVE` com a marca do convite, apontando para o
         // endereço de avisos do anfitrião.
-        fingido
-            .set_read_timeout(Some(Duration::from_secs(2)))
-            .expect("prazo");
+        let prazo = fingido.set_read_timeout(Some(Duration::from_secs(2)));
+        assert!(prazo.is_ok(), "o prazo de leitura não pegou");
         let mut balde = [0_u8; encontro::TAMANHO];
-        let (lidos, de) = fingido.recv_from(&mut balde).expect("nada chegou ao ponto");
+        let Ok((lidos, de)) = fingido.recv_from(&mut balde) else {
+            panic!("nada chegou ao ponto de encontro");
+        };
         assert_eq!(
             de.port(),
             local.port(),
@@ -488,12 +508,16 @@ mod testes {
         // pilha dupla (o caso comum de `abrir_socket_local`), `avisar` manda
         // para `[::ffff:255.255.255.255]:9`, não para o v4 puro — é essa
         // forma mapeada que o kernel avalia contra `SO_BROADCAST` e recusa.
-        // Sem esse mapeamento (por exemplo, numa máquina sem IPv6, caindo
-        // para o socket v4 de `abrir_socket_local`), o destino vai cru e o
-        // erro medido foi outro: `InvalidInput`, não `PermissionDenied` — os
-        // dois são erros, então a asserção de baixo (`is_err`) não distingue
-        // e continua correta nos dois ramos; só a causa exata muda. Medido
-        // nesta plataforma (macOS) nos dois ramos de `abrir_socket_local`.
+        // Os **dois** ramos de `abrir_socket_local` dão `PermissionDenied`:
+        // o de pilha dupla mandando para `[::ffff:255.255.255.255]:9` e o v4
+        // puro (a máquina sem IPv6) mandando para `255.255.255.255:9` — os
+        // dois medidos nesta plataforma (macOS), os dois `EACCES`. O
+        // `InvalidInput` que este comentário já afirmou não sai de ramo
+        // nenhum daqui: ele só apareceria numa terceira configuração, que é o
+        // socket de pilha dupla com o destino v4 **não** mapeado — isto é, o
+        // que aconteceria se `mapear` saísse de `avisar`. A asserção de baixo
+        // (`is_err`) vale para os três, e é de propósito: o que se afirma é
+        // que o erro chega a quem chama, não qual erro é.
         let bilhete = bilhete("255.255.255.255:9");
         let batida = Batida::preparar(&bilhete, Some(IMPRESSAO_DE_TESTE)).await;
         let Some(batida) = batida else {
@@ -513,32 +537,22 @@ mod testes {
     }
 
     #[tokio::test]
-    async fn bater_nao_devolve_socket_quando_o_aviso_falha() {
-        // A consequência observável, no invólucro, do conserto acima: era o
-        // comportamento do código de antes desta separação (`tracing::info!`
-        // e `return None` no primeiro envio que falhasse), perdido quando
-        // `avisar` passou a engolir todo erro e `bater` seguia adiante
-        // afirmando sucesso mesmo sem ele.
+    async fn preparar_da_certo_no_mesmo_bilhete_em_que_avisar_falha() {
+        // O guarda do teste de cima. `avisar_devolve_o_erro_em_vez_de_engoli_lo`
+        // afirma que um envio recusado pelo kernel chega a quem chama; se
+        // `preparar` deixasse de dar certo para este bilhete, aquele teste
+        // pararia de rodar `avisar` de verdade e passaria por outro caminho.
         //
-        // `bater` devolve `None` por seis motivos diferentes, e «o aviso
-        // falhou» é só um deles. Sem confirmar que `preparar` chega a dar
-        // certo para este mesmo bilhete, um `None` por qualquer um dos outros
-        // cinco (o `lookup_host` do endereço de broadcast recusando o
-        // literal, o socket não abrindo, ...) passaria por aqui como se
-        // tivesse testado a propriedade certa — vazio, mas verde.
+        // Quem consome esse erro é o laço de candidatos de `enlace.rs`, e o que
+        // ele faz com ele — registrar e ir ao candidato seguinte, sem derrubar
+        // a conexão — está em `um_aviso_recusado_pelo_kernel_nao_derruba_o_laco`,
+        // em `crates/seele-conformance/tests/furo.rs`.
         assert!(
             Batida::preparar(&bilhete("255.255.255.255:9"), Some(FP))
                 .await
                 .is_some(),
-            "preparar tem de dar certo para este bilhete — senão o `None` de \
-             `bater` abaixo pode vir de `preparar`, não de `avisar`, e este \
-             teste para de testar o que diz testar"
-        );
-
-        let batido = bater(&bilhete("255.255.255.255:9"), Some(FP)).await;
-        assert!(
-            batido.is_none(),
-            "bater devolveu um socket mesmo com o envio do aviso recusado pelo kernel"
+            "preparar tem de dar certo para este bilhete — é `avisar`, mandando \
+             para o broadcast, que não pode dar"
         );
     }
 }

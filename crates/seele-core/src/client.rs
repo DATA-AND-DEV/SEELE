@@ -395,8 +395,10 @@ impl Client {
     /// ao ponto de encontro e o aperto de mão QUIC saiam da **mesma** porta
     /// local, porque é por porta interna que o roteador do outro lado abre o
     /// caminho. `None` é o caminho de sempre, e quem passa `Some` é
-    /// [`crate::enlace::Enlace::conectar_entre_com_bilhete`], com o socket que
-    /// [`crate::encontro::bater`] usou.
+    /// [`crate::enlace::Enlace::conectar_entre_com_bilhete`], com uma cópia do
+    /// socket por onde a `Batida` de [`crate::encontro`] avisou o ponto de
+    /// encontro — uma por candidato, porque um `Endpoint` fecha o socket que
+    /// adotou e a porta furada tem de sobreviver ao laço inteiro.
     ///
     /// # Errors
     ///

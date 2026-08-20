@@ -688,6 +688,35 @@ Roteiro revisado:
 5. Conectado: `:sync` nos dois, **e por qual candidato e degrau a sessão saiu**.
 6. Passos 5 e 6 do roteiro atual (ponto de encontro fora do ar; queda de rede)
    ficam: são os testes de que o degrau 4 não virou ponto único de falha.
+7. **A máquina B — a que cola o link — sem IPv6.** Não a que hospeda: quem
+   chama `e_de_outra_casa` é quem entra, e tirar o IPv6 do anfitrião faz este
+   passo medir zero.
+
+   É o único lugar onde a escolha da família da sonda pode ser medida. Numa
+   máquina de pilha dupla as duas defesas contra o endereço mapeado se sobrepõem
+   e a suíte não falsifica nenhuma das duas sozinha; sem IPv6, se a canonização
+   do alvo sumisse, o `bind` de `[::]:0` falharia, a função devolveria `false`
+   por omissão, e cada candidato privado de outra casa voltaria a custar quatro
+   segundos em vez de um.
+
+   **O convite tem de ser construído à mão, e é isso que o passo pede.** Num
+   convite orgânico os candidatos privados são os `Local`, que o anfitrião
+   enumera na forma nativa; a forma mapeada só aparece no `Refletido`, e ele só é
+   privado sob CGNAT — ou seja, **um** candidato mapeado-e-privado, e a separação
+   cai para 1 s contra 4 s. Edite o `seele://` pondo quatro candidatos
+   `::ffff:a.b.c.d` privados, e aí a medida é a que separa de longe:
+
+   | canonização | tempo até a má notícia |
+   |---|---|
+   | intacta | ~4 s |
+   | ausente | ~16 s |
+
+   Quatro vezes é separação que nenhum relógio de pulso erra. Se você preferir
+   medir o caso orgânico, o número esperado é 1 s contra 4 s — ainda distinguível,
+   e mais próximo do que a pessoa real vive.
+
+   E a ironia que torna o passo obrigatório: a máquina sem IPv6 é justamente a
+   casa atrás de CGNAT que o degrau 4 existe para servir.
 
 Um relato utilizável é: duas saídas de `plug --rede` + o log carimbado + a
 operadora e o modelo de roteador de cada lado. Com isso, "não conectou" vira "o
