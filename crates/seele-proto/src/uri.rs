@@ -762,6 +762,20 @@ mod tests {
     }
 
     #[test]
+    fn o_convite_cabe_todos_os_alvos_que_a_escada_entrega() {
+        // Duas truncagens na mesma direção — `LIMITE_DE_CANDIDATOS` no
+        // `seele-server` e `LIMITE_DE_ALVOS` aqui — e nenhuma das duas sabe da
+        // outra. Enquanto os números forem iguais nada se perde; este teste é o que
+        // faz alguém que mexa num deles descobrir o outro.
+        // `const` e não `assert!` solto: os dois lados são constantes, então a
+        // conferência cabe na compilação, e o clippy tem razão em cobrá-la ali.
+        // Um teste que só reprova ao rodar deixa a janela entre editar a
+        // constante e rodar a suíte, e é justamente nessa janela que alguém
+        // encolhe o limite e vai embora.
+        const { assert!(LIMITE_DE_ALVOS >= 4) };
+    }
+
+    #[test]
     fn um_bilhete_de_encontro_vai_e_volta_com_as_duas_metades() {
         // Duas metades e não uma: o endereço do ponto de encontro viaja no link
         // justamente para que ele seja trocável, que é a condição sob a qual o

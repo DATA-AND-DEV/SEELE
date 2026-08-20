@@ -223,6 +223,14 @@ const FRASES = {
     // sem ler nada. Foi para `docs/alcance-pela-internet.md`, com o resto do
     // que estas frases carregavam — as marcas de VPN, o NAT simétrico, o
     // Tailscale.
+    // Degrau 1 com endereço próprio: VPS, IP fixo, porta já encaminhada à mão.
+    // O único degrau em que nada foi pedido a ninguém — nem ao roteador, nem a
+    // um ponto de encontro —, e por isso o único sem ressalva nenhuma na
+    // segunda linha. Nasceu de um defeito: antes dele uma VPS lia «ESTE LINK SÓ
+    // FUNCIONA NA SUA REDE», que manda encaminhar a porta num roteador que não
+    // existe, embaixo de um link que alcança o mundo inteiro.
+    EnderecoDireto:
+      "ESTA MÁQUINA TEM ENDEREÇO PRÓPRIO.\nEste link deve funcionar pela internet, sem depender de ninguém.",
     PortaNoRoteador:
       "O ROTEADOR ABRIU A PORTA.\nEste link deve funcionar pela internet e na sua rede.",
     // Degrau 4, o que faz «manda o link e funciona» valer numa casa com CGNAT

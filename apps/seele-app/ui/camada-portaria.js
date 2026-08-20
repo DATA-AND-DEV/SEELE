@@ -37,12 +37,29 @@ let focoAntesDaPortaria = null;
 /**
  * Os degraus do ADR 0022 que significam «dá para chegar aqui de fora».
  *
- * `SoRedeLocal` é o único que não está aqui, e a distinção é o alarme inteiro:
- * um Dogma aberto na rede de casa é o padrão que o ADR 0021 defende de
- * propósito; o mesmo Dogma aberto com endereço alcançável da internet é outra
- * coisa, e é dessa que o vermelho é reservado.
+ * Os nomes são os de `Degrau::nome()`, no `seele-server`, e são exatamente as
+ * variantes em que `Degrau::alcanca_de_fora()` responde `true`. Não é
+ * coincidência a manter à mão: `the_alarm_names_the_rungs_the_ladder_actually_reports`
+ * lê as duas listas e reprova quando elas divergem.
+ *
+ * Nasceu divergente. A lista dizia `EnderecoGlobal`, `PortaAberta` e
+ * `PontoDeEncontro`, e **nenhum desses três nomes existe** do lado Rust — o
+ * alarme comparava contra invenções, nunca dava igual, e o vermelho de «este
+ * Dogma está aberto e alcançável de fora» simplesmente não aparecia. Um alarme
+ * que não dispara não é um alarme silencioso: é um alarme que ninguém sabe que
+ * está quebrado.
+ *
+ * `SoRedeLocal` e `RedeLocalOuVpn` são os que não estão aqui, e a distinção é o
+ * alarme inteiro: um Dogma aberto na rede de casa é o padrão que o ADR 0021
+ * defende de propósito; o mesmo Dogma aberto com endereço alcançável da
+ * internet é outra coisa, e é dessa que o vermelho é reservado.
  */
-const ALCANCA_DE_FORA = ["EnderecoGlobal", "PortaAberta", "PontoDeEncontro"];
+const ALCANCA_DE_FORA = [
+  "PortaNoRoteador",
+  "FuroDeNat",
+  "Ipv6Direto",
+  "EnderecoDireto",
+];
 
 /**
  * A impressão digital, quebrada em grupos para uma pessoa conferir.

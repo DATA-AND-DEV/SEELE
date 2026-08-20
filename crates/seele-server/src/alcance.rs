@@ -386,6 +386,19 @@ pub enum Degrau {
     /// Alcança quem também tem IPv6 — se o firewall do roteador deixar entrar,
     /// e isso não dá para saber daqui.
     Ipv6Direto,
+    /// **Degrau 1, com endereço próprio.** A máquina tem IPv4 global na placa:
+    /// uma VPS, uma máquina com IP fixo, ou uma porta já encaminhada à mão.
+    ///
+    /// O ADR 0022 chama isto de "o caminho de quem hospeda a sério", e é o
+    /// único degrau em que nada foi pedido a ninguém — nem ao roteador, nem a um
+    /// ponto de encontro. Por isso ele fica acima do 2 na frase: alcança quem
+    /// tem IPv4, que é quase todo mundo.
+    ///
+    /// Variante própria, e não um `SoRedeLocal` de sorte, pelo critério que
+    /// [`Degrau::RedeLocalOuVpn`] já usa: **o que a pessoa faz a respeito é
+    /// diferente**. Aqui não há nada a fazer, e a frase que mandava encaminhar a
+    /// porta num roteador inexistente era pior que silêncio.
+    EnderecoDireto,
     /// **Degrau 1, com uma VPN no meio.** Não há endereço desta máquina que
     /// alcance de fora, e o único que sai daqui é o de um túnel.
     ///
@@ -404,6 +417,93 @@ pub enum Degrau {
     SoRedeLocal,
 }
 
+/// O que um candidato é, e o que ele precisa para funcionar.
+///
+/// Antes disto o tipo **era** a ordem: um `u8` solto de 0 a 5, que respondia
+/// "onde ele vai na lista" e não respondia "o que ele precisa". A inversão é
+/// literal — a ordem passa a ser derivada do tipo —, e o que ela destrava está
+/// em [`Tipo::precisa_de_furo`]: sem essa pergunta, avisar o ponto de encontro
+/// por candidato queimaria a janela de furos do anfitrião com endereços que
+/// nunca dependeram de furo nenhum.
+///
+/// `Local` e `Global` são os *host candidates* da literatura de NAT traversal;
+/// `Refletido` é o *server-reflexive*.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tipo {
+    /// Um endereço desta máquina, na rede de casa. O caso comum, e o único com
+    /// resposta imediata.
+    Local,
+    /// Um endereço desta máquina que sai para a internet: IPv6 nativo, ou o
+    /// IPv4 de uma VPS. Alcança de fora e também de dentro.
+    Global,
+    /// A porta que o roteador abriu a pedido (degrau 3). Refletido por
+    /// **configuração**, e não por observação: existe porque alguém pediu.
+    /// Alcança de fora, e de dentro só com *hairpin*, que muitos roteadores não
+    /// fazem.
+    PortaNoRoteador,
+    /// O endereço que o ponto de encontro observou (degrau 4). É o único que
+    /// depende de o anfitrião ter furado o caminho.
+    Refletido,
+    /// Um túnel: Tailscale, WireGuard, WARP. Dois pares na mesma VPN se acham
+    /// por aqui, e ninguém mais.
+    Tunel,
+    /// Uma ponte de contêiner. Não sai desta máquina, e está aqui só porque a
+    /// lista de nomes que a reconhece é heurística.
+    Ponte,
+}
+
+impl Tipo {
+    /// Onde ele entra na lista de tentativa.
+    #[must_use]
+    pub fn ordem(self) -> u8 {
+        match self {
+            Self::Local => 0,
+            Self::Global => 1,
+            Self::PortaNoRoteador => 2,
+            Self::Refletido => 3,
+            Self::Tunel => 4,
+            Self::Ponte => 5,
+        }
+    }
+
+    /// Se alguém precisa furar um NAT para este endereço atender.
+    ///
+    /// Só o refletido. É o que separa "avisar o ponto de encontro antes deste
+    /// candidato" de "não gastar metadado nem orçamento de furo com quem não
+    /// precisa" — e o caso dos dois na mesma casa não perde um milissegundo.
+    #[must_use]
+    pub fn precisa_de_furo(self) -> bool {
+        matches!(self, Self::Refletido)
+    }
+
+    /// Se ele não pode perder a vaga no convite para outro da mesma classe.
+    ///
+    /// Três, e cada um por um motivo diferente de perder a vaga custar caro:
+    ///
+    /// - o primeiro `Local`, porque sem ele os dois na mesma casa param de se
+    ///   achar — foi o que a 0.5.0 quebrou, e o ADR 0006 registra;
+    /// - a `PortaNoRoteador`, porque o endereço que sai do convite deixa de dar
+    ///   nome ao degrau, e um degrau 3 que não é declarado faz [`Escada::subir`]
+    ///   **devolver ao roteador** o mapeamento que ele tinha acabado de abrir.
+    ///   Truncar aqui não encolhe um convite: desliga um caminho que já
+    ///   funcionava;
+    /// - o `Refletido`, porque ele é o único endereço que o degrau 4 produz.
+    ///
+    /// Custa menos vaga do que parece: [`Escada::subir`] só tenta o degrau 4
+    /// quando o 3 não deu (`mapeada.is_none()`), então `PortaNoRoteador` e
+    /// `Refletido` são mutuamente exclusivos na prática e a reserva gasta duas
+    /// vagas das quatro, não três. `decidir` aceita os dois juntos porque é
+    /// função pura e não tem como cobrar isso — e reservar os dois é o que faz
+    /// o teste que os passa junto não medir outra coisa.
+    ///
+    /// Ver a reserva em [`Alcance::decidir`], que consulta este método e não
+    /// repete a lista.
+    #[must_use]
+    pub fn insubstituivel(self) -> bool {
+        matches!(self, Self::Local | Self::PortaNoRoteador | Self::Refletido)
+    }
+}
+
 /// Quantos endereços cabem num convite.
 ///
 /// Quatro. Cada um custa uma tentativa a quem recebe, e o prazo de cada
@@ -420,6 +520,7 @@ impl Degrau {
             Self::PortaNoRoteador => "PortaNoRoteador",
             Self::FuroDeNat => "FuroDeNat",
             Self::Ipv6Direto => "Ipv6Direto",
+            Self::EnderecoDireto => "EnderecoDireto",
             Self::RedeLocalOuVpn => "RedeLocalOuVpn",
             Self::SoRedeLocal => "SoRedeLocal",
         }
@@ -438,7 +539,7 @@ impl Degrau {
     pub fn alcanca_de_fora(self) -> bool {
         matches!(
             self,
-            Self::PortaNoRoteador | Self::FuroDeNat | Self::Ipv6Direto
+            Self::PortaNoRoteador | Self::FuroDeNat | Self::Ipv6Direto | Self::EnderecoDireto
         )
     }
 }
@@ -514,41 +615,85 @@ impl Alcance {
         //    ninguém mais;
         // 4. uma ponte de contêiner — não sai desta máquina, e está aqui só
         //    porque a lista de nomes que a reconhece é heurística.
-        let mut candidatos: Vec<(u8, SocketAddr)> = Vec::new();
+        let mut candidatos: Vec<(Tipo, SocketAddr)> = Vec::new();
         for achado in achados {
             let Some(alvo) = escuta.anunciar(achado.ip) else {
                 continue;
             };
-            let ordem = match (achado.classe(), achado.e_da_rede_local()) {
-                (interfaces::Origem::Fisica, true) => 0,
-                (interfaces::Origem::Fisica, false) => 1,
-                (interfaces::Origem::Tunel, _) => 4,
-                (interfaces::Origem::Virtual, _) => 5,
+            let tipo = match (achado.classe(), achado.e_da_rede_local()) {
+                (interfaces::Origem::Fisica, true) => Tipo::Local,
+                (interfaces::Origem::Fisica, false) => Tipo::Global,
+                (interfaces::Origem::Tunel, _) => Tipo::Tunel,
+                (interfaces::Origem::Virtual, _) => Tipo::Ponte,
             };
-            candidatos.push((ordem, alvo));
+            candidatos.push((tipo, alvo));
         }
         let externo = mapeada.and_then(|alvo| escuta.anunciar_com_porta(alvo));
         if let Some(externo) = externo {
-            candidatos.push((2, externo));
+            candidatos.push((Tipo::PortaNoRoteador, externo));
         }
         // O endereço que o ponto de encontro viu. Depois da porta do roteador —
         // aquele funciona sem ninguém bater em ponto nenhum — e antes do túnel,
         // que só serve a quem estiver na mesma VPN.
         let furado = encontrado.and_then(|alvo| escuta.anunciar_com_porta(alvo));
         if let Some(furado) = furado {
-            candidatos.push((3, furado));
+            candidatos.push((Tipo::Refletido, furado));
         }
 
         // Estável: dentro de uma classe vale a ordem em que a máquina listou as
         // interfaces, que é a ordem em que o próprio sistema as prefere.
-        candidatos.sort_by_key(|(ordem, _)| *ordem);
-        let mut alvos: Vec<SocketAddr> = Vec::new();
-        for (_, alvo) in candidatos {
-            if !alvos.contains(&alvo) {
-                alvos.push(alvo);
+        //
+        // Reservar antes de cortar. Dois endereços são insubstituíveis e não
+        // podem perder a vaga para um terceiro da mesma classe:
+        //
+        // - o **primeiro `Local`**, porque sem ele os dois na mesma casa param
+        //   de se achar — foi o que a 0.5.0 quebrou, e o ADR 0006 registra;
+        // - o **furado**, porque ele é o único endereço que o degrau 4 produz, e
+        //   sem ele o degrau não alcança ninguém.
+        //
+        // O que dá a vaga é o excedente da mesma classe: uma segunda placa, um
+        // segundo IPv6. Na prática isto vira "no máximo dois `Local`".
+        candidatos.sort_by_key(|(tipo, _)| tipo.ordem());
+
+        // O primeiro de cada tipo insubstituível, e a lista de quais são vem do
+        // próprio [`Tipo::insubstituivel`]: repeti-la aqui era o que deixava o
+        // método prometer uma reserva que a reserva não fazia.
+        //
+        // "O primeiro" importa só para o `Local`, que é o único que pode
+        // aparecer mais de uma vez — duas placas, duas redes de casa. Os outros
+        // dois vêm de `Option`, e são um ou nenhum.
+        let mut reservados: Vec<SocketAddr> = Vec::new();
+        let mut tipos_reservados: Vec<Tipo> = Vec::new();
+        for (tipo, alvo) in &candidatos {
+            if tipo.insubstituivel() && !tipos_reservados.contains(tipo) {
+                tipos_reservados.push(*tipo);
+                reservados.push(*alvo);
             }
         }
-        alvos.truncate(LIMITE_DE_CANDIDATOS);
+
+        let mut alvos: Vec<SocketAddr> = Vec::new();
+        for alvo in &reservados {
+            if !alvos.contains(alvo) {
+                alvos.push(*alvo);
+            }
+        }
+        for (_, alvo) in &candidatos {
+            if alvos.len() >= LIMITE_DE_CANDIDATOS {
+                break;
+            }
+            if !alvos.contains(alvo) {
+                alvos.push(*alvo);
+            }
+        }
+        // A ordem de tentativa é a das classes, e não a da reserva: reservar é
+        // sobre quem sobrevive ao corte, nunca sobre quem vem primeiro.
+        let posicao = |alvo: &SocketAddr| {
+            candidatos
+                .iter()
+                .find(|(_, candidato)| candidato == alvo)
+                .map_or(u8::MAX, |(tipo, _)| tipo.ordem())
+        };
+        alvos.sort_by_key(posicao);
 
         // Sem rede não há para onde convidar, e o loopback é o que sobra. Qual
         // dos dois depende da escuta pelo mesmo motivo de tudo acima: numa
@@ -561,13 +706,41 @@ impl Alcance {
             alvos.push(recuo);
         }
 
-        // O degrau é lido dos candidatos que sobraram, e não do caminho que os
-        // produziu: assim não há como dizer que se alcança por um endereço que
+        // O degrau é lido dos alvos que sobraram, e não das variáveis que os
+        // produziram: assim não há como dizer que se alcança por um endereço que
         // não está no convite.
-        let degrau = if externo.is_some() {
+        //
+        // **Estes dois `contains` são infalsificáveis hoje, e ficam.** Desde que
+        // `externo` e `furado` entraram na reserva, `is_some()` e
+        // `alvos.contains(...)` decidem igual em toda entrada — os dois são
+        // candidatos assim que a escuta os serve, e um candidato reservado nunca
+        // é truncado. Trocá-los de volta por `is_some()` não deixa teste nenhum
+        // vermelho, e é justamente por isso que isto está escrito aqui: eles são
+        // a rede embaixo da reserva, para o dia em que alguém mexer no
+        // `LIMITE_DE_CANDIDATOS` ou nos tipos insubstituíveis. Quem cobra a
+        // propriedade de fora é `um_degrau_nomeado_sempre_tem_o_endereco_dele_no_convite`,
+        // que a afirma sobre a saída pública e não sobre este `if`.
+        let degrau = if externo.is_some_and(|alvo| alvos.contains(&alvo)) {
             Degrau::PortaNoRoteador
-        } else if furado.is_some() {
+        } else if furado.is_some_and(|alvo| alvos.contains(&alvo)) {
             Degrau::FuroDeNat
+        } else if achados.iter().any(|achado| {
+            matches!(achado.ip, IpAddr::V4(quatro) if porta::global_v4(quatro))
+                && achado.classe() == interfaces::Origem::Fisica
+                && escuta.serve(achado.ip)
+        }) {
+            // **Antes** do degrau 2, e é o mesmo argumento que o ADR 0022 usa
+            // para pôr o degrau 4 acima do 2 na frase: um IPv4 público alcança
+            // quem tem IPv4, que é quase todo mundo, e o IPv6 direto só alcança
+            // quem também tem IPv6. Numa VPS de pilha dupla a ordem invertida
+            // devolvia `Ipv6Direto`, cuja frase diz "só alcança quem também
+            // tiver IPv6" — numa máquina com endereço IPv4 público na placa.
+            //
+            // A mesma conjunção do degrau 2, e pelo mesmo motivo: um degrau só
+            // pode ser declarado se a escuta o servir. `tem_ipv4_global` faz
+            // metade desta pergunta em `subir`, para decidir se vale bater no
+            // ponto de encontro; aqui a outra metade é a escuta.
+            Degrau::EnderecoDireto
         } else if achados.iter().any(|achado| {
             matches!(achado.ip, IpAddr::V6(seis) if global_v6(seis))
                 && achado.classe() == interfaces::Origem::Fisica
@@ -908,6 +1081,15 @@ mod testes {
         match alcance.degrau() {
             Degrau::PortaNoRoteador => {
                 assert!(alcance.porta_recusada().is_none(), "abriu e reclamou junto");
+                assert!(alcance.degrau().alcanca_de_fora());
+            }
+            // Degrau 1 com endereço próprio, e o único que não cobra razão do
+            // degrau 3: numa VPS o roteador pode ter aberto uma porta cujo
+            // endereço externo esta escuta não serve — pedido atendido, nada
+            // recusado, `porta_recusada` vazio. Exigir a razão aqui seria um
+            // `expect` que só panica na máquina de campo que tiver essa
+            // combinação, que é o pior lugar para descobrir.
+            Degrau::EnderecoDireto => {
                 assert!(alcance.degrau().alcanca_de_fora());
             }
             // O ponto todo do ADR 0022: quando o degrau 3 não deu, a razão não
@@ -1276,6 +1458,372 @@ mod testes {
     }
 
     #[test]
+    fn a_ordem_do_convite_sai_do_tipo_do_candidato() {
+        // A ordem deixa de ser um número solto que alguém pode editar sem saber o
+        // que ele significa. Cada posição tem nome, e o nome responde a pergunta
+        // que o número não respondia: **o que este candidato precisa para
+        // funcionar**.
+        assert!(Tipo::Local.ordem() < Tipo::Global.ordem());
+        assert!(Tipo::Global.ordem() < Tipo::PortaNoRoteador.ordem());
+        assert!(Tipo::PortaNoRoteador.ordem() < Tipo::Refletido.ordem());
+        assert!(Tipo::Refletido.ordem() < Tipo::Tunel.ordem());
+        assert!(Tipo::Tunel.ordem() < Tipo::Ponte.ordem());
+
+        // Só o refletido depende de alguém ter furado o caminho. É esta linha que
+        // impede o aviso por candidato da Tarefa 7 de queimar a janela de furos do
+        // anfitrião com quem não precisa dela.
+        assert!(Tipo::Refletido.precisa_de_furo());
+        for tipo in [
+            Tipo::Local,
+            Tipo::Global,
+            Tipo::PortaNoRoteador,
+            Tipo::Tunel,
+            Tipo::Ponte,
+        ] {
+            assert!(!tipo.precisa_de_furo());
+        }
+
+        // A porta do roteador é refletida por configuração, e não por observação:
+        // ela existe porque alguém pediu, não porque alguém contou de onde o pacote
+        // veio. Por isso variante própria, e por isso não precisa de furo.
+
+        // Os três que não podem perder a vaga, e o que os separa dos outros três
+        // não é serem melhores: é o **preço de perder**. Um `Global` ou um
+        // `Tunel` que sai do convite é uma tentativa a menos; um `Local` que sai
+        // desfaz o caso dos dois na mesma casa, uma `PortaNoRoteador` que sai faz
+        // `Escada::subir` devolver ao roteador um mapeamento que funcionava, e um
+        // `Refletido` que sai deixa o degrau 4 sem endereço nenhum.
+        assert!(Tipo::Local.insubstituivel());
+        assert!(Tipo::PortaNoRoteador.insubstituivel());
+        assert!(Tipo::Refletido.insubstituivel());
+        for tipo in [Tipo::Global, Tipo::Tunel, Tipo::Ponte] {
+            assert!(!tipo.insubstituivel());
+        }
+        // E a reserva cabe no convite com folga, que é o que a impede de virar
+        // um corte com outro nome.
+        assert!([Tipo::Local, Tipo::PortaNoRoteador, Tipo::Refletido].len() < LIMITE_DE_CANDIDATOS);
+    }
+
+    #[test]
+    fn o_endereco_furado_nunca_e_truncado_para_fora_do_convite() {
+        // Ethernet e wifi ligadas, numa rede com IPv6 nativo: dois endereços de
+        // ordem 0 e dois de ordem 1. São quatro, que é o `LIMITE_DE_CANDIDATOS`
+        // inteiro — e o endereço furado, que é de ordem 3, cai fora da lista.
+        //
+        // É exatamente a máquina de casa com CGNAT, que é o único caso que o
+        // degrau 4 existe para servir.
+        let furado = SocketAddr::from(([200, 100, 30, 40], 61234));
+        let alcance = Alcance::decidir(
+            Escuta::nova(8383, Pilha::Dupla),
+            None,
+            Some(furado),
+            &[
+                na_placa("192.168.0.10"),
+                na_placa("192.168.0.11"),
+                na_placa("2804:388::1"),
+                na_placa("2804:388::2"),
+            ],
+            None,
+        );
+
+        assert!(
+            alcance.alvos().contains(&furado),
+            "o endereço furado é insubstituível: sem ele o degrau 4 não alcança ninguém"
+        );
+    }
+
+    #[test]
+    fn a_porta_aberta_no_roteador_nunca_e_truncada_para_fora_do_convite() {
+        // O truncamento do degrau 3 não encolhe um convite: ele **desliga um
+        // caminho que funcionava**. `Escada::subir` guarda o mapeamento só
+        // quando o degrau declarado é o 3, e devolve ao roteador o que não virou
+        // degrau — então um endereço externo cortado da lista vira uma porta
+        // fechada por decisão nossa, numa máquina que a internet alcançava.
+        let externo = SocketAddr::from(([203, 0, 113, 7], 9000));
+
+        // Quatro placas na rede de casa gastam o `LIMITE_DE_CANDIDATOS` inteiro
+        // antes de o degrau 3 entrar na fila. Sem a reserva o convite sai só com
+        // as quatro, o degrau cai para `SoRedeLocal`, e a porta é devolvida.
+        let so_a_rede_de_casa = Alcance::decidir(
+            Escuta::nova(8383, Pilha::Dupla),
+            Some(externo),
+            None,
+            &[
+                na_placa("192.168.0.10"),
+                na_placa("192.168.0.11"),
+                na_placa("192.168.0.12"),
+                na_placa("192.168.0.13"),
+            ],
+            None,
+        );
+        assert!(
+            so_a_rede_de_casa.alvos().contains(&externo),
+            "a porta do roteador foi truncada para fora do convite: {:?}",
+            so_a_rede_de_casa.alvos()
+        );
+        assert_eq!(so_a_rede_de_casa.degrau(), Degrau::PortaNoRoteador);
+
+        // O segundo caso, e o mais caro: dois IPv6 globais na mesma placa é
+        // *privacy extensions*, que é o padrão e não uma raridade. Sem a reserva
+        // o degrau **descia de 3 para 4** — a porta era devolvida ao roteador e a
+        // máquina passava a depender de um ponto de encontro, com um terceiro
+        // sabendo quem falou com quem, tendo um caminho direto que funcionava.
+        let furado = SocketAddr::from(([200, 100, 30, 40], 61234));
+        let com_o_furo = Alcance::decidir(
+            Escuta::nova(8383, Pilha::Dupla),
+            Some(externo),
+            Some(furado),
+            &[
+                na_placa("192.168.0.10"),
+                na_placa("2804:388::1"),
+                na_placa("2804:388::2"),
+            ],
+            None,
+        );
+        assert!(
+            com_o_furo.alvos().contains(&externo),
+            "o degrau 4 empurrou a porta do roteador para fora do convite: {:?}",
+            com_o_furo.alvos()
+        );
+        assert_eq!(
+            com_o_furo.degrau(),
+            Degrau::PortaNoRoteador,
+            "a escada desceu do degrau 3 para o 4 e pôs um terceiro num caminho \
+             que já era direto: {:?}",
+            com_o_furo.alvos()
+        );
+    }
+
+    #[test]
+    fn uma_vps_de_pilha_dupla_nao_promete_so_ipv6_tendo_ipv4_publico() {
+        // A ordem dos dois degraus de "endereço próprio", e ela não é estética.
+        // Uma VPS comum tem IPv4 público **e** IPv6 nativo. Com o ramo do
+        // `EnderecoDireto` depois do `Ipv6Direto` a escada dizia degrau 2, cuja
+        // frase é "só alcança quem também tiver IPv6" — embaixo de um link que
+        // qualquer um com IPv4 alcança, que é quase todo mundo.
+        //
+        // É o mesmo argumento que o ADR 0022 usa para pôr o degrau 4 acima do 2
+        // na frase, e é o defeito 3.2 com outro rótulo: prometer de menos.
+        let alcance = Alcance::decidir(
+            Escuta::nova(8383, Pilha::Dupla),
+            None,
+            None,
+            &[na_placa("45.33.32.156"), na_placa("2804:388::1")],
+            None,
+        );
+
+        assert_eq!(
+            alcance.degrau(),
+            Degrau::EnderecoDireto,
+            "com IPv4 público na placa a escada leu o degrau do IPv6: {:?}",
+            alcance.alvos()
+        );
+        // E os dois endereços continuam no convite: quem só tem IPv6 entra pelo
+        // segundo, e o degrau declarado não é sobre jogar candidato fora.
+        assert!(alcance
+            .alvos()
+            .iter()
+            .any(|alvo| alvo.ip().to_string() == "45.33.32.156"));
+        assert!(alcance
+            .alvos()
+            .iter()
+            .any(|alvo| alvo.ip().to_string() == "2804:388::1"));
+    }
+
+    #[test]
+    fn um_degrau_nomeado_sempre_tem_o_endereco_dele_no_convite() {
+        // A propriedade que os dois consertos desta tarefa produzem **juntos**, e
+        // que nenhum dos dois cobra sozinho: se a escada diz `FuroDeNat`, o
+        // endereço furado está no convite; se ela diz `PortaNoRoteador`, o
+        // endereço do roteador está no convite.
+        //
+        // Um teste por mecanismo não bastava, e o motivo é que os dois se cobrem
+        // um ao outro: com a reserva no lugar, `furado.is_some()` e
+        // `alvos.contains(&furado)` passam a decidir igual em toda entrada, e a
+        // leitura pelos alvos vira inobservável de fora. Um conserto que teste
+        // nenhum consegue cobrar é um conserto que a próxima refatoração remove
+        // sem nada ficar vermelho — que é o padrão que este ciclo existe para
+        // acabar. Aqui a implicação é afirmada sobre a saída pública, e ela
+        // reprova se **qualquer uma** das duas metades cair: tire a reserva e o
+        // caso das quatro interfaces trunca o furado; troque o `contains` de
+        // volta pelo `is_some` e o caso da escuta que recusa volta a nomear um
+        // degrau que endereço nenhum sustenta.
+        let furado = SocketAddr::from(([200, 100, 30, 40], 61234));
+        let externo = SocketAddr::from(([203, 0, 113, 7], 9000));
+        let furado_ipv6 = SocketAddr::new(um_ipv6_global().into(), 61234);
+        let externo_ipv6 = SocketAddr::new(um_ipv6_global().into(), 9000);
+
+        let uma_placa = [na_placa("192.168.0.10")];
+        // Ethernet e wifi numa rede com IPv6 nativo: quatro endereços, que é o
+        // `LIMITE_DE_CANDIDATOS` inteiro antes de qualquer degrau entrar.
+        let quatro_placas = [
+            na_placa("192.168.0.10"),
+            na_placa("192.168.0.11"),
+            na_placa("2804:388::1"),
+            na_placa("2804:388::2"),
+        ];
+        let sem_rede: [interfaces::Achado; 0] = [];
+
+        // Uma estrutura e não uma tupla de cinco: `(&str, Escuta, Option<_>,
+        // Option<_>, &[_])` é o tipo que o `clippy::type_complexity` reclama, e
+        // com razão — as duas `Option<SocketAddr>` seguidas são trocáveis à vista
+        // desarmada, e trocá-las encenaria outra coisa em silêncio.
+        struct Encenacao<'a> {
+            conta: &'a str,
+            escuta: Escuta,
+            mapeada: Option<SocketAddr>,
+            encontrado: Option<SocketAddr>,
+            achados: &'a [interfaces::Achado],
+        }
+
+        let casos = &[
+            Encenacao {
+                conta: "uma placa e mais nada",
+                escuta: Escuta::nova(8383, Pilha::Dupla),
+                mapeada: None,
+                encontrado: None,
+                achados: &uma_placa,
+            },
+            Encenacao {
+                conta: "uma placa e o furo",
+                escuta: Escuta::nova(8383, Pilha::Dupla),
+                mapeada: None,
+                encontrado: Some(furado),
+                achados: &uma_placa,
+            },
+            Encenacao {
+                conta: "quatro interfaces e o furo: o limite inteiro gasto antes do degrau 4",
+                escuta: Escuta::nova(8383, Pilha::Dupla),
+                mapeada: None,
+                encontrado: Some(furado),
+                achados: &quatro_placas,
+            },
+            Encenacao {
+                conta: "quatro interfaces, a porta do roteador e o furo",
+                escuta: Escuta::nova(8383, Pilha::Dupla),
+                mapeada: Some(externo),
+                encontrado: Some(furado),
+                achados: &quatro_placas,
+            },
+            Encenacao {
+                conta: "uma placa e a porta do roteador",
+                escuta: Escuta::nova(8383, Pilha::Dupla),
+                mapeada: Some(externo),
+                encontrado: None,
+                achados: &uma_placa,
+            },
+            Encenacao {
+                conta: "quatro interfaces e a porta do roteador: o limite inteiro gasto antes do degrau 3",
+                escuta: Escuta::nova(8383, Pilha::Dupla),
+                mapeada: Some(externo),
+                encontrado: None,
+                achados: &quatro_placas,
+            },
+            Encenacao {
+                conta: "uma escuta só-IPv4 e um furo IPv6, que ela não serve",
+                escuta: Escuta::nova(8383, Pilha::SoIpv4),
+                mapeada: None,
+                encontrado: Some(furado_ipv6),
+                achados: &uma_placa,
+            },
+            Encenacao {
+                conta: "uma escuta só-IPv4 e uma porta externa IPv6, que ela não serve",
+                escuta: Escuta::nova(8383, Pilha::SoIpv4),
+                mapeada: Some(externo_ipv6),
+                encontrado: None,
+                achados: &uma_placa,
+            },
+            Encenacao {
+                conta: "sem rede nenhuma, só o furo",
+                escuta: Escuta::nova(8383, Pilha::Dupla),
+                mapeada: None,
+                encontrado: Some(furado),
+                achados: &sem_rede,
+            },
+        ];
+
+        let mut disse_furo = false;
+        let mut disse_porta = false;
+        for caso in casos {
+            let Encenacao {
+                conta: encenacao,
+                escuta,
+                mapeada,
+                encontrado,
+                achados,
+            } = caso;
+            let alcance = Alcance::decidir(*escuta, *mapeada, *encontrado, achados, None);
+
+            // A metade da reserva, afirmada na mesma travessia: um endereço que
+            // veio de fora desta máquina e que a escuta serve **está** no
+            // convite, sempre. Sem esta asserção a implicação abaixo é
+            // verdadeira de graça no caso das quatro interfaces — o endereço sai
+            // da lista, o degrau desce, e a premissa some junto com o problema.
+            //
+            // Os dois, e não só o furado: perder a vaga custa caro dos dois
+            // lados. Sem o furado o degrau 4 não alcança ninguém; sem a porta do
+            // roteador o degrau 3 deixa de ser declarado, e `Escada::subir`
+            // devolve ao roteador um mapeamento que estava funcionando.
+            for (nome, endereco) in [
+                ("o endereço furado", *encontrado),
+                ("a porta do roteador", *mapeada),
+            ] {
+                let Some(endereco) = endereco else {
+                    continue;
+                };
+                if escuta.serve(endereco.ip()) {
+                    assert!(
+                        alcance.alvos().contains(&endereco),
+                        "{encenacao}: a escuta serve {nome} e ele não está no convite, \
+                         então o degrau que ele produz não alcança ninguém: {:?}",
+                        alcance.alvos()
+                    );
+                }
+            }
+
+            match alcance.degrau() {
+                Degrau::FuroDeNat => {
+                    disse_furo = true;
+                    let Some(furado) = *encontrado else {
+                        panic!("disse degrau 4 sem endereço furado nenhum ({encenacao})");
+                    };
+                    assert!(
+                        alcance.alvos().contains(&furado),
+                        "{encenacao}: disse `FuroDeNat` e o endereço furado não está no \
+                         convite, então o degrau nomeia um caminho que candidato nenhum \
+                         tenta: {:?}",
+                        alcance.alvos()
+                    );
+                }
+                Degrau::PortaNoRoteador => {
+                    disse_porta = true;
+                    let Some(mapeada) = *mapeada else {
+                        panic!("disse degrau 3 sem porta aberta nenhuma ({encenacao})");
+                    };
+                    assert!(
+                        alcance.alvos().contains(&mapeada),
+                        "{encenacao}: disse `PortaNoRoteador` e a porta do roteador não \
+                         está no convite: {:?}",
+                        alcance.alvos()
+                    );
+                }
+                // Os outros degraus não são sobre um endereço que veio de fora
+                // desta máquina, e a implicação não os alcança.
+                Degrau::Ipv6Direto
+                | Degrau::EnderecoDireto
+                | Degrau::RedeLocalOuVpn
+                | Degrau::SoRedeLocal => {}
+            }
+        }
+
+        // Uma implicação nunca é falsa quando a premissa nunca acontece. Sem
+        // estas duas linhas, um dia em que `decidir` parasse de declarar os dois
+        // degraus deixaria este teste verde sem cobrar coisa nenhuma.
+        assert!(disse_furo, "nenhuma encenação chegou ao degrau 4");
+        assert!(disse_porta, "nenhuma encenação chegou ao degrau 3");
+    }
+
+    #[test]
     fn quem_ja_tem_endereco_publico_nao_pede_apresentacao_a_ninguem() {
         // O guarda que evita pagar metadado à toa: numa VPS o degrau 1 já
         // resolveu tudo, e um ponto de encontro só aprenderia quem está falando
@@ -1291,6 +1839,36 @@ mod testes {
     }
 
     #[test]
+    fn um_endereco_publico_nao_e_um_link_que_so_funciona_na_sua_rede() {
+        // Uma VPS: IPv4 global na placa, sem UPnP (não há roteador a pedir), sem
+        // IPv6, sem túnel. O degrau 4 não é tentado de propósito — `subir` só
+        // pergunta ao ponto de encontro quando não há IPv4 público, e numa VPS
+        // perguntar seria pagar metadado por um caminho que já existe (ADR 0022).
+        //
+        // Antes deste conserto a escada caía no `else` final e declarava
+        // `SoRedeLocal`, cuja frase manda encaminhar a porta 8383 num roteador que
+        // não existe. É o defeito do relato do Cloudflare WARP com o sinal
+        // invertido: lá a frase prometia demais, aqui promete de menos.
+        let alcance = Alcance::decidir(
+            Escuta::nova(8383, Pilha::Dupla),
+            None,
+            None,
+            &[na_placa("45.33.32.156")],
+            None,
+        );
+
+        assert_eq!(alcance.degrau(), Degrau::EnderecoDireto);
+        assert!(alcance.degrau().alcanca_de_fora());
+        assert!(
+            alcance
+                .alvos()
+                .iter()
+                .any(|alvo| alvo.ip().to_string() == "45.33.32.156"),
+            "o endereço que dá nome ao degrau tem de estar no convite"
+        );
+    }
+
+    #[test]
     fn cada_degrau_tem_nome_proprio_e_estavel() {
         // O nome atravessa até o JavaScript, onde a frase está escrita. Dois
         // degraus com o mesmo nome seriam duas situações com uma frase só.
@@ -1298,6 +1876,7 @@ mod testes {
             Degrau::PortaNoRoteador.nome(),
             Degrau::FuroDeNat.nome(),
             Degrau::Ipv6Direto.nome(),
+            Degrau::EnderecoDireto.nome(),
             Degrau::RedeLocalOuVpn.nome(),
             Degrau::SoRedeLocal.nome(),
         ];
@@ -1309,6 +1888,7 @@ mod testes {
         }
         assert!(Degrau::PortaNoRoteador.alcanca_de_fora());
         assert!(Degrau::Ipv6Direto.alcanca_de_fora());
+        assert!(Degrau::EnderecoDireto.alcanca_de_fora());
         assert!(
             !Degrau::SoRedeLocal.alcanca_de_fora(),
             "o degrau 1 prometeu alcançar de fora, e é justamente o que ele não faz"

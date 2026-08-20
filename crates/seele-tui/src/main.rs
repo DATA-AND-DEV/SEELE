@@ -237,6 +237,16 @@ fn frase_do_alcance(alcance: &seele_server::alcance::Alcance) -> String {
             "Este link é IPv6 e alcança de qualquer lugar — mas só quem também \
              tiver IPv6.{motivo}"
         ),
+        // Degrau 1 com endereço próprio: uma VPS, um IP fixo, uma porta já
+        // encaminhada à mão. O único degrau em que nada foi pedido a ninguém —
+        // nem ao roteador, nem a um ponto de encontro —, e por isso o único sem
+        // ressalva. Antes de ele existir esta máquina lia a frase do
+        // `SoRedeLocal`, que manda encaminhar a porta num roteador que não
+        // existe, embaixo de um link que alcança o mundo inteiro.
+        Degrau::EnderecoDireto => format!(
+            "Esta máquina tem endereço próprio: este link deve funcionar pela \
+             internet, sem depender de ninguém.{motivo}"
+        ),
         // O caso do relato de campo: a VPN é o único caminho que sai desta
         // máquina, e ela não aceita entrada. Frase própria porque o que se faz
         // a respeito é diferente — aqui a resposta é desligar a VPN.

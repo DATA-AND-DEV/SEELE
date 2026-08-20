@@ -3683,9 +3683,16 @@ fn every_rung_of_the_reachability_ladder_has_a_sentence() {
     // ADR 0022 asks for exactly this to be said out loud rather than left for
     // the person to discover as "it doesn't connect".
     let frases = read("ui/frases.js");
+    // `FuroDeNat` and `EnderecoDireto` were missing from this list, each for the
+    // same reason: the list is written by hand, and a rung added to `Degrau`
+    // reaches the screen without anything here noticing. Deleting either
+    // sentence from `frases.js` left this test green, which is the exact failure
+    // it exists to prevent.
     for degrau in [
         "PortaNoRoteador",
+        "FuroDeNat",
         "Ipv6Direto",
+        "EnderecoDireto",
         "RedeLocalOuVpn",
         "SoRedeLocal",
     ] {
@@ -5153,6 +5160,99 @@ fn the_doorkeeper_spends_the_alarm_red_only_on_a_door_open_to_the_internet() {
         "the doorkeeper spends the alarm red somewhere other than the band for \
          a door open to the internet, and that is the red nobody reads on the \
          day the internal battery lights up"
+    );
+}
+
+#[test]
+fn the_alarm_names_the_rungs_the_ladder_actually_reports() {
+    // The alarm compares `estado.alcance` — which is `Degrau::nome()`, straight
+    // off the Rust side — against a list written by hand in the layer. Nothing
+    // joined the two, and they had drifted all the way apart: the list named
+    // `EnderecoGlobal`, `PortaAberta` and `PontoDeEncontro`, and **no such name
+    // exists** in `Degrau::nome()`. The comparison never matched, so the red
+    // band saying this Dogma is open and reachable from the internet never
+    // appeared at all.
+    //
+    // That is worse than a missing sentence. A missing sentence is silence; an
+    // alarm wired to names nobody produces is a guard everybody believes in and
+    // nothing is behind. Read against the enum itself, so the next rung either
+    // joins the list or fails here.
+    let alcance = read("../../crates/seele-server/src/alcance.rs");
+
+    let Some(corpo) = alcance
+        .split("pub fn alcanca_de_fora")
+        .nth(1)
+        .and_then(|resto| resto.split("\n    }").next())
+    else {
+        panic!(
+            "`alcanca_de_fora` is gone from the ladder, so the question this \
+             alarm asks is now answered somewhere this test cannot see"
+        );
+    };
+    let de_fora: Vec<String> = corpo
+        .split("Self::")
+        .skip(1)
+        .filter_map(|resto| resto.split(|c: char| !c.is_alphanumeric()).next())
+        .filter(|nome| !nome.is_empty())
+        .map(str::to_owned)
+        .collect();
+    assert!(
+        de_fora.len() >= 3,
+        "found only {} rungs reachable from outside, so the `matches!` is no \
+         longer being read correctly and this test guards nothing: {de_fora:?}",
+        de_fora.len()
+    );
+
+    // Each one has to be a name `nome()` actually hands to the screen. Without
+    // this, a variant renamed on one side of that `match` would still pass.
+    let Some(nomes) = alcance
+        .split("pub fn nome")
+        .nth(1)
+        .and_then(|resto| resto.split("\n    }").next())
+    else {
+        panic!("`Degrau::nome` is gone, so the names the screen keys off are gone with it");
+    };
+    for variante in &de_fora {
+        assert!(
+            nomes.contains(&format!("Self::{variante} => \"{variante}\"")),
+            "`{variante}` reaches the person as some other string than its own \
+             name, and the alarm compares against the name"
+        );
+    }
+
+    let camada = without_comments(&read("ui/camada-portaria.js"));
+    let Some(lista) = camada
+        .split("const ALCANCA_DE_FORA")
+        .nth(1)
+        .and_then(|resto| resto.split(']').next())
+    else {
+        panic!("`ALCANCA_DE_FORA` is gone from ui/camada-portaria.js");
+    };
+    let anunciados: Vec<&str> = lista
+        .split('"')
+        .skip(1)
+        .step_by(2)
+        .filter(|nome| !nome.is_empty())
+        .collect();
+
+    let faltando: Vec<&String> = de_fora
+        .iter()
+        .filter(|nome| !anunciados.contains(&nome.as_str()))
+        .collect();
+    assert!(
+        faltando.is_empty(),
+        "the ladder reports these rungs as reachable from outside and the alarm \
+         does not know them, so a Dogma open to the internet raises nothing: \
+         {faltando:?}"
+    );
+    let inventados: Vec<&&str> = anunciados
+        .iter()
+        .filter(|nome| !de_fora.iter().any(|variante| variante == *nome))
+        .collect();
+    assert!(
+        inventados.is_empty(),
+        "the alarm compares against names the ladder never produces, which is \
+         how it stayed silent for every rung at once: {inventados:?}"
     );
 }
 
