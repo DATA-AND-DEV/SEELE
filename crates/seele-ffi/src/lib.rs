@@ -311,6 +311,21 @@ struct Shared {
     /// Round trip in microseconds. Integer because atomics have no `f32`, and
     /// microseconds because milliseconds would round a fast local link to zero.
     rtt_micros: std::sync::atomic::AtomicU64,
+    /// O jitter de chegada deste receptor, em microssegundos (RFC 3550).
+    ///
+    /// Guardado aqui porque quem o calcula é [`measure`], no laço de voz, e quem
+    /// o mostra é o [`Plug::snapshot`], na casca — e antes disto ele era
+    /// calculado, usado no Sync Ratio e jogado fora, enquanto a tela lia o zero
+    /// que o Dogma manda de propósito (`session.rs` diz em comentário que o
+    /// servidor não tem como medir jitter, porque jitter se mede no receptor).
+    ///
+    /// Microssegundos inteiros, e não os milissegundos em `f32` que a tela
+    /// mostra, pelo mesmo motivo de [`Self::rtt_micros`] logo acima: não há
+    /// átomo de `f32`, e um cadeado por quadro de interface seria contenção por
+    /// nada. Um jitter de rede honesto vive na casa das unidades de
+    /// milissegundo, então um milissegundo inteiro arredondaria a diferença
+    /// entre um enlace bom e um ótimo para o mesmo número.
+    jitter_de_chegada_micros: std::sync::atomic::AtomicU64,
     sync_ratio: AtomicU8,
     running: AtomicBool,
     /// Onde o enlace está, para o `Snapshot` contar à casca.
@@ -391,6 +406,37 @@ impl Shared {
         } else {
             LinkState::Online
         }
+    }
+
+    /// Guarda o jitter de chegada que o laço de voz acabou de medir.
+    ///
+    /// Só quem chama [`jitter_para_a_tela`] tem o que gravar aqui, e é de
+    /// propósito: o número certo e o errado são ambos milissegundos em `f32`, e
+    /// nada além daquela função separa um do outro.
+    fn gravar_jitter_de_chegada(&self, ms: f32) {
+        // Sem limitar a zero à mão: em Rust o `as` de ponto flutuante para
+        // inteiro **satura**, e leva tanto o negativo quanto o `NaN` a zero
+        // sozinho. Um `max` aqui seria uma guarda que nunca dispara, e uma
+        // guarda que nunca dispara faz o teste que a exercita passar por si
+        // mesmo em vez de guardar a propriedade.
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "o `as` satura: negativo e NaN viram zero, e o teto de u64 está muito acima de qualquer jitter"
+        )]
+        let micros = (ms * 1000.0) as u64;
+        self.jitter_de_chegada_micros
+            .store(micros, Ordering::Relaxed);
+    }
+
+    /// O jitter de chegada como a casca o vê, em milissegundos.
+    fn jitter_de_chegada_ms(&self) -> f32 {
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "um jitter em microssegundos está muito abaixo da faixa exata do f32"
+        )]
+        let ms = self.jitter_de_chegada_micros.load(Ordering::Relaxed) as f32 / 1000.0;
+        ms
     }
 
     /// Entrega o peso a quem perguntou por aquela Linha.
@@ -515,6 +561,7 @@ impl Plug {
             nickname: Mutex::new(config.nickname.clone()),
             pattern: AtomicU8::new(pattern_byte(Pattern::Offline)),
             rtt_micros: std::sync::atomic::AtomicU64::new(0),
+            jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
             sync_ratio: AtomicU8::new(0),
             running: AtomicBool::new(false),
             pending_weights: Mutex::new(Vec::new()),
@@ -1168,7 +1215,11 @@ impl Plug {
             messages_revision: self.shared.messages_revision.load(Ordering::Relaxed),
             telemetry: Telemetry {
                 rtt_ms,
-                jitter_ms: room.telemetry.as_ref().map_or(0.0, |t| t.jitter_ms),
+                // O jitter que a pessoa quer saber é o de chegada, medido
+                // aqui — e não o do relatório do Dogma, que é sempre `0.0`
+                // porque o servidor não tem como medir jitter. Ver
+                // [`Shared::jitter_de_chegada_micros`].
+                jitter_ms: self.shared.jitter_de_chegada_ms(),
                 loss_fraction: room.telemetry.as_ref().map_or(0.0, |t| t.loss_fraction),
                 bitrate_bps: audio.bitrate_bps,
                 sync_ratio,
@@ -1801,12 +1852,83 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
     }
 }
 
+/// Qual das duas grandezas chamadas "jitter" vai para a tela.
+///
+/// São duas, com o mesmo nome, e mostrar a errada é pior que não mostrar nada:
+///
+/// - `chegada_ms` é o **jitter de chegada** da RFC 3550 — a variação do
+///   intervalo entre pacotes, medida neste receptor por
+///   `seele_audio::jitter`, que alisa por `J += (|D(i-1,i)| - J) / 16`. É ruído
+///   da rede, e é o que a pessoa quer saber: quanto menor, melhor;
+/// - `profundidade_do_anel_ms` é a **profundidade do anel de reprodução** — a
+///   nossa própria reserva contra esse ruído, que o ADR 0028 acabou de dotar de
+///   alvo. Quanto maior, mais folga o anel teve. Mostrá-la como "jitter" exibiria
+///   a reserva como se fosse o problema, e uma conexão saudável apareceria na
+///   tela como ruim.
+///
+/// A resposta é sempre a primeira, e a segunda é ignorada de propósito. Um
+/// parâmetro ignorado parece bobo e não é: ele existe para o segundo número ter
+/// de ser **escrito** por quem chama, e para quem trocar os dois de lugar
+/// reprovar aqui, num teste desta casa, em vez de na tela de outra pessoa.
+///
+/// O que a tela lia antes deste conserto não era nenhum dos dois: era o jitter
+/// do relatório do Dogma, que é `0.0` fixo porque o servidor não tem como medir
+/// uma grandeza que só existe no receptor.
+fn jitter_para_a_tela(chegada_ms: f32, profundidade_do_anel_ms: f32) -> f32 {
+    let _ = profundidade_do_anel_ms;
+    chegada_ms
+}
+
+/// As duas grandezas chamadas "jitter" que uma volta de telemetria produz, já
+/// separadas e com destino escrito no nome.
+///
+/// Existe como estrutura, e não como uma tupla de dois `f32`, porque uma tupla
+/// de dois `f32` na mesma unidade é exatamente a forma que deixa trocar os dois
+/// sem nada notar — que é o defeito 3.3 outra vez, com outra roupa.
+struct JitterDaVolta {
+    /// Vai para o Sync Ratio: quanta reserva o anel de reprodução teve.
+    profundidade_do_anel_ms: f32,
+    /// Vai para a tela: o jitter de chegada da RFC 3550, medido neste receptor.
+    ///
+    /// Vazio quando não há fonte nenhuma sendo recebida. `None` e não zero de
+    /// propósito: o pior de uma lista vazia seria zero, e zero é o valor que
+    /// este conserto existe para tirar da tela.
+    chegada_ms: Option<f32>,
+}
+
+/// Separa as duas, a partir do que a camada de áudio mediu.
+///
+/// Apartada de [`measure`] para poder ser afirmada por um teste: `measure`
+/// precisa de um [`Enlace`] vivo e de um dispositivo de áudio aberto, e sem esta
+/// separação a única coisa que sobrava para testar era a função pura dos dois
+/// lados da fiação — que passava verde com a fiação desfeita.
+fn jitter_da_volta(telemetria: &seele_core::AudioTelemetry) -> JitterDaVolta {
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "milissegundos; f32 é o que a ponte para a casca carrega"
+    )]
+    let volta = JitterDaVolta {
+        profundidade_do_anel_ms: telemetria.worst_jitter_depth_ms() as f32,
+        // O pior entre as fontes, como já vale para a perda e para a
+        // profundidade: um único interlocutor ruim tem de ficar visível sem a
+        // casca ter de varrer a lista.
+        chegada_ms: telemetria
+            .sources
+            .iter()
+            .map(|fonte| fonte.jitter_ms)
+            .reduce(f64::max)
+            .map(|chegada| chegada as f32),
+    };
+    volta
+}
+
 /// Refreshes what the shell reads without asking the server.
 ///
 /// Returns whether anything moved enough to be worth telling a shell about.
 fn measure(sync: &mut SyncRatio, client: &Enlace, shared: &Arc<Shared>) -> bool {
     let mut jitter_ms = 0.0;
     let mut loss = 0.0;
+    let mut chegada_ms = None;
     if let Ok(voice) = shared.voice.lock() {
         if let Some(voice) = voice.as_ref() {
             let telemetry = voice.telemetry();
@@ -1814,13 +1936,23 @@ fn measure(sync: &mut SyncRatio, client: &Enlace, shared: &Arc<Shared>) -> bool 
             // the server's own numbers are not the ones used here.
             #[allow(
                 clippy::cast_possible_truncation,
-                reason = "milliseconds and a fraction; f32 is what the protocol carries"
+                reason = "a fraction; f32 is what the protocol carries"
             )]
             {
-                jitter_ms = telemetry.worst_jitter_depth_ms() as f32;
                 loss = telemetry.worst_loss_fraction() as f32;
             }
+            // Duas grandezas, dois destinos. A profundidade do anel continua
+            // indo para o Sync Ratio, que é o que ela mede: quanta reserva o
+            // anel teve. O de chegada vai para a tela, que é o que a pessoa quer
+            // saber.
+            let volta = jitter_da_volta(&telemetry);
+            jitter_ms = volta.profundidade_do_anel_ms;
+            chegada_ms = volta.chegada_ms;
         }
+    }
+
+    if let Some(chegada) = chegada_ms {
+        shared.gravar_jitter_de_chegada(jitter_para_a_tela(chegada, jitter_ms));
     }
 
     let rtt = client.rtt().unwrap_or_default();
@@ -2441,10 +2573,192 @@ mod tests {
             nickname: Mutex::new("ayanami".into()),
             pattern: AtomicU8::new(0),
             rtt_micros: std::sync::atomic::AtomicU64::new(0),
+            jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
             sync_ratio: AtomicU8::new(0),
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
         })
+    }
+
+    #[test]
+    fn o_jitter_da_tela_nao_e_a_profundidade_do_anel() {
+        // Duas grandezas com o mesmo nome, e mostrar a errada é pior que não
+        // mostrar nada:
+        //
+        // - `worst_jitter_depth_ms` é **profundidade do anel de reprodução**, e o
+        //   ADR 0028 acabou de dar um alvo a ele. Mostrá-lo como "jitter" exibiria a
+        //   nossa própria reserva como ruído da rede — e uma reserva saudável
+        //   apareceria na tela como problema;
+        // - `SourceTelemetry::jitter_ms` é o de **chegada** (RFC 3550), medido aqui,
+        //   e é o que a pessoa quer saber.
+        //
+        // E o que a tela lia antes deste conserto era um terceiro valor: o do
+        // relatório do Dogma, que é sempre `0.0` porque o servidor não tem como
+        // saber — `session.rs` diz isso em comentário desde sempre.
+        // Uma reserva de anel saudável (42 ms) ao lado de um jitter de rede baixo
+        // (7,5 ms): mostrar a primeira faria uma conexão boa parecer ruim.
+        assert!(
+            (jitter_para_a_tela(7.5, 42.0) - 7.5).abs() < 0.01,
+            "a tela mostra o jitter de chegada, não a profundidade do anel"
+        );
+        // E nunca o zero que o Dogma manda de propósito, que era o que a tela lia.
+        assert!(jitter_para_a_tela(7.5, 42.0) > 0.0);
+    }
+
+    #[test]
+    fn o_jitter_que_o_laco_de_voz_grava_e_o_que_a_casca_le() {
+        // A travessia inteira do número, sem o laço de voz: se o campo do
+        // `Shared` perdesse a escrita ou a leitura, a tela voltaria a mostrar um
+        // zero — que é exatamente o defeito de antes, com outra causa.
+        let compartilhado = bare_shared();
+        assert_eq!(
+            compartilhado.jitter_de_chegada_ms(),
+            0.0,
+            "sem medida nenhuma ainda não há jitter para mostrar"
+        );
+
+        compartilhado.gravar_jitter_de_chegada(jitter_para_a_tela(7.5, 42.0));
+
+        assert!(
+            (compartilhado.jitter_de_chegada_ms() - 7.5).abs() < 0.01,
+            "a casca leu {}, e o laço de voz gravou 7,5",
+            compartilhado.jitter_de_chegada_ms()
+        );
+    }
+
+    #[test]
+    fn a_profundidade_do_anel_vai_para_o_sync_ratio_e_a_chegada_para_a_tela() {
+        // A outra metade da fiação. `measure` em si precisa de um `Enlace` vivo
+        // e de um dispositivo de áudio aberto, então o que se afirma é a
+        // separação que ele faz, apartada nele para isto: qual das duas
+        // grandezas sai por qual porta.
+        //
+        // Os números são escolhidos para não poderem ser confundidos, e são os
+        // mesmos do teste da função pura: 42 ms de reserva de anel — saudável,
+        // que é o alvo que o ADR 0028 deu a ele — ao lado de 7,5 ms de jitter de
+        // rede. Trocar os dois de lugar em `measure` mostraria 42 na tela e uma
+        // conexão boa pareceria ruim.
+        let telemetria = seele_core::AudioTelemetry {
+            local: seele_core::LocalTelemetry::default(),
+            sources: vec![seele_core::SourceTelemetry {
+                ssrc: 700,
+                jitter_depth_ms: 42.0,
+                jitter_ms: 7.5,
+                ..Default::default()
+            }],
+        };
+
+        let volta = jitter_da_volta(&telemetria);
+
+        assert!(
+            (volta.profundidade_do_anel_ms - 42.0).abs() < 0.01,
+            "o Sync Ratio recebeu {}, e a reserva do anel era 42 ms",
+            volta.profundidade_do_anel_ms
+        );
+        let Some(chegada) = volta.chegada_ms else {
+            panic!("havia uma fonte sendo recebida e nenhum jitter de chegada saiu");
+        };
+        assert!(
+            (chegada - 7.5).abs() < 0.01,
+            "a tela recebeu {chegada}, e o jitter de chegada era 7,5 ms"
+        );
+    }
+
+    #[test]
+    fn sem_fonte_nenhuma_a_tela_nao_recebe_um_zero_inventado() {
+        // O pior de uma lista vazia seria zero, e zero é justamente o valor que
+        // esta tarefa existe para tirar da tela. Sem ninguém falando não há
+        // jitter de chegada nenhum a mostrar, e o último medido continua valendo
+        // até haver outro.
+        let telemetria = seele_core::AudioTelemetry {
+            local: seele_core::LocalTelemetry::default(),
+            sources: Vec::new(),
+        };
+
+        assert!(
+            jitter_da_volta(&telemetria).chegada_ms.is_none(),
+            "sem fonte nenhuma saiu um jitter de chegada, e ele só pode ser zero"
+        );
+    }
+
+    #[test]
+    fn o_snapshot_le_o_jitter_que_o_laco_de_voz_gravou_e_nao_o_do_dogma() {
+        // As duas linhas que consertam o defeito são de fiação, e fiação não se
+        // afirma testando a função pura dos dois lados dela: `jitter_para_a_tela`
+        // podia estar perfeita enquanto o `snapshot` continuava lendo o relatório
+        // do Dogma, e a suíte continuaria verde. Isto aqui é o teste que fica
+        // vermelho quando alguém desfaz o conserto.
+        //
+        // Os dois números são plantados de propósito para não poderem ser
+        // confundidos: 12,75 ms é o de chegada, medido neste receptor, e é o que
+        // a tela tem de mostrar; 99,0 ms é o que o relatório do Dogma diz, e é o
+        // caminho errado. Na vida real esse campo é `0.0` fixo — o servidor não
+        // tem como medir jitter, que só existe no receptor —, mas plantar um 99
+        // aqui faz o teste distinguir "leu o certo" de "leu um zero que calhou de
+        // bater", que um `0.0` de verdade não distinguiria.
+        let compartilhado = bare_shared();
+        if let Ok(mut room) = compartilhado.room.lock() {
+            room.telemetry = Some(seele_core::Telemetry {
+                rtt_ms: 20.0,
+                jitter_ms: 99.0,
+                loss_fraction: 0.0,
+                subsystems: Vec::new(),
+            });
+        }
+        compartilhado.gravar_jitter_de_chegada(jitter_para_a_tela(12.75, 42.0));
+
+        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
+        let plug = Plug {
+            commands,
+            shared: Arc::clone(&compartilhado),
+        };
+        let mostrado = plug.snapshot().telemetry.jitter_ms;
+
+        assert!(
+            (mostrado - 12.75).abs() < 0.01,
+            "a tela mostrou {mostrado}, e o laço de voz mediu 12,75 ms de chegada"
+        );
+        assert!(
+            (mostrado - 99.0).abs() > 0.01,
+            "a tela voltou a ler o jitter do relatório do Dogma, que é o defeito 3.3"
+        );
+    }
+
+    #[test]
+    fn um_jitter_de_fracao_de_milissegundo_nao_e_arredondado_para_zero() {
+        // O campo guarda microssegundos inteiros justamente para isto: num
+        // enlace local o jitter fica abaixo de um milissegundo, e guardá-lo em
+        // milissegundos inteiros faria a tela dizer zero num caminho excelente —
+        // indistinguível do zero que o Dogma manda.
+        let compartilhado = bare_shared();
+        compartilhado.gravar_jitter_de_chegada(0.25);
+
+        assert!(
+            (compartilhado.jitter_de_chegada_ms() - 0.25).abs() < 0.001,
+            "0,25 ms virou {}",
+            compartilhado.jitter_de_chegada_ms()
+        );
+    }
+
+    #[test]
+    fn um_jitter_impossivel_nao_atravessa_a_ponte() {
+        // `NaN` e negativo não têm como sair da RFC 3550, mas atravessariam a
+        // ponte para uma casca que os desenha — e um `NaN` numa tela vira texto
+        // que ninguém sabe ler. Zero é a resposta honesta para "não há medida".
+        //
+        // Quem garante isto é o `as u64` de `gravar_jitter_de_chegada`, que em
+        // Rust satura, e não uma guarda escrita à mão — havia um `max(0.0)` ali
+        // e ele foi tirado justamente porque nunca disparava. Este teste então
+        // não vigia código nosso: ele **fixa a linguagem**, e reprovaria se
+        // alguém trocasse aquele cast por uma conversão que embrulha ou por um
+        // `unsafe` de arredondamento sem verificação.
+        let compartilhado = bare_shared();
+
+        compartilhado.gravar_jitter_de_chegada(f32::NAN);
+        assert_eq!(compartilhado.jitter_de_chegada_ms(), 0.0);
+
+        compartilhado.gravar_jitter_de_chegada(-3.0);
+        assert_eq!(compartilhado.jitter_de_chegada_ms(), 0.0);
     }
 
     #[test]
@@ -3000,6 +3314,7 @@ mod tests {
             nickname: Mutex::new("ayanami".into()),
             pattern: AtomicU8::new(0),
             rtt_micros: std::sync::atomic::AtomicU64::new(0),
+            jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
             sync_ratio: AtomicU8::new(0),
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
