@@ -3818,15 +3818,25 @@ fn every_rung_of_the_reachability_ladder_has_a_sentence() {
         "the LAN-only sentence never says the link is limited to the local \
          network:\n{frase}"
     );
+    // The «way out» half was cut on 2026-08-20, by the product owner, across the
+    // whole ladder. It used to be asserted here: the sentence had to name the
+    // router or the VPN. The argument for it stands — a rung that only names
+    // itself leaves the host as stuck as no message at all — and the trade was
+    // made with that on the table: three paragraphs under a link is a warning
+    // nobody reads, and `docs/alcance-pela-internet.md` already exists as the
+    // long version precisely so the screen can be short.
+    //
+    // What is NOT allowed to come back is a pointer to that page on screen.
     assert!(
-        frase.to_lowercase().contains("roteador") || frase.to_lowercase().contains("vpn"),
-        "the LAN-only sentence names the problem and no way out — ADR 0022 asks \
-         for the way out to be written down:\n{frase}"
+        !frase.contains("docs/") && !frase.contains(".md"),
+        "the sentence sends the person to a documentation file, and a product \
+         that answers «read the docs» on the screen where the link appears has \
+         not answered:\n{frase}"
     );
 }
 
 #[test]
-fn the_vpn_rung_names_the_vpn_and_says_what_to_do_about_it() {
+fn the_vpn_rung_names_the_vpn_that_is_why_the_link_stops_here() {
     // The rung that exists because of a field failure: a Windows host with
     // Cloudflare WARP had a global IPv6 — the tunnel's — and the ladder read it
     // as "reachable from anywhere", printed under a link that accepts no
@@ -3854,10 +3864,10 @@ fn the_vpn_rung_names_the_vpn_and_says_what_to_do_about_it() {
         frase.to_lowercase().contains("vpn"),
         "the sentence never says a VPN is why the link reaches no further, which          is the only thing this rung knows that `SoRedeLocal` does not:\n{frase}"
     );
-    assert!(
-        frase.to_lowercase().contains("desligue") || frase.to_lowercase().contains("desligar"),
-        "the sentence names the cause and withholds the fix — ADR 0022 asks for          the way out to be written down:\n{frase}"
-    );
+    // The fix half («desligue a VPN») was cut on 2026-08-20 with the rest of the
+    // ladder's second lines. What this rung knows that `SoRedeLocal` does not —
+    // that a VPN is why the link reaches no further — is asserted above and is
+    // the reason the rung exists at all.
     assert!(
         !frase.to_lowercase().contains("alcança de qualquer lugar"),
         "the VPN rung repeats the promise that was the bug:\n{frase}"
@@ -4309,7 +4319,7 @@ fn a_room_that_stopped_existing_has_a_sentence_and_not_a_shrug() {
 }
 
 #[test]
-fn the_nat_punching_rung_promises_nothing_it_cannot_keep_and_names_its_cost() {
+fn the_nat_punching_rung_names_its_cost_where_the_cost_is_paid() {
     // Degrau 4 do ADR 0022, added the day the rung was built. Two things are
     // being asserted, and both are product decisions rather than wording.
     //
@@ -4330,15 +4340,19 @@ fn the_nat_punching_rung_promises_nothing_it_cannot_keep_and_names_its_cost() {
     let frase: String = depois.chars().take(800).collect();
     let baixa = frase.to_lowercase();
 
+    // Two of the three assertions were cut on 2026-08-20, by the product owner,
+    // when the ladder lost its second lines: «deve funcionar» (do not promise)
+    // and «roteador» (name the way out). The third is not wording and did not
+    // go — see below.
+    //
+    // What replaced them is narrower and still load-bearing: the sentence must
+    // not send the person to a documentation file. It used to carry
+    // `(docs/ponto-de-encontro.md)`, and that pointer went out with the rest.
     assert!(
-        baixa.contains("deve funcionar"),
-        "the NAT-punching sentence promises the link works, and nothing here can \
-         promise that — two symmetric NATs do not punch:\n{frase}"
-    );
-    assert!(
-        baixa.contains("roteador"),
-        "the sentence names no way out for the case where the punch fails, which \
-         leaves the host as stuck as no message at all:\n{frase}"
+        !frase.contains("docs/") && !frase.contains(".md"),
+        "the sentence sends the person to a documentation file to learn what the \
+         meeting point knows about them, which is the disclosure being made \
+         somewhere other than where the cost is paid:\n{frase}"
     );
     assert!(
         baixa.contains("ponto de encontro") && baixa.contains("nunca o que foi dito"),
@@ -4347,12 +4361,21 @@ fn the_nat_punching_rung_promises_nothing_it_cannot_keep_and_names_its_cost() {
          later:\n{frase}"
     );
 
-    // And the person has to be told they can point somewhere else, or «opcional
-    // e trocável» is a sentence in a document nobody can act on.
+    // «Opcional e trocável» is one of the four mitigations ADR 0022 accepted
+    // this rung on, and a mitigation the person cannot see is a sentence in a
+    // document rather than a property of the product. This used to be asserted
+    // as `frase.contains("docs/ponto-de-encontro.md")` — the pointer WAS the
+    // expression. The pointer went out on 2026-08-20 with every other
+    // documentation reference on screen, and four words took its place.
+    //
+    // So the assertion moved rather than went: it no longer cares where the
+    // person reads the detail, and it still cares that the screen says the
+    // choice exists.
     assert!(
-        frase.contains("docs/ponto-de-encontro.md"),
-        "the sentence never says the meeting point can be changed or switched \
-         off:\n{frase}"
+        baixa.contains("apontar para outro"),
+        "the sentence never says the meeting point can be swapped, and «opcional \
+         e trocável» stops being something the person paying the metadata can \
+         act on:\n{frase}"
     );
 }
 
@@ -6401,7 +6424,7 @@ fn saving_never_writes_to_a_path_this_window_cannot_name() {
 /// sentences average 60 characters and the median is 44; the longest is 173 —
 /// `FRASES.FuroDeNat`, the one rung of the ladder with a third party in it,
 /// held at that length by
-/// `the_nat_punching_rung_promises_nothing_it_cannot_keep_and_names_its_cost`,
+/// `the_nat_punching_rung_names_its_cost_where_the_cost_is_paid`,
 /// which requires it to name the meeting point, what it learns, what it does
 /// not, the way out, and where to switch it. 180 is that sentence plus the
 /// slack of rewording one clause.

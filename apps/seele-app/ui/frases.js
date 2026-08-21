@@ -39,7 +39,7 @@ const MOTIVOS = {
   // quer saber se perdeu alguma coisa. Perdeu, e voltar é o que a traz de volta
   // — «repõe o que faltou» diz as duas coisas numa frase só.
   FellBehind:
-    "ESTE ENLACE FICOU PARA TRÁS DO DOGMA.\nEntrar de novo busca o histórico e repõe o que faltou.",
+    "ESTE ENLACE FICOU PARA TRÁS DO DOGMA.",
 
   // ---- a portaria do ADR 0030 ----
   //
@@ -248,7 +248,7 @@ const FRASES = {
     // não `EnderecoInvalido` porque o que falta é outra coisa, e porque o resto
     // do link continua bom — o que se perde é o furo de NAT, não o Dogma.
     BilheteInvalido:
-      "ESTE CONVITE VEIO CORTADO NA PARTE QUE FURA O NAT.\nTente de novo com o link inteiro, ou peça outro a quem hospeda.",
+      "ESTE CONVITE VEIO CORTADO NA PARTE QUE FURA O NAT.",
     ImpressaoDigitalInvalida: "ESTE CONVITE CHEGOU CORTADO OU ADULTERADO",
     TokenInvalido: "O CONVITE DENTRO DESTE LINK NÃO É UM CONVITE",
     CageInvalido: "O CAGE DESTE CONVITE NÃO É UM NÚMERO",
@@ -266,7 +266,7 @@ const FRASES = {
     // tem porta nenhuma para mexer. A frase diz isso em vez de deixar a pessoa
     // procurando o que fez de errado.
     NaoEstaHospedando:
-      "ESTA JANELA NÃO ESTÁ HOSPEDANDO NENHUM DOGMA.\nNo Dogma de outra pessoa, quem decide quem entra é quem o hospeda.",
+      "ESTA JANELA NÃO ESTÁ HOSPEDANDO NENHUM DOGMA.",
     BancoNaoRespondeu: "O DOGMA DESTA MÁQUINA NÃO RESPONDEU",
 
     // Até onde o convite chega — a escada do ADR 0022. Vai junto do link, e não
@@ -291,34 +291,40 @@ const FRASES = {
     // FUNCIONA NA SUA REDE», que manda encaminhar a porta num roteador que não
     // existe, embaixo de um link que alcança o mundo inteiro.
     EnderecoDireto:
-      "ESTA MÁQUINA TEM ENDEREÇO PRÓPRIO.\nEste link deve funcionar pela internet, sem depender de ninguém.",
+      "ESTA MÁQUINA TEM ENDEREÇO PRÓPRIO.",
     PortaNoRoteador:
-      "O ROTEADOR ABRIU A PORTA.\nEste link deve funcionar pela internet e na sua rede.",
+      "O ROTEADOR ABRIU A PORTA.",
     // Degrau 4, o que faz «manda o link e funciona» valer numa casa com CGNAT
     // ou com o UPnP desligado. «Deve funcionar» como as outras: com NAT
     // simétrico dos dois lados o furo não abre, e o ADR 0022 deixou
     // retransmissão fora de escopo por decisão.
     //
-    // A **única** da escada com um terceiro no meio, e a única que ainda gasta
-    // duas linhas cheias. Um produto que se vende como «sem serviço no meio»
-    // ganhou um serviço no meio, opcional, e o que ele aprende é dito aqui — na
-    // tela em que o link aparece — porque a alternativa é a pessoa descobrir
-    // depois. O guarda `the_nat_punching_rung_promises_nothing_it_cannot_keep`
-    // cobra as duas metades, e ele tem razão: isto não encolhe mais.
+    // A **única** da escada com um terceiro no meio. Um produto que se vende como
+    // «sem serviço no meio» ganhou um serviço no meio, opcional, e o que ele
+    // aprende é dito aqui — na tela em que o link aparece — porque a alternativa
+    // é a pessoa descobrir depois.
+    //
+    // Este comentário dizia «a única que ainda gasta duas linhas cheias» e que
+    // «isto não encolhe mais». Encolheu, em 2026-08-20, junto com as segundas
+    // linhas do resto da escada. O que **não** encolheu é a divulgação: o guarda
+    // `the_nat_punching_rung_names_its_cost_where_the_cost_is_paid` continua
+    // cobrando que a frase diga o que o ponto de encontro aprende, e passou a
+    // cobrar que ela não mande ninguém ler documentação para saber disso.
     FuroDeNat:
-      "UM PONTO DE ENCONTRO ABRIU O CAMINHO: SABE QUEM FALOU, NUNCA O QUE FOI DITO (docs/ponto-de-encontro.md).\n" +
-      "Deve funcionar pela internet; se não, abra a porta 8383 no roteador.",
+      "UM PONTO DE ENCONTRO ABRIU O CAMINHO: SABE QUEM FALOU, NUNCA O QUE FOI DITO. VOCÊ PODE APONTAR PARA OUTRO.",
     Ipv6Direto:
-      "ESTE LINK LEVA UM ENDEREÇO IPv6.\nSó alcança quem também tiver IPv6, e se o seu roteador deixar entrar.",
+      "ESTE LINK LEVA UM ENDEREÇO IPv6.",
     // O degrau que nasceu de um defeito de campo: um Windows com Cloudflare
     // WARP tinha IPv6 global — do túnel —, e a escada declarava «alcança de
     // qualquer lugar» embaixo de um link que não aceita entrada nenhuma. Frase
-    // própria porque o que se faz a respeito é diferente das outras três: aqui
-    // a saída é desligar a VPN, e não mexer no roteador.
+    // própria porque a causa é diferente das outras três — é a VPN, e não o
+    // roteador —, e é a única coisa que este degrau sabe e o `SoRedeLocal` não.
+    // A frase dizia também o que fazer («desligue a VPN»); essa metade saiu em
+    // 2026-08-20, com as segundas linhas de toda a escada.
     RedeLocalOuVpn:
-      "ESTE LINK SÓ ALCANÇA A SUA REDE, OU QUEM ESTIVER NA MESMA VPN.\nPara alcançar de fora, desligue a VPN e encaminhe a porta 8383 no roteador.",
+      "ESTE LINK SÓ ALCANÇA A SUA REDE, OU QUEM ESTIVER NA MESMA VPN.",
     SoRedeLocal:
-      "ESTE LINK SÓ FUNCIONA NA SUA REDE.\nPara alcançar de fora, encaminhe a porta 8383 no roteador à mão.",
+      "ESTE LINK SÓ FUNCIONA NA SUA REDE.",
 
     // Escolher microfone, no Terminal Dogma. Duas frases e não uma porque pedem
     // coisas diferentes de quem lê: a primeira não tem conserto na tela, e a
@@ -326,7 +332,7 @@ const FRASES = {
     // clicar nela pode ser trocado por outro sem sair daqui.
     NaoGravei: "NÃO CONSEGUI GRAVAR ESSE AJUSTE NESTA MÁQUINA",
     DispositivoSumiu:
-      "ESSE MICROFONE NÃO ESTÁ MAIS AQUI.\nA escolha ficou gravada; escolha outro para agora.",
+      "ESSE MICROFONE NÃO ESTÁ MAIS AQUI.",
 
     // ---- atualizar (ADR 0026) ----
     //
@@ -397,7 +403,7 @@ const ANEXOS = {
   RateLimited:
     "VOCÊ ESTÁ MANDANDO ARQUIVO MAIS RÁPIDO DO QUE ESTE DOGMA ACEITA.\n" +
     "Espere um pouco e mande de novo.",
-  Unavailable: "ESTE DOGMA NÃO GUARDA ARQUIVO.\nSó texto e voz por aqui.",
+  Unavailable: "ESTE DOGMA NÃO GUARDA ARQUIVO.",
   NotFound: "ESTE ARQUIVO NÃO EXISTE NESTE DOGMA, OU ESTÁ NUMA LINHA QUE VOCÊ NÃO PODE LER.",
   Expired:
     "ESTE ARQUIVO EXPIROU, E O DOGMA APAGOU OS BYTES PARA ABRIR ESPAÇO.\n" +
@@ -445,7 +451,7 @@ const PREVIAS = {
   NotAPicture:
     "ESTE ARQUIVO NÃO É UMA DAS IMAGENS QUE ESTA JANELA DESENHA.\n" +
     "Ele continua aqui, com nome e tamanho, para salvar.",
-  DidNotArrive: "A PRÉVIA NÃO VEIO.\nTente de novo daqui a pouco.",
+  DidNotArrive: "A PRÉVIA NÃO VEIO.",
 };
 
 /**
