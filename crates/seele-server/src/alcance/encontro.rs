@@ -373,21 +373,43 @@ pub async fn abrir(convocacao: &Convocacao) -> Result<Encontro, FalhaNoEncontro>
         return Err(FalhaNoEncontro::SemSocketDoDogma);
     };
 
-    let ponto = resolver(&convocacao.ponto, ate).await?;
-    let avisos = escuta_de_avisos(ponto)
-        .await
-        .map_err(|erro| FalhaNoEncontro::SemEscutaDeAvisos(erro.to_string()))?;
-
-    // Primeira pergunta: o endereço público da escuta de avisos. Vai no
-    // bilhete, e é para lá que quem tem o link manda o `LEVE` dele.
+    let candidatos = resolver(&convocacao.ponto, ate).await?;
     let minha_marca = Marca::nova("anfitriao").ok_or(FalhaNoEncontro::SemSocketDoDogma)?;
-    let aviso = tokio::time::timeout_at(
-        ate,
-        perguntar(&avisos, ponto, &encontro::onde(&minha_marca), &minha_marca),
-    )
-    .await
-    .map_err(|_| FalhaNoEncontro::SemResposta)?
-    .ok_or(FalhaNoEncontro::SemResposta)?;
+
+    // Um de cada vez, até um responder. Um nome com A e AAAA vira dois
+    // candidatos, e qual deles serve é propriedade **desta máquina** — que o DNS
+    // não conhece. A escuta de avisos nasce da família do candidato, então cada
+    // tentativa tem a sua: um socket IPv4 não manda para destino IPv6, e o
+    // contrário só com pilha dupla.
+    //
+    // Quem falhar sai barato: `perguntar` devolve na hora quando o envio não
+    // sai, em vez de esperar resposta de um pacote que nunca partiu.
+    let mut ponto = None;
+    let mut aviso = None;
+    for alvo in candidatos {
+        let Ok(escuta) = escuta_de_avisos(alvo).await else {
+            continue;
+        };
+        let resposta = tokio::time::timeout_at(
+            ate,
+            perguntar(&escuta, alvo, &encontro::onde(&minha_marca), &minha_marca),
+        )
+        .await;
+        match resposta {
+            Ok(Some(publico)) => {
+                ponto = Some((alvo, escuta));
+                aviso = Some(publico);
+                break;
+            }
+            // Este endereço não serve. O prazo é de todos juntos, então seguir
+            // para o próximo só vale enquanto sobrar tempo.
+            Ok(None) => continue,
+            Err(_) => break,
+        }
+    }
+    let (Some((ponto, avisos)), Some(aviso)) = (ponto, aviso) else {
+        return Err(FalhaNoEncontro::SemResposta);
+    };
 
     // Segunda pergunta, e a que só o socket do Dogma pode fazer: qual é o
     // endereço público **dele**. A resposta vem pela escuta de avisos, porque
@@ -420,7 +442,10 @@ pub async fn abrir(convocacao: &Convocacao) -> Result<Encontro, FalhaNoEncontro>
 }
 
 /// Onde o ponto de encontro atende, resolvendo o nome se for um nome.
-async fn resolver(texto: &str, ate: tokio::time::Instant) -> Result<SocketAddr, FalhaNoEncontro> {
+async fn resolver(
+    texto: &str,
+    ate: tokio::time::Instant,
+) -> Result<Vec<SocketAddr>, FalhaNoEncontro> {
     // O mesmo `Bilhete` que lê o endereço do link lê o do ambiente: a porta
     // padrão de um ponto de encontro não é a de um Dogma, e essa regra mora em
     // um lugar só.
@@ -439,9 +464,15 @@ async fn resolver(texto: &str, ate: tokio::time::Instant) -> Result<SocketAddr, 
     let procura = tokio::time::timeout_at(ate, tokio::net::lookup_host((maquina, porta)))
         .await
         .map_err(|_| FalhaNoEncontro::NaoResolve(texto.to_owned()))?;
-    let achado = procura.ok().and_then(|mut achados| achados.next());
-    if let Some(alvo) = achado {
-        return Ok(alvo);
+
+    // **Todos**, e não o primeiro. `encontro.seele.app.br` tem A e AAAA, e a
+    // ordem em que o DNS os devolve não sabe nada sobre esta máquina: numa sem
+    // rota IPv6, o AAAA primeiro fazia a escuta de avisos nascer IPv6 e o degrau
+    // inteiro morrer por prazo, com o IPv4 que funcionava intocado. Foi o que o
+    // primeiro teste de campo real encontrou.
+    let achados: Vec<SocketAddr> = procura.map(Iterator::collect).unwrap_or_default();
+    if !achados.is_empty() {
+        return Ok(achados);
     }
 
     // O nome não resolveu. Se ele é o **nosso**, há uma rede embaixo; se é o de
@@ -449,7 +480,7 @@ async fn resolver(texto: &str, ate: tokio::time::Instant) -> Result<SocketAddr, 
     if texto == PONTO_PADRAO {
         if let Some(alvo) = rede_do_padrao() {
             tracing::info!(%texto, %alvo, "o nome não resolveu; usando o endereço de reserva");
-            return Ok(alvo);
+            return Ok(vec![alvo]);
         }
     }
     Err(FalhaNoEncontro::NaoResolve(texto.to_owned()))
@@ -498,7 +529,20 @@ async fn perguntar(
     esperada: &Marca,
 ) -> Option<SocketAddr> {
     loop {
-        let _ = avisos.send_to(pedido, ponto).await;
+        // O envio que **falha** não é o datagrama que se perde, e tratá-los
+        // igual custou o degrau 4 inteiro numa máquina de verdade: num destino
+        // que este socket não alcança — outra família, sem rota —, o `send_to`
+        // devolve erro na hora e a espera de [`REPETICAO`] fica aguardando
+        // resposta de um pacote que nunca saiu. Três voltas dessas comem o
+        // [`PRAZO`], e o endereço que funcionava nunca chega a ser tentado.
+        //
+        // É o mesmo defeito que `seele_core::encontro::Batida::avisar` deixou de
+        // ter neste ciclo, no arquivo ao lado: um erro engolido vira espera, e a
+        // espera vira uma frase dizendo que o ponto de encontro não respondeu.
+        if let Err(erro) = avisos.send_to(pedido, ponto).await {
+            tracing::debug!(%erro, %ponto, "o pedido não saiu; este endereço não serve");
+            return None;
+        }
         if let Ok(Some(endereco)) =
             tokio::time::timeout(REPETICAO, esperar_aqui(avisos, |marca| marca == esperada)).await
         {
@@ -660,6 +704,68 @@ async fn furar(dogma: &std::net::UdpSocket, destino: SocketAddr, marca: &Marca) 
 
 #[cfg(test)]
 mod testes {
+    use seele_proto::encontro::PORTA_PADRAO;
+    use std::net::Ipv6Addr;
+
+    // --------------------------------------------- a família que não alcança
+
+    #[tokio::test]
+    async fn um_endereco_de_familia_inalcancavel_nao_come_o_prazo() {
+        // O defeito que o primeiro teste de campo real encontrou, e ele não
+        // estava na coordenação do furo: estava antes dela.
+        //
+        // `encontro.seele.app.br` tem A **e** AAAA. Numa máquina sem rota IPv6 —
+        // um Windows atrás de dois roteadores, que foi a máquina do relato —, se
+        // o DNS devolver o AAAA primeiro, a escuta de avisos nasce IPv6, o
+        // `send_to` falha com «rede inalcançável», e `perguntar` esperava 300 ms
+        // por uma resposta que não vinha. Três voltas dessas comem o prazo de um
+        // segundo inteiro, e o IPv4 — que funciona — nunca chega a ser tentado.
+        //
+        // Aqui a rede inalcançável é encenada sem depender da máquina: um socket
+        // IPv4 mandando para um destino IPv6 falha na hora, em qualquer sistema,
+        // porque as famílias não se falam.
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0")
+            .await
+            .unwrap_or_else(|erro| panic!("um socket local tem de abrir: {erro}"));
+        let destino_de_outra_familia = SocketAddr::from((
+            "2001:db8::1"
+                .parse::<Ipv6Addr>()
+                .unwrap_or(Ipv6Addr::UNSPECIFIED),
+            PORTA_PADRAO,
+        ));
+        let marca =
+            Marca::nova("anfitriao").unwrap_or_else(|| panic!("«anfitriao» é uma marca válida"));
+
+        let comeco = tokio::time::Instant::now();
+        let resposta = tokio::time::timeout(
+            PRAZO,
+            perguntar(
+                &socket,
+                destino_de_outra_familia,
+                &encontro::onde(&marca),
+                &marca,
+            ),
+        )
+        .await;
+        let gasto = comeco.elapsed();
+
+        // Devolveu, e não estourou o prazo: é a diferença entre «este endereço
+        // não serve, tente o próximo» e «o ponto de encontro não respondeu a
+        // tempo», que era a frase errada que a máquina de campo lia.
+        assert!(
+            matches!(resposta, Ok(None)),
+            "um destino de outra família tem de voltar na hora dizendo que não \
+             serve, e não consumir o prazo até estourar: {resposta:?}"
+        );
+        assert!(
+            gasto < REPETICAO,
+            "um destino que o socket não alcança comeu {gasto:?} do prazo — \
+             `perguntar` está engolindo o erro do `send_to` e esperando resposta \
+             de um envio que nunca saiu. Com duas famílias no DNS, isso gasta o \
+             degrau 4 inteiro numa que a máquina não usa."
+        );
+    }
+
     #[test]
     fn a_rede_do_padrao_existe_e_serve_esta_maquina() {
         // Se as duas linhas não forem endereços válidos, o recuo é decoração —
