@@ -1625,3 +1625,29 @@ fn sem_tag_anterior_a_faixa_e_vazia_e_isso_nao_e_erro() {
     assert_eq!(anterior("", "0.1.0"), "");
     assert_eq!(anterior("0.2.0\n", "0.1.0"), "", "tag sem «v» não conta");
 }
+
+#[test]
+fn o_windows_instala_para_a_maquina_e_nao_para_o_usuario() {
+    // `currentUser` põe o SEELE em `%LOCALAPPDATA%`, e isso custou caro num
+    // teste de campo: ninguém achava o app nem o `plug`, porque as duas coisas
+    // que uma pessoa procura primeiro são `Program Files` e o `PATH`, e a
+    // instalação por usuário não está em nenhum dos dois.
+    //
+    // E cobra um segundo preço, que só apareceu depois: sem elevação o
+    // instalador não pode criar a regra de firewall de entrada, e no Windows
+    // sem essa regra ninguém alcança quem hospeda. `perMachine` pede o UAC uma
+    // vez, na instalação, e resolve os dois.
+    //
+    // O troco é real e está aceito: quem só quer entrar num Dogma de outra
+    // pessoa também paga o aviso do UAC. Entre pedir uma confirmação e o app
+    // não ser encontrável, a confirmação é a mais barata das duas.
+    let conf = std::fs::read_to_string(raiz().join("apps/seele-app/tauri.conf.json"))
+        .expect("o tauri.conf.json é legível");
+    let limpo = sem_comentario(&conf);
+
+    assert!(
+        limpo.contains("\"installMode\": \"perMachine\""),
+        "o instalador do Windows voltou a ser por usuário, e com ele o app sai \
+         de `Program Files` — onde quem procura, procura:\n{limpo}"
+    );
+}
