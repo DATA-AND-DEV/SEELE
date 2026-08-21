@@ -28,6 +28,7 @@ use crossterm::terminal::{
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use seele_core::chegada::Chegada;
 use seele_core::conhecidos::Conhecidos;
 use seele_core::enlace::{Aviso, Destino, Enlace, Fechado, Motivo};
 use seele_core::{
@@ -604,22 +605,29 @@ async fn sessao(
     // cai; o enlace é a **sessão**, que atravessa quedas. É ele que carrega a
     // bateria interna e a reconexão de `specs/07-tema-evangelion.md`.
     let destinos = construir_destinos(args);
-    // Com bilhete, bater no ponto de encontro antes de tentar endereço nenhum —
-    // degrau 4 do ADR 0022. Sem bilhete, é o caminho de sempre.
-    let mut client =
-        match Enlace::conectar_entre_com_bilhete(destinos, args.bilhete.clone(), key, pins).await {
-            Ok(client) => client,
-            Err(error) => {
-                runtime.app.screen = Screen::Lost {
-                    reason: motivo_de_conexao_perdida(&error),
-                };
-                // Um endereço que não atende é o caso mais comum de todos, e
-                // justamente o que mais precisa da lista: escolher um Dogma morto
-                // dos conhecidos jogava a pessoa para fora do cliente, longe da
-                // lista de onde ela acabou de escolher.
-                return fim_de_sessao(terminal, key_rx, &mut runtime, &mut hospedagem).await;
-            }
-        };
+    // Uma `Chegada`, que é quem dá nome a cada etapa desta travessia. Com
+    // bilhete ela avisa o ponto de encontro pelos candidatos que precisam de
+    // furo — degrau 4 do ADR 0022; sem bilhete, é o caminho de sempre.
+    let chegada = Chegada::nova(destinos, args.bilhete.clone());
+    let mut client = match chegada.chegar(key, pins).await {
+        Ok(client) => client,
+        Err(falha) => {
+            // A trilha morre aqui, e de propósito. Este terminal está no ecrã
+            // alternado quando isto acontece: escrever nele os passos da chegada
+            // rabiscaria a tela de fim por cima, e escrevê-los fora dele seria
+            // escrever onde ninguém está olhando. Quem pergunta «qual dos quatro
+            // endereços deu o quê» num terminal pergunta ao `plug --rede`, que
+            // existe para responder isso com o resto do diagnóstico junto.
+            runtime.app.screen = Screen::Lost {
+                reason: motivo_de_conexao_perdida(falha.motivo()),
+            };
+            // Um endereço que não atende é o caso mais comum de todos, e
+            // justamente o que mais precisa da lista: escolher um Dogma morto
+            // dos conhecidos jogava a pessoa para fora do cliente, longe da
+            // lista de onde ela acabou de escolher.
+            return fim_de_sessao(terminal, key_rx, &mut runtime, &mut hospedagem).await;
+        }
+    };
 
     // O core já decidiu o que este aperto de mão significa — `Enlace::veredito`
     // vem pronto, e esta casca só desenha o que ele diz. `Verdict::InviteRefused`

@@ -25,6 +25,7 @@
 )]
 
 pub mod battery;
+pub mod chegada;
 pub mod client;
 pub mod conhecidos;
 pub mod encontro;

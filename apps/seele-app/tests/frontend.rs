@@ -1144,6 +1144,109 @@ fn every_refusal_the_bridge_writes_itself_has_a_sentence_in_the_page() {
 }
 
 #[test]
+fn every_stage_of_an_arrival_has_a_sentence_in_the_page() {
+    // The mute spinner, as a test. Four candidates were tried in a row behind
+    // it, and when the two-house field test failed nobody could say at which
+    // point — there was no point with a name. `ConnectStage` gave every instant
+    // of that crossing a name; a name with no sentence over here puts the
+    // silence back, one stage at a time.
+    //
+    // Two things are asserted, and the second is the one that would go quiet:
+    // that every stage has an entry, and that the key the page files it under
+    // is the name serde actually writes. A dictionary keyed by a name nothing
+    // sends is a dictionary that is never read.
+    let file = without_comments(&read("ui/frases.js"));
+    let written: BTreeSet<String> = sentences_of(&file, "ETAPAS")
+        .into_iter()
+        .map(|(variant, _)| variant)
+        .collect();
+    assert!(
+        !written.is_empty(),
+        "`ETAPAS` came out empty, so the loop below is comparing against nothing"
+    );
+
+    // The list is `ConnectStage::todas()`, which is `Etapa::TODAS` put through
+    // the one `From` every stage crosses by — not a third hand-written copy of
+    // it. The copy was the bug: a variant added to the core reached this page
+    // and fell through to "FALHA QUE ESTA TELA NÃO SABE NOMEAR" in the middle
+    // of a connection that was going fine, and none of the 133 tests lit up,
+    // because every list that could have noticed was written out by hand.
+    let stages = seele_ffi::ConnectStage::todas();
+    assert!(
+        stages.len() >= 5,
+        "`ConnectStage::todas` came back with {} stages, so this loop is \
+         checking almost nothing",
+        stages.len()
+    );
+    for stage in stages {
+        let Ok(json) = serde_json::to_string(&stage) else {
+            panic!("a stage does not serialise, so no shell can read it at all");
+        };
+        // The variant name, exactly as serde writes it on the wire.
+        let Some(name) = json.trim_matches('"').split("\":").next() else {
+            panic!("unexpected shape: {json}");
+        };
+        let name = name.trim_start_matches('{').trim_matches('"');
+
+        assert_eq!(
+            name,
+            stage.nome(),
+            "the stage crosses as `{name}` and calls itself `{}`, so the page \
+             files the sentence under a name nothing sends",
+            stage.nome()
+        );
+        assert!(
+            written.contains(name),
+            "the arrival can stop at `{name}` and no sentence says what that \
+             means, so the screen shows the spinner this whole state machine \
+             exists to replace"
+        );
+    }
+}
+
+#[test]
+fn the_stage_that_gives_up_names_no_cause_it_does_not_know() {
+    // ADR 0003's alarm, on the screen. `Etapa::Desistiu` carries the whole
+    // `ConnectError`, and `chegada.rs` says why in as many words: flattening
+    // `PinChanged` and `InviteMismatch` would erase the alarm, because those
+    // two are the errors that are *not* network errors.
+    //
+    // The stage sentence read "NENHUM ENDEREÇO DO CONVITE ATENDEU", which
+    // asserts a network cause over both of them — sitting right next to a
+    // `fraseDeErro` that builds the alarm out of the two fingerprints. Nobody
+    // calls `fraseDeEtapa` yet, so this was a defect scheduled to become
+    // visible in a later task rather than one anybody would have seen.
+    let file = without_comments(&read("ui/frases.js"));
+    let Some((_, frase)) = sentences_of(&file, "ETAPAS")
+        .into_iter()
+        .find(|(variant, _)| variant == "Desistiu")
+    else {
+        panic!(
+            "`ETAPAS.Desistiu` is gone, and with it the sentence for the end of a failed arrival"
+        );
+    };
+
+    let baixa = frase.to_lowercase();
+    for causa in ["endere", "atende", "rede", "recus", "respond", "ningu"] {
+        assert!(
+            !baixa.contains(causa),
+            "the sentence for `Desistiu` says `{causa}`, which claims a cause \
+             the stage does not have: the same stage carries `PinChanged` and \
+             `InviteMismatch`, and this line would print over the ADR 0003 \
+             alarm:\n{frase}"
+        );
+    }
+
+    // And the cause stays with the half that has it. Without this the "fix"
+    // for the line above is to say nothing anywhere.
+    assert!(
+        file.contains("PinChanged") && file.contains("InviteMismatch"),
+        "the two errors that are not network errors lost their sentence, so \
+         nothing on the screen composes the ADR 0003 alarm any more"
+    );
+}
+
+#[test]
 fn the_frontend_never_names_a_protocol_concept() {
     // `specs/06-clientes-gui.md`, in one sentence: "Se o frontend precisa saber
     // o que é um `ssrc`, algo está errado." This is that sentence as a test.
@@ -6319,9 +6422,10 @@ const LIMITE_DE_FRASE: usize = 180;
 /// Dogma down with the window. Nor the two `fraseDeErro` composes for a changed
 /// key: those are two fingerprints with a line either side, and a fingerprint is
 /// as long as it is. What this guards is the prose.
-const DICIONARIOS: [&str; 6] = [
+const DICIONARIOS: [&str; 7] = [
     "MOTIVOS",
     "AVISOS",
+    "ETAPAS",
     "FRASES",
     "ANEXOS",
     "TRANSFERENCIAS",

@@ -95,6 +95,67 @@ const AVISOS = {
 };
 
 /**
+ * Onde uma conexão está, enquanto ela acontece.
+ *
+ * Uma entrada por etapa de `seele_ffi::ConnectStage`, e a lista tem de ser
+ * completa: o guarda `every_stage_of_an_arrival_has_a_sentence_in_the_page`
+ * cobra cada nome que o núcleo publica. Uma etapa sem frase é a tela muda que
+ * esta lista existe para acabar — quando o teste de campo das duas casas
+ * falhou, quatro candidatos tinham sido tentados em série atrás de um spinner e
+ * ninguém soube dizer em que ponto, porque não havia ponto nomeado.
+ *
+ * Os nomes vêm do Rust e as frases são daqui, como em toda a lista deste
+ * arquivo (ADR 0012 e 0023). Nenhuma promete nada: `CaminhoAberto` diz que o
+ * caminho abriu, e não que a conexão vai dar certo — a marca que o abre não
+ * autentica ninguém, e o aperto de mão ainda tem de acontecer inteiro.
+ */
+const ETAPAS = {
+  Parada: "LENDO O CONVITE",
+  Avisando: "AVISANDO O PONTO DE ENCONTRO",
+  Tentando: "TENTANDO UM ENDEREÇO DO CONVITE",
+  // Diz o que abriu e não o que vem: quem lê isto ainda pode não entrar.
+  CaminhoAberto: "O CAMINHO ATÉ AQUI ABRIU",
+  Dentro: "DENTRO",
+  // Neutra de propósito. `Desistiu` carrega o `ConnectError` inteiro — o núcleo
+  // o guardou assim para não achatar `PinChanged` e `InviteMismatch`, os dois
+  // erros que **não são de rede** (ADR 0003) — e afirmar aqui que nenhum
+  // endereço atendeu apagaria esse alarme na tela justamente quando ele é a
+  // coisa mais importante escrita nela. Esta linha diz onde a chegada parou; a
+  // causa é de quem a tem, que é `fraseDeErro`.
+  Desistiu: "A CHEGADA PAROU AQUI",
+};
+
+/**
+ * A frase de uma etapa de chegada.
+ *
+ * `Tentando` é a única montada, e o número é o motivo: «tentando um endereço»
+ * repetido quatro vezes é indistinguível de uma tela travada, e «o endereço 3
+ * de 4» é a informação que faltava a quem esperava sem saber quanto faltava.
+ *
+ * `Desistiu` **não** diz aqui o porquê, e não é só para não repetir: a etapa
+ * não sabe o porquê. O motivo é um `ConnectError`, e dois dos seus valores —
+ * `PinChanged` e `InviteMismatch` — não são falha de rede nenhuma. Uma frase de
+ * etapa que dissesse «nenhum endereço atendeu» afirmaria causa de rede sobre o
+ * alarme do ADR 0003, ao lado de um `fraseDeErro` que compõe esse alarme com as
+ * duas impressões digitais. Uma linha diz onde a chegada parou, a outra diz o
+ * que houve.
+ */
+function fraseDeEtapa(etapa) {
+  if (typeof etapa === "string") return ETAPAS[etapa] ?? desconhecida(etapa);
+  if (etapa && typeof etapa === "object") {
+    const nome = Object.keys(etapa)[0];
+    const base = ETAPAS[nome];
+    if (!base) return desconhecida(etapa);
+    const dados = etapa[nome];
+    if (nome === "Tentando" && typeof dados?.candidato === "number") {
+      return base.replace("UM ENDEREÇO", `O ENDEREÇO ${dados.candidato + 1} DE ${dados.de}`);
+    }
+    return base;
+  }
+  return desconhecida(etapa);
+}
+
+/**
  * A frase para uma falha de conexão.
  *
  * O erro chega como enum — nunca como texto — e é aqui que ele vira uma frase.

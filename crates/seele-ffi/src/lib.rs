@@ -195,6 +195,243 @@ pub struct ConnectConfig {
     pub playback_device: Option<String>,
 }
 
+/// Uma etapa de uma chegada, do jeito que uma casca a recebe.
+///
+/// Espelho de `seele_core::chegada::Etapa`, com o **mesmo nome** em cada
+/// variante e em cada campo. O que esta cópia acrescenta é `Serialize` e o
+/// [`PlugError`] no lugar do erro do núcleo; nada mais. A regra que ela segue é
+/// a das outras travessias deste arquivo: o nome do tipo é do crate e nunca
+/// atravessa, e o nome que atravessa — variante e campo — é o que o núcleo
+/// escolheu, porque é ele que a casca usa como chave de frase. Traduzir aqui
+/// daria dois vocabulários para a mesma coisa, e a casca teria de aprender os
+/// dois.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub enum ConnectStage {
+    /// Parada, com o convite lido e nada tentado.
+    Parada {
+        /// Quantos endereços o convite trouxe.
+        candidatos: u8,
+        /// O link trouxe `enc=` **e** o primeiro candidato tem impressão
+        /// digital.
+        ///
+        /// Não é «o degrau 4 do ADR 0022 vai ser tentado»: ver a variante do
+        /// núcleo, que escreve o que a bandeira sabe e o que ela não sabe.
+        com_bilhete_e_impressao: bool,
+    },
+    /// Avisando o ponto de encontro de que estamos chegando.
+    Avisando {
+        /// O ponto de encontro, como o convite o escreveu.
+        ponto: String,
+    },
+    /// Um aperto de mão correndo contra um endereço do convite.
+    Tentando {
+        /// Qual da lista, contando do zero.
+        candidato: u8,
+        /// De quantos.
+        de: u8,
+        /// O endereço, como texto: um `SocketAddr` não atravessa (ADR 0018).
+        onde: String,
+    },
+    /// Um furo com a marca certa chegou, e o caminho até aqui abriu.
+    ///
+    /// **Marca não é autenticação.** Ver a variante do núcleo: esta etapa não
+    /// decide para onde conectar nem dispensa conferência nenhuma — ela
+    /// antecipa o instante da tentativa, e mais nada.
+    CaminhoAberto {
+        /// De onde o furo veio.
+        onde: String,
+    },
+    /// Dentro: o aperto de mão terminou e há sessão.
+    Dentro,
+    /// Nenhum candidato entrou, e este é o motivo.
+    Desistiu {
+        /// O mesmo erro que a casca já sabe escrever.
+        motivo: PlugError,
+    },
+}
+
+/// Uma etapa e quando ela aconteceu.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ConnectStep {
+    /// Onde a chegada estava.
+    pub etapa: ConnectStage,
+    /// Quantos milissegundos depois do começo da chegada.
+    ///
+    /// Milissegundos e não uma `Duration`, pela mesma regra do resto desta
+    /// fronteira: um número que toda linguagem tem.
+    pub em_ms: u64,
+}
+
+/// Uma conexão que não aconteceu, e por onde ela passou tentando.
+///
+/// «Tentei quatro candidatos, o primeiro deu prazo esgotado em 4 s, o quarto
+/// recusou» é o dado que faltou quando o teste de campo das duas casas falhou e
+/// ninguém soube dizer por quê. Custa zero em privacidade: todo endereço da
+/// trilha já estava no convite de quem a lê.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ConnectFailure {
+    /// Por que não deu, do jeito de sempre.
+    pub error: PlugError,
+    /// Por onde a chegada passou, em ordem. Vazia quando nada chegou a ser
+    /// tentado — uma identidade que não abre, uma thread que não sobe.
+    pub trail: Vec<ConnectStep>,
+}
+
+impl From<PlugError> for ConnectFailure {
+    /// Uma falha de antes de haver chegada: o erro sozinho, sem trilha.
+    fn from(error: PlugError) -> Self {
+        Self {
+            error,
+            trail: Vec::new(),
+        }
+    }
+}
+
+impl std::fmt::Display for ConnectFailure {
+    /// Para log e para `Error`, nunca para uma pessoa.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "{:?} depois de {} passos",
+            self.error,
+            self.trail.len()
+        )
+    }
+}
+
+impl std::error::Error for ConnectFailure {}
+
+impl ConnectStage {
+    /// O nome estável que a casca usa como chave de frase.
+    ///
+    /// O mesmo de `seele_core::chegada::Etapa::nome`, e é obrigação desta
+    /// travessia que continue sendo: a casca escreve uma frase por nome, e um
+    /// nome que se perde entre os dois lados é uma tela muda.
+    #[must_use]
+    pub fn nome(&self) -> &'static str {
+        match self {
+            Self::Parada { .. } => "Parada",
+            Self::Avisando { .. } => "Avisando",
+            Self::Tentando { .. } => "Tentando",
+            Self::CaminhoAberto { .. } => "CaminhoAberto",
+            Self::Dentro => "Dentro",
+            Self::Desistiu { .. } => "Desistiu",
+        }
+    }
+
+    /// Um exemplar de cada etapa que pode atravessar esta fronteira.
+    ///
+    /// **Derivada, e não escrita à mão.** Ela é `seele_core::chegada::Etapa::TODAS`
+    /// passada por [`From`], que é a única porta por onde uma etapa atravessa —
+    /// então uma variante nova do núcleo aparece aqui sozinha, e a casca, que
+    /// pelo ADR 0002 não pode ver o núcleo, ganha a lista sem repeti-la.
+    ///
+    /// É para isso que ela existe: o guarda de cobertura de `frases.js` mora em
+    /// `apps/seele-app/tests/frontend.rs` e lia uma terceira cópia da lista,
+    /// escrita à mão. Uma etapa nova atravessava e caía no «falha que esta tela
+    /// não sabe nomear» no meio de uma conexão que ia bem, sem que teste nenhum
+    /// acendesse.
+    ///
+    /// Os valores são de exemplo e não significam nada — o que se lê deles é a
+    /// variante.
+    #[must_use]
+    pub fn todas() -> Vec<Self> {
+        seele_core::chegada::Etapa::TODAS
+            .iter()
+            .map(Self::from)
+            .collect()
+    }
+}
+
+impl From<&seele_core::chegada::Etapa> for ConnectStage {
+    /// Uma etapa do núcleo, do jeito que a casca a recebe.
+    fn from(etapa: &seele_core::chegada::Etapa) -> Self {
+        use seele_core::chegada::Etapa;
+        match etapa {
+            Etapa::Parada {
+                candidatos,
+                com_bilhete_e_impressao,
+            } => Self::Parada {
+                candidatos: *candidatos,
+                com_bilhete_e_impressao: *com_bilhete_e_impressao,
+            },
+            Etapa::Avisando { ponto } => Self::Avisando {
+                ponto: ponto.clone(),
+            },
+            Etapa::Tentando {
+                candidato,
+                de,
+                onde,
+            } => Self::Tentando {
+                candidato: *candidato,
+                de: *de,
+                onde: onde.to_string(),
+            },
+            Etapa::CaminhoAberto { onde } => Self::CaminhoAberto {
+                onde: onde.to_string(),
+            },
+            Etapa::Dentro => Self::Dentro,
+            Etapa::Desistiu(erro) => Self::Desistiu {
+                motivo: classify_connect_failure(erro),
+            },
+        }
+    }
+}
+
+/// Os três campos que uma etapa pode carregar sobre **onde** ela aconteceu.
+///
+/// `Option` e não um valor de enfeite: `Dentro` não tem candidato, e escrever
+/// `candidato = 0` para ela seria inventar o zero. Para `Avisando` o «onde» é o
+/// ponto de encontro, que é para onde aquele passo mandou alguma coisa; para
+/// `Parada` o `de` é quantos endereços o convite trouxe, que é a mesma
+/// grandeza que o `de` de uma tentativa — «de quantos».
+fn campos_do_passo(etapa: &seele_core::chegada::Etapa) -> (Option<String>, Option<u8>, Option<u8>) {
+    use seele_core::chegada::Etapa;
+    match etapa {
+        Etapa::Avisando { ponto } => (Some(ponto.clone()), None, None),
+        Etapa::Tentando {
+            candidato,
+            de,
+            onde,
+        } => (Some(onde.to_string()), Some(*candidato), Some(*de)),
+        Etapa::CaminhoAberto { onde } => (Some(onde.to_string()), None, None),
+        Etapa::Parada { candidatos, .. } => (None, None, Some(*candidatos)),
+        Etapa::Dentro | Etapa::Desistiu(_) => (None, None, None),
+    }
+}
+
+/// A trilha de uma chegada que falhou, no log do processo.
+///
+/// **É a superfície inteira que responde a pergunta desta tarefa.** Enquanto
+/// `apps/seele-app` entrar por [`Plug::connect`], que joga a trilha fora, este
+/// log é o único lugar em que ela aparece — e um log que escrevesse só a etapa
+/// e o relógio responderia «Parada, Tentando, Desistiu, aos 8003 ms», que não é
+/// a pergunta. A pergunta é **qual dos quatro deu o quê**, e ela precisa do
+/// endereço e do índice.
+fn registrar_trilha(trilha: &[seele_core::chegada::Passo]) {
+    for passo in trilha {
+        let (onde, candidato, de) = campos_do_passo(&passo.etapa);
+        tracing::info!(
+            etapa = passo.etapa.nome(),
+            candidato = ?candidato,
+            de = ?de,
+            onde = ?onde,
+            em_ms = %passo.em.as_millis(),
+            "trilha da chegada"
+        );
+    }
+}
+
+/// Um passo da trilha, do jeito que a casca o recebe.
+fn step_of(passo: &seele_core::chegada::Passo) -> ConnectStep {
+    ConnectStep {
+        etapa: ConnectStage::from(&passo.etapa),
+        // Saturado, e não truncado: uma chegada que levasse mais de 584 milhões
+        // de anos merece um número errado no fim da escala, e não um pequeno.
+        em_ms: u64::try_from(passo.em.as_millis()).unwrap_or(u64::MAX),
+    }
+}
+
 /// What a shell implements to be told things changed.
 ///
 /// Called on the driver thread. `specs/06-clientes-gui.md` puts the marshalling
@@ -522,11 +759,32 @@ impl Plug {
     ///
     /// **Blocks** until the session reaches PADRÃO: AZUL or fails.
     ///
+    /// A porta antiga, e o que ela perde: o erro sem a trilha. Ela fica porque
+    /// oito arquivos de teste entram por aqui, e trocá-los todos no commit que
+    /// abre a porta nova transformaria um passo barato num caro. Quem desenha
+    /// uma tela de falha quer [`Plug::connect_with_trail`].
+    ///
     /// # Errors
     ///
     /// Every failure is a [`PlugError`] variant, never a string: a shell has to
     /// be able to write its own sentence for each one.
     pub fn connect(config: ConnectConfig) -> Result<(Arc<Self>, Trust), PlugError> {
+        Self::connect_with_trail(config).map_err(|falha| falha.error)
+    }
+
+    /// O mesmo, respondendo também por onde a chegada passou.
+    ///
+    /// A trilha é o que faltava quando o teste de campo das duas casas falhou:
+    /// a tela dizia «não consegui conectar» sobre quatro tentativas das quais
+    /// nenhuma tinha nome. Ela sobrevive à falha e atravessa inteira — ver
+    /// [`ConnectFailure`].
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectFailure`], que é o [`PlugError`] de sempre mais a trilha. Ela
+    /// vem vazia quando a falha é de antes de haver chegada: um endereço que
+    /// não resolve, uma identidade que não abre, uma thread que não sobe.
+    pub fn connect_with_trail(config: ConnectConfig) -> Result<(Arc<Self>, Trust), ConnectFailure> {
         let (address, server_name, pin_key) = resolve(&config.server)?;
         // The invite's other addresses, resolved here so the driver thread gets
         // values. An alternative that does not resolve is dropped: the first
@@ -582,7 +840,7 @@ impl Plug {
                     Ok(runtime) => runtime,
                     Err(error) => {
                         tracing::error!(%error, "could not start the plug runtime");
-                        let _ = ready_tx.send(Err(PlugError::Unreachable));
+                        let _ = ready_tx.send(Err(PlugError::Unreachable.into()));
                         return;
                     }
                 };
@@ -1570,7 +1828,7 @@ async fn drive(
     pins: Arc<FilePinStore>,
     shared: Arc<Shared>,
     mut commands: tokio::sync::mpsc::UnboundedReceiver<Command>,
-    ready: &std::sync::mpsc::Sender<Result<Trust, PlugError>>,
+    ready: &std::sync::mpsc::Sender<Result<Trust, ConnectFailure>>,
 ) {
     shared
         .pattern
@@ -1585,21 +1843,25 @@ async fn drive(
             build_destino(&config, address, &server_name, &pin_key)
         })
         .collect();
-    // `conectar_entre_com_bilhete` e não `conectar_entre`: com um bilhete no
-    // link, quem entra bate no ponto de encontro antes de tentar endereço nenhum
-    // — degrau 4 do ADR 0022. Sem bilhete os dois caminhos são o mesmo.
-    let bilhete = config.bilhete.clone();
-    let mut client =
-        match seele_core::enlace::Enlace::conectar_entre_com_bilhete(destinos, bilhete, key, pins)
-            .await
-        {
-            Ok(client) => client,
-            Err(error) => {
-                tracing::warn!(%error, "could not reach the Dogma");
-                let _ = ready.send(Err(classify_connect_failure(&error)));
-                return;
-            }
-        };
+    // Uma `Chegada` e não a chamada direta ao laço: ela é quem dá nome a cada
+    // etapa desta travessia e guarda a trilha. O laço continua exatamente onde
+    // estava — com o aviso por candidato e os prazos —, e o que muda aqui é que
+    // a falha deixa de ser uma frase só. O bilhete vai junto: com ele, quem
+    // entra avisa o ponto de encontro por candidato que precisa de furo, que é
+    // o degrau 4 do ADR 0022. Sem bilhete os dois caminhos são o mesmo.
+    let chegada = seele_core::chegada::Chegada::nova(destinos, config.bilhete.clone());
+    let mut client = match chegada.chegar(key, pins).await {
+        Ok(client) => client,
+        Err(falha) => {
+            tracing::warn!(motivo = %falha, "could not reach the Dogma");
+            registrar_trilha(falha.trilha());
+            let _ = ready.send(Err(ConnectFailure {
+                error: classify_connect_failure(falha.motivo()),
+                trail: falha.trilha().iter().map(step_of).collect(),
+            }));
+            return;
+        }
+    };
 
     // `Enlace::conectar` already returned `Err` above for anything that would
     // have made this a `PinDecision::Changed` or a refused invite — see
@@ -3481,5 +3743,136 @@ mod previa {
         let previa = preview_of(7, "image/png", None);
         assert_eq!(previa.image, None);
         assert_eq!(previa.refusal, Some(PreviewRefusal::DidNotArrive));
+    }
+}
+
+/// O log que responde «qual dos quatro deu o quê».
+#[cfg(test)]
+mod trilha_no_log {
+    use super::*;
+
+    /// Um assinante de `tracing` que guarda o que foi escrito.
+    ///
+    /// Escrito à mão, e não com `tracing-subscriber`: o que se quer aqui é o
+    /// nome dos campos de um `event!`, e trazer um crate inteiro para lê-los
+    /// custaria mais do que as vinte linhas abaixo.
+    #[derive(Clone, Default)]
+    struct Espiao(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+
+    impl Espiao {
+        fn escrito(&self) -> Vec<String> {
+            self.0
+                .lock()
+                .map(|linhas| linhas.clone())
+                .unwrap_or_default()
+        }
+    }
+
+    /// Cada campo do evento como `nome=valor`, na ordem em que foi escrito.
+    struct Anotador(String);
+
+    impl tracing::field::Visit for Anotador {
+        fn record_debug(&mut self, campo: &tracing::field::Field, valor: &dyn std::fmt::Debug) {
+            self.0.push_str(&format!("{}={valor:?} ", campo.name()));
+        }
+    }
+
+    impl tracing::Subscriber for Espiao {
+        fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+            true
+        }
+
+        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+
+        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+
+        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+
+        fn event(&self, evento: &tracing::Event<'_>) {
+            let mut anotador = Anotador(String::new());
+            evento.record(&mut anotador);
+            if let Ok(mut linhas) = self.0.lock() {
+                linhas.push(anotador.0);
+            }
+        }
+
+        fn enter(&self, _: &tracing::span::Id) {}
+
+        fn exit(&self, _: &tracing::span::Id) {}
+    }
+
+    #[test]
+    fn o_log_da_trilha_diz_qual_candidato_deu_o_que() {
+        // Enquanto o app entrar por `Plug::connect`, este log é a superfície
+        // inteira em que a trilha aparece. Ele escrevia só a etapa e o
+        // relógio, e com isso respondia «Parada, Tentando, Desistiu, aos
+        // 8003 ms» — que é a etapa e não o candidato, ou seja, não é a
+        // pergunta que esta tarefa existe para responder.
+        use seele_core::chegada::{Etapa, Passo};
+        use std::time::Duration;
+
+        let onde = std::net::SocketAddr::from(([203, 0, 113, 7], 8383));
+        let trilha = vec![
+            Passo {
+                etapa: Etapa::Parada {
+                    candidatos: 4,
+                    com_bilhete_e_impressao: true,
+                },
+                em: Duration::ZERO,
+            },
+            Passo {
+                etapa: Etapa::Avisando {
+                    ponto: "encontro.exemplo:8384".into(),
+                },
+                em: Duration::from_millis(3),
+            },
+            Passo {
+                etapa: Etapa::Tentando {
+                    candidato: 2,
+                    de: 4,
+                    onde,
+                },
+                em: Duration::from_millis(8003),
+            },
+        ];
+
+        let espiao = Espiao::default();
+        tracing::subscriber::with_default(espiao.clone(), || registrar_trilha(&trilha));
+
+        let escrito = espiao.escrito();
+        assert_eq!(
+            escrito.len(),
+            trilha.len(),
+            "um passo por linha, e saíram {} linhas: {escrito:?}",
+            escrito.len()
+        );
+
+        let Some(tentativa) = escrito.iter().find(|linha| linha.contains("Tentando")) else {
+            panic!("a tentativa não foi registrada: {escrito:?}");
+        };
+        assert!(
+            tentativa.contains("203.0.113.7:8383"),
+            "o log não diz qual endereço foi tentado: {tentativa}"
+        );
+        assert!(
+            tentativa.contains("candidato=Some(2)"),
+            "o log não diz qual dos candidatos era: {tentativa}"
+        );
+        assert!(
+            tentativa.contains("de=Some(4)"),
+            "o log diz o candidato e esconde de quantos, que é metade da \
+             resposta: {tentativa}"
+        );
+
+        let Some(aviso) = escrito.iter().find(|linha| linha.contains("Avisando")) else {
+            panic!("o aviso não foi registrado: {escrito:?}");
+        };
+        assert!(
+            aviso.contains("encontro.exemplo:8384"),
+            "o «onde» de um aviso é o ponto de encontro, e ele não está no \
+             log: {aviso}"
+        );
     }
 }
