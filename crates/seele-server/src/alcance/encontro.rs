@@ -376,22 +376,41 @@ pub async fn abrir(convocacao: &Convocacao) -> Result<Encontro, FalhaNoEncontro>
     let candidatos = resolver(&convocacao.ponto, ate).await?;
     let minha_marca = Marca::nova("anfitriao").ok_or(FalhaNoEncontro::SemSocketDoDogma)?;
 
-    // Um de cada vez, até um responder. Um nome com A e AAAA vira dois
-    // candidatos, e qual deles serve é propriedade **desta máquina** — que o DNS
-    // não conhece. A escuta de avisos nasce da família do candidato, então cada
-    // tentativa tem a sua: um socket IPv4 não manda para destino IPv6, e o
-    // contrário só com pilha dupla.
+    // Um de cada vez, até um responder, e **cada um com a sua fatia do prazo**.
     //
-    // Quem falhar sai barato: `perguntar` devolve na hora quando o envio não
-    // sai, em vez de esperar resposta de um pacote que nunca partiu.
+    // Um nome com A e AAAA vira dois candidatos, e qual deles serve é
+    // propriedade desta máquina, que o DNS não conhece. A escuta de avisos nasce
+    // da família do candidato, então cada tentativa tem a sua: um socket IPv4
+    // não manda para destino IPv6, e o contrário só com pilha dupla.
+    //
+    // A fatia é o que faz isto funcionar, e ela custou um teste de campo para
+    // aparecer. Um endereço que não serve falha de duas formas, e só uma é
+    // barata: o `send_to` pode **errar** — e aí `perguntar` volta na hora — ou
+    // pode **dar certo e o pacote sumir**, que é o que um IPv6 global sem rota
+    // faz em algumas máquinas. No segundo caso não há erro nenhum para observar,
+    // e sem fatia o primeiro candidato repetia a cada [`REPETICAO`] até o prazo
+    // inteiro acabar: o IPv4, que responde em trezentos milissegundos, nunca
+    // chegava a ser tentado.
+    //
+    // Dividir por candidato conserta as duas formas sem depender de adivinhar
+    // qual delas o sistema escolheu. É o mesmo princípio que
+    // `seele_core::enlace` aplica do outro lado: um candidato morto não gasta o
+    // orçamento do próximo.
+    let quantos = candidatos.len().max(1);
     let mut ponto = None;
     let mut aviso = None;
     for alvo in candidatos {
         let Ok(escuta) = escuta_de_avisos(alvo).await else {
             continue;
         };
+        // O que sobra do prazo, dividido pelo que falta tentar. O último
+        // candidato fica com tudo o que sobrou, que é o comportamento certo:
+        // não há próximo para quem guardar.
+        let agora = tokio::time::Instant::now();
+        let sobra = ate.saturating_duration_since(agora);
+        let fatia = agora + sobra / u32::try_from(quantos).unwrap_or(1);
         let resposta = tokio::time::timeout_at(
-            ate,
+            fatia,
             perguntar(&escuta, alvo, &encontro::onde(&minha_marca), &minha_marca),
         )
         .await;
@@ -401,9 +420,11 @@ pub async fn abrir(convocacao: &Convocacao) -> Result<Encontro, FalhaNoEncontro>
                 aviso = Some(publico);
                 break;
             }
-            // Este endereço não serve. O prazo é de todos juntos, então seguir
-            // para o próximo só vale enquanto sobrar tempo.
+            // Este endereço não serve, por erro ou por silêncio. Nos dois
+            // casos o próximo ainda tem a fatia dele — e é justamente o silêncio
+            // que antes comia o prazo de todo mundo.
             Ok(None) => continue,
+            Err(_) if tokio::time::Instant::now() < ate => continue,
             Err(_) => break,
         }
     }
@@ -706,6 +727,75 @@ async fn furar(dogma: &std::net::UdpSocket, destino: SocketAddr, marca: &Marca) 
 mod testes {
     use seele_proto::encontro::PORTA_PADRAO;
     use std::net::Ipv6Addr;
+
+    // --------------------------------------------- a fatia por candidato
+
+    #[tokio::test]
+    async fn um_candidato_que_engole_em_silencio_nao_come_a_vez_do_proximo() {
+        // O defeito que sobreviveu ao primeiro conserto, e que só um teste de
+        // campo revelou. `encontro.seele.app.br` tem A e AAAA. Numa máquina sem
+        // rota IPv6, mandar para o AAAA pode **errar** — e aí `perguntar` volta
+        // na hora — ou pode **dar certo e o pacote sumir**, que é o que
+        // acontece quando sobrou rota de um túnel desligado. No segundo caso não
+        // há erro para observar, e sem fatia o primeiro candidato repetia a cada
+        // REPETICAO até o PRAZO inteiro acabar: o endereço que respondia nunca
+        // era tentado.
+        //
+        // Aqui o buraco negro é um endereço de documentação (RFC 5737), que
+        // aceita o envio e não responde nunca — o mesmo comportamento, sem
+        // depender das rotas desta máquina.
+        let buraco = SocketAddr::from(([192, 0, 2, 1], PORTA_PADRAO));
+
+        // E o que responde é um ponto de encontro de verdade, no laço local.
+        let servico = tokio::net::UdpSocket::bind("127.0.0.1:0")
+            .await
+            .unwrap_or_else(|erro| panic!("o ponto de encontro de teste tem de abrir: {erro}"));
+        let onde_atende = servico
+            .local_addr()
+            .unwrap_or_else(|erro| panic!("ele tem endereço: {erro}"));
+        tokio::spawn(async move {
+            let mut balde = [0_u8; encontro::TAMANHO];
+            while let Ok((lidos, de)) = servico.recv_from(&mut balde).await {
+                if let Some(resposta) = balde.get(..lidos).and_then(|bytes| {
+                    encontro::responder_em(bytes, de, encontro::Vizinhanca::TambemAqui)
+                }) {
+                    let _ = servico.send_to(&resposta.datagrama, resposta.destino).await;
+                }
+            }
+        });
+
+        let marca =
+            Marca::nova("anfitriao").unwrap_or_else(|| panic!("«anfitriao» é uma marca válida"));
+        let ate = tokio::time::Instant::now() + PRAZO;
+        let candidatos = [buraco, onde_atende];
+        let quantos = candidatos.len().max(1);
+
+        let mut achou = None;
+        for alvo in candidatos {
+            let Ok(escuta) = escuta_de_avisos(alvo).await else {
+                continue;
+            };
+            let agora = tokio::time::Instant::now();
+            let sobra = ate.saturating_duration_since(agora);
+            let fatia = agora + sobra / u32::try_from(quantos).unwrap_or(1);
+            if let Ok(Some(publico)) = tokio::time::timeout_at(
+                fatia,
+                perguntar(&escuta, alvo, &encontro::onde(&marca), &marca),
+            )
+            .await
+            {
+                achou = Some(publico);
+                break;
+            }
+        }
+
+        assert!(
+            achou.is_some(),
+            "o segundo candidato responde e não foi alcançado: o primeiro, que \
+             aceita o envio e nunca responde, comeu o prazo inteiro. É o defeito \
+             que fez o degrau 4 morrer numa máquina de verdade com o serviço no ar."
+        );
+    }
 
     // --------------------------------------------- a família que não alcança
 
