@@ -223,10 +223,37 @@ impl Batida {
 /// Onde o ponto de encontro atende.
 async fn resolver(bilhete: &Bilhete) -> Option<SocketAddr> {
     let alvo = bilhete.ponto().ok()?;
-    tokio::net::lookup_host((alvo.maquina, alvo.porta))
+    let aviso = bilhete.aviso().ok()?;
+    let achados: Vec<SocketAddr> = tokio::net::lookup_host((alvo.maquina, alvo.porta))
         .await
         .ok()?
-        .next()
+        .collect();
+    escolher_ponto(&achados, aviso)
+}
+
+/// Qual endereço do ponto de encontro usar, entre os que o DNS devolveu.
+///
+/// **O da família do anfitrião**, e não o primeiro. O pedido que sai daqui é um
+/// `LEVE`: ele manda o ponto de encontro avisar o anfitrião do endereço em que
+/// esta máquina foi vista. Esse endereço é o que o anfitrião vai furar, e o furo
+/// só serve se ele couber no mesmo caminho por onde o QUIC vai tentar passar.
+///
+/// Com `.next()` — que era o que estava aqui — quem chega por uma rede com IPv6
+/// falava com o ponto de encontro por IPv6 para pedir um aviso a um anfitrião
+/// IPv4. Duas coisas quebravam de uma vez: o ponto de encontro não tem por onde
+/// repassar um aviso que cruza famílias, e mesmo se tivesse, o endereço
+/// anunciado seria um IPv6 que o anfitrião IPv4 não alcança — um furo aberto no
+/// lugar errado, enquanto o QUIC tenta o outro.
+///
+/// Sem nenhum da família certa, vale o primeiro: é o que havia antes, e falhar
+/// ali é melhor que não tentar.
+fn escolher_ponto(achados: &[SocketAddr], aviso: SocketAddr) -> Option<SocketAddr> {
+    let mesma_familia = |ponto: &&SocketAddr| ponto.is_ipv4() == aviso.is_ipv4();
+    achados
+        .iter()
+        .find(mesma_familia)
+        .or_else(|| achados.first())
+        .copied()
 }
 
 /// Um socket local que alcança as duas famílias, como o do QUIC.
@@ -275,6 +302,39 @@ fn mapear(destino: SocketAddr, socket: &tokio::net::UdpSocket) -> SocketAddr {
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    /// O ponto de encontro é escolhido pela família do anfitrião, não pela ordem
+    /// do DNS.
+    ///
+    /// O caso de campo: Mac numa rede 5G com IPv6, anfitrião Windows com
+    /// endereço IPv4. O DNS devolve o AAAA primeiro, e com `.next()` o pedido
+    /// saía por IPv6 — o ponto de encontro registrou `Network is unreachable`
+    /// ao tentar repassar o aviso ao anfitrião IPv4, três vezes seguidas.
+    #[test]
+    fn o_ponto_de_encontro_e_o_da_familia_do_anfitriao() {
+        let seis = "[2001:db8::1]:8384".parse::<SocketAddr>();
+        let quatro = "216.128.168.216:8384".parse::<SocketAddr>();
+        let anfitriao_v4 = "187.255.97.152:9621".parse::<SocketAddr>();
+        let anfitriao_v6 = "[2804:388::1]:9621".parse::<SocketAddr>();
+        let (Ok(seis), Ok(quatro), Ok(anfitriao_v4), Ok(anfitriao_v6)) =
+            (seis, quatro, anfitriao_v4, anfitriao_v6)
+        else {
+            panic!("os endereços deste teste têm de ser válidos");
+        };
+
+        // O DNS devolve o IPv6 primeiro, como no 5G.
+        let achados = [seis, quatro];
+        assert_eq!(
+            escolher_ponto(&achados, anfitriao_v4),
+            Some(quatro),
+            "um anfitrião IPv4 só é avisado por um ponto de encontro IPv4"
+        );
+        assert_eq!(escolher_ponto(&achados, anfitriao_v6), Some(seis));
+
+        // Sem a família certa, o primeiro — falhar ali é melhor que não tentar.
+        assert_eq!(escolher_ponto(&[seis], anfitriao_v4), Some(seis));
+        assert_eq!(escolher_ponto(&[], anfitriao_v4), None);
+    }
 
     fn bilhete(ponto: &str) -> Bilhete {
         Bilhete::novo(ponto, "45.33.32.156:41234").expect("bilhete de teste")
