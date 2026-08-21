@@ -643,9 +643,56 @@ async fn perguntar_pelo_dogma(
 /// Ele está em modo não-bloqueante — o `Drop` de nada disto muda isso —, então
 /// um `WouldBlock` é possível e não é erro: o pedido é repetido pelo laço de
 /// fora, e a fila de saída de um socket UDP esvazia em microssegundos.
+///
+/// O destino é escrito na família **deste** socket antes de sair. Ver
+/// [`na_familia_de`], que existe por causa de um degrau 4 que nunca aconteceu.
 fn mandar_pelo_dogma(dogma: &std::net::UdpSocket, datagrama: &[u8], destino: SocketAddr) {
+    let destino = match na_familia_de(dogma, destino) {
+        Ok(escrito) => escrito,
+        Err(motivo) => {
+            tracing::debug!(%motivo, %destino, "este socket não alcança esta família");
+            return;
+        }
+    };
     if let Err(erro) = dogma.send_to(datagrama, destino) {
         tracing::debug!(%erro, %destino, "não saiu pelo socket do Dogma");
+    }
+}
+
+/// O mesmo destino, escrito na família em que um socket sabe falar.
+///
+/// Um socket `AF_INET6` — que é o que o Dogma abre, porque `[::]` é o único
+/// jeito de atender às duas famílias num descritor só — recusa um
+/// `SocketAddr::V4` com `EINVAL`. Não é rota ausente nem firewall: é o
+/// endereço escrito na forma errada. O mesmo destino na forma mapeada
+/// (`::ffff:a.b.c.d`) sai e chega.
+///
+/// Isto custou um ciclo inteiro de campo. O `ONDE` chegava ao ponto de
+/// encontro e o `LEVE` não, e a diferença entre os dois é só esta: o primeiro
+/// sai por uma escuta própria, aberta na família do destino, e o segundo tem de
+/// sair pelo socket do Dogma, porque furar um NAT exige a porta em que o QUIC
+/// atende. Toda máquina de pilha dupla falhava igual, e o erro do sistema ia
+/// para um `debug!` que nenhum dos dois clientes coleta.
+///
+/// # Errors
+///
+/// Um socket IPv4 não alcança um destino IPv6: não há forma de escrever
+/// `2001:db8::1` que caiba num `sockaddr_in`, e mandar assim mesmo seria
+/// prometer um caminho que não existe.
+fn na_familia_de(socket: &std::net::UdpSocket, destino: SocketAddr) -> Result<SocketAddr, String> {
+    let daqui = socket
+        .local_addr()
+        .map_err(|erro| format!("este socket não sabe dizer onde está: {erro}"))?;
+    match (daqui, destino) {
+        (SocketAddr::V6(_), SocketAddr::V4(alvo)) => {
+            Ok(SocketAddr::from((alvo.ip().to_ipv6_mapped(), alvo.port())))
+        }
+        (SocketAddr::V4(_), SocketAddr::V6(alvo)) => match alvo.ip().to_ipv4_mapped() {
+            // Um IPv4 disfarçado de IPv6 volta a ser o que era e passa.
+            Some(ipv4) => Ok(SocketAddr::from((ipv4, alvo.port()))),
+            None => Err("este socket atende só em IPv4".to_owned()),
+        },
+        _ => Ok(destino),
     }
 }
 
@@ -768,6 +815,39 @@ async fn furar(dogma: &std::net::UdpSocket, destino: SocketAddr, marca: &Marca) 
 
 #[cfg(test)]
 mod testes {
+
+    /// O socket do Dogma atende em `[::]` e o ponto de encontro é IPv4 puro.
+    ///
+    /// Este é o caso de campo, e ele falhava calado: um `send_to` com um
+    /// `SocketAddr::V4` num socket `AF_INET6` devolve `EINVAL`, e o degrau 4
+    /// morria aí em toda máquina de pilha dupla — Mac e Windows exatamente
+    /// igual. O `ONDE` chegava, porque sai por socket próprio; o `LEVE` não,
+    /// porque é o único que sai por este.
+    #[test]
+    fn o_dogma_de_pilha_dupla_alcanca_um_ponto_de_encontro_ipv4() {
+        let escuta = SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, 0));
+        let Ok((dogma, crate::alcance::Pilha::Dupla)) = crate::alcance::abrir_escuta(escuta) else {
+            // Sem pilha dupla não há o que este teste afirme.
+            return;
+        };
+        let ponto = match std::net::UdpSocket::bind("127.0.0.1:0").and_then(|s| {
+            let onde = s.local_addr()?;
+            s.set_read_timeout(Some(std::time::Duration::from_secs(2)))?;
+            Ok((s, onde))
+        }) {
+            Ok(par) => par,
+            Err(erro) => panic!("o ponto de encontro de teste tem de abrir: {erro}"),
+        };
+        let (servico, onde) = ponto;
+
+        mandar_pelo_dogma(&dogma, b"ONDE", onde);
+
+        let mut balde = [0_u8; 8];
+        match servico.recv_from(&mut balde) {
+            Ok((lidos, _)) => assert_eq!(balde.get(..lidos), Some(&b"ONDE"[..])),
+            Err(erro) => panic!("o pedido não chegou ao ponto de encontro IPv4: {erro}"),
+        }
+    }
     use seele_proto::encontro::PORTA_PADRAO;
     use std::net::Ipv6Addr;
 
