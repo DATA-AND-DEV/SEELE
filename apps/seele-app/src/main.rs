@@ -24,8 +24,8 @@
 use std::sync::{Arc, Mutex};
 
 use seele_ffi::{
-    ConnectConfig, Event, EventListener, LineWeight, Plug, PlugError, Preview, PreviewRules,
-    Snapshot, VoiceMode,
+    ConnectConfig, ConnectFailure, Event, EventListener, LineWeight, Plug, PlugError, Preview,
+    PreviewRules, Snapshot, VoiceMode,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -165,9 +165,9 @@ async fn connect(
     nickname: String,
     audio: bool,
     join_secret: Option<String>,
-) -> Result<Entrada, PlugError> {
+) -> Result<Entrada, ConnectFailure> {
     if session.plug().is_ok() {
-        return Err(PlugError::AlreadyConnected);
+        return Err(PlugError::AlreadyConnected.into());
     }
 
     // O convite guardado vale para o Dogma dele e para nenhum outro. Quem cola
@@ -235,14 +235,28 @@ async fn connect(
 
     // `connect` blocks on a QUIC handshake. Running it on the async runtime's
     // worker would stall every other command until it finished or timed out.
-    // O veredito volta daqui junto do handle: é o único lugar de onde ele pode
-    // vir, porque quem se inscreve para ouvir eventos só tem o `Arc<Plug>`
-    // depois que esta linha termina.
-    let (plug, veredito) = tauri::async_runtime::spawn_blocking(move || Plug::connect(config))
-        .await
-        .map_err(|_| PlugError::Unreachable)??;
+    //
+    // O veredito volta daqui junto do handle, e continua sendo o único lugar de
+    // onde ele pode vir: ele é decidido dentro do aperto de mão.
+    //
+    // **As etapas, não.** Elas acontecem durante esta linha, e é por isso que a
+    // ponte entra por `connect_watching` em vez de por `subscribe` depois: o
+    // comentário que estava aqui dizia que quem se inscreve só tem o
+    // `Arc<Plug>` depois que esta linha termina, e isso continua verdade — o
+    // que mudou é que a FFI passou a aceitar o ouvinte **antes** de bloquear.
+    // Sem isso o `watch` da chegada não tinha um só leitor em produção.
+    //
+    // `Bridge` não depende do plug para nada: ele carrega o `AppHandle` e
+    // reemite. Por isso um segundo, criado aqui, não é duplicação de estado —
+    // é o mesmo destino, ligado mais cedo.
+    let ponte = Arc::new(Bridge { app: app.clone() }) as Arc<dyn EventListener>;
+    let atento = Arc::clone(&ponte);
+    let (plug, veredito) =
+        tauri::async_runtime::spawn_blocking(move || Plug::connect_watching(config, atento))
+            .await
+            .map_err(|_| ConnectFailure::from(PlugError::Unreachable))??;
 
-    plug.subscribe(Arc::new(Bridge { app }) as Arc<dyn EventListener>);
+    plug.subscribe(ponte);
     let snapshot = plug.snapshot();
 
     if let Ok(mut slot) = session.plug.lock() {

@@ -544,6 +544,23 @@ pub struct Notice {
 /// Everything the interface needs, in one value.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Snapshot {
+    /// Por qual caminho esta conversa saiu, como nome estável.
+    ///
+    /// Um de `RedeLocal`, `Ipv6Direto`, `EnderecoPublico` ou `FuroDeNat` — os
+    /// quatro de `seele_core::chegada::Caminho`, que a lista
+    /// [`crate::caminhos`] deriva do enum para a casca poder cobrar cobertura
+    /// de frase sem repetir os nomes.
+    ///
+    /// **`None` quando não se sabe, e a casca então não escreve nada.** Não
+    /// existe um quinto nome para «direto»: a distinção que essa palavra
+    /// apagaria é justamente a que importa — em `FuroDeNat` a conversa é direta
+    /// **e** alguém soube que ela existe. Inventar um nome quando não se sabe é
+    /// a mentira confiante que o ADR 0022 existe para não produzir.
+    ///
+    /// O grau de certeza de `FuroDeNat` está escrito onde ele nasce, em
+    /// `seele_core::chegada::Caminho`: um `LEVE` que saiu é evidência forte de
+    /// que o furo abriu, e não é prova.
+    pub caminho: Option<&'static str>,
     /// Onde o enlace está: no ar, na bateria interna, ou acabado.
     ///
     /// `specs/07-tema-evangelion.md` manda a interface não fechar quando a
@@ -688,6 +705,21 @@ pub enum Event {
     Ended {
         /// Why.
         reason: EndReason,
+    },
+    /// Uma chegada mudou de etapa, enquanto ela acontece.
+    ///
+    /// O único evento desta lista que chega **antes** de haver sessão, e é para
+    /// isso que ele existe: `Plug::connect` bloqueia, e quem se inscrevesse
+    /// depois dela só teria o `Arc<Plug>` com a travessia inteira já terminada.
+    /// Quem quiser este evento entra por `Plug::connect_watching`, que recebe o
+    /// ouvinte antes de bloquear.
+    ///
+    /// Grosso como os outros? Não, e é a exceção: um `Snapshot` não carrega
+    /// etapa nenhuma — não há sessão para carregá-lo — então a etapa viaja
+    /// dentro do evento ou não viaja.
+    ConnectStageChanged {
+        /// Onde a chegada está agora.
+        stage: crate::ConnectStage,
     },
     /// A file moved, finished moving, or stopped moving. ADR 0027.
     ///

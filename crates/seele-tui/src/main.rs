@@ -32,10 +32,10 @@ use seele_core::chegada::Chegada;
 use seele_core::conhecidos::Conhecidos;
 use seele_core::enlace::{Aviso, Destino, Enlace, Fechado, Motivo};
 use seele_core::{
-    identity, CageId, ClientMessageId, ConnectError, FilePinStore, LineId, Room, SyncInputs,
-    SyncRatio, Verdict, Voice, VoiceMode,
+    identity, AudioTelemetry, CageId, ClientMessageId, ConnectError, FilePinStore, LineId, Room,
+    SyncInputs, SyncRatio, Verdict, Voice, VoiceMode,
 };
-use seele_tui::app::{Action, Alert, App, ChatLine, Key, Mode, Node, Screen};
+use seele_tui::app::{Action, Alert, App, Bar, ChatLine, Key, Mode, Node, Screen};
 use seele_tui::command::{self, Command};
 use seele_tui::rede;
 use seele_tui::selecao::{self, Resultado, Selecao};
@@ -601,7 +601,10 @@ async fn sessao(
     // furo — degrau 4 do ADR 0022; sem bilhete, é o caminho de sempre.
     let chegada = Chegada::nova(destinos, args.bilhete.clone());
     let mut client = match chegada.chegar(key, pins).await {
-        Ok(client) => client,
+        // A trilha do sucesso morre aqui pelo mesmo motivo que a da falha, logo
+        // abaixo: este terminal está no ecrã alternado, e o `plug --rede` é
+        // quem responde por onde a conexão passou, com o diagnóstico junto.
+        Ok(chegado) => chegado.enlace,
         Err(falha) => {
             // A trilha morre aqui, e de propósito. Este terminal está no ecrã
             // alternado quando isto acontece: escrever nele os passos da chegada
@@ -1004,10 +1007,82 @@ fn enlace_fechado(runtime: &mut Runtime<'_>) {
     };
 }
 
+/// Escreve na barra o que uma volta de telemetria de áudio mediu, e devolve a
+/// reserva do anel de reprodução, que **não** vai para a barra.
+///
+/// # Por que isto é uma função, e não três linhas dentro de `tick`
+///
+/// Porque a escolha entre as duas grandezas chamadas «jitter» é onde o defeito
+/// 3.3 mora, e dentro de `tick` ela não tinha como ser afirmada: `tick` pede um
+/// [`Enlace`] vivo e um dispositivo de áudio aberto, e não há nenhum dos dois
+/// numa máquina de integração contínua. O que sobrava era um guarda que lia o
+/// **texto** da função — e um guarda de texto que recusa
+/// `worst_jitter_depth_ms` na linha da atribuição passa verde com uma variável
+/// no meio:
+///
+/// ```ignore
+/// let errado = telemetry.worst_jitter_depth_ms() as f32;
+/// runtime.app.bar.jitter_ms = errado;
+/// ```
+///
+/// A escolha não precisa de nada disso: ela é função de um
+/// [`AudioTelemetry`], que se monta à mão. É o mesmo movimento que
+/// `seele_ffi::jitter_da_volta` já tinha feito do outro lado da mesma
+/// travessia, e o mesmo par de números o afirma — 42 ms de reserva contra
+/// 7,5 ms de chegada, que trocados não podem passar despercebidos, porque
+/// reserva boa é número alto e jitter de rede bom é número baixo.
+///
+/// # O que ela não escreve
+///
+/// `bar.jitter_ms` fica **como estava** quando não há fonte nenhuma sendo
+/// recebida. É a mesma escolha do `seele-ffi` e pela mesma razão: o pior de uma
+/// lista vazia seria zero, e zero é o número que este conserto tirou da tela. O
+/// preço é o campo congelar quando a voz cai no meio de uma sessão viva.
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "milissegundos e uma fração; f32 é o que o protocolo carrega"
+)]
+fn gravar_audio_na_barra(bar: &mut Bar, telemetria: &AudioTelemetry) -> f32 {
+    bar.bitrate = telemetria.local.bitrate_bps;
+    // O de **chegada**, e não a profundidade do anel. As duas são milissegundos
+    // em `f64` e nada num `f64` diz qual dos dois ele é; o nome do método diz.
+    // O rótulo desta barra é `JIT` e `Bar::jitter_ms` se documenta como «arrival
+    // jitter» — mostrar a reserva ali faz uma conexão saudável parecer ruim.
+    if let Some(chegada) = telemetria.worst_arrival_jitter_ms() {
+        bar.jitter_ms = chegada as f32;
+    }
+    // Perda e jitter só se observam no receptor, que é por que os números do
+    // servidor não são os mostrados aqui.
+    bar.loss = telemetria.worst_loss_fraction() as f32;
+    telemetria.worst_jitter_depth_ms() as f32
+}
+
+/// As três grandezas de que a conta do Sync Ratio é feita.
+///
+/// A do meio é a **reserva do anel**, e não o número da barra. Os dois eram o
+/// mesmo campo até esta tarefa separá-los, e um conserto que trocasse só a linha
+/// da barra deixaria o Sync Ratio lendo ruído de rede como se fosse reserva —
+/// que é o defeito 3.3 pelo outro lado.
+///
+/// Função e não um literal dentro de `tick` pelo mesmo motivo da de cima: assim
+/// a escolha é afirmável com uma [`Bar`] montada à mão, sem sessão nenhuma.
+fn entradas_do_sync(bar: &Bar, profundidade_do_anel_ms: f32) -> SyncInputs {
+    SyncInputs {
+        rtt_ms: bar.rtt_ms,
+        jitter_ms: profundidade_do_anel_ms,
+        loss_fraction: bar.loss,
+    }
+}
+
 /// Refreshes everything that changes on its own: the clock, the audio meters,
 /// and the Sync Ratio.
 fn tick(runtime: &mut Runtime<'_>, client: &Enlace) {
     runtime.app.clock = clock();
+
+    // A reserva do anel de reprodução, que vai para o Sync Ratio e **não** para
+    // a barra. Zero sem voz aberta, como no `seele-ffi`: sem fonte nenhuma não
+    // há reserva medida, e a conta do Sync Ratio pede um número.
+    let mut profundidade_do_anel_ms = 0.0;
 
     if let Some(rtt) = client.rtt() {
         #[allow(
@@ -1021,30 +1096,20 @@ fn tick(runtime: &mut Runtime<'_>, client: &Enlace) {
 
     if let Some(voice) = &runtime.voice {
         let telemetry = voice.telemetry();
-        runtime.app.bar.bitrate = telemetry.local.bitrate_bps;
         runtime.app.speaking = telemetry.local.speaking;
         runtime.app.at_field = voice.at_field();
         runtime.app.total_isolation = voice.total_isolation();
-
-        // Jitter and loss are only observable at the receiver, which is why the
-        // server's own numbers are not the ones shown here.
-        #[allow(
-            clippy::cast_possible_truncation,
-            reason = "milliseconds and a fraction; f32 is what the protocol carries"
-        )]
-        {
-            runtime.app.bar.jitter_ms = telemetry.worst_jitter_depth_ms() as f32;
-            runtime.app.bar.loss = telemetry.worst_loss_fraction() as f32;
-        }
+        // Tudo o que a volta de áudio escreve na barra sai daqui, e a reserva do
+        // anel volta de lá — as duas coisas juntas, porque separá-las é o
+        // defeito 3.3. Ver `gravar_audio_na_barra`.
+        profundidade_do_anel_ms = gravar_audio_na_barra(&mut runtime.app.bar, &telemetry);
     }
 
     // The Sync Ratio is computed in the core from the same inputs the server
     // uses, so the number on screen means what the protocol says it means.
-    runtime.app.bar.sync = runtime.sync.update(SyncInputs {
-        rtt_ms: runtime.app.bar.rtt_ms,
-        jitter_ms: runtime.app.bar.jitter_ms,
-        loss_fraction: runtime.app.bar.loss,
-    });
+    runtime.app.bar.sync = runtime
+        .sync
+        .update(entradas_do_sync(&runtime.app.bar, profundidade_do_anel_ms));
 }
 
 /// Mostra o motivo, espera ser lido, e volta à tela de seleção.
@@ -1624,6 +1689,170 @@ mod tests {
             1,
             "a metade baixa não começa em 1, então o espaço de contagem da sessão não é inteiro"
         );
+    }
+
+    /// Uma volta de telemetria com as duas grandezas plantadas para não poderem
+    /// ser confundidas.
+    ///
+    /// 42 ms de reserva de anel contra 7,5 ms de jitter de chegada, que é o
+    /// mesmo par que a tarefa 5 usou do lado do app. A distância entre eles é o
+    /// teste: reserva boa é número **alto** e jitter de rede bom é número
+    /// **baixo**, então mostrar um no lugar do outro faz uma conexão saudável
+    /// aparecer como ruim — e é exatamente assim que este defeito se manifesta
+    /// para quem está olhando a barra.
+    fn volta_de_teste() -> seele_core::AudioTelemetry {
+        seele_core::AudioTelemetry {
+            local: seele_core::LocalTelemetry::default(),
+            sources: vec![
+                seele_core::SourceTelemetry {
+                    ssrc: 1,
+                    jitter_depth_ms: 18.0,
+                    jitter_ms: 2.5,
+                    loss_fraction: 0.01,
+                    ..seele_core::SourceTelemetry::default()
+                },
+                seele_core::SourceTelemetry {
+                    ssrc: 2,
+                    jitter_depth_ms: 42.0,
+                    jitter_ms: 7.5,
+                    loss_fraction: 0.04,
+                    ..seele_core::SourceTelemetry::default()
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn a_barra_mostra_o_jitter_de_chegada_e_nao_a_reserva_do_anel() {
+        // O defeito 3.3 do spec, que a tarefa 5 consertou no app e deixou de pé
+        // aqui. `Bar::jitter_ms` se documenta como «arrival jitter» e é
+        // desenhado como `JIT {:.0}ms`, e o que o alimentava era
+        // `worst_jitter_depth_ms` — a **profundidade do anel de reprodução**,
+        // que o ADR 0028 acabou de dotar de alvo.
+        //
+        // Este teste afirma o **comportamento** e não o texto da produção. A
+        // versão anterior dele lia o corpo de `tick` e recusava
+        // `worst_jitter_depth_ms` nas linhas que continham `bar.jitter_ms =`;
+        // uma variável intermediária passava por ele com a barra mostrando de
+        // novo a reserva do anel, e 177 testes ficavam verdes. Ler o texto da
+        // produção prende a forma da linha, não a propriedade.
+        let mut bar = Bar::default();
+        let reserva = gravar_audio_na_barra(&mut bar, &volta_de_teste());
+
+        assert!(
+            (bar.jitter_ms - 7.5).abs() < 0.01,
+            "a barra `JIT` recebeu {}, e o jitter de chegada era 7,5 ms — 42,0 é \
+             a reserva do anel, que é a grandeza errada e a que faz uma conexão \
+             boa parecer ruim",
+            bar.jitter_ms
+        );
+        assert!(
+            (reserva - 42.0).abs() < 0.01,
+            "a reserva do anel devolvida foi {reserva}, e ela era 42 ms"
+        );
+        // E a perda continua sendo a pior entre as fontes, que é o que a barra
+        // sempre mostrou.
+        assert!((bar.loss - 0.04).abs() < 0.001, "{}", bar.loss);
+    }
+
+    #[test]
+    fn sem_fonte_nenhuma_a_barra_guarda_o_ultimo_jitter_medido() {
+        // A contrapartida deliberada de não gravar zero, e a mesma do
+        // `seele-ffi`: o pior de uma lista vazia seria zero, e zero é o número
+        // que este conserto tirou da tela. O preço é o campo congelar quando a
+        // voz cai no meio de uma sessão viva.
+        //
+        // A reserva **não** congela, e a assimetria é de propósito: ela vai para
+        // o Sync Ratio, cuja conta pede um número a cada volta.
+        let mut bar = Bar::default();
+        let _ = gravar_audio_na_barra(&mut bar, &volta_de_teste());
+        let reserva = gravar_audio_na_barra(&mut bar, &seele_core::AudioTelemetry::default());
+
+        assert!(
+            (bar.jitter_ms - 7.5).abs() < 0.01,
+            "a barra esqueceu o último jitter medido e mostrou {}",
+            bar.jitter_ms
+        );
+        assert!((reserva - 0.0).abs() < 0.01, "{reserva}");
+    }
+
+    #[test]
+    fn o_sync_ratio_le_a_reserva_do_anel_e_nao_o_numero_da_barra() {
+        // O outro lado do defeito 3.3, e o que um conserto pela metade
+        // produziria: trocar só a linha da barra deixaria o Sync Ratio lendo
+        // ruído de rede como se fosse reserva de anel. Os dois eram o mesmo
+        // campo até esta tarefa separá-los.
+        let bar = Bar {
+            rtt_ms: 41.0,
+            jitter_ms: 7.5,
+            loss: 0.04,
+            ..Bar::default()
+        };
+        let entradas = entradas_do_sync(&bar, 42.0);
+
+        assert!(
+            (entradas.jitter_ms - 42.0).abs() < 0.01,
+            "o Sync Ratio recebeu {}, e o que ele pede é a reserva do anel (42 \
+             ms) — 7,5 é o que a barra mostra, que é outra grandeza",
+            entradas.jitter_ms
+        );
+        assert!((entradas.rtt_ms - 41.0).abs() < 0.01);
+        assert!((entradas.loss_fraction - 0.04).abs() < 0.001);
+    }
+
+    #[test]
+    fn tick_nao_escolhe_entre_as_duas_grandezas_por_conta_propria() {
+        // Um encosto, e só isso — a propriedade está nos três testes acima, que
+        // afirmam comportamento. O que este guarda é o **hop** que sobrou: a
+        // escolha mora nas duas funções, e `tick` só as chama. Uma linha nova
+        // dentro de `tick` que escrevesse na barra desfaria o conserto sem tocar
+        // em nada que os outros três leem.
+        //
+        // Ele é escrito pelo negativo de propósito: o nome do método não pode
+        // aparecer, o que uma variável intermediária não contorna.
+        let corpo = corpo_de(
+            include_str!("main.rs"),
+            "fn tick(runtime: &mut Runtime<'_>, client: &Enlace) {",
+        );
+
+        assert!(
+            !corpo.contains("worst_jitter_depth_ms"),
+            "`tick` voltou a nomear a profundidade do anel por conta própria, e \
+             a escolha entre as duas grandezas saiu de onde ela é afirmável:\n{corpo}"
+        );
+        assert!(
+            !corpo.contains("bar.jitter_ms"),
+            "`tick` voltou a escrever na barra por fora de `gravar_audio_na_barra`:\n{corpo}"
+        );
+        assert!(
+            corpo.contains("gravar_audio_na_barra(&mut runtime.app.bar, &telemetry)")
+                && corpo.contains("entradas_do_sync(&runtime.app.bar, profundidade_do_anel_ms)"),
+            "`tick` deixou de chamar as duas funções que decidem, então elas \
+             podem estar certas sem nada da tela passar por elas:\n{corpo}"
+        );
+    }
+
+    /// O texto de uma função deste arquivo, sem os comentários.
+    ///
+    /// Sem eles porque este arquivo explica o defeito que o encosto acima
+    /// persegue, e um parágrafo que nomeia `worst_jitter_depth_ms` satisfaria um
+    /// `contains` muito depois de a linha ter sido apagada. Um guarda que um
+    /// comentário satisfaz guarda um comentário.
+    fn corpo_de(fonte: &str, assinatura: &str) -> String {
+        let Some(depois) = fonte.split(assinatura).nth(1) else {
+            panic!("`{assinatura}` sumiu deste arquivo, e este guarda tem de ir junto");
+        };
+        let Some(corpo) = depois.split("\n}\n").next() else {
+            panic!("`{assinatura}` não fecha");
+        };
+        corpo
+            .lines()
+            .map(|linha| match linha.split_once("//") {
+                Some((antes, _)) => antes,
+                None => linha,
+            })
+            .collect::<Vec<&str>>()
+            .join("\n")
     }
 
     use super::*;

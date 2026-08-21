@@ -349,6 +349,34 @@ impl AudioTelemetry {
             .map(|source| source.jitter_depth_ms)
             .fold(0.0, f64::max)
     }
+
+    /// O pior jitter **de chegada** entre as fontes recebidas, em milissegundos.
+    ///
+    /// A outra grandeza chamada jitter, e a que uma pessoa quer ver: a variação
+    /// do intervalo entre pacotes da RFC 3550, medida neste receptor. A de cima
+    /// é a reserva do anel de reprodução, que cresce quando as coisas vão bem —
+    /// mostrá-la sob o rótulo `JITTER` faz uma conexão saudável parecer ruim, e
+    /// foi assim que a tela do app e a barra da TUI erraram, cada uma por sua
+    /// conta.
+    ///
+    /// Existe aqui, e não numa casca, exatamente por isso: as duas cascas
+    /// escolhiam sozinhas entre dois `f64` na mesma unidade, e escolher errado
+    /// não parece um erro em lugar nenhum. Um nome que diz o destino é o que
+    /// separa os dois.
+    ///
+    /// # Por que `Option`, e não zero
+    ///
+    /// Porque o pior de uma lista vazia seria zero, e zero é justamente o valor
+    /// que este conserto tirou da tela — o relatório do Dogma manda `0.0` fixo
+    /// porque um servidor não tem como medir jitter. Sem fonte nenhuma sendo
+    /// recebida não há o que dizer, e quem chama decide o que fazer com isso.
+    #[must_use]
+    pub fn worst_arrival_jitter_ms(&self) -> Option<f64> {
+        self.sources
+            .iter()
+            .map(|source| source.jitter_ms)
+            .reduce(f64::max)
+    }
 }
 
 #[cfg(test)]
@@ -587,5 +615,52 @@ mod tests {
         let telemetry = AudioTelemetry::default();
         assert_eq!(telemetry.worst_loss_fraction(), 0.0);
         assert_eq!(telemetry.worst_jitter_depth_ms(), 0.0);
+    }
+
+    #[test]
+    fn as_duas_grandezas_chamadas_jitter_nao_devolvem_uma_a_outra() {
+        // As duas são `f64` em milissegundos, e nada num `f64` diz qual dos dois
+        // ele é — foi assim que a barra da TUI e o rodapé do app mostraram a
+        // reserva do anel sob o rótulo `JITTER`, cada um por sua conta. Os
+        // números são escolhidos para que trocar um pelo outro **não possa**
+        // passar: uma reserva saudável é alta e um jitter de rede honesto é
+        // baixo, que é exatamente por que a troca fazia uma conexão boa parecer
+        // ruim.
+        let telemetry = AudioTelemetry {
+            local: LocalTelemetry::default(),
+            sources: vec![
+                SourceTelemetry {
+                    ssrc: 1,
+                    jitter_depth_ms: 42.0,
+                    jitter_ms: 3.5,
+                    ..SourceTelemetry::default()
+                },
+                SourceTelemetry {
+                    ssrc: 2,
+                    jitter_depth_ms: 120.0,
+                    jitter_ms: 7.5,
+                    ..SourceTelemetry::default()
+                },
+            ],
+        };
+
+        let Some(chegada) = telemetry.worst_arrival_jitter_ms() else {
+            panic!("havia duas fontes sendo recebidas e nenhum jitter de chegada saiu");
+        };
+        assert!(
+            (chegada - 7.5).abs() < 1e-9,
+            "o pior jitter de chegada era 7,5 ms e saiu {chegada}"
+        );
+        assert!((telemetry.worst_jitter_depth_ms() - 120.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn sem_fonte_nenhuma_nao_ha_jitter_de_chegada_a_dizer() {
+        // `None` e não zero: o pior de uma lista vazia seria zero, e zero é o
+        // número que este conserto tirou da tela — o relatório do Dogma manda
+        // `0.0` fixo porque um servidor não tem como medir jitter. Quem chama
+        // decide o que fazer com a ausência; as duas cascas escolhem manter o
+        // último valor medido.
+        assert_eq!(AudioTelemetry::default().worst_arrival_jitter_ms(), None);
     }
 }

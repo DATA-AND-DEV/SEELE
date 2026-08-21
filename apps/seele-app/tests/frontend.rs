@@ -1205,6 +1205,203 @@ fn every_stage_of_an_arrival_has_a_sentence_in_the_page() {
 }
 
 #[test]
+fn every_path_a_connection_can_take_has_a_sentence_in_the_page() {
+    // The twin of the stage guard above, on the other list. `Snapshot.caminho`
+    // crosses as one of four stable names, and a name with no entry here is a
+    // metric that stays at the dash while the session knows perfectly well how
+    // it got there.
+    //
+    // The list is `seele_ffi::caminhos()`, derived from the enum's own `match`,
+    // and not a copy written out here. The copy was the bug this cycle already
+    // paid for once: three parallel hand-written lists, none of them tied to
+    // the enum by the compiler, and a new variant crossing all of them with
+    // nothing lighting up.
+    let file = without_comments(&read("ui/frases.js"));
+    let written: BTreeSet<String> = sentences_of(&file, "CAMINHOS")
+        .into_iter()
+        .map(|(variant, _)| variant)
+        .collect();
+    assert!(
+        !written.is_empty(),
+        "`CAMINHOS` came out empty, so the loop below is comparing against nothing"
+    );
+
+    let paths = seele_ffi::caminhos();
+    assert_eq!(
+        paths.len(),
+        4,
+        "`seele_ffi::caminhos` came back with {} names and the table in §5 of the \
+         spec has four rows, so this loop is checking something else: {paths:?}",
+        paths.len()
+    );
+    for path in &paths {
+        assert!(
+            written.contains(*path),
+            "a connection can arrive by `{path}` and no name says what that is, \
+             so the footer keeps the dash it shows when nothing is known"
+        );
+    }
+}
+
+#[test]
+fn the_screen_never_invents_a_word_for_a_path_it_does_not_know() {
+    // «DIRECT» is not sayable, and this is the guard that keeps it unsaid. The
+    // ladder has five rungs and the distinction that word would erase is the
+    // one that matters: in `FuroDeNat` the conversation **is** direct, and
+    // somebody knew it exists.
+    //
+    // Two halves. The dictionary must not grow the word, and `fraseDeCaminho`
+    // must answer with nothing rather than fall through to a name — the
+    // fallback every other lookup in this file has, deliberately not taken
+    // here, because a metric that prints the name of a Rust variant next to
+    // `RTT 41ms` is noise where a failure message would still be a lead.
+    let file = without_comments(&read("ui/frases.js"));
+    let escritos: BTreeSet<String> = sentences_of(&file, "CAMINHOS")
+        .into_iter()
+        .map(|(variant, _)| variant)
+        .collect();
+    let atravessam: BTreeSet<String> = seele_ffi::caminhos()
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    // Both directions. The guard above catches a name that crosses with no
+    // entry; this catches the entry with no name behind it, which is the shape
+    // «DIRETO» would take — a fifth key nothing ever sends, filed beside four
+    // that mean something, and read by a screen that had to decide what to do
+    // when it knows nothing.
+    let inventados: Vec<&String> = escritos.difference(&atravessam).collect();
+    assert!(
+        inventados.is_empty(),
+        "`CAMINHOS` writes names the core never sends, and there is exactly one \
+         reason to add one — to have something to say when nothing is known, \
+         which is the confident lie ADR 0022 exists not to produce: {inventados:?}"
+    );
+
+    // And no single name may be the bare word either. `IPv6 DIRETO` is fine —
+    // it is qualified, and it is one of the four the core distinguishes; a name
+    // that is only «DIRETO» is the flattening itself, wearing one of the four
+    // keys.
+    for (variant, sentence) in sentences_of(&file, "CAMINHOS") {
+        let baixa = sentence.trim().to_lowercase();
+        assert!(
+            baixa != "direto" && baixa != "direct",
+            "`CAMINHOS.{variant}` is written as the bare word «direct», which \
+             erases the distinction the four names exist to keep: in a NAT punch \
+             the conversation **is** direct, and somebody knew it exists"
+        );
+    }
+
+    let corpo = js_function(&read("ui/frases.js"), "function fraseDeCaminho(");
+    assert!(
+        corpo.contains("?? null"),
+        "`fraseDeCaminho` no longer answers with nothing for a name it does not \
+         know, so the footer prints whatever the core sends:\n{corpo}"
+    );
+    assert!(
+        !corpo.contains("desconhecida("),
+        "`fraseDeCaminho` falls through to the unknown-failure sentence, which \
+         puts «FALHA QUE ESTA TELA NÃO SABE NOMEAR» beside the round trip:\n{corpo}"
+    );
+}
+
+#[test]
+fn the_path_is_written_beside_the_numbers_and_then_left_alone() {
+    // Where it goes, and it is a product decision rather than a layout one: the
+    // footer is numbers, and the rule that a sentence only exists if it changes
+    // what somebody does is a rule about sentences. The path is a line next to
+    // them, written once when the session comes up and quiet afterwards.
+    let page = read("ui/index.html");
+    let Some(rodape) = page.split("<footer class=\"telemetria\">").nth(1) else {
+        panic!("the telemetry footer is gone, and the path has nowhere to be");
+    };
+    let Some(rodape) = rodape.split("</footer>").next() else {
+        panic!("the telemetry footer never closes");
+    };
+    assert!(
+        rodape.contains("id=\"tel-caminho\""),
+        "the path is not in the footer with the other measurements:\n{rodape}"
+    );
+
+    let corpo = js_function(&read("ui/tela-sessao.js"), "function desenharTelemetria(");
+    assert!(
+        corpo.contains("fraseDeCaminho(snapshot.caminho)"),
+        "nothing draws the path, so `Snapshot.caminho` crosses the bridge twice \
+         a second and is thrown away:\n{corpo}"
+    );
+    // Written once. Without the guard the footer rewrites the same two words on
+    // every frame — twice a second — which `specs/07-tema-evangelion.md` calls a
+    // design failure by name: movement that diagnoses nothing.
+    assert!(
+        corpo.contains("caminho !== null") && corpo.contains("!== caminho"),
+        "the path is redrawn whether or not it changed, and it never changes:\n{corpo}"
+    );
+}
+
+#[test]
+fn the_arrival_stage_reaches_the_screen_while_the_arrival_is_happening() {
+    // `fraseDeEtapa` was written in task 8 and had no caller at all: the FFI
+    // published a stage per instant of the crossing and nothing in production
+    // read one, because `Plug::connect` blocks and a listener subscribed after
+    // it returns has the whole crossing already behind it.
+    //
+    // Three things have to line up, and the middle one is the quiet one: the
+    // command has to hand the FFI the listener before blocking, the event has
+    // to cross under the name serde writes, and the script has to branch on
+    // that name.
+    let corpo = body_of(&read("src/main.rs"), "async fn connect(");
+    assert!(
+        corpo.contains("Plug::connect_watching"),
+        "the app still enters by the door that blocks with nobody listening, so \
+         the stages happen inside a line that answers only at the end:\n{corpo}"
+    );
+
+    let sent = serde_json::to_string(&seele_ffi::Event::ConnectStageChanged {
+        stage: seele_ffi::ConnectStage::Dentro,
+    })
+    .expect("the event must serialise to cross the bridge at all");
+    assert!(
+        sent.starts_with("{\"ConnectStageChanged\":"),
+        "the bridge no longer sends the shape the script branches on: {sent}"
+    );
+
+    let script = without_comments(&scripts());
+    assert!(
+        script.contains("payload.ConnectStageChanged"),
+        "nothing in the shell listens for the arrival's stages"
+    );
+    assert!(
+        script.contains("fraseDeEtapa(payload.ConnectStageChanged.stage)"),
+        "the stage arrives and is not turned into the sentence written for it, \
+         which is `fraseDeEtapa` going back to being dead code"
+    );
+}
+
+#[test]
+fn the_failed_connection_hands_the_shell_the_trail_it_kept() {
+    // Task 8 built the trail and `Plug::connect_with_trail` to carry it, and the
+    // app went on entering by `Plug::connect`, which throws it away. «Tentei
+    // quatro candidatos, o primeiro deu prazo esgotado em 4 s, o quarto
+    // recusou» is the data that was missing when the two-house field test
+    // failed, and a door nobody opens carries nothing.
+    let source = read("src/main.rs");
+    assert!(
+        source.contains("Result<Entrada, ConnectFailure>"),
+        "`connect` answers with the bare error again, and the trail dies at the \
+         bridge"
+    );
+
+    // And the shell has to know the shape changed, or every failure sentence
+    // reads a `ConnectFailure` as if it were a `PlugError` and falls through to
+    // «FALHA QUE ESTA TELA NÃO SABE NOMEAR».
+    let corpo = js_function(&read("ui/tela-boot.js"), "async function conectar(");
+    assert!(
+        corpo.contains("falha?.error ?? falha"),
+        "the entry screen writes its sentence from the whole failure instead of \
+         the error inside it, so every connection error reads as unknown:\n{corpo}"
+    );
+}
+
+#[test]
 fn the_stage_that_gives_up_names_no_cause_it_does_not_know() {
     // ADR 0003's alarm, on the screen. `Etapa::Desistiu` carries the whole
     // `ConnectError`, and `chegada.rs` says why in as many words: flattening
@@ -3786,6 +3983,16 @@ fn every_rung_of_the_reachability_ladder_has_a_sentence() {
     // ADR 0022 asks for exactly this to be said out loud rather than left for
     // the person to discover as "it doesn't connect".
     let frases = read("ui/frases.js");
+    // Scoped to `FRASES`, and that is load-bearing since the arrival paths
+    // arrived: `CAMINHOS` writes `FuroDeNat` and `Ipv6Direto` too, about the
+    // other side of the connection entirely, and a plain `contains` over the
+    // file would let either ladder sentence be deleted while a path sentence
+    // kept this green.
+    let dicionario = without_comments(&frases);
+    let escritas: BTreeSet<String> = sentences_of(&dicionario, "FRASES")
+        .into_iter()
+        .map(|(variante, _)| variante)
+        .collect();
     // `FuroDeNat` and `EnderecoDireto` were missing from this list, each for the
     // same reason: the list is written by hand, and a rung added to `Degrau`
     // reaches the screen without anything here noticing. Deleting either
@@ -3800,7 +4007,7 @@ fn every_rung_of_the_reachability_ladder_has_a_sentence() {
         "SoRedeLocal",
     ] {
         assert!(
-            frases.contains(&format!("{degrau}:")),
+            escritas.contains(degrau),
             "the ladder can stop at `{degrau}` and no sentence says what that \
              means for the link the person is about to send"
         );
@@ -4333,11 +4540,19 @@ fn the_nat_punching_rung_names_its_cost_where_the_cost_is_paid() {
     // the difference between saying so on the screen where the link appears and
     // letting somebody find out later is the difference between honesty and
     // advertising.
-    let frases = read("ui/frases.js");
-    let Some(depois) = frases.split("FuroDeNat:").nth(1) else {
+    // Read out of `FRASES` and not off the whole file. `CAMINHOS.FuroDeNat`
+    // exists now — the path this connection actually took, which is a fact
+    // about the other side of the wire — and it is a name rather than a
+    // sentence. Splitting the file on `FuroDeNat:` finds that one first, and
+    // every assertion below would then be checking a two-word metric for a
+    // disclosure it was never meant to carry.
+    let file = without_comments(&read("ui/frases.js"));
+    let Some((_, frase)) = sentences_of(&file, "FRASES")
+        .into_iter()
+        .find(|(variante, _)| variante == "FuroDeNat")
+    else {
         panic!("the ladder can stop at `FuroDeNat` and no sentence says what that means");
     };
-    let frase: String = depois.chars().take(800).collect();
     let baixa = frase.to_lowercase();
 
     // Two of the three assertions were cut on 2026-08-20, by the product owner,
@@ -6445,10 +6660,11 @@ const LIMITE_DE_FRASE: usize = 180;
 /// Dogma down with the window. Nor the two `fraseDeErro` composes for a changed
 /// key: those are two fingerprints with a line either side, and a fingerprint is
 /// as long as it is. What this guards is the prose.
-const DICIONARIOS: [&str; 7] = [
+const DICIONARIOS: [&str; 8] = [
     "MOTIVOS",
     "AVISOS",
     "ETAPAS",
+    "CAMINHOS",
     "FRASES",
     "ANEXOS",
     "TRANSFERENCIAS",

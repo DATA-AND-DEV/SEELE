@@ -231,6 +231,11 @@ pub enum ConnectStage {
         de: u8,
         /// O endereço, como texto: um `SocketAddr` não atravessa (ADR 0018).
         onde: String,
+        /// Um `LEVE` saiu pelo ponto de encontro por causa deste candidato.
+        ///
+        /// Ver a variante do núcleo. É a metade da informação de que
+        /// [`Snapshot::caminho`] é feito, e a única que não se lê do endereço.
+        avisou: bool,
     },
     /// Um furo com a marca certa chegou, e o caminho até aqui abriu.
     ///
@@ -362,10 +367,12 @@ impl From<&seele_core::chegada::Etapa> for ConnectStage {
                 candidato,
                 de,
                 onde,
+                avisou,
             } => Self::Tentando {
                 candidato: *candidato,
                 de: *de,
                 onde: onde.to_string(),
+                avisou: *avisou,
             },
             Etapa::CaminhoAberto { onde } => Self::CaminhoAberto {
                 onde: onde.to_string(),
@@ -393,6 +400,7 @@ fn campos_do_passo(etapa: &seele_core::chegada::Etapa) -> (Option<String>, Optio
             candidato,
             de,
             onde,
+            ..
         } => (Some(onde.to_string()), Some(*candidato), Some(*de)),
         Etapa::CaminhoAberto { onde } => (Some(onde.to_string()), None, None),
         Etapa::Parada { candidatos, .. } => (None, None, Some(*candidatos)),
@@ -416,10 +424,45 @@ fn registrar_trilha(trilha: &[seele_core::chegada::Passo]) {
             candidato = ?candidato,
             de = ?de,
             onde = ?onde,
+            avisou = ?avisou_do_passo(&passo.etapa),
             em_ms = %passo.em.as_millis(),
             "trilha da chegada"
         );
     }
+}
+
+/// Se um `LEVE` saiu por este passo, nos passos em que a pergunta faz sentido.
+///
+/// Vai para o log junto do endereço porque é a outra metade da resposta: uma
+/// tentativa que falhou **tendo avisado** e uma que falhou sem aviso nenhum são
+/// duas investigações diferentes, e sem esta linha as duas ficam iguais no
+/// registro.
+fn avisou_do_passo(etapa: &seele_core::chegada::Etapa) -> Option<bool> {
+    use seele_core::chegada::Etapa;
+    match etapa {
+        Etapa::Tentando { avisou, .. } => Some(*avisou),
+        Etapa::Parada { .. }
+        | Etapa::Avisando { .. }
+        | Etapa::CaminhoAberto { .. }
+        | Etapa::Dentro
+        | Etapa::Desistiu(_) => None,
+    }
+}
+
+/// Os nomes de caminho que podem chegar a uma casca.
+///
+/// **Derivada, e não escrita à mão**, pela mesma regra de
+/// [`ConnectStage::todas`]: é `seele_core::chegada::Caminho::TODOS` passada pelo
+/// `nome()` do núcleo. O guarda de cobertura de `frases.js` lê esta lista, e o
+/// ADR 0002 não deixa `apps/seele-app` ver o núcleo — sem esta função a casca
+/// teria de repetir os quatro nomes, que é exatamente o defeito que este ciclo
+/// já pagou uma vez.
+#[must_use]
+pub fn caminhos() -> Vec<&'static str> {
+    seele_core::chegada::Caminho::TODOS
+        .iter()
+        .map(seele_core::chegada::Caminho::nome)
+        .collect()
 }
 
 /// Um passo da trilha, do jeito que a casca o recebe.
@@ -573,6 +616,23 @@ struct Shared {
     link_battery: AtomicBool,
     link_seconds: std::sync::atomic::AtomicU64,
     link_attempts: std::sync::atomic::AtomicU32,
+    /// Por qual caminho esta conversa saiu, quando a chegada soube dizer.
+    ///
+    /// Escrito uma vez, quando a sessão sobe, e lido a cada quadro de interface.
+    /// Um `Mutex` e não um átomo porque é `&'static str` e porque a escrita
+    /// acontece exatamente uma vez — a contenção que os átomos de telemetria
+    /// evitam não existe aqui.
+    ///
+    /// `None` é uma resposta, e é a que a casca recebe quando a trilha não sabe
+    /// dizer: sem informação a tela **não escreve nada**. Ver
+    /// `seele_core::chegada::caminho`.
+    ///
+    /// Não é reescrito quando o enlace reconecta. A reconexão de
+    /// `seele_core::enlace` volta ao mesmo endereço do mesmo destino, então a
+    /// forma não muda; o que poderia mudar é o `avisou`, e trocar o nome na tela
+    /// por causa de um `send_to` que falhou num soluço de rede seria movimento
+    /// sem informação.
+    caminho: Mutex<Option<&'static str>>,
     /// Quantas vezes o histórico mudou desde que esta sessão começou.
     ///
     /// Existe para o [`Snapshot`] poder dizer "mudou" sem carregar a conversa
@@ -650,7 +710,13 @@ impl Shared {
     /// Só quem chama [`jitter_para_a_tela`] tem o que gravar aqui, e é de
     /// propósito: o número certo e o errado são ambos milissegundos em `f32`, e
     /// nada além daquela função separa um do outro.
-    fn gravar_jitter_de_chegada(&self, ms: f32) {
+    ///
+    /// Devolve se o número que a casca lê mudou de verdade — o suficiente para
+    /// valer um redesenho. A comparação é em microssegundos inteiros, que é como
+    /// ele é guardado: comparar os `f32` de origem acenderia o evento a cada
+    /// volta de telemetria, quatro vezes por segundo, porque um jitter alisado
+    /// muda no último bit sempre.
+    fn gravar_jitter_de_chegada(&self, ms: f32) -> bool {
         // Sem limitar a zero à mão: em Rust o `as` de ponto flutuante para
         // inteiro **satura**, e leva tanto o negativo quanto o `NaN` a zero
         // sozinho. Um `max` aqui seria uma guarda que nunca dispara, e uma
@@ -662,8 +728,25 @@ impl Shared {
             reason = "o `as` satura: negativo e NaN viram zero, e o teto de u64 está muito acima de qualquer jitter"
         )]
         let micros = (ms * 1000.0) as u64;
-        self.jitter_de_chegada_micros
-            .store(micros, Ordering::Relaxed);
+        let antes = self
+            .jitter_de_chegada_micros
+            .swap(micros, Ordering::Relaxed);
+        // Meio milissegundo, que é a menor diferença que o rodapé arredonda para
+        // outro número: `Math.round` na casca, `{:.0}` na TUI. Abaixo disso o
+        // evento acordaria a tela para ela redesenhar o mesmo texto.
+        antes.abs_diff(micros) >= 500
+    }
+
+    /// Guarda por qual caminho a chegada saiu, se ela soube dizer.
+    fn gravar_caminho(&self, caminho: Option<seele_core::chegada::Caminho>) {
+        if let Ok(mut slot) = self.caminho.lock() {
+            *slot = caminho.map(|caminho| caminho.nome());
+        }
+    }
+
+    /// O caminho como a casca o vê: um nome estável, ou nada.
+    fn caminho(&self) -> Option<&'static str> {
+        self.caminho.lock().ok().and_then(|slot| *slot)
     }
 
     /// O jitter de chegada como a casca o vê, em milissegundos.
@@ -785,6 +868,39 @@ impl Plug {
     /// vem vazia quando a falha é de antes de haver chegada: um endereço que
     /// não resolve, uma identidade que não abre, uma thread que não sobe.
     pub fn connect_with_trail(config: ConnectConfig) -> Result<(Arc<Self>, Trust), ConnectFailure> {
+        Self::abrir(config, None)
+    }
+
+    /// O mesmo, com alguém ouvindo a chegada **enquanto** ela acontece.
+    ///
+    /// A porta que faltava, e a falta era estrutural. `seele_core` publica uma
+    /// etapa por instante da travessia desde a tarefa 8, e nada em produção as
+    /// lia: [`Plug::connect`] bloqueia, quem se inscreve por [`Plug::subscribe`]
+    /// só tem o `Arc<Plug>` depois que ela volta, e quando ela volta a travessia
+    /// inteira já terminou. O ouvinte tinha de entrar **antes** do bloqueio, e é
+    /// só isso que esta função faz de diferente.
+    ///
+    /// Chega como [`Event::ConnectStageChanged`], na thread do motor, como todo
+    /// evento deste crate — quem marshala é a casca (`specs/06-clientes-gui.md`).
+    /// A última etapa (`Dentro` ou `Desistiu`) sai antes desta função devolver:
+    /// o motor espera o reencaminhamento terminar, e ele termina sozinho quando
+    /// a `Chegada` morre.
+    ///
+    /// # Errors
+    ///
+    /// O mesmo de [`Plug::connect_with_trail`].
+    pub fn connect_watching(
+        config: ConnectConfig,
+        olhos: Arc<dyn EventListener>,
+    ) -> Result<(Arc<Self>, Trust), ConnectFailure> {
+        Self::abrir(config, Some(olhos))
+    }
+
+    /// O corpo que as três portas compartilham.
+    fn abrir(
+        config: ConnectConfig,
+        olhos: Option<Arc<dyn EventListener>>,
+    ) -> Result<(Arc<Self>, Trust), ConnectFailure> {
         let (address, server_name, pin_key) = resolve(&config.server)?;
         // The invite's other addresses, resolved here so the driver thread gets
         // values. An alternative that does not resolve is dropped: the first
@@ -820,6 +936,7 @@ impl Plug {
             pattern: AtomicU8::new(pattern_byte(Pattern::Offline)),
             rtt_micros: std::sync::atomic::AtomicU64::new(0),
             jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
+            caminho: Mutex::new(None),
             sync_ratio: AtomicU8::new(0),
             running: AtomicBool::new(false),
             pending_weights: Mutex::new(Vec::new()),
@@ -855,6 +972,7 @@ impl Plug {
                     thread_shared,
                     command_rx,
                     &ready_tx,
+                    olhos,
                 ));
             })
             .map_err(|error| {
@@ -1463,6 +1581,7 @@ impl Plug {
         let rtt_ms = self.shared.rtt_micros.load(Ordering::Relaxed) as f32 / 1000.0;
 
         Snapshot {
+            caminho: self.shared.caminho(),
             link: self.shared.enlace(),
             pattern: pattern_from_byte(self.shared.pattern.load(Ordering::Relaxed)),
             dogma: room.dogma.clone(),
@@ -1829,6 +1948,7 @@ async fn drive(
     shared: Arc<Shared>,
     mut commands: tokio::sync::mpsc::UnboundedReceiver<Command>,
     ready: &std::sync::mpsc::Sender<Result<Trust, ConnectFailure>>,
+    olhos: Option<Arc<dyn EventListener>>,
 ) {
     shared
         .pattern
@@ -1850,8 +1970,34 @@ async fn drive(
     // entra avisa o ponto de encontro por candidato que precisa de furo, que é
     // o degrau 4 do ADR 0022. Sem bilhete os dois caminhos são o mesmo.
     let chegada = seele_core::chegada::Chegada::nova(destinos, config.bilhete.clone());
-    let mut client = match chegada.chegar(key, pins).await {
-        Ok(client) => client,
+
+    // O ouvinte entra **antes** do bloqueio, que é a coisa inteira: o `watch` da
+    // chegada existe desde a tarefa 8 e não tinha um só leitor em produção,
+    // porque toda inscrição acontecia depois de a travessia ter terminado.
+    //
+    // Uma tarefa e não um `select!` no laço abaixo: o laço só existe depois de
+    // haver sessão, e estas etapas todas acontecem antes disso.
+    let vigia = olhos.map(|ouvinte| {
+        let mut etapas = chegada.acompanhar();
+        tokio::spawn(async move {
+            while etapas.changed().await.is_ok() {
+                let etapa = ConnectStage::from(&*etapas.borrow_and_update());
+                ouvinte.on_event(Event::ConnectStageChanged { stage: etapa });
+            }
+        })
+    });
+
+    let chegou = chegada.chegar(key, pins).await;
+    // Esperada, e não abortada. A `Chegada` já morreu quando esta linha roda —
+    // `chegar` a consome —, então o emissor do `watch` já caiu e a tarefa acima
+    // termina sozinha depois de entregar a última etapa. Abortar aqui perderia
+    // exatamente essa última, que é a que diz como a travessia acabou.
+    if let Some(vigia) = vigia {
+        let _ = vigia.await;
+    }
+
+    let chegado = match chegou {
+        Ok(chegado) => chegado,
         Err(falha) => {
             tracing::warn!(motivo = %falha, "could not reach the Dogma");
             registrar_trilha(falha.trilha());
@@ -1862,6 +2008,18 @@ async fn drive(
             return;
         }
     };
+
+    // Por qual caminho esta conversa saiu, gravado antes de a casca poder
+    // perguntar: quem chama `snapshot()` no instante seguinte ao `connect` já
+    // encontra o nome, e não um `None` que vira nome no quadro seguinte.
+    //
+    // A trilha inteira vai para o log junto, e não só na falha: «venceu o
+    // terceiro candidato, público, com aviso» é a linha que responde por que a
+    // tela diz `FuroDeNat`, e sem ela o nome na tela não teria como ser
+    // conferido contra nada.
+    registrar_trilha(&chegado.trilha);
+    shared.gravar_caminho(chegado.caminho());
+    let mut client = chegado.enlace;
 
     // `Enlace::conectar` already returned `Err` above for anything that would
     // have made this a `PinDecision::Changed` or a refused invite — see
@@ -2174,11 +2332,13 @@ fn jitter_da_volta(telemetria: &seele_core::AudioTelemetry) -> JitterDaVolta {
         // O pior entre as fontes, como já vale para a perda e para a
         // profundidade: um único interlocutor ruim tem de ficar visível sem a
         // casca ter de varrer a lista.
+        //
+        // A escolha entre os dois `f64` mora na camada de áudio, com nome que
+        // diz o destino, e não aqui: a barra da TUI fazia a mesma escolha por
+        // conta própria e escolhia errado, e nada num `f64` avisa qual dos dois
+        // ele é.
         chegada_ms: telemetria
-            .sources
-            .iter()
-            .map(|fonte| fonte.jitter_ms)
-            .reduce(f64::max)
+            .worst_arrival_jitter_ms()
             .map(|chegada| chegada as f32),
     };
     volta
@@ -2187,38 +2347,84 @@ fn jitter_da_volta(telemetria: &seele_core::AudioTelemetry) -> JitterDaVolta {
 /// Refreshes what the shell reads without asking the server.
 ///
 /// Returns whether anything moved enough to be worth telling a shell about.
+///
+/// Só a fiação: pega a volta de áudio do laço de voz e o ida-e-volta do enlace,
+/// e entrega a [`medir_a_volta`], que é onde as decisões moram e onde elas são
+/// afirmáveis — esta função pede um [`Enlace`] vivo e um dispositivo de áudio
+/// aberto, e não há nenhum dos dois numa máquina de integração contínua.
 fn measure(sync: &mut SyncRatio, client: &Enlace, shared: &Arc<Shared>) -> bool {
+    let telemetria = shared
+        .voice
+        .lock()
+        .ok()
+        .and_then(|voice| voice.as_ref().map(Voice::telemetry));
+    let rtt = client.rtt().unwrap_or_default();
+    let rtt_micros = u64::try_from(rtt.as_micros()).unwrap_or(u64::MAX);
+    medir_a_volta(sync, shared, telemetria.as_ref(), rtt_micros)
+}
+
+/// Uma volta de medição: grava o que a casca lê, e diz se vale avisá-la.
+///
+/// # Por que isto é uma função, e não o corpo de [`measure`]
+///
+/// Porque a propriedade que este ciclo consertou — o `TelemetryChanged`
+/// disparar por variação **só** de jitter — não tinha como ser afirmada dentro
+/// de `measure`, e o que sobrava era um guarda que lia o **texto** dela. Esse
+/// guarda passa verde com a propriedade quebrada: um braço que grava o jitter e
+/// devolve `false` satisfaz tanto «a última linha nomeia `mudou_o_jitter`»
+/// quanto «o corpo tem `let mudou_o_jitter = match chegada_ms`».
+///
+/// Nada aqui precisa de sessão: a telemetria de áudio se monta à mão, o
+/// ida-e-volta é um `u64`, e o `Shared` já tinha um construtor de teste. Ler o
+/// texto da produção prende a forma da linha; isto prende o que ela faz.
+///
+/// # As duas grandezas, e os dois destinos
+///
+/// A profundidade do anel vai para o Sync Ratio, que é o que ela mede — quanta
+/// reserva o anel teve. O jitter de chegada vai para a tela, que é o que a
+/// pessoa quer saber. Ver [`jitter_para_a_tela`].
+///
+/// # Sem fonte nenhuma, nada é gravado
+///
+/// É contrapartida deliberada de não gravar zero: zero é o número que este
+/// conserto tirou dali — o relatório do Dogma manda `0.0` fixo porque um
+/// servidor não tem como medir jitter —, e escrevê-lo quando a voz cai faria a
+/// tela afirmar «rede perfeita» sobre uma sessão sem áudio nenhum.
+///
+/// O preço, dito por escrito porque não estava dito em lugar nenhum: numa sessão
+/// viva em que a voz cai no meio, o campo **congela** no último valor em vez de
+/// esvaziar. Corrigi-lo pede um terceiro estado na travessia — «medido», «sem
+/// medida ainda» e «sem medida agora» —, e nenhuma das duas cascas tem hoje como
+/// desenhar a diferença.
+fn medir_a_volta(
+    sync: &mut SyncRatio,
+    shared: &Arc<Shared>,
+    telemetria: Option<&seele_core::AudioTelemetry>,
+    rtt_micros: u64,
+) -> bool {
     let mut jitter_ms = 0.0;
     let mut loss = 0.0;
     let mut chegada_ms = None;
-    if let Ok(voice) = shared.voice.lock() {
-        if let Some(voice) = voice.as_ref() {
-            let telemetry = voice.telemetry();
-            // Jitter and loss are only observable at the receiver, which is why
-            // the server's own numbers are not the ones used here.
-            #[allow(
-                clippy::cast_possible_truncation,
-                reason = "a fraction; f32 is what the protocol carries"
-            )]
-            {
-                loss = telemetry.worst_loss_fraction() as f32;
-            }
-            // Duas grandezas, dois destinos. A profundidade do anel continua
-            // indo para o Sync Ratio, que é o que ela mede: quanta reserva o
-            // anel teve. O de chegada vai para a tela, que é o que a pessoa quer
-            // saber.
-            let volta = jitter_da_volta(&telemetry);
-            jitter_ms = volta.profundidade_do_anel_ms;
-            chegada_ms = volta.chegada_ms;
+    if let Some(telemetria) = telemetria {
+        // Jitter and loss are only observable at the receiver, which is why
+        // the server's own numbers are not the ones used here.
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "a fraction; f32 is what the protocol carries"
+        )]
+        {
+            loss = telemetria.worst_loss_fraction() as f32;
         }
+        let volta = jitter_da_volta(telemetria);
+        jitter_ms = volta.profundidade_do_anel_ms;
+        chegada_ms = volta.chegada_ms;
     }
 
-    if let Some(chegada) = chegada_ms {
-        shared.gravar_jitter_de_chegada(jitter_para_a_tela(chegada, jitter_ms));
-    }
+    let mudou_o_jitter = match chegada_ms {
+        Some(chegada) => shared.gravar_jitter_de_chegada(jitter_para_a_tela(chegada, jitter_ms)),
+        None => false,
+    };
 
-    let rtt = client.rtt().unwrap_or_default();
-    let rtt_micros = u64::try_from(rtt.as_micros()).unwrap_or(u64::MAX);
     #[allow(
         clippy::cast_precision_loss,
         reason = "a round trip in microseconds is far below f32's exact range"
@@ -2234,7 +2440,13 @@ fn measure(sync: &mut SyncRatio, client: &Enlace, shared: &Arc<Shared>) -> bool 
 
     // A shell redrawing because the round trip moved by a microsecond is a
     // shell redrawing thirty times a second for nothing.
-    previous_ratio != ratio || previous_rtt.abs_diff(rtt_micros) > 1_000
+    //
+    // O jitter entra nesta conta desde que ele passou a ser um número de
+    // verdade. Antes ele era o `0.0` do relatório do Dogma e nunca se mexia, e o
+    // evento nunca precisou falar dele; agora ele varia sozinho, e sem esta
+    // parcela quem depende do evento — em vez de puxar `snapshot` em laço, como
+    // o app faz — desenha o número velho até outra coisa mudar.
+    previous_ratio != ratio || previous_rtt.abs_diff(rtt_micros) > 1_000 || mudou_o_jitter
 }
 
 /// Runs one command. Returns false when the driver should stop.
@@ -2836,6 +3048,7 @@ mod tests {
             pattern: AtomicU8::new(0),
             rtt_micros: std::sync::atomic::AtomicU64::new(0),
             jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
+            caminho: Mutex::new(None),
             sync_ratio: AtomicU8::new(0),
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
@@ -2940,6 +3153,176 @@ mod tests {
         assert!(
             jitter_da_volta(&telemetria).chegada_ms.is_none(),
             "sem fonte nenhuma saiu um jitter de chegada, e ele só pode ser zero"
+        );
+    }
+
+    #[test]
+    fn gravar_o_mesmo_jitter_duas_vezes_nao_e_uma_mudanca() {
+        // O evento de telemetria existe para quem **não** puxa `snapshot` em
+        // laço, e ele não falava do jitter: enquanto o número era o `0.0` fixo
+        // do relatório do Dogma isso não custava nada, porque ele nunca se
+        // mexia. Agora ele varia sozinho, e quem depende do evento ficaria com o
+        // número velho até outra coisa mudar.
+        //
+        // O limiar é meio milissegundo porque é a menor diferença que muda o
+        // texto: as duas cascas arredondam para milissegundo inteiro. Sem ele o
+        // evento sairia quatro vezes por segundo para redesenhar a mesma linha,
+        // porque um jitter alisado muda no último bit sempre.
+        let compartilhado = bare_shared();
+
+        assert!(
+            compartilhado.gravar_jitter_de_chegada(7.5),
+            "a primeira medida veio de um zero e não contou como mudança"
+        );
+        assert!(
+            !compartilhado.gravar_jitter_de_chegada(7.5),
+            "o mesmo número contou como mudança, e a tela redesenharia por nada"
+        );
+        assert!(
+            !compartilhado.gravar_jitter_de_chegada(7.6),
+            "um décimo de milissegundo acordou a tela para escrever `8ms` de novo"
+        );
+        assert!(
+            compartilhado.gravar_jitter_de_chegada(9.0),
+            "um milissegundo e meio a mais não contou como mudança, e o rodapé \
+             ficaria em `8ms` com a rede piorando"
+        );
+    }
+
+    /// Uma volta de telemetria com as duas grandezas plantadas para não poderem
+    /// ser confundidas: 42 ms de reserva de anel contra `chegada` de jitter de
+    /// rede.
+    fn volta_com(chegada_ms: f64) -> seele_core::AudioTelemetry {
+        seele_core::AudioTelemetry {
+            local: seele_core::LocalTelemetry::default(),
+            sources: vec![seele_core::SourceTelemetry {
+                ssrc: 1,
+                jitter_depth_ms: 42.0,
+                jitter_ms: chegada_ms,
+                ..seele_core::SourceTelemetry::default()
+            }],
+        }
+    }
+
+    #[test]
+    fn uma_volta_grava_o_jitter_de_chegada_e_nao_a_reserva_do_anel() {
+        // A fiação de `measure`, afirmada onde ela é afirmável. A versão
+        // anterior deste teste lia o **texto** de `measure` e passava verde com
+        // a propriedade quebrada: um braço que gravasse o jitter e devolvesse
+        // `false` satisfazia as duas asserções de texto que ela fazia.
+        let compartilhado = bare_shared();
+        let mut sync = SyncRatio::new();
+
+        let _ = medir_a_volta(&mut sync, &compartilhado, Some(&volta_com(7.5)), 41_000);
+
+        assert!(
+            (compartilhado.jitter_de_chegada_ms() - 7.5).abs() < 0.01,
+            "a casca leria {}, e o jitter de chegada era 7,5 ms — 42,0 é a \
+             reserva do anel, que é a grandeza errada",
+            compartilhado.jitter_de_chegada_ms()
+        );
+    }
+
+    #[test]
+    fn o_evento_de_telemetria_conta_a_variacao_do_jitter() {
+        // A pendência do ledger, como comportamento. O evento existe para quem
+        // **não** puxa `snapshot` em laço, e ele não falava do jitter: enquanto
+        // o número era o `0.0` fixo do relatório do Dogma isso não custava nada,
+        // porque ele nunca se mexia.
+        //
+        // A parcela é isolada deixando o Sync Ratio assentar primeiro: ele é
+        // uma média móvel, e com entradas constantes ele para de andar. A conta
+        // dele não usa o jitter de **chegada** — usa a reserva do anel, o
+        // ida-e-volta e a perda —, então depois de assentado o único motivo que
+        // resta para responder «mudou» é o jitter da tela.
+        let compartilhado = bare_shared();
+        let mut sync = SyncRatio::new();
+
+        let mut assentou = false;
+        for _ in 0..500 {
+            if !medir_a_volta(&mut sync, &compartilhado, Some(&volta_com(7.5)), 41_000) {
+                assentou = true;
+                break;
+            }
+        }
+        assert!(
+            assentou,
+            "o Sync Ratio não parou de andar com entradas constantes, então este \
+             teste não consegue isolar a parcela do jitter"
+        );
+
+        assert!(
+            medir_a_volta(&mut sync, &compartilhado, Some(&volta_com(12.0)), 41_000),
+            "o jitter de chegada subiu de 7,5 ms para 12 ms e a volta disse que \
+             não havia nada a contar à casca: quem depende do evento em vez de \
+             puxar `snapshot` em laço desenha o número velho"
+        );
+        assert!(
+            !medir_a_volta(&mut sync, &compartilhado, Some(&volta_com(12.0)), 41_000),
+            "o mesmo jitter contou como mudança, e a tela redesenharia por nada"
+        );
+    }
+
+    #[test]
+    fn o_laco_entrega_a_volta_de_audio_que_ele_leu() {
+        // Um encosto, e só isso — as propriedades estão nos três testes de
+        // comportamento em volta. O que este guarda é o **hop** que sobrou:
+        // `measure` lê a telemetria de voz e a passa a `medir_a_volta`, e não há
+        // como afirmar essa linha de outro jeito — ela pede um `Enlace` vivo e
+        // um dispositivo de áudio aberto, que é justamente o motivo de tudo o
+        // mais ter saído dela.
+        //
+        // O que ele pega é uma mutação real: `medir_a_volta(sync, shared, None,
+        // rtt_micros)` tem o tipo certo, compila, e apaga a telemetria de áudio
+        // da tela inteira sem que nenhum dos outros testes veja.
+        let source = include_str!("lib.rs");
+        let Some(corpo) = source
+            .split(
+                "fn measure(sync: &mut SyncRatio, client: &Enlace, shared: &Arc<Shared>) -> bool {",
+            )
+            .nth(1)
+            .and_then(|resto| resto.split("\n}").next())
+        else {
+            panic!("`measure` mudou de assinatura, e este encosto tem de mudar com ela");
+        };
+        let corpo: String = corpo
+            .lines()
+            .map(|linha| match linha.split_once("//") {
+                Some((antes, _)) => antes,
+                None => linha,
+            })
+            .collect::<Vec<&str>>()
+            .join("\n");
+
+        assert!(
+            corpo.contains("medir_a_volta(sync, shared, telemetria.as_ref(), rtt_micros)"),
+            "`measure` deixou de entregar a `medir_a_volta` a telemetria que ele \
+             acabou de ler, e o laço de voz para de chegar à tela:\n{corpo}"
+        );
+        assert!(
+            corpo.contains("shared\n        .voice\n        .lock()"),
+            "`measure` deixou de ler o laço de voz:\n{corpo}"
+        );
+    }
+
+    #[test]
+    fn sem_volta_de_audio_nenhuma_o_ultimo_jitter_medido_fica() {
+        // A contrapartida deliberada de não gravar zero, e o preço dela: numa
+        // sessão viva em que a voz cai no meio, o campo congela no último valor
+        // em vez de esvaziar. Gravar zero faria a tela afirmar «rede perfeita»
+        // sobre uma sessão sem áudio nenhum, que é o defeito que este ciclo
+        // tirou dali.
+        let compartilhado = bare_shared();
+        let mut sync = SyncRatio::new();
+
+        let _ = medir_a_volta(&mut sync, &compartilhado, Some(&volta_com(7.5)), 41_000);
+        let _ = medir_a_volta(&mut sync, &compartilhado, None, 41_000);
+
+        assert!(
+            (compartilhado.jitter_de_chegada_ms() - 7.5).abs() < 0.01,
+            "a voz caiu e a tela passou a mostrar {}, que é o zero que este \
+             conserto existe para não mostrar",
+            compartilhado.jitter_de_chegada_ms()
         );
     }
 
@@ -3577,6 +3960,7 @@ mod tests {
             pattern: AtomicU8::new(0),
             rtt_micros: std::sync::atomic::AtomicU64::new(0),
             jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
+            caminho: Mutex::new(None),
             sync_ratio: AtomicU8::new(0),
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
@@ -3833,6 +4217,7 @@ mod trilha_no_log {
                     candidato: 2,
                     de: 4,
                     onde,
+                    avisou: true,
                 },
                 em: Duration::from_millis(8003),
             },

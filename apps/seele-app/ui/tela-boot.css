@@ -43,6 +43,15 @@
   overflow-wrap: anywhere;
 }
 
+/* O andamento da chegada, entre o formulário e o erro. Em fósforo e não em
+   vermelho porque não é falha nenhuma: é a travessia acontecendo, e ela ocupa
+   o lugar que o erro ocuparia se ela terminasse mal. Uma linha só — o texto
+   vem de `ETAPAS`, que o guarda de comprimento já segura. */
+.etapa {
+  margin: 16px 0 0;
+  color: var(--seele-fosforo);
+}
+
 /* ---- onde você já esteve ----
    Acima do formulário porque é o caminho mais curto para a maioria: quem abre o
    app quase sempre volta para onde já foi. Fica escondida enquanto a lista está

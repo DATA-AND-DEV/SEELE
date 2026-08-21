@@ -156,6 +156,57 @@ function fraseDeEtapa(etapa) {
 }
 
 /**
+ * Por qual caminho a conversa saiu.
+ *
+ * Uma entrada por `seele_core::chegada::Caminho`, e a lista tem de ser completa:
+ * o guarda `every_path_a_connection_can_take_has_a_sentence_in_the_page` cobra
+ * cada nome contra `seele_ffi::caminhos()`, que é derivada do enum.
+ *
+ * **Dicionário próprio, e não `FRASES`.** Dois destes nomes existem lá com o
+ * mesmo texto de variante e outro significado: os degraus `FuroDeNat` e
+ * `Ipv6Direto` do ADR 0022 são até onde **o link de quem hospeda** alcança,
+ * decididos antes de existir par nenhum. Estes quatro são por onde **esta
+ * conexão** de fato passou. Dobrar os dois conjuntos num dicionário só faria uma
+ * frase sobre um link aparecer descrevendo uma conversa, e o defeito seria
+ * invisível: a chave casa.
+ *
+ * Nomes, e não frases. Isto é uma métrica no rodapé, ao lado de ATRASO e
+ * JITTER: é escrita uma vez quando a sessão sobe e cala depois. Só a degradação
+ * vira frase, e a frase diz o que fazer.
+ *
+ * `FURO DE NAT` não promete nada, e é para não prometer que ela é um nome: o
+ * núcleo é explícito em que um aviso enviado é evidência forte de que o furo
+ * abriu, e não prova. É o mesmo grau de certeza do degrau homônimo da escada,
+ * cuja frase por isso diz «deve funcionar».
+ */
+const CAMINHOS = {
+  RedeLocal: "REDE LOCAL",
+  Ipv6Direto: "IPv6 DIRETO",
+  EnderecoPublico: "ENDEREÇO PÚBLICO",
+  FuroDeNat: "FURO DE NAT",
+};
+
+/**
+ * O nome do caminho, ou nada.
+ *
+ * `null` e não «DIRETO», e não «DESCONHECIDO»: **sem informação a tela não
+ * escreve nada**. A escada tem cinco degraus e a palavra que se inventaria
+ * apagaria a distinção que importa — num furo de NAT a conversa é direta *e*
+ * alguém soube que ela existe. Inventar um nome quando não se sabe é a mentira
+ * confiante que o ADR 0022 existe para não produzir.
+ *
+ * Um nome que este arquivo não conhece também vira `null`, e é a única
+ * divergência deliberada com `desconhecida`: aquela existe para uma falha, que
+ * é quando dizer o nome cru ainda ajuda quem relata. Esta é uma métrica, e uma
+ * métrica que imprime o nome de uma variante do Rust ao lado de `RTT 41ms` é
+ * ruído. Quem pega esse caso é o guarda, antes de sair daqui.
+ */
+function fraseDeCaminho(caminho) {
+  if (typeof caminho !== "string") return null;
+  return CAMINHOS[caminho] ?? null;
+}
+
+/**
  * A frase para uma falha de conexão.
  *
  * O erro chega como enum — nunca como texto — e é aqui que ele vira uma frase.

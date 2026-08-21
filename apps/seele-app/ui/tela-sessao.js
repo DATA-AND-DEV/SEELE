@@ -904,6 +904,19 @@ function desenharTelemetria(snapshot) {
   const cage = snapshot.cages.find((c) => c.occupied_by_us);
   medido($("tel-cage"), cage ? cage.name : "SEM PLUG");
 
+  // Escrito uma vez e calado depois. O caminho não muda dentro de uma sessão —
+  // a reconexão do núcleo volta ao mesmo endereço —, e reescrever o mesmo texto
+  // duas vezes por segundo seria movimento sem informação, que é o que
+  // `specs/07-tema-evangelion.md` chama de falha de design.
+  //
+  // Sem nome, nada é escrito e o travessão fica: é a métrica dizendo que não
+  // sabe, e não a tela inventando um «DIRETO» que apagaria a distinção que
+  // importa.
+  const caminho = fraseDeCaminho(snapshot.caminho);
+  if (caminho !== null && $("tel-caminho").textContent !== caminho) {
+    medido($("tel-caminho"), caminho);
+  }
+
   $("tel-local").hidden = !tel.local_fault;
 
   desenharEnlace(snapshot.link);

@@ -44,7 +44,7 @@
 //! inteira de candidatos em vez do endereço único com que
 //! [`crate::enlace::Enlace`] reconecta hoje.
 
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -110,6 +110,20 @@ pub enum Etapa {
         de: u8,
         /// O endereço.
         onde: SocketAddr,
+        /// Um `LEVE` saiu pelo ponto de encontro por causa **deste** candidato.
+        ///
+        /// A metade da informação de que [`Caminho`] é feito, e a única que não
+        /// se pode ler do endereço: `EnderecoPublico` e `FuroDeNat` são os dois
+        /// IPv4 público, e o que os separa é o aviso. Sem este campo a tabela
+        /// não é computável e a tela acabaria adivinhando.
+        ///
+        /// Verdadeiro quando `crate::enlace` conseguiu mandar o datagrama por
+        /// este candidato — nem o bilhete sozinho, nem a intenção: o envio.
+        /// Falso no candidato que não precisa de furo, no convite sem `enc=`, e
+        /// no aviso que o sistema recusou. Ver `avisar_pelo_candidato`, que é
+        /// quem decide, e a bandeira de [`Etapa::Parada`], que promete bem
+        /// menos que isto.
+        avisou: bool,
     },
     /// Um `FURO` com a marca certa chegou: o caminho até aqui abriu.
     ///
@@ -170,6 +184,7 @@ impl Etapa {
             candidato: 0,
             de: 0,
             onde: EXEMPLO,
+            avisou: false,
         },
         Self::CaminhoAberto { onde: EXEMPLO },
         Self::Dentro,
@@ -204,27 +219,36 @@ impl Etapa {
     /// prazo de 600 ms lá em `crate::encontro`; aqui é uma transição que não se
     /// pode escrever, que é mais barato de conferir e não depende do relógio.
     ///
-    /// # As duas linhas em que esta máquina é mais frouxa que a tabela do spec
+    /// # A linha do spec que esta máquina passou a cobrar
     ///
-    /// São **duas**, e pela mesma causa: enquanto [`Chegada::chegar`] delega o
-    /// laço a [`crate::enlace::Enlace`] ela observa o primeiro candidato e o
-    /// fim, e não os do meio. Cobrar índice obrigaria esta camada a publicar
-    /// passos que ninguém viu acontecer, e um passo inventado é pior que um
-    /// passo que falta — a trilha existe justamente para responder o que de
-    /// fato foi tentado.
+    /// «Do **último** candidato para `Desistiu`». Ela era frouxa aqui, e a
+    /// razão era de observação: [`Chegada::chegar`] via o primeiro candidato e
+    /// o fim, e não os do meio, então o índice do último não existia para ser
+    /// comparado. **Essa precondição foi cumprida** — o laço de
+    /// [`crate::enlace::Enlace`] passou a contar cada candidato com o índice
+    /// dele ([`crate::enlace::Tentativa`]) —, e a regra é cobrada:
+    /// `Tentando{i} → Desistiu` exige `i + 1 == de`.
     ///
-    /// 1. A tabela diz «do **último** candidato para `Desistiu`»; aqui
-    ///    `Tentando → Desistiu` vale com qualquer índice, porque o índice do
-    ///    último não é observado.
-    /// 2. A tabela diz `Tentando|CaminhoAberto → Tentando{i+1}`; aqui
-    ///    `Tentando → Tentando` vale com **qualquer** índice, inclusive o
-    ///    mesmo, e o mesmo para `CaminhoAberto → Tentando`. Pela mesma razão:
-    ///    sem ver os candidatos do meio, `i + 1` não é uma conta que esta
-    ///    camada saiba fazer.
+    /// O que ela pega é uma desistência anunciada com candidatos ainda por
+    /// tentar, que é a forma que um passo perdido no meio do caminho toma
+    /// quando ele chega aqui.
     ///
-    /// As duas apertam juntas quando o laço mudar de casa e os índices
-    /// passarem a ser observados. Nenhuma das duas afrouxa a ausência que é
-    /// requisito, que é a de cima.
+    /// # A linha que continua frouxa, e por um motivo que não é observação
+    ///
+    /// A tabela diz `Tentando|CaminhoAberto → Tentando{i+1}`. Aqui
+    /// `Tentando → Tentando` vale com **qualquer** índice, inclusive o mesmo, e
+    /// o mesmo para `CaminhoAberto → Tentando`. O motivo agora é outro: **o
+    /// destino entra como nome e não como valor**, então o índice de destino
+    /// não está nesta função para ser comparado com nada.
+    ///
+    /// E isso é a forma da função, não um acidente dela: a legalidade de sair
+    /// de onde se está não depende do conteúdo de aonde se vai, e passar o
+    /// destino inteiro faria o `match` casar sobre dois valores para cobrar uma
+    /// única aresta. A conta `i + 1` é sequencial por construção — o laço conta
+    /// com `enumerate` —, e quem a quebrasse quebraria antes o índice que a
+    /// regra de cima já cobra.
+    ///
+    /// Nenhuma das duas afrouxa a ausência que é requisito, que é a de cima.
     #[must_use]
     pub fn transicao_legal(atual: &Self, para: &str) -> bool {
         match (atual, para) {
@@ -244,11 +268,206 @@ impl Etapa {
             (Self::Parada { candidatos, .. }, "Tentando") => *candidatos > 0,
             (Self::Parada { candidatos: 0, .. }, "Desistiu") => true,
             (Self::Avisando { .. }, "Tentando") => true,
-            (Self::Tentando { .. }, "CaminhoAberto" | "Tentando" | "Dentro" | "Desistiu") => true,
+            // Só do último candidato. Uma desistência com endereços ainda por
+            // tentar é a forma que um passo perdido toma quando chega aqui —
+            // ver a seção sobre esta linha no doc.
+            //
+            // Em `u16` porque os dois campos saturam em `u8::MAX`: um convite de
+            // mais de 255 endereços não existe, e `candidato + 1` em `u8` seria
+            // um estouro à espera dele.
+            (Self::Tentando { candidato, de, .. }, "Desistiu") => {
+                u16::from(*candidato) + 1 == u16::from(*de)
+            }
+            (Self::Tentando { .. }, "CaminhoAberto" | "Tentando" | "Dentro") => true,
             (Self::CaminhoAberto { .. }, "Tentando" | "Dentro" | "Desistiu") => true,
             _ => false,
         }
     }
+}
+
+/// Por qual caminho a conversa saiu, depois que ela saiu.
+///
+/// Quatro nomes estáveis, no padrão de `Degrau::nome()` e pela mesma regra de
+/// [`Etapa`]: a frase que uma pessoa lê mora na casca (ADR 0012 e 0023), e o
+/// Rust exporta a chave.
+///
+/// **Não é a escada do ADR 0022, e não podia ser.** A escada tem cinco degraus
+/// e é o que **quem hospeda** conseguiu anunciar, antes de existir par nenhum;
+/// isto é por onde **quem entra** de fato passou, e só existe depois de haver
+/// sessão. Dois dos nomes se repetem entre as duas listas — `FuroDeNat` e
+/// `Ipv6Direto` — e são fatos diferentes sobre lados diferentes, o que é por que
+/// a casca os arquiva em dicionários separados.
+///
+/// # De onde estes quatro saem
+///
+/// De duas coisas, e só delas, porque só elas quem entra sabe:
+///
+/// 1. **a forma do endereço que venceu** — privado, IPv6 global ou IPv4 público;
+/// 2. **se um `LEVE` saiu por aquele candidato**, que é decisão desta camada e
+///    está gravada em [`Etapa::Tentando`].
+///
+/// | o que venceu | `LEVE` saiu por ele? | nome |
+/// |---|---|---|
+/// | endereço privado | não | [`Caminho::RedeLocal`] |
+/// | IPv6 global | — | [`Caminho::Ipv6Direto`] |
+/// | IPv4 público | não | [`Caminho::EnderecoPublico`] |
+/// | IPv4 público | **sim** | [`Caminho::FuroDeNat`] |
+///
+/// `EnderecoPublico` e `FuroDeNat` **não se distinguem pela forma do endereço**:
+/// os dois são IPv4 público. O que os separa é o aviso.
+///
+/// # O grau de certeza, escrito aqui porque não é «prova»
+///
+/// Mandar um `LEVE` não prova que o furo abriu. A conexão pode ter subido por um
+/// caminho que já estava aberto — uma porta mapeada no roteador, um NAT de cone
+/// cheio, um endereço que nunca precisou de furo nenhum. O que `FuroDeNat`
+/// afirma é o que se observou: **o candidato que venceu é público, e nós
+/// avisamos por ele**. Evidência forte, e não prova.
+///
+/// É o **mesmo grau de certeza** com que o anfitrião declara `Degrau::FuroDeNat`
+/// do outro lado — e é por isso que a frase daquele degrau diz «deve funcionar»
+/// e não «funciona». Quem provaria é o datagrama `FURO`, e quem o lê é o
+/// `seele-udp`, que vem depois do portão de campo e pode nem ser construído.
+/// Enquanto ele não existir, isto é o que há; e isto é muito melhor que
+/// «DIRECT», que apagaria a distinção inteira — em `FuroDeNat` a conversa **é**
+/// direta, e alguém soube que ela existe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Caminho {
+    /// O endereço que venceu não é roteável fora daqui: a mesma rede, ou a
+    /// mesma máquina.
+    ///
+    /// # Loopback conta — **na forma escrita**, e não na mapeada
+    ///
+    /// `127.0.0.1:8383` sai como `RedeLocal`. `[::ffff:127.0.0.1]:8383` **não**:
+    /// ele sai como [`Caminho::EnderecoPublico`], ou como
+    /// [`Caminho::FuroDeNat`] se o link trouxer `enc=`.
+    ///
+    /// Não é descuido, é consistência comprada de propósito. [`Caminho::de`]
+    /// faz **a mesma** pergunta que decide se o `LEVE` sai — `e_publico`, que
+    /// testa loopback no endereço como ele está escrito. Canonizar aqui daria
+    /// uma classificação mais bonita e duas respostas diferentes para o mesmo
+    /// endereço: o laço mandaria o aviso e a tela diria que ninguém precisou
+    /// dele. Entre a pureza e as duas metades concordarem, concordar vale mais.
+    ///
+    /// O preço não custa segurança, e é o mesmo argumento que `e_publico` já
+    /// carrega: o candidato decide apenas **se** o `LEVE` sai, nunca **para
+    /// onde** o anfitrião fura — o destino do furo é `bilhete.aviso()`, fixado
+    /// em `crate::encontro::Batida::preparar`. Um candidato mal classificado não
+    /// redireciona pacote contra terceiro nenhum.
+    ///
+    /// # O caso real em que isso aparece
+    ///
+    /// Um Dogma cujo ponto de encontro roda **na mesma máquina**, atrás de um
+    /// socket de pilha dupla — o arranjo de quem hospeda na máquina de
+    /// desenvolvimento. O ponto observa a origem de quem bateu como
+    /// `::ffff:127.0.0.1` e publica isso no convite;
+    /// `alcance::anunciar_com_porta` empurra o endereço refletido para a lista
+    /// conferindo só a família, sem filtro de loopback nenhum.
+    ///
+    /// Quem entra por aquele link vê no rodapé **`FURO DE NAT`** sobre uma
+    /// conversa que nunca saiu da máquina. A frase não é falsa no que ela
+    /// afirma — o candidato é público para esta classificação, e nós avisamos
+    /// por ele —, e é o mesmo grau de certeza do resto: evidência do que se
+    /// observou, e não prova do que aconteceu. Em campo, entre duas casas, o
+    /// arranjo não existe.
+    RedeLocal,
+    /// Um endereço IPv6 global respondeu, e não houve NAT no caminho.
+    ///
+    /// Vale **com ou sem** aviso, e a assimetria com o IPv4 é deliberada: um
+    /// `LEVE` sai por qualquer candidato público, IPv6 inclusive, mas o que o
+    /// anfitrião abre lá é buraco de firewall e não tradução de endereço.
+    /// Chamar isso de `FuroDeNat` poria a palavra NAT onde não houve NAT.
+    Ipv6Direto,
+    /// Um IPv4 público respondeu sem que precisássemos avisar ninguém.
+    ///
+    /// O degrau que uma porta mapeada no roteador produz, e o que um Dogma com
+    /// endereço próprio produz sempre.
+    EnderecoPublico,
+    /// Um IPv4 público respondeu, e avisamos o ponto de encontro por ele.
+    ///
+    /// A leitura honesta está no cabeçalho do enum: evidência forte, não prova.
+    FuroDeNat,
+}
+
+impl Caminho {
+    /// Um exemplar de cada caminho, para quem precisa cobrir todos.
+    ///
+    /// Pela mesma regra de [`Etapa::TODAS`], e pelo mesmo motivo: a casca cobra
+    /// cobertura de frase contra uma lista, e uma lista escrita à mão que o
+    /// compilador não liga ao enum deixa uma variante nova atravessar calada.
+    /// O guarda desta é `estados.rs`, que a confere contra os braços do `match`
+    /// de [`Caminho::nome`] — que é o que o compilador cobra de verdade.
+    pub const TODOS: [Self; 4] = [
+        Self::RedeLocal,
+        Self::Ipv6Direto,
+        Self::EnderecoPublico,
+        Self::FuroDeNat,
+    ];
+
+    /// O nome estável que atravessa para a casca.
+    #[must_use]
+    pub fn nome(&self) -> &'static str {
+        match self {
+            Self::RedeLocal => "RedeLocal",
+            Self::Ipv6Direto => "Ipv6Direto",
+            Self::EnderecoPublico => "EnderecoPublico",
+            Self::FuroDeNat => "FuroDeNat",
+        }
+    }
+
+    /// A tabela do cabeçalho, em código.
+    ///
+    /// `avisou` é lido **depois** da forma, e só quando ela é IPv4 público: é a
+    /// única linha da tabela em que a forma não decide sozinha.
+    #[must_use]
+    pub fn de(onde: SocketAddr, avisou: bool) -> Self {
+        // A mesma pergunta que decide se um `LEVE` sai, feita pela mesma
+        // função: privado, loopback, sem destino e multicast são todos «nada
+        // atravessou a internet». Duplicar o critério aqui deixaria os dois
+        // discordarem, e o desacordo apareceria como uma tela dizendo
+        // `EnderecoPublico` sobre um `192.168.x.x`.
+        if !crate::enlace::e_publico(onde.ip()) {
+            return Self::RedeLocal;
+        }
+        // Na forma canônica: um `::ffff:203.0.113.7` é IPv4 público escrito de
+        // outro jeito, e é **a forma comum** — é assim que o ponto de encontro
+        // reflete a origem de quem está atrás de pilha dupla. Sem canonizar,
+        // todo candidato refletido viraria `Ipv6Direto`.
+        match onde.ip().to_canonical() {
+            IpAddr::V6(_) => Self::Ipv6Direto,
+            IpAddr::V4(_) if avisou => Self::FuroDeNat,
+            IpAddr::V4(_) => Self::EnderecoPublico,
+        }
+    }
+}
+
+/// Por qual caminho esta trilha saiu, se ela saiu.
+///
+/// `None` é a resposta certa em três casos, e nos três a casca não escreve nada:
+/// uma trilha vazia, uma chegada que não chegou, e uma que chegou sem nenhuma
+/// tentativa registrada. **Inventar um nome quando não se sabe é a mentira
+/// confiante que o ADR 0022 existe para não produzir** — e «DIRECT», o nome que
+/// se inventaria, é justamente o que apaga a distinção que importa.
+///
+/// Lê a **última** [`Etapa::Tentando`] antes de [`Etapa::Dentro`], que é a que
+/// venceu: as anteriores falharam, e o laço só publica um passo por candidato.
+#[must_use]
+pub fn caminho(trilha: &[Passo]) -> Option<Caminho> {
+    let dentro = trilha
+        .iter()
+        .rposition(|passo| passo.etapa == Etapa::Dentro)?;
+    trilha
+        .iter()
+        .take(dentro)
+        .rev()
+        .find_map(|passo| match &passo.etapa {
+            Etapa::Tentando { onde, avisou, .. } => Some(Caminho::de(*onde, *avisou)),
+            Etapa::Parada { .. }
+            | Etapa::Avisando { .. }
+            | Etapa::CaminhoAberto { .. }
+            | Etapa::Dentro
+            | Etapa::Desistiu(_) => None,
+        })
 }
 
 /// Uma etapa e quando ela aconteceu.
@@ -342,16 +561,29 @@ impl Chegada {
 
     /// Atravessa: tenta os candidatos do convite e devolve a sessão.
     ///
-    /// # O que esta versão faz, e o que ela ainda não vê
+    /// # O que esta versão vê
     ///
-    /// O laço de candidatos continua em [`crate::enlace::Enlace`], inteiro e
-    /// sem uma linha movida — com o aviso por candidato, a repetição em tarefa
-    /// de fundo e o prazo curto do candidato distante que a tarefa anterior
-    /// escreveu. Daqui saem as etapas que esta camada **causa e observa**: o
-    /// convite lido, o aviso que o link autoriza, a primeira tentativa, e o
-    /// fim. As tentativas do meio ganham nome quando o laço mudar de casa; até
-    /// lá a trilha diz menos do que vai dizer, e nada do que ela diz é
-    /// inventado.
+    /// O laço de candidatos continua em [`crate::enlace::Enlace`], inteiro e sem
+    /// uma linha movida — com o aviso por candidato, a repetição em tarefa de
+    /// fundo e o prazo curto do candidato distante. O que mudou é que ele
+    /// **conta o que está fazendo**: cada candidato, no instante em que a
+    /// tentativa dele começa, e com o aviso já decidido. Antes desta tarefa esta
+    /// camada observava o primeiro candidato e o fim, e os do meio atravessavam
+    /// sem nome — a trilha dizia menos do que a pergunta que ela existe para
+    /// responder.
+    ///
+    /// Nada aqui é inventado: um passo por candidato que o laço de fato tentou,
+    /// publicado quando ele o tenta. O canal é ouvido **junto** com a conexão, e
+    /// esvaziado depois dela, para que o último candidato — o que ganhou, ou o
+    /// que perdeu por último — esteja na trilha antes de [`Etapa::Dentro`] ou de
+    /// [`Etapa::Desistiu`].
+    ///
+    /// # Por que o `avisou` só existe aqui
+    ///
+    /// Porque é o laço quem manda o `LEVE`, e a resposta só existe depois do
+    /// envio. Esta camada publicava a primeira tentativa **antes** de chamar o
+    /// laço, então um `avisou` escrito ali seria sempre um chute — e é dele que
+    /// [`Caminho`] é feito.
     ///
     /// # Errors
     ///
@@ -362,37 +594,70 @@ impl Chegada {
         mut self,
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
-    ) -> Result<Enlace, Frustrada> {
+    ) -> Result<Chegado, Frustrada> {
         let de = u8::try_from(self.destinos.len()).unwrap_or(u8::MAX);
-        let Some(primeiro) = self.destinos.first().map(|destino| destino.servidor) else {
+        if self.destinos.is_empty() {
             // Um convite sem endereço nenhum. Ninguém chama assim, e desistir
             // com o motivo na mão é melhor que devolver uma chegada que não
             // consta de lugar nenhum.
             return Err(self.desistir(ConnectError::Unreachable));
-        };
+        }
 
         // O aviso é publicado sob as mesmas condições em que ele sai — ver a
         // bandeira em `Etapa::Parada`. Que o `LEVE` de um candidato específico
-        // tenha saído ou não é assunto do laço: um envio recusado não reprova
-        // chegada nenhuma, que é a aresta que esta máquina não tem.
+        // tenha saído ou não é assunto do laço, e é ele quem responde, um
+        // candidato por vez, no `avisou` de cada `Tentando`.
         if let Some(ponto) = self.ponto_a_avisar() {
             self.marcar(Etapa::Avisando { ponto });
         }
-        self.marcar(Etapa::Tentando {
-            candidato: 0,
-            de,
-            onde: primeiro,
-        });
 
         let destinos = std::mem::take(&mut self.destinos);
         let bilhete = self.bilhete.clone();
-        match Enlace::conectar_entre_com_bilhete(destinos, bilhete, chave, pins).await {
+        let (contando, mut tentativas) = tokio::sync::mpsc::unbounded_channel();
+        let conectando = Enlace::conectar_entre_observado(destinos, bilhete, chave, pins, contando);
+        tokio::pin!(conectando);
+
+        let resultado = loop {
+            tokio::select! {
+                // `biased` de propósito, e é sobre **quando** o passo é
+                // publicado e não sobre se ele é: o esvaziamento lá embaixo
+                // garante que nenhum se perde. Com a escolha aleatória do
+                // `select!`, um candidato que entrou na fila enquanto a conexão
+                // ficava pronta sairia às vezes ao vivo e às vezes em bloco no
+                // fim — e a etapa ao vivo existe para acompanhar a travessia,
+                // não para resumi-la depois.
+                biased;
+                Some(tentativa) = tentativas.recv() => self.tentando(tentativa, de),
+                resultado = &mut conectando => break resultado,
+            }
+        };
+        // O que o laço mandou no mesmo instante em que terminou. Sem isto, o
+        // candidato que venceu ficaria de fora da trilha justamente por ter
+        // vencido — e é dele que sai o [`Caminho`].
+        while let Ok(tentativa) = tentativas.try_recv() {
+            self.tentando(tentativa, de);
+        }
+
+        match resultado {
             Ok(enlace) => {
                 self.marcar(Etapa::Dentro);
-                Ok(enlace)
+                Ok(Chegado {
+                    enlace,
+                    trilha: self.trilha,
+                })
             }
             Err(erro) => Err(self.desistir(erro)),
         }
+    }
+
+    /// Publica um candidato que o laço acabou de começar a tentar.
+    fn tentando(&mut self, tentativa: crate::enlace::Tentativa, de: u8) {
+        self.marcar(Etapa::Tentando {
+            candidato: tentativa.candidato,
+            de,
+            onde: tentativa.onde,
+            avisou: tentativa.avisou,
+        });
     }
 
     /// O ponto de encontro que vai ser avisado, se algum vai.
@@ -437,6 +702,32 @@ impl Chegada {
         // `send` só falha quando não há ninguém ouvindo, que é o caso comum: a
         // trilha é o registro, e o `watch` é a comodidade de quem desenha.
         let _ = self.estado.send(etapa);
+    }
+}
+
+/// Uma chegada que chegou: a sessão, e por onde ela passou.
+///
+/// Simétrico de [`Frustrada`], e pela mesma razão. A trilha sobrevivia à falha e
+/// **morria com o sucesso**, o que deixava a pergunta «por qual caminho esta
+/// conversa saiu» sem lugar de onde ser respondida — a [`Chegada`] é de uso
+/// único e já morreu quando este valor existe. Quem quer o nome pronto chama
+/// [`Chegado::caminho`]; quem quer a história inteira lê a trilha.
+#[derive(Debug)]
+pub struct Chegado {
+    /// A sessão.
+    pub enlace: Enlace,
+    /// Por onde a chegada passou, em ordem, terminando em [`Etapa::Dentro`].
+    pub trilha: Vec<Passo>,
+}
+
+impl Chegado {
+    /// Por qual caminho esta conversa saiu.
+    ///
+    /// `None` quando a trilha não sabe dizer — e a casca, então, não escreve
+    /// nada. Ver [`caminho`].
+    #[must_use]
+    pub fn caminho(&self) -> Option<Caminho> {
+        caminho(&self.trilha)
     }
 }
 
@@ -570,6 +861,7 @@ mod tests {
             candidato: 0,
             de: 1,
             onde: SocketAddr::from(([127, 0, 0, 1], 1)),
+            avisou: false,
         });
         std::thread::sleep(Duration::from_millis(20));
         chegada.marcar(Etapa::Desistiu(ConnectError::Unreachable));
@@ -589,6 +881,204 @@ mod tests {
         );
     }
 
+    /// Um passo qualquer, sem relógio: o que se lê dele é a etapa.
+    fn passo(etapa: Etapa) -> Passo {
+        Passo {
+            etapa,
+            em: Duration::ZERO,
+        }
+    }
+
+    /// Uma tentativa contra `onde`, com ou sem aviso.
+    fn tentando(onde: &str, avisou: bool) -> Passo {
+        let Ok(onde) = onde.parse::<SocketAddr>() else {
+            panic!("o endereço de teste `{onde}` não é um endereço");
+        };
+        passo(Etapa::Tentando {
+            candidato: 0,
+            de: 1,
+            onde,
+            avisou,
+        })
+    }
+
+    #[test]
+    fn sem_saber_o_caminho_a_casca_nao_escreve_nada() {
+        // «DIRECT» não é dizível: a escada tem cinco degraus, e a distinção que
+        // essa palavra apagaria é justamente a que importa — em `FuroDeNat` a
+        // conversa é direta **e** alguém soube que ela existe.
+        //
+        // Inventar um nome quando não se sabe é a mentira confiante que o ADR
+        // 0022 existe para não produzir. `None` é a resposta certa, e a casca
+        // cala.
+        assert_eq!(caminho(&[]), None);
+        assert_eq!(
+            caminho(&[passo(Etapa::Dentro)]),
+            None,
+            "chegar não diz por onde; quem diz é a tentativa que venceu"
+        );
+        assert_eq!(
+            caminho(&[
+                tentando("203.0.113.7:8383", true),
+                passo(Etapa::Desistiu(ConnectError::Unreachable)),
+            ]),
+            None,
+            "uma chegada que não chegou não saiu por caminho nenhum"
+        );
+    }
+
+    #[test]
+    fn a_forma_do_endereco_decide_o_caminho_e_o_aviso_desempata() {
+        // A tabela da seção 5 do spec, inteira, e a linha que ela existe para
+        // ter: `EnderecoPublico` e `FuroDeNat` são **os dois** IPv4 público, e o
+        // que os separa é o aviso. Um `Caminho::de` que ignorasse `avisou`
+        // continuaria certo em três das quatro linhas.
+        let caminho_de = |onde: &str, avisou: bool| {
+            let Ok(onde) = onde.parse::<SocketAddr>() else {
+                panic!("o endereço de teste `{onde}` não é um endereço");
+            };
+            Caminho::de(onde, avisou).nome()
+        };
+
+        assert_eq!(caminho_de("192.168.1.5:8383", false), "RedeLocal");
+        assert_eq!(caminho_de("[fd00::1]:8383", false), "RedeLocal");
+        assert_eq!(caminho_de("127.0.0.1:8383", false), "RedeLocal");
+        assert_eq!(caminho_de("[2001:db8::1]:8383", false), "Ipv6Direto");
+        assert_eq!(caminho_de("203.0.113.7:8383", false), "EnderecoPublico");
+        assert_eq!(caminho_de("203.0.113.7:8383", true), "FuroDeNat");
+
+        // A forma mapeada é **o caso comum** do candidato refletido: é assim que
+        // um ponto de encontro atrás de pilha dupla enxerga quem bateu. Sem
+        // canonizar, todo candidato refletido viraria `Ipv6Direto` e a linha
+        // acima nunca aconteceria em campo.
+        assert_eq!(caminho_de("[::ffff:203.0.113.7]:8383", true), "FuroDeNat");
+        assert_eq!(caminho_de("[::ffff:192.168.1.5]:8383", false), "RedeLocal");
+
+        // Um IPv6 global avisado continua sendo IPv6 direto: o `LEVE` sai por
+        // qualquer candidato público, mas o que o anfitrião abre lá é buraco de
+        // firewall, e não tradução de endereço nenhuma.
+        assert_eq!(caminho_de("[2001:db8::1]:8383", true), "Ipv6Direto");
+
+        // O loopback **mapeado** não é rede local, e a assimetria com a linha
+        // do `127.0.0.1` acima é uma decisão que fica presa aqui em vez de ficar
+        // só no doc. `Caminho::de` faz a mesma pergunta que decide se o `LEVE`
+        // sai, e ela testa loopback na forma escrita; canonizar daria uma
+        // classificação mais bonita e duas respostas diferentes para o mesmo
+        // endereço — o laço avisando e a tela dizendo que ninguém precisou.
+        //
+        // Quem paga é o arranjo em que o ponto de encontro roda na mesma
+        // máquina, atrás de pilha dupla. Ver `Caminho::RedeLocal`.
+        assert_eq!(
+            caminho_de("[::ffff:127.0.0.1]:8383", false),
+            "EnderecoPublico"
+        );
+        assert_eq!(caminho_de("[::ffff:127.0.0.1]:8383", true), "FuroDeNat");
+    }
+
+    #[test]
+    fn uma_desistencia_com_candidatos_por_tentar_nao_e_uma_desistencia() {
+        // A linha do spec que esta tarefa passou a cobrar. Ela era frouxa
+        // enquanto esta camada via o primeiro candidato e o fim; o laço passou a
+        // contar cada um com o índice dele, e a precondição que o doc nomeava
+        // deixou de ser hipótese.
+        //
+        // O que ela pega: um passo perdido no meio do caminho chega aqui como
+        // uma desistência anunciada com endereços ainda por tentar.
+        let tentando = |candidato: u8, de: u8| Etapa::Tentando {
+            candidato,
+            de,
+            onde: EXEMPLO,
+            avisou: false,
+        };
+
+        assert!(
+            !Etapa::transicao_legal(&tentando(0, 3), "Desistiu"),
+            "desistir no primeiro de três é desistir com dois endereços que \
+             ninguém tentou"
+        );
+        assert!(!Etapa::transicao_legal(&tentando(1, 3), "Desistiu"));
+        assert!(
+            Etapa::transicao_legal(&tentando(2, 3), "Desistiu"),
+            "o último candidato falhou e a chegada não pôde acabar"
+        );
+        assert!(
+            Etapa::transicao_legal(&tentando(0, 1), "Desistiu"),
+            "um convite de um endereço só desiste no primeiro, que é o último"
+        );
+
+        // As outras saídas de uma tentativa não dependem do índice: qualquer
+        // candidato pode ser o que vence, e o próximo pode ser tentado de
+        // qualquer um.
+        for saida in ["Dentro", "Tentando", "CaminhoAberto"] {
+            assert!(
+                Etapa::transicao_legal(&tentando(0, 3), saida),
+                "`Tentando → {saida}` deixou de valer no primeiro candidato"
+            );
+        }
+    }
+
+    #[test]
+    fn o_caminho_e_o_da_tentativa_que_venceu_e_nao_o_da_primeira() {
+        // O defeito que esta ordem evita, e que a versão anterior desta camada
+        // teria produzido: ela publicava **só** a primeira tentativa, então uma
+        // conexão que subisse pelo terceiro candidato seria nomeada pelo
+        // primeiro. Quatro endereços num convite, e o primeiro é o da rede de
+        // casa — a tela diria `RedeLocal` sobre uma conversa que atravessou a
+        // internet.
+        let trilha = vec![
+            passo(Etapa::Parada {
+                candidatos: 3,
+                com_bilhete_e_impressao: true,
+            }),
+            tentando("192.168.1.5:8383", false),
+            tentando("203.0.113.7:8383", true),
+            passo(Etapa::Dentro),
+        ];
+
+        assert_eq!(caminho(&trilha).map(|c| c.nome()), Some("FuroDeNat"));
+    }
+
+    #[tokio::test]
+    async fn um_candidato_que_falha_sem_ceder_a_vez_ainda_entra_na_trilha() {
+        // O passo que se perde sem o esvaziamento do canal depois do laço, e a
+        // única forma de perdê-lo: o `select!` só volta a olhar a fila quando a
+        // conexão cede a vez, e uma tentativa que falha **sem ceder** leva o
+        // laço inteiro ao fim numa poltrona só. O candidato é contado, o
+        // `select!` quebra no resultado, e a `Tentando` fica na fila.
+        //
+        // Um nome TLS com espaço é exatamente esse caso: o quinn recusa antes de
+        // mandar pacote nenhum, e `Endpoint::connect` devolve erro na hora. É o
+        // mesmo truque de `furo.rs`, usado lá para medir o que o laço faz quando
+        // uma tentativa acaba depressa.
+        //
+        // Sem este teste a linha do esvaziamento é uma guarda que nunca dispara,
+        // e uma guarda que nunca dispara não guarda propriedade nenhuma — é o
+        // argumento que este arquivo já faz sobre o `max` que não existe em
+        // `gravar_jitter_de_chegada`.
+        let mut impossivel = destino(1);
+        impossivel.nome_tls = "nome inválido com espaço".into();
+        let chegada = Chegada::nova(vec![impossivel], None);
+
+        let Err(frustrada) = chegada
+            .chegar(
+                SigningKey::from_bytes(&[7; 32]),
+                Arc::new(crate::tofu::MemoryPinStore::new()),
+            )
+            .await
+        else {
+            panic!("um nome TLS inválido deixou alguém entrar");
+        };
+
+        assert!(
+            frustrada
+                .trilha()
+                .iter()
+                .any(|passo| matches!(passo.etapa, Etapa::Tentando { .. })),
+            "o candidato foi tentado e não consta da trilha: {:?}",
+            frustrada.trilha()
+        );
+    }
+
     #[tokio::test]
     async fn quem_acompanha_ve_a_etapa_mudar() {
         // O `watch` é a metade que a tela lê. Ele nasce em `Parada` e anda com
@@ -602,6 +1092,7 @@ mod tests {
             candidato: 0,
             de: 1,
             onde: SocketAddr::from(([127, 0, 0, 1], 1)),
+            avisou: false,
         });
         assert!(olhos.has_changed().unwrap_or(false));
         assert!(matches!(

@@ -320,6 +320,32 @@ pub enum Transferencia {
     },
 }
 
+/// Um candidato que o laço está prestes a tentar, para quem observa de fora.
+///
+/// Existe porque o laço é o único lugar que sabe as duas coisas ao mesmo tempo:
+/// **qual** endereço está sendo tentado agora e **se um `LEVE` saiu por ele**. A
+/// segunda só é verdade depois do envio, e quem publica etapas fica uma camada
+/// acima — [`crate::chegada::Chegada`], que antes disto publicava a primeira
+/// tentativa antes de o laço começar e não via nenhuma das outras.
+///
+/// Três campos e não o [`Destino`] inteiro: o que atravessa aqui já estava no
+/// convite de quem vai ler, e mandar o segredo de entrada junto seria pôr uma
+/// credencial numa trilha que vira log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Tentativa {
+    /// Qual da lista, contando do zero.
+    pub candidato: u8,
+    /// O endereço que está sendo tentado.
+    pub onde: SocketAddr,
+    /// Um `LEVE` saiu pelo ponto de encontro por causa deste candidato.
+    ///
+    /// O que `avisar_pelo_candidato` respondeu: verdadeiro só quando o
+    /// datagrama saiu de verdade. Sem bilhete, num candidato que não precisa de
+    /// furo, ou com o envio recusado, é falso — e é falso pelo mesmo critério
+    /// que faz o log daquela função só dizer que avisou quando avisou.
+    pub avisou: bool,
+}
+
 /// A sessão com um Dogma, viva através de quedas.
 pub struct Enlace {
     comandos: mpsc::Sender<Comando>,
@@ -486,6 +512,42 @@ impl Enlace {
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
     ) -> Result<Self, ConnectError> {
+        Self::entre(destinos, bilhete, chave, pins, None).await
+    }
+
+    /// O mesmo, contando cada candidato a quem observa.
+    ///
+    /// A porta por onde [`crate::chegada::Chegada`] entra. Uma [`Tentativa`] sai
+    /// por candidato, no instante em que a tentativa dele começa e com o aviso
+    /// já decidido — que é a informação de que o caminho da tela é feito, e a
+    /// única que não se pode ler do endereço.
+    ///
+    /// Um canal e não um retorno: as tentativas acontecem enquanto esta função
+    /// corre, e quem desenha quer saber delas **durante**, não no fim. O canal é
+    /// ilimitado porque a quantidade é a do convite — quatro endereços, no
+    /// máximo — e um `send` bloqueante aqui poria a tela no caminho da conexão.
+    ///
+    /// # Errors
+    ///
+    /// O mesmo de [`Enlace::conectar_entre`].
+    pub async fn conectar_entre_observado(
+        destinos: Vec<Destino>,
+        bilhete: Option<seele_proto::uri::Bilhete>,
+        chave: SigningKey,
+        pins: Arc<dyn PinStore>,
+        olhos: mpsc::UnboundedSender<Tentativa>,
+    ) -> Result<Self, ConnectError> {
+        Self::entre(destinos, bilhete, chave, pins, Some(olhos)).await
+    }
+
+    /// A preparação que os dois compartilham, e o laço.
+    async fn entre(
+        destinos: Vec<Destino>,
+        bilhete: Option<seele_proto::uri::Bilhete>,
+        chave: SigningKey,
+        pins: Arc<dyn PinStore>,
+        olhos: Option<mpsc::UnboundedSender<Tentativa>>,
+    ) -> Result<Self, ConnectError> {
         // Preparado antes do laço porque o socket tem de ser um só — o NAT
         // mapeia por porta interna. Mas **nenhum pacote sai daqui**: o aviso é
         // por candidato, e é essa mudança que conserta a corrida.
@@ -498,7 +560,15 @@ impl Enlace {
             }
             None => None,
         };
-        Self::tentar_entre(destinos, batida.as_ref(), bilhete, chave, pins).await
+        Self::tentar_entre(
+            destinos,
+            batida.as_ref(),
+            bilhete,
+            chave,
+            pins,
+            olhos.as_ref(),
+        )
+        .await
     }
 
     /// O laço de tentativas, com ou sem furo de NAT.
@@ -508,6 +578,7 @@ impl Enlace {
         bilhete: Option<seele_proto::uri::Bilhete>,
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
+        olhos: Option<&mpsc::UnboundedSender<Tentativa>>,
     ) -> Result<Self, ConnectError> {
         // Uma cópia por tentativa, e o original vivo até o fim: um `Endpoint`
         // fecha o socket dele ao ser recolhido, e sem o original a porta que o
@@ -526,6 +597,14 @@ impl Enlace {
             // depende do degrau 4, e pular o aviso aqui deixaria sem furo quem
             // não tem outra chance.
             let repeticao = avisar_pelo_candidato(batida, primeiro.servidor).await;
+            contar(
+                olhos,
+                Tentativa {
+                    candidato: 0,
+                    onde: primeiro.servidor,
+                    avisou: repeticao.is_some(),
+                },
+            );
             let resultado = Self::conectar_por(emprestar(), bilhete, primeiro, chave, pins).await;
             if let Some(repeticao) = repeticao {
                 repeticao.abort();
@@ -535,7 +614,7 @@ impl Enlace {
 
         let mut primeira_falha: Option<ConnectError> = None;
         let mut respondeu: Option<ConnectError> = None;
-        for destino in std::iter::once(primeiro).chain(candidatos) {
+        for (indice, destino) in std::iter::once(primeiro).chain(candidatos).enumerate() {
             let onde = destino.servidor;
             let chave_do_pin = destino.chave_do_pin.clone();
             let fixado_antes = pins.pinned(&chave_do_pin);
@@ -545,6 +624,17 @@ impl Enlace {
             // outro lado dura menos de um segundo, e a única forma de o `Initial`
             // caber dentro dele é os dois saírem juntos.
             let repeticao = avisar_pelo_candidato(batida, onde).await;
+            // Contado **depois** do aviso e antes do aperto de mão, porque é
+            // aqui que as duas metades existem ao mesmo tempo: o endereço, e se
+            // o `LEVE` saiu por ele.
+            contar(
+                olhos,
+                Tentativa {
+                    candidato: u8::try_from(indice).unwrap_or(u8::MAX),
+                    onde,
+                    avisou: repeticao.is_some(),
+                },
+            );
 
             // Um candidato privado de outra casa não devolve ICMP nenhum: ele
             // queima o prazo inteiro sem nunca ter tido chance. Encurtar é o que
@@ -1601,6 +1691,17 @@ fn desfazer_pin_orfao(pins: &dyn PinStore, chave_do_pin: &str, fixado_antes: Opt
     }
 }
 
+/// Conta um candidato a quem estiver observando, se alguém estiver.
+///
+/// Um `send` recusado é silêncio de propósito: o canal só fecha quando quem
+/// observava desistiu, e a conexão não pode depender de uma tela estar viva —
+/// é a mesma regra que faz o `watch` da chegada ignorar o `send` sem ouvinte.
+fn contar(olhos: Option<&mpsc::UnboundedSender<Tentativa>>, tentativa: Tentativa) {
+    if let Some(olhos) = olhos {
+        let _ = olhos.send(tentativa);
+    }
+}
+
 /// Avisa o ponto de encontro por causa **deste** candidato, e deixa a repetição
 /// correndo enquanto o aperto de mão dele acontece.
 ///
@@ -1755,7 +1856,7 @@ fn e_privado(ip: IpAddr) -> bool {
 /// no datagrama. O candidato decide apenas **se** o `LEVE` sai, nunca **para
 /// onde** o anfitrião fura. Um candidato mal classificado não redireciona pacote
 /// contra terceiro nenhum.
-fn e_publico(ip: IpAddr) -> bool {
+pub(crate) fn e_publico(ip: IpAddr) -> bool {
     !e_privado(ip) && !ip.is_loopback() && !ip.is_unspecified() && !ip.is_multicast()
 }
 

@@ -353,6 +353,17 @@
           é um veredito, que nasce depois desta tela sumir. Ele está no aperto
           de mão, em `#tela-auth`.
         -->
+        <!--
+          Onde a chegada está, enquanto ela acontece. Quatro candidatos eram
+          tentados em série atrás de três blocos piscando, e quando o teste de
+          campo das duas casas falhou ninguém soube dizer em que ponto — porque
+          não havia ponto nomeado. O núcleo nomeia cada instante desde a tarefa
+          8; esta linha é o primeiro lugar em produção que os lê.
+
+          `role="status"` e não `alert`: isto não é uma falha, é o andamento. Um
+          `alert` interromperia o leitor de tela a cada candidato.
+        -->
+        <p id="boot-etapa" class="etapa" role="status" hidden></p>
         <p id="boot-erro" class="erro" role="alert" hidden></p>
       </div>
 
@@ -1260,6 +1271,16 @@
     <span class="metrica"><b class="rotulo">CODEC</b> <span id="tel-codec">·</span></span>
     <span class="metrica"><b class="rotulo">UPTIME</b> <span id="tel-uptime">·</span></span>
     <span class="metrica"><b class="rotulo">CAGE</b> <span id="tel-cage">·</span></span>
+    <!--
+      Por qual caminho a conversa saiu. Um nome e não uma frase: é uma linha ao
+      lado dos números, escrita uma vez quando a sessão sobe e calada depois.
+
+      «DIRETO» não aparece aqui, e a ausência é a decisão: a escada do ADR 0022
+      tem cinco degraus, e a distinção que essa palavra apagaria é justamente a
+      que importa — num furo de NAT a conversa **é** direta, e alguém soube que
+      ela existe. Sem saber, esta métrica fica no travessão.
+    -->
+    <span class="metrica"><b class="rotulo">CAMINHO</b> <span id="tel-caminho">·</span></span>
     <span class="espaco"></span>
     <span id="tel-local" class="falha-local" hidden title="a máquina, não a rede">
       ÁUDIO LOCAL FALHANDO

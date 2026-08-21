@@ -162,6 +162,9 @@ async function conectar(evento) {
   // real dela: `specs/05-cliente-tui.md` chama animação decorativa que atrasa
   // o usuário de falha de design.
   subsistemas("carga", "…");
+  // A linha de etapa nasce vazia a cada tentativa: a de uma conexão anterior
+  // descreveria uma travessia que já acabou.
+  mostrarEtapa(null);
 
   try {
     // A entrada traz duas coisas: a tela, e o que a chave deste Dogma acabou
@@ -189,18 +192,68 @@ async function conectar(evento) {
     entrarNaAutenticacao(snapshot, veredito, $("campo-servidor").value.trim());
   } catch (falha) {
     subsistemas("", "·");
+    // `connect` responde por `ConnectFailure` desde esta tarefa: o erro de
+    // sempre **mais a trilha**. Quem escreve a frase quer o erro; a trilha vai
+    // para o console, que é onde alguém que está investigando a procura — «o
+    // primeiro deu prazo esgotado em 4 s, o quarto recusou» é o dado que faltou
+    // quando o teste de campo das duas casas falhou.
+    //
+    // O `?? falha` não é zelo: `analisar_convite` e o `AlreadyConnected` deste
+    // mesmo comando respondem com o enum cru, e a mesma função lê os dois.
+    const motivo = falha?.error ?? falha;
+    if (Array.isArray(falha?.trail) && falha.trail.length > 0) {
+      console.warn("chegada:", falha.trail);
+    }
     // Uma batida que ficou pendente na portaria tem tela própria (ADR 0030), e
     // uma falha que chega enquanto essa tela está na frente pertence a ela:
     // `#boot-erro` estaria escondido atrás. `levarParaAEspera` responde se
     // tratou a falha, e só o que sobra vira a linha vermelha daqui.
-    if (!levarParaAEspera(falha, $("campo-servidor").value.trim())) {
+    if (!levarParaAEspera(motivo, $("campo-servidor").value.trim())) {
       erro.hidden = false;
-      erro.textContent = fraseDeErro(falha);
+      erro.textContent = fraseDeErro(motivo);
     }
   } finally {
     botao.disabled = false;
+    // A travessia acabou, de um jeito ou de outro. O que sobra na tela é o
+    // veredito ou o erro, e não o último candidato tentado.
+    mostrarEtapa(null);
   }
 }
+
+/**
+ * Escreve onde a chegada está, ou apaga a linha.
+ *
+ * `null` esconde: uma linha vazia e visível empurra o formulário para baixo a
+ * cada tentativa, e um `role="status"` vazio é anunciado como nada.
+ */
+function mostrarEtapa(frase) {
+  const linha = $("boot-etapa");
+  if (frase === null) {
+    linha.hidden = true;
+    linha.textContent = "";
+    return;
+  }
+  // Visível primeiro, escrita depois: um `role="status"` escondido no instante
+  // em que o texto muda não é anunciado. É a mesma ordem da faixa de veredito.
+  linha.hidden = false;
+  linha.textContent = frase;
+}
+
+// As etapas da chegada, enquanto ela acontece.
+//
+// Chegam pelo mesmo canal de sempre, e são o único evento da lista que existe
+// **antes** de haver sessão: a FFI recebe a ponte antes de bloquear no aperto
+// de mão (`Plug::connect_watching`). Sem isto o spinner desta tela era mudo, e
+// quando o teste de campo das duas casas falhou ninguém soube dizer em que
+// ponto — quatro candidatos eram tentados em série atrás dos três blocos.
+listen("seele://event", (evento) => {
+  const payload = evento.payload;
+  if (!payload || typeof payload !== "object" || !payload.ConnectStageChanged) return;
+  // Só com a tela de entrada na frente. Uma reconexão futura que publicasse
+  // etapas escreveria numa tela escondida atrás da sessão.
+  if ($("tela-boot").hidden) return;
+  mostrarEtapa(fraseDeEtapa(payload.ConnectStageChanged.stage));
+});
 
 /**
  * Diz até onde o link recém-criado chega, embaixo dele.
