@@ -864,12 +864,18 @@ impl Escada {
             )
         };
 
-        // Degrau 4, e só se os de cima não resolveram. Duas condições, e as
-        // duas são sobre não pagar o custo à toa: com a porta aberta no roteador
-        // não há o que um ponto de encontro acrescente, e com um endereço IPv4
-        // global esta máquina já é alcançável sem apresentação nenhuma — é o
-        // caso de uma VPS, que é o degrau 1.
-        let precisa = mapeada.is_none() && !tem_ipv4_global(&achados);
+        // Degrau 4, e uma condição só. Ela é sobre não pagar metadado à toa:
+        // com um endereço IPv4 global esta máquina já é alcançável sem
+        // apresentação nenhuma — é o caso de uma VPS, que é o degrau 1.
+        //
+        // A porta do roteador **não** dispensa mais o ponto de encontro. Quem
+        // abriu porta ainda perde quem não consegue atravessá-la: um roteador
+        // sem *hairpin*, um firewall do outro lado. O bilhete é a segunda
+        // chance, e recusá-lo porque o degrau 3 deu é a escada decidindo o que
+        // **descartar** — que é o mesmo erro que a 0.5.0 cometeu com os
+        // endereços, e que o ADR 0022 registra: ela escolhe a frase, nunca o
+        // que sai do convite.
+        let precisa = !tem_ipv4_global(&achados);
         let (encontro, recusa_do_encontro) = match (precisa, convocacao) {
             (true, Some(convocacao)) => match encontro::abrir(&convocacao).await {
                 Ok(aberto) => (Some(aberto), None),
@@ -904,11 +910,13 @@ impl Escada {
             }
             None => None,
         };
-        // O mesmo cuidado do degrau 3, pelo mesmo motivo: um encontro que não
-        // virou candidato é um encontro que fica reavivando um caminho que
-        // ninguém vai usar.
+        // O mesmo cuidado do degrau 3 e **não** o mesmo critério. Aqui a
+        // pergunta é se o endereço virou candidato, não se ele nomeou a frase:
+        // um furo que está no convite precisa continuar sendo reavivado, mesmo
+        // que a porta do roteador tenha ganhado o nome do degrau. Ver
+        // [`o_furo_vale_a_pena`].
         let encontro = match encontro {
-            Some(aberto) if alcance.degrau() == Degrau::FuroDeNat => Some(aberto),
+            Some(aberto) if o_furo_vale_a_pena(&alcance, escuta, aberto.publico()) => Some(aberto),
             Some(aberto) => {
                 tracing::warn!("o furo de NAT não virou candidato desta escuta; largando");
                 aberto.fechar();
@@ -954,6 +962,28 @@ impl Escada {
             porta.fechar().await;
         }
     }
+}
+
+/// Se o furo que o degrau 4 abriu merece continuar de pé.
+///
+/// A pergunta é uma só: **o endereço dele está no convite?** Se está, alguém
+/// vai bater nele, e parar de reavivá-lo deixaria o convite apontando para um
+/// mapeamento de NAT que já morreu. Se não está, manter o degrau 4 vivo é falar
+/// com um ponto de encontro por um caminho que ninguém vai usar.
+///
+/// # Por que não é `degrau() == FuroDeNat`
+///
+/// Porque eram duas perguntas escritas como uma. O degrau nomeia a frase que
+/// quem hospeda lê, e o convite carrega todos os endereços — o ADR 0022 separa
+/// as duas coisas desde que a 0.5.0 quebrou o caso dos dois na mesma casa
+/// escolhendo um degrau e jogando o resto fora. Com a porta do roteador aberta
+/// **e** o furo pronto, o degrau é `PortaNoRoteador` e o furo continua sendo o
+/// endereço que salva quem não atravessa aquela porta: um roteador sem
+/// *hairpin* de um lado, um firewall do outro.
+fn o_furo_vale_a_pena(alcance: &Alcance, escuta: Escuta, publico: SocketAddr) -> bool {
+    escuta
+        .anunciar_com_porta(publico)
+        .is_some_and(|alvo| alcance.alvos().contains(&alvo))
 }
 
 /// Se esta máquina já tem um endereço IPv4 que a internet alcança.
@@ -1629,6 +1659,31 @@ mod testes {
             .alvos()
             .iter()
             .any(|alvo| alvo.ip().to_string() == "2804:388::1"));
+    }
+
+    /// O bilhete não some porque a porta do roteador ganhou o nome do degrau.
+    ///
+    /// Enquanto o critério era `degrau() == FuroDeNat`, quem abriu porta perdia
+    /// o furo — e perdia junto a única segunda chance de quem não atravessa
+    /// aquela porta, que é o roteador sem *hairpin* de um lado e o firewall do
+    /// outro. O degrau nomeia a frase; o convite carrega os endereços. São duas
+    /// perguntas e estavam escritas como uma.
+    #[test]
+    fn o_furo_fica_de_pe_mesmo_quando_a_porta_do_roteador_nomeia_o_degrau() {
+        let furado = SocketAddr::from(([200, 100, 30, 40], 61234));
+        let externo = SocketAddr::from(([203, 0, 113, 7], 9000));
+        let escuta = Escuta::nova(8383, Pilha::Dupla);
+        let alcance = Alcance::decidir(escuta, Some(externo), Some(furado), &[], None);
+
+        // A porta ganha a frase — isto continua valendo.
+        assert_eq!(alcance.degrau(), Degrau::PortaNoRoteador);
+        // E o furo continua no convite, que é o que decide se ele fica de pé.
+        assert!(alcance.alvos().contains(&furado));
+        assert!(
+            o_furo_vale_a_pena(&alcance, escuta, furado),
+            "com o endereço furado no convite, largar o degrau 4 deixa o convite \
+             apontando para um mapeamento de NAT que ninguém reaviva"
+        );
     }
 
     #[test]

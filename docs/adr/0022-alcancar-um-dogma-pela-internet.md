@@ -248,6 +248,23 @@ ordens diferentes:
   IPv4, que é quase todo mundo, enquanto o IPv6 direto só alcança quem também
   tem IPv6.
 
+Uma coisa que **não** entra nessa ordem: a porta aberta no roteador não dispensa
+o degrau 4. Durante um tempo dispensou — o 4 só era tentado se o 3 tivesse
+falhado, e o bilhete só sobrevivia se o 4 nomeasse a frase. As duas regras eram
+a mesma confusão escrita duas vezes: **a escada escolhe a frase, e não o que sai
+do convite.**
+
+É o mesmo erro que a 0.5.0 cometeu com os endereços, e está registrado logo
+acima. Quem abriu porta no roteador continua perdendo quem não consegue
+atravessá-la — um roteador sem *hairpin* de um lado, um firewall do outro —, e o
+bilhete é justamente a segunda chance dessa pessoa. Recusá-lo porque outro
+degrau deu certo é jogar fora um caminho já pago.
+
+Hoje a única condição para não perguntar continua sendo o IPv4 público, e ela é
+sobre metadado, não sobre suficiência. O que decide se o furo fica de pé é se o
+endereço dele está no convite: se está, alguém vai bater nele, e parar de
+reavivá-lo deixaria o convite apontando para um mapeamento de NAT já morto.
+
 ### O que a marca do aviso resolveu, e o que ela não é
 
 Um Dogma que furasse NAT para qualquer endereço que aparecesse seria um refletor
