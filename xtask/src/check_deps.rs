@@ -61,11 +61,25 @@ const RULES: &[(&str, &[&str])] = &[
     ("seele-server", &["seele-proto"]),
     // Shells translate events into pixels and input into commands. Nothing more.
     //
-    // A exceção do `seele-server` é nomeada e tem motivo: `--hospedar` sobe um
-    // Dogma no próprio processo, para que quem hospeda entre amigos não precise
-    // saber o que é um daemon. Não inverte a regra — o servidor não passa a
-    // conhecer o cliente, e nenhuma lógica de protocolo entra na casca. É uma
-    // aresta lateral no topo do grafo: este binário contém os dois papéis.
+    // A exceção do `seele-server` é nomeada e tem **dois** motivos, e os dois
+    // dizem a mesma coisa: este binário contém os dois papéis.
+    //
+    // 1. `--hospedar` sobe um Dogma no próprio processo, para que quem hospeda
+    //    entre amigos não precise saber o que é um daemon.
+    // 2. `--rede` (`crates/seele-tui/src/rede.rs`) diagnostica o alcance **de
+    //    quem hospeda**: enumera as interfaces por `alcance::interfaces`, abre o
+    //    socket por `alcance::abrir_escuta`, e fala `SEELE-ENC/1` com pontos de
+    //    encontro pela lista de reexportações de `seele_server::encontro`.
+    //
+    // Nenhum dos dois inverte a regra: o servidor não passa a conhecer o
+    // cliente. É uma aresta lateral no topo do grafo.
+    //
+    // **Cuidado com o que esta checagem não vê.** Ela lê o grafo do Cargo, e uma
+    // reexportação não é uma aresta do Cargo: `seele-server` reexportando um
+    // pedaço de `seele-proto` passa por aqui em silêncio, e é assim que
+    // `seele-tui` alcança o formato do fio do ponto de encontro sem declarar
+    // dependência nenhuma. A guarda daquilo é a lista explícita em
+    // `crates/seele-server/src/lib.rs` e a revisão dela — não este arquivo.
     ("seele-tui", &["seele-core", "seele-server"]),
     ("seele-ffi", &["seele-core"]),
     // The one deliberate exception, and it has a name so it cannot spread.

@@ -44,6 +44,49 @@ pub mod taxa;
 pub mod tls;
 pub mod transfer;
 
+/// O vocabulário de fio de um ponto de encontro, e **só** ele.
+///
+/// Existe porque quem diagnostica a rede (`plug --rede`, em `seele-tui`) precisa
+/// escrever e ler estes datagramas, e a regra de dependência do ADR 0002 não
+/// deixa uma casca ver `seele-proto`.
+///
+/// # A lista é explícita, e o que ficou de fora é o ponto
+///
+/// `responder`, `responder_em`, `Vizinhanca` e `alcancavel` **não** saem daqui.
+/// Eles são a política antiamplificação do ADR 0022 — até onde um `LEVE` pode
+/// apontar, que portas são recusadas, o que faz o ponto de encontro calar — e
+/// essa decisão é de quem opera um ponto de encontro, não de uma casca. Um
+/// `pub use seele_proto::encontro;` inteiro os levava junto, e com eles a casca
+/// passava a poder montar um refletor e escolher a política dele.
+///
+/// O que sai é o formato dos 96 bytes, que não tem decisão dentro.
+///
+/// # `check-deps` é cego para esta classe
+///
+/// `cargo xtask check-deps` lê o grafo do Cargo, e uma reexportação não é uma
+/// aresta do Cargo. Alargar esta lista **não** faz o `check-deps` reprovar, e
+/// quem contar com ele para pegar isto não vai pegar. A guarda é esta lista e a
+/// revisão dela.
+///
+/// Note a diferença para [`alcance::encontro`], que é o **degrau 4** do lado do
+/// anfitrião: aquele decide, este só escreve e lê datagramas.
+pub mod encontro {
+    /// O que a produção do diagnóstico usa: os construtores, o leitor da
+    /// resposta, o tamanho fixo e a marca.
+    pub use seele_proto::encontro::{furo, ler_aqui, leve, onde, Marca, TAMANHO};
+
+    /// O que só o ponto de encontro de mentira do `mod testes` usa, para poder
+    /// fazer o papel de um.
+    ///
+    /// `analisar` lê um pedido e **não julga o destino** — a frase é da
+    /// documentação dele, e é por isso que ele pode sair e `responder_em` não:
+    /// o julgamento é a política, e um duplo que herdasse a política do serviço
+    /// público deixaria de ser um duplo, com a `Vizinhanca` escolhida por quem
+    /// escreveu o teste. `aqui` monta a resposta, campo a campo, como o serviço
+    /// a monta.
+    pub use seele_proto::encontro::{analisar, aqui, Pedido};
+}
+
 /// Length of an Ed25519 public key, in bytes.
 pub const PUBLIC_KEY_LEN: usize = seele_proto::control::PUBLIC_KEY_LEN;
 
