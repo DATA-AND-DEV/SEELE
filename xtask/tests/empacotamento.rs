@@ -1651,3 +1651,56 @@ fn o_windows_instala_para_a_maquina_e_nao_para_o_usuario() {
          de `Program Files` — onde quem procura, procura:\n{limpo}"
     );
 }
+
+#[test]
+fn o_instalador_do_windows_remove_a_instalacao_por_usuario_de_antes() {
+    // A troca para `perMachine` deixou uma ponta solta que só apareceu em campo:
+    // o instalador procura a instalação anterior no `HKLM` e a antiga mora no
+    // `HKCU`, então ele não a vê. Ficavam duas cópias — `Program Files` e
+    // `%LOCALAPPDATA%` — e os atalhos antigos continuavam abrindo a segunda.
+    //
+    // O relato foi «o aplicativo fica voltando versão»: o atualizador atualiza
+    // uma cópia e o atalho abre a outra.
+    let conf = std::fs::read_to_string(raiz().join("apps/seele-app/tauri.conf.json"))
+        .expect("o tauri.conf.json é legível");
+    let limpo = sem_comentario(&conf);
+    assert!(
+        limpo.contains("\"installerHooks\": \"instalador.nsh\""),
+        "o instalador do Windows voltou a não ter gancho, e com ele volta a \
+         conviver com a instalação por usuário que ele não enxerga:\n{limpo}"
+    );
+
+    let gancho = std::fs::read_to_string(raiz().join("apps/seele-app/instalador.nsh"))
+        .expect("o gancho do instalador é legível");
+    let corpo: String = gancho
+        .lines()
+        .filter(|linha| !linha.trim_start().starts_with(';'))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        corpo.contains("ReadRegStr $R7 HKCU"),
+        "o gancho parou de procurar no `HKCU`, que é o único lugar onde a \
+         instalação por usuário está:\n{corpo}"
+    );
+    assert!(
+        corpo.contains("/S _?="),
+        "a remoção da instalação antiga deixou de ser silenciosa e no lugar; \
+         sem `_?=` o `ExecWait` não espera, e a instalação nova corre junto \
+         com a remoção da velha:\n{corpo}"
+    );
+    // As duas coisas que o `/UPDATE` estragaria, e a segunda é o motivo de tudo:
+    // ele preserva os atalhos, que são exatamente o que precisa sair.
+    assert!(
+        !corpo.contains("/UPDATE"),
+        "o desinstalador passou a ser chamado com `/UPDATE`, que faz ele \
+         **manter** os atalhos — que são o que fazia a versão voltar:\n{corpo}"
+    );
+    // E a que não pode acontecer de jeito nenhum.
+    assert!(
+        !corpo.contains("$APPDATA") && !corpo.contains("RMDir /r"),
+        "o gancho passou a apagar dados: o CASPER, a identidade e os pinos do \
+         ADR 0003 moram aí, e uma migração de instalador não é lugar de \
+         perdê-los:\n{corpo}"
+    );
+}
