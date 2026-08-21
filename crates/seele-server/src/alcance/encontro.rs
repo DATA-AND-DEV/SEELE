@@ -88,9 +88,23 @@ pub const PONTO_PADRAO: &str = "encontro.seele.app.br";
 /// IPv6 antes de IPv4, e a ordem é decidida pela máquina que pergunta: quem tem
 /// IPv6 global usa o IPv6, porque é justamente o par que só se alcança por lá
 /// que mais precisa deste degrau.
+/// Trocada em 2026-08-21, quando o ponto de encontro do projeto mudou de
+/// Atlanta para o Brasil. A distância não era detalhe de conforto: com o serviço
+/// em Atlanta, as duas pernas do furo — de quem entra até o ponto, e do ponto
+/// até quem hospeda — somavam ~280 ms, e quem entra espera
+/// [`seele_core`]`::enlace::ESPERA_DO_FURO`, que são 200. O aperto de mão saía
+/// **antes** de o anfitrião ter furado, que é o defeito de origem deste degrau
+/// reaparecendo por geografia. Do Brasil as duas pernas somam ~34 ms.
+///
+/// E o endereço velho tinha de sair daqui por uma segunda razão: um IP de VPS
+/// destruída volta para o provedor e é entregue a outra pessoa. Enquanto esta
+/// constante o carregasse, todo SEELE do mundo mandaria `SEELE-ENC` para a
+/// máquina de um desconhecido sempre que o DNS falhasse — e ela aprenderia que
+/// endereço falou com que endereço, que é exatamente o metadado que este ADR
+/// pesa em voz alta.
 const REDE_DO_PADRAO: [&str; 2] = [
-    "[2001:19f0:5400:2f6c:5400:6ff:fe94:68f5]:8384",
-    "45.32.222.33:8384",
+    "[2001:19f0:b800:1bf5:5400:6ff:fe97:3c3b]:8384",
+    "216.128.168.216:8384",
 ];
 
 /// A variável que troca o ponto de encontro, ou o desliga.
