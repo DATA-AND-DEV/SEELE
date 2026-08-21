@@ -2299,18 +2299,22 @@ fn the_bound_name_is_stated_once_and_never_worn_as_a_badge() {
     let page = without_comments(&read("ui/index.html"));
     let mensagens = body_of(&scripts(), "function desenharMensagens");
 
+    // The sentence is gone too, and this is the third thing the screen stopped
+    // saying about itself. It explained a property the product already
+    // guarantees — the CASPER binds a nickname to the first identity that
+    // claims it, and the MELCHIOR refuses any other (ADR 0017) — to someone who
+    // never doubted it. Whoever does doubt it is not reassured by a line of
+    // text next to the name; they are reassured by the pin alarm of ADR 0003,
+    // which is loud and blocking and lives somewhere else.
+    //
+    // What this still guards is the part that was never about wording: the
+    // per-line seal must not creep back in.
     let sentence = "ninguém consegue usar o nome de outra pessoa";
-    assert_eq!(
-        page.matches(sentence).count(),
-        1,
-        "the sentence about names being bound to keys is either gone from the \
-         page or said more than once — it is worth exactly one telling, which is \
-         the whole reason the per-line seal was dropped for it"
-    );
     assert!(
-        page.contains("class=\"nota operador-frase\""),
-        "the sentence is no longer drawn as a `.nota`, so it is either styled by \
-         nothing at all or by a rule some screen invented for itself"
+        !page.contains(sentence),
+        "the sentence about names being bound to keys is back on the page; it \
+         explains a guarantee nobody asked about, next to a name nobody \
+         doubted"
     );
     assert!(
         !mensagens.contains("selo"),
