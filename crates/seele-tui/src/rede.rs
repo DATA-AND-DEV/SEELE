@@ -958,6 +958,7 @@ fn relatorio(fatos: &Fatos) -> String {
     escrever_entrada(&mut texto, fatos);
     escrever_nat(&mut texto, fatos);
     escrever_pontos(&mut texto, fatos);
+    escrever_firewall(&mut texto);
     escrever_quic(&mut texto, fatos);
     escrever_furo(&mut texto, fatos);
     texto
@@ -1145,6 +1146,34 @@ fn escrever_pontos(texto: &mut String, fatos: &Fatos) {
 }
 
 /// Se a máquina fala QUIC, independentemente da rede.
+/// O firewall desta máquina, e só quando há o que dizer.
+///
+/// Três respostas e duas linhas: `Liberada` não vira linha nenhuma, porque uma
+/// boa notícia gritada vira ruído que se aprende a ignorar — inclusive no dia em
+/// que a notícia for ruim. E `NaoSei` também não vira linha, que é a regra deste
+/// arquivo inteiro: sem informação, não se escreve.
+///
+/// Só `Barrada` fala, e ela fala com o comando pronto. É o único lugar desta
+/// saída que manda a pessoa **fazer** algo, e ela é a única que sabe o que fazer
+/// — criar a regra exige administrador, e o SEELE não é nem quer ser.
+fn escrever_firewall(texto: &mut String) {
+    use seele_server::alcance::firewall::{self, Entrada};
+
+    if firewall::entrada_para_este_programa() != Entrada::Barrada {
+        return;
+    }
+    let Ok(eu) = std::env::current_exe() else {
+        return;
+    };
+    linha(
+        texto,
+        "firewall",
+        "não há regra de entrada para este programa, e no Windows isso barra \
+         conexão de fora",
+    );
+    linha(texto, "", &firewall::comando_para_liberar(&eu));
+}
+
 fn escrever_quic(texto: &mut String, fatos: &Fatos) {
     let valor = match fatos.quic {
         Some(true) => "sobe nesta máquina",
