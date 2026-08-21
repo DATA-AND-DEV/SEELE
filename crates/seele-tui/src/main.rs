@@ -37,6 +37,7 @@ use seele_core::{
 };
 use seele_tui::app::{Action, Alert, App, ChatLine, Key, Mode, Node, Screen};
 use seele_tui::command::{self, Command};
+use seele_tui::rede;
 use seele_tui::selecao::{self, Resultado, Selecao};
 use seele_tui::theme::{Palette, Theme};
 use seele_tui::{ui, view};
@@ -218,54 +219,35 @@ fn frase_do_alcance(alcance: &seele_server::alcance::Alcance) -> String {
         .collect();
 
     match alcance.degrau() {
-        Degrau::PortaNoRoteador => {
-            "O roteador abriu a porta: este link deve funcionar pela internet.".to_owned()
-        }
+        Degrau::PortaNoRoteador => "O roteador abriu a porta.".to_owned(),
         // Degrau 4. "Deve funcionar" e não "funciona", e a diferença é a razão
         // de a escada continuar existindo: com NAT simétrico dos dois lados o
         // furo não abre, e a saída continua sendo encaminhar a porta à mão.
         Degrau::FuroDeNat => format!(
-            "Um ponto de encontro apresentou esta máquina: o link deve \
-             funcionar pela internet sem mexer no roteador.{motivo}\n\
-             Se não funcionar, as duas redes são do tipo que não deixa furar — \
-             aí encaminhe a porta {} no roteador à mão.\n\
-             O ponto de encontro fica sabendo que endereço falou com o seu, e \
-             quando; nunca o que foi dito. Para usar o seu, ou nenhum: \
-             docs/ponto-de-encontro.md.",
-            alcance.alvo().port()
+            "Um ponto de encontro apresentou esta máquina.{motivo}\n\
+             Ele fica sabendo que endereço falou com o seu, e quando; nunca o \
+             que foi dito. Você pode apontar para outro."
         ),
-        Degrau::Ipv6Direto => format!(
-            "Este link é IPv6 e alcança de qualquer lugar — mas só quem também \
-             tiver IPv6.{motivo}"
-        ),
+        Degrau::Ipv6Direto => {
+            format!("Este link é IPv6: só alcança quem também tiver IPv6.{motivo}")
+        }
         // Degrau 1 com endereço próprio: uma VPS, um IP fixo, uma porta já
         // encaminhada à mão. O único degrau em que nada foi pedido a ninguém —
         // nem ao roteador, nem a um ponto de encontro —, e por isso o único sem
         // ressalva. Antes de ele existir esta máquina lia a frase do
         // `SoRedeLocal`, que manda encaminhar a porta num roteador que não
         // existe, embaixo de um link que alcança o mundo inteiro.
-        Degrau::EnderecoDireto => format!(
-            "Esta máquina tem endereço próprio: este link deve funcionar pela \
-             internet, sem depender de ninguém.{motivo}"
-        ),
+        Degrau::EnderecoDireto => format!("Esta máquina tem endereço próprio.{motivo}"),
         // O caso do relato de campo: a VPN é o único caminho que sai desta
         // máquina, e ela não aceita entrada. Frase própria porque o que se faz
         // a respeito é diferente — aqui a resposta é desligar a VPN.
         Degrau::RedeLocalOuVpn => format!(
             "ATENÇÃO: este link só funciona na sua rede, ou para quem estiver \
-             na mesma VPN que você.{motivo}\n\
-             O único endereço que sai desta máquina vem de uma VPN, e VPN de \
-             navegação (WARP, Proton, Nord) não aceita conexão de entrada. \
-             Para alcançar de fora: desligue a VPN e encaminhe a porta {} no \
-             roteador à mão.",
-            alcance.alvo().port()
+             na mesma VPN que você.{motivo}"
         ),
-        Degrau::SoRedeLocal => format!(
-            "ATENÇÃO: este link só funciona para quem estiver na sua rede.{motivo}\n\
-             Para alcançar de fora: encaminhe a porta {} no roteador à mão, ou \
-             use uma VPN de rede (Tailscale, WireGuard) nos dois lados.",
-            alcance.alvo().port()
-        ),
+        Degrau::SoRedeLocal => {
+            format!("ATENÇÃO: este link só funciona para quem estiver na sua rede.{motivo}")
+        }
     }
 }
 
@@ -396,6 +378,15 @@ fn usage() {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Antes de `parse_args`, e antes de o terminal alternativo abrir: quem roda
+    // `plug --rede` tem uma pergunta sobre esta máquina, não uma sessão para
+    // abrir. O diagnóstico escreve na saída de sempre e termina em `ExitCode`,
+    // e nada do resto deste arquivo chega a rodar.
+    let argumentos: Vec<String> = std::env::args().skip(1).collect();
+    if rede::pedido(&argumentos) {
+        rede::rodar_e_sair(&argumentos);
+    }
+
     let args = match parse_args() {
         Ok(args) => args,
         Err(error) => {
