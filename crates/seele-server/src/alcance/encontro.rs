@@ -208,11 +208,28 @@ pub enum FalhaNoEncontro {
     Desligado,
     /// O nome do ponto de encontro não resolve.
     NaoResolve(String),
-    /// O ponto de encontro não respondeu dentro do prazo.
+    /// O ponto de encontro não respondeu à **primeira** pergunta, o `ONDE`.
     ///
-    /// Fora do ar, bloqueado por firewall de saída, ou uma rede que não deixa
-    /// UDP sair. Não dá para distinguir daqui, e prometer que dá seria pior.
-    SemResposta,
+    /// Ela sai de um socket recém-aberto e só pede «de onde este pacote veio».
+    /// Se ela falha, o problema é entre esta máquina e o serviço: fora do ar,
+    /// firewall de saída, ou uma rede que não deixa UDP sair.
+    ///
+    /// Separada da seguinte porque as duas apontam para lugares diferentes, e
+    /// enquanto foram a mesma variante quem investigava procurava no lugar
+    /// errado — foi o que aconteceu num teste de campo, três vezes seguidas.
+    SemRespostaAoOnde,
+    /// O ponto de encontro respondeu ao `ONDE` e **não** ao `LEVE`.
+    ///
+    /// É a pergunta que só o socket do Dogma pode fazer, porque o NAT mapeia por
+    /// porta interna e é a porta do QUIC que precisa do furo. Ela sai pelo
+    /// espelho daquele socket e a resposta volta pela escuta de avisos.
+    ///
+    /// Falhar **só aqui** é informação forte: o caminho até o ponto de encontro
+    /// funciona — a primeira pergunta acabou de provar isso — e o que não
+    /// funciona é o espelho do socket do Dogma, ou a volta até a escuta de
+    /// avisos. Nenhuma ferramenta de diagnóstico deste projeto exercita esse
+    /// caminho; ele só acontece ao hospedar.
+    SemRespostaAoLeve,
     /// A escuta de avisos não abriu nesta máquina.
     SemEscutaDeAvisos(String),
     /// O socket do Dogma não pôde ser usado para falar com o ponto de encontro.
@@ -253,10 +270,22 @@ impl std::fmt::Display for FalhaNoEncontro {
                 "não achei o ponto de encontro «{nome}»: o nome não resolve, ou \
                  esta máquina está sem DNS"
             ),
-            Self::SemResposta => write!(
+            // Duas frases porque apontam para lugares diferentes, e enquanto
+            // foram uma só quem investigava procurava no lugar errado.
+            Self::SemRespostaAoOnde => write!(
                 f,
                 "o ponto de encontro não respondeu a tempo — fora do ar, ou esta \
                  rede não deixa UDP sair"
+            ),
+            // Esta é a informação mais específica que o degrau 4 consegue dar
+            // sobre si mesmo: o serviço respondeu à primeira pergunta e não à
+            // segunda, então o caminho até ele funciona e o que não funciona é o
+            // socket do Dogma — que é justamente o que nenhum diagnóstico deste
+            // projeto sabe exercitar.
+            Self::SemRespostaAoLeve => write!(
+                f,
+                "o ponto de encontro respondeu, mas não pelo socket do Dogma — o \
+                 caminho até ele funciona e o furo não sai desta porta"
             ),
             Self::SemEscutaDeAvisos(erro) => write!(
                 f,
@@ -443,7 +472,7 @@ pub async fn abrir(convocacao: &Convocacao) -> Result<Encontro, FalhaNoEncontro>
         }
     }
     let (Some((ponto, avisos)), Some(aviso)) = (ponto, aviso) else {
-        return Err(FalhaNoEncontro::SemResposta);
+        return Err(FalhaNoEncontro::SemRespostaAoOnde);
     };
 
     // Segunda pergunta, e a que só o socket do Dogma pode fazer: qual é o
@@ -454,8 +483,8 @@ pub async fn abrir(convocacao: &Convocacao) -> Result<Encontro, FalhaNoEncontro>
         perguntar_pelo_dogma(&convocacao.socket, &avisos, ponto, aviso, &minha_marca),
     )
     .await
-    .map_err(|_| FalhaNoEncontro::SemResposta)?
-    .ok_or(FalhaNoEncontro::SemResposta)?;
+    .map_err(|_| FalhaNoEncontro::SemRespostaAoLeve)?
+    .ok_or(FalhaNoEncontro::SemRespostaAoLeve)?;
 
     tracing::info!(%aviso, %publico, ponto = %convocacao.ponto, "degrau 4: o ponto de encontro nos viu");
 
@@ -1024,7 +1053,10 @@ mod testes {
         };
         let levou = comeco.elapsed();
 
-        assert_eq!(falha, FalhaNoEncontro::SemResposta);
+        // `AoOnde` e não `AoLeve`: um buraco negro nunca responde à primeira
+        // pergunta, então a segunda não chega a ser feita. Distinguir as duas
+        // aqui é o que faz esta asserção significar alguma coisa.
+        assert_eq!(falha, FalhaNoEncontro::SemRespostaAoOnde);
         assert!(
             levou < PRAZO + Duration::from_millis(500),
             "o degrau 4 segurou quem apertou HOSPEDAR por {levou:?}"
@@ -1385,7 +1417,8 @@ mod testes {
         let falhas = [
             FalhaNoEncontro::Desligado,
             FalhaNoEncontro::NaoResolve("encontro.exemplo".to_owned()),
-            FalhaNoEncontro::SemResposta,
+            FalhaNoEncontro::SemRespostaAoOnde,
+            FalhaNoEncontro::SemRespostaAoLeve,
             FalhaNoEncontro::SemEscutaDeAvisos("endereço em uso".to_owned()),
             FalhaNoEncontro::SemSocketDoDogma,
         ];
