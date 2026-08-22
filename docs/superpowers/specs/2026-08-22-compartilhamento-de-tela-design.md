@@ -422,7 +422,73 @@ frente dela»*. Vale igual aqui: a §4 é desenho, e o portão de campo dela é
 `docs/superpowers/specs/2026-08-21-portao-de-campo.md` em espírito — três
 máquinas, três sistemas, uma pessoa em cada.
 
-## 5 · O que não entra na primeira versão
+## 5 · O que a pessoa escolhe, e por que é um teto
+
+Decidido em 22/08/2026, a pedido de quem desenha o produto: **quem compartilha
+controla o que sai da máquina dele.**
+
+### Resolução não controla tráfego
+
+A primeira coisa que a interface não pode deixar a pessoa acreditar. 1080p a
+1 Mbps e 720p a 1 Mbps gastam **o mesmo**. O que a resolução muda é o detalhe:
+no 1080p aquele megabit fica esticado sobre quatro vezes mais pixels, e o
+resultado é borrão em movimento. Quem escolhe 720p não economiza banda — troca
+tamanho por nitidez dentro do mesmo orçamento.
+
+Por isso são **três controles**, e não um, cada um respondendo a uma pergunta
+que a pessoa de fato tem:
+
+| controle | responde a |
+|---|---|
+| teto de banda | «não quero que isso coma minha internet» |
+| resolução | «o texto do meu editor está ilegível» |
+| quadros por segundo | «estou mostrando um vídeo e está picotado» |
+
+### Todos são teto, nenhum é piso
+
+**A regra que não se negocia.** O que a pessoa escolhe é o **máximo**, e o
+sistema continua livre para ficar abaixo.
+
+Se a escolha virar piso, a regra de aceite do §3.2 cai — *a voz nunca cede à
+tela* — e volta exatamente o que o spike mediu: 225 ms de atraso na voz contra
+22 ms. Alguém escolhe 1080p60 numa subida de 2 Mbps, o vídeo insiste, e a
+conversa fica impossível **por causa da tela**. Aí o produto fica pior com o
+recurso do que sem ele.
+
+Com teto, o comportamento continua o do §2: a resolução segura e o quadro cede,
+entre 5 e 30 por segundo. A escolha da pessoa passa a ser o limite de cima
+dessa faixa, e o teto automático de 60% do caminho medido continua por baixo,
+como piso de proteção da voz.
+
+Consequência de interface, e ela é obrigatória: **a tela não promete a escolha.**
+Ela mostra o que está saindo agora ao lado do que foi pedido. Escolher 1080p e
+receber 720p não é defeito; esconder que aconteceu, é.
+
+### O seletor diz o que a escolha custa
+
+O produto já mede o caminho — o sinal, o RTT, a perda (ADR 0024). Então as
+opções não aparecem secas: cada uma vem com o que ela pede, contra o que esta
+máquina mediu.
+
+Onde não houve medida, `——`, como em todo o resto do produto. Uma opção com um
+número inventado ao lado é pior que uma opção sem número.
+
+### O que fica de fora
+
+**«Qualidade da fonte»** — o *Source* do Discord. É a promessa que mais quebra
+em rede doméstica, e o §3 já mostrou o formato do estrago.
+
+### A lista de opções só é fixada depois do spike do codec
+
+Este documento **não** enumera as resoluções e os quadros oferecidos, e a
+omissão é deliberada: o spike do transporte mediu transporte, e quantos quadros
+de 1080p o encoder por software entrega numa máquina comum ainda não foi
+medido (§2, «CPU»). Oferecer 1080p antes desse número é oferecer uma opção que
+pode não ter CPU para acontecer.
+
+`spikes/tela-no-codec` é quem fecha esta lista.
+
+## 6 · O que não entra na primeira versão
 
 Lista honesta, com o motivo de cada uma. Uma promessa larga aqui custaria mais
 que o recurso.
@@ -452,7 +518,7 @@ que o recurso.
     **diz que não consegue mostrar** — nunca ignora em silêncio.
 12. **Cursor desenhado à parte, anotação, ponteiro.** Depois.
 
-## 6 · Ordem de construção
+## 7 · Ordem de construção
 
 A ordem é de **quanto cada passo desbloqueia medição**, como no ciclo anterior.
 
@@ -465,12 +531,15 @@ A ordem é de **quanto cada passo desbloqueia medição**, como no ciclo anterio
    já existe, e o quadro-chave espalhado. Aqui o §3 vira código.
 4. **O par completo em duas máquinas na mesma casa**, com o `plug` de um lado
    dizendo que não mostra.
-5. **Windows**, depois **Linux** — nesta ordem, porque o Linux é o que muda uma
-   propriedade do produto (§1) e é melhor fazê-lo sabendo que o resto funciona.
+5. **Windows.** O **Linux fica fora da v1**, por decisão de 22/08/2026: o
+   portal exige `ashpd` + `pipewire` e com eles o binário do Linux deixa de ser
+   autocontido (§1), que é uma das propriedades que este produto vende. É
+   reversível e não quebra promessa nenhuma — a v1 sai com macOS e Windows, e o
+   Linux fica nomeado como pendência em vez de trocado por baixo.
 6. **Portão de campo**, duas casas de verdade, com voz e tela juntas, medindo o
    sinal da voz durante a transmissão. O número a bater é o do §3.2.
 
-## 7 · Perguntas que continuam abertas
+## 8 · Perguntas que continuam abertas
 
 1. **60% do caminho é o teto certo?** É o que este spike sustenta num cano
    determinístico. Wi-Fi ruim tem perda esporádica e atraso que anda sozinho, e
