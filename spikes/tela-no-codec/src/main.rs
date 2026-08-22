@@ -529,22 +529,48 @@ fn escrever_amostra(
 
 /// Segundos de CPU já gastos por este processo, somando todas as threads.
 ///
-/// Lido do `ps` e não de `getrusage` porque `getrusage` exige FFI, e FFI exige
-/// `unsafe`, que esta casa proíbe. A resolução do `ps` é de 10 ms, o que sobre
-/// uma corrida de segundos erra na terceira casa — bem abaixo do que qualquer
-/// conclusão daqui depende.
+/// Lido de um programa do sistema e não de `getrusage`/`GetProcessTimes` porque
+/// os dois exigem FFI, e FFI exige `unsafe`, que esta casa proíbe. A resolução
+/// é de 10 ms, o que sobre uma corrida de segundos erra na terceira casa — bem
+/// abaixo do que qualquer conclusão daqui depende.
+///
+/// Dois caminhos porque há duas máquinas. O `ps` não existe no Windows, e foi
+/// nele que este spike parou quando saiu do Mac pela primeira vez.
 fn cpu_segundos() -> Option<f64> {
-    let saida = Command::new("ps")
-        .args(["-o", "cputime=", "-p"])
-        .arg(std::process::id().to_string())
-        .output()
-        .ok()?;
-    let texto = String::from_utf8_lossy(&saida.stdout);
-    let texto = texto.trim();
-    let (minutos, resto) = texto.rsplit_once(':')?;
-    let minutos: f64 = minutos.rsplit(':').next()?.parse().ok()?;
-    let segundos: f64 = resto.parse().ok()?;
-    Some(minutos * 60.0 + segundos)
+    #[cfg(windows)]
+    {
+        let saida = Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command"])
+            .arg(format!(
+                "(Get-Process -Id {}).TotalProcessorTime.TotalSeconds",
+                std::process::id()
+            ))
+            .output()
+            .ok()?;
+        // Vírgula porque a máquina pode estar em pt-BR, e o PowerShell formata
+        // pelo idioma do sistema. Um `parse` cru devolveria `None` ali e a
+        // corrida inteira morreria com «não consegui ler a CPU do processo».
+        return String::from_utf8_lossy(&saida.stdout)
+            .trim()
+            .replace(',', ".")
+            .parse()
+            .ok();
+    }
+
+    #[cfg(not(windows))]
+    {
+        let saida = Command::new("ps")
+            .args(["-o", "cputime=", "-p"])
+            .arg(std::process::id().to_string())
+            .output()
+            .ok()?;
+        let texto = String::from_utf8_lossy(&saida.stdout);
+        let texto = texto.trim();
+        let (minutos, resto) = texto.rsplit_once(':')?;
+        let minutos: f64 = minutos.rsplit(':').next()?.parse().ok()?;
+        let segundos: f64 = resto.parse().ok()?;
+        Some(minutos * 60.0 + segundos)
+    }
 }
 
 struct Cenario {
