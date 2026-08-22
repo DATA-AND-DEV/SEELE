@@ -915,12 +915,46 @@ Write-Output ('restos=' + \$restos.Count)")
     case "$cw_resposta" in
         *sujo=sim*)
             # Já restauramos o que era nosso, então isto é trabalho de quem está
-            # naquela máquina. Um `reset --hard` resolveria e apagaria sem volta;
-            # um `stash` resolveria e deixaria sedimento que ninguém limpa.
-            morrer "a árvore do repositório em $WINDOWS tem alteração que não é minha." \
-                "Restaurei o $CONFIG_TAURI, que é o que o windows.ps1 mexe. O que" \
-                "sobrou é seu, e eu não apago trabalho de ninguém sem perguntar." \
-                "Rode lá:  git -C '$REPO_WINDOWS' status"
+            # naquela máquina.
+            #
+            # Antes isto matava o release, e o argumento escrito era: um
+            # `reset --hard` apagaria sem volta, e um `stash` deixaria sedimento
+            # que ninguém limpa. A primeira metade continua valendo e é por isso
+            # que não há `reset` aqui. A segunda caiu na prática: parar custava
+            # uma viagem até a outra máquina **depois** de o SSH já estar de pé,
+            # e a árvore de lá chega suja quase sempre, porque o próprio
+            # empacotamento regenera arquivos nela.
+            #
+            # E há um motivo que o argumento antigo não via: uma árvore suja no
+            # commit certo **compila diferente do commit**. O release deixaria
+            # de sair do código que a tag aponta, e isso é pior que o sedimento.
+            #
+            # O sedimento é tratado, e não ignorado: o stash leva o número do
+            # release no nome, e a contagem da pilha é impressa. Uma pilha que
+            # cresce aparece na tela em vez de crescer calada.
+            #
+            # Só o rastreado: arquivo não rastreado não impede `checkout` nem
+            # muda o que compila, e `git stash` sem `-u` não o levaria — dizer
+            # que guardou o que não guardou seria a mentira de sempre.
+            passo "há trabalho não commitado em $WINDOWS; guardando num stash"
+            cw_guarda=$(no_windows "\$ErrorActionPreference = 'Stop'
+Set-Location '$REPO_WINDOWS'
+git stash push --quiet --untracked-files=no --message 'seele: antes do release $VERSAO'
+Write-Output ('sobrou=' + (git status --porcelain --untracked-files=no).Length)
+Write-Output ('pilha=' + (git stash list | Measure-Object).Count)")
+            case "$cw_guarda" in
+                *sobrou=0*|*sobrou=*[!0-9]*) ;;
+                *)
+                    morrer "não consegui guardar o trabalho solto em $WINDOWS." \
+                        "Não vou compilar um release a partir de uma árvore que não é o commit." \
+                        "Rode lá:  git -C '$REPO_WINDOWS' status" \
+                        "" \
+                        "O que veio de lá:" \
+                        "$cw_guarda"
+                    ;;
+            esac
+            printf '%s\n' "$cw_guarda" | sed -n 's/^pilha=/     stashes em '"$WINDOWS"' agora: /p' | tr -d '\r'
+            printf '     recupere lá com:  git stash list  e  git stash pop\n'
             ;;
     esac
     printf '%s\n' "$cw_resposta" | sed -n 's/^apaguei=/     apagado em '"$WINDOWS"': /p' | tr -d '\r'
@@ -952,6 +986,9 @@ Write-Output ('restos=' + \$restos.Count)")
         fi
 
         passo "levando $WINDOWS ao commit $COMMIT"
+        # Sem stash aqui: a árvore já foi limpa acima, no `sujo=sim`, e um
+        # segundo `stash` neste ponto nunca teria o que guardar. Código que não
+        # dá para observar rodando é código que ninguém percebe quando quebra.
         cw_troca=$(no_windows "\$ErrorActionPreference = 'Stop'
 Set-Location '$REPO_WINDOWS'
 git fetch --all --quiet

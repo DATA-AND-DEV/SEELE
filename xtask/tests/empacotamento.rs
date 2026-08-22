@@ -546,6 +546,14 @@ case "$comando" in
         printf 'head=%s\r\n' "${FALSO_SSH_HEAD_DEPOIS:-${FALSO_SSH_HEAD:-nenhum}}"
         exit 0
         ;;
+    *'stash push'*)
+        # O guardado. A bancada devolve uma árvore que ficou limpa e uma pilha
+        # com um stash — que é o caso bom. `sobrou` diferente de zero é o
+        # caminho de «não consegui guardar», e o teste dele encena por aqui.
+        printf 'sobrou=%s\r\n' "${FALSO_SSH_SOBROU:-0}"
+        printf 'pilha=%s\r\n' "${FALSO_SSH_PILHA:-1}"
+        exit 0
+        ;;
     *-Versao*)
         cat > /dev/null
         printf 'empacotei windows\n' >> "$SEELE_TESTE_DIARIO"
@@ -1147,12 +1155,43 @@ fn a_limpeza_do_windows_restaura_so_o_arquivo_conhecido() {
         "o Windows tem que restaurar o arquivo conhecido, e não outra coisa:\n\
          {bloco_do_windows}"
     );
-    for proibido in ["reset --hard", "git stash", "clean -fd"] {
+    // Estes dois continuam proibidos, e pelo motivo original: eles **apagam**
+    // trabalho de quem está naquela máquina, sem aviso e sem volta.
+    for proibido in ["reset --hard", "clean -fd"] {
         assert!(
             !limpo.contains(proibido),
-            "«{proibido}» apaga ou sedimenta trabalho de quem está naquela máquina"
+            "«{proibido}» apaga trabalho de quem está naquela máquina"
         );
     }
+
+    // O `git stash` estava nesta lista e saiu. A recusa dele era por sedimento
+    // — «uma entrada de stash por rodada interrompida, e um sedimento que
+    // ninguém limpa» —, e o preço de mantê-la apareceu no uso: o release
+    // parava no meio, e quem publica tinha de ir até a outra máquina limpar à
+    // mão **depois** de tudo estar pronto para não ir. A árvore de lá chega
+    // suja quase sempre, porque o próprio empacotamento regenera arquivos nela.
+    //
+    // E havia um motivo que a recusa não via: uma árvore suja no commit certo
+    // compila **diferente do commit**, e um release que não sai do código que a
+    // tag aponta é pior que sedimento.
+    //
+    // O sedimento passou a ser tratado em vez de evitado, e é isso que estas
+    // duas asserções cobram: a contagem da pilha vai para a tela, e o stash não
+    // arrasta arquivo não rastreado — que nunca bloqueou nada e nem muda o que
+    // compila.
+    assert!(
+        limpo.contains("git stash list | Measure-Object"),
+        "o stash voltou a crescer calado: sem a contagem da pilha na tela, o \
+         sedimento que motivou a recusa original volta inteiro"
+    );
+    let empurra = limpo
+        .lines()
+        .find(|linha| linha.contains("git stash push"))
+        .unwrap_or_default();
+    assert!(
+        empurra.is_empty() || empurra.contains("--untracked-files=no"),
+        "o `git stash push` do Windows leva arquivo não rastreado junto:\n{empurra}"
+    );
 }
 
 #[test]
@@ -1702,5 +1741,71 @@ fn o_instalador_do_windows_remove_a_instalacao_por_usuario_de_antes() {
         "o gancho passou a apagar dados: o CASPER, a identidade e os pinos do \
          ADR 0003 moram aí, e uma migração de instalador não é lugar de \
          perdê-los:\n{corpo}"
+    );
+}
+
+#[test]
+fn o_trabalho_solto_no_windows_e_guardado_e_nao_apagado() {
+    // O último passo manual que sobrou dos quatro. `git checkout` recusa uma
+    // árvore com alteração no que ele reescreve, e a do Windows chega suja
+    // quase sempre — o próprio empacotamento regenera arquivos lá. O release
+    // parava no meio, com quem publica tendo de ir até a outra máquina limpar
+    // à mão, depois de já ter tudo pronto para não ir.
+    //
+    // Guardado, e nunca descartado: um `reset --hard` resolveria o mesmo e
+    // apagaria trabalho de quem estivesse mexendo naquela máquina.
+    let bancada = Bancada::nova();
+    let saida = bancada.rodar(
+        &["1.2.3"],
+        &[
+            ("FALSO_SSH_HEAD", &bancada.commit.clone()),
+            ("FALSO_SSH_SUJO", "sim"),
+        ],
+    );
+
+    assert!(
+        saida.texto.contains("stash"),
+        "o script guardou trabalho da outra máquina e não disse; guardar em \
+         silêncio é o mesmo que perder:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("git stash list"),
+        "disse que guardou e não disse como recuperar — a pessoa está na \
+         máquina errada para descobrir sozinha:\n{}",
+        saida.texto
+    );
+
+    // E o script que faz isso guarda só o rastreado. Sem `--untracked-files=no`
+    // ele relataria «guardei» sobre uma árvore onde só há arquivo novo — que
+    // `git stash` sem `-u` não leva, e que nunca bloqueou `checkout` nenhum.
+    let script = std::fs::read_to_string(raiz().join("empacotar/publicar.sh"))
+        .expect("o publicar.sh é legível");
+    // Na linha do `stash push`, e não em qualquer lugar do arquivo: a bandeira
+    // também aparece na conferência logo abaixo, e procurá-la solta deixava
+    // esta asserção passar com o `stash` já sem ela. Encontrado por mutação —
+    // tirar a bandeira do `push` não deixava nada vermelho.
+    let empurra = script
+        .lines()
+        .find(|linha| linha.contains("git stash push"))
+        .unwrap_or_default();
+    assert!(
+        empurra.contains("--untracked-files=no"),
+        "o `git stash push` passou a levar arquivo não rastreado junto: ele \
+         nunca bloqueou `checkout` nem muda o que compila, e arrastá-lo tira \
+         da outra máquina arquivo que ninguém pediu para guardar:\n{empurra}"
+    );
+    // Olhando código, e não comentário: os comentários deste bloco discutem o
+    // `reset --hard` justamente para dizer por que ele não está lá, e uma busca
+    // crua casaria com a explicação e chamaria de defeito.
+    let codigo: String = script
+        .lines()
+        .filter(|linha| !linha.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        !codigo.contains("reset --hard"),
+        "apareceu um `reset --hard` no caminho do Windows: isso apaga trabalho \
+         de quem estiver naquela máquina, e o stash existe para não apagar"
     );
 }
