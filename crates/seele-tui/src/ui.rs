@@ -49,6 +49,24 @@ pub const MIN_HEIGHT: u16 = 24;
 /// on the other end.
 pub const MAX_ALERT_ROWS: usize = 4;
 
+/// A marca em texto puro: o nó cheio, o enlace, o nó vazio.
+///
+/// `docs/marca.md` dá esta variação à TUI porque aqui não há SVG: o glifo tem
+/// de ser feito de caracteres que qualquer terminal já tem. Substitui o
+/// katakana e a assinatura do plug de entrada em toda a interface.
+///
+/// **Nove bytes, três caracteres, três células.** As três são de largura
+/// ambígua no leste asiático (`■` U+25A0, `—` U+2014, `□` U+25A1): a medida
+/// que vale aqui é a que [`width`] dá, porque é a mesma que o ratatui usa para
+/// posicionar. Um terminal configurado para desenhar ambíguo em célula dupla
+/// vai render seis, e é por isso que a marca só entra em títulos e cabeçalhos
+/// — nunca numa linha cujo alinhamento outra coluna dependa.
+pub const MARCA: &str = "■—□";
+
+/// A assinatura, quando cabe: marca mais o wordmark. **Quinze bytes, nove
+/// caracteres, nove células** pela mesma medida de [`MARCA`].
+pub const ASSINATURA: &str = "■—□ SEELE";
+
 /// Display width of a string, in terminal cells.
 ///
 /// The only correct way to ask. See the module docs.
@@ -317,10 +335,10 @@ fn render_convite(
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-/// The outer frame: `SEELE ─ 12:04:33`.
+/// The outer frame: `■—□ SEELE ─ 12:04:33`.
 fn title_block(app: &App, theme: Theme) -> Block<'static> {
     let mut spans = vec![
-        Span::styled(" SEELE ", theme.accent()),
+        Span::styled(format!(" {ASSINATURA} "), theme.accent()),
         Span::styled("─ ", theme.fg(crate::theme::RULE)),
     ];
 
@@ -792,7 +810,7 @@ fn render_boot(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
     frame.render_widget(block, area);
 
     let lines = vec![
-        Line::from(Span::styled("  SEELE SYSTEM", theme.accent())),
+        Line::from(Span::styled(format!("  {ASSINATURA}"), theme.accent())),
         Line::from(""),
         Line::from(Span::styled("  estabelecendo enlace…", theme.label())),
     ];
@@ -1251,6 +1269,31 @@ mod tests {
         assert_eq!("同期率".len(), 9);
         assert_eq!("同期率".chars().count(), 3);
         assert_eq!(width("同期率"), 6);
+    }
+
+    #[test]
+    fn a_marca_em_texto_puro_mede_o_que_o_comentario_diz() {
+        // Mesma armadilha do teste acima, agora na marca: `■`, `—` e `□` são
+        // de largura ambígua, e o número que o layout usa é o de células, não
+        // o de bytes. Medido aqui para que ninguém troque o glifo por um mais
+        // largo sem ver a conta mudar.
+        assert_eq!(MARCA.len(), 9);
+        assert_eq!(MARCA.chars().count(), 3);
+        assert_eq!(width(MARCA), 3);
+
+        assert_eq!(ASSINATURA.len(), 15);
+        assert_eq!(ASSINATURA.chars().count(), 9);
+        assert_eq!(width(ASSINATURA), 9);
+    }
+
+    #[test]
+    fn a_marca_abre_o_quadro_e_a_tela_de_conexao() {
+        // A marca desenhada, não só a constante: o katakana e o plug de
+        // entrada saíram, e o que abre o quadro agora é `■—□ SEELE`.
+        let screen = draw(&populated(), Palette::True, (MIN_WIDTH, MIN_HEIGHT));
+        assert!(screen.contains(ASSINATURA), "{screen}");
+        assert!(!screen.contains("ゼーレ"), "{screen}");
+        assert!(!screen.contains("ENTRY PLUG"), "{screen}");
     }
 
     #[test]

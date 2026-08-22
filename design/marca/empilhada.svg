@@ -1,19 +1,20 @@
-<!-- SEELE · assinatura. Gerado por `design/marca/gerar-wordmark.py` a partir
+<!-- SEELE · empilhada. Gerado por `design/marca/gerar-wordmark.py` a partir
      de `simbolo.svg` e da Saira Condensed 900 embarcada. NÃO editar à mão.
 
-     Símbolo mais o wordmark SEELE em Saira Condensed 900, tracking 0,06 em,
-     separados pelo respiro de um nó cheio. A caixa alta do wordmark é 48 —
-     metade do quadro do símbolo — e a linha de base cai em 72, que põe o
-     centro óptico da palavra no centro do símbolo.
+     Símbolo em cima, wordmark embaixo, os dois centrados na mesma largura.
+     Para suporte alto e estreito, onde a assinatura deitada não cabe.
 
-     O respiro à direita fecha em 11,8 e não em 12: a largura do wordmark é
-     de tipo, não de grade, e é melhor arredondar a caixa que a letra. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 96" width="280" height="96" role="img" aria-label="SEELE">
+     O respiro entre os dois conta da borda do símbolo (84), não da borda do
+     quadro: o quadro já tem 12 de folga dentro dele, e medir pelo quadro
+     somaria duas folgas e afastaria o nome do desenho. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 184 168" width="184" height="168" role="img" aria-label="SEELE">
   <title>SEELE</title>
-  <path d="M34 34L62 62" stroke="#EAE3CF" stroke-width="4"/>
-  <rect x="12" y="12" width="24" height="24" fill="#F2521F"/>
-  <rect x="62" y="62" width="20" height="20" fill="none" stroke="#F2521F" stroke-width="4"/>
-  <g fill="#EAE3CF" transform="translate(106.3953 72) scale(0.069767442 -0.069767442)">
+  <g transform="translate(44 0)">
+    <path d="M34 34L62 62" stroke="#EAE3CF" stroke-width="4"/>
+    <rect x="12" y="12" width="24" height="24" fill="#F2521F"/>
+    <rect x="62" y="62" width="20" height="20" fill="none" stroke="#F2521F" stroke-width="4"/>
+  </g>
+  <g fill="#EAE3CF" transform="translate(10.3023 156) scale(0.069767442 -0.069767442)">
     <path d="M225 -8Q179 -8 126 -2.5Q73 3 36 11V147Q83 143 117 141.5Q151 140 173 140Q196 140 214 141.5Q232 143 238 151Q248 162 248 199Q248 227 244 240.5Q240 254 227 260Q214 266 185 271L100 287Q58 295 40.5 344.5Q23 394 23 484Q23 554 39.5 596.5Q56 639 85 660.5Q114 682 152.5 689Q191 696 236 696Q288 696 332 690Q376 684 401 678V541Q371 545 340.5 546.5Q310 548 278 548Q253 548 238 547Q223 546 215 539Q203 528 203 490Q203 459 208.5 447Q214 435 243 430L316 416Q350 409 373.5 394Q397 379 412 341Q421 319 424.5 289.5Q428 260 428 223Q428 141 411.5 90Q395 39 351 15.5Q307 -8 225 -8Z"/>
     <path transform="translate(509 0)" d="M40 0V688H393V540H220V421H367V274H220V148H393V0Z"/>
     <path transform="translate(995 0)" d="M40 0V688H393V540H220V421H367V274H220V148H393V0Z"/>

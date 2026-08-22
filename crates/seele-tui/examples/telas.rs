@@ -27,7 +27,7 @@ const LARGURA: u16 = 80;
 const ALTURA: u16 = 24;
 
 fn main() {
-    imprimir("Operação — PADRÃO: AZUL", &operando());
+    imprimir("Operação — conexão segura", &operando());
     imprimir("Busca no histórico, com `/`", &buscando());
     imprimir("Ajuda, com `?`", &com_ajuda());
     imprimir("Bateria interna — o enlace caiu", &na_bateria());
@@ -75,63 +75,63 @@ fn operando() -> App {
     let mut app = App::new();
     app.screen = Screen::PatternBlue;
     app.clock = "12:04:33".into();
-    app.dogmas = vec!["Terceira Tóquio".into()];
+    app.dogmas = vec!["Casa do Alexandre".into()];
     app.tree = vec![
         Node::Cage {
-            name: "CAGE-01 CENTRAL".into(),
+            name: "SALA 1".into(),
             open: true,
             sync: None,
         },
         Node::Pilot(RosterEntry {
-            nickname: "ayanami".into(),
+            nickname: "alexandre".into(),
             sync: 98,
             speaking: true,
             at_field: false,
             total_isolation: false,
         }),
         Node::Pilot(RosterEntry {
-            nickname: "shinji".into(),
+            nickname: "rafa".into(),
             sync: 71,
             speaking: false,
             at_field: false,
             total_isolation: false,
         }),
         Node::Pilot(RosterEntry {
-            nickname: "asuka".into(),
+            nickname: "bia".into(),
             sync: 44,
             speaking: false,
             at_field: true,
             total_isolation: false,
         }),
         Node::Cage {
-            name: "CAGE-02 TESTE".into(),
+            name: "JOGOS".into(),
             open: false,
             sync: None,
         },
         Node::Line {
-            name: "#geral".into(),
+            name: "geral".into(),
         },
         Node::Line {
-            name: "#logs".into(),
+            name: "combinados".into(),
         },
     ];
     app.messages = vec![
         ChatLine {
             at: "12:01".into(),
-            author: "ayanami".into(),
-            body: "verificando harmônicos".into(),
+            author: "alexandre".into(),
+            body: "subi o servidor aqui em casa".into(),
             own: false,
         },
         ChatLine {
             at: "12:03".into(),
-            author: "shinji".into(),
-            body: "sync caiu aqui".into(),
+            author: "rafa".into(),
+            body: "meu sinal caiu, um segundo".into(),
             own: false,
         },
         ChatLine {
             at: "12:04".into(),
             author: "você".into(),
-            body: "vendo — o jitter subiu junto".into(),
+            body: "vendo — o atraso subiu junto".into(),
             own: true,
         },
     ];
@@ -159,13 +159,13 @@ fn buscando() -> App {
     let mut app = operando();
     app.messages.push(ChatLine {
         at: "12:05".into(),
-        author: "ayanami".into(),
+        author: "alexandre".into(),
         body: "o sync voltou a subir".into(),
         own: false,
     });
     app.messages.push(ChatLine {
         at: "12:06".into(),
-        author: "asuka".into(),
+        author: "bia".into(),
         body: "aqui o sync nem caiu".into(),
         own: false,
     });

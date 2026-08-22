@@ -2,11 +2,12 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<title>SEELE · Entry Plug</title>
+<title>SEELE</title>
 <!--
-  Favicon é a forma muda: a folha de marca troca de forma abaixo de 32px de
-  largura do plug, e uma aba de navegador nunca chega perto disso. Com o nome
-  dentro, ゼーレ vira três borrões; sem ele, a silhueta ainda se lê a 16px.
+  Favicon é a forma muda: o símbolo sozinho, redesenhado para a faixa de 16px —
+  traço mais grosso e furo maior, senão o nó vazio fecha e os dois nós viram a
+  mesma forma. Com o nome dentro, uma aba de navegador não teria onde pôr as
+  cinco letras; sem ele, os dois nós e a diagonal ainda se leem a 16px.
 -->
 <link rel="icon" href="marca-muda.svg" type="image/svg+xml">
 <!--
@@ -128,17 +129,15 @@
 -->
 
 <!--
-  Boot — a sequência de inicialização. Dura o tempo real da conexão; nada aqui
-  espera de propósito.
+  Entrada — onde se escolhe o servidor e se conecta. Dura o tempo real da
+  conexão; nada aqui espera de propósito.
 
-  Duas colunas, como o comp v2 (`design/Entry Plug v2.dc.html`, painéis A·01 e
-  B·01): à esquerda a ficha da máquina e o diagrama MAGI, à direita o registro
-  de carga. O que o comp põe no registro são dez linhas de log com carimbo de
-  tempo, e nenhuma delas tem dado por trás (§16 do inventário: não existe
-  progresso de conexão no protocolo). Dez literais fixos desenhados como se
-  fossem eventos seriam dado falso, então o painel carrega o que **é** o
-  registro de carga desta janela: para onde você já foi, e o formulário que
-  começa a carga.
+  Duas colunas: à esquerda a marca e o que o produto é, à direita a conexão. O
+  que o comp v2 punha no painel da direita eram dez linhas de registro com
+  carimbo de tempo, e nenhuma delas tem dado por trás (§16 do inventário: não
+  existe progresso de conexão no protocolo). Dez literais fixos desenhados como
+  se fossem eventos seriam dado falso, então o painel carrega o que **é** a
+  conexão: para onde você já foi, e o formulário que começa a travessia.
 -->
 <!--
   `tabindex`, `data-foco` e `data-anuncio` em toda `.tela`, e o mesmo trio nas
@@ -153,6 +152,10 @@
   `tabindex="-1"` põe a `<section>` ao alcance de `focus()` sem pô-la na ordem
   de tabulação: é onde o foco pousa quando a tela não nomeia um controle melhor,
   e nunca uma parada a mais para quem tabula.
+
+  O foco continua em `#campo-servidor` e não no `#campo-convite`, que agora é o
+  primeiro da coluna: o convite é caminho de quem colou alguma coisa, e quem
+  colou já tem o valor. Quem chega sem convite digita endereço.
 -->
 <section id="tela-boot" class="tela" tabindex="-1"
          data-foco="campo-servidor"
@@ -166,164 +169,160 @@
       <p class="coordenada coordenada-solta">A·01 / SEQUÊNCIA DE INICIALIZAÇÃO</p>
 
       <div class="boot-corpo">
-        <div class="boot-ficha">
-          <!--
-            Aqui ficava a cartela japonesa (`起動検査`), e ela saiu junto com o
-            resto do japonês decorativo desta página. Ele nunca disse nada a
-            quem lê a tela: era acento de tema em cima de rótulos que já
-            carregavam a informação inteira em português, e quem não conhece a
-            referência lia dois glifos sem tradução no meio de um formulário. A
-            estética fica — a régua, o negro, a face de terminal —, a camada de
-            língua sai.
-          -->
-          <span class="regua-tripla" aria-hidden="true"></span>
-          <!--
-            Ficção de cenário, e o inventário a classifica assim (§16, **F**):
-            citação do frame original do Eva. Não bindam a nada e não deveriam —
-            é a única categoria de literal que pode ficar fixa sem mentir,
-            porque não afirma nada sobre esta máquina.
-          -->
-          <ul class="boot-meta">
-            <li>CODE : 0447</li>
-            <li>FILE : ENTRY_PLUG.INIT</li>
-            <li>EX_MODE : ON</li>
-            <li>PRIORITY : A——</li>
-          </ul>
-          <span class="regua-tripla" aria-hidden="true"></span>
+        <!--
+          A marca nova, `docs/marca.md`: dois nós e uma ligação — o cheio é quem
+          hospeda, o vazio é quem chega, a diagonal é o enlace. É a arquitetura
+          do produto num glifo.
 
-          <!--
-      Assinatura, a forma da marca para onde o nome precisa ser dito com
-      espaço: sequência de inicialização, autenticação, erro de tela cheia.
-      Uma forma por tela — por isso a sessão usa a palavra latina no topo e
-      nunca ゼーレ.
+          Aqui ficava a assinatura em contorno, que era o katakana da abertura
+          do anime, e ela saiu pelo mesmo motivo que o resto do japonês
+          decorativo desta página: não dizia nada a quem lê a tela. O símbolo é
+          imagem porque é geometria com uma fonte só (`marca-simbolo.svg`, o
+          mesmo arquivo de todos os tamanhos); o nome é **texto**, porque é
+          latino e a face que o desenha vem embarcada.
 
-      SVG com os glifos em contorno, e não texto. O app embarca a Noto Sans JP
-      desde M5 (`fontes.css`), então o motivo mudou de "não há face" para o que
-      sempre foi o verdadeiro: a assinatura é **desenho**, com o espacejamento
-      da folha de marca dentro dela. Como texto ela ficaria à mercê de qualquer
-      substituição — atualização da face, `font-display` errando o instante,
-      uma máquina sem o arquivo — e substituir a face japonesa é justamente o
-      que a folha de marca proíbe. O contorno não tem esse jeito de falhar.
-    -->
-          <h1 class="boot-marca">
-            <img src="marca-assinatura.svg" alt="SEELE" class="marca-assinatura" width="292" height="95">
-            <span class="marca-legenda">SEELE</span>
-          </h1>
-          <!--
-            O comp escreve `MAGI` em 44px nesta linha, porque lá MAGI é o nome
-            do produto. Aqui o nome do produto é SEELE, e `docs/marca.md` manda
-            a assinatura desenhada nas telas onde o nome precisa de espaço. MAGI
-            continua sendo o nome dos três subsistemas, e está no diagrama ao
-            lado — que é onde ele nomeia alguma coisa.
-          -->
-          <p class="boot-sistema">SISTEMA DE SINCRONIZAÇÃO</p>
-        </div>
+          `alt=""` de propósito: o `<span>` ao lado já diz SEELE, e um símbolo
+          rotulado ao lado do nome faria o leitor de tela dizer a marca duas
+          vezes.
+        -->
+        <h1 class="boot-marca">
+          <img src="marca-simbolo.svg" alt="" class="boot-simbolo" width="88" height="88">
+          <span class="boot-nome">SEELE</span>
+        </h1>
+
+        <span class="regua-tripla" aria-hidden="true"></span>
 
         <!--
-          O diagrama dos três. Desenho, não layout: o inventário (§13) registra
-          que nada nele alinha célula nenhuma, e a transcrição preserva as
-          coordenadas do comp em vez de arredondá-las para a grade de 8×16.
+          Aqui ficava a cartela de cenário — `CODE : 0447`, `FILE :
+          ENTRY_PLUG.INIT`, `EX_MODE : ON`, `PRIORITY : A——`. O inventário a
+          classificava como ficção (§16, **F**): quatro linhas que não bindavam
+          a nada, defensáveis enquanto não afirmassem nada sobre esta máquina.
 
-          O estado de cada polígono é o mesmo que a lista de subsistemas já
-          mostrava — `·` parado, `…` durante a tentativa, `ok` depois. Ele
-          continua escrito dentro do bloco: `specs/05-cliente-tui.md` proíbe
-          informação que só a cor carregue, e "acesa" e "apagada" seriam
-          exatamente isso. O que este estado **não** é: saúde por subsistema.
-          Ela não existe no protocolo (§16), e os três acendem juntos porque o
-          fato que eles relatam é um só — a conexão.
+          No lugar delas, três linhas com a mesma forma que afirmam o que o
+          produto de fato é. Não são medida — são o desenho do sistema, e valem
+          para toda janela deste app.
         -->
+        <ul class="boot-meta">
+          <li>REDE : PONTO-A-PONTO</li>
+          <li>TRANSPORTE : CIFRADO</li>
+          <li>REGISTRO : NENHUM</li>
+        </ul>
+
+        <span class="regua-tripla" aria-hidden="true"></span>
+
+        <p class="boot-sistema">COMUNICAÇÃO DE VOZ E TEXTO · SEM NUVEM, SEM CONTA</p>
+
         <!--
-          Aqui ficava o diagrama MAGI: três nós chamados MELCHIOR, BALTHASAR e
-          CASPER, com um selo `SEM MEDIDA` no meio.
-
-          Os três mudavam **juntos**, e o comentário que os acompanhava dizia por
-          quê: saúde por subsistema não existe no protocolo, e o fato que eles
-          relatavam era um só — a tentativa de conexão. Três nomes para um dado
-          é cenário se passando por instrumento, e foi por isso que a avaliação
-          de usabilidade os listou entre o que sai.
-
-          O dado honesto fica, porque ele serve: durante a conexão a pessoa
-          precisa ver que algo está acontecendo. Um estado, um nome, uma
-          palavra dentro — nunca só a cor, que `specs/05-cliente-tui.md` proíbe.
+          O glossário, e ele é desta tela e de mais nenhuma. A explicação do
+          vocabulário saiu das telas de operação porque legenda permanente é
+          texto que quem já sabe lê mil vezes; aqui ninguém sabe ainda. Esta é a
+          única tela que uma pessoa vê antes de ter aprendido o que é uma sala e
+          o que é um canal, e quatro termos é o inteiro do vocabulário.
         -->
-        <div class="boot-tentativa" data-estado="">
-          <span class="boot-tentativa-rotulo">CONEXÃO</span>
-          <b id="boot-tentativa-marca" class="boot-tentativa-marca">·</b>
-        </div>
+        <dl class="boot-glossario">
+          <dt>SERVIDOR</dt>
+          <dd>a máquina de um amigo ou a sua — nunca uma nuvem</dd>
+          <dt>SALA</dt>
+          <dd>voz — entre para falar e ouvir</dd>
+          <dt>CANAL</dt>
+          <dd>texto — nada fica guardado no servidor</dd>
+          <dt>SINAL</dt>
+          <dd>a qualidade da conexão de cada um, de 0 a 100, sempre visível</dd>
+        </dl>
+
+        <p class="boot-atalho">Aperte <kbd class="boot-tecla">?</kbd> em qualquer tela para atalhos e ajuda.</p>
       </div>
 
       <!--
-        O sinal. No comp ele sobe de 7 em 7 a cada 900 ms — um
-        cronômetro de protótipo, sem nada por trás (§16: `bootPct` exige
-        mudança de protocolo). Aqui a moldura fica e o valor falta: trilho
-        vazio, `——` no lugar do número, e a escala inteira. Um `0` seria a
-        resposta certa se houvesse campo medindo zero; aqui não há campo.
+        Onde a tentativa de conexão está, e o desenho da proposta não a traz.
+        Fica porque é o único lugar da janela que diz que **algo acontece**
+        enquanto o aperto de mão corre: `subsistemas()` escreve o estado aqui.
+
+        Aqui ficava, antes dela, o diagrama MAGI — três nós pintados pelo mesmo
+        `data-estado` — e antes disso o SINAL sem medida, moldura em volta de um
+        valor que este protocolo não carrega. Um estado, um nome, uma palavra
+        dentro: `specs/05-cliente-tui.md` proíbe informação que só a cor
+        carregue.
       -->
-      <div class="sync">
-        <div class="sync-topo">
-          <span class="rotulo">SINAL</span>
-          <span class="sync-valor ausente">——</span>
-        </div>
-        <span class="sync-trilho" aria-hidden="true"></span>
-        <div class="sync-escala">
-          <span>0</span><span>25</span><span>50</span><span>75</span><span>100</span>
-        </div>
-        <p class="sync-nota">NÃO MEDIDA — a conexão não relata progresso</p>
+      <div class="boot-tentativa" data-estado="">
+        <span class="boot-tentativa-rotulo">CONEXÃO</span>
+        <b id="boot-tentativa-marca" class="boot-tentativa-marca">·</b>
       </div>
     </div>
 
     <!-- ---------------- B·01 ---------------- -->
     <div class="boot-registro">
-      <h2 class="coordenada">B·01 / REGISTRO DE CARGA</h2>
+      <h2 class="coordenada">B·01 / CONEXÃO</h2>
 
       <div class="registro-corpo">
         <!--
           Onde você já esteve. Some inteira quando não há visitado nenhum — o
           estado vazio da tela é exatamente o de antes desta seção existir, e um
-          cabeçalho sobre uma lista vazia é pior que nenhum cabeçalho.
+          cabeçalho sobre uma lista vazia é pior que nenhum cabeçalho. A nota
+          embaixo some com ela, porque uma instrução sobre uma lista que não
+          está na tela é instrução para nada.
         -->
         <section id="visitados" class="visitados" hidden>
           <h3 class="visitados-titulo rotulo">ONDE VOCÊ JÁ ESTEVE</h3>
           <ul id="lista-visitados" class="lista-visitados"></ul>
+          <p class="nota">Clicar numa linha preenche tudo e conecta.</p>
         </section>
 
         <form id="form-conectar" class="boot-form" autocomplete="off">
+          <!--
+            O convite é o primeiro campo e o único com borda acesa: quem recebeu
+            um link não precisa entender endereço nenhum, e um link colado
+            preenche o endereço e leva a confirmação de identidade até o
+            `connect`. Os outros dois são o caminho de quem não recebeu link.
+          -->
+          <label class="campo campo-convite">
+            <span class="rotulo">CONVITE</span>
+            <input id="campo-convite" name="convite" placeholder="cole o link que te mandaram"
+                   spellcheck="false" autocapitalize="off">
+            <span class="nota">preenche o endereço e confere a identidade do servidor sozinho</span>
+          </label>
           <label class="campo">
             <span class="rotulo">SERVIDOR</span>
             <input id="campo-servidor" name="servidor" value="127.0.0.1:8383"
                    spellcheck="false" autocapitalize="off" required>
+            <span class="nota">sem convite, digite o IP:porta da máquina que hospeda — ex. 192.168.0.7:8383</span>
           </label>
           <label class="campo">
             <span class="rotulo">APELIDO</span>
             <input id="campo-apelido" name="apelido" value="pessoa"
                    spellcheck="false" autocapitalize="off" maxlength="32" required>
+            <span class="nota">o nome que os outros veem; fica preso à sua chave neste servidor</span>
           </label>
           <!--
-            Um link colado preenche o endereço, e o token viaja com ele até o
-            `connect`. Quem recebeu um convite não precisa saber separar o
-            endereço do resto à mão.
+            A nota fica fora do `<label>` da caixa: dentro dela, cada palavra da
+            explicação viraria alvo de clique da própria caixa, e ler a nota
+            marcaria e desmarcaria o áudio.
           -->
-          <label class="campo">
-            <span class="rotulo">CONVITE</span>
-            <input id="campo-convite" name="convite" placeholder="cole um seele://…"
-                   spellcheck="false" autocapitalize="off">
-          </label>
-          <label class="campo campo-linha">
-            <input id="campo-audio" type="checkbox" checked>
-            <span class="rotulo">conectar com áudio</span>
-          </label>
-          <button id="botao-conectar" type="submit" class="botao">CONECTAR</button>
-          <!--
-            Sem isto, hospedar exige abrir um terminal — e num produto cujo
-            argumento é "hospede você mesmo", exigir linha de comando de quem
-            hospeda exclui justamente quem mais ganharia. Mesmo servidor do
-            `seeled`, dentro deste processo, vivo enquanto a janela estiver
-            aberta.
-          -->
-          <button id="botao-hospedar" type="button" class="botao botao-secundario">
-            HOSPEDAR AQUI
-          </button>
+          <div class="campo">
+            <label class="campo-linha">
+              <input id="campo-audio" type="checkbox" checked>
+              <span class="rotulo">entrar com áudio</span>
+            </label>
+            <span class="nota">microfone pronto — no modo tecla, fala-se segurando ESPAÇO</span>
+          </div>
+          <button id="botao-conectar" type="submit" class="botao boot-conectar">CONECTAR</button>
         </form>
+
+        <!-- O filete dos dois lados diz que o que vem embaixo é a outra saída,
+             e não o passo seguinte do formulário. -->
+        <p class="boot-ou"><span>OU</span></p>
+
+        <!--
+          Sem isto, hospedar exige abrir um terminal — e num produto cujo
+          argumento é "hospede você mesmo", exigir linha de comando de quem
+          hospeda exclui justamente quem mais ganharia. Mesmo servidor do
+          `seeled`, dentro deste processo, vivo enquanto a janela estiver
+          aberta.
+        -->
+        <button id="botao-hospedar" type="button" class="botao botao-secundario boot-hospedar">
+          HOSPEDAR AQUI
+        </button>
+        <span class="nota boot-nota-hospedar">cria um servidor neste computador e entra nele — o link de convite aparece no topo da sessão</span>
 
         <!--
           A entrada para o Terminal Dogma, daqui e da sessão. Daqui porque
@@ -331,10 +330,15 @@
           durante, e uma configuração que só existisse com sessão aberta poria o
           controle atrás da porta que ele serve para abrir: quem descobre que o
           microfone está errado descobre justamente ao tentar falar.
+
+          O botão diz CONFIGURAÇÕES e não o nome da tela: aqui ele é a promessa
+          do que se vai fazer, e quem nunca abriu a tela não sabe o nome dela. O
+          nome continua no cabeçalho de lá, que é onde ele nomeia um lugar.
         -->
         <button id="botao-dogma" type="button" class="botao-fantasma dogma-entrada">
-          TERMINAL DOGMA
+          <span class="boot-engrenagem" data-glifo="engrenagem"></span>CONFIGURAÇÕES
         </button>
+        <p class="nota boot-nota-config">microfone e som — teste antes de entrar</p>
 
         <!--
           Só o que impede de entrar mora nesta tela: um erro de conexão devolve

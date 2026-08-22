@@ -1,0 +1,77 @@
+<!-- SEELE · painel de construção do símbolo. Referência, não arte: nada aqui é
+     servido nem entra em build. A arte é `design/marca/simbolo.svg`.
+
+     A grade é de 4 em 4 numa caixa de 96, que é a unidade em que traço e
+     respiro são escritos. O quadro tracejado é a área de respiro — um nó cheio,
+     24 — e ele encosta nos dois nós de propósito: é assim que se confere se a
+     marca está solta demais ou apertada demais num suporte novo.
+
+     As medidas em números estão no README ao lado. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="512" height="512" role="img" aria-label="SEELE — painel de construção">
+  <title>SEELE — painel de construção</title>
+  <rect width="128" height="128" fill="#050403"/>
+  <g transform="translate(16 16)">
+    <g stroke="#7A7061" stroke-width="0.25" opacity="0.35">
+    <path d="M0 0V96"/>
+    <path d="M0 0H96"/>
+    <path d="M4 0V96"/>
+    <path d="M0 4H96"/>
+    <path d="M8 0V96"/>
+    <path d="M0 8H96"/>
+    <path d="M12 0V96"/>
+    <path d="M0 12H96"/>
+    <path d="M16 0V96"/>
+    <path d="M0 16H96"/>
+    <path d="M20 0V96"/>
+    <path d="M0 20H96"/>
+    <path d="M24 0V96"/>
+    <path d="M0 24H96"/>
+    <path d="M28 0V96"/>
+    <path d="M0 28H96"/>
+    <path d="M32 0V96"/>
+    <path d="M0 32H96"/>
+    <path d="M36 0V96"/>
+    <path d="M0 36H96"/>
+    <path d="M40 0V96"/>
+    <path d="M0 40H96"/>
+    <path d="M44 0V96"/>
+    <path d="M0 44H96"/>
+    <path d="M48 0V96"/>
+    <path d="M0 48H96"/>
+    <path d="M52 0V96"/>
+    <path d="M0 52H96"/>
+    <path d="M56 0V96"/>
+    <path d="M0 56H96"/>
+    <path d="M60 0V96"/>
+    <path d="M0 60H96"/>
+    <path d="M64 0V96"/>
+    <path d="M0 64H96"/>
+    <path d="M68 0V96"/>
+    <path d="M0 68H96"/>
+    <path d="M72 0V96"/>
+    <path d="M0 72H96"/>
+    <path d="M76 0V96"/>
+    <path d="M0 76H96"/>
+    <path d="M80 0V96"/>
+    <path d="M0 80H96"/>
+    <path d="M84 0V96"/>
+    <path d="M0 84H96"/>
+    <path d="M88 0V96"/>
+    <path d="M0 88H96"/>
+    <path d="M92 0V96"/>
+    <path d="M0 92H96"/>
+    <path d="M96 0V96"/>
+    <path d="M0 96H96"/>
+    </g>
+    <rect x="12" y="12" width="72" height="72" fill="none" stroke="#7A7061"
+          stroke-width="0.5" stroke-dasharray="3 3"/>
+
+    <!-- a diagonal de construção: os dois nós ficam nos cantos opostos do
+         mesmo eixo de 45°, e é esse eixo que a marca nunca gira. -->
+    <path d="M0 0L96 96" stroke="#7A7061" stroke-width="0.5" stroke-dasharray="2 4"/>
+
+    <path d="M34 34L62 62" stroke="#EAE3CF" stroke-width="4"/>
+    <rect x="12" y="12" width="24" height="24" fill="#F2521F"/>
+    <rect x="62" y="62" width="20" height="20" fill="none" stroke="#F2521F" stroke-width="4"/>
+  </g>
+</svg>

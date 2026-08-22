@@ -1,5 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 88 162" width="88" height="162" role="img" aria-label="SEELE">
+<!-- SEELE · forma muda — o símbolo sozinho, redesenhado para a faixa de 16 px.
+     É o favicon e a forma de bandeja: onde só cabe uma imagem e nenhum nome.
+
+     Não é `simbolo.svg` encolhido, e a diferença é aritmética. Reduzido a 16 px
+     o traço de 4 da grade de 96 vale 0,67 px — meio pixel cinza, que é como um
+     ícone some numa aba. Aqui o traço é 6 (1 px exato a 16) e o furo do nó
+     vazio é 12 (2 px): abaixo disso o nó vazio fecha e os dois nós viram a
+     mesma forma, que é justamente o que a marca não pode dizer.
+
+     A extensão externa dos dois nós continua 24 — as massas seguem iguais, e é
+     o furo que paga o traço mais grosso, não o tamanho do nó.
+
+     A 16 px toda coordenada daqui cai em pixel inteiro ou meio pixel (96/16 = 6
+     e tudo é múltiplo de 3), então o desenho não borra na aba. NÃO editar. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96" role="img" aria-label="SEELE">
   <title>SEELE</title>
-  <polygon points="4,26 26,4 62,4 84,26 84,136 62,158 26,158 4,136" fill="none" stroke="#F2521F" stroke-width="12"/>
-  <rect x="37" y="52" width="14" height="58" fill="#F2521F"/>
+  <path d="M33 33L63 63" stroke="#EAE3CF" stroke-width="6"/>
+  <rect x="12" y="12" width="24" height="24" fill="#F2521F"/>
+  <rect x="63" y="63" width="18" height="18" fill="none" stroke="#F2521F" stroke-width="6"/>
 </svg>

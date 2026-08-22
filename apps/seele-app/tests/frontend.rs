@@ -7380,6 +7380,120 @@ fn a_ajuda_nao_rouba_a_interrogacao_de_quem_esta_escrevendo() {
     );
 }
 
+/// A `<section id="tela-boot">` inteira, sem comentário.
+///
+/// O corte é na tela seguinte e não no primeiro `</section>`, e a diferença não
+/// é gosto: a entrada tem uma `<section id="visitados">` dentro dela, então
+/// cortar no primeiro fechamento devolve o cabeçalho da lista de visitados e
+/// nada do formulário — um recorte que passa por tela inteira e não é.
+fn tela_de_entrada() -> String {
+    let pagina = without_comments(&read("ui/index.html"));
+    let Some(depois) = pagina.split("id=\"tela-boot\"").nth(1) else {
+        panic!("index.html não tem mais a tela de entrada");
+    };
+    let Some(tela) = depois.split("id=\"tela-sessao\"").next() else {
+        panic!("a tela de operação sumiu, e com ela o fim da tela de entrada");
+    };
+    tela.to_owned()
+}
+
+#[test]
+fn a_entrada_desenha_a_marca_nova_e_nenhuma_citacao_do_anime() {
+    // Aqui morava a metade contrária deste argumento, escrita em três lugares:
+    // a assinatura da entrada tinha de ser **desenho** e nunca texto, porque
+    // como texto os três katakana virariam Hiragino no macOS e Yu Gothic no
+    // Windows — e substituir a face japonesa era o que a folha de marca proibia.
+    //
+    // O argumento continua certo e ficou sem assunto. A direção 1c abandonou o
+    // katakana: a marca é dois nós e uma ligação mais o nome em latim, e latim é
+    // o que a Saira Condensed embarcada desenha. O símbolo continua imagem —
+    // geometria com uma fonte só, `marca-simbolo.svg` — e o nome passou a ser
+    // texto, que é o que deixa a assinatura escalar com a coluna e ser lida por
+    // quem não vê a tela.
+    //
+    // Junto com ela saíram as outras duas citações diretas do anime que só esta
+    // janela tinha: o `<title>` e a linha `FILE : ENTRY_PLUG.INIT` da cartela de
+    // cenário. As três eram uma decisão só e caem por um motivo só, então o
+    // guarda é um.
+    let pagina = without_comments(&read("ui/index.html"));
+    let tela = tela_de_entrada();
+
+    assert!(
+        !pagina.contains("marca-assinatura.svg"),
+        "a assinatura em contorno voltou à janela, e com ela o katakana que a \
+         direção 1c abandonou"
+    );
+    assert!(
+        tela.contains("marca-simbolo.svg"),
+        "a entrada não desenha o símbolo da marca; a coluna da esquerda é a \
+         apresentação do produto e ela começa por ele"
+    );
+    assert!(
+        tela.contains("boot-nome"),
+        "o nome SEELE saiu da entrada, ou deixou de ser texto — e desenhado ele \
+         volta a depender de um arquivo por tamanho"
+    );
+
+    for citacao in ["Entry Plug", "ENTRY_PLUG"] {
+        assert!(
+            !pagina.contains(citacao),
+            "«{citacao}» voltou à janela. É citação direta do anime, e as três \
+             desta tela saíram juntas com o katakana da assinatura"
+        );
+    }
+
+    // E o nome tem de sair na face embarcada, não numa qualquer: a folha diz
+    // Saira Condensed 900, e `--seele-display` é o nome dela nesta casa.
+    let folha = without_comments(&read("ui/tela-boot.css"));
+    let Some(depois) = folha.split(".boot-nome {").nth(1) else {
+        panic!("`tela-boot.css` não pinta mais `.boot-nome`");
+    };
+    let Some(regra) = depois.split('}').next() else {
+        panic!("a regra de `.boot-nome` nunca fecha");
+    };
+    assert!(
+        regra.contains("var(--seele-display)") && regra.contains("900"),
+        "o nome da marca não sai na Saira Condensed 900:\n{regra}"
+    );
+}
+
+#[test]
+fn a_entrada_poe_o_convite_na_frente_e_explica_cada_campo() {
+    // A tela em que ninguém aprendeu nada ainda, e a única em que a explicação
+    // sob o controle foi pedida por escrito. `the_captions_mode_does_not_come_
+    // back_by_accident` guarda o outro lado — que estas linhas não voltem a ser
+    // desligáveis —, e este guarda que elas existam nos três campos que uma
+    // pessoa preenche antes de conectar.
+    //
+    // A ordem é a outra metade: quem recebeu um link não precisa entender
+    // endereço nenhum, e o campo que aceita o link vinha por último, embaixo dos
+    // dois que ele preenche sozinho.
+    let tela = tela_de_entrada();
+
+    let posicao = |id: &str| {
+        tela.find(&format!("id=\"{id}\""))
+            .unwrap_or_else(|| panic!("a entrada não tem mais `{id}`"))
+    };
+    assert!(
+        posicao("campo-convite") < posicao("campo-servidor"),
+        "o convite voltou para depois do endereço que ele mesmo preenche"
+    );
+
+    for campo in ["campo-convite", "campo-servidor", "campo-apelido"] {
+        let Some(depois) = tela.split(&format!("id=\"{campo}\"")).nth(1) else {
+            panic!("a entrada não tem mais `{campo}`");
+        };
+        let Some(resto) = depois.split("</label>").next() else {
+            panic!("o `<label>` de `{campo}` nunca fecha");
+        };
+        assert!(
+            resto.contains("class=\"nota\""),
+            "`{campo}` não diz o que espera, e é um dos três que se preenchem \
+             antes de conectar:\n{resto}"
+        );
+    }
+}
+
 // ------------------------------------------ o vocabulário que saiu da tela
 
 /// As palavras que o mapa v3 tirou da interface, e o que cada uma virou.
@@ -7437,9 +7551,11 @@ const AINDA_NA_TELA: &[(&str, &str)] = &[
          linha para o composto e quem coordena ainda não decidiu.",
     ),
     (
-        "Entry Plug",
-        "nome interno da janela, e o mapa o deixa de pé por escrito. Cobre o \
-         `<title>` e o `FILE : ENTRY_PLUG.INIT` da ficha de arranque.",
+        "Clicar numa linha preenche tudo e conecta.",
+        "a nota sob a lista de visitados. Aqui `linha` é a fila da lista que se \
+         clica, e não o canal de texto que o mapa aposentou — a mesma palavra \
+         para duas coisas, e o guarda só sabe ler a palavra. A frase foi pedida \
+         nestes termos para esta tela; some daqui no dia em que ela mudar.",
     ),
 ];
 

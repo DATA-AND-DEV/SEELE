@@ -10,23 +10,27 @@ Só precisa de macOS: o `qlmanage` do sistema rasteriza SVG, e o `iconutil`
 monta o `.icns`. Os SVGs de entrada já trazem os glifos em contorno, então não
 há fonte para instalar nem para baixar.
 
-# Um desenho por faixa, e não a redução do maior
+# Duas faixas, e não uma redução única
 
-`design/marca/icone-app-16.svg`, `-32`, `-64` e `-128` são quatro desenhos, não
-quatro tamanhos do mesmo desenho: o traço engrossa conforme o orçamento de pixel
-encolhe, e as placas de profundidade vão sumindo até sobrar a silhueta. Cada
-tamanho pedido sai do arquivo da sua faixa. Uma redução do maior devolveria um
-traço de meio pixel a 16, que é como um ícone fica cinza no dock.
+`design/marca/icone-app-128.svg` e `-16` são dois desenhos, não dois tamanhos do
+mesmo: na faixa miúda o traço vai de 4 para 6 na grade de 96, porque 4 vale
+0,67 px a 16 px — meio pixel cinza, que é como um ícone some no dock.
 
-A faixa de 48 sai do desenho de 32: a folha de marca fecha a faixa de uma placa
-em 64, e 48 cai dentro dela.
+O corte fica em 48 px, e sai de uma conta: o traço de 4 vale `lado / 24` px, e a
+partir de 48 isso passa de 2 px. Abaixo disso entra a faixa miúda, cujo traço
+vale 2 px a 32 e 1 px a 16.
+
+**Eram quatro faixas quando a marca era o plug**, e não é afrouxamento ter duas
+agora: o plug tinha contorno de octógono, cinta e placas de profundidade, e a
+razão entre eles quebrava em quatro pontos diferentes. O símbolo de dois nós tem
+um valor de traço só, então há um limiar só. Voltar a quatro arquivos seria
+guardar três cópias do mesmo desenho para elas divergirem depois.
 
 # Uma arte, dois enquadramentos
 
-A placa vai em **todo** sistema. Ela é o que esta arte tem de novo: as placas de
-profundidade são cor plana deslocada sobre a placa, e sem a placa atrás não
-deslocam nada. Uma família sem ela jogava fora exatamente isso em dois dos três
-sistemas — o que sobrava era um anel laranja oco, que não é um plug.
+A placa laranja vai em **todo** sistema: fora dela o símbolo teria de ser
+entregue sobre fundo desconhecido, e a folha proíbe isso. Sobre a placa ele vem
+invertido — os dois nós e o enlace em negro.
 
 O que muda de um sistema para o outro é só o enquadramento:
 
@@ -96,8 +100,8 @@ FOLGA = (GRANDE - PLACA) // 2
 EXPOENTE = 5
 AMOSTRAS = 240
 
-# Cada tamanho pedido e o desenho de que ele sai.
-FAIXA = {16: 16, 32: 32, 48: 32, 64: 64, 128: 128, 256: 128, 512: 128, 1024: 128}
+# Cada tamanho pedido e o desenho de que ele sai. Ver "Duas faixas" no topo.
+FAIXA = {16: 16, 32: 16, 48: 128, 64: 128, 128: 128, 256: 128, 512: 128, 1024: 128}
 
 ATRIBUTO = re.compile(r'([\w:-]+)="([^"]*)"')
 
@@ -349,9 +353,12 @@ def conferir(png: bytes, nome: str, lado: int, recortada: bool) -> None:
 
     - a 15% e a 85% da largura, na meia altura, o laranja exato da placa. As
       duas sondas prendem a extensão da placa dos dois lados, então uma arte
-      encolhida num canto reprova mesmo com o quadro cheio;
-    - o pixel do meio, que cai sobre a cinta, escuro. Só se exige escuro: a
-      16 px a cinta tem 1,7 pixel de largura e nenhum pixel dela é negro puro.
+      encolhida num canto reprova mesmo com o quadro cheio. A meia altura elas
+      passam entre os dois nós, que ficam nos cantos opostos, então nenhuma das
+      duas encosta na marca em faixa nenhuma;
+    - o pixel do meio, que cai sobre o enlace — a diagonal vai de canto a canto
+      e o meio dela é o meio do quadro. Só se exige escuro, não negro puro: em
+      qualquer tamanho o pixel central é o traço misturado com a placa em volta.
       Sem esta sonda, um quadro de laranja liso — placa sem marca nenhuma —
       passaria inteiro na família quadrada.
 
@@ -403,7 +410,7 @@ def conferir(png: bytes, nome: str, lado: int, recortada: bool) -> None:
     if sum(meio[:3]) > sum(laranja) // 2:
         raise SystemExit(
             f"{nome}: o meio é #{bytes(meio[:3]).hex()}, claro demais "
-            "para ser a cinta. A marca não desenhou sobre a placa."
+            "para ser o enlace. A marca não desenhou sobre a placa."
         )
 
 
@@ -548,14 +555,18 @@ def main() -> None:
     # O app carrega a marca de dentro da própria pasta `ui/` — a CSP dele só
     # aceita `'self'`, e um caminho para fora de `ui/` não é servido. As cópias
     # são conferidas por teste contra estes originais, para não divergirem.
-    for origem, nome in (("assinatura.svg", "marca-assinatura.svg"), ("muda.svg", "marca-muda.svg")):
+    for origem, nome in (
+        ("simbolo.svg", "marca-simbolo.svg"),
+        ("assinatura.svg", "marca-assinatura.svg"),
+        ("muda.svg", "marca-muda.svg"),
+    ):
         shutil.copyfile(AQUI / origem, RAIZ / "apps" / "seele-app" / "ui" / nome)
 
     cartela()
 
     for arquivo in sorted(DESTINO.iterdir()):
         print(f"  {arquivo.name:20} {arquivo.stat().st_size:>8} bytes")
-    print("  ui/marca-assinatura.svg, ui/marca-muda.svg")
+    print("  ui/marca-simbolo.svg, ui/marca-assinatura.svg, ui/marca-muda.svg")
 
 
 if __name__ == "__main__":

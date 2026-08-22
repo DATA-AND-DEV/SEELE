@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-6 -14 112 184" role="img" aria-label="SEELE">
-  <title>SEELE · 2 placas</title>
-  <polygon points="4,26 26,4 62,4 84,26 84,136 62,158 26,158 4,136" transform="translate(12,-9)" fill="#050403" stroke="#7A2A0B" stroke-width="7"></polygon>
-  <polygon points="4,26 26,4 62,4 84,26 84,136 62,158 26,158 4,136" fill="#050403" stroke="#F2521F" stroke-width="8"></polygon>
-  <rect x="1" y="60" width="86" height="40" fill="#F2521F"></rect>
-  <rect x="1" y="100" width="86" height="5" fill="#7A2A0B"></rect>
-</svg>

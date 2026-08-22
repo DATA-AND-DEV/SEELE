@@ -1,8 +1,16 @@
+<!-- SEELE · ícone de app, faixa miúda (abaixo de 48 px). A mesma marca da faixa
+     larga com o traço engrossado de 4 para 6 e o furo do nó vazio fechado de
+     16 para 12 — o desenho de `muda.svg`, invertido em negro sobre a placa.
+
+     A 32 px o traço da faixa larga já vale 1,33 px e a 16 px vale 0,67: meio
+     pixel cinza. Aqui ele vale 2 px a 32 e 1 px a 16, e o furo nunca cai abaixo
+     de 2 px. NÃO editar à mão. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" role="img" aria-label="SEELE">
-  <title>SEELE · ícone 16px — muda</title>
+  <title>SEELE · ícone — faixa miúda</title>
   <rect width="16" height="16" fill="#F2521F"></rect>
-  <svg x="4.74" y="2" width="6.52" height="12" viewBox="0 0 88 162" overflow="visible">
-    <polygon points="4,26 26,4 62,4 84,26 84,136 62,158 26,158 4,136" fill="#F2521F" stroke="#050403" stroke-width="16"></polygon>
-    <rect x="30" y="46" width="28" height="70" fill="#050403"></rect>
+  <svg x="0" y="0" width="16" height="16" viewBox="0 0 96 96" overflow="visible">
+    <path d="M33 33L63 63" stroke="#050403" stroke-width="6"></path>
+    <rect x="12" y="12" width="24" height="24" fill="#050403"></rect>
+    <rect x="63" y="63" width="18" height="18" fill="none" stroke="#050403" stroke-width="6"></rect>
   </svg>
 </svg>

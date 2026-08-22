@@ -139,13 +139,20 @@ pub struct DogmaConfig {
 impl Default for DogmaConfig {
     fn default() -> Self {
         Self {
-            name: "Dogma".into(),
+            // Neutro, como todo o resto do que a pessoa lê: quem sobe um
+            // `seeled` sem configurar nome vê «Servidor» e não o vocabulário
+            // que saiu da interface. Os dois clientes que hospedam de dentro
+            // passam «Casa» e nunca chegam aqui.
+            name: "Servidor".into(),
             listen: SocketAddr::from((
                 std::net::Ipv6Addr::UNSPECIFIED,
                 seele_proto::transport::DEFAULT_PORT,
             )),
             cage: CageId(1),
-            cage_name: "CAGE-01 CENTRAL".into(),
+            // A sala que todo servidor nasce com. Este nome **aparece na
+            // tela** de quem entra, e ficou para trás na troca de vocabulário
+            // porque ela varreu `apps/` e a TUI, e não o servidor.
+            cage_name: "SALA 1".into(),
             cage_limit: 15,
             observers: Vec::new(),
             database: crate::casper::Location::Memory,

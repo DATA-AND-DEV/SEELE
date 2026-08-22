@@ -351,10 +351,12 @@ pub fn desenhar(frame: &mut Frame<'_>, selecao: &Selecao, tema: Theme) {
         area,
     );
 
-    // `docs/marca.md`: dentro do terminal a marca é latina. `ゼーレ` ocupa
-    // célula dupla e nem todo emulador mede igual, e uma marca que às vezes
-    // desalinha o quadro não é uma marca. A forma katakana fica para o app.
-    let titulo = " ──SEELE── ";
+    // `docs/marca.md` dá à TUI a variação em texto puro, e ela vem no título
+    // porque o quadro é o único lugar desta tela que não divide linha com
+    // dado. Os três caracteres da marca são de largura ambígua: em terminal
+    // que os desenha em célula dupla o título ocupa o dobro, e é o título que
+    // pode dar essa margem sem desalinhar coisa nenhuma.
+    let titulo = format!(" {} ", ui::ASSINATURA);
     let bloco = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Plain)
@@ -372,7 +374,7 @@ pub fn desenhar(frame: &mut Frame<'_>, selecao: &Selecao, tema: Theme) {
 
     frame.render_widget(
         Paragraph::new(vec![
-            Line::from(Span::styled("  ENTRY PLUG", tema.accent())),
+            Line::from(Span::styled(format!("  {}", ui::ASSINATURA), tema.accent())),
             Line::from(Span::styled("  para onde?", tema.label())),
         ]),
         cabecalho,
@@ -806,7 +808,9 @@ mod tests {
             .flat_map(|y| (0..ui::MIN_WIDTH).map(move |x| (x, y)))
             .map(|posicao| buffer[posicao].symbol().to_owned())
             .collect();
-        assert!(tudo.contains("ENTRY PLUG"));
+        // O cabeçalho é a marca da folha nova (`docs/marca.md`), não mais a
+        // assinatura do plug de entrada, que foi abandonada com o katakana.
+        assert!(tudo.contains(ui::ASSINATURA));
         assert!(tudo.contains("192.168.0.7:8383"));
         assert!(tudo.contains("hospedar"));
     }

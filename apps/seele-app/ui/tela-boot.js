@@ -1,16 +1,16 @@
-// SEELE · Entry Plug — a tela de entrada (`#tela-boot`).
+// SEELE · a tela de entrada (`#tela-boot`).
 //
 // Onde você já esteve, o convite colado, e a conexão — mais hospedar aqui
 // dentro, que é a mesma conexão com um servidor que este processo acabou de
 // subir. Sai daqui para `#tela-auth`, que é onde o veredito da chave é lido
 // antes de se entrar em sala de voz nenhuma.
 //
-// A tela é a transcrição dos painéis A·01 e B·01 do comp v2: a ficha da
-// máquina, o diagrama dos três subsistemas, o SINAL e o registro
-// de carga. Do que o comp anima aqui, nada tem dado por trás — o `bootPct` que
-// sobe de 7 em 7 é um cronômetro de protótipo, e o registro de dez linhas
-// carimbadas descreve um stream de progresso que o protocolo não tem. O que
-// esta tela move é o que ela realmente sabe: os três blocos, durante a
+// A coluna da esquerda é a apresentação do produto e não tem código: marca,
+// três fatos, glossário. Tudo o que este arquivo move está na direita, mais a
+// linha de CONEXÃO embaixo da marca. Do que o comp v2 animava nesta tela, nada
+// tinha dado por trás — o `bootPct` que subia de 7 em 7 era um cronômetro de
+// protótipo, e o registro de dez linhas carimbadas descrevia um stream de
+// progresso que o protocolo não tem. O que esta tela move é o que ela sabe: a
 // tentativa de conexão, pelo tempo real dela.
 
 "use strict";
@@ -160,9 +160,9 @@ async function conectar(evento) {
 
   botao.disabled = true;
   erro.hidden = true;
-  // Os três subsistemas reportam enquanto a conexão acontece. Duram o tempo
-  // real dela: `specs/05-cliente-tui.md` chama animação decorativa que atrasa
-  // o usuário de falha de design.
+  // A linha de CONEXÃO reporta enquanto a conexão acontece. Dura o tempo real
+  // dela: `specs/05-cliente-tui.md` chama animação decorativa que atrasa o
+  // usuário de falha de design.
   subsistemas("carga", "…");
   // A linha de etapa nasce vazia a cada tentativa: a de uma conexão anterior
   // descreveria uma travessia que já acabou.

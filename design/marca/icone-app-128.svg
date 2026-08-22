@@ -1,12 +1,13 @@
+<!-- SEELE · ícone de app, faixa larga (48 px e acima). A marca é a geometria de
+     `simbolo.svg`, invertida em negro sobre a placa laranja. Ver docs/marca.md.
+     A ordem importa: o enlace primeiro, os nós por cima, senão a diagonal
+     aparece pingando para fora do nó cheio. NÃO editar à mão. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="SEELE">
-  <title>SEELE · ícone 128px — 4 placas</title>
+  <title>SEELE · ícone — faixa larga</title>
   <rect width="128" height="128" fill="#F2521F"></rect>
-  <svg x="36" y="18" width="56" height="92" viewBox="-6 -14 112 184" overflow="visible">
-    <polygon points="4,26 26,4 62,4 84,26 84,136 62,158 26,158 4,136" transform="translate(15,-11)" fill="none" stroke="#FFA070" stroke-width="5"></polygon>
-    <polygon points="4,26 26,4 62,4 84,26 84,136 62,158 26,158 4,136" transform="translate(10,-7)" fill="#F2521F" stroke="#C4400F" stroke-width="5"></polygon>
-    <polygon points="4,26 26,4 62,4 84,26 84,136 62,158 26,158 4,136" transform="translate(5,-4)" fill="#F2521F" stroke="#8E2A08" stroke-width="5"></polygon>
-    <polygon points="4,26 26,4 62,4 84,26 84,136 62,158 26,158 4,136" fill="#F2521F" stroke="#050403" stroke-width="7"></polygon>
-    <rect x="1" y="58" width="86" height="4" fill="#8E2A08"></rect>
-    <rect x="1" y="62" width="86" height="38" fill="#050403"></rect>
+  <svg x="0" y="0" width="128" height="128" viewBox="0 0 96 96" overflow="visible">
+    <path d="M34 34L62 62" stroke="#050403" stroke-width="4"></path>
+    <rect x="12" y="12" width="24" height="24" fill="#050403"></rect>
+    <rect x="62" y="62" width="20" height="20" fill="none" stroke="#050403" stroke-width="4"></rect>
   </svg>
 </svg>

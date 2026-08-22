@@ -1,11 +1,23 @@
-<!-- SEELE · assinatura. Glifos convertidos em contorno de propósito: a
-     marca não pode depender de uma Noto Sans JP instalada, e substituir a face
-     japonesa é proibido pela folha de marca. Ver docs/marca.md. NÃO editar. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2916 950" width="2916" height="950" role="img" aria-label="SEELE">
+<!-- SEELE · assinatura. Gerado por `design/marca/gerar-wordmark.py` a partir
+     de `simbolo.svg` e da Saira Condensed 900 embarcada. NÃO editar à mão.
+
+     Símbolo mais o wordmark SEELE em Saira Condensed 900, tracking 0,06 em,
+     separados pelo respiro de um nó cheio. A caixa alta do wordmark é 48 —
+     metade do quadro do símbolo — e a linha de base cai em 72, que põe o
+     centro óptico da palavra no centro do símbolo.
+
+     O respiro à direita fecha em 11,8 e não em 12: a largura do wordmark é
+     de tipo, não de grade, e é melhor arredondar a caixa que a letra. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 96" width="280" height="96" role="img" aria-label="SEELE">
   <title>SEELE</title>
-  <g transform="translate(-26 878) scale(1 -1)">
-    <path fill="#EAE3CF" transform="translate(0 0)" d="M780 830 686 792C713 753 742 694 763 653L858 693C840 728 805 793 780 830ZM903 878 809 840C836 802 868 743 888 702L982 742C965 776 929 840 903 878ZM911 551 794 642C772 630 745 623 713 615C667 604 545 579 415 555V651C415 688 420 748 425 779H245C250 748 254 687 254 651V525C159 508 74 494 26 488L55 330C98 340 171 355 254 372V116C254 -14 286 -72 537 -72C635 -72 766 -61 845 -50L850 114C751 94 631 79 532 79C428 79 415 100 415 159V405L682 458C655 410 594 329 533 275L666 197C733 261 831 405 874 489C884 509 901 535 911 551Z"/>
-    <path fill="#F2521F" transform="translate(1000 0)" d="M86 480V289C127 292 202 295 259 295C401 295 691 295 790 295C831 295 887 290 913 289V480C884 478 835 473 790 473C692 473 402 473 259 473C210 473 126 477 86 480Z"/>
-    <path fill="#EAE3CF" transform="translate(2000 0)" d="M180 44 295 -56C323 -37 349 -29 364 -24C592 56 801 173 942 338L856 476C726 322 508 196 361 151C361 241 361 524 361 644C361 688 365 724 372 770H182C189 737 195 688 195 644C195 523 195 201 195 118C195 93 194 74 180 44Z"/>
+  <path d="M34 34L62 62" stroke="#EAE3CF" stroke-width="4"/>
+  <rect x="12" y="12" width="24" height="24" fill="#F2521F"/>
+  <rect x="62" y="62" width="20" height="20" fill="none" stroke="#F2521F" stroke-width="4"/>
+  <g fill="#EAE3CF" transform="translate(106.3953 72) scale(0.069767442 -0.069767442)">
+    <path d="M225 -8Q179 -8 126 -2.5Q73 3 36 11V147Q83 143 117 141.5Q151 140 173 140Q196 140 214 141.5Q232 143 238 151Q248 162 248 199Q248 227 244 240.5Q240 254 227 260Q214 266 185 271L100 287Q58 295 40.5 344.5Q23 394 23 484Q23 554 39.5 596.5Q56 639 85 660.5Q114 682 152.5 689Q191 696 236 696Q288 696 332 690Q376 684 401 678V541Q371 545 340.5 546.5Q310 548 278 548Q253 548 238 547Q223 546 215 539Q203 528 203 490Q203 459 208.5 447Q214 435 243 430L316 416Q350 409 373.5 394Q397 379 412 341Q421 319 424.5 289.5Q428 260 428 223Q428 141 411.5 90Q395 39 351 15.5Q307 -8 225 -8Z"/>
+    <path transform="translate(509 0)" d="M40 0V688H393V540H220V421H367V274H220V148H393V0Z"/>
+    <path transform="translate(995 0)" d="M40 0V688H393V540H220V421H367V274H220V148H393V0Z"/>
+    <path transform="translate(1481 0)" d="M40 0V688H220V153H372V0Z"/>
+    <path transform="translate(1926 0)" d="M40 0V688H393V540H220V421H367V274H220V148H393V0Z"/>
   </g>
 </svg>

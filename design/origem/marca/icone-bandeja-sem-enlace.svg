@@ -1,0 +1,8 @@
+<!-- SEELE · bandeja do sistema, sem enlace. O estado de queda: a diagonal some
+     e os dois nós ficam como estão. Não fica vermelho — o alerta é da interface
+     em volta, e a marca não pode significar erro (regra 4 de docs/marca.md). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="SEELE">
+  <title>SEELE · bandeja do sistema — sem enlace</title>
+  <rect x="12" y="12" width="24" height="24" fill="currentColor"></rect>
+  <rect x="63" y="63" width="18" height="18" fill="none" stroke="currentColor" stroke-width="6"></rect>
+</svg>

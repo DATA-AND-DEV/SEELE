@@ -1,0 +1,33 @@
+[package]
+name = "spike-tela-no-transporte"
+description = "Prova de desenho: o que o compartilhamento de tela faz com a voz no QUIC do produto. DESCARTÁVEL."
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Fora do workspace de propósito, como os três spikes anteriores. Este existe
+# para responder **uma** pergunta antes de a spec do compartilhamento de tela
+# escolher um transporte, e morre com a resposta. Nada pode depender dele.
+#
+# Não entra codec nenhum aqui, e isso é decisão, não preguiça: a pergunta é do
+# transporte. Carga com forma de vídeo — cadência de 30 fps, quadro-chave
+# periódico, bitrate acima do que o caminho aguenta — exercita o QUIC
+# exatamente como um H.264 real exercitaria, e um encoder no meio só
+# acrescentaria uma variável que não está sob prova.
+[workspace]
+
+[dependencies]
+# As mesmas versões do `seele-core`: o que se mede aqui só vale se for a mesma
+# pilha que o produto usa. Trocar por outra versão invalida os números.
+quinn = "0.11.11"
+rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "logging", "tls12"] }
+tokio = { version = "1.53.1", features = ["full"] }
+bytes = "1"
+rcgen = "0.14.8"
+# Preso na mesma versão do `Cargo.lock` do produto, e não por preciosismo: a
+# 0.11.17 subtrai `payload_bytes` duas vezes no caminho de descarte de
+# `send_datagram` (`connection/datagrams.rs`: o `pop_front` já desconta, e a
+# linha seguinte desconta de novo). O `usize` dá a volta, `memory_used()` fica
+# gigante, o laço esvazia a fila e o `expect` seguinte **aborta o processo**.
+# Medir com ela mediria o defeito dela, não o transporte. Ver o README.
+quinn-proto = "=0.11.16"

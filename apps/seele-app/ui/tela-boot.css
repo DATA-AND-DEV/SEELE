@@ -1,35 +1,42 @@
-/* SEELE · Entry Plug — a tela de entrada (`#tela-boot`).
-   Só o que esta tela usa. O cartão em volta (`.boot`, `.boot-marca`), os campos
-   e os botões são de `base.css`, que carrega antes — e é a ordem que faz
+/* SEELE · a tela de entrada (`#tela-boot`).
+   Só o que esta tela usa. O cartão em volta (`.boot`, `.boot-marca`), os campos,
+   as notas e os botões são de `base.css`, que carrega antes — e é a ordem que faz
    `.visitados-titulo` ganhar de `.rotulo` no elemento que tem as duas classes. */
 
 /* ---- a marca ----
-   docs/marca.md. A assinatura é uma imagem porque os glifos vêm em contorno,
-   com o espacejamento da folha dentro do desenho. O app passou a embarcar a
-   Noto Sans JP (`fontes.css`), e mesmo assim a assinatura continua desenho:
-   como texto ela dependeria de a face certa estar carregada no instante certo,
-   e a folha de marca proíbe substituir a face japonesa. */
-.marca-assinatura {
+   `docs/marca.md`, direção 1c. Aqui morava a assinatura em contorno — o katakana
+   da abertura do anime, desenhado como `<path>` para não depender de face
+   japonesa nenhuma. A marca nova não tem esse problema porque não tem glifo
+   japonês: o símbolo é geometria (`marca-simbolo.svg`) e o nome é latino, na
+   Saira Condensed que este app embarca.
+
+   O nome sai em laranja e não em osso, e é a única aplicação da marca em que
+   isso vale: esta tela é onde o produto se apresenta, e o par símbolo-nome é o
+   assunto da tela inteira em vez de um carimbo num canto. */
+.boot-simbolo {
   display: block;
-  /* Mínimo da folha de marca é 28px de altura; aqui sobra espaço, então usa o
-     tamanho da cartela. */
-  height: 72px;
-  width: auto;
+  width: 88px;
+  height: 88px;
 }
 
-/* Legenda latina: opcional pela folha, e presente aqui porque a tela de
-   entrada é onde alguém aprende como o produto se chama. */
-.marca-legenda {
-  font-size: 11px;
-  letter-spacing: 0.44em;
-  padding-left: 0.44em;
-  color: var(--seele-osso-apagado);
+.boot-nome {
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 96px;
+  line-height: 0.9;
+  letter-spacing: 0.02em;
+  color: var(--seele-laranja-nerv);
 }
 
 .boot-form { display: flex; flex-direction: column; gap: 16px; }
 
 .campo { display: flex; flex-direction: column; gap: 4px; }
 .campo-linha { flex-direction: row; align-items: center; gap: 8px; }
+
+/* O convite é o único campo com a borda acesa. Os outros dois são o caminho de
+   quem não recebeu link nenhum, e uma coluna inteira de bordas laranja não
+   apontaria para lugar algum. */
+.campo-convite input { border-color: var(--seele-laranja-nerv); }
 
 /* `pre-line` porque dois destes erros carregam duas impressões digitais para
    uma pessoa comparar — a chave que mudou (ADR 0003) e o convite que não leva a
@@ -67,6 +74,8 @@
 
 .lista-visitados { list-style: none; margin: 0; padding: 0; }
 
+.visitados .nota { margin: 8px 0 0; }
+
 .visitado {
   display: flex;
   align-items: baseline;
@@ -101,17 +110,15 @@
 .visitado:focus-within .botao-fantasma { opacity: 1; }
 
 /* ---- a sequência de inicialização ----
-   Transcrição do painel A·01 do comp v2 (`design/Entry Plug v2.dc.html`), com
-   as coordenadas dele preservadas. `docs/../inventário §13` registra que o
-   diagrama MAGI é posicionamento absoluto em pixels e porcentagens arbitrários
-   e que nada nele alinha a célula de 8×16 — é desenho, não layout, e arredondá-lo
-   para a grade seria redesenhá-lo. O que **é** layout aqui (a grade de colunas,
-   os paddings, os gaps) continua em múltiplos de 8. */
+   A coluna da esquerda é a marca e o que o produto é: assinatura, três fatos,
+   uma linha de posicionamento, o glossário e o atalho da ajuda. O que **é**
+   layout aqui (a grade de colunas, os paddings, os gaps) continua em múltiplos
+   de 8. */
 
 .boot-grade {
   flex: 1;
   display: grid;
-  grid-template-columns: 1fr 420px;
+  grid-template-columns: 1fr 460px;
   min-height: 0;
 }
 
@@ -145,18 +152,24 @@
   );
 }
 
-.boot-corpo { display: flex; align-items: flex-start; gap: 40px; }
+/* 560px é medida de leitura, não de coluna: o glossário e a linha do atalho são
+   as duas frases desta tela que se leem em caixa baixa, e uma coluna aberta as
+   deixaria com 120 caracteres de largura. */
+.boot-corpo {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 24px;
+  max-width: 560px;
+}
 
-.boot-ficha { flex-shrink: 0; width: 300px; }
-
-.boot-kanji {
+/* O símbolo e o nome lado a lado. `base.css` empilha `.boot-marca` porque lá
+   ela é o cartão centrado do fim de sessão; aqui a assinatura é horizontal. */
+.boot-corpo .boot-marca {
   margin: 0;
-  font-family: var(--seele-jp);
-  font-weight: 900;
-  font-size: 60px;
-  line-height: 0.92;
-  letter-spacing: 0.03em;
-  color: var(--seele-laranja-nerv);
+  flex-direction: row;
+  align-items: center;
+  gap: 24px;
 }
 
 /* A régua tripla do frame original: dois traços de borda e um terceiro feito de
@@ -165,15 +178,13 @@
    desfoque. Herda a cor de quem a hospeda, como no comp. */
 .regua-tripla {
   display: block;
+  align-self: stretch;
   height: 5px;
   color: var(--seele-laranja-nerv);
   border-top: 1px solid currentColor;
   border-bottom: 1px solid currentColor;
   box-shadow: 0 3px 0 -1px currentColor;
 }
-
-.boot-kanji + .regua-tripla { margin: 12px 0 16px; }
-.boot-meta + .regua-tripla { margin: 16px 0 12px; }
 
 .boot-meta {
   list-style: none;
@@ -187,17 +198,54 @@
   color: var(--seele-laranja-nerv);
 }
 
-/* O comp põe `MAGI` em 44px nesta linha; aqui vai a assinatura, e ela vem de
-   `base.css` com 32px de margem embaixo, que é a do cartão centrado que esta
-   tela deixou de ser. */
-.boot-ficha .boot-marca { margin: 0 0 4px; }
-.boot-ficha .marca-assinatura { height: 48px; }
-
 .boot-sistema {
   margin: 0;
   font-size: 11px;
   letter-spacing: 0.2em;
   color: var(--seele-rotulo-painel);
+}
+
+/* ---- o glossário ----
+   Quatro termos numa grade de duas colunas: o termo alinha com o termo, e a
+   definição com a definição. A borda esquerda é o que diz que os oito elementos
+   são um bloco só — sem ela, quatro `<dt>` e quatro `<dd>` soltos no meio da
+   coluna leem como oito parágrafos. */
+.boot-glossario {
+  margin: 0;
+  padding: 0 0 0 16px;
+  border-left: var(--seele-b-forte) solid var(--seele-linha-forte);
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 8px 16px;
+}
+
+.boot-glossario dt {
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-laranja-nerv);
+}
+
+.boot-glossario dd {
+  margin: 0;
+  line-height: 1.4;
+  color: var(--seele-osso);
+}
+
+/* ---- o atalho da ajuda ----
+   A camada de ajuda é onde a explicação do vocabulário passou a morar, e uma
+   camada que ninguém sabe abrir é uma camada que não existe. Esta é a linha que
+   a apresenta, e ela cabe aqui e em nenhuma tela de operação: aqui ninguém está
+   no meio de nada. */
+.boot-atalho {
+  margin: 0;
+  color: var(--seele-osso-apagado);
+}
+
+.boot-tecla {
+  font: inherit;
+  border: 1px solid var(--seele-linha-forte);
+  padding: 0 6px;
+  color: var(--seele-osso);
 }
 
 /* ---- a tentativa de conexão ----
@@ -213,8 +261,8 @@
    tentativa dura. */
 
 .boot-tentativa {
-  flex: 1;
-  min-width: 220px;
+  flex: 0 0 auto;
+  margin-top: 32px;
   display: flex;
   align-items: baseline;
   gap: var(--seele-e2);
@@ -254,51 +302,7 @@
   .boot-tentativa[data-estado="carga"] .boot-tentativa-marca { animation: none; }
 }
 
-/* ---- o SINAL ---- */
-
-.sync { margin-top: 32px; }
-
-.sync-topo {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: 8px;
-}
-
-.sync-valor {
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 40px;
-  line-height: 1;
-}
-
-/* O comp desenha 46 blocos de 15px. Aqui não há o que preencher, e preencher
-   com `░` seria pior que vazio: `░` é a marca da faixa crítica em
-   `base.js`, e um trilho inteiro dela afirmaria uma sincronia despencada. O
-   trilho vazio não afirma nada. */
-.sync-trilho {
-  display: block;
-  height: 16px;
-  border: 1px solid var(--seele-linha);
-}
-
-.sync-escala {
-  margin-top: 8px;
-  display: flex;
-  justify-content: space-between;
-  font-size: var(--seele-t-micro);
-  letter-spacing: 0.14em;
-  color: var(--seele-rotulo-painel);
-}
-
-.sync-nota {
-  margin: 8px 0 0;
-  font-size: var(--seele-t-rotulo);
-  letter-spacing: 0.18em;
-  color: var(--seele-osso-apagado);
-}
-
-/* ---- B·01, o registro de carga ---- */
+/* ---- B·01, a conexão ---- */
 
 .boot-registro {
   display: flex;
@@ -315,4 +319,57 @@
 
 .registro-corpo { flex: 1; min-height: 0; padding: 16px; overflow-y: auto; }
 
+/* CONECTAR é a única coisa desta coluna que se aperta sem ler nada antes, e a
+   cartela é o que diz isso sem uma segunda cor nem uma segunda borda. */
+.boot-conectar {
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 17px;
+  letter-spacing: 0.2em;
+}
 
+/* O divisor. O filete dos dois lados diz que o que vem embaixo é a outra saída,
+   e não o passo seguinte do formulário — que é exatamente como um segundo botão
+   embaixo do primeiro se lê sem ele. */
+.boot-ou {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 24px 0;
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-rotulo-painel);
+}
+
+.boot-ou::before,
+.boot-ou::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--seele-linha);
+}
+
+.boot-hospedar { width: 100%; }
+
+.boot-nota-hospedar { margin-top: 8px; }
+
+/* A engrenagem ao lado da palavra, e não no lugar dela: um glifo sozinho é uma
+   adivinhação, e `docs/marca.md` já resolveu o argumento uma camada acima. Mais
+   específico que `.dogma-entrada` de propósito — `tela-dogma.css` carrega
+   depois desta folha, e um empate ali seria decidido pela ordem. */
+.registro-corpo .dogma-entrada {
+  margin: 16px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.boot-engrenagem { display: flex; }
+
+/* Centrada porque a que ela explica é um botão de largura inteira e centrado, e
+   uma nota alinhada à esquerda embaixo dele apontaria para a borda. */
+.boot-nota-config {
+  margin: 8px 0 0;
+  text-align: center;
+  color: var(--seele-osso-apagado);
+}
