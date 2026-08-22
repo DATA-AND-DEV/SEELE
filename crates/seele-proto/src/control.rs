@@ -78,6 +78,50 @@ pub const MAX_CAGE_LIMIT: u16 = 250;
 /// Longest operator-supplied alert text, in bytes.
 pub const MAX_ALERT_TEXT_LEN: usize = 512;
 
+/// Largest Dogma icon, in bytes.
+///
+/// An icon is the one thing in this enum a stranger's machine both **stores**
+/// and **re-broadcasts**, so the number is a security limit and not a taste.
+/// Three things fix it:
+///
+/// - **It travels in a frame of its own, never inside
+///   [`ServerMessage::Session`]**, so the only thing it shares
+///   [`MAX_FRAME_LEN`] with is the postcard header. At 8 KiB the message sits
+///   at half the frame cap, which keeps the two refusals distinguishable: an
+///   oversized icon is refused *as an icon* rather than as a frame nobody can
+///   explain. ADR 0032 refused the icon inside the handshake for the same
+///   reason it is not there now — a decoration must never cost the connection.
+/// - **8 KiB accepts the picture and refuses the photograph.** A 256×256 PNG
+///   of flat shapes with alpha — a badge, which is all this is ever drawn as —
+///   lands between 2 and 6 KiB. Anything that needs more than 8 KiB at that
+///   size is a photograph, and a photograph shrunk to a badge is unreadable
+///   anyway.
+/// - **Whoever hosts pays for it fifty times.** Changing the icon writes one
+///   row and then sends it to every connected session; `specs/04-servidor-seele.md`
+///   sizes a Dogma at ~50 pilots, so one change costs 50 × 8 KiB ≈ 400 KiB of a
+///   home upstream. That is a hiccup. With no ceiling at all the same act is an
+///   upload channel with a fifty-fold amplifier pointed at a machine somebody
+///   runs in their living room, which is the whole reason there is a number
+///   here rather than a shrug.
+///
+/// ADR 0032 wrote 16 KiB into its "when it is wanted" section, before there was
+/// a frame to put it in; halving it is what buys the property above — the icon
+/// can never be the reason a control frame is refused.
+pub const MAX_DOGMA_ICON_LEN: usize = 8 * 1024;
+
+/// Largest side of a Dogma icon, in pixels.
+///
+/// Not redundant with [`MAX_DOGMA_ICON_LEN`], and this is the half that is easy
+/// to leave out: PNG compresses uniform colour to almost nothing, so 8 KiB is
+/// enough to declare a 20 000 × 20 000 image that costs 1.6 GB the moment
+/// anything decodes it. The bytes are small; the picture is not. Refusing the
+/// **declared** size here is what stops a decoration from being an
+/// out-of-memory kill on every machine that draws it.
+///
+/// 256 because the badge it is drawn in is 56 px in the v3 comp, and 256 covers
+/// that at four times the density with nothing left over.
+pub const MAX_DOGMA_ICON_SIDE: u32 = 256;
+
 /// Longest sender-chosen file name, in bytes.
 ///
 /// The name never reaches the filesystem — ADR 0027 stores a blob under the
@@ -880,6 +924,61 @@ pub enum ClientMessage {
         /// Which attachment.
         attachment: AttachmentId,
     },
+
+    // ---- what the Dogma calls itself ----
+    //
+    // Appended last, for the reason [`AlertReason::RateLimited`] gives.
+    //
+    // Both need [`Permission::AdministerDogma`], and **not** the
+    // [`Permission::ManageCages`] the four room verbs use. The line
+    // `specs/04-servidor-seele.md` draws is between "criar e configurar Cages"
+    // and "todo o resto sobre o Dogma"; the name and the picture of the Dogma
+    // itself are not a room, and whoever may build rooms is not thereby the
+    // person whose Dogma it is. Migration 1 seeds `AdministerDogma` on the
+    // Comandante alone, and `Melchior::seat_the_arrival` gives the Comandante to
+    // whoever connects to their own Dogma first — so this reaches exactly the
+    // person who pressed the button, plus anybody they deliberately promoted.
+    //
+    // ADR 0032 wanted the name written through an accessor on `Hospedagem`,
+    // straight into the CASPER on the machine, with no protocol verb at all —
+    // the argument being that naming a Dogma is a decision for whoever holds
+    // the file. That argument is sound and it answers a different question:
+    // it covers the app that is hosting **in this process**, and leaves a Dogma
+    // run by `seeled` on a VPS with no way to be named by the person who
+    // administers it. Both paths write the same row, and the permission above
+    // is what makes the wire path no wider than the local one.
+    /// Renames the Dogma. [`Permission::AdministerDogma`].
+    ///
+    /// Bounded by [`MAX_CLIENT_NAME_LEN`], which is what
+    /// [`ServerMessage::Session`] already carries the name under, and refused
+    /// blank for the reason `check_name` gives about a Cage: a header with
+    /// nothing in it is a thing nobody can refer to out loud.
+    RenameDogma {
+        /// The new name.
+        name: String,
+    },
+    /// Sets or clears the Dogma's icon. [`Permission::AdministerDogma`].
+    ///
+    /// `None` takes the icon off, and that is a verb rather than a gap: an
+    /// operator who wants no picture must be able to say so after having said
+    /// otherwise, and the alternative — writing a blank one — leaves every
+    /// client drawing an empty square.
+    ///
+    /// **PNG, and only PNG**, checked against the file's own first bytes by
+    /// [`Validate`]. The type is fixed by the message rather than declared
+    /// beside the bytes, so there is no claim for the content to disagree with
+    /// — which is the failure ADR 0027 names when it says nothing decides what
+    /// to decode from a sender's word alone. PNG because a badge on a dark
+    /// surface needs alpha and must not lose it to a re-encode, because every
+    /// platform this product draws on decodes it without a codec being chosen,
+    /// and because fixing one format is what lets the two formats that would
+    /// hurt be refused by construction: a GIF, which `specs/07-tema-evangelion.md`
+    /// would have animating in a badge, and an SVG, which is a document with
+    /// script and network fetches in it rather than a picture.
+    SetDogmaIcon {
+        /// The picture, or `None` to have none.
+        icon: Option<Vec<u8>>,
+    },
 }
 
 /// Server to client.
@@ -1172,6 +1271,52 @@ pub enum ServerMessage {
         /// Why.
         reason: AttachmentRefusal,
     },
+
+    // ---- what the Dogma calls itself ----
+    //
+    // Appended last, for the reason [`AlertReason::RateLimited`] gives.
+    //
+    // Sent to **everybody connected**, the pilot who asked included, exactly
+    // like the four room announcements: a Dogma that goes on being drawn under
+    // its old name until the next handshake is the failure ADR 0032 names —
+    // the screen of whoever renamed it showing one thing and everybody else's
+    // showing another.
+    /// The Dogma has a new name.
+    DogmaRenamed {
+        /// What it is called now.
+        name: String,
+    },
+    /// The Dogma has a new icon, or none.
+    ///
+    /// Also sent **once per session, straight after
+    /// [`ServerMessage::Session`], when the Dogma has one**. Silence there
+    /// means there is none: `Session` describes the Dogma from scratch — the
+    /// name and both channel lists come out of it — so a client that reconnects
+    /// into a Dogma whose picture was taken down while it was away stops
+    /// drawing the old one by having been introduced to the Dogma again, not by
+    /// being handed a `None`. A Dogma with no icon, which is every Dogma that
+    /// exists today, therefore exchanges exactly the frames it did before this
+    /// message was added.
+    ///
+    /// `None` **in a session** is the other thing: an operator taking the
+    /// picture down while people are connected, which has to reach them.
+    ///
+    /// Its own frame rather than a field on `Session`, for the third reason ADR
+    /// 0032 gives against the icon: `Session` already carries the Cages, the
+    /// Lines, the roles and the permissions inside [`MAX_FRAME_LEN`], and a
+    /// picture sharing that budget would make a big Dogma fail to admit anybody
+    /// because of a decoration.
+    ///
+    /// What this costs, said plainly: the bytes cross once per session instead
+    /// of once per machine. Addressing the picture by the hash of its content
+    /// and letting a client say it already has that one is the cheaper design
+    /// and needs a stream of its own to fetch it on; at
+    /// [`MAX_DOGMA_ICON_LEN`] the saving is 8 KiB per reconnection, which does
+    /// not yet pay for a second transfer path.
+    DogmaIconChanged {
+        /// The picture, or `None` when the Dogma has none.
+        icon: Option<Vec<u8>>,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -1271,6 +1416,87 @@ fn check_name(field: &'static str, name: &str) -> Result<(), ControlError> {
     check(field, name.len(), MAX_CHANNEL_NAME_LEN)
 }
 
+/// Bounds the Dogma's own name at both ends.
+///
+/// The upper bound is [`MAX_CLIENT_NAME_LEN`], because that is what
+/// [`ServerMessage::Session`] has always carried this string under and a rename
+/// that accepted more would produce a Dogma whose own handshake refuses to
+/// describe it. The lower one is [`check_name`]'s, word for word: a header with
+/// nothing in it is a thing nobody can refer to out loud.
+fn check_dogma_name(name: &str) -> Result<(), ControlError> {
+    if name.trim().is_empty() {
+        return Err(ControlError::FieldOutOfRange { field: "name" });
+    }
+    check("name", name.len(), MAX_CLIENT_NAME_LEN)
+}
+
+/// Refuses anything that is not a small PNG.
+///
+/// Three questions, and all three are asked here rather than in the server,
+/// because both ends have to agree about what an icon is: the Dogma refuses
+/// what it is sent, and refuses again on the way out, so a picture that arrived
+/// from an older build or straight from somebody's `sqlite3` prompt cannot
+/// travel further than one a client could have asked for. It is the rule
+/// [`ServerMessage::Session`] already applies to a Cage's name.
+///
+/// **Public**, and that is what keeps it the only copy. A shell has to be able
+/// to tell somebody their picture will not do *before* the frame is built:
+/// `encode` refusing at the last moment is indistinguishable, from where the
+/// client sits, from the link having fallen — the send fails, and everything
+/// above it treats a failed send as a dead connection. So the client asks this
+/// first, with the same function, rather than keeping a second list of rules
+/// that would be the one to fall behind.
+///
+/// # Errors
+///
+/// [`ControlError::FieldTooLong`] over [`MAX_DOGMA_ICON_LEN`];
+/// [`ControlError::FieldOutOfRange`] for anything that is not a PNG within
+/// [`MAX_DOGMA_ICON_SIDE`].
+pub fn check_dogma_icon(icon: Option<&[u8]>) -> Result<(), ControlError> {
+    let Some(bytes) = icon else {
+        return Ok(());
+    };
+    check("icon", bytes.len(), MAX_DOGMA_ICON_LEN)?;
+    let Some((width, height)) = png_header(bytes) else {
+        return Err(ControlError::FieldOutOfRange { field: "icon" });
+    };
+    // Zero is refused with the same breath as too large: a PNG declaring a side
+    // of nothing is not a picture, and it is far more often a truncated file
+    // than a deliberate one.
+    if width == 0 || height == 0 || width > MAX_DOGMA_ICON_SIDE || height > MAX_DOGMA_ICON_SIDE {
+        return Err(ControlError::FieldOutOfRange { field: "icon" });
+    }
+    Ok(())
+}
+
+/// The same question, asked of the field as the messages carry it.
+fn check_icon(icon: Option<&Vec<u8>>) -> Result<(), ControlError> {
+    check_dogma_icon(icon.map(Vec::as_slice))
+}
+
+/// The size a PNG declares about itself, if it is a PNG at all.
+///
+/// Reads the eight-byte signature and then the `IHDR` chunk, which the format
+/// requires to come first. `None` for anything else, which is the whole of
+/// "only PNG" — no list of magic numbers to keep in step with a list of names,
+/// because there is exactly one accepted format.
+///
+/// Every read is [`slice::get`]: this parses bytes from the network, and
+/// `specs/08-seguranca.md` names that as the surface where a panicking
+/// indexation turns a malformed frame into a dead Dogma.
+fn png_header(bytes: &[u8]) -> Option<(u32, u32)> {
+    const SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    if bytes.get(..8)? != SIGNATURE {
+        return None;
+    }
+    if bytes.get(12..16)? != b"IHDR" {
+        return None;
+    }
+    let width = u32::from_be_bytes(bytes.get(16..20)?.try_into().ok()?);
+    let height = u32::from_be_bytes(bytes.get(20..24)?.try_into().ok()?);
+    Some((width, height))
+}
+
 /// Bounds how many pilots a Cage may hold.
 ///
 /// Zero is refused: a Cage nobody may enter is not a Cage, and a limit of zero
@@ -1360,6 +1586,8 @@ impl Validate for ClientMessage {
                 reason.as_ref().map_or(0, String::len),
                 MAX_ALERT_TEXT_LEN,
             ),
+            Self::RenameDogma { name } => check_dogma_name(name),
+            Self::SetDogmaIcon { icon } => check_icon(icon.as_ref()),
             Self::EjectPlug
             | Self::JoinLine { .. }
             | Self::FetchHistory { .. }
@@ -1437,6 +1665,8 @@ impl Validate for ServerMessage {
             ),
             Self::Telemetry(telemetry) => telemetry.validate(),
             Self::PilotState(state) => state.validate(),
+            Self::DogmaRenamed { name } => check_dogma_name(name),
+            Self::DogmaIconChanged { icon } => check_icon(icon.as_ref()),
             Self::PilotLeft { .. }
             | Self::MessageRemoved { .. }
             | Self::Pong { .. }
@@ -2254,5 +2484,212 @@ mod key_tests {
         };
         let frame = encode(&hello).unwrap();
         assert_eq!(decode::<ClientMessage>(&frame).unwrap(), hello);
+    }
+}
+
+/// What an icon has to be to cross this protocol.
+///
+/// Its own module because these are the bounds that decide whether a stranger
+/// may put bytes on a machine somebody runs at home, and a bound with no test
+/// is a comment.
+#[cfg(test)]
+mod icon_tests {
+    use super::*;
+
+    /// A PNG of `side` × `side`, with `filler` bytes of body after the header.
+    ///
+    /// Hand-built rather than encoded by a library: what is under test is the
+    /// **header check**, and a real encoder would refuse to produce the two
+    /// cases that matter most — the twenty-thousand-pixel side and the file
+    /// that stops in the middle of `IHDR`.
+    fn png(side: u32, filler: usize) -> Vec<u8> {
+        let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        bytes.extend_from_slice(&13_u32.to_be_bytes());
+        bytes.extend_from_slice(b"IHDR");
+        bytes.extend_from_slice(&side.to_be_bytes());
+        bytes.extend_from_slice(&side.to_be_bytes());
+        bytes.extend(std::iter::repeat_n(0_u8, filler));
+        bytes
+    }
+
+    #[test]
+    fn an_icon_round_trips_in_both_directions() {
+        let set = ClientMessage::SetDogmaIcon {
+            icon: Some(png(128, 64)),
+        };
+        let frame = encode(&set).unwrap();
+        assert_eq!(decode::<ClientMessage>(&frame).unwrap(), set);
+
+        let announced = ServerMessage::DogmaIconChanged {
+            icon: Some(png(128, 64)),
+        };
+        let frame = encode(&announced).unwrap();
+        assert_eq!(decode::<ServerMessage>(&frame).unwrap(), announced);
+    }
+
+    #[test]
+    fn having_no_icon_is_a_value_and_not_a_refusal() {
+        // `None` is how an operator takes the picture down, and it is also what
+        // every session is told when the Dogma has none. If this were refused,
+        // a client reconnecting into a Dogma whose icon was removed while it was
+        // away would go on drawing the old one until it restarted.
+        let none = ServerMessage::DogmaIconChanged { icon: None };
+        let frame = encode(&none).unwrap();
+        assert_eq!(decode::<ServerMessage>(&frame).unwrap(), none);
+    }
+
+    #[test]
+    fn an_icon_over_the_ceiling_is_refused_in_both_directions() {
+        // On the way out so we cannot send one, and on the way in so a peer
+        // cannot skip the check by hand-rolling a frame — the rule
+        // `an_oversized_body_is_refused_in_both_directions` already states.
+        let fat = ClientMessage::SetDogmaIcon {
+            icon: Some(png(128, MAX_DOGMA_ICON_LEN)),
+        };
+        assert!(matches!(
+            encode(&fat),
+            Err(ControlError::FieldTooLong { field: "icon", .. })
+        ));
+
+        let mut frame = vec![PROTOCOL_VERSION];
+        frame = postcard::to_extend(&fat, frame).unwrap();
+        assert!(matches!(
+            decode::<ClientMessage>(&frame),
+            Err(ControlError::FieldTooLong { field: "icon", .. })
+        ));
+    }
+
+    #[test]
+    fn an_icon_at_the_ceiling_still_leaves_the_frame_with_room_to_spare() {
+        // The reason the ceiling is 8 KiB and not the 16 KiB of ADR 0032: at
+        // the cap the two refusals would be the same event, and an icon would
+        // be able to be the thing that makes a control frame unsendable. A
+        // kibibyte is far more than the handful of bytes postcard adds — it is
+        // there so that raising the ceiling towards the cap trips this test
+        // rather than a stranger's connection.
+        let biggest = ClientMessage::SetDogmaIcon {
+            icon: Some(png(256, MAX_DOGMA_ICON_LEN - 24)),
+        };
+        let frame = encode(&biggest).unwrap();
+        assert!(
+            frame.len() + 1024 <= MAX_FRAME_LEN,
+            "an icon at the ceiling fills {} of the {MAX_FRAME_LEN}-byte frame; \
+             the headroom that keeps «icon too big» and «frame too big» apart is gone",
+            frame.len()
+        );
+    }
+
+    #[test]
+    fn a_picture_that_is_not_a_png_is_refused() {
+        // The two that would hurt, by their own first bytes: a GIF, which
+        // `specs/07-tema-evangelion.md` would have animating in a badge, and an
+        // SVG, which is a document with script in it rather than a picture.
+        // Plus an empty one, which is neither and arrives as a truncated file.
+        for pretender in [
+            b"GIF89a".to_vec(),
+            b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>".to_vec(),
+            b"\xff\xd8\xff\xe0JFIF".to_vec(),
+            Vec::new(),
+        ] {
+            let set = ClientMessage::SetDogmaIcon {
+                icon: Some(pretender.clone()),
+            };
+            assert!(
+                matches!(
+                    encode(&set),
+                    Err(ControlError::FieldOutOfRange { field: "icon" })
+                ),
+                "accepted {} bytes that are not a PNG",
+                pretender.len()
+            );
+        }
+    }
+
+    #[test]
+    fn a_small_file_declaring_an_enormous_picture_is_refused() {
+        // The check the byte ceiling cannot make. PNG compresses uniform colour
+        // to almost nothing, so a few hundred bytes can declare 20 000 × 20 000
+        // — 1.6 GB the moment anything decodes it. The bytes are small; the
+        // picture is not, and it is the picture that kills the machine drawing
+        // it.
+        let bomb = ClientMessage::SetDogmaIcon {
+            icon: Some(png(20_000, 128)),
+        };
+        assert!(matches!(
+            encode(&bomb),
+            Err(ControlError::FieldOutOfRange { field: "icon" })
+        ));
+    }
+
+    #[test]
+    fn a_side_of_zero_is_refused() {
+        let flat = ClientMessage::SetDogmaIcon {
+            icon: Some(png(0, 128)),
+        };
+        assert!(matches!(
+            encode(&flat),
+            Err(ControlError::FieldOutOfRange { field: "icon" })
+        ));
+    }
+
+    #[test]
+    fn a_png_that_stops_inside_its_own_header_is_refused_and_does_not_panic() {
+        // `specs/08-seguranca.md` names this surface for fuzzing: a malformed
+        // frame must be a refusal, never a panicking indexation, or a truncated
+        // upload is a way to stop a Dogma.
+        let whole = png(64, 0);
+        for cut in 0..whole.len() {
+            let set = ClientMessage::SetDogmaIcon {
+                icon: Some(whole.get(..cut).unwrap_or_default().to_vec()),
+            };
+            assert!(
+                matches!(
+                    encode(&set),
+                    Err(ControlError::FieldOutOfRange { field: "icon" })
+                ),
+                "a PNG cut at {cut} bytes was accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn a_dogma_name_is_bounded_at_both_ends() {
+        // The upper bound is what `Session` already carries the name under; the
+        // lower one is `check_name`'s, and it is the half that is easy to leave
+        // out — a header with nothing in it is a thing nobody can refer to out
+        // loud.
+        for blank in ["", "   ", "\t\n"] {
+            assert!(
+                matches!(
+                    encode(&ClientMessage::RenameDogma { name: blank.into() }),
+                    Err(ControlError::FieldOutOfRange { field: "name" })
+                ),
+                "a blank name was accepted: {blank:?}"
+            );
+        }
+
+        assert!(matches!(
+            encode(&ClientMessage::RenameDogma {
+                name: "n".repeat(MAX_CLIENT_NAME_LEN + 1),
+            }),
+            Err(ControlError::FieldTooLong { field: "name", .. })
+        ));
+
+        let ok = ClientMessage::RenameDogma {
+            name: "Terceira Tóquio".into(),
+        };
+        let frame = encode(&ok).unwrap();
+        assert_eq!(decode::<ClientMessage>(&frame).unwrap(), ok);
+    }
+
+    #[test]
+    fn a_blank_name_never_leaves_the_dogma_either() {
+        // The same bound applied on the way out. A name that came from an older
+        // build, or straight from somebody's `sqlite3` prompt, must not travel
+        // further than one a client could have asked for.
+        assert!(matches!(
+            encode(&ServerMessage::DogmaRenamed { name: "  ".into() }),
+            Err(ControlError::FieldOutOfRange { field: "name" })
+        ));
     }
 }

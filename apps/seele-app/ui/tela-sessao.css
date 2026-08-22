@@ -326,7 +326,7 @@
   background: var(--seele-negro-painel);
 }
 
-.painel-sync { border-right: none; }
+.painel-pessoas { border-right: none; }
 
 /* O título de painel.
 
@@ -1235,17 +1235,30 @@
   white-space: pre-line;
 }
 
-/* ---------- coluna 4: o sinal ---------- */
+/* ---------- coluna 4: as pessoas ----------
+
+   Esta coluna era o sinal: a média da sala num bloco de 52px e uma lista de
+   quem estava na sala ocupada. A avaliação de usabilidade achou nisso o pior
+   erro de alocação da tela — a faixa permanente de 328px de uma ferramenta de
+   comunicação ocupada por um dado de diagnóstico, com a lista de pessoas sem
+   aparecer em tela nenhuma fora da coluna de 268px, e lá só para a sala em que
+   se está.
+
+   A troca: as pessoas ocupam a faixa, o sinal de cada uma continua sendo uma
+   linha dentro do cartão dela, e a média — que não é de ninguém — desceu para o
+   rodapé, ao lado das outras medidas. O cartão não mudou: as quatro faixas de
+   informação dele já tinham acompanhante textual, e era isso que não se podia
+   perder na mudança. */
 
 /* A cartela invertida. O inventário §12 endurece essa regra no v2: cabeçalho de
-   painel de sincronia é **bloco sólido de cor com texto no negro absoluto**, e
-   nunca texto colorido sobre fundo escuro. É a ênfase invertida da TUI. */
-.sync-cartela {
+   painel é **bloco sólido de cor com texto no negro absoluto**, e nunca texto
+   colorido sobre fundo escuro. É a ênfase invertida da TUI. */
+.pessoas-cartela {
   margin: 0;
   padding: 8px 16px;
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: baseline;
   gap: 8px;
   background: var(--seele-laranja-nerv);
   color: var(--seele-negro-absoluto);
@@ -1256,73 +1269,26 @@
   flex: 0 0 auto;
 }
 
-.sync-kanji {
-  font-weight: 900;
-  font-size: var(--seele-t-dado);
-  letter-spacing: 0;
-}
-
-.sync-media {
-  padding: 16px;
-  border-bottom: 1px solid var(--seele-linha);
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 12px;
-  flex: 0 0 auto;
-}
-
-.sync-media-legenda { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-
-.sync-media-rotulo {
-  font-size: var(--seele-t-micro);
-  letter-spacing: 0.2em;
-  color: var(--seele-rotulo-painel);
-}
-
-.sync-amostra { font-size: 11px; color: var(--seele-osso-apagado); }
-
-/* O bloco de 52px, invertido: o fundo é a faixa, o texto é o negro absoluto.
-   A marca de bloco vai junto, em face monoespaçada, porque a Saira Condensed
-   não tem `U+2588` — e sem ela a faixa seria cor e nada mais, que é o que
-   `specs/05-cliente-tui.md` proíbe.
-
-   Sem `magiRespiro`. O comp anima este bloco em 2400ms infinitos, e
-   `specs/07-tema-evangelion.md` diz que movimento é diagnóstico: a varredura é
-   a única exceção nomeada, e uma média que pulsa igual estando em 98 ou em 41
-   não diagnostica nada. */
-.sync-media-bloco {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 2px 10px 0;
-  background: var(--seele-linha);
-  color: var(--seele-osso-apagado);
-  flex: 0 0 auto;
-}
-
-.sync-media-bloco[data-faixa] { color: var(--seele-negro-absoluto); }
-.sync-media-bloco[data-faixa="Nominal"] { background: var(--seele-sync-nominal); }
-.sync-media-bloco[data-faixa="Degraded"] { background: var(--seele-sync-degradado); }
-.sync-media-bloco[data-faixa="Critical"] { background: var(--seele-sync-critico); }
-
-.sync-marca {
+/* A contagem, dentro da cartela e no mesmo negro: um segundo tom aqui seria
+   texto apagado sobre laranja, que é a metade da regra do §12 que se perde
+   primeiro. Peso normal e corpo pequeno bastam para ela não competir com o
+   título. */
+.pessoas-conta {
   font-family: var(--seele-mono);
-  font-size: 11px;
-  line-height: 1;
+  font-size: var(--seele-t-micro);
+  font-weight: normal;
+  letter-spacing: 0.14em;
+  flex: 0 0 auto;
 }
 
-.sync-media-valor {
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 52px;
-  line-height: 0.86;
-  font-variant-numeric: tabular-nums;
+/* A nota que diz de quem esta lista é — e de quem ela não é. Ela é permanente
+   e não um `title`: o que falta aqui não é um detalhe de quem reparou, é o
+   alcance da lista inteira. */
+.painel-pessoas .nota {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--seele-linha);
+  flex: 0 0 auto;
 }
-
-/* Sem faixa não há bloco invertido: um travessão num campo laranja pareceria
-   uma medida. Ele volta a ser texto apagado sobre o painel. */
-.sync-media-bloco:not([data-faixa]) .sync-media-valor { font-size: var(--seele-t-secao); }
 
 .roster {
   list-style: none;
@@ -1330,6 +1296,60 @@
   padding: 0;
   overflow-y: auto;
   flex: 1 1 auto;
+}
+
+.roster-grupo { display: block; }
+
+/* O cabeçalho de um grupo: o nome da sala e a ocupação, o mesmo par que a
+   coluna de salas escreve. Grudento porque a lista rola e um nome de sala que
+   sai da tela deixa os cartões de baixo sem dono. */
+.roster-sala {
+  margin: 0;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--seele-negro-painel);
+  border-bottom: 1px solid var(--seele-linha);
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-micro);
+  font-weight: normal;
+  letter-spacing: 0.16em;
+  color: var(--seele-rotulo-painel);
+}
+
+.roster-sala-nome {
+  color: var(--seele-osso-apagado);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.roster-sala-conta { flex: 0 0 auto; }
+
+/* A sala em que se está, marcada na borda **e** em palavra: a borda é cor, e
+   `specs/05-cliente-tui.md` não aceita informação que só a cor carregue. */
+.roster-grupo[data-nossa="sim"] .roster-sala {
+  border-left: 2px solid var(--seele-laranja-nerv);
+  color: var(--seele-laranja-nerv);
+}
+
+.roster-grupo[data-nossa="sim"] .roster-sala-nome { color: var(--seele-laranja-nerv); }
+
+.roster-sala-aqui {
+  margin-left: auto;
+  flex: 0 0 auto;
+  letter-spacing: 0.1em;
+  text-transform: lowercase;
+}
+
+.roster-pessoas {
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
 .roster .piloto {
@@ -1358,6 +1378,16 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A marca de bloco: a metade da faixa que sobrevive sem cor
+   (`specs/05-cliente-tui.md`). Em face monoespaçada porque a Saira Condensed,
+   que desenha os números ao lado dela, não tem `U+2588`. Vale no cartão e na
+   célula do rodapé, que são os dois lugares em que uma faixa é escrita. */
+.sync-marca {
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  line-height: 1;
 }
 
 .piloto-sync { display: flex; align-items: baseline; gap: 6px; flex: 0 0 auto; }
@@ -1460,6 +1490,22 @@
 }
 
 .metrica span { font-size: 12px; color: var(--seele-osso); }
+
+/* A média de sinal da sala, que era o bloco de 52px da quarta coluna. Aqui ela
+   é uma célula como as outras: número e marca coloridos pela faixa, e nunca o
+   bloco sólido invertido — a inversão do inventário §12 é para cabeçalho de
+   painel, e um retângulo laranja de altura inteira nesta fileira gritaria mais
+   alto que o alerta que fica logo acima dela.
+
+   A cor pinta o valor e a marca, e nunca o rótulo: `SINAL DA SALA` tem de ser
+   legível nas três faixas. */
+.metrica-sinal { gap: 6px; }
+
+.metrica-sinal .rotulo { margin-right: 2px; }
+
+.metrica-sinal[data-faixa="Nominal"] span { color: var(--seele-sync-nominal); }
+.metrica-sinal[data-faixa="Degraded"] span { color: var(--seele-sync-degradado); }
+.metrica-sinal[data-faixa="Critical"] span { color: var(--seele-sync-critico); }
 
 .falha-local {
   display: flex;
@@ -1710,21 +1756,25 @@
    A ordem é esta, e ela não é a ordem de importância — é a ordem do que se
    pode ir buscar noutro lugar:
 
-   1. O painel de sinal recolhe primeiro. Ele é medida permanente e ninguém
-      trabalha dentro dele; a mesma lista, com as mesmas pessoas e os mesmos
-      números, é a tela de chamada, a um botão do cabeçalho.
+   1. A faixa de pessoas recolhe primeiro. Ninguém trabalha dentro dela, e o
+      que ela mostra não desaparece com ela: a coluna do lado — que só cede no
+      ponto seguinte — lista quem está em cada sala, com o estado de cada um em
+      palavra, e a tela de chamada tem a sala ocupada em cartões, a um botão do
+      cabeçalho. O que se perde entre 1240px e 900px é o sinal por pessoa; a
+      média continua no rodapé e a de cada um volta assim que a janela volta.
    2. A coluna de salas e canais vira gaveta depois. Ela é navegação — serve
       para chegar a um canal, não para ficar aberta enquanto se lê o que está
       dentro dele —, e a porta dela é o `CANAIS` que `tela-sessao.js` põe na
-      barra do canal aberto.
+      barra do canal aberto. Recolhê-la antes da faixa seria tirar as duas
+      listas de gente ao mesmo tempo, que é o que a ordem acima evita.
    3. A conversa não cede nunca antes das outras duas. É o painel onde se
       passam horas e o único desta tela em que a largura muda o que cabe numa
       linha: espremê-la primeiro é encurtar a linha de texto para preservar
       duas colunas que ninguém está lendo.
 
    Os dois números são onde cada coisa deixa de caber, e não uma classe de
-   dispositivo: 1240px é onde a conversa desce de 600px com o painel de sinal
-   aberto, e 900px é onde ela desce disso outra vez sem ele. Não há um terceiro
+   dispositivo: 1240px é onde a conversa desce de 600px com a faixa de pessoas
+   aberta, e 900px é onde ela desce disso outra vez sem ela. Não há um terceiro
    ponto porque não há uma quarta coluna para tirar. */
 
 /* A porta da gaveta não existe fora da largura em que a gaveta existe. Este é
@@ -1733,7 +1783,7 @@
 
 @media (max-width: 1240px) {
   .paineis { grid-template-columns: 60px 268px minmax(0, 1fr); }
-  .painel-sync { display: none; }
+  .painel-pessoas { display: none; }
   /* A conversa passa a ser a última coluna, e a divisória dela seria uma linha
      colada na borda da janela. */
   .painel-linha { border-right: none; }

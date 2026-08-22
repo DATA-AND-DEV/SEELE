@@ -1037,6 +1037,7 @@ fn render_help(frame: &mut Frame<'_>, theme: Theme, area: Rect) {
         ("h j k l / setas", "navegar"),
         ("Tab / Shift+Tab", "alternar painel"),
         ("Enter", "entrar na sala / abrir canal"),
+        ("s", "sair da sala de voz"),
         ("i", "escrever mensagem"),
         ("Espaço (segurar)", "falar"),
         ("m", "mudo (microfone fechado)"),
@@ -1721,9 +1722,10 @@ mod tests {
 
     #[test]
     fn the_help_overlay_names_the_keys_that_have_no_other_hint() {
-        // Searching and ejecting are reachable and announced nowhere else: `/`,
-        // `n`, `N` and `:ejetar` have no button, no label and no prompt. A key
-        // that works and is written down nowhere is as good as missing.
+        // Searching, leaving the voice room and ejecting are reachable and
+        // announced nowhere else: `/`, `n`, `N`, `s` and `:ejetar` have no
+        // button, no label and no prompt. A key that works and is written down
+        // nowhere is as good as missing.
         let mut app = populated();
         app.help = true;
         let screen = draw(&app, Palette::True, (80, 24));
@@ -1732,6 +1734,7 @@ mod tests {
             "buscar no histórico",
             "ocorrência seguinte",
             ":ejetar",
+            "sair da sala de voz",
             "sair do programa",
         ] {
             assert!(screen.contains(what), "`{what}` missing:\n{screen}");

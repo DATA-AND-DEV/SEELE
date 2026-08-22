@@ -792,6 +792,42 @@ impl Client {
         .await
     }
 
+    /// Asks the Dogma to rename itself.
+    ///
+    /// Asks, like the four above, and for the same reason: what may be done is
+    /// the Dogma's to decide, and it wants `Permission::AdministerDogma` for
+    /// this. A refusal comes back as an `Alert` carrying `PermissionDenied`;
+    /// success comes back as `ServerMessage::DogmaRenamed`, to everybody.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed, or if the name is blank or longer
+    /// than `MAX_CLIENT_NAME_LEN` — `encode` refuses it before it leaves.
+    pub async fn rename_dogma(&mut self, name: &str) -> Result<()> {
+        frame::write(
+            &mut self.send,
+            &ClientMessage::RenameDogma {
+                name: name.to_owned(),
+            },
+        )
+        .await
+    }
+
+    /// Asks the Dogma to change its picture, or to have none.
+    ///
+    /// The bytes are refused before they leave if they are not a PNG within the
+    /// bounds `seele_proto::control` sets, which is what keeps a shell from
+    /// having to know the rules: it hands over whatever the person picked and
+    /// reads the error.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed, or if the picture is not an
+    /// acceptable icon.
+    pub async fn set_dogma_icon(&mut self, icon: Option<Vec<u8>>) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::SetDogmaIcon { icon }).await
+    }
+
     /// Asks the Dogma to end a pilot's session.
     ///
     /// Asks, like the four above, and for the same reason: nothing here checks

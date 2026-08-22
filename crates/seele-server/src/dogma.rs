@@ -105,6 +105,32 @@ pub enum Event {
         name: String,
     },
 
+    // ---- what the Dogma calls itself ----
+    //
+    // The same shape as `CageRenamed`, one level up: committed first, announced
+    // after, forwarded to every connection including the one that asked.
+    //
+    // Announced to **everybody** for the reason `CageCreated` gives, and here it
+    // is sharper than for a room: a name is drawn in the header of every open
+    // window, so a rename that only reached the next handshake would put the new
+    // name on the screen of whoever typed it and the old one on everybody
+    // else's — which is the exact failure ADR 0032 says not to ship.
+    /// The Dogma was renamed.
+    DogmaRenamed {
+        /// What it is called now.
+        name: String,
+    },
+    /// The Dogma's icon changed, or was taken down.
+    ///
+    /// The bytes travel on the bus rather than a "go and read it again": the bus
+    /// is what every connection is already draining, and telling fifty sessions
+    /// to each take the CASPER lock and read the same 8 KiB row would be fifty
+    /// reads of a value one reader already has in its hand.
+    DogmaIconChanged {
+        /// The picture, or `None` when it was taken down.
+        icon: Option<Vec<u8>>,
+    },
+
     // ---- moderation ----
     //
     // These two are the odd ones on this bus: every other event is something a

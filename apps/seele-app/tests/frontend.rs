@@ -6115,55 +6115,64 @@ fn the_knock_is_read_out_once_per_appearance_and_not_once_per_poll() {
 }
 
 #[test]
-fn nothing_on_the_waiting_screen_knocks_again_by_itself() {
-    // The trap this screen is one step away from. ADR 0030 refuses to hold the
-    // connection open on purpose: a deadline manufactures "nobody answered",
-    // which is an answer nobody can act on. A screen that retries on a timer
-    // turns "nothing waits" into waiting under another name — and it knocks on
-    // somebody else's Dogma forever, against the per-address bucket of ADR
-    // 0025. `seele-tui`'s `worth_retrying` refused the same thing.
+fn a_espera_so_bate_enquanto_alguem_esta_olhando() {
+    // Este guarda mudou de forma, e a mudança está registrada no ADR 0030.
+    //
+    // Ele exigia que **nada** batesse sozinho, e a razão citada era boa: uma
+    // tela que repete no relógio bate no Dogma de outra pessoa para sempre,
+    // contra o balde por endereço do ADR 0025.
+    //
+    // Duas metades daquela razão não se sustentaram, e uma sustentou.
+    //
+    // Não se sustentou a leitura de que isto é o que o ADR 0030 recusou: lá o
+    // que foi recusado é **segurar a conexão** enquanto quem hospeda decide, e
+    // uma batida daqui conecta, é recusada e desconecta, sem segurar recurso
+    // nenhum do outro lado. Não se sustentou a conta: quinze segundos são
+    // quatro batidas por minuto, e o balde de antes de autenticar do ADR 0025
+    // repõe trinta por minuto — a bateria de reconexão que já existe bate mais.
+    //
+    // Sustentou-se o **para sempre**. E o próprio ADR 0030 nomeia o caso, na
+    // alternativa 2: «o caso que importa, o da janela minimizada». Uma janela
+    // minimizada batendo por horas, com ninguém para ver a resposta, é gasto no
+    // servidor de um estranho por uma espera que ninguém está esperando.
+    //
+    // Então a propriedade cobrada aqui deixou de ser «não bate sozinho» e
+    // passou a ser **«só bate enquanto alguém está olhando»**.
     let tela = without_comments(&read("ui/tela-auth.js"));
 
-    for relogio in ["setInterval(", "setTimeout(", "requestAnimationFrame("] {
-        assert!(
-            !tela.contains(relogio),
-            "the entry screen schedules `{relogio}`, and the only thing it has \
-             to schedule is another knock on a door that has not answered yet"
-        );
-    }
+    assert!(
+        tela.contains("visibilityState"),
+        "a espera automática não pergunta se alguém está olhando, então uma          janela minimizada bate na porta de um estranho por horas — o caso que          a alternativa 2 do ADR 0030 nomeia:\n{tela}"
+    );
+    assert!(
+        tela.contains("visibilitychange"),
+        "nada religa a espera quando a janela volta, então minimizar uma vez a          encerra em silêncio e quem volta fica olhando uma tela que desistiu"
+    );
 
-    // And every path into a knock is a press. Counted over top-level chunks so
-    // a call added anywhere else — a listener on the screen becoming visible, a
-    // retry inside a `catch` — is reported with its text.
-    let mut declaracoes = 0;
-    let mut por_clique = 0;
-    let mut outros: Vec<String> = Vec::new();
-    for chunk in top_level_chunks(&read("ui/tela-auth.js")) {
-        if !chunk.contains("baterDeNovo") {
-            continue;
-        }
-        if chunk.contains("async function baterDeNovo") {
-            declaracoes += 1;
-        } else if chunk.contains("addEventListener(\"click\"") {
-            por_clique += 1;
-        } else {
-            outros.push(chunk);
-        }
-    }
-    assert_eq!(
-        declaracoes, 1,
-        "the function that knocks again is declared {declaracoes} times, so this \
-         guard is reading something other than the one that runs"
-    );
+    // A pausa é a primeira coisa que a contagem decide, e não um `if` perdido
+    // depois de já ter marcado o relógio. Um `setInterval` armado antes da
+    // pergunta bate uma vez com a janela escondida, que é exatamente o que
+    // isto existe para impedir.
+    let contar = body_of(&scripts(), "function contarParaBater");
+    let Some(pergunta) = contar.find("alguemOlhando()") else {
+        panic!("a contagem não pergunta se alguém está olhando:\n{contar}");
+    };
+    let Some(arma) = contar.find("setInterval(") else {
+        panic!("a contagem não arma relógio nenhum:\n{contar}");
+    };
     assert!(
-        por_clique >= 1,
-        "nothing presses the button that knocks again, so trying again is not \
-         offered at all — and an approval never pulls anybody back by itself"
+        pergunta < arma,
+        "o relógio é armado antes de a contagem perguntar se alguém está \
+         olhando, então a janela escondida ainda bate uma vez:\n{contar}"
     );
+
+    // E sair pela porta encerra, em vez de pausar. Sem isto, voltar à janela
+    // depois de desistir recomeçaria a bater numa porta que a pessoa já deixou.
+    let voltar = body_of(&scripts(), "function voltarParaAEntrada");
     assert!(
-        outros.is_empty(),
-        "something other than a press knocks again:\n{}",
-        outros.join("\n")
+        voltar.contains("esperando = false"),
+        "sair da espera pela porta não encerra a espera, só para o relógio — e \
+         voltar à janela a religa sobre um servidor que a pessoa abandonou:\n{voltar}"
     );
 }
 

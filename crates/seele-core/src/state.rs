@@ -184,6 +184,18 @@ pub struct Room {
     pub ssrc: Option<Ssrc>,
     /// What the Dogma is called.
     pub dogma: String,
+    /// The picture the Dogma chose for itself, if it chose one.
+    ///
+    /// PNG bytes, already bounded by `seele_proto::control` on the way in —
+    /// a real PNG, at most `MAX_DOGMA_ICON_SIDE` a side, at most
+    /// `MAX_DOGMA_ICON_LEN` bytes. Nothing here decodes them: a shell draws
+    /// them, and the terminal one has nowhere to draw them at all, which is
+    /// why this is bytes and not a decoded image.
+    ///
+    /// `None` is the ordinary state and is what every Dogma that exists today
+    /// is in. It is also what a handshake resets this to — see
+    /// [`Room::adopt`].
+    pub icon: Option<Vec<u8>>,
     /// Voice channels visible to this pilot.
     pub cages: Vec<CageInfo>,
     /// Text channels visible to this pilot.
@@ -230,6 +242,13 @@ pub struct Changed {
     pub messages: bool,
     /// Cages or Lines changed.
     pub channels: bool,
+    /// The Dogma renamed itself, or changed its picture.
+    ///
+    /// Its own flag and not folded into [`Self::channels`]: what moves is the
+    /// header and the badge, not the room lists, and a shell that redrew every
+    /// channel because the server was renamed would be redrawing the one part
+    /// of the screen that did not change.
+    pub dogma: bool,
     /// New measurements.
     pub telemetry: bool,
     /// A notice was raised.
@@ -247,6 +266,7 @@ impl Changed {
         self.roster
             || self.messages
             || self.channels
+            || self.dogma
             || self.telemetry
             || self.notice
             || self.transfers
@@ -275,6 +295,12 @@ impl Room {
         self.me = Some(info.pilot);
         self.ssrc = Some(info.ssrc);
         self.dogma = info.dogma.clone();
+        // Cleared, and not left alone, because this runs again on every
+        // reconnection. The handshake describes the Dogma from scratch and the
+        // picture arrives just behind it when there is one; keeping the old one
+        // here would leave a client that was away while the icon was taken down
+        // drawing it for the rest of the session.
+        self.icon = None;
         self.cages = info.cages.clone();
         self.lines = info.lines.clone();
         self.permissions = info.permissions.clone();
@@ -477,6 +503,9 @@ impl Room {
                 self.me = Some(*pilot);
                 self.ssrc = Some(*ssrc);
                 self.dogma.clone_from(dogma);
+                // For the reason [`Self::adopt`] gives: a handshake describes
+                // the Dogma from scratch, picture included.
+                self.icon = None;
                 self.cages.clone_from(cages);
                 self.lines.clone_from(lines);
                 self.permissions.clone_from(permissions);
@@ -678,6 +707,23 @@ impl Room {
                     known.name.clone_from(name);
                     changed.channels = true;
                 }
+            }
+
+            // What the Dogma calls itself, changed while everybody is inside.
+            //
+            // Folded unconditionally, including when the value is the one
+            // already held: the Dogma only sends these when it committed a
+            // change, and comparing here would mean this module deciding that a
+            // rename to the same string is not news — which is a judgement
+            // about a screen, and this module has none.
+            ServerMessage::DogmaRenamed { name } => {
+                self.dogma.clone_from(name);
+                changed.dogma = true;
+            }
+
+            ServerMessage::DogmaIconChanged { icon } => {
+                self.icon.clone_from(icon);
+                changed.dogma = true;
             }
 
             // Somebody with the permission moved this plug.
@@ -1308,6 +1354,69 @@ mod tests {
             !again.channels,
             "a repeat told the shell to redraw a list that did not change"
         );
+    }
+
+    #[test]
+    fn renaming_the_dogma_reaches_a_client_that_never_asked() {
+        // ADR 0032 names the failure this prevents: the screen of whoever
+        // renamed the server showing the new name and everybody else's showing
+        // the old one until they reconnect.
+        let mut room = Room::new();
+        room.apply(&session());
+        assert_eq!(room.dogma, "Terceira Tóquio");
+
+        let changed = room.apply(&ServerMessage::DogmaRenamed {
+            name: "Quartel-General".into(),
+        });
+
+        assert_eq!(room.dogma, "Quartel-General");
+        assert!(changed.dogma, "the header was not told to redraw");
+        assert!(
+            !changed.channels,
+            "renaming the server told the shell to redraw both channel lists,              which are the part of the screen that did not change"
+        );
+    }
+
+    #[test]
+    fn the_dogma_icon_arrives_and_can_be_taken_down_again() {
+        // Both halves. An `Option` folded in only when it is `Some` is the
+        // classic version of this bug: the picture goes up and never comes
+        // down, so it stays on the screen after it has left the database.
+        let mut room = Room::new();
+        room.apply(&session());
+        assert_eq!(room.icon, None, "a fresh room invented a picture");
+
+        let bytes = vec![0x89, b'P', b'N', b'G', 1, 2, 3];
+        let changed = room.apply(&ServerMessage::DogmaIconChanged {
+            icon: Some(bytes.clone()),
+        });
+        assert_eq!(room.icon, Some(bytes));
+        assert!(changed.dogma);
+
+        let changed = room.apply(&ServerMessage::DogmaIconChanged { icon: None });
+        assert_eq!(
+            room.icon, None,
+            "taking the picture down did not reach here"
+        );
+        assert!(changed.dogma);
+    }
+
+    #[test]
+    fn a_handshake_forgets_the_picture_the_last_one_left() {
+        // What makes "the Dogma sends the icon only when it has one" honest.
+        // A reconnection re-describes the Dogma from scratch, and a client that
+        // was away while the picture was taken down would otherwise draw it for
+        // the rest of the session — the Dogma says nothing, because there is
+        // nothing to say.
+        let mut room = Room::new();
+        room.apply(&session());
+        room.apply(&ServerMessage::DogmaIconChanged {
+            icon: Some(vec![0x89, b'P', b'N', b'G']),
+        });
+
+        room.apply(&session());
+
+        assert_eq!(room.icon, None, "the old picture survived the handshake");
     }
 
     #[test]

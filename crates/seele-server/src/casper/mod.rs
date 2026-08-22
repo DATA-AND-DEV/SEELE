@@ -24,6 +24,7 @@
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 
+pub mod aparencia;
 pub mod attachments;
 pub mod channels;
 pub mod messages;

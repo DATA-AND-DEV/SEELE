@@ -511,6 +511,12 @@ enum Command {
         line: LineId,
         name: String,
     },
+    RenameDogma {
+        name: String,
+    },
+    SetDogmaIcon {
+        icon: Option<Vec<u8>>,
+    },
     KickPilot {
         pilot: PilotId,
     },
@@ -645,6 +651,17 @@ struct Shared {
     /// O número em si não significa nada; só a diferença significa. A casca
     /// guarda o último que desenhou e busca o histórico quando ele muda.
     messages_revision: std::sync::atomic::AtomicU64,
+    /// Quantas vezes a imagem do Dogma mudou desde que esta sessão começou.
+    ///
+    /// Existe pelo mesmo motivo do `messages_revision`, num tamanho menor: o
+    /// [`Snapshot`] é lido a cada quadro de interface, e carregar os bytes nele
+    /// seria cloná-los, serializá-los em JSON e atravessar a ponte com eles
+    /// duas vezes por segundo — por um valor que muda quando alguém aperta um
+    /// botão e nunca mais.
+    ///
+    /// O número em si não significa nada; só a diferença significa. A casca
+    /// guarda o último que desenhou e busca a imagem quando ele muda.
+    icon_revision: std::sync::atomic::AtomicU64,
     /// Quem está esperando o peso de uma Linha, e por qual Linha.
     ///
     /// A única pergunta com resposta deste crate. Todo o resto que a casca pede
@@ -928,6 +945,7 @@ impl Plug {
             link_seconds: std::sync::atomic::AtomicU64::new(0),
             link_attempts: std::sync::atomic::AtomicU32::new(0),
             messages_revision: std::sync::atomic::AtomicU64::new(0),
+            icon_revision: std::sync::atomic::AtomicU64::new(0),
             room: Mutex::new(Room::new()),
             listeners: Mutex::new(Vec::new()),
             voice: Mutex::new(None),
@@ -1217,6 +1235,78 @@ impl Plug {
             line: LineId(line),
             name,
         })
+    }
+
+    /// Asks the Dogma to rename itself.
+    ///
+    /// Asks, and reports nothing back, like [`Plug::rename_cage`]: the answer
+    /// comes from the Dogma, as [`Event::DogmaChanged`] with the new name on
+    /// the next [`Snapshot`], or as [`Event::NoticeRaised`] carrying
+    /// [`NoticeReason::PermissionDenied`].
+    ///
+    /// A blank name is swallowed here rather than sent, exactly as
+    /// [`Plug::rename_cage`] swallows one: a shell with an empty box and a
+    /// button is not a shell reporting an error, and the Dogma would refuse it
+    /// anyway.
+    ///
+    /// A shell may read [`Snapshot::may_customise_dogma`] to decide whether to
+    /// draw the control. **Convenience, never enforcement** — pressing it
+    /// without the permission gets a refusal and nothing changes.
+    ///
+    /// # Errors
+    ///
+    /// [`PlugError::NotConnected`] once the session is over.
+    pub fn rename_dogma(&self, name: String) -> Result<(), PlugError> {
+        if name.trim().is_empty() {
+            return Ok(());
+        }
+        self.command(Command::RenameDogma { name })
+    }
+
+    /// Asks the Dogma to change its picture, or `None` to have none.
+    ///
+    /// PNG bytes, and the Dogma refuses anything else — a real PNG, at most
+    /// `seele_proto::control::MAX_DOGMA_ICON_SIDE` a side, at most
+    /// `seele_proto::control::MAX_DOGMA_ICON_LEN` bytes. A shell hands over
+    /// what the person picked; the picture that comes back to everybody is the
+    /// proof it was taken.
+    ///
+    /// Checked here **before** the command is queued, with the protocol's own
+    /// function rather than a copy of its rules. Not for politeness: a picture
+    /// the protocol refuses cannot be turned into a frame, a frame that cannot
+    /// be built is a send that fails, and a send that fails is how a dropped
+    /// connection looks from inside `seele_core::enlace`. Somebody choosing a
+    /// PDF would watch the app start its five-minute internal battery.
+    ///
+    /// # Errors
+    ///
+    /// [`PlugError::IconNotAPicture`] or [`PlugError::IconTooBig`] when the
+    /// bytes will not do; [`PlugError::NotConnected`] once the session is over.
+    pub fn set_dogma_icon(&self, icon: Option<Vec<u8>>) -> Result<(), PlugError> {
+        seele_core::check_dogma_icon(icon.as_deref()).map_err(|recusa| match recusa {
+            seele_core::IconRefusal::NotAnIcon => PlugError::IconNotAPicture,
+            seele_core::IconRefusal::TooBig { limit_bytes } => {
+                PlugError::IconTooBig { limit_bytes }
+            }
+        })?;
+        self.command(Command::SetDogmaIcon { icon })
+    }
+
+    /// The Dogma's picture, if it has one.
+    ///
+    /// Separate from [`Plug::snapshot`] for the reason [`Plug::messages`] is
+    /// separate from it: the two change at completely different rates, and
+    /// carrying the bytes on every frame of a redraw would mean cloning them
+    /// and serialising them twice a second for a value that moves when
+    /// somebody presses a button. Ask for this when
+    /// [`Snapshot::icon_revision`] changes, and not otherwise.
+    #[must_use]
+    pub fn dogma_icon(&self) -> Option<Vec<u8>> {
+        self.shared
+            .room
+            .lock()
+            .ok()
+            .and_then(|room| room.icon.clone())
     }
 
     /// Asks the Dogma to end a pilot's session — `expulsar`.
@@ -1585,6 +1675,7 @@ impl Plug {
             link: self.shared.enlace(),
             pattern: pattern_from_byte(self.shared.pattern.load(Ordering::Relaxed)),
             dogma: room.dogma.clone(),
+            icon_revision: self.shared.icon_revision.load(Ordering::Relaxed),
             me: room.me.map(|pilot| pilot.0),
             nickname,
             cages: cages_of(&room),
@@ -1628,6 +1719,9 @@ impl Plug {
             may_move_pilot: room
                 .permissions
                 .contains(&seele_core::Permission::MovePilot),
+            may_customise_dogma: room
+                .permissions
+                .contains(&seele_core::Permission::AdministerDogma),
             may_delete_rooms: room
                 .permissions
                 .contains(&seele_core::Permission::AdministerDogma),
@@ -2243,6 +2337,21 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
     if changed.channels {
         shared.notify(&Event::ChannelsChanged);
     }
+    if changed.dogma {
+        // A revisão sobe **antes** do aviso, como em `messages_changed` e pelo
+        // mesmo motivo: uma casca que reage ao evento leria o número velho e
+        // concluiria que não há imagem nova para buscar.
+        //
+        // Só quando foi a imagem que mudou. Um nome novo já viaja inteiro no
+        // `Snapshot`, e mexer no número faria toda casca rebuscar 8 KiB por
+        // causa de uma string que ela acabou de receber.
+        if matches!(message, seele_core::ServerMessage::DogmaIconChanged { .. }) {
+            shared
+                .icon_revision
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        shared.notify(&Event::DogmaChanged);
+    }
     if changed.telemetry {
         shared.notify(&Event::TelemetryChanged);
     }
@@ -2552,6 +2661,22 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
         }
         Command::RenameLine { line, name } => {
             if client.renomear_linha(line, name).await.is_err() {
+                return false;
+            }
+        }
+        // Nothing is written into the local `Room` here either, and for the
+        // sharpest version of the reason above: the Dogma's own name is what
+        // every window in the session is drawing. Writing it in optimistically
+        // would put the new name on the screen of the one person who is not
+        // allowed to change it, and put it there identically whether the server
+        // agreed or refused.
+        Command::RenameDogma { name } => {
+            if client.renomear_dogma(name).await.is_err() {
+                return false;
+            }
+        }
+        Command::SetDogmaIcon { icon } => {
+            if client.definir_icone(icon).await.is_err() {
                 return false;
             }
         }
@@ -3050,6 +3175,7 @@ mod tests {
             link_seconds: std::sync::atomic::AtomicU64::new(0),
             link_attempts: std::sync::atomic::AtomicU32::new(0),
             messages_revision: std::sync::atomic::AtomicU64::new(0),
+            icon_revision: std::sync::atomic::AtomicU64::new(0),
             room: Mutex::new(Room::new()),
             listeners: Mutex::new(Vec::new()),
             voice: Mutex::new(None),
@@ -3671,6 +3797,160 @@ mod tests {
         assert!(!plug.snapshot().may_delete_rooms);
     }
 
+    /// A shell watching a Dogma dress itself, from the outside.
+    ///
+    /// The three properties a screen depends on and no type can state: the name
+    /// arrives whole, the picture does not, and the two do not move each
+    /// other\u{2019}s counter.
+    #[test]
+    fn the_dogma_name_rides_the_snapshot_and_the_picture_rides_a_revision() {
+        use seele_core::{Permission, ServerMessage, SessionId, Ssrc};
+
+        let shared = bare_shared();
+        let (commands, _queue) = tokio::sync::mpsc::unbounded_channel();
+        let plug = Plug {
+            commands,
+            shared: Arc::clone(&shared),
+        };
+
+        fold(
+            &shared,
+            &ServerMessage::Session {
+                id: SessionId(1),
+                pilot: seele_core::PilotId(7),
+                ssrc: Ssrc(700),
+                dogma: "Casa".into(),
+                cages: Vec::new(),
+                lines: Vec::new(),
+                roles: Vec::new(),
+                permissions: vec![Permission::AdministerDogma],
+            },
+        );
+        let inicio = plug.snapshot();
+        assert_eq!(inicio.dogma, "Casa");
+        assert_eq!(inicio.icon_revision, 0);
+        assert_eq!(plug.dogma_icon(), None);
+        assert!(
+            inicio.may_customise_dogma,
+            "whoever administers the Dogma was not offered the control"
+        );
+
+        // The name travels whole, because it is a string and it is cheap.
+        fold(
+            &shared,
+            &ServerMessage::DogmaRenamed {
+                name: "Terceira Tóquio".into(),
+            },
+        );
+        let renomeado = plug.snapshot();
+        assert_eq!(renomeado.dogma, "Terceira Tóquio");
+        assert_eq!(
+            renomeado.icon_revision, 0,
+            "a rename made every shell refetch a picture that did not change"
+        );
+
+        // The picture does not: the snapshot only says that it moved.
+        let bytes = vec![0x89, b'P', b'N', b'G', 4, 5, 6];
+        fold(
+            &shared,
+            &ServerMessage::DogmaIconChanged {
+                icon: Some(bytes.clone()),
+            },
+        );
+        assert_eq!(plug.snapshot().icon_revision, 1);
+        assert_eq!(plug.dogma_icon(), Some(bytes));
+
+        // Including when it moves to nothing. A revision that only counted
+        // arrivals would leave the old picture on screen after it was taken
+        // down, because the shell would never be told to look again.
+        fold(&shared, &ServerMessage::DogmaIconChanged { icon: None });
+        assert_eq!(plug.snapshot().icon_revision, 2);
+        assert_eq!(plug.dogma_icon(), None);
+    }
+
+    #[test]
+    fn a_picture_that_will_not_do_never_leaves_this_crate() {
+        // The failure this prevents is not a wrong error message: it is the app
+        // starting its five-minute internal battery because somebody picked a
+        // PDF. A frame the protocol will not build is a send that fails, and a
+        // send that fails is how a dropped link looks from `enlace`.
+        let shared = bare_shared();
+        let (commands, mut fila) = tokio::sync::mpsc::unbounded_channel();
+        let plug = Plug { commands, shared };
+
+        assert_eq!(
+            plug.set_dogma_icon(Some(b"%PDF-1.7".to_vec())),
+            Err(PlugError::IconNotAPicture)
+        );
+        assert!(
+            fila.try_recv().is_err(),
+            "a picture the Dogma would refuse was queued to be sent anyway"
+        );
+
+        // And the heavy one answers with the ceiling, because the sentence
+        // about it needs the number.
+        let mut gorda = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        gorda.extend_from_slice(&13_u32.to_be_bytes());
+        gorda.extend_from_slice(b"IHDR");
+        gorda.extend_from_slice(&128_u32.to_be_bytes());
+        gorda.extend_from_slice(&128_u32.to_be_bytes());
+        gorda.resize(64 * 1024, 0);
+        let Err(PlugError::IconTooBig { limit_bytes }) = plug.set_dogma_icon(Some(gorda)) else {
+            panic!("a picture over the ceiling was queued");
+        };
+        assert!(limit_bytes > 0);
+        assert!(fila.try_recv().is_err());
+
+        // Taking the picture down is never refused: it carries no bytes to
+        // refuse, and whoever put one up has to be able to take it away.
+        assert_eq!(plug.set_dogma_icon(None), Ok(()));
+        assert!(
+            matches!(fila.try_recv(), Ok(Command::SetDogmaIcon { icon: None })),
+            "taking the picture down was swallowed instead of sent"
+        );
+    }
+
+    #[test]
+    fn dressing_the_dogma_is_a_permission_of_its_own_field() {
+        // Same permission as `may_delete_rooms` today, separate question. A
+        // shell reading the destroy flag to decide whether to draw a rename box
+        // would be leaning on a coincidence between two verbs.
+        use seele_core::{Permission, ServerMessage, SessionId, Ssrc};
+
+        let shared = bare_shared();
+        let (commands, _queue) = tokio::sync::mpsc::unbounded_channel();
+        let plug = Plug {
+            commands,
+            shared: Arc::clone(&shared),
+        };
+
+        let sessao = |permissions: Vec<Permission>| ServerMessage::Session {
+            id: SessionId(1),
+            pilot: seele_core::PilotId(7),
+            ssrc: Ssrc(700),
+            dogma: "Casa".into(),
+            cages: Vec::new(),
+            lines: Vec::new(),
+            roles: Vec::new(),
+            permissions,
+        };
+
+        fold(&shared, &sessao(vec![Permission::ManageCages]));
+        assert!(
+            !plug.snapshot().may_customise_dogma,
+            "the permission to make rooms was read as the permission to name the Dogma"
+        );
+
+        fold(&shared, &sessao(vec![Permission::AdministerDogma]));
+        assert!(plug.snapshot().may_customise_dogma);
+
+        fold(&shared, &sessao(Vec::new()));
+        assert!(
+            !plug.snapshot().may_customise_dogma,
+            "the snapshot went on offering the control after the permission went away"
+        );
+    }
+
     #[test]
     fn the_weight_of_a_line_reaches_the_caller_who_asked_for_it() {
         // The number in the confirmation, and the one call on this bridge that
@@ -3962,6 +4242,7 @@ mod tests {
             link_seconds: std::sync::atomic::AtomicU64::new(0),
             link_attempts: std::sync::atomic::AtomicU32::new(0),
             messages_revision: std::sync::atomic::AtomicU64::new(0),
+            icon_revision: std::sync::atomic::AtomicU64::new(0),
             room: Mutex::new(Room::new()),
             listeners: Mutex::new(Vec::new()),
             voice: Mutex::new(None),

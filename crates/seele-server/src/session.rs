@@ -36,7 +36,7 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use seele_proto::control::{
     AlertReason, AlertSeverity, AttachmentRefusal, CageInfo, ClientMessage, DisconnectReason,
     LineInfo, Permission, PilotProfile, PilotState, Presence, Role, ServerMessage, Subsystem,
-    SubsystemHealth, Telemetry,
+    SubsystemHealth, Telemetry, Validate,
 };
 use seele_proto::ids::{CageId, LineId, PilotId, RoleId, SessionId, Ssrc};
 use seele_proto::sync_ratio::{SyncInputs, SyncRatio};
@@ -534,6 +534,27 @@ async fn handshake(
         }
     };
 
+    // Lido do CASPER, e não da [`DogmaConfig`] que subiu o processo: renomear
+    // com o Dogma no ar é o caso normal — ADR 0032 —, e um nome que voltasse ao
+    // do arranque no próximo reinício não seria um nome, seria uma sessão.
+    // Ausência continua querendo dizer o padrão da configuração; ver
+    // `casper::aparencia`.
+    //
+    // Uma segunda tomada do mutex, e não um campo a mais na `Account`: são duas
+    // perguntas sobre coisas diferentes — o que este piloto é, e o que este
+    // Dogma é — e o aperto de mão já toma este mutex mais de uma vez.
+    let (nome_do_dogma, icone_do_dogma) = {
+        let guard = dogma.casper.lock().await;
+        let nome = crate::casper::aparencia::nome(&guard, &config.name).unwrap_or_else(|erro| {
+            // Um banco que não responde não pode deixar o Dogma sem nome na
+            // tela de quem entra. O padrão da configuração é a resposta honesta.
+            tracing::warn!(%erro, "não deu para ler o nome do Dogma");
+            config.name.clone()
+        });
+        let icone = crate::casper::aparencia::icone(&guard).unwrap_or_default();
+        (nome, icone)
+    };
+
     let (fresh_ssrc, session_id) = registry.issue();
 
     // specs/02-protocolo.md: the server holds the slot for the same five minutes
@@ -555,7 +576,7 @@ async fn handshake(
             id: session_id,
             pilot: account.id,
             ssrc,
-            dogma: config.name.clone(),
+            dogma: nome_do_dogma,
             cages: account.cages,
             lines: account.lines,
             roles: account.roles,
@@ -567,6 +588,41 @@ async fn handshake(
         reason: DisconnectReason::ProtocolViolation,
         detail: format!("could not send Session: {error}"),
     })?;
+
+    // Logo depois do `Session`, e num quadro próprio: o `Session` já carrega os
+    // Cages, as Linhas, os papéis e as permissões dentro dos 16 KiB do
+    // `MAX_FRAME_LEN`, e uma imagem disputando esse orçamento faria um Dogma
+    // grande deixar de admitir alguém por causa de uma decoração — a terceira
+    // razão do ADR 0032, aqui respeitada em vez de contornada.
+    //
+    // **Só quando há ícone**, e o silêncio quer dizer «não há». O `Session`
+    // descreve o Dogma do zero — é dele que sai o nome, a lista de Cages e a de
+    // Linhas —, então quem reconecta a um Dogma cuja imagem foi tirada enquanto
+    // ele estava fora para de desenhar a antiga por ter sido reapresentado ao
+    // Dogma, e não por receber um `None`. O que isso compra é que um Dogma sem
+    // ícone, que é todo Dogma que existe hoje, troca exatamente os quadros que
+    // trocava antes desta mudança.
+    //
+    // Um ícone que não passa pela conferência do protocolo é **descartado** em
+    // vez de derrubar o aperto de mão. Os bytes vêm do banco, e quem tem o
+    // arquivo tem um `sqlite3`: uma linha escrita à mão não pode ser o motivo
+    // de ninguém mais conseguir entrar. Uma decoração nunca custa a conexão.
+    if icone_do_dogma.is_some() {
+        let anuncio = ServerMessage::DogmaIconChanged {
+            icon: icone_do_dogma,
+        };
+        match anuncio.validate() {
+            Ok(()) => frame::write(send, &anuncio)
+                .await
+                .map_err(|error| Refusal {
+                    reason: DisconnectReason::ProtocolViolation,
+                    detail: format!("could not send the Dogma icon: {error}"),
+                })?,
+            Err(erro) => {
+                tracing::warn!(%erro, "o ícone guardado não é um ícone; seguindo sem ele");
+            }
+        }
+    }
 
     let _ = client;
     Ok(Session {
@@ -1094,6 +1150,70 @@ async fn run_session(
                         match feito {
                             Ok(name) => {
                                 let _ = dogma.events.send(Event::LineRenamed { line: id, name });
+                            }
+                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                        }
+                    }
+
+                    // ---- what the Dogma calls itself ----
+                    //
+                    // `AdministerDogma`, and not the `ManageCages` of the four
+                    // room verbs above. `specs/04-servidor-seele.md` calls
+                    // `gerenciar_cages` "criar e configurar Cages" and
+                    // `administrar_dogma` "todo o resto sobre o Dogma": the
+                    // name and the picture of the Dogma itself are not a room,
+                    // and somebody trusted to build rooms is not thereby the
+                    // person whose Dogma it is.
+                    //
+                    // Read from MELCHIOR **now**, like every verb here and for
+                    // the same reason. Denial answers, because a refusal nobody
+                    // is told about is indistinguishable from a Dogma that is
+                    // broken.
+                    //
+                    // Committed **before** it is announced, like a message and
+                    // unlike nothing else here: the bus carries what the
+                    // database already holds, so a Dogma that is renamed and
+                    // then loses power comes back with the name everybody was
+                    // told about.
+                    ClientMessage::RenameDogma { name } => {
+                        if !pode(dogma, session.pilot, Permission::AdministerDogma).await {
+                            recusar(&mut send, session.pilot, "RenameDogma").await?;
+                            continue;
+                        }
+                        let feito = {
+                            let guard = dogma.casper.lock().await;
+                            crate::casper::aparencia::definir_nome(&guard, &name)
+                        };
+                        match feito {
+                            Ok(name) => {
+                                tracing::info!(by = %session.pilot, %name, "the Dogma was renamed");
+                                let _ = dogma.events.send(Event::DogmaRenamed { name });
+                            }
+                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                        }
+                    }
+                    ClientMessage::SetDogmaIcon { icon } => {
+                        if !pode(dogma, session.pilot, Permission::AdministerDogma).await {
+                            recusar(&mut send, session.pilot, "SetDogmaIcon").await?;
+                            continue;
+                        }
+                        // Nada confere o formato aqui. `frame::read` já recusou
+                        // o quadro se estes bytes não fossem um PNG dentro do
+                        // teto — `seele_proto::control::check_icon` —, e uma
+                        // segunda regra neste arquivo seria a que ficaria para
+                        // trás da primeira.
+                        let feito = {
+                            let guard = dogma.casper.lock().await;
+                            crate::casper::aparencia::definir_icone(&guard, icon.as_deref())
+                        };
+                        match feito {
+                            Ok(()) => {
+                                tracing::info!(
+                                    by = %session.pilot,
+                                    bytes = icon.as_ref().map_or(0, Vec::len),
+                                    "the Dogma changed its icon"
+                                );
+                                let _ = dogma.events.send(Event::DogmaIconChanged { icon });
                             }
                             Err(erro) => nao_deu(&mut send, &erro).await?,
                         }
@@ -1972,6 +2092,14 @@ fn translate(event: &Event, lines: &[LineId], self_pilot: PilotId) -> Option<Ser
             line: *line,
             name: name.clone(),
         }),
+
+        // Unfiltered, and to the pilot who asked as well, like the four above.
+        // A header is drawn in every open window: filtering the asker out would
+        // leave the one person who renamed the Dogma reading the old name.
+        Event::DogmaRenamed { name } => Some(ServerMessage::DogmaRenamed { name: name.clone() }),
+        Event::DogmaIconChanged { icon } => {
+            Some(ServerMessage::DogmaIconChanged { icon: icon.clone() })
+        }
 
         // Acted on by the connection they name, in the loop, and carrying
         // nothing for anybody else. A move is visible to everybody as the

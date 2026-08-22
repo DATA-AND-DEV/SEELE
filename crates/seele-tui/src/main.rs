@@ -1350,8 +1350,32 @@ async fn act(
         }
 
         Action::Activate => activate(runtime, client).await?,
+
+        Action::LeaveCage => {
+            if runtime.room.current_cage.is_none() {
+                note(runtime, "você não está em nenhuma sala de voz".to_owned());
+            } else {
+                client.ejetar_plug().await?;
+                sair_da_sala(&mut runtime.room, &mut runtime.app);
+            }
+        }
     }
     Ok(())
+}
+
+/// A metade local de sair de uma sala de voz — a que não passa pela rede.
+///
+/// O Dogma não devolve o `PilotLeft` a quem o causou — «essa pessoa já sabe» —,
+/// então sair, exatamente como entrar, é contabilidade que cada casca faz para
+/// si. `ejetar_plug` sozinho esvazia o assento no servidor e em todas as outras
+/// telas; a única que continuaria desenhando a pessoa dentro da sala é a de
+/// quem acabou de sair dela. Foi esse o defeito no aplicativo (`1019c8e` e o
+/// anterior), e é por ele que esta função existe à parte de [`act`]: sem
+/// `Enlace` no caminho, um teste consegue cobrá-la.
+fn sair_da_sala(room: &mut Room, app: &mut App) {
+    room.leave_cage();
+    view::project(room, app);
+    app.refazer_busca();
 }
 
 /// Enter on the selected row: enter a Cage, or open a Line.
@@ -1660,7 +1684,80 @@ fn clock_short() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::primeira_chave_de_mensagem;
+    use super::{primeira_chave_de_mensagem, sair_da_sala};
+
+    #[test]
+    fn sair_da_sala_esvazia_o_assento_na_propria_tela() {
+        use seele_core::{
+            CageId, CageInfo, LineId, LineInfo, PilotId, PilotProfile, Room, ServerMessage,
+            SessionId, Ssrc,
+        };
+        use seele_tui::app::{App, Node};
+        use seele_tui::view;
+
+        // O defeito irmão do aplicativo (`1019c8e` e o anterior), evitado aqui
+        // antes de existir: o Dogma não devolve o `PilotLeft` a quem o causou,
+        // então `ejetar_plug` sozinho deixa a sala esvaziada no servidor e em
+        // todas as outras telas menos na de quem saiu. Quebrar o
+        // `room.leave_cage()` de `sair_da_sala` deixa este teste vermelho.
+        const SALA: CageId = CageId(1);
+        const CANAL: LineId = LineId(1);
+
+        let mut room = Room::new();
+        room.apply(&ServerMessage::Session {
+            id: SessionId(1),
+            pilot: PilotId(7),
+            ssrc: Ssrc(700),
+            dogma: "servidor de teste".into(),
+            cages: vec![CageInfo {
+                id: SALA,
+                name: "SALA-01".into(),
+                limit: 20,
+                password_required: false,
+                line: Some(CANAL),
+            }],
+            lines: vec![LineInfo {
+                id: CANAL,
+                name: "geral".into(),
+            }],
+            roles: Vec::new(),
+            permissions: Vec::new(),
+        });
+        room.apply(&ServerMessage::PilotJoined {
+            cage: SALA,
+            profile: PilotProfile {
+                id: PilotId(7),
+                nickname: "ayanami".into(),
+                roles: Vec::new(),
+            },
+            ssrc: Ssrc(700),
+        });
+        room.enter_cage(SALA);
+
+        let mut app = App::new();
+        view::project(&room, &mut app);
+        assert!(
+            app.tree.iter().any(|no| matches!(no, Node::Pilot(_))),
+            "a montagem não chegou a pôr ninguém dentro da sala: {:?}",
+            app.tree
+        );
+
+        sair_da_sala(&mut room, &mut app);
+
+        assert_eq!(
+            room.current_cage, None,
+            "a casca continua achando que o plug está numa sala"
+        );
+        assert!(
+            room.roster(SALA).next().is_none(),
+            "o assento não esvaziou na tela de quem saiu"
+        );
+        assert!(
+            !app.tree.iter().any(|no| matches!(no, Node::Pilot(_))),
+            "a árvore continua desenhando alguém dentro da sala: {:?}",
+            app.tree
+        );
+    }
 
     #[test]
     fn a_chave_de_uma_sessao_nao_e_a_mesma_de_outra() {

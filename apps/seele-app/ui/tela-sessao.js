@@ -10,10 +10,16 @@
 // A composição é a do comp **v3** (`design/Entry Plug v3.dc.html`, tela
 // `principal`), inventariada em `.superpowers/sdd/comp-inventario-v3.md` §6.
 // Quatro colunas — a trilha de servidores, as salas e os canais, o canal
-// aberto, o painel de sinal — em `60px 268px minmax(0,1fr) 328px`.
+// aberto, a faixa de pessoas — em `60px 268px minmax(0,1fr) 328px`.
 //
-// Em janela estreita elas não apertam todas juntas, e a ordem é decisão: o
-// painel de sinal recolhe primeiro, a coluna de salas e canais vira gaveta
+// A quarta era o painel de sinal, e a troca é o achado da avaliação de
+// usabilidade: numa ferramenta de comunicação, a faixa permanente estava com o
+// dado de diagnóstico e a lista de pessoas não existia em tela nenhuma. Agora
+// ela é das pessoas, o sinal de cada uma é uma linha dentro do cartão dela, e a
+// média da sala desceu para o rodapé de telemetria.
+//
+// Em janela estreita elas não apertam todas juntas, e a ordem é decisão: a
+// faixa de pessoas recolhe primeiro, a coluna de salas e canais vira gaveta
 // depois, e a conversa é a última a ceder largura. Ver `alternarCanais` aqui e
 // o rodapé de `tela-sessao.css`.
 //
@@ -237,7 +243,7 @@ function desenhar(snapshot) {
   desenharOperador(snapshot);
   desenharLinha(snapshot);
   sincronizarMensagens(snapshot.messages_revision);
-  desenharSync(snapshot);
+  desenharPessoas(snapshot);
   desenharTelemetria(snapshot);
   desenharAviso(snapshot);
 
@@ -509,11 +515,15 @@ function linhaDeQuemEstaDentro(piloto, snapshot) {
   } else if (piloto.speaking) {
     item.append(elemento("span", "cage-piloto-marca", "fala"));
   }
-  // A porta da moderação, quando esta sessão tem algum verbo sobre gente. Ela
-  // mora aqui e em mais lugar nenhum porque esta é a única lista desta janela
-  // que mostra **todo mundo em toda sala** — o roster e a grade da chamada
-  // mostram só o Cage ocupado, e moderar é justamente o que se faz com quem
-  // está noutra. `camada-moderar.js` decide se há o que oferecer.
+  // A porta da moderação, quando esta sessão tem algum verbo sobre gente.
+  // `camada-moderar.js` decide se há o que oferecer.
+  //
+  // Ela continua morando só aqui. A faixa de pessoas passou a listar todo mundo
+  // em toda sala também — era a razão de esta lista ser a única com a porta —,
+  // mas duas portas para o mesmo verbo é uma a mais, e a que existe é a que já
+  // tem teste. Mover a porta para a faixa, ou dar uma a ela, é decisão de quem
+  // coordena: o comentário de `botaoDeModerar` em `camada-moderar.js` ainda diz
+  // que o roster mostra só a sala ocupada, e ele tem de mudar junto.
   const porta = botaoDeModerar(piloto, snapshot);
   if (porta) item.append(porta);
   return item;
@@ -853,92 +863,167 @@ function corpoComRealce(corpo, intervalos, aceso = null) {
   return pedacos;
 }
 
-// ------------------------------------------------------------------- sinal
+// ------------------------------------------------------------------ pessoas
 
 /**
- * O painel da direita: a média do Cage e uma linha por piloto.
+ * A faixa da direita: quem está aqui, agrupado por sala.
  *
- * A média **não é calculada aqui**. Ela chega em `cage.sync` já com faixa e com
- * o tamanho da amostra, decidida uma vez no core — `types.rs` argumenta que
- * duas cascas com duas cópias de "85 é nominal" são duas cascas que discordam
- * no dia em que uma delas for atualizada, e o comp faz exatamente essa cópia
- * (`corSync(media)` na casca). `null` quando o Cage está vazio: um Cage sem
- * ninguém não tem média, e zero pintaria toda sala parada de vermelho.
+ * Ela era a sincronia — a média da sala em 52px e uma linha por pessoa da sala
+ * ocupada. A avaliação de usabilidade chamou aquilo de o pior erro de alocação
+ * da tela, e com razão: 328px permanentes de uma ferramenta de comunicação
+ * gastos num dado de diagnóstico, com a lista de pessoas sem aparecer em tela
+ * nenhuma fora da coluna de 268px. A média desceu para o rodapé, que é onde a
+ * telemetria mora, e as pessoas subiram para a faixa.
+ *
+ * ---- o alcance desta lista, que é menor do que o nome dela ----
+ *
+ * `snapshot.cages` traz `pilots` para **todo** Cage e não só para o ocupado, e
+ * é isso que esta lista percorre: todo mundo que está em alguma sala de voz.
+ *
+ * Quem está conectado no servidor **sem** estar numa sala não está aqui, e não
+ * está porque o protocolo não o carrega: `Room.pilots` só cresce com o
+ * `Session` desta conexão, com `PilotJoined` — que anuncia a entrada numa sala
+ * e traz o Cage no próprio campo — e com o autor de uma mensagem. Não há
+ * mensagem na fita que diga quem entrou no servidor e ficou fora das salas.
+ * Enquanto não houver, a nota do cabeçalho diz de que a lista é, e esta função
+ * não inventa o resto.
+ *
+ * ---- por que agrupado ----
+ *
+ * Sem grupo, uma dúzia de nomes seguidos não diz de onde nenhum deles fala, e a
+ * informação nova que a faixa passou a carregar — que há gente noutras salas —
+ * seria justamente a que se perderia. O cabeçalho do grupo é o nome da sala com
+ * a ocupação ao lado, que é o mesmo par que a coluna de salas escreve.
  */
-function desenharSync(snapshot) {
-  const cage = snapshot.cages.find((c) => c.occupied_by_us);
+function desenharPessoas(snapshot) {
+  const nossa = snapshot.cages.find((c) => c.occupied_by_us);
 
-  desenharMedia(cage);
+  const grupos = snapshot.cages
+    .filter((cage) => cage.pilots.length > 0)
+    .map((cage) =>
+      grupoDeSala(
+        cage.name,
+        `${cage.pilots.length}/${cage.limit}`,
+        cage.occupied_by_us,
+        cage.pilots.map((piloto) =>
+          linhaDoRoster(
+            {
+              nome: piloto.nickname + (piloto.is_self ? " (você)" : ""),
+              ratio: piloto.sync_ratio,
+              faixa: piloto.sync_band,
+              falando: piloto.speaking,
+              atField: piloto.at_field,
+              isolado: piloto.total_isolation,
+              // O deslizante é dos outros: baixar o próprio volume não faz
+              // nada, porque a própria voz nunca entra na mistura
+              // (`specs/03-audio.md`).
+              volume: piloto.is_self ? null : piloto.nickname,
+            },
+            snapshot.audio_available,
+          ),
+        ),
+      ),
+    );
 
-  // Dentro de um Cage, o roster é quem está nele. Fora, é o próprio operador:
-  // o sinal é a medida que `specs/05-cliente-tui.md` chama de permanente, e
-  // sumir com ela porque ainda não se entrou em sala nenhuma seria escondê-la
-  // justo enquanto se decide em qual sala entrar.
-  const pilotos = cage
-    ? cage.pilots.map((piloto) => ({
-        nome: piloto.nickname + (piloto.is_self ? " (você)" : ""),
-        ratio: piloto.sync_ratio,
-        faixa: piloto.sync_band,
-        falando: piloto.speaking,
-        atField: piloto.at_field,
-        isolado: piloto.total_isolation,
-        // O deslizante é dos outros: baixar o próprio volume não faz nada,
-        // porque a própria voz nunca entra na mistura (`specs/03-audio.md`).
-        volume: piloto.is_self ? null : piloto.nickname,
-      }))
-    : [
-        {
-          nome: `${snapshot.nickname} (você)`,
-          ratio: snapshot.telemetry.sync_ratio,
-          faixa: snapshot.telemetry.sync_band,
-          falando: snapshot.speaking,
-          atField: snapshot.at_field,
-          isolado: snapshot.total_isolation,
-          volume: null,
-        },
-      ];
+  // Fora de sala, o próprio operador ganha um grupo com o nome do lugar onde
+  // ele está. O sinal é a medida que `specs/05-cliente-tui.md` chama de
+  // permanente, e sumir com ela porque ainda não se entrou em sala nenhuma
+  // seria escondê-la justo enquanto se decide em qual entrar. O rótulo do grupo
+  // é o mesmo `FORA DE SALA` que o rodapé escreve, e não um grupo sem nome:
+  // um cartão solto no alto da lista pareceria pertencer à primeira sala.
+  if (!nossa) {
+    grupos.unshift(
+      grupoDeSala("FORA DE SALA", null, false, [
+        linhaDoRoster(
+          {
+            nome: `${snapshot.nickname} (você)`,
+            ratio: snapshot.telemetry.sync_ratio,
+            faixa: snapshot.telemetry.sync_band,
+            falando: snapshot.speaking,
+            atField: snapshot.at_field,
+            isolado: snapshot.total_isolation,
+            volume: null,
+          },
+          snapshot.audio_available,
+        ),
+      ]),
+    );
+  }
 
-  repovoar(
-    $("lista-roster"),
-    pilotos.map((piloto) => linhaDoRoster(piloto, snapshot.audio_available)),
-  );
+  repovoar($("lista-roster"), grupos);
+
+  // A contagem é do que o protocolo mede: quantas pessoas estão em salas de
+  // voz. O rótulo vai junto com o número porque um número solto ao lado de
+  // `PESSOAS` seria lido como a população do servidor, que é o que ninguém
+  // aqui sabe.
+  const emSalas = snapshot.cages.reduce((soma, cage) => soma + cage.pilots.length, 0);
+  medido($("pessoas-conta"), `${emSalas} EM SALAS DE VOZ`);
 }
 
-/** O bloco invertido de 52px, e a legenda ao lado dele. */
+/** Um grupo da faixa: o nome de uma sala e os cartões de quem está nela. */
+function grupoDeSala(nome, ocupacao, nossa, cartoes) {
+  const grupo = elemento("li", "roster-grupo");
+  if (nossa) grupo.dataset.nossa = "sim";
+
+  const cabeca = elemento("h3", "roster-sala");
+  cabeca.append(elemento("span", "roster-sala-nome", nome));
+  if (ocupacao !== null) cabeca.append(elemento("span", "roster-sala-conta", ocupacao));
+  // Que se está nesta sala, em palavra e não só na marca da borda: a borda é
+  // cor, e `specs/05-cliente-tui.md` não aceita informação que só a cor carregue.
+  if (nossa) cabeca.append(elemento("span", "roster-sala-aqui", "você está aqui"));
+
+  const lista = elemento("ul", "roster-pessoas");
+  lista.append(...cartoes);
+
+  grupo.append(cabeca, lista);
+  return grupo;
+}
+
+/**
+ * A média de sinal da sala ocupada, no rodapé.
+ *
+ * Ela **não é calculada aqui**. Chega em `cage.sync` já com faixa e decidida
+ * uma vez no core — `types.rs` argumenta que duas cascas com duas cópias de
+ * "85 é nominal" são duas cascas que discordam no dia em que uma delas for
+ * atualizada, e o comp faz exatamente essa cópia (`corSync(media)` na casca).
+ * `null` quando a sala está vazia: uma sala sem ninguém não tem média, e zero
+ * pintaria toda sala parada de vermelho.
+ *
+ * O travessão fica, e é a metade da regra de omissão do v3 que esta tela não
+ * inverteu: aqui a ausência responde a uma pergunta que o rótulo ao lado acabou
+ * de fazer, e o `title` diz o que falta para haver número.
+ */
 function desenharMedia(cage) {
-  const bloco = $("sync-media-bloco");
-  const valor = $("sync-media-valor");
-  const marca = $("sync-media-marca");
-  const amostra = $("sync-amostra");
+  const celula = $("tel-sinal");
+  const valor = $("tel-sinal-valor");
+  const marca = $("tel-sinal-marca");
 
   if (!cage || !cage.sync) {
-    // Sem plug inserido, ou num Cage vazio. Não é uma média baixa: é a ausência
-    // de qualquer coisa para tirar média de.
-    delete bloco.dataset.faixa;
+    // Sem sala, ou numa sala vazia. Não é uma média baixa: é a ausência de
+    // qualquer coisa para tirar média de.
+    delete celula.dataset.faixa;
     marca.textContent = "";
-    const porque = cage ? "esta sala está vazia" : "você não entrou em nenhuma sala";
-    naoMedido(valor, porque);
-    naoMedido(amostra, porque);
+    naoMedido(valor, cage ? "esta sala está vazia" : "você não entrou em nenhuma sala");
     return;
   }
 
   const sync = cage.sync;
-  bloco.dataset.faixa = sync.band;
+  celula.dataset.faixa = sync.band;
   // A marca de bloco é a metade que sobrevive sem cor. Ela fica em face
   // monoespaçada ao lado do número porque a Saira Condensed, que desenha o
   // número, não tem `U+2588`.
   marca.textContent = marcaSync(sync.band);
   medido(valor, String(sync.ratio));
-  medido(amostra, `${sync.pilots} ${sync.pilots === 1 ? "PESSOA" : "PESSOAS"}`);
 }
 
 /**
- * Uma linha do roster.
+ * O cartão de uma pessoa.
  *
- * Quatro faixas de informação, e todas as quatro têm acompanhante textual: o
- * número ao lado da marca de bloco, a barra de 20 blocos, o atraso, e a
- * pastilha de estado. Nenhuma delas depende de enxergar a cor
- * (`specs/05-cliente-tui.md`).
+ * Três faixas de informação, e todas as três têm acompanhante textual: o
+ * número ao lado da marca de bloco, a barra de 20 blocos, e a pastilha de
+ * estado em palavra. Nenhuma delas depende de enxergar a cor
+ * (`specs/05-cliente-tui.md`), e é essa a propriedade que a mudança de coluna
+ * tinha de preservar inteira — ela veio junto, sem uma linha de diferença.
  */
 function linhaDoRoster(piloto, temAudio) {
   const item = elemento("li", piloto.falando ? "piloto falando" : "piloto");
@@ -1038,6 +1123,10 @@ function desenharTelemetria(snapshot) {
 
   const cage = snapshot.cages.find((c) => c.occupied_by_us);
   medido($("tel-cage"), cage ? cage.name : "FORA DE SALA");
+
+  // A média da sala é vizinha do nome dela, e as duas saem do mesmo achado: a
+  // sala em que se está e como ela vai são a mesma pergunta em duas metades.
+  desenharMedia(cage);
 
   // Escrito uma vez e calado depois. O caminho não muda dentro de uma sessão —
   // a reconexão do núcleo volta ao mesmo endereço —, e reescrever o mesmo texto
@@ -1837,9 +1926,10 @@ async function refazerBusca() {
 // Quando a janela não cabe nas quatro colunas, alguma delas tem de sair — e a
 // ordem em que saem é a decisão, não o fato de saírem.
 //
-// 1. O painel de sinal recolhe primeiro. Ele é medida permanente e não é onde
-//    se trabalha: o mesmo roster, com as mesmas pessoas, está na tela de
-//    chamada, a um botão do cabeçalho.
+// 1. A faixa de pessoas recolhe primeiro. Não é onde se trabalha, e o que ela
+//    mostra não sai da tela com ela: a coluna ao lado — que só cede no ponto
+//    seguinte — lista quem está em cada sala, e a tela de chamada tem a sala
+//    ocupada em cartões, a um botão do cabeçalho.
 // 2. A coluna de salas e canais vira gaveta depois. Ela é navegação — algo que
 //    se usa para chegar a um canal e não enquanto se lê o que está nele.
 // 3. A conversa nunca é a primeira a apertar. Ela é o painel em que se passam
@@ -2058,7 +2148,8 @@ $("botao-surdo").addEventListener("click", async () => {
 });
 
 // O deslizante manda enquanto arrasta: ouvir o efeito é o que diz onde parar.
-// Ele mora no roster agora, que é onde o piloto está.
+// O ouvinte fica na lista inteira e não no cartão: os cartões agora vêm dentro
+// de um `<ul>` por sala, e um ouvinte por grupo seria um por sala criada.
 $("lista-roster").addEventListener("input", (evento) => {
   const alvo = evento.target;
   if (!alvo.classList.contains("volume")) return;

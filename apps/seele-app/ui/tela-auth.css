@@ -86,6 +86,26 @@
 
 .auth-valor-marcado { border-left-color: var(--seele-laranja-nerv); }
 
+/* O convite já conferiu a identidade, e a tela diz isso antes de qualquer
+   clique — achado ALTO da avaliação de usabilidade. Fósforo e não laranja:
+   `tokens.css` reserva o fósforo ao que está nominal, e isto é exatamente uma
+   boa notícia sobre a conferência que já aconteceu. Encosta no campo do
+   endereço, como a nota encosta na cartela, porque é sobre ele que fala.
+
+   `pre-line` mantém a impressão digital na sua própria linha sem inventar um
+   segundo elemento, como na frase da espera. */
+.auth-conferido {
+  margin: -16px 0 0;
+  padding: 8px 12px;
+  border-left: 2px solid var(--seele-fosforo);
+  background: var(--seele-fosforo-fraco);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--seele-fosforo);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
 .botao-auth {
   width: 100%;
   padding: 14px;
@@ -165,6 +185,18 @@
   line-height: 1.6;
   color: var(--seele-laranja-nerv);
   white-space: pre-line;
+}
+
+/* Quanto falta para a próxima batida. Fica logo acima do botão desabilitado,
+   que é onde ele responde a pergunta que aquele botão levanta — «isto está
+   fazendo alguma coisa?». Apagado e miúdo: é andamento, e andamento gritado
+   vira ruído que se aprende a ignorar. */
+.auth-repique {
+  margin: 0;
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  letter-spacing: var(--seele-tracking-cartela);
+  color: var(--seele-osso-apagado);
 }
 
 .auth-voltar { align-self: flex-start; }

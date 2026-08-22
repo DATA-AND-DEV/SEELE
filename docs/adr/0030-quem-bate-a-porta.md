@@ -255,3 +255,42 @@ Dogma aberto que alcança além do loopback diz isso numa banda de alerta, porqu
 Custo de reverter: **baixo**. Um módulo, uma migração aditiva, duas razões
 apensadas e um interruptor. Desligar a portaria devolve exatamente o
 comportamento de hoje, e a tabela que sobra não é lida por ninguém.
+
+## Adendo — a espera do cliente passa a insistir, enquanto alguém olha (22/08/2026)
+
+A alternativa 2 acima foi recusada, e continua recusada: **o Dogma não segura a
+conexão** enquanto quem hospeda decide. O que mudou é do outro lado do fio.
+
+O relato de campo foi «quando o usuário vai entrar num servidor, ele precisa
+ficar clicando repetidas vezes num mesmo lugar», e era literal: o botão da tela
+de aperto de mão tinha três passos — conferir, entrar, tentar de novo — e a
+primeira vez de qualquer pessoa passa pela terceira, porque a portaria deste ADR
+recusa quem ainda não foi liberado. Uma pessoa esperando aprovação ficava
+apertando um botão de minuto em minuto para descobrir se já.
+
+Agora a tela insiste sozinha, a cada quinze segundos. Havia um guarda que
+proibia exatamente isso, e ele citava este ADR e o 0025. Duas das três razões
+dele não sobreviveram ao exame:
+
+- **não é o que este ADR recusou.** O que se recusou foi segurar a conexão. Uma
+  batida do cliente conecta, é recusada e desconecta: não segura recurso do
+  Dogma, não obriga prazo nenhum, e não fabrica a resposta «ninguém atendeu» —
+  a resposta continua sendo a mesma recusa durável de sempre;
+- **não estoura o balde do ADR 0025.** Quinze segundos são quatro batidas por
+  minuto, e o balde de antes de autenticar repõe trinta. A bateria de reconexão
+  que já existe bate mais forte: vinte e quatro tentativas em cinco minutos por
+  cliente, e ninguém chamou aquilo de inundação. O intervalo não é número
+  inventado — é o `MAX_BACKOFF` daquela bateria.
+
+A terceira razão sobreviveu, e é a que este adendo endereça: **o para sempre.**
+Uma janela minimizada batendo por horas, sem ninguém para ler a resposta, é
+gasto no servidor de um estranho por uma espera que ninguém está esperando. A
+alternativa 2 já nomeava esse caso — «o caso que importa, o da janela
+minimizada» — e a resposta agora é a mesma coisa dita como regra: **a espera
+acompanha o olho.** Com a janela visível, insiste; escondida, para e diz que
+parou; de volta, retoma. Sair pela porta encerra, e não pausa.
+
+O guarda não foi apagado: foi reescrito para cobrar a propriedade nova, mais
+estreita — «só bate enquanto alguém está olhando» —, incluindo que a pergunta
+venha **antes** de o relógio ser armado, ou a janela escondida ainda bateria uma
+vez. Conferido por mutação.

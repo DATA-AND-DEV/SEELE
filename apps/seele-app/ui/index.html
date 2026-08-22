@@ -908,7 +908,14 @@
 
   <!--
     As quatro colunas do comp v3, nas larguras dele — `60px 268px minmax(0,1fr)
-    328px`: a trilha de servidores, os canais, o canal aberto, e o sinal.
+    328px`: a trilha de servidores, os canais, o canal aberto, e as pessoas.
+
+    A quarta é a única que não é a do comp. Ele põe o sinal ali, e o app fez
+    isso até a avaliação de usabilidade apontar o custo: numa ferramenta de
+    comunicação, a faixa permanente estava com o dado de diagnóstico e a lista
+    de pessoas não aparecia em tela nenhuma. A medida agregada desceu para o
+    rodapé; o sinal de cada pessoa continua onde sempre esteve, dentro do cartão
+    dela.
   -->
   <main class="paineis">
     <!--
@@ -1196,34 +1203,53 @@
     </section>
 
     <!--
-      A quarta coluna. A cartela é bloco sólido com texto no negro absoluto, e
-      não texto colorido sobre fundo escuro: o inventário §12 endurece essa
-      regra no v2, e ela é o `ÊNFASE ▸ inverso` da TUI.
-    -->
-    <section class="painel painel-sync" aria-labelledby="titulo-sync">
-      <h2 id="titulo-sync" class="sync-cartela">
-        <span>SINAL</span>
-      </h2>
-      <div class="sync-media">
-        <div class="sync-media-legenda">
-          <span class="sync-media-rotulo">MÉDIA DA SALA</span>
-          <span id="sync-amostra" class="sync-amostra">—</span>
-        </div>
-        <!--
-          A média chega do core já com faixa (`Cage.sync`), e é por isso que
-          este bloco não calcula nada: `types.rs` argumenta que uma casca que
-          conhece os limiares é uma casca que vai discordar da outra no dia em
-          que uma das duas for atualizada.
+      A quarta coluna: quem está aqui.
 
-          A marca de bloco fica ao lado do número, em face monoespaçada, porque
-          o número sozinho é Saira e a Saira não tem `U+2588`. É ela que carrega
-          a faixa quando não há cor — `specs/05-cliente-tui.md`.
+      Ela era a sincronia — a média da sala em 52px e uma linha por pessoa da
+      sala ocupada — e foi aí que a avaliação de usabilidade achou o pior erro
+      de alocação desta tela: 328px permanentes, numa ferramenta de comunicação,
+      gastos num dado de diagnóstico, enquanto a lista de pessoas não aparecia
+      em tela nenhuma fora da coluna de 268px, e lá só para a sala ocupada.
+
+      A troca é essa. As PESSOAS ocupam a faixa fixa, e o sinal de cada uma é
+      uma linha dentro do cartão dela — a mesma linha de sempre, com a marca de
+      bloco, o número, a barra e a pastilha em palavra, que é o que a torna
+      legível sem depender de cor nenhuma (`specs/05-cliente-tui.md`). A média
+      da sala desceu para o rodapé, ao lado das outras medidas, que é onde a
+      telemetria já morava.
+
+      ---- o que esta lista é, e o que ela não é ----
+
+      É todo mundo que está numa sala de voz, em **todas** as salas: `cages_of`
+      preenche `Cage.pilots` a partir de `room.roster(cage.id)` para todo Cage,
+      e não só para o ocupado. Por isso os cartões vêm agrupados por sala — sem
+      o agrupamento, doze nomes seguidos não diriam de onde nenhum deles fala.
+
+      Não é a lista de quem está conectado no servidor, e essa distinção está
+      escrita na nota abaixo do título em vez de ficar implícita. A lista
+      inteira não existe no protocolo: `Room.pilots` só cresce com o `Session`
+      desta conexão, com `PilotJoined` — que é a entrada numa **sala**, e traz
+      o Cage no próprio campo — e com o autor de uma mensagem. Nada na fita diz
+      quem entrou no servidor sem entrar em sala nenhuma. Desenhar a lista
+      «do servidor» a partir do que existe seria uma lista que finge estar
+      inteira, e a faixa prefere dizer de que ela é.
+    -->
+    <section class="painel painel-pessoas" aria-labelledby="titulo-pessoas">
+      <h2 id="titulo-pessoas" class="pessoas-cartela">
+        <span>PESSOAS</span>
+        <!--
+          A contagem é do que a lista de fato carrega — quantas pessoas estão em
+          salas de voz —, e o rótulo diz isso por extenso. Um número solto ao
+          lado de `PESSOAS` seria lido como a população do servidor, que é
+          justamente o que ninguém aqui sabe.
         -->
-        <span id="sync-media-bloco" class="sync-media-bloco">
-          <span id="sync-media-marca" class="sync-marca"></span>
-          <span id="sync-media-valor" class="sync-media-valor">—</span>
-        </span>
-      </div>
+        <span id="pessoas-conta" class="pessoas-conta">—</span>
+      </h2>
+      <p class="nota pessoas-nota">
+        Quem está em alguma sala de voz, agrupado por sala. Quem entrou no
+        servidor sem entrar numa sala não aparece: o servidor não manda essa
+        lista.
+      </p>
       <ul id="lista-roster" class="roster"></ul>
     </section>
   </main>
@@ -1235,8 +1261,15 @@
     do comp — o app dizia `SYNC RTT JIT LOSS OPUS`, que é a mesma medida com
     nome de log.
 
-    `SINAL` saiu daqui e não se perdeu: ele é a coluna inteira à direita agora,
-    e a linha do próprio operador está sempre nela.
+    `SINAL DA SALA` voltou para cá, e a volta é o conserto de uma alocação: a
+    média da sala passou uma versão ocupando o alto de uma coluna permanente de
+    328px numa ferramenta de comunicação, e ela é uma medida agregada como as
+    seis ao lado. A faixa da direita ficou com as pessoas, que é o que ninguém
+    tinha onde ver.
+
+    O sinal de cada pessoa **não** desceu para cá: ele é uma linha dentro do
+    cartão dela, na faixa, onde está o nome de quem ele mede. O que desce é só
+    a média, que não é de ninguém.
   -->
   <footer class="telemetria">
     <span class="metrica"><b class="rotulo">ATRASO</b> <span id="tel-rtt">·</span></span>
@@ -1245,6 +1278,25 @@
     <span class="metrica"><b class="rotulo">CODEC</b> <span id="tel-codec">·</span></span>
     <span class="metrica"><b class="rotulo">UPTIME</b> <span id="tel-uptime">·</span></span>
     <span class="metrica"><b class="rotulo">SALA</b> <span id="tel-cage">·</span></span>
+    <!--
+      A média de sinal da sala ocupada. Ela chega do core já com faixa
+      (`Cage.sync`) e este rodapé não calcula nada: `types.rs` argumenta que uma
+      casca que conhece os limiares é uma casca que vai discordar da outra no
+      dia em que uma das duas for atualizada.
+
+      Duas células e não uma. A marca de bloco é a metade da faixa que sobrevive
+      sem cor (`specs/05-cliente-tui.md`), e vai em face monoespaçada porque a
+      face que desenha o número não tem `U+2588`.
+
+      Sem o tamanho da amostra que a acompanhava na coluna: quantas pessoas a
+      média mede está escrito ao lado do nome da sala, na faixa da direita, e
+      duas leituras do mesmo número numa fileira de largura fixa é uma a mais.
+    -->
+    <span class="metrica metrica-sinal" id="tel-sinal">
+      <b class="rotulo">SINAL DA SALA</b>
+      <span id="tel-sinal-marca" class="sync-marca"></span>
+      <span id="tel-sinal-valor">·</span>
+    </span>
     <!--
       Por qual caminho a conversa saiu. Um nome e não uma frase: é uma linha ao
       lado dos números, escrita uma vez quando a sessão sobe e calada depois.
@@ -1481,10 +1533,15 @@
   `connect` já correu — é ele o aperto de mão — e esta tela é onde o veredito
   dele é lido antes de o plug entrar.
 
-  Daí o botão de dois passos, que é o do comp com trabalho de verdade nos dois
-  lados: VERIFICAR IDENTIDADE lê o que o `connect` decidiu e escreve no B·02;
-  INSERIR PLUG é o que leva à sessão. Ninguém entra num Cage sem que a
-  impressão digital do Dogma tenha passado por uma tela.
+  Daí o botão — **um**, e não os dois passos do comp. Ele era VERIFICAR
+  IDENTIDADE e depois ENTRAR NO SERVIDOR, e as duas metades sempre foram
+  obrigatórias na mesma ordem: não há entrar sem conferir, e conferir sem entrar
+  é uma tela que não leva a lugar nenhum. Duas metades obrigatórias de um
+  movimento não são duas decisões; são uma decisão cobrada duas vezes, e foi
+  assim que quem usou descreveu — «fica clicando repetidas vezes num mesmo
+  lugar». A conferência continua acontecendo e continua escrita no B·02:
+  ninguém entra num Cage sem que a impressão digital do Dogma tenha passado por
+  uma tela. O que ela deixou de ser é um pedágio.
 -->
 <!--
   `data-modo` é o que separa os dois trabalhos desta tela, e ele vale para a
@@ -1494,15 +1551,20 @@
   lido antes de o plug entrar em Cage nenhum.
 
   `espera` — o `connect` foi derrubado por `AdmissionPending`. Não há snapshot,
-  não há veredito e não há sessão: a cartela de padrão, a ficha do Dogma e o
-  botão de dois passos não têm o que dizer, e a folha os esconde em vez de
-  desenhá-los vazios. O que aparece no lugar é o que aconteceu, o que fazer, e
+  não há veredito e não há sessão: a cartela de padrão e a ficha do Dogma não
+  têm o que dizer, e a folha as esconde em vez de desenhá-las vazias. O botão
+  fica, desabilitado, dizendo o estado — porque um botão que some é um botão que
+  a pessoa procura —, e o que aparece no lugar é o que aconteceu, o que fazer, e
   o que não adianta fazer.
+
+  `data-foco` é reescrito pelo script entre os dois modos: em `aperto` o alvo é
+  o botão, que é a única coisa que a tela pede; em `espera` é a saída, que é o
+  único controle vivo ali.
 -->
 <section id="tela-auth" class="tela" tabindex="-1" hidden
          data-modo="aperto"
          data-foco="auth-botao"
-         data-anuncio="Aperto de mão. Verifique a identidade deste servidor.">
+         data-anuncio="Entrada no servidor. Um botão confere a identidade e entra.">
   <div class="auth-grade">
 
     <!-- ---------------- A·02 ---------------- -->
@@ -1534,6 +1596,23 @@
         </div>
 
         <!--
+          O convite já conferiu a identidade — achado ALTO da avaliação de
+          usabilidade, e o mesmo terreno do botão de dois passos.
+
+          Quem cola um link do ADR 0006 já teve a chave conferida contra a
+          impressão digital que o link carrega, em Rust, dentro do `connect`. A
+          tela pedia mesmo assim um VERIFICAR IDENTIDADE, com o mesmo texto de
+          quem chega sem convite nenhum — e a conferência que ele anunciava já
+          tinha acontecido. Pedir de novo o que já foi feito ensina que o pedido
+          não significa nada.
+
+          Escrito pelo script e só quando há o que afirmar: fora do convite
+          verificado esta linha não tem conteúdo, e uma moldura vazia afirmaria
+          que tem.
+        -->
+        <p id="auth-conferido" class="auth-conferido" hidden></p>
+
+        <!--
           A espera pela portaria — ADR 0030, e o trabalho novo desta tela.
 
           Só aparece em `data-modo="espera"`, e aí ela é a tela: quem bateu num
@@ -1547,10 +1626,25 @@
 
           A lista abaixo é prosa desta tela e não sai de enum nenhum: são as
           consequências do desenho do ADR 0030 ditas para quem está do lado de
-          fora dele. A terceira é a que evita o pior conserto possível — uma
-          tela que tenta de novo sozinha transforma «nada espera» em espera com
-          outro nome, e ainda bate na porta de outra pessoa sem parar, contra os
-          baldes de fichas do ADR 0025.
+          fora dele.
+
+          ---- esta tela passou a bater sozinha ----
+
+          A terceira linha da lista dizia o contrário, e o motivo dela era
+          metade certo: um relógio batendo na porta de outra pessoa gastaria os
+          baldes de fichas do ADR 0025. A metade que faltava é que a recusa por
+          falta de permissão é a **primeira** resposta que toda pessoa nova
+          recebe, e o preço de não ter relógio era ela apertar um botão às cegas
+          até acertar o instante em que quem hospeda decidiu.
+
+          O intervalo agora é escolhido contra aquele balde, e está escrito com
+          a conta em `tela-auth.js`. Ele bate menos que um dedo impaciente e em
+          ritmo constante, o que também é o que um balde de fichas prefere.
+
+          O que o ADR 0030 decide segue intacto: a conexão cai no mesmo
+          instante, nada fica pendurado do lado do servidor, e a decisão é
+          durável. O que mudou é de quem é o dedo — e por quanto tempo, que é
+          enquanto esta tela estiver aberta.
         -->
         <div id="auth-espera" class="auth-espera">
           <p id="auth-espera-frase" class="auth-espera-frase"></p>
@@ -1560,23 +1654,40 @@
               ele continua guardado no servidor, com a sua impressão digital.
             </li>
             <li>
-              Não há nada esperando desta ponta. A conexão caiu no mesmo instante
-              em que o pedido ficou de pé, então ninguém vai te puxar de volta
-              quando a decisão sair — nem esta tela, nem o app fechado.
+              Nada fica esperando do lado do servidor: a conexão caiu no mesmo
+              instante em que o pedido ficou de pé. Quem tenta de novo é esta
+              tela, enquanto ela estiver aberta — com o SEELE fechado, ninguém
+              vai te puxar de volta quando a decisão sair.
             </li>
             <li>
-              Tentar de novo é como você descobre que foi admitido.
-              Uma tentativa por vez: bater sem parar é o que o servidor conta e
-              freia, e aí você fica de fora por tempo, por ter insistido.
+              Tentar de novo é como você descobre que foi admitido, e é o que
+              esta tela faz por você. Uma tentativa por vez, no intervalo abaixo:
+              bater mais rápido é o que o servidor conta e freia, e aí você fica
+              de fora por tempo, por ter insistido.
             </li>
             <li>
               Se quem hospeda estiver por perto, avisar por outro canal é mais
               rápido do que qualquer botão desta tela.
             </li>
           </ul>
+
+          <!--
+            Quanto falta para a próxima batida, contado de segundo em segundo.
+
+            É o que separa uma espera de uma tela travada: quinze segundos que
+            se veem passar são andamento, e quinze segundos de tela parada são
+            indistinguíveis de um app morto — que é quando a pessoa volta a
+            procurar botão, o defeito que este desenho existe para tirar.
+
+            `aria-hidden` porque é um número que muda uma vez por segundo, e uma
+            região viva que anunciasse cada tique tornaria esta tela
+            inutilizável com leitor de tela. O que ela tem a dizer a quem não a
+            vê já está escrito na lista acima, uma vez, em prosa.
+          -->
+          <p id="auth-repique" class="auth-repique" aria-hidden="true"></p>
         </div>
 
-        <button id="auth-botao" class="botao botao-auth" type="button">VERIFICAR IDENTIDADE</button>
+        <button id="auth-botao" class="botao botao-auth" type="button">ENTRAR NO SERVIDOR</button>
         <p id="auth-parede" class="auth-parede" hidden></p>
 
         <!--

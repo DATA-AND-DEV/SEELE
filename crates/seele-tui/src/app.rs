@@ -229,6 +229,11 @@ pub enum Action {
     ToggleTotalIsolation,
     /// Enter the selected Cage or open the selected Line.
     Activate,
+    /// Leave the voice room this client is in.
+    ///
+    /// The other half of [`Self::Activate`] over a Cage, and it did not exist:
+    /// this shell could walk into a voice room and never out of one.
+    LeaveCage,
 }
 
 /// Everything on screen.
@@ -468,6 +473,12 @@ impl App {
             Key::Char('G') => self.jump(Edge::Last),
             Key::Char('m') => return Some(Action::ToggleAtField),
             Key::Char('d') => return Some(Action::ToggleTotalIsolation),
+            // `s` de sair, na mesma escola de `m` de mudo: as letras desta tela
+            // são mnemônicas da palavra em português. Estava livre em modo
+            // normal e na tela de escolha de servidor, e não encosta em `/`,
+            // `n`, `N` nem no `:` — sair da sala de voz não é sair do programa,
+            // que continua sendo `:q`, nem sair do servidor, que é `:ejetar`.
+            Key::Char('s') => return Some(Action::LeaveCage),
             // `n` and `N` were free, and it is where Vim puts them.
             Key::Char('n') => {
                 if let Some(search) = self.busca.as_mut() {
@@ -832,6 +843,24 @@ mod tests {
             None,
             "the space bar opened the microphone mid-sentence"
         );
+    }
+
+    #[test]
+    fn s_pede_para_sair_da_sala_de_voz_e_so_em_modo_normal() {
+        // Esta casca entrava em sala de voz e nunca saía: havia `Activate`
+        // sobre uma sala e nenhum verbo do outro lado. `s` é o verbo, e como
+        // toda letra de modo normal ele não pode valer nada dentro de uma
+        // mensagem — um «s» escrito numa frase é um «s».
+        let mut app = app();
+        assert_eq!(app.on_key(Key::Char('s')), Some(Action::LeaveCage));
+
+        app.on_key(Key::Char('i'));
+        assert_eq!(
+            app.on_key(Key::Char('s')),
+            None,
+            "a tecla de sair da sala disparou no meio de uma frase"
+        );
+        assert_eq!(app.input, "s");
     }
 
     #[test]

@@ -571,7 +571,25 @@ pub struct Snapshot {
     /// How far the connection has got.
     pub pattern: Pattern,
     /// What the Dogma is called.
+    ///
+    /// Follows a rename **inside the session** now: the Dogma announces it to
+    /// everybody connected, so a shell that redraws its header on
+    /// [`Event::DogmaChanged`] never shows a name the server stopped using.
     pub dogma: String,
+    /// How many times the Dogma's picture has changed, this session.
+    ///
+    /// Not the picture. The same reasoning as [`Snapshot::messages_revision`],
+    /// with the numbers a size smaller: this value is read on every interface
+    /// frame — twice a second — and carrying the bytes would mean cloning them,
+    /// turning them into JSON, and pushing them across the bridge each time,
+    /// for a value that changes when somebody presses a button and never
+    /// otherwise. At the protocol ceiling that is 8 KiB of PNG becoming rather
+    /// more than that as text, sixty times a minute, for ever.
+    ///
+    /// The number itself means nothing — only the difference does. A shell
+    /// keeps the last one it drew and calls [`crate::Plug::dogma_icon`] when it
+    /// moves. Zero, and never moving, is the ordinary Dogma: it has no picture.
+    pub icon_revision: u64,
     /// This pilot's identifier, once known.
     pub me: Option<u64>,
     /// This pilot's name.
@@ -664,6 +682,18 @@ pub struct Snapshot {
     pub may_remove_message: bool,
     /// Whether this pilot may move somebody between Cages — `mover_piloto`.
     pub may_move_pilot: bool,
+    /// Whether this pilot may name the Dogma and give it a picture.
+    ///
+    /// `AdministerDogma`, which is the same permission behind
+    /// [`Snapshot::may_delete_rooms`] today — and a separate field anyway,
+    /// because they are separate questions. A shell that read the destroy flag
+    /// to decide whether to offer a rename box would be leaning on a
+    /// coincidence between two verbs that the roles table can pull apart the
+    /// moment somebody makes a role that may dress the Dogma without being able
+    /// to destroy what people wrote in it.
+    ///
+    /// **Convenience, never enforcement**, like every flag beside it.
+    pub may_customise_dogma: bool,
     /// Whether this pilot may destroy Cages and Lines — `administrar_dogma`.
     ///
     /// Its own boolean, and deliberately not [`Snapshot::may_manage_cages`].
@@ -694,6 +724,17 @@ pub enum Event {
     MessagesChanged,
     /// Cages or Lines changed.
     ChannelsChanged,
+    /// The Dogma renamed itself, or changed its picture.
+    ///
+    /// Separate from [`Self::ChannelsChanged`] for the reason
+    /// `seele_core::Changed` gives: what moved is the header and the badge, and
+    /// a shell that redrew every room because the server was renamed would be
+    /// redrawing the one part of the screen that did not change.
+    ///
+    /// The new name is on the next [`Snapshot`]. The picture is not — read
+    /// [`Snapshot::icon_revision`] and fetch it with
+    /// [`crate::Plug::dogma_icon`] when the number moves.
+    DogmaChanged,
     /// New measurements.
     TelemetryChanged,
     /// Something to surface.
@@ -1026,6 +1067,25 @@ pub enum PlugError {
     UnknownChannel,
     /// The control stream broke.
     LinkLost,
+    /// The file offered as the Dogma's icon is not a picture that fits there.
+    ///
+    /// Answered **before** anything is sent, by
+    /// `seele_core::check_dogma_icon`, and that is the whole reason this
+    /// variant exists: the rule lives on the wire, and a picture that breaks it
+    /// makes the frame unbuildable — which everything above the link reads as a
+    /// dropped connection. Without this, choosing a PDF would look exactly like
+    /// the network falling over, five-minute internal battery included.
+    IconNotAPicture,
+    /// The picture offered as the Dogma's icon is heavier than a Dogma takes.
+    ///
+    /// Separate from [`PlugError::IconNotAPicture`] because the next step
+    /// differs: a photograph can be shrunk, and a PDF cannot be made into an
+    /// icon. The ceiling travels with it so the sentence can carry the number
+    /// — a shell has no other way to name a limit that lives in the protocol.
+    IconTooBig {
+        /// The most bytes a Dogma accepts.
+        limit_bytes: u64,
+    },
 }
 
 impl std::fmt::Display for PlugError {
@@ -1232,7 +1292,22 @@ mod tests {
                  session gets steadily slower. Use `messages_revision` and \
                  `Plug::messages`, which exist for exactly this."
             );
+            assert!(
+                !campo.contains("Vec<u8>"),
+                "`Snapshot` carries raw bytes: `{campo}`\n\
+                 The one thing that would be, today, is the Dogma\u{2019}s icon, and it \
+                 is bounded rather than unbounded — but it is still kilobytes \
+                 cloned and turned into JSON twice a second for a value that \
+                 changes when somebody presses a button. Use `icon_revision` and \
+                 `Plug::dogma_icon`, which are the same answer one size smaller."
+            );
         }
+
+        assert!(
+            campos.iter().any(|campo| campo.contains("icon_revision")),
+            "`icon_revision` is gone, and with it the only way a shell can tell \
+             that the Dogma\u{2019}s picture moved without being handed it on every frame"
+        );
 
         assert!(
             campos

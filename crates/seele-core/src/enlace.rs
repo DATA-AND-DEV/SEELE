@@ -165,6 +165,12 @@ enum Comando {
         linha: LineId,
         nome: String,
     },
+    RenomearDogma {
+        nome: String,
+    },
+    IconeDoDogma {
+        icone: Option<Vec<u8>>,
+    },
     Expulsar {
         piloto: PilotId,
     },
@@ -1024,6 +1030,39 @@ impl Enlace {
         self.mandar(Comando::RenomearLinha { linha, nome }).await
     }
 
+    /// Pede ao Dogma que troque o próprio nome.
+    ///
+    /// Pede, e só, como os verbos de sala e pelo mesmo motivo: quem decide é o
+    /// Dogma, que quer `AdministerDogma` para isto e responde `Alert` com
+    /// `PermissionDenied` quando nega. Quando aceita, o nome novo volta para
+    /// **todo mundo** como `DogmaRenamed`, inclusive para quem pediu — é o que
+    /// impede a tela de quem renomeou de ser a única com o nome certo.
+    ///
+    /// **Não** é refeito ao reconectar, como os verbos de sala e de moderação:
+    /// dar nome é coisa que se faz uma vez, e repetido depois de cinco minutos
+    /// de bateria desfaria o nome que outra pessoa pôs no meio.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn renomear_dogma(&self, nome: String) -> Result<(), Fechado> {
+        self.mandar(Comando::RenomearDogma { nome }).await
+    }
+
+    /// Pede ao Dogma que troque a própria imagem, ou que fique sem nenhuma.
+    ///
+    /// `None` tira a imagem, e é um verbo e não uma ausência: quem pôs tem que
+    /// poder tirar.
+    ///
+    /// **Não** é refeito ao reconectar, pelo mesmo motivo do nome.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn definir_icone(&self, icone: Option<Vec<u8>>) -> Result<(), Fechado> {
+        self.mandar(Comando::IconeDoDogma { icone }).await
+    }
+
     /// Pede ao Dogma que acabe com a sessão de alguém.
     ///
     /// Pede, e só — como os verbos de sala, e pela mesma razão: a
@@ -1467,6 +1506,8 @@ impl Motor {
             Comando::CriarLinha { nome } => cliente.create_line(&nome).await,
             Comando::RenomearCage { cage, nome } => cliente.rename_cage(cage, &nome).await,
             Comando::RenomearLinha { linha, nome } => cliente.rename_line(linha, &nome).await,
+            Comando::RenomearDogma { nome } => cliente.rename_dogma(&nome).await,
+            Comando::IconeDoDogma { icone } => cliente.set_dogma_icon(icone).await,
             Comando::Expulsar { piloto } => cliente.kick_pilot(piloto).await,
             Comando::Banir {
                 piloto,
@@ -1594,6 +1635,13 @@ impl Motor {
             // pedido de novo à mão. Expulsar é pior: refeito depois de cinco
             // minutos de bateria, derrubaria de novo alguém que já tinha
             // voltado, e ninguém entenderia por quê.
+            //
+            // Nomear o Dogma e dar-lhe uma imagem também não entram, pelo
+            // primeiro motivo: são coisas que se fazem uma vez. Refeito depois
+            // da queda, um `RenomearDogma` desfaria o nome que **outra pessoa**
+            // pôs nos cinco minutos em que este cliente esteve fora — e o nome
+            // do Dogma é de todo mundo que está dentro, ao contrário do Cage em
+            // que esta pessoa estava sentada.
             //
             // Apagar é o pior dos três, e por isso vale escrevê-lo: refeito
             // depois da queda, ele destruiria a sala que alguém fez no lugar da

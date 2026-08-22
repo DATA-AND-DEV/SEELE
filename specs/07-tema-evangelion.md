@@ -1,5 +1,20 @@
 # 07 — Tema
 
+> **Nota — 2026-08-21, ADR 0033.** A **camada de linguagem deste documento foi
+> retirada da interface.** O vocabulário abaixo — Dogma Central, Cage, Linha,
+> Piloto, inserir plug, ejetar, A.T. Field, Taxa de Sincronização, PADRÃO: AZUL,
+> e o japonês decorativo — **não é mais o que aparece na tela**. A autoridade
+> sobre a palavra que a pessoa lê passou a ser `docs/glossario.md`.
+>
+> **O resto desta spec continua valendo, e é a maior parte dela:** a regra de
+> ouro da densidade de informação, a hierarquia de comando, os tokens de cor, a
+> tipografia, o canto reto, a ausência de sombra e de gradiente. Sai a língua,
+> fica o desenho.
+>
+> O texto abaixo fica **inalterado de propósito**, como registro do que o
+> produto foi. Quem precisar do vocabulário vigente lê o glossário; quem
+> precisar saber por que o tema é assim lê isto.
+
 O tema é **vocabulário de produto**, não skin. É definido aqui uma vez e aplicado em todo lugar: interface, mensagens de erro, logs, documentação, nome de binário. Não se redesenha por tela.
 
 ## Regra de ouro

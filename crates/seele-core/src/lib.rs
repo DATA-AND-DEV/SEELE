@@ -46,7 +46,9 @@ pub use client::{
 };
 pub use ed25519_dalek::SigningKey;
 pub use identity::FilePinStore;
-pub use preview::{ImageFormat, Verdict as PreviewVerdict, PREVIEW_LIMIT};
+pub use preview::{
+    check_dogma_icon, IconRefusal, ImageFormat, Verdict as PreviewVerdict, PREVIEW_LIMIT,
+};
 pub use state::{CageSync, Changed, Ended, Message, Notice, Pilot, Room, TransferNotice};
 pub use tofu::{MemoryPinStore, PinDecision, PinStore, Verdict};
 pub use voice::{
