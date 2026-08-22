@@ -2,7 +2,8 @@
 
 **Data:** 2026-08-22
 **Estado:** aguardando plano
-**Prova:** `spikes/tela-no-transporte/`
+**Provas:** `spikes/tela-no-transporte/` (transporte) e `spikes/tela-no-codec/`
+(codec)
 
 O segundo dos dois ciclos que a conversa de 20/08 abriu. O primeiro
 (`2026-08-20-conectividade-p2p-design.md`) fecha dizendo, na lista do que ficava
@@ -22,7 +23,8 @@ de mídia como *«payload Opus de 20 ms»*, sem outra variante.
 
 O que existe é o padrão desta casa para o que ainda não se sabe fazer: três
 provas em `spikes/` — `device-latency`, `plug-cli`, `voice-link` —, cada uma
-respondendo uma pergunta que um documento não respondia. Esta traz a quarta.
+respondendo uma pergunta que um documento não respondia. Este ciclo traz a
+quarta (`tela-no-transporte`, o §3) e a quinta (`tela-no-codec`, o §2 e o §5).
 
 ## 0 · O que este documento revoga, e o que ele não revoga
 
@@ -211,10 +213,16 @@ licença. Consequências, todas obrigatórias:
 
 ### CPU, e o que acontece numa máquina fraca
 
-**Não medido aqui, e este documento não vai fingir que foi.** O que se sabe é a
-forma do problema: OpenH264 é baseline puro, feito para conversa em banda baixa,
-e encode por software de 1080p a 30 quadros é trabalho de núcleo inteiro numa
-máquina de escritório — mais em notebook fino que estrangula por calor.
+**O parágrafo abaixo foi escrito antes de haver medida, e a medida veio depois**
+— está no fim desta seção e o desmente por mais de uma ordem de grandeza. Os dois
+ficam aqui de propósito, o chute e o número lado a lado, porque a diferença entre
+eles é o argumento inteiro para fazer o spike antes do plano.
+
+> Não medido aqui, e este documento não vai fingir que foi. O que se sabe é a
+> forma do problema: OpenH264 é baseline puro, feito para conversa em banda
+> baixa, e encode por software de 1080p a 30 quadros é trabalho de núcleo
+> inteiro numa máquina de escritório — mais em notebook fino que estrangula por
+> calor.
 
 Então a v1 não promete 1080p30. Ela promete o seguinte, que é o que dá para
 sustentar:
@@ -231,11 +239,38 @@ sustentar:
   compartilhamento **para**, com motivo enumerado. Degradar para sempre é como
   um instrumento falso: consultado justamente quando algo deu errado.
 
-**Próxima prova, e é a que falta:** `spikes/tela-no-codec` — quadros por segundo
-sustentados e uso de CPU do OpenH264 em 1080p e em 720p, com conteúdo de tela
-real, nas três máquinas. Sem esse número o plano não deve fixar nenhum teto.
+**A prova foi feita, e numa máquina só:** `spikes/tela-no-codec`, num Apple M5
+Pro, com textura de tela capturada e o teto de 1200 kbps do §3.2. O que ela
+mudou aqui:
 
-## 3 · Transporte — a única parte que foi medida
+- **A CPU não é o gargalo desta máquina, e não é nem perto.** 1080p a 30 quadros
+  custa **0,06 de um núcleo** de desempenho — o encoder sustenta 498 quadros por
+  segundo — e **0,18 a 0,21** no núcleo de eficiência, com a prioridade de fundo
+  que esta seção manda usar. O parágrafo acima chutou «núcleo inteiro» e errou
+  por mais de uma ordem de grandeza. **Isto vale para Apple Silicon e para mais
+  nada:** faltam um x86-64 de mesa, o Windows, e o notebook fino que estrangula
+  por calor, que é justamente a máquina que este parágrafo nomeia.
+- **O que aperta é o orçamento de bits.** No teto de 1200 kbps o próprio
+  controle de taxa do OpenH264 descarta 16% dos quadros em 1080p e 11% em 720p.
+  A faixa de 5 a 30 continua sendo o desenho certo — mas quem cede primeiro não
+  é a CPU.
+- **Uma fatia, uma thread.** Cortar o quadro em quatro fatias para usar quatro
+  threads dá 2,4× de quadros por 2,5× de CPU — nenhuma eficiência — e sobe os
+  quadros descartados de 16% para 24%, porque a predição não atravessa fatia.
+  Numa máquina que já entrega dezesseis vezes o necessário, é qualidade jogada
+  fora por latência que ninguém pediu.
+- **O quadro-chave de 1080p custa 65 KiB e 8,4 ms**, quatro vezes um quadro
+  comum, e 65 KiB são 446 ms do orçamento inteiro. O §3.3 tinha razão nas duas
+  decisões, e agora com número.
+- **Dois custos de build que a lista de razões acima não previu:** o `build.rs`
+  do `shiguredo_openh264` faz `git clone` do repositório do Cisco para gerar as
+  bindings — então o `cargo build` precisa de `git` e de **rede** —, e o
+  `bindgen` precisa de `libclang`. Continua muito menos que nasm mais CMake, mas
+  «zero ferramentas de build» está otimista por dois itens.
+- **O `dlopen` do módulo do Cisco funcionou de primeira**, sem assinatura e sem
+  `Entitlements`. A busca é de 471 KiB comprimidos, 1,15 MiB em disco.
+
+## 3 · Transporte — a primeira parte que foi medida
 
 O produto já tem tudo de que o vídeo precisa: uma conexão QUIC por par, com
 datagramas para voz e fluxos para controle e texto (`specs/02-protocolo.md`).
@@ -478,15 +513,49 @@ número inventado ao lado é pior que uma opção sem número.
 **«Qualidade da fonte»** — o *Source* do Discord. É a promessa que mais quebra
 em rede doméstica, e o §3 já mostrou o formato do estrago.
 
-### A lista de opções só é fixada depois do spike do codec
+### A lista, fechada em 22/08/2026 por `spikes/tela-no-codec`
 
-Este documento **não** enumera as resoluções e os quadros oferecidos, e a
-omissão é deliberada: o spike do transporte mediu transporte, e quantos quadros
-de 1080p o encoder por software entrega numa máquina comum ainda não foi
-medido (§2, «CPU»). Oferecer 1080p antes desse número é oferecer uma opção que
-pode não ter CPU para acontecer.
+Este documento deixou as resoluções e os quadros em aberto de propósito, porque
+oferecer 1080p antes de medir seria oferecer uma opção que pode não ter CPU para
+acontecer. Está medido, num Apple M5 Pro, com textura de tela capturada e o teto
+de 1200 kbps do §3.2. O `README` do spike traz a tabela inteira.
 
-`spikes/tela-no-codec` é quem fecha esta lista.
+**Resolução — três: 1080p, 720p e 540p.** O padrão é 720p.
+
+- **1080p entra, e entra por medida:** 1080p a 30 quadros custa **0,06 de um
+  núcleo** de desempenho, e **0,18 a 0,21** no núcleo de eficiência com a
+  prioridade de fundo que o §2 manda usar. Ainda sobram quatro vezes. A frase
+  do §2 — *«trabalho de núcleo inteiro numa máquina de escritório»* — não vale
+  nesta máquina, e o que resta dela é só a cautela sobre as que faltam.
+- **E entra com o que a medida também diz:** no teto de 1200 kbps, **o próprio
+  controle de taxa do OpenH264 descarta 16% dos quadros** em 1080p para não
+  estourar — contra 11% em 720p. Quem escolhe 1080p numa casa recebe 1080p a uns
+  25 quadros, com o encoder decidindo sozinho quais cair. É legítimo, e é
+  exatamente o caso para o qual a regra *«a tela não promete a escolha»* existe.
+- **540p é o piso da lista, e o piso tem motivo.** Abaixo dele o encoder deixa
+  de conseguir gastar o orçamento: 360p rende 416 kbps dos 1200 disponíveis.
+  Descer mais torra nitidez sem devolver nada em troca — e quem quer gastar
+  menos internet mexe no **teto de banda**, que é o controle desenhado para
+  isso. Uma resolução mais baixa oferecida como economia seria a interface
+  ensinando justamente a confusão que a primeira parte deste §5 desfaz.
+- **Nada acima de 1080p**, como o §6 item 10 já dizia. A medida não mudou isso.
+
+**Quadros por segundo — três: 30, 15 e 8.** O padrão é 30.
+
+- **8 é o menor da lista, e não 5.** O 8 é o número que o §2 já nomeia — *«texto
+  continua legível a 8 quadros»*. O 5 é o **piso da faixa automática**, não uma
+  escolha: escolher o piso é escolher desistir, e desistir é o que o sistema faz
+  sozinho, com motivo enumerado, quando nem o piso se sustenta.
+- **Nada acima de 30**, §6 item 10 de novo.
+
+**As três listas são teto, como manda a regra acima.** A faixa automática de 5 a
+30 quadros continua rodando por baixo da escolha, e o teto de 60% do caminho
+medido continua por baixo dela.
+
+**O que o spike não fecha, e continua aberto:** a lista de **tetos de banda**.
+Ele mediu com um único teto, o de 1200 kbps que o `tela-no-transporte`
+sustenta; fixar uma lista de bandas exige medir quanto o caminho aguenta, que é
+a pergunta 2 do §8.
 
 ## 6 · O que não entra na primeira versão
 
@@ -522,8 +591,9 @@ que o recurso.
 
 A ordem é de **quanto cada passo desbloqueia medição**, como no ciclo anterior.
 
-1. **`spikes/tela-no-codec`** — os quadros por segundo e a CPU do OpenH264 nas
-   três máquinas. Sem esse número o resto fixa tetos no chute.
+1. **`spikes/tela-no-codec`** — os quadros por segundo e a CPU do OpenH264.
+   **Feito no macOS** (§2 e §5); faltam o Windows e um x86-64. O que ele fechou
+   já está nas duas seções, e a lista de opções da interface saiu do chute.
 2. **Captura no macOS, sozinha**, imprimindo tamanho e cadência de quadro. É a
    plataforma de quem desenvolve, e é a que tem TCC — o passo que descobre se a
    §4 está certa.

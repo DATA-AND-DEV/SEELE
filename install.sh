@@ -57,7 +57,7 @@ if [ "$SISTEMA" = linux ]; then
     case "$(uname -m)" in
         x86_64|amd64) : ;;
         *) erro "no Linux só há pacote para x86_64, e esta máquina é $(uname -m).
-       Compile do código-fonte: cargo build --release --bin seeled --bin plug" ;;
+       Compile do código-fonte: cargo build --release --bin seeled --bin seele" ;;
     esac
 fi
 
@@ -78,7 +78,7 @@ else
        Compile do código-fonte:
 
          git clone https://github.com/$REPO && cd SEELE
-         cargo build --release --bin seeled --bin plug"
+         cargo build --release --bin seeled --bin seele"
     printf '%s\n' "$VERSAO"
 fi
 
@@ -136,7 +136,7 @@ printf 'confere\n'
 tar -xzf "$TRABALHO/$PACOTE" -C "$TRABALHO"
 mkdir -p "$BIN"
 
-for programa in plug seeled; do
+for programa in seele seeled; do
     [ -f "$TRABALHO/$programa" ] || erro "o pacote não traz \`$programa\`."
     # Copia e depois renomeia: substituir um binário em uso falha no meio se
     # for escrito por cima.
@@ -147,11 +147,11 @@ done
 
 # O macOS põe em quarentena o que veio da rede e recusa abrir sem isso.
 if [ "$SISTEMA" = macos ] && command -v xattr >/dev/null 2>&1; then
-    xattr -d com.apple.quarantine "$BIN/plug" "$BIN/seeled" 2>/dev/null || true
+    xattr -d com.apple.quarantine "$BIN/seele" "$BIN/seeled" 2>/dev/null || true
 fi
 
 printf '\ninstalado em %s\n' "$BIN"
-printf '  plug    o cliente de terminal\n'
+printf '  seele   o cliente de terminal\n'
 printf '  seeled  o servidor\n'
 
 case ":$PATH:" in
@@ -164,5 +164,5 @@ esac
 
 printf '\npara começar:\n'
 printf '  seeled 0.0.0.0:8383      numa máquina\n'
-printf '  plug --server <ip>:8383  na outra\n'
-printf '\npara remover: rm %s/plug %s/seeled\n' "$BIN" "$BIN"
+printf '  seele --server <ip>:8383  na outra\n'
+printf '\npara remover: rm %s/seele %s/seeled\n' "$BIN" "$BIN"

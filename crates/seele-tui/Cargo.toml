@@ -32,5 +32,12 @@ name = "seele_tui"
 path = "src/lib.rs"
 
 [[bin]]
-name = "plug"
+# `seele`, e não `plug`, desde a 0.7.8. O nome antigo era o plug de entrada de
+# Evangelion, e era uma das duas coisas com esse nome que **saíam** da máquina
+# de quem compila para a de quem instala — a outra era o `dogma.db`.
+#
+# `seele` também fecha a pendência #3: o binário nunca entrou no `PATH` de
+# máquina nenhuma, e um comando com o nome do produto é o que a pessoa tenta
+# digitar primeiro.
+name = "seele"
 path = "src/main.rs"

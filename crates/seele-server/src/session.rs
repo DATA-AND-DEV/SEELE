@@ -338,20 +338,37 @@ async fn handshake(
     // que sim. Ver `admissao::Passe`: quem bate numa porta com portaria é
     // mandado tentar de novo, e queimar o convite dele nesta linha o deixaria
     // de fora para sempre — inclusive depois de aprovado.
-    let (passe, chegada) = {
+    let (passe, recusa_adiada, chegada) = {
         let guard = dogma.casper.lock().await;
         let politica = crate::admissao::Politica::carregar(&guard).map_err(|error| Refusal {
             reason: DisconnectReason::CredentialRejected,
             detail: format!("could not read the admission policy: {error}"),
         })?;
-        let passe = match politica.avaliar(&guard, join_secret.as_deref()) {
-            Ok(Ok(passe)) => passe,
-            Ok(Err(recusa)) => {
-                return Err(Refusal {
-                    reason: DisconnectReason::CredentialRejected,
-                    detail: format!("admissão recusada: {recusa:?}"),
-                });
-            }
+        // A recusa aqui é **adiada**, e não devolvida na hora.
+        //
+        // O motivo é um defeito relatado em campo: «aprovei a entrada de
+        // alguém e deu como credencial recusada». A política não tem memória —
+        // com o Dogma fechado ela exige segredo de todo mundo, sempre — e o
+        // convite que trouxe a pessoa é de uso único, gasto quando ela entrou.
+        // Na volta, ela é barrada por `ConviteGasto` **nesta linha**, antes de
+        // a portaria poder dizer que já a admitiu.
+        //
+        // Quem tem decisão de `admitido` gravada não precisa de segredo nenhum:
+        // a portaria **é** a credencial durável de uma pessoa, e o segredo é a
+        // porta de quem ainda é estranho.
+        //
+        // Mas a impressão digital ainda não está provada aqui — a assinatura só
+        // é conferida adiante —, e é por isso que isto vira uma recusa guardada
+        // em vez de um perdão. Ela é descartada mais abaixo, e só depois da
+        // assinatura, se `portaria::ja_admitido` disser que sim.
+        //
+        // O custo do adiamento é uma verificação de Ed25519 para quem chega com
+        // segredo errado, e o balde por endereço do ADR 0025 já limita quantas
+        // vezes por minuto. É mais barato que o Argon2 que o caminho da senha
+        // pagaria, e o que se compra com ele é quem foi aprovado poder voltar.
+        let (passe, recusa_adiada) = match politica.avaliar(&guard, join_secret.as_deref()) {
+            Ok(Ok(passe)) => (Some(passe), None),
+            Ok(Err(recusa)) => (None, Some(format!("admissão recusada: {recusa:?}"))),
             Err(error) => {
                 return Err(Refusal {
                     reason: DisconnectReason::CredentialRejected,
@@ -363,7 +380,7 @@ async fn handshake(
         // mostra lá embaixo. Nada aqui decide: a decisão foi a linha acima.
         let chegada =
             crate::portaria::como_chegou(&guard, politica.aberto(), join_secret.as_deref());
-        (passe, chegada)
+        (passe, recusa_adiada, chegada)
     };
 
     let key: [u8; PUBLIC_KEY_LEN] = public_key.clone().try_into().map_err(|_| Refusal {
@@ -438,12 +455,41 @@ async fn handshake(
         let mut guard = dogma.casper.lock().await;
         let impressao = seele_proto::transport::key_fingerprint(&public_key);
         let (segredo, observacao) = chegada;
+
+        // Aqui a impressão digital **está provada**: a assinatura sobre o nonce
+        // foi conferida acima. É o primeiro ponto do aperto de mão onde dá para
+        // perguntar «esta pessoa já foi admitida?» sem que a resposta valha
+        // para quem só afirmou ser ela.
+        //
+        // `ja_admitido` e não `bater`: aquela responde `Entra` a todo mundo com
+        // a portaria desligada, e perdoar um segredo errado por causa disso
+        // abriria a porta de todo Dogma que não usa portaria.
+        if let Some(recusa) = recusa_adiada {
+            let conhecida = crate::portaria::ja_admitido(&guard, &impressao).unwrap_or(false);
+            if !conhecida {
+                return Err(Refusal {
+                    reason: DisconnectReason::CredentialRejected,
+                    detail: recusa,
+                });
+            }
+            tracing::info!(
+                %impressao,
+                "segredo recusado, mas a portaria já admitiu esta chave; entra"
+            );
+        }
+
         match crate::portaria::bater(&mut guard, &impressao, &nickname, segredo, &observacao) {
             Ok(crate::portaria::Resposta::Entra) => {
-                // Entrou de verdade: agora o convite é gasto. Perder a corrida
-                // aqui é o mesmo caso de sempre — dois clientes com o mesmo
-                // convite no mesmo instante — e a recusa dele continua uniforme.
-                match crate::admissao::gastar(&mut guard, &passe) {
+                // Entrou de verdade: agora o convite é gasto — quando houve um.
+                // Sem passe não há o que gastar: é quem entrou pela porta que a
+                // portaria já tinha aberto, e ela não consome nada.
+                //
+                // Perder a corrida aqui é o mesmo caso de sempre — dois
+                // clientes com o mesmo convite no mesmo instante — e a recusa
+                // dele continua uniforme.
+                match passe.as_ref().map_or(Ok(Ok(())), |passe| {
+                    crate::admissao::gastar(&mut guard, passe)
+                }) {
                     Ok(Ok(())) => {}
                     Ok(Err(recusa)) => {
                         return Err(Refusal {

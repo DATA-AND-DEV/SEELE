@@ -349,6 +349,44 @@ pub fn revogar(casper: &mut Casper, impressao: &str) -> Result<()> {
     Ok(())
 }
 
+/// Se esta impressão digital **já foi admitida** por quem hospeda.
+///
+/// Estreito de propósito, e a estreiteza é a segurança desta função: responde
+/// `true` só quando a portaria está ligada **e** existe uma decisão gravada de
+/// `admitido` para esta impressão. Não é [`bater`], que responde `Entra` a todo
+/// mundo quando a portaria está desligada — usar aquela aqui deixaria qualquer
+/// segredo errado entrar em qualquer Dogma sem portaria.
+///
+/// # Para que ela existe
+///
+/// A política de admissão não tem memória: com o Dogma fechado, ela exige
+/// segredo de todo mundo, sempre. O convite que trouxe alguém é de uso único e
+/// é gasto na entrada — então, na volta, a pessoa aprovada é barrada por
+/// `ConviteGasto` **antes** de a portaria poder dizer que a conhece.
+///
+/// Relatado em campo como «aprovei a entrada de alguém e deu como credencial
+/// recusada». Quem recusou não foi a portaria: foi a porta de fora, que não
+/// sabia que a de dentro já tinha aberto.
+///
+/// # Errors
+///
+/// Falha se o banco não responder.
+pub fn ja_admitido(casper: &Casper, impressao: &str) -> Result<bool> {
+    if !ligada(casper)? {
+        return Ok(false);
+    }
+    let decidido: Option<String> = casper
+        .connection()
+        .query_row(
+            "SELECT veredito FROM portaria
+              WHERE impressao = ?1 AND decidido_em IS NOT NULL",
+            params![impressao],
+            |linha| linha.get(0),
+        )
+        .optional()?;
+    Ok(decidido.as_deref() == Some("admitido"))
+}
+
 /// A fila e o histórico, pendentes primeiro e mais antigo antes.
 ///
 /// Pendentes primeiro porque é o que pede ação; mais antigo antes porque quem
@@ -651,6 +689,95 @@ mod tests {
         assert_eq!(
             bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater"),
             Resposta::Recusado
+        );
+    }
+}
+
+#[cfg(test)]
+mod a_volta_de_quem_ja_foi_aprovado {
+    #![allow(clippy::expect_used, reason = "num teste, o pânico é o relatório")]
+
+    use super::*;
+    use crate::admissao::{criar_convite, gastar, Politica};
+    use crate::casper::Location;
+
+    const AYANAMI: &str = "aaaa1111";
+
+    /// Relatado em campo: «aprovei a entrada de alguém e deu como credencial
+    /// recusada».
+    ///
+    /// A portaria lembra da pessoa — `aprovado_uma_vez_entra_nas_proximas_sem_
+    /// perguntar` afirma isso —, mas ela nunca chega a ser consultada. A
+    /// política de admissão roda **antes**, no `session::serve`, e ela não tem
+    /// memória nenhuma: com o servidor fechado, exige segredo de todo mundo,
+    /// sempre. O convite de uso único que trouxe a pessoa foi gasto na entrada
+    /// dela, e na volta ele é `ConviteGasto`.
+    ///
+    /// O resultado é que **quem foi aprovado não consegue voltar**. Não é a
+    /// portaria recusando: é a porta de fora, que não sabe que a de dentro já
+    /// abriu.
+    #[test]
+    fn quem_foi_aprovado_volta_sem_precisar_de_um_convite_novo() {
+        let mut casper = Casper::open(&Location::Memory).expect("banco em memória");
+        // A portaria vem desligada num banco novo, e sem ela `bater` responde
+        // `Entra` a todo mundo — o cenário deste teste não existiria.
+        ligar(&mut casper, true).expect("ligar a portaria");
+        let token = criar_convite(&mut casper, "rafa").expect("criar convite");
+
+        // A chegada: o convite vale, a portaria põe em espera.
+        let politica = Politica::carregar(&casper).expect("política");
+        let passe = politica
+            .avaliar(&casper, Some(&token))
+            .expect("avaliar")
+            .expect("o convite vale na chegada");
+        let (segredo, observacao) = como_chegou(&casper, politica.aberto(), Some(&token));
+        assert_eq!(
+            bater(&mut casper, AYANAMI, "rafa", segredo, &observacao).expect("bater"),
+            Resposta::Pendente
+        );
+
+        // Quem hospeda aprova, e a pessoa entra. O convite é gasto agora.
+        decidir(&mut casper, AYANAMI, true).expect("aprovar");
+        let politica = Politica::carregar(&casper).expect("política");
+        let (segredo, observacao) = como_chegou(&casper, politica.aberto(), Some(&token));
+        assert_eq!(
+            bater(&mut casper, AYANAMI, "rafa", segredo, &observacao).expect("bater"),
+            Resposta::Entra
+        );
+        gastar(&mut casper, &passe)
+            .expect("gastar")
+            .expect("o convite é gasto na entrada");
+
+        // E ela volta no dia seguinte, com o mesmo link — que é o único que
+        // ela tem. A política **recusa**, e isso está certo: o convite é de uso
+        // único e foi gasto. Não é aqui que o conserto mora.
+        let politica = Politica::carregar(&casper).expect("política");
+        assert!(
+            politica
+                .avaliar(&casper, Some(&token))
+                .expect("avaliar")
+                .is_err(),
+            "o convite de uso único deixou de ser de uso único"
+        );
+
+        // O conserto é a composição: `session::serve` guarda essa recusa em vez
+        // de devolvê-la, e a descarta depois da assinatura se esta chave já
+        // tiver decisão de admitida. É esta a pergunta que faltava.
+        assert!(
+            ja_admitido(&casper, AYANAMI).expect("perguntar"),
+            "quem já foi aprovado não é reconhecido na volta, e a política a \
+             barra por convite gasto antes de a portaria poder dizer que a \
+             conhece"
+        );
+
+        // E a estreiteza que faz isso ser seguro: com a portaria desligada,
+        // ninguém é «já admitido». Sem esta linha, o perdão da recusa deixaria
+        // qualquer segredo errado entrar em todo Dogma que não usa portaria.
+        ligar(&mut casper, false).expect("desligar a portaria");
+        assert!(
+            !ja_admitido(&casper, AYANAMI).expect("perguntar"),
+            "com a portaria desligada alguém continua contando como admitido, \
+             e o perdão da recusa vira uma porta escancarada"
         );
     }
 }

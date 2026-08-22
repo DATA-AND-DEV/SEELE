@@ -113,7 +113,7 @@ A SOMA NÃO CONFERE.
     Expand-Archive "$trabalho\$pacote" -DestinationPath $trabalho -Force
     New-Item -ItemType Directory -Path $destino -Force | Out-Null
 
-    foreach ($programa in @('plug.exe', 'seeled.exe')) {
+    foreach ($programa in @('seele.exe', 'seeled.exe')) {
         $origem = Get-ChildItem -Path $trabalho -Filter $programa -Recurse |
             Select-Object -First 1
         if (-not $origem) { Falhar "o pacote não traz $programa." }
@@ -125,7 +125,7 @@ A SOMA NÃO CONFERE.
 
 Write-Host ''
 Write-Host "instalado em $destino"
-Write-Host '  plug.exe    o cliente de terminal'
+Write-Host '  seele.exe   o cliente de terminal'
 Write-Host '  seeled.exe  o servidor'
 
 $noCaminho = ($env:PATH -split ';') -contains $destino
@@ -143,4 +143,4 @@ Write-Host '  New-NetFirewallRule -DisplayName SEELE -Direction Inbound -Protoco
 Write-Host ''
 Write-Host 'para comecar:'
 Write-Host '  seeled 0.0.0.0:8383      numa maquina'
-Write-Host '  plug --server <ip>:8383  na outra'
+Write-Host '  seele --server <ip>:8383  na outra'

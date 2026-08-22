@@ -30,11 +30,56 @@ pub mod channels;
 pub mod messages;
 pub mod schema;
 
+/// O banco de um cliente que hospeda, na pasta dele, com o nome de hoje.
+///
+/// Faz a mudança de nome no caminho: até a 0.7.7 o arquivo se chamava
+/// `dogma.db`, e o nome vinha de Evangelion. O `seeled` já usava `seele.db`;
+/// eram os dois clientes que não.
+///
+/// # Por que renomear em vez de só passar a abrir o novo
+///
+/// Porque o arquivo antigo não guarda só conversa: ele guarda o **certificado
+/// TLS do servidor**, na tabela `configuracao`. Abrir um `seele.db` vazio ao
+/// lado de um `dogma.db` cheio geraria uma chave nova, e todo mundo que já
+/// entrou naquele servidor tomaria o alarme de pino trocado do ADR 0003 — o
+/// alarme reservado a ataque, disparando por causa de uma mudança de nome.
+///
+/// # Os três arquivos, e não um
+///
+/// O `-wal` e o `-shm` andam com o banco. Renomear só o principal deixaria um
+/// diário órfão, e o SQLite abriria o novo nome **sem** ele: o que estivesse no
+/// diário e ainda não tivesse sido incorporado sumiria em silêncio. Ou os três
+/// vão juntos, ou nenhum vai.
+///
+/// Não falha: se o novo já existe, ou se o antigo não existe, ou se o sistema
+/// recusar a renomeação, devolve o caminho novo do mesmo jeito. Um cliente que
+/// não sobe porque não conseguiu trocar um nome é pior que um cliente que sobe
+/// com o banco vazio — e o antigo continua no disco, intacto, para quem quiser
+/// mover à mão.
+#[must_use]
+pub fn banco_do_cliente(pasta: &std::path::Path) -> std::path::PathBuf {
+    let novo = pasta.join("seele.db");
+    let antigo = pasta.join("dogma.db");
+    if novo.exists() || !antigo.exists() {
+        return novo;
+    }
+    for sufixo in ["", "-wal", "-shm"] {
+        let de = pasta.join(format!("dogma.db{sufixo}"));
+        if de.exists() {
+            let para = pasta.join(format!("seele.db{sufixo}"));
+            if let Err(erro) = std::fs::rename(&de, &para) {
+                tracing::warn!(%erro, ?de, ?para, "não deu para renomear o banco");
+            }
+        }
+    }
+    novo
+}
+
 /// Where the database lives.
 #[derive(Debug, Clone)]
 pub enum Location {
     /// A file on disk. `specs/04-servidor-seele.md` defaults to
-    /// `/var/lib/seeled/dogma.db`.
+    /// `/var/lib/seeled/seele.db`.
     File(std::path::PathBuf),
     /// Memory only. Tests, and nothing else: a Dogma that forgets everything on
     /// restart fails its own acceptance criterion.

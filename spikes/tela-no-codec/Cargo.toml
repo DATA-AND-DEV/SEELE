@@ -1,0 +1,18 @@
+[package]
+name = "spike-tela-no-codec"
+description = "Prova de desenho: quantos quadros por segundo, e a que custo de CPU, o OpenH264 por software entrega com conteúdo de tela. DESCARTÁVEL."
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Fora do workspace de propósito, como os quatro spikes anteriores. Existe para
+# responder **uma** pergunta antes de a spec do compartilhamento de tela fixar
+# a lista de resoluções e de quadros que a interface oferece, e morre com a
+# resposta. Nada pode depender dele.
+[workspace]
+
+[dependencies]
+# A escolha do §2 da spec, e a árvore dele é uma linha só: ele mesmo. Não
+# compila C — gera as bindings com `bindgen` no build e faz `dlopen` do módulo
+# do Cisco na execução. Medir com outra binding mediria outra coisa.
+shiguredo_openh264 = "2026.2.0"

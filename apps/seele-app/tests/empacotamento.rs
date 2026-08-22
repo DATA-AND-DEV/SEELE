@@ -5,7 +5,7 @@
 //! o que eu fiz: o CI dos três sistemas quebrou na hora, porque o build script
 //! do Tauri lê `externalBin` em **toda** compilação e exige os arquivos. Um
 //! `cargo test --workspace` num clone limpo parava com
-//! `resource path binaries/plug-… doesn't exist`.
+//! `resource path binaries/seele-… doesn't exist`.
 //!
 //! A separação é a mesma de sempre neste projeto, só que aplicada a build:
 //! compilar o produto não pode depender de artefato que só o pipeline de
@@ -56,7 +56,7 @@ fn o_empacotamento_leva_as_duas_ferramentas() {
     // arquivo sumir, o instalador volta a ser só a parte gráfica — que era o
     // problema que ele existe para resolver.
     let release = ler("tauri.release.conf.json");
-    for ferramenta in ["binaries/plug", "binaries/seeled"] {
+    for ferramenta in ["binaries/seele", "binaries/seeled"] {
         assert!(
             release.contains(ferramenta),
             "tauri.release.conf.json não leva `{ferramenta}`: o instalador sairia \
@@ -69,9 +69,9 @@ fn o_empacotamento_leva_as_duas_ferramentas() {
 fn no_linux_as_ferramentas_vao_para_o_path() {
     // `.deb` é o formato escolhido justamente por isto. Se o mapeamento sumir,
     // o instalador do Linux vira só o app e ninguém percebe até tentar digitar
-    // `plug` num terminal.
+    // `seele` num terminal.
     let linux = ler("tauri.linux.conf.json");
-    for destino in ["/usr/bin/plug", "/usr/bin/seeled"] {
+    for destino in ["/usr/bin/seele", "/usr/bin/seeled"] {
         assert!(
             linux.contains(destino),
             "tauri.linux.conf.json não instala em `{destino}`"

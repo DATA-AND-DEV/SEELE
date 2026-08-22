@@ -68,7 +68,7 @@ fn nenhuma_casca_reabre_a_voz_jogando_fora_os_controles() {
     let raiz = raiz();
     let cascas = [
         ("seele-ffi", "crates/seele-ffi/src/lib.rs"),
-        ("plug", "crates/seele-tui/src/main.rs"),
+        ("seele", "crates/seele-tui/src/main.rs"),
     ];
 
     for (casca, caminho) in cascas {

@@ -91,11 +91,11 @@ PY
 # A CLI antes do app, como no workflow: `seeled` e `plug` são o produto
 # principal e o que menos pode falhar. Eles entram **dentro** do `.app`, para
 # que quem baixa ganhe as duas metades num arquivo só.
-echo "→ compilando seeled e plug"
-cargo build --release --bin seeled --bin plug --target "$ALVO"
+echo "→ compilando seeled e seele"
+cargo build --release --bin seeled --bin seele --target "$ALVO"
 
 mkdir -p apps/seele-app/binaries
-for b in plug seeled; do
+for b in seele seeled; do
     cp "target/$ALVO/release/$b" "apps/seele-app/binaries/$b-$ALVO"
 done
 
@@ -177,7 +177,7 @@ if [ -n "$tarball" ]; then
     echo "→ pacote de atualização em $DESTINO"
 fi
 
-tar -czf "$DESTINO/seele-cli-$VERSAO-macos.tar.gz" -C "target/$ALVO/release" seeled plug
+tar -czf "$DESTINO/seele-cli-$VERSAO-macos.tar.gz" -C "target/$ALVO/release" seeled seele
 
 echo
 echo "--- entrega ---"

@@ -128,15 +128,15 @@ PY
 
 # A CLI primeiro, como no workflow: é o produto principal e o que menos pode
 # falhar.
-echo "→ compilando seeled e plug"
-cargo build --release --bin seeled --bin plug
+echo "→ compilando seeled e seele"
+cargo build --release --bin seeled --bin seele
 
 # No Linux os dois **não** vão embutidos como acompanhantes do Tauri: o
 # `deb.files` de `tauri.linux.conf.json` os instala em `/usr/bin`, e é por isso
 # que o empacotamento abaixo não recebe `--config tauri.release.conf.json`.
 # Receber os dois faria o `.deb` carregar os binários duas vezes.
 mkdir -p apps/seele-app/binaries
-for b in plug seeled; do
+for b in seele seeled; do
     cp "/work/target-linux/release/$b" "apps/seele-app/binaries/$b-x86_64-unknown-linux-gnu"
 done
 
@@ -175,7 +175,7 @@ find target-linux -type f -name "$padrao" -exec cp {} "$DESTINO/" \;
 find target-linux -type f -name "${padrao}.sig" -exec cp {} "$DESTINO/" \; 2>/dev/null || true
 
 # O arquivo da CLI, que é o que o `install.sh` baixa.
-tar -czf "$DESTINO/seele-cli-$VERSAO-linux.tar.gz" -C target-linux/release seeled plug
+tar -czf "$DESTINO/seele-cli-$VERSAO-linux.tar.gz" -C target-linux/release seeled seele
 
 echo
 echo "--- entrega ---"

@@ -383,7 +383,7 @@ async fn hospedar(
         }
     }
 
-    let banco = std::path::Path::new(&config_dir(&app)).join("dogma.db");
+    let banco = seele_server::casper::banco_do_cliente(std::path::Path::new(&config_dir(&app)));
     let dogma = seele_server::hospedagem::Hospedagem::iniciar(
         PORTA_PADRAO,
         seele_server::casper::Location::File(banco),
