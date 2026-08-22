@@ -1,56 +1,73 @@
 # Glossário normativo — pt-BR · en
 
-`specs/10-convencoes.md` declara o glossário de `specs/07-tema-evangelion.md`
-normativo **nos dois idiomas**, mas `07` só existe em português e `10` dá apenas
-três exemplos. Este documento fecha a lacuna.
+**Autoridade sobre a palavra que aparece na tela.** Desde o **ADR 0033**, o
+vocabulário da interface é o comum — servidor, sala de voz, canal de texto,
+pessoa — e não mais o de `specs/07-tema-evangelion.md`. A `07` continua no
+repositório com uma nota no alto dizendo o que foi retirado; o que ela ainda
+governa é a estética, não a língua.
 
-**É pré-requisito de qualquer nome de tipo, módulo ou variante de erro.** Código,
-identificadores e comentários são em inglês (`10`), então a coluna EN não é
-tradução de cortesia: é o nome real das coisas no código.
+Duas colunas e um corte no meio:
 
-Regra que vem de `07` e vale aqui: **o tema nunca custa clareza.** Nomeação
-temática vem sempre acompanhada do dado concreto — `Distúrbio harmônico · perda
-8,4%`, nunca `Distúrbio harmônico` sozinho.
+- **na tela** é o que a pessoa lê. Muda por este documento.
+- **identificador** é o nome real da coisa no código. **Não muda.** `Cage`
+  continua `Cage`, `Dogma` continua `Dogma`, `at_field` continua `at_field`.
+  Renomear tipo é outro trabalho, com outro custo, e o ADR 0033 decidiu
+  explicitamente não fazê-lo.
+
+Ler as duas colunas juntas é o ponto do documento: quem lê um relatório de bug
+que diz «não consigo entrar na sala 2» precisa achar `CageId` sem intermediário.
+
+Regra que sobrevive à `07` e vale aqui inteira: **o nome nunca custa clareza.**
+Ela agora custa menos, porque o nome comum já é a explicação.
 
 ## Glossário canônico
 
-| Conceito | pt-BR | en | Identificador Rust |
+| Conceito | na tela (pt-BR) | na tela (en) | Identificador Rust |
 |---|---|---|---|
-| Instância de servidor | Dogma Central | Central Dogma | `Dogma` |
+| Instância de servidor | servidor | server | `Dogma` |
 | Daemon | `seeled` | `seeled` | `seeled` |
-| Cliente | Entry Plug · `plug` | Entry Plug · `plug` | `plug` |
-| Canal de voz | Cage | Cage | `Cage`, `CageId` |
-| Canal de texto | Linha | Line | `Line`, `LineId` |
-| Usuário | Piloto | Pilot | `Pilot`, `PilotId` |
-| Entrar em canal de voz | Inserir plug | Insert plug | `insert_plug` |
-| Sair do canal de voz | Ejetar | Eject | `eject` |
-| Qualidade de conexão | Taxa de Sincronização | Sync Ratio | `SyncRatio` |
-| Latência | Atraso de sinal | Signal Delay | `signal_delay_ms` |
-| Perda de pacote | Distúrbio harmônico | Harmonic Disturbance | `HarmonicDisturbance`, `loss_pct` |
-| Mudo (microfone) | A.T. Field ativo | A.T. Field engaged | `at_field` |
-| Surdo (alto-falante) | Isolamento total | Total Isolation | `total_isolation` |
-| Sessão verificada | PADRÃO: AZUL | PATTERN: BLUE | `Pattern::Blue` |
-| Sessão não verificada | PADRÃO: LARANJA | PATTERN: ORANGE | `Pattern::Orange` |
-| Reconectando | Bateria interna | Internal Battery | `InternalBattery` |
-| Notificação crítica | Alerta · 警告 | Alert · 警告 | `Alert` |
-| Configurações | Terminal Dogma | Terminal Dogma | `TerminalDogma` |
+| Cliente de terminal | `plug` | `plug` | `plug` |
+| Canal de voz | sala de voz | voice room | `Cage`, `CageId` |
+| Coluna de salas | SALAS DE VOZ | VOICE ROOMS | — |
+| Sala sem nome | SALA 1, SALA 2 | ROOM 1, ROOM 2 | — |
+| Canal de texto | canal de texto | text channel | `Line`, `LineId` |
+| Coluna de canais | CANAIS | CHANNELS | — |
+| Usuário | pessoa | person | `Pilot`, `PilotId` |
+| Nome escolhido pela pessoa | APELIDO | NICKNAME | `Pilot::nick` |
+| Entrar em sala de voz | conectar · CONECTAR | connect · CONNECT | `insert_plug` |
+| Sair da sala de voz | sair · SAIR · sair da sala | leave · LEAVE | `eject` |
+| Mudo (microfone) | mudo · microfone fechado | muted · mic closed | `at_field` |
+| Qualidade de conexão | sinal · SINAL | signal · SIGNAL | `SyncRatio` |
+| Faixas do sinal | boa · fraca · crítica | good · weak · critical | ver ADR 0024 |
+| Sessão verificada | conexão segura · CONEXÃO SEGURA | secure connection | `Pattern::Blue` |
+| Latência | atraso | delay | `signal_delay_ms` |
+| Perda de pacote | perda | loss | `HarmonicDisturbance`, `loss_pct` |
+
+**`Entry Plug` fica**, e só como nome interno: é o nome do cliente de terminal
+no código, na documentação de arquitetura e na forma desenhada da marca. Não é
+rótulo de tela. O binário continua `plug`.
 
 ## Papéis
 
-| pt-BR | en | Identificador |
+| na tela (pt-BR) | na tela (en) | Identificador |
 |---|---|---|
 | Comandante | Commander | `Role::Commander` |
 | Operador | Operator | `Role::Operator` |
 | Piloto | Pilot | `Role::Pilot` |
 | Observador | Observer | `Role::Observer` |
 
-**Colisão conhecida:** `Piloto` é ao mesmo tempo o conceito de conta de usuário
-(`specs/04`, modelo de domínio) e o nome de um papel. Em Rust os dois vivem em
-namespaces distintos — `Pilot` e `Role::Pilot` — e isso resolve. Em texto de
-interface, não: escrever "o Piloto não tem permissão" é ambíguo. Preferir "a
-conta" ou "o papel Piloto" conforme o caso.
+**A colisão antiga acabou sozinha.** «O Piloto não tem permissão» era ambíguo
+porque `Piloto` nomeava ao mesmo tempo a conta e o papel. A conta agora é
+**pessoa**; `Piloto` sobrou só como papel, e a frase deixa de ter dois sentidos.
+
+**Ponto em aberto:** `Role::Pilot` é o único rótulo de papel que ainda vem da
+`07`. Os outros três são português comum e nada os obriga a mudar. O mapa de
+renomeação não decide este caso, e este documento não o inventa — fica como
+está até que decidam.
 
 ## Subsistemas
+
+Fronteiras reais de módulo. **Não mudam, e o ADR 0033 diz isso em voz alta:**
 
 | Nome | Responsabilidade | Identificador |
 |---|---|---|
@@ -58,8 +75,10 @@ conta" ou "o papel Piloto" conforme o caso.
 | BALTHASAR | Roteamento de mídia, encaminhamento, controle de banda | `Subsystem::Balthasar` |
 | CASPER | Estado persistente, histórico, configuração, migrações | `Subsystem::Casper` |
 
-Estado nominal: "os três concordam". Não é decoração — são fronteiras reais de
-módulo e o estado de cada um aparece no diagnóstico do cliente (`specs/04`).
+O que saiu foi o **diagrama das três luzes no rodapé**, não os três subsistemas.
+As luzes nunca mediram nada — eram cenário se passando por instrumento, e um
+instrumento falso é consultado justamente quando algo dá errado. A telemetria
+que **informa** ficou inteira, e é ela que aparece na tela agora.
 
 ## Mensagens de protocolo
 
@@ -90,58 +109,81 @@ módulo e o estado de cada um aparece no diagnóstico do cliente (`specs/04`).
 | `Pong` | `Pong` | servidor → cliente |
 | `Desconectando` | `Disconnecting` | servidor → cliente |
 
-**Correção de vocabulário:** `02` usa `UsuarioEntrou` / `UsuarioSaiu` /
-`EstadoUsuario`, mas `07` define que o usuário se chama **Piloto**. É deriva de
-vocabulário exatamente do tipo que `07` manda evitar. O código usa `Pilot*`;
-`specs/02-protocolo.md` deveria ser corrigida.
+Estes são nomes de mensagem: nenhum deles aparece na tela, e por isso o ADR 0033
+não os toca. A divergência que o glossário antigo apontava — `02` diz
+`UsuarioEntrou` e o código diz `PilotJoined` — deixou de ser deriva de
+vocabulário e virou o que sempre foi por baixo: uma tradução pt↔en de nome de
+identificador, coberta pelo ADR 0023.
 
 ## Motivos de erro
 
 Todos enumerados — `02` proíbe string livre chegando à interface.
 
-| pt-BR | Identificador |
+| na tela (pt-BR) | Identificador |
 |---|---|
-| `PadraoAzulNaoEstabelecido` | `PatternBlueNotEstablished` |
-| `Incompatível` | `Incompatible` |
-| `ManutencaoProgramada` | `ScheduledMaintenance` |
+| conexão segura não estabelecida | `PatternBlueNotEstablished` |
+| versão incompatível | `Incompatible` |
+| manutenção programada | `ScheduledMaintenance` |
 
-A forma canônica é `PatternBlue`, não `BluePattern` — a exibição é
-`PADRÃO: AZUL` / `PATTERN: BLUE`, e o identificador espelha a exibição.
+A forma canônica do identificador continua `PatternBlue`, não `BluePattern`. O
+motivo original — «o identificador espelha a exibição» — caiu com a exibição;
+o identificador fica pelo motivo de sempre, que é não renomear tipo de graça.
 
 ## Permissões
 
 `specs/04-servidor-seele.md`, modelo enumerado, sem sistema de expressão.
+As chaves **não mudam**: são identificadores que a configuração em disco procura.
 
-| pt-BR | Identificador |
+| na tela (pt-BR) | Chave · identificador |
 |---|---|
-| `ver_cage` | `Permission::ViewCage` |
-| `inserir_plug` | `Permission::InsertPlug` |
-| `falar` | `Permission::Speak` |
-| `ler_linha` | `Permission::ReadLine` |
-| `escrever_linha` | `Permission::WriteLine` |
-| `remover_mensagem` | `Permission::RemoveMessage` |
-| `mover_piloto` | `Permission::MovePilot` |
-| `expulsar` | `Permission::Kick` |
-| `banir` | `Permission::Ban` |
-| `gerenciar_cages` | `Permission::ManageCages` |
-| `gerenciar_papeis` | `Permission::ManageRoles` |
-| `administrar_dogma` | `Permission::AdministerDogma` |
+| ver a sala | `ver_cage` · `Permission::ViewCage` |
+| conectar na sala | `inserir_plug` · `Permission::InsertPlug` |
+| falar | `falar` · `Permission::Speak` |
+| ler o canal | `ler_linha` · `Permission::ReadLine` |
+| escrever no canal | `escrever_linha` · `Permission::WriteLine` |
+| remover mensagem | `remover_mensagem` · `Permission::RemoveMessage` |
+| mover pessoa | `mover_piloto` · `Permission::MovePilot` |
+| expulsar | `expulsar` · `Permission::Kick` |
+| banir | `banir` · `Permission::Ban` |
+| gerenciar salas | `gerenciar_cages` · `Permission::ManageCages` |
+| gerenciar papéis | `gerenciar_papeis` · `Permission::ManageRoles` |
+| administrar o servidor | `administrar_dogma` · `Permission::AdministerDogma` |
 
-## Kanji
+## Japonês
 
-Acento tipográfico, **sempre secundário**. Nunca carrega informação necessária
-para operar o produto; quem não lê japonês não perde nada (`07`).
+**Fora da interface.** O katakana e o kanji decorativo — `第3新東京市`, `同期率`,
+`警告` — saíram da tela pelo ADR 0033. Não foram traduzidos: foram removidos,
+porque nunca carregaram informação necessária para operar o produto.
 
-Fragmentos aprovados: 警告 (alerta) · 同期率 (taxa de sincronização) ·
-第3新東京市 · 発令.
+`ゼーレ` continua, e só como **marca**: assinatura, ícone, cartela, inicialização,
+README. As regras estão em `docs/marca.md`, e nenhuma delas é vocabulário de
+tela.
 
-Na TUI, kanji ocupa duas células. Largura sempre por `unicode-width`, nunca por
-`.len()` — `05` avisa que isso quebra o layout se for esquecido.
+Onde ainda houver kanji num contexto de terminal, a regra de largura continua de
+pé: `unicode-width`, nunca `.len()` — `05` avisa que isso quebra o layout.
+
+## Ainda sem entrada no mapa
+
+Termos da `07` que aparecem na tela, que este documento **não** decide porque o
+mapa de renomeação não os cobre. Ficam registrados para quem fechar o mapa:
+
+| na tela hoje | conceito | sugestão, não normativa |
+|---|---|---|
+| Isolamento total | surdo (alto-falante) | «surdo» / «som desligado» |
+| Distúrbio harmônico | perda de pacote | «perda» |
+| Bateria interna | reconectando | «reconectando» |
+| Terminal Dogma | configurações | «configurações» |
+| Alerta · 警告 | notificação crítica | «alerta», sem o kanji |
+
+Aplicar qualquer uma delas exige entrada no mapa. Até lá, quem encontrar uma
+destas strings **deixa como está** — é mais barato deixar uma para trás do que
+inventar um nome que a próxima tela não vai repetir.
 
 ## O que este glossário não decide
 
 A postura de direitos sobre a franquia (`07`, `[EM ABERTO]`). A recomendação do
-plano é repositório privado até M4. Quando a decisão vier, note que a exposição
-não é uniforme: `MELCHIOR`/`BALTHASAR`/`CASPER` são nomes bíblicos e seguros;
-`Cage`, `Piloto`, `Linha`, `Dogma Central` são vocabulário genérico; o risco se
-concentra em **`A.T. Field`** e **`Entry Plug`**, que são cunhagens da obra.
+plano continua sendo repositório privado até M4. O ADR 0033 encolheu a
+superfície do problema sem fechá-lo: `A.T. Field` saiu da tela, e `Entry Plug`
+sobrou como nome interno e como forma da marca desenhada. `MELCHIOR`,
+`BALTHASAR` e `CASPER` são nomes bíblicos e seguros. O risco que resta está no
+repositório, não no produto.

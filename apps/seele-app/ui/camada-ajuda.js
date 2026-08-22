@@ -1,16 +1,20 @@
 /* SEELE · Entry Plug — a ajuda, na tecla `?`.
  *
- * # Por que uma camada e não legendas
+ * # Por que a camada continua, com metade do que tinha
  *
- * O vocabulário deste produto não se explica sozinho: Dogma, Piloto, Cage,
- * Linha e A.T. Field são palavras que quem chega do Discord não tem por onde
- * adivinhar. A resposta anterior eram notas sob os rótulos, e elas saíram por
- * decisão de desenho — legenda permanente é texto que quem já sabe lê mil
- * vezes, e este produto está sendo enxugado de texto.
+ * Ela nasceu para traduzir um vocabulário inteiro — as palavras do tema, que
+ * quem chega do Discord não tinha por onde adivinhar. A renomeação levou esse
+ * trabalho embora: servidor, sala de voz, canal, apelido e mudo se explicam no
+ * próprio rótulo, e um verbete que repete o rótulo é ruído.
  *
- * O critério que a TUI adota para o `plug` é «dá para conectar sabendo só a
- * tecla `?`». Esta camada é o equivalente do cliente gráfico, e o preço dela na
- * tela permanente é zero: ela não existe até ser chamada.
+ * O que sobra é o que **nenhum** rótulo cabe: conexão segura, que é uma
+ * promessa sobre impressões digitais e não uma cor, e o sinal, cuja escala vale
+ * dizer. Esses dois não têm nome autoexplicativo em português nenhum.
+ *
+ * E a seção das teclas, que é a outra metade e não encolheu: o critério que a
+ * TUI adota para o `plug` é «dá para conectar sabendo só a tecla `?`», e esta
+ * camada é o equivalente do cliente gráfico. O preço dela na tela permanente
+ * continua sendo zero — ela não existe até ser chamada.
  */
 
 /** Onde o teclado estava quando a ajuda abriu. */

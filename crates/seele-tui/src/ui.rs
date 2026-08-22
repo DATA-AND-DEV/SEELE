@@ -290,7 +290,7 @@ fn render_convite(
     let budget = inner.width as usize;
     let mut lines = vec![
         Line::from(Span::styled(
-            "Mande este link para quem você quer no Dogma:",
+            "Mande este link para quem você quer no servidor:",
             theme.label(),
         )),
         Line::from(""),
@@ -306,7 +306,7 @@ fn render_convite(
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "Vale para quem chegar primeiro. O Dogma acaba quando você sair.",
+        "Vale para quem chegar primeiro. O servidor acaba quando você sair.",
         theme.label(),
     )));
     lines.push(Line::from(Span::styled(
@@ -317,22 +317,12 @@ fn render_convite(
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-/// The outer frame: `SEELE ─ 同期率 ─ 第3新東京市 ─ 12:04:33`.
+/// The outer frame: `SEELE ─ 12:04:33`.
 fn title_block(app: &App, theme: Theme) -> Block<'static> {
     let mut spans = vec![
         Span::styled(" SEELE ", theme.accent()),
         Span::styled("─ ", theme.fg(crate::theme::RULE)),
     ];
-
-    // Kanji are a typographic accent that never carries information
-    // (specs/07-tema-evangelion.md), so a terminal that cannot draw them loses
-    // nothing by not being shown them.
-    if theme.kanji() {
-        spans.push(Span::styled("同期率 ", theme.label()));
-        spans.push(Span::styled("─ ", theme.fg(crate::theme::RULE)));
-        spans.push(Span::styled("第3新東京市 ", theme.label()));
-        spans.push(Span::styled("─ ", theme.fg(crate::theme::RULE)));
-    }
 
     spans.push(Span::styled(format!("{} ", app.clock), theme.body()));
 
@@ -358,7 +348,7 @@ fn panel(title: &str, focused: bool, theme: Theme) -> Block<'static> {
 }
 
 fn render_dogma(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
-    let block = panel("DOGMA", app.focus == Panel::Dogma, theme);
+    let block = panel("SERVIDOR", app.focus == Panel::Dogma, theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -386,7 +376,7 @@ fn render_dogma(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
 }
 
 fn render_tree(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
-    let block = panel("CAGES / LINHAS", app.focus == Panel::Channels, theme);
+    let block = panel("SALAS / CANAIS", app.focus == Panel::Channels, theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -400,7 +390,7 @@ fn render_tree(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
                 cage_line(name, *open, *sync, selected, budget, theme)
             }
             Node::Line { name } => Line::from(Span::styled(
-                truncate(&format!("─ LINHA {name}"), budget),
+                truncate(&format!("─ CANAL {name}"), budget),
                 if selected {
                     theme.accent()
                 } else {
@@ -464,10 +454,10 @@ fn cage_line(
 /// channel rather than the only one.
 fn pilot_line(pilot: &crate::app::RosterEntry, budget: usize, theme: Theme) -> Line<'static> {
     let presence = if pilot.speaking { "●" } else { "○" };
-    // A.T. Field and Isolamento total get text, not just a hue, for the same
-    // reason: this interface is used by people who cannot tell red from green.
+    // Mudo e isolamento total ganham texto, e não só uma cor, pela mesma
+    // razão: esta interface é usada por quem não separa vermelho de verde.
     let flag = if pilot.at_field {
-        "A.T."
+        "MUDO"
     } else if pilot.total_isolation {
         "SURDO"
     } else {
@@ -743,7 +733,7 @@ fn compose_line(app: &App, theme: Theme, budget: usize) -> Paragraph<'static> {
 
 /// The permanent telemetry bar.
 ///
-/// `SYNC 94% │ RTT 38ms │ JIT 12ms │ LOSS 0.2% │ OPUS 32k │ A.T. OFF`
+/// `SINAL 94% │ RTT 38ms │ JIT 12ms │ LOSS 0.2% │ OPUS 32k │ MUDO OFF`
 fn render_bar(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
     let mut spans = vec![Span::styled(
         format!(" {} ", app.mode.label()),
@@ -774,7 +764,7 @@ fn render_bar(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
 pub fn bar_segments(bar: &Bar, at_field: bool, total_isolation: bool) -> Vec<String> {
     let mut segments = vec![
         format!(
-            "SYNC {}{:>3}%",
+            "SINAL {}{:>3}%",
             Theme::sync_mark(seele_core::SyncBand::of(bar.sync)),
             bar.sync
         ),
@@ -782,7 +772,7 @@ pub fn bar_segments(bar: &Bar, at_field: bool, total_isolation: bool) -> Vec<Str
         format!("JIT {:.0}ms", bar.jitter_ms),
         format!("LOSS {:.1}%", bar.loss * 100.0),
         format!("OPUS {}k", bar.bitrate / 1000),
-        format!("A.T. {}", if at_field { "ON" } else { "OFF" }),
+        format!("MUDO {}", if at_field { "ON" } else { "OFF" }),
     ];
     if total_isolation {
         segments.push("SURDO".to_string());
@@ -790,7 +780,7 @@ pub fn bar_segments(bar: &Bar, at_field: bool, total_isolation: bool) -> Vec<Str
     segments
 }
 
-/// Boot: the three subsystems reporting.
+/// Boot: o enlace sendo estabelecido.
 ///
 /// This lasts exactly as long as connecting takes. `specs/05-cliente-tui.md`:
 /// "se conectar em 200 ms, não inventar espera artificial. Animação decorativa
@@ -803,10 +793,6 @@ fn render_boot(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
 
     let lines = vec![
         Line::from(Span::styled("  SEELE SYSTEM", theme.accent())),
-        Line::from(""),
-        Line::from(Span::styled("  MELCHIOR ...... ok", theme.body())),
-        Line::from(Span::styled("  BALTHASAR ..... ok", theme.body())),
-        Line::from(Span::styled("  CASPER ........ ok", theme.body())),
         Line::from(""),
         Line::from(Span::styled("  estabelecendo enlace…", theme.label())),
     ];
@@ -864,9 +850,6 @@ fn render_cramped(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
 /// number and not a spinner.
 fn render_battery(frame: &mut Frame<'_>, theme: Theme, area: Rect, remaining: u64, attempts: u32) {
     let mut spans = Vec::new();
-    if theme.kanji() {
-        spans.push(Span::styled("警告 ", theme.alert()));
-    }
     spans.push(Span::styled("BATERIA INTERNA ", theme.alert()));
     spans.push(Span::styled(
         format!("{:02}:{:02} ", remaining / 60, remaining % 60),
@@ -923,7 +906,7 @@ fn render_lost(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect, reaso
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  qualquer tecla para ejetar",
+        "  qualquer tecla para sair",
         theme.label(),
     )));
 
@@ -974,13 +957,7 @@ fn alert_rows(app: &App, theme: Theme, width: u16) -> Vec<Line<'static>> {
     };
     let budget = width as usize;
 
-    // 警告 rides on the first row instead of being a column of its own: an
-    // indent that wide would push `esperada:  <64 hex>` past 80 columns and
-    // split the very value it prefixes.
-    let mut text = alert.text.clone();
-    if theme.kanji() {
-        text.insert_str(0, "警告 ");
-    }
+    let text = alert.text.clone();
 
     let mut rows: Vec<String> = Vec::new();
     for paragraph in text.split('\n') {
@@ -1059,20 +1036,20 @@ fn render_help(frame: &mut Frame<'_>, theme: Theme, area: Rect) {
     let rows = [
         ("h j k l / setas", "navegar"),
         ("Tab / Shift+Tab", "alternar painel"),
-        ("Enter", "entrar no Cage / abrir Linha"),
+        ("Enter", "entrar na sala / abrir canal"),
         ("i", "escrever mensagem"),
         ("Espaço (segurar)", "falar"),
-        ("m", "A.T. Field (mudo)"),
+        ("m", "mudo (microfone fechado)"),
         ("d", "isolamento total (surdo)"),
         ("g / G", "topo / fim"),
         ("/", "buscar no histórico"),
         ("n / N", "ocorrência seguinte / anterior"),
         ("?", "esta ajuda"),
-        (":conectar <host>", "conectar a um Dogma"),
-        (":cage <nome>", "entrar num Cage"),
+        (":conectar <host>", "conectar a um servidor"),
+        (":cage <nome>", "entrar numa sala de voz"),
         (":sync", "diagnóstico detalhado"),
         (":audio", "dispositivos"),
-        (":ejetar", "sair deste Dogma e escolher outro"),
+        (":ejetar", "sair do servidor e escolher outro"),
         (":q", "sair do programa"),
     ];
 
@@ -1327,10 +1304,10 @@ mod tests {
     fn the_full_layout_draws_all_three_panels_and_the_bar() {
         let screen = draw(&populated(), Palette::True, (80, 24));
 
-        assert!(screen.contains("DOGMA"), "{screen}");
-        assert!(screen.contains("CAGES / LINHAS"), "{screen}");
+        assert!(screen.contains("SERVIDOR"), "{screen}");
+        assert!(screen.contains("SALAS / CANAIS"), "{screen}");
         assert!(screen.contains("MENSAGENS"), "{screen}");
-        assert!(screen.contains("SYNC"), "{screen}");
+        assert!(screen.contains("SINAL"), "{screen}");
         assert!(screen.contains("RTT 38ms"), "{screen}");
     }
 
@@ -1355,18 +1332,23 @@ mod tests {
     }
 
     #[test]
-    fn mono_drops_kanji_but_keeps_every_number() {
-        // Kanji are decoration (specs/07); Sync Ratios are not.
+    fn no_palette_draws_japanese_decoration_and_none_loses_a_number() {
+        // O japonês decorativo saiu da tela em toda paleta — ele nunca disse
+        // nada que a frase ao lado já não dissesse. O número, esse, é
+        // informação, e é o que nenhuma paleta pode perder.
         let app = populated();
-        let mono = draw(&app, Palette::Mono, (80, 24));
+        let rica = draw(&app, Palette::True, (80, 24));
+        assert!(!rica.contains("同期率"), "{rica}");
+        assert!(!rica.contains("第3新東京市"), "{rica}");
 
+        let mono = draw(&app, Palette::Mono, (80, 24));
         assert!(!mono.contains("同期率"), "{mono}");
         assert!(mono.contains("94"), "the Sync Ratio vanished:\n{mono}");
         assert!(
             mono.contains("98"),
             "a pilot's Sync Ratio vanished:\n{mono}"
         );
-        assert!(mono.contains("A.T."), "the mute marker vanished:\n{mono}");
+        assert!(mono.contains("MUDO"), "the mute marker vanished:\n{mono}");
     }
 
     #[test]
@@ -1386,7 +1368,7 @@ mod tests {
         assert!(screen.contains("60×18"), "no warning:\n{screen}");
         assert!(screen.contains("harmônicos"), "history was lost:\n{screen}");
         assert!(
-            !screen.contains("CAGES"),
+            !screen.contains("SALAS"),
             "three panels at 60 cells:\n{screen}"
         );
         for line in screen.lines() {
@@ -1415,14 +1397,18 @@ mod tests {
     }
 
     #[test]
-    fn the_boot_screen_reports_the_three_subsystems() {
+    fn the_boot_screen_says_the_link_is_being_established() {
+        // As três luzes saíram: nenhuma delas media coisa nenhuma, e uma luz
+        // que não mede é cenário se passando por instrumento. O que fica é a
+        // única linha desta tela que diz o que está acontecendo.
         let mut app = populated();
         app.screen = Screen::Boot;
         let screen = draw(&app, Palette::True, (80, 24));
 
-        assert!(screen.contains("MELCHIOR"), "{screen}");
-        assert!(screen.contains("BALTHASAR"), "{screen}");
-        assert!(screen.contains("CASPER"), "{screen}");
+        assert!(screen.contains("estabelecendo enlace"), "{screen}");
+        assert!(!screen.contains("MELCHIOR"), "{screen}");
+        assert!(!screen.contains("BALTHASAR"), "{screen}");
+        assert!(!screen.contains("CASPER"), "{screen}");
     }
 
     #[test]
@@ -1467,9 +1453,12 @@ mod tests {
             screen.contains("ACESSO BARRADO POR UM OPERADOR"),
             "{screen}"
         );
-        assert!(screen.contains("ejetar"), "no way out shown:\n{screen}");
         assert!(
-            !screen.contains("CAGES / LINHAS"),
+            screen.contains("qualquer tecla"),
+            "no way out shown:\n{screen}"
+        );
+        assert!(
+            !screen.contains("SALAS / CANAIS"),
             "a dead session still shows a live roster:\n{screen}"
         );
     }
@@ -1486,7 +1475,7 @@ mod tests {
         let offered = "b".repeat(64);
         app.screen = Screen::Lost {
             reason: format!(
-                "ESTE NÃO É O DOGMA DO CONVITE.\n\nesperada:  {expected}\nofertada:  {offered}"
+                "ESTE NÃO É O SERVIDOR DO CONVITE.\n\nesperada:  {expected}\nofertada:  {offered}"
             ),
         };
         let screen = draw(&app, Palette::True, (80, 24));
@@ -1565,7 +1554,7 @@ mod tests {
         let mut app = populated();
         app.alert = Some(Alert {
             text: format!(
-                "O CONVITE NÃO CORRESPONDE A ESTE DOGMA.\nesperada:  {expected}\nofertada:  {offered}"
+                "O CONVITE NÃO CORRESPONDE A ESTE SERVIDOR.\nesperada:  {expected}\nofertada:  {offered}"
             ),
             blocking: false,
         });

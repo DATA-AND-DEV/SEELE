@@ -9,8 +9,13 @@
 //
 // A composição é a do comp **v3** (`design/Entry Plug v3.dc.html`, tela
 // `principal`), inventariada em `.superpowers/sdd/comp-inventario-v3.md` §6.
-// Quatro colunas — a trilha de Dogmas, os canais, a Linha aberta, a Taxa de
-// Sincronização — em `60px 268px minmax(0,1fr) 328px`.
+// Quatro colunas — a trilha de servidores, as salas e os canais, o canal
+// aberto, o painel de sinal — em `60px 268px minmax(0,1fr) 328px`.
+//
+// Em janela estreita elas não apertam todas juntas, e a ordem é decisão: o
+// painel de sinal recolhe primeiro, a coluna de salas e canais vira gaveta
+// depois, e a conversa é a última a ceder largura. Ver `alternarCanais` aqui e
+// o rodapé de `tela-sessao.css`.
 //
 // O que o v3 muda de fundo, e é do que trata metade deste arquivo: cada Cage
 // mostra **quem está dentro** antes de se entrar nele, entrar e sair viraram
@@ -185,13 +190,14 @@ function fraseDoVeredito(veredito) {
       veredito.FirstContactVerified.fingerprint
     );
   }
-  // O Dogma é o mesmo de sempre; o link é que não é dele. Ressalva, não queda.
+  // O servidor é o mesmo de sempre; o link é que não é dele. Ressalva, não
+  // queda.
   if (veredito.InviteDisagrees) {
     return (
-      "O CONVITE NÃO CORRESPONDE A ESTE DOGMA.\n" +
+      "O CONVITE NÃO CORRESPONDE A ESTE SERVIDOR.\n" +
       `esperada: ${veredito.InviteDisagrees.expected}\n` +
       `ofertada: ${veredito.InviteDisagrees.offered}\n` +
-      "Você entrou no Dogma de sempre. O link é que não leva a ele."
+      "Você entrou no servidor de sempre. O link é que não leva a ele."
     );
   }
   return null;
@@ -239,19 +245,25 @@ function desenhar(snapshot) {
 }
 
 /**
- * O cabeçalho: a marca, o Dogma, o padrão, o piloto e o relógio.
+ * O cabeçalho: a marca, o servidor, o estado da conexão, o apelido e o
+ * relógio.
  *
- * O bloco do Dogma é o `TÓQUIO-3 / DOGMA CENTRAL · 7743` do comp (§3.1). Ele
- * mora aqui e em mais lugar nenhum — a ficha `C·02 / DOGMA` que já o mostrou
- * era um painel que o comp não desenha, e saiu junto com a trilha voltando.
+ * O bloco do servidor é o `TÓQUIO-3 / DOGMA CENTRAL · 7743` do comp (§3.1),
+ * com a segunda linha escrita `SERVIDOR · 7743`. Ele mora aqui e em mais lugar
+ * nenhum — a ficha `C·02 / DOGMA` que já o mostrou era um painel que o comp
+ * não desenha, e saiu junto com a trilha voltando.
  */
 function desenharTopo(snapshot) {
   const padrao = $("padrao");
   padrao.dataset.padrao = snapshot.pattern;
+  // O rótulo diz o estado da conexão em palavras; o `data-padrao` continua
+  // sendo o nome do enum, que é por onde a folha escolhe a cor. As três frases
+  // são as três do `Pattern` de `client.rs` — desligado, conectado sem
+  // verificar, verificado — e nenhuma delas é a cor que a antiga nomeava.
   padrao.textContent = {
-    Offline: "PADRÃO: DESLIGADO",
-    Orange: "PADRÃO: LARANJA",
-    Blue: "PADRÃO: AZUL",
+    Offline: "SEM CONEXÃO",
+    Orange: "CONEXÃO NÃO VERIFICADA",
+    Blue: "CONEXÃO SEGURA",
   }[snapshot.pattern];
 
   $("topo-piloto").textContent = snapshot.nickname;
@@ -270,10 +282,10 @@ function desenharTopo(snapshot) {
     trilha.setAttribute("aria-label", nome);
     trilha.title = nome;
   } else {
-    // Um Dogma sem nome é o servidor não tendo mandado um, e não um nome vazio.
-    naoMedido(rotulo, "este Dogma não anunciou nome");
+    // Um servidor sem nome é ele não tendo mandado um, e não um nome vazio.
+    naoMedido(rotulo, "este servidor não anunciou nome");
     trilha.textContent = SEM_MEDIDA;
-    trilha.setAttribute("aria-label", "Dogma sem nome");
+    trilha.setAttribute("aria-label", "servidor sem nome");
     trilha.removeAttribute("title");
   }
 
@@ -281,13 +293,13 @@ function desenharTopo(snapshot) {
 }
 
 /**
- * `DOGMA CENTRAL · 7743` — a segunda linha do bloco do Dogma.
+ * `SERVIDOR · 7743` — a segunda linha do bloco do servidor.
  *
  * A porta sai do endereço que esta janela discou, e não do `Snapshot`: o
  * protocolo não carrega para onde nos conectamos, e o inventário §3.5
  * classifica o campo como **S** justamente por isso — "a casca já tem o alvo".
  *
- * Quando o alvo não nomeia porta, a linha fica só `DOGMA CENTRAL`. A porta
+ * Quando o alvo não nomeia porta, a linha fica só `SERVIDOR`. A porta
  * efetiva nesse caso é a padrão do produto (ADR 0005), e escrevê-la aqui seria
  * pôr uma constante de protocolo dentro do JavaScript, que é exatamente o que
  * `specs/06-clientes-gui.md` proíbe. O motivo vai no `title`.
@@ -296,16 +308,16 @@ function desenharPortaDoDogma() {
   const sub = $("topo-dogma-sub");
   const porta = /:(\d+)$/.exec(alvoDoDogma ?? "");
   if (porta) {
-    sub.textContent = `DOGMA CENTRAL · ${porta[1]}`;
+    sub.textContent = `SERVIDOR · ${porta[1]}`;
     sub.removeAttribute("title");
   } else {
-    sub.textContent = "DOGMA CENTRAL";
+    sub.textContent = "SERVIDOR";
     sub.title = "o endereço não nomeou porta; esta sessão está na porta padrão";
   }
 }
 
 /**
- * A sigla de um Dogma, para a coluna de 60px.
+ * A sigla de um servidor, para a coluna de 60px.
  *
  * `TÓQUIO-3` vira `T3`, como no comp. A primeira letra de cada corrida de
  * letras ou algarismos, até três — e é abreviação de desenho, nunca um dado: o
@@ -364,7 +376,7 @@ function iniciaisDoApelido(apelido) {
  * traz um botão de 38px que diz o que faz.
  *
  * O comp escreve `VOCÊ ESTÁ AQUI` no Cage ocupado e não liga o botão a nada.
- * Aqui ele diz `SAIR DA JAULA` e ejeta, e a divergência é deliberada: `sair`
+ * Aqui ele diz `SAIR DA SALA` e ejeta, e a divergência é deliberada: `sair`
  * ganhou lugar próprio no v3 justamente porque no v2 ninguém o achava, e o
  * único outro lugar em que ele existe é a tela de chamada. Trocar um botão
  * mudo por um botão morto seria repetir o erro que o v3 corrige. Que se está
@@ -394,13 +406,13 @@ function desenharCanais(snapshot) {
     const entrar = elemento(
       "button",
       "cage-entrar",
-      cage.occupied_by_us ? "SAIR DA JAULA" : "ENTRAR NA JAULA",
+      cage.occupied_by_us ? "SAIR DA SALA" : "ENTRAR NA SALA",
     );
     entrar.type = "button";
     entrar.dataset.cage = String(cage.id);
     entrar.dataset.dentro = cage.occupied_by_us ? "sim" : "nao";
     entrar.title = cage.occupied_by_us
-      ? "tirar o plug: você para de ouvir e de falar nesta jaula"
+      ? "sair: você para de ouvir e de falar nesta sala"
       : `entrar e falar com quem está em ${cage.name}`;
 
     // Os dois botões da sala numa fileira só. Com um deles ausente — que é o
@@ -511,11 +523,11 @@ function linhaDeQuemEstaDentro(piloto, snapshot) {
 function desenharOperador(snapshot) {
   $("operador-nome").textContent = snapshot.nickname;
 
-  // Os rótulos são os do comp: o botão diz em que estado o A.T. Field está, e
-  // não o que apertá-lo vai fazer. Um botão escrito com o verbo é um botão que
-  // ninguém sabe ler quando volta a olhar para a tela.
+  // O botão diz em que estado o microfone está, e não o que apertá-lo vai
+  // fazer. Um botão escrito com o verbo é um botão que ninguém sabe ler quando
+  // volta a olhar para a tela.
   const mudo = $("botao-mudo");
-  mudo.textContent = snapshot.at_field ? "A.T. FIELD ATIVO" : "A.T. FIELD INATIVO";
+  mudo.textContent = snapshot.at_field ? "MICROFONE FECHADO" : "MICROFONE ABERTO";
   mudo.dataset.ativo = snapshot.at_field ? "sim" : "nao";
 
   const surdo = $("botao-surdo");
@@ -535,9 +547,13 @@ function desenharOperador(snapshot) {
   falar.dataset.ativo = snapshot.speaking ? "sim" : "nao";
   // O rótulo é a instrução. Um botão escrito "FALAR" que não faz nada ao ser
   // clicado é pior que nenhum botão: ensina a coisa errada.
+  // `PODE FALAR` e não `MICROFONE ABERTO` no modo aberto: o botão de mudo ao
+  // lado passou a dizer exatamente essa frase, e dois controles vizinhos com o
+  // mesmo rótulo são dois controles que ninguém distingue. O rótulo daqui é a
+  // instrução; o de lá é o estado.
   $("falar-rotulo").textContent = snapshot.speaking
     ? "NO AR"
-    : { PushToTalk: "SEGURE ESPAÇO", VoiceActivated: "FALE", Open: "MICROFONE ABERTO" }[
+    : { PushToTalk: "SEGURE ESPAÇO", VoiceActivated: "FALE", Open: "PODE FALAR" }[
         snapshot.voice_mode
       ] ?? "SEGURE ESPAÇO";
   falar.disabled = !snapshot.audio_available;
@@ -547,19 +563,19 @@ function desenharOperador(snapshot) {
 }
 
 /**
- * A barra da Linha aberta: `#` e o nome, como no comp v3.
+ * A barra do canal aberto: `#` e o nome, como no comp v3.
  *
  * `LINHA geral` virou `# geral`: a palavra estava dizendo o que o `#` ao lado
  * já dizia, e o cabeçalho da coluna tem um botão a mais agora.
  *
- * Sem Linha aberta a frase é uma frase, e não um travessão: nenhuma Linha
- * aberta é um estado que o produto conhece e sabe nomear, ao contrário de um
+ * Sem canal aberto a frase é uma frase, e não um travessão: nenhum canal
+ * aberto é um estado que o produto conhece e sabe nomear, ao contrário de um
  * campo que ninguém mediu.
  */
 function desenharLinha(snapshot) {
   const aberta = snapshot.lines.find((linha) => linha.open);
   const nome = $("linha-nome");
-  nome.textContent = aberta ? aberta.name : "nenhuma linha aberta";
+  nome.textContent = aberta ? aberta.name : "nenhum canal aberto";
   nome.classList.toggle("linha-nome-vazio", !aberta);
 }
 
@@ -603,6 +619,157 @@ async function sincronizarMensagens(revisao) {
   }
 }
 
+/**
+ * Quanto tempo cabe entre duas mensagens da mesma pessoa antes de a segunda
+ * deixar de ser continuação da primeira.
+ *
+ * Quinze minutos, e o número é o que separa uma rajada de uma volta. A mesma
+ * pessoa retomando o assunto depois do almoço não é a mesma fala continuando: o
+ * cabeçalho único diria que aquele bloco todo aconteceu na hora do primeiro.
+ */
+const JUNTA_ATE_SEGUNDOS = 900;
+
+/**
+ * O dia local de uma mensagem, como chave de comparação. `null` sem hora.
+ *
+ * Ano, mês e dia da máquina de quem lê, e não do relógio de quem escreveu: o
+ * divisor responde «que dia era para mim», que é a pergunta de quem está
+ * rolando a conversa para trás.
+ */
+function diaDaMensagem(segundos) {
+  if (!segundos) return null;
+  const quandoFoi = new Date(segundos * 1000);
+  return `${quandoFoi.getFullYear()}-${quandoFoi.getMonth()}-${quandoFoi.getDate()}`;
+}
+
+/**
+ * O que o divisor de dia escreve.
+ *
+ * `HOJE` e `ONTEM` por extenso, e a data nos outros: são as duas respostas que
+ * dispensam a conta, e são as duas que quem rola para trás faz o tempo todo.
+ * A conta é entre meias-noites locais, e não em múltiplos de 24 horas — às
+ * nove da manhã, «ontem às vinte e duas» está a onze horas, e onze horas
+ * arredondadas para baixo dariam «hoje».
+ */
+function rotuloDoDia(segundos) {
+  const data = new Date(segundos * 1000);
+  const meiaNoite = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const dias = Math.round((meiaNoite(new Date()) - meiaNoite(data)) / 86400000);
+  if (dias === 0) return "HOJE";
+  if (dias === 1) return "ONTEM";
+  return data
+    .toLocaleDateString([], { day: "2-digit", month: "2-digit", year: "numeric" })
+    .toUpperCase();
+}
+
+/** A faixa que separa dois dias de conversa. */
+function divisorDeDia(segundos) {
+  // Item da lista, e não `aria-hidden`: a data é informação e quem escuta a
+  // tela também está perguntando de que dia é o que vem a seguir. Os traços
+  // dos dois lados são da folha, em `::before`/`::after`, e por isso não
+  // chegam a leitor nenhum.
+  return elemento("li", "mensagens-dia", rotuloDoDia(segundos));
+}
+
+/**
+ * Uma mensagem da conversa.
+ *
+ * `segue` diz que esta continua a rajada da anterior — mesma pessoa, mesmo
+ * dia, e perto no relógio. Nesse caso o avatar e o nome não são repetidos: um
+ * nome que se repete seis vezes seguidas é seis leituras para descobrir que
+ * ninguém mudou. **A hora não some junto**: ela desce para a calha de 34px do
+ * avatar, porque uma hora que só aparece ao passar o ponteiro é uma hora que
+ * não está na tela, e este produto já gastou uma tela inteira desfazendo essa
+ * lição.
+ */
+function itemDeMensagem(mensagem, indice, segue) {
+  // A grade do comp v3: 34px de avatar, o resto para autor, hora e corpo. A
+  // hora saiu da coluna própria de 76px e foi para o lado do nome — é o que
+  // devolveu a largura que o avatar ocupa, e é onde o comp a põe.
+  //
+  // A marca de 2px à esquerda é onde o comp distingue mensagem de sistema e
+  // de alerta — `Message` não tem tipo (inventário §16), então só duas
+  // larguras existem aqui: a própria e a dos outros.
+  const item = elemento("li", mensagem.own ? "mensagem propria" : "mensagem");
+  if (segue) item.classList.add("mensagem-segue");
+  // O índice viaja no nó, e é por isso que `desenharBusca` não conta filhos.
+  //
+  // `setAttribute` e não `dataset`: escrita com ponto, esta propriedade fica
+  // com a mesma sequência de caracteres que `tests/frontend.rs` proíbe em
+  // qualquer script — o nome em português de um campo que um `Match`
+  // serializa, que ali chegaria como `undefined` e pintaria realce vazio sem
+  // erro nenhum. O guarda é literal e está certo em ser; quem desvia é esta
+  // linha.
+  item.setAttribute("data-mensagem", String(indice));
+
+  if (segue) {
+    // A calha de 34px do avatar recebe a hora quando o avatar não vem. É o que
+    // mantém toda linha datada sem repetir o nome seis vezes seguidas — e o
+    // que impede a solução comum, que é esconder a hora até alguém passar o
+    // ponteiro por cima dela.
+    item.append(
+      elemento("span", "mensagem-hora mensagem-hora-calha", relogio(mensagem.at_seconds)),
+    );
+  } else {
+    // O avatar de iniciais. Desenho e não dado: o nome inteiro está a doze
+    // pixels dali, então ele sai `aria-hidden` — anunciar `KM` antes de
+    // `KATSURAGI.M` é ler a mesma coisa duas vezes, uma delas em código.
+    //
+    // O `m.selo` do comp, ao lado do autor, **não** entra: ver o §1.2 do
+    // inventário v3 e a frase no rodapé da coluna de canais.
+    const avatar = elemento("span", "mensagem-avatar", iniciaisDoApelido(mensagem.author_nickname));
+    avatar.setAttribute("aria-hidden", "true");
+    item.append(avatar);
+  }
+
+  const conteudo = elemento("span", "mensagem-conteudo");
+  const cabeca = elemento("span", "mensagem-cabeca");
+  if (!segue) {
+    cabeca.append(elemento("span", "mensagem-autor", mensagem.author_nickname));
+    cabeca.append(elemento("span", "mensagem-hora", relogio(mensagem.at_seconds)));
+  }
+  if (mensagem.edited) cabeca.append(elemento("span", "editada", "editada"));
+  // Tirar a mensagem do canal, quando esta sessão pode tirar esta mensagem.
+  // Desenhado e nunca revelado pelo ponteiro: um controle que só existe no
+  // hover é um controle escondido, e o v3 gastou uma tela inteira desfazendo
+  // essa lição. `camada-moderar.js` decide se há o que oferecer, e pergunta
+  // primeiro se a mensagem é da própria pessoa — essa não pede permissão.
+  //
+  // Numa continuação sem edição e sem botão o cabeçalho não tem o que dizer, e
+  // aí ele não é escrito: uma linha vazia por mensagem devolveria o espaço que
+  // agrupar acabou de poupar.
+  const remover = botaoDeRemoverMensagem(mensagem, podeRemoverMensagem);
+  if (remover) cabeca.append(remover);
+  if (cabeca.childElementCount > 0) conteudo.append(cabeca);
+
+  // O corpo **cru**, e isto não é detalhe de pintura. `.mensagens .corpo` é
+  // `white-space: pre-wrap`: esta janela mostra quebra de linha e espaço
+  // duplo como eles chegaram, e é essa string que a busca do outro lado da
+  // ponte recebeu. Colapsar aqui deslocaria o realce em toda mensagem de mais
+  // de uma linha; colapsar dos dois lados alinharia o realce achatando a
+  // conversa, que é o preço errado a pagar por um índice.
+  const corpo = elemento("span", "corpo");
+  const aceso = ocorrenciaAtual?.indice === indice ? ocorrenciaAtual.ordinal : null;
+  corpo.append(...corpoComRealce(mensagem.body, casamentosPorMensagem.get(indice), aceso));
+  conteudo.append(corpo);
+  // O arquivo, embaixo do texto. ADR 0027: o texto sobrevive ao arquivo, e é
+  // por isso que este bloco continua aparecendo depois de os bytes irem
+  // embora — com o nome, o tamanho, e a frase que diz o que houve.
+  if (mensagem.attachment) conteudo.append(blocoDeAnexo(mensagem.attachment));
+
+  item.append(conteudo);
+  return item;
+}
+
+/**
+ * Escreve a conversa inteira: um cabeçalho por rajada, um divisor por dia.
+ *
+ * A lista não é mais uma mensagem por linha da lista — ela tem dois tipos de
+ * filho —, e é por isso que cada mensagem leva o próprio índice num
+ * `data-mensagem`. `desenharBusca` alcançava a mensagem pelo lugar dela entre
+ * os filhos, e o primeiro divisor desalinharia essa conta em um, calado, para
+ * todas as mensagens do dia seguinte.
+ */
 function desenharMensagens() {
   const lista = $("lista-mensagens");
 
@@ -622,57 +789,24 @@ function desenharMensagens() {
   // meio de uma leitura é pior do que não acompanhar.
   const noFim = lista.scrollHeight - lista.scrollTop - lista.clientHeight < 32;
 
-  const itens = mensagens.map((mensagem, indice) => {
-    // A grade do comp v3: 34px de avatar, o resto para autor, hora e corpo. A
-    // hora saiu da coluna própria de 76px e foi para o lado do nome — é o que
-    // devolveu a largura que o avatar ocupa, e é onde o comp a põe.
-    //
-    // A marca de 2px à esquerda é onde o comp distingue mensagem de sistema e
-    // de alerta — `Message` não tem tipo (inventário §16), então só duas
-    // larguras existem aqui: a própria e a dos outros.
-    const item = elemento("li", mensagem.own ? "mensagem propria" : "mensagem");
-
-    // O avatar de iniciais. Desenho e não dado: o nome inteiro está a doze
-    // pixels dali, então ele sai `aria-hidden` — anunciar `KM` antes de
-    // `KATSURAGI.M` é ler a mesma coisa duas vezes, uma delas em código.
-    //
-    // O `m.selo` do comp, ao lado do autor, **não** entra: ver o §1.2 do
-    // inventário v3 e a frase no rodapé da coluna de canais.
-    const avatar = elemento("span", "mensagem-avatar", iniciaisDoApelido(mensagem.author_nickname));
-    avatar.setAttribute("aria-hidden", "true");
-    item.append(avatar);
-
-    const conteudo = elemento("span", "mensagem-conteudo");
-    const cabeca = elemento("span", "mensagem-cabeca");
-    cabeca.append(elemento("span", "mensagem-autor", mensagem.author_nickname));
-    cabeca.append(elemento("span", "mensagem-hora", relogio(mensagem.at_seconds)));
-    if (mensagem.edited) cabeca.append(elemento("span", "editada", "editada"));
-    // Tirar a mensagem da Linha, quando esta sessão pode tirar esta mensagem.
-    // Desenhado e nunca revelado pelo ponteiro: um controle que só existe no
-    // hover é um controle escondido, e o v3 gastou uma tela inteira desfazendo
-    // essa lição. `camada-moderar.js` decide se há o que oferecer, e pergunta
-    // primeiro se a mensagem é da própria pessoa — essa não pede permissão.
-    const remover = botaoDeRemoverMensagem(mensagem, podeRemoverMensagem);
-    if (remover) cabeca.append(remover);
-    conteudo.append(cabeca);
-
-    // O corpo **cru**, e isto não é detalhe de pintura. `.mensagens .corpo` é
-    // `white-space: pre-wrap`: esta janela mostra quebra de linha e espaço
-    // duplo como eles chegaram, e é essa string que a busca do outro lado da
-    // ponte recebeu. Colapsar aqui deslocaria o realce em toda mensagem de mais
-    // de uma linha; colapsar dos dois lados alinharia o realce achatando a
-    // conversa, que é o preço errado a pagar por um índice.
-    const corpo = elemento("span", "corpo");
-    const aceso = ocorrenciaAtual?.indice === indice ? ocorrenciaAtual.ordinal : null;
-    corpo.append(...corpoComRealce(mensagem.body, casamentosPorMensagem.get(indice), aceso));
-    conteudo.append(corpo);
-    // O arquivo, embaixo do texto. ADR 0027: o texto sobrevive ao arquivo, e é
-    // por isso que este bloco continua aparecendo depois de os bytes irem
-    // embora — com o nome, o tamanho, e a frase que diz o que houve.
-    if (mensagem.attachment) conteudo.append(blocoDeAnexo(mensagem.attachment));
-
-    item.append(conteudo);
-    return item;
+  const itens = [];
+  let anterior = null;
+  mensagens.forEach((mensagem, indice) => {
+    const dia = diaDaMensagem(mensagem.at_seconds);
+    const trocouDeDia = dia !== null && dia !== diaDaMensagem(anterior?.at_seconds);
+    if (trocouDeDia) itens.push(divisorDeDia(mensagem.at_seconds));
+    // Sem hora dos dois lados não há como saber se a rajada é a mesma, e o
+    // desconhecido abre cabeçalho: repetir o nome custa uma linha, e engolir
+    // o nome de quem falou custa a autoria.
+    const segue =
+      anterior !== null &&
+      !trocouDeDia &&
+      anterior.author_nickname === mensagem.author_nickname &&
+      Boolean(anterior.at_seconds) &&
+      Boolean(mensagem.at_seconds) &&
+      mensagem.at_seconds - anterior.at_seconds <= JUNTA_ATE_SEGUNDOS;
+    itens.push(itemDeMensagem(mensagem, indice, segue));
+    anterior = mensagem;
   });
 
   repovoar(lista, itens);
@@ -719,7 +853,7 @@ function corpoComRealce(corpo, intervalos, aceso = null) {
   return pedacos;
 }
 
-// ------------------------------------------------- taxa de sincronização
+// ------------------------------------------------------------------- sinal
 
 /**
  * O painel da direita: a média do Cage e uma linha por piloto.
@@ -737,9 +871,9 @@ function desenharSync(snapshot) {
   desenharMedia(cage);
 
   // Dentro de um Cage, o roster é quem está nele. Fora, é o próprio operador:
-  // a Taxa de Sincronização é a medida que `specs/05-cliente-tui.md` chama de
-  // permanente, e sumir com ela porque ninguém inseriu o plug ainda seria
-  // escondê-la justo enquanto se decide em qual Cage entrar.
+  // o sinal é a medida que `specs/05-cliente-tui.md` chama de permanente, e
+  // sumir com ela porque ainda não se entrou em sala nenhuma seria escondê-la
+  // justo enquanto se decide em qual sala entrar.
   const pilotos = cage
     ? cage.pilots.map((piloto) => ({
         nome: piloto.nickname + (piloto.is_self ? " (você)" : ""),
@@ -782,8 +916,9 @@ function desenharMedia(cage) {
     // de qualquer coisa para tirar média de.
     delete bloco.dataset.faixa;
     marca.textContent = "";
-    naoMedido(valor, cage ? "este Cage está vazio" : "nenhum plug inserido");
-    naoMedido(amostra, cage ? "este Cage está vazio" : "nenhum plug inserido");
+    const porque = cage ? "esta sala está vazia" : "você não entrou em nenhuma sala";
+    naoMedido(valor, porque);
+    naoMedido(amostra, porque);
     return;
   }
 
@@ -794,7 +929,7 @@ function desenharMedia(cage) {
   // número, não tem `U+2588`.
   marca.textContent = marcaSync(sync.band);
   medido(valor, String(sync.ratio));
-  medido(amostra, `${sync.pilots} ${sync.pilots === 1 ? "PLUG" : "PLUGS"}`);
+  medido(amostra, `${sync.pilots} ${sync.pilots === 1 ? "PESSOA" : "PESSOAS"}`);
 }
 
 /**
@@ -844,7 +979,7 @@ function linhaDoRoster(piloto, temAudio) {
   // estado no `Pilot`, ou esta casca lembrando de quem estava ali, que é
   // exatamente o estado derivado que o topo de `base.js` proíbe.
   const estado = piloto.atField
-    ? "A.T. FIELD ATIVO"
+    ? "MUDO"
     : piloto.falando
       ? "TRANSMITINDO"
       : "EM ESCUTA";
@@ -902,7 +1037,7 @@ function desenharTelemetria(snapshot) {
   medido($("tel-uptime"), duracao(comecoDaSessao));
 
   const cage = snapshot.cages.find((c) => c.occupied_by_us);
-  medido($("tel-cage"), cage ? cage.name : "SEM PLUG");
+  medido($("tel-cage"), cage ? cage.name : "FORA DE SALA");
 
   // Escrito uma vez e calado depois. O caminho não muda dentro de uma sessão —
   // a reconexão do núcleo volta ao mesmo endereço —, e reescrever o mesmo texto
@@ -1088,7 +1223,7 @@ async function abrirSeletorDeArquivo() {
   // mesmo silêncio que trouxe este arquivo aqui — então a recusa vem antes do
   // diálogo, e vem onde dá para ver.
   if (linhaAberta === null) {
-    recusarAnexo("ABRA UMA LINHA ANTES DE ESCOLHER UM ARQUIVO");
+    recusarAnexo("ABRA UM CANAL ANTES DE ESCOLHER UM ARQUIVO");
     return;
   }
   let arquivo;
@@ -1497,6 +1632,10 @@ async function alternarCanal(evento) {
       linhaAberta = Number(item.dataset.linha);
       await invoke("open_line", { line: linhaAberta });
     }
+    // Escolhido o destino, a gaveta fecha: ela é navegação, e a conversa que
+    // se acabou de abrir está atrás dela. Em janela larga não há gaveta e isto
+    // não faz nada.
+    alternarCanais(false);
     // Soltos **antes** do redesenho, não depois: ver `soltarCasamentos`.
     soltarCasamentos();
     await atualizar();
@@ -1535,6 +1674,9 @@ async function ejetar() {
   // próxima seria dizer de um Dogma o que se apurou de outro.
   mostrarVeredito(null);
   document.body.classList.remove("na-bateria");
+  // A gaveta pela mesma razão que a moderação: aberta, ela voltaria por cima
+  // da próxima sessão com a lista de salas da anterior ainda desenhada.
+  alternarCanais(false);
   desenhado = null;
   linhaAberta = null;
   // O mesmo argumento do veredito, para o relógio e para o endereço: um uptime
@@ -1626,9 +1768,13 @@ function desenharBusca(estado) {
     // A ocorrência, e não a mensagem. Rolar até a mensagem punha na tela a
     // linha certa e nada dentro dela: numa mensagem que casa três vezes,
     // avançar duas vezes rolava para o mesmo lugar e mexia só no algarismo.
+    //
+    // O recurso é pelo `data-mensagem` e não mais pelo lugar entre os filhos:
+    // a lista ganhou divisores de dia, e cada divisor empurraria essa conta em
+    // um — caladamente, e só para as mensagens depois dele.
     const alvo =
       $("lista-mensagens").querySelector(".realce-atual") ??
-      $("lista-mensagens").children[estado.atual.message];
+      $("lista-mensagens").querySelector(`[data-mensagem="${estado.atual.message}"]`);
     alvo?.scrollIntoView({ block: "center" });
   }
 }
@@ -1686,6 +1832,80 @@ async function refazerBusca() {
   }
 }
 
+// ------------------------------------------------ a janela estreita, e a ordem
+//
+// Quando a janela não cabe nas quatro colunas, alguma delas tem de sair — e a
+// ordem em que saem é a decisão, não o fato de saírem.
+//
+// 1. O painel de sinal recolhe primeiro. Ele é medida permanente e não é onde
+//    se trabalha: o mesmo roster, com as mesmas pessoas, está na tela de
+//    chamada, a um botão do cabeçalho.
+// 2. A coluna de salas e canais vira gaveta depois. Ela é navegação — algo que
+//    se usa para chegar a um canal e não enquanto se lê o que está nele.
+// 3. A conversa nunca é a primeira a apertar. Ela é o painel em que se passam
+//    horas, e o único desta tela em que a largura muda o que cabe numa linha.
+//
+// A folha faz (1) e (2) sozinha; o que mora aqui é a porta da gaveta, porque
+// uma sobreposição que se abre sem controle nenhum é uma coluna que sumiu.
+
+/**
+ * O botão que abre a gaveta de salas e canais.
+ *
+ * Escrito aqui e não na marcação porque ele só existe por causa do que a folha
+ * faz com a largura, e as duas metades têm de morrer juntas no dia em que a
+ * gaveta sair. Ele mora na barra do canal aberto — que é a única barra que
+ * continua na tela em toda largura — e a folha o esconde acima do ponto de
+ * quebra: um botão que abre uma coluna já visível é um botão que não faz nada.
+ */
+const botaoDeCanais = elemento("button", "linha-canais", "CANAIS");
+botaoDeCanais.type = "button";
+botaoDeCanais.setAttribute("aria-expanded", "false");
+botaoDeCanais.title = "as salas de voz e os canais de texto";
+document.querySelector(".linha-barra")?.prepend(botaoDeCanais);
+
+/**
+ * Abre ou fecha a gaveta.
+ *
+ * Fechada, a coluna sai com `display: none` e não deslocada para fora da tela:
+ * fora da tela ela continua no caminho do teclado, e tabular por trinta botões
+ * invisíveis para chegar ao campo de mensagem é pior do que não ter a coluna.
+ *
+ * O foco acompanha, nos dois sentidos. Abrir uma sobreposição e deixar o foco
+ * atrás dela é abrir para quem enxerga e para mais ninguém; fechá-la sem
+ * devolver o foco larga quem usa o teclado no começo da tela.
+ */
+function alternarCanais(abrir) {
+  const tela = $("tela-sessao");
+  const aberta = tela.dataset.canais === "abertos";
+  const querAbrir = abrir ?? !aberta;
+  if (querAbrir === aberta) return;
+  if (querAbrir) {
+    tela.dataset.canais = "abertos";
+    botaoDeCanais.setAttribute("aria-expanded", "true");
+    $("lista-cages").querySelector("button")?.focus();
+    return;
+  }
+  // O foco volta para o botão só quando ele estava **dentro** da gaveta, que é
+  // quando fechá-la o deixaria em lugar nenhum. Devolvê-lo sempre roubaria o
+  // clique de quem fechou a gaveta apontando para o campo de mensagem.
+  const perdido = document
+    .querySelector(".painel-canais")
+    ?.contains(document.activeElement);
+  delete tela.dataset.canais;
+  botaoDeCanais.setAttribute("aria-expanded", "false");
+  if (perdido) botaoDeCanais.focus();
+}
+
+botaoDeCanais.addEventListener("click", () => alternarCanais());
+
+// Tocar na conversa fecha a gaveta, porque tocar na conversa é o que se faz
+// depois de escolher onde falar. `pointerdown` e não `click`: com o clique, o
+// primeiro toque na coluna de baixo só fechava a gaveta e o segundo é que
+// chegava ao campo.
+document
+  .querySelector(".painel-linha")
+  ?.addEventListener("pointerdown", () => alternarCanais(false));
+
 // ------------------------------------------------------------------- ligação
 
 $("form-busca").addEventListener("submit", (evento) => evento.preventDefault());
@@ -1718,7 +1938,7 @@ listen("tauri://drag-drop", (evento) => {
   // silêncio é indistinguível de defeito.
   if ($("tela-sessao").hidden) return;
   if (linhaAberta === null) {
-    recusarAnexo("ABRA UMA LINHA ANTES DE ANEXAR UM ARQUIVO");
+    recusarAnexo("ABRA UM CANAL ANTES DE ANEXAR UM ARQUIVO");
     return;
   }
   // Um por vez, e o primeiro. Uma mensagem carrega um arquivo — o ADR 0027 dá
@@ -1914,6 +2134,14 @@ window.addEventListener("keydown", (evento) => {
       invoke("busca_andar", { adiante: !evento.shiftKey }).then(desenharBusca);
       return;
     }
+  }
+  // `Escape` fecha a gaveta, depois da busca e antes da barra de espaço: com a
+  // gaveta aberta sobre a conversa, ela é a coisa mais de cima que a tecla
+  // pode estar querendo dispensar.
+  if (evento.key === "Escape" && $("tela-sessao").dataset.canais === "abertos") {
+    evento.preventDefault();
+    alternarCanais(false);
+    return;
   }
   if (evento.code === "Space" && !digitando() && !evento.repeat) {
     evento.preventDefault();

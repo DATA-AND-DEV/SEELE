@@ -107,7 +107,7 @@ function podeModerarPilotos(snapshot) {
  * noutra sala.
  *
  * Nunca sobre si mesmo: expulsar-se é o `DESCONECTAR` do cabeçalho, banir-se
- * não é coisa que exista, e mover-se é o `ENTRAR NA JAULA` da própria lista.
+ * não é coisa que exista, e mover-se é o `ENTRAR NA SALA` da própria lista.
  */
 function botaoDeModerar(piloto, snapshot) {
   if (piloto.is_self || !podeModerarPilotos(snapshot)) return null;
@@ -162,10 +162,10 @@ function botaoDeApagarCage(cage, snapshot, ultimo) {
   const botao = elemento("button", "cage-apagar", "APAGAR");
   botao.type = "button";
   botao.dataset.apagarCage = String(cage.id);
-  botao.setAttribute("aria-label", `apagar o Cage ${cage.name}`);
+  botao.setAttribute("aria-label", `apagar a sala de voz ${cage.name}`);
   botao.disabled = ultimo;
   botao.title = ultimo
-    ? `${cage.name} é o único Cage deste Dogma, e um Dogma sem Cage não tem onde falar. Faça outra sala antes.`
+    ? `${cage.name} é a única sala de voz deste servidor, e um servidor sem sala de voz não tem onde falar. Faça outra antes.`
     : `destruir ${cage.name} e pôr para fora quem estiver dentro`;
   return botao;
 }
@@ -184,7 +184,7 @@ function botaoDeApagarLinha(linha, snapshot) {
   const botao = elemento("button", "linha-apagar", "APAGAR");
   botao.type = "button";
   botao.dataset.apagarLinha = String(linha.id);
-  botao.setAttribute("aria-label", `apagar a Linha ${linha.name}`);
+  botao.setAttribute("aria-label", `apagar o canal ${linha.name}`);
   botao.title = `destruir #${linha.name} e tudo que foi escrito nela`;
   return botao;
 }
@@ -212,7 +212,7 @@ function atualizarPortaDoAlerta(snapshot) {
   porta.disabled = !pode;
   porta.title = pode
     ? "escolher quem, e o que fazer: expulsar, banir ou mover"
-    : "este Dogma não deu a você nenhuma permissão de moderação";
+    : "este servidor não deu a você nenhuma permissão de moderação";
 }
 
 // ------------------------------------------------------------------- desenho
@@ -503,12 +503,12 @@ function consequenciaDeExpulsar(quem) {
  */
 function consequenciaDeBanir(quem, ate) {
   const comum =
-    `${quem.nome} sai desta sessão agora e não consegue entrar de novo neste Dogma.\n`;
+    `${quem.nome} sai desta sessão agora e não consegue entrar de novo neste servidor.\n`;
   if (ate === null) {
     return (
       comum +
       "É para sempre. Nenhuma tela deste produto desfaz um banimento: só quem " +
-      "tiver acesso ao arquivo do Dogma, à mão, no computador que o hospeda."
+      "tiver acesso ao arquivo do servidor, à mão, no computador que o hospeda."
     );
   }
   return (
@@ -553,9 +553,9 @@ function consequenciaDeApagarCage(cage, linhaPresa) {
         `${cage.name} agora, no meio do que estiverem falando, e cada uma recebe ` +
         `um aviso dizendo o que aconteceu.`;
   const texto = linhaPresa
-    ? `\nA Linha #${linhaPresa.name} continua, com tudo que foi escrito nela: ela não é apagada junto.`
+    ? `\nO canal #${linhaPresa.name} continua, com tudo que foi escrito nele: ele não é apagado junto.`
     : "";
-  return `${gente}${texto}\nNenhuma tela deste produto traz este Cage de volta.`;
+  return `${gente}${texto}\nNenhuma tela deste produto traz esta sala de voz de volta.`;
 }
 
 /**
@@ -587,7 +587,7 @@ function consequenciaDeApagarLinha(linha, peso, cagesPresos) {
     cagesPresos.length === 0
       ? ""
       : `\n${cagesPresos.map((cage) => cage.name).join(", ")} ` +
-        `${cagesPresos.length === 1 ? "fica" : "ficam"} sem Linha, e ` +
+        `${cagesPresos.length === 1 ? "fica" : "ficam"} sem canal, e ` +
         `${cagesPresos.length === 1 ? "continua" : "continuam"} de pé.`;
   return (
     `${escrito}${soltos}\n` +
@@ -633,7 +633,7 @@ $("lista-mensagens").addEventListener("click", (evento) => {
   abrirConfirmacao(
     "REMOVER MENSAGEM",
     `A mensagem de ${mensagem.author_nickname} das ${relogio(mensagem.at_seconds)} some ` +
-      `desta Linha para todo mundo, e não há como trazê-la de volta.\n` +
+      `deste canal para todo mundo, e não há como trazê-la de volta.\n` +
       `«${mensagem.body}»`,
     "REMOVER",
     () => invoke("remover_mensagem", { message: mensagem.id }),
@@ -658,7 +658,7 @@ $("lista-cages").addEventListener("click", async (evento) => {
   // uma Linha chamada como a sala e nenhuma ligação entre as duas.
   const presa = snapshot.lines.find((linha) => linha.id === cage.line) ?? null;
   abrirConfirmacao(
-    `APAGAR O CAGE ${cage.name} ?`,
+    `APAGAR A SALA DE VOZ ${cage.name} ?`,
     consequenciaDeApagarCage(cage, presa),
     `APAGAR ${cage.name}`,
     () => invoke("apagar_cage", { cage: id }),
@@ -682,9 +682,9 @@ $("lista-linhas").addEventListener("click", async (evento) => {
     peso = await invoke("peso_da_linha", { line: id });
   } catch (falha) {
     abrirRecusa(
-      `APAGAR A LINHA #${linha.name} ?`,
+      `APAGAR O CANAL #${linha.name} ?`,
       `Não consegui contar o que há dentro de #${linha.name}, então não vou ` +
-        `perguntar se você quer apagá-la.\n` +
+        `perguntar se você quer apagá-lo.\n` +
         `Esta caixa existe para dizer quantas mensagens, de quanta gente e ` +
         `desde quando — e um número inventado seria pior que nenhum.\n` +
         `${fraseDeErro(falha)}`,
@@ -693,7 +693,7 @@ $("lista-linhas").addEventListener("click", async (evento) => {
   }
 
   abrirConfirmacao(
-    `APAGAR A LINHA #${linha.name} ?`,
+    `APAGAR O CANAL #${linha.name} ?`,
     consequenciaDeApagarLinha(
       linha,
       peso,

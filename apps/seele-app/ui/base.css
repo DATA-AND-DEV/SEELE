@@ -93,11 +93,14 @@ body { overflow: hidden; }
 
 .kanji { font-family: var(--seele-jp); }
 
+/* 10px em caixa alta é texto pequeno pelo critério do WCAG, e por isso a cor sai
+   de `--seele-rotulo-painel` e não de `osso-apagado` direto: aquele mede 4,11:1
+   e vale só para texto grande. Ver o achado 3 de `docs/tokens-achados.md`. */
 .rotulo {
   font-size: 10px;
   letter-spacing: var(--seele-tracking-rotulo);
   text-transform: uppercase;
-  color: var(--seele-osso-apagado);
+  color: var(--seele-rotulo-painel);
 }
 
 /* ---------- coordenada de painel ----------
@@ -106,11 +109,10 @@ body { overflow: hidden; }
 
    A cor sai de `--seele-rotulo-painel` e nunca de `osso-apagado` direto, e a
    diferença não é de estilo. `docs/tokens-achados.md` mede `osso-apagado` em
-   4,11:1, que passa só como texto grande, e põe a correção pendente em duas
-   opções: subir a cor, ou garantir que nada necessário dependa dela sozinha.
-   Título de painel é o que diz **qual** painel é aquele — informação
-   necessária. Passando por um nome semântico, a decisão, quando vier, é uma
-   linha em `tokens.css` e não uma varredura por todas as folhas. */
+   4,11:1, que passa só como texto grande; título de painel é o que diz **qual**
+   painel é aquele — informação necessária, em 9px. Passar por um nome semântico
+   fez a correção do achado 3 caber em uma linha de `tokens.css` em vez de uma
+   varredura por todas as folhas. */
 .coordenada {
   margin: 0;
   font-size: var(--seele-t-micro);
@@ -131,11 +133,13 @@ body { overflow: hidden; }
    campo nenhum, e um zero seria indistinguível de uma medida de verdade. */
 .ausente { color: var(--seele-osso-apagado); }
 
+/* 9px, pela mesma razão que `.coordenada`: o travessão que diz "não existe" é a
+   resposta à pergunta que o rótulo faz, e uma resposta ilegível é uma ausência. */
 .legenda-ausente {
   margin: 0;
   font-size: var(--seele-t-micro);
   letter-spacing: 0.14em;
-  color: var(--seele-osso-apagado);
+  color: var(--seele-rotulo-painel);
 }
 
 /* ---------- o cartão da entrada ----------

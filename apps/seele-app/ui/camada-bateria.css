@@ -182,25 +182,34 @@
    nunca a hora de ler uma nota sobre formato de mensagem. A lacuna continua
    registrada onde é trabalho; a tela ficou com o que é medido. */
 
-/* `FORÇAR REINSERÇÃO DE PLUG`, desabilitado. O inventário §5 o classifica como
-   **C**: reconectar já é do core — é ele que está tentando, e é dele que vem a
-   contagem acima —, mas não existe verbo de "tenta agora". Um botão que
-   parecesse apertável prometeria acelerar o que já está correndo. */
-.bateria-forcar {
-  margin-top: 12px;
-  padding: 12px;
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 16px;
-  letter-spacing: 0.16em;
-  color: var(--seele-vermelho-alerta);
-  background: none;
-  border: var(--seele-b) solid var(--seele-vermelho-alerta);
-  cursor: pointer;
-}
+/* O que era o botão `FORÇAR REINSERÇÃO DE PLUG`, agora uma linha de texto.
 
-.bateria-forcar:disabled {
-  color: var(--seele-osso-apagado);
-  border-color: var(--seele-linha-forte);
-  cursor: help;
+   O inventário §5 já o classificava como **C**: reconectar é do core — é ele
+   que está tentando, e é dele que vem a contagem acima —, e não existe verbo de
+   "tenta agora" para o botão chamar. Ele nasceu desabilitado e nunca teve como
+   deixar de ser: um controle que jamais fica apertável não é um controle, é uma
+   promessa que a caixa faz e não cumpre a cada vez que alguém tenta.
+
+   Então some a moldura e sobra a informação, que é a única coisa que ele
+   carregava: o SEELE já está tentando sozinho. Dito em osso e em corpo de
+   texto, ao lado da contagem de tentativas que o comprova.
+
+   A classe continua `bateria-forcar` de propósito: é o nome que a marcação e os
+   testes procuram, e renomeá-lo é trabalho de quem mexe no `index.html`. */
+.bateria-forcar {
+  margin: 12px 0 0;
+  padding: 0;
+  font-size: var(--seele-t-corpo);
+  line-height: 1.6;
+  letter-spacing: normal;
+  text-align: left;
+  color: var(--seele-osso);
+  background: none;
+  border: 0;
+  /* Continua sendo um `<button>` na marcação enquanto quem cuida dela não o
+     troca por um parágrafo. Estas três linhas são o que impede que ele pareça
+     apertável — e um cursor de texto sobre texto é o que ele passou a ser. */
+  cursor: default;
+  text-transform: none;
+  font-family: inherit;
 }

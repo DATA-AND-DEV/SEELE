@@ -49,6 +49,17 @@ muito de vermelho e verde. **Trabalho de M4:** ou subir `osso-apagado` para
 **Adendo M5:** a varredura passou a cobrir a janela inteira, e um véu cobra
 deste número. Ver "O que a varredura custa de contraste", no fim deste arquivo.
 
+**Resolvido.** A primeira das duas opções: `--seele-rotulo-painel` deixou de ser
+apelido de `osso-apagado` e passou a ser cor própria, `#908574`, que mede
+**5,52:1** sobre `negro-painel`. A mira acima de 4,5:1 é deliberada e o motivo
+está no adendo M5 desta página: sob a varredura a 6% o mesmo par entrega 4,97:1,
+e dentro da faixa que desce, 4,81:1. Uma cor escolhida para bater 4,5:1 no vácuo
+chegaria à tela abaixo de AA nas duas condições em que a tela é de fato vista.
+
+`osso-apagado` **não** subiu, e continua valendo o que valia: ele segue servindo
+o que é texto grande e o que não é informação necessária. O que mudou de dono foi
+o rótulo miúdo.
+
 ## 4. Em 256 cores, o painel some dentro do fundo
 
 `negro-absoluto` (`#050403`) e `negro-painel` (`#0A0806`) mapeiam **ambos para

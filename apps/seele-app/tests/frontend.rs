@@ -2000,15 +2000,15 @@ fn the_two_ways_out_of_the_call_say_which_one_leaves_the_cage() {
     let page = without_comments(&read("ui/index.html"));
     let script = scripts();
 
-    // `VER LINHAS` is navigation. Whatever it runs must not pull the plug.
+    // `VER CANAIS` is navigation. Whatever it runs must not pull the plug.
     let leaving = body_of(&script, "function fecharChamada");
     assert!(
         !leaving.contains("eject_plug"),
-        "`VER LINHAS` ejects the plug, so the two buttons do the same thing again \
+        "`VER CANAIS` ejects the plug, so the two buttons do the same thing again \
          and the screen's own words are wrong"
     );
 
-    // `SAIR DA JAULA` is the eject, and nothing else on this screen is.
+    // `SAIR DA SALA` is the eject, and nothing else on this screen is.
     let Some(exit) = script
         .split("$(\"chamada-ejetar\").addEventListener")
         .nth(1)
@@ -2023,7 +2023,7 @@ fn the_two_ways_out_of_the_call_say_which_one_leaves_the_cage() {
     // and watching this pass.
     assert!(
         exit.contains("invoke(\"eject_plug\")"),
-        "`SAIR DA JAULA` does not eject the plug, so leaving the Cage has no \
+        "`SAIR DA SALA` does not eject the plug, so leaving the Cage has no \
          button anywhere on this screen:{exit}"
     );
 
@@ -2234,7 +2234,7 @@ fn entering_and_leaving_a_cage_are_labelled_buttons_and_not_a_click_on_the_row()
         "the channel handler is back to catching the row, which is the shape \
          that has no keyboard and no accessible name"
     );
-    for label in ["ENTRAR NA JAULA", "SAIR DA JAULA"] {
+    for label in ["ENTRAR NA SALA", "SAIR DA SALA"] {
         assert!(
             lista.contains(label),
             "the Cage no longer offers `{label}`, so one half of the pair the v3 \
@@ -3468,7 +3468,10 @@ fn the_update_screen_says_the_window_closes_and_that_a_hosted_dogma_falls_with_i
             "that the window closes and comes back",
             "fecha e abre de novo",
         ),
-        ("that a Dogma hosted here falls too", "hospedando um Dogma"),
+        (
+            "that a Dogma hosted here falls too",
+            "hospedando um servidor",
+        ),
         (
             "that a failure leaves no half installation",
             "meia instalação",
@@ -3706,7 +3709,7 @@ fn the_ban_says_that_nothing_in_this_product_undoes_it() {
             "that no screen here undoes it",
             "Nenhuma tela deste produto desfaz",
         ),
-        ("who can undo it, and how", "arquivo do Dogma"),
+        ("who can undo it, and how", "arquivo do servidor"),
         ("when a timed one lifts", "cai sozinha"),
     ] {
         assert!(
@@ -3802,7 +3805,7 @@ fn each_moderation_verb_is_offered_by_its_own_permission() {
     );
 
     // And never on yourself: kicking yourself is DESCONECTAR, banning yourself
-    // is not a thing, and moving yourself is ENTRAR NA JAULA.
+    // is not a thing, and moving yourself is ENTRAR NA SALA.
     let porta = body_of(&scripts(), "function botaoDeModerar");
     assert!(
         porta.contains("piloto.is_self"),
@@ -4375,7 +4378,7 @@ fn destroying_a_room_says_what_it_does_to_the_people_and_to_the_other_room() {
             "no meio do que estiverem falando",
         ),
         ("that they are told", "aviso"),
-        ("that the bound Line survives", "não é apagada junto"),
+        ("that the bound Line survives", "não é apagado junto"),
         (
             "that nothing here brings it back",
             "Nenhuma tela deste produto",
@@ -4397,7 +4400,7 @@ fn destroying_a_room_says_what_it_does_to_the_people_and_to_the_other_room() {
             "Nenhuma tela deste produto",
         ),
         ("what happens to whoever is reading it", "perde da tela"),
-        ("which rooms come out without a Line", "sem Linha"),
+        ("which rooms come out without a Line", "sem canal"),
     ] {
         assert!(
             linha.contains(needle),
@@ -4436,7 +4439,7 @@ fn the_last_cage_is_offered_disabled_with_the_reason_written_on_it() {
          dead button and a shrug:\n{porta}"
     );
     assert!(
-        porta.contains("único Cage"),
+        porta.contains("única sala de voz"),
         "the reason the last Cage stays is not written anywhere a person \
          reads:\n{porta}"
     );
@@ -6908,5 +6911,399 @@ fn a_ajuda_nao_rouba_a_interrogacao_de_quem_esta_escrevendo() {
         "a tecla `?` abre a ajuda sem perguntar se a pessoa está num campo de \
          texto; a interrogação que ela quis escrever vira uma caixa na frente \
          da tela:\n{abre}"
+    );
+}
+
+// ------------------------------------------ o vocabulário que saiu da tela
+
+/// As palavras que o mapa v3 tirou da interface, e o que cada uma virou.
+///
+/// A decisão é `docs/adr/0033`: a camada de linguagem temática sai do texto que
+/// a pessoa lê, e o desenho fica. Uma decisão dessas não se mantém sozinha —
+/// ela se desfaz uma tela de cada vez, porque a palavra antiga continua sendo a
+/// que quem escreve o código tem na cabeça, e porque ela ainda está viva e certa
+/// em todo `id=`, toda classe, todo nome de tipo e todo comentário aqui do lado.
+/// É por isso que o guarda é por palavra e não por tela: uma tela nova entra
+/// coberta sem que ninguém se lembre de vir aqui.
+///
+/// A busca é por **palavra inteira** e sem caixa: `linha` acusa `Linhas` e
+/// ignora `alinhado`.
+///
+/// `sincronização` sozinha não está aqui: `TEMPO ESGOTADO NA SINCRONIZAÇÃO
+/// INICIAL` é o aperto de mão, não a taxa, e o mapa não o cobre. Os três nomes
+/// MAGI também não: o mapa tirou as **três luzes do rodapé**, e não os nomes —
+/// eles seguem em `B·02 / APERTO DE MÃO — MELCHIOR` e no diagrama do arranque,
+/// que nenhum guarda de texto sabe distinguir de uma luz.
+const APOSENTADOS: &[(&str, &str)] = &[
+    ("dogma", "servidor"),
+    ("cage", "sala de voz"),
+    ("cages", "salas de voz"),
+    ("jaula", "sala de voz"),
+    ("linha", "canal"),
+    ("linhas", "canais"),
+    ("piloto", "pessoa"),
+    ("pilotos", "pessoas"),
+    ("plug", "conectar / sair"),
+    ("ejetar", "sair"),
+    ("ejeção", "saída"),
+    ("a.t. field", "mudo"),
+    ("taxa de sincronização", "sinal"),
+    ("sync", "sinal"),
+    ("padrão: azul", "conexão segura"),
+    ("padrão: laranja", "conexão não verificada"),
+    ("padrão: desligado", "sem conexão"),
+];
+
+/// As frases que ainda carregam uma palavra aposentada, e por que ficam.
+///
+/// Cada uma sai do texto antes da busca, e cada uma é uma dívida com dono, não
+/// uma licença: some daqui no dia em que a frase mudar. Vazia é o estado que se
+/// quer.
+const AINDA_NA_TELA: &[(&str, &str)] = &[
+    (
+        "Terminal Dogma",
+        "o nome da tela de ajustes locais. `DOGMA → SERVIDOR` descreveria errado \
+         uma tela cuja própria subtitulação diz «Ajustes deste computador, e não \
+         deste servidor»: aqui `Dogma` não está no sentido de servidor. O mapa \
+         não tem linha para o composto e quem coordena ainda não decidiu.",
+    ),
+    (
+        "Entry Plug",
+        "nome interno da janela, e o mapa o deixa de pé por escrito. Cobre o \
+         `<title>` e o `FILE : ENTRY_PLUG.INIT` da ficha de arranque.",
+    ),
+];
+
+/// Os atributos que carregam frase, e não identificador.
+///
+/// `value` está aqui e não é engano: o que um `<input>` traz escrito é a
+/// primeira palavra que a pessoa lê no campo, e a que ela manda adiante se não
+/// mexer nele.
+const ATRIBUTOS_VISIVEIS: &[&str] = &[
+    "alt",
+    "aria-description",
+    "aria-label",
+    "aria-roledescription",
+    "aria-valuetext",
+    "data-anuncio",
+    "data-sub",
+    "data-titulo",
+    "placeholder",
+    "title",
+    "value",
+];
+
+/// O texto que uma marcação mostra: nó de texto e atributo de frase.
+fn texto_de_marcacao(pagina: &str) -> Vec<String> {
+    let pagina = without_comments(pagina);
+    let mut achado = Vec::new();
+    for atributo in ATRIBUTOS_VISIVEIS {
+        // Com o espaço na frente, para que ` title="` não seja encontrado
+        // dentro de um atributo cujo nome termina igual.
+        let agulha = format!(" {atributo}=\"");
+        for pedaco in pagina.split(&agulha).skip(1) {
+            if let Some(valor) = pedaco.split('"').next() {
+                achado.push(valor.to_owned());
+            }
+        }
+    }
+    for pedaco in pagina.split('>').skip(1) {
+        let Some(texto) = pedaco.split('<').next() else {
+            continue;
+        };
+        if !texto.trim().is_empty() {
+            achado.push(texto.trim().to_owned());
+        }
+    }
+    achado
+}
+
+/// Corta os argumentos de uma chamada, mantendo do `manter`-ésimo em diante.
+///
+/// Serve às duas posições deste frontend em que uma string com espaço dentro é
+/// identificador e não frase, e onde nenhuma regra de forma as separa:
+///
+/// - `console.warn("eject_plug:", falha)` — nada que sai por aqui chega a uma
+///   tela, então a chamada inteira cai (`manter` 0);
+/// - `elemento(tag, classe, texto)` — a **lista de classes** é a única string de
+///   identificador desta casa que traz espaço (`"cage aberto"`), e é o segundo
+///   argumento; o terceiro é o texto e fica (`manter` 2).
+///
+/// O nome é casado com o `(` através dos caracteres de identificador que houver
+/// entre os dois, que é o que faz `console.` alcançar `console.warn(` sem uma
+/// lista de métodos aqui dentro. Um `elemento` que não seja chamada — a palavra
+/// solta numa lista de argumentos — não tem `(` adiante e é copiado inteiro.
+fn sem_argumentos(fonte: &str, nome: &str, manter: usize) -> String {
+    let letras: Vec<char> = fonte.chars().collect();
+    let alvo: Vec<char> = nome.chars().collect();
+    let mut saida = String::with_capacity(fonte.len());
+    let mut i = 0usize;
+
+    while i < letras.len() {
+        if !letras[i..].starts_with(alvo.as_slice()) {
+            saida.push(letras[i]);
+            i += 1;
+            continue;
+        }
+        // Do fim do nome até o `(`, só pode haver mais identificador.
+        let mut abre = i + alvo.len();
+        while abre < letras.len() && (letras[abre].is_ascii_alphanumeric() || letras[abre] == '_') {
+            abre += 1;
+        }
+        if abre >= letras.len() || letras[abre] != '(' {
+            saida.push(letras[i]);
+            i += 1;
+            continue;
+        }
+
+        let mut j = abre + 1;
+        let mut profundidade = 1usize;
+        let mut virgulas = 0usize;
+        let mut aspas: Option<char> = None;
+        while j < letras.len() {
+            let letra = letras[j];
+            if let Some(fecha) = aspas {
+                if letra == '\\' {
+                    j += 2;
+                    continue;
+                }
+                if letra == fecha {
+                    aspas = None;
+                }
+                j += 1;
+                continue;
+            }
+            match letra {
+                '"' | '\'' | '`' => aspas = Some(letra),
+                '(' | '[' | '{' => profundidade += 1,
+                ')' | ']' | '}' => {
+                    profundidade -= 1;
+                    if profundidade == 0 {
+                        j += 1;
+                        break;
+                    }
+                }
+                ',' if profundidade == 1 => {
+                    // A `manter`-ésima vírgula de topo abre o argumento que
+                    // sobrevive: o corte para nela, e o resto da chamada é
+                    // copiado como qualquer outro trecho.
+                    virgulas += 1;
+                    if manter > 0 && virgulas >= manter {
+                        j += 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            j += 1;
+        }
+        i = j;
+    }
+    saida
+}
+
+/// Uma string de código que é identificador, e não frase.
+///
+/// Todo `id=`, toda classe, todo nome de comando e todo nome de evento deste
+/// frontend tem a mesma forma: ASCII minúsculo, sem espaço e sem acento, ligado
+/// por `-`, `_` ou `.`. Um seletor traz `#`, `.` ou `[` junto. Frase deste
+/// produto tem espaço, acento ou caixa alta, e nenhuma das formas abaixo tem
+/// nenhum dos três.
+///
+/// O custo aceito, dito por extenso: uma palavra solta, ASCII e minúscula
+/// escrita na tela por um script — `no.textContent = "piloto"` — passa por
+/// identificador e escapa daqui. Aceito porque a alternativa acusa todo
+/// `invoke("apagar_cage")` da janela, e porque a marcação, onde essas palavras
+/// de fato moram, é lida sem este filtro.
+fn parece_identificador(literal: &str) -> bool {
+    let texto = literal.trim();
+    if texto.is_empty() {
+        return true;
+    }
+    if texto.starts_with('.') || texto.starts_with('#') || texto.contains('[') {
+        return true;
+    }
+    if texto
+        .chars()
+        .all(|letra| letra.is_ascii_lowercase() || letra.is_ascii_digit() || "-_.".contains(letra))
+    {
+        return true;
+    }
+    texto.chars().all(|letra| letra.is_ascii_alphanumeric())
+        && texto.starts_with(|letra: char| letra.is_ascii_lowercase())
+}
+
+/// O texto que um script escreve na tela.
+fn texto_de_script(script: &str) -> Vec<String> {
+    let limpo = without_comments(script);
+    let limpo = sem_argumentos(&limpo, "console.", 0);
+    let limpo = sem_argumentos(&limpo, "elemento", 2);
+
+    let letras: Vec<char> = limpo.chars().collect();
+    let mut achado = Vec::new();
+    let mut i = 0usize;
+    while i < letras.len() {
+        let abre = letras[i];
+        if !matches!(abre, '"' | '\'' | '`') {
+            i += 1;
+            continue;
+        }
+        i += 1;
+        let mut texto = String::new();
+        while i < letras.len() {
+            let letra = letras[i];
+            if letra == '\\' {
+                if let Some(fugida) = letras.get(i + 1) {
+                    texto.push(if *fugida == 'n' { '\n' } else { *fugida });
+                }
+                i += 2;
+                continue;
+            }
+            if letra == abre {
+                i += 1;
+                break;
+            }
+            // `${…}` é o buraco onde entra um nome, e não texto: some, deixando
+            // o espaço para que as palavras dos dois lados não se colem numa só.
+            if abre == '`' && letra == '$' && letras.get(i + 1) == Some(&'{') {
+                let mut profundidade = 0usize;
+                while i < letras.len() {
+                    match letras[i] {
+                        '{' => profundidade += 1,
+                        '}' => {
+                            profundidade -= 1;
+                            if profundidade == 0 {
+                                i += 1;
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                    i += 1;
+                }
+                texto.push(' ');
+                continue;
+            }
+            texto.push(letra);
+            i += 1;
+        }
+        if !parece_identificador(&texto) {
+            achado.push(texto);
+        }
+    }
+    achado
+}
+
+/// O texto que uma folha escreve: só o que `content:` desenha.
+fn texto_de_folha(css: &str) -> Vec<String> {
+    let limpo = without_comments(css);
+    let mut achado = Vec::new();
+    for pedaco in limpo.split("content:").skip(1) {
+        let Some(depois) = pedaco.split(';').next() else {
+            continue;
+        };
+        for (indice, entre_aspas) in depois.split('"').enumerate() {
+            if indice % 2 == 1 && !entre_aspas.trim().is_empty() {
+                achado.push(entre_aspas.to_owned());
+            }
+        }
+    }
+    achado
+}
+
+/// Tudo em `ui/` que uma pessoa lê, como (arquivo, texto).
+fn textos_visiveis() -> Vec<(String, String)> {
+    let mut achado = Vec::new();
+    let mut colher = |arquivo: &str, textos: Vec<String>| {
+        for texto in textos {
+            achado.push((arquivo.to_owned(), texto));
+        }
+    };
+    for nome in ui_files(".html") {
+        colher(&nome, texto_de_marcacao(&read(&format!("ui/{nome}"))));
+    }
+    for nome in ui_files(".svg") {
+        colher(&nome, texto_de_marcacao(&read(&format!("ui/{nome}"))));
+    }
+    for nome in ui_files(".js") {
+        colher(&nome, texto_de_script(&read(&format!("ui/{nome}"))));
+    }
+    for nome in ui_files(".css") {
+        colher(&nome, texto_de_folha(&read(&format!("ui/{nome}"))));
+    }
+    achado
+}
+
+/// Onde `palavra` aparece em `texto` como palavra inteira. Os dois em minúscula.
+fn palavra_em(texto: &str, palavra: &str) -> bool {
+    let fronteira =
+        |letra: Option<char>| !letra.is_some_and(|letra| letra.is_alphanumeric() || letra == '_');
+    let mut de = 0usize;
+    while let Some(at) = texto[de..].find(palavra) {
+        let inicio = de + at;
+        let fim = inicio + palavra.len();
+        if fronteira(texto[..inicio].chars().next_back()) && fronteira(texto[fim..].chars().next())
+        {
+            return true;
+        }
+        de = inicio + texto[inicio..].chars().next().map_or(1, char::len_utf8);
+    }
+    false
+}
+
+/// Japonês decorativo: kana e kanji.
+fn japones(letra: char) -> bool {
+    matches!(letra, '\u{3040}'..='\u{30FF}' | '\u{4E00}'..='\u{9FFF}')
+}
+
+#[test]
+fn nenhum_termo_aposentado_volta_para_o_texto_da_interface() {
+    let textos = textos_visiveis();
+
+    // Um extrator que parou de achar texto fica verde para sempre, e um guarda
+    // que não pode falhar não é guarda. Estas cinco são as palavras que o mapa
+    // pôs no lugar das aposentadas: se nenhuma delas chega até aqui, quem está
+    // verde é a leitura, e não a interface.
+    for nova in ["servidor", "sala de voz", "canal", "apelido", "sinal"] {
+        assert!(
+            textos
+                .iter()
+                .any(|(_, texto)| texto.to_lowercase().contains(nova)),
+            "nenhum texto de `ui/` diz «{nova}». Ou o vocabulário novo sumiu da \
+             janela, ou este guarda parou de enxergar o texto dela — e a segunda \
+             hipótese é a que o deixa verde calado"
+        );
+    }
+
+    let mut achados: Vec<String> = Vec::new();
+    for (arquivo, texto) in &textos {
+        let mut procurado = texto.to_lowercase();
+        for (frase, _) in AINDA_NA_TELA {
+            procurado = procurado.replace(&frase.to_lowercase(), " ");
+        }
+        for (palavra, virou) in APOSENTADOS {
+            if palavra_em(&procurado, palavra) {
+                achados.push(format!(
+                    "{arquivo}: «{texto}» ainda diz «{palavra}», que o mapa v3 \
+                     trocou por «{virou}»"
+                ));
+            }
+        }
+        if texto.chars().any(japones) {
+            achados.push(format!(
+                "{arquivo}: «{texto}» ainda traz japonês decorativo, que o mapa \
+                 v3 tirou da interface inteira"
+            ));
+        }
+    }
+
+    assert!(
+        achados.is_empty(),
+        "o vocabulário que o ADR 0033 tirou da interface voltou ao texto que se \
+         lê nela:\n{}\n\nSe uma destas é `id=`, classe, nome de arquivo ou \
+         comentário, o defeito é deste guarda e é aqui que se conserta. Se é \
+         mesmo texto de tela e mesmo assim tem de ficar, ela entra em \
+         AINDA_NA_TELA com o motivo escrito — e não some daqui calada.",
+        achados.join("\n")
     );
 }

@@ -80,8 +80,8 @@ function comoChegou(pedido) {
       ? "chegou com um convite de uso único"
       : `chegou com o convite «${pedido.observacao}»`;
   }
-  if (pedido.segredo === "senha") return "chegou com a senha do Dogma";
-  return "chegou sem segredo nenhum — o Dogma estava aberto";
+  if (pedido.segredo === "senha") return "chegou com a senha do servidor";
+  return "chegou sem segredo nenhum — o servidor estava aberto";
 }
 
 /**
@@ -221,7 +221,7 @@ function desenharAlarme(estado) {
   }
   alarme.hidden = false;
   alarme.textContent =
-    "ESTE DOGMA ESTÁ ABERTO E ALCANÇÁVEL DE FORA DA SUA REDE.\n" +
+    "ESTE SERVIDOR ESTÁ ABERTO E ALCANÇÁVEL DE FORA DA SUA REDE.\n" +
     "Qualquer um que chegue ao endereço entra e ganha uma conta. " +
     "Ligue a portaria, ponha uma senha, ou as duas.";
 }
@@ -284,7 +284,7 @@ function desenharFila(pedidos) {
 function perguntarEDecidir(pedido, admitir) {
   const nome = `«${pedido.apelido}»`;
   const consequencia = admitir
-    ? `A chave que se diz ${nome} passa a entrar neste Dogma sem perguntar, ` +
+    ? `A chave que se diz ${nome} passa a entrar neste servidor sem perguntar, ` +
       `agora e sempre, até você revogar.\n` +
       `Você está decidindo sobre a impressão digital, e não sobre o nome: ` +
       `${agrupar(pedido.impressao)}\n` +
@@ -339,8 +339,8 @@ function perguntarETirarSenha(estado) {
     ? "A portaria continua ligada, então quem nunca entrou ainda precisa da sua permissão."
     : "Nada mais fecha esta porta: com a portaria desligada, qualquer um que chegue ao endereço entra.";
   abrirConfirmacao(
-    "TIRAR A SENHA DO DOGMA",
-    `Ninguém mais precisa saber a senha para chegar à porta deste Dogma.\n${sobra}`,
+    "TIRAR A SENHA DO SERVIDOR",
+    `Ninguém mais precisa saber a senha para chegar à porta deste servidor.\n${sobra}`,
     "TIRAR",
     async () => {
       await invoke("definir_senha_do_dogma", { senha: null });
@@ -357,7 +357,7 @@ function perguntarETirarSenha(estado) {
  */
 function perguntarEDesligar(estado) {
   const sobra = estado.tem_senha
-    ? "A senha do Dogma continua valendo, então ainda é preciso sabê-la para chegar."
+    ? "A senha do servidor continua valendo, então ainda é preciso sabê-la para chegar."
     : "Não há senha nem portaria: qualquer um que chegue ao endereço entra e ganha uma conta.";
   abrirConfirmacao(
     "DESLIGAR A PORTARIA",
@@ -398,7 +398,7 @@ async function abrirPortaria() {
   focoAntesDaPortaria = document.activeElement;
   $("portaria").hidden = false;
   $("portaria").focus();
-  anunciar("A porta deste Dogma. Quem está batendo, e as três camadas de entrada.");
+  anunciar("A porta deste servidor. Quem está batendo, e as três camadas de entrada.");
   await desenharPortaria();
 }
 
@@ -511,15 +511,15 @@ function avisarQueBatem(pendentes) {
 
   const frase =
     pendentes === 1
-      ? "ALGUÉM ESTÁ BATENDO À PORTA DESTE DOGMA"
-      : `${pendentes} PESSOAS ESTÃO BATENDO À PORTA DESTE DOGMA`;
+      ? "ALGUÉM ESTÁ BATENDO À PORTA DESTE SERVIDOR"
+      : `${pendentes} PESSOAS ESTÃO BATENDO À PORTA DESTE SERVIDOR`;
   $("portaria-batendo-texto").textContent = frase;
 
   const mostrar = pendentes > batidasCaladas;
   // Antes de escrever o `hidden`, porque a pergunta é se ela **estava**
   // escondida: é a transição que merece uma frase, não o estado.
   if (mostrar && faixa.hidden) {
-    anunciar(`${frase}. Abra a porta do Dogma para decidir.`);
+    anunciar(`${frase}. Abra a porta do servidor para decidir.`);
   }
   faixa.hidden = !mostrar;
 }

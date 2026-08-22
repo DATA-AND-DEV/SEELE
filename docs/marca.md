@@ -1,8 +1,13 @@
 # A marca
 
 Normativo, como `specs/07-tema-evangelion.md`. A diferença é o alcance: o tema
-governa o vocabulário do produto — Dogma, Cage, Piloto — e esta folha governa a
-única imagem que o produto tem de si mesmo.
+governa a estética do produto — cores, densidade, o ar de terminal — e esta
+folha governa a única imagem que o produto tem de si mesmo.
+
+O **ADR 0033** tirou a camada de linguagem da interface: na tela se lê servidor,
+sala de voz, canal de texto, pessoa. **Nada disso alcança esta folha.** A marca
+continua SEELE, continua `ゼーレ`, e continua com o contorno do Entry Plug —
+porque `Entry Plug` aqui é o nome de uma forma desenhada, não um rótulo de tela.
 
 Três formas. A escolha entre elas é sempre a mesma pergunta: **quanto espaço
 existe e o que a tela precisa dizer.** Nunca gosto.
@@ -19,8 +24,8 @@ O contorno do Entry Plug com `ゼーレ` na faixa laranja. Onde não cabe texto 
 marca precisa ser reconhecida de relance **dentro da interface**, sobre o negro
 do produto:
 
-- Avatar do Dogma na lista
-- Indicador de plug inserido
+- Avatar do servidor na lista
+- Indicador de conectado
 - Cabeçalho de painel onde o nome já foi dito uma vez
 
 **Tamanho mínimo: 32 px de largura.** Abaixo disso a forma muda.
@@ -81,9 +86,11 @@ sistema — **nunca** se põe uma segunda régua ao lado do logotipo.
 ### Forma institucional — a cartela
 
 Katakana no campo sólido, latim no campo vazio, descritor em duas linhas fixas.
-Onde o nome precisa vir acompanhado do que a coisa é: rodapé, changelog,
-README, compartilhamento social. **Mínimo: 180 px de largura.** A assimetria dos
-dois campos é a marca; a moldura não é.
+Onde o nome precisa vir acompanhado do que a coisa é: rodapé de página,
+changelog, README, compartilhamento social. **Fora da interface do produto** —
+o ADR 0033 tirou a cartela de dentro das telas, e o que sobrou lá é a forma
+reduzida. **Mínimo: 180 px de largura.** A assimetria dos dois campos é a
+marca; a moldura não é.
 
 ---
 
@@ -167,8 +174,10 @@ favicon      3 células      [S]        (S em vídeo inverso)
 256 cores ANSI: laranja `202`, osso `230`, apagado `243`.
 16 cores: `yellow-bold`, `white`, `white-dim`.
 
-Isto **não** revoga os kanji do tema. `同期率` na barra e `警告` no alerta
-continuam como `specs/07` manda: são vocabulário da interface, não a marca.
+Isto não tem nada a ver com os kanji que havia na interface. `同期率` na barra e
+`警告` no alerta **saíram** pelo ADR 0033 — eram vocabulário de tela, e a tela
+deixou de ter vocabulário japonês. O que esta seção governa é a marca, que
+continua sendo `ゼーレ` no gráfico e a forma latina no terminal.
 
 ---
 
@@ -207,8 +216,9 @@ Noto Sans JP Black (SIL OFL), glifos `ゼ`, `ー`, `レ`, upem 1000.
 
 ## Direitos
 
-`specs/07-tema-evangelion.md` já trata disso e vale aqui inteiro: o vocabulário
-e a estética são referência, não material do anime. Nenhum frame, nenhum
+`specs/07-tema-evangelion.md` já trata disso e vale aqui inteiro: a estética é
+referência, não material do anime — e desde o ADR 0033 o vocabulário nem está
+mais na tela para ser discutido. Nenhum frame, nenhum
 logotipo da NERV, nenhum asset de terceiro entra no produto ou no repositório. A
 marca desta folha é desenho original — um octógono, uma faixa, e três katakana
 de uma fonte livre.

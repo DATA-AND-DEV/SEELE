@@ -156,7 +156,7 @@
 -->
 <section id="tela-boot" class="tela" tabindex="-1"
          data-foco="campo-servidor"
-         data-anuncio="Entrada. Escolha o Dogma Central e insira o plug.">
+         data-anuncio="Entrada. Escolha o servidor e conecte.">
   <div class="boot-grade">
 
     <!-- ---------------- A·01 ---------------- -->
@@ -167,7 +167,15 @@
 
       <div class="boot-corpo">
         <div class="boot-ficha">
-          <p class="boot-kanji kanji" lang="ja">起動検査</p>
+          <!--
+            Aqui ficava a cartela japonesa (`起動検査`), e ela saiu junto com o
+            resto do japonês decorativo desta página. Ele nunca disse nada a
+            quem lê a tela: era acento de tema em cima de rótulos que já
+            carregavam a informação inteira em português, e quem não conhece a
+            referência lia dois glifos sem tradução no meio de um formulário. A
+            estética fica — a régua, o negro, a face de terminal —, a camada de
+            língua sai.
+          -->
           <span class="regua-tripla" aria-hidden="true"></span>
           <!--
             Ficção de cenário, e o inventário a classifica assim (§16, **F**):
@@ -208,8 +216,7 @@
             continua sendo o nome dos três subsistemas, e está no diagrama ao
             lado — que é onde ele nomeia alguma coisa.
           -->
-          <p class="boot-sistema">SISTEMA DE SINCRONIZAÇÃO ·
-            <span class="kanji" lang="ja">第三新東京市</span></p>
+          <p class="boot-sistema">SISTEMA DE SINCRONIZAÇÃO</p>
         </div>
 
         <!--
@@ -225,45 +232,28 @@
           Ela não existe no protocolo (§16), e os três acendem juntos porque o
           fato que eles relatam é um só — a conexão.
         -->
-        <div class="magi">
-          <span class="magi-haste" aria-hidden="true"></span>
-          <span class="magi-diagonal magi-diagonal-esquerda" aria-hidden="true"></span>
-          <span class="magi-diagonal magi-diagonal-direita" aria-hidden="true"></span>
+        <!--
+          Aqui ficava o diagrama MAGI: três nós chamados MELCHIOR, BALTHASAR e
+          CASPER, com um selo `SEM MEDIDA` no meio.
 
-          <ol class="magi-nos" aria-label="subsistemas">
-            <li class="magi-no magi-balthasar">
-              <span class="magi-nome">BALTHASAR·2</span>
-              <b id="sub-balthasar" class="magi-estado">·</b>
-            </li>
-            <li class="magi-no magi-casper">
-              <span class="magi-nome">CASPER·3</span>
-              <b id="sub-casper" class="magi-estado">·</b>
-            </li>
-            <li class="magi-no magi-melchior">
-              <span class="magi-nome">MELCHIOR·1</span>
-              <b id="sub-melchior" class="magi-estado">·</b>
-            </li>
-          </ol>
+          Os três mudavam **juntos**, e o comentário que os acompanhava dizia por
+          quê: saúde por subsistema não existe no protocolo, e o fato que eles
+          relatavam era um só — a tentativa de conexão. Três nomes para um dado
+          é cenário se passando por instrumento, e foi por isso que a avaliação
+          de usabilidade os listou entre o que sai.
 
-          <span class="magi-centro">MAGI</span>
-
-          <!--
-            O selo. O comp o pinta sempre em fósforo, por fidelidade ao
-            `ALL GREEN` do frame original (Q7 do inventário), e o conteúdo dele
-            deriva do `bootPct`, que não existe aqui. Um selo verde sobre uma
-            medida que ninguém tomou afirma `ALL GREEN` — é a única razão pela
-            qual esta é a exceção deliberada à Q7: sem medida, o selo é
-            apagado, e diz que é.
-          -->
-          <div class="magi-selo">
-            <span class="magi-selo-rotulo">SEM MEDIDA</span>
-            <span class="magi-selo-marca ausente">——</span>
-          </div>
+          O dado honesto fica, porque ele serve: durante a conexão a pessoa
+          precisa ver que algo está acontecendo. Um estado, um nome, uma
+          palavra dentro — nunca só a cor, que `specs/05-cliente-tui.md` proíbe.
+        -->
+        <div class="boot-tentativa" data-estado="">
+          <span class="boot-tentativa-rotulo">CONEXÃO</span>
+          <b id="boot-tentativa-marca" class="boot-tentativa-marca">·</b>
         </div>
       </div>
 
       <!--
-        A Taxa de Sincronização. No comp ela sobe de 7 em 7 a cada 900 ms — um
+        O sinal. No comp ele sobe de 7 em 7 a cada 900 ms — um
         cronômetro de protótipo, sem nada por trás (§16: `bootPct` exige
         mudança de protocolo). Aqui a moldura fica e o valor falta: trilho
         vazio, `——` no lugar do número, e a escala inteira. Um `0` seria a
@@ -271,7 +261,7 @@
       -->
       <div class="sync">
         <div class="sync-topo">
-          <span class="rotulo">TAXA DE SINCRONIZAÇÃO</span>
+          <span class="rotulo">SINAL</span>
           <span class="sync-valor ausente">——</span>
         </div>
         <span class="sync-trilho" aria-hidden="true"></span>
@@ -299,13 +289,13 @@
 
         <form id="form-conectar" class="boot-form" autocomplete="off">
           <label class="campo">
-            <span class="rotulo">DOGMA</span>
+            <span class="rotulo">SERVIDOR</span>
             <input id="campo-servidor" name="servidor" value="127.0.0.1:8383"
                    spellcheck="false" autocapitalize="off" required>
           </label>
           <label class="campo">
-            <span class="rotulo">PILOTO</span>
-            <input id="campo-apelido" name="apelido" value="piloto"
+            <span class="rotulo">APELIDO</span>
+            <input id="campo-apelido" name="apelido" value="pessoa"
                    spellcheck="false" autocapitalize="off" maxlength="32" required>
           </label>
           <!--
@@ -320,9 +310,9 @@
           </label>
           <label class="campo campo-linha">
             <input id="campo-audio" type="checkbox" checked>
-            <span class="rotulo">inserir plug com áudio</span>
+            <span class="rotulo">conectar com áudio</span>
           </label>
-          <button id="botao-conectar" type="submit" class="botao">INSERIR PLUG</button>
+          <button id="botao-conectar" type="submit" class="botao">CONECTAR</button>
           <!--
             Sem isto, hospedar exige abrir um terminal — e num produto cujo
             argumento é "hospede você mesmo", exigir linha de comando de quem
@@ -368,16 +358,6 @@
         <p id="boot-erro" class="erro" role="alert" hidden></p>
       </div>
 
-      <!--
-        `— / 3` é a forma do próprio comp para "ainda não": ele escreve
-        `3 / 3` quando o boot fecha e `— / 3` antes. Aqui não há o depois —
-        votação dos três subsistemas é o mesmo dado ausente dos polígonos —
-        então a linha fica na forma que o comp usa para a ausência.
-      -->
-      <div class="registro-rodape">
-        <span class="rotulo">CONCORDÂNCIA DOS TRÊS</span>
-        <span class="concordancia ausente">— / 3</span>
-      </div>
     </div>
   </div>
 </section>
@@ -392,7 +372,7 @@
   um Tab alcança a primeira coisa da tela.
 -->
 <section id="tela-sessao" class="tela" tabindex="-1" hidden
-         data-anuncio="Operação. Cages, Linhas e a conversa da Linha aberta.">
+         data-anuncio="Operação. Salas de voz, canais e a conversa do canal aberto.">
   <!--
     O cabeçalho do comp tem sete blocos, e cinco entram. Os dois que ficam de
     fora: o `MG`, que é a marca do outro produto — no lugar dele, no mesmo
@@ -410,15 +390,14 @@
     -->
     <span class="topo-dogma">
       <span id="topo-dogma-nome" class="topo-dogma-nome">—</span>
-      <span id="topo-dogma-sub" class="topo-dogma-sub">DOGMA CENTRAL</span>
+      <span id="topo-dogma-sub" class="topo-dogma-sub">SERVIDOR</span>
     </span>
     <span class="topo-bloco">
-      <span id="padrao" class="padrao">PADRÃO: AZUL</span>
+      <span id="padrao" class="padrao">CONEXÃO SEGURA</span>
       <span id="topo-piloto" class="topo-piloto"></span>
     </span>
     <span class="regua-larga" aria-hidden="true"></span>
     <span class="topo-bloco topo-bloco-fim">
-      <span class="kanji topo-kanji" lang="ja">同期率</span>
       <time id="relogio" class="relogio">--:--:--</time>
     </span>
     <!--
@@ -432,7 +411,7 @@
       daqui e só daqui, porque não faz sentido fora de uma sessão.
     -->
     <button id="botao-chamada" class="botao-fantasma" type="button"
-            title="a grade do Cage, um cartão por piloto">CHAMADA</button>
+            title="a grade da sala de voz, um cartão por pessoa">CHAMADA</button>
     <!--
       O `DOGMA` que ficava aqui virou a engrenagem no rodapé da coluna de
       canais, que é onde o comp v3 a põe: a configuração é do operador, e o
@@ -504,17 +483,16 @@
       <div class="alerta-cabeca">
         <div class="alerta-marca">
           <!--
-            Acento, e só. O comp escreve na ficha dele: "o kanji é acento — a
-            palavra ALERTA carrega a informação". Quem ouve a tela já recebe
-            ALERTA em latim ao lado, então anunciar o kanji seria ler a mesma
-            coisa duas vezes em duas línguas.
+            O kanji de acento (`警告`) saiu, com todo o japonês decorativo da
+            página: a palavra ALERTA sempre carregou a informação inteira, e o
+            glifo ao lado era enfeite que quem não conhece a referência lia como
+            ruído no instante em que a caixa interrompe a conversa.
           -->
-          <span class="kanji alerta-kanji" lang="ja" aria-hidden="true">警告</span>
           <span class="alerta-palavra">ALERTA</span>
         </div>
         <div class="alerta-dizeres">
           <p class="alerta-eixo">
-            <span>DOGMA · AVISO</span>
+            <span>SERVIDOR · AVISO</span>
             <!--
               A severidade em palavra. As três estão na marcação e o
               `data-severidade` que `desenharAviso` escreve na caixa escolhe
@@ -564,8 +542,8 @@
             lacuna.
           -->
           <button id="alerta-ejetar" class="alerta-ejetar" type="button" disabled
-                  title="este Dogma não deu a você nenhuma permissão de moderação">
-            MODERAR UM PILOTO
+                  title="este servidor não deu a você nenhuma permissão de moderação">
+            MODERAR UMA PESSOA
           </button>
         </div>
       </div>
@@ -603,14 +581,16 @@
     <div class="bateria-caixa">
       <div class="bateria-cabeca">
         <span class="bateria-nome">BATERIA INTERNA</span>
-        <!-- Acento. `BATERIA INTERNA` ao lado já diz tudo o que ele diz. -->
-        <span class="kanji bateria-kanji" lang="ja" aria-hidden="true">内部電源</span>
+        <!--
+          O kanji de acento (`内部電源`) saiu com o resto do japonês decorativo:
+          `BATERIA INTERNA` ao lado já dizia tudo o que ele dizia.
+        -->
       </div>
 
       <div class="bateria-corpo">
         <time id="bateria-conta">--:--</time>
         <div class="bateria-dizeres">
-          <p class="rotulo">ENERGIA RESTANTE ANTES DA EJEÇÃO FORÇADA</p>
+          <p class="rotulo">ENERGIA RESTANTE ANTES DA SAÍDA FORÇADA</p>
           <!--
             A frase do comp menos o nome de rota. Ele escreve "Conexão com
             BALTHASAR perdida", e o inventário §5 classifica a frase inteira
@@ -655,14 +635,14 @@
           tentativas houve. Ela é verdade inteira e chega do core.
         -->
         <!--
-          `FORÇAR REINSERÇÃO DE PLUG`, desabilitado. O inventário §5 o
+          `FORÇAR RECONEXÃO`, desabilitado. O inventário §5 o
           classifica como **C**: reconectar já é do core — é ele que está
           tentando, e é dele que vem a contagem acima — mas não existe verbo de
           "tenta agora". Um botão apertável prometeria acelerar o que já corre.
         -->
         <button id="bateria-forcar" class="bateria-forcar" type="button" disabled
                 title="o SEELE já está tentando sozinho, agora; não há como pedir que ele tente mais depressa">
-          FORÇAR REINSERÇÃO DE PLUG
+          FORÇAR RECONEXÃO
         </button>
       </div>
     </div>
@@ -704,8 +684,10 @@
        aria-labelledby="moderar-titulo" hidden>
     <div class="moderar-caixa">
       <div class="moderar-cabeca">
-        <!-- Acento. `MODERAÇÃO` ao lado já diz tudo o que ele diz. -->
-        <span class="kanji moderar-kanji" lang="ja" aria-hidden="true">指揮</span>
+        <!--
+          O kanji de acento (`指揮`) saiu com o resto do japonês decorativo:
+          `MODERAÇÃO` ao lado já dizia tudo o que ele dizia.
+        -->
         <h2 id="moderar-titulo" class="moderar-titulo">MODERAÇÃO</h2>
       </div>
 
@@ -714,13 +696,13 @@
           e ela não é consultada antes.</span>
 
         <!--
-          Nenhuma jaula com gente dentro além de você. Não é falha nem permissão
-          que falta, e por isso não é erro: é um Dogma vazio. Os três verbos
+          Nenhuma sala de voz com gente dentro além de você. Não é falha nem
+          permissão que falta, e por isso não é erro: é um servidor vazio. Os três verbos
           somem inteiros em vez de ficarem apagados — não há o que explicar
           sobre um controle cujo objeto não existe.
         -->
         <p id="moderar-vazio" class="moderar-vazio" hidden>
-          Não há mais ninguém em jaula nenhuma deste Dogma.
+          Não há mais ninguém em sala nenhuma deste servidor.
         </p>
 
         <div id="moderar-sobre" class="moderar-sobre">
@@ -768,8 +750,8 @@
               <select id="moderar-para" class="moderar-select"></select>
             </label>
             <button id="moderar-mover" class="moderar-verbo" type="button">MOVER</button>
-            <span class="nota">Tira a pessoa da jaula em que ela está e a põe na
-              escolhida. Ela continua na sessão.</span>
+            <span class="nota">Tira a pessoa da sala de voz em que ela está e a
+              põe na escolhida. Ela continua na sessão.</span>
           </div>
         </div>
       </div>
@@ -861,7 +843,7 @@
     <div class="portaria-caixa">
       <div class="portaria-cabeca">
         <span class="portaria-marca" data-glifo="chave"></span>
-        <h2 id="portaria-titulo" class="portaria-titulo">A PORTA DESTE DOGMA</h2>
+        <h2 id="portaria-titulo" class="portaria-titulo">A PORTA DESTE SERVIDOR</h2>
         <button id="portaria-fechar" class="portaria-fechar" type="button">FECHAR</button>
       </div>
 
@@ -879,7 +861,7 @@
         <!-- As três camadas, sempre as três, e sempre em palavras. -->
         <div class="portaria-camadas">
           <div class="portaria-camada">
-            <span class="rotulo">SENHA DO DOGMA</span>
+            <span class="rotulo">SENHA DO SERVIDOR</span>
             <span id="portaria-estado-senha" class="portaria-estado">——</span>
             <input id="portaria-senha" class="portaria-senha" type="password"
                    autocomplete="new-password" placeholder="uma senha para o grupo">
@@ -926,8 +908,7 @@
 
   <!--
     As quatro colunas do comp v3, nas larguras dele — `60px 268px minmax(0,1fr)
-    328px`: a trilha de Dogmas, os canais, a Linha aberta, e a Taxa de
-    Sincronização.
+    328px`: a trilha de servidores, os canais, o canal aberto, e o sinal.
   -->
   <main class="paineis">
     <!--
@@ -965,8 +946,8 @@
         de moderação chegaram, e ele passou a chamar um.)
       -->
       <button id="trilha-adicionar" class="trilha-mais" type="button" disabled
-              aria-label="Adicionar Dogma Central"
-              title="este produto mantém um Plug por vez: para trocar de Dogma, use DESCONECTAR">+</button>
+              aria-label="Adicionar servidor"
+              title="este produto mantém uma conexão por vez: para trocar de servidor, use DESCONECTAR">+</button>
     </nav>
 
     <!--
@@ -979,7 +960,7 @@
       muda. `.nota` mora em `base.css`, e aparece sempre: dizer o que uma sala de
       voz é não é ajuda de iniciante, é o rótulo da coluna terminando a frase.
     -->
-    <section class="painel painel-canais" aria-label="Cages e Linhas">
+    <section class="painel painel-canais" aria-label="Salas de voz e canais">
       <!--
         As duas listas, os dois cabeçalhos e os dois formulários dentro de um
         contêiner que rola, e a tira do operador **fora** dele.
@@ -997,12 +978,12 @@
       <div class="canais-rolagem">
         <div class="canais-cabeca">
           <h2 class="painel-titulo">
-            <span>CAGES</span><span class="painel-codigo">B·03</span>
+            <span>SALAS DE VOZ</span><span class="painel-codigo">B·03</span>
           </h2>
           <!--
-            A ajuda, e ela fica aqui por um motivo: CAGE e LINHA são as duas
-            palavras que a pessoa encontra primeiro sem saber o que querem
-            dizer, e este é o canto onde as duas moram. A tecla `?` abre de
+            A ajuda, e ela fica aqui por um motivo: é neste canto que a pessoa
+            encontra primeiro as palavras deste produto — o que é uma sala de
+            voz, o que é um canal, o que o sinal mede. A tecla `?` abre de
             qualquer lugar; o botão existe para quem ainda não sabe da tecla.
           -->
           <button id="ajuda-abrir" class="painel-ajuda" type="button"
@@ -1022,7 +1003,7 @@
         -->
         <form id="criar-cage" class="criar" hidden>
           <label class="criar-campo">
-            <span class="rotulo">NOVA JAULA</span>
+            <span class="rotulo">NOVA SALA</span>
             <input id="campo-cage-nome" name="nome" maxlength="48" required
                    spellcheck="false" autocomplete="off" placeholder="nome da sala">
           </label>
@@ -1040,16 +1021,16 @@
 
         <div class="canais-cabeca canais-cabeca-linhas">
           <h2 class="painel-titulo">
-            <span>LINHAS</span><span class="painel-codigo">B·04</span>
+            <span>CANAIS</span><span class="painel-codigo">B·04</span>
           </h2>
         </div>
         <ul id="lista-linhas" class="canais"></ul>
 
         <form id="criar-linha" class="criar" hidden>
           <label class="criar-campo">
-            <span class="rotulo">NOVA LINHA</span>
+            <span class="rotulo">NOVO CANAL</span>
             <input id="campo-linha-nome" name="nome" maxlength="48" required
-                   spellcheck="false" autocomplete="off" placeholder="nome da sala">
+                   spellcheck="false" autocomplete="off" placeholder="nome do canal">
           </label>
           <button type="submit" class="botao-fantasma">CRIAR</button>
         </form>
@@ -1090,20 +1071,20 @@
         </button>
         <button id="botao-voz" class="botao-estado" type="button"
                 title="como o microfone abre">MODO: TECLA</button>
-        <button id="botao-mudo" class="botao-estado" type="button">A.T. FIELD INATIVO</button>
+        <button id="botao-mudo" class="botao-estado" type="button">MICROFONE ABERTO</button>
         <button id="botao-surdo" class="botao-estado" type="button">OUVINDO</button>
       </div>
     </section>
 
     <!--
-      A Linha aberta (comp v3 §6.3): `#`, o nome, e um `BUSCAR` rotulado.
+      O canal aberto (comp v3 §6.3): `#`, o nome, e um `BUSCAR` rotulado.
 
       O que o comp desenha e não entra é `linhaDesc`, a descrição por Linha —
       o protocolo não tem o campo, e o `REGISTRO ATIVO · SEM RETENÇÃO` que
       ficava aqui era exatamente ele, escrito à mão. Sai da tela em vez de
       virar travessão: ver o cabeçalho de `tela-sessao.css`.
     -->
-    <section class="painel painel-linha" aria-label="Registro da Linha">
+    <section class="painel painel-linha" aria-label="Registro do canal">
       <div class="linha-barra">
         <span class="linha-barra-cerquilha" aria-hidden="true">#</span>
         <span id="linha-nome" class="linha-nome">—</span>
@@ -1120,7 +1101,7 @@
         -->
         <button id="botao-buscar" class="linha-buscar" type="button"
                 aria-controls="form-busca" aria-expanded="false"
-                title="procurar no que já foi dito nesta Linha">
+                title="procurar no que já foi dito neste canal">
           <span data-glifo="buscar"></span><span>BUSCAR</span>
         </button>
       </div>
@@ -1190,7 +1171,7 @@
         -->
         <span class="compor-caixa">
           <span class="prompt" aria-hidden="true">&gt;</span>
-          <input id="campo-mensagem" name="mensagem" placeholder="transmitir na linha"
+          <input id="campo-mensagem" name="mensagem" placeholder="transmitir no canal"
                  maxlength="4000" autocomplete="off">
         </span>
         <!--
@@ -1221,12 +1202,11 @@
     -->
     <section class="painel painel-sync" aria-labelledby="titulo-sync">
       <h2 id="titulo-sync" class="sync-cartela">
-        <span>TAXA DE SINCRONIZAÇÃO</span>
-        <span class="kanji sync-kanji" lang="ja">同期率</span>
+        <span>SINAL</span>
       </h2>
       <div class="sync-media">
         <div class="sync-media-legenda">
-          <span class="sync-media-rotulo">MÉDIA DO CAGE</span>
+          <span class="sync-media-rotulo">MÉDIA DA SALA</span>
           <span id="sync-amostra" class="sync-amostra">—</span>
         </div>
         <!--
@@ -1255,8 +1235,8 @@
     do comp — o app dizia `SYNC RTT JIT LOSS OPUS`, que é a mesma medida com
     nome de log.
 
-    `SYNC` saiu daqui e não se perdeu: ele é a coluna inteira à direita agora, e
-    a linha do próprio operador está sempre nela.
+    `SINAL` saiu daqui e não se perdeu: ele é a coluna inteira à direita agora,
+    e a linha do próprio operador está sempre nela.
   -->
   <footer class="telemetria">
     <span class="metrica"><b class="rotulo">ATRASO</b> <span id="tel-rtt">·</span></span>
@@ -1264,7 +1244,7 @@
     <span class="metrica"><b class="rotulo">DISTÚRBIO</b> <span id="tel-loss">·</span></span>
     <span class="metrica"><b class="rotulo">CODEC</b> <span id="tel-codec">·</span></span>
     <span class="metrica"><b class="rotulo">UPTIME</b> <span id="tel-uptime">·</span></span>
-    <span class="metrica"><b class="rotulo">CAGE</b> <span id="tel-cage">·</span></span>
+    <span class="metrica"><b class="rotulo">SALA</b> <span id="tel-cage">·</span></span>
     <!--
       Por qual caminho a conversa saiu. Um nome e não uma frase: é uma linha ao
       lado dos números, escrita uma vez quando a sessão sobe e calada depois.
@@ -1280,17 +1260,22 @@
       ÁUDIO LOCAL FALHANDO
     </span>
     <!--
-      As três luzes do comp. O quadrado é vazado, e vazado é o estado: o
-      protocolo prova que a ideia existe (`NoticeReason::SubsystemChanged`) e
-      não carrega **qual** subsistema nem **em que estado**, então hoje só se
-      pode dizer "algo mudou". Três luzes acesas em fósforo seriam três
-      afirmações de saúde que ninguém mediu.
+      Aqui ficavam as três luzes MELCHIOR · BALTHASAR · CASPER, e elas saíram.
+
+      O argumento antigo era que o quadrado vazado **é** o estado: o protocolo
+      prova que a ideia existe (`NoticeReason::SubsystemChanged`) e não carrega
+      qual subsistema nem em que estado, então três luzes sempre vazadas eram a
+      forma honesta de dizer "não medido". O que esse argumento não respondia é
+      por que a fileira estava na tela. Ela nunca mediu nada e nunca vai medir:
+      não há campo por trás dela em lugar nenhum do core, e uma luz que não mede
+      é cenário se passando por instrumento — no meio de uma barra onde tudo o
+      mais (ATRASO, JITTER, DISTÚRBIO) é medida de verdade, ela ensina a ler as
+      vizinhas como enfeite também.
+
+      A telemetria que **informa** fica inteira; o que sai é a fileira que só
+      decorava. Se um dia o protocolo disser qual subsistema mudou e para quê,
+      este é o lugar dela de volta.
     -->
-    <ol class="luzes" aria-label="subsistemas — estado não medido">
-      <li><span class="luz-marca" aria-hidden="true"></span>MELCHIOR</li>
-      <li><span class="luz-marca" aria-hidden="true"></span>BALTHASAR</li>
-      <li><span class="luz-marca" aria-hidden="true"></span>CASPER</li>
-    </ol>
   </footer>
 </section>
 
@@ -1333,14 +1318,15 @@
 -->
 <section id="tela-chamada" class="tela" tabindex="-1" hidden
          data-foco="chamada-at"
-         data-anuncio="Chamada. Um cartão por piloto no Cage.">
+         data-anuncio="Chamada. Um cartão por pessoa na sala de voz.">
   <div class="chamada">
 
     <!-- ---------------- a coluna do Cage ---------------- -->
     <div class="chamada-cage">
       <div class="chamada-barra">
         <!--
-          `JAULA 01` no comp: placa laranja com texto no negro absoluto
+          `JAULA 01` no comp, e aqui `SALA DE VOZ`: placa laranja com texto no
+          negro absoluto
           (inventário §12 — no v2 tudo que é cartela é inversão, e o nome do
           Cage nesta tela é nomeado ali explicitamente).
 
@@ -1350,7 +1336,7 @@
           endereço interno onde vai um nome. A placa diz que tipo de lugar é
           este, e o nome ao lado diz qual.
         -->
-        <span class="chamada-placa">JAULA</span>
+        <span class="chamada-placa">SALA DE VOZ</span>
         <div class="chamada-quem">
           <span id="chamada-nome" class="chamada-nome">——</span>
         </div>
@@ -1391,14 +1377,14 @@
         `limit` assentos e nada garante que sejam quatro. Esconder o quinto
         piloto é a única forma de esta tela mentir sobre quem está na sala.
       -->
-      <ol id="chamada-grade" class="chamada-grade" aria-label="pilotos no Cage"></ol>
+      <ol id="chamada-grade" class="chamada-grade" aria-label="pessoas na sala de voz"></ol>
 
       <div class="chamada-acoes">
         <!--
-          Os dois primeiros dizem em que estado a coisa **está**, e o v3 os
-          escreve em palavra corrente: `MICROFONE DESLIGADO` onde o v2 dizia
-          `A.T. FIELD ATIVO`. O nome do tema não some — ele fica na nota, que é
-          onde alguém o aprende sem precisar dele para operar o botão.
+          Os dois primeiros dizem em que estado a coisa **está**, e em palavra
+          corrente: `MICROFONE DESLIGADO` onde o v2 dizia `A.T. FIELD ATIVO`. O
+          nome do tema não fica em lugar nenhum — quem opera um botão de
+          microfone não deve ter de aprender uma segunda palavra para isso.
         -->
         <button id="chamada-at" class="chamada-acao chamada-acao-at" type="button"
                 data-ativo="nao">
@@ -1431,16 +1417,16 @@
         <button id="chamada-voltar" class="chamada-acao chamada-acao-voltar" type="button">
           <span class="chamada-acao-glifo" data-glifo="linhas"></span>
           <span class="chamada-acao-texto">
-            <span class="chamada-acao-titulo">VER LINHAS</span>
-            <span class="nota">volta para as Linhas e continua na chamada</span>
+            <span class="chamada-acao-titulo">VER CANAIS</span>
+            <span class="nota">volta para os canais e continua na chamada</span>
           </span>
         </button>
 
         <button id="chamada-ejetar" class="chamada-acao chamada-acao-ejetar" type="button">
           <span class="chamada-acao-glifo" data-glifo="desligar"></span>
           <span class="chamada-acao-texto">
-            <span class="chamada-acao-titulo">SAIR DA JAULA</span>
-            <span class="nota">tira o seu plug: você para de ouvir e de ser ouvido</span>
+            <span class="chamada-acao-titulo">SAIR DA SALA</span>
+            <span class="nota">você para de ouvir e de ser ouvido</span>
           </span>
         </button>
       </div>
@@ -1449,7 +1435,7 @@
     <!-- ---------------- D·04 / MONITOR DO CAGE ---------------- -->
     <aside class="chamada-monitor" aria-labelledby="titulo-monitor">
       <h2 id="titulo-monitor" class="chamada-titulo">
-        <span>MONITOR DO CAGE</span><span class="chamada-codigo">D·04</span>
+        <span>MONITOR DA SALA</span><span class="chamada-codigo">D·04</span>
       </h2>
 
       <div class="chamada-bloco chamada-bloco-falando">
@@ -1475,7 +1461,7 @@
       <div class="chamada-bloco chamada-bloco-eventos">
         <p class="rotulo">EVENTOS</p>
         <p class="nota">
-          O que esta janela viu acontecer, desde que abriu. O Dogma não guarda
+          O que esta janela viu acontecer, desde que abriu. O servidor não guarda
           histórico, então não há nada anterior a mostrar.
         </p>
         <ol id="chamada-eventos" class="chamada-eventos"
@@ -1516,12 +1502,12 @@
 <section id="tela-auth" class="tela" tabindex="-1" hidden
          data-modo="aperto"
          data-foco="auth-botao"
-         data-anuncio="Aperto de mão. Verifique a identidade deste Dogma.">
+         data-anuncio="Aperto de mão. Verifique a identidade deste servidor.">
   <div class="auth-grade">
 
     <!-- ---------------- A·02 ---------------- -->
     <div class="auth-entrada">
-      <p class="coordenada">A·02 / ENTRADA EM DOGMA CENTRAL</p>
+      <p class="coordenada">A·02 / ENTRADA NO SERVIDOR</p>
 
       <div class="auth-corpo">
         <!--
@@ -1530,13 +1516,13 @@
           `Snapshot.pattern`, que já é exatamente `Offline` / `Orange` / `Blue`.
         -->
         <div id="auth-padrao" class="cartela-padrao" data-padrao="Offline">
-          <span id="auth-padrao-rotulo" class="cartela-padrao-rotulo">PADRÃO: DESLIGADO</span>
+          <span id="auth-padrao-rotulo" class="cartela-padrao-rotulo">SEM CONEXÃO</span>
           <span id="auth-padrao-kanji" class="cartela-padrao-kanji kanji" lang="ja"></span>
         </div>
         <p id="auth-padrao-nota" class="auth-nota"></p>
 
         <div class="campo campo-auth">
-          <span class="rotulo">ENDEREÇO DO DOGMA CENTRAL</span>
+          <span class="rotulo">ENDEREÇO DO SERVIDOR</span>
           <!--
             Marcado à esquerda em laranja, como no comp: dos dois campos, só
             este tem a marca. Lá é um `input`; aqui é leitura, porque o endereço
@@ -1571,7 +1557,7 @@
           <ul class="auth-espera-fatos">
             <li>
               O pedido não vence, e não se perde. Feche o SEELE e volte amanhã:
-              ele continua guardado no Dogma, com a sua impressão digital.
+              ele continua guardado no servidor, com a sua impressão digital.
             </li>
             <li>
               Não há nada esperando desta ponta. A conexão caiu no mesmo instante
@@ -1580,7 +1566,7 @@
             </li>
             <li>
               Tentar de novo é como você descobre que foi admitido.
-              Uma tentativa por vez: bater sem parar é o que o Dogma conta e
+              Uma tentativa por vez: bater sem parar é o que o servidor conta e
               freia, e aí você fica de fora por tempo, por ter insistido.
             </li>
             <li>
@@ -1607,7 +1593,7 @@
 
     <!-- ---------------- B·02 ---------------- -->
     <div class="auth-aperto">
-      <h2 class="coordenada">B·02 / APERTO DE MÃO — MELCHIOR</h2>
+      <h2 class="coordenada">B·02 / APERTO DE MÃO</h2>
       <!--
         O comp traz oito linhas com carimbo de tempo, e §16 diz que nenhuma
         delas tem stream por trás. O que sobra e é verdade são os fatos que esta
@@ -1621,11 +1607,11 @@
 
     <!-- ---------------- C·02 ---------------- -->
     <div class="auth-dogma">
-      <h2 class="coordenada">C·02 / DOGMA</h2>
+      <h2 class="coordenada">C·02 / SERVIDOR</h2>
       <div class="auth-dogma-corpo">
         <div>
           <p id="auth-dogma-nome" class="auth-dogma-nome">——</p>
-          <p class="auth-dogma-sub">DOGMA CENTRAL</p>
+          <p class="auth-dogma-sub">SERVIDOR</p>
         </div>
         <!--
           Duas linhas, e não sete.
@@ -1644,8 +1630,8 @@
           `tela-auth.js`, e não em quatro caixas vazias na frente de quem entra.
         -->
         <dl class="auth-pares">
-          <div class="auth-par"><dt class="rotulo">CAGES</dt><dd id="auth-cages">——</dd></div>
-          <div class="auth-par"><dt class="rotulo">LINHAS</dt><dd id="auth-linhas">——</dd></div>
+          <div class="auth-par"><dt class="rotulo">SALAS DE VOZ</dt><dd id="auth-cages">——</dd></div>
+          <div class="auth-par"><dt class="rotulo">CANAIS</dt><dd id="auth-linhas">——</dd></div>
         </dl>
       </div>
     </div>
@@ -1709,7 +1695,7 @@
     <nav class="dogma-coluna" aria-label="seções da configuração">
       <div class="dogma-marca">
         <h1 class="dogma-marca-titulo">TERMINAL DOGMA</h1>
-        <p class="nota">Ajustes deste computador, e não deste Dogma.</p>
+        <p class="nota">Ajustes deste computador, e não deste servidor.</p>
       </div>
 
       <!--
@@ -1728,7 +1714,7 @@
           <button id="secao-audio" class="dogma-secao" type="button"
                   data-painel="painel-audio"
                   data-titulo="MICROFONE E SOM"
-                  data-sub="Escolha os aparelhos e ouça antes de entrar em uma jaula">
+                  data-sub="Escolha os aparelhos e ouça antes de entrar numa sala de voz">
             <span class="dogma-secao-icone" data-glifo="audio"></span>
             <span class="dogma-secao-texto">
               <span class="dogma-secao-nome">ÁUDIO</span>
@@ -1759,7 +1745,7 @@
           <button id="secao-identidade" class="dogma-secao" type="button"
                   data-painel="painel-identidade"
                   data-titulo="IDENTIDADE"
-                  data-sub="A chave que prova quem você é nos Dogmas Centrais">
+                  data-sub="A chave que prova quem você é nos servidores">
             <span class="dogma-secao-icone" data-glifo="chave"></span>
             <span class="dogma-secao-texto">
               <span class="dogma-secao-nome">IDENTIDADE</span>
@@ -1965,7 +1951,7 @@
               </li>
               <li class="dogma-atalho">
                 <span class="dogma-atalho-texto">
-                  <span class="dogma-atalho-acao">Buscar na Linha aberta</span>
+                  <span class="dogma-atalho-acao">Buscar no canal aberto</span>
                   <span class="dogma-atalho-desc">põe o cursor na busca, como no
                     terminal</span>
                 </span>
@@ -2010,18 +1996,18 @@
           <div class="dogma-bloco">
             <div class="dogma-bloco-topo">
               <h3 class="dogma-bloco-nome">SUA IDENTIDADE</h3>
-              <p class="nota">A chave que prova quem você é nos Dogmas</p>
+              <p class="nota">A chave que prova quem você é nos servidores</p>
             </div>
             <div class="dogma-bloco-corpo">
               <div class="dogma-par">
                 <span class="rotulo">APELIDO EM USO</span>
                 <span id="dogma-apelido" class="dogma-par-valor ausente">——</span>
               </div>
-              <p class="dogma-frase">Neste Dogma os apelidos são presos a chaves.
+              <p class="dogma-frase">Neste servidor os apelidos são presos a chaves.
                 O seu ficou reservado para a sua chave no dia em que você entrou
                 pela primeira vez, e ninguém mais consegue usá-lo.</p>
               <p class="dogma-frase">A chave mora nesta máquina, num arquivo só
-                seu. Perdê-la ou trocá-la custa o apelido em <em>todo</em> Dogma
+                seu. Perdê-la ou trocá-la custa o apelido em <em>todo</em> servidor
                 que você já visitou, e não há como recuperá-lo sem um operador de
                 cada um deles.</p>
             </div>
@@ -2091,7 +2077,7 @@
                     programa aberto, e nos outros dois a janela que ficasse de pé
                     continuaria rodando o programa velho.</p>
                   <p>Uma sessão aberta cai junto. E se este computador estiver
-                    <strong>hospedando um Dogma nesta janela</strong>, ele cai
+                    <strong>hospedando um servidor nesta janela</strong>, ele cai
                     também: todo mundo que estiver dentro sai na hora, sem aviso
                     prévio nenhum da sua parte.</p>
                   <p>Falhar no meio não deixa meia instalação: o pacote é
@@ -2140,7 +2126,7 @@
   <div class="boot">
     <h1 class="boot-marca fim">ENLACE ENCERRADO</h1>
     <p id="fim-motivo" class="fim-motivo"></p>
-    <button id="botao-voltar" class="botao" type="button">EJETAR</button>
+    <button id="botao-voltar" class="botao" type="button">VOLTAR À ENTRADA</button>
   </div>
 </section>
 
@@ -2181,20 +2167,20 @@
       <section>
         <h3 class="ajuda-secao-nome">AS PALAVRAS</h3>
         <dl class="ajuda-lista">
-          <dt class="ajuda-termo">DOGMA</dt>
-          <dd class="ajuda-diz">O servidor. Alguém hospeda, e você entra nele.</dd>
-          <dt class="ajuda-termo">PILOTO</dt>
-          <dd class="ajuda-diz">Você. O apelido é seu: ninguém mais consegue usá-lo neste Dogma.</dd>
-          <dt class="ajuda-termo">CAGE</dt>
-          <dd class="ajuda-diz">Sala de voz. Entre numa para falar.</dd>
-          <dt class="ajuda-termo">LINHA</dt>
-          <dd class="ajuda-diz">Canal de texto.</dd>
-          <dt class="ajuda-termo">A.T. FIELD</dt>
-          <dd class="ajuda-diz">Seu microfone fechado. Ninguém ouve você enquanto ele estiver de pé.</dd>
-          <dt class="ajuda-termo">SYNC</dt>
+          <dt class="ajuda-termo">SERVIDOR</dt>
+          <dd class="ajuda-diz">Alguém hospeda, e você entra nele.</dd>
+          <dt class="ajuda-termo">APELIDO</dt>
+          <dd class="ajuda-diz">Como os outros veem você. É seu: ninguém mais consegue usá-lo neste servidor.</dd>
+          <dt class="ajuda-termo">SALA DE VOZ</dt>
+          <dd class="ajuda-diz">Entre numa para falar.</dd>
+          <dt class="ajuda-termo">CANAL</dt>
+          <dd class="ajuda-diz">Onde se conversa por escrito.</dd>
+          <dt class="ajuda-termo">MUDO</dt>
+          <dd class="ajuda-diz">Seu microfone fechado. Ninguém ouve você enquanto ele estiver assim.</dd>
+          <dt class="ajuda-termo">SINAL</dt>
           <dd class="ajuda-diz">Quanto da sua voz está chegando inteira do outro lado.</dd>
-          <dt class="ajuda-termo">PADRÃO: AZUL</dt>
-          <dd class="ajuda-diz">O aperto de mão foi até o fim: o caminho é cifrado e a chave do Dogma confere.</dd>
+          <dt class="ajuda-termo">CONEXÃO SEGURA</dt>
+          <dd class="ajuda-diz">O aperto de mão foi até o fim: o caminho é cifrado e a chave do servidor confere.</dd>
         </dl>
       </section>
 
@@ -2209,7 +2195,7 @@
           <dt class="ajuda-termo"><span class="ajuda-tecla">ESPAÇO</span></dt>
           <dd class="ajuda-diz">Segure para falar, no modo tecla.</dd>
           <dt class="ajuda-termo"><span class="ajuda-tecla">/</span></dt>
-          <dd class="ajuda-diz">Procurar no que já foi dito nesta Linha.</dd>
+          <dd class="ajuda-diz">Procurar no que já foi dito neste canal.</dd>
           <dt class="ajuda-termo"><span class="ajuda-tecla">ENTER</span></dt>
           <dd class="ajuda-diz">Na busca, vai para a próxima ocorrência. Com Shift, volta.</dd>
           <dt class="ajuda-termo"><span class="ajuda-tecla">?</span></dt>

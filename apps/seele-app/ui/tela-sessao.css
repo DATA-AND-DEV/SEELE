@@ -2,7 +2,8 @@
 
    A composição do comp **v3**, tela `principal`
    (`.superpowers/sdd/comp-inventario-v3.md` §6): cabeçalho, quatro colunas,
-   rodapé de telemetria. Carrega depois de `base.css`, e depende disso:
+   rodapé de telemetria. Os pontos de quebra que decidem a ordem em que essas
+   colunas cedem estão no rodapé desta folha, e o porquê da ordem está lá. Carrega depois de `base.css`, e depende disso:
    `.compor input`, `.busca input`, `.convite-link` e `.volume` refinam o
    `input` de lá; `.busca .botao-fantasma` e `.botao-falar[data-ativo]` refinam
    botões de lá; e `.canais-cabeca .nota`, `.operador-frase` e `.compor-nota`
@@ -163,13 +164,20 @@
 
 .topo .botao-fantasma { align-self: center; margin-right: 16px; }
 
-/* A cartela de padrão do comp é Saira 900 com tracking largo: ela é a primeira
-   coisa que se lê ao voltar para a janela, e era 11px de texto corrido. */
+/* A cartela de estado da conexão. Saira 900 com tracking largo, como no comp:
+   ela é a primeira coisa que se lê ao voltar para a janela, e era 11px de texto
+   corrido.
+
+   `nowrap` porque a frase mais longa das três — a de conexão não verificada —
+   tem três palavras, e o cabeçalho tem 56px de altura: deixá-la quebrar seria
+   deixá-la sair pela borda de cima. Quem cede largura é a régua ao lado, que é
+   um vão. */
 .padrao {
   font-family: var(--seele-display);
   font-weight: 900;
   font-size: 16px;
   letter-spacing: 0.12em;
+  white-space: nowrap;
   color: var(--seele-padrao-azul);
 }
 .padrao[data-padrao="Orange"] { color: var(--seele-laranja-nerv); }
@@ -237,9 +245,9 @@
   min-height: 0;
 }
 
-/* ---------- coluna 1: a trilha de Dogmas ----------
+/* ---------- coluna 1: a trilha de servidores ----------
    60px de largura no v3, contra os 56px do v2, e o mesmo botão de 56px de
-   altura por Dogma. A marca de 2px na borda esquerda é a mesma técnica de
+   altura por servidor. A marca de 2px na borda esquerda é a mesma técnica de
    estado que os Cages usam logo ao lado, e é de propósito que seja a mesma:
    são duas listas de coisas em que se está ou não se está. */
 .trilha {
@@ -251,7 +259,7 @@
 }
 
 /* `REDES`, a faixa de 24px que o v3 põe no alto da trilha. Ela é o que diz que
-   esta coluna de siglas é uma lista de Dogmas e não um menu — sem ela, `T3`
+   esta coluna de siglas é uma lista de servidores e não um menu — sem ela, `T3`
    sozinho num quadrado não é o nome de nada. */
 .trilha-titulo {
   margin: 0;
@@ -283,7 +291,7 @@
   cursor: pointer;
 }
 
-/* O Dogma em que se está. Desabilitado porque apertá-lo seria entrar onde já se
+/* O servidor em que se está. Desabilitado porque apertá-lo seria entrar onde já se
    está — mas ele não é decoração: é o rótulo da coluna, e `aria-current` diz
    isso a quem escuta a tela. O `opacity` de `.botao-estado:disabled` não vale
    aqui; um item apagado seria o contrário do que ele significa. */
@@ -297,7 +305,7 @@
 /* O `+` de 48px. Apagado e desabilitado: ele nomeia uma capacidade que este
    produto não tem, e o `title` diz qual. Sem `opacity`, que faria dele um
    controle meio apagado ao lado de um controle apagado — a diferença entre "o
-   Dogma em que estou" e "o que não dá para fazer" tem que continuar legível. */
+   servidor em que estou" e "o que não dá para fazer" tem que continuar legível. */
 .trilha-mais {
   height: 48px;
   flex: 0 0 auto;
@@ -436,8 +444,8 @@
 
    As duas listas dividem **um** contêiner em vez de rolarem cada uma no seu.
    Duas áreas de rolagem numa coluna de 268px dão duas janelinhas de meia dúzia
-   de linhas cada, e a pessoa que procura uma Linha passa a ter de descobrir
-   qual das duas rola. Aqui o cabeçalho `LINHAS` sobe junto com o conteúdo, que
+   de linhas cada, e a pessoa que procura um canal passa a ter de descobrir
+   qual das duas rola. Aqui o cabeçalho dos canais sobe junto com o conteúdo, que
    é o que uma coluna de canais faz em qualquer cliente de chat.
 
    Coluna flex, e não bloco: é o que mantém o `flex: 0 0 auto` dos filhos
@@ -583,7 +591,7 @@
 
 /* ---- destruir uma sala ----
 
-   Os dois botões do Cage numa fileira. `ENTRAR NA JAULA` fica com o espaço, e
+   Os dois botões do Cage numa fileira. `ENTRAR NA SALA` fica com o espaço, e
    `APAGAR` toma o que o rótulo dele precisa: o que se faz nesta lista o dia
    inteiro é entrar e sair, e apagar é o que se faz uma vez.
 
@@ -761,7 +769,7 @@
 
 .botao-estado:disabled { opacity: 0.5; cursor: default; }
 
-/* ---------- coluna 3: a Linha aberta ---------- */
+/* ---------- coluna 3: o canal aberto ---------- */
 
 .painel-linha { background: var(--seele-negro-absoluto); }
 
@@ -795,8 +803,8 @@
   white-space: nowrap;
 }
 
-/* Sem Linha aberta a frase é uma frase — em minúscula, na tipografia de dado,
-   para não parecer o nome de uma Linha chamada "nenhuma linha aberta". */
+/* Sem canal aberto a frase é uma frase — em minúscula, na tipografia de dado,
+   para não parecer o nome de um canal chamado "nenhum canal aberto". */
 .linha-nome-vazio {
   font-family: var(--seele-mono);
   font-weight: normal;
@@ -831,6 +839,9 @@
 
 /* ---------- mensagens ---------- */
 
+/* O vão de 14px que separava toda mensagem virou dois vãos: 4px dentro de uma
+   rajada da mesma pessoa e 14px entre rajadas. O espaço passa a dizer o que o
+   nome repetido dizia, e é o que faz o agrupamento se ler sem contar nomes. */
 .mensagens {
   list-style: none;
   margin: 0;
@@ -839,8 +850,11 @@
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 4px;
 }
+
+.mensagem:not(.mensagem-segue) { margin-top: 10px; }
+.mensagens > li:first-child { margin-top: 0; }
 
 /* A grade do comp v3: 34px de avatar, o resto para autor, hora e corpo, com uma
    marca de 2px à esquerda. A marca é onde o comp separa mensagem de sistema e
@@ -900,6 +914,51 @@
   color: var(--seele-osso-apagado);
   font-variant-numeric: tabular-nums;
 }
+
+/* ---- a continuação de uma rajada ----
+
+   Mesma pessoa, mesmo dia, e perto no relógio: o avatar e o nome não se
+   repetem, e a calha de 34px que o avatar ocupava recebe a hora. A hora
+   **fica**, e é o ponto: a solução comum é escondê-la até alguém passar o
+   ponteiro por cima, e um dado que só o ponteiro revela é um dado que não está
+   na tela para quem usa teclado, para quem toca, e para quem nunca varreu
+   aquela linha por acaso. */
+.mensagem-hora-calha {
+  width: 34px;
+  display: flex;
+  justify-content: flex-end;
+  /* Alinhada com a primeira linha do corpo, e não com o topo da caixa: o corpo
+     tem `line-height: 1.55`, então o topo dele não é onde o texto começa. */
+  padding-top: 3px;
+}
+
+/* O divisor de dia. Um rótulo entre dois traços, que é a forma que não pede
+   cor nenhuma para se ler como divisão.
+
+   `HOJE` e `ONTEM` por extenso; ver `rotuloDoDia`. Os traços vêm de
+   `::before`/`::after` porque são desenho: um `<span>` vazio de cada lado
+   seria dois nós a mais por dia de conversa, e nenhum deles diz nada. */
+.mensagens-dia {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0 4px;
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.2em;
+  color: var(--seele-rotulo-painel);
+}
+
+.mensagens-dia::before,
+.mensagens-dia::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--seele-linha);
+}
+
+/* A primeira mensagem do dia já foi separada pelo divisor. */
+.mensagens-dia + .mensagem { margin-top: 0; }
 
 /* `pre-wrap`, e isto é contratual: a busca do outro lado da ponte indexou esta
    string com as quebras de linha dentro, e colapsá-las aqui deslocaria o realce
@@ -1176,7 +1235,7 @@
   white-space: pre-line;
 }
 
-/* ---------- coluna 4: Taxa de Sincronização ---------- */
+/* ---------- coluna 4: o sinal ---------- */
 
 /* A cartela invertida. O inventário §12 endurece essa regra no v2: cabeçalho de
    painel de sincronia é **bloco sólido de cor com texto no negro absoluto**, e
@@ -1641,3 +1700,96 @@
 
 /* A nota ocupa a largura inteira, embaixo dos dois campos. */
 .criar .nota { grid-column: 1 / -1; }
+
+/* ---------- o que aperta primeiro, quando a janela aperta ----------
+
+   As quatro colunas somam 656px de largura fixa antes de a conversa receber um
+   pixel. Numa janela de mil e pouco isso deixa a conversa com menos da metade
+   da tela, e é aí que a régua vira decisão: **qual coluna cede primeiro**.
+
+   A ordem é esta, e ela não é a ordem de importância — é a ordem do que se
+   pode ir buscar noutro lugar:
+
+   1. O painel de sinal recolhe primeiro. Ele é medida permanente e ninguém
+      trabalha dentro dele; a mesma lista, com as mesmas pessoas e os mesmos
+      números, é a tela de chamada, a um botão do cabeçalho.
+   2. A coluna de salas e canais vira gaveta depois. Ela é navegação — serve
+      para chegar a um canal, não para ficar aberta enquanto se lê o que está
+      dentro dele —, e a porta dela é o `CANAIS` que `tela-sessao.js` põe na
+      barra do canal aberto.
+   3. A conversa não cede nunca antes das outras duas. É o painel onde se
+      passam horas e o único desta tela em que a largura muda o que cabe numa
+      linha: espremê-la primeiro é encurtar a linha de texto para preservar
+      duas colunas que ninguém está lendo.
+
+   Os dois números são onde cada coisa deixa de caber, e não uma classe de
+   dispositivo: 1240px é onde a conversa desce de 600px com o painel de sinal
+   aberto, e 900px é onde ela desce disso outra vez sem ele. Não há um terceiro
+   ponto porque não há uma quarta coluna para tirar. */
+
+/* A porta da gaveta não existe fora da largura em que a gaveta existe. Este é
+   o estado normal dela, e o `@media` de baixo é a exceção. */
+.linha-canais { display: none; }
+
+@media (max-width: 1240px) {
+  .paineis { grid-template-columns: 60px 268px minmax(0, 1fr); }
+  .painel-sync { display: none; }
+  /* A conversa passa a ser a última coluna, e a divisória dela seria uma linha
+     colada na borda da janela. */
+  .painel-linha { border-right: none; }
+  /* Oito métricas numa fileira de largura fixa não cabem, e o que não cabe
+     some sem dizer que existia. Rolando, ele continua alcançável — e a régua
+     de `body { overflow: hidden }` continua valendo para a página. */
+  .telemetria { overflow-x: auto; }
+}
+
+@media (max-width: 900px) {
+  /* `relative` porque a gaveta se posiciona contra esta caixa. */
+  .paineis {
+    position: relative;
+    grid-template-columns: 60px minmax(0, 1fr);
+  }
+
+  /* Fechada, ela não existe: `display: none` e não uma coluna empurrada para
+     fora da tela. Fora da tela ela continua no caminho do teclado, e tabular
+     por trinta botões invisíveis até o campo de mensagem é pior do que não ter
+     a coluna. */
+  .painel-canais { display: none; }
+
+  #tela-sessao[data-canais="abertos"] .painel-canais {
+    display: flex;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 60px;
+    width: 268px;
+    z-index: 2;
+    /* A borda forte é o que separa a gaveta do que ela cobre. Sem sombra:
+       nenhuma superfície deste produto tem uma. */
+    border-right: 1px solid var(--seele-linha-forte);
+  }
+
+  /* A porta da gaveta. Ela existe só aqui — acima deste ponto a coluna está na
+     tela, e um botão que abre o que já está aberto é um botão que não faz
+     nada. */
+  .linha-canais {
+    display: flex;
+    align-items: center;
+    min-height: 34px;
+    padding: 0 12px;
+    flex: 0 0 auto;
+    font: inherit;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: var(--seele-osso-apagado);
+    background: none;
+    border: 1px solid var(--seele-linha-forte);
+    cursor: pointer;
+  }
+
+  .linha-canais:hover,
+  .linha-canais[aria-expanded="true"] {
+    color: var(--seele-laranja-nerv);
+    border-color: var(--seele-laranja-nerv);
+  }
+}

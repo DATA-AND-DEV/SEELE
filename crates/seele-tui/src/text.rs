@@ -24,21 +24,23 @@ pub fn alert(reason: AlertReason) -> &'static str {
     match reason {
         AlertReason::Mentioned => "VOCÊ FOI CHAMADO",
         AlertReason::SubsystemChanged => "UM SUBSISTEMA MUDOU DE ESTADO",
-        AlertReason::SyncDegraded => "TAXA DE SINCRONIZAÇÃO EM QUEDA",
-        AlertReason::CageEntryRefused => "ENTRADA NO CAGE RECUSADA",
+        AlertReason::SyncDegraded => "SINAL EM QUEDA",
+        AlertReason::CageEntryRefused => "ENTRADA NA SALA DE VOZ RECUSADA",
         AlertReason::PermissionDenied => "PERMISSÃO NEGADA",
-        AlertReason::CageFull => "CAGE LOTADO",
+        AlertReason::CageFull => "SALA DE VOZ LOTADA",
         AlertReason::OperatorNotice => "AVISO DO OPERADOR",
-        AlertReason::RateLimited => "VOCÊ ESTÁ FALANDO RÁPIDO DEMAIS PARA O DOGMA",
-        AlertReason::MovedByOperator => "UM OPERADOR MOVEU O SEU PLUG",
+        AlertReason::RateLimited => "VOCÊ ESTÁ FALANDO RÁPIDO DEMAIS PARA O SERVIDOR",
+        AlertReason::MovedByOperator => "UM OPERADOR MOVEU VOCÊ DE SALA",
         // O plug já saiu e a conversa já saiu da tela quando isto chega. Sem a
         // frase, o que resta é uma sala que sumiu sozinha — que de onde se lê é
         // igualzinho a um cliente que perdeu a conta de onde estava.
-        AlertReason::CageDeleted => "A JAULA EM QUE VOCÊ ESTAVA FOI APAGADA",
-        AlertReason::LineDeleted => "A LINHA QUE VOCÊ LIA FOI APAGADA, COM TUDO QUE HAVIA NELA",
+        AlertReason::CageDeleted => "A SALA DE VOZ EM QUE VOCÊ ESTAVA FOI APAGADA",
+        AlertReason::LineDeleted => {
+            "O CANAL DE TEXTO QUE VOCÊ LIA FOI APAGADO, COM TUDO QUE HAVIA NELE"
+        }
         // A única recusa desta lista, e a única que ensina o passo seguinte.
         AlertReason::LastCage => {
-            "ESTE É O ÚNICO CAGE DO DOGMA. FAÇA OUTRA SALA ANTES DE APAGAR ESTA"
+            "ESTA É A ÚNICA SALA DE VOZ DO SERVIDOR. FAÇA OUTRA ANTES DE APAGAR ESTA"
         }
     }
 }
@@ -51,7 +53,7 @@ pub fn alert(reason: AlertReason) -> &'static str {
 #[must_use]
 pub fn disconnect(reason: DisconnectReason) -> &'static str {
     match reason {
-        DisconnectReason::Incompatible => "VERSÃO INCOMPATÍVEL COM ESTE DOGMA",
+        DisconnectReason::Incompatible => "VERSÃO INCOMPATÍVEL COM ESTE SERVIDOR",
         // specs/08-seguranca.md requires login failures to be uniform, so this
         // says nothing about whether the account exists. Wording that leaked
         // that difference would undo the property the protocol went to trouble
@@ -60,9 +62,9 @@ pub fn disconnect(reason: DisconnectReason) -> &'static str {
         DisconnectReason::HandshakeTimeout => "TEMPO ESGOTADO NA SINCRONIZAÇÃO INICIAL",
         DisconnectReason::Kicked => "DESCONECTADO POR UM OPERADOR",
         DisconnectReason::Banned => "ACESSO BARRADO POR UM OPERADOR",
-        DisconnectReason::DogmaFull => "DOGMA LOTADO",
+        DisconnectReason::DogmaFull => "SERVIDOR LOTADO",
         DisconnectReason::ScheduledMaintenance => "MANUTENÇÃO PROGRAMADA",
-        DisconnectReason::ServerShuttingDown => "O DOGMA ESTÁ ENCERRANDO",
+        DisconnectReason::ServerShuttingDown => "O SERVIDOR ESTÁ ENCERRANDO",
         DisconnectReason::Timeout => "ENLACE PERDIDO",
         DisconnectReason::ProtocolViolation => "PROTOCOLO VIOLADO",
         DisconnectReason::RateLimited => "LIMITE DE MENSAGENS EXCEDIDO",

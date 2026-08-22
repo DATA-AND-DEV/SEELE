@@ -1,11 +1,11 @@
-// SEELE · Entry Plug — a entrada em Dogma Central (`#tela-auth`).
+// SEELE · Entry Plug — a entrada no servidor (`#tela-auth`).
 //
 // Duas entradas e dois trabalhos, escolhidos por `data-modo` na `<section>`.
 //
 // `aperto` — chega pelo `connect` bem-sucedido de `tela-boot.js` e sai para
 // `#tela-sessao`. É o aperto de mão virando etapa: antes dela, o único vestígio
-// dele na janela era o `PADRÃO: AZUL` no cabeçalho da sessão, escrito depois de
-// tudo já ter acontecido, inclusive de o plug já estar dentro de um Cage.
+// dele na janela era o `CONEXÃO SEGURA` no cabeçalho da sessão, escrito depois
+// de tudo já ter acontecido, inclusive de já se estar dentro de uma sala de voz.
 //
 // `espera` — chega pelo `connect` **derrubado** com `AdmissionPending`, a
 // portaria do ADR 0030. É trabalho novo, e nasceu de um teste de verdade: um
@@ -16,7 +16,7 @@
 //
 // **Nada tenta de novo sozinho.** Uma tela que repete a tentativa transforma o
 // «nada espera» do ADR 0030 em espera com outro nome, e ainda bate na porta do
-// Dogma de outra pessoa sem parar, contra os baldes de fichas do ADR 0025. Cada
+// servidor de outra pessoa sem parar, contra os baldes de fichas do ADR 0025. Cada
 // batida é um botão apertado por alguém.
 //
 // ---- o que esta tela sabe, e o que ela deixou de desenhar ----
@@ -26,17 +26,17 @@
 //
 // Quatro campos do comp v2 saíram, e a saída é a correção de uma convenção
 // aplicada longe demais. Eles eram desenhados com a moldura de pé e o valor
-// escrito como ausente — a contagem de operadores do Dogma, a rota, o codec e a
+// escrito como ausente — a contagem de operadores do servidor, a rota, o codec e a
 // chave de identidade local —, e nenhum deles existe: os dois primeiros não são
 // conceito em lugar nenhum do protocolo, o codec só ganha valor depois de o
-// plug entrar num Cage e nesta tela ninguém entrou ainda, e a chave local não
+// entrar numa sala de voz e nesta tela ninguém entrou ainda, e a chave local não
 // atravessa a FFI. Mostrar a falta serve a uma lacuna que se pretende fechar;
 // nenhuma destas se fechava, e sete campos com quatro travessões não ensinam
 // nada — dão uma tela que parece quebrada. A lacuna fica registrada aqui e no
 // `index.html`, que é onde lacuna se registra.
 //
 // O carimbo de hora das linhas do B·02 é o relógio local no instante em que
-// **esta janela** observou o fato. Não é um tempo que veio do Dogma, e não
+// **esta janela** observou o fato. Não é um tempo que veio do servidor, e não
 // pretende ser: é estado da casca, da mesma natureza do relógio do cabeçalho.
 // Em `espera` é ele que guarda o histórico das tentativas, que é a única coisa
 // que essa tela tem para contar e ninguém mais conta.
@@ -47,30 +47,28 @@
 let aperto = null;
 
 /**
- * As três frases do padrão da sessão.
+ * As três frases do estado da conexão.
  *
  * `Snapshot.pattern` já é exatamente `Offline` / `Orange` / `Blue`, decidido no
- * core — a casca não classifica nada aqui, só escolhe como dizer.
+ * core — a casca não classifica nada aqui, só escolhe como dizer. A chave
+ * continua sendo a do protocolo; o que mudou é a palavra que sai na tela.
  *
- * As frases de `Orange` e `Blue` são as do comp, palavra por palavra. `Offline`
- * não tem frase no comp: lá a tela só conhece dois padrões, porque lá nunca há
- * uma sessão que ainda não abriu. Aqui há.
+ * Os três rótulos dizem a mesma coisa que os `PADRÃO: …` do comp diziam, sem
+ * pedir que se aprenda uma cor antes: o que interessa a quem lê é se a
+ * identidade do outro lado foi conferida.
  */
 const PADROES = {
   Offline: {
-    rotulo: "PADRÃO: DESLIGADO",
-    kanji: "",
-    nota: "Sem sessão aberta. Nada a verificar até o Dogma responder.",
+    rotulo: "SEM CONEXÃO",
+    nota: "Sem sessão aberta. Nada a verificar até o servidor responder.",
   },
   Orange: {
-    rotulo: "PADRÃO: LARANJA",
-    kanji: "橙",
-    nota: "Sessão não verificada. Captura suspensa até MELCHIOR confirmar a chave.",
+    rotulo: "CONEXÃO NÃO VERIFICADA",
+    nota: "Sessão não verificada. Captura suspensa até a chave ser confirmada.",
   },
   Blue: {
-    rotulo: "PADRÃO: AZUL",
-    kanji: "青",
-    nota: "Identidade confirmada pelos três subsistemas. Captura liberada.",
+    rotulo: "CONEXÃO SEGURA",
+    nota: "Identidade confirmada. Captura liberada.",
   },
 };
 
@@ -104,7 +102,7 @@ function entrarNaAutenticacao(snapshot, veredito, endereco) {
   desenharDogmaDaEntrada(snapshot);
 
   // O primeiro passo do botão: ler o que o aperto de mão decidiu. O segundo,
-  // que é o que insere o plug, só existe depois dele.
+  // que é o que entra no servidor, só existe depois dele.
   const botao = $("auth-botao");
   botao.dataset.passo = "verificar";
   botao.textContent = "VERIFICAR IDENTIDADE";
@@ -121,27 +119,33 @@ function entrarNaAutenticacao(snapshot, veredito, endereco) {
   abrirTela("tela-auth");
 }
 
-/** A cartela de padrão, a nota que a acompanha, e o botão que a veste. */
+/**
+ * A cartela do estado da conexão, a nota que a acompanha, e o botão que a veste.
+ *
+ * O kanji ao lado do rótulo saiu junto com o resto do japonês decorativo. O
+ * elemento continua na marcação e é esvaziado aqui: uma cartela que guardasse o
+ * 青 da entrada anterior ficaria com o único caractere que já não é dito.
+ */
 function desenharPadrao(snapshot) {
   const padrao = PADROES[snapshot?.pattern] ?? PADROES.Offline;
   const cartela = $("auth-padrao");
   cartela.dataset.padrao = snapshot?.pattern ?? "Offline";
   $("auth-padrao-rotulo").textContent = padrao.rotulo;
-  $("auth-padrao-kanji").textContent = padrao.kanji;
+  $("auth-padrao-kanji").textContent = "";
   $("auth-padrao-nota").textContent = padrao.nota;
   $("auth-botao").dataset.padrao = snapshot?.pattern ?? "Offline";
 }
 
 /**
- * A ficha do Dogma — C·02.
+ * A ficha do servidor — C·02.
  *
- * Três valores, e os três saem do snapshot: o nome do Dogma, quantos Cages e
- * quantas Linhas. O travessão que sobra é o do carregamento, e não o de um
- * valor que não existe: um snapshot sem lista é um snapshot que ainda não
- * chegou.
+ * Três valores, e os três saem do snapshot: o nome do servidor, quantas salas
+ * de voz e quantos canais de texto. O travessão que sobra é o do carregamento,
+ * e não o de um valor que não existe: um snapshot sem lista é um snapshot que
+ * ainda não chegou.
  *
  * O codec estava aqui e saiu. Ele lia `telemetry.bitrate_bps`, que só ganha
- * valor depois de o plug entrar num Cage — e nesta tela ninguém entrou ainda,
+ * valor depois de se entrar numa sala de voz — e nesta tela ninguém entrou ainda,
  * então ele saía `——` em toda entrada que já aconteceu. Um campo que é sempre
  * travessão é um campo, e não uma lacuna: a telemetria de verdade está na barra
  * permanente da sessão, que é onde ela tem o que medir.
@@ -182,7 +186,7 @@ function registrar(texto, tom) {
  * Nenhuma comparação acontece aqui — ela já aconteceu, em Rust, dentro do
  * `connect` (ADR 0003), e o que chegou foi o resultado mais a impressão digital
  * para uma pessoa conferir por outro canal. O passo existe porque esse
- * resultado merece uma tela antes de o plug entrar, e não uma tarja depois.
+ * resultado merece uma tela antes de se entrar, e não uma tarja depois.
  */
 async function verificarIdentidade() {
   const frase = fraseDoVeredito(aperto?.veredito);
@@ -195,8 +199,8 @@ async function verificarIdentidade() {
     registrar("CHAVE CONFERIDA — NADA MUDOU DESDE A ÚLTIMA ENTRADA");
   }
 
-  // O padrão pode ter mudado entre o `connect` e agora; o valor volta a ser
-  // lido em vez de deduzido. `atualizar()` não serve porque desenha a sessão.
+  // O estado da conexão pode ter mudado entre o `connect` e agora; o valor
+  // volta a ser lido em vez de deduzido. `atualizar()` não serve porque desenha a sessão.
   try {
     const snapshot = await invoke("snapshot");
     aperto.snapshot = snapshot;
@@ -209,11 +213,11 @@ async function verificarIdentidade() {
 
   const botao = $("auth-botao");
   botao.dataset.passo = "inserir";
-  // «ENTRAR NO DOGMA», e não «INSERIR PLUG», porque inserir o plug deixou de
-  // acontecer aqui: entrar numa jaula virou ato à parte, apertado por quem
-  // quer voz. Um botão que promete uma coisa e faz outra é pior que um botão
-  // sem nome — e este prometia ligar o microfone.
-  botao.textContent = "ENTRAR NO DOGMA";
+  // «ENTRAR NO SERVIDOR», e não «CONECTAR», porque a conexão já aconteceu:
+  // entrar numa sala de voz virou ato à parte, apertado por quem quer voz. Um
+  // botão que promete uma coisa e faz outra é pior que um botão sem nome — e
+  // este prometia ligar o microfone.
+  botao.textContent = "ENTRAR NO SERVIDOR";
 }
 
 function tomDoPadrao(snapshot) {
@@ -225,16 +229,18 @@ function tomDoPadrao(snapshot) {
 /**
  * O segundo passo: a sessão começa.
  *
- * **A Linha abre sozinha; a jaula não.** As duas coisas já foram automáticas
+ * **O canal de texto abre sozinho; a sala de voz não.** As duas coisas já foram
+ * automáticas
  * juntas, com um motivo bom — chegar numa tela vazia é chegar sem saber o que
  * fazer. O motivo continua bom para uma delas e nunca foi bom para a outra.
  *
- * Texto é passivo: ninguém te ouve por você estar lendo, então abrir a primeira
- * Linha resolve a tela vazia sem te comprometer com nada.
+ * Texto é passivo: ninguém te ouve por você estar lendo, então abrir o primeiro
+ * canal resolve a tela vazia sem te comprometer com nada.
  *
- * Entrar numa jaula não é passivo. É ocupar uma das quinze vagas, aparecer na
- * lista como presente, e pôr um microfone à disposição de uma conversa que você
- * não escolheu. Quem chegou num Dogma para ler o que perdeu acordava dentro de
+ * Entrar numa sala de voz não é passivo. É ocupar uma das quinze vagas,
+ * aparecer na lista como presente, e pôr um microfone à disposição de uma
+ * conversa que você não escolheu. Quem chegou num servidor para ler o que
+ * perdeu acordava dentro de
  * uma sala de voz sem ter apertado nada — foi o relato de quem usou: «não dá
  * para você ficar fora de uma sala».
  *
@@ -270,7 +276,7 @@ async function inserirPlug() {
 
 // ---------------------------------------------------- a espera pela portaria
 //
-// ADR 0030. Quem bate num Dogma com portaria é derrubado **no instante**, de
+// ADR 0030. Quem bate num servidor com portaria é derrubado **no instante**, de
 // propósito: segurar a conexão obrigaria a um prazo, e um prazo fabrica
 // «ninguém atendeu», que é uma resposta sobre a qual não se pode agir. O que o
 // desenho não tinha era o outro lado disso — a pessoa caía de volta na tela de
@@ -294,13 +300,13 @@ function tituloDaFrase(frase) {
  * - `AdmissionPending` **sempre** vem para cá, venha de onde vier. É a resposta
  *   que tem o que dizer e não cabe numa linha.
  * - Qualquer falha vem para cá **se esta tela já estiver na frente em espera**.
- *   Quem apertou TENTAR ENTRAR DE NOVO e não alcançou o Dogma precisa ler isso
+ *   Quem apertou TENTAR ENTRAR DE NOVO e não alcançou o servidor precisa ler isso
  *   aqui: `#boot-erro` está atrás desta tela, e uma mensagem escrita numa tela
  *   escondida é uma mensagem que ninguém recebe.
  *
  * `AdmissionDenied` chegando da tela de entrada **não** vem para cá, e a
  * assimetria é deliberada: uma recusa não é uma espera, não há o que
- * acompanhar, e a tela de entrada é onde se escolhe outro Dogma. Chegando aqui,
+ * acompanhar, e a tela de entrada é onde se escolhe outro servidor. Chegando aqui,
  * numa tentativa feita de dentro da espera, ela é o fim desta espera e é dita
  * aqui — mudar de tela para dar uma resposta que a pessoa acabou de pedir seria
  * arrancá-la do lugar em que ela perguntou.
@@ -314,8 +320,8 @@ function levarParaAEspera(falha, endereco) {
   const chegando = tela.hidden;
   const frase = fraseDeErro(falha);
   // Não há aperto de mão nenhum: o `connect` não devolveu snapshot nem veredito,
-  // e deixar os de uma conexão anterior aqui seria mostrar a ficha de um Dogma
-  // em que esta pessoa não entrou.
+  // e deixar os de uma conexão anterior aqui seria mostrar a ficha de um
+  // servidor em que esta pessoa não entrou.
   aperto = null;
   tela.dataset.modo = "espera";
   $("auth-endereco").textContent = endereco || AUSENTE;
@@ -323,20 +329,20 @@ function levarParaAEspera(falha, endereco) {
 
   // A decisão saiu e foi não. O botão continua desenhado — um botão que some é
   // um botão que a pessoa procura — e fica desabilitado com o motivo escrito
-  // embaixo, que é como esta janela já recusa apagar o último Cage.
+  // embaixo, que é como esta janela já recusa apagar a última sala de voz.
   const recusado = razao === "AdmissionDenied";
   const botao = $("auth-botao");
   botao.dataset.passo = "tentar";
   botao.textContent = "TENTAR ENTRAR DE NOVO";
-  // O botão veste o padrão da sessão, e aqui não há sessão nenhuma. Sem isto
-  // ele guardaria o azul da última que houve — um `PADRÃO: AZUL` pintado num
+  // O botão veste o estado da conexão, e aqui não há sessão nenhuma. Sem isto
+  // ele guardaria o azul da última que houve — um `CONEXÃO SEGURA` pintado num
   // botão que existe porque a entrada foi negada.
   botao.dataset.padrao = "Offline";
   botao.disabled = recusado;
   $("auth-parede").hidden = !recusado;
   $("auth-parede").textContent = recusado
     ? "Apertar de novo bate na mesma porta e recebe a mesma resposta, e cada " +
-      "batida conta contra você no Dogma. Quem pode voltar atrás é quem hospeda."
+      "batida conta contra você no servidor. Quem pode voltar atrás é quem hospeda."
     : "";
 
   if (chegando) {
@@ -382,7 +388,7 @@ async function baterDeNovo() {
  * Sai da espera pela porta por onde se entrou.
  *
  * Existe só em `espera`, e existe porque ali não há sessão: quem espera pode
- * querer outro Dogma, outro apelido, ou só fechar o assunto. No aperto de mão
+ * querer outro servidor, outro apelido, ou só fechar o assunto. No aperto de mão
  * não há esta saída, e não deve haver — lá a sessão está aberta, e o caminho de
  * volta é encerrá-la.
  */

@@ -33,7 +33,7 @@
 
 /* `pre-line` porque dois destes erros carregam duas impressões digitais para
    uma pessoa comparar — a chave que mudou (ADR 0003) e o convite que não leva a
-   este Dogma. Sem a quebra as duas refluem no mesmo parágrafo, que é exatamente
+   este servidor. Sem a quebra as duas refluem no mesmo parágrafo, que é exatamente
    a forma em que a comparação não acontece; `anywhere` porque são 64 caracteres
    sem espaço nenhum onde quebrar. */
 .erro {
@@ -200,169 +200,61 @@
   color: var(--seele-rotulo-painel);
 }
 
-/* ---- o diagrama dos três ---- */
+/* ---- a tentativa de conexão ----
 
-.magi {
+   Aqui ficava o diagrama dos três: MELCHIOR, BALTHASAR e CASPER em polígonos,
+   com um selo `SEM MEDIDA` no meio. Os três eram pintados pelo mesmo
+   `data-estado`, escrito pelo mesmo laço, porque relatavam o mesmo fato — e
+   três nomes para um dado é cenário se passando por instrumento.
+
+   Sobrou o dado: durante a conexão a pessoa precisa ver que algo acontece. A
+   marca de texto dentro carrega o estado, porque `specs/05-cliente-tui.md`
+   proíbe informação que só a cor sustente, e a pulsação só existe enquanto a
+   tentativa dura. */
+
+.boot-tentativa {
   flex: 1;
-  position: relative;
-  height: 360px;
-  min-width: 440px;
-}
-
-.magi-haste {
-  position: absolute;
-  left: 50%;
-  top: 132px;
-  width: 5px;
-  height: 74px;
-  margin-left: -2px;
-  background: var(--seele-laranja-nerv);
-}
-
-.magi-diagonal {
-  position: absolute;
-  top: 264px;
-  width: 11%;
-  height: 5px;
-  background: var(--seele-laranja-nerv);
-}
-
-.magi-diagonal-esquerda { left: 39%; transform: rotate(18deg); transform-origin: 100% 50%; }
-.magi-diagonal-direita  { left: 50%; transform: rotate(-18deg); transform-origin: 0 50%; }
-
-.magi-nos { list-style: none; margin: 0; padding: 0; }
-
-/* Bloco em carga: preenchimento escuro com o nome em laranja. Aceso: bloco de
-   fósforo com o nome em negro — a regra de inversão do §12, a mesma da cartela
-   de padrão e da pastilha de estado. O que diz qual dos dois é a marca de texto
-   ao lado do nome, nunca a cor sozinha (`specs/05-cliente-tui.md`). */
-.magi-no {
-  position: absolute;
+  min-width: 220px;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  background: var(--seele-laranja-carga);
-  color: var(--seele-laranja-nerv);
+  align-items: baseline;
+  gap: var(--seele-e2);
 }
 
-/* ---- os três carregando ----
-
-   `subsistemas("carga", "…")` já punha `data-estado="carga"` e não havia regra
-   nenhuma para ele: enquanto a conexão acontecia, os três polígonos ficavam
-   exatamente iguais aos parados. O estado existia no atributo e não na tela.
-
-   Azul e não laranja porque laranja é o acento institucional e já pinta o
-   repouso; o azul é o mesmo `PADRÃO: AZUL` que o cabeçalho da sessão usa para
-   dizer "o aperto de mão foi até o fim", e usá-lo aqui é a mesma frase mais
-   cedo.
-
-   O movimento não é decoração — `specs/07` chama decorativo de erro, e com
-   razão. Este pulso diz uma coisa que nada mais na tela diz: que a espera
-   continua viva. Some sob `prefers-reduced-motion`, e some sem perder a
-   informação: a cor de repouso da regra já é azul, então parado continua
-   distinguível de carregando. E a marca de texto (`·` → `…` → `ok`) carrega o
-   estado sem cor nenhuma, que é o que `specs/05` exige. */
-.magi-no[data-estado="carga"] {
-  background: var(--seele-azul-fraco);
-  color: var(--seele-padrao-azul);
-  animation: seele-magi-carga 1200ms ease-in-out infinite;
-}
-
-/* Escalonados na ordem em que o diagrama os lê. Os três em uníssono piscariam
-   como um alarme; em sequência lê-se como uma coisa sendo percorrida. */
-.magi-melchior[data-estado="carga"]  { animation-delay: 0ms; }
-.magi-balthasar[data-estado="carga"] { animation-delay: 200ms; }
-.magi-casper[data-estado="carga"]    { animation-delay: 400ms; }
-
-@keyframes seele-magi-carga {
-  50% {
-    background: var(--seele-padrao-azul);
-    color: var(--seele-negro-absoluto);
-  }
-}
-
-.magi-no[data-estado="ok"] {
-  background: var(--seele-fosforo);
-  color: var(--seele-negro-absoluto);
-}
-
-.magi-balthasar {
-  left: 26%;
-  top: 0;
-  width: 48%;
-  height: 144px;
-  clip-path: polygon(0 0, 100% 0, 100% 70%, 84% 100%, 16% 100%, 0 70%);
-}
-
-.magi-casper {
-  left: 0;
-  top: 168px;
-  width: 40%;
-  height: 150px;
-  clip-path: polygon(0 20%, 20% 0, 100% 0, 100% 78%, 80% 100%, 0 100%);
-}
-
-.magi-melchior {
-  right: 0;
-  top: 196px;
-  width: 40%;
-  height: 150px;
-  clip-path: polygon(0 0, 80% 0, 100% 22%, 100% 100%, 20% 100%, 0 78%);
-}
-
-.magi-nome {
-  font-family: var(--seele-display);
-  font-weight: 700;
-  font-size: 34px;
-  letter-spacing: 0.02em;
-}
-
-.magi-estado { font-family: var(--seele-mono); font-size: 13px; font-weight: normal; }
-
-/* O fundo opaco é o que "corta" os conectores por trás — no comp é a mesma
-   técnica, e é por isso que ele tem `padding: 0 8px`. */
-.magi-centro {
-  position: absolute;
-  left: 50%;
-  top: 216px;
-  transform: translateX(-50%);
-  padding: 0 8px;
-  background: var(--seele-negro-absoluto);
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: var(--seele-t-titulo);
-  line-height: 1;
-  letter-spacing: 0.06em;
-  color: var(--seele-laranja-nerv);
-}
-
-/* O selo. No comp a borda é fósforo em todo estado, por fidelidade ao
-   `ALL GREEN` do frame — mas lá ele tem `bootPct` por trás. Sem medida, verde
-   afirmaria o que ninguém apurou, então a borda é a de painel apagado. */
-.magi-selo {
-  position: absolute;
-  right: 0;
-  top: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-  padding: 6px 10px;
-  border: 2px solid var(--seele-linha-forte);
-}
-
-.magi-selo-rotulo {
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 13px;
-  letter-spacing: 0.14em;
+.boot-tentativa-rotulo {
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
   color: var(--seele-rotulo-painel);
 }
 
-.magi-selo-marca { font-size: 26px; line-height: 1; }
+.boot-tentativa-marca {
+  font-family: var(--seele-mono);
+  font-size: 13px;
+  font-weight: normal;
+  color: var(--seele-osso-apagado);
+}
 
-/* ---- a Taxa de Sincronização ---- */
+/* Enquanto a tentativa dura, e só. `specs/07-tema-evangelion.md` só admite
+   movimento que diagnostique: este para quando a conexão para. */
+.boot-tentativa[data-estado="carga"] .boot-tentativa-marca {
+  color: var(--seele-laranja-nerv);
+  animation: boot-tentativa-pulso 1200ms ease-in-out infinite;
+}
+
+.boot-tentativa[data-estado="ok"] .boot-tentativa-marca {
+  color: var(--seele-fosforo);
+}
+
+@keyframes boot-tentativa-pulso {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boot-tentativa[data-estado="carga"] .boot-tentativa-marca { animation: none; }
+}
+
+/* ---- o SINAL ---- */
 
 .sync { margin-top: 32px; }
 
@@ -423,17 +315,4 @@
 
 .registro-corpo { flex: 1; min-height: 0; padding: 16px; overflow-y: auto; }
 
-.registro-rodape {
-  border-top: 1px solid var(--seele-linha);
-  padding: 16px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
 
-.concordancia {
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 22px;
-  letter-spacing: 0.08em;
-}

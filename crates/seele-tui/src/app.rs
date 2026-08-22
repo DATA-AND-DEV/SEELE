@@ -80,7 +80,7 @@ impl Panel {
 /// The six visual states `specs/05-cliente-tui.md` requires to exist.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Screen {
-    /// Boot: the three subsystems reporting.
+    /// Boot: o enlace sendo estabelecido.
     ///
     /// `specs/05` is emphatic that this lasts exactly as long as connecting
     /// takes: "se conectar em 200 ms, não inventar espera artificial. Animação

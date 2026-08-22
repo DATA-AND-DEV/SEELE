@@ -1,6 +1,6 @@
 // SEELE · Entry Plug — o Terminal Dogma (`#tela-dogma`).
 //
-// A configuração local: o que é desta máquina e não deste Dogma. Quatro seções —
+// A configuração local: o que é desta máquina e não deste servidor. Quatro seções —
 // ÁUDIO, ATALHOS, IDENTIDADE e ATUALIZAÇÃO. As três primeiras são a forma do
 // comp v3, §8; a última é o botão de atualizar do ADR 0026, que é posterior ao
 // comp e cai aqui porque qual SEELE está instalado é a coisa mais **desta
@@ -88,12 +88,12 @@ const BLOCOS_DO_MEDIDOR = 26;
  * O que a porta de saída diz, conforme de onde se entrou.
  *
  * O comp escreve `VOLTAR AO DOGMA` e daqui isso só é verdade metade das vezes:
- * esta tela também abre da entrada, onde não há Dogma nenhum para voltar. Um
+ * esta tela também abre da entrada, onde não há servidor nenhum para voltar. Um
  * botão que promete o lugar errado é pior que um botão genérico.
  */
 const VOLTA = {
   "tela-boot": "VOLTAR À ENTRADA",
-  "tela-sessao": "VOLTAR AO DOGMA",
+  "tela-sessao": "VOLTAR AO SERVIDOR",
 };
 
 // ------------------------------------------------------------------- seções
@@ -259,8 +259,8 @@ function desenharNivel(snapshot) {
  * o terceiro estado — o aberto, que é justamente o que ninguém quer ligar sem
  * saber. `aria-pressed` carrega a escolha para quem não vê o preenchimento.
  *
- * Sem sessão os três ficam apagados: `set_voice_mode` fala com um plug inserido,
- * e não há preferência em disco que os lembre. Apagado **e** dizendo por quê, ou
+ * Sem sessão os três ficam apagados: `set_voice_mode` fala com uma sessão
+ * aberta, e não há preferência em disco que os lembre. Apagado **e** dizendo por quê, ou
  * a lacuna se lê como defeito.
  */
 function desenharModos(snapshot) {
@@ -269,7 +269,7 @@ function desenharModos(snapshot) {
     botao.disabled = semSessao;
     botao.setAttribute("aria-pressed", !semSessao && snapshot.voice_mode === botao.dataset.modo);
     if (semSessao) {
-      botao.title = "Como o microfone abre é da sessão: sem plug inserido não há microfone para abrir.";
+      botao.title = "Como o microfone abre é da sessão: sem estar conectado não há microfone para abrir.";
     } else {
       botao.removeAttribute("title");
     }

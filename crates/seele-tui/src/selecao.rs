@@ -101,7 +101,7 @@ pub struct Selecao {
 }
 
 /// Quando não se sabe o apelido de ninguém.
-const APELIDO_PADRAO: &str = "piloto";
+const APELIDO_PADRAO: &str = "pessoa";
 /// Onde um Dogma hospedado aqui escuta.
 const AQUI: &str = "127.0.0.1:8383";
 
@@ -210,7 +210,7 @@ impl Selecao {
     /// digital e o token vieram de um link que fala de um endereço só, e
     /// arrastá-los para o Dogma seguinte produz as duas piores telas que este
     /// cliente tem: contra um Dogma ainda não fixado, uma recusa
-    /// ("ESTE NÃO É O DOGMA DO CONVITE") que ninguém pediu e que não há como
+    /// ("ESTE NÃO É O SERVIDOR DO CONVITE") que ninguém pediu e que não há como
     /// desfazer sem reiniciar; contra um já fixado, uma acusação laranja contra
     /// o Dogma de todo dia. O token faz o par disso do outro lado — um Dogma
     /// que nunca pediu credencial nenhuma responderia `CredentialRejected`.
@@ -425,7 +425,7 @@ fn desenhar_lista(frame: &mut Frame<'_>, selecao: &Selecao, tema: Theme, area: R
                 Item::Visitado(conhecido) => {
                     let cage = conhecido
                         .cage
-                        .map_or_else(String::new, |c| format!("  · CAGE-{c:02}"));
+                        .map_or_else(String::new, |c| format!("  · SALA {c}"));
                     format!("{}  ({}){}", conhecido.alvo, conhecido.apelido, cage)
                 }
                 Item::Novo => "novo endereço…".to_owned(),
@@ -453,7 +453,7 @@ fn desenhar_campo(
 ) {
     let (rotulo, exemplo) = match pergunta {
         Pergunta::Endereco => (
-            "endereço do Dogma",
+            "endereço do servidor",
             "192.168.0.7:8383  ou  casa.exemplo:8383",
         ),
         Pergunta::Link => ("cole o convite", "seele://192.168.0.7:8383?fp=…"),
@@ -492,7 +492,7 @@ fn desenhar_campo(
     if selecao.rascunho.hospedar {
         linhas.push(Line::from(""));
         linhas.push(Line::from(Span::styled(
-            "  o Dogma sobe aqui e acaba quando você sair",
+            "  o servidor sobe aqui e acaba quando você sair",
             tema.label(),
         )));
     }

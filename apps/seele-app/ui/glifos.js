@@ -19,7 +19,7 @@
 // peso, e o Unicode concorda: ▸ e ◂ são as formas *small*, ▼ e ▶ as grandes.
 //
 //   recuar/avancar   5×7 de 16   o cursor do compor e as setas da busca
-//   aberto/fechado   9×6 de 16   o Cage aberto ou fechado, que é a navegação
+//   aberto/fechado   9×6 de 16   a sala de voz aberta ou fechada, que é a navegação
 //   falando/silencio  ø6 de 16   a presença no roster, ao lado do apelido
 //   comando          ~11 de 16   a tecla, dentro de uma frase de texto
 //
@@ -40,7 +40,7 @@
 // ---- nome acessível ----
 //
 // Decoração ao lado de um rótulo de verdade não ganha nome: um triângulo que
-// vem antes do nome do Cage é forma, e anunciar "triângulo apontando para
+// vem antes do nome da sala de voz é forma, e anunciar "triângulo apontando para
 // baixo" antes de cada linha é ruído. Onde o glifo é o **conteúdo** do
 // elemento, o nome é obrigatório — os dois botões da busca não têm mais nada
 // dentro, e o ⌘ é a única coisa numa frase que diz qual tecla apertar. Os dois
@@ -60,7 +60,7 @@ const SVG = "http://www.w3.org/2000/svg";
  * herança sem vencer regra nenhuma.
  *
  * Quatro dos seis estão sem consumidor desde que a tela de sessão passou a
- * seguir o comp v2: lá o Cage aberto é uma borda de 2px e não um triângulo, e
+ * seguir o comp v2: lá a sala de voz aberta é uma borda de 2px e não um triângulo, e
  * quem fala é uma borda mais um fundo e não uma bolinha. Ficam desenhados
  * porque o que os justifica é a face, não a tela — a Plex Mono continua sem
  * eles, e a próxima tela que precisar de um triângulo não deve inventar o seu.
@@ -137,14 +137,14 @@ const GLIFOS = {
     ],
   ],
 
-  // ▤ — voltar às Linhas. O quadrado com preenchimento horizontal do Unicode é
+  // ▤ — voltar aos canais. O quadrado com preenchimento horizontal do Unicode é
   // literalmente uma lista, que é para onde o botão leva.
   linhas: [
     ["rect", { x: "2.5", y: "3", width: "11", height: "10", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],
     ["path", { d: "M4.8 6h6.4M4.8 8h6.4M4.8 10h6.4", stroke: "currentColor", "stroke-width": "1.1", fill: "none" }],
   ],
 
-  // ⏻ — sair da jaula. O símbolo de energia: haste vertical e aro aberto no
+  // ⏻ — sair da sala. O símbolo de energia: haste vertical e aro aberto no
   // topo. O arco é longo e no sentido de baixo, para a abertura ficar em cima.
   desligar: [
     ["path", { d: "M4.8 4.8A4.5 4.5 0 1 0 11.2 4.8", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],

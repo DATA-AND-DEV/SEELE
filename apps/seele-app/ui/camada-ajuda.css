@@ -6,25 +6,29 @@
    escolhendo o mesmo nome não é conflito que o navegador reporte — é a folha
    de baixo ganhando todo empate em silêncio.
 
-   ---- por que esta camada existe ----
+   ---- por que esta camada existe, e por que encolheu ----
 
-   O vocabulário deste produto — Dogma, Piloto, Cage, Linha, A.T. Field — não
-   se explica sozinho, e quem chega do Discord não tem por onde adivinhar. A
-   resposta anterior era uma nota sob cada rótulo, e ela foi removida por
-   pedido de quem desenha o produto: legenda permanente é texto que quem já
-   sabe lê mil vezes.
+   Ela foi escrita para traduzir um vocabulário inteiro, e a renomeação tirou
+   quase tudo dela: servidor, sala de voz, canal, apelido e mudo dizem o que
+   são no próprio rótulo, e um verbete que repete o rótulo é ruído. Ficaram os
+   dois conceitos que nenhum rótulo carrega — conexão segura e a escala do
+   sinal — e a lista de teclas, que não tem por que encolher.
 
-   Aqui o vocabulário inteiro mora num lugar só, que **não aparece até ser
+   O que não mudou é a forma: tudo num lugar só, que **não aparece até ser
    chamado**. É o mesmo critério que a TUI adota com o `?` do `plug`: dá para
    usar sabendo só uma tecla. A tela permanente não ganha uma linha de texto.
+
+   A grade de duas colunas fica como está. Com poucos verbetes ela é folgada em
+   vez de apertada, e uma lista curta não pede outro desenho — pede menos
+   linhas, que é o que ela tem agora.
 
    Nenhuma cor literal: `tests/tokens.rs` lê o arquivo inteiro e `tokens.css` é
    o único lugar onde um literal pertence.
 
    ---- sobre o vermelho ----
 
-   Esta folha não o gasta em lugar nenhum. Uma tabela de vocabulário não é
-   alerta nem queda, que é o que `tokens.css` reserva para ele. */
+   Esta folha não o gasta em lugar nenhum. Uma lista de definições não é alerta
+   nem queda, que é o que `tokens.css` reserva para ele. */
 
 .camada-ajuda {
   position: fixed;

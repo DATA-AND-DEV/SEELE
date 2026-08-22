@@ -38,6 +38,7 @@ Formato e regra de criação em `specs/10-convencoes.md`: toda decisão marcada
 | [0030](0030-quem-bate-a-porta.md) | Quem bate à porta: TOFU aplicado a gente, e a portaria de quem hospeda | **proposto** | — (pedido do dono; estende o `0021`) |
 | [0031](0031-varios-dogmas-ao-mesmo-tempo.md) | Vários Dogmas ao mesmo tempo: a sessão é do Dogma, o microfone é da máquina | **proposto** | — (pedido do dono; o `+` da trilha) |
 | [0032](0032-personalizacao-de-um-dogma.md) | Personalização de um Dogma: nome, cor e ícone | **proposto** | — (pedido do dono; reusa a resolução do `0029`) |
+| [0033](0033-o-vocabulario-sai-da-interface-a-estetica-fica.md) | O vocabulário de Evangelion sai da interface; a estética fica | aceito | `07` — o vocabulário na tela |
 
 ## O que ainda não tem ADR
 

@@ -1,12 +1,12 @@
 // SEELE · Entry Plug — a tela de entrada (`#tela-boot`).
 //
 // Onde você já esteve, o convite colado, e a conexão — mais hospedar aqui
-// dentro, que é a mesma conexão com um Dogma que este processo acabou de subir.
-// Sai daqui para `#tela-auth`, que é onde o veredito da chave é lido antes de o
-// plug entrar em Cage nenhum.
+// dentro, que é a mesma conexão com um servidor que este processo acabou de
+// subir. Sai daqui para `#tela-auth`, que é onde o veredito da chave é lido
+// antes de se entrar em sala de voz nenhuma.
 //
 // A tela é a transcrição dos painéis A·01 e B·01 do comp v2: a ficha da
-// máquina, o diagrama dos três subsistemas, a Taxa de Sincronização e o registro
+// máquina, o diagrama dos três subsistemas, o SINAL e o registro
 // de carga. Do que o comp anima aqui, nada tem dado por trás — o `bootPct` que
 // sobe de 7 em 7 é um cronômetro de protótipo, e o registro de dez linhas
 // carimbadas descreve um stream de progresso que o protocolo não tem. O que
@@ -16,28 +16,30 @@
 "use strict";
 
 /**
- * O estado dos três blocos MAGI.
+ * O estado da tentativa de conexão.
  *
- * O que eles relatam é **a tentativa de conexão**, e não saúde por subsistema —
- * essa não existe em lugar nenhum do protocolo (§16 do inventário do comp), e é
- * por isso que os três mudam juntos: o fato é um só. A marca de texto dentro de
- * cada bloco é o que diz qual estado é qual, porque a cor sozinha não pode
- * (`specs/05-cliente-tui.md`), e `specs/07-tema-evangelion.md` só admite
- * movimento que diagnostique — este dura o tempo real da conexão e para com ela.
+ * Um estado, e não três. Aqui havia um laço sobre `sub-melchior`,
+ * `sub-balthasar` e `sub-casper`, que escrevia **a mesma coisa** nos três — e o
+ * comentário desta função dizia o motivo em voz alta: saúde por subsistema não
+ * existe no protocolo, o fato relatado é um só. Três nomes para um dado é
+ * cenário se passando por instrumento, e o laço era a prova disso escrita em
+ * código.
+ *
+ * A marca de texto continua sendo o que diz qual estado é qual, porque a cor
+ * sozinha não pode (`specs/05-cliente-tui.md`), e o movimento continua durando
+ * o tempo real da conexão e parando com ela.
  */
 function subsistemas(estado, marca) {
-  for (const id of ["sub-melchior", "sub-balthasar", "sub-casper"]) {
-    const alvo = $(id);
-    alvo.textContent = marca;
-    alvo.parentElement.dataset.estado = estado;
-  }
+  const alvo = $("boot-tentativa-marca");
+  alvo.textContent = marca;
+  alvo.parentElement.dataset.estado = estado;
 }
 
 /** O convite lido do último `seele://` colado, se houver. */
 let convitePendente = null;
 
 /**
- * A lista de Dogmas onde este piloto já esteve.
+ * A lista de servidores onde esta pessoa já esteve.
  *
  * Quem já entrou uma vez não deveria ter que redigitar um endereço IP. A lista
  * chega pronta do Rust, do mais recente para o mais antigo — a única ordem útil
@@ -55,7 +57,7 @@ async function desenharVisitados() {
   //
   // `Conhecidos::listar` ordena do mais recente para o mais antigo, então o
   // primeiro é o nome com que esta pessoa entrou por último. Sem isto o campo
-  // volta a `piloto` a cada abertura do app — o nome estava gravado o tempo
+  // volta ao padrão da marcação a cada abertura do app — o nome estava gravado o tempo
   // todo, e a tela é que não o lia.
   //
   // Só quando o campo ainda está como a marcação o deixou. `defaultValue` é
@@ -141,9 +143,9 @@ async function lerConvite() {
 /**
  * Esquece o convite colado, campo e tudo.
  *
- * O token vale para o Dogma daquele link. Deixá-lo para trás numa troca de
+ * O token vale para o servidor daquele link. Deixá-lo para trás numa troca de
  * endereço manda a credencial de um servidor para outro, que a recusa — e a
- * recusa aparece como "credencial rejeitada" num Dogma que nunca pediu
+ * recusa aparece como "credencial rejeitada" num servidor que nunca pediu
  * credencial nenhuma.
  */
 function limparConvite() {
@@ -167,7 +169,7 @@ async function conectar(evento) {
   mostrarEtapa(null);
 
   try {
-    // A entrada traz duas coisas: a tela, e o que a chave deste Dogma acabou
+    // A entrada traz duas coisas: a tela, e o que a chave deste servidor acabou
     // de ser. A segunda vem do mesmo `connect` porque é lá que ela é decidida —
     // um ouvinte inscrito depois chegaria sempre tarde.
     const { snapshot, veredito } = await invoke("connect", {
@@ -184,7 +186,7 @@ async function conectar(evento) {
     subsistemas("ok", "ok");
 
     // Daqui em diante quem manda é `#tela-auth`: o veredito da chave é lido
-    // numa tela antes de o plug entrar em Cage nenhum, e a inserção mudou de
+    // numa tela antes de se entrar em sala de voz nenhuma, e a entrada mudou de
     // lugar junto com ele. Enquanto isso não acontece, a sessão continua
     // desenhada com o que o `connect` já devolveu — quem chegar nela não espera
     // o primeiro tique do laço de snapshot.
@@ -302,10 +304,10 @@ function mostrarAlcance(alcance, portaRecusada, encontroRecusado) {
 }
 
 /**
- * Vira anfitrião: sobe o Dogma dentro deste app e entra nele.
+ * Vira anfitrião: sobe o servidor dentro deste app e entra nele.
  *
  * Duas etapas de propósito. `hospedar` põe o servidor de pé e devolve o link;
- * conectar é o caminho de sempre, com o endereço que ele devolveu. Um Dogma
+ * conectar é o caminho de sempre, com o endereço que ele devolveu. Um servidor
  * hospedado aqui e um do outro lado do mundo entram pela mesma porta.
  */
 async function hospedar() {

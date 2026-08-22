@@ -1,6 +1,7 @@
 /* SEELE · Entry Plug — a tela de sessão encerrada (`#tela-fim`).
-   Duas regras. O cartão é o mesmo da entrada e vive em `base.css`; o que muda é
-   a cartela vermelha no lugar da assinatura e o motivo escrito abaixo dela. */
+   O cartão é o mesmo da entrada e vive em `base.css`; o que muda é a cartela
+   vermelha no lugar da assinatura, o motivo escrito abaixo dela e o par de
+   saídas — RECONECTAR e, menor, SAIR. */
 
 .boot-marca.fim {
   color: var(--seele-vermelho-alerta);
@@ -28,4 +29,16 @@
   color: var(--seele-osso);
   white-space: pre-line;
   overflow-wrap: anywhere;
+}
+
+/* A saída secundária, embaixo do RECONECTAR e visivelmente menor que ele.
+   Um bloco próprio e não `inline`: os dois lado a lado dariam dois botões do
+   mesmo peso, e o peso é o que diz qual dos dois é o caminho de volta.
+
+   `margin-left: 0` desfaz o `margin-left: auto` de `.botao-fantasma`, que
+   existe para empurrar o botão numa linha flex — aqui não há linha, e o `auto`
+   de um bloco centraliza pela metade. */
+.fim-sair {
+  display: block;
+  margin: 16px 0 0;
 }

@@ -2,9 +2,8 @@
 //
 // Este arquivo desenha e nada mais. `specs/06-clientes-gui.md`: "Nenhuma lógica
 // de protocolo em JavaScript. Se o frontend precisa saber o que é um `ssrc`,
-// algo está errado." Nada aqui sabe o que é um ssrc, o que faz uma Taxa de
-// Sincronização ser crítica, ou quando reconectar. Tudo isso chega decidido
-// dentro do snapshot.
+// algo está errado." Nada aqui sabe o que é um ssrc, o que faz o sinal ser
+// crítico, ou quando reconectar. Tudo isso chega decidido dentro do snapshot.
 //
 // O padrão é o mesmo de `seele-tui::view`: projetar o snapshot inteiro a cada
 // mudança. Não há estado derivado nem cache — a tela é função de um valor que
@@ -67,7 +66,7 @@ function quando(segundos) {
 }
 
 /**
- * A marca de bloco de uma faixa da Taxa de Sincronização.
+ * A marca de bloco de uma faixa do sinal.
  *
  * `specs/05-cliente-tui.md`: nenhuma informação transmitida só por cor. A marca
  * é a metade que sobrevive sem cor nenhuma, e é desenhada em toda paleta — uma
@@ -132,8 +131,8 @@ function digitando() {
  * Chaveado pela tela **deixada**, porque é isso que a volta pergunta: o que
  * estava focado da última vez que esta tela esteve na frente? Guarda o
  * elemento e não um `id` de propósito — metade dos controles desta janela é
- * desenhada pelo JavaScript e não tem `id` nenhum, e o botão de um Cage é
- * reconstruído a cada snapshot.
+ * desenhada pelo JavaScript e não tem `id` nenhum, e o botão de uma sala de voz
+ * é reconstruído a cada snapshot.
  */
 const focoDeVolta = new Map();
 
@@ -197,7 +196,7 @@ function guardarFoco(tela) {
  *
  * Não é o primeiro elemento. Cada tela nomeia o seu alvo em `data-foco`, ao
  * lado de si mesma na marcação, e escolhe o que ela existe para fazer — a
- * autenticação escolhe VERIFICAR IDENTIDADE, o fim escolhe EJETAR, a chamada
+ * autenticação escolhe VERIFICAR IDENTIDADE, o fim escolhe SAIR, a chamada
  * escolhe a chave do microfone. Tabular até lá seria atravessar um cabeçalho
  * inteiro para chegar na única coisa que a tela pede.
  *
@@ -205,7 +204,7 @@ function guardarFoco(tela) {
  * `tabindex="-1"`. É o caso da operação, e é escolha e não omissão: aquela tela
  * não tem uma ação, tem quatro colunas — e o único controle plausível ali é um
  * campo de texto, que ligaria `digitando()` e desligaria o push-to-talk da
- * barra de espaço no instante em que a pessoa entra no Dogma.
+ * barra de espaço no instante em que a pessoa entra no servidor.
  *
  * Chamada **depois** de a tela desenhar, porque um botão ainda desabilitado
  * não aceita foco; `focavel` cobre o resto e cai na `<section>`.

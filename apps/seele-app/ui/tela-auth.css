@@ -1,4 +1,4 @@
-/* SEELE · Entry Plug — a entrada em Dogma Central (`#tela-auth`).
+/* SEELE · Entry Plug — a entrada no servidor (`#tela-auth`).
    Só o que esta tela usa. A coordenada de painel, o travessão de valor ausente,
    `.campo`, `.rotulo` e `.botao` vêm de `base.css`, que carrega antes.
 
@@ -28,12 +28,13 @@
 
 .auth-corpo { display: flex; flex-direction: column; gap: 24px; }
 
-/* A cartela de padrão: bloco sólido de cor com o texto em negro, e nunca texto
+/* A cartela do estado da conexão: bloco sólido de cor com o texto em negro, e
+   nunca texto
    colorido sobre fundo escuro. É a regra de inversão que o v2 endureceu (§12 do
    inventário) — a mesma do polígono aceso, da pastilha de estado e do botão
    primário, e a ênfase inversa da TUI dita em pixels.
 
-   O rótulo é escrito por extenso (`PADRÃO: AZUL`), então a cor não carrega a
+   O rótulo é escrito por extenso (`CONEXÃO SEGURA`), então a cor não carrega a
    informação sozinha; `specs/05-cliente-tui.md` não deixaria. */
 .cartela-padrao {
   display: flex;
@@ -94,7 +95,7 @@
   letter-spacing: 0.2em;
 }
 
-/* O botão veste o padrão da sessão, como no comp. Enquanto não há sessão ele é
+/* O botão veste o estado da conexão, como no comp. Enquanto não há sessão ele é
    o laranja de `base.css`; ele não fica cinza junto com a cartela, porque um
    botão apagado é um botão que parece desligado, e este é o único caminho para
    fora desta tela. */
@@ -109,9 +110,9 @@
    muda entre os dois trabalhos desta tela são três painéis de uma vez, e um
    estado que se lê no DOM é um estado que não sai do lugar sozinho.
 
-   Em `espera` não há sessão nenhuma. A cartela de padrão descreve
-   `Snapshot.pattern` e não há snapshot; a ficha do Dogma descreve um Dogma em
-   que ninguém entrou. As duas somem em vez de aparecerem vazias — que é
+   Em `espera` não há sessão nenhuma. A cartela do estado descreve
+   `Snapshot.pattern` e não há snapshot; a ficha do servidor descreve um servidor
+   em que ninguém entrou. As duas somem em vez de aparecerem vazias — que é
    exatamente o que esta tela acabou de deixar de fazer com os quatro campos que
    o protocolo não carrega.
 
@@ -131,7 +132,7 @@
 
 .auth-espera { display: flex; flex-direction: column; gap: 16px; }
 
-/* A razão que o Dogma mandou, virada frase em `frases.js`. Duas linhas — o que
+/* A razão que o servidor mandou, virada frase em `frases.js`. Duas linhas — o que
    houve e o que fazer —, e `pre-line` é o que as mantém separadas sem inventar
    dois elementos, como na banda da portaria. */
 .auth-espera-frase {
@@ -211,7 +212,7 @@
 .registro-texto[data-tom="apagado"] { color: var(--seele-osso-apagado); }
 .registro-texto[data-tom="azul"] { color: var(--seele-padrao-azul); }
 
-/* ---- C·02, a ficha do Dogma ---- */
+/* ---- C·02, a ficha do servidor ---- */
 
 .auth-dogma {
   display: flex;

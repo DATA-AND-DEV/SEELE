@@ -18,14 +18,14 @@
  * português, porque é o mesmo produto.
  */
 const MOTIVOS = {
-  Incompatible: "VERSÃO INCOMPATÍVEL COM ESTE DOGMA",
+  Incompatible: "VERSÃO INCOMPATÍVEL COM ESTE SERVIDOR",
   CredentialRejected: "CREDENCIAL RECUSADA",
   HandshakeTimeout: "TEMPO ESGOTADO NA SINCRONIZAÇÃO INICIAL",
   Kicked: "DESCONECTADO POR UM OPERADOR",
   Banned: "ACESSO BARRADO POR UM OPERADOR",
-  DogmaFull: "DOGMA LOTADO",
+  DogmaFull: "SERVIDOR LOTADO",
   ScheduledMaintenance: "MANUTENÇÃO PROGRAMADA",
-  ServerShuttingDown: "O DOGMA ESTÁ ENCERRANDO",
+  ServerShuttingDown: "O SERVIDOR ESTÁ ENCERRANDO",
   Timeout: "ENLACE PERDIDO",
   ProtocolViolation: "PROTOCOLO VIOLADO",
   RateLimited: "LIMITE DE MENSAGENS EXCEDIDO",
@@ -39,7 +39,7 @@ const MOTIVOS = {
   // quer saber se perdeu alguma coisa. Perdeu, e voltar é o que a traz de volta
   // — «repõe o que faltou» diz as duas coisas numa frase só.
   FellBehind:
-    "ESTE ENLACE FICOU PARA TRÁS DO DOGMA.",
+    "ESTE ENLACE FICOU PARA TRÁS DO SERVIDOR.",
 
   // ---- a portaria do ADR 0030 ----
   //
@@ -69,15 +69,15 @@ const MOTIVOS = {
 const AVISOS = {
   Mentioned: "VOCÊ FOI CHAMADO",
   SubsystemChanged: "UM SUBSISTEMA MUDOU DE ESTADO",
-  SyncDegraded: "TAXA DE SINCRONIZAÇÃO EM QUEDA",
-  CageEntryRefused: "ENTRADA NO CAGE RECUSADA",
+  SyncDegraded: "SINAL EM QUEDA",
+  CageEntryRefused: "ENTRADA NA SALA DE VOZ RECUSADA",
   PermissionDenied: "PERMISSÃO NEGADA",
-  CageFull: "CAGE LOTADO",
+  CageFull: "SALA DE VOZ LOTADA",
   OperatorNotice: "AVISO DO OPERADOR",
   // O aviso que o Dogma manda **antes** de derrubar. É o único da lista que
   // pede uma mudança de comportamento de quem o lê, e por isso ele existe:
   // derrubar sem ter avisado é o que faz o produto parecer quebrado.
-  RateLimited: "VOCÊ ESTÁ FALANDO RÁPIDO DEMAIS PARA O DOGMA",
+  RateLimited: "VOCÊ ESTÁ FALANDO RÁPIDO DEMAIS PARA O SERVIDOR",
 
   // ---- uma sala deixou de existir ----
   //
@@ -88,10 +88,10 @@ const AVISOS = {
   //
   // A terceira não é sobre uma sala que foi: é uma recusa, e a única desta
   // lista que ensina o que fazer em seguida.
-  CageDeleted: "A JAULA EM QUE VOCÊ ESTAVA FOI APAGADA",
-  LineDeleted: "A LINHA QUE VOCÊ LIA FOI APAGADA, COM TUDO QUE HAVIA NELA",
+  CageDeleted: "A SALA DE VOZ EM QUE VOCÊ ESTAVA FOI APAGADA",
+  LineDeleted: "O CANAL DE TEXTO QUE VOCÊ LIA FOI APAGADO, COM TUDO QUE HAVIA NELE",
   LastCage:
-    "ESTE É O ÚNICO CAGE DO DOGMA, E ELE FICA.\nFaça outra sala antes de apagar esta.",
+    "ESTA É A ÚNICA SALA DE VOZ DO SERVIDOR, E ELA FICA.\nFaça outra sala antes de apagar esta.",
 };
 
 /**
@@ -231,7 +231,7 @@ function fraseDeErro(erro) {
     // o veredito laranja da sessão.
     if (erro.InviteMismatch) {
       return (
-        "ESTE NÃO É O DOGMA DO CONVITE.\n" +
+        "ESTE NÃO É O SERVIDOR DO CONVITE.\n" +
         `esperada: ${erro.InviteMismatch.expected}\n` +
         `ofertada: ${erro.InviteMismatch.offered}\n` +
         "Confirme o link com quem o mandou."
@@ -281,7 +281,7 @@ const FRASES = {
     HandshakeTimeout: "TEMPO ESGOTADO NA SINCRONIZAÇÃO INICIAL",
     IdentityUnavailable: "NÃO CONSEGUI LER OU GRAVAR A IDENTIDADE EM DISCO",
     NoAudioDevice: "SEM DISPOSITIVO DE ÁUDIO",
-    UnknownPilot: "NÃO CONHEÇO ESSE PILOTO",
+    UnknownPilot: "NÃO CONHEÇO ESSA PESSOA",
     UnknownChannel: "NÃO CONHEÇO ESSE CANAL",
     LinkLost: "ENLACE PERDIDO",
 
@@ -302,13 +302,13 @@ const FRASES = {
       "ESTE CONVITE VEIO CORTADO NA PARTE QUE FURA O NAT.",
     ImpressaoDigitalInvalida: "ESTE CONVITE CHEGOU CORTADO OU ADULTERADO",
     TokenInvalido: "O CONVITE DENTRO DESTE LINK NÃO É UM CONVITE",
-    CageInvalido: "O CAGE DESTE CONVITE NÃO É UM NÚMERO",
+    CageInvalido: "A SALA DE VOZ DESTE CONVITE NÃO É UM NÚMERO",
 
     // Hospedar aqui dentro.
     JaHospedando: "JÁ ESTOU HOSPEDANDO NESTA JANELA",
     PortaOcupada:
       "A PORTA 8383 JÁ ESTÁ EM USO.\nQuase sempre é outro SEELE aberto — feche o outro e tente de novo.",
-    NaoSubiu: "NÃO CONSEGUI SUBIR O DOGMA AQUI",
+    NaoSubiu: "NÃO CONSEGUI SUBIR O SERVIDOR AQUI",
 
     // A portaria — ADR 0030. As duas falam de uma porta que não existe daqui.
     //
@@ -317,8 +317,8 @@ const FRASES = {
     // tem porta nenhuma para mexer. A frase diz isso em vez de deixar a pessoa
     // procurando o que fez de errado.
     NaoEstaHospedando:
-      "ESTA JANELA NÃO ESTÁ HOSPEDANDO NENHUM DOGMA.",
-    BancoNaoRespondeu: "O DOGMA DESTA MÁQUINA NÃO RESPONDEU",
+      "ESTA JANELA NÃO ESTÁ HOSPEDANDO NENHUM SERVIDOR.",
+    BancoNaoRespondeu: "O SERVIDOR DESTA MÁQUINA NÃO RESPONDEU",
 
     // Até onde o convite chega — a escada do ADR 0022. Vai junto do link, e não
     // numa tela de diagnóstico, porque é aí que a informação vale: um link que
@@ -437,30 +437,30 @@ const FRASES = {
  */
 const ANEXOS = {
   NotAllowed:
-    "VOCÊ NÃO PODE ANEXAR ARQUIVO NESTE DOGMA.\n" +
+    "VOCÊ NÃO PODE ANEXAR ARQUIVO NESTE SERVIDOR.\n" +
     "Peça a permissão a quem hospeda.",
   TooLarge:
-    "ESTE ARQUIVO É GRANDE DEMAIS PARA ESTE DOGMA.\n" +
+    "ESTE ARQUIVO É GRANDE DEMAIS PARA ESTE SERVIDOR.\n" +
     "Tentar de novo com o mesmo arquivo dá no mesmo.",
   NoRoom:
-    "O DISCO DESTE DOGMA ESTÁ TOMADO POR TRANSFERÊNCIAS EM ANDAMENTO.\n" +
+    "O DISCO DESTE SERVIDOR ESTÁ TOMADO POR TRANSFERÊNCIAS EM ANDAMENTO.\n" +
     "Tente de novo daqui a pouco.",
   SizeMismatch:
-    "O ARQUIVO NÃO CHEGOU INTEIRO, E NADA FOI PUBLICADO NA LINHA.\n" +
+    "O ARQUIVO NÃO CHEGOU INTEIRO, E NADA FOI PUBLICADO NO CANAL.\n" +
     "Mandar de novo manda o arquivo inteiro outra vez, do começo.",
   HashDidNotMatch:
-    "O QUE CHEGOU NÃO É O QUE SAIU DAQUI, E O DOGMA RECUSOU.\n" +
-    "Nada foi publicado na Linha.",
+    "O QUE CHEGOU NÃO É O QUE SAIU DAQUI, E O SERVIDOR RECUSOU.\n" +
+    "Nada foi publicado no canal.",
   RateLimited:
-    "VOCÊ ESTÁ MANDANDO ARQUIVO MAIS RÁPIDO DO QUE ESTE DOGMA ACEITA.\n" +
+    "VOCÊ ESTÁ MANDANDO ARQUIVO MAIS RÁPIDO DO QUE ESTE SERVIDOR ACEITA.\n" +
     "Espere um pouco e mande de novo.",
-  Unavailable: "ESTE DOGMA NÃO GUARDA ARQUIVO.",
-  NotFound: "ESTE ARQUIVO NÃO EXISTE NESTE DOGMA, OU ESTÁ NUMA LINHA QUE VOCÊ NÃO PODE LER.",
+  Unavailable: "ESTE SERVIDOR NÃO GUARDA ARQUIVO.",
+  NotFound: "ESTE ARQUIVO NÃO EXISTE NESTE SERVIDOR, OU ESTÁ NUM CANAL QUE VOCÊ NÃO PODE LER.",
   Expired:
-    "ESTE ARQUIVO EXPIROU, E O DOGMA APAGOU OS BYTES PARA ABRIR ESPAÇO.\n" +
+    "ESTE ARQUIVO EXPIROU, E O SERVIDOR APAGOU OS BYTES PARA ABRIR ESPAÇO.\n" +
     "Peça a quem mandou para mandar de novo.",
   Malformed:
-    "O DOGMA NÃO ENTENDEU O PEDIDO DE ARQUIVO, E NADA FOI PUBLICADO NA LINHA.\n" +
+    "O SERVIDOR NÃO ENTENDEU O PEDIDO DE ARQUIVO, E NADA FOI PUBLICADO NO CANAL.\n" +
     "Se acontecer de novo, as duas pontas podem estar em versões diferentes.",
 };
 
@@ -474,7 +474,7 @@ const ANEXOS = {
  */
 const TRANSFERENCIAS = {
   Sent: "ARQUIVO ENTREGUE",
-  Refused: "O DOGMA RECUSOU O ARQUIVO",
+  Refused: "O SERVIDOR RECUSOU O ARQUIVO",
   Fell:
     "A TRANSFERÊNCIA CAIU, E NÃO HÁ DE ONDE CONTINUAR.\n" +
     "Mandar de novo manda o arquivo inteiro outra vez, do começo.",

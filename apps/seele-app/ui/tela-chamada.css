@@ -1,13 +1,13 @@
 /* SEELE · Entry Plug — a tela de chamada (`#tela-chamada`).
 
    O comp v3, tela `chamada` (`design/Entry Plug v3.dc.html` 209–336, e
-   `.superpowers/sdd/comp-inventario-v3.md` §7): a grade de quem está no Cage,
-   um cartão por piloto, e o monitor do Cage à direita.
+   `.superpowers/sdd/comp-inventario-v3.md` §7): a grade de quem está na sala
+   de voz, um cartão por pessoa, e o monitor da sala à direita.
 
    Tela própria, e não uma camada — ao contrário do alerta e da bateria. Ela
    substitui a conversa em vez de se sobrepor a ela, e é assim no comp
-   (`ehChamada` é exclusivo de `ehPrincipal`): olhar quem está falando e ler a
-   Linha são duas coisas diferentes que ninguém faz ao mesmo tempo.
+   (`ehChamada` é exclusivo de `ehPrincipal`): olhar quem está falando e ler o
+   canal de texto são duas coisas diferentes que ninguém faz ao mesmo tempo.
 
    Carrega depois de `base.css` e antes de `acessibilidade.css`, como toda folha
    de tela. Nenhuma cor literal, nem em regra nem em comentário: `tests/tokens.rs`
@@ -23,7 +23,7 @@
    O comp v3 pede `minmax(0,1fr) 328px`. Aqui é `1fr 320px`, pela mesma
    aritmética que `tela-sessao.css` já aplicou à quarta coluna dela: 320 é o
    múltiplo de 8 mais próximo, e as duas colunas de 320 alinham entre as duas
-   telas — a Taxa de Sincronização e o Monitor do Cage ocupam a mesma faixa da
+   telas — o painel de sinal e o monitor da sala ocupam a mesma faixa da
    janela, e trocar de tela não desloca a borda.
 
    ---- as alturas ----
@@ -63,7 +63,7 @@
 }
 
 /* A placa: bloco sólido laranja com texto no negro absoluto. Inventário §12 —
-   no v2 tudo que é cartela é inversão, e o nome do Cage nesta tela é nomeado
+   no v2 tudo que é cartela é inversão, e o nome da sala nesta tela é nomeado
    ali explicitamente como um dos casos. Ela diz que tipo de lugar é este; o
    nome ao lado diz qual. */
 .chamada-placa {
@@ -158,8 +158,8 @@
 /* ---------- a grade de cartões ----------
 
    O comp corta o roster em `slice(0,4)` e é sempre 2×2. Aqui a grade se acomoda
-   à largura e rola: um Cage tem `limit` assentos e nada garante que sejam
-   quatro, e esconder o quinto piloto é a única forma de esta tela mentir sobre
+   à largura e rola: uma sala tem `limit` assentos e nada garante que sejam
+   quatro, e esconder a quinta pessoa é a única forma de esta tela mentir sobre
    quem está na sala. `auto-fit` com um mínimo de 304px é o
    `minmax(300px,1fr)` do comp arredondado para a grade de 8. */
 .chamada-grade {
@@ -188,7 +188,7 @@
 
 /* O halo do comp: `inset 0 0 0 2px` em laranja quando a pessoa transmite, mais
    o fundo de bloco em carga. Nunca sozinho — a pastilha do canto diz
-   `TRANSMITINDO` em palavra, que é o acompanhante textual que
+   `FALANDO` em palavra, que é o acompanhante textual que
    `specs/05-cliente-tui.md` exige de toda faixa colorida.
 
    `[data-fala]` e não uma classe `.falando`: nome curto num namespace plano é
@@ -198,7 +198,7 @@
   box-shadow: inset 0 0 0 var(--seele-b-forte) var(--seele-laranja-nerv);
 }
 
-/* Um Cage vazio, ou nenhum plug inserido. Ocupa a grade inteira. */
+/* Uma sala vazia, ou nenhuma sala em que se esteja. Ocupa a grade inteira. */
 .chamada-vazio {
   grid-column: 1 / -1;
   display: flex;
@@ -306,7 +306,7 @@
   color: var(--seele-osso-apagado);
 }
 
-/* ---------- sincronização ---------- */
+/* ---------- o sinal ---------- */
 
 .chamada-cartao-sync {
   display: flex;
@@ -444,10 +444,10 @@
 
 /* ---------- a barra de ações ----------
 
-   Quatro colunas iguais, como no comp: o microfone, o som, ver as Linhas e sair
-   da jaula. Cada uma com título e nota, e a nota é o que responde a pergunta
-   que o teste de LAN encontrou sem resposta — voltar para as Linhas quer dizer
-   parar de ouvir? */
+   Quatro colunas iguais, como no comp: o microfone, o som, ver os canais de
+   texto e sair da sala. Cada uma com título e nota, e a nota é o que responde a
+   pergunta que o teste de LAN encontrou sem resposta — voltar para os canais
+   quer dizer parar de ouvir? */
 .chamada-acoes {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -503,9 +503,10 @@
    ela tem que caber em duas linhas sem empurrar a barra. */
 .chamada-acao .nota { line-height: 1.3; text-align: left; }
 
-/* Os dois botões de estado. O rótulo diz em que estado a coisa **está** — a
-   mesma regra da tira do operador na tela de operação —, e aceso ele é cartela:
-   bloco sólido com texto no negro absoluto. */
+/* Os dois botões de estado. O rótulo grande é o verbo — o que apertar vai
+   fazer — e a nota embaixo diz em que estado a coisa está; aceso, o botão é
+   cartela: bloco sólido com texto no negro absoluto, que é o estado ligado
+   aparecendo em forma além de aparecer escrito. */
 /* No título, e não no botão: o título tem peso próprio e venceria a herança —
    a regra ficaria escrita, correta e sem efeito nenhum. */
 .chamada-acao-at .chamada-acao-titulo { font-weight: 900; }
@@ -524,19 +525,34 @@
    laranja — o pior contraste do arquivo. */
 .chamada-acao[data-ativo="sim"] .nota { color: inherit; }
 
-/* Sair é a única coisa vermelha da tela, e `tokens.css` reserva o vermelho para
-   alerta e queda: sair do Cage é a queda voluntária. */
+/* Sair da sala é a única coisa vermelha desta barra, e em repouso ela é só
+   contorno. `tokens.css` reserva o vermelho para alerta e queda, e um botão
+   parado não é nenhum dos dois: sólido, ele acende o alarme o tempo inteiro em
+   que ninguém está saindo, e no dia em que a conexão cai o vermelho da queda
+   chega a uma tela que já estava vermelha. O bloco cheio fica para o instante
+   em que a pessoa está de fato mirando o botão — o hover e o foco —, que é
+   quando dizer «isto tem consequência» ainda serve para alguma coisa.
+
+   `box-shadow: inset` e não `border`: a borda direita já separa as colunas da
+   barra, e trocá-la moveria o texto de um botão em relação aos outros três. */
 .chamada-acao-ejetar {
-  background: var(--seele-vermelho-alerta);
-  color: var(--seele-negro-absoluto);
+  color: var(--seele-vermelho-alerta);
+  box-shadow: inset 0 0 0 var(--seele-b) var(--seele-vermelho-alerta);
 }
 
 .chamada-acao-ejetar .chamada-acao-titulo { font-weight: 900; }
 .chamada-acao-ejetar .chamada-acao-glifo,
 .chamada-acao-ejetar .nota { color: inherit; }
-.chamada-acao-ejetar:disabled { color: var(--seele-negro-absoluto); opacity: 0.5; }
 
-/* ---------- coluna 2: o monitor do Cage ---------- */
+.chamada-acao-ejetar:hover:not(:disabled),
+.chamada-acao-ejetar:focus-visible:not(:disabled) {
+  background: var(--seele-vermelho-alerta);
+  color: var(--seele-negro-absoluto);
+}
+
+.chamada-acao-ejetar:disabled { opacity: 0.5; }
+
+/* ---------- coluna 2: o monitor da sala ---------- */
 
 .chamada-monitor {
   display: flex;

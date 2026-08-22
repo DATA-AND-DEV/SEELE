@@ -132,3 +132,20 @@ paletas se separam.
 Custo de reverter: **baixo** para o segundo (um token e um seletor). Para o
 primeiro, reverter é trocar o nome de volta por `osso-apagado` em cada título —
 que é precisamente o trabalho que ele existe para evitar.
+
+## Adendo — o rótulo miúdo sai do apelido (21/08/2026)
+
+`--seele-rotulo-painel` era apelido de `osso-apagado`, e `osso-apagado` mede
+4,11:1: passa como texto grande e a escala põe rótulo de painel em 9–10px, que
+não é texto grande. O achado 3 de `docs/tokens-achados.md` deixou a decisão
+pendente entre duas opções — subir a cor, ou garantir que nenhuma informação
+necessária dependa dela. Título de painel **é** informação necessária: é o que
+diz qual painel é aquele.
+
+Veio a primeira opção. O nome passou a ser cor própria, `#908574`, medindo
+5,52:1 sobre `negro-painel`. A mira acima de 4,5:1 é deliberada: a varredura
+pinta por cima do texto e cobra da razão, e sob ela o mesmo par entrega 4,97:1 —
+uma cor escolhida para bater exatamente 4,5:1 no vácuo chegaria à tela reprovada.
+
+`osso-apagado` não mudou. A palheta v2 continua canônica; o que mudou foi de
+onde o rótulo miúdo tira a cor dele.

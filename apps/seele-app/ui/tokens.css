@@ -35,18 +35,26 @@
   --seele-placa-laranja-2:#C4400F;
   --seele-placa-laranja-3:#8E2A08;   /* placa mais próxima, sobre laranja */
 
-  /* ---- rótulo de painel ----
-     A coordenada de cada painel (`A·01`, `B·02`, `C·02`) e todo título de
-     painel passam por este nome, e nunca por `osso-apagado` direto.
+  /* ---- rótulo miúdo ----
+     A coordenada de cada painel (`A·01`, `B·02`, `C·02`), todo título de painel
+     e todo rótulo de 9–10px passam por este nome, e nunca por `osso-apagado`
+     direto.
 
-     Não é sinônimo por gosto. `docs/tokens-achados.md` mede `osso-apagado` em
-     4,11:1 — passa só como texto grande — e a escala tipográfica põe rótulo de
-     painel em 9–10px, que não é texto grande. O arquivo diz qual é a correção
-     pendente: ou subir a cor, ou garantir que nenhuma informação necessária
-     dependa só dela. Título de painel é informação necessária: é o que diz
-     **qual** painel é aquele. Enquanto a decisão não vem, este nome é o único
-     lugar a mudar quando ela vier — e hoje ele vale exatamente o que valia. */
-  --seele-rotulo-painel:  var(--seele-osso-apagado);
+     A decisão que `docs/tokens-achados.md` deixou pendente no achado 3 veio, e
+     é a primeira das duas opções: subir a cor. `osso-apagado` mede 4,11:1 e
+     passa só como texto grande; a escala põe rótulo em 9–10px, que não é texto
+     grande, e título de painel é informação necessária — é o que diz **qual**
+     painel é aquele. O valor deixou de ser apelido e passou a ser cor própria,
+     na mesma matiz e saturação do apagado, só mais clara: continua legível como
+     secundário ao lado de `osso`, e a hierarquia segue vindo do corpo, da caixa
+     alta e do tracking, não da cor doente.
+
+     5,52:1 e não 4,5:1 porque o piso aqui não é o do papel. A varredura pinta
+     por cima do texto a 6% e cobra da razão (o mesmo arquivo, "O que a varredura
+     custa de contraste"): sob o véu isto entrega 4,97:1, e dentro da faixa que
+     desce, 4,81:1. Uma cor escolhida para bater 4,5:1 no vácuo chegaria à tela
+     abaixo de AA nas duas condições em que a tela de fato é vista. */
+  --seele-rotulo-painel:  #908574;   /* ansi 102 · rótulo miúdo 9–10px · 5,52:1 AA */
 
   /* Preenchimento de bloco em carga — o polígono MAGI que ainda não acendeu.
      `#2B0F05`, e não `laranja-fraco #331704`: o comp v2 escureceu este valor

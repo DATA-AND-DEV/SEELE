@@ -1,7 +1,7 @@
 // SEELE · Entry Plug — a tela de chamada (`#tela-chamada`).
 //
-// A grade de quem está no Cage: um cartão por piloto, com estado em palavra,
-// sincronia e volume; e o monitor do Cage à direita. É a tela `chamada` do comp
+// A grade de quem está na sala de voz: um cartão por pessoa, com estado em
+// palavra, sinal e volume; e o monitor da sala à direita. É a tela `chamada` do comp
 // v3 (`.superpowers/sdd/comp-inventario-v3.md` §7).
 //
 // ---- o que este arquivo não decide ----
@@ -18,21 +18,21 @@
 // O v2 desta tela desenhava metade dos campos vazios, com travessão e `title`
 // explicando a falta. O v3 é a resposta a um teste entre duas máquinas que
 // achou a interface fiel e difícil ao mesmo tempo, e numa tela que existe para
-// ser simples um travessão explicado é ruído: quem entra numa jaula quer saber
+// ser simples um travessão explicado é ruído: quem entra numa sala de voz quer saber
 // quem está falando, não quais campos este protocolo ainda não carrega.
 //
 // Então saíram, em vez de ficarem vazios:
 //
-//   - **a onda por piloto.** `Telemetry.input_level` é escalar e é **nosso** —
+//   - **a onda por pessoa.** `Telemetry.input_level` é escalar e é **nosso** —
 //     amplitude por interlocutor não atravessa a fronteira e não é derivável de
 //     nada que atravesse. Vinte e quatro barras paradas seriam vinte e quatro
 //     afirmações de silêncio; oscilando, vinte e quatro mentiras animadas com o
 //     nome de outra pessoa embaixo.
-//   - **o atraso por piloto.** `Telemetry.rtt_ms` é o desta máquina até o
+//   - **o atraso por pessoa.** `Telemetry.rtt_ms` é o desta máquina até o
 //     Dogma, um número só. Ele continua na telemetria da tela de operação, que
 //     é onde ele é verdade.
 //   - **a tag de subsistema** (`BALTHASAR·01`), que o protocolo não tem.
-//   - **a rota e o cronômetro do plug**, pela mesma razão — ver `EM SESSÃO`,
+//   - **a rota e o cronômetro da conexão**, pela mesma razão — ver `EM SESSÃO`,
 //     abaixo, para o que ficou no lugar do segundo.
 //
 // O registro dessas ausências não sumiu do produto: ele está no inventário
@@ -53,7 +53,7 @@
 
 "use strict";
 
-/** Quantos blocos a barra de sincronia do cartão tem. */
+/** Quantos blocos a barra de sinal do cartão tem. */
 const BLOCOS_DA_BARRA = 24;
 
 /** Quantas células o controle de volume tem. */
@@ -106,13 +106,13 @@ function desenharChamada(snapshot) {
   desenharMonitor(snapshot, cage);
 }
 
-/** A barra de cima: o nome do Cage, o enlace e o relógio da sessão. */
+/** A barra de cima: o nome da sala, o enlace e o relógio da sessão. */
 function desenharBarraDaChamada(snapshot, cage) {
   const nome = $("chamada-nome");
   if (cage) {
     medido(nome, cage.name);
   } else {
-    naoMedido(nome, snapshot ? "nenhum plug inserido" : "sem sessão");
+    naoMedido(nome, snapshot ? "fora de uma sala de voz" : "sem sessão");
   }
 
   const caixa = $("chamada-enlace");
@@ -129,9 +129,9 @@ function desenharBarraDaChamada(snapshot, cage) {
     palavra.textContent = naBateria ? "CONEXÃO CAIU" : "CONEXÃO NO AR";
   }
 
-  // `duracao` no comp é o tempo de chamada. O protocolo não carrega quando o
-  // plug entrou, e um cronômetro que começasse a contar ao abrir esta tela
-  // diria que ele entrou agora — que é pior que não dizer nada. O que existe é
+  // `duracao` no comp é o tempo de chamada. O protocolo não carrega quando a
+  // pessoa entrou na sala, e um cronômetro que começasse a contar ao abrir esta
+  // tela diria que ela entrou agora — que é pior que não dizer nada. O que existe é
   // o relógio local desde o primeiro quadro da sessão, e é o mesmo valor que a
   // tela de operação mostra como `UPTIME`: lido do mesmo lugar, os dois nunca
   // discordam. O rótulo na marcação diz `EM SESSÃO` justamente porque é isto
@@ -145,7 +145,7 @@ function desenharBarraDaChamada(snapshot, cage) {
 }
 
 /**
- * Um cartão por piloto, ou a frase do vazio.
+ * Um cartão por pessoa, ou a frase do vazio.
  *
  * Os cartões são **repintados**, e não refeitos, quando já existem. Não é
  * economia: esta tela redesenha duas vezes por segundo e o cartão agora tem
@@ -160,8 +160,8 @@ function desenharCartoes(snapshot, cage) {
     const frase = !snapshot
       ? "SEM SESSÃO"
       : cage
-        ? "ESTE CAGE ESTÁ VAZIO"
-        : "NENHUM PLUG INSERIDO";
+        ? "ESTA SALA ESTÁ VAZIA"
+        : "VOCÊ NÃO ESTÁ EM NENHUMA SALA";
     if (grade.children.length === 1 && grade.children[0].textContent === frase) return;
     repovoar(grade, [elemento("li", "chamada-vazio", frase)]);
     return;
@@ -212,7 +212,7 @@ function cartaoDoPiloto(piloto) {
   estados.append(elemento("span", "chamada-pastilha"), elemento("span", "chamada-pastilha"));
   topo.append(identidade, estados);
 
-  // ---- meio: sincronia ----
+  // ---- meio: o sinal ----
   const sync = elemento("div", "chamada-cartao-sync");
   const linha = elemento("div", "chamada-cartao-linha");
   const numero = elemento("span", "chamada-cartao-numero");
@@ -220,7 +220,7 @@ function cartaoDoPiloto(piloto) {
     elemento("span", "chamada-cartao-marca"),
     elemento("span", "chamada-cartao-valor"),
   );
-  linha.append(elemento("span", "rotulo", "SINCRONIZAÇÃO"), numero);
+  linha.append(elemento("span", "rotulo", "SINAL"), numero);
 
   const barra = elemento("span", "chamada-cartao-barra");
   // A barra é a mesma medida que o número ao lado, em forma. Lida em voz alta
@@ -276,7 +276,7 @@ function controleDeVolume() {
  * Duas coisas que esta função não faz, e que o comp faz: decidir a faixa da
  * sincronia — ela chega pronta do core, e uma casca que soubesse que 85 é
  * nominal discordaria do terminal no dia em que um dos dois fosse atualizado —
- * e desenhar amplitude por piloto, que não atravessa a fronteira.
+ * e desenhar amplitude por pessoa, que não atravessa a fronteira.
  */
 function pintarCartao(cartao, piloto, temAudio) {
   cartao.dataset.faixa = piloto.sync_band;
@@ -374,7 +374,7 @@ function iniciaisDoCartao(apelido) {
 }
 
 /**
- * O estado de um piloto, em frase.
+ * O estado de uma pessoa, em frase.
  *
  * A mesma informação da pastilha, na língua de quem nunca leu o manual — é o
  * que `LEGENDAS SIMPLES` é (inventário §2). O microfone vem antes porque calar
@@ -398,10 +398,10 @@ function desenharMonitor(snapshot, cage) {
   const nomes = cage ? cage.pilots.filter((p) => p.speaking).map((p) => p.nickname) : [];
 
   if (!cage) {
-    naoMedido(falando, snapshot ? "nenhum plug inserido" : "sem sessão");
+    naoMedido(falando, snapshot ? "fora de uma sala de voz" : "sem sessão");
     return;
   }
-  // `NINGUÉM` e não travessão: um Cage em silêncio é uma medida, e o travessão
+  // `NINGUÉM` e não travessão: uma sala em silêncio é uma medida, e o travessão
   // está reservado para o que este protocolo não sabe dizer.
   medido(falando, nomes.length === 0 ? "NINGUÉM" : nomes.join(" · "));
 }
@@ -439,27 +439,29 @@ function desenharEventosDaChamada() {
 
 /** Os quatro botões da barra de ações. */
 function desenharAcoesDaChamada(snapshot) {
-  // O rótulo diz em que estado a coisa **está**, e não o que apertá-la vai
-  // fazer; a nota diz o que apertá-la vai fazer. Um botão com o verbo no rótulo
-  // é um botão que ninguém sabe ler quando volta a olhar para a tela — e uma
-  // chave sem o verbo em lugar nenhum é uma chave que ninguém arrisca virar.
+  // O verbo grande em cima, o estado na linha de baixo. Quem olha para a barra
+  // de ações está procurando o que fazer, e é o que fazer que precisa ser
+  // legível de longe; o estado continua escrito, embaixo e no cartão desta
+  // pessoa, em vez de ocupar o único lugar que a pessoa lê antes de apertar.
+  // Um rótulo grande que diz o estado é o que fazia alguém apertar o contrário
+  // do que queria — lia `MICROFONE LIGADO` e entendia uma promessa.
   const at = $("chamada-at");
   const calado = Boolean(snapshot?.at_field);
   at.dataset.ativo = calado ? "sim" : "nao";
   at.disabled = !snapshot;
-  $("chamada-at-titulo").textContent = calado ? "MICROFONE DESLIGADO" : "MICROFONE LIGADO";
+  $("chamada-at-titulo").textContent = calado ? "LIGAR O MICROFONE" : "DESLIGAR O MICROFONE";
   $("chamada-at-nota").textContent = calado
-    ? "clique para voltar a falar"
-    : "clique para silenciar você — é o A.T. Field";
+    ? "seu microfone está desligado"
+    : "seu microfone está ligado";
 
   const surdez = $("chamada-surdez");
   const surdo = Boolean(snapshot?.total_isolation);
   surdez.dataset.ativo = surdo ? "sim" : "nao";
   surdez.disabled = !snapshot;
-  $("chamada-surdez-titulo").textContent = surdo ? "SOM DESLIGADO" : "SOM LIGADO";
+  $("chamada-surdez-titulo").textContent = surdo ? "LIGAR O SOM" : "DESLIGAR O SOM";
   $("chamada-surdez-nota").textContent = surdo
-    ? "clique para voltar a ouvir"
-    : "clique para não ouvir ninguém — é o Isolamento total";
+    ? "você não está ouvindo ninguém"
+    : "você está ouvindo a sala";
 
   $("chamada-ejetar").disabled = !snapshot;
 }
@@ -482,10 +484,10 @@ async function abrirChamada() {
 }
 
 /**
- * Volta para as Linhas **sem tirar o plug**.
+ * Volta para os canais de texto **sem sair da sala**.
  *
  * Metade da distinção que o v3 traz (inventário §7.1): trocar de tela não é
- * sair do Cage. No protótipo os dois botões do rodapé chamam a mesma coisa e o
+ * sair da sala. No protótipo os dois botões do rodapé chamam a mesma coisa e o
  * que os separa é só o que prometem; aqui um troca de tela e o outro chama
  * `eject_plug`, e a nota de cada um diz qual é qual.
  */
@@ -499,7 +501,7 @@ function fecharChamada() {
   // A sessão não foi redesenhada enquanto esteve por baixo — `desenharMensagens`
   // sai cedo quando a lista está sem layout, porque ali não dá para saber se a
   // pessoa estava lendo o histórico ou acompanhando o fim. Redesenhar agora é o
-  // outro lado desse acordo, e sem ele a Linha volta parada no instante em que
+  // outro lado desse acordo, e sem ele o canal volta parado no instante em que
   // a chamada abriu.
   atualizar().catch((falha) => console.warn("voltar da chamada:", falha));
 }
@@ -562,17 +564,17 @@ $("chamada-surdez").addEventListener("click", async () => {
 });
 
 /**
- * `SAIR DA JAULA` — a outra metade da distinção do §7.1.
+ * `SAIR DA SALA` — a outra metade da distinção do §7.1.
  *
- * Este é o `eject_plug`, e é o único dos dois botões do rodapé que sai do Cage.
- * Ele devolve para a Linha depois, porque sem plug esta tela não tem grade
- * nenhuma para desenhar e ficar nela mostraria o vazio de uma sala que a pessoa
- * acabou de deixar de propósito.
+ * Este é o `eject_plug`, e é o único dos dois botões do rodapé que sai da sala
+ * de voz. Ele devolve para os canais depois, porque fora da sala esta tela não
+ * tem grade nenhuma para desenhar e ficar nela mostraria o vazio de uma sala
+ * que a pessoa acabou de deixar de propósito.
  */
 $("chamada-ejetar").addEventListener("click", async () => {
   try {
     await invoke("eject_plug");
-    registrarEventoDaChamada("você saiu da jaula", "anotacao");
+    registrarEventoDaChamada("você saiu da sala", "anotacao");
   } catch (falha) {
     console.warn("eject_plug:", falha);
   }

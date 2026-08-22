@@ -117,7 +117,7 @@ fn parse_args() -> Result<Option<Args>> {
     }
 
     let mut target = "127.0.0.1:8383".to_owned();
-    let mut nickname = "piloto".to_owned();
+    let mut nickname = "pessoa".to_owned();
     let mut cage = CageId(1);
     let mut line = LineId(1);
     let mut no_audio = false;
@@ -358,19 +358,21 @@ async fn escolher(
 fn usage() {
     eprintln!("plug — Entry Plug, o cliente SEELE");
     eprintln!();
-    eprintln!("  sem argumento nenhum, abre a tela de conexão: os Dogmas onde");
+    eprintln!("  sem argumento nenhum, abre a tela de conexão: os servidores onde");
     eprintln!("  você já esteve, um endereço novo, um convite, ou hospedar aqui.");
     eprintln!();
-    eprintln!("  -s, --server <host[:porta]>  Dogma ao qual se conectar (padrão 127.0.0.1:8383)");
+    eprintln!(
+        "  -s, --server <host[:porta]>  servidor ao qual se conectar (padrão 127.0.0.1:8383)"
+    );
     eprintln!("  -n, --nick <nome>            como aparecer no roster");
-    eprintln!("      --cage <n>               Cage a entrar (padrão 1)");
-    eprintln!("      --linha <n>              Linha a abrir (padrão 1)");
+    eprintln!("      --cage <n>               sala de voz a entrar (padrão 1)");
+    eprintln!("      --linha <n>              canal de texto a abrir (padrão 1)");
     eprintln!("      --sem-audio              só texto, sem placa de som");
     eprintln!(
         "  -u, --url <seele://…>        link de convite: endereço, impressão digital e convite"
     );
-    eprintln!("      --convite <token>        convite de uso único, ou a senha do Dogma");
-    eprintln!("      --hospedar               sobe um Dogma aqui e entra nele");
+    eprintln!("      --convite <token>        convite de uso único, ou a senha do servidor");
+    eprintln!("      --hospedar               sobe um servidor aqui e entra nele");
     eprintln!("  -h, --ajuda                  isto");
     eprintln!();
     eprintln!("  $SEELE_HOME  onde ficam a identidade e os pins (padrão ~/.config/seele)");
@@ -586,7 +588,7 @@ async fn sessao(
             "Casa",
         )
         .await
-        .context("não consegui subir o Dogma aqui")?;
+        .context("não consegui subir o servidor aqui")?;
         Some(dogma)
     } else {
         None
@@ -650,7 +652,7 @@ async fn sessao(
             if let Err(erro) = lista.registrar(&args.pin_key, &args.nickname, Some(cage.0)) {
                 note(
                     &mut runtime,
-                    format!("não guardei este Dogma na lista: {erro}"),
+                    format!("não guardei este servidor na lista: {erro}"),
                 );
             }
         }
@@ -669,7 +671,7 @@ async fn sessao(
         runtime.app.convite_visivel = true;
         note(
             &mut runtime,
-            "o Dogma acaba quando você sair. `:convite` mostra o link de novo.".to_owned(),
+            "o servidor acaba quando você sair. `:convite` mostra o link de novo.".to_owned(),
         );
     }
 
@@ -855,7 +857,7 @@ async fn sessao(
                                     "BATERIA INTERNA ESGOTADA — a sessão não voltou em cinco minutos"
                                         .to_owned()
                                 }
-                                Motivo::Recusado(detalhe) => format!("O DOGMA RECUSOU: {detalhe}"),
+                                Motivo::Recusado(detalhe) => format!("O SERVIDOR RECUSOU: {detalhe}"),
                                 Motivo::Pedido => "ENLACE ENCERRADO".to_owned(),
                             },
                         };
@@ -942,9 +944,11 @@ async fn entrar(client: &Enlace, cage: CageId, line: LineId) -> Result<(), Fecha
 fn motivo_de_conexao_perdida(error: &ConnectError) -> String {
     match error {
         ConnectError::InviteMismatch { expected, offered } => {
-            format!("ESTE NÃO É O DOGMA DO CONVITE.\n\nesperada:  {expected}\nofertada:  {offered}")
+            format!(
+                "ESTE NÃO É O SERVIDOR DO CONVITE.\n\nesperada:  {expected}\nofertada:  {offered}"
+            )
         }
-        _ => format!("NÃO FOI POSSÍVEL ALCANÇAR O DOGMA: {error}"),
+        _ => format!("NÃO FOI POSSÍVEL ALCANÇAR O SERVIDOR: {error}"),
     }
 }
 
@@ -975,7 +979,7 @@ fn alerta_do_veredito(veredito: &Verdict) -> Option<Alert> {
         // colunas. A faixa de alerta preserva o `\n` e cresce o quanto o texto
         // pedir — ver `ui::alert_rows`.
         Verdict::InviteDisagrees { expected, offered } => format!(
-            "O CONVITE NÃO CORRESPONDE A ESTE DOGMA.\nesperada:  {expected}\nofertada:  {offered}"
+            "O CONVITE NÃO CORRESPONDE A ESTE SERVIDOR.\nesperada:  {expected}\nofertada:  {offered}"
         ),
         Verdict::Known | Verdict::InviteRefused { .. } => return None,
     };
@@ -1003,7 +1007,7 @@ fn alerta_do_veredito(veredito: &Verdict) -> Option<Alert> {
 /// Isto aqui não é um `catch` geral, e é por isso que trata um tipo só.
 fn enlace_fechado(runtime: &mut Runtime<'_>) {
     runtime.app.screen = Screen::Lost {
-        reason: "O ENLACE FECHOU — o Dogma não está mais do outro lado".to_owned(),
+        reason: "O ENLACE FECHOU — o servidor não está mais do outro lado".to_owned(),
     };
 }
 
@@ -1410,7 +1414,7 @@ async fn run_command(
                 view::project(&runtime.room, &mut runtime.app);
                 runtime.app.refazer_busca();
             } else {
-                note(runtime, format!("nenhum Cage com «{which}»"));
+                note(runtime, format!("nenhuma sala de voz com «{which}»"));
             }
         }
 
@@ -1418,7 +1422,7 @@ async fn run_command(
             if let Some(id) = runtime.room.find_line(which) {
                 open_line(runtime, client, id).await?;
             } else {
-                note(runtime, format!("nenhuma Linha com «{which}»"));
+                note(runtime, format!("nenhum canal de texto com «{which}»"));
             }
         }
 
@@ -1435,7 +1439,7 @@ async fn run_command(
             note(
                 runtime,
                 format!(
-                    "SYNC {}% · RTT {:.0}ms · JIT {:.0}ms · LOSS {:.2}% · OPUS {}k",
+                    "SINAL {}% · RTT {:.0}ms · JIT {:.0}ms · LOSS {:.2}% · OPUS {}k",
                     bar.sync,
                     bar.rtt_ms,
                     bar.jitter_ms,
@@ -1971,7 +1975,7 @@ mod tests {
     #[test]
     fn qualquer_outro_erro_de_conexao_usa_a_frase_generica() {
         let motivo = motivo_de_conexao_perdida(&ConnectError::Unreachable);
-        assert!(motivo.contains("NÃO FOI POSSÍVEL ALCANÇAR O DOGMA"));
+        assert!(motivo.contains("NÃO FOI POSSÍVEL ALCANÇAR O SERVIDOR"));
     }
 
     #[test]
