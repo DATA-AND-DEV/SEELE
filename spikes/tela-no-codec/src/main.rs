@@ -104,7 +104,21 @@ struct Imagem {
 ///
 /// O arquivo é temporário e é apagado aqui mesmo. Nada do que está na tela de
 /// quem roda entra no repositório.
-fn capturar_tela() -> Result<Imagem, String> {
+fn capturar_tela(pronta: Option<PathBuf>) -> Result<Imagem, String> {
+    // Uma textura já capturada, quando a máquina não tem `screencapture`.
+    //
+    // Existe porque este spike foi levado a uma segunda máquina — um Ryzen com
+    // Windows, alcançado por SSH — e lá aquele comando não existe. Medir numa
+    // arquitetura só era a limitação que o próprio README declarava, e ela se
+    // fechava por um `Command::new` que não é do assunto.
+    //
+    // O que se mede não muda: continua sendo tela de verdade, capturada de uma
+    // tela de verdade. O que muda é **de qual** tela, e isso está no relatório.
+    if let Some(arquivo) = pronta {
+        let bytes = std::fs::read(&arquivo)
+            .map_err(|e| format!("não consegui ler a textura de {arquivo:?}: {e}"))?;
+        return ler_bmp(&bytes);
+    }
     let destino =
         std::env::temp_dir().join(format!("seele-spike-codec-{}.bmp", std::process::id()));
     let saida = Command::new("screencapture")
@@ -779,8 +793,11 @@ fn caminho_da_biblioteca(argumento: Option<String>) -> Result<PathBuf, String> {
         "o módulo do Cisco não está nesta máquina.\n\
          O binário deste produto não vem com codec — é a decisão do §2 da spec, e é a licença\n\
          que a impõe. Busque-o e aponte para ele:\n\n  \
-         curl -L -o /tmp/m.bz2 https://ciscobinary.openh264.org/libopenh264-2.6.0-mac-arm64.dylib.bz2\n  \
-         bunzip2 /tmp/m.bz2 && mv /tmp/m {}\n",
+         macOS arm64:  libopenh264-2.6.0-mac-arm64.dylib.bz2\n  \
+         Windows x64:  openh264-2.6.0-win64.dll.bz2  (sem o «lib» na frente)\n\n  \
+         curl -L -o m.bz2 https://ciscobinary.openh264.org/<o de cima>\n  \
+         bunzip2 m.bz2 && mv m {}\n\n\
+         Ou aponte para onde ele já estiver, com $OPENH264_PATH ou --lib.\n",
         vizinho.display()
     ))
 }
@@ -832,6 +849,7 @@ fn main() -> Result<(), String> {
     let mut lib_arg = None;
     let mut modo: Option<String> = None;
     let mut amostra: Option<PathBuf> = None;
+    let mut textura: Option<PathBuf> = None;
     let mut segundos = 8.0f64;
     let mut chaves_s = vec![2.0f64, 0.0];
     while let Some(a) = argumentos.next() {
@@ -839,6 +857,7 @@ fn main() -> Result<(), String> {
             "--lib" => lib_arg = argumentos.next(),
             "--modo" => modo = argumentos.next(),
             "--amostra" => amostra = argumentos.next().map(PathBuf::from),
+            "--textura" => textura = argumentos.next().map(PathBuf::from),
             "--chave-s" => {
                 chaves_s = vec![argumentos
                     .next()
@@ -866,7 +885,7 @@ fn main() -> Result<(), String> {
         shiguredo_openh264::BUILD_VERSION,
     );
 
-    let imagem = capturar_tela()?;
+    let imagem = capturar_tela(textura)?;
     println!(
         "captura: {}x{} da tela principal, em memória e já apagada do disco",
         imagem.largura, imagem.altura

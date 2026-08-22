@@ -933,13 +933,21 @@ Write-Output ('restos=' + \$restos.Count)")
             # release no nome, e a contagem da pilha é impressa. Uma pilha que
             # cresce aparece na tela em vez de crescer calada.
             #
-            # Só o rastreado: arquivo não rastreado não impede `checkout` nem
-            # muda o que compila, e `git stash` sem `-u` não o levaria — dizer
-            # que guardou o que não guardou seria a mentira de sempre.
+            # Só o rastreado, e isso é o **padrão** de `git stash push`: sem
+            # `-u` ele não toca em arquivo não rastreado. É o que se quer —
+            # aquele arquivo não impede `checkout` nem muda o que compila, e
+            # arrastá-lo tiraria da outra máquina coisa que ninguém pediu para
+            # guardar.
+            #
+            # Houve aqui um `--untracked-files=no`, escrito por simetria com o
+            # `git status` da linha de baixo. **Aquela bandeira não existe** em
+            # `git stash push`, e o git respondia com o texto de uso — o stash
+            # não acontecia e o `checkout` seguinte falhava. Encontrado rodando
+            # de verdade contra a máquina Windows, e não por leitura.
             passo "há trabalho não commitado em $WINDOWS; guardando num stash"
             cw_guarda=$(no_windows "\$ErrorActionPreference = 'Stop'
 Set-Location '$REPO_WINDOWS'
-git stash push --quiet --untracked-files=no --message 'seele: antes do release $VERSAO'
+git stash push --quiet --message 'seele: antes do release $VERSAO'
 Write-Output ('sobrou=' + (git status --porcelain --untracked-files=no).Length)
 Write-Output ('pilha=' + (git stash list | Measure-Object).Count)")
             case "$cw_guarda" in

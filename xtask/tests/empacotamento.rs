@@ -1189,7 +1189,7 @@ fn a_limpeza_do_windows_restaura_so_o_arquivo_conhecido() {
         .find(|linha| linha.contains("git stash push"))
         .unwrap_or_default();
     assert!(
-        empurra.is_empty() || empurra.contains("--untracked-files=no"),
+        !empurra.contains(" -u") && !empurra.contains("--include-untracked"),
         "o `git stash push` do Windows leva arquivo não rastreado junto:\n{empurra}"
     );
 }
@@ -1781,20 +1781,28 @@ fn o_trabalho_solto_no_windows_e_guardado_e_nao_apagado() {
     // `git stash` sem `-u` não leva, e que nunca bloqueou `checkout` nenhum.
     let script = std::fs::read_to_string(raiz().join("empacotar/publicar.sh"))
         .expect("o publicar.sh é legível");
-    // Na linha do `stash push`, e não em qualquer lugar do arquivo: a bandeira
-    // também aparece na conferência logo abaixo, e procurá-la solta deixava
-    // esta asserção passar com o `stash` já sem ela. Encontrado por mutação —
-    // tirar a bandeira do `push` não deixava nada vermelho.
+    // A propriedade é a **ausência** de `-u`, e não a presença de uma bandeira.
+    //
+    // Havia aqui um `--untracked-files=no`, e ele não existe em `git stash
+    // push` — é bandeira de `git status`. O git respondia com o texto de uso, o
+    // stash não acontecia, e este teste guardava a coisa quebrada por exigir
+    // justamente a bandeira inventada. Encontrado rodando o script contra a
+    // máquina Windows de verdade.
+    //
+    // Sem `-u`, `git stash push` já deixa o não rastreado onde está, que é o
+    // que se quer: ele não bloqueia `checkout` nem muda o que compila.
     let empurra = script
         .lines()
         .find(|linha| linha.contains("git stash push"))
         .unwrap_or_default();
-    assert!(
-        empurra.contains("--untracked-files=no"),
-        "o `git stash push` passou a levar arquivo não rastreado junto: ele \
-         nunca bloqueou `checkout` nem muda o que compila, e arrastá-lo tira \
-         da outra máquina arquivo que ninguém pediu para guardar:\n{empurra}"
-    );
+    for arrasta in [" -u", "--include-untracked", " -a", "--all"] {
+        assert!(
+            !empurra.contains(arrasta),
+            "o `git stash push` passou a levar arquivo não rastreado junto \
+             («{arrasta}»): arrastá-lo tira da outra máquina arquivo que \
+             ninguém pediu para guardar:\n{empurra}"
+        );
+    }
     // Olhando código, e não comentário: os comentários deste bloco discutem o
     // `reset --hard` justamente para dizer por que ele não está lá, e uma busca
     // crua casaria com a explicação e chamaria de defeito.
