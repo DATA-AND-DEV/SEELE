@@ -330,6 +330,9 @@ async function abrirDogma(origem) {
   $(origem).hidden = true;
   $("tela-dogma").hidden = false;
   $("dogma-erro").hidden = true;
+  // A recusa da seção do servidor some junto: ela é sobre o arquivo que alguém
+  // escolheu da última vez, e reabrir a tela não é tentar de novo.
+  $("dogma-servidor-erro").hidden = true;
   $("dogma-voltar-texto").textContent = VOLTA[origem] ?? "VOLTAR";
   await desenharDispositivos();
   await atualizarDogma();
@@ -386,6 +389,258 @@ async function atualizarDogma() {
   marcarLinhas(snapshot);
   desenharModos(snapshot);
   desenharIdentidade(snapshot);
+  desenharServidor(snapshot);
+  await sincronizarIcone(snapshot);
+}
+
+// ------------------------------------------------------------- o servidor
+//
+// A única seção desta tela que não é desta máquina: o nome e a imagem do
+// servidor, para quem tem permissão de mudá-los.
+//
+// ---- o que esta metade decide, e o que ela não decide ----
+//
+// Ela não decide **nada** sobre quem pode. `may_customise_dogma` chega pronto
+// no snapshot, resolvido pelo MELCHIOR a partir das permissões desta conexão, e
+// esconder a seção não impede ninguém de nada: um pedido sem a permissão é
+// recusado no servidor e volta como aviso. Isto é não oferecer o que não ia
+// funcionar — a mesma decisão que a coluna de canais toma com os formulários de
+// criar.
+//
+// Ela também não decide o que é uma imagem aceitável. Os dois números que a
+// frase escreve vêm do Rust, e quem recusa uma imagem é o protocolo, com o
+// número dele dentro do erro.
+
+/**
+ * O teto e o lado que o servidor aceita, como o Rust os conta.
+ *
+ * Buscados uma vez e guardados: são constantes de protocolo, e não mudam
+ * enquanto este binário for este binário. `null` enquanto a resposta não
+ * chegou — e nesse intervalo a frase fica vazia em vez de trazer números
+ * inventados.
+ */
+let regrasDoIcone = null;
+
+/**
+ * A imagem que está desenhada, e a revisão que a produziu.
+ *
+ * `revisao` é o `icon_revision` do snapshot, e é o acordo inteiro: os bytes não
+ * viajam no snapshot — ele atravessa a ponte em JSON duas vezes por segundo —,
+ * então o que se compara é um número, e só quando ele anda é que
+ * `icone_do_dogma` é chamado. `null` quer dizer «não há sessão que eu tenha
+ * desenhado», e não «revisão zero»: um servidor novo começa a contar do zero de
+ * novo, e sem essa distinção a imagem do servidor anterior ficaria no
+ * cabeçalho do seguinte.
+ */
+const iconeDesenhado = { revisao: null, uri: null };
+
+/**
+ * Os bytes de um PNG como um `data:` que um `<img>` aceita.
+ *
+ * Montado aqui, tipo de mídia incluído, e isso seria errado para um anexo — lá
+ * o tipo é uma **alegação** de quem mandou, e o ADR 0027 proíbe a tela de
+ * juntar as duas coisas. Aqui não há alegação nenhuma para o conteúdo
+ * desmentir: a mensagem do protocolo carrega bytes e mais nada, e o que ela
+ * aceita é PNG e só PNG, conferido nas duas pontas pela assinatura. `image/png`
+ * não é uma promessa desta linha; é o que estes bytes já provaram ser antes de
+ * chegarem aqui.
+ *
+ * `data:` e não um blob porque a Content Security Policy desta janela é
+ * `img-src 'self' data:` e não se mexe nela por causa de uma imagem.
+ */
+function uriDeIcone(bytes) {
+  // Em pedaços, e não `String.fromCharCode(...bytes)`: espalhar oito mil
+  // argumentos numa chamada estoura a pilha em alguns motores, e a falha
+  // apareceria como a imagem simplesmente não desenhando.
+  let cru = "";
+  for (let de = 0; de < bytes.length; de += 4096) {
+    cru += String.fromCharCode.apply(null, bytes.slice(de, de + 4096));
+  }
+  return `data:image/png;base64,${btoa(cru)}`;
+}
+
+/** Põe a imagem guardada nos dois lugares que a desenham, ou tira os dois. */
+function pintarIcone() {
+  const uri = iconeDesenhado.uri;
+  for (const id of ["topo-dogma-icone", "dogma-icone-previa"]) {
+    const alvo = $(id);
+    if (uri) alvo.src = uri;
+    else alvo.removeAttribute("src");
+    alvo.hidden = !uri;
+  }
+  // O dizer só existe na tela de configuração: no cabeçalho, a ausência de
+  // imagem é o cabeçalho de sempre, e não uma lacuna a explicar.
+  $("dogma-icone-vazio").hidden = Boolean(uri);
+}
+
+/** Esquece a imagem desenhada. Toda sessão nova começa por aqui. */
+function esquecerIcone() {
+  if (iconeDesenhado.revisao === null && iconeDesenhado.uri === null) return;
+  iconeDesenhado.revisao = null;
+  iconeDesenhado.uri = null;
+  pintarIcone();
+}
+
+/**
+ * Busca os bytes **só** quando a revisão andou.
+ *
+ * É o precedente de `messages_revision`, e o custo que ele evita é concreto:
+ * são até oito mil bytes atravessando a ponte em JSON, e um redesenho os
+ * puxaria duas vezes por segundo para uma imagem que muda quando alguém aperta
+ * um botão.
+ */
+async function sincronizarIcone(snapshot) {
+  if (!snapshot) {
+    esquecerIcone();
+    return;
+  }
+  if (iconeDesenhado.revisao === snapshot.icon_revision) return;
+  iconeDesenhado.revisao = snapshot.icon_revision;
+  try {
+    const bytes = await invoke("icone_do_dogma");
+    iconeDesenhado.uri = bytes ? uriDeIcone(bytes) : null;
+  } catch (falha) {
+    // A sessão acabou entre o snapshot e esta chamada. Não é aviso de nada, e
+    // a revisão volta a `null` para que a próxima leitura busque de novo.
+    if (falha !== "NotConnected") console.warn("icone_do_dogma:", falha);
+    iconeDesenhado.revisao = null;
+    iconeDesenhado.uri = null;
+  }
+  pintarIcone();
+}
+
+/**
+ * Puxa um snapshot só para a imagem, fora do laço desta tela.
+ *
+ * Chamado pelo `DogmaChanged` e por mais nada. Uma volta de IPC por troca de
+ * nome ou de imagem é barata; o que seria caro — e o que o `icon_revision`
+ * existe para evitar — é buscar os **bytes**, e isso continua acontecendo só
+ * quando o número anda.
+ */
+async function seguirOServidor() {
+  let snapshot = null;
+  try {
+    snapshot = await invoke("snapshot");
+  } catch (falha) {
+    if (falha !== "NotConnected") console.warn("snapshot:", falha);
+  }
+  await sincronizarIcone(snapshot);
+}
+
+/**
+ * Quem pode ver a seção, e o que ela mostra.
+ *
+ * O campo do nome traz o nome que **está valendo**, e não o que foi digitado —
+ * é a mesma regra que faz a lista de microfones dizer qual abriu. Ele só não é
+ * reescrito enquanto está sob o cursor: uma tela que sobrescreve o que alguém
+ * está digitando, duas vezes por segundo, é uma tela em que ninguém consegue
+ * escrever nada.
+ */
+function desenharServidor(snapshot) {
+  const pode = snapshot?.may_customise_dogma === true;
+  $("secao-servidor-item").hidden = !pode;
+
+  // Perder a permissão — ou a sessão — com a seção aberta deixaria o painel de
+  // pé com o botão que o abre já apagado da coluna. Volta para a primeira, que
+  // é a que existe sempre.
+  if (!pode && $("secao-servidor").getAttribute("aria-current") === "true") {
+    abrirSecao("secao-audio");
+  }
+  if (!pode) return;
+
+  const campo = $("dogma-nome-valor");
+  if (document.activeElement !== campo) campo.value = snapshot.dogma ?? "";
+}
+
+/** A frase da regra, com os dois números que o Rust conta. */
+function desenharRegraDoIcone() {
+  if (!regrasDoIcone) return;
+  $("dogma-icone-regra").textContent =
+    `PNG, no máximo ${emKibibytes(regrasDoIcone.limite_bytes)} e ` +
+    `${regrasDoIcone.lado} pixels de cada lado.`;
+}
+
+/** `8 KiB` — o teto como uma pessoa o lê. */
+function emKibibytes(bytes) {
+  return `${Math.round(bytes / 1024)} KiB`;
+}
+
+/**
+ * A frase de uma imagem recusada.
+ *
+ * As duas recusas são separadas porque o passo seguinte é outro: uma fotografia
+ * dá para encolher, e um PDF não vira imagem por mais que se insista. E o
+ * número sai do próprio erro, e não da cópia que o Rust guarda para escrever a
+ * frase de cima: quem manda é o protocolo, e é o número dele que a pessoa tem
+ * de acreditar.
+ */
+function fraseDeIcone(falha) {
+  if (falha === "IconNotAPicture") {
+    return "ESTE ARQUIVO NÃO SERVE COMO IMAGEM DESTE SERVIDOR.\nEle precisa ser um PNG.";
+  }
+  if (falha && typeof falha === "object" && falha.IconTooBig) {
+    const teto = emKibibytes(falha.IconTooBig.limit_bytes);
+    return `ESTA IMAGEM É PESADA DEMAIS.\nO máximo é ${teto}.`;
+  }
+  return fraseDeErro(falha);
+}
+
+/** Mostra o que deu errado, revelando antes de escrever. */
+function erroDoServidor(falha) {
+  const onde = $("dogma-servidor-erro");
+  onde.hidden = false;
+  onde.textContent = fraseDeIcone(falha);
+}
+
+/** Manda o nome que está na caixa. Sai do campo, vale. */
+async function renomearServidor() {
+  const campo = $("dogma-nome-valor");
+  const nome = campo.value.trim();
+  $("dogma-servidor-erro").hidden = true;
+  // Vazio é desistir da edição, e não pedir um servidor sem nome: a FFI engole
+  // o nome em branco antes de mandá-lo, e a tela devolve o que está valendo
+  // para que a caixa não fique mentindo.
+  if (nome === "") {
+    await atualizarDogma();
+    return;
+  }
+  try {
+    await invoke("renomear_dogma", { name: nome });
+  } catch (falha) {
+    erroDoServidor(falha);
+  }
+  await atualizarDogma();
+}
+
+/** Abre o seletor do sistema e põe o que a pessoa escolher. */
+async function escolherIcone() {
+  const botao = $("dogma-icone-escolher");
+  $("dogma-servidor-erro").hidden = true;
+  botao.disabled = true;
+  try {
+    // `false` é ter fechado o seletor sem escolher, que é o desfecho mais
+    // comum de todos e não é falha nenhuma.
+    if (await invoke("escolher_icone_do_dogma")) {
+      anunciar("Imagem do servidor trocada.");
+    }
+  } catch (falha) {
+    erroDoServidor(falha);
+  } finally {
+    botao.disabled = false;
+  }
+  await atualizarDogma();
+}
+
+/** Tira a imagem, deixando o servidor sem nenhuma. */
+async function tirarIcone() {
+  $("dogma-servidor-erro").hidden = true;
+  try {
+    await invoke("tirar_icone_do_dogma");
+    anunciar("Este servidor ficou sem imagem.");
+  } catch (falha) {
+    erroDoServidor(falha);
+  }
+  await atualizarDogma();
 }
 
 // --------------------------------------------------------------- atualizar
@@ -557,6 +812,52 @@ for (const botao of document.querySelectorAll(".dogma-modo")) {
 
 $("atualizacao-procurar").addEventListener("click", procurarAtualizacao);
 $("atualizacao-instalar").addEventListener("click", instalarAtualizacao);
+
+$("dogma-icone-escolher").addEventListener("click", escolherIcone);
+$("dogma-icone-tirar").addEventListener("click", tirarIcone);
+
+// Sair do campo é mandar. `change` é o evento que diz as duas coisas de uma vez
+// — o valor mudou **e** a edição terminou —, e é ele que faz o Enter e o clique
+// fora valerem a mesma coisa sem um botão no meio. Um valor escrito pelo script
+// não o dispara, então o redesenho de meio em meio segundo não se manda de volta
+// para o servidor.
+$("dogma-nome-valor").addEventListener("change", renomearServidor);
+// O Enter só tira o foco; quem manda continua sendo o `change` acima. Sem isto
+// o cursor fica na caixa depois de renomear, e nada na tela diz que acabou.
+$("dogma-nome-valor").addEventListener("keydown", (evento) => {
+  if (evento.key === "Enter") $("dogma-nome-valor").blur();
+});
+
+// Os dois números da imagem, uma vez. São constantes do protocolo — não mudam
+// enquanto este binário for este binário —, e a frase que os usa fica vazia até
+// eles chegarem, em vez de trazer números escritos à mão que possam divergir.
+invoke("regras_do_icone_do_dogma")
+  .then((regras) => {
+    regrasDoIcone = regras;
+    desenharRegraDoIcone();
+  })
+  .catch((falha) => console.warn("regras_do_icone_do_dogma:", falha));
+
+// A imagem do cabeçalho tem de acompanhar a sessão, e o cabeçalho fica na tela
+// **ao lado** desta: o laço lá embaixo só roda com a configuração na frente. Daí
+// este ouvinte, e daí ele ser estreito — `DogmaChanged` é o único evento que a
+// imagem pode ter mudado, e ele não chega por telemetria nem por mensagem.
+//
+// `ConnectStageChanged` é o zerar, e é ele porque é o único aviso que existe
+// **antes** de haver sessão. Sem isto, entrar num servidor sem imagem logo
+// depois de sair de um que tinha deixaria a imagem do anterior no cabeçalho do
+// seguinte: a revisão de um servidor novo recomeça do zero, e nada chegaria para
+// contradizer o que já estava desenhado.
+listen("seele://event", (evento) => {
+  const payload = evento.payload;
+  if (payload === "DogmaChanged") {
+    seguirOServidor().catch((falha) => console.warn("DogmaChanged:", falha));
+    return;
+  }
+  if (payload && typeof payload === "object" && (payload.Ended || payload.ConnectStageChanged)) {
+    esquecerIcone();
+  }
+});
 
 // O andamento do download. Um canal separado do `seele://event` da conversa, e
 // a separação é do Rust: aquele carrega o que a FFI emite sobre a sessão, e

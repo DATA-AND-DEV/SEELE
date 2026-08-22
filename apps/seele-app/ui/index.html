@@ -388,6 +388,26 @@
       para cá quando a ficha `C·02 / DOGMA` saiu: aquele painel não existe no
       comp, e o nome do Dogma é a primeira coisa que o desenho diz.
     -->
+    <!--
+      A imagem do servidor — o «à esquerda» do pedido, e o lugar onde ela vale
+      alguma coisa: ao lado do nome, no alto, onde a pessoa olha para saber em
+      que servidor está.
+
+      `alt=""` porque o nome está escrito no bloco ao lado, a um centímetro
+      daqui: uma descrição aqui faria um leitor de tela anunciar o mesmo
+      servidor duas vezes seguidas.
+
+      Nasce escondida e continua escondida enquanto não houver imagem — a
+      maioria dos servidores não tem uma, e um quadrado vazio no cabeçalho seria
+      uma moldura prometendo o que não existe. Quem a revela é `tela-dogma.js`,
+      que é quem sabe quando a imagem mudou.
+
+      A classe é `dogma-` e não `topo-` porque quem a pinta é `tela-dogma.css`:
+      esta imagem é a metade visível da tela de personalização, e as duas
+      metades mudam juntas. `tela-dogma.css` carrega depois de `tela-sessao.css`,
+      então nenhum empate de especificidade depende de sorte.
+    -->
+    <img id="topo-dogma-icone" class="dogma-icone-topo" alt="" hidden>
     <span class="topo-dogma">
       <span id="topo-dogma-nome" class="topo-dogma-nome">—</span>
       <span id="topo-dogma-sub" class="topo-dogma-sub">SERVIDOR</span>
@@ -919,42 +939,66 @@
   -->
   <main class="paineis">
     <!--
-      A trilha de Dogmas (comp v3 §6.1). O comp desenha um cabeçalho `REDES`,
-      um botão de 56px por Dogma, e um `+` de 48px. Aqui há um Dogma, e é o que
-      o produto tem: `Session` guarda **um** `Plug`, e `connect` devolve
-      `AlreadyConnected` se já houver um (inventário §16, "mudança de
-      arquitetura"). A trilha fica com o que existe — quando o segundo Plug
-      existir, ela já é o lugar dele.
+      A trilha de servidores (comp v3 §6.1): o cabeçalho `REDES`, um botão de
+      56px por servidor, e o `+` de 48px embaixo.
+
+      Ela lista o **histórico** — os mesmos servidores que a tela de entrada
+      oferece, lidos do mesmo lugar (o comando `conhecidos`) — com o atual
+      marcado. O atual é o botão de cima e é desenhado à parte de propósito: ele
+      pode não estar no histórico nenhum, porque um servidor hospedado nesta
+      máquina não é anotado lá (`127.0.0.1` não é lugar aonde se volta), e é
+      justamente ele que esta coluna existe para dizer.
+
+      **Este produto tem um `Plug` por vez**: `Session` guarda um só, e `connect`
+      devolve `AlreadyConnected` se já houver (inventário §16). Isso não impede a
+      trilha — é a forma dela. Apertar outro servidor não abre uma segunda
+      sessão: desconecta desta e conecta naquela, que é o que «entrar num outro
+      servidor desconecta você do anterior» quer dizer. A troca passa pela tela
+      de entrada, e o porquê está em `trocarDeServidor`, em `tela-sessao.js`.
 
       A sigla é do comp: `TÓQUIO-3` vira `T3` porque a coluna tem 60px e não
       cabe um nome. Ela é abreviação de desenho e não um dado — o nome inteiro
-      está escrito no cabeçalho, a dois centímetros daqui, e também no
-      `aria-label` deste botão, que é o que um leitor de tela anuncia.
+      está no `aria-label` de cada botão, que é o que um leitor de tela anuncia,
+      e o do servidor em que se está também no cabeçalho, a dois centímetros
+      daqui. Quando o servidor tem imagem, ela entra no lugar da sigla: uma
+      imagem se reconhece de relance, três letras se leem.
     -->
     <nav class="trilha" aria-labelledby="trilha-titulo">
       <h2 id="trilha-titulo" class="trilha-titulo">REDES</h2>
       <button id="trilha-dogma" class="trilha-item trilha-atual" type="button"
               aria-current="true" disabled>—</button>
       <!--
-        O `+`, de volta — e com **um** significado, que é a correção do comp v3.
-
-        No v2 ele acumulava "entrar noutro Dogma" e "sair deste", e um teste
-        entre duas máquinas encontrou o que isso significa na prática: a pessoa
-        não achou como sair. A resposta daquela vez foi tirar o `+` da tela e
-        pôr `DESCONECTAR` escrito no cabeçalho. O `DESCONECTAR` fica onde está;
-        o que volta aqui é só a metade que ele nunca teve: acrescentar.
-
-        Desabilitado, e por um motivo que o `title` diz: acrescentar um segundo
-        Dogma é ter dois `Plug` ao mesmo tempo, e este produto tem um. Um botão
-        apertável aqui prometeria uma segunda sessão que `connect` recusa com
-        `AlreadyConnected` — é o mesmo caso de `FORÇAR REINSERÇÃO DE PLUG`, e
-        recebe o mesmo tratamento: a moldura fica, a promessa não. (O terceiro
-        desta lista era o botão da caixa de alerta, e ele saiu dela: os verbos
-        de moderação chegaram, e ele passou a chamar um.)
+        O histórico, desenhado por `desenharTrilha`. Vazio na marcação porque
+        antes do primeiro quadro esta janela não sabe onde está — e vazio de
+        verdade para quem só esteve num servidor, que é a coluna exatamente como
+        era antes desta lista existir.
       -->
-      <button id="trilha-adicionar" class="trilha-mais" type="button" disabled
-              aria-label="Adicionar servidor"
-              title="este produto mantém uma conexão por vez: para trocar de servidor, use DESCONECTAR">+</button>
+      <ul id="trilha-outros" class="trilha-outros"></ul>
+      <!--
+        O `+`, e com **um** significado — que é a correção do comp v3.
+
+        No v2 ele acumulava «entrar noutro Dogma» e «sair deste», e um teste
+        entre duas máquinas encontrou o que isso significa na prática: a pessoa
+        não achou como sair. A resposta daquela vez foi tirar o `+` da tela e pôr
+        `DESCONECTAR` escrito no cabeçalho. O `DESCONECTAR` fica onde está; o que
+        volta aqui é só a metade que ele nunca teve: acrescentar.
+
+        Acrescentar, aqui, é levar à entrada com o campo do endereço vazio e sob
+        o cursor. Ele passa pela mesma saída que o `DESCONECTAR` porque com uma
+        conexão por vez não existe outro caminho — mas não é o mesmo controle
+        dito duas vezes: um diz «encerrar», e deixa o formulário como estava para
+        quem vai voltar ao mesmo lugar; o outro diz «conectar a um servidor que
+        ainda não está nesta coluna», e limpa o campo porque um endereço velho
+        num formulário que promete um servidor novo é o começo de uma conexão
+        errada. É a mesma relação que `/` e `BUSCAR` já têm: duas portas com
+        nomes diferentes, uma coisa atrás.
+
+        Sair no meio de uma sessão é o que a caixa de confirmação diz antes, com
+        o nome do servidor dentro — ver `pedirAEntrada` em `tela-sessao.js`.
+      -->
+      <button id="trilha-adicionar" class="trilha-mais" type="button"
+              aria-label="Conectar a outro servidor"
+              title="sai deste servidor e volta à entrada para você digitar outro endereço">+</button>
     </nav>
 
     <!--
@@ -1800,13 +1844,22 @@
 -->
 <section id="tela-dogma" class="tela" tabindex="-1" hidden
          data-foco="secao-audio"
-         data-anuncio="Terminal Dogma. Configuração deste computador.">
+         data-anuncio="Terminal Dogma. Configuração deste computador, e do servidor para quem pode mudá-lo.">
   <div class="dogma">
 
     <nav class="dogma-coluna" aria-label="seções da configuração">
       <div class="dogma-marca">
         <h1 class="dogma-marca-titulo">TERMINAL DOGMA</h1>
-        <p class="nota">Ajustes deste computador, e não deste servidor.</p>
+        <!--
+          A frase era «Ajustes deste computador, e não deste servidor», e a
+          segunda metade deixou de ser verdade no dia em que a última seção
+          entrou: quem hospeda personaliza o servidor daqui. A ressalva ficou
+          escrita em vez de sumir — quatro das cinco seções continuam sendo
+          desta máquina, e essa é a leitura que evita alguém procurar aqui o que
+          é do servidor.
+        -->
+        <p class="nota">Ajustes deste computador. A última seção é do servidor,
+          e só aparece para quem pode mudá-lo.</p>
       </div>
 
       <!--
@@ -1884,6 +1937,37 @@
             <span class="dogma-secao-texto">
               <span class="dogma-secao-nome">ATUALIZAÇÃO</span>
               <span class="nota">Versão nova</span>
+            </span>
+          </button>
+        </li>
+        <!--
+          A sexta, e a única que não é desta máquina: o nome e a imagem do
+          servidor. Ela cai aqui porque é aqui que se ajusta o que não é
+          conversa — a alternativa era uma tela nova alcançável só de dentro da
+          sessão, e o produto passaria a ter dois lugares chamados configuração.
+
+          Última, e a posição é a decisão: esta seção **quase nunca está aí**.
+          Ela aparece só para quem tem a permissão, então uma pessoa comum abre
+          esta tela e vê cinco seções, não um buraco no meio da coluna.
+
+          Esconder não é o que impede: quem pedir sem a permissão recebe uma
+          recusa do servidor, e é lá que a `specs/08-seguranca.md` põe a
+          segurança. Isto é não oferecer o que não ia funcionar — o mesmo que a
+          coluna de canais já faz com os dois formulários de criar.
+
+          O `hidden` está na marcação, e não é detalhe: antes do primeiro
+          snapshot esta janela não sabe que permissões tem, e uma seção nascida
+          visível prometeria por um quadro o que ela talvez não possa cumprir.
+        -->
+        <li id="secao-servidor-item" hidden>
+          <button id="secao-servidor" class="dogma-secao" type="button"
+                  data-painel="painel-servidor"
+                  data-titulo="ESTE SERVIDOR"
+                  data-sub="O nome e a imagem que todo mundo vê ao entrar aqui">
+            <span class="dogma-secao-icone" data-glifo="aparencia"></span>
+            <span class="dogma-secao-texto">
+              <span class="dogma-secao-nome">SERVIDOR</span>
+              <span class="nota">Nome e imagem</span>
             </span>
           </button>
         </li>
@@ -2213,6 +2297,117 @@
                 <h4 class="rotulo">BAIXANDO</h4>
                 <p id="atualizacao-barra" class="dogma-atualizacao-barra"></p>
                 <p id="atualizacao-baixados" class="dogma-atualizacao-baixados"></p>
+              </div>
+
+            </div>
+          </div>
+        </section>
+
+        <!-- ------------------------------------------------------ SERVIDOR -->
+        <!--
+          O que quem hospeda pode mudar no servidor: o nome e a imagem.
+
+          ---- não há SALVAR aqui também ----
+
+          É a regra desta tela inteira, e a avaliação de usabilidade a listou
+          entre «o que já está certo e não foi tocado»: a escolha vale na hora e
+          o que está desenhado é o que está **valendo**. O campo do nome não é a
+          sua intenção guardada até você confirmar — ele mostra o nome que o
+          servidor está usando, e mandá-lo é sair do campo. A imagem é a que
+          todo mundo está vendo agora, e não a que você preparou.
+
+          Uma segunda razão, específica desta seção: o servidor pode recusar, e
+          pode mudar por baixo de você — outra pessoa com a mesma permissão
+          renomeia enquanto esta tela está aberta. Um SALVAR aqui prometeria que
+          o que está na caixa é o que vale, e é a coisa que ele não pode
+          prometer.
+
+          ---- o limite é dito antes, e não depois ----
+
+          A frase com o teto e o tamanho fica **acima** do botão que abre o
+          seletor, e os dois números vêm do Rust (`regras_do_icone_do_dogma`) em
+          vez de escritos aqui: uma pessoa que só descobre o limite pela recusa
+          já perdeu a viagem até a pasta das fotos. Quando a recusa vier assim
+          mesmo, ela traz o número que o `PlugError` carrega — que é o do
+          protocolo, e o único que manda.
+        -->
+        <section id="painel-servidor" class="dogma-painel-secao"
+                 aria-labelledby="secao-servidor" hidden>
+
+          <div class="dogma-bloco">
+            <div class="dogma-bloco-topo">
+              <h3 class="dogma-bloco-nome">NOME</h3>
+              <p class="nota">O que se lê no alto da tela de quem está aqui dentro</p>
+            </div>
+            <div class="dogma-bloco-corpo">
+              <div class="dogma-campo">
+                <label class="dogma-nome-campo">
+                  <span class="rotulo">NOME DESTE SERVIDOR</span>
+                  <!--
+                    `maxlength` é a mesma aproximação que os campos de criar
+                    sala e canal já fazem: o teto do protocolo é em **bytes** e
+                    este atributo conta caracteres, então um nome de 64 letras
+                    acentuadas ainda pode ser recusado. A recusa é do servidor e
+                    chega como aviso, como a de qualquer outro verbo.
+                  -->
+                  <input id="dogma-nome-valor" name="nome" maxlength="64"
+                         spellcheck="false" autocomplete="off"
+                         placeholder="nome do servidor">
+                </label>
+                <p class="nota">Vale ao sair do campo, ou ao apertar Enter. Não
+                  há botão de salvar: o que está escrito aqui é o nome que o
+                  servidor está usando agora.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="dogma-bloco">
+            <div class="dogma-bloco-topo">
+              <h3 class="dogma-bloco-nome">IMAGEM</h3>
+              <p class="nota">O quadrado à esquerda do nome, no alto da tela</p>
+            </div>
+            <div class="dogma-bloco-corpo">
+
+              <div class="dogma-campo">
+                <h4 class="rotulo">O QUE ESTÁ VALENDO</h4>
+                <!--
+                  A moldura fica mesmo sem imagem, e o dizer é escrito dentro
+                  dela. Um espaço em branco onde a imagem vai ficar não conta a
+                  diferença entre «este servidor não tem imagem» e «esta tela
+                  não conseguiu buscá-la».
+                -->
+                <div class="dogma-icone-molde">
+                  <img id="dogma-icone-previa" class="dogma-icone-previa" alt="" hidden>
+                  <span id="dogma-icone-vazio" class="dogma-icone-vazio">SEM IMAGEM</span>
+                </div>
+              </div>
+
+              <div class="dogma-campo">
+                <h4 class="rotulo">O QUE CABE AQUI</h4>
+                <!--
+                  Escrito pelo script a partir de `regras_do_icone_do_dogma`, e
+                  vazio na marcação de propósito: os dois números moram no Rust,
+                  e uma cópia deles aqui seria a terceira.
+                -->
+                <p id="dogma-icone-regra" class="dogma-frase"></p>
+                <p class="dogma-frase">Ninguém converte nem encolhe nada por
+                  você: a imagem vai como está, e uma que não sirva volta
+                  recusada com o motivo escrito.</p>
+
+                <div class="dogma-icone-botoes">
+                  <button id="dogma-icone-escolher" class="botao" type="button">
+                    ESCOLHER IMAGEM
+                  </button>
+                  <button id="dogma-icone-tirar" class="botao-fantasma" type="button">
+                    TIRAR A IMAGEM
+                  </button>
+                </div>
+
+                <!--
+                  Revelado antes de escrito: `role="alert"` não anuncia o que já
+                  estava na página enquanto ela estava escondida.
+                -->
+                <p id="dogma-servidor-erro" class="erro" role="alert" hidden></p>
               </div>
 
             </div>

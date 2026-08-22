@@ -575,3 +575,87 @@
   width: 100%;
   color: var(--seele-osso-apagado);
 }
+
+/* ---------- o servidor: nome e imagem ----------
+
+   A sexta seção, e a única desta tela que não é desta máquina. Sem geometria
+   nova: os primitivos daqui (`.dogma-bloco`, `.dogma-campo`, `.dogma-frase`,
+   `.rotulo`) reusados, que é o que faz uma seção parecer parte da tela em vez
+   de um enxerto. */
+
+.dogma-nome-campo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* O nome do servidor cabe em 64 bytes, e uma caixa da largura do painel
+   convidaria a escrever um parágrafo. `48ch` é folga sobre o teto sem ser
+   convite. */
+.dogma-nome-campo input {
+  max-width: 48ch;
+}
+
+/* A moldura do que está valendo. Fica de pé com imagem ou sem, e é isso que a
+   faz dizer alguma coisa: um espaço em branco onde a imagem apareceria não
+   distingue «este servidor não tem imagem» de «esta tela não a buscou». */
+.dogma-icone-molde {
+  width: 96px;
+  height: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  background: var(--seele-negro-absoluto);
+  border: 1px solid var(--seele-linha-forte);
+}
+
+/* `contain` e não `cover`: recortar a imagem de alguém para caber na moldura é
+   a tela decidindo o que da imagem importa. O que o servidor aceita já é
+   quadrado o bastante — 256px de lado no máximo —, e o que sobra é margem. */
+.dogma-icone-previa {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.dogma-icone-vazio {
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-osso-apagado);
+  text-align: center;
+}
+
+.dogma-icone-botoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* `margin-left: 0` porque `.botao-fantasma` de `base.css` traz um
+   `margin-left: auto` que o empurraria para a outra ponta da fileira, longe do
+   botão de que ele é o par. */
+.dogma-icone-botoes .botao-fantasma {
+  margin-left: 0;
+}
+
+/* ---------- a mesma imagem, no cabeçalho da sessão ----------
+
+   Mora nesta folha e não em `tela-sessao.css` porque é aqui que ela é decidida:
+   `tela-dogma.js` é quem sabe quando a imagem mudou e quem a pinta nos dois
+   lugares. Esta folha carrega depois daquela, então o empate de especificidade
+   com `.topo` e vizinhos é ganho por ordem, e não por sorte.
+
+   56px é a altura do cabeçalho e a largura que o comp v3 dá ao quadrado da
+   marca, do outro lado da mesma fileira. A imagem fica no meio dele, contida,
+   com a divisória de 1px que separa todo bloco daquele cabeçalho. */
+.dogma-icone-topo {
+  width: 56px;
+  height: 56px;
+  flex: 0 0 auto;
+  padding: 8px;
+  object-fit: contain;
+  border-right: 1px solid var(--seele-linha);
+}

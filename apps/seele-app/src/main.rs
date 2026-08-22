@@ -791,6 +791,151 @@ fn renomear_linha(session: State<'_, Session>, line: u32, name: String) -> Resul
     session.plug()?.rename_line(line, name)
 }
 
+// ------------------------------------------------- a cara e o nome do Dogma
+//
+// O que quem hospeda personaliza: o nome que todo mundo lê no cabeçalho e a
+// imagem ao lado dele. Cinco comandos, e nenhum deles decide nada — a
+// permissão é conferida pelo MELCHIOR no instante do verbo, e o que é uma
+// imagem aceitável é conferido pelo próprio protocolo, dentro de
+// `Plug::set_dogma_icon`.
+
+/// Pede ao Dogma que troque o próprio nome.
+///
+/// A tela pode consultar `Snapshot::may_customise_dogma` para decidir se
+/// desenha o campo. Conveniência, como em `criar_cage`: quem pede sem a
+/// permissão recebe `Alert`/`PermissionDenied` do servidor, e é lá que a
+/// `specs/08-seguranca.md` põe a segurança — nunca no controle escondido.
+#[tauri::command]
+fn renomear_dogma(session: State<'_, Session>, name: String) -> Result<(), PlugError> {
+    session.plug()?.rename_dogma(name)
+}
+
+/// O que a tela pode dizer sobre a imagem **antes** de alguém escolher uma.
+///
+/// Os dois números que o protocolo cobra, num lugar só, para que a frase da
+/// tela não os traga escritos à mão. É a forma de `regras_de_previa`, pelo
+/// mesmo motivo dela: duas cópias da mesma regra discordam um dia, e a
+/// discordância aqui seria a tela prometendo aceitar o que o Dogma recusa.
+///
+/// **Isto ainda é uma cópia**, e a nota é a dívida: os números de verdade são
+/// `seele_proto::control::MAX_DOGMA_ICON_LEN` e `MAX_DOGMA_ICON_SIDE`, e o
+/// ADR 0002 impede este binário de enxergá-los — ele vê `seele-ffi` e nada
+/// além. `Plug::preview_rules()` existe justamente para não fazer isto com o
+/// teto de prévia; falta o irmão dela, `Plug::dogma_icon_rules()`, e enquanto
+/// ele não existe a cópia mora aqui, em Rust, onde uma linha a substitui.
+///
+/// O que a cópia **não** faz é julgar. Nenhum comando abaixo recusa uma imagem
+/// por causa destes números: quem recusa é `Plug::set_dogma_icon`, com a
+/// função do protocolo, e o número que a tela escreve no erro é o que o
+/// `PlugError::IconTooBig` carrega. Se esta cópia envelhecer, a tela mostra
+/// dois números diferentes — que é ruim, e ainda assim é melhor que uma casca
+/// recusando em nome de uma regra que deixou de ser a regra.
+#[tauri::command]
+fn regras_do_icone_do_dogma() -> RegrasDoIcone {
+    RegrasDoIcone {
+        limite_bytes: TETO_DO_ICONE,
+        lado: LADO_DO_ICONE,
+    }
+}
+
+/// Quanto pesa e quão grande é a imagem que o Dogma aceita.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+struct RegrasDoIcone {
+    /// O máximo de bytes.
+    limite_bytes: u64,
+    /// O máximo de pixels de cada lado.
+    lado: u32,
+}
+
+/// Cópia do teto do protocolo. Veja `regras_do_icone_do_dogma`.
+const TETO_DO_ICONE: u64 = 8 * 1024;
+
+/// Cópia do lado máximo do protocolo. Veja `regras_do_icone_do_dogma`.
+const LADO_DO_ICONE: u32 = 256;
+
+/// Abre o seletor, lê o que a pessoa escolheu e o põe como imagem do Dogma.
+///
+/// Um comando e não dois — escolher e aplicar — porque esta tela não tem
+/// SALVAR: a escolha vale na hora, como a do microfone ao lado. `Ok(false)` é
+/// desistir do seletor, que é o desfecho mais comum e não é falha nenhuma.
+///
+/// **Sem filtro de extensão**, pela razão do ADR 0027 que `escolher_arquivo` já
+/// segue: um filtro esconde justamente o arquivo que a pessoa quer, e um
+/// `rename` o contorna. O que separa uma imagem aceitável de outra é o
+/// conteúdo, e quem o lê é o protocolo.
+///
+/// **Fora da linha principal**, como `escolher_arquivo` e pelo mesmo motivo: o
+/// diálogo é modal e roda no laço de eventos da janela, e a versão bloqueante
+/// trava esse laço se for chamada de dentro dele.
+///
+/// Lê no máximo o teto **mais um byte**. O byte a mais não é folga: é o que faz
+/// um arquivo grande demais chegar a `Plug::set_dogma_icon` grande demais, para
+/// que quem responda «não cabe» seja o protocolo, com o número dele, e não esta
+/// casca com uma cópia que pode ter envelhecido. Sem o corte, escolher um vídeo
+/// de dois gigabytes seria lê-lo inteiro para a memória antes de ouvir «não».
+#[tauri::command]
+async fn escolher_icone_do_dogma(
+    app: AppHandle,
+    session: State<'_, Session>,
+) -> Result<bool, PlugError> {
+    use std::io::Read as _;
+    use tauri_plugin_dialog::DialogExt as _;
+
+    let (envia, mut recebe) = tauri::async_runtime::channel(1);
+    app.dialog()
+        .file()
+        .set_title("Escolha a imagem deste servidor")
+        .pick_file(move |escolha| {
+            let _ = envia.try_send(escolha);
+        });
+
+    let Some(Some(escolha)) = recebe.recv().await else {
+        return Ok(false);
+    };
+    let Ok(caminho) = escolha.into_path() else {
+        // Só o Android devolve `content://`, e este binário não roda lá.
+        return Err(PlugError::IconNotAPicture);
+    };
+
+    let Ok(arquivo) = std::fs::File::open(&caminho) else {
+        // Um arquivo que não abre não é uma imagem que este Dogma possa usar, e
+        // é a única frase honesta que esta casca tem: ela não sabe se o disco
+        // sumiu ou se a permissão é de outra pessoa.
+        return Err(PlugError::IconNotAPicture);
+    };
+    let mut bytes = Vec::new();
+    if arquivo
+        .take(TETO_DO_ICONE.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .is_err()
+    {
+        return Err(PlugError::IconNotAPicture);
+    }
+
+    session.plug()?.set_dogma_icon(Some(bytes))?;
+    Ok(true)
+}
+
+/// Tira a imagem do Dogma, deixando-o sem nenhuma.
+///
+/// Verbo próprio e não `escolher` com um argumento vazio: são duas coisas que
+/// uma pessoa faz por motivos diferentes, e são dois botões na tela.
+#[tauri::command]
+fn tirar_icone_do_dogma(session: State<'_, Session>) -> Result<(), PlugError> {
+    session.plug()?.set_dogma_icon(None)
+}
+
+/// Os bytes da imagem que está valendo, ou nada.
+///
+/// Fora do `Snapshot` de propósito, e a tela respeita o mesmo acordo: o
+/// snapshot é lido duas vezes por segundo e atravessa a ponte em JSON, então
+/// ele carrega `icon_revision` — um número — e a casca só vem buscar os bytes
+/// quando o número anda. É o precedente de `messages_revision`.
+#[tauri::command]
+fn icone_do_dogma(session: State<'_, Session>) -> Result<Option<Vec<u8>>, PlugError> {
+    Ok(session.plug()?.dogma_icon())
+}
+
 /// Pede ao Dogma que acabe com a sessão de alguém — `expulsar`.
 ///
 /// Devolve quando o pedido entra na fila, e não quando a pessoa saiu. Quem
@@ -1843,6 +1988,11 @@ fn main() {
             criar_linha,
             renomear_cage,
             renomear_linha,
+            renomear_dogma,
+            regras_do_icone_do_dogma,
+            escolher_icone_do_dogma,
+            tirar_icone_do_dogma,
+            icone_do_dogma,
             expulsar_piloto,
             banir_piloto,
             remover_mensagem,

@@ -302,20 +302,68 @@
   cursor: default;
 }
 
-/* O `+` de 48px. Apagado e desabilitado: ele nomeia uma capacidade que este
-   produto não tem, e o `title` diz qual. Sem `opacity`, que faria dele um
-   controle meio apagado ao lado de um controle apagado — a diferença entre "o
-   servidor em que estou" e "o que não dá para fazer" tem que continuar legível. */
+/* Os servidores do histórico. Uma lista de verdade — é o que eles são, e é o
+   que faz um leitor de tela anunciar quantos há antes de a pessoa percorrer a
+   coluna. Sem marcador e sem recuo: o marcador de `<li>` numa coluna de 60px
+   come a metade dela. */
+.trilha-outros {
+  margin: 0;
+  padding: 0;
+  flex: 0 0 auto;
+  list-style: none;
+}
+
+/* O botão dentro do `<li>` não é mais filho direto da coluna, então o `stretch`
+   que dava 60px a ele parou de valer: um `<button>` nasce `inline-block` e sai
+   do tamanho do que tem dentro — uma sigla de duas letras num quadrado de duas
+   letras, encostada à esquerda de uma coluna de 60px. */
+.trilha-outro {
+  display: block;
+  width: 100%;
+}
+
+/* Entrar noutro servidor é sair deste, e a coluna diz isso pelo mesmo canal que
+   os Cages ao lado: a marca de 2px na borda esquerda, que aqui acende sob o
+   ponteiro e sob o foco em vez de ficar acesa. O que está aceso é onde se está;
+   o que acende ao ser apontado é para onde se pode ir. */
+.trilha-outro:hover,
+.trilha-outro:focus-visible {
+  border-left-color: var(--seele-linha-forte);
+  color: var(--seele-osso);
+}
+
+/* A imagem do servidor, quando ele tem uma, no lugar da sigla. `contain` e não
+   `cover` pela mesma razão que no cabeçalho: recortar a imagem de alguém para
+   caber num quadrado é decidir por quem a escolheu qual metade dela importa. */
+.trilha-icone {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 8px;
+  object-fit: contain;
+}
+
+/* O `+` de 48px, que hoje faz alguma coisa: leva à entrada para conectar a um
+   servidor que ainda não está nesta coluna. Enquanto ele não fazia, era pintado
+   em `linha-forte` e com `cursor: default`, porque era moldura; um controle vivo
+   com a cor de uma borda é um controle que ninguém tenta apertar. */
 .trilha-mais {
   height: 48px;
   flex: 0 0 auto;
   border: 0;
   border-bottom: 1px solid var(--seele-linha);
+  border-left: 3px solid transparent;
   background: none;
   font: inherit;
   font-size: 18px;
-  color: var(--seele-linha-forte);
-  cursor: default;
+  color: var(--seele-osso-apagado);
+  cursor: pointer;
+}
+
+.trilha-mais:hover,
+.trilha-mais:focus-visible {
+  border-left-color: var(--seele-linha-forte);
+  color: var(--seele-osso);
 }
 
 .painel {

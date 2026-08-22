@@ -66,6 +66,29 @@ let alvoDoDogma = null;
 function guardarAlvoDoDogma(endereco) {
   alvoDoDogma = endereco || null;
 }
+/**
+ * Os servidores do histórico, como a trilha os lista.
+ *
+ * A mesma lista da tela de entrada, do mesmo comando e na mesma ordem — do mais
+ * recente para o mais antigo, que é a única ordem útil numa lista de atalhos.
+ *
+ * Lida uma vez por sessão e guardada aqui, e não a cada quadro: o histórico só
+ * muda quando alguém entra num servidor ou esquece um, e `desenharTopo` roda
+ * duas vezes por segundo. Uma ida ao disco por quadro para uma lista que muda
+ * uma vez por dia é o mesmo desperdício que o `icon_revision` existe para
+ * evitar, por outra porta.
+ */
+let conhecidosDaTrilha = [];
+/**
+ * O que a trilha já tem desenhado, para não reconstruir os botões dela.
+ *
+ * `null` quer dizer «desenhe de novo». Não é economia de pintura: os botões do
+ * histórico são criados por código, e reconstruí-los a cada quadro arrancaria
+ * da árvore justamente o que estiver sob o cursor ou com o foco — que é o botão
+ * que a pessoa está a ponto de apertar. É o mesmo cuidado que `fecharModeracao`
+ * documenta do outro lado, e aqui é a causa em vez do sintoma.
+ */
+let trilhaDesenhada = null;
 /** Se a barra de espaço já está segurando o microfone. */
 let falando = false;
 /**
@@ -231,7 +254,12 @@ function desenhar(snapshot) {
   }
 
   // O primeiro quadro da sessão é onde o uptime começa a contar.
-  if (comecoDaSessao === null) comecoDaSessao = Date.now();
+  if (comecoDaSessao === null) {
+    comecoDaSessao = Date.now();
+    // E é onde o histórico é lido: neste ponto o `connect` já anotou o servidor
+    // em que se acabou de entrar, então a trilha nasce com ele dentro.
+    recarregarTrilha();
+  }
 
   // Antes de qualquer desenho: `desenharMensagens` a lê, e ela chega do
   // servidor como `may_remove_message` — resolvida no MELCHIOR a partir das
@@ -276,25 +304,17 @@ function desenharTopo(snapshot) {
 
   const nome = snapshot.dogma;
   const rotulo = $("topo-dogma-nome");
-  const trilha = $("trilha-dogma");
   if (nome) {
     medido(rotulo, nome);
     // O `title` porque o nome pode ser mais largo que o bloco e sair em
     // reticências: o cabeçalho é o único lugar onde ele está por extenso.
     rotulo.title = nome;
-    // A trilha leva a sigla, porque 56px não cabem um nome. O nome inteiro fica
-    // no nome acessível dela, que é o que um leitor de tela anuncia.
-    trilha.textContent = sigla(nome);
-    trilha.setAttribute("aria-label", nome);
-    trilha.title = nome;
   } else {
     // Um servidor sem nome é ele não tendo mandado um, e não um nome vazio.
     naoMedido(rotulo, "este servidor não anunciou nome");
-    trilha.textContent = SEM_MEDIDA;
-    trilha.setAttribute("aria-label", "servidor sem nome");
-    trilha.removeAttribute("title");
   }
 
+  desenharTrilha(snapshot);
   desenharPortaDoDogma();
 }
 
@@ -337,6 +357,138 @@ function sigla(nome) {
     .map((parte) => [...parte][0])
     .join("")
     .slice(0, 3);
+}
+
+/**
+ * A sigla de um servidor que só se conhece pelo endereço.
+ *
+ * O histórico guarda endereço, apelido, último canal e data — e **não** o nome
+ * que o servidor anuncia (`crates/seele-core/src/conhecidos.rs`: quatro
+ * colunas, num arquivo dividido com o `plug`). Então a coluna de 60px abrevia o
+ * que existe, que é o endereço.
+ *
+ * `sigla` não serve aqui e o motivo é concreto: a primeira letra de cada corrida
+ * de `192.168.0.7` dá `110`, três algarismos que não são o endereço e que são os
+ * **mesmos** para toda máquina daquela rede — uma abreviação que não distingue é
+ * pior que nenhuma. Num IPv4 quem distingue é o último campo, que é como as
+ * pessoas leem esses endereços em voz alta; num nome, a primeira etiqueta dele.
+ *
+ * O endereço inteiro fica no nome acessível do botão, que é o que um leitor de
+ * tela anuncia. A sigla é abreviação de desenho, nunca um dado.
+ */
+function siglaDoAlvo(alvo) {
+  // Sem a porta e sem os colchetes de um IPv6: nenhum dos dois identifica o
+  // servidor, e os dois comeriam a coluna inteira.
+  const host = alvo.replace(/:\d+$/, "").replace(/[[\]]/g, "");
+  const ipv4 = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.(\d{1,3})$/.exec(host);
+  if (ipv4) return ipv4[1];
+  const etiqueta = host.split(".")[0].toUpperCase();
+  // Por ponto de código, pela mesma razão que `iniciaisDoApelido`: cortar por
+  // índice parte um par substituto ao meio e desenha um caractere de
+  // substituição no lugar da inicial.
+  return [...etiqueta].slice(0, 3).join("") || SEM_MEDIDA;
+}
+
+/**
+ * Relê o histórico do disco e redesenha a trilha com ele.
+ *
+ * Falhar não é motivo para tela nenhuma: a lista de atalhos é conveniência, e o
+ * Rust já devolve lista vazia quando o arquivo não abre. O que sobra aqui é a
+ * ponte cair, e nesse caso a trilha fica com o servidor atual — que é a coluna
+ * como ela era antes desta lista existir.
+ */
+async function recarregarTrilha() {
+  try {
+    conhecidosDaTrilha = await invoke("conhecidos");
+  } catch (falha) {
+    console.warn("conhecidos:", falha);
+    return;
+  }
+  trilhaDesenhada = null;
+  if (desenhado) desenharTrilha(desenhado);
+}
+
+/**
+ * A coluna de 60px: o servidor em que se está, e os do histórico embaixo.
+ *
+ * O atual é desenhado à parte, e não como o primeiro da lista, porque ele pode
+ * não estar nela: um servidor hospedado nesta máquina não é anotado no
+ * histórico — `127.0.0.1` não é lugar aonde se volta — e é justamente ele que
+ * esta coluna existe para dizer.
+ *
+ * Ele também sai da lista de baixo. Repeti-lo ali seria oferecer entrar onde já
+ * se está, e a troca que isso dispararia é uma sessão derrubada para reabrir a
+ * mesma sessão.
+ */
+function desenharTrilha(snapshot) {
+  const nome = snapshot.dogma;
+  const uri = iconeDesenhado.uri;
+  const outros = conhecidosDaTrilha.filter((conhecido) => conhecido.alvo !== alvoDoDogma);
+  const chave = outros.map((conhecido) => conhecido.alvo).join("\n");
+  if (
+    trilhaDesenhada !== null &&
+    trilhaDesenhada.nome === nome &&
+    trilhaDesenhada.alvo === alvoDoDogma &&
+    trilhaDesenhada.icone === uri &&
+    trilhaDesenhada.outros === chave
+  ) {
+    return;
+  }
+  trilhaDesenhada = { nome, alvo: alvoDoDogma, icone: uri, outros: chave };
+
+  vestirItemDaTrilha(
+    $("trilha-dogma"),
+    nome ? sigla(nome) : SEM_MEDIDA,
+    // Um servidor sem nome é ele não tendo mandado um, e não um nome vazio — e
+    // um botão sem nome acessível é anunciado pela sigla, que é desenho.
+    nome || "servidor sem nome",
+    uri,
+  );
+
+  repovoar(
+    $("trilha-outros"),
+    outros.map((conhecido) => {
+      const linha = elemento("li");
+      const botao = elemento("button", "trilha-item trilha-outro");
+      botao.type = "button";
+      // O apelido viaja junto porque é com ele que se entra: o histórico guarda
+      // com que nome se entrou da última vez em cada servidor, e trocar de
+      // servidor sem levá-lo entraria com o apelido de outro lugar.
+      botao.dataset.alvo = conhecido.alvo;
+      botao.dataset.apelido = conhecido.apelido;
+      // Sem imagem: o histórico guarda endereços, e a imagem de um servidor só
+      // existe enquanto se está dentro dele.
+      vestirItemDaTrilha(botao, siglaDoAlvo(conhecido.alvo), conhecido.alvo, null);
+      linha.append(botao);
+      return linha;
+    }),
+  );
+}
+
+/**
+ * Põe num botão da trilha o que couber em 56px, e o nome inteiro por baixo.
+ *
+ * A imagem ganha da sigla quando existe: numa coluna de ícones, uma imagem se
+ * reconhece de relance e três letras se leem. Ela vai com `alt=""` porque o
+ * botão já tem nome acessível — uma descrição aqui faria um leitor de tela
+ * anunciar o mesmo servidor duas vezes seguidas.
+ *
+ * O `title` repete o nome acessível de propósito: o que está desenhado no botão
+ * é uma abreviação, e quem usa o ponteiro não tem outro lugar onde ler o nome
+ * inteiro de um servidor do histórico.
+ */
+function vestirItemDaTrilha(botao, abreviacao, nomeInteiro, uri) {
+  if (uri) {
+    const imagem = document.createElement("img");
+    imagem.className = "trilha-icone";
+    imagem.src = uri;
+    imagem.alt = "";
+    botao.replaceChildren(imagem);
+  } else {
+    botao.textContent = abreviacao;
+  }
+  botao.setAttribute("aria-label", nomeInteiro);
+  botao.title = nomeInteiro;
 }
 
 /**
@@ -1748,6 +1900,153 @@ function segurarFala(segurando) {
   invoke("set_talking", { talking: segurando }).catch(() => {});
 }
 
+/**
+ * O nome do servidor em que se está, para uma frase que o cite.
+ *
+ * O nome anunciado primeiro, o endereço discado depois. Nunca `—`: um travessão
+ * dentro de uma frase de consequência é a frase deixando de dizer de quem ela
+ * fala, e é justamente a metade que faz a pessoa lê-la.
+ */
+function nomeDesteServidor() {
+  return desenhado?.dogma || alvoDoDogma || "este servidor";
+}
+
+/**
+ * Se é esta janela que está hospedando o servidor desta sessão.
+ *
+ * Pergunta a `estado_da_porta`, que já responde isso à camada da portaria, em
+ * vez de um comando novo com a mesma resposta: quando não se hospeda ele
+ * devolve `hospedando: false` sem tocar no banco do servidor, que é o caso
+ * barato e o caso comum.
+ *
+ * Falha vira `false`, e isso não é otimismo: o `false` só **omite** uma linha da
+ * consequência — a de que o servidor cai junto —, e nenhuma frase daqui afirma
+ * que nada mais cai. Omitir o que não se sabe é honesto; afirmá-lo não seria.
+ */
+async function hospedandoAqui() {
+  try {
+    return (await invoke("estado_da_porta")).hospedando === true;
+  } catch (falha) {
+    console.warn("estado_da_porta:", falha);
+    return false;
+  }
+}
+
+/**
+ * O que trocar de servidor custa, com os dois nomes dentro.
+ *
+ * A forma é a das frases da moderação, e pela mesma razão: «tem certeza?» não
+ * acrescenta nada a quem já apertou uma vez, e dizer o que vai acontecer sim.
+ *
+ * A terceira linha só aparece para quem hospeda, e é a que muda a decisão: para
+ * essa pessoa trocar de servidor não é sair de uma conversa, é fechar a
+ * conversa de todo mundo. Ela não pode ser um `title` nem uma nota — é a
+ * consequência, e vai onde as outras vão.
+ */
+function consequenciaDeTrocar(daqui, ate, hospedando) {
+  const comum =
+    `Você sai de ${daqui} agora, no meio do que estiver fazendo, e entra em ${ate}.\n` +
+    "Este produto mantém uma conexão por vez: entrar num servidor é sair do anterior.";
+  if (!hospedando) return comum;
+  return (
+    `${comum}\n${daqui} está no ar dentro deste computador: ele cai junto, e ` +
+    "todo mundo que estiver nele sai."
+  );
+}
+
+/** O que ir à entrada custa. Mesma forma, e um destino que não é servidor nenhum. */
+function consequenciaDeIrParaAEntrada(daqui, hospedando) {
+  const comum =
+    `Você sai de ${daqui} agora, no meio do que estiver fazendo, e volta à tela ` +
+    "de entrada sem estar em servidor nenhum.\n" +
+    "O campo do endereço fica vazio, esperando o do servidor novo.";
+  if (!hospedando) return comum;
+  return (
+    `${comum}\n${daqui} está no ar dentro deste computador: ele cai junto, e ` +
+    "todo mundo que estiver nele sai."
+  );
+}
+
+/**
+ * Pergunta antes de trocar de servidor, e a pergunta diz o preço.
+ *
+ * **Por que perguntar aqui e não no `DESCONECTAR`**, que derruba a mesma
+ * sessão: o `DESCONECTAR` é o que ele diz, e uma caixa repetindo o rótulo do
+ * botão é a caixa que treina a apertar duas vezes sem ler. Estes dois controles
+ * dizem outra coisa — «vá para aquele servidor», «conecte a um novo» —, e a
+ * parte que não está no rótulo deles é o que a caixa existe para escrever: você
+ * sai deste, e o servidor que este computador hospeda cai junto.
+ *
+ * A caixa é a de `camada-moderar.js`, e não uma nova. Ela não é da moderação —
+ * salvar um anexo já entra por ela —, é a superfície de confirmação deste
+ * produto: a que escreve a consequência com o nome dentro e põe o foco no
+ * CANCELAR. Uma segunda seria uma segunda forma de esquecer de escrever a frase.
+ */
+async function pedirTrocaDeServidor(alvo, apelido) {
+  const daqui = nomeDesteServidor();
+  const hospedando = await hospedandoAqui();
+  abrirConfirmacao(
+    "TROCAR DE SERVIDOR",
+    consequenciaDeTrocar(daqui, alvo, hospedando),
+    `ENTRAR EM ${alvo}`,
+    () => trocarDeServidor(alvo, apelido),
+  );
+}
+
+/** O mesmo, para o `+`: a entrada, sem destino escolhido. */
+async function pedirAEntrada() {
+  const daqui = nomeDesteServidor();
+  const hospedando = await hospedandoAqui();
+  abrirConfirmacao(
+    "CONECTAR A OUTRO SERVIDOR",
+    consequenciaDeIrParaAEntrada(daqui, hospedando),
+    `SAIR DE ${daqui}`,
+    sairParaAEntrada,
+  );
+}
+
+/**
+ * Troca de servidor: sai deste e entra naquele.
+ *
+ * Desconectar-e-conectar, nesta ordem, porque é o que o produto tem: `Session`
+ * guarda **um** `Plug` e `connect` devolve `AlreadyConnected` enquanto houver
+ * um. Não há troca atômica a inventar aqui — a troca *é* isto.
+ *
+ * E ela passa pela tela de entrada de propósito, em vez de conectar por baixo
+ * com a sessão ainda na frente. O caminho da entrada já sabe fazer tudo o que
+ * pode dar errado: a etapa da chegada aparece enquanto ela acontece, uma batida
+ * que fica pendente na portaria tem tela própria, e a recusa vira a linha
+ * vermelha de `#boot-erro`. Conectando por trás da sessão, cada uma dessas
+ * coisas seria escrita numa tela escondida — e quem apertasse um servidor que
+ * não responde ficaria olhando o servidor anterior, que já caiu.
+ *
+ * O apelido é o do histórico, e não o desta sessão: é com aquele nome que esta
+ * pessoa entrou naquele servidor da última vez.
+ */
+async function trocarDeServidor(alvo, apelido) {
+  await ejetar();
+  $("campo-servidor").value = alvo;
+  $("campo-apelido").value = apelido;
+  await conectar();
+}
+
+/**
+ * Sai para a entrada com o campo do endereço vazio.
+ *
+ * A diferença inteira entre o `+` e o `DESCONECTAR`, e ela é do formulário: quem
+ * desconecta costuma voltar ao mesmo lugar e o endereço de lá continua no campo;
+ * quem apertou «conectar a outro servidor» já disse que não é aquele, e um
+ * endereço velho num formulário que promete um servidor novo é o começo de uma
+ * conexão errada.
+ *
+ * O cursor já está no campo: `ejetar` termina em `abrirTela("tela-boot")`, e o
+ * `data-foco` daquela tela é este campo.
+ */
+async function sairParaAEntrada() {
+  await ejetar();
+  $("campo-servidor").value = "";
+}
+
 /** Ejeta e volta para a tela de entrada, sem fechar o programa. */
 async function ejetar() {
   await invoke("disconnect");
@@ -2198,6 +2497,16 @@ $("convite-copiar").addEventListener("click", async () => {
 });
 
 $("botao-desconectar").addEventListener("click", ejetar);
+
+// A trilha, por delegação: os botões do histórico são reconstruídos quando a
+// lista muda, e um ouvinte por botão seria um ouvinte perdido a cada redesenho.
+$("trilha-outros").addEventListener("click", (evento) => {
+  const item = evento.target.closest("button[data-alvo]");
+  if (!item) return;
+  pedirTrocaDeServidor(item.dataset.alvo, item.dataset.apelido);
+});
+
+$("trilha-adicionar").addEventListener("click", pedirAEntrada);
 
 // A barra de espaço fala, exceto enquanto se digita — a mesma colisão que a TUI
 // resolve mantendo o push-to-talk fora do modo de inserção (decisão D19).

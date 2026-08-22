@@ -2372,39 +2372,210 @@ fn the_search_starts_closed_and_opens_from_something_that_says_buscar() {
 }
 
 #[test]
-fn the_add_dogma_button_promises_nothing_this_product_can_do() {
-    // The v3 gives the `+` one meaning — add — and hands leaving to
-    // `DESCONECTAR`, which is where the LAN test's finding put it. Adding is
-    // still not a thing this product does: `Session` holds one `Plug` and
-    // `connect` answers `AlreadyConnected` when there is one.
+fn the_add_server_button_carries_one_verb_and_not_the_two_the_v2_conflated() {
+    // This guard used to demand the opposite, and the rewrite is the record of
+    // what changed.
     //
-    // So it is drawn and disabled, for the same reason as
-    // `EJETAR PLUG DO OPERADOR` and `FORÇAR REINSERÇÃO DE PLUG` — and it needs
-    // the same guard, because the tempting edit is to wire it to the entry
-    // screen and call that "adding a Dogma", which is leaving with a friendlier
-    // label. That is the exact conflation the v3 took apart.
+    // It held the `+` *disabled*, on the reading that adding a server means two
+    // `Plug` at once and this product has one. The premise did not change —
+    // `Session` still holds one and `connect` still answers `AlreadyConnected` —
+    // but the conclusion drawn from it did. Holding one connection at a time
+    // does not forbid a second server on screen; it decides what pressing one
+    // *means*: leave this one, enter that one. So the trilha lists the history,
+    // and the `+` finally carries the half it never had.
+    //
+    // What did **not** change is the finding the v2 paid for on a two-machine
+    // test: with "enter another" and "leave this" behind the same glyph, nobody
+    // found how to leave. That is what this now holds.
+    //
+    // - `DESCONECTAR` stays in the header, written and pressable. The moment it
+    //   goes, the `+` is the only way out again and the v2 is back;
+    // - the `+` names one thing, and it is not leaving. Leaving is what it
+    //   costs, and the cost is what the confirmation says;
+    // - it asks before it spends a live session, through the one confirmation
+    //   surface of this product rather than a second box of its own;
+    // - and it is still a glyph, so it still needs an accessible name.
     let page = read("ui/index.html");
-    let tag = tag_with_id(&page, "trilha-adicionar");
+    let script = without_comments(&scripts());
+    let sessao = read("ui/tela-sessao.js");
 
+    let tag = tag_with_id(&page, "trilha-adicionar");
     assert!(
-        tag.contains("disabled"),
-        "the `+` is pressable, and a second Dogma is a second Plug this product \
-         does not have: <{tag}>"
-    );
-    assert!(
-        tag.contains("title=\""),
-        "the `+` is disabled and says nothing about why, which reads as a bug \
-         rather than as a gap: <{tag}>"
+        !tag.contains("disabled"),
+        "the `+` is drawn dead again. Switching servers is disconnect-and-connect \
+         and this product can do it, so a disabled button here is a capability \
+         hidden behind a moldura: <{tag}>"
     );
     assert!(
         tag.contains("aria-label=\""),
         "the `+` is a glyph with no accessible name, so it announces as `+`: <{tag}>"
     );
     assert!(
-        !without_comments(&scripts()).contains("$(\"trilha-adicionar\")"),
-        "a script reaches for the `+`, so the disabled button grew a listener — \
-         and the only thing it could be wired to is leaving, which is the \
-         conflation the v3 exists to undo"
+        tag.contains("title=\""),
+        "the `+` says nothing about what it costs to the pointer, and what it \
+         costs — a live session — is not in the word `+`: <{tag}>"
+    );
+
+    let sair = tag_with_id(&page, "botao-desconectar");
+    assert!(
+        !sair.contains("disabled") && !sair.contains("hidden"),
+        "`DESCONECTAR` is gone from the header or cannot be pressed, so leaving \
+         is back behind the `+` — which is exactly the state the two-machine \
+         test found and nobody escaped from: <{sair}>"
+    );
+
+    assert!(
+        script.contains("$(\"trilha-adicionar\")"),
+        "nothing listens on the `+`, so the button that is no longer disabled \
+         does nothing at all — which is worse than the disabled one it replaced"
+    );
+
+    let pede = js_function(&sessao, "async function pedirAEntrada(");
+    assert!(
+        pede.contains("abrirConfirmacao("),
+        "the `+` drops a live session without saying so first: {pede}"
+    );
+    for verbo in ["invoke(\"disconnect\"", "invoke(\"connect\""] {
+        assert!(
+            !pede.contains(verbo),
+            "the `+` calls `{verbo}…` straight from the press, so the box that \
+             would have said what it costs is decoration: {pede}"
+        );
+    }
+
+    // And the act behind it goes to the entrance and stops there. A `connect`
+    // in here would be the `+` choosing a server for somebody who pressed it to
+    // choose one.
+    let sai = js_function(&sessao, "async function sairParaAEntrada(");
+    assert!(
+        sai.contains("ejetar("),
+        "the `+` reaches the entrance without ending the session, and this \
+         product cannot hold two: {sai}"
+    );
+    assert!(
+        !sai.contains("conectar("),
+        "the `+` connects somewhere on its own, so pressing «connect to another \
+         server» picks the server for you: {sai}"
+    );
+}
+
+#[test]
+fn entering_another_server_leaves_this_one_and_says_so_with_both_names() {
+    // The whole of "entrar num outro servidor desconecta você do anterior",
+    // held where it can break: the order of the two halves, and the sentence
+    // that has to run before either.
+    //
+    // Disconnect first is not style. `connect` answers `AlreadyConnected` while
+    // a `Plug` is held, so a switch that connects first does not half-work — it
+    // does nothing, and it does nothing while the person is looking at a screen
+    // that says they are somewhere else.
+    let sessao = read("ui/tela-sessao.js");
+    let troca = js_function(&sessao, "async function trocarDeServidor(");
+
+    let Some(saida) = troca.find("ejetar(") else {
+        panic!("switching servers never ends the session it is switching away from: {troca}");
+    };
+    let Some(entrada) = troca.find("conectar(") else {
+        panic!("switching servers never connects to the one it was asked for: {troca}");
+    };
+    assert!(
+        saida < entrada,
+        "the switch connects before it disconnects, and `connect` refuses with \
+         `AlreadyConnected` while a Plug is held — so pressing a server in the \
+         trilha does nothing at all: {troca}"
+    );
+
+    // The press asks first, and the question carries both names: where you are
+    // and where you are going. A box that says «tem certeza?» is the box that
+    // teaches people to press twice.
+    let pede = js_function(&sessao, "async function pedirTrocaDeServidor(");
+    assert!(
+        pede.contains("abrirConfirmacao("),
+        "pressing a server in the trilha drops the current session with no \
+         question at all: {pede}"
+    );
+    let frase = js_function(&sessao, "function consequenciaDeTrocar(");
+    assert!(
+        frase.contains("${daqui}") && frase.contains("${ate}"),
+        "the sentence does not name both servers, so it says something is about \
+         to happen without saying to what: {frase}"
+    );
+
+    // The line that only a host sees, and the only one that changes the answer:
+    // for them, switching is not leaving a conversation, it is closing
+    // everybody's.
+    assert!(
+        frase.contains("hospedando"),
+        "the consequence is the same whether or not this computer is the one \
+         hosting the server being left — and for the host it is not: {frase}"
+    );
+    // The call itself, and not the name: the `console.warn` in the same body
+    // says `estado_da_porta` too, so a check on the word alone stays green with
+    // the question deleted and only the failure branch left behind.
+    let hospeda = js_function(&sessao, "async function hospedandoAqui(");
+    assert!(
+        hospeda.contains("invoke(\"estado_da_porta\")"),
+        "the screen decides on its own whether this window is hosting, instead \
+         of asking the side that knows: {hospeda}"
+    );
+}
+
+#[test]
+fn the_trilha_lists_the_history_and_never_offers_the_server_it_is_already_on() {
+    // The column is the shortcut list of the entrance, seen from inside a
+    // session — same command, same order. What it must not do is repeat the
+    // server it is already on: pressing that entry would tear a session down to
+    // build the same session again, and the sentence confirming it would name
+    // the same server on both sides.
+    let sessao = read("ui/tela-sessao.js");
+    let desenha = js_function(&sessao, "function desenharTrilha(");
+
+    assert!(
+        desenha.contains("conhecidosDaTrilha"),
+        "the trilha is drawn without the history, so the column only ever holds \
+         the server somebody is already in: {desenha}"
+    );
+    assert!(
+        desenha.contains("alvoDoDogma"),
+        "nothing in the trilha knows which server this session is on, so nothing \
+         can be marked as current and nothing can be left out of the list: {desenha}"
+    );
+
+    // Read once per session, not once per frame: `desenharTopo` runs twice a
+    // second and the shortcut list changes when somebody enters or forgets a
+    // server.
+    let recarrega = js_function(&sessao, "async function recarregarTrilha(");
+    assert!(
+        recarrega.contains("invoke(\"conhecidos\")"),
+        "the history is not read from the side that keeps it: {recarrega}"
+    );
+    assert!(
+        !desenha.contains("invoke("),
+        "drawing the trilha asks Rust for something, and it is drawn twice a \
+         second: {desenha}"
+    );
+
+    // And the abbreviation is never the only form of the name on screen.
+    let veste = js_function(&sessao, "function vestirItemDaTrilha(");
+    assert!(
+        veste.contains("aria-label"),
+        "a trilha button is a sigla or a picture and carries no accessible name, \
+         so a screen reader announces three letters: {veste}"
+    );
+    assert!(
+        veste.contains("alt"),
+        "the server picture goes into the button with no `alt` decided, so it is \
+         announced by its file name or read out beside the name it duplicates: {veste}"
+    );
+
+    // The sigla of an address is not the sigla of a name. `192.168.0.7` through
+    // `sigla` is `110` — three digits shared by every machine on that network,
+    // which is an abbreviation that abbreviates nothing.
+    let siglas = js_function(&sessao, "function siglaDoAlvo(");
+    assert!(
+        siglas.contains("\\d{1,3}"),
+        "the address is abbreviated as if it were a name, and every machine on \
+         one network comes out with the same three characters: {siglas}"
     );
 }
 
@@ -2587,15 +2758,245 @@ fn every_section_of_the_settings_screen_carries_the_panel_and_the_heading_it_ope
             // exist; this screen's own rule is to omit what it does not have
             // rather than draw it dead.
             "secao-identidade",
-            // The last is not the comp's — it predates the update button
+            // The fourth is not the comp's — it predates the update button
             // existing at all (ADR 0026). It lands here because what this screen
             // adjusts is *this machine*, and which SEELE is installed on it is
-            // the most machine-local fact there is; and last because it is the
-            // one section nobody opens on a normal day.
+            // the most machine-local fact there is; and after the three above
+            // because it is the one section nobody opens on a normal day.
             "secao-atualizacao",
+            // And the fifth is the one that is not about this machine at all:
+            // the server's own name and picture, for whoever is allowed to
+            // change them. It arrived after this list was first written down,
+            // and the sentence this screen's own subtitle used to carry —
+            // "ajustes deste computador, e não deste servidor" — was rewritten
+            // rather than quietly outlived. That is the decision that moved, and
+            // it moved because the alternative was a second screen also called
+            // configuration, reachable only from inside a session.
+            //
+            // Last, and the position is the argument: this section is *usually
+            // absent*. It is drawn only for a session that carries
+            // `may_customise_dogma`, so for everybody else the column ends at
+            // the update section rather than showing a gap in its middle.
+            "secao-servidor",
         ],
-        "the settings screen is three of the four sections of the v3 comp plus \
-         the update one, in this order"
+        "the settings screen is three of the four sections of the v3 comp, then \
+         the update one, then the server one, in this order"
+    );
+}
+
+/// The server section is offered from the snapshot, and never decided here.
+///
+/// The rule this screen shares with the channels column: hiding a control is
+/// **not** what stops anybody. `AdministerDogma` is checked by the MELCHIOR at
+/// the instant of the verb, and a rename asked without it comes back as
+/// `Alert`/`PermissionDenied`. What the boolean buys is not offering what the
+/// server was going to refuse.
+///
+/// Two halves, and the markup half is the one that fails silently: before the
+/// first snapshot this window does not know which permissions it has, so a
+/// section born visible promises for one frame what it may not be able to
+/// carry out — and on the entry screen, where there is no session at all, it
+/// would promise it for as long as somebody looked at it.
+#[test]
+fn the_server_section_is_offered_from_the_snapshot_and_never_judged_by_the_screen() {
+    let page = read("ui/index.html");
+    let item = tag_with_id(&page, "secao-servidor-item");
+    assert!(
+        item.contains("hidden"),
+        "the server section is born visible, so between the window opening and \
+         the first snapshot it offers a permission nobody has yet — and from the \
+         entry screen, where there is no session, it never stops: <{item}>"
+    );
+
+    let desenha = js_function(&read("ui/tela-dogma.js"), "function desenharServidor(");
+    assert!(
+        desenha.contains("may_customise_dogma"),
+        "the section is shown without asking whether this session may customise \
+         anything, so it offers what the server will refuse: {desenha}"
+    );
+    assert!(
+        desenha.contains("$(\"secao-servidor-item\")"),
+        "nothing reaches for the section item, so the boolean is read and then \
+         dropped: {desenha}"
+    );
+
+    // And nothing in this screen refuses on its own. A shell that returned early
+    // on the boolean instead of sending would be a shell whose idea of the
+    // permission is the one that counts — which is exactly the failure mode
+    // `specs/08-seguranca.md` puts on the server side.
+    for verbo in [
+        "async function renomearServidor(",
+        "async function escolherIcone(",
+        "async function tirarIcone(",
+    ] {
+        let corpo = js_function(&read("ui/tela-dogma.js"), verbo);
+        assert!(
+            !corpo.contains("may_customise_dogma"),
+            "`{verbo}…` checks the permission before asking, so the refusal that \
+             matters stops being the server's: {corpo}"
+        );
+    }
+}
+
+/// The ceiling is on screen before the picker opens, and it is not written here.
+///
+/// Two failures, and they are different. The first is a person walking to the
+/// folder with the photographs, picking one, and only then being told that a
+/// server takes eight kilobytes — a trip spent to read a rule that could have
+/// been on screen the whole time.
+///
+/// The second is subtler and is what the numbers coming from Rust prevents: two
+/// copies of a protocol constant drift, and the drift shows up as a screen
+/// promising to accept what the Dogma refuses. `regras_de_previa` made the same
+/// choice for the preview ceiling, and this follows it.
+#[test]
+fn the_ceiling_for_the_picture_is_said_before_the_picker_and_never_written_in_the_page() {
+    let page = without_comments(&read("ui/index.html"));
+    let dogma = read("ui/tela-dogma.js");
+
+    let Some(regra) = page.find("id=\"dogma-icone-regra\"") else {
+        panic!("the page has nowhere to write what a picture may weigh");
+    };
+    let Some(escolher) = page.find("id=\"dogma-icone-escolher\"") else {
+        panic!("the page has no button that opens the picker");
+    };
+    assert!(
+        regra < escolher,
+        "the sentence with the ceiling is not above the button that opens the \
+         picker, so it is read after the trip to the folder rather than before it"
+    );
+
+    let escreve = js_function(&dogma, "function desenharRegraDoIcone(");
+    for campo in ["limite_bytes", "lado"] {
+        assert!(
+            escreve.contains(campo),
+            "the sentence does not use `{campo}` from the rules Rust sent, so the \
+             number on screen is one this page decided: {escreve}"
+        );
+    }
+
+    // The refusal quotes the protocol's own number, and not the copy the shell
+    // keeps to write the sentence above. They should agree; when they stop
+    // agreeing, the one that decides is the one the person has to believe.
+    let frase = js_function(&dogma, "function fraseDeIcone(");
+    assert!(
+        frase.contains("limit_bytes"),
+        "the refusal does not carry the number the `PlugError` brought, so \
+         somebody is told «too heavy» and never how heavy is not: {frase}"
+    );
+    assert!(
+        frase.contains("IconNotAPicture") && frase.contains("IconTooBig"),
+        "one of the two refusals has no sentence of its own, and they ask \
+         different things of the person reading — a photograph can be shrunk \
+         and a PDF cannot be made into a picture: {frase}"
+    );
+}
+
+/// The bytes are fetched when the revision moves, and on no other frame.
+///
+/// The whole reason `icon_revision` exists. The snapshot crosses the bridge as
+/// JSON twice a second; the picture is up to eight kilobytes that change when
+/// somebody presses a button. A screen that read the bytes off every redraw
+/// would be serialising them a hundred and twenty times a minute for a value
+/// that moved once.
+#[test]
+fn the_picture_crosses_the_bridge_only_when_its_revision_moved() {
+    let dogma = read("ui/tela-dogma.js");
+    let sincroniza = js_function(&dogma, "async function sincronizarIcone(");
+
+    let Some((antes, _)) = sincroniza.split_once("invoke(\"icone_do_dogma\")") else {
+        panic!("nothing fetches the picture at all: {sincroniza}");
+    };
+    assert!(
+        antes.contains("icon_revision"),
+        "the bytes are fetched without the revision being compared first, so \
+         every redraw pulls the whole picture across the bridge: {sincroniza}"
+    );
+
+    // And the drawing is separate from the fetching, which is what lets a redraw
+    // be free: the panel and the header are painted from what is already here.
+    let pinta = js_function(&dogma, "function pintarIcone(");
+    assert!(
+        !pinta.contains("invoke("),
+        "painting the picture asks Rust for something, so a redraw is not free \
+         after all: {pinta}"
+    );
+    for id in ["topo-dogma-icone", "dogma-icone-previa"] {
+        assert!(
+            pinta.contains(id),
+            "`pintarIcone` never touches `{id}`, so one of the two places the \
+             picture is drawn goes stale: {pinta}"
+        );
+    }
+
+    // A session that ends forgets it. The revision of a *new* session starts
+    // counting from zero again, so without this the picture of the server
+    // somebody just left would sit in the header of the one they just entered —
+    // and a server with no picture sends nothing that would contradict it.
+    let esquece = js_function(&dogma, "function esquecerIcone(");
+    assert!(
+        esquece.contains("null"),
+        "leaving a server does not forget its picture: {esquece}"
+    );
+    let ouvinte = dogma
+        .split("listen(\"seele://event\"")
+        .nth(1)
+        .unwrap_or_default();
+    assert!(
+        ouvinte.contains("ConnectStageChanged") && ouvinte.contains("esquecerIcone("),
+        "nothing forgets the picture when a new session is being built, and that \
+         is the only notice that arrives *before* there is a session to compare \
+         revisions with: {ouvinte}"
+    );
+}
+
+/// This screen still has no SALVAR, and the newest section did not bring one.
+///
+/// The rule of the whole window, and the usability review listed it under "what
+/// is already right and was not touched": the choice takes effect at once, and
+/// what is drawn is what is **in force**. The name field is not somebody's
+/// intention held until they confirm it — it is the name the server is using.
+///
+/// The section that would most naturally have brought a save button is this one,
+/// because it holds the only free-text field on the screen.
+#[test]
+fn the_server_section_confirms_by_state_and_not_by_a_save_button() {
+    let page = read("ui/index.html");
+    let painel = screen_markup(&page, "painel-servidor", "ajuda-titulo");
+    for palavra in ["SALVAR", "APLICAR", "DESCARTAR"] {
+        assert!(
+            !painel.contains(palavra),
+            "the server section grew a `{palavra}` button. This screen confirms \
+             by state: the field shows the name in force, and a button promising \
+             that nothing changes until it is pressed would be false the moment \
+             somebody else with the same permission renames the server"
+        );
+    }
+
+    let dogma = read("ui/tela-dogma.js");
+    let rodape = dogma
+        .split("// ------------------------------------------------------------------- ligação")
+        .nth(1)
+        .unwrap_or_default();
+    assert!(
+        rodape.contains("\"change\""),
+        "nothing sends the name when the field is left, so the only way to \
+         rename is a button this screen does not have: {rodape}"
+    );
+
+    // And the field shows what is in force rather than what was typed — except
+    // while somebody is typing into it, because a screen that overwrites the
+    // caret twice a second is a screen nobody can write in.
+    let desenha = js_function(&dogma, "function desenharServidor(");
+    assert!(
+        desenha.contains("activeElement"),
+        "the name field is rewritten from the snapshot even while it has the \
+         caret, so typing into it is undone twice a second: {desenha}"
+    );
+    assert!(
+        desenha.contains("snapshot.dogma"),
+        "the field is not filled from the name the server is using, so it shows \
+         what was typed instead of what is in force: {desenha}"
     );
 }
 
@@ -5799,8 +6200,31 @@ fn the_page_never_composes_the_media_type_a_picture_is_decoded_with() {
     // And nowhere in the frontend is a media type of one of the four written
     // out at all: the list a screen offers previews for comes from Rust, so
     // that two copies of it cannot drift into offering what the fetch refuses.
+    //
+    // ---- one exception, and why it is not a hole ----
+    //
+    // `tela-dogma.js` composes `data:image/png;base64,…` for the server's own
+    // picture, and that is *not* the thing this test forbids. What it forbids is
+    // a page joining a media type to bytes **whose type somebody else claimed**
+    // — an attachment carries `declared_type`, chosen by the sender, and the
+    // whole of ADR 0027 is that the claim must never reach a decoder.
+    //
+    // The server's picture carries no claim to disagree with. `SetDogmaIcon`
+    // moves bytes and nothing else: the format is fixed by the message rather
+    // than declared beside it, and both ends check the PNG signature and the
+    // `IHDR` before the bytes travel any further. `image/png` there is not a
+    // promise the page is making; it is what the bytes already proved on the way
+    // in. The alternative was `seele-core::preview::data_uri`, which this crate
+    // may not name — ADR 0002 gives the shell `seele-ffi` and nothing past it —
+    // so the choice was this line or a second base64 encoder in `main.rs`.
+    //
+    // The exception is held to exactly that shape below, rather than trusted.
+    let excecao = "tela-dogma.js";
     let mut fonte = String::new();
     for name in ui_files(".js") {
+        if name == excecao {
+            continue;
+        }
         fonte.push_str(&without_comments(&read(&format!("ui/{name}"))));
     }
     for tipo in ["image/png", "image/jpeg", "image/gif", "image/webp"] {
@@ -5808,6 +6232,39 @@ fn the_page_never_composes_the_media_type_a_picture_is_decoded_with() {
             !fonte.contains(tipo),
             "the frontend writes out `{tipo}`, which is a second copy of a list \
              that already lives in `seele-core::preview`"
+        );
+    }
+
+    // The exception, kept to one type, one function, and no claim in sight.
+    let servidor = read(&format!("ui/{excecao}"));
+    let limpo = without_comments(&servidor);
+    for tipo in ["image/jpeg", "image/gif", "image/webp"] {
+        assert!(
+            !limpo.contains(tipo),
+            "`{excecao}` writes out `{tipo}`. The exemption above is for the one \
+             format `SetDogmaIcon` fixes; a second one there is a page choosing \
+             a decoder again"
+        );
+    }
+    assert_eq!(
+        limpo.matches("image/png").count(),
+        1,
+        "`{excecao}` names `image/png` more than once, so the exemption has \
+         spread beyond the single line that composes the server's picture"
+    );
+    let compoe = js_function(&servidor, "function uriDeIcone(");
+    assert!(
+        compoe.contains("image/png"),
+        "the one `image/png` in `{excecao}` is no longer inside `uriDeIcone`, so \
+         it is somewhere this test cannot see what it is being joined to: \
+         {compoe}"
+    );
+    for reivindicado in ["declared_type", "claimed", "found", "anexo", "previa"] {
+        assert!(
+            !compoe.contains(reivindicado),
+            "`uriDeIcone` reads `{reivindicado}`, so the type it writes is being \
+             joined to bytes that came with somebody's claim about them — which \
+             is the one thing ADR 0027 forbids: {compoe}"
         );
     }
     let pode = js_function(&read("ui/tela-sessao.js"), "function podeOferecerPrevia(");
@@ -6972,9 +7429,12 @@ const AINDA_NA_TELA: &[(&str, &str)] = &[
     (
         "Terminal Dogma",
         "o nome da tela de ajustes locais. `DOGMA → SERVIDOR` descreveria errado \
-         uma tela cuja própria subtitulação diz «Ajustes deste computador, e não \
-         deste servidor»: aqui `Dogma` não está no sentido de servidor. O mapa \
-         não tem linha para o composto e quem coordena ainda não decidiu.",
+         uma tela cuja própria subtitulação diz «Ajustes deste computador»: aqui \
+         `Dogma` é o nome do lugar, e não a palavra para servidor. A subtitulação \
+         perdeu a segunda metade — «e não deste servidor» — quando a seção do \
+         servidor entrou, e o argumento não depende dela: quatro das cinco seções \
+         continuam sendo desta máquina, e a quinta se anuncia. O mapa não tem \
+         linha para o composto e quem coordena ainda não decidiu.",
     ),
     (
         "Entry Plug",
