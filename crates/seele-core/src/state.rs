@@ -304,6 +304,27 @@ impl Room {
         self.current_cage = Some(cage);
     }
 
+    /// Records that this pilot's plug came **out**, and empties their seat.
+    ///
+    /// The other half of [`Self::enter_cage`], and it was missing for as long
+    /// as that one existed. The Dogma does not echo `PilotLeft` back to the
+    /// pilot who caused it — "they already know" — so leaving, exactly like
+    /// entering, is bookkeeping this side has to do for itself. Without it the
+    /// server empties the seat, every other client empties the seat, and the
+    /// one screen that goes on drawing the pilot in the Cage is the screen of
+    /// the person who just left it.
+    ///
+    /// Idempotent: leaving a Cage nobody is in is not an error, it is a client
+    /// asking twice.
+    pub fn leave_cage(&mut self) {
+        if let (Some(me), Some(previous)) = (self.me, self.current_cage) {
+            if let Some(seats) = self.seats.get_mut(&previous) {
+                seats.retain(|seated| *seated != me);
+            }
+        }
+        self.current_cage = None;
+    }
+
     /// Records that the client is now reading a Line.
     ///
     /// Clears the messages, because a new Line is a new conversation and keeping

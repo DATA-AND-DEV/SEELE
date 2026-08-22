@@ -2465,6 +2465,16 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             if client.ejetar_plug().await.is_err() {
                 return false;
             }
+            // O espelho do `InsertPlug` acima, e ele faltava. O Dogma não
+            // devolve o `PilotLeft` a quem o causou — «essa pessoa já sabe» —,
+            // então esta metade do roster é contabilidade desta casca. Sem ela
+            // o assento se esvazia no servidor e em todos os outros clientes, e
+            // a única tela que continua desenhando o piloto na jaula é a de
+            // quem acabou de sair dela.
+            if let Ok(mut room) = shared.room.lock() {
+                room.leave_cage();
+            }
+            shared.notify(&Event::RosterChanged);
         }
         Command::OpenLine(line) => {
             if client.abrir_linha(line).await.is_err() {

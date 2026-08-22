@@ -163,6 +163,79 @@ async fn entering_a_cage_puts_us_on_our_own_roster() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn leaving_a_cage_takes_us_off_our_own_roster() -> Result<()> {
+    // The mirror of the test above, and it was missing.
+    //
+    // The Dogma does not echo `PilotLeft` to the pilot who caused it — "they
+    // already know" — so this side of the roster is the shell's own
+    // bookkeeping. `insert_plug` did it and `eject_plug` did not, and the
+    // asymmetry is invisible from inside `Room`, which both halves are correct
+    // about: the seat that never got cleared was cleared on the *server* and on
+    // every *other* client.
+    //
+    // Reported from a real session twice over, as two complaints that turn out
+    // to be one: "não dá pra sair de uma jaula e deixá-la vazia" — the Cage
+    // never empties on the screen of the person who left it — and "o usuário
+    // está numa jaula com outro, mas o segundo não consegue ver esse usuário" —
+    // which is the same picture from the other chair, where the Dogma is right
+    // and the leaver's own screen is the one lying.
+    let (address, server) = start().await?;
+    let plug = tokio::task::spawn_blocking(move || connect(address, "rei")).await??;
+
+    plug.insert_plug(CAGE)?;
+    assert!(
+        until(&plug, |plug| {
+            plug.snapshot()
+                .cages
+                .iter()
+                .any(|cage| cage.occupied_by_us && cage.pilots.iter().any(|p| p.is_self))
+        }),
+        "we entered a Cage and are not on its roster"
+    );
+
+    plug.eject_plug()?;
+
+    assert!(
+        until(&plug, |plug| {
+            let snapshot = plug.snapshot();
+            !snapshot
+                .cages
+                .iter()
+                .any(|cage| cage.occupied_by_us || cage.pilots.iter().any(|p| p.is_self))
+        }),
+        "we left the Cage and our own screen still draws us in it: {:?}",
+        plug.snapshot()
+            .cages
+            .iter()
+            .map(|cage| (
+                cage.occupied_by_us,
+                cage.pilots.iter().filter(|p| p.is_self).count()
+            ))
+            .collect::<Vec<_>>()
+    );
+
+    // And the way back in still works, which is the part of this that was a
+    // trap rather than a wrong picture. The screen draws `SAIR DA JAULA` when
+    // `occupied_by_us` is true and sends `eject_plug` when it is pressed. With
+    // the seat never clearing, that button stayed on `SAIR DA JAULA` for the
+    // rest of the session and every press ejected again: the Cage could not be
+    // left on screen **and could not be re-entered**.
+    plug.insert_plug(CAGE)?;
+    assert!(
+        until(&plug, |plug| {
+            plug.snapshot()
+                .cages
+                .iter()
+                .any(|cage| cage.occupied_by_us && cage.pilots.iter().any(|p| p.is_self))
+        }),
+        "we could not walk back into the Cage we had just left"
+    );
+
+    server.shutdown();
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn two_shells_hold_a_conversation() -> Result<()> {
     let (address, server) = start().await?;
 
