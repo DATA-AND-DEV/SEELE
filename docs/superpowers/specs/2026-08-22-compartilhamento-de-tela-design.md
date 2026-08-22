@@ -239,19 +239,37 @@ sustentar:
   compartilhamento **para**, com motivo enumerado. Degradar para sempre é como
   um instrumento falso: consultado justamente quando algo deu errado.
 
-**A prova foi feita, e numa máquina só:** `spikes/tela-no-codec`, num Apple M5
-Pro, com textura de tela capturada e o teto de 1200 kbps do §3.2. O que ela
-mudou aqui:
+**A prova foi feita em duas máquinas**, com a **mesma textura** nas duas:
+`spikes/tela-no-codec`, num Apple M5 Pro e num AMD Ryzen 7 5800X3D com Windows,
+alcançado por SSH. Textura idêntica porque a primeira corrida no Windows usou a
+área de trabalho de 1024×768 que uma sessão sem monitor enxerga, e ela deu
+números bonitos demais — 0% de descarte a 29 kbps. **Textura diferente é medida
+diferente**, e comparar as duas teria sido comparar duas telas, não duas
+máquinas.
 
-- **A CPU não é o gargalo desta máquina, e não é nem perto.** 1080p a 30 quadros
-  custa **0,06 de um núcleo** de desempenho — o encoder sustenta 498 quadros por
-  segundo — e **0,18 a 0,21** no núcleo de eficiência, com a prioridade de fundo
-  que esta seção manda usar. O parágrafo acima chutou «núcleo inteiro» e errou
-  por mais de uma ordem de grandeza. **Isto vale para Apple Silicon e para mais
-  nada:** faltam um x86-64 de mesa, o Windows, e o notebook fino que estrangula
-  por calor, que é justamente a máquina que este parágrafo nomeia.
-- **O que aperta é o orçamento de bits.** No teto de 1200 kbps o próprio
-  controle de taxa do OpenH264 descarta 16% dos quadros em 1080p e 11% em 720p.
+| 1080p, uma fatia | Apple M5 Pro | Ryzen 5800X3D |
+|---|---|---|
+| quadros/s sustentados | 408 | 283 |
+| núcleo a 30 quadros | 0,073 | **0,105** |
+| descartados por falta de bits | 16,0% | 16,1% |
+| kbps entregues | 1147 | 1145 |
+
+O que ela mudou aqui:
+
+- **A CPU não é o gargalo em nenhuma das duas, e não é nem perto.** 1080p a 30
+  quadros custa **0,073 de um núcleo** no M5 Pro e **0,105** no Ryzen — o x86-64
+  cobra 44% mais por quadro e ainda fica num décimo de núcleo. No núcleo de
+  eficiência do Apple, com a prioridade de fundo que esta seção manda usar, são
+  **0,18 a 0,21**. O parágrafo acima chutou «núcleo inteiro» e errou por mais de
+  uma ordem de grandeza.
+  **O que ainda falta:** o notebook fino que estrangula por calor, que é
+  justamente a máquina que este parágrafo nomeia. As duas medidas são de máquina
+  de mesa com dissipação sobrando, e nenhuma delas responde por essa.
+- **O que aperta é o orçamento de bits**, e esta é a conclusão que a segunda
+  máquina mais reforçou: no teto de 1200 kbps o controle de taxa do OpenH264
+  descarta **16,0% dos quadros em 1080p no Mac e 16,1% no Ryzen**. Idêntico,
+  porque quem descarta é o controle de taxa e não o processador — trocar de
+  máquina não compra um quadro sequer.
   A faixa de 5 a 30 continua sendo o desenho certo — mas quem cede primeiro não
   é a CPU.
 - **Uma fatia, uma thread.** Cortar o quadro em quatro fatias para usar quatro
