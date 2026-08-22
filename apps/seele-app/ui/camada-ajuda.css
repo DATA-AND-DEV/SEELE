@@ -1,0 +1,161 @@
+/* SEELE · Entry Plug — a ajuda, na tecla `?`.
+
+   ---- toda classe daqui começa por `ajuda-` ----
+
+   Mesmo motivo de sempre: as folhas caem num só espaço de nomes, e duas telas
+   escolhendo o mesmo nome não é conflito que o navegador reporte — é a folha
+   de baixo ganhando todo empate em silêncio.
+
+   ---- por que esta camada existe ----
+
+   O vocabulário deste produto — Dogma, Piloto, Cage, Linha, A.T. Field — não
+   se explica sozinho, e quem chega do Discord não tem por onde adivinhar. A
+   resposta anterior era uma nota sob cada rótulo, e ela foi removida por
+   pedido de quem desenha o produto: legenda permanente é texto que quem já
+   sabe lê mil vezes.
+
+   Aqui o vocabulário inteiro mora num lugar só, que **não aparece até ser
+   chamado**. É o mesmo critério que a TUI adota com o `?` do `plug`: dá para
+   usar sabendo só uma tecla. A tela permanente não ganha uma linha de texto.
+
+   Nenhuma cor literal: `tests/tokens.rs` lê o arquivo inteiro e `tokens.css` é
+   o único lugar onde um literal pertence.
+
+   ---- sobre o vermelho ----
+
+   Esta folha não o gasta em lugar nenhum. Uma tabela de vocabulário não é
+   alerta nem queda, que é o que `tokens.css` reserva para ele. */
+
+.camada-ajuda {
+  position: fixed;
+  inset: 0;
+  /* Acima da portaria (25) e da moderação (30): a ajuda é a única coisa desta
+     janela que pode ser pedida **de dentro** de qualquer outra, e uma ajuda
+     que abre atrás do que ela explica não ajuda ninguém. */
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--seele-e4);
+}
+
+/* O véu num pseudoelemento e não `opacity` na caixa, como nas outras camadas:
+   apagar a caixa apagaria o texto dentro dela, que é o que a pessoa veio ler. */
+.camada-ajuda::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--seele-negro-absoluto);
+  opacity: 0.72;
+}
+
+.ajuda-caixa {
+  position: relative;
+  width: 100%;
+  max-width: 760px;
+  max-height: calc(100vh - var(--seele-e8));
+  display: flex;
+  flex-direction: column;
+  background: var(--seele-negro-painel);
+  border: 1px solid var(--seele-linha-forte);
+}
+
+.ajuda-cabeca {
+  display: flex;
+  align-items: center;
+  gap: var(--seele-e2);
+  padding: var(--seele-e3) var(--seele-e4);
+  border-bottom: 1px solid var(--seele-linha);
+}
+
+.ajuda-titulo {
+  margin: 0;
+  flex: 1;
+  font-family: var(--seele-display);
+  font-size: var(--seele-t-secao);
+  letter-spacing: var(--seele-tracking-cartela);
+  color: var(--seele-osso);
+}
+
+/* A tecla que fecha, escrita. Um `×` sozinho obriga a pessoa a descobrir que
+   `Escape` também serve; escrever a tecla ensina o atalho no único momento em
+   que ela está olhando para ele. */
+.ajuda-fechar {
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-micro);
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-osso-apagado);
+  background: none;
+  border: 1px solid var(--seele-linha-forte);
+  padding: var(--seele-e1) var(--seele-e2);
+  cursor: pointer;
+}
+
+.ajuda-fechar:hover,
+.ajuda-fechar:focus-visible {
+  color: var(--seele-osso);
+  border-color: var(--seele-laranja-nerv);
+}
+
+.ajuda-corpo {
+  overflow-y: auto;
+  padding: var(--seele-e4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--seele-e4);
+}
+
+.ajuda-secao-nome {
+  margin: 0 0 var(--seele-e2);
+  font-family: var(--seele-display);
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-laranja-nerv);
+}
+
+/* Duas colunas: o termo e o que ele é. `grid` e não uma `<table>` porque o que
+   se quer é o alinhamento, e uma tabela traria semântica de dados tabulares
+   para o que é uma lista de definições — que é o que `<dl>` já diz. */
+.ajuda-lista {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--seele-e2) var(--seele-e3);
+  align-items: baseline;
+}
+
+.ajuda-termo {
+  margin: 0;
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-dado);
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-osso);
+}
+
+.ajuda-diz {
+  margin: 0;
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-corpo);
+  color: var(--seele-osso-apagado);
+}
+
+/* A tecla desenhada como tecla. É a única parte desta caixa que a pessoa vai
+   querer reconhecer de relance depois de já ter lido uma vez. */
+.ajuda-tecla {
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-micro);
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-osso);
+  border: 1px solid var(--seele-linha-forte);
+  padding: 0 var(--seele-e1);
+  white-space: nowrap;
+}
+
+/* Em janela baixa a caixa encolhe pelo corpo, que rola. O cabeçalho e a linha
+   de fechar continuam onde estão: são eles que dizem como sair daqui. */
+@media (max-height: 560px) {
+  .ajuda-corpo {
+    gap: var(--seele-e3);
+    padding: var(--seele-e3);
+  }
+}

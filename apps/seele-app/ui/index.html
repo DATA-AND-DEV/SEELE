@@ -36,6 +36,7 @@
 <link rel="stylesheet" href="camada-bateria.css">
 <link rel="stylesheet" href="camada-portaria.css">
 <link rel="stylesheet" href="camada-moderar.css">
+<link rel="stylesheet" href="camada-ajuda.css">
 <link rel="stylesheet" href="tela-chamada.css">
 <link rel="stylesheet" href="tela-dogma.css">
 <link rel="stylesheet" href="tela-fim.css">
@@ -998,6 +999,14 @@
           <h2 class="painel-titulo">
             <span>CAGES</span><span class="painel-codigo">B·03</span>
           </h2>
+          <!--
+            A ajuda, e ela fica aqui por um motivo: CAGE e LINHA são as duas
+            palavras que a pessoa encontra primeiro sem saber o que querem
+            dizer, e este é o canto onde as duas moram. A tecla `?` abre de
+            qualquer lugar; o botão existe para quem ainda não sabe da tecla.
+          -->
+          <button id="ajuda-abrir" class="painel-ajuda" type="button"
+                  aria-label="Ajuda: o vocabulário do SEELE e as teclas">?</button>
         </div>
         <ul id="lista-cages" class="canais"></ul>
 
@@ -2146,6 +2155,73 @@
 
   Uma tela nova acrescenta um `tela-<nome>.js` no fim desta lista.
 -->
+<!--
+  ---- A AJUDA ----
+
+  O vocabulário deste produto num lugar só, que não aparece até ser chamado.
+
+  Ele já esteve espalhado em notas sob os rótulos, e elas saíram: legenda
+  permanente é texto que quem já sabe lê mil vezes, e uma tela de conversa não
+  deve parecer um manual. O que a avaliação de usabilidade pediu — explicar o
+  vocabulário onde a pessoa esbarra nele — continua valendo, e é isto: a uma
+  tecla de distância, de qualquer tela, sem custar uma linha à tela permanente.
+
+  `aria-modal` e `tabindex="-1"` como nas outras duas camadas: a caixa recebe o
+  foco ao abrir e o devolve ao fechar.
+-->
+<div id="ajuda" class="camada-ajuda" role="dialog" aria-modal="true"
+     aria-labelledby="ajuda-titulo" tabindex="-1" hidden>
+  <div class="ajuda-caixa">
+    <div class="ajuda-cabeca">
+      <h2 id="ajuda-titulo" class="ajuda-titulo">O QUE É O QUÊ</h2>
+      <button id="ajuda-fechar" class="ajuda-fechar" type="button">ESC</button>
+    </div>
+
+    <div class="ajuda-corpo">
+      <section>
+        <h3 class="ajuda-secao-nome">AS PALAVRAS</h3>
+        <dl class="ajuda-lista">
+          <dt class="ajuda-termo">DOGMA</dt>
+          <dd class="ajuda-diz">O servidor. Alguém hospeda, e você entra nele.</dd>
+          <dt class="ajuda-termo">PILOTO</dt>
+          <dd class="ajuda-diz">Você. O apelido é seu: ninguém mais consegue usá-lo neste Dogma.</dd>
+          <dt class="ajuda-termo">CAGE</dt>
+          <dd class="ajuda-diz">Sala de voz. Entre numa para falar.</dd>
+          <dt class="ajuda-termo">LINHA</dt>
+          <dd class="ajuda-diz">Canal de texto.</dd>
+          <dt class="ajuda-termo">A.T. FIELD</dt>
+          <dd class="ajuda-diz">Seu microfone fechado. Ninguém ouve você enquanto ele estiver de pé.</dd>
+          <dt class="ajuda-termo">SYNC</dt>
+          <dd class="ajuda-diz">Quanto da sua voz está chegando inteira do outro lado.</dd>
+          <dt class="ajuda-termo">PADRÃO: AZUL</dt>
+          <dd class="ajuda-diz">O aperto de mão foi até o fim: o caminho é cifrado e a chave do Dogma confere.</dd>
+        </dl>
+      </section>
+
+      <!--
+        Só as teclas que existem de verdade. Uma ajuda que lista um atalho que
+        o programa não tem é pior que ajuda nenhuma: ela ensina errado e não
+        falha em lugar nenhum.
+      -->
+      <section>
+        <h3 class="ajuda-secao-nome">AS TECLAS</h3>
+        <dl class="ajuda-lista">
+          <dt class="ajuda-termo"><span class="ajuda-tecla">ESPAÇO</span></dt>
+          <dd class="ajuda-diz">Segure para falar, no modo tecla.</dd>
+          <dt class="ajuda-termo"><span class="ajuda-tecla">/</span></dt>
+          <dd class="ajuda-diz">Procurar no que já foi dito nesta Linha.</dd>
+          <dt class="ajuda-termo"><span class="ajuda-tecla">ENTER</span></dt>
+          <dd class="ajuda-diz">Na busca, vai para a próxima ocorrência. Com Shift, volta.</dd>
+          <dt class="ajuda-termo"><span class="ajuda-tecla">?</span></dt>
+          <dd class="ajuda-diz">Esta ajuda, de qualquer tela.</dd>
+          <dt class="ajuda-termo"><span class="ajuda-tecla">ESC</span></dt>
+          <dd class="ajuda-diz">Fecha o que estiver por cima.</dd>
+        </dl>
+      </section>
+    </div>
+  </div>
+</div>
+
 <script src="base.js"></script>
 <script src="glifos.js"></script>
 <script src="frases.js"></script>
@@ -2167,6 +2243,7 @@
   precise pensar nisso.
 -->
 <script src="camada-portaria.js"></script>
+<script src="camada-ajuda.js"></script>
 <!--
   Depois de `tela-sessao.js`, e não é gosto: a chamada usa `naoMedido`,
   `medido`, `SEM_MEDIDA` e `blocos`, que são declarados lá. Declaração de função

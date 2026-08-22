@@ -6834,3 +6834,79 @@ fn no_sentence_the_screen_writes_reaches_a_third_line() {
         }
     }
 }
+
+#[test]
+fn a_ajuda_so_promete_teclas_que_a_janela_atende() {
+    // Uma ajuda que lista um atalho inexistente é pior que ajuda nenhuma: ela
+    // ensina errado e não falha em lugar nenhum. Isto lê os `<span
+    // class="ajuda-tecla">` da página e cobra, para cada um, que exista um
+    // `keydown` em algum script desta janela que o compare.
+    //
+    // Esta camada existe porque a explicação do vocabulário saiu das telas —
+    // legenda permanente é texto que quem já sabe lê mil vezes. O que a
+    // avaliação de usabilidade pediu continua valendo e passou a morar aqui, a
+    // uma tecla de distância e a zero linhas da tela permanente.
+    let page = read("ui/index.html");
+    let scripts = scripts();
+
+    // O que a tecla desenhada na ajuda vira num `KeyboardEvent`.
+    let atalhos = [
+        ("ESPAÇO", "\"Space\""),
+        ("/", "\"/\""),
+        ("ENTER", "\"Enter\""),
+        ("?", "\"?\""),
+        ("ESC", "\"Escape\""),
+    ];
+
+    let mut desenhadas = Vec::new();
+    let mut resto = page.as_str();
+    while let Some(inicio) = resto.find("class=\"ajuda-tecla\">") {
+        let depois = &resto[inicio + "class=\"ajuda-tecla\">".len()..];
+        let Some(fim) = depois.find('<') else { break };
+        desenhadas.push(depois[..fim].to_owned());
+        resto = &depois[fim..];
+    }
+
+    assert!(
+        !desenhadas.is_empty(),
+        "a ajuda não desenha tecla nenhuma; ou a seção sumiu ou a classe mudou \
+         de nome e este teste virou decoração"
+    );
+
+    for tecla in &desenhadas {
+        let Some((_, valor)) = atalhos.iter().find(|(desenhada, _)| desenhada == tecla) else {
+            panic!(
+                "a ajuda desenha a tecla «{tecla}», que este teste não sabe \
+                 traduzir para um `KeyboardEvent`. Ou ela é nova — e então \
+                 entra na tabela junto com o `keydown` que a atende — ou é \
+                 promessa sem dono."
+            );
+        };
+        assert!(
+            scripts.contains(valor),
+            "a ajuda promete «{tecla}» e nenhum script desta janela compara \
+             {valor} num `keydown`: a ajuda está ensinando um atalho que não \
+             existe"
+        );
+    }
+}
+
+#[test]
+fn a_ajuda_nao_rouba_a_interrogacao_de_quem_esta_escrevendo() {
+    // O mesmo guarda que a `/` da busca e o espaço da fala têm, e pelo mesmo
+    // motivo: uma interrogação escrita numa mensagem é uma interrogação. Sem
+    // isto a camada abriria no meio da frase, e o caractere se perderia.
+    let ajuda = read("ui/camada-ajuda.js");
+    let sem_comentario = without_comments(&ajuda);
+    let abre = sem_comentario
+        .lines()
+        .find(|linha| linha.contains("\"?\""))
+        .unwrap_or_default();
+
+    assert!(
+        abre.contains("!digitando()"),
+        "a tecla `?` abre a ajuda sem perguntar se a pessoa está num campo de \
+         texto; a interrogação que ela quis escrever vira uma caixa na frente \
+         da tela:\n{abre}"
+    );
+}

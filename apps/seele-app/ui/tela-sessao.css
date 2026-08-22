@@ -356,9 +356,38 @@
 .canais-cabeca {
   flex: 0 0 auto;
   border-bottom: 1px solid var(--seele-linha);
+  /* Em linha para o `?` caber ao lado do título sem uma segunda faixa. O
+     `.painel-titulo` já é `flex` por dentro e continua ocupando o que sobra. */
+  display: flex;
+  align-items: flex-start;
+  gap: var(--seele-e2);
 }
 
-.canais-cabeca .painel-titulo { padding-bottom: 2px; }
+.canais-cabeca .painel-titulo { flex: 1; padding-bottom: 2px; }
+
+/* O `?` que abre a ajuda.
+   Quadrado e do tamanho do texto ao lado: ele não compete com o título, e não
+   deve — quem já sabe o que é um Cage nunca mais precisa dele. Vira laranja no
+   hover e no foco como todo alvo desta janela. */
+.painel-ajuda {
+  flex: 0 0 auto;
+  margin: 10px 16px 0 0;
+  width: 20px;
+  height: 20px;
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-micro);
+  line-height: 1;
+  color: var(--seele-osso-apagado);
+  background: none;
+  border: 1px solid var(--seele-linha-forte);
+  cursor: pointer;
+}
+
+.painel-ajuda:hover,
+.painel-ajuda:focus-visible {
+  color: var(--seele-osso);
+  border-color: var(--seele-laranja-nerv);
+}
 .canais-cabeca .nota { padding: 0 16px 12px; }
 
 .canais-cabeca-linhas {
