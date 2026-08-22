@@ -172,21 +172,37 @@ fn ler_bmp(bytes: &[u8]) -> Result<Imagem, String> {
         return Err(format!("BMP de {bits} bits; este leitor só trata 32"));
     }
     // Altura negativa quer dizer «primeira linha do arquivo é a de cima», que é
-    // o que o macOS escreve. O caminho de baixo para cima não existe aqui
-    // porque nenhuma captura desta máquina o produz.
-    if altura_bruta >= 0 {
-        return Err("BMP de baixo para cima; o screencapture do macOS não produz isso".to_string());
-    }
+    // o que o `screencapture` do macOS escreve. Positiva é de baixo para cima,
+    // que é a forma **padrão** do formato e a que o `System.Drawing` do Windows
+    // produz — este leitor recusava justamente a comum, porque foi escrito
+    // olhando uma máquina só. Encontrado ao levar o spike a um Ryzen.
+    let de_baixo = altura_bruta >= 0;
     let largura = usize::try_from(largura).map_err(|_| "largura negativa".to_string())?;
-    let altura = usize::try_from(-altura_bruta).map_err(|_| "altura inválida".to_string())?;
+    let altura = usize::try_from(altura_bruta.abs()).map_err(|_| "altura inválida".to_string())?;
     let esperado = largura
         .checked_mul(altura)
         .and_then(|n| n.checked_mul(4))
         .ok_or_else(|| "dimensões absurdas".to_string())?;
-    let bgra = bytes
+    let cru = bytes
         .get(inicio_pixels..inicio_pixels + esperado)
-        .ok_or_else(|| "BMP menor que o próprio cabeçalho promete".to_string())?
-        .to_vec();
+        .ok_or_else(|| "BMP menor que o próprio cabeçalho promete".to_string())?;
+    // Virado uma vez na leitura, e não a cada quadro: o resto deste spike
+    // trabalha em cima da imagem milhares de vezes, e pagar a inversão ali
+    // mediria o custo de virar linha, não o de encodar.
+    let bgra = if de_baixo {
+        let passo = largura * 4;
+        let mut virada = Vec::with_capacity(esperado);
+        for linha in (0..altura).rev() {
+            let inicio = linha * passo;
+            virada.extend_from_slice(
+                cru.get(inicio..inicio + passo)
+                    .ok_or_else(|| "linha fora do BMP".to_string())?,
+            );
+        }
+        virada
+    } else {
+        cru.to_vec()
+    };
     Ok(Imagem {
         largura,
         altura,
