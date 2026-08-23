@@ -27,13 +27,14 @@ pub mod control;
 pub mod encontro;
 pub mod ids;
 pub mod media;
+pub mod screen;
 pub mod sync_ratio;
 pub mod transport;
 pub mod uri;
 pub mod version;
 
 pub use control::{ClientMessage, ControlError, ServerMessage};
-pub use ids::{CageId, LineId, PilotId, SessionId, Ssrc};
+pub use ids::{CageId, LineId, PilotId, ScreenId, SessionId, Ssrc};
 pub use media::{MediaError, MediaHeader, HEADER_LEN, MAX_DATAGRAM_LEN, MAX_PAYLOAD_LEN};
 pub use sync_ratio::{SyncBand, SyncInputs, SyncRatio};
 pub use version::{oldest_supported_version, Incompatible, COMPATIBILITY_WINDOW, PROTOCOL_VERSION};

@@ -1,0 +1,77 @@
+[package]
+name = "seele-video"
+description = "Compartilhamento de tela: captura e codec H.264, do mesmo jeito que `seele-audio` guarda dispositivo e codec."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# `specs/01-arquitetura.md`, regra de dependência: este crate vê `seele-proto` e
+# mais nada. Guardado por `cargo xtask check-deps` (ADR 0002).
+#
+# **A aresta para `seele-proto` está permitida e ainda não é usada.** O que a
+# fará existir é o §3.6 da spec do compartilhamento de tela — o cabeçalho do
+# fluxo unidirecional, versionado pelo primeiro byte como todo frame de
+# controle. Ele é o passo 3 da ordem de construção; este crate é o passo 1.
+# Declarar a dependência antes de haver o que importar seria uma linha que
+# ninguém consegue explicar.
+[dependencies]
+# A escolha do §2 da spec, e a árvore de execução dela é uma linha só: ele
+# mesmo. Não compila C — gera as bindings com `bindgen` e faz `dlopen` do módulo
+# do Cisco em tempo de execução, que é o que mantém a patente respondida em vez
+# de contornada (§2, razão 3).
+#
+# Mesma família do `shiguredo_opus` que o ADR 0008 escolheu para a voz: mesmo
+# mantenedor, mesmo trem de versões, e o `rust-toolchain.toml` já carrega
+# `llvm-tools` por causa dela.
+#
+# **Dois custos de build que o §2 não previu**, os dois medidos por
+# `spikes/tela-no-codec`: o `build.rs` faz `git clone --depth 1` do repositório
+# do Cisco para pegar `codec_api.h`, então `cargo build` precisa de `git` e de
+# **rede**; e o `bindgen` precisa de `libclang`. Continua sendo muito menos que
+# nasm mais CMake — que é o custo que o `rustls` já recusou por escrito —, mas
+# «zero ferramentas de build» está otimista por dois itens, e quem empacota
+# precisa saber antes.
+shiguredo_openh264 = "2026.2.0"
+# Só para conferir o hash fixado do módulo que se baixa (§2: «hash fixado e
+# conferido»). Não acrescenta nada à árvore: `seele-proto` já depende dele, na
+# mesma versão.
+sha2 = "0.11.0"
+
+# ---- captura, uma por sistema ----
+#
+# Postas por quem coordena, e não pelos dois agentes que escreveram
+# `captura/macos.rs` e `captura/windows.rs`: um `Cargo.toml` editado por duas
+# frentes em paralelo é a colisão que o `captura/mod.rs` vazio existe para
+# evitar. Eles pediram; esta é a resposta.
+
+# ScreenCaptureKit, a escolha do §1. `core-graphics` acompanha por causa de
+# `CGPreflightScreenCaptureAccess`/`CGRequestScreenCaptureAccess`, que é como se
+# pergunta ao TCC **sem `unsafe`** — e `unsafe_code` é `forbid` aqui.
+#
+# `core-graphics` e não `objc2-core-graphics`: o primeiro **já está no
+# `Cargo.lock`**, trazido pelo `tao` do Tauri, e portanto acrescenta zero à
+# árvore. O segundo serviria igual e traria uma segunda família.
+#
+# **O custo que o §1 não previu, e ele é do tipo que o §2 já recusou uma vez:**
+# o `build.rs` do `screencapturekit` roda `swift build`. Exige toolchain Swift
+# na máquina que compila, não só `cargo` — é o mesmo formato do nasm que o
+# comentário do `rustls` recusou por escrito. E ele publica o rpath do Swift por
+# `cargo:rustc-link-arg`, que **o Cargo ignora quando vem de dependência**: sem
+# a linha em `.cargo/config.toml`, o binário linka e morre no `dyld`.
+[target.'cfg(target_os = "macos")'.dependencies]
+screencapturekit = "8.0.1"
+core-graphics = "0.25"
+
+# Windows Graphics Capture. O §1 pesou as duas portas e esta é a que não exige
+# `unsafe`: a alternativa é WGC crua pelo `windows` 0.61, com zero crates novos
+# e uma exceção nomeada ao `forbid unsafe_code` — que a spec recusou para a v1.
+#
+# Custo aceito e escrito: 31 crates, `windows` 0.62 ao lado do 0.61 já na árvore
+# (`multiple-versions = "warn"` no `deny.toml`), e um `rayon` que só entra pelos
+# caminhos que este código não chama.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-capture = "2.0.1"
+
+[lints]
+workspace = true

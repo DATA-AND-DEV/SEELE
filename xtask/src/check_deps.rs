@@ -56,7 +56,18 @@ const RULES: &[(&str, &[&str])] = &[
     // decisão. A tabela é onde essa mudança teria de ser argumentada.
     ("seele-encontro", &["seele-proto"]),
     ("seele-audio", &["seele-proto"]),
-    ("seele-core", &["seele-proto", "seele-audio"]),
+    // Compartilhamento de tela: captura e codec, ao lado de `seele-audio` e com
+    // exatamente a mesma vizinhança. Não é um degrau novo no grafo, é a segunda
+    // folha de mídia.
+    //
+    // **A aresta que não existe é a que importa.** Este crate faz `dlopen` do
+    // módulo do Cisco e codifica H.264; se um dia ele precisar de `seele-core`,
+    // quer dizer que a decisão de o que transmitir e de quando parar migrou para
+    // dentro do codec — e o §3.2 da spec de compartilhamento de tela põe essa
+    // decisão do outro lado, pendurada no sinal da voz que `seele-core` já
+    // calcula. A tabela é onde essa mudança teria de ser argumentada.
+    ("seele-video", &["seele-proto"]),
+    ("seele-core", &["seele-proto", "seele-audio", "seele-video"]),
     // The daemon speaks the wire format and nothing else.
     ("seele-server", &["seele-proto"]),
     // Shells translate events into pixels and input into commands. Nothing more.
@@ -279,6 +290,22 @@ mod tests {
         assert!(evaluate("seele-encontro", &[edge("seele-proto")]).is_empty());
         assert_eq!(evaluate("seele-encontro", &[edge("seele-core")]).len(), 1);
         assert_eq!(evaluate("seele-encontro", &[edge("seele-server")]).len(), 1);
+    }
+
+    #[test]
+    fn the_screen_crate_is_a_leaf_next_to_audio() {
+        // Mesma vizinhança de `seele-audio`, e pelo mesmo motivo: mídia vê o
+        // formato do fio e mais nada. Uma aresta daqui para `seele-core` seria a
+        // assinatura de que a decisão de quando o vídeo cede migrou para dentro
+        // do codec, e o §3.2 da spec a põe do outro lado.
+        assert!(evaluate("seele-video", &[edge("seele-proto")]).is_empty());
+        assert_eq!(evaluate("seele-video", &[edge("seele-core")]).len(), 1);
+        assert_eq!(evaluate("seele-video", &[edge("seele-audio")]).len(), 1);
+        // E o servidor continua sem enxergá-lo: `specs/04` diz que ele nunca
+        // decodifica Opus, e o §5 da spec de tela diz que ele nunca encaminha
+        // vídeo. Ligar este crate a um daemon de 1 vCPU seria as duas frases
+        // deixando de valer de uma vez.
+        assert_eq!(evaluate("seele-server", &[edge("seele-video")]).len(), 1);
     }
 
     #[test]

@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use seele_proto::control::{CageInfo, LineInfo, PilotProfile, PilotState};
-use seele_proto::ids::{CageId, LineId, MessageId, PilotId, Ssrc};
+use seele_proto::ids::{CageId, LineId, MessageId, PilotId, ScreenId, Ssrc};
 use tokio::sync::{broadcast, mpsc, Mutex};
 
 use crate::casper::messages::{Messages, PendingMessage, StoredMessage};
@@ -181,6 +181,143 @@ pub enum Event {
         /// Which Line.
         line: LineId,
     },
+
+    // ---- compartilhamento de tela ----
+    //
+    // Só o controle passa por aqui. **Os quadros não**, e é a decisão medida do
+    // §3 de `docs/superpowers/specs/2026-08-22-compartilhamento-de-tela-design.md`:
+    // eles vão num fluxo unidirecional QUIC, e este barramento é um
+    // `broadcast::Sender<Event>` que toda conexão drena — pôr 150 kB/s de vídeo
+    // num anel que cinquenta sessões copiam seria o oposto exato do desenho.
+    /// Alguém começou a compartilhar tela.
+    ScreenShareStarted {
+        /// Em qual Cage.
+        cage: CageId,
+        /// Quem.
+        pilot: PilotId,
+        /// Como a transmissão se chama daqui em diante.
+        screen: ScreenId,
+    },
+    /// Uma transmissão acabou.
+    ScreenShareStopped {
+        /// Em qual Cage.
+        cage: CageId,
+        /// Qual transmissão.
+        screen: ScreenId,
+    },
+    /// Alguém que assiste não tem de que predizer e pediu um quadro-chave.
+    ///
+    /// Endereçado a um piloto e entregue a todos, como o [`Self::SessionEnded`]
+    /// — um Dogma não tem outra maneira de uma sessão alcançar outra, e o
+    /// barramento já é o que toda conexão drena.
+    KeyFrameRequested {
+        /// Qual transmissão.
+        screen: ScreenId,
+        /// Quem pediu.
+        pilot: PilotId,
+        /// A quem entregar: quem está compartilhando.
+        sharer: PilotId,
+    },
+}
+
+/// Quem está compartilhando tela em cada Cage.
+///
+/// **Uma transmissão por Cage**, que é o §6 item 3 da spec de compartilhamento
+/// de tela: *«uma transmissão por sala de voz na v1. Duas dobram a subida de
+/// quem recebe e triplicam a interface»*. Quem chega depois perde a corrida e
+/// **é avisado com nome** — `AlertReason::ScreenShareTaken` —, porque
+/// `PermissionDenied` diria «você não pode» a quem pode.
+///
+/// Ao lado da [`Occupancy`] e não dentro dela: quem está sentado e quem está
+/// transmitindo mudam por motivos diferentes e em momentos diferentes, e a
+/// única coisa que os liga é a limpeza — sair do Cage encerra a transmissão,
+/// que é o que [`Telas::encerrar_de`] existe para fazer numa chamada só.
+#[derive(Debug, Default)]
+pub struct Telas {
+    por_cage: HashMap<CageId, (PilotId, ScreenId)>,
+}
+
+impl Telas {
+    /// Registra uma transmissão, ou diz quem já está com a vaga.
+    ///
+    /// `Err(pilot)` é quem chegou primeiro. Devolver o nome e não um `bool`
+    /// porque a frase que a interface tem de escrever é «fulano já está
+    /// compartilhando», e um booleano obrigaria quem chama a procurar a resposta
+    /// de novo em outro lugar.
+    pub fn comecar(
+        &mut self,
+        cage: CageId,
+        pilot: PilotId,
+        screen: ScreenId,
+    ) -> Result<(), PilotId> {
+        match self.por_cage.get(&cage) {
+            // Quem já está transmitindo pedindo de novo não é uma corrida
+            // perdida: é um cliente que reabriu o botão, e devolver
+            // `ScreenShareTaken` para a própria pessoa seria dizer que ela
+            // perdeu para si mesma.
+            Some((dono, _)) if *dono != pilot => Err(*dono),
+            _ => {
+                self.por_cage.insert(cage, (pilot, screen));
+                Ok(())
+            }
+        }
+    }
+
+    /// Encerra a transmissão de um Cage, se for deste piloto.
+    ///
+    /// Conferido, e não apagado às cegas: um `StopScreenShare` de quem não está
+    /// transmitindo derrubaria a tela de quem está.
+    pub fn parar(&mut self, cage: CageId, pilot: PilotId) -> Option<ScreenId> {
+        let (dono, screen) = *self.por_cage.get(&cage)?;
+        if dono != pilot {
+            return None;
+        }
+        self.por_cage.remove(&cage);
+        Some(screen)
+    }
+
+    /// Encerra o que este piloto estivesse transmitindo, onde quer que fosse.
+    ///
+    /// Devolve os Cages e as transmissões, porque alguém tem de anunciar o fim
+    /// e quem chama nem sempre sabe a sala — uma sessão acaba em qualquer `?` do
+    /// meio do laço dela. É o mesmo raciocínio de
+    /// [`Occupancy::vacate_everywhere`].
+    pub fn encerrar_de(&mut self, pilot: PilotId) -> Vec<(CageId, ScreenId)> {
+        let encerradas: Vec<_> = self
+            .por_cage
+            .iter()
+            .filter(|(_, (dono, _))| *dono == pilot)
+            .map(|(cage, (_, screen))| (*cage, *screen))
+            .collect();
+        for (cage, _) in &encerradas {
+            self.por_cage.remove(cage);
+        }
+        encerradas
+    }
+
+    /// Encerra tudo o que estivesse acontecendo num Cage que deixou de existir.
+    pub fn encerrar_cage(&mut self, cage: CageId) -> Option<ScreenId> {
+        self.por_cage.remove(&cage).map(|(_, screen)| screen)
+    }
+
+    /// Quem está transmitindo neste Cage, se alguém está.
+    #[must_use]
+    pub fn em(&self, cage: CageId) -> Option<(PilotId, ScreenId)> {
+        self.por_cage.get(&cage).copied()
+    }
+
+    /// Tudo o que está acontecendo agora, achatado.
+    ///
+    /// Achatado e não devolvido como mapa porque o único chamador percorre a
+    /// lista uma vez para escrever um quadro por transmissão — a mesma razão
+    /// que [`Occupancy::everywhere`] dá.
+    #[must_use]
+    pub fn todas(&self) -> Vec<(CageId, PilotId, ScreenId)> {
+        self.por_cage
+            .iter()
+            .map(|(cage, (pilot, screen))| (*cage, *pilot, *screen))
+            .collect()
+    }
 }
 
 /// A Cage seat held open for a pilot who dropped.
@@ -411,6 +548,8 @@ pub struct Dogma {
     pub portaria: Arc<Mutex<crate::taxa::Portaria>>,
     /// How often the bus outran a session. See [`Atrasos`].
     pub atrasos: Arc<Atrasos>,
+    /// Quem está compartilhando tela em cada Cage. Ver [`Telas`].
+    pub telas: Arc<Mutex<Telas>>,
     /// The attachment store, its ceiling, and the byte budget. ADR 0027.
     ///
     /// `None` when this Dogma has nowhere to keep blobs, which is the in-memory
@@ -657,5 +796,98 @@ mod tests {
 
         assert_eq!(occupancy.in_cage(CageId(1)).len(), 0);
         assert_eq!(occupancy.in_cage(CageId(2)).len(), 1);
+    }
+    // ---- compartilhamento de tela ----
+
+    #[test]
+    fn uma_transmissao_por_cage_e_quem_perde_a_corrida_tem_nome() {
+        // §6 item 3 da spec de compartilhamento de tela: uma transmissão por
+        // sala de voz na v1, porque «duas dobram a subida de quem recebe e
+        // triplicam a interface».
+        //
+        // O que este teste prende junto com a regra é **quem** o `Err` carrega:
+        // é com esse nome que a sessão escreve `AlertReason::ScreenShareTaken`,
+        // e trocá-lo por um `bool` obrigaria quem chama a procurar a resposta
+        // de novo em outro lugar — onde ela já pode ter mudado.
+        let mut telas = Telas::default();
+        assert_eq!(telas.comecar(CageId(1), PilotId(10), ScreenId(1)), Ok(()));
+        assert_eq!(
+            telas.comecar(CageId(1), PilotId(20), ScreenId(2)),
+            Err(PilotId(10)),
+            "duas telas na mesma sala"
+        );
+        // E a corrida perdida não derruba quem ganhou.
+        assert_eq!(telas.em(CageId(1)), Some((PilotId(10), ScreenId(1))));
+
+        // Outra sala é outra corrida.
+        assert_eq!(telas.comecar(CageId(2), PilotId(20), ScreenId(3)), Ok(()));
+    }
+
+    #[test]
+    fn quem_ja_transmite_pedindo_de_novo_nao_perde_para_si_mesmo() {
+        // Um cliente que reabriu o botão, ou um `StartScreenShare` repetido
+        // depois de uma reconexão. Devolver `ScreenShareTaken` para a própria
+        // pessoa seria dizer que ela perdeu uma corrida contra ela mesma, e a
+        // interface escreveria uma frase que não faz sentido nenhum na tela de
+        // quem está compartilhando naquele instante.
+        let mut telas = Telas::default();
+        telas
+            .comecar(CageId(1), PilotId(10), ScreenId(1))
+            .expect("primeira");
+        assert_eq!(telas.comecar(CageId(1), PilotId(10), ScreenId(2)), Ok(()));
+        assert_eq!(telas.em(CageId(1)), Some((PilotId(10), ScreenId(2))));
+    }
+
+    #[test]
+    fn parar_a_tela_de_outra_pessoa_nao_para_nada() {
+        // Sem esta conferência, um `StopScreenShare` de qualquer pessoa da sala
+        // derruba a tela de quem está compartilhando — e o verbo não carrega
+        // Cage nem `ScreenId` de propósito, então não há nada além do registro
+        // para separar as duas.
+        let mut telas = Telas::default();
+        telas
+            .comecar(CageId(1), PilotId(10), ScreenId(1))
+            .expect("começa");
+
+        assert_eq!(telas.parar(CageId(1), PilotId(20)), None);
+        assert_eq!(telas.em(CageId(1)), Some((PilotId(10), ScreenId(1))));
+
+        assert_eq!(telas.parar(CageId(1), PilotId(10)), Some(ScreenId(1)));
+        assert_eq!(telas.em(CageId(1)), None);
+    }
+
+    #[test]
+    fn a_tela_de_quem_sai_para_junto_com_ele() {
+        // O mesmo defeito que `Occupancy::vacate_everywhere` conserta para o
+        // piloto fantasma, com a diferença de que aqui a sala fica prometendo
+        // imagem em movimento que não tem mais de onde vir: o fluxo morreu com
+        // a conexão.
+        let mut telas = Telas::default();
+        telas
+            .comecar(CageId(1), PilotId(10), ScreenId(1))
+            .expect("começa");
+        telas
+            .comecar(CageId(2), PilotId(20), ScreenId(2))
+            .expect("começa");
+
+        assert_eq!(
+            telas.encerrar_de(PilotId(10)),
+            vec![(CageId(1), ScreenId(1))]
+        );
+        assert_eq!(telas.em(CageId(1)), None);
+        // E não encosta na de mais ninguém.
+        assert_eq!(telas.em(CageId(2)), Some((PilotId(20), ScreenId(2))));
+        assert!(telas.encerrar_de(PilotId(10)).is_empty());
+    }
+
+    #[test]
+    fn uma_sala_destruida_leva_a_transmissao_dela() {
+        let mut telas = Telas::default();
+        telas
+            .comecar(CageId(1), PilotId(10), ScreenId(1))
+            .expect("começa");
+        assert_eq!(telas.encerrar_cage(CageId(1)), Some(ScreenId(1)));
+        assert_eq!(telas.encerrar_cage(CageId(1)), None);
+        assert!(telas.todas().is_empty());
     }
 }

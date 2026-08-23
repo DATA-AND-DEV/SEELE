@@ -28,7 +28,7 @@
 use std::collections::HashMap;
 
 use seele_proto::control::{CageInfo, LineInfo, Permission, PilotState};
-use seele_proto::ids::{CageId, LineId, MessageId, PilotId, Ssrc};
+use seele_proto::ids::{CageId, LineId, MessageId, PilotId, ScreenId, Ssrc};
 use seele_proto::sync_ratio::SyncBand;
 use seele_proto::ServerMessage;
 
@@ -226,8 +226,48 @@ pub struct Room {
     /// be in the air at once, and the second one failing must not erase the
     /// reason the first one did. A shell drains it.
     pub transfers: Vec<TransferNotice>,
+    /// Quem está compartilhando tela em cada Cage.
+    ///
+    /// Uma transmissão por Cage, que é o §6 item 3 da spec de compartilhamento
+    /// de tela: *«duas dobram a subida de quem recebe e triplicam a
+    /// interface»*. Um mapa e não um campo em [`CageInfo`] porque o Dogma
+    /// **não** pôs a transmissão lá — ele reenvia `ScreenShareStarted` a quem
+    /// entra numa sala que já tem uma —, e um campo que só o reenvio preenche
+    /// seria um campo mentindo no aperto de mão.
+    pub telas: HashMap<CageId, Tela>,
+    /// O último pedido de quadro-chave recebido, para quem está compartilhando.
+    ///
+    /// Uma vaga só, e não uma fila: §3.3 conta o que um quadro-chave custa —
+    /// 65 KiB em 1080p, 446 ms do orçamento inteiro —, e três pessoas pedindo
+    /// no mesmo segundo querem **um** quadro-chave, não três. Quem lê, limpa.
+    pub chave_pedida: Option<ChavePedida>,
     /// Set once the session is over.
     pub ended: Option<Ended>,
+}
+
+/// Uma transmissão de tela acontecendo num Cage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Tela {
+    /// Quem está compartilhando.
+    pub pilot: PilotId,
+    /// Como a transmissão se chama.
+    ///
+    /// Atribuído pelo Dogma, como o `ssrc`, e **diferente** dele: a tabela de
+    /// `ssrc` → pessoa é sobre quem fala, e uma tela não é um falante.
+    pub screen: ScreenId,
+}
+
+/// Alguém que está assistindo não tem de que predizer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChavePedida {
+    /// Qual transmissão.
+    pub screen: ScreenId,
+    /// Quem pediu.
+    ///
+    /// Carregado porque quem compartilha pode segurar um fluxo por espectador,
+    /// e porque é a única maneira de distinguir uma pessoa pedindo duas vezes
+    /// por segundo de a sala inteira perdendo quadros.
+    pub pilot: PilotId,
 }
 
 /// What changed, so a shell can redraw only what it must.
@@ -255,6 +295,13 @@ pub struct Changed {
     pub notice: bool,
     /// A transfer was refused, or a file asked for is not coming.
     pub transfers: bool,
+    /// Uma transmissão de tela começou, acabou, ou pediram quadro-chave.
+    ///
+    /// Bandeira própria e não dobrada em [`Self::roster`]: o que se mexe é o
+    /// painel da tela, e uma casca que redesenhasse a lista de pilotos inteira
+    /// a cada pedido de quadro-chave estaria redesenhando justamente a parte
+    /// que não mudou.
+    pub telas: bool,
     /// The session ended.
     pub ended: bool,
 }
@@ -270,6 +317,7 @@ impl Changed {
             || self.telemetry
             || self.notice
             || self.transfers
+            || self.telas
             || self.ended
     }
 }
@@ -304,6 +352,14 @@ impl Room {
         self.cages = info.cages.clone();
         self.lines = info.lines.clone();
         self.permissions = info.permissions.clone();
+        // Limpas pelo mesmo motivo do ícone, e o estrago aqui é maior: uma
+        // conexão nova não tem fluxo de tela nenhum — o `Client` que os
+        // carregava morreu com ela —, então uma transmissão herdada seria a
+        // interface prometendo uma tela que não tem por onde chegar. O Dogma
+        // reenvia `ScreenShareStarted` a quem entra num Cage que está
+        // transmitindo, então o que é verdade volta sozinho.
+        self.telas.clear();
+        self.chave_pedida = None;
         self.pilots.insert(
             info.pilot,
             Pilot::new(info.pilot, nickname.to_owned(), Some(info.ssrc)),
@@ -792,6 +848,60 @@ impl Room {
             // storing a number whose whole value is being fresh.
             ServerMessage::LineWeighed { .. } => {}
 
+            // ---- compartilhamento de tela ----
+            //
+            // O Dogma manda `ScreenShareStarted` a **todo** mundo do Cage, quem
+            // compartilha incluído: quem compartilha precisa do `ScreenId` para
+            // poder abrir o fluxo, e todo o resto precisa saber que um fluxo
+            // vem aí em vez de descobrir sendo entregue um.
+            //
+            // E manda de novo a quem **entra** num Cage que já tem transmissão.
+            // É por isso que aqui não há caso especial nenhum: chegar depois e
+            // estar lá desde o começo são a mesma mensagem, e um cliente que
+            // tratasse os dois de maneiras diferentes teria duas maneiras de
+            // errar.
+            ServerMessage::ScreenShareStarted {
+                cage,
+                pilot,
+                screen,
+            } => {
+                self.telas.insert(
+                    *cage,
+                    Tela {
+                        pilot: *pilot,
+                        screen: *screen,
+                    },
+                );
+                changed.telas = true;
+            }
+            // Sem motivo, e o §3.6 explica por quê: as duas maneiras de acabar
+            // — alguém apertou parar, ou quem mandava sumiu — já se distinguem
+            // por tudo o mais que acontece. Quem foi embora produz um
+            // `PilotLeft`; quem continua na sala parou de propósito.
+            ServerMessage::ScreenShareStopped { cage, screen } => {
+                // Conferido antes de tirar: um `ScreenShareStopped` atrasado de
+                // uma transmissão anterior não pode apagar a que começou
+                // depois. As mensagens chegam em ordem no fluxo de controle,
+                // mas o `ScreenId` é o que torna essa garantia verificável em
+                // vez de assumida.
+                if self
+                    .telas
+                    .get(cage)
+                    .is_some_and(|tela| tela.screen == *screen)
+                {
+                    self.telas.remove(cage);
+                    changed.telas = true;
+                }
+            }
+            // Só chega a quem está compartilhando.
+            ServerMessage::KeyFrameRequested { screen, pilot } => {
+                self.chave_pedida = Some(ChavePedida {
+                    screen: *screen,
+                    pilot: *pilot,
+                });
+                changed.telas = true;
+            }
+
             // Consumed by the handshake and by the round-trip measurement, both
             // of which are over before any shell is watching.
             ServerMessage::Challenge { .. } | ServerMessage::Pong { .. } => {}
@@ -818,7 +928,7 @@ mod tests {
     use seele_proto::control::{
         AlertReason, AlertSeverity, DisconnectReason, PilotProfile, Presence, Telemetry,
     };
-    use seele_proto::ids::SessionId;
+    use seele_proto::ids::{ScreenId, SessionId};
 
     const CAGE: CageId = CageId(1);
     const LINE: LineId = LineId(1);
@@ -1627,5 +1737,115 @@ mod tests {
 
         assert!(room.permissions.contains(&Permission::ManageCages));
         assert!(!room.permissions.contains(&Permission::Ban));
+    }
+    // ---- compartilhamento de tela ----
+
+    #[test]
+    fn uma_transmissao_anunciada_fica_no_cage_e_some_quando_para() {
+        let mut room = room();
+
+        let changed = room.apply(&ServerMessage::ScreenShareStarted {
+            cage: CAGE,
+            pilot: PilotId(9),
+            screen: ScreenId(1),
+        });
+        assert!(changed.telas, "a bandeira da tela não subiu");
+        // E só ela: uma casca que redesenhasse o roster inteiro por causa de
+        // uma tela estaria redesenhando justamente o que não mudou.
+        assert!(!changed.roster);
+        assert_eq!(
+            room.telas.get(&CAGE),
+            Some(&Tela {
+                pilot: PilotId(9),
+                screen: ScreenId(1)
+            })
+        );
+
+        let changed = room.apply(&ServerMessage::ScreenShareStopped {
+            cage: CAGE,
+            screen: ScreenId(1),
+        });
+        assert!(changed.telas);
+        assert!(room.telas.is_empty());
+    }
+
+    #[test]
+    fn um_fim_atrasado_nao_apaga_a_transmissao_que_comecou_depois() {
+        // O `ScreenId` existe para isto. Sem a conferência, alguém que parou e
+        // recomeçou depressa perderia a segunda transmissão para o aviso de fim
+        // da primeira — e o sintoma seria uma tela que some sozinha logo depois
+        // de aparecer, que é o defeito mais difícil de acreditar que existe.
+        let mut room = room();
+        room.apply(&ServerMessage::ScreenShareStarted {
+            cage: CAGE,
+            pilot: PilotId(9),
+            screen: ScreenId(2),
+        });
+
+        let changed = room.apply(&ServerMessage::ScreenShareStopped {
+            cage: CAGE,
+            screen: ScreenId(1),
+        });
+        assert!(!changed.telas, "um fim de outra transmissão mexeu na sala");
+        assert_eq!(
+            room.telas.get(&CAGE).map(|tela| tela.screen),
+            Some(ScreenId(2))
+        );
+    }
+
+    #[test]
+    fn um_pedido_de_quadro_chave_fica_numa_vaga_so() {
+        // Uma vaga e não uma fila: §3.3 conta que um quadro-chave de 1080p custa
+        // 65 KiB, 446 ms do orçamento inteiro. Três pessoas pedindo no mesmo
+        // segundo querem **um** quadro-chave, não três.
+        let mut room = room();
+        room.apply(&ServerMessage::KeyFrameRequested {
+            screen: ScreenId(1),
+            pilot: PilotId(9),
+        });
+        let changed = room.apply(&ServerMessage::KeyFrameRequested {
+            screen: ScreenId(1),
+            pilot: PilotId(11),
+        });
+        assert!(changed.telas);
+        assert_eq!(
+            room.chave_pedida,
+            Some(ChavePedida {
+                screen: ScreenId(1),
+                pilot: PilotId(11)
+            })
+        );
+    }
+
+    #[test]
+    fn reconectar_nao_herda_transmissao_nenhuma() {
+        // A conexão é nova e os fluxos morreram com a antiga, então uma
+        // transmissão herdada seria a interface prometendo uma tela que não tem
+        // por onde chegar. O Dogma reenvia o que é verdade logo em seguida.
+        let mut room = room();
+        room.apply(&ServerMessage::ScreenShareStarted {
+            cage: CAGE,
+            pilot: PilotId(9),
+            screen: ScreenId(1),
+        });
+        room.apply(&ServerMessage::KeyFrameRequested {
+            screen: ScreenId(1),
+            pilot: PilotId(11),
+        });
+
+        room.adopt(
+            &SessionInfo {
+                id: SessionId(2),
+                pilot: PilotId(7),
+                ssrc: Ssrc(700),
+                dogma: "Terceira Tóquio".into(),
+                cages: Vec::new(),
+                lines: Vec::new(),
+                permissions: Vec::new(),
+            },
+            "ayanami",
+        );
+        assert!(room.telas.is_empty());
+        assert_eq!(room.chave_pedida, None);
     }
 }

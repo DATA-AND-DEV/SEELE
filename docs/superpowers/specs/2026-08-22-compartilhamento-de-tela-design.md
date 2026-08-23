@@ -123,6 +123,34 @@ anterior, o novo substitui — não entra numa fila. Um quadro velho entregue ta
 depressa. É a mesma decisão que `specs/03-audio.md` já tomou para o áudio, pelo
 mesmo motivo.
 
+### Adendo — o Swift que o `screencapturekit` arrasta (22/08/2026)
+
+Escrito ao construir, e não ao pesquisar. **A tabela acima contou dez crates e
+não contou uma toolchain.**
+
+O `build.rs` do `screencapturekit` roda **`swift build`**. Quem compila este
+projeto no macOS passa a precisar de Swift na máquina, e não só de `cargo`. É o
+mesmo formato de custo que o §2 recusou no nasm — com uma diferença que o salva:
+na Apple o Swift vem com as ferramentas de linha de comando, que quem compila
+aqui já tem instaladas. Não é uma ferramenta nova a instalar; é uma dependência
+a mais para declarar.
+
+E há um segundo custo, que quase passou por ser silencioso do jeito errado: o
+crate publica o caminho do runtime por `cargo:rustc-link-arg`, e **o Cargo
+ignora essa diretiva quando ela vem de uma dependência**. O sintoma é um
+`cargo build` que **passa** e um binário de teste que não liga, reclamando de
+`__swift_FORCE_LOAD_$_swiftCompatibility56`. Um `build` verde e um `test` que
+nem chega a rodar é o formato de falha mais caro que existe, porque parece
+sucesso.
+
+A correção mora em `.cargo/config.toml`, que é o único lugar que o Cargo lê
+para o pacote de cima, e está comentada lá. Ela precisa acompanhar o
+empacotamento do `.app`.
+
+**O que isto não muda:** a escolha do §1 continua de pé. `screencapturekit` é a
+única porta desde que o `CGDisplayStream` foi depreciado, e a alternativa era
+`unsafe`. O que muda é a conta — e a conta agora está escrita.
+
 ## 2 · Codec
 
 ### A conta que decide, e não é a que se espera
@@ -574,6 +602,66 @@ medido continua por baixo dela.
 Ele mediu com um único teto, o de 1200 kbps que o `tela-no-transporte`
 sustenta; fixar uma lista de bandas exige medir quanto o caminho aguenta, que é
 a pergunta 2 do §8.
+
+## 5.1 · Quem carrega os bytes até quem assiste — **em aberto**
+
+Levantada ao construir o §3: o plano de controle ficou inteiro e **nada bombeia
+o fluxo de quem compartilha para quem assiste**. A pergunta não é de
+implementação, é de desenho, e por isso está aqui em vez de ter sido decidida
+por quem escrevia o transporte.
+
+### O fato que enquadra as três opções
+
+**Alguém sobe N cópias.** Não há como fugir disso: multicast não existe na
+internet aberta, e um quadro que quatro pessoas assistem sai quatro vezes de
+alguma máquina. A pergunta inteira é **de quem é essa máquina**, e se o teto do
+§3.2 está sendo calculado do caminho dela.
+
+Hoje o teto sai do caminho de **quem compartilha**. Em duas das três opções
+abaixo isso está errado, e é o defeito mais caro desta seção.
+
+### A · O servidor encaminha, como ele já faz com a voz
+
+O `Cage` já reencaminha datagramas de áudio para cada membro
+(`cage::Cage::forward`). O fluxo de vídeo entraria pelo mesmo caminho.
+
+- **Custa:** a máquina que hospeda sobe `N × teto`. Com quatro espectadores a
+  1,2 Mbps são 4,8 Mbps só de tela, mais a voz de todo mundo. Numa conexão
+  doméstica brasileira típica isso é mais do que existe de subida.
+- **Obriga uma correção no §3.2:** o teto passa a sair do caminho de **quem
+  hospeda, dividido pelo número de espectadores** — não do caminho de quem
+  compartilha. Sem essa mudança o produto mede a perna errada e estoura a que
+  não mediu.
+- **Ganha:** zero arquitetura nova. Funciona com o que existe, inclusive para
+  quem está atrás de NAT sem furo — que é justamente quem o degrau 4 serve.
+
+### B · Ponto a ponto, de quem compartilha para cada espectador
+
+- **Custa um caminho que não existe.** Este produto conecta cliente↔servidor e
+  **nunca** cliente↔cliente. Seria o degrau 4 do ADR 0022 aplicado entre pares,
+  com um ponto de encontro por par e um furo por espectador — e o §6.5 já tirou
+  o degrau 5 de escopo por decisão.
+- **Não resolve o problema, troca quem paga.** Quem compartilha passa a subir as
+  N cópias em vez do anfitrião.
+- **Ganha uma coisa real:** quando quem compartilha **não** é quem hospeda, tira
+  a carga de cima do anfitrião — que é a pessoa que não pediu para participar
+  daquilo.
+
+### C · Só quem hospeda compartilha
+
+- **Custa** o recurso pela metade: numa conversa entre amigos quem mostra a tela
+  costuma ser quem está explicando, não quem tem o servidor.
+- **Ganha** previsibilidade: a subida que sofre é a de quem escolheu hospedar, e
+  o teto sai de um caminho que essa máquina já mede.
+- É a opção que **não precisa** da correção do teto, porque as duas pernas são a
+  mesma máquina.
+
+### O que fica escrito de qualquer jeito
+
+Seja qual for a escolha: **o número de espectadores entra na conta do teto**, e
+a tela diz quando ele aperta. Um compartilhamento que degrada porque entrou a
+quinta pessoa e não explica por quê é o mesmo defeito de sempre — o produto
+sabendo algo que a pessoa na frente dele não sabe.
 
 ## 6 · O que não entra na primeira versão
 

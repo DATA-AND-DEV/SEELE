@@ -36,6 +36,7 @@ pub mod preferences;
 pub mod preview;
 pub mod search;
 pub mod state;
+pub mod tela;
 pub mod tofu;
 pub mod voice;
 
@@ -49,7 +50,13 @@ pub use identity::FilePinStore;
 pub use preview::{
     check_dogma_icon, IconRefusal, ImageFormat, Verdict as PreviewVerdict, PREVIEW_LIMIT,
 };
-pub use state::{CageSync, Changed, Ended, Message, Notice, Pilot, Room, TransferNotice};
+pub use state::{
+    CageSync, Changed, ChavePedida, Ended, Message, Notice, Pilot, Room, Tela, TransferNotice,
+};
+pub use tela::{
+    Envio, ErroDeTela, MotivoDeDescarte, MotivoDeParada, QuadroRecebido, Recepcao, Teto,
+    TetoDeVideo, Transmissao,
+};
 pub use tofu::{MemoryPinStore, PinDecision, PinStore, Verdict};
 pub use voice::{
     capture_devices, playback_devices, CaptureDevice, DeviceChoice, DeviceRates, PlaybackDevice,
@@ -81,8 +88,18 @@ pub use seele_proto::control::{
 pub use seele_proto::transport::key_fingerprint;
 
 pub use seele_proto::ids::{
-    AttachmentId, CageId, ClientMessageId, LineId, MessageId, PilotId, RoleId, SessionId, Ssrc,
+    AttachmentId, CageId, ClientMessageId, LineId, MessageId, PilotId, RoleId, ScreenId, SessionId,
+    Ssrc,
 };
+/// O cabeçalho de abertura de uma transmissão de tela, e o que ele carrega.
+///
+/// Reexportado porque a casca é quem sabe **o que** a pessoa escolheu
+/// compartilhar — um monitor ou uma janela — e em que resolução, e a regra de
+/// dependência do ADR 0002 não deixa a casca ver `seele-proto`. Note o que
+/// **não** está aqui: quadros por segundo. §5, e é decisão e não esquecimento —
+/// a tela não promete a escolha, e um número que a casca pudesse escrever no
+/// cabeçalho seria a casca prometendo.
+pub use seele_proto::screen::{ScreenCodec, ScreenHeader, ScreenSource};
 pub use seele_proto::sync_ratio::{SyncBand, SyncInputs, SyncRatio};
 pub use seele_proto::transport::DEFAULT_PORT;
 pub use seele_proto::uri;

@@ -79,6 +79,24 @@ id_type!(
 );
 
 id_type!(
+    /// One screen transmission inside a Cage.
+    ///
+    /// **Not an [`Ssrc`], and that is the whole reason it exists.** §3.6 of
+    /// `docs/superpowers/specs/2026-08-22-compartilhamento-de-tela-design.md`:
+    /// the `ssrc` is the audio source assigned on Cage entry, and every client
+    /// builds a table of `ssrc` → person out of it. Sharing a screen is not
+    /// becoming a second talker, so it gets an identifier of its own and nobody
+    /// has to rewrite that table to make room for something that never speaks.
+    ///
+    /// Assigned by the Dogma when the transmission is announced, never taken
+    /// from the sender — the rule `specs/08-seguranca.md` already applies to
+    /// [`Ssrc`], for the same reason: an identifier a client chooses is an
+    /// identifier a client can choose somebody else's.
+    ScreenId,
+    u32
+);
+
+id_type!(
     /// A text message.
     MessageId,
     u64

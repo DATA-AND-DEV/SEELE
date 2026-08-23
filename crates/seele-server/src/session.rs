@@ -38,7 +38,7 @@ use seele_proto::control::{
     LineInfo, Permission, PilotProfile, PilotState, Presence, Role, ServerMessage, Subsystem,
     SubsystemHealth, Telemetry, Validate,
 };
-use seele_proto::ids::{CageId, LineId, PilotId, RoleId, SessionId, Ssrc};
+use seele_proto::ids::{CageId, LineId, PilotId, RoleId, ScreenId, SessionId, Ssrc};
 use seele_proto::sync_ratio::{SyncInputs, SyncRatio};
 use seele_proto::transport::HANDSHAKE_TIMEOUT;
 use tokio::sync::mpsc;
@@ -98,6 +98,15 @@ const TELEMETRY_INTERVAL: Duration = Duration::from_secs(1);
 pub struct Registry {
     next_ssrc: AtomicU32,
     next_session: AtomicU64,
+    /// O contador das transmissões de tela.
+    ///
+    /// **Separado do `ssrc` de propósito**, e o §3.6 da spec de
+    /// compartilhamento de tela põe isso em negrito: o `ssrc` é o identificador
+    /// de fonte de **áudio**, atribuído na entrada do Cage, e todo cliente
+    /// mantém uma tabela de `ssrc` → pessoa construída a partir dele. Uma tela
+    /// não é um falante; dar-lhe um `ssrc` obrigaria essa tabela a ganhar uma
+    /// segunda espécie de linha.
+    next_screen: AtomicU32,
 }
 
 impl Default for Registry {
@@ -113,7 +122,18 @@ impl Registry {
         Self {
             next_ssrc: AtomicU32::new(1),
             next_session: AtomicU64::new(1),
+            next_screen: AtomicU32::new(1),
         }
+    }
+
+    /// Batiza a próxima transmissão de tela.
+    ///
+    /// Atribuído aqui e **nunca tomado de quem manda**, que é a regra que
+    /// `specs/08-seguranca.md` já aplica ao `ssrc`: um identificador que o
+    /// cliente escolhe é um identificador com que o cliente escolhe o de outra
+    /// pessoa.
+    fn issue_screen(&self) -> ScreenId {
+        ScreenId(self.next_screen.fetch_add(1, Ordering::Relaxed))
     }
 
     fn issue(&self) -> (Ssrc, SessionId) {
@@ -235,12 +255,13 @@ pub async fn serve(
         "pattern blue"
     );
 
-    let result = run_session(connection, send, recv, &session, &dogma, &cages).await;
+    let result = run_session(connection, send, recv, &session, &dogma, &cages, &registry).await;
 
     // Out of every room, not out of the one this connection remembers. The loop
     // above can end at any `?`, and a path that returns early does not know
     // where the pilot was sitting.
     cages.leave_everywhere(session.pilot).await;
+    encerrar_telas_de(&dogma, session.pilot).await;
 
     // And **announced**, which it was not. `Event::PilotLeft` was sent only
     // from the `EjectPlug` branch, so a pilot who closed their client, lost
@@ -728,6 +749,7 @@ async fn run_session(
     session: &Session,
     dogma: &Arc<Dogma>,
     cages: &crate::cage::Cages,
+    registry: &Registry,
 ) -> Result<()> {
     // Uma tarefa é dona do fluxo de leitura e entrega quadros inteiros por um
     // canal.
@@ -957,6 +979,32 @@ async fn run_session(
         .await?;
     }
 
+    // E quais Cages já estão transmitindo tela, pelo mesmo motivo e no mesmo
+    // lugar.
+    //
+    // §3.6 escreve esta regra como «reenviado a quem entra num Cage que já
+    // está transmitindo», e ela é atendida aqui em vez de na entrada do Cage
+    // porque `ScreenShareStarted` sai do barramento **sem filtro de sala** —
+    // do jeito que `PilotJoined` passou a sair quando o cliente começou a
+    // desenhar todos os Cages. Com a difusão cobrindo tudo o que acontece a
+    // partir de agora, o que falta é exatamente o que já estava acontecendo
+    // antes de esta conexão existir, e isso é uma varredura, uma vez.
+    //
+    // Depois do `subscribe()` acima pelo mesmo motivo que a ocupação: a ordem
+    // inversa pode perder uma transmissão que começou entre as duas linhas, e
+    // uma transmissão perdida é uma tela que ninguém sabe que existe.
+    for (cage, pilot, screen) in dogma.telas.lock().await.todas() {
+        frame::write(
+            &mut send,
+            &ServerMessage::ScreenShareStarted {
+                cage,
+                pilot,
+                screen,
+            },
+        )
+        .await?;
+    }
+
     loop {
         tokio::select! {
             // `recv` num canal é cancel-safe: nada é consumido pelo ramo que
@@ -1021,6 +1069,7 @@ async fn run_session(
                     }
                     ClientMessage::EjectPlug => {
                         cages.leave_everywhere(session.pilot).await;
+                        encerrar_telas_de(dogma, session.pilot).await;
                         if let Some(id) = current_cage.take() {
                             dogma.occupancy.lock().await.vacate(id, session.pilot);
                             let _ = dogma.events.send(Event::PilotLeft {
@@ -1419,6 +1468,17 @@ async fn run_session(
                         match feito {
                             Ok(()) => {
                                 tracing::info!(by = %session.pilot, cage = %id, "cage destroyed");
+                                // A transmissão morre com a sala, e antes do
+                                // aviso de que a sala morreu: quem está
+                                // desenhando a tela para de desenhá-la porque
+                                // ela acabou, e não porque o cômodo sumiu de
+                                // baixo dela.
+                                if let Some(screen) = dogma.telas.lock().await.encerrar_cage(id) {
+                                    let _ = dogma.events.send(Event::ScreenShareStopped {
+                                        cage: id,
+                                        screen,
+                                    });
+                                }
                                 let _ = dogma.events.send(Event::CageDeleted { cage: id });
                             }
                             // The only refusal here with a sentence of its own.
@@ -1532,6 +1592,94 @@ async fn run_session(
                                 }
                             }
                         });
+                    }
+
+                    // ---- compartilhamento de tela ----
+                    //
+                    // Só o controle passa aqui. Os quadros vão num fluxo
+                    // unidirecional QUIC aberto por quem compartilha, e o §3.1
+                    // da spec do recurso é a razão medida: `send_datagram` põe
+                    // voz e vídeo na mesma fila FIFO, e
+                    // `spikes/tela-no-transporte` viu 16,1% da voz perdida com
+                    // o buffer padrão e 98,1% com o buffer pequeno.
+                    ClientMessage::StartScreenShare => {
+                        // Sentado antes de transmitir. Um Cage vindo de quem
+                        // pergunta é um Cage que quem pergunta aponta para
+                        // outro lugar, então a mensagem não o carrega e a
+                        // resposta é a sala onde o plug está.
+                        //
+                        // `PermissionDenied` é a recusa mais próxima que existe
+                        // enumerada, e ela não diz a verdade inteira: a pessoa
+                        // **pode**, só não está em sala nenhuma. Um
+                        // `NotInCage` falta em `AlertReason`, e não foi
+                        // acrescentado aqui porque `seele-proto` é de outro
+                        // dono nesta rodada — está no relatório. Enquanto isso,
+                        // recusar com a frase errada continua sendo melhor que
+                        // recusar em silêncio, que é indistinguível de um Dogma
+                        // quebrado.
+                        let Some(cage) = current_cage else {
+                            recusar(&mut send, session.pilot, "StartScreenShare fora de Cage")
+                                .await?;
+                            continue;
+                        };
+                        // A mesma permissão da voz, e nenhuma nova: quem não
+                        // pode transmitir mídia nesta sala não passa a poder
+                        // transmitindo-a como imagem. `specs/08-seguranca.md`:
+                        // verificado no servidor, sempre.
+                        if !session.may_speak {
+                            recusar(&mut send, session.pilot, "StartScreenShare").await?;
+                            continue;
+                        }
+                        let screen = registry.issue_screen();
+                        match dogma.telas.lock().await.comecar(cage, session.pilot, screen) {
+                            Ok(()) => {
+                                let _ = dogma.events.send(Event::ScreenShareStarted {
+                                    cage,
+                                    pilot: session.pilot,
+                                    screen,
+                                });
+                            }
+                            // Uma transmissão por sala (§6 item 3). Quem perdeu
+                            // a corrida ouve uma frase verdadeira: a vaga está
+                            // tomada, e não «você não pode».
+                            Err(_dono) => {
+                                frame::write(&mut send, &ServerMessage::Alert {
+                                    severity: AlertSeverity::Info,
+                                    reason: AlertReason::ScreenShareTaken,
+                                    operator_text: None,
+                                }).await?;
+                            }
+                        }
+                    }
+                    ClientMessage::StopScreenShare => {
+                        let parada = match current_cage {
+                            Some(cage) => dogma.telas.lock().await.parar(cage, session.pilot),
+                            None => None,
+                        };
+                        if let (Some(cage), Some(screen)) = (current_cage, parada) {
+                            let _ = dogma.events.send(Event::ScreenShareStopped { cage, screen });
+                        }
+                    }
+                    ClientMessage::RequestKeyFrame { screen } => {
+                        // Conferido contra o registro, e não repassado ao
+                        // acaso: um `ScreenId` inventado seria uma maneira de
+                        // pedir quadro-chave a quem transmite em outra sala, e
+                        // §3.3 conta o que um quadro-chave custa — 65 KiB em
+                        // 1080p, 446 ms do orçamento inteiro. Um pedido que
+                        // atravessasse salas seria amplificação de graça.
+                        let dono = match current_cage {
+                            Some(cage) => dogma.telas.lock().await.em(cage),
+                            None => None,
+                        };
+                        if let Some((sharer, corrente)) = dono {
+                            if corrente == screen {
+                                let _ = dogma.events.send(Event::KeyFrameRequested {
+                                    screen,
+                                    pilot: session.pilot,
+                                    sharer,
+                                });
+                            }
+                        }
                     }
 
                     // The handshake is over. Repeating it is a protocol
@@ -1690,6 +1838,7 @@ async fn run_session(
                     // been told to forget.
                     Event::CageDeleted { cage: id } if current_cage == Some(*id) => {
                         cages.leave_everywhere(session.pilot).await;
+                        encerrar_telas_de(dogma, session.pilot).await;
                         current_cage = None;
                         dogma.occupancy.lock().await.vacate(*id, session.pilot);
                         let _ = dogma.events.send(Event::PilotLeft {
@@ -1845,6 +1994,12 @@ async fn assentar(
     // walks from one Cage to another is still a member of the first, and goes
     // on hearing it.
     cages.leave_everywhere(session.pilot).await;
+    // E a tela vai junto. Uma transmissão não anda de sala com quem a manda:
+    // quem ficou na sala anterior continuaria vendo o cabeçalho de um fluxo que
+    // agora aponta para outro lugar, e o §6 item 3 só permite uma por sala —
+    // levar a transmissão pela mão faria a pessoa tomar a vaga da sala nova sem
+    // ter pedido.
+    encerrar_telas_de(dogma, session.pilot).await;
     cages
         .of(destino)
         .await
@@ -1894,6 +2049,15 @@ async fn assentar(
         },
         ssrc: session.ssrc,
     });
+
+    // **Nada de tela é reenviado aqui**, e o §3.6 pede que seja — «também
+    // enviado a um piloto que entra num Cage onde já há transmissão». Ele é
+    // atendido em outro lugar e melhor: `ScreenShareStarted` sai pelo
+    // barramento **sem filtro**, como `PilotJoined` já sai desde que o cliente
+    // passou a desenhar todos os Cages, e o que faltava — o que já estava
+    // acontecendo antes de esta conexão existir — é mandado uma vez, no começo
+    // da sessão, ao lado do retrato da ocupação. Reenviar aqui seria o mesmo
+    // quadro duas vezes para quem já o tinha.
     Ok(())
 }
 
@@ -1955,6 +2119,22 @@ async fn moderavel(dogma: &Dogma, quem: PilotId, alvo: PilotId, permission: Perm
         .may(quem, Permission::AdministerDogma)
         .unwrap_or(false);
     !alvo_administra || quem_administra
+}
+
+/// Encerra e anuncia o que este piloto estivesse transmitindo, onde estivesse.
+///
+/// Chamado em todo lugar onde o plug sai de um Cage — sair, ser movido, ser
+/// expulso, ou a conexão acabar em qualquer `?` do meio do laço. Uma
+/// transmissão que sobrevivesse à saída de quem a manda ficaria desenhada para
+/// sempre na sala, prometendo um fluxo que não tem mais de onde vir: é o mesmo
+/// defeito do piloto fantasma que `serve` conserta logo acima, com a diferença
+/// de que aqui a promessa é de imagem em movimento.
+async fn encerrar_telas_de(dogma: &Dogma, pilot: PilotId) {
+    for (cage, screen) in dogma.telas.lock().await.encerrar_de(pilot) {
+        let _ = dogma
+            .events
+            .send(Event::ScreenShareStopped { cage, screen });
+    }
 }
 
 /// Tells a client the server said no, and why.
@@ -2167,5 +2347,45 @@ fn translate(event: &Event, lines: &[LineId], self_pilot: PilotId) -> Option<Ser
         // knows about neither.
         Event::CageDeleted { cage } => Some(ServerMessage::CageDeleted { cage: *cage }),
         Event::LineDeleted { line } => Some(ServerMessage::LineDeleted { line: *line }),
+
+        // ---- compartilhamento de tela ----
+        //
+        // Sem filtro, e a quem compartilha também. É o mesmo caso de
+        // `CageCreated` e por uma razão mais forte: o `ScreenId` é do servidor
+        // para atribuir, e **quem compartilha precisa dele** antes de conseguir
+        // abrir um fluxo. Filtrar a si mesmo aqui deixaria quem apertou o botão
+        // como a única pessoa incapaz de transmitir.
+        //
+        // A todo mundo e não só ao Cage: é a mesma escolha que `PilotJoined`
+        // fez ao deixar de filtrar por sala, e pelo mesmo motivo — a v3 desenha
+        // todos os Cages, e uma sala que não diz que está transmitindo é uma
+        // sala em que ninguém sabe que há o que assistir. Não revela nada que
+        // entrar na sala já não revelasse.
+        Event::ScreenShareStarted {
+            cage,
+            pilot,
+            screen,
+        } => Some(ServerMessage::ScreenShareStarted {
+            cage: *cage,
+            pilot: *pilot,
+            screen: *screen,
+        }),
+        Event::ScreenShareStopped { cage, screen } => Some(ServerMessage::ScreenShareStopped {
+            cage: *cage,
+            screen: *screen,
+        }),
+
+        // A exceção: este só vai para quem está compartilhando. Um quadro-chave
+        // custa 65 KiB em 1080p — 446 ms do orçamento inteiro (§3.3) —, e
+        // mandar o pedido para a sala inteira faria toda máquina que assiste
+        // acordar para um pedido que não é dela.
+        Event::KeyFrameRequested {
+            screen,
+            pilot,
+            sharer,
+        } => (*sharer == self_pilot).then_some(ServerMessage::KeyFrameRequested {
+            screen: *screen,
+            pilot: *pilot,
+        }),
     }
 }

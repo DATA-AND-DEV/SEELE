@@ -4,6 +4,7 @@ members = [
     "crates/seele-proto",
     "crates/seele-encontro",
     "crates/seele-audio",
+    "crates/seele-video",
     "crates/seele-core",
     "crates/seele-server",
     "crates/seele-tui",

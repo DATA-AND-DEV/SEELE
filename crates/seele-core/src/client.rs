@@ -20,7 +20,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use ed25519_dalek::{Signer, SigningKey};
 use seele_proto::control::{ClientMessage, ServerMessage};
-use seele_proto::ids::{CageId, ClientMessageId, LineId, MessageId, PilotId, SessionId, Ssrc};
+use seele_proto::ids::{
+    CageId, ClientMessageId, LineId, MessageId, PilotId, ScreenId, SessionId, Ssrc,
+};
 use seele_proto::transport::{HANDSHAKE_TIMEOUT, IDLE_TIMEOUT, KEEPALIVE};
 
 use crate::frame;
@@ -1049,6 +1051,93 @@ impl Client {
     /// Fails if the control stream is closed.
     pub async fn weigh_line(&mut self, line: LineId) -> Result<()> {
         frame::write(&mut self.send, &ClientMessage::WeighLine { line }).await
+    }
+
+    // ---- compartilhamento de tela ----
+    //
+    // Os três verbos de controle, e mais nada: os quadros não passam nem perto
+    // do fluxo de controle. Eles vão num fluxo unidirecional próprio, aberto
+    // por [`Self::abrir_tela`], e o §3.1 explica por que não num datagrama —
+    // `spikes/tela-no-transporte` mediu 16,1% da voz perdida quando os dois
+    // dividem a fila de datagramas do `quinn`.
+
+    /// Pede ao Dogma para começar a compartilhar tela no Cage onde este plug
+    /// está.
+    ///
+    /// Não carrega Cage, resolução nem codec. O Cage é o que o Dogma já sabe —
+    /// um Cage vindo de quem pergunta é um Cage que quem pergunta pode apontar
+    /// para outro lugar —, e os outros dois descrevem o que sai do encoder, que
+    /// não está decidido quando o botão é apertado e **muda depois** (§5: a tela
+    /// não promete a escolha). Eles são declarados onde são verdade: na cabeça
+    /// do fluxo.
+    ///
+    /// A resposta é um `ScreenShareStarted` no fluxo de eventos, e o `ScreenId`
+    /// dele é o que [`Self::abrir_tela`] precisa. Não dá para abrir o fluxo
+    /// antes: até o Dogma responder, a transmissão não tem nome.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn start_screen_share(&mut self) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::StartScreenShare).await
+    }
+
+    /// Diz ao Dogma que esta transmissão acabou.
+    ///
+    /// Fechar o fluxo diz a mesma coisa e é o que acontece quando a máquina
+    /// some. Os dois existem porque a sala precisa distinguir «ela parou de
+    /// compartilhar» de «o enlace dela caiu», e um verbo que só existisse como
+    /// ausência não daria essa distinção a ninguém.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn stop_screen_share(&mut self) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::StopScreenShare).await
+    }
+
+    /// Pede um quadro-chave a quem está compartilhando.
+    ///
+    /// **Sob demanda, nunca periódico** (§3.3), e é medida e não preferência:
+    /// um quadro-chave de 1080p custa 65 KiB, quatro vezes um quadro comum, o
+    /// que são 446 ms do orçamento inteiro. Numa conversa entre pares não há
+    /// quem entre no meio da transmissão, então quem sabe que um quadro-chave é
+    /// preciso é justamente quem está recebendo e não tem de que predizer.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn request_key_frame(&mut self, screen: ScreenId) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::RequestKeyFrame { screen }).await
+    }
+
+    /// Abre o fluxo de vídeo desta transmissão.
+    ///
+    /// Na conexão que já existe, e num fluxo unidirecional — as duas metades do
+    /// §3.1, as duas medidas. `teto_bps` é o que [`crate::tela::TetoDeVideo`]
+    /// devolveu para a faixa em que o sinal da voz está agora.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::tela::ErroDeTela`] se o cabeçalho não passa ou se a conexão não
+    /// abre o fluxo.
+    pub async fn abrir_tela(
+        &self,
+        cabecalho: seele_proto::screen::ScreenHeader,
+        teto_bps: u32,
+        agora: std::time::Instant,
+    ) -> Result<crate::tela::Transmissao, crate::tela::ErroDeTela> {
+        crate::tela::Transmissao::abrir(&self.connection, cabecalho, teto_bps, agora).await
+    }
+
+    /// Aceita o próximo fluxo unidirecional como uma transmissão de tela.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::tela::ErroDeTela`] para um cabeçalho que este build não carrega
+    /// ou para uma conexão que acabou.
+    pub async fn aceitar_tela(&self) -> Result<crate::tela::Recepcao, crate::tela::ErroDeTela> {
+        crate::tela::Recepcao::aceitar(&self.connection).await
     }
 }
 

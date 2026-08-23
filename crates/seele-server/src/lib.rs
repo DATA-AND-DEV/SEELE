@@ -363,6 +363,7 @@ impl Server {
             occupancy: Arc::new(tokio::sync::Mutex::new(dogma::Occupancy::default())),
             portaria: Arc::new(tokio::sync::Mutex::new(taxa::Portaria::nova())),
             atrasos: Arc::new(dogma::Atrasos::default()),
+            telas: Arc::new(tokio::sync::Mutex::new(dogma::Telas::default())),
             anexos,
         });
 

@@ -42,6 +42,11 @@ pub fn alert(reason: AlertReason) -> &'static str {
         AlertReason::LastCage => {
             "ESTA É A ÚNICA SALA DE VOZ DO SERVIDOR. FAÇA OUTRA ANTES DE APAGAR ESTA"
         }
+        // Uma transmissão por sala. Diz **quem** ocupou, e não só que não deu:
+        // sem o nome, quem lê não sabe se espera ou se pede. E não é
+        // `PERMISSÃO NEGADA`, que mandaria a pessoa procurar um papel que ela
+        // já tem — aqui é só a vez de outro.
+        AlertReason::ScreenShareTaken => "ALGUÉM JÁ ESTÁ COMPARTILHANDO A TELA NESTA SALA",
     }
 }
 

@@ -139,6 +139,14 @@ pub enum NoticeReason {
     LineDeleted,
     /// The Cage asked about is the only one the Dogma has, so it stays.
     LastCage,
+    /// Somebody else is already sharing their screen in this room.
+    ///
+    /// One share per voice room (§6.3 da spec do compartilhamento de tela), and
+    /// this is what whoever lost the race is told. Not a permission problem —
+    /// the person may share the moment the other one stops — and that is why it
+    /// is its own reason instead of `PermissionDenied`, which would say the
+    /// wrong thing and send somebody looking for a role they already have.
+    ScreenShareTaken,
 }
 
 impl From<seele_core::AlertReason> for NoticeReason {
@@ -156,6 +164,7 @@ impl From<seele_core::AlertReason> for NoticeReason {
             seele_core::AlertReason::CageDeleted => Self::CageDeleted,
             seele_core::AlertReason::LineDeleted => Self::LineDeleted,
             seele_core::AlertReason::LastCage => Self::LastCage,
+            seele_core::AlertReason::ScreenShareTaken => Self::ScreenShareTaken,
         }
     }
 }

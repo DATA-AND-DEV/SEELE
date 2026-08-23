@@ -37,7 +37,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{
-    AttachmentId, CageId, ClientMessageId, LineId, MessageId, PilotId, RoleId, SessionId, Ssrc,
+    AttachmentId, CageId, ClientMessageId, LineId, MessageId, PilotId, RoleId, ScreenId, SessionId,
+    Ssrc,
 };
 use crate::version::PROTOCOL_VERSION;
 
@@ -627,6 +628,23 @@ pub enum AlertReason {
     /// that survives an older shell, and `specs/08-seguranca.md` puts the rule
     /// on the server for exactly that reason.
     LastCage,
+
+    /// Somebody is already sharing a screen in this Cage.
+    ///
+    /// §6 item 3 of the screen-sharing design puts one transmission per voice
+    /// room in v1 — "two double the download of everybody watching and triple
+    /// the interface" — so two people pressing the button within the same
+    /// second is an ordinary race, not misuse, and the loser has to be told
+    /// something true. The nearest existing reason is [`Self::PermissionDenied`],
+    /// which every shell writes as "you may not do that": a sentence about the
+    /// person, in front of somebody who may do it and simply has to wait.
+    ///
+    /// §2 asks that "o botão de compartilhar não pode falhar. Ou ele não está
+    /// lá, ou ele explica o que falta"; this is the half of that promise the
+    /// server owes, since only the server knows the room is taken.
+    ///
+    /// Appended after `LastCage`, for the reason [`Self::RateLimited`] gives.
+    ScreenShareTaken,
 }
 
 /// Client to server.
@@ -979,6 +997,53 @@ pub enum ClientMessage {
         /// The picture, or `None` to have none.
         icon: Option<Vec<u8>>,
     },
+
+    // ---- screen sharing ----
+    //
+    // Appended last, for the reason [`AlertReason::RateLimited`] gives.
+    //
+    // Three verbs, and §3.6 of
+    // `docs/superpowers/specs/2026-08-22-compartilhamento-de-tela-design.md`
+    // asks for exactly three: the beginning, the end, and the key frame. The
+    // pictures themselves never come near this stream — they go on a
+    // unidirectional stream of their own, opened by whoever is sharing, headed
+    // by a `screen::ScreenHeader`. That split is the same one ADR 0027 made for
+    // attachments, and here it is measured: `spikes/tela-no-transporte` shows
+    // what sharing a queue with the voice costs.
+    /// Starts sharing a screen in the Cage this connection's plug is in.
+    ///
+    /// Carries nothing, like [`Self::EjectPlug`]: the Cage is the one the
+    /// server already has this connection in, and a Cage taken from the asker
+    /// is a Cage the asker can aim somewhere else. What comes back is
+    /// [`ServerMessage::ScreenShareStarted`], and the [`ScreenId`] in it is
+    /// what the sender then writes at the head of the stream it opens — a
+    /// sender cannot open the stream first, because until the Dogma answers
+    /// there is nothing to call the transmission.
+    ///
+    /// It carries no resolution and no codec either. Those describe what is
+    /// coming out of the encoder, which is not decided when the button is
+    /// pressed and moves afterwards (§5: "a tela não promete a escolha"), so
+    /// they are declared where they are true — at the head of the stream.
+    StartScreenShare,
+    /// Stops the transmission this connection is sending.
+    ///
+    /// Also carries nothing, for the same reason. Closing the stream says the
+    /// same thing and is what happens when a machine goes away, but a verb that
+    /// only exists as an absence gives the room no way to tell "she stopped
+    /// sharing" from "her link fell" — and those are different sentences.
+    StopScreenShare,
+    /// Asks whoever is sharing for a key frame.
+    ///
+    /// §3.3, and it is a measurement rather than a preference: a key frame is
+    /// four times the bytes of an ordinary picture — 65 KiB in 1080p, 446 ms of
+    /// the whole budget — so sending them on a timer spends the link on
+    /// pictures nobody needed. Between two peers there is nobody joining
+    /// mid-transmission, so the only party who knows a key frame is needed is
+    /// the receiver that has nothing to predict from.
+    RequestKeyFrame {
+        /// Which transmission.
+        screen: ScreenId,
+    },
 }
 
 /// Server to client.
@@ -1317,6 +1382,62 @@ pub enum ServerMessage {
         /// The picture, or `None` when the Dogma has none.
         icon: Option<Vec<u8>>,
     },
+
+    // ---- screen sharing ----
+    //
+    // Appended last, for the reason [`AlertReason::RateLimited`] gives.
+    //
+    // Sent to everybody in the Cage, the sharer included — the sharer needs the
+    // [`ScreenId`] before it can open a stream, and everybody else needs to
+    // know a stream is about to arrive rather than discovering it by being
+    // handed one.
+    /// Somebody started sharing a screen.
+    ///
+    /// Also sent to a pilot who **enters** a Cage where a transmission is
+    /// already running, straight after their [`Self::PilotJoined`]. That is a
+    /// rule for the Dogma rather than a message of its own, and it is the
+    /// reason [`CageInfo`] gained no field: a client learns about a
+    /// transmission the same way whether it was there when it began or not,
+    /// and there is only one frame to understand instead of two.
+    ScreenShareStarted {
+        /// Which Cage it is happening in.
+        cage: CageId,
+        /// Who is sharing.
+        pilot: PilotId,
+        /// What to call the transmission from now on.
+        ///
+        /// Assigned here, by the Dogma, and never taken from the sender — the
+        /// rule `specs/08-seguranca.md` applies to [`Ssrc`], and a **different**
+        /// identifier from it for the reason §3.6 gives: a screen is not a
+        /// talker, and the table of `ssrc` → person must not have to grow a
+        /// second kind of row.
+        screen: ScreenId,
+    },
+    /// A transmission ended.
+    ///
+    /// Carries no reason. The two ways it ends — somebody pressed stop, or the
+    /// sender went away — are already told apart by everything else that
+    /// happens: a pilot who left produces [`Self::PilotLeft`], and one who is
+    /// still in the room stopped on purpose.
+    ScreenShareStopped {
+        /// Which Cage it was happening in.
+        cage: CageId,
+        /// Which transmission ended.
+        screen: ScreenId,
+    },
+    /// Somebody watching has nothing to predict from and needs a key frame.
+    ///
+    /// Sent only to the pilot who is sharing, and it carries who asked because
+    /// the sender may hold one stream per watcher: without a name it would have
+    /// to spend a key frame on everybody to answer one person, and §3.3 counts
+    /// what a key frame costs. It is also the only way a sender can tell one
+    /// watcher asking twice a second from the room genuinely losing pictures.
+    KeyFrameRequested {
+        /// Which transmission.
+        screen: ScreenId,
+        /// Who asked.
+        pilot: PilotId,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -1601,7 +1722,10 @@ impl Validate for ClientMessage {
             | Self::DeleteCage { .. }
             | Self::DeleteLine { .. }
             | Self::WeighLine { .. }
-            | Self::FetchAttachment { .. } => Ok(()),
+            | Self::FetchAttachment { .. }
+            | Self::StartScreenShare
+            | Self::StopScreenShare
+            | Self::RequestKeyFrame { .. } => Ok(()),
         }
     }
 }
@@ -1676,7 +1800,10 @@ impl Validate for ServerMessage {
             | Self::LineDeleted { .. }
             | Self::LineWeighed { .. }
             | Self::AttachmentRefused { .. }
-            | Self::AttachmentUnavailable { .. } => Ok(()),
+            | Self::AttachmentUnavailable { .. }
+            | Self::ScreenShareStarted { .. }
+            | Self::ScreenShareStopped { .. }
+            | Self::KeyFrameRequested { .. } => Ok(()),
         }
     }
 }
@@ -2691,5 +2818,156 @@ mod icon_tests {
             encode(&ServerMessage::DogmaRenamed { name: "  ".into() }),
             Err(ControlError::FieldOutOfRange { field: "name" })
         ));
+    }
+}
+
+/// What a screen transmission says on the control stream.
+///
+/// Its own module for the reason `icon_tests` has one: these three verbs are
+/// the whole of §3.6 of
+/// `docs/superpowers/specs/2026-08-22-compartilhamento-de-tela-design.md`, and
+/// what they must never do — move, or borrow the audio identifier — is easier
+/// to see when it is all in one place.
+#[cfg(test)]
+mod screen_tests {
+    use super::*;
+
+    #[test]
+    fn the_screen_verbs_round_trip_and_sit_where_they_were_appended() {
+        // §3.6 of the screen-sharing design asks for three things on control:
+        // the beginning, the end and the key frame. The round trip is the cheap
+        // half; the ordinals are the half that matters.
+        //
+        // `postcard` writes a variant as its position, so a build one protocol
+        // version older reads byte 25 as whatever *it* has at 25 — which is
+        // nothing, so it refuses the frame, which is the contract. What would
+        // break it is somebody inserting a variant above these to keep the list
+        // tidy: `SetDogmaIcon` would arrive as `StartScreenShare` and a picture
+        // would become a room full of people watching nothing.
+        //
+        // Byte 0 is the protocol version, byte 1 the variant, so `frame[1]` is
+        // where a shifted list shows up.
+        for (message, ordinal) in [
+            (ClientMessage::StartScreenShare, 25_u8),
+            (ClientMessage::StopScreenShare, 26),
+            (
+                ClientMessage::RequestKeyFrame {
+                    screen: ScreenId(0x00C0_FFEE),
+                },
+                27,
+            ),
+        ] {
+            let frame = encode(&message).unwrap();
+            assert_eq!(decode::<ClientMessage>(&frame).unwrap(), message);
+            assert_eq!(frame.first(), Some(&PROTOCOL_VERSION));
+            assert_eq!(
+                frame.get(1),
+                Some(&ordinal),
+                "{message:?} no longer sits where it was appended, so every peer \
+                 one version older now reads it as a different verb"
+            );
+        }
+
+        for (message, ordinal) in [
+            (
+                ServerMessage::ScreenShareStarted {
+                    cage: CageId(2),
+                    pilot: PilotId(42),
+                    screen: ScreenId(0x00C0_FFEE),
+                },
+                24_u8,
+            ),
+            (
+                ServerMessage::ScreenShareStopped {
+                    cage: CageId(2),
+                    screen: ScreenId(0x00C0_FFEE),
+                },
+                25,
+            ),
+            (
+                ServerMessage::KeyFrameRequested {
+                    screen: ScreenId(0x00C0_FFEE),
+                    pilot: PilotId(43),
+                },
+                26,
+            ),
+        ] {
+            let frame = encode(&message).unwrap();
+            assert_eq!(decode::<ServerMessage>(&frame).unwrap(), message);
+            assert_eq!(
+                frame.get(1),
+                Some(&ordinal),
+                "{message:?} no longer sits where it was appended"
+            );
+        }
+
+        // And the neighbours that were last before them have not moved either.
+        assert_eq!(
+            postcard::to_extend(&ClientMessage::SetDogmaIcon { icon: None }, Vec::new()).unwrap(),
+            vec![24_u8, 0]
+        );
+        assert_eq!(
+            postcard::to_extend(&ServerMessage::DogmaIconChanged { icon: None }, Vec::new())
+                .unwrap(),
+            vec![23_u8, 0]
+        );
+    }
+
+    #[test]
+    fn a_transmission_is_named_by_a_screen_id_and_never_by_an_ssrc() {
+        // §3.6 puts this in bold, and it is the one decision in that section
+        // that is about somebody else's code: `ssrc` is the audio source
+        // assigned on Cage entry, and every client keeps a table of
+        // `ssrc` → person built out of it. Reusing it for a screen would mean
+        // one person holding two rows in that table, and every shell that reads
+        // it learning the difference.
+        //
+        // The compiler is what enforces this — `ScreenId` and `Ssrc` do not
+        // interchange — so the test records the shape instead: the
+        // announcement carries a `ScreenId`, and `Session` still carries the
+        // `ssrc` it always did, untouched by any of this.
+        let started = ServerMessage::ScreenShareStarted {
+            cage: CageId(2),
+            pilot: PilotId(42),
+            screen: ScreenId(7),
+        };
+        let frame = encode(&started).unwrap();
+        let ServerMessage::ScreenShareStarted { screen, .. } =
+            decode::<ServerMessage>(&frame).unwrap()
+        else {
+            panic!("not a transmission");
+        };
+        assert_eq!(screen, ScreenId(7));
+    }
+
+    #[test]
+    fn a_room_that_is_already_being_shared_says_so_in_its_own_words() {
+        // §6 item 3 allows one transmission per Cage in v1, so two people
+        // pressing the button in the same second is an ordinary race and the
+        // loser has to be told something true. `PermissionDenied` would have
+        // every shell write "you may not do that" in front of somebody who may,
+        // and who only has to wait.
+        //
+        // The ordinal is asserted for the reason
+        // `the_doorkeeper_reasons_round_trip_and_do_not_read_as_an_older_one`
+        // gives: a round trip is self-referential and a shifted list passes it
+        // perfectly.
+        let alert = ServerMessage::Alert {
+            severity: AlertSeverity::Warning,
+            reason: AlertReason::ScreenShareTaken,
+            operator_text: None,
+        };
+        let frame = encode(&alert).unwrap();
+        assert_eq!(decode::<ServerMessage>(&frame).unwrap(), alert);
+
+        assert_eq!(
+            postcard::to_extend(&AlertReason::ScreenShareTaken, Vec::new()).unwrap(),
+            vec![12_u8],
+            "the reason moved, so every peer one version older now reads it as another one"
+        );
+        assert_eq!(
+            postcard::to_extend(&AlertReason::LastCage, Vec::new()).unwrap(),
+            vec![11_u8]
+        );
     }
 }

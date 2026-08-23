@@ -1,2 +1,30 @@
 [alias]
 xtask = "run --quiet --package xtask --"
+
+# ---- o Swift que a captura de tela do macOS arrasta ----
+#
+# O `screencapturekit` compila código Swift no `build.rs` dele, e a saída disso
+# precisa do runtime de compatibilidade do Swift na hora de ligar. O crate
+# publica o caminho por `cargo:rustc-link-arg`, e **o Cargo ignora essa diretiva
+# quando ela vem de uma dependência** — só a respeita vinda do pacote que está
+# sendo construído. O resultado é um `cargo build` que passa e um binário de
+# teste que não liga: `__swift_FORCE_LOAD_$_swiftCompatibility56`, não resolvido.
+#
+# Daí a linha estar aqui, no repositório, e não no crate: é o único lugar que o
+# Cargo lê para o pacote de cima.
+#
+# `-L` e não `-rpath` para os `swiftCompatibility*`: eles são estáticos (`.a`) e
+# o problema é de **busca em tempo de ligação**, não de carga. O `rpath` de
+# `/usr/lib/swift` continua valendo para o runtime dinâmico, que na Apple mora
+# no sistema desde o Swift 5.
+#
+# **Isto é custo de máquina de quem compila, e a spec do compartilhamento de
+# tela o registra:** o §1 escolheu o `screencapturekit` contando dez crates e
+# não contou uma toolchain Swift. É o mesmo formato de custo que o §2 recusou no
+# nasm — e a diferença é que na Apple o Swift vem com as ferramentas de linha de
+# comando, que quem compila neste projeto já precisa ter.
+[target.'cfg(target_os = "macos")']
+rustflags = [
+  "-L", "/Library/Developer/CommandLineTools/usr/lib/swift/macosx",
+  "-C", "link-arg=-Wl,-rpath,/usr/lib/swift",
+]
