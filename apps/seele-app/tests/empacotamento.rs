@@ -85,6 +85,36 @@ fn no_linux_as_ferramentas_vao_para_o_path() {
 }
 
 #[test]
+fn o_app_declara_para_que_quer_a_tela() {
+    // O mesmo defeito do microfone, a segunda vez. Sem esta chave o macOS nega
+    // a gravação de tela **sem perguntar nada**, e o sintoma é a lista de telas
+    // chegando vazia à interface — que quem olha lê como «este app não sabe
+    // compartilhar», e não como «o sistema recusou».
+    //
+    // Custou um teste de campo: a 0.7.9 saiu sem a chave, o botão respondeu que
+    // a funcionalidade não estava implementada, e ela estava. Nenhuma das três
+    // ondas era dona deste arquivo.
+    let plist = ler("Info.plist");
+    assert!(
+        plist.contains("NSScreenCaptureUsageDescription"),
+        "o Info.plist não diz para que o app quer a tela; o macOS nega calado \
+         e a interface parece quebrada"
+    );
+
+    // E o par que **não** existe, dito aqui para poupar a busca: não há direito
+    // de hardened runtime para gravação de tela. Quem consertar «por simetria»
+    // com o microfone vai procurar `com.apple.security.device.screen-capture` e
+    // não vai achar, porque a Apple não o define.
+    let direitos = ler("Entitlements.plist");
+    assert!(
+        !direitos.contains("screen-capture"),
+        "apareceu um direito de captura de tela no Entitlements.plist, e ele \
+         não existe — um direito inventado não é recusado, é ignorado, e some \
+         no meio dos que valem"
+    );
+}
+
+#[test]
 fn o_app_declara_para_que_quer_o_microfone() {
     // Sem esta chave o macOS nega o microfone **sem perguntar nada**: nenhum
     // alerta, nenhuma entrada em Ajustes, e o programa recebe uma falha de

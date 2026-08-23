@@ -18,6 +18,20 @@
 -->
 <plist version="1.0">
 <dict>
+	<!--
+	  Sem `NSScreenCaptureUsageDescription` o macOS **nega a gravação de tela
+	  sem perguntar nada** — exatamente como fez com o microfone, e o comentário
+	  acima conta como aquilo apareceu. A sonda mostra o sintoma sem alerta
+	  nenhum: `permissão: NaoPerguntada` e `fontes: SemPermissao`, e a lista de
+	  telas chega vazia à interface.
+
+	  O `Entitlements.plist` **não** ganha par para isto, e a ausência é
+	  deliberada: não existe direito de *hardened runtime* para gravação de
+	  tela. Quem for consertar «por simetria» com o microfone vai procurar e não
+	  achar — esta linha existe para poupar essa busca.
+	-->
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>O SEELE mostra a sua tela para as outras pessoas da sala de voz, e só enquanto você estiver compartilhando. Nada é gravado.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>O SEELE usa o microfone para transmitir sua voz aos outros pilotos do Cage. Nada é gravado, e nada sai da sua máquina para além do Dogma ao qual você se conectou.</string>
 </dict>
