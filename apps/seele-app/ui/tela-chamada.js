@@ -102,8 +102,163 @@ function desenharChamada(snapshot) {
   const cage = snapshot ? snapshot.cages.find((c) => c.occupied_by_us) : null;
 
   desenharBarraDaChamada(snapshot, cage);
+  desenharPalco(snapshot, cage);
   desenharCartoes(snapshot, cage);
   desenharMonitor(snapshot, cage);
+}
+
+/**
+ * O palco: a transmissão de tela desta sala, ou o que a tela diz sem nenhuma.
+ *
+ * Três coisas moram aqui e nenhuma delas é decisão:
+ *
+ *   1. **quem** está compartilhando, que é o consentimento da §4 da spec de
+ *      22/08 aparecendo em algum lugar — no Windows a captura do sistema não
+ *      pergunta nada a ninguém, e esta linha é o único aviso que existe;
+ *   2. **o que está saindo agora, ao lado do que foi pedido** (§5). Escolher
+ *      1080p e receber 720p não é defeito; esconder que aconteceu, é;
+ *   3. **a razão**, `720p · 6 pessoas assistindo` (§5.1). O gatilho da
+ *      resolução é o teto e não a contagem de gente — resolução não controla
+ *      tráfego —, mas quem lê quer previsibilidade, e a contagem é a metade do
+ *      pedido que estava certa.
+ *
+ * O que **não** mora aqui é a imagem. O contrato entre a ponte e esta casca
+ * carrega os números da transmissão e nenhum quadro, então esta janela não tem
+ * por onde desenhar a tela de outra pessoa — e a nota do palco diz isso em vez
+ * de deixar uma moldura preta parecendo uma transmissão travada.
+ *
+ * `limitesPedidos` e `nomeDaResolucao` vêm de `camada-compartilhar.js`, que é
+ * quem manda os limites e portanto o único que sabe quais foram.
+ */
+function desenharPalco(snapshot, cage) {
+  const palco = $("palco");
+  const tela = snapshot ? snapshot.tela : null;
+
+  if (!tela) {
+    palco.dataset.transmitindo = "nao";
+    $("palco-razao").textContent = "";
+    $("palco-quem").textContent = snapshot
+      ? "NINGUÉM ESTÁ COMPARTILHANDO A TELA"
+      : "SEM SESSÃO";
+    const nota = $("palco-nota");
+    // Fora de uma sala de voz não há para quem compartilhar, e a frase que
+    // manda apertar um botão desabilitado é pior que nenhuma. Sem o controle
+    // desenhado, mandar apertar um botão que não existe é pior ainda.
+    nota.hidden = !cage;
+    nota.textContent = temControleDeTela()
+      ? "Use COMPARTILHAR A TELA aqui embaixo para mostrar um monitor ou uma janela sua."
+      : "Esta versão não sabe compartilhar tela desta máquina. A de outra pessoa apareceria aqui.";
+    $("palco-parada").hidden = true;
+    $("palco-numeros").hidden = true;
+    $("palco-aperto").hidden = true;
+    return;
+  }
+
+  palco.dataset.transmitindo = "sim";
+
+  // `tela.de` é o identificador de quem compartilha, e o nome vem do roster da
+  // sala. Sem casamento — a pessoa saiu entre dois quadros — a frase diz que
+  // alguém está, e não um nome que esta janela inventaria.
+  const dono = cage ? cage.pilots.find((pessoa) => pessoa.id === tela.de) : null;
+  $("palco-quem").textContent = tela.e_minha
+    ? "VOCÊ ESTÁ COMPARTILHANDO A SUA TELA"
+    : dono
+      ? `${dono.nickname} ESTÁ COMPARTILHANDO A TELA`
+      : "ALGUÉM DESTA SALA ESTÁ COMPARTILHANDO A TELA";
+
+  // `720p · 6 pessoas assistindo` quando há a medida, e só a contagem quando
+  // não há: `0p` é o que a ponte manda enquanto ninguém mede o que está saindo,
+  // e escrevê-lo seria a mentira confiante que `TelaEmCurso::medida` existe
+  // para não produzir.
+  $("palco-razao").textContent = tela.medida
+    ? `${nomeDaResolucao(tela.altura)} · ${assistindo(tela.espectadores)}`
+    : assistindo(tela.espectadores);
+
+  const nota = $("palco-nota");
+  nota.hidden = false;
+  nota.textContent = tela.e_minha
+    ? "Quem está na sala vê o que você escolheu. Esta janela não redesenha a sua própria tela."
+    : "Esta versão ainda não desenha a imagem aqui: o que se sabe da transmissão está abaixo.";
+
+  // O motivo de uma parada chega como **nome** (`TelaEmCurso::parada`), e a
+  // frase é escrita aqui, como a de todo enum deste produto. O `??` cobre um
+  // nome que esta janela não conhece: diz que parou, que é o que ela sabe, e
+  // não inventa a causa.
+  const parada = $("palco-parada");
+  parada.hidden = !tela.parada;
+  parada.textContent = tela.parada ? (PARADAS[tela.parada] ?? "A TELA PAROU") : "";
+
+  desenharNumerosDoPalco(tela);
+}
+
+/**
+ * O que está saindo agora, ao lado do que foi pedido.
+ *
+ * A coluna do pedido **some** para quem só assiste, e não vira travessão: o
+ * teto é a escolha de outra pessoa e não atravessa em lugar nenhum, então não é
+ * um buraco na resposta a uma pergunta que esta tela fez — é uma pergunta que
+ * ela não tem por que fazer. Para quem compartilha ela fica, inclusive vazia,
+ * porque aí a pergunta é legítima e a falta tem motivo escrito.
+ */
+function desenharNumerosDoPalco(tela) {
+  $("palco-numeros").hidden = false;
+
+  // `medida` é o que separa «está saindo a 720p» de «ninguém mediu o que está
+  // saindo». Os três são `u32` e vêm zerados enquanto ninguém os mede; escrever
+  // `0p` ali seria dizer que a transmissão está em zero pixel de altura.
+  if (tela.medida) {
+    medido($("palco-altura"), nomeDaResolucao(tela.altura));
+    medido($("palco-quadros"), `${tela.quadros}/s`);
+    medido($("palco-banda"), `${tela.kbps} kbps`);
+  } else {
+    const motivo = "esta versão não mede o que está saindo da transmissão";
+    naoMedido($("palco-altura"), motivo);
+    naoMedido($("palco-quadros"), motivo);
+    naoMedido($("palco-banda"), motivo);
+  }
+
+  for (const lado of document.querySelectorAll(".chamada-palco-pedido")) {
+    lado.hidden = !tela.e_minha;
+  }
+
+  const pedido = tela.e_minha ? limitesPedidos : null;
+  if (tela.e_minha && !pedido) {
+    const motivo = "esta janela não estava aberta quando os limites foram escolhidos";
+    naoMedido($("palco-altura-pedida"), motivo);
+    naoMedido($("palco-quadros-pedidos"), motivo);
+    naoMedido($("palco-banda-pedida"), motivo);
+  } else if (pedido) {
+    medido($("palco-altura-pedida"), nomeDaResolucao(pedido.altura_maxima));
+    medido($("palco-quadros-pedidos"), `${pedido.quadros_maximos}/s`);
+    medido(
+      $("palco-banda-pedida"),
+      pedido.banda_bps === null ? "sem teto seu" : `${Math.round(pedido.banda_bps / 1000)} kbps`,
+    );
+  }
+
+  // E quando aperta, a tela diz que apertou e por quê (§5.1). Sem esta linha o
+  // que sobra são dois números diferentes lado a lado e nenhuma explicação de
+  // qual é o certo — que é o produto sabendo algo que quem está na frente dele
+  // não sabe.
+  const aperto = $("palco-aperto");
+  const abaixo =
+    tela.medida &&
+    pedido !== null &&
+    (tela.altura < pedido.altura_maxima ||
+      tela.quadros < pedido.quadros_maximos ||
+      (pedido.banda_bps !== null && tela.kbps * 1000 < pedido.banda_bps));
+  aperto.hidden = !abaixo;
+  aperto.textContent = abaixo
+    ? "O teto apertou, e é por isso que está saindo menos do que você pediu: " +
+      "ele sai do caminho medido, dividido por quem está assistindo."
+    : "";
+}
+
+/** `6 pessoas assistindo`, e as duas contagens que não pluralizam assim. */
+function assistindo(quantos) {
+  if (quantos === 0) return "ninguém assistindo";
+  if (quantos === 1) return "1 pessoa assistindo";
+  return `${quantos} pessoas assistindo`;
 }
 
 /** A barra de cima: o nome da sala, o enlace e o relógio da sessão. */
@@ -463,6 +618,28 @@ function desenharAcoesDaChamada(snapshot) {
     ? "você não está ouvindo ninguém"
     : "você está ouvindo a sala";
 
+  // O terceiro botão abre a escolha em vez de agir, e o rótulo diz qual dos
+  // dois trabalhos ele vai fazer: começar, ou mexer no que já está saindo. A
+  // nota diz o estado, que é onde o estado mora nesta barra.
+  const tela = snapshot ? snapshot.tela : null;
+  const minha = Boolean(tela && tela.e_minha);
+  const compartilhar = $("chamada-compartilhar");
+  // Some inteiro, e não desabilitado: `PermissaoDeTela::NaoSeSabe` quer dizer
+  // que esta compilação não tem como perguntar ao sistema, e um botão apagado
+  // ali seria uma pergunta («por que não posso?») cuja resposta não muda nada
+  // do que a pessoa faz.
+  compartilhar.hidden = !temControleDeTela();
+  compartilhar.dataset.ativo = minha ? "sim" : "nao";
+  compartilhar.disabled = !snapshot;
+  $("chamada-compartilhar-titulo").textContent = minha
+    ? "AJUSTAR OU PARAR"
+    : "COMPARTILHAR A TELA";
+  $("chamada-compartilhar-nota").textContent = minha
+    ? "sua tela está saindo agora"
+    : tela
+      ? "outra pessoa está compartilhando agora"
+      : "escolhe um monitor ou uma janela sua";
+
   $("chamada-ejetar").disabled = !snapshot;
 }
 
@@ -476,6 +653,10 @@ async function abrirChamada() {
   guardarFoco("tela-sessao");
   $("tela-sessao").hidden = true;
   $("tela-chamada").hidden = false;
+  // Antes do desenho, porque é ela que decide se o botão de compartilhar
+  // existe: desenhar primeiro e esconder depois é um botão que ninguém viu
+  // chegar nem sair.
+  await conferirPermissaoDeTela();
   // E o foco só **depois** do desenho: `desenharAcoesDaChamada` é quem tira o
   // `disabled` da chave do microfone, e um botão desabilitado recusa o foco em
   // silêncio.
@@ -540,6 +721,9 @@ async function atualizarChamada() {
 
 $("botao-chamada").addEventListener("click", abrirChamada);
 $("chamada-voltar").addEventListener("click", fecharChamada);
+$("chamada-compartilhar").addEventListener("click", () => {
+  abrirCompartilhar().catch((falha) => console.warn("compartilhar:", falha));
+});
 
 $("chamada-at").addEventListener("click", async () => {
   const snapshot = await invoke("snapshot");
@@ -619,7 +803,14 @@ $("chamada-grade").addEventListener("click", (evento) => {
 // Escape fecha, que é o que uma tela alcançada de dentro de outra faz. Só com
 // ela na frente, ou engoliria a tecla de quem está fechando uma busca.
 window.addEventListener("keydown", (evento) => {
-  if (evento.key === "Escape" && !$("tela-chamada").hidden) {
+  // E só com nada por cima. Toda caixa desta janela fecha no Escape, e as duas
+  // que se abrem daqui — a ajuda e o compartilhamento — registram o ouvinte
+  // delas no mesmo `window`: sem esta conferência, um Escape fecharia a caixa
+  // **e** a chamada por baixo dela, e quem só queria voltar da caixa acabaria
+  // nos canais de texto. `role="dialog"` e não uma lista de `id`: uma terceira
+  // caixa amanhã já entra coberta.
+  const porCima = document.querySelector('[role="dialog"]:not([hidden])');
+  if (evento.key === "Escape" && !$("tela-chamada").hidden && !porCima) {
     evento.preventDefault();
     fecharChamada();
   }

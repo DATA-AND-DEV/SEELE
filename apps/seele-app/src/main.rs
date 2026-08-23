@@ -1064,6 +1064,87 @@ fn set_volume(
     session.plug()?.set_volume(nickname, percent)
 }
 
+// ------------------------------------------------------- compartilhar a tela
+//
+// Seis comandos e nenhuma decisão, como todo o resto deste arquivo. O teto de
+// verdade é do core e tem de continuar lá: a decisão de 22/08 do
+// `docs/superpowers/specs/2026-08-22-compartilhamento-de-tela-design.md` (§5.1)
+// o escreve como
+//
+//     min(caminho de quem HOSPEDA × 60% ÷ N espectadores,
+//         caminho de quem COMPARTILHA × 60%,
+//         a escolha da pessoa)
+//
+// e as duas primeiras linhas são medidas que esta casca não tem e não deve
+// tentar refazer. O que atravessa daqui é só a terceira — a escolha —, e ela é
+// **teto**: `Snapshot::tela` volta dizendo o que de fato está saindo, e é isso
+// que a tela desenha ao lado do que foi pedido.
+
+/// As telas e janelas que esta máquina pode transmitir.
+///
+/// Uma lista vazia não é falha: é a resposta quando o sistema recusou, e
+/// [`permissao_de_tela`] é quem diz qual foi a recusa. Por isso os dois são
+/// comandos separados e a janela chama os dois — uma lista vazia sem motivo é
+/// um beco.
+#[tauri::command]
+fn fontes_de_tela(session: State<'_, Session>) -> Result<Vec<seele_ffi::FonteDeTela>, PlugError> {
+    session.plug()?.fontes_de_tela()
+}
+
+/// O que o sistema operacional respondeu sobre gravar a tela.
+#[tauri::command]
+fn permissao_de_tela(session: State<'_, Session>) -> Result<seele_ffi::PermissaoDeTela, PlugError> {
+    Ok(session.plug()?.permissao_de_tela())
+}
+
+/// Pede a permissão ao sistema.
+///
+/// Só por aperto de botão, e nunca ao abrir a caixa: no macOS isto abre o
+/// alerta do TCC, e um alerta de sistema que aparece sem ninguém ter pedido é
+/// o que ensina a pessoa a recusar por reflexo — e o TCC não pergunta duas
+/// vezes.
+#[tauri::command]
+fn pedir_permissao_de_tela(
+    session: State<'_, Session>,
+) -> Result<seele_ffi::PermissaoDeTela, PlugError> {
+    Ok(session.plug()?.pedir_permissao_de_tela())
+}
+
+/// Começa a transmitir a fonte escolhida, com os limites escolhidos.
+///
+/// `PlugError::ScreenShareTaken` quando alguém já está compartilhando nesta
+/// sala. Não é permissão que falta — a pessoa pode compartilhar assim que o
+/// outro parar —, e é por isso que a frase dela em `ui/frases.js` manda esperar
+/// em vez de mandar procurar um papel que ela já tem.
+#[tauri::command]
+fn compartilhar_tela(
+    session: State<'_, Session>,
+    fonte: u64,
+    limites: seele_ffi::LimitesDeTela,
+) -> Result<(), PlugError> {
+    session.plug()?.compartilhar_tela(fonte, limites)
+}
+
+/// Para de transmitir. Idempotente do outro lado: parar sem estar
+/// compartilhando não é erro.
+#[tauri::command]
+fn parar_de_compartilhar(session: State<'_, Session>) -> Result<(), PlugError> {
+    session.plug()?.parar_de_compartilhar()
+}
+
+/// Muda os limites no meio da transmissão, sem cortá-la.
+///
+/// Comando próprio e não um `compartilhar_tela` de novo: recomeçar a
+/// transmissão para trocar um teto piscaria a imagem de todo mundo que está
+/// assistindo por causa de um controle mexido por uma pessoa só.
+#[tauri::command]
+fn ajustar_limites_da_tela(
+    session: State<'_, Session>,
+    limites: seele_ffi::LimitesDeTela,
+) -> Result<(), PlugError> {
+    session.plug()?.ajustar_limites_da_tela(limites)
+}
+
 /// Os ajustes desta máquina, ou nada quando o disco não deixa lê-los.
 ///
 /// `Option` e não `Result` porque nenhum chamador tem o que fazer com o motivo:
@@ -2005,6 +2086,12 @@ fn main() {
             set_talking,
             set_voice_mode,
             set_volume,
+            fontes_de_tela,
+            permissao_de_tela,
+            pedir_permissao_de_tela,
+            compartilhar_tela,
+            parar_de_compartilhar,
+            ajustar_limites_da_tela,
             microfones,
             microfone_escolhido,
             escolher_microfone,

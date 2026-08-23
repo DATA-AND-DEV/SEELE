@@ -79,6 +79,12 @@ const AVISOS = {
   // derrubar sem ter avisado é o que faz o produto parecer quebrado.
   RateLimited: "VOCÊ ESTÁ FALANDO RÁPIDO DEMAIS PARA O SERVIDOR",
 
+  // Uma transmissão de tela por sala de voz. Chega como aviso a quem tentou
+  // começar a segunda, e a frase é a mesma da recusa em `FRASES` sem a segunda
+  // linha: aqui ninguém apertou nada agora, então não há o que fazer em
+  // seguida além de ler.
+  ScreenShareTaken: "ALGUÉM JÁ ESTÁ COMPARTILHANDO A TELA NESTA SALA",
+
   // ---- uma sala deixou de existir ----
   //
   // Três frases e não uma, porque pedem coisas diferentes de quem lê. As duas
@@ -187,6 +193,29 @@ const CAMINHOS = {
 };
 
 /**
+ * Por que uma transmissão de tela está parada.
+ *
+ * Os nomes vêm de `seele_ffi::motivos_de_parada_da_tela`, e é o mesmo acordo dos
+ * caminhos: o núcleo enumera e a frase é daqui. Uma frase pronta em português
+ * atravessando a ponte seria a única sentença desta janela que o guarda de
+ * vocabulário não vê.
+ *
+ * Frases e não nomes — ao contrário de `CAMINHOS` — porque estas duas chegam
+ * quando algo deixou de funcionar, e nenhuma pessoa deduz «o vídeo cedeu o lugar
+ * para a voz» de `SINAL CRÍTICO`. As duas terminam dizendo que a volta é
+ * sozinha, que é a única coisa a fazer: não há botão de tentar de novo, porque o
+ * núcleo já está tentando.
+ */
+const PARADAS = {
+  SinalCritico:
+    "A TELA PAROU PARA A VOZ NÃO PICOTAR.\n" +
+    "Ela volta sozinha quando o sinal melhorar.",
+  AbaixoDoPiso:
+    "A TELA PAROU: O QUE SOBROU DA CONEXÃO NÃO SUSTENTA NEM A MENOR IMAGEM.\n" +
+    "Ela volta sozinha quando o caminho abrir.",
+};
+
+/**
  * O nome do caminho, ou nada.
  *
  * `null` e não «DIRETO», e não «DESCONHECIDO»: **sem informação a tela não
@@ -284,6 +313,23 @@ const FRASES = {
     UnknownPilot: "NÃO CONHEÇO ESSA PESSOA",
     UnknownChannel: "NÃO CONHEÇO ESSE CANAL",
     LinkLost: "ENLACE PERDIDO",
+
+    // A recusa de quem apertou COMPARTILHAR com outra pessoa já transmitindo.
+    // **Não** é permissão que falta, e a segunda linha é o que separa as duas:
+    // esta pessoa pode compartilhar, só não agora — mandá-la procurar um papel
+    // que ela já tem seria mandá-la procurar o que não existe.
+    ScreenShareTaken:
+      "ALGUÉM JÁ ESTÁ COMPARTILHANDO A TELA NESTA SALA.\n" +
+      "Cabe uma por vez: dá para começar assim que a pessoa parar.",
+
+    // A metade que captura a tela ainda não está neste executável, e a frase
+    // não manda tentar de novo por isso: não há nada que quem lê possa fazer
+    // para mudar a resposta. Dizer que não é a conexão nem permissão é o que
+    // impede a caça ao defeito que não existe — foi o que a frase de
+    // `NadaPublicado` aprendeu, dois recursos atrás.
+    ScreenShareUnavailable:
+      "ESTA VERSÃO NÃO SABE COMPARTILHAR TELA.\n" +
+      "Não é a sua conexão nem permissão: a parte que captura a tela ainda não está neste app.",
 
     // Por que um texto colado não é um convite. O Rust devolve o nome da
     // falha; a frase é daqui, como todas as outras.

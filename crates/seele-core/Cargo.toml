@@ -11,6 +11,23 @@ publish.workspace = true
 [dependencies]
 seele-proto = { path = "../seele-proto" }
 seele-audio = { path = "../seele-audio" }
+# A segunda folha de mídia, ao lado de `seele-audio` e com a mesma vizinhança —
+# a aresta que o ADR 0002 já permitia e que ninguém tinha usado.
+#
+# **Ela existe porque a decisão de o que transmitir mora deste lado.** O §3.2 da
+# spec de compartilhamento de tela põe o teto pendurado no sinal da voz, que é
+# conta de `seele-core`; o codificador só sabe obedecer a um número. Sem esta
+# linha, captura, codificador e teto eram três peças que ninguém juntava —
+# `crate::video` é onde elas se encontram.
+#
+# **O que ela arrasta, e é preciso saber antes de compilar:** o
+# `shiguredo_openh264` faz `git clone --depth 1` do repositório do Cisco no
+# `build.rs` (então `cargo build` precisa de `git` e de rede) e gera bindings
+# com `bindgen` (então precisa de `libclang`); no macOS o `screencapturekit`
+# roda `swift build` e exige a linha de `-rpath` que mora em
+# `.cargo/config.toml`. Quem compila `seele-core` passa a pagar isso — inclusive
+# quem só queria a voz.
+seele-video = { path = "../seele-video" }
 quinn = "0.11.11"
 # Só o provider `ring`, que é o que instalamos em tempo de execução. Os
 # defaults do rustls trazem o `aws-lc-rs` junto, e ele exige CMake e NASM

@@ -41,6 +41,7 @@ pub mod melchior;
 pub mod portaria;
 pub mod session;
 pub mod taxa;
+pub mod tela;
 pub mod tls;
 pub mod transfer;
 

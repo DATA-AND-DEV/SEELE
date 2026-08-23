@@ -730,6 +730,34 @@ nitidez. Ou o piso desce e o motivo escrito no §5 muda, ou a lista fica e o
 degrau mais baixo é 540p. **Fica em aberto**, e a corrida por teto acima é quem
 tem o número para decidir.
 
+## 5.2 · Uma dívida que a construção criou: o fio não marca o tipo do fluxo
+
+Levantada por quem escreveu o encaminhamento, e escrita aqui porque calá-la
+sairia mais caro depois.
+
+Um Dogma agora recebe **dois** tipos de fluxo unidirecional: transferência de
+anexo e tela. Nada no fio diz qual é qual. O que os separa hoje é aritmética
+sobre o primeiro byte:
+
+- **zero** é transferência, porque o quadro dela cabe em 16 KiB e o primeiro
+  byte do tamanho nunca chega a valer mais que isso;
+- **não-zero** é tela, porque a versão do cabeçalho dela nasceu em 1.
+
+Funciona, e é frágil de um jeito específico: **as duas premissas são de outra
+seção.** No dia em que o limite do anexo subir, ou a versão do cabeçalho da tela
+passar de 255, ou um terceiro tipo de fluxo aparecer, a conta deixa de fechar —
+e o sintoma será um fluxo lido como o tipo errado, que é o pior formato de erro
+de protocolo que existe.
+
+**O conserto é um byte de tipo em `seele-proto`, na frente dos dois
+cabeçalhos.** Não entrou junto porque o crate do protocolo era de outra frente
+na mesma onda, e mudá-lo por baixo de quem estava escrevendo nele teria sido a
+colisão que a repartição de arquivos existe para evitar.
+
+Enquanto ele não existe, `transfer::receive` e `quem_perguntou` carregam um
+parâmetro `primeiro` que só existe por causa disto — é a marca da dívida no
+código, e ela some junto com ela.
+
 ## 6 · O que não entra na primeira versão
 
 Lista honesta, com o motivo de cada uma. Uma promessa larga aqui custaria mais

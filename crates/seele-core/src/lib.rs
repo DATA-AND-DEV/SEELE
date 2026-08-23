@@ -38,6 +38,7 @@ pub mod search;
 pub mod state;
 pub mod tela;
 pub mod tofu;
+pub mod video;
 pub mod voice;
 
 pub use battery::{Battery, Link};
@@ -54,10 +55,13 @@ pub use state::{
     CageSync, Changed, ChavePedida, Ended, Message, Notice, Pilot, Room, Tela, TransferNotice,
 };
 pub use tela::{
-    Envio, ErroDeTela, MotivoDeDescarte, MotivoDeParada, QuadroRecebido, Recepcao, Teto,
-    TetoDeVideo, Transmissao,
+    menor_resolucao, resolucao_estimada_para, Envio, ErroDeTela, MotivoDeDescarte, MotivoDeParada,
+    PernaQueAperta, QuadroRecebido, Recepcao, Teto, TetoDeVideo, Transmissao,
 };
 pub use tofu::{MemoryPinStore, PinDecision, PinStore, Verdict};
+pub use video::{
+    Ajuste, Compartilhamento, ErroDeCompartilhamento, FonteDeQuadros, Passo as PassoDeVideo,
+};
 pub use voice::{
     capture_devices, playback_devices, CaptureDevice, DeviceChoice, DeviceRates, PlaybackDevice,
     Voice, VoiceMode,

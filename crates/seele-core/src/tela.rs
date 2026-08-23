@@ -57,6 +57,7 @@ use std::time::{Duration, Instant};
 
 use seele_proto::screen::{ScreenError, ScreenHeader, SCREEN_HEADER_LEN};
 use seele_proto::sync_ratio::SyncBand;
+use seele_video::codec::Resolucao;
 use thiserror::Error;
 
 // ---------------------------------------------------------------------------
@@ -151,6 +152,38 @@ impl Teto {
             Self::Parado(_) => 0,
         }
     }
+
+    /// A resolução que este teto compra, ou `None` quando o vídeo está parado.
+    ///
+    /// `None` e não «540p»: parado não é a menor resolução, é resolução
+    /// nenhuma. Devolver o degrau mais baixo aqui faria a interface desenhar um
+    /// retângulo de 960×540 para uma transmissão que não existe.
+    #[must_use]
+    pub const fn resolucao_estimada(self) -> Option<Resolucao> {
+        match self {
+            Self::Bps(bps) => Some(resolucao_estimada_para(bps)),
+            Self::Parado(_) => None,
+        }
+    }
+}
+
+/// Qual perna do `min` do §5.1 está mandando agora.
+///
+/// Existe para a tela, e o §5.1 a obriga: *«quando aperta, a tela diz que
+/// apertou e por quê. Um compartilhamento que cai de resolução porque entrou a
+/// quinta pessoa e não explica é o produto sabendo algo que quem está na frente
+/// dele não sabe.»* O gatilho é o teto, mas a **razão** é isto — é a diferença
+/// entre `720p · 6 pessoas assistindo` e `720p · sua conexão`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PernaQueAperta {
+    /// A subida de quem hospeda, dividida pelos espectadores. É a perna que o
+    /// §5.1 acrescentou, e a única que anda quando alguém entra ou sai.
+    QuemHospeda,
+    /// A subida de quem compartilha.
+    QuemCompartilha,
+    /// A escolha da pessoa (§5), que é sempre teto e nunca piso — apertar por
+    /// aqui é o produto obedecendo, não o produto degradando.
+    Escolha,
 }
 
 /// O teto do vídeo, pendurado no sinal que a voz já calcula.
@@ -159,6 +192,33 @@ impl Teto {
 /// calcula RTT, jitter e perda por conexão e os transforma em Taxa de
 /// Sincronização (ADR 0024); o teto do vídeo pendura nesse número em vez de
 /// abrir um segundo medidor que discordaria do primeiro no primeiro dia ruim.
+///
+/// # As três pernas, e a que faltava
+///
+/// Decidido em 22/08/2026 (§5.1): **o servidor encaminha**, como ele já faz com
+/// a voz em `cage::Cage::forward`. Alguém sobe N cópias — multicast não existe
+/// na internet aberta, e um quadro que quatro pessoas assistem sai quatro vezes
+/// de alguma máquina —, e nesta decisão essa máquina é a de **quem hospeda**.
+/// Então o teto é o menor de três:
+///
+/// ```text
+/// teto = min(
+///     caminho de quem HOSPEDA × 60% ÷ N espectadores,   ← o que o servidor sobe
+///     caminho de quem COMPARTILHA × 60%,                ← o que a fonte sobe
+///     o que a pessoa escolheu (§5),                     ← sempre teto, nunca piso
+/// )
+/// ```
+///
+/// **A primeira linha é nova, e sem ela o produto media uma perna e estourava a
+/// outra** — o §5.1 chama isso de «o defeito mais caro desta seção». Com quatro
+/// espectadores a 1,2 Mbps são 4,8 Mbps saindo da casa de quem hospeda, mais a
+/// voz de todo mundo, o que numa subida doméstica brasileira típica é mais do
+/// que existe.
+///
+/// Quando quem compartilha **é** quem hospeda, as duas primeiras pernas são a
+/// mesma máquina e quem chama passa o mesmo número nas duas. Esta estrutura não
+/// tenta descobrir isso sozinha: ela não sabe quem é quem, e adivinhar seria
+/// inventar a perna mais cara da conta.
 ///
 /// # O tempo não entra aqui
 ///
@@ -169,6 +229,8 @@ impl Teto {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TetoDeVideo {
     caminho_bps: u32,
+    caminho_de_quem_hospeda_bps: u32,
+    espectadores: u32,
     escolha_bps: Option<u32>,
 }
 
@@ -178,17 +240,35 @@ impl Default for TetoDeVideo {
     }
 }
 
+/// [`FRACAO_DO_CAMINHO`] por cento de um caminho, sem dar a volta.
+///
+/// Em `u64` porque `caminho_bps × 60` estoura `u32` a partir de uns 71 Mbit/s,
+/// que é uma fibra doméstica comum. Um teto que dá a volta vira um teto
+/// minúsculo, e o defeito apareceria só na casa boa.
+const fn fracao_do(caminho_bps: u32) -> u32 {
+    ((caminho_bps as u64 * FRACAO_DO_CAMINHO as u64) / 100) as u32
+}
+
 impl TetoDeVideo {
-    /// O teto de quem ainda não mediu o caminho: o cano da prova.
+    /// O teto de quem ainda não mediu caminho nenhum: o cano da prova nas duas
+    /// pernas, e um espectador.
+    ///
+    /// **Um, e não zero**, porque uma transmissão sem ninguém assistindo não
+    /// tem razão de existir — e porque com o piso de `copias` os dois
+    /// dão exatamente a mesma conta, então o número que fica escrito aqui é o
+    /// que descreve o caso de uso e não o que economiza uma linha.
     #[must_use]
     pub const fn novo() -> Self {
         Self {
             caminho_bps: CAMINHO_DA_PROVA_BPS,
+            caminho_de_quem_hospeda_bps: CAMINHO_DA_PROVA_BPS,
+            espectadores: 1,
             escolha_bps: None,
         }
     }
 
-    /// O teto sobre um caminho de subida conhecido, em bits por segundo.
+    /// O teto sobre o caminho de subida de **quem compartilha**, em bits por
+    /// segundo.
     ///
     /// **Nada no produto chama isto ainda**, e é honesto que assim seja: o §8
     /// pergunta 2 é a pergunta de onde este número viria. Existe para o dia em
@@ -198,8 +278,34 @@ impl TetoDeVideo {
     pub const fn com_caminho(caminho_bps: u32) -> Self {
         Self {
             caminho_bps,
+            caminho_de_quem_hospeda_bps: CAMINHO_DA_PROVA_BPS,
+            espectadores: 1,
             escolha_bps: None,
         }
+    }
+
+    /// O caminho de subida de **quem hospeda**, que é por onde as N cópias
+    /// saem (§5.1).
+    ///
+    /// Fica separado de [`Self::com_caminho`] porque são duas máquinas
+    /// diferentes com duas medidas diferentes, e juntá-las num campo só foi
+    /// exatamente o defeito que o §5.1 mandou corrigir.
+    #[must_use]
+    pub const fn com_caminho_de_quem_hospeda(mut self, caminho_bps: u32) -> Self {
+        self.caminho_de_quem_hospeda_bps = caminho_bps;
+        self
+    }
+
+    /// Quantas pessoas estão assistindo, que é quantas cópias o servidor sobe.
+    ///
+    /// **Zero é estado normal**, e o §5.1 não o trata: uma transmissão que
+    /// começou antes de alguém abrir a tela, ou de onde o último espectador
+    /// acabou de sair. Zero não pode ser divisão por zero e também não pode ser
+    /// teto infinito — ver `copias`.
+    #[must_use]
+    pub const fn com_espectadores(mut self, espectadores: u32) -> Self {
+        self.espectadores = espectadores;
+        self
     }
 
     /// A escolha de quem compartilha, que é **teto e nunca piso** (§5).
@@ -215,23 +321,100 @@ impl TetoDeVideo {
         self
     }
 
-    /// O que fica para a voz, em bits por segundo, aconteça o que acontecer.
+    /// Quantas pessoas estão assistindo, como quem chamou informou.
     ///
-    /// **Este número não depende da faixa**, e é isso que a frase *«a voz nunca
-    /// cede à tela»* quer dizer em aritmética: quando o sinal piora, o que muda
-    /// é o teto do vídeo. A reserva da voz é o que sobra do caminho depois de
-    /// [`FRACAO_DO_CAMINHO`] e não encolhe nunca.
+    /// Devolve o número **cru**, e não o de `copias`: quem escreve
+    /// `720p · 6 pessoas assistindo` na tela (§5.1) precisa do que é verdade,
+    /// não do que a aritmética usou para não dividir por zero.
     #[must_use]
-    pub const fn reserva_da_voz(&self) -> u32 {
-        self.caminho_bps - self.teto_da_faixa_nominal()
+    pub const fn espectadores(&self) -> u32 {
+        self.espectadores
     }
 
-    /// 60% do caminho: o teto de quem está com o sinal nominal.
+    /// Por quanto a perna de quem hospeda é dividida.
+    ///
+    /// **Zero espectador vira uma cópia, e isso é uma escolha.** Dividir por
+    /// zero não existe; não dividir — ou seja, deixar a perna passar inteira —
+    /// seria um teto que sobe justamente quando ninguém está olhando, e a
+    /// primeira pessoa a entrar o derrubaria de volta com um salto que a
+    /// interface teria de explicar. Uma cópia é o menor número de cópias que
+    /// uma transmissão viva chega a subir, e é o valor que faz a conta ser
+    /// contínua na entrada da primeira pessoa.
+    const fn copias(&self) -> u32 {
+        if self.espectadores == 0 {
+            1
+        } else {
+            self.espectadores
+        }
+    }
+
+    /// O que fica para a voz **desta máquina**, em bits por segundo, aconteça o
+    /// que acontecer.
+    ///
+    /// **Este número não depende da faixa nem de quanta gente está
+    /// assistindo**, e é isso que a frase *«a voz nunca cede à tela»* quer dizer
+    /// em aritmética: quando o sinal piora, ou quando a sala cresce, o que muda
+    /// é o teto do vídeo. A reserva da voz é o que sobra do caminho de quem
+    /// compartilha depois de [`FRACAO_DO_CAMINHO`] e não encolhe nunca.
+    ///
+    /// A mesma reserva existe do lado de quem hospeda, e não precisa de um
+    /// segundo método: as N cópias saem de [`FRACAO_DO_CAMINHO`] daquele
+    /// caminho **dividido por N**, então N × teto nunca passa dos 60% de lá e
+    /// os outros 40% ficam para a voz de todo mundo que passa pelo servidor.
+    #[must_use]
+    pub const fn reserva_da_voz(&self) -> u32 {
+        self.caminho_bps - self.perna_de_quem_compartilha()
+    }
+
+    /// 60% do caminho de quem compartilha: o que esta máquina pode subir.
+    const fn perna_de_quem_compartilha(&self) -> u32 {
+        fracao_do(self.caminho_bps)
+    }
+
+    /// 60% do caminho de quem hospeda, dividido pelas cópias que o servidor
+    /// sobe. A perna que o §5.1 acrescentou.
+    const fn perna_de_quem_hospeda(&self) -> u32 {
+        fracao_do(self.caminho_de_quem_hospeda_bps) / self.copias()
+    }
+
+    /// O menor das duas pernas de rede, antes da faixa e da escolha.
     const fn teto_da_faixa_nominal(&self) -> u32 {
-        // Em `u64` porque `caminho_bps × 60` estoura `u32` a partir de uns
-        // 71 Mbit/s, que é uma fibra doméstica comum. Um teto que dá a volta
-        // vira um teto minúsculo, e o defeito apareceria só na casa boa.
-        ((self.caminho_bps as u64 * FRACAO_DO_CAMINHO as u64) / 100) as u32
+        let hospeda = self.perna_de_quem_hospeda();
+        let compartilha = self.perna_de_quem_compartilha();
+        if hospeda < compartilha {
+            hospeda
+        } else {
+            compartilha
+        }
+    }
+
+    /// Qual das três pernas está mandando nesta faixa (§5.1).
+    ///
+    /// Empate vai para a perna de quem hospeda e depois para a de quem
+    /// compartilha, nesta ordem, porque é a ordem em que a rede manda: numa
+    /// sala onde os três números se encontram, dizer «a escolha» seria dizer à
+    /// pessoa que basta escolher mais.
+    #[must_use]
+    pub fn perna_que_aperta(&self, faixa: SyncBand) -> PernaQueAperta {
+        let hospeda = self.perna_de_quem_hospeda();
+        let compartilha = self.perna_de_quem_compartilha();
+        // A faixa corta as duas pernas de rede pelo mesmo fator, então ela não
+        // muda quem é a menor — só a escolha da pessoa é que pode ultrapassar
+        // uma perna cortada, e é por isso que ela entra depois.
+        let rede = if hospeda <= compartilha {
+            (hospeda, PernaQueAperta::QuemHospeda)
+        } else {
+            (compartilha, PernaQueAperta::QuemCompartilha)
+        };
+        let da_faixa = match faixa {
+            SyncBand::Nominal => rede.0,
+            SyncBand::Degraded => rede.0 / 2,
+            SyncBand::Critical => return rede.1,
+        };
+        match self.escolha_bps {
+            Some(escolha) if escolha < da_faixa => PernaQueAperta::Escolha,
+            _ => rede.1,
+        }
     }
 
     /// O teto agora, dada a faixa em que o sinal da voz está.
@@ -255,8 +438,8 @@ impl TetoDeVideo {
             SyncBand::Degraded => nominal / 2,
             SyncBand::Critical => return Teto::Parado(MotivoDeParada::SinalCritico),
         };
-        // O mínimo entre o que o caminho aguenta e o que a pessoa pediu. Os
-        // dois são teto; quem manda é o menor, sempre.
+        // O mínimo entre o que os dois caminhos aguentam e o que a pessoa
+        // pediu. Os três são teto; quem manda é o menor, sempre.
         let teto = match self.escolha_bps {
             Some(escolha) => da_faixa.min(escolha),
             None => da_faixa,
@@ -265,6 +448,102 @@ impl TetoDeVideo {
             return Teto::Parado(MotivoDeParada::AbaixoDoPiso);
         }
         Teto::Bps(teto)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A resolução, que acompanha o teto e não a contagem de gente
+// ---------------------------------------------------------------------------
+
+/// A partir de quanto o orçamento compra 1080p, em bits por segundo.
+///
+/// **`ESTIMADO` está no nome de propósito, e não sai até alguém medir.** O
+/// §5.1 escreve isso com todas as letras: *«a tabela mede um teto só. Os
+/// limiares certos saem de uma corrida por teto — 1200, 800, 500, 300 kbps —, e
+/// ela ainda não foi feita.»*
+///
+/// De onde este número veio, e o que nele é chute:
+///
+/// | resolução | kbps entregues | quadros perdidos |
+/// |---|---|---|
+/// | 1080p | 1146 | **16,2%** |
+/// | 720p | 872 | 11,1% |
+/// | 540p | 796 | 12,4% |
+/// | 360p | 416 | 2,2% |
+///
+/// A única medida que existe é essa, e ela é **num teto só**, o de 1200 kbps
+/// que `spikes/tela-no-transporte` sustenta. O que ela diz sobre 1080p é
+/// negativo: a 1200 kbps o controle de taxa do OpenH264 joga fora um sexto do
+/// que a captura entrega, e o que chega do outro lado é imagem grande e trêmula.
+/// Ela **não** diz onde 1080p passa a caber.
+///
+/// 1500 kbps é o palpite com a única aritmética disponível atrás: os 1146 kbps
+/// entregues cobriram 83,8% dos quadros, e carregar os outros pediria uns
+/// 1368 kbps — 1500 é isso com a folga que um ponto medido merece. **O modelo é
+/// ingênuo pela mesma razão que o comentário de [`PISO_DE_BANDA_BPS`] já dá:**
+/// bits não escalam com quadros, o quadro-chave custa o mesmo e o conteúdo
+/// parado também. A prova de que é ingênuo está na própria tabela — 540p perde
+/// *mais* quadros que 720p gastando *menos* bits, o que nenhuma regra de três
+/// explica.
+pub const TETO_ESTIMADO_PARA_1080P_BPS: u32 = 1_500_000;
+
+/// A partir de quanto o orçamento compra 720p, em bits por segundo.
+///
+/// Mesma tabela, mesma ressalva de [`TETO_ESTIMADO_PARA_1080P_BPS`]: um teto
+/// medido, e o resto é estimativa.
+///
+/// 900 kbps é o que 720p **de fato gastou** no teto de 1200 (872 kbps),
+/// arredondado para cima. Abaixo disso o orçamento deixa de cobrir o que essa
+/// resolução pede, e o degrau seguinte — 540p, o piso da lista do §5 — passa a
+/// ser a maior que ainda compra alguma coisa.
+pub const TETO_ESTIMADO_PARA_720P_BPS: u32 = 900_000;
+
+/// A maior resolução que este teto ainda compra (§5.1).
+///
+/// **O gatilho é o teto, e não a contagem de gente.** O pedido de quem desenha
+/// o produto era «se tiver mais que 4 pessoas vai para 720p, 10 vai para 480p»,
+/// e o §5.1 aceita a intenção e recusa o gatilho pelo motivo que o §5 já
+/// escreve: *resolução não controla tráfego*. Dez pessoas numa fibra cabem em
+/// 1080p; quatro numa subida ruim não cabem em 720p. Amarrar a resolução à
+/// contagem degradaria a primeira à toa e ainda estouraria a segunda.
+///
+/// A contagem entra assim mesmo, e entra pelo lugar certo: N está **dentro** do
+/// teto, pela perna de quem hospeda ([`TetoDeVideo`]). Quem quiser escrever
+/// `720p · 6 pessoas assistindo` na tela tem as duas metades —
+/// [`TetoDeVideo::espectadores`] para o número e
+/// [`TetoDeVideo::perna_que_aperta`] para a razão.
+///
+/// O resultado é **teto**, como tudo no §5: quem escolheu 540p continua em
+/// 540p num caminho de fibra. Combinar as duas escolhas é
+/// [`menor_resolucao`].
+#[must_use]
+pub const fn resolucao_estimada_para(teto_bps: u32) -> Resolucao {
+    if teto_bps >= TETO_ESTIMADO_PARA_1080P_BPS {
+        Resolucao::P1080
+    } else if teto_bps >= TETO_ESTIMADO_PARA_720P_BPS {
+        Resolucao::P720
+    } else {
+        // 540p é o piso da lista do §5, e abaixo dele não há degrau: quem quer
+        // gastar menos internet mexe no teto de banda, que é o controle
+        // desenhado para isso. Se nem 540p couber, quem para é o piso de
+        // [`PISO_DE_BANDA_BPS`], com motivo enumerado — não uma quarta
+        // resolução.
+        Resolucao::P540
+    }
+}
+
+/// A menor de duas resoluções.
+///
+/// É como a escolha da pessoa e o degrau do teto se combinam: os dois são teto
+/// (§5), e quem manda é o menor. Comparar por área, e não pela ordem da
+/// enumeração, porque a ordem de uma enumeração é uma coisa que alguém
+/// reorganiza sem perceber que decidiu algo.
+#[must_use]
+pub const fn menor_resolucao(a: Resolucao, b: Resolucao) -> Resolucao {
+    if a.largura() * a.altura() <= b.largura() * b.altura() {
+        a
+    } else {
+        b
     }
 }
 
@@ -838,6 +1117,16 @@ mod tests {
     /// 3. piorar a faixa nunca dá mais ao vídeo, e a faixa crítica **para** o
     ///    vídeo com motivo enumerado em vez de deixá-lo caindo para sempre.
     ///
+    /// E, desde 22/08/2026, uma quarta, que é a perna que o §5.1 acrescentou
+    /// quando decidiu que **o servidor encaminha**:
+    ///
+    /// 4. com N espectadores crescendo, o teto **cai** e a reserva da voz
+    ///    **nunca** encolhe. As N cópias saem da subida de quem hospeda, e o
+    ///    que elas somam nunca passa dos mesmos 60% de lá — porque a voz de
+    ///    todo mundo passa por aquela máquina também. Sem esta propriedade o
+    ///    produto media uma perna e estourava a outra, que é o defeito que o
+    ///    §5.1 chama de o mais caro daquela seção.
+    ///
     /// Se este teste ficar vermelho, o recurso está pior que não existir: é a
     /// tela tornando a conversa impossível, que é exatamente o que o spike
     /// mediu e o que este ciclo existe para não repetir.
@@ -901,6 +1190,75 @@ mod tests {
                 teto.teto(SyncBand::Critical),
                 Teto::Parado(MotivoDeParada::SinalCritico),
                 "sinal crítico tinha de parar o vídeo em {caminho} bps"
+            );
+
+            // ---------------------------------------------------------------
+            // 4 — a perna que o §5.1 acrescentou. O servidor encaminha, e quem
+            // sobe N cópias é quem hospeda; aqui as duas casas têm o mesmo
+            // caminho, que é o caso em que a única coisa que se mexe é o N.
+            // ---------------------------------------------------------------
+            let mut anterior_com_n = u32::MAX;
+            for espectadores in [0, 1, 2, 4, 10, 1_000] {
+                let com_n = TetoDeVideo::com_caminho(caminho)
+                    .com_caminho_de_quem_hospeda(caminho)
+                    .com_espectadores(espectadores);
+
+                // 4a — a reserva da voz não sabe quantas pessoas entraram. É a
+                // mesma frase de sempre, agora contra a coisa que mudou: uma
+                // sala que cresce aperta o vídeo, nunca a voz.
+                assert_eq!(
+                    com_n.reserva_da_voz(),
+                    reserva,
+                    "a reserva da voz encolheu com {espectadores} espectadores em {caminho} bps"
+                );
+
+                for faixa in [SyncBand::Nominal, SyncBand::Degraded] {
+                    let agora = com_n.teto(faixa);
+
+                    // 4b — o que o servidor sobe, que são N cópias do mesmo
+                    // teto, nunca passa dos 60% do caminho de quem hospeda. Os
+                    // outros 40% são a voz de todo mundo que passa por lá, e
+                    // esta é a única linha que prova que a divisão por N está
+                    // sendo feita antes do min e não depois.
+                    //
+                    // O 60 vai escrito à mão pelo mesmo motivo da propriedade
+                    // 0: com a constante, este teste concordaria com 100.
+                    let subida = u64::from(agora.bps()) * u64::from(espectadores);
+                    assert!(
+                        subida <= u64::from(caminho) * 60 / 100,
+                        "com {espectadores} espectadores em {faixa:?} o servidor subiria \
+                         {subida} bps de tela num caminho de {caminho}"
+                    );
+                }
+
+                // 4c — mais gente nunca dá mais banda ao vídeo. É o outro lado
+                // de 4b: se o teto subisse com N, a conta acima ainda fecharia
+                // por acaso em algum caminho largo.
+                let agora = com_n.teto(SyncBand::Nominal).bps();
+                assert!(
+                    agora <= anterior_com_n,
+                    "o teto subiu ao entrar mais gente: {anterior_com_n} → {agora} bps \
+                     com {espectadores} espectadores em {caminho} bps"
+                );
+                anterior_com_n = agora;
+            }
+
+            // 4d — ninguém assistindo não é divisão por zero e também não é
+            // teto infinito. Zero e um dão a mesma conta, que é o que faz a
+            // entrada da primeira pessoa não mexer em nada.
+            let vazio = TetoDeVideo::com_caminho(caminho)
+                .com_caminho_de_quem_hospeda(caminho)
+                .com_espectadores(0);
+            let uma_pessoa = vazio.com_espectadores(1);
+            assert_eq!(
+                vazio.teto(SyncBand::Nominal),
+                uma_pessoa.teto(SyncBand::Nominal),
+                "sala vazia e sala de uma pessoa deram tetos diferentes em {caminho} bps"
+            );
+            assert_eq!(
+                vazio.espectadores(),
+                0,
+                "o número que a tela escreve tem de ser o de verdade, não o da conta"
             );
         }
     }
@@ -969,6 +1327,161 @@ mod tests {
                 .teto(SyncBand::Nominal),
             Teto::Parado(MotivoDeParada::AbaixoDoPiso)
         );
+    }
+
+    #[test]
+    fn a_resolucao_acompanha_o_teto_e_nao_a_contagem_de_gente() {
+        // §5.1: «o gatilho é o teto, que já tem N dentro dele». O pedido era
+        // «mais de 4 pessoas vai para 720p», e a razão de recusá-lo é que
+        // resolução não controla tráfego: dez pessoas numa fibra cabem em
+        // 1080p, quatro numa subida ruim não cabem em 720p.
+        //
+        // Dez pessoas numa fibra de 100 Mbps:
+        let fibra = TetoDeVideo::com_caminho(100_000_000)
+            .com_caminho_de_quem_hospeda(100_000_000)
+            .com_espectadores(10);
+        assert_eq!(
+            fibra.teto(SyncBand::Nominal).resolucao_estimada(),
+            Some(Resolucao::P1080),
+            "dez pessoas numa fibra continuam cabendo em 1080p"
+        );
+
+        // Quatro numa subida doméstica de 2 Mbps, que é o cano das duas provas:
+        let casa = TetoDeVideo::com_caminho(CAMINHO_DA_PROVA_BPS)
+            .com_caminho_de_quem_hospeda(CAMINHO_DA_PROVA_BPS)
+            .com_espectadores(4);
+        // 1200 kbps ÷ 4 são 300, que não compram nem 720p.
+        assert_eq!(casa.teto(SyncBand::Nominal), Teto::Bps(300_000));
+        assert_eq!(
+            casa.teto(SyncBand::Nominal).resolucao_estimada(),
+            Some(Resolucao::P540),
+            "quatro pessoas numa casa não cabem em 720p, e é o teto que diz isso"
+        );
+
+        // E o degrau anda com o teto, não com o número de pessoas: a mesma sala
+        // de quatro numa subida três vezes maior sobe de degrau sozinha.
+        let casa_boa = casa.com_caminho_de_quem_hospeda(6_000_000);
+        assert_eq!(
+            casa_boa.teto(SyncBand::Nominal).resolucao_estimada(),
+            Some(Resolucao::P720),
+            "a mesma sala de quatro, com mais subida, tinha de subir de degrau"
+        );
+    }
+
+    #[test]
+    fn os_degraus_de_resolucao_sao_o_que_a_unica_medida_sustenta() {
+        // A tabela do §5.1, medida num teto só — 1200 kbps. Os limiares são
+        // estimativa, e o nome das constantes diz isso; o que este teste prende
+        // é o que a medida de fato sustenta.
+
+        // No teto que foi medido, 1080p joga fora 16,2% do que captura e 720p
+        // perde 11,1% e anda melhor. Então 1200 kbps **não** compra 1080p.
+        assert_eq!(resolucao_estimada_para(1_200_000), Resolucao::P720);
+
+        // Nos limiares, e um bit abaixo de cada um.
+        assert_eq!(
+            resolucao_estimada_para(TETO_ESTIMADO_PARA_1080P_BPS),
+            Resolucao::P1080
+        );
+        assert_eq!(
+            resolucao_estimada_para(TETO_ESTIMADO_PARA_1080P_BPS - 1),
+            Resolucao::P720
+        );
+        assert_eq!(
+            resolucao_estimada_para(TETO_ESTIMADO_PARA_720P_BPS),
+            Resolucao::P720
+        );
+        assert_eq!(
+            resolucao_estimada_para(TETO_ESTIMADO_PARA_720P_BPS - 1),
+            Resolucao::P540
+        );
+
+        // 540p é o piso da lista, e não há um degrau abaixo dele: quem para é o
+        // piso de banda, com motivo, e não uma quarta resolução.
+        assert_eq!(resolucao_estimada_para(PISO_DE_BANDA_BPS), Resolucao::P540);
+        assert_eq!(resolucao_estimada_para(0), Resolucao::P540);
+
+        // Nunca decresce: um teto maior nunca dá uma resolução menor.
+        let mut anterior = Resolucao::P540;
+        for teto in (0..3_000_000).step_by(50_000) {
+            let agora = resolucao_estimada_para(teto);
+            assert!(
+                agora.largura() * agora.altura() >= anterior.largura() * anterior.altura(),
+                "o degrau caiu ao subir o teto para {teto} bps"
+            );
+            anterior = agora;
+        }
+
+        // E parado não é 540p: é resolução nenhuma.
+        assert_eq!(
+            Teto::Parado(MotivoDeParada::SinalCritico).resolucao_estimada(),
+            None
+        );
+    }
+
+    #[test]
+    fn a_escolha_de_resolucao_continua_teto_e_nunca_piso() {
+        // §5, a mesma regra da banda. O degrau do teto e a escolha da pessoa
+        // são os dois teto; quem manda é o menor.
+        let fibra = resolucao_estimada_para(10_000_000);
+        assert_eq!(fibra, Resolucao::P1080);
+        assert_eq!(
+            menor_resolucao(fibra, Resolucao::P540),
+            Resolucao::P540,
+            "quem escolheu 540p numa fibra continua em 540p"
+        );
+
+        let apertado = resolucao_estimada_para(500_000);
+        assert_eq!(
+            menor_resolucao(apertado, Resolucao::P1080),
+            Resolucao::P540,
+            "escolher 1080p não levanta o degrau que o orçamento comprou"
+        );
+
+        // E é simétrica: qual dos dois vem primeiro não muda a resposta.
+        for a in Resolucao::TODAS {
+            for b in Resolucao::TODAS {
+                assert_eq!(menor_resolucao(a, b), menor_resolucao(b, a));
+            }
+        }
+    }
+
+    #[test]
+    fn a_tela_pode_dizer_qual_perna_apertou() {
+        // §5.1: «quando aperta, a tela diz que apertou e por quê». É a
+        // diferença entre `720p · 6 pessoas assistindo` e `720p · sua conexão`.
+        let sala_cheia = TetoDeVideo::com_caminho(50_000_000)
+            .com_caminho_de_quem_hospeda(CAMINHO_DA_PROVA_BPS)
+            .com_espectadores(4);
+        assert_eq!(
+            sala_cheia.perna_que_aperta(SyncBand::Nominal),
+            PernaQueAperta::QuemHospeda
+        );
+
+        let subida_ruim = TetoDeVideo::com_caminho(600_000)
+            .com_caminho_de_quem_hospeda(50_000_000)
+            .com_espectadores(4);
+        assert_eq!(
+            subida_ruim.perna_que_aperta(SyncBand::Nominal),
+            PernaQueAperta::QuemCompartilha
+        );
+
+        // A escolha da pessoa só «aperta» quando ela é a menor das três — pedir
+        // mais do que o caminho dá não é a escolha mandando, é a rede.
+        let escolheu_pouco = TetoDeVideo::novo().com_escolha(Some(400_000));
+        assert_eq!(
+            escolheu_pouco.perna_que_aperta(SyncBand::Nominal),
+            PernaQueAperta::Escolha
+        );
+        let pediu_demais = TetoDeVideo::novo().com_escolha(Some(50_000_000));
+        assert_ne!(
+            pediu_demais.perna_que_aperta(SyncBand::Nominal),
+            PernaQueAperta::Escolha
+        );
+
+        // E a razão bate com o número: a perna que aperta é a que o teto seguiu.
+        assert_eq!(sala_cheia.teto(SyncBand::Nominal), Teto::Bps(300_000));
+        assert_eq!(subida_ruim.teto(SyncBand::Nominal), Teto::Bps(360_000));
     }
 
     // -----------------------------------------------------------------------

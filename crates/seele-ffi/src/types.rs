@@ -550,6 +550,127 @@ pub struct Notice {
     pub operator_text: Option<String>,
 }
 
+/// Uma tela ou uma janela que esta máquina pode transmitir.
+///
+/// O gêmeo de [`CaptureDevice`] para o vídeo, com a mesma divisão de trabalho:
+/// a casca mostra `nome`, devolve `id` em [`crate::Plug::compartilhar_tela`], e
+/// não lê nem um nem o outro.
+///
+/// `largura` e `altura` são o tamanho da **fonte**, e não o da transmissão. Os
+/// dois quase nunca são iguais: o que sai é o degrau que o teto compra (§5.1),
+/// e quem quiser o número que está saindo lê [`TelaEmCurso::altura`].
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FonteDeTela {
+    /// O identificador a devolver. Não é para uma pessoa ler.
+    pub id: u64,
+    /// Como o sistema chama esta fonte.
+    pub nome: String,
+    /// `true` para um monitor inteiro, `false` para uma janela.
+    pub monitor: bool,
+    /// Largura da fonte, em pixels.
+    pub largura: u32,
+    /// Altura da fonte, em pixels.
+    pub altura: u32,
+}
+
+/// O que o sistema operacional respondeu sobre gravar a tela.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum PermissaoDeTela {
+    /// Pode capturar.
+    Concedida,
+    /// Negada, e a pessoa precisa ir aos ajustes do sistema — no macOS o TCC
+    /// não pergunta duas vezes.
+    Negada,
+    /// Ainda não perguntada.
+    NaoPerguntada,
+    /// Esta compilação não tem como perguntar ao sistema.
+    ///
+    /// **Não estava no contrato de 22/08, e existe porque as outras três
+    /// mentiriam.** O ADR 0002 deixa esta ponte ver `seele-core` e mais nada, e
+    /// `seele-core` ainda não reexporta `seele_video::captura::macos::permissao`
+    /// — o gêmeo do que ele já faz por [`crate::capture_devices`] para o
+    /// microfone. Sem esse degrau, responder `NaoPerguntada` no macOS mandaria
+    /// a pessoa apertar um botão que não pergunta nada, e responder `Negada`
+    /// culparia um sistema que nunca foi consultado.
+    ///
+    /// Uma casca que recebe isto **não desenha o controle de compartilhar**. É a
+    /// mesma resposta que [`Snapshot::caminho`] dá com `None`: sem informação, a
+    /// tela não escreve nada.
+    NaoSeSabe,
+}
+
+/// O que a pessoa escolheu, e **todos são teto** (§5 da spec de tela).
+///
+/// Teto e nunca piso: o sistema continua livre para ficar abaixo de cada um
+/// destes números, e a §3.2 depende disso — *a voz nunca cede à tela*. Uma
+/// escolha tratada como piso devolve os 225 ms de atraso na voz que o
+/// `spikes/tela-no-transporte` mediu.
+///
+/// Nada aqui é conferido nesta travessia. Os valores da lista fechada do §5 são
+/// 1080/720/540 e 30/15/8, e quem os converte em degrau de codificador é quem
+/// abre o codificador — uma ponte que recusasse um número seria uma segunda
+/// autoridade sobre a mesma lista.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LimitesDeTela {
+    /// Teto de banda em bits por segundo. `None` = sem limite próprio; vale só
+    /// o que o caminho permitir.
+    pub banda_bps: Option<u32>,
+    /// Altura máxima em pixels: 1080, 720 ou 540.
+    pub altura_maxima: u32,
+    /// Quadros por segundo, no máximo: 30, 15 ou 8.
+    pub quadros_maximos: u32,
+}
+
+/// A transmissão de tela desta sala de voz, quando há uma.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct TelaEmCurso {
+    /// Quem está compartilhando.
+    pub de: u64,
+    /// Se é esta pessoa.
+    pub e_minha: bool,
+    /// A altura que está saindo **agora** — não a que foi pedida.
+    ///
+    /// Zero enquanto [`Self::medida`] for `false`. A tela mostra este número ao
+    /// lado do que foi pedido (§5): receber menos do que se escolheu não é
+    /// defeito, esconder que aconteceu é.
+    pub altura: u32,
+    /// Os quadros por segundo que estão saindo agora. Zero enquanto
+    /// [`Self::medida`] for `false`.
+    pub quadros: u32,
+    /// Os kbps que estão saindo agora. Zero enquanto [`Self::medida`] for
+    /// `false`.
+    pub kbps: u32,
+    /// Quantas pessoas estão na sala de voz além de quem compartilha.
+    ///
+    /// Contadas no roster **desta** máquina, que é a única contagem que existe
+    /// aqui. É a razão que a tela escreve ao lado da resolução — `720p · 6
+    /// pessoas assistindo`, §5.1 — e **não** é, hoje, o N pelo qual o Dogma
+    /// dividiu o teto: esse número é calculado em `Cage::reconferir_o_teto` e
+    /// nenhum quadro de controle o carrega de volta ao cliente. Os dois
+    /// coincidem sempre que o roster estiver em dia, e divergem no intervalo
+    /// entre alguém entrar e o `PilotJoined` chegar.
+    pub espectadores: u32,
+    /// `Some` quando a transmissão está parada, com o nome estável do motivo.
+    ///
+    /// Um nome e não uma frase, como [`Snapshot::caminho`]: a lista
+    /// [`crate::motivos_de_parada_da_tela`] é derivada deste mesmo mapeamento,
+    /// para a casca poder cobrar cobertura de frase sem repetir os nomes. Uma
+    /// frase pronta em português atravessando aqui seria a única sentença que a
+    /// casca não escreve — e a que o guarda de vocabulário da interface não vê.
+    pub parada: Option<String>,
+    /// Se [`Self::altura`], [`Self::quadros`] e [`Self::kbps`] foram medidos.
+    ///
+    /// **Não estava no contrato de 22/08.** Está aqui porque os três são `u32`
+    /// e hoje ninguém os mede: nada nesta ponte alcança o codificador de quem
+    /// compartilha, e do lado de quem assiste nada abre a recepção. Sem este
+    /// campo os três sairiam zerados e a tela escreveria `0p · 0 quadros`, que
+    /// é a mentira confiante — o mesmo defeito do jitter que o Dogma manda como
+    /// `0.0` porque não tem como medi-lo.
+    ///
+    /// `false` significa **não sei**, e a casca não escreve nada.
+    pub medida: bool,
+}
+
 /// Everything the interface needs, in one value.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Snapshot {
@@ -716,6 +837,13 @@ pub struct Snapshot {
     ///
     /// **Convenience, never enforcement**, like the five above it.
     pub may_delete_rooms: bool,
+    /// A transmissão de tela desta sala de voz, quando há uma.
+    ///
+    /// `None` quando ninguém está compartilhando **na sala onde esta pessoa
+    /// está**. Uma transmissão noutra sala não aparece aqui: o Dogma só a
+    /// anuncia a quem está lá dentro, e desenhá-la fora seria a casca contando
+    /// algo que a sessão não viu.
+    pub tela: Option<TelaEmCurso>,
     /// Set once the session is over.
     pub ended: Option<EndReason>,
 }
@@ -781,6 +909,18 @@ pub enum Event {
         /// Where it is.
         transfer: Transfer,
     },
+    /// A transmissão de tela desta sala começou, acabou, ou mudou de número.
+    ///
+    /// Grosso como os outros: o que mudou está no próximo [`Snapshot::tela`].
+    ///
+    /// Acende também quando **só o roster** anda e há uma transmissão em curso,
+    /// e isso não é generosidade — é o §5.1. A contagem de espectadores é um
+    /// campo de [`TelaEmCurso`], ela é o N que divide o teto, e uma quinta
+    /// pessoa entrando muda o que está saindo sem que nenhuma mensagem de tela
+    /// tenha chegado. Uma casca que só redesenhasse a tela em
+    /// `ScreenShareStarted` mostraria `720p · 4 pessoas assistindo` para uma
+    /// sala de seis.
+    ScreenChanged,
 }
 
 /// Where one file is on its way.
@@ -1095,6 +1235,37 @@ pub enum PlugError {
         /// The most bytes a Dogma accepts.
         limit_bytes: u64,
     },
+    /// Alguém já está compartilhando a tela nesta sala de voz.
+    ///
+    /// Uma transmissão por sala (§6.3 da spec de tela). **Não é permissão**: a
+    /// pessoa pode compartilhar assim que a outra parar, e dizer
+    /// [`PlugError::Refused`] ou o `PermissionDenied` de um aviso a mandaria
+    /// procurar um papel que ela já tem.
+    ///
+    /// Quem decide é o Dogma, e por isso este veredito chega **também** — hoje,
+    /// só — pelo caminho assíncrono, como [`NoticeReason::ScreenShareTaken`]
+    /// num [`Event::NoticeRaised`]. A variante existe aqui para o dia em que o
+    /// pedido tiver resposta síncrona; esta ponte nunca a devolve por conta
+    /// própria, porque decidir localmente quem perdeu a corrida seria a casca
+    /// julgando no lugar do servidor.
+    ScreenShareTaken,
+    /// Esta compilação não sabe compartilhar tela.
+    ///
+    /// **Não é uma recusa e não é rede.** É a metade do caminho que ainda não
+    /// existe, e ela tem dois buracos, os dois fora deste crate:
+    ///
+    /// 1. o ADR 0002 deixa esta ponte ver `seele-core` e mais nada, e
+    ///    `seele-core` não reexporta a captura — nem a lista de fontes
+    ///    (`captura::macos::fontes`, `captura::windows::listar_monitores`) nem
+    ///    a permissão. O gêmeo disso para o microfone já existe e se chama
+    ///    [`crate::capture_devices`];
+    /// 2. `seele_core::enlace::Enlace` não tem por onde mandar
+    ///    `StartScreenShare` nem `StopScreenShare`. O protocolo os tem desde a
+    ///    onda 1; o comando do lado do cliente não foi escrito.
+    ///
+    /// Uma casca que recebe isto não deve oferecer o controle de novo com outro
+    /// texto: não há nada que a pessoa possa fazer para mudar a resposta.
+    ScreenShareUnavailable,
 }
 
 impl std::fmt::Display for PlugError {
@@ -1324,6 +1495,103 @@ mod tests {
                 .any(|campo| campo.contains("messages_revision")),
             "`messages_revision` is gone, and with it the only way a shell can \
              tell that the history moved without being handed all of it"
+        );
+    }
+
+    #[test]
+    fn os_limites_da_tela_atravessam_pelo_nome() {
+        // Este é o único valor deste módulo que viaja **para dentro**: a casca
+        // gráfica o escreve em JSON e o Tauri o desserializa aqui. Um campo
+        // renomeado de um lado só compila nos dois lados e falha em silêncio —
+        // e o que a pessoa vê é um teto de banda que não pega.
+        let escrito = r#"{"banda_bps":1200000,"altura_maxima":720,"quadros_maximos":15}"#;
+        let limites: LimitesDeTela =
+            serde_json::from_str(escrito).expect("a casca escreve exatamente estes três nomes");
+        assert_eq!(limites.banda_bps, Some(1_200_000));
+        assert_eq!(limites.altura_maxima, 720);
+        assert_eq!(limites.quadros_maximos, 15);
+
+        // «Sem limite próprio» é `null`, e não zero: zero seria um teto de zero
+        // bits por segundo, que é a mesma conta que parar.
+        let sem_teto: LimitesDeTela =
+            serde_json::from_str(r#"{"banda_bps":null,"altura_maxima":1080,"quadros_maximos":30}"#)
+                .expect("`null` é como a casca diz «sem limite próprio»");
+        assert_eq!(sem_teto.banda_bps, None);
+    }
+
+    #[test]
+    fn a_tela_em_curso_atravessa_pelo_nome_e_diz_o_que_nao_sabe() {
+        let tela = TelaEmCurso {
+            de: 3,
+            e_minha: false,
+            altura: 0,
+            quadros: 0,
+            kbps: 0,
+            espectadores: 6,
+            parada: None,
+            medida: false,
+        };
+        let json = serde_json::to_string(&tela).expect("uma estrutura simples sempre serializa");
+
+        for nome in [
+            "\"de\"",
+            "\"e_minha\"",
+            "\"altura\"",
+            "\"quadros\"",
+            "\"kbps\"",
+            "\"espectadores\"",
+            "\"parada\"",
+            "\"medida\"",
+        ] {
+            assert!(json.contains(nome), "{nome} não atravessa: {json}");
+        }
+
+        // O campo que impede a casca de escrever `0p · 0 quadros` sobre uma
+        // transmissão que ninguém mediu. Ver o doc de `TelaEmCurso::medida`.
+        assert!(
+            json.contains("\"medida\":false"),
+            "a ponte diz ter medido o que não mediu: {json}"
+        );
+    }
+
+    #[test]
+    fn a_permissao_de_tela_atravessa_com_os_nomes_que_a_casca_ramifica() {
+        let nome = |permissao: PermissaoDeTela| {
+            serde_json::to_string(&permissao).expect("um enum simples sempre serializa")
+        };
+        assert_eq!(nome(PermissaoDeTela::Concedida), "\"Concedida\"");
+        assert_eq!(nome(PermissaoDeTela::Negada), "\"Negada\"");
+        assert_eq!(nome(PermissaoDeTela::NaoPerguntada), "\"NaoPerguntada\"");
+        // A quarta, que não estava no contrato de 22/08. Uma casca que a
+        // tratasse como `NaoPerguntada` desenharia um botão de pedir permissão
+        // que não tem a quem pedir.
+        assert_eq!(nome(PermissaoDeTela::NaoSeSabe), "\"NaoSeSabe\"");
+    }
+
+    #[test]
+    fn a_tela_tem_evento_proprio_no_barramento() {
+        // Separado de `RosterChanged` pelo motivo que `seele_core::Changed` já
+        // dá: o que se mexe é um painel, e uma casca que redesenhasse a lista de
+        // pilotos inteira por causa de um número de kbps estaria redesenhando a
+        // parte da tela que não mudou.
+        let json = serde_json::to_string(&Event::ScreenChanged)
+            .expect("uma variante sem campo sempre serializa");
+        assert_eq!(json, "\"ScreenChanged\"");
+    }
+
+    #[test]
+    fn a_tela_tomada_nao_e_uma_recusa_de_permissao() {
+        // Duas variantes, e a distinção é o produto inteiro: quem perde a
+        // corrida pode compartilhar assim que o outro parar, e `PermissionDenied`
+        // a mandaria procurar um papel que ela já tem.
+        assert_ne!(
+            serde_json::to_string(&PlugError::ScreenShareTaken).ok(),
+            serde_json::to_string(&PlugError::ScreenShareUnavailable).ok(),
+            "as duas respostas de tela viraram a mesma, e as saídas delas são opostas"
+        );
+        assert_ne!(
+            NoticeReason::ScreenShareTaken,
+            NoticeReason::PermissionDenied
         );
     }
 

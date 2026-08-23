@@ -363,6 +363,25 @@ impl Codificador {
         // uma decisão nossa: no dia em que o OpenH264 mudar o dele, o §3.3
         // cairia em silêncio.
         bruta.intra_period = Some(0);
+        // E a detecção de mudança de cena **desligada**, que é a outra porta
+        // por onde um quadro-chave entra sem ninguém pedir.
+        //
+        // O padrão do OpenH264 é ligada, e para vídeo natural ela é a coisa
+        // certa: depois de um corte, prever a partir do quadro velho não
+        // adianta. Para tela é o contrário — trocar de janela, rolar um texto
+        // ou tocar um vídeo dispara «mudança de cena» o tempo todo, e cada
+        // disparo custa os mesmos 65 KiB de um chave, que são 446 ms do
+        // orçamento inteiro no teto medido.
+        //
+        // O §3.3 decidiu o oposto disto por medida: o chave é **espalhado e sob
+        // demanda**, porque forçar um a cada 2 s tira 21% dos quadros e sobe o
+        // descarte de 16,2% para 17,6%. Um encoder inserindo chaves por conta
+        // própria desfaz aquela decisão sem que ninguém a tenha revogado.
+        //
+        // Esta linha **muda comportamento**, ao contrário da de cima:
+        // `sem_pedido_nao_ha_quadro_chave_depois_do_primeiro` contava quatro
+        // chaves onde só o primeiro é permitido, e foi assim que ela apareceu.
+        bruta.scene_change_detection = Some(false);
         // Uma fatia, uma thread, e as duas linhas andam juntas: o OpenH264 só
         // paraleliza **entre fatias**, então pedir mais threads sem fatiar não
         // faz nada, e fatiar custa qualidade porque a predição não atravessa

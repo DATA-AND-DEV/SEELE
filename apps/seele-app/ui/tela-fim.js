@@ -60,6 +60,10 @@ function mostrarFim(motivo) {
   // sessão, armada com um ato sobre alguém de um servidor que já ficou para
   // trás.
   abandonarModeracao();
+  // E a caixa de compartilhar, pela mesma razão e com um agravante: ela guarda
+  // qual fonte desta máquina estava armada, e reaparecer sobre a próxima sessão
+  // ofereceria um identificador de janela de uma sessão que já acabou.
+  abandonarCompartilhar();
   $("tela-fim").hidden = false;
 
   // Lido antes de qualquer coisa desta tela mexer no estado da anterior: é o

@@ -39,6 +39,7 @@ use seele_proto::control::{
     SubsystemHealth, Telemetry, Validate,
 };
 use seele_proto::ids::{CageId, LineId, PilotId, RoleId, ScreenId, SessionId, Ssrc};
+use seele_proto::screen::SCREEN_HEADER_LEN;
 use seele_proto::sync_ratio::{SyncInputs, SyncRatio};
 use seele_proto::transport::HANDSHAKE_TIMEOUT;
 use tokio::sync::mpsc;
@@ -748,17 +749,17 @@ async fn run_session(
     recv: quinn::RecvStream,
     session: &Session,
     dogma: &Arc<Dogma>,
-    cages: &crate::cage::Cages,
+    cages: &Arc<crate::cage::Cages>,
     registry: &Registry,
 ) -> Result<()> {
     // Uma tarefa é dona do fluxo de leitura e entrega quadros inteiros por um
     // canal.
     //
     // Ler direto dentro do `select!` abaixo era um defeito, e um caro. `read`
-    // faz dois `read_exact` — tamanho e corpo — e o `select!` cancela o que
-    // perde a corrida. Cancelado entre os dois, o tamanho já consumido some, e
-    // o `read` seguinte lê os primeiros bytes do **corpo** como tamanho: o
-    // fluxo fica deslocado para sempre. Depois disso o cliente segue conectado,
+    // faz três `read_exact` — o primeiro byte, o resto do tamanho e o corpo — e
+    // o `select!` cancela o que perde a corrida. Cancelado entre eles, o que já
+    // foi consumido some, e o `read` seguinte lê os bytes do **corpo** como
+    // tamanho: o fluxo fica deslocado para sempre. Depois disso o cliente segue conectado,
     // manda mensagens, e o servidor não entende mais nenhuma.
     //
     // Aqui havia cinco ramos, um deles um `interval` de um segundo — uma
@@ -810,10 +811,23 @@ async fn run_session(
     // `select!` precisa ter — ver o comentário da tarefa leitora acima.
     let (avisos_tx, mut avisos_rx) = mpsc::channel::<ServerMessage>(AVISOS_DEPTH);
 
-    // Uma tarefa que aceita os fluxos unidirecionais que chegam. Hoje só há um
-    // tipo: alguém mandando um arquivo. Ela vive fora do `select!` de propósito
-    // — receber vinte megabytes ali dentro seria exatamente o bloqueio de
-    // cabeça de fila que o fluxo próprio existe para evitar.
+    // Por onde esta conexão é convidada a assistir uma transmissão de tela, e a
+    // tarefa que escreve essas transmissões no fluxo dela. Fora do `select!`
+    // pelo mesmo motivo da tarefa acima e por um a mais: o `write_all` de um
+    // espectador lento é onde a contrapressão dele tem de aparecer, e ela não
+    // pode aparecer no laço que lê o controle de todo mundo.
+    let (tela_tx, tela_rx) =
+        mpsc::channel::<crate::tela::AberturaDeTela>(crate::tela::ABERTURAS_DEPTH);
+    let _telas = AbortaAoSair(tokio::spawn(crate::tela::bombear(
+        connection.clone(),
+        tela_rx,
+    )));
+
+    // Uma tarefa que aceita os fluxos unidirecionais que chegam. São dois
+    // tipos: alguém mandando um arquivo e alguém compartilhando a tela. Ela
+    // vive fora do `select!` de propósito — receber vinte megabytes ali dentro
+    // seria exatamente o bloqueio de cabeça de fila que o fluxo próprio existe
+    // para evitar.
     //
     // Aceita **sempre**, inclusive num Dogma que não guarda arquivo nenhum.
     // Não aceitar deixaria o fluxo pendurado até o tempo ocioso do QUIC
@@ -831,12 +845,35 @@ async fn run_session(
         let conexao = connection.clone();
         let piloto = session.pilot;
         let apelido = session.nickname.clone();
+        let salas = Arc::clone(cages);
         tokio::spawn(async move {
             while let Ok(mut fluxo) = conexao.accept_uni().await {
                 let anexos = anexos.clone();
                 let contexto = Arc::clone(&entrada);
                 let avisos = avisos.clone();
                 let apelido = apelido.clone();
+                let salas = Arc::clone(&salas);
+                // Qual dos dois usos de fluxo unidirecional é este. O byte que
+                // decide é lido aqui e repassado adiante: `crate::frame::read_apos`
+                // explica por que ele decide, e por que ser aritmética em vez de
+                // marca é dívida.
+                let mut primeiro = [0_u8; 1];
+                if fluxo.read_exact(&mut primeiro).await.is_err() {
+                    continue;
+                }
+                let primeiro = primeiro.first().copied().unwrap_or_default();
+                if primeiro != 0 {
+                    // Uma tarefa por transmissão, como abaixo: quem
+                    // compartilha não pode fazer fila com quem manda arquivo.
+                    tokio::spawn(async move {
+                        if let Err(erro) =
+                            receber_tela(&contexto, &salas, piloto, primeiro, &mut fluxo).await
+                        {
+                            tracing::debug!(%piloto, %erro, "o fluxo de tela terminou");
+                        }
+                    });
+                    continue;
+                }
                 // Uma tarefa por transferência: duas pessoas mandando ao mesmo
                 // tempo não se enfileiram uma atrás da outra.
                 tokio::spawn(async move {
@@ -845,7 +882,7 @@ async fn run_session(
                         // chave de idempotência é o único nome que as duas
                         // pontas compartilham antes de o Dogma ter atribuído
                         // coisa alguma. Os bytes não são lidos.
-                        match crate::transfer::quem_perguntou(&mut fluxo).await {
+                        match crate::transfer::quem_perguntou(&mut fluxo, primeiro).await {
                             Ok(client_message_id) => {
                                 let _ = avisos
                                     .send(ServerMessage::AttachmentRefused {
@@ -860,8 +897,10 @@ async fn run_session(
                         }
                         return;
                     };
-                    match crate::transfer::receive(&anexos, &contexto, piloto, &apelido, &mut fluxo)
-                        .await
+                    match crate::transfer::receive(
+                        &anexos, &contexto, piloto, &apelido, &mut fluxo, primeiro,
+                    )
+                    .await
                     {
                         Ok(crate::transfer::Outcome::Published(_)) => {}
                         Ok(crate::transfer::Outcome::Refused {
@@ -926,6 +965,7 @@ async fn run_session(
                 ssrc: session.ssrc,
                 may_speak: session.may_speak,
                 outbound: outbound_tx.clone(),
+                tela: tela_tx.clone(),
             })
             .await?;
         current_cage = Some(reclaimed);
@@ -1064,7 +1104,7 @@ async fn run_session(
                             }).await?;
                             continue;
                         }
-                        assentar(dogma, cages, session, &outbound_tx, id).await?;
+                        assentar(dogma, cages, session, &outbound_tx, &tela_tx, id).await?;
                         current_cage = Some(id);
                     }
                     ClientMessage::EjectPlug => {
@@ -1807,7 +1847,7 @@ async fn run_session(
                         break;
                     }
                     Event::PilotMoved { pilot, cage: destino } if *pilot == session.pilot => {
-                        assentar(dogma, cages, session, &outbound_tx, *destino).await?;
+                        assentar(dogma, cages, session, &outbound_tx, &tela_tx, *destino).await?;
                         current_cage = Some(*destino);
                         // Where the plug is now, and then that somebody put it
                         // there. Two frames because they are two different
@@ -1988,6 +2028,7 @@ async fn assentar(
     cages: &crate::cage::Cages,
     session: &Session,
     outbound: &mpsc::Sender<Vec<u8>>,
+    tela: &mpsc::Sender<crate::tela::AberturaDeTela>,
     destino: CageId,
 ) -> Result<()> {
     // Out of the old room before into the new one. Without this a pilot who
@@ -2008,6 +2049,7 @@ async fn assentar(
             ssrc: session.ssrc,
             may_speak: session.may_speak,
             outbound: outbound.clone(),
+            tela: tela.clone(),
         })
         .await?;
 
@@ -2119,6 +2161,99 @@ async fn moderavel(dogma: &Dogma, quem: PilotId, alvo: PilotId, permission: Perm
         .may(quem, Permission::AdministerDogma)
         .unwrap_or(false);
     !alvo_administra || quem_administra
+}
+
+/// Lê o fluxo de quem compartilha e o entrega ao Cage, que o encaminha.
+///
+/// §5.1, decidido em 22/08/2026: **o servidor encaminha, como já faz com a
+/// voz.** Esta é a metade que lê; a que escreve é `crate::tela::bombear`, uma
+/// por espectador, e o que as liga é o [`crate::cage::Cage`] — que é o único
+/// lugar deste Dogma que sabe quem está na sala sem perguntar a ninguém.
+///
+/// # Só de quem o controle já autorizou
+///
+/// O fluxo não carrega identidade nenhuma, e não deve carregar: quem manda é a
+/// conexão, como o `ssrc` de `Cage::forward`. Então a primeira pergunta é ao
+/// registro que decidiu a corrida do §6 item 3 — este piloto está transmitindo
+/// em alguma sala? —, e o `ScreenId` que o cabeçalho declara é conferido contra
+/// o que **este Dogma** atribuiu. Sem essas duas linhas, abrir um fluxo seria
+/// uma maneira de compartilhar tela sem pedir, e de assinar a transmissão de
+/// outra pessoa.
+async fn receber_tela(
+    dogma: &Dogma,
+    cages: &crate::cage::Cages,
+    pilot: PilotId,
+    primeiro: u8,
+    fluxo: &mut quinn::RecvStream,
+) -> Result<()> {
+    let Some((cage, screen)) = dogma.telas.lock().await.de(pilot) else {
+        // Parar o fluxo e não ignorá-lo: um cliente que abriu sem pedir tem de
+        // descobrir agora, e não pela imagem que nunca aparece do outro lado.
+        let _ = fluxo.stop(quinn::VarInt::from_u32(crate::tela::CODIGO_DE_CORTE));
+        bail!("um fluxo de tela chegou de quem não está transmitindo");
+    };
+
+    let mut abertura = [0_u8; SCREEN_HEADER_LEN];
+    if let Some(resto) = abertura.get_mut(1..) {
+        fluxo.read_exact(resto).await?;
+    }
+    if let Some(primeiro_byte) = abertura.first_mut() {
+        *primeiro_byte = primeiro;
+    }
+    let (cabecalho, _) = seele_proto::screen::ScreenHeader::decode(&abertura)?;
+    if cabecalho.screen != screen {
+        let _ = fluxo.stop(quinn::VarInt::from_u32(crate::tela::CODIGO_DE_CORTE));
+        bail!(
+            "um fluxo de tela declarou {} e não {screen}",
+            cabecalho.screen
+        );
+    }
+
+    let sala = cages.of(cage).await;
+    // Uma vaga só: o Dogma encerra uma transmissão uma vez, e a segunda razão
+    // não teria o que dizer.
+    let (fim_tx, mut fim_rx) = mpsc::channel::<crate::tela::FimDaTela>(1);
+    sala.send(CageCommand::TelaAbriu {
+        from: pilot,
+        screen,
+        abertura: abertura.to_vec(),
+        fim: fim_tx,
+    })
+    .await?;
+
+    let mut buffer = vec![0_u8; crate::tela::LEITURA_LEN];
+    loop {
+        // Consultado entre duas leituras e não dentro de um `select!`: a
+        // leitura do `quinn` não é cancel-safe, e um `select!` que a cancelasse
+        // no meio perderia os bytes já retirados do fluxo — o mesmo defeito que
+        // a tarefa leitora do controle existe para não ter.
+        if let Ok(motivo) = fim_rx.try_recv() {
+            tracing::info!(%pilot, %cage, %screen, ?motivo, "o Dogma encerrou uma transmissão");
+            let _ = fluxo.stop(quinn::VarInt::from_u32(crate::tela::CODIGO_DE_CORTE));
+            // Anunciado, porque o plano de controle é o único lugar de onde a
+            // sala aprende que a tela parou. Sem isto ficaria desenhada uma
+            // transmissão que já não tem quem a bombeie.
+            encerrar_telas_de(dogma, pilot).await;
+            return Ok(());
+        }
+        match fluxo.read(&mut buffer).await? {
+            Some(lidos) => {
+                let bytes = buffer.get(..lidos).unwrap_or_default().to_vec();
+                // `send` e não `try_send`: encher a fila do Cage tem de virar
+                // contrapressão no QUIC de quem compartilha, que é onde ela
+                // conserta alguma coisa. Descartar aqui deslocaria o
+                // enquadramento de todos os espectadores de uma vez.
+                sala.send(CageCommand::TelaBytes { from: pilot, bytes })
+                    .await?;
+            }
+            None => break,
+        }
+    }
+    // O fim limpo. Quem parou de propósito também manda `StopScreenShare` pelo
+    // controle, e é ele que anuncia; quem sumiu é recolhido pelo fim da sessão.
+    // Aqui só o encaminhamento morre, que é o que o §5.1 pôs sob esta função.
+    let _ = sala.send(CageCommand::TelaFechou { from: pilot }).await;
+    Ok(())
 }
 
 /// Encerra e anuncia o que este piloto estivesse transmitindo, onde estivesse.

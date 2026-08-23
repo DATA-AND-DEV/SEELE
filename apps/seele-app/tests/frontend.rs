@@ -1244,6 +1244,48 @@ fn every_path_a_connection_can_take_has_a_sentence_in_the_page() {
 }
 
 #[test]
+fn every_reason_a_screen_share_can_stop_for_has_a_sentence() {
+    // The twin of the two guards above, on the list that arrived with screen
+    // sharing. `TelaEmCurso::parada` crosses as a stable name — not as a
+    // sentence — for the reason the FFI writes beside it: a ready-made
+    // Portuguese sentence coming over the bridge would be the one line of this
+    // window the vocabulary guard cannot see, and the one nobody could
+    // translate.
+    //
+    // A name with no entry here draws «A TELA PAROU» and nothing else, which is
+    // the shell knowing that something stopped and not why — and the two
+    // reasons ask opposite things of the reader: one is the voice winning, and
+    // the other is the path having nothing left.
+    //
+    // The list is `seele_ffi::motivos_de_parada_da_tela()`, tied to that
+    // crate's own `match` by a test over there, and not a copy written out
+    // here. The copy is the bug this cycle already paid for once.
+    let file = without_comments(&read("ui/frases.js"));
+    let written: BTreeSet<String> = sentences_of(&file, "PARADAS")
+        .into_iter()
+        .map(|(variant, _)| variant)
+        .collect();
+    assert!(
+        !written.is_empty(),
+        "`PARADAS` came out empty, so the loop below is comparing against nothing"
+    );
+
+    let reasons = seele_ffi::motivos_de_parada_da_tela();
+    assert!(
+        !reasons.is_empty(),
+        "`seele_ffi::motivos_de_parada_da_tela` came back empty, so this guard is \
+         asserting over nothing"
+    );
+    for reason in &reasons {
+        assert!(
+            written.contains(*reason),
+            "a screen share can stop for `{reason}` and no sentence says what that \
+             is, so the stage says it stopped and never why"
+        );
+    }
+}
+
+#[test]
 fn the_screen_never_invents_a_word_for_a_path_it_does_not_know() {
     // «DIRECT» is not sayable, and this is the guard that keeps it unsaid. The
     // ladder has five rungs and the distinction that word would erase is the
@@ -7133,11 +7175,12 @@ const LIMITE_DE_FRASE: usize = 180;
 /// Dogma down with the window. Nor the two `fraseDeErro` composes for a changed
 /// key: those are two fingerprints with a line either side, and a fingerprint is
 /// as long as it is. What this guards is the prose.
-const DICIONARIOS: [&str; 8] = [
+const DICIONARIOS: [&str; 9] = [
     "MOTIVOS",
     "AVISOS",
     "ETAPAS",
     "CAMINHOS",
+    "PARADAS",
     "FRASES",
     "ANEXOS",
     "TRANSFERENCIAS",

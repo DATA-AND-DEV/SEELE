@@ -306,6 +306,24 @@ impl Telas {
         self.por_cage.get(&cage).copied()
     }
 
+    /// Onde este piloto está transmitindo, se está.
+    ///
+    /// A pergunta que o **encaminhamento** faz, e ela vem ao contrário de
+    /// [`Self::em`] por um motivo concreto: a tarefa que aceita os fluxos
+    /// unidirecionais de uma conexão vive fora do laço da sessão — é o que a
+    /// impede de bloquear o controle — e por isso não enxerga em que Cage o
+    /// plug está. Este registro é a única fonte que sabe as duas coisas ao
+    /// mesmo tempo, e é a mesma que decidiu a corrida do §6 item 3. Perguntar a
+    /// ela é o que garante que um fluxo de tela só é aceito de quem o controle
+    /// já autorizou.
+    #[must_use]
+    pub fn de(&self, pilot: PilotId) -> Option<(CageId, ScreenId)> {
+        self.por_cage
+            .iter()
+            .find(|(_, (dono, _))| *dono == pilot)
+            .map(|(cage, (_, screen))| (*cage, *screen))
+    }
+
     /// Tudo o que está acontecendo agora, achatado.
     ///
     /// Achatado e não devolvido como mapa porque o único chamador percorre a

@@ -1,0 +1,254 @@
+/* SEELE · Entry Plug — compartilhar a tela (`#compartilhar`), camada sobre a
+   chamada.
+
+   Camada e não tela, pela mesma razão que o alerta, a bateria e a moderação:
+   `specs/07` não deixa esta janela trocar a conversa por outra coisa, e escolher
+   o que mostrar é uma decisão que se toma olhando para a sala.
+
+   Carrega depois de `tela-chamada.css` e depende disso só por ordem de leitura:
+   nada aqui refina classe de lá. O palco — onde a transmissão de fato aparece,
+   e onde fica escrito o que está saindo ao lado do que foi pedido — mora
+   naquela folha, e não nesta, porque ele continua na tela com esta caixa
+   fechada.
+
+   ---- toda classe daqui começa por `compartilhar-` ----
+
+   As folhas caem num só espaço de nomes, na ordem em que `index.html` as
+   carrega, e duas escolhendo o mesmo nome não é conflito que o navegador
+   reporte: é a de baixo ganhando todo empate em silêncio.
+
+   ---- nenhum vermelho de alarme ----
+
+   `tokens.css` marca o vermelho «EXCLUSIVO alerta e queda». Nada aqui é queda:
+   uma permissão negada tem conserto nos ajustes do sistema e uma transmissão
+   ocupada acaba quando o outro parar. O acento é o laranja institucional. O
+   único vermelho desta caixa é o `.erro` de `base.css`, que é texto de falha e
+   nunca a moldura.
+
+   Nenhuma cor literal aqui, nem em regra nem em comentário: `tests/tokens.rs`
+   lê o arquivo inteiro. */
+
+/* ---------- o véu ----------
+   O token pintando um pseudo-elemento, e não `opacity` no contêiner — aquilo
+   desbotaria a caixa junto com o fundo, e é a caixa que precisa ser lida. */
+
+.camada-compartilhar {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.camada-compartilhar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--seele-negro-absoluto);
+  opacity: 0.72;
+}
+
+/* ---------- a caixa ----------
+   `overflow-y: auto` porque o que ela mostra vem da máquina: quantas janelas
+   existem é decisão de quem está na frente dela, e sem isto a caixa passaria da
+   janela num corpo com `overflow: hidden`, levando o botão de compartilhar para
+   fora de vista. */
+.compartilhar-caixa {
+  position: relative;
+  width: 640px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  border: var(--seele-b-forte) solid var(--seele-laranja-nerv);
+  background: var(--seele-negro-absoluto);
+}
+
+/* ---------- a cabeça ----------
+   Bloco sólido com texto no negro absoluto, que é a regra de inversão do v2:
+   cartela nunca é texto colorido sobre fundo escuro. */
+.compartilhar-cabeca {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  background: var(--seele-laranja-nerv);
+  color: var(--seele-negro-absoluto);
+}
+
+.compartilhar-titulo {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 26px;
+  line-height: 1;
+  letter-spacing: 0.12em;
+}
+
+.compartilhar-fechar {
+  font: inherit;
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+  padding: 4px 8px;
+  color: var(--seele-negro-absoluto);
+  background: none;
+  border: var(--seele-b) solid var(--seele-negro-absoluto);
+  cursor: pointer;
+}
+
+.compartilhar-fechar:focus-visible {
+  outline: var(--seele-b-forte) solid var(--seele-negro-absoluto);
+  outline-offset: 2px;
+}
+
+/* ---------- o corpo ---------- */
+
+.compartilhar-corpo {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px;
+}
+
+/* ---------- a permissão ----------
+   Só aparece quando há o que dizer. Concedida, o bloco some inteiro: dizer
+   «está tudo certo» a cada abertura é ensinar a não ler a linha no dia em que
+   ela não estiver. */
+
+.compartilhar-permissao {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border: var(--seele-b) solid var(--seele-laranja-nerv);
+  background: var(--seele-laranja-carga);
+}
+
+.compartilhar-permissao-diz {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: var(--seele-t-secao);
+  letter-spacing: var(--seele-tracking-cartela);
+  color: var(--seele-laranja-nerv);
+}
+
+/* ---------- a lista de fontes ---------- */
+
+.compartilhar-escolha {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.compartilhar-vazio {
+  margin: 0;
+  font-size: var(--seele-t-corpo);
+  line-height: 1.55;
+  color: var(--seele-osso);
+}
+
+/* Quem rola é a caixa da lista e não a caixa inteira: os limites e o botão de
+   compartilhar têm de continuar visíveis enquanto se procura uma janela no meio
+   de trinta. */
+.compartilhar-fontes-caixa {
+  max-height: 240px;
+  overflow-y: auto;
+  border: var(--seele-b) solid var(--seele-linha-forte);
+}
+
+.compartilhar-fontes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.compartilhar-fonte {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  font: inherit;
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-dado);
+  text-align: left;
+  color: var(--seele-osso);
+  background: none;
+  border: 0;
+  border-bottom: var(--seele-b) solid var(--seele-linha);
+  cursor: pointer;
+}
+
+.compartilhar-fonte:hover { background: var(--seele-negro-painel); }
+
+.compartilhar-fonte:focus-visible {
+  outline: var(--seele-b-forte) solid var(--seele-osso);
+  outline-offset: -2px;
+}
+
+/* A escolhida, e ela é dita em palavra também: `specs/05-cliente-tui.md` proíbe
+   informação transmitida só por cor, e qual fonte está armada é informação. A
+   palavra vem no `aria-pressed` e no rótulo que o script escreve. */
+.compartilhar-fonte[aria-pressed="true"] {
+  color: var(--seele-laranja-nerv);
+  background: var(--seele-laranja-carga);
+  box-shadow: inset var(--seele-b-forte) 0 0 0 var(--seele-laranja-nerv);
+}
+
+.compartilhar-fonte-nome {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.compartilhar-fonte-diz {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: 0.12em;
+  color: var(--seele-rotulo-painel);
+}
+
+/* ---------- os três tetos ---------- */
+
+.compartilhar-limites {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 16px;
+  border-top: var(--seele-b) solid var(--seele-linha);
+}
+
+.compartilhar-campo {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.compartilhar-select {
+  font: inherit;
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-dado);
+  padding: 6px 8px;
+  min-width: 180px;
+  color: var(--seele-osso);
+  background: var(--seele-negro-painel);
+  border: var(--seele-b) solid var(--seele-linha-forte);
+  border-radius: var(--seele-raio);
+}
+
+.compartilhar-select:focus-visible {
+  outline: var(--seele-b-forte) solid var(--seele-osso);
+  outline-offset: 1px;
+}
+
+/* ---------- os botões ---------- */
+
+.compartilhar-botoes {
+  display: flex;
+  gap: 16px;
+  padding-top: 16px;
+  border-top: var(--seele-b) solid var(--seele-linha);
+}

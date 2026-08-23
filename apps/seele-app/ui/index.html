@@ -39,6 +39,7 @@
 <link rel="stylesheet" href="camada-moderar.css">
 <link rel="stylesheet" href="camada-ajuda.css">
 <link rel="stylesheet" href="tela-chamada.css">
+<link rel="stylesheet" href="camada-compartilhar.css">
 <link rel="stylesheet" href="tela-dogma.css">
 <link rel="stylesheet" href="tela-fim.css">
 <link rel="stylesheet" href="tela-auth.css">
@@ -1472,6 +1473,87 @@
       </div>
 
       <!--
+        ---- o palco: a tela que alguém está compartilhando ----
+
+        No alto da coluna da sala e nunca atrás de um botão. No Windows a
+        captura do sistema não pergunta nada a ninguém — o único consentimento
+        que existe é o desta interface —, e ele só vale se quem está na sala
+        enxergar que há uma transmissão sem precisar procurar.
+
+        Sem ninguém transmitindo é uma faixa de uma linha, que diz isso e diz
+        por onde se começa. Com alguém transmitindo ele cresce, e os cartões
+        dividem o que sobra da coluna.
+      -->
+      <section id="palco" class="chamada-palco" data-transmitindo="nao"
+               aria-labelledby="palco-titulo">
+        <div class="chamada-palco-cabeca">
+          <h2 id="palco-titulo" class="chamada-titulo">
+            <span>TELA COMPARTILHADA</span><span class="chamada-codigo">D·05</span>
+          </h2>
+          <!--
+            A razão, ao lado da medida, e ela é literal do §5.1 da spec:
+            `720p · 6 pessoas assistindo`. O gatilho da resolução é o teto e não
+            a contagem de gente — resolução não controla tráfego —, mas quem lê
+            quer previsibilidade, e a contagem é a metade do pedido que estava
+            certa. Escrevê-la aqui é dizer a razão sem mentir sobre a causa.
+          -->
+          <span id="palco-razao" class="chamada-palco-razao"></span>
+        </div>
+
+        <div class="chamada-palco-corpo">
+          <p id="palco-quem" class="chamada-palco-quem">NINGUÉM ESTÁ COMPARTILHANDO A TELA</p>
+          <p id="palco-nota" class="nota">Use COMPARTILHAR A TELA aqui embaixo para mostrar um monitor ou uma janela sua.</p>
+          <!--
+            O motivo de uma transmissão parada chega por extenso do outro lado
+            (`TelaEmCurso::parada`), e é a única frase desta janela escrita
+            fora daqui. Ela aparece como está: reescrevê-la seria inventar uma
+            causa que esta tela não conhece.
+          -->
+          <p id="palco-parada" class="chamada-palco-parada" hidden></p>
+        </div>
+
+        <!--
+          O que está saindo **agora**, ao lado do que foi pedido. Obrigatório
+          pelo §5, e nesta ordem: escolher 1080p e receber 720p não é defeito;
+          esconder que aconteceu, é.
+
+          A metade do pedido só existe para quem compartilha, e só nesta janela
+          — o teto é a escolha de outra pessoa e não atravessa em lugar nenhum.
+          Quem assiste lê só a coluna da esquerda, que é o que se sabe.
+        -->
+        <dl id="palco-numeros" class="chamada-palco-numeros" hidden>
+          <div class="chamada-palco-linha">
+            <dt class="rotulo">RESOLUÇÃO</dt>
+            <dd class="chamada-palco-par">
+              <span id="palco-altura" class="chamada-palco-agora"></span>
+              <span class="chamada-palco-pedido">pedido: <span id="palco-altura-pedida"></span></span>
+            </dd>
+          </div>
+          <div class="chamada-palco-linha">
+            <dt class="rotulo">QUADROS</dt>
+            <dd class="chamada-palco-par">
+              <span id="palco-quadros" class="chamada-palco-agora"></span>
+              <span class="chamada-palco-pedido">pedido: <span id="palco-quadros-pedidos"></span></span>
+            </dd>
+          </div>
+          <div class="chamada-palco-linha">
+            <dt class="rotulo">BANDA</dt>
+            <dd class="chamada-palco-par">
+              <span id="palco-banda" class="chamada-palco-agora"></span>
+              <span class="chamada-palco-pedido">pedido: <span id="palco-banda-pedida"></span></span>
+            </dd>
+          </div>
+        </dl>
+
+        <!--
+          Quando aperta, a tela diz que apertou. Um compartilhamento que cai de
+          resolução porque entrou a quinta pessoa e não explica é o produto
+          sabendo algo que quem está na frente dele não sabe (§5.1).
+        -->
+        <p id="palco-aperto" class="chamada-palco-aperto" hidden></p>
+      </section>
+
+      <!--
         Um cartão por piloto. O comp corta o roster em `slice(0,4)` e é sempre
         2×2; aqui a grade se acomoda à largura e rola, porque um Cage tem
         `limit` assentos e nada garante que sejam quatro. Esconder o quinto
@@ -1514,6 +1596,19 @@
           face embarcada (inventário §5), e digitados cairiam na monoespaçada do
           sistema no meio da linha.
         -->
+        <!--
+          O terceiro botão, e ele abre uma escolha em vez de agir: o que sai
+          desta máquina depende de qual monitor, de qual janela e de três
+          tetos, e nenhum deles tem padrão que se possa presumir por alguém.
+        -->
+        <button id="chamada-compartilhar" class="chamada-acao chamada-acao-compartilhar"
+                type="button" data-ativo="nao">
+          <span class="chamada-acao-texto">
+            <span id="chamada-compartilhar-titulo" class="chamada-acao-titulo">COMPARTILHAR A TELA</span>
+            <span id="chamada-compartilhar-nota" class="nota">escolhe um monitor ou uma janela sua</span>
+          </span>
+        </button>
+
         <button id="chamada-voltar" class="chamada-acao chamada-acao-voltar" type="button">
           <span class="chamada-acao-glifo" data-glifo="linhas"></span>
           <span class="chamada-acao-texto">
@@ -2518,6 +2613,141 @@
   </div>
 </div>
 
+<!--
+  Compartilhar a tela — a camada `#compartilhar`, sobre a chamada.
+
+  Camada e não tela, pela mesma razão do alerta e da moderação: escolher o que
+  mostrar é uma decisão que se toma olhando para a sala, e `specs/07` não deixa
+  esta janela trocar a conversa por outra coisa.
+
+  ---- por que a permissão vem antes da lista ----
+
+  Uma lista vazia sem motivo é um beco. `fontes_de_tela` devolve vazio quando o
+  sistema recusou, e `permissao_de_tela` é quem diz qual foi a recusa — os dois
+  são comandos separados justamente para que esta caixa nunca precise adivinhar
+  entre «esta máquina não tem tela nenhuma» e «o sistema disse não».
+
+  A permissão só é **pedida** por aperto de botão. No macOS pedir abre o alerta
+  do TCC, e o TCC não pergunta duas vezes: um alerta de sistema que aparece sem
+  ninguém ter pedido é o que ensina a recusar por reflexo, e a recusa dali não
+  se desfaz de dentro deste app.
+
+  ---- os três controles são teto, e a caixa diz isso ----
+
+  §5 da spec de 22/08: o que a pessoa escolhe é o **máximo**, e o sistema
+  continua livre para ficar abaixo. Se a escolha virasse piso, a regra de aceite
+  cairia junto — a voz nunca cede à tela — e a conversa ficaria impossível por
+  causa do recurso.
+
+  O que está saindo de verdade não mora aqui dentro: mora no palco da chamada,
+  ao lado do que foi pedido, onde continua visível com esta caixa fechada.
+
+  ---- o que esta caixa não sabe dizer ----
+
+  Quanto a sua subida aguenta. Este produto mede RTT, jitter e perda (ADR 0024)
+  e não mede capacidade, então não há como escrever ao lado de cada opção o que
+  ela custa contra o caminho desta máquina. A caixa diz que não sabe, em vez de
+  pôr um número inventado ao lado de uma escolha.
+-->
+<div id="compartilhar" class="camada-compartilhar" role="dialog" aria-modal="true"
+     aria-labelledby="compartilhar-titulo" tabindex="-1" hidden>
+  <div class="compartilhar-caixa">
+    <div class="compartilhar-cabeca">
+      <h2 id="compartilhar-titulo" class="compartilhar-titulo">COMPARTILHAR A TELA</h2>
+      <button id="compartilhar-fechar" class="compartilhar-fechar" type="button">ESC</button>
+    </div>
+
+    <div class="compartilhar-corpo">
+      <!--
+        O bloco da permissão. Aparece só quando há o que dizer sobre ela:
+        concedida, ele some inteiro — dizer «está tudo certo» a cada abertura é
+        ensinar a não ler a linha no dia em que ela não estiver.
+      -->
+      <div id="compartilhar-permissao" class="compartilhar-permissao" hidden>
+        <p id="compartilhar-permissao-diz" class="compartilhar-permissao-diz"></p>
+        <p id="compartilhar-permissao-nota" class="nota"></p>
+        <button id="compartilhar-pedir" class="botao" type="button" hidden>PEDIR AO SISTEMA</button>
+      </div>
+
+      <div class="compartilhar-escolha">
+        <p class="rotulo">O QUE MOSTRAR</p>
+        <p id="compartilhar-sem-fonte" class="compartilhar-vazio" hidden></p>
+        <!--
+          A lista rola dentro de si mesma: quantas janelas esta máquina tem é
+          decisão de quem está na frente dela, e uma lista que passa da caixa é
+          uma janela que deixa de existir para quem procura.
+        -->
+        <div class="compartilhar-fontes-caixa">
+          <ul id="compartilhar-fontes" class="compartilhar-fontes"
+              aria-label="telas e janelas desta máquina"></ul>
+        </div>
+      </div>
+
+      <div class="compartilhar-limites">
+        <p class="rotulo">LIMITES</p>
+        <p class="nota">Os três são teto, e nenhum é piso: o SEELE fica abaixo
+          deles sempre que subir mais atrapalharia a voz. O que está saindo de
+          verdade fica escrito na chamada, ao lado do que você pediu.</p>
+
+        <label class="compartilhar-campo">
+          <span class="rotulo">RESOLUÇÃO</span>
+          <select id="compartilhar-altura" class="compartilhar-select">
+            <option value="1080">1080p</option>
+            <option value="720" selected>720p</option>
+            <option value="540">540p</option>
+          </select>
+        </label>
+        <!--
+          Medido, e não opinião: `spikes/tela-no-codec` num teto de 1200 kbps
+          viu o próprio controle de taxa do codificador jogar fora 16% dos
+          quadros em 1080p contra 11% em 720p. Resolução alta demais para o
+          orçamento não compra nitidez — troca imagem parada por imagem grande
+          e trêmula.
+        -->
+        <p class="nota">Resolução não economiza internet: 1080p e 720p gastam o
+          mesmo. Num teto apertado o 1080p perde mais quadros e treme.</p>
+
+        <label class="compartilhar-campo">
+          <span class="rotulo">QUADROS POR SEGUNDO</span>
+          <select id="compartilhar-quadros" class="compartilhar-select">
+            <option value="30" selected>30</option>
+            <option value="15">15</option>
+            <option value="8">8</option>
+          </select>
+        </label>
+        <p class="nota">Texto continua legível a 8 por segundo. Vídeo não.</p>
+
+        <label class="compartilhar-campo">
+          <span class="rotulo">TETO DE BANDA</span>
+          <!--
+            A lista está em aberto de propósito, e o comentário é o registro
+            disso: o spike do transporte mediu **um** teto, o de 1200 kbps, e
+            fixar uma lista exige medir quanto o caminho aguenta — a pergunta
+            que a spec deixou aberta. Estes três degraus saem daquele único
+            número, e a nota abaixo não os vende como medida.
+          -->
+          <select id="compartilhar-banda" class="compartilhar-select">
+            <option value="" selected>sem teto seu</option>
+            <option value="2000000">2000 kbps</option>
+            <option value="1200000">1200 kbps</option>
+            <option value="600000">600 kbps</option>
+          </select>
+        </label>
+        <p class="nota">Este produto não mede quanto a sua subida aguenta, então
+          não dá para dizer aqui o que cada teto custa. Sem teto seu, vale o que
+          o caminho permitir.</p>
+      </div>
+
+      <p id="compartilhar-erro" class="erro" hidden></p>
+
+      <div class="compartilhar-botoes">
+        <button id="compartilhar-comecar" class="botao" type="button">COMPARTILHAR</button>
+        <button id="compartilhar-parar" class="botao-secundario" type="button" hidden>PARAR</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="base.js"></script>
 <script src="glifos.js"></script>
 <script src="frases.js"></script>
@@ -2548,6 +2778,13 @@
   mexer nele.
 -->
 <script src="tela-chamada.js"></script>
+<!--
+  Depois da chamada por arrumação e não por necessidade: os dois lados só se
+  chamam de dentro de manipulador, que é sempre depois de todos os arquivos
+  terem rodado. `nomeDaResolucao` é declarada aqui e lida lá, como
+  `tela-chamada.js` já lê `medido` de `tela-sessao.js`.
+-->
+<script src="camada-compartilhar.js"></script>
 <script src="tela-dogma.js"></script>
 <script src="tela-fim.js"></script>
 <script src="tela-auth.js"></script>

@@ -222,6 +222,16 @@ fn o_teto_de_banda_muda_sem_derrubar_o_fluxo() {
         seele_video::codec::TETO_DA_PROVA_BPS
     );
 
+    // Um quadro antes de mexer no teto, e ele é o que faz este teste dizer
+    // alguma coisa: **o primeiro quadro de um codificador é sempre chave**, por
+    // construção — sem gastá-lo aqui, o quadro conferido lá embaixo seria o
+    // primeiro, e a asserção reprovaria o codificador por obedecer ao formato.
+    let primeiro = codificador
+        .codificar(&quadro_com_textura(Resolucao::P720, 6), false)
+        .expect("codificar o primeiro")
+        .expect("o primeiro quadro não é pulado pelo controle de taxa");
+    assert!(primeiro.chave, "o primeiro quadro de um fluxo é chave");
+
     codificador.ajustar_teto(400_000).expect("baixar o teto");
     assert_eq!(codificador.teto_bps(), 400_000);
 

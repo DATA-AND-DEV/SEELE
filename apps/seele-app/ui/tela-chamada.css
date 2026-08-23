@@ -155,6 +155,159 @@
   text-overflow: ellipsis;
 }
 
+/* ---------- o palco ----------
+
+   A transmissão de tela da sala. `[data-transmitindo]` decide entre uma faixa
+   de uma linha — que é o estado normal, e diz por onde se começa — e um bloco
+   que cresce e divide a coluna com os cartões.
+
+   Sem transmissão ele **não some**. Uma faixa de uma linha responde a pergunta
+   que quem chega faz («dá para mostrar minha tela aqui?»); um bloco que só
+   aparece depois de já estar acontecendo responde a pergunta de quem já sabe.
+
+   Nenhum vermelho aqui: `tokens.css` o marca EXCLUSIVO alerta e queda, e uma
+   transmissão parada é interrupção de recurso, não queda de enlace. O acento é
+   o laranja institucional, como no resto desta tela. */
+
+.chamada-palco {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-bottom: var(--seele-b) solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+}
+
+/* Transmitindo, o palco passa a dividir a altura com a grade. `1 1 40%` e não
+   uma altura fixa: a grade continua rolando por dentro, e uma sala com muita
+   gente não empurra o palco para fora da janela. */
+.chamada-palco[data-transmitindo="sim"] {
+  flex: 1 1 40%;
+  min-height: 160px;
+  overflow-y: auto;
+}
+
+.chamada-palco-cabeca {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding-right: 16px;
+  border-bottom: var(--seele-b) solid var(--seele-linha);
+  flex: 0 0 auto;
+}
+
+/* O título já traz a régua de baixo na cabeça inteira; repeti-la nele
+   desenharia duas linhas coladas. */
+.chamada-palco-cabeca .chamada-titulo {
+  flex: 0 0 auto;
+  border-bottom: 0;
+}
+
+/* `720p · 6 pessoas assistindo`. Tabular porque o número muda a cada pessoa que
+   entra, e um dígito que empurra a frase para o lado pisca a cada mudança. */
+.chamada-palco-razao {
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-dado);
+  font-variant-numeric: tabular-nums;
+  color: var(--seele-fosforo);
+}
+
+.chamada-palco-corpo {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+}
+
+.chamada-palco-quem {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: var(--seele-t-secao);
+  letter-spacing: var(--seele-tracking-cartela);
+  color: var(--seele-osso);
+}
+
+/* Sem ninguém transmitindo a frase é estado, e não manchete: ela desce ao corpo
+   do texto para não gritar um nada. */
+.chamada-palco[data-transmitindo="nao"] .chamada-palco-quem {
+  font-family: var(--seele-mono);
+  font-weight: normal;
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-osso);
+}
+
+/* O motivo de uma parada, escrito por quem parou. Laranja e não vermelho, pelo
+   argumento do cabeçalho desta seção. */
+.chamada-palco-parada {
+  margin: 0;
+  font-size: var(--seele-t-corpo);
+  line-height: 1.5;
+  color: var(--seele-laranja-nerv);
+}
+
+/* ---------- o que sai, ao lado do que foi pedido ---------- */
+
+.chamada-palco-numeros {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  border-top: var(--seele-b) solid var(--seele-linha);
+  flex: 0 0 auto;
+}
+
+.chamada-palco-linha {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 16px;
+  border-right: var(--seele-b) solid var(--seele-linha);
+  min-width: 0;
+}
+
+.chamada-palco-linha .rotulo {
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: 0.18em;
+}
+
+.chamada-palco-par {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+/* O que está saindo agora é o valor grande; o pedido fica ao lado, menor. Os
+   dois têm de ser lidos juntos, e o que a pessoa precisa saber primeiro é o que
+   está acontecendo — não o que ela pediu, que ela já sabe. */
+.chamada-palco-agora {
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-secao);
+  font-variant-numeric: tabular-nums;
+  color: var(--seele-fosforo);
+}
+
+.chamada-palco-pedido {
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-dado);
+  font-variant-numeric: tabular-nums;
+  color: var(--seele-rotulo-painel);
+}
+
+/* Quando aperta, a tela diz que apertou. Ocupa a largura inteira embaixo dos
+   três pares, porque explica os três de uma vez. */
+.chamada-palco-aperto {
+  margin: 0;
+  padding: 8px 16px 12px;
+  font-size: var(--seele-t-corpo);
+  line-height: 1.5;
+  color: var(--seele-laranja-nerv);
+  flex: 0 0 auto;
+}
+
 /* ---------- a grade de cartões ----------
 
    O comp corta o roster em `slice(0,4)` e é sempre 2×2. Aqui a grade se acomoda
@@ -444,13 +597,22 @@
 
 /* ---------- a barra de ações ----------
 
-   Quatro colunas iguais, como no comp: o microfone, o som, ver os canais de
-   texto e sair da sala. Cada uma com título e nota, e a nota é o que responde a
-   pergunta que o teste de LAN encontrou sem resposta — voltar para os canais
-   quer dizer parar de ouvir? */
+   Cinco colunas iguais: o microfone, o som, compartilhar a tela, ver os canais
+   de texto e sair da sala. Cada uma com título e nota, e a nota é o que responde
+   a pergunta que o teste de LAN encontrou sem resposta — voltar para os canais
+   quer dizer parar de ouvir?
+
+   Eram quatro no comp. A quinta entrou com o compartilhamento de tela, e entrou
+   aqui e não atrás de um menu porque no Windows a captura do sistema não pede
+   consentimento nenhum: o único lugar onde alguém enxerga que a própria tela
+   está saindo é esta interface. */
+/* Colunas criadas por botão visível, e não uma lista fixa de cinco: o botão de
+   compartilhar **some** numa compilação que não sabe compartilhar, e uma
+   `repeat(5, …)` deixaria a quinta coluna vazia no lugar dele. */
 .chamada-acoes {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   min-height: 64px;
   border-top: var(--seele-b) solid var(--seele-linha);
   background: var(--seele-negro-painel);
@@ -518,6 +680,15 @@
 
 .chamada-acao-surdez[data-ativo="sim"] {
   background: var(--seele-osso);
+  color: var(--seele-negro-absoluto);
+}
+
+/* Compartilhando, o botão é cartela como os outros dois: o estado ligado
+   aparecendo em forma além de aparecer escrito na nota. Laranja e não vermelho
+   — `tokens.css` reserva o vermelho para alerta e queda, e a sua tela estar
+   saindo é um estado do produto funcionando. */
+.chamada-acao-compartilhar[data-ativo="sim"] {
+  background: var(--seele-laranja-nerv);
   color: var(--seele-negro-absoluto);
 }
 

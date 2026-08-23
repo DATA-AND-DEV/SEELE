@@ -22,9 +22,42 @@ pub async fn read<T>(stream: &mut quinn::RecvStream) -> Result<T>
 where
     T: for<'de> Deserialize<'de> + Validate,
 {
-    let mut length = [0_u8; 4];
-    stream.read_exact(&mut length).await?;
-    let length = u32::from_be_bytes(length) as usize;
+    let mut primeiro = [0_u8; 1];
+    stream.read_exact(&mut primeiro).await?;
+    read_apos(stream, primeiro.first().copied().unwrap_or_default()).await
+}
+
+/// O mesmo [`read`], num fluxo cujo primeiro byte já foi lido.
+///
+/// Existe por causa de uma multiplexação que o fio não carrega: uma conexão tem
+/// um `accept_uni` só e dois usos para fluxo unidirecional — uma transferência
+/// e uma transmissão de tela —, e **nada no primeiro byte diz qual é**. O que
+/// diz é a aritmética: um quadro deste enquadramento tem no máximo
+/// [`MAX_FRAME_LEN`] bytes, 16 KiB, então o byte mais significativo do
+/// comprimento é **sempre zero**; o cabeçalho de tela abre com a versão do
+/// protocolo, que nasceu em 1 e nunca foi 0 nesta feature. Então zero é
+/// transferência e qualquer outra coisa é tela — e quem demultiplexa consome
+/// esse byte antes de saber o que fazer com ele.
+///
+/// **É uma leitura do formato, e não uma marca dele**, e isso é dívida: o lugar
+/// certo de um discriminante de fluxo é um byte de tipo em `seele-proto`, na
+/// frente dos dois cabeçalhos. Está no relatório desta tarefa.
+///
+/// # Errors
+///
+/// As mesmas de [`read`].
+pub async fn read_apos<T>(stream: &mut quinn::RecvStream, primeiro: u8) -> Result<T>
+where
+    T: for<'de> Deserialize<'de> + Validate,
+{
+    let mut resto = [0_u8; 3];
+    stream.read_exact(&mut resto).await?;
+    let length = u32::from_be_bytes([
+        primeiro,
+        resto.first().copied().unwrap_or_default(),
+        resto.get(1).copied().unwrap_or_default(),
+        resto.get(2).copied().unwrap_or_default(),
+    ]) as usize;
 
     // Before allocating. specs/08-seguranca.md.
     if length > MAX_FRAME_LEN {
