@@ -85,6 +85,15 @@ const AVISOS = {
   // seguida além de ler.
   ScreenShareTaken: "ALGUÉM JÁ ESTÁ COMPARTILHANDO A TELA NESTA SALA",
 
+  // O Dogma parou a transmissão desta pessoa porque a sala cresceu além da
+  // subida de quem hospeda (§5.1: o teto é o caminho do anfitrião ÷ quem
+  // assiste). A frase diz **de quem** é o caminho que faltou, e é para isso que
+  // ela não é `SyncDegraded`: «sinal em queda» mandaria quem lê conferir a
+  // própria conexão, que está boa. Não manda tentar de novo — o que mudaria a
+  // resposta é a sala esvaziar, e isso não está na mão de quem lê.
+  ScreenShareOverHostUplink:
+    "A TELA PAROU: A SALA CRESCEU ALÉM DA CONEXÃO DE QUEM HOSPEDA O SERVIDOR",
+
   // ---- uma sala deixou de existir ----
   //
   // Três frases e não uma, porque pedem coisas diferentes de quem lê. As duas

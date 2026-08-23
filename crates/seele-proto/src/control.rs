@@ -645,6 +645,29 @@ pub enum AlertReason {
     ///
     /// Appended after `LastCage`, for the reason [`Self::RateLimited`] gives.
     ScreenShareTaken,
+
+    /// The Dogma stopped this pilot's transmission: the room outgrew its uplink.
+    ///
+    /// §5.1 made the host's upward path a term of the ceiling —
+    /// `caminho de quem HOSPEDA × 60% ÷ N espectadores` — because the Dogma is
+    /// what lifts `N` copies. Past some `N` not even the floor of §2 fits, and
+    /// §3.2 says what happens then: *"quando o sinal cai de faixa, quem baixa é
+    /// o vídeo; se continuar caindo, quem para é o vídeo."* The alternative is
+    /// the whole room stuttering because of a screen, which is the one thing
+    /// that section calls the product broken.
+    ///
+    /// Its own reason, and sent only to the pilot who was sharing.
+    /// [`ServerMessage::ScreenShareStopped`] goes to the whole Cage and carries
+    /// no reason on purpose — the two ordinary endings tell themselves apart —
+    /// and this is the third: somebody who pressed stop knows they pressed it,
+    /// and somebody stopped by the Dogma would otherwise learn nothing at all.
+    /// The nearest existing reason is [`Self::SyncDegraded`], which every shell
+    /// writes as "signal falling" — a sentence about this person's connection,
+    /// in front of somebody whose connection is fine and whose audience grew.
+    ///
+    /// Appended after `ScreenShareTaken`, for the reason [`Self::RateLimited`]
+    /// gives.
+    ScreenShareOverHostUplink,
 }
 
 /// Client to server.
@@ -1438,6 +1461,62 @@ pub enum ServerMessage {
         /// Who asked.
         pilot: PilotId,
     },
+    /// How many people are receiving a transmission.
+    ///
+    /// The `N` of §5.1, and it travels because the ceiling cannot be computed
+    /// without it: the Dogma forwards the pictures, so what it has to lift is
+    /// `N × ceiling`, and the correction §5.1 makes mandatory divides the
+    /// host's measured path by this number. Without it a sharer applies a
+    /// `min(...)` with a leg it invented, which is the "measure one leg and
+    /// burst the other" that section names as the most expensive defect in it.
+    ///
+    /// On control rather than in the stream, because it is not about a picture:
+    /// it changes when somebody enters or leaves the Cage, not when a frame is
+    /// encoded, and a number carried by the pictures would stop arriving
+    /// exactly when the transmission stalls.
+    ///
+    /// Sent to the whole Cage whenever the count moves, and once straight after
+    /// [`Self::ScreenShareStarted`] — a transmission that never learns its own
+    /// audience would sit on the ceiling for a single watcher while four are
+    /// listening.
+    ///
+    /// It is also the sentence the interface owes the person: §5.1 puts
+    /// "720p · 6 pessoas assistindo" on the screen, because "more than four
+    /// people" is something one can plan around and a number of kbps is not.
+    /// The trigger is still the ceiling, and this is the reason shown beside
+    /// it.
+    ScreenViewers {
+        /// Which transmission.
+        tela: ScreenId,
+        /// How many are receiving it, the sharer excluded.
+        quantos: u32,
+    },
+    /// What the Dogma measured its own upward path to be, in bits per second.
+    ///
+    /// The first line of the ceiling in §5.1 — `caminho de quem HOSPEDA × 60% ÷
+    /// N espectadores` — and it is the leg the sharer cannot see: the bytes
+    /// leave the host's machine, not the sharer's, and until now the number
+    /// standing in for it was the 2000 kbps pipe of `spikes/tela-no-transporte`.
+    /// A constant borrowed from a laboratory is exactly the "second measurer
+    /// disagreeing with the first" that §3.2 rule 2 refuses.
+    ///
+    /// Sent on entering the session, and again when the measurement changes
+    /// band. Band rather than value, for the reason [`SyncRatio`] already
+    /// exists: a number that moves every second would have the encoder chasing
+    /// it, and a transmission that renegotiates its ceiling fifty times a
+    /// minute is worse than one that is slightly wrong.
+    ///
+    /// **Zero means "not measured", and never zero bits per second.** Whoever
+    /// receives it treats zero as absence — the same contract as the `——` the
+    /// rest of the product shows where there is no measurement. An `Option`
+    /// would say it better in Rust and would cost a byte on every send of a
+    /// field that is present nearly always; the sentinel is written down here
+    /// instead, and it is the one thing about this message a reader must not
+    /// guess.
+    HostUplink {
+        /// Bits per second, or zero for "not measured".
+        bps: u32,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -1803,7 +1882,9 @@ impl Validate for ServerMessage {
             | Self::AttachmentUnavailable { .. }
             | Self::ScreenShareStarted { .. }
             | Self::ScreenShareStopped { .. }
-            | Self::KeyFrameRequested { .. } => Ok(()),
+            | Self::KeyFrameRequested { .. }
+            | Self::ScreenViewers { .. }
+            | Self::HostUplink { .. } => Ok(()),
         }
     }
 }
@@ -2969,5 +3050,73 @@ mod screen_tests {
             postcard::to_extend(&AlertReason::LastCage, Vec::new()).unwrap(),
             vec![11_u8]
         );
+    }
+    #[test]
+    fn the_two_frames_the_ceiling_needs_sit_after_the_verbs_and_shift_nothing() {
+        // The wave-3 additions of `fio-onda3.md`: the audience count and the
+        // host's measured path, both appended, both on control.
+        //
+        // The round trip is the cheap half. The ordinals are the half that
+        // matters, for the reason the test above gives: `postcard` writes a
+        // variant as its position, so a variant inserted among the screen verbs
+        // to keep the list tidy would have a peer one version older read
+        // `ScreenViewers` as `KeyFrameRequested` — and answer an audience count
+        // with a key frame, which is 65 KiB spent on nothing.
+        for (message, ordinal) in [
+            (
+                ServerMessage::ScreenViewers {
+                    tela: ScreenId(0x00C0_FFEE),
+                    quantos: 6,
+                },
+                27_u8,
+            ),
+            (ServerMessage::HostUplink { bps: 12_000_000 }, 28),
+        ] {
+            let frame = encode(&message).unwrap();
+            assert_eq!(decode::<ServerMessage>(&frame).unwrap(), message);
+            assert_eq!(frame.first(), Some(&PROTOCOL_VERSION));
+            assert_eq!(
+                frame.get(1),
+                Some(&ordinal),
+                "{message:?} no longer sits where it was appended, so every peer \
+                 one version older now reads it as a different frame"
+            );
+        }
+
+        // And the verb that was last before them has not moved.
+        assert_eq!(
+            postcard::to_extend(
+                &ServerMessage::KeyFrameRequested {
+                    screen: ScreenId(1),
+                    pilot: PilotId(1),
+                },
+                Vec::new()
+            )
+            .unwrap()
+            .first(),
+            Some(&26_u8)
+        );
+    }
+
+    #[test]
+    fn an_unmeasured_uplink_travels_as_zero_rather_than_being_refused() {
+        // The contract written on `HostUplink`: zero is **absence**, the same
+        // `——` the rest of the product shows where nothing was measured, and
+        // not a link of no bits. A Dogma that has not measured yet still has to
+        // say so on entry — refusing zero here would leave it silent, and a
+        // sharer with no first line for the ceiling of §5.1 falls back to
+        // guessing, which is what this frame exists to end.
+        let quieto = ServerMessage::HostUplink { bps: 0 };
+        let frame = encode(&quieto).unwrap();
+        assert_eq!(decode::<ServerMessage>(&frame).unwrap(), quieto);
+
+        // And a room that emptied says zero too, for the same reason: the
+        // count is news whether it went up or down.
+        let ninguem = ServerMessage::ScreenViewers {
+            tela: ScreenId(7),
+            quantos: 0,
+        };
+        let frame = encode(&ninguem).unwrap();
+        assert_eq!(decode::<ServerMessage>(&frame).unwrap(), ninguem);
     }
 }

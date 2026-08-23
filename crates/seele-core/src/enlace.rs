@@ -42,7 +42,10 @@ use std::time::{Duration, Instant};
 
 use ed25519_dalek::SigningKey;
 use seele_proto::control::ServerMessage;
-use seele_proto::ids::{AttachmentId, CageId, ClientMessageId, LineId, MessageId, PilotId};
+use seele_proto::ids::{
+    AttachmentId, CageId, ClientMessageId, LineId, MessageId, PilotId, ScreenId,
+};
+use seele_proto::sync_ratio::SyncBand;
 use tokio::sync::mpsc;
 
 use crate::battery::{Action, Battery, Link};
@@ -50,6 +53,7 @@ use crate::client::{Client, ConnectError, MediaChannel, SessionInfo};
 use crate::tofu::PinDecision;
 use crate::tofu::PinStore;
 use crate::tofu::{verdict, Verdict};
+use crate::video::{LimitesDeTela, PedidoDeTela};
 
 /// Onde ficar batendo, e com que credencial.
 #[derive(Debug, Clone)]
@@ -211,6 +215,17 @@ enum Comando {
         anexo: AttachmentId,
         resposta: tokio::sync::oneshot::Sender<Previa>,
     },
+    /// Comece a transmitir esta fonte, com estes tetos.
+    ///
+    /// Boxeado porque carrega o módulo do Cisco carregado e a captura numa
+    /// caixa, e um enum é do tamanho do maior braço dele: sem a caixa, toda
+    /// tecla digitada pagaria por eles na fila.
+    CompartilharTela {
+        fonte: Box<PedidoDeTela>,
+        limites: LimitesDeTela,
+    },
+    /// Pare de transmitir.
+    PararDeCompartilhar,
     Sair,
 }
 
@@ -814,6 +829,11 @@ impl Enlace {
             isolamento: false,
             avisos: avisos_tx,
             rtt: Arc::clone(&rtt),
+            tela_pedida: None,
+            tela_viva: None,
+            faixa: FAIXA_INICIAL,
+            caminho_de_quem_hospeda_bps: None,
+            espectadores: 0,
         };
         let tarefa = tokio::spawn(motor.rodar(comandos_rx));
 
@@ -1221,6 +1241,49 @@ impl Enlace {
         Ok(caixa)
     }
 
+    /// Começa a compartilhar a tela escolhida, com os tetos escolhidos.
+    ///
+    /// **Não volta com a transmissão pronta**, e não teria como: o que sai
+    /// daqui é um `StartScreenShare`, e o nome da transmissão — o
+    /// [`ScreenId`] — só chega depois, num `ScreenShareStarted` do fluxo de
+    /// eventos. É por isso que este verbo não devolve nada além de «foi
+    /// mandado»: entre o botão e o primeiro quadro há uma volta de rede, e
+    /// prometer aqui seria prometer no lugar do Dogma.
+    ///
+    /// **Não é refeito depois de uma queda**, ao contrário do Cage e da Linha.
+    /// Ver o comentário de `Motor::lembrar`: uma transmissão que voltasse
+    /// sozinha cinco minutos depois poria a tela de alguém no ar sem que
+    /// ninguém tivesse apertado nada.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn compartilhar_tela(
+        &self,
+        fonte: PedidoDeTela,
+        limites: LimitesDeTela,
+    ) -> Result<(), Fechado> {
+        self.mandar(Comando::CompartilharTela {
+            fonte: Box::new(fonte),
+            limites,
+        })
+        .await
+    }
+
+    /// Para de compartilhar.
+    ///
+    /// Idempotente: parar sem estar compartilhando manda o verbo assim mesmo, e
+    /// o Dogma o ignora. A alternativa — conferir aqui — poria uma segunda
+    /// autoridade sobre quem está transmitindo, e ela discordaria da primeira no
+    /// primeiro atraso de rede.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn parar_de_compartilhar(&self) -> Result<(), Fechado> {
+        self.mandar(Comando::PararDeCompartilhar).await
+    }
+
     /// Encerra por vontade própria.
     pub async fn sair(&self) {
         let _ = self.mandar(Comando::Sair).await;
@@ -1270,13 +1333,90 @@ struct Motor {
     isolamento: bool,
     avisos: mpsc::UnboundedSender<Aviso>,
     rtt: Arc<std::sync::atomic::AtomicU64>,
+    /// A escolha da pessoa, esperando a transmissão ganhar nome.
+    ///
+    /// **A bomba não pode nascer no comando**, e é a forma da coisa e não uma
+    /// preguiça: [`Client::start_screen_share`] manda um pedido, e o
+    /// [`ScreenId`] — que é o que `escoar` escreve no cabeçalho de abertura —
+    /// só chega depois, num `ScreenShareStarted` do laço de mensagens. Entre os
+    /// dois instantes, isto é a transmissão inteira.
+    tela_pedida: Option<(Box<PedidoDeTela>, LimitesDeTela)>,
+    /// A bomba viva desta pessoa, quando há uma.
+    tela_viva: Option<TelaViva>,
+    /// A faixa do sinal da **própria** voz, lida do que o Dogma devolve.
+    ///
+    /// Era uma constante `Nominal`, e a dívida estava escrita no lugar dela: o
+    /// teto respondia ao `HostUplink` e ao número de espectadores e **não** ao
+    /// sinal da voz piorando — numa sala onde a voz começava a doer, a tela não
+    /// cedia sozinha. Faltava metade da regra de aceite do §3.2.
+    ///
+    /// O que fechava a dívida já vinha pelo fio e ninguém guardava: o Dogma
+    /// calcula a taxa de cada pessoa e a devolve em `PilotState`, uma vez por
+    /// segundo. O `SyncRatio` da casca é a mesma conta feita de novo para
+    /// desenhar — não é fonte, é cópia —, e é por isso que isto não precisou de
+    /// comando novo nem de a casca falar com o núcleo.
+    faixa: SyncBand,
+    /// A subida de quem hospeda, como o `HostUplink` a mediu. §5.1.
+    ///
+    /// `None` é «não medido», e é assim que o zero do protocolo chega aqui: a
+    /// perna fica no cano das provas em vez de zerar o teto.
+    caminho_de_quem_hospeda_bps: Option<u32>,
+    /// Quantos estão assistindo, como o `ScreenViewers` contou. O N do §5.1.
+    espectadores: u32,
 }
+
+/// Uma transmissão desta pessoa que está no ar.
+///
+/// Não guarda a tarefa que escoa, e a ausência é deliberada: ela acaba sozinha
+/// quando a bomba manda o [`EventoDaBomba::Fim`](crate::EventoDaBomba::Fim) —
+/// **e é assim que o fluxo fecha direito**. Abortá-la seria cortar no meio de um
+/// quadro e deixar quem assiste esperando o resto dele.
+#[derive(Debug)]
+struct TelaViva {
+    /// O nome que o Dogma deu a esta transmissão.
+    tela: ScreenId,
+    /// A alça da thread do codificador. Largá-la para a bomba.
+    bomba: crate::bomba::Bomba,
+    /// O que a pessoa escolheu, guardado porque o teto é recalculado a cada
+    /// `ScreenViewers` e a escolha é uma das pernas dele (§5).
+    limites: LimitesDeTela,
+}
+
+/// Em que faixa o sinal da voz começa, antes de o Dogma dizer a primeira.
+///
+/// Otimista de propósito, e o motivo é qual erro custa mais: começar em
+/// `Critical` pararia a tela de alguém cuja voz está ótima, por causa de um
+/// dado que ainda não chegou. Começar em `Nominal` deixa a tela abrir e ceder
+/// no primeiro `PilotState`, que vem uma vez por segundo.
+const FAIXA_INICIAL: SyncBand = SyncBand::Nominal;
 
 /// De quanto em quanto tempo a bateria é consultada.
 ///
 /// Menor que o intervalo de ping e muito menor que o menor backoff, para que
 /// nem o ping nem uma tentativa de reconexão fiquem esperando a tica seguinte.
 const TICA: Duration = Duration::from_millis(200);
+
+/// A faixa nova, quando este `PilotState` for sobre esta pessoa e mudar de faixa.
+///
+/// Separada do `Motor` porque é a decisão inteira, e uma decisão sobre valores
+/// não precisa de conexão QUIC para ser conferida — o mesmo argumento que
+/// `alcance::Alcance::decidir` usa no servidor.
+///
+/// `None` em três casos, e os três importam: a mensagem é sobre outra pessoa; a
+/// sessão ainda não existe, e então ela não é sobre ninguém que este `Motor`
+/// conheça; ou a faixa não mudou, e refazer o teto a cada chegada acordaria a
+/// thread do codificador uma vez por segundo para lhe dizer o que ela já sabe.
+fn faixa_nova(
+    atual: SyncBand,
+    estado: &seele_proto::control::PilotState,
+    eu: Option<PilotId>,
+) -> Option<SyncBand> {
+    if eu != Some(estado.pilot) {
+        return None;
+    }
+    let nova = SyncBand::of(estado.sync_ratio);
+    (nova != atual).then_some(nova)
+}
 
 impl Motor {
     async fn rodar(mut self, mut comandos: mpsc::Receiver<Comando>) {
@@ -1328,6 +1468,11 @@ impl Motor {
                                     .store(micros.max(1), std::sync::atomic::Ordering::Relaxed);
                             }
                         }
+                        // Antes de o aviso sair, porque a tela é a única coisa
+                        // desta casa que **age** sobre uma mensagem em vez de
+                        // repassá-la: é aqui que a transmissão ganha nome e a
+                        // bomba nasce.
+                        self.a_tela_ouviu(&mensagem);
                         let _ = self.avisos.send(Aviso::Mensagem(Box::new(mensagem)));
                     }
                     // O fluxo caiu. Não é o fim da sessão: é o começo da
@@ -1375,6 +1520,17 @@ impl Motor {
     /// A conexão morreu. Entra na bateria e conta para a casca.
     fn cair(&mut self) {
         self.cliente = None;
+        // **Uma bomba que sobrevive ao enlace é uma thread codificando para uma
+        // conexão morta**, e ela não pararia sozinha: a captura continua
+        // entregando quadros e `escoar` só descobre a queda no próximo fluxo
+        // que não abre. Além do custo, é o indicador de gravação do macOS aceso
+        // sobre uma transmissão que ninguém está recebendo.
+        //
+        // O pedido morre junto, e é a mesma decisão de [`Self::lembrar`]: uma
+        // transmissão que voltasse sozinha depois de cinco minutos de bateria
+        // poria a tela de alguém no ar sem que ninguém tivesse apertado nada.
+        self.tela_pedida = None;
+        self.parar_a_tela();
         let agora = self.inicio.elapsed();
         let antes = self.bateria.state();
         self.bateria.on_connection_lost(agora);
@@ -1611,11 +1767,218 @@ impl Motor {
                 pedido
             }
 
+            // O pedido é guardado **antes** de o verbo sair, e a ordem
+            // importa: a resposta do Dogma chega pelo mesmo laço que trouxe
+            // este comando, e guardar depois abriria uma janela em que o
+            // `ScreenShareStarted` chega e não encontra a escolha da pessoa.
+            Comando::CompartilharTela { fonte, limites } => {
+                self.tela_pedida = Some((fonte, limites));
+                cliente.start_screen_share().await
+            }
+
+            // A bomba morre aqui, e não quando o `ScreenShareStopped` voltar:
+            // quem apertou parar não deve continuar capturando enquanto uma
+            // volta de rede acontece, e o Dogma pode nunca responder.
+            Comando::PararDeCompartilhar => {
+                self.tela_pedida = None;
+                // Pelos campos e não por [`Self::parar_a_tela`]: `cliente` é um
+                // empréstimo de `self.cliente` que ainda está vivo na linha
+                // abaixo, e um método pegaria `self` inteiro.
+                self.espectadores = 0;
+                matar(self.tela_viva.take());
+                cliente.stop_screen_share().await
+            }
+
             Comando::Sair => return,
         };
         if resultado.is_err() {
             self.cair();
         }
+    }
+
+    // ------------------------------------------------------------------ tela
+
+    /// O que uma mensagem do Dogma faz com a tela desta pessoa.
+    fn a_tela_ouviu(&mut self, mensagem: &ServerMessage) {
+        match *mensagem {
+            // A faixa da **própria** voz, que é a perna que faltava no teto do
+            // §3.2. O Dogma calcula a taxa de cada pessoa e a devolve aqui uma
+            // vez por segundo; o que faltava era guardar a sua.
+            //
+            // `SyncBand::of` e não um limiar escrito aqui: a conta de onde
+            // começa cada faixa é do `seele-proto`, e duas cópias dela
+            // divergiriam no dia em que uma mudasse.
+            ServerMessage::PilotState(ref estado) => {
+                let eu = self.cliente.as_ref().map(|c| c.session().pilot);
+                if let Some(nova) = faixa_nova(self.faixa, estado, eu) {
+                    {
+                        self.faixa = nova;
+                        // Só quando muda, e só se houver tela: a taxa chega uma
+                        // vez por segundo e quase sempre na mesma faixa, e
+                        // refazer o teto a cada chegada seria acordar a thread
+                        // do codificador sessenta vezes por minuto para lhe
+                        // dizer o que ela já sabe.
+                        self.reconferir_o_teto();
+                    }
+                }
+            }
+            ServerMessage::ScreenShareStarted { pilot, screen, .. } => {
+                self.talvez_ligar_a_bomba(pilot, screen);
+            }
+            ServerMessage::ScreenShareStopped { screen, .. } => {
+                if self.e_a_minha_tela(screen) {
+                    self.parar_a_tela();
+                }
+            }
+            // §3.3: quadro-chave quando quem recebe pede, e nunca periódico.
+            // Um de 1080p custa 65 KiB, quatro vezes um quadro comum.
+            ServerMessage::KeyFrameRequested { screen, .. } => {
+                if let Some(viva) = self.tela_viva.as_ref() {
+                    if viva.tela == screen {
+                        let _ = viva.bomba.chave();
+                    }
+                }
+            }
+            ServerMessage::ScreenViewers { tela, quantos } => {
+                if self.e_a_minha_tela(tela) {
+                    self.espectadores = quantos;
+                    self.reconferir_o_teto();
+                }
+            }
+            // Zero é **ausência de medida** e nunca zero bits por segundo — o
+            // contrato está escrito no próprio quadro do protocolo.
+            ServerMessage::HostUplink { bps } => {
+                self.caminho_de_quem_hospeda_bps = (bps > 0).then_some(bps);
+                self.reconferir_o_teto();
+            }
+            _ => {}
+        }
+    }
+
+    fn e_a_minha_tela(&self, tela: ScreenId) -> bool {
+        self.tela_viva
+            .as_ref()
+            .is_some_and(|viva| viva.tela == tela)
+    }
+
+    /// O pedido guardado vira bomba, se este `ScreenShareStarted` for o dele.
+    ///
+    /// A guarda que mora aqui é uma só, e é a que precisa do [`Client`]: **é
+    /// desta pessoa?** O quadro sai do barramento do Dogma para o Cage inteiro,
+    /// e sem ela quem apenas assiste ligaria a captura da própria tela ao ver
+    /// outro começar. As outras duas — já há uma viva, e o pedido existe — moram
+    /// em [`Self::nascer_a_tela`], porque valem também para quem o chama de um
+    /// teste.
+    ///
+    /// **A `Bomba` não vai para uma bomba a mais quando o Dogma reenvia.** Ele
+    /// reenvia `ScreenShareStarted` a cada pessoa que entra num Cage onde já há
+    /// transmissão, e quem transmite recebe o reenvio junto; o pedido já foi
+    /// consumido no primeiro, então o segundo não acha nada.
+    fn talvez_ligar_a_bomba(&mut self, piloto: PilotId, tela: ScreenId) {
+        let escoadouro = match self.cliente.as_ref() {
+            Some(cliente) if cliente.session().pilot == piloto => cliente.escoadouro_de_tela(),
+            _ => return,
+        };
+
+        self.nascer_a_tela(tela, move |origem, mut eventos| {
+            // Numa tarefa própria pelo mesmo motivo de `Comando::Anexar`:
+            // escoar dura o que a transmissão durar, e fazê-lo dentro do laço
+            // pararia quem lê a conexão e atende comandos até a pessoa parar de
+            // compartilhar.
+            tokio::spawn(async move {
+                match escoadouro.escoar(tela, origem, &mut eventos).await {
+                    Ok(contagem) => tracing::debug!(?contagem, "a transmissão de tela acabou"),
+                    Err(erro) => tracing::debug!(%erro, "a transmissão de tela caiu"),
+                }
+            });
+        });
+    }
+
+    /// O pedido guardado vira bomba, e `escoar` recebe o canal dela.
+    ///
+    /// Quem escoa entra por fora, e a costura é o que torna esta máquina de
+    /// estados afirmável: escrever no fio é a única metade daqui que precisa de
+    /// uma conexão QUIC viva, e sem separá-la «pedido guardado → nome chegando →
+    /// bomba nascendo» só seria exercível contra um Dogma de verdade — que é o
+    /// mesmo que dizer que nunca seria exercido.
+    fn nascer_a_tela(
+        &mut self,
+        tela: ScreenId,
+        escoar: impl FnOnce(seele_proto::screen::ScreenSource, mpsc::Receiver<crate::EventoDaBomba>),
+    ) {
+        if self.tela_viva.is_some() {
+            return;
+        }
+        let Some((pedido, limites)) = self.tela_pedida.take() else {
+            return;
+        };
+
+        let PedidoDeTela {
+            biblioteca,
+            captura,
+            origem,
+        } = *pedido;
+        let arranjo = crate::bomba::Arranjo {
+            teto: self.teto_de_video(limites.banda_bps),
+            faixa: self.faixa,
+            escolha_de_resolucao: limites.resolucao,
+            cadencia: limites.cadencia,
+        };
+
+        // `|| {}` é a resposta que este crate consegue dar ao §2, e a bomba diz
+        // por quê no cabeçalho dela: baixar a prioridade da thread pede
+        // `setpriority`/`SetThreadPriority`, e `unsafe_code` é `forbid` neste
+        // workspace. A ausência fica visível aqui em vez de escondida lá.
+        let (bomba, eventos) = match crate::bomba::ligar(biblioteca, captura, arranjo, || {}) {
+            Ok(ligada) => ligada,
+            Err(erro) => {
+                tracing::warn!(%erro, "a thread do codificador de tela não nasceu");
+                return;
+            }
+        };
+
+        escoar(origem, eventos);
+        self.tela_viva = Some(TelaViva {
+            tela,
+            bomba,
+            limites,
+        });
+    }
+
+    /// O teto de agora, com as pernas do §5.1 que este motor consegue ver.
+    ///
+    /// Duas das três: a de quem hospeda chega pelo `HostUplink`, e o N pelo
+    /// `ScreenViewers`. A terceira — o caminho de subida **desta** máquina —
+    /// continua sendo o cano das provas, que é a pergunta 2 do §8 e não uma
+    /// omissão desta função.
+    fn teto_de_video(&self, escolha_bps: Option<u32>) -> crate::tela::TetoDeVideo {
+        let mut teto = crate::tela::TetoDeVideo::novo();
+        if let Some(medido) = self.caminho_de_quem_hospeda_bps {
+            teto = teto.com_caminho_de_quem_hospeda(medido);
+        }
+        teto.com_espectadores(self.espectadores)
+            .com_escolha(escolha_bps)
+    }
+
+    /// Conta à bomba que o teto andou.
+    ///
+    /// Uma ordem só para as três coisas que o mexem, porque o N já mora dentro
+    /// do [`crate::tela::TetoDeVideo`] pela perna de quem hospeda.
+    fn reconferir_o_teto(&self) {
+        let Some(viva) = self.tela_viva.as_ref() else {
+            return;
+        };
+        let teto = self.teto_de_video(viva.limites.banda_bps);
+        let _ = viva.bomba.teto(teto, self.faixa);
+    }
+
+    /// Mata a bomba, se houver uma.
+    fn parar_a_tela(&mut self) {
+        // A contagem morre junto: ela é de **uma** transmissão, e deixá-la de pé
+        // faria a próxima nascer dividindo a perna de quem hospeda pelo público
+        // da anterior — um teto apertado sem que ninguém estivesse assistindo.
+        self.espectadores = 0;
+        matar(self.tela_viva.take());
     }
 
     /// Guarda o que a reconexão vai ter que refazer.
@@ -1649,15 +2012,50 @@ impl Motor {
             // o tamanho de **outro** estrago. Pesar uma Linha também não volta:
             // é uma pergunta, e a resposta que interessava era a de quando a
             // caixa estava aberta.
+            //
+            // **Compartilhar a tela é o que menos pode voltar dos dois.** Refeito
+            // depois de cinco minutos de bateria, ele poria o monitor de alguém
+            // no ar sem que ninguém tivesse apertado nada, e minutos depois de a
+            // pessoa ter desistido — a captura já morreu na queda, por
+            // [`Self::cair`], e ressuscitá-la seria a única coisa neste enum que
+            // liga uma câmera sozinha.
             _ => {}
         }
     }
 
     fn encerrar(&mut self, motivo: Motivo) {
+        // Antes de derrubar a conexão: a bomba fecha o fluxo dela ao morrer, e
+        // o fim do fluxo é a segunda maneira de dizer «parei» (§3.6). Derrubar
+        // primeiro trocaria isso por um fluxo cortado.
+        self.tela_pedida = None;
+        self.parar_a_tela();
         if let Some(mut cliente) = self.cliente.take() {
             cliente.disconnect();
         }
         let _ = self.avisos.send(Aviso::Encerrado(motivo));
+    }
+}
+
+/// Mata uma transmissão, se houver uma.
+///
+/// Livre e não método porque o caminho de parar corre com um empréstimo do
+/// [`Client`] vivo na mão, e um `&mut self` o atropelaria.
+fn matar(viva: Option<TelaViva>) {
+    let Some(viva) = viva else {
+        return;
+    };
+    // `Bomba::parar` junta a thread do codificador, e juntar **bloqueia**. A
+    // casca gráfica roda este motor num runtime de thread única, e bloquear aqui
+    // pararia junto a tarefa que escoa — que é justamente quem tem de esvaziar o
+    // canal para a thread conseguir entregar o `Fim` dela. Na piscina de bloqueio
+    // o mesmo fim não custa nada ao laço.
+    match tokio::runtime::Handle::try_current() {
+        Ok(runtime) => {
+            runtime.spawn_blocking(move || viva.bomba.parar());
+        }
+        // Fora de um runtime — um teste que monta o motor à mão. Aqui não há
+        // tarefa nenhuma para proteger do bloqueio.
+        Err(_) => viva.bomba.parar(),
     }
 }
 
@@ -2462,6 +2860,317 @@ mod tests {
         );
     }
 
+    // ------------------------------------------------------- a tela
+
+    /// Uma captura de mentira: entrega sempre um quadro do tamanho pedido.
+    ///
+    /// A da máquina precisa de monitor e de permissão, e nenhum dos dois existe
+    /// num agente de integração contínua. O que estes testes provam é a máquina
+    /// de estados, não a ScreenCaptureKit.
+    #[derive(Debug)]
+    struct CapturaDeMentira;
+
+    #[derive(Debug)]
+    struct FonteDeMentira {
+        largura: usize,
+        altura: usize,
+        passo: std::sync::atomic::AtomicUsize,
+    }
+
+    impl crate::video::FonteDeQuadros for FonteDeMentira {
+        fn tomar(&self) -> Option<seele_video::codec::QuadroI420> {
+            let passo = self
+                .passo
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let (largura, altura) = (self.largura, self.altura);
+            let mut luma = Vec::with_capacity(largura * altura);
+            for linha in 0..altura {
+                for coluna in 0..largura {
+                    // Bordas duras: um quadro chapado sairia com trinta bytes e
+                    // não provaria que o codificador rodou.
+                    let claro = ((coluna + passo) / 8 + linha / 12).is_multiple_of(2);
+                    luma.push(if claro { 235 } else { 16 });
+                }
+            }
+            let croma = vec![128; largura.div_ceil(2) * altura.div_ceil(2)];
+            seele_video::codec::QuadroI420::novo(largura, altura, luma, croma.clone(), croma).ok()
+        }
+    }
+
+    impl crate::video::Captura for CapturaDeMentira {
+        type Fonte = FonteDeMentira;
+
+        fn iniciar(
+            &mut self,
+            resolucao: seele_video::codec::Resolucao,
+            _cadencia: seele_video::codec::Cadencia,
+        ) -> Result<Self::Fonte, crate::video::CapturaRecusou> {
+            Ok(FonteDeMentira {
+                largura: resolucao.largura(),
+                altura: resolucao.altura(),
+                passo: std::sync::atomic::AtomicUsize::new(0),
+            })
+        }
+    }
+
+    /// O módulo do Cisco, ou `None` com o motivo impresso.
+    ///
+    /// **Pula em vez de falhar, e o motivo é a licença**: o módulo não pode
+    /// morar neste repositório, e um teste que o exigisse seria vermelho em toda
+    /// máquina limpa — um teste sempre vermelho é um teste que todo mundo
+    /// aprende a ignorar. Mesma decisão de `crate::bomba` e de `crate::video`.
+    fn biblioteca_de_teste() -> Option<seele_video::BibliotecaDeVideo> {
+        let mut pastas = Vec::new();
+        if let Some(apontado) = std::env::var_os("SEELE_OPENH264") {
+            let caminho = std::path::PathBuf::from(apontado);
+            pastas.push(if caminho.is_dir() {
+                caminho
+            } else {
+                caminho.parent().map_or_else(|| caminho.clone(), Into::into)
+            });
+        }
+        pastas.push(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("..")
+                .join("target"),
+        );
+        match seele_video::BibliotecaDeVideo::procurar_e_carregar(&pastas) {
+            Ok(biblioteca) => Some(biblioteca),
+            Err(motivo) => {
+                eprintln!(
+                    "PULADO: {motivo}.\n  O produto não vem com codec, e é a licença que impõe \
+                     isso. Aponte-o com SEELE_OPENH264."
+                );
+                None
+            }
+        }
+    }
+
+    fn pedido_de_teste(biblioteca: seele_video::BibliotecaDeVideo) -> PedidoDeTela {
+        PedidoDeTela {
+            biblioteca,
+            captura: crate::video::CapturaEmCaixa::nova(CapturaDeMentira),
+            origem: seele_proto::screen::ScreenSource::Monitor,
+        }
+    }
+
+    #[test]
+    fn a_bomba_so_nasce_quando_o_dogma_da_nome_a_transmissao() {
+        let Some(biblioteca) = biblioteca_de_teste() else {
+            return;
+        };
+        let mut motor = motor_de_teste();
+
+        // O botão foi apertado: o que existe é o pedido, e mais nada. Uma bomba
+        // aqui seria uma bomba sem `ScreenId` para pôr no cabeçalho do fluxo.
+        motor.tela_pedida = Some((
+            Box::new(pedido_de_teste(biblioteca)),
+            crate::video::LimitesDeTela::default(),
+        ));
+        assert!(
+            motor.tela_viva.is_none(),
+            "o pedido sozinho já tinha ligado a captura"
+        );
+
+        // O Dogma respondeu, e a transmissão ganhou nome.
+        let mut canal = None;
+        motor.nascer_a_tela(ScreenId(7), |origem, eventos| {
+            canal = Some((origem, eventos));
+        });
+
+        let viva = motor.tela_viva.as_ref().expect("a bomba não nasceu");
+        assert_eq!(viva.tela, ScreenId(7), "a bomba nasceu com outro nome");
+        assert!(
+            motor.tela_pedida.is_none(),
+            "o pedido sobreviveu à transmissão que ele abriu, e o próximo \
+             `ScreenShareStarted` abriria uma segunda"
+        );
+
+        let (origem, mut eventos) = canal.expect("quem escoa não recebeu o canal");
+        assert_eq!(
+            origem,
+            seele_proto::screen::ScreenSource::Monitor,
+            "o cabeçalho do fluxo sairia dizendo que é uma janela"
+        );
+
+        // E ela está codificando de verdade: o primeiro evento é o fluxo a
+        // abrir, que só sai depois de a captura e o codificador armarem.
+        match eventos.blocking_recv() {
+            Some(crate::EventoDaBomba::Fluxo { geracao, .. }) => assert_eq!(geracao, 1),
+            outro => panic!("a bomba não abriu fluxo nenhum: {outro:?}"),
+        }
+
+        // E morre com o enlace. Uma bomba que sobrevivesse à queda seria uma
+        // thread codificando para uma conexão morta.
+        motor.cair();
+        assert!(
+            motor.tela_viva.is_none(),
+            "a bomba sobreviveu à queda do enlace"
+        );
+        assert!(
+            motor.tela_pedida.is_none(),
+            "o pedido sobreviveu à queda, e a reconexão poria a tela de alguém \
+             no ar sem que ninguém apertasse nada"
+        );
+
+        // A thread acabou de fato: o `Fim` é a última coisa que ela manda, e o
+        // canal fecha depois dele.
+        let mut acabou = false;
+        while let Some(evento) = eventos.blocking_recv() {
+            if matches!(evento, crate::EventoDaBomba::Fim(None)) {
+                acabou = true;
+            }
+        }
+        assert!(acabou, "a thread do codificador não disse que acabou");
+    }
+
+    /// O fecho: do pedido guardado ao primeiro quadro lido do outro lado.
+    ///
+    /// **É a pergunta que esta tarefa existe para responder** — apertar
+    /// compartilhar faz um quadro sair pela conexão? — e ela não se responde
+    /// olhando `tela_viva`: o que prova é o cabeçalho que quem recebe lê e os
+    /// bytes que vêm depois dele. `crate::bomba` já prova a bomba contra uma
+    /// conexão; o que estava sem prova é a costura do meio, que é o
+    /// `Escoadouro` que o [`Client`] embrulha e a tarefa que o motor solta.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn do_pedido_guardado_ao_quadro_lido_do_outro_lado() {
+        let Some(biblioteca) = biblioteca_de_teste() else {
+            return;
+        };
+        let (saida, entrada) = crate::tela::tests::par().await;
+        let escoadouro = crate::bomba::Escoadouro::nova(saida);
+        let tela = ScreenId(0x00C0_FFEE);
+
+        let mut motor = motor_de_teste();
+        motor.tela_pedida = Some((
+            Box::new(pedido_de_teste(biblioteca)),
+            crate::video::LimitesDeTela::default(),
+        ));
+
+        // A mesma forma da produção: uma tarefa própria, porque escoar dura o
+        // que a transmissão durar.
+        let mut escoando = None;
+        motor.nascer_a_tela(tela, |origem, mut eventos| {
+            escoando = Some(tokio::spawn(async move {
+                escoadouro.escoar(tela, origem, &mut eventos).await
+            }));
+        });
+        let escoando = escoando.expect("quem escoa não foi chamado");
+
+        let mut recepcao = crate::tela::Recepcao::aceitar(&entrada)
+            .await
+            .expect("aceitar o fluxo da tela");
+        assert_eq!(
+            recepcao.cabecalho().screen,
+            tela,
+            "o fluxo abriu com o nome de outra transmissão"
+        );
+        assert_eq!(
+            recepcao.cabecalho().source,
+            seele_proto::screen::ScreenSource::Monitor,
+            "o cabeçalho diz janela sobre um monitor"
+        );
+
+        let primeiro = recepcao
+            .proximo_quadro()
+            .await
+            .expect("ler o primeiro quadro")
+            .expect("o fluxo não podia ter acabado");
+        assert!(primeiro.chave, "o primeiro quadro de um fluxo é chave");
+        assert!(!primeiro.bytes.is_empty(), "saiu um quadro vazio");
+
+        // E a queda do enlace fecha tudo: a bomba morre e o fluxo termina.
+        motor.cair();
+        let contagem = escoando
+            .await
+            .expect("a tarefa de escoar")
+            .expect("escoar até o fim");
+        assert!(contagem.enviados >= 1, "nenhum quadro chegou ao fio");
+        assert_eq!(contagem.fluxos, 1);
+    }
+
+    #[test]
+    fn sem_pedido_guardado_um_nome_de_transmissao_nao_liga_nada() {
+        // O Dogma reenvia `ScreenShareStarted` a cada pessoa que entra num Cage
+        // onde já há transmissão — inclusive a quem está transmitindo. Sem esta
+        // guarda, cada pessoa entrando na sala ligaria outra captura da mesma
+        // tela.
+        let mut motor = motor_de_teste();
+        let mut chamou = false;
+        motor.nascer_a_tela(ScreenId(1), |_, _| chamou = true);
+        assert!(!chamou, "ligou uma bomba que ninguém pediu");
+        assert!(motor.tela_viva.is_none());
+    }
+
+    #[test]
+    fn compartilhar_tela_nao_e_lembrado_para_a_reconexao() {
+        // Refeito depois de cinco minutos de bateria, poria o monitor de alguém
+        // no ar sem que ninguém tivesse apertado nada — e minutos depois de a
+        // pessoa ter desistido.
+        let mut motor = motor_de_teste();
+        motor.cage = Some(CageId(3));
+        motor.lembrar(&Comando::PararDeCompartilhar);
+        assert_eq!(motor.cage, Some(CageId(3)));
+    }
+
+    /// A metade da regra de aceite do §3.2 que faltava.
+    ///
+    /// O teto respondia ao `HostUplink` e ao número de espectadores e **não**
+    /// ao sinal da voz piorando: numa sala onde a voz começava a doer, a tela
+    /// não cedia sozinha. A perna que faltava já vinha pelo fio — o Dogma
+    /// devolve a taxa de cada pessoa em `PilotState`, uma vez por segundo — e
+    /// ninguém guardava a sua.
+    #[test]
+    fn a_faixa_da_voz_desce_pelo_que_o_dogma_devolve() {
+        use seele_proto::control::{PilotState, Presence};
+
+        let eu = PilotId(7);
+        let outra = PilotId(9);
+        let estado = |piloto: PilotId, taxa: u8| PilotState {
+            pilot: piloto,
+            sync_ratio: taxa,
+            speaking: false,
+            at_field: false,
+            total_isolation: false,
+            presence: Presence::Available,
+        };
+
+        // A voz doendo derruba a faixa, e é isto que faz a tela ceder.
+        assert_eq!(
+            faixa_nova(SyncBand::Nominal, &estado(eu, 10), Some(eu)),
+            Some(SyncBand::Critical),
+            "a taxa despencou e a faixa não acompanhou"
+        );
+
+        // A de outra pessoa não move nada. Sem esta guarda, a tela cederia
+        // porque a conexão **de outro** piorou — e quem compartilha ficaria
+        // pagando pelo vizinho.
+        assert_eq!(
+            faixa_nova(SyncBand::Nominal, &estado(outra, 10), Some(eu)),
+            None
+        );
+
+        // Sem sessão não há «esta pessoa». Uma mensagem antes do aperto de mão
+        // terminar não é sobre ninguém que este motor conheça.
+        assert_eq!(faixa_nova(SyncBand::Nominal, &estado(eu, 10), None), None);
+
+        // E a mesma faixa não vira ordem: a taxa chega uma vez por segundo e
+        // quase sempre no mesmo degrau, e refazer o teto a cada chegada
+        // acordaria a thread do codificador para lhe dizer o que ela já sabe.
+        assert_eq!(
+            faixa_nova(SyncBand::Critical, &estado(eu, 10), Some(eu)),
+            None
+        );
+
+        // E ela sobe de volta: ceder não pode ser de mão única, ou a tela
+        // ficaria pequena para sempre depois do primeiro engasgo.
+        assert_eq!(
+            faixa_nova(SyncBand::Critical, &estado(eu, 100), Some(eu)),
+            Some(SyncBand::Nominal)
+        );
+    }
+
     fn motor_de_teste() -> Motor {
         let (avisos, _) = mpsc::unbounded_channel();
         Motor {
@@ -2485,6 +3194,11 @@ mod tests {
             isolamento: false,
             avisos,
             rtt: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            tela_pedida: None,
+            tela_viva: None,
+            faixa: FAIXA_INICIAL,
+            caminho_de_quem_hospeda_bps: None,
+            espectadores: 0,
         }
     }
 }

@@ -756,8 +756,8 @@ async fn run_session(
     // canal.
     //
     // Ler direto dentro do `select!` abaixo era um defeito, e um caro. `read`
-    // faz três `read_exact` — o primeiro byte, o resto do tamanho e o corpo — e
-    // o `select!` cancela o que perde a corrida. Cancelado entre eles, o que já
+    // faz dois `read_exact` — o tamanho e o corpo — e o `select!` cancela o que
+    // perde a corrida. Cancelado entre eles, o que já
     // foi consumido some, e o `read` seguinte lê os bytes do **corpo** como
     // tamanho: o fluxo fica deslocado para sempre. Depois disso o cliente segue conectado,
     // manda mensagens, e o servidor não entende mais nenhuma.
@@ -853,26 +853,46 @@ async fn run_session(
                 let avisos = avisos.clone();
                 let apelido = apelido.clone();
                 let salas = Arc::clone(&salas);
-                // Qual dos dois usos de fluxo unidirecional é este. O byte que
-                // decide é lido aqui e repassado adiante: `crate::frame::read_apos`
-                // explica por que ele decide, e por que ser aritmética em vez de
-                // marca é dívida.
-                let mut primeiro = [0_u8; 1];
-                if fluxo.read_exact(&mut primeiro).await.is_err() {
+                // Qual dos dois usos de fluxo unidirecional é este, dito pelo
+                // fio em vez de deduzido dele. Era aritmética sobre o primeiro
+                // byte do cabeçalho — zero é anexo porque um quadro de controle
+                // cabe em 16 KiB, não-zero é tela porque a versão nasceu em 1 —
+                // e as duas premissas eram emprestadas de outra seção (§5.2).
+                // No dia em que uma delas mudasse, o sintoma seria um fluxo
+                // lido como o tipo errado, que é o pior erro de protocolo que
+                // existe.
+                let mut marca = [0_u8; 1];
+                if fluxo.read_exact(&mut marca).await.is_err() {
                     continue;
                 }
-                let primeiro = primeiro.first().copied().unwrap_or_default();
-                if primeiro != 0 {
-                    // Uma tarefa por transmissão, como abaixo: quem
-                    // compartilha não pode fazer fila com quem manda arquivo.
-                    tokio::spawn(async move {
-                        if let Err(erro) =
-                            receber_tela(&contexto, &salas, piloto, primeiro, &mut fluxo).await
-                        {
-                            tracing::debug!(%piloto, %erro, "o fluxo de tela terminou");
-                        }
-                    });
-                    continue;
+                let tipo = seele_proto::stream::StreamType::decode(
+                    marca.first().copied().unwrap_or_default(),
+                );
+                match tipo {
+                    Ok(seele_proto::stream::StreamType::Screen) => {
+                        // Uma tarefa por transmissão, como abaixo: quem
+                        // compartilha não pode fazer fila com quem manda
+                        // arquivo.
+                        tokio::spawn(async move {
+                            if let Err(erro) =
+                                receber_tela(&contexto, &salas, piloto, &avisos, &mut fluxo).await
+                            {
+                                tracing::debug!(%piloto, %erro, "o fluxo de tela terminou");
+                            }
+                        });
+                        continue;
+                    }
+                    Ok(seele_proto::stream::StreamType::Attachment) => {}
+                    // Inclusive o zero, que é o valor que a leitura antiga
+                    // produzia: recusá-lo faz um par velho falhar alto em vez
+                    // de despejar um cabeçalho de anexo onde se espera um de
+                    // tela. Parar o fluxo e não ignorá-lo, para que o outro
+                    // lado descubra agora.
+                    Err(_) => {
+                        let _ = fluxo.stop(quinn::VarInt::from_u32(crate::tela::CODIGO_DE_CORTE));
+                        tracing::debug!(%piloto, "um fluxo unidirecional chegou sem tipo conhecido");
+                        continue;
+                    }
                 }
                 // Uma tarefa por transferência: duas pessoas mandando ao mesmo
                 // tempo não se enfileiram uma atrás da outra.
@@ -882,7 +902,7 @@ async fn run_session(
                         // chave de idempotência é o único nome que as duas
                         // pontas compartilham antes de o Dogma ter atribuído
                         // coisa alguma. Os bytes não são lidos.
-                        match crate::transfer::quem_perguntou(&mut fluxo, primeiro).await {
+                        match crate::transfer::quem_perguntou(&mut fluxo).await {
                             Ok(client_message_id) => {
                                 let _ = avisos
                                     .send(ServerMessage::AttachmentRefused {
@@ -897,10 +917,8 @@ async fn run_session(
                         }
                         return;
                     };
-                    match crate::transfer::receive(
-                        &anexos, &contexto, piloto, &apelido, &mut fluxo, primeiro,
-                    )
-                    .await
+                    match crate::transfer::receive(&anexos, &contexto, piloto, &apelido, &mut fluxo)
+                        .await
                     {
                         Ok(crate::transfer::Outcome::Published(_)) => {}
                         Ok(crate::transfer::Outcome::Refused {
@@ -1044,6 +1062,31 @@ async fn run_session(
         )
         .await?;
     }
+
+    // E quanto a subida **desta máquina** carrega, que é a perna do teto do
+    // §5.1 que só o Dogma sabe:
+    //
+    // ```text
+    // teto = min(
+    //     caminho de quem HOSPEDA × 60% ÷ N espectadores,   ← esta
+    //     caminho de quem COMPARTILHA × 60%,
+    //     o que a pessoa escolheu (§5),
+    // )
+    // ```
+    //
+    // Na entrada da sessão e não no `StartScreenShare`: quem aperta o botão
+    // precisa do número **antes** de escolher resolução, e a alternativa —
+    // mandar junto com a resposta — deixaria o seletor sem nada a dizer até que
+    // a transmissão já tivesse começado. Uma vez, porque é uma declaração de
+    // configuração e não uma medida: enquanto ninguém medir, ela não muda de
+    // faixa e não há segundo quadro a mandar. Ver `crate::tela::caminho_no_fio`.
+    frame::write(
+        &mut send,
+        &ServerMessage::HostUplink {
+            bps: crate::tela::caminho_no_fio(dogma.caminho_bps),
+        },
+    )
+    .await?;
 
     loop {
         tokio::select! {
@@ -2183,7 +2226,7 @@ async fn receber_tela(
     dogma: &Dogma,
     cages: &crate::cage::Cages,
     pilot: PilotId,
-    primeiro: u8,
+    avisos: &mpsc::Sender<ServerMessage>,
     fluxo: &mut quinn::RecvStream,
 ) -> Result<()> {
     let Some((cage, screen)) = dogma.telas.lock().await.de(pilot) else {
@@ -2193,13 +2236,11 @@ async fn receber_tela(
         bail!("um fluxo de tela chegou de quem não está transmitindo");
     };
 
+    // Inteiro, e não remendado: o byte que a tarefa de aceitação consumiu é o
+    // **tipo do fluxo**, e ele vem antes do cabeçalho em vez de ser o primeiro
+    // byte dele. Era isto que o `primeiro` carregava de volta para cá.
     let mut abertura = [0_u8; SCREEN_HEADER_LEN];
-    if let Some(resto) = abertura.get_mut(1..) {
-        fluxo.read_exact(resto).await?;
-    }
-    if let Some(primeiro_byte) = abertura.first_mut() {
-        *primeiro_byte = primeiro;
-    }
+    fluxo.read_exact(&mut abertura).await?;
     let (cabecalho, _) = seele_proto::screen::ScreenHeader::decode(&abertura)?;
     if cabecalho.screen != screen {
         let _ = fluxo.stop(quinn::VarInt::from_u32(crate::tela::CODIGO_DE_CORTE));
@@ -2234,6 +2275,29 @@ async fn receber_tela(
             // sala aprende que a tela parou. Sem isto ficaria desenhada uma
             // transmissão que já não tem quem a bombeie.
             encerrar_telas_de(dogma, pilot).await;
+            // E com nome, para quem a mandava. `ScreenShareStopped` vai para a
+            // sala inteira e não carrega razão de propósito — as duas maneiras
+            // comuns de acabar já se distinguem sozinhas —, mas esta terceira
+            // não: quem apertou parar sabe que apertou, e quem foi parado pelo
+            // Dogma não descobriria nada. A frase que falta é «a sala cresceu
+            // além do que esta subida carrega», e ela é do §5.1.
+            //
+            // Pela sessão de quem compartilha, que é a única a quem ela
+            // interessa, e pelo barramento de avisos: escrever no fluxo de
+            // controle daqui exigiria a caneta que o laço da sessão segura.
+            if motivo == crate::tela::FimDaTela::AlemDoQueOHospedeiroCarrega {
+                let _ = avisos
+                    .send(ServerMessage::Alert {
+                        severity: AlertSeverity::Warning,
+                        reason: AlertReason::ScreenShareOverHostUplink,
+                        operator_text: None,
+                    })
+                    .await;
+            }
+            // `FluxoMalformado` não ganha frase, e é decisão: ele quer dizer
+            // que o cliente escreveu um enquadramento que não é o do §3.6, o
+            // que nenhuma frase de interface conserta e nenhum usuário
+            // provocou. Fica no log, onde quem escreve cliente vai procurar.
             return Ok(());
         }
         match fluxo.read(&mut buffer).await? {
@@ -2508,6 +2572,24 @@ fn translate(event: &Event, lines: &[LineId], self_pilot: PilotId) -> Option<Ser
         Event::ScreenShareStopped { cage, screen } => Some(ServerMessage::ScreenShareStopped {
             cage: *cage,
             screen: *screen,
+        }),
+
+        // A todo mundo, como o `ScreenShareStarted` de que ele é a continuação.
+        //
+        // Quem compartilha precisa de N para dividir o caminho do anfitrião
+        // (§5.1) — é a razão de a mensagem existir. Quem assiste precisa dele
+        // para a frase que o §5.1 desenha, «720p · 6 pessoas assistindo»: a
+        // resolução muda porque N mudou, e uma tela que cai de degrau sem dizer
+        // por quê é o produto sabendo algo que quem está na frente dele não
+        // sabe. O `cage` não viaja porque `ScreenId` já é único neste Dogma e
+        // quem recebeu o `ScreenShareStarted` já sabe de que sala ele é.
+        Event::ScreenViewers {
+            cage: _,
+            screen,
+            quantos,
+        } => Some(ServerMessage::ScreenViewers {
+            tela: *screen,
+            quantos: *quantos,
         }),
 
         // A exceção: este só vai para quem está compartilhando. Um quadro-chave

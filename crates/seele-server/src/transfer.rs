@@ -132,11 +132,8 @@ pub enum Outcome {
 /// # Errors
 ///
 /// Fails if the header is not a header.
-pub async fn quem_perguntou(
-    stream: &mut quinn::RecvStream,
-    primeiro: u8,
-) -> Result<ClientMessageId> {
-    let header: AttachmentHeader = crate::frame::read_apos(stream, primeiro)
+pub async fn quem_perguntou(stream: &mut quinn::RecvStream) -> Result<ClientMessageId> {
+    let header: AttachmentHeader = crate::frame::read(stream)
         .await
         .context("could not read the transfer header")?;
     Ok(header.client_message_id)
@@ -155,9 +152,8 @@ pub async fn receive(
     pilot: PilotId,
     nickname: &str,
     stream: &mut quinn::RecvStream,
-    primeiro: u8,
 ) -> Result<Outcome> {
-    let header: AttachmentHeader = crate::frame::read_apos(stream, primeiro)
+    let header: AttachmentHeader = crate::frame::read(stream)
         .await
         .context("could not read the transfer header")?;
     let key = header.client_message_id;
@@ -428,6 +424,12 @@ pub async fn deliver(
     let mut stream = connection.open_uni().await?;
     // Below control, so that fetching a picture cannot delay a `Pong`.
     stream.set_priority(TRANSFER_PRIORITY)?;
+    // Que tipo de fluxo é este, antes do cabeçalho. A regra vale nos dois
+    // sentidos: quem recebe tem um `accept_uni` só e mais de um uso para ele, e
+    // adivinhar pelo conteúdo é o que o §5.2 chama de dívida.
+    stream
+        .write_all(&[seele_proto::stream::StreamType::Attachment.byte()])
+        .await?;
     crate::frame::write(
         &mut stream,
         &AttachmentDelivery {

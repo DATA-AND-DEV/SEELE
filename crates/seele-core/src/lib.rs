@@ -25,6 +25,7 @@
 )]
 
 pub mod battery;
+pub mod bomba;
 pub mod chegada;
 pub mod client;
 pub mod conhecidos;
@@ -42,6 +43,10 @@ pub mod video;
 pub mod voice;
 
 pub use battery::{Battery, Link};
+pub use bomba::{
+    escoar, ligar, Arranjo, Bomba, Contagem, Escoadouro, EventoDaBomba, Ordem, QuadroParaOFio,
+    NOME_DA_THREAD,
+};
 pub use client::{
     AttachmentRequest, Client, ConnectError, FlowControl, MediaChannel, Pattern, Previewed, Sent,
     SessionInfo, Transfers,
@@ -59,9 +64,31 @@ pub use tela::{
     PernaQueAperta, QuadroRecebido, Recepcao, Teto, TetoDeVideo, Transmissao,
 };
 pub use tofu::{MemoryPinStore, PinDecision, PinStore, Verdict};
+/// A tela: o trait, quem o cumpre nesta máquina, e o que se escolhe.
+///
+/// **[`Captura`] estava exportado sem ninguém que o cumprisse**, e era o degrau
+/// que faltava para o botão de compartilhar deixar de responder «este build não
+/// sabe»: uma casca não pode implementar o trait — não vê `seele-video` — e não
+/// tinha o que passar para a bomba.
 pub use video::{
-    Ajuste, Compartilhamento, ErroDeCompartilhamento, FonteDeQuadros, Passo as PassoDeVideo,
+    fontes_de_tela, pedir_permissao_de_tela, permissao_de_tela, Ajuste, Captura, CapturaDoSistema,
+    CapturaEmCaixa, CapturaRecusou, Compartilhamento, ErroDeCompartilhamento, ErroDeFontes,
+    FonteDeQuadros, FonteDeTela, LimitesDeTela, Passo as PassoDeVideo, PedidoDeTela,
+    PermissaoDeTela,
 };
+
+/// O módulo do Cisco e os degraus que a pessoa escolhe.
+///
+/// Reexportados porque [`PedidoDeTela`] pede os três e o ADR 0002 não deixa uma
+/// casca ver `seele-video`. [`BibliotecaDeVideo`] vem pronta de quem chama pelo
+/// argumento que `seele_video::modulo::procurar_em` escreve: onde os arquivos do
+/// produto moram é decisão da casca, não desta biblioteca.
+pub use seele_video::codec::{Cadencia, Resolucao};
+pub use seele_video::modulo::{
+    procurar_em as procurar_modulo_de_video,
+    publicado_para_este_sistema as modulo_de_video_publicado, ModuloPublicado,
+};
+pub use seele_video::{BibliotecaDeVideo, ErroDeVideo};
 pub use voice::{
     capture_devices, playback_devices, CaptureDevice, DeviceChoice, DeviceRates, PlaybackDevice,
     Voice, VoiceMode,

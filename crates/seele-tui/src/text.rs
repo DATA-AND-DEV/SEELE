@@ -47,6 +47,13 @@ pub fn alert(reason: AlertReason) -> &'static str {
         // `PERMISSÃO NEGADA`, que mandaria a pessoa procurar um papel que ela
         // já tem — aqui é só a vez de outro.
         AlertReason::ScreenShareTaken => "ALGUÉM JÁ ESTÁ COMPARTILHANDO A TELA NESTA SALA",
+        // Não é a sua conexão: é a de quem hospeda, dividida por quanta gente
+        // está assistindo. Dizer «sua conexão caiu» mandaria a pessoa mexer no
+        // roteador dela, que é o lugar errado — e o §5.1 escreve que a razão
+        // aparece, e não só o efeito.
+        AlertReason::ScreenShareOverHostUplink => {
+            "A TELA PAROU: A CONEXÃO DE QUEM HOSPEDA NÃO CARREGA TANTA GENTE ASSISTINDO"
+        }
     }
 }
 

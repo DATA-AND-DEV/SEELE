@@ -808,6 +808,15 @@ impl Transmissao {
         // acabou de nascer — e mesmo assim não vale derrubar a transmissão por
         // uma prioridade não aplicada.
         let _ = fluxo.set_priority(PRIORIDADE_DA_TELA);
+        // O tipo do fluxo antes do cabeçalho, pelo mesmo motivo do anexo: quem
+        // recebe precisa saber o que está chegando **antes** de tentar ler o
+        // que chegou. Ver o §5.2 da spec.
+        if let Err(erro) = fluxo
+            .write_all(&[seele_proto::stream::StreamType::Screen.byte()])
+            .await
+        {
+            return Err(ErroDeTela::Fluxo(erro.to_string()));
+        }
         fluxo
             .write_all(&abertura)
             .await
@@ -1005,6 +1014,24 @@ impl Recepcao {
     ///
     /// As mesmas de [`Self::aceitar`].
     pub async fn do_fluxo(mut fluxo: quinn::RecvStream) -> Result<Self, ErroDeTela> {
+        // O tipo do fluxo primeiro, e conferido em vez de pulado: um byte lido
+        // e jogado fora aceitaria um anexo como se fosse tela e leria o
+        // cabeçalho errado sem reclamar. Ver o §5.2 da spec.
+        let mut tipo = [0_u8; seele_proto::stream::STREAM_TYPE_LEN];
+        fluxo
+            .read_exact(&mut tipo)
+            .await
+            .map_err(|erro| ErroDeTela::Fluxo(erro.to_string()))?;
+        match seele_proto::stream::StreamType::decode(tipo[0]) {
+            Ok(seele_proto::stream::StreamType::Screen) => {}
+            Ok(outro) => {
+                return Err(ErroDeTela::Fluxo(format!(
+                    "este fluxo é {outro:?} e não uma transmissão de tela"
+                )));
+            }
+            Err(erro) => return Err(ErroDeTela::Fluxo(erro.to_string())),
+        }
+
         let mut abertura = [0_u8; SCREEN_HEADER_LEN];
         fluxo
             .read_exact(&mut abertura)
@@ -1074,7 +1101,7 @@ pub fn intervalo_de_quadro(quadros_por_segundo: u32) -> Duration {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::net::SocketAddr;
     use std::sync::Arc;
 
@@ -1516,7 +1543,7 @@ mod tests {
     /// está sob teste é o transporte da tela, e um handshake no meio só
     /// acrescentaria maneiras de o teste falhar que não têm a ver com a
     /// pergunta.
-    async fn par() -> (quinn::Connection, quinn::Connection) {
+    pub(crate) async fn par() -> (quinn::Connection, quinn::Connection) {
         let _ = rustls::crypto::ring::default_provider().install_default();
 
         let certificado =
@@ -1856,6 +1883,13 @@ mod tests {
         // serviço mais velha que existe.
         let (saida, entrada) = par().await;
         let mut fluxo = saida.open_uni().await.expect("abrir na mão");
+        // Este teste finge ser o remetente, e remetente escreve o tipo do
+        // fluxo antes do cabeçalho — ver o §5.2 da spec. Sem esta linha ele
+        // reprovava a leitura por não achar o que ele mesmo não mandou.
+        fluxo
+            .write_all(&[seele_proto::stream::StreamType::Screen.byte()])
+            .await
+            .expect("tipo do fluxo");
         let mut abertura = [0_u8; SCREEN_HEADER_LEN];
         cabecalho().encode(&mut abertura).expect("cabeçalho");
         fluxo.write_all(&abertura).await.expect("abertura");
@@ -1877,6 +1911,10 @@ mod tests {
         // de zero: é muito mais vezes uma captura que falhou do que uma
         // escolha, e não há quadro atrás dele de qualquer jeito.
         let mut vazio = saida.open_uni().await.expect("abrir na mão");
+        vazio
+            .write_all(&[seele_proto::stream::StreamType::Screen.byte()])
+            .await
+            .expect("tipo do fluxo");
         vazio.write_all(&abertura).await.expect("abertura");
         vazio
             .write_all(&escrever_cabecalho_de_quadro(false, 0))

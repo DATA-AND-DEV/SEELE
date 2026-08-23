@@ -27,10 +27,18 @@
 // ---- o que vem de fora ----
 //
 // `anunciar`, `focavel`, `elemento`, `repovoar` e `invoke` são de `base.js`;
-// `fraseDeErro` e `FRASES` são de `frases.js`. `limitesPedidos` e
-// `nomeDaResolucao` são declarados **aqui** e lidos por `tela-chamada.js`, do
-// mesmo jeito que aquele arquivo já lê `medido` de `tela-sessao.js` — os
-// scripts dividem um escopo só (ADR 0019).
+// `fraseDeErro` e `FRASES` são de `frases.js`. `nomeDaResolucao` é declarada
+// **aqui** e lida por `tela-chamada.js`, do mesmo jeito que aquele arquivo já lê
+// `medido` de `tela-sessao.js` — os scripts dividem um escopo só (ADR 0019).
+//
+// ---- o que esta caixa deixou de guardar ----
+//
+// Os limites que ela mandou. Eles moravam aqui, numa variável desta janela, e
+// morriam com ela: uma recarga no meio de uma transmissão apagava metade da
+// comparação que o §5 obriga — o que está saindo ao lado do que foi pedido — e
+// o palco escrevia travessão sobre uma tela que continuava saindo. Agora o
+// pedido volta em `Snapshot::tela.pedido`, guardado do lado que sobrevive à
+// janela, que é o mesmo lado que o manda ao codificador.
 
 "use strict";
 
@@ -48,20 +56,6 @@ let focoAntesDeCompartilhar = null;
  * dizendo por quê.
  */
 let fonteArmada = null;
-
-/**
- * Os limites que esta janela **mandou** da última vez, ou `null`.
- *
- * A memória mora aqui porque o contrato não a devolve: `TelaEmCurso` carrega o
- * que está saindo agora e não o que foi pedido. Sem isto o palco não teria com
- * o que comparar, e a regra do §5 — mostrar um ao lado do outro — não teria
- * metade.
- *
- * `null` depois de abrir a janela com uma transmissão já em curso, e é o
- * estado honesto: esta janela não estava aqui quando alguém escolheu. O palco
- * escreve travessão nessa coluna, com o motivo no `title`.
- */
-let limitesPedidos = null;
 
 /**
  * A última resposta do sistema sobre gravar a tela, ou `null` antes da primeira.
@@ -360,7 +354,6 @@ function abandonarCompartilhar() {
   $("compartilhar").hidden = true;
   focoAntesDeCompartilhar = null;
   fonteArmada = null;
-  limitesPedidos = null;
   erroDeTela = null;
 }
 
@@ -413,7 +406,6 @@ $("compartilhar-comecar").addEventListener("click", async () => {
       // controle que uma pessoa mexeu.
       await invoke("ajustar_limites_da_tela", { limites });
     }
-    limitesPedidos = limites;
     if (comecando) {
       registrarEventoDaChamada("você começou a compartilhar a sua tela", "anotacao");
     }
@@ -429,9 +421,6 @@ $("compartilhar-parar").addEventListener("click", async () => {
   try {
     await invoke("parar_de_compartilhar");
     registrarEventoDaChamada("você parou de compartilhar a tela", "anotacao");
-    // O que foi pedido morre com a transmissão: guardá-lo faria o palco da
-    // próxima comparar o que está saindo agora com um teto de outra vez.
-    limitesPedidos = null;
   } catch (falha) {
     mostrarErroDeTela(falha);
   }

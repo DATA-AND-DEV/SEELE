@@ -567,6 +567,16 @@ enum Command {
         attachment: seele_core::AttachmentId,
         answer: tokio::sync::oneshot::Sender<Preview>,
     },
+    /// A tela escolhida, com o módulo do Cisco já carregado. §3.6.
+    ///
+    /// Boxeado pela mesma razão de [`Command::Attach`]: um enum é do tamanho do
+    /// maior braço dele, e sem a caixa toda tecla digitada pagaria pelo peso
+    /// desta.
+    ShareScreen {
+        pedido: Box<seele_core::PedidoDeTela>,
+        limites: seele_core::LimitesDeTela,
+    },
+    StopScreenShare,
     Shutdown,
 }
 
@@ -674,6 +684,34 @@ struct Shared {
     /// atenderia uma e deixaria a outra esperando para sempre. Aqui as duas
     /// recebem a mesma resposta.
     pending_weights: Mutex<Vec<(LineId, tokio::sync::oneshot::Sender<LineWeight>)>>,
+    /// Os limites que esta sessão pediu para a transmissão de tela dela.
+    ///
+    /// **Mora aqui porque a janela não sobrevive à transmissão.** O §5 manda
+    /// mostrar o que está saindo ao lado do que foi pedido, e o que foi pedido
+    /// não atravessa o fio em lugar nenhum — o `ScreenHeader` carrega resolução
+    /// e codec, nunca a escolha. A casca gráfica cobria o buraco guardando a
+    /// última escolha numa variável de JavaScript, e uma janela recarregada
+    /// perdia metade da comparação enquanto a tela continuava saindo.
+    ///
+    /// Um `Mutex` e não um átomo: são três números e um `Option`, e a escrita
+    /// acontece quando alguém aperta um botão — a contenção que os átomos de
+    /// telemetria evitam não existe aqui.
+    ///
+    /// Limpo quando a transmissão desta pessoa acaba, e é a mesma regra que a
+    /// casca já escrevia do lado dela: guardá-lo faria o painel da próxima
+    /// comparar o que está saindo agora com um teto de outra vez.
+    limites_da_tela: Mutex<Option<LimitesDeTela>>,
+    /// A última lista de fontes que [`Plug::fontes_de_tela`] devolveu.
+    ///
+    /// **Existe porque o número que a casca devolve é o índice desta lista**, e
+    /// não um identificador do sistema: um `Alvo` da WGC não publica `HWND`
+    /// nenhum, e um número estável entre duas listagens não existe nos dois
+    /// sistemas. Ver `seele_core::FonteDeTela::id`.
+    ///
+    /// E porque o alvo nativo não atravessa a travessia: a casca recebe nome e
+    /// tamanho, e o `SCWindow` — que é o que a captura precisa — fica deste
+    /// lado, esperando a escolha.
+    fontes_de_tela: Mutex<Vec<seele_core::FonteDeTela>>,
 }
 
 impl Shared {
@@ -708,6 +746,26 @@ impl Shared {
         if let seele_core::Link::InternalBattery { attempts } = estado {
             self.link_attempts.store(attempts, Ordering::Relaxed);
         }
+    }
+
+    /// Guarda o que esta pessoa pediu para a tela dela, ou esquece.
+    ///
+    /// `None` esquece, e é o que acontece quando a transmissão acaba: um teto
+    /// guardado além dela faria o painel da próxima comparar o que está saindo
+    /// agora com uma escolha de outra vez.
+    fn gravar_pedido_da_tela(&self, limites: Option<LimitesDeTela>) {
+        if let Ok(mut guardado) = self.limites_da_tela.lock() {
+            *guardado = limites;
+        }
+    }
+
+    /// O que esta pessoa pediu para a tela dela, se ainda vale.
+    ///
+    /// Um cadeado envenenado responde `None`, que é a mesma resposta de «esta
+    /// sessão não pediu nada»: a casca escreve travessão e não uma escolha que
+    /// ninguém consegue mais afirmar.
+    fn pedido_da_tela(&self) -> Option<LimitesDeTela> {
+        self.limites_da_tela.lock().ok().and_then(|g| *g)
     }
 
     /// O estado do enlace como a casca o vê.
@@ -958,6 +1016,8 @@ impl Plug {
             sync_ratio: AtomicU8::new(0),
             running: AtomicBool::new(false),
             pending_weights: Mutex::new(Vec::new()),
+            limites_da_tela: Mutex::new(None),
+            fontes_de_tela: Mutex::new(Vec::new()),
         });
 
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1627,14 +1687,49 @@ impl Plug {
     /// motivo é um beco. Por isso a falta de captura sai como erro e não como
     /// lista curta.
     ///
+    /// O número em [`FonteDeTela::id`] é o índice **desta** listagem, e a casca
+    /// tem de devolver um dos que acabou de receber: listar de novo renumera.
+    /// Ver `seele_core::FonteDeTela::id`, que diz por que um identificador
+    /// estável não existe nos dois sistemas.
+    ///
     /// # Errors
     ///
-    /// [`PlugError::ScreenShareUnavailable`], sempre, enquanto `seele-core` não
-    /// reexportar a captura: o ADR 0002 deixa esta ponte ver `seele-core` e mais
-    /// nada, e `seele_video::captura` não passa por lá. A variante explica os
-    /// dois degraus que faltam.
+    /// [`PlugError::ScreenShareUnavailable`] quando esta máquina não tem
+    /// captura de tela, ou quando o sistema recusou listar. Uma sessão sem
+    /// monitor e sem janela **não** é erro: a lista vem vazia, porque não ter o
+    /// que compartilhar é estado.
     pub fn fontes_de_tela(&self) -> Result<Vec<FonteDeTela>, PlugError> {
-        Err(PlugError::ScreenShareUnavailable)
+        let fontes = match seele_core::fontes_de_tela() {
+            Ok(fontes) => fontes,
+            // **Vazio, e não erro**, e é o contrato escrito acima: uma recusa de
+            // permissão é a lista vazia que [`Plug::permissao_de_tela`] explica.
+            // Devolvê-la como erro faria a casca escrever «esta máquina não tem
+            // como compartilhar» ao lado do bloco que oferece pedir a permissão
+            // — duas frases sobre o mesmo estado, e a primeira mentindo.
+            Err(seele_core::ErroDeFontes::SemPermissao) => Vec::new(),
+            Err(erro) => {
+                tracing::debug!(%erro, "não deu para listar o que esta máquina compartilha");
+                return Err(PlugError::ScreenShareUnavailable);
+            }
+        };
+
+        let lista = fontes
+            .iter()
+            .map(|fonte| FonteDeTela {
+                id: fonte.id(),
+                nome: fonte.rotulo().to_owned(),
+                monitor: fonte.monitor(),
+                largura: fonte.largura(),
+                altura: fonte.altura(),
+            })
+            .collect();
+
+        // A lista fica deste lado inteira: o alvo nativo é o que a captura
+        // precisa, e ele não cabe numa travessia de JSON.
+        if let Ok(mut guardadas) = self.shared.fontes_de_tela.lock() {
+            *guardadas = fontes;
+        }
+        Ok(lista)
     }
 
     /// O que o sistema operacional respondeu sobre gravar a tela.
@@ -1645,21 +1740,19 @@ impl Plug {
     /// que perguntasse gastaria a única chance que a pessoa tem.
     #[must_use]
     pub fn permissao_de_tela(&self) -> PermissaoDeTela {
-        permissao_de_tela_desta_maquina()
+        permissao_daqui(seele_core::permissao_de_tela())
     }
 
     /// Pede a permissão ao sistema.
     ///
     /// No Windows devolve `Concedida` sem perguntar nada, porque lá não há
     /// permissão de sistema — o único consentimento é o da nossa interface. No
-    /// macOS abriria o alerta do TCC, e é justamente essa metade que ainda não
-    /// alcança daqui: ver [`PermissaoDeTela::NaoSeSabe`].
+    /// macOS abre o alerta do TCC, **uma vez**: da segunda em diante o sistema
+    /// responde o mesmo que a consulta sem mostrar nada, e o caminho de volta
+    /// são os Ajustes.
     #[must_use]
     pub fn pedir_permissao_de_tela(&self) -> PermissaoDeTela {
-        // O mesmo corpo da consulta, e não uma cópia com `request` no lugar de
-        // `preflight`: onde não há como perguntar, «pedi» e «olhei» têm de dar a
-        // mesma resposta, senão a casca acha que pediu.
-        permissao_de_tela_desta_maquina()
+        permissao_daqui(seele_core::pedir_permissao_de_tela())
     }
 
     /// Começa a transmitir a fonte escolhida, com os limites escolhidos.
@@ -1671,25 +1764,75 @@ impl Plug {
     /// casca que recusasse aqui seria uma segunda autoridade discordando da
     /// primeira no primeiro atraso de rede.
     ///
+    /// **`Ok` quer dizer «foi pedido», e não «está saindo».** O `StartScreenShare`
+    /// sai daqui; o nome da transmissão volta depois, num `ScreenShareStarted`,
+    /// e é só nesse instante que o codificador nasce. A casca vê o resultado
+    /// pelo [`Snapshot`], como vê todo o resto.
+    ///
     /// # Errors
     ///
-    /// [`PlugError::ScreenShareUnavailable`], sempre, hoje: além da captura que
-    /// [`Plug::fontes_de_tela`] já não alcança, `seele_core::enlace::Enlace` não
-    /// tem por onde mandar `StartScreenShare` — o quadro existe no protocolo
-    /// desde a onda 1 e o comando do lado do cliente não.
+    /// [`PlugError::ScreenShareUnavailable`] quando esta máquina não tem como
+    /// começar: a fonte escolhida não está na última lista, o módulo do Cisco
+    /// não está em disco, ou este build não tem captura.
+    /// [`PlugError::NotConnected`] quando a sessão já acabou.
     pub fn compartilhar_tela(&self, fonte: u64, limites: LimitesDeTela) -> Result<(), PlugError> {
-        // Registrados e não guardados: guardar uma escolha que nenhum
-        // codificador vai ler seria estado que só serve para ser lido errado
-        // depois. O rastro fica no log, que é onde o resto do detalhe de
-        // desenvolvedor deste crate já mora.
-        tracing::warn!(
-            fonte,
-            banda_bps = ?limites.banda_bps,
-            altura_maxima = limites.altura_maxima,
-            quadros_maximos = limites.quadros_maximos,
-            "screen sharing was asked for, and this build has no way to start it"
-        );
-        Err(PlugError::ScreenShareUnavailable)
+        let comecou = self.comecar_a_transmitir(fonte, limites);
+        // O pedido é guardado **quando há transmissão a que ele pertença**, e
+        // apagado quando não há. Guardá-lo depois de uma recusa poria, na coluna
+        // do que foi pedido, o teto de um botão que devolveu erro — e o §5 quer
+        // ali a metade que explica a outra, não um número solto.
+        self.shared
+            .gravar_pedido_da_tela(comecou.is_ok().then_some(limites));
+        comecou
+    }
+
+    /// A metade que abre a transmissão de verdade, separada para que
+    /// [`Plug::compartilhar_tela`] fique sendo só a memória do que foi pedido.
+    ///
+    /// As três recusas que ela sabe dar acontecem **antes** de qualquer coisa
+    /// sair pelo fio, e é para isso que ela é síncrona: uma fonte que sumiu ou
+    /// um codec que não está em disco viram uma resposta na mão de quem apertou,
+    /// e não um silêncio no laço de comandos.
+    fn comecar_a_transmitir(&self, fonte: u64, limites: LimitesDeTela) -> Result<(), PlugError> {
+        let escolhida = self.fonte_escolhida(fonte)?;
+        let biblioteca = modulo_de_video()?;
+        let pedido = seele_core::PedidoDeTela {
+            biblioteca,
+            origem: escolhida.origem(),
+            captura: seele_core::CapturaEmCaixa::nova(escolhida.captura()),
+        };
+        self.command(Command::ShareScreen {
+            pedido: Box::new(pedido),
+            limites: limites_do_nucleo(limites),
+        })
+    }
+
+    /// Tira da última listagem a fonte que a casca escolheu.
+    ///
+    /// Lista de novo quando não há listagem guardada, e **só** nesse caso: uma
+    /// casca que desenhou o menu tem a lista, e relistar por baixo dela
+    /// renumeraria os índices no meio da escolha.
+    fn fonte_escolhida(&self, fonte: u64) -> Result<seele_core::FonteDeTela, PlugError> {
+        let mut guardadas = self
+            .shared
+            .fontes_de_tela
+            .lock()
+            .map_err(|_| PlugError::ScreenShareUnavailable)?;
+        if guardadas.is_empty() {
+            *guardadas = seele_core::fontes_de_tela().map_err(|erro| {
+                tracing::debug!(%erro, "não deu para listar o que esta máquina compartilha");
+                PlugError::ScreenShareUnavailable
+            })?;
+            // Aqui a recusa de permissão **é** erro, ao contrário de
+            // [`Plug::fontes_de_tela`]: ali a lista vazia é uma resposta que a
+            // tela sabe desenhar, e aqui alguém já escolheu uma fonte que não
+            // existe mais.
+        }
+        let onde = guardadas
+            .iter()
+            .position(|candidata| candidata.id() == fonte)
+            .ok_or(PlugError::ScreenShareUnavailable)?;
+        Ok(guardadas.swap_remove(onde))
     }
 
     /// Para de transmitir.
@@ -1699,38 +1842,38 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::ScreenShareUnavailable`] se houver uma transmissão desta
-    /// pessoa em curso, porque então haveria algo para parar e nada com que
-    /// parar. Responder `Ok` aí seria a ponte dizendo que parou uma coisa que
-    /// continua saindo.
+    /// [`PlugError::NotConnected`] quando a sessão já acabou.
     pub fn parar_de_compartilhar(&self) -> Result<(), PlugError> {
-        let minha = self
-            .shared
-            .room
-            .lock()
-            .ok()
-            .and_then(|room| tela_de(&room))
-            .is_some_and(|tela| tela.e_minha);
-        if minha {
-            return Err(PlugError::ScreenShareUnavailable);
-        }
-        Ok(())
+        // O que foi pedido morre com a transmissão, e parar é uma das duas
+        // maneiras de ela acabar — a outra é o `ScreenShareStopped` que `fold`
+        // dobra. As duas limpam, porque só uma delas acontece de cada vez:
+        // quando esta pessoa aperta PARAR, o quadro do Dogma pode nunca chegar.
+        self.shared.gravar_pedido_da_tela(None);
+        self.command(Command::StopScreenShare)
     }
 
     /// Muda os limites no meio da transmissão, sem cortá-la.
     ///
     /// # Errors
     ///
-    /// [`PlugError::ScreenShareUnavailable`], sempre, hoje: não há transmissão
-    /// para ajustar, e um `Ok` sobre uma escolha que não chegou a codificador
-    /// nenhum é a casca acreditando que o limite pegou.
+    /// [`PlugError::ScreenShareUnavailable`], sempre, hoje, e o degrau que falta
+    /// já não é a fiação — é a bomba. `seele_core::Arranjo::escolha_de_resolucao`
+    /// e a cadência são armados quando a thread do codificador nasce e não têm
+    /// ordem que os mexa: `seele_core::Ordem` tem `Teto`, `Chave` e `Parar`, e
+    /// nenhuma delas troca a escolha da pessoa. Só o teto de banda passaria hoje,
+    /// e aceitar um terço de um pedido dizendo `Ok` seria pior que recusá-lo —
+    /// a casca escreveria os três números novos no painel e dois deles seriam
+    /// mentira. Enquanto isso, parar e recomeçar aplica os três.
     pub fn ajustar_limites_da_tela(&self, limites: LimitesDeTela) -> Result<(), PlugError> {
         tracing::warn!(
             banda_bps = ?limites.banda_bps,
             altura_maxima = limites.altura_maxima,
             quadros_maximos = limites.quadros_maximos,
-            "screen limits were changed, and there is no transmission to change them on"
+            "screen limits were changed, and the pump has no order that carries them"
         );
+        // Sem guardar, pela mesma razão de `compartilhar_tela`: um teto novo que
+        // aparecesse na coluna do pedido sem ter chegado a codificador nenhum
+        // seria a tela dizendo que o limite pegou.
         Err(PlugError::ScreenShareUnavailable)
     }
 
@@ -1846,7 +1989,7 @@ impl Plug {
             may_delete_rooms: room
                 .permissions
                 .contains(&seele_core::Permission::AdministerDogma),
-            tela: tela_de(&room),
+            tela: tela_de(&room, self.shared.pedido_da_tela()),
             ended: room.ended.map(|end| end.reason.into()),
         }
     }
@@ -2019,25 +2162,90 @@ fn messages_of(room: &Room) -> Vec<Message> {
         .collect()
 }
 
-/// O que esta máquina sabe dizer sobre a permissão de gravar a tela.
+/// A resposta do núcleo, no vocabulário que atravessa a ponte.
 ///
-/// Uma função e não duas: ver [`Plug::pedir_permissao_de_tela`].
-fn permissao_de_tela_desta_maquina() -> PermissaoDeTela {
-    // No Windows não há permissão de sistema para capturar a tela — a WGC
-    // captura, e o único consentimento é o da nossa interface (§4). Responder
-    // `NaoPerguntada` ali desenharia um botão de pedir permissão que não teria
-    // a quem pedir.
-    #[cfg(target_os = "windows")]
-    {
-        PermissaoDeTela::Concedida
+/// Um `match` exaustivo de propósito, como [`nome_da_parada`]: uma resposta nova
+/// em `seele-core` reprova aqui em vez de virar silenciosamente outra.
+const fn permissao_daqui(resposta: seele_core::PermissaoDeTela) -> PermissaoDeTela {
+    match resposta {
+        seele_core::PermissaoDeTela::Concedida => PermissaoDeTela::Concedida,
+        seele_core::PermissaoDeTela::Negada => PermissaoDeTela::Negada,
+        seele_core::PermissaoDeTela::NaoPerguntada => PermissaoDeTela::NaoPerguntada,
+        seele_core::PermissaoDeTela::SemCaptura => PermissaoDeTela::NaoSeSabe,
     }
-    // No macOS a resposta existe e mora em `seele_video::captura::macos`, atrás
-    // de `CGPreflightScreenCaptureAccess`. O ADR 0002 não deixa esta ponte
-    // chegar lá, e `seele-core` ainda não a reexporta.
-    #[cfg(not(target_os = "windows"))]
-    {
-        PermissaoDeTela::NaoSeSabe
+}
+
+/// O que a pessoa escolheu, traduzido para os degraus fechados do §5.
+///
+/// **Para baixo, sempre**: a escolha é teto, então um número entre dois degraus
+/// vira o degrau de baixo, e um número abaixo do menor vira o menor — que é o
+/// piso da lista e não uma quarta opção. Arredondar para cima seria a ponte
+/// entregando mais do que a pessoa pediu, que é o §5 ao contrário.
+fn limites_do_nucleo(limites: LimitesDeTela) -> seele_core::LimitesDeTela {
+    let resolucao = seele_core::Resolucao::TODAS
+        .into_iter()
+        .rev()
+        .find(|degrau| u32::try_from(degrau.altura()).unwrap_or(u32::MAX) <= limites.altura_maxima)
+        .unwrap_or(seele_core::Resolucao::P540);
+    let cadencia = seele_core::Cadencia::TODAS
+        .into_iter()
+        .rev()
+        .find(|degrau| degrau.hz() <= limites.quadros_maximos)
+        .unwrap_or(seele_core::Cadencia::Q8);
+    seele_core::LimitesDeTela {
+        banda_bps: limites.banda_bps,
+        resolucao,
+        cadencia,
     }
+}
+
+/// Onde o módulo do Cisco é procurado, na ordem.
+///
+/// A lista vem daqui porque `seele_video::modulo::procurar_em` a pede de fora, e
+/// o argumento dele é o desta casa: *onde os arquivos do produto moram é decisão
+/// da casca*. Esta é a casca.
+///
+/// A ordem é uma decisão. Primeiro o que quem roda apontou, que é como se
+/// desenvolve e como se depura; depois a pasta do executável, que é onde um
+/// pacote o carrega; depois `../Frameworks`, que é onde um `.app` do macOS o
+/// põe; depois a pasta de build, que é onde ele cai numa árvore de fonte.
+fn pastas_do_modulo() -> Vec<std::path::PathBuf> {
+    let mut pastas = Vec::new();
+    if let Some(apontado) = std::env::var_os("SEELE_OPENH264") {
+        let caminho = std::path::PathBuf::from(apontado);
+        pastas.push(if caminho.is_dir() {
+            caminho
+        } else {
+            caminho
+                .parent()
+                .map_or_else(|| caminho.clone(), std::path::Path::to_path_buf)
+        });
+    }
+    if let Some(perto) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
+    {
+        pastas.push(perto.join("../Frameworks"));
+        // A pasta de build de uma árvore de fonte: o executável mora em
+        // `target/debug`, e o módulo em `target`.
+        pastas.push(perto.join(".."));
+        pastas.push(perto);
+    }
+    pastas
+}
+
+/// O módulo do Cisco, achado e carregado.
+///
+/// **O produto não vem com codec, e é a licença que impõe isso** — o módulo do
+/// Cisco não pode ser redistribuído com este binário. Não achá-lo é o estado
+/// normal de quem nunca compartilhou tela, e não um defeito.
+fn modulo_de_video() -> Result<seele_core::BibliotecaDeVideo, PlugError> {
+    seele_core::BibliotecaDeVideo::procurar_e_carregar(&pastas_do_modulo()).map_err(|erro| {
+        let onde = seele_core::modulo_de_video_publicado()
+            .map_or_else(|| "—".to_owned(), |modulo| modulo.url());
+        tracing::warn!(%erro, %onde, "o módulo de vídeo não está nesta máquina");
+        PlugError::ScreenShareUnavailable
+    })
 }
 
 /// O nome estável de um motivo de parada, para a casca escrever a frase.
@@ -2073,13 +2281,18 @@ pub fn motivos_de_parada_da_tela() -> Vec<&'static str> {
 
 /// A transmissão de tela da sala onde esta pessoa está, como a casca a vê.
 ///
-/// Lê o `Room` e nada mais. Os três números do que está saindo — altura,
-/// quadros, kbps — ficam zerados com `medida: false`, porque **nada nesta ponte
-/// os mede**: quem compartilha não tem codificador daqui, e quem assiste não tem
-/// recepção aberta. Preenchê-los com o que foi pedido, ou com o degrau que o
-/// teto compraria, seria a ponte prometendo a escolha — o oposto exato da regra
-/// do §5.
-fn tela_de(room: &Room) -> Option<TelaEmCurso> {
+/// Lê o `Room` e o que esta sessão pediu, e nada mais. Os três números do que
+/// está saindo — altura, quadros, kbps — ficam zerados com `medida: false`,
+/// porque **nada nesta ponte os mede**: quem compartilha não tem codificador
+/// daqui, e quem assiste não tem recepção aberta. Preenchê-los com o que foi
+/// pedido, ou com o degrau que o teto compraria, seria a ponte prometendo a
+/// escolha — o oposto exato da regra do §5.
+///
+/// `pedido` é a outra metade dessa mesma regra, e entra por parâmetro em vez de
+/// sair do `Room`: o `Room` é o que o Dogma contou, e o que esta pessoa
+/// escolheu nunca passou por ele. Ele só sai daqui quando a transmissão é
+/// desta pessoa — ver [`TelaEmCurso::pedido`].
+fn tela_de(room: &Room, pedido: Option<LimitesDeTela>) -> Option<TelaEmCurso> {
     let cage = room.current_cage?;
     let tela = room.telas.get(&cage)?;
     // Quem compartilha não assiste a si mesmo. É o mesmo N do §5.1, contado do
@@ -2088,9 +2301,10 @@ fn tela_de(room: &Room) -> Option<TelaEmCurso> {
         .roster(cage)
         .filter(|pilot| pilot.id != tela.pilot)
         .count();
+    let e_minha = room.me == Some(tela.pilot);
     Some(TelaEmCurso {
         de: tela.pilot.0,
-        e_minha: room.me == Some(tela.pilot),
+        e_minha,
         altura: 0,
         quadros: 0,
         kbps: 0,
@@ -2099,6 +2313,12 @@ fn tela_de(room: &Room) -> Option<TelaEmCurso> {
         espectadores: u32::try_from(espectadores).unwrap_or(u32::MAX),
         parada: None,
         medida: false,
+        // Só para quem compartilha, e a conferência é o campo inteiro: o teto é
+        // escolha de quem transmite e não viaja no fio, então o que esta
+        // máquina guardou só descreve a **própria** transmissão. Mostrá-lo ao
+        // lado da tela de outra pessoa seria a coluna «pedido» exibindo o que
+        // um terceiro pediu na vez passada.
+        pedido: if e_minha { pedido } else { None },
     })
 }
 
@@ -2592,13 +2812,19 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
     // Lido do `Room` de novo, e depois da dobra: o que decide entre «acendeu» e
     // «não acendeu» quando só o roster andou é se há transmissão **agora**.
     if changed.telas || changed.roster {
-        let ha_tela = shared
+        let tela = shared
             .room
             .lock()
             .ok()
-            .and_then(|room| tela_de(&room))
-            .is_some();
-        if a_tela_mudou(changed, ha_tela) {
+            .and_then(|room| tela_de(&room, None));
+        // O que foi pedido morre com a transmissão. Sem esta linha, a próxima
+        // vez que esta pessoa compartilhasse mostraria o que está saindo agora
+        // ao lado de um teto que ela escolheu noutra ocasião — dois números
+        // lado a lado, o da direita mentindo, e nada na tela dizendo qual.
+        if !tela.as_ref().is_some_and(|tela| tela.e_minha) {
+            shared.gravar_pedido_da_tela(None);
+        }
+        if a_tela_mudou(changed, tela.is_some()) {
             shared.notify(&Event::ScreenChanged);
         }
     }
@@ -2988,6 +3214,16 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             tokio::spawn(async move {
                 let _ = answer.send(preview_of(attachment.get(), &claimed, caixa.await.ok()));
             });
+        }
+        Command::ShareScreen { pedido, limites } => {
+            if client.compartilhar_tela(*pedido, limites).await.is_err() {
+                return false;
+            }
+        }
+        Command::StopScreenShare => {
+            if client.parar_de_compartilhar().await.is_err() {
+                return false;
+            }
         }
         Command::Shutdown => return false,
     }
@@ -3420,6 +3656,8 @@ mod tests {
             sync_ratio: AtomicU8::new(0),
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
+            limites_da_tela: Mutex::new(None),
+            fontes_de_tela: Mutex::new(Vec::new()),
         })
     }
 
@@ -4487,6 +4725,8 @@ mod tests {
             sync_ratio: AtomicU8::new(0),
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
+            limites_da_tela: Mutex::new(None),
+            fontes_de_tela: Mutex::new(Vec::new()),
         });
         let counter = Arc::new(Counter(std::sync::atomic::AtomicUsize::new(0)));
         shared
@@ -4556,7 +4796,7 @@ mod tests {
         sentar(&mut room, 3);
         sentar(&mut room, 4);
 
-        let tela = tela_de(&room).expect("a transmissão foi anunciada nesta sala");
+        let tela = tela_de(&room, None).expect("a transmissão foi anunciada nesta sala");
         assert_eq!(tela.de, 3);
         assert!(
             !tela.e_minha,
@@ -4571,7 +4811,9 @@ mod tests {
 
         sentar(&mut room, 5);
         assert_eq!(
-            tela_de(&room).expect("a transmissão continua").espectadores,
+            tela_de(&room, None)
+                .expect("a transmissão continua")
+                .espectadores,
             3,
             "entrou mais uma pessoa e a contagem não andou"
         );
@@ -4583,7 +4825,7 @@ mod tests {
 
         // O piloto 7 é quem esta sessão é — `sala_com_tela` o diz na `Session`.
         let room = sala_com_tela(PilotId(7));
-        let tela = tela_de(&room).expect("a transmissão foi anunciada");
+        let tela = tela_de(&room, None).expect("a transmissão foi anunciada");
         assert!(
             tela.e_minha,
             "sem isto a casca desenha o painel de quem assiste para quem compartilha"
@@ -4612,7 +4854,7 @@ mod tests {
             permissions: Vec::new(),
         });
         room.enter_cage(CageId(1));
-        assert!(tela_de(&room).is_none());
+        assert!(tela_de(&room, None).is_none());
     }
 
     #[test]
@@ -4629,7 +4871,7 @@ mod tests {
         // o servidor não tem como medir uma grandeza do receptor.
         use seele_core::PilotId;
 
-        let tela = tela_de(&sala_com_tela(PilotId(3))).expect("a transmissão foi anunciada");
+        let tela = tela_de(&sala_com_tela(PilotId(3)), None).expect("a transmissão foi anunciada");
         assert!(
             !tela.medida,
             "alguém passou a medir o que sai: então preencha os três números e mude este teste"
@@ -4638,6 +4880,114 @@ mod tests {
         assert_eq!(
             tela.parada, None,
             "parar com motivo é decisão do teto, e nenhum teto roda deste lado"
+        );
+    }
+
+    /// Um pedido qualquer, com os três controles do §5 preenchidos.
+    fn limites() -> LimitesDeTela {
+        LimitesDeTela {
+            banda_bps: Some(1_200_000),
+            altura_maxima: 1080,
+            quadros_maximos: 30,
+        }
+    }
+
+    #[test]
+    fn o_pedido_so_aparece_ao_lado_da_propria_tela() {
+        use seele_core::PilotId;
+
+        // O §5 manda pôr o que está saindo ao lado do que foi pedido. O que foi
+        // pedido é escolha de quem transmite e **não viaja**: o `ScreenHeader`
+        // carrega resolução e codec, nunca o teto. Então esta ponte só tem como
+        // preencher a coluna da própria transmissão — e preenchê-la com a
+        // escolha desta máquina ao lado da tela de outra pessoa seria mostrar o
+        // teto de uma transmissão como se fosse o de outra.
+        let minha = tela_de(&sala_com_tela(PilotId(7)), Some(limites()))
+            .expect("a transmissão foi anunciada");
+        assert!(minha.e_minha);
+        assert_eq!(
+            minha.pedido,
+            Some(limites()),
+            "quem compartilha perdeu a metade da comparação que o §5 obriga"
+        );
+
+        let alheia = tela_de(&sala_com_tela(PilotId(3)), Some(limites()))
+            .expect("a transmissão foi anunciada");
+        assert!(!alheia.e_minha);
+        assert_eq!(
+            alheia.pedido, None,
+            "o teto escolhido nesta máquina foi mostrado como se fosse o de quem compartilha"
+        );
+    }
+
+    #[test]
+    fn o_pedido_morre_com_a_transmissao_e_nao_com_o_roster() {
+        use seele_core::{PilotId, ScreenId, ServerMessage};
+
+        // A memória do que foi pedido saiu do JavaScript da casca — onde ela
+        // morria com a janela — e passou a morar aqui. Isso troca um defeito por
+        // outro se ela sobreviver à transmissão: a próxima vez que esta pessoa
+        // compartilhasse mostraria o que está saindo agora ao lado de um teto de
+        // outra vez, e nada na tela diria qual dos dois números vale.
+        let shared = bare_shared();
+        if let Ok(mut room) = shared.room.lock() {
+            *room = sala_com_tela(PilotId(7));
+        }
+        shared.gravar_pedido_da_tela(Some(limites()));
+
+        // Alguém entra na sala: o N do §5.1 anda, a transmissão continua, e o
+        // que foi pedido continua valendo.
+        fold(
+            &shared,
+            &ServerMessage::PilotJoined {
+                cage: CageId(1),
+                profile: seele_core::PilotProfile {
+                    id: PilotId(4),
+                    nickname: "piloto-4".into(),
+                    roles: Vec::new(),
+                },
+                ssrc: Ssrc(40),
+            },
+        );
+        assert_eq!(
+            shared.pedido_da_tela(),
+            Some(limites()),
+            "uma pessoa entrando na sala apagou o teto de quem estava compartilhando"
+        );
+
+        // A transmissão acaba: o pedido acaba com ela.
+        fold(
+            &shared,
+            &ServerMessage::ScreenShareStopped {
+                cage: CageId(1),
+                screen: ScreenId(9),
+            },
+        );
+        assert_eq!(
+            shared.pedido_da_tela(),
+            None,
+            "o teto sobreviveu à transmissão a que ele pertencia"
+        );
+    }
+
+    #[test]
+    fn um_pedido_recusado_nao_vira_memoria() {
+        // `compartilhar_tela` guarda o que foi pedido **quando a transmissão
+        // começa**. Enquanto ela não começa, guardar seria pôr na coluna do
+        // pedido o teto de um botão que devolveu erro — e a coluna existe para
+        // explicar a diferença entre o que se pediu e o que está saindo, não
+        // para registrar tentativas.
+        let fonte = include_str!("lib.rs");
+        let Some(corpo) = fonte
+            .split("pub fn compartilhar_tela(")
+            .nth(1)
+            .and_then(|resto| resto.split("\n    }").next())
+        else {
+            panic!("`compartilhar_tela` mudou de forma; este guarda tem de mudar com ele");
+        };
+        assert!(
+            corpo.contains("comecou.is_ok().then_some(limites)"),
+            "`compartilhar_tela` guarda o pedido sem conferir se a transmissão começou:\n{corpo}"
         );
     }
 
@@ -5044,6 +5394,69 @@ mod trilha_no_log {
         fn enter(&self, _: &tracing::span::Id) {}
 
         fn exit(&self, _: &tracing::span::Id) {}
+    }
+
+    #[test]
+    fn a_escolha_da_pessoa_vira_degrau_arredondando_para_baixo() {
+        // §5: o que se escolhe é o **máximo**. Arredondar para cima seria a
+        // ponte entregando mais do que a pessoa pediu — 1080p a quem escolheu
+        // 800 —, que é a regra ao contrário e o `spikes/tela-no-transporte`
+        // de volta.
+        let escolha = |altura, quadros| {
+            limites_do_nucleo(LimitesDeTela {
+                banda_bps: Some(1_200_000),
+                altura_maxima: altura,
+                quadros_maximos: quadros,
+            })
+        };
+
+        // Os três da lista fechada caem em si mesmos.
+        assert_eq!(escolha(1080, 30).resolucao, seele_core::Resolucao::P1080);
+        assert_eq!(escolha(720, 15).resolucao, seele_core::Resolucao::P720);
+        assert_eq!(escolha(540, 8).resolucao, seele_core::Resolucao::P540);
+        assert_eq!(escolha(1080, 30).cadencia, seele_core::Cadencia::Q30);
+        assert_eq!(escolha(1080, 15).cadencia, seele_core::Cadencia::Q15);
+        assert_eq!(escolha(1080, 8).cadencia, seele_core::Cadencia::Q8);
+
+        // Entre dois degraus, o de baixo.
+        assert_eq!(escolha(900, 29).resolucao, seele_core::Resolucao::P720);
+        assert_eq!(escolha(900, 29).cadencia, seele_core::Cadencia::Q15);
+
+        // Abaixo do menor, o menor: 540p é o piso da lista e não há uma quarta
+        // opção — abaixo dele o encoder deixa de conseguir gastar o orçamento.
+        assert_eq!(escolha(240, 1).resolucao, seele_core::Resolucao::P540);
+        assert_eq!(escolha(240, 1).cadencia, seele_core::Cadencia::Q8);
+
+        // E o teto de banda atravessa como está: quem o converte em degrau é o
+        // `TetoDeVideo`, e não esta travessia.
+        assert_eq!(escolha(720, 30).banda_bps, Some(1_200_000));
+    }
+
+    #[test]
+    fn o_modulo_de_video_e_procurado_onde_a_casca_o_poe() {
+        // A lista vem daqui porque `procurar_em` a pede de fora — «onde os
+        // arquivos do produto moram é decisão da casca» —, e uma lista vazia
+        // faria o botão de compartilhar responder «este build não sabe» numa
+        // máquina que tem o módulo ao lado do executável.
+        //
+        // A variável de ambiente não é mexida aqui de propósito: ela é global ao
+        // processo, e uma bateria que roda em paralelo não tem como emprestá-la.
+        let pastas = pastas_do_modulo();
+        let perto = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
+            .expect("o executável do teste");
+
+        assert!(
+            pastas.contains(&perto),
+            "sem a pasta do executável, um binário empacotado não acharia o \
+             módulo que veio com ele: {pastas:?}"
+        );
+        assert!(
+            pastas.contains(&perto.join("..")),
+            "sem a pasta acima, uma árvore de fonte não acharia o módulo em \
+             `target/`: {pastas:?}"
+        );
     }
 
     #[test]

@@ -147,6 +147,19 @@ pub enum NoticeReason {
     /// is its own reason instead of `PermissionDenied`, which would say the
     /// wrong thing and send somebody looking for a role they already have.
     ScreenShareTaken,
+    /// O Dogma parou a transmissão desta pessoa: a sala cresceu além da subida
+    /// de quem hospeda.
+    ///
+    /// §5.1 pôs o caminho de quem hospeda dentro do teto — `caminho × 60% ÷ N` —
+    /// porque é o Dogma que sobe as N cópias. Passado certo N nem o piso do §2
+    /// cabe, e o §3.2 diz o que acontece então: *quem para é o vídeo*.
+    ///
+    /// Razão própria, e não [`Self::SyncDegraded`], que toda casca escreve como
+    /// «sinal em queda» — uma frase sobre a conexão de quem lê, na frente de
+    /// alguém cuja conexão está boa e cuja plateia cresceu. E não um
+    /// `ScreenShareStopped` mudo: quem apertou parar sabe que apertou, e quem
+    /// foi parado pelo Dogma não ficaria sabendo de nada.
+    ScreenShareOverHostUplink,
 }
 
 impl From<seele_core::AlertReason> for NoticeReason {
@@ -165,6 +178,7 @@ impl From<seele_core::AlertReason> for NoticeReason {
             seele_core::AlertReason::LineDeleted => Self::LineDeleted,
             seele_core::AlertReason::LastCage => Self::LastCage,
             seele_core::AlertReason::ScreenShareTaken => Self::ScreenShareTaken,
+            seele_core::AlertReason::ScreenShareOverHostUplink => Self::ScreenShareOverHostUplink,
         }
     }
 }
@@ -586,12 +600,12 @@ pub enum PermissaoDeTela {
     /// Esta compilação não tem como perguntar ao sistema.
     ///
     /// **Não estava no contrato de 22/08, e existe porque as outras três
-    /// mentiriam.** O ADR 0002 deixa esta ponte ver `seele-core` e mais nada, e
-    /// `seele-core` ainda não reexporta `seele_video::captura::macos::permissao`
-    /// — o gêmeo do que ele já faz por [`crate::capture_devices`] para o
-    /// microfone. Sem esse degrau, responder `NaoPerguntada` no macOS mandaria
-    /// a pessoa apertar um botão que não pergunta nada, e responder `Negada`
-    /// culparia um sistema que nunca foi consultado.
+    /// mentiriam.** É o Linux da v1: não há captura de tela neste build — o
+    /// portal XDG exige `ashpd` mais `pipewire`, e com eles o binário deixa de
+    /// ser autocontido (decisão de 22/08/2026, §7 item 5) —, então não há a quem
+    /// perguntar. Responder `NaoPerguntada` mandaria a pessoa apertar um botão
+    /// que não pergunta nada, e responder `Negada` culparia um sistema que nunca
+    /// foi consultado.
     ///
     /// Uma casca que recebe isto **não desenha o controle de compartilhar**. É a
     /// mesma resposta que [`Snapshot::caminho`] dá com `None`: sem informação, a
@@ -669,6 +683,30 @@ pub struct TelaEmCurso {
     ///
     /// `false` significa **não sei**, e a casca não escreve nada.
     pub medida: bool,
+    /// O que foi **pedido** para esta transmissão, quando ela é desta pessoa.
+    ///
+    /// O outro lado do §5: *a tela não promete a escolha*, e mostra o que está
+    /// saindo **ao lado** do que foi pedido. Os campos acima são a primeira
+    /// metade; sem esta, a segunda não atravessa e a comparação que a regra
+    /// obriga não tem com o que ser feita.
+    ///
+    /// **Estava faltando no contrato de 22/08, e a falta tinha dono.** A casca
+    /// gráfica cobriu o buraco guardando os limites que ela mesma mandou numa
+    /// variável de JavaScript — e uma janela recarregada, ou uma segunda janela
+    /// sobre a mesma sessão, perdia a memória de uma transmissão que continuava
+    /// saindo. Aqui o pedido mora do lado que sobrevive à janela, que é o mesmo
+    /// lado que o mandou ao codificador.
+    ///
+    /// `None` em dois casos, e os dois são a mesma resposta honesta — «não sei»:
+    ///
+    /// - **quem só assiste**, sempre. O teto é escolha de quem compartilha e não
+    ///   atravessa o fio em lugar nenhum (`ScreenHeader` carrega resolução e
+    ///   codec, nunca o que a pessoa pediu). Inventá-lo a partir do que chega
+    ///   seria devolver a medida como se fosse a escolha, que é exatamente a
+    ///   promessa que o §5 proíbe;
+    /// - **uma transmissão própria que este processo não começou** — a sessão
+    ///   caiu e voltou, ou o Dogma reanunciou uma tela de antes.
+    pub pedido: Option<LimitesDeTela>,
 }
 
 /// Everything the interface needs, in one value.
@@ -1249,22 +1287,25 @@ pub enum PlugError {
     /// própria, porque decidir localmente quem perdeu a corrida seria a casca
     /// julgando no lugar do servidor.
     ScreenShareTaken,
-    /// Esta compilação não sabe compartilhar tela.
+    /// Esta máquina não tem como começar a compartilhar.
     ///
-    /// **Não é uma recusa e não é rede.** É a metade do caminho que ainda não
-    /// existe, e ela tem dois buracos, os dois fora deste crate:
+    /// **Não é uma recusa do Dogma e não é rede.** É uma das quatro coisas que
+    /// faltam **aqui**, e três delas a pessoa consegue mudar:
     ///
-    /// 1. o ADR 0002 deixa esta ponte ver `seele-core` e mais nada, e
-    ///    `seele-core` não reexporta a captura — nem a lista de fontes
-    ///    (`captura::macos::fontes`, `captura::windows::listar_monitores`) nem
-    ///    a permissão. O gêmeo disso para o microfone já existe e se chama
-    ///    [`crate::capture_devices`];
-    /// 2. `seele_core::enlace::Enlace` não tem por onde mandar
-    ///    `StartScreenShare` nem `StopScreenShare`. O protocolo os tem desde a
-    ///    onda 1; o comando do lado do cliente não foi escrito.
+    /// 1. o módulo do Cisco não está em disco. O produto não vem com codec, e é
+    ///    a licença que impõe isso — há um endereço de download, e o log da
+    ///    ponte o escreve;
+    /// 2. o sistema não concedeu gravação de tela. Aí quem responde é
+    ///    [`PermissaoDeTela`], e o botão a oferecer é o de pedir;
+    /// 3. a fonte escolhida não está na última lista — a janela fechou entre o
+    ///    menu e o clique. Listar de novo resolve;
+    /// 4. este build não tem captura de tela (o Linux da v1). Só este último não
+    ///    tem conserto do lado de quem usa, e é o que
+    ///    [`PermissaoDeTela::NaoSeSabe`] diz.
     ///
-    /// Uma casca que recebe isto não deve oferecer o controle de novo com outro
-    /// texto: não há nada que a pessoa possa fazer para mudar a resposta.
+    /// Também é o que `Plug::ajustar_limites_da_tela` devolve, e ali o motivo
+    /// é outro: a bomba não tem ordem que troque a escolha de resolução ou de
+    /// cadência depois de armada. Parar e recomeçar aplica as três.
     ScreenShareUnavailable,
 }
 
@@ -1530,6 +1571,11 @@ mod tests {
             espectadores: 6,
             parada: None,
             medida: false,
+            pedido: Some(LimitesDeTela {
+                banda_bps: Some(1_200_000),
+                altura_maxima: 1080,
+                quadros_maximos: 30,
+            }),
         };
         let json = serde_json::to_string(&tela).expect("uma estrutura simples sempre serializa");
 
@@ -1542,6 +1588,7 @@ mod tests {
             "\"espectadores\"",
             "\"parada\"",
             "\"medida\"",
+            "\"pedido\"",
         ] {
             assert!(json.contains(nome), "{nome} não atravessa: {json}");
         }
@@ -1551,6 +1598,44 @@ mod tests {
         assert!(
             json.contains("\"medida\":false"),
             "a ponte diz ter medido o que não mediu: {json}"
+        );
+
+        // E o pedido atravessa com os **mesmos três nomes** com que a casca o
+        // escreveu ao mandá-lo (`LimitesDeTela`, logo acima). Renomear um deles
+        // aqui deixaria a coluna do que foi pedido vazia sem nada falhar: os
+        // dois lados continuariam compilando e a comparação do §5 sumiria da
+        // tela.
+        for nome in ["\"banda_bps\"", "\"altura_maxima\"", "\"quadros_maximos\""] {
+            assert!(
+                json.contains(nome),
+                "{nome} não atravessa dentro do pedido: {json}"
+            );
+        }
+    }
+
+    #[test]
+    fn quem_so_assiste_nao_recebe_um_pedido_que_nao_e_dele() {
+        // O teto é escolha de quem compartilha, e ela não viaja: o
+        // `ScreenHeader` carrega resolução e codec, nunca o que a pessoa pediu.
+        // Preencher esta coluna para quem assiste só seria possível copiando a
+        // medida para o lugar da escolha — e aí as duas metades que o §5 manda
+        // pôr lado a lado passariam a ser o mesmo número, sempre iguais, sempre
+        // dizendo que o teto nunca apertou.
+        let alheia = TelaEmCurso {
+            de: 3,
+            e_minha: false,
+            altura: 0,
+            quadros: 0,
+            kbps: 0,
+            espectadores: 6,
+            parada: None,
+            medida: false,
+            pedido: None,
+        };
+        let json = serde_json::to_string(&alheia).expect("uma estrutura simples sempre serializa");
+        assert!(
+            json.contains("\"pedido\":null"),
+            "o pedido de outra pessoa foi inventado deste lado: {json}"
         );
     }
 

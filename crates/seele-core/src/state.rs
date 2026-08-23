@@ -235,6 +235,21 @@ pub struct Room {
     /// entra numa sala que já tem uma —, e um campo que só o reenvio preenche
     /// seria um campo mentindo no aperto de mão.
     pub telas: HashMap<CageId, Tela>,
+    /// A subida que o Dogma mediu da própria máquina, em bits por segundo.
+    ///
+    /// A primeira linha do teto do §5.1 — `caminho de quem HOSPEDA × 60% ÷ N` —
+    /// e a única perna que quem compartilha **não** consegue ver: os bytes saem
+    /// da máquina de quem hospeda e não da dele.
+    ///
+    /// `None` é «não medi», e o `HostUplink` diz isso com um zero. Traduzir o
+    /// zero para `None` aqui, na entrada, é a única maneira de o resto do
+    /// produto não ter de lembrar do sentinela: um zero que escapasse daqui
+    /// viraria um teto de zero bits por segundo, que é [`MotivoDeParada`]
+    /// `AbaixoDoPiso` — o compartilhamento parando **porque o servidor não
+    /// mediu**, que é o oposto do que a ausência quer dizer.
+    ///
+    /// [`MotivoDeParada`]: crate::tela::MotivoDeParada
+    pub caminho_de_quem_hospeda_bps: Option<u32>,
     /// O último pedido de quadro-chave recebido, para quem está compartilhando.
     ///
     /// Uma vaga só, e não uma fila: §3.3 conta o que um quadro-chave custa —
@@ -248,6 +263,20 @@ pub struct Room {
 /// Uma transmissão de tela acontecendo num Cage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Tela {
+    /// Quantas pessoas estão recebendo esta transmissão, quem compartilha
+    /// excluído.
+    ///
+    /// **É o N do §5.1, e é o que o servidor sobe.** O Dogma encaminha os
+    /// quadros, então o que a máquina dele levanta é `N × teto` — e a correção
+    /// que aquela seção torna obrigatória divide a subida de quem hospeda por
+    /// este número. Sem ele quem compartilha aplica um `min(...)` com uma perna
+    /// que inventou, que é o defeito mais caro do §5.1.
+    ///
+    /// Zero até o `ScreenViewers` chegar, e não um: o um de
+    /// [`crate::tela::TetoDeVideo`] é o piso da **divisão**, escolhido lá para
+    /// que a entrada da primeira pessoa não dê um salto no teto. Repeti-lo aqui
+    /// faria a interface escrever «1 pessoa assistindo» antes de haver uma.
+    pub espectadores: u32,
     /// Quem está compartilhando.
     pub pilot: PilotId,
     /// Como a transmissão se chama.
@@ -360,6 +389,11 @@ impl Room {
         // transmitindo, então o que é verdade volta sozinho.
         self.telas.clear();
         self.chave_pedida = None;
+        // Pelo mesmo motivo, e com o mesmo estrago: a medida é da máquina que
+        // hospeda **esta** conexão, e uma conexão nova pode ser com outro
+        // Dogma. Carregar a subida do anterior seria dimensionar o teto pela
+        // casa errada, que é o defeito que o §5.1 mandou corrigir.
+        self.caminho_de_quem_hospeda_bps = None;
         self.pilots.insert(
             info.pilot,
             Pilot::new(info.pilot, nickname.to_owned(), Some(info.ssrc)),
@@ -536,6 +570,44 @@ impl Room {
         self.pilots
             .get(&pilot)
             .map_or_else(|| format!("piloto {}", pilot.0), |p| p.nickname.clone())
+    }
+
+    /// A transmissão que **este** piloto está compartilhando, se houver uma.
+    ///
+    /// Uma por Cage (§6 item 3), então achar a minha é achar aquela cujo dono
+    /// sou eu — e não a do Cage em que estou, que pode ser a de outra pessoa.
+    #[must_use]
+    pub fn minha_tela(&self) -> Option<Tela> {
+        let me = self.me?;
+        self.telas.values().copied().find(|tela| tela.pilot == me)
+    }
+
+    /// O teto do vídeo com o que o fio já contou, pronto para a bomba.
+    ///
+    /// **É aqui que as três pernas do §5.1 se encontram**, e cada uma vem de um
+    /// lugar diferente pelo motivo que aquela seção dá: a de quem hospeda vem do
+    /// `HostUplink`, o N vem do `ScreenViewers`, e a escolha da pessoa vem da
+    /// interface — sempre teto, nunca piso (§5).
+    ///
+    /// A perna de quem compartilha **não** vem de lugar nenhum, e isto é
+    /// deliberado: o produto mede sinal, RTT e perda (ADR 0024), e nenhum dos
+    /// três diz quanto o caminho aguenta. Fica o cano das provas
+    /// ([`crate::tela::CAMINHO_DA_PROVA_BPS`]), que é a única suposição com
+    /// número atrás, e quem aperta de verdade num caminho ruim é a faixa do
+    /// sinal — [`crate::tela::TetoDeVideo::teto`] a recebe à parte. É a
+    /// pergunta 2 do §8, e ela continua aberta.
+    ///
+    /// Ausência de medida do anfitrião **não** é zero: quando o `HostUplink`
+    /// não chegou, ou chegou dizendo zero, a perna dele fica no cano das provas
+    /// em vez de zerar o teto — ver [`Self::caminho_de_quem_hospeda_bps`].
+    #[must_use]
+    pub fn teto_de_video(&self, escolha_bps: Option<u32>) -> crate::tela::TetoDeVideo {
+        let mut teto = crate::tela::TetoDeVideo::novo();
+        if let Some(medido) = self.caminho_de_quem_hospeda_bps {
+            teto = teto.com_caminho_de_quem_hospeda(medido);
+        }
+        teto.com_espectadores(self.minha_tela().map_or(0, |tela| tela.espectadores))
+            .com_escolha(escolha_bps)
     }
 
     /// Folds one message from the server into this room.
@@ -865,14 +937,62 @@ impl Room {
                 pilot,
                 screen,
             } => {
+                // A contagem sobrevive ao reenvio, e é por isso que ela é lida
+                // antes de inserir: o Dogma manda `ScreenShareStarted` de novo
+                // a **cada** pessoa que entra num Cage que já transmite, e
+                // zerar ali faria a interface piscar «0 assistindo» e o teto
+                // subir por um instante — justamente no instante em que a sala
+                // acabou de crescer. O `ScreenViewers` que vem atrás corrige o
+                // número; o que ele não corrige é o teto que já saiu.
+                let espectadores = self
+                    .telas
+                    .get(cage)
+                    .filter(|tela| tela.screen == *screen)
+                    .map_or(0, |tela| tela.espectadores);
                 self.telas.insert(
                     *cage,
                     Tela {
+                        espectadores,
                         pilot: *pilot,
                         screen: *screen,
                     },
                 );
                 changed.telas = true;
+            }
+            // Quantas pessoas estão recebendo, que é o N do §5.1.
+            //
+            // Procurado pelo `ScreenId` e não pelo Cage porque é assim que a
+            // mensagem se endereça, e porque um `ScreenViewers` atrasado de uma
+            // transmissão anterior não pode reescrever a contagem da que
+            // começou depois — é o mesmo cuidado do `ScreenShareStopped` logo
+            // acima, pelo mesmo motivo.
+            ServerMessage::ScreenViewers { tela, quantos } => {
+                if let Some(viva) = self
+                    .telas
+                    .values_mut()
+                    .find(|conhecida| conhecida.screen == *tela)
+                {
+                    if viva.espectadores != *quantos {
+                        viva.espectadores = *quantos;
+                        changed.telas = true;
+                    }
+                }
+            }
+            // A subida de quem hospeda. **Zero é ausência, nunca zero bits.**
+            //
+            // A tradução acontece aqui, na entrada, e em nenhum outro lugar: é
+            // o que faz o resto do produto poder ler
+            // `caminho_de_quem_hospeda_bps` sem lembrar do sentinela. A
+            // bandeira é `telas` e não `telemetry` porque o que se mexe com
+            // isto é o painel da tela — o teto, e a frase que explica por que
+            // ele apertou (§5.1) —, e não os números de RTT e perda que a
+            // telemetria desenha.
+            ServerMessage::HostUplink { bps } => {
+                let medido = (*bps != 0).then_some(*bps);
+                if self.caminho_de_quem_hospeda_bps != medido {
+                    self.caminho_de_quem_hospeda_bps = medido;
+                    changed.telas = true;
+                }
             }
             // Sem motivo, e o §3.6 explica por quê: as duas maneiras de acabar
             // — alguém apertou parar, ou quem mandava sumiu — já se distinguem
@@ -1756,6 +1876,9 @@ mod tests {
         assert_eq!(
             room.telas.get(&CAGE),
             Some(&Tela {
+                // Zero até o `ScreenViewers` chegar: quem começou a
+                // compartilhar ainda não sabe se alguém está olhando.
+                espectadores: 0,
                 pilot: PilotId(9),
                 screen: ScreenId(1)
             })
@@ -1767,6 +1890,123 @@ mod tests {
         });
         assert!(changed.telas);
         assert!(room.telas.is_empty());
+    }
+
+    /// **`HostUplink { bps: 0 }` é ausência, e nunca zero bits por segundo.**
+    ///
+    /// É o contrato escrito na própria mensagem, e o custo de errá-lo é grande e
+    /// silencioso: um zero lido como medida vira um teto de zero, que é
+    /// [`crate::tela::MotivoDeParada::AbaixoDoPiso`] — o compartilhamento
+    /// parando **porque o servidor não mediu**, com uma frase na tela que
+    /// culpa a conexão de quem está olhando para ela. É o mesmo contrato do
+    /// `——` que o resto do produto usa onde não houve medida.
+    ///
+    /// Confira por mutação: troque `(*bps != 0).then_some(*bps)` por
+    /// `Some(*bps)` e a primeira asserção fica vermelha.
+    #[test]
+    fn a_subida_de_quem_hospeda_com_zero_e_ausencia_e_nao_um_teto_de_zero() {
+        let mut room = room();
+
+        // Sem notícia nenhuma: fica o cano das provas, que é a única suposição
+        // com número atrás (§8 pergunta 2).
+        assert_eq!(room.caminho_de_quem_hospeda_bps, None);
+        assert_eq!(
+            room.teto_de_video(None).teto(SyncBand::Nominal),
+            crate::tela::Teto::Bps(1_200_000)
+        );
+
+        // O Dogma dizendo «não medi». O teto não pode se mexer.
+        let changed = room.apply(&ServerMessage::HostUplink { bps: 0 });
+        assert!(
+            !changed.telas,
+            "um zero que não muda nada não redesenha nada"
+        );
+        assert_eq!(room.caminho_de_quem_hospeda_bps, None);
+        assert_eq!(
+            room.teto_de_video(None).teto(SyncBand::Nominal),
+            crate::tela::Teto::Bps(1_200_000),
+            "o zero de «não medi» virou um teto de zero"
+        );
+
+        // E uma medida de verdade entra inteira.
+        let changed = room.apply(&ServerMessage::HostUplink { bps: 6_000_000 });
+        assert!(changed.telas);
+        assert_eq!(room.caminho_de_quem_hospeda_bps, Some(6_000_000));
+    }
+
+    /// §5.1: **o N chega pelo fio e entra no teto pela perna de quem hospeda.**
+    ///
+    /// Antes desta mensagem quem compartilhava aplicava um `min(...)` com uma
+    /// perna inventada, que é o defeito que aquela seção chama de o mais caro
+    /// dela. A escada aqui é a mesma do `crate::video`: entra gente, a subida do
+    /// anfitrião é dividida por mais um, e o degrau que o orçamento compra cai
+    /// junto — sem que a contagem toque na resolução diretamente, que é o
+    /// gatilho que o §5.1 recusa.
+    #[test]
+    fn os_espectadores_do_fio_apertam_o_teto_e_nao_a_voz() {
+        let mut room = room();
+        room.me = Some(PilotId(7));
+        room.apply(&ServerMessage::HostUplink { bps: 6_000_000 });
+        room.apply(&ServerMessage::ScreenShareStarted {
+            cage: CAGE,
+            pilot: PilotId(7),
+            screen: ScreenId(1),
+        });
+
+        // Sozinho: a subida do anfitrião dá 6 Mbps × 60% = 3,6, e quem manda é
+        // a **outra** perna — o cano das provas de quem compartilha, 2 Mbps ×
+        // 60% = 1,2. É a pergunta 2 do §8 aparecendo na conta: enquanto
+        // ninguém mede o caminho de quem compartilha, é ele que faz o teto.
+        assert_eq!(
+            room.teto_de_video(None).teto(SyncBand::Nominal),
+            crate::tela::Teto::Bps(1_200_000)
+        );
+        assert_eq!(
+            room.teto_de_video(None).perna_que_aperta(SyncBand::Nominal),
+            crate::tela::PernaQueAperta::QuemCompartilha
+        );
+
+        // Entram quatro: 3,6 ÷ 4 = 900 kbps, e agora quem aperta é a máquina
+        // que sobe as quatro cópias. É a linha nova do §5.1, e sem o
+        // `ScreenViewers` no fio ela não existiria.
+        let changed = room.apply(&ServerMessage::ScreenViewers {
+            tela: ScreenId(1),
+            quantos: 4,
+        });
+        assert!(changed.telas, "a contagem mudou e o painel não soube");
+        assert_eq!(room.minha_tela().map(|tela| tela.espectadores), Some(4));
+        assert_eq!(
+            room.teto_de_video(None).teto(SyncBand::Nominal),
+            crate::tela::Teto::Bps(900_000),
+            "as quatro cópias que o servidor sobe não foram divididas"
+        );
+        // E a razão é dizível, que é o que a tela escreve ao lado do degrau:
+        // `720p · 4 pessoas assistindo`, e não `720p · sua conexão`.
+        assert_eq!(
+            room.teto_de_video(None).perna_que_aperta(SyncBand::Nominal),
+            crate::tela::PernaQueAperta::QuemHospeda
+        );
+        // E a voz da máquina de quem compartilha nunca cedeu: os 40% do caminho
+        // dela continuam de pé em toda a escada.
+        assert_eq!(room.teto_de_video(None).reserva_da_voz(), 800_000);
+
+        // O reenvio de `ScreenShareStarted` — o Dogma manda um a cada pessoa
+        // que entra numa sala que já transmite — não pode zerar a contagem, ou
+        // o teto subiria justamente no instante em que a sala cresceu.
+        room.apply(&ServerMessage::ScreenShareStarted {
+            cage: CAGE,
+            pilot: PilotId(7),
+            screen: ScreenId(1),
+        });
+        assert_eq!(room.minha_tela().map(|tela| tela.espectadores), Some(4));
+
+        // Um `ScreenViewers` de uma transmissão que não é esta não mexe nesta.
+        let changed = room.apply(&ServerMessage::ScreenViewers {
+            tela: ScreenId(404),
+            quantos: 99,
+        });
+        assert!(!changed.telas);
+        assert_eq!(room.minha_tela().map(|tela| tela.espectadores), Some(4));
     }
 
     #[test]

@@ -584,7 +584,7 @@ async fn sessao(
     let mut hospedagem = if args.hospedar {
         let dogma = seele_server::hospedagem::Hospedagem::iniciar(
             args.server.port(),
-            seele_server::casper::Location::File(seele_server::casper::banco_do_cliente(&home)),
+            seele_server::casper::Location::File(seele_server::casper::banco_do_cliente(home)),
             "Casa",
         )
         .await

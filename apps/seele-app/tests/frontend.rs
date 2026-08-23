@@ -4976,6 +4976,84 @@ fn a_room_that_stopped_existing_has_a_sentence_and_not_a_shrug() {
 }
 
 #[test]
+fn o_palco_le_o_que_foi_pedido_do_snapshot_e_nao_da_memoria_da_janela() {
+    // §5 da spec de compartilhamento de tela: a tela mostra o que está saindo
+    // **ao lado** do que foi pedido, porque «escolher 1080p e receber 720p não é
+    // defeito; esconder que aconteceu, é».
+    //
+    // A metade do que foi pedido morava numa variável desta janela — a caixa de
+    // compartilhar guardava o que ela mesma tinha mandado. Uma recarga da janela
+    // no meio de uma transmissão apagava essa metade enquanto a tela continuava
+    // saindo, e o palco escrevia travessão sobre uma transmissão que estava
+    // acontecendo. Agora ela atravessa em `Snapshot::tela.pedido`, guardada do
+    // lado que sobrevive à janela.
+    let numeros = body_of(&scripts(), "function desenharNumerosDoPalco");
+    assert!(
+        numeros.contains("tela.pedido"),
+        "o palco não lê o que foi pedido do `Snapshot`, então a comparação que o \
+         §5 obriga depende de esta janela ter estado aberta na hora da escolha:\n{numeros}"
+    );
+    assert!(
+        !scripts().contains("limitesPedidos"),
+        "a casca voltou a guardar em JavaScript o que ela mandou, e essa cópia \
+         morre com a janela"
+    );
+
+    // E o campo existe do outro lado da ponte. Sem esta metade o `?? null` do
+    // palco leria `undefined` para sempre e a coluna do pedido ficaria vazia
+    // sem nada falhar.
+    let types = read("../../crates/seele-ffi/src/types.rs");
+    assert!(
+        types.contains("pub pedido: Option<LimitesDeTela>"),
+        "`TelaEmCurso` não carrega o que foi pedido, e o palco lê um campo que \
+         não existe"
+    );
+}
+
+#[test]
+fn a_tela_parada_por_falta_de_subida_do_anfitriao_nao_acusa_quem_le() {
+    // O Dogma para a transmissão quando a sala cresce além da subida de quem
+    // hospeda (§5.1: o teto é o caminho do anfitrião ÷ quem assiste). A razão
+    // mais parecida que já existia é `SyncDegraded`, que esta casca escreve como
+    // «SINAL EM QUEDA» — uma frase sobre a conexão de quem lê, na frente de
+    // alguém cuja conexão está boa e cuja plateia cresceu. Sem frase própria,
+    // quem foi parado sai procurando um defeito que não é dele.
+    let frases = read("ui/frases.js");
+    let Some(avisos) = frases
+        .split("const AVISOS = {")
+        .nth(1)
+        .and_then(|resto| resto.split("\n};").next())
+    else {
+        panic!("`AVISOS` is gone from ui/frases.js");
+    };
+    let avisos = without_comments(avisos);
+
+    let Some(frase) = avisos
+        .split("ScreenShareOverHostUplink:")
+        .nth(1)
+        .and_then(|resto| resto.split(",\n").next())
+    else {
+        panic!(
+            "o Dogma pode parar uma transmissão por falta de subida do anfitrião \
+             e `AVISOS` não tem frase para isso, então ela chega como a palavra \
+             AVISO e mais nada"
+        );
+    };
+    assert!(
+        !frase.contains("SINAL"),
+        "a frase da tela parada pelo anfitrião acusa o sinal de quem lê, que é a \
+         confusão pela qual esta razão existe:{frase}"
+    );
+
+    let types = read("../../crates/seele-ffi/src/types.rs");
+    assert!(
+        types.contains("ScreenShareOverHostUplink"),
+        "`AVISOS` escreve uma frase para uma razão que `NoticeReason` não pode \
+         ser — uma frase que ninguém vai ler"
+    );
+}
+
+#[test]
 fn the_nat_punching_rung_names_its_cost_where_the_cost_is_paid() {
     // Degrau 4 do ADR 0022, added the day the rung was built. Two things are
     // being asserted, and both are product decisions rather than wording.

@@ -96,6 +96,512 @@ impl FonteDeQuadros for seele_video::captura::windows::Captura {
     }
 }
 
+/// A captura não recomeçou no degrau pedido.
+///
+/// Texto e não o erro da plataforma de propósito: `seele-video` tem **dois**
+/// `ErroDeCaptura`, um por sistema, e nenhum dos dois existe no build do outro.
+/// Um tipo que este crate pudesse nomear teria de ser inventado aqui e traduzido
+/// duas vezes lá; é a mesma razão pela qual [`crate::tela::ErroDeTela::Fluxo`]
+/// carrega o erro do `quinn` como texto.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("the capture would not start at {largura}×{altura}: {detalhe}")]
+pub struct CapturaRecusou {
+    /// A largura pedida, em pixels.
+    pub largura: usize,
+    /// A altura pedida, em pixels.
+    pub altura: usize,
+    /// O que o sistema disse, cru. Serve a quem depura e não a quem usa.
+    pub detalhe: String,
+}
+
+impl CapturaRecusou {
+    /// O erro de uma captura que recusou este degrau.
+    #[must_use]
+    pub fn nova(resolucao: Resolucao, detalhe: impl Into<String>) -> Self {
+        Self {
+            largura: resolucao.largura(),
+            altura: resolucao.altura(),
+            detalhe: detalhe.into(),
+        }
+    }
+}
+
+/// Quem sabe **começar** uma captura, e recomeçá-la noutro degrau.
+///
+/// # Por que uma fábrica e não uma captura pronta
+///
+/// Porque trocar de degrau não é ajustar nada: é recomeçar. A ScreenCaptureKit
+/// é armada com largura e altura fixas — `CapturaDaTela::iniciar` põe
+/// `with_width`/`with_height` na `SCStreamConfiguration` e o comentário dela diz
+/// por quê: *«[`Codificador`] é armado com uma [`Resolucao`] e recusa qualquer
+/// quadro de outro tamanho»*. Então um degrau novo tem três metades que andam
+/// juntas — captura nova, codificador novo, fluxo novo (§3.6, a resolução mora
+/// no cabeçalho de abertura) —, e uma captura entregue pronta deixaria a
+/// primeira delas sem dono.
+///
+/// A [`crate::bomba::Bomba`] é quem as junta, e é para isso que ela pede isto em
+/// vez de pedir uma [`FonteDeQuadros`].
+pub trait Captura: Send + 'static {
+    /// De onde os quadros saem depois de começar.
+    type Fonte: FonteDeQuadros + Send;
+
+    /// Começa a capturar neste degrau, largando o que estava capturando antes.
+    ///
+    /// # Errors
+    ///
+    /// [`CapturaRecusou`] quando o sistema não começa — sem permissão, alvo que
+    /// sumiu, degrau que a fonte não aceita.
+    fn iniciar(
+        &mut self,
+        resolucao: Resolucao,
+        cadencia: Cadencia,
+    ) -> Result<Self::Fonte, CapturaRecusou>;
+}
+
+// ---------------------------------------------------------------------------
+// A captura sem o tipo dela
+// ---------------------------------------------------------------------------
+
+/// Uma [`Captura`] com o tipo apagado, para caber num comando.
+///
+/// [`Captura`] tem tipo associado — a fonte que ela abre —, então não é objeto
+/// seguro, e o `Comando` que leva a escolha da pessoa até o motor do
+/// [`crate::enlace::Enlace`] é um enum de tipos concretos. Esta caixa é o que
+/// reconcilia os dois.
+///
+/// **E é o que deixa a máquina de estados ser provada sem uma tela na frente.**
+/// Se o comando carregasse [`CapturaDoSistema`], o único jeito de exercer
+/// «pedido guardado → `ScreenShareStarted` → bomba nascendo» seria numa máquina
+/// com monitor e com o TCC concedido, que é o mesmo que dizer que ele nunca
+/// seria exercido.
+pub struct CapturaEmCaixa(Box<dyn AbreCaptura>);
+
+impl CapturaEmCaixa {
+    /// Guarda uma captura qualquer na caixa.
+    pub fn nova<C>(captura: C) -> Self
+    where
+        C: Captura,
+        C::Fonte: 'static,
+    {
+        Self(Box::new(captura))
+    }
+}
+
+impl std::fmt::Debug for CapturaEmCaixa {
+    /// Só o nome: o que está dentro é um `SCStream` ou uma sessão da WGC, e
+    /// nenhum dos dois tem o que dizer num log.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CapturaEmCaixa")
+    }
+}
+
+/// A metade objeto-segura de [`Captura`]: a fonte também sai numa caixa.
+trait AbreCaptura: Send {
+    fn iniciar(
+        &mut self,
+        resolucao: Resolucao,
+        cadencia: Cadencia,
+    ) -> Result<Box<dyn FonteDeQuadros + Send>, CapturaRecusou>;
+}
+
+impl<C> AbreCaptura for C
+where
+    C: Captura,
+    C::Fonte: 'static,
+{
+    fn iniciar(
+        &mut self,
+        resolucao: Resolucao,
+        cadencia: Cadencia,
+    ) -> Result<Box<dyn FonteDeQuadros + Send>, CapturaRecusou> {
+        Captura::iniciar(self, resolucao, cadencia)
+            .map(|fonte| Box::new(fonte) as Box<dyn FonteDeQuadros + Send>)
+    }
+}
+
+impl FonteDeQuadros for Box<dyn FonteDeQuadros + Send> {
+    fn tomar(&self) -> Option<QuadroI420> {
+        (**self).tomar()
+    }
+}
+
+impl Captura for CapturaEmCaixa {
+    type Fonte = Box<dyn FonteDeQuadros + Send>;
+
+    fn iniciar(
+        &mut self,
+        resolucao: Resolucao,
+        cadencia: Cadencia,
+    ) -> Result<Self::Fonte, CapturaRecusou> {
+        self.0.iniciar(resolucao, cadencia)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A captura desta máquina
+// ---------------------------------------------------------------------------
+
+/// O alvo nativo que [`FonteDeTela`] guarda, um por sistema.
+///
+/// Fora do macOS e do Windows é [`Infallible`](std::convert::Infallible), e
+/// isso é o desenho e não um recheio: sem captura não há como construir uma
+/// [`FonteDeTela`], então o tipo diz por construção o que
+/// [`fontes_de_tela`] diria por erro.
+#[cfg(target_os = "macos")]
+type AlvoDoSistema = seele_video::captura::macos::Fonte;
+#[cfg(target_os = "windows")]
+type AlvoDoSistema = seele_video::captura::windows::Alvo;
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+type AlvoDoSistema = std::convert::Infallible;
+
+/// De onde os quadros saem depois que [`CapturaDoSistema`] começa.
+#[cfg(target_os = "macos")]
+type FonteDoSistema = seele_video::captura::macos::CapturaDaTela;
+#[cfg(target_os = "windows")]
+type FonteDoSistema = seele_video::captura::windows::Captura;
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+type FonteDoSistema = std::convert::Infallible;
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+impl FonteDeQuadros for std::convert::Infallible {
+    fn tomar(&self) -> Option<QuadroI420> {
+        match *self {}
+    }
+}
+
+/// O que o sistema operacional respondeu sobre gravar a tela.
+///
+/// Quatro respostas e não três: a última não é sobre a pessoa nem sobre o
+/// sistema, é sobre **esta compilação**, e confundi-la com «negada» mandaria
+/// quem usa procurar um ajuste que não existe. É a mesma razão pela qual o §4
+/// separa consultar de pedir.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PermissaoDeTela {
+    /// Dá para capturar agora.
+    Concedida,
+    /// O sistema disse não, e o caminho de volta são os Ajustes — no macOS o
+    /// alerta do TCC não aparece duas vezes.
+    Negada,
+    /// Ninguém perguntou ainda, e perguntar pode dar `Concedida`.
+    NaoPerguntada,
+    /// Este build não tem captura de tela, então não há a quem perguntar.
+    ///
+    /// É o Linux da v1: o portal XDG exige `ashpd` mais `pipewire`, e com eles
+    /// o binário deixa de ser autocontido — decisão de 22/08/2026, §7 item 5.
+    SemCaptura,
+}
+
+/// Olha o que o sistema já concedeu, **sem** perguntar nada.
+///
+/// Barato e sem efeito colateral: dá para chamar toda vez que a tela de
+/// escolher abre, e é o que se deve fazer — num app não assinado a concessão
+/// morre a cada build.
+#[must_use]
+pub fn permissao_de_tela() -> PermissaoDeTela {
+    #[cfg(target_os = "macos")]
+    {
+        // `Ausente` vira `NaoPerguntada` e não `Negada` **aqui**, e o
+        // contrário em `pedir_permissao_de_tela`. A ScreenCaptureKit tem uma
+        // resposta só para os dois estados, e quem sabe distingui-los é quem
+        // chamou: uma consulta que nunca perguntou não pode afirmar que foi
+        // negada, e um pedido que voltou vazio não pode dizer que ninguém
+        // perguntou.
+        if seele_video::captura::macos::permissao().concedida() {
+            PermissaoDeTela::Concedida
+        } else {
+            PermissaoDeTela::NaoPerguntada
+        }
+    }
+    // No Windows não há permissão de sistema para capturar a tela: a WGC
+    // captura, e o único consentimento é o da nossa interface (§4).
+    #[cfg(target_os = "windows")]
+    {
+        PermissaoDeTela::Concedida
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        PermissaoDeTela::SemCaptura
+    }
+}
+
+/// Pede ao sistema, abrindo o alerta dele se ainda houver um a abrir.
+///
+/// **Não é a mesma coisa que [`permissao_de_tela`]**, e o §4 é quem separa: no
+/// macOS o alerta do TCC aparece **uma vez só** por identidade assinada, então
+/// uma consulta que perguntasse gastaria a única chance que a pessoa tem.
+#[must_use]
+pub fn pedir_permissao_de_tela() -> PermissaoDeTela {
+    #[cfg(target_os = "macos")]
+    {
+        if seele_video::captura::macos::pedir_permissao().concedida() {
+            PermissaoDeTela::Concedida
+        } else {
+            PermissaoDeTela::Negada
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        permissao_de_tela()
+    }
+}
+
+/// Por que a lista de fontes não veio.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum ErroDeFontes {
+    /// Este build não tem captura de tela. Ver [`PermissaoDeTela::SemCaptura`].
+    #[error("this build has no screen capture")]
+    SemCaptura,
+    /// O sistema não concedeu gravação de tela.
+    ///
+    /// Separado do resto porque é o único com conserto do lado de quem usa, e
+    /// porque uma lista vazia diria a mesma coisa sem dizer o motivo — que é o
+    /// beco que o §4 manda evitar.
+    #[error("screen recording was not allowed")]
+    SemPermissao,
+    /// O sistema recusou, e o que ele disse vai junto para quem depura.
+    #[error("the system would not list what can be shared: {0}")]
+    SistemaRecusou(String),
+}
+
+/// Uma coisa que esta máquina pode transmitir: um monitor ou uma janela.
+///
+/// Carrega o alvo nativo por dentro, e por isso não é `Clone` nem atravessa a
+/// fronteira do [ADR 0002](../../../docs/adr/0002-regra-de-dependencia.md)
+/// inteira — a casca lê os campos e guarda a lista.
+#[derive(Debug)]
+pub struct FonteDeTela {
+    id: u64,
+    rotulo: String,
+    monitor: bool,
+    largura: u32,
+    altura: u32,
+    alvo: AlvoDoSistema,
+}
+
+impl FonteDeTela {
+    /// Como esta fonte é chamada nesta listagem, e **só nesta**.
+    ///
+    /// É o índice, não um identificador do sistema, e a diferença é do
+    /// Windows: um `Alvo` da WGC não
+    /// publica `HWND` nenhum, então um número estável entre duas listagens não
+    /// existe nos dois sistemas. Quem escolhe por este número tem de estar
+    /// segurando a lista de onde ele saiu — que é o que a casca faz, porque a
+    /// lista é o que ela acabou de desenhar.
+    #[must_use]
+    pub const fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// O rótulo que a interface mostra, montado pelo sistema que o conhece.
+    #[must_use]
+    pub fn rotulo(&self) -> &str {
+        &self.rotulo
+    }
+
+    /// `true` para um monitor inteiro, `false` para uma janela.
+    #[must_use]
+    pub const fn monitor(&self) -> bool {
+        self.monitor
+    }
+
+    /// Largura de agora, em pixels. **Não é promessa**: uma janela muda de
+    /// tamanho enquanto é transmitida.
+    #[must_use]
+    pub const fn largura(&self) -> u32 {
+        self.largura
+    }
+
+    /// Altura de agora, em pixels.
+    #[must_use]
+    pub const fn altura(&self) -> u32 {
+        self.altura
+    }
+
+    /// O que o cabeçalho de abertura do fluxo declara (§3.6).
+    #[must_use]
+    pub const fn origem(&self) -> seele_proto::screen::ScreenSource {
+        if self.monitor {
+            seele_proto::screen::ScreenSource::Monitor
+        } else {
+            seele_proto::screen::ScreenSource::Window
+        }
+    }
+
+    /// Quem sabe começar — e recomeçar — a captura desta fonte.
+    #[must_use]
+    pub fn captura(self) -> CapturaDoSistema {
+        CapturaDoSistema { alvo: self.alvo }
+    }
+}
+
+/// O que esta máquina pode transmitir, na ordem em que o sistema enumera:
+/// monitores primeiro, janelas depois.
+///
+/// # Errors
+///
+/// [`ErroDeFontes`], e o caso que **não** é erro está dito ali: uma sessão sem
+/// monitor e sem janela devolve lista vazia, porque não ter o que compartilhar
+/// é estado e não falha.
+pub fn fontes_de_tela() -> Result<Vec<FonteDeTela>, ErroDeFontes> {
+    #[cfg(target_os = "macos")]
+    {
+        use seele_video::captura::macos::{fontes, ErroDeCaptura, Fonte};
+
+        let lista = match fontes() {
+            Ok(lista) => lista,
+            Err(ErroDeCaptura::SemPermissaoDeTela) => return Err(ErroDeFontes::SemPermissao),
+            // Uma sessão sem tela — SSH, um agente de integração contínua.
+            // Estado, e não falha: a lista é vazia e quem desenha o botão
+            // decide não desenhá-lo.
+            Err(ErroDeCaptura::NadaParaCapturar) => Vec::new(),
+            Err(outro) => return Err(ErroDeFontes::SistemaRecusou(outro.to_string())),
+        };
+
+        Ok(lista
+            .into_iter()
+            .enumerate()
+            .map(|(indice, fonte)| {
+                let rotulo = fonte.rotulo();
+                let (monitor, largura, altura) = match &fonte {
+                    Fonte::Monitor {
+                        largura, altura, ..
+                    } => (true, *largura, *altura),
+                    // Uma janela não publica tamanho pela `SCWindow` que esta
+                    // lista carrega, e zero aqui quer dizer «não sei» — o mesmo
+                    // contrato do `HostUplink` do protocolo. A casca escreve
+                    // travessão, e nunca `0×0`.
+                    Fonte::Janela { .. } => (false, 0, 0),
+                };
+                FonteDeTela {
+                    id: indice as u64,
+                    rotulo,
+                    monitor,
+                    largura,
+                    altura,
+                    alvo: fonte,
+                }
+            })
+            .collect())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use seele_video::captura::windows::{listar_janelas, listar_monitores, ErroDeCaptura};
+
+        let monitores = match listar_monitores() {
+            Ok(lista) => lista,
+            // A mesma decisão do macOS: sem área de trabalho não é falha.
+            Err(ErroDeCaptura::SemMonitor) => Vec::new(),
+            Err(outro) => return Err(ErroDeFontes::SistemaRecusou(outro.to_string())),
+        };
+        let janelas =
+            listar_janelas().map_err(|erro| ErroDeFontes::SistemaRecusou(erro.to_string()))?;
+
+        Ok(monitores
+            .into_iter()
+            .chain(janelas)
+            .enumerate()
+            .map(|(indice, alvo)| {
+                let (largura, altura) = alvo.tamanho();
+                FonteDeTela {
+                    id: indice as u64,
+                    rotulo: alvo.nome().to_owned(),
+                    monitor: alvo.e_monitor(),
+                    largura,
+                    altura,
+                    alvo,
+                }
+            })
+            .collect())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        Err(ErroDeFontes::SemCaptura)
+    }
+}
+
+/// A captura desta máquina, presa a uma fonte escolhida.
+///
+/// É o implementador de [`Captura`] que faltava: até aqui o trait era exportado
+/// sem ninguém que o cumprisse fora dos testes, e a bomba não tinha o que ligar.
+#[derive(Debug)]
+pub struct CapturaDoSistema {
+    alvo: AlvoDoSistema,
+}
+
+impl Captura for CapturaDoSistema {
+    type Fonte = FonteDoSistema;
+
+    fn iniciar(
+        &mut self,
+        resolucao: Resolucao,
+        cadencia: Cadencia,
+    ) -> Result<Self::Fonte, CapturaRecusou> {
+        #[cfg(target_os = "macos")]
+        {
+            seele_video::captura::macos::CapturaDaTela::iniciar(&self.alvo, resolucao, cadencia)
+                .map_err(|erro| CapturaRecusou::nova(resolucao, erro.to_string()))
+        }
+        #[cfg(target_os = "windows")]
+        {
+            seele_video::captura::windows::Captura::iniciar(&self.alvo, resolucao, cadencia)
+                .map_err(|erro| CapturaRecusou::nova(resolucao, erro.to_string()))
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            let _ = (resolucao, cadencia);
+            match self.alvo {}
+        }
+    }
+}
+
+/// O que a pessoa escolheu como teto, e **todos são teto** (§5).
+///
+/// Teto e nunca piso: o sistema continua livre para ficar abaixo de cada um
+/// destes números, e a regra de aceite do §3.2 depende disso — *a voz nunca
+/// cede à tela*.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LimitesDeTela {
+    /// Teto de banda em bits por segundo, ou `None` para «só o que o caminho
+    /// permitir».
+    pub banda_bps: Option<u32>,
+    /// O degrau escolhido, que é o **maior** que pode sair.
+    pub resolucao: Resolucao,
+    /// A cadência escolhida, também máximo.
+    pub cadencia: Cadencia,
+}
+
+impl Default for LimitesDeTela {
+    /// O que a lista fechada do §5 tem como padrão: 720p a 30, sem teto de
+    /// banda próprio.
+    fn default() -> Self {
+        Self {
+            banda_bps: None,
+            resolucao: Resolucao::P720,
+            cadencia: Cadencia::Q30,
+        }
+    }
+}
+
+/// Tudo o que é preciso para começar a transmitir, menos o nome da transmissão.
+///
+/// O nome falta porque ele não existe ainda: `StartScreenShare` é um pedido, e
+/// o [`ScreenId`](seele_proto::ids::ScreenId) volta depois, num
+/// `ScreenShareStarted`. Esta estrutura é o que espera nesse intervalo.
+#[derive(Debug)]
+pub struct PedidoDeTela {
+    /// O módulo do Cisco, já carregado.
+    ///
+    /// Vem pronto de quem chamou pelo mesmo argumento de
+    /// `seele_video::modulo::procurar_em`: onde os arquivos do produto moram é
+    /// decisão da casca, e uma biblioteca que adivinha `~/Library` passa a ter
+    /// opinião sobre uma coisa que não é dela.
+    pub biblioteca: BibliotecaDeVideo,
+    /// Quem sabe começar a captura escolhida.
+    pub captura: CapturaEmCaixa,
+    /// Monitor ou janela, para o cabeçalho de abertura (§3.6).
+    pub origem: seele_proto::screen::ScreenSource,
+}
+
 /// Por que o compartilhamento não anda.
 #[derive(Debug, Error)]
 pub enum ErroDeCompartilhamento {
@@ -262,6 +768,23 @@ impl Compartilhamento {
     #[must_use]
     pub const fn escolha_de_resolucao(&self) -> Resolucao {
         self.escolha_de_resolucao
+    }
+
+    /// A cadência com que o codificador está armado.
+    ///
+    /// Existe porque quem gira o laço precisa dela para saber quanto dormir
+    /// entre dois tiques — [`crate::tela::intervalo_de_quadro`] —, e ler isso do
+    /// `Arranjo` que abriu a transmissão seria ler a intenção em vez do que o
+    /// codificador de fato aceitou.
+    #[must_use]
+    pub const fn cadencia(&self) -> Cadencia {
+        self.codificador.cadencia()
+    }
+
+    /// Quantos quadros por segundo o codificador está armado para aceitar.
+    #[must_use]
+    pub const fn quadros_por_segundo(&self) -> u32 {
+        self.codificador.quadros_por_segundo()
     }
 
     /// Reage a um teto novo: aplica a banda e diz se o degrau mudou.

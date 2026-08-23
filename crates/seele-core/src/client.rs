@@ -1139,6 +1139,48 @@ impl Client {
     pub async fn aceitar_tela(&self) -> Result<crate::tela::Recepcao, crate::tela::ErroDeTela> {
         crate::tela::Recepcao::aceitar(&self.connection).await
     }
+
+    /// Um punho desta conexão que só sabe escoar uma tela.
+    ///
+    /// Embrulha em vez de devolver a [`quinn::Connection`] pelo mesmo motivo
+    /// que [`Self::abrir_tela`] embrulha: quem chama não precisa da conexão,
+    /// precisa de uma coisa que ela sabe fazer, e uma conexão devolvida é uma
+    /// conexão que qualquer um pode abrir fluxo em cima sem passar por aqui.
+    ///
+    /// **Não é um empréstimo**, e essa é a diferença que faz este método
+    /// existir: a transmissão é escoada por uma tarefa que vive tanto quanto
+    /// ela, enquanto o motor do enlace continua lendo o fluxo de controle. Um
+    /// `&self` não atravessaria o `tokio::spawn`.
+    #[must_use]
+    pub fn escoadouro_de_tela(&self) -> crate::bomba::Escoadouro {
+        crate::bomba::Escoadouro::nova(self.connection.clone())
+    }
+}
+
+/// Tira o byte de tipo da frente de um fluxo, conferindo que é o esperado.
+///
+/// Conferido e não pulado. Um byte lido e jogado fora aceitaria uma tela como
+/// se fosse anexo e leria o cabeçalho errado sem reclamar — e o sintoma de um
+/// byte a mais no lugar errado é um tamanho absurdo, como o
+/// «16777216-byte control frame» que apareceu quando este byte foi escrito de
+/// um lado e não lido do outro.
+///
+/// Ver o §5.2 da spec do compartilhamento de tela: um Dogma recebe e manda dois
+/// tipos de fluxo unidirecional, e até a 0.7.8 o que os separava era aritmética
+/// sobre o primeiro byte do cabeçalho.
+async fn engolir_o_tipo(
+    stream: &mut quinn::RecvStream,
+    esperado: seele_proto::stream::StreamType,
+) -> Result<()> {
+    let mut tipo = [0_u8; seele_proto::stream::STREAM_TYPE_LEN];
+    stream
+        .read_exact(&mut tipo)
+        .await
+        .map_err(|erro| anyhow::anyhow!("o fluxo acabou antes de dizer o que era: {erro}"))?;
+    let veio = seele_proto::stream::StreamType::decode(tipo[0])
+        .map_err(|erro| anyhow::anyhow!("tipo de fluxo que este build não conhece: {erro}"))?;
+    anyhow::ensure!(veio == esperado, "esperava {esperado:?} e veio {veio:?}");
+    Ok(())
 }
 
 /// A pilot left. The ordinary end of a session.
@@ -1398,6 +1440,15 @@ impl Transfers {
         // somebody else's `Pong` on this connection. It says nothing about
         // another connection — see ADR 0027 on what has no way out.
         stream.set_priority(TRANSFER_PRIORITY)?;
+        // O tipo do fluxo, antes de tudo. Um Dogma recebe dois tipos de fluxo
+        // unidirecional — anexo e tela — e até a 0.7.8 o que os separava era
+        // aritmética sobre o primeiro byte do cabeçalho. O §5.2 da spec do
+        // compartilhamento de tela conta a dívida e este byte é o pagamento
+        // dela; sem escrevê-lo aqui, o servidor lê o cabeçalho um byte adiante
+        // e recusa o anexo inteiro.
+        stream
+            .write_all(&[seele_proto::stream::StreamType::Attachment.byte()])
+            .await?;
         let header = AttachmentHeader {
             line: request.line,
             client_message_id: request.client_message_id,
@@ -1496,6 +1547,7 @@ impl Transfers {
             .await
             .map_err(|_| anyhow::anyhow!("o Dogma não mandou o arquivo em {wait:?}"))??;
 
+        engolir_o_tipo(&mut stream, seele_proto::stream::StreamType::Attachment).await?;
         let delivery: AttachmentDelivery = frame::read(&mut stream).await?;
         anyhow::ensure!(
             delivery.attachment == attachment,
@@ -1568,6 +1620,7 @@ impl Transfers {
             .await
             .map_err(|_| anyhow::anyhow!("o Dogma não mandou o arquivo em {wait:?}"))??;
 
+        engolir_o_tipo(&mut stream, seele_proto::stream::StreamType::Attachment).await?;
         let delivery: AttachmentDelivery = frame::read(&mut stream).await?;
         anyhow::ensure!(
             delivery.attachment == attachment,

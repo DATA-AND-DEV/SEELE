@@ -135,6 +135,19 @@ pub struct DogmaConfig {
     /// whatever directory the process happened to start in. Tests that want
     /// attachments say where.
     pub anexos: Option<std::path::PathBuf>,
+    /// Quanto a subida desta máquina carrega, em bits por segundo.
+    ///
+    /// O §5.1 do desenho de compartilhamento de tela pôs este número no meio do
+    /// teto do vídeo — `caminho de quem hospeda × 60% ÷ N espectadores` —, e é
+    /// a perna que estourava sem ser medida: com o servidor encaminhando, quem
+    /// sobe N cópias é esta máquina.
+    ///
+    /// **Declarado, não medido**, e a diferença viaja no fio. `None` é o caso
+    /// comum e quer dizer que ninguém sabe: a admissão daqui cai na hipótese de
+    /// `crate::tela::CAMINHO_DO_DOGMA_BPS` e o `HostUplink` sai **zero**, que
+    /// pelo protocolo é «não medi» e não «zero bit por segundo». Ver
+    /// `crate::tela::caminho_no_fio`.
+    pub caminho_bps: Option<u32>,
 }
 
 impl Default for DogmaConfig {
@@ -158,6 +171,7 @@ impl Default for DogmaConfig {
             observers: Vec::new(),
             database: crate::casper::Location::Memory,
             anexos: None,
+            caminho_bps: None,
         }
     }
 }
@@ -366,6 +380,7 @@ impl Server {
             atrasos: Arc::new(dogma::Atrasos::default()),
             telas: Arc::new(tokio::sync::Mutex::new(dogma::Telas::default())),
             anexos,
+            caminho_bps: config.caminho_bps,
         });
 
         // Held seats have to be released even if nobody reconnects, or a Dogma
@@ -386,7 +401,10 @@ impl Server {
         // exatamente uma, a do Cage do `DogmaConfig`, e toda sessão segurava
         // esse único remetente: correto enquanto um Dogma tinha uma sala,
         // silenciosamente errado no instante em que passou a poder ter duas.
-        let cages = Arc::new(cage::Cages::new());
+        let cages = Arc::new(cage::Cages::new(
+            tela::caminho_do_dogma(dogma.caminho_bps),
+            dogma.events.clone(),
+        ));
 
         Ok(Self {
             endpoint,

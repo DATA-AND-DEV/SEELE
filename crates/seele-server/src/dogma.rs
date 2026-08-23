@@ -205,6 +205,26 @@ pub enum Event {
         /// Qual transmissão.
         screen: ScreenId,
     },
+    /// Quantas pessoas estão recebendo uma transmissão, agora.
+    ///
+    /// **N**, e ele é um termo do teto do §5.1 —
+    /// `caminho de quem hospeda × 60% ÷ N` — que até aqui só existia dentro do
+    /// Dogma. Sem ele no fio, quem compartilha aplica um `min` com uma perna
+    /// que inventa; com ele, a mesma conta é feita nas duas pontas a partir do
+    /// mesmo número.
+    ///
+    /// Mandado pelo [`crate::cage::Cage`], que é o único lugar deste Dogma que
+    /// sabe quem está na sala sem perguntar a ninguém, e no mesmo instante em
+    /// que ele refaz o teto. Dois donos de N seriam duas contas discordando no
+    /// primeiro dia ruim.
+    ScreenViewers {
+        /// Em qual Cage.
+        cage: CageId,
+        /// Qual transmissão.
+        screen: ScreenId,
+        /// Quantos assistem. Não conta quem compartilha.
+        quantos: u32,
+    },
     /// Alguém que assiste não tem de que predizer e pediu um quadro-chave.
     ///
     /// Endereçado a um piloto e entregue a todos, como o [`Self::SessionEnded`]
@@ -575,6 +595,18 @@ pub struct Dogma {
     /// sentence — rather than a directory appearing wherever the process
     /// started.
     pub anexos: Option<Arc<crate::transfer::Vault>>,
+    /// Quanto a subida desta máquina carrega, em bits por segundo, ou `None`.
+    ///
+    /// A cópia de `DogmaConfig::caminho_bps` que o resto do daemon alcança, e
+    /// ela mora aqui pela mesma razão que [`Self::telas`]: é um fato sobre
+    /// **este Dogma** que duas partes distantes precisam, e a alternativa era
+    /// passar a configuração inteira por assinaturas que já estão cheias.
+    ///
+    /// Duas leituras saem daqui e elas discordam de propósito — a admissão de
+    /// [`crate::cage::Cage`] cai numa hipótese quando isto é `None`, e o
+    /// `HostUplink` que a sessão escreve manda **zero**, que pelo protocolo é
+    /// «não medi». Ver `crate::tela::caminho_no_fio`.
+    pub caminho_bps: Option<u32>,
 }
 
 /// Starts the batching writer.

@@ -127,8 +127,10 @@ function desenharChamada(snapshot) {
  * por onde desenhar a tela de outra pessoa — e a nota do palco diz isso em vez
  * de deixar uma moldura preta parecendo uma transmissão travada.
  *
- * `limitesPedidos` e `nomeDaResolucao` vêm de `camada-compartilhar.js`, que é
- * quem manda os limites e portanto o único que sabe quais foram.
+ * `nomeDaResolucao` vem de `camada-compartilhar.js`. O que foi **pedido** já não
+ * vem de lá: `tela.pedido` atravessa no próprio `Snapshot`, ao lado do que está
+ * saindo, porque uma memória guardada nesta janela morria com ela — e uma
+ * recarga no meio de uma transmissão apagava metade da comparação do §5.
  */
 function desenharPalco(snapshot, cage) {
   const palco = $("palco");
@@ -221,9 +223,11 @@ function desenharNumerosDoPalco(tela) {
     lado.hidden = !tela.e_minha;
   }
 
-  const pedido = tela.e_minha ? limitesPedidos : null;
+  // `tela.pedido` já vem `null` para quem só assiste — o teto é escolha de quem
+  // compartilha e não viaja no fio —, então não há o que ramificar aqui.
+  const pedido = tela.pedido ?? null;
   if (tela.e_minha && !pedido) {
-    const motivo = "esta janela não estava aberta quando os limites foram escolhidos";
+    const motivo = "esta sessão não escolheu os limites desta transmissão";
     naoMedido($("palco-altura-pedida"), motivo);
     naoMedido($("palco-quadros-pedidos"), motivo);
     naoMedido($("palco-banda-pedida"), motivo);

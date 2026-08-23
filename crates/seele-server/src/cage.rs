@@ -23,8 +23,9 @@ use std::time::Instant;
 
 use seele_proto::ids::{CageId, PilotId, ScreenId, Ssrc};
 use seele_proto::transport::MAX_FRAMES_PER_SECOND;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 
+use crate::dogma::Event;
 use crate::tela::{AberturaDeTela, Enquadramento, FimDaTela, Pedaco};
 
 /// How many datagrams a Cage task will hold before it starts shedding.
@@ -194,18 +195,33 @@ pub struct Cage {
     /// [`crate::tela::CAMINHO_DO_DOGMA_BPS`].
     caminho_bps: u32,
     tela: Option<EmCurso>,
+    /// Por onde o **N** desta sala chega ao plano de controle.
+    ///
+    /// O Cage é o único lugar do Dogma que sabe quem está na sala sem
+    /// perguntar a ninguém, e o §5.1 fez desse número um termo do teto que as
+    /// **duas** pontas calculam. Ou ele sai daqui, ou a outra ponta conta a
+    /// mesma coisa de novo em outro lugar — e a segunda conta é a que fica
+    /// errada primeiro.
+    ///
+    /// `None` numa sala sem barramento: a conta do teto é a mesma, e o que
+    /// muda é só não haver quem escute. É o que os testes deste módulo usam.
+    eventos: Option<broadcast::Sender<Event>>,
 }
 
 impl Cage {
     /// An empty Cage.
     #[must_use]
     pub fn new(id: CageId) -> Self {
-        Self::com_caminho(id, crate::tela::CAMINHO_DO_DOGMA_BPS)
+        Self::com_caminho(id, crate::tela::CAMINHO_DO_DOGMA_BPS, None)
     }
 
-    /// A mesma sala, sobre uma subida de Dogma conhecida.
+    /// A mesma sala, sobre uma subida de Dogma conhecida e com quem avisar.
     #[must_use]
-    pub fn com_caminho(id: CageId, caminho_bps: u32) -> Self {
+    pub fn com_caminho(
+        id: CageId,
+        caminho_bps: u32,
+        eventos: Option<broadcast::Sender<Event>>,
+    ) -> Self {
         Self {
             id,
             members: HashMap::new(),
@@ -214,6 +230,7 @@ impl Cage {
             forwarded: 0,
             caminho_bps,
             tela: None,
+            eventos,
         }
     }
 
@@ -350,7 +367,32 @@ impl Cage {
         }
         if crate::tela::teto_do_hospedeiro(self.caminho_bps, self.espectadores()).is_none() {
             self.encerrar_tela(Some(FimDaTela::AlemDoQueOHospedeiroCarrega));
+            return;
         }
+        // O mesmo instante, e por isso está aqui e não ao lado de
+        // `PilotJoined`: o N que encolhe o teto desta linha é o mesmo N que a
+        // outra ponta precisa para encolher o dela. Contado em dois lugares,
+        // ele passaria a discordar de si mesmo, e o §5.1 divide por ele.
+        //
+        // Depois da parada, nunca antes: uma transmissão que acabou de morrer
+        // não anuncia quantos a assistem.
+        self.anunciar_espectadores();
+    }
+
+    /// Põe o N desta sala no barramento, se há transmissão e há quem ouça.
+    fn anunciar_espectadores(&self) {
+        let (Some(curso), Some(eventos)) = (self.tela.as_ref(), self.eventos.as_ref()) else {
+            return;
+        };
+        let _ = eventos.send(Event::ScreenViewers {
+            cage: self.id,
+            screen: curso.screen,
+            // Um Dogma é dimensionado em cinquenta pilotos
+            // (`specs/04-servidor-seele.md`), então isto nunca satura; saturar
+            // ainda assim é melhor que dar a volta, porque um N pequeno demais
+            // devolveria um teto grande demais.
+            quantos: u32::try_from(self.espectadores()).unwrap_or(u32::MAX),
+        });
     }
 
     /// Abre a transmissão e liga nela todo mundo que já está na sala.
@@ -403,6 +445,10 @@ impl Cage {
             .filter(|quem| *quem != from)
             .collect();
         self.ligar(&ja_estao);
+        // A primeira contagem, e ela tem de sair mesmo quando a sala está
+        // vazia: quem compartilha para uma sala de uma pessoa precisa saber
+        // que N é zero tanto quanto precisa saber que virou seis.
+        self.anunciar_espectadores();
     }
 
     /// Liga estes espectadores na transmissão em curso.
@@ -591,10 +637,14 @@ impl Cage {
 /// `specs/04-servidor-seele.md`: one task per Cage, owning its state, reached by
 /// `mpsc`. Nothing shares a lock.
 #[must_use]
-pub fn spawn(id: CageId) -> mpsc::Sender<CageCommand> {
+pub fn spawn(
+    id: CageId,
+    caminho_bps: u32,
+    eventos: broadcast::Sender<Event>,
+) -> mpsc::Sender<CageCommand> {
     let (tx, mut rx) = mpsc::channel(CHANNEL_DEPTH);
     tokio::spawn(async move {
-        let mut cage = Cage::new(id);
+        let mut cage = Cage::com_caminho(id, caminho_bps, Some(eventos));
         while let Some(command) = rx.recv().await {
             cage.handle(command);
         }
@@ -623,20 +673,27 @@ pub fn spawn(id: CageId) -> mpsc::Sender<CageCommand> {
 /// and lives until the Dogma stops.
 pub struct Cages {
     tasks: tokio::sync::Mutex<HashMap<CageId, mpsc::Sender<CageCommand>>>,
-}
-
-impl Default for Cages {
-    fn default() -> Self {
-        Self::new()
-    }
+    /// A subida deste Dogma, repassada a cada sala que nasce.
+    ///
+    /// Uma cópia só, e ela é a mesma que viaja no `HostUplink`: a sala divide
+    /// este número por N e o cliente o divide de novo, e as duas contas têm de
+    /// partir do mesmo lugar. Ver [`crate::tela::caminho_do_dogma`].
+    caminho_bps: u32,
+    eventos: broadcast::Sender<Event>,
 }
 
 impl Cages {
     /// A Dogma with no Cage task running yet.
+    ///
+    /// Sem `Default`, e de propósito: uma sala precisa saber quanto a subida
+    /// deste Dogma carrega antes de deixar alguém transmitir nela, e um
+    /// `Default` teria de inventar esse número.
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(caminho_bps: u32, eventos: broadcast::Sender<Event>) -> Self {
         Self {
             tasks: tokio::sync::Mutex::new(HashMap::new()),
+            caminho_bps,
+            eventos,
         }
     }
 
@@ -646,7 +703,7 @@ impl Cages {
             .lock()
             .await
             .entry(id)
-            .or_insert_with(|| spawn(id))
+            .or_insert_with(|| spawn(id, self.caminho_bps, self.eventos.clone()))
             .clone()
     }
 
@@ -678,6 +735,12 @@ mod tests {
     use super::*;
     use seele_proto::MediaHeader;
 
+    /// Um conjunto de salas sobre o cano das duas provas, 2000 kbps.
+    fn salas() -> Cages {
+        let (eventos, _) = broadcast::channel(64);
+        Cages::new(crate::tela::CAMINHO_DO_DOGMA_BPS, eventos)
+    }
+
     fn datagram(ssrc: u32, seq: u16) -> Vec<u8> {
         let header = MediaHeader {
             version: seele_proto::PROTOCOL_VERSION,
@@ -689,6 +752,26 @@ mod tests {
         let len = header.encode_datagram(&[1, 2, 3, 4], &mut out).unwrap();
         out.truncate(len);
         out
+    }
+
+    /// Uma sala ligada ao barramento, e a ponta por onde se lê o que ela diz.
+    fn sala_com_barramento(caminho_bps: u32) -> (Cage, broadcast::Receiver<Event>) {
+        let (eventos, ouvinte) = broadcast::channel(64);
+        (
+            Cage::com_caminho(CageId(1), caminho_bps, Some(eventos)),
+            ouvinte,
+        )
+    }
+
+    /// Os `ScreenViewers` que a sala anunciou até agora, em ordem.
+    fn contagens(ouvinte: &mut broadcast::Receiver<Event>) -> Vec<u32> {
+        let mut vistos = Vec::new();
+        while let Ok(evento) = ouvinte.try_recv() {
+            if let Event::ScreenViewers { quantos, .. } = evento {
+                vistos.push(quantos);
+            }
+        }
+        vistos
     }
 
     fn member(cage: &mut Cage, pilot: u64, ssrc: u32, may_speak: bool) -> mpsc::Receiver<Vec<u8>> {
@@ -996,7 +1079,7 @@ mod tests {
         // — which is what there was — a pilot in the room made at nine o'clock
         // and a pilot in the room made at ten would have been delivered each
         // other's audio, because there was only ever one room to deliver into.
-        let cages = Cages::new();
+        let cages = salas();
         let primeiro = cages.of(CageId(1)).await;
         let segundo = cages.of(CageId(2)).await;
 
@@ -1046,7 +1129,7 @@ mod tests {
         // Two pilots walking into the same room must find the same room. A
         // registry that spawned per request would give each of them a private
         // copy of a Cage they both believe they are in.
-        let cages = Cages::new();
+        let cages = salas();
         let _ = cages.of(CageId(1)).await;
         let _ = cages.of(CageId(1)).await;
         let _ = cages.of(CageId(2)).await;
@@ -1059,7 +1142,7 @@ mod tests {
         // pilot was sitting. Aiming the `Leave` at a remembered Cage would leave
         // a departed pilot's ssrc receiving audio whenever that memory was
         // wrong.
-        let cages = Cages::new();
+        let cages = salas();
         let sala = cages.of(CageId(7)).await;
 
         let (alice_tx, mut alice) = mpsc::channel(8);
@@ -1232,13 +1315,67 @@ mod tests {
     }
 
     #[test]
+    fn o_n_da_sala_e_anunciado_ao_abrir_e_a_cada_entrada_e_saida() {
+        // §5.1 divide o caminho do anfitrião por N, e quem compartilha calcula
+        // o mesmo `min` do outro lado. Sem este anúncio ele aplicaria a conta
+        // com uma perna que inventa, que é o defeito que a seção chama de mais
+        // caro. Vem daqui, e não de junto do `PilotJoined`, porque este é o
+        // único mapa que sabe quem está na sala sem perguntar a ninguém.
+        let (mut cage, mut ouvinte) = sala_com_barramento(crate::tela::CAMINHO_DO_DOGMA_BPS);
+        let _alice = espectador(&mut cage, 1);
+        let _fim = compartilhar(&mut cage, 1, 7);
+        // Zero é uma resposta, e ela tem de sair: quem compartilha para uma
+        // sala vazia precisa saber que ninguém assiste tanto quanto precisa
+        // saber que seis assistem.
+        assert_eq!(contagens(&mut ouvinte), vec![0]);
+
+        let _bob = espectador(&mut cage, 2);
+        let _carol = espectador(&mut cage, 3);
+        assert_eq!(contagens(&mut ouvinte), vec![1, 2]);
+
+        // E a saída é a metade boa de N mudar: ela devolve teto.
+        cage.handle(CageCommand::Leave { pilot: PilotId(2) });
+        assert_eq!(contagens(&mut ouvinte), vec![1]);
+    }
+
+    #[test]
+    fn uma_sala_sem_transmissao_nao_anuncia_contagem_nenhuma() {
+        // O número só quer dizer alguma coisa enquanto há transmissão: fora
+        // disso ele seria um quadro por entrada e saída em toda sala do Dogma,
+        // sobre um teto que ninguém está calculando.
+        let (mut cage, mut ouvinte) = sala_com_barramento(crate::tela::CAMINHO_DO_DOGMA_BPS);
+        let _alice = espectador(&mut cage, 1);
+        let _bob = espectador(&mut cage, 2);
+        assert_eq!(contagens(&mut ouvinte), Vec::<u32>::new());
+    }
+
+    #[test]
+    fn a_transmissao_que_para_pelo_teto_nao_anuncia_uma_ultima_contagem() {
+        // A ordem importa: anunciar antes de reconferir poria no fio o N de uma
+        // transmissão que morre no mesmo instante, e quem recebesse desenharia
+        // «3 pessoas assistindo» ao lado de uma tela que acabou de parar.
+        let (mut cage, mut ouvinte) = sala_com_barramento(600_000);
+        let _alice = espectador(&mut cage, 1);
+        let _bob = espectador(&mut cage, 2);
+        let mut fim = compartilhar(&mut cage, 1, 7);
+        assert_eq!(contagens(&mut ouvinte), vec![1]);
+
+        let _carol = espectador(&mut cage, 3);
+        assert_eq!(
+            fim.try_recv(),
+            Ok(crate::tela::FimDaTela::AlemDoQueOHospedeiroCarrega)
+        );
+        assert_eq!(contagens(&mut ouvinte), Vec::<u32>::new());
+    }
+
+    #[test]
     fn a_sala_que_cresce_alem_da_subida_do_dogma_para_a_transmissao() {
         // A primeira linha do `min` do §5.1, que é a que faltava: a subida de
         // quem hospeda é `N × teto`, então cada pessoa que entra encolhe o teto
         // de todo mundo. Quando ele passa por baixo do piso do §2, o que para é
         // o vídeo — com motivo — porque a alternativa é a sala inteira
         // picotando por causa da tela.
-        let mut cage = Cage::com_caminho(CageId(1), 600_000);
+        let mut cage = Cage::com_caminho(CageId(1), 600_000, None);
         let _alice = espectador(&mut cage, 1);
         let mut bob = espectador(&mut cage, 2);
         let mut fim = compartilhar(&mut cage, 1, 7);

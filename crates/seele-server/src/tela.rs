@@ -68,7 +68,7 @@ pub const FRACAO_DO_CAMINHO: u32 = 60;
 /// e está aqui com o mesmo valor que `seele_core::tela::PISO_DE_BANDA_BPS`.
 pub const PISO_DE_BANDA_BPS: u32 = 200_000;
 
-/// O caminho de subida que se assume para **este Dogma**, em bits por segundo.
+/// O caminho de subida que se **assume** para este Dogma, em bits por segundo.
 ///
 /// **Hipótese, e escrita como hipótese.** O §8 pergunta 2 continua aberta —
 /// ninguém mede quanto cabe num caminho que não está sendo enchido — e o
@@ -79,7 +79,53 @@ pub const PISO_DE_BANDA_BPS: u32 = 200_000;
 /// o produto até agora **não media**: o teto saía do caminho de quem
 /// compartilha, e com o servidor encaminhando é a subida do Dogma que estoura
 /// primeiro.
+///
+/// Só a admissão deste lado sai daqui. **No fio ele não vai** — ver
+/// [`caminho_no_fio`], e a diferença entre os dois é o assunto inteiro destas
+/// vinte linhas.
 pub const CAMINHO_DO_DOGMA_BPS: u32 = 2_000_000;
+
+/// A subida por que este Dogma divide N ao admitir uma transmissão.
+///
+/// O que o operador declarou, ou a hipótese de [`CAMINHO_DO_DOGMA_BPS`].
+/// Zero declarado é tratado como nada declarado: um caminho de zero bit por
+/// segundo pararia toda transmissão deste Dogma, e um campo de configuração em
+/// branco não é um pedido para desligar o recurso.
+///
+/// Recusar-se a admitir sem um número seria a outra escolha, e é pior: um
+/// Dogma que não sabe a própria subida ainda tem de decidir o que faz quando
+/// alguém aperta o botão, e a hipótese de 2000 kbps é conservadora — ela erra
+/// para o lado de encerrar cedo, que é o lado que o §3.2 manda errar.
+#[must_use]
+pub fn caminho_do_dogma(declarado: Option<u32>) -> u32 {
+    declarado
+        .filter(|bps| *bps > 0)
+        .unwrap_or(CAMINHO_DO_DOGMA_BPS)
+}
+
+/// O que o Dogma diz da própria subida no `HostUplink`, em bits por segundo.
+///
+/// **Zero quer dizer «não medi»**, o mesmo contrato do `——` que o resto do
+/// produto usa, e quem recebe trata isso como ausência — o termo do §5.1 some
+/// do `min` em vez de virar um teto de zero.
+///
+/// A diferença para [`caminho_do_dogma`] é que a hipótese **não atravessa o
+/// fio**. Dentro desta máquina ela é uma decisão de admissão, e assumir é o que
+/// se faz na falta de medida; posta no fio ela vira uma promessa de banda que
+/// ninguém conferiu, e o cliente a usaria para escolher resolução. Uma medida
+/// inventada é pior que a ausência declarada.
+///
+/// **E não há medida.** O que este Dogma sabe do próprio caminho é o que o
+/// `quinn` conta por conexão — RTT, perda, janela de congestionamento —, e
+/// nenhum deles diz quanto **cabe** num cano que não está sendo enchido, que é
+/// exatamente a pergunta 2 do §8. Somar o que já saiu daria um piso
+/// demonstrado, não uma capacidade: num Dogma parado ele desabaria abaixo do
+/// piso do §2 e pararia transmissões que cabiam. Então: o que o operador
+/// declarou, ou nada.
+#[must_use]
+pub fn caminho_no_fio(declarado: Option<u32>) -> u32 {
+    declarado.filter(|bps| *bps > 0).unwrap_or(0)
+}
 
 /// Quantas aberturas de transmissão esperam por espectador.
 ///
@@ -302,6 +348,15 @@ pub async fn bombear(conexao: quinn::Connection, mut aberturas: mpsc::Receiver<A
             return;
         };
         let _ = fluxo.set_priority(PRIORIDADE_DA_TELA);
+        // O byte de tipo antes do cabeçalho de abertura, e a regra vale nos
+        // dois sentidos: quem recebe tem um `accept_uni` só e mais de um uso
+        // para ele. Separar por aritmética sobre o conteúdo é o que o §5.2
+        // chama de dívida, e o pior erro de protocolo que existe é um fluxo
+        // lido como o tipo errado.
+        let marca = [seele_proto::stream::StreamType::Screen.byte()];
+        if fluxo.write_all(&marca).await.is_err() {
+            continue;
+        }
         if fluxo.write_all(&convite.abertura).await.is_err() {
             continue;
         }
@@ -352,6 +407,35 @@ mod tests {
             teto_do_hospedeiro(2_000_000, 0),
             teto_do_hospedeiro(2_000_000, 1)
         );
+    }
+
+    #[test]
+    fn a_hipotese_admite_aqui_dentro_e_nao_atravessa_o_fio() {
+        // As duas respostas à mesma pergunta, e elas **têm** de discordar. Sem
+        // número declarado, a admissão daqui cai na hipótese das provas — que
+        // erra para o lado de encerrar cedo — e o fio leva zero, que pelo §5.1
+        // quer dizer «não medi» e faz o termo sumir do `min` do outro lado.
+        // Mandar a hipótese seria prometer 2000 kbps que ninguém conferiu.
+        assert_eq!(caminho_do_dogma(None), CAMINHO_DO_DOGMA_BPS);
+        assert_eq!(caminho_no_fio(None), 0);
+    }
+
+    #[test]
+    fn o_que_o_operador_declara_vale_nos_dois_lugares() {
+        // Declarado, as duas contas partem do mesmo número — que é a regra 2 do
+        // §3.2: nada de um segundo medidor discordando do primeiro.
+        assert_eq!(caminho_do_dogma(Some(50_000_000)), 50_000_000);
+        assert_eq!(caminho_no_fio(Some(50_000_000)), 50_000_000);
+    }
+
+    #[test]
+    fn zero_declarado_e_um_campo_em_branco_e_nao_um_pedido_para_desligar() {
+        // Um caminho de zero bit por segundo pararia toda transmissão deste
+        // Dogma, e no fio ele já quer dizer «não medi». Ler os dois como
+        // ausência é o que impede uma configuração meio preenchida de desligar
+        // o recurso em silêncio.
+        assert_eq!(caminho_do_dogma(Some(0)), CAMINHO_DO_DOGMA_BPS);
+        assert_eq!(caminho_no_fio(Some(0)), 0);
     }
 
     #[test]
