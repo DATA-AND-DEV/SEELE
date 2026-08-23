@@ -603,7 +603,7 @@ Ele mediu com um único teto, o de 1200 kbps que o `tela-no-transporte`
 sustenta; fixar uma lista de bandas exige medir quanto o caminho aguenta, que é
 a pergunta 2 do §8.
 
-## 5.1 · Quem carrega os bytes até quem assiste — **em aberto**
+## 5.1 · Quem carrega os bytes até quem assiste — **decidido: o servidor**
 
 Levantada ao construir o §3: o plano de controle ficou inteiro e **nada bombeia
 o fluxo de quem compartilha para quem assiste**. A pergunta não é de
@@ -656,12 +656,79 @@ O `Cage` já reencaminha datagramas de áudio para cada membro
 - É a opção que **não precisa** da correção do teto, porque as duas pernas são a
   mesma máquina.
 
-### O que fica escrito de qualquer jeito
+### A decisão: **A**, com a correção do teto (22/08/2026)
 
-Seja qual for a escolha: **o número de espectadores entra na conta do teto**, e
-a tela diz quando ele aperta. Um compartilhamento que degrada porque entrou a
-quinta pessoa e não explica por quê é o mesmo defeito de sempre — o produto
-sabendo algo que a pessoa na frente dele não sabe.
+O servidor encaminha, como já faz com a voz. A alternativa B pedia um caminho
+cliente↔cliente que este produto nunca teve e só trocaria quem paga; a C
+entregava o recurso pela metade.
+
+**A correção que ela obriga não é opcional.** O teto do §3.2 deixa de sair do
+caminho de quem compartilha e passa a sair de:
+
+```
+teto = min(
+    caminho de quem HOSPEDA × 60% ÷ N espectadores,   ← o que o servidor sobe
+    caminho de quem COMPARTILHA × 60%,                ← o que a fonte sobe
+    o que a pessoa escolheu (§5),                     ← sempre teto, nunca piso
+)
+```
+
+A primeira linha é nova e é a que faltava. Sem ela o produto mede uma perna e
+estoura a outra.
+
+### A resolução acompanha o teto, e não a contagem de gente
+
+Pedido de quem desenha o produto: «se tiver mais que 4 pessoas vai para 720p,
+10 vai para 480p». A intenção está certa e o gatilho está errado, pelo motivo
+que o §5 já escreve: **resolução não controla tráfego.** Dez pessoas numa
+conexão de fibra cabem em 1080p; quatro numa subida ruim não cabem em 720p.
+Amarrar a resolução à contagem degradaria a primeira à toa e ainda estouraria a
+segunda.
+
+O gatilho é o **teto**, que já tem N dentro dele. A resolução é a maior que
+ainda compra alguma coisa no orçamento que sobrou, e `spikes/tela-no-codec` diz
+onde está esse ponto — mesmo teto de 1200 kbps, quadros perdidos por falta de
+bits:
+
+| resolução | kbps entregues | quadros perdidos |
+|---|---|---|
+| 1080p | 1146 | **16,2%** |
+| 720p | 872 | 11,1% |
+| 540p | 796 | 12,4% |
+| 360p | 416 | 2,2% |
+
+O que a tabela mostra é que **uma resolução alta demais para o orçamento perde
+quadros sem entregar nitidez**: a 1200 kbps o 1080p joga fora um sexto do que
+captura, e o que chega do lado de lá é uma imagem grande e trêmula. O 720p no
+mesmo teto perde menos e anda melhor.
+
+**Os degraus são provisórios, e isto está escrito de propósito.** A tabela mede
+um teto só. Os limiares certos saem de uma corrida por teto — 1200, 800, 500,
+300 kbps —, e ela ainda não foi feita. Enquanto não for, os degraus vêm da
+única medida que existe e o código os nomeia como estimativa.
+
+### O que a pessoa vê, e é a metade que o pedido acertou
+
+O pedido queria previsibilidade, e ela é legítima: «mais de quatro pessoas» é
+algo que dá para planejar, um número de kbps não é.
+
+Então a **razão** aparece na tela, mesmo o gatilho sendo o teto:
+
+```
+720p · 6 pessoas assistindo
+```
+
+E quando aperta, a tela diz que apertou e por quê. Um compartilhamento que cai
+de resolução porque entrou a quinta pessoa e não explica é o produto sabendo
+algo que quem está na frente dele não sabe.
+
+### Uma pendência que este pedido abriu
+
+O pedido cita **480p**, e a lista fechada do §5 é 1080p / 720p / 540p — o 540p
+foi escolhido como piso porque abaixo dele a resolução deixa de comprar
+nitidez. Ou o piso desce e o motivo escrito no §5 muda, ou a lista fica e o
+degrau mais baixo é 540p. **Fica em aberto**, e a corrida por teto acima é quem
+tem o número para decidir.
 
 ## 6 · O que não entra na primeira versão
 
