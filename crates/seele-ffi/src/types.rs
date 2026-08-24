@@ -1307,6 +1307,21 @@ pub enum PlugError {
     /// é outro: a bomba não tem ordem que troque a escolha de resolução ou de
     /// cadência depois de armada. Parar e recomeçar aplica as três.
     ScreenShareUnavailable,
+    /// O módulo de vídeo não está nesta máquina.
+    ///
+    /// **Não é o mesmo que [`Self::ScreenShareUnavailable`]**, e confundir os
+    /// dois já custou dois testes de campo: aquele diz «esta compilação não
+    /// captura tela», e este diz «captura, e falta um arquivo».
+    ///
+    /// O módulo do OpenH264 não vem no pacote por decisão de licença — a
+    /// cobertura de patente do Cisco acompanha o binário que o Cisco entrega,
+    /// então embrulhá-lo junto seria trocar uma patente respondida por uma
+    /// contornada. O que resta é buscá-lo, uma vez, com consentimento e com o
+    /// hash conferido.
+    ///
+    /// Quem lê a frase errada conclui que o recurso não existe e para de
+    /// tentar. Quem lê esta sabe que falta um megabyte e o que fazer com isso.
+    ScreenModuleMissing,
 }
 
 impl std::fmt::Display for PlugError {

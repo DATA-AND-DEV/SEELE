@@ -2051,7 +2051,26 @@ fn main() {
         // escrito aqui, e não uma linha de JavaScript.
         .plugin(tauri_plugin_dialog::init())
         .manage(Session::default())
-        .setup(move |_app| {
+        .setup(move |app| {
+            // O módulo de vídeo passa a morar ao lado do banco, e não dentro do
+            // pacote.
+            //
+            // Dentro do pacote ele não sobrevive a uma instalação: cada versão
+            // nova traz um pacote novo e vazio, e quem já tinha o módulo volta a
+            // ver «falta o módulo de vídeo». Foi o que aconteceu duas vezes num
+            // dia, no macOS e no Windows, e não é um acidente de empacotamento —
+            // é onde o arquivo estava guardado. Ao lado do banco ele é do
+            // computador, e não da versão instalada.
+            //
+            // Só quando ninguém apontou: `SEELE_OPENH264` continua sendo a
+            // palavra final de quem quer testar outro módulo.
+            if std::env::var_os("SEELE_OPENH264").is_none() {
+                let pasta = config_dir(app.handle());
+                // SAFETY-ish: estamos antes de qualquer thread do app tocar o
+                // ambiente — o `setup` roda uma vez, antes da primeira janela.
+                std::env::set_var("SEELE_OPENH264", &pasta);
+                tracing::info!(%pasta, "onde o módulo de vídeo é procurado");
+            }
             tracing::info!(millis = arranque.elapsed().as_millis(), "janela pronta");
             Ok(())
         })

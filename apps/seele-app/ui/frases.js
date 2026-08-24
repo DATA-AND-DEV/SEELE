@@ -340,6 +340,31 @@ const FRASES = {
       "ESTA VERSÃO NÃO SABE COMPARTILHAR TELA.\n" +
       "Não é a sua conexão nem permissão: a parte que captura a tela ainda não está neste app.",
 
+    // Separada da de cima porque as duas mandam a pessoa fazer coisas
+    // diferentes, e enquanto foram uma só quem lia parava de tentar: aquela diz
+    // que o recurso não existe, e esta diz que falta um arquivo.
+    //
+    // O módulo do OpenH264 não vem no pacote porque a licença não deixa. A
+    // frase diz o tamanho porque um megabyte é uma decisão fácil de tomar, e
+    // «baixar algo da internet» sem número é uma difícil.
+    ScreenModuleMissing:
+      "FALTA O MÓDULO DE VÍDEO.\n" +
+      "Este app captura a tela; o codec que comprime a imagem não vem junto, " +
+      "porque a licença dele não deixa. É cerca de 1 MB, uma vez só.",
+
+    // Separada da de cima porque elas mandam a pessoa fazer coisas diferentes,
+    // e enquanto foram uma só quem lia parava de tentar: a de cima diz que o
+    // recurso não existe, e esta diz que falta um arquivo.
+    //
+    // O módulo do OpenH264 não vem no pacote por licença — a cobertura de
+    // patente do Cisco acompanha o binário que o Cisco entrega. A frase diz o
+    // tamanho porque um megabyte é uma decisão fácil de tomar, e «baixar algo
+    // da internet» sem número é uma difícil.
+    ScreenModuleMissing:
+      "FALTA O MÓDULO DE VÍDEO.\n" +
+      "Este app captura a tela, e o codec que comprime a imagem não vem junto: " +
+      "a licença dele não deixa. São cerca de 1 MB, baixados uma vez.",
+
     // Por que um texto colado não é um convite. O Rust devolve o nome da
     // falha; a frase é daqui, como todas as outras.
     EsquemaDesconhecido: "ISTO NÃO PARECE UM CONVITE SEELE",

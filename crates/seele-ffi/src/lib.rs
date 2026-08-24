@@ -2244,7 +2244,11 @@ fn modulo_de_video() -> Result<seele_core::BibliotecaDeVideo, PlugError> {
         let onde = seele_core::modulo_de_video_publicado()
             .map_or_else(|| "—".to_owned(), |modulo| modulo.url());
         tracing::warn!(%erro, %onde, "o módulo de vídeo não está nesta máquina");
-        PlugError::ScreenShareUnavailable
+        // **Este erro, e não `ScreenShareUnavailable`.** A captura está neste
+        // app; o que falta é o módulo, que não vem no pacote por licença. A
+        // frase daquele diz que o recurso não existe, e quem a lê para de
+        // tentar — aconteceu duas vezes em campo, no macOS e no Windows.
+        PlugError::ScreenModuleMissing
     })
 }
 
