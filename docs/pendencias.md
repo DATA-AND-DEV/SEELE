@@ -1236,3 +1236,70 @@ tela de quem entra sem moderação nenhuma.
 **Quando dói.** O nome dói hoje, em uso: todo Dogma hospedado pelo app tem o
 mesmo. A cor e o ícone doem em pedido, e a cor só passa a fazer sentido depois da
 pendência 24.
+
+## 26 · O degrau 2 é um palpite, e o PCP transformaria em fato
+
+**Sintoma, medido em 2026-08-24.** Uma casa com IPv6 global publica os
+endereços IPv6 dela no `seele://` e ninguém de fora entra por eles. Não é
+defeito do endereço: o firewall do roteador vem fechado para entrada não
+solicitada, que é o padrão de fábrica de todo roteador doméstico, e o
+anfitrião **não tem como saber disso** — está escrito no próprio
+`Degrau::Ipv6Direto`: «se o firewall do roteador deixar entrar, e isso não dá
+para saber daqui».
+
+**A prova, com controle.** Três pacotes UDP de uma VPS para o IPv6 do PC, na
+porta 8384, com regra de firewall do Windows liberando: nenhum chegou. Os
+mesmos três, do Mac na mesma casa, para o mesmo endereço e a mesma porta:
+chegaram. A escuta funciona, o Windows deixa passar, o endereço está certo —
+quem bloqueia é o roteador.
+
+**O que isso custa a quem entra.** Os dois IPv6 ficam na frente da lista e
+custam quatro segundos cada. Medido de um 5G contra um Dogma real: 9,6 s
+queimados em três candidatos sem chance, e o quarto respondeu em 358 ms. A
+ordem já foi consertada (`4c9429c`) e a espera também (`3b5510f`), mas as duas
+tratam o sintoma: o endereço continua sendo anunciado e continua não
+funcionando.
+
+### O que fecharia
+
+**PCP — Port Control Protocol, RFC 6887.** É a mesma conversa que o degrau 3
+já tem com o roteador da própria casa, num protocolo mais novo, e ele tem o
+verbo que falta: **abrir buraco no firewall IPv6**. Em IPv6 não há NAT a
+mapear; o que existe é entrada bloqueada, e o PCP é como se pede que ela seja
+liberada para uma porta.
+
+Se o roteador atender, o degrau 2 deixa de ser afirmação e vira observação —
+e aí o `Tipo::Global` volta a merecer a frente da lista, que é de onde ele
+saiu hoje justamente por ser palpite.
+
+O ganho para quem hospeda atrás de CGNAT é o maior que existe nesta escada:
+um endereço **estável**, que não morre quando o app fecha, sem ponto de
+encontro, sem furo e sem VPS. É o único item que **apaga** a dependência de
+terceiro em vez de mudá-la de dono.
+
+### O que já foi levantado, para não refazer
+
+- **O crate.** `crab_nat` 0.8.1, Rust puro, fala PCP com recuo para NAT-PMP.
+  `PortMapping::new(gateway, client, protocol, porta_interna, opcoes)` — e é
+  passar o **nosso IPv6 global** como `client` que faz o pedido virar abertura
+  de firewall em vez de mapeamento.
+- **O que falta e não estava previsto: descobrir o roteador.** O UPnP acha por
+  multicast SSDP; o PCP **não tem descoberta** — a RFC manda falar com o
+  gateway padrão, e lê-lo é código por sistema. `netdev` 0.46 resolve por três
+  crates, medido com `cargo add --dry-run`.
+- **Onde encaixa.** `crates/seele-server/src/alcance/porta.rs` é o vizinho:
+  mesma forma, mesma disciplina de nunca falhar em silêncio — todo caminho
+  termina numa falha que **diz qual foi**, porque um pedido de porta que não
+  deu certo tem de dizer que não deu.
+- **A armadilha que o degrau 3 já pisou, e que vale de novo.** Um roteador
+  atrás de outro roteador responde `Ok` e abre a porta na WAN dele, que não
+  sai para a internet. `FalhaAoAbrir::SemSaidaParaInternet` existe por causa
+  disso. O equivalente em IPv6 é um roteador que aceita o pedido e não é quem
+  filtra.
+- **Como saber se funcionou de verdade.** Não confiar no `Ok`: a única prova é
+  um pacote entrando de fora. A VPS do ponto de encontro serve de sonda, e o
+  método com controle está descrito acima.
+
+**Quando dói.** Hoje, em toda casa com CGNAT e IPv6 — que é a combinação mais
+comum no Brasil de 2026. Quem cai nela depende do degrau 4, e o link do degrau
+4 morre quando o app fecha (ver o aviso acrescentado em `d229074`).
