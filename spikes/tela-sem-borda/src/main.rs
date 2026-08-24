@@ -51,10 +51,13 @@ impl GraphicsCaptureApiHandler for PrimeiroQuadro {
     fn on_frame_arrived(
         &mut self,
         _quadro: &mut Frame,
-        controle: InternalCaptureControl,
+        _controle: InternalCaptureControl,
     ) -> Result<(), Self::Error> {
+        // **Não para no primeiro quadro**, e essa foi a falha do primeiro
+        // desenho desta sonda: ela media se a chamada dava erro, e a pergunta
+        // é outra — se a borda aparece na tela. Uma captura que dura um quadro
+        // acaba antes de qualquer pessoa conseguir olhar.
         let _ = self.0.send(());
-        controle.stop();
         Ok(())
     }
 
@@ -131,6 +134,24 @@ fn main() {
     println!("2. a captura começou sem reclamar de permissão");
 
     let chegou = espera.recv_timeout(Duration::from_secs(10)).is_ok();
+    if chegou {
+        println!();
+        println!("   >>> OLHE PARA A BORDA DA SUA TELA AGORA <<<");
+        println!(
+            "   {} — a captura fica de pé por 12 segundos.",
+            if controle_apenas {
+                "Deve haver um contorno amarelo: é o controle, e ele mostra como a borda é"
+            } else {
+                "Se NÃO houver contorno amarelo, o pedido pegou"
+            }
+        );
+        for restam in (1..=12).rev() {
+            print!("\r   {restam:>2}s ");
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+            std::thread::sleep(Duration::from_secs(1));
+        }
+        println!("\r        ");
+    }
     // O `on_frame_arrived` já mandou parar, então este `stop` quase sempre
     // encontra a thread encerrada. Reclamar disso seria ruído.
     if let Err(erro) = controle.stop() {
@@ -138,10 +159,18 @@ fn main() {
     }
 
     if chegou {
-        println!(
-            "3. VEREDITO: a borda PODE ser desligada aqui — a sessão aceitou \
-             SetIsBorderRequired(false) e entregou quadro."
-        );
+        if controle_apenas {
+            println!(
+                "3. CONTROLE OK: o ambiente captura. O contorno que você acabou de ver \
+                 é a borda que queremos tirar."
+            );
+        } else {
+            println!(
+                "3. A chamada passou e os quadros vieram. **A resposta é o que você viu**: \
+                 sem contorno, dá para tirar a borda; com contorno, o Windows aceitou o \
+                 pedido e o ignorou — que é pior que recusar, porque não deixa rastro."
+            );
+        }
     } else {
         println!(
             "3. VEREDITO: começou e não entregou quadro em 10 s. Não é resposta: \
