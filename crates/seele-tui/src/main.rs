@@ -811,6 +811,16 @@ async fn sessao(
                     // acompanhar, e este ramo existe para dizer isso em vez de
                     // deixar um `_ =>` engolir uma variante nova amanhã.
                     Aviso::Transferencia(_) => {}
+                    // A tela de outra pessoa chegando. Um terminal não desenha
+                    // imagem, e descartar aqui não é perder nada: o fluxo é
+                    // lido de qualquer jeito — quem o lê é a tarefa do enlace —,
+                    // então o Dogma não fica com um fluxo parado por causa
+                    // deste cliente.
+                    //
+                    // O `_` não serve: um aviso novo tem de reprovar aqui em
+                    // vez de virar silenciosamente um dos de cima.
+                    Aviso::TelaAbriu { .. } | Aviso::TelaQuadro { .. } | Aviso::TelaFechou { .. } => {
+                    }
                     // A queda não encerra nada. `specs/07-tema-evangelion.md`:
                     // a interface esmaece e continua legível, a contagem desce,
                     // e o histórico fica ali para leitura.

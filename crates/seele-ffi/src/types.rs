@@ -959,6 +959,47 @@ pub enum Event {
     /// `ScreenShareStarted` mostraria `720p · 4 pessoas assistindo` para uma
     /// sala de seis.
     ScreenChanged,
+    /// Uma transmissão alheia começou a chegar, e este é o seu tamanho.
+    ///
+    /// Separado de [`Self::ScreenChanged`], que é grosso e manda reler o
+    /// `Snapshot`: este carrega o que **não** está no snapshot, porque é do
+    /// fluxo e não da sala — a largura e a altura com que o cabeçalho abriu.
+    /// Sem elas a casca não tem como armar o decodificador, e o primeiro quadro
+    /// chegaria a uma tela que ainda não sabe de que tamanho é a imagem.
+    ScreenOpened {
+        /// Qual transmissão.
+        screen: u32,
+        /// Largura em pixels.
+        width: u16,
+        /// Altura em pixels.
+        height: u16,
+    },
+    /// Um quadro comprimido de uma transmissão alheia.
+    ///
+    /// **A exceção à regra de que os eventos são grossos**, e ela se paga: um
+    /// quadro não é uma mudança que se lê do `Snapshot` depois, é o conteúdo. A
+    /// alternativa seria a casca vir buscar quadro a quadro por comando, o que
+    /// custa uma travessia de ida e volta por quadro em vez de meia.
+    ///
+    /// Os bytes vão em base64 e não como lista de números: o JSON de um `Vec<u8>`
+    /// gasta umas quatro vezes mais para dizer a mesma coisa, e um quadro-chave
+    /// de 1080p tem 65 KiB.
+    ///
+    /// Quem decodifica é a janela, com o decodificador do sistema. É o que faz
+    /// **assistir não exigir o módulo do Cisco** — só transmitir exige.
+    ScreenFrame {
+        /// Qual transmissão.
+        screen: u32,
+        /// Se dá para começar a decodificar por este.
+        key: bool,
+        /// O quadro em Annex-B, em base64.
+        data: String,
+    },
+    /// A transmissão que estava chegando acabou.
+    ScreenClosed {
+        /// Qual transmissão.
+        screen: u32,
+    },
 }
 
 /// Where one file is on its way.

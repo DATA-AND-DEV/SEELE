@@ -1861,6 +1861,7 @@ function salvarAnexo(anexo, nome) {
 async function alternarCanal(evento) {
   const item = evento.target.closest("button[data-cage], button[data-linha]");
   if (!item) return;
+  let entrou = false;
   try {
     if (item.dataset.cage) {
       const cage = Number(item.dataset.cage);
@@ -1868,6 +1869,7 @@ async function alternarCanal(evento) {
         await invoke("eject_plug");
       } else {
         await invoke("insert_plug", { cage });
+        entrou = true;
       }
     } else if (item.dataset.linha) {
       linhaAberta = Number(item.dataset.linha);
@@ -1882,6 +1884,17 @@ async function alternarCanal(evento) {
     await atualizar();
     // A lista de mensagens acabou de ser trocada inteira. Ver `refazerBusca`.
     await refazerBusca();
+    // Entrou numa sala de voz: a chamada abre.
+    //
+    // Um Cage é onde se fala, e depois de entrar não há nada a fazer na
+    // operação — quem está lá quer ver quem está junto, o microfone e a tela.
+    // Ficar na lista de canais depois de escolher um é a tela pedindo de novo
+    // uma decisão que acabou de ser tomada, e é o mesmo gesto que a caixa de
+    // compartilhar já faz quando a transmissão começa.
+    //
+    // Só ao **entrar**. Sair de um Cage devolve à operação, que é para onde
+    // quem saiu está indo.
+    if (entrou) await abrirChamada();
   } catch (falha) {
     console.warn("canal:", falha);
   }

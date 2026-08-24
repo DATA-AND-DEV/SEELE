@@ -346,7 +346,27 @@ pub struct Client {
     pending_ping: Option<(u64, std::time::Instant)>,
     /// The most recent round trip.
     last_rtt: Option<std::time::Duration>,
+    /// Fluxos de tela, já aceitos e classificados pelo roteador.
+    ///
+    /// Atrás de um `Mutex` embora só um lugar o leia: quem o lê é um braço de
+    /// um `select!` que, no outro braço, já pegou o `Client` emprestado mutável
+    /// para ler eventos. Dois empréstimos mutáveis no mesmo `select!` não
+    /// compilam, e a fila é a metade que não precisa deles.
+    telas: FilaDeTelas,
+    /// Fluxos de anexo, idem.
+    ///
+    /// Atrás de um `Mutex` e não do `&mut self` como as telas: quem recebe um
+    /// anexo é uma tarefa solta, criada por comando, e ela não tem o `Client`.
+    anexos: FilaDeAnexos,
 }
+
+/// A fila de onde sai a próxima transmissão de tela alheia.
+pub type FilaDeTelas =
+    std::sync::Arc<tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<quinn::RecvStream>>>;
+
+/// A fila de onde as tarefas de anexo tiram o fluxo que lhes cabe.
+type FilaDeAnexos =
+    std::sync::Arc<tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<quinn::RecvStream>>>;
 
 impl Client {
     /// Connects, runs the handshake, and returns once PATTERN: BLUE is reached.
@@ -498,6 +518,58 @@ impl Client {
             }
         });
 
+        // E outra é dona do `accept_uni`, pela mesma razão e contra o mesmo
+        // defeito.
+        //
+        // Uma conexão tem um `accept_uni` só, e dois usos para fluxo de
+        // entrada: anexo e tela. Enquanto cada um chamava `accept_uni` por
+        // conta própria, quem chegasse primeiro pegava o fluxo do outro — um
+        // anexo baixando durante uma transmissão de tela levava o quadro-chave
+        // embora, e a tela ficava esperando um fluxo que já tinha sido lido e
+        // descartado por engano. É a dívida que o §5.2 da spec de 22/08
+        // registrou quando o byte de tipo entrou: ele passou a dizer o que cada
+        // fluxo é, e faltava alguém para ler isso e distribuir.
+        //
+        // O byte é lido **aqui**, e por isso quem recebe do outro lado não o lê
+        // de novo: `Recepcao::do_fluxo_ja_tipado` e `receive_attachment`
+        // começam depois dele.
+        let (tela_para_dentro, telas) = tokio::sync::mpsc::unbounded_channel();
+        let (anexo_para_dentro, anexos) = tokio::sync::mpsc::unbounded_channel();
+        let conexao_do_roteador = connection.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok(mut fluxo) = conexao_do_roteador.accept_uni().await else {
+                    // A conexão acabou. As pontas dos canais caem junto, e quem
+                    // esperava um fluxo recebe o fim em vez de esperar para
+                    // sempre.
+                    return;
+                };
+                let mut tipo = [0_u8; seele_proto::stream::STREAM_TYPE_LEN];
+                if let Err(erro) = fluxo.read_exact(&mut tipo).await {
+                    tracing::debug!(%erro, "um fluxo de entrada morreu antes de dizer o que era");
+                    continue;
+                }
+                match seele_proto::stream::StreamType::decode(tipo[0]) {
+                    Ok(seele_proto::stream::StreamType::Screen) => {
+                        if tela_para_dentro.send(fluxo).is_err() {
+                            return;
+                        }
+                    }
+                    Ok(seele_proto::stream::StreamType::Attachment) => {
+                        if anexo_para_dentro.send(fluxo).is_err() {
+                            return;
+                        }
+                    }
+                    Err(erro) => {
+                        // Um tipo que este build não conhece é um fluxo de uma
+                        // versão mais nova, e não um defeito: descartar um é
+                        // muito melhor que fechar a conexão por causa dele.
+                        tracing::debug!(%erro, byte = tipo[0], "fluxo de entrada de tipo estranho");
+                    }
+                }
+            }
+        });
+
         Ok(Self {
             connection,
             send,
@@ -507,7 +579,20 @@ impl Client {
             pattern: Pattern::Blue,
             pending_ping: None,
             last_rtt: None,
+            telas: std::sync::Arc::new(tokio::sync::Mutex::new(telas)),
+            anexos: std::sync::Arc::new(tokio::sync::Mutex::new(anexos)),
         })
+    }
+
+    /// A fila por onde chegam os fluxos de tela, sem o byte de tipo.
+    ///
+    /// Devolvida como punho e não lida aqui: quem a lê é um braço de um
+    /// `select!` que, no outro braço, já tem o `Client` emprestado mutável para
+    /// ler eventos, e dois empréstimos no mesmo `select!` não compilam. Um
+    /// punho tirado antes do laço não empresta nada.
+    #[must_use]
+    pub fn fila_de_telas(&self) -> FilaDeTelas {
+        std::sync::Arc::clone(&self.telas)
     }
 
     /// What the server told us.
@@ -627,6 +712,7 @@ impl Client {
     pub fn transfers(&self) -> Transfers {
         Transfers {
             connection: self.connection.clone(),
+            anexos: std::sync::Arc::clone(&self.anexos),
         }
     }
 
@@ -1130,16 +1216,6 @@ impl Client {
         crate::tela::Transmissao::abrir(&self.connection, cabecalho, teto_bps, agora).await
     }
 
-    /// Aceita o próximo fluxo unidirecional como uma transmissão de tela.
-    ///
-    /// # Errors
-    ///
-    /// [`crate::tela::ErroDeTela`] para um cabeçalho que este build não carrega
-    /// ou para uma conexão que acabou.
-    pub async fn aceitar_tela(&self) -> Result<crate::tela::Recepcao, crate::tela::ErroDeTela> {
-        crate::tela::Recepcao::aceitar(&self.connection).await
-    }
-
     /// Um punho desta conexão que só sabe escoar uma tela.
     ///
     /// Embrulha em vez de devolver a [`quinn::Connection`] pelo mesmo motivo
@@ -1155,32 +1231,6 @@ impl Client {
     pub fn escoadouro_de_tela(&self) -> crate::bomba::Escoadouro {
         crate::bomba::Escoadouro::nova(self.connection.clone())
     }
-}
-
-/// Tira o byte de tipo da frente de um fluxo, conferindo que é o esperado.
-///
-/// Conferido e não pulado. Um byte lido e jogado fora aceitaria uma tela como
-/// se fosse anexo e leria o cabeçalho errado sem reclamar — e o sintoma de um
-/// byte a mais no lugar errado é um tamanho absurdo, como o
-/// «16777216-byte control frame» que apareceu quando este byte foi escrito de
-/// um lado e não lido do outro.
-///
-/// Ver o §5.2 da spec do compartilhamento de tela: um Dogma recebe e manda dois
-/// tipos de fluxo unidirecional, e até a 0.7.8 o que os separava era aritmética
-/// sobre o primeiro byte do cabeçalho.
-async fn engolir_o_tipo(
-    stream: &mut quinn::RecvStream,
-    esperado: seele_proto::stream::StreamType,
-) -> Result<()> {
-    let mut tipo = [0_u8; seele_proto::stream::STREAM_TYPE_LEN];
-    stream
-        .read_exact(&mut tipo)
-        .await
-        .map_err(|erro| anyhow::anyhow!("o fluxo acabou antes de dizer o que era: {erro}"))?;
-    let veio = seele_proto::stream::StreamType::decode(tipo[0])
-        .map_err(|erro| anyhow::anyhow!("tipo de fluxo que este build não conhece: {erro}"))?;
-    anyhow::ensure!(veio == esperado, "esperava {esperado:?} e veio {veio:?}");
-    Ok(())
 }
 
 /// A pilot left. The ordinary end of a session.
@@ -1377,9 +1427,28 @@ async fn handshake(
 #[derive(Clone)]
 pub struct Transfers {
     connection: quinn::Connection,
+    /// A fila que o roteador de `Client::connect` alimenta.
+    anexos: FilaDeAnexos,
 }
 
 impl Transfers {
+    /// O próximo fluxo de anexo da fila do roteador, dentro do prazo.
+    ///
+    /// **A fila é uma só e as tarefas de anexo são várias.** Duas transferências
+    /// ao mesmo tempo podem trocar de fluxo aqui — e o conserto está logo
+    /// abaixo, em quem chama: o `AttachmentDelivery` diz de qual anexo o fluxo
+    /// é, e um que não seja o pedido é recusado por nome. Era assim antes do
+    /// roteador, com o `accept_uni` no lugar desta fila, e continua sendo:
+    /// endereçar fluxo por identificador é trabalho de outro dia, e não do dia
+    /// em que a tela passou a ter para onde ir.
+    async fn proximo_fluxo(&self, wait: std::time::Duration) -> Result<quinn::RecvStream> {
+        let mut fila = self.anexos.lock().await;
+        tokio::time::timeout(wait, fila.recv())
+            .await
+            .map_err(|_| anyhow::anyhow!("o Dogma não mandou o arquivo em {wait:?}"))?
+            .ok_or_else(|| anyhow::anyhow!("a conexão acabou antes do arquivo"))
+    }
+
     /// Sends a file on a stream of its own, and reports the bytes as they go.
     ///
     /// **Never on the control stream.** Twenty megabytes written there stop
@@ -1543,11 +1612,12 @@ impl Transfers {
         // opens one, which is why there is a deadline: the reason is on its way
         // through `next_event` and this call must not hang for ever waiting for
         // bytes that were never coming.
-        let mut stream = tokio::time::timeout(wait, self.connection.accept_uni())
-            .await
-            .map_err(|_| anyhow::anyhow!("o Dogma não mandou o arquivo em {wait:?}"))??;
+        //
+        // Da fila do roteador e não do `accept_uni`: o byte de tipo já foi lido
+        // por ele, e é ele que garante que o que sai daqui é anexo e não a tela
+        // de alguém que começou a transmitir no meio do download.
+        let mut stream = self.proximo_fluxo(wait).await?;
 
-        engolir_o_tipo(&mut stream, seele_proto::stream::StreamType::Attachment).await?;
         let delivery: AttachmentDelivery = frame::read(&mut stream).await?;
         anyhow::ensure!(
             delivery.attachment == attachment,
@@ -1616,11 +1686,8 @@ impl Transfers {
     ) -> Result<Previewed> {
         use seele_proto::attachment::{AttachmentDelivery, ContentDigest, BLOCK_LEN};
 
-        let mut stream = tokio::time::timeout(wait, self.connection.accept_uni())
-            .await
-            .map_err(|_| anyhow::anyhow!("o Dogma não mandou o arquivo em {wait:?}"))??;
+        let mut stream = self.proximo_fluxo(wait).await?;
 
-        engolir_o_tipo(&mut stream, seele_proto::stream::StreamType::Attachment).await?;
         let delivery: AttachmentDelivery = frame::read(&mut stream).await?;
         anyhow::ensure!(
             delivery.attachment == attachment,

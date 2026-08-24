@@ -1501,6 +1501,17 @@
         </div>
 
         <div class="chamada-palco-corpo">
+          <!--
+            A imagem. Escondida enquanto não há quadro nenhum: uma moldura preta
+            sobre uma sala sem transmissão parece uma transmissão travada, e
+            essa confusão é pior que não desenhar nada.
+
+            `<canvas>` e não `<video>`: o que atravessa a ponte são quadros
+            comprimidos avulsos, sem contêiner nenhum — não há URL para um
+            `<video>` apontar. Quem os junta é o `VideoDecoder` da janela, e o
+            destino dele é um canvas.
+          -->
+          <canvas id="palco-imagem" class="chamada-palco-imagem" hidden></canvas>
           <p id="palco-quem" class="chamada-palco-quem">NINGUÉM ESTÁ COMPARTILHANDO A TELA</p>
           <p id="palco-nota" class="nota">Use COMPARTILHAR A TELA aqui embaixo para mostrar um monitor ou uma janela sua.</p>
           <!--
@@ -2813,6 +2824,7 @@
   terem rodado. `nomeDaResolucao` é declarada aqui e lida lá, como
   `tela-chamada.js` já lê `medido` de `tela-sessao.js`.
 -->
+<script src="palco-imagem.js"></script>
 <script src="camada-compartilhar.js"></script>
 <script src="tela-dogma.js"></script>
 <script src="tela-fim.js"></script>

@@ -1032,6 +1032,20 @@ impl Recepcao {
             Err(erro) => return Err(ErroDeTela::Fluxo(erro.to_string())),
         }
 
+        Self::do_fluxo_ja_tipado(fluxo).await
+    }
+
+    /// A mesma leitura, sobre um fluxo cujo byte de tipo já foi lido.
+    ///
+    /// É esta que a produção usa: quem aceita os fluxos de entrada é o roteador
+    /// de `Client::connect`, e é lá que o byte é lido — ele precisa lê-lo para
+    /// saber para qual fila mandar o fluxo, e lê-lo duas vezes comeria o
+    /// primeiro byte do cabeçalho.
+    ///
+    /// # Errors
+    ///
+    /// As mesmas de [`Self::aceitar`], menos as do byte de tipo.
+    pub async fn do_fluxo_ja_tipado(mut fluxo: quinn::RecvStream) -> Result<Self, ErroDeTela> {
         let mut abertura = [0_u8; SCREEN_HEADER_LEN];
         fluxo
             .read_exact(&mut abertura)

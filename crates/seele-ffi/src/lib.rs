@@ -2209,6 +2209,44 @@ fn limites_do_nucleo(limites: LimitesDeTela) -> seele_core::LimitesDeTela {
 /// desenvolve e como se depura; depois a pasta do executável, que é onde um
 /// pacote o carrega; depois `../Frameworks`, que é onde um `.app` do macOS o
 /// põe; depois a pasta de build, que é onde ele cai numa árvore de fonte.
+/// Base64 padrão, com o preenchimento que o `atob` da janela espera.
+///
+/// Sem o crate `base64`, pela mesma razão que `seele-video` escreveu quando
+/// recusou o `hex`: ele entraria na árvore só para isto, e isto são vinte
+/// linhas. A tabela é a do RFC 4648, que é a que o navegador decodifica.
+fn base64(bytes: &[u8]) -> String {
+    const TABELA: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut texto = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for grupo in bytes.chunks(3) {
+        // Três bytes viram quatro caracteres de seis bits. Os que faltam no
+        // último grupo entram como zero e saem como `=`.
+        let (a, b, c) = (
+            u32::from(grupo.first().copied().unwrap_or(0)),
+            u32::from(grupo.get(1).copied().unwrap_or(0)),
+            u32::from(grupo.get(2).copied().unwrap_or(0)),
+        );
+        let junto = (a << 16) | (b << 8) | c;
+        for casa in 0..4 {
+            // Cada casa depois do que o grupo de fato trouxe vira `=`: dois
+            // bytes dão três caracteres e um `=`, um byte dá dois e dois `=`.
+            if casa > grupo.len() {
+                texto.push('=');
+                continue;
+            }
+            let indice = ((junto >> (18 - 6 * casa)) & 0x3F) as usize;
+            // `get` e não `[]`: seis bits mascarados não podem passar de 63 e a
+            // tabela tem 64, mas quem lê esta linha não tem por que refazer essa
+            // conta para acreditar nela — e `indexing_slicing` é aviso aqui de
+            // propósito, justamente para não haver a linha que só está certa
+            // porque alguém conferiu.
+            if let Some(letra) = TABELA.get(indice) {
+                texto.push(char::from(*letra));
+            }
+        }
+    }
+    texto
+}
+
 fn pastas_do_modulo() -> Vec<std::path::PathBuf> {
     let mut pastas = Vec::new();
     if let Some(apontado) = std::env::var_os("SEELE_OPENH264") {
@@ -2705,6 +2743,27 @@ async fn drive(
                         shared.notify(&Event::TransferChanged {
                             transfer: transfer_of(&estado),
                         });
+                    }
+                    seele_core::enlace::Aviso::TelaAbriu {
+                        tela,
+                        largura,
+                        altura,
+                    } => {
+                        shared.notify(&Event::ScreenOpened {
+                            screen: tela.0,
+                            width: largura,
+                            height: altura,
+                        });
+                    }
+                    seele_core::enlace::Aviso::TelaQuadro { tela, chave, bytes } => {
+                        shared.notify(&Event::ScreenFrame {
+                            screen: tela.0,
+                            key: chave,
+                            data: base64(&bytes),
+                        });
+                    }
+                    seele_core::enlace::Aviso::TelaFechou { tela } => {
+                        shared.notify(&Event::ScreenClosed { screen: tela.0 });
                     }
                     // Cair não encerra: começa a bateria interna, e a casca
                     // esmaece em vez de fechar.
@@ -5596,5 +5655,42 @@ mod trilha_no_log {
             "o «onde» de um aviso é o ponto de encontro, e ele não está no \
              log: {aviso}"
         );
+    }
+}
+
+#[cfg(test)]
+mod base64_escrito_a_mao {
+    use super::base64;
+
+    #[test]
+    fn os_vetores_do_rfc_4648() {
+        // Escrever base64 à mão é barato; escrevê-lo **errado** é caro de um
+        // jeito específico: o `atob` da janela não reclama de quase nada, então
+        // um preenchimento errado no último grupo vira um quadro truncado que o
+        // decodificador recusa em silêncio — e o sintoma é uma tela preta, que
+        // é o mesmo sintoma de outras seis coisas.
+        //
+        // Os vetores são os do §10 do RFC 4648, que existem exatamente para
+        // isto e cobrem os três restos possíveis.
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64(b"foob"), "Zm9vYg==");
+        assert_eq!(base64(b"fooba"), "Zm9vYmE=");
+        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn os_bytes_altos_tambem() {
+        // A tabela tem 64 entradas e o índice tem seis bits, então nenhum byte
+        // pode sair dela — mas um `>>` com o deslocamento errado sai, e sai
+        // justamente nos bytes altos, que texto ASCII nunca exercita. Um quadro
+        // de vídeo é quase só byte alto.
+        assert_eq!(base64(&[0xFF, 0xFF, 0xFF]), "////");
+        assert_eq!(base64(&[0x00, 0x00, 0x00]), "AAAA");
+        assert_eq!(base64(&[0xFB, 0xFF, 0xBE]), "+/++");
+        // E o Annex-B começa sempre assim: `00 00 00 01`.
+        assert_eq!(base64(&[0x00, 0x00, 0x00, 0x01]), "AAAAAQ==");
     }
 }

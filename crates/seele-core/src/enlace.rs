@@ -100,6 +100,39 @@ pub enum Aviso {
     },
     /// Uma transferência andou. ADR 0027.
     Transferencia(Transferencia),
+    /// Uma transmissão de tela alheia começou a chegar.
+    ///
+    /// Vem antes de qualquer quadro e carrega o que a casca precisa para armar
+    /// o decodificador: tamanho e codec. Sem ela, o primeiro quadro chegaria a
+    /// uma tela que ainda não sabe de que tamanho é a imagem.
+    TelaAbriu {
+        /// Qual transmissão, para casar com o que o `Snapshot` já diz.
+        tela: ScreenId,
+        /// Largura em pixels, como o cabeçalho a declarou.
+        largura: u16,
+        /// Altura em pixels.
+        altura: u16,
+    },
+    /// Um quadro comprimido de uma tela alheia.
+    ///
+    /// Os bytes vão crus, como saíram do codificador do outro lado: quem
+    /// decodifica é a casca. Esta camada não decodifica de propósito — o
+    /// decodificador do sistema, que a janela alcança, é acelerado por hardware
+    /// e não exige o módulo do Cisco em quem só assiste. Só quem transmite
+    /// precisa dele.
+    TelaQuadro {
+        /// Qual transmissão.
+        tela: ScreenId,
+        /// Se dá para começar a decodificar por este.
+        chave: bool,
+        /// O quadro, em Annex-B.
+        bytes: Vec<u8>,
+    },
+    /// A transmissão que estava chegando acabou.
+    TelaFechou {
+        /// Qual transmissão.
+        tela: ScreenId,
+    },
     /// Acabou. Ou os cinco minutos passaram, ou não vale a pena tentar.
     Encerrado(Motivo),
 }
@@ -120,6 +153,27 @@ impl std::fmt::Debug for Aviso {
                 .field("sessao", sessao)
                 .finish(),
             Self::Transferencia(estado) => f.debug_tuple("Transferencia").field(estado).finish(),
+            Self::TelaAbriu {
+                tela,
+                largura,
+                altura,
+            } => f
+                .debug_struct("TelaAbriu")
+                .field("tela", tela)
+                .field("largura", largura)
+                .field("altura", altura)
+                .finish(),
+            // Os bytes viram um número: um quadro-chave de 1080p tem 65 KiB, e
+            // despejá-los num log é apagar o log.
+            Self::TelaQuadro { tela, chave, bytes } => f
+                .debug_struct("TelaQuadro")
+                .field("tela", tela)
+                .field("chave", chave)
+                .field("bytes", &bytes.len())
+                .finish(),
+            Self::TelaFechou { tela } => {
+                f.debug_struct("TelaFechou").field("tela", tela).finish()
+            }
             Self::Encerrado(motivo) => f.debug_tuple("Encerrado").field(motivo).finish(),
         }
     }
@@ -1424,10 +1478,27 @@ impl Motor {
         tica.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {
+            // Tirados antes do `select!`, e é o que faz o braço da tela
+            // compilar: o braço de cima já pega `self.cliente` emprestado
+            // mutável, e um segundo empréstimo de `self` no mesmo `select!` —
+            // mesmo imutável — é recusado. Estes dois punhos não emprestam
+            // nada: um `Arc` e um remetente, os dois baratos de clonar.
+            let fila_de_telas = self
+                .cliente
+                .as_ref()
+                .map(crate::client::Client::fila_de_telas);
+            let avisos_da_tela = self.avisos.clone();
+
             // Só há o que ler quando há conexão. Sem ela, a espera é o relógio.
             let houve_evento = match self.cliente.as_mut() {
                 Some(cliente) => tokio::select! {
                     evento = cliente.next_event() => Some(evento),
+                    // Uma tela alheia chegando. O roteador de `Client::connect`
+                    // já separou este fluxo dos anexos; aqui ele vira quadros.
+                    Some(fluxo) = espera_da_fila(&fila_de_telas) => {
+                        escoar_tela_alheia(avisos_da_tela.clone(), fluxo);
+                        None
+                    }
                     comando = comandos.recv() => {
                         match comando {
                             Some(Comando::Sair) | None => return self.encerrar(Motivo::Pedido),
@@ -1855,6 +1926,87 @@ impl Motor {
         }
     }
 
+}
+
+/// A espera de uma fila que pode não existir.
+///
+/// `None` quando não há conexão, e aí este braço do `select!` nunca acorda —
+/// que é o certo: sem conexão não chega tela nenhuma. Um braço que devolvesse
+/// `None` de imediato giraria o laço a full CPU.
+async fn espera_da_fila(fila: &Option<crate::client::FilaDeTelas>) -> Option<quinn::RecvStream> {
+    match fila {
+        Some(fila) => fila.lock().await.recv().await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Lê uma transmissão alheia até o fim, numa tarefa própria.
+///
+/// Própria porque ler uma tela dura o que a transmissão durar, e fazer isso no
+/// laço principal pararia a voz, a presença e as mensagens de todo mundo
+/// enquanto alguém compartilha — que é o oposto do que a §3.2 da spec pede
+/// quando diz que a voz nunca cede à tela.
+///
+/// Livre e não método por causa do `select!` que a chama: o outro braço já tem
+/// o `Motor` emprestado mutável, e um método aqui seria um segundo empréstimo.
+/// O que ela precisa do motor é o remetente de avisos, que vem por argumento.
+///
+/// Os quadros saem pelo mesmo canal de avisos que todo o resto, e por isso
+/// chegam à casca na ordem em que foram lidos.
+fn escoar_tela_alheia(avisos: mpsc::UnboundedSender<Aviso>, fluxo: quinn::RecvStream) {
+    {
+        tokio::spawn(async move {
+            let mut recepcao = match crate::tela::Recepcao::do_fluxo_ja_tipado(fluxo).await {
+                Ok(recepcao) => recepcao,
+                Err(erro) => {
+                    tracing::debug!(%erro, "um fluxo de tela abriu torto");
+                    return;
+                }
+            };
+            let cabecalho = *recepcao.cabecalho();
+            let tela = cabecalho.screen;
+            if avisos
+                .send(Aviso::TelaAbriu {
+                    tela,
+                    largura: cabecalho.width,
+                    altura: cabecalho.height,
+                })
+                .is_err()
+            {
+                return;
+            }
+
+            loop {
+                match recepcao.proximo_quadro().await {
+                    Ok(Some(quadro)) => {
+                        if avisos
+                            .send(Aviso::TelaQuadro {
+                                tela,
+                                chave: quadro.chave,
+                                bytes: quadro.bytes,
+                            })
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(erro) => {
+                        // Um quadro torto encerra esta transmissão e não a
+                        // conexão: o fluxo já perdeu o sincronismo, e continuar
+                        // lendo dele é ler lixo. Quem transmite recomeça com um
+                        // fluxo novo se quiser.
+                        tracing::debug!(%erro, %tela, "a transmissão alheia terminou torta");
+                        break;
+                    }
+                }
+            }
+            let _ = avisos.send(Aviso::TelaFechou { tela });
+        });
+    }
+}
+
+impl Motor {
     fn e_a_minha_tela(&self, tela: ScreenId) -> bool {
         self.tela_viva
             .as_ref()
@@ -1880,13 +2032,38 @@ impl Motor {
             _ => return,
         };
 
+        let avisos = self.avisos.clone();
         self.nascer_a_tela(tela, move |origem, mut eventos| {
             // Numa tarefa própria pelo mesmo motivo de `Comando::Anexar`:
             // escoar dura o que a transmissão durar, e fazê-lo dentro do laço
             // pararia quem lê a conexão e atende comandos até a pessoa parar de
             // compartilhar.
             tokio::spawn(async move {
-                match escoadouro.escoar(tela, origem, &mut eventos).await {
+                // O espelho: os mesmos avisos que uma tela alheia produz, pelo
+                // mesmo caminho, para a casca não ter dois modos de desenhar a
+                // mesma coisa. Quem compartilha era a única pessoa da sala que
+                // não via o que estava mostrando — o Dogma não devolve a
+                // transmissão a quem a produziu, e com razão.
+                let espelho = |visto: crate::bomba::EspelhoDaTela<'_>| {
+                    let aviso = match visto {
+                        crate::bomba::EspelhoDaTela::Abriu { largura, altura } => Aviso::TelaAbriu {
+                            tela,
+                            largura,
+                            altura,
+                        },
+                        crate::bomba::EspelhoDaTela::Quadro { chave, bytes } => Aviso::TelaQuadro {
+                            tela,
+                            chave,
+                            bytes: bytes.to_vec(),
+                        },
+                    };
+                    let _ = avisos.send(aviso);
+                };
+                let fim = escoadouro
+                    .escoar_espelhado(tela, origem, &mut eventos, espelho)
+                    .await;
+                let _ = avisos.send(Aviso::TelaFechou { tela });
+                match fim {
                     Ok(contagem) => tracing::debug!(?contagem, "a transmissão de tela acabou"),
                     Err(erro) => tracing::debug!(%erro, "a transmissão de tela caiu"),
                 }

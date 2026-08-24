@@ -724,6 +724,51 @@ impl Escoadouro {
     ) -> Result<Contagem, ErroDeTela> {
         escoar(&self.conexao, tela, fonte, eventos).await
     }
+
+    /// O mesmo, com um espelho que vê o que está saindo.
+    ///
+    /// # Errors
+    ///
+    /// O que [`escoar`] devolve.
+    pub async fn escoar_espelhado(
+        &self,
+        tela: ScreenId,
+        fonte: ScreenSource,
+        eventos: &mut canal::Receiver<EventoDaBomba>,
+        espelho: impl FnMut(EspelhoDaTela<'_>),
+    ) -> Result<Contagem, ErroDeTela> {
+        escoar_com_espelho(&self.conexao, tela, fonte, eventos, espelho).await
+    }
+}
+
+/// O que o espelho de quem transmite vê passar.
+///
+/// # Por que existe
+///
+/// O Dogma não devolve a transmissão a quem a produziu — `Cage::ligar` tira o
+/// autor da lista de espectadores de propósito, porque mandar de volta o que
+/// acabou de subir é pagar a banda duas vezes. O efeito colateral é que quem
+/// compartilha era a única pessoa da sala que não via o que estava mostrando.
+///
+/// Este espelho fecha isso do lado de cá: os quadros já existem, já estão
+/// comprimidos, e passar um punho deles para a casca não custa nem um byte de
+/// rede. É também o que permite conferir a transmissão inteira numa máquina só.
+#[derive(Debug)]
+pub enum EspelhoDaTela<'a> {
+    /// Um fluxo abriu, com este tamanho.
+    Abriu {
+        /// Largura em pixels.
+        largura: u16,
+        /// Altura em pixels.
+        altura: u16,
+    },
+    /// Um quadro foi escrito no fio.
+    Quadro {
+        /// Se dá para começar a decodificar por ele.
+        chave: bool,
+        /// O quadro, em Annex-B.
+        bytes: &'a [u8],
+    },
 }
 
 /// Escoa o que a bomba produz para dentro da conexão que já existe.
@@ -745,6 +790,25 @@ pub async fn escoar(
     tela: ScreenId,
     fonte: ScreenSource,
     eventos: &mut canal::Receiver<EventoDaBomba>,
+) -> Result<Contagem, ErroDeTela> {
+    escoar_com_espelho(conexao, tela, fonte, eventos, |_| {}).await
+}
+
+/// [`escoar`], com alguém olhando o que passa. Ver [`EspelhoDaTela`].
+///
+/// O espelho é chamado **depois** de o byte ir para o fluxo, e nunca antes:
+/// mostrar a quem transmite um quadro que a rede recusou seria a única tela da
+/// sala mentindo, e ela é justamente a de quem tem de decidir se para.
+///
+/// # Errors
+///
+/// As mesmas de [`escoar`].
+pub async fn escoar_com_espelho(
+    conexao: &quinn::Connection,
+    tela: ScreenId,
+    fonte: ScreenSource,
+    eventos: &mut canal::Receiver<EventoDaBomba>,
+    mut espelho: impl FnMut(EspelhoDaTela<'_>),
 ) -> Result<Contagem, ErroDeTela> {
     let mut transmissao: Option<Transmissao> = None;
     let mut geracao = 0_u64;
@@ -777,6 +841,10 @@ pub async fn escoar(
                     Some(Transmissao::abrir(conexao, cabecalho, teto_bps, Instant::now()).await?);
                 geracao = nova;
                 contagem.fluxos += 1;
+                espelho(EspelhoDaTela::Abriu {
+                    largura: cabecalho.width,
+                    altura: cabecalho.height,
+                });
             }
             EventoDaBomba::Teto { teto_bps } => {
                 if let Some(viva) = transmissao.as_mut() {
@@ -790,8 +858,19 @@ pub async fn escoar(
                     continue;
                 }
                 if let Some(viva) = transmissao.as_mut() {
-                    viva.enviar_quadro(&quadro.bytes, quadro.chave, Instant::now())
+                    let envio = viva
+                        .enviar_quadro(&quadro.bytes, quadro.chave, Instant::now())
                         .await?;
+                    // Só o que de fato saiu. Um quadro descartado pelo teto não
+                    // chega a ninguém, e ver no próprio espelho um quadro que a
+                    // sala não recebeu é o tipo de mentira que faz alguém
+                    // concluir que está tudo bem enquanto ninguém vê nada.
+                    if !matches!(envio, crate::tela::Envio::Descartado(_)) {
+                        espelho(EspelhoDaTela::Quadro {
+                            chave: quadro.chave,
+                            bytes: &quadro.bytes,
+                        });
+                    }
                 }
             }
             // §3.2: quem para é o vídeo. O fluxo fecha e a sala fica sabendo
