@@ -28,9 +28,7 @@
 use std::sync::mpsc;
 use std::time::Duration;
 
-use windows_capture::capture::{
-    CaptureControlError, Context, GraphicsCaptureApiHandler,
-};
+use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
 use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::{GraphicsCaptureApi, InternalCaptureControl};
 use windows_capture::monitor::Monitor;
@@ -66,6 +64,23 @@ impl GraphicsCaptureApiHandler for PrimeiroQuadro {
 }
 
 fn main() {
+    // O controle, e ele é o que separa uma resposta de um palpite.
+    //
+    // Rodar isto por SSH não dá uma sessão gráfica de verdade, e a WGC precisa
+    // de uma: sem estação de janelas ela recusa **qualquer** captura, com ou
+    // sem borda. Se a versão com borda falhar igual, a falha é do ambiente e
+    // não da permissão — e concluir «não dá para tirar a borda» a partir dela
+    // seria o mesmo erro que este spike existe para consertar.
+    //
+    // `com-borda` roda o controle; sem argumento, roda a pergunta.
+    let controle_apenas = std::env::args().nth(1).as_deref() == Some("com-borda");
+    let borda = if controle_apenas {
+        println!("0. CONTROLE: pedindo a borda padrão, para ver se o ambiente deixa capturar");
+        DrawBorderSettings::Default
+    } else {
+        DrawBorderSettings::WithoutBorder
+    };
+
     println!(
         "1. a propriedade IsBorderRequired existe neste Windows: {:?}",
         GraphicsCaptureApi::is_border_settings_supported()
@@ -83,8 +98,7 @@ fn main() {
     let ajustes = Settings::new(
         monitor,
         CursorCaptureSettings::WithCursor,
-        // O que este spike existe para exercitar.
-        DrawBorderSettings::WithoutBorder,
+        borda,
         SecondaryWindowSettings::Default,
         MinimumUpdateIntervalSettings::Default,
         DirtyRegionSettings::Default,
@@ -98,19 +112,29 @@ fn main() {
         Ok(controle) => controle,
         Err(erro) => {
             println!("2. a captura NÃO começou: {erro:?}");
-            println!(
-                "3. VEREDITO: a borda NÃO pode ser desligada aqui. Pedir \
-                 WithoutBorder troca a borda por um botão que falha."
-            );
+            if controle_apenas {
+                println!(
+                    "3. INCONCLUSIVO: nem com a borda padrão este ambiente captura. \
+                     A falha é da sessão gráfica, e não da permissão da borda — \
+                     rode isto na máquina, com alguém logado na tela."
+                );
+            } else {
+                println!(
+                    "3. VEREDITO: a borda NÃO pode ser desligada aqui — **se** o \
+                     controle (`com-borda`) tiver capturado. Se ele falhar igual, \
+                     isto aqui não diz nada."
+                );
+            }
             return;
         }
     };
     println!("2. a captura começou sem reclamar de permissão");
 
     let chegou = espera.recv_timeout(Duration::from_secs(10)).is_ok();
-    match controle.stop() {
-        Ok(()) | Err(CaptureControlError::AlreadyStopped) => {}
-        Err(erro) => println!("   (ao parar: {erro:?})"),
+    // O `on_frame_arrived` já mandou parar, então este `stop` quase sempre
+    // encontra a thread encerrada. Reclamar disso seria ruído.
+    if let Err(erro) = controle.stop() {
+        println!("   (ao parar: {erro:?})");
     }
 
     if chegou {
