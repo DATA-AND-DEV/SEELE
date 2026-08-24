@@ -838,6 +838,54 @@ fn regras_do_icone_do_dogma() -> RegrasDoIcone {
     }
 }
 
+/// O que oferecer a quem clicou em compartilhar e não tem o módulo de vídeo.
+///
+/// `None` quando não há o que oferecer: o módulo já está lá, ou este sistema
+/// não tem um publicado. A casca não mostra a caixa nos dois casos.
+#[tauri::command]
+fn modulo_de_video_a_baixar(app: AppHandle) -> Option<seele_ffi::ModuloAOferecer> {
+    seele_ffi::modulo_de_video_a_baixar(&config_dir(&app))
+}
+
+/// Busca o módulo do Cisco e o instala, depois de a pessoa ter dito que sim.
+///
+/// **Só é chamado por um clique.** Nada aqui roda sozinho no arranque: baixar
+/// um megabyte da rede é uma coisa que se pede, e o ADR 0026 já fixou essa
+/// postura para o atualizador — que é, aliás, quem põe o `reqwest` nesta árvore,
+/// então este comando não custa dependência nenhuma nova.
+///
+/// A conferência do hash não está aqui, e é de propósito: ela é do
+/// `seele-video`, que é quem fixou o número, e assim ela é testável sem rede.
+/// Esta função faz a única parte que não dá para testar sem rede — pedir os
+/// bytes — e entrega o resto para quem sabe recusá-los.
+#[tauri::command]
+async fn baixar_modulo_de_video(app: AppHandle) -> Result<String, seele_ffi::PlugError> {
+    let pasta = config_dir(&app);
+    let Some(oferta) = seele_ffi::modulo_de_video_a_baixar(&pasta) else {
+        // Já está instalado, ou não existe para este sistema. Nos dois casos não
+        // há nada a buscar, e devolver erro seria pior: quem clicou duas vezes
+        // veria uma falha por ter conseguido.
+        return Ok(pasta);
+    };
+
+    let resposta = reqwest::get(&oferta.url).await.map_err(|erro| {
+        tracing::warn!(%erro, url = %oferta.url, "não consegui pedir o módulo de vídeo");
+        seele_ffi::PlugError::ScreenModuleRefused
+    })?;
+    if !resposta.status().is_success() {
+        tracing::warn!(status = %resposta.status(), url = %oferta.url, "a origem do módulo recusou");
+        return Err(seele_ffi::PlugError::ScreenModuleRefused);
+    }
+    let bytes = resposta.bytes().await.map_err(|erro| {
+        tracing::warn!(%erro, "o download do módulo de vídeo não completou");
+        seele_ffi::PlugError::ScreenModuleRefused
+    })?;
+
+    let caminho = seele_ffi::instalar_modulo_de_video(&pasta, &bytes)?;
+    tracing::info!(caminho, "o módulo de vídeo está instalado");
+    Ok(caminho)
+}
+
 /// Quanto pesa e quão grande é a imagem que o Dogma aceita.
 #[derive(Debug, Clone, Copy, serde::Serialize)]
 struct RegrasDoIcone {
@@ -2033,6 +2081,17 @@ fn main() {
 
     // A window that cannot open is not a case with a graceful path: there is
     // nowhere left to show the reason. It goes to the log and to the exit code.
+    // Qual criptografia o `reqwest` usa, dito de fora.
+    //
+    // O `rustls` desta árvore é compilado sem provedor embutido de propósito
+    // (ver `Cargo.toml`): a alternativa punha uma segunda pilha, em C, ao lado
+    // do `ring` que já está aqui. O preço é esta linha, e ela precisa vir antes
+    // do primeiro cliente HTTP existir.
+    //
+    // `Err` significa que alguém já instalou um — o atualizador, provavelmente —
+    // e nesse caso está feito, que era o objetivo.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let started = tauri::Builder::default()
         // O atualizador. Registrado sempre, inclusive num build sem chave: o
         // plugin não fala com a rede por conta própria — quem o aciona são os
@@ -2090,6 +2149,8 @@ fn main() {
             renomear_linha,
             renomear_dogma,
             regras_do_icone_do_dogma,
+            modulo_de_video_a_baixar,
+            baixar_modulo_de_video,
             escolher_icone_do_dogma,
             tirar_icone_do_dogma,
             icone_do_dogma,

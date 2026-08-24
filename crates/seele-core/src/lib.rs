@@ -85,7 +85,7 @@ pub use video::{
 /// produto moram é decisão da casca, não desta biblioteca.
 pub use seele_video::codec::{Cadencia, Resolucao};
 pub use seele_video::modulo::{
-    procurar_em as procurar_modulo_de_video,
+    instalar_em as instalar_modulo_de_video, procurar_em as procurar_modulo_de_video,
     publicado_para_este_sistema as modulo_de_video_publicado, ModuloPublicado,
 };
 pub use seele_video::{BibliotecaDeVideo, ErroDeVideo};

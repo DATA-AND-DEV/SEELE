@@ -2669,6 +2669,28 @@
         <button id="compartilhar-pedir" class="botao" type="button" hidden>PEDIR AO SISTEMA</button>
       </div>
 
+      <!--
+        O módulo de vídeo, quando ele falta.
+        
+        Fica **acima** da lista de telas de propósito: sem ele nada do que está
+        embaixo funciona, e uma pessoa que escolhe um monitor primeiro e só
+        depois descobre que falta um arquivo fez uma escolha à toa.
+
+        A caixa diz tamanho, origem e motivo porque é com isso que se consente.
+        «Baixar um componente» não é uma pergunta que dê para responder.
+      -->
+      <div id="compartilhar-modulo" class="compartilhar-modulo" hidden>
+        <p class="compartilhar-modulo-diz">FALTA O MÓDULO DE VÍDEO.</p>
+        <p class="nota">
+          O codec que comprime a imagem não vem dentro do SEELE: a licença dele
+          não deixa. É preciso buscá-lo no site do Cisco, uma vez só — depois
+          ele fica nesta máquina e não é baixado de novo, nem quando o SEELE
+          atualizar.
+        </p>
+        <p id="compartilhar-modulo-onde" class="compartilhar-modulo-onde"></p>
+        <button id="compartilhar-baixar" class="botao" type="button">BAIXAR O MÓDULO</button>
+      </div>
+
       <div class="compartilhar-escolha">
         <p class="rotulo">O QUE MOSTRAR</p>
         <p id="compartilhar-sem-fonte" class="compartilhar-vazio" hidden></p>

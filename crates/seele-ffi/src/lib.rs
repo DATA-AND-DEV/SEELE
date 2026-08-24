@@ -2234,6 +2234,67 @@ fn pastas_do_modulo() -> Vec<std::path::PathBuf> {
     pastas
 }
 
+/// O que a casca precisa dizer a quem vai decidir se baixa o módulo.
+///
+/// Uma pessoa não consente com «baixar um componente»; ela consente com um
+/// tamanho, uma origem e um motivo. Os três campos são isso, e nenhum deles é
+/// texto de interface: a frase é da casca, e estes são os números que ela põe
+/// dentro dela.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ModuloAOferecer {
+    /// De onde vem, inteiro. É do Cisco, e quem lê tem direito de ver isso.
+    pub url: String,
+    /// Quantos bytes viajam.
+    pub bytes: u64,
+    /// Como o arquivo se chama depois de instalado.
+    pub nome: String,
+    /// Onde ele vai ficar. A pasta de configuração, não o pacote — é o que faz
+    /// isto acontecer uma vez, e não a cada atualização.
+    pub pasta: String,
+}
+
+/// O módulo que falta, se é que falta e se é que existe para este sistema.
+///
+/// `None` nos dois casos em que não há botão a oferecer: o módulo já está em
+/// disco, ou este sistema não tem módulo publicado (Linux, e Mac Intel, por
+/// enquanto). A casca não precisa distinguir os dois — nos dois ela não mostra
+/// a caixa.
+#[must_use]
+pub fn modulo_de_video_a_baixar(pasta: &str) -> Option<ModuloAOferecer> {
+    let pastas = pastas_do_modulo();
+    if seele_core::procurar_modulo_de_video(&pastas).is_ok() {
+        return None;
+    }
+    let publicado = seele_core::modulo_de_video_publicado()?;
+    Some(ModuloAOferecer {
+        url: publicado.url(),
+        bytes: publicado.bytes_comprimido,
+        nome: publicado.nome_em_disco.to_owned(),
+        pasta: pasta.to_owned(),
+    })
+}
+
+/// Instala o módulo a partir dos bytes comprimidos que a casca buscou.
+///
+/// **A rede não passa por aqui.** Quem busca é a casca gráfica, que já tem
+/// cliente HTTP na árvore por causa do atualizador; somar um segundo aqui seria
+/// pagar duas vezes pela mesma coisa. O que é desta camada é o que vem depois
+/// dos bytes: conferir o hash fixado, expandir, gravar atômico.
+///
+/// # Errors
+///
+/// [`PlugError::ScreenModuleRefused`] se os bytes não são os fixados, se o bz2
+/// não abre ou se a pasta não aceita o arquivo. Os três dizem a mesma coisa a
+/// quem clicou — «não deu, tente de novo» — e o que separa os três está no log.
+pub fn instalar_modulo_de_video(pasta: &str, comprimido: &[u8]) -> Result<String, PlugError> {
+    seele_core::instalar_modulo_de_video(std::path::Path::new(pasta), comprimido)
+        .map(|caminho| caminho.display().to_string())
+        .map_err(|erro| {
+            tracing::warn!(%erro, pasta, bytes = comprimido.len(), "o módulo de vídeo não instalou");
+            PlugError::ScreenModuleRefused
+        })
+}
+
 /// O módulo do Cisco, achado e carregado.
 ///
 /// **O produto não vem com codec, e é a licença que impõe isso** — o módulo do

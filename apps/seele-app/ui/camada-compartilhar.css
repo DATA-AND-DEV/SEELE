@@ -135,6 +135,45 @@
   color: var(--seele-laranja-nerv);
 }
 
+/* ---------- o módulo que falta ---------- */
+
+/*
+ * A mesma moldura do bloco de permissão, e é de propósito: os dois dizem «falta
+ * uma coisa antes de isto funcionar», e dar duas aparências à mesma categoria
+ * de recado ensina a lê-los como coisas diferentes.
+ */
+.compartilhar-modulo {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border: var(--seele-b) solid var(--seele-laranja-nerv);
+  background: var(--seele-laranja-carga);
+}
+
+.compartilhar-modulo-diz {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: var(--seele-t-secao);
+  letter-spacing: var(--seele-tracking-cartela);
+  color: var(--seele-laranja-nerv);
+}
+
+/*
+ * A origem e o tamanho, em monoespaçada: é um endereço, e endereço se confere
+ * caractere a caractere. `break-all` porque a URL não cabe na largura da caixa
+ * e uma URL cortada com reticências é a que ninguém consegue conferir.
+ */
+.compartilhar-modulo-onde {
+  margin: 0;
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-nota);
+  line-height: 1.5;
+  color: var(--seele-osso);
+  word-break: break-all;
+}
+
 /* ---------- a lista de fontes ---------- */
 
 .compartilhar-escolha {

@@ -37,6 +37,15 @@ shiguredo_openh264 = "2026.2.0"
 # conferido»). Não acrescenta nada à árvore: `seele-proto` já depende dele, na
 # mesma versão.
 sha2 = "0.11.0"
+# Para expandir o `.bz2` que o Cisco publica — é assim que o arquivo é servido,
+# e não há versão crua para baixar em vez dele.
+#
+# O `default` deste crate é `libbz2-rs-sys`, a porta em Rust dos mesmos que
+# fizeram o `zlib-rs`: **não compila C**, o que importa aqui porque o
+# `shiguredo_openh264` já cobra `git`, rede e `libclang` de quem compila, e
+# somar um toolchain de C a essa conta era o custo que o §2 recusou por escrito
+# quando pesou nasm mais CMake.
+bzip2 = "0.6.1"
 
 # ---- captura, uma por sistema ----
 #

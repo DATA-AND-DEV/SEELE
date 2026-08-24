@@ -1322,6 +1322,15 @@ pub enum PlugError {
     /// Quem lê a frase errada conclui que o recurso não existe e para de
     /// tentar. Quem lê esta sabe que falta um megabyte e o que fazer com isso.
     ScreenModuleMissing,
+    /// O download veio, e o módulo não ficou em disco.
+    ///
+    /// Hash que não bate, bz2 que não abre, pasta que não aceita gravação. São
+    /// três causas e uma frase só, porque a ação de quem clicou é a mesma nas
+    /// três — tentar de novo — e o que as separa está no log de quem depura.
+    ///
+    /// Um hash que não bate quase nunca é corrupção: é uma página de erro de
+    /// proxy chegando no lugar do arquivo.
+    ScreenModuleRefused,
 }
 
 impl std::fmt::Display for PlugError {

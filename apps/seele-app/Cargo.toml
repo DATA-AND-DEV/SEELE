@@ -42,6 +42,33 @@ tauri-plugin-updater = { version = "2.10", default-features = false, features = 
     "rustls-tls",
     "zip",
 ] }
+# Para buscar o módulo do OpenH264, uma vez, quando a pessoa pede.
+#
+# **A versão é a do `tauri-plugin-updater` acima, e isso não é coincidência**:
+# declarar `0.12` resolvia e punha uma segunda cópia do `reqwest` na árvore, com
+# a sua própria pilha de TLS junto. O `deny.toml` avisa sobre versões múltiplas e
+# eu não teria notado sem olhar o `Cargo.lock` — daí este comentário, para quem
+# for atualizar: se o plugin pular de minor, este número pula junto.
+#
+# O nome da feature também mudou entre as duas: aqui é `rustls`, não
+# `rustls-tls`. Nada de OpenSSL nos dois casos, que é o que o `deny.toml` quer.
+# `rustls-no-provider` e não `rustls`: o segundo escolhe o `aws-lc-rs`, que
+# compila C e assembly, e a árvore já tem o `ring` — que é o que o próprio
+# atualizador usa. Ligar o outro poria duas pilhas de criptografia no binário e
+# um toolchain de C na conta de quem compila para Windows.
+#
+# O preço de «no-provider» é que alguém precisa dizer qual é: `main` instala o
+# `ring` como padrão do processo, e o comentário lá explica por que ali.
+#
+# Sem `system-proxy`, e a razão é paridade e não economia: quatro crates, e o
+# atualizador — que baixa desta mesma máquina, pela mesma rede — não o liga. Se
+# um proxy corporativo impede um, impede o outro, e o conserto é dos dois juntos.
+reqwest = { version = "0.13", default-features = false, features = [
+    "rustls-no-provider",
+] }
+# Só para nomear o provedor de criptografia acima. Zero na árvore: o
+# `tauri-plugin-updater` já o traz, nesta versão.
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 

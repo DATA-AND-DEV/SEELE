@@ -475,6 +475,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bzip2"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3a53fac24f34a81bc9954b5d6cfce0c21e18ec6959f44f56e8e90e4bb7c346c"
+dependencies = [
+ "libbz2-rs-sys",
+]
+
+[[package]]
 name = "cairo-rs"
 version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2731,6 +2740,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "libbz2-rs-sys"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34b357333733e8260735ba5894eb928c02ecc69c78715f01a8019e7fa7f2db4c"
+
+[[package]]
 name = "libc"
 version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4705,6 +4720,8 @@ name = "seele-app"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "reqwest",
+ "rustls",
  "seele-ffi",
  "seele-server",
  "serde",
@@ -4763,6 +4780,7 @@ dependencies = [
  "rustls",
  "seele-audio",
  "seele-proto",
+ "seele-video",
  "serde",
  "socket2",
  "thiserror 2.0.19",
@@ -4846,6 +4864,7 @@ dependencies = [
 name = "seele-video"
 version = "0.0.0"
 dependencies = [
+ "bzip2",
  "core-graphics",
  "screencapturekit",
  "sha2 0.11.0",

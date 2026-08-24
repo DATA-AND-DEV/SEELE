@@ -183,6 +183,7 @@ const PERMISSAO_DE_TELA = {
 async function desenharCompartilhar() {
   const permissao = await conferirPermissaoDeTela();
   desenharPermissaoDeTela(permissao);
+  await desenharModuloDeTela();
 
   let fontes = [];
   let listou = true;
@@ -201,6 +202,30 @@ async function desenharCompartilhar() {
     if (falha !== "NotConnected") console.warn("snapshot:", falha);
   }
   desenharBotoesDeTela(snapshot);
+}
+
+/**
+ * O bloco do módulo de vídeo, ou nada quando não há o que baixar.
+ *
+ * `null` cobre os dois casos em que não há oferta a fazer — já está instalado, e
+ * este sistema não tem módulo publicado. A caixa some nos dois, e é o certo:
+ * quem está no Linux não ganha nada vendo um botão que não tem o que buscar.
+ */
+async function desenharModuloDeTela() {
+  const bloco = $("compartilhar-modulo");
+  let oferta = null;
+  try {
+    oferta = await invoke("modulo_de_video_a_baixar");
+  } catch (falha) {
+    console.warn("modulo_de_video_a_baixar:", falha);
+  }
+  bloco.hidden = !oferta;
+  if (!oferta) return;
+
+  // O tamanho arredondado, e a origem inteira. Meio megabyte é uma decisão que
+  // se toma sem pensar; «um componente» não é.
+  const mb = (oferta.bytes / (1024 * 1024)).toFixed(1).replace(".", ",");
+  $("compartilhar-modulo-onde").textContent = `${mb} MB — ${oferta.url}`;
 }
 
 /** O bloco da permissão, ou nada quando não há o que dizer sobre ela. */
@@ -406,6 +431,29 @@ $("compartilhar-pedir").addEventListener("click", async () => {
   }
   await desenharCompartilhar();
   await atualizarChamada();
+});
+
+/**
+ * Buscar o módulo, depois de a pessoa ter lido o tamanho e a origem e apertado.
+ *
+ * O botão vira texto durante a busca em vez de sumir: um botão que desaparece ao
+ * ser apertado parece um clique que não pegou, e um megabyte numa conexão ruim
+ * demora o suficiente para alguém apertar de novo.
+ */
+$("compartilhar-baixar").addEventListener("click", async () => {
+  const botao = $("compartilhar-baixar");
+  const antes = botao.textContent;
+  botao.disabled = true;
+  botao.textContent = "BAIXANDO…";
+  erroDeTela = null;
+  try {
+    await invoke("baixar_modulo_de_video");
+  } catch (falha) {
+    mostrarErroDeTela(falha);
+  }
+  botao.disabled = false;
+  botao.textContent = antes;
+  await desenharCompartilhar();
 });
 
 $("compartilhar-comecar").addEventListener("click", async () => {

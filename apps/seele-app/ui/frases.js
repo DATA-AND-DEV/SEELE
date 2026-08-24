@@ -347,6 +347,11 @@ const FRASES = {
     // O módulo do OpenH264 não vem no pacote porque a licença não deixa. A
     // frase diz o tamanho porque um megabyte é uma decisão fácil de tomar, e
     // «baixar algo da internet» sem número é uma difícil.
+    ScreenModuleRefused:
+      "O MÓDULO DE VÍDEO NÃO INSTALOU.\n" +
+      "Ou o download veio quebrado, ou a pasta de configuração não aceitou o arquivo. " +
+      "Tente de novo; se insistir, é a pasta.",
+
     ScreenModuleMissing:
       "FALTA O MÓDULO DE VÍDEO.\n" +
       "Este app captura a tela; o codec que comprime a imagem não vem junto, " +

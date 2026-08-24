@@ -85,6 +85,29 @@ pub enum ErroDeVideo {
         bytes: usize,
     },
 
+    /// Os bytes chegaram inteiros e o disco não os aceitou.
+    ///
+    /// Separado de [`Self::ModuloDeVideoCorrompido`] porque manda fazer outra
+    /// coisa: aquele é «baixe de novo», e este é «a pasta não é gravável».
+    /// Acontece de verdade — pasta somente-leitura, disco cheio, um antivírus
+    /// segurando o arquivo no Windows enquanto ele é escrito.
+    ModuloDeVideoNaoGravou {
+        /// Onde se tentou escrever.
+        caminho: PathBuf,
+        /// O que o sistema disse, cru.
+        motivo: String,
+    },
+
+    /// O arquivo baixado não é um bz2 que se consiga expandir.
+    ///
+    /// O hash do comprimido é conferido antes, então em campo isto quase não
+    /// acontece; existe porque a alternativa seria um `unwrap` num descompressor
+    /// que lê bytes de fora.
+    ModuloDeVideoNaoExpandiu {
+        /// O que o descompressor disse.
+        motivo: String,
+    },
+
     /// O quadro entregue não tem o tamanho que o codificador foi configurado
     /// para receber.
     ///
@@ -150,6 +173,12 @@ impl std::fmt::Display for ErroDeVideo {
                 f,
                 "o módulo de vídeo não confere: esperava {esperado}, veio {encontrado} ({bytes} bytes)"
             ),
+            Self::ModuloDeVideoNaoGravou { caminho, motivo } => {
+                write!(f, "não consegui gravar {}: {motivo}", caminho.display())
+            }
+            Self::ModuloDeVideoNaoExpandiu { motivo } => {
+                write!(f, "não consegui expandir o módulo de vídeo: {motivo}")
+            }
             Self::QuadroDeTamanhoErrado { esperado, recebido } => write!(
                 f,
                 "o codificador foi armado para {}x{} e recebeu {}x{}",

@@ -218,6 +218,78 @@ pub fn procurar_em(pastas: &[PathBuf]) -> Result<PathBuf, ErroDeVideo> {
     })
 }
 
+/// Expande e instala o módulo, a partir dos bytes comprimidos como o Cisco os
+/// serve.
+///
+/// **Não baixa.** Recebe os bytes prontos, e é isso que a mantém testável sem
+/// rede: quem busca é a casca, que já tem cliente HTTP na árvore por causa do
+/// atualizador. Aqui ficam as três coisas que não são de rede — conferir,
+/// expandir, gravar — e a ordem entre elas, que importa.
+///
+/// A escrita é atômica: um arquivo temporário ao lado, e um `rename` no fim. Um
+/// download interrompido no meio deixaria, sem isso, meio módulo em disco com o
+/// nome certo — e a próxima abertura do app carregaria esse meio arquivo em vez
+/// de tentar de novo.
+///
+/// # Errors
+///
+/// [`ErroDeVideo::SistemaSemModuloPublicado`] se não há módulo para este alvo.
+///
+/// [`ErroDeVideo::ModuloDeVideoCorrompido`] se o comprimido ou o expandido não
+/// batem com o hash fixado. Os dois são conferidos, e o do comprimido primeiro:
+/// recusar uma página de erro de proxy antes de gastar CPU descomprimindo.
+///
+/// [`ErroDeVideo::ModuloDeVideoNaoExpandiu`] se o bz2 não abre.
+///
+/// [`ErroDeVideo::ModuloDeVideoNaoGravou`] se a pasta não aceita o arquivo.
+pub fn instalar_em(pasta: &Path, comprimido: &[u8]) -> Result<PathBuf, ErroDeVideo> {
+    let Some(modulo) = publicado_para_este_sistema() else {
+        return Err(ErroDeVideo::SistemaSemModuloPublicado {
+            sistema: std::env::consts::OS,
+            arquitetura: std::env::consts::ARCH,
+        });
+    };
+
+    modulo.conferir_comprimido(comprimido)?;
+
+    let mut expandido = Vec::with_capacity(
+        usize::try_from(modulo.bytes_expandido).unwrap_or(1 << 20),
+    );
+    std::io::Read::read_to_end(
+        &mut bzip2::read::BzDecoder::new(comprimido),
+        &mut expandido,
+    )
+    .map_err(|erro| ErroDeVideo::ModuloDeVideoNaoExpandiu {
+        motivo: erro.to_string(),
+    })?;
+
+    modulo.conferir_expandido(&expandido)?;
+
+    let destino = pasta.join(modulo.nome_em_disco);
+    // O temporário fica **na mesma pasta**, e não em `/tmp`: `rename` só é
+    // atômico dentro de um sistema de arquivos, e a pasta de configuração do
+    // usuário pode estar num volume diferente do temporário do sistema.
+    let a_caminho = pasta.join(format!("{}.a-caminho", modulo.nome_em_disco));
+    let gravar = || -> std::io::Result<()> {
+        std::fs::create_dir_all(pasta)?;
+        std::fs::write(&a_caminho, &expandido)?;
+        // No Windows um `rename` sobre um arquivo existente falha, e no Unix
+        // não. Remover antes é o que dá o mesmo comportamento nos dois — e o
+        // caso é real: reinstalar por cima de um módulo já presente.
+        let _ = std::fs::remove_file(&destino);
+        std::fs::rename(&a_caminho, &destino)
+    };
+    gravar().map_err(|erro| {
+        let _ = std::fs::remove_file(&a_caminho);
+        ErroDeVideo::ModuloDeVideoNaoGravou {
+            caminho: destino.clone(),
+            motivo: erro.to_string(),
+        }
+    })?;
+
+    Ok(destino)
+}
+
 /// O módulo do Cisco, carregado e pronto para dar encoders e decoders.
 ///
 /// É barato de clonar (a biblioteca por baixo é contada por referência) e é
@@ -286,6 +358,92 @@ impl BibliotecaDeVideo {
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    /// Uma pasta temporária desta execução, e só dela.
+    ///
+    /// Sem `tempfile`, que entraria na árvore por causa de dois testes. O nome
+    /// leva o do teste porque `cargo test` roda em paralelo e duas pastas com o
+    /// mesmo nome seriam dois testes escrevendo um no arquivo do outro.
+    fn pasta_de_teste(nome: &str) -> PathBuf {
+        let pasta = std::env::temp_dir().join(format!("seele-modulo-{nome}"));
+        let _ = std::fs::remove_dir_all(&pasta);
+        std::fs::create_dir_all(&pasta).expect("criar a pasta do teste");
+        pasta
+    }
+
+    #[test]
+    fn bytes_que_nao_conferem_nao_chegam_ao_disco() {
+        // **A propriedade que importa nesta função.** O que se baixa vem de
+        // fora, e o hash fixado é a única coisa entre a rede e um `dlopen`
+        // nesta máquina. Um download recusado que ainda assim deixasse o
+        // arquivo no lugar certo seria pior que não conferir nada: a próxima
+        // abertura do app carregaria o arquivo recusado sem perguntar mais.
+        //
+        // O caso real disto não é um atacante — é uma página de erro de proxy
+        // de 900 bytes chegando com status 200 no lugar do módulo.
+        let Some(modulo) = publicado_para_este_sistema() else {
+            // Alvo sem módulo publicado: `instalar_em` recusa antes de olhar os
+            // bytes, e é outro teste.
+            return;
+        };
+        let pasta = pasta_de_teste("recusa");
+
+        let erro = instalar_em(&pasta, b"<html>407 Proxy Authentication Required</html>")
+            .expect_err("bytes que não conferem tinham de ser recusados");
+        assert!(
+            matches!(erro, ErroDeVideo::ModuloDeVideoCorrompido { .. }),
+            "recusou pelo motivo errado: {erro}"
+        );
+
+        assert!(
+            !pasta.join(modulo.nome_em_disco).exists(),
+            "o módulo recusado ficou em disco, e a próxima abertura o carregaria"
+        );
+        // Nem o temporário: um `.a-caminho` esquecido é lixo que ninguém limpa,
+        // e ocupa o nome que a próxima tentativa vai querer.
+        assert!(
+            !pasta
+                .join(format!("{}.a-caminho", modulo.nome_em_disco))
+                .exists(),
+            "sobrou o arquivo temporário de um download recusado"
+        );
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    #[test]
+    fn o_modulo_de_verdade_expande_e_grava() {
+        // A outra metade, e ela não roda sozinha: aponte `SEELE_MODULO_BZ2` para
+        // o `.bz2` publicado deste sistema e ela roda.
+        //
+        // O arquivo não entra no repositório — meio megabyte de binário do Cisco
+        // versionado aqui é exatamente o que a licença nos fez evitar no pacote.
+        // E baixá-lo dentro do teste faria a suíte precisar de rede, que é o
+        // caminho para uma suíte que falha por causa do wi-fi de quem roda.
+        //
+        // Sem o arquivo o teste passa sem fazer nada, e isso é dito no nome do
+        // que ele não fez: quem quiser a prova sabe como pedi-la.
+        let Some(caminho) = std::env::var_os("SEELE_MODULO_BZ2") else {
+            return;
+        };
+        let comprimido = std::fs::read(&caminho).expect("ler o bz2 apontado");
+        let pasta = pasta_de_teste("de-verdade");
+
+        let posto = instalar_em(&pasta, &comprimido).expect("instalar o módulo de verdade");
+        let modulo = publicado_para_este_sistema().expect("este sistema tem módulo publicado");
+        assert_eq!(posto, pasta.join(modulo.nome_em_disco));
+
+        let em_disco = std::fs::read(&posto).expect("ler o que ficou em disco");
+        assert_eq!(
+            em_disco.len() as u64,
+            modulo.bytes_expandido,
+            "o que ficou em disco não tem o tamanho publicado"
+        );
+        // E ele carrega. É a única asserção que prova que o arquivo gravado é
+        // uma biblioteca e não um monte de bytes com o hash certo.
+        BibliotecaDeVideo::carregar(&posto).expect("o módulo instalado tinha de carregar");
+
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
 
     #[test]
     fn os_nomes_publicados_sao_os_que_alguem_conferiu() {
