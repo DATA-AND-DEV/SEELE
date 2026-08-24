@@ -576,6 +576,12 @@ enum Command {
         pedido: Box<seele_core::PedidoDeTela>,
         limites: seele_core::LimitesDeTela,
     },
+    /// Trocar os tetos da transmissão que já está de pé.
+    ///
+    /// Sem caixa: não carrega módulo nem captura, só três números.
+    AdjustScreenLimits {
+        limites: seele_core::LimitesDeTela,
+    },
     StopScreenShare,
     Shutdown,
 }
@@ -1369,6 +1375,23 @@ impl Plug {
             .and_then(|room| room.icon.clone())
     }
 
+    /// Esquece o aviso que está na tela. Ver `seele_core::Room::dispensar_aviso`.
+    ///
+    /// Síncrono e sem passar pelo Dogma: o aviso é desta ponta, e nada do outro
+    /// lado precisa saber que alguém o leu.
+    pub fn dispensar_aviso(&self) {
+        let dispensou = self
+            .shared
+            .room
+            .lock()
+            .is_ok_and(|mut room| room.dispensar_aviso());
+        // Só quando havia: um evento por clique num botão que não fez nada é a
+        // casca redesenhando por educação.
+        if dispensou {
+            self.shared.notify(&Event::TelemetryChanged);
+        }
+    }
+
     /// Asks the Dogma to end a pilot's session — `expulsar`.
     ///
     /// Asks, and reports nothing back, for the same reason [`Plug::create_cage`]
@@ -1852,29 +1875,30 @@ impl Plug {
         self.command(Command::StopScreenShare)
     }
 
-    /// Muda os limites no meio da transmissão, sem cortá-la.
+    /// Muda os tetos no meio da transmissão.
+    ///
+    /// **Recomeça o fluxo quando a resolução ou a cadência mudam**, e não há
+    /// como não recomeçar: o tamanho da imagem vai no cabeçalho de abertura, e
+    /// um fluxo que abriu dizendo 1080p não tem onde dizer «daqui para frente é
+    /// 720p». Quem assiste vê a imagem piscar uma vez. Mexer só na banda não
+    /// pisca nada — ela é uma perna do teto, e o teto se ajusta dentro do fluxo.
+    ///
+    /// Uma escolha idêntica à que já vale não faz nada, e é por isso que apertar
+    /// APLICAR duas vezes seguidas não pisca a tela de ninguém.
     ///
     /// # Errors
     ///
-    /// [`PlugError::ScreenShareUnavailable`], sempre, hoje, e o degrau que falta
-    /// já não é a fiação — é a bomba. `seele_core::Arranjo::escolha_de_resolucao`
-    /// e a cadência são armados quando a thread do codificador nasce e não têm
-    /// ordem que os mexa: `seele_core::Ordem` tem `Teto`, `Chave` e `Parar`, e
-    /// nenhuma delas troca a escolha da pessoa. Só o teto de banda passaria hoje,
-    /// e aceitar um terço de um pedido dizendo `Ok` seria pior que recusá-lo —
-    /// a casca escreveria os três números novos no painel e dois deles seriam
-    /// mentira. Enquanto isso, parar e recomeçar aplica os três.
+    /// [`PlugError::NotConnected`] quando a sessão já acabou.
     pub fn ajustar_limites_da_tela(&self, limites: LimitesDeTela) -> Result<(), PlugError> {
-        tracing::warn!(
-            banda_bps = ?limites.banda_bps,
-            altura_maxima = limites.altura_maxima,
-            quadros_maximos = limites.quadros_maximos,
-            "screen limits were changed, and the pump has no order that carries them"
-        );
-        // Sem guardar, pela mesma razão de `compartilhar_tela`: um teto novo que
-        // aparecesse na coluna do pedido sem ter chegado a codificador nenhum
-        // seria a tela dizendo que o limite pegou.
-        Err(PlugError::ScreenShareUnavailable)
+        // Guardado aqui, e não quando a bomba responder: a coluna «pedido» do
+        // painel é a escolha da pessoa, e ela vale desde o aperto. A coluna de
+        // ao lado — o que está saindo — é que espera o degrau acompanhar, e as
+        // duas juntas são o §5 inteiro: escolher 1080p e receber 720p não é
+        // defeito, esconder que aconteceu é.
+        self.shared.gravar_pedido_da_tela(Some(limites));
+        self.command(Command::AdjustScreenLimits {
+            limites: limites_do_nucleo(limites),
+        })
     }
 
     /// Subscribes to changes.
@@ -3341,6 +3365,11 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
         }
         Command::ShareScreen { pedido, limites } => {
             if client.compartilhar_tela(*pedido, limites).await.is_err() {
+                return false;
+            }
+        }
+        Command::AdjustScreenLimits { limites } => {
+            if client.ajustar_limites_da_tela(limites).await.is_err() {
                 return false;
             }
         }

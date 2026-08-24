@@ -153,6 +153,7 @@ function desenharPalco(snapshot, cage) {
     $("palco-parada").hidden = true;
     $("palco-numeros").hidden = true;
     $("palco-aperto").hidden = true;
+    botaoDeCinema(false);
     return;
   }
 
@@ -176,11 +177,15 @@ function desenharPalco(snapshot, cage) {
     ? `${nomeDaResolucao(tela.altura)} · ${assistindo(tela.espectadores)}`
     : assistindo(tela.espectadores);
 
+  // As duas frases diziam que a imagem não aparecia aqui, e diziam a verdade
+  // até a imagem passar a aparecer. A de quem transmite ainda tem o que
+  // explicar: o que ela vê é o espelho do que saiu, e não a própria tela sendo
+  // redesenhada — a diferença aparece quando um quadro é descartado pelo teto.
   const nota = $("palco-nota");
   nota.hidden = false;
   nota.textContent = tela.e_minha
-    ? "Quem está na sala vê o que você escolheu. Esta janela não redesenha a sua própria tela."
-    : "Esta versão ainda não desenha a imagem aqui: o que se sabe da transmissão está abaixo.";
+    ? "Esta é a imagem que está saindo daqui — a mesma que a sala recebe."
+    : "Duplo clique na imagem para vê-la em tela cheia.";
 
   // O motivo de uma parada chega como **nome** (`TelaEmCurso::parada`), e a
   // frase é escrita aqui, como a de todo enum deste produto. O `??` cobre um
@@ -191,6 +196,7 @@ function desenharPalco(snapshot, cage) {
   parada.textContent = tela.parada ? (PARADAS[tela.parada] ?? "A TELA PAROU") : "";
 
   desenharNumerosDoPalco(tela);
+  botaoDeCinema(true);
 }
 
 /**

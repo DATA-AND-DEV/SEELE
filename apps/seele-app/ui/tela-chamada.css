@@ -835,3 +835,87 @@
   background: var(--seele-negro-absoluto);
   border: var(--seele-b) solid var(--seele-linha);
 }
+
+.chamada-palco-cheia {
+  margin-left: auto;
+  padding: 4px 10px;
+  font-family: var(--seele-display);
+  font-size: var(--seele-t-nota);
+  letter-spacing: var(--seele-tracking-cartela);
+  color: var(--seele-osso);
+  background: transparent;
+  border: var(--seele-b) solid var(--seele-linha-forte);
+  cursor: pointer;
+}
+
+.chamada-palco-cheia:hover,
+.chamada-palco-cheia:focus-visible {
+  color: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
+}
+
+/* ---------- o cinema ---------- */
+
+/*
+ * Tela cheia é um corte na interface, e não um `position: fixed` na imagem.
+ *
+ * A diferença aparece no teclado: uma imagem por cima com o resto ainda no
+ * documento deixa o foco caminhar por botões que ninguém está vendo, e o leitor
+ * de tela lê uma sala inteira que sumiu. Esconder o irmão de cima é o que faz a
+ * tela cheia ser mesmo só a tela.
+ */
+body[data-cinema="sim"] > *:not(#tela-chamada),
+body[data-cinema="sim"] #tela-chamada > *:not(#palco),
+body[data-cinema="sim"] #palco > *:not(.chamada-palco-corpo),
+body[data-cinema="sim"] .chamada-palco-corpo > *:not(#palco-imagem) {
+  display: none !important;
+}
+
+body[data-cinema="sim"] #palco,
+body[data-cinema="sim"] #tela-chamada,
+body[data-cinema="sim"] .chamada-palco-corpo {
+  display: block;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: var(--seele-negro-absoluto);
+  height: 100vh;
+  max-height: 100vh;
+}
+
+body[data-cinema="sim"] #palco-imagem {
+  width: 100vw;
+  height: 100vh;
+  max-height: 100vh;
+  border: none;
+}
+
+/*
+ * A saída, escrita na própria tela.
+ *
+ * Uma janela sem borda e sem menu que engoliu a interface inteira precisa dizer
+ * como se sai dela — senão a resposta de quem não sabe é forçar o fechamento do
+ * app. Some depois de alguns segundos porque ela atrapalha justamente o que a
+ * pessoa entrou aqui para ver.
+ */
+body[data-cinema="sim"]::after {
+  content: "ESC PARA SAIR DA TELA CHEIA";
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  font-family: var(--seele-display);
+  font-size: var(--seele-t-nota);
+  letter-spacing: var(--seele-tracking-cartela);
+  color: var(--seele-osso);
+  background: rgba(5, 4, 3, 0.85);
+  border: var(--seele-b) solid var(--seele-linha-forte);
+  animation: seele-sumir 4s ease-in forwards;
+  pointer-events: none;
+}
+
+@keyframes seele-sumir {
+  0%, 60% { opacity: 1; }
+  100% { opacity: 0; }
+}

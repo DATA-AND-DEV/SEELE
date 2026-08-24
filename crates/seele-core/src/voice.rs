@@ -102,6 +102,27 @@ struct Controls {
     bitrate: AtomicU32,
     speaking: AtomicBool,
     stop: AtomicBool,
+    /// Onde o relógio de mídia desta pessoa está.
+    ///
+    /// # Por que ele mora fora do laço
+    ///
+    /// Porque trocar de microfone abre um caminho de voz **novo** sobre o
+    /// **mesmo** `ssrc` — o servidor recusa qualquer outro (G2) —, e um laço
+    /// novo começava a contar do zero. Do outro lado, o buffer de jitter daquele
+    /// `ssrc` já tocou até um carimbo alto e descarta como atrasado tudo o que
+    /// venha antes dele. O efeito é exato e é cruel: a pessoa troca de microfone
+    /// e a sala inteira para de ouvi-la, sem erro nenhum em lugar nenhum —
+    /// ela está falando, o medidor dela mexe, os quadros saem, e são jogados
+    /// fora na chegada.
+    ///
+    /// Guardado aqui, `Voice::carry_over` o leva para o caminho novo junto com
+    /// o mudo e os ganhos, e o relógio segue de onde parou.
+    ///
+    /// `AtomicU32` para os dois porque não há `AtomicU16` garantido em todo
+    /// alvo; o de sequência é lido de volta como `u16`.
+    relogio_seq: AtomicU32,
+    /// O carimbo de tempo, em amostras. Ver [`Self::relogio_seq`].
+    relogio_carimbo: AtomicU32,
     /// Quadros que a Voice produziu e o transporte recusou.
     ///
     /// Terceira categoria, e ela faltava. `Telemetry` já distingue perda de
@@ -436,6 +457,8 @@ impl Voice {
             bitrate: AtomicU32::new(DEFAULT_BITRATE_BPS),
             speaking: AtomicBool::new(false),
             stop: AtomicBool::new(false),
+            relogio_seq: AtomicU32::new(0),
+            relogio_carimbo: AtomicU32::new(0),
             recusados: std::sync::atomic::AtomicU64::new(0),
             anel_cheio: std::sync::atomic::AtomicU64::new(0),
             gains: Mutex::new(HashMap::new()),
@@ -616,12 +639,54 @@ impl Voice {
         fresh.set_total_isolation(self.total_isolation());
         fresh.set_mode(self.mode());
         fresh.set_key_held(self.controls.key_held.load(Ordering::Relaxed));
+        // O relógio de mídia junto, e é o item cuja falta calava a pessoa. Ver
+        // `Controls::relogio_seq` para o porquê e `salto_do_relogio` para o
+        // tamanho do pulo.
+        let (seq, carimbo) = Self::salto_do_relogio(
+            self.controls.relogio_seq.load(Ordering::Relaxed) as u16,
+            self.controls.relogio_carimbo.load(Ordering::Relaxed),
+        );
+        fresh
+            .controls
+            .relogio_seq
+            .store(u32::from(seq), Ordering::Relaxed);
+        fresh
+            .controls
+            .relogio_carimbo
+            .store(carimbo, Ordering::Relaxed);
         if let Ok(gains) = self.controls.gains.lock() {
             for (talker, gain) in gains.iter() {
                 fresh.set_gain(*talker, *gain);
             }
         }
     }
+
+/// Onde o relógio de mídia recomeça depois de trocar de dispositivo.
+///
+/// # Por que pular, e não só continuar
+///
+/// Porque os dois caminhos existem ao mesmo tempo por um instante: o novo é
+/// aberto **antes** de o velho ser largado, de propósito — um microfone que
+/// sumiu deixa a pessoa falando pelo antigo em vez de muda. Enquanto os dois
+/// vivem, o velho ainda manda quadros com carimbos que crescem, e um caminho
+/// novo que continuasse do último número visto ficaria atrás deles. Quem recebe
+/// descarta o que vem atrás do que já tocou, e a pessoa some de novo — pelo
+/// mesmo defeito, uma volta depois.
+///
+/// Um segundo de folga passa na frente de qualquer coisa que ainda esteja no ar
+/// e custa, a quem escuta, um silêncio de um segundo que **de fato aconteceu**:
+/// abrir um dispositivo de áudio leva esse tempo. O buffer de jitter lê o pulo
+/// como um vão, esconde o que dá e reacerta — que é exatamente o que ele existe
+/// para fazer.
+///
+/// A sequência anda um, e não mil: ela conta o que sai, e quem recebe usa a
+/// diferença entre ela e o carimbo para separar silêncio de perda (M1.9).
+    fn salto_do_relogio(seq: u16, carimbo: u32) -> (u16, u32) {
+    (
+        seq.wrapping_add(1),
+        carimbo.wrapping_add(seele_audio::SAMPLE_RATE_HZ),
+    )
+}
 
     /// Mutes the microphone — A.T. Field.
     pub fn set_at_field(&self, on: bool) {
@@ -738,7 +803,33 @@ struct Source {
     buffer: JitterBuffer<Vec<u8>>,
     drift: DriftTracker,
     decoder: VoiceDecoder,
+    /// Quando chegou o último quadro desta pessoa, no relógio deste laço.
+    ///
+    /// Serve para esquecê-la depois de [`SILENCIO_ATE_ESQUECER_MS`]. Ver ali
+    /// por que esquecer é o certo.
+    ultimo_ms: f64,
 }
+
+/// Quanto silêncio faz uma pessoa ser esquecida por quem escuta.
+///
+/// # Por que esquecer alguém é bom
+///
+/// A tabela de quem fala era um `Vec` que só crescia: uma pessoa que entrou,
+/// falou e saiu ficava lá com um decodificador e um buffer inteiros até a
+/// sessão acabar. Isso era só desperdício.
+///
+/// O que **não** era desperdício é a segunda metade: um buffer velho guarda até
+/// onde aquela pessoa já tocou, e recusa qualquer carimbo anterior a isso. Se o
+/// relógio dela recomeçar por qualquer motivo — o conserto de
+/// `Controls::relogio_seq` cobre o motivo conhecido, e nada garante que era o
+/// único —, a pessoa some para sempre e nem sair e voltar resolve. Esquecê-la
+/// depois de meio minuto calado transforma «para sempre» em «meio minuto».
+///
+/// Meio minuto e não cinco segundos porque o silêncio aqui é normal: o DTX não
+/// manda nada enquanto ninguém fala, então uma pessoa quieta numa reunião fica
+/// sem mandar um quadro por minutos a fio. O preço de esquecer é o buffer
+/// encher de novo na primeira palavra — algumas dezenas de milissegundos.
+const SILENCIO_ATE_ESQUECER_MS: f64 = 30_000.0;
 
 /// The whole loop, on its own thread.
 #[allow(
@@ -785,7 +876,11 @@ async fn pipeline(
     let mut mixed = vec![0.0_f32; FRAME_SAMPLES];
     let mut for_device = Vec::new();
 
-    let (mut seq, mut timestamp) = (0_u16, 0_u32);
+    // De onde o caminho anterior parou, e não de zero. Ver `Controls::relogio_seq`.
+    let (mut seq, mut timestamp) = (
+        controls.relogio_seq.load(Ordering::Relaxed) as u16,
+        controls.relogio_carimbo.load(Ordering::Relaxed),
+    );
     let started = Instant::now();
     // Não é `Instant + 20 ms` somado à mão. Este laço faz outras cinco coisas
     // entre duas conferidas do prazo, e quanto tempo isso custa é do sistema
@@ -817,11 +912,13 @@ async fn pipeline(
                         buffer: JitterBuffer::new(JitterConfig::default()),
                         drift: DriftTracker::new(),
                         decoder,
+                        ultimo_ms: arrival_ms,
                     });
                     sources.len() - 1
                 }
             };
             if let Some(source) = sources.get_mut(index) {
+                source.ultimo_ms = arrival_ms;
                 let sent_ms = f64::from(header.timestamp) / f64::from(SAMPLE_RATE_HZ) * 1000.0;
                 source.drift.observe(arrival_ms - sent_ms, arrival_ms);
                 source
@@ -829,6 +926,10 @@ async fn pipeline(
                     .push(header.seq, header.timestamp, arrival_ms, payload.to_vec());
             }
         }
+
+        // Quem calou faz meio minuto é esquecido. Ver `SILENCIO_ATE_ESQUECER_MS`.
+        let agora_ms = started.elapsed().as_secs_f64() * 1000.0;
+        sources.retain(|fonte| agora_ms - fonte.ultimo_ms < SILENCIO_ATE_ESQUECER_MS);
 
         // ---- capture, encode, send ----
         gate.set_mode(VoiceMode::from_byte(controls.mode.load(Ordering::Relaxed)).to_gate());
@@ -861,6 +962,9 @@ async fn pipeline(
             // out; the sequence counts only what does. That difference is what
             // lets the receiver tell DTX silence from real loss — M1.9.
             timestamp = timestamp.wrapping_add(u32::try_from(FRAME_SAMPLES).unwrap_or(FRAME_MS));
+            controls
+                .relogio_carimbo
+                .store(timestamp, Ordering::Relaxed);
             if !speaking {
                 continue;
             }
@@ -879,6 +983,9 @@ async fn pipeline(
                 continue;
             }
             seq = seq.wrapping_add(1);
+            controls
+                .relogio_seq
+                .store(u32::from(seq), Ordering::Relaxed);
             let header = MediaHeader {
                 version: seele_proto::PROTOCOL_VERSION,
                 // The server refuses anything but the ssrc it assigned — G2.
@@ -1028,6 +1135,75 @@ async fn pipeline(
         }
 
         tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+}
+
+#[cfg(test)]
+mod relogio_de_midia {
+    use super::Voice;
+    use seele_audio::jitter::{JitterBuffer, JitterConfig};
+
+    /// O defeito, escrito como teste antes do conserto.
+    ///
+    /// Trocar de microfone abria um caminho novo sobre o mesmo `ssrc`, e o
+    /// caminho novo contava do zero. Este teste mostra o que acontecia do outro
+    /// lado — e ele não falha por causa do buffer, que está certo: um carimbo
+    /// anterior ao que já tocou **é** atrasado, e descartá-lo é o trabalho dele.
+    /// O erro estava em produzir esse carimbo.
+    #[test]
+    fn um_relogio_que_recomeca_do_zero_e_descartado_inteiro() {
+        let mut buffer = JitterBuffer::new(JitterConfig::default());
+        // Uma conversa que já dura cinco minutos.
+        let inicio = 48_000 * 300_u32;
+        for quadro in 0..40_u32 {
+            buffer.push(
+                quadro as u16,
+                inicio + quadro * 960,
+                f64::from(quadro) * 20.0,
+                vec![1_u8],
+            );
+        }
+        // Toca o suficiente para o buffer sair do enchimento e ter um «próximo».
+        for _ in 0..20 {
+            let _ = buffer.tick();
+        }
+
+        // Agora a pessoa troca de microfone, e o caminho novo começa em zero.
+        let antes = buffer.metrics().late_discards;
+        for quadro in 0..40_u32 {
+            buffer.push(quadro as u16, quadro * 960, 900.0, vec![2_u8]);
+        }
+        assert!(
+            buffer.metrics().late_discards - antes >= 40,
+            "o buffer aceitou carimbos anteriores ao que já tocou; se isto mudar,              o teste de baixo deixa de provar o que prova"
+        );
+    }
+
+    #[test]
+    fn o_salto_passa_na_frente_do_caminho_que_ainda_esta_no_ar() {
+        // O caminho velho não morre no instante em que o novo abre — ele é
+        // largado **depois**, de propósito, para que um microfone que sumiu
+        // deixe a pessoa falando pelo antigo em vez de muda. Enquanto os dois
+        // vivem, o velho continua carimbando para a frente.
+        let (_, carimbo) = Voice::salto_do_relogio(700, 48_000 * 300);
+        // Meio segundo de caminho velho ainda saindo: 25 quadros de 20 ms.
+        let ultimo_do_velho = 48_000 * 300 + 25 * 960;
+        assert!(
+            seele_audio::jitter::ts_delta(carimbo, ultimo_do_velho) > 0,
+            "o caminho novo abriu atrás do velho, e quem escuta descartaria              o novo exatamente como descartava antes"
+        );
+    }
+
+    #[test]
+    fn a_sequencia_anda_um_e_nao_mil() {
+        // Ela conta o que sai, e quem recebe usa a distância entre ela e o
+        // carimbo para separar silêncio de perda (M1.9). Um pulo grande aqui
+        // seria lido como meio segundo de pacotes perdidos que nunca existiram.
+        let (seq, _) = Voice::salto_do_relogio(700, 0);
+        assert_eq!(seq, 701);
+        // E dá a volta sem estourar, que é o caso de uma conversa longa.
+        let (volta, _) = Voice::salto_do_relogio(u16::MAX, 0);
+        assert_eq!(volta, 0);
     }
 }
 

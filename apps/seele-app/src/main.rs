@@ -1215,6 +1215,36 @@ fn ajustar_limites_da_tela(
     session.plug()?.ajustar_limites_da_tela(limites)
 }
 
+/// Põe a janela em tela cheia, ou a tira de lá.
+///
+/// A janela do sistema **e** o corte da interface, e os dois são precisos: sem
+/// a janela sobra a barra de título e a moldura do sistema em volta da imagem;
+/// sem o corte, a interface inteira cresce junto e a tela compartilhada continua
+/// dividindo espaço com o roster e os botões. Quem corta a interface é o CSS,
+/// que responde ao `data-cinema`; esta metade é a janela.
+///
+/// Ignora a falta da janela em vez de reclamar: chamar isto durante o
+/// fechamento não é erro de ninguém.
+#[tauri::command]
+fn tela_cheia(app: AppHandle, ligada: bool) {
+    if let Some(janela) = app.get_webview_window("main") {
+        if let Err(erro) = janela.set_fullscreen(ligada) {
+            tracing::debug!(%erro, ligada, "a janela não trocou de modo");
+        }
+    }
+}
+
+/// Fecha o aviso que está na tela, de verdade.
+///
+/// A janela escondia a caixa por conta própria, e o redesenho — que roda duas
+/// vezes por segundo a partir do `Snapshot` — a trazia de volta. Apagar uma sala
+/// com alguém dentro deixava a janela coberta por um alerta que não fechava.
+#[tauri::command]
+fn dispensar_aviso(session: State<'_, Session>) -> Result<(), PlugError> {
+    session.plug()?.dispensar_aviso();
+    Ok(())
+}
+
 /// Os ajustes desta máquina, ou nada quando o disco não deixa lê-los.
 ///
 /// `Option` e não `Result` porque nenhum chamador tem o que fazer com o motivo:
@@ -2194,6 +2224,8 @@ fn main() {
             compartilhar_tela,
             parar_de_compartilhar,
             ajustar_limites_da_tela,
+            dispensar_aviso,
+            tela_cheia,
             microfones,
             microfone_escolhido,
             escolher_microfone,

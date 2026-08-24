@@ -441,6 +441,25 @@ impl Room {
         self.current_cage = None;
     }
 
+    /// Esquece o aviso que está na tela, porque alguém o leu e o fechou.
+    ///
+    /// # Por que o estado tem de mudar
+    ///
+    /// [`Self::notice`] é uma vaga que guarda a última coisa a dizer, e ela
+    /// ficava cheia para sempre. Uma casca que desenhasse a partir dela e
+    /// fechasse a caixa só do lado dela veria a caixa voltar no redesenho
+    /// seguinte, e o redesenho seguinte vem duas vezes por segundo: o efeito é
+    /// um alerta que não fecha nunca, e foi assim que apagar uma sala com
+    /// alguém dentro deixou a janela inutilizável.
+    ///
+    /// Fechar é uma decisão de quem leu, e uma decisão que não muda estado
+    /// nenhum não é uma decisão.
+    ///
+    /// Devolve `true` quando havia o que dispensar. Idempotente.
+    pub fn dispensar_aviso(&mut self) -> bool {
+        self.notice.take().is_some()
+    }
+
     /// Records that the client is now reading a Line.
     ///
     /// Clears the messages, because a new Line is a new conversation and keeping

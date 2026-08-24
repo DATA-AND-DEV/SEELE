@@ -2434,7 +2434,23 @@ $("criar-linha").addEventListener("submit", (evento) => {
 // saiu, porque duas portas para o mesmo ato numa caixa de 720px é a pessoa
 // procurando qual das duas é a certa. O `id` não mudou junto com a forma — é o
 // mesmo elemento, noutro canto.
-$("banner-fechar").addEventListener("click", () => ($("banner").hidden = true));
+/**
+ * Fecha o alerta, dos dois lados.
+ *
+ * Esconder aqui e mais nada era o bug: `desenharAviso` roda a cada redesenho,
+ * duas vezes por segundo, e reabria a caixa a partir do `Snapshot`, que ainda
+ * trazia o aviso. Apagar uma sala com alguém dentro cobria a janela com um
+ * alerta que voltava mais rápido do que dava para clicar.
+ *
+ * Esconder **antes** de mandar: o comando é uma travessia de ida e volta, e a
+ * caixa tem de sumir no aperto e não no quadro seguinte.
+ */
+function fecharAlerta() {
+  $("banner").hidden = true;
+  invoke("dispensar_aviso").catch((falha) => console.warn("dispensar_aviso:", falha));
+}
+
+$("banner-fechar").addEventListener("click", fecharAlerta);
 // E o mesmo fechamento pela tecla. Com o `×` sozinho, `Escape` deixou de ser
 // conveniência: uma caixa que cobre a janela inteira e só se fecha com o
 // ponteiro é pior que a redundância que ela perdeu. Só com ela na frente, ou a
@@ -2442,7 +2458,7 @@ $("banner-fechar").addEventListener("click", () => ($("banner").hidden = true));
 window.addEventListener("keydown", (evento) => {
   if (evento.key === "Escape" && !$("banner").hidden) {
     evento.preventDefault();
-    $("banner").hidden = true;
+    fecharAlerta();
   }
 });
 $("veredito-fechar").addEventListener("click", () => ($("veredito").hidden = true));

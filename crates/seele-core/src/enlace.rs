@@ -278,6 +278,14 @@ enum Comando {
         fonte: Box<PedidoDeTela>,
         limites: LimitesDeTela,
     },
+    /// Troque os tetos da transmissão que já está de pé.
+    ///
+    /// Sem caixa, ao contrário de [`Self::CompartilharTela`]: aqui não vai
+    /// módulo nem captura, só três números.
+    AjustarLimitesDaTela {
+        /// Os tetos novos, como a pessoa os escolheu.
+        limites: LimitesDeTela,
+    },
     /// Pare de transmitir.
     PararDeCompartilhar,
     Sair,
@@ -1324,6 +1332,16 @@ impl Enlace {
         .await
     }
 
+    /// Troca os tetos de uma transmissão em curso. Ver
+    /// [`Comando::AjustarLimitesDaTela`].
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn ajustar_limites_da_tela(&self, limites: LimitesDeTela) -> Result<(), Fechado> {
+        self.mandar(Comando::AjustarLimitesDaTela { limites }).await
+    }
+
     /// Para de compartilhar.
     ///
     /// Idempotente: parar sem estar compartilhando manda o verbo assim mesmo, e
@@ -1845,6 +1863,30 @@ impl Motor {
             Comando::CompartilharTela { fonte, limites } => {
                 self.tela_pedida = Some((fonte, limites));
                 cliente.start_screen_share().await
+            }
+
+            // Os tetos da pessoa, na transmissão que já existe.
+            //
+            // Sem verbo para o Dogma: os tetos são desta ponta. O que atravessa
+            // a rede é o resultado deles — a resolução no cabeçalho do fluxo
+            // novo —, e não a escolha em si. `TelaEmCurso::pedido` é lido do
+            // que está guardado aqui, e é por isso que ele é escrito antes de a
+            // bomba responder: a coluna «pedido» é a escolha, e ela vale desde
+            // o aperto, mesmo que o degrau demore um quadro a acompanhar.
+            Comando::AjustarLimitesDaTela { limites } => {
+                let Some(viva) = self.tela_viva.as_mut() else {
+                    // Ninguém está transmitindo. Não é erro: é alguém que
+                    // apertou APLICAR na janela um instante depois de a
+                    // transmissão cair sozinha.
+                    return;
+                };
+                viva.limites = limites;
+                let (resolucao, cadencia) = (limites.resolucao, limites.cadencia);
+                viva.bomba.escolha(resolucao, cadencia);
+                // E o teto de novo, porque a banda escolhida é uma das pernas
+                // dele: sem esta linha, mexer só na banda não mudaria nada.
+                self.reconferir_o_teto();
+                return;
             }
 
             // A bomba morre aqui, e não quando o `ScreenShareStopped` voltar:

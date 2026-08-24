@@ -174,6 +174,76 @@ function fecharImagemDaTela() {
   }
 }
 
+// ------------------------------------------------------------------ cinema
+
+/**
+ * Se a janela está em tela cheia.
+ *
+ * Guardado aqui e não lido do `document`: quem manda é a janela do sistema, e
+ * `document.fullscreenElement` fica `null` numa janela que o Tauri pôs em tela
+ * cheia — são dois mecanismos diferentes, e ler o errado faria o botão dizer o
+ * contrário do que está acontecendo.
+ */
+let noCinema = false;
+
+/** Entra ou sai da tela cheia, nos dois lados. */
+async function trocarCinema(ligada) {
+  noCinema = ligada;
+  if (ligada) {
+    document.body.dataset.cinema = "sim";
+  } else {
+    delete document.body.dataset.cinema;
+  }
+  const botao = $("palco-cheia");
+  if (botao) botao.textContent = ligada ? "SAIR DA TELA CHEIA" : "TELA CHEIA";
+  try {
+    await invoke("tela_cheia", { ligada });
+  } catch (falha) {
+    console.warn("tela_cheia:", falha);
+  }
+}
+
+/**
+ * Mostra ou esconde o botão, conforme haja imagem.
+ *
+ * Chamado de `desenharPalco`: é ele que sabe se há transmissão, e duplicar essa
+ * decisão aqui daria duas respostas para a mesma pergunta.
+ */
+function botaoDeCinema(temImagem) {
+  const botao = $("palco-cheia");
+  if (!botao) return;
+  botao.hidden = !temImagem;
+  // A transmissão acabou enquanto alguém assistia em tela cheia: sair sozinho,
+  // porque o que sobra é uma janela preta sem nada dizendo como voltar.
+  if (!temImagem && noCinema) {
+    trocarCinema(false).catch((falha) => console.warn("sair do cinema:", falha));
+  }
+}
+
+$("palco-cheia").addEventListener("click", () => {
+  trocarCinema(!noCinema).catch((falha) => console.warn("cinema:", falha));
+});
+
+// Duplo clique na imagem, que é o gesto que todo mundo já tem no dedo.
+$("palco-imagem").addEventListener("dblclick", () => {
+  trocarCinema(!noCinema).catch((falha) => console.warn("cinema:", falha));
+});
+
+// `Escape` sai, e **antes** de qualquer outro ouvinte de `Escape` desta janela:
+// em tela cheia não há nenhuma outra coisa aberta para a tecla fechar, e a
+// alternativa era a pessoa apertar Esc e ver uma busca fechar atrás de uma
+// imagem que continua cobrindo tudo.
+window.addEventListener(
+  "keydown",
+  (evento) => {
+    if (evento.key !== "Escape" || !noCinema) return;
+    evento.preventDefault();
+    evento.stopPropagation();
+    trocarCinema(false).catch((falha) => console.warn("sair do cinema:", falha));
+  },
+  true,
+);
+
 listen("seele://event", (evento) => {
   const carga = evento.payload;
   if (!carga || typeof carga !== "object") return;

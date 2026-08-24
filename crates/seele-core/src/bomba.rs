@@ -127,6 +127,24 @@ pub enum Ordem {
     /// Sob demanda e nunca periódico: um quadro-chave de 1080p custa 65 KiB,
     /// quatro vezes um quadro comum, que são 446 ms do orçamento de 1200 kbps.
     Chave,
+    /// A pessoa mexeu nos próprios tetos (§5).
+    ///
+    /// Separada de [`Self::Teto`] porque as duas mexem em coisas diferentes e
+    /// por motivos diferentes: aquela é a medida — o que a rede e a voz
+    /// permitem agora — e esta é a escolha, que é teto e nunca piso. Quem as
+    /// juntasse numa só faria a próxima medida apagar a escolha da pessoa, ou o
+    /// contrário.
+    ///
+    /// **Recomeça o fluxo.** Uma resolução nova pede um cabeçalho novo, e o
+    /// cabeçalho vai na abertura: não há como dizer «daqui para frente é 720p»
+    /// dentro de um fluxo que abriu dizendo 1080p. Quem assiste vê a imagem
+    /// piscar uma vez, e é o preço honesto de trocar de tamanho.
+    Escolha {
+        /// A altura máxima escolhida.
+        resolucao: Resolucao,
+        /// A cadência máxima escolhida.
+        cadencia: Cadencia,
+    },
     /// A pessoa apertou parar.
     Parar,
 }
@@ -237,6 +255,18 @@ impl Bomba {
     /// coisa que o `Fim` que já saiu pelo canal de eventos disse.
     pub fn teto(&self, teto: TetoDeVideo, faixa: SyncBand) -> bool {
         self.ordens.send(Ordem::Teto { teto, faixa }).is_ok()
+    }
+
+    /// Diz que a pessoa mexeu nos próprios tetos. Ver [`Ordem::Escolha`].
+    ///
+    /// Devolve `false` quando a thread já acabou, como [`Self::teto`].
+    pub fn escolha(&self, resolucao: Resolucao, cadencia: Cadencia) -> bool {
+        self.ordens
+            .send(Ordem::Escolha {
+                resolucao,
+                cadencia,
+            })
+            .is_ok()
     }
 
     /// Pede um quadro-chave (§3.3).
@@ -515,6 +545,27 @@ impl<C: Captura> Laco<C> {
                 self.arranjo.teto = teto;
                 self.arranjo.faixa = faixa;
                 self.teto_andou()?;
+                Ok(Andamento::Segue)
+            }
+            Ordem::Escolha {
+                resolucao,
+                cadencia,
+            } => {
+                // Nada a fazer quando a escolha é a que já vale: rearmar
+                // recomeçaria o fluxo, e a imagem de todo mundo piscaria porque
+                // alguém apertou APLICAR sem ter mexido em nada.
+                if self.arranjo.escolha_de_resolucao == resolucao
+                    && self.arranjo.cadencia == cadencia
+                {
+                    return Ok(Andamento::Segue);
+                }
+                self.arranjo.escolha_de_resolucao = resolucao;
+                self.arranjo.cadencia = cadencia;
+                // `armar` e não `teto_andou`: a escolha entra na conta lá
+                // dentro, junto com o teto medido, e é ela que decide o degrau.
+                // O `Compartilhamento` de agora foi construído com a escolha
+                // velha e não sabe reconsiderá-la.
+                self.armar()?;
                 Ok(Andamento::Segue)
             }
         }
@@ -1230,6 +1281,72 @@ mod tests {
             }
         }
         assert!(vistos > 0, "nenhum quadro saiu depois de trocar de degrau");
+        bomba.parar();
+    }
+
+    #[test]
+    fn a_escolha_da_pessoa_troca_o_degrau_e_a_mesma_escolha_nao_troca_nada() {
+        // Até a 0.7.14 este botão respondia erro. A bomba não tinha ordem que
+        // trocasse a escolha da pessoa — `Ordem` era `Teto`, `Chave` e `Parar`
+        // —, e a ponte preferiu recusar a aceitar um terço do pedido e escrever
+        // os três números no painel como se todos tivessem pegado.
+        let Some(biblioteca) = biblioteca() else {
+            return;
+        };
+        // Fibra de sobra, e uma pessoa só: assim o degrau é decidido pela
+        // escolha e não pelo teto, que é justamente o que este teste mede.
+        let fibra = TetoDeVideo::com_caminho(20_000_000)
+            .com_caminho_de_quem_hospeda(20_000_000)
+            .com_espectadores(1);
+        let captura = CapturaDeMentira::default();
+        let (bomba, mut eventos) = ligar(
+            biblioteca,
+            captura.clone(),
+            arranjo(fibra, SyncBand::Nominal, Resolucao::P1080),
+            || {},
+        )
+        .expect("criar a thread da tela");
+
+        let Some(EventoDaBomba::Fluxo { resolucao, .. }) = esperar(&mut eventos) else {
+            panic!("a bomba não abriu o primeiro fluxo");
+        };
+        assert_eq!(resolucao, Resolucao::P1080);
+
+        // A pessoa baixa o próprio teto para 720p.
+        assert!(bomba.escolha(Resolucao::P720, Cadencia::Q30));
+        let Some(EventoDaBomba::Fluxo {
+            geracao, resolucao, ..
+        }) = esperar_controle(&mut eventos)
+        else {
+            panic!("a escolha não abriu fluxo novo");
+        };
+        assert_eq!(resolucao, Resolucao::P720, "a escolha não pegou");
+        assert_eq!(geracao, 2, "o fluxo tinha de recomeçar: o tamanho vai no cabeçalho");
+        assert_eq!(
+            captura.inicios(),
+            vec![(1920, 1080), (1280, 720)],
+            "a captura tinha de recomeçar no degrau novo"
+        );
+
+        // E a mesma escolha de novo não faz nada. Sem esta guarda, apertar
+        // APLICAR duas vezes piscaria a imagem de todo mundo da sala por causa
+        // de um clique que não mudou nada.
+        assert!(bomba.escolha(Resolucao::P720, Cadencia::Q30));
+        let mut fluxos = 0_u32;
+        for _ in 0..12 {
+            match esperar(&mut eventos) {
+                Some(EventoDaBomba::Fluxo { .. }) => fluxos += 1,
+                Some(_) => {}
+                None => break,
+            }
+        }
+        assert_eq!(fluxos, 0, "a mesma escolha recomeçou o fluxo à toa");
+        assert_eq!(
+            captura.inicios().len(),
+            2,
+            "a captura recomeçou por causa de uma escolha que não mudou"
+        );
+
         bomba.parar();
     }
 
