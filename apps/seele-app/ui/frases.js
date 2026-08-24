@@ -171,7 +171,17 @@ function fraseDeEtapa(etapa) {
     if (!base) return desconhecida(etapa);
     const dados = etapa[nome];
     if (nome === "Tentando" && typeof dados?.candidato === "number") {
-      return base.replace("UM ENDEREÇO", `O ENDEREÇO ${dados.candidato + 1} DE ${dados.de}`);
+      const conta = base.replace("UM ENDEREÇO", `O ENDEREÇO ${dados.candidato + 1} DE ${dados.de}`);
+      // **E qual endereço**, que é a metade que faltava. «2 de 4» diz que a
+      // tela não travou; não diz por que a espera é longa. Um endereço de rede
+      // local de outra casa demora porque ninguém responde, e ver
+      // `192.168.68.104` ali é a diferença entre esperar sem saber e entender
+      // que aquele candidato não tinha chance — relatado como «falta mensagem
+      // que está testando os endereços da URL, por que às vezes demora».
+      //
+      // O endereço já atravessava a ponte em `Etapa::Tentando`; era esta linha
+      // que o descartava.
+      return dados.onde ? `${conta} · ${dados.onde}` : conta;
     }
     return base;
   }
@@ -454,8 +464,21 @@ const FRASES = {
     // `the_nat_punching_rung_names_its_cost_where_the_cost_is_paid` continua
     // cobrando que a frase diga o que o ponto de encontro aprende, e passou a
     // cobrar que ela não mande ninguém ler documentação para saber disso.
+    // A segunda linha entrou no lugar de «você pode apontar para outro», e a
+    // troca é deliberada: o guarda de tamanho aceita duas frases, e das três
+    // que cabiam esta é a que muda o que a pessoa **faz hoje**. Apontar para
+    // outro ponto de encontro é escolha de quem opera, e está em
+    // `docs/ponto-de-encontro.md`.
+    //
+    // O que ela diz custou uma tarde de teste de campo: o endereço deste link
+    // não é um endereço, é um buraco no roteador que existe enquanto este app
+    // estiver aberto. Fechou e abriu, o buraco é outro, e todo link já mandado
+    // aponta para o vazio — sem ninguém ser avisado. Três amigos bateram numa
+    // porta morta enquanto o servidor estava no ar ao lado.
     FuroDeNat:
-      "UM PONTO DE ENCONTRO ABRIU O CAMINHO: SABE QUEM FALOU, NUNCA O QUE FOI DITO. VOCÊ PODE APONTAR PARA OUTRO.",
+      "UM PONTO DE ENCONTRO ABRIU O CAMINHO: SABE QUEM FALOU, NUNCA O QUE FOI DITO, " +
+      "E DÁ PARA APONTAR PARA OUTRO.\n" +
+      "O link vale enquanto o app estiver aberto; se fechar, gere outro.",
     Ipv6Direto:
       "ESTE LINK LEVA UM ENDEREÇO IPv6.",
     // O degrau que nasceu de um defeito de campo: um Windows com Cloudflare
