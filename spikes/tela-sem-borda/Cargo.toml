@@ -1,0 +1,18 @@
+[package]
+name = "spike-tela-sem-borda"
+description = "Prova de desenho: um app NÃO empacotado consegue desligar a borda amarela da Windows Graphics Capture? DESCARTÁVEL."
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Fora do workspace de propósito, como os spikes anteriores. Existe para
+# responder **uma** pergunta — se `SetIsBorderRequired(false)` passa num
+# executável instalado por NSIS, sem manifesto de pacote — e morre com a
+# resposta.
+[workspace]
+
+[dependencies]
+# A mesma versão que `seele-video` usa. Medir com outra mediria outra coisa: o
+# que está em jogo é o que a nossa árvore consegue fazer, não o que a API
+# permite em abstrato.
+windows-capture = "2.0.1"
