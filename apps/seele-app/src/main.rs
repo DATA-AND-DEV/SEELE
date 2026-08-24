@@ -63,6 +63,19 @@ struct Session {
     /// A busca corrente. O cursor é estado de sessão, e é o que impede a regra
     /// de dar-a-volta de ser reescrita em JavaScript.
     busca: Mutex<Option<seele_ffi::search::Search>>,
+    /// O endereço com que esta sessão entrou, como a lista de visitados o
+    /// conhece.
+    ///
+    /// Guardado porque a aparência do Dogma — nome e imagem — só chega **depois**
+    /// do aperto de mão, e quem a anota precisa saber sob qual chave. A
+    /// alternativa era a tela devolver o endereço, e aí a chave da lista
+    /// passaria a depender de o JavaScript normalizar a string do mesmo jeito
+    /// que o Rust normalizou.
+    ///
+    /// `None` quando não há sessão, e também quando o Dogma é hospedado aqui:
+    /// esse não entra na lista de para-onde-voltar, e anotar sobre ele seria
+    /// escrever numa entrada que não existe.
+    alvo: Mutex<Option<String>>,
     /// O último `seele://` lido, **inteiro** — impressão digital inclusive.
     ///
     /// A impressão é o que `connect` entrega como
@@ -281,6 +294,9 @@ async fn connect(
     // `--hospedar`; aqui não há bandeira, e o endereço é o que sobrou para
     // dizer a mesma coisa.
     if !hospedado_aqui(&alvo) {
+        if let Ok(mut guardado) = session.alvo.lock() {
+            *guardado = Some(alvo.clone());
+        }
         if let Ok(mut lista) = seele_ffi::conhecidos::Conhecidos::abrir(
             std::path::PathBuf::from(&casa).join("conhecidos"),
         ) {
@@ -1241,6 +1257,39 @@ fn tela_cheia(app: AppHandle, ligada: bool) {
     };
     if let Err(erro) = janela.set_fullscreen(ligada) {
         tracing::debug!(%erro, ligada, "a janela não trocou de modo");
+    }
+}
+
+/// Anota o nome e a imagem do Dogma na lista de visitados.
+///
+/// # Por que a tela chama isto, e não o Rust sozinho
+///
+/// Porque o momento é da tela. A aparência chega num quadro que o Dogma manda
+/// **depois** do aperto de mão, e `Plug::connect` já voltou quando ele chega —
+/// é a mesma janela cega que faz o cabeçalho precisar sincronizar o ícone à mão
+/// ao entrar. A tela é quem sabe que já sincronizou; daqui não dá para saber
+/// sem inventar um prazo.
+///
+/// Sem argumentos de propósito: o endereço vem do que a sessão guardou, e o
+/// nome e a imagem vêm da `Plug`. Uma tela que passasse os três poderia passar
+/// os três de outro servidor.
+#[tauri::command]
+fn lembrar_aparencia_do_servidor(app: AppHandle, session: State<'_, Session>) {
+    let Ok(Some(alvo)) = session.alvo.lock().map(|guardado| guardado.clone()) else {
+        return;
+    };
+    let Ok(plug) = session.plug() else { return };
+    let nome = plug.snapshot().dogma;
+    let icone = plug.dogma_icon();
+
+    let Ok(mut lista) = seele_ffi::conhecidos::Conhecidos::abrir(caminho_dos_conhecidos(&app))
+    else {
+        return;
+    };
+    if let Err(erro) = lista.anotar_aparencia(&alvo, Some(&nome), icone.as_deref()) {
+        // Um distintivo que não gravou é uma lista sem enfeite, e não uma falha
+        // que valha interromper quem está entrando numa conversa.
+        tracing::debug!(%erro, "não anotei a aparência deste Dogma");
     }
 }
 
@@ -2235,6 +2284,7 @@ fn main() {
             parar_de_compartilhar,
             ajustar_limites_da_tela,
             dispensar_aviso,
+            lembrar_aparencia_do_servidor,
             tela_cheia,
             microfones,
             microfone_escolhido,

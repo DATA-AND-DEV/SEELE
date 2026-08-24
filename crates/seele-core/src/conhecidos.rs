@@ -47,6 +47,21 @@ pub struct Conhecido {
     pub cage: Option<u32>,
     /// Quando foi a última visita, em segundos desde a época.
     pub visto_em: i64,
+    /// Como o Dogma se chamava na última visita.
+    ///
+    /// `None` numa entrada escrita antes de este campo existir, e a tela cai
+    /// para o endereço nesse caso. Guardar o nome é o que faz esta lista servir
+    /// a quem não decora IP: «Terceira Tóquio» é o que uma pessoa reconhece, e
+    /// `192.168.0.39:8383` é o que ela copiou de alguém uma vez.
+    pub nome: Option<String>,
+    /// A imagem do Dogma na última visita, se havia uma.
+    ///
+    /// Fora do arquivo de texto: são até 8 KiB de PNG, e binário em coluna de
+    /// TSV faria uma limpeza de lista à mão virar conversa de suporte — que é
+    /// exatamente o que o cabeçalho deste módulo recusa. Mora num arquivo por
+    /// Dogma, ao lado da lista, e vem carregada em [`Conhecidos::listar`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icone: Option<Vec<u8>>,
 }
 
 /// A lista, em disco.
@@ -72,11 +87,27 @@ impl Conhecidos {
                 .with_context(|| format!("não consegui criar {}", pai.display()))?;
         }
 
-        let entradas = std::fs::read_to_string(&caminho)
+        let entradas: Vec<Conhecido> = std::fs::read_to_string(&caminho)
             .map(|texto| texto.lines().filter_map(analisar_linha).collect())
             .unwrap_or_default();
 
-        Ok(Self { caminho, entradas })
+        let mut lista = Self { caminho, entradas };
+        // As imagens vêm do disco aqui, e não a cada `listar`: a lista é
+        // desenhada na tela de entrada, que a lê mais de uma vez, e reler
+        // alguns arquivos por desenho seria pagar disco por uma decoração.
+        //
+        // Um arquivo que não abre é ausência de imagem, e não erro: a lista de
+        // para-onde-voltar não pode deixar de abrir por causa de um enfeite.
+        for indice in 0..lista.entradas.len() {
+            let Some(alvo) = lista.entradas.get(indice).map(|e| e.alvo.clone()) else {
+                continue;
+            };
+            let bytes = std::fs::read(lista.caminho_do_icone(&alvo)).ok();
+            if let Some(entrada) = lista.entradas.get_mut(indice) {
+                entrada.icone = bytes;
+            }
+        }
+        Ok(lista)
     }
 
     /// Os Dogmas conhecidos, do mais recente para o mais antigo.
@@ -108,14 +139,69 @@ impl Conhecidos {
         let alvo = higienizar(alvo);
         let apelido = higienizar(apelido);
 
+        // O nome e a imagem que já estavam anotados sobrevivem a uma visita que
+        // não os traz: `registrar` reescreve a entrada inteira, e apagá-los aqui
+        // faria a lista esquecer a aparência a cada conexão do terminal, que não
+        // tem como saber dela.
+        let (nome, icone) = self
+            .entradas
+            .iter()
+            .find(|e| e.alvo == alvo)
+            .map_or((None, None), |e| (e.nome.clone(), e.icone.clone()));
+
         self.entradas.retain(|e| e.alvo != alvo);
         self.entradas.push(Conhecido {
             alvo,
             apelido,
             cage,
             visto_em: agora,
+            nome,
+            icone,
         });
         self.gravar()
+    }
+
+    /// Anota como o Dogma se chama e qual é a imagem dele.
+    ///
+    /// Separado de [`Self::registrar`] porque acontece noutro momento: o
+    /// endereço e o apelido são sabidos quando a conexão dá certo, e estes dois
+    /// chegam **depois**, no quadro que o Dogma manda logo após o aperto de mão.
+    ///
+    /// Não cria entrada: só anota sobre uma que já existe. Um Dogma que não está
+    /// na lista de visitados não está por decisão de quem chamou `registrar` —
+    /// um hospedado aqui, por exemplo — e esta função não pode desfazer isso.
+    ///
+    /// # Errors
+    ///
+    /// Falha se o arquivo não puder ser escrito.
+    pub fn anotar_aparencia(
+        &mut self,
+        alvo: &str,
+        nome: Option<&str>,
+        icone: Option<&[u8]>,
+    ) -> Result<()> {
+        let alvo = higienizar(alvo);
+        let Some(entrada) = self.entradas.iter_mut().find(|e| e.alvo == alvo) else {
+            return Ok(());
+        };
+        entrada.nome = nome.map(higienizar);
+        entrada.icone = icone.map(<[u8]>::to_vec);
+        self.gravar()
+    }
+
+    /// Onde a imagem de um Dogma é guardada.
+    ///
+    /// Um arquivo por Dogma, num diretório ao lado da lista. O nome vem do
+    /// endereço passado por um digestor, e não do endereço: um `alvo` é texto
+    /// que alguém digitou, e texto que alguém digitou não pode virar caminho de
+    /// arquivo sem alguém escrever `../` mais cedo ou mais tarde.
+    fn caminho_do_icone(&self, alvo: &str) -> PathBuf {
+        let mut pasta = self.caminho.clone();
+        let nome = pasta
+            .file_name()
+            .map_or_else(|| "conhecidos".to_owned(), |n| n.to_string_lossy().into_owned());
+        pasta.set_file_name(format!("{nome}-icones"));
+        pasta.join(format!("{}.png", digerir(alvo)))
     }
 
     /// Esquece um Dogma.
@@ -134,16 +220,41 @@ impl Conhecidos {
             .iter()
             .map(|e| {
                 format!(
-                    "{}\t{}\t{}\t{}\n",
+                    "{}\t{}\t{}\t{}\t{}\n",
                     e.alvo,
                     e.apelido,
                     e.cage.map_or_else(|| "-".to_owned(), |c| c.to_string()),
-                    e.visto_em
+                    e.visto_em,
+                    // Uma coluna a mais no fim, e nunca no meio: uma linha de
+                    // quatro campos escrita por uma versão anterior continua
+                    // sendo lida, e o campo que falta vira ausência de nome.
+                    e.nome.as_deref().unwrap_or("")
                 )
             })
             .collect();
         escrever_privado(&self.caminho, texto.as_bytes())
-            .with_context(|| format!("não consegui gravar {}", self.caminho.display()))
+            .with_context(|| format!("não consegui gravar {}", self.caminho.display()))?;
+
+        // As imagens, uma por arquivo. Falhar aqui **não** derruba a gravação da
+        // lista: um distintivo que não coube em disco é uma tela sem enfeite, e
+        // a lista de para-onde-voltar é a coisa que precisa sobreviver.
+        for entrada in &self.entradas {
+            let caminho = self.caminho_do_icone(&entrada.alvo);
+            match entrada.icone.as_deref() {
+                Some(bytes) => {
+                    if let Some(pasta) = caminho.parent() {
+                        let _ = std::fs::create_dir_all(pasta);
+                    }
+                    if let Err(erro) = escrever_privado(&caminho, bytes) {
+                        tracing::debug!(%erro, caminho = %caminho.display(), "não gravei a imagem");
+                    }
+                }
+                None => {
+                    let _ = std::fs::remove_file(&caminho);
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -160,12 +271,38 @@ fn analisar_linha(linha: &str) -> Option<Conhecido> {
         .and_then(|v| v.trim().parse().ok())
         .unwrap_or(0);
 
+    // Vazio é ausência, e não um nome vazio: é o que uma linha de quatro campos
+    // — escrita antes de esta coluna existir — produz, e é a mesma coisa.
+    let nome = campos
+        .next()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .map(str::to_owned);
+
     Some(Conhecido {
         alvo: alvo.to_owned(),
         apelido,
         cage,
         visto_em,
+        nome,
+        // Carregada em `abrir`, que é quem conhece o caminho.
+        icone: None,
     })
+}
+
+/// Um nome de arquivo estável para um endereço, que não venha do endereço.
+///
+/// FNV-1a de 64 bits, em hexadecimal. Não é criptografia e não precisa ser: o
+/// que se quer é que `../../algo` e `um:endereço/com/barras` virem um nome de
+/// arquivo previsível e inofensivo. Escrito à mão pelo motivo de sempre — um
+/// crate de digestão para dezesseis dígitos seria caro pelo que entrega.
+fn digerir(texto: &str) -> String {
+    let mut valor = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in texto.as_bytes() {
+        valor ^= u64::from(*byte);
+        valor = valor.wrapping_mul(0x0000_0100_0000_01B3);
+    }
+    format!("{valor:016x}")
 }
 
 /// Tira o que quebraria o formato.
@@ -204,6 +341,45 @@ fn agora_em_segundos() -> i64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn o_nome_e_a_imagem_sobrevivem_a_uma_visita_que_nao_os_traz() {
+        // `registrar` reescreve a entrada inteira, e é chamado por quem não sabe
+        // da aparência — o terminal, por exemplo, que nunca viu o ícone. Sem
+        // preservar, cada conexão pelo `plug` apagaria o distintivo que o app
+        // tinha anotado, e a lista voltaria a ser uma coluna de endereços.
+        let pasta = std::env::temp_dir().join(format!("seele-conhecidos-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&pasta);
+        let caminho = pasta.join("conhecidos");
+
+        let mut lista = Conhecidos::abrir(caminho.clone()).expect("abrir");
+        lista.registrar("dogma.exemplo:8383", "ayanami", Some(1)).expect("registrar");
+        lista
+            .anotar_aparencia("dogma.exemplo:8383", Some("Terceira Tóquio"), Some(&[1, 2, 3]))
+            .expect("anotar");
+
+        lista.registrar("dogma.exemplo:8383", "ayanami", Some(2)).expect("de novo");
+
+        let de_volta = Conhecidos::abrir(caminho).expect("reabrir");
+        let entrada = de_volta.buscar("dogma.exemplo:8383").expect("está lá");
+        assert_eq!(entrada.nome.as_deref(), Some("Terceira Tóquio"));
+        assert_eq!(entrada.icone.as_deref(), Some(&[1, 2, 3][..]));
+        assert_eq!(entrada.cage, Some(2), "a visita nova não valeu");
+
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    #[test]
+    fn uma_linha_de_quatro_campos_continua_sendo_lida() {
+        // O formato ganhou uma coluna. Uma lista escrita por uma versão
+        // anterior tem quatro campos, e recusá-la faria a atualização apagar os
+        // atalhos de quem já usava o produto.
+        let velha = analisar_linha("dogma.exemplo:8383\tayanami\t1\t1738000000")
+            .expect("uma linha de quatro campos é válida");
+        assert_eq!(velha.apelido, "ayanami");
+        assert_eq!(velha.cage, Some(1));
+        assert_eq!(velha.nome, None, "um campo ausente virou nome vazio");
+    }
+
     use super::*;
 
     fn rascunho(nome: &str) -> PathBuf {

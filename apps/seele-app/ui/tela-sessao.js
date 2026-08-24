@@ -424,7 +424,12 @@ function desenharTrilha(snapshot) {
   const nome = snapshot.dogma;
   const uri = iconeDesenhado.uri;
   const outros = conhecidosDaTrilha.filter((conhecido) => conhecido.alvo !== alvoDoDogma);
-  const chave = outros.map((conhecido) => conhecido.alvo).join("\n");
+  // A chave inclui nome e presença de imagem: sem isso, um servidor que ganhou
+  // distintivo desde o último desenho não seria redesenhado — a lista teria
+  // mudado e a comparação diria que não.
+  const chave = outros
+    .map((conhecido) => `${conhecido.alvo}|${conhecido.nome ?? ""}|${conhecido.icone ? 1 : 0}`)
+    .join("\n");
   if (
     trilhaDesenhada !== null &&
     trilhaDesenhada.nome === nome &&
@@ -456,9 +461,29 @@ function desenharTrilha(snapshot) {
       // servidor sem levá-lo entraria com o apelido de outro lugar.
       botao.dataset.alvo = conhecido.alvo;
       botao.dataset.apelido = conhecido.apelido;
-      // Sem imagem: o histórico guarda endereços, e a imagem de um servidor só
-      // existe enquanto se está dentro dele.
-      vestirItemDaTrilha(botao, siglaDoAlvo(conhecido.alvo), conhecido.alvo, null);
+      // **Com nome e imagem**, agora que o histórico os guarda. O comentário
+      // aqui dizia o contrário — «o histórico guarda endereços, e a imagem de um
+      // servidor só existe enquanto se está dentro dele» — e era verdade e era
+      // o defeito: uma coluna de endereços IP não é uma lista que alguém use
+      // para escolher para onde voltar. Ninguém decora o IP do amigo.
+      //
+      // O endereço continua sendo o recuo, e é o certo: uma entrada anotada por
+      // uma versão anterior, ou por uma visita pelo terminal, não tem nome.
+      const rotulo = conhecido.nome || conhecido.alvo;
+      vestirItemDaTrilha(
+        botao,
+        conhecido.nome ? sigla(conhecido.nome) : siglaDoAlvo(conhecido.alvo),
+        // O endereço vai junto do nome no rótulo acessível: dois servidores
+        // podem se chamar igual, e é o endereço que os separa.
+        conhecido.nome ? `${conhecido.nome} · ${conhecido.alvo}` : conhecido.alvo,
+        // `uriDeIcone` de `tela-dogma.js`, e não uma cópia aqui: escrever
+        // `image/png` num segundo arquivo é o que `frontend.rs` proíbe, e com
+        // razão. A exceção que ele abre é para **um** lugar compor o tipo, e
+        // são os mesmos bytes — os que o protocolo já provou serem PNG nas duas
+        // pontas antes de este app os gravar em disco.
+        conhecido.icone ? uriDeIcone(conhecido.icone) : null,
+      );
+      botao.title = rotulo;
       linha.append(botao);
       return linha;
     }),

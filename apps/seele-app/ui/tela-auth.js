@@ -413,6 +413,27 @@ async function inserirPlug() {
     // quem estava olhando esta tela; a faixa é onde ele fica disponível para
     // quem chegou depois, e é `role="status"`, que esta lista não é.
     mostrarVeredito(aperto?.veredito ?? null);
+    // A imagem do servidor, uma vez, aqui.
+    //
+    // Ela **não** vem por evento nesta hora, e essa é a razão de esta linha
+    // existir: o Dogma manda `DogmaIconChanged` logo depois do aperto de mão, a
+    // ponte dobra a mensagem e emite `DogmaChanged` — e ninguém está ouvindo
+    // ainda. A casca só se inscreve depois de `Plug::connect` voltar, e a
+    // travessia inteira já aconteceu quando ela volta. O único evento que
+    // atravessa essa janela é `ConnectStageChanged`, e ele existe justamente
+    // porque foi entregue **antes** do bloqueio.
+    //
+    // O sintoma era um cabeçalho sem distintivo em todo servidor que já tinha
+    // imagem escolhida — inclusive o próprio, ao hospedar. Abrir a tela de
+    // configuração consertava por acidente, porque lá o ícone é sincronizado
+    // no desenho.
+    await seguirOServidor();
+    // E o que se acabou de aprender fica anotado para a próxima vez: a lista de
+    // servidores salvos passa a mostrar o nome e o distintivo em vez de um
+    // endereço IP, que é o que ninguém decora.
+    invoke("lembrar_aparencia_do_servidor").catch((falha) =>
+      console.warn("lembrar_aparencia_do_servidor:", falha),
+    );
     await atualizar();
     // Depois do desenho, e sem `data-foco`: a operação recebe o foco na própria
     // `<section>`. Ver a marcação dela — focar o compositor aqui desligaria o
