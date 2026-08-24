@@ -455,13 +455,39 @@ pub enum Tipo {
 
 impl Tipo {
     /// Onde ele entra na lista de tentativa.
+    ///
+    /// # A ordem é por evidência, e não por qualidade do caminho
+    ///
+    /// Ela já foi por qualidade: `Global` vinha antes de `Refletido`, porque um
+    /// endereço direto é melhor que um furado — não passa por terceiro nenhum.
+    /// O argumento está certo sobre o caminho e errado sobre a escolha, e uma
+    /// medição de campo mostrou o tamanho do erro.
+    ///
+    /// Quem entra tenta um candidato de cada vez e paga **quatro segundos** por
+    /// palpite errado. Numa casa com IPv6 global e o firewall do roteador
+    /// fechado para entrada — que é o padrão de fábrica de todo roteador
+    /// doméstico —, os dois `Global` do convite consomem 8,4 s antes de o
+    /// `Refletido` ser tentado. Ele respondeu em **358 ms**. Do 5G, com prazo
+    /// apertado, o que se via era «tempo esgotado» num servidor que estava no
+    /// ar e alcançável.
+    ///
+    /// O que separa os dois não é qualidade: é quem sabe. `Global` é o
+    /// anfitrião afirmando a própria alcançabilidade, e ele **não tem como
+    /// saber** — está escrito em [`Degrau::Ipv6Direto`]: «se o firewall do
+    /// roteador deixar entrar, e isso não dá para saber daqui». `Refletido` é um
+    /// terceiro tendo observado um pacote chegar, neste instante.
+    ///
+    /// Observação vence afirmação. `Local` continua na frente porque a casa é
+    /// mais barata que tudo — o ADR 0006 registra a 0.5.0 tendo quebrado isso —
+    /// e `PortaNoRoteador` continua acima do furo porque ali alguém abriu a
+    /// porta de propósito, e um Dogma com porta aberta nem chega a furar.
     #[must_use]
     pub fn ordem(self) -> u8 {
         match self {
             Self::Local => 0,
-            Self::Global => 1,
-            Self::PortaNoRoteador => 2,
-            Self::Refletido => 3,
+            Self::PortaNoRoteador => 1,
+            Self::Refletido => 2,
+            Self::Global => 3,
             Self::Tunel => 4,
             Self::Ponte => 5,
         }
@@ -1323,9 +1349,13 @@ mod testes {
                 .position(|alvo| *alvo == procurado)
                 .unwrap_or(usize::MAX)
         };
+        // A porta do roteador vem **antes** do IPv6, e este teste já exigia o
+        // contrário. Ver o doc de `Tipo::ordem`: uma porta que alguém abriu de
+        // propósito é fato, e um IPv6 global é o anfitrião supondo que o
+        // firewall dele deixa entrar — que por padrão não deixa.
         assert!(
-            posicao(SocketAddr::new(um_ipv6_global().into(), 8383)) < posicao(externo),
-            "a porta do roteador veio antes do IPv6, e ela só volta de fora: {:?}",
+            posicao(externo) < posicao(SocketAddr::new(um_ipv6_global().into(), 8383)),
+            "o IPv6 veio antes da porta do roteador, e ele é um palpite: {:?}",
             alcance.alvos()
         );
         assert!(
@@ -1494,10 +1524,17 @@ mod testes {
         // que ele significa. Cada posição tem nome, e o nome responde a pergunta
         // que o número não respondia: **o que este candidato precisa para
         // funcionar**.
-        assert!(Tipo::Local.ordem() < Tipo::Global.ordem());
-        assert!(Tipo::Global.ordem() < Tipo::PortaNoRoteador.ordem());
+        assert!(Tipo::Local.ordem() < Tipo::PortaNoRoteador.ordem());
         assert!(Tipo::PortaNoRoteador.ordem() < Tipo::Refletido.ordem());
-        assert!(Tipo::Refletido.ordem() < Tipo::Tunel.ordem());
+        // **O refletido antes do global**, e este par já esteve ao contrário.
+        // Ver o doc de `ordem`: o global é o anfitrião afirmando a própria
+        // alcançabilidade sem ter como conferi-la, e o refletido é um terceiro
+        // tendo visto um pacote chegar. Quem entra paga quatro segundos por
+        // palpite errado, em série — medido em campo: 8,4 s gastos em dois IPv6
+        // que o roteador da casa recusa, antes do refletido, que respondeu em
+        // 358 ms.
+        assert!(Tipo::Refletido.ordem() < Tipo::Global.ordem());
+        assert!(Tipo::Global.ordem() < Tipo::Tunel.ordem());
         assert!(Tipo::Tunel.ordem() < Tipo::Ponte.ordem());
 
         // Só o refletido depende de alguém ter furado o caminho. É esta linha que

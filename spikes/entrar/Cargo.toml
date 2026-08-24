@@ -1,0 +1,11 @@
+[package]
+name = "spike-entrar"
+description = "Prova de campo: entrar num link seele:// pela mesma porta que o app usa, e imprimir onde parou. DESCARTÁVEL."
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+seele-ffi = { path = "../../crates/seele-ffi" }
