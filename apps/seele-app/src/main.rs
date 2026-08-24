@@ -1293,6 +1293,47 @@ fn lembrar_aparencia_do_servidor(app: AppHandle, session: State<'_, Session>) {
     }
 }
 
+/// O que o sistema deixa este app fazer com o microfone.
+///
+/// Sem sessão, de propósito: quem desconfia que está mudo quer a resposta antes
+/// de entrar, e a tela de entrada não tem `Plug` nenhum para perguntar.
+#[tauri::command]
+fn permissao_de_microfone() -> seele_ffi::PermissaoDeMicrofone {
+    seele_ffi::permissao_de_microfone()
+}
+
+/// Abre a página de privacidade do microfone do sistema.
+///
+/// # Por que abrir os Ajustes é o máximo que dá para fazer
+///
+/// Porque no Windows **não existe pedido a fazer**. Um app empacotado tem
+/// prompt de consentimento e API; um app de área de trabalho — que é o que este
+/// é, e o que o Discord também é — não tem nem um nem outro. O interruptor é da
+/// pessoa, e o que este produto pode fazer é levá-la até ele em vez de deixá-la
+/// procurar numa página longa.
+///
+/// `ms-settings:` é o esquema do próprio Windows, e não um caminho de arquivo:
+/// ele abre a seção certa dos Ajustes.
+///
+/// Sem barulho quando falha: um botão de conveniência que não abriu não é
+/// motivo para uma segunda mensagem de erro em cima da primeira.
+#[tauri::command]
+fn abrir_ajustes_do_microfone(app: AppHandle) {
+    let _ = app;
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", "", "ms-settings:privacy-microphone"])
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+            .spawn();
+    }
+}
+
 /// Fecha o aviso que está na tela, de verdade.
 ///
 /// A janela escondia a caixa por conta própria, e o redesenho — que roda duas
@@ -2284,6 +2325,8 @@ fn main() {
             parar_de_compartilhar,
             ajustar_limites_da_tela,
             dispensar_aviso,
+            permissao_de_microfone,
+            abrir_ajustes_do_microfone,
             lembrar_aparencia_do_servidor,
             tela_cheia,
             microfones,

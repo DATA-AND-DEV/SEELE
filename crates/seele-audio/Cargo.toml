@@ -37,6 +37,14 @@ shiguredo_opus = { workspace = true, features = ["source-build"] }
 tracing = "0.1.44"
 thiserror = "2.0.19"
 
+# Só para ler o que o Windows já decidiu sobre o microfone — ver
+# `device::consentimento_do_microfone`. Não acrescenta à árvore: já está no
+# `Cargo.lock`, trazido pelo que o Tauri e o `cpal` carregam.
+#
+# Leitura e nada mais: este crate não escreve no registro, e não tem por que.
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+
 [lints]
 workspace = true
 

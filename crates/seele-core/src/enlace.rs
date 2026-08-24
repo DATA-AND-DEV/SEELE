@@ -508,6 +508,29 @@ const INTERVALO_DO_AVISO: Duration = Duration::from_millis(700);
 /// capturando a rota dão falso negativo, e falso negativo só custa velocidade.
 const PRAZO_DE_CANDIDATO_DISTANTE: Duration = Duration::from_secs(1);
 
+/// O prazo da **primeira** volta por todos os candidatos.
+///
+/// # Por que existem duas voltas
+///
+/// Porque a lista é tentada em série e um candidato morto custa o prazo
+/// inteiro. Medido em campo, com o cliente rodando de um 5G contra um Dogma de
+/// verdade: quatro candidatos, os três primeiros sem chance, **9,6 segundos**
+/// queimados — e o quarto respondeu em **358 ms**. Com o prazo geral apertado,
+/// o quarto nunca era alcançado e a tela dizia «tempo esgotado» sobre um
+/// servidor que estava no ar.
+///
+/// A primeira volta pergunta a todos com pouca paciência: quem está vivo
+/// costuma responder em menos de meio segundo, e um segundo e meio cobre uma
+/// rede móvel ruim com folga. Só se **ninguém** responder é que vale gastar os
+/// quatro segundos por candidato — e aí a lentidão é do caminho, não da ordem.
+///
+/// O que isto **não** faz é tentar em paralelo, que seria melhor ainda. Vários
+/// apertos de mão ao mesmo tempo escrevem pins ao mesmo tempo, e o pin é a
+/// propriedade do ADR 0003: um vencedor e três órfãos exigem um desenho próprio
+/// para decidir qual fica. Fica registrado como o próximo passo, e não como
+/// esquecimento.
+const PRAZO_DA_PRIMEIRA_VOLTA: Duration = Duration::from_millis(1500);
+
 impl Enlace {
     /// Conecta no primeiro endereço que atender, tentando um de cada vez.
     ///
@@ -697,7 +720,15 @@ impl Enlace {
 
         let mut primeira_falha: Option<ConnectError> = None;
         let mut respondeu: Option<ConnectError> = None;
-        for (indice, destino) in std::iter::once(primeiro).chain(candidatos).enumerate() {
+
+        // Duas voltas: a primeira com pouca paciência para todo mundo, a
+        // segunda com a paciência inteira. Ver `PRAZO_DA_PRIMEIRA_VOLTA`.
+        //
+        // A lista é clonada porque ela é percorrida duas vezes; `Destino` é
+        // barato — endereços e uma impressão digital.
+        let todos: Vec<Destino> = std::iter::once(primeiro).chain(candidatos).collect();
+        for volta in 0..2_u8 {
+        for (indice, destino) in todos.iter().cloned().enumerate() {
             let onde = destino.servidor;
             let chave_do_pin = destino.chave_do_pin.clone();
             let fixado_antes = pins.pinned(&chave_do_pin);
@@ -726,6 +757,8 @@ impl Enlace {
             // ou uma VPN capturando a rota dão falso negativo.
             let prazo = if e_de_outra_casa(onde) {
                 PRAZO_DE_CANDIDATO_DISTANTE
+            } else if volta == 0 {
+                PRAZO_DA_PRIMEIRA_VOLTA
             } else {
                 PRAZO_POR_CANDIDATO
             };
@@ -768,6 +801,16 @@ impl Enlace {
             if primeira_falha.is_none() {
                 primeira_falha = Some(falha);
             }
+        }
+
+        // Alguém respondeu e disse não — portaria pendente, credencial
+        // recusada, apelido tomado. Isso é resposta, não silêncio, e insistir
+        // com mais paciência dá exatamente a mesma resposta mais devagar.
+        if respondeu.is_some() {
+            break;
+        }
+        // E um candidato de outra casa já teve o prazo dele nas duas voltas: o
+        // encurtamento não é impaciência, é saber que ninguém vai responder.
         }
 
         Err(respondeu

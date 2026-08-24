@@ -48,6 +48,7 @@ use seele_core::{
 };
 
 pub use types::{
+    PermissaoDeMicrofone,
     Attachment, AttachmentRefusal, Cage, CageSync, CaptureDevice, EndReason, Event, FonteDeTela,
     LimitesDeTela, Line, LineWeight, LinkState, Message, Notice, NoticeReason, Pattern,
     PermissaoDeTela, Pilot, PlaybackDevice, PlugError, Preview, PreviewRefusal, PreviewRules,
@@ -111,6 +112,20 @@ pub fn playback_devices() -> Vec<PlaybackDevice> {
         })
         .collect()
 }
+
+/// O que o sistema deixa este processo fazer com o microfone.
+///
+/// **Livre e não método**, ao contrário da permissão de tela: não precisa de
+/// sessão nenhuma. Quem descobre que está mudo quer a resposta antes de
+/// entrar, e a tela de entrada não tem `Plug` para perguntar.
+///
+/// Só olha, e não pede nada — no Windows não há o que pedir para um app de
+/// área de trabalho. Ver `seele_audio::device::consentimento_do_microfone`.
+#[must_use]
+pub fn permissao_de_microfone() -> PermissaoDeMicrofone {
+    seele_core::consentimento_do_microfone().into()
+}
+
 
 /// A impressão digital da identidade desta máquina.
 ///

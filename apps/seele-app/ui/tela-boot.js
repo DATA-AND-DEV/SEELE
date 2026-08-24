@@ -350,3 +350,39 @@ $("botao-hospedar").addEventListener("click", hospedar);
 
 // A tela de entrada é a primeira coisa que aparece, e a lista faz parte dela.
 desenharVisitados().catch((falha) => console.warn("conhecidos:", falha));
+
+// ------------------------------------------------- o microfone, antes de entrar
+//
+// Uma consulta ao sistema, no arranque e a cada volta para esta tela. Não pede
+// nada e não muda nada: só lê o que o Windows já decidiu. Ver
+// `seele_audio::device::consentimento_do_microfone`.
+//
+// Aqui e não na sessão porque é aqui que dá para agir a tempo: quem descobre
+// que está mudo lá dentro já falou por cinco minutos para uma sala calada. Foi
+// exatamente o que aconteceu num teste de campo, e a única coisa que a tela
+// daquela pessoa dizia era «SEM ÁUDIO».
+
+/** Mostra o bloqueio do microfone, ou esconde quando não há o que dizer. */
+async function conferirMicrofone() {
+  const bloco = $("boot-microfone");
+  if (!bloco) return;
+  let permissao = "NaoSeSabe";
+  try {
+    permissao = await invoke("permissao_de_microfone");
+  } catch (falha) {
+    console.warn("permissao_de_microfone:", falha);
+  }
+  const dito = PERMISSAO_DE_MICROFONE[permissao];
+  bloco.hidden = !dito;
+  if (!dito) return;
+  $("boot-microfone-diz").textContent = dito.diz;
+  $("boot-microfone-nota").textContent = dito.nota;
+}
+
+$("boot-microfone-ajustes").addEventListener("click", () => {
+  invoke("abrir_ajustes_do_microfone").catch((falha) =>
+    console.warn("abrir_ajustes_do_microfone:", falha),
+  );
+});
+
+conferirMicrofone().catch((falha) => console.warn("microfone:", falha));

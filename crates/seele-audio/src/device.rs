@@ -895,3 +895,119 @@ mod tests {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// O consentimento do microfone, no Windows
+// ---------------------------------------------------------------------------
+
+/// O que o sistema deixa este processo fazer com o microfone.
+///
+/// # Por que isto existe, e por que só no Windows
+///
+/// Porque no Windows **não há a quem pedir**. Um app empacotado (Store/MSIX)
+/// tem prompt e API de consentimento; um app de área de trabalho — que é o que
+/// este é, e o que o Discord também é — não tem nem um nem outro. O que existe
+/// é um interruptor nos Ajustes, ligado de fábrica, e nada acontece quando ele
+/// está desligado: a captura simplesmente entrega silêncio.
+///
+/// Foi assim que uma pessoa passou uma conversa inteira falando sozinha, e a
+/// única coisa que a tela dela dizia era `SEM ÁUDIO`. O bloqueio estava em
+/// `HKLM`, que é política de máquina e passa por cima de tudo — e nada em
+/// lugar nenhum apontava para lá.
+///
+/// Ler o registro não pede permissão nenhuma e não muda nada. É só parar de
+/// deixar a pessoa adivinhando.
+///
+/// No macOS o caminho é outro e já existe: o TCC pergunta, uma vez, e o
+/// `Info.plist` diz por quê. No Linux não há a quem perguntar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConsentimentoDoMicrofone {
+    /// O sistema deixa. Se ainda assim não há som, o problema é outro.
+    Permitido,
+    /// Desligado para **toda** esta máquina, por política.
+    ///
+    /// `HKLM` vence o ajuste de quem está usando: quem tentar ligar na própria
+    /// conta vai ver o interruptor voltar. Quem conserta é quem administra a
+    /// máquina.
+    NegadoNaMaquina,
+    /// A pessoa desligou o microfone para todos os aplicativos.
+    NegadoParaTudo,
+    /// O microfone está ligado, e **aplicativos de área de trabalho** não.
+    ///
+    /// É o interruptor separado, e é o que mais pega: ele fica no fim de uma
+    /// página longa, depois da lista de aplicativos da Store, e desligá-lo não
+    /// muda nada visível até alguém tentar falar.
+    NegadoParaAreaDeTrabalho,
+    /// Não deu para ler, ou este sistema não tem esse controle.
+    ///
+    /// **Não é «permitido»**, e a diferença importa: dizer que está tudo certo
+    /// sem ter olhado é a mentira confiante que este enum existe para não
+    /// contar.
+    NaoSeSabe,
+}
+
+/// Lê o que o Windows já decidiu sobre o microfone. Não pergunta nada.
+///
+/// A ordem é a que o sistema usa, e ela não é óbvia: a política da máquina vem
+/// primeiro, e dentro de cada colmeia o interruptor geral vem antes do de
+/// aplicativos de área de trabalho. Ler fora de ordem faz um `Allow` de usuário
+/// esconder um `Deny` de máquina que é quem manda.
+#[must_use]
+pub fn consentimento_do_microfone() -> ConsentimentoDoMicrofone {
+    #[cfg(windows)]
+    {
+        windows_consentimento()
+    }
+    #[cfg(not(windows))]
+    {
+        // macOS tem TCC, que pergunta e tem caminho próprio; Linux não tem a
+        // quem perguntar. Nos dois, esta função não sabe de nada — e diz isso.
+        ConsentimentoDoMicrofone::NaoSeSabe
+    }
+}
+
+#[cfg(windows)]
+fn windows_consentimento() -> ConsentimentoDoMicrofone {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::enums::HKEY_LOCAL_MACHINE;
+    use winreg::RegKey;
+
+    const RAIZ: &str =
+        r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone";
+
+    /// `Deny` de forma exata: qualquer outro valor — inclusive lixo — não é
+    /// negativa, e tratá-lo como negativa poria a tela a acusar o sistema por
+    /// causa de uma chave escrita à mão.
+    fn negado(colmeia: winreg::enums::HKEY, caminho: &str) -> Option<bool> {
+        let raiz = RegKey::predef(colmeia);
+        let chave = raiz.open_subkey(caminho).ok()?;
+        let valor: String = chave.get_value("Value").ok()?;
+        Some(valor.eq_ignore_ascii_case("Deny"))
+    }
+
+    let area_de_trabalho = format!(r"{RAIZ}\NonPackaged");
+
+    // A máquina primeiro: `HKLM` passa por cima do que a pessoa escolher.
+    if negado(HKEY_LOCAL_MACHINE, RAIZ) == Some(true)
+        || negado(HKEY_LOCAL_MACHINE, &area_de_trabalho) == Some(true)
+    {
+        return ConsentimentoDoMicrofone::NegadoNaMaquina;
+    }
+    if negado(HKEY_CURRENT_USER, RAIZ) == Some(true) {
+        return ConsentimentoDoMicrofone::NegadoParaTudo;
+    }
+    if negado(HKEY_CURRENT_USER, &area_de_trabalho) == Some(true) {
+        return ConsentimentoDoMicrofone::NegadoParaAreaDeTrabalho;
+    }
+
+    // Nenhum `Deny` encontrado. Só é `Permitido` se **alguma** chave foi lida:
+    // um registro que não abriu não é uma autorização.
+    let leu_alguma = negado(HKEY_CURRENT_USER, RAIZ).is_some()
+        || negado(HKEY_CURRENT_USER, &area_de_trabalho).is_some()
+        || negado(HKEY_LOCAL_MACHINE, RAIZ).is_some();
+    if leu_alguma {
+        ConsentimentoDoMicrofone::Permitido
+    } else {
+        ConsentimentoDoMicrofone::NaoSeSabe
+    }
+}

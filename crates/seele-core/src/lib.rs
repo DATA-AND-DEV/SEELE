@@ -88,6 +88,7 @@ pub use seele_video::modulo::{
     instalar_em as instalar_modulo_de_video, procurar_em as procurar_modulo_de_video,
     publicado_para_este_sistema as modulo_de_video_publicado, ModuloPublicado,
 };
+pub use seele_audio::device::{consentimento_do_microfone, ConsentimentoDoMicrofone};
 pub use seele_video::{BibliotecaDeVideo, ErroDeVideo};
 pub use voice::{
     capture_devices, playback_devices, CaptureDevice, DeviceChoice, DeviceRates, PlaybackDevice,

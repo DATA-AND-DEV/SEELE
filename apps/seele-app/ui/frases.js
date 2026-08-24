@@ -132,6 +132,37 @@ const AVISOS = {
  * caminho abriu, e não que a conexão vai dar certo — a marca que o abre não
  * autentica ninguém, e o aperto de mão ainda tem de acontecer inteiro.
  */
+/**
+ * O que o sistema respondeu sobre o microfone, e o que fazer com isso.
+ *
+ * Os nomes vêm de `seele_ffi::PermissaoDeMicrofone`. Só os casos que **negam**
+ * têm entrada: permitido não é notícia, e não saber não é acusação a fazer.
+ *
+ * `pedir` não existe aqui, ao contrário da permissão de tela, e a ausência é a
+ * decisão: no Windows não há a quem pedir para um app de área de trabalho. Não
+ * existe caixa de consentimento para disparar — nem para nós, nem para o
+ * Discord. O que existe é um interruptor, e o botão só leva até ele.
+ */
+const PERMISSAO_DE_MICROFONE = {
+  NegadaNaMaquina: {
+    diz: "O MICROFONE ESTÁ BLOQUEADO NESTA MÁQUINA.",
+    nota:
+      "O bloqueio é de administrador e vale para todas as contas — ligar nos " +
+      "seus ajustes não vai pegar. Quem consegue mudar é quem administra este " +
+      "computador.",
+  },
+  NegadaParaTudo: {
+    diz: "O WINDOWS ESTÁ BLOQUEANDO O MICROFONE PARA TODOS OS APLICATIVOS.",
+    nota: "Ligue «acesso ao microfone» na página que o botão abaixo abre.",
+  },
+  NegadaParaAreaDeTrabalho: {
+    diz: "O WINDOWS BLOQUEIA O MICROFONE PARA APLICATIVOS COMO ESTE.",
+    nota:
+      "O microfone está ligado, e o interruptor separado dos aplicativos de " +
+      "área de trabalho não — ele fica no fim da mesma página, depois da lista.",
+  },
+};
+
 const ETAPAS = {
   Parada: "LENDO O CONVITE",
   Avisando: "AVISANDO O PONTO DE ENCONTRO",

@@ -305,6 +305,22 @@
               <span class="rotulo">entrar com áudio</span>
             </label>
             <span class="nota">microfone pronto — no modo tecla, fala-se segurando ESPAÇO</span>
+            <!--
+              O bloqueio do sistema, quando existe. Aqui e não na sessão: quem
+              descobre que está mudo já falou por cinco minutos, e esta caixa é
+              o último lugar antes de entrar em que a pessoa decide levar áudio.
+
+              Escondido quando não há nada a dizer — a maioria das máquinas
+              permite, e um aviso repetido a cada abertura é um aviso que se
+              aprende a não ler.
+            -->
+            <div id="boot-microfone" class="boot-microfone" hidden>
+              <p id="boot-microfone-diz" class="boot-microfone-diz"></p>
+              <p id="boot-microfone-nota" class="nota"></p>
+              <button id="boot-microfone-ajustes" class="botao-fantasma" type="button">
+                ABRIR OS AJUSTES DO SISTEMA
+              </button>
+            </div>
           </div>
           <button id="botao-conectar" type="submit" class="botao boot-conectar">CONECTAR</button>
         </form>

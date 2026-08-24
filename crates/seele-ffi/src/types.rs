@@ -597,6 +597,43 @@ pub struct FonteDeTela {
     pub altura: u32,
 }
 
+/// O que o sistema deixa este processo fazer com o microfone.
+///
+/// O gêmeo de [`PermissaoDeTela`], e a diferença entre os dois é o que a tela
+/// pode oferecer: aquele tem um botão que **pergunta**, e este não — no Windows
+/// não há a quem pedir para um app de área de trabalho. Aqui o botão só abre a
+/// página certa dos Ajustes.
+///
+/// Ver `seele_audio::device::ConsentimentoDoMicrofone` para o porquê de cada
+/// caso, e para a ordem em que o sistema os decide.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum PermissaoDeMicrofone {
+    /// O sistema deixa.
+    Permitida,
+    /// Desligado por política da máquina; quem conserta é quem a administra.
+    NegadaNaMaquina,
+    /// A pessoa desligou o microfone para todos os aplicativos.
+    NegadaParaTudo,
+    /// O microfone está ligado e **aplicativos de área de trabalho** não.
+    NegadaParaAreaDeTrabalho,
+    /// Não deu para saber. **Não é «permitida»** — ver o enum do núcleo.
+    NaoSeSabe,
+}
+
+impl From<seele_core::ConsentimentoDoMicrofone> for PermissaoDeMicrofone {
+    fn from(consentimento: seele_core::ConsentimentoDoMicrofone) -> Self {
+        match consentimento {
+            seele_core::ConsentimentoDoMicrofone::Permitido => Self::Permitida,
+            seele_core::ConsentimentoDoMicrofone::NegadoNaMaquina => Self::NegadaNaMaquina,
+            seele_core::ConsentimentoDoMicrofone::NegadoParaTudo => Self::NegadaParaTudo,
+            seele_core::ConsentimentoDoMicrofone::NegadoParaAreaDeTrabalho => {
+                Self::NegadaParaAreaDeTrabalho
+            }
+            seele_core::ConsentimentoDoMicrofone::NaoSeSabe => Self::NaoSeSabe,
+        }
+    }
+}
+
 /// O que o sistema operacional respondeu sobre gravar a tela.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum PermissaoDeTela {

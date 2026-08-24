@@ -373,3 +373,27 @@
   text-align: center;
   color: var(--seele-osso-apagado);
 }
+
+/* ---------- o microfone bloqueado pelo sistema ----------
+
+   A mesma moldura do bloco de permissão de tela, e é de propósito: os dois
+   dizem «o sistema está impedindo isto», e dar duas aparências à mesma
+   categoria de recado ensina a lê-los como coisas diferentes. */
+.boot-microfone {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 12px 16px;
+  border: var(--seele-b) solid var(--seele-laranja-nerv);
+  background: var(--seele-laranja-carga);
+}
+
+.boot-microfone-diz {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: var(--seele-t-nota);
+  letter-spacing: var(--seele-tracking-cartela);
+  color: var(--seele-laranja-nerv);
+}
