@@ -534,7 +534,32 @@ async fn resolver(
     // rota IPv6, o AAAA primeiro fazia a escuta de avisos nascer IPv6 e o degrau
     // inteiro morrer por prazo, com o IPv4 que funcionava intocado. Foi o que o
     // primeiro teste de campo real encontrou.
-    let achados: Vec<SocketAddr> = procura.map(Iterator::collect).unwrap_or_default();
+    let mut achados: Vec<SocketAddr> = procura.map(Iterator::collect).unwrap_or_default();
+
+    // **IPv4 primeiro, e a ordem do DNS não decide isto.**
+    //
+    // Aqui não se está escolhendo por onde falar com o ponto de encontro — se
+    // estivesse, tanto faria qual responde. Está-se escolhendo **o endereço que
+    // vai no link que outra pessoa vai usar**: o `enc=` carrega o reflexo desta
+    // conversa, e o reflexo é de quem respondeu primeiro.
+    //
+    // As duas famílias não valem o mesmo aí. Um reflexo IPv4 alcança quem tem
+    // IPv4, que é quase todo mundo — é a frase que `Degrau::FuroDeNat` já usa
+    // para se pôr acima do IPv6 direto. Um reflexo IPv6 alcança só quem também
+    // tem IPv6, e ainda esbarra num detalhe que o furo não conserta: sem NAT
+    // não há mapeamento a furar, e o que decide é o firewall do roteador, que
+    // vem fechado para entrada não solicitada.
+    //
+    // Custou um teste de campo, e ele foi o inverso do primeiro: a máquina
+    // ganhou IPv6 ao mudar de rede, o AAAA passou a responder antes, e o link
+    // saiu sem **nenhum** caminho IPv4 — `enc=` em IPv6, `alt=` só de IPv6, e o
+    // endereço da frente sendo o de rede local. Quem estava no 5G não tinha por
+    // onde entrar. Antes do IPv6 o mesmo Dogma funcionava.
+    //
+    // Os IPv6 não se perdem: eles viajam no `alt=`, que é onde um endereço
+    // global direto pertence. O que esta ordem protege é o furo.
+    achados.sort_by_key(|achado| u8::from(achado.is_ipv6()));
+
     if !achados.is_empty() {
         return Ok(achados);
     }
@@ -552,21 +577,25 @@ async fn resolver(
 
 /// O endereço de reserva que serve **esta** máquina.
 ///
-/// IPv6 primeiro para quem tem IPv6 global, porque o par que só se alcança por
-/// lá é justamente o que mais precisa do degrau 4. Sem IPv6, IPv4 — que é o que
-/// toda máquina tem.
+/// **IPv4 primeiro**, pela mesma razão que [`resolver`] ordena assim, e o texto
+/// aqui dizia o contrário: «IPv6 primeiro para quem tem IPv6 global, porque o
+/// par que só se alcança por lá é justamente o que mais precisa do degrau 4».
+///
+/// O que essa frase esquecia é de quem é o endereço. Ele não é por onde esta
+/// máquina fala com o ponto de encontro — é o que sai **no link**, para outra
+/// pessoa usar. Um par que só tem IPv6 é raro; um que só tem IPv4 é a maioria,
+/// e um link sem caminho IPv4 não serve a ele. Foi exatamente o que aconteceu
+/// em campo: a máquina ganhou IPv6, o link saiu inteiro em IPv6, e quem estava
+/// no 5G ficou de fora de um Dogma que funcionava no dia anterior.
+///
+/// Sem IPv4 utilizável, IPv6 — a última linha continua servindo de recuo.
 fn rede_do_padrao() -> Option<SocketAddr> {
-    let tem_seis = super::endereco_de_saida_v6().is_some();
-    REDE_DO_PADRAO
+    let mut candidatos: Vec<SocketAddr> = REDE_DO_PADRAO
         .iter()
         .filter_map(|texto| texto.parse::<SocketAddr>().ok())
-        .find(|alvo| alvo.is_ipv6() == tem_seis)
-        .or_else(|| {
-            REDE_DO_PADRAO
-                .iter()
-                .filter_map(|texto| texto.parse::<SocketAddr>().ok())
-                .next_back()
-        })
+        .collect();
+    candidatos.sort_by_key(|alvo| u8::from(alvo.is_ipv6()));
+    candidatos.first().copied()
 }
 
 /// A escuta de avisos, na mesma família do ponto de encontro.
@@ -979,6 +1008,41 @@ mod testes {
         );
     }
 
+    #[tokio::test]
+    async fn o_ipv4_e_tentado_antes_do_ipv6_quando_os_dois_existem() {
+        // **A ordem é a coisa que quebrou**, e ela quebrou pelo caminho mais
+        // difícil de prever: uma máquina que não tinha IPv6 ganhou IPv6 ao
+        // mudar de rede. O DNS passou a responder AAAA antes, o AAAA respondeu,
+        // e o link saiu com `enc=` em IPv6 — sem nenhum caminho IPv4. Quem
+        // estava no 5G não tinha por onde entrar num Dogma que funcionava no
+        // dia anterior.
+        //
+        // O reflexo do primeiro candidato **é** o que vai no link, e é por isso
+        // que a ordem não pode vir do DNS: ela não é sobre com quem esta
+        // máquina consegue falar, é sobre quem consegue falar com esta máquina.
+        //
+        // `localhost` resolve para 127.0.0.1 e ::1 em praticamente toda
+        // máquina, e é o único nome com as duas famílias de que um teste pode
+        // depender sem rede.
+        let ate = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        let Ok(achados) = super::resolver("localhost:8384", ate).await else {
+            // Uma máquina que não resolve `localhost` para as duas famílias não
+            // tem o que este teste mede. Passar sem medir é melhor que uma
+            // bateria que falha por causa do `/etc/hosts` de quem a roda.
+            return;
+        };
+        let Some(primeiro_seis) = achados.iter().position(SocketAddr::is_ipv6) else {
+            return;
+        };
+        let Some(ultimo_quatro) = achados.iter().rposition(SocketAddr::is_ipv4) else {
+            return;
+        };
+        assert!(
+            ultimo_quatro < primeiro_seis,
+            "um IPv6 foi ordenado antes de um IPv4: {achados:?}"
+        );
+    }
+
     #[test]
     fn a_rede_do_padrao_existe_e_serve_esta_maquina() {
         // Se as duas linhas não forem endereços válidos, o recuo é decoração —
@@ -989,16 +1053,15 @@ mod testes {
             "nenhum endereço de reserva serve esta máquina"
         );
 
-        // E a escolha acompanha a máquina: quem tem IPv6 global fala IPv6 com o
-        // ponto de encontro, porque é justamente o par que só se alcança por lá
-        // que mais precisa deste degrau.
-        let tem_seis = crate::alcance::endereco_de_saida_v6().is_some();
-        if tem_seis {
-            assert!(
-                escolhido.is_some_and(|alvo| alvo.is_ipv6()),
-                "esta máquina tem IPv6 global e o recuo escolheu IPv4"
-            );
-        }
+        // E é IPv4, **mesmo numa máquina com IPv6 global**. Este teste exigia o
+        // contrário, e a inversão é o conserto de um defeito de campo: o
+        // endereço escolhido aqui vai no `enc=` do link, e um `enc=` em IPv6 só
+        // serve a quem também tem IPv6. Ver `rede_do_padrao`.
+        assert!(
+            escolhido.is_some_and(|alvo| alvo.is_ipv4()),
+            "o recuo escolheu IPv6; um link com furo só em IPv6 deixa de fora \
+             quem só tem IPv4, que é quase todo mundo"
+        );
     }
 
     #[tokio::test]
