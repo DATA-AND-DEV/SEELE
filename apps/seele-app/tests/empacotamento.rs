@@ -254,3 +254,38 @@ fn o_repositorio_nao_pede_artefatos_de_atualizacao() {
          Quem liga isto é o release, com o segredo no ambiente."
     );
 }
+
+#[test]
+fn o_modulo_de_video_e_procurado_fora_do_pacote() {
+    // O defeito que este teste tranca custou dois testes de campo num dia.
+    //
+    // O módulo do OpenH264 morava dentro do pacote, e um pacote é da versão,
+    // não do computador: toda instalação nova chega vazia, e quem já tinha o
+    // módulo volta a ver que ele falta. Nas duas vezes eu procurei o erro no
+    // empacotamento, e nas duas ele estava em **onde o arquivo era guardado**.
+    //
+    // Ao lado do banco ele é do computador. Se alguém devolver a busca para
+    // dentro do pacote — ou trocar `config_dir` por um caminho relativo ao
+    // executável — o ciclo recomeça, e demora uma versão inteira para
+    // aparecer, porque na máquina de quem compila o módulo sempre está lá.
+    let main = ler("src/main.rs");
+    let mut onde = main.match_indices("SEELE_OPENH264").peekable();
+    assert!(
+        onde.peek().is_some(),
+        "o app não aponta mais onde procurar o módulo de vídeo"
+    );
+    // Uma vizinhança, e não a linha: `config_dir` é chamado algumas linhas
+    // acima do `set_var`, e exigir os dois na mesma linha só ensinaria a
+    // próxima pessoa a reescrever o teste.
+    let perto = onde.any(|(inicio, _)| {
+        let comeco = inicio.saturating_sub(700);
+        let fim = main.len().min(inicio + 700);
+        main.get(comeco..fim)
+            .is_some_and(|volta| volta.contains("config_dir"))
+    });
+    assert!(
+        perto,
+        "o módulo de vídeo voltou a ser procurado num caminho que não é a pasta \
+         de configuração; toda atualização vai apagá-lo de novo"
+    );
+}
