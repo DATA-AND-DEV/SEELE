@@ -73,6 +73,16 @@ pub enum Event {
         /// Who.
         pilot: PilotId,
     },
+    /// A pilot connected to the Dogma, whatever room they are in.
+    PilotPresent {
+        /// Who, and what they are called.
+        quem: Occupant,
+    },
+    /// A pilot's connection ended.
+    PilotGone {
+        /// Who.
+        pilot: PilotId,
+    },
     /// A pilot's state changed, including their Sync Ratio.
     PilotState(PilotState),
     /// A Cage was created.
@@ -428,6 +438,45 @@ pub struct Occupant {
     pub ssrc: Ssrc,
 }
 
+/// Quem está conectado neste Dogma agora, sentado numa sala ou não.
+///
+/// # Por que não bastava a ocupação
+///
+/// [`Occupancy`] responde «quem está em qual sala», e por muito tempo era a
+/// única tabela de presença que existia — então quem entrava no Dogma e ficava
+/// fora das salas não existia para mais ninguém. `PilotJoined` carrega um Cage
+/// porque anuncia sentar-se num; não havia mensagem para estar aqui. O cliente
+/// escreveu isso num comentário e seguiu em frente: «não há mensagem na fita
+/// que diga quem entrou no servidor e ficou fora das salas».
+///
+/// Chaveado por pessoa e não por conexão: reconectar dentro da carência é a
+/// mesma pessoa, e duas linhas para ela seriam dois nomes na lista.
+#[derive(Debug, Default)]
+pub struct Presentes {
+    por_pilot: HashMap<PilotId, Occupant>,
+}
+
+impl Presentes {
+    /// Marca alguém como presente, e diz se ele ainda não estava.
+    ///
+    /// O `bool` é o que evita anunciar duas vezes: uma reconexão dentro da
+    /// carência passa por aqui de novo, e um segundo `PilotPresent` faria a
+    /// lista de todo mundo piscar sem nada ter mudado.
+    pub fn chegou(&mut self, quem: Occupant) -> bool {
+        self.por_pilot.insert(quem.pilot, quem).is_none()
+    }
+
+    /// Tira alguém, e diz se havia o que tirar.
+    pub fn saiu(&mut self, pilot: PilotId) -> bool {
+        self.por_pilot.remove(&pilot).is_some()
+    }
+
+    /// Todo mundo que está aqui agora.
+    pub fn todos(&self) -> Vec<Occupant> {
+        self.por_pilot.values().cloned().collect()
+    }
+}
+
 /// Who is in which Cage at this moment.
 ///
 /// Separate from [`Slots`], which holds seats for pilots who are *away*. This
@@ -579,6 +628,8 @@ pub struct Dogma {
     pub slots: Arc<Mutex<Slots>>,
     /// Who is sitting in which Cage right now — gap G15.
     pub occupancy: Arc<Mutex<Occupancy>>,
+    /// Quem está conectado, sentado ou não. Ver [`Presentes`].
+    pub presentes: Arc<Mutex<Presentes>>,
     /// Quantos apertos de mão cada endereço ainda pode gastar.
     ///
     /// Antes de autenticar, portanto sem identidade nenhuma para contar: a

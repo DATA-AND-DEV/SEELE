@@ -63,6 +63,14 @@ const MOTIVOS = {
     "QUEM HOSPEDA RECUSOU A SUA ENTRADA.\n" +
     "Não foi a senha nem o convite: fale com quem hospeda por outro canal.",
 
+  // A única recusa desta lista que a pessoa conserta sozinha, e a que mais
+  // custou até ganhar frase própria: ela vestia CREDENCIAL RECUSADA, e o
+  // conselho que vinha junto — confira o convite — mandava mexer na única coisa
+  // que não era o problema. Nem ser aprovado, nem reinstalar o app resolvia.
+  NicknameTaken:
+    "ESTE APELIDO JÁ É DE OUTRA PESSOA NESTE SERVIDOR.\n" +
+    "Não é o convite nem a senha: escolha outro apelido e entre de novo.",
+
   LinkLost: "ENLACE PERDIDO",
 };
 

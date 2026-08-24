@@ -58,6 +58,7 @@ function pintar(quadro) {
     const pincel = tela.getContext("2d");
     if (pincel) pincel.drawImage(quadro, 0, 0);
     tela.hidden = false;
+    document.body.dataset.vendoTela = "sim";
   } finally {
     // Sempre, mesmo se o desenho falhar: um `VideoFrame` não fechado segura
     // memória de vídeo, e quinze por segundo esgotam a fila do decodificador
@@ -163,6 +164,7 @@ function fecharImagemDaTela() {
   decodificador = null;
   telaEmCurso = null;
   esperandoChave = true;
+  delete document.body.dataset.vendoTela;
   const tela = $("palco-imagem");
   if (tela) {
     tela.hidden = true;
@@ -186,6 +188,34 @@ function fecharImagemDaTela() {
  */
 let noCinema = false;
 
+/**
+ * Marca o caminho da imagem até o `<body>` e esconde tudo o que fica de fora.
+ *
+ * Sobe nó a nó em vez de confiar num seletor com a estrutura escrita dentro
+ * dele. A primeira versão da tela cheia usava `#tela-chamada > *:not(#palco)`,
+ * e o palco está **três** níveis abaixo — a regra escondia a caixa que o
+ * continha, e a tela cheia abria vazia. Uma `<div>` a mais no HTML quebraria a
+ * regra de novo, e quebraria em silêncio.
+ */
+function marcarCaminhoDoCinema(ligada) {
+  const imagem = $("palco-imagem");
+  if (!imagem) return;
+  for (let no = imagem; no && no !== document.body; no = no.parentElement) {
+    const pai = no.parentElement;
+    if (!pai) break;
+    for (const irmao of pai.children) {
+      if (irmao === no) continue;
+      if (ligada) irmao.dataset.foraDoCinema = "sim";
+      else delete irmao.dataset.foraDoCinema;
+    }
+    // O próprio caminho estica; a imagem não, que é quem recebe o tamanho.
+    if (no !== imagem) {
+      if (ligada) no.dataset.noCinema = "sim";
+      else delete no.dataset.noCinema;
+    }
+  }
+}
+
 /** Entra ou sai da tela cheia, nos dois lados. */
 async function trocarCinema(ligada) {
   noCinema = ligada;
@@ -194,6 +224,7 @@ async function trocarCinema(ligada) {
   } else {
     delete document.body.dataset.cinema;
   }
+  marcarCaminhoDoCinema(ligada);
   const botao = $("palco-cheia");
   if (botao) botao.textContent = ligada ? "SAIR DA TELA CHEIA" : "TELA CHEIA";
   try {

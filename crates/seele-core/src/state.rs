@@ -214,6 +214,20 @@ pub struct Room {
     pub pilots: HashMap<PilotId, Pilot>,
     /// Who is seated in which Cage, in arrival order.
     pub seats: HashMap<CageId, Vec<PilotId>>,
+    /// Quem está conectado neste Dogma, esteja ou não numa sala.
+    ///
+    /// # Por que não dá para deduzir de [`Self::seats`]
+    ///
+    /// Porque sentar-se numa sala é uma coisa e estar aqui é outra, e por muito
+    /// tempo só a primeira tinha mensagem. `PilotJoined` carrega um Cage, então
+    /// quem entrava no servidor e ficava fora das salas era invisível para todo
+    /// mundo — a lista de pessoas mostrava quem estava sentado e se chamava
+    /// «pessoas». Agora `PilotPresent` e `PilotGone` dizem a outra metade.
+    ///
+    /// Em ordem de chegada, como os assentos, e sem repetição: a mesma pessoa
+    /// anunciada duas vezes é uma linha, porque a varredura de abertura e a
+    /// difusão podem se sobrepor por um instante.
+    pub presentes: Vec<PilotId>,
     /// What has been said, oldest first.
     pub messages: Vec<Message>,
     /// Connection quality as the server reports it.
@@ -689,6 +703,34 @@ impl Room {
                 }
                 // The pilot stays in `pilots`: their name is still needed to
                 // attribute everything they said before leaving.
+                if let Some(known) = self.pilots.get_mut(pilot) {
+                    known.speaking = false;
+                }
+                changed.roster = true;
+            }
+
+            ServerMessage::PilotPresent { profile, ssrc } => {
+                let pilot = self
+                    .pilots
+                    .entry(profile.id)
+                    .or_insert_with(|| Pilot::new(profile.id, profile.nickname.clone(), None));
+                pilot.nickname.clone_from(&profile.nickname);
+                pilot.ssrc = Some(*ssrc);
+                if !self.presentes.contains(&profile.id) {
+                    self.presentes.push(profile.id);
+                }
+                changed.roster = true;
+            }
+
+            ServerMessage::PilotGone { pilot } => {
+                self.presentes.retain(|presente| presente != pilot);
+                // Os assentos **não** são limpos aqui: o Dogma manda um
+                // `PilotLeft` por sala que a pessoa ocupava, e limpar nos dois
+                // lugares poria duas autoridades sobre a mesma linha. O que se
+                // limpa é o que só esta mensagem sabe.
+                //
+                // E ela continua em `pilots`, como em `PilotLeft`: o nome ainda
+                // é preciso para atribuir tudo o que ela disse antes de sair.
                 if let Some(known) = self.pilots.get_mut(pilot) {
                     known.speaking = false;
                 }

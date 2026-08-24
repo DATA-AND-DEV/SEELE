@@ -376,6 +376,7 @@ impl Server {
             writes,
             slots: Arc::new(tokio::sync::Mutex::new(dogma::Slots::default())),
             occupancy: Arc::new(tokio::sync::Mutex::new(dogma::Occupancy::default())),
+            presentes: Arc::new(tokio::sync::Mutex::new(dogma::Presentes::default())),
             portaria: Arc::new(tokio::sync::Mutex::new(taxa::Portaria::nova())),
             atrasos: Arc::new(dogma::Atrasos::default()),
             telas: Arc::new(tokio::sync::Mutex::new(dogma::Telas::default())),

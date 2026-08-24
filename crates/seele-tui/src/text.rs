@@ -95,6 +95,9 @@ pub fn disconnect(reason: DisconnectReason) -> &'static str {
             "QUEM HOSPEDA AINDA NÃO DECIDIU SOBRE VOCÊ; O PEDIDO FICOU GUARDADO"
         }
         DisconnectReason::AdmissionDenied => "QUEM HOSPEDA RECUSOU A SUA ENTRADA",
+        // A única recusa deste conjunto que a pessoa conserta sozinha, e por
+        // isso ela diz o que fazer em vez de só o que houve.
+        DisconnectReason::NicknameTaken => "ESTE APELIDO É DE OUTRA PESSOA NESTE DOGMA",
     }
 }
 
@@ -129,7 +132,9 @@ pub fn worth_retrying(reason: DisconnectReason) -> bool {
         // agravante de a máquina fazê-la sozinha. Quem foi mandado tentar de
         // novo tenta quando quiser.
         | DisconnectReason::AdmissionPending
-        | DisconnectReason::AdmissionDenied => false,
+        | DisconnectReason::AdmissionDenied
+        // Tentar de novo com o mesmo nome dá o mesmo resultado, sempre.
+        | DisconnectReason::NicknameTaken => false,
     }
 }
 

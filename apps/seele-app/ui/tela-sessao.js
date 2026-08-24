@@ -1102,14 +1102,64 @@ function desenharPessoas(snapshot) {
     );
   }
 
+  // Quem está conectado e fora de toda sala.
+  //
+  // Esta lista não existia, e a falta dela era o que fazia o sincronismo
+  // parecer estranho: `PilotJoined` carrega um Cage porque anuncia sentar-se
+  // num, e não havia mensagem para estar aqui — quem entrava no servidor e não
+  // escolhia sala nenhuma era invisível para todo mundo. `PilotPresent` e
+  // `PilotGone` fecharam isso do lado do protocolo; esta é a metade que
+  // aparece.
+  //
+  // Uma subtração e não uma terceira lista: `presentes` é todo mundo, os Cages
+  // dizem quem está sentado, e quem sobra está no saguão. O próprio operador
+  // sai daqui quando não está em sala porque ele já tem o grupo `FORA DE SALA`
+  // logo acima, com a telemetria que só a própria sessão mede.
+  const sentados = new Set(
+    snapshot.cages.flatMap((cage) => cage.pilots.map((piloto) => piloto.id)),
+  );
+  const noSaguao = snapshot.presentes.filter(
+    (piloto) => !sentados.has(piloto.id) && !piloto.is_self,
+  );
+  if (noSaguao.length > 0) {
+    grupos.push(
+      grupoDeSala(
+        "NO SERVIDOR, FORA DAS SALAS",
+        `${noSaguao.length}`,
+        false,
+        noSaguao.map((piloto) =>
+          linhaDoRoster(
+            {
+              nome: piloto.nickname,
+              // Sem medida: o sinal de quem não está numa sala não é medido por
+              // ninguém — não há voz atravessando para medir. Travessão é o que
+              // este produto escreve onde não mediu, e inventar zero aqui seria
+              // desenhar uma barra vermelha para quem está bem.
+              ratio: null,
+              faixa: null,
+              falando: false,
+              atField: piloto.at_field,
+              isolado: piloto.total_isolation,
+              volume: null,
+            },
+            snapshot.audio_available,
+          ),
+        ),
+      ),
+    );
+  }
+
   repovoar($("lista-roster"), grupos);
 
-  // A contagem é do que o protocolo mede: quantas pessoas estão em salas de
-  // voz. O rótulo vai junto com o número porque um número solto ao lado de
-  // `PESSOAS` seria lido como a população do servidor, que é o que ninguém
-  // aqui sabe.
+  // Duas contagens, e a de fora existe porque a de dentro sozinha mentia por
+  // omissão: `12 EM SALAS DE VOZ` ao lado de `PESSOAS` era lido como a
+  // população do servidor, e não era.
   const emSalas = snapshot.cages.reduce((soma, cage) => soma + cage.pilots.length, 0);
-  medido($("pessoas-conta"), `${emSalas} EM SALAS DE VOZ`);
+  const total = snapshot.presentes.length;
+  medido(
+    $("pessoas-conta"),
+    total > emSalas ? `${emSalas} EM SALAS · ${total} NO SERVIDOR` : `${emSalas} EM SALAS DE VOZ`,
+  );
 }
 
 /** Um grupo da faixa: o nome de uma sala e os cartões de quem está nela. */
@@ -1178,8 +1228,17 @@ function desenharMedia(cage) {
  * tinha de preservar inteira — ela veio junto, sem uma linha de diferença.
  */
 function linhaDoRoster(piloto, temAudio) {
+  // `ratio: null` é «ninguém mediu isto», e não zero.
+  //
+  // Quem está conectado e fora de toda sala não tem sinal medido: não há voz
+  // atravessando para medir. Um zero aqui desenharia a barra vermelha do sinal
+  // crítico para quem está perfeitamente bem — e o travessão é o que este
+  // produto escreve onde não mediu, em toda outra tela.
+  const medido = piloto.ratio !== null && piloto.ratio !== undefined;
+
   const item = elemento("li", piloto.falando ? "piloto falando" : "piloto");
-  item.dataset.faixa = piloto.faixa;
+  if (medido) item.dataset.faixa = piloto.faixa;
+  else item.dataset.semMedida = "sim";
 
   const cabeca = elemento("span", "piloto-cabeca");
   const identidade = elemento("span", "piloto-identidade");
@@ -1192,16 +1251,20 @@ function linhaDoRoster(piloto, temAudio) {
   const numero = elemento("span", "piloto-sync");
   // A marca de bloco antes do número, pela mesma razão que na média: a Saira
   // desenha o número e não tem o bloco.
-  numero.append(
-    elemento("span", "sync-marca", marcaSync(piloto.faixa)),
-    // Inteiro, e não `98.4`: `sync_ratio` é `u8` em todo ponto onde existe, e
-    // uma casa decimal aqui seria precisão inventada no último passo.
-    elemento("span", "piloto-sync-valor", String(piloto.ratio)),
-  );
+  if (medido) {
+    numero.append(
+      elemento("span", "sync-marca", marcaSync(piloto.faixa)),
+      // Inteiro, e não `98.4`: `sync_ratio` é `u8` em todo ponto onde existe, e
+      // uma casa decimal aqui seria precisão inventada no último passo.
+      elemento("span", "piloto-sync-valor", String(piloto.ratio)),
+    );
+  } else {
+    numero.append(elemento("span", "piloto-sync-valor", SEM_MEDIDA));
+  }
 
   cabeca.append(identidade, numero);
 
-  const barra = elemento("span", "barra", blocos(piloto.ratio, 20));
+  const barra = elemento("span", "barra", medido ? blocos(piloto.ratio, 20) : "");
   barra.setAttribute("aria-hidden", "true");
 
   // O `ATRASO` por piloto do comp não entra. `Telemetry` é a **nossa** conexão:

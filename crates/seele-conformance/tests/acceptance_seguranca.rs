@@ -406,6 +406,34 @@ async fn um_dogma_com_portaria_nao_admite_ninguem_por_um_caminho_lateral() -> Re
         entra.err()
     );
 
+    // 5b. E entra **de novo**, sem trazer segredo nenhum.
+    //
+    // O caso de campo, relatado assim: «dou permissão, ele tenta bater de novo
+    // e dá credencial recusada; mesmo fechando o app dá credencial recusada».
+    //
+    // O que acontece do outro lado é isto: o app que já entrou uma vez guarda o
+    // Dogma na lista de visitados e reconecta **sem** o convite — ele era de uso
+    // único e já foi gasto — e sem a senha, que ninguém digitou. A política não
+    // tem memória: com o Dogma fechado ela exige segredo de todo mundo, sempre.
+    //
+    // A portaria **é** a credencial durável de uma pessoa. Se aprovar não
+    // dispensar o segredo na volta, aprovar não serviu para nada: a pessoa fica
+    // dependendo de um convite novo a cada conexão, que é exatamente o que quem
+    // hospeda achou que tinha resolvido ao apertar admitir.
+    let sem_segredo_depois_de_aprovado = conectar(
+        endereco,
+        "estranho",
+        9,
+        Arc::new(MemoryPinStore::new()),
+        None,
+    )
+    .await;
+    assert!(
+        sem_segredo_depois_de_aprovado.is_ok(),
+        "quem foi admitido pela portaria precisou de segredo para voltar: {:?}",
+        sem_segredo_depois_de_aprovado.err()
+    );
+
     // 6. A aprovação não vazou para o vizinho da fila.
     let vizinho = conectar(
         endereco,
@@ -436,6 +464,51 @@ async fn um_dogma_com_portaria_nao_admite_ninguem_por_um_caminho_lateral() -> Re
         DisconnectReason::AdmissionPending,
         "uma chave nova entrou por se dizer pelo nome de alguém já admitido"
     );
+
+    // 8. E se quem hospeda aprovar **essa** chave nova, a recusa que sobra tem
+    //    de dizer qual é.
+    //
+    // O relato de campo: «dou permissão e continua dando credencial recusada,
+    // mesmo fechando o app». Quatro falhas diferentes vestiam essa frase, e uma
+    // delas é esta — o apelido pertence a outra chave, e não passa com o tempo:
+    // tentar de novo, ser aprovado de novo e reinstalar o app dão o mesmo
+    // resultado. Enquanto ela se chamava «credencial recusada», o conselho que
+    // vinha junto mandava conferir o convite, que é a única coisa que não era o
+    // problema.
+    {
+        let mut casper = Casper::open(&Location::File(banco.clone()))?;
+        portaria::decidir(&mut casper, &impressao_de(3), true)?;
+    }
+    let homonimo_aprovado = conectar(
+        endereco,
+        "estranho",
+        3,
+        Arc::new(MemoryPinStore::new()),
+        Some("terceiro impacto"),
+    )
+    .await;
+    assert_eq!(
+        razao(homonimo_aprovado.err()),
+        DisconnectReason::NicknameTaken,
+        "a portaria aprovou e a recusa que sobrou não disse que era o apelido;          quem lê «credencial recusada» vai mexer no convite para sempre"
+    );
+
+    // E com outro apelido a mesma chave entra, que é a prova de que a frase
+    // acima aponta para a coisa certa de mexer.
+    let com_outro_nome = conectar(
+        endereco,
+        "outro-nome",
+        3,
+        Arc::new(MemoryPinStore::new()),
+        Some("terceiro impacto"),
+    )
+    .await;
+    assert!(
+        com_outro_nome.is_ok(),
+        "trocar de apelido não resolveu: {:?}",
+        com_outro_nome.err()
+    );
+
 
     servidor.shutdown();
     Ok(())

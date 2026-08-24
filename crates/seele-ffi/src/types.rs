@@ -249,6 +249,15 @@ pub enum EndReason {
     /// Milder than [`Self::Banned`]: the host can approve the same key later,
     /// and this never ended a session that was already running.
     AdmissionDenied,
+    /// O apelido pedido é de outra chave. ADR 0017.
+    ///
+    /// Separada de [`Self::CredentialRejected`] porque é a única deste conjunto
+    /// que a pessoa conserta sozinha, e porque não passa com o tempo: tentar de
+    /// novo, ser aprovado de novo e reinstalar o app dão todos o mesmo
+    /// resultado. Enquanto ela vestia a frase da credencial, o conselho que a
+    /// tela dava — «confira o convite» — mandava a pessoa mexer na única coisa
+    /// que não era o problema.
+    NicknameTaken,
     /// The link died without the server saying why.
     LinkLost,
 }
@@ -270,6 +279,7 @@ impl From<seele_core::DisconnectReason> for EndReason {
             seele_core::DisconnectReason::FellBehind => Self::FellBehind,
             seele_core::DisconnectReason::AdmissionPending => Self::AdmissionPending,
             seele_core::DisconnectReason::AdmissionDenied => Self::AdmissionDenied,
+            seele_core::DisconnectReason::NicknameTaken => Self::NicknameTaken,
         }
     }
 }
@@ -764,6 +774,15 @@ pub struct Snapshot {
     pub nickname: String,
     /// Voice channels, each carrying who is in it.
     pub cages: Vec<Cage>,
+    /// Quem está conectado neste Dogma, em sala ou fora dela.
+    ///
+    /// **Não é a soma de [`Cage::pilots`]**, e essa diferença é a razão de o
+    /// campo existir: quem entra no servidor e fica fora das salas não aparece
+    /// em nenhum Cage, e por muito tempo não aparecia em lugar nenhum — a
+    /// interface listava os sentados e chamava aquilo de «pessoas». A lista de
+    /// quem está fora das salas é esta menos aquelas, e a subtração é uma linha
+    /// de quem desenha.
+    pub presentes: Vec<Pilot>,
     /// Text channels.
     pub lines: Vec<Line>,
     /// How many times the conversation has changed, this session.

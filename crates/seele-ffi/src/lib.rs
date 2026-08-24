@@ -1967,6 +1967,7 @@ impl Plug {
             me: room.me.map(|pilot| pilot.0),
             nickname,
             cages: cages_of(&room),
+            presentes: presentes_de(&room),
             lines: lines_of(&room),
             messages_revision: self.shared.messages_revision.load(Ordering::Relaxed),
             telemetry: Telemetry {
@@ -2114,6 +2115,33 @@ impl Drop for Plug {
     fn drop(&mut self) {
         self.disconnect();
     }
+}
+
+/// Todo mundo que está conectado, em ordem de chegada.
+///
+/// Inclui quem está numa sala, e é de propósito: a casca precisa das duas
+/// listas para desenhar «no servidor, fora das salas» sem fazer conta de menos
+/// — subtrair uma da outra é trabalho de quem desenha, e ele é uma linha.
+///
+/// A própria pessoa entra aqui: o Dogma não anuncia a chegada de volta para
+/// quem chegou, então quem monta esta lista soma o `me` que a sessão já tem.
+/// Sem isso, cada um seria o único ausente da própria lista de presentes.
+fn presentes_de(room: &Room) -> Vec<Pilot> {
+    room.presentes
+        .iter()
+        .chain(room.me.iter().filter(|eu| !room.presentes.contains(eu)))
+        .filter_map(|id| room.pilots.get(id))
+        .map(|pilot| Pilot {
+            id: pilot.id.0,
+            nickname: pilot.nickname.clone(),
+            speaking: pilot.speaking,
+            at_field: pilot.at_field,
+            total_isolation: pilot.total_isolation,
+            sync_ratio: pilot.sync_ratio,
+            sync_band: SyncBand::of(pilot.sync_ratio).into(),
+            is_self: room.me == Some(pilot.id),
+        })
+        .collect()
 }
 
 fn cages_of(room: &Room) -> Vec<Cage> {

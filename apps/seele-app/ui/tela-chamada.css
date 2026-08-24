@@ -861,26 +861,29 @@
  *
  * A diferença aparece no teclado: uma imagem por cima com o resto ainda no
  * documento deixa o foco caminhar por botões que ninguém está vendo, e o leitor
- * de tela lê uma sala inteira que sumiu. Esconder o irmão de cima é o que faz a
- * tela cheia ser mesmo só a tela.
+ * de tela lê uma sala inteira que sumiu.
+ *
+ * **Quem escolhe o que esconder é o script, e não um seletor.** A primeira
+ * versão disto escrevia `#tela-chamada > *:not(#palco)`, e `#palco` está três
+ * níveis abaixo de `#tela-chamada` e não um: a regra escondia justamente a
+ * caixa que contém o palco, e a tela cheia abria vazia. Um seletor que conta
+ * níveis é uma cópia da estrutura do HTML guardada noutro arquivo, e ela
+ * envelhece na primeira `<div>` que alguém acrescenta. O script sobe da imagem
+ * até o `<body>` e marca o que encontra, seja qual for a profundidade.
  */
-body[data-cinema="sim"] > *:not(#tela-chamada),
-body[data-cinema="sim"] #tela-chamada > *:not(#palco),
-body[data-cinema="sim"] #palco > *:not(.chamada-palco-corpo),
-body[data-cinema="sim"] .chamada-palco-corpo > *:not(#palco-imagem) {
+[data-fora-do-cinema="sim"] {
   display: none !important;
 }
 
-body[data-cinema="sim"] #palco,
-body[data-cinema="sim"] #tela-chamada,
-body[data-cinema="sim"] .chamada-palco-corpo {
-  display: block;
-  padding: 0;
-  margin: 0;
-  border: none;
-  background: var(--seele-negro-absoluto);
-  height: 100vh;
-  max-height: 100vh;
+[data-no-cinema="sim"] {
+  display: block !important;
+  height: 100vh !important;
+  max-height: 100vh !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  overflow: hidden !important;
+  background: var(--seele-negro-absoluto) !important;
 }
 
 body[data-cinema="sim"] #palco-imagem {
@@ -904,6 +907,7 @@ body[data-cinema="sim"]::after {
   bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
+  z-index: 20;
   padding: 6px 14px;
   font-family: var(--seele-display);
   font-size: var(--seele-t-nota);
@@ -918,4 +922,19 @@ body[data-cinema="sim"]::after {
 @keyframes seele-sumir {
   0%, 60% { opacity: 1; }
   100% { opacity: 0; }
+}
+
+/* ---------- a varredura, enquanto se olha uma tela ---------- */
+
+/*
+ * O efeito de tubo sai de cima da tela de outra pessoa.
+ *
+ * Ele é a marca da casa e fica em todo o resto. Aqui não: o que está embaixo
+ * dele é o monitor de alguém — texto pequeno, código, uma planilha —, e uma
+ * textura de linhas por cima de texto pequeno é a diferença entre ler e não
+ * ler. A varredura decora a nossa interface; ela não tem licença para decorar
+ * o trabalho de quem está do outro lado.
+ */
+body[data-vendo-tela="sim"] .varredura {
+  display: none;
 }

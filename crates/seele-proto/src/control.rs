@@ -542,6 +542,29 @@ pub enum DisconnectReason {
     ///
     /// Appended last, for the reason [`AlertReason::RateLimited`] gives.
     AdmissionDenied,
+
+    /// The nickname asked for belongs to a different key. ADR 0017.
+    ///
+    /// # Why this is not [`Self::CredentialRejected`]
+    ///
+    /// It used to be, and it cost somebody an evening. The report: "I host a
+    /// Dogma, somebody knocks, I approve them — and they still get credential
+    /// rejected, even after closing the app." Four unrelated failures wore that
+    /// one sentence, and this is the one that does not go away by trying again,
+    /// by being approved, or by reinstalling: the name is simply somebody
+    /// else's, and nothing but choosing another will move it.
+    ///
+    /// `specs/08-seguranca.md` requires login failures to be uniform so that
+    /// somebody guessing a secret learns nothing from which guess landed
+    /// closer. That rule does not reach here, and the position in the handshake
+    /// is the argument: this refusal happens **after** the signature is checked
+    /// and **after** the doorkeeper admitted the peer. Nothing was guessed. And
+    /// on a Dogma with no doorkeeper — the only case where an anonymous peer
+    /// reaches this line — the nicknames it could enumerate are the ones the
+    /// roster hands to anybody who walks in.
+    ///
+    /// Appended last, for the reason [`AlertReason::RateLimited`] gives.
+    NicknameTaken,
 }
 
 /// How loud an alert is.
@@ -1517,6 +1540,45 @@ pub enum ServerMessage {
         /// Bits per second, or zero for "not measured".
         bps: u32,
     },
+    /// Somebody is connected to this Dogma, whether or not they are in a Cage.
+    ///
+    /// # Why this exists at all
+    ///
+    /// [`Self::PilotJoined`] carries a Cage, because it announces sitting down
+    /// in one. There was nothing that announced being *here* — so a pilot who
+    /// connected and stayed out of every room was invisible to everybody else,
+    /// and a client's own comment said so: "there is no message on the wire
+    /// that says who entered the server and stayed out of the rooms". The
+    /// people list showed whoever was seated and called itself the roster.
+    ///
+    /// Sent once per connected pilot when a session opens — the whole picture,
+    /// like the occupancy sweep beside it — and again to everybody whenever
+    /// somebody new arrives.
+    ///
+    /// Idempotent by construction: a pilot who is announced twice is one entry,
+    /// because whoever receives it keys on [`PilotProfile::id`].
+    ///
+    /// **At the end of the enum, and this is not stylistic.** Postcard writes a
+    /// variant's index and nothing else; a variant inserted in the middle
+    /// renumbers every one after it, and two builds of this product would then
+    /// disagree about what every later message means.
+    PilotPresent {
+        /// Who.
+        profile: PilotProfile,
+        /// Their media source, for the ssrc-to-person table every client keeps.
+        ssrc: Ssrc,
+    },
+    /// Somebody's connection to this Dogma ended.
+    ///
+    /// The twin of [`Self::PilotPresent`], and the half that hurts to leave
+    /// out: without it every client accumulates the names of everyone who has
+    /// ever connected and draws them as present. [`Self::PilotLeft`] does not
+    /// cover it — that one says a Cage was vacated, and somebody who never sat
+    /// down never produces one.
+    PilotGone {
+        /// Who.
+        pilot: PilotId,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -1837,7 +1899,7 @@ impl Validate for ServerMessage {
             Self::CageRenamed { name, .. } | Self::LineRenamed { name, .. } => {
                 check_name("name", name)
             }
-            Self::PilotJoined { profile, .. } => {
+            Self::PilotJoined { profile, .. } | Self::PilotPresent { profile, .. } => {
                 check("nickname", profile.nickname.len(), MAX_NICKNAME_LEN)
             }
             Self::MessageReceived {
@@ -1871,6 +1933,7 @@ impl Validate for ServerMessage {
             Self::DogmaRenamed { name } => check_dogma_name(name),
             Self::DogmaIconChanged { icon } => check_icon(icon.as_ref()),
             Self::PilotLeft { .. }
+            | Self::PilotGone { .. }
             | Self::MessageRemoved { .. }
             | Self::Pong { .. }
             | Self::Disconnecting { .. }

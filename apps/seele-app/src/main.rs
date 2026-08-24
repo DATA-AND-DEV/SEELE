@@ -1227,10 +1227,20 @@ fn ajustar_limites_da_tela(
 /// fechamento não é erro de ninguém.
 #[tauri::command]
 fn tela_cheia(app: AppHandle, ligada: bool) {
-    if let Some(janela) = app.get_webview_window("main") {
-        if let Err(erro) = janela.set_fullscreen(ligada) {
-            tracing::debug!(%erro, ligada, "a janela não trocou de modo");
-        }
+    // Pelo rótulo, e por qualquer uma se o rótulo não achar. O `main` é o que o
+    // Tauri dá quando o `tauri.conf.json` não nomeia a janela — e ele não a
+    // nomeia. Depender de um padrão que não está escrito em lugar nenhum é o
+    // tipo de coisa que some numa atualização do Tauri sem ninguém notar, e o
+    // sintoma seria este botão parando de funcionar em silêncio.
+    let janela = app
+        .get_webview_window("main")
+        .or_else(|| app.webview_windows().into_values().next());
+    let Some(janela) = janela else {
+        tracing::debug!(ligada, "não há janela para pôr em tela cheia");
+        return;
+    };
+    if let Err(erro) = janela.set_fullscreen(ligada) {
+        tracing::debug!(%erro, ligada, "a janela não trocou de modo");
     }
 }
 

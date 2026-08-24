@@ -285,6 +285,16 @@ pub async fn serve(
         });
     }
 
+    // E some da lista de presentes, pelo mesmo caminho e pelo mesmo motivo do
+    // laço acima: sem isto, todo cliente acumula o nome de quem já conectou
+    // alguma vez e desenha todos como presentes. `PilotLeft` não cobre — ele
+    // diz que uma sala esvaziou, e quem nunca se sentou não produz nenhum.
+    if dogma.presentes.lock().await.saiu(session.pilot) {
+        let _ = dogma.events.send(Event::PilotGone {
+            pilot: session.pilot,
+        });
+    }
+
     tracing::info!(pilot = %session.pilot, "session ended");
     result
 }
@@ -560,9 +570,33 @@ async fn handshake(
 
         let pilot = melchior
             .register_or_find(&public_key, &nickname)
-            .map_err(|error| Refusal {
-                reason: DisconnectReason::CredentialRejected,
-                detail: format!("could not establish an account: {error}"),
+            .map_err(|error| {
+                // O apelido tomado ganha razão própria, e é o conserto de um
+                // defeito de campo: «aprovei a entrada e continua dando
+                // credencial recusada, mesmo fechando o app». Quatro falhas
+                // diferentes vestiam a mesma frase, e esta é a única que não
+                // passa com o tempo — não adianta tentar de novo, ser aprovado
+                // de novo, nem reinstalar. O nome é de outra chave, e só trocar
+                // de nome resolve.
+                //
+                // Distinguir aqui não fere a uniformidade que a
+                // `specs/08-seguranca.md` pede: esta linha é depois da
+                // assinatura e depois da portaria, então nada foi adivinhado —
+                // e num Dogma sem portaria os apelidos que se poderiam
+                // enumerar aqui são os que o roster entrega a quem entra.
+                if matches!(
+                    error.downcast_ref::<crate::melchior::Refusal>(),
+                    Some(crate::melchior::Refusal::NicknameTaken)
+                ) {
+                    return Refusal {
+                        reason: DisconnectReason::NicknameTaken,
+                        detail: format!("o apelido {nickname} é de outra chave"),
+                    };
+                }
+                Refusal {
+                    reason: DisconnectReason::CredentialRejected,
+                    detail: format!("could not establish an account: {error}"),
+                }
             })?;
 
         if melchior.is_banned(pilot.id).unwrap_or(false) {
@@ -1018,6 +1052,51 @@ async fn run_session(
     // about that — while the other order would drop one, and a dropped arrival
     // is a person who is in the room and not on the screen, which is the whole
     // bug again.
+    // Quem está aqui, sentado ou não — a metade que faltava da fotografia.
+    //
+    // A ocupação abaixo diz quem está em qual sala; esta diz quem está no
+    // Dogma. Sem ela, alguém que conecta e fica fora das salas não existe para
+    // mais ninguém, e a lista de pessoas mostra os sentados chamando-se
+    // «pessoas». Mesma ordem e mesmo motivo: depois do `subscribe`, para não
+    // perder uma chegada entre as duas linhas.
+    {
+        let mut presentes = dogma.presentes.lock().await;
+        for quem in presentes.todos() {
+            if quem.pilot == session.pilot {
+                continue;
+            }
+            frame::write(
+                &mut send,
+                &ServerMessage::PilotPresent {
+                    profile: PilotProfile {
+                        id: quem.pilot,
+                        nickname: quem.nickname.clone(),
+                        roles: Vec::new(),
+                    },
+                    ssrc: quem.ssrc,
+                },
+            )
+            .await?;
+        }
+        // E esta conexão passa a existir para as próximas. Anunciada só quando
+        // é chegada de verdade: uma reconexão dentro da carência é a mesma
+        // pessoa, e um segundo anúncio faria a lista de todo mundo piscar.
+        let chegou = presentes.chegou(crate::dogma::Occupant {
+            pilot: session.pilot,
+            nickname: session.nickname.clone(),
+            ssrc: session.ssrc,
+        });
+        if chegou {
+            let _ = dogma.events.send(Event::PilotPresent {
+                quem: crate::dogma::Occupant {
+                    pilot: session.pilot,
+                    nickname: session.nickname.clone(),
+                    ssrc: session.ssrc,
+                },
+            });
+        }
+    }
+
     for (cage, occupant) in dogma.occupancy.lock().await.everywhere() {
         if occupant.pilot == session.pilot {
             continue;
@@ -2483,6 +2562,21 @@ fn translate(event: &Event, lines: &[LineId], self_pilot: PilotId) -> Option<Ser
                 cage: *left,
                 pilot: *pilot,
             })
+        }
+        // Estes dois **também** não voltam para quem os causou: quem acabou de
+        // conectar sabe que conectou, e quem saiu não está mais aqui para ler.
+        Event::PilotPresent { quem } => (quem.pilot != self_pilot).then(|| {
+            ServerMessage::PilotPresent {
+                profile: PilotProfile {
+                    id: quem.pilot,
+                    nickname: quem.nickname.clone(),
+                    roles: Vec::new(),
+                },
+                ssrc: quem.ssrc,
+            }
+        }),
+        Event::PilotGone { pilot } => {
+            (*pilot != self_pilot).then_some(ServerMessage::PilotGone { pilot: *pilot })
         }
         // Echoed back to the pilot it describes, unlike the two above.
         //

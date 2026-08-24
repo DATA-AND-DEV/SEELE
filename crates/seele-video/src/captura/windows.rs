@@ -36,14 +36,26 @@
 //! porque não há a quem pedir — e a ausência é o motivo de a interface ter de
 //! ser mais explícita do que o sistema exige.
 //!
-//! **A borda amarela fica.** O `windows-capture` oferece
-//! [`DrawBorderSettings::WithoutBorder`], que chama `SetIsBorderRequired(false)`
-//! — e isso exige a capacidade `graphicsCaptureWithoutBorder` num manifesto de
-//! pacote, que um instalador NSIS não tem. Este arquivo passa
-//! [`DrawBorderSettings::Default`] **de propósito**: pedir o que não se pode
-//! ter trocaria uma borda por um erro na hora de começar a transmitir, que é
-//! justamente o defeito que o §2 proíbe («o botão de compartilhar não pode
-//! falhar»).
+//! **A borda amarela sai, quando o Windows deixa.** O `windows-capture` oferece
+//! [`DrawBorderSettings::WithoutBorder`], que chama `SetIsBorderRequired(false)`.
+//!
+//! Este cabeçalho dizia, com todas as letras, que isso exigia a capacidade
+//! `graphicsCaptureWithoutBorder` num manifesto de pacote — que um instalador
+//! NSIS não tem — e que portanto a borda ficava. **Estava errado, e o erro era
+//! meu por escrever de cabeça o que a documentação diz de uma rota e não da
+//! outra.** `spikes/tela-sem-borda` mediu num Windows 11 build 26200, com este
+//! mesmo crate e sem manifesto nenhum: a chamada passa e o contorno some.
+//!
+//! O que **não** dá para assumir é que passa em toda parte. Builds mais antigos
+//! não têm a propriedade, e não há como saber sem tentar:
+//! `GraphicsCaptureApi::is_border_settings_supported` só confere se a
+//! propriedade **existe** no sistema, não se este processo pode usá-la — ela
+//! responderia `true` e a captura morreria ao começar.
+//!
+//! Daí a forma de [`ligar`]: tenta sem a borda, e se a sessão não abrir, abre
+//! de novo com ela. Perguntar e confiar na resposta trocaria uma borda amarela
+//! por um botão de compartilhar que falha, que é o defeito que o §2 proíbe por
+//! escrito.
 //!
 //! # A cadência não é nossa, e este é o achado que muda o desenho de quem chama
 //!
@@ -728,12 +740,57 @@ pub struct Captura {
 }
 
 /// Liga a captura para um item que a WGC saiba converter.
+///
+/// **Tenta sem a borda e cai para a borda se o sistema recusar**, nesta ordem e
+/// nunca ao contrário. Ver [`sem_borda_ou_com`].
 fn ligar<T>(
     item: T,
     caixa: Arc<Caixa>,
     destino: Resolucao,
     intervalo: Duration,
     do_sistema: MinimumUpdateIntervalSettings,
+) -> Result<CaptureControl<Manipulador, ErroDeCaptura>, ErroDeCaptura>
+where
+    T: TryInto<GraphicsCaptureItemType> + Clone + Send + 'static,
+{
+    match ligar_com_borda(
+        item.clone(),
+        Arc::clone(&caixa),
+        destino,
+        intervalo,
+        do_sistema,
+        DrawBorderSettings::WithoutBorder,
+    ) {
+        Ok(controle) => Ok(controle),
+        Err(erro) => {
+            // Não é defeito: é um Windows que não deixa este app desligar a
+            // borda. A alternativa seria devolver o erro, e aí uma borda
+            // amarela teria virado um botão de compartilhar que falha — o
+            // defeito que o §2 proíbe por escrito.
+            // Sem `tracing`: este crate não o tem na árvore, e trazê-lo por
+            // causa de uma linha seria pagar caro por um recado que não é de
+            // erro. Quem quiser o detalhe roda `spikes/tela-sem-borda`.
+            let _ = &erro;
+            ligar_com_borda(
+                item,
+                caixa,
+                destino,
+                intervalo,
+                do_sistema,
+                DrawBorderSettings::Default,
+            )
+        }
+    }
+}
+
+/// A metade que fala com a WGC, com a decisão da borda vinda de fora.
+fn ligar_com_borda<T>(
+    item: T,
+    caixa: Arc<Caixa>,
+    destino: Resolucao,
+    intervalo: Duration,
+    do_sistema: MinimumUpdateIntervalSettings,
+    borda: DrawBorderSettings,
 ) -> Result<CaptureControl<Manipulador, ErroDeCaptura>, ErroDeCaptura>
 where
     T: TryInto<GraphicsCaptureItemType> + Send + 'static,
@@ -745,11 +802,7 @@ where
         // um segundo ponteiro, com anotação —, e não o que a composição já põe
         // no quadro de graça.
         CursorCaptureSettings::WithCursor,
-        // A borda amarela fica (§4). Pedir `WithoutBorder` chamaria
-        // `SetIsBorderRequired(false)`, que exige a capacidade
-        // `graphicsCaptureWithoutBorder` num manifesto de pacote que um
-        // instalador NSIS não tem.
-        DrawBorderSettings::Default,
+        borda,
         SecondaryWindowSettings::Default,
         do_sistema,
         DirtyRegionSettings::Default,
