@@ -8055,3 +8055,35 @@ fn toda_camada_fecha_apertando_fora_dela() {
         );
     }
 }
+
+#[test]
+fn todo_caminho_que_troca_de_servidor_larga_o_convite_do_anterior() {
+    // O token de um convite vale para **um** servidor. Levá-lo para o próximo é
+    // mandar a credencial de um lugar para outro, que a recusa — e a recusa
+    // fala da coisa errada: «credencial recusada» num servidor que não pediu
+    // credencial nenhuma.
+    //
+    // `limparConvite` existe desde sempre e o comentário dela já dizia isso.
+    // Faltava chamá-la: ela só rodava quando alguém esvaziava o campo à mão, e
+    // quem entra por link nunca esvazia. O efeito era a trilha de servidores
+    // salvos simplesmente não funcionar, relatado assim — «reconectar pela tela
+    // de cima não funciona».
+    //
+    // A guarda é sobre as **duas** funções que trocam de destino, e não sobre
+    // uma: `sairParaAEntrada` esvazia o endereço e teria o mesmo problema.
+    let fonte = without_comments(&read("ui/tela-sessao.js"));
+    for funcao in ["trocarDeServidor", "sairParaAEntrada"] {
+        let Some(corpo) = fonte
+            .split(&format!("async function {funcao}("))
+            .nth(1)
+            .and_then(|resto| resto.split("\n}").next())
+        else {
+            panic!("{funcao} sumiu de tela-sessao.js");
+        };
+        assert!(
+            corpo.contains("limparConvite()"),
+            "{funcao} troca de servidor sem largar o convite do anterior; o \
+             próximo servidor vai recusar uma credencial que não é dele"
+        );
+    }
+}

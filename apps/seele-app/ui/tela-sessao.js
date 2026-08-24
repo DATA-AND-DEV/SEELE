@@ -2126,6 +2126,18 @@ async function pedirAEntrada() {
  */
 async function trocarDeServidor(alvo, apelido) {
   await ejetar();
+  // **O convite do servidor anterior fica para trás**, e sem esta linha a troca
+  // simplesmente não funcionava.
+  //
+  // `limparConvite` já existia, e o comentário dela já descrevia este defeito
+  // com todas as letras: «o token vale para o servidor daquele link; deixá-lo
+  // para trás numa troca de endereço manda a credencial de um servidor para
+  // outro, que a recusa». Ela só era chamada quando alguém esvaziava o campo à
+  // mão — e quem entra por link nunca esvazia.
+  //
+  // O sintoma é cruel de depurar porque a recusa fala da coisa errada:
+  // «credencial recusada» num servidor que não pediu credencial nenhuma.
+  limparConvite();
   $("campo-servidor").value = alvo;
   $("campo-apelido").value = apelido;
   await conectar();
@@ -2145,6 +2157,10 @@ async function trocarDeServidor(alvo, apelido) {
  */
 async function sairParaAEntrada() {
   await ejetar();
+  // Pelo mesmo motivo de `trocarDeServidor`, e aqui é ainda mais claro: quem
+  // apertou «conectar a outro servidor» já disse que não é aquele, e o token
+  // daquele não tem o que fazer no formulário do próximo.
+  limparConvite();
   $("campo-servidor").value = "";
 }
 
