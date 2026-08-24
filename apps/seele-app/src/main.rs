@@ -20,6 +20,13 @@
 // A desktop shell with no window is not a desktop shell. The attribute keeps
 // the console from opening behind the app on Windows.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// `specs/10-convencoes.md`: fora de teste não há `unwrap`/`expect`. Dentro, um
+// `expect` com mensagem é mais legível que um `match` que só pode ir para um
+// lado, e uma falha ali é falha do teste e não do produto. Mesma linha, mesma
+// razão, que a de `seele-video`.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
+mod icone;
 
 use std::sync::{Arc, Mutex};
 
@@ -916,11 +923,15 @@ const LADO_DO_ICONE: u32 = 256;
 /// diálogo é modal e roda no laço de eventos da janela, e a versão bloqueante
 /// trava esse laço se for chamada de dentro dele.
 ///
-/// Lê no máximo o teto **mais um byte**. O byte a mais não é folga: é o que faz
-/// um arquivo grande demais chegar a `Plug::set_dogma_icon` grande demais, para
-/// que quem responda «não cabe» seja o protocolo, com o número dele, e não esta
-/// casca com uma cópia que pode ter envelhecido. Sem o corte, escolher um vídeo
-/// de dois gigabytes seria lê-lo inteiro para a memória antes de ouvir «não».
+/// **A imagem escolhida é encolhida aqui**, e é o que faz este botão servir para
+/// alguma coisa. O teto do protocolo é 8 KiB, e nenhuma imagem que uma pessoa
+/// tem no computador tem 8 KiB: a versão anterior lia o arquivo, ouvia «não
+/// cabe» do protocolo e devolvia isso à tela, o que na prática queria dizer
+/// «arrume um PNG minúsculo por conta própria». Ver `icone::encolher`.
+///
+/// Lê no máximo `icone::TETO_DA_ORIGEM`, que é o teto do **arquivo escolhido** e
+/// não o do ícone: sem um corte, escolher um vídeo de dois gigabytes seria
+/// lê-lo inteiro para a memória antes de descobrir que não é imagem.
 #[tauri::command]
 async fn escolher_icone_do_dogma(
     app: AppHandle,
@@ -953,14 +964,25 @@ async fn escolher_icone_do_dogma(
     };
     let mut bytes = Vec::new();
     if arquivo
-        .take(TETO_DO_ICONE.saturating_add(1))
+        .take(icone::TETO_DA_ORIGEM.saturating_add(1))
         .read_to_end(&mut bytes)
         .is_err()
     {
         return Err(PlugError::IconNotAPicture);
     }
 
-    session.plug()?.set_dogma_icon(Some(bytes))?;
+    // Fora da linha principal: uma foto de doze megapixels leva um tempo visível
+    // para ser decodificada e reduzida, e fazer isso no laço de eventos congela
+    // a janela inteira no meio de um gesto que parecia instantâneo.
+    let Ok(Some(pronto)) = tauri::async_runtime::spawn_blocking(move || icone::encolher(&bytes))
+        .await
+    else {
+        // Não é imagem, ou é uma que nem o último degrau fez caber. As duas
+        // dizem a mesma coisa a quem escolheu: este arquivo não vira ícone.
+        return Err(PlugError::IconNotAPicture);
+    };
+
+    session.plug()?.set_dogma_icon(Some(pronto))?;
     Ok(true)
 }
 

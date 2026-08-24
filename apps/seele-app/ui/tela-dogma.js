@@ -552,12 +552,21 @@ function desenharServidor(snapshot) {
   if (document.activeElement !== campo) campo.value = snapshot.dogma ?? "";
 }
 
-/** A frase da regra, com os dois números que o Rust conta. */
+/**
+ * A frase da regra.
+ *
+ * **Sem os dois números**, agora que o app encolhe a imagem antes de enviá-la.
+ * Eles continuam sendo a regra do protocolo e continuam vindo do Rust — o que
+ * mudou é que deixaram de ser uma tarefa de quem escolhe. Dizer «no máximo
+ * 8 KiB» a quem tem uma foto de 3 MB é enunciar um requisito sem dizer como
+ * cumpri-lo, e a resposta honesta era «não sei, use outro programa».
+ */
 function desenharRegraDoIcone() {
   if (!regrasDoIcone) return;
   $("dogma-icone-regra").textContent =
-    `PNG, no máximo ${emKibibytes(regrasDoIcone.limite_bytes)} e ` +
-    `${regrasDoIcone.lado} pixels de cada lado.`;
+    "Qualquer imagem. Ela é reduzida a um distintivo de até " +
+    `${regrasDoIcone.lado} pixels e ${emKibibytes(regrasDoIcone.limite_bytes)} ` +
+    "antes de ir para quem está conectado.";
 }
 
 /** `8 KiB` — o teto como uma pessoa o lê. */
@@ -576,7 +585,10 @@ function emKibibytes(bytes) {
  */
 function fraseDeIcone(falha) {
   if (falha === "IconNotAPicture") {
-    return "ESTE ARQUIVO NÃO SERVE COMO IMAGEM DESTE SERVIDOR.\nEle precisa ser um PNG.";
+    return (
+      "ESTE ARQUIVO NÃO SERVE COMO IMAGEM DESTE SERVIDOR.\n" +
+      "PNG, JPEG, WebP e GIF servem; o que o app não conseguir abrir como imagem, não."
+    );
   }
   if (falha && typeof falha === "object" && falha.IconTooBig) {
     const teto = emKibibytes(falha.IconTooBig.limit_bytes);
