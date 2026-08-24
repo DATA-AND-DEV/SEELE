@@ -8013,3 +8013,45 @@ fn nenhum_termo_aposentado_volta_para_o_texto_da_interface() {
         achados.join("\n")
     );
 }
+
+#[test]
+fn toda_camada_fecha_apertando_fora_dela() {
+    // O `Escape` sozinho não bastava, e a razão é de quem usa: ele está longe
+    // da mão que acabou de clicar, e quem nunca leu a documentação não tem por
+    // que saber que ele fecha. Apertar fora é o gesto que todo mundo tenta
+    // primeiro, e era o que não acontecia.
+    //
+    // Cobrado sobre **todas** as camadas e não sobre a lista de hoje: uma
+    // quinta escrita amanhã tem de nascer com isto, e a forma de garantir é o
+    // teste descobrir sozinho quais existem.
+    let page = read("ui/index.html");
+    let scripts = scripts();
+
+    let mut camadas: Vec<String> = Vec::new();
+    let mut resto = page.as_str();
+    while let Some(inicio) = resto.find("role=\"dialog\"") {
+        let antes = &resto[..inicio];
+        let Some(marca) = antes.rfind("id=\"") else {
+            break;
+        };
+        let depois = &antes[marca + 4..];
+        let Some(fim) = depois.find('"') else { break };
+        camadas.push(depois[..fim].to_owned());
+        resto = &resto[inicio + 1..];
+    }
+
+    assert!(
+        camadas.len() >= 4,
+        "esperava pelo menos as quatro camadas conhecidas e achei {camadas:?}; \
+         ou o `role=\"dialog\"` mudou de forma e este guarda ficou cego"
+    );
+
+    for camada in &camadas {
+        let pedido = format!("fecharAoClicarFora(\"{camada}\"");
+        assert!(
+            scripts.contains(&pedido),
+            "a camada «{camada}» não fecha apertando fora dela: quem abriu por \
+             engano fica preso a uma tecla que ninguém lhe ensinou"
+        );
+    }
+}

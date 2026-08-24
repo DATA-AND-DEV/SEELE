@@ -756,6 +756,7 @@ $("moderar-quem").addEventListener("change", desenharDestinos);
 
 $("moderar-cancelar").addEventListener("click", desarmarAto);
 $("moderar-fechar").addEventListener("click", fecharModeracao);
+fecharAoClicarFora("moderar", fecharModeracao);
 
 $("moderar-confirmar").addEventListener("click", async () => {
   const ato = atoArmado;

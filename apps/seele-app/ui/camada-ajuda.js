@@ -52,6 +52,7 @@ function fecharAjuda() {
 }
 
 $("ajuda-fechar").addEventListener("click", fecharAjuda);
+fecharAoClicarFora("ajuda", fecharAjuda);
 $("ajuda-abrir").addEventListener("click", abrirAjuda);
 
 /*

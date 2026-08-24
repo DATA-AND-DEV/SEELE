@@ -127,12 +127,26 @@ function nomeDaResolucao(altura) {
  * app; no Linux quem decide é o compositor, e ele volta a perguntar sozinho.
  * Uma frase só mandaria metade das pessoas ao lugar errado.
  */
+// A resposta do macOS é **guardada pelo processo**, e isso decide o que estas
+// frases precisam dizer.
+//
+// `CGPreflightScreenCaptureAccess` responde uma vez e repete a mesma resposta
+// até o app reabrir. Quem concede nos Ajustes com o SEELE aberto vê a tela
+// continuar dizendo que não tem permissão, e lê isso como app quebrado — foi o
+// que aconteceu no primeiro teste de campo da 0.7.10, depois de a chave do
+// `Info.plist` já estar no lugar.
+//
+// Por isso as duas frases que precedem uma concessão mandam reabrir, e não só a
+// de recusa: quem chega pelo caminho «ainda não pediu» e resolve pelos ajustes
+// cai no mesmo cache.
 const PERMISSAO_DE_TELA = {
   NaoPerguntada: {
     diz: "ESTE APP AINDA NÃO PEDIU PARA GRAVAR A TELA",
     nota:
       "O sistema pergunta uma vez. Se você recusar, a volta é pelos ajustes " +
-      "dele, e não por aqui.",
+      "dele, e não por aqui — e depois de marcar lá é preciso **fechar e abrir " +
+      "o SEELE**: o macOS guarda a resposta pela vida do processo, e conceder " +
+      "com o app aberto não muda nada até ele reabrir.",
     pedir: true,
   },
   // Esta compilação não tem como perguntar ao sistema. A chamada nem desenha o
@@ -360,6 +374,7 @@ function abandonarCompartilhar() {
 // ------------------------------------------------------------------- ligação
 
 $("compartilhar-fechar").addEventListener("click", fecharCompartilhar);
+fecharAoClicarFora("compartilhar", fecharCompartilhar);
 
 /**
  * A escolha da fonte, por delegação.
@@ -408,6 +423,18 @@ $("compartilhar-comecar").addEventListener("click", async () => {
     }
     if (comecando) {
       registrarEventoDaChamada("você começou a compartilhar a sua tela", "anotacao");
+      // Começou: esta caixa some e a chamada entra.
+      //
+      // Quem acabou de escolher uma tela quer **ver** o que está saindo, e
+      // ficar na caixa de escolha depois de escolher é a tela pedindo uma
+      // decisão que já foi tomada. A chamada é onde a transmissão aparece —
+      // a própria e a dos outros —, e é para lá que o gesto aponta.
+      //
+      // Só quando começa. Mexer no teto de uma transmissão em curso não é
+      // motivo para trocar de tela: quem ajusta está olhando o controle, e
+      // arrancá-lo do olho seria o oposto do que ele pediu.
+      fecharCompartilhar();
+      await abrirChamada();
     }
   } catch (falha) {
     mostrarErroDeTela(falha);

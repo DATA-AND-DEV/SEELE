@@ -85,6 +85,36 @@ fn no_linux_as_ferramentas_vao_para_o_path() {
 }
 
 #[test]
+fn o_build_ad_hoc_do_mac_nao_liga_o_hardened_runtime() {
+    // As duas coisas juntas quebram a permissão de gravação de tela, e isso
+    // custou quatro tentativas num teste de campo — depois de a chave do
+    // `Info.plist` já estar no lugar.
+    //
+    // O hardened runtime é exigido pela **notarização**, que este build não
+    // faz. Ligado sobre uma assinatura ad-hoc, o macOS fica sem Team ID para
+    // formar um requisito estável, e a concessão de tela não gruda: conceder
+    // nos Ajustes não muda nada, e as tentativas empilham entradas mortas — o
+    // `tccutil` achou três do mesmo app.
+    //
+    // Desligado, o TCC guarda contra a impressão do binário e a concessão vale
+    // enquanto o binário não mudar.
+    //
+    // **As duas voltam juntas ou nenhuma volta.** No dia em que houver conta de
+    // desenvolvedor, `signingIdentity` deixa de ser `-` e aí sim o hardened
+    // runtime volta a `true`. Religá-lo sozinho reintroduz o defeito inteiro.
+    let limpo = ler("tauri.conf.json");
+    let ad_hoc = limpo.contains("\"signingIdentity\": \"-\"");
+    if ad_hoc {
+        assert!(
+            limpo.contains("\"hardenedRuntime\": false"),
+            "assinatura ad-hoc com hardened runtime ligado: a permissão de \
+             gravação de tela do macOS não gruda, e quem testar vai culpar o \
+             app:\n{limpo}"
+        );
+    }
+}
+
+#[test]
 fn o_app_declara_para_que_quer_a_tela() {
     // O mesmo defeito do microfone, a segunda vez. Sem esta chave o macOS nega
     // a gravação de tela **sem perguntar nada**, e o sintoma é a lista de telas

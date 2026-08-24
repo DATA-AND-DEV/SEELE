@@ -248,3 +248,37 @@ function voltarParaTela(tela) {
 // consequência de um controle é do produto e continua na tela, sempre visível,
 // como `.nota` de `base.css`; o que descrevia o mecanismo por trás dele saiu com
 // o modo. `apps/seele-app/tests/frontend.rs` prende as duas metades.
+
+/**
+ * Fecha uma camada quando se aperta fora da caixa dela.
+ *
+ * O `Escape` sozinho não bastava, e a razão é de quem usa: ele está longe da
+ * mão que acabou de clicar, e quem nunca leu a documentação não tem por que
+ * saber que ele fecha. Apertar fora é o gesto que todo mundo já tenta primeiro.
+ *
+ * # Por que aqui e não quatro vezes
+ *
+ * São quatro camadas — ajuda, compartilhar, moderação e portaria — e cada uma
+ * já repetia o próprio `Escape`. Uma quinta camada escrita amanhã ganha isto de
+ * graça ao chamar esta função, e não por lembrar de copiar um ouvinte.
+ *
+ * # O alvo é o véu, e só ele
+ *
+ * `evento.target === camada` e não `!caixa.contains(...)`: um clique que começa
+ * dentro da caixa e termina fora — arrastar para selecionar um texto e soltar
+ * no escuro — dispara no elemento onde **começou**, e fechar ali apagaria da
+ * tela o que a pessoa estava lendo. O `mousedown` é conferido junto pelo mesmo
+ * motivo: sem ele, soltar o botão fora depois de arrastar de dentro fecharia.
+ */
+function fecharAoClicarFora(id, fechar) {
+  const camada = $(id);
+  if (!camada) return;
+  let comecouNoVeu = false;
+  camada.addEventListener("mousedown", (evento) => {
+    comecouNoVeu = evento.target === camada;
+  });
+  camada.addEventListener("click", (evento) => {
+    if (comecouNoVeu && evento.target === camada) fechar();
+    comecouNoVeu = false;
+  });
+}

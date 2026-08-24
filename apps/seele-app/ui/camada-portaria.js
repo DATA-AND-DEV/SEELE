@@ -576,6 +576,7 @@ $("portaria-batendo-depois").addEventListener("click", () => {
 });
 
 $("portaria-fechar").addEventListener("click", fecharPortaria);
+fecharAoClicarFora("portaria", fecharPortaria);
 
 $("portaria").addEventListener("keydown", (evento) => {
   if (evento.key === "Escape") fecharPortaria();
