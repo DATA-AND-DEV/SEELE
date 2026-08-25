@@ -512,6 +512,13 @@ mod tests {
             apelido: apelido.to_owned(),
             cage,
             visto_em: 0,
+            // Os dois campos que a lista de conhecidos ganhou depois: o nome do
+            // Dogma e o ícone dele. Nenhum teste desta tela olha para eles — o
+            // que se testa aqui é a busca e a seleção, que trabalham sobre
+            // `alvo` e `apelido` —, e `None` é o que uma entrada escrita antes
+            // de os campos existirem carrega, que é o caso mais comum em disco.
+            nome: None,
+            icone: None,
         }
     }
 
