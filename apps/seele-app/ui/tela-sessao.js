@@ -568,7 +568,15 @@ function iniciaisDoApelido(apelido) {
  */
 function desenharCanais(snapshot) {
   const voice_rooms = snapshot.voice_rooms.map((voice_room) => {
-    const item = elemento("li", voice_room.occupied_by_us ? "voice room aberto" : "voice room");
+    // `voice_room` com sublinhado, e não `voice room`: aqui é **nome de
+    // classe**, e um espaço faz o navegador aplicar duas classes — `voice` e
+    // `room` — que não têm regra nenhuma. O `<li>` perdia padding, borda e
+    // fundo, e a lista de salas aparecia grudada no canto. A varredura de
+    // renomeação trocou `cage` pela forma em prosa aqui dentro.
+    const item = elemento(
+      "li",
+      voice_room.occupied_by_us ? "voice_room aberto" : "voice_room",
+    );
 
     const cabeca = elemento("span", "canal-cabeca");
     cabeca.append(elemento("span", "voice_room-nome", voice_room.name));

@@ -233,6 +233,113 @@ fn invoked_with_arguments(script: &str) -> Vec<(String, usize, String)> {
     achados
 }
 
+/// Os argumentos de uma chamada, separados no nível de topo.
+///
+/// Escrito à mão em vez de um `split(',')` porque o que interessa está
+/// frequentemente dentro de um ternário — `elemento("li", x ? "a" : "b")` — e
+/// dividir por vírgula crua devolveria pedaços que não são argumentos. Ele
+/// respeita parênteses, colchetes, chaves e aspas.
+fn argumentos_da_chamada(a_partir_do_parenteses: &str) -> Vec<String> {
+    let (mut prof, mut atual, mut args) = (0_i32, String::new(), Vec::new());
+    let mut aspas: Option<char> = None;
+    let mut escapado = false;
+    for c in a_partir_do_parenteses.chars() {
+        if let Some(fecha) = aspas {
+            atual.push(c);
+            if escapado {
+                escapado = false;
+            } else if c == '\\' {
+                escapado = true;
+            } else if c == fecha {
+                aspas = None;
+            }
+        } else if c == '"' || c == '\'' || c == '`' {
+            aspas = Some(c);
+            atual.push(c);
+        } else if c == '(' || c == '[' || c == '{' {
+            prof += 1;
+            if prof > 1 {
+                atual.push(c);
+            }
+        } else if c == ')' || c == ']' || c == '}' {
+            prof -= 1;
+            if prof == 0 {
+                args.push(atual);
+                return args;
+            }
+            atual.push(c);
+        } else if c == ',' && prof == 1 {
+            args.push(std::mem::take(&mut atual));
+        } else {
+            atual.push(c);
+        }
+    }
+    args
+}
+
+#[test]
+fn toda_classe_que_o_script_aplica_tem_regra_de_css() {
+    // **Nasceu de um defeito de campo, e o sintoma não parecia de código.**
+    //
+    // A renomeação de 2026-08-25 trocou `elemento("li", "cage")` por
+    // `elemento("li", "voice room")` — a forma em **prosa**, com espaço. Em CSS
+    // um espaço separa duas classes, então cada sala virava `voice` mais `room`,
+    // nenhuma das duas com regra: o `<li>` perdia padding, borda e fundo, e a
+    // lista aparecia grudada no canto esquerdo. Nada quebrou, nada avisou, e o
+    // build ficou verde.
+    //
+    // O guarda lê o **segundo argumento** de cada `elemento(...)` — a classe — e
+    // cobra que todo token dela tenha regra. Ler o argumento na posição certa é
+    // o que separa isto de um teste inútil: uma varredura por qualquer literal
+    // acusaria o **texto** do terceiro argumento, e uma que só olhasse literais
+    // colados à vírgula perderia o ternário, que é exatamente onde o defeito
+    // estava.
+    let folhas = styles() + &read("ui/tokens.css");
+    let mut regras: BTreeSet<String> = BTreeSet::new();
+    for pedaco in folhas.split('.').skip(1) {
+        let nome: String = pedaco
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+            .collect();
+        if !nome.is_empty() {
+            regras.insert(nome);
+        }
+    }
+
+    let script = without_comments(&scripts());
+    let mut sem_regra: Vec<String> = Vec::new();
+    let mut chamadas = 0_usize;
+    for (posicao, _) in script.match_indices("elemento(") {
+        // Fatiado por **byte**, que é o que `match_indices` devolve. Indexar
+        // um vetor de `char` com esse número trata acento como dois passos, e
+        // o separador sai devorando o arquivo — foi o primeiro estado deste
+        // guarda, e ele acusou texto de outra função inteiramente.
+        let args = argumentos_da_chamada(&script[posicao + "elemento".len()..]);
+        let Some(classe) = args.get(1) else { continue };
+        chamadas += 1;
+        for literal in classe.split('"').skip(1).step_by(2) {
+            for token in literal.split_whitespace() {
+                if !regras.contains(token) {
+                    sem_regra.push(format!("`{token}` (de \"{literal}\")"));
+                }
+            }
+        }
+    }
+
+    assert!(
+        chamadas > 20,
+        "só {chamadas} chamadas a `elemento(` com classe foram lidas, o que é \
+         pouco demais — o separador de argumentos provavelmente parou de casar e \
+         este teste está passando por não olhar nada"
+    );
+    assert!(
+        sem_regra.is_empty(),
+        "o script aplica classe que nenhuma folha estiliza — o elemento aparece \
+         sem espaçamento nenhum e nada avisa:\n  {}",
+        sem_regra.join("\n  ")
+    );
+}
+
 #[test]
 fn todo_argumento_que_o_frontend_manda_existe_no_comando() {
     // **O guarda irmão do de baixo, e ele nasceu de um defeito de campo.**
