@@ -41,8 +41,8 @@ pub struct Escolha {
     pub alvo: String,
     /// Com que nome entrar.
     pub apelido: String,
-    /// Cage a entrar.
-    pub cage: u32,
+    /// voice room a entrar.
+    pub voice_room: u32,
     /// Convite de uso único, quando veio de um link.
     pub convite: Option<String>,
     /// Impressão digital esperada, quando veio de um link.
@@ -131,7 +131,7 @@ impl Selecao {
             rascunho: Escolha {
                 alvo: String::new(),
                 apelido,
-                cage: 1,
+                voice_room: 1,
                 convite: None,
                 impressao_digital: None,
                 hospedar: false,
@@ -178,13 +178,13 @@ impl Selecao {
 
     fn ir_para(&mut self, item: &Item) -> Resultado {
         match item {
-            // Um Dogma conhecido já tem tudo: endereço, apelido e o Cage de
+            // Um Dogma conhecido já tem tudo: endereço, apelido e a sala de voz de
             // onde se parou. Uma tecla e pronto — é para isso que a lista
             // existe.
             Item::Visitado(conhecido) => {
                 self.apontar_para(conhecido.alvo.clone());
                 self.rascunho.apelido.clone_from(&conhecido.apelido);
-                self.rascunho.cage = conhecido.cage.unwrap_or(1);
+                self.rascunho.voice_room = conhecido.voice_room.unwrap_or(1);
                 Resultado::Pronto(Box::new(self.rascunho.clone()))
             }
             Item::Novo => {
@@ -247,7 +247,7 @@ impl Selecao {
     /// **Vazia**, e não preenchida com a sugestão. Preencher parece atencioso e
     /// é uma armadilha: quem quer outro nome digita, e o que digita gruda no que
     /// já estava. Foi assim que o primeiro teste desta tela entrou num Dogma
-    /// como `personoasuka`. Sugestão se mostra apagada e se aceita com Enter;
+    /// como `pessoaasuka`. Sugestão se mostra apagada e se aceita com Enter;
     /// digitar escreve por cima.
     fn perguntar_apelido(&mut self) {
         self.aberta = Some((Pergunta::Apelido, String::new()));
@@ -299,8 +299,8 @@ impl Selecao {
                     self.apontar_para(com_porta(&convite.alvo));
                     self.rascunho.impressao_digital = convite.impressao_digital;
                     self.rascunho.convite = convite.token;
-                    if let Some(numero) = convite.cage {
-                        self.rascunho.cage = numero;
+                    if let Some(numero) = convite.voice_room {
+                        self.rascunho.voice_room = numero;
                     }
                     self.perguntar_apelido();
                     Resultado::Segue
@@ -425,10 +425,10 @@ fn desenhar_lista(frame: &mut Frame<'_>, selecao: &Selecao, tema: Theme, area: R
 
             let texto = match item {
                 Item::Visitado(conhecido) => {
-                    let cage = conhecido
-                        .cage
+                    let voice_room = conhecido
+                        .voice_room
                         .map_or_else(String::new, |c| format!("  · SALA {c}"));
-                    format!("{}  ({}){}", conhecido.alvo, conhecido.apelido, cage)
+                    format!("{}  ({}){}", conhecido.alvo, conhecido.apelido, voice_room)
                 }
                 Item::Novo => "novo endereço…".to_owned(),
                 Item::Colar => "colar um convite seele://…".to_owned(),
@@ -506,11 +506,11 @@ fn desenhar_campo(
 mod tests {
     use super::*;
 
-    fn conhecido(alvo: &str, apelido: &str, cage: Option<u32>) -> Conhecido {
+    fn conhecido(alvo: &str, apelido: &str, voice_room: Option<u32>) -> Conhecido {
         Conhecido {
             alvo: alvo.to_owned(),
             apelido: apelido.to_owned(),
-            cage,
+            voice_room,
             visto_em: 0,
             // Os dois campos que a lista de conhecidos ganhou depois: o nome do
             // Dogma e o ícone dele. Nenhum teste desta tela olha para eles — o
@@ -542,7 +542,7 @@ mod tests {
         };
         assert_eq!(escolha.alvo, "recente:8383");
         assert_eq!(escolha.apelido, "ayanami");
-        assert_eq!(escolha.cage, 2);
+        assert_eq!(escolha.voice_room, 2);
         assert!(!escolha.hospedar);
     }
 
@@ -565,7 +565,7 @@ mod tests {
     #[test]
     fn digitar_um_apelido_escreve_por_cima_da_sugestao() {
         // Achado dirigindo a tela de verdade: com o campo preenchido pela
-        // sugestão, digitar `asuka` entrava no Dogma como `personoasuka`.
+        // sugestão, digitar `asuka` entrava no Dogma como `pessoaasuka`.
         let mut selecao = Selecao::nova(vec![conhecido("casa:8383", "pessoa", None)]);
 
         selecao.tecla(KeyCode::Char('n'));

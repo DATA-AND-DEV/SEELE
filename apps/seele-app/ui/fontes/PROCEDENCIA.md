@@ -141,7 +141,7 @@ depois deste commit**:
 | `▸` | `ui/index.html:234` | o prompt de composição |
 | `◂` | `ui/index.html:228` | busca: ocorrência anterior |
 | `▸` | `ui/index.html:230` | busca: próxima ocorrência |
-| `▼` / `▶` | `ui/seele.js:299` | Cage aberto / fechado |
+| `▼` / `▶` | `ui/seele.js:299` | VoiceRoom aberto / fechado |
 | `●` / `○` | `ui/seele.js:311` | pessoa falando / calado |
 | `⌘` | `ui/seele.js:956` | a dica de cópia do convite |
 

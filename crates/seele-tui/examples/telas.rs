@@ -77,7 +77,7 @@ fn operando() -> App {
     app.clock = "12:04:33".into();
     app.dogmas = vec!["Casa do Alexandre".into()];
     app.tree = vec![
-        Node::Cage {
+        Node::VoiceRoom {
             name: "SALA 1".into(),
             open: true,
             sync: None,
@@ -103,7 +103,7 @@ fn operando() -> App {
             at_field: true,
             total_isolation: false,
         }),
-        Node::Cage {
+        Node::VoiceRoom {
             name: "JOGOS".into(),
             open: false,
             sync: None,

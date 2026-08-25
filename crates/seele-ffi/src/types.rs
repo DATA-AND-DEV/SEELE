@@ -121,24 +121,24 @@ pub enum NoticeReason {
     SubsystemChanged,
     /// The connection is struggling.
     SyncDegraded,
-    /// Entry to a Cage was refused.
-    CageEntryRefused,
+    /// Entry to a voice room was refused.
+    VoiceRoomEntryRefused,
     /// The action needed a permission the person lacks.
     PermissionDenied,
-    /// The Cage is at its limit.
-    CageFull,
+    /// The voice room is at its limit.
+    VoiceRoomFull,
     /// The operator is saying something.
     OperatorNotice,
     /// The client is sending control frames faster than its budget.
     RateLimited,
-    /// An operator moved this person's plug into another Cage.
+    /// An operator moved this person's plug into another voice room.
     MovedByOperator,
-    /// The Cage this person's plug was in no longer exists.
-    CageDeleted,
+    /// The voice room this person's plug was in no longer exists.
+    VoiceRoomDeleted,
     /// A Line this person had open no longer exists.
     LineDeleted,
-    /// The Cage asked about is the only one the Dogma has, so it stays.
-    LastCage,
+    /// The voice room asked about is the only one the Dogma has, so it stays.
+    LastVoiceRoom,
     /// Somebody else is already sharing their screen in this room.
     ///
     /// One share per voice room (§6.3 da spec do compartilhamento de tela), and
@@ -168,15 +168,15 @@ impl From<seele_core::AlertReason> for NoticeReason {
             seele_core::AlertReason::Mentioned => Self::Mentioned,
             seele_core::AlertReason::SubsystemChanged => Self::SubsystemChanged,
             seele_core::AlertReason::SyncDegraded => Self::SyncDegraded,
-            seele_core::AlertReason::CageEntryRefused => Self::CageEntryRefused,
+            seele_core::AlertReason::VoiceRoomEntryRefused => Self::VoiceRoomEntryRefused,
             seele_core::AlertReason::PermissionDenied => Self::PermissionDenied,
-            seele_core::AlertReason::CageFull => Self::CageFull,
+            seele_core::AlertReason::VoiceRoomFull => Self::VoiceRoomFull,
             seele_core::AlertReason::OperatorNotice => Self::OperatorNotice,
             seele_core::AlertReason::RateLimited => Self::RateLimited,
             seele_core::AlertReason::MovedByOperator => Self::MovedByOperator,
-            seele_core::AlertReason::CageDeleted => Self::CageDeleted,
+            seele_core::AlertReason::VoiceRoomDeleted => Self::VoiceRoomDeleted,
             seele_core::AlertReason::LineDeleted => Self::LineDeleted,
-            seele_core::AlertReason::LastCage => Self::LastCage,
+            seele_core::AlertReason::LastVoiceRoom => Self::LastVoiceRoom,
             seele_core::AlertReason::ScreenShareTaken => Self::ScreenShareTaken,
             seele_core::AlertReason::ScreenShareOverHostUplink => Self::ScreenShareOverHostUplink,
         }
@@ -354,7 +354,7 @@ impl From<seele_core::tofu::Verdict> for Trust {
     }
 }
 
-/// One person in a Cage.
+/// One person in a voice room.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Person {
     /// Stable identifier for this person on this Dogma.
@@ -375,7 +375,7 @@ pub struct Person {
     pub is_self: bool,
 }
 
-/// The average Sync Ratio of a Cage, already banded — **MÉDIA DO CAGE**.
+/// The average Sync Ratio of a voice room, already banded — **MÉDIA DO VOICE_ROOM**.
 ///
 /// The comp computes this in the shell and colours it there. It is computed in
 /// the core instead, for the reason at the top of this module: a shell that
@@ -383,7 +383,7 @@ pub struct Person {
 /// arrives here is the number, the band and the size of the sample, and drawing
 /// is all that is left to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-pub struct CageSync {
+pub struct VoiceRoomSync {
     /// The average, 0 to 100, rounded to a whole point.
     ///
     /// The comp prints `82.4`; the datum is a `u8` at every point it exists, so
@@ -396,12 +396,12 @@ pub struct CageSync {
     pub people: u32,
 }
 
-impl From<seele_core::CageSync> for CageSync {
-    fn from(sync: seele_core::CageSync) -> Self {
+impl From<seele_core::VoiceRoomSync> for VoiceRoomSync {
+    fn from(sync: seele_core::VoiceRoomSync) -> Self {
         Self {
             ratio: sync.ratio,
             band: sync.band.into(),
-            // A Cage holds at most `limit` people and `limit` is a `u16`. The
+            // A voice room holds at most `limit` people and `limit` is a `u16`. The
             // saturation is unreachable and is here so the conversion cannot
             // panic on a server that says otherwise.
             people: u32::try_from(sync.people).unwrap_or(u32::MAX),
@@ -411,7 +411,7 @@ impl From<seele_core::CageSync> for CageSync {
 
 /// A voice channel.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
-pub struct Cage {
+pub struct VoiceRoom {
     /// Identifier.
     pub id: u32,
     /// Display name.
@@ -426,7 +426,7 @@ pub struct Cage {
     /// association optional.
     ///
     /// Carried so a shell can say what destroying that Line would do to this
-    /// room. The Cage survives it and comes out with no Line attached, which is
+    /// room. The voice room survives it and comes out with no Line attached, which is
     /// a change nobody asked for — and a product whose confirmations name their
     /// consequences has to be able to name that one.
     pub line: Option<u32>,
@@ -434,9 +434,9 @@ pub struct Cage {
     pub people: Vec<Person>,
     /// The average Sync Ratio of everybody inside, or `None` if nobody is.
     ///
-    /// `None` rather than zero: an empty Cage has nothing to average, and zero
+    /// `None` rather than zero: an empty voice room has nothing to average, and zero
     /// would draw every idle room in the critical colour.
-    pub sync: Option<CageSync>,
+    pub sync: Option<VoiceRoomSync>,
 }
 
 /// A text channel.
@@ -706,7 +706,7 @@ pub struct TelaEmCurso {
     /// Contadas no roster **desta** máquina, que é a única contagem que existe
     /// aqui. É a razão que a tela escreve ao lado da resolução — `720p · 6
     /// pessoas assistindo`, §5.1 — e **não** é, hoje, o N pelo qual o Dogma
-    /// dividiu o teto: esse número é calculado em `Cage::reconferir_o_teto` e
+    /// dividiu o teto: esse número é calculado em `VoiceRoom::reconferir_o_teto` e
     /// nenhum quadro de controle o carrega de volta ao cliente. Os dois
     /// coincidem sempre que o roster estiver em dia, e divergem no intervalo
     /// entre alguém entrar e o `PersonJoined` chegar.
@@ -810,12 +810,12 @@ pub struct Snapshot {
     /// This person's name.
     pub nickname: String,
     /// Voice channels, each carrying who is in it.
-    pub cages: Vec<Cage>,
+    pub voice_rooms: Vec<VoiceRoom>,
     /// Quem está conectado neste Dogma, em sala ou fora dela.
     ///
-    /// **Não é a soma de [`Cage::people`]**, e essa diferença é a razão de o
+    /// **Não é a soma de [`VoiceRoom::people`]**, e essa diferença é a razão de o
     /// campo existir: quem entra no servidor e fica fora das salas não aparece
-    /// em nenhum Cage, e por muito tempo não aparecia em lugar nenhum — a
+    /// em nenhum sala de voz, e por muito tempo não aparecia em lugar nenhum — a
     /// interface listava os sentados e chamava aquilo de «pessoas». A lista de
     /// quem está fora das salas é esta menos aquelas, e a subtração é uma linha
     /// de quem desenha.
@@ -871,9 +871,9 @@ pub struct Snapshot {
     /// hears nothing has this line and nothing else to tell them the pick did
     /// not take.
     pub playback: Option<PlaybackDevice>,
-    /// Whether this person may make and rename Cages and Lines.
+    /// Whether this person may make and rename voice_rooms and Lines.
     ///
-    /// So a shell can decide whether the control exists at all. `ManageCages`
+    /// So a shell can decide whether the control exists at all. `ManageVoiceRooms`
     /// as PERMISSIONS resolved it, sent down in the handshake — a single boolean
     /// and not the permission list, because this is the one a screen asks
     /// about, and a list would invite each shell to start deciding things out
@@ -883,11 +883,11 @@ pub struct Snapshot {
     /// interface esconder é conveniência; o servidor negar é a segurança." A
     /// shell that ignores this and asks anyway gets a `NoticeRaised` carrying
     /// `PermissionDenied`, and nothing is created.
-    pub may_manage_cages: bool,
+    pub may_manage_voice_rooms: bool,
     /// Whether this person may end somebody else's session — `expulsar`.
     ///
     /// One boolean per moderation verb rather than the permission list, for the
-    /// reason [`Snapshot::may_manage_cages`] gives: a list invites each shell to
+    /// reason [`Snapshot::may_manage_voice_rooms`] gives: a list invites each shell to
     /// start deciding things out of it, and four separate controls ask four
     /// separate questions. They are separate on the wire too —
     /// `specs/04-servidor-seele.md` enumerates four permissions and a role may
@@ -904,7 +904,7 @@ pub struct Snapshot {
     /// Only somebody else's: removing one's own needs no permission, so a shell
     /// offering the control on a message the reader wrote does not consult this.
     pub may_remove_message: bool,
-    /// Whether this person may move somebody between Cages — `mover_persono`.
+    /// Whether this person may move somebody between voice_rooms — `mover_pessoa`.
     pub may_move_person: bool,
     /// Whether this person may name the Dogma and give it a picture.
     ///
@@ -918,13 +918,13 @@ pub struct Snapshot {
     ///
     /// **Convenience, never enforcement**, like every flag beside it.
     pub may_customise_dogma: bool,
-    /// Whether this person may destroy Cages and Lines — `administrar_dogma`.
+    /// Whether this person may destroy voice_rooms and Lines — `administrar_dogma`.
     ///
-    /// Its own boolean, and deliberately not [`Snapshot::may_manage_cages`].
+    /// Its own boolean, and deliberately not [`Snapshot::may_manage_voice_rooms`].
     /// Making a room and renaming one are mistakes a Dogma survives; destroying
     /// one ends what other people wrote, and no screen of this product brings
-    /// it back. `specs/04-servidor-seele.md` calls `gerenciar_cages` "criar e
-    /// configurar Cages" and `administrar_dogma` "todo o resto sobre o Dogma",
+    /// it back. `specs/04-servidor-seele.md` calls `gerenciar_voice_rooms` "criar e
+    /// configurar salas de voz" and `administrar_dogma` "todo o resto sobre o Dogma",
     /// so a role that may build rooms without being able to unmake them is a
     /// role somebody can actually write — and a single boolean for both would
     /// make that role impossible to offer correctly.
@@ -953,7 +953,7 @@ pub enum Event {
     RosterChanged,
     /// A message arrived, changed, or went away.
     MessagesChanged,
-    /// Cages or Lines changed.
+    /// voice_rooms or Lines changed.
     ChannelsChanged,
     /// The Dogma renamed itself, or changed its picture.
     ///
@@ -1345,9 +1345,9 @@ pub enum PlugError {
     /// unplugged" is the wrong sentence to read after choosing a headset. The
     /// two point at opposite halves of the screen.
     PlaybackDeviceGone,
-    /// The named person is not in this Cage.
+    /// The named person is not in this voice room.
     UnknownPerson,
-    /// No Cage or Line by that name or number.
+    /// No voice room or Line by that name or number.
     UnknownChannel,
     /// The control stream broke.
     LinkLost,
@@ -1486,15 +1486,15 @@ mod tests {
             seele_core::AlertReason::Mentioned,
             seele_core::AlertReason::SubsystemChanged,
             seele_core::AlertReason::SyncDegraded,
-            seele_core::AlertReason::CageEntryRefused,
+            seele_core::AlertReason::VoiceRoomEntryRefused,
             seele_core::AlertReason::PermissionDenied,
-            seele_core::AlertReason::CageFull,
+            seele_core::AlertReason::VoiceRoomFull,
             seele_core::AlertReason::OperatorNotice,
             seele_core::AlertReason::RateLimited,
             seele_core::AlertReason::MovedByOperator,
-            seele_core::AlertReason::CageDeleted,
+            seele_core::AlertReason::VoiceRoomDeleted,
             seele_core::AlertReason::LineDeleted,
-            seele_core::AlertReason::LastCage,
+            seele_core::AlertReason::LastVoiceRoom,
         ];
         let mapped: std::collections::HashSet<NoticeReason> =
             all.into_iter().map(NoticeReason::from).collect();

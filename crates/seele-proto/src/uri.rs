@@ -103,8 +103,8 @@ pub struct Convite {
     pub impressao_digital: Option<String>,
     /// Token de uso único, se o link o trouxe.
     pub token: Option<String>,
-    /// Cage a entrar assim que conectar.
-    pub cage: Option<u32>,
+    /// sala de voz a entrar assim que conectar.
+    pub voice_room: Option<u32>,
 }
 
 impl Convite {
@@ -117,7 +117,7 @@ impl Convite {
             bilhete: None,
             impressao_digital: None,
             token: None,
-            cage: None,
+            voice_room: None,
         }
     }
 
@@ -173,10 +173,10 @@ impl Convite {
         self
     }
 
-    /// Acrescenta o Cage de destino.
+    /// Acrescenta a sala de voz de destino.
     #[must_use]
-    pub fn com_cage(mut self, cage: u32) -> Self {
-        self.cage = Some(cage);
+    pub fn com_voice_room(mut self, voice_room: u32) -> Self {
+        self.voice_room = Some(voice_room);
         self
     }
 
@@ -319,8 +319,8 @@ pub enum ErroDeUri {
     ImpressaoDigitalInvalida,
     /// O token tem caractere fora do alfabeto de convites.
     TokenInvalido,
-    /// O Cage não é um número.
-    CageInvalido,
+    /// A sala de voz não é um número.
+    VoiceRoomInvalido,
 }
 
 impl fmt::Display for ErroDeUri {
@@ -359,8 +359,8 @@ impl fmt::Display for Convite {
             write!(formatador, "{separador}convite={token}")?;
             separador = '&';
         }
-        if let Some(cage) = self.cage {
-            write!(formatador, "{separador}cage={cage}")?;
+        if let Some(voice_room) = self.voice_room {
+            write!(formatador, "{separador}room={voice_room}")?;
         }
         Ok(())
     }
@@ -424,8 +424,8 @@ pub fn analisar(texto: &str) -> Result<Convite, ErroDeUri> {
             // O bilhete de encontro. Validado como os outros endereços, e pelo
             // mesmo motivo: as duas metades terminam num `send_to`.
             "enc" => convite.bilhete = Some(Bilhete::ler(valor)?),
-            "cage" => {
-                convite.cage = Some(valor.parse().map_err(|_| ErroDeUri::CageInvalido)?);
+            "room" => {
+                convite.voice_room = Some(valor.parse().map_err(|_| ErroDeUri::VoiceRoomInvalido)?);
             }
             // Parâmetro desconhecido é ignorado, e de propósito: é o que
             // permite acrescentar um campo depois sem que clientes velhos
@@ -582,7 +582,7 @@ mod tests {
         let original = Convite::novo("dogma.exemplo:8383")
             .com_impressao_digital(FP)
             .com_token("7K4MNPQRSTVWXYZ23456")
-            .com_cage(2);
+            .com_voice_room(2);
 
         let texto = original.to_string();
         assert_eq!(analisar(&texto).expect("analisar"), original);
@@ -869,8 +869,8 @@ mod tests {
     fn parametro_desconhecido_e_ignorado_em_vez_de_recusado() {
         // É o que permite acrescentar um campo depois sem que cliente velho
         // recuse link novo.
-        let convite = analisar("seele://host:8383?futuro=1&cage=3").expect("analisar");
-        assert_eq!(convite.cage, Some(3));
+        let convite = analisar("seele://host:8383?futuro=1&room=3").expect("analisar");
+        assert_eq!(convite.voice_room, Some(3));
     }
 
     #[test]

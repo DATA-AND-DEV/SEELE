@@ -12,11 +12,11 @@ use std::sync::Arc;
 use anyhow::Result;
 use ed25519_dalek::SigningKey;
 use seele_core::{Client, MemoryPinStore, PinDecision, PinStore};
-use seele_proto::ids::CageId;
+use seele_proto::ids::VoiceRoomId;
 use seele_server::persistence::{Persistence, Location};
 use seele_server::{admissao, DogmaConfig, Server};
 
-const CAGE: CageId = CageId(1);
+const VOICE_ROOM: VoiceRoomId = VoiceRoomId(1);
 
 async fn subir(caminho: &std::path::Path) -> Result<(SocketAddr, Arc<Server>)> {
     let config = DogmaConfig {
@@ -192,18 +192,18 @@ async fn um_convite_serve_a_uma_pessoa_so() -> Result<()> {
     Ok(())
 }
 
-/// A senha de um Cage é conferida, e não só anunciada.
+/// A senha de uma sala de voz é conferida, e não só anunciada.
 #[tokio::test]
-async fn a_senha_do_cage_e_conferida() -> Result<()> {
+async fn a_senha_do_voice_room_e_conferida() -> Result<()> {
     let pasta = tempfile::tempdir()?;
     let banco = pasta.path().join("seele.db");
 
     {
-        // O Dogma semeia o Cage ao subir, então sobe uma vez antes de trancar.
+        // O Dogma semeia a sala de voz ao subir, então sobe uma vez antes de trancar.
         let (_, servidor) = subir(&banco).await?;
         servidor.shutdown();
         let mut persistence = Persistence::open(&Location::File(banco.clone()))?;
-        admissao::definir_senha_cage(&mut persistence, CAGE, Some("geofront"))?;
+        admissao::definir_senha_voice_room(&mut persistence, VOICE_ROOM, Some("geofront"))?;
     }
 
     let (endereco, servidor) = subir(&banco).await?;
@@ -216,9 +216,9 @@ async fn a_senha_do_cage_e_conferida() -> Result<()> {
     )
     .await?;
 
-    // A entrada sem senha é recusada com um alerta, não com uma queda: o Cage
+    // A entrada sem senha é recusada com um alerta, não com uma queda: a sala de voz
     // é um cômodo, e errar a senha dele não derruba a sessão.
-    cliente.insert_plug(CAGE).await?;
+    cliente.insert_plug(VOICE_ROOM).await?;
     let alerta = tokio::time::timeout(
         std::time::Duration::from_secs(3),
         aguardar_recusa(&mut cliente),
@@ -226,7 +226,7 @@ async fn a_senha_do_cage_e_conferida() -> Result<()> {
     .await;
     assert!(
         alerta.is_ok(),
-        "entrar num Cage trancado sem senha não foi recusado"
+        "entrar num sala de voz trancado sem senha não foi recusado"
     );
 
     servidor.shutdown();
@@ -238,7 +238,7 @@ async fn aguardar_recusa(cliente: &mut Client) {
         if matches!(
             mensagem,
             seele_proto::ServerMessage::Alert {
-                reason: seele_proto::control::AlertReason::CageEntryRefused,
+                reason: seele_proto::control::AlertReason::VoiceRoomEntryRefused,
                 ..
             }
         ) {
@@ -556,7 +556,7 @@ async fn quem_foi_recusado_ouve_outra_coisa_de_quem_so_espera() -> Result<()> {
 
     let voltou = conectar(
         endereco,
-        "persono4",
+        "pessoa4",
         4,
         Arc::new(MemoryPinStore::new()),
         None,
@@ -570,7 +570,7 @@ async fn quem_foi_recusado_ouve_outra_coisa_de_quem_so_espera() -> Result<()> {
 
     let esperando = conectar(
         endereco,
-        "persono5",
+        "pessoa5",
         5,
         Arc::new(MemoryPinStore::new()),
         None,
@@ -590,7 +590,7 @@ async fn quem_foi_recusado_ouve_outra_coisa_de_quem_so_espera() -> Result<()> {
     }
     let de_novo = conectar(
         endereco,
-        "persono4",
+        "pessoa4",
         4,
         Arc::new(MemoryPinStore::new()),
         None,

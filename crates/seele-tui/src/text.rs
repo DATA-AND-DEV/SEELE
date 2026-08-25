@@ -25,21 +25,21 @@ pub fn alert(reason: AlertReason) -> &'static str {
         AlertReason::Mentioned => "VOCÊ FOI CHAMADO",
         AlertReason::SubsystemChanged => "UM SUBSISTEMA MUDOU DE ESTADO",
         AlertReason::SyncDegraded => "SINAL EM QUEDA",
-        AlertReason::CageEntryRefused => "ENTRADA NA SALA DE VOZ RECUSADA",
+        AlertReason::VoiceRoomEntryRefused => "ENTRADA NA SALA DE VOZ RECUSADA",
         AlertReason::PermissionDenied => "PERMISSÃO NEGADA",
-        AlertReason::CageFull => "SALA DE VOZ LOTADA",
+        AlertReason::VoiceRoomFull => "SALA DE VOZ LOTADA",
         AlertReason::OperatorNotice => "AVISO DO OPERADOR",
         AlertReason::RateLimited => "VOCÊ ESTÁ FALANDO RÁPIDO DEMAIS PARA O SERVIDOR",
         AlertReason::MovedByOperator => "UM OPERADOR MOVEU VOCÊ DE SALA",
         // O plug já saiu e a conversa já saiu da tela quando isto chega. Sem a
         // frase, o que resta é uma sala que sumiu sozinha — que de onde se lê é
         // igualzinho a um cliente que perdeu a conta de onde estava.
-        AlertReason::CageDeleted => "A SALA DE VOZ EM QUE VOCÊ ESTAVA FOI APAGADA",
+        AlertReason::VoiceRoomDeleted => "A SALA DE VOZ EM QUE VOCÊ ESTAVA FOI APAGADA",
         AlertReason::LineDeleted => {
             "O CANAL DE TEXTO QUE VOCÊ LIA FOI APAGADO, COM TUDO QUE HAVIA NELE"
         }
         // A única recusa desta lista, e a única que ensina o passo seguinte.
-        AlertReason::LastCage => {
+        AlertReason::LastVoiceRoom => {
             "ESTA É A ÚNICA SALA DE VOZ DO SERVIDOR. FAÇA OUTRA ANTES DE APAGAR ESTA"
         }
         // Uma transmissão por sala. Diz **quem** ocupou, e não só que não deu:
@@ -146,18 +146,18 @@ mod tests {
         AlertReason::Mentioned,
         AlertReason::SubsystemChanged,
         AlertReason::SyncDegraded,
-        AlertReason::CageEntryRefused,
+        AlertReason::VoiceRoomEntryRefused,
         AlertReason::PermissionDenied,
-        AlertReason::CageFull,
+        AlertReason::VoiceRoomFull,
         AlertReason::OperatorNotice,
         AlertReason::RateLimited,
         AlertReason::MovedByOperator,
-        AlertReason::CageDeleted,
+        AlertReason::VoiceRoomDeleted,
         AlertReason::LineDeleted,
-        // The one that reads closest to `CageEntryRefused`, and the reason it
+        // The one that reads closest to `VoiceRoomEntryRefused`, and the reason it
         // is not that: "entry refused" is a sentence about walking into a room,
         // in front of somebody who was trying to destroy one.
-        AlertReason::LastCage,
+        AlertReason::LastVoiceRoom,
     ];
 
     const DISCONNECTS: [DisconnectReason; 12] = [

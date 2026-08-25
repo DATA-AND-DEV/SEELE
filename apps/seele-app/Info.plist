@@ -33,6 +33,6 @@
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>O SEELE mostra a sua tela para as outras pessoas da sala de voz, e só enquanto você estiver compartilhando. Nada é gravado.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>O SEELE usa o microfone para transmitir sua voz aos outros pessoas do Cage. Nada é gravado, e nada sai da sua máquina para além do Dogma ao qual você se conectou.</string>
+	<string>O SEELE usa o microfone para transmitir sua voz aos outros pessoas do VoiceRoom. Nada é gravado, e nada sai da sua máquina para além do Dogma ao qual você se conectou.</string>
 </dict>
 </plist>

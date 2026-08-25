@@ -1,13 +1,13 @@
-//! Cages and Lines — the rooms a Dogma is made of.
+//! voice_rooms and Lines — the rooms a Dogma is made of.
 //!
 //! `specs/04-servidor-seele.md`:
 //!
 //! > ```text
-//! >  ├─ Cage       — canal de voz     (id, nome, limite, senha?, papel mínimo)
+//! >  ├─ voice room       — canal de voz     (id, nome, limite, senha?, papel mínimo)
 //! >  └─ Linha      — canal de texto   (id, nome, papel mínimo de leitura/escrita)
 //! > ```
 //! >
-//! > Cages e Linhas são independentes; um Cage pode ter uma Linha associada, mas
+//! > salas de voz e Linhas são independentes; uma sala de voz pode ter uma Linha associada, mas
 //! > não é obrigatório.
 //!
 //! The tables have been in [`super::schema`] since migration 1, with every
@@ -35,8 +35,8 @@
 
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
-use seele_proto::control::{CageInfo, LineInfo};
-use seele_proto::ids::{CageId, LineId};
+use seele_proto::control::{VoiceRoomInfo, LineInfo};
+use seele_proto::ids::{VoiceRoomId, LineId};
 
 /// The channel tree, over PERSISTENCE.
 pub struct Channels<'a> {
@@ -52,7 +52,7 @@ impl<'a> Channels<'a> {
         }
     }
 
-    /// Every Cage, in the order a shell should draw them.
+    /// Every voice room, in the order a shell should draw them.
     ///
     /// `position` first and `id` as the tiebreak, so a Dogma that has never
     /// reordered anything still lists its rooms in the order they were made
@@ -61,15 +61,15 @@ impl<'a> Channels<'a> {
     /// # Errors
     ///
     /// Fails on a database error.
-    pub fn cages(&self) -> Result<Vec<CageInfo>> {
+    pub fn voice_rooms(&self) -> Result<Vec<VoiceRoomInfo>> {
         let mut statement = self.connection.prepare(
             "SELECT id, name, member_limit, password_hash IS NOT NULL, line_id
-             FROM cages ORDER BY position, id",
+             FROM voice_rooms ORDER BY position, id",
         )?;
         let rows = statement
             .query_map([], |row| {
-                Ok(CageInfo {
-                    id: CageId(row.get::<_, i64>(0)? as u32),
+                Ok(VoiceRoomInfo {
+                    id: VoiceRoomId(row.get::<_, i64>(0)? as u32),
                     name: row.get(1)?,
                     limit: row.get::<_, i64>(2)? as u16,
                     password_required: row.get(3)?,
@@ -102,7 +102,7 @@ impl<'a> Channels<'a> {
         Ok(rows)
     }
 
-    /// Makes a Cage, and returns it as the wire will carry it.
+    /// Makes a voice room, and returns it as the wire will carry it.
     ///
     /// `line` binds a text channel to the room. It is checked against the
     /// `lines` table rather than trusted: SQLite enforces the foreign key, but
@@ -114,7 +114,7 @@ impl<'a> Channels<'a> {
     ///
     /// Returns [`NoSuchChannel`] if `line` names a Line that is not there, or a
     /// database error.
-    pub fn create_cage(&self, name: &str, limit: u16, line: Option<LineId>) -> Result<CageInfo> {
+    pub fn create_voice_room(&self, name: &str, limit: u16, line: Option<LineId>) -> Result<VoiceRoomInfo> {
         let name = name.trim();
         if let Some(line) = line {
             if !self.line_exists(line)? {
@@ -124,24 +124,24 @@ impl<'a> Channels<'a> {
 
         self.connection
             .execute(
-                "INSERT INTO cages (name, member_limit, line_id, position)
-                 VALUES (?1, ?2, ?3, (SELECT COALESCE(MAX(position), 0) + 1 FROM cages))",
+                "INSERT INTO voice_rooms (name, member_limit, line_id, position)
+                 VALUES (?1, ?2, ?3, (SELECT COALESCE(MAX(position), 0) + 1 FROM voice_rooms))",
                 params![
                     name,
                     i64::from(limit),
                     line.map(|line| i64::from(line.get()))
                 ],
             )
-            .context("could not create the Cage")?;
+            .context("could not create the voice room")?;
 
-        Ok(CageInfo {
-            id: CageId(self.connection.last_insert_rowid() as u32),
+        Ok(VoiceRoomInfo {
+            id: VoiceRoomId(self.connection.last_insert_rowid() as u32),
             name: name.to_owned(),
             limit,
             // Nothing sets a password at creation. A room born locked is a room
             // whose maker has to tell everybody a secret before anybody can use
             // it, which is a separate decision taken later, with
-            // `admissao::definir_senha_cage`.
+            // `admissao::definir_senha_voice_room`.
             password_required: false,
             line,
         })
@@ -168,16 +168,16 @@ impl<'a> Channels<'a> {
         })
     }
 
-    /// Renames a Cage. Returns the trimmed name that was stored.
+    /// Renames a voice room. Returns the trimmed name that was stored.
     ///
     /// # Errors
     ///
-    /// Returns [`NoSuchChannel`] if there is no such Cage, or a database error.
-    pub fn rename_cage(&self, cage: CageId, name: &str) -> Result<String> {
+    /// Returns [`NoSuchChannel`] if there is no such voice room, or a database error.
+    pub fn rename_voice_room(&self, voice_room: VoiceRoomId, name: &str) -> Result<String> {
         let name = name.trim();
         let changed = self.connection.execute(
-            "UPDATE cages SET name = ?1 WHERE id = ?2",
-            params![name, i64::from(cage.get())],
+            "UPDATE voice_rooms SET name = ?1 WHERE id = ?2",
+            params![name, i64::from(voice_room.get())],
         )?;
         if changed == 0 {
             return Err(NoSuchChannel.into());
@@ -245,12 +245,12 @@ impl<'a> Channels<'a> {
         })
     }
 
-    /// Destroys a Cage.
+    /// Destroys a voice room.
     ///
     /// # The last one is refused
     ///
-    /// A Dogma with no Cage has nowhere to speak, and speaking is what this
-    /// product is. Somebody looking at a channel list with no voice room in it
+    /// A Dogma with na sala de voz has nowhere to speak, and speaking is what this
+    /// product is. Somebody looking at a channel list with na sala de voz in it
     /// cannot tell a working Dogma from a broken one — which is the exact
     /// condition [`crate::seed`] exists to prevent on the first boot, and it
     /// would be strange to spend a paragraph avoiding it there and then let a
@@ -261,7 +261,7 @@ impl<'a> Channels<'a> {
     ///
     /// # The Line bound to it survives
     ///
-    /// `specs/04-servidor-seele.md` makes Cages and Lines independent and the
+    /// `specs/04-servidor-seele.md` makes voice_rooms and Lines independent and the
     /// association optional. Destroying a voice room says nothing about the
     /// writing that happened to hang off it, and taking the Line down with it
     /// would destroy history through a verb whose confirmation never mentioned
@@ -269,21 +269,21 @@ impl<'a> Channels<'a> {
     ///
     /// # Errors
     ///
-    /// Returns [`NoSuchChannel`] if there is no such Cage, [`LastCage`] if it
+    /// Returns [`NoSuchChannel`] if there is no such voice room, [`LastVoiceRoom`] if it
     /// is the only one, or a database error.
-    pub fn delete_cage(&self, cage: CageId) -> Result<()> {
+    pub fn delete_voice_room(&self, voice_room: VoiceRoomId) -> Result<()> {
         let remaining: i64 =
             self.connection
-                .query_row("SELECT COUNT(*) FROM cages", [], |row| row.get(0))?;
+                .query_row("SELECT COUNT(*) FROM voice_rooms", [], |row| row.get(0))?;
         if remaining <= 1 {
-            // Checked before "does it exist", deliberately: with one Cage left,
+            // Checked before "does it exist", deliberately: with one voice room left,
             // the answer is the same whether the identifier names it or names
             // nothing, and the useful half of the answer is the reason.
-            return Err(LastCage.into());
+            return Err(LastVoiceRoom.into());
         }
         let changed = self.connection.execute(
-            "DELETE FROM cages WHERE id = ?1",
-            params![i64::from(cage.get())],
+            "DELETE FROM voice_rooms WHERE id = ?1",
+            params![i64::from(voice_room.get())],
         )?;
         if changed == 0 {
             return Err(NoSuchChannel.into());
@@ -304,8 +304,8 @@ impl<'a> Channels<'a> {
     /// The messages go by `ON DELETE CASCADE`, which migration 1 already
     /// declares. The other two are the ones a cascade cannot do:
     ///
-    /// - a Cage bound to this Line keeps existing and loses the binding.
-    ///   `cages.line_id` has no `ON DELETE` clause, so without this the delete
+    /// - a voice room bound to this Line keeps existing and loses the binding.
+    ///   `voice_rooms.line_id` has no `ON DELETE` clause, so without this the delete
     ///   fails on the foreign key and reaches the shell as a database error —
     ///   "could not destroy it", about a Line whose only sin is being useful to
     ///   a room.
@@ -335,7 +335,7 @@ impl<'a> Channels<'a> {
             params![id],
         )?;
         transaction.execute(
-            "UPDATE cages SET line_id = NULL WHERE line_id = ?1",
+            "UPDATE voice_rooms SET line_id = NULL WHERE line_id = ?1",
             params![id],
         )?;
         let changed = transaction.execute("DELETE FROM lines WHERE id = ?1", params![id])?;
@@ -356,23 +356,23 @@ impl<'a> Channels<'a> {
     }
 }
 
-/// The Cage or Line named does not exist.
+/// The voice room or Line named does not exist.
 ///
 /// Enumerated rather than a sentence, like every other refusal that can reach a
 /// client: the shell decides how to say it. `specs/02-protocolo.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("no such Cage or Line")]
+#[error("no such voice room or Line")]
 pub struct NoSuchChannel;
 
-/// The Cage named is the only one this Dogma has.
+/// The voice room named is the only one this Dogma has.
 ///
 /// Its own refusal rather than [`NoSuchChannel`], because the two ask different
 /// things of whoever reads them: one means "check the identifier", this one
 /// means "make another room first". `specs/02-protocolo.md` keeps the sentence
 /// out of the protocol; the shell writes it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("this is the only Cage in the Dogma")]
-pub struct LastCage;
+#[error("this is the only voice room in the Dogma")]
+pub struct LastVoiceRoom;
 
 /// What a Line holds, as the confirmation in front of destroying it needs it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -401,26 +401,26 @@ mod tests {
         // there and nothing outside a test block ever wrote to them.
         let persistence = store();
         let channels = Channels::new(&persistence);
-        assert!(channels.cages().unwrap().is_empty());
+        assert!(channels.voice_rooms().unwrap().is_empty());
         assert!(channels.lines().unwrap().is_empty());
     }
 
     #[test]
-    fn a_created_cage_reads_back_the_way_it_was_asked_for() {
+    fn a_created_voice_room_reads_back_the_way_it_was_asked_for() {
         let persistence = store();
         let channels = Channels::new(&persistence);
         let line = channels.create_line("geral").unwrap();
-        let cage = channels
-            .create_cage("CAGE-01 CENTRAL", 15, Some(line.id))
+        let voice_room = channels
+            .create_voice_room("VOICE_ROOM-01 CENTRAL", 15, Some(line.id))
             .unwrap();
 
         // What the creator is told, and what everybody else will read out of the
         // table, have to be the same thing — otherwise the room the maker sees
         // is not the room that exists.
-        assert_eq!(channels.cages().unwrap(), vec![cage.clone()]);
-        assert_eq!(cage.limit, 15);
-        assert_eq!(cage.line, Some(line.id));
-        assert!(!cage.password_required);
+        assert_eq!(channels.voice_rooms().unwrap(), vec![voice_room.clone()]);
+        assert_eq!(voice_room.limit, 15);
+        assert_eq!(voice_room.line, Some(line.id));
+        assert!(!voice_room.password_required);
     }
 
     #[test]
@@ -443,20 +443,20 @@ mod tests {
     }
 
     #[test]
-    fn a_cage_bound_to_a_line_that_is_not_there_is_refused_by_name() {
+    fn a_voice_room_bound_to_a_line_that_is_not_there_is_refused_by_name() {
         // The foreign key would stop it too, but it would stop it as a database
         // error — indistinguishable from the disk being full, and useless to the
         // person who mistyped a number.
         let persistence = store();
         let channels = Channels::new(&persistence);
-        let refused = channels.create_cage("CAGE-02", 8, Some(LineId(404)));
+        let refused = channels.create_voice_room("VOICE_ROOM-02", 8, Some(LineId(404)));
         assert!(refused
             .unwrap_err()
             .downcast_ref::<NoSuchChannel>()
             .is_some());
         assert!(
-            channels.cages().unwrap().is_empty(),
-            "the Cage was made anyway"
+            channels.voice_rooms().unwrap().is_empty(),
+            "the voice room was made anyway"
         );
     }
 
@@ -465,7 +465,7 @@ mod tests {
         let persistence = store();
         let channels = Channels::new(&persistence);
         assert!(channels
-            .rename_cage(CageId(404), "fantasma")
+            .rename_voice_room(VoiceRoomId(404), "fantasma")
             .unwrap_err()
             .downcast_ref::<NoSuchChannel>()
             .is_some());
@@ -620,7 +620,7 @@ mod tests {
     }
 
     #[test]
-    fn a_cage_bound_to_a_destroyed_line_keeps_existing_without_it() {
+    fn a_voice_room_bound_to_a_destroyed_line_keeps_existing_without_it() {
         // `specs/04-servidor-seele.md` makes the association optional, so the
         // room outlives the Line it pointed at. Without the unbinding, the
         // foreign key refuses the delete and the shell shows the sentence it
@@ -628,13 +628,13 @@ mod tests {
         let persistence = store();
         let channels = Channels::new(&persistence);
         let line = channels.create_line("geral").unwrap();
-        let cage = channels.create_cage("CAGE-01", 8, Some(line.id)).unwrap();
+        let voice_room = channels.create_voice_room("VOICE_ROOM-01", 8, Some(line.id)).unwrap();
 
         channels.delete_line(line.id).unwrap();
-        let cages = channels.cages().unwrap();
-        assert_eq!(cages.len(), 1, "the Cage went with the Line");
-        assert_eq!(cages[0].id, cage.id);
-        assert_eq!(cages[0].line, None);
+        let voice_rooms = channels.voice_rooms().unwrap();
+        assert_eq!(voice_rooms.len(), 1, "the voice room went with the Line");
+        assert_eq!(voice_rooms[0].id, voice_room.id);
+        assert_eq!(voice_rooms[0].line, None);
     }
 
     #[test]
@@ -670,57 +670,57 @@ mod tests {
     }
 
     #[test]
-    fn the_last_cage_is_refused_by_name() {
-        // A Dogma with no Cage has nowhere to speak, and somebody looking at a
-        // channel list with no voice room in it cannot tell a working Dogma from
+    fn the_last_voice_room_is_refused_by_name() {
+        // A Dogma with na sala de voz has nowhere to speak, and somebody looking at a
+        // channel list with na sala de voz in it cannot tell a working Dogma from
         // a broken one. Refused with its own error, so the shell can say "make
         // another room first" instead of "check the identifier".
         let persistence = store();
         let channels = Channels::new(&persistence);
-        let unica = channels.create_cage("CAGE-01", 8, None).unwrap();
+        let unica = channels.create_voice_room("VOICE_ROOM-01", 8, None).unwrap();
 
         assert!(channels
-            .delete_cage(unica.id)
+            .delete_voice_room(unica.id)
             .unwrap_err()
-            .downcast_ref::<LastCage>()
+            .downcast_ref::<LastVoiceRoom>()
             .is_some());
-        assert_eq!(channels.cages().unwrap().len(), 1);
+        assert_eq!(channels.voice_rooms().unwrap().len(), 1);
 
         // A segunda sala é o que destrava a primeira.
-        let segunda = channels.create_cage("CAGE-02", 8, None).unwrap();
-        channels.delete_cage(unica.id).unwrap();
-        let restantes = channels.cages().unwrap();
+        let segunda = channels.create_voice_room("VOICE_ROOM-02", 8, None).unwrap();
+        channels.delete_voice_room(unica.id).unwrap();
+        let restantes = channels.voice_rooms().unwrap();
         assert_eq!(restantes.len(), 1);
         assert_eq!(restantes[0].id, segunda.id);
     }
 
     #[test]
-    fn destroying_a_cage_leaves_the_line_it_was_bound_to_alone() {
-        // The other half of "Cages and Lines are independent". A voice room
+    fn destroying_a_voice_room_leaves_the_line_it_was_bound_to_alone() {
+        // The other half of "voice_rooms and Lines are independent". A voice room
         // going away is no statement about the writing hanging off it, and
         // taking the Line with it would destroy history through a verb whose
         // confirmation never mentioned any.
         let persistence = store();
         let channels = Channels::new(&persistence);
         let line = channels.create_line("geral").unwrap();
-        let cage = channels.create_cage("CAGE-01", 8, Some(line.id)).unwrap();
-        channels.create_cage("CAGE-02", 8, None).unwrap();
+        let voice_room = channels.create_voice_room("VOICE_ROOM-01", 8, Some(line.id)).unwrap();
+        channels.create_voice_room("VOICE_ROOM-02", 8, None).unwrap();
         let rei = person(&persistence, "rei", 1);
         say(&persistence, line.id, rei, "sobrevive", 100);
 
-        channels.delete_cage(cage.id).unwrap();
+        channels.delete_voice_room(voice_room.id).unwrap();
         assert_eq!(channels.weigh_line(line.id).unwrap().messages, 1);
         assert_eq!(channels.lines().unwrap(), vec![line]);
     }
 
     #[test]
-    fn destroying_a_cage_that_is_not_there_says_so() {
+    fn destroying_a_voice_room_that_is_not_there_says_so() {
         let persistence = store();
         let channels = Channels::new(&persistence);
-        channels.create_cage("CAGE-01", 8, None).unwrap();
-        channels.create_cage("CAGE-02", 8, None).unwrap();
+        channels.create_voice_room("VOICE_ROOM-01", 8, None).unwrap();
+        channels.create_voice_room("VOICE_ROOM-02", 8, None).unwrap();
         assert!(channels
-            .delete_cage(CageId(404))
+            .delete_voice_room(VoiceRoomId(404))
             .unwrap_err()
             .downcast_ref::<NoSuchChannel>()
             .is_some());
@@ -742,12 +742,12 @@ mod tests {
         assert_eq!(line.name, "geral");
         assert_eq!(channels.lines().unwrap()[0].name, "geral");
 
-        let cage = channels.create_cage("\tCAGE-01  ", 4, None).unwrap();
-        assert_eq!(cage.name, "CAGE-01");
+        let voice_room = channels.create_voice_room("\tVOICE_ROOM-01  ", 4, None).unwrap();
+        assert_eq!(voice_room.name, "VOICE_ROOM-01");
         assert_eq!(
-            channels.rename_cage(cage.id, " CAGE-02 ").unwrap(),
-            "CAGE-02"
+            channels.rename_voice_room(voice_room.id, " VOICE_ROOM-02 ").unwrap(),
+            "VOICE_ROOM-02"
         );
-        assert_eq!(channels.cages().unwrap()[0].name, "CAGE-02");
+        assert_eq!(channels.voice_rooms().unwrap()[0].name, "VOICE_ROOM-02");
     }
 }

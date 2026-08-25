@@ -21,7 +21,7 @@ use anyhow::Result;
 use ed25519_dalek::{Signer, SigningKey};
 use seele_proto::control::{ClientMessage, ServerMessage};
 use seele_proto::ids::{
-    CageId, ClientMessageId, LineId, MessageId, PersonId, ScreenId, SessionId, Ssrc,
+    VoiceRoomId, ClientMessageId, LineId, MessageId, PersonId, ScreenId, SessionId, Ssrc,
 };
 use seele_proto::transport::{HANDSHAKE_TIMEOUT, IDLE_TIMEOUT, KEEPALIVE};
 
@@ -110,10 +110,10 @@ pub struct SessionInfo {
     /// What the Dogma is called.
     pub dogma: String,
     /// Voice channels visible to us.
-    pub cages: Vec<seele_proto::control::CageInfo>,
+    pub voice_rooms: Vec<seele_proto::control::VoiceRoomInfo>,
     /// Text channels visible to us.
     ///
-    /// Carried through rather than dropped: an interface that knows the Cages
+    /// Carried through rather than dropped: an interface that knows the voice_rooms
     /// but not the Lines can only ever open whichever Line it was started with.
     pub lines: Vec<seele_proto::control::LineInfo>,
     /// What this person may do, as PERMISSIONS resolved it.
@@ -613,16 +613,16 @@ impl Client {
         &self.pin
     }
 
-    /// Enters a Cage. "Inserir plug".
+    /// Enters a voice room. "Inserir plug".
     ///
     /// # Errors
     ///
     /// Fails if the control stream is closed.
-    pub async fn insert_plug(&mut self, cage: CageId) -> Result<()> {
+    pub async fn insert_plug(&mut self, voice_room: VoiceRoomId) -> Result<()> {
         frame::write(
             &mut self.send,
             &ClientMessage::InsertPlug {
-                cage,
+                voice_room,
                 password: None,
             },
         )
@@ -761,7 +761,7 @@ impl Client {
             .await
     }
 
-    /// Takes the plug out of whatever Cage it is in.
+    /// Takes the plug out of whatever voice room it is in.
     ///
     /// # Errors
     ///
@@ -805,18 +805,18 @@ impl Client {
         frame::write(&mut self.send, &ClientMessage::SetPresence(presence)).await
     }
 
-    /// Asks the Dogma to make a Cage.
+    /// Asks the Dogma to make a voice room.
     ///
     /// Asks, and nothing more. Nothing here checks whether this person may:
     /// `specs/08-seguranca.md` puts the decision on the server, and a core that
     /// refused on its own would be a second authority to keep in step with the
-    /// first. What comes back is a `CageCreated` on the event stream if it
+    /// first. What comes back is a `VoiceRoomCreated` on the event stream if it
     /// happened, or an `Alert` carrying `PermissionDenied` if it did not.
     ///
     /// # Errors
     ///
     /// Fails if the control stream is closed.
-    pub async fn create_cage(
+    pub async fn create_voice_room(
         &mut self,
         name: &str,
         limit: u16,
@@ -824,7 +824,7 @@ impl Client {
     ) -> Result<()> {
         frame::write(
             &mut self.send,
-            &ClientMessage::CreateCage {
+            &ClientMessage::CreateVoiceRoom {
                 name: name.to_owned(),
                 limit,
                 line,
@@ -848,16 +848,16 @@ impl Client {
         .await
     }
 
-    /// Asks the Dogma to rename a Cage.
+    /// Asks the Dogma to rename a voice room.
     ///
     /// # Errors
     ///
     /// Fails if the control stream is closed.
-    pub async fn rename_cage(&mut self, cage: CageId, name: &str) -> Result<()> {
+    pub async fn rename_voice_room(&mut self, voice_room: VoiceRoomId, name: &str) -> Result<()> {
         frame::write(
             &mut self.send,
-            &ClientMessage::RenameCage {
-                cage,
+            &ClientMessage::RenameVoiceRoom {
+                voice_room,
                 name: name.to_owned(),
             },
         )
@@ -962,13 +962,13 @@ impl Client {
         frame::write(&mut self.send, &ClientMessage::RemoveMessage { message }).await
     }
 
-    /// Asks the Dogma to move a person into a Cage.
+    /// Asks the Dogma to move a person into a voice room.
     ///
     /// # Errors
     ///
     /// Fails if the control stream is closed.
-    pub async fn move_person(&mut self, person: PersonId, cage: CageId) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::MovePerson { person, cage }).await
+    pub async fn move_person(&mut self, person: PersonId, voice_room: VoiceRoomId) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::MovePerson { person, voice_room }).await
     }
 
     /// Asks for a page of history, oldest of the page first on the wire.
@@ -1115,7 +1115,7 @@ impl Client {
 
     // ---- unmaking a room ----
     //
-    // Appended at the end of the impl on purpose, and not beside `rename_cage`
+    // Appended at the end of the impl on purpose, and not beside `rename_voice_room`
     // where they belong by subject: `crates/seele-core/src/client.rs` is being
     // worked on elsewhere at the same time, around the message and event paths
     // in the middle of this file. Three additions with nothing above or below
@@ -1126,13 +1126,13 @@ impl Client {
     // and a core that refused on its own would be a second authority to keep in
     // step with the first.
 
-    /// Asks the Dogma to destroy a Cage.
+    /// Asks the Dogma to destroy a voice room.
     ///
     /// # Errors
     ///
     /// Fails if the control stream is closed.
-    pub async fn delete_cage(&mut self, cage: CageId) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::DeleteCage { cage }).await
+    pub async fn delete_voice_room(&mut self, voice_room: VoiceRoomId) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::DeleteVoiceRoom { voice_room }).await
     }
 
     /// Asks the Dogma to destroy a Line, and everything written in it.
@@ -1164,11 +1164,11 @@ impl Client {
     // `spikes/tela-no-transporte` mediu 16,1% da voz perdida quando os dois
     // dividem a fila de datagramas do `quinn`.
 
-    /// Pede ao Dogma para começar a compartilhar tela no Cage onde este plug
+    /// Pede ao Dogma para começar a compartilhar tela na sala de voz onde este plug
     /// está.
     ///
-    /// Não carrega Cage, resolução nem codec. O Cage é o que o Dogma já sabe —
-    /// um Cage vindo de quem pergunta é um Cage que quem pergunta pode apontar
+    /// Não carrega sala de voz, resolução nem codec. A sala de voz é o que o Dogma já sabe —
+    /// uma sala de voz vindo de quem pergunta é uma sala de voz que quem pergunta pode apontar
     /// para outro lugar —, e os outros dois descrevem o que sai do encoder, que
     /// não está decidido quando o botão é apertado e **muda depois** (§5: a tela
     /// não promete a escolha). Eles são declarados onde são verdade: na cabeça
@@ -1412,7 +1412,7 @@ async fn handshake(
             person,
             ssrc,
             dogma,
-            cages,
+            voice_rooms,
             lines,
             permissions,
             ..
@@ -1421,7 +1421,7 @@ async fn handshake(
             person,
             ssrc,
             dogma,
-            cages,
+            voice_rooms,
             lines,
             permissions,
         }),

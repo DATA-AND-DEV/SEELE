@@ -35,7 +35,7 @@ use seele_server::persistence::{Persistence, Location};
 use seele_server::permissions::{Permissions, COMMANDER_ROLE, OPERATOR_ROLE, PERSON_ROLE};
 use seele_server::{DogmaConfig, Server};
 
-const CAGE: u32 = 1;
+const VOICE_ROOM: u32 = 1;
 const LINE: u32 = 1;
 const PRAZO: Duration = Duration::from_secs(10);
 
@@ -134,12 +134,12 @@ fn ate<F: Fn(&Plug) -> bool>(plug: &Plug, pronto: F) -> bool {
     pronto(plug)
 }
 
-/// Quantas pessoas o snapshot desenha num Cage.
-fn sentados(plug: &Plug, cage: u32) -> usize {
+/// Quantas pessoas o snapshot desenha num voice room.
+fn sentados(plug: &Plug, voice_room: u32) -> usize {
     plug.snapshot()
-        .cages
+        .voice_rooms
         .iter()
-        .find(|desenhado| desenhado.id == cage)
+        .find(|desenhado| desenhado.id == voice_room)
         .map_or(0, |desenhado| desenhado.people.len())
 }
 
@@ -195,14 +195,14 @@ fn dar_papel(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn um_persono_comum_e_recusado_pelo_dogma_e_nao_pela_casca() -> Result<()> {
+async fn um_pessoa_comum_e_recusado_pelo_dogma_e_nao_pela_casca() -> Result<()> {
     let (endereco, servidor, _arquivo) = dogma("recusa").await?;
 
     // O anfitrião conecta primeiro e vira Comandante. Aqui ele é a vítima e a
     // testemunha ao mesmo tempo: se qualquer verbo tivesse passado, a sessão
     // dele acabaria, ou o plug dele mudaria de sala.
     let anfitriao = entrar(endereco, "anfitriao-recusa").await?;
-    anfitriao.insert_plug(CAGE)?;
+    anfitriao.insert_plug(VOICE_ROOM)?;
     anfitriao.open_line(LINE)?;
     anfitriao.send_message(LINE, "verificando harmônicos".into())?;
     assert!(
@@ -234,7 +234,7 @@ async fn um_persono_comum_e_recusado_pelo_dogma_e_nao_pela_casca() -> Result<()>
         ("expulsar", intruso.kick_person(alvo)),
         ("banir", intruso.ban_person(alvo, None, None)),
         ("remover_mensagem", intruso.remove_message(mensagem)),
-        ("mover_persono", intruso.move_person(alvo, CAGE)),
+        ("mover_pessoa", intruso.move_person(alvo, VOICE_ROOM)),
     ] {
         pedido.unwrap_or_else(|erro| panic!("{verbo} não chegou a ser pedido: {erro}"));
         esperadas += 1;
@@ -259,10 +259,10 @@ async fn um_persono_comum_e_recusado_pelo_dogma_e_nao_pela_casca() -> Result<()>
     assert_eq!(vitima.ended, None, "o intruso derrubou o Comandante");
     assert!(
         vitima
-            .cages
+            .voice_rooms
             .iter()
-            .any(|cage| cage.id == CAGE && cage.occupied_by_us),
-        "o plug do Comandante saiu do Cage por conta de um pedido recusado"
+            .any(|voice_room| voice_room.id == VOICE_ROOM && voice_room.occupied_by_us),
+        "o plug do Comandante saiu da sala de voz por conta de um pedido recusado"
     );
     assert_eq!(
         anfitriao.messages().len(),
@@ -292,10 +292,10 @@ async fn expulsar_acaba_com_a_sessao_e_deixa_voltar() -> Result<()> {
     );
 
     let visita = entrar(endereco, "visita-expulsar").await?;
-    visita.insert_plug(CAGE)?;
+    visita.insert_plug(VOICE_ROOM)?;
     let quem = visita.snapshot().me.expect("a visita tem identidade");
     assert!(
-        ate(&anfitriao, |plug| sentados(plug, CAGE) == 1),
+        ate(&anfitriao, |plug| sentados(plug, VOICE_ROOM) == 1),
         "a visita não chegou a sentar; expulsar não mede nada"
     );
 
@@ -315,13 +315,13 @@ async fn expulsar_acaba_com_a_sessao_e_deixa_voltar() -> Result<()> {
 
     // Dois: a sala esvazia para quem ficou.
     assert!(
-        ate(&anfitriao, |plug| sentados(plug, CAGE) == 0),
-        "quem foi expulso continua desenhado no Cage"
+        ate(&anfitriao, |plug| sentados(plug, VOICE_ROOM) == 0),
+        "quem foi expulso continua desenhado na sala de voz"
     );
 
     // Três: expulsar é esta sessão e nada além dela — e o assento **não** fica
     // guardado. A janela de carência existe para um trem entrando num túnel;
-    // aplicada aqui, devolveria a pessoa ao Cage de onde ela foi tirada no
+    // aplicada aqui, devolveria a pessoa à sala de voz de onde ela foi tirada no
     // instante em que reconectasse, e o verbo estaria desfeito por um recurso
     // feito para outra coisa.
     let de_volta = voltar(endereco, "visita-expulsar").await?;
@@ -329,10 +329,10 @@ async fn expulsar_acaba_com_a_sessao_e_deixa_voltar() -> Result<()> {
     assert!(
         !de_volta
             .snapshot()
-            .cages
+            .voice_rooms
             .iter()
-            .any(|cage| cage.occupied_by_us),
-        "quem voltou caiu de novo dentro do Cage de onde tinha sido expulso"
+            .any(|voice_room| voice_room.occupied_by_us),
+        "quem voltou caiu de novo dentro da sala de voz de onde tinha sido expulso"
     );
 
     servidor.shutdown();
@@ -434,23 +434,23 @@ async fn mover_leva_o_plug_e_conta_a_pessoa() -> Result<()> {
     let (endereco, servidor, _arquivo) = dogma("mover").await?;
 
     let anfitriao = entrar(endereco, "anfitriao-mover").await?;
-    anfitriao.create_cage("CAGE-02 SALA DOS FUNDOS".into(), 8, None)?;
+    anfitriao.create_voice_room("VOICE_ROOM-02 SALA DOS FUNDOS".into(), 8, None)?;
     assert!(
-        ate(&anfitriao, |plug| plug.snapshot().cages.len() == 2),
-        "o segundo Cage não foi feito, e não há para onde mover ninguém"
+        ate(&anfitriao, |plug| plug.snapshot().voice_rooms.len() == 2),
+        "o segundo sala de voz não foi feito, e não há para onde mover ninguém"
     );
-    let destino = anfitriao.snapshot().cages[1].id;
+    let destino = anfitriao.snapshot().voice_rooms[1].id;
 
     let visita = entrar(endereco, "visita-mover").await?;
-    visita.insert_plug(CAGE)?;
+    visita.insert_plug(VOICE_ROOM)?;
     let quem = visita.snapshot().me.expect("a visita tem identidade");
     assert!(
         ate(&visita, |plug| plug
             .snapshot()
-            .cages
+            .voice_rooms
             .iter()
-            .any(|cage| cage.id == CAGE && cage.occupied_by_us)),
-        "a visita não entrou no primeiro Cage"
+            .any(|voice_room| voice_room.id == VOICE_ROOM && voice_room.occupied_by_us)),
+        "a visita não entrou no primeiro sala de voz"
     );
 
     anfitriao.move_person(quem, destino)?;
@@ -460,18 +460,18 @@ async fn mover_leva_o_plug_e_conta_a_pessoa() -> Result<()> {
     assert!(
         ate(&visita, |plug| plug
             .snapshot()
-            .cages
+            .voice_rooms
             .iter()
-            .any(|cage| cage.id == destino && cage.occupied_by_us)),
-        "quem foi movido continua desenhado no Cage antigo"
+            .any(|voice_room| voice_room.id == destino && voice_room.occupied_by_us)),
+        "quem foi movido continua desenhado na sala de voz antigo"
     );
     assert!(
         !visita
             .snapshot()
-            .cages
+            .voice_rooms
             .iter()
-            .any(|cage| cage.id == CAGE && cage.occupied_by_us),
-        "o plug ficou nos dois Cages ao mesmo tempo"
+            .any(|voice_room| voice_room.id == VOICE_ROOM && voice_room.occupied_by_us),
+        "o plug ficou nos dois voice_rooms ao mesmo tempo"
     );
 
     // Dois: a pessoa é **contada**. Ser movido em silêncio é indistinguível de
@@ -487,13 +487,13 @@ async fn mover_leva_o_plug_e_conta_a_pessoa() -> Result<()> {
     // entrada, que é o que o roster já sabe desenhar.
     assert!(
         ate(&anfitriao, |plug| sentados(plug, destino) == 1
-            && sentados(plug, CAGE) == 0),
+            && sentados(plug, VOICE_ROOM) == 0),
         "quem assiste vê a visita em {:?}",
         anfitriao
             .snapshot()
-            .cages
+            .voice_rooms
             .iter()
-            .map(|cage| (cage.id, cage.people.len()))
+            .map(|voice_room| (voice_room.id, voice_room.people.len()))
             .collect::<Vec<_>>()
     );
 
@@ -502,7 +502,7 @@ async fn mover_leva_o_plug_e_conta_a_pessoa() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn um_operador_modera_personos_e_nao_o_comandante() -> Result<()> {
+async fn um_operador_modera_pessoas_e_nao_o_comandante() -> Result<()> {
     let (endereco, servidor, arquivo) = dogma("hierarquia").await?;
 
     // O anfitrião é Comandante por ser o primeiro a chegar.

@@ -2,8 +2,8 @@
 //!
 //! Every one of these is a number on the wire, and every one of them would
 //! compile fine in the wrong slot if they were all `u32`. Passing a `LineId`
-//! where a `CageId` belongs is a bug the compiler can catch for free, and
-//! `specs/04-servidor-seele.md` makes Cages and Linhas independent so the mix-up
+//! where a `VoiceRoomId` belongs is a bug the compiler can catch for free, and
+//! `specs/04-servidor-seele.md` makes voice_rooms and Linhas independent so the mix-up
 //! is available to make.
 //!
 //! Names follow `docs/glossario.md`, which is normative in both languages
@@ -44,8 +44,8 @@ macro_rules! id_type {
 }
 
 id_type!(
-    /// A voice channel. `Cage` in both languages (`docs/glossario.md`).
-    CageId,
+    /// A voice channel. `VoiceRoom` in both languages (`docs/glossario.md`).
+    VoiceRoomId,
     u32
 );
 
@@ -68,7 +68,7 @@ id_type!(
 );
 
 id_type!(
-    /// A media source inside a Cage.
+    /// A media source inside a voice room.
     ///
     /// `specs/08-seguranca.md`: assigned by the server, **never accepted from
     /// the client**. The server binds it to the connection and refuses any
@@ -79,11 +79,11 @@ id_type!(
 );
 
 id_type!(
-    /// One screen transmission inside a Cage.
+    /// One screen transmission inside a voice room.
     ///
     /// **Not an [`Ssrc`], and that is the whole reason it exists.** §3.6 of
     /// `docs/superpowers/specs/2026-08-22-compartilhamento-de-tela-design.md`:
-    /// the `ssrc` is the audio source assigned on Cage entry, and every client
+    /// the `ssrc` is the audio source assigned on voice room entry, and every client
     /// builds a table of `ssrc` → person out of it. Sharing a screen is not
     /// becoming a second talker, so it gets an identifier of its own and nobody
     /// has to rewrite that table to make room for something that never speaks.
@@ -137,12 +137,12 @@ mod tests {
     #[test]
     fn identifiers_do_not_interchange() {
         // The whole point of the newtypes. This is a compile-time property, so
-        // the test documents it rather than proving it: `takes_cage(LineId(1))`
+        // the test documents it rather than proving it: `takes_voice_room(LineId(1))`
         // does not compile, and that is the guarantee.
-        fn takes_cage(id: CageId) -> u32 {
+        fn takes_voice_room(id: VoiceRoomId) -> u32 {
             id.get()
         }
-        assert_eq!(takes_cage(CageId(7)), 7);
+        assert_eq!(takes_voice_room(VoiceRoomId(7)), 7);
         assert_eq!(LineId::from(7).get(), 7);
     }
 
@@ -150,7 +150,7 @@ mod tests {
     fn identifiers_are_transparent_on_the_wire() {
         // `serde(transparent)` keeps a newtype the same bytes as its integer, so
         // wrapping costs nothing in a header budgeted at 11 bytes.
-        let wrapped = postcard::to_allocvec(&CageId(300)).unwrap();
+        let wrapped = postcard::to_allocvec(&VoiceRoomId(300)).unwrap();
         let bare = postcard::to_allocvec(&300_u32).unwrap();
         assert_eq!(wrapped, bare);
     }

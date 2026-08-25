@@ -9,13 +9,13 @@ governa é a estética, não a língua.
 Duas colunas e um corte no meio:
 
 - **na tela** é o que a pessoa lê. Muda por este documento.
-- **identificador** é o nome real da coisa no código. **Não muda.** `Cage`
-  continua `Cage`, `Dogma` continua `Dogma`, `at_field` continua `at_field`.
+- **identificador** é o nome real da coisa no código. **Não muda.** `VoiceRoom`
+  continua `VoiceRoom`, `Dogma` continua `Dogma`, `at_field` continua `at_field`.
   Renomear tipo é outro trabalho, com outro custo, e o ADR 0033 decidiu
   explicitamente não fazê-lo.
 
 Ler as duas colunas juntas é o ponto do documento: quem lê um relatório de bug
-que diz «não consigo entrar na sala 2» precisa achar `CageId` sem intermediário.
+que diz «não consigo entrar na sala 2» precisa achar `VoiceRoomId` sem intermediário.
 
 Regra que sobrevive à `07` e vale aqui inteira: **o nome nunca custa clareza.**
 Ela agora custa menos, porque o nome comum já é a explicação.
@@ -27,7 +27,7 @@ Ela agora custa menos, porque o nome comum já é a explicação.
 | Instância de servidor | servidor | server | `Dogma` |
 | Daemon | `seeled` | `seeled` | `seeled` |
 | Cliente de terminal | `plug` | `plug` | `plug` |
-| Canal de voz | sala de voz | voice room | `Cage`, `CageId` |
+| Canal de voz | sala de voz | voice room | `VoiceRoom`, `VoiceRoomId` |
 | Coluna de salas | SALAS DE VOZ | VOICE ROOMS | — |
 | Sala sem nome | SALA 1, SALA 2 | ROOM 1, ROOM 2 | — |
 | Canal de texto | canal de texto | text channel | `Line`, `LineId` |
@@ -136,16 +136,16 @@ As chaves **não mudam**: são identificadores que a configuração em disco pro
 
 | na tela (pt-BR) | Chave · identificador |
 |---|---|
-| ver a sala | `ver_cage` · `Permission::ViewCage` |
+| ver a sala | `ver_voice_room` · `Permission::ViewVoiceRoom` |
 | conectar na sala | `inserir_plug` · `Permission::InsertPlug` |
 | falar | `falar` · `Permission::Speak` |
 | ler o canal | `ler_linha` · `Permission::ReadLine` |
 | escrever no canal | `escrever_linha` · `Permission::WriteLine` |
 | remover mensagem | `remover_mensagem` · `Permission::RemoveMessage` |
-| mover pessoa | `mover_persono` · `Permission::MovePerson` |
+| mover pessoa | `mover_pessoa` · `Permission::MovePerson` |
 | expulsar | `expulsar` · `Permission::Kick` |
 | banir | `banir` · `Permission::Ban` |
-| gerenciar salas | `gerenciar_cages` · `Permission::ManageCages` |
+| gerenciar salas | `gerenciar_voice_rooms` · `Permission::ManageVoiceRooms` |
 | gerenciar papéis | `gerenciar_papeis` · `Permission::ManageRoles` |
 | administrar o servidor | `administrar_dogma` · `Permission::AdministerDogma` |
 

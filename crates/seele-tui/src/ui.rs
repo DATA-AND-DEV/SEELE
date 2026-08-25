@@ -404,8 +404,8 @@ fn render_tree(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
     for (index, node) in app.tree.iter().enumerate() {
         let selected = index == app.selected && app.focus == Panel::Channels;
         lines.push(match node {
-            Node::Cage { name, open, sync } => {
-                cage_line(name, *open, *sync, selected, budget, theme)
+            Node::VoiceRoom { name, open, sync } => {
+                voice_room_line(name, *open, *sync, selected, budget, theme)
             }
             Node::Line { name } => Line::from(Span::styled(
                 truncate(&format!("─ CANAL {name}"), budget),
@@ -422,16 +422,16 @@ fn render_tree(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
     frame.render_widget(Paragraph::new(lines).style(dim(theme, app)), inner);
 }
 
-/// One Cage row: the name, and the room's average Sync Ratio when it has one.
+/// One voice room row: the name, and the room's average Sync Ratio when it has one.
 ///
-/// The comp labels this **MÉDIA DO CAGE**. There is no room for the label in a
+/// The comp labels this **MÉDIA DO VOICE_ROOM**. There is no room for the label in a
 /// panel this narrow, so what identifies it is its place: the same column as
-/// every person's number, on the row the people hang under. An empty Cage prints
-/// nothing rather than a zero — see [`seele_core::Room::cage_sync`].
-fn cage_line(
+/// every person's number, on the row the people hang under. An empty voice room prints
+/// nothing rather than a zero — see [`seele_core::Room::voice_room_sync`].
+fn voice_room_line(
     name: &str,
     open: bool,
-    sync: Option<seele_core::CageSync>,
+    sync: Option<seele_core::VoiceRoomSync>,
     selected: bool,
     budget: usize,
     theme: Theme,
@@ -1065,7 +1065,7 @@ fn render_help(frame: &mut Frame<'_>, theme: Theme, area: Rect) {
         ("n / N", "ocorrência seguinte / anterior"),
         ("?", "esta ajuda"),
         (":conectar <host>", "conectar a um servidor"),
-        (":cage <nome>", "entrar numa sala de voz"),
+        (":voice room <nome>", "entrar numa sala de voz"),
         (":sync", "diagnóstico detalhado"),
         (":audio", "dispositivos"),
         (":ejetar", "sair do servidor e escolher outro"),
@@ -1166,8 +1166,8 @@ mod tests {
         app.clock = "12:04:33".into();
         app.dogmas = vec!["Terceira Tóquio".into(), "Geofront".into()];
         app.tree = vec![
-            Node::Cage {
-                name: "CAGE-01 CENTRAL".into(),
+            Node::VoiceRoom {
+                name: "VOICE_ROOM-01 CENTRAL".into(),
                 open: true,
                 sync: None,
             },
@@ -1221,16 +1221,16 @@ mod tests {
     }
 
     #[test]
-    fn a_cages_row_carries_the_average_of_the_room() {
-        // MÉDIA DO CAGE, in the same column as every person's number. The mark
+    fn a_voice_rooms_row_carries_the_average_of_the_room() {
+        // MÉDIA DO VOICE_ROOM, in the same column as every person's number. The mark
         // travels with it: specs/05-cliente-tui.md forbids carrying a band by
         // colour alone, and an average is not an exception to that.
         let mut app = populated();
-        app.tree[0] = Node::Cage {
-            name: "CAGE-01 CENTRAL".into(),
+        app.tree[0] = Node::VoiceRoom {
+            name: "VOICE_ROOM-01 CENTRAL".into(),
             open: true,
             // 98 and 44, which is what the two people below it read.
-            sync: Some(seele_core::CageSync {
+            sync: Some(seele_core::VoiceRoomSync {
                 ratio: 71,
                 band: seele_core::SyncBand::of(71),
                 people: 2,
@@ -1240,25 +1240,25 @@ mod tests {
 
         let row = screen
             .lines()
-            .find(|row| row.contains("CAGE-01"))
-            .expect("the Cage row");
-        assert!(row.contains("▒ 71%"), "no average on the Cage row: {row:?}");
-        assert!(row.contains("CAGE-01"), "the name was eaten: {row:?}");
+            .find(|row| row.contains("VOICE_ROOM-01"))
+            .expect("the voice room row");
+        assert!(row.contains("▒ 71%"), "no average on the voice room row: {row:?}");
+        assert!(row.contains("VOICE_ROOM-01"), "the name was eaten: {row:?}");
     }
 
     #[test]
-    fn a_cage_nobody_is_in_shows_no_number_at_all() {
-        // An empty Cage has no average — not a zero, which the bands would
+    fn a_voice_room_nobody_is_in_shows_no_number_at_all() {
+        // An empty voice room has no average — not a zero, which the bands would
         // paint red and which would read as a room in trouble.
         let screen = draw(&populated(), Palette::True, (MIN_WIDTH, MIN_HEIGHT));
 
         let row = screen
             .lines()
-            .find(|row| row.contains("CAGE-01"))
-            .expect("the Cage row");
+            .find(|row| row.contains("VOICE_ROOM-01"))
+            .expect("the voice room row");
         assert!(
             !row.contains('%'),
-            "an empty Cage was given a number: {row:?}"
+            "an empty voice room was given a number: {row:?}"
         );
     }
 

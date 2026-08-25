@@ -6,7 +6,7 @@
    a sala.
 
    Carrega depois de `tela-sessao.css` e depende disso: `.moderar-porta` e
-   `.moderar-remover` moram dentro da linha de um Cage e da linha de uma
+   `.moderar-remover` moram dentro da linha de um VoiceRoom e da linha de uma
    mensagem, que aquela folha desenha, e as duas refinam o espaçamento de lá.
 
    ---- toda classe daqui começa por `moderar-` ----
@@ -251,7 +251,7 @@
 /* ---------- as portas ----------
 
    Os dois controles que abrem esta caixa, e os dois moram na tela de operação:
-   um na linha de quem está dentro de um Cage, outro na linha de uma mensagem.
+   um na linha de quem está dentro de um VoiceRoom, outro na linha de uma mensagem.
 
    Visíveis, e não revelados pelo ponteiro. A tela de chamada aprendeu isto por
    um teste entre duas máquinas — «um controle que só existe no hover é um

@@ -17,7 +17,7 @@ Três coisas definem o projeto:
 ## Escopo — v1.0
 
 - Voz em grupo com baixa latência (alvo: < 70 ms boca-a-ouvido em rede local, < 150 ms na internet regional).
-- Canais de voz (**Cages**) e de texto (**Linhas**) persistentes.
+- Canais de voz (**VoiceRooms**) e de texto (**Linhas**) persistentes.
 - Mensagens de texto com histórico, edição e resposta.
 - Push-to-talk e ativação por voz (VAD).
 - Volume e mudo por usuário, no lado de quem escuta.

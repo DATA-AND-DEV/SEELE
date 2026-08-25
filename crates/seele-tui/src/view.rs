@@ -25,7 +25,7 @@ pub fn project(room: &Room, app: &mut App) {
     project_screen(room, app);
 }
 
-/// The Cages/Lines panel: Cages, their people nested under the open one, Lines.
+/// The voice_rooms/Lines panel: voice_rooms, their people nested under the open one, Lines.
 fn project_channels(room: &Room, app: &mut App) {
     app.dogmas = if room.dogma.is_empty() {
         Vec::new()
@@ -34,21 +34,21 @@ fn project_channels(room: &Room, app: &mut App) {
     };
 
     let mut tree = Vec::new();
-    for cage in &room.cages {
-        let open = Some(cage.id) == room.current_cage;
-        tree.push(Node::Cage {
-            name: cage.name.clone(),
+    for voice_room in &room.voice_rooms {
+        let open = Some(voice_room.id) == room.current_voice_room;
+        tree.push(Node::VoiceRoom {
+            name: voice_room.name.clone(),
             open,
             // The core's average, not one folded here. `seele-ffi` hands the
             // desktop shell the same value from the same method: two shells
             // averaging the same roster separately is the second implementation
             // `specs/01-arquitetura.md` says is in the wrong place.
-            sync: room.cage_sync(cage.id),
+            sync: room.voice_room_sync(voice_room.id),
         });
         if !open {
             continue;
         }
-        for person in room.roster(cage.id) {
+        for person in room.roster(voice_room.id) {
             tree.push(Node::Person(RosterEntry {
                 nickname: person.nickname.clone(),
                 sync: person.sync_ratio,
@@ -197,11 +197,11 @@ pub fn worth_retrying(reason: DisconnectReason) -> bool {
 mod tests {
     use super::*;
     use seele_core::{
-        AlertReason, CageId, CageInfo, LineId, LineInfo, MessageId, PersonId, PersonProfile,
+        AlertReason, VoiceRoomId, VoiceRoomInfo, LineId, LineInfo, MessageId, PersonId, PersonProfile,
         PersonState, Presence, ServerMessage, SessionId, Ssrc,
     };
 
-    const CAGE: CageId = CageId(1);
+    const VOICE_ROOM: VoiceRoomId = VoiceRoomId(1);
     const LINE: LineId = LineId(1);
 
     fn room() -> Room {
@@ -213,17 +213,17 @@ mod tests {
             person: PersonId(7),
             ssrc: Ssrc(700),
             dogma: "Terceira Tóquio".into(),
-            cages: vec![
-                CageInfo {
-                    id: CAGE,
-                    name: "CAGE-01 CENTRAL".into(),
+            voice_rooms: vec![
+                VoiceRoomInfo {
+                    id: VOICE_ROOM,
+                    name: "VOICE_ROOM-01 CENTRAL".into(),
                     limit: 20,
                     password_required: false,
                     line: Some(LINE),
                 },
-                CageInfo {
-                    id: CageId(2),
-                    name: "CAGE-02 TESTE".into(),
+                VoiceRoomInfo {
+                    id: VoiceRoomId(2),
+                    name: "VOICE_ROOM-02 TESTE".into(),
                     limit: 20,
                     password_required: false,
                     line: None,
@@ -236,14 +236,14 @@ mod tests {
             roles: Vec::new(),
             permissions: Vec::new(),
         });
-        room.enter_cage(CAGE);
+        room.enter_voice_room(VOICE_ROOM);
         room.open_line(LINE);
         room
     }
 
     fn joined(id: u64, nickname: &str) -> ServerMessage {
         ServerMessage::PersonJoined {
-            cage: CAGE,
+            voice_room: VOICE_ROOM,
             profile: PersonProfile {
                 id: PersonId(id),
                 nickname: nickname.into(),
@@ -351,7 +351,7 @@ mod tests {
     }
 
     #[test]
-    fn persons_are_nested_under_the_open_cage_and_nowhere_else() {
+    fn persons_are_nested_under_the_open_voice_room_and_nowhere_else() {
         let mut room = room();
         room.apply(&joined(3, "ayanami"));
         let mut app = App::new();
@@ -363,19 +363,19 @@ mod tests {
         let names: Vec<&str> = app.roster().map(|p| p.nickname.as_str()).collect();
         assert_eq!(names, ["pessoa 7", "ayanami"]);
 
-        // The closed Cage is a row, not a container.
-        let cages = app
+        // The closed voice room is a row, not a container.
+        let voice_rooms = app
             .tree
             .iter()
-            .filter(|node| matches!(node, Node::Cage { .. }))
+            .filter(|node| matches!(node, Node::VoiceRoom { .. }))
             .count();
-        assert_eq!(cages, 2);
+        assert_eq!(voice_rooms, 2);
     }
 
     #[test]
-    fn the_cage_row_carries_the_core_s_average_and_not_one_of_its_own() {
+    fn the_voice_room_row_carries_the_core_s_average_and_not_one_of_its_own() {
         // The terminal must not average anything: the desktop shell reads the
-        // same value from `Room::cage_sync` through `seele-ffi`, and a mean
+        // same value from `Room::voice_room_sync` through `seele-ffi`, and a mean
         // computed twice is a mean that will disagree once.
         let mut room = room();
         room.apply(&joined(3, "ayanami"));
@@ -403,51 +403,51 @@ mod tests {
             .tree
             .iter()
             .find_map(|node| match node {
-                Node::Cage { name, sync, .. } if name.contains("CAGE-01") => Some(*sync),
+                Node::VoiceRoom { name, sync, .. } if name.contains("VOICE_ROOM-01") => Some(*sync),
                 _ => None,
             })
-            .expect("the open Cage");
-        assert_eq!(occupied, room.cage_sync(CAGE));
+            .expect("the open voice room");
+        assert_eq!(occupied, room.voice_room_sync(VOICE_ROOM));
         assert_eq!(occupied.map(|sync| sync.ratio), Some(75));
 
-        // And the Cage nobody is in has nothing, rather than a zero.
+        // And the voice room nobody is in has nothing, rather than a zero.
         let empty = app
             .tree
             .iter()
             .find_map(|node| match node {
-                Node::Cage { name, sync, .. } if name.contains("CAGE-02") => Some(*sync),
+                Node::VoiceRoom { name, sync, .. } if name.contains("VOICE_ROOM-02") => Some(*sync),
                 _ => None,
             })
-            .expect("the closed Cage");
+            .expect("the closed voice room");
         assert_eq!(empty, None);
     }
 
     #[test]
-    fn lines_come_after_every_cage() {
-        // The composition specs/05-cliente-tui.md draws: Cages with their
-        // people, then Lines. A Line floating between two Cages reads as
+    fn lines_come_after_every_voice_room() {
+        // The composition specs/05-cliente-tui.md draws: voice_rooms with their
+        // people, then Lines. A Line floating between two voice_rooms reads as
         // belonging to the one above it.
         let mut room = room();
         room.apply(&joined(3, "ayanami"));
         let mut app = App::new();
         project(&room, &mut app);
 
-        let last_cage = app
+        let last_voice_room = app
             .tree
             .iter()
-            .rposition(|node| matches!(node, Node::Cage { .. }))
-            .expect("a cage");
+            .rposition(|node| matches!(node, Node::VoiceRoom { .. }))
+            .expect("a voice room");
         let first_line = app
             .tree
             .iter()
             .position(|node| matches!(node, Node::Line { .. }))
             .expect("a line");
-        assert!(first_line > last_cage);
+        assert!(first_line > last_voice_room);
     }
 
     #[test]
     fn a_selection_past_the_end_is_pulled_back_rather_than_left_dangling() {
-        // Somebody selects the last row, a Cage disappears, and the index now
+        // Somebody selects the last row, a voice room disappears, and the index now
         // points at nothing. Drawing that panics or silently shows the wrong
         // row depending on how it is read.
         let mut room = room();
@@ -455,7 +455,7 @@ mod tests {
         project(&room, &mut app);
         app.selected = app.tree.len() - 1;
 
-        room.cages.clear();
+        room.voice_rooms.clear();
         room.lines.clear();
         project(&room, &mut app);
 

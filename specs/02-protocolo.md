@@ -34,7 +34,7 @@ Cliente                                Servidor
    │── Ola { versao, cliente, apelido } ──▶│
    │◀── Desafio { nonce } ─────────────────│
    │── Resposta { prova } ────────────────▶│   (ver 08)
-   │◀── Sessao { id, dogma, cages, papeis }│   → PADRÃO: AZUL
+   │◀── Sessao { id, dogma, voice_rooms, papeis }│   → PADRÃO: AZUL
 ```
 
 Antes da `Sessao`, o cliente está em **PADRÃO: LARANJA** — conectado, não verificado. A interface deve refletir esse estado, não escondê-lo.
@@ -47,7 +47,7 @@ Timeout de handshake: 10 s. Falha → `PadraoAzulNaoEstabelecido` com motivo esp
 |---|---|---|
 | `Ola` | versão, nome do cliente, apelido pretendido | |
 | `Resposta` | prova de autenticação | |
-| `InserirPlug` | `cage_id`, senha opcional | Entrar em canal de voz |
+| `InserirPlug` | `voice_room_id`, senha opcional | Entrar em canal de voz |
 | `EjetarPlug` | — | |
 | `EntrarNaLinha` | `linha_id` | Assinar canal de texto |
 | `EnviarMensagem` | `linha_id`, corpo, `responde_a` opcional | Idempotente por `client_msg_id` |
@@ -60,8 +60,8 @@ Timeout de handshake: 10 s. Falha → `PadraoAzulNaoEstabelecido` com motivo esp
 
 | Mensagem | Payload |
 |---|---|
-| `Sessao` | id da sessão, descrição do Dogma, árvore de Cages e Linhas, papéis |
-| `UsuarioEntrou` / `UsuarioSaiu` | `cage_id`, perfil do usuário |
+| `Sessao` | id da sessão, descrição do Dogma, árvore de VoiceRooms e Linhas, papéis |
+| `UsuarioEntrou` / `UsuarioSaiu` | `voice_room_id`, perfil do usuário |
 | `EstadoUsuario` | A.T. Field, presença, taxa de sincronização |
 | `MensagemRecebida` | mensagem completa |
 | `MensagemEditada` / `MensagemRemovida` | id + novo corpo |
@@ -82,7 +82,7 @@ Datagram QUIC tem entrega não confiável e sem ordem, que é exatamente o desej
 └─────────┴──────────┴────────────┴─────────┴──────────────┘
 ```
 
-- `ssrc` — identificador da fonte, atribuído na entrada do Cage.
+- `ssrc` — identificador da fonte, atribuído na entrada do VoiceRoom.
 - `seq` — sequencial, com wrap. Detecta perda e reordenação.
 - `ts` — timestamp em amostras a 48 kHz. Detecta gaps de silêncio.
 - Payload Opus de 20 ms.

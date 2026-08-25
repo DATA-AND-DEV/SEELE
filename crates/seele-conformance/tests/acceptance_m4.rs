@@ -22,7 +22,7 @@ use ed25519_dalek::SigningKey;
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use seele_core::{Client, MemoryPinStore, Room};
-use seele_proto::ids::{CageId, ClientMessageId, LineId};
+use seele_proto::ids::{VoiceRoomId, ClientMessageId, LineId};
 use seele_proto::ServerMessage;
 use seele_server::persistence::Location;
 use seele_server::{DogmaConfig, Server};
@@ -30,7 +30,7 @@ use seele_tui::app::{App, Key, Mode, Screen};
 use seele_tui::theme::{Palette, Theme};
 use seele_tui::{ui, view};
 
-const CAGE: CageId = CageId(1);
+const VOICE_ROOM: VoiceRoomId = VoiceRoomId(1);
 const LINE: LineId = LineId(1);
 const WAIT: Duration = Duration::from_secs(5);
 
@@ -117,12 +117,12 @@ where
 }
 
 /// Brings the interface up against a live connection, the way `plug` does.
-fn attach(client: &Client, nickname: &str, cage: CageId, line: Option<LineId>) -> (App, Room) {
+fn attach(client: &Client, nickname: &str, voice_room: VoiceRoomId, line: Option<LineId>) -> (App, Room) {
     let mut app = App::new();
     app.screen = Screen::PatternBlue;
     let mut room = Room::new();
     room.adopt(client.session(), nickname);
-    room.enter_cage(cage);
+    room.enter_voice_room(voice_room);
     if let Some(line) = line {
         room.open_line(line);
     }
@@ -136,13 +136,13 @@ async fn an_outsider_connects_and_the_screen_shows_the_conversation() -> Result<
     let (address, server) = start().await?;
 
     let mut watcher = connect(address, "ayanami", 1).await?;
-    watcher.insert_plug(CAGE).await?;
+    watcher.insert_plug(VOICE_ROOM).await?;
     watcher.join_line(LINE).await?;
 
-    let (mut app, mut room) = attach(&watcher, "ayanami", CAGE, Some(LINE));
+    let (mut app, mut room) = attach(&watcher, "ayanami", VOICE_ROOM, Some(LINE));
 
     let mut talker = connect(address, "shinji", 2).await?;
-    talker.insert_plug(CAGE).await?;
+    talker.insert_plug(VOICE_ROOM).await?;
     talker.join_line(LINE).await?;
     talker
         .send_message(LINE, "sync caiu aqui", ClientMessageId(1))
@@ -168,22 +168,22 @@ async fn an_outsider_connects_and_the_screen_shows_the_conversation() -> Result<
 
 /// The roster fills in from real joins, not from invented state.
 #[tokio::test]
-async fn the_roster_shows_who_actually_entered_the_cage() -> Result<()> {
+async fn the_roster_shows_who_actually_entered_the_voice_room() -> Result<()> {
     let (address, server) = start().await?;
 
     let mut watcher = connect(address, "ayanami", 3).await?;
-    watcher.insert_plug(CAGE).await?;
+    watcher.insert_plug(VOICE_ROOM).await?;
 
-    let (mut app, mut room) = attach(&watcher, "ayanami", CAGE, None);
+    let (mut app, mut room) = attach(&watcher, "ayanami", VOICE_ROOM, None);
 
     let mut talker = connect(address, "asuka", 4).await?;
-    talker.insert_plug(CAGE).await?;
+    talker.insert_plug(VOICE_ROOM).await?;
 
     let seen = pump(&mut watcher, &mut app, &mut room, |app| {
         app.roster().any(|person| person.nickname == "asuka")
     })
     .await;
-    assert!(seen, "a person entered the Cage and never appeared");
+    assert!(seen, "a person entered the voice room and never appeared");
 
     // The Sync Ratio is shown as a number beside a mark, in every palette —
     // specs/05-cliente-tui.md forbids carrying it by colour alone.
@@ -198,7 +198,7 @@ async fn the_roster_shows_who_actually_entered_the_cage() -> Result<()> {
     Ok(())
 }
 
-/// Walking into an occupied Cage shows the people already in it.
+/// Walking into an occupied voice room shows the people already in it.
 ///
 /// Gap G15. `specs/02-protocolo.md` announces arrivals going forward and says
 /// nothing about who is already seated, so the second person to arrive saw an
@@ -210,19 +210,19 @@ async fn the_second_person_to_arrive_sees_the_first_one() -> Result<()> {
 
     // The first person sits down and stops being interesting.
     let mut early = connect(address, "shinji", 10).await?;
-    early.insert_plug(CAGE).await?;
+    early.insert_plug(VOICE_ROOM).await?;
 
     // The second arrives afterwards, and has never seen an announcement.
     let mut late = connect(address, "asuka", 11).await?;
-    late.insert_plug(CAGE).await?;
+    late.insert_plug(VOICE_ROOM).await?;
 
-    let (mut app, mut room) = attach(&late, "asuka", CAGE, None);
+    let (mut app, mut room) = attach(&late, "asuka", VOICE_ROOM, None);
     let seen = pump(&mut late, &mut app, &mut room, |app| {
         app.roster().any(|person| person.nickname == "shinji")
     })
     .await;
 
-    assert!(seen, "walked into an occupied Cage and saw an empty room");
+    assert!(seen, "walked into an occupied voice room and saw an empty room");
 
     let names: Vec<&str> = app.roster().map(|p| p.nickname.as_str()).collect();
     assert!(
@@ -245,13 +245,13 @@ async fn sixteen_colours_over_ssh_lose_no_information() -> Result<()> {
     let (address, server) = start().await?;
 
     let mut watcher = connect(address, "ayanami", 5).await?;
-    watcher.insert_plug(CAGE).await?;
+    watcher.insert_plug(VOICE_ROOM).await?;
     watcher.join_line(LINE).await?;
 
-    let (mut app, mut room) = attach(&watcher, "ayanami", CAGE, Some(LINE));
+    let (mut app, mut room) = attach(&watcher, "ayanami", VOICE_ROOM, Some(LINE));
 
     let mut talker = connect(address, "shinji", 6).await?;
-    talker.insert_plug(CAGE).await?;
+    talker.insert_plug(VOICE_ROOM).await?;
     talker.join_line(LINE).await?;
     talker
         .send_message(LINE, "verificando harmônicos", ClientMessageId(1))
@@ -289,10 +289,10 @@ async fn boot_to_ready_is_under_a_second_and_a_half() -> Result<()> {
 
     let started = Instant::now();
     let mut client = connect(address, "ayanami", 7).await?;
-    client.insert_plug(CAGE).await?;
+    client.insert_plug(VOICE_ROOM).await?;
     client.join_line(LINE).await?;
 
-    let (app, _room) = attach(&client, "ayanami", CAGE, Some(LINE));
+    let (app, _room) = attach(&client, "ayanami", VOICE_ROOM, Some(LINE));
     let screen = draw(&app, Palette::True);
     let elapsed = started.elapsed();
 
@@ -317,11 +317,11 @@ async fn a_newcomer_can_hold_a_conversation_with_only_the_help_screen() -> Resul
     let (address, server) = start().await?;
 
     let mut newcomer = connect(address, "ayanami", 8).await?;
-    newcomer.insert_plug(CAGE).await?;
+    newcomer.insert_plug(VOICE_ROOM).await?;
     newcomer.join_line(LINE).await?;
 
     let mut listener = connect(address, "shinji", 9).await?;
-    listener.insert_plug(CAGE).await?;
+    listener.insert_plug(VOICE_ROOM).await?;
     listener.join_line(LINE).await?;
 
     let mut app = App::new();

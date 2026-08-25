@@ -250,7 +250,7 @@ impl FalhaLocal {
 /// Metrics about one incoming stream — one talker, one `ssrc`.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct SourceTelemetry {
-    /// Which stream this describes. Assigned by the server on Cage entry
+    /// Which stream this describes. Assigned by the server on voice room entry
     /// (`specs/02-protocolo.md`); the client maps it to a person from the control
     /// channel.
     pub ssrc: u32,

@@ -19,11 +19,11 @@ use std::time::Duration;
 use anyhow::Result;
 use seele_core::enlace::{Aviso, Destino, Enlace, Motivo};
 use seele_core::{Link, MemoryPinStore};
-use seele_proto::ids::{CageId, ClientMessageId, LineId};
+use seele_proto::ids::{VoiceRoomId, ClientMessageId, LineId};
 use seele_server::persistence::Location;
 use seele_server::{DogmaConfig, Server};
 
-const CAGE: u32 = 1;
+const VOICE_ROOM: u32 = 1;
 const LINE: u32 = 1;
 
 /// Sobe um Dogma numa porta escolhida — a mesma na segunda vez.
@@ -88,7 +88,7 @@ async fn o_dogma_cai_e_a_sessao_entra_na_bateria_em_vez_de_acabar() -> Result<()
         Arc::new(MemoryPinStore::new()),
     )
     .await?;
-    enlace.inserir_plug(CageId(CAGE)).await?;
+    enlace.inserir_plug(VoiceRoomId(VOICE_ROOM)).await?;
     enlace.abrir_linha(LineId(LINE)).await?;
     assert_eq!(enlace.estado(), Link::Online);
 
@@ -147,7 +147,7 @@ async fn o_dogma_cai_e_a_sessao_entra_na_bateria_em_vez_de_acabar() -> Result<()
 #[tokio::test(flavor = "multi_thread")]
 async fn o_que_a_pessoa_escolheu_volta_com_ela() -> Result<()> {
     // Reconectar no lugar errado é quase tão ruim quanto não reconectar: quem
-    // estava num Cage conversando volta calado noutro canto sem entender por
+    // estava num sala de voz conversando volta calado noutro canto sem entender por
     // quê.
     let pasta = tempfile::tempdir()?;
     let banco = pasta.path().join("dogma.db");
@@ -160,7 +160,7 @@ async fn o_que_a_pessoa_escolheu_volta_com_ela() -> Result<()> {
         Arc::new(MemoryPinStore::new()),
     )
     .await?;
-    enlace.inserir_plug(CageId(CAGE)).await?;
+    enlace.inserir_plug(VoiceRoomId(VOICE_ROOM)).await?;
     enlace.abrir_linha(LineId(LINE)).await?;
     enlace.at_field(true).await?;
 
@@ -185,7 +185,7 @@ async fn o_que_a_pessoa_escolheu_volta_com_ela() -> Result<()> {
         "a sessão nova não trouxe um ssrc"
     );
 
-    // Falar de novo prova que o Cage e a Linha foram refeitos: sem `join_line`
+    // Falar de novo prova que a sala de voz e a Linha foram refeitos: sem `join_line`
     // o Dogma aceita a mensagem e não a devolve para ninguém.
     enlace
         .dizer(LineId(LINE), "de volta".to_owned(), ClientMessageId(1))

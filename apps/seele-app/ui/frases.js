@@ -78,9 +78,9 @@ const AVISOS = {
   Mentioned: "VOCÊ FOI CHAMADO",
   SubsystemChanged: "UM SUBSISTEMA MUDOU DE ESTADO",
   SyncDegraded: "SINAL EM QUEDA",
-  CageEntryRefused: "ENTRADA NA SALA DE VOZ RECUSADA",
+  VoiceRoomEntryRefused: "ENTRADA NA SALA DE VOZ RECUSADA",
   PermissionDenied: "PERMISSÃO NEGADA",
-  CageFull: "SALA DE VOZ LOTADA",
+  VoiceRoomFull: "SALA DE VOZ LOTADA",
   OperatorNotice: "AVISO DO OPERADOR",
   // O aviso que o Dogma manda **antes** de derrubar. É o único da lista que
   // pede uma mudança de comportamento de quem o lê, e por isso ele existe:
@@ -111,9 +111,9 @@ const AVISOS = {
   //
   // A terceira não é sobre uma sala que foi: é uma recusa, e a única desta
   // lista que ensina o que fazer em seguida.
-  CageDeleted: "A SALA DE VOZ EM QUE VOCÊ ESTAVA FOI APAGADA",
+  VoiceRoomDeleted: "A SALA DE VOZ EM QUE VOCÊ ESTAVA FOI APAGADA",
   LineDeleted: "O CANAL DE TEXTO QUE VOCÊ LIA FOI APAGADO, COM TUDO QUE HAVIA NELE",
-  LastCage:
+  LastVoiceRoom:
     "ESTA É A ÚNICA SALA DE VOZ DO SERVIDOR, E ELA FICA.\nFaça outra sala antes de apagar esta.",
 };
 
@@ -431,7 +431,7 @@ const FRASES = {
       "Dá para entrar por ele na mesma rede; de fora, peça o link inteiro de novo.",
     ImpressaoDigitalInvalida: "ESTE CONVITE CHEGOU CORTADO OU ADULTERADO",
     TokenInvalido: "O CONVITE DENTRO DESTE LINK NÃO É UM CONVITE",
-    CageInvalido: "A SALA DE VOZ DESTE CONVITE NÃO É UM NÚMERO",
+    VoiceRoomInvalido: "A SALA DE VOZ DESTE CONVITE NÃO É UM NÚMERO",
 
     // Hospedar aqui dentro.
     JaHospedando: "JÁ ESTOU HOSPEDANDO NESTA JANELA",

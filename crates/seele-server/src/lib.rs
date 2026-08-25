@@ -6,17 +6,17 @@
 //! | Subsystem | Responsibility | Module |
 //! |---|---|---|
 //! | **PERMISSIONS** | Identity, authentication, sessions, roles | [`session`] |
-//! | **MEDIA** | Media routing, forwarding, bandwidth | [`cage`] |
+//! | **MEDIA** | Media routing, forwarding, bandwidth | [`voice_room`] |
 //! | **PERSISTENCE** | Persistent state, history, migrations | M3 |
 //!
 //! M2 builds PERMISSIONS's handshake and MEDIA's forwarding, with one fixed
-//! Cage and no persistence.
+//! voice room and no persistence.
 //!
 //! # Why this is a library as well as a binary
 //!
 //! `specs/10-convencoes.md` puts protocol coverage under "integration tests with
 //! an in-process server". The acceptance criterion for M2 — three clients in a
-//! Cage — therefore runs in CI, on a machine with no sound card and no second
+//! voice room — therefore runs in CI, on a machine with no sound card and no second
 //! host.
 
 #![cfg_attr(
@@ -28,11 +28,11 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use seele_proto::ids::CageId;
+use seele_proto::ids::VoiceRoomId;
 
 pub mod admissao;
 pub mod alcance;
-pub mod cage;
+pub mod voice_room;
 pub mod persistence;
 pub mod dogma;
 pub mod frame;
@@ -107,12 +107,12 @@ pub struct DogmaConfig {
     /// degrau 2 do ADR 0022 — e por isso um Dogma não atendia em IPv6 nem
     /// quando as duas pontas tinham. Ver [`alcance::abrir_escuta`].
     pub listen: SocketAddr,
-    /// The one Cage M2 offers.
-    pub cage: CageId,
+    /// The one voice room M2 offers.
+    pub voice_room: VoiceRoomId,
     /// Its display name.
-    pub cage_name: String,
+    pub voice_room_name: String,
     /// How many people fit in it.
-    pub cage_limit: u16,
+    pub voice_room_limit: u16,
     /// Nicknames that arrive as Observador rather than Pessoa.
     ///
     /// M3 brought real accounts, so this is now only a bootstrap convenience:
@@ -162,12 +162,12 @@ impl Default for DogmaConfig {
                 std::net::Ipv6Addr::UNSPECIFIED,
                 seele_proto::transport::DEFAULT_PORT,
             )),
-            cage: CageId(1),
+            voice_room: VoiceRoomId(1),
             // A sala que todo servidor nasce com. Este nome **aparece na
             // tela** de quem entra, e ficou para trás na troca de vocabulário
             // porque ela varreu `apps/` e a TUI, e não o servidor.
-            cage_name: "SALA 1".into(),
-            cage_limit: 15,
+            voice_room_name: "SALA 1".into(),
+            voice_room_limit: 15,
             observers: Vec::new(),
             database: crate::persistence::Location::Memory,
             anexos: None,
@@ -195,7 +195,7 @@ pub fn diretorio_de_anexos(config: &DogmaConfig) -> Option<std::path::PathBuf> {
     }
 }
 
-/// Creates the configured Cage and its Line if they are not there yet.
+/// Creates the configured voice room and its Line if they are not there yet.
 ///
 /// M2 kept these in the config struct; M3 keeps them in PERSISTENCE so a restart
 /// finds the same room rather than rebuilding it. Idempotent, because it runs
@@ -204,10 +204,10 @@ pub fn diretorio_de_anexos(config: &DogmaConfig) -> Option<std::path::PathBuf> {
 /// # A Dogma opens with somewhere to go
 ///
 /// This is what stops a fresh Dogma being a screen that does not explain
-/// itself. A room with no Cage offers nowhere to speak and no Line to write in;
+/// itself. A room with na sala de voz offers nowhere to speak and no Line to write in;
 /// the person who pressed **HOSPEDAR AQUI** looks at an empty list and has no
 /// way to tell a working Dogma from a broken one. So the first boot writes a
-/// Line called `geral` and one Cage bound to it, and there is somewhere to
+/// Line called `geral` and one voice room bound to it, and there is somewhere to
 /// stand from the first second.
 ///
 /// # Why here, and not in the migration
@@ -216,17 +216,17 @@ pub fn diretorio_de_anexos(config: &DogmaConfig) -> Option<std::path::PathBuf> {
 /// is the wrong place, for two reasons that only show up later.
 ///
 /// **A migration is irreversible and append-only** ([`persistence::schema`]). The
-/// name of a Cage is not: `ClientMessage::RenameCage` exists, and the whole
+/// name of a voice room is not: `ClientMessage::RenameVoiceRoom` exists, and the whole
 /// point of hosting your own Dogma is that the rooms are yours. Seeded content
 /// baked into a schema version would be a name the operator can change and the
 /// history of the schema still claims.
 ///
-/// **The Cage's name and limit come from [`DogmaConfig`]**, which a migration
+/// **The voice room's name and limit come from [`DogmaConfig`]**, which a migration
 /// cannot see. Migrations run inside PERSISTENCE, before there is a config to
 /// consult, and passing one in would make "which SQL is this database at" depend
 /// on a runtime value.
 ///
-/// `INSERT OR IGNORE` is what keeps it honest on the second boot: a Cage that
+/// `INSERT OR IGNORE` is what keeps it honest on the second boot: a voice room that
 /// has since been renamed keeps its new name, because the conflicting insert is
 /// skipped rather than applied.
 ///
@@ -265,12 +265,12 @@ fn seed(persistence: &mut persistence::Persistence, config: &DogmaConfig) -> Res
         [],
     )?;
     connection.execute(
-        "INSERT OR IGNORE INTO cages (id, name, member_limit, line_id)
+        "INSERT OR IGNORE INTO voice_rooms (id, name, member_limit, line_id)
          VALUES (?1, ?2, ?3, 1)",
         rusqlite::params![
-            i64::from(config.cage.get()),
-            config.cage_name,
-            i64::from(config.cage_limit)
+            i64::from(config.voice_room.get()),
+            config.voice_room_name,
+            i64::from(config.voice_room_limit)
         ],
     )?;
     connection.execute(
@@ -290,11 +290,11 @@ pub struct Server {
     fingerprint: String,
     registry: Arc<session::Registry>,
     dogma: Arc<dogma::Dogma>,
-    cages: Arc<cage::Cages>,
+    voice_rooms: Arc<voice_room::VoiceRooms>,
 }
 
 impl Server {
-    /// Binds the endpoint and starts the Cage task.
+    /// Binds the endpoint and starts the voice room task.
     ///
     /// # Errors
     ///
@@ -398,11 +398,11 @@ impl Server {
             }
         });
 
-        // Uma tarefa por Cage, criada quando alguém entra. Antes havia
-        // exatamente uma, a do Cage do `DogmaConfig`, e toda sessão segurava
+        // Uma tarefa por sala de voz, criada quando alguém entra. Antes havia
+        // exatamente uma, a da sala de voz do `DogmaConfig`, e toda sessão segurava
         // esse único remetente: correto enquanto um Dogma tinha uma sala,
         // silenciosamente errado no instante em que passou a poder ter duas.
-        let cages = Arc::new(cage::Cages::new(
+        let voice_rooms = Arc::new(voice_room::VoiceRooms::new(
             tela::caminho_do_dogma(dogma.caminho_bps),
             dogma.events.clone(),
         ));
@@ -415,7 +415,7 @@ impl Server {
             fingerprint,
             registry: Arc::new(session::Registry::new()),
             dogma,
-            cages,
+            voice_rooms,
         })
     }
 
@@ -500,7 +500,7 @@ impl Server {
             let config = Arc::clone(&self.config);
             let registry = Arc::clone(&self.registry);
             let dogma = Arc::clone(&self.dogma);
-            let cages = Arc::clone(&self.cages);
+            let voice_rooms = Arc::clone(&self.voice_rooms);
 
             tokio::spawn(async move {
                 let connection = match incoming.await {
@@ -513,7 +513,7 @@ impl Server {
                 let peer = connection.remote_address();
                 tracing::info!(%peer, "pattern orange");
 
-                if let Err(error) = session::serve(connection, config, registry, dogma, cages).await
+                if let Err(error) = session::serve(connection, config, registry, dogma, voice_rooms).await
                 {
                     tracing::info!(%peer, %error, "session closed");
                 }
@@ -612,7 +612,7 @@ mod tests {
 
     #[test]
     fn a_new_dogma_opens_with_somewhere_to_go() {
-        // A Dogma with no Cage offers nowhere to speak and no Line to write in.
+        // A Dogma with na sala de voz offers nowhere to speak and no Line to write in.
         // The person who pressed HOSPEDAR AQUI would look at an empty list with
         // no way to tell a working Dogma from a broken one — and "hospede você
         // mesmo" would be a claim rather than a thing that happens.
@@ -624,18 +624,18 @@ mod tests {
         assert_eq!(lines.len(), 1, "a Dogma opened with no Line: {lines:?}");
         assert_eq!(lines[0].name, "geral");
 
-        let cages = channels.cages().expect("cages");
-        assert_eq!(cages.len(), 1, "a Dogma opened with no Cage: {cages:?}");
-        assert_eq!(cages[0].name, config.cage_name);
-        assert_eq!(cages[0].limit, config.cage_limit);
+        let voice_rooms = channels.voice_rooms().expect("voice_rooms");
+        assert_eq!(voice_rooms.len(), 1, "a Dogma opened with na sala de voz: {voice_rooms:?}");
+        assert_eq!(voice_rooms[0].name, config.voice_room_name);
+        assert_eq!(voice_rooms[0].limit, config.voice_room_limit);
         assert_eq!(
-            cages[0].line,
+            voice_rooms[0].line,
             Some(lines[0].id),
-            "the opening Cage has no Line attached to it"
+            "the opening voice room has no Line attached to it"
         );
         assert!(
-            !cages[0].password_required,
-            "the opening Cage is locked, and nobody has the key"
+            !voice_rooms[0].password_required,
+            "the opening voice room is locked, and nobody has the key"
         );
     }
 
@@ -654,12 +654,12 @@ mod tests {
 
         let channels = Channels::new(&persistence);
         assert_eq!(channels.lines().expect("lines").len(), 1);
-        assert_eq!(channels.cages().expect("cages").len(), 1);
+        assert_eq!(channels.voice_rooms().expect("voice_rooms").len(), 1);
     }
 
     #[test]
-    fn a_renamed_opening_cage_keeps_its_new_name_across_a_restart() {
-        // The seed and `RenameCage` write the same row, and a seed that
+    fn a_renamed_opening_voice_room_keeps_its_new_name_across_a_restart() {
+        // The seed and `RenameVoiceRoom` write the same row, and a seed that
         // overwrote would undo the rename on the next restart — silently, and
         // only for the room the Dogma came with, which is the hardest kind of
         // bug to believe when somebody reports it.
@@ -670,16 +670,16 @@ mod tests {
         };
 
         let persistence = born(&config);
-        let cage = Channels::new(&persistence).cages().expect("cages")[0].id;
+        let voice_room = Channels::new(&persistence).voice_rooms().expect("voice_rooms")[0].id;
         Channels::new(&persistence)
-            .rename_cage(cage, "CAGE-01 PONTE")
+            .rename_voice_room(voice_room, "VOICE_ROOM-01 PONTE")
             .expect("rename");
         drop(persistence);
 
         let persistence = born(&config);
-        let cages = Channels::new(&persistence).cages().expect("cages");
-        assert_eq!(cages.len(), 1);
-        assert_eq!(cages[0].name, "CAGE-01 PONTE");
+        let voice_rooms = Channels::new(&persistence).voice_rooms().expect("voice_rooms");
+        assert_eq!(voice_rooms.len(), 1);
+        assert_eq!(voice_rooms[0].name, "VOICE_ROOM-01 PONTE");
     }
 
     #[test]
@@ -700,8 +700,8 @@ mod tests {
         let persistence = born(&config);
         let channels = Channels::new(&persistence);
         let line = channels.lines().expect("lines")[0].id;
-        // The Cage bound to it is unbound by the delete; nothing else here
-        // depends on that, and the Cage is not what this test is about.
+        // The voice room bound to it is unbound by the delete; nothing else here
+        // depends on that, and the voice room is not what this test is about.
         channels.delete_line(line).expect("delete");
         drop(persistence);
 
@@ -713,9 +713,9 @@ mod tests {
     }
 
     #[test]
-    fn a_destroyed_opening_cage_does_not_come_back_at_the_next_boot() {
-        // The same for the Cage, which the seed also writes by identifier. It
-        // takes a second room to get here at all, because the last Cage is
+    fn a_destroyed_opening_voice_room_does_not_come_back_at_the_next_boot() {
+        // The same for the voice room, which the seed also writes by identifier. It
+        // takes a second room to get here at all, because the last voice room is
         // refused — and that is the shape a real Dogma has when somebody
         // destroys the one it came with: they made theirs first.
         let directory = tempfile::tempdir().expect("tempdir");
@@ -726,21 +726,21 @@ mod tests {
 
         let persistence = born(&config);
         let channels = Channels::new(&persistence);
-        let inicial = channels.cages().expect("cages")[0].id;
+        let inicial = channels.voice_rooms().expect("voice_rooms")[0].id;
         channels
-            .create_cage("CAGE-02 PONTE", 8, None)
-            .expect("cage");
-        channels.delete_cage(inicial).expect("delete");
+            .create_voice_room("VOICE_ROOM-02 PONTE", 8, None)
+            .expect("voice room");
+        channels.delete_voice_room(inicial).expect("delete");
         drop(persistence);
 
         let persistence = born(&config);
-        let cages = Channels::new(&persistence).cages().expect("cages");
+        let voice_rooms = Channels::new(&persistence).voice_rooms().expect("voice_rooms");
         assert_eq!(
-            cages.len(),
+            voice_rooms.len(),
             1,
-            "the opening Cage was written back: {cages:?}"
+            "the opening voice room was written back: {voice_rooms:?}"
         );
-        assert_eq!(cages[0].name, "CAGE-02 PONTE");
+        assert_eq!(voice_rooms[0].name, "VOICE_ROOM-02 PONTE");
     }
 
     #[test]

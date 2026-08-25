@@ -10,12 +10,12 @@ O produto principal. Tudo o mais imita esta interface.
 
 ```
 ┌ SEELE ─────────────────────── 同期率 ─── 第3新東京市 ─────── 12:04:33 ┐
-│ DOGMA          │ CAGES / LINHAS       │ MENSAGENS                  │
-│ ▸ Terceira Tó… │ ▼ CAGE-01 CENTRAL    │ 12:01 ayanami              │
+│ DOGMA          │ VOICE_ROOMS / LINHAS       │ MENSAGENS                  │
+│ ▸ Terceira Tó… │ ▼ VOICE_ROOM-01 CENTRAL    │ 12:01 ayanami              │
 │   Geofront     │   ● ayanami    98%   │   verificando harmônicos   │
 │   Matsushiro   │   ● shinji     71%   │                            │
 │                │   ○ asuka    A.T.    │ 12:03 shinji               │
-│                │ ▼ CAGE-02 TESTE      │   sync caiu aqui           │
+│                │ ▼ VOICE_ROOM-02 TESTE      │   sync caiu aqui           │
 │                │ ─ LINHA #geral       │                            │
 │                │ ─ LINHA #logs        │ ▸ _                        │
 ├────────────────┴──────────────────────┴────────────────────────────┤
@@ -41,7 +41,7 @@ Atalhos essenciais no modo Normal:
 ```
 h j k l / setas   navegar
 Tab / Shift+Tab   alternar painel, adiante e para trás
-Enter             inserir plug no Cage / abrir Linha
+Enter             inserir plug no VoiceRoom / abrir Linha
 i                 escrever mensagem
 Espaço (hold)     push-to-talk
 m                 alternar A.T. Field (mudo)
@@ -66,7 +66,7 @@ metade textual disso: sem ele o destaque seria informação só na cor, que esta
 spec proíbe. O cursor dá a volta nas duas pontas, porque quem procura trata a
 última ocorrência e a primeira como vizinhas.
 
-Comandos: `:conectar <host>`, `:cage <nome>`, `:sync` (diagnóstico detalhado), `:audio` (dispositivos), `:tema`, `:sobre`, `:ejetar` (sair deste Dogma e escolher outro).
+Comandos: `:conectar <host>`, `:voice_room <nome>`, `:sync` (diagnóstico detalhado), `:audio` (dispositivos), `:tema`, `:sobre`, `:ejetar` (sair deste Dogma e escolher outro).
 
 **Resolvido em M4, e eram duas causas independentes.** A colisão com digitação: PTT só no modo Normal, onde não há nada com que colidir (decisão D19). E uma que esta spec não previa: **a maioria dos terminais não reporta soltura de tecla**, então "segurar espaço" abre um microfone que nunca fecha. Onde o protocolo de teclado do Kitty existe, é segurar de verdade; onde não existe, a barra vira trava — aperta para abrir, aperta para fechar (ADR 0016). A barra de telemetria diz qual estado está valendo nos dois casos.
 
@@ -101,7 +101,7 @@ comando que termina sozinho quando dá errado.
 
 Os Dogmas visitados ficam num arquivo à parte dos pins, e a separação é
 deliberada: o arquivo de pins decide se um servidor é o mesmo de ontem e por
-isso é curto e legível a olho. Apelido e último Cage são conveniência — um pode
+isso é curto e legível a olho. Apelido e último VoiceRoom são conveniência — um pode
 ser apagado sem consequência, o outro não.
 
 ### Sair do programa é uma coisa; sair do Dogma é outra

@@ -33,7 +33,7 @@
 //! # `ssrc` is not used here
 //!
 //! §3.6 again, and it is the one thing that section puts in bold: [`crate::ids::Ssrc`] is
-//! the **audio** source identifier the server assigns on Cage entry, and every
+//! the **audio** source identifier the server assigns on voice room entry, and every
 //! client keeps a table of `ssrc` → person built out of it. A screen is not a
 //! voice, so it gets [`ScreenId`], and nobody has to rewrite that table to make
 //! room for something that was never a talker.
@@ -580,7 +580,7 @@ mod tests {
 
     #[test]
     fn a_screen_is_not_an_audio_source() {
-        // §3.6, and the one thing it puts in bold. `Ssrc` is assigned on Cage
+        // §3.6, and the one thing it puts in bold. `Ssrc` is assigned on voice room
         // entry and every client keeps a table of `ssrc` → person built out of
         // it; passing one where the other belongs is a bug the compiler catches
         // for free, and this test documents the guarantee — `ScreenId(1)` does

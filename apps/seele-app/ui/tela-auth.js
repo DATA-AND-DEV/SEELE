@@ -275,7 +275,7 @@ function dizerSeOConviteJaConferiu(veredito) {
  */
 function desenharDogmaDaEntrada(snapshot) {
   $("auth-dogma-nome").textContent = snapshot?.dogma || AUSENTE;
-  $("auth-cages").textContent = doisDigitos(snapshot?.cages?.length);
+  $("auth-voice_rooms").textContent = doisDigitos(snapshot?.voice_rooms?.length);
   $("auth-linhas").textContent = doisDigitos(snapshot?.lines?.length);
 }
 

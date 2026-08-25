@@ -20,7 +20,7 @@ use seele_ffi::{ConnectConfig, Event, EventListener, Pattern, Plug, PlugError, T
 use seele_server::persistence::Location;
 use seele_server::{DogmaConfig, Server};
 
-const CAGE: u32 = 1;
+const VOICE_ROOM: u32 = 1;
 const LINE: u32 = 1;
 const WAIT: Duration = Duration::from_secs(5);
 
@@ -132,7 +132,7 @@ async fn a_shell_connects_and_the_snapshot_describes_the_dogma() -> Result<()> {
     assert_eq!(snapshot.dogma, "Terceira Tóquio");
     assert_eq!(snapshot.nickname, "ayanami");
     assert!(snapshot.me.is_some());
-    assert!(!snapshot.cages.is_empty(), "no Cages in the snapshot");
+    assert!(!snapshot.voice_rooms.is_empty(), "no voice_rooms in the snapshot");
     assert!(!snapshot.audio_available, "audio was off for this session");
     assert!(snapshot.ended.is_none());
 
@@ -141,21 +141,21 @@ async fn a_shell_connects_and_the_snapshot_describes_the_dogma() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn entering_a_cage_puts_us_on_our_own_roster() -> Result<()> {
+async fn entering_a_voice_room_puts_us_on_our_own_roster() -> Result<()> {
     let (address, server) = start().await?;
     let plug = tokio::task::spawn_blocking(move || connect(address, "rei")).await??;
 
-    plug.insert_plug(CAGE)?;
+    plug.insert_plug(VOICE_ROOM)?;
 
     assert!(
         until(&plug, |plug| {
             let snapshot = plug.snapshot();
             snapshot
-                .cages
+                .voice_rooms
                 .iter()
-                .any(|cage| cage.occupied_by_us && cage.people.iter().any(|p| p.is_self))
+                .any(|voice_room| voice_room.occupied_by_us && voice_room.people.iter().any(|p| p.is_self))
         }),
-        "we entered a Cage and are not on its roster"
+        "we entered a voice room and are not on its roster"
     );
 
     server.shutdown();
@@ -163,7 +163,7 @@ async fn entering_a_cage_puts_us_on_our_own_roster() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn leaving_a_cage_takes_us_off_our_own_roster() -> Result<()> {
+async fn leaving_a_voice_room_takes_us_off_our_own_roster() -> Result<()> {
     // The mirror of the test above, and it was missing.
     //
     // The Dogma does not echo `PersonLeft` to the person who caused it — "they
@@ -174,7 +174,7 @@ async fn leaving_a_cage_takes_us_off_our_own_roster() -> Result<()> {
     // every *other* client.
     //
     // Reported from a real session twice over, as two complaints that turn out
-    // to be one: "não dá pra sair de uma jaula e deixá-la vazia" — the Cage
+    // to be one: "não dá pra sair de uma jaula e deixá-la vazia" — the sala de voz
     // never empties on the screen of the person who left it — and "o usuário
     // está numa jaula com outro, mas o segundo não consegue ver esse usuário" —
     // which is the same picture from the other chair, where the Dogma is right
@@ -182,15 +182,15 @@ async fn leaving_a_cage_takes_us_off_our_own_roster() -> Result<()> {
     let (address, server) = start().await?;
     let plug = tokio::task::spawn_blocking(move || connect(address, "rei")).await??;
 
-    plug.insert_plug(CAGE)?;
+    plug.insert_plug(VOICE_ROOM)?;
     assert!(
         until(&plug, |plug| {
             plug.snapshot()
-                .cages
+                .voice_rooms
                 .iter()
-                .any(|cage| cage.occupied_by_us && cage.people.iter().any(|p| p.is_self))
+                .any(|voice_room| voice_room.occupied_by_us && voice_room.people.iter().any(|p| p.is_self))
         }),
-        "we entered a Cage and are not on its roster"
+        "we entered a voice room and are not on its roster"
     );
 
     plug.eject_plug()?;
@@ -199,17 +199,17 @@ async fn leaving_a_cage_takes_us_off_our_own_roster() -> Result<()> {
         until(&plug, |plug| {
             let snapshot = plug.snapshot();
             !snapshot
-                .cages
+                .voice_rooms
                 .iter()
-                .any(|cage| cage.occupied_by_us || cage.people.iter().any(|p| p.is_self))
+                .any(|voice_room| voice_room.occupied_by_us || voice_room.people.iter().any(|p| p.is_self))
         }),
-        "we left the Cage and our own screen still draws us in it: {:?}",
+        "we left the voice room and our own screen still draws us in it: {:?}",
         plug.snapshot()
-            .cages
+            .voice_rooms
             .iter()
-            .map(|cage| (
-                cage.occupied_by_us,
-                cage.people.iter().filter(|p| p.is_self).count()
+            .map(|voice_room| (
+                voice_room.occupied_by_us,
+                voice_room.people.iter().filter(|p| p.is_self).count()
             ))
             .collect::<Vec<_>>()
     );
@@ -218,17 +218,17 @@ async fn leaving_a_cage_takes_us_off_our_own_roster() -> Result<()> {
     // trap rather than a wrong picture. The screen draws `SAIR DA JAULA` when
     // `occupied_by_us` is true and sends `eject_plug` when it is pressed. With
     // the seat never clearing, that button stayed on `SAIR DA JAULA` for the
-    // rest of the session and every press ejected again: the Cage could not be
+    // rest of the session and every press ejected again: the voice room could not be
     // left on screen **and could not be re-entered**.
-    plug.insert_plug(CAGE)?;
+    plug.insert_plug(VOICE_ROOM)?;
     assert!(
         until(&plug, |plug| {
             plug.snapshot()
-                .cages
+                .voice_rooms
                 .iter()
-                .any(|cage| cage.occupied_by_us && cage.people.iter().any(|p| p.is_self))
+                .any(|voice_room| voice_room.occupied_by_us && voice_room.people.iter().any(|p| p.is_self))
         }),
-        "we could not walk back into the Cage we had just left"
+        "we could not walk back into the voice room we had just left"
     );
 
     server.shutdown();
@@ -246,7 +246,7 @@ async fn two_shells_hold_a_conversation() -> Result<()> {
     listener.subscribe(Arc::clone(&heard) as Arc<dyn EventListener>);
 
     for plug in [&speaker, &listener] {
-        plug.insert_plug(CAGE)?;
+        plug.insert_plug(VOICE_ROOM)?;
         plug.open_line(LINE)?;
     }
 
@@ -289,15 +289,15 @@ async fn an_at_field_is_visible_to_everybody_else() -> Result<()> {
     let muted = tokio::task::spawn_blocking(move || connect(address, "kaworu")).await??;
     let watcher = tokio::task::spawn_blocking(move || connect(address, "misato")).await??;
 
-    muted.insert_plug(CAGE)?;
-    watcher.insert_plug(CAGE)?;
+    muted.insert_plug(VOICE_ROOM)?;
+    watcher.insert_plug(VOICE_ROOM)?;
     assert!(
         until(&watcher, |plug| {
             let snapshot = plug.snapshot();
             snapshot
-                .cages
+                .voice_rooms
                 .iter()
-                .any(|cage| cage.people.iter().any(|person| person.nickname == "kaworu"))
+                .any(|voice_room| voice_room.people.iter().any(|person| person.nickname == "kaworu"))
         }),
         "the other person never appeared"
     );
@@ -307,8 +307,8 @@ async fn an_at_field_is_visible_to_everybody_else() -> Result<()> {
     assert!(
         until(&watcher, |plug| {
             let snapshot = plug.snapshot();
-            snapshot.cages.iter().any(|cage| {
-                cage.people
+            snapshot.voice_rooms.iter().any(|voice_room| {
+                voice_room.people
                     .iter()
                     .any(|person| person.nickname == "kaworu" && person.at_field)
             })
@@ -329,7 +329,7 @@ async fn a_second_client_resumes_the_conversation_with_its_history() -> Result<(
     let (address, server) = start().await?;
 
     let first = tokio::task::spawn_blocking(move || connect(address, "maya")).await??;
-    first.insert_plug(CAGE)?;
+    first.insert_plug(VOICE_ROOM)?;
     first.open_line(LINE)?;
     first.send_message(LINE, "primeira coisa dita".into())?;
     assert!(
@@ -378,7 +378,7 @@ async fn a_second_client_resumes_the_conversation_with_its_history() -> Result<(
 #[tokio::test(flavor = "multi_thread")]
 async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()> {
     use seele_core::{Client, MemoryPinStore, Room};
-    use seele_proto::ids::{CageId, ClientMessageId, LineId};
+    use seele_proto::ids::{VoiceRoomId, ClientMessageId, LineId};
 
     let (address, server) = start().await?;
 
@@ -396,8 +396,8 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
 
     let mut room = Room::new();
     room.adopt(terminal.session(), "ayanami");
-    terminal.insert_plug(CageId(CAGE)).await?;
-    room.enter_cage(CageId(CAGE));
+    terminal.insert_plug(VoiceRoomId(VOICE_ROOM)).await?;
+    room.enter_voice_room(VoiceRoomId(VOICE_ROOM));
     terminal.join_line(LineId(LINE)).await?;
     room.open_line(LineId(LINE));
     terminal
@@ -520,7 +520,7 @@ async fn the_volume_of_a_stranger_is_refused_by_name() -> Result<()> {
 async fn dropping_the_handle_disconnects() -> Result<()> {
     let (address, server) = start().await?;
     let plug = tokio::task::spawn_blocking(move || connect(address, "aoba")).await??;
-    plug.insert_plug(CAGE)?;
+    plug.insert_plug(VOICE_ROOM)?;
     assert!(until(&plug, |plug| plug.snapshot().pattern == Pattern::Blue));
 
     drop(plug);
@@ -550,7 +550,7 @@ async fn a_shell_asks_for_a_room_and_the_dogma_makes_it() -> Result<()> {
     // shell the one that may ask. The field exists so a screen can decide
     // whether to draw the control at all.
     assert!(
-        plug.snapshot().may_manage_cages,
+        plug.snapshot().may_manage_voice_rooms,
         "the shell that hosted this Dogma was not told it may make rooms"
     );
 
@@ -558,14 +558,14 @@ async fn a_shell_asks_for_a_room_and_the_dogma_makes_it() -> Result<()> {
     plug.subscribe(Arc::clone(&recorder) as Arc<dyn EventListener>);
 
     plug.create_line("planejamento".into())?;
-    plug.create_cage("CAGE-02 SALA DOS FUNDOS".into(), 8, None)?;
+    plug.create_voice_room("VOICE_ROOM-02 SALA DOS FUNDOS".into(), 8, None)?;
 
     assert!(
         until(&plug, |plug| plug
             .snapshot()
-            .cages
+            .voice_rooms
             .iter()
-            .any(|cage| cage.name == "CAGE-02 SALA DOS FUNDOS")),
+            .any(|voice_room| voice_room.name == "VOICE_ROOM-02 SALA DOS FUNDOS")),
         "the room never reached the snapshot the screen reads"
     );
     assert!(
@@ -581,14 +581,14 @@ async fn a_shell_asks_for_a_room_and_the_dogma_makes_it() -> Result<()> {
         "nothing woke the shell to redraw the channel list"
     );
 
-    // And the room is a room: somebody can walk into it. A Cage that exists in
+    // And the room is a room: somebody can walk into it. A voice room that exists in
     // a list and cannot be entered is a row, not a channel.
     plug.insert_plug(2)?;
     assert!(until(&plug, |plug| plug
         .snapshot()
-        .cages
+        .voice_rooms
         .iter()
-        .any(|cage| cage.id == 2 && cage.occupied_by_us)));
+        .any(|voice_room| voice_room.id == 2 && voice_room.occupied_by_us)));
 
     drop(plug);
     server.shutdown();
@@ -597,7 +597,7 @@ async fn a_shell_asks_for_a_room_and_the_dogma_makes_it() -> Result<()> {
 
 /// A shell that asks without the permission is refused by the Dogma.
 ///
-/// `may_manage_cages` is convenience — `specs/08-seguranca.md` puts the
+/// `may_manage_voice_rooms` is convenience — `specs/08-seguranca.md` puts the
 /// security in the server refusing — so this shell ignores it and asks anyway,
 /// which is exactly what a hostile client would do. What comes back is an
 /// enumerated notice and no room.
@@ -610,14 +610,14 @@ async fn a_shell_without_the_permission_is_refused_by_the_dogma() -> Result<()> 
     let convidado = tokio::task::spawn_blocking(move || connect(address, "convidado")).await??;
 
     assert!(
-        !convidado.snapshot().may_manage_cages,
+        !convidado.snapshot().may_manage_voice_rooms,
         "the guest was told it may make rooms, and this test measures nothing"
     );
 
     let recorder = Arc::new(Recorder::default());
     convidado.subscribe(Arc::clone(&recorder) as Arc<dyn EventListener>);
 
-    convidado.create_cage("CAGE-DO-INTRUSO".into(), 8, None)?;
+    convidado.create_voice_room("VOICE_ROOM-DO-INTRUSO".into(), 8, None)?;
 
     assert!(
         until(&convidado, |_| {
@@ -633,18 +633,18 @@ async fn a_shell_without_the_permission_is_refused_by_the_dogma() -> Result<()> 
     // the whole time and never sees the room appear. A shell that had merely
     // hidden its own button would produce the same screen for the guest and no
     // difference at all here.
-    let antes = anfitria.snapshot().cages.len();
+    let antes = anfitria.snapshot().voice_rooms.len();
     std::thread::sleep(Duration::from_millis(500));
     assert_eq!(
-        anfitria.snapshot().cages.len(),
+        anfitria.snapshot().voice_rooms.len(),
         antes,
         "the intruder's room was announced to the host"
     );
     assert!(!convidado
         .snapshot()
-        .cages
+        .voice_rooms
         .iter()
-        .any(|cage| cage.name == "CAGE-DO-INTRUSO"));
+        .any(|voice_room| voice_room.name == "VOICE_ROOM-DO-INTRUSO"));
 
     drop(anfitria);
     drop(convidado);

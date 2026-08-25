@@ -60,16 +60,16 @@ pub const NOMINAL_FRAMES_PER_SECOND: u32 = 50;
 ///
 /// `specs/04-servidor-seele.md`: "per-sender limit on frames per second (an
 /// honest client sends 50/s). Above that, discard and log. Protects against a
-/// malicious client saturating the Cage." The margin absorbs bursts after a
+/// malicious client saturating the voice room." The margin absorbs bursts after a
 /// scheduling hiccup without admitting a flood.
 pub const MAX_FRAMES_PER_SECOND: u32 = 60;
 
-/// Participants above which a Cage starts forwarding only the loudest.
+/// Participants above which a voice room starts forwarding only the loudest.
 ///
 /// `specs/01-arquitetura.md` sets the threshold and leaves the policy open —
 /// see decision D13 in `docs/plano-m0-m1.md`. Nothing implements the policy yet;
 /// this is the number it will key off.
-pub const CAGE_ACTIVE_SPEAKER_THRESHOLD: usize = 20;
+pub const VOICE_ROOM_ACTIVE_SPEAKER_THRESHOLD: usize = 20;
 
 #[cfg(test)]
 mod tests {

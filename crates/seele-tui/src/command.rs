@@ -20,8 +20,8 @@ pub enum Command {
         /// Whatever was typed. Resolving it is the caller's problem.
         target: String,
     },
-    /// `:cage <nome>`.
-    Cage {
+    /// `:voice_room <nome>`.
+    VoiceRoom {
         /// Name or number.
         which: String,
     },
@@ -90,7 +90,7 @@ pub fn parse(input: &str) -> Command {
         "q" | "quit" | "sair" => Command::Quit,
         "ejetar" | "eject" => Command::Eject,
         "conectar" | "connect" if !joined.is_empty() => Command::Connect { target: joined },
-        "cage" if !joined.is_empty() => Command::Cage { which: joined },
+        "voice room" if !joined.is_empty() => Command::VoiceRoom { which: joined },
         "linha" | "line" if !joined.is_empty() => Command::Line { which: joined },
         "sync" => Command::Sync,
         "audio" | "áudio" => Command::Audio,
@@ -142,8 +142,8 @@ mod tests {
             }
         );
         assert_eq!(
-            parse(":cage central"),
-            Command::Cage {
+            parse(":voice room central"),
+            Command::VoiceRoom {
                 which: "central".into()
             }
         );
@@ -175,11 +175,11 @@ mod tests {
     }
 
     #[test]
-    fn a_cage_name_may_contain_spaces() {
+    fn a_voice_room_name_may_contain_spaces() {
         assert_eq!(
-            parse(":cage CAGE-01 CENTRAL"),
-            Command::Cage {
-                which: "CAGE-01 CENTRAL".into()
+            parse(":voice room VOICE_ROOM-01 CENTRAL"),
+            Command::VoiceRoom {
+                which: "VOICE_ROOM-01 CENTRAL".into()
             }
         );
     }
@@ -189,7 +189,7 @@ mod tests {
         // `:conectar` alone connecting to the last host would be a surprise the
         // first time somebody mistypes it.
         assert!(matches!(parse(":conectar"), Command::Unknown { .. }));
-        assert!(matches!(parse(":cage"), Command::Unknown { .. }));
+        assert!(matches!(parse(":voice room"), Command::Unknown { .. }));
     }
 
     #[test]

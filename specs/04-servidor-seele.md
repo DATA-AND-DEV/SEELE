@@ -7,8 +7,8 @@ O daemon se chama `seeled`. Uma instância é um **Dogma Central**. Internamente
 | Subsistema | Responsabilidade |
 |---|---|
 | **PERMISSIONS** | Identidade, autenticação, sessões, papéis e permissões |
-| **MEDIA** | Roteamento de mídia: assinaturas de Cage, encaminhamento de datagrams, controle de banda |
-| **PERSISTENCE** | Estado persistente: Cages, Linhas, histórico, configuração, migrações |
+| **MEDIA** | Roteamento de mídia: assinaturas de VoiceRoom, encaminhamento de datagrams, controle de banda |
+| **PERSISTENCE** | Estado persistente: VoiceRooms, Linhas, histórico, configuração, migrações |
 
 Quando um subsistema está degradado, o cliente mostra isso explicitamente. "Os três concordam" é o estado nominal.
 
@@ -16,19 +16,19 @@ Quando um subsistema está degradado, o cliente mostra isso explicitamente. "Os 
 
 ```
 Dogma (a instância)
- ├─ Cage       — canal de voz     (id, nome, limite, senha?, papel mínimo)
+ ├─ VoiceRoom       — canal de voz     (id, nome, limite, senha?, papel mínimo)
  ├─ Linha      — canal de texto   (id, nome, papel mínimo de leitura/escrita)
  ├─ Pessoa     — conta de usuário (id, apelido, chave pública, papéis)
  └─ Papel      — conjunto de permissões
 ```
 
-Cages e Linhas são independentes; um Cage pode ter uma Linha associada, mas não é obrigatório.
+VoiceRooms e Linhas são independentes; um VoiceRoom pode ter uma Linha associada, mas não é obrigatório.
 
 ## Permissões
 
 Modelo simples e enumerado, sem sistema de expressão. Cada Papel carrega um conjunto:
 
-`ver_cage`, `inserir_plug`, `falar`, `ler_linha`, `escrever_linha`, `remover_mensagem`, `mover_persono`, `expulsar`, `banir`, `gerenciar_cages`, `gerenciar_papeis`, `administrar_dogma`.
+`ver_voice_room`, `inserir_plug`, `falar`, `ler_linha`, `escrever_linha`, `remover_mensagem`, `mover_pessoa`, `expulsar`, `banir`, `gerenciar_voice_rooms`, `gerenciar_papeis`, `administrar_dogma`.
 
 Papéis padrão: **Comandante** (tudo), **Operador** (moderação), **Pessoa** (uso normal), **Observador** (só ouvir e ler).
 
@@ -37,23 +37,23 @@ Regra: permissões negadas vencem concedidas. Sem herança em árvore — a comp
 ## Concorrência
 
 - Uma task `tokio` por conexão, tratando o stream de controle.
-- Uma task por **Cage**, dona do estado daquele Cage. Entrada e saída por `mpsc`. Isso elimina lock global e torna o roteamento de mídia trivialmente paralelo.
-- Datagrams de mídia entram na task do Cage, que replica para os assinantes. Zero cópia sempre que possível (`Bytes`).
+- Uma task por **VoiceRoom**, dona do estado daquele VoiceRoom. Entrada e saída por `mpsc`. Isso elimina lock global e torna o roteamento de mídia trivialmente paralelo.
+- Datagrams de mídia entram na task do VoiceRoom, que replica para os assinantes. Zero cópia sempre que possível (`Bytes`).
 
 ## Encaminhamento de mídia (MEDIA)
 
 1. Recebe datagram de um `ssrc` conhecido.
-2. Valida que o remetente está no Cage e tem permissão de falar. **Validar sempre** — não confiar no cliente.
-3. Encaminha o payload íntegro a todos os outros assinantes do Cage.
+2. Valida que o remetente está no VoiceRoom e tem permissão de falar. **Validar sempre** — não confiar no cliente.
+3. Encaminha o payload íntegro a todos os outros assinantes do VoiceRoom.
 4. Nunca decodifica o Opus.
 
-Controle de fluxo: limite por remetente de quadros por segundo (um cliente honesto envia 50/s). Acima disso, descarta e registra. Protege contra cliente malicioso saturando o Cage.
+Controle de fluxo: limite por remetente de quadros por segundo (um cliente honesto envia 50/s). Acima disso, descarta e registra. Protege contra cliente malicioso saturando o VoiceRoom.
 
 **[EM ABERTO]** Política acima de 20 falantes simultâneos: encaminhar apenas os N mais ativos, medidos por energia reportada? Requer que o cliente reporte energia, o que é confiável apenas parcialmente.
 
 ## Persistência (PERSISTENCE)
 
-SQLite, arquivo único, WAL ligado. Tabelas: `pessoas`, `papeis`, `persono_papeis`, `cages`, `linhas`, `mensagens`, `banimentos`, `config`, `schema_version`.
+SQLite, arquivo único, WAL ligado. Tabelas: `pessoas`, `papeis`, `pessoas_papeis`, `voice_rooms`, `linhas`, `mensagens`, `banimentos`, `config`, `schema_version`.
 
 - Migrações embutidas no binário, aplicadas no boot, versionadas e irreversíveis.
 - Histórico de mensagens com retenção configurável (padrão: ilimitado).
@@ -68,7 +68,7 @@ Arquivo TOML único, mais variáveis de ambiente para segredos. Exemplo de forma
 [dogma]
 nome = "Terceira Tóquio"
 descricao = "..."
-max_personos = 50
+max_pessoas = 50
 
 [rede]
 escuta = "0.0.0.0:8383"
@@ -89,11 +89,11 @@ Recarga a quente de configuração: **[EM ABERTO]**. Provavelmente não em v1 �
 
 - Log estruturado com `tracing`, saída JSON opcional.
 - Endpoint de saúde: **[EM ABERTO]** — HTTP separado ou comando no protocolo de controle? Um HTTP mínimo facilita monitoramento externo.
-- Métricas em formato Prometheus: pessoas conectados, cages ativos, datagrams/s, taxa de descarte, uso de banda.
+- Métricas em formato Prometheus: pessoas conectados, voice_rooms ativos, datagrams/s, taxa de descarte, uso de banda.
 - Desligamento gracioso: avisar clientes com motivo `ManutencaoProgramada`, dar 3 s, encerrar.
 
 ## Critérios de aceite
 
-- Suporta 50 sessões e 5 Cages ativos em 1 vCPU / 512 MB.
+- Suporta 50 sessões e 5 VoiceRooms ativos em 1 vCPU / 512 MB.
 - Reinício não perde mensagem confirmada ao cliente.
-- Cliente malicioso não consegue: falar em Cage sem permissão, ler Linha sem permissão, saturar CPU com datagrams, ou forjar `ssrc` de outro pessoa.
+- Cliente malicioso não consegue: falar em VoiceRoom sem permissão, ler Linha sem permissão, saturar CPU com datagrams, ou forjar `ssrc` de outro pessoa.

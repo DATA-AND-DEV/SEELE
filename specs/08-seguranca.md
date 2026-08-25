@@ -10,7 +10,7 @@ Servidor auto-hospedado, comunidades pequenas, operador confiável mas não nece
 |---|---|
 | Escuta passiva na rede | TLS 1.3 obrigatório via QUIC |
 | Man-in-the-middle no primeiro contato | TOFU com pinning e aviso explícito na troca de chave |
-| Cliente malicioso falando em Cage sem permissão | Validação server-side em todo datagram |
+| Cliente malicioso falando em VoiceRoom sem permissão | Validação server-side em todo datagram |
 | Cliente forjando identidade de outro | `ssrc` atribuído pelo servidor, nunca aceito do cliente |
 | Saturação de CPU/banda por flood | Limite de quadros por segundo por remetente, desconexão progressiva |
 | Vazamento de histórico por acesso ao disco do servidor | **Fora de escopo em v1** — documentar claramente |
@@ -57,7 +57,7 @@ Toda ação é verificada no servidor, sempre, mesmo que o cliente já esconda o
 O desenho SFU (`01`) foi escolhido em parte por isso: **o servidor já não decodifica áudio**. Adicionar criptografia fim-a-fim é um incremento, não uma reescrita.
 
 Esboço para pós-v1:
-- Chave de mídia por Cage, negociada entre participantes.
+- Chave de mídia por VoiceRoom, negociada entre participantes.
 - Rotação da chave a cada entrada e saída (forward secrecy em relação a quem sai).
 - Cabeçalho do datagram permanece em claro (o servidor precisa de `ssrc` e `seq` para encaminhar); apenas o payload Opus é cifrado.
 - Verificação de identidade fora de banda entre pessoas (comparação de fingerprint).

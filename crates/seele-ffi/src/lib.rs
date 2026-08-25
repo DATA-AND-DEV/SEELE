@@ -43,13 +43,13 @@ use std::time::{Duration, Instant};
 
 use seele_core::enlace::Enlace;
 use seele_core::{
-    identity, CageId, ClientMessageId, FilePinStore, LineId, MediaChannel, MessageId, PersonId,
+    identity, VoiceRoomId, ClientMessageId, FilePinStore, LineId, MediaChannel, MessageId, PersonId,
     Room, Ssrc, SyncBand, SyncInputs, SyncRatio, Voice,
 };
 
 pub use types::{
     PermissaoDeMicrofone,
-    Attachment, AttachmentRefusal, Cage, CageSync, CaptureDevice, EndReason, Event, FonteDeTela,
+    Attachment, AttachmentRefusal, VoiceRoom, VoiceRoomSync, CaptureDevice, EndReason, Event, FonteDeTela,
     LimitesDeTela, Line, LineWeight, LinkState, Message, Notice, NoticeReason, Pattern,
     PermissaoDeTela, Person, PlaybackDevice, PlugError, Preview, PreviewRefusal, PreviewRules,
     Severity, Snapshot, SyncBand as Band, TelaEmCurso, Telemetry, Transfer, Trust, VoiceMode,
@@ -501,7 +501,7 @@ pub trait EventListener: Send + Sync {
 
 /// A command on its way to the driver thread.
 enum Command {
-    InsertPlug(CageId),
+    InsertPlug(VoiceRoomId),
     EjectPlug,
     OpenLine(LineId),
     Send {
@@ -510,7 +510,7 @@ enum Command {
     },
     SetAtField(bool),
     SetTotalIsolation(bool),
-    CreateCage {
+    CreateVoiceRoom {
         name: String,
         limit: u16,
         line: Option<LineId>,
@@ -518,8 +518,8 @@ enum Command {
     CreateLine {
         name: String,
     },
-    RenameCage {
-        cage: CageId,
+    RenameVoiceRoom {
+        voice_room: VoiceRoomId,
         name: String,
     },
     RenameLine {
@@ -545,10 +545,10 @@ enum Command {
     },
     MovePerson {
         person: PersonId,
-        cage: CageId,
+        voice_room: VoiceRoomId,
     },
-    DeleteCage {
-        cage: CageId,
+    DeleteVoiceRoom {
+        voice_room: VoiceRoomId,
     },
     DeleteLine {
         line: LineId,
@@ -1089,13 +1089,13 @@ impl Plug {
         Ok((plug, trust))
     }
 
-    /// Puts the plug into a Cage.
+    /// Puts the plug into a voice room.
     ///
     /// # Errors
     ///
     /// [`PlugError::NotConnected`] once the session is over.
-    pub fn insert_plug(&self, cage: u32) -> Result<(), PlugError> {
-        self.command(Command::InsertPlug(CageId(cage)))
+    pub fn insert_plug(&self, voice_room: u32) -> Result<(), PlugError> {
+        self.command(Command::InsertPlug(VoiceRoomId(voice_room)))
     }
 
     /// Takes the plug out.
@@ -1238,7 +1238,7 @@ impl Plug {
         })
     }
 
-    /// Asks the Dogma to make a Cage.
+    /// Asks the Dogma to make a voice room.
     ///
     /// Asks. It does not decide, and it does not report back whether it worked
     /// — because it cannot: the answer comes from the Dogma, arrives on the
@@ -1260,7 +1260,7 @@ impl Plug {
     /// # Errors
     ///
     /// [`PlugError::NotConnected`] once the session is over.
-    pub fn create_cage(
+    pub fn create_voice_room(
         &self,
         name: String,
         limit: u16,
@@ -1269,7 +1269,7 @@ impl Plug {
         if name.trim().is_empty() {
             return Ok(());
         }
-        self.command(Command::CreateCage {
+        self.command(Command::CreateVoiceRoom {
             name,
             limit,
             line: line.map(LineId),
@@ -1288,17 +1288,17 @@ impl Plug {
         self.command(Command::CreateLine { name })
     }
 
-    /// Asks the Dogma to rename a Cage.
+    /// Asks the Dogma to rename a voice room.
     ///
     /// # Errors
     ///
     /// [`PlugError::NotConnected`] once the session is over.
-    pub fn rename_cage(&self, cage: u32, name: String) -> Result<(), PlugError> {
+    pub fn rename_voice_room(&self, voice_room: u32, name: String) -> Result<(), PlugError> {
         if name.trim().is_empty() {
             return Ok(());
         }
-        self.command(Command::RenameCage {
-            cage: CageId(cage),
+        self.command(Command::RenameVoiceRoom {
+            voice_room: VoiceRoomId(voice_room),
             name,
         })
     }
@@ -1320,13 +1320,13 @@ impl Plug {
 
     /// Asks the Dogma to rename itself.
     ///
-    /// Asks, and reports nothing back, like [`Plug::rename_cage`]: the answer
+    /// Asks, and reports nothing back, like [`Plug::rename_voice_room`]: the answer
     /// comes from the Dogma, as [`Event::DogmaChanged`] with the new name on
     /// the next [`Snapshot`], or as [`Event::NoticeRaised`] carrying
     /// [`NoticeReason::PermissionDenied`].
     ///
     /// A blank name is swallowed here rather than sent, exactly as
-    /// [`Plug::rename_cage`] swallows one: a shell with an empty box and a
+    /// [`Plug::rename_voice_room`] swallows one: a shell with an empty box and a
     /// button is not a shell reporting an error, and the Dogma would refuse it
     /// anyway.
     ///
@@ -1409,7 +1409,7 @@ impl Plug {
 
     /// Asks the Dogma to end a person's session — `expulsar`.
     ///
-    /// Asks, and reports nothing back, for the same reason [`Plug::create_cage`]
+    /// Asks, and reports nothing back, for the same reason [`Plug::create_voice_room`]
     /// gives: the answer comes from the Dogma. The roster losing them arrives as
     /// [`Event::RosterChanged`]; a refusal arrives as [`Event::NoticeRaised`]
     /// carrying [`NoticeReason::PermissionDenied`].
@@ -1464,23 +1464,23 @@ impl Plug {
         })
     }
 
-    /// Asks the Dogma to move a person into a Cage — `mover_persono`.
+    /// Asks the Dogma to move a person into a voice room — `mover_pessoa`.
     ///
     /// # Errors
     ///
     /// [`PlugError::NotConnected`] once the session is over.
-    pub fn move_person(&self, person: u64, cage: u32) -> Result<(), PlugError> {
+    pub fn move_person(&self, person: u64, voice_room: u32) -> Result<(), PlugError> {
         self.command(Command::MovePerson {
             person: PersonId(person),
-            cage: CageId(cage),
+            voice_room: VoiceRoomId(voice_room),
         })
     }
 
-    /// Asks the Dogma to destroy a Cage — `apagar_cage`.
+    /// Asks the Dogma to destroy a voice room — `apagar_voice_room`.
     ///
     /// Everybody inside is turned out of it and told; the Line bound to it, if
-    /// there is one, is left alone. The Dogma refuses the last Cage, and says so
-    /// with [`NoticeReason::LastCage`] rather than with the sentence it uses for
+    /// there is one, is left alone. The Dogma refuses the last voice room, and says so
+    /// with [`NoticeReason::LastVoiceRoom`] rather than with the sentence it uses for
     /// a refused entry.
     ///
     /// Asks, and nothing more. Nothing is removed from this client's own idea of
@@ -1492,8 +1492,8 @@ impl Plug {
     /// # Errors
     ///
     /// [`PlugError::NotConnected`] once the session is over.
-    pub fn delete_cage(&self, cage: u32) -> Result<(), PlugError> {
-        self.command(Command::DeleteCage { cage: CageId(cage) })
+    pub fn delete_voice_room(&self, voice_room: u32) -> Result<(), PlugError> {
+        self.command(Command::DeleteVoiceRoom { voice_room: VoiceRoomId(voice_room) })
     }
 
     /// Asks the Dogma to destroy a Line, and everything written in it —
@@ -1587,7 +1587,7 @@ impl Plug {
     /// reconnection reopens the same microphone rather than quietly falling back
     /// to the default one. The chosen sound output is left where it is.
     ///
-    /// Takes effect **now**, not on the next Cage. That is worth the extra
+    /// Takes effect **now**, not on the next voice room. That is worth the extra
     /// mechanism: somebody opens this screen because the microphone they are
     /// speaking into is the wrong one, and telling them to leave the Dogma and
     /// come back is telling them to solve it themselves.
@@ -1981,7 +1981,7 @@ impl Plug {
             icon_revision: self.shared.icon_revision.load(Ordering::Relaxed),
             me: room.me.map(|person| person.0),
             nickname,
-            cages: cages_of(&room),
+            voice_rooms: voice_rooms_of(&room),
             presentes: presentes_de(&room),
             lines: lines_of(&room),
             messages_revision: self.shared.messages_revision.load(Ordering::Relaxed),
@@ -2012,9 +2012,9 @@ impl Plug {
             audio_available: audio.available,
             capture: audio.capture,
             playback: audio.playback,
-            may_manage_cages: room
+            may_manage_voice_rooms: room
                 .permissions
-                .contains(&seele_core::Permission::ManageCages),
+                .contains(&seele_core::Permission::ManageVoiceRooms),
             may_kick: room.permissions.contains(&seele_core::Permission::Kick),
             may_ban: room.permissions.contains(&seele_core::Permission::Ban),
             may_remove_message: room
@@ -2159,18 +2159,18 @@ fn presentes_de(room: &Room) -> Vec<Person> {
         .collect()
 }
 
-fn cages_of(room: &Room) -> Vec<Cage> {
-    room.cages
+fn voice_rooms_of(room: &Room) -> Vec<VoiceRoom> {
+    room.voice_rooms
         .iter()
-        .map(|cage| Cage {
-            id: cage.id.0,
-            name: cage.name.clone(),
-            limit: cage.limit,
-            password_required: cage.password_required,
-            occupied_by_us: room.current_cage == Some(cage.id),
-            line: cage.line.map(|line| line.0),
+        .map(|voice_room| VoiceRoom {
+            id: voice_room.id.0,
+            name: voice_room.name.clone(),
+            limit: voice_room.limit,
+            password_required: voice_room.password_required,
+            occupied_by_us: room.current_voice_room == Some(voice_room.id),
+            line: voice_room.line.map(|line| line.0),
             people: room
-                .roster(cage.id)
+                .roster(voice_room.id)
                 .map(|person| Person {
                     id: person.id.0,
                     nickname: person.nickname.clone(),
@@ -2185,7 +2185,7 @@ fn cages_of(room: &Room) -> Vec<Cage> {
             // Off the core, not folded here: the terminal draws the same number
             // from the same method, and a mean computed in two shells is a mean
             // two shells will one day round differently.
-            sync: room.cage_sync(cage.id).map(Into::into),
+            sync: room.voice_room_sync(voice_room.id).map(Into::into),
         })
         .collect()
 }
@@ -2463,12 +2463,12 @@ pub fn motivos_de_parada_da_tela() -> Vec<&'static str> {
 /// escolheu nunca passou por ele. Ele só sai daqui quando a transmissão é
 /// desta pessoa — ver [`TelaEmCurso::pedido`].
 fn tela_de(room: &Room, pedido: Option<LimitesDeTela>) -> Option<TelaEmCurso> {
-    let cage = room.current_cage?;
-    let tela = room.telas.get(&cage)?;
+    let voice_room = room.current_voice_room?;
+    let tela = room.telas.get(&voice_room)?;
     // Quem compartilha não assiste a si mesmo. É o mesmo N do §5.1, contado do
     // lado de cá — ver o doc de `TelaEmCurso::espectadores` para o que ele não é.
     let espectadores = room
-        .roster(cage)
+        .roster(voice_room)
         .filter(|person| person.id != tela.person)
         .count();
     let e_minha = room.me == Some(tela.person);
@@ -3210,12 +3210,12 @@ fn medir_a_volta(
 /// Runs one command. Returns false when the driver should stop.
 async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) -> bool {
     match command {
-        Command::InsertPlug(cage) => {
-            if client.inserir_plug(cage).await.is_err() {
+        Command::InsertPlug(voice_room) => {
+            if client.inserir_plug(voice_room).await.is_err() {
                 return false;
             }
             if let Ok(mut room) = shared.room.lock() {
-                room.enter_cage(cage);
+                room.enter_voice_room(voice_room);
             }
             shared.notify(&Event::RosterChanged);
         }
@@ -3230,7 +3230,7 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             // a única tela que continua desenhando o pessoa na jaula é a de
             // quem acabou de sair dela.
             if let Ok(mut room) = shared.room.lock() {
-                room.leave_cage();
+                room.leave_voice_room();
             }
             shared.notify(&Event::RosterChanged);
         }
@@ -3287,14 +3287,14 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
                 return false;
             }
         }
-        // Nothing is written into the local `Room` here, unlike entering a Cage
+        // Nothing is written into the local `Room` here, unlike entering a voice room
         // or opening a Line. Those two are facts about this client, which the
         // server confirms by silence; a room is a fact about the Dogma, and the
         // only honest source for it is the Dogma saying it exists. Writing it in
         // optimistically would draw a room for the person who asked even when
         // the server refused them.
-        Command::CreateCage { name, limit, line } => {
-            if client.criar_cage(name, limit, line).await.is_err() {
+        Command::CreateVoiceRoom { name, limit, line } => {
+            if client.criar_voice_room(name, limit, line).await.is_err() {
                 return false;
             }
         }
@@ -3303,8 +3303,8 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
                 return false;
             }
         }
-        Command::RenameCage { cage, name } => {
-            if client.renomear_cage(cage, name).await.is_err() {
+        Command::RenameVoiceRoom { voice_room, name } => {
+            if client.renomear_voice_room(voice_room, name).await.is_err() {
                 return false;
             }
         }
@@ -3355,18 +3355,18 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
                 return false;
             }
         }
-        Command::MovePerson { person, cage } => {
-            if client.mover_persono(person, cage).await.is_err() {
+        Command::MovePerson { person, voice_room } => {
+            if client.mover_pessoa(person, voice_room).await.is_err() {
                 return false;
             }
         }
         // Nothing is written into the local `Room` for these either, and here
         // the reason is at its sharpest: a room removed optimistically would
         // vanish off the screen of the person who asked whether or not the
-        // Dogma agreed — and the one case where it refuses, the last Cage, is
+        // Dogma agreed — and the one case where it refuses, the last voice room, is
         // exactly the case they most need to see did not happen.
-        Command::DeleteCage { cage } => {
-            if client.apagar_cage(cage).await.is_err() {
+        Command::DeleteVoiceRoom { voice_room } => {
+            if client.apagar_voice_room(voice_room).await.is_err() {
                 return false;
             }
         }
@@ -3653,7 +3653,7 @@ mod tests {
     #[test]
     fn a_snapshot_of_an_empty_room_is_empty_and_not_a_panic() {
         let room = Room::new();
-        assert!(cages_of(&room).is_empty());
+        assert!(voice_rooms_of(&room).is_empty());
         assert!(lines_of(&room).is_empty());
         assert!(messages_of(&room).is_empty());
     }
@@ -3662,7 +3662,7 @@ mod tests {
     fn the_snapshot_marks_which_person_is_us() {
         // Without this the shell has to compare ids, which means the shell has
         // to know what a `PersonId` is.
-        use seele_core::{CageInfo, PersonId, PersonProfile, ServerMessage, SessionId, Ssrc};
+        use seele_core::{VoiceRoomInfo, PersonId, PersonProfile, ServerMessage, SessionId, Ssrc};
 
         let mut room = Room::new();
         room.apply(&ServerMessage::Session {
@@ -3670,9 +3670,9 @@ mod tests {
             person: PersonId(7),
             ssrc: Ssrc(700),
             dogma: "Terceira Tóquio".into(),
-            cages: vec![CageInfo {
-                id: CageId(1),
-                name: "CAGE-01".into(),
+            voice_rooms: vec![VoiceRoomInfo {
+                id: VoiceRoomId(1),
+                name: "VOICE_ROOM-01".into(),
                 limit: 20,
                 password_required: false,
                 line: None,
@@ -3681,9 +3681,9 @@ mod tests {
             roles: Vec::new(),
             permissions: Vec::new(),
         });
-        room.enter_cage(CageId(1));
+        room.enter_voice_room(VoiceRoomId(1));
         room.apply(&ServerMessage::PersonJoined {
-            cage: CageId(1),
+            voice_room: VoiceRoomId(1),
             profile: PersonProfile {
                 id: PersonId(3),
                 nickname: "ayanami".into(),
@@ -3692,15 +3692,15 @@ mod tests {
             ssrc: Ssrc(30),
         });
 
-        let cages = cages_of(&room);
-        let people = &cages[0].people;
+        let voice_rooms = voice_rooms_of(&room);
+        let people = &voice_rooms[0].people;
         assert!(people.iter().any(|person| person.is_self));
         assert_eq!(
             people.iter().filter(|person| person.is_self).count(),
             1,
             "more than one person claims to be us"
         );
-        assert!(cages[0].occupied_by_us);
+        assert!(voice_rooms[0].occupied_by_us);
     }
 
     #[test]
@@ -3710,19 +3710,19 @@ mod tests {
         // number, and one that only got a number would have to know the
         // thresholds.
         use seele_core::{
-            CageInfo, PersonId, PersonProfile, PersonState, Presence, ServerMessage, Ssrc,
+            VoiceRoomInfo, PersonId, PersonProfile, PersonState, Presence, ServerMessage, Ssrc,
         };
 
         let mut room = Room::new();
-        room.cages = vec![CageInfo {
-            id: CageId(1),
-            name: "CAGE-01".into(),
+        room.voice_rooms = vec![VoiceRoomInfo {
+            id: VoiceRoomId(1),
+            name: "VOICE_ROOM-01".into(),
             limit: 20,
             password_required: false,
             line: None,
         }];
         room.apply(&ServerMessage::PersonJoined {
-            cage: CageId(1),
+            voice_room: VoiceRoomId(1),
             profile: PersonProfile {
                 id: PersonId(3),
                 nickname: "ayanami".into(),
@@ -3742,33 +3742,33 @@ mod tests {
         // 72 rather than a critical number on purpose: `SyncBand::Critical` is
         // the `Default`, so a shell that received it could not tell a banded
         // ratio from a field nobody filled in.
-        let person = &cages_of(&room)[0].people[0];
+        let person = &voice_rooms_of(&room)[0].people[0];
         assert_eq!(person.sync_ratio, 72);
         assert_eq!(person.sync_band, types::SyncBand::Degraded);
     }
 
     #[test]
-    fn the_cages_average_crosses_already_banded() {
-        // MÉDIA DO CAGE. The comp computes it in the shell; here the shell gets
+    fn the_voice_rooms_average_crosses_already_banded() {
+        // MÉDIA DO VOICE_ROOM. The comp computes it in the shell; here the shell gets
         // the number, the band and the sample size and has nothing left to
-        // decide. A Cage nobody is in carries `None`, not a critical zero.
+        // decide. A voice room nobody is in carries `None`, not a critical zero.
         use seele_core::{
-            CageInfo, PersonId, PersonProfile, PersonState, Presence, ServerMessage, Ssrc,
+            VoiceRoomInfo, PersonId, PersonProfile, PersonState, Presence, ServerMessage, Ssrc,
         };
 
         let mut room = Room::new();
-        room.cages = vec![CageInfo {
-            id: CageId(1),
-            name: "CAGE-01".into(),
+        room.voice_rooms = vec![VoiceRoomInfo {
+            id: VoiceRoomId(1),
+            name: "VOICE_ROOM-01".into(),
             limit: 20,
             password_required: false,
             line: None,
         }];
-        assert_eq!(cages_of(&room)[0].sync, None, "an empty Cage");
+        assert_eq!(voice_rooms_of(&room)[0].sync, None, "an empty voice room");
 
         for (id, sync) in [(3_u64, 84_u8), (4, 85)] {
             room.apply(&ServerMessage::PersonJoined {
-                cage: CageId(1),
+                voice_room: VoiceRoomId(1),
                 profile: PersonProfile {
                     id: PersonId(id),
                     nickname: format!("pessoa {id}"),
@@ -3786,7 +3786,7 @@ mod tests {
             }));
         }
 
-        let average = cages_of(&room)[0].sync.expect("two people are seated");
+        let average = voice_rooms_of(&room)[0].sync.expect("two people are seated");
         assert_eq!(average.ratio, 85);
         assert_eq!(average.band, types::SyncBand::Nominal);
         assert_eq!(average.people, 2);
@@ -4210,11 +4210,11 @@ mod tests {
 
     #[test]
     fn a_room_made_now_reaches_the_shell_as_a_channel_change() {
-        // The bridge invents nothing: the Dogma says a Cage exists, the room
+        // The bridge invents nothing: the Dogma says a voice room exists, the room
         // folds it in, and the shell is told to redraw the list it already
         // knows how to draw. If this stopped firing, the person who made the
         // room would be looking at the old list with no way to know.
-        use seele_core::{CageInfo, ServerMessage};
+        use seele_core::{VoiceRoomInfo, ServerMessage};
 
         #[derive(Default)]
         struct Recorder(Mutex<Vec<Event>>);
@@ -4236,10 +4236,10 @@ mod tests {
 
         fold(
             &shared,
-            &ServerMessage::CageCreated {
-                cage: CageInfo {
-                    id: CageId(2),
-                    name: "CAGE-02 SALA DOS FUNDOS".into(),
+            &ServerMessage::VoiceRoomCreated {
+                voice_room: VoiceRoomInfo {
+                    id: VoiceRoomId(2),
+                    name: "VOICE_ROOM-02 SALA DOS FUNDOS".into(),
                     limit: 8,
                     password_required: false,
                     line: None,
@@ -4253,8 +4253,8 @@ mod tests {
             "the shell was not told the channel list moved"
         );
         let room = shared.room.lock().unwrap();
-        assert_eq!(cages_of(&room).len(), 1);
-        assert_eq!(cages_of(&room)[0].name, "CAGE-02 SALA DOS FUNDOS");
+        assert_eq!(voice_rooms_of(&room).len(), 1);
+        assert_eq!(voice_rooms_of(&room)[0].name, "VOICE_ROOM-02 SALA DOS FUNDOS");
     }
 
     #[test]
@@ -4273,7 +4273,7 @@ mod tests {
                 person: seele_core::PersonId(7),
                 ssrc: Ssrc(700),
                 dogma: "Terceira Tóquio".into(),
-                cages: Vec::new(),
+                voice_rooms: Vec::new(),
                 lines: Vec::new(),
                 roles: Vec::new(),
                 permissions: vec![Permission::Speak],
@@ -4285,8 +4285,8 @@ mod tests {
                 .lock()
                 .unwrap()
                 .permissions
-                .contains(&Permission::ManageCages),
-            "a person who may only speak was told they may manage Cages"
+                .contains(&Permission::ManageVoiceRooms),
+            "a person who may only speak was told they may manage voice_rooms"
         );
 
         fold(
@@ -4296,21 +4296,21 @@ mod tests {
                 person: seele_core::PersonId(7),
                 ssrc: Ssrc(700),
                 dogma: "Terceira Tóquio".into(),
-                cages: Vec::new(),
+                voice_rooms: Vec::new(),
                 lines: Vec::new(),
                 roles: Vec::new(),
-                permissions: vec![Permission::Speak, Permission::ManageCages],
+                permissions: vec![Permission::Speak, Permission::ManageVoiceRooms],
             },
         );
         // And the field the screen actually reads, not only the list behind it.
         // Asserting on `room.permissions` alone would pass with
-        // `may_manage_cages` hardcoded either way — measured, and it did.
+        // `may_manage_voice_rooms` hardcoded either way — measured, and it did.
         let (commands, _queue) = tokio::sync::mpsc::unbounded_channel();
         let plug = Plug {
             commands,
             shared: Arc::clone(&shared),
         };
-        assert!(plug.snapshot().may_manage_cages);
+        assert!(plug.snapshot().may_manage_voice_rooms);
 
         fold(
             &shared,
@@ -4319,14 +4319,14 @@ mod tests {
                 person: seele_core::PersonId(7),
                 ssrc: Ssrc(700),
                 dogma: "Terceira Tóquio".into(),
-                cages: Vec::new(),
+                voice_rooms: Vec::new(),
                 lines: Vec::new(),
                 roles: Vec::new(),
                 permissions: vec![Permission::Speak],
             },
         );
         assert!(
-            !plug.snapshot().may_manage_cages,
+            !plug.snapshot().may_manage_voice_rooms,
             "the snapshot went on offering the control after the permission went away"
         );
     }
@@ -4352,7 +4352,7 @@ mod tests {
             person: seele_core::PersonId(7),
             ssrc: Ssrc(700),
             dogma: "Terceira Tóquio".into(),
-            cages: Vec::new(),
+            voice_rooms: Vec::new(),
             lines: Vec::new(),
             roles: Vec::new(),
             permissions,
@@ -4404,7 +4404,7 @@ mod tests {
         // destroying one ends what other people wrote. A role that may build
         // rooms without being able to unmake them is a role somebody can
         // actually write — `specs/04-servidor-seele.md` enumerates
-        // `gerenciar_cages` and `administrar_dogma` separately — and a single
+        // `gerenciar_voice_rooms` and `administrar_dogma` separately — and a single
         // boolean for both would make it impossible to offer correctly.
         use seele_core::{Permission, ServerMessage, SessionId, Ssrc};
 
@@ -4420,7 +4420,7 @@ mod tests {
             person: seele_core::PersonId(7),
             ssrc: Ssrc(700),
             dogma: "Terceira Tóquio".into(),
-            cages: Vec::new(),
+            voice_rooms: Vec::new(),
             lines: Vec::new(),
             roles: Vec::new(),
             permissions,
@@ -4428,9 +4428,9 @@ mod tests {
 
         // The role that builds and does not destroy. This is the pair the
         // separation exists for, and the one a single boolean would get wrong.
-        fold(&shared, &sessao(vec![Permission::ManageCages]));
+        fold(&shared, &sessao(vec![Permission::ManageVoiceRooms]));
         let constroi = plug.snapshot();
-        assert!(constroi.may_manage_cages);
+        assert!(constroi.may_manage_voice_rooms);
         assert!(
             !constroi.may_delete_rooms,
             "the permission to make a room was read as the permission to destroy one"
@@ -4440,7 +4440,7 @@ mod tests {
         fold(&shared, &sessao(vec![Permission::AdministerDogma]));
         let administra = plug.snapshot();
         assert!(administra.may_delete_rooms);
-        assert!(!administra.may_manage_cages);
+        assert!(!administra.may_manage_voice_rooms);
 
         // Never the moderation permissions either: somebody trusted to remove a
         // person for the evening is not thereby trusted with the Dogma's past.
@@ -4486,7 +4486,7 @@ mod tests {
                 person: seele_core::PersonId(7),
                 ssrc: Ssrc(700),
                 dogma: "Casa".into(),
-                cages: Vec::new(),
+                voice_rooms: Vec::new(),
                 lines: Vec::new(),
                 roles: Vec::new(),
                 permissions: vec![Permission::AdministerDogma],
@@ -4595,13 +4595,13 @@ mod tests {
             person: seele_core::PersonId(7),
             ssrc: Ssrc(700),
             dogma: "Casa".into(),
-            cages: Vec::new(),
+            voice_rooms: Vec::new(),
             lines: Vec::new(),
             roles: Vec::new(),
             permissions,
         };
 
-        fold(&shared, &sessao(vec![Permission::ManageCages]));
+        fold(&shared, &sessao(vec![Permission::ManageVoiceRooms]));
         assert!(
             !plug.snapshot().may_customise_dogma,
             "the permission to make rooms was read as the permission to name the Dogma"
@@ -4718,9 +4718,9 @@ mod tests {
         };
 
         for blank in ["", "   ", "\t\n"] {
-            plug.create_cage(blank.into(), 8, None).unwrap();
+            plug.create_voice_room(blank.into(), 8, None).unwrap();
             plug.create_line(blank.into()).unwrap();
-            plug.rename_cage(1, blank.into()).unwrap();
+            plug.rename_voice_room(1, blank.into()).unwrap();
             plug.rename_line(1, blank.into()).unwrap();
         }
         assert!(
@@ -4728,9 +4728,9 @@ mod tests {
             "a blank name was sent to the Dogma"
         );
 
-        plug.create_cage("CAGE-02".into(), 8, None).unwrap();
+        plug.create_voice_room("VOICE_ROOM-02".into(), 8, None).unwrap();
         assert!(
-            matches!(queue.try_recv(), Ok(Command::CreateCage { .. })),
+            matches!(queue.try_recv(), Ok(Command::CreateVoiceRoom { .. })),
             "a real name was swallowed too"
         );
     }
@@ -4941,7 +4941,7 @@ mod tests {
     /// Devolve o `Room` para o teste acrescentar gente: é a contagem de
     /// espectadores que os testes abaixo mexem, e ela é o N do §5.1.
     fn sala_com_tela(quem_compartilha: seele_core::PersonId) -> Room {
-        use seele_core::{CageInfo, PersonId, ScreenId, ServerMessage, SessionId, Ssrc};
+        use seele_core::{VoiceRoomInfo, PersonId, ScreenId, ServerMessage, SessionId, Ssrc};
 
         let mut room = Room::new();
         room.apply(&ServerMessage::Session {
@@ -4949,9 +4949,9 @@ mod tests {
             person: PersonId(7),
             ssrc: Ssrc(700),
             dogma: "Terceira Tóquio".into(),
-            cages: vec![CageInfo {
-                id: CageId(1),
-                name: "CAGE-01".into(),
+            voice_rooms: vec![VoiceRoomInfo {
+                id: VoiceRoomId(1),
+                name: "VOICE_ROOM-01".into(),
                 limit: 20,
                 password_required: false,
                 line: None,
@@ -4960,9 +4960,9 @@ mod tests {
             roles: Vec::new(),
             permissions: Vec::new(),
         });
-        room.enter_cage(CageId(1));
+        room.enter_voice_room(VoiceRoomId(1));
         room.apply(&ServerMessage::ScreenShareStarted {
-            cage: CageId(1),
+            voice_room: VoiceRoomId(1),
             person: quem_compartilha,
             screen: ScreenId(9),
         });
@@ -4974,7 +4974,7 @@ mod tests {
         use seele_core::{PersonId, PersonProfile, ServerMessage, Ssrc};
 
         room.apply(&ServerMessage::PersonJoined {
-            cage: CageId(1),
+            voice_room: VoiceRoomId(1),
             profile: PersonProfile {
                 id: PersonId(pessoa),
                 nickname: format!("pessoa-{pessoa}"),
@@ -5030,7 +5030,7 @@ mod tests {
 
     #[test]
     fn nao_ha_tela_quando_ninguem_compartilha() {
-        use seele_core::{CageInfo, PersonId, ServerMessage, SessionId, Ssrc};
+        use seele_core::{VoiceRoomInfo, PersonId, ServerMessage, SessionId, Ssrc};
 
         let mut room = Room::new();
         room.apply(&ServerMessage::Session {
@@ -5038,9 +5038,9 @@ mod tests {
             person: PersonId(7),
             ssrc: Ssrc(700),
             dogma: "Terceira Tóquio".into(),
-            cages: vec![CageInfo {
-                id: CageId(1),
-                name: "CAGE-01".into(),
+            voice_rooms: vec![VoiceRoomInfo {
+                id: VoiceRoomId(1),
+                name: "VOICE_ROOM-01".into(),
                 limit: 20,
                 password_required: false,
                 line: None,
@@ -5049,7 +5049,7 @@ mod tests {
             roles: Vec::new(),
             permissions: Vec::new(),
         });
-        room.enter_cage(CageId(1));
+        room.enter_voice_room(VoiceRoomId(1));
         assert!(tela_de(&room, None).is_none());
     }
 
@@ -5136,7 +5136,7 @@ mod tests {
         fold(
             &shared,
             &ServerMessage::PersonJoined {
-                cage: CageId(1),
+                voice_room: VoiceRoomId(1),
                 profile: seele_core::PersonProfile {
                     id: PersonId(4),
                     nickname: "pessoa-4".into(),
@@ -5155,7 +5155,7 @@ mod tests {
         fold(
             &shared,
             &ServerMessage::ScreenShareStopped {
-                cage: CageId(1),
+                voice_room: VoiceRoomId(1),
                 screen: ScreenId(9),
             },
         );
@@ -5218,7 +5218,7 @@ mod tests {
     #[test]
     fn um_ouvinte_sabe_que_a_tela_comecou_e_que_a_sala_cresceu() {
         use seele_core::{
-            CageInfo, PersonId, PersonProfile, ScreenId, ServerMessage, SessionId, Ssrc,
+            VoiceRoomInfo, PersonId, PersonProfile, ScreenId, ServerMessage, SessionId, Ssrc,
         };
 
         #[derive(Default)]
@@ -5246,9 +5246,9 @@ mod tests {
                 person: PersonId(7),
                 ssrc: Ssrc(700),
                 dogma: "Terceira Tóquio".into(),
-                cages: vec![CageInfo {
-                    id: CageId(1),
-                    name: "CAGE-01".into(),
+                voice_rooms: vec![VoiceRoomInfo {
+                    id: VoiceRoomId(1),
+                    name: "VOICE_ROOM-01".into(),
                     limit: 20,
                     password_required: false,
                     line: None,
@@ -5258,13 +5258,13 @@ mod tests {
                 permissions: Vec::new(),
             },
         );
-        shared.room.lock().unwrap().enter_cage(CageId(1));
+        shared.room.lock().unwrap().enter_voice_room(VoiceRoomId(1));
 
         // Alguém entra antes de haver tela: nada de `ScreenChanged`.
         fold(
             &shared,
             &ServerMessage::PersonJoined {
-                cage: CageId(1),
+                voice_room: VoiceRoomId(1),
                 profile: PersonProfile {
                     id: PersonId(3),
                     nickname: "ayanami".into(),
@@ -5286,7 +5286,7 @@ mod tests {
         fold(
             &shared,
             &ServerMessage::ScreenShareStarted {
-                cage: CageId(1),
+                voice_room: VoiceRoomId(1),
                 person: PersonId(3),
                 screen: ScreenId(9),
             },
@@ -5307,7 +5307,7 @@ mod tests {
         fold(
             &shared,
             &ServerMessage::PersonJoined {
-                cage: CageId(1),
+                voice_room: VoiceRoomId(1),
                 profile: PersonProfile {
                     id: PersonId(4),
                     nickname: "soryu".into(),

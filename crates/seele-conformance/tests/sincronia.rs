@@ -18,8 +18,8 @@
 //! olhar». Numa sessão local, com RTT, jitter e perda em zero, o Dogma calcula
 //! cem — e o roster acusava o pessoa de estar em colapso.
 //!
-//! E não para na linha: `Room::cage_sync` tira a média das cadeiras, então numa
-//! sessão de um pessoa só a MÉDIA DO CAGE também era zero, e num Cage de cinco
+//! E não para na linha: `Room::voice_room_sync` tira a média das cadeiras, então numa
+//! sessão de um pessoa só a MÉDIA Da sala de voz também era zero, e num sala de voz de cinco
 //! cada pessoa via a média puxada para baixo pela própria linha.
 //!
 //! # O que este arquivo afirma, e o que não
@@ -44,11 +44,11 @@ use std::time::Duration;
 use anyhow::Result;
 use seele_core::enlace::{Aviso, Destino, Enlace};
 use seele_core::{MemoryPinStore, Room, SyncBand};
-use seele_proto::ids::CageId;
+use seele_proto::ids::VoiceRoomId;
 use seele_server::persistence::Location;
 use seele_server::{DogmaConfig, Server};
 
-const CAGE: u32 = 1;
+const VOICE_ROOM: u32 = 1;
 
 /// Quanto se espera a difusão periódica.
 ///
@@ -90,11 +90,11 @@ fn destino(endereco: SocketAddr, apelido: &str) -> Destino {
     }
 }
 
-/// Conecta, entra no Cage e monta a sala como a casca monta.
+/// Conecta, entra na sala de voz e monta a sala como a casca monta.
 ///
-/// `adopt` e `enter_cage` na mão são o que `plug` e o aplicativo fazem: o
+/// `adopt` e `enter_voice_room` na mão são o que `plug` e o aplicativo fazem: o
 /// aperto de mão consome o `Session` antes de qualquer casca ver, e o Dogma
-/// confirma a entrada no Cage pelo silêncio. Sem os dois, o roster deste teste
+/// confirma a entrada na sala de voz pelo silêncio. Sem os dois, o roster deste teste
 /// começaria vazio e não haveria linha de `me` para medir.
 async fn sentar(endereco: SocketAddr, semente: u8, apelido: &str) -> Result<(Enlace, Room)> {
     let enlace = Enlace::conectar(
@@ -103,11 +103,11 @@ async fn sentar(endereco: SocketAddr, semente: u8, apelido: &str) -> Result<(Enl
         Arc::new(MemoryPinStore::new()),
     )
     .await?;
-    enlace.inserir_plug(CageId(CAGE)).await?;
+    enlace.inserir_plug(VoiceRoomId(VOICE_ROOM)).await?;
 
     let mut sala = Room::new();
     sala.adopt(enlace.sessao(), apelido);
-    sala.enter_cage(CageId(CAGE));
+    sala.enter_voice_room(VoiceRoomId(VOICE_ROOM));
     Ok((enlace, sala))
 }
 
@@ -143,7 +143,7 @@ fn minha_taxa(sala: &Room) -> Option<u8> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn o_roster_mostra_a_taxa_do_proprio_persono() -> Result<()> {
+async fn o_roster_mostra_a_taxa_do_proprio_pessoa() -> Result<()> {
     let (endereco, servidor) = dogma().await?;
     let (mut enlace, mut sala) = sentar(endereco, 46, "ayanami").await?;
 
@@ -180,28 +180,28 @@ async fn o_roster_mostra_a_taxa_do_proprio_persono() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_media_do_cage_conta_a_propria_linha() -> Result<()> {
-    // A média sai de `Room::cage_sync`, que soma as cadeiras. Enquanto a linha
-    // de `me` ficava em zero, um pessoa sozinho via MÉDIA DO CAGE: 0 — e num
-    // Cage cheio cada pessoa via a média puxada para baixo pela própria linha,
+async fn a_media_do_voice_room_conta_a_propria_linha() -> Result<()> {
+    // A média sai de `Room::voice_room_sync`, que soma as cadeiras. Enquanto a linha
+    // de `me` ficava em zero, um pessoa sozinho via MÉDIA DO VOICE_ROOM: 0 — e num
+    // sala de voz cheio cada pessoa via a média puxada para baixo pela própria linha,
     // cada uma por um valor diferente. Uma média que discorda entre as telas da
     // mesma sala não é média de nada.
     let (endereco, servidor) = dogma().await?;
     let (mut enlace, mut sala) = sentar(endereco, 47, "shikinami").await?;
 
     let mediu = dobrar_ate(&mut enlace, &mut sala, PRAZO, |sala| {
-        sala.current_cage_sync()
+        sala.current_voice_room_sync()
             .is_some_and(|media| media.ratio > 0)
     })
     .await;
 
     let media = sala
-        .current_cage_sync()
-        .expect("um Cage com alguém dentro tem média");
-    assert_eq!(media.people, 1, "o Cage devia ter só este pessoa");
+        .current_voice_room_sync()
+        .expect("uma sala de voz com alguém dentro tem média");
+    assert_eq!(media.people, 1, "a sala de voz devia ter só este pessoa");
     assert!(
         mediu,
-        "a média do Cage de um pessoa medido ficou em {}%",
+        "a média da sala de voz de um pessoa medido ficou em {}%",
         media.ratio
     );
 

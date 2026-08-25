@@ -322,16 +322,16 @@ Não está registrado no sistema operacional. Quando for, o cliente **precisa
 perguntar antes de conectar**: um link que inicia conexão sozinho é superfície
 nova. Ver ADR 0006.
 
-## 11 · Reconectar rápido pode esvaziar o roster do Cage
+## 11 · Reconectar rápido pode esvaziar o roster do VoiceRoom
 
 **Sintoma esperado.** Alguém dá `:ejetar` e entra de novo em seguida. A sessão
-nova sobe, fala e ouve normalmente, e o Cage aparece **vazio** — sem nem a
+nova sobe, fala e ouve normalmente, e o VoiceRoom aparece **vazio** — sem nem a
 própria pessoa — até o movimento de alguém redesenhar a lista.
 
 **O que se sabe.** É uma corrida entre a sessão que morre e a que nasce, e as
 duas mexem na lotação pela mesma chave. `Occupancy::seat` começa apagando o
 pessoa de toda parte antes de sentá-lo (`dogma.rs:171-174`), e o desmonte da
-sessão antiga chama `occupancy.vacate(cage, person)` (`session.rs:845`). Como
+sessão antiga chama `occupancy.vacate(voice_room, person)` (`session.rs:845`). Como
 `vacate` filtra só por `PersonId` (`dogma.rs:177-181`), ele não distingue a
 cadeira da sessão velha da cadeira da sessão nova: se o desmonte da primeira
 chegar **depois** do `seat` da segunda, apaga a segunda. A ordem depende de
@@ -370,7 +370,7 @@ precisa saber de qual sessão veio o pedido — carregar o `SessionId` no
 `vacate_everywhere` e nos avisos de roster. É tarefa própria, com revisão
 própria, e não um remendo no fim de uma tarefa de teste.
 
-**Quando dói.** `:ejetar` seguido de reconexão imediata no mesmo Cage, que é
+**Quando dói.** `:ejetar` seguido de reconexão imediata no mesmo VoiceRoom, que é
 exatamente o que a tela de seleção convida a fazer. Some assim que qualquer
 pessoa entra ou sai, porque aí o roster é reconstruído.
 
@@ -550,7 +550,7 @@ depende de hardware:
 
 **O que falta.** Rodar o `cadencia` no Windows. Se a volta de lá couber dentro
 de um quadro, este diagnóstico está errado e a suspeita seguinte é a fila de
-saída do servidor — o `cage.rs` conta `drops.subscriber_lagging` e **`drops()`
+saída do servidor — o `voice_room.rs` conta `drops.subscriber_lagging` e **`drops()`
 só é lido em teste**, então nada em produção mostra aquilo. Se a volta não
 couber, a alavanca já está medida: tirar a soneca do fim do laço tira uma das
 duas esperas de temporizador, e custou 3,39 ms de p50 aqui.
@@ -1100,7 +1100,7 @@ Dogma desconecta deste.
 
 **O que se sabe.** Tudo o que dá para saber sem escrever código está no
 **ADR 0031**, que está **proposto** e não aceito. Em resumo: várias sessões, um
-caminho de voz. A sessão é do Dogma — Cages, Linhas, histórico, roster,
+caminho de voz. A sessão é do Dogma — VoiceRooms, Linhas, histórico, roster,
 telemetria, apelido, permissões. O microfone, a saída, o modo de voz, o A.T.
 Field, o isolamento total, a tecla, a chave, o atualizador e o MOD são desta
 máquina, e não se multiplicam.
@@ -1109,15 +1109,15 @@ máquina, e não se multiplicam.
 jaula de dois Dogmas ao mesmo tempo. O microfone é um e a pessoa é uma; a barra
 de espaço deixaria de ter referente (`ui/tela-sessao.js:1714-1723` é um `keydown`
 de janela sem alvo); e o orçamento do ADR 0009 é de um caminho, com 21 ms já
-gastos pelo ADR 0028. Entrar num Cage de outro Dogma **ejeta** o anterior, e o
-Cage que se deixou é nomeado.
+gastos pelo ADR 0028. Entrar num VoiceRoom de outro Dogma **ejeta** o anterior, e o
+VoiceRoom que se deixou é nomeado.
 
 **Três achados no código mudaram o desenho**, e valem mesmo sem o ADR:
 
-1. **O áudio abre na conexão, não na entrada no Cage**
+1. **O áudio abre na conexão, não na entrada no VoiceRoom**
    (`crates/seele-ffi/src/lib.rs:1507-1531`; `insert_plug` não toca áudio,
    `lib.rs:565-567` e `1787-1795`). Três conexões abririam três `AudioIo` antes
-   de alguém falar. O ADR move a abertura para a entrada no primeiro Cage, o que
+   de alguém falar. O ADR move a abertura para a entrada no primeiro VoiceRoom, o que
    é melhoria de privacidade por si só.
 2. **A troca de sessão embaixo de um caminho de voz vivo já está construída.**
    `Voice::reopen(media, ssrc)` (`lib.rs:1587-1626`) foi feito para reconexão e
@@ -1161,7 +1161,7 @@ contrário.
 
 **Um operador de outro Dogma pode inserir o seu plug.**
 `crates/seele-server/src/session.rs:1220-1230`: `MovePerson` transmite
-`PersonMoved` sem exigir que o pessoa já esteja num Cage. A regra do ADR 0031 é
+`PersonMoved` sem exigir que o pessoa já esteja num VoiceRoom. A regra do ADR 0031 é
 que o servidor decide quem está na sala e **esta máquina decide para onde o
 microfone dela vai**: um plug inserido por outra pessoa entra no roster e não
 reivindica o caminho de voz.
@@ -1213,7 +1213,7 @@ não funcional é a sigla na placa e a regra de `specs/05-cliente-tui.md:143`.
 anexo que alguém **pediu** ainda não está construída (ADR 0027, no alto dele); a
 CSP não freia isto, porque `img-src 'self' data:` já aceita imagem embutida
 (`apps/seele-app/tauri.conf.json:22`); e o quadro de aperto de mão tem 16 KiB
-(`MAX_FRAME_LEN`) e já carrega Cages, Linhas, papéis e permissões. A saída está
+(`MAX_FRAME_LEN`) e já carrega VoiceRooms, Linhas, papéis e permissões. A saída está
 escrita: fora do aperto de mão, endereçada por conteúdo, 128×128 e 16 KiB, lista
 curta de tipos com os bytes concordando com a alegação, sem animação, e nunca
 fora da placa.

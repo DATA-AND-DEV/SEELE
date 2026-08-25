@@ -11,7 +11,7 @@
 //! propósito, porque quem foi avisado de que a chave mudou precisa abrir e
 //! comparar.
 //!
-//! Acrescentar apelido e último Cage ali dentro tornaria esse arquivo maior,
+//! Acrescentar apelido e último sala de voz ali dentro tornaria esse arquivo maior,
 //! mais fácil de corromper, e menos óbvio de ler. Conveniência e segurança em
 //! arquivos separados: um pode ser apagado sem consequência, o outro não.
 //!
@@ -23,7 +23,7 @@
 //! 192.168.0.7:8383 <TAB> ayanami <TAB> 1 <TAB> 1738000000
 //! ```
 //!
-//! endereço, apelido, último Cage, e quando foi a última visita. Texto porque
+//! endereço, apelido, último sala de voz, e quando foi a última visita. Texto porque
 //! alguém vai querer editar isso à mão, e binário transformaria uma limpeza de
 //! lista numa conversa de suporte.
 
@@ -43,8 +43,8 @@ pub struct Conhecido {
     pub alvo: String,
     /// Com que apelido se entrou da última vez.
     pub apelido: String,
-    /// Último Cage em que o plug foi inserido.
-    pub cage: Option<u32>,
+    /// Último sala de voz em que o plug foi inserido.
+    pub voice_room: Option<u32>,
     /// Quando foi a última visita, em segundos desde a época.
     pub visto_em: i64,
     /// Como o Dogma se chamava na última visita.
@@ -132,7 +132,7 @@ impl Conhecidos {
     /// # Errors
     ///
     /// Falha se o arquivo não puder ser escrito.
-    pub fn registrar(&mut self, alvo: &str, apelido: &str, cage: Option<u32>) -> Result<()> {
+    pub fn registrar(&mut self, alvo: &str, apelido: &str, voice_room: Option<u32>) -> Result<()> {
         let agora = agora_em_segundos();
         // Sem tabulação nem quebra de linha nos campos, ou a próxima leitura
         // entende um registro como dois.
@@ -153,7 +153,7 @@ impl Conhecidos {
         self.entradas.push(Conhecido {
             alvo,
             apelido,
-            cage,
+            voice_room,
             visto_em: agora,
             nome,
             icone,
@@ -223,7 +223,7 @@ impl Conhecidos {
                     "{}\t{}\t{}\t{}\t{}\n",
                     e.alvo,
                     e.apelido,
-                    e.cage.map_or_else(|| "-".to_owned(), |c| c.to_string()),
+                    e.voice_room.map_or_else(|| "-".to_owned(), |c| c.to_string()),
                     e.visto_em,
                     // Uma coluna a mais no fim, e nunca no meio: uma linha de
                     // quatro campos escrita por uma versão anterior continua
@@ -265,7 +265,7 @@ fn analisar_linha(linha: &str) -> Option<Conhecido> {
         return None;
     }
     let apelido = campos.next().unwrap_or("").trim().to_owned();
-    let cage = campos.next().and_then(|c| c.trim().parse().ok());
+    let voice_room = campos.next().and_then(|c| c.trim().parse().ok());
     let visto_em = campos
         .next()
         .and_then(|v| v.trim().parse().ok())
@@ -282,7 +282,7 @@ fn analisar_linha(linha: &str) -> Option<Conhecido> {
     Some(Conhecido {
         alvo: alvo.to_owned(),
         apelido,
-        cage,
+        voice_room,
         visto_em,
         nome,
         // Carregada em `abrir`, que é quem conhece o caminho.
@@ -363,7 +363,7 @@ mod tests {
         let entrada = de_volta.buscar("dogma.exemplo:8383").expect("está lá");
         assert_eq!(entrada.nome.as_deref(), Some("Terceira Tóquio"));
         assert_eq!(entrada.icone.as_deref(), Some(&[1, 2, 3][..]));
-        assert_eq!(entrada.cage, Some(2), "a visita nova não valeu");
+        assert_eq!(entrada.voice_room, Some(2), "a visita nova não valeu");
 
         let _ = std::fs::remove_dir_all(&pasta);
     }
@@ -376,7 +376,7 @@ mod tests {
         let velha = analisar_linha("dogma.exemplo:8383\tayanami\t1\t1738000000")
             .expect("uma linha de quatro campos é válida");
         assert_eq!(velha.apelido, "ayanami");
-        assert_eq!(velha.cage, Some(1));
+        assert_eq!(velha.voice_room, Some(1));
         assert_eq!(velha.nome, None, "um campo ausente virou nome vazio");
     }
 
@@ -402,7 +402,7 @@ mod tests {
         let lista = Conhecidos::abrir(caminho.clone()).expect("reabrir");
         let encontrado = lista.buscar("192.168.0.7:8383").expect("achar");
         assert_eq!(encontrado.apelido, "ayanami");
-        assert_eq!(encontrado.cage, Some(1));
+        assert_eq!(encontrado.voice_room, Some(1));
 
         let _ = std::fs::remove_dir_all(caminho.parent().expect("pai"));
     }
@@ -421,7 +421,7 @@ mod tests {
         assert_eq!(lista.listar().len(), 1);
         let encontrado = lista.buscar("host:8383").expect("achar");
         assert_eq!(encontrado.apelido, "rei");
-        assert_eq!(encontrado.cage, Some(2));
+        assert_eq!(encontrado.voice_room, Some(2));
 
         let _ = std::fs::remove_dir_all(caminho.parent().expect("pai"));
     }

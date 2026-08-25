@@ -48,16 +48,16 @@ Se este milestone escorregar muito, o escopo do projeto precisa ser revisto — 
 
 - `seele-proto` com tipos, serialização e versionamento.
 - Conexão QUIC via `quinn`, handshake completo, PADRÃO LARANJA → AZUL.
-- `seeled` com um Cage fixo, encaminhamento de datagrams, sem persistência.
+- `seeled` com um VoiceRoom fixo, encaminhamento de datagrams, sem persistência.
 - Cliente de linha de comando feio, sem TUI, só para exercitar o protocolo.
 
-**Aceite:** três clientes entram no mesmo Cage e conversam por voz através do servidor. Cliente sem permissão é rejeitado. Fuzzing do parser sem crash.
+**Aceite:** três clientes entram no mesmo VoiceRoom e conversam por voz através do servidor. Cliente sem permissão é rejeitado. Fuzzing do parser sem crash.
 
 ---
 
 ## M3 — Estado, texto e persistência
 
-- PERSISTENCE: SQLite, migrações, Cages e Linhas configuráveis.
+- PERSISTENCE: SQLite, migrações, VoiceRooms e Linhas configuráveis.
 - PERMISSIONS: contas, papéis, permissões, banimento.
 - Mensagens de texto com histórico paginado por cursor.
 - Telemetria e cálculo da Taxa de Sincronização.
@@ -100,7 +100,7 @@ O primeiro milestone com o produto de verdade.
 - Ouvir, falar, ler, responder. Nada de administração.
 - Sobrevive a bloqueio de tela, chamada recebida e troca de rede.
 
-**Aceite:** 30 minutos em Cage com a tela bloqueada, sem queda, com consumo de bateria documentado.
+**Aceite:** 30 minutos em VoiceRoom com a tela bloqueada, sem queda, com consumo de bateria documentado.
 
 ---
 

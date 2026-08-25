@@ -46,11 +46,11 @@ use anyhow::Result;
 use seele_core::enlace::{Aviso, Destino, Enlace};
 use seele_core::{ConnectError, MemoryPinStore, PinStore, Verdict};
 use seele_proto::control::ServerMessage;
-use seele_proto::ids::{CageId, ClientMessageId, LineId};
+use seele_proto::ids::{VoiceRoomId, ClientMessageId, LineId};
 use seele_server::persistence::Location;
 use seele_server::{DogmaConfig, Server};
 
-const CAGE: u32 = 1;
+const VOICE_ROOM: u32 = 1;
 const LINE: u32 = 1;
 
 /// Uma impressão digital com a forma certa e dona nenhuma.
@@ -139,13 +139,13 @@ where
 
 /// Prova que a sessão **serve**, e não só que o construtor devolveu `Ok`.
 ///
-/// Entrar no Cage, abrir a Linha, dizer algo e ouvir de volta é o menor caminho
+/// Entrar na sala de voz, abrir a Linha, dizer algo e ouvir de volta é o menor caminho
 /// que passa pelo Dogma inteiro — copiado do `conectar_e_falar` do `ejetar.rs`,
 /// que é onde esta forma nasceu. É o que distingue "a conferência avisou e
 /// seguiu" de "a conferência avisou e derrubou": um enlace derrubado devolve
 /// `Ok` do mesmo jeito, e só cala quando alguém fala com ele.
 async fn falar_e_ouvir(enlace: &mut Enlace, o_que: &str) -> Result<()> {
-    enlace.inserir_plug(CageId(CAGE)).await?;
+    enlace.inserir_plug(VoiceRoomId(VOICE_ROOM)).await?;
     enlace.abrir_linha(LineId(LINE)).await?;
     enlace
         .dizer(LineId(LINE), o_que.to_owned(), ClientMessageId(1))

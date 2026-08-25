@@ -173,9 +173,9 @@ fn every_command_the_frontend_calls_is_registered() {
 /// below make sure it is: the moment the page calls one of these, this test
 /// fails and says to take it off the list. Nothing rots quietly.
 ///
-/// `renomear_cage` / `renomear_linha` are the other half of managing rooms.
+/// `renomear_voice_room` / `renomear_linha` are the other half of managing rooms.
 /// Creating them is drawn — the session screen offers both forms to whoever
-/// `Snapshot::may_manage_cages` says may create — and renaming is not: it was
+/// `Snapshot::may_manage_voice_rooms` says may create — and renaming is not: it was
 /// not asked for, and a rename control is a different shape from a create one
 /// (it belongs on the room, not under the list).
 ///
@@ -185,7 +185,7 @@ fn every_command_the_frontend_calls_is_registered() {
 /// The day the four moderation verbs were wired, these two were looked at again
 /// and left. The reason is specific rather than a shrug, and it is about the
 /// shape the control has to have: a rename belongs *on the room*, which means an
-/// editable name in the row — and every row of `#lista-cages` and `#lista-linhas`
+/// editable name in the row — and every row of `#lista-voice_rooms` and `#lista-linhas`
 /// is thrown away and rebuilt by `desenharCanais` on every snapshot, twice a
 /// second. A field there cannot hold a cursor for two frames, let alone a
 /// selection. Making it possible means the channel column adopting the call
@@ -202,7 +202,7 @@ fn every_command_the_frontend_calls_is_registered() {
 /// The seven of ADR 0030 were here for exactly one commit, and this is the note
 /// they left: `camada-portaria.js` draws all of them, so the check below said so
 /// by name and they came out. That is the list working the way it is meant to.
-const AGUARDANDO_TELA: &[&str] = &["renomear_cage", "renomear_linha"];
+const AGUARDANDO_TELA: &[&str] = &["renomear_voice_room", "renomear_linha"];
 
 #[test]
 fn no_command_is_registered_and_never_called() {
@@ -1686,8 +1686,8 @@ fn the_button_with_no_command_behind_it_cannot_be_pressed_and_the_one_that_grew_
     //
     // The other one moved. `EJETAR PLUG DO OPERADOR` was disabled because
     // `EndReason::Kicked` existed only for the person receiving one and nothing
-    // could emit it; `expulsar_persono`, `banir_persono`, `remover_mensagem` and
-    // `mover_persono` are what changed that. So the question about it is no
+    // could emit it; `expulsar_pessoa`, `banir_pessoa`, `remover_mensagem` and
+    // `mover_pessoa` are what changed that. So the question about it is no
     // longer "is it disabled" — it is "does it stay honest now that it does
     // something", and that has three halves:
     //
@@ -1695,7 +1695,7 @@ fn the_button_with_no_command_behind_it_cannot_be_pressed_and_the_one_that_grew_
     //   window does not know which permissions it has, and a button born
     //   pressable promises what it may not be able to carry out;
     // - something turns it on from the snapshot, and from the moderation
-    //   booleans rather than from `may_manage_cages` or from nothing at all;
+    //   booleans rather than from `may_manage_voice_rooms` or from nothing at all;
     // - and it opens the choosing, rather than acting. A `Notice` carries a
     //   severity and a reason and never *whose* it is — the same gap that leaves
     //   the three cells of that box empty — so a button that ejected from there
@@ -1769,9 +1769,9 @@ fn the_button_with_no_command_behind_it_cannot_be_pressed_and_the_one_that_grew_
         "`alerta-ejetar` does something other than open the moderation:{aperto}"
     );
     for verbo in [
-        "invoke(\"expulsar_persono\"",
-        "invoke(\"banir_persono\"",
-        "invoke(\"mover_persono\"",
+        "invoke(\"expulsar_pessoa\"",
+        "invoke(\"banir_pessoa\"",
+        "invoke(\"mover_pessoa\"",
     ] {
         assert!(
             !aperto.contains(verbo),
@@ -1849,7 +1849,7 @@ fn a_person_card_passes_the_band_through_and_never_measures_anything_itself() {
     // is where the two differ. v2 drew the waveform and the per-person delay as
     // empty frames with a dash and a `title` saying what was missing; v3 drops
     // them, because on a screen whose whole point is being easy to read an
-    // explained dash is noise — somebody entering a Cage wants to know who is
+    // explained dash is noise — somebody entering a voice room wants to know who is
     // talking, not which fields this protocol does not carry yet. The record of
     // the gap lives in the inventory (§1.3, §7), which is where anybody looks
     // before trying to draw them again.
@@ -2030,9 +2030,9 @@ fn the_volume_control_does_not_hide_behind_the_pointer() {
 }
 
 #[test]
-fn the_two_ways_out_of_the_call_say_which_one_leaves_the_cage() {
+fn the_two_ways_out_of_the_call_say_which_one_leaves_the_voice_room() {
     // The v3 comp's finding, and the inventory settles it in §7.1: changing
-    // screen is not leaving the Cage. The prototype collapses the two — both
+    // screen is not leaving the voice room. The prototype collapses the two — both
     // buttons call `ir('principal')` — and what separates them there is only
     // what they promise. Here they have to differ for real, and say so.
     //
@@ -2065,7 +2065,7 @@ fn the_two_ways_out_of_the_call_say_which_one_leaves_the_cage() {
     // and watching this pass.
     assert!(
         exit.contains("invoke(\"eject_plug\")"),
-        "`SAIR DA SALA` does not eject the plug, so leaving the Cage has no \
+        "`SAIR DA SALA` does not eject the plug, so leaving the VoiceRoom has no \
          button anywhere on this screen:{exit}"
     );
 
@@ -2085,7 +2085,7 @@ fn the_two_ways_out_of_the_call_say_which_one_leaves_the_cage() {
         else {
             panic!(
                 "`{id}` carries no hint beside it, so the distinction between \
-                 changing screen and leaving the Cage is nowhere on the screen"
+                 changing screen and leaving the VoiceRoom is nowhere on the screen"
             );
         };
         hint.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -2173,7 +2173,7 @@ fn ending_the_session_takes_the_call_screen_down_with_it() {
     // Every `.tela` is `height: 100vh`, so two visible ones do not overlap: they
     // stack, and the second sits below the fold where nobody finds it. A session
     // can end with the call screen open — that is precisely who gets kicked, the
-    // person sitting in a Cage — and `mostrarFim` picks the next screen on its
+    // person sitting in a voice room — and `mostrarFim` picks the next screen on its
     // own.
     //
     // Scoped to `mostrarFim`, because `tela-chamada.js` names the function in
@@ -2210,9 +2210,9 @@ fn classes_defined_in(css: &str) -> BTreeSet<String> {
 }
 
 #[test]
-fn the_cage_says_who_is_inside_and_says_their_state_in_words() {
-    // The v3 comp's biggest single gain, and it costs no protocol: `cages_of`
-    // already fills `Cage.people` from `room.roster(cage.id)` for *every* Cage,
+fn the_voice_room_says_who_is_inside_and_says_their_state_in_words() {
+    // The v3 comp's biggest single gain, and it costs no protocol: `voice_rooms_of`
+    // already fills `VoiceRoom.people` from `room.roster(voice_room.id)` for *every* voice room,
     // not only the occupied one. The app spent that on a block bar — twelve
     // characters standing in for the four names it had in hand.
     //
@@ -2231,13 +2231,13 @@ fn the_cage_says_who_is_inside_and_says_their_state_in_words() {
     let dentro = body_of(&scripts(), "function linhaDeQuemEstaDentro");
 
     assert!(
-        lista.contains("cage.people") && lista.contains("linhaDeQuemEstaDentro"),
-        "the Cage list no longer draws who is inside, so the one thing the v3 \
+        lista.contains("voice_room.people") && lista.contains("linhaDeQuemEstaDentro"),
+        "the VoiceRoom list no longer draws who is inside, so the one thing the v3 \
          added to this column is a block bar again"
     );
     assert!(
         dentro.contains("pessoa.speaking") && dentro.contains("pessoa.at_field"),
-        "the row inside a Cage reads neither who is talking nor who is muted, \
+        "the row inside a VoiceRoom reads neither who is talking nor who is muted, \
          which is everything it was drawn to say"
     );
     for word in ["fala", "mudo"] {
@@ -2251,7 +2251,7 @@ fn the_cage_says_who_is_inside_and_says_their_state_in_words() {
 }
 
 #[test]
-fn entering_and_leaving_a_cage_are_labelled_buttons_and_not_a_click_on_the_row() {
+fn entering_and_leaving_a_voice_room_are_labelled_buttons_and_not_a_click_on_the_row() {
     // What the v2 shipped: a `<li>` with `cursor: pointer` and one listener on
     // the `<ul>`. Nothing about it said it could be pressed, no keyboard could
     // reach it, and no screen reader announced it as anything at all. The LAN
@@ -2259,15 +2259,15 @@ fn entering_and_leaving_a_cage_are_labelled_buttons_and_not_a_click_on_the_row()
     // way out of a Dogma — this is that finding applied here.
     //
     // Leaving is asserted beside entering on purpose. The comp writes
-    // `VOCÊ ESTÁ AQUI` on the occupied Cage and wires it to nothing, and taking
+    // `VOCÊ ESTÁ AQUI` on the occupied sala de voz and wires it to nothing, and taking
     // that literally would trade a mute button for a dead one: this screen
-    // would lose its only way out of a Cage, and gain a button that looks like
+    // would lose its only way out of a voice room, and gain a button that looks like
     // it acts.
     let handler = body_of(&scripts(), "async function alternarCanal");
     let lista = body_of(&scripts(), "function desenharCanais");
 
     assert!(
-        handler.contains("button[data-cage]") && handler.contains("button[data-linha]"),
+        handler.contains("button[data-voice_room]") && handler.contains("button[data-linha]"),
         "the channel handler is looking for something other than a button, so \
          whatever it finds is not focusable and announces as nothing:\n{handler}"
     );
@@ -2279,7 +2279,7 @@ fn entering_and_leaving_a_cage_are_labelled_buttons_and_not_a_click_on_the_row()
     for label in ["ENTRAR NA SALA", "SAIR DA SALA"] {
         assert!(
             lista.contains(label),
-            "the Cage no longer offers `{label}`, so one half of the pair the v3 \
+            "the VoiceRoom no longer offers `{label}`, so one half of the pair the v3 \
              split apart has gone missing again"
         );
     }
@@ -3370,13 +3370,13 @@ fn the_three_subsystems_look_different_while_they_are_loading() {
 fn creating_a_room_is_offered_by_permission_and_sized_by_the_dogma() {
     let body = body_of(&scripts(), "function desenharCanais");
 
-    // Offered, not enforced. The server refuses `CreateCage` from anybody
-    // without `ManageCages`, and `seele-conformance` proves the refusal comes
+    // Offered, not enforced. The server refuses `CreateVoiceRoom` from anybody
+    // without `ManageVoiceRooms`, and `seele-conformance` proves the refusal comes
     // from there — this is the shell not putting up a control that would fail.
     // The distinction matters because the opposite reading (hide it and call it
     // secured) is the one the `plug` walks straight through.
     assert!(
-        body.contains("may_manage_cages"),
+        body.contains("may_manage_voice_rooms"),
         "the screen offers the create forms without asking whether this person may \
          create, so it either hides them from the host or shows them to everybody"
     );
@@ -3385,7 +3385,7 @@ fn creating_a_room_is_offered_by_permission_and_sized_by_the_dogma() {
     // Whoever hosts already chose one when they set the Dogma up, and repeating
     // their choice beats inventing a default in JavaScript.
     assert!(
-        body.contains("cages[0].limit") || body.contains("limit"),
+        body.contains("voice_rooms[0].limit") || body.contains("limit"),
         "the default seat count no longer comes from a room that already exists, \
          so the shell is deciding how big a room should be:\n{body}"
     );
@@ -3394,7 +3394,7 @@ fn creating_a_room_is_offered_by_permission_and_sized_by_the_dogma() {
     // guard that ties calls to registered commands goes blind — which it did,
     // twice in one day, in this very file and in the settings screen.
     let script = without_comments(&scripts());
-    for comando in ["invoke(\"criar_cage\"", "invoke(\"criar_linha\""] {
+    for comando in ["invoke(\"criar_voice_room\"", "invoke(\"criar_linha\""] {
         assert!(
             script.contains(comando),
             "`{comando}…` is not written out anywhere, so the command name reaches \
@@ -3418,7 +3418,7 @@ const VOID_TAGS: &[&str] = &["meta", "link", "img", "input", "br", "hr", "source
 /// as many rows as the page has: `.dogma-atalhos` is four shortcuts, `.luzes` is
 /// three subsystems, and no Dogma can make either longer. A list the page leaves
 /// empty is one a script fills from a `Snapshot`, and nothing in the protocol
-/// caps how many Cages, Linhas, people, messages, devices or visited Dogmas come
+/// caps how many voice_rooms, Linhas, people, messages, devices or visited Dogmas come
 /// back. Those are the ones that can outgrow the window.
 ///
 /// So the distinction is not "long" against "short" — nobody can measure that
@@ -3520,7 +3520,7 @@ fn classes_that_scroll(css: &str) -> BTreeSet<String> {
 
 #[test]
 fn every_list_the_dogma_fills_lives_inside_something_that_scrolls() {
-    // How this was found: somebody with more than a screenful of Cages asked how
+    // How this was found: somebody with more than a screenful of voice_rooms asked how
     // to see the rest. There was no way. `.canais` was `flex: 0 0 auto`, no panel
     // in the channel column declared `overflow-y`, and `base.css` puts
     // `overflow: hidden` on `body` — so the column grew past the window and the
@@ -3540,7 +3540,7 @@ fn every_list_the_dogma_fills_lives_inside_something_that_scrolls() {
     let lists = empty_lists_with_their_ancestry(&page);
     assert!(
         lists.len() >= 8,
-        "found {} lists the Dogma fills; the session alone has Cages, Linhas, \
+        "found {} lists the Dogma fills; the session alone has VoiceRooms, Linhas, \
          the messages and the roster",
         lists.len()
     );
@@ -4037,15 +4037,15 @@ fn the_update_is_only_ever_asked_for_by_a_press() {
 
 /// The four commands that act on a person or on what they said.
 const VERBOS_DE_MODERACAO: &[&str] = &[
-    "expulsar_persono",
-    "banir_persono",
+    "expulsar_pessoa",
+    "banir_pessoa",
     "remover_mensagem",
-    "mover_persono",
+    "mover_pessoa",
     // Destroying a room goes through the same machine, and belongs on the same
     // list. It is the most consequential of the six — a kick lasts a session, a
     // ban is undone by whoever holds the Dogma's file, and this ends what other
     // people wrote with nothing anywhere that brings it back.
-    "apagar_cage",
+    "apagar_voice_room",
     "apagar_linha",
 ];
 
@@ -4183,7 +4183,7 @@ fn moving_somebody_says_they_did_not_ask_and_that_both_rooms_watch_it_happen() {
     for (what, needle) in [
         ("that the person did not ask for it", "sem ter pedido"),
         ("that they are told", "aviso"),
-        ("which room they are taken from", "quem.cage"),
+        ("which room they are taken from", "quem.voice_room"),
         ("which room they land in", "destino"),
     ] {
         assert!(
@@ -4227,7 +4227,7 @@ fn each_moderation_verb_is_offered_by_its_own_permission() {
         );
     }
     assert!(
-        !body.contains("may_manage_cages"),
+        !body.contains("may_manage_voice_rooms"),
         "the moderation box is offered by the room-management permission, which \
          is a different permission for a different thing:\n{body}"
     );
@@ -4330,7 +4330,7 @@ fn opening_the_moderation_carries_the_keyboard_and_closing_gives_it_back() {
     // stands nothing happened. WCAG 2.4.3, the same rule `abrirTela` exists for.
     //
     // Closing is the half that is easy to forget, and it has a trap of its own:
-    // the button that opened the box is a row of `#lista-cages`, and that list is
+    // the button that opened the box is a row of `#lista-voice_rooms`, and that list is
     // thrown away and rebuilt twice a second — so by the time the box closes the
     // element may not be in the document any more. `focus()` on a node outside
     // the tree does nothing and reports nothing, which is the original defect
@@ -4808,14 +4808,14 @@ fn destroying_a_room_says_what_it_does_to_the_people_and_to_the_other_room() {
     // The two things the person pressing does not experience, and therefore the
     // two a confirmation has to say out loud.
     //
-    // For a Cage: people are turned out of it in the middle of speaking, and
+    // For a voice room: people are turned out of it in the middle of speaking, and
     // they are told. And the half that is easiest to get wrong from the other
     // direction — the Line bound to it is **not** destroyed with it. Without
-    // that line, somebody who wanted a conversation gone destroys the Cage, sees
+    // that line, somebody who wanted a conversation gone destroys the voice room, sees
     // the Line still there, and concludes the product did not do what it said.
-    let cage = body_of(&scripts(), "function consequenciaDeApagarCage");
+    let voice_room = body_of(&scripts(), "function consequenciaDeApagarVoiceRoom");
     for (what, needle) in [
-        ("how many people are inside", "cage.people.length"),
+        ("how many people are inside", "voice_room.people.length"),
         (
             "that it happens mid-sentence",
             "no meio do que estiverem falando",
@@ -4828,13 +4828,13 @@ fn destroying_a_room_says_what_it_does_to_the_people_and_to_the_other_room() {
         ),
     ] {
         assert!(
-            cage.contains(needle),
-            "the Cage confirmation never says {what}:\n{cage}"
+            voice_room.contains(needle),
+            "the voice room confirmation never says {what}:\n{voice_room}"
         );
     }
 
     // For a Line: whoever is reading it loses it from the screen at that
-    // instant, and any Cage bound to it comes out with no Line — a change
+    // instant, and any voice room bound to it comes out with no Line — a change
     // nobody asked for, which is exactly the kind this product names.
     let linha = body_of(&scripts(), "function consequenciaDeApagarLinha");
     for (what, needle) in [
@@ -4863,16 +4863,16 @@ fn destroying_a_room_says_what_it_does_to_the_people_and_to_the_other_room() {
 }
 
 #[test]
-fn the_last_cage_is_offered_disabled_with_the_reason_written_on_it() {
-    // A Dogma with no Cage has nowhere to speak. The Dogma refuses the press,
+fn the_last_voice_room_is_offered_disabled_with_the_reason_written_on_it() {
+    // A Dogma with na sala de voz has nowhere to speak. The Dogma refuses the press,
     // and this window has to say why *before* it — a control that vanishes on
     // the last room teaches nothing, because an absence is not something anybody
     // reads. `moderar-acao-mover` hides instead, and the difference is real: it
     // hides when its **object** does not exist, and this room does.
-    let porta = body_of(&scripts(), "function botaoDeApagarCage");
+    let porta = body_of(&scripts(), "function botaoDeApagarVoiceRoom");
     assert!(
         porta.contains("botao.disabled = ultimo"),
-        "the last Cage is offered for destruction like any other, so the only \
+        "the last VoiceRoom is offered for destruction like any other, so the only \
          thing between a Dogma and having nowhere to speak is a refusal that \
          arrives after the press:\n{porta}"
     );
@@ -4883,16 +4883,16 @@ fn the_last_cage_is_offered_disabled_with_the_reason_written_on_it() {
     );
     assert!(
         porta.contains("única sala de voz"),
-        "the reason the last Cage stays is not written anywhere a person \
+        "the reason the last VoiceRoom stays is not written anywhere a person \
          reads:\n{porta}"
     );
 
     // And the count comes from the Dogma's list, not from anything this file
-    // decides: one Cage left is one Cage in `snapshot.cages`.
+    // decides: one voice room left is one voice room in `snapshot.voice_rooms`.
     let desenho = body_of(&scripts(), "function desenharCanais");
     assert!(
-        desenho.contains("snapshot.cages.length === 1"),
-        "nothing tells the delete control which Cage is the last one:\n{desenho}"
+        desenho.contains("snapshot.voice_rooms.length === 1"),
+        "nothing tells the delete control which voice room is the last one:\n{desenho}"
     );
 }
 
@@ -4900,7 +4900,7 @@ fn the_last_cage_is_offered_disabled_with_the_reason_written_on_it() {
 fn destroying_a_room_is_offered_by_the_permission_that_destroys_it() {
     // The decision, asserted where a person meets it. Making a room and
     // renaming one are mistakes a Dogma survives; destroying one ends what other
-    // people wrote. `specs/04-servidor-seele.md` enumerates `gerenciar_cages`
+    // people wrote. `specs/04-servidor-seele.md` enumerates `gerenciar_voice_rooms`
     // and `administrar_dogma` separately, so a role that builds rooms without
     // being able to unmake them is a role somebody can actually write — and
     // gating both on one boolean makes it impossible to offer correctly.
@@ -4908,14 +4908,14 @@ fn destroying_a_room_is_offered_by_the_permission_that_destroys_it() {
     // Scoped to the two functions that draw the controls, because the file
     // explains the distinction in prose too and an unscoped search for either
     // name would be satisfied by the paragraph that says why they differ.
-    for porta in ["function botaoDeApagarCage", "function botaoDeApagarLinha"] {
+    for porta in ["function botaoDeApagarVoiceRoom", "function botaoDeApagarLinha"] {
         let corpo = body_of(&scripts(), porta);
         assert!(
             corpo.contains("may_delete_rooms"),
             "`{porta}` does not consult the permission that destroys rooms:\n{corpo}"
         );
         assert!(
-            !corpo.contains("may_manage_cages"),
+            !corpo.contains("may_manage_voice_rooms"),
             "`{porta}` is offered by the permission to *make* rooms, which is a \
              different permission for a different thing:\n{corpo}"
         );
@@ -4933,7 +4933,7 @@ fn destroying_a_room_is_offered_by_the_permission_that_destroys_it() {
 
 #[test]
 fn a_room_that_stopped_existing_has_a_sentence_and_not_a_shrug() {
-    // Somebody is standing in the Cage, or reading the Line, when it stops
+    // Somebody is standing in the voice room, or reading the Line, when it stops
     // existing. The plug is already out and the conversation is already off the
     // screen by the time this arrives — so without the sentence what is left is
     // a room that vanished on its own, which from where the reader sits is
@@ -4951,7 +4951,7 @@ fn a_room_that_stopped_existing_has_a_sentence_and_not_a_shrug() {
     };
     let avisos = without_comments(avisos);
 
-    for reason in ["CageDeleted", "LineDeleted", "LastCage"] {
+    for reason in ["VoiceRoomDeleted", "LineDeleted", "LastVoiceRoom"] {
         assert!(
             avisos.contains(&format!("{reason}:")),
             "the Dogma can raise `{reason}` and `AVISOS` has no sentence for it, \
@@ -4960,13 +4960,13 @@ fn a_room_that_stopped_existing_has_a_sentence_and_not_a_shrug() {
     }
     assert!(
         avisos.contains("Faça outra sala antes"),
-        "the refusal of the last Cage does not say what to do about it, which \
+        "the refusal of the last VoiceRoom does not say what to do about it, which \
          makes it a wall rather than an answer"
     );
 
     // Every one of the three has to be a reason the bridge can actually produce.
     let types = read("../../crates/seele-ffi/src/types.rs");
-    for reason in ["CageDeleted", "LineDeleted", "LastCage"] {
+    for reason in ["VoiceRoomDeleted", "LineDeleted", "LastVoiceRoom"] {
         assert!(
             types.contains(reason),
             "`AVISOS` writes a sentence for `{reason}`, which `NoticeReason` \
@@ -5754,7 +5754,7 @@ fn the_reason_a_rung_failed_is_not_prefixed_by_a_label_it_already_carries() {
 }
 
 #[test]
-fn arriving_at_a_dogma_opens_a_line_and_does_not_put_anybody_in_a_cage() {
+fn arriving_at_a_dogma_opens_a_line_and_does_not_put_anybody_in_a_voice_room() {
     // Both used to happen together on entry, with one good reason between them:
     // arriving at an empty screen is arriving without knowing what to do. The
     // reason still holds for one of the two and never held for the other.
@@ -5763,7 +5763,7 @@ fn arriving_at_a_dogma_opens_a_line_and_does_not_put_anybody_in_a_cage() {
     // opening the first Line answers the empty screen and commits the person to
     // nothing.
     //
-    // Entering a Cage is not passive. It takes one of fifteen seats, shows the
+    // Entering a voice room is not passive. It takes one of fifteen seats, shows the
     // person as present, and puts a microphone at the disposal of a conversation
     // they did not pick. From the person who actually used it: «não dá para você
     // ficar fora de uma sala». They had never pressed anything.
@@ -5776,7 +5776,7 @@ fn arriving_at_a_dogma_opens_a_line_and_does_not_put_anybody_in_a_cage() {
     );
     assert!(
         !entrar.contains("insert_plug"),
-        "arriving puts the person inside a Cage without them pressing anything — \
+        "arriving puts the person inside a VoiceRoom without them pressing anything — \
          a seat taken and a microphone offered to a conversation nobody \
          chose:\n{entrar}"
     );
@@ -6601,7 +6601,7 @@ fn the_knock_notice_never_takes_the_keyboard_from_somebody_mid_sentence() {
         faixa < primeira,
         "the knock band moved inside a screen, where a `hidden` on that section \
          takes it off the page along with everything else — and whoever hosts is \
-         inside a cage or in the settings exactly when somebody knocks"
+         inside a voice_room or in the settings exactly when somebody knocks"
     );
 
     let tag = tag_with_id(&read("ui/index.html"), "portaria-batendo");
@@ -6806,7 +6806,7 @@ fn the_waiting_screen_says_what_happened_what_to_do_and_what_is_useless() {
     );
 
     // A decided refusal is a wall with the reason on it, and not a button that
-    // keeps working. Same shape as the last cage: drawn, disabled, explained —
+    // keeps working. Same shape as the last voice room: drawn, disabled, explained —
     // a button that vanishes is a button somebody hunts for.
     assert!(
         corpo.contains("AdmissionDenied") && corpo.contains("disabled"),
@@ -6842,7 +6842,7 @@ fn the_entrance_screen_stopped_drawing_the_four_values_this_protocol_never_carri
     // write the value as missing, and the gap stays visible. That serves a gap
     // somebody means to close. These four never closed — there is no population
     // count and no "route" anywhere in the core, the codec has no value until a
-    // plug is inside a cage and nobody is yet, and the local key does not cross
+    // plug is inside a voice room and nobody is yet, and the local key does not cross
     // the FFI — so what the screen showed was seven fields with four dashes,
     // which reads as a broken window rather than as an honest one.
     let tela = entry_screen();
@@ -6862,7 +6862,7 @@ fn the_entrance_screen_stopped_drawing_the_four_values_this_protocol_never_carri
     }
 
     // The ones that are real stay, or this passes by deleting the panel.
-    for vivo in ["auth-cages", "auth-linhas", "auth-dogma-nome"] {
+    for vivo in ["auth-voice_rooms", "auth-linhas", "auth-dogma-nome"] {
         assert!(
             tela.contains(vivo),
             "`{vivo}` left the entry screen too, and that one comes straight out \
@@ -7641,6 +7641,9 @@ fn a_entrada_poe_o_convite_na_frente_e_explica_cada_campo() {
 /// isentar.
 const APOSENTADOS: &[(&str, &str)] = &[
     ("dogma", "servidor"),
+    // Mesma regra do aviso alguns itens abaixo, e a varredura de `Cage` as
+    // mordeu do mesmo jeito em 2026-08-25: a esquerda é o nome **aposentado**,
+    // e reescrevê-la para `voice room` fazia o guarda procurar a palavra nova.
     ("cage", "sala de voz"),
     ("cages", "salas de voz"),
     ("jaula", "sala de voz"),
@@ -7741,7 +7744,7 @@ fn texto_de_marcacao(pagina: &str) -> Vec<String> {
 /// - `console.warn("eject_plug:", falha)` — nada que sai por aqui chega a uma
 ///   tela, então a chamada inteira cai (`manter` 0);
 /// - `elemento(tag, classe, texto)` — a **lista de classes** é a única string de
-///   identificador desta casa que traz espaço (`"cage aberto"`), e é o segundo
+///   identificador desta casa que traz espaço (`"voice_room aberto"`), e é o segundo
 ///   argumento; o terceiro é o texto e fica (`manter` 2).
 ///
 /// O nome é casado com o `(` através dos caracteres de identificador que houver
@@ -7828,7 +7831,7 @@ fn sem_argumentos(fonte: &str, nome: &str, manter: usize) -> String {
 /// O custo aceito, dito por extenso: uma palavra solta, ASCII e minúscula
 /// escrita na tela por um script — `no.textContent = "pessoa"` — passa por
 /// identificador e escapa daqui. Aceito porque a alternativa acusa todo
-/// `invoke("apagar_cage")` da janela, e porque a marcação, onde essas palavras
+/// `invoke("apagar_voice_room")` da janela, e porque a marcação, onde essas palavras
 /// de fato moram, é lida sem este filtro.
 fn parece_identificador(literal: &str) -> bool {
     let texto = literal.trim();

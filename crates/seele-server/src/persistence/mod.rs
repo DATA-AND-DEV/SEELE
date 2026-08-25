@@ -2,8 +2,8 @@
 //!
 //! `specs/04-servidor-seele.md`:
 //!
-//! > SQLite, single file, WAL on. Tables: `pessoas`, `papeis`, `persono_papeis`,
-//! > `cages`, `linhas`, `mensagens`, `banimentos`, `config`, `schema_version`.
+//! > SQLite, single file, WAL on. Tables: `pessoas`, `papeis`, `pessoas_papeis`,
+//! > `voice_rooms`, `linhas`, `mensagens`, `banimentos`, `config`, `schema_version`.
 //! >
 //! > - Migrations embedded in the binary, applied at boot, versioned and
 //! >   irreversible.
@@ -337,6 +337,13 @@ mod tests {
                      -- o replay encontra `people` onde procura `pilots` e para
                      -- com «no such table» — que foi exatamente o que aconteceu
                      -- quando a 5 entrou.
+                     -- A parte da migração 6, pela mesma regra.
+                     ALTER TABLE voice_rooms RENAME TO cages;
+                     UPDATE roles SET permissions = replace(permissions, 'ManageVoiceRooms', 'ManageCages');
+                     UPDATE roles SET denials     = replace(denials,     'ManageVoiceRooms', 'ManageCages');
+                     UPDATE roles SET permissions = replace(permissions, 'ViewVoiceRoom', 'ViewCage');
+                     UPDATE roles SET denials     = replace(denials,     'ViewVoiceRoom', 'ViewCage');
+
                      ALTER TABLE people RENAME TO pilots;
                      ALTER TABLE person_roles RENAME TO pilot_roles;
                      ALTER TABLE pilot_roles RENAME COLUMN person_id TO pilot_id;
@@ -404,7 +411,7 @@ mod tests {
     #[test]
     fn write_ahead_logging_is_on() {
         // specs/04-servidor-seele.md asks for it by name. Without WAL a reader
-        // blocks the writer, and the Cage tasks read while messages are written.
+        // blocks the writer, and the voice room tasks read while messages are written.
         let path = tempfile::tempdir().unwrap();
         let persistence = Persistence::open(&Location::File(path.path().join("dogma.db"))).unwrap();
         let mode: String = persistence

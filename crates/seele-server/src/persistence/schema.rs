@@ -382,6 +382,27 @@ pub const MIGRATIONS: &[Migration] = &[
             UPDATE roles SET denials     = replace(denials,     'MovePilot', 'MovePerson');
         "#,
     },
+    Migration {
+        version: 6,
+        description: "vocabulário: Cage vira VoiceRoom em tabela e permissão",
+        sql: r#"
+            -- Segundo lado do mesmo rename da migração 5, agora para o `Cage`,
+            -- que era o termo de Evangelion para a sala de voz. A tela já dizia
+            -- "sala de voz" desde o ADR 0033.
+
+            ALTER TABLE cages RENAME TO voice_rooms;
+
+            -- Os nomes de permissão são gravados como **texto** dentro dos
+            -- arrays JSON de `roles`, então o rename do enum em Rust não chega
+            -- aqui sozinho — foi assim que "MovePilot" quase sumiu na migração
+            -- anterior. `ManageCages` antes de `ViewCage`: trocar o mais curto
+            -- primeiro deixaria `ManageVoiceRooms` impossível de casar depois.
+            UPDATE roles SET permissions = replace(permissions, 'ManageCages', 'ManageVoiceRooms');
+            UPDATE roles SET denials     = replace(denials,     'ManageCages', 'ManageVoiceRooms');
+            UPDATE roles SET permissions = replace(permissions, 'ViewCage', 'ViewVoiceRoom');
+            UPDATE roles SET denials     = replace(denials,     'ViewCage', 'ViewVoiceRoom');
+        "#,
+    },
 ];
 
 #[cfg(test)]

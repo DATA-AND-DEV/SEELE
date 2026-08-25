@@ -84,7 +84,7 @@ pub enum MediaError {
 pub struct MediaHeader {
     /// Protocol version. Always [`PROTOCOL_VERSION`] on the way out.
     pub version: u8,
-    /// Source identifier, assigned by the server on Cage entry.
+    /// Source identifier, assigned by the server on voice room entry.
     ///
     /// `specs/08-seguranca.md`: never accepted from the client. The server binds
     /// it to the connection and forwards the datagram intact, which is what

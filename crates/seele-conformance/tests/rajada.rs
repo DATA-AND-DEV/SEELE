@@ -54,11 +54,11 @@ use std::time::Duration;
 use anyhow::Result;
 use seele_core::{Client, MemoryPinStore};
 use seele_proto::control::ServerMessage;
-use seele_proto::ids::{CageId, ClientMessageId, LineId};
+use seele_proto::ids::{VoiceRoomId, ClientMessageId, LineId};
 use seele_server::persistence::Location;
 use seele_server::{DogmaConfig, Server};
 
-const CAGE: u32 = 1;
+const VOICE_ROOM: u32 = 1;
 const LINE: u32 = 1;
 
 /// O tamanho da pendência. Grande o bastante para não caber num pacote, que é
@@ -93,7 +93,7 @@ async fn entrar(address: SocketAddr, apelido: &str, semente: u8) -> Result<Clien
         None,
     )
     .await?;
-    cliente.insert_plug(CageId(CAGE)).await?;
+    cliente.insert_plug(VoiceRoomId(VOICE_ROOM)).await?;
     cliente.join_line(LineId(LINE)).await?;
     Ok(cliente)
 }

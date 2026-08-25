@@ -1,6 +1,6 @@
 //! The Dogma's shared state: storage, the write batch, and the event bus.
 //!
-//! `specs/04-servidor-seele.md` puts Cage state in a task per Cage with no global
+//! `specs/04-servidor-seele.md` puts voice room state in a task per voice room with no global
 //! lock. Text is different: it is one durable log per Line, and the thing worth
 //! avoiding is not contention but `fsync` per message. So storage sits behind a
 //! single mutex — SQLite in WAL mode has one writer anyway — and the batching
@@ -18,8 +18,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use seele_proto::control::{CageInfo, LineInfo, PersonProfile, PersonState};
-use seele_proto::ids::{CageId, LineId, MessageId, PersonId, ScreenId, Ssrc};
+use seele_proto::control::{VoiceRoomInfo, LineInfo, PersonProfile, PersonState};
+use seele_proto::ids::{VoiceRoomId, LineId, MessageId, PersonId, ScreenId, Ssrc};
 use tokio::sync::{broadcast, mpsc, Mutex};
 
 use crate::persistence::messages::{Messages, PendingMessage, StoredMessage};
@@ -57,19 +57,19 @@ pub enum Event {
         /// Which message.
         id: MessageId,
     },
-    /// A person entered a Cage.
+    /// A person entered a voice room.
     PersonJoined {
-        /// Which Cage.
-        cage: CageId,
+        /// Which voice room.
+        voice_room: VoiceRoomId,
         /// Who.
         profile: PersonProfile,
         /// Their media source.
         ssrc: Ssrc,
     },
-    /// A person left a Cage.
+    /// A person left a voice room.
     PersonLeft {
-        /// Which Cage.
-        cage: CageId,
+        /// Which voice room.
+        voice_room: VoiceRoomId,
         /// Who.
         person: PersonId,
     },
@@ -85,25 +85,25 @@ pub enum Event {
     },
     /// A person's state changed, including their Sync Ratio.
     PersonState(PersonState),
-    /// A Cage was created.
+    /// A voice room was created.
     ///
     /// Announced to **everybody**, the person who asked included, and this is the
     /// difference between a feature and a demonstration: a room that only shows
     /// up on the next handshake is a room whose maker has to tell their friends
     /// to reconnect before they can use it.
-    CageCreated {
-        /// The Cage, as it now exists.
-        cage: CageInfo,
+    VoiceRoomCreated {
+        /// The voice room, as it now exists.
+        voice_room: VoiceRoomInfo,
     },
     /// A Line was created.
     LineCreated {
         /// The Line, as it now exists.
         line: LineInfo,
     },
-    /// A Cage was renamed.
-    CageRenamed {
-        /// Which Cage.
-        cage: CageId,
+    /// A voice room was renamed.
+    VoiceRoomRenamed {
+        /// Which voice room.
+        voice_room: VoiceRoomId,
         /// Its new name.
         name: String,
     },
@@ -117,10 +117,10 @@ pub enum Event {
 
     // ---- what the Dogma calls itself ----
     //
-    // The same shape as `CageRenamed`, one level up: committed first, announced
+    // The same shape as `VoiceRoomRenamed`, one level up: committed first, announced
     // after, forwarded to every connection including the one that asked.
     //
-    // Announced to **everybody** for the reason `CageCreated` gives, and here it
+    // Announced to **everybody** for the reason `VoiceRoomCreated` gives, and here it
     // is sharper than for a room: a name is drawn in the header of every open
     // window, so a rename that only reached the next handshake would put the new
     // name on the screen of whoever typed it and the old one on everybody
@@ -147,8 +147,8 @@ pub enum Event {
     // connection **forwards** to its client, and these are something a
     // connection **does to itself**. They are here anyway because a Dogma has no
     // other way for one session to reach another — there is no map of live
-    // sessions, deliberately, since `specs/04-servidor-seele.md` puts Cage state
-    // in a task per Cage with no global lock. The bus already reaches every
+    // sessions, deliberately, since `specs/04-servidor-seele.md` puts voice room state
+    // in a task per voice room with no global lock. The bus already reaches every
     // connection; adding a registry of sessions beside it would be a second way
     // to find somebody, and the two would disagree the first time one of them
     // leaked.
@@ -163,12 +163,12 @@ pub enum Event {
         /// Which of the enumerated reasons to send them.
         reason: seele_proto::control::DisconnectReason,
     },
-    /// An operator moved a person into a Cage.
+    /// An operator moved a person into a voice room.
     PersonMoved {
         /// Who.
         person: PersonId,
         /// Where to.
-        cage: CageId,
+        voice_room: VoiceRoomId,
     },
 
     // ---- unmaking a room ----
@@ -181,10 +181,10 @@ pub enum Event {
     //
     // Which is why the sessions concerned act on them in the loop and then
     // `continue`, rather than letting `translate` write the same frame twice.
-    /// A Cage was destroyed.
-    CageDeleted {
-        /// Which Cage.
-        cage: CageId,
+    /// A voice room was destroyed.
+    VoiceRoomDeleted {
+        /// Which voice room.
+        voice_room: VoiceRoomId,
     },
     /// A Line was destroyed, and everything written in it with it.
     LineDeleted {
@@ -201,8 +201,8 @@ pub enum Event {
     // num anel que cinquenta sessões copiam seria o oposto exato do desenho.
     /// Alguém começou a compartilhar tela.
     ScreenShareStarted {
-        /// Em qual Cage.
-        cage: CageId,
+        /// Em qual voice room.
+        voice_room: VoiceRoomId,
         /// Quem.
         person: PersonId,
         /// Como a transmissão se chama daqui em diante.
@@ -210,8 +210,8 @@ pub enum Event {
     },
     /// Uma transmissão acabou.
     ScreenShareStopped {
-        /// Em qual Cage.
-        cage: CageId,
+        /// Em qual voice room.
+        voice_room: VoiceRoomId,
         /// Qual transmissão.
         screen: ScreenId,
     },
@@ -223,13 +223,13 @@ pub enum Event {
     /// que inventa; com ele, a mesma conta é feita nas duas pontas a partir do
     /// mesmo número.
     ///
-    /// Mandado pelo [`crate::cage::Cage`], que é o único lugar deste Dogma que
+    /// Mandado pelo [`crate::voice_room::VoiceRoom`], que é o único lugar deste Dogma que
     /// sabe quem está na sala sem perguntar a ninguém, e no mesmo instante em
     /// que ele refaz o teto. Dois donos de N seriam duas contas discordando no
     /// primeiro dia ruim.
     ScreenViewers {
-        /// Em qual Cage.
-        cage: CageId,
+        /// Em qual voice room.
+        voice_room: VoiceRoomId,
         /// Qual transmissão.
         screen: ScreenId,
         /// Quantos assistem. Não conta quem compartilha.
@@ -250,9 +250,9 @@ pub enum Event {
     },
 }
 
-/// Quem está compartilhando tela em cada Cage.
+/// Quem está compartilhando tela em cada sala de voz.
 ///
-/// **Uma transmissão por Cage**, que é o §6 item 3 da spec de compartilhamento
+/// **Uma transmissão por sala de voz**, que é o §6 item 3 da spec de compartilhamento
 /// de tela: *«uma transmissão por sala de voz na v1. Duas dobram a subida de
 /// quem recebe e triplicam a interface»*. Quem chega depois perde a corrida e
 /// **é avisado com nome** — `AlertReason::ScreenShareTaken` —, porque
@@ -260,11 +260,11 @@ pub enum Event {
 ///
 /// Ao lado da [`Occupancy`] e não dentro dela: quem está sentado e quem está
 /// transmitindo mudam por motivos diferentes e em momentos diferentes, e a
-/// única coisa que os liga é a limpeza — sair do Cage encerra a transmissão,
+/// única coisa que os liga é a limpeza — sair da sala de voz encerra a transmissão,
 /// que é o que [`Telas::encerrar_de`] existe para fazer numa chamada só.
 #[derive(Debug, Default)]
 pub struct Telas {
-    por_cage: HashMap<CageId, (PersonId, ScreenId)>,
+    por_voice_room: HashMap<VoiceRoomId, (PersonId, ScreenId)>,
 }
 
 impl Telas {
@@ -276,64 +276,64 @@ impl Telas {
     /// de novo em outro lugar.
     pub fn comecar(
         &mut self,
-        cage: CageId,
+        voice_room: VoiceRoomId,
         person: PersonId,
         screen: ScreenId,
     ) -> Result<(), PersonId> {
-        match self.por_cage.get(&cage) {
+        match self.por_voice_room.get(&voice_room) {
             // Quem já está transmitindo pedindo de novo não é uma corrida
             // perdida: é um cliente que reabriu o botão, e devolver
             // `ScreenShareTaken` para a própria pessoa seria dizer que ela
             // perdeu para si mesma.
             Some((dono, _)) if *dono != person => Err(*dono),
             _ => {
-                self.por_cage.insert(cage, (person, screen));
+                self.por_voice_room.insert(voice_room, (person, screen));
                 Ok(())
             }
         }
     }
 
-    /// Encerra a transmissão de um Cage, se for deste pessoa.
+    /// Encerra a transmissão de uma sala de voz, se for deste pessoa.
     ///
     /// Conferido, e não apagado às cegas: um `StopScreenShare` de quem não está
     /// transmitindo derrubaria a tela de quem está.
-    pub fn parar(&mut self, cage: CageId, person: PersonId) -> Option<ScreenId> {
-        let (dono, screen) = *self.por_cage.get(&cage)?;
+    pub fn parar(&mut self, voice_room: VoiceRoomId, person: PersonId) -> Option<ScreenId> {
+        let (dono, screen) = *self.por_voice_room.get(&voice_room)?;
         if dono != person {
             return None;
         }
-        self.por_cage.remove(&cage);
+        self.por_voice_room.remove(&voice_room);
         Some(screen)
     }
 
     /// Encerra o que este pessoa estivesse transmitindo, onde quer que fosse.
     ///
-    /// Devolve os Cages e as transmissões, porque alguém tem de anunciar o fim
+    /// Devolve as salas de voz e as transmissões, porque alguém tem de anunciar o fim
     /// e quem chama nem sempre sabe a sala — uma sessão acaba em qualquer `?` do
     /// meio do laço dela. É o mesmo raciocínio de
     /// [`Occupancy::vacate_everywhere`].
-    pub fn encerrar_de(&mut self, person: PersonId) -> Vec<(CageId, ScreenId)> {
+    pub fn encerrar_de(&mut self, person: PersonId) -> Vec<(VoiceRoomId, ScreenId)> {
         let encerradas: Vec<_> = self
-            .por_cage
+            .por_voice_room
             .iter()
             .filter(|(_, (dono, _))| *dono == person)
-            .map(|(cage, (_, screen))| (*cage, *screen))
+            .map(|(voice_room, (_, screen))| (*voice_room, *screen))
             .collect();
-        for (cage, _) in &encerradas {
-            self.por_cage.remove(cage);
+        for (voice_room, _) in &encerradas {
+            self.por_voice_room.remove(voice_room);
         }
         encerradas
     }
 
-    /// Encerra tudo o que estivesse acontecendo num Cage que deixou de existir.
-    pub fn encerrar_cage(&mut self, cage: CageId) -> Option<ScreenId> {
-        self.por_cage.remove(&cage).map(|(_, screen)| screen)
+    /// Encerra tudo o que estivesse acontecendo num sala de voz que deixou de existir.
+    pub fn encerrar_voice_room(&mut self, voice_room: VoiceRoomId) -> Option<ScreenId> {
+        self.por_voice_room.remove(&voice_room).map(|(_, screen)| screen)
     }
 
-    /// Quem está transmitindo neste Cage, se alguém está.
+    /// Quem está transmitindo neste sala de voz, se alguém está.
     #[must_use]
-    pub fn em(&self, cage: CageId) -> Option<(PersonId, ScreenId)> {
-        self.por_cage.get(&cage).copied()
+    pub fn em(&self, voice_room: VoiceRoomId) -> Option<(PersonId, ScreenId)> {
+        self.por_voice_room.get(&voice_room).copied()
     }
 
     /// Onde este pessoa está transmitindo, se está.
@@ -341,17 +341,17 @@ impl Telas {
     /// A pergunta que o **encaminhamento** faz, e ela vem ao contrário de
     /// [`Self::em`] por um motivo concreto: a tarefa que aceita os fluxos
     /// unidirecionais de uma conexão vive fora do laço da sessão — é o que a
-    /// impede de bloquear o controle — e por isso não enxerga em que Cage o
+    /// impede de bloquear o controle — e por isso não enxerga em que sala de voz o
     /// plug está. Este registro é a única fonte que sabe as duas coisas ao
     /// mesmo tempo, e é a mesma que decidiu a corrida do §6 item 3. Perguntar a
     /// ela é o que garante que um fluxo de tela só é aceito de quem o controle
     /// já autorizou.
     #[must_use]
-    pub fn de(&self, person: PersonId) -> Option<(CageId, ScreenId)> {
-        self.por_cage
+    pub fn de(&self, person: PersonId) -> Option<(VoiceRoomId, ScreenId)> {
+        self.por_voice_room
             .iter()
             .find(|(_, (dono, _))| *dono == person)
-            .map(|(cage, (_, screen))| (*cage, *screen))
+            .map(|(voice_room, (_, screen))| (*voice_room, *screen))
     }
 
     /// Tudo o que está acontecendo agora, achatado.
@@ -360,22 +360,22 @@ impl Telas {
     /// lista uma vez para escrever um quadro por transmissão — a mesma razão
     /// que [`Occupancy::everywhere`] dá.
     #[must_use]
-    pub fn todas(&self) -> Vec<(CageId, PersonId, ScreenId)> {
-        self.por_cage
+    pub fn todas(&self) -> Vec<(VoiceRoomId, PersonId, ScreenId)> {
+        self.por_voice_room
             .iter()
-            .map(|(cage, (person, screen))| (*cage, *person, *screen))
+            .map(|(voice_room, (person, screen))| (*voice_room, *person, *screen))
             .collect()
     }
 }
 
-/// A Cage seat held open for a person who dropped.
+/// A voice room seat held open for a person who dropped.
 ///
 /// `specs/02-protocolo.md`: "O servidor guarda o slot pelo mesmo período" — the
 /// five minutes of the internal battery. Without this a person whose train enters
-/// a tunnel comes back to find their Cage full.
+/// a tunnel comes back to find their voice room full.
 #[derive(Debug, Clone, Copy)]
 struct ReservedSlot {
-    cage: CageId,
+    voice_room: VoiceRoomId,
     ssrc: Ssrc,
     expires_at: Instant,
 }
@@ -388,11 +388,11 @@ pub struct Slots {
 
 impl Slots {
     /// Holds a seat for the grace period.
-    pub fn reserve(&mut self, person: PersonId, cage: CageId, ssrc: Ssrc, now: Instant) {
+    pub fn reserve(&mut self, person: PersonId, voice_room: VoiceRoomId, ssrc: Ssrc, now: Instant) {
         self.reserved.insert(
             person,
             ReservedSlot {
-                cage,
+                voice_room,
                 ssrc,
                 expires_at: now + seele_proto::transport::SESSION_GRACE,
             },
@@ -401,16 +401,16 @@ impl Slots {
 
     /// Reclaims a seat, if one is still being held.
     ///
-    /// Returns the Cage and the `ssrc` the person had, so a reconnection lands
+    /// Returns the voice room and the `ssrc` the person had, so a reconnection lands
     /// where it left off rather than looking like somebody new.
-    pub fn reclaim(&mut self, person: PersonId, now: Instant) -> Option<(CageId, Ssrc)> {
+    pub fn reclaim(&mut self, person: PersonId, now: Instant) -> Option<(VoiceRoomId, Ssrc)> {
         let slot = self.reserved.get(&person).copied()?;
         if slot.expires_at <= now {
             self.reserved.remove(&person);
             return None;
         }
         self.reserved.remove(&person);
-        Some((slot.cage, slot.ssrc))
+        Some((slot.voice_room, slot.ssrc))
     }
 
     /// Drops seats whose grace period has passed.
@@ -427,7 +427,7 @@ impl Slots {
     }
 }
 
-/// Somebody sitting in a Cage right now.
+/// Somebody sitting in a voice room right now.
 #[derive(Debug, Clone)]
 pub struct Occupant {
     /// Who.
@@ -444,7 +444,7 @@ pub struct Occupant {
 ///
 /// [`Occupancy`] responde «quem está em qual sala», e por muito tempo era a
 /// única tabela de presença que existia — então quem entrava no Dogma e ficava
-/// fora das salas não existia para mais ninguém. `PersonJoined` carrega um Cage
+/// fora das salas não existia para mais ninguém. `PersonJoined` carrega uma sala de voz
 /// porque anuncia sentar-se num; não havia mensagem para estar aqui. O cliente
 /// escreveu isso num comentário e seguiu em frente: «não há mensagem na fita
 /// que diga quem entrou no servidor e ficou fora das salas».
@@ -477,89 +477,89 @@ impl Presentes {
     }
 }
 
-/// Who is in which Cage at this moment.
+/// Who is in which voice room at this moment.
 ///
 /// Separate from [`Slots`], which holds seats for people who are *away*. This
 /// is who is actually there, and it exists to answer one question the protocol
 /// could not: **who was already here before I was watching.**
 ///
 /// `specs/02-protocolo.md` announces arrivals going forward and nothing else,
-/// so a person entering an occupied Cage saw an empty room until somebody moved.
+/// so a person entering an occupied voice room saw an empty room until somebody moved.
 /// Gap G15, found by running two clients where the second started after the
 /// first had already sat down.
 ///
-/// # Why the whole map, and not one Cage
+/// # Why the whole map, and not one voice room
 ///
-/// G15 was closed for the Cage the person walked into, and only that one. The
-/// screen `design/Entry Plug v3.dc.html` draws occupants under **every** Cage,
+/// G15 was closed for the voice room the person walked into, and only that one. The
+/// screen `design/Entry Plug v3.dc.html` draws occupants under **every** voice room,
 /// and for the other four that data had never existed on the client at all:
 /// they were drawn empty, always, however many people were in them. Reported
-/// from a real session as "o sistema de cages não está bem implementado,
-/// mostra que as cages estão vazias quando não deveriam estar".
+/// from a real session as "o sistema de voice_rooms não está bem implementado,
+/// mostra que as salas de voz estão vazias quando não deveriam estar".
 ///
 /// So [`Occupancy::everywhere`] hands back the entire picture, and a connection
 /// is given it once, at the start of its session. Everything after that is the
 /// unfiltered `PersonJoined` / `PersonLeft` broadcast.
 #[derive(Debug, Default)]
 pub struct Occupancy {
-    by_cage: HashMap<CageId, Vec<Occupant>>,
+    by_voice_room: HashMap<VoiceRoomId, Vec<Occupant>>,
 }
 
 impl Occupancy {
     /// Seats a person, replacing any earlier seat they held.
     ///
     /// Replacing rather than appending: a reconnection inside the grace period
-    /// re-enters the same Cage, and a roster with the same person twice is a
+    /// re-enters the same voice room, and a roster with the same person twice is a
     /// roster nobody trusts.
-    pub fn seat(&mut self, cage: CageId, occupant: Occupant) {
+    pub fn seat(&mut self, voice_room: VoiceRoomId, occupant: Occupant) {
         let _ = self.vacate_everywhere(occupant.person);
-        self.by_cage.entry(cage).or_default().push(occupant);
+        self.by_voice_room.entry(voice_room).or_default().push(occupant);
     }
 
-    /// Removes a person from one Cage.
-    pub fn vacate(&mut self, cage: CageId, person: PersonId) {
-        if let Some(seated) = self.by_cage.get_mut(&cage) {
+    /// Removes a person from one voice room.
+    pub fn vacate(&mut self, voice_room: VoiceRoomId, person: PersonId) {
+        if let Some(seated) = self.by_voice_room.get_mut(&voice_room) {
             seated.retain(|occupant| occupant.person != person);
         }
     }
 
     /// Removes a person from wherever they were, and says where that was.
     ///
-    /// The Cages come back because somebody has to announce the departure and
+    /// The voice_rooms come back because somebody has to announce the departure and
     /// the caller does not always know the room: a session can end at any `?`
     /// in the middle of its loop, and that path has no idea where the person was
     /// sitting. Returning the answer here is what lets one call at the end of a
     /// connection both clear the seat and tell everybody about it — the same
-    /// reasoning `crate::cage::Cages::leave_everywhere` gives for being
+    /// reasoning `crate::voice_room::voice_rooms::leave_everywhere` gives for being
     /// broadcast rather than aimed.
-    pub fn vacate_everywhere(&mut self, person: PersonId) -> Vec<CageId> {
+    pub fn vacate_everywhere(&mut self, person: PersonId) -> Vec<VoiceRoomId> {
         let mut vacated = Vec::new();
-        for (cage, seated) in &mut self.by_cage {
+        for (voice_room, seated) in &mut self.by_voice_room {
             let before = seated.len();
             seated.retain(|occupant| occupant.person != person);
             if seated.len() != before {
-                vacated.push(*cage);
+                vacated.push(*voice_room);
             }
         }
         vacated
     }
 
-    /// Who is in a Cage, in the order they arrived.
+    /// Who is in a voice room, in the order they arrived.
     #[must_use]
-    pub fn in_cage(&self, cage: CageId) -> Vec<Occupant> {
-        self.by_cage.get(&cage).cloned().unwrap_or_default()
+    pub fn in_voice_room(&self, voice_room: VoiceRoomId) -> Vec<Occupant> {
+        self.by_voice_room.get(&voice_room).cloned().unwrap_or_default()
     }
 
-    /// Everybody seated anywhere, with the Cage they are seated in.
+    /// Everybody seated anywhere, with the voice room they are seated in.
     ///
     /// Flattened rather than handed back as a map, because the only caller
     /// walks it once to write a frame per occupant, and a map would make that
     /// caller nest two loops to say one thing.
     #[must_use]
-    pub fn everywhere(&self) -> Vec<(CageId, Occupant)> {
-        self.by_cage
+    pub fn everywhere(&self) -> Vec<(VoiceRoomId, Occupant)> {
+        self.by_voice_room
             .iter()
-            .flat_map(|(cage, seated)| seated.iter().map(|occupant| (*cage, occupant.clone())))
+            .flat_map(|(voice_room, seated)| seated.iter().map(|occupant| (*voice_room, occupant.clone())))
             .collect()
     }
 }
@@ -626,7 +626,7 @@ pub struct Dogma {
     pub writes: mpsc::Sender<WriteRequest>,
     /// Seats held for people who are expected back.
     pub slots: Arc<Mutex<Slots>>,
-    /// Who is sitting in which Cage right now — gap G15.
+    /// Who is sitting in which voice room right now — gap G15.
     pub occupancy: Arc<Mutex<Occupancy>>,
     /// Quem está conectado, sentado ou não. Ver [`Presentes`].
     pub presentes: Arc<Mutex<Presentes>>,
@@ -637,7 +637,7 @@ pub struct Dogma {
     pub portaria: Arc<Mutex<crate::taxa::Portaria>>,
     /// How often the bus outran a session. See [`Atrasos`].
     pub atrasos: Arc<Atrasos>,
-    /// Quem está compartilhando tela em cada Cage. Ver [`Telas`].
+    /// Quem está compartilhando tela em cada sala de voz. Ver [`Telas`].
     pub telas: Arc<Mutex<Telas>>,
     /// The attachment store, its ceiling, and the byte budget. ADR 0027.
     ///
@@ -654,7 +654,7 @@ pub struct Dogma {
     /// passar a configuração inteira por assinaturas que já estão cheias.
     ///
     /// Duas leituras saem daqui e elas discordam de propósito — a admissão de
-    /// [`crate::cage::Cage`] cai numa hipótese quando isto é `None`, e o
+    /// [`crate::voice_room::VoiceRoom`] cai numa hipótese quando isto é `None`, e o
     /// `HostUplink` que a sessão escreve manda **zero**, que pelo protocolo é
     /// «não medi». Ver `crate::tela::caminho_no_fio`.
     pub caminho_bps: Option<u32>,
@@ -759,10 +759,10 @@ mod tests {
         // minutes as the client's internal battery.
         let mut slots = Slots::default();
         let now = instant();
-        slots.reserve(PersonId(1), CageId(1), Ssrc(7), now);
+        slots.reserve(PersonId(1), VoiceRoomId(1), Ssrc(7), now);
 
         let reclaimed = slots.reclaim(PersonId(1), now + Duration::from_secs(60));
-        assert_eq!(reclaimed, Some((CageId(1), Ssrc(7))));
+        assert_eq!(reclaimed, Some((VoiceRoomId(1), Ssrc(7))));
     }
 
     #[test]
@@ -772,10 +772,10 @@ mod tests {
         // from scratch.
         let mut slots = Slots::default();
         let now = instant();
-        slots.reserve(PersonId(1), CageId(2), Ssrc(42), now);
+        slots.reserve(PersonId(1), VoiceRoomId(2), Ssrc(42), now);
 
-        let (cage, ssrc) = slots.reclaim(PersonId(1), now).expect("seat held");
-        assert_eq!(cage, CageId(2));
+        let (voice_room, ssrc) = slots.reclaim(PersonId(1), now).expect("seat held");
+        assert_eq!(voice_room, VoiceRoomId(2));
         assert_eq!(ssrc, Ssrc(42));
     }
 
@@ -783,7 +783,7 @@ mod tests {
     fn an_expired_seat_is_not_reclaimable() {
         let mut slots = Slots::default();
         let now = instant();
-        slots.reserve(PersonId(1), CageId(1), Ssrc(7), now);
+        slots.reserve(PersonId(1), VoiceRoomId(1), Ssrc(7), now);
 
         let after = now + seele_proto::transport::SESSION_GRACE + Duration::from_secs(1);
         assert_eq!(slots.reclaim(PersonId(1), after), None);
@@ -795,7 +795,7 @@ mod tests {
         // person occupy two.
         let mut slots = Slots::default();
         let now = instant();
-        slots.reserve(PersonId(1), CageId(1), Ssrc(7), now);
+        slots.reserve(PersonId(1), VoiceRoomId(1), Ssrc(7), now);
 
         assert!(slots.reclaim(PersonId(1), now).is_some());
         assert!(slots.reclaim(PersonId(1), now).is_none());
@@ -804,11 +804,11 @@ mod tests {
     #[test]
     fn the_sweeper_frees_expired_seats() {
         // Without this a Dogma slowly fills with seats held for people who are
-        // never coming back, and specs/04 caps a Cage at a member limit.
+        // never coming back, and specs/04 caps a voice room at a member limit.
         let mut slots = Slots::default();
         let now = instant();
-        slots.reserve(PersonId(1), CageId(1), Ssrc(1), now);
-        slots.reserve(PersonId(2), CageId(1), Ssrc(2), now);
+        slots.reserve(PersonId(1), VoiceRoomId(1), Ssrc(1), now);
+        slots.reserve(PersonId(2), VoiceRoomId(1), Ssrc(2), now);
         assert_eq!(slots.held(), 2);
 
         let after = now + seele_proto::transport::SESSION_GRACE + Duration::from_secs(1);
@@ -820,12 +820,12 @@ mod tests {
     fn the_sweeper_leaves_live_seats_alone() {
         let mut slots = Slots::default();
         let now = instant();
-        slots.reserve(PersonId(1), CageId(1), Ssrc(1), now);
+        slots.reserve(PersonId(1), VoiceRoomId(1), Ssrc(1), now);
         assert_eq!(slots.sweep(now + Duration::from_secs(30)), 0);
         assert_eq!(slots.held(), 1);
     }
 
-    // ---- who is in which Cage ----
+    // ---- who is in which voice room ----
 
     fn occupant(person: u64, nickname: &str) -> Occupant {
         Occupant {
@@ -837,19 +837,19 @@ mod tests {
 
     #[test]
     fn the_whole_dogma_is_readable_at_once_and_not_one_room_at_a_time() {
-        // The half of gap G15 that was missing. `in_cage` answered "who is in
+        // The half of gap G15 that was missing. `in_voice_room` answered "who is in
         // the room I am walking into"; nothing answered "who is in the other
         // four", and the v3 layout draws those four with their occupants under
         // them. They were drawn empty however many people were in them.
         let mut occupancy = Occupancy::default();
-        occupancy.seat(CageId(1), occupant(1, "ayanami"));
-        occupancy.seat(CageId(1), occupant(2, "shinji"));
-        occupancy.seat(CageId(2), occupant(3, "asuka"));
+        occupancy.seat(VoiceRoomId(1), occupant(1, "ayanami"));
+        occupancy.seat(VoiceRoomId(1), occupant(2, "shinji"));
+        occupancy.seat(VoiceRoomId(2), occupant(3, "asuka"));
 
         let mut everywhere: Vec<(u32, u64)> = occupancy
             .everywhere()
             .into_iter()
-            .map(|(cage, seated)| (cage.0, seated.person.0))
+            .map(|(voice_room, seated)| (voice_room.0, seated.person.0))
             .collect();
         everywhere.sort_unstable();
 
@@ -863,9 +863,9 @@ mod tests {
         // this said nothing, the departure could not be announced, and the
         // person would stay on everybody's screen until they came back.
         let mut occupancy = Occupancy::default();
-        occupancy.seat(CageId(7), occupant(1, "ayanami"));
+        occupancy.seat(VoiceRoomId(7), occupant(1, "ayanami"));
 
-        assert_eq!(occupancy.vacate_everywhere(PersonId(1)), vec![CageId(7)]);
+        assert_eq!(occupancy.vacate_everywhere(PersonId(1)), vec![VoiceRoomId(7)]);
         assert!(occupancy.everywhere().is_empty());
     }
 
@@ -875,8 +875,8 @@ mod tests {
         // twice: `serve` calls this after every session, including the ones that
         // already left through `EjectPlug` and said so.
         let mut occupancy = Occupancy::default();
-        occupancy.seat(CageId(7), occupant(1, "ayanami"));
-        occupancy.vacate(CageId(7), PersonId(1));
+        occupancy.seat(VoiceRoomId(7), occupant(1, "ayanami"));
+        occupancy.vacate(VoiceRoomId(7), PersonId(1));
 
         assert!(
             occupancy.vacate_everywhere(PersonId(1)).is_empty(),
@@ -888,20 +888,20 @@ mod tests {
     fn walking_between_rooms_reports_the_room_that_was_left() {
         // What `InsertPlug` needs in order to tell the old room. Seating alone
         // clears the previous seat silently, and a silent clear is a person who
-        // stays in the first Cage on every other client for ever.
+        // stays in the first voice room on every other client for ever.
         let mut occupancy = Occupancy::default();
-        occupancy.seat(CageId(1), occupant(1, "ayanami"));
+        occupancy.seat(VoiceRoomId(1), occupant(1, "ayanami"));
 
-        assert_eq!(occupancy.vacate_everywhere(PersonId(1)), vec![CageId(1)]);
-        occupancy.seat(CageId(2), occupant(1, "ayanami"));
+        assert_eq!(occupancy.vacate_everywhere(PersonId(1)), vec![VoiceRoomId(1)]);
+        occupancy.seat(VoiceRoomId(2), occupant(1, "ayanami"));
 
-        assert_eq!(occupancy.in_cage(CageId(1)).len(), 0);
-        assert_eq!(occupancy.in_cage(CageId(2)).len(), 1);
+        assert_eq!(occupancy.in_voice_room(VoiceRoomId(1)).len(), 0);
+        assert_eq!(occupancy.in_voice_room(VoiceRoomId(2)).len(), 1);
     }
     // ---- compartilhamento de tela ----
 
     #[test]
-    fn uma_transmissao_por_cage_e_quem_perde_a_corrida_tem_nome() {
+    fn uma_transmissao_por_voice_room_e_quem_perde_a_corrida_tem_nome() {
         // §6 item 3 da spec de compartilhamento de tela: uma transmissão por
         // sala de voz na v1, porque «duas dobram a subida de quem recebe e
         // triplicam a interface».
@@ -911,17 +911,17 @@ mod tests {
         // e trocá-lo por um `bool` obrigaria quem chama a procurar a resposta
         // de novo em outro lugar — onde ela já pode ter mudado.
         let mut telas = Telas::default();
-        assert_eq!(telas.comecar(CageId(1), PersonId(10), ScreenId(1)), Ok(()));
+        assert_eq!(telas.comecar(VoiceRoomId(1), PersonId(10), ScreenId(1)), Ok(()));
         assert_eq!(
-            telas.comecar(CageId(1), PersonId(20), ScreenId(2)),
+            telas.comecar(VoiceRoomId(1), PersonId(20), ScreenId(2)),
             Err(PersonId(10)),
             "duas telas na mesma sala"
         );
         // E a corrida perdida não derruba quem ganhou.
-        assert_eq!(telas.em(CageId(1)), Some((PersonId(10), ScreenId(1))));
+        assert_eq!(telas.em(VoiceRoomId(1)), Some((PersonId(10), ScreenId(1))));
 
         // Outra sala é outra corrida.
-        assert_eq!(telas.comecar(CageId(2), PersonId(20), ScreenId(3)), Ok(()));
+        assert_eq!(telas.comecar(VoiceRoomId(2), PersonId(20), ScreenId(3)), Ok(()));
     }
 
     #[test]
@@ -933,28 +933,28 @@ mod tests {
         // quem está compartilhando naquele instante.
         let mut telas = Telas::default();
         telas
-            .comecar(CageId(1), PersonId(10), ScreenId(1))
+            .comecar(VoiceRoomId(1), PersonId(10), ScreenId(1))
             .expect("primeira");
-        assert_eq!(telas.comecar(CageId(1), PersonId(10), ScreenId(2)), Ok(()));
-        assert_eq!(telas.em(CageId(1)), Some((PersonId(10), ScreenId(2))));
+        assert_eq!(telas.comecar(VoiceRoomId(1), PersonId(10), ScreenId(2)), Ok(()));
+        assert_eq!(telas.em(VoiceRoomId(1)), Some((PersonId(10), ScreenId(2))));
     }
 
     #[test]
     fn parar_a_tela_de_outra_pessoa_nao_para_nada() {
         // Sem esta conferência, um `StopScreenShare` de qualquer pessoa da sala
         // derruba a tela de quem está compartilhando — e o verbo não carrega
-        // Cage nem `ScreenId` de propósito, então não há nada além do registro
+        // sala de voz nem `ScreenId` de propósito, então não há nada além do registro
         // para separar as duas.
         let mut telas = Telas::default();
         telas
-            .comecar(CageId(1), PersonId(10), ScreenId(1))
+            .comecar(VoiceRoomId(1), PersonId(10), ScreenId(1))
             .expect("começa");
 
-        assert_eq!(telas.parar(CageId(1), PersonId(20)), None);
-        assert_eq!(telas.em(CageId(1)), Some((PersonId(10), ScreenId(1))));
+        assert_eq!(telas.parar(VoiceRoomId(1), PersonId(20)), None);
+        assert_eq!(telas.em(VoiceRoomId(1)), Some((PersonId(10), ScreenId(1))));
 
-        assert_eq!(telas.parar(CageId(1), PersonId(10)), Some(ScreenId(1)));
-        assert_eq!(telas.em(CageId(1)), None);
+        assert_eq!(telas.parar(VoiceRoomId(1), PersonId(10)), Some(ScreenId(1)));
+        assert_eq!(telas.em(VoiceRoomId(1)), None);
     }
 
     #[test]
@@ -965,19 +965,19 @@ mod tests {
         // a conexão.
         let mut telas = Telas::default();
         telas
-            .comecar(CageId(1), PersonId(10), ScreenId(1))
+            .comecar(VoiceRoomId(1), PersonId(10), ScreenId(1))
             .expect("começa");
         telas
-            .comecar(CageId(2), PersonId(20), ScreenId(2))
+            .comecar(VoiceRoomId(2), PersonId(20), ScreenId(2))
             .expect("começa");
 
         assert_eq!(
             telas.encerrar_de(PersonId(10)),
-            vec![(CageId(1), ScreenId(1))]
+            vec![(VoiceRoomId(1), ScreenId(1))]
         );
-        assert_eq!(telas.em(CageId(1)), None);
+        assert_eq!(telas.em(VoiceRoomId(1)), None);
         // E não encosta na de mais ninguém.
-        assert_eq!(telas.em(CageId(2)), Some((PersonId(20), ScreenId(2))));
+        assert_eq!(telas.em(VoiceRoomId(2)), Some((PersonId(20), ScreenId(2))));
         assert!(telas.encerrar_de(PersonId(10)).is_empty());
     }
 
@@ -985,10 +985,10 @@ mod tests {
     fn uma_sala_destruida_leva_a_transmissao_dela() {
         let mut telas = Telas::default();
         telas
-            .comecar(CageId(1), PersonId(10), ScreenId(1))
+            .comecar(VoiceRoomId(1), PersonId(10), ScreenId(1))
             .expect("começa");
-        assert_eq!(telas.encerrar_cage(CageId(1)), Some(ScreenId(1)));
-        assert_eq!(telas.encerrar_cage(CageId(1)), None);
+        assert_eq!(telas.encerrar_voice_room(VoiceRoomId(1)), Some(ScreenId(1)));
+        assert_eq!(telas.encerrar_voice_room(VoiceRoomId(1)), None);
         assert!(telas.todas().is_empty());
     }
 }

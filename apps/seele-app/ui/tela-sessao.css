@@ -248,7 +248,7 @@
 /* ---------- coluna 1: a trilha de servidores ----------
    60px de largura no v3, contra os 56px do v2, e o mesmo botão de 56px de
    altura por servidor. A marca de 2px na borda esquerda é a mesma técnica de
-   estado que os Cages usam logo ao lado, e é de propósito que seja a mesma:
+   estado que os VoiceRooms usam logo ao lado, e é de propósito que seja a mesma:
    são duas listas de coisas em que se está ou não se está. */
 .trilha {
   display: flex;
@@ -323,7 +323,7 @@
 }
 
 /* Entrar noutro servidor é sair deste, e a coluna diz isso pelo mesmo canal que
-   os Cages ao lado: a marca de 2px na borda esquerda, que aqui acende sob o
+   os VoiceRooms ao lado: a marca de 2px na borda esquerda, que aqui acende sob o
    ponteiro e sob o foco em vez de ficar acesa. O que está aceso é onde se está;
    o que acende ao ser apontado é para onde se pode ir. */
 .trilha-outro:hover,
@@ -423,7 +423,7 @@
 
 /* O `?` que abre a ajuda.
    Quadrado e do tamanho do texto ao lado: ele não compete com o título, e não
-   deve — quem já sabe o que é um Cage nunca mais precisa dele. Vira laranja no
+   deve — quem já sabe o que é um VoiceRoom nunca mais precisa dele. Vira laranja no
    hover e no foco como todo alvo desta janela. */
 .painel-ajuda {
   flex: 0 0 auto;
@@ -476,7 +476,7 @@
    tooltip promete uma explicação que não vem. */
 .ausente[title] { cursor: help; }
 
-/* ---------- coluna 2: Cages e Linhas ---------- */
+/* ---------- coluna 2: VoiceRooms e Linhas ---------- */
 
 /* O que rola nesta coluna, e o que não rola.
 
@@ -487,7 +487,7 @@
    `.painel` genérico logo acima; a outra metade é este `overflow-y`, e sem ela
    `min-height: 0` não faz nada visível — o conteúdo passa da borda do painel e
    `body { overflow: hidden }` de `base.css` garante que nem a janela role atrás
-   dele. Com dois Cages ninguém percebe. Com trinta, os de baixo não existem, e
+   dele. Com dois VoiceRooms ninguém percebe. Com trinta, os de baixo não existem, e
    foi assim que o defeito foi encontrado: por alguém usando.
 
    As duas listas dividem **um** contêiner em vez de rolarem cada uma no seu.
@@ -517,16 +517,16 @@
 /* A marca de 3px à esquerda é o estado, e é a mesma técnica do comp v3: uma
    barra de cor na borda em vez de um fundo inteiro, para que a lista continue
    legível com metade das linhas marcadas. Ela vai no elemento que **é** o item
-   — o `<li>` do Cage, o `<button>` da Linha — e não num ancestral comum: a
+   — o `<li>` do VoiceRoom, o `<button>` da Linha — e não num ancestral comum: a
    Linha virou botão para ganhar teclado, e um marcador no `<li>` em volta dela
    ficaria de fora do foco que ele acompanha. */
-.cage, .linha { border-left: 3px solid transparent; }
-.cage.aberto, .linha.aberto { border-left-color: var(--seele-laranja-nerv); }
+.voice_room, .linha { border-left: 3px solid transparent; }
+.voice_room.aberto, .linha.aberto { border-left-color: var(--seele-laranja-nerv); }
 
-/* O Cage tem quatro faixas de conteúdo agora — nome, ocupação, quem está
+/* O VoiceRoom tem quatro faixas de conteúdo agora — nome, ocupação, quem está
    dentro, e o botão — e ganha `10px 12px` mais um `border-top` que o separa do
    anterior, como no comp v3. */
-.cage {
+.voice_room {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -534,11 +534,11 @@
   padding: 10px 12px;
 }
 
-.cage.aberto { background: var(--seele-laranja-fraco); }
+.voice_room.aberto { background: var(--seele-laranja-fraco); }
 
 .canal-cabeca { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 
-.cage-nome {
+.voice_room-nome {
   font-family: var(--seele-display);
   font-weight: var(--seele-cartela);
   font-size: 15px;
@@ -549,12 +549,12 @@
   white-space: nowrap;
 }
 
-.cage.aberto .cage-nome { color: var(--seele-laranja-nerv); }
+.voice_room.aberto .voice_room-nome { color: var(--seele-laranja-nerv); }
 
 /* `4/8` — a ocupação em número, e sozinha: a barra de blocos que a acompanhava
    saiu junto com o v2. A lista de nomes logo abaixo diz o mesmo com os nomes
    dentro, e duas leituras da mesma medida numa coluna de 268px é uma a mais. */
-.cage-ocupacao {
+.voice_room-ocupacao {
   font-size: var(--seele-t-rotulo);
   color: var(--seele-osso-apagado);
   font-variant-numeric: tabular-nums;
@@ -562,13 +562,13 @@
 }
 
 /* ---- quem está dentro ----
-   O ganho maior do v3, e ele não custa protocolo: `Cage.people` já vinha
-   populado para todo Cage, e o app o gastava numa barra de blocos.
+   O ganho maior do v3, e ele não custa protocolo: `VoiceRoom.people` já vinha
+   populado para todo VoiceRoom, e o app o gastava numa barra de blocos.
 
    A palavra ao lado do nome é o que separa isto de um enfeite: o glifo dá a
    varredura de relance, e `fala`/`mudo` é a mesma informação sem depender de
    enxergar forma nem cor (`specs/05-cliente-tui.md`). */
-.cage-dentro {
+.voice_room-dentro {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -577,7 +577,7 @@
   gap: 3px;
 }
 
-.cage-pessoa {
+.voice_room-pessoa {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -585,28 +585,28 @@
   color: var(--seele-osso-apagado);
 }
 
-.cage-pessoa-nome {
+.voice_room-pessoa-nome {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.cage-pessoa-eu { color: var(--seele-padrao-azul); flex: 0 0 auto; }
+.voice_room-pessoa-eu { color: var(--seele-padrao-azul); flex: 0 0 auto; }
 
-.cage-pessoa-marca {
+.voice_room-pessoa-marca {
   margin-left: auto;
   flex: 0 0 auto;
   letter-spacing: 0.08em;
   color: var(--seele-laranja-nerv);
 }
 
-.cage-vazio { color: var(--seele-linha-forte); font-size: 11px; }
+.voice_room-vazio { color: var(--seele-linha-forte); font-size: 11px; }
 
 /* O botão de 38px, com rótulo. Contorno enquanto se está de fora, sólido
    enquanto se está dentro — a mesma ênfase invertida do resto da interface,
    dizendo qual dos dois é o estado corrente. */
-.cage-entrar {
+.voice_room-entrar {
   width: 100%;
   min-height: 38px;
   display: flex;
@@ -622,24 +622,24 @@
   cursor: pointer;
 }
 
-.cage-entrar:hover {
+.voice_room-entrar:hover {
   color: var(--seele-negro-absoluto);
   background: var(--seele-laranja-nerv);
 }
 
-.cage-entrar[data-dentro="sim"] {
+.voice_room-entrar[data-dentro="sim"] {
   color: var(--seele-negro-absoluto);
   background: var(--seele-laranja-nerv);
 }
 
-.cage-entrar[data-dentro="sim"]:hover {
+.voice_room-entrar[data-dentro="sim"]:hover {
   color: var(--seele-laranja-nerv);
   background: none;
 }
 
 /* ---- destruir uma sala ----
 
-   Os dois botões do Cage numa fileira. `ENTRAR NA SALA` fica com o espaço, e
+   Os dois botões do VoiceRoom numa fileira. `ENTRAR NA SALA` fica com o espaço, e
    `APAGAR` toma o que o rótulo dele precisa: o que se faz nesta lista o dia
    inteiro é entrar e sair, e apagar é o que se faz uma vez.
 
@@ -648,10 +648,10 @@
    enlace — o vermelho gasto aqui é o vermelho que ninguém lê no dia em que a
    bateria interna acender. O que separa este botão do outro é a moldura fraca
    e o texto apagado, e não uma cor de alarme. */
-.cage-botoes { display: flex; gap: 6px; }
-.cage-botoes .cage-entrar { flex: 1; width: auto; }
+.voice_room-botoes { display: flex; gap: 6px; }
+.voice_room-botoes .voice_room-entrar { flex: 1; width: auto; }
 
-.cage-apagar, .linha-apagar {
+.voice_room-apagar, .linha-apagar {
   flex: 0 0 auto;
   min-height: 38px;
   padding: 0 10px;
@@ -665,21 +665,21 @@
   cursor: pointer;
 }
 
-.cage-apagar:hover, .linha-apagar:hover {
+.voice_room-apagar:hover, .linha-apagar:hover {
   color: var(--seele-negro-absoluto);
   background: var(--seele-osso-apagado);
   border-color: var(--seele-osso-apagado);
 }
 
-/* O último Cage. Desabilitado e legível — o `title` diz por que, e um controle
+/* O último VoiceRoom. Desabilitado e legível — o `title` diz por que, e um controle
    apagado a ponto de não se ler é um controle que não explica nada. */
-.cage-apagar:disabled {
+.voice_room-apagar:disabled {
   color: var(--seele-linha-forte);
   border-color: var(--seele-linha);
   cursor: not-allowed;
 }
 
-.cage-apagar:disabled:hover { color: var(--seele-linha-forte); background: none; }
+.voice_room-apagar:disabled:hover { color: var(--seele-linha-forte); background: none; }
 
 /* A fileira da Linha, quando ela tem um botão de apagar ao lado. Sem ele o
    `<li>` continua sendo o que era: um único botão de largura cheia. */
@@ -697,7 +697,7 @@
   overflow: hidden;
 }
 
-.cage.aberto .barra { color: var(--seele-laranja-nerv); }
+.voice_room.aberto .barra { color: var(--seele-laranja-nerv); }
 
 /* A Linha, agora um botão de 40px que ocupa a fileira inteira. `text-align`
    explícito porque um `<button>` centra por omissão, e uma lista de nomes
@@ -1763,8 +1763,8 @@
    Debaixo de cada lista, e não num botão de barra: a ação pertence ao lugar que
    ela muda, e quem quer uma sala nova está olhando as que já existem.
 
-   Aparece só para quem pode — `Snapshot.may_manage_cages`. Esconder não é o que
-   protege: o servidor recusa `CreateCage` de quem não tem `ManageCages`, e há
+   Aparece só para quem pode — `Snapshot.may_manage_voice_rooms`. Esconder não é o que
+   protege: o servidor recusa `CreateVoiceRoom` de quem não tem `ManageVoiceRooms`, e há
    conformidade provando. Isto é não oferecer o que não ia funcionar. */
 .criar {
   flex: 0 0 auto;

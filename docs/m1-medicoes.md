@@ -492,7 +492,7 @@ segundos que nenhuma revisão de código teria pego.
 
 `specs/09-roadmap.md`, aceite de M2:
 
-> Três clientes entram no mesmo Cage e conversam por voz através do servidor.
+> Três clientes entram no mesmo VoiceRoom e conversam por voz através do servidor.
 > Cliente sem permissão é rejeitado. Fuzzing do parser sem crash.
 
 `cargo test --package seele-conformance` — oito testes, todos passando, em
@@ -501,14 +501,14 @@ segunda máquina, que é por que `seele-server` é biblioteca além de binário.
 
 | teste | o que prova |
 |---|---|
-| `three_clients_in_one_cage_hear_each_other` | o critério principal, com payload byte a byte idêntico e sem eco de volta ao falante |
+| `three_clients_in_one_voice_room_hear_each_other` | o critério principal, com payload byte a byte idêntico e sem eco de volta ao falante |
 | `a_client_without_permission_is_refused` | Observador entra e ouve, mas não é encaminhado |
 | `a_forged_ssrc_is_refused` | lacuna G2: Shinji com o `ssrc` de Ayanami é recusado, e o dele próprio continua passando |
-| `media_before_entering_a_cage_goes_nowhere` | conexão autenticada mas sem plug inserido não alcança o Cage |
+| `media_before_entering_a_voice_room_goes_nowhere` | conexão autenticada mas sem plug inserido não alcança o VoiceRoom |
 | `the_first_connection_pins_the_certificate` | TOFU do ADR 0003 |
 | `a_second_connection_reuses_the_pin` | o pin persiste entre conexões |
 | `a_ping_comes_back_as_a_pong` | base do RTT da Taxa de Sincronização |
-| `the_session_names_the_dogma_and_its_cage` | a `Sessao` traz a árvore de que a casca desenha a primeira tela |
+| `the_session_names_the_dogma_and_its_voice_room` | a `Sessao` traz a árvore de que a casca desenha a primeira tela |
 
 Fuzzing: 29,4 milhões de execuções no parser de controle e 70,8 milhões no de
 mídia, zero crashes — depois de o primeiro achar o bug de NaN.

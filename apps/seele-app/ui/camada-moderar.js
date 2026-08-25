@@ -101,9 +101,9 @@ function podeModerarPersonos(snapshot) {
  * O botão que abre a moderação de uma pessoa, ou `null` quando não há o que
  * oferecer.
  *
- * Mora na linha de quem está dentro de um Cage, que é o único lugar desta
+ * Mora na linha de quem está dentro de um VoiceRoom, que é o único lugar desta
  * janela que lista **todo mundo em toda sala**: o roster e a grade da chamada
- * mostram só o Cage ocupado, e moderar é justamente o que se faz com quem está
+ * mostram só o VoiceRoom ocupado, e moderar é justamente o que se faz com quem está
  * noutra sala.
  *
  * Nunca sobre si mesmo: expulsar-se é o `DESCONECTAR` do cabeçalho, banir-se
@@ -142,41 +142,41 @@ function botaoDeRemoverMensagem(mensagem, pode) {
 }
 
 /**
- * O botão que destrói um Cage, ou `null` quando não há o que oferecer.
+ * O botão que destrói um VoiceRoom, ou `null` quando não há o que oferecer.
  *
- * `may_delete_rooms` e não `may_manage_cages`, e a diferença é a decisão inteira:
+ * `may_delete_rooms` e não `may_manage_voice_rooms`, e a diferença é a decisão inteira:
  * fazer uma sala é um erro que o Dogma sobrevive, destruir uma acaba com o que
  * outra pessoa escreveu. A `specs/04-servidor-seele.md` enumera
- * `gerenciar_cages` e `administrar_dogma` separados justamente para que exista
+ * `gerenciar_voice_rooms` e `administrar_dogma` separados justamente para que exista
  * um papel que ergue salas sem poder derrubá-las.
  *
- * ---- o último Cage vem desabilitado, e não escondido ----
+ * ---- o último VoiceRoom vem desabilitado, e não escondido ----
  *
- * Um Dogma sem Cage nenhum não tem onde falar, e o Dogma recusa o pedido. Some
+ * Um Dogma sem VoiceRoom nenhum não tem onde falar, e o Dogma recusa o pedido. Some
  * quem tem o objeto ausente — mover sem destino, moderar sem ninguém —, e aqui o
  * objeto existe: a sala está ali, e a razão de ela não poder ir embora é uma
  * coisa que se aprende lendo, não notando uma ausência.
  */
-function botaoDeApagarCage(cage, snapshot, ultimo) {
+function botaoDeApagarVoiceRoom(voice_room, snapshot, ultimo) {
   if (snapshot.may_delete_rooms !== true) return null;
-  const botao = elemento("button", "cage-apagar", "APAGAR");
+  const botao = elemento("button", "voice_room-apagar", "APAGAR");
   botao.type = "button";
-  botao.dataset.apagarCage = String(cage.id);
-  botao.setAttribute("aria-label", `apagar a sala de voz ${cage.name}`);
+  botao.dataset.apagarVoiceRoom = String(voice_room.id);
+  botao.setAttribute("aria-label", `apagar a sala de voz ${voice_room.name}`);
   botao.disabled = ultimo;
   botao.title = ultimo
-    ? `${cage.name} é a única sala de voz deste servidor, e um servidor sem sala de voz não tem onde falar. Faça outra antes.`
-    : `destruir ${cage.name} e pôr para fora quem estiver dentro`;
+    ? `${voice_room.name} é a única sala de voz deste servidor, e um servidor sem sala de voz não tem onde falar. Faça outra antes.`
+    : `destruir ${voice_room.name} e pôr para fora quem estiver dentro`;
   return botao;
 }
 
 /**
  * O botão que destrói uma Linha, ou `null` quando não há o que oferecer.
  *
- * Sem o par desabilitado do Cage: a última Linha pode ir. Um Dogma sem Linha
+ * Sem o par desabilitado do VoiceRoom: a última Linha pode ir. Um Dogma sem Linha
  * nenhuma continua sendo o que este produto é — a `specs/04-servidor-seele.md`
- * faz a Linha presa a um Cage **opcional**, então uma sala de voz sem texto é
- * uma configuração que o produto já prevê. Sem Cage não há onde falar; sem
+ * faz a Linha presa a um VoiceRoom **opcional**, então uma sala de voz sem texto é
+ * uma configuração que o produto já prevê. Sem VoiceRoom não há onde falar; sem
  * Linha há.
  */
 function botaoDeApagarLinha(linha, snapshot) {
@@ -227,19 +227,19 @@ function atualizarPortaDoAlerta(snapshot) {
  */
 function desenharModeracao(snapshot) {
   ondeEstaOPersono.clear();
-  salasDoDogma = snapshot.cages;
+  salasDoDogma = snapshot.voice_rooms;
 
   const quem = $("moderar-quem");
   const opcoes = [];
-  for (const cage of snapshot.cages) {
-    for (const pessoa of cage.people) {
+  for (const voice_room of snapshot.voice_rooms) {
+    for (const pessoa of voice_room.people) {
       if (pessoa.is_self) continue;
       ondeEstaOPersono.set(String(pessoa.id), {
         nome: pessoa.nickname,
-        cage: cage.name,
-        cageId: cage.id,
+        voice_room: voice_room.name,
+        voice_roomId: voice_room.id,
       });
-      const opcao = elemento("option", null, `${pessoa.nickname} — ${cage.name}`);
+      const opcao = elemento("option", null, `${pessoa.nickname} — ${voice_room.name}`);
       opcao.value = String(pessoa.id);
       opcoes.push(opcao);
     }
@@ -278,12 +278,12 @@ function desenharModeracao(snapshot) {
  */
 function desenharDestinos() {
   const escolhido = ondeEstaOPersono.get($("moderar-quem").value);
-  const destinos = salasDoDogma.filter((cage) => cage.id !== escolhido?.cageId);
+  const destinos = salasDoDogma.filter((voice_room) => voice_room.id !== escolhido?.voice_roomId);
   repovoar(
     $("moderar-para"),
-    destinos.map((cage) => {
-      const opcao = elemento("option", null, `${cage.name} — ${cage.people.length}/${cage.limit}`);
-      opcao.value = String(cage.id);
+    destinos.map((voice_room) => {
+      const opcao = elemento("option", null, `${voice_room.name} — ${voice_room.people.length}/${voice_room.limit}`);
+      opcao.value = String(voice_room.id);
       return opcao;
     }),
   );
@@ -295,7 +295,7 @@ function quemEstaEscolhido() {
   const id = $("moderar-quem").value;
   const onde = ondeEstaOPersono.get(id);
   if (!onde) return null;
-  return { id: Number(id), nome: onde.nome, cage: onde.cage };
+  return { id: Number(id), nome: onde.nome, voice_room: onde.voice_room };
 }
 
 // ------------------------------------------------------- armar e confirmar
@@ -344,7 +344,7 @@ function desarmarAto() {
  *
  * Toda porta desta camada começa por aqui, e nenhuma delas desenha a partir do
  * que a lista de trás mostrava: a lista é redesenhada duas vezes por segundo, e
- * o Cage que estava na linha clicada pode ter deixado de existir entre o clique
+ * o VoiceRoom que estava na linha clicada pode ter deixado de existir entre o clique
  * e este quadro. Uma caixa escrita a partir da tela seria uma caixa sobre uma
  * sala que já não está lá.
  *
@@ -486,7 +486,7 @@ function abandonarModeracao() {
 function consequenciaDeExpulsar(quem) {
   return (
     `${quem.nome} sai desta sessão agora, no meio do que estiver fazendo, e ` +
-    `quem estiver em ${quem.cage} vê a saída.\n` +
+    `quem estiver em ${quem.voice_room} vê a saída.\n` +
     `Não é banimento: ${quem.nome} pode entrar de novo em seguida.`
   );
 }
@@ -528,29 +528,29 @@ function consequenciaDeBanir(quem, ate) {
  */
 function consequenciaDeMover(quem, destino) {
   return (
-    `${quem.nome} é tirada de ${quem.cage} e posta em ${destino} sem ter pedido, ` +
+    `${quem.nome} é tirada de ${quem.voice_room} e posta em ${destino} sem ter pedido, ` +
     `e continua na sessão.\n` +
-    `Ela recebe um aviso de que foi movida; quem está em ${quem.cage} a vê sair, ` +
+    `Ela recebe um aviso de que foi movida; quem está em ${quem.voice_room} a vê sair, ` +
     `e quem está em ${destino} a vê entrar.`
   );
 }
 
 /**
- * A frase de consequência de apagar um Cage.
+ * A frase de consequência de apagar um VoiceRoom.
  *
  * Diz as três coisas que quem aperta não vive: quanta gente é posta para fora,
  * que isso acontece no meio do que estiverem falando, e que cada uma é avisada.
- * E a que mais engana: a Linha presa ao Cage **não** vai junto. Sem essa linha,
- * quem quer acabar com uma conversa apaga o Cage, olha a Linha ainda ali, e
+ * E a que mais engana: a Linha presa ao VoiceRoom **não** vai junto. Sem essa linha,
+ * quem quer acabar com uma conversa apaga o VoiceRoom, olha a Linha ainda ali, e
  * conclui que o produto não fez o que disse.
  */
-function consequenciaDeApagarCage(cage, linhaPresa) {
-  const dentro = cage.people.length;
+function consequenciaDeApagarVoiceRoom(voice_room, linhaPresa) {
+  const dentro = voice_room.people.length;
   const gente =
     dentro === 0
-      ? `Não há ninguém dentro de ${cage.name} agora.`
+      ? `Não há ninguém dentro de ${voice_room.name} agora.`
       : `Isto põe ${dentro} ${dentro === 1 ? "pessoa" : "pessoas"} para fora de ` +
-        `${cage.name} agora, no meio do que estiverem falando, e cada uma recebe ` +
+        `${voice_room.name} agora, no meio do que estiverem falando, e cada uma recebe ` +
         `um aviso dizendo o que aconteceu.`;
   const texto = linhaPresa
     ? `\nO canal #${linhaPresa.name} continua, com tudo que foi escrito nele: ele não é apagado junto.`
@@ -570,7 +570,7 @@ function consequenciaDeApagarCage(cage, linhaPresa) {
  * A Linha vazia tem ramo próprio porque não tem data para dar: «escritas desde»
  * não existe quando ninguém escreveu.
  */
-function consequenciaDeApagarLinha(linha, peso, cagesPresos) {
+function consequenciaDeApagarLinha(linha, peso, voice_roomsPresos) {
   const escrito =
     peso.messages === 0
       ? `Ninguém escreveu nada em #${linha.name} ainda.`
@@ -580,15 +580,15 @@ function consequenciaDeApagarLinha(linha, peso, cagesPresos) {
         `${peso.messages === 1 ? "escrita" : "escritas"} desde ` +
         `${dataDeInicio(peso.oldest_at_seconds)}. Nenhuma tela deste produto ` +
         `as traz de volta.`;
-  // Um Cage que apontava para esta Linha sobrevive e sai sem Linha nenhuma. É
+  // Uma sala de voz que apontava para esta Linha sobrevive e sai sem Linha nenhuma. É
   // uma mudança que ninguém pediu, e as caixas deste produto nomeiam o que
   // fazem.
   const soltos =
-    cagesPresos.length === 0
+    voice_roomsPresos.length === 0
       ? ""
-      : `\n${cagesPresos.map((cage) => cage.name).join(", ")} ` +
-        `${cagesPresos.length === 1 ? "fica" : "ficam"} sem canal, e ` +
-        `${cagesPresos.length === 1 ? "continua" : "continuam"} de pé.`;
+      : `\n${voice_roomsPresos.map((voice_room) => voice_room.name).join(", ")} ` +
+        `${voice_roomsPresos.length === 1 ? "fica" : "ficam"} sem canal, e ` +
+        `${voice_roomsPresos.length === 1 ? "continua" : "continuam"} de pé.`;
   return (
     `${escrito}${soltos}\n` +
     `Quem estiver lendo #${linha.name} agora a perde da tela no mesmo instante.`
@@ -616,10 +616,10 @@ function dataDeInicio(segundos) {
 
 // ------------------------------------------------------------------- ligação
 
-// Delegação, e não um ouvinte por botão: as linhas dos Cages são refeitas a
+// Delegação, e não um ouvinte por botão: as linhas das salas de voz são refeitas a
 // cada snapshot, duas vezes por segundo, e um ouvinte por botão seria
 // registrado de novo a cada quadro. A mesma técnica de `alternarCanal`.
-$("lista-cages").addEventListener("click", (evento) => {
+$("lista-voice_rooms").addEventListener("click", (evento) => {
   const alvo = evento.target.closest("button[data-moderar-pessoa]");
   if (!alvo) return;
   abrirModeracao(alvo.dataset.moderarPersono);
@@ -646,22 +646,22 @@ $("lista-mensagens").addEventListener("click", (evento) => {
 //
 // Delegação como as duas de cima, e pelo mesmo motivo: as duas listas são
 // refeitas a cada snapshot, duas vezes por segundo.
-$("lista-cages").addEventListener("click", async (evento) => {
-  const alvo = evento.target.closest("button[data-apagar-cage]");
+$("lista-voice_rooms").addEventListener("click", async (evento) => {
+  const alvo = evento.target.closest("button[data-apagar-voice_room]");
   if (!alvo) return;
-  const id = Number(alvo.dataset.apagarCage);
+  const id = Number(alvo.dataset.apagarVoiceRoom);
   const snapshot = await lerSnapshot();
   if (!snapshot) return;
-  const cage = snapshot.cages.find((c) => c.id === id);
-  if (!cage) return;
-  // A Linha presa é lida do Cage, e não adivinhada pelo nome: um Dogma pode ter
+  const voice_room = snapshot.voice_rooms.find((c) => c.id === id);
+  if (!voice_room) return;
+  // A Linha presa é lida da sala de voz, e não adivinhada pelo nome: um Dogma pode ter
   // uma Linha chamada como a sala e nenhuma ligação entre as duas.
-  const presa = snapshot.lines.find((linha) => linha.id === cage.line) ?? null;
+  const presa = snapshot.lines.find((linha) => linha.id === voice_room.line) ?? null;
   abrirConfirmacao(
-    `APAGAR A SALA DE VOZ ${cage.name} ?`,
-    consequenciaDeApagarCage(cage, presa),
-    `APAGAR ${cage.name}`,
-    () => invoke("apagar_cage", { cage: id }),
+    `APAGAR A SALA DE VOZ ${voice_room.name} ?`,
+    consequenciaDeApagarVoiceRoom(voice_room, presa),
+    `APAGAR ${voice_room.name}`,
+    () => invoke("apagar_voice_room", { voice_room: id }),
   );
 });
 
@@ -697,7 +697,7 @@ $("lista-linhas").addEventListener("click", async (evento) => {
     consequenciaDeApagarLinha(
       linha,
       peso,
-      snapshot.cages.filter((cage) => cage.line === id),
+      snapshot.voice_rooms.filter((voice_room) => voice_room.line === id),
     ),
     `APAGAR #${linha.name}`,
     () => invoke("apagar_linha", { line: id }),
@@ -716,7 +716,7 @@ $("moderar-expulsar").addEventListener("click", () => {
   const quem = quemEstaEscolhido();
   if (!quem) return;
   armarAto(`EXPULSAR ${quem.nome}`, consequenciaDeExpulsar(quem), () =>
-    invoke("expulsar_persono", { person: quem.id }),
+    invoke("expulsar_pessoa", { person: quem.id }),
   );
 });
 
@@ -730,7 +730,7 @@ $("moderar-banir").addEventListener("click", () => {
   const ate = dias > 0 ? Math.floor(Date.now() / 1000) + dias * SEGUNDOS_POR_DIA : null;
   const motivo = $("moderar-motivo").value.trim();
   armarAto(`BANIR ${quem.nome}`, consequenciaDeBanir(quem, ate), () =>
-    invoke("banir_persono", {
+    invoke("banir_pessoa", {
       person: quem.id,
       // O motivo é para o registro de quem hospeda e nunca chega a quem foi
       // banido. Vazio vira `null`, que é como o Rust escreve «não houve».
@@ -746,7 +746,7 @@ $("moderar-mover").addEventListener("click", () => {
   const para = $("moderar-para");
   const destino = para.options[para.selectedIndex]?.textContent ?? "";
   armarAto(`MOVER ${quem.nome}`, consequenciaDeMover(quem, destino), () =>
-    invoke("mover_persono", { person: quem.id, cage: Number(para.value) }),
+    invoke("mover_pessoa", { person: quem.id, voice_room: Number(para.value) }),
   );
 });
 

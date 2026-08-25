@@ -23,7 +23,7 @@
 // depois, e a conversa é a última a ceder largura. Ver `alternarCanais` aqui e
 // o rodapé de `tela-sessao.css`.
 //
-// O que o v3 muda de fundo, e é do que trata metade deste arquivo: cada Cage
+// O que o v3 muda de fundo, e é do que trata metade deste arquivo: cada sala de voz
 // mostra **quem está dentro** antes de se entrar nele, entrar e sair viraram
 // botões com rótulo, as mensagens ganharam avatar de iniciais, e a busca deixou
 // de viver aberta.
@@ -543,75 +543,75 @@ function iniciaisDoApelido(apelido) {
 }
 
 /**
- * Os Cages e as Linhas, em duas listas com cabeçalho próprio.
+ * Os VoiceRooms e as Linhas, em duas listas com cabeçalho próprio.
  *
  * ---- ver quem está dentro antes de entrar ----
  *
- * A mudança de fundo do v3 (§6.2), e ela não custa protocolo nenhum: `cages_of`
- * popula `Cage.people` a partir de `room.roster(cage.id)` para **todo** Cage, e
+ * A mudança de fundo do v3 (§6.2), e ela não custa protocolo nenhum: `voice_rooms_of`
+ * popula `VoiceRoom.people` a partir de `room.roster(voice_room.id)` para **todo** VoiceRoom, e
  * não só para o ocupado. O produto sabia quem estava em cada sala e desenhava
  * uma barra de blocos no lugar dos nomes.
  *
  * ---- entrar é um botão, e sair também ----
  *
  * No v2 a linha inteira era o alvo do clique, sem rótulo e sem foco de teclado
- * — o ouvinte estava no `<ul>` e nenhum `<li>` era apertável. Agora cada Cage
+ * — o ouvinte estava no `<ul>` e nenhum `<li>` era apertável. Agora cada VoiceRoom
  * traz um botão de 38px que diz o que faz.
  *
- * O comp escreve `VOCÊ ESTÁ AQUI` no Cage ocupado e não liga o botão a nada.
+ * O comp escreve `VOCÊ ESTÁ AQUI` no VoiceRoom ocupado e não liga o botão a nada.
  * Aqui ele diz `SAIR DA SALA` e ejeta, e a divergência é deliberada: `sair`
  * ganhou lugar próprio no v3 justamente porque no v2 ninguém o achava, e o
  * único outro lugar em que ele existe é a tela de chamada. Trocar um botão
  * mudo por um botão morto seria repetir o erro que o v3 corrige. Que se está
- * dentro continua dito, e por duas vias: a marca laranja na borda do Cage e o
+ * dentro continua dito, e por duas vias: a marca laranja na borda do VoiceRoom e o
  * `(você)` ao lado do próprio nome na lista de quem está lá.
  */
 function desenharCanais(snapshot) {
-  const cages = snapshot.cages.map((cage) => {
-    const item = elemento("li", cage.occupied_by_us ? "cage aberto" : "cage");
+  const voice_rooms = snapshot.voice_rooms.map((voice_room) => {
+    const item = elemento("li", voice_room.occupied_by_us ? "voice room aberto" : "voice room");
 
     const cabeca = elemento("span", "canal-cabeca");
-    cabeca.append(elemento("span", "cage-nome", cage.name));
+    cabeca.append(elemento("span", "voice_room-nome", voice_room.name));
     // `4/8` — a ocupação em número. Ela não acompanha mais uma barra de blocos:
     // a lista de nomes logo abaixo é a mesma informação com os nomes dentro,
     // e duas leituras da mesma coisa numa coluna de 268px é uma a mais.
-    cabeca.append(elemento("span", "cage-ocupacao", `${cage.people.length}/${cage.limit}`));
+    cabeca.append(elemento("span", "voice_room-ocupacao", `${voice_room.people.length}/${voice_room.limit}`));
 
-    const dentro = elemento("ul", "cage-dentro");
-    if (cage.people.length === 0) {
-      // Palavra, e não travessão: um Cage vazio é uma medida, e o produto a
+    const dentro = elemento("ul", "voice_room-dentro");
+    if (voice_room.people.length === 0) {
+      // Palavra, e não travessão: uma sala de voz vazio é uma medida, e o produto a
       // tem. O travessão é para o que ninguém mediu.
-      dentro.append(elemento("li", "cage-vazio", "ninguém aqui"));
+      dentro.append(elemento("li", "voice_room-vazio", "ninguém aqui"));
     } else {
-      dentro.append(...cage.people.map((pessoa) => linhaDeQuemEstaDentro(pessoa, snapshot)));
+      dentro.append(...voice_room.people.map((pessoa) => linhaDeQuemEstaDentro(pessoa, snapshot)));
     }
 
     const entrar = elemento(
       "button",
-      "cage-entrar",
-      cage.occupied_by_us ? "SAIR DA SALA" : "ENTRAR NA SALA",
+      "voice_room-entrar",
+      voice_room.occupied_by_us ? "SAIR DA SALA" : "ENTRAR NA SALA",
     );
     entrar.type = "button";
-    entrar.dataset.cage = String(cage.id);
-    entrar.dataset.dentro = cage.occupied_by_us ? "sim" : "nao";
-    entrar.title = cage.occupied_by_us
+    entrar.dataset.voice_room = String(voice_room.id);
+    entrar.dataset.dentro = voice_room.occupied_by_us ? "sim" : "nao";
+    entrar.title = voice_room.occupied_by_us
       ? "sair: você para de ouvir e de falar nesta sala"
-      : `entrar e falar com quem está em ${cage.name}`;
+      : `entrar e falar com quem está em ${voice_room.name}`;
 
     // Os dois botões da sala numa fileira só. Com um deles ausente — que é o
     // caso de quem não administra o Dogma — a fileira tem um filho de
     // `flex: 1`, e sai idêntica ao botão de largura cheia de antes.
-    const botoes = elemento("div", "cage-botoes");
+    const botoes = elemento("div", "voice_room-botoes");
     botoes.append(entrar);
-    // O último Cage vem desabilitado e não escondido: a razão de ele não poder
+    // O último sala de voz vem desabilitado e não escondido: a razão de ele não poder
     // ir embora é coisa que se lê, e uma ausência não se lê.
-    const apagar = botaoDeApagarCage(cage, snapshot, snapshot.cages.length === 1);
+    const apagar = botaoDeApagarVoiceRoom(voice_room, snapshot, snapshot.voice_rooms.length === 1);
     if (apagar) botoes.append(apagar);
 
     item.append(cabeca, dentro, botoes);
     return item;
   });
-  repovoar($("lista-cages"), cages);
+  repovoar($("lista-voice_rooms"), voice_rooms);
 
   const linhas = snapshot.lines.map((linha) => {
     const item = elemento("li", null);
@@ -650,27 +650,27 @@ function desenharCanais(snapshot) {
   repovoar($("lista-linhas"), linhas);
 
   // Os dois formulários de criar sala só aparecem para quem pode criar. Quem
-  // responde é o servidor, em `may_manage_cages`, resolvido pelo PERMISSIONS a
+  // responde é o servidor, em `may_manage_voice_rooms`, resolvido pelo PERMISSIONS a
   // partir das permissões desta conexão. Esconder aqui não impede ninguém de
-  // nada — `CreateCage` de quem não tem `ManageCages` é recusado lá, e há teste
+  // nada — `CreateVoiceRoom` de quem não tem `ManageVoiceRooms` é recusado lá, e há teste
   // de conformidade provando que a recusa é de lá. Isto é não oferecer o que
   // não ia funcionar.
-  const pode = snapshot.may_manage_cages === true;
-  $("criar-cage").hidden = !pode;
+  const pode = snapshot.may_manage_voice_rooms === true;
+  $("criar-voice_room").hidden = !pode;
   $("criar-linha").hidden = !pode;
 
   // O tamanho padrão da sala nova vem de uma sala que já existe, e não de um
   // número escrito no JavaScript: quem hospeda já disse que tamanho quer
   // quando montou o Dogma, e repetir a escolha dele é mais honesto que
   // inventar quinze. Só enquanto o campo estiver como a marcação o deixou.
-  const lugares = $("campo-cage-limite");
-  if (pode && lugares.value === lugares.defaultValue && snapshot.cages.length > 0) {
-    lugares.value = String(snapshot.cages[0].limit);
+  const lugares = $("campo-voice_room-limite");
+  if (pode && lugares.value === lugares.defaultValue && snapshot.voice_rooms.length > 0) {
+    lugares.value = String(snapshot.voice_rooms[0].limit);
   }
 }
 
 /**
- * Uma pessoa na lista de quem está dentro de um Cage.
+ * Uma pessoa na lista de quem está dentro de um VoiceRoom.
  *
  * O comp marca o estado com um ponto colorido e nada mais.
  * `specs/05-cliente-tui.md` proíbe informação que só a cor carregue, e um ponto
@@ -683,14 +683,14 @@ function desenharCanais(snapshot) {
  * coluna de relance, e quem escuta a tela já recebe a palavra.
  */
 function linhaDeQuemEstaDentro(pessoa, snapshot) {
-  const item = elemento("li", "cage-pessoa");
+  const item = elemento("li", "voice_room-pessoa");
   item.append(glifo(pessoa.speaking ? "falando" : "silencio"));
-  item.append(elemento("span", "cage-pessoa-nome", pessoa.nickname));
-  if (pessoa.is_self) item.append(elemento("span", "cage-pessoa-eu", "(você)"));
+  item.append(elemento("span", "voice_room-pessoa-nome", pessoa.nickname));
+  if (pessoa.is_self) item.append(elemento("span", "voice_room-pessoa-eu", "(você)"));
   if (pessoa.at_field) {
-    item.append(elemento("span", "cage-pessoa-marca", "mudo"));
+    item.append(elemento("span", "voice_room-pessoa-marca", "mudo"));
   } else if (pessoa.speaking) {
-    item.append(elemento("span", "cage-pessoa-marca", "fala"));
+    item.append(elemento("span", "voice_room-pessoa-marca", "fala"));
   }
   // A porta da moderação, quando esta sessão tem algum verbo sobre gente.
   // `camada-moderar.js` decide se há o que oferecer.
@@ -1054,13 +1054,13 @@ function corpoComRealce(corpo, intervalos, aceso = null) {
  *
  * ---- o alcance desta lista, que é menor do que o nome dela ----
  *
- * `snapshot.cages` traz `people` para **todo** Cage e não só para o ocupado, e
+ * `snapshot.voice_rooms` traz `people` para **todo** VoiceRoom e não só para o ocupado, e
  * é isso que esta lista percorre: todo mundo que está em alguma sala de voz.
  *
  * Quem está conectado no servidor **sem** estar numa sala não está aqui, e não
  * está porque o protocolo não o carrega: `Room.people` só cresce com o
  * `Session` desta conexão, com `PersonJoined` — que anuncia a entrada numa sala
- * e traz o Cage no próprio campo — e com o autor de uma mensagem. Não há
+ * e traz o VoiceRoom no próprio campo — e com o autor de uma mensagem. Não há
  * mensagem na fita que diga quem entrou no servidor e ficou fora das salas.
  * Enquanto não houver, a nota do cabeçalho diz de que a lista é, e esta função
  * não inventa o resto.
@@ -1073,16 +1073,16 @@ function corpoComRealce(corpo, intervalos, aceso = null) {
  * a ocupação ao lado, que é o mesmo par que a coluna de salas escreve.
  */
 function desenharPessoas(snapshot) {
-  const nossa = snapshot.cages.find((c) => c.occupied_by_us);
+  const nossa = snapshot.voice_rooms.find((c) => c.occupied_by_us);
 
-  const grupos = snapshot.cages
-    .filter((cage) => cage.people.length > 0)
-    .map((cage) =>
+  const grupos = snapshot.voice_rooms
+    .filter((voice_room) => voice_room.people.length > 0)
+    .map((voice_room) =>
       grupoDeSala(
-        cage.name,
-        `${cage.people.length}/${cage.limit}`,
-        cage.occupied_by_us,
-        cage.people.map((pessoa) =>
+        voice_room.name,
+        `${voice_room.people.length}/${voice_room.limit}`,
+        voice_room.occupied_by_us,
+        voice_room.people.map((pessoa) =>
           linhaDoRoster(
             {
               nome: pessoa.nickname + (pessoa.is_self ? " (você)" : ""),
@@ -1130,18 +1130,18 @@ function desenharPessoas(snapshot) {
   // Quem está conectado e fora de toda sala.
   //
   // Esta lista não existia, e a falta dela era o que fazia o sincronismo
-  // parecer estranho: `PersonJoined` carrega um Cage porque anuncia sentar-se
+  // parecer estranho: `PersonJoined` carrega uma sala de voz porque anuncia sentar-se
   // num, e não havia mensagem para estar aqui — quem entrava no servidor e não
   // escolhia sala nenhuma era invisível para todo mundo. `PersonPresent` e
   // `PersonGone` fecharam isso do lado do protocolo; esta é a metade que
   // aparece.
   //
-  // Uma subtração e não uma terceira lista: `presentes` é todo mundo, os Cages
+  // Uma subtração e não uma terceira lista: `presentes` é todo mundo, as salas de voz
   // dizem quem está sentado, e quem sobra está no saguão. O próprio operador
   // sai daqui quando não está em sala porque ele já tem o grupo `FORA DE SALA`
   // logo acima, com a telemetria que só a própria sessão mede.
   const sentados = new Set(
-    snapshot.cages.flatMap((cage) => cage.people.map((pessoa) => pessoa.id)),
+    snapshot.voice_rooms.flatMap((voice_room) => voice_room.people.map((pessoa) => pessoa.id)),
   );
   const noSaguao = snapshot.presentes.filter(
     (pessoa) => !sentados.has(pessoa.id) && !pessoa.is_self,
@@ -1179,7 +1179,7 @@ function desenharPessoas(snapshot) {
   // Duas contagens, e a de fora existe porque a de dentro sozinha mentia por
   // omissão: `12 EM SALAS DE VOZ` ao lado de `PESSOAS` era lido como a
   // população do servidor, e não era.
-  const emSalas = snapshot.cages.reduce((soma, cage) => soma + cage.people.length, 0);
+  const emSalas = snapshot.voice_rooms.reduce((soma, voice_room) => soma + voice_room.people.length, 0);
   const total = snapshot.presentes.length;
   medido(
     $("pessoas-conta"),
@@ -1209,7 +1209,7 @@ function grupoDeSala(nome, ocupacao, nossa, cartoes) {
 /**
  * A média de sinal da sala ocupada, no rodapé.
  *
- * Ela **não é calculada aqui**. Chega em `cage.sync` já com faixa e decidida
+ * Ela **não é calculada aqui**. Chega em `voice_room.sync` já com faixa e decidida
  * uma vez no core — `types.rs` argumenta que duas cascas com duas cópias de
  * "85 é nominal" são duas cascas que discordam no dia em que uma delas for
  * atualizada, e o comp faz exatamente essa cópia (`corSync(media)` na casca).
@@ -1220,21 +1220,21 @@ function grupoDeSala(nome, ocupacao, nossa, cartoes) {
  * inverteu: aqui a ausência responde a uma pergunta que o rótulo ao lado acabou
  * de fazer, e o `title` diz o que falta para haver número.
  */
-function desenharMedia(cage) {
+function desenharMedia(voice_room) {
   const celula = $("tel-sinal");
   const valor = $("tel-sinal-valor");
   const marca = $("tel-sinal-marca");
 
-  if (!cage || !cage.sync) {
+  if (!voice_room || !voice_room.sync) {
     // Sem sala, ou numa sala vazia. Não é uma média baixa: é a ausência de
     // qualquer coisa para tirar média de.
     delete celula.dataset.faixa;
     marca.textContent = "";
-    naoMedido(valor, cage ? "esta sala está vazia" : "você não entrou em nenhuma sala");
+    naoMedido(valor, voice_room ? "esta sala está vazia" : "você não entrou em nenhuma sala");
     return;
   }
 
-  const sync = cage.sync;
+  const sync = voice_room.sync;
   celula.dataset.faixa = sync.band;
   // A marca de bloco é a metade que sobrevive sem cor. Ela fica em face
   // monoespaçada ao lado do número porque a Saira Condensed, que desenha o
@@ -1300,7 +1300,7 @@ function linhaDoRoster(pessoa, temAudio) {
   const estados = elemento("span", "pessoa-estados");
   // A pastilha do comp: bloco sólido com texto no negro absoluto, e não texto
   // colorido. `PLUG EJETADO` é o quarto estado do comp e não aparece aqui —
-  // quem sai some de `cage.people`, e manter a lápide exigiria ou um campo de
+  // quem sai some de `voice_room.people`, e manter a lápide exigiria ou um campo de
   // estado no `Person`, ou esta casca lembrando de quem estava ali, que é
   // exatamente o estado derivado que o topo de `base.js` proíbe.
   const estado = pessoa.atField
@@ -1361,12 +1361,12 @@ function desenharTelemetria(snapshot) {
 
   medido($("tel-uptime"), duracao(comecoDaSessao));
 
-  const cage = snapshot.cages.find((c) => c.occupied_by_us);
-  medido($("tel-cage"), cage ? cage.name : "FORA DE SALA");
+  const voice_room = snapshot.voice_rooms.find((c) => c.occupied_by_us);
+  medido($("tel-voice_room"), voice_room ? voice_room.name : "FORA DE SALA");
 
   // A média da sala é vizinha do nome dela, e as duas saem do mesmo achado: a
   // sala em que se está e como ela vai são a mesma pergunta em duas metades.
-  desenharMedia(cage);
+  desenharMedia(voice_room);
 
   // Escrito uma vez e calado depois. O caminho não muda dentro de uma sessão —
   // a reconexão do núcleo volta ao mesmo endereço —, e reescrever o mesmo texto
@@ -1940,23 +1940,23 @@ function salvarAnexo(anexo, nome) {
 }
 
 /**
- * Entrar num Cage, sair dele, ou abrir uma Linha.
+ * Entrar num VoiceRoom, sair dele, ou abrir uma Linha.
  *
- * O alvo é um `<button>` com `data-cage` ou `data-linha`, e não mais a linha
+ * O alvo é um `<button>` com `data-voice_room` ou `data-linha`, e não mais a linha
  * inteira: no v2 o ouvinte estava no `<ul>` e o que se apertava era um `<li>`,
  * que nenhum teclado alcança e nenhum leitor de tela anuncia como apertável.
  */
 async function alternarCanal(evento) {
-  const item = evento.target.closest("button[data-cage], button[data-linha]");
+  const item = evento.target.closest("button[data-voice_room], button[data-linha]");
   if (!item) return;
   let entrou = false;
   try {
-    if (item.dataset.cage) {
-      const cage = Number(item.dataset.cage);
+    if (item.dataset.voice_room) {
+      const voice_room = Number(item.dataset.voice_room);
       if (item.dataset.dentro === "sim") {
         await invoke("eject_plug");
       } else {
-        await invoke("insert_plug", { cage });
+        await invoke("insert_plug", { voice_room });
         entrou = true;
       }
     } else if (item.dataset.linha) {
@@ -1974,13 +1974,13 @@ async function alternarCanal(evento) {
     await refazerBusca();
     // Entrou numa sala de voz: a chamada abre.
     //
-    // Um Cage é onde se fala, e depois de entrar não há nada a fazer na
+    // Uma sala de voz é onde se fala, e depois de entrar não há nada a fazer na
     // operação — quem está lá quer ver quem está junto, o microfone e a tela.
     // Ficar na lista de canais depois de escolher um é a tela pedindo de novo
     // uma decisão que acabou de ser tomada, e é o mesmo gesto que a caixa de
     // compartilhar já faz quando a transmissão começa.
     //
-    // Só ao **entrar**. Sair de um Cage devolve à operação, que é para onde
+    // Só ao **entrar**. Sair de uma sala de voz devolve à operação, que é para onde
     // quem saiu está indo.
     if (entrou) await abrirChamada();
   } catch (falha) {
@@ -2313,7 +2313,7 @@ function soltarCasamentos() {
  * Refaz a busca sobre o histórico que está na tela agora.
  *
  * Obrigatório sempre que a lista desenhada mudar de forma — abrir outra Linha,
- * entrar ou sair de um Cage, uma mensagem editada ou apagada. Ao contrário do
+ * entrar ou sair de um VoiceRoom, uma mensagem editada ou apagada. Ao contrário do
  * `plug`, que recalcula o realce a partir do termo a cada desenho
  * (`seele-tui::ui`) e só guarda o cursor, esta janela guarda os deslocamentos
  * que vieram do Rust; sem um ponto de invalidação eles passariam a acender
@@ -2388,7 +2388,7 @@ function alternarCanais(abrir) {
   if (querAbrir) {
     tela.dataset.canais = "abertos";
     botaoDeCanais.setAttribute("aria-expanded", "true");
-    $("lista-cages").querySelector("button")?.focus();
+    $("lista-voice_rooms").querySelector("button")?.focus();
     return;
   }
   // O foco volta para o botão só quando ele estava **dentro** da gaveta, que é
@@ -2477,9 +2477,9 @@ invoke("regras_de_previa")
     regrasDePrevia = regras;
   })
   .catch((falha) => console.warn("regras_de_previa:", falha));
-// Duas listas, um manipulador: os Cages e as Linhas ganharam cabeçalhos
+// Duas listas, um manipulador: as salas de voz e as Linhas ganharam cabeçalhos
 // próprios (`B·03` e `B·04`) e deixaram de caber numa lista só.
-$("lista-cages").addEventListener("click", alternarCanal);
+$("lista-voice_rooms").addEventListener("click", alternarCanal);
 $("lista-linhas").addEventListener("click", alternarCanal);
 
 /**
@@ -2515,17 +2515,17 @@ async function pedirSala(pedido, campo, rotulo) {
   }
 }
 
-$("criar-cage").addEventListener("submit", (evento) => {
+$("criar-voice_room").addEventListener("submit", (evento) => {
   evento.preventDefault();
-  const nome = $("campo-cage-nome");
+  const nome = $("campo-voice_room-nome");
   pedirSala(
-    invoke("criar_cage", {
+    invoke("criar_voice_room", {
       name: nome.value.trim(),
-      limit: Number($("campo-cage-limite").value),
+      limit: Number($("campo-voice_room-limite").value),
       line: null,
     }),
     nome,
-    "criar_cage",
+    "criar_voice_room",
   );
 });
 

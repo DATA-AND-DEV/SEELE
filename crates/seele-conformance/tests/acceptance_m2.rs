@@ -1,6 +1,6 @@
 //! The M2 acceptance criteria from `specs/09-roadmap.md`, executed.
 //!
-//! > **Aceite:** três clientes entram no mesmo Cage e conversam por voz através
+//! > **Aceite:** três clientes entram no mesmo voice room e conversam por voz através
 //! > do servidor. Cliente sem permissão é rejeitado. Fuzzing do parser sem
 //! > crash.
 //!
@@ -18,7 +18,7 @@ use std::time::Duration;
 use anyhow::Result;
 use ed25519_dalek::SigningKey;
 use seele_core::{Client, MemoryPinStore, Pattern, PinDecision};
-use seele_proto::ids::{CageId, Ssrc};
+use seele_proto::ids::{VoiceRoomId, Ssrc};
 use seele_proto::MediaHeader;
 use seele_server::{DogmaConfig, Server};
 
@@ -80,7 +80,7 @@ fn media(ssrc: Ssrc, seq: u16, payload: &[u8]) -> Vec<u8> {
 }
 
 #[tokio::test]
-async fn three_clients_in_one_cage_hear_each_other() -> Result<()> {
+async fn three_clients_in_one_voice_room_hear_each_other() -> Result<()> {
     // The headline criterion of specs/09-roadmap.md.
     let address = start(Vec::new()).await?;
 
@@ -110,9 +110,9 @@ async fn three_clients_in_one_cage_hear_each_other() -> Result<()> {
     );
 
     for client in [&mut ayanami, &mut shinji, &mut asuka] {
-        client.insert_plug(CageId(1)).await?;
+        client.insert_plug(VoiceRoomId(1)).await?;
     }
-    // The Cage task processes joins asynchronously; give it a moment before
+    // The voice room task processes joins asynchronously; give it a moment before
     // anybody speaks, or the first datagram races the membership.
     tokio::time::sleep(Duration::from_millis(200)).await;
 
@@ -147,17 +147,17 @@ async fn a_client_without_permission_is_refused() -> Result<()> {
     let mut observer = connect(address, "observador").await?;
     let mut person = connect(address, "ayanami").await?;
 
-    observer.insert_plug(CageId(1)).await?;
-    person.insert_plug(CageId(1)).await?;
+    observer.insert_plug(VoiceRoomId(1)).await?;
+    person.insert_plug(VoiceRoomId(1)).await?;
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    // The observer is in the Cage and may listen.
+    // The observer is in the voice room and may listen.
     observer.send_media(media(observer.session().ssrc, 1, b"should not carry"))?;
     let leaked = tokio::time::timeout(Duration::from_millis(600), person.next_media()).await;
-    assert!(leaked.is_err(), "an observer was forwarded to the Cage");
+    assert!(leaked.is_err(), "an observer was forwarded to the voice room");
 
     // The other direction still works, so the refusal is about permission rather
-    // than a broken Cage.
+    // than a broken voice room.
     let spoken = media(person.session().ssrc, 1, b"carries");
     person.send_media(spoken.clone())?;
     let heard = tokio::time::timeout(DELIVERY_TIMEOUT, observer.next_media()).await??;
@@ -180,7 +180,7 @@ async fn a_forged_ssrc_is_refused() -> Result<()> {
     let mut asuka = connect(address, "asuka").await?;
 
     for client in [&mut ayanami, &mut shinji, &mut asuka] {
-        client.insert_plug(CageId(1)).await?;
+        client.insert_plug(VoiceRoomId(1)).await?;
     }
     tokio::time::sleep(Duration::from_millis(200)).await;
 
@@ -189,7 +189,7 @@ async fn a_forged_ssrc_is_refused() -> Result<()> {
     shinji.send_media(forged)?;
 
     let delivered = tokio::time::timeout(Duration::from_millis(600), asuka.next_media()).await;
-    assert!(delivered.is_err(), "a forged datagram reached the Cage");
+    assert!(delivered.is_err(), "a forged datagram reached the voice room");
 
     // An honest datagram from the same connection still goes through, so the
     // refusal is about the forgery and not about Shinji.
@@ -355,36 +355,36 @@ async fn a_ping_comes_back_as_a_pong() -> Result<()> {
 }
 
 #[tokio::test]
-async fn the_session_names_the_dogma_and_its_cage() -> Result<()> {
+async fn the_session_names_the_dogma_and_its_voice_room() -> Result<()> {
     // specs/02-protocolo.md: the Session carries the Dogma description and the
-    // tree of Cages and Lines, which is what a shell draws its first screen from.
+    // tree of voice_rooms and Lines, which is what a shell draws its first screen from.
     let address = start(Vec::new()).await?;
     let client = connect(address, "ayanami").await?;
 
     let session = client.session();
     assert_eq!(session.dogma, "Terceira Tóquio");
-    assert_eq!(session.cages.len(), 1);
-    assert_eq!(session.cages.first().map(|cage| cage.id), Some(CageId(1)));
+    assert_eq!(session.voice_rooms.len(), 1);
+    assert_eq!(session.voice_rooms.first().map(|voice_room| voice_room.id), Some(VoiceRoomId(1)));
 
     Ok(())
 }
 
 #[tokio::test]
-async fn media_before_entering_a_cage_goes_nowhere() -> Result<()> {
+async fn media_before_entering_a_voice_room_goes_nowhere() -> Result<()> {
     // A connection that authenticated but never inserted its plug has no
-    // business reaching a Cage. specs/04: validate that the sender is in it.
+    // business reaching a voice room. specs/04: validate that the sender is in it.
     let address = start(Vec::new()).await?;
 
     let listener = connect(address, "ayanami").await?;
     let mut inside = connect(address, "shinji").await?;
-    inside.insert_plug(CageId(1)).await?;
+    inside.insert_plug(VoiceRoomId(1)).await?;
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // `listener` never inserted its plug.
     listener.send_media(media(listener.session().ssrc, 1, b"nope"))?;
 
     let leaked = tokio::time::timeout(Duration::from_millis(600), inside.next_media()).await;
-    assert!(leaked.is_err(), "media from outside the Cage was forwarded");
+    assert!(leaked.is_err(), "media from outside the voice room was forwarded");
 
     Ok(())
 }

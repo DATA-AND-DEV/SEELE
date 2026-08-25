@@ -32,7 +32,7 @@ use seele_core::chegada::Chegada;
 use seele_core::conhecidos::Conhecidos;
 use seele_core::enlace::{Aviso, Destino, Enlace, Fechado, Motivo};
 use seele_core::{
-    identity, AudioTelemetry, CageId, ClientMessageId, ConnectError, FilePinStore, LineId, Room,
+    identity, AudioTelemetry, VoiceRoomId, ClientMessageId, ConnectError, FilePinStore, LineId, Room,
     SyncInputs, SyncRatio, Verdict, Voice, VoiceMode,
 };
 use seele_tui::app::{Action, Alert, App, Bar, ChatLine, Key, Mode, Node, Screen};
@@ -61,7 +61,7 @@ struct Args {
     /// to refuse a link whose first address is fine.
     alternativos: Vec<String>,
     nickname: String,
-    cage: CageId,
+    voice_room: VoiceRoomId,
     line: LineId,
     no_audio: bool,
     /// Convite ou senha, quando o Dogma pede.
@@ -93,7 +93,7 @@ impl Args {
             // list is a property of an invite, not of a place already visited.
             alternativos: Vec::new(),
             nickname: escolha.apelido.clone(),
-            cage: CageId(escolha.cage),
+            voice_room: VoiceRoomId(escolha.voice_room),
             line: LineId(1),
             no_audio: false,
             join_secret: escolha.convite.clone(),
@@ -118,7 +118,7 @@ fn parse_args() -> Result<Option<Args>> {
 
     let mut target = "127.0.0.1:8383".to_owned();
     let mut nickname = "pessoa".to_owned();
-    let mut cage = CageId(1);
+    let mut voice_room = VoiceRoomId(1);
     let mut line = LineId(1);
     let mut no_audio = false;
     let mut join_secret: Option<String> = None;
@@ -142,16 +142,16 @@ fn parse_args() -> Result<Option<Args>> {
                 expected_fingerprint = convite.impressao_digital;
                 bilhete = convite.bilhete;
                 join_secret = convite.token;
-                if let Some(numero) = convite.cage {
-                    cage = CageId(numero);
+                if let Some(numero) = convite.voice_room {
+                    voice_room = VoiceRoomId(numero);
                 }
             }
             "--convite" | "--senha" => {
                 join_secret = Some(argv.next().context("--convite needs a value")?);
             }
             "--nick" | "-n" => nickname = argv.next().context("--nick needs a name")?,
-            "--cage" => {
-                cage = CageId(argv.next().context("--cage needs a number")?.parse()?);
+            "--voice_room" => {
+                voice_room = VoiceRoomId(argv.next().context("--voice_room needs a number")?.parse()?);
             }
             "--linha" | "--line" => {
                 line = LineId(argv.next().context("--linha needs a number")?.parse()?);
@@ -176,7 +176,7 @@ fn parse_args() -> Result<Option<Args>> {
         pin_key,
         alternativos,
         nickname,
-        cage,
+        voice_room,
         line,
         no_audio,
         join_secret,
@@ -365,7 +365,7 @@ fn usage() {
         "  -s, --server <host[:porta]>  servidor ao qual se conectar (padrão 127.0.0.1:8383)"
     );
     eprintln!("  -n, --nick <nome>            como aparecer no roster");
-    eprintln!("      --cage <n>               sala de voz a entrar (padrão 1)");
+    eprintln!("      --voice_room <n>               sala de voz a entrar (padrão 1)");
     eprintln!("      --linha <n>              canal de texto a abrir (padrão 1)");
     eprintln!("      --sem-audio              só texto, sem placa de som");
     eprintln!(
@@ -632,10 +632,10 @@ async fn sessao(
     // [`motivo_de_conexao_perdida`].
     runtime.app.alert = alerta_do_veredito(client.veredito());
 
-    let cage = args.cage;
+    let voice_room = args.voice_room;
     // Um enlace que fecha antes mesmo de a sessão subir é uma sessão que
     // acabou, e não um defeito do programa. Ver [`enlace_fechado`].
-    if entrar(&client, cage, args.line).await.is_err() {
+    if entrar(&client, voice_room, args.line).await.is_err() {
         enlace_fechado(&mut runtime);
         drop(client);
         return fim_de_sessao(terminal, key_rx, &mut runtime, &mut hospedagem).await;
@@ -649,7 +649,7 @@ async fn sessao(
         if let Ok(mut lista) = Conhecidos::abrir(home.join("conhecidos")) {
             // Falhar em gravar um atalho não pode derrubar uma conversa que já
             // está de pé.
-            if let Err(erro) = lista.registrar(&args.pin_key, &args.nickname, Some(cage.0)) {
+            if let Err(erro) = lista.registrar(&args.pin_key, &args.nickname, Some(voice_room.0)) {
                 note(
                     &mut runtime,
                     format!("não guardei este servidor na lista: {erro}"),
@@ -676,7 +676,7 @@ async fn sessao(
     }
 
     runtime.room.adopt(client.sessao(), &args.nickname);
-    runtime.room.enter_cage(cage);
+    runtime.room.enter_voice_room(voice_room);
     runtime.room.open_line(args.line);
 
     if !args.no_audio {
@@ -938,8 +938,8 @@ fn construir_destinos(args: &Args) -> Vec<Destino> {
 ///
 /// Juntos porque falham juntos e pelo mesmo motivo: se o enlace fechou, nenhum
 /// dos três vai a lugar nenhum, e o que se faz com isso é um só.
-async fn entrar(client: &Enlace, cage: CageId, line: LineId) -> Result<(), Fechado> {
-    client.inserir_plug(cage).await?;
+async fn entrar(client: &Enlace, voice_room: VoiceRoomId, line: LineId) -> Result<(), Fechado> {
+    client.inserir_plug(voice_room).await?;
     client.abrir_linha(line).await?;
     client.historico(line, 50).await
 }
@@ -1361,8 +1361,8 @@ async fn act(
 
         Action::Activate => activate(runtime, client).await?,
 
-        Action::LeaveCage => {
-            if runtime.room.current_cage.is_none() {
+        Action::LeaveVoiceRoom => {
+            if runtime.room.current_voice_room.is_none() {
                 note(runtime, "você não está em nenhuma sala de voz".to_owned());
             } else {
                 client.ejetar_plug().await?;
@@ -1383,21 +1383,21 @@ async fn act(
 /// anterior), e é por ele que esta função existe à parte de [`act`]: sem
 /// `Enlace` no caminho, um teste consegue cobrá-la.
 fn sair_da_sala(room: &mut Room, app: &mut App) {
-    room.leave_cage();
+    room.leave_voice_room();
     view::project(room, app);
     app.refazer_busca();
 }
 
-/// Enter on the selected row: enter a Cage, or open a Line.
+/// Enter on the selected row: enter a voice room, or open a Line.
 async fn activate(runtime: &mut Runtime<'_>, client: &Enlace) -> Result<(), Fechado> {
     let Some(node) = runtime.app.tree.get(runtime.app.selected).cloned() else {
         return Ok(());
     };
     match node {
-        Node::Cage { name, .. } => {
-            if let Some(id) = runtime.room.find_cage(&name) {
+        Node::VoiceRoom { name, .. } => {
+            if let Some(id) = runtime.room.find_voice_room(&name) {
                 client.inserir_plug(id).await?;
-                runtime.room.enter_cage(id);
+                runtime.room.enter_voice_room(id);
                 view::project(&runtime.room, &mut runtime.app);
                 runtime.app.refazer_busca();
             }
@@ -1441,10 +1441,10 @@ async fn run_command(
 
         Command::Eject => runtime.app.ejetar(),
 
-        Command::Cage { which } => {
-            if let Some(id) = runtime.room.find_cage(which) {
+        Command::VoiceRoom { which } => {
+            if let Some(id) = runtime.room.find_voice_room(which) {
                 client.inserir_plug(id).await?;
-                runtime.room.enter_cage(id);
+                runtime.room.enter_voice_room(id);
                 view::project(&runtime.room, &mut runtime.app);
                 runtime.app.refazer_busca();
             } else {
@@ -1699,7 +1699,7 @@ mod tests {
     #[test]
     fn sair_da_sala_esvazia_o_assento_na_propria_tela() {
         use seele_core::{
-            CageId, CageInfo, LineId, LineInfo, PersonId, PersonProfile, Room, ServerMessage,
+            VoiceRoomId, VoiceRoomInfo, LineId, LineInfo, PersonId, PersonProfile, Room, ServerMessage,
             SessionId, Ssrc,
         };
         use seele_tui::app::{App, Node};
@@ -1709,8 +1709,8 @@ mod tests {
         // antes de existir: o Dogma não devolve o `PersonLeft` a quem o causou,
         // então `ejetar_plug` sozinho deixa a sala esvaziada no servidor e em
         // todas as outras telas menos na de quem saiu. Quebrar o
-        // `room.leave_cage()` de `sair_da_sala` deixa este teste vermelho.
-        const SALA: CageId = CageId(1);
+        // `room.leave_voice_room()` de `sair_da_sala` deixa este teste vermelho.
+        const SALA: VoiceRoomId = VoiceRoomId(1);
         const CANAL: LineId = LineId(1);
 
         let mut room = Room::new();
@@ -1719,7 +1719,7 @@ mod tests {
             person: PersonId(7),
             ssrc: Ssrc(700),
             dogma: "servidor de teste".into(),
-            cages: vec![CageInfo {
+            voice_rooms: vec![VoiceRoomInfo {
                 id: SALA,
                 name: "SALA-01".into(),
                 limit: 20,
@@ -1734,7 +1734,7 @@ mod tests {
             permissions: Vec::new(),
         });
         room.apply(&ServerMessage::PersonJoined {
-            cage: SALA,
+            voice_room: SALA,
             profile: PersonProfile {
                 id: PersonId(7),
                 nickname: "ayanami".into(),
@@ -1742,7 +1742,7 @@ mod tests {
             },
             ssrc: Ssrc(700),
         });
-        room.enter_cage(SALA);
+        room.enter_voice_room(SALA);
 
         let mut app = App::new();
         view::project(&room, &mut app);
@@ -1755,7 +1755,7 @@ mod tests {
         sair_da_sala(&mut room, &mut app);
 
         assert_eq!(
-            room.current_cage, None,
+            room.current_voice_room, None,
             "a casca continua achando que o plug está numa sala"
         );
         assert!(
@@ -1974,7 +1974,7 @@ mod tests {
             server_name: "localhost".to_owned(),
             pin_key: "127.0.0.1:8383".to_owned(),
             nickname: "pessoa".to_owned(),
-            cage: CageId(1),
+            voice_room: VoiceRoomId(1),
             line: LineId(1),
             no_audio: true,
             join_secret: None,

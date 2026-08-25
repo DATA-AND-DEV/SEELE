@@ -33,11 +33,11 @@ use anyhow::Result;
 use seele_core::enlace::{Aviso, Destino, Enlace};
 use seele_core::{MemoryPinStore, PinStore};
 use seele_proto::control::ServerMessage;
-use seele_proto::ids::{CageId, ClientMessageId, LineId};
+use seele_proto::ids::{VoiceRoomId, ClientMessageId, LineId};
 use seele_server::persistence::Location;
 use seele_server::{DogmaConfig, Server};
 
-const CAGE: u32 = 1;
+const VOICE_ROOM: u32 = 1;
 const LINE: u32 = 1;
 
 /// Starts a Dogma on a port the system picks.
@@ -81,7 +81,7 @@ fn destino(endereco: SocketAddr, apelido: &str) -> Destino {
 
 /// Proves the session serves, and not merely that the constructor said `Ok`.
 async fn falar_e_ouvir(enlace: &mut Enlace, o_que: &str) -> Result<()> {
-    enlace.inserir_plug(CageId(CAGE)).await?;
+    enlace.inserir_plug(VoiceRoomId(VOICE_ROOM)).await?;
     enlace.abrir_linha(LineId(LINE)).await?;
     enlace
         .dizer(LineId(LINE), o_que.to_owned(), ClientMessageId(1))

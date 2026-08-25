@@ -3,7 +3,7 @@
 //! `specs/06-clientes-gui.md` sets the shape of this file in one sentence:
 //! "Nenhuma lógica de protocolo em JavaScript. Se o frontend precisa saber o
 //! que é um `ssrc`, algo está errado." So the frontend gets a `Snapshot` and
-//! sends back verbs — enter this Cage, say this, mute — and every one of them
+//! sends back verbs — enter this voice room, say this, mute — and every one of them
 //! is a call straight through to the FFI.
 //!
 //! Nothing here decides anything either. If a command in this file grows a
@@ -300,15 +300,15 @@ async fn connect(
         if let Ok(mut lista) = seele_ffi::conhecidos::Conhecidos::abrir(
             std::path::PathBuf::from(&casa).join("conhecidos"),
         ) {
-            // O Cage que já estava anotado, preservado. `registrar` reescreve a
+            // A sala de voz que já estava anotado, preservado. `registrar` reescreve a
             // entrada inteira, e este arquivo é compartilhado com o `plug`, que
-            // grava em qual Cage a pessoa entrou e o lê de volta como padrão na
+            // grava em qual sala de voz a pessoa entrou e o lê de volta como padrão na
             // sua tela de seleção. Passar `None` daqui apagaria, a cada visita
             // pelo app, o que o terminal anotou.
-            let cage = lista.buscar(&alvo).and_then(|conhecido| conhecido.cage);
+            let voice_room = lista.buscar(&alvo).and_then(|conhecido| conhecido.voice_room);
             // Falhar em gravar um atalho não pode derrubar uma conversa que já
             // está de pé.
-            if let Err(erro) = lista.registrar(&alvo, &apelido, cage) {
+            if let Err(erro) = lista.registrar(&alvo, &apelido, voice_room) {
                 tracing::warn!(%erro, "não guardei este Dogma na lista de visitados");
             }
         }
@@ -538,8 +538,8 @@ fn messages(session: State<'_, Session>) -> Result<Vec<seele_ffi::Message>, Plug
 }
 
 #[tauri::command]
-fn insert_plug(session: State<'_, Session>, cage: u32) -> Result<(), PlugError> {
-    session.plug()?.insert_plug(cage)
+fn insert_plug(session: State<'_, Session>, voice_room: u32) -> Result<(), PlugError> {
+    session.plug()?.insert_plug(voice_room)
 }
 
 #[tauri::command]
@@ -774,26 +774,26 @@ fn pasta_de_downloads(app: AppHandle) -> String {
         .unwrap_or_default()
 }
 
-/// Pede ao Dogma que faça um Cage.
+/// Pede ao Dogma que faça uma sala de voz.
 ///
 /// Devolve assim que o pedido entra na fila, e **não** quando a sala existe.
 /// Quem responde isso é o Dogma, e a resposta chega pela mesma porta que todo o
 /// resto: `ChannelsChanged` se ele fez, `NoticeRaised` com `PermissionDenied`
 /// se recusou. A tela redesenha a lista pelo evento, como já faz quando alguém
-/// entra num Cage — não há caminho novo a aprender.
+/// entra num sala de voz — não há caminho novo a aprender.
 ///
-/// A tela pode consultar `Snapshot::may_manage_cages` para decidir se mostra o
+/// A tela pode consultar `Snapshot::may_manage_voice_rooms` para decidir se mostra o
 /// botão. Isso é conveniência: mandar o pedido sem ter a permissão não cria
 /// nada, e a `specs/08-seguranca.md` põe a segurança nessa recusa e não no
 /// botão escondido.
 #[tauri::command]
-fn criar_cage(
+fn criar_voice_room(
     session: State<'_, Session>,
     name: String,
     limit: u16,
     line: Option<u32>,
 ) -> Result<(), PlugError> {
-    session.plug()?.create_cage(name, limit, line)
+    session.plug()?.create_voice_room(name, limit, line)
 }
 
 /// Pede ao Dogma que faça uma Linha.
@@ -802,10 +802,10 @@ fn criar_linha(session: State<'_, Session>, name: String) -> Result<(), PlugErro
     session.plug()?.create_line(name)
 }
 
-/// Pede ao Dogma que renomeie um Cage.
+/// Pede ao Dogma que renomeie uma sala de voz.
 #[tauri::command]
-fn renomear_cage(session: State<'_, Session>, cage: u32, name: String) -> Result<(), PlugError> {
-    session.plug()?.rename_cage(cage, name)
+fn renomear_voice_room(session: State<'_, Session>, voice_room: u32, name: String) -> Result<(), PlugError> {
+    session.plug()?.rename_voice_room(voice_room, name)
 }
 
 /// Pede ao Dogma que renomeie uma Linha.
@@ -825,7 +825,7 @@ fn renomear_linha(session: State<'_, Session>, line: u32, name: String) -> Resul
 /// Pede ao Dogma que troque o próprio nome.
 ///
 /// A tela pode consultar `Snapshot::may_customise_dogma` para decidir se
-/// desenha o campo. Conveniência, como em `criar_cage`: quem pede sem a
+/// desenha o campo. Conveniência, como em `criar_voice_room`: quem pede sem a
 /// permissão recebe `Alert`/`PermissionDenied` do servidor, e é lá que a
 /// `specs/08-seguranca.md` põe a segurança — nunca no controle escondido.
 #[tauri::command]
@@ -1035,7 +1035,7 @@ fn icone_do_dogma(session: State<'_, Session>) -> Result<Option<Vec<u8>>, PlugEr
 /// pedido sem a permissão não expulsa ninguém, e a `specs/08-seguranca.md` põe
 /// a segurança nessa recusa e não no botão escondido.
 #[tauri::command]
-fn expulsar_persono(session: State<'_, Session>, person: u64) -> Result<(), PlugError> {
+fn expulsar_pessoa(session: State<'_, Session>, person: u64) -> Result<(), PlugError> {
     session.plug()?.kick_person(person)
 }
 
@@ -1044,7 +1044,7 @@ fn expulsar_persono(session: State<'_, Session>, person: u64) -> Result<(), Plug
 /// `expires_at` em segundos desde a época; `None` é para sempre. O `reason` é
 /// para o registro de quem hospeda e nunca chega a quem foi banido.
 #[tauri::command]
-fn banir_persono(
+fn banir_pessoa(
     session: State<'_, Session>,
     person: u64,
     reason: Option<String>,
@@ -1062,25 +1062,25 @@ fn remover_mensagem(session: State<'_, Session>, message: u64) -> Result<(), Plu
     session.plug()?.remove_message(message)
 }
 
-/// Pede ao Dogma que mova alguém para um Cage — `mover_persono`.
+/// Pede ao Dogma que mova alguém para uma sala de voz — `mover_pessoa`.
 #[tauri::command]
-fn mover_persono(session: State<'_, Session>, person: u64, cage: u32) -> Result<(), PlugError> {
-    session.plug()?.move_person(person, cage)
+fn mover_pessoa(session: State<'_, Session>, person: u64, voice_room: u32) -> Result<(), PlugError> {
+    session.plug()?.move_person(person, voice_room)
 }
 
-/// Pede ao Dogma que destrua um Cage — `apagar_cage`.
+/// Pede ao Dogma que destrua uma sala de voz — `apagar_voice_room`.
 ///
 /// Quem estiver dentro é posto para fora e avisado; a Linha presa a ele, se
-/// houver, fica onde está. O Dogma recusa o último Cage e diz isso com
-/// `LastCage`, que é frase diferente da de entrada recusada.
+/// houver, fica onde está. O Dogma recusa o último sala de voz e diz isso com
+/// `LastVoiceRoom`, que é frase diferente da de entrada recusada.
 ///
 /// A tela pode consultar `Snapshot::may_delete_rooms` para decidir se desenha o
-/// controle — e é campo próprio, não `may_manage_cages`: fazer sala e destruir
+/// controle — e é campo próprio, não `may_manage_voice_rooms`: fazer sala e destruir
 /// sala são permissões diferentes na `specs/04-servidor-seele.md`, e é preciso
 /// poder oferecer uma sem a outra. Isso é conveniência; quem nega é o servidor.
 #[tauri::command]
-fn apagar_cage(session: State<'_, Session>, cage: u32) -> Result<(), PlugError> {
-    session.plug()?.delete_cage(cage)
+fn apagar_voice_room(session: State<'_, Session>, voice_room: u32) -> Result<(), PlugError> {
+    session.plug()?.delete_voice_room(voice_room)
 }
 
 /// Pede ao Dogma que destrua uma Linha, e tudo que foi escrito nela —
@@ -1591,7 +1591,7 @@ fn nome_da_falha(erro: &seele_ffi::uri::ErroDeUri) -> &'static str {
         Falha::BilheteInvalido => "BilheteInvalido",
         Falha::ImpressaoDigitalInvalida => "ImpressaoDigitalInvalida",
         Falha::TokenInvalido => "TokenInvalido",
-        Falha::CageInvalido => "CageInvalido",
+        Falha::VoiceRoomInvalido => "VoiceRoomInvalido",
     }
 }
 
@@ -2295,9 +2295,9 @@ fn main() {
             eject_plug,
             open_line,
             send_message,
-            criar_cage,
+            criar_voice_room,
             criar_linha,
-            renomear_cage,
+            renomear_voice_room,
             renomear_linha,
             renomear_dogma,
             regras_do_icone_do_dogma,
@@ -2306,11 +2306,11 @@ fn main() {
             escolher_icone_do_dogma,
             tirar_icone_do_dogma,
             icone_do_dogma,
-            expulsar_persono,
-            banir_persono,
+            expulsar_pessoa,
+            banir_pessoa,
             remover_mensagem,
-            mover_persono,
-            apagar_cage,
+            mover_pessoa,
+            apagar_voice_room,
             apagar_linha,
             peso_da_linha,
             set_at_field,

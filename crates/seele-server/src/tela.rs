@@ -196,7 +196,7 @@ pub fn teto_do_hospedeiro(caminho_bps: u32, espectadores: usize) -> Option<u32> 
 /// sequência ordenada de bytes: descartar um pedaço no meio não atrasa um
 /// espectador, desloca o enquadramento dele para sempre — o quadro seguinte
 /// leria o meio do anterior como cabeçalho. Onde o áudio descarta
-/// (`Cage::forward`, «old audio helps nobody»), a tela **corta**: quem não
+/// (`VoiceRoom::forward`, «old audio helps nobody»), a tela **corta**: quem não
 /// acompanha perde a transmissão inteira e sabe disso, o que é uma frase
 /// verdadeira, em vez de receber lixo indistinguível de um encoder quebrado.
 #[derive(Debug)]
@@ -340,7 +340,7 @@ impl Enquadramento {
 /// para uma pessoa, e elas são frases diferentes na tela dela.
 ///
 /// O `write_all` é onde a contrapressão mora: um espectador lento faz esta
-/// tarefa parar, a fila dele encher, e o [`crate::cage::Cage`] cortá-lo. Nunca
+/// tarefa parar, a fila dele encher, e o [`crate::voice_room::VoiceRoom`] cortá-lo. Nunca
 /// faz o Dogma esperar e nunca faz os outros esperarem.
 pub async fn bombear(conexao: quinn::Connection, mut aberturas: mpsc::Receiver<AberturaDeTela>) {
     while let Some(mut convite) = aberturas.recv().await {

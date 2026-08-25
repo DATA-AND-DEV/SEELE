@@ -19,13 +19,13 @@ use std::time::Duration;
 use anyhow::Result;
 use ed25519_dalek::SigningKey;
 use seele_core::{Client, MemoryPinStore};
-use seele_proto::ids::{CageId, ClientMessageId, LineId};
+use seele_proto::ids::{VoiceRoomId, ClientMessageId, LineId};
 use seele_proto::ServerMessage;
 use seele_server::persistence::Location;
 use seele_server::{DogmaConfig, Server};
 
 const LINE: LineId = LineId(1);
-const CAGE: CageId = CageId(1);
+const VOICE_ROOM: VoiceRoomId = VoiceRoomId(1);
 const WAIT: Duration = Duration::from_secs(5);
 
 /// Starts a Dogma backed by a file, and returns where to reach it plus a handle
@@ -327,7 +327,7 @@ async fn telemetry_carries_a_sync_ratio() -> Result<()> {
 async fn a_returning_person_reclaims_their_seat_and_their_ssrc() -> Result<()> {
     // specs/09-roadmap.md: "Queda de rede de 60 s é recuperada de forma
     // transparente." The observable half of transparent is that the person comes
-    // back as themselves: same account, same ssrc, same Cage. Otherwise the
+    // back as themselves: same account, same ssrc, same voice room. Otherwise the
     // outage looks to everybody else like a departure and an arrival, and every
     // listener's jitter buffer starts over.
     let directory = tempfile::tempdir()?;
@@ -335,7 +335,7 @@ async fn a_returning_person_reclaims_their_seat_and_their_ssrc() -> Result<()> {
 
     let before = {
         let mut ayanami = connect(address, "ayanami", &key(1)).await?;
-        ayanami.insert_plug(CAGE).await?;
+        ayanami.insert_plug(VOICE_ROOM).await?;
         tokio::time::sleep(Duration::from_millis(150)).await;
         let session = ayanami.session().clone();
         // The train enters the tunnel.

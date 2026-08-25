@@ -31,7 +31,7 @@ use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, Salt
 use argon2::Argon2;
 use rusqlite::{params, Connection};
 
-use seele_proto::ids::CageId;
+use seele_proto::ids::VoiceRoomId;
 
 use crate::persistence::{now_seconds, Persistence};
 
@@ -280,27 +280,27 @@ pub fn criar_convite(persistence: &mut Persistence, observacao: &str) -> Result<
     Ok(token)
 }
 
-/// Se um Cage aceita esta entrada.
+/// Se uma sala de voz aceita esta entrada.
 ///
-/// A senha do Cage é coisa diferente da admissão no Dogma: aquela decide quem
-/// entra na casa, esta decide quem entra num cômodo. Um Cage sem senha aceita
+/// A senha da sala de voz é coisa diferente da admissão no Dogma: aquela decide quem
+/// entra na casa, esta decide quem entra num cômodo. Uma sala de voz sem senha aceita
 /// qualquer membro do Dogma, que é o caso normal.
 ///
 /// Recusa quando o banco não responde. É a única resposta segura: uma consulta
 /// que falha não é prova de que a porta pode abrir.
 #[must_use]
-pub fn cage_liberado(persistence: &Persistence, cage: CageId, senha: Option<&str>) -> bool {
+pub fn voice_room_liberado(persistence: &Persistence, voice_room: VoiceRoomId, senha: Option<&str>) -> bool {
     let hash: Option<Option<String>> = persistence
         .connection()
         .query_row(
-            "SELECT password_hash FROM cages WHERE id = ?1",
-            params![i64::from(cage.get())],
+            "SELECT password_hash FROM voice_rooms WHERE id = ?1",
+            params![i64::from(voice_room.get())],
             |linha| linha.get(0),
         )
         .ok();
 
     match hash {
-        // Cage inexistente. Recusar aqui evita que um erro de digitação vire
+        // sala de voz inexistente. Recusar aqui evita que um erro de digitação vire
         // uma entrada silenciosa em lugar nenhum.
         None => false,
         Some(None) => true,
@@ -308,16 +308,16 @@ pub fn cage_liberado(persistence: &Persistence, cage: CageId, senha: Option<&str
     }
 }
 
-/// Grava a senha de um Cage, ou a remove.
+/// Grava a senha de uma sala de voz, ou a remove.
 ///
 /// # Errors
 ///
 /// Falha se o hash não puder ser calculado ou o banco não responder.
-pub fn definir_senha_cage(persistence: &mut Persistence, cage: CageId, senha: Option<&str>) -> Result<()> {
+pub fn definir_senha_voice_room(persistence: &mut Persistence, voice_room: VoiceRoomId, senha: Option<&str>) -> Result<()> {
     let hash = senha.map(calcular_hash).transpose()?;
     persistence.connection().execute(
-        "UPDATE cages SET password_hash = ?1 WHERE id = ?2",
-        params![hash, i64::from(cage.get())],
+        "UPDATE voice_rooms SET password_hash = ?1 WHERE id = ?2",
+        params![hash, i64::from(voice_room.get())],
     )?;
     Ok(())
 }
@@ -399,15 +399,15 @@ mod tests {
 
     fn persistence() -> Persistence {
         let persistence = Persistence::open(&Location::Memory).expect("banco em memória");
-        // O Dogma real semeia o Cage padrão ao subir; um banco recém-migrado
+        // O Dogma real semeia a sala de voz padrão ao subir; um banco recém-migrado
         // está vazio, e um teste de fechadura precisa de uma porta.
         persistence
             .connection()
             .execute(
-                "INSERT INTO cages (id, name, member_limit, position) VALUES (1, 'CAGE-01', 20, 0)",
+                "INSERT INTO voice_rooms (id, name, member_limit, position) VALUES (1, 'VOICE_ROOM-01', 20, 0)",
                 [],
             )
-            .expect("semear o Cage");
+            .expect("semear a sala de voz");
         persistence
     }
 
@@ -643,39 +643,39 @@ mod tests {
     }
 
     #[test]
-    fn um_cage_sem_senha_aceita_qualquer_membro() {
+    fn um_voice_room_sem_senha_aceita_qualquer_membro() {
         let persistence = persistence();
-        assert!(cage_liberado(&persistence, CageId(1), None));
+        assert!(voice_room_liberado(&persistence, VoiceRoomId(1), None));
     }
 
     #[test]
-    fn um_cage_com_senha_recusa_quem_nao_a_tem() {
+    fn um_voice_room_com_senha_recusa_quem_nao_a_tem() {
         // A fechadura que existia no protocolo, era anunciada ao cliente em
         // `password_required` e nunca era conferida.
         let mut persistence = persistence();
-        definir_senha_cage(&mut persistence, CageId(1), Some("geofront")).expect("definir");
+        definir_senha_voice_room(&mut persistence, VoiceRoomId(1), Some("geofront")).expect("definir");
 
-        assert!(!cage_liberado(&persistence, CageId(1), None));
-        assert!(!cage_liberado(&persistence, CageId(1), Some("errada")));
-        assert!(cage_liberado(&persistence, CageId(1), Some("geofront")));
+        assert!(!voice_room_liberado(&persistence, VoiceRoomId(1), None));
+        assert!(!voice_room_liberado(&persistence, VoiceRoomId(1), Some("errada")));
+        assert!(voice_room_liberado(&persistence, VoiceRoomId(1), Some("geofront")));
     }
 
     #[test]
-    fn um_cage_que_nao_existe_nao_libera() {
+    fn um_voice_room_que_nao_existe_nao_libera() {
         // Um erro de digitação não deve virar entrada silenciosa em lugar
         // nenhum.
         let persistence = persistence();
-        assert!(!cage_liberado(&persistence, CageId(9999), None));
+        assert!(!voice_room_liberado(&persistence, VoiceRoomId(9999), None));
     }
 
     #[test]
-    fn a_senha_do_cage_tambem_e_hasheada() {
+    fn a_senha_do_voice_room_tambem_e_hasheada() {
         let mut persistence = persistence();
-        definir_senha_cage(&mut persistence, CageId(1), Some("geofront")).expect("definir");
+        definir_senha_voice_room(&mut persistence, VoiceRoomId(1), Some("geofront")).expect("definir");
 
         let guardado: String = persistence
             .connection()
-            .query_row("SELECT password_hash FROM cages WHERE id = 1", [], |l| {
+            .query_row("SELECT password_hash FROM voice_rooms WHERE id = 1", [], |l| {
                 l.get(0)
             })
             .expect("ler");

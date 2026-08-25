@@ -99,12 +99,12 @@ const EVENTOS_LEMBRADOS = 40;
  * alcançável só de dentro da operação, mas a sessão pode acabar com ela aberta.
  */
 function desenharChamada(snapshot) {
-  const cage = snapshot ? snapshot.cages.find((c) => c.occupied_by_us) : null;
+  const voice_room = snapshot ? snapshot.voice_rooms.find((c) => c.occupied_by_us) : null;
 
-  desenharBarraDaChamada(snapshot, cage);
-  desenharPalco(snapshot, cage);
-  desenharCartoes(snapshot, cage);
-  desenharMonitor(snapshot, cage);
+  desenharBarraDaChamada(snapshot, voice_room);
+  desenharPalco(snapshot, voice_room);
+  desenharCartoes(snapshot, voice_room);
+  desenharMonitor(snapshot, voice_room);
 }
 
 /**
@@ -132,7 +132,7 @@ function desenharChamada(snapshot) {
  * saindo, porque uma memória guardada nesta janela morria com ela — e uma
  * recarga no meio de uma transmissão apagava metade da comparação do §5.
  */
-function desenharPalco(snapshot, cage) {
+function desenharPalco(snapshot, voice_room) {
   const palco = $("palco");
   const tela = snapshot ? snapshot.tela : null;
 
@@ -146,7 +146,7 @@ function desenharPalco(snapshot, cage) {
     // Fora de uma sala de voz não há para quem compartilhar, e a frase que
     // manda apertar um botão desabilitado é pior que nenhuma. Sem o controle
     // desenhado, mandar apertar um botão que não existe é pior ainda.
-    nota.hidden = !cage;
+    nota.hidden = !voice_room;
     nota.textContent = temControleDeTela()
       ? "Use COMPARTILHAR A TELA aqui embaixo para mostrar um monitor ou uma janela sua."
       : "Esta versão não sabe compartilhar tela desta máquina. A de outra pessoa apareceria aqui.";
@@ -162,7 +162,7 @@ function desenharPalco(snapshot, cage) {
   // `tela.de` é o identificador de quem compartilha, e o nome vem do roster da
   // sala. Sem casamento — a pessoa saiu entre dois quadros — a frase diz que
   // alguém está, e não um nome que esta janela inventaria.
-  const dono = cage ? cage.people.find((pessoa) => pessoa.id === tela.de) : null;
+  const dono = voice_room ? voice_room.people.find((pessoa) => pessoa.id === tela.de) : null;
   $("palco-quem").textContent = tela.e_minha
     ? "VOCÊ ESTÁ COMPARTILHANDO A SUA TELA"
     : dono
@@ -272,10 +272,10 @@ function assistindo(quantos) {
 }
 
 /** A barra de cima: o nome da sala, o enlace e o relógio da sessão. */
-function desenharBarraDaChamada(snapshot, cage) {
+function desenharBarraDaChamada(snapshot, voice_room) {
   const nome = $("chamada-nome");
-  if (cage) {
-    medido(nome, cage.name);
+  if (voice_room) {
+    medido(nome, voice_room.name);
   } else {
     naoMedido(nome, snapshot ? "fora de uma sala de voz" : "sem sessão");
   }
@@ -318,13 +318,13 @@ function desenharBarraDaChamada(snapshot, cage) {
  * teclado a cada meio segundo, e um clique que atravessasse a troca sumiria sem
  * erro nenhum — o `mouseup` cairia num nó que não é mais o do `mousedown`.
  */
-function desenharCartoes(snapshot, cage) {
+function desenharCartoes(snapshot, voice_room) {
   const grade = $("chamada-grade");
 
-  if (!cage || cage.people.length === 0) {
+  if (!voice_room || voice_room.people.length === 0) {
     const frase = !snapshot
       ? "SEM SESSÃO"
-      : cage
+      : voice_room
         ? "ESTA SALA ESTÁ VAZIA"
         : "VOCÊ NÃO ESTÁ EM NENHUMA SALA";
     if (grade.children.length === 1 && grade.children[0].textContent === frase) return;
@@ -337,7 +337,7 @@ function desenharCartoes(snapshot, cage) {
     if (cartao.dataset.pessoa) existentes.set(cartao.dataset.pessoa, cartao);
   }
 
-  const cartoes = cage.people.map((pessoa) => {
+  const cartoes = voice_room.people.map((pessoa) => {
     const cartao = existentes.get(pessoa.nickname) ?? cartaoDoPersono(pessoa);
     pintarCartao(cartao, pessoa, snapshot.audio_available);
     return cartao;
@@ -558,11 +558,11 @@ function fraseDoEstado(pessoa) {
 }
 
 /** A coluna da direita: quem fala. */
-function desenharMonitor(snapshot, cage) {
+function desenharMonitor(snapshot, voice_room) {
   const falando = $("chamada-falando-nome");
-  const nomes = cage ? cage.people.filter((p) => p.speaking).map((p) => p.nickname) : [];
+  const nomes = voice_room ? voice_room.people.filter((p) => p.speaking).map((p) => p.nickname) : [];
 
-  if (!cage) {
+  if (!voice_room) {
     naoMedido(falando, snapshot ? "fora de uma sala de voz" : "sem sessão");
     return;
   }

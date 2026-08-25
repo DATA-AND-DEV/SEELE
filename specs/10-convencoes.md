@@ -6,7 +6,7 @@
 - **Documentação, specs e ADRs: português.**
 - **Strings visíveis ao usuário: i18n desde o início**, com pt-BR e en como locales iniciais. Nunca literal de string direto na interface — o custo de retrofit é alto e o vocabulário temático (`07`) tem que ser traduzido com cuidado.
 
-O glossário de `07` é normativo em ambos os idiomas: `Cage` permanece `Cage`, `Pessoa` vira `Person`, `Taxa de Sincronização` vira `Sync Ratio`.
+O glossário de `07` é normativo em ambos os idiomas: `VoiceRoom` permanece `VoiceRoom`, `Pessoa` vira `Person`, `Taxa de Sincronização` vira `Sync Ratio`.
 
 ## Estilo
 
@@ -56,7 +56,7 @@ SemVer. O protocolo tem versão própria, independente da versão do produto (`0
 
 ## Observabilidade
 
-- `tracing` em todo lugar, com spans nas fronteiras: conexão, Cage, sessão.
+- `tracing` em todo lugar, com spans nas fronteiras: conexão, VoiceRoom, sessão.
 - Níveis: `error` para ação necessária do operador; `warn` para degradação; `info` para eventos de ciclo de vida; `debug` e `trace` para desenvolvimento.
 - **Nunca logar:** segredos, conteúdo de mensagem, payload de mídia.
 

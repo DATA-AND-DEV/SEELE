@@ -3,7 +3,7 @@
 //! `specs/04-servidor-seele.md`:
 //!
 //! > Modelo simples e enumerado, sem sistema de expressão. Cada Papel carrega um
-//! > conjunto: `ver_cage`, `inserir_plug`, `falar`, …
+//! > conjunto: `ver_voice_room`, `inserir_plug`, `falar`, …
 //! >
 //! > Papéis padrão: **Comandante** (tudo), **Operador** (moderação), **Pessoa**
 //! > (uso normal), **Observador** (só ouvir e ler).
@@ -101,7 +101,7 @@ fn parse_permissions(json: &str) -> Vec<Permission> {
 /// change what an existing database means.
 fn name_to_permission(name: &str) -> Option<Permission> {
     Some(match name {
-        "ViewCage" => Permission::ViewCage,
+        "ViewVoiceRoom" => Permission::ViewVoiceRoom,
         "InsertPlug" => Permission::InsertPlug,
         "Speak" => Permission::Speak,
         "ReadLine" => Permission::ReadLine,
@@ -110,7 +110,7 @@ fn name_to_permission(name: &str) -> Option<Permission> {
         "MovePerson" => Permission::MovePerson,
         "Kick" => Permission::Kick,
         "Ban" => Permission::Ban,
-        "ManageCages" => Permission::ManageCages,
+        "ManageVoiceRooms" => Permission::ManageVoiceRooms,
         "ManageRoles" => Permission::ManageRoles,
         "AdministerDogma" => Permission::AdministerDogma,
         "AttachFile" => Permission::AttachFile,
@@ -229,7 +229,7 @@ impl<'a> Permissions<'a> {
     /// # The first account created on a Dogma becomes the Comandante
     ///
     /// Every account used to arrive as a Pessoa, which meant **nobody ever
-    /// became a Comandante**. Migration 1 seeds the role with `ManageCages`,
+    /// became a Comandante**. Migration 1 seeds the role with `ManageVoiceRooms`,
     /// `ManageRoles` and `AdministerDogma`, and nothing granted it: a Dogma
     /// shipped with three permissions no account in it could ever hold, so
     /// every verb behind them was unreachable by construction.
@@ -474,7 +474,7 @@ impl<'a> Permissions<'a> {
     /// Fails on a database error.
     pub fn permissions(&self, person: PersonId) -> Result<Vec<Permission>> {
         let all = [
-            Permission::ViewCage,
+            Permission::ViewVoiceRoom,
             Permission::InsertPlug,
             Permission::Speak,
             Permission::ReadLine,
@@ -483,7 +483,7 @@ impl<'a> Permissions<'a> {
             Permission::MovePerson,
             Permission::Kick,
             Permission::Ban,
-            Permission::ManageCages,
+            Permission::ManageVoiceRooms,
             Permission::ManageRoles,
             Permission::AdministerDogma,
             Permission::AttachFile,
@@ -575,7 +575,7 @@ mod tests {
 
     /// Every permission `specs/04-servidor-seele.md` enumerates.
     const ALL: &[Permission] = &[
-        Permission::ViewCage,
+        Permission::ViewVoiceRoom,
         Permission::InsertPlug,
         Permission::Speak,
         Permission::ReadLine,
@@ -584,7 +584,7 @@ mod tests {
         Permission::MovePerson,
         Permission::Kick,
         Permission::Ban,
-        Permission::ManageCages,
+        Permission::ManageVoiceRooms,
         Permission::ManageRoles,
         Permission::AdministerDogma,
         Permission::AttachFile,
@@ -638,13 +638,13 @@ mod tests {
     fn the_first_account_becomes_the_commander() {
         // Whoever hosts is whoever connects to their own Dogma first. Without
         // this, migration 1 seeds a Comandante role that no account can ever
-        // hold, and ManageCages / ManageRoles / AdministerDogma are unreachable
+        // hold, and ManageVoiceRooms / ManageRoles / AdministerDogma are unreachable
         // by construction — every verb behind them dead on arrival.
         let persistence = store();
         let permissions = Permissions::new(&persistence);
         let anfitriao = permissions.register_or_find(&[1; 32], "anfitriao").unwrap();
         assert_eq!(anfitriao.roles, vec![COMMANDER]);
-        assert!(permissions.may(anfitriao.id, Permission::ManageCages).unwrap());
+        assert!(permissions.may(anfitriao.id, Permission::ManageVoiceRooms).unwrap());
     }
 
     #[test]
@@ -734,7 +734,7 @@ mod tests {
             "uma conta anterior ao comando não conseguiu assumi-lo, e o Dogma fica \
              inadministrável para sempre: {de_volta:?}"
         );
-        assert!(permissions.may(de_volta.id, Permission::ManageCages).unwrap());
+        assert!(permissions.may(de_volta.id, Permission::ManageVoiceRooms).unwrap());
     }
 
     #[test]
@@ -768,7 +768,7 @@ mod tests {
         let convidado = permissions.register_or_find(&[2; 32], "shinji").unwrap();
         assert_eq!(convidado.roles, vec![PERSON]);
         for permission in [
-            Permission::ManageCages,
+            Permission::ManageVoiceRooms,
             Permission::ManageRoles,
             Permission::AdministerDogma,
         ] {
@@ -854,7 +854,7 @@ mod tests {
         let permissions = Permissions::new(&persistence);
 
         let allowed = [
-            Permission::ViewCage,
+            Permission::ViewVoiceRoom,
             Permission::InsertPlug,
             Permission::ReadLine,
         ];
@@ -879,7 +879,7 @@ mod tests {
             Permission::MovePerson,
             Permission::Kick,
             Permission::Ban,
-            Permission::ManageCages,
+            Permission::ManageVoiceRooms,
             Permission::ManageRoles,
             Permission::AdministerDogma,
         ];
@@ -900,7 +900,7 @@ mod tests {
 
         assert!(permissions.may(operator, Permission::Kick).unwrap());
         assert!(permissions.may(operator, Permission::Ban).unwrap());
-        assert!(!permissions.may(operator, Permission::ManageCages).unwrap());
+        assert!(!permissions.may(operator, Permission::ManageVoiceRooms).unwrap());
         assert!(!permissions.may(operator, Permission::ManageRoles).unwrap());
         assert!(!permissions.may(operator, Permission::AdministerDogma).unwrap());
     }

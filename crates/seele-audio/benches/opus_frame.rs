@@ -84,7 +84,7 @@ fn codec_path(c: &mut Criterion) {
 
 fn resampling(c: &mut Criterion) {
     // Task M1.4. The question is whether a sinc resampler is affordable per
-    // source: a client in a 15-person Cage runs one on capture and, once mixing
+    // source: a client in a 15-person voice room runs one on capture and, once mixing
     // lands, potentially more on playback. Budget is 20 ms of real time per
     // frame.
     let mut group = c.benchmark_group("resample 20 ms frame");

@@ -30,7 +30,7 @@
 //!
 //! # O que a reconexão restaura, e o que não
 //!
-//! Restaura o Cage, a Linha, o A.T. Field e o isolamento: é o que a pessoa
+//! Restaura a sala de voz, a Linha, o A.T. Field e o isolamento: é o que a pessoa
 //! escolheu, e voltar sem isso seria voltar para outro lugar. **Não** restaura
 //! a voz sozinha — a conexão é nova, e com ela o canal de mídia. A casca recebe
 //! [`Aviso::Reconectado`] com o canal novo e reabre o áudio. É honesto: o
@@ -43,7 +43,7 @@ use std::time::{Duration, Instant};
 use ed25519_dalek::SigningKey;
 use seele_proto::control::ServerMessage;
 use seele_proto::ids::{
-    AttachmentId, CageId, ClientMessageId, LineId, MessageId, PersonId, ScreenId,
+    AttachmentId, VoiceRoomId, ClientMessageId, LineId, MessageId, PersonId, ScreenId,
 };
 use seele_proto::sync_ratio::SyncBand;
 use tokio::sync::mpsc;
@@ -191,7 +191,7 @@ pub enum Motivo {
 /// O que a casca manda fazer.
 #[derive(Debug)]
 enum Comando {
-    InserirPlug(CageId),
+    InserirPlug(VoiceRoomId),
     EjetarPlug,
     AbrirLinha(LineId),
     Dizer {
@@ -205,7 +205,7 @@ enum Comando {
     },
     AtField(bool),
     Isolamento(bool),
-    CriarCage {
+    CriarVoiceRoom {
         nome: String,
         limite: u16,
         linha: Option<LineId>,
@@ -213,8 +213,8 @@ enum Comando {
     CriarLinha {
         nome: String,
     },
-    RenomearCage {
-        cage: CageId,
+    RenomearVoiceRoom {
+        voice_room: VoiceRoomId,
         nome: String,
     },
     RenomearLinha {
@@ -240,10 +240,10 @@ enum Comando {
     },
     MoverPersono {
         pessoa: PersonId,
-        cage: CageId,
+        voice_room: VoiceRoomId,
     },
-    ApagarCage {
-        cage: CageId,
+    ApagarVoiceRoom {
+        voice_room: VoiceRoomId,
     },
     ApagarLinha {
         linha: LineId,
@@ -926,7 +926,7 @@ impl Enlace {
             cliente: Some(cliente),
             bateria: Battery::new(),
             inicio: Instant::now(),
-            cage: None,
+            voice_room: None,
             linha: None,
             at_field: false,
             isolamento: false,
@@ -1028,16 +1028,16 @@ impl Enlace {
         self.media.clone()
     }
 
-    /// Entra num Cage. Restaurado depois de uma reconexão.
+    /// Entra num sala de voz. Restaurado depois de uma reconexão.
     ///
     /// # Errors
     ///
     /// Falha se a sessão já tiver acabado.
-    pub async fn inserir_plug(&self, cage: CageId) -> Result<(), Fechado> {
-        self.mandar(Comando::InserirPlug(cage)).await
+    pub async fn inserir_plug(&self, voice_room: VoiceRoomId) -> Result<(), Fechado> {
+        self.mandar(Comando::InserirPlug(voice_room)).await
     }
 
-    /// Sai do Cage.
+    /// Sai da sala de voz.
     ///
     /// # Errors
     ///
@@ -1096,15 +1096,15 @@ impl Enlace {
         self.mandar(Comando::Isolamento(ligado)).await
     }
 
-    /// Pede ao Dogma que faça um Cage.
+    /// Pede ao Dogma que faça uma sala de voz.
     ///
     /// Pede, e só. Nada aqui confere se este pessoa pode: a `specs/08-seguranca.md`
     /// põe a decisão no servidor, e um core que recusasse por conta própria
     /// seria uma segunda autoridade para manter de acordo com a primeira. A
-    /// resposta chega como aviso — `CageCreated` se aconteceu, `Alert` com
+    /// resposta chega como aviso — `VoiceRoomCreated` se aconteceu, `Alert` com
     /// `PermissionDenied` se não.
     ///
-    /// **Não** é refeito ao reconectar, ao contrário do Cage e da Linha
+    /// **Não** é refeito ao reconectar, ao contrário da sala de voz e da Linha
     /// abertos. Aqueles são onde a pessoa estava, e voltar sem eles é voltar
     /// para outro lugar; este é uma coisa que se faz uma vez. Repetido depois de
     /// uma queda, ele criaria uma sala minutos mais tarde, do nada, e mais uma
@@ -1113,13 +1113,13 @@ impl Enlace {
     /// # Errors
     ///
     /// Falha se a sessão já tiver acabado.
-    pub async fn criar_cage(
+    pub async fn criar_voice_room(
         &self,
         nome: String,
         limite: u16,
         linha: Option<LineId>,
     ) -> Result<(), Fechado> {
-        self.mandar(Comando::CriarCage {
+        self.mandar(Comando::CriarVoiceRoom {
             nome,
             limite,
             linha,
@@ -1136,13 +1136,13 @@ impl Enlace {
         self.mandar(Comando::CriarLinha { nome }).await
     }
 
-    /// Pede ao Dogma que renomeie um Cage.
+    /// Pede ao Dogma que renomeie uma sala de voz.
     ///
     /// # Errors
     ///
     /// Falha se a sessão já tiver acabado.
-    pub async fn renomear_cage(&self, cage: CageId, nome: String) -> Result<(), Fechado> {
-        self.mandar(Comando::RenomearCage { cage, nome }).await
+    pub async fn renomear_voice_room(&self, voice_room: VoiceRoomId, nome: String) -> Result<(), Fechado> {
+        self.mandar(Comando::RenomearVoiceRoom { voice_room, nome }).await
     }
 
     /// Pede ao Dogma que renomeie uma Linha.
@@ -1239,20 +1239,20 @@ impl Enlace {
         self.mandar(Comando::RemoverMensagem { mensagem }).await
     }
 
-    /// Pede ao Dogma que mova alguém para um Cage.
+    /// Pede ao Dogma que mova alguém para uma sala de voz.
     ///
     /// # Errors
     ///
     /// Falha se a sessão já tiver acabado.
-    pub async fn mover_persono(&self, pessoa: PersonId, cage: CageId) -> Result<(), Fechado> {
-        self.mandar(Comando::MoverPersono { pessoa, cage }).await
+    pub async fn mover_pessoa(&self, pessoa: PersonId, voice_room: VoiceRoomId) -> Result<(), Fechado> {
+        self.mandar(Comando::MoverPersono { pessoa, voice_room }).await
     }
 
-    /// Pede ao Dogma que destrua um Cage.
+    /// Pede ao Dogma que destrua uma sala de voz.
     ///
     /// Pede, e só, como todo verbo daqui. Quem recusa é o Dogma: sem
     /// `administrar_dogma` volta `Alert` com `PermissionDenied`, e no único
-    /// Cage que resta volta `Alert` com `LastCage`, que é frase diferente.
+    /// sala de voz que resta volta `Alert` com `LastVoiceRoom`, que é frase diferente.
     ///
     /// **Não** é refeito ao reconectar, como os verbos de sala e de moderação e
     /// pelo mesmo motivo, com uma ponta a mais: repetido minutos depois, este
@@ -1261,8 +1261,8 @@ impl Enlace {
     /// # Errors
     ///
     /// Falha se a sessão já tiver acabado.
-    pub async fn apagar_cage(&self, cage: CageId) -> Result<(), Fechado> {
-        self.mandar(Comando::ApagarCage { cage }).await
+    pub async fn apagar_voice_room(&self, voice_room: VoiceRoomId) -> Result<(), Fechado> {
+        self.mandar(Comando::ApagarVoiceRoom { voice_room }).await
     }
 
     /// Pede ao Dogma que destrua uma Linha, e tudo que foi escrito nela.
@@ -1354,7 +1354,7 @@ impl Enlace {
     /// mandado»: entre o botão e o primeiro quadro há uma volta de rede, e
     /// prometer aqui seria prometer no lugar do Dogma.
     ///
-    /// **Não é refeito depois de uma queda**, ao contrário do Cage e da Linha.
+    /// **Não é refeito depois de uma queda**, ao contrário da sala de voz e da Linha.
     /// Ver o comentário de `Motor::lembrar`: uma transmissão que voltasse
     /// sozinha cinco minutos depois poria a tela de alguém no ar sem que
     /// ninguém tivesse apertado nada.
@@ -1441,7 +1441,7 @@ struct Motor {
     bateria: Battery,
     inicio: Instant,
     /// O que restaurar ao reconectar.
-    cage: Option<CageId>,
+    voice_room: Option<VoiceRoomId>,
     linha: Option<LineId>,
     at_field: bool,
     isolamento: bool,
@@ -1584,7 +1584,7 @@ impl Motor {
                     comando = comandos.recv() => {
                         match comando {
                             Some(Comando::Sair) | None => return self.encerrar(Motivo::Pedido),
-                            // Guardado, não perdido: entrar num Cage durante a
+                            // Guardado, não perdido: entrar num sala de voz durante a
                             // queda é uma intenção que vale quando voltar.
                             Some(comando) => { self.lembrar(&comando); None }
                         }
@@ -1599,10 +1599,10 @@ impl Motor {
                         // O que a reconexão vai refazer também muda quando
                         // **outra pessoa** decide. Sem isto, alguém movido por
                         // um operador voltaria, depois de uma queda, para o
-                        // Cage de onde foi tirado: o motor refaz o último Cage
+                        // sala de voz de onde foi tirado: o motor refaz o último sala de voz
                         // que este cliente pediu, e ele não pediu este.
-                        if let ServerMessage::MovedToCage { cage } = mensagem {
-                            self.cage = Some(cage);
+                        if let ServerMessage::MovedToVoiceRoom { voice_room } = mensagem {
+                            self.voice_room = Some(voice_room);
                         }
                         if matches!(mensagem, ServerMessage::Pong { .. }) {
                             self.bateria.on_pong();
@@ -1753,10 +1753,10 @@ impl Motor {
         match resultado {
             Ok(mut cliente) => {
                 // Restaurar antes de anunciar. Uma casca que recebesse
-                // "reconectado" e perguntasse o Cage antes de ele existir veria
+                // "reconectado" e perguntasse a sala de voz antes de ele existir veria
                 // uma sala vazia e acharia que perdeu gente.
-                if let Some(cage) = self.cage {
-                    let _ = cliente.insert_plug(cage).await;
+                if let Some(voice_room) = self.voice_room {
+                    let _ = cliente.insert_plug(voice_room).await;
                 }
                 if let Some(linha) = self.linha {
                     let _ = cliente.join_line(linha).await;
@@ -1797,7 +1797,7 @@ impl Motor {
             return;
         };
         let resultado = match comando {
-            Comando::InserirPlug(cage) => cliente.insert_plug(cage).await,
+            Comando::InserirPlug(voice_room) => cliente.insert_plug(voice_room).await,
             Comando::EjetarPlug => cliente.eject_plug().await,
             Comando::AbrirLinha(linha) => cliente.join_line(linha).await,
             Comando::Dizer { linha, corpo, id } => cliente.send_message(linha, &corpo, id).await,
@@ -1806,13 +1806,13 @@ impl Motor {
             }
             Comando::AtField(ligado) => cliente.set_at_field(ligado).await,
             Comando::Isolamento(ligado) => cliente.set_total_isolation(ligado).await,
-            Comando::CriarCage {
+            Comando::CriarVoiceRoom {
                 nome,
                 limite,
                 linha,
-            } => cliente.create_cage(&nome, limite, linha).await,
+            } => cliente.create_voice_room(&nome, limite, linha).await,
             Comando::CriarLinha { nome } => cliente.create_line(&nome).await,
-            Comando::RenomearCage { cage, nome } => cliente.rename_cage(cage, &nome).await,
+            Comando::RenomearVoiceRoom { voice_room, nome } => cliente.rename_voice_room(voice_room, &nome).await,
             Comando::RenomearLinha { linha, nome } => cliente.rename_line(linha, &nome).await,
             Comando::RenomearDogma { nome } => cliente.rename_dogma(&nome).await,
             Comando::IconeDoDogma { icone } => cliente.set_dogma_icon(icone).await,
@@ -1827,8 +1827,8 @@ impl Motor {
                     .await
             }
             Comando::RemoverMensagem { mensagem } => cliente.remove_message(mensagem).await,
-            Comando::MoverPersono { pessoa, cage } => cliente.move_person(pessoa, cage).await,
-            Comando::ApagarCage { cage } => cliente.delete_cage(cage).await,
+            Comando::MoverPersono { pessoa, voice_room } => cliente.move_person(pessoa, voice_room).await,
+            Comando::ApagarVoiceRoom { voice_room } => cliente.delete_voice_room(voice_room).await,
             Comando::ApagarLinha { linha } => cliente.delete_line(linha).await,
             Comando::PesarLinha { linha } => cliente.weigh_line(linha).await,
 
@@ -2121,14 +2121,14 @@ impl Motor {
     /// O pedido guardado vira bomba, se este `ScreenShareStarted` for o dele.
     ///
     /// A guarda que mora aqui é uma só, e é a que precisa do [`Client`]: **é
-    /// desta pessoa?** O quadro sai do barramento do Dogma para o Cage inteiro,
+    /// desta pessoa?** O quadro sai do barramento do Dogma para a sala de voz inteiro,
     /// e sem ela quem apenas assiste ligaria a captura da própria tela ao ver
     /// outro começar. As outras duas — já há uma viva, e o pedido existe — moram
     /// em [`Self::nascer_a_tela`], porque valem também para quem o chama de um
     /// teste.
     ///
     /// **A `Bomba` não vai para uma bomba a mais quando o Dogma reenvia.** Ele
-    /// reenvia `ScreenShareStarted` a cada pessoa que entra num Cage onde já há
+    /// reenvia `ScreenShareStarted` a cada pessoa que entra num sala de voz onde já há
     /// transmissão, e quem transmite recebe o reenvio junto; o pedido já foi
     /// consumido no primeiro, então o segundo não acha nada.
     fn talvez_ligar_a_bomba(&mut self, pessoa: PersonId, tela: ScreenId) {
@@ -2299,14 +2299,14 @@ impl Motor {
     /// Guarda o que a reconexão vai ter que refazer.
     fn lembrar(&mut self, comando: &Comando) {
         match comando {
-            Comando::InserirPlug(cage) => self.cage = Some(*cage),
-            Comando::EjetarPlug => self.cage = None,
+            Comando::InserirPlug(voice_room) => self.voice_room = Some(*voice_room),
+            Comando::EjetarPlug => self.voice_room = None,
             Comando::AbrirLinha(linha) => self.linha = Some(*linha),
             Comando::AtField(ligado) => self.at_field = *ligado,
             Comando::Isolamento(ligado) => self.isolamento = *ligado,
             // Fazer uma sala e moderar alguém **não** entram aqui, e a ausência
             // é deliberada nos dois casos. O que se refaz ao reconectar é onde
-            // a pessoa estava — o Cage, a Linha, os dois silêncios —, porque
+            // a pessoa estava — a sala de voz, a Linha, os dois silêncios —, porque
             // voltar sem isso é voltar para outro lugar. Fazer uma sala é coisa
             // que se faz uma vez; repetida depois de uma queda, ela apareceria
             // minutos mais tarde do nada, e duplicada se a pessoa já tivesse
@@ -2318,7 +2318,7 @@ impl Motor {
             // primeiro motivo: são coisas que se fazem uma vez. Refeito depois
             // da queda, um `RenomearDogma` desfaria o nome que **outra pessoa**
             // pôs nos cinco minutos em que este cliente esteve fora — e o nome
-            // do Dogma é de todo mundo que está dentro, ao contrário do Cage em
+            // do Dogma é de todo mundo que está dentro, ao contrário da sala de voz em
             // que esta pessoa estava sentada.
             //
             // Apagar é o pior dos três, e por isso vale escrevê-lo: refeito
@@ -2966,19 +2966,19 @@ mod tests {
     fn o_que_a_reconexao_restaura_e_o_que_a_pessoa_escolheu() {
         let mut motor = motor_de_teste();
 
-        motor.lembrar(&Comando::InserirPlug(CageId(2)));
+        motor.lembrar(&Comando::InserirPlug(VoiceRoomId(2)));
         motor.lembrar(&Comando::AbrirLinha(LineId(7)));
         motor.lembrar(&Comando::AtField(true));
         motor.lembrar(&Comando::Isolamento(true));
 
-        assert_eq!(motor.cage, Some(CageId(2)));
+        assert_eq!(motor.voice_room, Some(VoiceRoomId(2)));
         assert_eq!(motor.linha, Some(LineId(7)));
         assert!(motor.at_field);
         assert!(motor.isolamento);
 
-        // Ejetar não é uma queda: quem saiu do Cage não volta para ele.
+        // Ejetar não é uma queda: quem saiu da sala de voz não volta para ele.
         motor.lembrar(&Comando::EjetarPlug);
-        assert_eq!(motor.cage, None);
+        assert_eq!(motor.voice_room, None);
     }
 
     #[tokio::test]
@@ -3152,7 +3152,7 @@ mod tests {
         // minutos depois, alguém que já tinha reconectado cairia de novo, sem
         // ninguém ter pedido nada. O mesmo para banir.
         let mut motor = motor_de_teste();
-        motor.lembrar(&Comando::InserirPlug(CageId(2)));
+        motor.lembrar(&Comando::InserirPlug(VoiceRoomId(2)));
 
         motor.lembrar(&Comando::Expulsar { pessoa: PersonId(9) });
         motor.lembrar(&Comando::Banir {
@@ -3162,15 +3162,15 @@ mod tests {
         });
         motor.lembrar(&Comando::MoverPersono {
             pessoa: PersonId(9),
-            cage: CageId(5),
+            voice_room: VoiceRoomId(5),
         });
         motor.lembrar(&Comando::RemoverMensagem {
             mensagem: MessageId(1),
         });
 
         assert_eq!(
-            motor.cage,
-            Some(CageId(2)),
+            motor.voice_room,
+            Some(VoiceRoomId(2)),
             "moderar outra pessoa mexeu em onde este cliente está"
         );
     }
@@ -3407,7 +3407,7 @@ mod tests {
 
     #[test]
     fn sem_pedido_guardado_um_nome_de_transmissao_nao_liga_nada() {
-        // O Dogma reenvia `ScreenShareStarted` a cada pessoa que entra num Cage
+        // O Dogma reenvia `ScreenShareStarted` a cada pessoa que entra num sala de voz
         // onde já há transmissão — inclusive a quem está transmitindo. Sem esta
         // guarda, cada pessoa entrando na sala ligaria outra captura da mesma
         // tela.
@@ -3424,9 +3424,9 @@ mod tests {
         // no ar sem que ninguém tivesse apertado nada — e minutos depois de a
         // pessoa ter desistido.
         let mut motor = motor_de_teste();
-        motor.cage = Some(CageId(3));
+        motor.voice_room = Some(VoiceRoomId(3));
         motor.lembrar(&Comando::PararDeCompartilhar);
-        assert_eq!(motor.cage, Some(CageId(3)));
+        assert_eq!(motor.voice_room, Some(VoiceRoomId(3)));
     }
 
     /// A metade da regra de aceite do §3.2 que faltava.
@@ -3577,7 +3577,7 @@ mod tests {
             cliente: None,
             bateria: Battery::new(),
             inicio: Instant::now(),
-            cage: None,
+            voice_room: None,
             linha: None,
             at_field: false,
             isolamento: false,

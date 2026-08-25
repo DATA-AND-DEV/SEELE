@@ -14,7 +14,7 @@
 //! 2. **Depois de autenticar** — [`Vigia`], com chave na conexão. Segura o
 //!    convidado legítimo que inunda, que é o caso que o ADR 0021 nomeia.
 //!
-//! O terceiro uso é a mídia, em [`crate::cage`]: aquele limite já existia como
+//! O terceiro uso é a mídia, em [`crate::voice_room`]: aquele limite já existia como
 //! janela fixa e passou a usar o mesmo [`Balde`], para o Dogma ter **um**
 //! mecanismo de limitação e não três parecidos.
 //!
@@ -72,7 +72,7 @@ pub const ENDERECOS_LEMBRADOS: usize = 4096;
 
 /// Quantos quadros de controle uma conexão pode mandar em rajada.
 ///
-/// Entrar num Cage, abrir as Linhas e pedir o histórico de cada uma é uma
+/// Entrar num sala de voz, abrir as Linhas e pedir o histórico de cada uma é uma
 /// rajada real, e acontece toda vez que alguém conecta ou reconecta. Sessenta
 /// dá folga para um punhado de Linhas sem chegar perto do limite.
 pub const QUADROS_DE_RAJADA: u32 = 60;
@@ -597,7 +597,7 @@ mod testes {
 
     #[test]
     fn o_vigia_deixa_passar_a_rajada_de_entrada() {
-        // Entrar num Cage, abrir as Linhas e pedir o histórico de cada uma.
+        // Entrar num sala de voz, abrir as Linhas e pedir o histórico de cada uma.
         let inicio = zero();
         let mut vigia = Vigia::novo(inicio);
         for numero in 0..QUADROS_DE_RAJADA {
@@ -739,7 +739,7 @@ mod testes {
     }
 
     #[test]
-    fn o_balde_de_bytes_conta_por_persono_e_nao_por_conexao() {
+    fn o_balde_de_bytes_conta_por_pessoa_e_nao_por_conexao() {
         // Cinco conexões da mesma pessoa são cinco fluxos e um só orçamento; e
         // a pessoa do lado não paga por ela.
         let inicio = zero();
@@ -772,7 +772,7 @@ mod testes {
     }
 
     #[test]
-    fn a_tabela_de_personos_tem_teto() {
+    fn a_tabela_de_pessoas_tem_teto() {
         let inicio = zero();
         let mut vazao = Vazao::nova();
         for numero in 0..PERSONOS_LEMBRADOS as u64 + 10 {

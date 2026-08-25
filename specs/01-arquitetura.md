@@ -54,15 +54,15 @@ Consequências positivas:
 - Áudio espacial fica viável depois.
 - O servidor nunca vê áudio em claro → E2EE é um incremento, não uma reescrita.
 
-Consequência negativa: banda cresce com O(n²) no pior caso. Para o alvo (Cages de até ~15 pessoas), é irrelevante. Mitigação embutida: o VAD faz com que só quem está falando transmita, e na prática 2–3 pessoas falam por vez.
+Consequência negativa: banda cresce com O(n²) no pior caso. Para o alvo (VoiceRooms de até ~15 pessoas), é irrelevante. Mitigação embutida: o VAD faz com que só quem está falando transmita, e na prática 2–3 pessoas falam por vez.
 
-**Limite rígido:** acima de 20 participantes ativos em um Cage, o servidor passa a encaminhar apenas os N falantes mais altos [EM ABERTO: definir N e a política].
+**Limite rígido:** acima de 20 participantes ativos em um VoiceRoom, o servidor passa a encaminhar apenas os N falantes mais altos [EM ABERTO: definir N e a política].
 
 ## Modelo de concorrência
 
 - `tokio` como runtime, tanto no servidor quanto no cliente.
 - **O thread de áudio nunca é async.** Callback do `cpal` é tempo real: sem alocação, sem lock que bloqueie, sem I/O. Comunicação com o mundo async por ring buffer lock-free (`rtrb` ou similar).
-- Estado do servidor por Cage em uma task própria, com canais `mpsc`. Nada de `Mutex` global.
+- Estado do servidor por VoiceRoom em uma task própria, com canais `mpsc`. Nada de `Mutex` global.
 
 ## Fluxo de eventos no cliente
 
@@ -71,7 +71,7 @@ Consequência negativa: banda cresce com O(n²) no pior caso. Para o alvo (Cages
 ```
 Comando  →  [ seele-core ]  →  Evento
   Conectar                     SincronizacaoAlterada
-  EntrarNoCage                 UsuarioEntrou / UsuarioSaiu
+  EntrarNoVoiceRoom                 UsuarioEntrou / UsuarioSaiu
   EnviarMensagem               MensagemRecebida
   DefinirATField               TelemetriaAtualizada
   Ejetar                       ConexaoPerdida / Reconectando

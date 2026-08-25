@@ -1,6 +1,6 @@
 //! What is true about the session right now.
 //!
-//! A fold over [`ServerMessage`]: which people are in which Cage, what they are
+//! A fold over [`ServerMessage`]: which people are in which voice room, what they are
 //! called, what state they announced, what has been said. Nothing here draws
 //! anything or decides what a human should read.
 //!
@@ -27,8 +27,8 @@
 
 use std::collections::HashMap;
 
-use seele_proto::control::{CageInfo, LineInfo, Permission, PersonState};
-use seele_proto::ids::{CageId, LineId, MessageId, PersonId, ScreenId, Ssrc};
+use seele_proto::control::{VoiceRoomInfo, LineInfo, Permission, PersonState};
+use seele_proto::ids::{VoiceRoomId, LineId, MessageId, PersonId, ScreenId, Ssrc};
 use seele_proto::sync_ratio::SyncBand;
 use seele_proto::ServerMessage;
 
@@ -142,16 +142,16 @@ pub enum TransferNotice {
     },
 }
 
-/// The average Sync Ratio of a Cage, already banded.
+/// The average Sync Ratio of a voice room, already banded.
 ///
-/// The comp (`design/Entry Plug v2.dc.html`) draws this as **MÉDIA DO CAGE**, a
+/// The comp (`design/Entry Plug v2.dc.html`) draws this as **MÉDIA DO VOICE_ROOM**, a
 /// number in the band's colour with the sample size beside it, and computes
 /// both in the shell. Here it is computed once, in the core, for the same
 /// reason `seele_ffi::types` gives for carrying a band beside every person's
 /// number: a threshold known by two shells is a threshold two shells disagree
 /// about the day one of them is updated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CageSync {
+pub struct VoiceRoomSync {
     /// The mean of the seated people' ratios, 0 to 100.
     ///
     /// Rounded to the nearest point, ties up. The comp prints `82.4`, but the
@@ -197,7 +197,7 @@ pub struct Room {
     /// [`Room::adopt`].
     pub icon: Option<Vec<u8>>,
     /// Voice channels visible to this person.
-    pub cages: Vec<CageInfo>,
+    pub voice_rooms: Vec<VoiceRoomInfo>,
     /// Text channels visible to this person.
     pub lines: Vec<LineInfo>,
     /// What this person may do, as PERMISSIONS resolved it.
@@ -206,20 +206,20 @@ pub struct Room {
     /// re-deriving `specs/04-servidor-seele.md`'s "negadas vencem concedidas"
     /// for itself. **Convenience, never enforcement**: the server checks again.
     pub permissions: Vec<Permission>,
-    /// The Cage this person's plug is in.
-    pub current_cage: Option<CageId>,
+    /// The voice room this person's plug is in.
+    pub current_voice_room: Option<VoiceRoomId>,
     /// The Line being read.
     pub current_line: Option<LineId>,
     /// Everybody this client has heard of, by id.
     pub people: HashMap<PersonId, Person>,
-    /// Who is seated in which Cage, in arrival order.
-    pub seats: HashMap<CageId, Vec<PersonId>>,
+    /// Who is seated in which voice room, in arrival order.
+    pub seats: HashMap<VoiceRoomId, Vec<PersonId>>,
     /// Quem está conectado neste Dogma, esteja ou não numa sala.
     ///
     /// # Por que não dá para deduzir de [`Self::seats`]
     ///
     /// Porque sentar-se numa sala é uma coisa e estar aqui é outra, e por muito
-    /// tempo só a primeira tinha mensagem. `PersonJoined` carrega um Cage, então
+    /// tempo só a primeira tinha mensagem. `PersonJoined` carrega uma sala de voz, então
     /// quem entrava no servidor e ficava fora das salas era invisível para todo
     /// mundo — a lista de pessoas mostrava quem estava sentado e se chamava
     /// «pessoas». Agora `PersonPresent` e `PersonGone` dizem a outra metade.
@@ -240,15 +240,15 @@ pub struct Room {
     /// be in the air at once, and the second one failing must not erase the
     /// reason the first one did. A shell drains it.
     pub transfers: Vec<TransferNotice>,
-    /// Quem está compartilhando tela em cada Cage.
+    /// Quem está compartilhando tela em cada sala de voz.
     ///
-    /// Uma transmissão por Cage, que é o §6 item 3 da spec de compartilhamento
+    /// Uma transmissão por sala de voz, que é o §6 item 3 da spec de compartilhamento
     /// de tela: *«duas dobram a subida de quem recebe e triplicam a
-    /// interface»*. Um mapa e não um campo em [`CageInfo`] porque o Dogma
+    /// interface»*. Um mapa e não um campo em [`VoiceRoomInfo`] porque o Dogma
     /// **não** pôs a transmissão lá — ele reenvia `ScreenShareStarted` a quem
     /// entra numa sala que já tem uma —, e um campo que só o reenvio preenche
     /// seria um campo mentindo no aperto de mão.
-    pub telas: HashMap<CageId, Tela>,
+    pub telas: HashMap<VoiceRoomId, Tela>,
     /// A subida que o Dogma mediu da própria máquina, em bits por segundo.
     ///
     /// A primeira linha do teto do §5.1 — `caminho de quem HOSPEDA × 60% ÷ N` —
@@ -274,7 +274,7 @@ pub struct Room {
     pub ended: Option<Ended>,
 }
 
-/// Uma transmissão de tela acontecendo num Cage.
+/// Uma transmissão de tela acontecendo num sala de voz.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Tela {
     /// Quantas pessoas estão recebendo esta transmissão, quem compartilha
@@ -323,7 +323,7 @@ pub struct Changed {
     pub roster: bool,
     /// A message arrived, changed, or went away.
     pub messages: bool,
-    /// Cages or Lines changed.
+    /// voice_rooms or Lines changed.
     pub channels: bool,
     /// The Dogma renamed itself, or changed its picture.
     ///
@@ -377,7 +377,7 @@ impl Room {
     /// The handshake consumes the `Session` message while establishing PADRÃO:
     /// AZUL, so no shell ever sees it go by. Without this a client that
     /// connected perfectly shows an empty Dogma — which looks exactly like a
-    /// server with no Cages.
+    /// server with no voice_rooms.
     ///
     /// `nickname` is what this client asked to be called. It has to be passed
     /// in because the server announces arrivals to everybody *else*: nothing on
@@ -392,14 +392,14 @@ impl Room {
         // here would leave a client that was away while the icon was taken down
         // drawing it for the rest of the session.
         self.icon = None;
-        self.cages = info.cages.clone();
+        self.voice_rooms = info.voice_rooms.clone();
         self.lines = info.lines.clone();
         self.permissions = info.permissions.clone();
         // Limpas pelo mesmo motivo do ícone, e o estrago aqui é maior: uma
         // conexão nova não tem fluxo de tela nenhum — o `Client` que os
         // carregava morreu com ela —, então uma transmissão herdada seria a
         // interface prometendo uma tela que não tem por onde chegar. O Dogma
-        // reenvia `ScreenShareStarted` a quem entra num Cage que está
+        // reenvia `ScreenShareStarted` a quem entra num sala de voz que está
         // transmitindo, então o que é verdade volta sozinho.
         self.telas.clear();
         self.chave_pedida = None;
@@ -414,45 +414,45 @@ impl Room {
         );
     }
 
-    /// Records that this person's plug is now in a Cage, and seats them in it.
+    /// Records that this person's plug is now in a voice room, and seats them in it.
     ///
     /// Called on the way *out*, when the client asks — not on the way in. The
-    /// server confirms a Cage entry by silence, and a roster that waits for a
+    /// server confirms a voice room entry by silence, and a roster that waits for a
     /// message that never comes shows an empty room to the person sitting in it.
-    pub fn enter_cage(&mut self, cage: CageId) {
+    pub fn enter_voice_room(&mut self, voice_room: VoiceRoomId) {
         if let Some(me) = self.me {
-            if let Some(previous) = self.current_cage {
+            if let Some(previous) = self.current_voice_room {
                 if let Some(seats) = self.seats.get_mut(&previous) {
                     seats.retain(|seated| *seated != me);
                 }
             }
-            let seats = self.seats.entry(cage).or_default();
+            let seats = self.seats.entry(voice_room).or_default();
             if !seats.contains(&me) {
                 seats.push(me);
             }
         }
-        self.current_cage = Some(cage);
+        self.current_voice_room = Some(voice_room);
     }
 
     /// Records that this person's plug came **out**, and empties their seat.
     ///
-    /// The other half of [`Self::enter_cage`], and it was missing for as long
+    /// The other half of [`Self::enter_voice_room`], and it was missing for as long
     /// as that one existed. The Dogma does not echo `PersonLeft` back to the
     /// person who caused it — "they already know" — so leaving, exactly like
     /// entering, is bookkeeping this side has to do for itself. Without it the
     /// server empties the seat, every other client empties the seat, and the
-    /// one screen that goes on drawing the person in the Cage is the screen of
+    /// one screen that goes on drawing the person in the voice room is the screen of
     /// the person who just left it.
     ///
-    /// Idempotent: leaving a Cage nobody is in is not an error, it is a client
+    /// Idempotent: leaving a voice room nobody is in is not an error, it is a client
     /// asking twice.
-    pub fn leave_cage(&mut self) {
-        if let (Some(me), Some(previous)) = (self.me, self.current_cage) {
+    pub fn leave_voice_room(&mut self) {
+        if let (Some(me), Some(previous)) = (self.me, self.current_voice_room) {
             if let Some(seats) = self.seats.get_mut(&previous) {
                 seats.retain(|seated| *seated != me);
             }
         }
-        self.current_cage = None;
+        self.current_voice_room = None;
     }
 
     /// Esquece o aviso que está na tela, porque alguém o leu e o fechou.
@@ -485,47 +485,47 @@ impl Room {
         self.current_line = Some(line);
     }
 
-    /// The people seated in a Cage, in arrival order.
-    pub fn roster(&self, cage: CageId) -> impl Iterator<Item = &Person> {
+    /// The people seated in a voice room, in arrival order.
+    pub fn roster(&self, voice_room: VoiceRoomId) -> impl Iterator<Item = &Person> {
         self.seats
-            .get(&cage)
+            .get(&voice_room)
             .into_iter()
             .flatten()
             .filter_map(|id| self.people.get(id))
     }
 
-    /// The people in whichever Cage this client is in.
+    /// The people in whichever voice room this client is in.
     pub fn current_roster(&self) -> impl Iterator<Item = &Person> {
-        self.current_cage
+        self.current_voice_room
             .into_iter()
-            .flat_map(|cage| self.roster(cage))
+            .flat_map(|voice_room| self.roster(voice_room))
     }
 
-    /// The average Sync Ratio of a Cage, banded, or `None` if nobody is in it.
+    /// The average Sync Ratio of a voice room, banded, or `None` if nobody is in it.
     ///
-    /// # An empty Cage has no average
+    /// # An empty voice room has no average
     ///
     /// Not zero. Zero is a measurement, and by the bands it is a critical one:
-    /// a Dogma with four idle Cages would show four red rooms nobody is in,
-    /// and the one Cage that is genuinely in trouble would stop standing out.
+    /// a Dogma with four idle voice_rooms would show four red rooms nobody is in,
+    /// and the one voice room that is genuinely in trouble would stop standing out.
     /// `None` says "nothing to average", which is the truth, and leaves the
     /// shell to draw the absence — the comp draws `——` for a plug with no
     /// number, and this is the same case one level up.
     ///
     /// # An ejected person does not count
     ///
-    /// Ejecting a plug leaves the Cage: the person comes out of `seats` — via
-    /// [`Self::enter_cage`] for this client, or `PersonLeft` for anybody else —
+    /// Ejecting a plug leaves the voice room: the person comes out of `seats` — via
+    /// [`Self::enter_voice_room`] for this client, or `PersonLeft` for anybody else —
     /// while staying in `people`, because their name is still needed for what
     /// they already said. This averages the *seats*, so somebody who left stops
     /// counting the moment they leave and cannot drag the room's number down
     /// from outside it. There is no third state: this client has no notion of a
-    /// person who is in the Cage but ejected.
+    /// person who is in the voice room but ejected.
     #[must_use]
-    pub fn cage_sync(&self, cage: CageId) -> Option<CageSync> {
+    pub fn voice_room_sync(&self, voice_room: VoiceRoomId) -> Option<VoiceRoomSync> {
         let mut total: u32 = 0;
         let mut people: usize = 0;
-        for person in self.roster(cage) {
+        for person in self.roster(voice_room) {
             total += u32::from(person.sync_ratio);
             people += 1;
         }
@@ -542,17 +542,17 @@ impl Room {
         let mean = (2 * total + count) / (2 * count);
         let ratio = u8::try_from(mean).unwrap_or(u8::MAX);
 
-        Some(CageSync {
+        Some(VoiceRoomSync {
             ratio,
             band: SyncBand::of(ratio),
             people,
         })
     }
 
-    /// The average for whichever Cage this client is in.
+    /// The average for whichever voice room this client is in.
     #[must_use]
-    pub fn current_cage_sync(&self) -> Option<CageSync> {
-        self.current_cage.and_then(|cage| self.cage_sync(cage))
+    pub fn current_voice_room_sync(&self) -> Option<VoiceRoomSync> {
+        self.current_voice_room.and_then(|voice_room| self.voice_room_sync(voice_room))
     }
 
     /// A person's media source, addressed by nickname.
@@ -564,19 +564,19 @@ impl Room {
             .and_then(|person| person.ssrc)
     }
 
-    /// The Cage matching a name or a number.
+    /// The voice room matching a name or a number.
     #[must_use]
-    pub fn find_cage(&self, which: &str) -> Option<CageId> {
+    pub fn find_voice_room(&self, which: &str) -> Option<VoiceRoomId> {
         if let Ok(number) = which.parse::<u32>() {
-            if let Some(cage) = self.cages.iter().find(|cage| cage.id.0 == number) {
-                return Some(cage.id);
+            if let Some(voice_room) = self.voice_rooms.iter().find(|voice_room| voice_room.id.0 == number) {
+                return Some(voice_room.id);
             }
         }
         let wanted = which.to_lowercase();
-        self.cages
+        self.voice_rooms
             .iter()
-            .find(|cage| cage.name.to_lowercase().contains(&wanted))
-            .map(|cage| cage.id)
+            .find(|voice_room| voice_room.name.to_lowercase().contains(&wanted))
+            .map(|voice_room| voice_room.id)
     }
 
     /// The Line matching a name or a number, with or without its `#`.
@@ -607,8 +607,8 @@ impl Room {
 
     /// A transmissão que **este** pessoa está compartilhando, se houver uma.
     ///
-    /// Uma por Cage (§6 item 3), então achar a minha é achar aquela cujo dono
-    /// sou eu — e não a do Cage em que estou, que pode ser a de outra pessoa.
+    /// Uma por sala de voz (§6 item 3), então achar a minha é achar aquela cujo dono
+    /// sou eu — e não a da sala de voz em que estou, que pode ser a de outra pessoa.
     #[must_use]
     pub fn minha_tela(&self) -> Option<Tela> {
         let me = self.me?;
@@ -669,7 +669,7 @@ impl Room {
                 person,
                 ssrc,
                 dogma,
-                cages,
+                voice_rooms,
                 lines,
                 permissions,
                 ..
@@ -680,7 +680,7 @@ impl Room {
                 // For the reason [`Self::adopt`] gives: a handshake describes
                 // the Dogma from scratch, picture included.
                 self.icon = None;
-                self.cages.clone_from(cages);
+                self.voice_rooms.clone_from(voice_rooms);
                 self.lines.clone_from(lines);
                 self.permissions.clone_from(permissions);
                 self.people
@@ -692,7 +692,7 @@ impl Room {
             }
 
             ServerMessage::PersonJoined {
-                cage,
+                voice_room,
                 profile,
                 ssrc,
             } => {
@@ -703,15 +703,15 @@ impl Room {
                 person.nickname.clone_from(&profile.nickname);
                 person.ssrc = Some(*ssrc);
 
-                let seats = self.seats.entry(*cage).or_default();
+                let seats = self.seats.entry(*voice_room).or_default();
                 if !seats.contains(&profile.id) {
                     seats.push(profile.id);
                 }
                 changed.roster = true;
             }
 
-            ServerMessage::PersonLeft { cage, person } => {
-                if let Some(seats) = self.seats.get_mut(cage) {
+            ServerMessage::PersonLeft { voice_room, person } => {
+                if let Some(seats) = self.seats.get_mut(voice_room) {
                     seats.retain(|seated| seated != person);
                 }
                 // The person stays in `people`: their name is still needed to
@@ -883,9 +883,9 @@ impl Room {
             // sends one twice today; a client that reconnects and folds an old
             // event in would otherwise show the same room in the list twice, and
             // a duplicated room is one nobody can tell their friends to join.
-            ServerMessage::CageCreated { cage } => {
-                if !self.cages.iter().any(|known| known.id == cage.id) {
-                    self.cages.push(cage.clone());
+            ServerMessage::VoiceRoomCreated { voice_room } => {
+                if !self.voice_rooms.iter().any(|known| known.id == voice_room.id) {
+                    self.voice_rooms.push(voice_room.clone());
                     changed.channels = true;
                 }
             }
@@ -897,8 +897,8 @@ impl Room {
                 }
             }
 
-            ServerMessage::CageRenamed { cage, name } => {
-                if let Some(known) = self.cages.iter_mut().find(|known| known.id == *cage) {
+            ServerMessage::VoiceRoomRenamed { voice_room, name } => {
+                if let Some(known) = self.voice_rooms.iter_mut().find(|known| known.id == *voice_room) {
                     known.name.clone_from(name);
                     changed.channels = true;
                 }
@@ -930,10 +930,10 @@ impl Room {
 
             // Somebody with the permission moved this plug.
             //
-            // The same bookkeeping [`Self::enter_cage`] does when *this* client
-            // asks, and it has to be here as well as there: entering a Cage is
+            // The same bookkeeping [`Self::enter_voice_room`] does when *this* client
+            // asks, and it has to be here as well as there: entering a voice room is
             // recorded on the way out, when the client sends the request, and a
-            // move is a Cage this client never asked for. Without this the
+            // move is a voice room this client never asked for. Without this the
             // person is drawn in the room they left, sending voice into it,
             // reading its roster.
             //
@@ -942,8 +942,8 @@ impl Room {
             // because they are two different things: this is where the plug is,
             // that is what the person should be told, and only the shell knows
             // how to say the second.
-            ServerMessage::MovedToCage { cage } => {
-                self.enter_cage(*cage);
+            ServerMessage::MovedToVoiceRoom { voice_room } => {
+                self.enter_voice_room(*voice_room);
                 changed.roster = true;
             }
 
@@ -955,21 +955,21 @@ impl Room {
             //
             // The seats go with it. Whoever was inside was turned out by the
             // server, which announces each of them as a `PersonLeft` — but the
-            // announcement is per person and this map is per Cage, so a Cage
+            // announcement is per person and this map is per voice room, so a voice room
             // whose last `PersonLeft` was lost to a reconnection would leave
             // people seated in a room nobody can see. Clearing it here needs no
             // announcement to be complete.
-            ServerMessage::CageDeleted { cage } => {
-                let before = self.cages.len();
-                self.cages.retain(|known| known.id != *cage);
-                self.seats.remove(cage);
-                if self.current_cage == Some(*cage) {
-                    // Not moved anywhere: this client is in no Cage now, which
+            ServerMessage::VoiceRoomDeleted { voice_room } => {
+                let before = self.voice_rooms.len();
+                self.voice_rooms.retain(|known| known.id != *voice_room);
+                self.seats.remove(voice_room);
+                if self.current_voice_room == Some(*voice_room) {
+                    // Not moved anywhere: this client is in na sala de voz now, which
                     // is the truth. Choosing another room for somebody would be
                     // putting them in a conversation they never asked to be in.
-                    self.current_cage = None;
+                    self.current_voice_room = None;
                 }
-                changed.channels = self.cages.len() != before;
+                changed.channels = self.voice_rooms.len() != before;
                 changed.roster = true;
             }
 
@@ -996,35 +996,35 @@ impl Room {
 
             // ---- compartilhamento de tela ----
             //
-            // O Dogma manda `ScreenShareStarted` a **todo** mundo do Cage, quem
+            // O Dogma manda `ScreenShareStarted` a **todo** mundo da sala de voz, quem
             // compartilha incluído: quem compartilha precisa do `ScreenId` para
             // poder abrir o fluxo, e todo o resto precisa saber que um fluxo
             // vem aí em vez de descobrir sendo entregue um.
             //
-            // E manda de novo a quem **entra** num Cage que já tem transmissão.
+            // E manda de novo a quem **entra** num sala de voz que já tem transmissão.
             // É por isso que aqui não há caso especial nenhum: chegar depois e
             // estar lá desde o começo são a mesma mensagem, e um cliente que
             // tratasse os dois de maneiras diferentes teria duas maneiras de
             // errar.
             ServerMessage::ScreenShareStarted {
-                cage,
+                voice_room,
                 person,
                 screen,
             } => {
                 // A contagem sobrevive ao reenvio, e é por isso que ela é lida
                 // antes de inserir: o Dogma manda `ScreenShareStarted` de novo
-                // a **cada** pessoa que entra num Cage que já transmite, e
+                // a **cada** pessoa que entra num sala de voz que já transmite, e
                 // zerar ali faria a interface piscar «0 assistindo» e o teto
                 // subir por um instante — justamente no instante em que a sala
                 // acabou de crescer. O `ScreenViewers` que vem atrás corrige o
                 // número; o que ele não corrige é o teto que já saiu.
                 let espectadores = self
                     .telas
-                    .get(cage)
+                    .get(voice_room)
                     .filter(|tela| tela.screen == *screen)
                     .map_or(0, |tela| tela.espectadores);
                 self.telas.insert(
-                    *cage,
+                    *voice_room,
                     Tela {
                         espectadores,
                         person: *person,
@@ -1035,7 +1035,7 @@ impl Room {
             }
             // Quantas pessoas estão recebendo, que é o N do §5.1.
             //
-            // Procurado pelo `ScreenId` e não pelo Cage porque é assim que a
+            // Procurado pelo `ScreenId` e não pelo sala de voz porque é assim que a
             // mensagem se endereça, e porque um `ScreenViewers` atrasado de uma
             // transmissão anterior não pode reescrever a contagem da que
             // começou depois — é o mesmo cuidado do `ScreenShareStopped` logo
@@ -1072,7 +1072,7 @@ impl Room {
             // — alguém apertou parar, ou quem mandava sumiu — já se distinguem
             // por tudo o mais que acontece. Quem foi embora produz um
             // `PersonLeft`; quem continua na sala parou de propósito.
-            ServerMessage::ScreenShareStopped { cage, screen } => {
+            ServerMessage::ScreenShareStopped { voice_room, screen } => {
                 // Conferido antes de tirar: um `ScreenShareStopped` atrasado de
                 // uma transmissão anterior não pode apagar a que começou
                 // depois. As mensagens chegam em ordem no fluxo de controle,
@@ -1080,10 +1080,10 @@ impl Room {
                 // vez de assumida.
                 if self
                     .telas
-                    .get(cage)
+                    .get(voice_room)
                     .is_some_and(|tela| tela.screen == *screen)
                 {
-                    self.telas.remove(cage);
+                    self.telas.remove(voice_room);
                     changed.telas = true;
                 }
             }
@@ -1124,7 +1124,7 @@ mod tests {
     };
     use seele_proto::ids::{ScreenId, SessionId};
 
-    const CAGE: CageId = CageId(1);
+    const VOICE_ROOM: VoiceRoomId = VoiceRoomId(1);
     const LINE: LineId = LineId(1);
 
     fn session() -> ServerMessage {
@@ -1133,9 +1133,9 @@ mod tests {
             person: PersonId(7),
             ssrc: Ssrc(700),
             dogma: "Terceira Tóquio".into(),
-            cages: vec![CageInfo {
-                id: CAGE,
-                name: "CAGE-01 CENTRAL".into(),
+            voice_rooms: vec![VoiceRoomInfo {
+                id: VOICE_ROOM,
+                name: "VOICE_ROOM-01 CENTRAL".into(),
                 limit: 20,
                 password_required: false,
                 line: Some(LINE),
@@ -1151,7 +1151,7 @@ mod tests {
 
     fn joined(id: u64, nickname: &str) -> ServerMessage {
         ServerMessage::PersonJoined {
-            cage: CAGE,
+            voice_room: VOICE_ROOM,
             profile: PersonProfile {
                 id: PersonId(id),
                 nickname: nickname.into(),
@@ -1180,7 +1180,7 @@ mod tests {
     fn room() -> Room {
         let mut room = Room::new();
         room.apply(&session());
-        room.enter_cage(CAGE);
+        room.enter_voice_room(VOICE_ROOM);
         room.open_line(LINE);
         room
     }
@@ -1192,7 +1192,7 @@ mod tests {
 
         assert!(changed.channels);
         assert_eq!(room.dogma, "Terceira Tóquio");
-        assert_eq!(room.cages.len(), 1);
+        assert_eq!(room.voice_rooms.len(), 1);
         assert_eq!(room.lines.len(), 1);
         assert_eq!(room.me, Some(PersonId(7)));
     }
@@ -1208,12 +1208,12 @@ mod tests {
             person: PersonId(7),
             ssrc: Ssrc(700),
             dogma: "Terceira Tóquio".into(),
-            cages: Vec::new(),
+            voice_rooms: Vec::new(),
             lines: Vec::new(),
             permissions: Vec::new(),
         };
         room.adopt(&info, "ayanami");
-        room.enter_cage(CAGE);
+        room.enter_voice_room(VOICE_ROOM);
 
         let names: Vec<&str> = room
             .current_roster()
@@ -1223,12 +1223,12 @@ mod tests {
     }
 
     #[test]
-    fn moving_between_cages_does_not_leave_a_copy_behind() {
+    fn moving_between_voice_rooms_does_not_leave_a_copy_behind() {
         let mut room = room();
-        room.enter_cage(CageId(2));
+        room.enter_voice_room(VoiceRoomId(2));
 
-        assert_eq!(room.roster(CAGE).count(), 0);
-        assert_eq!(room.roster(CageId(2)).count(), 1);
+        assert_eq!(room.roster(VOICE_ROOM).count(), 0);
+        assert_eq!(room.roster(VoiceRoomId(2)).count(), 1);
     }
 
     #[test]
@@ -1239,7 +1239,7 @@ mod tests {
         room.apply(&joined(3, "ayanami"));
         room.apply(&said(1, 3, "verificando harmônicos"));
         room.apply(&ServerMessage::PersonLeft {
-            cage: CAGE,
+            voice_room: VOICE_ROOM,
             person: PersonId(3),
         });
 
@@ -1458,12 +1458,12 @@ mod tests {
     }
 
     #[test]
-    fn a_cage_is_found_by_number_or_by_part_of_its_name() {
+    fn a_voice_room_is_found_by_number_or_by_part_of_its_name() {
         let room = room();
-        assert_eq!(room.find_cage("1"), Some(CAGE));
-        assert_eq!(room.find_cage("central"), Some(CAGE));
-        assert_eq!(room.find_cage("CENTRAL"), Some(CAGE));
-        assert_eq!(room.find_cage("geofront"), None);
+        assert_eq!(room.find_voice_room("1"), Some(VOICE_ROOM));
+        assert_eq!(room.find_voice_room("central"), Some(VOICE_ROOM));
+        assert_eq!(room.find_voice_room("CENTRAL"), Some(VOICE_ROOM));
+        assert_eq!(room.find_voice_room("geofront"), None);
     }
 
     #[test]
@@ -1485,7 +1485,7 @@ mod tests {
         assert_eq!(room.ssrc_of("ninguém"), None);
     }
 
-    /// Seats a person in `CAGE` and gives them a Sync Ratio.
+    /// Seats a person in `VOICE_ROOM` and gives them a Sync Ratio.
     fn seated_with(room: &mut Room, id: u64, nickname: &str, sync: u8) {
         room.apply(&joined(id, nickname));
         room.apply(&ServerMessage::PersonState(PersonState {
@@ -1498,7 +1498,7 @@ mod tests {
         }));
     }
 
-    /// The Cage seen by somebody whose own plug is elsewhere, so the fixture's
+    /// The voice room seen by somebody whose own plug is elsewhere, so the fixture's
     /// own zero does not have to be reasoned about in every average.
     fn watching() -> Room {
         let mut room = Room::new();
@@ -1507,21 +1507,21 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_cage_has_no_average_rather_than_a_zero() {
+    fn an_empty_voice_room_has_no_average_rather_than_a_zero() {
         // Zero is a measurement, and by the bands a critical one. Four idle
-        // Cages drawn in red is four alarms nobody set, and the Cage that is
+        // voice_rooms drawn in red is four alarms nobody set, and the voice room that is
         // genuinely in trouble stops standing out among them.
         let room = room();
-        assert_eq!(room.cage_sync(CageId(9)), None, "a Cage nobody is in");
-        assert_eq!(watching().cage_sync(CAGE), None, "a Cage nobody has sat in");
+        assert_eq!(room.voice_room_sync(VoiceRoomId(9)), None, "a voice room nobody is in");
+        assert_eq!(watching().voice_room_sync(VOICE_ROOM), None, "a voice room nobody has sat in");
 
-        // And the person's own Cage, before anybody is in it, has no average
+        // And the person's own voice room, before anybody is in it, has no average
         // either — including no average of nobody.
         let mut alone = watching();
-        assert_eq!(alone.current_cage_sync(), None, "no Cage entered yet");
-        alone.enter_cage(CAGE);
+        assert_eq!(alone.current_voice_room_sync(), None, "na sala de voz entered yet");
+        alone.enter_voice_room(VOICE_ROOM);
         assert_eq!(
-            alone.current_cage_sync().map(|sync| sync.people),
+            alone.current_voice_room_sync().map(|sync| sync.people),
             Some(1),
             "the person sitting in it is one person"
         );
@@ -1537,7 +1537,7 @@ mod tests {
         seated_with(&mut room, 4, "asuka", 81);
         seated_with(&mut room, 5, "shinji", 78);
 
-        let average = room.cage_sync(CAGE).expect("three people are seated");
+        let average = room.voice_room_sync(VOICE_ROOM).expect("three people are seated");
         assert_eq!(average.ratio, 83);
         assert_eq!(average.band, SyncBand::Degraded);
         assert_eq!(average.people, 3);
@@ -1553,11 +1553,11 @@ mod tests {
         seated_with(&mut room, 3, "ayanami", 84);
         seated_with(&mut room, 4, "asuka", 85);
 
-        let average = room.cage_sync(CAGE).expect("two people are seated");
+        let average = room.voice_room_sync(VOICE_ROOM).expect("two people are seated");
         assert_eq!(average.ratio, 85);
         assert_eq!(average.band, SyncBand::Nominal);
         assert_eq!(average.people, 2);
-        assert_eq!(room.current_cage_sync(), None, "our plug is elsewhere");
+        assert_eq!(room.current_voice_room_sync(), None, "our plug is elsewhere");
     }
 
     #[test]
@@ -1565,19 +1565,19 @@ mod tests {
         // Ejecting leaves the seats and keeps the name. Somebody who walked out
         // with a dying connection must not go on dragging the room's number
         // down from outside it — and this client has no third state where a
-        // person is in the Cage but ejected.
+        // person is in the voice room but ejected.
         let mut room = watching();
         seated_with(&mut room, 3, "ayanami", 90);
         seated_with(&mut room, 4, "asuka", 20);
 
-        assert_eq!(room.cage_sync(CAGE).map(|sync| sync.ratio), Some(55));
+        assert_eq!(room.voice_room_sync(VOICE_ROOM).map(|sync| sync.ratio), Some(55));
 
         room.apply(&ServerMessage::PersonLeft {
-            cage: CAGE,
+            voice_room: VOICE_ROOM,
             person: PersonId(4),
         });
 
-        let average = room.cage_sync(CAGE).expect("ayanami is still seated");
+        let average = room.voice_room_sync(VOICE_ROOM).expect("ayanami is still seated");
         assert_eq!(average.ratio, 90, "somebody who left is still counted");
         assert_eq!(average.people, 1);
         assert_eq!(
@@ -1590,18 +1590,18 @@ mod tests {
     // ---- rooms made while this client was already connected ----
 
     #[test]
-    fn a_cage_made_now_joins_the_list_without_a_reconnection() {
+    fn a_voice_room_made_now_joins_the_list_without_a_reconnection() {
         // The whole point of announcing it. Folding this into the next
         // handshake only would mean the person who made the room has to tell
         // everybody to reconnect before they can walk into it.
         let mut room = Room::new();
         room.apply(&session());
-        assert_eq!(room.cages.len(), 1);
+        assert_eq!(room.voice_rooms.len(), 1);
 
-        let changed = room.apply(&ServerMessage::CageCreated {
-            cage: CageInfo {
-                id: CageId(2),
-                name: "CAGE-02 SALA DOS FUNDOS".into(),
+        let changed = room.apply(&ServerMessage::VoiceRoomCreated {
+            voice_room: VoiceRoomInfo {
+                id: VoiceRoomId(2),
+                name: "VOICE_ROOM-02 SALA DOS FUNDOS".into(),
                 limit: 8,
                 password_required: false,
                 line: None,
@@ -1612,9 +1612,9 @@ mod tests {
             changed.channels,
             "nothing told the shell to redraw the list"
         );
-        assert_eq!(room.cages.len(), 2);
-        assert_eq!(room.cages[1].id, CageId(2));
-        assert_eq!(room.cages[1].name, "CAGE-02 SALA DOS FUNDOS");
+        assert_eq!(room.voice_rooms.len(), 2);
+        assert_eq!(room.voice_rooms[1].id, VoiceRoomId(2));
+        assert_eq!(room.voice_rooms[1].name, "VOICE_ROOM-02 SALA DOS FUNDOS");
     }
 
     #[test]
@@ -1640,10 +1640,10 @@ mod tests {
         // is a room nobody can tell a friend to join by name.
         let mut room = Room::new();
         room.apply(&session());
-        let made = ServerMessage::CageCreated {
-            cage: CageInfo {
-                id: CageId(2),
-                name: "CAGE-02".into(),
+        let made = ServerMessage::VoiceRoomCreated {
+            voice_room: VoiceRoomInfo {
+                id: VoiceRoomId(2),
+                name: "VOICE_ROOM-02".into(),
                 limit: 8,
                 password_required: false,
                 line: None,
@@ -1653,7 +1653,7 @@ mod tests {
         room.apply(&made);
         let again = room.apply(&made);
 
-        assert_eq!(room.cages.len(), 2);
+        assert_eq!(room.voice_rooms.len(), 2);
         assert!(
             !again.channels,
             "a repeat told the shell to redraw a list that did not change"
@@ -1730,26 +1730,26 @@ mod tests {
         // it under the cursor of whoever was about to click it.
         let mut room = Room::new();
         room.apply(&session());
-        room.apply(&ServerMessage::CageCreated {
-            cage: CageInfo {
-                id: CageId(2),
-                name: "CAGE-02".into(),
+        room.apply(&ServerMessage::VoiceRoomCreated {
+            voice_room: VoiceRoomInfo {
+                id: VoiceRoomId(2),
+                name: "VOICE_ROOM-02".into(),
                 limit: 8,
                 password_required: false,
                 line: None,
             },
         });
 
-        let changed = room.apply(&ServerMessage::CageRenamed {
-            cage: CAGE,
-            name: "CAGE-01 PONTE".into(),
+        let changed = room.apply(&ServerMessage::VoiceRoomRenamed {
+            voice_room: VOICE_ROOM,
+            name: "VOICE_ROOM-01 PONTE".into(),
         });
 
         assert!(changed.channels);
-        assert_eq!(room.cages.len(), 2, "the rename made a second room");
-        assert_eq!(room.cages[0].id, CAGE);
-        assert_eq!(room.cages[0].name, "CAGE-01 PONTE");
-        assert_eq!(room.cages[0].limit, 20, "the rename rewrote the rest of it");
+        assert_eq!(room.voice_rooms.len(), 2, "the rename made a second room");
+        assert_eq!(room.voice_rooms[0].id, VOICE_ROOM);
+        assert_eq!(room.voice_rooms[0].name, "VOICE_ROOM-01 PONTE");
+        assert_eq!(room.voice_rooms[0].limit, 20, "the rename rewrote the rest of it");
     }
 
     #[test]
@@ -1770,61 +1770,61 @@ mod tests {
     // ---- rooms destroyed while this client was looking at them ----
 
     #[test]
-    fn a_destroyed_cage_leaves_the_list_and_takes_its_seats_with_it() {
+    fn a_destroyed_voice_room_leaves_the_list_and_takes_its_seats_with_it() {
         // Dropped rather than greyed out. The confirmation in front of the verb
         // promised destruction; a client still drawing the row would be the one
         // screen in the product claiming the room is there.
         let mut room = room();
         room.apply(&joined(3, "ayanami"));
-        assert_eq!(room.roster(CAGE).count(), 2, "this client and ayanami");
+        assert_eq!(room.roster(VOICE_ROOM).count(), 2, "this client and ayanami");
 
-        let changed = room.apply(&ServerMessage::CageDeleted { cage: CAGE });
+        let changed = room.apply(&ServerMessage::VoiceRoomDeleted { voice_room: VOICE_ROOM });
 
         assert!(
             changed.channels,
             "nothing told the shell to redraw the list"
         );
-        assert!(room.cages.is_empty(), "the destroyed Cage is still listed");
+        assert!(room.voice_rooms.is_empty(), "the destroyed voice room is still listed");
         assert_eq!(
-            room.roster(CAGE).count(),
+            room.roster(VOICE_ROOM).count(),
             0,
             "people are still seated in a room nobody can see"
         );
     }
 
     #[test]
-    fn the_plug_comes_out_of_a_cage_that_no_longer_exists() {
+    fn the_plug_comes_out_of_a_voice_room_that_no_longer_exists() {
         // And lands nowhere. Choosing another room for somebody would put them
         // in a conversation they never asked to be in — with a live microphone.
         let mut room = room();
-        assert_eq!(room.current_cage, Some(CAGE));
+        assert_eq!(room.current_voice_room, Some(VOICE_ROOM));
 
-        room.apply(&ServerMessage::CageDeleted { cage: CAGE });
+        room.apply(&ServerMessage::VoiceRoomDeleted { voice_room: VOICE_ROOM });
 
-        assert_eq!(room.current_cage, None);
+        assert_eq!(room.current_voice_room, None);
         assert_eq!(room.current_roster().count(), 0);
     }
 
     #[test]
-    fn destroying_some_other_cage_leaves_this_plug_where_it_is() {
+    fn destroying_some_other_voice_room_leaves_this_plug_where_it_is() {
         // The half that a `retain` over the wrong field would break silently:
         // most of these announcements are about a room this client is not in.
         let mut room = room();
-        room.apply(&ServerMessage::CageCreated {
-            cage: CageInfo {
-                id: CageId(2),
-                name: "CAGE-02".into(),
+        room.apply(&ServerMessage::VoiceRoomCreated {
+            voice_room: VoiceRoomInfo {
+                id: VoiceRoomId(2),
+                name: "VOICE_ROOM-02".into(),
                 limit: 8,
                 password_required: false,
                 line: None,
             },
         });
 
-        let changed = room.apply(&ServerMessage::CageDeleted { cage: CageId(2) });
+        let changed = room.apply(&ServerMessage::VoiceRoomDeleted { voice_room: VoiceRoomId(2) });
 
         assert!(changed.channels);
-        assert_eq!(room.cages.len(), 1);
-        assert_eq!(room.current_cage, Some(CAGE), "the wrong plug came out");
+        assert_eq!(room.voice_rooms.len(), 1);
+        assert_eq!(room.current_voice_room, Some(VOICE_ROOM), "the wrong plug came out");
     }
 
     #[test]
@@ -1851,14 +1851,14 @@ mod tests {
     #[test]
     fn destroying_a_room_this_client_never_heard_of_changes_nothing() {
         let mut room = room();
-        let cage = room.apply(&ServerMessage::CageDeleted { cage: CageId(404) });
+        let voice_room = room.apply(&ServerMessage::VoiceRoomDeleted { voice_room: VoiceRoomId(404) });
         let line = room.apply(&ServerMessage::LineDeleted { line: LineId(404) });
 
-        assert!(!cage.channels);
+        assert!(!voice_room.channels);
         assert!(!line.channels);
-        assert_eq!(room.cages.len(), 1);
+        assert_eq!(room.voice_rooms.len(), 1);
         assert_eq!(room.lines.len(), 1);
-        assert_eq!(room.current_cage, Some(CAGE));
+        assert_eq!(room.current_voice_room, Some(VOICE_ROOM));
         assert_eq!(room.current_line, Some(LINE));
     }
 
@@ -1886,29 +1886,29 @@ mod tests {
 
     #[test]
     fn being_moved_takes_the_plug_with_it() {
-        // `enter_cage` is called on the way out, when this client asks. A move
-        // is a Cage nobody here asked for, so without an arm of its own the
+        // `enter_voice_room` is called on the way out, when this client asks. A move
+        // is a voice room nobody here asked for, so without an arm of its own the
         // person stays drawn in the room they left — sending voice into it and
         // reading its roster — while everybody else sees them somewhere new.
         let mut room = room();
         room.apply(&joined(3, "ayanami"));
-        assert_eq!(room.current_cage, Some(CAGE));
+        assert_eq!(room.current_voice_room, Some(VOICE_ROOM));
 
-        let changed = room.apply(&ServerMessage::MovedToCage { cage: CageId(2) });
+        let changed = room.apply(&ServerMessage::MovedToVoiceRoom { voice_room: VoiceRoomId(2) });
 
         assert!(changed.roster, "nothing told the shell to redraw");
-        assert_eq!(room.current_cage, Some(CageId(2)));
+        assert_eq!(room.current_voice_room, Some(VoiceRoomId(2)));
         assert_eq!(
             room.current_roster().count(),
             1,
             "the moved person is not in the room they were moved to"
         );
         assert_eq!(
-            room.roster(CAGE)
+            room.roster(VOICE_ROOM)
                 .map(|p| p.nickname.as_str())
                 .collect::<Vec<_>>(),
             ["ayanami"],
-            "a copy was left behind in the old Cage"
+            "a copy was left behind in the old voice room"
         );
     }
 
@@ -1923,23 +1923,23 @@ mod tests {
             person: PersonId(7),
             ssrc: Ssrc(700),
             dogma: "Terceira Tóquio".into(),
-            cages: Vec::new(),
+            voice_rooms: Vec::new(),
             lines: Vec::new(),
             roles: Vec::new(),
-            permissions: vec![Permission::ManageCages, Permission::Speak],
+            permissions: vec![Permission::ManageVoiceRooms, Permission::Speak],
         });
 
-        assert!(room.permissions.contains(&Permission::ManageCages));
+        assert!(room.permissions.contains(&Permission::ManageVoiceRooms));
         assert!(!room.permissions.contains(&Permission::Ban));
     }
     // ---- compartilhamento de tela ----
 
     #[test]
-    fn uma_transmissao_anunciada_fica_no_cage_e_some_quando_para() {
+    fn uma_transmissao_anunciada_fica_no_voice_room_e_some_quando_para() {
         let mut room = room();
 
         let changed = room.apply(&ServerMessage::ScreenShareStarted {
-            cage: CAGE,
+            voice_room: VOICE_ROOM,
             person: PersonId(9),
             screen: ScreenId(1),
         });
@@ -1948,7 +1948,7 @@ mod tests {
         // uma tela estaria redesenhando justamente o que não mudou.
         assert!(!changed.roster);
         assert_eq!(
-            room.telas.get(&CAGE),
+            room.telas.get(&VOICE_ROOM),
             Some(&Tela {
                 // Zero até o `ScreenViewers` chegar: quem começou a
                 // compartilhar ainda não sabe se alguém está olhando.
@@ -1959,7 +1959,7 @@ mod tests {
         );
 
         let changed = room.apply(&ServerMessage::ScreenShareStopped {
-            cage: CAGE,
+            voice_room: VOICE_ROOM,
             screen: ScreenId(1),
         });
         assert!(changed.telas);
@@ -2025,7 +2025,7 @@ mod tests {
         room.me = Some(PersonId(7));
         room.apply(&ServerMessage::HostUplink { bps: 6_000_000 });
         room.apply(&ServerMessage::ScreenShareStarted {
-            cage: CAGE,
+            voice_room: VOICE_ROOM,
             person: PersonId(7),
             screen: ScreenId(1),
         });
@@ -2080,7 +2080,7 @@ mod tests {
         // que entra numa sala que já transmite — não pode zerar a contagem, ou
         // o teto subiria justamente no instante em que a sala cresceu.
         room.apply(&ServerMessage::ScreenShareStarted {
-            cage: CAGE,
+            voice_room: VOICE_ROOM,
             person: PersonId(7),
             screen: ScreenId(1),
         });
@@ -2103,18 +2103,18 @@ mod tests {
         // de aparecer, que é o defeito mais difícil de acreditar que existe.
         let mut room = room();
         room.apply(&ServerMessage::ScreenShareStarted {
-            cage: CAGE,
+            voice_room: VOICE_ROOM,
             person: PersonId(9),
             screen: ScreenId(2),
         });
 
         let changed = room.apply(&ServerMessage::ScreenShareStopped {
-            cage: CAGE,
+            voice_room: VOICE_ROOM,
             screen: ScreenId(1),
         });
         assert!(!changed.telas, "um fim de outra transmissão mexeu na sala");
         assert_eq!(
-            room.telas.get(&CAGE).map(|tela| tela.screen),
+            room.telas.get(&VOICE_ROOM).map(|tela| tela.screen),
             Some(ScreenId(2))
         );
     }
@@ -2150,7 +2150,7 @@ mod tests {
         // por onde chegar. O Dogma reenvia o que é verdade logo em seguida.
         let mut room = room();
         room.apply(&ServerMessage::ScreenShareStarted {
-            cage: CAGE,
+            voice_room: VOICE_ROOM,
             person: PersonId(9),
             screen: ScreenId(1),
         });
@@ -2165,7 +2165,7 @@ mod tests {
                 person: PersonId(7),
                 ssrc: Ssrc(700),
                 dogma: "Terceira Tóquio".into(),
-                cages: Vec::new(),
+                voice_rooms: Vec::new(),
                 lines: Vec::new(),
                 permissions: Vec::new(),
             },

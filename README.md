@@ -138,7 +138,7 @@ para saber que a conexão está ruim.
 ││           │n / N             ocorrência seguinte / anterior    │           ││
 ││           │?                 esta ajuda                        │           ││
 ││           │:conectar <host>  conectar a um servidor            │           ││
-││           │:cage <nome>      entrar numa sala de voz           │           ││
+││           │:voice_room <nome>      entrar numa sala de voz           │           ││
 ││           │:sync             diagnóstico detalhado             │           ││
 ││           │:audio            dispositivos                      │           ││
 ││           │:ejetar           sair do servidor e escolher outro │           ││
@@ -463,7 +463,7 @@ explica por que uma linha é daquele jeito, a razão inteira está numa delas.
 
 Ainda não definida, mas o que a segurava saiu do caminho.
 
-A interface usava o vocabulário de Evangelion — Dogma, Cage, Pessoa, A.T. Field,
+A interface usava o vocabulário de Evangelion — Dogma, VoiceRoom, Pessoa, A.T. Field,
 e a assinatura em katakana —, e definir direitos com isso dentro era o tipo de
 decisão que se toma errado. Uma avaliação de usabilidade mostrou que o
 vocabulário também cobrava um preço de quem chegava, e as duas razões apontaram

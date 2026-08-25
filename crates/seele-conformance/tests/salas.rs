@@ -7,13 +7,13 @@
 //!
 //! Este é o que mais fácil passaria por engano. `seele-core` não confere
 //! permissão nenhuma — de propósito, porque a `specs/08-seguranca.md` põe a
-//! decisão no servidor —, então o pedido de um pessoa sem `ManageCages`
+//! decisão no servidor —, então o pedido de um pessoa sem `ManageVoiceRooms`
 //! **sai no fio**. Um teste que só olhasse o cliente não distinguiria «a casca
 //! não mandou» de «o Dogma recusou», e as duas dão a mesma tela.
 //!
 //! Então este arquivo separa as duas com três asserções que só o servidor pode
 //! produzir: o `Alert` com `PermissionDenied` volta; o **Comandante conectado
-//! ao lado não recebe `CageCreated` nenhum**, o que prova que a sala não foi
+//! ao lado não recebe `VoiceRoomCreated` nenhum**, o que prova que a sala não foi
 //! feita em lugar nenhum; e um aperto de mão novo não a encontra, o que prova
 //! que ela não foi feita nem no PERSISTENCE.
 //!
@@ -44,7 +44,7 @@ use anyhow::Result;
 use seele_core::enlace::{Aviso, Destino, Enlace};
 use seele_core::{MemoryPinStore, PinStore};
 use seele_proto::control::{AlertReason, Permission, ServerMessage};
-use seele_proto::ids::{CageId, LineId};
+use seele_proto::ids::{VoiceRoomId, LineId};
 use seele_server::persistence::Location;
 use seele_server::{DogmaConfig, Server};
 
@@ -125,11 +125,11 @@ async fn drenar(enlace: &mut Enlace, por: Duration) -> Vec<Aviso> {
     vistos
 }
 
-fn e_cage_criado(aviso: &Aviso, nome: &str) -> bool {
+fn e_voice_room_criado(aviso: &Aviso, nome: &str) -> bool {
     matches!(
         aviso,
         Aviso::Mensagem(mensagem)
-            if matches!(&**mensagem, ServerMessage::CageCreated { cage } if cage.name == nome)
+            if matches!(&**mensagem, ServerMessage::VoiceRoomCreated { voice_room } if voice_room.name == nome)
     )
 }
 
@@ -156,8 +156,8 @@ async fn quem_hospeda_vira_comandante_e_a_segunda_conta_nao() -> Result<()> {
         anfitriao
             .sessao()
             .permissions
-            .contains(&Permission::ManageCages),
-        "quem hospedou não recebeu ManageCages: {:?}",
+            .contains(&Permission::ManageVoiceRooms),
+        "quem hospedou não recebeu ManageVoiceRooms: {:?}",
         anfitriao.sessao().permissions
     );
 
@@ -166,7 +166,7 @@ async fn quem_hospeda_vira_comandante_e_a_segunda_conta_nao() -> Result<()> {
         !convidado
             .sessao()
             .permissions
-            .contains(&Permission::ManageCages),
+            .contains(&Permission::ManageVoiceRooms),
         "a segunda conta chegou podendo gerenciar o Dogma dos outros: {:?}",
         convidado.sessao().permissions
     );
@@ -199,15 +199,15 @@ async fn uma_sala_criada_aparece_para_quem_ja_estava_conectado() -> Result<()> {
 
     // A testemunha entrou antes de a sala existir, e é isso que se mede: ela
     // conhece a lista que o aperto de mão dela trouxe, e mais nada.
-    let antes = testemunha.sessao().cages.len();
-    assert_eq!(antes, 1, "o Dogma não abriu com o Cage de sempre");
+    let antes = testemunha.sessao().voice_rooms.len();
+    assert_eq!(antes, 1, "o Dogma não abriu com a sala de voz de sempre");
 
     anfitriao
         .criar_linha("planejamento".to_owned())
         .await
         .expect("a sessão do anfitrião acabou");
     anfitriao
-        .criar_cage("CAGE-02 SALA DOS FUNDOS".to_owned(), 8, None)
+        .criar_voice_room("VOICE_ROOM-02 SALA DOS FUNDOS".to_owned(), 8, None)
         .await
         .expect("a sessão do anfitrião acabou");
 
@@ -219,7 +219,7 @@ async fn uma_sala_criada_aparece_para_quem_ja_estava_conectado() -> Result<()> {
     assert!(
         vistos
             .iter()
-            .any(|aviso| e_cage_criado(aviso, "CAGE-02 SALA DOS FUNDOS")),
+            .any(|aviso| e_voice_room_criado(aviso, "VOICE_ROOM-02 SALA DOS FUNDOS")),
         "a sala foi feita e quem já estava conectado não soube — teria de reconectar para vê-la"
     );
     assert!(
@@ -236,12 +236,12 @@ async fn uma_sala_criada_aparece_para_quem_ja_estava_conectado() -> Result<()> {
     let depois = conectar(endereco, 48, "asuka").await?;
     let nomes: Vec<&str> = depois
         .sessao()
-        .cages
+        .voice_rooms
         .iter()
-        .map(|cage| cage.name.as_str())
+        .map(|voice_room| voice_room.name.as_str())
         .collect();
     assert!(
-        nomes.contains(&"CAGE-02 SALA DOS FUNDOS"),
+        nomes.contains(&"VOICE_ROOM-02 SALA DOS FUNDOS"),
         "a sala não sobreviveu ao anúncio: {nomes:?}"
     );
 
@@ -253,7 +253,7 @@ async fn uma_sala_criada_aparece_para_quem_ja_estava_conectado() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn um_persono_sem_manage_cages_e_recusado_pelo_dogma_e_nao_pela_casca() -> Result<()> {
+async fn um_pessoa_sem_manage_voice_rooms_e_recusado_pelo_dogma_e_nao_pela_casca() -> Result<()> {
     let (endereco, servidor) = dogma().await?;
 
     // O anfitrião conecta primeiro e fica de pé, calado, como testemunha. Ele é
@@ -265,14 +265,14 @@ async fn um_persono_sem_manage_cages_e_recusado_pelo_dogma_e_nao_pela_casca() ->
         !sem_permissao
             .sessao()
             .permissions
-            .contains(&Permission::ManageCages),
+            .contains(&Permission::ManageVoiceRooms),
         "o segundo pessoa tem a permissão, e este teste não mede mais nada"
     );
 
     // `seele-core` não confere nada — o pedido sai no fio. É essa a razão de
     // este teste existir aqui e não em `seele-core`.
     sem_permissao
-        .criar_cage("CAGE-DO-INTRUSO".to_owned(), 8, None)
+        .criar_voice_room("VOICE_ROOM-DO-INTRUSO".to_owned(), 8, None)
         .await
         .expect("a sessão acabou antes de o pedido sair");
 
@@ -291,7 +291,7 @@ async fn um_persono_sem_manage_cages_e_recusado_pelo_dogma_e_nao_pela_casca() ->
     assert!(
         !no_anfitriao
             .iter()
-            .any(|aviso| e_cage_criado(aviso, "CAGE-DO-INTRUSO")),
+            .any(|aviso| e_voice_room_criado(aviso, "VOICE_ROOM-DO-INTRUSO")),
         "a sala do intruso foi anunciada a quem estava conectado"
     );
 
@@ -300,19 +300,19 @@ async fn um_persono_sem_manage_cages_e_recusado_pelo_dogma_e_nao_pela_casca() ->
     let depois = conectar(endereco, 48, "asuka").await?;
     let nomes: Vec<&str> = depois
         .sessao()
-        .cages
+        .voice_rooms
         .iter()
-        .map(|cage| cage.name.as_str())
+        .map(|voice_room| voice_room.name.as_str())
         .collect();
     assert!(
-        !nomes.contains(&"CAGE-DO-INTRUSO"),
+        !nomes.contains(&"VOICE_ROOM-DO-INTRUSO"),
         "a sala do intruso ficou gravada: {nomes:?}"
     );
 
     // E a mesma recusa vale para os outros três verbos, que compartilham a
     // permissão e não a checagem — cada um tem o seu `if`, e um `if` esquecido
     // é uma porta aberta que os outros três testes não veriam.
-    let cage_de_sempre = CageId(depois.sessao().cages[0].id.get());
+    let voice_room_de_sempre = VoiceRoomId(depois.sessao().voice_rooms[0].id.get());
     let linha_de_sempre = LineId(depois.sessao().lines[0].id.get());
     for (verbo, pedido) in [
         (
@@ -322,9 +322,9 @@ async fn um_persono_sem_manage_cages_e_recusado_pelo_dogma_e_nao_pela_casca() ->
                 .await,
         ),
         (
-            "RenameCage",
+            "RenameVoiceRoom",
             sem_permissao
-                .renomear_cage(cage_de_sempre, "TOMADO".to_owned())
+                .renomear_voice_room(voice_room_de_sempre, "TOMADO".to_owned())
                 .await,
         ),
         (
@@ -345,9 +345,9 @@ async fn um_persono_sem_manage_cages_e_recusado_pelo_dogma_e_nao_pela_casca() ->
 
     let ultimo = conectar(endereco, 49, "rei").await?;
     assert_eq!(
-        ultimo.sessao().cages[0].name,
-        depois.sessao().cages[0].name,
-        "o intruso renomeou o Cage"
+        ultimo.sessao().voice_rooms[0].name,
+        depois.sessao().voice_rooms[0].name,
+        "o intruso renomeou a sala de voz"
     );
     assert_eq!(
         ultimo.sessao().lines[0].name,
@@ -374,10 +374,10 @@ async fn o_comandante_renomeia_e_todo_mundo_ve_o_nome_novo() -> Result<()> {
 
     let anfitriao = conectar(endereco, 46, "anfitriao").await?;
     let mut testemunha = conectar(endereco, 47, "shinji").await?;
-    let cage = anfitriao.sessao().cages[0].id;
+    let voice_room = anfitriao.sessao().voice_rooms[0].id;
 
     anfitriao
-        .renomear_cage(cage, "CAGE-01 PONTE".to_owned())
+        .renomear_voice_room(voice_room, "VOICE_ROOM-01 PONTE".to_owned())
         .await
         .expect("a sessão do anfitrião acabou");
 
@@ -387,7 +387,7 @@ async fn o_comandante_renomeia_e_todo_mundo_ve_o_nome_novo() -> Result<()> {
             Aviso::Mensagem(mensagem)
                 if matches!(
                     &**mensagem,
-                    ServerMessage::CageRenamed { name, .. } if name == "CAGE-01 PONTE"
+                    ServerMessage::VoiceRoomRenamed { name, .. } if name == "VOICE_ROOM-01 PONTE"
                 )
         )
     })
@@ -397,9 +397,9 @@ async fn o_comandante_renomeia_e_todo_mundo_ve_o_nome_novo() -> Result<()> {
     // E ele sobrevive: uma renomeação que só existisse no fio voltaria ao nome
     // velho na próxima conexão, e ninguém saberia qual dos dois é o certo.
     let depois = conectar(endereco, 48, "asuka").await?;
-    assert_eq!(depois.sessao().cages[0].name, "CAGE-01 PONTE");
+    assert_eq!(depois.sessao().voice_rooms[0].name, "VOICE_ROOM-01 PONTE");
     assert_eq!(
-        depois.sessao().cages.len(),
+        depois.sessao().voice_rooms.len(),
         1,
         "a renomeação criou uma segunda sala"
     );

@@ -19,7 +19,7 @@
 //! funciona**, **a sala do Dogma esvazia**, e **encerrar a hospedagem devolve a
 //! porta**. Um teardown que deixasse algo preso reprovaria numa dessas três.
 //!
-//! A do meio é a que enxerga vazamento. Sondar a lotação do Cage com prazo não
+//! A do meio é a que enxerga vazamento. Sondar a lotação da sala de voz com prazo não
 //! é a mesma coisa que afirmar fechamento instantâneo: não diz *quando* a
 //! cadeira é liberada, só que ela é — a mesma forma do `esperar` logo abaixo,
 //! e nada intermitente.
@@ -37,13 +37,13 @@ use anyhow::Result;
 use seele_core::enlace::{Aviso, Destino, Enlace};
 use seele_core::{Link, MemoryPinStore};
 use seele_proto::control::ServerMessage;
-use seele_proto::ids::{CageId, ClientMessageId, LineId};
+use seele_proto::ids::{VoiceRoomId, ClientMessageId, LineId};
 use seele_server::persistence::Location;
 use seele_server::dogma::Occupant;
 use seele_server::hospedagem::Hospedagem;
 use seele_server::{DogmaConfig, Server};
 
-const CAGE: u32 = 1;
+const VOICE_ROOM: u32 = 1;
 const LINE: u32 = 1;
 
 /// Sobe um Dogma numa porta que o sistema escolhe.
@@ -127,7 +127,7 @@ fn proxima_chave() -> ClientMessageId {
 /// Conecta e prova que a sessão **serve**, e não só que o construtor devolveu
 /// `Ok`.
 ///
-/// Entrar no Cage, abrir a Linha, dizer algo e ouvir de volta é o menor
+/// Entrar na sala de voz, abrir a Linha, dizer algo e ouvir de volta é o menor
 /// caminho que passa pelo Dogma inteiro. Uma conexão que só existisse no papel
 /// falharia aqui, e é justamente essa a diferença que este arquivo precisa
 /// enxergar na segunda volta.
@@ -143,7 +143,7 @@ async fn conectar_e_falar(
         Arc::new(MemoryPinStore::new()),
     )
     .await?;
-    enlace.inserir_plug(CageId(CAGE)).await?;
+    enlace.inserir_plug(VoiceRoomId(VOICE_ROOM)).await?;
     enlace.abrir_linha(LineId(LINE)).await?;
     enlace
         .dizer(LineId(LINE), o_que.to_owned(), proxima_chave())
@@ -165,7 +165,7 @@ async fn conectar_e_falar(
     Ok(enlace)
 }
 
-/// Quem o Dogma acha que está no Cage, esperando até a conta bater.
+/// Quem o Dogma acha que está na sala de voz, esperando até a conta bater.
 ///
 /// Sondar com prazo, e não olhar uma vez. O briefing proíbe afirmar que algo
 /// fechou **no instante** em que a alça foi solta — e com razão, porque o
@@ -184,7 +184,7 @@ async fn ocupantes(servidor: &Server, esperados: usize, prazo: Duration) -> Vec<
             .occupancy
             .lock()
             .await
-            .in_cage(CageId(CAGE));
+            .in_voice_room(VoiceRoomId(VOICE_ROOM));
         if agora.len() == esperados || tokio::time::Instant::now() >= fim {
             return agora;
         }
@@ -235,7 +235,7 @@ async fn conectar_ejetar_e_conectar_de_novo_no_mesmo_processo() -> Result<()> {
     assert_eq!(
         dentro.len(),
         1,
-        "o Cage ficou com {} ocupantes depois de um ejetar: a sessão soltar não a tirou da sala — {dentro:?}",
+        "a sala de voz ficou com {} ocupantes depois de um ejetar: a sessão soltar não a tirou da sala — {dentro:?}",
         dentro.len()
     );
     assert_eq!(
@@ -274,7 +274,7 @@ async fn a_mesma_pessoa_volta_pela_tela_de_selecao() -> Result<()> {
         "a volta reaproveitou a sessão anterior: isso não é reconectar"
     );
 
-    // Este teste **não** olha a lotação do Cage, e a omissão é deliberada: com o
+    // Este teste **não** olha a lotação da sala de voz, e a omissão é deliberada: com o
     // mesmo pessoa nos dois lados, o `vacate` da sessão que morre e o `seat` da
     // que nasce disputam a mesma chave, e a lista pode acabar vazia. É a
     // pendência 11, encontrada lendo este teste — o defeito é do Dogma, não

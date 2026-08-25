@@ -199,7 +199,7 @@ pub enum PernaQueAperta {
 /// # As três pernas, e a que faltava
 ///
 /// Decidido em 22/08/2026 (§5.1): **o servidor encaminha**, como ele já faz com
-/// a voz em `cage::Cage::forward`. Alguém sobe N cópias — multicast não existe
+/// a voz em `voice_room::VoiceRoom::forward`. Alguém sobe N cópias — multicast não existe
 /// na internet aberta, e um quadro que quatro pessoas assistem sai quatro vezes
 /// de alguma máquina —, e nesta decisão essa máquina é a de **quem hospeda**.
 /// Então o teto é o menor de três:

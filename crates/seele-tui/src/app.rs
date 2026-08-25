@@ -11,7 +11,7 @@
 //! matters is that a keystroke means different things in different modes, and
 //! the one place that gets decided is [`App::on_key`].
 
-use seele_core::{CageSync, Link, Pattern, SyncBand};
+use seele_core::{VoiceRoomSync, Link, Pattern, SyncBand};
 
 /// Which input mode the client is in. `specs/05-cliente-tui.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,7 +46,7 @@ impl Mode {
 pub enum Panel {
     /// The Dogma list.
     Dogma,
-    /// Cages and Lines.
+    /// voice_rooms and Lines.
     Channels,
     /// Messages.
     Messages,
@@ -127,14 +127,14 @@ impl RosterEntry {
     }
 }
 
-/// One row of the Cages/Lines panel.
+/// One row of the voice_rooms/Lines panel.
 ///
-/// `specs/05-cliente-tui.md` draws people nested under their Cage rather than
+/// `specs/05-cliente-tui.md` draws people nested under their voice room rather than
 /// in a panel of their own, so the panel is a flattened tree and not a list.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
-    /// A Cage — a voice room.
-    Cage {
+    /// A voice room — a voice room.
+    VoiceRoom {
         /// Its name.
         name: String,
         /// Whether its people are showing.
@@ -142,12 +142,12 @@ pub enum Node {
         /// The average Sync Ratio of everybody in it, already banded by the
         /// core, or `None` when nobody is.
         ///
-        /// The comp's **MÉDIA DO CAGE**. Taken whole from `seele_core`: the
+        /// The comp's **MÉDIA DO VOICE_ROOM**. Taken whole from `seele_core`: the
         /// number, the band and the sample all arrive decided, and this shell
         /// only chooses where on the row to put them.
-        sync: Option<CageSync>,
+        sync: Option<VoiceRoomSync>,
     },
-    /// A person inside the Cage above.
+    /// A person inside the voice room above.
     Person(RosterEntry),
     /// A Line — a text channel.
     Line {
@@ -227,13 +227,13 @@ pub enum Action {
     ToggleAtField,
     /// Toggle the speaker mute.
     ToggleTotalIsolation,
-    /// Enter the selected Cage or open the selected Line.
+    /// Enter the selected voice room or open the selected Line.
     Activate,
     /// Leave the voice room this client is in.
     ///
-    /// The other half of [`Self::Activate`] over a Cage, and it did not exist:
+    /// The other half of [`Self::Activate`] over a voice room, and it did not exist:
     /// this shell could walk into a voice room and never out of one.
-    LeaveCage,
+    LeaveVoiceRoom,
 }
 
 /// Everything on screen.
@@ -249,7 +249,7 @@ pub struct App {
     pub dogmas: Vec<String>,
     /// Which Dogma is selected.
     pub selected_dogma: usize,
-    /// Cages, their people, and Lines — flattened for drawing.
+    /// voice_rooms, their people, and Lines — flattened for drawing.
     pub tree: Vec<Node>,
     /// Which tree row is selected.
     pub selected: usize,
@@ -478,7 +478,7 @@ impl App {
             // normal e na tela de escolha de servidor, e não encosta em `/`,
             // `n`, `N` nem no `:` — sair da sala de voz não é sair do programa,
             // que continua sendo `:q`, nem sair do servidor, que é `:ejetar`.
-            Key::Char('s') => return Some(Action::LeaveCage),
+            Key::Char('s') => return Some(Action::LeaveVoiceRoom),
             // `n` and `N` were free, and it is where Vim puts them.
             Key::Char('n') => {
                 if let Some(search) = self.busca.as_mut() {
@@ -693,8 +693,8 @@ mod tests {
     fn app() -> App {
         let mut app = App::new();
         app.tree = vec![
-            Node::Cage {
-                name: "CAGE-01 CENTRAL".into(),
+            Node::VoiceRoom {
+                name: "VOICE_ROOM-01 CENTRAL".into(),
                 open: true,
                 sync: None,
             },
@@ -705,8 +705,8 @@ mod tests {
                 at_field: false,
                 total_isolation: false,
             }),
-            Node::Cage {
-                name: "CAGE-02 TESTE".into(),
+            Node::VoiceRoom {
+                name: "VOICE_ROOM-02 TESTE".into(),
                 open: false,
                 sync: None,
             },
@@ -852,7 +852,7 @@ mod tests {
         // toda letra de modo normal ele não pode valer nada dentro de uma
         // mensagem — um «s» escrito numa frase é um «s».
         let mut app = app();
-        assert_eq!(app.on_key(Key::Char('s')), Some(Action::LeaveCage));
+        assert_eq!(app.on_key(Key::Char('s')), Some(Action::LeaveVoiceRoom));
 
         app.on_key(Key::Char('i'));
         assert_eq!(
@@ -1141,8 +1141,8 @@ mod tree_tests {
 
     fn tree() -> Vec<Node> {
         vec![
-            Node::Cage {
-                name: "CAGE-01".into(),
+            Node::VoiceRoom {
+                name: "VOICE_ROOM-01".into(),
                 open: true,
                 sync: None,
             },
@@ -1169,7 +1169,7 @@ mod tree_tests {
     #[test]
     fn navigation_skips_over_persons() {
         // People are shown, not entered. Stopping on them on the way from a
-        // Cage to a Line is two wasted keystrokes per person in the room.
+        // voice room to a Line is two wasted keystrokes per person in the room.
         let mut app = App::new();
         app.tree = tree();
         app.focus = Panel::Channels;
@@ -1183,8 +1183,8 @@ mod tree_tests {
     fn jumping_to_the_end_lands_somewhere_selectable() {
         let mut app = App::new();
         app.tree = vec![
-            Node::Cage {
-                name: "CAGE-01".into(),
+            Node::VoiceRoom {
+                name: "VOICE_ROOM-01".into(),
                 open: true,
                 sync: None,
             },

@@ -77,8 +77,8 @@ pub fn nome(persistence: &Persistence, padrao: &str) -> Result<String> {
 
 /// Escreve o nome escolhido. Devolve o nome aparado, que é o que ficou gravado.
 ///
-/// Apara antes de gravar, como [`super::channels::Channels::rename_cage`] apara
-/// o nome de um Cage, e recusa o que sobrar em branco. A recusa é aqui **além**
+/// Apara antes de gravar, como [`super::channels::Channels::rename_voice_room`] apara
+/// o nome de uma sala de voz, e recusa o que sobrar em branco. A recusa é aqui **além**
 /// de ser no protocolo porque o arranque e a janela de quem hospeda também
 /// chamam por aqui, sem passar por quadro nenhum.
 ///
@@ -187,7 +187,7 @@ mod testes {
     #[test]
     fn um_nome_branco_e_recusado() {
         // Um cabeçalho com nada dentro é uma coisa que ninguém consegue citar em
-        // voz alta — a mesma razão que `check_name` dá sobre um Cage.
+        // voz alta — a mesma razão que `check_name` dá sobre uma sala de voz.
         let persistence = memoria();
         for branco in ["", "   ", "\t\n"] {
             assert!(

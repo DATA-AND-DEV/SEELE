@@ -37,7 +37,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{
-    AttachmentId, CageId, ClientMessageId, LineId, MessageId, PersonId, RoleId, ScreenId, SessionId,
+    AttachmentId, VoiceRoomId, ClientMessageId, LineId, MessageId, PersonId, RoleId, ScreenId, SessionId,
     Ssrc,
 };
 use crate::version::PROTOCOL_VERSION;
@@ -61,20 +61,20 @@ pub const MAX_NICKNAME_LEN: usize = 32;
 /// Longest client name, in bytes.
 pub const MAX_CLIENT_NAME_LEN: usize = 64;
 
-/// Longest Cage or Line name, in bytes.
+/// Longest voice room or Line name, in bytes.
 ///
 /// A name is a label in a list, not a description. Long enough for
-/// `CAGE-01 CENTRAL` several times over, short enough that no shell has to
+/// `VOICE_ROOM-01 CENTRAL` several times over, short enough that no shell has to
 /// decide where to cut one off.
 pub const MAX_CHANNEL_NAME_LEN: usize = 48;
 
-/// Largest number of people a Cage may be created with.
+/// Largest number of people a voice room may be created with.
 ///
-/// `specs/04-servidor-seele.md` sizes the target at "50 sessões e 5 Cages
+/// `specs/04-servidor-seele.md` sizes the target at "50 sessões e 5 voice_rooms
 /// ativos em 1 vCPU / 512 MB", so this is five times the whole Dogma: generous
 /// rather than tight, and there to stop a `u16` of 65 535 being written into a
 /// room nobody could fill.
-pub const MAX_CAGE_LIMIT: u16 = 250;
+pub const MAX_VOICE_ROOM_LIMIT: u16 = 250;
 
 /// Longest operator-supplied alert text, in bytes.
 pub const MAX_ALERT_TEXT_LEN: usize = 512;
@@ -299,9 +299,9 @@ pub enum Presence {
 /// system: "the complexity does not pay for itself at the target scale".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Permission {
-    /// See that a Cage exists.
-    ViewCage,
-    /// Enter a Cage.
+    /// See that a voice room exists.
+    ViewVoiceRoom,
+    /// Enter a voice room.
     InsertPlug,
     /// Transmit voice.
     Speak,
@@ -311,14 +311,14 @@ pub enum Permission {
     WriteLine,
     /// Delete somebody else's message.
     RemoveMessage,
-    /// Move a person between Cages.
+    /// Move a person between voice_rooms.
     MovePerson,
     /// Disconnect a person.
     Kick,
     /// Bar a person from returning.
     Ban,
-    /// Create and configure Cages.
-    ManageCages,
+    /// Create and configure voice_rooms.
+    ManageVoiceRooms,
     /// Create and assign roles.
     ManageRoles,
     /// Everything else about the Dogma.
@@ -374,16 +374,16 @@ pub struct PersonProfile {
 
 /// A voice channel.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CageInfo {
+pub struct VoiceRoomInfo {
     /// Identifier.
-    pub id: CageId,
+    pub id: VoiceRoomId,
     /// Display name.
     pub name: String,
     /// How many people may be inside at once.
     pub limit: u16,
     /// Whether entry needs a password.
     pub password_required: bool,
-    /// A Line bound to this Cage, if any. `specs/04-servidor-seele.md` makes the
+    /// A Line bound to this voice room, if any. `specs/04-servidor-seele.md` makes the
     /// association optional.
     pub line: Option<LineId>,
 }
@@ -405,9 +405,9 @@ pub struct LineInfo {
 pub enum Subsystem {
     /// Identity, authentication, sessions, roles, permissions.
     Permissions,
-    /// Media routing: Cage subscriptions, datagram forwarding, bandwidth.
+    /// Media routing: voice room subscriptions, datagram forwarding, bandwidth.
     Media,
-    /// Persistent state: Cages, Lines, history, configuration, migrations.
+    /// Persistent state: voice_rooms, Lines, history, configuration, migrations.
     Persistence,
 }
 
@@ -587,12 +587,12 @@ pub enum AlertReason {
     SubsystemChanged,
     /// The connection is struggling.
     SyncDegraded,
-    /// Entry to a Cage was refused.
-    CageEntryRefused,
+    /// Entry to a voice room was refused.
+    VoiceRoomEntryRefused,
     /// The action needed a permission the person lacks.
     PermissionDenied,
-    /// The Cage is at its limit.
-    CageFull,
+    /// The voice room is at its limit.
+    VoiceRoomFull,
     /// The operator is saying something.
     OperatorNotice,
     /// The client is sending control frames faster than its budget.
@@ -607,7 +607,7 @@ pub enum AlertReason {
     /// connection that was already exceeding its budget, and nothing else.
     RateLimited,
 
-    /// An operator moved this person's plug into another Cage.
+    /// An operator moved this person's plug into another voice room.
     ///
     /// Its own reason rather than [`Self::OperatorNotice`], because the shell
     /// has a specific sentence to write and `OperatorNotice` would have it
@@ -617,42 +617,42 @@ pub enum AlertReason {
     /// Appended after `RateLimited`, for the reason that variant gives.
     MovedByOperator,
 
-    /// The Cage this person's plug was in no longer exists.
+    /// The voice room this person's plug was in no longer exists.
     ///
     /// Its own reason rather than [`Self::OperatorNotice`], for the reason
     /// [`Self::MovedByOperator`] gives: the shell has a specific sentence to
     /// write, and being turned out of a room in the middle of speaking is the
     /// case this exists to explain. Sent only to the people who were inside —
     /// everybody else learns the room is gone from
-    /// [`ServerMessage::CageDeleted`] and has nothing to be told about it.
+    /// [`ServerMessage::VoiceRoomDeleted`] and has nothing to be told about it.
     ///
     /// Appended after `MovedByOperator`, for the reason that variant gives.
-    CageDeleted,
+    VoiceRoomDeleted,
 
     /// A Line this person had open no longer exists, and neither does anything
     /// written in it.
     ///
-    /// Separate from [`Self::CageDeleted`] because the two sentences are not
+    /// Separate from [`Self::VoiceRoomDeleted`] because the two sentences are not
     /// the same sentence: one says the room you were speaking in is gone, the
     /// other says the conversation you were reading was destroyed. A shell
     /// given one reason for both would have to write the vaguer of the two.
     LineDeleted,
 
-    /// The Cage asked about is the only one the Dogma has, so it stays.
+    /// The voice room asked about is the only one the Dogma has, so it stays.
     ///
     /// A refusal with a sentence of its own, and that is the whole reason it
-    /// exists: the nearest existing reason is [`Self::CageEntryRefused`], which
+    /// exists: the nearest existing reason is [`Self::VoiceRoomEntryRefused`], which
     /// every shell writes as "entry refused" — a sentence about walking into a
     /// room, in front of somebody who was trying to destroy one. What this has
     /// to say is "make another room first", and no other variant says it.
     ///
-    /// The app disables the control on the last Cage and says as much in a
+    /// The app disables the control on the last voice room and says as much in a
     /// `title`, which is where the reader meets this first. This is the half
     /// that survives an older shell, and `specs/08-seguranca.md` puts the rule
     /// on the server for exactly that reason.
-    LastCage,
+    LastVoiceRoom,
 
-    /// Somebody is already sharing a screen in this Cage.
+    /// Somebody is already sharing a screen in this voice room.
     ///
     /// §6 item 3 of the screen-sharing design puts one transmission per voice
     /// room in v1 — "two double the download of everybody watching and triple
@@ -666,7 +666,7 @@ pub enum AlertReason {
     /// lá, ou ele explica o que falta"; this is the half of that promise the
     /// server owes, since only the server knows the room is taken.
     ///
-    /// Appended after `LastCage`, for the reason [`Self::RateLimited`] gives.
+    /// Appended after `LastVoiceRoom`, for the reason [`Self::RateLimited`] gives.
     ScreenShareTaken,
 
     /// The Dogma stopped this person's transmission: the room outgrew its uplink.
@@ -680,7 +680,7 @@ pub enum AlertReason {
     /// that section calls the product broken.
     ///
     /// Its own reason, and sent only to the person who was sharing.
-    /// [`ServerMessage::ScreenShareStopped`] goes to the whole Cage and carries
+    /// [`ServerMessage::ScreenShareStopped`] goes to the whole voice room and carries
     /// no reason on purpose — the two ordinary endings tell themselves apart —
     /// and this is the third: somebody who pressed stop knows they pressed it,
     /// and somebody stopped by the Dogma would otherwise learn nothing at all.
@@ -728,14 +728,14 @@ pub enum ClientMessage {
         /// Proof of identity. ADR 0004 makes this an Ed25519 signature.
         proof: Vec<u8>,
     },
-    /// Enters a Cage. "Inserir plug" in `docs/glossario.md`.
+    /// Enters a voice room. "Inserir plug" in `docs/glossario.md`.
     InsertPlug {
-        /// Which Cage.
-        cage: CageId,
-        /// Password, if the Cage needs one.
+        /// Which voice room.
+        voice_room: VoiceRoomId,
+        /// Password, if the voice room needs one.
         password: Option<String>,
     },
-    /// Leaves the current Cage. "Ejetar".
+    /// Leaves the current voice room. "Ejetar".
     EjectPlug,
     /// Subscribes to a text channel.
     JoinLine {
@@ -780,12 +780,12 @@ pub enum ClientMessage {
     // one protocol version older does not know these variants and refuses the
     // frame rather than misreading it as something it does understand.
     //
-    // All four need [`Permission::ManageCages`]. `specs/04-servidor-seele.md`
+    // All four need [`Permission::ManageVoiceRooms`]. `specs/04-servidor-seele.md`
     // enumerates one permission for channels and not two — there is no
     // `gerenciar_linhas` — so the one it names covers both kinds, and the
     // server checks it on every one of these.
-    /// Creates a Cage.
-    CreateCage {
+    /// Creates a voice room.
+    CreateVoiceRoom {
         /// What to call it.
         name: String,
         /// How many people may be inside at once.
@@ -799,10 +799,10 @@ pub enum ClientMessage {
         /// What to call it.
         name: String,
     },
-    /// Renames a Cage.
-    RenameCage {
-        /// Which Cage.
-        cage: CageId,
+    /// Renames a voice room.
+    RenameVoiceRoom {
+        /// Which voice room.
+        voice_room: VoiceRoomId,
         /// The new name.
         name: String,
     },
@@ -819,7 +819,7 @@ pub enum ClientMessage {
     // Appended last, for the reason [`AlertReason::RateLimited`] gives.
     //
     // `specs/04-servidor-seele.md` enumerates `expulsar`, `banir`,
-    // `remover_mensagem` and `mover_persono`, migration 1 seeds all four on the
+    // `remover_mensagem` and `mover_pessoa`, migration 1 seeds all four on the
     // Comandante and the Operador, and until now **no message carried any of
     // them**. The permissions existed and there was nothing to ask for: the
     // app's `EJETAR PLUG DO OPERADOR` has been drawn and disabled since v2 for
@@ -878,10 +878,10 @@ pub enum ClientMessage {
         /// Which message.
         message: MessageId,
     },
-    /// Moves a person into a Cage. `mover_persono` — [`Permission::MovePerson`].
+    /// Moves a person into a voice room. `mover_pessoa` — [`Permission::MovePerson`].
     ///
     /// The person is told, and told *what happened*: they get
-    /// [`ServerMessage::MovedToCage`] so their client follows, and an
+    /// [`ServerMessage::MovedToVoiceRoom`] so their client follows, and an
     /// [`ServerMessage::Alert`] carrying [`AlertReason::MovedByOperator`] so
     /// they read a sentence rather than finding themselves somewhere else with
     /// no explanation. Being moved silently is indistinguishable from a client
@@ -890,14 +890,14 @@ pub enum ClientMessage {
         /// Who.
         person: PersonId,
         /// Where to.
-        cage: CageId,
+        voice_room: VoiceRoomId,
     },
 
     // ---- unmaking a room ----
     //
     // Appended last, for the reason [`AlertReason::RateLimited`] gives.
     //
-    // # Why these are not [`Permission::ManageCages`]
+    // # Why these are not [`Permission::ManageVoiceRooms`]
     //
     // The four verbs above them are: creating a room and renaming one are both
     // things a mistake survives — the wrong name is renamed again, the room
@@ -905,8 +905,8 @@ pub enum ClientMessage {
     // somebody **else's** writing, and no screen of this product brings it
     // back.
     //
-    // `specs/04-servidor-seele.md` enumerates `gerenciar_cages` as "criar e
-    // configurar Cages" and `administrar_dogma` as "todo o resto sobre o
+    // `specs/04-servidor-seele.md` enumerates `gerenciar_voice_rooms` as "criar e
+    // configurar salas de voz" and `administrar_dogma` as "todo o resto sobre o
     // Dogma". Destroying every message six people wrote is not configuration.
     // So it sits on [`Permission::AdministerDogma`], which migration 1 seeds on
     // the Comandante alone — and the separation is real rather than notional
@@ -915,24 +915,24 @@ pub enum ClientMessage {
     // permissions either: `specs/04` gives the Operador `expulsar` and `banir`,
     // and somebody trusted to remove a person for the evening is not thereby
     // trusted to destroy the Dogma's history.
-    /// Destroys a Cage. `apagar_cage` — [`Permission::AdministerDogma`].
+    /// Destroys a voice room. `apagar_voice_room` — [`Permission::AdministerDogma`].
     ///
-    /// Everybody inside is turned out of it: a Cage does not vanish from under
+    /// Everybody inside is turned out of it: a voice room does not vanish from under
     /// the feet of the people speaking in it. They are told, with
-    /// [`AlertReason::CageDeleted`], for the reason
+    /// [`AlertReason::VoiceRoomDeleted`], for the reason
     /// [`AlertReason::MovedByOperator`] gives.
     ///
-    /// A Line bound to the Cage is **not** destroyed with it.
-    /// `specs/04-servidor-seele.md` makes Cages and Lines independent, and the
+    /// A Line bound to the voice room is **not** destroyed with it.
+    /// `specs/04-servidor-seele.md` makes voice_rooms and Lines independent, and the
     /// association optional; destroying a voice room is no statement about the
     /// writing that happened to hang off it.
     ///
-    /// The server refuses the last one. A Dogma with no Cage has nowhere to
+    /// The server refuses the last one. A Dogma with na sala de voz has nowhere to
     /// speak, which is the product's first sentence — and the refusal is a
     /// refusal rather than a silence, so a shell can say why.
-    DeleteCage {
-        /// Which Cage.
-        cage: CageId,
+    DeleteVoiceRoom {
+        /// Which voice room.
+        voice_room: VoiceRoomId,
     },
     /// Destroys a Line and everything written in it. `apagar_linha` —
     /// [`Permission::AdministerDogma`].
@@ -942,7 +942,7 @@ pub enum ClientMessage {
     /// this destroys the Line those rows hang from, so there is nothing left
     /// for either to be about.
     ///
-    /// Any Cage bound to this Line keeps existing and loses the binding.
+    /// Any voice room bound to this Line keeps existing and loses the binding.
     DeleteLine {
         /// Which Line.
         line: LineId,
@@ -994,8 +994,8 @@ pub enum ClientMessage {
     // Appended last, for the reason [`AlertReason::RateLimited`] gives.
     //
     // Both need [`Permission::AdministerDogma`], and **not** the
-    // [`Permission::ManageCages`] the four room verbs use. The line
-    // `specs/04-servidor-seele.md` draws is between "criar e configurar Cages"
+    // [`Permission::ManageVoiceRooms`] the four room verbs use. The line
+    // `specs/04-servidor-seele.md` draws is between "criar e configurar voice_rooms"
     // and "todo o resto sobre o Dogma"; the name and the picture of the Dogma
     // itself are not a room, and whoever may build rooms is not thereby the
     // person whose Dogma it is. Migration 1 seeds `AdministerDogma` on the
@@ -1015,7 +1015,7 @@ pub enum ClientMessage {
     ///
     /// Bounded by [`MAX_CLIENT_NAME_LEN`], which is what
     /// [`ServerMessage::Session`] already carries the name under, and refused
-    /// blank for the reason `check_name` gives about a Cage: a header with
+    /// blank for the reason `check_name` gives about a voice room: a header with
     /// nothing in it is a thing nobody can refer to out loud.
     RenameDogma {
         /// The new name.
@@ -1056,11 +1056,11 @@ pub enum ClientMessage {
     // by a `screen::ScreenHeader`. That split is the same one ADR 0027 made for
     // attachments, and here it is measured: `spikes/tela-no-transporte` shows
     // what sharing a queue with the voice costs.
-    /// Starts sharing a screen in the Cage this connection's plug is in.
+    /// Starts sharing a screen in the voice room this connection's plug is in.
     ///
-    /// Carries nothing, like [`Self::EjectPlug`]: the Cage is the one the
-    /// server already has this connection in, and a Cage taken from the asker
-    /// is a Cage the asker can aim somewhere else. What comes back is
+    /// Carries nothing, like [`Self::EjectPlug`]: the voice room is the one the
+    /// server already has this connection in, and a voice room taken from the asker
+    /// is a voice room the asker can aim somewhere else. What comes back is
     /// [`ServerMessage::ScreenShareStarted`], and the [`ScreenId`] in it is
     /// what the sender then writes at the head of the stream it opens — a
     /// sender cannot open the stream first, because until the Dogma answers
@@ -1118,7 +1118,7 @@ pub enum ServerMessage {
         /// Name of the Dogma.
         dogma: String,
         /// Voice channels visible to this person.
-        cages: Vec<CageInfo>,
+        voice_rooms: Vec<VoiceRoomInfo>,
         /// Text channels visible to this person.
         lines: Vec<LineInfo>,
         /// Roles defined on this Dogma.
@@ -1138,10 +1138,10 @@ pub enum ServerMessage {
         /// segurança." Every action is checked again when it is asked for.
         permissions: Vec<Permission>,
     },
-    /// A person entered a Cage.
+    /// A person entered a voice room.
     PersonJoined {
-        /// Which Cage.
-        cage: CageId,
+        /// Which voice room.
+        voice_room: VoiceRoomId,
         /// Who.
         profile: PersonProfile,
         /// Their media source — gap G1. This is the mapping
@@ -1149,10 +1149,10 @@ pub enum ServerMessage {
         /// channel, and which nothing previously carried.
         ssrc: Ssrc,
     },
-    /// A person left a Cage.
+    /// A person left a voice room.
     PersonLeft {
-        /// Which Cage.
-        cage: CageId,
+        /// Which voice room.
+        voice_room: VoiceRoomId,
         /// Who.
         person: PersonId,
     },
@@ -1255,23 +1255,23 @@ pub enum ServerMessage {
     // Appended last, for the same reason as their client-side counterparts.
     //
     // Sent to **everybody connected**, the person who asked included. Without
-    // that, a Cage made at nine o'clock is a Cage nobody sees until they
+    // that, a voice room made at nine o'clock is a voice room nobody sees until they
     // reconnect — and "reconnect to see the room I just told you about" is the
     // kind of instruction that makes a product feel broken rather than new.
-    /// A Cage was created.
-    CageCreated {
-        /// The Cage, as it now exists.
-        cage: CageInfo,
+    /// A voice room was created.
+    VoiceRoomCreated {
+        /// The voice room, as it now exists.
+        voice_room: VoiceRoomInfo,
     },
     /// A Line was created.
     LineCreated {
         /// The Line, as it now exists.
         line: LineInfo,
     },
-    /// A Cage was renamed.
-    CageRenamed {
-        /// Which Cage.
-        cage: CageId,
+    /// A voice room was renamed.
+    VoiceRoomRenamed {
+        /// Which voice room.
+        voice_room: VoiceRoomId,
         /// Its new name.
         name: String,
     },
@@ -1289,22 +1289,22 @@ pub enum ServerMessage {
     // ban both end with [`Self::Disconnecting`], which already enumerates
     // `Kicked` and `Banned`; a removal is [`Self::MessageRemoved`], which every
     // shell already folds in. Only being moved had nothing that could say it.
-    /// This person's plug is now in a different Cage, by somebody else's hand.
+    /// This person's plug is now in a different voice room, by somebody else's hand.
     ///
     /// Sent only to the person who was moved. Everybody else learns it the
-    /// ordinary way, as a [`Self::PersonLeft`] from the old Cage and a
+    /// ordinary way, as a [`Self::PersonLeft`] from the old voice room and a
     /// [`Self::PersonJoined`] in the new one — there is nothing special about a
     /// move from outside, and inventing a second way to say "somebody is in
     /// that room now" would mean every shell learning both.
     ///
     /// What makes this its own message is that the moved client has to change
     /// **its own** idea of where it is, and that is a fact no `PersonJoined` has
-    /// ever carried: a client sets its current Cage on the way *out*, when it
+    /// ever carried: a client sets its current voice room on the way *out*, when it
     /// asks. Without this it would keep sending voice into the room it thought
     /// it was in and drawing that room's roster around itself.
-    MovedToCage {
+    MovedToVoiceRoom {
         /// Where the plug is now.
-        cage: CageId,
+        voice_room: VoiceRoomId,
     },
 
     // ---- unmaking a room ----
@@ -1314,10 +1314,10 @@ pub enum ServerMessage {
     // Sent to **everybody connected**, the person who asked included, exactly
     // like the four announcements above: a room that goes on being drawn until
     // the next handshake is a room people keep trying to walk into.
-    /// A Cage was destroyed.
-    CageDeleted {
-        /// Which Cage.
-        cage: CageId,
+    /// A voice room was destroyed.
+    VoiceRoomDeleted {
+        /// Which voice room.
+        voice_room: VoiceRoomId,
     },
     /// A Line was destroyed, and everything written in it with it.
     LineDeleted {
@@ -1413,7 +1413,7 @@ pub enum ServerMessage {
     /// picture down while people are connected, which has to reach them.
     ///
     /// Its own frame rather than a field on `Session`, for the third reason ADR
-    /// 0032 gives against the icon: `Session` already carries the Cages, the
+    /// 0032 gives against the icon: `Session` already carries the voice_rooms, the
     /// Lines, the roles and the permissions inside [`MAX_FRAME_LEN`], and a
     /// picture sharing that budget would make a big Dogma fail to admit anybody
     /// because of a decoration.
@@ -1433,21 +1433,21 @@ pub enum ServerMessage {
     //
     // Appended last, for the reason [`AlertReason::RateLimited`] gives.
     //
-    // Sent to everybody in the Cage, the sharer included — the sharer needs the
+    // Sent to everybody in the voice room, the sharer included — the sharer needs the
     // [`ScreenId`] before it can open a stream, and everybody else needs to
     // know a stream is about to arrive rather than discovering it by being
     // handed one.
     /// Somebody started sharing a screen.
     ///
-    /// Also sent to a person who **enters** a Cage where a transmission is
+    /// Also sent to a person who **enters** a voice room where a transmission is
     /// already running, straight after their [`Self::PersonJoined`]. That is a
     /// rule for the Dogma rather than a message of its own, and it is the
-    /// reason [`CageInfo`] gained no field: a client learns about a
+    /// reason [`VoiceRoomInfo`] gained no field: a client learns about a
     /// transmission the same way whether it was there when it began or not,
     /// and there is only one frame to understand instead of two.
     ScreenShareStarted {
-        /// Which Cage it is happening in.
-        cage: CageId,
+        /// Which voice room it is happening in.
+        voice_room: VoiceRoomId,
         /// Who is sharing.
         person: PersonId,
         /// What to call the transmission from now on.
@@ -1466,8 +1466,8 @@ pub enum ServerMessage {
     /// happens: a person who left produces [`Self::PersonLeft`], and one who is
     /// still in the room stopped on purpose.
     ScreenShareStopped {
-        /// Which Cage it was happening in.
-        cage: CageId,
+        /// Which voice room it was happening in.
+        voice_room: VoiceRoomId,
         /// Which transmission ended.
         screen: ScreenId,
     },
@@ -1494,11 +1494,11 @@ pub enum ServerMessage {
     /// burst the other" that section names as the most expensive defect in it.
     ///
     /// On control rather than in the stream, because it is not about a picture:
-    /// it changes when somebody enters or leaves the Cage, not when a frame is
+    /// it changes when somebody enters or leaves the voice room, not when a frame is
     /// encoded, and a number carried by the pictures would stop arriving
     /// exactly when the transmission stalls.
     ///
-    /// Sent to the whole Cage whenever the count moves, and once straight after
+    /// Sent to the whole voice room whenever the count moves, and once straight after
     /// [`Self::ScreenShareStarted`] — a transmission that never learns its own
     /// audience would sit on the ceiling for a single watcher while four are
     /// listening.
@@ -1540,11 +1540,11 @@ pub enum ServerMessage {
         /// Bits per second, or zero for "not measured".
         bps: u32,
     },
-    /// Somebody is connected to this Dogma, whether or not they are in a Cage.
+    /// Somebody is connected to this Dogma, whether or not they are in a voice room.
     ///
     /// # Why this exists at all
     ///
-    /// [`Self::PersonJoined`] carries a Cage, because it announces sitting down
+    /// [`Self::PersonJoined`] carries a voice room, because it announces sitting down
     /// in one. There was nothing that announced being *here* — so a person who
     /// connected and stayed out of every room was invisible to everybody else,
     /// and a client's own comment said so: "there is no message on the wire
@@ -1573,7 +1573,7 @@ pub enum ServerMessage {
     /// The twin of [`Self::PersonPresent`], and the half that hurts to leave
     /// out: without it every client accumulates the names of everyone who has
     /// ever connected and draws them as present. [`Self::PersonLeft`] does not
-    /// cover it — that one says a Cage was vacated, and somebody who never sat
+    /// cover it — that one says a voice room was vacated, and somebody who never sat
     /// down never produces one.
     PersonGone {
         /// Who.
@@ -1663,7 +1663,7 @@ pub fn check_bounds(field: &'static str, len: usize, limit: usize) -> Result<(),
     Ok(())
 }
 
-/// Bounds a Cage or Line name at both ends.
+/// Bounds a voice room or Line name at both ends.
 ///
 /// The upper bound is [`MAX_CHANNEL_NAME_LEN`], like every other text field.
 /// The lower one is the half that is easy to leave out: a name that is empty,
@@ -1699,7 +1699,7 @@ fn check_dogma_name(name: &str) -> Result<(), ControlError> {
 /// what it is sent, and refuses again on the way out, so a picture that arrived
 /// from an older build or straight from somebody's `sqlite3` prompt cannot
 /// travel further than one a client could have asked for. It is the rule
-/// [`ServerMessage::Session`] already applies to a Cage's name.
+/// [`ServerMessage::Session`] already applies to a voice room's name.
 ///
 /// **Public**, and that is what keeps it the only copy. A shell has to be able
 /// to tell somebody their picture will not do *before* the frame is built:
@@ -1759,12 +1759,12 @@ fn png_header(bytes: &[u8]) -> Option<(u32, u32)> {
     Some((width, height))
 }
 
-/// Bounds how many people a Cage may hold.
+/// Bounds how many people a voice room may hold.
 ///
-/// Zero is refused: a Cage nobody may enter is not a Cage, and a limit of zero
+/// Zero is refused: a voice room nobody may enter is not a voice room, and a limit of zero
 /// is far more often a field left at its default than a deliberate choice.
-fn check_cage_limit(limit: u16) -> Result<(), ControlError> {
-    if limit == 0 || limit > MAX_CAGE_LIMIT {
+fn check_voice_room_limit(limit: u16) -> Result<(), ControlError> {
+    if limit == 0 || limit > MAX_VOICE_ROOM_LIMIT {
         return Err(ControlError::FieldOutOfRange { field: "limit" });
     }
     Ok(())
@@ -1834,12 +1834,12 @@ impl Validate for ClientMessage {
                 MAX_NICKNAME_LEN,
             ),
             Self::SendMessage { body, .. } => check("body", body.len(), MAX_BODY_LEN),
-            Self::CreateCage { name, limit, .. } => {
+            Self::CreateVoiceRoom { name, limit, .. } => {
                 check_name("name", name)?;
-                check_cage_limit(*limit)
+                check_voice_room_limit(*limit)
             }
             Self::CreateLine { name }
-            | Self::RenameCage { name, .. }
+            | Self::RenameVoiceRoom { name, .. }
             | Self::RenameLine { name, .. } => check_name("name", name),
             // The operator's own words about their own Dogma, bounded like the
             // other place they cross the wire.
@@ -1860,7 +1860,7 @@ impl Validate for ClientMessage {
             | Self::KickPerson { .. }
             | Self::RemoveMessage { .. }
             | Self::MovePerson { .. }
-            | Self::DeleteCage { .. }
+            | Self::DeleteVoiceRoom { .. }
             | Self::DeleteLine { .. }
             | Self::WeighLine { .. }
             | Self::FetchAttachment { .. }
@@ -1877,26 +1877,26 @@ impl Validate for ServerMessage {
             Self::Challenge { nonce } => check("nonce", nonce.len(), MAX_PROOF_LEN),
             Self::Session {
                 dogma,
-                cages,
+                voice_rooms,
                 lines,
                 ..
             } => {
                 check("dogma", dogma.len(), MAX_CLIENT_NAME_LEN)?;
                 // The same bound the creating verb enforces, applied to the
-                // tree on the way out. A Cage whose name came from an older
+                // tree on the way out. A voice room whose name came from an older
                 // build, or straight from somebody's `sqlite3` prompt, must not
                 // travel further than one a client could have asked for.
-                for cage in cages {
-                    check_name("name", &cage.name)?;
+                for voice_room in voice_rooms {
+                    check_name("name", &voice_room.name)?;
                 }
                 for line in lines {
                     check_name("name", &line.name)?;
                 }
                 Ok(())
             }
-            Self::CageCreated { cage } => check_name("name", &cage.name),
+            Self::VoiceRoomCreated { voice_room } => check_name("name", &voice_room.name),
             Self::LineCreated { line } => check_name("name", &line.name),
-            Self::CageRenamed { name, .. } | Self::LineRenamed { name, .. } => {
+            Self::VoiceRoomRenamed { name, .. } | Self::LineRenamed { name, .. } => {
                 check_name("name", name)
             }
             Self::PersonJoined { profile, .. } | Self::PersonPresent { profile, .. } => {
@@ -1937,8 +1937,8 @@ impl Validate for ServerMessage {
             | Self::MessageRemoved { .. }
             | Self::Pong { .. }
             | Self::Disconnecting { .. }
-            | Self::MovedToCage { .. }
-            | Self::CageDeleted { .. }
+            | Self::MovedToVoiceRoom { .. }
+            | Self::VoiceRoomDeleted { .. }
             | Self::LineDeleted { .. }
             | Self::LineWeighed { .. }
             | Self::AttachmentRefused { .. }
@@ -1973,9 +1973,9 @@ mod tests {
             person: PersonId(42),
             ssrc: Ssrc(0xABCD),
             dogma: "Terceira Tóquio".into(),
-            cages: vec![CageInfo {
-                id: CageId(1),
-                name: "CAGE-01 CENTRAL".into(),
+            voice_rooms: vec![VoiceRoomInfo {
+                id: VoiceRoomId(1),
+                name: "VOICE_ROOM-01 CENTRAL".into(),
                 limit: 15,
                 password_required: false,
                 line: Some(LineId(1)),
@@ -2097,7 +2097,7 @@ mod tests {
     fn a_joining_person_carries_their_ssrc() {
         // The other half of gap G1: the mapping for everybody else.
         let joined = ServerMessage::PersonJoined {
-            cage: CageId(1),
+            voice_room: VoiceRoomId(1),
             profile: PersonProfile {
                 id: PersonId(2),
                 nickname: "shinji".into(),
@@ -2167,17 +2167,17 @@ mod tests {
     #[test]
     fn the_room_making_verbs_round_trip() {
         for message in [
-            ClientMessage::CreateCage {
-                name: "CAGE-02 SALA DOS FUNDOS".into(),
+            ClientMessage::CreateVoiceRoom {
+                name: "VOICE_ROOM-02 SALA DOS FUNDOS".into(),
                 limit: 8,
                 line: Some(LineId(1)),
             },
             ClientMessage::CreateLine {
                 name: "planejamento".into(),
             },
-            ClientMessage::RenameCage {
-                cage: CageId(2),
-                name: "CAGE-02 CENTRAL".into(),
+            ClientMessage::RenameVoiceRoom {
+                voice_room: VoiceRoomId(2),
+                name: "VOICE_ROOM-02 CENTRAL".into(),
             },
             ClientMessage::RenameLine {
                 line: LineId(3),
@@ -2192,10 +2192,10 @@ mod tests {
     #[test]
     fn the_room_making_announcements_round_trip() {
         for message in [
-            ServerMessage::CageCreated {
-                cage: CageInfo {
-                    id: CageId(2),
-                    name: "CAGE-02 SALA DOS FUNDOS".into(),
+            ServerMessage::VoiceRoomCreated {
+                voice_room: VoiceRoomInfo {
+                    id: VoiceRoomId(2),
+                    name: "VOICE_ROOM-02 SALA DOS FUNDOS".into(),
                     limit: 8,
                     password_required: false,
                     line: Some(LineId(1)),
@@ -2207,9 +2207,9 @@ mod tests {
                     name: "planejamento".into(),
                 },
             },
-            ServerMessage::CageRenamed {
-                cage: CageId(2),
-                name: "CAGE-02 CENTRAL".into(),
+            ServerMessage::VoiceRoomRenamed {
+                voice_room: VoiceRoomId(2),
+                name: "VOICE_ROOM-02 CENTRAL".into(),
             },
             ServerMessage::LineRenamed {
                 line: LineId(3),
@@ -2228,7 +2228,7 @@ mod tests {
         // loud. Whitespace counts as blank — " " is not a name, it is a name
         // somebody forgot to type.
         for blank in ["", " ", "\t\n  "] {
-            let ask = ClientMessage::CreateCage {
+            let ask = ClientMessage::CreateVoiceRoom {
                 name: blank.into(),
                 limit: 8,
                 line: None,
@@ -2238,7 +2238,7 @@ mod tests {
                     encode(&ask),
                     Err(ControlError::FieldOutOfRange { field: "name" })
                 ),
-                "accepted a Cage named {blank:?}"
+                "accepted a voice room named {blank:?}"
             );
 
             // And now the way a hostile peer would build it, skipping the
@@ -2250,7 +2250,7 @@ mod tests {
                     decode::<ClientMessage>(&frame),
                     Err(ControlError::FieldOutOfRange { field: "name" })
                 ),
-                "accepted a hand-rolled Cage named {blank:?}"
+                "accepted a hand-rolled voice room named {blank:?}"
             );
         }
     }
@@ -2272,13 +2272,13 @@ mod tests {
     }
 
     #[test]
-    fn a_cage_that_holds_nobody_or_everybody_is_refused() {
+    fn a_voice_room_that_holds_nobody_or_everybody_is_refused() {
         // Zero is far more often a field left at its default than a decision,
         // and a room nobody may enter is not a room. The ceiling stops a u16 of
         // 65 535 being written into a Dogma sized for fifty.
-        for limit in [0, MAX_CAGE_LIMIT + 1, u16::MAX] {
-            let ask = ClientMessage::CreateCage {
-                name: "CAGE-02".into(),
+        for limit in [0, MAX_VOICE_ROOM_LIMIT + 1, u16::MAX] {
+            let ask = ClientMessage::CreateVoiceRoom {
+                name: "VOICE_ROOM-02".into(),
                 limit,
                 line: None,
             };
@@ -2287,7 +2287,7 @@ mod tests {
                     encode(&ask),
                     Err(ControlError::FieldOutOfRange { field: "limit" })
                 ),
-                "accepted a Cage for {limit} people"
+                "accepted a voice room for {limit} people"
             );
 
             let mut frame = vec![PROTOCOL_VERSION];
@@ -2297,19 +2297,19 @@ mod tests {
                     decode::<ClientMessage>(&frame),
                     Err(ControlError::FieldOutOfRange { field: "limit" })
                 ),
-                "accepted a hand-rolled Cage for {limit} people"
+                "accepted a hand-rolled voice room for {limit} people"
             );
         }
 
-        for limit in [1, MAX_CAGE_LIMIT] {
+        for limit in [1, MAX_VOICE_ROOM_LIMIT] {
             assert!(
-                encode(&ClientMessage::CreateCage {
-                    name: "CAGE-02".into(),
+                encode(&ClientMessage::CreateVoiceRoom {
+                    name: "VOICE_ROOM-02".into(),
                     limit,
                     line: None,
                 })
                 .is_ok(),
-                "refused a Cage for {limit} people"
+                "refused a voice room for {limit} people"
             );
         }
     }
@@ -2337,8 +2337,8 @@ mod tests {
             person,
             ssrc,
             dogma,
-            cages: vec![CageInfo {
-                id: CageId(9),
+            voice_rooms: vec![VoiceRoomInfo {
+                id: VoiceRoomId(9),
                 name: "   ".into(),
                 limit: 4,
                 password_required: false,
@@ -2375,7 +2375,7 @@ mod tests {
             },
             ClientMessage::MovePerson {
                 person: PersonId(42),
-                cage: CageId(2),
+                voice_room: VoiceRoomId(2),
             },
         ] {
             let frame = encode(&message).unwrap();
@@ -2428,8 +2428,8 @@ mod tests {
         // The one moderation verb that needed an announcement of its own. A
         // kick and a ban end in `Disconnecting`, a removal is
         // `MessageRemoved`; only "you are somewhere else now" had nothing that
-        // could say it, because a client sets its own Cage on the way out.
-        let moved = ServerMessage::MovedToCage { cage: CageId(3) };
+        // could say it, because a client sets its own voice room on the way out.
+        let moved = ServerMessage::MovedToVoiceRoom { voice_room: VoiceRoomId(3) };
         let frame = encode(&moved).unwrap();
         assert_eq!(decode::<ServerMessage>(&frame).unwrap(), moved);
     }
@@ -2485,7 +2485,7 @@ mod tests {
     #[test]
     fn the_deleting_verbs_round_trip() {
         for message in [
-            ClientMessage::DeleteCage { cage: CageId(2) },
+            ClientMessage::DeleteVoiceRoom { voice_room: VoiceRoomId(2) },
             ClientMessage::DeleteLine { line: LineId(7) },
             ClientMessage::WeighLine { line: LineId(7) },
         ] {
@@ -2523,12 +2523,12 @@ mod tests {
 
     #[test]
     fn a_destroyed_room_is_announced_by_identifier_and_nothing_else() {
-        // Unlike `CageCreated`, which carries the whole row: there is no row
+        // Unlike `VoiceRoomCreated`, which carries the whole row: there is no row
         // any more, and everything a client needs to stop drawing the room it
         // already has. A frame carrying the name of a room that no longer
         // exists would be inviting some shell to keep it.
         for gone in [
-            ServerMessage::CageDeleted { cage: CageId(2) },
+            ServerMessage::VoiceRoomDeleted { voice_room: VoiceRoomId(2) },
             ServerMessage::LineDeleted { line: LineId(7) },
         ] {
             let frame = encode(&gone).unwrap();
@@ -2548,9 +2548,9 @@ mod tests {
         // destroyed. A shell handed one reason for both writes the vaguer of the
         // two, which is the shape `OperatorNotice` already has and the reason
         // neither of these is it.
-        let cage = ServerMessage::Alert {
+        let voice_room = ServerMessage::Alert {
             severity: AlertSeverity::Warning,
-            reason: AlertReason::CageDeleted,
+            reason: AlertReason::VoiceRoomDeleted,
             operator_text: None,
         };
         let line = ServerMessage::Alert {
@@ -2558,17 +2558,17 @@ mod tests {
             reason: AlertReason::LineDeleted,
             operator_text: None,
         };
-        // And the refusal of the last Cage is a third sentence, not either of
+        // And the refusal of the last voice room is a third sentence, not either of
         // these two: "make another room first" is not "the room is gone".
         let ultimo = ServerMessage::Alert {
             severity: AlertSeverity::Warning,
-            reason: AlertReason::LastCage,
+            reason: AlertReason::LastVoiceRoom,
             operator_text: None,
         };
-        assert_ne!(cage, line);
-        assert_ne!(cage, ultimo);
+        assert_ne!(voice_room, line);
+        assert_ne!(voice_room, ultimo);
         assert_ne!(line, ultimo);
-        for alert in [cage, line, ultimo] {
+        for alert in [voice_room, line, ultimo] {
             let frame = encode(&alert).unwrap();
             assert_eq!(decode::<ServerMessage>(&frame).unwrap(), alert);
         }
@@ -3015,7 +3015,7 @@ mod screen_tests {
         for (message, ordinal) in [
             (
                 ServerMessage::ScreenShareStarted {
-                    cage: CageId(2),
+                    voice_room: VoiceRoomId(2),
                     person: PersonId(42),
                     screen: ScreenId(0x00C0_FFEE),
                 },
@@ -3023,7 +3023,7 @@ mod screen_tests {
             ),
             (
                 ServerMessage::ScreenShareStopped {
-                    cage: CageId(2),
+                    voice_room: VoiceRoomId(2),
                     screen: ScreenId(0x00C0_FFEE),
                 },
                 25,
@@ -3061,7 +3061,7 @@ mod screen_tests {
     fn a_transmission_is_named_by_a_screen_id_and_never_by_an_ssrc() {
         // §3.6 puts this in bold, and it is the one decision in that section
         // that is about somebody else's code: `ssrc` is the audio source
-        // assigned on Cage entry, and every client keeps a table of
+        // assigned on voice room entry, and every client keeps a table of
         // `ssrc` → person built out of it. Reusing it for a screen would mean
         // one person holding two rows in that table, and every shell that reads
         // it learning the difference.
@@ -3071,7 +3071,7 @@ mod screen_tests {
         // announcement carries a `ScreenId`, and `Session` still carries the
         // `ssrc` it always did, untouched by any of this.
         let started = ServerMessage::ScreenShareStarted {
-            cage: CageId(2),
+            voice_room: VoiceRoomId(2),
             person: PersonId(42),
             screen: ScreenId(7),
         };
@@ -3086,7 +3086,7 @@ mod screen_tests {
 
     #[test]
     fn a_room_that_is_already_being_shared_says_so_in_its_own_words() {
-        // §6 item 3 allows one transmission per Cage in v1, so two people
+        // §6 item 3 allows one transmission per voice room in v1, so two people
         // pressing the button in the same second is an ordinary race and the
         // loser has to be told something true. `PermissionDenied` would have
         // every shell write "you may not do that" in front of somebody who may,
@@ -3110,7 +3110,7 @@ mod screen_tests {
             "the reason moved, so every peer one version older now reads it as another one"
         );
         assert_eq!(
-            postcard::to_extend(&AlertReason::LastCage, Vec::new()).unwrap(),
+            postcard::to_extend(&AlertReason::LastVoiceRoom, Vec::new()).unwrap(),
             vec![11_u8]
         );
     }

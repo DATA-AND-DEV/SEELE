@@ -1,7 +1,7 @@
 # 07 — Tema
 
 > **Nota — 2026-08-21, ADR 0033.** A **camada de linguagem deste documento foi
-> retirada da interface.** O vocabulário abaixo — Dogma Central, Cage, Linha,
+> retirada da interface.** O vocabulário abaixo — Dogma Central, VoiceRoom, Linha,
 > Pessoa, inserir plug, ejetar, A.T. Field, Taxa de Sincronização, PADRÃO: AZUL,
 > e o japonês decorativo — **não é mais o que aparece na tela**. A autoridade
 > sobre a palavra que a pessoa lê passou a ser `docs/glossario.md`.
@@ -32,7 +32,7 @@ Estes termos são obrigatórios e consistentes em toda a superfície do produto.
 | Instância de servidor | **Dogma Central** | Plural: Dogmas |
 | Daemon | **seeled** | |
 | Cliente | **Entry Plug** / `plug` | |
-| Canal de voz | **Cage** | |
+| Canal de voz | **VoiceRoom** | |
 | Canal de texto | **Linha** | |
 | Usuário | **Pessoa** | |
 | Entrar em canal de voz | **Inserir plug** | |
@@ -94,7 +94,7 @@ Nenhuma animação pode atrasar o usuário. Se a conexão fecha em 200 ms, o boo
 Operacional, fria, factual. A interface **reporta**; não pede desculpa, não é simpática, não usa primeira pessoa.
 
 - Certo: `PADRÃO AZUL NÃO ESTABELECIDO · credencial rejeitada`
-- Certo: `CAGE-02 vazio. Insira o plug para iniciar.`
+- Certo: `VOICE_ROOM-02 vazio. Insira o plug para iniciar.`
 - Errado: `Ops! Não conseguimos te conectar 😥`
 - Errado: `Nenhuma mensagem ainda!`
 

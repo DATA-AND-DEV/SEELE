@@ -11,7 +11,7 @@
 //!    │── Ola { versao, cliente, apelido } ──▶│
 //!    │◀── Desafio { nonce } ─────────────────│
 //!    │── Resposta { prova } ────────────────▶│
-//!    │◀── Sessao { id, dogma, cages, papeis }│   → PADRÃO: AZUL
+//!    │◀── Sessao { id, dogma, voice_rooms, papeis }│   → PADRÃO: AZUL
 //! ```
 //!
 //! Before `Sessao` the client is in **PADRÃO: LARANJA** — connected, not
@@ -34,18 +34,18 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context, Result};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use seele_proto::control::{
-    AlertReason, AlertSeverity, AttachmentRefusal, CageInfo, ClientMessage, DisconnectReason,
+    AlertReason, AlertSeverity, AttachmentRefusal, VoiceRoomInfo, ClientMessage, DisconnectReason,
     LineInfo, Permission, PersonProfile, PersonState, Presence, Role, ServerMessage, Subsystem,
     SubsystemHealth, Telemetry, Validate,
 };
-use seele_proto::ids::{CageId, LineId, PersonId, RoleId, ScreenId, SessionId, Ssrc};
+use seele_proto::ids::{VoiceRoomId, LineId, PersonId, RoleId, ScreenId, SessionId, Ssrc};
 use seele_proto::screen::SCREEN_HEADER_LEN;
 use seele_proto::sync_ratio::{SyncInputs, SyncRatio};
 use seele_proto::transport::HANDSHAKE_TIMEOUT;
 use tokio::sync::mpsc;
 
-use crate::cage::CageCommand;
-use crate::persistence::channels::{Channels, LastCage};
+use crate::voice_room::VoiceRoomCommand;
+use crate::persistence::channels::{Channels, LastVoiceRoom};
 use crate::persistence::messages::{Messages, PendingMessage, DEFAULT_PAGE};
 use crate::persistence::Persistence;
 use crate::dogma::{Dogma, Event};
@@ -56,12 +56,12 @@ use crate::{frame, DogmaConfig, PUBLIC_KEY_LEN};
 /// Bytes of nonce the client signs.
 const NONCE_LEN: usize = 32;
 
-/// How many datagrams queue for one listener before the Cage sheds.
+/// How many datagrams queue for one listener before the voice room sheds.
 const OUTBOUND_DEPTH: usize = 256;
 
 /// Quantos quadros de controle esperam a sessão antes de a leitura parar.
 ///
-/// Limitado de propósito. Controle é raro — entrar num Cage, abrir uma Linha,
+/// Limitado de propósito. Controle é raro — entrar num sala de voz, abrir uma Linha,
 /// dizer uma frase — então um cliente honesto nunca chega perto disto; e um
 /// desonesto encontra contrapressão em vez de memória do Dogma para gastar.
 const ENTRADA_DEPTH: usize = 64;
@@ -103,7 +103,7 @@ pub struct Registry {
     ///
     /// **Separado do `ssrc` de propósito**, e o §3.6 da spec de
     /// compartilhamento de tela põe isso em negrito: o `ssrc` é o identificador
-    /// de fonte de **áudio**, atribuído na entrada do Cage, e todo cliente
+    /// de fonte de **áudio**, atribuído na entrada da sala de voz, e todo cliente
     /// mantém uma tabela de `ssrc` → pessoa construída a partir dele. Uma tela
     /// não é um falante; dar-lhe um `ssrc` obrigaria essa tabela a ganhar uma
     /// segunda espécie de linha.
@@ -158,7 +158,7 @@ pub struct Session {
     /// May post text.
     pub may_write: bool,
     /// A seat reclaimed from an earlier connection, if any.
-    pub reclaimed_cage: Option<CageId>,
+    pub reclaimed_voice_room: Option<VoiceRoomId>,
 }
 
 /// Runs the handshake, then the session, then cleans up.
@@ -171,7 +171,7 @@ pub async fn serve(
     config: Arc<DogmaConfig>,
     registry: Arc<Registry>,
     dogma: Arc<Dogma>,
-    cages: Arc<crate::cage::Cages>,
+    voice_rooms: Arc<crate::voice_room::VoiceRooms>,
 ) -> Result<()> {
     // O balde de antes de autenticar, consultado antes de qualquer trabalho.
     //
@@ -252,35 +252,35 @@ pub async fn serve(
         ssrc = %session.ssrc,
         nickname = %session.nickname,
         may_speak = session.may_speak,
-        reclaimed = ?session.reclaimed_cage,
+        reclaimed = ?session.reclaimed_voice_room,
         "pattern blue"
     );
 
-    let result = run_session(connection, send, recv, &session, &dogma, &cages, &registry).await;
+    let result = run_session(connection, send, recv, &session, &dogma, &voice_rooms, &registry).await;
 
     // Out of every room, not out of the one this connection remembers. The loop
     // above can end at any `?`, and a path that returns early does not know
     // where the person was sitting.
-    cages.leave_everywhere(session.person).await;
+    voice_rooms.leave_everywhere(session.person).await;
     encerrar_telas_de(&dogma, session.person).await;
 
     // And **announced**, which it was not. `Event::PersonLeft` was sent only
     // from the `EjectPlug` branch, so a person who closed their client, lost
     // their network or hit any `?` in the loop stayed in everybody else's
     // roster until they reconnected. Nobody saw it while a client only drew the
-    // Cage it was sitting in and only learned of that Cage's arrivals; now that
-    // every Cage is drawn with the people in it, a ghost is a ghost on screen.
+    // voice room it was sitting in and only learned of that voice room's arrivals; now that
+    // every voice room is drawn with the people in it, a ghost is a ghost on screen.
     //
     // Here rather than at the end of `run_session` for the same reason as the
     // line above: this is the one place every exit path passes through.
-    for cage in dogma
+    for voice_room in dogma
         .occupancy
         .lock()
         .await
         .vacate_everywhere(session.person)
     {
         let _ = dogma.events.send(Event::PersonLeft {
-            cage,
+            voice_room,
             person: session.person,
         });
     }
@@ -551,7 +551,7 @@ async fn handshake(
                 });
             }
             // Um banco que não responde não é prova de que a porta pode abrir,
-            // e a falha aqui cai para o lado fechado como em `cage_liberado`.
+            // e a falha aqui cai para o lado fechado como em `voice_room_liberado`.
             // Pendente e não recusado: a máquina falhou, não a pessoa.
             Err(error) => {
                 tracing::error!(%error, "could not consult the doorkeeper");
@@ -616,7 +616,7 @@ async fn handshake(
         }
 
         let may = |permission| permissions.may(person.id, permission).unwrap_or(false);
-        let (cages, lines, roles) = read_dogma(&guard).map_err(|error| Refusal {
+        let (voice_rooms, lines, roles) = read_dogma(&guard).map_err(|error| Refusal {
             reason: DisconnectReason::ServerShuttingDown,
             detail: format!("could not read the Dogma: {error}"),
         })?;
@@ -629,7 +629,7 @@ async fn handshake(
             nickname: person.nickname,
             may_speak: may(Permission::Speak),
             may_write: may(Permission::WriteLine),
-            cages,
+            voice_rooms,
             lines,
             roles,
             permissions,
@@ -667,8 +667,8 @@ async fn handshake(
         let mut slots = dogma.slots.lock().await;
         slots.reclaim(account.id, Instant::now())
     };
-    let (ssrc, reclaimed_cage) = match reclaimed {
-        Some((cage, ssrc)) => (ssrc, Some(cage)),
+    let (ssrc, reclaimed_voice_room) = match reclaimed {
+        Some((voice_room, ssrc)) => (ssrc, Some(voice_room)),
         None => (fresh_ssrc, None),
     };
 
@@ -679,7 +679,7 @@ async fn handshake(
             person: account.id,
             ssrc,
             dogma: nome_do_dogma,
-            cages: account.cages,
+            voice_rooms: account.voice_rooms,
             lines: account.lines,
             roles: account.roles,
             permissions: account.permissions,
@@ -692,13 +692,13 @@ async fn handshake(
     })?;
 
     // Logo depois do `Session`, e num quadro próprio: o `Session` já carrega os
-    // Cages, as Linhas, os papéis e as permissões dentro dos 16 KiB do
+    // salas de voz, as Linhas, os papéis e as permissões dentro dos 16 KiB do
     // `MAX_FRAME_LEN`, e uma imagem disputando esse orçamento faria um Dogma
     // grande deixar de admitir alguém por causa de uma decoração — a terceira
     // razão do ADR 0032, aqui respeitada em vez de contornada.
     //
     // **Só quando há ícone**, e o silêncio quer dizer «não há». O `Session`
-    // descreve o Dogma do zero — é dele que sai o nome, a lista de Cages e a de
+    // descreve o Dogma do zero — é dele que sai o nome, a lista de salas de voz e a de
     // Linhas —, então quem reconecta a um Dogma cuja imagem foi tirada enquanto
     // ele estava fora para de desenhar a antiga por ter sido reapresentado ao
     // Dogma, e não por receber um `None`. O que isso compra é que um Dogma sem
@@ -733,7 +733,7 @@ async fn handshake(
         nickname: account.nickname,
         may_speak: account.may_speak,
         may_write: account.may_write,
-        reclaimed_cage,
+        reclaimed_voice_room,
     })
 }
 
@@ -743,20 +743,20 @@ struct Account {
     nickname: String,
     may_speak: bool,
     may_write: bool,
-    cages: Vec<CageInfo>,
+    voice_rooms: Vec<VoiceRoomInfo>,
     lines: Vec<LineInfo>,
     roles: Vec<Role>,
     permissions: Vec<Permission>,
 }
 
-/// Reads the Cage and Line tree, and the roles, out of PERSISTENCE.
-fn read_dogma(persistence: &Persistence) -> Result<(Vec<CageInfo>, Vec<LineInfo>, Vec<Role>)> {
+/// Reads the voice room and Line tree, and the roles, out of PERSISTENCE.
+fn read_dogma(persistence: &Persistence) -> Result<(Vec<VoiceRoomInfo>, Vec<LineInfo>, Vec<Role>)> {
     let connection = persistence.connection();
 
     // The same reader the creating verbs use, so the tree the handshake sends
     // and the tree a new room lands in cannot drift apart.
     let channels = Channels::new(persistence);
-    let cages = channels.cages()?;
+    let voice_rooms = channels.voice_rooms()?;
     let lines = channels.lines()?;
 
     let mut role_statement = connection.prepare("SELECT id, name, permissions FROM roles")?;
@@ -772,7 +772,7 @@ fn read_dogma(persistence: &Persistence) -> Result<(Vec<CageInfo>, Vec<LineInfo>
         .filter_map(Result::ok)
         .collect();
 
-    Ok((cages, lines, roles))
+    Ok((voice_rooms, lines, roles))
 }
 
 /// The session loop.
@@ -783,7 +783,7 @@ async fn run_session(
     recv: quinn::RecvStream,
     session: &Session,
     dogma: &Arc<Dogma>,
-    cages: &Arc<crate::cage::Cages>,
+    voice_rooms: &Arc<crate::voice_room::VoiceRooms>,
     registry: &Registry,
 ) -> Result<()> {
     // Uma tarefa é dona do fluxo de leitura e entrega quadros inteiros por um
@@ -879,7 +879,7 @@ async fn run_session(
         let conexao = connection.clone();
         let pessoa = session.person;
         let apelido = session.nickname.clone();
-        let salas = Arc::clone(cages);
+        let salas = Arc::clone(voice_rooms);
         tokio::spawn(async move {
             while let Ok(mut fluxo) = conexao.accept_uni().await {
                 let anexos = anexos.clone();
@@ -985,7 +985,7 @@ async fn run_session(
     let mut recusados: u64 = 0;
     let mut events = dogma.events.subscribe();
     let mut lines: Vec<LineId> = Vec::new();
-    let mut current_cage: Option<CageId> = None;
+    let mut current_voice_room: Option<VoiceRoomId> = None;
 
     // What this person has announced about themselves. Held here rather than
     // rebuilt each tick, because the telemetry broadcast carries it and a tick
@@ -1007,12 +1007,12 @@ async fn run_session(
     let mut telemetry = tokio::time::interval(TELEMETRY_INTERVAL);
     telemetry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
-    // A reclaimed seat means the person was already in a Cage when they dropped.
-    if let Some(reclaimed) = session.reclaimed_cage {
-        cages
+    // A reclaimed seat means the person was already in a voice room when they dropped.
+    if let Some(reclaimed) = session.reclaimed_voice_room {
+        voice_rooms
             .of(reclaimed)
             .await
-            .send(CageCommand::Join {
+            .send(VoiceRoomCommand::Join {
                 person: session.person,
                 ssrc: session.ssrc,
                 may_speak: session.may_speak,
@@ -1020,7 +1020,7 @@ async fn run_session(
                 tela: tela_tx.clone(),
             })
             .await?;
-        current_cage = Some(reclaimed);
+        current_voice_room = Some(reclaimed);
         dogma.occupancy.lock().await.seat(
             reclaimed,
             crate::dogma::Occupant {
@@ -1032,14 +1032,14 @@ async fn run_session(
         tracing::info!(person = %session.person, "seat reclaimed");
     }
 
-    // Who is already seated, in **every** Cage — the whole picture, once.
+    // Who is already seated, in **every** voice room — the whole picture, once.
     //
     // The wider half of gap G15. The narrow half was closed inside
-    // `InsertPlug`: walk into an occupied Cage and the server listed the people
-    // in *that* Cage. Every other Cage stayed empty on the client for the whole
+    // `InsertPlug`: walk into an occupied voice room and the server listed the people
+    // in *that* voice room. Every other voice room stayed empty on the client for the whole
     // session, because nothing had ever carried who was in it — and the screen
     // in `design/Entry Plug v3.dc.html` draws occupants under all of them. That
-    // is the defect reported from a real session as the Cages showing empty
+    // is the defect reported from a real session as the voice_rooms showing empty
     // when they were not.
     //
     // Sent as `PersonJoined`, which is what the client already folds in, so this
@@ -1097,14 +1097,14 @@ async fn run_session(
         }
     }
 
-    for (cage, occupant) in dogma.occupancy.lock().await.everywhere() {
+    for (voice_room, occupant) in dogma.occupancy.lock().await.everywhere() {
         if occupant.person == session.person {
             continue;
         }
         frame::write(
             &mut send,
             &ServerMessage::PersonJoined {
-                cage,
+                voice_room,
                 profile: PersonProfile {
                     id: occupant.person,
                     nickname: occupant.nickname.clone(),
@@ -1116,25 +1116,25 @@ async fn run_session(
         .await?;
     }
 
-    // E quais Cages já estão transmitindo tela, pelo mesmo motivo e no mesmo
+    // E quais salas de voz já estão transmitindo tela, pelo mesmo motivo e no mesmo
     // lugar.
     //
-    // §3.6 escreve esta regra como «reenviado a quem entra num Cage que já
-    // está transmitindo», e ela é atendida aqui em vez de na entrada do Cage
+    // §3.6 escreve esta regra como «reenviado a quem entra num sala de voz que já
+    // está transmitindo», e ela é atendida aqui em vez de na entrada da sala de voz
     // porque `ScreenShareStarted` sai do barramento **sem filtro de sala** —
     // do jeito que `PersonJoined` passou a sair quando o cliente começou a
-    // desenhar todos os Cages. Com a difusão cobrindo tudo o que acontece a
+    // desenhar todos as salas de voz. Com a difusão cobrindo tudo o que acontece a
     // partir de agora, o que falta é exatamente o que já estava acontecendo
     // antes de esta conexão existir, e isso é uma varredura, uma vez.
     //
     // Depois do `subscribe()` acima pelo mesmo motivo que a ocupação: a ordem
     // inversa pode perder uma transmissão que começou entre as duas linhas, e
     // uma transmissão perdida é uma tela que ninguém sabe que existe.
-    for (cage, person, screen) in dogma.telas.lock().await.todas() {
+    for (voice_room, person, screen) in dogma.telas.lock().await.todas() {
         frame::write(
             &mut send,
             &ServerMessage::ScreenShareStarted {
-                cage,
+                voice_room,
                 person,
                 screen,
             },
@@ -1208,34 +1208,34 @@ async fn run_session(
                 }
 
                 match message {
-                    ClientMessage::InsertPlug { cage: id, password } => {
-                        // A senha do Cage era declarada no protocolo, relatada
+                    ClientMessage::InsertPlug { voice_room: id, password } => {
+                        // A senha da sala de voz era declarada no protocolo, relatada
                         // ao cliente em `password_required` e **nunca
                         // conferida**. Uma fechadura que se anuncia trancada e
                         // não está é pior que porta aberta: quem confia nela
                         // toma decisão errada sobre o que dizer ali dentro.
-                        if !crate::admissao::cage_liberado(
+                        if !crate::admissao::voice_room_liberado(
                             &*dogma.persistence.lock().await,
                             id,
                             password.as_deref(),
                         ) {
                             frame::write(&mut send, &ServerMessage::Alert {
                                 severity: AlertSeverity::Warning,
-                                reason: AlertReason::CageEntryRefused,
+                                reason: AlertReason::VoiceRoomEntryRefused,
                                 operator_text: None,
                             }).await?;
                             continue;
                         }
-                        assentar(dogma, cages, session, &outbound_tx, &tela_tx, id).await?;
-                        current_cage = Some(id);
+                        assentar(dogma, voice_rooms, session, &outbound_tx, &tela_tx, id).await?;
+                        current_voice_room = Some(id);
                     }
                     ClientMessage::EjectPlug => {
-                        cages.leave_everywhere(session.person).await;
+                        voice_rooms.leave_everywhere(session.person).await;
                         encerrar_telas_de(dogma, session.person).await;
-                        if let Some(id) = current_cage.take() {
+                        if let Some(id) = current_voice_room.take() {
                             dogma.occupancy.lock().await.vacate(id, session.person);
                             let _ = dogma.events.send(Event::PersonLeft {
-                                cage: id,
+                                voice_room: id,
                                 person: session.person,
                             });
                         }
@@ -1337,7 +1337,7 @@ async fn run_session(
                     // `may_write` are cached because they are consulted per
                     // audio frame and per message; these four are consulted
                     // once in a while, and a Comandante who revoked somebody's
-                    // ManageCages a minute ago should not have to wait for that
+                    // ManageVoiceRooms a minute ago should not have to wait for that
                     // person to reconnect before it means anything.
                     //
                     // Denial answers with `PermissionDenied` rather than
@@ -1345,25 +1345,25 @@ async fn run_session(
                     // security and the hidden button the convenience — but a
                     // refusal nobody is told about is indistinguishable from a
                     // Dogma that is broken.
-                    ClientMessage::CreateCage { name, limit, line } => {
-                        if !pode(dogma, session.person, Permission::ManageCages).await {
-                            recusar(&mut send, session.person, "CreateCage").await?;
+                    ClientMessage::CreateVoiceRoom { name, limit, line } => {
+                        if !pode(dogma, session.person, Permission::ManageVoiceRooms).await {
+                            recusar(&mut send, session.person, "CreateVoiceRoom").await?;
                             continue;
                         }
                         let feito = {
                             let guard = dogma.persistence.lock().await;
-                            Channels::new(&guard).create_cage(&name, limit, line)
+                            Channels::new(&guard).create_voice_room(&name, limit, line)
                         };
                         match feito {
-                            Ok(cage) => {
-                                tracing::info!(person = %session.person, cage = %cage.id, "cage created");
-                                let _ = dogma.events.send(Event::CageCreated { cage });
+                            Ok(voice_room) => {
+                                tracing::info!(person = %session.person, voice_room = %voice_room.id, "voice room created");
+                                let _ = dogma.events.send(Event::VoiceRoomCreated { voice_room });
                             }
                             Err(erro) => nao_deu(&mut send, &erro).await?,
                         }
                     }
                     ClientMessage::CreateLine { name } => {
-                        if !pode(dogma, session.person, Permission::ManageCages).await {
+                        if !pode(dogma, session.person, Permission::ManageVoiceRooms).await {
                             recusar(&mut send, session.person, "CreateLine").await?;
                             continue;
                         }
@@ -1379,24 +1379,24 @@ async fn run_session(
                             Err(erro) => nao_deu(&mut send, &erro).await?,
                         }
                     }
-                    ClientMessage::RenameCage { cage: id, name } => {
-                        if !pode(dogma, session.person, Permission::ManageCages).await {
-                            recusar(&mut send, session.person, "RenameCage").await?;
+                    ClientMessage::RenameVoiceRoom { voice_room: id, name } => {
+                        if !pode(dogma, session.person, Permission::ManageVoiceRooms).await {
+                            recusar(&mut send, session.person, "RenameVoiceRoom").await?;
                             continue;
                         }
                         let feito = {
                             let guard = dogma.persistence.lock().await;
-                            Channels::new(&guard).rename_cage(id, &name)
+                            Channels::new(&guard).rename_voice_room(id, &name)
                         };
                         match feito {
                             Ok(name) => {
-                                let _ = dogma.events.send(Event::CageRenamed { cage: id, name });
+                                let _ = dogma.events.send(Event::VoiceRoomRenamed { voice_room: id, name });
                             }
                             Err(erro) => nao_deu(&mut send, &erro).await?,
                         }
                     }
                     ClientMessage::RenameLine { line: id, name } => {
-                        if !pode(dogma, session.person, Permission::ManageCages).await {
+                        if !pode(dogma, session.person, Permission::ManageVoiceRooms).await {
                             recusar(&mut send, session.person, "RenameLine").await?;
                             continue;
                         }
@@ -1414,9 +1414,9 @@ async fn run_session(
 
                     // ---- what the Dogma calls itself ----
                     //
-                    // `AdministerDogma`, and not the `ManageCages` of the four
+                    // `AdministerDogma`, and not the `ManageVoiceRooms` of the four
                     // room verbs above. `specs/04-servidor-seele.md` calls
-                    // `gerenciar_cages` "criar e configurar Cages" and
+                    // `gerenciar_voice_rooms` "criar e configurar voice_rooms" and
                     // `administrar_dogma` "todo o resto sobre o Dogma": the
                     // name and the picture of the Dogma itself are not a room,
                     // and somebody trusted to build rooms is not thereby the
@@ -1594,62 +1594,62 @@ async fn run_session(
                             Err(erro) => nao_deu(&mut send, &erro).await?,
                         }
                     }
-                    ClientMessage::MovePerson { person: alvo, cage: destino } => {
+                    ClientMessage::MovePerson { person: alvo, voice_room: destino } => {
                         if !moderavel(dogma, session.person, alvo, Permission::MovePerson).await {
                             recusar(&mut send, session.person, "MovePerson").await?;
                             continue;
                         }
-                        tracing::info!(by = %session.person, %alvo, cage = %destino, "moved");
+                        tracing::info!(by = %session.person, %alvo, voice_room = %destino, "moved");
                         let _ = dogma.events.send(Event::PersonMoved {
                             person: alvo,
-                            cage: destino,
+                            voice_room: destino,
                         });
                     }
 
                     // ---- unmaking a room ----
                     //
-                    // `AdministerDogma`, and not the `ManageCages` the four
+                    // `AdministerDogma`, and not the `ManageVoiceRooms` the four
                     // room verbs above use. Creating and renaming are mistakes
                     // one survives; this is the one room verb that ends
                     // somebody else's writing, and no screen of this product
                     // brings it back. `specs/04-servidor-seele.md` calls
-                    // `gerenciar_cages` "criar e configurar Cages" and
+                    // `gerenciar_voice_rooms` "criar e configurar voice_rooms" and
                     // `administrar_dogma` "todo o resto sobre o Dogma";
                     // destroying every message six people wrote is not
                     // configuration. Read now, from PERMISSIONS, like all the
                     // others.
-                    ClientMessage::DeleteCage { cage: id } => {
+                    ClientMessage::DeleteVoiceRoom { voice_room: id } => {
                         if !pode(dogma, session.person, Permission::AdministerDogma).await {
-                            recusar(&mut send, session.person, "DeleteCage").await?;
+                            recusar(&mut send, session.person, "DeleteVoiceRoom").await?;
                             continue;
                         }
                         let feito = {
                             let guard = dogma.persistence.lock().await;
-                            Channels::new(&guard).delete_cage(id)
+                            Channels::new(&guard).delete_voice_room(id)
                         };
                         match feito {
                             Ok(()) => {
-                                tracing::info!(by = %session.person, cage = %id, "cage destroyed");
+                                tracing::info!(by = %session.person, voice_room = %id, "voice room destroyed");
                                 // A transmissão morre com a sala, e antes do
                                 // aviso de que a sala morreu: quem está
                                 // desenhando a tela para de desenhá-la porque
                                 // ela acabou, e não porque o cômodo sumiu de
                                 // baixo dela.
-                                if let Some(screen) = dogma.telas.lock().await.encerrar_cage(id) {
+                                if let Some(screen) = dogma.telas.lock().await.encerrar_voice_room(id) {
                                     let _ = dogma.events.send(Event::ScreenShareStopped {
-                                        cage: id,
+                                        voice_room: id,
                                         screen,
                                     });
                                 }
-                                let _ = dogma.events.send(Event::CageDeleted { cage: id });
+                                let _ = dogma.events.send(Event::VoiceRoomDeleted { voice_room: id });
                             }
                             // The only refusal here with a sentence of its own.
                             // Everything else a write can fail with is the
                             // database's business and goes to the operator's log.
-                            Err(erro) if erro.downcast_ref::<LastCage>().is_some() => {
+                            Err(erro) if erro.downcast_ref::<LastVoiceRoom>().is_some() => {
                                 frame::write(&mut send, &ServerMessage::Alert {
                                     severity: AlertSeverity::Warning,
-                                    reason: AlertReason::LastCage,
+                                    reason: AlertReason::LastVoiceRoom,
                                     operator_text: None,
                                 }).await?;
                             }
@@ -1765,22 +1765,22 @@ async fn run_session(
                     // `spikes/tela-no-transporte` viu 16,1% da voz perdida com
                     // o buffer padrão e 98,1% com o buffer pequeno.
                     ClientMessage::StartScreenShare => {
-                        // Sentado antes de transmitir. Um Cage vindo de quem
-                        // pergunta é um Cage que quem pergunta aponta para
+                        // Sentado antes de transmitir. Uma sala de voz vindo de quem
+                        // pergunta é uma sala de voz que quem pergunta aponta para
                         // outro lugar, então a mensagem não o carrega e a
                         // resposta é a sala onde o plug está.
                         //
                         // `PermissionDenied` é a recusa mais próxima que existe
                         // enumerada, e ela não diz a verdade inteira: a pessoa
                         // **pode**, só não está em sala nenhuma. Um
-                        // `NotInCage` falta em `AlertReason`, e não foi
+                        // `NotInVoiceRoom` falta em `AlertReason`, e não foi
                         // acrescentado aqui porque `seele-proto` é de outro
                         // dono nesta rodada — está no relatório. Enquanto isso,
                         // recusar com a frase errada continua sendo melhor que
                         // recusar em silêncio, que é indistinguível de um Dogma
                         // quebrado.
-                        let Some(cage) = current_cage else {
-                            recusar(&mut send, session.person, "StartScreenShare fora de Cage")
+                        let Some(voice_room) = current_voice_room else {
+                            recusar(&mut send, session.person, "StartScreenShare fora de voice room")
                                 .await?;
                             continue;
                         };
@@ -1793,10 +1793,10 @@ async fn run_session(
                             continue;
                         }
                         let screen = registry.issue_screen();
-                        match dogma.telas.lock().await.comecar(cage, session.person, screen) {
+                        match dogma.telas.lock().await.comecar(voice_room, session.person, screen) {
                             Ok(()) => {
                                 let _ = dogma.events.send(Event::ScreenShareStarted {
-                                    cage,
+                                    voice_room,
                                     person: session.person,
                                     screen,
                                 });
@@ -1814,12 +1814,12 @@ async fn run_session(
                         }
                     }
                     ClientMessage::StopScreenShare => {
-                        let parada = match current_cage {
-                            Some(cage) => dogma.telas.lock().await.parar(cage, session.person),
+                        let parada = match current_voice_room {
+                            Some(voice_room) => dogma.telas.lock().await.parar(voice_room, session.person),
                             None => None,
                         };
-                        if let (Some(cage), Some(screen)) = (current_cage, parada) {
-                            let _ = dogma.events.send(Event::ScreenShareStopped { cage, screen });
+                        if let (Some(voice_room), Some(screen)) = (current_voice_room, parada) {
+                            let _ = dogma.events.send(Event::ScreenShareStopped { voice_room, screen });
                         }
                     }
                     ClientMessage::RequestKeyFrame { screen } => {
@@ -1829,8 +1829,8 @@ async fn run_session(
                         // §3.3 conta o que um quadro-chave custa — 65 KiB em
                         // 1080p, 446 ms do orçamento inteiro. Um pedido que
                         // atravessasse salas seria amplificação de graça.
-                        let dono = match current_cage {
-                            Some(cage) => dogma.telas.lock().await.em(cage),
+                        let dono = match current_voice_room {
+                            Some(voice_room) => dogma.telas.lock().await.em(voice_room),
                             None => None,
                         };
                         if let Some((sharer, corrente)) = dono {
@@ -1853,11 +1853,11 @@ async fn run_session(
             datagram = connection.read_datagram() => {
                 let Ok(bytes) = datagram else { break };
                 // Into the room this connection is actually in. Sending to a
-                // fixed Cage was correct while a Dogma had one and became a
+                // fixed voice room was correct while a Dogma had one and became a
                 // crossed wire the moment it could have two.
-                let Some(id) = current_cage else { continue };
+                let Some(id) = current_voice_room else { continue };
                 last_datagram = Some(Instant::now());
-                let _ = cages.of(id).await.send(CageCommand::Datagram {
+                let _ = voice_rooms.of(id).await.send(VoiceRoomCommand::Datagram {
                     from: session.ssrc,
                     bytes: bytes.to_vec(),
                 }).await;
@@ -1956,11 +1956,11 @@ async fn run_session(
                         // somebody to look for a network problem.
                         // And the seat is **not** held. The grace period exists
                         // for a train going into a tunnel; applied here it
-                        // would put a kicked person straight back into the Cage
+                        // would put a kicked person straight back into the voice room
                         // they were removed from the moment they reconnected,
                         // which is the whole verb undone by a feature meant for
                         // something else.
-                        current_cage = None;
+                        current_voice_room = None;
                         let _ = frame::write(&mut send, &ServerMessage::Disconnecting {
                             reason: *reason,
                         }).await;
@@ -1968,9 +1968,9 @@ async fn run_session(
                         despedir(&connection, &mut send, b"moderated").await;
                         break;
                     }
-                    Event::PersonMoved { person, cage: destino } if *person == session.person => {
-                        assentar(dogma, cages, session, &outbound_tx, &tela_tx, *destino).await?;
-                        current_cage = Some(*destino);
+                    Event::PersonMoved { person, voice_room: destino } if *person == session.person => {
+                        assentar(dogma, voice_rooms, session, &outbound_tx, &tela_tx, *destino).await?;
+                        current_voice_room = Some(*destino);
                         // Where the plug is now, and then that somebody put it
                         // there. Two frames because they are two different
                         // things: one is state this client has to fold in or go
@@ -1978,8 +1978,8 @@ async fn run_session(
                         // sentence only a shell knows how to write. Being moved
                         // in silence is indistinguishable from a client that
                         // lost track of where it was.
-                        frame::write(&mut send, &ServerMessage::MovedToCage {
-                            cage: *destino,
+                        frame::write(&mut send, &ServerMessage::MovedToVoiceRoom {
+                            voice_room: *destino,
                         }).await?;
                         frame::write(&mut send, &ServerMessage::Alert {
                             severity: AlertSeverity::Info,
@@ -1988,36 +1988,36 @@ async fn run_session(
                         }).await?;
                         continue;
                     }
-                    // A Cage does not vanish from under the feet of the people
+                    // A voice room does not vanish from under the feet of the people
                     // speaking in it. The plug comes out first — the same
                     // bookkeeping `EjectPlug` does, because it is the same
                     // thing happening without being asked for — and only then
                     // does this client hear that the room is gone.
                     //
                     // Order matters in the other direction too: `PersonLeft`
-                    // goes out before `CageDeleted` reaches anybody, so no
+                    // goes out before `VoiceRoomDeleted` reaches anybody, so no
                     // client is ever holding a roster for a room it has already
                     // been told to forget.
-                    Event::CageDeleted { cage: id } if current_cage == Some(*id) => {
-                        cages.leave_everywhere(session.person).await;
+                    Event::VoiceRoomDeleted { voice_room: id } if current_voice_room == Some(*id) => {
+                        voice_rooms.leave_everywhere(session.person).await;
                         encerrar_telas_de(dogma, session.person).await;
-                        current_cage = None;
+                        current_voice_room = None;
                         dogma.occupancy.lock().await.vacate(*id, session.person);
                         let _ = dogma.events.send(Event::PersonLeft {
-                            cage: *id,
+                            voice_room: *id,
                             person: session.person,
                         });
-                        frame::write(&mut send, &ServerMessage::CageDeleted {
-                            cage: *id,
+                        frame::write(&mut send, &ServerMessage::VoiceRoomDeleted {
+                            voice_room: *id,
                         }).await?;
                         // And then the sentence. Two frames for the reason
-                        // `MovedToCage` gives: one is state this client has to
+                        // `MovedToVoiceRoom` gives: one is state this client has to
                         // fold in or go on sending voice into a room that is
                         // not there, the other is what the person should be
                         // told, and only a shell knows how to say it.
                         frame::write(&mut send, &ServerMessage::Alert {
                             severity: AlertSeverity::Warning,
-                            reason: AlertReason::CageDeleted,
+                            reason: AlertReason::VoiceRoomDeleted,
                             operator_text: None,
                         }).await?;
                         continue;
@@ -2089,7 +2089,7 @@ async fn run_session(
 
     // The connection is gone. Hold the seat for the grace window rather than
     // letting a tunnel cost somebody their place — specs/02-protocolo.md.
-    if let Some(id) = current_cage {
+    if let Some(id) = current_voice_room {
         let mut slots = dogma.slots.lock().await;
         slots.reserve(session.person, id, session.ssrc, Instant::now());
     }
@@ -2136,7 +2136,7 @@ async fn run_session(
     Ok(())
 }
 
-/// Puts this connection's plug into a Cage, and tells the Dogma.
+/// Puts this connection's plug into a voice room, and tells the Dogma.
 ///
 /// One function because there are two ways in — the person asks
 /// ([`ClientMessage::InsertPlug`]) or somebody with [`Permission::MovePerson`]
@@ -2147,26 +2147,26 @@ async fn run_session(
 /// somebody in a room they are not in.
 async fn assentar(
     dogma: &Dogma,
-    cages: &crate::cage::Cages,
+    voice_rooms: &crate::voice_room::VoiceRooms,
     session: &Session,
     outbound: &mpsc::Sender<Vec<u8>>,
     tela: &mpsc::Sender<crate::tela::AberturaDeTela>,
-    destino: CageId,
+    destino: VoiceRoomId,
 ) -> Result<()> {
     // Out of the old room before into the new one. Without this a person who
-    // walks from one Cage to another is still a member of the first, and goes
+    // walks from one voice room to another is still a member of the first, and goes
     // on hearing it.
-    cages.leave_everywhere(session.person).await;
+    voice_rooms.leave_everywhere(session.person).await;
     // E a tela vai junto. Uma transmissão não anda de sala com quem a manda:
     // quem ficou na sala anterior continuaria vendo o cabeçalho de um fluxo que
     // agora aponta para outro lugar, e o §6 item 3 só permite uma por sala —
     // levar a transmissão pela mão faria a pessoa tomar a vaga da sala nova sem
     // ter pedido.
     encerrar_telas_de(dogma, session.person).await;
-    cages
+    voice_rooms
         .of(destino)
         .await
-        .send(CageCommand::Join {
+        .send(VoiceRoomCommand::Join {
             person: session.person,
             ssrc: session.ssrc,
             may_speak: session.may_speak,
@@ -2176,7 +2176,7 @@ async fn assentar(
         .await?;
 
     // No burst of "who is already here": this connection was handed every
-    // Cage's occupants when it started, and has been told about every arrival
+    // voice room's occupants when it started, and has been told about every arrival
     // and departure since, wherever it happened. Repeating the room it is
     // walking into would be telling it something it already knows.
     let saiu_de = {
@@ -2194,18 +2194,18 @@ async fn assentar(
         saiu_de
     };
 
-    // Walking from one Cage to another is a departure and an arrival, and both
+    // Walking from one voice room to another is a departure and an arrival, and both
     // have to be said. Without the first, everybody watching the old room keeps
     // the person in it for ever — invisible while a client only drew its own
-    // Cage, and a ghost now that it draws all of them.
+    // voice room, and a ghost now that it draws all of them.
     for anterior in saiu_de {
         let _ = dogma.events.send(Event::PersonLeft {
-            cage: anterior,
+            voice_room: anterior,
             person: session.person,
         });
     }
     let _ = dogma.events.send(Event::PersonJoined {
-        cage: destino,
+        voice_room: destino,
         profile: PersonProfile {
             id: session.person,
             nickname: session.nickname.clone(),
@@ -2215,10 +2215,10 @@ async fn assentar(
     });
 
     // **Nada de tela é reenviado aqui**, e o §3.6 pede que seja — «também
-    // enviado a um pessoa que entra num Cage onde já há transmissão». Ele é
+    // enviado a um pessoa que entra num sala de voz onde já há transmissão». Ele é
     // atendido em outro lugar e melhor: `ScreenShareStarted` sai pelo
     // barramento **sem filtro**, como `PersonJoined` já sai desde que o cliente
-    // passou a desenhar todos os Cages, e o que faltava — o que já estava
+    // passou a desenhar todos as salas de voz, e o que faltava — o que já estava
     // acontecendo antes de esta conexão existir — é mandado uma vez, no começo
     // da sessão, ao lado do retrato da ocupação. Reenviar aqui seria o mesmo
     // quadro duas vezes para quem já o tinha.
@@ -2235,7 +2235,7 @@ async fn assentar(
 /// one connection can ask.
 ///
 /// A database error reads as denial. The alternative is to let a Dogma whose
-/// disk is failing hand out `ManageCages` to whoever asks while it fails.
+/// disk is failing hand out `ManageVoiceRooms` to whoever asks while it fails.
 async fn pode(dogma: &Dogma, person: PersonId, permission: Permission) -> bool {
     let guard = dogma.persistence.lock().await;
     Permissions::new(&guard)
@@ -2285,17 +2285,17 @@ async fn moderavel(dogma: &Dogma, quem: PersonId, alvo: PersonId, permission: Pe
     !alvo_administra || quem_administra
 }
 
-/// Lê o fluxo de quem compartilha e o entrega ao Cage, que o encaminha.
+/// Lê o fluxo de quem compartilha e o entrega à sala de voz, que o encaminha.
 ///
 /// §5.1, decidido em 22/08/2026: **o servidor encaminha, como já faz com a
 /// voz.** Esta é a metade que lê; a que escreve é `crate::tela::bombear`, uma
-/// por espectador, e o que as liga é o [`crate::cage::Cage`] — que é o único
+/// por espectador, e o que as liga é o [`crate::voice_room::VoiceRoom`] — que é o único
 /// lugar deste Dogma que sabe quem está na sala sem perguntar a ninguém.
 ///
 /// # Só de quem o controle já autorizou
 ///
 /// O fluxo não carrega identidade nenhuma, e não deve carregar: quem manda é a
-/// conexão, como o `ssrc` de `Cage::forward`. Então a primeira pergunta é ao
+/// conexão, como o `ssrc` de `VoiceRoom::forward`. Então a primeira pergunta é ao
 /// registro que decidiu a corrida do §6 item 3 — este pessoa está transmitindo
 /// em alguma sala? —, e o `ScreenId` que o cabeçalho declara é conferido contra
 /// o que **este Dogma** atribuiu. Sem essas duas linhas, abrir um fluxo seria
@@ -2303,12 +2303,12 @@ async fn moderavel(dogma: &Dogma, quem: PersonId, alvo: PersonId, permission: Pe
 /// outra pessoa.
 async fn receber_tela(
     dogma: &Dogma,
-    cages: &crate::cage::Cages,
+    voice_rooms: &crate::voice_room::VoiceRooms,
     person: PersonId,
     avisos: &mpsc::Sender<ServerMessage>,
     fluxo: &mut quinn::RecvStream,
 ) -> Result<()> {
-    let Some((cage, screen)) = dogma.telas.lock().await.de(person) else {
+    let Some((voice_room, screen)) = dogma.telas.lock().await.de(person) else {
         // Parar o fluxo e não ignorá-lo: um cliente que abriu sem pedir tem de
         // descobrir agora, e não pela imagem que nunca aparece do outro lado.
         let _ = fluxo.stop(quinn::VarInt::from_u32(crate::tela::CODIGO_DE_CORTE));
@@ -2329,11 +2329,11 @@ async fn receber_tela(
         );
     }
 
-    let sala = cages.of(cage).await;
+    let sala = voice_rooms.of(voice_room).await;
     // Uma vaga só: o Dogma encerra uma transmissão uma vez, e a segunda razão
     // não teria o que dizer.
     let (fim_tx, mut fim_rx) = mpsc::channel::<crate::tela::FimDaTela>(1);
-    sala.send(CageCommand::TelaAbriu {
+    sala.send(VoiceRoomCommand::TelaAbriu {
         from: person,
         screen,
         abertura: abertura.to_vec(),
@@ -2348,7 +2348,7 @@ async fn receber_tela(
         // no meio perderia os bytes já retirados do fluxo — o mesmo defeito que
         // a tarefa leitora do controle existe para não ter.
         if let Ok(motivo) = fim_rx.try_recv() {
-            tracing::info!(%person, %cage, %screen, ?motivo, "o Dogma encerrou uma transmissão");
+            tracing::info!(%person, %voice_room, %screen, ?motivo, "o Dogma encerrou uma transmissão");
             let _ = fluxo.stop(quinn::VarInt::from_u32(crate::tela::CODIGO_DE_CORTE));
             // Anunciado, porque o plano de controle é o único lugar de onde a
             // sala aprende que a tela parou. Sem isto ficaria desenhada uma
@@ -2382,11 +2382,11 @@ async fn receber_tela(
         match fluxo.read(&mut buffer).await? {
             Some(lidos) => {
                 let bytes = buffer.get(..lidos).unwrap_or_default().to_vec();
-                // `send` e não `try_send`: encher a fila do Cage tem de virar
+                // `send` e não `try_send`: encher a fila da sala de voz tem de virar
                 // contrapressão no QUIC de quem compartilha, que é onde ela
                 // conserta alguma coisa. Descartar aqui deslocaria o
                 // enquadramento de todos os espectadores de uma vez.
-                sala.send(CageCommand::TelaBytes { from: person, bytes })
+                sala.send(VoiceRoomCommand::TelaBytes { from: person, bytes })
                     .await?;
             }
             None => break,
@@ -2395,23 +2395,23 @@ async fn receber_tela(
     // O fim limpo. Quem parou de propósito também manda `StopScreenShare` pelo
     // controle, e é ele que anuncia; quem sumiu é recolhido pelo fim da sessão.
     // Aqui só o encaminhamento morre, que é o que o §5.1 pôs sob esta função.
-    let _ = sala.send(CageCommand::TelaFechou { from: person }).await;
+    let _ = sala.send(VoiceRoomCommand::TelaFechou { from: person }).await;
     Ok(())
 }
 
 /// Encerra e anuncia o que este pessoa estivesse transmitindo, onde estivesse.
 ///
-/// Chamado em todo lugar onde o plug sai de um Cage — sair, ser movido, ser
+/// Chamado em todo lugar onde o plug sai de uma sala de voz — sair, ser movido, ser
 /// expulso, ou a conexão acabar em qualquer `?` do meio do laço. Uma
 /// transmissão que sobrevivesse à saída de quem a manda ficaria desenhada para
 /// sempre na sala, prometendo um fluxo que não tem mais de onde vir: é o mesmo
 /// defeito do pessoa fantasma que `serve` conserta logo acima, com a diferença
 /// de que aqui a promessa é de imagem em movimento.
 async fn encerrar_telas_de(dogma: &Dogma, person: PersonId) {
-    for (cage, screen) in dogma.telas.lock().await.encerrar_de(person) {
+    for (voice_room, screen) in dogma.telas.lock().await.encerrar_de(person) {
         let _ = dogma
             .events
-            .send(Event::ScreenShareStopped { cage, screen });
+            .send(Event::ScreenShareStopped { voice_room, screen });
     }
 }
 
@@ -2432,7 +2432,7 @@ async fn recusar(send: &mut quinn::SendStream, person: PersonId, verbo: &str) ->
 /// Tells a client the room could not be made, without saying what the database
 /// thinks about it.
 ///
-/// `CageEntryRefused` is the nearest enumerated reason for "that room is not
+/// `VoiceRoomEntryRefused` is the nearest enumerated reason for "that room is not
 /// there" — `specs/02-protocolo.md` allows no free-form string on the wire, and
 /// inventing a variant for every way a write can fail would be inventing an
 /// error language. The detail goes to the operator's log, which is where a
@@ -2443,7 +2443,7 @@ async fn nao_deu(send: &mut quinn::SendStream, erro: &anyhow::Error) -> Result<(
         send,
         &ServerMessage::Alert {
             severity: AlertSeverity::Warning,
-            reason: AlertReason::CageEntryRefused,
+            reason: AlertReason::VoiceRoomEntryRefused,
             operator_text: None,
         },
     )
@@ -2521,16 +2521,16 @@ fn translate(event: &Event, lines: &[LineId], self_person: PersonId) -> Option<S
                     id: *id,
                 })
         }
-        // Every Cage, and not only the one this connection is sitting in.
+        // Every voice room, and not only the one this connection is sitting in.
         //
-        // The filter that used to be here — `cage == Some(*joined)` — is what
+        // The filter that used to be here — `voice_room == Some(*joined)` — is what
         // made four rooms out of five permanently empty on screen: a client was
-        // told about arrivals in its own Cage and about nothing else, so the
-        // occupants the v3 layout draws under every other Cage were data it had
-        // never been sent. Reported from a real session as the Cages showing
+        // told about arrivals in its own voice room and about nothing else, so the
+        // occupants the v3 layout draws under every other voice room were data it had
+        // never been sent. Reported from a real session as the voice_rooms showing
         // empty when they were not.
         //
-        // Weighed against a count on `CageInfo` and against a snapshot the
+        // Weighed against a count on `VoiceRoomInfo` and against a snapshot the
         // client asks for. The count is cheaper and loses the names the screen
         // is built around; the snapshot keeps the names and goes stale the
         // instant it lands, which is the same bug moving more slowly. This is
@@ -2541,7 +2541,7 @@ fn translate(event: &Event, lines: &[LineId], self_person: PersonId) -> Option<S
         // mutes — has always gone to every connection unfiltered, so a client
         // was already being told about people it had no seat for, and drew them
         // as ghosts with no room. `specs/04-servidor-seele.md` sizes a Dogma at
-        // fifty people and five Cages, and the Cage list itself is not filtered
+        // fifty people and five voice_rooms, and the voice room list itself is not filtered
         // per person, so this reveals nothing that walking into the room would
         // not. ADR 0022 opens a Dogma to the internet; what changes there is who
         // may hold an account, which is `crate::admissao`'s question, not this
@@ -2549,17 +2549,17 @@ fn translate(event: &Event, lines: &[LineId], self_person: PersonId) -> Option<S
         //
         // Not echoed to the person who caused it: they already know.
         Event::PersonJoined {
-            cage: joined,
+            voice_room: joined,
             profile,
             ssrc,
         } => (profile.id != self_person).then(|| ServerMessage::PersonJoined {
-            cage: *joined,
+            voice_room: *joined,
             profile: profile.clone(),
             ssrc: *ssrc,
         }),
-        Event::PersonLeft { cage: left, person } => {
+        Event::PersonLeft { voice_room: left, person } => {
             (*person != self_person).then_some(ServerMessage::PersonLeft {
-                cage: *left,
+                voice_room: *left,
                 person: *person,
             })
         }
@@ -2597,14 +2597,14 @@ fn translate(event: &Event, lines: &[LineId], self_person: PersonId) -> Option<S
 
         // Unfiltered, and to the person who caused it as well.
         //
-        // Unlike a Cage arrival, a new room is not something a client can infer
+        // Unlike a voice room arrival, a new room is not something a client can infer
         // from having asked: the identifier is the server's to assign, and the
         // maker needs it as much as everybody else does. Filtering self out here
         // would leave whoever made the room as the one person who cannot see it.
-        Event::CageCreated { cage } => Some(ServerMessage::CageCreated { cage: cage.clone() }),
+        Event::VoiceRoomCreated { voice_room } => Some(ServerMessage::VoiceRoomCreated { voice_room: voice_room.clone() }),
         Event::LineCreated { line } => Some(ServerMessage::LineCreated { line: line.clone() }),
-        Event::CageRenamed { cage, name } => Some(ServerMessage::CageRenamed {
-            cage: *cage,
+        Event::VoiceRoomRenamed { voice_room, name } => Some(ServerMessage::VoiceRoomRenamed {
+            voice_room: *voice_room,
             name: name.clone(),
         }),
         Event::LineRenamed { line, name } => Some(ServerMessage::LineRenamed {
@@ -2634,37 +2634,37 @@ fn translate(event: &Event, lines: &[LineId], self_person: PersonId) -> Option<S
         // room people keep trying to walk into. The person who asked included —
         // they need to stop drawing it as much as anybody.
         //
-        // The connections that were *inside* the Cage, or had the Line open,
+        // The connections that were *inside* the voice room, or had the Line open,
         // never get here: the loop answers them itself and `continue`s, because
         // they have a plug to pull and a sentence to be told and this function
         // knows about neither.
-        Event::CageDeleted { cage } => Some(ServerMessage::CageDeleted { cage: *cage }),
+        Event::VoiceRoomDeleted { voice_room } => Some(ServerMessage::VoiceRoomDeleted { voice_room: *voice_room }),
         Event::LineDeleted { line } => Some(ServerMessage::LineDeleted { line: *line }),
 
         // ---- compartilhamento de tela ----
         //
         // Sem filtro, e a quem compartilha também. É o mesmo caso de
-        // `CageCreated` e por uma razão mais forte: o `ScreenId` é do servidor
+        // `VoiceRoomCreated` e por uma razão mais forte: o `ScreenId` é do servidor
         // para atribuir, e **quem compartilha precisa dele** antes de conseguir
         // abrir um fluxo. Filtrar a si mesmo aqui deixaria quem apertou o botão
         // como a única pessoa incapaz de transmitir.
         //
-        // A todo mundo e não só ao Cage: é a mesma escolha que `PersonJoined`
+        // A todo mundo e não só à sala de voz: é a mesma escolha que `PersonJoined`
         // fez ao deixar de filtrar por sala, e pelo mesmo motivo — a v3 desenha
-        // todos os Cages, e uma sala que não diz que está transmitindo é uma
+        // todos as salas de voz, e uma sala que não diz que está transmitindo é uma
         // sala em que ninguém sabe que há o que assistir. Não revela nada que
         // entrar na sala já não revelasse.
         Event::ScreenShareStarted {
-            cage,
+            voice_room,
             person,
             screen,
         } => Some(ServerMessage::ScreenShareStarted {
-            cage: *cage,
+            voice_room: *voice_room,
             person: *person,
             screen: *screen,
         }),
-        Event::ScreenShareStopped { cage, screen } => Some(ServerMessage::ScreenShareStopped {
-            cage: *cage,
+        Event::ScreenShareStopped { voice_room, screen } => Some(ServerMessage::ScreenShareStopped {
+            voice_room: *voice_room,
             screen: *screen,
         }),
 
@@ -2675,10 +2675,10 @@ fn translate(event: &Event, lines: &[LineId], self_person: PersonId) -> Option<S
         // para a frase que o §5.1 desenha, «720p · 6 pessoas assistindo»: a
         // resolução muda porque N mudou, e uma tela que cai de degrau sem dizer
         // por quê é o produto sabendo algo que quem está na frente dele não
-        // sabe. O `cage` não viaja porque `ScreenId` já é único neste Dogma e
+        // sabe. O `voice_room` não viaja porque `ScreenId` já é único neste Dogma e
         // quem recebeu o `ScreenShareStarted` já sabe de que sala ele é.
         Event::ScreenViewers {
-            cage: _,
+            voice_room: _,
             screen,
             quantos,
         } => Some(ServerMessage::ScreenViewers {
