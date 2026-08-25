@@ -1,4 +1,4 @@
-// SEELE · Entry Plug — a tela de sessão encerrada (`#tela-fim`).
+// SEELE — a tela de sessão encerrada (`#tela-fim`).
 //
 // Diz por quê; um app que fecha calado vira suporte. Chega aqui por duas
 // portas: um `ended` dentro do snapshot que `tela-sessao.js` projeta, e o

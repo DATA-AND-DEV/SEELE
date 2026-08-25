@@ -337,6 +337,10 @@ mod tests {
                      -- o replay encontra `people` onde procura `pilots` e para
                      -- com «no such table» — que foi exatamente o que aconteceu
                      -- quando a 5 entrou.
+                     -- A parte da migração 9, pela mesma regra.
+                     UPDATE roles SET permissions = replace(permissions, 'EnterVoiceRoom', 'InsertPlug');
+                     UPDATE roles SET denials     = replace(denials,     'EnterVoiceRoom', 'InsertPlug');
+
                      -- A parte da migração 8, pela mesma regra.
                      ALTER TABLE channels RENAME TO lines;
                      ALTER TABLE messages RENAME COLUMN channel_id TO line_id;

@@ -52,11 +52,11 @@ Uma variável de ambiente, na máquina que **hospeda**:
 
 ```sh
 # usar o seu
-SEELE_ENCONTRO=encontro.suacasa.exemplo:8384 plug --hospedar
+SEELE_ENCONTRO=encontro.suacasa.exemplo:8384 connection --hospedar
 
 # não usar nenhum: o degrau 4 deixa de existir, e nenhum pacote sai daqui
 # para ponto de encontro nenhum
-SEELE_ENCONTRO=nao plug --hospedar
+SEELE_ENCONTRO=nao connection --hospedar
 ```
 
 Quem entra não configura nada: o endereço do ponto de encontro viaja no próprio

@@ -1,4 +1,4 @@
-// SEELE · Entry Plug — a portaria: a porta do servidor que esta janela hospeda.
+// SEELE — a portaria: a porta do servidor que esta janela hospeda.
 //
 // ADR 0030. O buraco que isto fecha, nas palavras do dono: «precisava ter uma
 // tela de permissão para usuários não registrados nos servidores, assim não entra

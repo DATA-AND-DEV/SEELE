@@ -29,7 +29,7 @@
 //!   descoberta é do outro lado e aconteceu antes deste processo existir.
 //! - `NAT_TRAVERSAL_FAILED` e `DISCOVERY_FAILED` — o que se observa é «todos os
 //!   candidatos falharam». Atribuir isso ao furo é chute, e quem responde por
-//!   quê é o diagnóstico do `plug --rede`, que mede em vez de supor.
+//!   quê é o diagnóstico do `connection --rede`, que mede em vez de supor.
 //!
 //! O quarto, `PATH_ESTABLISHED`, era inafirmável enquanto nada deste lado
 //! aprendesse que o furo abriu. Deixou de ser: quem entra **pode ler** o

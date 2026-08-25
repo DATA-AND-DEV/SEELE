@@ -56,7 +56,7 @@
 use std::time::{Duration, Instant};
 
 use seele_proto::screen::{ScreenError, ScreenHeader, SCREEN_HEADER_LEN};
-use seele_proto::sync_ratio::SyncBand;
+use seele_proto::signal::SignalBand;
 use seele_video::codec::Resolucao;
 use thiserror::Error;
 
@@ -120,7 +120,7 @@ pub const PISO_DE_BANDA_BPS: u32 = 200_000;
 /// escrever a frase na língua da pessoa, e uma string de erro não deixa.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum MotivoDeParada {
-    /// O sinal da voz caiu para [`SyncBand::Critical`].
+    /// O sinal da voz caiu para [`SignalBand::Critical`].
     ///
     /// §3.2: *«quando o sinal cai de faixa, quem baixa é o vídeo; se continuar
     /// caindo, quem para é o vídeo»*. Uma conversa com a tela travando é o
@@ -226,7 +226,7 @@ pub enum PernaQueAperta {
 /// # O tempo não entra aqui
 ///
 /// Nada nesta estrutura lê relógio nem guarda histórico: ela é uma conta sobre
-/// o que se sabe agora. Quem suaviza é a própria [`seele_proto::sync_ratio`],
+/// o que se sabe agora. Quem suaviza é a própria [`seele_proto::signal`],
 /// com o α ≈ 0,2 que `specs/02-protocolo.md` fixa — suavizar duas vezes seria
 /// pôr o teto atrás do sinal que ele existe para seguir.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -401,7 +401,7 @@ impl TetoDeVideo {
     /// sala onde os três números se encontram, dizer «a escolha» seria dizer à
     /// pessoa que basta escolher mais.
     #[must_use]
-    pub fn perna_que_aperta(&self, faixa: SyncBand) -> PernaQueAperta {
+    pub fn perna_que_aperta(&self, faixa: SignalBand) -> PernaQueAperta {
         let hospeda = self.perna_de_quem_hospeda();
         let compartilha = self.perna_de_quem_compartilha();
         // A faixa corta as duas pernas de rede pelo mesmo fator, então ela não
@@ -413,9 +413,9 @@ impl TetoDeVideo {
             (compartilha, PernaQueAperta::QuemCompartilha)
         };
         let da_faixa = match faixa {
-            SyncBand::Nominal => rede.0,
-            SyncBand::Degraded => rede.0 / 2,
-            SyncBand::Critical => return rede.1,
+            SignalBand::Nominal => rede.0,
+            SignalBand::Degraded => rede.0 / 2,
+            SignalBand::Critical => return rede.1,
         };
         match self.escolha_bps {
             Some(escolha) if escolha < da_faixa => PernaQueAperta::Escolha,
@@ -427,22 +427,22 @@ impl TetoDeVideo {
     ///
     /// As três saídas são as três frases do §3.2, nesta ordem:
     ///
-    /// - [`SyncBand::Nominal`] — o vídeo tem [`FRACAO_DO_CAMINHO`] do caminho;
-    /// - [`SyncBand::Degraded`] — **quem baixa é o vídeo**, e baixa pela
+    /// - [`SignalBand::Nominal`] — o vídeo tem [`FRACAO_DO_CAMINHO`] do caminho;
+    /// - [`SignalBand::Degraded`] — **quem baixa é o vídeo**, e baixa pela
     ///   metade. A metade não foi medida: o que foi medido é o 60% na faixa
     ///   nominal. Metade é o menor passo que ainda **é** um passo — um corte de
     ///   10% seria indistinguível do ruído do próprio encoder, que já descarta
     ///   16% dos quadros em 1080p por conta própria;
-    /// - [`SyncBand::Critical`] — **quem para é o vídeo**, com motivo.
+    /// - [`SignalBand::Critical`] — **quem para é o vídeo**, com motivo.
     ///
     /// E, por baixo das três, a escolha da pessoa e o piso.
     #[must_use]
-    pub fn teto(&self, faixa: SyncBand) -> Teto {
+    pub fn teto(&self, faixa: SignalBand) -> Teto {
         let nominal = self.teto_da_faixa_nominal();
         let da_faixa = match faixa {
-            SyncBand::Nominal => nominal,
-            SyncBand::Degraded => nominal / 2,
-            SyncBand::Critical => return Teto::Parado(MotivoDeParada::SinalCritico),
+            SignalBand::Nominal => nominal,
+            SignalBand::Degraded => nominal / 2,
+            SignalBand::Critical => return Teto::Parado(MotivoDeParada::SinalCritico),
         };
         // O mínimo entre o que os dois caminhos aguentam e o que a pessoa
         // pediu. Os três são teto; quem manda é o menor, sempre.
@@ -1205,7 +1205,7 @@ pub(crate) mod tests {
             );
 
             let mut anterior = u32::MAX;
-            for faixa in [SyncBand::Nominal, SyncBand::Degraded, SyncBand::Critical] {
+            for faixa in [SignalBand::Nominal, SignalBand::Degraded, SignalBand::Critical] {
                 let agora = teto.teto(faixa);
 
                 // 1 — o vídeo nunca passa da fração medida, então a voz sempre
@@ -1234,7 +1234,7 @@ pub(crate) mod tests {
 
             // E o fim da escada é parar, com nome — não é um teto muito baixo.
             assert_eq!(
-                teto.teto(SyncBand::Critical),
+                teto.teto(SignalBand::Critical),
                 Teto::Parado(MotivoDeParada::SinalCritico),
                 "sinal crítico tinha de parar o vídeo em {caminho} bps"
             );
@@ -1259,7 +1259,7 @@ pub(crate) mod tests {
                     "a reserva da voz encolheu com {espectadores} espectadores em {caminho} bps"
                 );
 
-                for faixa in [SyncBand::Nominal, SyncBand::Degraded] {
+                for faixa in [SignalBand::Nominal, SignalBand::Degraded] {
                     let agora = com_n.teto(faixa);
 
                     // 4b — o que o servidor sobe, que são N cópias do mesmo
@@ -1281,7 +1281,7 @@ pub(crate) mod tests {
                 // 4c — mais gente nunca dá mais banda ao vídeo. É o outro lado
                 // de 4b: se o teto subisse com N, a conta acima ainda fecharia
                 // por acaso em algum caminho largo.
-                let agora = com_n.teto(SyncBand::Nominal).bps();
+                let agora = com_n.teto(SignalBand::Nominal).bps();
                 assert!(
                     agora <= anterior_com_n,
                     "o teto subiu ao entrar mais gente: {anterior_com_n} → {agora} bps \
@@ -1298,8 +1298,8 @@ pub(crate) mod tests {
                 .com_espectadores(0);
             let uma_pessoa = vazio.com_espectadores(1);
             assert_eq!(
-                vazio.teto(SyncBand::Nominal),
-                uma_pessoa.teto(SyncBand::Nominal),
+                vazio.teto(SignalBand::Nominal),
+                uma_pessoa.teto(SignalBand::Nominal),
                 "sala vazia e sala de uma pessoa deram tetos diferentes em {caminho} bps"
             );
             assert_eq!(
@@ -1318,13 +1318,13 @@ pub(crate) mod tests {
         // dois e seria estreito num e desperdiçado no outro.
         let estreito = TetoDeVideo::com_caminho(1_000_000);
         let largo = TetoDeVideo::com_caminho(2_000_000);
-        assert_eq!(estreito.teto(SyncBand::Nominal), Teto::Bps(600_000));
-        assert_eq!(largo.teto(SyncBand::Nominal), Teto::Bps(1_200_000));
+        assert_eq!(estreito.teto(SignalBand::Nominal), Teto::Bps(600_000));
+        assert_eq!(largo.teto(SignalBand::Nominal), Teto::Bps(1_200_000));
 
         // E o padrão é o cano da prova, que dá exatamente os 1200 kbps sob os
         // quais as duas provas rodaram.
         assert_eq!(
-            TetoDeVideo::novo().teto(SyncBand::Nominal),
+            TetoDeVideo::novo().teto(SignalBand::Nominal),
             Teto::Bps(1_200_000)
         );
     }
@@ -1337,18 +1337,18 @@ pub(crate) mod tests {
 
         let pedindo_demais = caminho.com_escolha(Some(50_000_000));
         assert_eq!(
-            pedindo_demais.teto(SyncBand::Nominal),
+            pedindo_demais.teto(SignalBand::Nominal),
             Teto::Bps(1_200_000),
             "a escolha virou piso e levantou o teto do caminho"
         );
 
         let pedindo_pouco = caminho.com_escolha(Some(500_000));
-        assert_eq!(pedindo_pouco.teto(SyncBand::Nominal), Teto::Bps(500_000));
+        assert_eq!(pedindo_pouco.teto(SignalBand::Nominal), Teto::Bps(500_000));
 
         // E continua sendo teto depois de o sinal cair: a faixa degradada corta
         // o que o caminho dá, e a escolha continua por cima do resultado.
         assert_eq!(
-            caminho.com_escolha(Some(400_000)).teto(SyncBand::Degraded),
+            caminho.com_escolha(Some(400_000)).teto(SignalBand::Degraded),
             Teto::Bps(400_000)
         );
     }
@@ -1359,10 +1359,10 @@ pub(crate) mod tests {
         // com motivo enumerado. Degradar para sempre é como um instrumento
         // falso: consultado justamente quando algo deu errado.»
         let apertado = TetoDeVideo::com_caminho(500_000);
-        assert_eq!(apertado.teto(SyncBand::Nominal), Teto::Bps(300_000));
+        assert_eq!(apertado.teto(SignalBand::Nominal), Teto::Bps(300_000));
         // Metade de 300 kbps são 150, abaixo do piso de 200.
         assert_eq!(
-            apertado.teto(SyncBand::Degraded),
+            apertado.teto(SignalBand::Degraded),
             Teto::Parado(MotivoDeParada::AbaixoDoPiso)
         );
 
@@ -1371,7 +1371,7 @@ pub(crate) mod tests {
         assert_eq!(
             TetoDeVideo::novo()
                 .com_escolha(Some(PISO_DE_BANDA_BPS - 1))
-                .teto(SyncBand::Nominal),
+                .teto(SignalBand::Nominal),
             Teto::Parado(MotivoDeParada::AbaixoDoPiso)
         );
     }
@@ -1388,7 +1388,7 @@ pub(crate) mod tests {
             .com_caminho_de_quem_hospeda(100_000_000)
             .com_espectadores(10);
         assert_eq!(
-            fibra.teto(SyncBand::Nominal).resolucao_estimada(),
+            fibra.teto(SignalBand::Nominal).resolucao_estimada(),
             Some(Resolucao::P1080),
             "dez pessoas numa fibra continuam cabendo em 1080p"
         );
@@ -1398,9 +1398,9 @@ pub(crate) mod tests {
             .com_caminho_de_quem_hospeda(CAMINHO_DA_PROVA_BPS)
             .com_espectadores(4);
         // 1200 kbps ÷ 4 são 300, que não compram nem 720p.
-        assert_eq!(casa.teto(SyncBand::Nominal), Teto::Bps(300_000));
+        assert_eq!(casa.teto(SignalBand::Nominal), Teto::Bps(300_000));
         assert_eq!(
-            casa.teto(SyncBand::Nominal).resolucao_estimada(),
+            casa.teto(SignalBand::Nominal).resolucao_estimada(),
             Some(Resolucao::P540),
             "quatro pessoas numa casa não cabem em 720p, e é o teto que diz isso"
         );
@@ -1409,7 +1409,7 @@ pub(crate) mod tests {
         // de quatro numa subida três vezes maior sobe de degrau sozinha.
         let casa_boa = casa.com_caminho_de_quem_hospeda(6_000_000);
         assert_eq!(
-            casa_boa.teto(SyncBand::Nominal).resolucao_estimada(),
+            casa_boa.teto(SignalBand::Nominal).resolucao_estimada(),
             Some(Resolucao::P720),
             "a mesma sala de quatro, com mais subida, tinha de subir de degrau"
         );
@@ -1501,7 +1501,7 @@ pub(crate) mod tests {
             .com_caminho_de_quem_hospeda(CAMINHO_DA_PROVA_BPS)
             .com_espectadores(4);
         assert_eq!(
-            sala_cheia.perna_que_aperta(SyncBand::Nominal),
+            sala_cheia.perna_que_aperta(SignalBand::Nominal),
             PernaQueAperta::QuemHospeda
         );
 
@@ -1509,7 +1509,7 @@ pub(crate) mod tests {
             .com_caminho_de_quem_hospeda(50_000_000)
             .com_espectadores(4);
         assert_eq!(
-            subida_ruim.perna_que_aperta(SyncBand::Nominal),
+            subida_ruim.perna_que_aperta(SignalBand::Nominal),
             PernaQueAperta::QuemCompartilha
         );
 
@@ -1517,18 +1517,18 @@ pub(crate) mod tests {
         // mais do que o caminho dá não é a escolha mandando, é a rede.
         let escolheu_pouco = TetoDeVideo::novo().com_escolha(Some(400_000));
         assert_eq!(
-            escolheu_pouco.perna_que_aperta(SyncBand::Nominal),
+            escolheu_pouco.perna_que_aperta(SignalBand::Nominal),
             PernaQueAperta::Escolha
         );
         let pediu_demais = TetoDeVideo::novo().com_escolha(Some(50_000_000));
         assert_ne!(
-            pediu_demais.perna_que_aperta(SyncBand::Nominal),
+            pediu_demais.perna_que_aperta(SignalBand::Nominal),
             PernaQueAperta::Escolha
         );
 
         // E a razão bate com o número: a perna que aperta é a que o teto seguiu.
-        assert_eq!(sala_cheia.teto(SyncBand::Nominal), Teto::Bps(300_000));
-        assert_eq!(subida_ruim.teto(SyncBand::Nominal), Teto::Bps(360_000));
+        assert_eq!(sala_cheia.teto(SignalBand::Nominal), Teto::Bps(300_000));
+        assert_eq!(subida_ruim.teto(SignalBand::Nominal), Teto::Bps(360_000));
     }
 
     // -----------------------------------------------------------------------

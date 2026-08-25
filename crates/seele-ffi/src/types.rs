@@ -46,13 +46,13 @@ impl From<VoiceMode> for seele_core::VoiceMode {
 
 /// How far the connection has got. `specs/07-tema-evangelion.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum Pattern {
+pub enum LinkTrust {
     /// Not connected.
     Offline,
     /// Connected, not verified.
-    Orange,
+    Unverified,
     /// Verified. Normal operation.
-    Blue,
+    Verified,
 }
 
 /// Which band a Sync Ratio falls into.
@@ -61,12 +61,12 @@ pub enum Pattern {
 /// thresholds. Two shells with two copies of "85 is nominal" is two shells that
 /// disagree the day one of them is updated.
 ///
-/// Three bands, from `design/Entry Plug v2.dc.html`. The fourth — `Acceptable`
+/// Three bands, from `design/SEELE v2.dc.html`. The fourth — `Acceptable`
 /// — is gone, and it is gone from the JSON the webview reads too: a shell that
 /// still branches on `"Acceptable"` now falls through to whatever it does with
 /// an unknown band, and never to a colour it drew last week.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
-pub enum SyncBand {
+pub enum SignalBand {
     /// 85 and above.
     Nominal,
     /// 60 to 84.
@@ -81,12 +81,12 @@ pub enum SyncBand {
     Critical,
 }
 
-impl From<seele_core::SyncBand> for SyncBand {
-    fn from(band: seele_core::SyncBand) -> Self {
+impl From<seele_core::SignalBand> for SignalBand {
+    fn from(band: seele_core::SignalBand) -> Self {
         match band {
-            seele_core::SyncBand::Nominal => Self::Nominal,
-            seele_core::SyncBand::Degraded => Self::Degraded,
-            seele_core::SyncBand::Critical => Self::Critical,
+            seele_core::SignalBand::Nominal => Self::Nominal,
+            seele_core::SignalBand::Degraded => Self::Degraded,
+            seele_core::SignalBand::Critical => Self::Critical,
         }
     }
 }
@@ -131,9 +131,9 @@ pub enum NoticeReason {
     OperatorNotice,
     /// The client is sending control frames faster than its budget.
     RateLimited,
-    /// An operator moved this person's plug into another voice room.
+    /// An operator moved this person's connection into another voice room.
     MovedByOperator,
-    /// The voice room this person's plug was in no longer exists.
+    /// The voice room this person's connection was in no longer exists.
     VoiceRoomDeleted,
     /// A Channel this person had open no longer exists.
     ChannelDeleted,
@@ -364,13 +364,13 @@ pub struct Person {
     /// Transmitting right now.
     pub speaking: bool,
     /// Microphone muted — A.T. Field.
-    pub at_field: bool,
+    pub muted: bool,
     /// Speakers muted — Isolamento total.
     pub total_isolation: bool,
     /// Sync Ratio, 0 to 100.
-    pub sync_ratio: u8,
+    pub signal: u8,
     /// Which band that falls into, decided once, in the core.
-    pub sync_band: SyncBand,
+    pub sync_band: SignalBand,
     /// Whether this is the person holding the handle.
     pub is_self: bool,
 }
@@ -391,7 +391,7 @@ pub struct VoiceRoomSync {
     /// step, not carried from the measurement.
     pub ratio: u8,
     /// Which band the average falls into.
-    pub band: SyncBand,
+    pub band: SignalBand,
     /// How many people it averages — the comp's `5 PLUGS`.
     pub people: u32,
 }
@@ -420,7 +420,7 @@ pub struct VoiceRoom {
     pub limit: u16,
     /// Whether entry needs a password.
     pub password_required: bool,
-    /// Whether this person's plug is in it.
+    /// Whether this person's connection is in it.
     pub occupied_by_us: bool,
     /// The Channel bound to it, if any. `specs/04-servidor-seele.md` makes the
     /// association optional.
@@ -531,9 +531,9 @@ pub struct Telemetry {
     /// Encoder bitrate, bits per second. Zero when there is no audio.
     pub bitrate_bps: u32,
     /// This person's Sync Ratio, 0 to 100.
-    pub sync_ratio: u8,
+    pub signal: u8,
     /// Which band that is.
-    pub sync_band: SyncBand,
+    pub sync_band: SignalBand,
     /// Microphone level, 0.0 to 1.0.
     pub input_level: f32,
     /// Whether the machine, rather than the network, is dropping audio.
@@ -577,7 +577,7 @@ pub struct Notice {
 /// Uma tela ou uma janela que esta máquina pode transmitir.
 ///
 /// O gêmeo de [`CaptureDevice`] para o vídeo, com a mesma divisão de trabalho:
-/// a casca mostra `nome`, devolve `id` em [`crate::Plug::compartilhar_tela`], e
+/// a casca mostra `nome`, devolve `id` em [`crate::Connection::compartilhar_tela`], e
 /// não lê nem um nem o outro.
 ///
 /// `largura` e `altura` são o tamanho da **fonte**, e não o da transmissão. Os
@@ -784,7 +784,7 @@ pub struct Snapshot {
     /// para "encerrado", que é a simplificação que a spec proíbe.
     pub link: LinkState,
     /// How far the connection has got.
-    pub pattern: Pattern,
+    pub link_state: LinkTrust,
     /// What the server is called.
     ///
     /// Follows a rename **inside the session** now: the server announces it to
@@ -802,7 +802,7 @@ pub struct Snapshot {
     /// more than that as text, sixty times a minute, for ever.
     ///
     /// The number itself means nothing — only the difference does. A shell
-    /// keeps the last one it drew and calls [`crate::Plug::server_icon`] when it
+    /// keeps the last one it drew and calls [`crate::Connection::server_icon`] when it
     /// moves. Zero, and never moving, is the ordinary server: it has no picture.
     pub icon_revision: u64,
     /// This person's identifier, once known.
@@ -833,7 +833,7 @@ pub struct Snapshot {
     /// and it showed up the first time two machines talked for a while.
     ///
     /// The number itself means nothing — only the difference does. A shell
-    /// keeps the last one it drew and calls [`Plug::messages`] when it moves.
+    /// keeps the last one it drew and calls [`Connection::messages`] when it moves.
     /// `seele_core::Changed` already said when that was, and this is the shell
     /// finally being able to act on it.
     pub messages_revision: u64,
@@ -842,7 +842,7 @@ pub struct Snapshot {
     /// The last thing worth surfacing.
     pub notice: Option<Notice>,
     /// Whether this person's microphone is muted.
-    pub at_field: bool,
+    pub muted: bool,
     /// Whether this person's speakers are muted.
     pub total_isolation: bool,
     /// Whether this person is transmitting.
@@ -964,7 +964,7 @@ pub enum Event {
     ///
     /// The new name is on the next [`Snapshot`]. The picture is not — read
     /// [`Snapshot::icon_revision`] and fetch it with
-    /// [`crate::Plug::server_icon`] when the number moves.
+    /// [`crate::Connection::server_icon`] when the number moves.
     ServerChanged,
     /// New measurements.
     TelemetryChanged,
@@ -981,9 +981,9 @@ pub enum Event {
     /// Uma chegada mudou de etapa, enquanto ela acontece.
     ///
     /// O único evento desta lista que chega **antes** de haver sessão, e é para
-    /// isso que ele existe: `Plug::connect` bloqueia, e quem se inscrevesse
-    /// depois dela só teria o `Arc<Plug>` com a travessia inteira já terminada.
-    /// Quem quiser este evento entra por `Plug::connect_watching`, que recebe o
+    /// isso que ele existe: `Connection::connect` bloqueia, e quem se inscrevesse
+    /// depois dela só teria o `Arc<Connection>` com a travessia inteira já terminada.
+    /// Quem quiser este evento entra por `Connection::connect_watching`, que recebe o
     /// ouvinte antes de bloquear.
     ///
     /// Grosso como os outros? Não, e é a exceção: um `Snapshot` não carrega
@@ -1290,7 +1290,7 @@ pub enum LinkState {
 /// shell cannot localise and must print verbatim. Detail that helps a developer
 /// goes to `tracing`, not across this boundary.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub enum PlugError {
+pub enum ConnectionError {
     /// No connection, or it is already gone.
     NotConnected,
     /// A connection is already open on this handle.
@@ -1313,7 +1313,7 @@ pub enum PlugError {
     },
     /// The invite named one key and the server offered another.
     ///
-    /// ADR 0006, and deliberately not [`PlugError::PinChanged`]: nothing was
+    /// ADR 0006, and deliberately not [`ConnectionError::PinChanged`]: nothing was
     /// ever pinned here, so the shell's key-change alarm would name the wrong
     /// culprit. What failed is the link, not the server's continuity.
     InviteMismatch {
@@ -1333,14 +1333,14 @@ pub enum PlugError {
     NoAudioDevice,
     /// The chosen microphone is not one this machine is offering any more.
     ///
-    /// Its own variant rather than [`PlugError::NoAudioDevice`] because the two
+    /// Its own variant rather than [`ConnectionError::NoAudioDevice`] because the two
     /// ask different things of the person reading them: "this machine has no
     /// microphone" and "the one you picked was unplugged" have different next
     /// steps, and the second one has a list to pick from again.
     CaptureDeviceGone,
     /// The chosen output is not one this machine is offering any more.
     ///
-    /// Its own variant rather than [`PlugError::CaptureDeviceGone`] because a
+    /// Its own variant rather than [`ConnectionError::CaptureDeviceGone`] because a
     /// shell writes one sentence per variant, and "the microphone you picked was
     /// unplugged" is the wrong sentence to read after choosing a headset. The
     /// two point at opposite halves of the screen.
@@ -1362,7 +1362,7 @@ pub enum PlugError {
     IconNotAPicture,
     /// The picture offered as the server's icon is heavier than a server takes.
     ///
-    /// Separate from [`PlugError::IconNotAPicture`] because the next step
+    /// Separate from [`ConnectionError::IconNotAPicture`] because the next step
     /// differs: a photograph can be shrunk, and a PDF cannot be made into an
     /// icon. The ceiling travels with it so the sentence can carry the number
     /// — a shell has no other way to name a limit that lives in the protocol.
@@ -1374,7 +1374,7 @@ pub enum PlugError {
     ///
     /// Uma transmissão por sala (§6.3 da spec de tela). **Não é permissão**: a
     /// pessoa pode compartilhar assim que a outra parar, e dizer
-    /// [`PlugError::Refused`] ou o `PermissionDenied` de um aviso a mandaria
+    /// [`ConnectionError::Refused`] ou o `PermissionDenied` de um aviso a mandaria
     /// procurar um papel que ela já tem.
     ///
     /// Quem decide é o servidor, e por isso este veredito chega **também** — hoje,
@@ -1400,7 +1400,7 @@ pub enum PlugError {
     ///    tem conserto do lado de quem usa, e é o que
     ///    [`PermissaoDeTela::NaoSeSabe`] diz.
     ///
-    /// Também é o que `Plug::ajustar_limites_da_tela` devolve, e ali o motivo
+    /// Também é o que `Connection::ajustar_limites_da_tela` devolve, e ali o motivo
     /// é outro: a bomba não tem ordem que troque a escolha de resolução ou de
     /// cadência depois de armada. Parar e recomeçar aplica as três.
     ScreenShareUnavailable,
@@ -1430,7 +1430,7 @@ pub enum PlugError {
     ScreenModuleRefused,
 }
 
-impl std::fmt::Display for PlugError {
+impl std::fmt::Display for ConnectionError {
     /// For logs and `Error`, never for a user.
     ///
     /// A shell that prints this is a shell that skipped writing its own
@@ -1440,7 +1440,7 @@ impl std::fmt::Display for PlugError {
     }
 }
 
-impl std::error::Error for PlugError {}
+impl std::error::Error for ConnectionError {}
 
 #[cfg(test)]
 mod tests {
@@ -1507,11 +1507,11 @@ mod tests {
         // disagree the day one of them is updated. The core decides; this only
         // relabels.
         for ratio in 0..=100u8 {
-            let band: SyncBand = seele_core::SyncBand::of(ratio).into();
+            let band: SignalBand = seele_core::SignalBand::of(ratio).into();
             let expected = match ratio {
-                85..=255 => SyncBand::Nominal,
-                60..=84 => SyncBand::Degraded,
-                _ => SyncBand::Critical,
+                85..=255 => SignalBand::Nominal,
+                60..=84 => SignalBand::Degraded,
+                _ => SignalBand::Critical,
             };
             assert_eq!(band, expected, "ratio {ratio}");
         }
@@ -1523,7 +1523,7 @@ mod tests {
         // shell would get wrong if it kept its own thresholds, so the edges
         // are what is pinned — 84 and 85, 59 and 60.
         let json = |ratio: u8| {
-            let band: SyncBand = seele_core::SyncBand::of(ratio).into();
+            let band: SignalBand = seele_core::SignalBand::of(ratio).into();
             serde_json::to_string(&band).expect("a bare enum always serialises")
         };
 
@@ -1581,17 +1581,17 @@ mod tests {
     fn no_error_variant_carries_free_text() {
         // The two that carry strings carry *fingerprints*, which are data a
         // human compares — not a sentence a shell would have to print.
-        let pin = PlugError::PinChanged {
+        let pin = ConnectionError::PinChanged {
             pinned: "aaa".into(),
             offered: "bbb".into(),
         };
-        let PlugError::PinChanged { pinned, offered } = &pin else {
+        let ConnectionError::PinChanged { pinned, offered } = &pin else {
             panic!("shape changed");
         };
         assert_ne!(pinned, offered);
 
         // Everything else is a bare variant, which is what makes it localisable.
-        assert_eq!(format!("{}", PlugError::Unreachable), "Unreachable");
+        assert_eq!(format!("{}", ConnectionError::Unreachable), "Unreachable");
     }
 
     /// The snapshot must stay cheap, and "cheap" means it carries no list that
@@ -1632,7 +1632,7 @@ mod tests {
                  Reading this costs one clone of every nickname and body already \
                  said, on every interface frame — twice a second — so a long \
                  session gets steadily slower. Use `messages_revision` and \
-                 `Plug::messages`, which exist for exactly this."
+                 `Connection::messages`, which exist for exactly this."
             );
             assert!(
                 !campo.contains("Vec<u8>"),
@@ -1641,7 +1641,7 @@ mod tests {
                  is bounded rather than unbounded — but it is still kilobytes \
                  cloned and turned into JSON twice a second for a value that \
                  changes when somebody presses a button. Use `icon_revision` and \
-                 `Plug::server_icon`, which are the same answer one size smaller."
+                 `Connection::server_icon`, which are the same answer one size smaller."
             );
         }
 
@@ -1791,8 +1791,8 @@ mod tests {
         // corrida pode compartilhar assim que o outro parar, e `PermissionDenied`
         // a mandaria procurar um papel que ela já tem.
         assert_ne!(
-            serde_json::to_string(&PlugError::ScreenShareTaken).ok(),
-            serde_json::to_string(&PlugError::ScreenShareUnavailable).ok(),
+            serde_json::to_string(&ConnectionError::ScreenShareTaken).ok(),
+            serde_json::to_string(&ConnectionError::ScreenShareUnavailable).ok(),
             "as duas respostas de tela viraram a mesma, e as saídas delas são opostas"
         );
         assert_ne!(

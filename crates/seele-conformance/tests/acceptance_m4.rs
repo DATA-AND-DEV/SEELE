@@ -116,7 +116,7 @@ where
     done(app)
 }
 
-/// Brings the interface up against a live connection, the way `plug` does.
+/// Brings the interface up against a live connection, the way `connection` does.
 fn attach(client: &Client, nickname: &str, voice_room: VoiceRoomId, channel: Option<ChannelId>) -> (App, Room) {
     let mut app = App::new();
     app.screen = Screen::PatternBlue;

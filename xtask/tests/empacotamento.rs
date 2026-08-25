@@ -6,10 +6,10 @@
 //! máquina brasileira. O arquivo é UTF-8 **sem BOM**, e sem BOM não há o que
 //! detectar: ele supõe ANSI.
 //!
-//! O título da janela é `SEELE · Entry Plug`. O `·` é `C2 B7` em UTF-8; lido
+//! O título da janela é `SEELE`. O `·` é `C2 B7` em UTF-8; lido
 //! como cp1252 vira `Â` seguido de `·`; e a escrita, que sempre esteve correta,
 //! grava esse par como UTF-8 de verdade. O arquivo passa a conter
-//! `SEELE Â· Entry Plug` — e como o script restaura ao sair a mesma string que
+//! `SEELE Â· SEELE` — e como o script restaura ao sair a mesma string que
 //! leu, a corrupção fica **gravada no repositório de quem empacotou**.
 //!
 //! Nada disso aparece na máquina de quem escreveu o script: em macOS e Linux o
@@ -85,7 +85,7 @@ fn o_titulo_da_janela_atravessou_inteiro() {
     let corpo = std::fs::read_to_string(&config).expect("o tauri.conf.json tem que ser legível");
 
     assert!(
-        corpo.contains("SEELE · Entry Plug"),
+        corpo.contains("SEELE"),
         "o título da janela não está inteiro no tauri.conf.json"
     );
     assert!(
@@ -498,7 +498,7 @@ echo deb > "$raiz/entrega/seele_$1_amd64.deb"
         escrever(
             &repo.join("apps/seele-app/tauri.conf.json"),
             "{\n  \"productName\": \"SEELE\",\n  \"app\": { \"windows\": [ { \"title\": \
-             \"SEELE · Entry Plug\" } ] },\n  \"plugins\": { \"updater\": { \"pubkey\": \
+             \"SEELE\" } ] },\n  \"plugins\": { \"updater\": { \"pubkey\": \
              \"chave-publica-de-mentira\" } }\n}\n",
             false,
         );
@@ -1668,7 +1668,7 @@ fn sem_tag_anterior_a_faixa_e_vazia_e_isso_nao_e_erro() {
 #[test]
 fn o_windows_instala_para_a_maquina_e_nao_para_o_usuario() {
     // `currentUser` põe o SEELE em `%LOCALAPPDATA%`, e isso custou caro num
-    // teste de campo: ninguém achava o app nem o `plug`, porque as duas coisas
+    // teste de campo: ninguém achava o app nem o `connection`, porque as duas coisas
     // que uma pessoa procura primeiro são `Program Files` e o `PATH`, e a
     // instalação por usuário não está em nenhum dos dois.
     //

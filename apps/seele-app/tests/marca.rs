@@ -6,7 +6,7 @@
 //! dependendo de olho, e estão escritas lá.
 //!
 //! O **ADR 0034** trocou a marca inteira: saíram o katakana `ゼーレ` e a
-//! silhueta do plug de entrada, entrou o símbolo de dois nós e uma ligação.
+//! silhueta do connection de entrada, entrou o símbolo de dois nós e uma ligação.
 //! Vários testes daqui guardavam decisões daquela marca. Onde a decisão
 //! sobreviveu à troca, o teste ficou e o comentário conta a razão nova; onde a
 //! decisão mudou, o teste foi reescrito para cobrar a propriedade nova, com o
@@ -156,7 +156,7 @@ fn a_marca_so_usa_cores_que_os_tokens_definem() {
     // Se um dia divergirem, é aqui que se descobre — e não numa tela.
     //
     // A lista encolheu de dez para quatro com o ADR 0034. As seis placas de
-    // profundidade eram do plug: cor plana deslocada por trás de um contorno de
+    // profundidade eram do connection: cor plana deslocada por trás de um contorno de
     // octógono, para dar volume sem sombra. O símbolo de dois nós não tem
     // contorno para deslocar, e as seis saíram da marca junto com ele. Os
     // tokens continuam em `tokens.css` porque quem os tira de lá é quem cuidar
@@ -247,7 +247,7 @@ fn cada_faixa_de_icone_aguenta_os_pixeis_dela() {
     //   proxy passou a acusar o próprio símbolo. O que se cobra no lugar é o
     //   que se queria dizer: um caminho só, e de um traço só — um contorno de
     //   letra tem dezenas de comandos.
-    // - **Quatro faixas eram do plug**, que tinha contorno de octógono, cinta e
+    // - **Quatro faixas eram do connection**, que tinha contorno de octógono, cinta e
     //   placas, e a razão entre eles quebrava em quatro pontos. O símbolo tem
     //   um valor de traço só, então há um limiar só, em 48 px. Guardar quatro
     //   arquivos seria guardar três cópias do mesmo desenho para divergirem.

@@ -53,7 +53,7 @@ pub const MAX_ALERT_ROWS: usize = 4;
 ///
 /// `docs/marca.md` dá esta variação à TUI porque aqui não há SVG: o glifo tem
 /// de ser feito de caracteres que qualquer terminal já tem. Substitui o
-/// katakana e a assinatura do plug de entrada em toda a interface.
+/// katakana e a assinatura do connection de entrada em toda a interface.
 ///
 /// **Nove bytes, três caracteres, três células.** As três são de largura
 /// ambígua no leste asiático (`■` U+25A0, `—` U+2014, `□` U+25A1): a medida
@@ -474,7 +474,7 @@ fn person_line(person: &crate::app::RosterEntry, budget: usize, theme: Theme) ->
     let presence = if person.speaking { "●" } else { "○" };
     // Mudo e isolamento total ganham texto, e não só uma cor, pela mesma
     // razão: esta interface é usada por quem não separa vermelho de verde.
-    let flag = if person.at_field {
+    let flag = if person.muted {
         "MUDO"
     } else if person.total_isolation {
         "SURDO"
@@ -759,7 +759,7 @@ fn render_bar(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
     )];
 
     let separator = Span::styled("│ ", theme.fg(crate::theme::RULE));
-    for (index, segment) in bar_segments(&app.bar, app.at_field, app.total_isolation)
+    for (index, segment) in bar_segments(&app.bar, app.muted, app.total_isolation)
         .into_iter()
         .enumerate()
     {
@@ -767,7 +767,7 @@ fn render_bar(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
         // The Sync Ratio is the one segment that changes colour, because it is
         // the one the person is meant to react to.
         let style = if index == 0 {
-            theme.sync(seele_core::SyncBand::of(app.bar.sync))
+            theme.sync(seele_core::SignalBand::of(app.bar.sync))
         } else {
             theme.body()
         };
@@ -779,18 +779,18 @@ fn render_bar(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
 
 /// The bar's text, without styling. Pulled out so its width can be tested.
 #[must_use]
-pub fn bar_segments(bar: &Bar, at_field: bool, total_isolation: bool) -> Vec<String> {
+pub fn bar_segments(bar: &Bar, muted: bool, total_isolation: bool) -> Vec<String> {
     let mut segments = vec![
         format!(
             "SINAL {}{:>3}%",
-            Theme::sync_mark(seele_core::SyncBand::of(bar.sync)),
+            Theme::sync_mark(seele_core::SignalBand::of(bar.sync)),
             bar.sync
         ),
         format!("RTT {:.0}ms", bar.rtt_ms),
         format!("JIT {:.0}ms", bar.jitter_ms),
         format!("LOSS {:.1}%", bar.loss * 100.0),
         format!("OPUS {}k", bar.bitrate / 1000),
-        format!("MUDO {}", if at_field { "ON" } else { "OFF" }),
+        format!("MUDO {}", if muted { "ON" } else { "OFF" }),
     ];
     if total_isolation {
         segments.push("SURDO".to_string());
@@ -1175,14 +1175,14 @@ mod tests {
                 nickname: "ayanami".into(),
                 sync: 98,
                 speaking: true,
-                at_field: false,
+                muted: false,
                 total_isolation: false,
             }),
             Node::Person(RosterEntry {
                 nickname: "asuka".into(),
                 sync: 44,
                 speaking: false,
-                at_field: true,
+                muted: true,
                 total_isolation: false,
             }),
             Node::Channel {
@@ -1232,7 +1232,7 @@ mod tests {
             // 98 and 44, which is what the two people below it read.
             sync: Some(seele_core::VoiceRoomSync {
                 ratio: 71,
-                band: seele_core::SyncBand::of(71),
+                band: seele_core::SignalBand::of(71),
                 people: 2,
             }),
         };
@@ -1288,7 +1288,7 @@ mod tests {
 
     #[test]
     fn a_marca_abre_o_quadro_e_a_tela_de_conexao() {
-        // A marca desenhada, não só a constante: o katakana e o plug de
+        // A marca desenhada, não só a constante: o katakana e o connection de
         // entrada saíram, e o que abre o quadro agora é `■—□ SEELE`.
         let screen = draw(&populated(), Palette::True, (MIN_WIDTH, MIN_HEIGHT));
         assert!(screen.contains(ASSINATURA), "{screen}");

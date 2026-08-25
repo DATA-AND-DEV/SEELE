@@ -17,7 +17,7 @@ porque a matriz de três SOs em CI nunca executou.
 Em cada máquina:
 
 ```sh
-cargo build --release --bin seeled --bin plug
+cargo build --release --bin seeled --bin connection
 ```
 
 Se a máquina tiver interface gráfica e você quiser testar o app junto:
@@ -42,7 +42,7 @@ Ele imprime três coisas que importam:
 seeled listening on 0.0.0.0:8383
 
 na outra máquina:
-  plug --server 192.168.x.x:8383
+  connection --server 192.168.x.x:8383
 
 certificate fingerprint: 50217d68c6...
 ```
@@ -76,7 +76,7 @@ precisa conferi-la por outro canal** — o cliente compara sozinho e recusa se
 não bater. Do outro lado:
 
 ```sh
-./target/release/plug --url "seele://…" --nick seunome
+./target/release/connection --url "seele://…" --nick seunome
 ```
 
 ### Firewall
@@ -96,7 +96,7 @@ conectar e o firewall estiver liberado, é a suspeita seguinte.
 ## 2 · Conectar da máquina B
 
 ```sh
-./target/release/plug --server 192.168.x.x:8383 --nick seunome
+./target/release/connection --server 192.168.x.x:8383 --nick seunome
 ```
 
 Na primeira vez o cliente mostra `PRIMEIRO CONTATO — CHAVE FIXADA` com uma
@@ -107,7 +107,7 @@ momento que o ADR 0003 existe.
 Conecte também na máquina A, com **apelido diferente**:
 
 ```sh
-./target/release/plug --server 127.0.0.1:8383 --nick outronome
+./target/release/connection --server 127.0.0.1:8383 --nick outronome
 ```
 
 > Dois clientes com o mesmo `$SEELE_HOME` são **a mesma pessoa** — o PERSISTENCE
@@ -252,14 +252,14 @@ medições de M1.
 
 ## 6 · Se o app gráfico estiver na jogada
 
-Rode o `seele-app` numa das máquinas em vez do `plug` e repita as seções 3 e 4. A
+Rode o `seele-app` numa das máquinas em vez do `connection` e repita as seções 3 e 4. A
 composição é a mesma de propósito: mesmos três painéis, telemetria no rodapé.
 
 Aqui a barra de espaço segura de verdade — a janela relata soltura.
 
 O que checar a mais:
 
-- o app e o `plug` no mesmo `$SEELE_HOME` são o mesmo pessoa (retomada de sessão)
+- o app e o `connection` no mesmo `$SEELE_HOME` são o mesmo pessoa (retomada de sessão)
 - o histórico aparece ao abrir a Linha, com autor e horário corretos
 - o deslizante de volume, ao apontar uma linha do roster, muda o que se ouve
 
@@ -289,14 +289,14 @@ Na máquina A, em casa, com o UPnP do roteador **desligado** de propósito (é o
 força a escada a chegar ao degrau 4):
 
 ```sh
-SEELE_ENCONTRO=<endereço-da-vps>:8384 ./target/release/plug --hospedar
+SEELE_ENCONTRO=<endereço-da-vps>:8384 ./target/release/connection --hospedar
 ```
 
 O que checar, em ordem:
 
 1. A frase embaixo do link diz **"um ponto de encontro apresentou esta
    máquina"**. Se disser "só funciona na sua rede", o degrau 4 não subiu: o
-   terminal do `plug` diz por quê, e o `--barulhento` da VPS diz se o pedido
+   terminal do `connection` diz por quê, e o `--barulhento` da VPS diz se o pedido
    chegou lá.
 2. O link tem um `enc=` com **duas metades** separadas por `/`, e um endereço
    público seu no `alt=`.
@@ -305,7 +305,7 @@ O que checar, em ordem:
    descobrindo, e a da máquina B chegando. Nunca mais que isso — se aparecer
    tráfego contínuo ali, alguma coisa está passando pelo ponto de encontro que
    não deveria.
-5. **Desligue o ponto de encontro** e hospede de novo. O `plug` tem de subir na
+5. **Desligue o ponto de encontro** e hospede de novo. O `connection` tem de subir na
    mesma velocidade de antes (mais no máximo um segundo), com o link levando os
    endereços de sempre e **sem** `enc=`. Este é o teste de que o degrau 4 não
    virou ponto único de falha.
@@ -331,13 +331,13 @@ entregável de M1.15 — CoreAudio, WASAPI, ALSA e PipeWire.
 | SO e versão | | |
 | Backend de áudio | | |
 | Dispositivos (captura / reprodução) | | |
-| Taxa nativa relatada pelo `plug` | | |
+| Taxa nativa relatada pelo `connection` | | |
 | Latência por cabo (M1.2) | | |
 | Latência no ar (M1.2) | | |
 | Estalos em 10 min | | |
 | Inteligível a 5% de perda | | |
 | Troca de dispositivo a quente funciona | | |
-| RSS do `plug` após 10 min | | |
+| RSS do `connection` após 10 min | | |
 
 A troca a quente é M1.14: com a chamada rodando, tire o fone USB e coloque de
 volta. A chamada deve pausar e retomar, não morrer.

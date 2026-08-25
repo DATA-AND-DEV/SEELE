@@ -11,7 +11,7 @@
 //! matters is that a keystroke means different things in different modes, and
 //! the one place that gets decided is [`App::on_key`].
 
-use seele_core::{VoiceRoomSync, Link, Pattern, SyncBand};
+use seele_core::{VoiceRoomSync, Link, LinkTrust, SignalBand};
 
 /// Which input mode the client is in. `specs/05-cliente-tui.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,7 +114,7 @@ pub struct RosterEntry {
     /// Whether they are transmitting.
     pub speaking: bool,
     /// Microphone muted — A.T. Field.
-    pub at_field: bool,
+    pub muted: bool,
     /// Speakers muted — Isolamento total.
     pub total_isolation: bool,
 }
@@ -122,8 +122,8 @@ pub struct RosterEntry {
 impl RosterEntry {
     /// Which band their Sync Ratio falls into.
     #[must_use]
-    pub fn band(&self) -> SyncBand {
-        SyncBand::of(self.sync)
+    pub fn band(&self) -> SignalBand {
+        SignalBand::of(self.sync)
     }
 }
 
@@ -281,7 +281,7 @@ pub struct App {
     /// Whether this person is transmitting.
     pub speaking: bool,
     /// Microphone muted.
-    pub at_field: bool,
+    pub muted: bool,
     /// Speakers muted.
     pub total_isolation: bool,
     /// Whether the help overlay is up. `?` in Normal mode.
@@ -341,7 +341,7 @@ impl App {
             termo: String::new(),
             alert: None,
             speaking: false,
-            at_field: false,
+            muted: false,
             total_isolation: false,
             help: false,
             convite: None,
@@ -354,11 +354,11 @@ impl App {
     }
 
     /// Folds in the connection state from the core.
-    pub fn set_pattern(&mut self, pattern: Pattern) {
-        self.screen = match pattern {
-            Pattern::Offline => Screen::Boot,
-            Pattern::Orange => Screen::PatternOrange,
-            Pattern::Blue => Screen::PatternBlue,
+    pub fn set_link_trust(&mut self, link_state: LinkTrust) {
+        self.screen = match link_state {
+            LinkTrust::Offline => Screen::Boot,
+            LinkTrust::Unverified => Screen::PatternOrange,
+            LinkTrust::Verified => Screen::PatternBlue,
         };
     }
 
@@ -702,7 +702,7 @@ mod tests {
                 nickname: "ayanami".into(),
                 sync: 98,
                 speaking: true,
-                at_field: false,
+                muted: false,
                 total_isolation: false,
             }),
             Node::VoiceRoom {
@@ -948,9 +948,9 @@ mod tests {
     #[test]
     fn the_pattern_follows_the_core() {
         let mut app = App::new();
-        app.set_pattern(Pattern::Orange);
+        app.set_link_trust(LinkTrust::Unverified);
         assert_eq!(app.screen, Screen::PatternOrange);
-        app.set_pattern(Pattern::Blue);
+        app.set_link_trust(LinkTrust::Verified);
         assert_eq!(app.screen, Screen::PatternBlue);
     }
 
@@ -1150,14 +1150,14 @@ mod tree_tests {
                 nickname: "ayanami".into(),
                 sync: 98,
                 speaking: false,
-                at_field: false,
+                muted: false,
                 total_isolation: false,
             }),
             Node::Person(RosterEntry {
                 nickname: "shinji".into(),
                 sync: 71,
                 speaking: false,
-                at_field: false,
+                muted: false,
                 total_isolation: false,
             }),
             Node::Channel {
@@ -1192,7 +1192,7 @@ mod tree_tests {
                 nickname: "ayanami".into(),
                 sync: 98,
                 speaking: false,
-                at_field: false,
+                muted: false,
                 total_isolation: false,
             }),
         ];

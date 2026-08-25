@@ -29,7 +29,7 @@ use std::collections::HashMap;
 
 use seele_proto::control::{VoiceRoomInfo, ChannelInfo, Permission, PersonState};
 use seele_proto::ids::{VoiceRoomId, ChannelId, MessageId, PersonId, ScreenId, Ssrc};
-use seele_proto::sync_ratio::SyncBand;
+use seele_proto::signal::SignalBand;
 use seele_proto::ServerMessage;
 
 use crate::client::SessionInfo;
@@ -44,13 +44,13 @@ pub struct Person {
     /// Their media source, for per-talker volume.
     pub ssrc: Option<Ssrc>,
     /// Microphone muted — A.T. Field.
-    pub at_field: bool,
+    pub muted: bool,
     /// Speakers muted — Isolamento total.
     pub total_isolation: bool,
     /// Transmitting right now.
     pub speaking: bool,
     /// Sync Ratio, 0 to 100.
-    pub sync_ratio: u8,
+    pub signal: u8,
 }
 
 impl Person {
@@ -59,13 +59,13 @@ impl Person {
             id,
             nickname,
             ssrc,
-            at_field: false,
+            muted: false,
             total_isolation: false,
             speaking: false,
             // Zero rather than a hopeful hundred: an unmeasured Sync Ratio that
             // reads as perfect is worse than one that reads as unknown, because
             // it looks like an answer.
-            sync_ratio: 0,
+            signal: 0,
         }
     }
 }
@@ -144,7 +144,7 @@ pub enum TransferNotice {
 
 /// The average Sync Ratio of a voice room, already banded.
 ///
-/// The comp (`design/Entry Plug v2.dc.html`) draws this as **MÉDIA DO VOICE_ROOM**, a
+/// The comp (`design/SEELE v2.dc.html`) draws this as **MÉDIA DO VOICE_ROOM**, a
 /// number in the band's colour with the sample size beside it, and computes
 /// both in the shell. Here it is computed once, in the core, for the same
 /// reason `seele_ffi::types` gives for carrying a band beside every person's
@@ -156,11 +156,11 @@ pub struct VoiceRoomSync {
     ///
     /// Rounded to the nearest point, ties up. The comp prints `82.4`, but the
     /// datum is a `u8` at every point it exists — on the wire, in
-    /// [`Person::sync_ratio`], in the smoothing — so a decimal here would be
+    /// [`Person::signal`], in the smoothing — so a decimal here would be
     /// precision invented at the last step. `82` is what is known.
     pub ratio: u8,
     /// Which band that mean falls into.
-    pub band: SyncBand,
+    pub band: SignalBand,
     /// How many people it is the mean of — the comp's `5 PLUGS`.
     ///
     /// Carried so a shell can say what the number is an average *of* without
@@ -206,7 +206,7 @@ pub struct Room {
     /// re-deriving `specs/04-servidor-seele.md`'s "negadas vencem concedidas"
     /// for itself. **Convenience, never enforcement**: the server checks again.
     pub permissions: Vec<Permission>,
-    /// The voice room this person's plug is in.
+    /// The voice room this person's connection is in.
     pub current_voice_room: Option<VoiceRoomId>,
     /// The Channel being read.
     pub current_channel: Option<ChannelId>,
@@ -414,7 +414,7 @@ impl Room {
         );
     }
 
-    /// Records that this person's plug is now in a voice room, and seats them in it.
+    /// Records that this person's connection is now in a voice room, and seats them in it.
     ///
     /// Called on the way *out*, when the client asks — not on the way in. The
     /// server confirms a voice room entry by silence, and a roster that waits for a
@@ -434,7 +434,7 @@ impl Room {
         self.current_voice_room = Some(voice_room);
     }
 
-    /// Records that this person's plug came **out**, and empties their seat.
+    /// Records that this person's connection came **out**, and empties their seat.
     ///
     /// The other half of [`Self::enter_voice_room`], and it was missing for as long
     /// as that one existed. The server does not echo `PersonLeft` back to the
@@ -509,12 +509,12 @@ impl Room {
     /// a server with four idle voice_rooms would show four red rooms nobody is in,
     /// and the one voice room that is genuinely in trouble would stop standing out.
     /// `None` says "nothing to average", which is the truth, and leaves the
-    /// shell to draw the absence — the comp draws `——` for a plug with no
+    /// shell to draw the absence — the comp draws `——` for a connection with no
     /// number, and this is the same case one level up.
     ///
     /// # An ejected person does not count
     ///
-    /// Ejecting a plug leaves the voice room: the person comes out of `seats` — via
+    /// Ejecting a connection leaves the voice room: the person comes out of `seats` — via
     /// [`Self::enter_voice_room`] for this client, or `PersonLeft` for anybody else —
     /// while staying in `people`, because their name is still needed for what
     /// they already said. This averages the *seats*, so somebody who left stops
@@ -526,7 +526,7 @@ impl Room {
         let mut total: u32 = 0;
         let mut people: usize = 0;
         for person in self.roster(voice_room) {
-            total += u32::from(person.sync_ratio);
+            total += u32::from(person.signal);
             people += 1;
         }
 
@@ -544,7 +544,7 @@ impl Room {
 
         Some(VoiceRoomSync {
             ratio,
-            band: SyncBand::of(ratio),
+            band: SignalBand::of(ratio),
             people,
         })
     }
@@ -928,7 +928,7 @@ impl Room {
                 changed.server = true;
             }
 
-            // Somebody with the permission moved this plug.
+            // Somebody with the permission moved this connection.
             //
             // The same bookkeeping [`Self::enter_voice_room`] does when *this* client
             // asks, and it has to be here as well as there: entering a voice room is
@@ -939,7 +939,7 @@ impl Room {
             //
             // The sentence that says it happened arrives separately, as an
             // `Alert` carrying `MovedByOperator`. Two frames rather than one
-            // because they are two different things: this is where the plug is,
+            // because they are two different things: this is where the connection is,
             // that is what the person should be told, and only the shell knows
             // how to say the second.
             ServerMessage::MovedToVoiceRoom { voice_room } => {
@@ -1109,10 +1109,10 @@ impl Room {
             .people
             .entry(state.person)
             .or_insert_with(|| Person::new(state.person, format!("pessoa {}", state.person.0), None));
-        person.at_field = state.at_field;
+        person.muted = state.muted;
         person.total_isolation = state.total_isolation;
         person.speaking = state.speaking;
-        person.sync_ratio = state.sync_ratio;
+        person.signal = state.signal;
     }
 }
 
@@ -1366,17 +1366,17 @@ mod tests {
         room.apply(&joined(3, "ayanami"));
         room.apply(&ServerMessage::PersonState(PersonState {
             person: PersonId(3),
-            at_field: true,
+            muted: true,
             total_isolation: false,
             speaking: true,
             presence: Presence::Available,
-            sync_ratio: 42,
+            signal: 42,
         }));
 
         let person = room.people.get(&PersonId(3)).expect("person");
-        assert!(person.at_field);
+        assert!(person.muted);
         assert!(person.speaking);
-        assert_eq!(person.sync_ratio, 42);
+        assert_eq!(person.signal, 42);
     }
 
     #[test]
@@ -1385,7 +1385,7 @@ mod tests {
         // like a question, which is what it is.
         let mut room = room();
         room.apply(&joined(3, "ayanami"));
-        assert_eq!(room.people[&PersonId(3)].sync_ratio, 0);
+        assert_eq!(room.people[&PersonId(3)].signal, 0);
     }
 
     #[test]
@@ -1490,15 +1490,15 @@ mod tests {
         room.apply(&joined(id, nickname));
         room.apply(&ServerMessage::PersonState(PersonState {
             person: PersonId(id),
-            at_field: false,
+            muted: false,
             total_isolation: false,
             speaking: false,
             presence: Presence::Available,
-            sync_ratio: sync,
+            signal: sync,
         }));
     }
 
-    /// The voice room seen by somebody whose own plug is elsewhere, so the fixture's
+    /// The voice room seen by somebody whose own connection is elsewhere, so the fixture's
     /// own zero does not have to be reasoned about in every average.
     fn watching() -> Room {
         let mut room = Room::new();
@@ -1539,7 +1539,7 @@ mod tests {
 
         let average = room.voice_room_sync(VOICE_ROOM).expect("three people are seated");
         assert_eq!(average.ratio, 83);
-        assert_eq!(average.band, SyncBand::Degraded);
+        assert_eq!(average.band, SignalBand::Degraded);
         assert_eq!(average.people, 3);
     }
 
@@ -1555,9 +1555,9 @@ mod tests {
 
         let average = room.voice_room_sync(VOICE_ROOM).expect("two people are seated");
         assert_eq!(average.ratio, 85);
-        assert_eq!(average.band, SyncBand::Nominal);
+        assert_eq!(average.band, SignalBand::Nominal);
         assert_eq!(average.people, 2);
-        assert_eq!(room.current_voice_room_sync(), None, "our plug is elsewhere");
+        assert_eq!(room.current_voice_room_sync(), None, "our connection is elsewhere");
     }
 
     #[test]
@@ -1824,7 +1824,7 @@ mod tests {
 
         assert!(changed.channels);
         assert_eq!(room.voice_rooms.len(), 1);
-        assert_eq!(room.current_voice_room, Some(VOICE_ROOM), "the wrong plug came out");
+        assert_eq!(room.current_voice_room, Some(VOICE_ROOM), "the wrong connection came out");
     }
 
     #[test]
@@ -1987,7 +1987,7 @@ mod tests {
         assert_eq!(room.caminho_de_quem_hospeda_bps, None);
         assert_eq!(
             room.teto_de_video(crate::tela::CAMINHO_DA_PROVA_BPS, None)
-                .teto(SyncBand::Nominal),
+                .teto(SignalBand::Nominal),
             crate::tela::Teto::Bps(1_200_000)
         );
 
@@ -2000,7 +2000,7 @@ mod tests {
         assert_eq!(room.caminho_de_quem_hospeda_bps, None);
         assert_eq!(
             room.teto_de_video(crate::tela::CAMINHO_DA_PROVA_BPS, None)
-                .teto(SyncBand::Nominal),
+                .teto(SignalBand::Nominal),
             crate::tela::Teto::Bps(1_200_000),
             "o zero de «não medi» virou um teto de zero"
         );
@@ -2037,12 +2037,12 @@ mod tests {
         // que põe o número, e o resto desta conta não muda.
         assert_eq!(
             room.teto_de_video(crate::tela::CAMINHO_DA_PROVA_BPS, None)
-                .teto(SyncBand::Nominal),
+                .teto(SignalBand::Nominal),
             crate::tela::Teto::Bps(1_200_000)
         );
         assert_eq!(
             room.teto_de_video(crate::tela::CAMINHO_DA_PROVA_BPS, None)
-                .perna_que_aperta(SyncBand::Nominal),
+                .perna_que_aperta(SignalBand::Nominal),
             crate::tela::PernaQueAperta::QuemCompartilha
         );
 
@@ -2057,7 +2057,7 @@ mod tests {
         assert_eq!(room.minha_tela().map(|tela| tela.espectadores), Some(4));
         assert_eq!(
             room.teto_de_video(crate::tela::CAMINHO_DA_PROVA_BPS, None)
-                .teto(SyncBand::Nominal),
+                .teto(SignalBand::Nominal),
             crate::tela::Teto::Bps(900_000),
             "as quatro cópias que o servidor sobe não foram divididas"
         );
@@ -2065,7 +2065,7 @@ mod tests {
         // `720p · 4 pessoas assistindo`, e não `720p · sua conexão`.
         assert_eq!(
             room.teto_de_video(crate::tela::CAMINHO_DA_PROVA_BPS, None)
-                .perna_que_aperta(SyncBand::Nominal),
+                .perna_que_aperta(SignalBand::Nominal),
             crate::tela::PernaQueAperta::QuemHospeda
         );
         // E a voz da máquina de quem compartilha nunca cedeu: os 40% do caminho

@@ -1,4 +1,4 @@
-//! **Entry Plug** — the terminal client, `plug`.
+//! **SEELE** — the terminal client, `connection`.
 //!
 //! `specs/00-visao-geral.md` puts this first:
 //!

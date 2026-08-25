@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex};
 use seele_core::chegada::{Caminho, Chegada, Etapa};
 use seele_core::enlace::Destino;
 use seele_core::{MemoryPinStore, PinStore, SigningKey};
-use seele_ffi::{ConnectConfig, ConnectStage, Event, EventListener, Plug};
+use seele_ffi::{ConnectConfig, ConnectStage, Event, EventListener, Connection};
 use seele_server::persistence::Location;
 use seele_server::{ServerConfig, Daemon};
 
@@ -306,7 +306,7 @@ fn a_trilha_de_uma_chegada_que_falhou_atravessa_ate_a_casca() {
     let primeiro = endereco_morto();
     let segundo = endereco_morto();
 
-    let falha = match Plug::connect_with_trail(ConnectConfig {
+    let falha = match Connection::connect_with_trail(ConnectConfig {
         server: primeiro.to_string(),
         alternate_servers: vec![segundo.to_string()],
         nickname: "pessoa".into(),
@@ -352,7 +352,7 @@ fn a_trilha_de_uma_chegada_que_falhou_atravessa_ate_a_casca() {
     assert!(
         matches!(
             falha.error,
-            seele_ffi::PlugError::Unreachable | seele_ffi::PlugError::HandshakeTimeout
+            seele_ffi::ConnectionError::Unreachable | seele_ffi::ConnectionError::HandshakeTimeout
         ),
         "erro inesperado: {:?}",
         falha.error
@@ -442,11 +442,11 @@ async fn uma_conexao_que_venceu_por_um_candidato_avisado_diz_furo_de_nat() {
     config.expected_fingerprint = Some(servidor.fingerprint().to_owned());
     config.bilhete = Some(bilhete);
 
-    let Ok(entrada) = tokio::task::spawn_blocking(move || Plug::connect_with_trail(config)).await
+    let Ok(entrada) = tokio::task::spawn_blocking(move || Connection::connect_with_trail(config)).await
     else {
         panic!("a thread que conecta caiu");
     };
-    let (plug, _) = match entrada {
+    let (connection, _) = match entrada {
         Ok(entrada) => entrada,
         Err(falha) => panic!("o servidor de teste não deixou entrar: {falha:?}"),
     };
@@ -457,7 +457,7 @@ async fn uma_conexao_que_venceu_por_um_candidato_avisado_diz_furo_de_nat() {
          `FuroDeNat` sobre uma conexão que não avisou ninguém"
     );
     assert_eq!(
-        plug.snapshot().caminho,
+        connection.snapshot().caminho,
         Some("FuroDeNat"),
         "a conexão subiu por um candidato público pelo qual avisamos, e o \
          snapshot não diz por onde ela saiu"
@@ -480,17 +480,17 @@ async fn a_mesma_conexao_sem_aviso_nenhum_diz_endereco_publico() {
     let mut config = config_de_teste(format!("[::ffff:127.0.0.1]:{}", server.port()), casa.path());
     config.expected_fingerprint = Some(servidor.fingerprint().to_owned());
 
-    let Ok(entrada) = tokio::task::spawn_blocking(move || Plug::connect_with_trail(config)).await
+    let Ok(entrada) = tokio::task::spawn_blocking(move || Connection::connect_with_trail(config)).await
     else {
         panic!("a thread que conecta caiu");
     };
-    let (plug, _) = match entrada {
+    let (connection, _) = match entrada {
         Ok(entrada) => entrada,
         Err(falha) => panic!("o servidor de teste não deixou entrar: {falha:?}"),
     };
 
     assert_eq!(
-        plug.snapshot().caminho,
+        connection.snapshot().caminho,
         Some("EnderecoPublico"),
         "sem bilhete não sai `LEVE` nenhum, e ainda assim a tela afirma que \
          alguém furou o caminho até aqui"
@@ -587,7 +587,7 @@ fn quem_liga_a_ponte_antes_do_bloqueio_ve_as_etapas_acontecerem() {
     // A limitação estrutural que a tarefa 8 deixou de pé, como teste.
     //
     // `Chegada::acompanhar` existia e não tinha **um só uso em produção**:
-    // `Plug::connect` bloqueia, `Plug::subscribe` só existe depois de ela
+    // `Connection::connect` bloqueia, `Connection::subscribe` só existe depois de ela
     // voltar, e quando ela volta a travessia inteira já aconteceu. Consertar
     // exigia mudar a forma da chamada, e é o que `connect_watching` faz.
     //
@@ -603,7 +603,7 @@ fn quem_liga_a_ponte_antes_do_bloqueio_ve_as_etapas_acontecerem() {
     config.alternate_servers = vec![segundo.to_string()];
 
     let anotador = Arc::new(Anotador::default());
-    let resultado = Plug::connect_watching(config, Arc::clone(&anotador) as Arc<dyn EventListener>);
+    let resultado = Connection::connect_watching(config, Arc::clone(&anotador) as Arc<dyn EventListener>);
     assert!(
         resultado.is_err(),
         "dois endereços mortos deixaram alguém entrar"

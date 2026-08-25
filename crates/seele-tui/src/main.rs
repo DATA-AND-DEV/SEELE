@@ -1,4 +1,4 @@
-//! `plug` — the Entry Plug.
+//! `connection` — the SEELE.
 //!
 //! The terminal client, and the product's primary interface
 //! (`specs/05-cliente-tui.md`: "O produto principal. Tudo o mais imita esta
@@ -33,7 +33,7 @@ use seele_core::conhecidos::Conhecidos;
 use seele_core::enlace::{Aviso, Destino, Enlace, Fechado, Motivo};
 use seele_core::{
     identity, AudioTelemetry, VoiceRoomId, ClientMessageId, ConnectError, FilePinStore, ChannelId, Room,
-    SyncInputs, SyncRatio, Verdict, Voice, VoiceMode,
+    SyncInputs, Signal, Verdict, Voice, VoiceMode,
 };
 use seele_tui::app::{Action, Alert, App, Bar, ChatLine, Key, Mode, Node, Screen};
 use seele_tui::command::{self, Command};
@@ -109,7 +109,7 @@ impl Args {
 
 /// Lê a linha de comando, ou avisa que não veio nada.
 ///
-/// `None` significa `plug` puro, sem flag nenhuma: aí a tela de conexão decide.
+/// `None` significa `connection` puro, sem flag nenhuma: aí a tela de conexão decide.
 /// Qualquer argumento pula a tela — quem digitou aonde vai já disse aonde vai.
 fn parse_args() -> Result<Option<Args>> {
     if std::env::args().len() <= 1 {
@@ -356,7 +356,7 @@ async fn escolher(
 }
 
 fn usage() {
-    eprintln!("plug — Entry Plug, o cliente SEELE");
+    eprintln!("connection — SEELE, o cliente SEELE");
     eprintln!();
     eprintln!("  sem argumento nenhum, abre a tela de conexão: os servidores onde");
     eprintln!("  você já esteve, um endereço novo, um convite, ou hospedar aqui.");
@@ -381,7 +381,7 @@ fn usage() {
 #[tokio::main]
 async fn main() -> Result<()> {
     // Antes de `parse_args`, e antes de o terminal alternativo abrir: quem roda
-    // `plug --rede` tem uma pergunta sobre esta máquina, não uma sessão para
+    // `connection --rede` tem uma pergunta sobre esta máquina, não uma sessão para
     // abrir. O diagnóstico escreve na saída de sempre e termina em `ExitCode`,
     // e nada do resto deste arquivo chega a rodar.
     let argumentos: Vec<String> = std::env::args().skip(1).collect();
@@ -411,7 +411,7 @@ async fn main() -> Result<()> {
     // screen and disappears with it — which is how a crash becomes "it just
     // closed".
     if let Err(error) = &result {
-        eprintln!("plug encerrou: {error:#}");
+        eprintln!("connection encerrou: {error:#}");
     }
     result
 }
@@ -464,7 +464,7 @@ struct Runtime<'a> {
     /// palette at every eject, forever.
     theme: &'a mut Theme,
     voice: Option<Voice>,
-    sync: SyncRatio,
+    sync: Signal,
     /// True when the terminal reports key releases, so the space bar can be
     /// held rather than latched.
     holds: bool,
@@ -556,7 +556,7 @@ async fn sessao(
         room: Room::new(),
         theme: tema,
         voice: None,
-        sync: SyncRatio::new(),
+        sync: Signal::new(),
         holds,
         latched: false,
         next_message_id: primeira_chave_de_mensagem(),
@@ -604,7 +604,7 @@ async fn sessao(
     let chegada = Chegada::nova(destinos, args.bilhete.clone());
     let mut client = match chegada.chegar(key, pins).await {
         // A trilha do sucesso morre aqui pelo mesmo motivo que a da falha, logo
-        // abaixo: este terminal está no ecrã alternado, e o `plug --rede` é
+        // abaixo: este terminal está no ecrã alternado, e o `connection --rede` é
         // quem responde por onde a conexão passou, com o diagnóstico junto.
         Ok(chegado) => chegado.enlace,
         Err(falha) => {
@@ -612,7 +612,7 @@ async fn sessao(
             // alternado quando isto acontece: escrever nele os passos da chegada
             // rabiscaria a tela de fim por cima, e escrevê-los fora dele seria
             // escrever onde ninguém está olhando. Quem pergunta «qual dos quatro
-            // endereços deu o quê» num terminal pergunta ao `plug --rede`, que
+            // endereços deu o quê» num terminal pergunta ao `connection --rede`, que
             // existe para responder isso com o resto do diagnóstico junto.
             runtime.app.screen = Screen::Lost {
                 reason: motivo_de_conexao_perdida(falha.motivo()),
@@ -740,7 +740,7 @@ async fn sessao(
                             if let Some(action) = runtime.app.on_key(key) {
                                 // Um `?` aqui matava o cliente: mandar uma
                                 // mensagem por um enlace que acabou de fechar
-                                // virava `plug encerrou: …` numa linha de
+                                // virava `connection encerrou: …` numa linha de
                                 // stderr. Ver [`enlace_fechado`].
                                 if act(&mut runtime, &client, action, args.channel).await.is_err() {
                                     enlace_fechado(&mut runtime);
@@ -1007,7 +1007,7 @@ fn alerta_do_veredito(veredito: &Verdict) -> Option<Alert> {
 /// —, e não um defeito do cliente.
 ///
 /// Era o buraco: `Enlace::dizer` devolve [`Fechado`] quando a sessão já morreu,
-/// e o `?` levava isso até o `main`, que imprimia `plug encerrou: …` e saía com
+/// e o `?` levava isso até o `main`, que imprimia `connection encerrou: …` e saía com
 /// código diferente de zero. Bastava o `select!` escolher a tecla em vez do
 /// `Aviso::Encerrado` que estava pronto ao lado — e ele escolhe qualquer um dos
 /// dois — para apertar Enter matar o cliente.
@@ -1111,7 +1111,7 @@ fn tick(runtime: &mut Runtime<'_>, client: &Enlace) {
     if let Some(voice) = &runtime.voice {
         let telemetry = voice.telemetry();
         runtime.app.speaking = telemetry.local.speaking;
-        runtime.app.at_field = voice.at_field();
+        runtime.app.muted = voice.muted();
         runtime.app.total_isolation = voice.total_isolation();
         // Tudo o que a volta de áudio escreve na barra sai daqui, e a reserva do
         // anel volta de lá — as duas coisas juntas, porque separá-las é o
@@ -1347,9 +1347,9 @@ async fn act(
         }
 
         Action::ToggleAtField => {
-            runtime.app.at_field = !runtime.app.at_field;
+            runtime.app.muted = !runtime.app.muted;
             if let Some(voice) = &runtime.voice {
-                voice.set_at_field(runtime.app.at_field);
+                voice.set_at_field(runtime.app.muted);
             }
         }
         Action::ToggleTotalIsolation => {
@@ -1607,16 +1607,16 @@ async fn run_command(
         Command::About => note(
             runtime,
             format!(
-                "SEELE · plug {} · protocolo v{}",
+                "SEELE · connection {} · protocolo v{}",
                 env!("CARGO_PKG_VERSION"),
                 seele_core::PROTOCOL_VERSION
             ),
         ),
 
-        Command::AtField => {
-            runtime.app.at_field = !runtime.app.at_field;
+        Command::Muted => {
+            runtime.app.muted = !runtime.app.muted;
             if let Some(voice) = &runtime.voice {
-                voice.set_at_field(runtime.app.at_field);
+                voice.set_at_field(runtime.app.muted);
             }
         }
 
@@ -1756,7 +1756,7 @@ mod tests {
 
         assert_eq!(
             room.current_voice_room, None,
-            "a casca continua achando que o plug está numa sala"
+            "a casca continua achando que o connection está numa sala"
         );
         assert!(
             room.roster(SALA).next().is_none(),
@@ -2227,7 +2227,7 @@ mod tests {
             room: Room::new(),
             theme: &mut tema,
             voice: None,
-            sync: SyncRatio::new(),
+            sync: Signal::new(),
             holds: false,
             latched: false,
             next_message_id: 1,

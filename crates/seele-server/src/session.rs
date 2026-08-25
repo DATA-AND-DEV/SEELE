@@ -40,7 +40,7 @@ use seele_proto::control::{
 };
 use seele_proto::ids::{VoiceRoomId, ChannelId, PersonId, RoleId, ScreenId, SessionId, Ssrc};
 use seele_proto::screen::SCREEN_HEADER_LEN;
-use seele_proto::sync_ratio::{SyncInputs, SyncRatio};
+use seele_proto::signal::{SyncInputs, Signal};
 use seele_proto::transport::HANDSHAKE_TIMEOUT;
 use tokio::sync::mpsc;
 
@@ -253,7 +253,7 @@ pub async fn serve(
         nickname = %session.nickname,
         may_speak = session.may_speak,
         reclaimed = ?session.reclaimed_voice_room,
-        "pattern blue"
+        "link verified"
     );
 
     let result = run_session(connection, send, recv, &session, &server, &voice_rooms, &registry).await;
@@ -265,7 +265,7 @@ pub async fn serve(
     encerrar_telas_de(&server, session.person).await;
 
     // And **announced**, which it was not. `Event::PersonLeft` was sent only
-    // from the `EjectPlug` branch, so a person who closed their client, lost
+    // from the `LeaveVoiceRoom` branch, so a person who closed their client, lost
     // their network or hit any `?` in the loop stayed in everybody else's
     // roster until they reconnected. Nobody saw it while a client only drew the
     // voice room it was sitting in and only learned of that voice room's arrivals; now that
@@ -990,7 +990,7 @@ async fn run_session(
     // What this person has announced about themselves. Held here rather than
     // rebuilt each tick, because the telemetry broadcast carries it and a tick
     // that reported a hardcoded `false` would undo every mute a second later.
-    let mut at_field = false;
+    let mut muted = false;
     let mut total_isolation = false;
     let mut presence = Presence::Available;
     // Whether they are transmitting. Not announceable on the control channel,
@@ -1003,7 +1003,7 @@ async fn run_session(
     // the whole `PersonState` in, so a field left at a default is not left
     // alone, it is overwritten.
     let mut last_ratio = 0_u8;
-    let mut sync = SyncRatio::new();
+    let mut sync = Signal::new();
     let mut telemetry = tokio::time::interval(TELEMETRY_INTERVAL);
     telemetry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
@@ -1035,10 +1035,10 @@ async fn run_session(
     // Who is already seated, in **every** voice room — the whole picture, once.
     //
     // The wider half of gap G15. The narrow half was closed inside
-    // `InsertPlug`: walk into an occupied voice room and the server listed the people
+    // `EnterVoiceRoom`: walk into an occupied voice room and the server listed the people
     // in *that* voice room. Every other voice room stayed empty on the client for the whole
     // session, because nothing had ever carried who was in it — and the screen
-    // in `design/Entry Plug v3.dc.html` draws occupants under all of them. That
+    // in `design/SEELE v3.dc.html` draws occupants under all of them. That
     // is the defect reported from a real session as the voice_rooms showing empty
     // when they were not.
     //
@@ -1208,7 +1208,7 @@ async fn run_session(
                 }
 
                 match message {
-                    ClientMessage::InsertPlug { voice_room: id, password } => {
+                    ClientMessage::EnterVoiceRoom { voice_room: id, password } => {
                         // A senha da sala de voz era declarada no protocolo, relatada
                         // ao cliente em `password_required` e **nunca
                         // conferida**. Uma fechadura que se anuncia trancada e
@@ -1229,7 +1229,7 @@ async fn run_session(
                         assentar(server, voice_rooms, session, &outbound_tx, &tela_tx, id).await?;
                         current_voice_room = Some(id);
                     }
-                    ClientMessage::EjectPlug => {
+                    ClientMessage::LeaveVoiceRoom => {
                         voice_rooms.leave_everywhere(session.person).await;
                         encerrar_telas_de(server, session.person).await;
                         if let Some(id) = current_voice_room.take() {
@@ -1298,23 +1298,23 @@ async fn run_session(
                     // Ignoring them, as this did, made every mute local-only:
                     // the marker existed and could never light up.
                     ClientMessage::SetAtField(on) => {
-                        at_field = on;
+                        muted = on;
                         announce(server, session, &AnnouncedState {
-                            at_field,
+                            muted,
                             total_isolation,
                             speaking: speaking_now(last_datagram),
                             presence,
-                            sync_ratio: last_ratio,
+                            signal: last_ratio,
                         });
                     }
                     ClientMessage::SetTotalIsolation(on) => {
                         total_isolation = on;
                         announce(server, session, &AnnouncedState {
-                            at_field,
+                            muted,
                             total_isolation,
                             speaking: speaking_now(last_datagram),
                             presence,
-                            sync_ratio: last_ratio,
+                            signal: last_ratio,
                         });
                     }
                     ClientMessage::SetPresence(
@@ -1323,11 +1323,11 @@ async fn run_session(
                     ) => {
                         presence = announced;
                         announce(server, session, &AnnouncedState {
-                            at_field,
+                            muted,
                             total_isolation,
                             speaking: speaking_now(last_datagram),
                             presence,
-                            sync_ratio: last_ratio,
+                            signal: last_ratio,
                         });
                     }
                     // ---- rooms, made by whoever hosts ----
@@ -1768,7 +1768,7 @@ async fn run_session(
                         // Sentado antes de transmitir. Uma sala de voz vindo de quem
                         // pergunta é uma sala de voz que quem pergunta aponta para
                         // outro lugar, então a mensagem não o carrega e a
-                        // resposta é a sala onde o plug está.
+                        // resposta é a sala onde o connection está.
                         //
                         // `PermissionDenied` é a recusa mais próxima que existe
                         // enumerada, e ela não diz a verdade inteira: a pessoa
@@ -1971,7 +1971,7 @@ async fn run_session(
                     Event::PersonMoved { person, voice_room: destino } if *person == session.person => {
                         assentar(server, voice_rooms, session, &outbound_tx, &tela_tx, *destino).await?;
                         current_voice_room = Some(*destino);
-                        // Where the plug is now, and then that somebody put it
+                        // Where the connection is now, and then that somebody put it
                         // there. Two frames because they are two different
                         // things: one is state this client has to fold in or go
                         // on speaking into the room it left, the other is a
@@ -1989,8 +1989,8 @@ async fn run_session(
                         continue;
                     }
                     // A voice room does not vanish from under the feet of the people
-                    // speaking in it. The plug comes out first — the same
-                    // bookkeeping `EjectPlug` does, because it is the same
+                    // speaking in it. The connection comes out first — the same
+                    // bookkeeping `LeaveVoiceRoom` does, because it is the same
                     // thing happening without being asked for — and only then
                     // does this client hear that the room is gone.
                     //
@@ -2077,11 +2077,11 @@ async fn run_session(
 
                 let _ = server.events.send(Event::PersonState(PersonState {
                     person: session.person,
-                    at_field,
+                    muted,
                     total_isolation,
                     speaking: speaking_now(last_datagram),
                     presence,
-                    sync_ratio: ratio,
+                    signal: ratio,
                 }));
             }
         }
@@ -2136,10 +2136,10 @@ async fn run_session(
     Ok(())
 }
 
-/// Puts this connection's plug into a voice room, and tells the server.
+/// Puts this connection's connection into a voice room, and tells the server.
 ///
 /// One function because there are two ways in — the person asks
-/// ([`ClientMessage::InsertPlug`]) or somebody with [`Permission::MovePerson`]
+/// ([`ClientMessage::EnterVoiceRoom`]) or somebody with [`Permission::MovePerson`]
 /// decides — and the bookkeeping either way is identical: out of the old room
 /// before into the new one, the occupancy rewritten, the departure and the
 /// arrival both announced. Written twice, the copy that gets a channel added is
@@ -2401,7 +2401,7 @@ async fn receber_tela(
 
 /// Encerra e anuncia o que este pessoa estivesse transmitindo, onde estivesse.
 ///
-/// Chamado em todo lugar onde o plug sai de uma sala de voz — sair, ser movido, ser
+/// Chamado em todo lugar onde o connection sai de uma sala de voz — sair, ser movido, ser
 /// expulso, ou a conexão acabar em qualquer `?` do meio do laço. Uma
 /// transmissão que sobrevivesse à saída de quem a manda ficaria desenhada para
 /// sempre na sala, prometendo um fluxo que não tem mais de onde vir: é o mesmo
@@ -2469,22 +2469,22 @@ fn speaking_now(last_datagram: Option<Instant>) -> bool {
 /// struct in, so a field left at a default is not left alone — it replaces
 /// whatever that client knew.
 struct AnnouncedState {
-    at_field: bool,
+    muted: bool,
     total_isolation: bool,
     speaking: bool,
     presence: Presence,
-    sync_ratio: u8,
+    signal: u8,
 }
 
 /// Tells everybody what this person just announced about themselves.
 fn announce(server: &Server, session: &Session, state: &AnnouncedState) {
     let _ = server.events.send(Event::PersonState(PersonState {
         person: session.person,
-        at_field: state.at_field,
+        muted: state.muted,
         total_isolation: state.total_isolation,
         speaking: state.speaking,
         presence: state.presence,
-        sync_ratio: state.sync_ratio,
+        signal: state.signal,
     }));
 }
 
@@ -2636,7 +2636,7 @@ fn translate(event: &Event, channels: &[ChannelId], self_person: PersonId) -> Op
         //
         // The connections that were *inside* the voice room, or had the Channel open,
         // never get here: the loop answers them itself and `continue`s, because
-        // they have a plug to pull and a sentence to be told and this function
+        // they have a connection to pull and a sentence to be told and this function
         // knows about neither.
         Event::VoiceRoomDeleted { voice_room } => Some(ServerMessage::VoiceRoomDeleted { voice_room: *voice_room }),
         Event::ChannelDeleted { channel } => Some(ServerMessage::ChannelDeleted { channel: *channel }),

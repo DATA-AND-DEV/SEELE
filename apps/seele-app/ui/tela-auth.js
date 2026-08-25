@@ -1,4 +1,4 @@
-// SEELE · Entry Plug — a entrada no servidor (`#tela-auth`).
+// SEELE — a entrada no servidor (`#tela-auth`).
 //
 // Duas entradas e dois trabalhos, escolhidos por `data-modo` na `<section>`.
 //
@@ -106,7 +106,7 @@ const SEGUNDOS_ENTRE_BATIDAS = 15;
 /**
  * As três frases do estado da conexão.
  *
- * `Snapshot.pattern` já é exatamente `Offline` / `Orange` / `Blue`, decidido no
+ * `Snapshot.link_state` já é exatamente `Offline` / `Unverified` / `Verified`, decidido no
  * core — a casca não classifica nada aqui, só escolhe como dizer. A chave
  * continua sendo a do protocolo; o que mudou é a palavra que sai na tela.
  *
@@ -119,11 +119,11 @@ const PADROES = {
     rotulo: "SEM CONEXÃO",
     nota: "Sem sessão aberta. Nada a verificar até o servidor responder.",
   },
-  Orange: {
+  Unverified: {
     rotulo: "CONEXÃO NÃO VERIFICADA",
     nota: "A identidade deste servidor ainda não foi conferida.",
   },
-  Blue: {
+  Verified: {
     rotulo: "CONEXÃO SEGURA",
     nota: "Identidade confirmada. Captura liberada.",
   },
@@ -224,13 +224,13 @@ function entrarNaAutenticacao(snapshot, veredito, endereco) {
  * 青 da entrada anterior ficaria com o único caractere que já não é dito.
  */
 function desenharPadrao(snapshot) {
-  const padrao = PADROES[snapshot?.pattern] ?? PADROES.Offline;
+  const padrao = PADROES[snapshot?.link_state] ?? PADROES.Offline;
   const cartela = $("auth-padrao");
-  cartela.dataset.padrao = snapshot?.pattern ?? "Offline";
+  cartela.dataset.padrao = snapshot?.link_state ?? "Offline";
   $("auth-padrao-rotulo").textContent = padrao.rotulo;
   $("auth-padrao-kanji").textContent = "";
   $("auth-padrao-nota").textContent = padrao.nota;
-  $("auth-botao").dataset.padrao = snapshot?.pattern ?? "Offline";
+  $("auth-botao").dataset.padrao = snapshot?.link_state ?? "Offline";
 }
 
 /**
@@ -364,15 +364,15 @@ async function verificarIdentidade() {
     aperto.snapshot = snapshot;
     desenharPadrao(snapshot);
     desenharServerDaEntrada(snapshot);
-    registrar(PADROES[snapshot.pattern]?.rotulo ?? PADROES.Offline.rotulo, tomDoPadrao(snapshot));
+    registrar(PADROES[snapshot.link_state]?.rotulo ?? PADROES.Offline.rotulo, tomDoPadrao(snapshot));
   } catch (falha) {
     console.warn("snapshot:", falha);
   }
 }
 
 function tomDoPadrao(snapshot) {
-  if (snapshot.pattern === "Blue") return "azul";
-  if (snapshot.pattern === "Orange") return "atencao";
+  if (snapshot.link_state === "Verified") return "azul";
+  if (snapshot.link_state === "Unverified") return "atencao";
   return "apagado";
 }
 
@@ -418,7 +418,7 @@ async function inserirPlug() {
     // Ela **não** vem por evento nesta hora, e essa é a razão de esta linha
     // existir: o servidor manda `ServerIconChanged` logo depois do aperto de mão, a
     // ponte dobra a mensagem e emite `ServerChanged` — e ninguém está ouvindo
-    // ainda. A casca só se inscreve depois de `Plug::connect` voltar, e a
+    // ainda. A casca só se inscreve depois de `Connection::connect` voltar, e a
     // travessia inteira já aconteceu quando ela volta. O único evento que
     // atravessa essa janela é `ConnectStageChanged`, e ele existe justamente
     // porque foi entregue **antes** do bloqueio.

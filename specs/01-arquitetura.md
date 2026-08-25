@@ -16,7 +16,7 @@ seele/
 │  ├─ seele-core/           # cliente headless: sessão, canais, áudio, eventos
 │  ├─ seele-audio/          # captura, codec, jitter buffer, mixagem
 │  ├─ seele-server/         # o daemon (seeled)
-│  ├─ seele-tui/            # binário `plug` — ratatui + crossterm
+│  ├─ seele-tui/            # binário `connection` — ratatui + crossterm
 │  └─ seele-ffi/            # superfície C ABI + uniffi para Tauri/Flutter
 ├─ apps/
 │  ├─ desktop/             # Tauri

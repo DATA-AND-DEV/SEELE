@@ -31,7 +31,7 @@ pub fn alert(reason: AlertReason) -> &'static str {
         AlertReason::OperatorNotice => "AVISO DO OPERADOR",
         AlertReason::RateLimited => "VOCÊ ESTÁ FALANDO RÁPIDO DEMAIS PARA O SERVIDOR",
         AlertReason::MovedByOperator => "UM OPERADOR MOVEU VOCÊ DE SALA",
-        // O plug já saiu e a conversa já saiu da tela quando isto chega. Sem a
+        // O connection já saiu e a conversa já saiu da tela quando isto chega. Sem a
         // frase, o que resta é uma sala que sumiu sozinha — que de onde se lê é
         // igualzinho a um cliente que perdeu a conta de onde estava.
         AlertReason::VoiceRoomDeleted => "A SALA DE VOZ EM QUE VOCÊ ESTAVA FOI APAGADA",

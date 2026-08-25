@@ -1,4 +1,4 @@
-//! Desenha as telas do `plug` num buffer e imprime como texto.
+//! Desenha as telas do `connection` num buffer e imprime como texto.
 //!
 //! ```text
 //! cargo run --example telas -p seele-tui
@@ -86,21 +86,21 @@ fn operando() -> App {
             nickname: "alexandre".into(),
             sync: 98,
             speaking: true,
-            at_field: false,
+            muted: false,
             total_isolation: false,
         }),
         Node::Person(RosterEntry {
             nickname: "rafa".into(),
             sync: 71,
             speaking: false,
-            at_field: false,
+            muted: false,
             total_isolation: false,
         }),
         Node::Person(RosterEntry {
             nickname: "bia".into(),
             sync: 44,
             speaking: false,
-            at_field: true,
+            muted: true,
             total_isolation: false,
         }),
         Node::VoiceRoom {

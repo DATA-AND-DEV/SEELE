@@ -1,4 +1,4 @@
-// SEELE · Entry Plug — a moderação (`#moderar`), camada sobre a operação.
+// SEELE — a moderação (`#moderar`), camada sobre a operação.
 //
 // Os quatro verbos que a `specs/04-servidor-seele.md` dá ao Comandante e ao
 // Operador: expulsar, banir, remover mensagem e mover pessoa. O Rust os tinha
@@ -192,7 +192,7 @@ function botaoDeApagarLinha(linha, snapshot) {
 /**
  * O segundo botão da caixa de alerta, que o comp desenha e o v2 deixou morto.
  *
- * A ambiguidade do rótulo do comp (Q6 do inventário — «ejetar o plug **do**
+ * A ambiguidade do rótulo do comp (Q6 do inventário — «ejetar o connection **do**
  * operador» tanto pode ser o ato sobre outra pessoa quanto a saída ordenada por
  * quem está aqui) se resolveu para o primeiro lado: quem quer sair tem
  * DESCONECTAR no cabeçalho, escrito, e é o que faz o que diz.

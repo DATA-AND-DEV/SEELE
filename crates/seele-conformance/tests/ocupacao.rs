@@ -240,7 +240,7 @@ async fn entrar_num_voice_room_aparece_para_quem_esta_noutro() -> Result<()> {
     .await;
     assert!(
         sumiu,
-        "quem ejetou o plug na sala de voz-02 continua desenhado lá: {:?}",
+        "quem ejetou o connection na sala de voz-02 continua desenhado lá: {:?}",
         sentados(&sala_rei, voice_room_dois)
     );
 

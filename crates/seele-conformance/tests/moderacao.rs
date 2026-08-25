@@ -1,6 +1,6 @@
 //! Os quatro verbos de moderação, contra um servidor de verdade.
 //!
-//! # Por que aqui, e conduzindo um `Plug`
+//! # Por que aqui, e conduzindo um `Connection`
 //!
 //! Duas coisas que só existem com as duas pontas de pé.
 //!
@@ -15,7 +15,7 @@
 //! **A ponte liga em algum lugar.** Um braço vazio no `executar` do `seele-ffi`
 //! deixa a árvore inteira verde: o botão não faria nada, em silêncio, no app
 //! publicado. Já aconteceu neste projeto. Por isso estes testes conduzem um
-//! `Plug` de verdade, que é o mesmo objeto que o comando Tauri segura, e não um
+//! `Connection` de verdade, que é o mesmo objeto que o comando Tauri segura, e não um
 //! `Enlace` — o `Enlace` pula justamente o trecho que some.
 
 #![allow(
@@ -30,7 +30,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use seele_ffi::{ConnectConfig, EndReason, Event, EventListener, NoticeReason, Plug, PlugError};
+use seele_ffi::{ConnectConfig, EndReason, Event, EventListener, NoticeReason, Connection, ConnectionError};
 use seele_server::persistence::{Persistence, Location};
 use seele_server::permissions::{Permissions, COMMANDER_ROLE, OPERATOR_ROLE, PERSON_ROLE};
 use seele_server::{ServerConfig, Daemon};
@@ -88,8 +88,8 @@ fn nascer(nome: &str) -> String {
     caminho
 }
 
-fn conectar(endereco: SocketAddr, apelido: &str) -> Result<Arc<Plug>, PlugError> {
-    Plug::connect(ConnectConfig {
+fn conectar(endereco: SocketAddr, apelido: &str) -> Result<Arc<Connection>, ConnectionError> {
+    Connection::connect(ConnectConfig {
         server: endereco.to_string(),
         alternate_servers: Vec::new(),
         nickname: apelido.to_owned(),
@@ -103,7 +103,7 @@ fn conectar(endereco: SocketAddr, apelido: &str) -> Result<Arc<Plug>, PlugError>
         capture_device: None,
         playback_device: None,
     })
-    .map(|(plug, _confianca)| plug)
+    .map(|(connection, _confianca)| connection)
 }
 
 /// Conecta fora da thread que desenha, como o comando do Tauri faz.
@@ -111,32 +111,32 @@ fn conectar(endereco: SocketAddr, apelido: &str) -> Result<Arc<Plug>, PlugError>
 /// Estreia um apelido: a casa é apagada primeiro, então esta é uma identidade
 /// nova contra um servidor recém-nascido. Voltar usa [`voltar`], que guarda a
 /// chave.
-async fn entrar(endereco: SocketAddr, apelido: &str) -> Result<Arc<Plug>> {
+async fn entrar(endereco: SocketAddr, apelido: &str) -> Result<Arc<Connection>> {
     let _ = nascer(apelido);
     voltar(endereco, apelido).await
 }
 
 /// Reconecta com a **mesma** identidade.
-async fn voltar(endereco: SocketAddr, apelido: &str) -> Result<Arc<Plug>> {
+async fn voltar(endereco: SocketAddr, apelido: &str) -> Result<Arc<Connection>> {
     let apelido = apelido.to_owned();
     Ok(tokio::task::spawn_blocking(move || conectar(endereco, &apelido)).await??)
 }
 
 /// Espera até o snapshot dizer o que o teste quer, ou desistir.
-fn ate<F: Fn(&Plug) -> bool>(plug: &Plug, pronto: F) -> bool {
+fn ate<F: Fn(&Connection) -> bool>(connection: &Connection, pronto: F) -> bool {
     let fim = Instant::now() + PRAZO;
     while Instant::now() < fim {
-        if pronto(plug) {
+        if pronto(connection) {
             return true;
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    pronto(plug)
+    pronto(connection)
 }
 
 /// Quantas pessoas o snapshot desenha num voice room.
-fn sentados(plug: &Plug, voice_room: u32) -> usize {
-    plug.snapshot()
+fn sentados(connection: &Connection, voice_room: u32) -> usize {
+    connection.snapshot()
         .voice_rooms
         .iter()
         .find(|desenhado| desenhado.id == voice_room)
@@ -144,8 +144,8 @@ fn sentados(plug: &Plug, voice_room: u32) -> usize {
 }
 
 /// O último aviso que a tela mostraria.
-fn aviso(plug: &Plug) -> Option<NoticeReason> {
-    plug.snapshot().notice.map(|notice| notice.reason)
+fn aviso(connection: &Connection) -> Option<NoticeReason> {
+    connection.snapshot().notice.map(|notice| notice.reason)
 }
 
 /// Conta as recusas, em vez de olhar a última.
@@ -200,13 +200,13 @@ async fn um_pessoa_comum_e_recusado_pelo_server_e_nao_pela_casca() -> Result<()>
 
     // O anfitrião conecta primeiro e vira Comandante. Aqui ele é a vítima e a
     // testemunha ao mesmo tempo: se qualquer verbo tivesse passado, a sessão
-    // dele acabaria, ou o plug dele mudaria de sala.
+    // dele acabaria, ou o connection dele mudaria de sala.
     let anfitriao = entrar(endereco, "anfitriao-recusa").await?;
     anfitriao.insert_plug(VOICE_ROOM)?;
     anfitriao.open_channel(LINE)?;
     anfitriao.send_message(LINE, "verificando harmônicos".into())?;
     assert!(
-        ate(&anfitriao, |plug| !plug.messages().is_empty()),
+        ate(&anfitriao, |connection| !connection.messages().is_empty()),
         "a mensagem do anfitrião não chegou; não há o que tentar apagar"
     );
     let alvo = anfitriao.snapshot().me.expect("o anfitrião tem identidade");
@@ -262,7 +262,7 @@ async fn um_pessoa_comum_e_recusado_pelo_server_e_nao_pela_casca() -> Result<()>
             .voice_rooms
             .iter()
             .any(|voice_room| voice_room.id == VOICE_ROOM && voice_room.occupied_by_us),
-        "o plug do Comandante saiu da sala de voz por conta de um pedido recusado"
+        "o connection do Comandante saiu da sala de voz por conta de um pedido recusado"
     );
     assert_eq!(
         anfitriao.messages().len(),
@@ -295,7 +295,7 @@ async fn expulsar_acaba_com_a_sessao_e_deixa_voltar() -> Result<()> {
     visita.insert_plug(VOICE_ROOM)?;
     let quem = visita.snapshot().me.expect("a visita tem identidade");
     assert!(
-        ate(&anfitriao, |plug| sentados(plug, VOICE_ROOM) == 1),
+        ate(&anfitriao, |connection| sentados(connection, VOICE_ROOM) == 1),
         "a visita não chegou a sentar; expulsar não mede nada"
     );
 
@@ -304,7 +304,7 @@ async fn expulsar_acaba_com_a_sessao_e_deixa_voltar() -> Result<()> {
     // Um: a sessão acaba, e **com o motivo enumerado**. Uma queda sem motivo
     // manda a pessoa procurar problema de rede.
     assert!(
-        ate(&visita, |plug| plug.snapshot().ended.is_some()),
+        ate(&visita, |connection| connection.snapshot().ended.is_some()),
         "a sessão da visita continuou de pé depois da expulsão"
     );
     assert_eq!(
@@ -315,7 +315,7 @@ async fn expulsar_acaba_com_a_sessao_e_deixa_voltar() -> Result<()> {
 
     // Dois: a sala esvazia para quem ficou.
     assert!(
-        ate(&anfitriao, |plug| sentados(plug, VOICE_ROOM) == 0),
+        ate(&anfitriao, |connection| sentados(connection, VOICE_ROOM) == 0),
         "quem foi expulso continua desenhado na sala de voz"
     );
 
@@ -350,7 +350,7 @@ async fn banir_acaba_com_a_sessao_e_impede_de_voltar() -> Result<()> {
     anfitriao.ban_person(quem, Some("inundou a Linha".into()), None)?;
 
     assert!(
-        ate(&visita, |plug| plug.snapshot().ended.is_some()),
+        ate(&visita, |connection| connection.snapshot().ended.is_some()),
         "a sessão de quem foi banido continuou de pé"
     );
     assert_eq!(
@@ -384,7 +384,7 @@ async fn apagar_uma_mensagem_tira_ela_da_conversa_de_todo_mundo() -> Result<()> 
     visita.send_message(LINE, "isto some".into())?;
 
     assert!(
-        ate(&anfitriao, |plug| plug.messages().len() == 2),
+        ate(&anfitriao, |connection| connection.messages().len() == 2),
         "as duas mensagens não chegaram ao Comandante"
     );
     let some = anfitriao.messages()[1].id;
@@ -396,11 +396,11 @@ async fn apagar_uma_mensagem_tira_ela_da_conversa_de_todo_mundo() -> Result<()> 
     // filtra o que está carimbado, e o `Room::apply` tira a linha da tela. O que
     // a linha sobrevivente serve é a não deixar resposta apontando para o vazio.
     assert!(
-        ate(&anfitriao, |plug| plug.messages().len() == 1),
+        ate(&anfitriao, |connection| connection.messages().len() == 1),
         "a mensagem apagada continua na conversa de quem apagou"
     );
     assert!(
-        ate(&visita, |plug| plug.messages().len() == 1),
+        ate(&visita, |connection| connection.messages().len() == 1),
         "a mensagem apagada continua na conversa de quem a escreveu"
     );
     assert_eq!(anfitriao.messages()[0].body, "padrão azul");
@@ -416,12 +416,12 @@ async fn apagar_uma_mensagem_tira_ela_da_conversa_de_todo_mundo() -> Result<()> 
     let propria = visita.messages()[0].id;
     visita.remove_message(propria)?;
     assert!(
-        ate(&visita, |plug| plug.messages().is_empty()),
+        ate(&visita, |connection| connection.messages().is_empty()),
         "o autor não conseguiu apagar a própria mensagem: {:?}",
         aviso(&visita)
     );
     assert!(
-        ate(&anfitriao, |plug| plug.messages().is_empty()),
+        ate(&anfitriao, |connection| connection.messages().is_empty()),
         "a remoção pelo autor não chegou a quem estava lendo"
     );
 
@@ -436,7 +436,7 @@ async fn mover_leva_o_plug_e_conta_a_pessoa() -> Result<()> {
     let anfitriao = entrar(endereco, "anfitriao-mover").await?;
     anfitriao.create_voice_room("VOICE_ROOM-02 SALA DOS FUNDOS".into(), 8, None)?;
     assert!(
-        ate(&anfitriao, |plug| plug.snapshot().voice_rooms.len() == 2),
+        ate(&anfitriao, |connection| connection.snapshot().voice_rooms.len() == 2),
         "o segundo sala de voz não foi feito, e não há para onde mover ninguém"
     );
     let destino = anfitriao.snapshot().voice_rooms[1].id;
@@ -445,7 +445,7 @@ async fn mover_leva_o_plug_e_conta_a_pessoa() -> Result<()> {
     visita.insert_plug(VOICE_ROOM)?;
     let quem = visita.snapshot().me.expect("a visita tem identidade");
     assert!(
-        ate(&visita, |plug| plug
+        ate(&visita, |connection| connection
             .snapshot()
             .voice_rooms
             .iter()
@@ -455,10 +455,10 @@ async fn mover_leva_o_plug_e_conta_a_pessoa() -> Result<()> {
 
     anfitriao.move_person(quem, destino)?;
 
-    // Um: o plug muda de sala do lado de quem foi movido. Sem isto a pessoa
+    // Um: o connection muda de sala do lado de quem foi movido. Sem isto a pessoa
     // continuaria mandando voz para a sala que ela acha que ainda é a dela.
     assert!(
-        ate(&visita, |plug| plug
+        ate(&visita, |connection| connection
             .snapshot()
             .voice_rooms
             .iter()
@@ -471,13 +471,13 @@ async fn mover_leva_o_plug_e_conta_a_pessoa() -> Result<()> {
             .voice_rooms
             .iter()
             .any(|voice_room| voice_room.id == VOICE_ROOM && voice_room.occupied_by_us),
-        "o plug ficou nos dois voice_rooms ao mesmo tempo"
+        "o connection ficou nos dois voice_rooms ao mesmo tempo"
     );
 
     // Dois: a pessoa é **contada**. Ser movido em silêncio é indistinguível de
     // um cliente que se perdeu de onde estava.
     assert!(
-        ate(&visita, |plug| aviso(plug)
+        ate(&visita, |connection| aviso(connection)
             == Some(NoticeReason::MovedByOperator)),
         "quem foi movido não recebeu aviso nenhum: {:?}",
         aviso(&visita)
@@ -486,8 +486,8 @@ async fn mover_leva_o_plug_e_conta_a_pessoa() -> Result<()> {
     // Três: todo mundo vê. Para quem assiste, um movimento é uma saída e uma
     // entrada, que é o que o roster já sabe desenhar.
     assert!(
-        ate(&anfitriao, |plug| sentados(plug, destino) == 1
-            && sentados(plug, VOICE_ROOM) == 0),
+        ate(&anfitriao, |connection| sentados(connection, destino) == 1
+            && sentados(connection, VOICE_ROOM) == 0),
         "quem assiste vê a visita em {:?}",
         anfitriao
             .snapshot()
@@ -531,7 +531,7 @@ async fn um_operador_modera_pessoas_e_nao_o_comandante() -> Result<()> {
     let alguem = visita.snapshot().me.expect("identidade");
     operador.kick_person(alguem)?;
     assert!(
-        ate(&visita, |plug| plug.snapshot().ended
+        ate(&visita, |connection| connection.snapshot().ended
             == Some(EndReason::Kicked)),
         "o Operador não conseguiu expulsar um Pessoa comum"
     );
@@ -543,7 +543,7 @@ async fn um_operador_modera_pessoas_e_nao_o_comandante() -> Result<()> {
     // deve ter.
     operador.ban_person(comandante, None, None)?;
     assert!(
-        ate(&operador, |plug| aviso(plug)
+        ate(&operador, |connection| aviso(connection)
             == Some(NoticeReason::PermissionDenied)),
         "o servidor deixou o Operador banir o Comandante em silêncio"
     );

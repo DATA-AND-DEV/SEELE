@@ -1,4 +1,4 @@
-// SEELE · Entry Plug — o Terminal server (`#tela-server`).
+// SEELE — o Terminal server (`#tela-server`).
 //
 // A configuração local: o que é desta máquina e não deste servidor. Quatro seções —
 // ÁUDIO, ATALHOS, IDENTIDADE e ATUALIZAÇÃO. As três primeiras são a forma do

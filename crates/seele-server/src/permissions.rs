@@ -102,7 +102,7 @@ fn parse_permissions(json: &str) -> Vec<Permission> {
 fn name_to_permission(name: &str) -> Option<Permission> {
     Some(match name {
         "ViewVoiceRoom" => Permission::ViewVoiceRoom,
-        "InsertPlug" => Permission::InsertPlug,
+        "EnterVoiceRoom" => Permission::EnterVoiceRoom,
         "Speak" => Permission::Speak,
         "ReadChannel" => Permission::ReadChannel,
         "WriteChannel" => Permission::WriteChannel,
@@ -475,7 +475,7 @@ impl<'a> Permissions<'a> {
     pub fn permissions(&self, person: PersonId) -> Result<Vec<Permission>> {
         let all = [
             Permission::ViewVoiceRoom,
-            Permission::InsertPlug,
+            Permission::EnterVoiceRoom,
             Permission::Speak,
             Permission::ReadChannel,
             Permission::WriteChannel,
@@ -576,7 +576,7 @@ mod tests {
     /// Every permission `specs/04-servidor-seele.md` enumerates.
     const ALL: &[Permission] = &[
         Permission::ViewVoiceRoom,
-        Permission::InsertPlug,
+        Permission::EnterVoiceRoom,
         Permission::Speak,
         Permission::ReadChannel,
         Permission::WriteChannel,
@@ -855,7 +855,7 @@ mod tests {
 
         let allowed = [
             Permission::ViewVoiceRoom,
-            Permission::InsertPlug,
+            Permission::EnterVoiceRoom,
             Permission::ReadChannel,
         ];
         for permission in ALL {

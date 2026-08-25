@@ -2,7 +2,7 @@
 
 > **Nota — 2026-08-21, ADR 0033.** A **camada de linguagem deste documento foi
 > retirada da interface.** O vocabulário abaixo — Server Central, VoiceRoom, Linha,
-> Pessoa, inserir plug, ejetar, A.T. Field, Taxa de Sincronização, PADRÃO: AZUL,
+> Pessoa, inserir connection, ejetar, A.T. Field, Taxa de Sincronização, PADRÃO: AZUL,
 > e o japonês decorativo — **não é mais o que aparece na tela**. A autoridade
 > sobre a palavra que a pessoa lê passou a ser `docs/glossario.md`.
 >
@@ -31,11 +31,11 @@ Estes termos são obrigatórios e consistentes em toda a superfície do produto.
 |---|---|---|
 | Instância de servidor | **Server Central** | Plural: Servers |
 | Daemon | **seeled** | |
-| Cliente | **Entry Plug** / `plug` | |
+| Cliente | **SEELE** / `connection` | |
 | Canal de voz | **VoiceRoom** | |
 | Canal de texto | **Linha** | |
 | Usuário | **Pessoa** | |
-| Entrar em canal de voz | **Inserir plug** | |
+| Entrar em canal de voz | **Inserir connection** | |
 | Sair | **Ejetar** | |
 | Qualidade de conexão | **Taxa de Sincronização** | 0–100%, ver `02` |
 | Latência | **Atraso de sinal** | ms |
@@ -75,7 +75,7 @@ Valores definitivos saem do trabalho no Claude Design; estas são as **restriç�
 
 Faixas da Taxa de Sincronização: **≥ 85** nominal (fósforo) · **60–84** degradado (laranja NERV) · **< 60** crítico (vermelho).
 
-Eram quatro — `≥ 90` nominal, `70–89` aceitável em off-white, `40–69` degradado, `< 40` crítico. O comp v2 (`design/Entry Plug v2.dc.html`) banda o mesmo número em três, corta em 85 e 60, e **não usa osso em escala de sincronia nenhuma**; o comp é posterior a esta tabela e o dono decidiu que ele vence. A consequência que importa: 80 lia-se como "fora do nominal, mas tudo bem" e agora se lê como degradado — laranja, a cor de ir olhar. É o objetivo da mudança, não um efeito colateral dela.
+Eram quatro — `≥ 90` nominal, `70–89` aceitável em off-white, `40–69` degradado, `< 40` crítico. O comp v2 (`design/SEELE v2.dc.html`) banda o mesmo número em três, corta em 85 e 60, e **não usa osso em escala de sincronia nenhuma**; o comp é posterior a esta tabela e o dono decidiu que ele vence. A consequência que importa: 80 lia-se como "fora do nominal, mas tudo bem" e agora se lê como degradado — laranja, a cor de ir olhar. É o objetivo da mudança, não um efeito colateral dela.
 
 ## Tipografia
 
@@ -94,7 +94,7 @@ Nenhuma animação pode atrasar o usuário. Se a conexão fecha em 200 ms, o boo
 Operacional, fria, factual. A interface **reporta**; não pede desculpa, não é simpática, não usa primeira pessoa.
 
 - Certo: `PADRÃO AZUL NÃO ESTABELECIDO · credencial rejeitada`
-- Certo: `VOICE_ROOM-02 vazio. Insira o plug para iniciar.`
+- Certo: `VOICE_ROOM-02 vazio. Insira o connection para iniciar.`
 - Errado: `Ops! Não conseguimos te conectar 😥`
 - Errado: `Nenhuma mensagem ainda!`
 

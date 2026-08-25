@@ -1,4 +1,4 @@
-# 05 — Cliente TUI (`plug`)
+# 05 — Cliente TUI (`connection`)
 
 O produto principal. Tudo o mais imita esta interface.
 
@@ -41,7 +41,7 @@ Atalhos essenciais no modo Normal:
 ```
 h j k l / setas   navegar
 Tab / Shift+Tab   alternar painel, adiante e para trás
-Enter             inserir plug no VoiceRoom / abrir Linha
+Enter             inserir connection no VoiceRoom / abrir Linha
 i                 escrever mensagem
 Espaço (hold)     push-to-talk
 m                 alternar A.T. Field (mudo)
@@ -83,19 +83,19 @@ Tecla dedicada configurável não resolveria: o problema não é *qual* tecla, �
 
 ### A tela de conexão não é o sétimo
 
-Os seis acima descrevem uma **sessão**. `plug` sem argumento nenhum abre antes
+Os seis acima descrevem uma **sessão**. `connection` sem argumento nenhum abre antes
 disso uma tela de conexão — Servers visitados, endereço novo, colar convite,
 hospedar aqui — que não tem roster, telemetria nem Taxa de Sincronização.
 Encaixá-la no mesmo enum custaria campos vazios nos outros seis, então ela vive
 fora, em `seele-tui::selecao`, e some quando a conexão começa.
 
-**Qualquer flag pula a tela.** `plug --server casa:8383` conecta direto, sem
+**Qualquer flag pula a tela.** `connection --server casa:8383` conecta direto, sem
 uma tecla no caminho. Um menu obrigatório entre a intenção e o resultado é o
 oposto do que este cliente promete a quem já sabe o que quer.
 
 A flag pula a tela na **entrada**, e só. Um `--server` que não responde não
 imprime o motivo e devolve o terminal: ele mostra o motivo, e depois a tela de
-conexão, onde espera por alguém. Quem chama `plug` de dentro de um script tem
+conexão, onde espera por alguém. Quem chama `connection` de dentro de um script tem
 de contar com isso — é um programa interativo do começo ao fim, e não um
 comando que termina sozinho quando dá errado.
 
@@ -124,7 +124,7 @@ pedido; perder a conexão não é.
 
 ### Hospedar sem daemon
 
-`plug --hospedar` sobe um servidor dentro do próprio processo e entra nele; o link
+`connection --hospedar` sobe um servidor dentro do próprio processo e entra nele; o link
 de convite aparece de saída numa sobreposição de largura inteira, e `:convite`
 o traz de volta. Não substitui o `seeled`: este servidor morre quando o cliente
 fecha, que é o certo para "estou hospedando uma conversa" e errado para

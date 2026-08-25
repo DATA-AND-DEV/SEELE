@@ -245,7 +245,7 @@ function mostrarEtapa(frase) {
 //
 // Chegam pelo mesmo canal de sempre, e são o único evento da lista que existe
 // **antes** de haver sessão: a FFI recebe a ponte antes de bloquear no aperto
-// de mão (`Plug::connect_watching`). Sem isto o spinner desta tela era mudo, e
+// de mão (`Connection::connect_watching`). Sem isto o spinner desta tela era mudo, e
 // quando o teste de campo das duas casas falhou ninguém soube dizer em que
 // ponto — quatro candidatos eram tentados em série atrás dos três blocos.
 listen("seele://event", (evento) => {

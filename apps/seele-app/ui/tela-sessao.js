@@ -1,4 +1,4 @@
-// SEELE · Entry Plug — a tela de operação (`#tela-sessao`).
+// SEELE — a tela de operação (`#tela-sessao`).
 //
 // O projetor: cada `desenhar*` recebe o snapshot inteiro e escreve a tela, sem
 // estado derivado. Também a busca, a faixa de veredito, a bateria interna, o
@@ -7,7 +7,7 @@
 //
 // ---- o que esta tela desenha, e o que ela recusa a desenhar ----
 //
-// A composição é a do comp **v3** (`design/Entry Plug v3.dc.html`, tela
+// A composição é a do comp **v3** (`design/SEELE v3.dc.html`, tela
 // `principal`), inventariada em `.superpowers/sdd/comp-inventario-v3.md` §6.
 // Quatro colunas — a trilha de servidores, as salas e os canais, o canal
 // aberto, a faixa de pessoas — em `60px 268px minmax(0,1fr) 328px`.
@@ -36,7 +36,7 @@
 // cujo nome é a frase inteira — uma taxa não medida lê zero, e não cem.
 //
 // Ela continua valendo onde a ausência **responde** a uma pergunta que a tela
-// acabou de fazer: a média sem plug inserido, a barra da bateria, as três
+// acabou de fazer: a média sem connection inserido, a barra da bateria, as três
 // células do alerta. E ela foi invertida onde a ausência se repetia por
 // fileira — pendências por Linha, subsistema por pessoa, atraso por pessoa —,
 // porque meia dúzia de travessões explicados numa tela que existe para ser
@@ -289,16 +289,16 @@ function desenhar(snapshot) {
  */
 function desenharTopo(snapshot) {
   const padrao = $("padrao");
-  padrao.dataset.padrao = snapshot.pattern;
+  padrao.dataset.padrao = snapshot.link_state;
   // O rótulo diz o estado da conexão em palavras; o `data-padrao` continua
   // sendo o nome do enum, que é por onde a folha escolhe a cor. As três frases
-  // são as três do `Pattern` de `client.rs` — desligado, conectado sem
+  // são as três do `Trust` de `client.rs` — desligado, conectado sem
   // verificar, verificado — e nenhuma delas é a cor que a antiga nomeava.
   padrao.textContent = {
     Offline: "SEM CONEXÃO",
-    Orange: "CONEXÃO NÃO VERIFICADA",
-    Blue: "CONEXÃO SEGURA",
-  }[snapshot.pattern];
+    Unverified: "CONEXÃO NÃO VERIFICADA",
+    Verified: "CONEXÃO SEGURA",
+  }[snapshot.link_state];
 
   $("topo-pessoa").textContent = snapshot.nickname;
 
@@ -364,7 +364,7 @@ function sigla(nome) {
  *
  * O histórico guarda endereço, apelido, último canal e data — e **não** o nome
  * que o servidor anuncia (`crates/seele-core/src/conhecidos.rs`: quatro
- * colunas, num arquivo dividido com o `plug`). Então a coluna de 60px abrevia o
+ * colunas, num arquivo dividido com o `connection`). Então a coluna de 60px abrevia o
  * que existe, que é o endereço.
  *
  * `sigla` não serve aqui e o motivo é concreto: a primeira letra de cada corrida
@@ -687,7 +687,7 @@ function linhaDeQuemEstaDentro(pessoa, snapshot) {
   item.append(glifo(pessoa.speaking ? "falando" : "silencio"));
   item.append(elemento("span", "voice_room-pessoa-nome", pessoa.nickname));
   if (pessoa.is_self) item.append(elemento("span", "voice_room-pessoa-eu", "(você)"));
-  if (pessoa.at_field) {
+  if (pessoa.muted) {
     item.append(elemento("span", "voice_room-pessoa-marca", "mudo"));
   } else if (pessoa.speaking) {
     item.append(elemento("span", "voice_room-pessoa-marca", "fala"));
@@ -714,8 +714,8 @@ function desenharOperador(snapshot) {
   // fazer. Um botão escrito com o verbo é um botão que ninguém sabe ler quando
   // volta a olhar para a tela.
   const mudo = $("botao-mudo");
-  mudo.textContent = snapshot.at_field ? "MICROFONE FECHADO" : "MICROFONE ABERTO";
-  mudo.dataset.ativo = snapshot.at_field ? "sim" : "nao";
+  mudo.textContent = snapshot.muted ? "MICROFONE FECHADO" : "MICROFONE ABERTO";
+  mudo.dataset.ativo = snapshot.muted ? "sim" : "nao";
 
   const surdo = $("botao-surdo");
   surdo.textContent = snapshot.total_isolation ? "ISOLAMENTO TOTAL" : "OUVINDO";
@@ -1086,10 +1086,10 @@ function desenharPessoas(snapshot) {
           linhaDoRoster(
             {
               nome: pessoa.nickname + (pessoa.is_self ? " (você)" : ""),
-              ratio: pessoa.sync_ratio,
+              ratio: pessoa.signal,
               faixa: pessoa.sync_band,
               falando: pessoa.speaking,
-              atField: pessoa.at_field,
+              atField: pessoa.muted,
               isolado: pessoa.total_isolation,
               // O deslizante é dos outros: baixar o próprio volume não faz
               // nada, porque a própria voz nunca entra na mistura
@@ -1114,10 +1114,10 @@ function desenharPessoas(snapshot) {
         linhaDoRoster(
           {
             nome: `${snapshot.nickname} (você)`,
-            ratio: snapshot.telemetry.sync_ratio,
+            ratio: snapshot.telemetry.signal,
             faixa: snapshot.telemetry.sync_band,
             falando: snapshot.speaking,
-            atField: snapshot.at_field,
+            atField: snapshot.muted,
             isolado: snapshot.total_isolation,
             volume: null,
           },
@@ -1163,7 +1163,7 @@ function desenharPessoas(snapshot) {
               ratio: null,
               faixa: null,
               falando: false,
-              atField: pessoa.at_field,
+              atField: pessoa.muted,
               isolado: pessoa.total_isolation,
               volume: null,
             },
@@ -1279,7 +1279,7 @@ function linhaDoRoster(pessoa, temAudio) {
   if (medido) {
     numero.append(
       elemento("span", "sync-marca", marcaSync(pessoa.faixa)),
-      // Inteiro, e não `98.4`: `sync_ratio` é `u8` em todo ponto onde existe, e
+      // Inteiro, e não `98.4`: `signal` é `u8` em todo ponto onde existe, e
       // uma casa decimal aqui seria precisão inventada no último passo.
       elemento("span", "pessoa-sync-valor", String(pessoa.ratio)),
     );
@@ -2110,7 +2110,7 @@ async function pedirAEntrada() {
  * Troca de servidor: sai deste e entra naquele.
  *
  * Desconectar-e-conectar, nesta ordem, porque é o que o produto tem: `Session`
- * guarda **um** `Plug` e `connect` devolve `AlreadyConnected` enquanto houver
+ * guarda **um** `Connection` e `connect` devolve `AlreadyConnected` enquanto houver
  * um. Não há troca atômica a inventar aqui — a troca *é* isto.
  *
  * E ela passa pela tela de entrada de propósito, em vez de conectar por baixo
@@ -2314,7 +2314,7 @@ function soltarCasamentos() {
  *
  * Obrigatório sempre que a lista desenhada mudar de forma — abrir outra Linha,
  * entrar ou sair de um VoiceRoom, uma mensagem editada ou apagada. Ao contrário do
- * `plug`, que recalcula o realce a partir do termo a cada desenho
+ * `connection`, que recalcula o realce a partir do termo a cada desenho
  * (`seele-tui::ui`) e só guarda o cursor, esta janela guarda os deslocamentos
  * que vieram do Rust; sem um ponto de invalidação eles passariam a acender
  * trechos de mensagens que não são mais aquelas, com `[n/m]` contando uma
@@ -2569,7 +2569,7 @@ $("veredito-fechar").addEventListener("click", () => ($("veredito").hidden = tru
 
 $("botao-mudo").addEventListener("click", async () => {
   const snapshot = await invoke("snapshot");
-  await invoke("set_at_field", { on: !snapshot.at_field });
+  await invoke("set_at_field", { on: !snapshot.muted });
   await atualizar();
 });
 
@@ -2661,7 +2661,7 @@ window.addEventListener("keydown", (evento) => {
       return;
     }
     if (evento.key === "Enter") {
-      // Enter anda; Shift+Enter volta — o `n`/`N` do `plug`, no teclado que
+      // Enter anda; Shift+Enter volta — o `n`/`N` do `connection`, no teclado que
       // esta janela tem.
       evento.preventDefault();
       invoke("busca_andar", { adiante: !evento.shiftKey }).then(desenharBusca);

@@ -473,7 +473,7 @@ decodificação, porque um par hostil monta o frame na mão e pula o encoder:
 
 - `rtt_ms` e `jitter_ms`: finitos, entre 0 e 10 000 ms
 - `loss_fraction`: finito, entre 0 e 1
-- `sync_ratio`: `u8` cabe 255, mas `02` define escala 0–100
+- `signal`: `u8` cabe 255, mas `02` define escala 0–100
 
 Seis testes cobrem cada caso, incluindo o do par hostil.
 
@@ -504,7 +504,7 @@ segunda máquina, que é por que `seele-server` é biblioteca além de binário.
 | `three_clients_in_one_voice_room_hear_each_other` | o critério principal, com payload byte a byte idêntico e sem eco de volta ao falante |
 | `a_client_without_permission_is_refused` | Observador entra e ouve, mas não é encaminhado |
 | `a_forged_ssrc_is_refused` | lacuna G2: Shinji com o `ssrc` de Ayanami é recusado, e o dele próprio continua passando |
-| `media_before_entering_a_voice_room_goes_nowhere` | conexão autenticada mas sem plug inserido não alcança o VoiceRoom |
+| `media_before_entering_a_voice_room_goes_nowhere` | conexão autenticada mas sem connection inserido não alcança o VoiceRoom |
 | `the_first_connection_pins_the_certificate` | TOFU do ADR 0003 |
 | `a_second_connection_reuses_the_pin` | o pin persiste entre conexões |
 | `a_ping_comes_back_as_a_pong` | base do RTT da Taxa de Sincronização |

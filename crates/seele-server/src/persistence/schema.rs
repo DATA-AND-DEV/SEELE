@@ -446,6 +446,17 @@ pub const MIGRATIONS: &[Migration] = &[
             UPDATE roles SET denials     = replace(denials,     'WriteLine', 'WriteChannel');
         "#,
     },
+    Migration {
+        version: 9,
+        description: "vocabulário: InsertPlug vira EnterVoiceRoom na permissão gravada",
+        sql: r#"
+            -- «Inserir plug» era como se entrava numa sala de voz, e o plug de
+            -- entrada é o objeto de Evangelion que o ADR 0034 já tirou da marca.
+            -- Última aparição do vocabulário em dado gravado.
+            UPDATE roles SET permissions = replace(permissions, 'InsertPlug', 'EnterVoiceRoom');
+            UPDATE roles SET denials     = replace(denials,     'InsertPlug', 'EnterVoiceRoom');
+        "#,
+    },
 ];
 
 #[cfg(test)]

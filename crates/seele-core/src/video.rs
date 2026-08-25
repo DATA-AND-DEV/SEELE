@@ -46,7 +46,7 @@ use seele_video::{BibliotecaDeVideo, ErroDeVideo};
 use thiserror::Error;
 
 use crate::tela::{menor_resolucao, MotivoDeParada, Teto, TetoDeVideo};
-use seele_proto::sync_ratio::SyncBand;
+use seele_proto::signal::SignalBand;
 
 /// De onde os quadros vêm.
 ///
@@ -722,7 +722,7 @@ impl Compartilhamento {
     pub fn abrir(
         biblioteca: BibliotecaDeVideo,
         teto_de_video: &TetoDeVideo,
-        faixa: SyncBand,
+        faixa: SignalBand,
         escolha_de_resolucao: Resolucao,
         cadencia: Cadencia,
     ) -> Result<Self, ErroDeCompartilhamento> {
@@ -802,7 +802,7 @@ impl Compartilhamento {
     pub fn ajustar(
         &mut self,
         teto_de_video: &TetoDeVideo,
-        faixa: SyncBand,
+        faixa: SignalBand,
     ) -> Result<Ajuste, ErroDeCompartilhamento> {
         let novo = teto_de_video.teto(faixa);
         self.teto = novo;
@@ -1021,7 +1021,7 @@ mod tests {
         let mut compartilhamento = Compartilhamento::abrir(
             biblioteca,
             &sozinho,
-            SyncBand::Nominal,
+            SignalBand::Nominal,
             Resolucao::P1080,
             Cadencia::Q30,
         )
@@ -1033,7 +1033,7 @@ mod tests {
         let a_dois = sozinho.com_espectadores(2);
         assert_eq!(
             compartilhamento
-                .ajustar(&a_dois, SyncBand::Nominal)
+                .ajustar(&a_dois, SignalBand::Nominal)
                 .expect("baixar a banda do codificador"),
             Ajuste::TetoNovo {
                 teto_bps: 1_800_000
@@ -1046,7 +1046,7 @@ mod tests {
         let a_tres = sozinho.com_espectadores(3);
         assert_eq!(
             compartilhamento
-                .ajustar(&a_tres, SyncBand::Nominal)
+                .ajustar(&a_tres, SignalBand::Nominal)
                 .expect("baixar a banda do codificador"),
             Ajuste::ResolucaoPedida {
                 de: Resolucao::P1080,
@@ -1084,7 +1084,7 @@ mod tests {
         let mut compartilhamento = Compartilhamento::abrir(
             biblioteca,
             &teto,
-            SyncBand::Nominal,
+            SignalBand::Nominal,
             Resolucao::P720,
             Cadencia::Q30,
         )
@@ -1129,7 +1129,7 @@ mod tests {
         let erro = Compartilhamento::abrir(
             biblioteca,
             &teto,
-            SyncBand::Nominal,
+            SignalBand::Nominal,
             Resolucao::P720,
             Cadencia::Q30,
         )

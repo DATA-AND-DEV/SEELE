@@ -1,4 +1,4 @@
-// SEELE · Entry Plug — compartilhar a tela (`#compartilhar`).
+// SEELE — compartilhar a tela (`#compartilhar`).
 //
 // A caixa que escolhe **o que** sai desta máquina e **até onde** ele sobe. Ela
 // não desenha o que está saindo: isso é do palco, em `tela-chamada.js`, e a
@@ -345,7 +345,7 @@ function mostrarErroDeTela(falha) {
  * Os três tetos, como o Rust os recebe.
  *
  * Nomes de campo em `snake_case` porque é assim que `LimitesDeTela` atravessa —
- * o mesmo acordo de `at_field` e `sync_band` no snapshot. Banda vazia é `null`
+ * o mesmo acordo de `muted` e `sync_band` no snapshot. Banda vazia é `null`
  * e não zero: zero seria um teto de zero bit por segundo, que é o contrário de
  * «sem teto meu».
  */

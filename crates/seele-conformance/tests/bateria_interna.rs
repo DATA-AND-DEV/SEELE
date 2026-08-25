@@ -162,7 +162,7 @@ async fn o_que_a_pessoa_escolheu_volta_com_ela() -> Result<()> {
     .await?;
     enlace.inserir_plug(VoiceRoomId(VOICE_ROOM)).await?;
     enlace.abrir_linha(ChannelId(LINE)).await?;
-    enlace.at_field(true).await?;
+    enlace.muted(true).await?;
 
     servidor.shutdown();
     servidor.wait_idle().await;

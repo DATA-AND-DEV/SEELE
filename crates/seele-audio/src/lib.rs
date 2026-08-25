@@ -17,7 +17,7 @@
 //! # Boundary
 //!
 //! This crate emits **plain data** — never formatted text, never colour, never a
-//! `SyncRatio` band. Presentation belongs to the shells (`specs/01-arquitetura.md`).
+//! `Signal` band. Presentation belongs to the shells (`specs/01-arquitetura.md`).
 //! A themed `to_string()` in here is an architecture error, not a detail.
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]

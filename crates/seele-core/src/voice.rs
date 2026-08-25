@@ -95,7 +95,7 @@ impl VoiceMode {
 /// block, and every field is one machine word.
 #[derive(Debug)]
 struct Controls {
-    at_field: AtomicBool,
+    muted: AtomicBool,
     total_isolation: AtomicBool,
     key_held: AtomicBool,
     mode: AtomicU8,
@@ -298,7 +298,7 @@ pub struct DeviceRates {
 /// Opens `chosen`, giving up the preference each failure blames, one at a time.
 ///
 /// The rule this encodes, and the reason it is one function rather than a
-/// pattern each shell repeats: **a preference written down yesterday never
+/// link_state each shell repeats: **a preference written down yesterday never
 /// stops somebody entering today**. A device moves, gets unplugged, or belongs
 /// to a machine the settings file was copied from, and none of those may cost a
 /// person the session.
@@ -447,7 +447,7 @@ impl Voice {
         let playback = io.playback.clone().map(playback_into_core);
 
         let controls = Arc::new(Controls {
-            at_field: AtomicBool::new(false),
+            muted: AtomicBool::new(false),
             total_isolation: AtomicBool::new(false),
             key_held: AtomicBool::new(false),
             // specs/03-audio.md makes push-to-talk the default because it never
@@ -635,7 +635,7 @@ impl Voice {
 
     /// Puts this path's controls onto a freshly opened one.
     fn carry_over(&self, fresh: &Self) {
-        fresh.set_at_field(self.at_field());
+        fresh.set_at_field(self.muted());
         fresh.set_total_isolation(self.total_isolation());
         fresh.set_mode(self.mode());
         fresh.set_key_held(self.controls.key_held.load(Ordering::Relaxed));
@@ -690,13 +690,13 @@ impl Voice {
 
     /// Mutes the microphone — A.T. Field.
     pub fn set_at_field(&self, on: bool) {
-        self.controls.at_field.store(on, Ordering::Relaxed);
+        self.controls.muted.store(on, Ordering::Relaxed);
     }
 
     /// Whether the microphone is muted.
     #[must_use]
-    pub fn at_field(&self) -> bool {
-        self.controls.at_field.load(Ordering::Relaxed)
+    pub fn muted(&self) -> bool {
+        self.controls.muted.load(Ordering::Relaxed)
     }
 
     /// Mutes the speakers — Isolamento total.
@@ -948,14 +948,14 @@ async fn pipeline(
             pending.extend_from_slice(&at_48k);
         }
 
-        let at_field = controls.at_field.load(Ordering::Relaxed);
+        let muted = controls.muted.load(Ordering::Relaxed);
         while pending.len() >= FRAME_SAMPLES {
             let frame: Vec<f32> = pending.drain(..FRAME_SAMPLES).collect();
             // The gate still runs while muted, so the level meter keeps moving
             // and somebody talking into a muted microphone can see that they
             // are. Not showing that is how people give whole speeches to nobody.
             let open = gate.update(&frame);
-            let speaking = open && !at_field;
+            let speaking = open && !muted;
             controls.speaking.store(speaking, Ordering::Relaxed);
 
             // The timestamp counts elapsed samples whether or not anything goes

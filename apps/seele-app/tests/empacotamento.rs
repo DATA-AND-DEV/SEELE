@@ -1,6 +1,6 @@
 //! O que é do empacotamento não pode virar exigência de quem só compila.
 //!
-//! `plug` e `seeled` viajam **dentro** do instalador do app, e o Tauri chama
+//! O `seeled` viaja **dentro** do instalador do app, e o Tauri chama
 //! isso de `externalBin`. A tentação é declarar isso no `tauri.conf.json`, e foi
 //! o que eu fiz: o CI dos três sistemas quebrou na hora, porque o build script
 //! do Tauri lê `externalBin` em **toda** compilação e exige os arquivos. Um

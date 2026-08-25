@@ -309,7 +309,7 @@ async fn telemetry_carries_a_sync_ratio() -> Result<()> {
     assert!((0.0..=1.0).contains(&telemetry.loss_fraction));
     assert_eq!(telemetry.subsystems.len(), 3, "PERMISSIONS, MEDIA, PERSISTENCE");
 
-    let ratio = seele_proto::sync_ratio::raw(seele_proto::SyncInputs {
+    let ratio = seele_proto::signal::raw(seele_proto::SyncInputs {
         rtt_ms: telemetry.rtt_ms,
         jitter_ms: telemetry.jitter_ms,
         loss_fraction: telemetry.loss_fraction,

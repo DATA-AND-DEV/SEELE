@@ -1,4 +1,4 @@
-// SEELE · Entry Plug — a tela de chamada (`#tela-chamada`).
+// SEELE — a tela de chamada (`#tela-chamada`).
 //
 // A grade de quem está na sala de voz: um cartão por pessoa, com estado em
 // palavra, sinal e volume; e o monitor da sala à direita. É a tela `chamada` do comp
@@ -6,7 +6,7 @@
 //
 // ---- o que este arquivo não decide ----
 //
-// Nada. A faixa de cada sincronia chega decidida do core (`SyncBand`), quem
+// Nada. A faixa de cada sincronia chega decidida do core (`SignalBand`), quem
 // está falando chega no snapshot, a severidade de um aviso chega decidida, e as
 // quatro ações são quatro `invoke`. Não há limiar, não há média calculada aqui
 // e não há estado derivado de protocolo — a mesma regra que o topo de `base.js`
@@ -465,7 +465,7 @@ function pintarCartao(cartao, pessoa, temAudio) {
   // lida em meio segundo. Quem está surdo e calado tem um estado só a
   // declarar, e é o segundo.
   const pastilhas = cartao.querySelectorAll(".chamada-pastilha");
-  const microfone = pessoa.at_field
+  const microfone = pessoa.muted
     ? "MUDO"
     : pessoa.speaking
       ? "FALANDO"
@@ -474,7 +474,7 @@ function pintarCartao(cartao, pessoa, temAudio) {
         : "OUVINDO";
   pastilhas[0].textContent = microfone;
   pastilhas[0].hidden = microfone === "";
-  pastilhas[0].dataset.estado = pessoa.at_field ? "at" : pessoa.speaking ? "fala" : "escuta";
+  pastilhas[0].dataset.estado = pessoa.muted ? "at" : pessoa.speaking ? "fala" : "escuta";
 
   // O isolamento total não existe no comp e existe no produto. Segunda
   // pastilha, e não uma troca da primeira: estar surdo e estar transmitindo são
@@ -484,11 +484,11 @@ function pintarCartao(cartao, pessoa, temAudio) {
   pastilhas[1].hidden = !pessoa.total_isolation;
 
   cartao.querySelector(".chamada-cartao-marca").textContent = marcaSync(pessoa.sync_band);
-  // Inteiro, e não `98.4`: `sync_ratio` é `u8` em todo ponto onde existe, e a
+  // Inteiro, e não `98.4`: `signal` é `u8` em todo ponto onde existe, e a
   // casa decimal do comp seria precisão inventada no último passo.
-  cartao.querySelector(".chamada-cartao-valor").textContent = String(pessoa.sync_ratio);
+  cartao.querySelector(".chamada-cartao-valor").textContent = String(pessoa.signal);
   cartao.querySelector(".chamada-cartao-barra").textContent = blocos(
-    pessoa.sync_ratio,
+    pessoa.signal,
     BLOCOS_DA_BARRA,
   );
 
@@ -548,11 +548,11 @@ function iniciaisDoCartao(apelido) {
  */
 function fraseDoEstado(pessoa) {
   if (pessoa.total_isolation) {
-    if (pessoa.at_field) return "está com o microfone desligado e não ouve ninguém";
+    if (pessoa.muted) return "está com o microfone desligado e não ouve ninguém";
     if (pessoa.speaking) return "está falando agora, e não ouve ninguém";
     return "não está ouvindo ninguém";
   }
-  if (pessoa.at_field) return "está com o microfone desligado";
+  if (pessoa.muted) return "está com o microfone desligado";
   if (pessoa.speaking) return "está falando agora";
   return "está só ouvindo";
 }
@@ -611,7 +611,7 @@ function desenharAcoesDaChamada(snapshot) {
   // Um rótulo grande que diz o estado é o que fazia alguém apertar o contrário
   // do que queria — lia `MICROFONE LIGADO` e entendia uma promessa.
   const at = $("chamada-at");
-  const calado = Boolean(snapshot?.at_field);
+  const calado = Boolean(snapshot?.muted);
   at.dataset.ativo = calado ? "sim" : "nao";
   at.disabled = !snapshot;
   $("chamada-at-titulo").textContent = calado ? "LIGAR O MICROFONE" : "DESLIGAR O MICROFONE";
@@ -737,7 +737,7 @@ $("chamada-compartilhar").addEventListener("click", () => {
 
 $("chamada-at").addEventListener("click", async () => {
   const snapshot = await invoke("snapshot");
-  const calar = !snapshot.at_field;
+  const calar = !snapshot.muted;
   await invoke("set_at_field", { on: calar });
   registrarEventoDaChamada(
     calar ? "você desligou o seu microfone" : "você ligou o seu microfone",

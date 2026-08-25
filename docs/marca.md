@@ -7,7 +7,7 @@ folha governa a única imagem que o produto tem de si mesmo.
 O **ADR 0033** tirou a camada de linguagem da interface: na tela se lê servidor,
 sala de voz, canal de texto, pessoa. O **ADR 0034** completou o movimento na
 imagem: saíram as duas citações diretas que restavam — o katakana `ゼーレ` e a
-silhueta do plug de entrada — e entrou um símbolo desenhado do zero.
+silhueta do connection de entrada — e entrou um símbolo desenhado do zero.
 
 **Nada disso alcança a estética.** A palheta é a mesma, o ar de terminal é o
 mesmo, o nome continua SEELE. O que mudou é o desenho que diz o nome.
@@ -118,8 +118,8 @@ tamanho gerado sai do arquivo da sua faixa, **nunca** da redução do maior.
 `design/marca/gerar-icones.py` faz a escolha por tabela e
 `apps/seele-app/tests/marca.rs` confere a conta nas duas faixas.
 
-**Eram quatro faixas quando a marca era o plug**, e ter duas agora não é
-afrouxamento: o plug tinha contorno de octógono, cinta e placas de profundidade,
+**Eram quatro faixas quando a marca era o connection**, e ter duas agora não é
+afrouxamento: o connection tinha contorno de octógono, cinta e placas de profundidade,
 e a razão entre eles quebrava em quatro pontos diferentes. O símbolo tem um
 valor de traço só, então há um limiar só.
 
@@ -187,7 +187,7 @@ Não são valores novos: são os mesmos de `apps/seele-app/ui/tokens.css`,
 congelados em M0.12. Um teste confere que a marca não introduz nenhuma cor fora
 dessa lista.
 
-**As seis placas de profundidade saíram da marca com o plug.** Elas eram cor
+**As seis placas de profundidade saíram da marca com o connection.** Elas eram cor
 plana deslocada por trás de um contorno de octógono, para dar volume sem sombra;
 o símbolo de dois nós não tem contorno para deslocar. Os tokens continuam em
 `tokens.css` — tirá-los de lá é decisão de quem cuida da folha de tokens, não
@@ -294,7 +294,7 @@ contorno não existe `letter-spacing`, existe a posição de cada glifo.
 
 `specs/07-tema-evangelion.md` já trata disso e vale aqui inteiro: a estética é
 referência, não material do anime. O ADR 0033 tirou o vocabulário da tela e o
-ADR 0034 tirou as duas últimas citações da imagem — o katakana e o plug. Nenhum
+ADR 0034 tirou as duas últimas citações da imagem — o katakana e o connection. Nenhum
 frame, nenhum logotipo da NERV, nenhum asset de terceiro entra no produto ou no
 repositório. A marca desta folha é desenho original: dois quadrados e uma
 diagonal, mais o nome numa fonte livre.

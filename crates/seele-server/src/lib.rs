@@ -47,7 +47,7 @@ pub mod transfer;
 
 /// O vocabulário de fio de um ponto de encontro, e **só** ele.
 ///
-/// Existe porque quem diagnostica a rede (`plug --rede`, em `seele-tui`) precisa
+/// Existe porque quem diagnostica a rede (`connection --rede`, em `seele-tui`) precisa
 /// escrever e ler estes datagramas, e a regra de dependência do ADR 0002 não
 /// deixa uma casca ver `seele-proto`.
 ///
@@ -511,7 +511,7 @@ impl Daemon {
                     }
                 };
                 let peer = connection.remote_address();
-                tracing::info!(%peer, "pattern orange");
+                tracing::info!(%peer, "link unverified");
 
                 if let Err(error) = session::serve(connection, config, registry, server, voice_rooms).await
                 {

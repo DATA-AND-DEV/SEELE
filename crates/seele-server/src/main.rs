@@ -84,13 +84,13 @@ async fn main() -> Result<()> {
         }
         if let Some(seis) = global {
             println!(
-                "  plug --server [{seis}]:{}   (pela internet, se o",
+                "  connection --server [{seis}]:{}   (pela internet, se o",
                 bound.port()
             );
             println!("                             firewall do roteador deixar entrar)");
         }
         if let Some(lan) = lan {
-            println!("  plug --server {lan}:{}   (na mesma rede)", bound.port());
+            println!("  connection --server {lan}:{}   (na mesma rede)", bound.port());
         }
     }
     println!("certificate fingerprint: {}", server.fingerprint());

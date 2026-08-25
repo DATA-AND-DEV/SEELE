@@ -8,7 +8,7 @@
 //!
 //! O protocolo já tinha prova disso — `seele-server/tests/personalizacao.rs`
 //! mostra o ícone sobrevivendo a um reinício e chegando a quem entra depois. O
-//! que **não** tinha prova é o trecho seguinte: a `Plug` dobra a mensagem, a
+//! que **não** tinha prova é o trecho seguinte: a `Connection` dobra a mensagem, a
 //! revisão anda, e a casca busca os bytes por causa dela. Três peças, e o
 //! defeito relatado cabe em qualquer uma.
 //!
@@ -21,7 +21,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Result;
-use seele_ffi::{ConnectConfig, Plug, PlugError};
+use seele_ffi::{ConnectConfig, Connection, ConnectionError};
 use seele_server::persistence::{Persistence, Location};
 use seele_server::{ServerConfig, Daemon};
 
@@ -89,8 +89,8 @@ async fn server(arquivo: std::path::PathBuf) -> Result<(SocketAddr, Arc<Daemon>)
     Ok((endereco, servidor))
 }
 
-fn conectar(endereco: SocketAddr, casa: &str) -> Result<Arc<Plug>, PlugError> {
-    Plug::connect(ConnectConfig {
+fn conectar(endereco: SocketAddr, casa: &str) -> Result<Arc<Connection>, ConnectionError> {
+    Connection::connect(ConnectConfig {
         server: endereco.to_string(),
         alternate_servers: Vec::new(),
         nickname: "anfitria".to_owned(),
@@ -102,7 +102,7 @@ fn conectar(endereco: SocketAddr, casa: &str) -> Result<Arc<Plug>, PlugError> {
         capture_device: None,
         playback_device: None,
     })
-    .map(|(plug, _confianca)| plug)
+    .map(|(connection, _confianca)| connection)
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -122,7 +122,7 @@ async fn quem_conecta_recebe_o_icone_que_o_server_ja_tinha() -> Result<()> {
 
     let (endereco, servidor) = server(banco).await?;
     let casa = pasta.join("casa");
-    let plug = {
+    let connection = {
         let casa = casa.to_string_lossy().into_owned();
         let endereco = endereco;
         tokio::task::spawn_blocking(move || conectar(endereco, &casa)).await??
@@ -133,7 +133,7 @@ async fn quem_conecta_recebe_o_icone_que_o_server_ja_tinha() -> Result<()> {
     // senão a tela nunca vem buscar, e o defeito é exatamente esse.
     let mut revisao = 0;
     for _ in 0..40 {
-        revisao = plug.snapshot().icon_revision;
+        revisao = connection.snapshot().icon_revision;
         if revisao > 0 {
             break;
         }
@@ -145,7 +145,7 @@ async fn quem_conecta_recebe_o_icone_que_o_server_ja_tinha() -> Result<()> {
     );
 
     assert_eq!(
-        plug.server_icon().as_deref(),
+        connection.server_icon().as_deref(),
         Some(imagem.as_slice()),
         "a revisão andou e os bytes não vieram"
     );

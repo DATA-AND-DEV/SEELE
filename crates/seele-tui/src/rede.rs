@@ -1,4 +1,4 @@
-//! `plug --rede` — o instrumento que transforma relato de campo em dado.
+//! `connection --rede` — o instrumento que transforma relato de campo em dado.
 //!
 //! Ligue em `main.rs` com **uma linha**, antes de o terminal alternativo abrir:
 //! `if rede::pedido(&argumentos) { rede::rodar_e_sair(&argumentos) }`, onde
@@ -55,8 +55,8 @@
 //!
 //! **O furo.** Furo de verdade precisa de duas máquinas em redes diferentes, e
 //! nenhuma execução solitária pode dizer que ele falhou. Fora do modo par a
-//! linha diz `não testado`, **nunca** `FALHOU`. O modo par é `plug --rede
-//! --esperar` de um lado, que imprime um bilhete, e `plug --rede <bilhete>` do
+//! linha diz `não testado`, **nunca** `FALHOU`. O modo par é `connection --rede
+//! --esperar` de um lado, que imprime um bilhete, e `connection --rede <bilhete>` do
 //! outro: é o degrau 4 inteiro, sem servidor atrás.
 //!
 //! # Por que aqui dentro, e não num binário novo
@@ -274,7 +274,7 @@ pub fn pedido(argumentos: &[String]) -> bool {
 /// `argumentos` são os da linha de comando **sem** o nome do programa.
 ///
 /// Abre laço de eventos próprio, num fio próprio, porque quem chama já está
-/// dentro do `#[tokio::main]` do `plug` e abrir um laço dentro do outro entra em
+/// dentro do `#[tokio::main]` do `connection` e abrir um laço dentro do outro entra em
 /// pânico.
 #[must_use]
 pub fn rodar(argumentos: &[String]) -> ExitCode {
@@ -298,7 +298,7 @@ fn conduzir(argumentos: &[String]) -> bool {
     let plano = match ler_plano(argumentos) {
         Ok(plano) => plano,
         Err(queixa) => {
-            eprintln!("plug --rede: {queixa}");
+            eprintln!("connection --rede: {queixa}");
             return false;
         }
     };
@@ -311,7 +311,7 @@ fn executar(plano: &Plano) -> bool {
         .enable_all()
         .build()
     else {
-        eprintln!("plug --rede: não deu para abrir o laço de eventos");
+        eprintln!("connection --rede: não deu para abrir o laço de eventos");
         return false;
     };
     laco.block_on(async {
@@ -688,7 +688,7 @@ where
     if plano.esperar {
         let Some(bilhete) = bilhete_para_anunciar(sondagens) else {
             anunciar(
-                "plug --rede --esperar: nenhum ponto de encontro respondeu, e sem isso não há \
+                "connection --rede --esperar: nenhum ponto de encontro respondeu, e sem isso não há \
                  bilhete a dar",
             );
             return Furo::SemBilheteAAnunciar;

@@ -1,4 +1,4 @@
-// SEELE · Entry Plug — a camada comum a toda tela.
+// SEELE — a camada comum a toda tela.
 //
 // Este arquivo desenha e nada mais. `specs/06-clientes-gui.md`: "Nenhuma lógica
 // de protocolo em JavaScript. Se o frontend precisa saber o que é um `ssrc`,

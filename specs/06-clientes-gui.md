@@ -41,7 +41,7 @@ digital do certificado, e é ela que transforma o primeiro contato de cego em
 verificado (ADR 0006). O app a confere. A impressão lida do link atravessa a
 ponte como `ConnectConfig::expected_fingerprint`, vira a impressão esperada do
 `Destino`, e a comparação acontece em `seele-core` — antes de haver sessão,
-uma vez só, para as duas cascas. O `plug` lê o mesmo resultado; não há duas
+uma vez só, para as duas cascas. O `connection` lê o mesmo resultado; não há duas
 conferências para discordar uma da outra.
 
 O que volta da conferência é um veredito, não um booleano: primeiro contato
@@ -72,7 +72,7 @@ nunca fez, e a recusa apareceria sem nada na tela que a explicasse.
 
 A tela de entrada tem **HOSPEDAR AQUI** ao lado de INSERIR PLUG. Sobe um servidor
 dentro do processo do app — o mesmo `seele-server::hospedagem` do
-`plug --hospedar` — e devolve o link de convite, que aparece no topo da sessão
+`connection --hospedar` — e devolve o link de convite, que aparece no topo da sessão
 pronto para copiar. Ele vive enquanto a janela estiver aberta.
 
 Sem isso, hospedar exigia um terminal, e num produto cujo argumento é "hospede
@@ -91,7 +91,7 @@ entram pela mesma porta.
 respeitar: a assinatura `ゼーレ` vem de SVG com **glifos em contorno** — o app
 não embarca fonte, e texto entregaria a marca à face japonesa do sistema, que a
 folha proíbe substituir — e o favicon é a forma muda, porque abaixo de 32 px de
-largura do plug a forma troca.
+largura do connection a forma troca.
 
 ## Mobile
 

@@ -1,4 +1,4 @@
-// SEELE · Entry Plug — os seis glifos que a face de dados não tem.
+// SEELE — os seis glifos que a face de dados não tem.
 //
 // A IBM Plex Mono embarcada (`fontes/ibm-plex-mono-400.woff2`) traz 1049
 // entradas de cmap e **um** glifo em toda a faixa U+25A0–U+25CF. Ou seja: ▸ ◂

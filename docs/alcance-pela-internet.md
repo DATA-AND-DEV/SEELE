@@ -9,7 +9,7 @@ seu computador nem do seu amigo. O ADR 0022 registra a decisão por trás disto.
 
 ## O que o SEELE tenta sozinho
 
-Quando você aperta **HOSPEDAR AQUI** (ou roda `plug --hospedar`), o SEELE sobe
+Quando você aperta **HOSPEDAR AQUI** (ou roda `connection --hospedar`), o SEELE sobe
 uma escada e para no degrau mais alto que funcionar. Você não configura nada;
 ele tenta e depois **conta o que conseguiu**, junto do link.
 
@@ -151,7 +151,7 @@ roteadores vêm assim de fábrica, e alguns provedores desligam de propósito.
 
 Entre na configuração do roteador (normalmente `192.168.0.1` ou `192.168.1.1`
 no navegador) e procure por **UPnP** — pode estar escrito "UPnP", "Universal
-Plug and Play", ou dentro de "NAT" / "Encaminhamento". Ligue, e hospede de novo.
+Connection and Play", ou dentro de "NAT" / "Encaminhamento". Ligue, e hospede de novo.
 
 Se você estiver numa rede que não é sua — trabalho, faculdade, hotel, wi-fi de
 condomínio — o pedido nem chega ao roteador, e não há o que ligar. Use uma das

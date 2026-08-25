@@ -1,7 +1,7 @@
 //! Ejetar e voltar, no mesmo processo.
 //!
 //! A pendência #9 recusou trocar a conexão por baixo de uma sessão viva. O laço
-//! externo do `plug` faz outra coisa: derruba tudo e reconstrói — é assim que
+//! externo do `connection` faz outra coisa: derruba tudo e reconstrói — é assim que
 //! `:ejetar` volta para a tela de seleção em vez de matar o processo. Este
 //! teste existe para provar que esse teardown fecha de verdade. Se ele falhar,
 //! a decisão do laço estava errada, e é melhor descobrir aqui do que meses

@@ -342,7 +342,7 @@ impl Telas {
     /// [`Self::em`] por um motivo concreto: a tarefa que aceita os fluxos
     /// unidirecionais de uma conexão vive fora do laço da sessão — é o que a
     /// impede de bloquear o controle — e por isso não enxerga em que sala de voz o
-    /// plug está. Este registro é a única fonte que sabe as duas coisas ao
+    /// connection está. Este registro é a única fonte que sabe as duas coisas ao
     /// mesmo tempo, e é a mesma que decidiu a corrida do §6 item 3. Perguntar a
     /// ela é o que garante que um fluxo de tela só é aceito de quem o controle
     /// já autorizou.
@@ -491,7 +491,7 @@ impl Presentes {
 /// # Why the whole map, and not one voice room
 ///
 /// G15 was closed for the voice room the person walked into, and only that one. The
-/// screen `design/Entry Plug v3.dc.html` draws occupants under **every** voice room,
+/// screen `design/SEELE v3.dc.html` draws occupants under **every** voice room,
 /// and for the other four that data had never existed on the client at all:
 /// they were drawn empty, always, however many people were in them. Reported
 /// from a real session as "o sistema de voice_rooms não está bem implementado,
@@ -873,7 +873,7 @@ mod tests {
     fn leaving_a_room_nobody_was_in_announces_nothing() {
         // The other half, and the one that keeps a departure from being sent
         // twice: `serve` calls this after every session, including the ones that
-        // already left through `EjectPlug` and said so.
+        // already left through `LeaveVoiceRoom` and said so.
         let mut occupancy = Occupancy::default();
         occupancy.seat(VoiceRoomId(7), occupant(1, "ayanami"));
         occupancy.vacate(VoiceRoomId(7), PersonId(1));
@@ -886,7 +886,7 @@ mod tests {
 
     #[test]
     fn walking_between_rooms_reports_the_room_that_was_left() {
-        // What `InsertPlug` needs in order to tell the old room. Seating alone
+        // What `EnterVoiceRoom` needs in order to tell the old room. Seating alone
         // clears the previous seat silently, and a silent clear is a person who
         // stays in the first voice room on every other client for ever.
         let mut occupancy = Occupancy::default();

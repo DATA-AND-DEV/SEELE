@@ -780,7 +780,7 @@ fn every_verdict_the_bridge_can_send_has_its_own_sentence_in_the_page() {
     // handles it would leave this green on the strength of an explanation.
     //
     // `InviteRefused` is left out on purpose — the core drops the connection,
-    // so it reaches the shell as a `PlugError`. The test below covers it.
+    // so it reaches the shell as a `ConnectionError`. The test below covers it.
     let script = without_comments(&scripts());
 
     for verdict in [
@@ -819,12 +819,12 @@ fn the_refused_invite_reaches_the_screen_with_both_fingerprints() {
     // connection, so it arrives as the error below and its sentence lives on
     // the `#boot-erro` path. Both prints have to be in it — an accusation that
     // shows one of the two is an accusation nobody can check.
-    let refusal = seele_ffi::PlugError::InviteMismatch {
+    let refusal = seele_ffi::ConnectionError::InviteMismatch {
         expected: "bbbb".into(),
         offered: "aaaa".into(),
     };
     let Ok(json) = serde_json::to_string(&refusal) else {
-        panic!("PlugError does not serialise, so no shell can read it at all");
+        panic!("ConnectionError does not serialise, so no shell can read it at all");
     };
     let script = without_comments(&scripts());
 
@@ -930,7 +930,7 @@ fn leaving_forgets_the_invite_that_let_us_in() {
     let body = body_of(&read("src/main.rs"), "async fn disconnect");
     assert!(
         body.contains("session.convite"),
-        "`disconnect` drops the plug and the hosting but keeps the invite, so a \
+        "`disconnect` drops the connection and the hosting but keeps the invite, so a \
          fingerprint from a previous link outlives the session it belonged to"
     );
 }
@@ -1113,7 +1113,7 @@ fn variants_of(source: &str, name: &str) -> Vec<String> {
 #[test]
 fn every_refusal_the_bridge_writes_itself_has_a_sentence_in_the_page() {
     // Two of this shell's commands answer with an enum of their own rather than
-    // a `PlugError` — hosting, and choosing a microphone — because their
+    // a `ConnectionError` — hosting, and choosing a microphone — because their
     // failures are local ones the FFI has no business naming. That freedom costs
     // exactly this guard: a variant added here with no sentence over there lands
     // on a screen that says nothing, or worse, prints the name of a Rust variant
@@ -1383,7 +1383,7 @@ fn the_path_is_written_beside_the_numbers_and_then_left_alone() {
 fn the_arrival_stage_reaches_the_screen_while_the_arrival_is_happening() {
     // `fraseDeEtapa` was written in task 8 and had no caller at all: the FFI
     // published a stage per instant of the crossing and nothing in production
-    // read one, because `Plug::connect` blocks and a listener subscribed after
+    // read one, because `Connection::connect` blocks and a listener subscribed after
     // it returns has the whole crossing already behind it.
     //
     // Three things have to channel up, and the middle one is the quiet one: the
@@ -1392,7 +1392,7 @@ fn the_arrival_stage_reaches_the_screen_while_the_arrival_is_happening() {
     // that name.
     let corpo = body_of(&read("src/main.rs"), "async fn connect(");
     assert!(
-        corpo.contains("Plug::connect_watching"),
+        corpo.contains("Connection::connect_watching"),
         "the app still enters by the door that blocks with nobody listening, so \
          the stages happen inside a channel that answers only at the end:\n{corpo}"
     );
@@ -1420,8 +1420,8 @@ fn the_arrival_stage_reaches_the_screen_while_the_arrival_is_happening() {
 
 #[test]
 fn the_failed_connection_hands_the_shell_the_trail_it_kept() {
-    // Task 8 built the trail and `Plug::connect_with_trail` to carry it, and the
-    // app went on entering by `Plug::connect`, which throws it away. «Tentei
+    // Task 8 built the trail and `Connection::connect_with_trail` to carry it, and the
+    // app went on entering by `Connection::connect`, which throws it away. «Tentei
     // quatro candidatos, o primeiro deu prazo esgotado em 4 s, o quarto
     // recusou» is the data that was missing when the two-house field test
     // failed, and a door nobody opens carries nothing.
@@ -1433,7 +1433,7 @@ fn the_failed_connection_hands_the_shell_the_trail_it_kept() {
     );
 
     // And the shell has to know the shape changed, or every failure sentence
-    // reads a `ConnectFailure` as if it were a `PlugError` and falls through to
+    // reads a `ConnectFailure` as if it were a `ConnectionError` and falls through to
     // «FALHA QUE ESTA TELA NÃO SABE NOMEAR».
     let corpo = js_function(&read("ui/tela-boot.js"), "async function conectar(");
     assert!(
@@ -1908,7 +1908,7 @@ fn the_state_of_a_person_is_a_word_and_never_only_a_colour() {
     // A statement that tells the three states apart in words: it has to look at
     // the microphone and at the voice, and have a word for each way out.
     let tells_them_apart = |statement: &str| {
-        statement.contains("at_field")
+        statement.contains("muted")
             && statement.contains("speaking")
             && statement
                 .split('"')
@@ -1955,7 +1955,7 @@ fn the_state_of_a_person_is_a_word_and_never_only_a_colour() {
 
     // All three facts, in the sentence. The colour version of any one of them
     // would be a fact only some readers get.
-    for fact in ["at_field", "speaking", "total_isolation"] {
+    for fact in ["muted", "speaking", "total_isolation"] {
         assert!(
             sentence.contains(fact),
             "the sentence beside the name never mentions `{fact}`, so that state \
@@ -2042,11 +2042,11 @@ fn the_two_ways_out_of_the_call_say_which_one_leaves_the_voice_room() {
     let page = without_comments(&read("ui/index.html"));
     let script = scripts();
 
-    // `VER CANAIS` is navigation. Whatever it runs must not pull the plug.
+    // `VER CANAIS` is navigation. Whatever it runs must not pull the connection.
     let leaving = body_of(&script, "function fecharChamada");
     assert!(
         !leaving.contains("eject_plug"),
-        "`VER CANAIS` ejects the plug, so the two buttons do the same thing again \
+        "`VER CANAIS` ejects the connection, so the two buttons do the same thing again \
          and the screen's own words are wrong"
     );
 
@@ -2065,7 +2065,7 @@ fn the_two_ways_out_of_the_call_say_which_one_leaves_the_voice_room() {
     // and watching this pass.
     assert!(
         exit.contains("invoke(\"eject_plug\")"),
-        "`SAIR DA SALA` does not eject the plug, so leaving the VoiceRoom has no \
+        "`SAIR DA SALA` does not eject the connection, so leaving the VoiceRoom has no \
          button anywhere on this screen:{exit}"
     );
 
@@ -2236,7 +2236,7 @@ fn the_voice_room_says_who_is_inside_and_says_their_state_in_words() {
          added to this column is a block bar again"
     );
     assert!(
-        dentro.contains("pessoa.speaking") && dentro.contains("pessoa.at_field"),
+        dentro.contains("pessoa.speaking") && dentro.contains("pessoa.muted"),
         "the row inside a VoiceRoom reads neither who is talking nor who is muted, \
          which is everything it was drawn to say"
     );
@@ -2285,7 +2285,7 @@ fn entering_and_leaving_a_voice_room_are_labelled_buttons_and_not_a_click_on_the
     }
     assert!(
         lista.contains("eject_plug") || handler.contains("eject_plug"),
-        "nothing on this screen takes the plug out, and the only other way out \
+        "nothing on this screen takes the connection out, and the only other way out \
          lives on a screen reached from here"
     );
 }
@@ -2294,7 +2294,7 @@ fn entering_and_leaving_a_voice_room_are_labelled_buttons_and_not_a_click_on_the
 fn the_session_screen_omits_what_nothing_measures_rather_than_a_dash_per_row() {
     // The v2 rule was: draw the frame, leave the value visibly unmeasured, put
     // the reason in a `title`. It is the right rule where the absence answers a
-    // question the screen just asked — the average with no plug in, the battery
+    // question the screen just asked — the average with no connection in, the battery
     // bar, the alert's three cells — and all of those stay.
     //
     // It is the wrong rule *per row*. A dash beside every Channel and two more
@@ -2321,7 +2321,7 @@ fn the_session_screen_omits_what_nothing_measures_rather_than_a_dash_per_row() {
     assert!(
         media.contains("naoMedido"),
         "the Sync average no longer marks itself unmeasured when there is no \
-         plug in — that gap is an answer to a question the panel just asked, and \
+         connection in — that gap is an answer to a question the panel just asked, and \
          it is the one this rule does not touch"
     );
 }
@@ -2419,7 +2419,7 @@ fn the_add_server_button_carries_one_verb_and_not_the_two_the_v2_conflated() {
     // what changed.
     //
     // It held the `+` *disabled*, on the reading that adding a server means two
-    // `Plug` at once and this product has one. The premise did not change —
+    // `Connection` at once and this product has one. The premise did not change —
     // `Session` still holds one and `connect` still answers `AlreadyConnected` —
     // but the conclusion drawn from it did. Holding one connection at a time
     // does not forbid a second server on screen; it decides what pressing one
@@ -2508,7 +2508,7 @@ fn entering_another_server_leaves_this_one_and_says_so_with_both_names() {
     // that has to run before either.
     //
     // Disconnect first is not style. `connect` answers `AlreadyConnected` while
-    // a `Plug` is held, so a switch that connects first does not half-work — it
+    // a `Connection` is held, so a switch that connects first does not half-work — it
     // does nothing, and it does nothing while the person is looking at a screen
     // that says they are somewhere else.
     let sessao = read("ui/tela-sessao.js");
@@ -2523,7 +2523,7 @@ fn entering_another_server_leaves_this_one_and_says_so_with_both_names() {
     assert!(
         saida < entrada,
         "the switch connects before it disconnects, and `connect` refuses with \
-         `AlreadyConnected` while a Plug is held — so pressing a server in the \
+         `AlreadyConnected` while a Connection is held — so pressing a server in the \
          trilha does nothing at all: {troca}"
     );
 
@@ -2923,7 +2923,7 @@ fn the_ceiling_for_the_picture_is_said_before_the_picker_and_never_written_in_th
     let frase = js_function(&server, "function fraseDeIcone(");
     assert!(
         frase.contains("limit_bytes"),
-        "the refusal does not carry the number the `PlugError` brought, so \
+        "the refusal does not carry the number the `ConnectionError` brought, so \
          somebody is told «too heavy» and never how heavy is not: {frase}"
     );
     assert!(
@@ -3216,7 +3216,7 @@ fn globals_declared_in(script: &str) -> BTreeSet<String> {
         else {
             continue;
         };
-        // `const { invoke } = window.__TAURI__.core` binds through a pattern
+        // `const { invoke } = window.__TAURI__.core` binds through a link_state
         // rather than a name, and this does not try to read patterns.
         let name: String = rest
             .chars()
@@ -3374,7 +3374,7 @@ fn creating_a_room_is_offered_by_permission_and_sized_by_the_server() {
     // without `ManageVoiceRooms`, and `seele-conformance` proves the refusal comes
     // from there — this is the shell not putting up a control that would fail.
     // The distinction matters because the opposite reading (hide it and call it
-    // secured) is the one the `plug` walks straight through.
+    // secured) is the one the `connection` walks straight through.
     assert!(
         body.contains("may_manage_voice_rooms"),
         "the screen offers the create forms without asking whether this person may \
@@ -4934,7 +4934,7 @@ fn destroying_a_room_is_offered_by_the_permission_that_destroys_it() {
 #[test]
 fn a_room_that_stopped_existing_has_a_sentence_and_not_a_shrug() {
     // Somebody is standing in the voice room, or reading the Channel, when it stops
-    // existing. The plug is already out and the conversation is already off the
+    // existing. The connection is already out and the conversation is already off the
     // screen by the time this arrives — so without the sentence what is left is
     // a room that vanished on its own, which from where the reader sits is
     // indistinguishable from a window that lost track of where it was.
@@ -6842,7 +6842,7 @@ fn the_entrance_screen_stopped_drawing_the_four_values_this_protocol_never_carri
     // write the value as missing, and the gap stays visible. That serves a gap
     // somebody means to close. These four never closed — there is no population
     // count and no "route" anywhere in the core, the codec has no value until a
-    // plug is inside a voice room and nobody is yet, and the local key does not cross
+    // connection is inside a voice room and nobody is yet, and the local key does not cross
     // the FFI — so what the screen showed was seven fields with four dashes,
     // which reads as a broken window rather than as an honest one.
     let tela = entry_screen();
@@ -7555,6 +7555,13 @@ fn a_entrada_desenha_a_marca_nova_e_nenhuma_citacao_do_anime() {
          volta a depender de um arquivo por tamanho"
     );
 
+    // **A agulha é o termo aposentado, e não o novo.** Esta lista dizia
+    // `["Entry Plug", "ENTRY_PLUG"]`, e a varredura de renomeação a reescreveu
+    // para `["SEELE", …]` em 2026-08-25 — fazendo o guarda acusar o nome do
+    // próprio produto, que obviamente está na página. É o terceiro guarda desta
+    // sessão mordido do mesmo jeito, junto com as duas entradas de
+    // `APOSENTADOS`: quem procura uma palavra que saiu não pode ser atualizado
+    // para a que ficou.
     for citacao in ["Entry Plug", "ENTRY_PLUG"] {
         assert!(
             !pagina.contains(citacao),
@@ -7656,6 +7663,8 @@ const APOSENTADOS: &[(&str, &str)] = &[
     // legítimo da palavra nova contra ela mesma.
     ("piloto", "pessoa"),
     ("pilotos", "pessoas"),
+    // `plug`, e não `connection`: pela terceira vez, a varredura trocou o nome
+    // aposentado pelo novo nesta coluna. Ver o aviso mais abaixo.
     ("plug", "conectar / sair"),
     ("ejetar", "sair"),
     ("ejeção", "saída"),

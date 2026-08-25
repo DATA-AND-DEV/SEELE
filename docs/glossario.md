@@ -10,7 +10,7 @@ Duas colunas e um corte no meio:
 
 - **na tela** é o que a pessoa lê. Muda por este documento.
 - **identificador** é o nome real da coisa no código. **Não muda.** `VoiceRoom`
-  continua `VoiceRoom`, `Server` continua `Server`, `at_field` continua `at_field`.
+  continua `VoiceRoom`, `Server` continua `Server`, `muted` continua `muted`.
   Renomear tipo é outro trabalho, com outro custo, e o ADR 0033 decidiu
   explicitamente não fazê-lo.
 
@@ -26,7 +26,7 @@ Ela agora custa menos, porque o nome comum já é a explicação.
 |---|---|---|---|
 | Instância de servidor | servidor | server | `Server` |
 | Daemon | `seeled` | `seeled` | `seeled` |
-| Cliente de terminal | `plug` | `plug` | `plug` |
+| Cliente de terminal | `connection` | `connection` | `connection` |
 | Canal de voz | sala de voz | voice room | `VoiceRoom`, `VoiceRoomId` |
 | Coluna de salas | SALAS DE VOZ | VOICE ROOMS | — |
 | Sala sem nome | SALA 1, SALA 2 | ROOM 1, ROOM 2 | — |
@@ -36,16 +36,16 @@ Ela agora custa menos, porque o nome comum já é a explicação.
 | Nome escolhido pela pessoa | APELIDO | NICKNAME | `Person::nick` |
 | Entrar em sala de voz | conectar · CONECTAR | connect · CONNECT | `insert_plug` |
 | Sair da sala de voz | sair · SAIR · sair da sala | leave · LEAVE | `eject` |
-| Mudo (microfone) | mudo · microfone fechado | muted · mic closed | `at_field` |
-| Qualidade de conexão | sinal · SINAL | signal · SIGNAL | `SyncRatio` |
+| Mudo (microfone) | mudo · microfone fechado | muted · mic closed | `muted` |
+| Qualidade de conexão | sinal · SINAL | signal · SIGNAL | `Signal` |
 | Faixas do sinal | boa · fraca · crítica | good · weak · critical | ver ADR 0024 |
-| Sessão verificada | conexão segura · CONEXÃO SEGURA | secure connection | `Pattern::Blue` |
+| Sessão verificada | conexão segura · CONEXÃO SEGURA | secure connection | `LinkState::Verified` |
 | Latência | atraso | delay | `signal_delay_ms` |
 | Perda de pacote | perda | loss | `HarmonicDisturbance`, `loss_pct` |
 
-**`Entry Plug` fica**, e só como nome interno: é o nome do cliente de terminal
+**`SEELE` fica**, e só como nome interno: é o nome do cliente de terminal
 no código, na documentação de arquitetura e na forma desenhada da marca. Não é
-rótulo de tela. O binário continua `plug`.
+rótulo de tela. O binário continua `connection`.
 
 ## Papéis
 
@@ -88,8 +88,8 @@ que **informa** ficou inteira, e é ela que aparece na tela agora.
 |---|---|---|
 | `Ola` | `Hello` | cliente → servidor |
 | `Resposta` | `Response` | cliente → servidor |
-| `InserirPlug` | `InsertPlug` | cliente → servidor |
-| `EjetarPlug` | `EjectPlug` | cliente → servidor |
+| `InserirPlug` | `EnterVoiceRoom` | cliente → servidor |
+| `EjetarPlug` | `LeaveVoiceRoom` | cliente → servidor |
 | `EntrarNaLinha` | `JoinLine` | cliente → servidor |
 | `EnviarMensagem` | `SendMessage` | cliente → servidor |
 | `BuscarHistorico` | `FetchHistory` | cliente → servidor |
@@ -137,7 +137,7 @@ As chaves **não mudam**: são identificadores que a configuração em disco pro
 | na tela (pt-BR) | Chave · identificador |
 |---|---|
 | ver a sala | `ver_voice_room` · `Permission::ViewVoiceRoom` |
-| conectar na sala | `inserir_plug` · `Permission::InsertPlug` |
+| conectar na sala | `inserir_plug` · `Permission::EnterVoiceRoom` |
 | falar | `falar` · `Permission::Speak` |
 | ler o canal | `ler_linha` · `Permission::ReadLine` |
 | escrever no canal | `escrever_linha` · `Permission::WriteLine` |
@@ -183,7 +183,7 @@ inventar um nome que a próxima tela não vai repetir.
 
 A postura de direitos sobre a franquia (`07`, `[EM ABERTO]`). A recomendação do
 plano continua sendo repositório privado até M4. O ADR 0033 encolheu a
-superfície do problema sem fechá-lo: `A.T. Field` saiu da tela, e `Entry Plug`
+superfície do problema sem fechá-lo: `A.T. Field` saiu da tela, e `SEELE`
 sobrou como nome interno e como forma da marca desenhada. `PERMISSIONS`,
 `MEDIA` e `PERSISTENCE` são nomes bíblicos e seguros. O risco que resta está no
 repositório, não no produto.

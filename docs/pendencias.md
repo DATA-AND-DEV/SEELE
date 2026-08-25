@@ -99,7 +99,7 @@ histórico em rajada. Não apareceu em uso normal.
 segura ali reamostrando — `crates/seele-audio/src/pacing.rs`, tarefa M1.8. Ver
 o ADR 0028 para a decisão e para o que ela custa de latência, e o
 `docs/m1-medicoes.md` para os números. O que ainda não foi visto é o `:sync` de
-um `plug --hospedar` de verdade parar de crescer; o que foi medido está abaixo.
+um `connection --hospedar` de verdade parar de crescer; o que foi medido está abaixo.
 
 **Uma conta desta seção estava errada, e o erro importa.** Aqui se lia que
 "centenas de amostras por dezena de segundos dão algo da ordem de algumas
@@ -136,7 +136,7 @@ segundos, e fundo zero o tempo todo.
 **Sintoma.** "ÁUDIO LOCAL FALHANDO" acende sozinho e volta a acender depois de
 apagar, com o áudio audivelmente bom.
 
-**Medido**, com `:sync` num `plug --hospedar` sem ninguém do outro lado:
+**Medido**, com `:sync` num `connection --hospedar` sem ninguém do outro lado:
 
 | | captura | saída |
 |---|---|---|
@@ -191,11 +191,11 @@ da faixa em que cristal vive (aí não é deriva: taxa diferente da anunciada,
 dispositivo trocado), ou anel raspando o fundo (aí é a volta do laço, que é a
 pendência 15).
 
-## 3 · O instalador do Windows não põe `plug` no `PATH`
+## 3 · O instalador do Windows não põe `connection` no `PATH`
 
 O `.exe` do NSIS instala o app e os dois programas de terminal em
 `%LOCALAPPDATA%\Programs\SEELE`, e **não acrescenta essa pasta ao `PATH`**.
-Quem instalou pelo app tem o `plug`, mas precisa do caminho inteiro para
+Quem instalou pelo app tem o `connection`, mas precisa do caminho inteiro para
 chamá-lo.
 
 O NSIS do Tauri aceita um gancho de pós-instalação que resolveria isso. Não
@@ -294,7 +294,7 @@ Baixo impacto num Server de amigos, real num aberto.
 
 ## 7 · A matriz de três SOs nunca foi verde por inteiro
 
-Linux e Windows compilam no CI, mas ninguém rodou o `plug` neles fora disso.
+Linux e Windows compilam no CI, mas ninguém rodou o `connection` neles fora disso.
 `docs/teste-duas-maquinas.md` é o roteiro.
 
 ## 8 · Sem troca de chaves pós-quântica
@@ -378,7 +378,7 @@ pessoa entra ou sai, porque aí o roster é reconstruído.
 
 **O que era.** O app lia a impressão digital de um `seele://` e não a conferia:
 colar um link com impressão conectava como se não houvesse impressão nenhuma.
-O `plug` conferia — ou parecia conferir: comparava a impressão esperada com ela
+O `connection` conferia — ou parecia conferir: comparava a impressão esperada com ela
 mesma, porque `PinDecision::Matches` não carregava a ofertada, e era um teste
 que não tinha como reprovar. Duas cascas, dois comportamentos, nenhum dos dois
 o que o ADR 0006 desenhou.
@@ -392,7 +392,7 @@ escrito — sem essa segunda metade a recusa seria decorativa, porque a visita
 seguinte, sem link para conferir, entraria calada no servidor recusado. Contra
 um servidor já fixado, um convite que discorda **avisa** e não derruba: o TOFU já
 provou que é o servidor de ontem, e trancar alguém para fora por causa de um
-link velho seria o erro oposto. As duas cascas leem o mesmo veredito; o `plug`
+link velho seria o erro oposto. As duas cascas leem o mesmo veredito; o `connection`
 não compara mais nada por conta própria.
 
 **A segunda ponta, do mesmo fio, também fechou.** O `Session::convite` morre
@@ -970,7 +970,7 @@ seletores.
 O esquema é fechado e só cresce; **a versão 1 traz uma capacidade só, `cor`**,
 pela regra de que uma capacidade entra quando a tabela e o consumidor dela já
 existem — glifo, frase, som, atalho, comando e painel são recusados um a um com o
-motivo. O `plug` fica com a palheta congelada em v1. Um MOD **não acompanha um
+motivo. O `connection` fica com a palheta congelada em v1. Um MOD **não acompanha um
 Server**: a sala pode recomendar, e instalar continua sendo ato de quem instala.
 
 **O que ficou tentado.** Nada de código, de propósito — a mesma postura da
@@ -1092,9 +1092,9 @@ que exista hoje.
 
 **Sintoma.** Não dá para estar em dois Servers ao mesmo tempo. O `+` da trilha
 existe na tela, desabilitado, com a limitação escrita no `title`
-(`apps/seele-app/ui/index.html:906`): «este produto mantém um Plug por vez: para
+(`apps/seele-app/ui/index.html:906`): «este produto mantém um Connection por vez: para
 trocar de Server, use DESCONECTAR». `Session` guarda um
-`plug: Mutex<Option<Arc<Plug>>>` (`apps/seele-app/src/main.rs:49`) e `connect`
+`connection: Mutex<Option<Arc<Connection>>>` (`apps/seele-app/src/main.rs:49`) e `connect`
 recusa com `AlreadyConnected` (`main.rs:168-170`). Quem quer ler a Linha de outro
 Server desconecta deste.
 
@@ -1132,7 +1132,7 @@ VoiceRoom que se deixou é nomeado.
 uma camada acima dele, para preservar `messages_revision` e porque as 28 funções
 de desenho continuam desenhando um servidor cada. Ele **perde sete campos** de áudio
 para um bloco de máquina. O `main.rs` tem **51 `#[tauri::command]`**, dos quais
-**23 resolvem `session.plug()?`** e mais quatro alcançam o `Plug` de outra forma
+**23 resolvem `session.connection()?`** e mais quatro alcançam o `Connection` de outra forma
 (`set_talking`, `escolher_microfone`, `escolher_saida` e o `connect`, que é onde a
 regra de uma sessão é aplicada). `apps/seele-app/ui/` são ~13 mil linhas, das
 quais `tela-sessao.js` sozinho são 1771; a janela lê **23 dos 24 campos** do
@@ -1159,11 +1159,11 @@ visitados, nem trilha.
 sendo cobrada como moldura; quando o `+` funcionar, ele vira o teste do
 contrário.
 
-**Um operador de outro Server pode inserir o seu plug.**
+**Um operador de outro Server pode inserir o seu connection.**
 `crates/seele-server/src/session.rs:1220-1230`: `MovePerson` transmite
 `PersonMoved` sem exigir que o pessoa já esteja num VoiceRoom. A regra do ADR 0031 é
 que o servidor decide quem está na sala e **esta máquina decide para onde o
-microfone dela vai**: um plug inserido por outra pessoa entra no roster e não
+microfone dela vai**: um connection inserido por outra pessoa entra no roster e não
 reivindica o caminho de voz.
 
 **Por que não foi resolvido.** Falta a decisão humana sobre um ADR proposto. E

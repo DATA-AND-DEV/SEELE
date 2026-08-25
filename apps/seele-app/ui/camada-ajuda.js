@@ -1,4 +1,4 @@
-/* SEELE · Entry Plug — a ajuda, na tecla `?`.
+/* SEELE — a ajuda, na tecla `?`.
  *
  * # Por que a camada continua, com metade do que tinha
  *
@@ -12,7 +12,7 @@
  * dizer. Esses dois não têm nome autoexplicativo em português nenhum.
  *
  * E a seção das teclas, que é a outra metade e não encolheu: o critério que a
- * TUI adota para o `plug` é «dá para conectar sabendo só a tecla `?`», e esta
+ * TUI adota para o `connection` é «dá para conectar sabendo só a tecla `?`», e esta
  * camada é o equivalente do cliente gráfico. O preço dela na tela permanente
  * continua sendo zero — ela não existe até ser chamada.
  */
@@ -58,7 +58,7 @@ $("ajuda-abrir").addEventListener("click", abrirAjuda);
 /*
  * A tecla.
  *
- * `?` e não `F1`: é a tecla que o `plug` usa, e a paridade entre as duas cascas
+ * `?` e não `F1`: é a tecla que o `connection` usa, e a paridade entre as duas cascas
  * é o ponto. Em teclado ABNT2 e US o `?` exige Shift, e é por isso que a
  * comparação é por `evento.key` — que já traz o caractere resolvido — e não por
  * `code`, que diria a tecla física e erraria em metade dos layouts.

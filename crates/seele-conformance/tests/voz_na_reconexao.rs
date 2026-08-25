@@ -28,9 +28,9 @@
 //! decidindo por onde a pessoa ouve, calada, no pior momento possível.
 //!
 //! As duas cascas esqueciam todos. E o que torna isto pior que "volta
-//! desmutado" é a assimetria: `Enlace::tentar` **restaura** `at_field` no
+//! desmutado" é a assimetria: `Enlace::tentar` **restaura** `muted` no
 //! servidor ao reconectar, então o roster continua mostrando a pessoa muda,
-//! enquanto o portão local — `speaking = open && !at_field`, em `voice.rs` —
+//! enquanto o portão local — `speaking = open && !muted`, em `voice.rs` —
 //! volta aberto. O indicador que todo mundo lê passa a mentir, e a primeira vez
 //! que essa pessoa encosta na tecla de falar ela transmite achando que está
 //! calada.

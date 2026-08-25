@@ -2,7 +2,7 @@
 
 > **O caminho curto:** se houver um release publicado, baixe
 > `seele-cli-<versão>-windows-x86_64.zip` na aba **Releases**, descompacte e
-> pule direto para o passo 3. Ele traz `seeled.exe` e `plug.exe` prontos, e
+> pule direto para o passo 3. Ele traz `seeled.exe` e `connection.exe` prontos, e
 > nenhuma das etapas de instalação abaixo é necessária — nem Rust, nem Build
 > Tools. O Windows vai reclamar que o arquivo não é assinado; **Mais
 > informações** → **Executar assim mesmo**.
@@ -138,7 +138,7 @@ Nos dois PCs:
 ```powershell
 git clone <url-do-repo> C:\SEELE
 cd C:\SEELE
-cargo build --release --bin seeled --bin plug
+cargo build --release --bin seeled --bin connection
 ```
 
 A primeira compilação demora — dez a vinte minutos é normal, e o Opus baixa uma
@@ -185,7 +185,7 @@ Ele imprime, entre outras coisas:
 
 ```
 na outra máquina:
-  plug --server 192.168.x.x:8383
+  connection --server 192.168.x.x:8383
 
 certificate fingerprint: 50217d68c6...
 ```
@@ -206,13 +206,13 @@ pare o servidor e apague o arquivo.
 No **PC A**, num segundo terminal:
 
 ```powershell
-.\target\release\plug.exe --server 127.0.0.1:8383 --nick alexandre
+.\target\release\connection.exe --server 127.0.0.1:8383 --nick alexandre
 ```
 
 No **PC B**:
 
 ```powershell
-.\target\release\plug.exe --server 192.168.x.x:8383 --nick outro
+.\target\release\connection.exe --server 192.168.x.x:8383 --nick outro
 ```
 
 Use o endereço que o `seeled` imprimiu, e **apelidos diferentes**.
@@ -225,7 +225,7 @@ impressão digital. Confira contra a do passo 4. Se conferir, é aquele servidor
 > ser um segundo pessoa:
 > ```powershell
 > $env:SEELE_HOME="$HOME\.seele-outro"
-> .\target\release\plug.exe --server 127.0.0.1:8383 --nick terceiro
+> .\target\release\connection.exe --server 127.0.0.1:8383 --nick terceiro
 > ```
 
 ---

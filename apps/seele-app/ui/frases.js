@@ -1,4 +1,4 @@
-// SEELE · Entry Plug — enum → frase, para toda tela.
+// SEELE — enum → frase, para toda tela.
 //
 // A fronteira erro→texto do produto fica aqui, e é por isso que nenhuma
 // mensagem para gente é escrita em Rust. O protocolo carrega enums justamente
@@ -14,7 +14,7 @@
  * A frase para um motivo de fim de sessão.
  *
  * O protocolo carrega enums justamente para que cada casca escreva as suas
- * (`specs/02-protocolo.md`). Este é o mesmo conjunto de frases do `plug`, em
+ * (`specs/02-protocolo.md`). Este é o mesmo conjunto de frases do `connection`, em
  * português, porque é o mesmo produto.
  */
 const MOTIVOS = {
@@ -105,7 +105,7 @@ const AVISOS = {
   // ---- uma sala deixou de existir ----
   //
   // Três frases e não uma, porque pedem coisas diferentes de quem lê. As duas
-  // primeiras chegam a quem estava dentro: o plug já saiu e a conversa já saiu
+  // primeiras chegam a quem estava dentro: o connection já saiu e a conversa já saiu
   // da tela quando isto aparece, e sem a frase o que sobra é uma sala que sumiu
   // sozinha — indistinguível de uma janela que perdeu a conta de onde estava.
   //

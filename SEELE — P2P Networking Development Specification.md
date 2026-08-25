@@ -141,7 +141,7 @@ O SEELE atualmente utiliza Rust e QUIC/UDP como base do transporte.
 
 A aplicação possui conceitos de:
 
-- `plug`
+- `connection`
 - `seeled`
 - identidade dos peers
 - salas
@@ -836,7 +836,7 @@ Ao final desta etapa, o SEELE deve funcionar conceitualmente assim:
                         /             \
                        ▼               ▼
                  ┌──────────┐   ┌──────────┐
-                 │  Plug A  │   │  Plug B  │
+                 │  Connection A  │   │  Connection B  │
                  │          │   │          │
                  │ NAT A    │   │ NAT B    │
                  └────┬─────┘   └────┬─────┘
@@ -868,7 +868,7 @@ A regra fundamental é:
 Antes de modificar o código:
 
 1. analisar completamente a implementação atual de networking;
-2. mapear o fluxo atual `plug → seeled → VPS`;
+2. mapear o fluxo atual `connection → seeled → VPS`;
 3. identificar exatamente onde o estabelecimento QUIC ocorre;
 4. identificar como endpoints são atualmente determinados;
 5. identificar onde NAT traversal atualmente falha;

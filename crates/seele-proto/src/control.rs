@@ -302,7 +302,7 @@ pub enum Permission {
     /// See that a voice room exists.
     ViewVoiceRoom,
     /// Enter a voice room.
-    InsertPlug,
+    EnterVoiceRoom,
     /// Transmit voice.
     Speak,
     /// Read a Channel.
@@ -432,7 +432,7 @@ pub struct PersonState {
     /// Whose state this is.
     pub person: PersonId,
     /// Microphone muted — "A.T. Field" active.
-    pub at_field: bool,
+    pub muted: bool,
     /// Speakers muted — "Isolamento total".
     ///
     /// Local in effect, but announced so the roster can show who is not
@@ -443,7 +443,7 @@ pub struct PersonState {
     /// Presence hint.
     pub presence: Presence,
     /// Sync Ratio, 0 to 100. `specs/02-protocolo.md`.
-    pub sync_ratio: u8,
+    pub signal: u8,
 }
 
 /// Connection quality, as the server sees it.
@@ -607,7 +607,7 @@ pub enum AlertReason {
     /// connection that was already exceeding its budget, and nothing else.
     RateLimited,
 
-    /// An operator moved this person's plug into another voice room.
+    /// An operator moved this person's connection into another voice room.
     ///
     /// Its own reason rather than [`Self::OperatorNotice`], because the shell
     /// has a specific sentence to write and `OperatorNotice` would have it
@@ -617,7 +617,7 @@ pub enum AlertReason {
     /// Appended after `RateLimited`, for the reason that variant gives.
     MovedByOperator,
 
-    /// The voice room this person's plug was in no longer exists.
+    /// The voice room this person's connection was in no longer exists.
     ///
     /// Its own reason rather than [`Self::OperatorNotice`], for the reason
     /// [`Self::MovedByOperator`] gives: the shell has a specific sentence to
@@ -728,15 +728,15 @@ pub enum ClientMessage {
         /// Proof of identity. ADR 0004 makes this an Ed25519 signature.
         proof: Vec<u8>,
     },
-    /// Enters a voice room. "Inserir plug" in `docs/glossario.md`.
-    InsertPlug {
+    /// Enters a voice room. "Inserir connection" in `docs/glossario.md`.
+    EnterVoiceRoom {
         /// Which voice room.
         voice_room: VoiceRoomId,
         /// Password, if the voice room needs one.
         password: Option<String>,
     },
     /// Leaves the current voice room. "Ejetar".
-    EjectPlug,
+    LeaveVoiceRoom,
     /// Subscribes to a text channel.
     JoinChannel {
         /// Which Channel.
@@ -1056,9 +1056,9 @@ pub enum ClientMessage {
     // by a `screen::ScreenHeader`. That split is the same one ADR 0027 made for
     // attachments, and here it is measured: `spikes/tela-no-transporte` shows
     // what sharing a queue with the voice costs.
-    /// Starts sharing a screen in the voice room this connection's plug is in.
+    /// Starts sharing a screen in the voice room this connection's connection is in.
     ///
-    /// Carries nothing, like [`Self::EjectPlug`]: the voice room is the one the
+    /// Carries nothing, like [`Self::LeaveVoiceRoom`]: the voice room is the one the
     /// server already has this connection in, and a voice room taken from the asker
     /// is a voice room the asker can aim somewhere else. What comes back is
     /// [`ServerMessage::ScreenShareStarted`], and the [`ScreenId`] in it is
@@ -1289,7 +1289,7 @@ pub enum ServerMessage {
     // ban both end with [`Self::Disconnecting`], which already enumerates
     // `Kicked` and `Banned`; a removal is [`Self::MessageRemoved`], which every
     // shell already folds in. Only being moved had nothing that could say it.
-    /// This person's plug is now in a different voice room, by somebody else's hand.
+    /// This person's connection is now in a different voice room, by somebody else's hand.
     ///
     /// Sent only to the person who was moved. Everybody else learns it the
     /// ordinary way, as a [`Self::PersonLeft`] from the old voice room and a
@@ -1303,7 +1303,7 @@ pub enum ServerMessage {
     /// asks. Without this it would keep sending voice into the room it thought
     /// it was in and drawing that room's roster around itself.
     MovedToVoiceRoom {
-        /// Where the plug is now.
+        /// Where the connection is now.
         voice_room: VoiceRoomId,
     },
 
@@ -1524,7 +1524,7 @@ pub enum ServerMessage {
     /// disagreeing with the first" that §3.2 rule 2 refuses.
     ///
     /// Sent on entering the session, and again when the measurement changes
-    /// band. Band rather than value, for the reason [`SyncRatio`] already
+    /// band. Band rather than value, for the reason [`Signal`] already
     /// exists: a number that moves every second would have the encoder chasing
     /// it, and a transmission that renegotiates its ceiling fifty times a
     /// minute is worse than one that is slightly wrong.
@@ -1798,9 +1798,9 @@ impl Validate for PersonState {
         // specs/02-protocolo.md puts the Sync Ratio on a 0-100 scale. A u8 can
         // hold 200, and a shell matching the bands of specs/07 would find no
         // band for it.
-        if self.sync_ratio > 100 {
+        if self.signal > 100 {
             return Err(ControlError::FieldOutOfRange {
-                field: "sync_ratio",
+                field: "signal",
             });
         }
         Ok(())
@@ -1828,7 +1828,7 @@ impl Validate for ClientMessage {
                 Ok(())
             }
             Self::Response { proof } => check("proof", proof.len(), MAX_PROOF_LEN),
-            Self::InsertPlug { password, .. } => check(
+            Self::EnterVoiceRoom { password, .. } => check(
                 "password",
                 password.as_ref().map_or(0, String::len),
                 MAX_NICKNAME_LEN,
@@ -1850,7 +1850,7 @@ impl Validate for ClientMessage {
             ),
             Self::RenameServer { name } => check_server_name(name),
             Self::SetServerIcon { icon } => check_icon(icon.as_ref()),
-            Self::EjectPlug
+            Self::LeaveVoiceRoom
             | Self::JoinChannel { .. }
             | Self::FetchHistory { .. }
             | Self::SetAtField(_)
@@ -1961,7 +1961,7 @@ mod tests {
         ClientMessage::Hello {
             join_secret: None,
             version: PROTOCOL_VERSION,
-            client: "plug/0.0.0".into(),
+            client: "connection/0.0.0".into(),
             nickname: "ayanami".into(),
             public_key: vec![7; PUBLIC_KEY_LEN],
         }
@@ -1987,9 +1987,9 @@ mod tests {
             roles: vec![Role {
                 id: RoleId(1),
                 name: "Person".into(),
-                permissions: vec![Permission::InsertPlug, Permission::Speak],
+                permissions: vec![Permission::EnterVoiceRoom, Permission::Speak],
             }],
-            permissions: vec![Permission::InsertPlug, Permission::Speak],
+            permissions: vec![Permission::EnterVoiceRoom, Permission::Speak],
         }
     }
 
@@ -2068,7 +2068,7 @@ mod tests {
         let long = ClientMessage::Hello {
             join_secret: None,
             version: PROTOCOL_VERSION,
-            client: "plug".into(),
+            client: "connection".into(),
             nickname: "n".repeat(MAX_NICKNAME_LEN + 1),
             public_key: vec![7; PUBLIC_KEY_LEN],
         };
@@ -2116,11 +2116,11 @@ mod tests {
         // a roster could not show who was not listening.
         let state = ServerMessage::PersonState(PersonState {
             person: PersonId(1),
-            at_field: true,
+            muted: true,
             total_isolation: true,
             speaking: false,
             presence: Presence::Available,
-            sync_ratio: 94,
+            signal: 94,
         });
         let frame = encode(&state).unwrap();
         assert_eq!(decode::<ServerMessage>(&frame).unwrap(), state);
@@ -2161,7 +2161,7 @@ mod tests {
         else {
             panic!("not a session");
         };
-        assert_eq!(permissions, vec![Permission::InsertPlug, Permission::Speak]);
+        assert_eq!(permissions, vec![Permission::EnterVoiceRoom, Permission::Speak]);
     }
 
     #[test]
@@ -2699,16 +2699,16 @@ mod numeric_tests {
         // no band in specs/07 covers 200.
         let state = ServerMessage::PersonState(PersonState {
             person: PersonId(1),
-            at_field: false,
+            muted: false,
             total_isolation: false,
             speaking: true,
             presence: Presence::Available,
-            sync_ratio: 200,
+            signal: 200,
         });
         assert!(matches!(
             encode(&state),
             Err(ControlError::FieldOutOfRange {
-                field: "sync_ratio"
+                field: "signal"
             })
         ));
     }
@@ -2728,7 +2728,7 @@ mod key_tests {
             let hello = ClientMessage::Hello {
                 join_secret: None,
                 version: PROTOCOL_VERSION,
-                client: "plug".into(),
+                client: "connection".into(),
                 nickname: "ayanami".into(),
                 public_key: vec![0; len],
             };
@@ -2749,7 +2749,7 @@ mod key_tests {
         let hello = ClientMessage::Hello {
             join_secret: None,
             version: PROTOCOL_VERSION,
-            client: "plug".into(),
+            client: "connection".into(),
             nickname: "ayanami".into(),
             public_key: vec![9; PUBLIC_KEY_LEN],
         };

@@ -51,9 +51,9 @@ fn project_channels(room: &Room, app: &mut App) {
         for person in room.roster(voice_room.id) {
             tree.push(Node::Person(RosterEntry {
                 nickname: person.nickname.clone(),
-                sync: person.sync_ratio,
+                sync: person.signal,
                 speaking: person.speaking,
-                at_field: person.at_field,
+                muted: person.muted,
                 total_isolation: person.total_isolation,
             }));
         }
@@ -381,19 +381,19 @@ mod tests {
         room.apply(&joined(3, "ayanami"));
         room.apply(&ServerMessage::PersonState(PersonState {
             person: PersonId(3),
-            at_field: false,
+            muted: false,
             total_isolation: false,
             speaking: false,
             presence: Presence::Available,
-            sync_ratio: 90,
+            signal: 90,
         }));
         room.apply(&ServerMessage::PersonState(PersonState {
             person: PersonId(7),
-            at_field: false,
+            muted: false,
             total_isolation: false,
             speaking: false,
             presence: Presence::Available,
-            sync_ratio: 60,
+            signal: 60,
         }));
 
         let mut app = App::new();
@@ -561,11 +561,11 @@ mod tests {
         room.apply(&joined(3, "ayanami"));
         room.apply(&ServerMessage::PersonState(PersonState {
             person: PersonId(3),
-            at_field: true,
+            muted: true,
             total_isolation: false,
             speaking: true,
             presence: Presence::Available,
-            sync_ratio: 42,
+            signal: 42,
         }));
 
         let mut app = App::new();
@@ -575,7 +575,7 @@ mod tests {
             .roster()
             .find(|person| person.nickname == "ayanami")
             .expect("roster");
-        assert!(person.at_field);
+        assert!(person.muted);
         assert!(person.speaking);
         assert_eq!(person.sync, 42);
     }

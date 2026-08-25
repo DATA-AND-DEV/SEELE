@@ -1,12 +1,12 @@
 # Como testar o SEELE
 
-Estado em M4: o `plug` é uma TUI de verdade, contra um `seeled` de verdade. Texto
+Estado em M4: o `connection` é uma TUI de verdade, contra um `seeled` de verdade. Texto
 funciona sem placa de som; voz precisa de microfone e alto-falante.
 
 ## Subir um servidor
 
 ```sh
-cargo build --release --bin seeled --bin plug
+cargo build --release --bin seeled --bin connection
 ./target/release/seeled 127.0.0.1:8383
 ```
 
@@ -32,7 +32,7 @@ verdade, então não há a trava que os terminais precisam (ADR 0016). Clicar no
 VoiceRoom em que já se está sai dele. O deslizante de volume aparece ao apontar uma
 linha do roster.
 
-O app e o `plug` usam o mesmo `$SEELE_HOME`, então por padrão são **o mesmo
+O app e o `connection` usam o mesmo `$SEELE_HOME`, então por padrão são **o mesmo
 pessoa** — que é o que faz a mesma sessão ser retomável entre os dois. Para
 serem duas pessoas, dois diretórios.
 
@@ -41,13 +41,13 @@ serem duas pessoas, dois diretórios.
 Noutro terminal:
 
 ```sh
-./target/release/plug --server 127.0.0.1:8383 --nick seunome
+./target/release/connection --server 127.0.0.1:8383 --nick seunome
 ```
 
 Sem placa de som, ou numa VPS:
 
 ```sh
-./target/release/plug --server 127.0.0.1:8383 --nick seunome --sem-audio
+./target/release/connection --server 127.0.0.1:8383 --nick seunome --sem-audio
 ```
 
 ## Dois pessoas na mesma máquina
@@ -57,8 +57,8 @@ A identidade mora em `$SEELE_HOME` (ADR 0017). Dois clientes com o mesmo
 ser duas pessoas, dois diretórios:
 
 ```sh
-SEELE_HOME=~/.seele-shinji ./target/release/plug -n shinji
-SEELE_HOME=~/.seele-asuka  ./target/release/plug -n asuka
+SEELE_HOME=~/.seele-shinji ./target/release/connection -n shinji
+SEELE_HOME=~/.seele-asuka  ./target/release/connection -n asuka
 ```
 
 O padrão é `~/.config/seele`.

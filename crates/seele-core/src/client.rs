@@ -11,7 +11,7 @@
 //! > Before `Sessao`, the client is in **PADRÃO: LARANJA** — connected, not
 //! > verified. The interface must reflect that state, not hide it.
 //!
-//! [`Pattern`] is that state, as plain data. A shell decides what orange looks
+//! [`Trust`] is that state, as plain data. A shell decides what orange looks
 //! like; this decides when it is true.
 
 use std::net::SocketAddr;
@@ -33,13 +33,13 @@ use crate::tofu::{PinDecision, PinStore, TofuVerifier};
 /// `specs/07-tema-evangelion.md` names these, and `specs/05-cliente-tui.md`
 /// requires both to be visible states rather than a spinner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Pattern {
+pub enum LinkTrust {
     /// Not connected.
     Offline,
-    /// Connected, not verified. **PADRÃO: LARANJA.**
-    Orange,
-    /// Verified. **PADRÃO: AZUL.**
-    Blue,
+    /// Connected, not verified. A conferência de identidade ainda não passou.
+    Unverified,
+    /// Verified. A identidade do servidor confere.
+    Verified,
 }
 
 /// Why a connection did not happen.
@@ -341,7 +341,7 @@ pub struct Client {
     inbox: tokio::sync::mpsc::UnboundedReceiver<ServerMessage>,
     session: SessionInfo,
     pin: PinDecision,
-    pattern: Pattern,
+    link_state: LinkTrust,
     /// A ping that has been sent and not yet answered.
     pending_ping: Option<(u64, std::time::Instant)>,
     /// The most recent round trip.
@@ -576,7 +576,7 @@ impl Client {
             inbox,
             session,
             pin,
-            pattern: Pattern::Blue,
+            link_state: LinkTrust::Verified,
             pending_ping: None,
             last_rtt: None,
             telas: std::sync::Arc::new(tokio::sync::Mutex::new(telas)),
@@ -603,8 +603,8 @@ impl Client {
 
     /// How far the connection has got.
     #[must_use]
-    pub fn pattern(&self) -> Pattern {
-        self.pattern
+    pub fn link_state(&self) -> LinkTrust {
+        self.link_state
     }
 
     /// What the TOFU check decided. ADR 0003.
@@ -613,7 +613,7 @@ impl Client {
         &self.pin
     }
 
-    /// Enters a voice room. "Inserir plug".
+    /// Enters a voice room. "Inserir connection".
     ///
     /// # Errors
     ///
@@ -621,7 +621,7 @@ impl Client {
     pub async fn insert_plug(&mut self, voice_room: VoiceRoomId) -> Result<()> {
         frame::write(
             &mut self.send,
-            &ClientMessage::InsertPlug {
+            &ClientMessage::EnterVoiceRoom {
                 voice_room,
                 password: None,
             },
@@ -761,13 +761,13 @@ impl Client {
             .await
     }
 
-    /// Takes the plug out of whatever voice room it is in.
+    /// Takes the connection out of whatever voice room it is in.
     ///
     /// # Errors
     ///
     /// Fails if the control stream is closed.
     pub async fn eject_plug(&mut self) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::EjectPlug).await
+        frame::write(&mut self.send, &ClientMessage::LeaveVoiceRoom).await
     }
 
     /// Announces the A.T. Field — the microphone being muted.
@@ -1109,7 +1109,7 @@ impl Client {
     /// not match used to be recorded as an ejection, which is the one reading
     /// that hides a refusal.
     pub fn close(&mut self, reason: &[u8]) {
-        self.pattern = Pattern::Offline;
+        self.link_state = LinkTrust::Offline;
         self.connection.close(0_u32.into(), reason);
     }
 
@@ -1164,7 +1164,7 @@ impl Client {
     // `spikes/tela-no-transporte` mediu 16,1% da voz perdida quando os dois
     // dividem a fila de datagramas do `quinn`.
 
-    /// Pede ao servidor para começar a compartilhar tela na sala de voz onde este plug
+    /// Pede ao servidor para começar a compartilhar tela na sala de voz onde este connection
     /// está.
     ///
     /// Não carrega sala de voz, resolução nem codec. A sala de voz é o que o servidor já sabe —
@@ -1361,7 +1361,7 @@ async fn handshake(
         send,
         &ClientMessage::Hello {
             version: seele_proto::PROTOCOL_VERSION,
-            client: concat!("plug/", env!("CARGO_PKG_VERSION")).into(),
+            client: concat!("connection/", env!("CARGO_PKG_VERSION")).into(),
             nickname: nickname.to_owned(),
             public_key: signing_key.verifying_key().to_bytes().to_vec(),
             join_secret: join_secret.map(str::to_owned),

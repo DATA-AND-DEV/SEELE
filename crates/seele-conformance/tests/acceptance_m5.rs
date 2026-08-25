@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use seele_ffi::{ConnectConfig, Event, EventListener, Pattern, Plug, PlugError, Trust};
+use seele_ffi::{ConnectConfig, Event, EventListener, LinkTrust, Connection, ConnectionError, Trust};
 use seele_server::persistence::Location;
 use seele_server::{ServerConfig, Daemon};
 
@@ -51,7 +51,7 @@ fn home(name: &str) -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn connect(address: SocketAddr, nickname: &str) -> Result<Arc<Plug>, PlugError> {
+fn connect(address: SocketAddr, nickname: &str) -> Result<Arc<Connection>, ConnectionError> {
     // `seele-ffi`'s unit tests cover the two ends of this — what goes into
     // `Destino`, and how a `Verdict` maps to a `Trust` — and neither of them
     // touches the one channel that puts the second inside the value `connect`
@@ -63,7 +63,7 @@ fn connect(address: SocketAddr, nickname: &str) -> Result<Arc<Plug>, PlugError> 
     // `home()` is wiped per nickname, so every connection here is a genuine
     // first contact with a server that was just born. Saying so out loud is what
     // makes the constant impossible.
-    Plug::connect(ConnectConfig {
+    Connection::connect(ConnectConfig {
         server: address.to_string(),
         alternate_servers: Vec::new(),
         nickname: nickname.to_owned(),
@@ -76,13 +76,13 @@ fn connect(address: SocketAddr, nickname: &str) -> Result<Arc<Plug>, PlugError> 
         capture_device: None,
         playback_device: None,
     })
-    .map(|(plug, trust)| {
+    .map(|(connection, trust)| {
         assert!(
             matches!(trust, Trust::FirstContact { .. }),
             "a fresh home against a fresh Server is first contact, and the shell \
              was told {trust:?}"
         );
-        plug
+        connection
     })
 }
 
@@ -108,15 +108,15 @@ impl Recorder {
 }
 
 /// Polls the snapshot until it says what the test is waiting for.
-fn until<F: Fn(&Plug) -> bool>(plug: &Plug, done: F) -> bool {
+fn until<F: Fn(&Connection) -> bool>(connection: &Connection, done: F) -> bool {
     let deadline = Instant::now() + WAIT;
     while Instant::now() < deadline {
-        if done(plug) {
+        if done(connection) {
             return true;
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    done(plug)
+    done(connection)
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -125,10 +125,10 @@ async fn a_shell_connects_and_the_snapshot_describes_the_server() -> Result<()> 
 
     // `connect` blocks, and a shell must call it off the thread that draws.
     // Here that is `spawn_blocking`, which is what the Tauri command does too.
-    let plug = tokio::task::spawn_blocking(move || connect(address, "ayanami")).await??;
+    let connection = tokio::task::spawn_blocking(move || connect(address, "ayanami")).await??;
 
-    let snapshot = plug.snapshot();
-    assert_eq!(snapshot.pattern, Pattern::Blue);
+    let snapshot = connection.snapshot();
+    assert_eq!(snapshot.link_state, LinkTrust::Verified);
     assert_eq!(snapshot.server, "Terceira Tóquio");
     assert_eq!(snapshot.nickname, "ayanami");
     assert!(snapshot.me.is_some());
@@ -143,13 +143,13 @@ async fn a_shell_connects_and_the_snapshot_describes_the_server() -> Result<()> 
 #[tokio::test(flavor = "multi_thread")]
 async fn entering_a_voice_room_puts_us_on_our_own_roster() -> Result<()> {
     let (address, server) = start().await?;
-    let plug = tokio::task::spawn_blocking(move || connect(address, "rei")).await??;
+    let connection = tokio::task::spawn_blocking(move || connect(address, "rei")).await??;
 
-    plug.insert_plug(VOICE_ROOM)?;
+    connection.insert_plug(VOICE_ROOM)?;
 
     assert!(
-        until(&plug, |plug| {
-            let snapshot = plug.snapshot();
+        until(&connection, |connection| {
+            let snapshot = connection.snapshot();
             snapshot
                 .voice_rooms
                 .iter()
@@ -180,12 +180,12 @@ async fn leaving_a_voice_room_takes_us_off_our_own_roster() -> Result<()> {
     // which is the same picture from the other chair, where the server is right
     // and the leaver's own screen is the one lying.
     let (address, server) = start().await?;
-    let plug = tokio::task::spawn_blocking(move || connect(address, "rei")).await??;
+    let connection = tokio::task::spawn_blocking(move || connect(address, "rei")).await??;
 
-    plug.insert_plug(VOICE_ROOM)?;
+    connection.insert_plug(VOICE_ROOM)?;
     assert!(
-        until(&plug, |plug| {
-            plug.snapshot()
+        until(&connection, |connection| {
+            connection.snapshot()
                 .voice_rooms
                 .iter()
                 .any(|voice_room| voice_room.occupied_by_us && voice_room.people.iter().any(|p| p.is_self))
@@ -193,18 +193,18 @@ async fn leaving_a_voice_room_takes_us_off_our_own_roster() -> Result<()> {
         "we entered a voice room and are not on its roster"
     );
 
-    plug.eject_plug()?;
+    connection.eject_plug()?;
 
     assert!(
-        until(&plug, |plug| {
-            let snapshot = plug.snapshot();
+        until(&connection, |connection| {
+            let snapshot = connection.snapshot();
             !snapshot
                 .voice_rooms
                 .iter()
                 .any(|voice_room| voice_room.occupied_by_us || voice_room.people.iter().any(|p| p.is_self))
         }),
         "we left the voice room and our own screen still draws us in it: {:?}",
-        plug.snapshot()
+        connection.snapshot()
             .voice_rooms
             .iter()
             .map(|voice_room| (
@@ -220,10 +220,10 @@ async fn leaving_a_voice_room_takes_us_off_our_own_roster() -> Result<()> {
     // the seat never clearing, that button stayed on `SAIR DA JAULA` for the
     // rest of the session and every press ejected again: the voice room could not be
     // left on screen **and could not be re-entered**.
-    plug.insert_plug(VOICE_ROOM)?;
+    connection.insert_plug(VOICE_ROOM)?;
     assert!(
-        until(&plug, |plug| {
-            plug.snapshot()
+        until(&connection, |connection| {
+            connection.snapshot()
                 .voice_rooms
                 .iter()
                 .any(|voice_room| voice_room.occupied_by_us && voice_room.people.iter().any(|p| p.is_self))
@@ -245,16 +245,16 @@ async fn two_shells_hold_a_conversation() -> Result<()> {
     let heard = Arc::new(Recorder::default());
     listener.subscribe(Arc::clone(&heard) as Arc<dyn EventListener>);
 
-    for plug in [&speaker, &listener] {
-        plug.insert_plug(VOICE_ROOM)?;
-        plug.open_channel(CHANNEL)?;
+    for connection in [&speaker, &listener] {
+        connection.insert_plug(VOICE_ROOM)?;
+        connection.open_channel(CHANNEL)?;
     }
 
     speaker.send_message(CHANNEL, "sync caiu aqui".into())?;
 
     assert!(
-        until(&listener, |plug| {
-            plug.messages().iter().any(|m| m.body == "sync caiu aqui")
+        until(&listener, |connection| {
+            connection.messages().iter().any(|m| m.body == "sync caiu aqui")
         }),
         "the message never reached the other shell"
     );
@@ -292,8 +292,8 @@ async fn an_at_field_is_visible_to_everybody_else() -> Result<()> {
     muted.insert_plug(VOICE_ROOM)?;
     watcher.insert_plug(VOICE_ROOM)?;
     assert!(
-        until(&watcher, |plug| {
-            let snapshot = plug.snapshot();
+        until(&watcher, |connection| {
+            let snapshot = connection.snapshot();
             snapshot
                 .voice_rooms
                 .iter()
@@ -305,12 +305,12 @@ async fn an_at_field_is_visible_to_everybody_else() -> Result<()> {
     muted.set_at_field(true)?;
 
     assert!(
-        until(&watcher, |plug| {
-            let snapshot = plug.snapshot();
+        until(&watcher, |connection| {
+            let snapshot = connection.snapshot();
             snapshot.voice_rooms.iter().any(|voice_room| {
                 voice_room.people
                     .iter()
-                    .any(|person| person.nickname == "kaworu" && person.at_field)
+                    .any(|person| person.nickname == "kaworu" && person.muted)
             })
         }),
         "a mute was applied locally and never announced"
@@ -333,7 +333,7 @@ async fn a_second_client_resumes_the_conversation_with_its_history() -> Result<(
     first.open_channel(CHANNEL)?;
     first.send_message(CHANNEL, "primeira coisa dita".into())?;
     assert!(
-        until(&first, |plug| !plug.messages().is_empty()),
+        until(&first, |connection| !connection.messages().is_empty()),
         "the message was never committed"
     );
     // Ending the first session is what makes this a resumption rather than two
@@ -345,8 +345,8 @@ async fn a_second_client_resumes_the_conversation_with_its_history() -> Result<(
     second.open_channel(CHANNEL)?;
 
     assert!(
-        until(&second, |plug| {
-            plug.messages()
+        until(&second, |connection| {
+            connection.messages()
                 .iter()
                 .any(|m| m.body == "primeira coisa dita")
         }),
@@ -374,7 +374,7 @@ async fn a_second_client_resumes_the_conversation_with_its_history() -> Result<(
 /// `specs/06-clientes-gui.md`: "mesma sessão pode ser retomada em outro cliente
 /// sem perda de histórico." Os outros testes deste arquivo usam dois handles da
 /// FFI, o que prova a retomada mas não a travessia — este usa o caminho do
-/// `plug` de um lado e o do app do outro, que é o que a frase quer dizer.
+/// `connection` de um lado e o do app do outro, que é o que a frase quer dizer.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()> {
     use seele_core::{Client, MemoryPinStore, Room};
@@ -382,7 +382,7 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
 
     let (address, server) = start().await?;
 
-    // ---- o lado do `plug`: seele-core cru, com o mesmo Room que a TUI projeta.
+    // ---- o lado do `connection`: seele-core cru, com o mesmo Room que a TUI projeta.
     let mut terminal = Client::connect(
         address,
         "localhost",
@@ -434,8 +434,8 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
     desktop.open_channel(CHANNEL)?;
 
     assert!(
-        until(&desktop, |plug| {
-            plug.messages().iter().any(|m| m.body == "dito no terminal")
+        until(&desktop, |connection| {
+            connection.messages().iter().any(|m| m.body == "dito no terminal")
         }),
         "o app abriu a Linha e não viu o que o terminal disse"
     );
@@ -470,7 +470,7 @@ async fn an_unreachable_server_is_an_enum_and_not_a_message() -> Result<()> {
     assert!(
         matches!(
             failure,
-            PlugError::Unreachable | PlugError::HandshakeTimeout
+            ConnectionError::Unreachable | ConnectionError::HandshakeTimeout
         ),
         "unexpected failure: {failure:?}"
     );
@@ -480,7 +480,7 @@ async fn an_unreachable_server_is_an_enum_and_not_a_message() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_name_that_does_not_resolve_says_so_specifically() -> Result<()> {
     let failure = tokio::task::spawn_blocking(|| {
-        Plug::connect(ConnectConfig {
+        Connection::connect(ConnectConfig {
             server: "nao-existe.invalid:8383".into(),
             alternate_servers: Vec::new(),
             nickname: "ninguem".into(),
@@ -496,7 +496,7 @@ async fn a_name_that_does_not_resolve_says_so_specifically() -> Result<()> {
     .await?
     .expect_err("an impossible host resolved");
 
-    assert_eq!(failure, PlugError::UnresolvableHost);
+    assert_eq!(failure, ConnectionError::UnresolvableHost);
     Ok(())
 }
 
@@ -504,11 +504,11 @@ async fn a_name_that_does_not_resolve_says_so_specifically() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn the_volume_of_a_stranger_is_refused_by_name() -> Result<()> {
     let (address, server) = start().await?;
-    let plug = tokio::task::spawn_blocking(move || connect(address, "hyuga")).await??;
+    let connection = tokio::task::spawn_blocking(move || connect(address, "hyuga")).await??;
 
     assert_eq!(
-        plug.set_volume("ninguem".into(), 50),
-        Err(PlugError::UnknownPerson)
+        connection.set_volume("ninguem".into(), 50),
+        Err(ConnectionError::UnknownPerson)
     );
 
     server.shutdown();
@@ -519,11 +519,11 @@ async fn the_volume_of_a_stranger_is_refused_by_name() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn dropping_the_handle_disconnects() -> Result<()> {
     let (address, server) = start().await?;
-    let plug = tokio::task::spawn_blocking(move || connect(address, "aoba")).await??;
-    plug.insert_plug(VOICE_ROOM)?;
-    assert!(until(&plug, |plug| plug.snapshot().pattern == Pattern::Blue));
+    let connection = tokio::task::spawn_blocking(move || connect(address, "aoba")).await??;
+    connection.insert_plug(VOICE_ROOM)?;
+    assert!(until(&connection, |connection| connection.snapshot().link_state == LinkTrust::Verified));
 
-    drop(plug);
+    drop(connection);
     // Nothing to assert beyond not hanging: a handle whose driver thread
     // outlives it would keep a QUIC connection and an audio thread alive for
     // the life of the process.
@@ -544,24 +544,24 @@ async fn dropping_the_handle_disconnects() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_shell_asks_for_a_room_and_the_server_makes_it() -> Result<()> {
     let (address, server) = start().await?;
-    let plug = tokio::task::spawn_blocking(move || connect(address, "anfitria")).await??;
+    let connection = tokio::task::spawn_blocking(move || connect(address, "anfitria")).await??;
 
     // The first account on a server is its Comandante, which is what makes this
     // shell the one that may ask. The field exists so a screen can decide
     // whether to draw the control at all.
     assert!(
-        plug.snapshot().may_manage_voice_rooms,
+        connection.snapshot().may_manage_voice_rooms,
         "the shell that hosted this server was not told it may make rooms"
     );
 
     let recorder = Arc::new(Recorder::default());
-    plug.subscribe(Arc::clone(&recorder) as Arc<dyn EventListener>);
+    connection.subscribe(Arc::clone(&recorder) as Arc<dyn EventListener>);
 
-    plug.create_channel("planejamento".into())?;
-    plug.create_voice_room("VOICE_ROOM-02 SALA DOS FUNDOS".into(), 8, None)?;
+    connection.create_channel("planejamento".into())?;
+    connection.create_voice_room("VOICE_ROOM-02 SALA DOS FUNDOS".into(), 8, None)?;
 
     assert!(
-        until(&plug, |plug| plug
+        until(&connection, |connection| connection
             .snapshot()
             .voice_rooms
             .iter()
@@ -569,7 +569,7 @@ async fn a_shell_asks_for_a_room_and_the_server_makes_it() -> Result<()> {
         "the room never reached the snapshot the screen reads"
     );
     assert!(
-        until(&plug, |plug| plug
+        until(&connection, |connection| connection
             .snapshot()
             .channels
             .iter()
@@ -583,14 +583,14 @@ async fn a_shell_asks_for_a_room_and_the_server_makes_it() -> Result<()> {
 
     // And the room is a room: somebody can walk into it. A voice room that exists in
     // a list and cannot be entered is a row, not a channel.
-    plug.insert_plug(2)?;
-    assert!(until(&plug, |plug| plug
+    connection.insert_plug(2)?;
+    assert!(until(&connection, |connection| connection
         .snapshot()
         .voice_rooms
         .iter()
         .any(|voice_room| voice_room.id == 2 && voice_room.occupied_by_us)));
 
-    drop(plug);
+    drop(connection);
     server.shutdown();
     Ok(())
 }

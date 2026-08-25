@@ -8,7 +8,7 @@
 //! Sem isto, essa pessoa precisa saber o que é uma linha de comando — e num
 //! produto cujo argumento inteiro é "hospede você mesmo", exigir isso de quem
 //! hospeda exclui justamente quem mais ganharia. Os dois clientes chamam daqui:
-//! `plug --hospedar` e o botão **Hospedar** do app.
+//! `connection --hospedar` e o botão **Hospedar** do app.
 //!
 //! # O que isto **não** é
 //!

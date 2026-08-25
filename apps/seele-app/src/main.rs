@@ -12,7 +12,7 @@
 //!
 //! # Threading
 //!
-//! [`seele_ffi::Plug::connect`] blocks, so it runs on a blocking thread. Events
+//! [`seele_ffi::Connection::connect`] blocks, so it runs on a blocking thread. Events
 //! arrive on the FFI's driver thread; [`Bridge`] is what marshals them onto the
 //! webview, which is the "a casca marshala para sua thread de UI" the spec asks
 //! for.
@@ -31,7 +31,7 @@ mod icone;
 use std::sync::{Arc, Mutex};
 
 use seele_ffi::{
-    ConnectConfig, ConnectFailure, Event, EventListener, ChannelWeight, Plug, PlugError, Preview,
+    ConnectConfig, ConnectFailure, Event, EventListener, ChannelWeight, Connection, ConnectionError, Preview,
     PreviewRules, Snapshot, VoiceMode,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -54,7 +54,7 @@ const CANAL_DE_ATUALIZACAO: &str = "seele://atualizacao";
 /// Everything the commands share.
 #[derive(Default)]
 struct Session {
-    plug: Mutex<Option<Arc<Plug>>>,
+    connection: Mutex<Option<Arc<Connection>>>,
     /// O servidor que este app está hospedando, quando está.
     ///
     /// Vive aqui e não numa variável local porque tem que sobreviver ao comando
@@ -92,7 +92,7 @@ struct Session {
     /// ninguém nada para fazer com ela além de reescrever a comparação em
     /// JavaScript, que é exatamente o que `specs/06-clientes-gui.md:19` proíbe.
     ///
-    /// O que mudou foi o outro lado: [`seele_ffi::Plug::connect`] devolve o
+    /// O que mudou foi o outro lado: [`seele_ffi::Connection::connect`] devolve o
     /// veredito já decidido, em Rust, com a comparação feita. A string que
     /// atravessa agora não é uma entrada de decisão — é o que uma pessoa lê e
     /// confere por outro canal, do mesmo jeito que o `PinChanged` já mandava as
@@ -114,12 +114,12 @@ struct Session {
 
 impl Session {
     /// The live handle, or the reason there is none.
-    fn plug(&self) -> Result<Arc<Plug>, PlugError> {
-        self.plug
+    fn connection(&self) -> Result<Arc<Connection>, ConnectionError> {
+        self.connection
             .lock()
-            .map_err(|_| PlugError::NotConnected)?
+            .map_err(|_| ConnectionError::NotConnected)?
             .clone()
-            .ok_or(PlugError::NotConnected)
+            .ok_or(ConnectionError::NotConnected)
     }
 }
 
@@ -140,7 +140,7 @@ impl EventListener for Bridge {
 ///
 /// The FFI takes a path because the shell knows where its platform keeps
 /// configuration and the core knows how to persist an identity. `$SEELE_HOME`
-/// comes first so the desktop app and `plug` can be told to be the same person —
+/// comes first so the desktop app and `connection` can be told to be the same person —
 /// which is what makes a session resumable between them.
 fn config_dir(app: &AppHandle) -> String {
     if let Ok(home) = std::env::var("SEELE_HOME") {
@@ -162,8 +162,8 @@ fn config_dir(app: &AppHandle) -> String {
 
 /// O que uma conexão bem-sucedida entrega à tela.
 ///
-/// O veredito vem **junto** do `Snapshot`, e não por evento: `Plug::connect` só
-/// devolve o `Arc<Plug>` depois de a identidade estar decidida, então uma casca
+/// O veredito vem **junto** do `Snapshot`, e não por evento: `Connection::connect` só
+/// devolve o `Arc<Connection>` depois de a identidade estar decidida, então uma casca
 /// que se inscrevesse para ouvi-lo chegaria sempre tarde demais.
 #[derive(Debug, serde::Serialize)]
 struct Entrada {
@@ -186,8 +186,8 @@ async fn connect(
     audio: bool,
     join_secret: Option<String>,
 ) -> Result<Entrada, ConnectFailure> {
-    if session.plug().is_ok() {
-        return Err(PlugError::AlreadyConnected.into());
+    if session.connection().is_ok() {
+        return Err(ConnectionError::AlreadyConnected.into());
     }
 
     // O convite guardado vale para o servidor dele e para nenhum outro. Quem cola
@@ -262,35 +262,35 @@ async fn connect(
     // **As etapas, não.** Elas acontecem durante esta linha, e é por isso que a
     // ponte entra por `connect_watching` em vez de por `subscribe` depois: o
     // comentário que estava aqui dizia que quem se inscreve só tem o
-    // `Arc<Plug>` depois que esta linha termina, e isso continua verdade — o
+    // `Arc<Connection>` depois que esta linha termina, e isso continua verdade — o
     // que mudou é que a FFI passou a aceitar o ouvinte **antes** de bloquear.
     // Sem isso o `watch` da chegada não tinha um só leitor em produção.
     //
-    // `Bridge` não depende do plug para nada: ele carrega o `AppHandle` e
+    // `Bridge` não depende do connection para nada: ele carrega o `AppHandle` e
     // reemite. Por isso um segundo, criado aqui, não é duplicação de estado —
     // é o mesmo destino, ligado mais cedo.
     let ponte = Arc::new(Bridge { app: app.clone() }) as Arc<dyn EventListener>;
     let atento = Arc::clone(&ponte);
-    let (plug, veredito) =
-        tauri::async_runtime::spawn_blocking(move || Plug::connect_watching(config, atento))
+    let (connection, veredito) =
+        tauri::async_runtime::spawn_blocking(move || Connection::connect_watching(config, atento))
             .await
-            .map_err(|_| ConnectFailure::from(PlugError::Unreachable))??;
+            .map_err(|_| ConnectFailure::from(ConnectionError::Unreachable))??;
 
-    plug.subscribe(ponte);
-    let snapshot = plug.snapshot();
+    connection.subscribe(ponte);
+    let snapshot = connection.snapshot();
 
-    if let Ok(mut slot) = session.plug.lock() {
-        *slot = Some(plug);
+    if let Ok(mut slot) = session.connection.lock() {
+        *slot = Some(connection);
     }
 
     // A metade invisível da lista de visitados: sem isto a seção da tela de
-    // entrada ficaria permanentemente vazia. A política é a mesma que o `plug`
+    // entrada ficaria permanentemente vazia. A política é a mesma que o `connection`
     // já escreveu em `crates/seele-tui/src/main.rs`.
     //
     // Registrado só **depois** de dar certo — guardar antes encheria a lista de
     // endereços errados digitados uma vez, que é o oposto de uma lista de
     // atalhos. E um servidor hospedado aqui não entra: `127.0.0.1` não é lugar
-    // aonde se volta, é o botão HOSPEDAR. O `plug` decide isso pela bandeira
+    // aonde se volta, é o botão HOSPEDAR. O `connection` decide isso pela bandeira
     // `--hospedar`; aqui não há bandeira, e o endereço é o que sobrou para
     // dizer a mesma coisa.
     if !hospedado_aqui(&alvo) {
@@ -301,7 +301,7 @@ async fn connect(
             std::path::PathBuf::from(&casa).join("conhecidos"),
         ) {
             // A sala de voz que já estava anotado, preservado. `registrar` reescreve a
-            // entrada inteira, e este arquivo é compartilhado com o `plug`, que
+            // entrada inteira, e este arquivo é compartilhado com o `connection`, que
             // grava em qual sala de voz a pessoa entrou e o lê de volta como padrão na
             // sua tela de seleção. Passar `None` daqui apagaria, a cada visita
             // pelo app, o que o terminal anotou.
@@ -385,7 +385,7 @@ enum FalhaAoHospedar {
 ///
 /// Este comando é o item de UX que faltava: sem ele, hospedar exige abrir um
 /// terminal, e num produto cujo argumento é "hospede você mesmo" isso exclui
-/// justamente quem só quer clicar. O mesmo caminho do `plug --hospedar`, o
+/// justamente quem só quer clicar. O mesmo caminho do `connection --hospedar`, o
 /// mesmo módulo, o mesmo server.
 ///
 /// Não conecta. Quem conecta é o `connect` de sempre, com o endereço que este
@@ -493,10 +493,10 @@ fn classificar(erro: &anyhow::Error) -> FalhaAoHospedar {
 
 #[tauri::command]
 async fn disconnect(session: State<'_, Session>) -> Result<(), ()> {
-    let plug = session.plug.lock().ok().and_then(|mut slot| slot.take());
+    let connection = session.connection.lock().ok().and_then(|mut slot| slot.take());
     // Dropping the handle is what ends the session; taking it out of the slot
     // is what makes the next `connect` allowed.
-    drop(plug);
+    drop(connection);
 
     // O convite morre com a sessão que ele abriu. Enquanto nada era conferido
     // isto era inerte; deixou de ser no momento em que `expected_fingerprint`
@@ -522,8 +522,8 @@ async fn disconnect(session: State<'_, Session>) -> Result<(), ()> {
 }
 
 #[tauri::command]
-fn snapshot(session: State<'_, Session>) -> Result<Snapshot, PlugError> {
-    Ok(session.plug()?.snapshot())
+fn snapshot(session: State<'_, Session>) -> Result<Snapshot, ConnectionError> {
+    Ok(session.connection()?.snapshot())
 }
 
 /// A conversa da Linha aberta.
@@ -533,28 +533,28 @@ fn snapshot(session: State<'_, Session>) -> Result<Snapshot, PlugError> {
 /// longa ficava lenta de escrever. A tela pede este quando o
 /// `messages_revision` do snapshot muda, e só então.
 #[tauri::command]
-fn messages(session: State<'_, Session>) -> Result<Vec<seele_ffi::Message>, PlugError> {
-    Ok(session.plug()?.messages())
+fn messages(session: State<'_, Session>) -> Result<Vec<seele_ffi::Message>, ConnectionError> {
+    Ok(session.connection()?.messages())
 }
 
 #[tauri::command]
-fn insert_plug(session: State<'_, Session>, voice_room: u32) -> Result<(), PlugError> {
-    session.plug()?.insert_plug(voice_room)
+fn insert_plug(session: State<'_, Session>, voice_room: u32) -> Result<(), ConnectionError> {
+    session.connection()?.insert_plug(voice_room)
 }
 
 #[tauri::command]
-fn eject_plug(session: State<'_, Session>) -> Result<(), PlugError> {
-    session.plug()?.eject_plug()
+fn eject_plug(session: State<'_, Session>) -> Result<(), ConnectionError> {
+    session.connection()?.eject_plug()
 }
 
 #[tauri::command]
-fn open_channel(session: State<'_, Session>, channel: u32) -> Result<(), PlugError> {
-    session.plug()?.open_channel(channel)
+fn open_channel(session: State<'_, Session>, channel: u32) -> Result<(), ConnectionError> {
+    session.connection()?.open_channel(channel)
 }
 
 #[tauri::command]
-fn send_message(session: State<'_, Session>, channel: u32, body: String) -> Result<(), PlugError> {
-    session.plug()?.send_message(channel, body)
+fn send_message(session: State<'_, Session>, channel: u32, body: String) -> Result<(), ConnectionError> {
+    session.connection()?.send_message(channel, body)
 }
 
 // ---------------------------------------------------------------- anexos
@@ -593,11 +593,11 @@ struct ArquivoEscolhido {
 /// quem escolheu o arquivo sabe o tamanho dele —, então esta janela nunca
 /// mostra um travessão no lugar de um andamento.
 #[tauri::command]
-fn descrever_arquivo(caminho: String) -> Result<ArquivoEscolhido, PlugError> {
+fn descrever_arquivo(caminho: String) -> Result<ArquivoEscolhido, ConnectionError> {
     let alvo = std::path::PathBuf::from(&caminho);
-    let meta = std::fs::metadata(&alvo).map_err(|_| PlugError::NotConnected)?;
+    let meta = std::fs::metadata(&alvo).map_err(|_| ConnectionError::NotConnected)?;
     if !meta.is_file() {
-        return Err(PlugError::NotConnected);
+        return Err(ConnectionError::NotConnected);
     }
     let nome = alvo
         .file_name()
@@ -626,7 +626,7 @@ fn descrever_arquivo(caminho: String) -> Result<ArquivoEscolhido, PlugError> {
 /// pelo mesmo motivo do ADR 0027: uma lista de extensões aqui esconderia
 /// justamente o arquivo que alguém quer mandar, e um `rename` a contorna.
 #[tauri::command]
-async fn escolher_arquivo(app: AppHandle) -> Result<Option<ArquivoEscolhido>, PlugError> {
+async fn escolher_arquivo(app: AppHandle) -> Result<Option<ArquivoEscolhido>, ConnectionError> {
     use tauri_plugin_dialog::DialogExt as _;
 
     let (envia, mut recebe) = tauri::async_runtime::channel(1);
@@ -646,7 +646,7 @@ async fn escolher_arquivo(app: AppHandle) -> Result<Option<ArquivoEscolhido>, Pl
     let Ok(caminho) = escolha.into_path() else {
         // Só o Android devolve `content://`, e este binário não roda lá. Um
         // caminho que não é caminho é recusado em vez de virar texto.
-        return Err(PlugError::NotConnected);
+        return Err(ConnectionError::NotConnected);
     };
     descrever_arquivo(caminho.display().to_string()).map(Some)
 }
@@ -698,9 +698,9 @@ fn enviar_anexo(
     caminho: String,
     nome: String,
     tipo: String,
-) -> Result<u64, PlugError> {
+) -> Result<u64, ConnectionError> {
     session
-        .plug()?
+        .connection()?
         .send_attachment(channel, body, caminho, nome, tipo)
 }
 
@@ -713,8 +713,8 @@ fn enviar_anexo(
 /// varrer.** É a guarda que o sistema já tem, e que só funciona se quem grava a
 /// acionar.
 #[tauri::command]
-fn salvar_anexo(session: State<'_, Session>, anexo: u64, destino: String) -> Result<(), PlugError> {
-    session.plug()?.save_attachment(anexo, destino)
+fn salvar_anexo(session: State<'_, Session>, anexo: u64, destino: String) -> Result<(), ConnectionError> {
+    session.connection()?.save_attachment(anexo, destino)
 }
 
 /// Baixa um anexo pequeno e diz se esta janela pode desenhá-lo.
@@ -736,9 +736,9 @@ fn salvar_anexo(session: State<'_, Session>, anexo: u64, destino: String) -> Res
 /// teto de disco de quem hospeda em banda de todo mundo, uma vez por vez que
 /// alguém abrisse a Linha.
 #[tauri::command]
-async fn prever_anexo(session: State<'_, Session>, anexo: u64) -> Result<Preview, PlugError> {
-    let plug = session.plug()?;
-    plug.preview_attachment(anexo).await
+async fn prever_anexo(session: State<'_, Session>, anexo: u64) -> Result<Preview, ConnectionError> {
+    let connection = session.connection()?;
+    connection.preview_attachment(anexo).await
 }
 
 /// O que a tela precisa para decidir se oferece uma prévia.
@@ -755,7 +755,7 @@ async fn prever_anexo(session: State<'_, Session>, anexo: u64) -> Result<Preview
 /// desenhar o que a busca depois recusa.
 #[tauri::command]
 fn regras_de_previa() -> PreviewRules {
-    Plug::preview_rules()
+    Connection::preview_rules()
 }
 
 /// Onde os arquivos salvos vão parar, por padrão.
@@ -792,26 +792,26 @@ fn criar_voice_room(
     name: String,
     limit: u16,
     channel: Option<u32>,
-) -> Result<(), PlugError> {
-    session.plug()?.create_voice_room(name, limit, channel)
+) -> Result<(), ConnectionError> {
+    session.connection()?.create_voice_room(name, limit, channel)
 }
 
 /// Pede ao servidor que faça uma Linha.
 #[tauri::command]
-fn criar_linha(session: State<'_, Session>, name: String) -> Result<(), PlugError> {
-    session.plug()?.create_channel(name)
+fn criar_linha(session: State<'_, Session>, name: String) -> Result<(), ConnectionError> {
+    session.connection()?.create_channel(name)
 }
 
 /// Pede ao servidor que renomeie uma sala de voz.
 #[tauri::command]
-fn renomear_voice_room(session: State<'_, Session>, voice_room: u32, name: String) -> Result<(), PlugError> {
-    session.plug()?.rename_voice_room(voice_room, name)
+fn renomear_voice_room(session: State<'_, Session>, voice_room: u32, name: String) -> Result<(), ConnectionError> {
+    session.connection()?.rename_voice_room(voice_room, name)
 }
 
 /// Pede ao servidor que renomeie uma Linha.
 #[tauri::command]
-fn renomear_linha(session: State<'_, Session>, channel: u32, name: String) -> Result<(), PlugError> {
-    session.plug()?.rename_channel(channel, name)
+fn renomear_linha(session: State<'_, Session>, channel: u32, name: String) -> Result<(), ConnectionError> {
+    session.connection()?.rename_channel(channel, name)
 }
 
 // ------------------------------------------------- a cara e o nome do servidor
@@ -820,7 +820,7 @@ fn renomear_linha(session: State<'_, Session>, channel: u32, name: String) -> Re
 // imagem ao lado dele. Cinco comandos, e nenhum deles decide nada — a
 // permissão é conferida pelo PERMISSIONS no instante do verbo, e o que é uma
 // imagem aceitável é conferido pelo próprio protocolo, dentro de
-// `Plug::set_server_icon`.
+// `Connection::set_server_icon`.
 
 /// Pede ao servidor que troque o próprio nome.
 ///
@@ -829,8 +829,8 @@ fn renomear_linha(session: State<'_, Session>, channel: u32, name: String) -> Re
 /// permissão recebe `Alert`/`PermissionDenied` do servidor, e é lá que a
 /// `specs/08-seguranca.md` põe a segurança — nunca no controle escondido.
 #[tauri::command]
-fn renomear_server(session: State<'_, Session>, name: String) -> Result<(), PlugError> {
-    session.plug()?.rename_server(name)
+fn renomear_server(session: State<'_, Session>, name: String) -> Result<(), ConnectionError> {
+    session.connection()?.rename_server(name)
 }
 
 /// O que a tela pode dizer sobre a imagem **antes** de alguém escolher uma.
@@ -843,14 +843,14 @@ fn renomear_server(session: State<'_, Session>, name: String) -> Result<(), Plug
 /// **Isto ainda é uma cópia**, e a nota é a dívida: os números de verdade são
 /// `seele_proto::control::MAX_SERVER_ICON_LEN` e `MAX_SERVER_ICON_SIDE`, e o
 /// ADR 0002 impede este binário de enxergá-los — ele vê `seele-ffi` e nada
-/// além. `Plug::preview_rules()` existe justamente para não fazer isto com o
-/// teto de prévia; falta o irmão dela, `Plug::server_icon_rules()`, e enquanto
+/// além. `Connection::preview_rules()` existe justamente para não fazer isto com o
+/// teto de prévia; falta o irmão dela, `Connection::server_icon_rules()`, e enquanto
 /// ele não existe a cópia mora aqui, em Rust, onde uma linha a substitui.
 ///
 /// O que a cópia **não** faz é julgar. Nenhum comando abaixo recusa uma imagem
-/// por causa destes números: quem recusa é `Plug::set_server_icon`, com a
+/// por causa destes números: quem recusa é `Connection::set_server_icon`, com a
 /// função do protocolo, e o número que a tela escreve no erro é o que o
-/// `PlugError::IconTooBig` carrega. Se esta cópia envelhecer, a tela mostra
+/// `ConnectionError::IconTooBig` carrega. Se esta cópia envelhecer, a tela mostra
 /// dois números diferentes — que é ruim, e ainda assim é melhor que uma casca
 /// recusando em nome de uma regra que deixou de ser a regra.
 #[tauri::command]
@@ -882,7 +882,7 @@ fn modulo_de_video_a_baixar(app: AppHandle) -> Option<seele_ffi::ModuloAOferecer
 /// Esta função faz a única parte que não dá para testar sem rede — pedir os
 /// bytes — e entrega o resto para quem sabe recusá-los.
 #[tauri::command]
-async fn baixar_modulo_de_video(app: AppHandle) -> Result<String, seele_ffi::PlugError> {
+async fn baixar_modulo_de_video(app: AppHandle) -> Result<String, seele_ffi::ConnectionError> {
     let pasta = config_dir(&app);
     let Some(oferta) = seele_ffi::modulo_de_video_a_baixar(&pasta) else {
         // Já está instalado, ou não existe para este sistema. Nos dois casos não
@@ -893,15 +893,15 @@ async fn baixar_modulo_de_video(app: AppHandle) -> Result<String, seele_ffi::Plu
 
     let resposta = reqwest::get(&oferta.url).await.map_err(|erro| {
         tracing::warn!(%erro, url = %oferta.url, "não consegui pedir o módulo de vídeo");
-        seele_ffi::PlugError::ScreenModuleRefused
+        seele_ffi::ConnectionError::ScreenModuleRefused
     })?;
     if !resposta.status().is_success() {
         tracing::warn!(status = %resposta.status(), url = %oferta.url, "a origem do módulo recusou");
-        return Err(seele_ffi::PlugError::ScreenModuleRefused);
+        return Err(seele_ffi::ConnectionError::ScreenModuleRefused);
     }
     let bytes = resposta.bytes().await.map_err(|erro| {
         tracing::warn!(%erro, "o download do módulo de vídeo não completou");
-        seele_ffi::PlugError::ScreenModuleRefused
+        seele_ffi::ConnectionError::ScreenModuleRefused
     })?;
 
     let caminho = seele_ffi::instalar_modulo_de_video(&pasta, &bytes)?;
@@ -952,7 +952,7 @@ const LADO_DO_ICONE: u32 = 256;
 async fn escolher_icone_do_server(
     app: AppHandle,
     session: State<'_, Session>,
-) -> Result<bool, PlugError> {
+) -> Result<bool, ConnectionError> {
     use std::io::Read as _;
     use tauri_plugin_dialog::DialogExt as _;
 
@@ -969,14 +969,14 @@ async fn escolher_icone_do_server(
     };
     let Ok(caminho) = escolha.into_path() else {
         // Só o Android devolve `content://`, e este binário não roda lá.
-        return Err(PlugError::IconNotAPicture);
+        return Err(ConnectionError::IconNotAPicture);
     };
 
     let Ok(arquivo) = std::fs::File::open(&caminho) else {
         // Um arquivo que não abre não é uma imagem que este servidor possa usar, e
         // é a única frase honesta que esta casca tem: ela não sabe se o disco
         // sumiu ou se a permissão é de outra pessoa.
-        return Err(PlugError::IconNotAPicture);
+        return Err(ConnectionError::IconNotAPicture);
     };
     let mut bytes = Vec::new();
     if arquivo
@@ -984,7 +984,7 @@ async fn escolher_icone_do_server(
         .read_to_end(&mut bytes)
         .is_err()
     {
-        return Err(PlugError::IconNotAPicture);
+        return Err(ConnectionError::IconNotAPicture);
     }
 
     // Fora da linha principal: uma foto de doze megapixels leva um tempo visível
@@ -995,10 +995,10 @@ async fn escolher_icone_do_server(
     else {
         // Não é imagem, ou é uma que nem o último degrau fez caber. As duas
         // dizem a mesma coisa a quem escolheu: este arquivo não vira ícone.
-        return Err(PlugError::IconNotAPicture);
+        return Err(ConnectionError::IconNotAPicture);
     };
 
-    session.plug()?.set_server_icon(Some(pronto))?;
+    session.connection()?.set_server_icon(Some(pronto))?;
     Ok(true)
 }
 
@@ -1007,8 +1007,8 @@ async fn escolher_icone_do_server(
 /// Verbo próprio e não `escolher` com um argumento vazio: são duas coisas que
 /// uma pessoa faz por motivos diferentes, e são dois botões na tela.
 #[tauri::command]
-fn tirar_icone_do_server(session: State<'_, Session>) -> Result<(), PlugError> {
-    session.plug()?.set_server_icon(None)
+fn tirar_icone_do_server(session: State<'_, Session>) -> Result<(), ConnectionError> {
+    session.connection()?.set_server_icon(None)
 }
 
 /// Os bytes da imagem que está valendo, ou nada.
@@ -1018,8 +1018,8 @@ fn tirar_icone_do_server(session: State<'_, Session>) -> Result<(), PlugError> {
 /// ele carrega `icon_revision` — um número — e a casca só vem buscar os bytes
 /// quando o número anda. É o precedente de `messages_revision`.
 #[tauri::command]
-fn icone_do_server(session: State<'_, Session>) -> Result<Option<Vec<u8>>, PlugError> {
-    Ok(session.plug()?.server_icon())
+fn icone_do_server(session: State<'_, Session>) -> Result<Option<Vec<u8>>, ConnectionError> {
+    Ok(session.connection()?.server_icon())
 }
 
 /// Pede ao servidor que acabe com a sessão de alguém — `expulsar`.
@@ -1035,8 +1035,8 @@ fn icone_do_server(session: State<'_, Session>) -> Result<Option<Vec<u8>>, PlugE
 /// pedido sem a permissão não expulsa ninguém, e a `specs/08-seguranca.md` põe
 /// a segurança nessa recusa e não no botão escondido.
 #[tauri::command]
-fn expulsar_pessoa(session: State<'_, Session>, person: u64) -> Result<(), PlugError> {
-    session.plug()?.kick_person(person)
+fn expulsar_pessoa(session: State<'_, Session>, person: u64) -> Result<(), ConnectionError> {
+    session.connection()?.kick_person(person)
 }
 
 /// Pede ao servidor que impeça alguém de voltar — `banir`.
@@ -1049,8 +1049,8 @@ fn banir_pessoa(
     person: u64,
     reason: Option<String>,
     expires_at: Option<i64>,
-) -> Result<(), PlugError> {
-    session.plug()?.ban_person(person, reason, expires_at)
+) -> Result<(), ConnectionError> {
+    session.connection()?.ban_person(person, reason, expires_at)
 }
 
 /// Pede ao servidor que tire uma mensagem da Linha.
@@ -1058,14 +1058,14 @@ fn banir_pessoa(
 /// Sem permissão nenhuma quando a mensagem é de quem pede: a permissão do
 /// `specs/04-servidor-seele.md` diz «de outra pessoa».
 #[tauri::command]
-fn remover_mensagem(session: State<'_, Session>, message: u64) -> Result<(), PlugError> {
-    session.plug()?.remove_message(message)
+fn remover_mensagem(session: State<'_, Session>, message: u64) -> Result<(), ConnectionError> {
+    session.connection()?.remove_message(message)
 }
 
 /// Pede ao servidor que mova alguém para uma sala de voz — `mover_pessoa`.
 #[tauri::command]
-fn mover_pessoa(session: State<'_, Session>, person: u64, voice_room: u32) -> Result<(), PlugError> {
-    session.plug()?.move_person(person, voice_room)
+fn mover_pessoa(session: State<'_, Session>, person: u64, voice_room: u32) -> Result<(), ConnectionError> {
+    session.connection()?.move_person(person, voice_room)
 }
 
 /// Pede ao servidor que destrua uma sala de voz — `apagar_voice_room`.
@@ -1079,15 +1079,15 @@ fn mover_pessoa(session: State<'_, Session>, person: u64, voice_room: u32) -> Re
 /// sala são permissões diferentes na `specs/04-servidor-seele.md`, e é preciso
 /// poder oferecer uma sem a outra. Isso é conveniência; quem nega é o servidor.
 #[tauri::command]
-fn apagar_voice_room(session: State<'_, Session>, voice_room: u32) -> Result<(), PlugError> {
-    session.plug()?.delete_voice_room(voice_room)
+fn apagar_voice_room(session: State<'_, Session>, voice_room: u32) -> Result<(), ConnectionError> {
+    session.connection()?.delete_voice_room(voice_room)
 }
 
 /// Pede ao servidor que destrua uma Linha, e tudo que foi escrito nela —
 /// `apagar_linha`.
 #[tauri::command]
-fn apagar_linha(session: State<'_, Session>, channel: u32) -> Result<(), PlugError> {
-    session.plug()?.delete_channel(channel)
+fn apagar_linha(session: State<'_, Session>, channel: u32) -> Result<(), ConnectionError> {
+    session.connection()?.delete_channel(channel)
 }
 
 /// Pergunta quanto custaria destruir uma Linha. Não destrói nada.
@@ -1105,22 +1105,22 @@ fn apagar_linha(session: State<'_, Session>, channel: u32) -> Result<(), PlugErr
 /// Quem não conseguir resposta **não abre a caixa**. Não há versão honesta dela
 /// sem os três números.
 #[tauri::command]
-async fn peso_da_linha(session: State<'_, Session>, channel: u32) -> Result<ChannelWeight, PlugError> {
-    // O `Arc` sai do cadeado antes do `await`, e é de propósito: `Session::plug`
+async fn peso_da_linha(session: State<'_, Session>, channel: u32) -> Result<ChannelWeight, ConnectionError> {
+    // O `Arc` sai do cadeado antes do `await`, e é de propósito: `Session::connection`
     // devolve um clone justamente para que nada segure o `Mutex` atravessando um
     // ponto de espera.
-    let plug = session.plug()?;
-    plug.weigh_channel(channel).await
+    let connection = session.connection()?;
+    connection.weigh_channel(channel).await
 }
 
 #[tauri::command]
-fn set_at_field(session: State<'_, Session>, on: bool) -> Result<(), PlugError> {
-    session.plug()?.set_at_field(on)
+fn set_at_field(session: State<'_, Session>, on: bool) -> Result<(), ConnectionError> {
+    session.connection()?.set_at_field(on)
 }
 
 #[tauri::command]
-fn set_total_isolation(session: State<'_, Session>, on: bool) -> Result<(), PlugError> {
-    session.plug()?.set_total_isolation(on)
+fn set_total_isolation(session: State<'_, Session>, on: bool) -> Result<(), ConnectionError> {
+    session.connection()?.set_total_isolation(on)
 }
 
 /// Push-to-talk, reported as it happens.
@@ -1130,14 +1130,14 @@ fn set_total_isolation(session: State<'_, Session>, on: bool) -> Result<(), Plug
 /// and the close was rejected.
 #[tauri::command]
 fn set_talking(session: State<'_, Session>, talking: bool) {
-    if let Ok(plug) = session.plug() {
-        plug.set_talking(talking);
+    if let Ok(connection) = session.connection() {
+        connection.set_talking(talking);
     }
 }
 
 #[tauri::command]
-fn set_voice_mode(session: State<'_, Session>, mode: VoiceMode) -> Result<(), PlugError> {
-    session.plug()?.set_voice_mode(mode);
+fn set_voice_mode(session: State<'_, Session>, mode: VoiceMode) -> Result<(), ConnectionError> {
+    session.connection()?.set_voice_mode(mode);
     Ok(())
 }
 
@@ -1146,8 +1146,8 @@ fn set_volume(
     session: State<'_, Session>,
     nickname: String,
     percent: u16,
-) -> Result<(), PlugError> {
-    session.plug()?.set_volume(nickname, percent)
+) -> Result<(), ConnectionError> {
+    session.connection()?.set_volume(nickname, percent)
 }
 
 // ------------------------------------------------------- compartilhar a tela
@@ -1173,14 +1173,14 @@ fn set_volume(
 /// comandos separados e a janela chama os dois — uma lista vazia sem motivo é
 /// um beco.
 #[tauri::command]
-fn fontes_de_tela(session: State<'_, Session>) -> Result<Vec<seele_ffi::FonteDeTela>, PlugError> {
-    session.plug()?.fontes_de_tela()
+fn fontes_de_tela(session: State<'_, Session>) -> Result<Vec<seele_ffi::FonteDeTela>, ConnectionError> {
+    session.connection()?.fontes_de_tela()
 }
 
 /// O que o sistema operacional respondeu sobre gravar a tela.
 #[tauri::command]
-fn permissao_de_tela(session: State<'_, Session>) -> Result<seele_ffi::PermissaoDeTela, PlugError> {
-    Ok(session.plug()?.permissao_de_tela())
+fn permissao_de_tela(session: State<'_, Session>) -> Result<seele_ffi::PermissaoDeTela, ConnectionError> {
+    Ok(session.connection()?.permissao_de_tela())
 }
 
 /// Pede a permissão ao sistema.
@@ -1192,13 +1192,13 @@ fn permissao_de_tela(session: State<'_, Session>) -> Result<seele_ffi::Permissao
 #[tauri::command]
 fn pedir_permissao_de_tela(
     session: State<'_, Session>,
-) -> Result<seele_ffi::PermissaoDeTela, PlugError> {
-    Ok(session.plug()?.pedir_permissao_de_tela())
+) -> Result<seele_ffi::PermissaoDeTela, ConnectionError> {
+    Ok(session.connection()?.pedir_permissao_de_tela())
 }
 
 /// Começa a transmitir a fonte escolhida, com os limites escolhidos.
 ///
-/// `PlugError::ScreenShareTaken` quando alguém já está compartilhando nesta
+/// `ConnectionError::ScreenShareTaken` quando alguém já está compartilhando nesta
 /// sala. Não é permissão que falta — a pessoa pode compartilhar assim que o
 /// outro parar —, e é por isso que a frase dela em `ui/frases.js` manda esperar
 /// em vez de mandar procurar um papel que ela já tem.
@@ -1207,15 +1207,15 @@ fn compartilhar_tela(
     session: State<'_, Session>,
     fonte: u64,
     limites: seele_ffi::LimitesDeTela,
-) -> Result<(), PlugError> {
-    session.plug()?.compartilhar_tela(fonte, limites)
+) -> Result<(), ConnectionError> {
+    session.connection()?.compartilhar_tela(fonte, limites)
 }
 
 /// Para de transmitir. Idempotente do outro lado: parar sem estar
 /// compartilhando não é erro.
 #[tauri::command]
-fn parar_de_compartilhar(session: State<'_, Session>) -> Result<(), PlugError> {
-    session.plug()?.parar_de_compartilhar()
+fn parar_de_compartilhar(session: State<'_, Session>) -> Result<(), ConnectionError> {
+    session.connection()?.parar_de_compartilhar()
 }
 
 /// Muda os limites no meio da transmissão, sem cortá-la.
@@ -1227,8 +1227,8 @@ fn parar_de_compartilhar(session: State<'_, Session>) -> Result<(), PlugError> {
 fn ajustar_limites_da_tela(
     session: State<'_, Session>,
     limites: seele_ffi::LimitesDeTela,
-) -> Result<(), PlugError> {
-    session.plug()?.ajustar_limites_da_tela(limites)
+) -> Result<(), ConnectionError> {
+    session.connection()?.ajustar_limites_da_tela(limites)
 }
 
 /// Põe a janela em tela cheia, ou a tira de lá.
@@ -1265,22 +1265,22 @@ fn tela_cheia(app: AppHandle, ligada: bool) {
 /// # Por que a tela chama isto, e não o Rust sozinho
 ///
 /// Porque o momento é da tela. A aparência chega num quadro que o servidor manda
-/// **depois** do aperto de mão, e `Plug::connect` já voltou quando ele chega —
+/// **depois** do aperto de mão, e `Connection::connect` já voltou quando ele chega —
 /// é a mesma janela cega que faz o cabeçalho precisar sincronizar o ícone à mão
 /// ao entrar. A tela é quem sabe que já sincronizou; daqui não dá para saber
 /// sem inventar um prazo.
 ///
 /// Sem argumentos de propósito: o endereço vem do que a sessão guardou, e o
-/// nome e a imagem vêm da `Plug`. Uma tela que passasse os três poderia passar
+/// nome e a imagem vêm da `Connection`. Uma tela que passasse os três poderia passar
 /// os três de outro servidor.
 #[tauri::command]
 fn lembrar_aparencia_do_servidor(app: AppHandle, session: State<'_, Session>) {
     let Ok(Some(alvo)) = session.alvo.lock().map(|guardado| guardado.clone()) else {
         return;
     };
-    let Ok(plug) = session.plug() else { return };
-    let nome = plug.snapshot().server;
-    let icone = plug.server_icon();
+    let Ok(connection) = session.connection() else { return };
+    let nome = connection.snapshot().server;
+    let icone = connection.server_icon();
 
     let Ok(mut lista) = seele_ffi::conhecidos::Conhecidos::abrir(caminho_dos_conhecidos(&app))
     else {
@@ -1296,7 +1296,7 @@ fn lembrar_aparencia_do_servidor(app: AppHandle, session: State<'_, Session>) {
 /// O que o sistema deixa este app fazer com o microfone.
 ///
 /// Sem sessão, de propósito: quem desconfia que está mudo quer a resposta antes
-/// de entrar, e a tela de entrada não tem `Plug` nenhum para perguntar.
+/// de entrar, e a tela de entrada não tem `Connection` nenhum para perguntar.
 #[tauri::command]
 fn permissao_de_microfone() -> seele_ffi::PermissaoDeMicrofone {
     seele_ffi::permissao_de_microfone()
@@ -1340,8 +1340,8 @@ fn abrir_ajustes_do_microfone(app: AppHandle) {
 /// vezes por segundo a partir do `Snapshot` — a trazia de volta. Apagar uma sala
 /// com alguém dentro deixava a janela coberta por um alerta que não fechava.
 #[tauri::command]
-fn dispensar_aviso(session: State<'_, Session>) -> Result<(), PlugError> {
-    session.plug()?.dispensar_aviso();
+fn dispensar_aviso(session: State<'_, Session>) -> Result<(), ConnectionError> {
+    session.connection()?.dispensar_aviso();
     Ok(())
 }
 
@@ -1360,7 +1360,7 @@ fn preferencias(app: &AppHandle) -> Option<seele_ffi::preferences::Preferences> 
 /// Os microfones que esta máquina está oferecendo agora.
 ///
 /// Respondível sem sessão: escolher microfone é coisa que se faz antes de
-/// conectar tanto quanto durante, e pendurar a lista num `Plug` vivo poria o
+/// conectar tanto quanto durante, e pendurar a lista num `Connection` vivo poria o
 /// controle atrás da porta que ele existe para abrir.
 ///
 /// Lista vazia significa que a máquina não quis enumerar — **não** que não há
@@ -1391,7 +1391,7 @@ fn microfone_escolhido(app: AppHandle) -> Option<String> {
 /// Duas e não uma porque pedem coisas diferentes de quem está na frente da tela.
 /// Uma não tem conserto ali — o disco recusou —, e a outra tem: a lista está
 /// logo acima, e o que sumiu entre desenhá-la e clicar nela pode ser trocado por
-/// outro. Nenhuma delas é `PlugError::IdentityUnavailable`, que era o que este
+/// outro. Nenhuma delas é `ConnectionError::IdentityUnavailable`, que era o que este
 /// comando devolvia: a frase daquela fala de identidade em disco, e acusar a
 /// chave do pessoa por causa de um arquivo de ajustes manda quem lê procurar no
 /// lugar errado.
@@ -1427,11 +1427,11 @@ fn escolher_microfone(
         return Err(FalhaAoEscolher::NaoGravei);
     }
 
-    let Ok(plug) = session.plug() else {
+    let Ok(connection) = session.connection() else {
         // Sem sessão a escolha está gravada, e era tudo o que havia para fazer.
         return Ok(());
     };
-    plug.set_capture_device(dispositivo).map_err(|erro| {
+    connection.set_capture_device(dispositivo).map_err(|erro| {
         tracing::warn!(%erro, "não consegui trocar o microfone da sessão");
         FalhaAoEscolher::DispositivoSumiu
     })
@@ -1481,11 +1481,11 @@ fn escolher_saida(
         return Err(FalhaAoEscolher::NaoGravei);
     }
 
-    let Ok(plug) = session.plug() else {
+    let Ok(connection) = session.connection() else {
         // Sem sessão a escolha está gravada, e era tudo o que havia para fazer.
         return Ok(());
     };
-    plug.set_playback_device(dispositivo).map_err(|erro| {
+    connection.set_playback_device(dispositivo).map_err(|erro| {
         tracing::warn!(%erro, "não consegui trocar a saída de som da sessão");
         FalhaAoEscolher::DispositivoSumiu
     })
@@ -1899,7 +1899,7 @@ impl BuscaEstado {
 /// aqui erraria o alvo em toda mensagem com espaço colapsado, e achatar o
 /// desenho para consertar isso seria trocar o produto pela implementação.
 ///
-/// O `plug` faz o contrário — e está certo: `ui::wrap` já colapsa antes de
+/// O `connection` faz o contrário — e está certo: `ui::wrap` já colapsa antes de
 /// desenhar, então lá o texto na tela é o normalizado. Cada casca busca o que
 /// desenha.
 ///
@@ -1915,17 +1915,17 @@ impl BuscaEstado {
 /// painel junto, toda vez que alguém falava. Numa conversa viva não dava para
 /// segurar a posição, que é exatamente onde buscar serve para alguma coisa.
 ///
-/// `Search::resume_at` é a mesma regra que o `plug` já usava em
+/// `Search::resume_at` é a mesma regra que o `connection` já usava em
 /// `App::refazer_busca`, e mora no core justamente para não haver duas. O
 /// cursor continua deste lado da ponte, em `Session::busca`: o JavaScript não
 /// decide nada sobre busca (`specs/06-clientes-gui.md:19`).
 #[tauri::command]
-fn buscar(session: State<'_, Session>, termo: String) -> Result<BuscaEstado, PlugError> {
+fn buscar(session: State<'_, Session>, termo: String) -> Result<BuscaEstado, ConnectionError> {
     // `messages()` e não `snapshot()`: a conversa saiu do snapshot, que agora
     // carrega só a revisão dela. Aqui a lista inteira é mesmo necessária — é o
     // que se busca —, e este comando roda quando alguém digita, não a cada
     // quadro.
-    let mensagens = session.plug()?.messages();
+    let mensagens = session.connection()?.messages();
     let mut busca =
         seele_ffi::search::Search::new(mensagens.iter().map(|mensagem| &mensagem.body), &termo);
 

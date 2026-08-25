@@ -45,7 +45,7 @@ use seele_proto::control::ServerMessage;
 use seele_proto::ids::{
     AttachmentId, VoiceRoomId, ClientMessageId, ChannelId, MessageId, PersonId, ScreenId,
 };
-use seele_proto::sync_ratio::SyncBand;
+use seele_proto::signal::SignalBand;
 use tokio::sync::mpsc;
 
 use crate::battery::{Action, Battery, Link};
@@ -203,7 +203,7 @@ enum Comando {
         linha: ChannelId,
         limite: u16,
     },
-    AtField(bool),
+    Muted(bool),
     Isolamento(bool),
     CriarVoiceRoom {
         nome: String,
@@ -928,7 +928,7 @@ impl Enlace {
             inicio: Instant::now(),
             voice_room: None,
             linha: None,
-            at_field: false,
+            muted: false,
             isolamento: false,
             avisos: avisos_tx,
             rtt: Arc::clone(&rtt),
@@ -1083,8 +1083,8 @@ impl Enlace {
     /// # Errors
     ///
     /// Falha se a sessão já tiver acabado.
-    pub async fn at_field(&self, ligado: bool) -> Result<(), Fechado> {
-        self.mandar(Comando::AtField(ligado)).await
+    pub async fn muted(&self, ligado: bool) -> Result<(), Fechado> {
+        self.mandar(Comando::Muted(ligado)).await
     }
 
     /// Liga ou desliga o isolamento total. Restaurado depois de uma reconexão.
@@ -1443,7 +1443,7 @@ struct Motor {
     /// O que restaurar ao reconectar.
     voice_room: Option<VoiceRoomId>,
     linha: Option<ChannelId>,
-    at_field: bool,
+    muted: bool,
     isolamento: bool,
     avisos: mpsc::UnboundedSender<Aviso>,
     rtt: Arc<std::sync::atomic::AtomicU64>,
@@ -1466,10 +1466,10 @@ struct Motor {
     ///
     /// O que fechava a dívida já vinha pelo fio e ninguém guardava: o servidor
     /// calcula a taxa de cada pessoa e a devolve em `PersonState`, uma vez por
-    /// segundo. O `SyncRatio` da casca é a mesma conta feita de novo para
+    /// segundo. O `Signal` da casca é a mesma conta feita de novo para
     /// desenhar — não é fonte, é cópia —, e é por isso que isto não precisou de
     /// comando novo nem de a casca falar com o núcleo.
-    faixa: SyncBand,
+    faixa: SignalBand,
     /// A subida de quem hospeda, como o `HostUplink` a mediu. §5.1.
     ///
     /// `None` é «não medido», e é assim que o zero do protocolo chega aqui: a
@@ -1515,7 +1515,7 @@ struct TelaViva {
 /// `Critical` pararia a tela de alguém cuja voz está ótima, por causa de um
 /// dado que ainda não chegou. Começar em `Nominal` deixa a tela abrir e ceder
 /// no primeiro `PersonState`, que vem uma vez por segundo.
-const FAIXA_INICIAL: SyncBand = SyncBand::Nominal;
+const FAIXA_INICIAL: SignalBand = SignalBand::Nominal;
 
 /// De quanto em quanto tempo a bateria é consultada.
 ///
@@ -1534,14 +1534,14 @@ const TICA: Duration = Duration::from_millis(200);
 /// conheça; ou a faixa não mudou, e refazer o teto a cada chegada acordaria a
 /// thread do codificador uma vez por segundo para lhe dizer o que ela já sabe.
 fn faixa_nova(
-    atual: SyncBand,
+    atual: SignalBand,
     estado: &seele_proto::control::PersonState,
     eu: Option<PersonId>,
-) -> Option<SyncBand> {
+) -> Option<SignalBand> {
     if eu != Some(estado.person) {
         return None;
     }
-    let nova = SyncBand::of(estado.sync_ratio);
+    let nova = SignalBand::of(estado.signal);
     (nova != atual).then_some(nova)
 }
 
@@ -1761,7 +1761,7 @@ impl Motor {
                 if let Some(linha) = self.linha {
                     let _ = cliente.join_channel(linha).await;
                 }
-                if self.at_field {
+                if self.muted {
                     let _ = cliente.set_at_field(true).await;
                 }
                 if self.isolamento {
@@ -1804,7 +1804,7 @@ impl Motor {
             Comando::Historico { linha, limite } => {
                 cliente.fetch_history(linha, None, limite).await
             }
-            Comando::AtField(ligado) => cliente.set_at_field(ligado).await,
+            Comando::Muted(ligado) => cliente.set_at_field(ligado).await,
             Comando::Isolamento(ligado) => cliente.set_total_isolation(ligado).await,
             Comando::CriarVoiceRoom {
                 nome,
@@ -1982,7 +1982,7 @@ impl Motor {
             // §3.2. O servidor calcula a taxa de cada pessoa e a devolve aqui uma
             // vez por segundo; o que faltava era guardar a sua.
             //
-            // `SyncBand::of` e não um limiar escrito aqui: a conta de onde
+            // `SignalBand::of` e não um limiar escrito aqui: a conta de onde
             // começa cada faixa é do `seele-proto`, e duas cópias dela
             // divergiriam no dia em que uma mudasse.
             ServerMessage::PersonState(ref estado) => {
@@ -2302,7 +2302,7 @@ impl Motor {
             Comando::InserirPlug(voice_room) => self.voice_room = Some(*voice_room),
             Comando::EjetarPlug => self.voice_room = None,
             Comando::AbrirLinha(linha) => self.linha = Some(*linha),
-            Comando::AtField(ligado) => self.at_field = *ligado,
+            Comando::Muted(ligado) => self.muted = *ligado,
             Comando::Isolamento(ligado) => self.isolamento = *ligado,
             // Fazer uma sala e moderar alguém **não** entram aqui, e a ausência
             // é deliberada nos dois casos. O que se refaz ao reconectar é onde
@@ -2968,12 +2968,12 @@ mod tests {
 
         motor.lembrar(&Comando::InserirPlug(VoiceRoomId(2)));
         motor.lembrar(&Comando::AbrirLinha(ChannelId(7)));
-        motor.lembrar(&Comando::AtField(true));
+        motor.lembrar(&Comando::Muted(true));
         motor.lembrar(&Comando::Isolamento(true));
 
         assert_eq!(motor.voice_room, Some(VoiceRoomId(2)));
         assert_eq!(motor.linha, Some(ChannelId(7)));
-        assert!(motor.at_field);
+        assert!(motor.muted);
         assert!(motor.isolamento);
 
         // Ejetar não é uma queda: quem saiu da sala de voz não volta para ele.
@@ -3444,17 +3444,17 @@ mod tests {
         let outra = PersonId(9);
         let estado = |pessoa: PersonId, taxa: u8| PersonState {
             person: pessoa,
-            sync_ratio: taxa,
+            signal: taxa,
             speaking: false,
-            at_field: false,
+            muted: false,
             total_isolation: false,
             presence: Presence::Available,
         };
 
         // A voz doendo derruba a faixa, e é isto que faz a tela ceder.
         assert_eq!(
-            faixa_nova(SyncBand::Nominal, &estado(eu, 10), Some(eu)),
-            Some(SyncBand::Critical),
+            faixa_nova(SignalBand::Nominal, &estado(eu, 10), Some(eu)),
+            Some(SignalBand::Critical),
             "a taxa despencou e a faixa não acompanhou"
         );
 
@@ -3462,27 +3462,27 @@ mod tests {
         // porque a conexão **de outro** piorou — e quem compartilha ficaria
         // pagando pelo vizinho.
         assert_eq!(
-            faixa_nova(SyncBand::Nominal, &estado(outra, 10), Some(eu)),
+            faixa_nova(SignalBand::Nominal, &estado(outra, 10), Some(eu)),
             None
         );
 
         // Sem sessão não há «esta pessoa». Uma mensagem antes do aperto de mão
         // terminar não é sobre ninguém que este motor conheça.
-        assert_eq!(faixa_nova(SyncBand::Nominal, &estado(eu, 10), None), None);
+        assert_eq!(faixa_nova(SignalBand::Nominal, &estado(eu, 10), None), None);
 
         // E a mesma faixa não vira ordem: a taxa chega uma vez por segundo e
         // quase sempre no mesmo degrau, e refazer o teto a cada chegada
         // acordaria a thread do codificador para lhe dizer o que ela já sabe.
         assert_eq!(
-            faixa_nova(SyncBand::Critical, &estado(eu, 10), Some(eu)),
+            faixa_nova(SignalBand::Critical, &estado(eu, 10), Some(eu)),
             None
         );
 
         // E ela sobe de volta: ceder não pode ser de mão única, ou a tela
         // ficaria pequena para sempre depois do primeiro engasgo.
         assert_eq!(
-            faixa_nova(SyncBand::Critical, &estado(eu, 100), Some(eu)),
-            Some(SyncBand::Nominal)
+            faixa_nova(SignalBand::Critical, &estado(eu, 100), Some(eu)),
+            Some(SignalBand::Nominal)
         );
     }
 
@@ -3508,7 +3508,7 @@ mod tests {
         // Antes de medir, a suposição de sempre: a primeira transmissão de uma
         // sessão abre exatamente com o teto que abria antes deste módulo.
         assert_eq!(
-            motor.teto_de_video(None).teto(SyncBand::Nominal),
+            motor.teto_de_video(None).teto(SignalBand::Nominal),
             Teto::Bps(1_200_000)
         );
 
@@ -3516,7 +3516,7 @@ mod tests {
         let inicio = Instant::now();
         let mut bytes = 0_u64;
         for segundo in 0..12_u32 {
-            let teto = motor.teto_de_video(None).teto(SyncBand::Nominal);
+            let teto = motor.teto_de_video(None).teto(SignalBand::Nominal);
             // O que sai pelo soquete numa janela em que a tela encheu o teto: o
             // orçamento inteiro mais a voz.
             bytes += u64::from(teto.bps() + 60_000) / 8;
@@ -3527,14 +3527,14 @@ mod tests {
                     ..Transporte::default()
                 },
                 teto,
-                faixa: SyncBand::Nominal,
+                faixa: SignalBand::Nominal,
             };
             motor
                 .caminho
                 .observar(inicio + Duration::from_secs(u64::from(segundo)), &amostra);
         }
 
-        let teto = motor.teto_de_video(None).teto(SyncBand::Nominal);
+        let teto = motor.teto_de_video(None).teto(SignalBand::Nominal);
         assert!(
             teto.bps() > 1_200_000,
             "doze janelas cheias e o teto continuou na suposição: {teto:?}"
@@ -3555,7 +3555,7 @@ mod tests {
         motor.medir_o_caminho();
         assert_eq!(motor.caminho.estimativa(), antes);
         assert_eq!(
-            motor.teto_de_video(None).teto(SyncBand::Nominal),
+            motor.teto_de_video(None).teto(SignalBand::Nominal),
             crate::tela::Teto::Bps(1_200_000)
         );
     }
@@ -3579,7 +3579,7 @@ mod tests {
             inicio: Instant::now(),
             voice_room: None,
             linha: None,
-            at_field: false,
+            muted: false,
             isolamento: false,
             avisos,
             rtt: Arc::new(std::sync::atomic::AtomicU64::new(0)),

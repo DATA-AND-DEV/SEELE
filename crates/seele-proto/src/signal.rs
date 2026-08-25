@@ -65,13 +65,13 @@ pub const LOSS_MAX_PENALTY: f32 = 30.0;
 /// jumps around is noise a user learns to ignore.
 pub const SMOOTHING: f32 = 0.2;
 
-/// Floor of [`SyncBand::Nominal`], in points.
+/// Floor of [`SignalBand::Nominal`], in points.
 ///
-/// `design/Entry Plug v2.dc.html`: `if (v >= 85) return FOS`.
+/// `design/SEELE v2.dc.html`: `if (v >= 85) return FOS`.
 pub const NOMINAL_FLOOR: u8 = 85;
-/// Floor of [`SyncBand::Degraded`], in points. Below this the ratio is critical.
+/// Floor of [`SignalBand::Degraded`], in points. Below this the ratio is critical.
 ///
-/// `design/Entry Plug v2.dc.html`: `if (v >= 60) return LAR`.
+/// `design/SEELE v2.dc.html`: `if (v >= 60) return LAR`.
 pub const DEGRADED_FLOOR: u8 = 60;
 
 /// What band a Sync Ratio falls into.
@@ -84,7 +84,7 @@ pub const DEGRADED_FLOOR: u8 = 60;
 ///
 /// This used to have a fourth band — `Acceptable`, 70 to 89, drawn in bone —
 /// taken from the table in `specs/07-tema-evangelion.md`. The v2 comp
-/// (`design/Entry Plug v2.dc.html`) bands the same number in three, at 85 and
+/// (`design/SEELE v2.dc.html`) bands the same number in three, at 85 and
 /// 60, and uses bone in no sync scale at all:
 ///
 /// ```text
@@ -97,7 +97,7 @@ pub const DEGRADED_FLOOR: u8 = 60;
 /// degraded — orange, the colour of "go and look". That is the point of the
 /// change, not a side effect of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum SyncBand {
+pub enum SignalBand {
     /// Below [`DEGRADED_FLOOR`]. Something is wrong.
     Critical,
     /// [`DEGRADED_FLOOR`] to one below [`NOMINAL_FLOOR`].
@@ -106,8 +106,8 @@ pub enum SyncBand {
     Nominal,
 }
 
-impl SyncBand {
-    /// Which band a ratio falls into. `design/Entry Plug v2.dc.html`.
+impl SignalBand {
+    /// Which band a ratio falls into. `design/SEELE v2.dc.html`.
     #[must_use]
     pub fn of(ratio: u8) -> Self {
         match ratio {
@@ -181,17 +181,17 @@ pub fn raw(inputs: SyncInputs) -> f32 {
 /// One per person in the roster, since `specs/07-tema-evangelion.md` makes the
 /// number per-person.
 #[derive(Debug, Clone, Copy)]
-pub struct SyncRatio {
+pub struct Signal {
     smoothed: Option<f32>,
 }
 
-impl Default for SyncRatio {
+impl Default for Signal {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl SyncRatio {
+impl Signal {
     /// A ratio with no measurements yet.
     #[must_use]
     pub fn new() -> Self {
@@ -224,8 +224,8 @@ impl SyncRatio {
 
     /// The band the current value falls into.
     #[must_use]
-    pub fn band(&self) -> SyncBand {
-        SyncBand::of(self.value())
+    pub fn band(&self) -> SignalBand {
+        SignalBand::of(self.value())
     }
 
     /// Whether anything has been measured yet.
@@ -302,21 +302,21 @@ mod tests {
 
     #[test]
     fn the_bands_break_where_the_comp_breaks_them() {
-        // design/Entry Plug v2.dc.html: >= 85 fósforo, 60-85 laranja,
+        // design/SEELE v2.dc.html: >= 85 fósforo, 60-85 laranja,
         // < 60 vermelho. Only the two edges and the two ends are asserted —
         // a test that checked 98 and 20 would have passed against the four
         // bands this replaced, and so would have proved nothing.
-        assert_eq!(SyncBand::of(84), SyncBand::Degraded);
-        assert_eq!(SyncBand::of(85), SyncBand::Nominal);
-        assert_eq!(SyncBand::of(59), SyncBand::Critical);
-        assert_eq!(SyncBand::of(60), SyncBand::Degraded);
+        assert_eq!(SignalBand::of(84), SignalBand::Degraded);
+        assert_eq!(SignalBand::of(85), SignalBand::Nominal);
+        assert_eq!(SignalBand::of(59), SignalBand::Critical);
+        assert_eq!(SignalBand::of(60), SignalBand::Degraded);
 
         // The ends. 100 is the ceiling the ratio is clamped to; 255 is the
         // ceiling the *type* has, and a shell that got one must not fall off
         // the top of the match.
-        assert_eq!(SyncBand::of(0), SyncBand::Critical);
-        assert_eq!(SyncBand::of(100), SyncBand::Nominal);
-        assert_eq!(SyncBand::of(u8::MAX), SyncBand::Nominal);
+        assert_eq!(SignalBand::of(0), SignalBand::Critical);
+        assert_eq!(SignalBand::of(100), SignalBand::Nominal);
+        assert_eq!(SignalBand::of(u8::MAX), SignalBand::Nominal);
     }
 
     #[test]
@@ -330,13 +330,13 @@ mod tests {
 
         let gone: StrDeserializer<'_, serde::de::value::Error> = "Acceptable".into_deserializer();
         assert!(
-            SyncBand::deserialize(gone).is_err(),
+            SignalBand::deserialize(gone).is_err(),
             "a band that no longer exists was accepted by name"
         );
         let alive: StrDeserializer<'_, serde::de::value::Error> = "Degraded".into_deserializer();
-        assert_eq!(SyncBand::deserialize(alive), Ok(SyncBand::Degraded));
+        assert_eq!(SignalBand::deserialize(alive), Ok(SignalBand::Degraded));
 
-        assert_eq!(SyncBand::of(80), SyncBand::Degraded);
+        assert_eq!(SignalBand::of(80), SignalBand::Degraded);
     }
 
     #[test]
@@ -345,27 +345,27 @@ mod tests {
         // docs/m1-medicoes.md. A metric that called a good Wi-Fi connection
         // critical would be worse than no metric.
         let lan = raw(inputs(2.0, 0.3, 0.0)).round() as u8;
-        assert_eq!(SyncBand::of(lan), SyncBand::Nominal, "lan scored {lan}");
+        assert_eq!(SignalBand::of(lan), SignalBand::Nominal, "lan scored {lan}");
 
         // Both of these were "at least acceptable" under the four bands. Under
         // the three from the comp the claim is the same one — not critical, a
         // connection nobody has to go and fix — and both in fact clear 85.
         let wifi = raw(inputs(28.0, 4.7, 0.0109)).round() as u8;
         assert!(
-            SyncBand::of(wifi) >= SyncBand::Degraded,
+            SignalBand::of(wifi) >= SignalBand::Degraded,
             "household wifi scored {wifi}"
         );
 
         let regional = raw(inputs(75.0, 4.5, 0.0061)).round() as u8;
         assert!(
-            SyncBand::of(regional) >= SyncBand::Degraded,
+            SignalBand::of(regional) >= SignalBand::Degraded,
             "regional internet scored {regional}"
         );
 
         let mobile = raw(inputs(160.0, 21.9, 0.0434)).round() as u8;
         assert_eq!(
-            SyncBand::of(mobile),
-            SyncBand::Degraded,
+            SignalBand::of(mobile),
+            SignalBand::Degraded,
             "a bad mobile link scored {mobile}"
         );
     }
@@ -374,7 +374,7 @@ mod tests {
     fn smoothing_stops_the_number_flickering() {
         // specs/02-protocolo.md asks for an exponential moving average "para não
         // piscar". A number that jumps every frame is one users learn to ignore.
-        let mut ratio = SyncRatio::new();
+        let mut ratio = Signal::new();
         ratio.update(inputs(2.0, 0.3, 0.0));
         let steady = ratio.value();
 
@@ -391,19 +391,19 @@ mod tests {
     fn a_sustained_problem_does_arrive() {
         // The other half: smoothing must not hide a connection that is genuinely
         // bad, only stop it flickering.
-        let mut ratio = SyncRatio::new();
+        let mut ratio = Signal::new();
         ratio.update(inputs(2.0, 0.3, 0.0));
         for _ in 0..40 {
             ratio.update(inputs(300.0, 80.0, 0.08));
         }
-        assert_eq!(ratio.band(), SyncBand::Critical);
+        assert_eq!(ratio.band(), SignalBand::Critical);
     }
 
     #[test]
     fn the_first_measurement_is_taken_whole() {
         // Easing up from zero would show every person as critical for the first
         // second of every call.
-        let mut ratio = SyncRatio::new();
+        let mut ratio = Signal::new();
         assert_eq!(ratio.update(inputs(2.0, 0.3, 0.0)), 100);
     }
 
@@ -411,9 +411,9 @@ mod tests {
     fn a_person_with_no_measurements_reads_as_nominal() {
         // They just arrived. Nothing is known to be wrong with them, and showing
         // a red zero would be an accusation rather than a measurement.
-        let ratio = SyncRatio::new();
+        let ratio = Signal::new();
         assert_eq!(ratio.value(), 100);
-        assert_eq!(ratio.band(), SyncBand::Nominal);
+        assert_eq!(ratio.band(), SignalBand::Nominal);
         assert!(!ratio.has_measurement());
     }
 

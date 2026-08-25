@@ -54,7 +54,7 @@
 //! enche, e era essa a pergunta 2 do §8. O que chega aqui continua sendo o
 //! resultado pronto, um [`TetoDeVideo`] com as três pernas do §5.1 já dentro
 //! ([`crate::state::Room::teto_de_video`] junta os espectadores, a subida de
-//! quem hospeda e a medida desta máquina), mais a [`SyncBand`] à parte.
+//! quem hospeda e a medida desta máquina), mais a [`SignalBand`] à parte.
 //!
 //! E a divisão de trabalho não mudou, porque ela é de propósito: RTT, jitter e
 //! perda (ADR 0024) dizem se o caminho está **doendo**, e é a voz que os lê; o
@@ -71,7 +71,7 @@ use std::time::{Duration, Instant};
 
 use seele_proto::ids::ScreenId;
 use seele_proto::screen::{ScreenCodec, ScreenHeader, ScreenSource};
-use seele_proto::sync_ratio::SyncBand;
+use seele_proto::signal::SignalBand;
 use seele_proto::version::PROTOCOL_VERSION;
 use seele_video::codec::{Cadencia, QuadroCodificado, Resolucao};
 use seele_video::BibliotecaDeVideo;
@@ -128,7 +128,7 @@ pub enum Ordem {
         /// O teto de agora, com as três pernas do §5.1 dentro dele.
         teto: TetoDeVideo,
         /// A faixa em que o sinal da voz está.
-        faixa: SyncBand,
+        faixa: SignalBand,
     },
     /// Alguém que está assistindo não tem de que predizer (§3.3).
     ///
@@ -236,7 +236,7 @@ pub struct Arranjo {
     /// O teto, com as três pernas do §5.1.
     pub teto: TetoDeVideo,
     /// A faixa em que o sinal da voz está agora.
-    pub faixa: SyncBand,
+    pub faixa: SignalBand,
     /// A resolução que a pessoa escolheu, que é teto e nunca piso (§5).
     pub escolha_de_resolucao: Resolucao,
     /// A cadência que a pessoa escolheu, também teto.
@@ -261,7 +261,7 @@ impl Bomba {
     ///
     /// Devolve `false` quando a thread já acabou — o que não é erro: é a mesma
     /// coisa que o `Fim` que já saiu pelo canal de eventos disse.
-    pub fn teto(&self, teto: TetoDeVideo, faixa: SyncBand) -> bool {
+    pub fn teto(&self, teto: TetoDeVideo, faixa: SignalBand) -> bool {
         self.ordens.send(Ordem::Teto { teto, faixa }).is_ok()
     }
 
@@ -1134,7 +1134,7 @@ mod tests {
         }
     }
 
-    fn arranjo(teto: TetoDeVideo, faixa: SyncBand, escolha: Resolucao) -> Arranjo {
+    fn arranjo(teto: TetoDeVideo, faixa: SignalBand, escolha: Resolucao) -> Arranjo {
         Arranjo {
             teto,
             faixa,
@@ -1150,7 +1150,7 @@ mod tests {
     /// **A razão desta onda existir**, num teste: a bomba nasce, gira, entrega
     /// quadros, e morre quando mandam.
     ///
-    /// Antes dela `Plug::compartilhar_tela` devolvia `ScreenShareUnavailable`
+    /// Antes dela `Connection::compartilhar_tela` devolvia `ScreenShareUnavailable`
     /// com todas as peças prontas na máquina — captura, codec, teto e transporte
     /// existiam e ninguém os chamava em sequência. Se este teste ficar vermelho,
     /// o recurso voltou a ser um botão que não faz nada.
@@ -1165,7 +1165,7 @@ mod tests {
             captura.clone(),
             arranjo(
                 TetoDeVideo::com_caminho(CAMINHO_DA_PROVA_BPS),
-                SyncBand::Nominal,
+                SignalBand::Nominal,
                 Resolucao::P720,
             ),
             || {},
@@ -1243,7 +1243,7 @@ mod tests {
         let (bomba, mut eventos) = ligar(
             biblioteca,
             captura.clone(),
-            arranjo(fibra, SyncBand::Nominal, Resolucao::P1080),
+            arranjo(fibra, SignalBand::Nominal, Resolucao::P1080),
             || {},
         )
         .expect("criar a thread da tela");
@@ -1259,7 +1259,7 @@ mod tests {
 
         // Entram mais duas pessoas: 3,6 Mbps ÷ 3 = 1,2, que é onde o 1080p
         // passa a jogar fora um sexto do que captura.
-        assert!(bomba.teto(fibra.com_espectadores(3), SyncBand::Nominal));
+        assert!(bomba.teto(fibra.com_espectadores(3), SignalBand::Nominal));
 
         assert_eq!(
             esperar_controle(&mut eventos),
@@ -1310,7 +1310,7 @@ mod tests {
         let (bomba, mut eventos) = ligar(
             biblioteca,
             captura.clone(),
-            arranjo(fibra, SyncBand::Nominal, Resolucao::P1080),
+            arranjo(fibra, SignalBand::Nominal, Resolucao::P1080),
             || {},
         )
         .expect("criar a thread da tela");
@@ -1376,7 +1376,7 @@ mod tests {
         let (bomba, mut eventos) = ligar(
             biblioteca,
             captura.clone(),
-            arranjo(teto, SyncBand::Nominal, Resolucao::P720),
+            arranjo(teto, SignalBand::Nominal, Resolucao::P720),
             || {},
         )
         .expect("criar a thread da tela");
@@ -1386,7 +1386,7 @@ mod tests {
             Some(EventoDaBomba::Fluxo { geracao: 1, .. })
         ));
 
-        assert!(bomba.teto(teto, SyncBand::Critical));
+        assert!(bomba.teto(teto, SignalBand::Critical));
         assert_eq!(
             esperar_controle(&mut eventos),
             Some(EventoDaBomba::Parou(MotivoDeParada::SinalCritico)),
@@ -1404,7 +1404,7 @@ mod tests {
         );
 
         // O sinal volta, e a tela volta com ele — fluxo novo, captura nova.
-        assert!(bomba.teto(teto, SyncBand::Nominal));
+        assert!(bomba.teto(teto, SignalBand::Nominal));
         assert_eq!(
             esperar_controle(&mut eventos),
             Some(EventoDaBomba::Fluxo {
@@ -1440,7 +1440,7 @@ mod tests {
             captura,
             arranjo(
                 TetoDeVideo::com_caminho(CAMINHO_DA_PROVA_BPS),
-                SyncBand::Nominal,
+                SignalBand::Nominal,
                 Resolucao::P1080,
             ),
             || {},

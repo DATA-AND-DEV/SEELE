@@ -55,7 +55,7 @@ pub use bomba::{
 /// — um número medido e um número suposto merecem frases diferentes.
 pub use caminho::{Amostra as AmostraDoCaminho, Sonda, Transporte as TransporteDoCaminho};
 pub use client::{
-    AttachmentRequest, Client, ConnectError, FlowControl, MediaChannel, Pattern, Previewed, Sent,
+    AttachmentRequest, Client, ConnectError, FlowControl, MediaChannel, LinkTrust, Previewed, Sent,
     SessionInfo, Transfers,
 };
 pub use ed25519_dalek::SigningKey;
@@ -139,7 +139,7 @@ pub use seele_proto::ids::{
 /// a tela não promete a escolha, e um número que a casca pudesse escrever no
 /// cabeçalho seria a casca prometendo.
 pub use seele_proto::screen::{ScreenCodec, ScreenHeader, ScreenSource};
-pub use seele_proto::sync_ratio::{SyncBand, SyncInputs, SyncRatio};
+pub use seele_proto::signal::{SignalBand, SyncInputs, Signal};
 pub use seele_proto::transport::DEFAULT_PORT;
 pub use seele_proto::uri;
 pub use seele_proto::PROTOCOL_VERSION;

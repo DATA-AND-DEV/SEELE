@@ -2,7 +2,7 @@
 //!
 //! Parsing is separated from doing so that the vocabulary in
 //! `specs/05-cliente-tui.md` can be tested without a server, a sound card, or a
-//! terminal. Running the commands is the `plug` binary's job.
+//! terminal. Running the commands is the `connection` binary's job.
 
 /// A parsed command.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,7 +48,7 @@ pub enum Command {
     Convite,
     /// `:mudo` / `:surdo` — the same toggles as `m` and `d`, for people who
     /// reach for words.
-    AtField,
+    Muted,
     /// Isolamento total.
     TotalIsolation,
     /// `:voz <ptt|vad|aberto>`.
@@ -99,7 +99,7 @@ pub fn parse(input: &str) -> Command {
         },
         "sobre" | "about" => Command::About,
         "convite" | "convidar" => Command::Convite,
-        "mudo" | "at" => Command::AtField,
+        "mudo" | "at" => Command::Muted,
         "surdo" | "isolamento" => Command::TotalIsolation,
         "voz" | "voice" if !joined.is_empty() => Command::VoiceMode { which: joined },
         "volume" | "vol" => parse_volume(&rest, trimmed),

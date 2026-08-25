@@ -19,7 +19,7 @@ hospeda, o vazio é quem chega, a diagonal é o enlace.
 ## Como é por dentro
 
 ```text
-   plug (terminal)          SEELE.app (desktop)
+   connection (terminal)          SEELE.app (desktop)
           │                        │
           └────────┬───────────────┘
                    │  seele-core — sessão, protocolo, áudio, estado
@@ -258,7 +258,7 @@ que abre o caminho. O ADR 0022 conta a escada inteira, e por que o degrau 5
 ### Um arquivo, tudo dentro
 
 Na aba **Releases**, um instalador por sistema: `.dmg` no macOS, `.exe` no
-Windows, `.deb` no Linux. Cada um traz as três coisas — o app gráfico, o `plug`
+Windows, `.deb` no Linux. Cada um traz as três coisas — o app gráfico, o `connection`
 e o `seeled` —, então quem instala não precisa decidir nada antes de entender a
 diferença.
 
@@ -297,16 +297,16 @@ Compilando do código-fonte, que é a opção que não exige confiar em ninguém
 
 ```sh
 git clone https://github.com/DATA-AND-DEV/SEELE && cd SEELE
-cargo build --release --bin seeled --bin plug
+cargo build --release --bin seeled --bin connection
 ```
 
 No Windows isso pede o Build Tools do Visual Studio — ver `docs/windows.md`.
 
-Depois de instalar pelo `.dmg`, o `plug` e o `seeled` moram dentro do app. Para
+Depois de instalar pelo `.dmg`, o `connection` e o `seeled` moram dentro do app. Para
 tê-los no `PATH`:
 
 ```sh
-sudo ln -sf /Applications/SEELE.app/Contents/MacOS/{plug,seeled} /usr/local/bin/
+sudo ln -sf /Applications/SEELE.app/Contents/MacOS/{connection,seeled} /usr/local/bin/
 ```
 
 No Linux o `.deb` já os põe em `/usr/bin`. No Windows ficam na pasta do
@@ -326,7 +326,7 @@ Ele imprime o endereço para usar na outra máquina e a impressão digital do
 certificado. Na outra:
 
 ```sh
-plug --server 192.168.x.x:8383 --nick seunome
+connection --server 192.168.x.x:8383 --nick seunome
 ```
 
 Aperte `?`.
@@ -358,7 +358,7 @@ Ele carrega a impressão digital do certificado, então quem recebe **não preci
 conferi-la por outro canal** — o cliente compara sozinho: num servidor que ele
 ainda não conhece, **recusa** se não bater; num servidor que ele já conhece, avisa
 que o link não é daquele servidor e entra assim mesmo, porque a chave de ontem
-já provou quem é. Do outro lado, `plug --url "seele://…"`.
+já provou quem é. Do outro lado, `connection --url "seele://…"`.
 
 A senha do servidor nunca viaja no link, e isso é decisão registrada: senha vale
 para sempre, convite gasto não vale nada.
@@ -417,7 +417,7 @@ entre eles áudio da tela, câmera, gravação e controle remoto.
 - senha e convite fechando a porta; convite servindo a uma pessoa só
 - limitação de taxa nas duas pontas: quem bate à porta em laço é recusado com
   motivo, e quem inunda de mensagens é avisado antes de ser derrubado
-- a mesma sessão retomada entre o `plug` e o app, com autor e horário
+- a mesma sessão retomada entre o `connection` e o app, com autor e horário
 - a interface: que a ajuda não prometa uma tecla que não existe, que o
   vocabulário aposentado não volte à tela, que a marca não use o vermelho de
   alerta, e que os retratos acima saiam do código que desenha
@@ -444,7 +444,7 @@ O que está frouxo está em `docs/pendencias.md`, com nome e motivo.
 | `crates/seele-core` | o núcleo: sessão, estado, voz. Tudo que pensa |
 | `crates/seele-server` | `seeled`, o servidor |
 | `crates/seele-encontro` | o ponto de encontro do furo de NAT |
-| `crates/seele-tui` | `plug`, o cliente de terminal |
+| `crates/seele-tui` | `connection`, o cliente de terminal |
 | `crates/seele-ffi` | a superfície que as cascas gráficas falam |
 | `apps/seele-app` | o cliente desktop, Tauri |
 | `design/marca/` | a marca, e o gerador de todos os tamanhos dela |

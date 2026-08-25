@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use ed25519_dalek::SigningKey;
-use seele_core::{Client, MemoryPinStore, Pattern, PinDecision};
+use seele_core::{Client, MemoryPinStore, LinkTrust, PinDecision};
 use seele_proto::ids::{VoiceRoomId, Ssrc};
 use seele_proto::MediaHeader;
 use seele_server::{ServerConfig, Daemon};
@@ -89,9 +89,9 @@ async fn three_clients_in_one_voice_room_hear_each_other() -> Result<()> {
     let mut asuka = connect(address, "asuka").await?;
 
     // The handshake reached PADRÃO: AZUL for all three.
-    assert_eq!(ayanami.pattern(), Pattern::Blue);
-    assert_eq!(shinji.pattern(), Pattern::Blue);
-    assert_eq!(asuka.pattern(), Pattern::Blue);
+    assert_eq!(ayanami.link_state(), LinkTrust::Verified);
+    assert_eq!(shinji.link_state(), LinkTrust::Verified);
+    assert_eq!(asuka.link_state(), LinkTrust::Verified);
 
     // Gap G1: each client learned its own ssrc, and they are distinct. Without
     // this nobody could attribute audio to anybody.
@@ -371,7 +371,7 @@ async fn the_session_names_the_server_and_its_voice_room() -> Result<()> {
 
 #[tokio::test]
 async fn media_before_entering_a_voice_room_goes_nowhere() -> Result<()> {
-    // A connection that authenticated but never inserted its plug has no
+    // A connection that authenticated but never inserted its connection has no
     // business reaching a voice room. specs/04: validate that the sender is in it.
     let address = start(Vec::new()).await?;
 
@@ -380,7 +380,7 @@ async fn media_before_entering_a_voice_room_goes_nowhere() -> Result<()> {
     inside.insert_plug(VoiceRoomId(1)).await?;
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    // `listener` never inserted its plug.
+    // `listener` never inserted its connection.
     listener.send_media(media(listener.session().ssrc, 1, b"nope"))?;
 
     let leaked = tokio::time::timeout(Duration::from_millis(600), inside.next_media()).await;

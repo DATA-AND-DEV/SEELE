@@ -40,7 +40,7 @@
 //!    — a janela ainda pode mandar recuar, se doeu, mas nunca dizer um tamanho.
 //! 2. **A faixa da voz não pode derrubar a estimativa.**
 //!    [`TetoDeVideo::teto`] **já** corta o teto pela metade em
-//!    [`SyncBand::Degraded`] e **já** para em [`SyncBand::Critical`]. Se a sonda
+//!    [`SignalBand::Degraded`] e **já** para em [`SignalBand::Critical`]. Se a sonda
 //!    também baixasse por causa da faixa, o vídeo levaria dois cortes pelo mesmo
 //!    sintoma e voltaria devagar de um buraco que ele mesmo cavou. São dois
 //!    sinais independentes **de propósito**: a faixa da voz é a **dor**, o
@@ -134,7 +134,7 @@
 
 use std::time::{Duration, Instant};
 
-use seele_proto::sync_ratio::SyncBand;
+use seele_proto::signal::SignalBand;
 
 use crate::tela::{Teto, CAMINHO_DA_PROVA_BPS, FRACAO_DO_CAMINHO, PISO_DE_BANDA_BPS};
 
@@ -312,9 +312,9 @@ pub struct Amostra {
     ///
     /// **Não serve para baixar a estimativa**, e a segunda armadilha do
     /// cabeçalho deste módulo diz por quê. Serve para uma coisa só: saber quanto
-    /// da nossa perna o teto acima representa, já que [`SyncBand::Degraded`]
+    /// da nossa perna o teto acima representa, já que [`SignalBand::Degraded`]
     /// corta as duas pernas de rede pela metade.
-    pub faixa: SyncBand,
+    pub faixa: SignalBand,
 }
 
 // ---------------------------------------------------------------------------
@@ -327,7 +327,7 @@ struct Janela {
     abriu: Instant,
     transporte: Transporte,
     teto_bps: u32,
-    faixa: SyncBand,
+    faixa: SignalBand,
 }
 
 /// A profundidade do caminho de subida desta máquina, medida enquanto a tela
@@ -435,7 +435,7 @@ impl Sonda {
     /// - **doeu?** — `congestion_events` ou `lost_packets` cresceram, ou a ida e
     ///   volta subiu mais que [`FILA_TOLERADA`] acima do mínimo já visto. É a
     ///   pergunta sobre a **capacidade**, e não sobre a dor da voz: a faixa de
-    ///   `SyncBand` não entra aqui, pelo motivo que o cabeçalho do módulo dá.
+    ///   `SignalBand` não entra aqui, pelo motivo que o cabeçalho do módulo dá.
     /// - **encheu?** — o que saiu pelo soquete chegou a [`OCUPACAO_MINIMA`] do
     ///   teto que valia. Uma janela que não encheu não mediu nada, e é a
     ///   primeira armadilha do cabeçalho.
@@ -657,18 +657,18 @@ impl Sonda {
 /// caminho de `entregue / 0,6` é o maior em que o que saiu pelo soquete ainda
 /// caberia no teto. Afirmar mais que isso é afirmar sobre bits que ninguém viu
 /// passar.
-fn caminho_que_sustenta(entregue_bps: u32, faixa: SyncBand) -> u32 {
+fn caminho_que_sustenta(entregue_bps: u32, faixa: SignalBand) -> u32 {
     let por_cento = match faixa {
-        SyncBand::Nominal => FRACAO_DO_CAMINHO,
+        SignalBand::Nominal => FRACAO_DO_CAMINHO,
         // A faixa degradada corta o teto pela metade, então metade da fração —
         // e é a mesma metade de `nossa_perna`, para que as duas sejam a ida e a
         // volta da mesma conta. Sem isto, a sonda leria uma janela degradada
         // como se o cano fosse metade do que é, e a faixa da voz cortaria a
         // estimativa por dentro: exatamente a segunda armadilha, entrando pela
         // porta dos fundos.
-        SyncBand::Degraded => FRACAO_DO_CAMINHO / 2,
+        SignalBand::Degraded => FRACAO_DO_CAMINHO / 2,
         // Vídeo parado; `observar` nem chega aqui.
-        SyncBand::Critical => return TETO_DA_ESTIMATIVA_BPS,
+        SignalBand::Critical => return TETO_DA_ESTIMATIVA_BPS,
     };
     let sustentado = (u64::from(entregue_bps) * 100) / u64::from(por_cento);
     u32::try_from(sustentado)
@@ -682,15 +682,15 @@ fn caminho_que_sustenta(entregue_bps: u32, faixa: SyncBand) -> u32 {
 /// teto; o que esta sonda precisa é da mesma conta sobre o número que ela mesma
 /// produziu. As duas têm de concordar, e concordam por construção: são
 /// [`FRACAO_DO_CAMINHO`] e a mesma metade da faixa degradada.
-const fn nossa_perna(estimativa_bps: u32, faixa: SyncBand) -> u32 {
+const fn nossa_perna(estimativa_bps: u32, faixa: SignalBand) -> u32 {
     let inteira = ((estimativa_bps as u64 * FRACAO_DO_CAMINHO as u64) / 100) as u32;
     match faixa {
-        SyncBand::Nominal => inteira,
-        SyncBand::Degraded => inteira / 2,
+        SignalBand::Nominal => inteira,
+        SignalBand::Degraded => inteira / 2,
         // Faixa crítica não tem teto — o vídeo está parado, e `observar` nem
         // chega aqui. Zero é o que faz a comparação ser verdadeira à toa, e é o
         // certo: se houvesse janela, ela não seria sobre a nossa perna.
-        SyncBand::Critical => 0,
+        SignalBand::Critical => 0,
     }
 }
 
@@ -773,7 +773,7 @@ mod tests {
             }
         }
 
-        fn amostra(&self, teto: Teto, faixa: SyncBand) -> Amostra {
+        fn amostra(&self, teto: Teto, faixa: SignalBand) -> Amostra {
             Amostra {
                 transporte: self.transporte,
                 teto,
@@ -795,7 +795,7 @@ mod tests {
 
     /// O teto com as pernas do §5.1 que estes testes querem: a nossa, medida,
     /// e a de quem hospeda fora do caminho.
-    fn teto_de(estimativa_bps: u32, faixa: SyncBand) -> Teto {
+    fn teto_de(estimativa_bps: u32, faixa: SignalBand) -> Teto {
         TetoDeVideo::com_caminho(estimativa_bps)
             .com_caminho_de_quem_hospeda(SERVER_LARGO_BPS)
             .teto(faixa)
@@ -810,7 +810,7 @@ mod tests {
     fn correr(
         sonda: &mut Sonda,
         cano: &mut Cano,
-        faixa: SyncBand,
+        faixa: SignalBand,
         ticas: u32,
         mut a_cada_tica: impl FnMut(u32, Teto),
     ) {
@@ -847,7 +847,7 @@ mod tests {
         correr(
             &mut sonda,
             &mut cano,
-            SyncBand::Nominal,
+            SignalBand::Nominal,
             ticas(10),
             |_, _| {},
         );
@@ -859,7 +859,7 @@ mod tests {
         );
         // E a resolução acompanha, que é o defeito que o usuário relatava.
         assert_eq!(
-            teto_de(sonda.estimativa(), SyncBand::Nominal).resolucao_estimada(),
+            teto_de(sonda.estimativa(), SignalBand::Nominal).resolucao_estimada(),
             Some(Resolucao::P1080)
         );
     }
@@ -889,13 +889,13 @@ mod tests {
         let mut cano = Cano::de(8_000_000);
         let inicio = Instant::now();
         let antes = sonda.estimativa();
-        let teto = teto_de(antes, SyncBand::Nominal);
+        let teto = teto_de(antes, SignalBand::Nominal);
 
         // Sessenta segundos de tela parada: o teto continua o que era, e o que
         // sai pelo fio é a voz e mais nada.
         for k in 1..=ticas(60) {
             cano.correr(0, TICA);
-            sonda.observar(inicio + TICA * k, &cano.amostra(teto, SyncBand::Nominal));
+            sonda.observar(inicio + TICA * k, &cano.amostra(teto, SignalBand::Nominal));
         }
 
         assert_eq!(
@@ -920,7 +920,7 @@ mod tests {
             }
             sonda.observar(
                 inicio + TICA * (comeco + k),
-                &cano.amostra(teto, SyncBand::Nominal),
+                &cano.amostra(teto, SignalBand::Nominal),
             );
         }
 
@@ -960,7 +960,7 @@ mod tests {
             correr(
                 &mut sonda,
                 &mut cano,
-                SyncBand::Nominal,
+                SignalBand::Nominal,
                 ticas(180),
                 |k, teto| {
                     // Os primeiros segundos são a subida, e ela é uma aposta
@@ -1009,7 +1009,7 @@ mod tests {
     /// A segunda armadilha: **a faixa da voz não pode cortar duas vezes**.
     ///
     /// [`TetoDeVideo::teto`] já corta o teto pela metade em
-    /// [`SyncBand::Degraded`]. Se a sonda também baixasse por causa da faixa, o
+    /// [`SignalBand::Degraded`]. Se a sonda também baixasse por causa da faixa, o
     /// vídeo levaria dois cortes pelo mesmo sintoma — e voltaria devagar de um
     /// buraco que ele mesmo cavou, porque a subida da sonda leva janelas e a
     /// faixa volta num `PersonState`.
@@ -1023,7 +1023,7 @@ mod tests {
         correr(
             &mut nominal,
             &mut cano_nominal,
-            SyncBand::Nominal,
+            SignalBand::Nominal,
             ticas(15),
             |_, _| {},
         );
@@ -1033,7 +1033,7 @@ mod tests {
         correr(
             &mut degradada,
             &mut cano_degradado,
-            SyncBand::Degraded,
+            SignalBand::Degraded,
             ticas(15),
             |_, _| {},
         );
@@ -1048,8 +1048,8 @@ mod tests {
         // E o corte da faixa continua existindo, no lugar dele: metade do teto,
         // pelas mãos de quem sempre o fez.
         assert_eq!(
-            teto_de(degradada.estimativa(), SyncBand::Degraded).bps(),
-            teto_de(degradada.estimativa(), SyncBand::Nominal).bps() / 2
+            teto_de(degradada.estimativa(), SignalBand::Degraded).bps(),
+            teto_de(degradada.estimativa(), SignalBand::Nominal).bps() / 2
         );
     }
 
@@ -1062,7 +1062,7 @@ mod tests {
     #[test]
     fn cada_sinal_de_piora_sozinho_derruba_a_estimativa() {
         let inicio = Instant::now();
-        let teto = teto_de(CAMINHO_DA_PROVA_BPS, SyncBand::Nominal);
+        let teto = teto_de(CAMINHO_DA_PROVA_BPS, SignalBand::Nominal);
         // Bytes de uma janela cheia a 1,2 Mbps de teto mais a voz.
         let cheios = u64::from(teto.bps() + VOZ_BPS) / 8;
 
@@ -1075,7 +1075,7 @@ mod tests {
             let comeco = Amostra {
                 transporte: fim,
                 teto,
-                faixa: SyncBand::Nominal,
+                faixa: SignalBand::Nominal,
             };
             assert_eq!(sonda.observar(inicio, &comeco), None);
             fim.bytes_enviados += cheios;
@@ -1085,7 +1085,7 @@ mod tests {
                 &Amostra {
                     transporte: fim,
                     teto,
-                    faixa: SyncBand::Nominal,
+                    faixa: SignalBand::Nominal,
                 },
             );
             sonda.estimativa()
@@ -1129,7 +1129,7 @@ mod tests {
         correr(
             &mut sonda,
             &mut cano,
-            SyncBand::Nominal,
+            SignalBand::Nominal,
             ticas(120),
             |_, _| {},
         );
@@ -1142,11 +1142,11 @@ mod tests {
         // E o piso é exatamente onde a fração ainda compra o piso de banda: quem
         // para daqui para baixo é o teto, com nome.
         assert_eq!(
-            teto_de(sonda.estimativa(), SyncBand::Nominal),
+            teto_de(sonda.estimativa(), SignalBand::Nominal),
             Teto::Bps(PISO_DE_BANDA_BPS)
         );
         assert_eq!(
-            teto_de(sonda.estimativa(), SyncBand::Degraded),
+            teto_de(sonda.estimativa(), SignalBand::Degraded),
             Teto::Parado(crate::tela::MotivoDeParada::AbaixoDoPiso)
         );
 
@@ -1156,7 +1156,7 @@ mod tests {
         correr(
             &mut larga,
             &mut fibra,
-            SyncBand::Nominal,
+            SignalBand::Nominal,
             ticas(120),
             |_, _| {},
         );
@@ -1189,10 +1189,10 @@ mod tests {
         // arredondamento seja o que faz este teste passar.
         let mut cano = Cano::de(1_500_000);
         let mut trocas = 0_u32;
-        let mut degrau = teto_de(sonda.estimativa(), SyncBand::Nominal).resolucao_estimada();
+        let mut degrau = teto_de(sonda.estimativa(), SignalBand::Nominal).resolucao_estimada();
 
         let inicio = Instant::now();
-        let faixa = SyncBand::Nominal;
+        let faixa = SignalBand::Nominal;
         let mut teto = teto_de(sonda.estimativa(), faixa);
         for k in 1..=ticas(180) {
             // O cano respira: ±4% em volta do limiar, trocando a cada segundo.
@@ -1238,12 +1238,12 @@ mod tests {
         let teto = TetoDeVideo::com_caminho(sonda.estimativa())
             .com_caminho_de_quem_hospeda(3_000_000)
             .com_espectadores(6)
-            .teto(SyncBand::Nominal);
+            .teto(SignalBand::Nominal);
         assert_eq!(teto, Teto::Bps(300_000));
 
         for k in 1..=ticas(60) {
             cano.correr(teto.bps(), TICA);
-            sonda.observar(inicio + TICA * k, &cano.amostra(teto, SyncBand::Nominal));
+            sonda.observar(inicio + TICA * k, &cano.amostra(teto, SignalBand::Nominal));
         }
 
         assert_eq!(
@@ -1275,7 +1275,7 @@ mod tests {
         let mut sonda = Sonda::nova();
         let mut cano = Cano::de(50_000_000);
         let inicio = Instant::now();
-        let faixa = SyncBand::Nominal;
+        let faixa = SignalBand::Nominal;
         // Sem `com_caminho_de_quem_hospeda`: é o teto de uma sala cujo servidor
         // não declarou nada, que é o padrão de fábrica.
         let mut teto = TetoDeVideo::com_caminho(sonda.estimativa()).teto(faixa);
@@ -1311,7 +1311,7 @@ mod tests {
         correr(
             &mut sonda,
             &mut cano,
-            SyncBand::Nominal,
+            SignalBand::Nominal,
             ticas(10),
             |_, _| {},
         );
@@ -1325,16 +1325,16 @@ mod tests {
         // que morreu: os do `quinn` novo começam em zero, e a subtração daria
         // uma janela absurda.
         let inicio = Instant::now();
-        let teto = teto_de(aprendido, SyncBand::Nominal);
+        let teto = teto_de(aprendido, SignalBand::Nominal);
         let mut novo = Cano::de(8_000_000);
         assert_eq!(
-            sonda.observar(inicio, &novo.amostra(teto, SyncBand::Nominal)),
+            sonda.observar(inicio, &novo.amostra(teto, SignalBand::Nominal)),
             None
         );
         novo.correr(teto.bps(), Duration::from_secs(1));
         let depois = sonda.observar(
             inicio + Duration::from_secs(1),
-            &novo.amostra(teto, SyncBand::Nominal),
+            &novo.amostra(teto, SignalBand::Nominal),
         );
         assert!(
             depois.is_none_or(|bps| bps <= TETO_DA_ESTIMATIVA_BPS),
@@ -1355,7 +1355,7 @@ mod tests {
         let amostra = Amostra {
             transporte,
             teto: parado,
-            faixa: SyncBand::Critical,
+            faixa: SignalBand::Critical,
         };
 
         for k in 1..=ticas(30) {

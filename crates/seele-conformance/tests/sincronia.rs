@@ -14,7 +14,7 @@
 //! # Por que zero e por que ele engana
 //!
 //! Zero não é «não medido» aos olhos de quem lê: pelas três faixas do comp
-//! (`design/Entry Plug v2.dc.html`) zero é **crítico**, vermelho, a cor de «vá
+//! (`design/SEELE v2.dc.html`) zero é **crítico**, vermelho, a cor de «vá
 //! olhar». Numa sessão local, com RTT, jitter e perda em zero, o servidor calcula
 //! cem — e o roster acusava o pessoa de estar em colapso.
 //!
@@ -43,7 +43,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use seele_core::enlace::{Aviso, Destino, Enlace};
-use seele_core::{MemoryPinStore, Room, SyncBand};
+use seele_core::{MemoryPinStore, Room, SignalBand};
 use seele_proto::ids::VoiceRoomId;
 use seele_server::persistence::Location;
 use seele_server::{ServerConfig, Daemon};
@@ -92,7 +92,7 @@ fn destino(endereco: SocketAddr, apelido: &str) -> Destino {
 
 /// Conecta, entra na sala de voz e monta a sala como a casca monta.
 ///
-/// `adopt` e `enter_voice_room` na mão são o que `plug` e o aplicativo fazem: o
+/// `adopt` e `enter_voice_room` na mão são o que `connection` e o aplicativo fazem: o
 /// aperto de mão consome o `Session` antes de qualquer casca ver, e o servidor
 /// confirma a entrada na sala de voz pelo silêncio. Sem os dois, o roster deste teste
 /// começaria vazio e não haveria linha de `me` para medir.
@@ -139,7 +139,7 @@ fn minha_taxa(sala: &Room) -> Option<u8> {
     let eu = sala.me?;
     sala.current_roster()
         .find(|pessoa| pessoa.id == eu)
-        .map(|pessoa| pessoa.sync_ratio)
+        .map(|pessoa| pessoa.signal)
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -170,8 +170,8 @@ async fn o_roster_mostra_a_taxa_do_proprio_pessoa() -> Result<()> {
     // A faixa, e não o valor: cravar cem seria cravar o desempenho da máquina.
     // Em `127.0.0.1` o que se pode exigir é que ninguém precise ir olhar.
     assert_ne!(
-        SyncBand::of(taxa),
-        SyncBand::Critical,
+        SignalBand::of(taxa),
+        SignalBand::Critical,
         "uma conexão local marcou {taxa}%, que pelas três faixas é crítico"
     );
 

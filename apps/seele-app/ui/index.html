@@ -123,7 +123,7 @@
 </div>
 
 <!--
-  A composição é a mesma do `plug` de propósito. `specs/06-clientes-gui.md`:
+  A composição é a mesma do `connection` de propósito. `specs/06-clientes-gui.md`:
   "Alguém que usa a TUI deve abrir o app e saber onde tudo está sem procurar."
   Mesmo cabeçalho, mesmos três painéis na mesma ordem, mesma barra permanente
   no rodapé.
@@ -465,7 +465,7 @@
       botão chamado `SERVER`, e «sair do servidor» ao lado dele leria como sair da
       configuração. E não «EJETAR», que é o vocabulário do tema mas não diz a
       quem chega o que vai acontecer — o produto tem uma tela inteira chamada
-      Entry Plug, e ejetar pode ser lida como ejetar alguém.
+      SEELE, e ejetar pode ser lida como ejetar alguém.
     -->
     <button id="botao-desconectar" class="botao-fantasma" type="button"
             title="encerrar esta sessão e voltar à tela de entrada">DESCONECTAR</button>
@@ -593,7 +593,7 @@
 
   <!--
     O que a chave deste Server acabou de ser. `crates/seele-core/src/tofu.rs`
-    manda a casca dizer o que acabou de confiar, e o `plug` no terminal já diz;
+    manda a casca dizer o que acabou de confiar, e o `connection` no terminal já diz;
     esta janela fixava em silêncio.
 
     Laranja e `role="status"`, nunca o vermelho do banner: `specs/08-seguranca.md`
@@ -969,7 +969,7 @@
       máquina não é anotado lá (`127.0.0.1` não é lugar aonde se volta), e é
       justamente ele que esta coluna existe para dizer.
 
-      **Este produto tem um `Plug` por vez**: `Session` guarda um só, e `connect`
+      **Este produto tem um `Connection` por vez**: `Session` guarda um só, e `connect`
       devolve `AlreadyConnected` se já houver (inventário §16). Isso não impede a
       trilha — é a forma dela. Apertar outro servidor não abre uma segunda
       sessão: desconecta desta e conecta naquela, que é o que «entrar num outro
@@ -1397,7 +1397,7 @@
 
 <!--
   Chamada — a grade do VoiceRoom, redesenhada segundo o comp v3
-  (`design/Entry Plug v3.dc.html`, linhas 209–336; inventário §7).
+  (`design/SEELE v3.dc.html`, linhas 209–336; inventário §7).
 
   Tela própria, e não camada: ela **substitui** a conversa em vez de se pôr
   sobre ela, e é assim no comp (`ehChamada` é exclusivo de `ehPrincipal`). Ler a
@@ -1471,7 +1471,7 @@
 
         <!--
           `duracao` no comp é o tempo de chamada, e este produto não o tem: o
-          protocolo não carrega quando o plug entrou, e um cronômetro que
+          protocolo não carrega quando o connection entrou, e um cronômetro que
           começasse a contar ao abrir esta tela diria que ele entrou agora.
 
           O que existe é o relógio local desde o primeiro quadro da sessão — o
@@ -1707,7 +1707,7 @@
   vestígio do aperto de mão na janela é o `PADRÃO: AZUL` do cabeçalho da
   sessão, que aparece depois de tudo já ter acontecido. Aqui ele é a etapa: o
   `connect` já correu — é ele o aperto de mão — e esta tela é onde o veredito
-  dele é lido antes de o plug entrar.
+  dele é lido antes de o connection entrar.
 
   Daí o botão — **um**, e não os dois passos do comp. Ele era VERIFICAR
   IDENTIDADE e depois ENTRAR NO SERVIDOR, e as duas metades sempre foram
@@ -1724,7 +1724,7 @@
   `<section>` inteira porque muda três painéis de uma vez.
 
   `aperto` — o caminho de sempre: o `connect` deu certo, e o veredito da chave é
-  lido antes de o plug entrar em VoiceRoom nenhum.
+  lido antes de o connection entrar em VoiceRoom nenhum.
 
   `espera` — o `connect` foi derrubado por `AdmissionPending`. Não há snapshot,
   não há veredito e não há sessão: a cartela de padrão e a ficha do servidor não
@@ -1751,7 +1751,7 @@
         <!--
           A cartela de padrão: bloco sólido invertido, e não contorno — é a
           regra de inversão que o v2 endureceu (§12 do inventário). O valor é
-          `Snapshot.pattern`, que já é exatamente `Offline` / `Orange` / `Blue`.
+          `Snapshot.link_state`, que já é exatamente `Offline` / `Orange` / `Blue`.
         -->
         <div id="auth-padrao" class="cartela-padrao" data-padrao="Offline">
           <span id="auth-padrao-rotulo" class="cartela-padrao-rotulo">SEM CONEXÃO</span>
@@ -1906,7 +1906,7 @@
           O que saiu daqui e do painel ao lado: OPERADORES e ROTA, que o comp v2
           preenche e o protocolo não tem — não existe população total do servidor, e
           "rota" não é conceito em lugar nenhum do core; CODEC, que só ganha
-          valor depois de o plug entrar num VoiceRoom, e nesta tela ninguém entrou
+          valor depois de o connection entrar num VoiceRoom, e nesta tela ninguém entrou
           ainda; e a CHAVE DE IDENTIDADE local, que não atravessa a FFI.
 
           A convenção anterior era manter a moldura e escrever a falta, para a
@@ -2174,7 +2174,7 @@
                 ela nunca dispara sozinha. Uma chave de dois lados esconderia o
                 terceiro estado, que é justamente o perigoso.
 
-                É da sessão e não do disco: `set_voice_mode` fala com um plug
+                É da sessão e não do disco: `set_voice_mode` fala com um connection
                 inserido. Sem sessão os três ficam apagados, com o motivo no
                 `title` — a exceção que esta tela abre para um controle morto, e
                 ela é temporária por natureza, não estrutural.
@@ -2245,7 +2245,7 @@
         <!--
           Uma lista, e não uma tabela de teclas trocáveis. O comp escreve «Clique
           em uma tecla para trocá-la», e não há onde guardar a troca: os atalhos
-          do app e do `plug` são fixos. O que esta seção faz é o que ninguém
+          do app e do `connection` são fixos. O que esta seção faz é o que ninguém
           fazia — dizer quais são.
 
           `data-tecla` carrega o nome que o navegador dá à tecla, e não o nome
@@ -2454,7 +2454,7 @@
           seletor, e os dois números vêm do Rust (`regras_do_icone_do_server`) em
           vez de escritos aqui: uma pessoa que só descobre o limite pela recusa
           já perdeu a viagem até a pasta das fotos. Quando a recusa vier assim
-          mesmo, ela traz o número que o `PlugError` carrega — que é o do
+          mesmo, ela traz o número que o `ConnectionError` carrega — que é o do
           protocolo, e o único que manda.
         -->
         <section id="painel-servidor" class="server-painel-secao"

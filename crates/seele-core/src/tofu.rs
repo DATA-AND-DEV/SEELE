@@ -476,7 +476,7 @@ mod tests {
 
     #[test]
     fn a_matching_pin_the_invite_contradicts_warns_and_does_not_refuse() {
-        // This is the hole: `plug` compared the expected value with itself,
+        // This is the hole: `connection` compared the expected value with itself,
         // because `Matches` carried no fingerprint to compare against.
         // Trust on first use already proved this is yesterday's server, so
         // the link is what is wrong — refusing would lock somebody out of a

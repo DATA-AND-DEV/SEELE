@@ -1,7 +1,7 @@
 //! Os servidores onde este cliente já esteve.
 //!
 //! Existe para que ninguém precise redigitar um endereço IP e um apelido toda
-//! vez. É o que alimenta a tela de conexão do `plug` e a lista do app.
+//! vez. É o que alimenta a tela de conexão do `connection` e a lista do app.
 //!
 //! # Por que não junto dos pins
 //!
@@ -43,7 +43,7 @@ pub struct Conhecido {
     pub alvo: String,
     /// Com que apelido se entrou da última vez.
     pub apelido: String,
-    /// Último sala de voz em que o plug foi inserido.
+    /// Último sala de voz em que o connection foi inserido.
     pub voice_room: Option<u32>,
     /// Quando foi a última visita, em segundos desde a época.
     pub visto_em: i64,
@@ -345,7 +345,7 @@ mod tests {
     fn o_nome_e_a_imagem_sobrevivem_a_uma_visita_que_nao_os_traz() {
         // `registrar` reescreve a entrada inteira, e é chamado por quem não sabe
         // da aparência — o terminal, por exemplo, que nunca viu o ícone. Sem
-        // preservar, cada conexão pelo `plug` apagaria o distintivo que o app
+        // preservar, cada conexão pelo `connection` apagaria o distintivo que o app
         // tinha anotado, e a lista voltaria a ser uma coluna de endereços.
         let pasta = std::env::temp_dir().join(format!("seele-conhecidos-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&pasta);

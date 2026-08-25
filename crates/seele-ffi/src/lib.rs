@@ -1,4 +1,4 @@
-//! **Entry Plug**, as one object a graphical shell can hold.
+//! **SEELE**, as one object a graphical shell can hold.
 //!
 //! `specs/06-clientes-gui.md` specifies this surface and states the rule it
 //! exists to enforce: "Nenhuma funcionalidade nasce aqui: se algo é útil, é
@@ -17,10 +17,10 @@
 //!
 //! # Threading
 //!
-//! [`Plug::connect`] **blocks**. It opens a QUIC connection and completes a
+//! [`Connection::connect`] **blocks**. It opens a QUIC connection and completes a
 //! handshake, and a shell must call it off whatever thread draws. Everything
 //! afterwards returns immediately: commands are queued to the driver thread,
-//! and [`Plug::snapshot`] reads a copy.
+//! and [`Connection::snapshot`] reads a copy.
 //!
 //! Events arrive on the driver thread, not the shell's. A listener that touches
 //! a UI must marshal — `specs/06-clientes-gui.md`: "a casca marshala para sua
@@ -44,21 +44,21 @@ use std::time::{Duration, Instant};
 use seele_core::enlace::Enlace;
 use seele_core::{
     identity, VoiceRoomId, ClientMessageId, FilePinStore, ChannelId, MediaChannel, MessageId, PersonId,
-    Room, Ssrc, SyncBand, SyncInputs, SyncRatio, Voice,
+    Room, Ssrc, SignalBand, SyncInputs, Signal, Voice,
 };
 
 pub use types::{
     PermissaoDeMicrofone,
     Attachment, AttachmentRefusal, VoiceRoom, VoiceRoomSync, CaptureDevice, EndReason, Event, FonteDeTela,
-    LimitesDeTela, Channel, ChannelWeight, LinkState, Message, Notice, NoticeReason, Pattern,
-    PermissaoDeTela, Person, PlaybackDevice, PlugError, Preview, PreviewRefusal, PreviewRules,
-    Severity, Snapshot, SyncBand as Band, TelaEmCurso, Telemetry, Transfer, Trust, VoiceMode,
+    LimitesDeTela, Channel, ChannelWeight, LinkTrust, Message, Notice, NoticeReason, LinkState,
+    PermissaoDeTela, Person, PlaybackDevice, ConnectionError, Preview, PreviewRefusal, PreviewRules,
+    Severity, Snapshot, SignalBand as Band, TelaEmCurso, Telemetry, Transfer, Trust, VoiceMode,
 };
 
-/// O que a casca gráfica precisa do core além de um [`Plug`] vivo.
+/// O que a casca gráfica precisa do core além de um [`Connection`] vivo.
 ///
 /// ADR 0002 deixa `seele-app` ver `seele-ffi` e mais nada, e as telas do app
-/// precisam dos mesmos módulos que o `plug` usa direto: a lista de servidores
+/// precisam dos mesmos módulos que o `connection` usa direto: a lista de servidores
 /// visitados, a busca no histórico, a leitura de um `seele://` e os ajustes
 /// que ficam nesta máquina. Nenhum deles é lógica de casca — se fossem escritos
 /// aqui, seriam escritos de novo no terminal e mais uma vez no cliente móvel.
@@ -73,7 +73,7 @@ pub use seele_core::{conhecidos, preferences, search, uri};
 
 /// Every microphone this machine is offering, right now.
 ///
-/// A free function and not a method on [`Plug`]: picking a microphone is a thing
+/// A free function and not a method on [`Connection`]: picking a microphone is a thing
 /// a person does *before* connecting at least as often as during, and hanging
 /// the list off a live session would put the control behind the door it exists
 /// to open. It is also what makes the list answerable from the entry screen.
@@ -117,7 +117,7 @@ pub fn playback_devices() -> Vec<PlaybackDevice> {
 ///
 /// **Livre e não método**, ao contrário da permissão de tela: não precisa de
 /// sessão nenhuma. Quem descobre que está mudo quer a resposta antes de
-/// entrar, e a tela de entrada não tem `Plug` para perguntar.
+/// entrar, e a tela de entrada não tem `Connection` para perguntar.
 ///
 /// Só olha, e não pede nada — no Windows não há o que pedir para um app de
 /// área de trabalho. Ver `seele_audio::device::consentimento_do_microfone`.
@@ -141,11 +141,11 @@ pub fn permissao_de_microfone() -> PermissaoDeMicrofone {
 /// # Errors
 ///
 /// Falha se a identidade não puder ser lida nem criada.
-pub fn impressao_desta_maquina(home: &str) -> Result<String, PlugError> {
+pub fn impressao_desta_maquina(home: &str) -> Result<String, ConnectionError> {
     let chave =
         identity::load_or_create(&PathBuf::from(home).join("identity.key")).map_err(|error| {
             tracing::warn!(%error, "identity unavailable");
-            PlugError::IdentityUnavailable
+            ConnectionError::IdentityUnavailable
         })?;
     Ok(seele_core::key_fingerprint(
         chave.verifying_key().as_bytes(),
@@ -214,7 +214,7 @@ pub struct ConnectConfig {
 ///
 /// Espelho de `seele_core::chegada::Etapa`, com o **mesmo nome** em cada
 /// variante e em cada campo. O que esta cópia acrescenta é `Serialize` e o
-/// [`PlugError`] no lugar do erro do núcleo; nada mais. A regra que ela segue é
+/// [`ConnectionError`] no lugar do erro do núcleo; nada mais. A regra que ela segue é
 /// a das outras travessias deste arquivo: o nome do tipo é do crate e nunca
 /// atravessa, e o nome que atravessa — variante e campo — é o que o núcleo
 /// escolheu, porque é ele que a casca usa como chave de frase. Traduzir aqui
@@ -266,7 +266,7 @@ pub enum ConnectStage {
     /// Nenhum candidato entrou, e este é o motivo.
     Desistiu {
         /// O mesmo erro que a casca já sabe escrever.
-        motivo: PlugError,
+        motivo: ConnectionError,
     },
 }
 
@@ -291,15 +291,15 @@ pub struct ConnectStep {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ConnectFailure {
     /// Por que não deu, do jeito de sempre.
-    pub error: PlugError,
+    pub error: ConnectionError,
     /// Por onde a chegada passou, em ordem. Vazia quando nada chegou a ser
     /// tentado — uma identidade que não abre, uma thread que não sobe.
     pub trail: Vec<ConnectStep>,
 }
 
-impl From<PlugError> for ConnectFailure {
+impl From<ConnectionError> for ConnectFailure {
     /// Uma falha de antes de haver chegada: o erro sozinho, sem trilha.
-    fn from(error: PlugError) -> Self {
+    fn from(error: ConnectionError) -> Self {
         Self {
             error,
             trail: Vec::new(),
@@ -426,7 +426,7 @@ fn campos_do_passo(etapa: &seele_core::chegada::Etapa) -> (Option<String>, Optio
 /// A trilha de uma chegada que falhou, no log do processo.
 ///
 /// **É a superfície inteira que responde a pergunta desta tarefa.** Enquanto
-/// `apps/seele-app` entrar por [`Plug::connect`], que joga a trilha fora, este
+/// `apps/seele-app` entrar por [`Connection::connect`], que joga a trilha fora, este
 /// log é o único lugar em que ela aparece — e um log que escrevesse só a etapa
 /// e o relógio responderia «Parada, Tentando, Desistiu, aos 8003 ms», que não é
 /// a pergunta. A pergunta é **qual dos quatro deu o quê**, e ela precisa do
@@ -501,8 +501,8 @@ pub trait EventListener: Send + Sync {
 
 /// A command on its way to the driver thread.
 enum Command {
-    InsertPlug(VoiceRoomId),
-    EjectPlug,
+    EnterVoiceRoom(VoiceRoomId),
+    LeaveVoiceRoom,
     OpenChannel(ChannelId),
     Send {
         channel: ChannelId,
@@ -624,14 +624,14 @@ struct Shared {
     /// Rewritten on every reconnection: the ssrc and the channel are both new.
     media: Mutex<Option<(MediaChannel, Ssrc)>>,
     nickname: Mutex<String>,
-    pattern: AtomicU8,
+    link_state: AtomicU8,
     /// Round trip in microseconds. Integer because atomics have no `f32`, and
     /// microseconds because milliseconds would round a fast local link to zero.
     rtt_micros: std::sync::atomic::AtomicU64,
     /// O jitter de chegada deste receptor, em microssegundos (RFC 3550).
     ///
     /// Guardado aqui porque quem o calcula é [`measure`], no laço de voz, e quem
-    /// o mostra é o [`Plug::snapshot`], na casca — e antes disto ele era
+    /// o mostra é o [`Connection::snapshot`], na casca — e antes disto ele era
     /// calculado, usado no Sync Ratio e jogado fora, enquanto a tela lia o zero
     /// que o servidor manda de propósito (`session.rs` diz em comentário que o
     /// servidor não tem como medir jitter, porque jitter se mede no receptor).
@@ -643,7 +643,7 @@ struct Shared {
     /// milissegundo, então um milissegundo inteiro arredondaria a diferença
     /// entre um enlace bom e um ótimo para o mesmo número.
     jitter_de_chegada_micros: std::sync::atomic::AtomicU64,
-    sync_ratio: AtomicU8,
+    signal: AtomicU8,
     running: AtomicBool,
     /// Onde o enlace está, para o `Snapshot` contar à casca.
     ///
@@ -722,7 +722,7 @@ struct Shared {
     /// casca já escrevia do lado dela: guardá-lo faria o painel da próxima
     /// comparar o que está saindo agora com um teto de outra vez.
     limites_da_tela: Mutex<Option<LimitesDeTela>>,
-    /// A última lista de fontes que [`Plug::fontes_de_tela`] devolveu.
+    /// A última lista de fontes que [`Connection::fontes_de_tela`] devolveu.
     ///
     /// **Existe porque o número que a casca devolve é o índice desta lista**, e
     /// não um identificador do sistema: um `Alvo` da WGC não publica `HWND`
@@ -919,21 +919,21 @@ impl Shared {
 /// A live session.
 ///
 /// Dropping it disconnects.
-pub struct Plug {
+pub struct Connection {
     commands: tokio::sync::mpsc::UnboundedSender<Command>,
     shared: Arc<Shared>,
 }
 
-impl std::fmt::Debug for Plug {
+impl std::fmt::Debug for Connection {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("Plug")
+            .debug_struct("Connection")
             .field("running", &self.shared.running.load(Ordering::Relaxed))
             .finish()
     }
 }
 
-impl Plug {
+impl Connection {
     /// Connects, authenticates, and starts the driver thread.
     ///
     /// **Blocks** until the session reaches PADRÃO: AZUL or fails.
@@ -941,13 +941,13 @@ impl Plug {
     /// A porta antiga, e o que ela perde: o erro sem a trilha. Ela fica porque
     /// oito arquivos de teste entram por aqui, e trocá-los todos no commit que
     /// abre a porta nova transformaria um passo barato num caro. Quem desenha
-    /// uma tela de falha quer [`Plug::connect_with_trail`].
+    /// uma tela de falha quer [`Connection::connect_with_trail`].
     ///
     /// # Errors
     ///
-    /// Every failure is a [`PlugError`] variant, never a string: a shell has to
+    /// Every failure is a [`ConnectionError`] variant, never a string: a shell has to
     /// be able to write its own sentence for each one.
-    pub fn connect(config: ConnectConfig) -> Result<(Arc<Self>, Trust), PlugError> {
+    pub fn connect(config: ConnectConfig) -> Result<(Arc<Self>, Trust), ConnectionError> {
         Self::connect_with_trail(config).map_err(|falha| falha.error)
     }
 
@@ -960,7 +960,7 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`ConnectFailure`], que é o [`PlugError`] de sempre mais a trilha. Ela
+    /// [`ConnectFailure`], que é o [`ConnectionError`] de sempre mais a trilha. Ela
     /// vem vazia quando a falha é de antes de haver chegada: um endereço que
     /// não resolve, uma identidade que não abre, uma thread que não sobe.
     pub fn connect_with_trail(config: ConnectConfig) -> Result<(Arc<Self>, Trust), ConnectFailure> {
@@ -971,8 +971,8 @@ impl Plug {
     ///
     /// A porta que faltava, e a falta era estrutural. `seele_core` publica uma
     /// etapa por instante da travessia desde a tarefa 8, e nada em produção as
-    /// lia: [`Plug::connect`] bloqueia, quem se inscreve por [`Plug::subscribe`]
-    /// só tem o `Arc<Plug>` depois que ela volta, e quando ela volta a travessia
+    /// lia: [`Connection::connect`] bloqueia, quem se inscreve por [`Connection::subscribe`]
+    /// só tem o `Arc<Connection>` depois que ela volta, e quando ela volta a travessia
     /// inteira já terminou. O ouvinte tinha de entrar **antes** do bloqueio, e é
     /// só isso que esta função faz de diferente.
     ///
@@ -984,7 +984,7 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// O mesmo de [`Plug::connect_with_trail`].
+    /// O mesmo de [`Connection::connect_with_trail`].
     pub fn connect_watching(
         config: ConnectConfig,
         olhos: Arc<dyn EventListener>,
@@ -1012,11 +1012,11 @@ impl Plug {
         let home = PathBuf::from(&config.home);
         let key = identity::load_or_create(&home.join("identity.key")).map_err(|error| {
             tracing::warn!(%error, "identity unavailable");
-            PlugError::IdentityUnavailable
+            ConnectionError::IdentityUnavailable
         })?;
         let pins = Arc::new(FilePinStore::open(home.join("pins")).map_err(|error| {
             tracing::warn!(%error, "pin store unavailable");
-            PlugError::IdentityUnavailable
+            ConnectionError::IdentityUnavailable
         })?);
 
         let shared = Arc::new(Shared {
@@ -1030,11 +1030,11 @@ impl Plug {
             voice: Mutex::new(None),
             media: Mutex::new(None),
             nickname: Mutex::new(config.nickname.clone()),
-            pattern: AtomicU8::new(pattern_byte(Pattern::Offline)),
+            link_state: AtomicU8::new(link_state_byte(LinkTrust::Offline)),
             rtt_micros: std::sync::atomic::AtomicU64::new(0),
             jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
             caminho: Mutex::new(None),
-            sync_ratio: AtomicU8::new(0),
+            signal: AtomicU8::new(0),
             running: AtomicBool::new(false),
             pending_weights: Mutex::new(Vec::new()),
             limites_da_tela: Mutex::new(None),
@@ -1047,7 +1047,7 @@ impl Plug {
         let thread_shared = Arc::clone(&shared);
         let thread_config = config.clone();
         std::thread::Builder::new()
-            .name("seele-plug".into())
+            .name("seele-connection".into())
             .spawn(move || {
                 let runtime = match tokio::runtime::Builder::new_current_thread()
                     .enable_all()
@@ -1055,8 +1055,8 @@ impl Plug {
                 {
                     Ok(runtime) => runtime,
                     Err(error) => {
-                        tracing::error!(%error, "could not start the plug runtime");
-                        let _ = ready_tx.send(Err(PlugError::Unreachable.into()));
+                        tracing::error!(%error, "could not start the connection runtime");
+                        let _ = ready_tx.send(Err(ConnectionError::Unreachable.into()));
                         return;
                     }
                 };
@@ -1075,44 +1075,44 @@ impl Plug {
                 ));
             })
             .map_err(|error| {
-                tracing::error!(%error, "could not start the plug thread");
-                PlugError::Unreachable
+                tracing::error!(%error, "could not start the connection thread");
+                ConnectionError::Unreachable
             })?;
 
         // The thread reports the outcome of the handshake, then keeps running.
-        let trust = ready_rx.recv().map_err(|_| PlugError::Unreachable)??;
+        let trust = ready_rx.recv().map_err(|_| ConnectionError::Unreachable)??;
 
-        let plug = Arc::new(Self {
+        let connection = Arc::new(Self {
             commands: command_tx,
             shared,
         });
-        Ok((plug, trust))
+        Ok((connection, trust))
     }
 
-    /// Puts the plug into a voice room.
+    /// Puts the connection into a voice room.
     ///
     /// # Errors
     ///
-    /// [`PlugError::NotConnected`] once the session is over.
-    pub fn insert_plug(&self, voice_room: u32) -> Result<(), PlugError> {
-        self.command(Command::InsertPlug(VoiceRoomId(voice_room)))
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn insert_plug(&self, voice_room: u32) -> Result<(), ConnectionError> {
+        self.command(Command::EnterVoiceRoom(VoiceRoomId(voice_room)))
     }
 
-    /// Takes the plug out.
+    /// Takes the connection out.
     ///
     /// # Errors
     ///
-    /// [`PlugError::NotConnected`] once the session is over.
-    pub fn eject_plug(&self) -> Result<(), PlugError> {
-        self.command(Command::EjectPlug)
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn eject_plug(&self) -> Result<(), ConnectionError> {
+        self.command(Command::LeaveVoiceRoom)
     }
 
     /// Opens a Channel and asks for the page of history behind it.
     ///
     /// # Errors
     ///
-    /// [`PlugError::NotConnected`] once the session is over.
-    pub fn open_channel(&self, channel: u32) -> Result<(), PlugError> {
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn open_channel(&self, channel: u32) -> Result<(), ConnectionError> {
         self.command(Command::OpenChannel(ChannelId(channel)))
     }
 
@@ -1129,7 +1129,7 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::NotConnected`] once the session is over.
+    /// [`ConnectionError::NotConnected`] once the session is over.
     pub fn send_attachment(
         &self,
         channel: u32,
@@ -1137,7 +1137,7 @@ impl Plug {
         path: String,
         file_name: String,
         declared_type: String,
-    ) -> Result<u64, PlugError> {
+    ) -> Result<u64, ConnectionError> {
         // The key is taken here rather than on the queue, unlike `Send`: the
         // shell needs it **now**, to hang a bar on. Nothing else about a
         // message has ever had to be known before it was sent.
@@ -1163,8 +1163,8 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::NotConnected`] once the session is over.
-    pub fn save_attachment(&self, attachment: u64, destination: String) -> Result<(), PlugError> {
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn save_attachment(&self, attachment: u64, destination: String) -> Result<(), ConnectionError> {
         self.command(Command::SaveAttachment {
             attachment: seele_core::AttachmentId(attachment),
             destination: std::path::PathBuf::from(destination),
@@ -1188,15 +1188,15 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::NotConnected`] once the session is over, and equally if it
+    /// [`ConnectionError::NotConnected`] once the session is over, and equally if it
     /// ends while the fetch is in flight.
-    pub async fn preview_attachment(&self, attachment: u64) -> Result<Preview, PlugError> {
+    pub async fn preview_attachment(&self, attachment: u64) -> Result<Preview, ConnectionError> {
         let (answer, caixa) = tokio::sync::oneshot::channel();
         self.command(Command::PreviewAttachment {
             attachment: seele_core::AttachmentId(attachment),
             answer,
         })?;
-        caixa.await.map_err(|_| PlugError::NotConnected)
+        caixa.await.map_err(|_| ConnectionError::NotConnected)
     }
 
     /// What a screen needs to decide whether to offer a preview at all.
@@ -1227,8 +1227,8 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::NotConnected`] once the session is over.
-    pub fn send_message(&self, channel: u32, body: String) -> Result<(), PlugError> {
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn send_message(&self, channel: u32, body: String) -> Result<(), ConnectionError> {
         if body.trim().is_empty() {
             return Ok(());
         }
@@ -1252,20 +1252,20 @@ impl Plug {
     /// only, which `specs/04-servidor-seele.md` allows.
     ///
     /// The empty-name case returns `Ok` without sending anything, the same way
-    /// [`Plug::send_message`] swallows an empty body: a person who pressed the
+    /// [`Connection::send_message`] swallows an empty body: a person who pressed the
     /// button with nothing typed has not asked for anything, and answering that
     /// with an error would put a red message on a screen where nothing went
     /// wrong.
     ///
     /// # Errors
     ///
-    /// [`PlugError::NotConnected`] once the session is over.
+    /// [`ConnectionError::NotConnected`] once the session is over.
     pub fn create_voice_room(
         &self,
         name: String,
         limit: u16,
         channel: Option<u32>,
-    ) -> Result<(), PlugError> {
+    ) -> Result<(), ConnectionError> {
         if name.trim().is_empty() {
             return Ok(());
         }
@@ -1280,8 +1280,8 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::NotConnected`] once the session is over.
-    pub fn create_channel(&self, name: String) -> Result<(), PlugError> {
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn create_channel(&self, name: String) -> Result<(), ConnectionError> {
         if name.trim().is_empty() {
             return Ok(());
         }
@@ -1292,8 +1292,8 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::NotConnected`] once the session is over.
-    pub fn rename_voice_room(&self, voice_room: u32, name: String) -> Result<(), PlugError> {
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn rename_voice_room(&self, voice_room: u32, name: String) -> Result<(), ConnectionError> {
         if name.trim().is_empty() {
             return Ok(());
         }
@@ -1307,8 +1307,8 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::NotConnected`] once the session is over.
-    pub fn rename_channel(&self, channel: u32, name: String) -> Result<(), PlugError> {
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn rename_channel(&self, channel: u32, name: String) -> Result<(), ConnectionError> {
         if name.trim().is_empty() {
             return Ok(());
         }
@@ -1320,13 +1320,13 @@ impl Plug {
 
     /// Asks the server to rename itself.
     ///
-    /// Asks, and reports nothing back, like [`Plug::rename_voice_room`]: the answer
+    /// Asks, and reports nothing back, like [`Connection::rename_voice_room`]: the answer
     /// comes from the server, as [`Event::ServerChanged`] with the new name on
     /// the next [`Snapshot`], or as [`Event::NoticeRaised`] carrying
     /// [`NoticeReason::PermissionDenied`].
     ///
     /// A blank name is swallowed here rather than sent, exactly as
-    /// [`Plug::rename_voice_room`] swallows one: a shell with an empty box and a
+    /// [`Connection::rename_voice_room`] swallows one: a shell with an empty box and a
     /// button is not a shell reporting an error, and the server would refuse it
     /// anyway.
     ///
@@ -1336,8 +1336,8 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::NotConnected`] once the session is over.
-    pub fn rename_server(&self, name: String) -> Result<(), PlugError> {
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn rename_server(&self, name: String) -> Result<(), ConnectionError> {
         if name.trim().is_empty() {
             return Ok(());
         }
@@ -1361,13 +1361,13 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::IconNotAPicture`] or [`PlugError::IconTooBig`] when the
-    /// bytes will not do; [`PlugError::NotConnected`] once the session is over.
-    pub fn set_server_icon(&self, icon: Option<Vec<u8>>) -> Result<(), PlugError> {
+    /// [`ConnectionError::IconNotAPicture`] or [`ConnectionError::IconTooBig`] when the
+    /// bytes will not do; [`ConnectionError::NotConnected`] once the session is over.
+    pub fn set_server_icon(&self, icon: Option<Vec<u8>>) -> Result<(), ConnectionError> {
         seele_core::check_server_icon(icon.as_deref()).map_err(|recusa| match recusa {
-            seele_core::IconRefusal::NotAnIcon => PlugError::IconNotAPicture,
+            seele_core::IconRefusal::NotAnIcon => ConnectionError::IconNotAPicture,
             seele_core::IconRefusal::TooBig { limit_bytes } => {
-                PlugError::IconTooBig { limit_bytes }
+                ConnectionError::IconTooBig { limit_bytes }
             }
         })?;
         self.command(Command::SetServerIcon { icon })
@@ -1375,7 +1375,7 @@ impl Plug {
 
     /// The server's picture, if it has one.
     ///
-    /// Separate from [`Plug::snapshot`] for the reason [`Plug::messages`] is
+    /// Separate from [`Connection::snapshot`] for the reason [`Connection::messages`] is
     /// separate from it: the two change at completely different rates, and
     /// carrying the bytes on every frame of a redraw would mean cloning them
     /// and serialising them twice a second for a value that moves when
@@ -1409,7 +1409,7 @@ impl Plug {
 
     /// Asks the server to end a person's session — `expulsar`.
     ///
-    /// Asks, and reports nothing back, for the same reason [`Plug::create_voice_room`]
+    /// Asks, and reports nothing back, for the same reason [`Connection::create_voice_room`]
     /// gives: the answer comes from the server. The roster losing them arrives as
     /// [`Event::RosterChanged`]; a refusal arrives as [`Event::NoticeRaised`]
     /// carrying [`NoticeReason::PermissionDenied`].
@@ -1420,8 +1420,8 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::NotConnected`] once the session is over.
-    pub fn kick_person(&self, person: u64) -> Result<(), PlugError> {
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn kick_person(&self, person: u64) -> Result<(), ConnectionError> {
         self.command(Command::KickPerson {
             person: PersonId(person),
         })
@@ -1435,13 +1435,13 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::NotConnected`] once the session is over.
+    /// [`ConnectionError::NotConnected`] once the session is over.
     pub fn ban_person(
         &self,
         person: u64,
         reason: Option<String>,
         expires_at: Option<i64>,
-    ) -> Result<(), PlugError> {
+    ) -> Result<(), ConnectionError> {
         self.command(Command::BanPerson {
             person: PersonId(person),
             reason,
@@ -1457,8 +1457,8 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::NotConnected`] once the session is over.
-    pub fn remove_message(&self, message: u64) -> Result<(), PlugError> {
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn remove_message(&self, message: u64) -> Result<(), ConnectionError> {
         self.command(Command::RemoveMessage {
             message: MessageId(message),
         })
@@ -1468,8 +1468,8 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::NotConnected`] once the session is over.
-    pub fn move_person(&self, person: u64, voice_room: u32) -> Result<(), PlugError> {
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn move_person(&self, person: u64, voice_room: u32) -> Result<(), ConnectionError> {
         self.command(Command::MovePerson {
             person: PersonId(person),
             voice_room: VoiceRoomId(voice_room),
@@ -1491,8 +1491,8 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::NotConnected`] once the session is over.
-    pub fn delete_voice_room(&self, voice_room: u32) -> Result<(), PlugError> {
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn delete_voice_room(&self, voice_room: u32) -> Result<(), ConnectionError> {
         self.command(Command::DeleteVoiceRoom { voice_room: VoiceRoomId(voice_room) })
     }
 
@@ -1501,8 +1501,8 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::NotConnected`] once the session is over.
-    pub fn delete_channel(&self, channel: u32) -> Result<(), PlugError> {
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn delete_channel(&self, channel: u32) -> Result<(), ConnectionError> {
         self.command(Command::DeleteChannel { channel: ChannelId(channel) })
     }
 
@@ -1523,17 +1523,17 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::NotConnected`] once the session is over, and equally if it
+    /// [`ConnectionError::NotConnected`] once the session is over, and equally if it
     /// ends while the question is in flight: the driver drops what it was going
     /// to answer with, and this returns rather than waiting for a server that is
     /// no longer there.
-    pub async fn weigh_channel(&self, channel: u32) -> Result<ChannelWeight, PlugError> {
+    pub async fn weigh_channel(&self, channel: u32) -> Result<ChannelWeight, ConnectionError> {
         let (answer, resposta) = tokio::sync::oneshot::channel();
         self.command(Command::WeighChannel {
             channel: ChannelId(channel),
             answer,
         })?;
-        resposta.await.map_err(|_| PlugError::NotConnected)
+        resposta.await.map_err(|_| ConnectionError::NotConnected)
     }
 
     /// Mutes or unmutes the microphone — A.T. Field.
@@ -1543,8 +1543,8 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::NotConnected`] once the session is over.
-    pub fn set_at_field(&self, on: bool) -> Result<(), PlugError> {
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn set_at_field(&self, on: bool) -> Result<(), ConnectionError> {
         if let Ok(voice) = self.shared.voice.lock() {
             if let Some(voice) = voice.as_ref() {
                 voice.set_at_field(on);
@@ -1557,8 +1557,8 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::NotConnected`] once the session is over.
-    pub fn set_total_isolation(&self, on: bool) -> Result<(), PlugError> {
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn set_total_isolation(&self, on: bool) -> Result<(), ConnectionError> {
         if let Ok(voice) = self.shared.voice.lock() {
             if let Some(voice) = voice.as_ref() {
                 voice.set_total_isolation(on);
@@ -1598,12 +1598,12 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::CaptureDeviceGone`] when the machine is not offering that
+    /// [`ConnectionError::CaptureDeviceGone`] when the machine is not offering that
     /// device any more, in which case **nothing changed** and the previous
-    /// microphone is still live. [`PlugError::NoAudioDevice`] when this session
+    /// microphone is still live. [`ConnectionError::NoAudioDevice`] when this session
     /// has no audio at all — a session joined with the audio box unticked has no
     /// voice path to move.
-    pub fn set_capture_device(&self, device: Option<String>) -> Result<(), PlugError> {
+    pub fn set_capture_device(&self, device: Option<String>) -> Result<(), ConnectionError> {
         // The new path opens before the old one is dropped, so a microphone that
         // turns out to be gone leaves the session speaking instead of silent.
         // `switch_capture` is what carries A.T. Field and the rest across — in
@@ -1614,7 +1614,7 @@ impl Plug {
                 .switch_capture(device.as_deref(), media, ssrc)
                 .map_err(|error| {
                     tracing::warn!(%error, "could not open the chosen microphone");
-                    PlugError::CaptureDeviceGone
+                    ConnectionError::CaptureDeviceGone
                 })
         })
     }
@@ -1636,17 +1636,17 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::PlaybackDeviceGone`] when the machine is not offering that
+    /// [`ConnectionError::PlaybackDeviceGone`] when the machine is not offering that
     /// device any more, in which case **nothing changed** and the sound is still
-    /// coming out of the old one. [`PlugError::NoAudioDevice`] when this session
+    /// coming out of the old one. [`ConnectionError::NoAudioDevice`] when this session
     /// has no audio at all.
-    pub fn set_playback_device(&self, device: Option<String>) -> Result<(), PlugError> {
+    pub fn set_playback_device(&self, device: Option<String>) -> Result<(), ConnectionError> {
         self.switch_device(|running, media, ssrc| {
             running
                 .switch_playback(device.as_deref(), media, ssrc)
                 .map_err(|error| {
                     tracing::warn!(%error, "could not open the chosen sound output");
-                    PlugError::PlaybackDeviceGone
+                    ConnectionError::PlaybackDeviceGone
                 })
         })
     }
@@ -1659,17 +1659,17 @@ impl Plug {
     /// path where the device turned out to be missing.
     fn switch_device(
         &self,
-        reopen: impl FnOnce(&Voice, MediaChannel, Ssrc) -> Result<Voice, PlugError>,
-    ) -> Result<(), PlugError> {
+        reopen: impl FnOnce(&Voice, MediaChannel, Ssrc) -> Result<Voice, ConnectionError>,
+    ) -> Result<(), ConnectionError> {
         let Ok(mut voice) = self.shared.voice.lock() else {
-            return Err(PlugError::NoAudioDevice);
+            return Err(ConnectionError::NoAudioDevice);
         };
         let Some(running) = voice.as_ref() else {
-            return Err(PlugError::NoAudioDevice);
+            return Err(ConnectionError::NoAudioDevice);
         };
         let Some((media, ssrc)) = self.shared.media.lock().ok().and_then(|slot| slot.clone())
         else {
-            return Err(PlugError::NotConnected);
+            return Err(ConnectionError::NotConnected);
         };
 
         let fresh = reopen(running, media, ssrc)?;
@@ -1690,23 +1690,23 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::UnknownPerson`] if nobody here is called that,
-    /// [`PlugError::NoAudioDevice`] if this session has no audio.
-    pub fn set_volume(&self, nickname: String, percent: u16) -> Result<(), PlugError> {
+    /// [`ConnectionError::UnknownPerson`] if nobody here is called that,
+    /// [`ConnectionError::NoAudioDevice`] if this session has no audio.
+    pub fn set_volume(&self, nickname: String, percent: u16) -> Result<(), ConnectionError> {
         let ssrc = self
             .shared
             .room
             .lock()
             .ok()
             .and_then(|room| room.ssrc_of(&nickname))
-            .ok_or(PlugError::UnknownPerson)?;
+            .ok_or(ConnectionError::UnknownPerson)?;
 
         let voice = self
             .shared
             .voice
             .lock()
-            .map_err(|_| PlugError::NoAudioDevice)?;
-        let voice = voice.as_ref().ok_or(PlugError::NoAudioDevice)?;
+            .map_err(|_| ConnectionError::NoAudioDevice)?;
+        let voice = voice.as_ref().ok_or(ConnectionError::NoAudioDevice)?;
         voice.set_gain(ssrc.get(), f32::from(percent.min(400)) / 100.0);
         Ok(())
     }
@@ -1721,7 +1721,7 @@ impl Plug {
     /// As telas e janelas que esta máquina pode transmitir.
     ///
     /// Uma lista vazia significaria «o sistema recusou a permissão», e aí
-    /// [`Plug::permissao_de_tela`] diria qual foi a recusa — uma lista vazia sem
+    /// [`Connection::permissao_de_tela`] diria qual foi a recusa — uma lista vazia sem
     /// motivo é um beco. Por isso a falta de captura sai como erro e não como
     /// lista curta.
     ///
@@ -1732,22 +1732,22 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::ScreenShareUnavailable`] quando esta máquina não tem
+    /// [`ConnectionError::ScreenShareUnavailable`] quando esta máquina não tem
     /// captura de tela, ou quando o sistema recusou listar. Uma sessão sem
     /// monitor e sem janela **não** é erro: a lista vem vazia, porque não ter o
     /// que compartilhar é estado.
-    pub fn fontes_de_tela(&self) -> Result<Vec<FonteDeTela>, PlugError> {
+    pub fn fontes_de_tela(&self) -> Result<Vec<FonteDeTela>, ConnectionError> {
         let fontes = match seele_core::fontes_de_tela() {
             Ok(fontes) => fontes,
             // **Vazio, e não erro**, e é o contrato escrito acima: uma recusa de
-            // permissão é a lista vazia que [`Plug::permissao_de_tela`] explica.
+            // permissão é a lista vazia que [`Connection::permissao_de_tela`] explica.
             // Devolvê-la como erro faria a casca escrever «esta máquina não tem
             // como compartilhar» ao lado do bloco que oferece pedir a permissão
             // — duas frases sobre o mesmo estado, e a primeira mentindo.
             Err(seele_core::ErroDeFontes::SemPermissao) => Vec::new(),
             Err(erro) => {
                 tracing::debug!(%erro, "não deu para listar o que esta máquina compartilha");
-                return Err(PlugError::ScreenShareUnavailable);
+                return Err(ConnectionError::ScreenShareUnavailable);
             }
         };
 
@@ -1773,7 +1773,7 @@ impl Plug {
     /// O que o sistema operacional respondeu sobre gravar a tela.
     ///
     /// Não pergunta nada: só olha. Quem pergunta é
-    /// [`Plug::pedir_permissao_de_tela`], e a separação é do §4 — no macOS o
+    /// [`Connection::pedir_permissao_de_tela`], e a separação é do §4 — no macOS o
     /// alerta do TCC aparece **uma vez só** por instalação, então uma consulta
     /// que perguntasse gastaria a única chance que a pessoa tem.
     #[must_use]
@@ -1809,11 +1809,11 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::ScreenShareUnavailable`] quando esta máquina não tem como
+    /// [`ConnectionError::ScreenShareUnavailable`] quando esta máquina não tem como
     /// começar: a fonte escolhida não está na última lista, o módulo do Cisco
     /// não está em disco, ou este build não tem captura.
-    /// [`PlugError::NotConnected`] quando a sessão já acabou.
-    pub fn compartilhar_tela(&self, fonte: u64, limites: LimitesDeTela) -> Result<(), PlugError> {
+    /// [`ConnectionError::NotConnected`] quando a sessão já acabou.
+    pub fn compartilhar_tela(&self, fonte: u64, limites: LimitesDeTela) -> Result<(), ConnectionError> {
         let comecou = self.comecar_a_transmitir(fonte, limites);
         // O pedido é guardado **quando há transmissão a que ele pertença**, e
         // apagado quando não há. Guardá-lo depois de uma recusa poria, na coluna
@@ -1825,13 +1825,13 @@ impl Plug {
     }
 
     /// A metade que abre a transmissão de verdade, separada para que
-    /// [`Plug::compartilhar_tela`] fique sendo só a memória do que foi pedido.
+    /// [`Connection::compartilhar_tela`] fique sendo só a memória do que foi pedido.
     ///
     /// As três recusas que ela sabe dar acontecem **antes** de qualquer coisa
     /// sair pelo fio, e é para isso que ela é síncrona: uma fonte que sumiu ou
     /// um codec que não está em disco viram uma resposta na mão de quem apertou,
     /// e não um silêncio no laço de comandos.
-    fn comecar_a_transmitir(&self, fonte: u64, limites: LimitesDeTela) -> Result<(), PlugError> {
+    fn comecar_a_transmitir(&self, fonte: u64, limites: LimitesDeTela) -> Result<(), ConnectionError> {
         let escolhida = self.fonte_escolhida(fonte)?;
         let biblioteca = modulo_de_video()?;
         let pedido = seele_core::PedidoDeTela {
@@ -1850,26 +1850,26 @@ impl Plug {
     /// Lista de novo quando não há listagem guardada, e **só** nesse caso: uma
     /// casca que desenhou o menu tem a lista, e relistar por baixo dela
     /// renumeraria os índices no meio da escolha.
-    fn fonte_escolhida(&self, fonte: u64) -> Result<seele_core::FonteDeTela, PlugError> {
+    fn fonte_escolhida(&self, fonte: u64) -> Result<seele_core::FonteDeTela, ConnectionError> {
         let mut guardadas = self
             .shared
             .fontes_de_tela
             .lock()
-            .map_err(|_| PlugError::ScreenShareUnavailable)?;
+            .map_err(|_| ConnectionError::ScreenShareUnavailable)?;
         if guardadas.is_empty() {
             *guardadas = seele_core::fontes_de_tela().map_err(|erro| {
                 tracing::debug!(%erro, "não deu para listar o que esta máquina compartilha");
-                PlugError::ScreenShareUnavailable
+                ConnectionError::ScreenShareUnavailable
             })?;
             // Aqui a recusa de permissão **é** erro, ao contrário de
-            // [`Plug::fontes_de_tela`]: ali a lista vazia é uma resposta que a
+            // [`Connection::fontes_de_tela`]: ali a lista vazia é uma resposta que a
             // tela sabe desenhar, e aqui alguém já escolheu uma fonte que não
             // existe mais.
         }
         let onde = guardadas
             .iter()
             .position(|candidata| candidata.id() == fonte)
-            .ok_or(PlugError::ScreenShareUnavailable)?;
+            .ok_or(ConnectionError::ScreenShareUnavailable)?;
         Ok(guardadas.swap_remove(onde))
     }
 
@@ -1880,8 +1880,8 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::NotConnected`] quando a sessão já acabou.
-    pub fn parar_de_compartilhar(&self) -> Result<(), PlugError> {
+    /// [`ConnectionError::NotConnected`] quando a sessão já acabou.
+    pub fn parar_de_compartilhar(&self) -> Result<(), ConnectionError> {
         // O que foi pedido morre com a transmissão, e parar é uma das duas
         // maneiras de ela acabar — a outra é o `ScreenShareStopped` que `fold`
         // dobra. As duas limpam, porque só uma delas acontece de cada vez:
@@ -1903,8 +1903,8 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::NotConnected`] quando a sessão já acabou.
-    pub fn ajustar_limites_da_tela(&self, limites: LimitesDeTela) -> Result<(), PlugError> {
+    /// [`ConnectionError::NotConnected`] quando a sessão já acabou.
+    pub fn ajustar_limites_da_tela(&self, limites: LimitesDeTela) -> Result<(), ConnectionError> {
         // Guardado aqui, e não quando a bomba responder: a coluna «pedido» do
         // painel é a escolha da pessoa, e ela vale desde o aperto. A coluna de
         // ao lado — o que está saindo — é que espera o degrau acompanhar, e as
@@ -1927,7 +1927,7 @@ impl Plug {
 
     /// The conversation in the open Channel, oldest first.
     ///
-    /// Separate from [`Plug::snapshot`] because the two change at completely
+    /// Separate from [`Connection::snapshot`] because the two change at completely
     /// different rates. Telemetry moves on its own and wants reading twice a
     /// second; the history only moves when somebody says something. Carrying
     /// both in one value meant paying for the conversation on every frame —
@@ -1966,7 +1966,7 @@ impl Plug {
 
         let audio = self.audio_state();
 
-        let sync_ratio = self.shared.sync_ratio.load(Ordering::Relaxed);
+        let signal = self.shared.signal.load(Ordering::Relaxed);
         #[allow(
             clippy::cast_precision_loss,
             reason = "a round trip in microseconds is far below f32's exact range"
@@ -1976,7 +1976,7 @@ impl Plug {
         Snapshot {
             caminho: self.shared.caminho(),
             link: self.shared.enlace(),
-            pattern: pattern_from_byte(self.shared.pattern.load(Ordering::Relaxed)),
+            link_state: link_state_from_byte(self.shared.link_state.load(Ordering::Relaxed)),
             server: room.server.clone(),
             icon_revision: self.shared.icon_revision.load(Ordering::Relaxed),
             me: room.me.map(|person| person.0),
@@ -1994,8 +1994,8 @@ impl Plug {
                 jitter_ms: self.shared.jitter_de_chegada_ms(),
                 loss_fraction: room.telemetry.as_ref().map_or(0.0, |t| t.loss_fraction),
                 bitrate_bps: audio.bitrate_bps,
-                sync_ratio,
-                sync_band: SyncBand::of(sync_ratio).into(),
+                signal,
+                sync_band: SignalBand::of(signal).into(),
                 input_level: audio.input_level,
                 local_fault: audio.local_fault,
                 frames_refused: audio.frames_refused,
@@ -2005,7 +2005,7 @@ impl Plug {
                 reason: notice.reason.into(),
                 operator_text: notice.operator_text.clone(),
             }),
-            at_field: audio.at_field,
+            muted: audio.muted,
             total_isolation: audio.total_isolation,
             speaking: audio.speaking,
             voice_mode: audio.mode,
@@ -2040,10 +2040,10 @@ impl Plug {
         let _ = self.commands.send(Command::Shutdown);
     }
 
-    fn command(&self, command: Command) -> Result<(), PlugError> {
+    fn command(&self, command: Command) -> Result<(), ConnectionError> {
         self.commands
             .send(command)
-            .map_err(|_| PlugError::NotConnected)
+            .map_err(|_| ConnectionError::NotConnected)
     }
 
     fn audio_state(&self) -> AudioState {
@@ -2062,7 +2062,7 @@ impl Plug {
                 seele_core::VoiceMode::Open => VoiceMode::Open,
             },
             speaking: telemetry.local.speaking,
-            at_field: voice.at_field(),
+            muted: voice.muted(),
             total_isolation: voice.total_isolation(),
             input_level: telemetry.local.input_level,
             local_fault: voice.falha_local(),
@@ -2082,7 +2082,7 @@ impl Plug {
     }
 }
 
-/// What the voice path is doing, read once per [`Plug::snapshot`].
+/// What the voice path is doing, read once per [`Connection::snapshot`].
 ///
 /// A struct and not the eight-tuple this was: the tuple had already reached the
 /// point of needing `clippy::type_complexity` waved through, and its run of
@@ -2092,7 +2092,7 @@ struct AudioState {
     available: bool,
     mode: VoiceMode,
     speaking: bool,
-    at_field: bool,
+    muted: bool,
     total_isolation: bool,
     input_level: f32,
     local_fault: bool,
@@ -2114,7 +2114,7 @@ impl AudioState {
             available: false,
             mode: VoiceMode::PushToTalk,
             speaking: false,
-            at_field: false,
+            muted: false,
             total_isolation: false,
             input_level: 0.0,
             local_fault: false,
@@ -2126,7 +2126,7 @@ impl AudioState {
     }
 }
 
-impl Drop for Plug {
+impl Drop for Connection {
     fn drop(&mut self) {
         self.disconnect();
     }
@@ -2150,10 +2150,10 @@ fn presentes_de(room: &Room) -> Vec<Person> {
             id: person.id.0,
             nickname: person.nickname.clone(),
             speaking: person.speaking,
-            at_field: person.at_field,
+            muted: person.muted,
             total_isolation: person.total_isolation,
-            sync_ratio: person.sync_ratio,
-            sync_band: SyncBand::of(person.sync_ratio).into(),
+            signal: person.signal,
+            sync_band: SignalBand::of(person.signal).into(),
             is_self: room.me == Some(person.id),
         })
         .collect()
@@ -2175,10 +2175,10 @@ fn voice_rooms_of(room: &Room) -> Vec<VoiceRoom> {
                     id: person.id.0,
                     nickname: person.nickname.clone(),
                     speaking: person.speaking,
-                    at_field: person.at_field,
+                    muted: person.muted,
                     total_isolation: person.total_isolation,
-                    sync_ratio: person.sync_ratio,
-                    sync_band: SyncBand::of(person.sync_ratio).into(),
+                    signal: person.signal,
+                    sync_band: SignalBand::of(person.signal).into(),
                     is_self: room.me == Some(person.id),
                 })
                 .collect(),
@@ -2388,15 +2388,15 @@ pub fn modulo_de_video_a_baixar(pasta: &str) -> Option<ModuloAOferecer> {
 ///
 /// # Errors
 ///
-/// [`PlugError::ScreenModuleRefused`] se os bytes não são os fixados, se o bz2
+/// [`ConnectionError::ScreenModuleRefused`] se os bytes não são os fixados, se o bz2
 /// não abre ou se a pasta não aceita o arquivo. Os três dizem a mesma coisa a
 /// quem clicou — «não deu, tente de novo» — e o que separa os três está no log.
-pub fn instalar_modulo_de_video(pasta: &str, comprimido: &[u8]) -> Result<String, PlugError> {
+pub fn instalar_modulo_de_video(pasta: &str, comprimido: &[u8]) -> Result<String, ConnectionError> {
     seele_core::instalar_modulo_de_video(std::path::Path::new(pasta), comprimido)
         .map(|caminho| caminho.display().to_string())
         .map_err(|erro| {
             tracing::warn!(%erro, pasta, bytes = comprimido.len(), "o módulo de vídeo não instalou");
-            PlugError::ScreenModuleRefused
+            ConnectionError::ScreenModuleRefused
         })
 }
 
@@ -2405,7 +2405,7 @@ pub fn instalar_modulo_de_video(pasta: &str, comprimido: &[u8]) -> Result<String
 /// **O produto não vem com codec, e é a licença que impõe isso** — o módulo do
 /// Cisco não pode ser redistribuído com este binário. Não achá-lo é o estado
 /// normal de quem nunca compartilhou tela, e não um defeito.
-fn modulo_de_video() -> Result<seele_core::BibliotecaDeVideo, PlugError> {
+fn modulo_de_video() -> Result<seele_core::BibliotecaDeVideo, ConnectionError> {
     seele_core::BibliotecaDeVideo::procurar_e_carregar(&pastas_do_modulo()).map_err(|erro| {
         let onde = seele_core::modulo_de_video_publicado()
             .map_or_else(|| "—".to_owned(), |modulo| modulo.url());
@@ -2414,7 +2414,7 @@ fn modulo_de_video() -> Result<seele_core::BibliotecaDeVideo, PlugError> {
         // app; o que falta é o módulo, que não vem no pacote por licença. A
         // frase daquele diz que o recurso não existe, e quem a lê para de
         // tentar — aconteceu duas vezes em campo, no macOS e no Windows.
-        PlugError::ScreenModuleMissing
+        ConnectionError::ScreenModuleMissing
     })
 }
 
@@ -2559,19 +2559,19 @@ fn transfer_of(estado: &seele_core::enlace::Transferencia) -> Transfer {
     }
 }
 
-fn pattern_byte(pattern: Pattern) -> u8 {
-    match pattern {
-        Pattern::Offline => 0,
-        Pattern::Orange => 1,
-        Pattern::Blue => 2,
+fn link_state_byte(link_state: LinkTrust) -> u8 {
+    match link_state {
+        LinkTrust::Offline => 0,
+        LinkTrust::Unverified => 1,
+        LinkTrust::Verified => 2,
     }
 }
 
-fn pattern_from_byte(byte: u8) -> Pattern {
+fn link_state_from_byte(byte: u8) -> LinkTrust {
     match byte {
-        1 => Pattern::Orange,
-        2 => Pattern::Blue,
-        _ => Pattern::Offline,
+        1 => LinkTrust::Unverified,
+        2 => LinkTrust::Verified,
+        _ => LinkTrust::Offline,
     }
 }
 
@@ -2583,13 +2583,13 @@ fn pattern_from_byte(byte: u8) -> Pattern {
 /// The split is `seele_core::uri::separar` and not `rsplit_once(':')`: the port
 /// separator and an IPv6's own separator are the same character, and doing it by
 /// hand here made `[2001:db8::1]:8383` resolve to nothing. ADR 0022, step 2.
-fn resolve(target: &str) -> Result<(SocketAddr, String, String), PlugError> {
-    let alvo = seele_core::uri::separar(target).map_err(|_| PlugError::UnresolvableHost)?;
+fn resolve(target: &str) -> Result<(SocketAddr, String, String), ConnectionError> {
+    let alvo = seele_core::uri::separar(target).map_err(|_| ConnectionError::UnresolvableHost)?;
     let address = (alvo.maquina, alvo.porta)
         .to_socket_addrs()
-        .map_err(|_| PlugError::UnresolvableHost)?
+        .map_err(|_| ConnectionError::UnresolvableHost)?
         .next()
-        .ok_or(PlugError::UnresolvableHost)?;
+        .ok_or(ConnectionError::UnresolvableHost)?;
 
     // TLS gets the name the M2 certificate carries; the pin gets the address,
     // which is what actually tells one server from another.
@@ -2654,8 +2654,8 @@ async fn drive(
     olhos: Option<Arc<dyn EventListener>>,
 ) {
     shared
-        .pattern
-        .store(pattern_byte(Pattern::Orange), Ordering::Relaxed);
+        .link_state
+        .store(link_state_byte(LinkTrust::Unverified), Ordering::Relaxed);
 
     // `Enlace` e não `Client`: é a sessão que atravessa quedas, com a bateria
     // interna dentro. Antes disto, o app pulava de "conectado" para "encerrado"
@@ -2735,8 +2735,8 @@ async fn drive(
         room.adopt(client.sessao(), &config.nickname);
     }
     shared
-        .pattern
-        .store(pattern_byte(Pattern::Blue), Ordering::Relaxed);
+        .link_state
+        .store(link_state_byte(LinkTrust::Verified), Ordering::Relaxed);
 
     remember_media(&shared, client.media(), client.sessao().ssrc);
 
@@ -2768,7 +2768,7 @@ async fn drive(
     shared.running.store(true, Ordering::Relaxed);
     let _ = ready.send(Ok(trust));
 
-    let mut sync = SyncRatio::new();
+    let mut sync = Signal::new();
     let mut next_tick = Instant::now() + TICK;
 
     while shared.running.load(Ordering::Relaxed) {
@@ -2909,8 +2909,8 @@ async fn drive(
 
     shared.running.store(false, Ordering::Relaxed);
     shared
-        .pattern
-        .store(pattern_byte(Pattern::Offline), Ordering::Relaxed);
+        .link_state
+        .store(link_state_byte(LinkTrust::Offline), Ordering::Relaxed);
     // Dropping the voice stops the audio thread with the session.
     if let Ok(mut voice) = shared.voice.lock() {
         *voice = None;
@@ -3110,7 +3110,7 @@ fn jitter_da_volta(telemetria: &seele_core::AudioTelemetry) -> JitterDaVolta {
 /// e entrega a [`medir_a_volta`], que é onde as decisões moram e onde elas são
 /// afirmáveis — esta função pede um [`Enlace`] vivo e um dispositivo de áudio
 /// aberto, e não há nenhum dos dois numa máquina de integração contínua.
-fn measure(sync: &mut SyncRatio, client: &Enlace, shared: &Arc<Shared>) -> bool {
+fn measure(sync: &mut Signal, client: &Enlace, shared: &Arc<Shared>) -> bool {
     let telemetria = shared
         .voice
         .lock()
@@ -3155,7 +3155,7 @@ fn measure(sync: &mut SyncRatio, client: &Enlace, shared: &Arc<Shared>) -> bool 
 /// medida ainda» e «sem medida agora» —, e nenhuma das duas cascas tem hoje como
 /// desenhar a diferença.
 fn medir_a_volta(
-    sync: &mut SyncRatio,
+    sync: &mut Signal,
     shared: &Arc<Shared>,
     telemetria: Option<&seele_core::AudioTelemetry>,
     rtt_micros: u64,
@@ -3193,7 +3193,7 @@ fn medir_a_volta(
         loss_fraction: loss,
     });
 
-    let previous_ratio = shared.sync_ratio.swap(ratio, Ordering::Relaxed);
+    let previous_ratio = shared.signal.swap(ratio, Ordering::Relaxed);
     let previous_rtt = shared.rtt_micros.swap(rtt_micros, Ordering::Relaxed);
 
     // A shell redrawing because the round trip moved by a microsecond is a
@@ -3210,7 +3210,7 @@ fn medir_a_volta(
 /// Runs one command. Returns false when the driver should stop.
 async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) -> bool {
     match command {
-        Command::InsertPlug(voice_room) => {
+        Command::EnterVoiceRoom(voice_room) => {
             if client.inserir_plug(voice_room).await.is_err() {
                 return false;
             }
@@ -3219,11 +3219,11 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             }
             shared.notify(&Event::RosterChanged);
         }
-        Command::EjectPlug => {
+        Command::LeaveVoiceRoom => {
             if client.ejetar_plug().await.is_err() {
                 return false;
             }
-            // O espelho do `InsertPlug` acima, e ele faltava. O servidor não
+            // O espelho do `EnterVoiceRoom` acima, e ele faltava. O servidor não
             // devolve o `PersonLeft` a quem o causou — «essa pessoa já sabe» —,
             // então esta metade do roster é contabilidade desta casca. Sem ela
             // o assento se esvazia no servidor e em todos os outros clientes, e
@@ -3278,7 +3278,7 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             }
         }
         Command::SetAtField(on) => {
-            if client.at_field(on).await.is_err() {
+            if client.muted(on).await.is_err() {
                 return false;
             }
         }
@@ -3487,7 +3487,7 @@ fn preview_of(
 
 /// A monotonic identifier for outgoing messages.
 ///
-/// Process-wide rather than per-`Plug`: two handles in one process sending the
+/// Process-wide rather than per-`Connection`: two handles in one process sending the
 /// same number would collide in the server's idempotency check, and the second
 /// message would be silently dropped as a resend of the first.
 fn next_client_message_id() -> u64 {
@@ -3516,28 +3516,28 @@ fn next_client_message_id() -> u64 {
 /// A relabel and nothing more: the core already decided *what* went wrong, and
 /// it decided it from typed causes rather than from the text of somebody else's
 /// error message.
-fn classify_connect_failure(error: &seele_core::ConnectError) -> PlugError {
+fn classify_connect_failure(error: &seele_core::ConnectError) -> ConnectionError {
     match error {
         seele_core::ConnectError::LocalEndpoint | seele_core::ConnectError::Unreachable => {
-            PlugError::Unreachable
+            ConnectionError::Unreachable
         }
         seele_core::ConnectError::TlsRefused | seele_core::ConnectError::ProtocolViolation => {
-            PlugError::Refused {
+            ConnectionError::Refused {
                 reason: EndReason::Incompatible,
             }
         }
-        seele_core::ConnectError::PinChanged { pinned, offered } => PlugError::PinChanged {
+        seele_core::ConnectError::PinChanged { pinned, offered } => ConnectionError::PinChanged {
             pinned: pinned.clone(),
             offered: offered.clone(),
         },
         seele_core::ConnectError::InviteMismatch { expected, offered } => {
-            PlugError::InviteMismatch {
+            ConnectionError::InviteMismatch {
                 expected: expected.clone(),
                 offered: offered.clone(),
             }
         }
-        seele_core::ConnectError::HandshakeTimeout => PlugError::HandshakeTimeout,
-        seele_core::ConnectError::Refused { reason } => PlugError::Refused {
+        seele_core::ConnectError::HandshakeTimeout => ConnectionError::HandshakeTimeout,
+        seele_core::ConnectError::Refused { reason } => ConnectionError::Refused {
             reason: (*reason).into(),
         },
     }
@@ -3623,21 +3623,21 @@ mod tests {
     fn a_host_that_does_not_exist_is_an_enum_and_not_a_panic() {
         assert_eq!(
             resolve("nao-existe.invalid:8383"),
-            Err(PlugError::UnresolvableHost)
+            Err(ConnectionError::UnresolvableHost)
         );
     }
 
     #[test]
     fn the_pattern_survives_the_round_trip_through_an_atomic() {
-        for pattern in [Pattern::Offline, Pattern::Orange, Pattern::Blue] {
-            assert_eq!(pattern_from_byte(pattern_byte(pattern)), pattern);
+        for link_state in [LinkTrust::Offline, LinkTrust::Unverified, LinkTrust::Verified] {
+            assert_eq!(link_state_from_byte(link_state_byte(link_state)), link_state);
         }
     }
 
     #[test]
     fn an_unknown_pattern_byte_reads_as_offline() {
         // Whatever goes wrong, it must not claim a verified session.
-        assert_eq!(pattern_from_byte(200), Pattern::Offline);
+        assert_eq!(link_state_from_byte(200), LinkTrust::Offline);
     }
 
     #[test]
@@ -3732,19 +3732,19 @@ mod tests {
         });
         room.apply(&ServerMessage::PersonState(PersonState {
             person: PersonId(3),
-            at_field: false,
+            muted: false,
             total_isolation: false,
             speaking: false,
             presence: Presence::Available,
-            sync_ratio: 72,
+            signal: 72,
         }));
 
-        // 72 rather than a critical number on purpose: `SyncBand::Critical` is
+        // 72 rather than a critical number on purpose: `SignalBand::Critical` is
         // the `Default`, so a shell that received it could not tell a banded
         // ratio from a field nobody filled in.
         let person = &voice_rooms_of(&room)[0].people[0];
-        assert_eq!(person.sync_ratio, 72);
-        assert_eq!(person.sync_band, types::SyncBand::Degraded);
+        assert_eq!(person.signal, 72);
+        assert_eq!(person.sync_band, types::SignalBand::Degraded);
     }
 
     #[test]
@@ -3778,17 +3778,17 @@ mod tests {
             });
             room.apply(&ServerMessage::PersonState(PersonState {
                 person: PersonId(id),
-                at_field: false,
+                muted: false,
                 total_isolation: false,
                 speaking: false,
                 presence: Presence::Available,
-                sync_ratio: sync,
+                signal: sync,
             }));
         }
 
         let average = voice_rooms_of(&room)[0].sync.expect("two people are seated");
         assert_eq!(average.ratio, 85);
-        assert_eq!(average.band, types::SyncBand::Nominal);
+        assert_eq!(average.band, types::SignalBand::Nominal);
         assert_eq!(average.people, 2);
     }
 
@@ -3845,11 +3845,11 @@ mod tests {
             voice: Mutex::new(None),
             media: Mutex::new(None),
             nickname: Mutex::new("ayanami".into()),
-            pattern: AtomicU8::new(0),
+            link_state: AtomicU8::new(0),
             rtt_micros: std::sync::atomic::AtomicU64::new(0),
             jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
             caminho: Mutex::new(None),
-            sync_ratio: AtomicU8::new(0),
+            signal: AtomicU8::new(0),
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
             limites_da_tela: Mutex::new(None),
@@ -4013,7 +4013,7 @@ mod tests {
         // a propriedade quebrada: um braço que gravasse o jitter e devolvesse
         // `false` satisfazia as duas asserções de texto que ela fazia.
         let compartilhado = bare_shared();
-        let mut sync = SyncRatio::new();
+        let mut sync = Signal::new();
 
         let _ = medir_a_volta(&mut sync, &compartilhado, Some(&volta_com(7.5)), 41_000);
 
@@ -4038,7 +4038,7 @@ mod tests {
         // ida-e-volta e a perda —, então depois de assentado o único motivo que
         // resta para responder «mudou» é o jitter da tela.
         let compartilhado = bare_shared();
-        let mut sync = SyncRatio::new();
+        let mut sync = Signal::new();
 
         let mut assentou = false;
         for _ in 0..500 {
@@ -4080,7 +4080,7 @@ mod tests {
         let source = include_str!("lib.rs");
         let Some(corpo) = source
             .split(
-                "fn measure(sync: &mut SyncRatio, client: &Enlace, shared: &Arc<Shared>) -> bool {",
+                "fn measure(sync: &mut Signal, client: &Enlace, shared: &Arc<Shared>) -> bool {",
             )
             .nth(1)
             .and_then(|resto| resto.split("\n}").next())
@@ -4115,7 +4115,7 @@ mod tests {
         // sobre uma sessão sem áudio nenhum, que é o defeito que este ciclo
         // tirou dali.
         let compartilhado = bare_shared();
-        let mut sync = SyncRatio::new();
+        let mut sync = Signal::new();
 
         let _ = medir_a_volta(&mut sync, &compartilhado, Some(&volta_com(7.5)), 41_000);
         let _ = medir_a_volta(&mut sync, &compartilhado, None, 41_000);
@@ -4155,11 +4155,11 @@ mod tests {
         compartilhado.gravar_jitter_de_chegada(jitter_para_a_tela(12.75, 42.0));
 
         let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
-        let plug = Plug {
+        let connection = Connection {
             commands,
             shared: Arc::clone(&compartilhado),
         };
-        let mostrado = plug.snapshot().telemetry.jitter_ms;
+        let mostrado = connection.snapshot().telemetry.jitter_ms;
 
         assert!(
             (mostrado - 12.75).abs() < 0.01,
@@ -4306,11 +4306,11 @@ mod tests {
         // Asserting on `room.permissions` alone would pass with
         // `may_manage_voice_rooms` hardcoded either way — measured, and it did.
         let (commands, _queue) = tokio::sync::mpsc::unbounded_channel();
-        let plug = Plug {
+        let connection = Connection {
             commands,
             shared: Arc::clone(&shared),
         };
-        assert!(plug.snapshot().may_manage_voice_rooms);
+        assert!(connection.snapshot().may_manage_voice_rooms);
 
         fold(
             &shared,
@@ -4326,7 +4326,7 @@ mod tests {
             },
         );
         assert!(
-            !plug.snapshot().may_manage_voice_rooms,
+            !connection.snapshot().may_manage_voice_rooms,
             "the snapshot went on offering the control after the permission went away"
         );
     }
@@ -4342,7 +4342,7 @@ mod tests {
 
         let shared = bare_shared();
         let (commands, _queue) = tokio::sync::mpsc::unbounded_channel();
-        let plug = Plug {
+        let connection = Connection {
             commands,
             shared: Arc::clone(&shared),
         };
@@ -4359,7 +4359,7 @@ mod tests {
         };
 
         fold(&shared, &sessao(vec![Permission::Speak]));
-        let nada = plug.snapshot();
+        let nada = connection.snapshot();
         assert!(!nada.may_kick);
         assert!(!nada.may_ban);
         assert!(!nada.may_remove_message);
@@ -4368,7 +4368,7 @@ mod tests {
         // An Operador holding exactly one of the four. The assertion that
         // matters is the three `false`s beside the one `true`.
         fold(&shared, &sessao(vec![Permission::Speak, Permission::Kick]));
-        let so_expulsa = plug.snapshot();
+        let so_expulsa = connection.snapshot();
         assert!(so_expulsa.may_kick);
         assert!(
             !so_expulsa.may_ban && !so_expulsa.may_remove_message && !so_expulsa.may_move_person,
@@ -4384,13 +4384,13 @@ mod tests {
                 Permission::MovePerson,
             ]),
         );
-        let tudo = plug.snapshot();
+        let tudo = connection.snapshot();
         assert!(tudo.may_kick && tudo.may_ban && tudo.may_remove_message && tudo.may_move_person);
 
         // And they go away again. A snapshot that latched would go on offering
         // a control after a Comandante revoked it.
         fold(&shared, &sessao(Vec::new()));
-        let depois = plug.snapshot();
+        let depois = connection.snapshot();
         assert!(
             !depois.may_kick && !depois.may_ban && !depois.may_remove_message,
             "the snapshot went on offering the controls after the permissions went away"
@@ -4410,7 +4410,7 @@ mod tests {
 
         let shared = bare_shared();
         let (commands, _queue) = tokio::sync::mpsc::unbounded_channel();
-        let plug = Plug {
+        let connection = Connection {
             commands,
             shared: Arc::clone(&shared),
         };
@@ -4429,7 +4429,7 @@ mod tests {
         // The role that builds and does not destroy. This is the pair the
         // separation exists for, and the one a single boolean would get wrong.
         fold(&shared, &sessao(vec![Permission::ManageVoiceRooms]));
-        let constroi = plug.snapshot();
+        let constroi = connection.snapshot();
         assert!(constroi.may_manage_voice_rooms);
         assert!(
             !constroi.may_delete_rooms,
@@ -4438,7 +4438,7 @@ mod tests {
 
         // And the reverse, so the two are not simply the same field read twice.
         fold(&shared, &sessao(vec![Permission::AdministerServer]));
-        let administra = plug.snapshot();
+        let administra = connection.snapshot();
         assert!(administra.may_delete_rooms);
         assert!(!administra.may_manage_voice_rooms);
 
@@ -4454,13 +4454,13 @@ mod tests {
             ]),
         );
         assert!(
-            !plug.snapshot().may_delete_rooms,
+            !connection.snapshot().may_delete_rooms,
             "a moderation permission lit up the one that destroys rooms"
         );
 
         // And it goes away again, like the five beside it.
         fold(&shared, &sessao(Vec::new()));
-        assert!(!plug.snapshot().may_delete_rooms);
+        assert!(!connection.snapshot().may_delete_rooms);
     }
 
     /// A shell watching a server dress itself, from the outside.
@@ -4474,7 +4474,7 @@ mod tests {
 
         let shared = bare_shared();
         let (commands, _queue) = tokio::sync::mpsc::unbounded_channel();
-        let plug = Plug {
+        let connection = Connection {
             commands,
             shared: Arc::clone(&shared),
         };
@@ -4492,10 +4492,10 @@ mod tests {
                 permissions: vec![Permission::AdministerServer],
             },
         );
-        let inicio = plug.snapshot();
+        let inicio = connection.snapshot();
         assert_eq!(inicio.server, "Casa");
         assert_eq!(inicio.icon_revision, 0);
-        assert_eq!(plug.server_icon(), None);
+        assert_eq!(connection.server_icon(), None);
         assert!(
             inicio.may_customise_server,
             "whoever administers the server was not offered the control"
@@ -4508,7 +4508,7 @@ mod tests {
                 name: "Terceira Tóquio".into(),
             },
         );
-        let renomeado = plug.snapshot();
+        let renomeado = connection.snapshot();
         assert_eq!(renomeado.server, "Terceira Tóquio");
         assert_eq!(
             renomeado.icon_revision, 0,
@@ -4523,15 +4523,15 @@ mod tests {
                 icon: Some(bytes.clone()),
             },
         );
-        assert_eq!(plug.snapshot().icon_revision, 1);
-        assert_eq!(plug.server_icon(), Some(bytes));
+        assert_eq!(connection.snapshot().icon_revision, 1);
+        assert_eq!(connection.server_icon(), Some(bytes));
 
         // Including when it moves to nothing. A revision that only counted
         // arrivals would leave the old picture on screen after it was taken
         // down, because the shell would never be told to look again.
         fold(&shared, &ServerMessage::ServerIconChanged { icon: None });
-        assert_eq!(plug.snapshot().icon_revision, 2);
-        assert_eq!(plug.server_icon(), None);
+        assert_eq!(connection.snapshot().icon_revision, 2);
+        assert_eq!(connection.server_icon(), None);
     }
 
     #[test]
@@ -4542,11 +4542,11 @@ mod tests {
         // send that fails is how a dropped link looks from `enlace`.
         let shared = bare_shared();
         let (commands, mut fila) = tokio::sync::mpsc::unbounded_channel();
-        let plug = Plug { commands, shared };
+        let connection = Connection { commands, shared };
 
         assert_eq!(
-            plug.set_server_icon(Some(b"%PDF-1.7".to_vec())),
-            Err(PlugError::IconNotAPicture)
+            connection.set_server_icon(Some(b"%PDF-1.7".to_vec())),
+            Err(ConnectionError::IconNotAPicture)
         );
         assert!(
             fila.try_recv().is_err(),
@@ -4561,7 +4561,7 @@ mod tests {
         gorda.extend_from_slice(&128_u32.to_be_bytes());
         gorda.extend_from_slice(&128_u32.to_be_bytes());
         gorda.resize(64 * 1024, 0);
-        let Err(PlugError::IconTooBig { limit_bytes }) = plug.set_server_icon(Some(gorda)) else {
+        let Err(ConnectionError::IconTooBig { limit_bytes }) = connection.set_server_icon(Some(gorda)) else {
             panic!("a picture over the ceiling was queued");
         };
         assert!(limit_bytes > 0);
@@ -4569,7 +4569,7 @@ mod tests {
 
         // Taking the picture down is never refused: it carries no bytes to
         // refuse, and whoever put one up has to be able to take it away.
-        assert_eq!(plug.set_server_icon(None), Ok(()));
+        assert_eq!(connection.set_server_icon(None), Ok(()));
         assert!(
             matches!(fila.try_recv(), Ok(Command::SetServerIcon { icon: None })),
             "taking the picture down was swallowed instead of sent"
@@ -4585,7 +4585,7 @@ mod tests {
 
         let shared = bare_shared();
         let (commands, _queue) = tokio::sync::mpsc::unbounded_channel();
-        let plug = Plug {
+        let connection = Connection {
             commands,
             shared: Arc::clone(&shared),
         };
@@ -4603,16 +4603,16 @@ mod tests {
 
         fold(&shared, &sessao(vec![Permission::ManageVoiceRooms]));
         assert!(
-            !plug.snapshot().may_customise_server,
+            !connection.snapshot().may_customise_server,
             "the permission to make rooms was read as the permission to name the server"
         );
 
         fold(&shared, &sessao(vec![Permission::AdministerServer]));
-        assert!(plug.snapshot().may_customise_server);
+        assert!(connection.snapshot().may_customise_server);
 
         fold(&shared, &sessao(Vec::new()));
         assert!(
-            !plug.snapshot().may_customise_server,
+            !connection.snapshot().may_customise_server,
             "the snapshot went on offering the control after the permission went away"
         );
     }
@@ -4626,7 +4626,7 @@ mod tests {
         // and the caller wakes with the counts unrounded.
         let shared = bare_shared();
         let (commands, mut queue) = tokio::sync::mpsc::unbounded_channel();
-        let plug = Plug {
+        let connection = Connection {
             commands,
             shared: Arc::clone(&shared),
         };
@@ -4657,7 +4657,7 @@ mod tests {
                 }
             });
 
-            let peso = plug.weigh_channel(7).await.expect("weight");
+            let peso = connection.weigh_channel(7).await.expect("weight");
             pergunta.await.expect("driver");
 
             assert_eq!(peso.messages, 1_847);
@@ -4712,23 +4712,23 @@ mod tests {
         // because the proto one would arrive as a dropped connection rather
         // than as nothing happening.
         let (commands, mut queue) = tokio::sync::mpsc::unbounded_channel();
-        let plug = Plug {
+        let connection = Connection {
             commands,
             shared: bare_shared(),
         };
 
         for blank in ["", "   ", "\t\n"] {
-            plug.create_voice_room(blank.into(), 8, None).unwrap();
-            plug.create_channel(blank.into()).unwrap();
-            plug.rename_voice_room(1, blank.into()).unwrap();
-            plug.rename_channel(1, blank.into()).unwrap();
+            connection.create_voice_room(blank.into(), 8, None).unwrap();
+            connection.create_channel(blank.into()).unwrap();
+            connection.rename_voice_room(1, blank.into()).unwrap();
+            connection.rename_channel(1, blank.into()).unwrap();
         }
         assert!(
             queue.try_recv().is_err(),
             "a blank name was sent to the server"
         );
 
-        plug.create_voice_room("VOICE_ROOM-02".into(), 8, None).unwrap();
+        connection.create_voice_room("VOICE_ROOM-02".into(), 8, None).unwrap();
         assert!(
             matches!(queue.try_recv(), Ok(Command::CreateVoiceRoom { .. })),
             "a real name was swallowed too"
@@ -4914,11 +4914,11 @@ mod tests {
             voice: Mutex::new(None),
             media: Mutex::new(None),
             nickname: Mutex::new("ayanami".into()),
-            pattern: AtomicU8::new(0),
+            link_state: AtomicU8::new(0),
             rtt_micros: std::sync::atomic::AtomicU64::new(0),
             jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
             caminho: Mutex::new(None),
-            sync_ratio: AtomicU8::new(0),
+            signal: AtomicU8::new(0),
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
             limites_da_tela: Mutex::new(None),
@@ -5657,7 +5657,7 @@ mod trilha_no_log {
 
     #[test]
     fn o_log_da_trilha_diz_qual_candidato_deu_o_que() {
-        // Enquanto o app entrar por `Plug::connect`, este log é a superfície
+        // Enquanto o app entrar por `Connection::connect`, este log é a superfície
         // inteira em que a trilha aparece. Ele escrevia só a etapa e o
         // relógio, e com isso respondia «Parada, Tentando, Desistiu, aos
         // 8003 ms» — que é a etapa e não o candidato, ou seja, não é a

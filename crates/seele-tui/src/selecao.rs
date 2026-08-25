@@ -1,8 +1,8 @@
 //! A tela de onde se escolhe para onde ir.
 //!
-//! `plug` sem argumento nenhum cai aqui: os servidores onde você já esteve, mais
+//! `connection` sem argumento nenhum cai aqui: os servidores onde você já esteve, mais
 //! *novo endereço*, *colar convite* e *hospedar aqui*. Com qualquer flag, esta
-//! tela não aparece — quem digitou `plug --server casa:8383` já disse aonde
+//! tela não aparece — quem digitou `connection --server casa:8383` já disse aonde
 //! vai, e um menu no caminho seria só uma tecla a mais entre a intenção e o
 //! resultado. O público deste cliente é o mesmo do Vim; interromper quem sabe o
 //! que quer é o pior que uma interface faz.
@@ -610,7 +610,7 @@ mod tests {
         // O caminho mais curto até o defeito, e o que o reproduziu: colar um
         // convite, apertar Esc na pergunta do apelido — que preserva o rascunho
         // de propósito — e entrar num server da lista. A impressão digital ia
-        // junto, e `plug` acusava de impostor um servidor que o convite nem cita.
+        // junto, e `connection` acusava de impostor um servidor que o convite nem cita.
         let mut selecao = Selecao::nova(vec![conhecido("outro:8383", "ayanami", None)]);
 
         selecao.tecla(KeyCode::Char('c'));
@@ -816,7 +816,7 @@ mod tests {
             .map(|posicao| buffer[posicao].symbol().to_owned())
             .collect();
         // O cabeçalho é a marca da folha nova (`docs/marca.md`), não mais a
-        // assinatura do plug de entrada, que foi abandonada com o katakana.
+        // assinatura do connection de entrada, que foi abandonada com o katakana.
         assert!(tudo.contains(ui::ASSINATURA));
         assert!(tudo.contains("192.168.0.7:8383"));
         assert!(tudo.contains("hospedar"));
