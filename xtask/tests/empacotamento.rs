@@ -441,12 +441,28 @@ fn escrever(caminho: &PathBuf, conteudo: &str, executavel: bool) {
         std::fs::create_dir_all(pai).expect("a pasta tem que ser criável");
     }
     std::fs::write(caminho, conteudo).expect("o arquivo tem que ser gravável");
+    marcar_executavel(caminho, executavel);
+}
+
+/// Marca o arquivo como executável, onde isso quer dizer alguma coisa.
+///
+/// **Só no Unix, e a razão é do sistema.** No Windows não há bit de execução:
+/// quem decide se um arquivo roda é a extensão, e `Permissions` nem tem
+/// `from_mode`. Sem esta separação a compilação do `xtask` morria lá com
+/// `cannot find `unix` in `os`` — um erro que nenhuma máquina Unix vê, e que só
+/// apareceu quando o workspace foi compilado num Windows de verdade.
+#[cfg(unix)]
+fn marcar_executavel(caminho: &PathBuf, executavel: bool) {
     if executavel {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(caminho, std::fs::Permissions::from_mode(0o755))
             .expect("a permissão tem que colar");
     }
 }
+
+/// No Windows não há o que marcar, e fingir que há seria pior que não fazer.
+#[cfg(not(unix))]
+fn marcar_executavel(_caminho: &PathBuf, _executavel: bool) {}
 
 impl Bancada {
     fn nova() -> Bancada {

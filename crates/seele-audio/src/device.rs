@@ -977,7 +977,13 @@ fn windows_consentimento() -> ConsentimentoDoMicrofone {
     /// `Deny` de forma exata: qualquer outro valor — inclusive lixo — não é
     /// negativa, e tratá-lo como negativa poria a tela a acusar o sistema por
     /// causa de uma chave escrita à mão.
-    fn negado(colmeia: winreg::enums::HKEY, caminho: &str) -> Option<bool> {
+    ///
+    /// `winreg::HKEY` e **não** `winreg::enums::HKEY`: o módulo `enums` carrega
+    /// as constantes — `HKEY_LOCAL_MACHINE` e as irmãs, importadas acima — e o
+    /// **tipo** delas mora na raiz do crate, reexportado do `windows_sys`. A
+    /// confusão compila em qualquer máquina que não seja Windows, porque este
+    /// bloco inteiro é `cfg(windows)` e nunca foi visto por um compilador aqui.
+    fn negado(colmeia: winreg::HKEY, caminho: &str) -> Option<bool> {
         let raiz = RegKey::predef(colmeia);
         let chave = raiz.open_subkey(caminho).ok()?;
         let valor: String = chave.get_value("Value").ok()?;
