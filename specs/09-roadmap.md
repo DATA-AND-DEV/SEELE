@@ -48,7 +48,7 @@ Se este milestone escorregar muito, o escopo do projeto precisa ser revisto — 
 
 - `seele-proto` com tipos, serialização e versionamento.
 - Conexão QUIC via `quinn`, handshake completo, PADRÃO LARANJA → AZUL.
-- `seeled` com um VoiceRoom fixo, encaminhamento de datagrams, sem persistência.
+- `seeled` com uma sala de voz fixo, encaminhamento de datagrams, sem persistência.
 - Cliente de linha de comando feio, sem TUI, só para exercitar o protocolo.
 
 **Aceite:** três clientes entram no mesmo VoiceRoom e conversam por voz através do servidor. Cliente sem permissão é rejeitado. Fuzzing do parser sem crash.

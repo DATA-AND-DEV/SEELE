@@ -248,7 +248,7 @@
 /* ---------- coluna 1: a trilha de servidores ----------
    60px de largura no v3, contra os 56px do v2, e o mesmo botão de 56px de
    altura por servidor. A marca de 2px na borda esquerda é a mesma técnica de
-   estado que os VoiceRooms usam logo ao lado, e é de propósito que seja a mesma:
+   estado que as salas de voz usam logo ao lado, e é de propósito que seja a mesma:
    são duas listas de coisas em que se está ou não se está. */
 .trilha {
   display: flex;
@@ -323,7 +323,7 @@
 }
 
 /* Entrar noutro servidor é sair deste, e a coluna diz isso pelo mesmo canal que
-   os VoiceRooms ao lado: a marca de 2px na borda esquerda, que aqui acende sob o
+   as salas de voz ao lado: a marca de 2px na borda esquerda, que aqui acende sob o
    ponteiro e sob o foco em vez de ficar acesa. O que está aceso é onde se está;
    o que acende ao ser apontado é para onde se pode ir. */
 .trilha-outro:hover,
@@ -423,7 +423,7 @@
 
 /* O `?` que abre a ajuda.
    Quadrado e do tamanho do texto ao lado: ele não compete com o título, e não
-   deve — quem já sabe o que é um VoiceRoom nunca mais precisa dele. Vira laranja no
+   deve — quem já sabe o que é uma sala de voz nunca mais precisa dele. Vira laranja no
    hover e no foco como todo alvo desta janela. */
 .painel-ajuda {
   flex: 0 0 auto;
@@ -517,7 +517,7 @@
 /* A marca de 3px à esquerda é o estado, e é a mesma técnica do comp v3: uma
    barra de cor na borda em vez de um fundo inteiro, para que a lista continue
    legível com metade das linhas marcadas. Ela vai no elemento que **é** o item
-   — o `<li>` do VoiceRoom, o `<button>` da Linha — e não num ancestral comum: a
+   — o `<li>` da sala de voz, o `<button>` da Linha — e não num ancestral comum: a
    Linha virou botão para ganhar teclado, e um marcador no `<li>` em volta dela
    ficaria de fora do foco que ele acompanha. */
 .voice_room, .linha { border-left: 3px solid transparent; }
@@ -639,7 +639,7 @@
 
 /* ---- destruir uma sala ----
 
-   Os dois botões do VoiceRoom numa fileira. `ENTRAR NA SALA` fica com o espaço, e
+   Os dois botões da sala de voz numa fileira. `ENTRAR NA SALA` fica com o espaço, e
    `APAGAR` toma o que o rótulo dele precisa: o que se faz nesta lista o dia
    inteiro é entrar e sair, e apagar é o que se faz uma vez.
 

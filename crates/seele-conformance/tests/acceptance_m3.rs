@@ -88,7 +88,7 @@ async fn a_restarted_server_keeps_its_history() -> Result<()> {
     // "Reinício não perde mensagem confirmada ao cliente", which is why a
     // message is broadcast only after its batch has committed.
     let directory = tempfile::tempdir()?;
-    let database = directory.path().join("dogma.db");
+    let database = directory.path().join("seele.db");
 
     let posted = {
         let (address, server) = start(database.clone()).await?;
@@ -145,7 +145,7 @@ async fn a_restarted_server_keeps_its_accounts() -> Result<()> {
     // so the same key must find the same account — otherwise every restart
     // orphans everybody's history.
     let directory = tempfile::tempdir()?;
-    let database = directory.path().join("dogma.db");
+    let database = directory.path().join("seele.db");
 
     let first_person = {
         let (address, server) = start(database.clone()).await?;
@@ -170,7 +170,7 @@ async fn a_restarted_server_keeps_its_accounts() -> Result<()> {
 #[tokio::test]
 async fn a_message_reaches_everybody_on_the_line() -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let (address, server) = start(directory.path().join("dogma.db")).await?;
+    let (address, server) = start(directory.path().join("seele.db")).await?;
 
     let mut ayanami = connect(address, "ayanami", &key(1)).await?;
     let mut shinji = connect(address, "shinji", &key(2)).await?;
@@ -202,7 +202,7 @@ async fn a_resent_message_is_not_posted_twice() -> Result<()> {
     // that resends because the acknowledgement was lost, not because the user
     // pressed enter twice.
     let directory = tempfile::tempdir()?;
-    let (address, server) = start(directory.path().join("dogma.db")).await?;
+    let (address, server) = start(directory.path().join("seele.db")).await?;
 
     let mut ayanami = connect(address, "ayanami", &key(1)).await?;
     ayanami.join_channel(LINE).await?;
@@ -253,7 +253,7 @@ async fn a_person_without_write_permission_is_refused() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let config = ServerConfig {
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
-        database: Location::File(directory.path().join("dogma.db")),
+        database: Location::File(directory.path().join("seele.db")),
         observers: vec!["observador".into()],
         ..ServerConfig::default()
     };
@@ -294,7 +294,7 @@ async fn telemetry_carries_a_sync_ratio() -> Result<()> {
     // and specs/02-protocolo.md derives it from RTT, jitter and loss. On
     // loopback it should be nominal.
     let directory = tempfile::tempdir()?;
-    let (address, server) = start(directory.path().join("dogma.db")).await?;
+    let (address, server) = start(directory.path().join("seele.db")).await?;
     let mut client = connect(address, "ayanami", &key(1)).await?;
 
     let event = wait_for(&mut client, |event| {
@@ -331,7 +331,7 @@ async fn a_returning_person_reclaims_their_seat_and_their_ssrc() -> Result<()> {
     // outage looks to everybody else like a departure and an arrival, and every
     // listener's jitter buffer starts over.
     let directory = tempfile::tempdir()?;
-    let (address, server) = start(directory.path().join("dogma.db")).await?;
+    let (address, server) = start(directory.path().join("seele.db")).await?;
 
     let before = {
         let mut ayanami = connect(address, "ayanami", &key(1)).await?;
@@ -365,7 +365,7 @@ async fn a_returning_person_reclaims_their_seat_and_their_ssrc() -> Result<()> {
 async fn history_pages_backwards_without_gaps() -> Result<()> {
     // specs/02-protocolo.md: "Paginação por cursor, nunca offset."
     let directory = tempfile::tempdir()?;
-    let (address, server) = start(directory.path().join("dogma.db")).await?;
+    let (address, server) = start(directory.path().join("seele.db")).await?;
 
     let mut ayanami = connect(address, "ayanami", &key(1)).await?;
     ayanami.join_channel(LINE).await?;

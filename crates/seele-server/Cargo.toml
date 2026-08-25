@@ -1,6 +1,6 @@
 [package]
 name = "seele-server"
-description = "seeled — the SEELE daemon. One instance is a Dogma Central."
+description = "seeled — o daemon do SEELE. Uma instância é um servidor."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

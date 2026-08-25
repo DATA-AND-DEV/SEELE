@@ -52,7 +52,7 @@ const LINHA: ChannelId = ChannelId(1);
 /// directory and `Location::Memory` has none.
 async fn server(teto: u64) -> Result<(SocketAddr, Arc<Daemon>, tempfile::TempDir)> {
     let casa = tempfile::tempdir()?;
-    let banco = casa.path().join("dogma.db");
+    let banco = casa.path().join("seele.db");
     {
         let persistence = seele_server::persistence::Persistence::open(&Location::File(banco.clone()))?;
         seele_server::persistence::attachments::set_quota(&persistence, teto)?;
@@ -347,7 +347,7 @@ async fn quem_nao_pode_anexar_e_recusado_com_razao() -> Result<()> {
     // «Pode escrever» e «pode pôr um gigabyte no meu notebook» são perguntas
     // diferentes, e esta é a segunda. O Observador é negado explicitamente.
     let casa = tempfile::tempdir()?;
-    let banco = casa.path().join("dogma.db");
+    let banco = casa.path().join("seele.db");
     let config = ServerConfig {
         name: "Terceira Tóquio".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),

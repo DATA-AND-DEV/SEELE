@@ -1388,7 +1388,7 @@ fn sair_da_sala(room: &mut Room, app: &mut App) {
     app.refazer_busca();
 }
 
-/// Enter on the selected row: enter a voice room, or open a Channel.
+/// Enter on the selected row: enter a voice room, or open o canal.
 async fn activate(runtime: &mut Runtime<'_>, client: &Enlace) -> Result<(), Fechado> {
     let Some(node) = runtime.app.tree.get(runtime.app.selected).cloned() else {
         return Ok(());
@@ -1412,7 +1412,7 @@ async fn activate(runtime: &mut Runtime<'_>, client: &Enlace) -> Result<(), Fech
     Ok(())
 }
 
-/// Opens a Channel and asks for the page of history behind it.
+/// Opens o canal and asks for the page of history behind it.
 ///
 /// The fetch is what makes `specs/06-clientes-gui.md`'s "sem perda de
 /// histórico" true: a client arriving late reads what was already said instead

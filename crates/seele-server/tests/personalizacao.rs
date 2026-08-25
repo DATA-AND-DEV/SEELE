@@ -425,7 +425,7 @@ async fn o_nome_e_o_icone_sobrevivem_a_um_reinicio() -> Result<()> {
     // encontra o que quem hospeda escolheu — e não o `name` da `ServerConfig`,
     // que é o que estava sendo mandado antes desta mudança.
     let diretorio = tempfile::tempdir()?;
-    let arquivo = diretorio.path().join("dogma.db");
+    let arquivo = diretorio.path().join("seele.db");
     let imagem = png(MAX_SERVER_ICON_SIDE);
 
     {

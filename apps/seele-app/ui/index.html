@@ -447,7 +447,7 @@
       que a máquina abriu o errado — e a troca vale na hora, sem sair do servidor.
     -->
     <!--
-      A grade do VoiceRoom — a tela `chamada` do comp. Ela é a mesma sala vista de
+      A grade da sala de voz — a tela `chamada` do comp. Ela é a mesma sala vista de
       outro ângulo: aqui está a conversa escrita, lá estão as pessoas. Alcançada
       daqui e só daqui, porque não faz sentido fora de uma sessão.
     -->
@@ -1082,7 +1082,7 @@
             <span class="rotulo">LUGARES</span>
             <!--
               O padrão vem do servidor e não daqui: `desenharCanais` o copia do
-              limite de um VoiceRoom que já existe. Um número escrito neste arquivo
+              limite de uma sala de voz que já existe. Um número escrito neste arquivo
               seria a casca decidindo o tamanho de uma sala.
             -->
             <input id="campo-voice_room-limite" name="lugares" type="number" min="1" max="250" required>
@@ -1293,7 +1293,7 @@
       escrita na nota abaixo do título em vez de ficar implícita. A lista
       inteira não existe no protocolo: `Room.people` só cresce com o `Session`
       desta conexão, com `PersonJoined` — que é a entrada numa **sala**, e traz
-      o VoiceRoom no próprio campo — e com o autor de uma mensagem. Nada na fita diz
+      a sala de voz no próprio campo — e com o autor de uma mensagem. Nada na fita diz
       quem entrou no servidor sem entrar em sala nenhuma. Desenhar a lista
       «do servidor» a partir do que existe seria uma lista que finge estar
       inteira, e a faixa prefere dizer de que ela é.
@@ -1396,7 +1396,7 @@
 </section>
 
 <!--
-  Chamada — a grade do VoiceRoom, redesenhada segundo o comp v3
+  Chamada — a grade da sala de voz, redesenhada segundo o comp v3
   (`design/SEELE v3.dc.html`, linhas 209–336; inventário §7).
 
   Tela própria, e não camada: ela **substitui** a conversa em vez de se pôr
@@ -1421,7 +1421,7 @@
   2. o volume tem `−`, `+` e células clicáveis, no lugar de um deslizante que
      só existia quando o ponteiro passava por cima — um controle que aparece no
      hover é um controle escondido;
-  3. os dois botões de saída dizem, em palavras, qual deles sai do VoiceRoom.
+  3. os dois botões de saída dizem, em palavras, qual deles sai da sala de voz.
 
   ---- as notas ----
 
@@ -1437,7 +1437,7 @@
          data-anuncio="Chamada. Um cartão por pessoa na sala de voz.">
   <div class="chamada">
 
-    <!-- ---------------- a coluna do VoiceRoom ---------------- -->
+    <!-- ---------------- a coluna da sala de voz ---------------- -->
     <div class="chamada-voice_room">
       <div class="chamada-barra">
         <!--
@@ -1588,7 +1588,7 @@
 
       <!--
         Um cartão por pessoa. O comp corta o roster em `slice(0,4)` e é sempre
-        2×2; aqui a grade se acomoda à largura e rola, porque um VoiceRoom tem
+        2×2; aqui a grade se acomoda à largura e rola, porque uma sala de voz tem
         `limit` assentos e nada garante que sejam quatro. Esconder o quinto
         pessoa é a única forma de esta tela mentir sobre quem está na sala.
       -->

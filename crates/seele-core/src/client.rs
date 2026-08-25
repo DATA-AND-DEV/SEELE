@@ -833,7 +833,7 @@ impl Client {
         .await
     }
 
-    /// Asks the server to make a Channel.
+    /// Asks the server to make o canal.
     ///
     /// # Errors
     ///
@@ -864,7 +864,7 @@ impl Client {
         .await
     }
 
-    /// Asks the server to rename a Channel.
+    /// Asks the server to rename o canal.
     ///
     /// # Errors
     ///
@@ -1135,7 +1135,7 @@ impl Client {
         frame::write(&mut self.send, &ClientMessage::DeleteVoiceRoom { voice_room }).await
     }
 
-    /// Asks the server to destroy a Channel, and everything written in it.
+    /// Asks the server to destroy o canal, and everything written in it.
     ///
     /// # Errors
     ///
@@ -1144,7 +1144,7 @@ impl Client {
         frame::write(&mut self.send, &ClientMessage::DeleteChannel { channel }).await
     }
 
-    /// Asks what destroying a Channel would cost. Destroys nothing.
+    /// Asks what destroying o canal would cost. Destroys nothing.
     ///
     /// The answer arrives as a `ChannelWeighed` on the event stream, like every
     /// other answer this client gets.

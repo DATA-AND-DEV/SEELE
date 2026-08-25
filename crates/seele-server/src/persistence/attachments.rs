@@ -749,7 +749,7 @@ impl Store {
     /// Deduplication happens here, **after** the bytes arrived, and that is
     /// deliberate: answering "I already have that" before receiving would tell
     /// the sender, by timing alone, that somebody has already sent that exact
-    /// file — including into a Channel they may not read. The disk is the resource
+    /// file — including into o canal they may not read. The disk is the resource
     /// under a hard ceiling, and the disk is still spared.
     ///
     /// # Errors
@@ -937,7 +937,7 @@ mod tests {
     #[test]
     fn choosing_a_ceiling_survives_a_reopen() {
         let directory = tempfile::tempdir().unwrap();
-        let location = Location::File(directory.path().join("dogma.db"));
+        let location = Location::File(directory.path().join("seele.db"));
         {
             let persistence = Persistence::open(&location).unwrap();
             set_quota(&persistence, 4 * 1024 * 1024).unwrap();

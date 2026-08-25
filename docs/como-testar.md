@@ -68,7 +68,7 @@ O padrão é `~/.config/seele`.
 Aperte `?`. É o critério de aceite de M4 que isso baste.
 
 O resumo: `i` escreve, `Enter` envia, `Esc` cancela, `Tab` troca de painel,
-`j`/`k` navegam, `Enter` entra no VoiceRoom ou abre a Linha selecionada, `:q` sai.
+`j`/`k` navegam, `Enter` entra na sala de voz ou abre a Linha selecionada, `:q` sai.
 
 Comandos úteis para olhar o sistema por dentro:
 

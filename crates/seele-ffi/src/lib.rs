@@ -155,7 +155,7 @@ pub fn impressao_desta_maquina(home: &str) -> Result<String, ConnectionError> {
 /// How often measurements are refreshed.
 const TICK: Duration = Duration::from_millis(250);
 
-/// How many messages of history to ask for when a Channel opens.
+/// How many messages of history to ask for when o canal opens.
 const HISTORY_PAGE: u16 = 50;
 
 /// What a shell needs to connect.
@@ -1107,7 +1107,7 @@ impl Connection {
         self.command(Command::LeaveVoiceRoom)
     }
 
-    /// Opens a Channel and asks for the page of history behind it.
+    /// Opens o canal and asks for the page of history behind it.
     ///
     /// # Errors
     ///
@@ -1175,7 +1175,7 @@ impl Connection {
     ///
     /// **On a press, never on a scroll**, and that is a decision this call
     /// leaves no room to get wrong: it downloads. The file lives on the server,
-    /// so looking at it costs the host's uplink, and a Channel that previewed
+    /// so looking at it costs the host's uplink, and o canal that previewed
     /// everything as it scrolled would turn a 1 GiB disk ceiling into a 1 GiB
     /// transfer every time somebody opened it.
     ///
@@ -1223,7 +1223,7 @@ impl Connection {
         }
     }
 
-    /// Says something in a Channel.
+    /// Says something in o canal.
     ///
     /// # Errors
     ///
@@ -1276,7 +1276,7 @@ impl Connection {
         })
     }
 
-    /// Asks the server to make a Channel.
+    /// Asks the server to make o canal.
     ///
     /// # Errors
     ///
@@ -1303,7 +1303,7 @@ impl Connection {
         })
     }
 
-    /// Asks the server to rename a Channel.
+    /// Asks the server to rename o canal.
     ///
     /// # Errors
     ///
@@ -1496,7 +1496,7 @@ impl Connection {
         self.command(Command::DeleteVoiceRoom { voice_room: VoiceRoomId(voice_room) })
     }
 
-    /// Asks the server to destroy a Channel, and everything written in it —
+    /// Asks the server to destroy o canal, and everything written in it —
     /// `apagar_linha`.
     ///
     /// # Errors
@@ -1506,7 +1506,7 @@ impl Connection {
         self.command(Command::DeleteChannel { channel: ChannelId(channel) })
     }
 
-    /// Asks what destroying a Channel would cost, and waits for the answer.
+    /// Asks what destroying o canal would cost, and waits for the answer.
     ///
     /// The one call on this handle that waits, and the reason is the sentence it
     /// feeds: a confirmation promising to destroy 1.847 messages by 6 people
@@ -3288,7 +3288,7 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             }
         }
         // Nothing is written into the local `Room` here, unlike entering a voice room
-        // or opening a Channel. Those two are facts about this client, which the
+        // or opening o canal. Those two are facts about this client, which the
         // server confirms by silence; a room is a fact about the server, and the
         // only honest source for it is the server saying it exists. Writing it in
         // optimistically would draw a room for the person who asked even when

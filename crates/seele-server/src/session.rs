@@ -1583,8 +1583,8 @@ async fn run_session(
                             Ok(()) => {
                                 tracing::info!(by = %session.person, %id, own = seu, "message removed");
                                 // The Channel comes from the stored row, never
-                                // from the asker: a Channel the client filled in
-                                // is a Channel the client can fill in wrong, and
+                                // from the asker: o canal the client filled in
+                                // is o canal the client can fill in wrong, and
                                 // it would aim somebody else's announcement.
                                 let _ = server.events.send(Event::MessageRemoved {
                                     channel: alvo.channel,
@@ -1675,7 +1675,7 @@ async fn run_session(
                     }
                     // A read, answered straight down this connection rather
                     // than over the bus: it is nobody else's business how heavy
-                    // a Channel looked to the person about to be asked whether
+                    // o canal looked to the person about to be asked whether
                     // they mean it.
                     //
                     // No permission. Answering tells a person how much is in a
@@ -2022,10 +2022,10 @@ async fn run_session(
                         }).await?;
                         continue;
                     }
-                    // The same for a Channel this connection had open. It is
+                    // The same for o canal this connection had open. It is
                     // dropped from `channels` here rather than left to rot: that
                     // list is what `translate` filters message traffic by, and
-                    // a Channel that stayed in it would make this connection the
+                    // o canal that stayed in it would make this connection the
                     // one that still asks about a room that is gone.
                     Event::ChannelDeleted { channel: id } if channels.contains(id) => {
                         channels.retain(|aberta| aberta != id);

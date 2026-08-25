@@ -41,7 +41,7 @@ Atalhos essenciais no modo Normal:
 ```
 h j k l / setas   navegar
 Tab / Shift+Tab   alternar painel, adiante e para trás
-Enter             inserir connection no VoiceRoom / abrir Linha
+Enter             inserir connection na sala de voz / abrir Linha
 i                 escrever mensagem
 Espaço (hold)     push-to-talk
 m                 alternar A.T. Field (mudo)

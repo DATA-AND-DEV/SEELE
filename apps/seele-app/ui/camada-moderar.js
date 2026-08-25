@@ -101,9 +101,9 @@ function podeModerarPersonos(snapshot) {
  * O botão que abre a moderação de uma pessoa, ou `null` quando não há o que
  * oferecer.
  *
- * Mora na linha de quem está dentro de um VoiceRoom, que é o único lugar desta
+ * Mora na linha de quem está dentro de uma sala de voz, que é o único lugar desta
  * janela que lista **todo mundo em toda sala**: o roster e a grade da chamada
- * mostram só o VoiceRoom ocupado, e moderar é justamente o que se faz com quem está
+ * mostram só a sala de voz ocupado, e moderar é justamente o que se faz com quem está
  * noutra sala.
  *
  * Nunca sobre si mesmo: expulsar-se é o `DESCONECTAR` do cabeçalho, banir-se
@@ -142,7 +142,7 @@ function botaoDeRemoverMensagem(mensagem, pode) {
 }
 
 /**
- * O botão que destrói um VoiceRoom, ou `null` quando não há o que oferecer.
+ * O botão que destrói uma sala de voz, ou `null` quando não há o que oferecer.
  *
  * `may_delete_rooms` e não `may_manage_voice_rooms`, e a diferença é a decisão inteira:
  * fazer uma sala é um erro que o servidor sobrevive, destruir uma acaba com o que
@@ -173,9 +173,9 @@ function botaoDeApagarVoiceRoom(voice_room, snapshot, ultimo) {
 /**
  * O botão que destrói uma Linha, ou `null` quando não há o que oferecer.
  *
- * Sem o par desabilitado do VoiceRoom: a última Linha pode ir. Um servidor sem Linha
+ * Sem o par desabilitado da sala de voz: a última Linha pode ir. Um servidor sem Linha
  * nenhuma continua sendo o que este produto é — a `specs/04-servidor-seele.md`
- * faz a Linha presa a um VoiceRoom **opcional**, então uma sala de voz sem texto é
+ * faz a Linha presa a uma sala de voz **opcional**, então uma sala de voz sem texto é
  * uma configuração que o produto já prevê. Sem VoiceRoom não há onde falar; sem
  * Linha há.
  */
@@ -344,7 +344,7 @@ function desarmarAto() {
  *
  * Toda porta desta camada começa por aqui, e nenhuma delas desenha a partir do
  * que a lista de trás mostrava: a lista é redesenhada duas vezes por segundo, e
- * o VoiceRoom que estava na linha clicada pode ter deixado de existir entre o clique
+ * a sala de voz que estava na linha clicada pode ter deixado de existir entre o clique
  * e este quadro. Uma caixa escrita a partir da tela seria uma caixa sobre uma
  * sala que já não está lá.
  *
@@ -536,12 +536,12 @@ function consequenciaDeMover(quem, destino) {
 }
 
 /**
- * A frase de consequência de apagar um VoiceRoom.
+ * A frase de consequência de apagar uma sala de voz.
  *
  * Diz as três coisas que quem aperta não vive: quanta gente é posta para fora,
  * que isso acontece no meio do que estiverem falando, e que cada uma é avisada.
- * E a que mais engana: a Linha presa ao VoiceRoom **não** vai junto. Sem essa linha,
- * quem quer acabar com uma conversa apaga o VoiceRoom, olha a Linha ainda ali, e
+ * E a que mais engana: a Linha presa à sala de voz **não** vai junto. Sem essa linha,
+ * quem quer acabar com uma conversa apaga a sala de voz, olha a Linha ainda ali, e
  * conclui que o produto não fez o que disse.
  */
 function consequenciaDeApagarVoiceRoom(voice_room, linhaPresa) {

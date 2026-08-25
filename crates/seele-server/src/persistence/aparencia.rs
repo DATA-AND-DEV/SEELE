@@ -269,7 +269,7 @@ mod testes {
         // O critério com que a tabela `configuracao` foi criada, cobrado: fechar
         // o banco e abri-lo de novo é o que um reinício faz.
         let diretorio = tempfile::tempdir().unwrap();
-        let arquivo = Location::File(diretorio.path().join("dogma.db"));
+        let arquivo = Location::File(diretorio.path().join("seele.db"));
         let bytes = vec![0x89, b'P', b'N', b'G', 7, 7, 7];
 
         {

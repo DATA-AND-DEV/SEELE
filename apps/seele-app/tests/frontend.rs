@@ -2237,7 +2237,7 @@ fn the_voice_room_says_who_is_inside_and_says_their_state_in_words() {
     );
     assert!(
         dentro.contains("pessoa.speaking") && dentro.contains("pessoa.muted"),
-        "the row inside a VoiceRoom reads neither who is talking nor who is muted, \
+        "the row inside a sala de voz reads neither who is talking nor who is muted, \
          which is everything it was drawn to say"
     );
     for word in ["fala", "mudo"] {
@@ -4723,7 +4723,7 @@ fn the_line_confirmation_counts_what_it_is_about_to_destroy() {
     };
     assert!(
         porta.contains("invoke(\"peso_da_linha\""),
-        "the box about destroying a Channel opens without asking the Server what is \
+        "the box about destroying o canal opens without asking the Server what is \
          in it, so its numbers came from somewhere this window guessed:\n{porta}"
     );
 
@@ -4772,7 +4772,7 @@ fn a_count_that_did_not_arrive_stops_the_question_instead_of_rounding_it() {
     };
     assert!(
         !falhou.contains("abrirConfirmacao("),
-        "a Channel whose count never arrived is still offered for destruction, with \
+        "o canal whose count never arrived is still offered for destruction, with \
          whatever number the sentence fell back to:\n{falhou}"
     );
     assert!(
@@ -4833,8 +4833,8 @@ fn destroying_a_room_says_what_it_does_to_the_people_and_to_the_other_room() {
         );
     }
 
-    // For a Channel: whoever is reading it loses it from the screen at that
-    // instant, and any voice room bound to it comes out with no Channel — a change
+    // For o canal: whoever is reading it loses it from the screen at that
+    // instant, and any voice room bound to it comes out with no canal — a change
     // nobody asked for, which is exactly the kind this product names.
     let linha = body_of(&scripts(), "function consequenciaDeApagarLinha");
     for (what, needle) in [
@@ -4843,7 +4843,7 @@ fn destroying_a_room_says_what_it_does_to_the_people_and_to_the_other_room() {
             "Nenhuma tela deste produto",
         ),
         ("what happens to whoever is reading it", "perde da tela"),
-        ("which rooms come out without a Channel", "sem canal"),
+        ("which rooms come out without o canal", "sem canal"),
     ] {
         assert!(
             linha.contains(needle),
@@ -4856,7 +4856,7 @@ fn destroying_a_room_says_what_it_does_to_the_people_and_to_the_other_room() {
     // Invalid Date" is a sentence that was never read by its author.
     assert!(
         linha.contains("peso.messages === 0"),
-        "the Channel confirmation has one sentence for a Channel with a past and a \
+        "the Channel confirmation has one sentence for o canal with a past and a \
          Channel with none, so the empty one reads as a date that does not \
          exist:\n{linha}"
     );
@@ -5694,7 +5694,7 @@ fn a_file_that_cannot_be_read_says_so_where_it_can_be_seen() {
 
 #[test]
 fn a_file_offered_with_no_line_open_is_refused_out_loud() {
-    // Both doors give up when there is no Channel to send to, and both used to give
+    // Both doors give up when there is no canal to send to, and both used to give
     // up with a bare `return`. From the outside that is the same event as the
     // bug this whole file was written for: the person acts, and the window does
     // not move.
@@ -5705,14 +5705,14 @@ fn a_file_offered_with_no_line_open_is_refused_out_loud() {
     ] {
         let corpo = js_function(&sessao, entrada);
         let Some(depois) = corpo.split("linhaAberta === null").nth(1) else {
-            panic!("`{entrada}` no longer checks whether a Channel is open at all");
+            panic!("`{entrada}` no longer checks whether o canal is open at all");
         };
         // Only as far as the end of that branch: a `recusarAnexo` further down,
         // on some other path, would say nothing about this one.
         let ramo = depois.split('}').next().unwrap_or_default();
         assert!(
             ramo.contains("recusarAnexo("),
-            "`{entrada}` gives up in silence when no Channel is open, which reads \
+            "`{entrada}` gives up in silence when no canal is open, which reads \
              exactly like a broken button: {ramo}"
         );
     }
@@ -5771,12 +5771,12 @@ fn arriving_at_a_server_opens_a_line_and_does_not_put_anybody_in_a_voice_room() 
 
     assert!(
         entrar.contains("open_channel"),
-        "arriving no longer opens a Channel, so the screen is empty again and the \
+        "arriving no longer opens o canal, so the screen is empty again and the \
          reason the automatic step existed is lost:\n{entrar}"
     );
     assert!(
         !entrar.contains("insert_plug"),
-        "arriving puts the person inside a VoiceRoom without them pressing anything — \
+        "arriving puts the person inside a sala de voz without them pressing anything — \
          a seat taken and a microphone offered to a conversation nobody \
          chose:\n{entrar}"
     );

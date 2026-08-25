@@ -110,7 +110,7 @@ async fn quem_conecta_recebe_o_icone_que_o_server_ja_tinha() -> Result<()> {
     let pasta = std::env::temp_dir().join(format!("seele-icone-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&pasta);
     std::fs::create_dir_all(&pasta)?;
-    let banco = pasta.join("dogma.db");
+    let banco = pasta.join("seele.db");
     let imagem = png(64);
 
     // O ícone é gravado **antes** de qualquer sessão existir, que é o caso do

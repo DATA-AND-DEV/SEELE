@@ -474,7 +474,7 @@ impl Room {
         self.notice.take().is_some()
     }
 
-    /// Records that the client is now reading a Channel.
+    /// Records that the client is now reading o canal.
     ///
     /// Clears the messages, because a new Channel is a new conversation and keeping
     /// the old one under a new heading misattributes every channel of it.
@@ -596,7 +596,7 @@ impl Room {
 
     /// The name to show for a person, even one never introduced.
     ///
-    /// Joining a Channel mid-conversation means the first thing said can come from
+    /// Joining o canal mid-conversation means the first thing said can come from
     /// somebody whose arrival was never seen. Showing an id beats dropping it.
     #[must_use]
     pub fn name_of(&self, person: PersonId) -> String {
@@ -1877,7 +1877,7 @@ mod tests {
             oldest_at_seconds: Some(1_678_600_000),
         });
 
-        assert!(!changed.any(), "weighing a Channel changed the room");
+        assert!(!changed.any(), "weighing o canal changed the room");
         assert_eq!(room.channels, before.channels);
         assert_eq!(room.messages.len(), before.messages.len());
     }

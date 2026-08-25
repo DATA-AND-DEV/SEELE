@@ -77,7 +77,7 @@ async fn o_server_cai_e_a_sessao_entra_na_bateria_em_vez_de_acabar() -> Result<(
     // troca de chave ao cliente, que é o alerta do ADR 0003 e não uma
     // reconexão.
     let pasta = tempfile::tempdir()?;
-    let banco = pasta.path().join("dogma.db");
+    let banco = pasta.path().join("seele.db");
 
     let (endereco, servidor) = server(0, Location::File(banco.clone())).await?;
     let porta = endereco.port();
@@ -150,7 +150,7 @@ async fn o_que_a_pessoa_escolheu_volta_com_ela() -> Result<()> {
     // estava num sala de voz conversando volta calado noutro canto sem entender por
     // quê.
     let pasta = tempfile::tempdir()?;
-    let banco = pasta.path().join("dogma.db");
+    let banco = pasta.path().join("seele.db");
     let (endereco, servidor) = server(0, Location::File(banco.clone())).await?;
     let porta = endereco.port();
 

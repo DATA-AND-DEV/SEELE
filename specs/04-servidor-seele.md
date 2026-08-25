@@ -22,7 +22,7 @@ Server (a instância)
  └─ Papel      — conjunto de permissões
 ```
 
-VoiceRooms e Linhas são independentes; um VoiceRoom pode ter uma Linha associada, mas não é obrigatório.
+VoiceRooms e Linhas são independentes; uma sala de voz pode ter uma Linha associada, mas não é obrigatório.
 
 ## Permissões
 
@@ -38,16 +38,16 @@ Regra: permissões negadas vencem concedidas. Sem herança em árvore — a comp
 
 - Uma task `tokio` por conexão, tratando o stream de controle.
 - Uma task por **VoiceRoom**, dona do estado daquele VoiceRoom. Entrada e saída por `mpsc`. Isso elimina lock global e torna o roteamento de mídia trivialmente paralelo.
-- Datagrams de mídia entram na task do VoiceRoom, que replica para os assinantes. Zero cópia sempre que possível (`Bytes`).
+- Datagrams de mídia entram na task da sala de voz, que replica para os assinantes. Zero cópia sempre que possível (`Bytes`).
 
 ## Encaminhamento de mídia (MEDIA)
 
 1. Recebe datagram de um `ssrc` conhecido.
-2. Valida que o remetente está no VoiceRoom e tem permissão de falar. **Validar sempre** — não confiar no cliente.
-3. Encaminha o payload íntegro a todos os outros assinantes do VoiceRoom.
+2. Valida que o remetente está na sala de voz e tem permissão de falar. **Validar sempre** — não confiar no cliente.
+3. Encaminha o payload íntegro a todos os outros assinantes da sala de voz.
 4. Nunca decodifica o Opus.
 
-Controle de fluxo: limite por remetente de quadros por segundo (um cliente honesto envia 50/s). Acima disso, descarta e registra. Protege contra cliente malicioso saturando o VoiceRoom.
+Controle de fluxo: limite por remetente de quadros por segundo (um cliente honesto envia 50/s). Acima disso, descarta e registra. Protege contra cliente malicioso saturando a sala de voz.
 
 **[EM ABERTO]** Política acima de 20 falantes simultâneos: encaminhar apenas os N mais ativos, medidos por energia reportada? Requer que o cliente reporte energia, o que é confiável apenas parcialmente.
 
@@ -79,7 +79,7 @@ bitrate_maximo = 48000
 quadros_por_segundo_max = 60
 
 [persistencia]
-caminho = "/var/lib/seeled/dogma.db"
+caminho = "/var/lib/seeled/seele.db"
 retencao_dias = 0             # 0 = ilimitado
 ```
 

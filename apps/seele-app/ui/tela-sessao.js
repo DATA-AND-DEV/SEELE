@@ -558,12 +558,12 @@ function iniciaisDoApelido(apelido) {
  * — o ouvinte estava no `<ul>` e nenhum `<li>` era apertável. Agora cada VoiceRoom
  * traz um botão de 38px que diz o que faz.
  *
- * O comp escreve `VOCÊ ESTÁ AQUI` no VoiceRoom ocupado e não liga o botão a nada.
+ * O comp escreve `VOCÊ ESTÁ AQUI` na sala de voz ocupado e não liga o botão a nada.
  * Aqui ele diz `SAIR DA SALA` e ejeta, e a divergência é deliberada: `sair`
  * ganhou lugar próprio no v3 justamente porque no v2 ninguém o achava, e o
  * único outro lugar em que ele existe é a tela de chamada. Trocar um botão
  * mudo por um botão morto seria repetir o erro que o v3 corrige. Que se está
- * dentro continua dito, e por duas vias: a marca laranja na borda do VoiceRoom e o
+ * dentro continua dito, e por duas vias: a marca laranja na borda da sala de voz e o
  * `(você)` ao lado do próprio nome na lista de quem está lá.
  */
 function desenharCanais(snapshot) {
@@ -670,7 +670,7 @@ function desenharCanais(snapshot) {
 }
 
 /**
- * Uma pessoa na lista de quem está dentro de um VoiceRoom.
+ * Uma pessoa na lista de quem está dentro de uma sala de voz.
  *
  * O comp marca o estado com um ponto colorido e nada mais.
  * `specs/05-cliente-tui.md` proíbe informação que só a cor carregue, e um ponto
@@ -1060,7 +1060,7 @@ function corpoComRealce(corpo, intervalos, aceso = null) {
  * Quem está conectado no servidor **sem** estar numa sala não está aqui, e não
  * está porque o protocolo não o carrega: `Room.people` só cresce com o
  * `Session` desta conexão, com `PersonJoined` — que anuncia a entrada numa sala
- * e traz o VoiceRoom no próprio campo — e com o autor de uma mensagem. Não há
+ * e traz a sala de voz no próprio campo — e com o autor de uma mensagem. Não há
  * mensagem na fita que diga quem entrou no servidor e ficou fora das salas.
  * Enquanto não houver, a nota do cabeçalho diz de que a lista é, e esta função
  * não inventa o resto.
@@ -2313,7 +2313,7 @@ function soltarCasamentos() {
  * Refaz a busca sobre o histórico que está na tela agora.
  *
  * Obrigatório sempre que a lista desenhada mudar de forma — abrir outra Linha,
- * entrar ou sair de um VoiceRoom, uma mensagem editada ou apagada. Ao contrário do
+ * entrar ou sair de uma sala de voz, uma mensagem editada ou apagada. Ao contrário do
  * `connection`, que recalcula o realce a partir do termo a cada desenho
  * (`seele-tui::ui`) e só guarda o cursor, esta janela guarda os deslocamentos
  * que vieram do Rust; sem um ponto de invalidação eles passariam a acender

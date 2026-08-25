@@ -207,7 +207,7 @@ pub enum AttachmentRefusal {
     RateLimited,
     /// This server is not storing attachments at all.
     Unavailable,
-    /// No such attachment, or it belongs to a Channel this person may not read.
+    /// No such attachment, or it belongs to o canal this person may not read.
     NotFound,
     /// The bytes were evicted to keep the server under its ceiling.
     Expired,
@@ -305,9 +305,9 @@ pub enum Permission {
     EnterVoiceRoom,
     /// Transmit voice.
     Speak,
-    /// Read a Channel.
+    /// Read o canal.
     ReadChannel,
-    /// Post to a Channel.
+    /// Post to o canal.
     WriteChannel,
     /// Delete somebody else's message.
     RemoveMessage,
@@ -340,7 +340,7 @@ pub enum Permission {
     /// Migration 3 seeds it on Commander, Operator and Person, and **denies it
     /// explicitly on Observer** rather than merely leaving it out — the schema
     /// already writes why on the Observer's channel: denying on purpose makes
-    /// granting Observer to somebody who is also a Person *silence* them,
+    /// granting Observer to somebody who is also a pessoa *silence* them,
     /// instead of quietly doing nothing.
     AttachFile,
 }
@@ -794,7 +794,7 @@ pub enum ClientMessage {
         /// association optional.
         channel: Option<ChannelId>,
     },
-    /// Creates a Channel.
+    /// Creates o canal.
     CreateChannel {
         /// What to call it.
         name: String,
@@ -806,7 +806,7 @@ pub enum ClientMessage {
         /// The new name.
         name: String,
     },
-    /// Renames a Channel.
+    /// Renames o canal.
     RenameChannel {
         /// Which Channel.
         channel: ChannelId,
@@ -869,7 +869,7 @@ pub enum ClientMessage {
     /// server where taking back your own typo requires an operator is a server
     /// where people ask an operator about typos.
     ///
-    /// Carries no Channel. The identifier is the server's own and globally
+    /// Carries no canal. The identifier is the server's own and globally
     /// unique, so the Channel to announce the removal on is read out of the stored
     /// row rather than taken from the asker — a field the client fills in is a
     /// field the client can fill in wrong, and this one would aim somebody
@@ -934,7 +934,7 @@ pub enum ClientMessage {
         /// Which voice room.
         voice_room: VoiceRoomId,
     },
-    /// Destroys a Channel and everything written in it. `apagar_linha` —
+    /// Destroys o canal and everything written in it. `apagar_linha` —
     /// [`Permission::AdministerServer`].
     ///
     /// Not a soft delete, unlike [`Self::RemoveMessage`]. That one keeps a row
@@ -947,7 +947,7 @@ pub enum ClientMessage {
         /// Which Channel.
         channel: ChannelId,
     },
-    /// Asks what destroying a Channel would cost, without destroying anything.
+    /// Asks what destroying o canal would cost, without destroying anything.
     ///
     /// A read, and the only verb in this enum that exists for a **sentence**: a
     /// confirmation that says "this destroys 1.847 messages by 6 people,
@@ -957,7 +957,7 @@ pub enum ClientMessage {
     /// whole past is — and a number that is nearly right in a box promising
     /// destruction is worse than no number at all.
     ///
-    /// Needs no permission. Answering it tells a person how much is in a Channel
+    /// Needs no permission. Answering it tells a person how much is in o canal
     /// they may already read, and refusing it would only mean the confirmation
     /// they see is the vaguer one.
     WeighChannel {
@@ -1324,7 +1324,7 @@ pub enum ServerMessage {
         /// Which Channel.
         channel: ChannelId,
     },
-    /// What destroying a Channel would cost, counted now.
+    /// What destroying o canal would cost, counted now.
     ///
     /// The answer to [`ClientMessage::WeighChannel`], and the numbers a
     /// confirmation is built out of. Counted at the moment of asking rather

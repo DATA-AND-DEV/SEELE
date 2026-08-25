@@ -1169,7 +1169,7 @@ mod tree_tests {
     #[test]
     fn navigation_skips_over_persons() {
         // People are shown, not entered. Stopping on them on the way from a
-        // voice room to a Channel is two wasted keystrokes per person in the room.
+        // voice room to o canal is two wasted keystrokes per person in the room.
         let mut app = App::new();
         app.tree = tree();
         app.focus = Panel::Channels;

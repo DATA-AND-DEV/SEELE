@@ -322,7 +322,7 @@ impl<'a> Messages<'a> {
         Ok(page)
     }
 
-    /// How many messages a Channel holds, removed ones excluded.
+    /// How many messages o canal holds, removed ones excluded.
     ///
     /// Not a page: [`Self::history`] is capped at [`MAX_PAGE`], because a client
     /// scrolls and a screen holds a screenful. The question "how many are there"
@@ -880,7 +880,7 @@ mod tests {
         // confirmada ao cliente". `append_batch` returns only after the commit,
         // so anything it returned is durable by construction.
         let directory = tempfile::tempdir().unwrap();
-        let location = Location::File(directory.path().join("dogma.db"));
+        let location = Location::File(directory.path().join("seele.db"));
 
         {
             let mut persistence = Persistence::open(&location).unwrap();

@@ -1,6 +1,6 @@
 [package]
 name = "seele-tui"
-description = "Entry Plug — the terminal client. The reference interface."
+description = "O cliente de terminal. Não é mais distribuído — ver o comentário do [[bin]]."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -16,7 +16,7 @@ rand = "0.10"
 anyhow = "1.0.104"
 crossterm = "0.29.0"
 seele-core = { path = "../seele-core" }
-# `--hospedar` sobe um Dogma neste processo. Exceção nomeada na regra de
+# `--hospedar` sobe um servidor neste processo. Exceção nomeada na regra de
 # dependência (xtask/src/check_deps.rs): o cliente contém os dois papéis, e
 # nenhuma lógica de protocolo entra na casca por causa disso.
 seele-server = { path = "../seele-server" }

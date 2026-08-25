@@ -362,7 +362,7 @@ impl<'a> Permissions<'a> {
             return Ok(());
         }
 
-        // Everybody after the first arrives as a Person. specs/04 makes that the
+        // Everybody after the first arrives as a pessoa. specs/04 makes that the
         // normal-use role; a Comandante promotes from there.
         self.connection.execute(
             "INSERT INTO person_roles (person_id, role_id) VALUES (?1, ?2)",
@@ -788,7 +788,7 @@ mod tests {
         // row — a single-connection test could not tell that apart from a check
         // done in Rust before the insert, which would race.
         let directory = tempfile::tempdir().unwrap();
-        let file = directory.path().join("dogma.db");
+        let file = directory.path().join("seele.db");
         Persistence::open(&Location::File(file.clone())).unwrap();
 
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));

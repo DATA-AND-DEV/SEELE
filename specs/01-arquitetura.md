@@ -56,7 +56,7 @@ Consequências positivas:
 
 Consequência negativa: banda cresce com O(n²) no pior caso. Para o alvo (VoiceRooms de até ~15 pessoas), é irrelevante. Mitigação embutida: o VAD faz com que só quem está falando transmita, e na prática 2–3 pessoas falam por vez.
 
-**Limite rígido:** acima de 20 participantes ativos em um VoiceRoom, o servidor passa a encaminhar apenas os N falantes mais altos [EM ABERTO: definir N e a política].
+**Limite rígido:** acima de 20 participantes ativos em uma sala de voz, o servidor passa a encaminhar apenas os N falantes mais altos [EM ABERTO: definir N e a política].
 
 ## Modelo de concorrência
 

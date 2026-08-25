@@ -122,7 +122,7 @@ Antes de qualquer coisa com áudio, prove que o enlace existe.
 
 | | esperado |
 |---|---|
-| Os dois se veem no roster | cada um vê o outro na lista sob o VoiceRoom |
+| Os dois se veem no roster | cada um vê o outro na lista sob a sala de voz |
 | `i`, digitar, `Enter` na máquina A | aparece na B em menos de um segundo |
 | O mesmo de B para A | idem |
 | `:sync` nas duas | RTT plausível para a rede (LAN cabeada: 1–5 ms; wifi: 5–30 ms) |
@@ -162,7 +162,7 @@ Estas são M1.16, e são o motivo deste documento.
 
 ### 5.1 · Soak de 10 minutos
 
-Fiquem os dois no VoiceRoom por dez minutos com conversa intermitente. O que se
+Fiquem os dois na sala de voz por dez minutos com conversa intermitente. O que se
 procura é o que só aparece com tempo: **estalos**, e a deriva de clock que a
 M1.8 corrige (`docs/m1-medicoes.md` tem a tabela de deriva medida).
 

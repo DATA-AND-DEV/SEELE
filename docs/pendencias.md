@@ -322,10 +322,10 @@ Não está registrado no sistema operacional. Quando for, o cliente **precisa
 perguntar antes de conectar**: um link que inicia conexão sozinho é superfície
 nova. Ver ADR 0006.
 
-## 11 · Reconectar rápido pode esvaziar o roster do VoiceRoom
+## 11 · Reconectar rápido pode esvaziar o roster da sala de voz
 
 **Sintoma esperado.** Alguém dá `:ejetar` e entra de novo em seguida. A sessão
-nova sobe, fala e ouve normalmente, e o VoiceRoom aparece **vazio** — sem nem a
+nova sobe, fala e ouve normalmente, e a sala de voz aparece **vazio** — sem nem a
 própria pessoa — até o movimento de alguém redesenhar a lista.
 
 **O que se sabe.** É uma corrida entre a sessão que morre e a que nasce, e as
@@ -1114,7 +1114,7 @@ VoiceRoom que se deixou é nomeado.
 
 **Três achados no código mudaram o desenho**, e valem mesmo sem o ADR:
 
-1. **O áudio abre na conexão, não na entrada no VoiceRoom**
+1. **O áudio abre na conexão, não na entrada na sala de voz**
    (`crates/seele-ffi/src/lib.rs:1507-1531`; `insert_plug` não toca áudio,
    `lib.rs:565-567` e `1787-1795`). Três conexões abririam três `AudioIo` antes
    de alguém falar. O ADR move a abertura para a entrada no primeiro VoiceRoom, o que

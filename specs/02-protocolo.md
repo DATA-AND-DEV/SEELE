@@ -82,7 +82,7 @@ Datagram QUIC tem entrega não confiável e sem ordem, que é exatamente o desej
 └─────────┴──────────┴────────────┴─────────┴──────────────┘
 ```
 
-- `ssrc` — identificador da fonte, atribuído na entrada do VoiceRoom.
+- `ssrc` — identificador da fonte, atribuído na entrada da sala de voz.
 - `seq` — sequencial, com wrap. Detecta perda e reordenação.
 - `ts` — timestamp em amostras a 48 kHz. Detecta gaps de silêncio.
 - Payload Opus de 20 ms.

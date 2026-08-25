@@ -204,7 +204,7 @@ pub fn diretorio_de_anexos(config: &ServerConfig) -> Option<std::path::PathBuf> 
 /// # A server opens with somewhere to go
 ///
 /// This is what stops a fresh server being a screen that does not explain
-/// itself. A room with na sala de voz offers nowhere to speak and no Channel to write in;
+/// itself. A room with na sala de voz offers nowhere to speak and no canal to write in;
 /// the person who pressed **HOSPEDAR AQUI** looks at an empty list and has no
 /// way to tell a working server from a broken one. So the first boot writes a
 /// Channel called `geral` and one voice room bound to it, and there is somewhere to
@@ -233,7 +233,7 @@ pub fn diretorio_de_anexos(config: &ServerConfig) -> Option<std::path::PathBuf> 
 /// # Why a flag, and not only `INSERT OR IGNORE`
 ///
 /// Because the identifiers are written out by hand, `INSERT OR IGNORE` means
-/// "unless row 1 is taken" — and once a Channel can be **destroyed**, row 1 stops
+/// "unless row 1 is taken" — and once o canal can be **destroyed**, row 1 stops
 /// being taken. A server whose operator destroyed `geral` on purpose, after a
 /// confirmation promising that nothing brings it back, would find it again at
 /// the next restart: same name, same identifier, empty. That is the product
@@ -528,7 +528,7 @@ impl Daemon {
         &self.server
     }
 
-    /// How many messages PERSISTENCE holds on a Channel.
+    /// How many messages PERSISTENCE holds on o canal.
     ///
     /// The counterpart of [`Self::mensagens_da_linha`], and the one that answers
     /// "did anything get lost": a page is capped, a count is not. See
@@ -542,7 +542,7 @@ impl Daemon {
         persistence::messages::Messages::new(&mut guard).count(channel)
     }
 
-    /// What PERSISTENCE actually recorded on a Channel, newest first.
+    /// What PERSISTENCE actually recorded on o canal, newest first.
     ///
     /// One page, capped at [`persistence::messages::MAX_PAGE`] like every other
     /// reader of history — [`Self::quantas_mensagens`] is what counts.
@@ -612,7 +612,7 @@ mod tests {
 
     #[test]
     fn a_new_server_opens_with_somewhere_to_go() {
-        // A server with na sala de voz offers nowhere to speak and no Channel to write in.
+        // A server with na sala de voz offers nowhere to speak and no canal to write in.
         // The person who pressed HOSPEDAR AQUI would look at an empty list with
         // no way to tell a working server from a broken one — and "hospede você
         // mesmo" would be a claim rather than a thing that happens.
@@ -624,7 +624,7 @@ mod tests {
         // `channels` depois do rename, e sombrear o DAO com o resultado dele
         // fazia a linha seguinte pedir `voice_rooms()` a um `Vec`.
         let channels = dao.channels().expect("channels");
-        assert_eq!(channels.len(), 1, "a server opened with no Channel: {channels:?}");
+        assert_eq!(channels.len(), 1, "a server opened with no canal: {channels:?}");
         assert_eq!(channels[0].name, "geral");
 
         let voice_rooms = dao.voice_rooms().expect("voice_rooms");
@@ -634,7 +634,7 @@ mod tests {
         assert_eq!(
             voice_rooms[0].channel,
             Some(channels[0].id),
-            "the opening voice room has no Channel attached to it"
+            "the opening voice room has no canal attached to it"
         );
         assert!(
             !voice_rooms[0].password_required,
@@ -648,7 +648,7 @@ mod tests {
         // that has been restarted twenty times shows twenty `geral`s.
         let directory = tempfile::tempdir().expect("tempdir");
         let config = ServerConfig {
-            database: Location::File(directory.path().join("dogma.db")),
+            database: Location::File(directory.path().join("seele.db")),
             ..ServerConfig::default()
         };
 
@@ -668,7 +668,7 @@ mod tests {
         // bug to believe when somebody reports it.
         let directory = tempfile::tempdir().expect("tempdir");
         let config = ServerConfig {
-            database: Location::File(directory.path().join("dogma.db")),
+            database: Location::File(directory.path().join("seele.db")),
             ..ServerConfig::default()
         };
 
@@ -696,7 +696,7 @@ mod tests {
         // confirmation.
         let directory = tempfile::tempdir().expect("tempdir");
         let config = ServerConfig {
-            database: Location::File(directory.path().join("dogma.db")),
+            database: Location::File(directory.path().join("seele.db")),
             ..ServerConfig::default()
         };
 
@@ -711,7 +711,7 @@ mod tests {
         let persistence = born(&config);
         assert!(
             Channels::new(&persistence).channels().expect("channels").is_empty(),
-            "a Channel destroyed on purpose was written back by the next boot"
+            "o canal destroyed on purpose was written back by the next boot"
         );
     }
 
@@ -723,7 +723,7 @@ mod tests {
         // destroys the one it came with: they made theirs first.
         let directory = tempfile::tempdir().expect("tempdir");
         let config = ServerConfig {
-            database: Location::File(directory.path().join("dogma.db")),
+            database: Location::File(directory.path().join("seele.db")),
             ..ServerConfig::default()
         };
 
@@ -754,7 +754,7 @@ mod tests {
         // already doing on its own.
         let directory = tempfile::tempdir().expect("tempdir");
         let config = ServerConfig {
-            database: Location::File(directory.path().join("dogma.db")),
+            database: Location::File(directory.path().join("seele.db")),
             ..ServerConfig::default()
         };
 

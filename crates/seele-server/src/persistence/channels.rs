@@ -112,7 +112,7 @@ impl<'a> Channels<'a> {
     ///
     /// # Errors
     ///
-    /// Returns [`NoSuchChannel`] if `channel` names a Channel that is not there, or a
+    /// Returns [`NoSuchChannel`] if `channel` names o canal that is not there, or a
     /// database error.
     pub fn create_voice_room(&self, name: &str, limit: u16, channel: Option<ChannelId>) -> Result<VoiceRoomInfo> {
         let name = name.trim();
@@ -147,7 +147,7 @@ impl<'a> Channels<'a> {
         })
     }
 
-    /// Makes a Channel, and returns it as the wire will carry it.
+    /// Makes o canal, and returns it as the wire will carry it.
     ///
     /// # Errors
     ///
@@ -185,7 +185,7 @@ impl<'a> Channels<'a> {
         Ok(name.to_owned())
     }
 
-    /// Renames a Channel. Returns the trimmed name that was stored.
+    /// Renames o canal. Returns the trimmed name that was stored.
     ///
     /// # Errors
     ///
@@ -202,7 +202,7 @@ impl<'a> Channels<'a> {
         Ok(name.to_owned())
     }
 
-    /// What destroying a Channel would cost, counted now.
+    /// What destroying o canal would cost, counted now.
     ///
     /// The three numbers the confirmation in the app is built out of, and they
     /// are read here rather than estimated anywhere else: a client holds one
@@ -223,7 +223,7 @@ impl<'a> Channels<'a> {
             return Err(NoSuchChannel.into());
         }
         // One statement for the three numbers, and not three. Two of them would
-        // be counted a moment apart otherwise, and a Channel being written to
+        // be counted a moment apart otherwise, and o canal being written to
         // while somebody weighs it could answer "1.847 messages by 7 people"
         // with the seventh person's only message in neither count.
         let (messages, authors, oldest) = self.connection.query_row(
@@ -291,7 +291,7 @@ impl<'a> Channels<'a> {
         Ok(())
     }
 
-    /// Destroys a Channel, and everything written in it.
+    /// Destroys o canal, and everything written in it.
     ///
     /// Really destroys it. `remover_mensagem` is soft — it keeps the row so
     /// replies do not dangle and an operator can still answer "what was removed
@@ -307,14 +307,14 @@ impl<'a> Channels<'a> {
     /// - a voice room bound to this Channel keeps existing and loses the binding.
     ///   `voice_rooms.channel_id` has no `ON DELETE` clause, so without this the delete
     ///   fails on the foreign key and reaches the shell as a database error —
-    ///   "could not destroy it", about a Channel whose only sin is being useful to
+    ///   "could not destroy it", about o canal whose only sin is being useful to
     ///   a room.
     /// - a reply **from another Channel** pointing at a message in this one is
     ///   unhooked first. `messages.replies_to` references `messages(id)` with
     ///   no `ON DELETE` either, so one cross-Channel reply is enough to make the
     ///   cascade fail — and nothing stops a client sending one.
     ///
-    /// One transaction because a Channel half destroyed is worse than one not
+    /// One transaction because o canal half destroyed is worse than one not
     /// destroyed at all: rooms pointing at nothing, replies pointing at
     /// nothing, and a confirmation that already promised it was over.
     ///
@@ -374,7 +374,7 @@ pub struct NoSuchChannel;
 #[error("this is the only voice room in the server")]
 pub struct LastVoiceRoom;
 
-/// What a Channel holds, as the confirmation in front of destroying it needs it.
+/// What o canal holds, as the confirmation in front of destroying it needs it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChannelWeight {
     /// How many messages are in it that anybody can read.

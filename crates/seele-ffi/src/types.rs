@@ -183,7 +183,7 @@ impl From<seele_core::AlertReason> for NoticeReason {
     }
 }
 
-/// What a Channel holds, as the confirmation in front of destroying it needs it.
+/// What o canal holds, as the confirmation in front of destroying it needs it.
 ///
 /// Counted in the server's database at the instant of asking, and carried across
 /// the bridge unrounded. A shell cannot work these out for itself: it holds one
@@ -426,7 +426,7 @@ pub struct VoiceRoom {
     /// association optional.
     ///
     /// Carried so a shell can say what destroying that Channel would do to this
-    /// room. The voice room survives it and comes out with no Channel attached, which is
+    /// room. The voice room survives it and comes out with no canal attached, which is
     /// a change nobody asked for — and a product whose confirmations name their
     /// consequences has to be able to name that one.
     pub channel: Option<u32>,
@@ -899,7 +899,7 @@ pub struct Snapshot {
     pub may_kick: bool,
     /// Whether this person may bar somebody from returning — `banir`.
     pub may_ban: bool,
-    /// Whether this person may take somebody else's message off a Channel.
+    /// Whether this person may take somebody else's message off o canal.
     ///
     /// Only somebody else's: removing one's own needs no permission, so a shell
     /// offering the control on a message the reader wrote does not consult this.
@@ -1168,7 +1168,7 @@ pub enum AttachmentRefusal {
     RateLimited,
     /// This server is not storing attachments at all.
     Unavailable,
-    /// No such attachment, or it is in a Channel this person may not read.
+    /// No such attachment, or it is in o canal this person may not read.
     NotFound,
     /// The bytes were evicted to keep the server under its ceiling.
     Expired,
@@ -1202,7 +1202,7 @@ pub struct Attachment {
 ///
 /// The answer to one press of one button, and never anything a screen gets by
 /// scrolling: the file lives on the server, so looking at it is downloading it,
-/// and a Channel that fetched every picture as it scrolled past would turn the
+/// and o canal that fetched every picture as it scrolled past would turn the
 /// host's disk ceiling into everybody's uplink.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Preview {
