@@ -6,10 +6,10 @@
 //! # Por que nenhum teste de unidade via isso
 //!
 //! Os dois lados estavam certos sozinhos. `seele_core::state::Room` sabe assentar
-//! um piloto em qualquer Cage e sempre soube — os testes dele passam entregando
-//! `PilotJoined` à mão, para o Cage que o teste quiser. O servidor sabe manter a
+//! um pessoa em qualquer Cage e sempre soube — os testes dele passam entregando
+//! `PersonJoined` à mão, para o Cage que o teste quiser. O servidor sabe manter a
 //! ocupação e sempre soube. O que faltava era o **fio entre os dois**: o
-//! `translate` da sessão descartava todo `PilotJoined` que não fosse do Cage em
+//! `translate` da sessão descartava todo `PersonJoined` que não fosse do Cage em
 //! que aquela conexão estava sentada, então o `seats` do cliente só ganhava
 //! entrada para um Cage e a tela desenhava os outros vazios para sempre.
 //!
@@ -24,7 +24,7 @@
 //! 2. **Quem entra depois aparece para quem está noutro Cage.** É a metade que
 //!    fica viva; sem ela a tela está certa ao abrir e erra um minuto depois.
 //! 3. **Quem some é retirado.** A saída só era anunciada pelo ramo do
-//!    `EjetarPlug`; uma conexão que caía deixava o piloto no roster de todo
+//!    `EjetarPlug`; uma conexão que caía deixava o pessoa no roster de todo
 //!    mundo. Invisível enquanto o cliente desenhava um Cage só, e um fantasma na
 //!    tela agora que ele desenha todos.
 
@@ -135,7 +135,7 @@ where
 fn sentados(room: &Room, cage: CageId) -> Vec<String> {
     let mut nomes: Vec<String> = room
         .roster(cage)
-        .map(|pilot| pilot.nickname.clone())
+        .map(|person| person.nickname.clone())
         .collect();
     nomes.sort();
     nomes

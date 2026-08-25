@@ -46,8 +46,8 @@
    Saíram por essa regra: a descrição por Linha (`linhaDesc` — o protocolo não
    tem o campo), a população do Dogma (`412 operadores` — não existe), a
    contagem de pendências por Linha (`Line` é `{id, name, open}`), o atraso por
-   piloto no roster (`rtt_ms` é **nosso**, um número só) e o subsistema por
-   piloto (`PERMISSIONS·01` — o protocolo não diz qual atende quem).
+   pessoa no roster (`rtt_ms` é **nosso**, um número só) e o subsistema por
+   pessoa (`PERMISSIONS·01` — o protocolo não diz qual atende quem).
 
    A convenção do travessão **continua valendo** onde a moldura é a informação:
    a média sem plug inserido, a barra da bateria, as três células do alerta. A
@@ -183,7 +183,7 @@
 .padrao[data-padrao="Orange"] { color: var(--seele-laranja-nerv); }
 .padrao[data-padrao="Offline"] { color: var(--seele-osso-apagado); }
 
-.topo-piloto { font-size: var(--seele-t-rotulo); color: var(--seele-osso-apagado); }
+.topo-pessoa { font-size: var(--seele-t-rotulo); color: var(--seele-osso-apagado); }
 
 .relogio {
   font-size: var(--seele-t-dado);
@@ -562,7 +562,7 @@
 }
 
 /* ---- quem está dentro ----
-   O ganho maior do v3, e ele não custa protocolo: `Cage.pilots` já vinha
+   O ganho maior do v3, e ele não custa protocolo: `Cage.people` já vinha
    populado para todo Cage, e o app o gastava numa barra de blocos.
 
    A palavra ao lado do nome é o que separa isto de um enfeite: o glifo dá a
@@ -577,7 +577,7 @@
   gap: 3px;
 }
 
-.cage-piloto {
+.cage-pessoa {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -585,16 +585,16 @@
   color: var(--seele-osso-apagado);
 }
 
-.cage-piloto-nome {
+.cage-pessoa-nome {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.cage-piloto-eu { color: var(--seele-padrao-azul); flex: 0 0 auto; }
+.cage-pessoa-eu { color: var(--seele-padrao-azul); flex: 0 0 auto; }
 
-.cage-piloto-marca {
+.cage-pessoa-marca {
   margin-left: auto;
   flex: 0 0 auto;
   letter-spacing: 0.08em;
@@ -1400,7 +1400,7 @@
   padding: 0;
 }
 
-.roster .piloto {
+.roster .pessoa {
   border-bottom: 1px solid var(--seele-linha);
   border-left: 2px solid transparent;
   padding: 10px 14px;
@@ -1410,16 +1410,16 @@
 }
 
 /* Quem está falando ganha a marca e o fundo, como no comp. */
-.roster .piloto.falando {
+.roster .pessoa.falando {
   border-left-color: var(--seele-fosforo);
   background: var(--seele-fosforo-fraco);
 }
 
-.piloto-cabeca { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.pessoa-cabeca { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 
-.piloto-identidade { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.pessoa-identidade { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 
-.piloto-nome {
+.pessoa-nome {
   font-size: var(--seele-t-dado);
   letter-spacing: 0.06em;
   color: var(--seele-osso);
@@ -1438,9 +1438,9 @@
   line-height: 1;
 }
 
-.piloto-sync { display: flex; align-items: baseline; gap: 6px; flex: 0 0 auto; }
+.pessoa-sync { display: flex; align-items: baseline; gap: 6px; flex: 0 0 auto; }
 
-.piloto-sync-valor {
+.pessoa-sync-valor {
   font-family: var(--seele-display);
   font-weight: 900;
   font-size: 26px;
@@ -1451,19 +1451,19 @@
 /* A faixa pinta a marca, o número e a barra — nunca o nome, que precisa ser
    legível em qualquer estado. O acompanhante não-cromático é a marca de bloco,
    que é diferente em cada uma das três faixas. */
-.piloto[data-faixa="Nominal"] .piloto-sync,
-.piloto[data-faixa="Nominal"] .barra { color: var(--seele-sync-nominal); }
-.piloto[data-faixa="Degraded"] .piloto-sync,
-.piloto[data-faixa="Degraded"] .barra { color: var(--seele-sync-degradado); }
-.piloto[data-faixa="Critical"] .piloto-sync,
-.piloto[data-faixa="Critical"] .barra { color: var(--seele-sync-critico); }
+.pessoa[data-faixa="Nominal"] .pessoa-sync,
+.pessoa[data-faixa="Nominal"] .barra { color: var(--seele-sync-nominal); }
+.pessoa[data-faixa="Degraded"] .pessoa-sync,
+.pessoa[data-faixa="Degraded"] .barra { color: var(--seele-sync-degradado); }
+.pessoa[data-faixa="Critical"] .pessoa-sync,
+.pessoa[data-faixa="Critical"] .barra { color: var(--seele-sync-critico); }
 
-.piloto .barra { font-size: 11px; letter-spacing: 0.02em; }
+.pessoa .barra { font-size: 11px; letter-spacing: 0.02em; }
 
 /* `flex-end` e não `space-between`: o `ATRASO` que ocupava a esquerda saiu com
    a regra de omissão, e um `space-between` de um filho só o encosta à esquerda,
    que é onde as pastilhas não estavam. */
-.piloto-rodape {
+.pessoa-rodape {
   display: flex;
   justify-content: flex-end;
   align-items: center;
@@ -1472,7 +1472,7 @@
   letter-spacing: 0.12em;
 }
 
-.piloto-estados { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.pessoa-estados { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 
 /* A pastilha de estado: bloco sólido, texto no negro absoluto (inventário §12).
 
@@ -1498,7 +1498,7 @@
 }
 
 /* O volume por pessoa fica escondido até a linha ser apontada: `specs/03-audio.md`
-   pede o controle, e um deslizante por piloto sempre visível transformaria o
+   pede o controle, e um deslizante por pessoa sempre visível transformaria o
    roster numa mesa de som. */
 .volume {
   width: 100%;
@@ -1506,8 +1506,8 @@
   opacity: 0;
 }
 
-.roster .piloto:hover .volume,
-.roster .piloto:focus-within .volume { opacity: 1; }
+.roster .pessoa:hover .volume,
+.roster .pessoa:focus-within .volume { opacity: 1; }
 
 /* ---------- rodapé de telemetria ---------- */
 

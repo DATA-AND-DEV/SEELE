@@ -30,7 +30,7 @@ fn config_de_teste(server: String, casa: &std::path::Path) -> ConnectConfig {
     ConnectConfig {
         server,
         alternate_servers: Vec::new(),
-        nickname: "piloto".into(),
+        nickname: "pessoa".into(),
         home: casa.display().to_string(),
         join_secret: None,
         expected_fingerprint: None,
@@ -68,7 +68,7 @@ fn destinos_mortos_de_teste() -> Vec<Destino> {
                 servidor,
                 nome_tls: "localhost".into(),
                 chave_do_pin: servidor.to_string(),
-                apelido: "piloto".into(),
+                apelido: "pessoa".into(),
                 segredo: None,
                 impressao_esperada: None,
             }
@@ -309,7 +309,7 @@ fn a_trilha_de_uma_chegada_que_falhou_atravessa_ate_a_casca() {
     let falha = match Plug::connect_with_trail(ConnectConfig {
         server: primeiro.to_string(),
         alternate_servers: vec![segundo.to_string()],
-        nickname: "piloto".into(),
+        nickname: "pessoa".into(),
         home: casa.path().display().to_string(),
         join_secret: None,
         expected_fingerprint: None,

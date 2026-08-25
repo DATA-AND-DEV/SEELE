@@ -415,7 +415,7 @@ fn render_tree(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
                     theme.body()
                 },
             )),
-            Node::Pilot(pilot) => pilot_line(pilot, budget, theme),
+            Node::Person(person) => person_line(person, budget, theme),
         });
     }
 
@@ -426,7 +426,7 @@ fn render_tree(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
 ///
 /// The comp labels this **MÉDIA DO CAGE**. There is no room for the label in a
 /// panel this narrow, so what identifies it is its place: the same column as
-/// every pilot's number, on the row the pilots hang under. An empty Cage prints
+/// every person's number, on the row the people hang under. An empty Cage prints
 /// nothing rather than a zero — see [`seele_core::Room::cage_sync`].
 fn cage_line(
     name: &str,
@@ -464,25 +464,25 @@ fn cage_line(
     ])
 }
 
-/// One pilot row: presence, name, and the Sync Ratio with its mark.
+/// One person row: presence, name, and the Sync Ratio with its mark.
 ///
 /// `specs/05-cliente-tui.md`: "Nenhuma informação transmitida **só** por cor: a
 /// Taxa de Sincronização é sempre acompanhada do número". So the number is
 /// always printed, the band mark is always printed, and colour is the third
 /// channel rather than the only one.
-fn pilot_line(pilot: &crate::app::RosterEntry, budget: usize, theme: Theme) -> Line<'static> {
-    let presence = if pilot.speaking { "●" } else { "○" };
+fn person_line(person: &crate::app::RosterEntry, budget: usize, theme: Theme) -> Line<'static> {
+    let presence = if person.speaking { "●" } else { "○" };
     // Mudo e isolamento total ganham texto, e não só uma cor, pela mesma
     // razão: esta interface é usada por quem não separa vermelho de verde.
-    let flag = if pilot.at_field {
+    let flag = if person.at_field {
         "MUDO"
-    } else if pilot.total_isolation {
+    } else if person.total_isolation {
         "SURDO"
     } else {
         ""
     };
 
-    let sync = format!("{}{:>3}%", Theme::sync_mark(pilot.band()), pilot.sync);
+    let sync = format!("{}{:>3}%", Theme::sync_mark(person.band()), person.sync);
     let right = if flag.is_empty() {
         sync.clone()
     } else {
@@ -490,20 +490,20 @@ fn pilot_line(pilot: &crate::app::RosterEntry, budget: usize, theme: Theme) -> L
     };
 
     let left_budget = budget.saturating_sub(width(&right) + 3);
-    let left = format!("  {presence} {}", truncate(&pilot.nickname, left_budget));
+    let left = format!("  {presence} {}", truncate(&person.nickname, left_budget));
     let gap = budget.saturating_sub(width(&left) + width(&right));
 
     Line::from(vec![
         Span::styled(
             left,
-            if pilot.speaking {
+            if person.speaking {
                 theme.body().add_modifier(Modifier::BOLD)
             } else {
                 theme.label()
             },
         ),
         Span::raw(" ".repeat(gap)),
-        Span::styled(right, theme.sync(pilot.band())),
+        Span::styled(right, theme.sync(person.band())),
     ])
 }
 
@@ -765,7 +765,7 @@ fn render_bar(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
     {
         spans.push(separator.clone());
         // The Sync Ratio is the one segment that changes colour, because it is
-        // the one the pilot is meant to react to.
+        // the one the person is meant to react to.
         let style = if index == 0 {
             theme.sync(seele_core::SyncBand::of(app.bar.sync))
         } else {
@@ -1171,14 +1171,14 @@ mod tests {
                 open: true,
                 sync: None,
             },
-            Node::Pilot(RosterEntry {
+            Node::Person(RosterEntry {
                 nickname: "ayanami".into(),
                 sync: 98,
                 speaking: true,
                 at_field: false,
                 total_isolation: false,
             }),
-            Node::Pilot(RosterEntry {
+            Node::Person(RosterEntry {
                 nickname: "asuka".into(),
                 sync: 44,
                 speaking: false,
@@ -1222,18 +1222,18 @@ mod tests {
 
     #[test]
     fn a_cages_row_carries_the_average_of_the_room() {
-        // MÉDIA DO CAGE, in the same column as every pilot's number. The mark
+        // MÉDIA DO CAGE, in the same column as every person's number. The mark
         // travels with it: specs/05-cliente-tui.md forbids carrying a band by
         // colour alone, and an average is not an exception to that.
         let mut app = populated();
         app.tree[0] = Node::Cage {
             name: "CAGE-01 CENTRAL".into(),
             open: true,
-            // 98 and 44, which is what the two pilots below it read.
+            // 98 and 44, which is what the two people below it read.
             sync: Some(seele_core::CageSync {
                 ratio: 71,
                 band: seele_core::SyncBand::of(71),
-                pilots: 2,
+                people: 2,
             }),
         };
         let screen = draw(&app, Palette::True, (MIN_WIDTH, MIN_HEIGHT));
@@ -1390,7 +1390,7 @@ mod tests {
         assert!(mono.contains("94"), "the Sync Ratio vanished:\n{mono}");
         assert!(
             mono.contains("98"),
-            "a pilot's Sync Ratio vanished:\n{mono}"
+            "a person's Sync Ratio vanished:\n{mono}"
         );
         assert!(mono.contains("MUDO"), "the mute marker vanished:\n{mono}");
     }

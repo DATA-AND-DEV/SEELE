@@ -36,7 +36,7 @@ use seele_proto::attachment::{
     AttachmentDelivery, AttachmentHeader, ContentDigest, BLOCK_LEN, CONTENT_HASH_LEN,
 };
 use seele_proto::control::{AttachmentRefusal, Permission};
-use seele_proto::ids::{AttachmentId, ClientMessageId, PilotId};
+use seele_proto::ids::{AttachmentId, ClientMessageId, PersonId};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 
@@ -149,7 +149,7 @@ pub async fn quem_perguntou(stream: &mut quinn::RecvStream) -> Result<ClientMess
 pub async fn receive(
     vault: &Vault,
     dogma: &Dogma,
-    pilot: PilotId,
+    person: PersonId,
     nickname: &str,
     stream: &mut quinn::RecvStream,
 ) -> Result<Outcome> {
@@ -173,11 +173,11 @@ pub async fn receive(
     let allowed = {
         let guard = dogma.persistence.lock().await;
         Permissions::new(&guard)
-            .may(pilot, Permission::AttachFile)
+            .may(person, Permission::AttachFile)
             .unwrap_or(false)
     };
     if !allowed {
-        tracing::info!(%pilot, "transfer refused: no AttachFile");
+        tracing::info!(%person, "transfer refused: no AttachFile");
         return refuse(AttachmentRefusal::NotAllowed);
     }
 
@@ -190,15 +190,15 @@ pub async fn receive(
         .throughput
         .lock()
         .await
-        .permitir(pilot, header.declared_len, now)
+        .permitir(person, header.declared_len, now)
     {
-        tracing::info!(%pilot, bytes = header.declared_len, "transfer refused: rate limited");
+        tracing::info!(%person, bytes = header.declared_len, "transfer refused: rate limited");
         return refuse(AttachmentRefusal::RateLimited);
     }
 
     let scratch_name = format!(
         "{}-{}-{}",
-        pilot.get(),
+        person.get(),
         key.get(),
         vault.scratches.fetch_add(1, Ordering::Relaxed)
     );
@@ -220,13 +220,13 @@ pub async fn receive(
                     Refusal::TooLarge { limit, .. } => AttachmentRefusal::TooLarge { limit },
                     Refusal::NoRoom { .. } => AttachmentRefusal::NoRoom,
                 };
-                tracing::info!(%pilot, ?refusal, "transfer refused by the ceiling");
+                tracing::info!(%person, ?refusal, "transfer refused by the ceiling");
                 drop(ledger);
                 vault
                     .throughput
                     .lock()
                     .await
-                    .devolver(pilot, header.declared_len, now);
+                    .devolver(person, header.declared_len, now);
                 return refuse(reason);
             }
         }
@@ -239,7 +239,7 @@ pub async fn receive(
     let digest = match landed {
         Ok(digest) => digest,
         Err(error) => {
-            tracing::info!(%pilot, %error, "transfer fell before the last byte");
+            tracing::info!(%person, %error, "transfer fell before the last byte");
             let mut ledger = vault.ledger.lock().await;
             vault.store.abandon(&mut ledger, reservation);
             return refuse(AttachmentRefusal::SizeMismatch);
@@ -250,7 +250,7 @@ pub async fn receive(
     // trade ADR 0027 takes: the ceiling is enforced against the declaration, and
     // the declaration is enforced against the bytes.
     if digest != header.content_hash {
-        tracing::info!(%pilot, "transfer refused: the hash did not close");
+        tracing::info!(%person, "transfer refused: the hash did not close");
         let mut ledger = vault.ledger.lock().await;
         vault.store.abandon(&mut ledger, reservation);
         return refuse(AttachmentRefusal::HashDidNotMatch);
@@ -259,7 +259,7 @@ pub async fn receive(
     let content_hash = seele_proto::attachment::hex(&digest);
     let pending = PendingMessage {
         line: header.line,
-        author: pilot,
+        author: person,
         author_nickname: nickname.to_owned(),
         body: header.body.clone(),
         replies_to: header.replies_to,
@@ -290,7 +290,7 @@ pub async fn receive(
         // "I already have that", which is the oracle the design refuses.
         let existing = attachments::Attachments::new(&guard).of_message(stored.id)?;
         if let Some(existing) = existing {
-            tracing::info!(%pilot, message = %stored.id, "transfer was a retry of one already stored");
+            tracing::info!(%person, message = %stored.id, "transfer was a retry of one already stored");
             stored.attachment = Some(existing.info());
             vault.store.abandon(&mut ledger, reservation);
             stored
@@ -307,7 +307,7 @@ pub async fn receive(
                 },
             )?;
             tracing::info!(
-                %pilot,
+                %person,
                 attachment = %attachment.id,
                 bytes = attachment.byte_size,
                 guardado = ledger.stored(),

@@ -371,7 +371,7 @@ const FRASES = {
     HandshakeTimeout: "TEMPO ESGOTADO NA SINCRONIZAÇÃO INICIAL",
     IdentityUnavailable: "NÃO CONSEGUI LER OU GRAVAR A IDENTIDADE EM DISCO",
     NoAudioDevice: "SEM DISPOSITIVO DE ÁUDIO",
-    UnknownPilot: "NÃO CONHEÇO ESSA PESSOA",
+    UnknownPerson: "NÃO CONHEÇO ESSA PESSOA",
     UnknownChannel: "NÃO CONHEÇO ESSE CANAL",
     LinkLost: "ENLACE PERDIDO",
 

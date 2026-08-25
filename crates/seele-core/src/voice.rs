@@ -89,7 +89,7 @@ impl VoiceMode {
     }
 }
 
-/// What the pilot has set, read by the audio thread every frame.
+/// What the person has set, read by the audio thread every frame.
 ///
 /// Atomics rather than a lock: this is read from the thread that must not
 /// block, and every field is one machine word.
@@ -761,7 +761,7 @@ impl Voice {
         self.controls.anel_cheio.load(Ordering::Relaxed)
     }
 
-    /// Whether this pilot is transmitting right now.
+    /// Whether this person is transmitting right now.
     #[must_use]
     pub fn speaking(&self) -> bool {
         self.controls.speaking.load(Ordering::Relaxed)
@@ -1016,7 +1016,7 @@ async fn pipeline(
         if vencidos > 0 {
             // Isolamento total silences the mix rather than stopping the
             // pipeline: the jitter buffers keep draining, so unmuting lands the
-            // pilot in the present instead of replaying the last ten seconds.
+            // person in the present instead of replaying the last ten seconds.
             mixer.set_master(if controls.total_isolation.load(Ordering::Relaxed) {
                 0.0
             } else {

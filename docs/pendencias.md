@@ -30,10 +30,10 @@ bloqueada ninguém tira evento do barramento**. O barramento é um `broadcast` d
 anel fixo: passado o anel, o mais antigo é descartado e a leitura seguinte
 devolve `Lagged(n)`. Um `let Ok(event) = event else { continue }` transformava
 isso em nada — a sessão seguia, calada, com um buraco permanente no que aquele
-piloto vê, e sem um número em lugar nenhum.
+pessoa vê, e sem um número em lugar nenhum.
 
 Medido em `crates/seele-server/tests/par_lento.rs`, que **reprovava antes do
-conserto**: 969 de 1160 mensagens chegam, 191 somem, o piloto segue conectado e
+conserto**: 969 de 1160 mensagens chegam, 191 somem, o pessoa segue conectado e
 nenhum dos dois lados fica sabendo. As 1160 estão gravadas em PERSISTENCE — o que se
 perde é a entrega, não a mensagem.
 
@@ -330,14 +330,14 @@ própria pessoa — até o movimento de alguém redesenhar a lista.
 
 **O que se sabe.** É uma corrida entre a sessão que morre e a que nasce, e as
 duas mexem na lotação pela mesma chave. `Occupancy::seat` começa apagando o
-piloto de toda parte antes de sentá-lo (`dogma.rs:171-174`), e o desmonte da
-sessão antiga chama `occupancy.vacate(cage, pilot)` (`session.rs:845`). Como
-`vacate` filtra só por `PilotId` (`dogma.rs:177-181`), ele não distingue a
+pessoa de toda parte antes de sentá-lo (`dogma.rs:171-174`), e o desmonte da
+sessão antiga chama `occupancy.vacate(cage, person)` (`session.rs:845`). Como
+`vacate` filtra só por `PersonId` (`dogma.rs:177-181`), ele não distingue a
 cadeira da sessão velha da cadeira da sessão nova: se o desmonte da primeira
 chegar **depois** do `seat` da segunda, apaga a segunda. A ordem depende de
 quando a conexão QUIC antiga é dada por morta, o que ninguém controla.
 
-Só atinge a mesma identidade voltando — dois pilotos diferentes não colidem,
+Só atinge a mesma identidade voltando — dois pessoas diferentes não colidem,
 porque as chaves diferem. E o cliente não tem como serializar isso do lado dele:
 `Drop for Enlace` é um `abort()`, que é assíncrono.
 
@@ -654,7 +654,7 @@ enumerada, e são dez.
 
 **A permissão é nova.** `Permission::AttachFile`, no fim da enumeração, com
 migração 3 trazendo os papéis semeados para a frente — Comandante, Operador e
-Piloto ganham, o Observador é **negado explicitamente**.
+Pessoa ganham, o Observador é **negado explicitamente**.
 
 **O texto sobrevive ao arquivo.** Expirar apaga os bytes e mantém a linha, e a
 página de histórico carrega o nome, o tamanho e um estado enumerado. É por isso
@@ -759,7 +759,7 @@ pessoa nota sem ninguém apontar.
 
 ## 19 · Fechada em 2026-08-17 · A chave de idempotência reinicia, e a identidade não
 
-**Sintoma.** Depois de reconectar, as mensagens de um piloto **não são
+**Sintoma.** Depois de reconectar, as mensagens de um pessoa **não são
 gravadas**. A primeira mensagem da sessão nova é tratada como reenvio da
 primeira mensagem da sessão anterior, a segunda como reenvio da segunda, e assim
 por diante. Ninguém é avisado dos dois lados.
@@ -817,7 +817,7 @@ ejetar.rs::a_mesma_pessoa_volta_pela_tela_de_selecao` conecta a mesma identidade
 duas vezes e fixava `ClientMessageId(1)` nas duas — e **passava por causa do
 defeito**: o servidor devolvia o corpo que chegou vestindo o id da linha antiga,
 então o eco batia e ninguém via que nada tinha sido escrito. Consertado o eco, o
-teste caiu, e o que ele caiu provando é que **um piloto que reconecta não
+teste caiu, e o que ele caiu provando é que **um pessoa que reconecta não
 conseguia falar**. O teste agora usa chave que não se repete, que é o que um
 cliente correto faz. Ele também passou a rodar em 0,8 s em vez de 15: antes
 esperava o prazo inteiro por um eco que nunca vinha.
@@ -1160,8 +1160,8 @@ sendo cobrada como moldura; quando o `+` funcionar, ele vira o teste do
 contrário.
 
 **Um operador de outro Dogma pode inserir o seu plug.**
-`crates/seele-server/src/session.rs:1220-1230`: `MovePilot` transmite
-`PilotMoved` sem exigir que o piloto já esteja num Cage. A regra do ADR 0031 é
+`crates/seele-server/src/session.rs:1220-1230`: `MovePerson` transmite
+`PersonMoved` sem exigir que o pessoa já esteja num Cage. A regra do ADR 0031 é
 que o servidor decide quem está na sala e **esta máquina decide para onde o
 microfone dela vai**: um plug inserido por outra pessoa entra no roster e não
 reivindica o caminho de voz.

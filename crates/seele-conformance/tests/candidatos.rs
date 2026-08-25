@@ -111,7 +111,7 @@ async fn a_conexao_cai_para_o_proximo_endereco_do_convite() -> Result<()> {
 
     let comeco = Instant::now();
     let mut enlace = Enlace::conectar_entre(
-        vec![destino(endereco_morto(), "piloto"), destino(vivo, "piloto")],
+        vec![destino(endereco_morto(), "pessoa"), destino(vivo, "pessoa")],
         ed25519_dalek::SigningKey::from_bytes(&[7; 32]),
         Arc::clone(&pins) as Arc<dyn PinStore>,
     )
@@ -152,7 +152,7 @@ async fn um_convite_de_um_endereco_so_continua_conectando_como_antes() -> Result
     let pins = Arc::new(MemoryPinStore::default());
 
     let mut enlace = Enlace::conectar_entre(
-        vec![destino(vivo, "piloto")],
+        vec![destino(vivo, "pessoa")],
         ed25519_dalek::SigningKey::from_bytes(&[9; 32]),
         Arc::clone(&pins) as Arc<dyn PinStore>,
     )
@@ -172,9 +172,9 @@ async fn nenhum_endereco_atendendo_falha_e_nao_trava() -> Result<()> {
     let comeco = Instant::now();
     let erro = Enlace::conectar_entre(
         vec![
-            destino(endereco_morto(), "piloto"),
-            destino(endereco_morto(), "piloto"),
-            destino(endereco_morto(), "piloto"),
+            destino(endereco_morto(), "pessoa"),
+            destino(endereco_morto(), "pessoa"),
+            destino(endereco_morto(), "pessoa"),
         ],
         ed25519_dalek::SigningKey::from_bytes(&[11; 32]),
         Arc::new(MemoryPinStore::default()) as Arc<dyn PinStore>,

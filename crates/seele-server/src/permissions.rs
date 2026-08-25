@@ -5,7 +5,7 @@
 //! > Modelo simples e enumerado, sem sistema de expressão. Cada Papel carrega um
 //! > conjunto: `ver_cage`, `inserir_plug`, `falar`, …
 //! >
-//! > Papéis padrão: **Comandante** (tudo), **Operador** (moderação), **Piloto**
+//! > Papéis padrão: **Comandante** (tudo), **Operador** (moderação), **Pessoa**
 //! > (uso normal), **Observador** (só ouvir e ler).
 //! >
 //! > Regra: permissões negadas vencem concedidas. Sem herança em árvore — a
@@ -15,11 +15,11 @@
 //!
 //! A model of grants alone makes that sentence vacuous: absence is already
 //! denial, so there is nothing for a denial to win against. A role here can
-//! therefore both **grant** and **deny**, and a denial in any role the pilot
+//! therefore both **grant** and **deny**, and a denial in any role the person
 //! holds beats a grant in any other.
 //!
 //! It matters in exactly the case the spec's four defaults suggest: giving
-//! somebody Observer alongside Pilot should silence them, and with grants alone
+//! somebody Observer alongside Person should silence them, and with grants alone
 //! it would do nothing at all.
 //!
 //! # Every check happens here
@@ -31,7 +31,7 @@
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use seele_proto::control::Permission;
-use seele_proto::ids::{PilotId, RoleId};
+use seele_proto::ids::{PersonId, RoleId};
 
 use crate::persistence::{now_seconds, Persistence};
 
@@ -39,16 +39,16 @@ use crate::persistence::{now_seconds, Persistence};
 pub const COMMANDER_ROLE: RoleId = RoleId(1);
 /// The Operador role.
 pub const OPERATOR_ROLE: RoleId = RoleId(2);
-/// The Piloto role, which every account after the first arrives with.
-pub const PILOT_ROLE: RoleId = RoleId(3);
+/// The Pessoa role, which every account after the first arrives with.
+pub const PERSON_ROLE: RoleId = RoleId(3);
 /// The Observador role: may listen and read, and nothing else.
 pub const OBSERVER_ROLE: RoleId = RoleId(4);
 
-/// A pilot as PERMISSIONS knows them.
+/// A person as PERMISSIONS knows them.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Pilot {
+pub struct Person {
     /// Account identifier.
-    pub id: PilotId,
+    pub id: PersonId,
     /// Display name.
     pub nickname: String,
     /// Roles held.
@@ -60,15 +60,15 @@ pub struct Pilot {
 /// Enumerated, per `specs/02-protocolo.md`. A shell matches on the variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum Refusal {
-    /// The pilot holds no role granting it, or a role denying it.
+    /// The person holds no role granting it, or a role denying it.
     #[error("permission denied")]
     PermissionDenied,
-    /// The pilot is barred from the Dogma.
+    /// The person is barred from the Dogma.
     #[error("banned")]
     Banned,
     /// No such account.
-    #[error("no such pilot")]
-    UnknownPilot,
+    #[error("no such person")]
+    UnknownPerson,
     /// The nickname is taken by a different key.
     ///
     /// `specs/08-seguranca.md` wants uniform login failures, so this is only
@@ -107,7 +107,7 @@ fn name_to_permission(name: &str) -> Option<Permission> {
         "ReadLine" => Permission::ReadLine,
         "WriteLine" => Permission::WriteLine,
         "RemoveMessage" => Permission::RemoveMessage,
-        "MovePilot" => Permission::MovePilot,
+        "MovePerson" => Permission::MovePerson,
         "Kick" => Permission::Kick,
         "Ban" => Permission::Ban,
         "ManageCages" => Permission::ManageCages,
@@ -135,7 +135,7 @@ impl<'a> Permissions<'a> {
     /// Finds the account for a public key, creating it on first sight.
     ///
     /// ADR 0004 makes the key the identity, and the nickname a label attached to
-    /// it. A returning pilot therefore keeps their **account** whatever name
+    /// it. A returning person therefore keeps their **account** whatever name
     /// they ask for, and the name they ask for becomes the label — the account
     /// survives a rename, which is the opposite of the name owning the account.
     ///
@@ -147,30 +147,30 @@ impl<'a> Permissions<'a> {
     ///
     /// Returns [`Refusal::NicknameTaken`] if the name belongs to another key, or
     /// a database error.
-    pub fn register_or_find(&self, public_key: &[u8], nickname: &str) -> Result<Pilot> {
+    pub fn register_or_find(&self, public_key: &[u8], nickname: &str) -> Result<Person> {
         if let Some(id) = self
             .connection
             .query_row(
-                "SELECT id FROM pilots WHERE public_key = ?1",
+                "SELECT id FROM people WHERE public_key = ?1",
                 [public_key],
                 |row| row.get::<_, i64>(0),
             )
             .optional()?
         {
             self.connection.execute(
-                "UPDATE pilots SET last_seen_at = ?1 WHERE id = ?2",
+                "UPDATE people SET last_seen_at = ?1 WHERE id = ?2",
                 params![now_seconds(), id],
             )?;
             // O apelido pedido passa a valer, e isto é conserto e não recurso.
             //
             // Antes, uma conta que voltava mantinha o nome com que foi criada e
             // o pedido era descartado em silêncio: quem entrou uma vez como
-            // `piloto` era `piloto` para sempre, para todo mundo, sem nada na
+            // `pessoa` era `pessoa` para sempre, para todo mundo, sem nada na
             // tela dizendo por quê. Encontrado num teste entre duas máquinas —
             // a pessoa trocou de nome e a outra continuou vendo o antigo.
             //
             // O histórico acompanha sozinho: `persistence::messages` resolve o autor
-            // por `JOIN pilots` e lê o nome de agora, em vez de guardar uma
+            // por `JOIN people` e lê o nome de agora, em vez de guardar uma
             // cópia por mensagem. Uma mensagem antiga passa a ser exibida com o
             // nome novo, que é o que uma pessoa espera de «mudei meu nome».
             //
@@ -178,7 +178,7 @@ impl<'a> Permissions<'a> {
             // pertencendo a uma chave. Pedir um nome que é de outra pessoa é a
             // mesma recusa de sempre — a de baixo —, e não passa a ser
             // permitida por a conta já existir.
-            self.rename(PilotId(id as u64), nickname)?;
+            self.rename(PersonId(id as u64), nickname)?;
             // Uma conta que já existe assume o comando **se ele nunca foi de
             // ninguém** — e essa condição não é a mesma que «está vago agora».
             //
@@ -198,13 +198,13 @@ impl<'a> Permissions<'a> {
             // Dogma nunca teve Comandante; com marca, quem não tem o papel não
             // o tem por decisão de alguém.
             self.claim_never_held_commandership(id)?;
-            return self.pilot(PilotId(id as u64));
+            return self.person(PersonId(id as u64));
         }
 
         let taken: Option<i64> = self
             .connection
             .query_row(
-                "SELECT id FROM pilots WHERE nickname = ?1",
+                "SELECT id FROM people WHERE nickname = ?1",
                 [nickname],
                 |row| row.get(0),
             )
@@ -214,21 +214,21 @@ impl<'a> Permissions<'a> {
         }
 
         self.connection.execute(
-            "INSERT INTO pilots (nickname, public_key, created_at, last_seen_at)
+            "INSERT INTO people (nickname, public_key, created_at, last_seen_at)
              VALUES (?1, ?2, ?3, ?3)",
             params![nickname, public_key, now_seconds()],
         )?;
         let id = self.connection.last_insert_rowid();
         self.seat_the_arrival(id)?;
 
-        self.pilot(PilotId(id as u64))
+        self.person(PersonId(id as u64))
     }
 
     /// Gives a freshly created account its opening role.
     ///
     /// # The first account created on a Dogma becomes the Comandante
     ///
-    /// Every account used to arrive as a Piloto, which meant **nobody ever
+    /// Every account used to arrive as a Pessoa, which meant **nobody ever
     /// became a Comandante**. Migration 1 seeds the role with `ManageCages`,
     /// `ManageRoles` and `AdministerDogma`, and nothing granted it: a Dogma
     /// shipped with three permissions no account in it could ever hold, so
@@ -249,11 +249,11 @@ impl<'a> Permissions<'a> {
     /// `crate::admissao` uses to spend an invite exactly once with
     /// `UPDATE … WHERE usado_em IS NULL`. SQLite serialises writers, so the
     /// second claim to run sees the first one's row, inserts nothing, and
-    /// reports zero rows changed; that account then takes the Piloto role like
+    /// reports zero rows changed; that account then takes the Pessoa role like
     /// anybody else.
     ///
     /// Deliberately keyed on *the role being unheld*, not on "is this the first
-    /// pilot row". A Dogma whose Comandante account was deleted has no
+    /// person row". A Dogma whose Comandante account was deleted has no
     /// Comandante again, and the next arrival should be able to take the seat
     /// rather than leave the Dogma permanently unadministrable.
     /// Points an account at a different display name.
@@ -267,10 +267,10 @@ impl<'a> Permissions<'a> {
     /// ADR 0017 makes the name property of the key that claimed it, and that is
     /// the whole protection: without this check, renaming would be the way to
     /// take somebody else's name and inherit how they are addressed.
-    fn rename(&self, pilot: PilotId, nickname: &str) -> Result<()> {
+    fn rename(&self, person: PersonId, nickname: &str) -> Result<()> {
         let atual: String = self.connection.query_row(
-            "SELECT nickname FROM pilots WHERE id = ?1",
-            [pilot.get() as i64],
+            "SELECT nickname FROM people WHERE id = ?1",
+            [person.get() as i64],
             |row| row.get(0),
         )?;
         if atual == nickname {
@@ -280,20 +280,20 @@ impl<'a> Permissions<'a> {
         let dono: Option<i64> = self
             .connection
             .query_row(
-                "SELECT id FROM pilots WHERE nickname = ?1",
+                "SELECT id FROM people WHERE nickname = ?1",
                 [nickname],
                 |row| row.get(0),
             )
             .optional()?;
-        if dono.is_some_and(|dono| dono != pilot.get() as i64) {
+        if dono.is_some_and(|dono| dono != person.get() as i64) {
             return Err(Refusal::NicknameTaken.into());
         }
 
         self.connection.execute(
-            "UPDATE pilots SET nickname = ?1 WHERE id = ?2",
-            params![nickname, pilot.get() as i64],
+            "UPDATE people SET nickname = ?1 WHERE id = ?2",
+            params![nickname, person.get() as i64],
         )?;
-        tracing::info!(pilot = pilot.get(), "this account changed its name");
+        tracing::info!(person = person.get(), "this account changed its name");
         Ok(())
     }
 
@@ -315,7 +315,7 @@ impl<'a> Permissions<'a> {
     /// The mark is written inside the same transaction as the claim: a claim
     /// that succeeded without leaving the mark would let the next reconnect
     /// claim again.
-    fn claim_never_held_commandership(&self, pilot_row: i64) -> Result<bool> {
+    fn claim_never_held_commandership(&self, person_row: i64) -> Result<bool> {
         let ja: Option<String> = self
             .connection
             .query_row(
@@ -327,7 +327,7 @@ impl<'a> Permissions<'a> {
         if ja.is_some() {
             return Ok(false);
         }
-        self.claim_vacant_commandership(pilot_row)
+        self.claim_vacant_commandership(person_row)
     }
 
     /// Takes the Comandante seat if nobody holds it. Says whether it did.
@@ -337,12 +337,12 @@ impl<'a> Permissions<'a> {
     /// writers, so of two clients racing for a virgin Dogma the second sees the
     /// first's row, inserts nothing, and reports zero rows changed. Neither a
     /// check-then-insert in Rust nor two statements would survive that.
-    fn claim_vacant_commandership(&self, pilot_row: i64) -> Result<bool> {
+    fn claim_vacant_commandership(&self, person_row: i64) -> Result<bool> {
         let claimed = self.connection.execute(
-            "INSERT INTO pilot_roles (pilot_id, role_id)
+            "INSERT INTO person_roles (person_id, role_id)
              SELECT ?1, ?2
-             WHERE NOT EXISTS (SELECT 1 FROM pilot_roles WHERE role_id = ?2)",
-            params![pilot_row, i64::from(COMMANDER_ROLE.get())],
+             WHERE NOT EXISTS (SELECT 1 FROM person_roles WHERE role_id = ?2)",
+            params![person_row, i64::from(COMMANDER_ROLE.get())],
         )?;
         if claimed > 0 {
             // A marca, e não só o papel: ela é o que distingue «nunca teve
@@ -352,21 +352,21 @@ impl<'a> Permissions<'a> {
                 "INSERT OR IGNORE INTO config (key, value) VALUES (?1, '1')",
                 [Self::SEAT_TAKEN],
             )?;
-            tracing::info!(pilot = pilot_row, "this account took the commandership");
+            tracing::info!(person = person_row, "this account took the commandership");
         }
         Ok(claimed > 0)
     }
 
-    fn seat_the_arrival(&self, pilot_row: i64) -> Result<()> {
-        if self.claim_vacant_commandership(pilot_row)? {
+    fn seat_the_arrival(&self, person_row: i64) -> Result<()> {
+        if self.claim_vacant_commandership(person_row)? {
             return Ok(());
         }
 
-        // Everybody after the first arrives as a Pilot. specs/04 makes that the
+        // Everybody after the first arrives as a Person. specs/04 makes that the
         // normal-use role; a Comandante promotes from there.
         self.connection.execute(
-            "INSERT INTO pilot_roles (pilot_id, role_id) VALUES (?1, ?2)",
-            params![pilot_row, i64::from(PILOT_ROLE.get())],
+            "INSERT INTO person_roles (person_id, role_id) VALUES (?1, ?2)",
+            params![person_row, i64::from(PERSON_ROLE.get())],
         )?;
         Ok(())
     }
@@ -375,28 +375,28 @@ impl<'a> Permissions<'a> {
     ///
     /// # Errors
     ///
-    /// Returns [`Refusal::UnknownPilot`] if there is no such account.
-    pub fn pilot(&self, id: PilotId) -> Result<Pilot> {
+    /// Returns [`Refusal::UnknownPerson`] if there is no such account.
+    pub fn person(&self, id: PersonId) -> Result<Person> {
         let nickname: String = self
             .connection
             .query_row(
-                "SELECT nickname FROM pilots WHERE id = ?1",
+                "SELECT nickname FROM people WHERE id = ?1",
                 [id.get() as i64],
                 |row| row.get(0),
             )
             .optional()?
-            .ok_or(Refusal::UnknownPilot)?;
+            .ok_or(Refusal::UnknownPerson)?;
 
         let mut statement = self
             .connection
-            .prepare("SELECT role_id FROM pilot_roles WHERE pilot_id = ?1 ORDER BY role_id")?;
+            .prepare("SELECT role_id FROM person_roles WHERE person_id = ?1 ORDER BY role_id")?;
         let roles = statement
             .query_map([id.get() as i64], |row| row.get::<_, i64>(0))?
             .filter_map(Result::ok)
             .map(|role| RoleId(role as u32))
             .collect();
 
-        Ok(Pilot {
+        Ok(Person {
             id,
             nickname,
             roles,
@@ -408,10 +408,10 @@ impl<'a> Permissions<'a> {
     /// # Errors
     ///
     /// Fails on a database error.
-    pub fn grant_role(&self, pilot: PilotId, role: RoleId) -> Result<()> {
+    pub fn grant_role(&self, person: PersonId, role: RoleId) -> Result<()> {
         self.connection.execute(
-            "INSERT OR IGNORE INTO pilot_roles (pilot_id, role_id) VALUES (?1, ?2)",
-            params![pilot.get() as i64, i64::from(role.get())],
+            "INSERT OR IGNORE INTO person_roles (person_id, role_id) VALUES (?1, ?2)",
+            params![person.get() as i64, i64::from(role.get())],
         )?;
         Ok(())
     }
@@ -421,15 +421,15 @@ impl<'a> Permissions<'a> {
     /// # Errors
     ///
     /// Fails on a database error.
-    pub fn revoke_role(&self, pilot: PilotId, role: RoleId) -> Result<()> {
+    pub fn revoke_role(&self, person: PersonId, role: RoleId) -> Result<()> {
         self.connection.execute(
-            "DELETE FROM pilot_roles WHERE pilot_id = ?1 AND role_id = ?2",
-            params![pilot.get() as i64, i64::from(role.get())],
+            "DELETE FROM person_roles WHERE person_id = ?1 AND role_id = ?2",
+            params![person.get() as i64, i64::from(role.get())],
         )?;
         Ok(())
     }
 
-    /// Whether a pilot may do something.
+    /// Whether a person may do something.
     ///
     /// Denial in any role beats a grant in any other, and a ban beats
     /// everything. `specs/08-seguranca.md` requires this to be consulted for
@@ -438,19 +438,19 @@ impl<'a> Permissions<'a> {
     /// # Errors
     ///
     /// Fails on a database error.
-    pub fn may(&self, pilot: PilotId, permission: Permission) -> Result<bool> {
-        if self.is_banned(pilot)? {
+    pub fn may(&self, person: PersonId, permission: Permission) -> Result<bool> {
+        if self.is_banned(person)? {
             return Ok(false);
         }
 
         let mut statement = self.connection.prepare(
             "SELECT r.permissions, r.denials
              FROM roles r
-             JOIN pilot_roles pr ON pr.role_id = r.id
-             WHERE pr.pilot_id = ?1",
+             JOIN person_roles pr ON pr.role_id = r.id
+             WHERE pr.person_id = ?1",
         )?;
         let rows: Vec<(String, String)> = statement
-            .query_map([pilot.get() as i64], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .query_map([person.get() as i64], |row| Ok((row.get(0)?, row.get(1)?)))?
             .filter_map(Result::ok)
             .collect();
 
@@ -467,12 +467,12 @@ impl<'a> Permissions<'a> {
         Ok(granted)
     }
 
-    /// Every permission a pilot currently holds.
+    /// Every permission a person currently holds.
     ///
     /// # Errors
     ///
     /// Fails on a database error.
-    pub fn permissions(&self, pilot: PilotId) -> Result<Vec<Permission>> {
+    pub fn permissions(&self, person: PersonId) -> Result<Vec<Permission>> {
         let all = [
             Permission::ViewCage,
             Permission::InsertPlug,
@@ -480,7 +480,7 @@ impl<'a> Permissions<'a> {
             Permission::ReadLine,
             Permission::WriteLine,
             Permission::RemoveMessage,
-            Permission::MovePilot,
+            Permission::MovePerson,
             Permission::Kick,
             Permission::Ban,
             Permission::ManageCages,
@@ -490,14 +490,14 @@ impl<'a> Permissions<'a> {
         ];
         let mut held = Vec::new();
         for permission in all {
-            if self.may(pilot, permission)? {
+            if self.may(person, permission)? {
                 held.push(permission);
             }
         }
         Ok(held)
     }
 
-    /// Bars a pilot. `expires_at` of `None` is permanent.
+    /// Bars a person. `expires_at` of `None` is permanent.
     ///
     /// # Errors
     ///
@@ -505,8 +505,8 @@ impl<'a> Permissions<'a> {
     /// [`Permission::Ban`].
     pub fn ban(
         &self,
-        pilot: PilotId,
-        issued_by: PilotId,
+        person: PersonId,
+        issued_by: PersonId,
         reason: Option<&str>,
         expires_at: Option<i64>,
     ) -> Result<()> {
@@ -518,10 +518,10 @@ impl<'a> Permissions<'a> {
         }
         self.connection
             .execute(
-                "INSERT INTO bans (pilot_id, issued_by, reason, created_at, expires_at)
+                "INSERT INTO bans (person_id, issued_by, reason, created_at, expires_at)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
-                    pilot.get() as i64,
+                    person.get() as i64,
                     issued_by.get() as i64,
                     reason,
                     now_seconds(),
@@ -532,31 +532,31 @@ impl<'a> Permissions<'a> {
         Ok(())
     }
 
-    /// Lifts every ban on a pilot.
+    /// Lifts every ban on a person.
     ///
     /// # Errors
     ///
     /// Returns [`Refusal::PermissionDenied`] if the issuer lacks
     /// [`Permission::Ban`].
-    pub fn unban(&self, pilot: PilotId, issued_by: PilotId) -> Result<()> {
+    pub fn unban(&self, person: PersonId, issued_by: PersonId) -> Result<()> {
         if !self.may(issued_by, Permission::Ban)? {
             return Err(Refusal::PermissionDenied.into());
         }
         self.connection
-            .execute("DELETE FROM bans WHERE pilot_id = ?1", [pilot.get() as i64])?;
+            .execute("DELETE FROM bans WHERE person_id = ?1", [person.get() as i64])?;
         Ok(())
     }
 
-    /// Whether a pilot is currently barred.
+    /// Whether a person is currently barred.
     ///
     /// # Errors
     ///
     /// Fails on a database error.
-    pub fn is_banned(&self, pilot: PilotId) -> Result<bool> {
+    pub fn is_banned(&self, person: PersonId) -> Result<bool> {
         let count: i64 = self.connection.query_row(
             "SELECT COUNT(*) FROM bans
-             WHERE pilot_id = ?1 AND (expires_at IS NULL OR expires_at > ?2)",
-            params![pilot.get() as i64, now_seconds()],
+             WHERE person_id = ?1 AND (expires_at IS NULL OR expires_at > ?2)",
+            params![person.get() as i64, now_seconds()],
             |row| row.get(0),
         )?;
         Ok(count > 0)
@@ -570,7 +570,7 @@ mod tests {
 
     const COMMANDER: RoleId = COMMANDER_ROLE;
     const OPERATOR: RoleId = OPERATOR_ROLE;
-    const PILOT: RoleId = PILOT_ROLE;
+    const PERSON: RoleId = PERSON_ROLE;
     const OBSERVER: RoleId = OBSERVER_ROLE;
 
     /// Every permission `specs/04-servidor-seele.md` enumerates.
@@ -581,7 +581,7 @@ mod tests {
         Permission::ReadLine,
         Permission::WriteLine,
         Permission::RemoveMessage,
-        Permission::MovePilot,
+        Permission::MovePerson,
         Permission::Kick,
         Permission::Ban,
         Permission::ManageCages,
@@ -597,25 +597,25 @@ mod tests {
     /// An account holding exactly one named role, whatever it arrived with.
     ///
     /// Normalising rather than assuming: the first account on a Dogma arrives as
-    /// a Comandante and every one after it as a Piloto, so a fixture that only
+    /// a Comandante and every one after it as a Pessoa, so a fixture that only
     /// added a role would hand back a Comandante whenever it happened to be
     /// called first — and the permission matrix below would pass for the wrong
     /// reason, which is the worst way for it to pass.
-    fn pilot_with(persistence: &Persistence, nickname: &str, key: u8, role: RoleId) -> PilotId {
+    fn person_with(persistence: &Persistence, nickname: &str, key: u8, role: RoleId) -> PersonId {
         let permissions = Permissions::new(persistence);
-        let pilot = permissions.register_or_find(&[key; 32], nickname).unwrap();
-        for held in [COMMANDER, OPERATOR, PILOT, OBSERVER] {
+        let person = permissions.register_or_find(&[key; 32], nickname).unwrap();
+        for held in [COMMANDER, OPERATOR, PERSON, OBSERVER] {
             if held != role {
-                permissions.revoke_role(pilot.id, held).unwrap();
+                permissions.revoke_role(person.id, held).unwrap();
             }
         }
-        permissions.grant_role(pilot.id, role).unwrap();
-        pilot.id
+        permissions.grant_role(person.id, role).unwrap();
+        person.id
     }
 
     #[test]
     fn a_key_gets_the_same_account_every_time() {
-        // ADR 0004 makes the key the identity, so a returning pilot must find
+        // ADR 0004 makes the key the identity, so a returning person must find
         // their own history rather than a new empty account.
         let persistence = store();
         let permissions = Permissions::new(&persistence);
@@ -650,17 +650,17 @@ mod tests {
     #[test]
     fn a_returning_key_takes_the_name_it_asks_for() {
         // Encontrado num teste entre duas máquinas: a pessoa entrou como
-        // `piloto`, trocou o nome, e a outra continuou vendo `piloto` — nas
+        // `pessoa`, trocou o nome, e a outra continuou vendo `pessoa` — nas
         // mensagens e no roster. O pedido era descartado em silêncio, e não
         // havia nada na tela dizendo por quê.
         //
         // O histórico acompanha sem trabalho nenhum: `persistence::messages` resolve
-        // o autor por `JOIN pilots`, então o nome exibido é o de agora e não uma
+        // o autor por `JOIN people`, então o nome exibido é o de agora e não uma
         // cópia congelada por mensagem.
         let persistence = store();
         let permissions = Permissions::new(&persistence);
 
-        let antes = permissions.register_or_find(&[1; 32], "piloto").unwrap();
+        let antes = permissions.register_or_find(&[1; 32], "pessoa").unwrap();
         let depois = permissions.register_or_find(&[1; 32], "ikari").unwrap();
 
         assert_eq!(depois.id, antes.id, "trocar de nome criou uma conta nova");
@@ -705,7 +705,7 @@ mod tests {
         // próprio Dogma».
         //
         // O cenário é encenado como o banco antigo de verdade era: a linha do
-        // piloto escrita à mão, com o papel de Piloto e nada mais. Encená-lo
+        // pessoa escrita à mão, com o papel de Pessoa e nada mais. Encená-lo
         // revogando o comando de uma conta nova seria outro caso — aquele deixa
         // a marca, e a marca é justamente o que impede a revogação de ser
         // desfeita.
@@ -714,7 +714,7 @@ mod tests {
         persistence
             .connection()
             .execute(
-                "INSERT INTO pilots (nickname, public_key, created_at, last_seen_at)
+                "INSERT INTO people (nickname, public_key, created_at, last_seen_at)
                  VALUES ('anfitriao', ?1, 0, 0)",
                 [&[1u8; 32][..]],
             )
@@ -723,8 +723,8 @@ mod tests {
         persistence
             .connection()
             .execute(
-                "INSERT INTO pilot_roles (pilot_id, role_id) VALUES (?1, ?2)",
-                params![antigo, i64::from(PILOT.get())],
+                "INSERT INTO person_roles (person_id, role_id) VALUES (?1, ?2)",
+                params![antigo, i64::from(PERSON.get())],
             )
             .unwrap();
 
@@ -757,7 +757,7 @@ mod tests {
     }
 
     #[test]
-    fn the_second_account_is_only_a_pilot() {
+    fn the_second_account_is_only_a_person() {
         // The half that makes the rule a rule. "First account is Comandante"
         // implemented as "every account is Comandante" passes the test above and
         // hands the Dogma to whoever walks in.
@@ -766,7 +766,7 @@ mod tests {
         permissions.register_or_find(&[1; 32], "anfitriao").unwrap();
 
         let convidado = permissions.register_or_find(&[2; 32], "shinji").unwrap();
-        assert_eq!(convidado.roles, vec![PILOT]);
+        assert_eq!(convidado.roles, vec![PERSON]);
         for permission in [
             Permission::ManageCages,
             Permission::ManageRoles,
@@ -819,7 +819,7 @@ mod tests {
             .count();
         assert_eq!(comandantes, 1, "roles handed out: {papeis:?}");
         assert_eq!(
-            papeis.iter().filter(|roles| roles.contains(&PILOT)).count(),
+            papeis.iter().filter(|roles| roles.contains(&PERSON)).count(),
             1,
             "roles handed out: {papeis:?}"
         );
@@ -828,7 +828,7 @@ mod tests {
     #[test]
     fn a_returning_account_does_not_claim_the_commandership_again() {
         // `register_or_find` runs on every handshake. Seating on the *find* path
-        // as well as the create path would let the second pilot take the seat
+        // as well as the create path would let the second person take the seat
         // the moment the first one's account was deleted mid-session — and, more
         // ordinarily, would re-grant a role an operator had just revoked.
         let persistence = store();
@@ -850,7 +850,7 @@ mod tests {
     fn an_observer_is_denied_every_permission_it_should_not_have() {
         // specs/04: Observador is "só ouvir e ler".
         let persistence = store();
-        let observer = pilot_with(&persistence, "observador", 4, OBSERVER);
+        let observer = person_with(&persistence, "observador", 4, OBSERVER);
         let permissions = Permissions::new(&persistence);
 
         let allowed = [
@@ -869,14 +869,14 @@ mod tests {
     }
 
     #[test]
-    fn a_pilot_is_denied_every_moderation_permission() {
+    fn a_person_is_denied_every_moderation_permission() {
         let persistence = store();
-        let pilot = pilot_with(&persistence, "ayanami", 1, PILOT);
+        let person = person_with(&persistence, "ayanami", 1, PERSON);
         let permissions = Permissions::new(&persistence);
 
         let denied = [
             Permission::RemoveMessage,
-            Permission::MovePilot,
+            Permission::MovePerson,
             Permission::Kick,
             Permission::Ban,
             Permission::ManageCages,
@@ -885,8 +885,8 @@ mod tests {
         ];
         for permission in denied {
             assert!(
-                !permissions.may(pilot, permission).unwrap(),
-                "a pilot should not have {permission:?}"
+                !permissions.may(person, permission).unwrap(),
+                "a person should not have {permission:?}"
             );
         }
     }
@@ -895,7 +895,7 @@ mod tests {
     fn an_operator_moderates_but_does_not_administer() {
         // The line specs/04 draws between Operador and Comandante.
         let persistence = store();
-        let operator = pilot_with(&persistence, "operador", 2, OPERATOR);
+        let operator = person_with(&persistence, "operador", 2, OPERATOR);
         let permissions = Permissions::new(&persistence);
 
         assert!(permissions.may(operator, Permission::Kick).unwrap());
@@ -908,7 +908,7 @@ mod tests {
     #[test]
     fn a_commander_has_everything() {
         let persistence = store();
-        let commander = pilot_with(&persistence, "comandante", 9, COMMANDER);
+        let commander = person_with(&persistence, "comandante", 9, COMMANDER);
         let permissions = Permissions::new(&persistence);
         for permission in ALL {
             assert!(
@@ -922,27 +922,27 @@ mod tests {
     fn denial_beats_a_grant_from_another_role() {
         // specs/04-servidor-seele.md: "permissões negadas vencem concedidas".
         // Without an explicit denial the sentence has nothing to mean, and
-        // giving somebody Observer alongside Pilot would quietly do nothing.
+        // giving somebody Observer alongside Person would quietly do nothing.
         let persistence = store();
-        let pilot = pilot_with(&persistence, "silenciado", 3, PILOT);
+        let person = person_with(&persistence, "silenciado", 3, PERSON);
         let permissions = Permissions::new(&persistence);
-        assert!(permissions.may(pilot, Permission::Speak).unwrap());
+        assert!(permissions.may(person, Permission::Speak).unwrap());
 
-        permissions.grant_role(pilot, OBSERVER).unwrap();
+        permissions.grant_role(person, OBSERVER).unwrap();
 
         assert!(
-            !permissions.may(pilot, Permission::Speak).unwrap(),
-            "the Observer denial did not beat the Pilot grant"
+            !permissions.may(person, Permission::Speak).unwrap(),
+            "the Observer denial did not beat the Person grant"
         );
         // And the permissions the two roles agree on survive.
-        assert!(permissions.may(pilot, Permission::ReadLine).unwrap());
+        assert!(permissions.may(person, Permission::ReadLine).unwrap());
     }
 
     #[test]
     fn a_ban_beats_every_permission() {
         let persistence = store();
-        let commander = pilot_with(&persistence, "comandante", 9, COMMANDER);
-        let target = pilot_with(&persistence, "ayanami", 1, PILOT);
+        let commander = person_with(&persistence, "comandante", 9, COMMANDER);
+        let target = person_with(&persistence, "ayanami", 1, PERSON);
         let permissions = Permissions::new(&persistence);
 
         assert!(permissions.may(target, Permission::Speak).unwrap());
@@ -953,7 +953,7 @@ mod tests {
         for permission in ALL {
             assert!(
                 !permissions.may(target, *permission).unwrap(),
-                "a banned pilot kept {permission:?}"
+                "a banned person kept {permission:?}"
             );
         }
     }
@@ -963,8 +963,8 @@ mod tests {
         // specs/08-seguranca.md: every action verified on the server. The check
         // lives inside `ban` so no future caller can forget it.
         let persistence = store();
-        let ordinary = pilot_with(&persistence, "ayanami", 1, PILOT);
-        let target = pilot_with(&persistence, "shinji", 2, PILOT);
+        let ordinary = person_with(&persistence, "ayanami", 1, PERSON);
+        let target = person_with(&persistence, "shinji", 2, PERSON);
         let permissions = Permissions::new(&persistence);
 
         assert!(permissions.ban(target, ordinary, None, None).is_err());
@@ -974,8 +974,8 @@ mod tests {
     #[test]
     fn an_expired_ban_stops_applying() {
         let persistence = store();
-        let commander = pilot_with(&persistence, "comandante", 9, COMMANDER);
-        let target = pilot_with(&persistence, "ayanami", 1, PILOT);
+        let commander = person_with(&persistence, "comandante", 9, COMMANDER);
+        let target = person_with(&persistence, "ayanami", 1, PERSON);
         let permissions = Permissions::new(&persistence);
 
         permissions
@@ -988,8 +988,8 @@ mod tests {
     #[test]
     fn a_ban_can_be_lifted() {
         let persistence = store();
-        let commander = pilot_with(&persistence, "comandante", 9, COMMANDER);
-        let target = pilot_with(&persistence, "ayanami", 1, PILOT);
+        let commander = person_with(&persistence, "comandante", 9, COMMANDER);
+        let target = person_with(&persistence, "ayanami", 1, PERSON);
         let permissions = Permissions::new(&persistence);
 
         permissions.ban(target, commander, None, None).unwrap();
@@ -1001,28 +1001,28 @@ mod tests {
     }
 
     #[test]
-    fn a_pilot_with_no_roles_can_do_nothing() {
-        // The default has to be denial. A pilot whose roles were all revoked
+    fn a_person_with_no_roles_can_do_nothing() {
+        // The default has to be denial. A person whose roles were all revoked
         // must not fall through to some implicit baseline.
         let persistence = store();
-        let pilot = pilot_with(&persistence, "sem-papel", 5, PILOT);
+        let person = person_with(&persistence, "sem-papel", 5, PERSON);
         let permissions = Permissions::new(&persistence);
-        permissions.revoke_role(pilot, PILOT).unwrap();
+        permissions.revoke_role(person, PERSON).unwrap();
 
         for permission in ALL {
             assert!(
-                !permissions.may(pilot, *permission).unwrap(),
-                "a roleless pilot had {permission:?}"
+                !permissions.may(person, *permission).unwrap(),
+                "a roleless person had {permission:?}"
             );
         }
-        assert!(permissions.permissions(pilot).unwrap().is_empty());
+        assert!(permissions.permissions(person).unwrap().is_empty());
     }
 
     #[test]
-    fn an_unknown_pilot_is_refused_rather_than_defaulted() {
+    fn an_unknown_person_is_refused_rather_than_defaulted() {
         let persistence = store();
         let permissions = Permissions::new(&persistence);
-        assert!(permissions.pilot(PilotId(9999)).is_err());
-        assert!(!permissions.may(PilotId(9999), Permission::Speak).unwrap());
+        assert!(permissions.person(PersonId(9999)).is_err());
+        assert!(!permissions.may(PersonId(9999), Permission::Speak).unwrap());
     }
 }

@@ -149,7 +149,7 @@ async fn abrir(endereco: SocketAddr, semente: u8) -> Result<Par> {
         &ClientMessage::Hello {
             version: seele_proto::PROTOCOL_VERSION,
             client: "par-cru".into(),
-            nickname: format!("piloto{semente:03}"),
+            nickname: format!("pessoa{semente:03}"),
             public_key: chave.verifying_key().to_bytes().to_vec(),
             join_secret: None,
         },

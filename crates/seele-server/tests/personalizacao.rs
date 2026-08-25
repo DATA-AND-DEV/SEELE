@@ -372,7 +372,7 @@ async fn quem_nao_administra_e_recusado_e_nada_muda() -> Result<()> {
     // pergunta nada, que é exatamente a casca que não existe.
     let (endereco, servidor) = dogma(Location::Memory).await?;
 
-    // A primeira conta vira a Comandante, então a segunda é uma Piloto comum.
+    // A primeira conta vira a Comandante, então a segunda é uma Pessoa comum.
     let anfitria = abrir(endereco, 1).await?;
     let mut visita = abrir(endereco, 2).await?;
 

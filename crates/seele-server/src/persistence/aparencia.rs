@@ -21,7 +21,7 @@
 //! Permissão. Este módulo escreve; quem pergunta se pode é [`crate::session`],
 //! no instante em que o verbo é usado, pelo PERMISSIONS — a mesma divisão que
 //! [`super::channels`] explica no cabeçalho dele, e pelo mesmo motivo: o
-//! arranque e os testes também escrevem aqui, e nenhum dos dois tem piloto para
+//! arranque e os testes também escrevem aqui, e nenhum dos dois tem pessoa para
 //! conferir.
 //!
 //! O **formato** do ícone, esse sim, é conferido — mas não aqui. Ele é conferido

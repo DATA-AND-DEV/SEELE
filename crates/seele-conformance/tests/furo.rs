@@ -113,7 +113,7 @@ fn destino_com_nome(alvo: &str, nome_tls: &str) -> Destino {
         // Sob o endereço escrito, e não sob um nome fixo: dois candidatos são
         // Dogmas diferentes até que um deles responda.
         chave_do_pin: alvo.to_owned(),
-        apelido: "piloto".to_owned(),
+        apelido: "pessoa".to_owned(),
         segredo: None,
         impressao_esperada: Some(IMPRESSAO.to_owned()),
     }

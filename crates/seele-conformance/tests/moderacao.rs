@@ -7,7 +7,7 @@
 //! **A recusa é do servidor.** É a que passaria por engano mais fácil. Nem o
 //! `seele-core` nem o `seele-ffi` conferem permissão nenhuma — de propósito,
 //! porque a `specs/08-seguranca.md` põe a decisão no servidor —, então o pedido
-//! de um piloto sem `Kick` **sai no fio**. Um teste que só olhasse o cliente não
+//! de um pessoa sem `Kick` **sai no fio**. Um teste que só olhasse o cliente não
 //! distinguiria «a casca não mandou» de «o Dogma recusou», e as duas dão
 //! exatamente a mesma tela. Aqui a diferença é medida por fora: a vítima
 //! continua conectada e sentada, o que só é observável de outra sessão.
@@ -32,7 +32,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use seele_ffi::{ConnectConfig, EndReason, Event, EventListener, NoticeReason, Plug, PlugError};
 use seele_server::persistence::{Persistence, Location};
-use seele_server::permissions::{Permissions, COMMANDER_ROLE, OPERATOR_ROLE, PILOT_ROLE};
+use seele_server::permissions::{Permissions, COMMANDER_ROLE, OPERATOR_ROLE, PERSON_ROLE};
 use seele_server::{DogmaConfig, Server};
 
 const CAGE: u32 = 1;
@@ -140,7 +140,7 @@ fn sentados(plug: &Plug, cage: u32) -> usize {
         .cages
         .iter()
         .find(|desenhado| desenhado.id == cage)
-        .map_or(0, |desenhado| desenhado.pilots.len())
+        .map_or(0, |desenhado| desenhado.people.len())
 }
 
 /// O último aviso que a tela mostraria.
@@ -181,21 +181,21 @@ impl Recusas {
 /// contra concorrência de verdade.
 fn dar_papel(
     arquivo: &std::path::Path,
-    pilot: seele_proto::ids::PilotId,
+    person: seele_proto::ids::PersonId,
     papel: seele_proto::ids::RoleId,
 ) {
     let persistence = Persistence::open(&Location::File(arquivo.to_path_buf())).expect("abrir o banco");
     let permissions = Permissions::new(&persistence);
-    for tinha in [COMMANDER_ROLE, OPERATOR_ROLE, PILOT_ROLE] {
+    for tinha in [COMMANDER_ROLE, OPERATOR_ROLE, PERSON_ROLE] {
         if tinha != papel {
-            permissions.revoke_role(pilot, tinha).expect("revogar");
+            permissions.revoke_role(person, tinha).expect("revogar");
         }
     }
-    permissions.grant_role(pilot, papel).expect("conceder");
+    permissions.grant_role(person, papel).expect("conceder");
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn um_piloto_comum_e_recusado_pelo_dogma_e_nao_pela_casca() -> Result<()> {
+async fn um_persono_comum_e_recusado_pelo_dogma_e_nao_pela_casca() -> Result<()> {
     let (endereco, servidor, _arquivo) = dogma("recusa").await?;
 
     // O anfitrião conecta primeiro e vira Comandante. Aqui ele é a vítima e a
@@ -215,7 +215,7 @@ async fn um_piloto_comum_e_recusado_pelo_dogma_e_nao_pela_casca() -> Result<()> 
     let intruso = entrar(endereco, "intruso-recusa").await?;
     let pode = intruso.snapshot();
     assert!(
-        !pode.may_kick && !pode.may_ban && !pode.may_remove_message && !pode.may_move_pilot,
+        !pode.may_kick && !pode.may_ban && !pode.may_remove_message && !pode.may_move_person,
         "a segunda conta chegou podendo moderar, e este teste não mede mais nada"
     );
 
@@ -231,10 +231,10 @@ async fn um_piloto_comum_e_recusado_pelo_dogma_e_nao_pela_casca() -> Result<()> 
 
     let mut esperadas = 0;
     for (verbo, pedido) in [
-        ("expulsar", intruso.kick_pilot(alvo)),
-        ("banir", intruso.ban_pilot(alvo, None, None)),
+        ("expulsar", intruso.kick_person(alvo)),
+        ("banir", intruso.ban_person(alvo, None, None)),
         ("remover_mensagem", intruso.remove_message(mensagem)),
-        ("mover_piloto", intruso.move_pilot(alvo, CAGE)),
+        ("mover_persono", intruso.move_person(alvo, CAGE)),
     ] {
         pedido.unwrap_or_else(|erro| panic!("{verbo} não chegou a ser pedido: {erro}"));
         esperadas += 1;
@@ -299,7 +299,7 @@ async fn expulsar_acaba_com_a_sessao_e_deixa_voltar() -> Result<()> {
         "a visita não chegou a sentar; expulsar não mede nada"
     );
 
-    anfitriao.kick_pilot(quem)?;
+    anfitriao.kick_person(quem)?;
 
     // Um: a sessão acaba, e **com o motivo enumerado**. Uma queda sem motivo
     // manda a pessoa procurar problema de rede.
@@ -347,7 +347,7 @@ async fn banir_acaba_com_a_sessao_e_impede_de_voltar() -> Result<()> {
     let visita = entrar(endereco, "visita-banir").await?;
     let quem = visita.snapshot().me.expect("a visita tem identidade");
 
-    anfitriao.ban_pilot(quem, Some("inundou a Linha".into()), None)?;
+    anfitriao.ban_person(quem, Some("inundou a Linha".into()), None)?;
 
     assert!(
         ate(&visita, |plug| plug.snapshot().ended.is_some()),
@@ -453,7 +453,7 @@ async fn mover_leva_o_plug_e_conta_a_pessoa() -> Result<()> {
         "a visita não entrou no primeiro Cage"
     );
 
-    anfitriao.move_pilot(quem, destino)?;
+    anfitriao.move_person(quem, destino)?;
 
     // Um: o plug muda de sala do lado de quem foi movido. Sem isto a pessoa
     // continuaria mandando voz para a sala que ela acha que ainda é a dela.
@@ -493,7 +493,7 @@ async fn mover_leva_o_plug_e_conta_a_pessoa() -> Result<()> {
             .snapshot()
             .cages
             .iter()
-            .map(|cage| (cage.id, cage.pilots.len()))
+            .map(|cage| (cage.id, cage.people.len()))
             .collect::<Vec<_>>()
     );
 
@@ -502,19 +502,19 @@ async fn mover_leva_o_plug_e_conta_a_pessoa() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn um_operador_modera_pilotos_e_nao_o_comandante() -> Result<()> {
+async fn um_operador_modera_personos_e_nao_o_comandante() -> Result<()> {
     let (endereco, servidor, arquivo) = dogma("hierarquia").await?;
 
     // O anfitrião é Comandante por ser o primeiro a chegar.
     let anfitriao = entrar(endereco, "anfitriao-hierarquia").await?;
     let comandante = anfitriao.snapshot().me.expect("identidade");
 
-    // O segundo chega como Piloto; é promovido a Operador pelo banco, que é o
+    // O segundo chega como Pessoa; é promovido a Operador pelo banco, que é o
     // que a tela de papéis fará um dia.
     let operador = entrar(endereco, "operador-hierarquia").await?;
     dar_papel(
         &arquivo,
-        seele_proto::ids::PilotId(operador.snapshot().me.expect("identidade")),
+        seele_proto::ids::PersonId(operador.snapshot().me.expect("identidade")),
         OPERATOR_ROLE,
     );
     drop(operador);
@@ -529,11 +529,11 @@ async fn um_operador_modera_pilotos_e_nao_o_comandante() -> Result<()> {
     // passaria com um Operador que não consegue banir ninguém.
     let visita = entrar(endereco, "visita-hierarquia").await?;
     let alguem = visita.snapshot().me.expect("identidade");
-    operador.kick_pilot(alguem)?;
+    operador.kick_person(alguem)?;
     assert!(
         ate(&visita, |plug| plug.snapshot().ended
             == Some(EndReason::Kicked)),
-        "o Operador não conseguiu expulsar um Piloto comum"
+        "o Operador não conseguiu expulsar um Pessoa comum"
     );
 
     // E não funciona para cima. A `specs/04-servidor-seele.md` dá «moderação»
@@ -541,7 +541,7 @@ async fn um_operador_modera_pilotos_e_nao_o_comandante() -> Result<()> {
     // amigo por uma noite significar entregar-lhe a chave de trancar você fora
     // do seu próprio Dogma, para sempre, com um verbo que a spec diz que ele
     // deve ter.
-    operador.ban_pilot(comandante, None, None)?;
+    operador.ban_person(comandante, None, None)?;
     assert!(
         ate(&operador, |plug| aviso(plug)
             == Some(NoticeReason::PermissionDenied)),

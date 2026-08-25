@@ -29,7 +29,7 @@
 //! On purpose, and it is the opposite of the choice [`crate::permissions::Permissions::ban`]
 //! makes. A ban is a single verb with a single caller; a room is written by the
 //! session handler, by [`crate::seed`] at boot, and by tests, and only the first
-//! of those has a pilot to check. The check therefore lives at the one call site
+//! of those has a person to check. The check therefore lives at the one call site
 //! that has an asker — and `specs/08-seguranca.md` still holds, because that
 //! call site is the only path a client can reach.
 
@@ -379,7 +379,7 @@ pub struct LastCage;
 pub struct LineWeight {
     /// How many messages are in it that anybody can read.
     pub messages: u32,
-    /// How many distinct pilots wrote them.
+    /// How many distinct people wrote them.
     pub authors: u32,
     /// When the oldest was written, in seconds since the Unix epoch. `None`
     /// when the Line is empty.
@@ -496,12 +496,12 @@ mod tests {
 
     // ---- unmaking a room ----
 
-    /// A pilot to hang messages on, since `messages.author_id` is a real key.
-    fn pilot(persistence: &Persistence, nickname: &str, key: u8) -> i64 {
+    /// A person to hang messages on, since `messages.author_id` is a real key.
+    fn person(persistence: &Persistence, nickname: &str, key: u8) -> i64 {
         persistence
             .connection()
             .execute(
-                "INSERT INTO pilots (nickname, public_key, created_at) VALUES (?1, ?2, 0)",
+                "INSERT INTO people (nickname, public_key, created_at) VALUES (?1, ?2, 0)",
                 params![nickname, [key; 32]],
             )
             .unwrap();
@@ -529,9 +529,9 @@ mod tests {
         let line = channels.create_line("sync-geral").unwrap();
         let outra = channels.create_line("avisos").unwrap();
 
-        let rei = pilot(&persistence, "rei", 1);
-        let shinji = pilot(&persistence, "shinji", 2);
-        let asuka = pilot(&persistence, "asuka", 3);
+        let rei = person(&persistence, "rei", 1);
+        let shinji = person(&persistence, "shinji", 2);
+        let asuka = person(&persistence, "asuka", 3);
         say(&persistence, line.id, rei, "primeira", 1_678_600_000);
         say(&persistence, line.id, rei, "segunda", 1_678_600_060);
         say(&persistence, line.id, shinji, "terceira", 1_678_600_120);
@@ -554,7 +554,7 @@ mod tests {
         let persistence = store();
         let channels = Channels::new(&persistence);
         let line = channels.create_line("geral").unwrap();
-        let rei = pilot(&persistence, "rei", 1);
+        let rei = person(&persistence, "rei", 1);
         say(&persistence, line.id, rei, "fica", 100);
         let removida = say(&persistence, line.id, rei, "removida", 50);
         persistence
@@ -603,7 +603,7 @@ mod tests {
         let persistence = store();
         let channels = Channels::new(&persistence);
         let line = channels.create_line("geral").unwrap();
-        let rei = pilot(&persistence, "rei", 1);
+        let rei = person(&persistence, "rei", 1);
         say(&persistence, line.id, rei, "some junto", 100);
 
         channels.delete_line(line.id).unwrap();
@@ -646,7 +646,7 @@ mod tests {
         let channels = Channels::new(&persistence);
         let condenada = channels.create_line("condenada").unwrap();
         let outra = channels.create_line("outra").unwrap();
-        let rei = pilot(&persistence, "rei", 1);
+        let rei = person(&persistence, "rei", 1);
         let alvo = say(&persistence, condenada.id, rei, "original", 100);
         persistence
             .connection()
@@ -705,7 +705,7 @@ mod tests {
         let line = channels.create_line("geral").unwrap();
         let cage = channels.create_cage("CAGE-01", 8, Some(line.id)).unwrap();
         channels.create_cage("CAGE-02", 8, None).unwrap();
-        let rei = pilot(&persistence, "rei", 1);
+        let rei = person(&persistence, "rei", 1);
         say(&persistence, line.id, rei, "sobrevive", 100);
 
         channels.delete_cage(cage.id).unwrap();

@@ -60,7 +60,7 @@ Esboço para pós-v1:
 - Chave de mídia por Cage, negociada entre participantes.
 - Rotação da chave a cada entrada e saída (forward secrecy em relação a quem sai).
 - Cabeçalho do datagram permanece em claro (o servidor precisa de `ssrc` e `seq` para encaminhar); apenas o payload Opus é cifrado.
-- Verificação de identidade fora de banda entre pilotos (comparação de fingerprint).
+- Verificação de identidade fora de banda entre pessoas (comparação de fingerprint).
 
 **Não prometer E2EE em v1.** Documentar honestamente: em v1, o operador do servidor pode, em teoria, capturar mídia. Isso é aceitável para o modelo de uso (você hospeda para seu próprio grupo), mas precisa estar escrito.
 

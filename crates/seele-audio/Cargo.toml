@@ -33,7 +33,7 @@ rubato = "4.0.0"
 # plataformas se comportarem igual. Ver ADR 0008.
 shiguredo_opus = { workspace = true, features = ["source-build"] }
 # The codec reports libopus failures to the log rather than across an API:
-# a C function name and an error code help a developer and tell a pilot nothing.
+# a C function name and an error code help a developer and tell a person nothing.
 tracing = "0.1.44"
 thiserror = "2.0.19"
 

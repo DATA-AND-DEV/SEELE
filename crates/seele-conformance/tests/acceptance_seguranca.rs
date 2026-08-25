@@ -67,7 +67,7 @@ async fn reiniciar_o_dogma_nao_troca_a_chave() -> Result<()> {
     let (endereco, servidor) = subir(&banco).await?;
     let impressao_inicial = servidor.fingerprint().to_owned();
 
-    // Um piloto se conecta e fixa a chave.
+    // Um pessoa se conecta e fixa a chave.
     let pins: Arc<dyn PinStore> = Arc::new(MemoryPinStore::new());
     let cliente = conectar(endereco, "ayanami", 1, Arc::clone(&pins), None).await?;
     assert!(matches!(
@@ -88,7 +88,7 @@ async fn reiniciar_o_dogma_nao_troca_a_chave() -> Result<()> {
 
     let cliente = conectar(endereco, "ayanami", 1, pins, None)
         .await
-        .map_err(|erro| anyhow::anyhow!("o piloto foi recusado após um reinício: {erro:?}"))?;
+        .map_err(|erro| anyhow::anyhow!("o pessoa foi recusado após um reinício: {erro:?}"))?;
     assert!(matches!(
         cliente.pin_decision(),
         PinDecision::Matches { .. }
@@ -539,7 +539,7 @@ async fn quem_foi_recusado_ouve_outra_coisa_de_quem_so_espera() -> Result<()> {
     for semente in [4_u8, 5_u8] {
         let batida = conectar(
             endereco,
-            &format!("piloto{semente}"),
+            &format!("pessoa{semente}"),
             semente,
             Arc::new(MemoryPinStore::new()),
             None,
@@ -556,7 +556,7 @@ async fn quem_foi_recusado_ouve_outra_coisa_de_quem_so_espera() -> Result<()> {
 
     let voltou = conectar(
         endereco,
-        "piloto4",
+        "persono4",
         4,
         Arc::new(MemoryPinStore::new()),
         None,
@@ -570,7 +570,7 @@ async fn quem_foi_recusado_ouve_outra_coisa_de_quem_so_espera() -> Result<()> {
 
     let esperando = conectar(
         endereco,
-        "piloto5",
+        "persono5",
         5,
         Arc::new(MemoryPinStore::new()),
         None,
@@ -590,7 +590,7 @@ async fn quem_foi_recusado_ouve_outra_coisa_de_quem_so_espera() -> Result<()> {
     }
     let de_novo = conectar(
         endereco,
-        "piloto4",
+        "persono4",
         4,
         Arc::new(MemoryPinStore::new()),
         None,

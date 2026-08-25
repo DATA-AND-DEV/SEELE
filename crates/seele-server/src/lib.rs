@@ -111,9 +111,9 @@ pub struct DogmaConfig {
     pub cage: CageId,
     /// Its display name.
     pub cage_name: String,
-    /// How many pilots fit in it.
+    /// How many people fit in it.
     pub cage_limit: u16,
-    /// Nicknames that arrive as Observador rather than Piloto.
+    /// Nicknames that arrive as Observador rather than Pessoa.
     ///
     /// M3 brought real accounts, so this is now only a bootstrap convenience:
     /// somebody has to be able to configure the first roles before there is an

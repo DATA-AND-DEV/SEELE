@@ -38,7 +38,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::time::Instant;
 
-use seele_proto::ids::PilotId;
+use seele_proto::ids::PersonId;
 
 /// Quantos apertos de mão um mesmo endereço pode fazer em rajada.
 ///
@@ -66,7 +66,7 @@ pub const APERTOS_POR_MINUTO: f64 = 30.0;
 /// A tabela é ela própria uma superfície: um balde por endereço, sem teto, é
 /// memória do Dogma para quem tiver endereços de sobra. Quatro mil e noventa e
 /// seis baldes cabem em algumas centenas de kilobytes, e um Dogma de amigos
-/// (`specs/04-servidor-seele.md` dimensiona uns cinquenta pilotos) nunca vê
+/// (`specs/04-servidor-seele.md` dimensiona uns cinquenta pessoas) nunca vê
 /// número dessa ordem.
 pub const ENDERECOS_LEMBRADOS: usize = 4096;
 
@@ -95,7 +95,7 @@ pub const QUADROS_POR_SEGUNDO: f64 = 20.0;
 /// ninguém do outro lado leu o aviso.
 pub const PACIENCIA: u32 = 200;
 
-/// Quantos bytes de anexo um piloto pode subir em rajada.
+/// Quantos bytes de anexo um pessoa pode subir em rajada.
 ///
 /// O ADR 0027 é explícito sobre o que este balde **não** é: ele não é um
 /// limite, é um retardo. O limite é o teto, e é o único mecanismo aqui que
@@ -120,12 +120,12 @@ pub const BYTES_DE_RAJADA: u32 = 256 * 1024 * 1024;
 /// doze segundos de reposição; uma conversa normal nunca encosta nele.
 pub const BYTES_POR_SEGUNDO: f64 = 256.0 * 1024.0;
 
-/// Quantos pilotos a [`Vazao`] lembra ao mesmo tempo.
+/// Quantos pessoas a [`Vazao`] lembra ao mesmo tempo.
 ///
 /// Pelo mesmo motivo que a [`Portaria`] tem teto: um balde por chave, sem teto,
 /// é memória do Dogma para quem tiver chaves de sobra. Um Dogma aberto
 /// (ADR 0021) aceita identidade nova a cada aperto de mão.
-pub const PILOTOS_LEMBRADOS: usize = 4096;
+pub const PERSONOS_LEMBRADOS: usize = 4096;
 
 /// Um balde de fichas.
 ///
@@ -290,7 +290,7 @@ pub enum Veredito {
 
 /// O balde de depois de autenticar, um por conexão.
 ///
-/// Chave na conexão e não no piloto de propósito: o mesmo piloto em duas
+/// Chave na conexão e não no pessoa de propósito: o mesmo pessoa em duas
 /// máquinas são duas conexões, e quem abre conexões em série para diluir o
 /// limite esbarra antes na [`Portaria`], que conta por endereço. Os dois baldes
 /// se compõem; nenhum dos dois sozinho fecha os dois caminhos.
@@ -346,16 +346,16 @@ impl Vigia {
     }
 }
 
-/// O balde de bytes, um por piloto.
+/// O balde de bytes, um por pessoa.
 ///
 /// O terceiro balde do ADR 0025, acrescentado pelo ADR 0027, no mesmo mecanismo
-/// e com o tempo entrando por parâmetro como os outros dois. Chave no piloto e
+/// e com o tempo entrando por parâmetro como os outros dois. Chave no pessoa e
 /// não na conexão: uma pessoa abrindo cinco conexões para subir cinco arquivos
 /// ao mesmo tempo é exatamente o caso que um balde por conexão não pega, e a
 /// identidade aqui já está provada — isto acontece depois do desafio-resposta.
 #[derive(Debug, Default)]
 pub struct Vazao {
-    baldes: HashMap<PilotId, Balde>,
+    baldes: HashMap<PersonId, Balde>,
 }
 
 impl Vazao {
@@ -365,12 +365,12 @@ impl Vazao {
         Self::default()
     }
 
-    /// Se este piloto pode gastar `bytes` agora.
+    /// Se este pessoa pode gastar `bytes` agora.
     ///
     /// Consultado com o tamanho **declarado**, antes de o primeiro byte ser
     /// lido — pela mesma razão que o teto é: cobrar depois é cobrar por uma
     /// coisa que já aconteceu.
-    pub fn permitir(&mut self, piloto: PilotId, bytes: u64, agora: Instant) -> bool {
+    pub fn permitir(&mut self, pessoa: PersonId, bytes: u64, agora: Instant) -> bool {
         // Uma transferência maior que a capacidade do balde nunca passaria, por
         // mais que se esperasse. O teto por arquivo já a teria recusado com
         // razão própria; aqui ela não pode virar espera infinita.
@@ -379,31 +379,31 @@ impl Vazao {
             return false;
         }
 
-        if let Some(balde) = self.baldes.get_mut(&piloto) {
+        if let Some(balde) = self.baldes.get_mut(&pessoa) {
             return balde.gastar(custo, agora);
         }
 
-        if self.baldes.len() >= PILOTOS_LEMBRADOS {
+        if self.baldes.len() >= PERSONOS_LEMBRADOS {
             self.baldes.retain(|_, balde| !balde.cheio(agora));
         }
-        if self.baldes.len() >= PILOTOS_LEMBRADOS {
+        if self.baldes.len() >= PERSONOS_LEMBRADOS {
             return false;
         }
 
         let mut balde = Balde::novo(BYTES_DE_RAJADA, BYTES_POR_SEGUNDO, agora);
         let permitido = balde.gastar(custo, agora);
-        self.baldes.insert(piloto, balde);
+        self.baldes.insert(pessoa, balde);
         permitido
     }
 
     /// Devolve o que uma transferência recusada mais adiante não gastou.
-    pub fn devolver(&mut self, piloto: PilotId, bytes: u64, agora: Instant) {
-        if let Some(balde) = self.baldes.get_mut(&piloto) {
+    pub fn devolver(&mut self, pessoa: PersonId, bytes: u64, agora: Instant) {
+        if let Some(balde) = self.baldes.get_mut(&pessoa) {
             balde.devolver(bytes as f64, agora);
         }
     }
 
-    /// Quantos pilotos estão sendo lembrados.
+    /// Quantos pessoas estão sendo lembrados.
     #[must_use]
     pub fn lembrados(&self) -> usize {
         self.baldes.len()
@@ -662,8 +662,8 @@ mod testes {
 
     // ---- o balde de bytes, do ADR 0027 ----
 
-    fn piloto(numero: u64) -> PilotId {
-        PilotId(numero)
+    fn pessoa(numero: u64) -> PersonId {
+        PersonId(numero)
     }
 
     #[test]
@@ -684,7 +684,7 @@ mod testes {
             if vigia.avaliar(inicio) == Veredito::Passa {
                 quadros_que_passaram += 1;
             }
-            if vazao.permitir(piloto(1), anexo, inicio) {
+            if vazao.permitir(pessoa(1), anexo, inicio) {
                 bytes_que_passaram += anexo;
             }
         }
@@ -708,7 +708,7 @@ mod testes {
         let mut vazao = Vazao::nova();
         for numero in 0..20 {
             assert!(
-                vazao.permitir(piloto(1), 3 * 1024 * 1024, inicio),
+                vazao.permitir(pessoa(1), 3 * 1024 * 1024, inicio),
                 "a foto {numero} foi barrada"
             );
         }
@@ -720,7 +720,7 @@ mod testes {
         // rajada, e o gibibyte seguinte leva o tempo que a reposição impõe.
         let inicio = zero();
         let mut vazao = Vazao::nova();
-        assert!(vazao.permitir(piloto(1), u64::from(BYTES_DE_RAJADA), inicio));
+        assert!(vazao.permitir(pessoa(1), u64::from(BYTES_DE_RAJADA), inicio));
 
         let gibibyte = 1024 * 1024 * 1024_u64;
         let mut restante = gibibyte;
@@ -728,7 +728,7 @@ mod testes {
         while restante > 0 {
             segundos += 60;
             let pedaco = restante.min(16 * 1024 * 1024);
-            if vazao.permitir(piloto(1), pedaco, inicio + Duration::from_secs(segundos)) {
+            if vazao.permitir(pessoa(1), pedaco, inicio + Duration::from_secs(segundos)) {
                 restante -= pedaco;
             }
         }
@@ -739,18 +739,18 @@ mod testes {
     }
 
     #[test]
-    fn o_balde_de_bytes_conta_por_piloto_e_nao_por_conexao() {
+    fn o_balde_de_bytes_conta_por_persono_e_nao_por_conexao() {
         // Cinco conexões da mesma pessoa são cinco fluxos e um só orçamento; e
         // a pessoa do lado não paga por ela.
         let inicio = zero();
         let mut vazao = Vazao::nova();
-        assert!(vazao.permitir(piloto(1), u64::from(BYTES_DE_RAJADA), inicio));
+        assert!(vazao.permitir(pessoa(1), u64::from(BYTES_DE_RAJADA), inicio));
         assert!(
-            !vazao.permitir(piloto(1), 1024 * 1024, inicio),
+            !vazao.permitir(pessoa(1), 1024 * 1024, inicio),
             "a mesma identidade numa segunda conexão ganhou orçamento novo"
         );
         assert!(
-            vazao.permitir(piloto(2), 1024 * 1024, inicio),
+            vazao.permitir(pessoa(2), 1024 * 1024, inicio),
             "o vizinho pagou pelo abusador"
         );
     }
@@ -763,22 +763,22 @@ mod testes {
         let inicio = zero();
         let mut vazao = Vazao::nova();
         let metade = u64::from(BYTES_DE_RAJADA / 2);
-        assert!(vazao.permitir(piloto(1), metade, inicio));
-        vazao.devolver(piloto(1), metade, inicio);
+        assert!(vazao.permitir(pessoa(1), metade, inicio));
+        vazao.devolver(pessoa(1), metade, inicio);
         assert!(
-            vazao.permitir(piloto(1), u64::from(BYTES_DE_RAJADA), inicio),
+            vazao.permitir(pessoa(1), u64::from(BYTES_DE_RAJADA), inicio),
             "a rajada não voltou inteira depois de uma recusa"
         );
     }
 
     #[test]
-    fn a_tabela_de_pilotos_tem_teto() {
+    fn a_tabela_de_personos_tem_teto() {
         let inicio = zero();
         let mut vazao = Vazao::nova();
-        for numero in 0..PILOTOS_LEMBRADOS as u64 + 10 {
-            vazao.permitir(piloto(numero), u64::from(BYTES_DE_RAJADA), inicio);
+        for numero in 0..PERSONOS_LEMBRADOS as u64 + 10 {
+            vazao.permitir(pessoa(numero), u64::from(BYTES_DE_RAJADA), inicio);
         }
-        assert_eq!(vazao.lembrados(), PILOTOS_LEMBRADOS);
+        assert_eq!(vazao.lembrados(), PERSONOS_LEMBRADOS);
     }
 
     #[test]

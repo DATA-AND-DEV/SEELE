@@ -145,21 +145,21 @@ async fn a_client_without_permission_is_refused() -> Result<()> {
     let address = start(vec!["observador".into()]).await?;
 
     let mut observer = connect(address, "observador").await?;
-    let mut pilot = connect(address, "ayanami").await?;
+    let mut person = connect(address, "ayanami").await?;
 
     observer.insert_plug(CageId(1)).await?;
-    pilot.insert_plug(CageId(1)).await?;
+    person.insert_plug(CageId(1)).await?;
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // The observer is in the Cage and may listen.
     observer.send_media(media(observer.session().ssrc, 1, b"should not carry"))?;
-    let leaked = tokio::time::timeout(Duration::from_millis(600), pilot.next_media()).await;
+    let leaked = tokio::time::timeout(Duration::from_millis(600), person.next_media()).await;
     assert!(leaked.is_err(), "an observer was forwarded to the Cage");
 
     // The other direction still works, so the refusal is about permission rather
     // than a broken Cage.
-    let spoken = media(pilot.session().ssrc, 1, b"carries");
-    pilot.send_media(spoken.clone())?;
+    let spoken = media(person.session().ssrc, 1, b"carries");
+    person.send_media(spoken.clone())?;
     let heard = tokio::time::timeout(DELIVERY_TIMEOUT, observer.next_media()).await??;
     assert_eq!(heard, spoken, "the observer could not listen either");
 
@@ -171,7 +171,7 @@ async fn a_forged_ssrc_is_refused() -> Result<()> {
     // Gap G2. specs/08-seguranca.md promises that "a client forging another's
     // identity" is handled because the ssrc is server-assigned, but nothing said
     // the header had to be checked against the connection. Without that check a
-    // pilot puts somebody else's ssrc in their datagrams and every listener
+    // person puts somebody else's ssrc in their datagrams and every listener
     // credits them with the wrong voice.
     let address = start(Vec::new()).await?;
 
@@ -228,7 +228,7 @@ async fn two_dogmas_on_one_machine_do_not_share_a_pin() -> Result<()> {
     let second_address = start(Vec::new()).await?;
     assert_ne!(first_address, second_address);
 
-    // One store, the way one pilot's `~/.config/seele/pins` is one store.
+    // One store, the way one person's `~/.config/seele/pins` is one store.
     let pins = Arc::new(MemoryPinStore::new());
     let key = SigningKey::from_bytes(&[70; 32]);
 

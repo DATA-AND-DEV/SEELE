@@ -33,7 +33,7 @@ Cage em que já se está sai dele. O deslizante de volume aparece ao apontar uma
 linha do roster.
 
 O app e o `plug` usam o mesmo `$SEELE_HOME`, então por padrão são **o mesmo
-piloto** — que é o que faz a mesma sessão ser retomável entre os dois. Para
+pessoa** — que é o que faz a mesma sessão ser retomável entre os dois. Para
 serem duas pessoas, dois diretórios.
 
 ## Abrir o cliente de terminal
@@ -50,7 +50,7 @@ Sem placa de som, ou numa VPS:
 ./target/release/plug --server 127.0.0.1:8383 --nick seunome --sem-audio
 ```
 
-## Dois pilotos na mesma máquina
+## Dois pessoas na mesma máquina
 
 A identidade mora em `$SEELE_HOME` (ADR 0017). Dois clientes com o mesmo
 `$SEELE_HOME` são a **mesma pessoa** — o servidor recusa o segundo apelido. Para

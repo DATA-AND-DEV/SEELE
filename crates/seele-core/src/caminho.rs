@@ -149,7 +149,7 @@ use crate::tela::{Teto, CAMINHO_DA_PROVA_BPS, FRACAO_DO_CAMINHO, PISO_DE_BANDA_B
 /// `crate::tela::Transmissao` se enche: a capacidade dele é *um segundo de
 /// orçamento*. Uma janela mais curta mediria um balde que ainda não repôs e
 /// leria a rajada de um quadro-chave como se fosse o cano. É também o intervalo
-/// em que o Dogma manda `PilotState`, então é o passo em que o resto da malha
+/// em que o Dogma manda `PersonState`, então é o passo em que o resto da malha
 /// já anda.
 pub const JANELA: Duration = Duration::from_secs(1);
 
@@ -193,7 +193,7 @@ pub const QUEDA: u32 = 80;
 /// medida a pôs, e ficar lá para sempre seria tratar a rede de agora como a rede
 /// de sempre: quem estava baixando um arquivo termina, o vizinho desliga a TV, e
 /// o cano de meio minuto atrás não é o de agora. Trinta segundos são trinta
-/// `PilotState` — tempo de a faixa da voz ter dito, e redito, que está tudo bem
+/// `PersonState` — tempo de a faixa da voz ter dito, e redito, que está tudo bem
 /// antes de a tela pedir mais.
 ///
 /// **Uma sondagem custa uma janela de fila**, e é por isso que a espera dobra a
@@ -1012,7 +1012,7 @@ mod tests {
     /// [`SyncBand::Degraded`]. Se a sonda também baixasse por causa da faixa, o
     /// vídeo levaria dois cortes pelo mesmo sintoma — e voltaria devagar de um
     /// buraco que ele mesmo cavou, porque a subida da sonda leva janelas e a
-    /// faixa volta num `PilotState`.
+    /// faixa volta num `PersonState`.
     ///
     /// A prova: as mesmas janelas cheias, na faixa degradada, num cano largo.
     /// A estimativa tem de **subir do mesmo jeito**.

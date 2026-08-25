@@ -21,7 +21,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use seele_proto::ids::{CageId, PilotId, ScreenId, Ssrc};
+use seele_proto::ids::{CageId, PersonId, ScreenId, Ssrc};
 use seele_proto::transport::MAX_FRAMES_PER_SECOND;
 use tokio::sync::{broadcast, mpsc};
 
@@ -38,10 +38,10 @@ const CHANNEL_DEPTH: usize = 1024;
 
 /// What a connection asks its Cage to do.
 pub enum CageCommand {
-    /// A pilot entered. `specs/07-tema-evangelion.md` calls it "inserir plug".
+    /// A person entered. `specs/07-tema-evangelion.md` calls it "inserir plug".
     Join {
         /// Who.
-        pilot: PilotId,
+        person: PersonId,
         /// The media source the server assigned to their connection.
         ssrc: Ssrc,
         /// Whether they may transmit.
@@ -57,16 +57,16 @@ pub enum CageCommand {
         /// `crate::tela::Pedaco` escreve isso por extenso.
         tela: mpsc::Sender<AberturaDeTela>,
     },
-    /// A pilot left, or their connection dropped.
+    /// A person left, or their connection dropped.
     Leave {
         /// Who.
-        pilot: PilotId,
+        person: PersonId,
     },
     /// A datagram arrived from a connection.
     Datagram {
         /// Which connection sent it. Taken from the connection, **never** from
         /// the datagram. The two are compared before anything is forwarded,
-        /// which is what stops one pilot being credited with another's audio.
+        /// which is what stops one person being credited with another's audio.
         from: Ssrc,
         /// The bytes as received, header included.
         bytes: Vec<u8>,
@@ -84,7 +84,7 @@ pub enum CageCommand {
     TelaAbriu {
         /// Quem. Vem da **sessão**, nunca do fluxo, pelo motivo que
         /// [`Cage::forward`] dá sobre o `ssrc`.
-        from: PilotId,
+        from: PersonId,
         /// Como o Dogma batizou esta transmissão.
         screen: ScreenId,
         /// Os bytes do cabeçalho de abertura, para repassar a cada espectador.
@@ -96,14 +96,14 @@ pub enum CageCommand {
     /// Bytes do fluxo de quem compartilha, como chegaram.
     TelaBytes {
         /// Quem.
-        from: PilotId,
+        from: PersonId,
         /// Os bytes, sem nenhuma interpretação além de onde os quadros acabam.
         bytes: Vec<u8>,
     },
     /// O fluxo de quem compartilha terminou.
     TelaFechou {
         /// Quem.
-        from: PilotId,
+        from: PersonId,
     },
 }
 
@@ -167,25 +167,25 @@ struct Member {
 /// teto — `caminho de quem hospeda × 60% ÷ N` — e quem encaminha é quem o sabe
 /// primeiro, porque é o mesmo mapa de onde saem as cópias.
 struct EmCurso {
-    dono: PilotId,
+    dono: PersonId,
     /// Como o Dogma batizou esta transmissão. Vai no convite de cada
     /// espectador; o cabeçalho de abertura o repete, porque é ele que atravessa
     /// o fio.
     screen: ScreenId,
     abertura: Vec<u8>,
     enquadramento: Enquadramento,
-    canos: HashMap<PilotId, mpsc::Sender<Pedaco>>,
+    canos: HashMap<PersonId, mpsc::Sender<Pedaco>>,
     /// Quem entrou na sala depois do começo e ainda espera um quadro-chave.
-    esperando: Vec<PilotId>,
+    esperando: Vec<PersonId>,
     fim: mpsc::Sender<FimDaTela>,
 }
 
 /// The state of one voice channel.
 pub struct Cage {
     id: CageId,
-    members: HashMap<PilotId, Member>,
+    members: HashMap<PersonId, Member>,
     /// Reverse index, so a datagram's sender is found without scanning.
-    by_ssrc: HashMap<Ssrc, PilotId>,
+    by_ssrc: HashMap<Ssrc, PersonId>,
     drops: DropCounts,
     forwarded: u64,
     /// A subida que se assume deste Dogma, em bits por segundo.
@@ -240,7 +240,7 @@ impl Cage {
         self.id
     }
 
-    /// How many pilots are inside.
+    /// How many people are inside.
     #[must_use]
     pub fn occupancy(&self) -> usize {
         self.members.len()
@@ -271,15 +271,15 @@ impl Cage {
     pub fn handle_at(&mut self, command: CageCommand, now: Instant) {
         match command {
             CageCommand::Join {
-                pilot,
+                person,
                 ssrc,
                 may_speak,
                 outbound,
                 tela,
             } => {
-                self.by_ssrc.insert(ssrc, pilot);
+                self.by_ssrc.insert(ssrc, person);
                 self.members.insert(
-                    pilot,
+                    person,
                     Member {
                         ssrc,
                         may_speak,
@@ -299,14 +299,14 @@ impl Cage {
                 // decodificar. Quem entra pede um quadro-chave, e a onda 1 já
                 // atende esse pedido.
                 if let Some(curso) = self.tela.as_mut() {
-                    if curso.dono != pilot {
-                        curso.esperando.push(pilot);
+                    if curso.dono != person {
+                        curso.esperando.push(person);
                     }
                 }
                 self.reconferir_o_teto();
             }
-            CageCommand::Leave { pilot } => {
-                if let Some(member) = self.members.remove(&pilot) {
+            CageCommand::Leave { person } => {
+                if let Some(member) = self.members.remove(&person) {
                     self.by_ssrc.remove(&member.ssrc);
                 }
                 // A saída de quem compartilha mata a transmissão, e é o caminho
@@ -315,12 +315,12 @@ impl Cage {
                 // destruída e em qualquer `?` do meio da sessão. Um
                 // encaminhamento que sobrevivesse a isso seria um fluxo
                 // bombeando para uma sala que já não tem de onde receber.
-                let do_dono = self.tela.as_ref().is_some_and(|curso| curso.dono == pilot);
+                let do_dono = self.tela.as_ref().is_some_and(|curso| curso.dono == person);
                 if do_dono {
                     self.encerrar_tela(None);
                 } else if let Some(curso) = self.tela.as_mut() {
-                    curso.canos.remove(&pilot);
-                    curso.esperando.retain(|quem| *quem != pilot);
+                    curso.canos.remove(&person);
+                    curso.esperando.retain(|quem| *quem != person);
                 }
                 // Depois de tirar o cano: sair da sala **devolve** teto a quem
                 // ficou, e é a metade boa de N mudar.
@@ -370,7 +370,7 @@ impl Cage {
             return;
         }
         // O mesmo instante, e por isso está aqui e não ao lado de
-        // `PilotJoined`: o N que encolhe o teto desta linha é o mesmo N que a
+        // `PersonJoined`: o N que encolhe o teto desta linha é o mesmo N que a
         // outra ponta precisa para encolher o dela. Contado em dois lugares,
         // ele passaria a discordar de si mesmo, e o §5.1 divide por ele.
         //
@@ -387,7 +387,7 @@ impl Cage {
         let _ = eventos.send(Event::ScreenViewers {
             cage: self.id,
             screen: curso.screen,
-            // Um Dogma é dimensionado em cinquenta pilotos
+            // Um Dogma é dimensionado em cinquenta pessoas
             // (`specs/04-servidor-seele.md`), então isto nunca satura; saturar
             // ainda assim é melhor que dar a volta, porque um N pequeno demais
             // devolveria um teto grande demais.
@@ -398,7 +398,7 @@ impl Cage {
     /// Abre a transmissão e liga nela todo mundo que já está na sala.
     fn tela_abriu(
         &mut self,
-        from: PilotId,
+        from: PersonId,
         screen: ScreenId,
         abertura: Vec<u8>,
         fim: mpsc::Sender<FimDaTela>,
@@ -438,7 +438,7 @@ impl Cage {
         });
         // Quem já está na sala entra do primeiro byte: o fluxo ainda não tem
         // byte nenhum, então não há passo a acertar.
-        let ja_estao: Vec<PilotId> = self
+        let ja_estao: Vec<PersonId> = self
             .members
             .keys()
             .copied()
@@ -456,13 +456,13 @@ impl Cage {
     /// Um cano por pessoa e por transmissão. É o fechamento dele que diz a
     /// `crate::tela::bombear` se o fluxo terminou ou foi cortado, sem uma
     /// segunda bandeira que pudesse discordar do canal.
-    fn ligar(&mut self, quem: &[PilotId]) {
+    fn ligar(&mut self, quem: &[PersonId]) {
         let mut cortados = 0_u64;
         let Some(curso) = self.tela.as_mut() else {
             return;
         };
-        for pilot in quem {
-            let Some(member) = self.members.get(pilot) else {
+        for person in quem {
+            let Some(member) = self.members.get(person) else {
                 continue;
             };
             let (tx, rx) = mpsc::channel(crate::tela::PEDACOS_DEPTH);
@@ -475,7 +475,7 @@ impl Cage {
             // espectador seria parar a sala inteira por causa dele — o mesmo
             // raciocínio de `forward`, com a sanção trocada.
             if member.tela.try_send(convite).is_ok() {
-                curso.canos.insert(*pilot, tx);
+                curso.canos.insert(*person, tx);
             } else {
                 cortados += 1;
             }
@@ -490,7 +490,7 @@ impl Cage {
     /// motivo: é ela que mantém a CPU do Dogma plana e que deixa o E2EE de
     /// mídia ser um acréscimo. Os cinco bytes que o [`Enquadramento`] lê dizem
     /// onde um quadro acaba, e nada sobre o que há dentro dele.
-    fn tela_bytes(&mut self, from: PilotId, bytes: &[u8]) {
+    fn tela_bytes(&mut self, from: PersonId, bytes: &[u8]) {
         let Some(curso) = self.tela.as_mut() else {
             self.drops.tela_sem_dono += 1;
             return;
@@ -529,16 +529,16 @@ impl Cage {
             return;
         };
         let mut cortados = Vec::new();
-        for (pilot, cano) in &curso.canos {
+        for (person, cano) in &curso.canos {
             if cano.try_send(Pedaco::Bytes(bytes.to_vec())).is_err() {
-                cortados.push(*pilot);
+                cortados.push(*person);
             }
         }
-        for pilot in &cortados {
+        for person in &cortados {
             // Tirar o cano é o corte: `bombear` vê o canal fechar sem um
             // `Fim` e faz `reset` no fluxo daquela pessoa, que é a diferença
             // entre «a transmissão acabou» e «a sua cópia se perdeu».
-            curso.canos.remove(pilot);
+            curso.canos.remove(person);
         }
         self.drops.espectador_cortado += cortados.len() as u64;
     }
@@ -572,11 +572,11 @@ impl Cage {
     /// identity" is handled because "`ssrc` is assigned by the server, never
     /// accepted from the client" — but `specs/02-protocolo.md` also says the
     /// server "forwards intact", and nothing anywhere stated that the two must
-    /// be checked against each other. Without this line a pilot could put
+    /// be checked against each other. Without this line a person could put
     /// somebody else's `ssrc` in their own datagrams and every listener would
     /// attribute the audio to the wrong person.
     fn forward(&mut self, from: Ssrc, bytes: &[u8], now: Instant) {
-        let Some(pilot) = self.by_ssrc.get(&from).copied() else {
+        let Some(person) = self.by_ssrc.get(&from).copied() else {
             self.drops.not_a_member += 1;
             return;
         };
@@ -591,7 +591,7 @@ impl Cage {
             return;
         }
 
-        let Some(member) = self.members.get_mut(&pilot) else {
+        let Some(member) = self.members.get_mut(&person) else {
             self.drops.not_a_member += 1;
             return;
         };
@@ -617,7 +617,7 @@ impl Cage {
         let mut lagging = 0_u64;
         let mut delivered = 0_u64;
         for (other, subscriber) in &self.members {
-            if *other == pilot {
+            if *other == person {
                 continue;
             }
             match subscriber.outbound.try_send(bytes.to_vec()) {
@@ -660,7 +660,7 @@ pub fn spawn(
 /// The Dogma used to spawn exactly one Cage task, at boot, for the one Cage in
 /// `DogmaConfig` — and every session held that single sender. That was correct
 /// while a Dogma had one room and *silently wrong* the instant it could have
-/// two: two pilots in two different rooms would have had their datagrams
+/// two: two people in two different rooms would have had their datagrams
 /// delivered to each other, because there was only ever one room to deliver
 /// into. A voice channel that is not a channel is worse than a missing feature,
 /// because it looks like it works.
@@ -669,7 +669,7 @@ pub fn spawn(
 ///
 /// A Cage task is a channel and a `HashMap`; the cost of one nobody has entered
 /// is not worth a boot-time scan of PERSISTENCE that would then be stale the first
-/// time somebody made a room. The task appears the first time a pilot walks in
+/// time somebody made a room. The task appears the first time a person walks in
 /// and lives until the Dogma stops.
 pub struct Cages {
     tasks: tokio::sync::Mutex<HashMap<CageId, mpsc::Sender<CageCommand>>>,
@@ -707,20 +707,20 @@ impl Cages {
             .clone()
     }
 
-    /// Takes a pilot out of every Cage.
+    /// Takes a person out of every Cage.
     ///
     /// Broadcast rather than aimed, and deliberately so. A session can end at
     /// any `?` in the middle of the loop, which is a path that does not know
-    /// which room the pilot was in; tracking that separately would be a second
+    /// which room the person was in; tracking that separately would be a second
     /// copy of a fact, and the copy that goes stale is the one that leaves
     /// somebody's `ssrc` receiving audio in a room they left. `Leave` for a
-    /// pilot who is not there is a no-op, and `specs/04-servidor-seele.md` sizes
+    /// person who is not there is a no-op, and `specs/04-servidor-seele.md` sizes
     /// a Dogma at five active Cages, so the fan-out is five sends.
-    pub async fn leave_everywhere(&self, pilot: PilotId) {
+    pub async fn leave_everywhere(&self, person: PersonId) {
         let tasks: Vec<mpsc::Sender<CageCommand>> =
             self.tasks.lock().await.values().cloned().collect();
         for task in tasks {
-            let _ = task.send(CageCommand::Leave { pilot }).await;
+            let _ = task.send(CageCommand::Leave { person }).await;
         }
     }
 
@@ -774,11 +774,11 @@ mod tests {
         vistos
     }
 
-    fn member(cage: &mut Cage, pilot: u64, ssrc: u32, may_speak: bool) -> mpsc::Receiver<Vec<u8>> {
+    fn member(cage: &mut Cage, person: u64, ssrc: u32, may_speak: bool) -> mpsc::Receiver<Vec<u8>> {
         let (tx, rx) = mpsc::channel(64);
         let (tela, _) = mpsc::channel(4);
         cage.handle(CageCommand::Join {
-            pilot: PilotId(pilot),
+            person: PersonId(person),
             ssrc: Ssrc(ssrc),
             may_speak,
             outbound: tx,
@@ -788,12 +788,12 @@ mod tests {
     }
 
     /// Alguém que entra na sala e fica de olho no que chega **de tela**.
-    fn espectador(cage: &mut Cage, pilot: u64) -> mpsc::Receiver<AberturaDeTela> {
+    fn espectador(cage: &mut Cage, person: u64) -> mpsc::Receiver<AberturaDeTela> {
         let (outbound, _) = mpsc::channel(64);
         let (tela, tela_rx) = mpsc::channel(crate::tela::ABERTURAS_DEPTH);
         cage.handle(CageCommand::Join {
-            pilot: PilotId(pilot),
-            ssrc: Ssrc(pilot as u32 * 10),
+            person: PersonId(person),
+            ssrc: Ssrc(person as u32 * 10),
             may_speak: true,
             outbound,
             tela,
@@ -825,15 +825,15 @@ mod tests {
         bytes
     }
 
-    /// Abre uma transmissão de `pilot` e devolve por onde o Dogma reclamaria.
+    /// Abre uma transmissão de `person` e devolve por onde o Dogma reclamaria.
     fn compartilhar(
         cage: &mut Cage,
-        pilot: u64,
+        person: u64,
         screen: u32,
     ) -> mpsc::Receiver<crate::tela::FimDaTela> {
         let (fim, fim_rx) = mpsc::channel(1);
         cage.handle(CageCommand::TelaAbriu {
-            from: PilotId(pilot),
+            from: PersonId(person),
             screen: ScreenId(screen),
             abertura: abertura(screen),
             fim,
@@ -910,19 +910,19 @@ mod tests {
     }
 
     #[test]
-    fn a_pilot_without_permission_cannot_speak() {
+    fn a_person_without_permission_cannot_speak() {
         // specs/04-servidor-seele.md: "always validate — do not trust the
         // client". specs/07 calls the role that cannot speak an Observador.
         let mut cage = Cage::new(CageId(1));
         let _observer = member(&mut cage, 1, 100, false);
-        let mut pilot = member(&mut cage, 2, 200, true);
+        let mut person = member(&mut cage, 2, 200, true);
 
         cage.handle(CageCommand::Datagram {
             from: Ssrc(100),
             bytes: datagram(100, 1),
         });
 
-        assert!(pilot.try_recv().is_err(), "an observer was forwarded");
+        assert!(person.try_recv().is_err(), "an observer was forwarded");
         assert_eq!(cage.drops().not_permitted, 1);
     }
 
@@ -1056,14 +1056,14 @@ mod tests {
         let mut bob = member(&mut cage, 2, 200, true);
         assert_eq!(cage.occupancy(), 2);
 
-        cage.handle(CageCommand::Leave { pilot: PilotId(2) });
+        cage.handle(CageCommand::Leave { person: PersonId(2) });
         assert_eq!(cage.occupancy(), 1);
 
         cage.handle(CageCommand::Datagram {
             from: Ssrc(100),
             bytes: datagram(100, 1),
         });
-        assert!(bob.try_recv().is_err(), "a departed pilot still received");
+        assert!(bob.try_recv().is_err(), "a departed person still received");
 
         // The ssrc must be released, or a stale mapping outlives the session.
         cage.handle(CageCommand::Datagram {
@@ -1076,8 +1076,8 @@ mod tests {
     #[tokio::test]
     async fn two_rooms_do_not_hear_each_other() {
         // The whole reason [`Cages`] exists. With one task for the whole Dogma
-        // — which is what there was — a pilot in the room made at nine o'clock
-        // and a pilot in the room made at ten would have been delivered each
+        // — which is what there was — a person in the room made at nine o'clock
+        // and a person in the room made at ten would have been delivered each
         // other's audio, because there was only ever one room to deliver into.
         let cages = salas();
         let primeiro = cages.of(CageId(1)).await;
@@ -1086,7 +1086,7 @@ mod tests {
         let (alice_tx, mut alice) = mpsc::channel(8);
         primeiro
             .send(CageCommand::Join {
-                pilot: PilotId(1),
+                person: PersonId(1),
                 ssrc: Ssrc(100),
                 may_speak: true,
                 outbound: alice_tx,
@@ -1098,7 +1098,7 @@ mod tests {
         let (bob_tx, mut bob) = mpsc::channel(8);
         segundo
             .send(CageCommand::Join {
-                pilot: PilotId(2),
+                person: PersonId(2),
                 ssrc: Ssrc(200),
                 may_speak: true,
                 outbound: bob_tx,
@@ -1119,14 +1119,14 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         assert!(
             alice.try_recv().is_err(),
-            "a pilot in Cage 1 heard somebody talking in Cage 2"
+            "a person in Cage 1 heard somebody talking in Cage 2"
         );
         assert!(bob.try_recv().is_err(), "bob heard himself");
     }
 
     #[tokio::test]
     async fn the_same_cage_is_asked_for_twice_and_started_once() {
-        // Two pilots walking into the same room must find the same room. A
+        // Two people walking into the same room must find the same room. A
         // registry that spawned per request would give each of them a private
         // copy of a Cage they both believe they are in.
         let cages = salas();
@@ -1137,17 +1137,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn leaving_everywhere_reaches_the_room_the_pilot_was_actually_in() {
+    async fn leaving_everywhere_reaches_the_room_the_person_was_actually_in() {
         // A session can end at any `?`, on a path that does not know where the
-        // pilot was sitting. Aiming the `Leave` at a remembered Cage would leave
-        // a departed pilot's ssrc receiving audio whenever that memory was
+        // person was sitting. Aiming the `Leave` at a remembered Cage would leave
+        // a departed person's ssrc receiving audio whenever that memory was
         // wrong.
         let cages = salas();
         let sala = cages.of(CageId(7)).await;
 
         let (alice_tx, mut alice) = mpsc::channel(8);
         sala.send(CageCommand::Join {
-            pilot: PilotId(1),
+            person: PersonId(1),
             ssrc: Ssrc(100),
             may_speak: true,
             outbound: alice_tx,
@@ -1157,7 +1157,7 @@ mod tests {
         .unwrap();
         let (bob_tx, _bob) = mpsc::channel(8);
         sala.send(CageCommand::Join {
-            pilot: PilotId(2),
+            person: PersonId(2),
             ssrc: Ssrc(200),
             may_speak: true,
             outbound: bob_tx,
@@ -1166,7 +1166,7 @@ mod tests {
         .await
         .unwrap();
 
-        cages.leave_everywhere(PilotId(1)).await;
+        cages.leave_everywhere(PersonId(1)).await;
 
         sala.send(CageCommand::Datagram {
             from: Ssrc(200),
@@ -1177,7 +1177,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         assert!(
             alice.try_recv().is_err(),
-            "a pilot whose session ended is still being delivered audio"
+            "a person whose session ended is still being delivered audio"
         );
     }
 
@@ -1214,7 +1214,7 @@ mod tests {
 
         let primeiro = quadro(true, 40);
         cage.handle(CageCommand::TelaBytes {
-            from: PilotId(1),
+            from: PersonId(1),
             bytes: primeiro.clone(),
         });
         for convite in &mut convites {
@@ -1259,7 +1259,7 @@ mod tests {
         let _fim = compartilhar(&mut cage, 1, 7);
         let mut convite = bob.try_recv().unwrap();
 
-        cage.handle(CageCommand::Leave { pilot: PilotId(1) });
+        cage.handle(CageCommand::Leave { person: PersonId(1) });
         assert!(
             matches!(convite.pedacos.try_recv(), Ok(Pedaco::Fim)),
             "o espectador não foi avisado de que a transmissão acabou"
@@ -1268,7 +1268,7 @@ mod tests {
         // E o encaminhamento morreu junto: o que chegar depois não vai a lugar
         // nenhum.
         cage.handle(CageCommand::TelaBytes {
-            from: PilotId(1),
+            from: PersonId(1),
             bytes: quadro(true, 8),
         });
         assert_eq!(cage.drops().tela_sem_dono, 1);
@@ -1295,7 +1295,7 @@ mod tests {
         // Um quadro comum não abre a porta.
         let comum = quadro(false, 20);
         cage.handle(CageCommand::TelaBytes {
-            from: PilotId(1),
+            from: PersonId(1),
             bytes: comum.clone(),
         });
         assert!(carol.try_recv().is_err());
@@ -1303,7 +1303,7 @@ mod tests {
         // O quadro-chave abre, e ele chega inteiro a quem entrou.
         let chave = quadro(true, 30);
         cage.handle(CageCommand::TelaBytes {
-            from: PilotId(1),
+            from: PersonId(1),
             bytes: chave.clone(),
         });
         let mut de_carol = carol.try_recv().expect("carol devia ter sido ligada");
@@ -1319,7 +1319,7 @@ mod tests {
         // §5.1 divide o caminho do anfitrião por N, e quem compartilha calcula
         // o mesmo `min` do outro lado. Sem este anúncio ele aplicaria a conta
         // com uma perna que inventa, que é o defeito que a seção chama de mais
-        // caro. Vem daqui, e não de junto do `PilotJoined`, porque este é o
+        // caro. Vem daqui, e não de junto do `PersonJoined`, porque este é o
         // único mapa que sabe quem está na sala sem perguntar a ninguém.
         let (mut cage, mut ouvinte) = sala_com_barramento(crate::tela::CAMINHO_DO_DOGMA_BPS);
         let _alice = espectador(&mut cage, 1);
@@ -1334,7 +1334,7 @@ mod tests {
         assert_eq!(contagens(&mut ouvinte), vec![1, 2]);
 
         // E a saída é a metade boa de N mudar: ela devolve teto.
-        cage.handle(CageCommand::Leave { pilot: PilotId(2) });
+        cage.handle(CageCommand::Leave { person: PersonId(2) });
         assert_eq!(contagens(&mut ouvinte), vec![1]);
     }
 
@@ -1410,7 +1410,7 @@ mod tests {
         for _ in 0..(crate::tela::PEDACOS_DEPTH + 8) {
             let bytes = quadro(false, 16);
             cage.handle(CageCommand::TelaBytes {
-                from: PilotId(1),
+                from: PersonId(1),
                 bytes: bytes.clone(),
             });
             chegou.extend(recebido(&mut do_atento));
@@ -1435,7 +1435,7 @@ mod tests {
         let mut de_bob = bob.try_recv().unwrap();
 
         cage.handle(CageCommand::TelaBytes {
-            from: PilotId(2),
+            from: PersonId(2),
             bytes: quadro(true, 12),
         });
         assert_eq!(cage.drops().tela_sem_dono, 1);
@@ -1464,7 +1464,7 @@ mod tests {
         let _alice = member(&mut cage, 1, 100, true);
         let (tx, _rx) = mpsc::channel(1);
         cage.handle(CageCommand::Join {
-            pilot: PilotId(2),
+            person: PersonId(2),
             ssrc: Ssrc(200),
             may_speak: true,
             outbound: tx,

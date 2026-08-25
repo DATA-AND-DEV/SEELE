@@ -5,7 +5,7 @@
 //! point rather than an oversight.
 //!
 //! `specs/06-clientes-gui.md` states the rule in one sentence: "Se o frontend
-//! precisa saber o que é um `ssrc`, algo está errado." A `PilotId` crossing
+//! precisa saber o que é um `ssrc`, algo está errado." A `PersonId` crossing
 //! into a shell is protocol knowledge in the shell, and the third shell would
 //! have to learn it too.
 //!
@@ -115,7 +115,7 @@ impl From<seele_core::AlertSeverity> for Severity {
 /// What a notice is about. Enumerated so each shell writes its own sentence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum NoticeReason {
-    /// The pilot was named in a message.
+    /// The person was named in a message.
     Mentioned,
     /// A subsystem changed health.
     SubsystemChanged,
@@ -123,7 +123,7 @@ pub enum NoticeReason {
     SyncDegraded,
     /// Entry to a Cage was refused.
     CageEntryRefused,
-    /// The action needed a permission the pilot lacks.
+    /// The action needed a permission the person lacks.
     PermissionDenied,
     /// The Cage is at its limit.
     CageFull,
@@ -131,11 +131,11 @@ pub enum NoticeReason {
     OperatorNotice,
     /// The client is sending control frames faster than its budget.
     RateLimited,
-    /// An operator moved this pilot's plug into another Cage.
+    /// An operator moved this person's plug into another Cage.
     MovedByOperator,
-    /// The Cage this pilot's plug was in no longer exists.
+    /// The Cage this person's plug was in no longer exists.
     CageDeleted,
-    /// A Line this pilot had open no longer exists.
+    /// A Line this person had open no longer exists.
     LineDeleted,
     /// The Cage asked about is the only one the Dogma has, so it stays.
     LastCage,
@@ -196,7 +196,7 @@ pub struct LineWeight {
     pub line: u32,
     /// How many messages are in it that anybody can read.
     pub messages: u32,
-    /// How many distinct pilots wrote them.
+    /// How many distinct people wrote them.
     pub authors: u32,
     /// When the oldest was written, in seconds since the Unix epoch.
     ///
@@ -217,9 +217,9 @@ pub enum EndReason {
     CredentialRejected,
     /// The handshake did not finish in time.
     HandshakeTimeout,
-    /// An operator disconnected this pilot.
+    /// An operator disconnected this person.
     Kicked,
-    /// An operator barred this pilot.
+    /// An operator barred this person.
     Banned,
     /// The Dogma is full.
     DogmaFull,
@@ -354,10 +354,10 @@ impl From<seele_core::tofu::Verdict> for Trust {
     }
 }
 
-/// One pilot in a Cage.
+/// One person in a Cage.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
-pub struct Pilot {
-    /// Stable identifier for this pilot on this Dogma.
+pub struct Person {
+    /// Stable identifier for this person on this Dogma.
     pub id: u64,
     /// Display name.
     pub nickname: String,
@@ -371,7 +371,7 @@ pub struct Pilot {
     pub sync_ratio: u8,
     /// Which band that falls into, decided once, in the core.
     pub sync_band: SyncBand,
-    /// Whether this is the pilot holding the handle.
+    /// Whether this is the person holding the handle.
     pub is_self: bool,
 }
 
@@ -392,8 +392,8 @@ pub struct CageSync {
     pub ratio: u8,
     /// Which band the average falls into.
     pub band: SyncBand,
-    /// How many pilots it averages — the comp's `5 PLUGS`.
-    pub pilots: u32,
+    /// How many people it averages — the comp's `5 PLUGS`.
+    pub people: u32,
 }
 
 impl From<seele_core::CageSync> for CageSync {
@@ -401,10 +401,10 @@ impl From<seele_core::CageSync> for CageSync {
         Self {
             ratio: sync.ratio,
             band: sync.band.into(),
-            // A Cage holds at most `limit` pilots and `limit` is a `u16`. The
+            // A Cage holds at most `limit` people and `limit` is a `u16`. The
             // saturation is unreachable and is here so the conversion cannot
             // panic on a server that says otherwise.
-            pilots: u32::try_from(sync.pilots).unwrap_or(u32::MAX),
+            people: u32::try_from(sync.people).unwrap_or(u32::MAX),
         }
     }
 }
@@ -416,11 +416,11 @@ pub struct Cage {
     pub id: u32,
     /// Display name.
     pub name: String,
-    /// How many pilots fit.
+    /// How many people fit.
     pub limit: u16,
     /// Whether entry needs a password.
     pub password_required: bool,
-    /// Whether this pilot's plug is in it.
+    /// Whether this person's plug is in it.
     pub occupied_by_us: bool,
     /// The Line bound to it, if any. `specs/04-servidor-seele.md` makes the
     /// association optional.
@@ -431,7 +431,7 @@ pub struct Cage {
     /// consequences has to be able to name that one.
     pub line: Option<u32>,
     /// Who is inside, in arrival order.
-    pub pilots: Vec<Pilot>,
+    pub people: Vec<Person>,
     /// The average Sync Ratio of everybody inside, or `None` if nobody is.
     ///
     /// `None` rather than zero: an empty Cage has nothing to average, and zero
@@ -530,7 +530,7 @@ pub struct Telemetry {
     pub loss_fraction: f32,
     /// Encoder bitrate, bits per second. Zero when there is no audio.
     pub bitrate_bps: u32,
-    /// This pilot's Sync Ratio, 0 to 100.
+    /// This person's Sync Ratio, 0 to 100.
     pub sync_ratio: u8,
     /// Which band that is.
     pub sync_band: SyncBand,
@@ -709,7 +709,7 @@ pub struct TelaEmCurso {
     /// dividiu o teto: esse número é calculado em `Cage::reconferir_o_teto` e
     /// nenhum quadro de controle o carrega de volta ao cliente. Os dois
     /// coincidem sempre que o roster estiver em dia, e divergem no intervalo
-    /// entre alguém entrar e o `PilotJoined` chegar.
+    /// entre alguém entrar e o `PersonJoined` chegar.
     pub espectadores: u32,
     /// `Some` quando a transmissão está parada, com o nome estável do motivo.
     ///
@@ -805,21 +805,21 @@ pub struct Snapshot {
     /// keeps the last one it drew and calls [`crate::Plug::dogma_icon`] when it
     /// moves. Zero, and never moving, is the ordinary Dogma: it has no picture.
     pub icon_revision: u64,
-    /// This pilot's identifier, once known.
+    /// This person's identifier, once known.
     pub me: Option<u64>,
-    /// This pilot's name.
+    /// This person's name.
     pub nickname: String,
     /// Voice channels, each carrying who is in it.
     pub cages: Vec<Cage>,
     /// Quem está conectado neste Dogma, em sala ou fora dela.
     ///
-    /// **Não é a soma de [`Cage::pilots`]**, e essa diferença é a razão de o
+    /// **Não é a soma de [`Cage::people`]**, e essa diferença é a razão de o
     /// campo existir: quem entra no servidor e fica fora das salas não aparece
     /// em nenhum Cage, e por muito tempo não aparecia em lugar nenhum — a
     /// interface listava os sentados e chamava aquilo de «pessoas». A lista de
     /// quem está fora das salas é esta menos aquelas, e a subtração é uma linha
     /// de quem desenha.
-    pub presentes: Vec<Pilot>,
+    pub presentes: Vec<Person>,
     /// Text channels.
     pub lines: Vec<Line>,
     /// How many times the conversation has changed, this session.
@@ -841,11 +841,11 @@ pub struct Snapshot {
     pub telemetry: Telemetry,
     /// The last thing worth surfacing.
     pub notice: Option<Notice>,
-    /// Whether this pilot's microphone is muted.
+    /// Whether this person's microphone is muted.
     pub at_field: bool,
-    /// Whether this pilot's speakers are muted.
+    /// Whether this person's speakers are muted.
     pub total_isolation: bool,
-    /// Whether this pilot is transmitting.
+    /// Whether this person is transmitting.
     pub speaking: bool,
     /// How the microphone opens.
     pub voice_mode: VoiceMode,
@@ -871,7 +871,7 @@ pub struct Snapshot {
     /// hears nothing has this line and nothing else to tell them the pick did
     /// not take.
     pub playback: Option<PlaybackDevice>,
-    /// Whether this pilot may make and rename Cages and Lines.
+    /// Whether this person may make and rename Cages and Lines.
     ///
     /// So a shell can decide whether the control exists at all. `ManageCages`
     /// as PERMISSIONS resolved it, sent down in the handshake — a single boolean
@@ -884,7 +884,7 @@ pub struct Snapshot {
     /// shell that ignores this and asks anyway gets a `NoticeRaised` carrying
     /// `PermissionDenied`, and nothing is created.
     pub may_manage_cages: bool,
-    /// Whether this pilot may end somebody else's session — `expulsar`.
+    /// Whether this person may end somebody else's session — `expulsar`.
     ///
     /// One boolean per moderation verb rather than the permission list, for the
     /// reason [`Snapshot::may_manage_cages`] gives: a list invites each shell to
@@ -897,16 +897,16 @@ pub struct Snapshot {
     /// has been drawn and disabled since v2; this is what may enable it, and
     /// the server refusing is still what makes it safe.
     pub may_kick: bool,
-    /// Whether this pilot may bar somebody from returning — `banir`.
+    /// Whether this person may bar somebody from returning — `banir`.
     pub may_ban: bool,
-    /// Whether this pilot may take somebody else's message off a Line.
+    /// Whether this person may take somebody else's message off a Line.
     ///
     /// Only somebody else's: removing one's own needs no permission, so a shell
     /// offering the control on a message the reader wrote does not consult this.
     pub may_remove_message: bool,
-    /// Whether this pilot may move somebody between Cages — `mover_piloto`.
-    pub may_move_pilot: bool,
-    /// Whether this pilot may name the Dogma and give it a picture.
+    /// Whether this person may move somebody between Cages — `mover_persono`.
+    pub may_move_person: bool,
+    /// Whether this person may name the Dogma and give it a picture.
     ///
     /// `AdministerDogma`, which is the same permission behind
     /// [`Snapshot::may_delete_rooms`] today — and a separate field anyway,
@@ -918,7 +918,7 @@ pub struct Snapshot {
     ///
     /// **Convenience, never enforcement**, like every flag beside it.
     pub may_customise_dogma: bool,
-    /// Whether this pilot may destroy Cages and Lines — `administrar_dogma`.
+    /// Whether this person may destroy Cages and Lines — `administrar_dogma`.
     ///
     /// Its own boolean, and deliberately not [`Snapshot::may_manage_cages`].
     /// Making a room and renaming one are mistakes a Dogma survives; destroying
@@ -1149,7 +1149,7 @@ pub enum Transfer {
 /// rather than silently change what a screen writes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum AttachmentRefusal {
-    /// The pilot lacks the permission to attach.
+    /// The person lacks the permission to attach.
     NotAllowed,
     /// Larger than this Dogma's per-file limit.
     TooLarge {
@@ -1168,7 +1168,7 @@ pub enum AttachmentRefusal {
     RateLimited,
     /// This Dogma is not storing attachments at all.
     Unavailable,
-    /// No such attachment, or it is in a Line this pilot may not read.
+    /// No such attachment, or it is in a Line this person may not read.
     NotFound,
     /// The bytes were evicted to keep the Dogma under its ceiling.
     Expired,
@@ -1345,8 +1345,8 @@ pub enum PlugError {
     /// unplugged" is the wrong sentence to read after choosing a headset. The
     /// two point at opposite halves of the screen.
     PlaybackDeviceGone,
-    /// The named pilot is not in this Cage.
-    UnknownPilot,
+    /// The named person is not in this Cage.
+    UnknownPerson,
     /// No Cage or Line by that name or number.
     UnknownChannel,
     /// The control stream broke.
@@ -1778,7 +1778,7 @@ mod tests {
     fn a_tela_tem_evento_proprio_no_barramento() {
         // Separado de `RosterChanged` pelo motivo que `seele_core::Changed` já
         // dá: o que se mexe é um painel, e uma casca que redesenhasse a lista de
-        // pilotos inteira por causa de um número de kbps estaria redesenhando a
+        // pessoas inteira por causa de um número de kbps estaria redesenhando a
         // parte da tela que não mudou.
         let json = serde_json::to_string(&Event::ScreenChanged)
             .expect("uma variante sem campo sempre serializa");

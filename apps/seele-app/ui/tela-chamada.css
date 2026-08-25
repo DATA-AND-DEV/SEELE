@@ -774,7 +774,7 @@
   letter-spacing: 0.2em;
 }
 
-/* Quem está falando agora, em 26px. Vem de `pilots.filter(speaking)`, que o
+/* Quem está falando agora, em 26px. Vem de `people.filter(speaking)`, que o
    snapshot carrega inteiro — é medida, não ausência, e por isso o silêncio se
    escreve `NINGUÉM` e não com travessão. */
 .chamada-falando-nome {

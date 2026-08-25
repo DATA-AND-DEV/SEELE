@@ -42,7 +42,7 @@ pub enum CodecError {
     /// libopus would not create or configure the encoder or decoder.
     ///
     /// The library's own message goes to `tracing`: it names a C function and a
-    /// numeric code, which helps a developer and tells a pilot nothing.
+    /// numeric code, which helps a developer and tells a person nothing.
     Unavailable,
     /// The frame handed in was not one 20 ms frame of mono audio.
     ///
@@ -110,7 +110,7 @@ impl VoiceEncoder {
     /// encoder's internal state, so the first frame after a change is encoded
     /// without the prediction history of the ones before it. At 20 ms that is
     /// one frame of slightly worse quality, which is why this is acceptable for
-    /// a pilot changing a setting and **would not be** for an automatic
+    /// a person changing a setting and **would not be** for an automatic
     /// congestion response adjusting bitrate every few seconds. If that is ever
     /// wanted, this is the line that has to change first.
     ///

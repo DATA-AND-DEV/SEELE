@@ -9,14 +9,14 @@
 //!
 //! Found while implementing M1 and M2; see `docs/plano-m0-m1.md`.
 //!
-//! - **G1.** The spec says the client resolves `ssrc → pilot` "from the table
+//! - **G1.** The spec says the client resolves `ssrc → person` "from the table
 //!   received on the control channel", but no control message carried an `ssrc`,
 //!   and a client had no way to learn its own. [`ServerMessage::Session`] and
-//!   [`ServerMessage::PilotJoined`] now carry it.
+//!   [`ServerMessage::PersonJoined`] now carry it.
 //! - **G8.** "Isolamento total" (deafen) is defined in
 //!   `specs/07-tema-evangelion.md` and bound to a key in `specs/05-cliente-tui.md`,
 //!   but had no protocol representation, so a roster could not show who was not
-//!   listening. [`PilotState`] carries it beside the A.T. Field.
+//!   listening. [`PersonState`] carries it beside the A.T. Field.
 //! - **G9.** `EnviarMensagem` is documented as "idempotent by `client_msg_id`"
 //!   while the field was missing from its payload. It is explicit here.
 //!
@@ -37,7 +37,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{
-    AttachmentId, CageId, ClientMessageId, LineId, MessageId, PilotId, RoleId, ScreenId, SessionId,
+    AttachmentId, CageId, ClientMessageId, LineId, MessageId, PersonId, RoleId, ScreenId, SessionId,
     Ssrc,
 };
 use crate::version::PROTOCOL_VERSION;
@@ -68,7 +68,7 @@ pub const MAX_CLIENT_NAME_LEN: usize = 64;
 /// decide where to cut one off.
 pub const MAX_CHANNEL_NAME_LEN: usize = 48;
 
-/// Largest number of pilots a Cage may be created with.
+/// Largest number of people a Cage may be created with.
 ///
 /// `specs/04-servidor-seele.md` sizes the target at "50 sessões e 5 Cages
 /// ativos em 1 vCPU / 512 MB", so this is five times the whole Dogma: generous
@@ -99,7 +99,7 @@ pub const MAX_ALERT_TEXT_LEN: usize = 512;
 ///   anyway.
 /// - **Whoever hosts pays for it fifty times.** Changing the icon writes one
 ///   row and then sends it to every connected session; `specs/04-servidor-seele.md`
-///   sizes a Dogma at ~50 pilots, so one change costs 50 × 8 KiB ≈ 400 KiB of a
+///   sizes a Dogma at ~50 people, so one change costs 50 × 8 KiB ≈ 400 KiB of a
 ///   home upstream. That is a hiccup. With no ceiling at all the same act is an
 ///   upload channel with a fifty-fold amplifier pointed at a machine somebody
 ///   runs in their living room, which is the whole reason there is a number
@@ -180,7 +180,7 @@ pub struct AttachmentInfo {
 /// "attachment failed" would leave a person retrying a file that will never fit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AttachmentRefusal {
-    /// The pilot lacks [`Permission::AttachFile`].
+    /// The person lacks [`Permission::AttachFile`].
     NotAllowed,
     /// Larger than this Dogma's per-file limit.
     ///
@@ -203,11 +203,11 @@ pub enum AttachmentRefusal {
     /// The one question ADR 0027 says a Dogma can answer about a file: did it
     /// arrive whole. It says nothing about whether the file is good.
     HashDidNotMatch,
-    /// The pilot is sending bytes faster than their budget.
+    /// The person is sending bytes faster than their budget.
     RateLimited,
     /// This Dogma is not storing attachments at all.
     Unavailable,
-    /// No such attachment, or it belongs to a Line this pilot may not read.
+    /// No such attachment, or it belongs to a Line this person may not read.
     NotFound,
     /// The bytes were evicted to keep the Dogma under its ceiling.
     Expired,
@@ -280,11 +280,11 @@ pub enum ControlError {
     },
 }
 
-/// Presence, as announced by the pilot.
+/// Presence, as announced by the person.
 ///
 /// Deliberately short. `specs/00-visao-geral.md` names "published presence" as
 /// one of the things that made the tools it is reacting against unpleasant, so
-/// this stays a hint the pilot sets rather than anything inferred from activity.
+/// this stays a hint the person sets rather than anything inferred from activity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Presence {
     /// Present and available.
@@ -311,11 +311,11 @@ pub enum Permission {
     WriteLine,
     /// Delete somebody else's message.
     RemoveMessage,
-    /// Move a pilot between Cages.
-    MovePilot,
-    /// Disconnect a pilot.
+    /// Move a person between Cages.
+    MovePerson,
+    /// Disconnect a person.
     Kick,
-    /// Bar a pilot from returning.
+    /// Bar a person from returning.
     Ban,
     /// Create and configure Cages.
     ManageCages,
@@ -337,10 +337,10 @@ pub enum Permission {
     /// one protocol version older refuses the frame rather than reading this as
     /// a permission it already understands.
     ///
-    /// Migration 3 seeds it on Commander, Operator and Pilot, and **denies it
+    /// Migration 3 seeds it on Commander, Operator and Person, and **denies it
     /// explicitly on Observer** rather than merely leaving it out — the schema
     /// already writes why on the Observer's line: denying on purpose makes
-    /// granting Observer to somebody who is also a Pilot *silence* them,
+    /// granting Observer to somebody who is also a Person *silence* them,
     /// instead of quietly doing nothing.
     AttachFile,
 }
@@ -350,22 +350,22 @@ pub enum Permission {
 pub struct Role {
     /// Identifier.
     pub id: RoleId,
-    /// Display name. One of Commander, Operator, Pilot, Observer for the four
+    /// Display name. One of Commander, Operator, Person, Observer for the four
     /// defaults in `specs/04-servidor-seele.md`, but operators may add more.
     pub name: String,
     /// What the role allows.
     ///
     /// `specs/04-servidor-seele.md`: denied beats granted, and there is no tree
-    /// inheritance. A permission absent from every one of a pilot's roles is
+    /// inheritance. A permission absent from every one of a person's roles is
     /// denied.
     pub permissions: Vec<Permission>,
 }
 
-/// A pilot as other pilots see them.
+/// A person as other people see them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PilotProfile {
+pub struct PersonProfile {
     /// Account identifier.
-    pub id: PilotId,
+    pub id: PersonId,
     /// Display name.
     pub nickname: String,
     /// Roles held.
@@ -379,7 +379,7 @@ pub struct CageInfo {
     pub id: CageId,
     /// Display name.
     pub name: String,
-    /// How many pilots may be inside at once.
+    /// How many people may be inside at once.
     pub limit: u16,
     /// Whether entry needs a password.
     pub password_required: bool,
@@ -422,15 +422,15 @@ pub enum SubsystemHealth {
     Failed,
 }
 
-/// What a pilot's client is currently doing.
+/// What a person's client is currently doing.
 ///
 /// Carries both mute controls. `specs/07-tema-evangelion.md` names them
 /// "A.T. Field" (microphone) and "Isolamento total" (speakers); the second had
 /// no protocol representation before — gap G8.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PilotState {
+pub struct PersonState {
     /// Whose state this is.
-    pub pilot: PilotId,
+    pub person: PersonId,
     /// Microphone muted — "A.T. Field" active.
     pub at_field: bool,
     /// Speakers muted — "Isolamento total".
@@ -471,9 +471,9 @@ pub enum DisconnectReason {
     CredentialRejected,
     /// Handshake did not finish inside the 10 s budget.
     HandshakeTimeout,
-    /// An operator disconnected this pilot.
+    /// An operator disconnected this person.
     Kicked,
-    /// An operator barred this pilot.
+    /// An operator barred this person.
     Banned,
     /// The Dogma is full.
     DogmaFull,
@@ -502,7 +502,7 @@ pub enum DisconnectReason {
     /// What it *can* do is reconnect and fetch history, which is a path that
     /// already exists and is already exercised — and which is exactly what the
     /// internal battery does on its own. `docs/pendencias.md` #1 is what
-    /// happened while this was silent instead: the pilot stayed connected with
+    /// happened while this was silent instead: the person stayed connected with
     /// a gap in the conversation that neither end could name.
     ///
     /// Appended last, for the reason [`AlertReason::RateLimited`] gives.
@@ -581,7 +581,7 @@ pub enum AlertSeverity {
 /// What an alert is about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AlertReason {
-    /// The pilot was named in a message.
+    /// The person was named in a message.
     Mentioned,
     /// A subsystem changed health.
     SubsystemChanged,
@@ -589,7 +589,7 @@ pub enum AlertReason {
     SyncDegraded,
     /// Entry to a Cage was refused.
     CageEntryRefused,
-    /// The action needed a permission the pilot lacks.
+    /// The action needed a permission the person lacks.
     PermissionDenied,
     /// The Cage is at its limit.
     CageFull,
@@ -607,7 +607,7 @@ pub enum AlertReason {
     /// connection that was already exceeding its budget, and nothing else.
     RateLimited,
 
-    /// An operator moved this pilot's plug into another Cage.
+    /// An operator moved this person's plug into another Cage.
     ///
     /// Its own reason rather than [`Self::OperatorNotice`], because the shell
     /// has a specific sentence to write and `OperatorNotice` would have it
@@ -617,19 +617,19 @@ pub enum AlertReason {
     /// Appended after `RateLimited`, for the reason that variant gives.
     MovedByOperator,
 
-    /// The Cage this pilot's plug was in no longer exists.
+    /// The Cage this person's plug was in no longer exists.
     ///
     /// Its own reason rather than [`Self::OperatorNotice`], for the reason
     /// [`Self::MovedByOperator`] gives: the shell has a specific sentence to
     /// write, and being turned out of a room in the middle of speaking is the
-    /// case this exists to explain. Sent only to the pilots who were inside —
+    /// case this exists to explain. Sent only to the people who were inside —
     /// everybody else learns the room is gone from
     /// [`ServerMessage::CageDeleted`] and has nothing to be told about it.
     ///
     /// Appended after `MovedByOperator`, for the reason that variant gives.
     CageDeleted,
 
-    /// A Line this pilot had open no longer exists, and neither does anything
+    /// A Line this person had open no longer exists, and neither does anything
     /// written in it.
     ///
     /// Separate from [`Self::CageDeleted`] because the two sentences are not
@@ -669,7 +669,7 @@ pub enum AlertReason {
     /// Appended after `LastCage`, for the reason [`Self::RateLimited`] gives.
     ScreenShareTaken,
 
-    /// The Dogma stopped this pilot's transmission: the room outgrew its uplink.
+    /// The Dogma stopped this person's transmission: the room outgrew its uplink.
     ///
     /// §5.1 made the host's upward path a term of the ceiling —
     /// `caminho de quem HOSPEDA × 60% ÷ N espectadores` — because the Dogma is
@@ -679,7 +679,7 @@ pub enum AlertReason {
     /// the whole room stuttering because of a screen, which is the one thing
     /// that section calls the product broken.
     ///
-    /// Its own reason, and sent only to the pilot who was sharing.
+    /// Its own reason, and sent only to the person who was sharing.
     /// [`ServerMessage::ScreenShareStopped`] goes to the whole Cage and carries
     /// no reason on purpose — the two ordinary endings tell themselves apart —
     /// and this is the third: somebody who pressed stop knows they pressed it,
@@ -788,7 +788,7 @@ pub enum ClientMessage {
     CreateCage {
         /// What to call it.
         name: String,
-        /// How many pilots may be inside at once.
+        /// How many people may be inside at once.
         limit: u16,
         /// A Line to bind to it, if any. `specs/04-servidor-seele.md` makes the
         /// association optional.
@@ -819,7 +819,7 @@ pub enum ClientMessage {
     // Appended last, for the reason [`AlertReason::RateLimited`] gives.
     //
     // `specs/04-servidor-seele.md` enumerates `expulsar`, `banir`,
-    // `remover_mensagem` and `mover_piloto`, migration 1 seeds all four on the
+    // `remover_mensagem` and `mover_persono`, migration 1 seeds all four on the
     // Comandante and the Operador, and until now **no message carried any of
     // them**. The permissions existed and there was nothing to ask for: the
     // app's `EJETAR PLUG DO OPERADOR` has been drawn and disabled since v2 for
@@ -829,25 +829,25 @@ pub enum ClientMessage {
     // — not from anything the handshake cached. `specs/08-seguranca.md`: "Toda
     // ação é verificada no servidor, sempre, mesmo que o cliente já esconda o
     // botão."
-    /// Ends a pilot's session. `expulsar` — [`Permission::Kick`].
+    /// Ends a person's session. `expulsar` — [`Permission::Kick`].
     ///
-    /// This session, and nothing beyond it: the pilot may reconnect at once.
-    /// Barring a return is [`Self::BanPilot`], and the two are separate verbs
+    /// This session, and nothing beyond it: the person may reconnect at once.
+    /// Barring a return is [`Self::BanPerson`], and the two are separate verbs
     /// because they are separate decisions — "leave the room" is not "never
     /// come back", and an operator who wanted the first and got the second has
     /// no way to take it back except by finding the row.
-    KickPilot {
+    KickPerson {
         /// Who.
-        pilot: PilotId,
+        person: PersonId,
     },
-    /// Bars a pilot from returning. `banir` — [`Permission::Ban`].
+    /// Bars a person from returning. `banir` — [`Permission::Ban`].
     ///
     /// Ends their session too: a ban that let the offender stay until they
     /// chose to leave would be a ban that does nothing to the thing that
     /// prompted it.
-    BanPilot {
+    BanPerson {
         /// Who.
-        pilot: PilotId,
+        person: PersonId,
         /// The operator's own words, for the operator's own record.
         ///
         /// Not a hole in the enumerated-reasons rule, and the same exception
@@ -878,17 +878,17 @@ pub enum ClientMessage {
         /// Which message.
         message: MessageId,
     },
-    /// Moves a pilot into a Cage. `mover_piloto` — [`Permission::MovePilot`].
+    /// Moves a person into a Cage. `mover_persono` — [`Permission::MovePerson`].
     ///
-    /// The pilot is told, and told *what happened*: they get
+    /// The person is told, and told *what happened*: they get
     /// [`ServerMessage::MovedToCage`] so their client follows, and an
     /// [`ServerMessage::Alert`] carrying [`AlertReason::MovedByOperator`] so
     /// they read a sentence rather than finding themselves somewhere else with
     /// no explanation. Being moved silently is indistinguishable from a client
     /// that lost track of which room it was in.
-    MovePilot {
+    MovePerson {
         /// Who.
-        pilot: PilotId,
+        person: PersonId,
         /// Where to.
         cage: CageId,
     },
@@ -957,7 +957,7 @@ pub enum ClientMessage {
     /// whole past is — and a number that is nearly right in a box promising
     /// destruction is worse than no number at all.
     ///
-    /// Needs no permission. Answering it tells a pilot how much is in a Line
+    /// Needs no permission. Answering it tells a person how much is in a Line
     /// they may already read, and refusing it would only mean the confirmation
     /// they see is the vaguer one.
     WeighLine {
@@ -1107,8 +1107,8 @@ pub enum ServerMessage {
     Session {
         /// Session identifier.
         id: SessionId,
-        /// Which pilot this connection is.
-        pilot: PilotId,
+        /// Which person this connection is.
+        person: PersonId,
         /// The media source assigned to this connection — gap G1.
         ///
         /// `specs/08-seguranca.md`: the server assigns it and never accepts one
@@ -1117,13 +1117,13 @@ pub enum ServerMessage {
         ssrc: Ssrc,
         /// Name of the Dogma.
         dogma: String,
-        /// Voice channels visible to this pilot.
+        /// Voice channels visible to this person.
         cages: Vec<CageInfo>,
-        /// Text channels visible to this pilot.
+        /// Text channels visible to this person.
         lines: Vec<LineInfo>,
         /// Roles defined on this Dogma.
         roles: Vec<Role>,
-        /// What **this** pilot may do, as PERMISSIONS resolved it.
+        /// What **this** person may do, as PERMISSIONS resolved it.
         ///
         /// `roles` above is the Dogma's catalogue of roles; nothing on the wire
         /// ever told a client which of them it holds, so no shell could tell
@@ -1138,26 +1138,26 @@ pub enum ServerMessage {
         /// segurança." Every action is checked again when it is asked for.
         permissions: Vec<Permission>,
     },
-    /// A pilot entered a Cage.
-    PilotJoined {
+    /// A person entered a Cage.
+    PersonJoined {
         /// Which Cage.
         cage: CageId,
         /// Who.
-        profile: PilotProfile,
+        profile: PersonProfile,
         /// Their media source — gap G1. This is the mapping
         /// `specs/02-protocolo.md` says the client resolves from the control
         /// channel, and which nothing previously carried.
         ssrc: Ssrc,
     },
-    /// A pilot left a Cage.
-    PilotLeft {
+    /// A person left a Cage.
+    PersonLeft {
         /// Which Cage.
         cage: CageId,
         /// Who.
-        pilot: PilotId,
+        person: PersonId,
     },
-    /// A pilot's state changed.
-    PilotState(PilotState),
+    /// A person's state changed.
+    PersonState(PersonState),
     /// A message was posted.
     MessageReceived {
         /// Which Line.
@@ -1165,7 +1165,7 @@ pub enum ServerMessage {
         /// Server-assigned identifier.
         id: MessageId,
         /// Who wrote it.
-        author: PilotId,
+        author: PersonId,
         /// When the server accepted it, in **seconds** since the Unix epoch.
         ///
         /// The unit is in the name because it was wrong once: PERSISTENCE stores
@@ -1184,9 +1184,9 @@ pub enum ServerMessage {
         /// What the author is called.
         ///
         /// Carried with the message rather than looked up, because a client
-        /// reading history has never seen most of these pilots arrive and has
+        /// reading history has never seen most of these people arrive and has
         /// no other way to learn their names. Without it a resumed session
-        /// attributes everything written before you got there to "piloto 1".
+        /// attributes everything written before you got there to "pessoa 1".
         author_nickname: String,
         /// Body.
         body: String,
@@ -1254,7 +1254,7 @@ pub enum ServerMessage {
     //
     // Appended last, for the same reason as their client-side counterparts.
     //
-    // Sent to **everybody connected**, the pilot who asked included. Without
+    // Sent to **everybody connected**, the person who asked included. Without
     // that, a Cage made at nine o'clock is a Cage nobody sees until they
     // reconnect — and "reconnect to see the room I just told you about" is the
     // kind of instruction that makes a product feel broken rather than new.
@@ -1289,16 +1289,16 @@ pub enum ServerMessage {
     // ban both end with [`Self::Disconnecting`], which already enumerates
     // `Kicked` and `Banned`; a removal is [`Self::MessageRemoved`], which every
     // shell already folds in. Only being moved had nothing that could say it.
-    /// This pilot's plug is now in a different Cage, by somebody else's hand.
+    /// This person's plug is now in a different Cage, by somebody else's hand.
     ///
-    /// Sent only to the pilot who was moved. Everybody else learns it the
-    /// ordinary way, as a [`Self::PilotLeft`] from the old Cage and a
-    /// [`Self::PilotJoined`] in the new one — there is nothing special about a
+    /// Sent only to the person who was moved. Everybody else learns it the
+    /// ordinary way, as a [`Self::PersonLeft`] from the old Cage and a
+    /// [`Self::PersonJoined`] in the new one — there is nothing special about a
     /// move from outside, and inventing a second way to say "somebody is in
     /// that room now" would mean every shell learning both.
     ///
     /// What makes this its own message is that the moved client has to change
-    /// **its own** idea of where it is, and that is a fact no `PilotJoined` has
+    /// **its own** idea of where it is, and that is a fact no `PersonJoined` has
     /// ever carried: a client sets its current Cage on the way *out*, when it
     /// asks. Without this it would keep sending voice into the room it thought
     /// it was in and drawing that room's roster around itself.
@@ -1311,7 +1311,7 @@ pub enum ServerMessage {
     //
     // Appended last, for the reason [`AlertReason::RateLimited`] gives.
     //
-    // Sent to **everybody connected**, the pilot who asked included, exactly
+    // Sent to **everybody connected**, the person who asked included, exactly
     // like the four announcements above: a room that goes on being drawn until
     // the next handshake is a room people keep trying to walk into.
     /// A Cage was destroyed.
@@ -1341,7 +1341,7 @@ pub enum ServerMessage {
         /// counting them would inflate what the reader is told they are about
         /// to lose by a number only the database can see.
         messages: u32,
-        /// How many distinct pilots wrote them.
+        /// How many distinct people wrote them.
         authors: u32,
         /// When the oldest one was written, in seconds since the Unix epoch.
         ///
@@ -1359,7 +1359,7 @@ pub enum ServerMessage {
     // is where `specs/02-protocolo.md` says every reason already lives.
     /// A transfer was not taken, and why.
     ///
-    /// Sent only to the pilot who was sending, and nothing is published: no
+    /// Sent only to the person who was sending, and nothing is published: no
     /// half message, and no message pointing at a file that does not exist.
     /// Keyed by `client_message_id` rather than by anything the server assigned,
     /// because at the moment of refusal the server has assigned nothing — the
@@ -1387,7 +1387,7 @@ pub enum ServerMessage {
     //
     // Appended last, for the reason [`AlertReason::RateLimited`] gives.
     //
-    // Sent to **everybody connected**, the pilot who asked included, exactly
+    // Sent to **everybody connected**, the person who asked included, exactly
     // like the four room announcements: a Dogma that goes on being drawn under
     // its old name until the next handshake is the failure ADR 0032 names —
     // the screen of whoever renamed it showing one thing and everybody else's
@@ -1439,8 +1439,8 @@ pub enum ServerMessage {
     // handed one.
     /// Somebody started sharing a screen.
     ///
-    /// Also sent to a pilot who **enters** a Cage where a transmission is
-    /// already running, straight after their [`Self::PilotJoined`]. That is a
+    /// Also sent to a person who **enters** a Cage where a transmission is
+    /// already running, straight after their [`Self::PersonJoined`]. That is a
     /// rule for the Dogma rather than a message of its own, and it is the
     /// reason [`CageInfo`] gained no field: a client learns about a
     /// transmission the same way whether it was there when it began or not,
@@ -1449,7 +1449,7 @@ pub enum ServerMessage {
         /// Which Cage it is happening in.
         cage: CageId,
         /// Who is sharing.
-        pilot: PilotId,
+        person: PersonId,
         /// What to call the transmission from now on.
         ///
         /// Assigned here, by the Dogma, and never taken from the sender — the
@@ -1463,7 +1463,7 @@ pub enum ServerMessage {
     ///
     /// Carries no reason. The two ways it ends — somebody pressed stop, or the
     /// sender went away — are already told apart by everything else that
-    /// happens: a pilot who left produces [`Self::PilotLeft`], and one who is
+    /// happens: a person who left produces [`Self::PersonLeft`], and one who is
     /// still in the room stopped on purpose.
     ScreenShareStopped {
         /// Which Cage it was happening in.
@@ -1473,7 +1473,7 @@ pub enum ServerMessage {
     },
     /// Somebody watching has nothing to predict from and needs a key frame.
     ///
-    /// Sent only to the pilot who is sharing, and it carries who asked because
+    /// Sent only to the person who is sharing, and it carries who asked because
     /// the sender may hold one stream per watcher: without a name it would have
     /// to spend a key frame on everybody to answer one person, and §3.3 counts
     /// what a key frame costs. It is also the only way a sender can tell one
@@ -1482,7 +1482,7 @@ pub enum ServerMessage {
         /// Which transmission.
         screen: ScreenId,
         /// Who asked.
-        pilot: PilotId,
+        person: PersonId,
     },
     /// How many people are receiving a transmission.
     ///
@@ -1544,40 +1544,40 @@ pub enum ServerMessage {
     ///
     /// # Why this exists at all
     ///
-    /// [`Self::PilotJoined`] carries a Cage, because it announces sitting down
-    /// in one. There was nothing that announced being *here* — so a pilot who
+    /// [`Self::PersonJoined`] carries a Cage, because it announces sitting down
+    /// in one. There was nothing that announced being *here* — so a person who
     /// connected and stayed out of every room was invisible to everybody else,
     /// and a client's own comment said so: "there is no message on the wire
     /// that says who entered the server and stayed out of the rooms". The
     /// people list showed whoever was seated and called itself the roster.
     ///
-    /// Sent once per connected pilot when a session opens — the whole picture,
+    /// Sent once per connected person when a session opens — the whole picture,
     /// like the occupancy sweep beside it — and again to everybody whenever
     /// somebody new arrives.
     ///
-    /// Idempotent by construction: a pilot who is announced twice is one entry,
-    /// because whoever receives it keys on [`PilotProfile::id`].
+    /// Idempotent by construction: a person who is announced twice is one entry,
+    /// because whoever receives it keys on [`PersonProfile::id`].
     ///
     /// **At the end of the enum, and this is not stylistic.** Postcard writes a
     /// variant's index and nothing else; a variant inserted in the middle
     /// renumbers every one after it, and two builds of this product would then
     /// disagree about what every later message means.
-    PilotPresent {
+    PersonPresent {
         /// Who.
-        profile: PilotProfile,
+        profile: PersonProfile,
         /// Their media source, for the ssrc-to-person table every client keeps.
         ssrc: Ssrc,
     },
     /// Somebody's connection to this Dogma ended.
     ///
-    /// The twin of [`Self::PilotPresent`], and the half that hurts to leave
+    /// The twin of [`Self::PersonPresent`], and the half that hurts to leave
     /// out: without it every client accumulates the names of everyone who has
-    /// ever connected and draws them as present. [`Self::PilotLeft`] does not
+    /// ever connected and draws them as present. [`Self::PersonLeft`] does not
     /// cover it — that one says a Cage was vacated, and somebody who never sat
     /// down never produces one.
-    PilotGone {
+    PersonGone {
         /// Who.
-        pilot: PilotId,
+        person: PersonId,
     },
 }
 
@@ -1759,7 +1759,7 @@ fn png_header(bytes: &[u8]) -> Option<(u32, u32)> {
     Some((width, height))
 }
 
-/// Bounds how many pilots a Cage may hold.
+/// Bounds how many people a Cage may hold.
 ///
 /// Zero is refused: a Cage nobody may enter is not a Cage, and a limit of zero
 /// is far more often a field left at its default than a deliberate choice.
@@ -1793,7 +1793,7 @@ impl Validate for Telemetry {
     }
 }
 
-impl Validate for PilotState {
+impl Validate for PersonState {
     fn validate(&self) -> Result<(), ControlError> {
         // specs/02-protocolo.md puts the Sync Ratio on a 0-100 scale. A u8 can
         // hold 200, and a shell matching the bands of specs/07 would find no
@@ -1843,7 +1843,7 @@ impl Validate for ClientMessage {
             | Self::RenameLine { name, .. } => check_name("name", name),
             // The operator's own words about their own Dogma, bounded like the
             // other place they cross the wire.
-            Self::BanPilot { reason, .. } => check(
+            Self::BanPerson { reason, .. } => check(
                 "reason",
                 reason.as_ref().map_or(0, String::len),
                 MAX_ALERT_TEXT_LEN,
@@ -1857,9 +1857,9 @@ impl Validate for ClientMessage {
             | Self::SetTotalIsolation(_)
             | Self::SetPresence(_)
             | Self::Ping { .. }
-            | Self::KickPilot { .. }
+            | Self::KickPerson { .. }
             | Self::RemoveMessage { .. }
-            | Self::MovePilot { .. }
+            | Self::MovePerson { .. }
             | Self::DeleteCage { .. }
             | Self::DeleteLine { .. }
             | Self::WeighLine { .. }
@@ -1899,7 +1899,7 @@ impl Validate for ServerMessage {
             Self::CageRenamed { name, .. } | Self::LineRenamed { name, .. } => {
                 check_name("name", name)
             }
-            Self::PilotJoined { profile, .. } | Self::PilotPresent { profile, .. } => {
+            Self::PersonJoined { profile, .. } | Self::PersonPresent { profile, .. } => {
                 check("nickname", profile.nickname.len(), MAX_NICKNAME_LEN)
             }
             Self::MessageReceived {
@@ -1929,11 +1929,11 @@ impl Validate for ServerMessage {
                 MAX_ALERT_TEXT_LEN,
             ),
             Self::Telemetry(telemetry) => telemetry.validate(),
-            Self::PilotState(state) => state.validate(),
+            Self::PersonState(state) => state.validate(),
             Self::DogmaRenamed { name } => check_dogma_name(name),
             Self::DogmaIconChanged { icon } => check_icon(icon.as_ref()),
-            Self::PilotLeft { .. }
-            | Self::PilotGone { .. }
+            Self::PersonLeft { .. }
+            | Self::PersonGone { .. }
             | Self::MessageRemoved { .. }
             | Self::Pong { .. }
             | Self::Disconnecting { .. }
@@ -1970,7 +1970,7 @@ mod tests {
     fn session() -> ServerMessage {
         ServerMessage::Session {
             id: SessionId(7),
-            pilot: PilotId(42),
+            person: PersonId(42),
             ssrc: Ssrc(0xABCD),
             dogma: "Terceira Tóquio".into(),
             cages: vec![CageInfo {
@@ -1986,7 +1986,7 @@ mod tests {
             }],
             roles: vec![Role {
                 id: RoleId(1),
-                name: "Pilot".into(),
+                name: "Person".into(),
                 permissions: vec![Permission::InsertPlug, Permission::Speak],
             }],
             permissions: vec![Permission::InsertPlug, Permission::Speak],
@@ -2084,7 +2084,7 @@ mod tests {
     #[test]
     fn the_session_carries_the_ssrc() {
         // Gap G1. Without this a client cannot learn its own media source, and
-        // specs/02-protocolo.md's "resolve ssrc to pilot from the control
+        // specs/02-protocolo.md's "resolve ssrc to person from the control
         // channel" has nothing to resolve from.
         let frame = encode(&session()).unwrap();
         let ServerMessage::Session { ssrc, .. } = decode::<ServerMessage>(&frame).unwrap() else {
@@ -2094,12 +2094,12 @@ mod tests {
     }
 
     #[test]
-    fn a_joining_pilot_carries_their_ssrc() {
+    fn a_joining_person_carries_their_ssrc() {
         // The other half of gap G1: the mapping for everybody else.
-        let joined = ServerMessage::PilotJoined {
+        let joined = ServerMessage::PersonJoined {
             cage: CageId(1),
-            profile: PilotProfile {
-                id: PilotId(2),
+            profile: PersonProfile {
+                id: PersonId(2),
                 nickname: "shinji".into(),
                 roles: vec![RoleId(1)],
             },
@@ -2110,12 +2110,12 @@ mod tests {
     }
 
     #[test]
-    fn pilot_state_carries_both_mute_controls() {
+    fn person_state_carries_both_mute_controls() {
         // Gap G8. specs/07-tema-evangelion.md defines "Isolamento total" and
         // specs/05-cliente-tui.md binds it to a key, but nothing carried it, so
         // a roster could not show who was not listening.
-        let state = ServerMessage::PilotState(PilotState {
-            pilot: PilotId(1),
+        let state = ServerMessage::PersonState(PersonState {
+            person: PersonId(1),
             at_field: true,
             total_isolation: true,
             speaking: false,
@@ -2150,7 +2150,7 @@ mod tests {
     }
 
     #[test]
-    fn the_session_says_what_this_pilot_may_do() {
+    fn the_session_says_what_this_person_may_do() {
         // `roles` is the Dogma's catalogue; nothing ever said which of them this
         // connection holds. Without this field a shell has no honest way to
         // decide whether to offer a control at all, and the only alternative is
@@ -2287,7 +2287,7 @@ mod tests {
                     encode(&ask),
                     Err(ControlError::FieldOutOfRange { field: "limit" })
                 ),
-                "accepted a Cage for {limit} pilots"
+                "accepted a Cage for {limit} people"
             );
 
             let mut frame = vec![PROTOCOL_VERSION];
@@ -2297,7 +2297,7 @@ mod tests {
                     decode::<ClientMessage>(&frame),
                     Err(ControlError::FieldOutOfRange { field: "limit" })
                 ),
-                "accepted a hand-rolled Cage for {limit} pilots"
+                "accepted a hand-rolled Cage for {limit} people"
             );
         }
 
@@ -2309,7 +2309,7 @@ mod tests {
                     line: None,
                 })
                 .is_ok(),
-                "refused a Cage for {limit} pilots"
+                "refused a Cage for {limit} people"
             );
         }
     }
@@ -2321,7 +2321,7 @@ mod tests {
         // reach a shell that has no sentence for it.
         let ServerMessage::Session {
             id,
-            pilot,
+            person,
             ssrc,
             dogma,
             lines,
@@ -2334,7 +2334,7 @@ mod tests {
         };
         let blank = ServerMessage::Session {
             id,
-            pilot,
+            person,
             ssrc,
             dogma,
             cages: vec![CageInfo {
@@ -2359,22 +2359,22 @@ mod tests {
     #[test]
     fn the_moderation_verbs_round_trip() {
         for message in [
-            ClientMessage::KickPilot { pilot: PilotId(42) },
-            ClientMessage::BanPilot {
-                pilot: PilotId(42),
+            ClientMessage::KickPerson { person: PersonId(42) },
+            ClientMessage::BanPerson {
+                person: PersonId(42),
                 reason: Some("inundou a Linha".into()),
                 expires_at: Some(1_700_000_000),
             },
-            ClientMessage::BanPilot {
-                pilot: PilotId(42),
+            ClientMessage::BanPerson {
+                person: PersonId(42),
                 reason: None,
                 expires_at: None,
             },
             ClientMessage::RemoveMessage {
                 message: MessageId(9),
             },
-            ClientMessage::MovePilot {
-                pilot: PilotId(42),
+            ClientMessage::MovePerson {
+                person: PersonId(42),
                 cage: CageId(2),
             },
         ] {
@@ -2440,8 +2440,8 @@ mod tests {
         // way out so we cannot send one, and on the way in so a peer cannot
         // skip the check by hand-rolling a frame — the same pair every other
         // text field gets.
-        let long = ClientMessage::BanPilot {
-            pilot: PilotId(1),
+        let long = ClientMessage::BanPerson {
+            person: PersonId(1),
             reason: Some("x".repeat(MAX_ALERT_TEXT_LEN + 1)),
             expires_at: None,
         };
@@ -2465,14 +2465,14 @@ mod tests {
     }
 
     #[test]
-    fn moderation_asks_for_a_pilot_and_never_for_a_sentence() {
+    fn moderation_asks_for_a_person_and_never_for_a_sentence() {
         // specs/02-protocolo.md: no free-form string reaches the interface. A
         // kick that carried "why" as text would be a second error language
         // growing beside the enumerated one, written by whoever is angriest.
         // The one string here is the ban's operator note, which never leaves
         // the Dogma — the person barred meets `DisconnectReason::Banned` and
         // nothing else.
-        let frame = encode(&ClientMessage::KickPilot { pilot: PilotId(42) }).unwrap();
+        let frame = encode(&ClientMessage::KickPerson { person: PersonId(42) }).unwrap();
         assert!(
             frame.len() < 32,
             "a kick got big enough to be carrying prose: {} bytes",
@@ -2697,8 +2697,8 @@ mod numeric_tests {
     fn a_sync_ratio_above_one_hundred_is_refused() {
         // specs/02-protocolo.md puts it on a 0-100 scale; a u8 holds more, and
         // no band in specs/07 covers 200.
-        let state = ServerMessage::PilotState(PilotState {
-            pilot: PilotId(1),
+        let state = ServerMessage::PersonState(PersonState {
+            person: PersonId(1),
             at_field: false,
             total_isolation: false,
             speaking: true,
@@ -3016,7 +3016,7 @@ mod screen_tests {
             (
                 ServerMessage::ScreenShareStarted {
                     cage: CageId(2),
-                    pilot: PilotId(42),
+                    person: PersonId(42),
                     screen: ScreenId(0x00C0_FFEE),
                 },
                 24_u8,
@@ -3031,7 +3031,7 @@ mod screen_tests {
             (
                 ServerMessage::KeyFrameRequested {
                     screen: ScreenId(0x00C0_FFEE),
-                    pilot: PilotId(43),
+                    person: PersonId(43),
                 },
                 26,
             ),
@@ -3072,7 +3072,7 @@ mod screen_tests {
         // `ssrc` it always did, untouched by any of this.
         let started = ServerMessage::ScreenShareStarted {
             cage: CageId(2),
-            pilot: PilotId(42),
+            person: PersonId(42),
             screen: ScreenId(7),
         };
         let frame = encode(&started).unwrap();
@@ -3151,7 +3151,7 @@ mod screen_tests {
             postcard::to_extend(
                 &ServerMessage::KeyFrameRequested {
                     screen: ScreenId(1),
-                    pilot: PilotId(1),
+                    person: PersonId(1),
                 },
                 Vec::new()
             )

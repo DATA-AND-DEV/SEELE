@@ -289,7 +289,7 @@ fn resolve(target: &str) -> Result<(SocketAddr, String, String)> {
 
 /// Where this client keeps its identity and its pins.
 ///
-/// `$SEELE_HOME` first, so a second client on one machine can be a second pilot
+/// `$SEELE_HOME` first, so a second client on one machine can be a second person
 /// — which is exactly what testing two ends of a conversation needs.
 fn config_dir() -> PathBuf {
     if let Ok(home) = std::env::var("SEELE_HOME") {
@@ -480,7 +480,7 @@ struct Runtime<'a> {
 /// Ed25519 key on disk (ADR 0004) and never changes, while this counter started
 /// at 1 on every session. So after reconnecting, message 1 of the new session
 /// was read as a retry of message 1 of the old one and **was never written** —
-/// a pilot who dropped their wi-fi and came back could not speak, and neither
+/// a person who dropped their wi-fi and came back could not speak, and neither
 /// end was told (pendency 19).
 ///
 /// The high half is random and the low half counts, which leaves four billion
@@ -1375,7 +1375,7 @@ async fn act(
 
 /// A metade local de sair de uma sala de voz — a que não passa pela rede.
 ///
-/// O Dogma não devolve o `PilotLeft` a quem o causou — «essa pessoa já sabe» —,
+/// O Dogma não devolve o `PersonLeft` a quem o causou — «essa pessoa já sabe» —,
 /// então sair, exatamente como entrar, é contabilidade que cada casca faz para
 /// si. `ejetar_plug` sozinho esvazia o assento no servidor e em todas as outras
 /// telas; a única que continuaria desenhando a pessoa dentro da sala é a de
@@ -1407,7 +1407,7 @@ async fn activate(runtime: &mut Runtime<'_>, client: &Enlace) -> Result<(), Fech
                 open_line(runtime, client, id).await?;
             }
         }
-        Node::Pilot(_) => {}
+        Node::Person(_) => {}
     }
     Ok(())
 }
@@ -1683,7 +1683,7 @@ fn note(runtime: &mut Runtime<'_>, text: String) {
 /// Wall-clock time for the title bar.
 ///
 /// Formatting lives here because the core deals in monotonic durations and has
-/// no opinion about what time it is where the pilot is sitting.
+/// no opinion about what time it is where the person is sitting.
 fn clock() -> String {
     chrono::Local::now().format("%H:%M:%S").to_string()
 }
@@ -1699,14 +1699,14 @@ mod tests {
     #[test]
     fn sair_da_sala_esvazia_o_assento_na_propria_tela() {
         use seele_core::{
-            CageId, CageInfo, LineId, LineInfo, PilotId, PilotProfile, Room, ServerMessage,
+            CageId, CageInfo, LineId, LineInfo, PersonId, PersonProfile, Room, ServerMessage,
             SessionId, Ssrc,
         };
         use seele_tui::app::{App, Node};
         use seele_tui::view;
 
         // O defeito irmão do aplicativo (`1019c8e` e o anterior), evitado aqui
-        // antes de existir: o Dogma não devolve o `PilotLeft` a quem o causou,
+        // antes de existir: o Dogma não devolve o `PersonLeft` a quem o causou,
         // então `ejetar_plug` sozinho deixa a sala esvaziada no servidor e em
         // todas as outras telas menos na de quem saiu. Quebrar o
         // `room.leave_cage()` de `sair_da_sala` deixa este teste vermelho.
@@ -1716,7 +1716,7 @@ mod tests {
         let mut room = Room::new();
         room.apply(&ServerMessage::Session {
             id: SessionId(1),
-            pilot: PilotId(7),
+            person: PersonId(7),
             ssrc: Ssrc(700),
             dogma: "servidor de teste".into(),
             cages: vec![CageInfo {
@@ -1733,10 +1733,10 @@ mod tests {
             roles: Vec::new(),
             permissions: Vec::new(),
         });
-        room.apply(&ServerMessage::PilotJoined {
+        room.apply(&ServerMessage::PersonJoined {
             cage: SALA,
-            profile: PilotProfile {
-                id: PilotId(7),
+            profile: PersonProfile {
+                id: PersonId(7),
                 nickname: "ayanami".into(),
                 roles: Vec::new(),
             },
@@ -1747,7 +1747,7 @@ mod tests {
         let mut app = App::new();
         view::project(&room, &mut app);
         assert!(
-            app.tree.iter().any(|no| matches!(no, Node::Pilot(_))),
+            app.tree.iter().any(|no| matches!(no, Node::Person(_))),
             "a montagem não chegou a pôr ninguém dentro da sala: {:?}",
             app.tree
         );
@@ -1763,7 +1763,7 @@ mod tests {
             "o assento não esvaziou na tela de quem saiu"
         );
         assert!(
-            !app.tree.iter().any(|no| matches!(no, Node::Pilot(_))),
+            !app.tree.iter().any(|no| matches!(no, Node::Person(_))),
             "a árvore continua desenhando alguém dentro da sala: {:?}",
             app.tree
         );
@@ -1973,7 +1973,7 @@ mod tests {
             server: SocketAddr::from(([127, 0, 0, 1], 8383)),
             server_name: "localhost".to_owned(),
             pin_key: "127.0.0.1:8383".to_owned(),
-            nickname: "piloto".to_owned(),
+            nickname: "pessoa".to_owned(),
             cage: CageId(1),
             line: LineId(1),
             no_audio: true,

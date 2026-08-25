@@ -180,7 +180,7 @@ impl Politica {
 /// estava aqui antes dela.
 ///
 /// **O convite passava a ser gasto por quem *bate*, não por quem *entra*.** Um
-/// handshake que morresse depois desta camada — assinatura ruim, piloto banido,
+/// handshake que morresse depois desta camada — assinatura ruim, pessoa banido,
 /// a rede caindo entre um quadro e outro — queimava o convite de alguém que
 /// nunca chegou a entrar, e essa pessoa não tinha como voltar. Era raro. Com a
 /// portaria deixa de ser: uma batida pendente é o caso **normal**, a pessoa é

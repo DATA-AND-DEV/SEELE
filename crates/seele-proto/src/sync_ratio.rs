@@ -2,7 +2,7 @@
 //!
 //! `specs/07-tema-evangelion.md` calls this the product's signature element:
 //!
-//! > **A Taxa de Sincronização por pessoa.** Cada piloto no roster tem um
+//! > **A Taxa de Sincronização por pessoa.** Cada pessoa no roster tem um
 //! > percentual vivo derivado do RTT, jitter e perda daquela conexão. Nenhum
 //! > concorrente mostra isso; aqui é a coisa mais visível da tela. É a métrica
 //! > que dá caráter ao produto e, não por acaso, é genuinamente útil — quando
@@ -61,7 +61,7 @@ pub const LOSS_MAX_PENALTY: f32 = 30.0;
 /// Smoothing factor for the moving average. `specs/02-protocolo.md`: α ≈ 0,2.
 ///
 /// The spec's reason is presentational — "para não piscar" — and it is a real
-/// requirement: this number is on screen next to every pilot, and one that
+/// requirement: this number is on screen next to every person, and one that
 /// jumps around is noise a user learns to ignore.
 pub const SMOOTHING: f32 = 0.2;
 
@@ -178,7 +178,7 @@ pub fn raw(inputs: SyncInputs) -> f32 {
 
 /// A Sync Ratio that smooths over time.
 ///
-/// One per pilot in the roster, since `specs/07-tema-evangelion.md` makes the
+/// One per person in the roster, since `specs/07-tema-evangelion.md` makes the
 /// number per-person.
 #[derive(Debug, Clone, Copy)]
 pub struct SyncRatio {
@@ -201,7 +201,7 @@ impl SyncRatio {
     /// Folds in one measurement and returns the smoothed value.
     ///
     /// The first measurement is taken whole: starting from zero and easing up
-    /// would show every pilot as critical for the first second of every call.
+    /// would show every person as critical for the first second of every call.
     pub fn update(&mut self, inputs: SyncInputs) -> u8 {
         let instant = raw(inputs);
         let smoothed = match self.smoothed {
@@ -215,7 +215,7 @@ impl SyncRatio {
     /// The current value, 0 to 100.
     ///
     /// A connection with no measurements yet reads as 100 rather than 0: the
-    /// pilot has just arrived and nothing is known to be wrong with them.
+    /// person has just arrived and nothing is known to be wrong with them.
     #[must_use]
     pub fn value(&self) -> u8 {
         self.smoothed
@@ -401,14 +401,14 @@ mod tests {
 
     #[test]
     fn the_first_measurement_is_taken_whole() {
-        // Easing up from zero would show every pilot as critical for the first
+        // Easing up from zero would show every person as critical for the first
         // second of every call.
         let mut ratio = SyncRatio::new();
         assert_eq!(ratio.update(inputs(2.0, 0.3, 0.0)), 100);
     }
 
     #[test]
-    fn a_pilot_with_no_measurements_reads_as_nominal() {
+    fn a_person_with_no_measurements_reads_as_nominal() {
         // They just arrived. Nothing is known to be wrong with them, and showing
         // a red zero would be an accusation rather than a measurement.
         let ratio = SyncRatio::new();

@@ -247,7 +247,7 @@ impl Selecao {
     /// **Vazia**, e não preenchida com a sugestão. Preencher parece atencioso e
     /// é uma armadilha: quem quer outro nome digita, e o que digita gruda no que
     /// já estava. Foi assim que o primeiro teste desta tela entrou num Dogma
-    /// como `pilotoasuka`. Sugestão se mostra apagada e se aceita com Enter;
+    /// como `personoasuka`. Sugestão se mostra apagada e se aceita com Enter;
     /// digitar escreve por cima.
     fn perguntar_apelido(&mut self) {
         self.aberta = Some((Pergunta::Apelido, String::new()));
@@ -565,8 +565,8 @@ mod tests {
     #[test]
     fn digitar_um_apelido_escreve_por_cima_da_sugestao() {
         // Achado dirigindo a tela de verdade: com o campo preenchido pela
-        // sugestão, digitar `asuka` entrava no Dogma como `pilotoasuka`.
-        let mut selecao = Selecao::nova(vec![conhecido("casa:8383", "piloto", None)]);
+        // sugestão, digitar `asuka` entrava no Dogma como `personoasuka`.
+        let mut selecao = Selecao::nova(vec![conhecido("casa:8383", "pessoa", None)]);
 
         selecao.tecla(KeyCode::Char('n'));
         digitar(&mut selecao, "novo:8383");

@@ -12,7 +12,7 @@
 //! `broadcast` de capacidade fixa: passado o tamanho do anel, ele descarta o
 //! mais antigo e devolve `Lagged` na próxima leitura. Um `let Ok(event) = event
 //! else { continue }` transformava isso em nada — a sessão seguia, calada, com
-//! um buraco permanente no que aquele piloto vê.
+//! um buraco permanente no que aquele pessoa vê.
 //!
 //! É por isso que a pendência é a número 1: a mensagem foi gravada em PERSISTENCE,
 //! quem escreveu viu a sua aparecer, e o outro lado nunca soube que faltou.
@@ -51,7 +51,7 @@ const CORPO: usize = 3_900;
 /// Quantas conexões falam ao mesmo tempo.
 ///
 /// Vinte, e não uma, porque o [`seele_server::taxa::Vigia`] limita cada conexão
-/// a sessenta quadros de rajada — e com razão. Vinte pilotos falando de uma vez
+/// a sessenta quadros de rajada — e com razão. Vinte pessoas falando de uma vez
 /// é um Dogma cheio numa hora movimentada, que `specs/04-servidor-seele.md`
 /// dimensiona em cinquenta pessoas.
 const FALANTES: usize = 20;
@@ -174,7 +174,7 @@ async fn abrir(endereco: SocketAddr, semente: u8, janela: u32) -> Result<Par> {
         &ClientMessage::Hello {
             version: seele_proto::PROTOCOL_VERSION,
             client: "par-cru".into(),
-            nickname: format!("piloto{semente:03}"),
+            nickname: format!("pessoa{semente:03}"),
             public_key: chave.verifying_key().to_bytes().to_vec(),
             join_secret: None,
         },

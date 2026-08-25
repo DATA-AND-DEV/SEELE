@@ -241,7 +241,7 @@ pub fn bater(
             // Já decidido. O apelido **não** é reescrito aqui: o que quem
             // hospeda aprovou foi o que estava no cartão, e deixar a pessoa
             // trocar o nome depois de aprovada faria a lista de admitidos
-            // mentir sobre quem foi admitido. O nome em uso é do `pilots`, e
+            // mentir sobre quem foi admitido. O nome em uso é do `people`, e
             // esta coluna é o registro do que foi decidido.
             if veredito == "admitido" {
                 Ok(Resposta::Entra)

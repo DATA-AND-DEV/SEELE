@@ -2,12 +2,12 @@
 //!
 //! O número que `specs/07-tema-evangelion.md` chama de «a coisa mais visível da
 //! tela» aparece em dois lugares ao mesmo tempo: na barra de telemetria, medida
-//! pela casca contra a própria conexão, e no roster, uma linha por piloto, vinda
-//! do `PilotState` que o Dogma difunde a cada segundo.
+//! pela casca contra a própria conexão, e no roster, uma linha por pessoa, vinda
+//! do `PersonState` que o Dogma difunde a cada segundo.
 //!
 //! Para todo mundo **menos você** os dois batem. Para você, a linha do roster
-//! nunca recebia difusão nenhuma: `translate` descartava o `Event::PilotState`
-//! do próprio piloto, então a entrada de `me` ficava no padrão de `Pilot::new` —
+//! nunca recebia difusão nenhuma: `translate` descartava o `Event::PersonState`
+//! do próprio pessoa, então a entrada de `me` ficava no padrão de `Person::new` —
 //! zero — para sempre. A tela mostrava `SYNC 100%` na barra e `você 0%` no
 //! roster, no mesmo instante e sobre a mesma métrica.
 //!
@@ -16,15 +16,15 @@
 //! Zero não é «não medido» aos olhos de quem lê: pelas três faixas do comp
 //! (`design/Entry Plug v2.dc.html`) zero é **crítico**, vermelho, a cor de «vá
 //! olhar». Numa sessão local, com RTT, jitter e perda em zero, o Dogma calcula
-//! cem — e o roster acusava o piloto de estar em colapso.
+//! cem — e o roster acusava o pessoa de estar em colapso.
 //!
 //! E não para na linha: `Room::cage_sync` tira a média das cadeiras, então numa
-//! sessão de um piloto só a MÉDIA DO CAGE também era zero, e num Cage de cinco
+//! sessão de um pessoa só a MÉDIA DO CAGE também era zero, e num Cage de cinco
 //! cada pessoa via a média puxada para baixo pela própria linha.
 //!
 //! # O que este arquivo afirma, e o que não
 //!
-//! Afirma que a difusão **chega** ao piloto que ela descreve e que o roster dele
+//! Afirma que a difusão **chega** ao pessoa que ela descreve e que o roster dele
 //! sai do zero por medição, não por otimismo. Não afirma valor exato: a taxa é
 //! medida contra a pilha QUIC real, e cravar «cem» seria cravar o desempenho da
 //! máquina de integração contínua. O que dá para afirmar é a faixa — em
@@ -134,16 +134,16 @@ where
     vale(sala)
 }
 
-/// A taxa que a sala conhece do próprio piloto.
+/// A taxa que a sala conhece do próprio pessoa.
 fn minha_taxa(sala: &Room) -> Option<u8> {
     let eu = sala.me?;
     sala.current_roster()
-        .find(|piloto| piloto.id == eu)
-        .map(|piloto| piloto.sync_ratio)
+        .find(|pessoa| pessoa.id == eu)
+        .map(|pessoa| pessoa.sync_ratio)
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn o_roster_mostra_a_taxa_do_proprio_piloto() -> Result<()> {
+async fn o_roster_mostra_a_taxa_do_proprio_persono() -> Result<()> {
     let (endereco, servidor) = dogma().await?;
     let (mut enlace, mut sala) = sentar(endereco, 46, "ayanami").await?;
 
@@ -159,11 +159,11 @@ async fn o_roster_mostra_a_taxa_do_proprio_piloto() -> Result<()> {
     })
     .await;
 
-    let taxa = minha_taxa(&sala).expect("o próprio piloto sumiu do roster");
+    let taxa = minha_taxa(&sala).expect("o próprio pessoa sumiu do roster");
     assert!(
         mediu,
         "a barra de telemetria mede a Taxa de Sincronização e o roster continua \
-         em {taxa}%: a difusão do `PilotState` nunca chegou ao piloto que ela \
+         em {taxa}%: a difusão do `PersonState` nunca chegou ao pessoa que ela \
          descreve"
     );
 
@@ -182,7 +182,7 @@ async fn o_roster_mostra_a_taxa_do_proprio_piloto() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_media_do_cage_conta_a_propria_linha() -> Result<()> {
     // A média sai de `Room::cage_sync`, que soma as cadeiras. Enquanto a linha
-    // de `me` ficava em zero, um piloto sozinho via MÉDIA DO CAGE: 0 — e num
+    // de `me` ficava em zero, um pessoa sozinho via MÉDIA DO CAGE: 0 — e num
     // Cage cheio cada pessoa via a média puxada para baixo pela própria linha,
     // cada uma por um valor diferente. Uma média que discorda entre as telas da
     // mesma sala não é média de nada.
@@ -198,10 +198,10 @@ async fn a_media_do_cage_conta_a_propria_linha() -> Result<()> {
     let media = sala
         .current_cage_sync()
         .expect("um Cage com alguém dentro tem média");
-    assert_eq!(media.pilots, 1, "o Cage devia ter só este piloto");
+    assert_eq!(media.people, 1, "o Cage devia ter só este pessoa");
     assert!(
         mediu,
-        "a média do Cage de um piloto medido ficou em {}%",
+        "a média do Cage de um pessoa medido ficou em {}%",
         media.ratio
     );
 

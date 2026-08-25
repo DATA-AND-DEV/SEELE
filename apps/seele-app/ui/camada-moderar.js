@@ -1,7 +1,7 @@
 // SEELE · Entry Plug — a moderação (`#moderar`), camada sobre a operação.
 //
 // Os quatro verbos que a `specs/04-servidor-seele.md` dá ao Comandante e ao
-// Operador: expulsar, banir, remover mensagem e mover piloto. O Rust os tinha
+// Operador: expulsar, banir, remover mensagem e mover pessoa. O Rust os tinha
 // prontos e nada os chamava — o `EJETAR PLUG DO OPERADOR` do comp v2 está
 // desenhado e desabilitado desde então, com um `title` dizendo que não havia o
 // que chamar.
@@ -29,7 +29,7 @@
 // ---- o que este arquivo não decide ----
 //
 // Se a pessoa pode. Os quatro booleanos do `Snapshot` (`may_kick`, `may_ban`,
-// `may_remove_message`, `may_move_pilot`) dizem o que **oferecer**, e são
+// `may_remove_message`, `may_move_person`) dizem o que **oferecer**, e são
 // quatro porque a `specs/04` enumera quatro permissões e um papel pode ter
 // qualquer subconjunto delas. Esconder aqui é conveniência; quem nega é o
 // servidor, e a `specs/08-seguranca.md` põe a segurança nessa recusa e não no
@@ -46,7 +46,7 @@ let atoArmado = null;
  *
  * Guardado como elemento e não como `id`, pela mesma razão que `focoDeVolta` em
  * `base.js`: metade dos controles que abrem esta caixa é desenhada pelo
- * JavaScript e não tem `id` nenhum — o botão de moderar de um piloto é
+ * JavaScript e não tem `id` nenhum — o botão de moderar de um pessoa é
  * reconstruído a cada snapshot.
  */
 let focoAntesDeModerar = null;
@@ -62,13 +62,13 @@ let alvoPreferido = null;
  *
  * Decide o que CANCELAR faz, e são coisas diferentes: cancelar um ato sobre uma
  * pessoa devolve à escolha de quem, e cancelar a remoção de uma mensagem fecha
- * — ali não há nada atrás, e voltar para um formulário de pilotos que ninguém
+ * — ali não há nada atrás, e voltar para um formulário de pessoas que ninguém
  * pediu seria a caixa inventando um passo.
  */
 let caixaComEscolha = false;
 
-/** Onde cada piloto está, por id, para as frases de consequência. */
-const ondeEstaOPiloto = new Map();
+/** Onde cada pessoa está, por id, para as frases de consequência. */
+const ondeEstaOPersono = new Map();
 
 /**
  * As salas do Dogma, como estavam quando a caixa abriu.
@@ -91,9 +91,9 @@ const SEGUNDOS_POR_DIA = 86400;
  * propósito: quem só pode apagar mensagem não tem o que fazer nesta caixa, e
  * abri-la seria oferecer três controles apagados.
  */
-function podeModerarPilotos(snapshot) {
+function podeModerarPersonos(snapshot) {
   return Boolean(
-    snapshot && (snapshot.may_kick || snapshot.may_ban || snapshot.may_move_pilot),
+    snapshot && (snapshot.may_kick || snapshot.may_ban || snapshot.may_move_person),
   );
 }
 
@@ -109,15 +109,15 @@ function podeModerarPilotos(snapshot) {
  * Nunca sobre si mesmo: expulsar-se é o `DESCONECTAR` do cabeçalho, banir-se
  * não é coisa que exista, e mover-se é o `ENTRAR NA SALA` da própria lista.
  */
-function botaoDeModerar(piloto, snapshot) {
-  if (piloto.is_self || !podeModerarPilotos(snapshot)) return null;
+function botaoDeModerar(pessoa, snapshot) {
+  if (pessoa.is_self || !podeModerarPersonos(snapshot)) return null;
   const botao = elemento("button", "moderar-porta", "MODERAR");
   botao.type = "button";
-  botao.dataset.moderarPiloto = String(piloto.id);
+  botao.dataset.moderarPersono = String(pessoa.id);
   // O nome no rótulo acessível porque `MODERAR` sozinho se repete uma vez por
   // pessoa, e uma lista de botões idênticos é uma lista que não se navega.
-  botao.setAttribute("aria-label", `moderar ${piloto.nickname}`);
-  botao.title = `expulsar, banir ou mover ${piloto.nickname}`;
+  botao.setAttribute("aria-label", `moderar ${pessoa.nickname}`);
+  botao.title = `expulsar, banir ou mover ${pessoa.nickname}`;
   return botao;
 }
 
@@ -208,7 +208,7 @@ function botaoDeApagarLinha(linha, snapshot) {
  */
 function atualizarPortaDoAlerta(snapshot) {
   const porta = $("alerta-ejetar");
-  const pode = podeModerarPilotos(snapshot);
+  const pode = podeModerarPersonos(snapshot);
   porta.disabled = !pode;
   porta.title = pode
     ? "escolher quem, e o que fazer: expulsar, banir ou mover"
@@ -226,21 +226,21 @@ function atualizarPortaDoAlerta(snapshot) {
  * apagaria a escolha de quem estava escolhendo.
  */
 function desenharModeracao(snapshot) {
-  ondeEstaOPiloto.clear();
+  ondeEstaOPersono.clear();
   salasDoDogma = snapshot.cages;
 
   const quem = $("moderar-quem");
   const opcoes = [];
   for (const cage of snapshot.cages) {
-    for (const piloto of cage.pilots) {
-      if (piloto.is_self) continue;
-      ondeEstaOPiloto.set(String(piloto.id), {
-        nome: piloto.nickname,
+    for (const pessoa of cage.people) {
+      if (pessoa.is_self) continue;
+      ondeEstaOPersono.set(String(pessoa.id), {
+        nome: pessoa.nickname,
         cage: cage.name,
         cageId: cage.id,
       });
-      const opcao = elemento("option", null, `${piloto.nickname} — ${cage.name}`);
-      opcao.value = String(piloto.id);
+      const opcao = elemento("option", null, `${pessoa.nickname} — ${cage.name}`);
+      opcao.value = String(pessoa.id);
       opcoes.push(opcao);
     }
   }
@@ -256,7 +256,7 @@ function desenharModeracao(snapshot) {
   if (ha) {
     // A porta que nomeou alguém pré-escolhe; a porta do alerta não nomeia
     // ninguém e cai na primeira pessoa da lista, que é o que um `<select>` faz.
-    if (alvoPreferido && ondeEstaOPiloto.has(alvoPreferido)) quem.value = alvoPreferido;
+    if (alvoPreferido && ondeEstaOPersono.has(alvoPreferido)) quem.value = alvoPreferido;
   }
 
   // Um verbo por permissão, e não os três por uma. `specs/04` enumera quatro
@@ -266,7 +266,7 @@ function desenharModeracao(snapshot) {
   $("moderar-acao-banir").hidden = !snapshot.may_ban;
   // Mover some também quando não há para onde: um Dogma de uma jaula só não
   // tem destino, e um controle cujo objeto não existe é ruído, não lacuna.
-  $("moderar-acao-mover").hidden = !snapshot.may_move_pilot || desenharDestinos() === 0;
+  $("moderar-acao-mover").hidden = !snapshot.may_move_person || desenharDestinos() === 0;
 }
 
 /**
@@ -277,12 +277,12 @@ function desenharModeracao(snapshot) {
  * escolher — e depois vai perguntar por que não aconteceu nada.
  */
 function desenharDestinos() {
-  const escolhido = ondeEstaOPiloto.get($("moderar-quem").value);
+  const escolhido = ondeEstaOPersono.get($("moderar-quem").value);
   const destinos = salasDoDogma.filter((cage) => cage.id !== escolhido?.cageId);
   repovoar(
     $("moderar-para"),
     destinos.map((cage) => {
-      const opcao = elemento("option", null, `${cage.name} — ${cage.pilots.length}/${cage.limit}`);
+      const opcao = elemento("option", null, `${cage.name} — ${cage.people.length}/${cage.limit}`);
       opcao.value = String(cage.id);
       return opcao;
     }),
@@ -293,7 +293,7 @@ function desenharDestinos() {
 /** Quem está escolhido agora, com o nome e a sala em que está. */
 function quemEstaEscolhido() {
   const id = $("moderar-quem").value;
-  const onde = ondeEstaOPiloto.get(id);
+  const onde = ondeEstaOPersono.get(id);
   if (!onde) return null;
   return { id: Number(id), nome: onde.nome, cage: onde.cage };
 }
@@ -392,7 +392,7 @@ async function abrirModeracao(alvo) {
  * A caixa aberta já confirmando, para um ato que não precisa escolher ninguém.
  *
  * É o caminho da mensagem: quem foi clicado já é o objeto, e uma lista de
- * pilotos no meio do caminho seria uma pergunta já respondida.
+ * pessoas no meio do caminho seria uma pergunta já respondida.
  */
 function abrirConfirmacao(titulo, consequencia, rotulo, executar) {
   focoAntesDeModerar = document.activeElement;
@@ -545,7 +545,7 @@ function consequenciaDeMover(quem, destino) {
  * conclui que o produto não fez o que disse.
  */
 function consequenciaDeApagarCage(cage, linhaPresa) {
-  const dentro = cage.pilots.length;
+  const dentro = cage.people.length;
   const gente =
     dentro === 0
       ? `Não há ninguém dentro de ${cage.name} agora.`
@@ -620,9 +620,9 @@ function dataDeInicio(segundos) {
 // cada snapshot, duas vezes por segundo, e um ouvinte por botão seria
 // registrado de novo a cada quadro. A mesma técnica de `alternarCanal`.
 $("lista-cages").addEventListener("click", (evento) => {
-  const alvo = evento.target.closest("button[data-moderar-piloto]");
+  const alvo = evento.target.closest("button[data-moderar-pessoa]");
   if (!alvo) return;
-  abrirModeracao(alvo.dataset.moderarPiloto);
+  abrirModeracao(alvo.dataset.moderarPersono);
 });
 
 $("lista-mensagens").addEventListener("click", (evento) => {
@@ -716,7 +716,7 @@ $("moderar-expulsar").addEventListener("click", () => {
   const quem = quemEstaEscolhido();
   if (!quem) return;
   armarAto(`EXPULSAR ${quem.nome}`, consequenciaDeExpulsar(quem), () =>
-    invoke("expulsar_piloto", { pilot: quem.id }),
+    invoke("expulsar_persono", { person: quem.id }),
   );
 });
 
@@ -730,8 +730,8 @@ $("moderar-banir").addEventListener("click", () => {
   const ate = dias > 0 ? Math.floor(Date.now() / 1000) + dias * SEGUNDOS_POR_DIA : null;
   const motivo = $("moderar-motivo").value.trim();
   armarAto(`BANIR ${quem.nome}`, consequenciaDeBanir(quem, ate), () =>
-    invoke("banir_piloto", {
-      pilot: quem.id,
+    invoke("banir_persono", {
+      person: quem.id,
       // O motivo é para o registro de quem hospeda e nunca chega a quem foi
       // banido. Vazio vira `null`, que é como o Rust escreve «não houve».
       reason: motivo === "" ? null : motivo,
@@ -746,7 +746,7 @@ $("moderar-mover").addEventListener("click", () => {
   const para = $("moderar-para");
   const destino = para.options[para.selectedIndex]?.textContent ?? "";
   armarAto(`MOVER ${quem.nome}`, consequenciaDeMover(quem, destino), () =>
-    invoke("mover_piloto", { pilot: quem.id, cage: Number(para.value) }),
+    invoke("mover_persono", { person: quem.id, cage: Number(para.value) }),
   );
 });
 

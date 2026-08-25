@@ -7,7 +7,7 @@
 //!
 //! Este é o que mais fácil passaria por engano. `seele-core` não confere
 //! permissão nenhuma — de propósito, porque a `specs/08-seguranca.md` põe a
-//! decisão no servidor —, então o pedido de um piloto sem `ManageCages`
+//! decisão no servidor —, então o pedido de um pessoa sem `ManageCages`
 //! **sai no fio**. Um teste que só olhasse o cliente não distinguiria «a casca
 //! não mandou» de «o Dogma recusou», e as duas dão a mesma tela.
 //!
@@ -170,7 +170,7 @@ async fn quem_hospeda_vira_comandante_e_a_segunda_conta_nao() -> Result<()> {
         "a segunda conta chegou podendo gerenciar o Dogma dos outros: {:?}",
         convidado.sessao().permissions
     );
-    // E não é que a segunda conta chegou sem nada: ela é um Piloto inteiro.
+    // E não é que a segunda conta chegou sem nada: ela é um Pessoa inteiro.
     // Sem esta linha, «a segunda não vira Comandante» passaria com uma conta
     // que não pode fazer coisa nenhuma.
     for permissao in [
@@ -253,7 +253,7 @@ async fn uma_sala_criada_aparece_para_quem_ja_estava_conectado() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn um_piloto_sem_manage_cages_e_recusado_pelo_dogma_e_nao_pela_casca() -> Result<()> {
+async fn um_persono_sem_manage_cages_e_recusado_pelo_dogma_e_nao_pela_casca() -> Result<()> {
     let (endereco, servidor) = dogma().await?;
 
     // O anfitrião conecta primeiro e fica de pé, calado, como testemunha. Ele é
@@ -266,7 +266,7 @@ async fn um_piloto_sem_manage_cages_e_recusado_pelo_dogma_e_nao_pela_casca() -> 
             .sessao()
             .permissions
             .contains(&Permission::ManageCages),
-        "o segundo piloto tem a permissão, e este teste não mede mais nada"
+        "o segundo pessoa tem a permissão, e este teste não mede mais nada"
     );
 
     // `seele-core` não confere nada — o pedido sai no fio. É essa a razão de
@@ -276,7 +276,7 @@ async fn um_piloto_sem_manage_cages_e_recusado_pelo_dogma_e_nao_pela_casca() -> 
         .await
         .expect("a sessão acabou antes de o pedido sair");
 
-    // Um: a recusa volta, enumerada. Sem ela o piloto olharia para uma lista
+    // Um: a recusa volta, enumerada. Sem ela o pessoa olharia para uma lista
     // que não mudou sem saber por quê.
     let recusa = esperar(&mut sem_permissao, Duration::from_secs(15), e_recusa).await;
     assert!(

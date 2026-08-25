@@ -56,8 +56,8 @@ id_type!(
 );
 
 id_type!(
-    /// A user account. `Piloto` in Portuguese, `Pilot` in English.
-    PilotId,
+    /// A user account. `Pessoa` in Portuguese, `Person` in English.
+    PersonId,
     u64
 );
 
@@ -72,7 +72,7 @@ id_type!(
     ///
     /// `specs/08-seguranca.md`: assigned by the server, **never accepted from
     /// the client**. The server binds it to the connection and refuses any
-    /// datagram whose `ssrc` does not match, which is what stops one pilot
+    /// datagram whose `ssrc` does not match, which is what stops one person
     /// impersonating another.
     Ssrc,
     u32
@@ -125,7 +125,7 @@ id_type!(
     /// The row, and not the bytes. ADR 0027 keeps the two apart on purpose:
     /// expiring an attachment deletes the bytes and **keeps this row**, so the
     /// message can still say that a file was here and what it was called. Two
-    /// pilots who sent the same file have two of these and one blob.
+    /// people who sent the same file have two of these and one blob.
     AttachmentId,
     u64
 );

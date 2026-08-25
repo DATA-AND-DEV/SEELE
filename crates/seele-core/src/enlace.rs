@@ -43,7 +43,7 @@ use std::time::{Duration, Instant};
 use ed25519_dalek::SigningKey;
 use seele_proto::control::ServerMessage;
 use seele_proto::ids::{
-    AttachmentId, CageId, ClientMessageId, LineId, MessageId, PilotId, ScreenId,
+    AttachmentId, CageId, ClientMessageId, LineId, MessageId, PersonId, ScreenId,
 };
 use seele_proto::sync_ratio::SyncBand;
 use tokio::sync::mpsc;
@@ -228,18 +228,18 @@ enum Comando {
         icone: Option<Vec<u8>>,
     },
     Expulsar {
-        piloto: PilotId,
+        pessoa: PersonId,
     },
     Banir {
-        piloto: PilotId,
+        pessoa: PersonId,
         motivo: Option<String>,
         expira_em: Option<i64>,
     },
     RemoverMensagem {
         mensagem: MessageId,
     },
-    MoverPiloto {
-        piloto: PilotId,
+    MoverPersono {
+        pessoa: PersonId,
         cage: CageId,
     },
     ApagarCage {
@@ -898,7 +898,7 @@ impl Enlace {
                 //
                 // E fecha **dizendo o que foi**: o motivo viaja no
                 // `CONNECTION_CLOSE` e é o que fica no log do Dogma. Fechar
-                // como `ejected` faria uma recusa de convite parecer um piloto
+                // como `ejected` faria uma recusa de convite parecer um pessoa
                 // saindo, que é o único jeito de esconder a recusa de quem tem
                 // o log na mão.
                 cliente.close(crate::client::INVITE_REFUSED);
@@ -1098,7 +1098,7 @@ impl Enlace {
 
     /// Pede ao Dogma que faça um Cage.
     ///
-    /// Pede, e só. Nada aqui confere se este piloto pode: a `specs/08-seguranca.md`
+    /// Pede, e só. Nada aqui confere se este pessoa pode: a `specs/08-seguranca.md`
     /// põe a decisão no servidor, e um core que recusasse por conta própria
     /// seria uma segunda autoridade para manter de acordo com a primeira. A
     /// resposta chega como aviso — `CageCreated` se aconteceu, `Alert` com
@@ -1202,8 +1202,8 @@ impl Enlace {
     /// # Errors
     ///
     /// Falha se a sessão já tiver acabado.
-    pub async fn expulsar(&self, piloto: PilotId) -> Result<(), Fechado> {
-        self.mandar(Comando::Expulsar { piloto }).await
+    pub async fn expulsar(&self, pessoa: PersonId) -> Result<(), Fechado> {
+        self.mandar(Comando::Expulsar { pessoa }).await
     }
 
     /// Pede ao Dogma que impeça alguém de voltar.
@@ -1218,12 +1218,12 @@ impl Enlace {
     /// Falha se a sessão já tiver acabado.
     pub async fn banir(
         &self,
-        piloto: PilotId,
+        pessoa: PersonId,
         motivo: Option<String>,
         expira_em: Option<i64>,
     ) -> Result<(), Fechado> {
         self.mandar(Comando::Banir {
-            piloto,
+            pessoa,
             motivo,
             expira_em,
         })
@@ -1244,8 +1244,8 @@ impl Enlace {
     /// # Errors
     ///
     /// Falha se a sessão já tiver acabado.
-    pub async fn mover_piloto(&self, piloto: PilotId, cage: CageId) -> Result<(), Fechado> {
-        self.mandar(Comando::MoverPiloto { piloto, cage }).await
+    pub async fn mover_persono(&self, pessoa: PersonId, cage: CageId) -> Result<(), Fechado> {
+        self.mandar(Comando::MoverPersono { pessoa, cage }).await
     }
 
     /// Pede ao Dogma que destrua um Cage.
@@ -1465,7 +1465,7 @@ struct Motor {
     /// cedia sozinha. Faltava metade da regra de aceite do §3.2.
     ///
     /// O que fechava a dívida já vinha pelo fio e ninguém guardava: o Dogma
-    /// calcula a taxa de cada pessoa e a devolve em `PilotState`, uma vez por
+    /// calcula a taxa de cada pessoa e a devolve em `PersonState`, uma vez por
     /// segundo. O `SyncRatio` da casca é a mesma conta feita de novo para
     /// desenhar — não é fonte, é cópia —, e é por isso que isto não precisou de
     /// comando novo nem de a casca falar com o núcleo.
@@ -1514,7 +1514,7 @@ struct TelaViva {
 /// Otimista de propósito, e o motivo é qual erro custa mais: começar em
 /// `Critical` pararia a tela de alguém cuja voz está ótima, por causa de um
 /// dado que ainda não chegou. Começar em `Nominal` deixa a tela abrir e ceder
-/// no primeiro `PilotState`, que vem uma vez por segundo.
+/// no primeiro `PersonState`, que vem uma vez por segundo.
 const FAIXA_INICIAL: SyncBand = SyncBand::Nominal;
 
 /// De quanto em quanto tempo a bateria é consultada.
@@ -1523,7 +1523,7 @@ const FAIXA_INICIAL: SyncBand = SyncBand::Nominal;
 /// nem o ping nem uma tentativa de reconexão fiquem esperando a tica seguinte.
 const TICA: Duration = Duration::from_millis(200);
 
-/// A faixa nova, quando este `PilotState` for sobre esta pessoa e mudar de faixa.
+/// A faixa nova, quando este `PersonState` for sobre esta pessoa e mudar de faixa.
 ///
 /// Separada do `Motor` porque é a decisão inteira, e uma decisão sobre valores
 /// não precisa de conexão QUIC para ser conferida — o mesmo argumento que
@@ -1535,10 +1535,10 @@ const TICA: Duration = Duration::from_millis(200);
 /// thread do codificador uma vez por segundo para lhe dizer o que ela já sabe.
 fn faixa_nova(
     atual: SyncBand,
-    estado: &seele_proto::control::PilotState,
-    eu: Option<PilotId>,
+    estado: &seele_proto::control::PersonState,
+    eu: Option<PersonId>,
 ) -> Option<SyncBand> {
-    if eu != Some(estado.pilot) {
+    if eu != Some(estado.person) {
         return None;
     }
     let nova = SyncBand::of(estado.sync_ratio);
@@ -1816,18 +1816,18 @@ impl Motor {
             Comando::RenomearLinha { linha, nome } => cliente.rename_line(linha, &nome).await,
             Comando::RenomearDogma { nome } => cliente.rename_dogma(&nome).await,
             Comando::IconeDoDogma { icone } => cliente.set_dogma_icon(icone).await,
-            Comando::Expulsar { piloto } => cliente.kick_pilot(piloto).await,
+            Comando::Expulsar { pessoa } => cliente.kick_person(pessoa).await,
             Comando::Banir {
-                piloto,
+                pessoa,
                 motivo,
                 expira_em,
             } => {
                 cliente
-                    .ban_pilot(piloto, motivo.as_deref(), expira_em)
+                    .ban_person(pessoa, motivo.as_deref(), expira_em)
                     .await
             }
             Comando::RemoverMensagem { mensagem } => cliente.remove_message(mensagem).await,
-            Comando::MoverPiloto { piloto, cage } => cliente.move_pilot(piloto, cage).await,
+            Comando::MoverPersono { pessoa, cage } => cliente.move_person(pessoa, cage).await,
             Comando::ApagarCage { cage } => cliente.delete_cage(cage).await,
             Comando::ApagarLinha { linha } => cliente.delete_line(linha).await,
             Comando::PesarLinha { linha } => cliente.weigh_line(linha).await,
@@ -1985,8 +1985,8 @@ impl Motor {
             // `SyncBand::of` e não um limiar escrito aqui: a conta de onde
             // começa cada faixa é do `seele-proto`, e duas cópias dela
             // divergiriam no dia em que uma mudasse.
-            ServerMessage::PilotState(ref estado) => {
-                let eu = self.cliente.as_ref().map(|c| c.session().pilot);
+            ServerMessage::PersonState(ref estado) => {
+                let eu = self.cliente.as_ref().map(|c| c.session().person);
                 if let Some(nova) = faixa_nova(self.faixa, estado, eu) {
                     {
                         self.faixa = nova;
@@ -1999,8 +1999,8 @@ impl Motor {
                     }
                 }
             }
-            ServerMessage::ScreenShareStarted { pilot, screen, .. } => {
-                self.talvez_ligar_a_bomba(pilot, screen);
+            ServerMessage::ScreenShareStarted { person, screen, .. } => {
+                self.talvez_ligar_a_bomba(person, screen);
             }
             ServerMessage::ScreenShareStopped { screen, .. } => {
                 if self.e_a_minha_tela(screen) {
@@ -2131,9 +2131,9 @@ impl Motor {
     /// reenvia `ScreenShareStarted` a cada pessoa que entra num Cage onde já há
     /// transmissão, e quem transmite recebe o reenvio junto; o pedido já foi
     /// consumido no primeiro, então o segundo não acha nada.
-    fn talvez_ligar_a_bomba(&mut self, piloto: PilotId, tela: ScreenId) {
+    fn talvez_ligar_a_bomba(&mut self, pessoa: PersonId, tela: ScreenId) {
         let escoadouro = match self.cliente.as_ref() {
-            Some(cliente) if cliente.session().pilot == piloto => cliente.escoadouro_de_tela(),
+            Some(cliente) if cliente.session().person == pessoa => cliente.escoadouro_de_tela(),
             _ => return,
         };
 
@@ -2815,7 +2815,7 @@ mod tests {
             servidor: "127.0.0.1:1".parse().expect("endereço"),
             nome_tls: "localhost".into(),
             chave_do_pin: "casa".into(),
-            apelido: "piloto".into(),
+            apelido: "pessoa".into(),
             segredo: None,
             impressao_esperada: impressao_esperada.map(str::to_owned),
         }
@@ -3025,7 +3025,7 @@ mod tests {
             servidor,
             nome_tls: "localhost".into(),
             chave_do_pin: servidor.to_string(),
-            apelido: "piloto".into(),
+            apelido: "pessoa".into(),
             segredo: None,
             // Uma impressão digital de verdade: é dela que sai a marca do
             // aviso, e sem ela não se bate em ponto de encontro nenhum.
@@ -3154,14 +3154,14 @@ mod tests {
         let mut motor = motor_de_teste();
         motor.lembrar(&Comando::InserirPlug(CageId(2)));
 
-        motor.lembrar(&Comando::Expulsar { piloto: PilotId(9) });
+        motor.lembrar(&Comando::Expulsar { pessoa: PersonId(9) });
         motor.lembrar(&Comando::Banir {
-            piloto: PilotId(9),
+            pessoa: PersonId(9),
             motivo: None,
             expira_em: None,
         });
-        motor.lembrar(&Comando::MoverPiloto {
-            piloto: PilotId(9),
+        motor.lembrar(&Comando::MoverPersono {
+            pessoa: PersonId(9),
             cage: CageId(5),
         });
         motor.lembrar(&Comando::RemoverMensagem {
@@ -3434,16 +3434,16 @@ mod tests {
     /// O teto respondia ao `HostUplink` e ao número de espectadores e **não**
     /// ao sinal da voz piorando: numa sala onde a voz começava a doer, a tela
     /// não cedia sozinha. A perna que faltava já vinha pelo fio — o Dogma
-    /// devolve a taxa de cada pessoa em `PilotState`, uma vez por segundo — e
+    /// devolve a taxa de cada pessoa em `PersonState`, uma vez por segundo — e
     /// ninguém guardava a sua.
     #[test]
     fn a_faixa_da_voz_desce_pelo_que_o_dogma_devolve() {
-        use seele_proto::control::{PilotState, Presence};
+        use seele_proto::control::{PersonState, Presence};
 
-        let eu = PilotId(7);
-        let outra = PilotId(9);
-        let estado = |piloto: PilotId, taxa: u8| PilotState {
-            pilot: piloto,
+        let eu = PersonId(7);
+        let outra = PersonId(9);
+        let estado = |pessoa: PersonId, taxa: u8| PersonState {
+            person: pessoa,
             sync_ratio: taxa,
             speaking: false,
             at_field: false,
@@ -3568,7 +3568,7 @@ mod tests {
                 servidor: "127.0.0.1:1".parse().expect("endereço"),
                 nome_tls: "localhost".into(),
                 chave_do_pin: "127.0.0.1:1".into(),
-                apelido: "piloto".into(),
+                apelido: "pessoa".into(),
                 segredo: None,
                 impressao_esperada: None,
             },

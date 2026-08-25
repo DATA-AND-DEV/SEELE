@@ -43,7 +43,7 @@ use std::time::{Duration, Instant};
 
 use seele_core::enlace::Enlace;
 use seele_core::{
-    identity, CageId, ClientMessageId, FilePinStore, LineId, MediaChannel, MessageId, PilotId,
+    identity, CageId, ClientMessageId, FilePinStore, LineId, MediaChannel, MessageId, PersonId,
     Room, Ssrc, SyncBand, SyncInputs, SyncRatio, Voice,
 };
 
@@ -51,7 +51,7 @@ pub use types::{
     PermissaoDeMicrofone,
     Attachment, AttachmentRefusal, Cage, CageSync, CaptureDevice, EndReason, Event, FonteDeTela,
     LimitesDeTela, Line, LineWeight, LinkState, Message, Notice, NoticeReason, Pattern,
-    PermissaoDeTela, Pilot, PlaybackDevice, PlugError, Preview, PreviewRefusal, PreviewRules,
+    PermissaoDeTela, Person, PlaybackDevice, PlugError, Preview, PreviewRefusal, PreviewRules,
     Severity, Snapshot, SyncBand as Band, TelaEmCurso, Telemetry, Transfer, Trust, VoiceMode,
 };
 
@@ -532,19 +532,19 @@ enum Command {
     SetDogmaIcon {
         icon: Option<Vec<u8>>,
     },
-    KickPilot {
-        pilot: PilotId,
+    KickPerson {
+        person: PersonId,
     },
-    BanPilot {
-        pilot: PilotId,
+    BanPerson {
+        person: PersonId,
         reason: Option<String>,
         expires_at: Option<i64>,
     },
     RemoveMessage {
         message: MessageId,
     },
-    MovePilot {
-        pilot: PilotId,
+    MovePerson {
+        person: PersonId,
         cage: CageId,
     },
     DeleteCage {
@@ -1407,7 +1407,7 @@ impl Plug {
         }
     }
 
-    /// Asks the Dogma to end a pilot's session — `expulsar`.
+    /// Asks the Dogma to end a person's session — `expulsar`.
     ///
     /// Asks, and reports nothing back, for the same reason [`Plug::create_cage`]
     /// gives: the answer comes from the Dogma. The roster losing them arrives as
@@ -1421,13 +1421,13 @@ impl Plug {
     /// # Errors
     ///
     /// [`PlugError::NotConnected`] once the session is over.
-    pub fn kick_pilot(&self, pilot: u64) -> Result<(), PlugError> {
-        self.command(Command::KickPilot {
-            pilot: PilotId(pilot),
+    pub fn kick_person(&self, person: u64) -> Result<(), PlugError> {
+        self.command(Command::KickPerson {
+            person: PersonId(person),
         })
     }
 
-    /// Asks the Dogma to bar a pilot from returning — `banir`.
+    /// Asks the Dogma to bar a person from returning — `banir`.
     ///
     /// `expires_at` is seconds since the Unix epoch; `None` is permanent. The
     /// `reason` is for whoever hosts, in their own records, and never reaches
@@ -1436,14 +1436,14 @@ impl Plug {
     /// # Errors
     ///
     /// [`PlugError::NotConnected`] once the session is over.
-    pub fn ban_pilot(
+    pub fn ban_person(
         &self,
-        pilot: u64,
+        person: u64,
         reason: Option<String>,
         expires_at: Option<i64>,
     ) -> Result<(), PlugError> {
-        self.command(Command::BanPilot {
-            pilot: PilotId(pilot),
+        self.command(Command::BanPerson {
+            person: PersonId(person),
             reason,
             expires_at,
         })
@@ -1464,14 +1464,14 @@ impl Plug {
         })
     }
 
-    /// Asks the Dogma to move a pilot into a Cage — `mover_piloto`.
+    /// Asks the Dogma to move a person into a Cage — `mover_persono`.
     ///
     /// # Errors
     ///
     /// [`PlugError::NotConnected`] once the session is over.
-    pub fn move_pilot(&self, pilot: u64, cage: u32) -> Result<(), PlugError> {
-        self.command(Command::MovePilot {
-            pilot: PilotId(pilot),
+    pub fn move_person(&self, person: u64, cage: u32) -> Result<(), PlugError> {
+        self.command(Command::MovePerson {
+            person: PersonId(person),
             cage: CageId(cage),
         })
     }
@@ -1690,7 +1690,7 @@ impl Plug {
     ///
     /// # Errors
     ///
-    /// [`PlugError::UnknownPilot`] if nobody here is called that,
+    /// [`PlugError::UnknownPerson`] if nobody here is called that,
     /// [`PlugError::NoAudioDevice`] if this session has no audio.
     pub fn set_volume(&self, nickname: String, percent: u16) -> Result<(), PlugError> {
         let ssrc = self
@@ -1699,7 +1699,7 @@ impl Plug {
             .lock()
             .ok()
             .and_then(|room| room.ssrc_of(&nickname))
-            .ok_or(PlugError::UnknownPilot)?;
+            .ok_or(PlugError::UnknownPerson)?;
 
         let voice = self
             .shared
@@ -1979,7 +1979,7 @@ impl Plug {
             pattern: pattern_from_byte(self.shared.pattern.load(Ordering::Relaxed)),
             dogma: room.dogma.clone(),
             icon_revision: self.shared.icon_revision.load(Ordering::Relaxed),
-            me: room.me.map(|pilot| pilot.0),
+            me: room.me.map(|person| person.0),
             nickname,
             cages: cages_of(&room),
             presentes: presentes_de(&room),
@@ -2020,9 +2020,9 @@ impl Plug {
             may_remove_message: room
                 .permissions
                 .contains(&seele_core::Permission::RemoveMessage),
-            may_move_pilot: room
+            may_move_person: room
                 .permissions
-                .contains(&seele_core::Permission::MovePilot),
+                .contains(&seele_core::Permission::MovePerson),
             may_customise_dogma: room
                 .permissions
                 .contains(&seele_core::Permission::AdministerDogma),
@@ -2141,20 +2141,20 @@ impl Drop for Plug {
 /// A própria pessoa entra aqui: o Dogma não anuncia a chegada de volta para
 /// quem chegou, então quem monta esta lista soma o `me` que a sessão já tem.
 /// Sem isso, cada um seria o único ausente da própria lista de presentes.
-fn presentes_de(room: &Room) -> Vec<Pilot> {
+fn presentes_de(room: &Room) -> Vec<Person> {
     room.presentes
         .iter()
         .chain(room.me.iter().filter(|eu| !room.presentes.contains(eu)))
-        .filter_map(|id| room.pilots.get(id))
-        .map(|pilot| Pilot {
-            id: pilot.id.0,
-            nickname: pilot.nickname.clone(),
-            speaking: pilot.speaking,
-            at_field: pilot.at_field,
-            total_isolation: pilot.total_isolation,
-            sync_ratio: pilot.sync_ratio,
-            sync_band: SyncBand::of(pilot.sync_ratio).into(),
-            is_self: room.me == Some(pilot.id),
+        .filter_map(|id| room.people.get(id))
+        .map(|person| Person {
+            id: person.id.0,
+            nickname: person.nickname.clone(),
+            speaking: person.speaking,
+            at_field: person.at_field,
+            total_isolation: person.total_isolation,
+            sync_ratio: person.sync_ratio,
+            sync_band: SyncBand::of(person.sync_ratio).into(),
+            is_self: room.me == Some(person.id),
         })
         .collect()
 }
@@ -2169,17 +2169,17 @@ fn cages_of(room: &Room) -> Vec<Cage> {
             password_required: cage.password_required,
             occupied_by_us: room.current_cage == Some(cage.id),
             line: cage.line.map(|line| line.0),
-            pilots: room
+            people: room
                 .roster(cage.id)
-                .map(|pilot| Pilot {
-                    id: pilot.id.0,
-                    nickname: pilot.nickname.clone(),
-                    speaking: pilot.speaking,
-                    at_field: pilot.at_field,
-                    total_isolation: pilot.total_isolation,
-                    sync_ratio: pilot.sync_ratio,
-                    sync_band: SyncBand::of(pilot.sync_ratio).into(),
-                    is_self: room.me == Some(pilot.id),
+                .map(|person| Person {
+                    id: person.id.0,
+                    nickname: person.nickname.clone(),
+                    speaking: person.speaking,
+                    at_field: person.at_field,
+                    total_isolation: person.total_isolation,
+                    sync_ratio: person.sync_ratio,
+                    sync_band: SyncBand::of(person.sync_ratio).into(),
+                    is_self: room.me == Some(person.id),
                 })
                 .collect(),
             // Off the core, not folded here: the terminal draws the same number
@@ -2469,11 +2469,11 @@ fn tela_de(room: &Room, pedido: Option<LimitesDeTela>) -> Option<TelaEmCurso> {
     // lado de cá — ver o doc de `TelaEmCurso::espectadores` para o que ele não é.
     let espectadores = room
         .roster(cage)
-        .filter(|pilot| pilot.id != tela.pilot)
+        .filter(|person| person.id != tela.person)
         .count();
-    let e_minha = room.me == Some(tela.pilot);
+    let e_minha = room.me == Some(tela.person);
     Some(TelaEmCurso {
-        de: tela.pilot.0,
+        de: tela.person.0,
         e_minha,
         altura: 0,
         quadros: 0,
@@ -3224,10 +3224,10 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
                 return false;
             }
             // O espelho do `InsertPlug` acima, e ele faltava. O Dogma não
-            // devolve o `PilotLeft` a quem o causou — «essa pessoa já sabe» —,
+            // devolve o `PersonLeft` a quem o causou — «essa pessoa já sabe» —,
             // então esta metade do roster é contabilidade desta casca. Sem ela
             // o assento se esvazia no servidor e em todos os outros clientes, e
-            // a única tela que continua desenhando o piloto na jaula é a de
+            // a única tela que continua desenhando o pessoa na jaula é a de
             // quem acabou de sair dela.
             if let Ok(mut room) = shared.room.lock() {
                 room.leave_cage();
@@ -3332,21 +3332,21 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
         // Nothing is written into the local `Room` for these either, and for a
         // sharper version of the reason above: what a moderation verb changes
         // is somebody **else's** session. The only honest source for "they are
-        // gone" is the `PilotLeft` the Dogma sends when it is true. Marking it
+        // gone" is the `PersonLeft` the Dogma sends when it is true. Marking it
         // here would draw a roster the person who pressed the button is alone
         // in believing — and draw it identically whether the server did it or
         // refused, which is the exact difference the button exists to expose.
-        Command::KickPilot { pilot } => {
-            if client.expulsar(pilot).await.is_err() {
+        Command::KickPerson { person } => {
+            if client.expulsar(person).await.is_err() {
                 return false;
             }
         }
-        Command::BanPilot {
-            pilot,
+        Command::BanPerson {
+            person,
             reason,
             expires_at,
         } => {
-            if client.banir(pilot, reason, expires_at).await.is_err() {
+            if client.banir(person, reason, expires_at).await.is_err() {
                 return false;
             }
         }
@@ -3355,8 +3355,8 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
                 return false;
             }
         }
-        Command::MovePilot { pilot, cage } => {
-            if client.mover_piloto(pilot, cage).await.is_err() {
+        Command::MovePerson { person, cage } => {
+            if client.mover_persono(person, cage).await.is_err() {
                 return false;
             }
         }
@@ -3659,15 +3659,15 @@ mod tests {
     }
 
     #[test]
-    fn the_snapshot_marks_which_pilot_is_us() {
+    fn the_snapshot_marks_which_person_is_us() {
         // Without this the shell has to compare ids, which means the shell has
-        // to know what a `PilotId` is.
-        use seele_core::{CageInfo, PilotId, PilotProfile, ServerMessage, SessionId, Ssrc};
+        // to know what a `PersonId` is.
+        use seele_core::{CageInfo, PersonId, PersonProfile, ServerMessage, SessionId, Ssrc};
 
         let mut room = Room::new();
         room.apply(&ServerMessage::Session {
             id: SessionId(1),
-            pilot: PilotId(7),
+            person: PersonId(7),
             ssrc: Ssrc(700),
             dogma: "Terceira Tóquio".into(),
             cages: vec![CageInfo {
@@ -3682,10 +3682,10 @@ mod tests {
             permissions: Vec::new(),
         });
         room.enter_cage(CageId(1));
-        room.apply(&ServerMessage::PilotJoined {
+        room.apply(&ServerMessage::PersonJoined {
             cage: CageId(1),
-            profile: PilotProfile {
-                id: PilotId(3),
+            profile: PersonProfile {
+                id: PersonId(3),
                 nickname: "ayanami".into(),
                 roles: Vec::new(),
             },
@@ -3693,12 +3693,12 @@ mod tests {
         });
 
         let cages = cages_of(&room);
-        let pilots = &cages[0].pilots;
-        assert!(pilots.iter().any(|pilot| pilot.is_self));
+        let people = &cages[0].people;
+        assert!(people.iter().any(|person| person.is_self));
         assert_eq!(
-            pilots.iter().filter(|pilot| pilot.is_self).count(),
+            people.iter().filter(|person| person.is_self).count(),
             1,
-            "more than one pilot claims to be us"
+            "more than one person claims to be us"
         );
         assert!(cages[0].occupied_by_us);
     }
@@ -3710,7 +3710,7 @@ mod tests {
         // number, and one that only got a number would have to know the
         // thresholds.
         use seele_core::{
-            CageInfo, PilotId, PilotProfile, PilotState, Presence, ServerMessage, Ssrc,
+            CageInfo, PersonId, PersonProfile, PersonState, Presence, ServerMessage, Ssrc,
         };
 
         let mut room = Room::new();
@@ -3721,17 +3721,17 @@ mod tests {
             password_required: false,
             line: None,
         }];
-        room.apply(&ServerMessage::PilotJoined {
+        room.apply(&ServerMessage::PersonJoined {
             cage: CageId(1),
-            profile: PilotProfile {
-                id: PilotId(3),
+            profile: PersonProfile {
+                id: PersonId(3),
                 nickname: "ayanami".into(),
                 roles: Vec::new(),
             },
             ssrc: Ssrc(30),
         });
-        room.apply(&ServerMessage::PilotState(PilotState {
-            pilot: PilotId(3),
+        room.apply(&ServerMessage::PersonState(PersonState {
+            person: PersonId(3),
             at_field: false,
             total_isolation: false,
             speaking: false,
@@ -3742,9 +3742,9 @@ mod tests {
         // 72 rather than a critical number on purpose: `SyncBand::Critical` is
         // the `Default`, so a shell that received it could not tell a banded
         // ratio from a field nobody filled in.
-        let pilot = &cages_of(&room)[0].pilots[0];
-        assert_eq!(pilot.sync_ratio, 72);
-        assert_eq!(pilot.sync_band, types::SyncBand::Degraded);
+        let person = &cages_of(&room)[0].people[0];
+        assert_eq!(person.sync_ratio, 72);
+        assert_eq!(person.sync_band, types::SyncBand::Degraded);
     }
 
     #[test]
@@ -3753,7 +3753,7 @@ mod tests {
         // the number, the band and the sample size and has nothing left to
         // decide. A Cage nobody is in carries `None`, not a critical zero.
         use seele_core::{
-            CageInfo, PilotId, PilotProfile, PilotState, Presence, ServerMessage, Ssrc,
+            CageInfo, PersonId, PersonProfile, PersonState, Presence, ServerMessage, Ssrc,
         };
 
         let mut room = Room::new();
@@ -3767,17 +3767,17 @@ mod tests {
         assert_eq!(cages_of(&room)[0].sync, None, "an empty Cage");
 
         for (id, sync) in [(3_u64, 84_u8), (4, 85)] {
-            room.apply(&ServerMessage::PilotJoined {
+            room.apply(&ServerMessage::PersonJoined {
                 cage: CageId(1),
-                profile: PilotProfile {
-                    id: PilotId(id),
-                    nickname: format!("piloto {id}"),
+                profile: PersonProfile {
+                    id: PersonId(id),
+                    nickname: format!("pessoa {id}"),
                     roles: Vec::new(),
                 },
                 ssrc: Ssrc(u32::try_from(id * 10).expect("ssrc")),
             });
-            room.apply(&ServerMessage::PilotState(PilotState {
-                pilot: PilotId(id),
+            room.apply(&ServerMessage::PersonState(PersonState {
+                person: PersonId(id),
                 at_field: false,
                 total_isolation: false,
                 speaking: false,
@@ -3786,10 +3786,10 @@ mod tests {
             }));
         }
 
-        let average = cages_of(&room)[0].sync.expect("two pilots are seated");
+        let average = cages_of(&room)[0].sync.expect("two people are seated");
         assert_eq!(average.ratio, 85);
         assert_eq!(average.band, types::SyncBand::Nominal);
-        assert_eq!(average.pilots, 2);
+        assert_eq!(average.people, 2);
     }
 
     #[test]
@@ -4258,7 +4258,7 @@ mod tests {
     }
 
     #[test]
-    fn the_snapshot_says_whether_this_pilot_may_make_rooms() {
+    fn the_snapshot_says_whether_this_person_may_make_rooms() {
         // What a screen asks before drawing the control. Convenience, never
         // enforcement — but a shell with no way to ask has only two options,
         // and both are bad: hide the feature from the host, or offer everybody
@@ -4270,7 +4270,7 @@ mod tests {
             &shared,
             &ServerMessage::Session {
                 id: SessionId(1),
-                pilot: seele_core::PilotId(7),
+                person: seele_core::PersonId(7),
                 ssrc: Ssrc(700),
                 dogma: "Terceira Tóquio".into(),
                 cages: Vec::new(),
@@ -4286,14 +4286,14 @@ mod tests {
                 .unwrap()
                 .permissions
                 .contains(&Permission::ManageCages),
-            "a pilot who may only speak was told they may manage Cages"
+            "a person who may only speak was told they may manage Cages"
         );
 
         fold(
             &shared,
             &ServerMessage::Session {
                 id: SessionId(1),
-                pilot: seele_core::PilotId(7),
+                person: seele_core::PersonId(7),
                 ssrc: Ssrc(700),
                 dogma: "Terceira Tóquio".into(),
                 cages: Vec::new(),
@@ -4316,7 +4316,7 @@ mod tests {
             &shared,
             &ServerMessage::Session {
                 id: SessionId(1),
-                pilot: seele_core::PilotId(7),
+                person: seele_core::PersonId(7),
                 ssrc: Ssrc(700),
                 dogma: "Terceira Tóquio".into(),
                 cages: Vec::new(),
@@ -4349,7 +4349,7 @@ mod tests {
 
         let sessao = |permissions: Vec<Permission>| ServerMessage::Session {
             id: SessionId(1),
-            pilot: seele_core::PilotId(7),
+            person: seele_core::PersonId(7),
             ssrc: Ssrc(700),
             dogma: "Terceira Tóquio".into(),
             cages: Vec::new(),
@@ -4363,7 +4363,7 @@ mod tests {
         assert!(!nada.may_kick);
         assert!(!nada.may_ban);
         assert!(!nada.may_remove_message);
-        assert!(!nada.may_move_pilot);
+        assert!(!nada.may_move_person);
 
         // An Operador holding exactly one of the four. The assertion that
         // matters is the three `false`s beside the one `true`.
@@ -4371,7 +4371,7 @@ mod tests {
         let so_expulsa = plug.snapshot();
         assert!(so_expulsa.may_kick);
         assert!(
-            !so_expulsa.may_ban && !so_expulsa.may_remove_message && !so_expulsa.may_move_pilot,
+            !so_expulsa.may_ban && !so_expulsa.may_remove_message && !so_expulsa.may_move_person,
             "one moderation permission lit up the other three"
         );
 
@@ -4381,11 +4381,11 @@ mod tests {
                 Permission::Kick,
                 Permission::Ban,
                 Permission::RemoveMessage,
-                Permission::MovePilot,
+                Permission::MovePerson,
             ]),
         );
         let tudo = plug.snapshot();
-        assert!(tudo.may_kick && tudo.may_ban && tudo.may_remove_message && tudo.may_move_pilot);
+        assert!(tudo.may_kick && tudo.may_ban && tudo.may_remove_message && tudo.may_move_person);
 
         // And they go away again. A snapshot that latched would go on offering
         // a control after a Comandante revoked it.
@@ -4417,7 +4417,7 @@ mod tests {
 
         let sessao = |permissions: Vec<Permission>| ServerMessage::Session {
             id: SessionId(1),
-            pilot: seele_core::PilotId(7),
+            person: seele_core::PersonId(7),
             ssrc: Ssrc(700),
             dogma: "Terceira Tóquio".into(),
             cages: Vec::new(),
@@ -4450,7 +4450,7 @@ mod tests {
                 Permission::Kick,
                 Permission::Ban,
                 Permission::RemoveMessage,
-                Permission::MovePilot,
+                Permission::MovePerson,
             ]),
         );
         assert!(
@@ -4483,7 +4483,7 @@ mod tests {
             &shared,
             &ServerMessage::Session {
                 id: SessionId(1),
-                pilot: seele_core::PilotId(7),
+                person: seele_core::PersonId(7),
                 ssrc: Ssrc(700),
                 dogma: "Casa".into(),
                 cages: Vec::new(),
@@ -4592,7 +4592,7 @@ mod tests {
 
         let sessao = |permissions: Vec<Permission>| ServerMessage::Session {
             id: SessionId(1),
-            pilot: seele_core::PilotId(7),
+            person: seele_core::PersonId(7),
             ssrc: Ssrc(700),
             dogma: "Casa".into(),
             cages: Vec::new(),
@@ -4940,13 +4940,13 @@ mod tests {
     ///
     /// Devolve o `Room` para o teste acrescentar gente: é a contagem de
     /// espectadores que os testes abaixo mexem, e ela é o N do §5.1.
-    fn sala_com_tela(quem_compartilha: seele_core::PilotId) -> Room {
-        use seele_core::{CageInfo, PilotId, ScreenId, ServerMessage, SessionId, Ssrc};
+    fn sala_com_tela(quem_compartilha: seele_core::PersonId) -> Room {
+        use seele_core::{CageInfo, PersonId, ScreenId, ServerMessage, SessionId, Ssrc};
 
         let mut room = Room::new();
         room.apply(&ServerMessage::Session {
             id: SessionId(1),
-            pilot: PilotId(7),
+            person: PersonId(7),
             ssrc: Ssrc(700),
             dogma: "Terceira Tóquio".into(),
             cages: vec![CageInfo {
@@ -4963,32 +4963,32 @@ mod tests {
         room.enter_cage(CageId(1));
         room.apply(&ServerMessage::ScreenShareStarted {
             cage: CageId(1),
-            pilot: quem_compartilha,
+            person: quem_compartilha,
             screen: ScreenId(9),
         });
         room
     }
 
     /// Senta mais uma pessoa na sala.
-    fn sentar(room: &mut Room, piloto: u64) {
-        use seele_core::{PilotId, PilotProfile, ServerMessage, Ssrc};
+    fn sentar(room: &mut Room, pessoa: u64) {
+        use seele_core::{PersonId, PersonProfile, ServerMessage, Ssrc};
 
-        room.apply(&ServerMessage::PilotJoined {
+        room.apply(&ServerMessage::PersonJoined {
             cage: CageId(1),
-            profile: PilotProfile {
-                id: PilotId(piloto),
-                nickname: format!("piloto-{piloto}"),
+            profile: PersonProfile {
+                id: PersonId(pessoa),
+                nickname: format!("pessoa-{pessoa}"),
                 roles: Vec::new(),
             },
-            ssrc: Ssrc(piloto.wrapping_mul(10).try_into().unwrap_or(1)),
+            ssrc: Ssrc(pessoa.wrapping_mul(10).try_into().unwrap_or(1)),
         });
     }
 
     #[test]
     fn a_tela_conta_quem_compartilha_e_quem_assiste() {
-        use seele_core::PilotId;
+        use seele_core::PersonId;
 
-        let mut room = sala_com_tela(PilotId(3));
+        let mut room = sala_com_tela(PersonId(3));
         sentar(&mut room, 3);
         sentar(&mut room, 4);
 
@@ -4996,7 +4996,7 @@ mod tests {
         assert_eq!(tela.de, 3);
         assert!(
             !tela.e_minha,
-            "quem compartilha é o piloto 3, e nós somos o 7"
+            "quem compartilha é o pessoa 3, e nós somos o 7"
         );
         // Três na sala — nós, o 3 e o 4 —, e quem compartilha não assiste a si
         // mesmo. Quem assiste são dois, e é esse N que divide o teto (§5.1).
@@ -5017,10 +5017,10 @@ mod tests {
 
     #[test]
     fn a_tela_de_quem_compartilha_se_reconhece() {
-        use seele_core::PilotId;
+        use seele_core::PersonId;
 
-        // O piloto 7 é quem esta sessão é — `sala_com_tela` o diz na `Session`.
-        let room = sala_com_tela(PilotId(7));
+        // O pessoa 7 é quem esta sessão é — `sala_com_tela` o diz na `Session`.
+        let room = sala_com_tela(PersonId(7));
         let tela = tela_de(&room, None).expect("a transmissão foi anunciada");
         assert!(
             tela.e_minha,
@@ -5030,12 +5030,12 @@ mod tests {
 
     #[test]
     fn nao_ha_tela_quando_ninguem_compartilha() {
-        use seele_core::{CageInfo, PilotId, ServerMessage, SessionId, Ssrc};
+        use seele_core::{CageInfo, PersonId, ServerMessage, SessionId, Ssrc};
 
         let mut room = Room::new();
         room.apply(&ServerMessage::Session {
             id: SessionId(1),
-            pilot: PilotId(7),
+            person: PersonId(7),
             ssrc: Ssrc(700),
             dogma: "Terceira Tóquio".into(),
             cages: vec![CageInfo {
@@ -5065,9 +5065,9 @@ mod tests {
         // o degrau que o teto compraria — custe uma linha vermelha. Era o defeito
         // exato do jitter, que a tela lia do relatório do Dogma como `0.0` porque
         // o servidor não tem como medir uma grandeza do receptor.
-        use seele_core::PilotId;
+        use seele_core::PersonId;
 
-        let tela = tela_de(&sala_com_tela(PilotId(3)), None).expect("a transmissão foi anunciada");
+        let tela = tela_de(&sala_com_tela(PersonId(3)), None).expect("a transmissão foi anunciada");
         assert!(
             !tela.medida,
             "alguém passou a medir o que sai: então preencha os três números e mude este teste"
@@ -5090,7 +5090,7 @@ mod tests {
 
     #[test]
     fn o_pedido_so_aparece_ao_lado_da_propria_tela() {
-        use seele_core::PilotId;
+        use seele_core::PersonId;
 
         // O §5 manda pôr o que está saindo ao lado do que foi pedido. O que foi
         // pedido é escolha de quem transmite e **não viaja**: o `ScreenHeader`
@@ -5098,7 +5098,7 @@ mod tests {
         // preencher a coluna da própria transmissão — e preenchê-la com a
         // escolha desta máquina ao lado da tela de outra pessoa seria mostrar o
         // teto de uma transmissão como se fosse o de outra.
-        let minha = tela_de(&sala_com_tela(PilotId(7)), Some(limites()))
+        let minha = tela_de(&sala_com_tela(PersonId(7)), Some(limites()))
             .expect("a transmissão foi anunciada");
         assert!(minha.e_minha);
         assert_eq!(
@@ -5107,7 +5107,7 @@ mod tests {
             "quem compartilha perdeu a metade da comparação que o §5 obriga"
         );
 
-        let alheia = tela_de(&sala_com_tela(PilotId(3)), Some(limites()))
+        let alheia = tela_de(&sala_com_tela(PersonId(3)), Some(limites()))
             .expect("a transmissão foi anunciada");
         assert!(!alheia.e_minha);
         assert_eq!(
@@ -5118,7 +5118,7 @@ mod tests {
 
     #[test]
     fn o_pedido_morre_com_a_transmissao_e_nao_com_o_roster() {
-        use seele_core::{PilotId, ScreenId, ServerMessage};
+        use seele_core::{PersonId, ScreenId, ServerMessage};
 
         // A memória do que foi pedido saiu do JavaScript da casca — onde ela
         // morria com a janela — e passou a morar aqui. Isso troca um defeito por
@@ -5127,7 +5127,7 @@ mod tests {
         // outra vez, e nada na tela diria qual dos dois números vale.
         let shared = bare_shared();
         if let Ok(mut room) = shared.room.lock() {
-            *room = sala_com_tela(PilotId(7));
+            *room = sala_com_tela(PersonId(7));
         }
         shared.gravar_pedido_da_tela(Some(limites()));
 
@@ -5135,11 +5135,11 @@ mod tests {
         // que foi pedido continua valendo.
         fold(
             &shared,
-            &ServerMessage::PilotJoined {
+            &ServerMessage::PersonJoined {
                 cage: CageId(1),
-                profile: seele_core::PilotProfile {
-                    id: PilotId(4),
-                    nickname: "piloto-4".into(),
+                profile: seele_core::PersonProfile {
+                    id: PersonId(4),
+                    nickname: "pessoa-4".into(),
                     roles: Vec::new(),
                 },
                 ssrc: Ssrc(40),
@@ -5218,7 +5218,7 @@ mod tests {
     #[test]
     fn um_ouvinte_sabe_que_a_tela_comecou_e_que_a_sala_cresceu() {
         use seele_core::{
-            CageInfo, PilotId, PilotProfile, ScreenId, ServerMessage, SessionId, Ssrc,
+            CageInfo, PersonId, PersonProfile, ScreenId, ServerMessage, SessionId, Ssrc,
         };
 
         #[derive(Default)]
@@ -5243,7 +5243,7 @@ mod tests {
             &shared,
             &ServerMessage::Session {
                 id: SessionId(1),
-                pilot: PilotId(7),
+                person: PersonId(7),
                 ssrc: Ssrc(700),
                 dogma: "Terceira Tóquio".into(),
                 cages: vec![CageInfo {
@@ -5263,10 +5263,10 @@ mod tests {
         // Alguém entra antes de haver tela: nada de `ScreenChanged`.
         fold(
             &shared,
-            &ServerMessage::PilotJoined {
+            &ServerMessage::PersonJoined {
                 cage: CageId(1),
-                profile: PilotProfile {
-                    id: PilotId(3),
+                profile: PersonProfile {
+                    id: PersonId(3),
                     nickname: "ayanami".into(),
                     roles: Vec::new(),
                 },
@@ -5287,7 +5287,7 @@ mod tests {
             &shared,
             &ServerMessage::ScreenShareStarted {
                 cage: CageId(1),
-                pilot: PilotId(3),
+                person: PersonId(3),
                 screen: ScreenId(9),
             },
         );
@@ -5306,10 +5306,10 @@ mod tests {
         // E agora o roster sozinho, com a tela em curso: o N mudou.
         fold(
             &shared,
-            &ServerMessage::PilotJoined {
+            &ServerMessage::PersonJoined {
                 cage: CageId(1),
-                profile: PilotProfile {
-                    id: PilotId(4),
+                profile: PersonProfile {
+                    id: PersonId(4),
                     nickname: "soryu".into(),
                     roles: Vec::new(),
                 },

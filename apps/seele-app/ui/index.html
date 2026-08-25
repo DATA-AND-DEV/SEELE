@@ -435,7 +435,7 @@
     </span>
     <span class="topo-bloco">
       <span id="padrao" class="padrao">CONEXÃO SEGURA</span>
-      <span id="topo-piloto" class="topo-piloto"></span>
+      <span id="topo-pessoa" class="topo-pessoa"></span>
     </span>
     <span class="regua-larga" aria-hidden="true"></span>
     <span class="topo-bloco topo-bloco-fim">
@@ -503,7 +503,7 @@
 
     Visível **para quem?** Essa era a pergunta que faltava. Três células
     permanentemente vazias, com um `title` cada dizendo «o protocolo não carrega
-    estado de chave por piloto», são um bilhete de quem escreve o protocolo para
+    estado de chave por pessoa», são um bilhete de quem escreve o protocolo para
     quem escreve o protocolo — colado dentro da caixa que interrompe a conversa
     de alguém para dizer o que acabou de acontecer. A lacuna continua registrada
     onde ela é trabalho: no inventário do comp e no §16. Aqui saiu, e com ela a
@@ -711,7 +711,7 @@
     Nada nelas é lista de leitura: são escolhas, e uma escolha é o que um
     `select` é. Ele também resolve de graça o que o guarda
     `every_list_the_dogma_fills_lives_inside_something_that_scrolls` cobra de
-    toda lista que o Dogma preenche — um Dogma com quarenta pilotos não estica
+    toda lista que o Dogma preenche — um Dogma com quarenta pessoas não estica
     esta caixa para fora da janela, porque quem rola é o próprio controle.
 
     ---- nenhuma cor de alarme aqui ----
@@ -1285,14 +1285,14 @@
       ---- o que esta lista é, e o que ela não é ----
 
       É todo mundo que está numa sala de voz, em **todas** as salas: `cages_of`
-      preenche `Cage.pilots` a partir de `room.roster(cage.id)` para todo Cage,
+      preenche `Cage.people` a partir de `room.roster(cage.id)` para todo Cage,
       e não só para o ocupado. Por isso os cartões vêm agrupados por sala — sem
       o agrupamento, doze nomes seguidos não diriam de onde nenhum deles fala.
 
       Não é a lista de quem está conectado no servidor, e essa distinção está
       escrita na nota abaixo do título em vez de ficar implícita. A lista
-      inteira não existe no protocolo: `Room.pilots` só cresce com o `Session`
-      desta conexão, com `PilotJoined` — que é a entrada numa **sala**, e traz
+      inteira não existe no protocolo: `Room.people` só cresce com o `Session`
+      desta conexão, com `PersonJoined` — que é a entrada numa **sala**, e traz
       o Cage no próprio campo — e com o autor de uma mensagem. Nada na fita diz
       quem entrou no servidor sem entrar em sala nenhuma. Desenhar a lista
       «do servidor» a partir do que existe seria uma lista que finge estar
@@ -1417,7 +1417,7 @@
   fiel e difícil de usar ao mesmo tempo. Três consertos desta tela vêm daí, e
   cada um está escrito ao lado do controle que ele conserta:
 
-  1. o estado de cada piloto é **palavra**, e não só cor (`specs/05`);
+  1. o estado de cada pessoa é **palavra**, e não só cor (`specs/05`);
   2. o volume tem `−`, `+` e células clicáveis, no lugar de um deslizante que
      só existia quando o ponteiro passava por cima — um controle que aparece no
      hover é um controle escondido;
@@ -1587,10 +1587,10 @@
       </section>
 
       <!--
-        Um cartão por piloto. O comp corta o roster em `slice(0,4)` e é sempre
+        Um cartão por pessoa. O comp corta o roster em `slice(0,4)` e é sempre
         2×2; aqui a grade se acomoda à largura e rola, porque um Cage tem
         `limit` assentos e nada garante que sejam quatro. Esconder o quinto
-        piloto é a única forma de esta tela mentir sobre quem está na sala.
+        pessoa é a única forma de esta tela mentir sobre quem está na sala.
       -->
       <ol id="chamada-grade" class="chamada-grade" aria-label="pessoas na sala de voz"></ol>
 

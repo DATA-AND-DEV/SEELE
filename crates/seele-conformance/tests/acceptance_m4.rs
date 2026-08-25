@@ -180,10 +180,10 @@ async fn the_roster_shows_who_actually_entered_the_cage() -> Result<()> {
     talker.insert_plug(CAGE).await?;
 
     let seen = pump(&mut watcher, &mut app, &mut room, |app| {
-        app.roster().any(|pilot| pilot.nickname == "asuka")
+        app.roster().any(|person| person.nickname == "asuka")
     })
     .await;
-    assert!(seen, "a pilot entered the Cage and never appeared");
+    assert!(seen, "a person entered the Cage and never appeared");
 
     // The Sync Ratio is shown as a number beside a mark, in every palette —
     // specs/05-cliente-tui.md forbids carrying it by colour alone.
@@ -201,14 +201,14 @@ async fn the_roster_shows_who_actually_entered_the_cage() -> Result<()> {
 /// Walking into an occupied Cage shows the people already in it.
 ///
 /// Gap G15. `specs/02-protocolo.md` announces arrivals going forward and says
-/// nothing about who is already seated, so the second pilot to arrive saw an
+/// nothing about who is already seated, so the second person to arrive saw an
 /// empty room until somebody else moved. Found by starting two clients in
 /// sequence rather than at once — which is what everybody actually does.
 #[tokio::test]
-async fn the_second_pilot_to_arrive_sees_the_first_one() -> Result<()> {
+async fn the_second_person_to_arrive_sees_the_first_one() -> Result<()> {
     let (address, server) = start().await?;
 
-    // The first pilot sits down and stops being interesting.
+    // The first person sits down and stops being interesting.
     let mut early = connect(address, "shinji", 10).await?;
     early.insert_plug(CAGE).await?;
 
@@ -218,7 +218,7 @@ async fn the_second_pilot_to_arrive_sees_the_first_one() -> Result<()> {
 
     let (mut app, mut room) = attach(&late, "asuka", CAGE, None);
     let seen = pump(&mut late, &mut app, &mut room, |app| {
-        app.roster().any(|pilot| pilot.nickname == "shinji")
+        app.roster().any(|person| person.nickname == "shinji")
     })
     .await;
 
@@ -232,7 +232,7 @@ async fn the_second_pilot_to_arrive_sees_the_first_one() -> Result<()> {
     assert_eq!(
         names.iter().filter(|name| **name == "shinji").count(),
         1,
-        "the same pilot is seated twice: {names:?}"
+        "the same person is seated twice: {names:?}"
     );
 
     server.shutdown();
@@ -311,7 +311,7 @@ async fn boot_to_ready_is_under_a_second_and_a_half() -> Result<()> {
 ///
 /// `specs/09-roadmap.md` accepts M4 on somebody outside the project connecting
 /// and conversing knowing only that key. So the test presses only keys that
-/// help screen names, and checks that a message really reaches another pilot.
+/// help screen names, and checks that a message really reaches another person.
 #[tokio::test]
 async fn a_newcomer_can_hold_a_conversation_with_only_the_help_screen() -> Result<()> {
     let (address, server) = start().await?;
@@ -370,7 +370,7 @@ async fn a_newcomer_can_hold_a_conversation_with_only_the_help_screen() -> Resul
             Err(_) => {}
         }
     }
-    assert!(heard, "the message never reached the other pilot");
+    assert!(heard, "the message never reached the other person");
 
     // `:q` leaves, which is the last thing the help promised.
     app.on_key(Key::Char(':'));

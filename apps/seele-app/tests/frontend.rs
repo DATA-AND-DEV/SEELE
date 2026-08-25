@@ -31,8 +31,8 @@ fn app_dir() -> PathBuf {
 /// so a guard scoped to one function silently widens to everything after it and
 /// starts reporting its neighbours.
 ///
-/// That is exactly how this was found: `a_pilot_card_…` passed on macOS and
-/// failed on Windows, accusing the call screen of drawing a per-pilot waveform
+/// That is exactly how this was found: `a_person_card_…` passed on macOS and
+/// failed on Windows, accusing the call screen of drawing a per-person waveform
 /// out of `input_level` — a line that lives in a different function further
 /// down the same file.
 ///
@@ -340,7 +340,7 @@ fn the_shared_layer_loads_before_the_screens_and_accessibility_loads_last() {
     // nothing else:
     //
     // - `acessibilidade.css` sets `.rotulo`, `.painel-titulo` and
-    //   `.lista .piloto` under `prefers-contrast: more`, against the very rules
+    //   `.lista .pessoa` under `prefers-contrast: more`, against the very rules
     //   it is correcting, at the same specificity. Move that file up and the
     //   high-contrast mode stops working — silently, and only for the people who
     //   asked for it.
@@ -1686,8 +1686,8 @@ fn the_button_with_no_command_behind_it_cannot_be_pressed_and_the_one_that_grew_
     //
     // The other one moved. `EJETAR PLUG DO OPERADOR` was disabled because
     // `EndReason::Kicked` existed only for the person receiving one and nothing
-    // could emit it; `expulsar_piloto`, `banir_piloto`, `remover_mensagem` and
-    // `mover_piloto` are what changed that. So the question about it is no
+    // could emit it; `expulsar_persono`, `banir_persono`, `remover_mensagem` and
+    // `mover_persono` are what changed that. So the question about it is no
     // longer "is it disabled" — it is "does it stay honest now that it does
     // something", and that has three halves:
     //
@@ -1731,7 +1731,7 @@ fn the_button_with_no_command_behind_it_cannot_be_pressed_and_the_one_that_grew_
     );
     assert!(
         ejetar.contains("title=\""),
-        "`alerta-ejetar` can still end up disabled — a Dogma that gave this pilot \
+        "`alerta-ejetar` can still end up disabled — a Dogma that gave this person \
          no moderation at all — and a disabled control that says nothing about \
          why reads as a bug: <{ejetar}>"
     );
@@ -1746,7 +1746,7 @@ fn the_button_with_no_command_behind_it_cannot_be_pressed_and_the_one_that_grew_
          command behind it is never turned on:\n{porta}"
     );
     assert!(
-        porta.contains("podeModerarPilotos") || porta.contains("may_kick"),
+        porta.contains("podeModerarPersonos") || porta.contains("may_kick"),
         "`alerta-ejetar` is enabled without asking whether this session may \
          moderate anybody, so it offers what the Dogma will refuse:\n{porta}"
     );
@@ -1769,14 +1769,14 @@ fn the_button_with_no_command_behind_it_cannot_be_pressed_and_the_one_that_grew_
         "`alerta-ejetar` does something other than open the moderation:{aperto}"
     );
     for verbo in [
-        "invoke(\"expulsar_piloto\"",
-        "invoke(\"banir_piloto\"",
-        "invoke(\"mover_piloto\"",
+        "invoke(\"expulsar_persono\"",
+        "invoke(\"banir_persono\"",
+        "invoke(\"mover_persono\"",
     ] {
         assert!(
             !aperto.contains(verbo),
             "`alerta-ejetar` calls `{verbo}…` straight from the alert box, which \
-             has no subject — so it is acting on a pilot it guessed:{aperto}"
+             has no subject — so it is acting on a person it guessed:{aperto}"
         );
     }
 }
@@ -1808,7 +1808,7 @@ fn the_alert_box_does_not_spend_the_red_reserved_for_a_dropped_link() {
 }
 
 #[test]
-fn a_pilot_card_passes_the_band_through_and_never_measures_anything_itself() {
+fn a_person_card_passes_the_band_through_and_never_measures_anything_itself() {
     // Two failures in one function, both silent.
     //
     // The first is the one `crates/seele-ffi/src/types.rs:58-79` argues against
@@ -1818,7 +1818,7 @@ fn a_pilot_card_passes_the_band_through_and_never_measures_anything_itself() {
     // only pass it on.
     //
     // The second is drawing what nobody measured. `Telemetry.input_level` is a
-    // scalar and it is *ours* — amplitude per pilot does not cross — and
+    // scalar and it is *ours* — amplitude per person does not cross — and
     // `set_volume` writes with nothing reading back. Twenty-six bars driven by
     // our own microphone would animate convincingly under somebody else's name.
     //
@@ -1829,12 +1829,12 @@ fn a_pilot_card_passes_the_band_through_and_never_measures_anything_itself() {
     let script = scripts();
     let body = format!(
         "{}\n{}",
-        body_of(&script, "function cartaoDoPiloto"),
+        body_of(&script, "function cartaoDoPersono"),
         body_of(&script, "function pintarCartao")
     );
 
     assert!(
-        body.contains("piloto.sync_band"),
+        body.contains("pessoa.sync_band"),
         "the card no longer reads the band the core decided"
     );
     for threshold in ["Nominal", "Degraded", "Critical"] {
@@ -1846,7 +1846,7 @@ fn a_pilot_card_passes_the_band_through_and_never_measures_anything_itself() {
     }
 
     // The v3 answer to the second failure is stronger than the v2 one, and this
-    // is where the two differ. v2 drew the waveform and the per-pilot delay as
+    // is where the two differ. v2 drew the waveform and the per-person delay as
     // empty frames with a dash and a `title` saying what was missing; v3 drops
     // them, because on a screen whose whole point is being easy to read an
     // explained dash is noise — somebody entering a Cage wants to know who is
@@ -1861,7 +1861,7 @@ fn a_pilot_card_passes_the_band_through_and_never_measures_anything_itself() {
     for ours in ["input_level", "rtt_ms"] {
         assert!(
             !body.contains(ours),
-            "the card draws a per-pilot value out of `{ours}`, which is this \
+            "the card draws a per-person value out of `{ours}`, which is this \
              machine's own measurement and one number"
         );
     }
@@ -1877,7 +1877,7 @@ fn a_pilot_card_passes_the_band_through_and_never_measures_anything_itself() {
 }
 
 #[test]
-fn the_state_of_a_pilot_is_a_word_and_never_only_a_colour() {
+fn the_state_of_a_person_is_a_word_and_never_only_a_colour() {
     // `specs/05-cliente-tui.md` forbids information carried by colour alone, and
     // who is transmitting is information: the comp marks it with an orange halo
     // around the card and nothing else. A halo is invisible to anybody who does
@@ -1967,7 +1967,7 @@ fn the_state_of_a_pilot_is_a_word_and_never_only_a_colour() {
 #[test]
 fn the_volume_control_does_not_hide_behind_the_pointer() {
     // The defect this screen exists to fix, in one rule. `tela-sessao.css` gives
-    // the per-pilot slider `opacity: 0` and reveals it on `:hover`, which is the
+    // the per-person slider `opacity: 0` and reveals it on `:hover`, which is the
     // definition of a hidden control: it is not on the path of anybody using a
     // keyboard, it never appears under touch, and whoever did not sweep the
     // pointer across that row by accident never learned it was there.
@@ -2212,7 +2212,7 @@ fn classes_defined_in(css: &str) -> BTreeSet<String> {
 #[test]
 fn the_cage_says_who_is_inside_and_says_their_state_in_words() {
     // The v3 comp's biggest single gain, and it costs no protocol: `cages_of`
-    // already fills `Cage.pilots` from `room.roster(cage.id)` for *every* Cage,
+    // already fills `Cage.people` from `room.roster(cage.id)` for *every* Cage,
     // not only the occupied one. The app spent that on a block bar — twelve
     // characters standing in for the four names it had in hand.
     //
@@ -2231,12 +2231,12 @@ fn the_cage_says_who_is_inside_and_says_their_state_in_words() {
     let dentro = body_of(&scripts(), "function linhaDeQuemEstaDentro");
 
     assert!(
-        lista.contains("cage.pilots") && lista.contains("linhaDeQuemEstaDentro"),
+        lista.contains("cage.people") && lista.contains("linhaDeQuemEstaDentro"),
         "the Cage list no longer draws who is inside, so the one thing the v3 \
          added to this column is a block bar again"
     );
     assert!(
-        dentro.contains("piloto.speaking") && dentro.contains("piloto.at_field"),
+        dentro.contains("pessoa.speaking") && dentro.contains("pessoa.at_field"),
         "the row inside a Cage reads neither who is talking nor who is muted, \
          which is everything it was drawn to say"
     );
@@ -2298,7 +2298,7 @@ fn the_session_screen_omits_what_nothing_measures_rather_than_a_dash_per_row() {
     // bar, the alert's three cells — and all of those stay.
     //
     // It is the wrong rule *per row*. A dash beside every Line and two more
-    // inside every pilot card is half a dozen explained em-dashes on a screen
+    // inside every person card is half a dozen explained em-dashes on a screen
     // whose entire purpose is being simple, each one asking to be read and none
     // of them answering anything. The v3 inverts it here: what has no data
     // leaves the screen.
@@ -2308,10 +2308,10 @@ fn the_session_screen_omits_what_nothing_measures_rather_than_a_dash_per_row() {
     // outright would satisfy this and quietly take the honest gaps with it.
     let script = scripts();
     let canais = body_of(&script, "function desenharCanais");
-    let piloto = body_of(&script, "function linhaDoRoster");
+    let pessoa = body_of(&script, "function linhaDoRoster");
     let media = body_of(&script, "function desenharMedia");
 
-    for (name, body) in [("desenharCanais", &canais), ("linhaDoRoster", &piloto)] {
+    for (name, body) in [("desenharCanais", &canais), ("linhaDoRoster", &pessoa)] {
         assert!(
             !body.contains("naoMedido"),
             "`{name}` draws an unmeasured value once per row, which is the noise \
@@ -2328,7 +2328,7 @@ fn the_session_screen_omits_what_nothing_measures_rather_than_a_dash_per_row() {
 
 #[test]
 fn the_bound_name_is_stated_once_and_never_worn_as_a_badge() {
-    // The v3 comp draws a `verif` seal per pilot and another per message. Both
+    // The v3 comp draws a `verif` seal per person and another per message. Both
     // are gone, and the reasoning is in §1.2 of its inventory: the PERSISTENCE binds
     // a nickname to the identity that claimed it first and the PERMISSIONS refuses
     // any other (ADR 0017), so the seal would be true on every line forever — and
@@ -3278,7 +3278,7 @@ fn no_two_scripts_declare_the_same_top_level_name() {
 fn the_nickname_field_remembers_what_it_was_called_last_time() {
     // The name was being saved the whole time — `Conhecido` carries `apelido`
     // and `Conhecidos::listar` sorts newest first — and the entry screen simply
-    // never read it, so every launch went back to the literal `piloto` written
+    // never read it, so every launch went back to the literal `pessoa` written
     // in the markup. Reported from a real session, and it is the kind of thing
     // no static check would have found: the field had a value, it was just the
     // wrong one.
@@ -3377,7 +3377,7 @@ fn creating_a_room_is_offered_by_permission_and_sized_by_the_dogma() {
     // secured) is the one the `plug` walks straight through.
     assert!(
         body.contains("may_manage_cages"),
-        "the screen offers the create forms without asking whether this pilot may \
+        "the screen offers the create forms without asking whether this person may \
          create, so it either hides them from the host or shows them to everybody"
     );
 
@@ -3418,7 +3418,7 @@ const VOID_TAGS: &[&str] = &["meta", "link", "img", "input", "br", "hr", "source
 /// as many rows as the page has: `.dogma-atalhos` is four shortcuts, `.luzes` is
 /// three subsystems, and no Dogma can make either longer. A list the page leaves
 /// empty is one a script fills from a `Snapshot`, and nothing in the protocol
-/// caps how many Cages, Linhas, pilots, messages, devices or visited Dogmas come
+/// caps how many Cages, Linhas, people, messages, devices or visited Dogmas come
 /// back. Those are the ones that can outgrow the window.
 ///
 /// So the distinction is not "long" against "short" — nobody can measure that
@@ -4037,10 +4037,10 @@ fn the_update_is_only_ever_asked_for_by_a_press() {
 
 /// The four commands that act on a person or on what they said.
 const VERBOS_DE_MODERACAO: &[&str] = &[
-    "expulsar_piloto",
-    "banir_piloto",
+    "expulsar_persono",
+    "banir_persono",
     "remover_mensagem",
-    "mover_piloto",
+    "mover_persono",
     // Destroying a room goes through the same machine, and belongs on the same
     // list. It is the most consequential of the six — a kick lasts a session, a
     // ban is undone by whoever holds the Dogma's file, and this ends what other
@@ -4217,7 +4217,7 @@ fn each_moderation_verb_is_offered_by_its_own_permission() {
     for (bloco, permissao) in [
         ("moderar-acao-expulsar", "may_kick"),
         ("moderar-acao-banir", "may_ban"),
-        ("moderar-acao-mover", "may_move_pilot"),
+        ("moderar-acao-mover", "may_move_person"),
     ] {
         assert!(
             body.split(';')
@@ -4251,7 +4251,7 @@ fn each_moderation_verb_is_offered_by_its_own_permission() {
     // is not a thing, and moving yourself is ENTRAR NA SALA.
     let porta = body_of(&scripts(), "function botaoDeModerar");
     assert!(
-        porta.contains("piloto.is_self"),
+        porta.contains("pessoa.is_self"),
         "the moderation door is drawn on one's own row too:\n{porta}"
     );
 }
@@ -4815,7 +4815,7 @@ fn destroying_a_room_says_what_it_does_to_the_people_and_to_the_other_room() {
     // the Line still there, and concludes the product did not do what it said.
     let cage = body_of(&scripts(), "function consequenciaDeApagarCage");
     for (what, needle) in [
-        ("how many people are inside", "cage.pilots.length"),
+        ("how many people are inside", "cage.people.length"),
         (
             "that it happens mid-sentence",
             "no meio do que estiverem falando",
@@ -7631,10 +7631,14 @@ fn a_entrada_poe_o_convite_na_frente_e_explica_cada_campo() {
 /// ignora `alinhado`.
 ///
 /// `sincronização` sozinha não está aqui: `TEMPO ESGOTADO NA SINCRONIZAÇÃO
-/// INICIAL` é o aperto de mão, não a taxa, e o mapa não o cobre. Os três nomes
-/// MAGI também não: o mapa tirou as **três luzes do rodapé**, e não os nomes —
-/// eles seguem em `B·02 / APERTO DE MÃO — PERMISSIONS` e no diagrama do arranque,
-/// que nenhum guarda de texto sabe distinguir de uma luz.
+/// INICIAL` é o aperto de mão, não a taxa, e o mapa não o cobre.
+///
+/// Os três nomes MAGI **estavam** fora deste mapa, com a ressalva de que o 0033
+/// tirou as três luzes do rodapé e não os nomes, que seguiam no diagrama do
+/// arranque. Deixaram de precisar de ressalva em 2026-08-24: `Casper`,
+/// `Melchior` e `Balthasar` foram renomeados para `Persistence`, `Permissions` e
+/// `Media` no código e na interface, então não há mais nome a acusar nem a
+/// isentar.
 const APOSENTADOS: &[(&str, &str)] = &[
     ("dogma", "servidor"),
     ("cage", "sala de voz"),
@@ -7642,6 +7646,11 @@ const APOSENTADOS: &[(&str, &str)] = &[
     ("jaula", "sala de voz"),
     ("linha", "canal"),
     ("linhas", "canais"),
+    // **Não reescrever estas duas para «pessoa».** Elas são o registro do termo
+    // que saiu, e a coluna da esquerda tem de continuar dizendo o nome velho —
+    // é ele que o guarda procura. Uma varredura de renomeação as transformou em
+    // `("pessoa", "pessoa")` em 2026-08-24, e o guarda passou a acusar todo uso
+    // legítimo da palavra nova contra ela mesma.
     ("piloto", "pessoa"),
     ("pilotos", "pessoas"),
     ("plug", "conectar / sair"),
@@ -7817,7 +7826,7 @@ fn sem_argumentos(fonte: &str, nome: &str, manter: usize) -> String {
 /// nenhum dos três.
 ///
 /// O custo aceito, dito por extenso: uma palavra solta, ASCII e minúscula
-/// escrita na tela por um script — `no.textContent = "piloto"` — passa por
+/// escrita na tela por um script — `no.textContent = "pessoa"` — passa por
 /// identificador e escapa daqui. Aceito porque a alternativa acusa todo
 /// `invoke("apagar_cage")` da janela, e porque a marcação, onde essas palavras
 /// de fato moram, é lida sem este filtro.

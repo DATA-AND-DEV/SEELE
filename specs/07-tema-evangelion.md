@@ -2,7 +2,7 @@
 
 > **Nota — 2026-08-21, ADR 0033.** A **camada de linguagem deste documento foi
 > retirada da interface.** O vocabulário abaixo — Dogma Central, Cage, Linha,
-> Piloto, inserir plug, ejetar, A.T. Field, Taxa de Sincronização, PADRÃO: AZUL,
+> Pessoa, inserir plug, ejetar, A.T. Field, Taxa de Sincronização, PADRÃO: AZUL,
 > e o japonês decorativo — **não é mais o que aparece na tela**. A autoridade
 > sobre a palavra que a pessoa lê passou a ser `docs/glossario.md`.
 >
@@ -34,7 +34,7 @@ Estes termos são obrigatórios e consistentes em toda a superfície do produto.
 | Cliente | **Entry Plug** / `plug` | |
 | Canal de voz | **Cage** | |
 | Canal de texto | **Linha** | |
-| Usuário | **Piloto** | |
+| Usuário | **Pessoa** | |
 | Entrar em canal de voz | **Inserir plug** | |
 | Sair | **Ejetar** | |
 | Qualidade de conexão | **Taxa de Sincronização** | 0–100%, ver `02` |
@@ -47,12 +47,12 @@ Estes termos são obrigatórios e consistentes em toda a superfície do produto.
 | Reconectando | **Bateria interna** | contagem de 04:59 |
 | Notificação crítica | **Alerta · 警告** | |
 | Configurações | **Terminal Dogma** | |
-| Papéis | Comandante, Operador, Piloto, Observador | |
+| Papéis | Comandante, Operador, Pessoa, Observador | |
 | Subsistemas | PERMISSIONS, MEDIA, PERSISTENCE | ver `04` |
 
 ## O elemento assinatura
 
-**A Taxa de Sincronização por pessoa.** Cada piloto no roster tem um percentual vivo derivado do RTT, jitter e perda daquela conexão. Nenhum concorrente mostra isso; aqui é a coisa mais visível da tela. É a métrica que dá caráter ao produto e, não por acaso, é genuinamente útil — quando alguém fica difícil de entender, todo mundo já sabe por quê.
+**A Taxa de Sincronização por pessoa.** Cada pessoa no roster tem um percentual vivo derivado do RTT, jitter e perda daquela conexão. Nenhum concorrente mostra isso; aqui é a coisa mais visível da tela. É a métrica que dá caráter ao produto e, não por acaso, é genuinamente útil — quando alguém fica difícil de entender, todo mundo já sabe por quê.
 
 ## A bateria interna
 

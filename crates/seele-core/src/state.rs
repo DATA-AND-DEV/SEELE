@@ -1,6 +1,6 @@
 //! What is true about the session right now.
 //!
-//! A fold over [`ServerMessage`]: which pilots are in which Cage, what they are
+//! A fold over [`ServerMessage`]: which people are in which Cage, what they are
 //! called, what state they announced, what has been said. Nothing here draws
 //! anything or decides what a human should read.
 //!
@@ -12,7 +12,7 @@
 //!
 //! The M4 terminal client kept this bookkeeping itself, and it worked. Then
 //! `specs/06-clientes-gui.md` asked `seele-ffi` for `estado_atual() -> Snapshot`
-//! — the same map from pilot to nickname, the same seats, the same "who is
+//! — the same map from person to nickname, the same seats, the same "who is
 //! speaking". Building that separately would have been the second
 //! implementation, with the third waiting in M6.
 //!
@@ -27,18 +27,18 @@
 
 use std::collections::HashMap;
 
-use seele_proto::control::{CageInfo, LineInfo, Permission, PilotState};
-use seele_proto::ids::{CageId, LineId, MessageId, PilotId, ScreenId, Ssrc};
+use seele_proto::control::{CageInfo, LineInfo, Permission, PersonState};
+use seele_proto::ids::{CageId, LineId, MessageId, PersonId, ScreenId, Ssrc};
 use seele_proto::sync_ratio::SyncBand;
 use seele_proto::ServerMessage;
 
 use crate::client::SessionInfo;
 
-/// One pilot, as far as this client knows.
+/// One person, as far as this client knows.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Pilot {
+pub struct Person {
     /// Account identifier.
-    pub id: PilotId,
+    pub id: PersonId,
     /// Display name.
     pub nickname: String,
     /// Their media source, for per-talker volume.
@@ -53,8 +53,8 @@ pub struct Pilot {
     pub sync_ratio: u8,
 }
 
-impl Pilot {
-    fn new(id: PilotId, nickname: String, ssrc: Option<Ssrc>) -> Self {
+impl Person {
+    fn new(id: PersonId, nickname: String, ssrc: Option<Ssrc>) -> Self {
         Self {
             id,
             nickname,
@@ -78,7 +78,7 @@ pub struct Message {
     /// Which Line it was said in.
     pub line: LineId,
     /// Who said it.
-    pub author: PilotId,
+    pub author: PersonId,
     /// Their name at the time it arrived.
     pub author_nickname: String,
     /// When the server accepted it, in **seconds** since the Unix epoch.
@@ -147,25 +147,25 @@ pub enum TransferNotice {
 /// The comp (`design/Entry Plug v2.dc.html`) draws this as **MÉDIA DO CAGE**, a
 /// number in the band's colour with the sample size beside it, and computes
 /// both in the shell. Here it is computed once, in the core, for the same
-/// reason `seele_ffi::types` gives for carrying a band beside every pilot's
+/// reason `seele_ffi::types` gives for carrying a band beside every person's
 /// number: a threshold known by two shells is a threshold two shells disagree
 /// about the day one of them is updated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CageSync {
-    /// The mean of the seated pilots' ratios, 0 to 100.
+    /// The mean of the seated people' ratios, 0 to 100.
     ///
     /// Rounded to the nearest point, ties up. The comp prints `82.4`, but the
     /// datum is a `u8` at every point it exists — on the wire, in
-    /// [`Pilot::sync_ratio`], in the smoothing — so a decimal here would be
+    /// [`Person::sync_ratio`], in the smoothing — so a decimal here would be
     /// precision invented at the last step. `82` is what is known.
     pub ratio: u8,
     /// Which band that mean falls into.
     pub band: SyncBand,
-    /// How many pilots it is the mean of — the comp's `5 PLUGS`.
+    /// How many people it is the mean of — the comp's `5 PLUGS`.
     ///
     /// Carried so a shell can say what the number is an average *of* without
     /// counting the roster a second time and getting a different answer.
-    pub pilots: usize,
+    pub people: usize,
 }
 
 /// Why the session ended, if it has.
@@ -178,8 +178,8 @@ pub struct Ended {
 /// Everything this client knows about the Dogma it is attached to.
 #[derive(Debug, Default, Clone)]
 pub struct Room {
-    /// Which pilot this connection is.
-    pub me: Option<PilotId>,
+    /// Which person this connection is.
+    pub me: Option<PersonId>,
     /// The media source the server assigned — gap G1.
     pub ssrc: Option<Ssrc>,
     /// What the Dogma is called.
@@ -196,38 +196,38 @@ pub struct Room {
     /// is in. It is also what a handshake resets this to — see
     /// [`Room::adopt`].
     pub icon: Option<Vec<u8>>,
-    /// Voice channels visible to this pilot.
+    /// Voice channels visible to this person.
     pub cages: Vec<CageInfo>,
-    /// Text channels visible to this pilot.
+    /// Text channels visible to this person.
     pub lines: Vec<LineInfo>,
-    /// What this pilot may do, as PERMISSIONS resolved it.
+    /// What this person may do, as PERMISSIONS resolved it.
     ///
     /// Here so a shell can ask "should this control exist at all" without
     /// re-deriving `specs/04-servidor-seele.md`'s "negadas vencem concedidas"
     /// for itself. **Convenience, never enforcement**: the server checks again.
     pub permissions: Vec<Permission>,
-    /// The Cage this pilot's plug is in.
+    /// The Cage this person's plug is in.
     pub current_cage: Option<CageId>,
     /// The Line being read.
     pub current_line: Option<LineId>,
     /// Everybody this client has heard of, by id.
-    pub pilots: HashMap<PilotId, Pilot>,
+    pub people: HashMap<PersonId, Person>,
     /// Who is seated in which Cage, in arrival order.
-    pub seats: HashMap<CageId, Vec<PilotId>>,
+    pub seats: HashMap<CageId, Vec<PersonId>>,
     /// Quem está conectado neste Dogma, esteja ou não numa sala.
     ///
     /// # Por que não dá para deduzir de [`Self::seats`]
     ///
     /// Porque sentar-se numa sala é uma coisa e estar aqui é outra, e por muito
-    /// tempo só a primeira tinha mensagem. `PilotJoined` carrega um Cage, então
+    /// tempo só a primeira tinha mensagem. `PersonJoined` carrega um Cage, então
     /// quem entrava no servidor e ficava fora das salas era invisível para todo
     /// mundo — a lista de pessoas mostrava quem estava sentado e se chamava
-    /// «pessoas». Agora `PilotPresent` e `PilotGone` dizem a outra metade.
+    /// «pessoas». Agora `PersonPresent` e `PersonGone` dizem a outra metade.
     ///
     /// Em ordem de chegada, como os assentos, e sem repetição: a mesma pessoa
     /// anunciada duas vezes é uma linha, porque a varredura de abertura e a
     /// difusão podem se sobrepor por um instante.
-    pub presentes: Vec<PilotId>,
+    pub presentes: Vec<PersonId>,
     /// What has been said, oldest first.
     pub messages: Vec<Message>,
     /// Connection quality as the server reports it.
@@ -292,7 +292,7 @@ pub struct Tela {
     /// faria a interface escrever «1 pessoa assistindo» antes de haver uma.
     pub espectadores: u32,
     /// Quem está compartilhando.
-    pub pilot: PilotId,
+    pub person: PersonId,
     /// Como a transmissão se chama.
     ///
     /// Atribuído pelo Dogma, como o `ssrc`, e **diferente** dele: a tabela de
@@ -310,7 +310,7 @@ pub struct ChavePedida {
     /// Carregado porque quem compartilha pode segurar um fluxo por espectador,
     /// e porque é a única maneira de distinguir uma pessoa pedindo duas vezes
     /// por segundo de a sala inteira perdendo quadros.
-    pub pilot: PilotId,
+    pub person: PersonId,
 }
 
 /// What changed, so a shell can redraw only what it must.
@@ -341,7 +341,7 @@ pub struct Changed {
     /// Uma transmissão de tela começou, acabou, ou pediram quadro-chave.
     ///
     /// Bandeira própria e não dobrada em [`Self::roster`]: o que se mexe é o
-    /// painel da tela, e uma casca que redesenhasse a lista de pilotos inteira
+    /// painel da tela, e uma casca que redesenhasse a lista de pessoas inteira
     /// a cada pedido de quadro-chave estaria redesenhando justamente a parte
     /// que não mudou.
     pub telas: bool,
@@ -383,7 +383,7 @@ impl Room {
     /// in because the server announces arrivals to everybody *else*: nothing on
     /// the wire ever tells this client who it is.
     pub fn adopt(&mut self, info: &SessionInfo, nickname: &str) {
-        self.me = Some(info.pilot);
+        self.me = Some(info.person);
         self.ssrc = Some(info.ssrc);
         self.dogma = info.dogma.clone();
         // Cleared, and not left alone, because this runs again on every
@@ -408,13 +408,13 @@ impl Room {
         // Dogma. Carregar a subida do anterior seria dimensionar o teto pela
         // casa errada, que é o defeito que o §5.1 mandou corrigir.
         self.caminho_de_quem_hospeda_bps = None;
-        self.pilots.insert(
-            info.pilot,
-            Pilot::new(info.pilot, nickname.to_owned(), Some(info.ssrc)),
+        self.people.insert(
+            info.person,
+            Person::new(info.person, nickname.to_owned(), Some(info.ssrc)),
         );
     }
 
-    /// Records that this pilot's plug is now in a Cage, and seats them in it.
+    /// Records that this person's plug is now in a Cage, and seats them in it.
     ///
     /// Called on the way *out*, when the client asks — not on the way in. The
     /// server confirms a Cage entry by silence, and a roster that waits for a
@@ -434,14 +434,14 @@ impl Room {
         self.current_cage = Some(cage);
     }
 
-    /// Records that this pilot's plug came **out**, and empties their seat.
+    /// Records that this person's plug came **out**, and empties their seat.
     ///
     /// The other half of [`Self::enter_cage`], and it was missing for as long
-    /// as that one existed. The Dogma does not echo `PilotLeft` back to the
-    /// pilot who caused it — "they already know" — so leaving, exactly like
+    /// as that one existed. The Dogma does not echo `PersonLeft` back to the
+    /// person who caused it — "they already know" — so leaving, exactly like
     /// entering, is bookkeeping this side has to do for itself. Without it the
     /// server empties the seat, every other client empties the seat, and the
-    /// one screen that goes on drawing the pilot in the Cage is the screen of
+    /// one screen that goes on drawing the person in the Cage is the screen of
     /// the person who just left it.
     ///
     /// Idempotent: leaving a Cage nobody is in is not an error, it is a client
@@ -485,17 +485,17 @@ impl Room {
         self.current_line = Some(line);
     }
 
-    /// The pilots seated in a Cage, in arrival order.
-    pub fn roster(&self, cage: CageId) -> impl Iterator<Item = &Pilot> {
+    /// The people seated in a Cage, in arrival order.
+    pub fn roster(&self, cage: CageId) -> impl Iterator<Item = &Person> {
         self.seats
             .get(&cage)
             .into_iter()
             .flatten()
-            .filter_map(|id| self.pilots.get(id))
+            .filter_map(|id| self.people.get(id))
     }
 
-    /// The pilots in whichever Cage this client is in.
-    pub fn current_roster(&self) -> impl Iterator<Item = &Pilot> {
+    /// The people in whichever Cage this client is in.
+    pub fn current_roster(&self) -> impl Iterator<Item = &Person> {
         self.current_cage
             .into_iter()
             .flat_map(|cage| self.roster(cage))
@@ -512,25 +512,25 @@ impl Room {
     /// shell to draw the absence — the comp draws `——` for a plug with no
     /// number, and this is the same case one level up.
     ///
-    /// # An ejected pilot does not count
+    /// # An ejected person does not count
     ///
-    /// Ejecting a plug leaves the Cage: the pilot comes out of `seats` — via
-    /// [`Self::enter_cage`] for this client, or `PilotLeft` for anybody else —
-    /// while staying in `pilots`, because their name is still needed for what
+    /// Ejecting a plug leaves the Cage: the person comes out of `seats` — via
+    /// [`Self::enter_cage`] for this client, or `PersonLeft` for anybody else —
+    /// while staying in `people`, because their name is still needed for what
     /// they already said. This averages the *seats*, so somebody who left stops
     /// counting the moment they leave and cannot drag the room's number down
     /// from outside it. There is no third state: this client has no notion of a
-    /// pilot who is in the Cage but ejected.
+    /// person who is in the Cage but ejected.
     #[must_use]
     pub fn cage_sync(&self, cage: CageId) -> Option<CageSync> {
         let mut total: u32 = 0;
-        let mut pilots: usize = 0;
-        for pilot in self.roster(cage) {
-            total += u32::from(pilot.sync_ratio);
-            pilots += 1;
+        let mut people: usize = 0;
+        for person in self.roster(cage) {
+            total += u32::from(person.sync_ratio);
+            people += 1;
         }
 
-        let count = u32::try_from(pilots).ok()?;
+        let count = u32::try_from(people).ok()?;
         if count == 0 {
             return None;
         }
@@ -545,7 +545,7 @@ impl Room {
         Some(CageSync {
             ratio,
             band: SyncBand::of(ratio),
-            pilots,
+            people,
         })
     }
 
@@ -555,13 +555,13 @@ impl Room {
         self.current_cage.and_then(|cage| self.cage_sync(cage))
     }
 
-    /// A pilot's media source, addressed by nickname.
+    /// A person's media source, addressed by nickname.
     #[must_use]
     pub fn ssrc_of(&self, nickname: &str) -> Option<Ssrc> {
-        self.pilots
+        self.people
             .values()
-            .find(|pilot| pilot.nickname.eq_ignore_ascii_case(nickname))
-            .and_then(|pilot| pilot.ssrc)
+            .find(|person| person.nickname.eq_ignore_ascii_case(nickname))
+            .and_then(|person| person.ssrc)
     }
 
     /// The Cage matching a name or a number.
@@ -594,25 +594,25 @@ impl Room {
             .map(|line| line.id)
     }
 
-    /// The name to show for a pilot, even one never introduced.
+    /// The name to show for a person, even one never introduced.
     ///
     /// Joining a Line mid-conversation means the first thing said can come from
     /// somebody whose arrival was never seen. Showing an id beats dropping it.
     #[must_use]
-    pub fn name_of(&self, pilot: PilotId) -> String {
-        self.pilots
-            .get(&pilot)
-            .map_or_else(|| format!("piloto {}", pilot.0), |p| p.nickname.clone())
+    pub fn name_of(&self, person: PersonId) -> String {
+        self.people
+            .get(&person)
+            .map_or_else(|| format!("pessoa {}", person.0), |p| p.nickname.clone())
     }
 
-    /// A transmissão que **este** piloto está compartilhando, se houver uma.
+    /// A transmissão que **este** pessoa está compartilhando, se houver uma.
     ///
     /// Uma por Cage (§6 item 3), então achar a minha é achar aquela cujo dono
     /// sou eu — e não a do Cage em que estou, que pode ser a de outra pessoa.
     #[must_use]
     pub fn minha_tela(&self) -> Option<Tela> {
         let me = self.me?;
-        self.telas.values().copied().find(|tela| tela.pilot == me)
+        self.telas.values().copied().find(|tela| tela.person == me)
     }
 
     /// O teto do vídeo com o que o fio já contou, pronto para a bomba.
@@ -666,7 +666,7 @@ impl Room {
 
         match message {
             ServerMessage::Session {
-                pilot,
+                person,
                 ssrc,
                 dogma,
                 cages,
@@ -674,7 +674,7 @@ impl Room {
                 permissions,
                 ..
             } => {
-                self.me = Some(*pilot);
+                self.me = Some(*person);
                 self.ssrc = Some(*ssrc);
                 self.dogma.clone_from(dogma);
                 // For the reason [`Self::adopt`] gives: a handshake describes
@@ -683,25 +683,25 @@ impl Room {
                 self.cages.clone_from(cages);
                 self.lines.clone_from(lines);
                 self.permissions.clone_from(permissions);
-                self.pilots
-                    .entry(*pilot)
-                    .or_insert_with(|| Pilot::new(*pilot, format!("piloto {}", pilot.0), None))
+                self.people
+                    .entry(*person)
+                    .or_insert_with(|| Person::new(*person, format!("pessoa {}", person.0), None))
                     .ssrc = Some(*ssrc);
                 changed.channels = true;
                 changed.roster = true;
             }
 
-            ServerMessage::PilotJoined {
+            ServerMessage::PersonJoined {
                 cage,
                 profile,
                 ssrc,
             } => {
-                let pilot = self
-                    .pilots
+                let person = self
+                    .people
                     .entry(profile.id)
-                    .or_insert_with(|| Pilot::new(profile.id, profile.nickname.clone(), None));
-                pilot.nickname.clone_from(&profile.nickname);
-                pilot.ssrc = Some(*ssrc);
+                    .or_insert_with(|| Person::new(profile.id, profile.nickname.clone(), None));
+                person.nickname.clone_from(&profile.nickname);
+                person.ssrc = Some(*ssrc);
 
                 let seats = self.seats.entry(*cage).or_default();
                 if !seats.contains(&profile.id) {
@@ -710,47 +710,47 @@ impl Room {
                 changed.roster = true;
             }
 
-            ServerMessage::PilotLeft { cage, pilot } => {
+            ServerMessage::PersonLeft { cage, person } => {
                 if let Some(seats) = self.seats.get_mut(cage) {
-                    seats.retain(|seated| seated != pilot);
+                    seats.retain(|seated| seated != person);
                 }
-                // The pilot stays in `pilots`: their name is still needed to
+                // The person stays in `people`: their name is still needed to
                 // attribute everything they said before leaving.
-                if let Some(known) = self.pilots.get_mut(pilot) {
+                if let Some(known) = self.people.get_mut(person) {
                     known.speaking = false;
                 }
                 changed.roster = true;
             }
 
-            ServerMessage::PilotPresent { profile, ssrc } => {
-                let pilot = self
-                    .pilots
+            ServerMessage::PersonPresent { profile, ssrc } => {
+                let person = self
+                    .people
                     .entry(profile.id)
-                    .or_insert_with(|| Pilot::new(profile.id, profile.nickname.clone(), None));
-                pilot.nickname.clone_from(&profile.nickname);
-                pilot.ssrc = Some(*ssrc);
+                    .or_insert_with(|| Person::new(profile.id, profile.nickname.clone(), None));
+                person.nickname.clone_from(&profile.nickname);
+                person.ssrc = Some(*ssrc);
                 if !self.presentes.contains(&profile.id) {
                     self.presentes.push(profile.id);
                 }
                 changed.roster = true;
             }
 
-            ServerMessage::PilotGone { pilot } => {
-                self.presentes.retain(|presente| presente != pilot);
+            ServerMessage::PersonGone { person } => {
+                self.presentes.retain(|presente| presente != person);
                 // Os assentos **não** são limpos aqui: o Dogma manda um
-                // `PilotLeft` por sala que a pessoa ocupava, e limpar nos dois
+                // `PersonLeft` por sala que a pessoa ocupava, e limpar nos dois
                 // lugares poria duas autoridades sobre a mesma linha. O que se
                 // limpa é o que só esta mensagem sabe.
                 //
-                // E ela continua em `pilots`, como em `PilotLeft`: o nome ainda
+                // E ela continua em `people`, como em `PersonLeft`: o nome ainda
                 // é preciso para atribuir tudo o que ela disse antes de sair.
-                if let Some(known) = self.pilots.get_mut(pilot) {
+                if let Some(known) = self.people.get_mut(person) {
                     known.speaking = false;
                 }
                 changed.roster = true;
             }
 
-            ServerMessage::PilotState(state) => {
+            ServerMessage::PersonState(state) => {
                 self.absorb_state(state);
                 changed.roster = true;
             }
@@ -780,9 +780,9 @@ impl Room {
                     // name we already learned, and history for a stranger is
                     // the case this field exists for.
                     author_nickname: self
-                        .pilots
+                        .people
                         .get(author)
-                        .map_or_else(|| author_nickname.clone(), |pilot| pilot.nickname.clone()),
+                        .map_or_else(|| author_nickname.clone(), |person| person.nickname.clone()),
                     at_seconds: *at_seconds,
                     body: body.clone(),
                     replies_to: *replies_to,
@@ -954,9 +954,9 @@ impl Room {
             // claiming the room is there.
             //
             // The seats go with it. Whoever was inside was turned out by the
-            // server, which announces each of them as a `PilotLeft` — but the
-            // announcement is per pilot and this map is per Cage, so a Cage
-            // whose last `PilotLeft` was lost to a reconnection would leave
+            // server, which announces each of them as a `PersonLeft` — but the
+            // announcement is per person and this map is per Cage, so a Cage
+            // whose last `PersonLeft` was lost to a reconnection would leave
             // people seated in a room nobody can see. Clearing it here needs no
             // announcement to be complete.
             ServerMessage::CageDeleted { cage } => {
@@ -1008,7 +1008,7 @@ impl Room {
             // errar.
             ServerMessage::ScreenShareStarted {
                 cage,
-                pilot,
+                person,
                 screen,
             } => {
                 // A contagem sobrevive ao reenvio, e é por isso que ela é lida
@@ -1027,7 +1027,7 @@ impl Room {
                     *cage,
                     Tela {
                         espectadores,
-                        pilot: *pilot,
+                        person: *person,
                         screen: *screen,
                     },
                 );
@@ -1071,7 +1071,7 @@ impl Room {
             // Sem motivo, e o §3.6 explica por quê: as duas maneiras de acabar
             // — alguém apertou parar, ou quem mandava sumiu — já se distinguem
             // por tudo o mais que acontece. Quem foi embora produz um
-            // `PilotLeft`; quem continua na sala parou de propósito.
+            // `PersonLeft`; quem continua na sala parou de propósito.
             ServerMessage::ScreenShareStopped { cage, screen } => {
                 // Conferido antes de tirar: um `ScreenShareStopped` atrasado de
                 // uma transmissão anterior não pode apagar a que começou
@@ -1088,10 +1088,10 @@ impl Room {
                 }
             }
             // Só chega a quem está compartilhando.
-            ServerMessage::KeyFrameRequested { screen, pilot } => {
+            ServerMessage::KeyFrameRequested { screen, person } => {
                 self.chave_pedida = Some(ChavePedida {
                     screen: *screen,
-                    pilot: *pilot,
+                    person: *person,
                 });
                 changed.telas = true;
             }
@@ -1104,15 +1104,15 @@ impl Room {
         changed
     }
 
-    fn absorb_state(&mut self, state: &PilotState) {
-        let pilot = self
-            .pilots
-            .entry(state.pilot)
-            .or_insert_with(|| Pilot::new(state.pilot, format!("piloto {}", state.pilot.0), None));
-        pilot.at_field = state.at_field;
-        pilot.total_isolation = state.total_isolation;
-        pilot.speaking = state.speaking;
-        pilot.sync_ratio = state.sync_ratio;
+    fn absorb_state(&mut self, state: &PersonState) {
+        let person = self
+            .people
+            .entry(state.person)
+            .or_insert_with(|| Person::new(state.person, format!("pessoa {}", state.person.0), None));
+        person.at_field = state.at_field;
+        person.total_isolation = state.total_isolation;
+        person.speaking = state.speaking;
+        person.sync_ratio = state.sync_ratio;
     }
 }
 
@@ -1120,7 +1120,7 @@ impl Room {
 mod tests {
     use super::*;
     use seele_proto::control::{
-        AlertReason, AlertSeverity, DisconnectReason, PilotProfile, Presence, Telemetry,
+        AlertReason, AlertSeverity, DisconnectReason, PersonProfile, Presence, Telemetry,
     };
     use seele_proto::ids::{ScreenId, SessionId};
 
@@ -1130,7 +1130,7 @@ mod tests {
     fn session() -> ServerMessage {
         ServerMessage::Session {
             id: SessionId(1),
-            pilot: PilotId(7),
+            person: PersonId(7),
             ssrc: Ssrc(700),
             dogma: "Terceira Tóquio".into(),
             cages: vec![CageInfo {
@@ -1150,10 +1150,10 @@ mod tests {
     }
 
     fn joined(id: u64, nickname: &str) -> ServerMessage {
-        ServerMessage::PilotJoined {
+        ServerMessage::PersonJoined {
             cage: CAGE,
-            profile: PilotProfile {
-                id: PilotId(id),
+            profile: PersonProfile {
+                id: PersonId(id),
                 nickname: nickname.into(),
                 roles: Vec::new(),
             },
@@ -1165,8 +1165,8 @@ mod tests {
         ServerMessage::MessageReceived {
             line: LINE,
             id: MessageId(id),
-            author: PilotId(author),
-            author_nickname: format!("piloto {author}"),
+            author: PersonId(author),
+            author_nickname: format!("pessoa {author}"),
             // Deliberately unrelated to the id: the server's clock can tie or
             // go backwards across a restart, and ordering must not depend on it.
             at_seconds: 1_700_000_000 - i64::try_from(id).expect("at"),
@@ -1194,18 +1194,18 @@ mod tests {
         assert_eq!(room.dogma, "Terceira Tóquio");
         assert_eq!(room.cages.len(), 1);
         assert_eq!(room.lines.len(), 1);
-        assert_eq!(room.me, Some(PilotId(7)));
+        assert_eq!(room.me, Some(PersonId(7)));
     }
 
     #[test]
-    fn the_pilot_is_seated_in_their_own_roster() {
+    fn the_person_is_seated_in_their_own_roster() {
         // The server announces arrivals to everybody else, so nothing on the
         // wire ever names this client to itself. The one person missing from
         // the roster would be the person reading it.
         let mut room = Room::new();
         let info = SessionInfo {
             id: SessionId(1),
-            pilot: PilotId(7),
+            person: PersonId(7),
             ssrc: Ssrc(700),
             dogma: "Terceira Tóquio".into(),
             cages: Vec::new(),
@@ -1217,7 +1217,7 @@ mod tests {
 
         let names: Vec<&str> = room
             .current_roster()
-            .map(|pilot| pilot.nickname.as_str())
+            .map(|person| person.nickname.as_str())
             .collect();
         assert_eq!(names, ["ayanami"]);
     }
@@ -1232,19 +1232,19 @@ mod tests {
     }
 
     #[test]
-    fn a_pilot_who_leaves_keeps_their_name_for_what_they_already_said() {
-        // Dropping the name with the pilot would turn every line they wrote
-        // into "piloto 3" the moment they close their client.
+    fn a_person_who_leaves_keeps_their_name_for_what_they_already_said() {
+        // Dropping the name with the person would turn every line they wrote
+        // into "pessoa 3" the moment they close their client.
         let mut room = room();
         room.apply(&joined(3, "ayanami"));
         room.apply(&said(1, 3, "verificando harmônicos"));
-        room.apply(&ServerMessage::PilotLeft {
+        room.apply(&ServerMessage::PersonLeft {
             cage: CAGE,
-            pilot: PilotId(3),
+            person: PersonId(3),
         });
 
         assert_eq!(room.current_roster().count(), 1, "only us should be left");
-        assert_eq!(room.name_of(PilotId(3)), "ayanami");
+        assert_eq!(room.name_of(PersonId(3)), "ayanami");
         assert_eq!(room.messages[0].author_nickname, "ayanami");
     }
 
@@ -1357,15 +1357,15 @@ mod tests {
         room.apply(&said(1, 99, "olá"));
 
         assert_eq!(room.messages.len(), 1);
-        assert_eq!(room.messages[0].author_nickname, "piloto 99");
+        assert_eq!(room.messages[0].author_nickname, "pessoa 99");
     }
 
     #[test]
-    fn state_updates_reach_the_pilot_they_are_about() {
+    fn state_updates_reach_the_person_they_are_about() {
         let mut room = room();
         room.apply(&joined(3, "ayanami"));
-        room.apply(&ServerMessage::PilotState(PilotState {
-            pilot: PilotId(3),
+        room.apply(&ServerMessage::PersonState(PersonState {
+            person: PersonId(3),
             at_field: true,
             total_isolation: false,
             speaking: true,
@@ -1373,10 +1373,10 @@ mod tests {
             sync_ratio: 42,
         }));
 
-        let pilot = room.pilots.get(&PilotId(3)).expect("pilot");
-        assert!(pilot.at_field);
-        assert!(pilot.speaking);
-        assert_eq!(pilot.sync_ratio, 42);
+        let person = room.people.get(&PersonId(3)).expect("person");
+        assert!(person.at_field);
+        assert!(person.speaking);
+        assert_eq!(person.sync_ratio, 42);
     }
 
     #[test]
@@ -1385,7 +1385,7 @@ mod tests {
         // like a question, which is what it is.
         let mut room = room();
         room.apply(&joined(3, "ayanami"));
-        assert_eq!(room.pilots[&PilotId(3)].sync_ratio, 0);
+        assert_eq!(room.people[&PersonId(3)].sync_ratio, 0);
     }
 
     #[test]
@@ -1485,11 +1485,11 @@ mod tests {
         assert_eq!(room.ssrc_of("ninguém"), None);
     }
 
-    /// Seats a pilot in `CAGE` and gives them a Sync Ratio.
+    /// Seats a person in `CAGE` and gives them a Sync Ratio.
     fn seated_with(room: &mut Room, id: u64, nickname: &str, sync: u8) {
         room.apply(&joined(id, nickname));
-        room.apply(&ServerMessage::PilotState(PilotState {
-            pilot: PilotId(id),
+        room.apply(&ServerMessage::PersonState(PersonState {
+            person: PersonId(id),
             at_field: false,
             total_isolation: false,
             speaking: false,
@@ -1515,20 +1515,20 @@ mod tests {
         assert_eq!(room.cage_sync(CageId(9)), None, "a Cage nobody is in");
         assert_eq!(watching().cage_sync(CAGE), None, "a Cage nobody has sat in");
 
-        // And the pilot's own Cage, before anybody is in it, has no average
+        // And the person's own Cage, before anybody is in it, has no average
         // either — including no average of nobody.
         let mut alone = watching();
         assert_eq!(alone.current_cage_sync(), None, "no Cage entered yet");
         alone.enter_cage(CAGE);
         assert_eq!(
-            alone.current_cage_sync().map(|sync| sync.pilots),
+            alone.current_cage_sync().map(|sync| sync.people),
             Some(1),
-            "the pilot sitting in it is one pilot"
+            "the person sitting in it is one person"
         );
     }
 
     #[test]
-    fn the_average_is_the_seated_pilots_rounded_to_a_whole_point() {
+    fn the_average_is_the_seated_persons_rounded_to_a_whole_point() {
         // 90 + 81 + 78 = 249, over three, is 83 exactly. The band is read off
         // the average and not off the members: two of these three are nominal
         // on their own, and together the room is degraded.
@@ -1537,10 +1537,10 @@ mod tests {
         seated_with(&mut room, 4, "asuka", 81);
         seated_with(&mut room, 5, "shinji", 78);
 
-        let average = room.cage_sync(CAGE).expect("three pilots are seated");
+        let average = room.cage_sync(CAGE).expect("three people are seated");
         assert_eq!(average.ratio, 83);
         assert_eq!(average.band, SyncBand::Degraded);
-        assert_eq!(average.pilots, 3);
+        assert_eq!(average.people, 3);
     }
 
     #[test]
@@ -1553,35 +1553,35 @@ mod tests {
         seated_with(&mut room, 3, "ayanami", 84);
         seated_with(&mut room, 4, "asuka", 85);
 
-        let average = room.cage_sync(CAGE).expect("two pilots are seated");
+        let average = room.cage_sync(CAGE).expect("two people are seated");
         assert_eq!(average.ratio, 85);
         assert_eq!(average.band, SyncBand::Nominal);
-        assert_eq!(average.pilots, 2);
+        assert_eq!(average.people, 2);
         assert_eq!(room.current_cage_sync(), None, "our plug is elsewhere");
     }
 
     #[test]
-    fn a_pilot_who_ejected_stops_counting_towards_the_room() {
+    fn a_person_who_ejected_stops_counting_towards_the_room() {
         // Ejecting leaves the seats and keeps the name. Somebody who walked out
         // with a dying connection must not go on dragging the room's number
         // down from outside it — and this client has no third state where a
-        // pilot is in the Cage but ejected.
+        // person is in the Cage but ejected.
         let mut room = watching();
         seated_with(&mut room, 3, "ayanami", 90);
         seated_with(&mut room, 4, "asuka", 20);
 
         assert_eq!(room.cage_sync(CAGE).map(|sync| sync.ratio), Some(55));
 
-        room.apply(&ServerMessage::PilotLeft {
+        room.apply(&ServerMessage::PersonLeft {
             cage: CAGE,
-            pilot: PilotId(4),
+            person: PersonId(4),
         });
 
         let average = room.cage_sync(CAGE).expect("ayanami is still seated");
         assert_eq!(average.ratio, 90, "somebody who left is still counted");
-        assert_eq!(average.pilots, 1);
+        assert_eq!(average.people, 1);
         assert_eq!(
-            room.name_of(PilotId(4)),
+            room.name_of(PersonId(4)),
             "asuka",
             "the name left with the seat"
         );
@@ -1901,7 +1901,7 @@ mod tests {
         assert_eq!(
             room.current_roster().count(),
             1,
-            "the moved pilot is not in the room they were moved to"
+            "the moved person is not in the room they were moved to"
         );
         assert_eq!(
             room.roster(CAGE)
@@ -1913,14 +1913,14 @@ mod tests {
     }
 
     #[test]
-    fn the_session_carries_what_this_pilot_may_do() {
+    fn the_session_carries_what_this_person_may_do() {
         // A shell asking "should this control exist" must not have to intersect
         // the role catalogue itself: "negadas vencem concedidas" is one rule and
         // it lives on the server.
         let mut room = Room::new();
         room.apply(&ServerMessage::Session {
             id: SessionId(1),
-            pilot: PilotId(7),
+            person: PersonId(7),
             ssrc: Ssrc(700),
             dogma: "Terceira Tóquio".into(),
             cages: Vec::new(),
@@ -1940,7 +1940,7 @@ mod tests {
 
         let changed = room.apply(&ServerMessage::ScreenShareStarted {
             cage: CAGE,
-            pilot: PilotId(9),
+            person: PersonId(9),
             screen: ScreenId(1),
         });
         assert!(changed.telas, "a bandeira da tela não subiu");
@@ -1953,7 +1953,7 @@ mod tests {
                 // Zero até o `ScreenViewers` chegar: quem começou a
                 // compartilhar ainda não sabe se alguém está olhando.
                 espectadores: 0,
-                pilot: PilotId(9),
+                person: PersonId(9),
                 screen: ScreenId(1)
             })
         );
@@ -2022,11 +2022,11 @@ mod tests {
     #[test]
     fn os_espectadores_do_fio_apertam_o_teto_e_nao_a_voz() {
         let mut room = room();
-        room.me = Some(PilotId(7));
+        room.me = Some(PersonId(7));
         room.apply(&ServerMessage::HostUplink { bps: 6_000_000 });
         room.apply(&ServerMessage::ScreenShareStarted {
             cage: CAGE,
-            pilot: PilotId(7),
+            person: PersonId(7),
             screen: ScreenId(1),
         });
 
@@ -2081,7 +2081,7 @@ mod tests {
         // o teto subiria justamente no instante em que a sala cresceu.
         room.apply(&ServerMessage::ScreenShareStarted {
             cage: CAGE,
-            pilot: PilotId(7),
+            person: PersonId(7),
             screen: ScreenId(1),
         });
         assert_eq!(room.minha_tela().map(|tela| tela.espectadores), Some(4));
@@ -2104,7 +2104,7 @@ mod tests {
         let mut room = room();
         room.apply(&ServerMessage::ScreenShareStarted {
             cage: CAGE,
-            pilot: PilotId(9),
+            person: PersonId(9),
             screen: ScreenId(2),
         });
 
@@ -2127,18 +2127,18 @@ mod tests {
         let mut room = room();
         room.apply(&ServerMessage::KeyFrameRequested {
             screen: ScreenId(1),
-            pilot: PilotId(9),
+            person: PersonId(9),
         });
         let changed = room.apply(&ServerMessage::KeyFrameRequested {
             screen: ScreenId(1),
-            pilot: PilotId(11),
+            person: PersonId(11),
         });
         assert!(changed.telas);
         assert_eq!(
             room.chave_pedida,
             Some(ChavePedida {
                 screen: ScreenId(1),
-                pilot: PilotId(11)
+                person: PersonId(11)
             })
         );
     }
@@ -2151,18 +2151,18 @@ mod tests {
         let mut room = room();
         room.apply(&ServerMessage::ScreenShareStarted {
             cage: CAGE,
-            pilot: PilotId(9),
+            person: PersonId(9),
             screen: ScreenId(1),
         });
         room.apply(&ServerMessage::KeyFrameRequested {
             screen: ScreenId(1),
-            pilot: PilotId(11),
+            person: PersonId(11),
         });
 
         room.adopt(
             &SessionInfo {
                 id: SessionId(2),
-                pilot: PilotId(7),
+                person: PersonId(7),
                 ssrc: Ssrc(700),
                 dogma: "Terceira Tóquio".into(),
                 cages: Vec::new(),

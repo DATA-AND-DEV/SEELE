@@ -2,7 +2,7 @@
 //!
 //! The comp calls the screen these belong to "Terminal Dogma · configuração
 //! local", and the word that matters is *local*: none of this is sent anywhere,
-//! none of it follows the pilot to another computer, and every one of them is
+//! none of it follows the person to another computer, and every one of them is
 //! about the hardware in front of the person rather than about the Dogma.
 //!
 //! Today there are two — which microphone to open, and where the sound comes

@@ -147,19 +147,19 @@ async fn a_restarted_dogma_keeps_its_accounts() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let database = directory.path().join("dogma.db");
 
-    let first_pilot = {
+    let first_person = {
         let (address, server) = start(database.clone()).await?;
         let client = connect(address, "ayanami", &key(1)).await?;
-        let pilot = client.session().pilot;
+        let person = client.session().person;
         server.shutdown();
-        pilot
+        person
     };
 
     let (address, server) = start(database).await?;
     let client = connect(address, "ayanami", &key(1)).await?;
     assert_eq!(
-        client.session().pilot,
-        first_pilot,
+        client.session().person,
+        first_person,
         "the same key got a different account after a restart"
     );
 
@@ -190,7 +190,7 @@ async fn a_message_reaches_everybody_on_the_line() -> Result<()> {
         panic!("not a message");
     };
     assert_eq!(body, "sync caiu aqui");
-    assert_eq!(author, ayanami.session().pilot);
+    assert_eq!(author, ayanami.session().person);
 
     server.shutdown();
     Ok(())
@@ -246,7 +246,7 @@ async fn a_resent_message_is_not_posted_twice() -> Result<()> {
 }
 
 #[tokio::test]
-async fn a_pilot_without_write_permission_is_refused() -> Result<()> {
+async fn a_person_without_write_permission_is_refused() -> Result<()> {
     // The permission matrix proper lives in seele-server's unit tests; this
     // checks the wiring, that the refusal actually reaches the wire.
     // specs/08-seguranca.md: the server denying is the security.
@@ -264,7 +264,7 @@ async fn a_pilot_without_write_permission_is_refused() -> Result<()> {
         let _ = accepting.run().await;
     });
 
-    // The bootstrap list makes this pilot an Observador, who by specs/04 may
+    // The bootstrap list makes this person an Observador, who by specs/04 may
     // "só ouvir e ler".
     let mut observer = connect(address, "observador", &key(3)).await?;
     observer.join_line(LINE).await?;
@@ -324,9 +324,9 @@ async fn telemetry_carries_a_sync_ratio() -> Result<()> {
 }
 
 #[tokio::test]
-async fn a_returning_pilot_reclaims_their_seat_and_their_ssrc() -> Result<()> {
+async fn a_returning_person_reclaims_their_seat_and_their_ssrc() -> Result<()> {
     // specs/09-roadmap.md: "Queda de rede de 60 s é recuperada de forma
-    // transparente." The observable half of transparent is that the pilot comes
+    // transparente." The observable half of transparent is that the person comes
     // back as themselves: same account, same ssrc, same Cage. Otherwise the
     // outage looks to everybody else like a departure and an arrival, and every
     // listener's jitter buffer starts over.
@@ -347,8 +347,8 @@ async fn a_returning_pilot_reclaims_their_seat_and_their_ssrc() -> Result<()> {
 
     let after = connect(address, "ayanami", &key(1)).await?;
     assert_eq!(
-        after.session().pilot,
-        before.pilot,
+        after.session().person,
+        before.person,
         "came back as somebody else"
     );
     assert_eq!(

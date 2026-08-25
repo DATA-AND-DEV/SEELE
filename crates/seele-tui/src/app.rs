@@ -104,7 +104,7 @@ pub enum Screen {
     },
 }
 
-/// One pilot in the roster.
+/// One person in the roster.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RosterEntry {
     /// Display name.
@@ -129,7 +129,7 @@ impl RosterEntry {
 
 /// One row of the Cages/Lines panel.
 ///
-/// `specs/05-cliente-tui.md` draws pilots nested under their Cage rather than
+/// `specs/05-cliente-tui.md` draws people nested under their Cage rather than
 /// in a panel of their own, so the panel is a flattened tree and not a list.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
@@ -137,7 +137,7 @@ pub enum Node {
     Cage {
         /// Its name.
         name: String,
-        /// Whether its pilots are showing.
+        /// Whether its people are showing.
         open: bool,
         /// The average Sync Ratio of everybody in it, already banded by the
         /// core, or `None` when nobody is.
@@ -147,8 +147,8 @@ pub enum Node {
         /// only chooses where on the row to put them.
         sync: Option<CageSync>,
     },
-    /// A pilot inside the Cage above.
-    Pilot(RosterEntry),
+    /// A person inside the Cage above.
+    Person(RosterEntry),
     /// A Line — a text channel.
     Line {
         /// Its name, including the `#`.
@@ -159,11 +159,11 @@ pub enum Node {
 impl Node {
     /// Whether the selection is allowed to land here.
     ///
-    /// Pilots are shown, not entered: `Enter` on a pilot means nothing, so
+    /// People are shown, not entered: `Enter` on a person means nothing, so
     /// stopping there on the way down just costs keystrokes.
     #[must_use]
     pub fn selectable(&self) -> bool {
-        !matches!(self, Self::Pilot(_))
+        !matches!(self, Self::Person(_))
     }
 }
 
@@ -177,7 +177,7 @@ pub struct ChatLine {
     pub author: String,
     /// What they said.
     pub body: String,
-    /// Whether it was this pilot.
+    /// Whether it was this person.
     pub own: bool,
 }
 
@@ -245,11 +245,11 @@ pub struct App {
     pub focus: Panel,
     /// Which of the six states is showing.
     pub screen: Screen,
-    /// The Dogmas this pilot knows about.
+    /// The Dogmas this person knows about.
     pub dogmas: Vec<String>,
     /// Which Dogma is selected.
     pub selected_dogma: usize,
-    /// Cages, their pilots, and Lines — flattened for drawing.
+    /// Cages, their people, and Lines — flattened for drawing.
     pub tree: Vec<Node>,
     /// Which tree row is selected.
     pub selected: usize,
@@ -278,7 +278,7 @@ pub struct App {
     pub termo: String,
     /// A banner, if there is one.
     pub alert: Option<Alert>,
-    /// Whether this pilot is transmitting.
+    /// Whether this person is transmitting.
     pub speaking: bool,
     /// Microphone muted.
     pub at_field: bool,
@@ -307,7 +307,7 @@ pub struct App {
     /// Wall-clock time for the title bar, already formatted.
     ///
     /// The shell owns the clock. `seele-core` deals in monotonic durations and
-    /// has no opinion about what time it is where the pilot is sitting.
+    /// has no opinion about what time it is where the person is sitting.
     pub clock: String,
     /// Set when the app should exit.
     pub quit: bool,
@@ -547,7 +547,7 @@ impl App {
         }
     }
 
-    /// Steps to the next selectable tree row in a direction, skipping pilots.
+    /// Steps to the next selectable tree row in a direction, skipping people.
     fn step_tree(&mut self, delta: isize) {
         let mut index = self.selected as isize;
         loop {
@@ -594,10 +594,10 @@ impl App {
         }
     }
 
-    /// The pilots currently in the tree, in drawing order.
+    /// The people currently in the tree, in drawing order.
     pub fn roster(&self) -> impl Iterator<Item = &RosterEntry> {
         self.tree.iter().filter_map(|node| match node {
-            Node::Pilot(entry) => Some(entry),
+            Node::Person(entry) => Some(entry),
             _ => None,
         })
     }
@@ -698,7 +698,7 @@ mod tests {
                 open: true,
                 sync: None,
             },
-            Node::Pilot(RosterEntry {
+            Node::Person(RosterEntry {
                 nickname: "ayanami".into(),
                 sync: 98,
                 speaking: true,
@@ -1002,7 +1002,7 @@ mod tests {
             .into_iter()
             .map(|text| ChatLine {
                 at: "12:00".into(),
-                author: "piloto".into(),
+                author: "pessoa".into(),
                 body: text.into(),
                 own: false,
             })
@@ -1146,14 +1146,14 @@ mod tree_tests {
                 open: true,
                 sync: None,
             },
-            Node::Pilot(RosterEntry {
+            Node::Person(RosterEntry {
                 nickname: "ayanami".into(),
                 sync: 98,
                 speaking: false,
                 at_field: false,
                 total_isolation: false,
             }),
-            Node::Pilot(RosterEntry {
+            Node::Person(RosterEntry {
                 nickname: "shinji".into(),
                 sync: 71,
                 speaking: false,
@@ -1167,16 +1167,16 @@ mod tree_tests {
     }
 
     #[test]
-    fn navigation_skips_over_pilots() {
-        // Pilots are shown, not entered. Stopping on them on the way from a
-        // Cage to a Line is two wasted keystrokes per pilot in the room.
+    fn navigation_skips_over_persons() {
+        // People are shown, not entered. Stopping on them on the way from a
+        // Cage to a Line is two wasted keystrokes per person in the room.
         let mut app = App::new();
         app.tree = tree();
         app.focus = Panel::Channels;
 
         app.on_key(Key::Char('j'));
 
-        assert_eq!(app.selected, 3, "the selection landed on a pilot");
+        assert_eq!(app.selected, 3, "the selection landed on a person");
     }
 
     #[test]
@@ -1188,7 +1188,7 @@ mod tree_tests {
                 open: true,
                 sync: None,
             },
-            Node::Pilot(RosterEntry {
+            Node::Person(RosterEntry {
                 nickname: "ayanami".into(),
                 sync: 98,
                 speaking: false,
@@ -1205,7 +1205,7 @@ mod tree_tests {
     }
 
     #[test]
-    fn the_roster_is_the_pilots_in_drawing_order() {
+    fn the_roster_is_the_persons_in_drawing_order() {
         let mut app = App::new();
         app.tree = tree();
         let names: Vec<&str> = app.roster().map(|p| p.nickname.as_str()).collect();

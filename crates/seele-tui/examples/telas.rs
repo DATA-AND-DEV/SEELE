@@ -82,21 +82,21 @@ fn operando() -> App {
             open: true,
             sync: None,
         },
-        Node::Pilot(RosterEntry {
+        Node::Person(RosterEntry {
             nickname: "alexandre".into(),
             sync: 98,
             speaking: true,
             at_field: false,
             total_isolation: false,
         }),
-        Node::Pilot(RosterEntry {
+        Node::Person(RosterEntry {
             nickname: "rafa".into(),
             sync: 71,
             speaking: false,
             at_field: false,
             total_isolation: false,
         }),
-        Node::Pilot(RosterEntry {
+        Node::Person(RosterEntry {
             nickname: "bia".into(),
             sync: 44,
             speaking: false,

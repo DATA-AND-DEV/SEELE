@@ -38,7 +38,7 @@
 // Ela continua valendo onde a ausência **responde** a uma pergunta que a tela
 // acabou de fazer: a média sem plug inserido, a barra da bateria, as três
 // células do alerta. E ela foi invertida onde a ausência se repetia por
-// fileira — pendências por Linha, subsistema por piloto, atraso por piloto —,
+// fileira — pendências por Linha, subsistema por pessoa, atraso por pessoa —,
 // porque meia dúzia de travessões explicados numa tela que existe para ser
 // simples é ruído, não honestidade. Ver o cabeçalho de `tela-sessao.css`.
 //
@@ -300,7 +300,7 @@ function desenharTopo(snapshot) {
     Blue: "CONEXÃO SEGURA",
   }[snapshot.pattern];
 
-  $("topo-piloto").textContent = snapshot.nickname;
+  $("topo-pessoa").textContent = snapshot.nickname;
 
   const nome = snapshot.dogma;
   const rotulo = $("topo-dogma-nome");
@@ -548,7 +548,7 @@ function iniciaisDoApelido(apelido) {
  * ---- ver quem está dentro antes de entrar ----
  *
  * A mudança de fundo do v3 (§6.2), e ela não custa protocolo nenhum: `cages_of`
- * popula `Cage.pilots` a partir de `room.roster(cage.id)` para **todo** Cage, e
+ * popula `Cage.people` a partir de `room.roster(cage.id)` para **todo** Cage, e
  * não só para o ocupado. O produto sabia quem estava em cada sala e desenhava
  * uma barra de blocos no lugar dos nomes.
  *
@@ -575,15 +575,15 @@ function desenharCanais(snapshot) {
     // `4/8` — a ocupação em número. Ela não acompanha mais uma barra de blocos:
     // a lista de nomes logo abaixo é a mesma informação com os nomes dentro,
     // e duas leituras da mesma coisa numa coluna de 268px é uma a mais.
-    cabeca.append(elemento("span", "cage-ocupacao", `${cage.pilots.length}/${cage.limit}`));
+    cabeca.append(elemento("span", "cage-ocupacao", `${cage.people.length}/${cage.limit}`));
 
     const dentro = elemento("ul", "cage-dentro");
-    if (cage.pilots.length === 0) {
+    if (cage.people.length === 0) {
       // Palavra, e não travessão: um Cage vazio é uma medida, e o produto a
       // tem. O travessão é para o que ninguém mediu.
       dentro.append(elemento("li", "cage-vazio", "ninguém aqui"));
     } else {
-      dentro.append(...cage.pilots.map((piloto) => linhaDeQuemEstaDentro(piloto, snapshot)));
+      dentro.append(...cage.people.map((pessoa) => linhaDeQuemEstaDentro(pessoa, snapshot)));
     }
 
     const entrar = elemento(
@@ -682,15 +682,15 @@ function desenharCanais(snapshot) {
  * O glifo continua, desenhado e `aria-hidden`: ele é o que dá a varredura da
  * coluna de relance, e quem escuta a tela já recebe a palavra.
  */
-function linhaDeQuemEstaDentro(piloto, snapshot) {
-  const item = elemento("li", "cage-piloto");
-  item.append(glifo(piloto.speaking ? "falando" : "silencio"));
-  item.append(elemento("span", "cage-piloto-nome", piloto.nickname));
-  if (piloto.is_self) item.append(elemento("span", "cage-piloto-eu", "(você)"));
-  if (piloto.at_field) {
-    item.append(elemento("span", "cage-piloto-marca", "mudo"));
-  } else if (piloto.speaking) {
-    item.append(elemento("span", "cage-piloto-marca", "fala"));
+function linhaDeQuemEstaDentro(pessoa, snapshot) {
+  const item = elemento("li", "cage-pessoa");
+  item.append(glifo(pessoa.speaking ? "falando" : "silencio"));
+  item.append(elemento("span", "cage-pessoa-nome", pessoa.nickname));
+  if (pessoa.is_self) item.append(elemento("span", "cage-pessoa-eu", "(você)"));
+  if (pessoa.at_field) {
+    item.append(elemento("span", "cage-pessoa-marca", "mudo"));
+  } else if (pessoa.speaking) {
+    item.append(elemento("span", "cage-pessoa-marca", "fala"));
   }
   // A porta da moderação, quando esta sessão tem algum verbo sobre gente.
   // `camada-moderar.js` decide se há o que oferecer.
@@ -701,7 +701,7 @@ function linhaDeQuemEstaDentro(piloto, snapshot) {
   // tem teste. Mover a porta para a faixa, ou dar uma a ela, é decisão de quem
   // coordena: o comentário de `botaoDeModerar` em `camada-moderar.js` ainda diz
   // que o roster mostra só a sala ocupada, e ele tem de mudar junto.
-  const porta = botaoDeModerar(piloto, snapshot);
+  const porta = botaoDeModerar(pessoa, snapshot);
   if (porta) item.append(porta);
   return item;
 }
@@ -1009,7 +1009,7 @@ function desenharMensagens() {
  * mantém o realce no lugar num corpo com emoji.
  *
  * `aceso` é qual destes intervalos é o do cursor, ou `null` se o cursor está
- * noutra mensagem. Sem ele todas as ocorrências saíam idênticas e o piloto não
+ * noutra mensagem. Sem ele todas as ocorrências saíam idênticas e o pessoa não
  * enxergava onde estava dentro de uma mensagem que casa três vezes. A ordem
  * desta lista é a mesma em que o core contou, e é o que faz o índice bater.
  *
@@ -1054,12 +1054,12 @@ function corpoComRealce(corpo, intervalos, aceso = null) {
  *
  * ---- o alcance desta lista, que é menor do que o nome dela ----
  *
- * `snapshot.cages` traz `pilots` para **todo** Cage e não só para o ocupado, e
+ * `snapshot.cages` traz `people` para **todo** Cage e não só para o ocupado, e
  * é isso que esta lista percorre: todo mundo que está em alguma sala de voz.
  *
  * Quem está conectado no servidor **sem** estar numa sala não está aqui, e não
- * está porque o protocolo não o carrega: `Room.pilots` só cresce com o
- * `Session` desta conexão, com `PilotJoined` — que anuncia a entrada numa sala
+ * está porque o protocolo não o carrega: `Room.people` só cresce com o
+ * `Session` desta conexão, com `PersonJoined` — que anuncia a entrada numa sala
  * e traz o Cage no próprio campo — e com o autor de uma mensagem. Não há
  * mensagem na fita que diga quem entrou no servidor e ficou fora das salas.
  * Enquanto não houver, a nota do cabeçalho diz de que a lista é, e esta função
@@ -1076,25 +1076,25 @@ function desenharPessoas(snapshot) {
   const nossa = snapshot.cages.find((c) => c.occupied_by_us);
 
   const grupos = snapshot.cages
-    .filter((cage) => cage.pilots.length > 0)
+    .filter((cage) => cage.people.length > 0)
     .map((cage) =>
       grupoDeSala(
         cage.name,
-        `${cage.pilots.length}/${cage.limit}`,
+        `${cage.people.length}/${cage.limit}`,
         cage.occupied_by_us,
-        cage.pilots.map((piloto) =>
+        cage.people.map((pessoa) =>
           linhaDoRoster(
             {
-              nome: piloto.nickname + (piloto.is_self ? " (você)" : ""),
-              ratio: piloto.sync_ratio,
-              faixa: piloto.sync_band,
-              falando: piloto.speaking,
-              atField: piloto.at_field,
-              isolado: piloto.total_isolation,
+              nome: pessoa.nickname + (pessoa.is_self ? " (você)" : ""),
+              ratio: pessoa.sync_ratio,
+              faixa: pessoa.sync_band,
+              falando: pessoa.speaking,
+              atField: pessoa.at_field,
+              isolado: pessoa.total_isolation,
               // O deslizante é dos outros: baixar o próprio volume não faz
               // nada, porque a própria voz nunca entra na mistura
               // (`specs/03-audio.md`).
-              volume: piloto.is_self ? null : piloto.nickname,
+              volume: pessoa.is_self ? null : pessoa.nickname,
             },
             snapshot.audio_available,
           ),
@@ -1130,10 +1130,10 @@ function desenharPessoas(snapshot) {
   // Quem está conectado e fora de toda sala.
   //
   // Esta lista não existia, e a falta dela era o que fazia o sincronismo
-  // parecer estranho: `PilotJoined` carrega um Cage porque anuncia sentar-se
+  // parecer estranho: `PersonJoined` carrega um Cage porque anuncia sentar-se
   // num, e não havia mensagem para estar aqui — quem entrava no servidor e não
-  // escolhia sala nenhuma era invisível para todo mundo. `PilotPresent` e
-  // `PilotGone` fecharam isso do lado do protocolo; esta é a metade que
+  // escolhia sala nenhuma era invisível para todo mundo. `PersonPresent` e
+  // `PersonGone` fecharam isso do lado do protocolo; esta é a metade que
   // aparece.
   //
   // Uma subtração e não uma terceira lista: `presentes` é todo mundo, os Cages
@@ -1141,10 +1141,10 @@ function desenharPessoas(snapshot) {
   // sai daqui quando não está em sala porque ele já tem o grupo `FORA DE SALA`
   // logo acima, com a telemetria que só a própria sessão mede.
   const sentados = new Set(
-    snapshot.cages.flatMap((cage) => cage.pilots.map((piloto) => piloto.id)),
+    snapshot.cages.flatMap((cage) => cage.people.map((pessoa) => pessoa.id)),
   );
   const noSaguao = snapshot.presentes.filter(
-    (piloto) => !sentados.has(piloto.id) && !piloto.is_self,
+    (pessoa) => !sentados.has(pessoa.id) && !pessoa.is_self,
   );
   if (noSaguao.length > 0) {
     grupos.push(
@@ -1152,10 +1152,10 @@ function desenharPessoas(snapshot) {
         "NO SERVIDOR, FORA DAS SALAS",
         `${noSaguao.length}`,
         false,
-        noSaguao.map((piloto) =>
+        noSaguao.map((pessoa) =>
           linhaDoRoster(
             {
-              nome: piloto.nickname,
+              nome: pessoa.nickname,
               // Sem medida: o sinal de quem não está numa sala não é medido por
               // ninguém — não há voz atravessando para medir. Travessão é o que
               // este produto escreve onde não mediu, e inventar zero aqui seria
@@ -1163,8 +1163,8 @@ function desenharPessoas(snapshot) {
               ratio: null,
               faixa: null,
               falando: false,
-              atField: piloto.at_field,
-              isolado: piloto.total_isolation,
+              atField: pessoa.at_field,
+              isolado: pessoa.total_isolation,
               volume: null,
             },
             snapshot.audio_available,
@@ -1179,7 +1179,7 @@ function desenharPessoas(snapshot) {
   // Duas contagens, e a de fora existe porque a de dentro sozinha mentia por
   // omissão: `12 EM SALAS DE VOZ` ao lado de `PESSOAS` era lido como a
   // população do servidor, e não era.
-  const emSalas = snapshot.cages.reduce((soma, cage) => soma + cage.pilots.length, 0);
+  const emSalas = snapshot.cages.reduce((soma, cage) => soma + cage.people.length, 0);
   const total = snapshot.presentes.length;
   medido(
     $("pessoas-conta"),
@@ -1252,70 +1252,70 @@ function desenharMedia(cage) {
  * (`specs/05-cliente-tui.md`), e é essa a propriedade que a mudança de coluna
  * tinha de preservar inteira — ela veio junto, sem uma linha de diferença.
  */
-function linhaDoRoster(piloto, temAudio) {
+function linhaDoRoster(pessoa, temAudio) {
   // `ratio: null` é «ninguém mediu isto», e não zero.
   //
   // Quem está conectado e fora de toda sala não tem sinal medido: não há voz
   // atravessando para medir. Um zero aqui desenharia a barra vermelha do sinal
   // crítico para quem está perfeitamente bem — e o travessão é o que este
   // produto escreve onde não mediu, em toda outra tela.
-  const medido = piloto.ratio !== null && piloto.ratio !== undefined;
+  const medido = pessoa.ratio !== null && pessoa.ratio !== undefined;
 
-  const item = elemento("li", piloto.falando ? "piloto falando" : "piloto");
-  if (medido) item.dataset.faixa = piloto.faixa;
+  const item = elemento("li", pessoa.falando ? "pessoa falando" : "pessoa");
+  if (medido) item.dataset.faixa = pessoa.faixa;
   else item.dataset.semMedida = "sim";
 
-  const cabeca = elemento("span", "piloto-cabeca");
-  const identidade = elemento("span", "piloto-identidade");
-  identidade.append(elemento("span", "piloto-nome", piloto.nome));
+  const cabeca = elemento("span", "pessoa-cabeca");
+  const identidade = elemento("span", "pessoa-identidade");
+  identidade.append(elemento("span", "pessoa-nome", pessoa.nome));
 
-  // `PERMISSIONS·01`, o subsistema por piloto, não entra. O protocolo não diz qual
+  // `PERMISSIONS·01`, o subsistema por pessoa, não entra. O protocolo não diz qual
   // atende quem, e um travessão explicado em toda linha do roster é o ruído que
   // o v3 veio tirar desta tela.
 
-  const numero = elemento("span", "piloto-sync");
+  const numero = elemento("span", "pessoa-sync");
   // A marca de bloco antes do número, pela mesma razão que na média: a Saira
   // desenha o número e não tem o bloco.
   if (medido) {
     numero.append(
-      elemento("span", "sync-marca", marcaSync(piloto.faixa)),
+      elemento("span", "sync-marca", marcaSync(pessoa.faixa)),
       // Inteiro, e não `98.4`: `sync_ratio` é `u8` em todo ponto onde existe, e
       // uma casa decimal aqui seria precisão inventada no último passo.
-      elemento("span", "piloto-sync-valor", String(piloto.ratio)),
+      elemento("span", "pessoa-sync-valor", String(pessoa.ratio)),
     );
   } else {
-    numero.append(elemento("span", "piloto-sync-valor", SEM_MEDIDA));
+    numero.append(elemento("span", "pessoa-sync-valor", SEM_MEDIDA));
   }
 
   cabeca.append(identidade, numero);
 
-  const barra = elemento("span", "barra", medido ? blocos(piloto.ratio, 20) : "");
+  const barra = elemento("span", "barra", medido ? blocos(pessoa.ratio, 20) : "");
   barra.setAttribute("aria-hidden", "true");
 
-  // O `ATRASO` por piloto do comp não entra. `Telemetry` é a **nossa** conexão:
+  // O `ATRASO` por pessoa do comp não entra. `Telemetry` é a **nossa** conexão:
   // `rtt_ms` é um número só, e latência por par não atravessa a fronteira nem é
   // derivável de nada que atravesse (inventário v3 §1.3). O rodapé fica com o
   // que existe.
-  const rodape = elemento("span", "piloto-rodape");
-  const estados = elemento("span", "piloto-estados");
+  const rodape = elemento("span", "pessoa-rodape");
+  const estados = elemento("span", "pessoa-estados");
   // A pastilha do comp: bloco sólido com texto no negro absoluto, e não texto
   // colorido. `PLUG EJETADO` é o quarto estado do comp e não aparece aqui —
-  // quem sai some de `cage.pilots`, e manter a lápide exigiria ou um campo de
-  // estado no `Pilot`, ou esta casca lembrando de quem estava ali, que é
+  // quem sai some de `cage.people`, e manter a lápide exigiria ou um campo de
+  // estado no `Person`, ou esta casca lembrando de quem estava ali, que é
   // exatamente o estado derivado que o topo de `base.js` proíbe.
-  const estado = piloto.atField
+  const estado = pessoa.atField
     ? "MUDO"
-    : piloto.falando
+    : pessoa.falando
       ? "TRANSMITINDO"
       : "EM ESCUTA";
   const pastilha = elemento("span", "pastilha", estado);
-  pastilha.dataset.estado = piloto.atField ? "at" : piloto.falando ? "fala" : "escuta";
+  pastilha.dataset.estado = pessoa.atField ? "at" : pessoa.falando ? "fala" : "escuta";
   estados.append(pastilha);
 
   // O isolamento total não existe no comp e existe no produto. Segunda
   // pastilha, e não uma troca da primeira: estar surdo e estar transmitindo são
   // dois fatos ao mesmo tempo, e um deles apagando o outro esconderia metade.
-  if (piloto.isolado) {
+  if (pessoa.isolado) {
     const surdez = elemento("span", "pastilha", "ISOLAMENTO TOTAL");
     surdez.dataset.estado = "surdo";
     estados.append(surdez);
@@ -1325,16 +1325,16 @@ function linhaDoRoster(piloto, temAudio) {
   item.append(cabeca, barra, rodape);
 
   // Volume por pessoa (`specs/03-audio.md`).
-  if (piloto.volume !== null && temAudio) {
+  if (pessoa.volume !== null && temAudio) {
     const volume = document.createElement("input");
     volume.type = "range";
     volume.className = "volume";
     volume.min = "0";
     volume.max = "200";
     volume.step = "10";
-    volume.value = String(volumes.get(piloto.volume) ?? 100);
-    volume.title = `volume de ${piloto.volume}`;
-    volume.dataset.piloto = piloto.volume;
+    volume.value = String(volumes.get(pessoa.volume) ?? 100);
+    volume.title = `volume de ${pessoa.volume}`;
+    volume.dataset.pessoa = pessoa.volume;
     item.append(volume);
   }
 
@@ -1899,7 +1899,7 @@ async function verPrevia(anexo) {
  * Chamar a porta e não o miolo também é o que devolve o resto do acordo:
  * `focoAntesDeModerar` guarda quem apertou SALVAR, e `caixaComEscolha = false`
  * é o que faz CANCELAR fechar a caixa em vez de voltar para uma lista de
- * pilotos que este caminho nunca mostrou.
+ * pessoas que este caminho nunca mostrou.
  *
  * ---- sem pasta de destino não há pergunta a fazer ----
  *
@@ -2586,8 +2586,8 @@ $("lista-roster").addEventListener("input", (evento) => {
   const alvo = evento.target;
   if (!alvo.classList.contains("volume")) return;
   const percent = Number(alvo.value);
-  volumes.set(alvo.dataset.piloto, percent);
-  invoke("set_volume", { nickname: alvo.dataset.piloto, percent }).catch((falha) => {
+  volumes.set(alvo.dataset.pessoa, percent);
+  invoke("set_volume", { nickname: alvo.dataset.pessoa, percent }).catch((falha) => {
     console.warn("set_volume:", falha);
   });
 });

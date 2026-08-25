@@ -112,7 +112,7 @@ Conecte também na máquina A, com **apelido diferente**:
 
 > Dois clientes com o mesmo `$SEELE_HOME` são **a mesma pessoa** — o PERSISTENCE
 > vincula o apelido à identidade que o reivindicou (ADR 0017). Para serem dois
-> pilotos na mesma máquina, `SEELE_HOME=~/.seele-outro`.
+> pessoas na mesma máquina, `SEELE_HOME=~/.seele-outro`.
 
 ---
 
@@ -259,7 +259,7 @@ Aqui a barra de espaço segura de verdade — a janela relata soltura.
 
 O que checar a mais:
 
-- o app e o `plug` no mesmo `$SEELE_HOME` são o mesmo piloto (retomada de sessão)
+- o app e o `plug` no mesmo `$SEELE_HOME` são o mesmo pessoa (retomada de sessão)
 - o histórico aparece ao abrir a Linha, com autor e horário corretos
 - o deslizante de volume, ao apontar uma linha do roster, muda o que se ouve
 

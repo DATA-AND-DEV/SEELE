@@ -118,7 +118,7 @@ impl Identity {
     /// `specs/08-seguranca.md` requires the key-change warning to be
     /// "impossible to ignore — literally a blocking `Alerta · 警告`". This is the
     /// value both ends compare, and the one an operator reads out over another
-    /// channel when a pilot asks whether the change was real.
+    /// channel when a person asks whether the change was real.
     #[must_use]
     pub fn fingerprint(&self) -> String {
         self.chain.first().map_or_else(String::new, |certificate| {

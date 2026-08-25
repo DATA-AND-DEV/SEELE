@@ -787,7 +787,7 @@ mod tests {
             servidor: SocketAddr::from(([127, 0, 0, 1], porta)),
             nome_tls: "localhost".into(),
             chave_do_pin: format!("127.0.0.1:{porta}"),
-            apelido: "piloto".into(),
+            apelido: "pessoa".into(),
             segredo: None,
             impressao_esperada: Some("0123456789abcdef0123".into()),
         }

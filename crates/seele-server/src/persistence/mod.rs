@@ -2,7 +2,7 @@
 //!
 //! `specs/04-servidor-seele.md`:
 //!
-//! > SQLite, single file, WAL on. Tables: `pilotos`, `papeis`, `piloto_papeis`,
+//! > SQLite, single file, WAL on. Tables: `pessoas`, `papeis`, `persono_papeis`,
 //! > `cages`, `linhas`, `mensagens`, `banimentos`, `config`, `schema_version`.
 //! >
 //! > - Migrations embedded in the binary, applied at boot, versioned and
@@ -15,7 +15,7 @@
 //! # Why a single connection behind a mutex, and not a pool
 //!
 //! SQLite in WAL mode allows one writer and many readers, and the target is a
-//! Dogma of ~50 pilots on 1 vCPU (`specs/00-visao-geral.md`). A pool would add
+//! Dogma of ~50 people on 1 vCPU (`specs/00-visao-geral.md`). A pool would add
 //! contention management for a workload that is a few writes a second. What
 //! matters far more is not calling `fsync` per message. `specs/04` asks for
 //! batched writes with a ~200 ms flush, which arrives with the text channel in
@@ -231,7 +231,7 @@ mod tests {
 
     #[test]
     fn the_four_default_roles_exist() {
-        // specs/04-servidor-seele.md: Comandante, Operador, Piloto, Observador.
+        // specs/04-servidor-seele.md: Comandante, Operador, Pessoa, Observador.
         let persistence = memory();
         let mut statement = persistence
             .connection()
@@ -242,11 +242,11 @@ mod tests {
             .unwrap()
             .filter_map(Result::ok)
             .collect();
-        assert_eq!(names, vec!["Commander", "Operator", "Pilot", "Observer"]);
+        assert_eq!(names, vec!["Commander", "Operator", "Person", "Observer"]);
     }
 
     #[test]
-    fn an_observer_cannot_speak_and_a_pilot_can() {
+    fn an_observer_cannot_speak_and_a_person_can() {
         // The role definitions are data, so they deserve the same scrutiny as
         // code. specs/04 gives Observador "só ouvir e ler".
         let persistence = memory();
@@ -260,7 +260,7 @@ mod tests {
                 )
                 .unwrap()
         };
-        assert!(permissions("Pilot").contains("Speak"));
+        assert!(permissions("Person").contains("Speak"));
         assert!(!permissions("Observer").contains("Speak"));
         assert!(permissions("Observer").contains("ReadLine"));
         assert!(!permissions("Observer").contains("WriteLine"));
@@ -268,10 +268,10 @@ mod tests {
 
     #[test]
     fn the_three_roles_that_may_speak_may_also_attach_and_the_observer_is_denied() {
-        // ADR 0027 puts `AttachFile` on Commander, Operator and Pilot, and
+        // ADR 0027 puts `AttachFile` on Commander, Operator and Person, and
         // denies it on Observer **explicitly**. The difference between denying
         // and omitting is the whole of "negadas vencem concedidas": an omission
-        // does nothing when the same person also holds Pilot.
+        // does nothing when the same person also holds Person.
         let persistence = memory();
         let column = |role: &str, column: &str| -> String {
             persistence
@@ -283,7 +283,7 @@ mod tests {
                 )
                 .unwrap()
         };
-        for role in ["Commander", "Operator", "Pilot"] {
+        for role in ["Commander", "Operator", "Person"] {
             assert!(
                 column(role, "permissions").contains("AttachFile"),
                 "{role} may write and may not attach"
@@ -292,7 +292,7 @@ mod tests {
         assert!(!column("Observer", "permissions").contains("AttachFile"));
         assert!(
             column("Observer", "denials").contains("AttachFile"),
-            "the Observer is merely missing the permission, so holding Pilot \
+            "the Observer is merely missing the permission, so holding Person \
              alongside would grant it back"
         );
     }
@@ -329,9 +329,26 @@ mod tests {
                                       denials     = replace(denials,     ',\"AttachFile\"', '');
                      DELETE FROM schema_version WHERE version >= 3;
                      DROP TABLE attachments;
-                     DROP TABLE portaria;",
+                     DROP TABLE portaria;
+
+                     -- A parte da migração 5, desfeita pela mesma regra que o
+                     -- comentário acima escreve. Ela não cria tabela: renomeia.
+                     -- Então o que a rebobinagem tem de desfazer é o rename, ou
+                     -- o replay encontra `people` onde procura `pilots` e para
+                     -- com «no such table» — que foi exatamente o que aconteceu
+                     -- quando a 5 entrou.
+                     ALTER TABLE people RENAME TO pilots;
+                     ALTER TABLE person_roles RENAME TO pilot_roles;
+                     ALTER TABLE pilot_roles RENAME COLUMN person_id TO pilot_id;
+                     ALTER TABLE bans RENAME COLUMN person_id TO pilot_id;
+                     DROP INDEX IF EXISTS bans_by_person;
+                     UPDATE roles SET name = 'Pilot' WHERE name = 'Person';
+                     UPDATE roles SET permissions = replace(permissions, 'MovePerson', 'MovePilot');
+                     UPDATE roles SET denials     = replace(denials,     'MovePerson', 'MovePilot');",
                 )
                 .unwrap();
+            // `'Pilot'` e não `'Person'`: aqui o banco está rebobinado para
+            // antes da 5, e o papel ainda carrega o nome velho.
             assert!(!persistence
                 .connection()
                 .query_row::<String, _, _>(
@@ -344,16 +361,16 @@ mod tests {
         }
 
         let persistence = Persistence::open(&file).unwrap();
-        let pilot: String = persistence
+        let person: String = persistence
             .connection()
             .query_row(
-                "SELECT permissions FROM roles WHERE name = 'Pilot'",
+                "SELECT permissions FROM roles WHERE name = 'Person'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
         assert!(
-            pilot.contains("AttachFile"),
+            person.contains("AttachFile"),
             "the old Dogma was left behind"
         );
     }
@@ -373,15 +390,15 @@ mod tests {
                     .map_or("", |(_, rest)| rest),
             )
             .unwrap();
-        let pilot: String = persistence
+        let person: String = persistence
             .connection()
             .query_row(
-                "SELECT permissions FROM roles WHERE name = 'Pilot'",
+                "SELECT permissions FROM roles WHERE name = 'Person'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(pilot.matches("AttachFile").count(), 1);
+        assert_eq!(person.matches("AttachFile").count(), 1);
     }
 
     #[test]
@@ -415,7 +432,7 @@ mod tests {
         let persistence = memory();
         let insert = |nick: &str, key: &[u8]| {
             persistence.connection().execute(
-                "INSERT INTO pilots (nickname, public_key, created_at) VALUES (?1, ?2, ?3)",
+                "INSERT INTO people (nickname, public_key, created_at) VALUES (?1, ?2, ?3)",
                 rusqlite::params![nick, key, now_seconds()],
             )
         };

@@ -23,7 +23,7 @@
    - toda regra de tela que refina um primitivo daqui (`.busca .botao-fantasma`,
      `.compor input`, `.visitados-titulo` sobre `.rotulo`) precisa vir **depois**;
    - `acessibilidade.css` sobrescreve `.rotulo`, `.painel-titulo` e
-     `.roster .piloto` com a mesma especificidade, e só ganha por ser o último.
+     `.roster .pessoa` com a mesma especificidade, e só ganha por ser o último.
 
    `apps/seele-app/tests/frontend.rs` confere essa ordem. */
 

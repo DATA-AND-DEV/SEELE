@@ -162,7 +162,7 @@ function desenharPalco(snapshot, cage) {
   // `tela.de` é o identificador de quem compartilha, e o nome vem do roster da
   // sala. Sem casamento — a pessoa saiu entre dois quadros — a frase diz que
   // alguém está, e não um nome que esta janela inventaria.
-  const dono = cage ? cage.pilots.find((pessoa) => pessoa.id === tela.de) : null;
+  const dono = cage ? cage.people.find((pessoa) => pessoa.id === tela.de) : null;
   $("palco-quem").textContent = tela.e_minha
     ? "VOCÊ ESTÁ COMPARTILHANDO A SUA TELA"
     : dono
@@ -321,7 +321,7 @@ function desenharBarraDaChamada(snapshot, cage) {
 function desenharCartoes(snapshot, cage) {
   const grade = $("chamada-grade");
 
-  if (!cage || cage.pilots.length === 0) {
+  if (!cage || cage.people.length === 0) {
     const frase = !snapshot
       ? "SEM SESSÃO"
       : cage
@@ -334,12 +334,12 @@ function desenharCartoes(snapshot, cage) {
 
   const existentes = new Map();
   for (const cartao of grade.children) {
-    if (cartao.dataset.piloto) existentes.set(cartao.dataset.piloto, cartao);
+    if (cartao.dataset.pessoa) existentes.set(cartao.dataset.pessoa, cartao);
   }
 
-  const cartoes = cage.pilots.map((piloto) => {
-    const cartao = existentes.get(piloto.nickname) ?? cartaoDoPiloto(piloto);
-    pintarCartao(cartao, piloto, snapshot.audio_available);
+  const cartoes = cage.people.map((pessoa) => {
+    const cartao = existentes.get(pessoa.nickname) ?? cartaoDoPersono(pessoa);
+    pintarCartao(cartao, pessoa, snapshot.audio_available);
     return cartao;
   });
 
@@ -356,9 +356,9 @@ function desenharCartoes(snapshot, cage) {
  * permite repintar sem refazer, e é ela que mantém o foco e o clique de pé
  * entre dois quadros.
  */
-function cartaoDoPiloto(piloto) {
+function cartaoDoPersono(pessoa) {
   const cartao = elemento("li", "chamada-cartao");
-  cartao.dataset.piloto = piloto.nickname;
+  cartao.dataset.pessoa = pessoa.nickname;
 
   // ---- topo: iniciais, nome, o estado em frase, o estado em palavra ----
   const topo = elemento("div", "chamada-cartao-topo");
@@ -443,17 +443,17 @@ function controleDeVolume() {
  * nominal discordaria do terminal no dia em que um dos dois fosse atualizado —
  * e desenhar amplitude por pessoa, que não atravessa a fronteira.
  */
-function pintarCartao(cartao, piloto, temAudio) {
-  cartao.dataset.faixa = piloto.sync_band;
-  cartao.dataset.fala = piloto.speaking ? "sim" : "nao";
+function pintarCartao(cartao, pessoa, temAudio) {
+  cartao.dataset.faixa = pessoa.sync_band;
+  cartao.dataset.fala = pessoa.speaking ? "sim" : "nao";
 
-  cartao.querySelector(".chamada-avatar").textContent = iniciaisDoCartao(piloto.nickname);
+  cartao.querySelector(".chamada-avatar").textContent = iniciaisDoCartao(pessoa.nickname);
   cartao.querySelector(".chamada-cartao-nome").textContent =
-    piloto.nickname + (piloto.is_self ? " (você)" : "");
+    pessoa.nickname + (pessoa.is_self ? " (você)" : "");
   // O estado em frase, ao lado do estado em palavra, e sempre visível: é o dado
   // mais importante do cartão, e não havia versão desta tela em que escondê-lo
   // fosse defensável.
-  cartao.querySelector(".nota").textContent = fraseDoEstado(piloto);
+  cartao.querySelector(".nota").textContent = fraseDoEstado(pessoa);
 
   // A palavra, e não só a cor. `specs/05-cliente-tui.md` proíbe informação
   // transmitida só por cor, e o estado de quem está na sala é informação: o
@@ -465,30 +465,30 @@ function pintarCartao(cartao, piloto, temAudio) {
   // lida em meio segundo. Quem está surdo e calado tem um estado só a
   // declarar, e é o segundo.
   const pastilhas = cartao.querySelectorAll(".chamada-pastilha");
-  const microfone = piloto.at_field
+  const microfone = pessoa.at_field
     ? "MUDO"
-    : piloto.speaking
+    : pessoa.speaking
       ? "FALANDO"
-      : piloto.total_isolation
+      : pessoa.total_isolation
         ? ""
         : "OUVINDO";
   pastilhas[0].textContent = microfone;
   pastilhas[0].hidden = microfone === "";
-  pastilhas[0].dataset.estado = piloto.at_field ? "at" : piloto.speaking ? "fala" : "escuta";
+  pastilhas[0].dataset.estado = pessoa.at_field ? "at" : pessoa.speaking ? "fala" : "escuta";
 
   // O isolamento total não existe no comp e existe no produto. Segunda
   // pastilha, e não uma troca da primeira: estar surdo e estar transmitindo são
   // dois fatos ao mesmo tempo, e um deles apagando o outro esconderia metade.
   pastilhas[1].textContent = "SEM SOM";
   pastilhas[1].dataset.estado = "surdo";
-  pastilhas[1].hidden = !piloto.total_isolation;
+  pastilhas[1].hidden = !pessoa.total_isolation;
 
-  cartao.querySelector(".chamada-cartao-marca").textContent = marcaSync(piloto.sync_band);
+  cartao.querySelector(".chamada-cartao-marca").textContent = marcaSync(pessoa.sync_band);
   // Inteiro, e não `98.4`: `sync_ratio` é `u8` em todo ponto onde existe, e a
   // casa decimal do comp seria precisão inventada no último passo.
-  cartao.querySelector(".chamada-cartao-valor").textContent = String(piloto.sync_ratio);
+  cartao.querySelector(".chamada-cartao-valor").textContent = String(pessoa.sync_ratio);
   cartao.querySelector(".chamada-cartao-barra").textContent = blocos(
-    piloto.sync_ratio,
+    pessoa.sync_ratio,
     BLOCOS_DA_BARRA,
   );
 
@@ -496,8 +496,8 @@ function pintarCartao(cartao, piloto, temAudio) {
   // controle some nos dois casos em vez de ficar desabilitado: um botão morto é
   // uma pergunta ("por que não posso?") onde não havia pergunta nenhuma.
   const volume = cartao.querySelector(".chamada-volume");
-  volume.hidden = piloto.is_self || !temAudio;
-  if (!volume.hidden) pintarVolume(cartao, piloto.nickname);
+  volume.hidden = pessoa.is_self || !temAudio;
+  if (!volume.hidden) pintarVolume(cartao, pessoa.nickname);
 }
 
 /**
@@ -546,21 +546,21 @@ function iniciaisDoCartao(apelido) {
  * é o que impede alguém de ser ouvido; o isolamento entra na mesma frase porque
  * são dois fatos ao mesmo tempo e escolher um esconderia o outro.
  */
-function fraseDoEstado(piloto) {
-  if (piloto.total_isolation) {
-    if (piloto.at_field) return "está com o microfone desligado e não ouve ninguém";
-    if (piloto.speaking) return "está falando agora, e não ouve ninguém";
+function fraseDoEstado(pessoa) {
+  if (pessoa.total_isolation) {
+    if (pessoa.at_field) return "está com o microfone desligado e não ouve ninguém";
+    if (pessoa.speaking) return "está falando agora, e não ouve ninguém";
     return "não está ouvindo ninguém";
   }
-  if (piloto.at_field) return "está com o microfone desligado";
-  if (piloto.speaking) return "está falando agora";
+  if (pessoa.at_field) return "está com o microfone desligado";
+  if (pessoa.speaking) return "está falando agora";
   return "está só ouvindo";
 }
 
 /** A coluna da direita: quem fala. */
 function desenharMonitor(snapshot, cage) {
   const falando = $("chamada-falando-nome");
-  const nomes = cage ? cage.pilots.filter((p) => p.speaking).map((p) => p.nickname) : [];
+  const nomes = cage ? cage.people.filter((p) => p.speaking).map((p) => p.nickname) : [];
 
   if (!cage) {
     naoMedido(falando, snapshot ? "fora de uma sala de voz" : "sem sessão");
@@ -792,7 +792,7 @@ $("chamada-grade").addEventListener("click", (evento) => {
   if (!alvo) return;
 
   const cartao = alvo.closest(".chamada-cartao");
-  const apelido = cartao.dataset.piloto;
+  const apelido = cartao.dataset.pessoa;
   const atual = volumes.get(apelido) ?? VOLUME_NORMAL;
 
   const pedido =

@@ -116,7 +116,7 @@ pub fn worth_retrying(reason: DisconnectReason) -> bool {
         | DisconnectReason::HandshakeTimeout
         // Reconectar **é** o conserto aqui: a sessão perdeu evento e só uma
         // sincronização inteira a repõe. Tratar isto como recusa deixaria o
-        // piloto de fora justamente do caso em que voltar resolve.
+        // pessoa de fora justamente do caso em que voltar resolve.
         | DisconnectReason::FellBehind => true,
 
         DisconnectReason::Banned
@@ -178,7 +178,7 @@ mod tests {
     #[test]
     fn every_reason_says_something_and_no_two_say_the_same() {
         // Two reasons sharing a sentence means one of them is unreportable, and
-        // the pilot cannot tell which of two situations they are in.
+        // the person cannot tell which of two situations they are in.
         let alerts: std::collections::HashSet<&str> = ALERTS.iter().map(|r| alert(*r)).collect();
         assert_eq!(alerts.len(), ALERTS.len());
 

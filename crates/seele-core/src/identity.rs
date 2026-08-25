@@ -2,7 +2,7 @@
 //!
 //! ADR 0004 makes identity an Ed25519 key pair. What it did not say is where
 //! the key lives, and until M3 it did not matter: with no accounts, a fresh key
-//! every run was simply a fresh pilot every run. PERSISTENCE changed that. A Dogma
+//! every run was simply a fresh person every run. PERSISTENCE changed that. A Dogma
 //! now binds a nickname to the identity that first claimed it, so a client that
 //! forgets its key cannot come back — the server refuses the second connection
 //! with "nickname belongs to a different identity", which is exactly the
@@ -15,7 +15,7 @@
 //!
 //! Not a key store. One identity, one file, no passphrase, no rotation. A key
 //! sitting unencrypted in the user's own home directory is worth saying out
-//! loud: anybody who can read that file can be this pilot. That is the same
+//! loud: anybody who can read that file can be this person. That is the same
 //! trust boundary as an SSH private key without a passphrase, and it is a
 //! deliberate M4 stopping point rather than an oversight — encryption at rest
 //! belongs with the account work, not with the interface.

@@ -197,7 +197,7 @@ async fn conectar_ejetar_e_conectar_de_novo_no_mesmo_processo() -> Result<()> {
     let (endereco, servidor) = dogma().await?;
 
     let primeiro = conectar_e_falar(endereco, 46, "ayanami", "primeira volta").await?;
-    assert!(primeiro.sessao().pilot.0 > 0, "a primeira sessão não subiu");
+    assert!(primeiro.sessao().person.0 > 0, "a primeira sessão não subiu");
     assert_eq!(primeiro.estado(), Link::Online);
     let primeira = primeiro.sessao().id;
 
@@ -206,18 +206,18 @@ async fn conectar_ejetar_e_conectar_de_novo_no_mesmo_processo() -> Result<()> {
     drop(primeiro);
 
     // Semente diferente, e de propósito: aqui o que se mede é o **rastro** que a
-    // sessão ejetada deixa no Dogma, e com o mesmo piloto não haveria rastro
-    // para medir. `Occupancy::seat` começa por `vacate_everywhere(pilot)`
-    // (`dogma.rs:171-174`), então o mesmo piloto nunca aparece duas vezes na
+    // sessão ejetada deixa no Dogma, e com o mesmo pessoa não haveria rastro
+    // para medir. `Occupancy::seat` começa por `vacate_everywhere(person)`
+    // (`dogma.rs:171-174`), então o mesmo pessoa nunca aparece duas vezes na
     // lista, por construção — a asserção lá embaixo passaria mesmo com a
-    // primeira sessão inteira pendurada. Com dois pilotos, uma sessão que não
+    // primeira sessão inteira pendurada. Com dois pessoas, uma sessão que não
     // se desfaz fica visível como uma cadeira ocupada a mais.
     //
     // A volta da *mesma* pessoa, que é o caso real do `:ejetar`, está no teste
     // seguinte, que não olha a lotação — ver a pendência 11 para o motivo.
     let segundo = conectar_e_falar(endereco, 48, "shikinami", "segunda volta").await?;
     assert!(
-        segundo.sessao().pilot.0 > 0,
+        segundo.sessao().person.0 > 0,
         "reconectar depois de ejetar falhou — o teardown não fechou"
     );
     assert_eq!(segundo.estado(), Link::Online);
@@ -239,8 +239,8 @@ async fn conectar_ejetar_e_conectar_de_novo_no_mesmo_processo() -> Result<()> {
         dentro.len()
     );
     assert_eq!(
-        dentro.first().map(|ocupante| ocupante.pilot),
-        Some(segundo.sessao().pilot),
+        dentro.first().map(|ocupante| ocupante.person),
+        Some(segundo.sessao().person),
         "quem sobrou na sala não é quem está conectado"
     );
 
@@ -258,15 +258,15 @@ async fn a_mesma_pessoa_volta_pela_tela_de_selecao() -> Result<()> {
 
     let primeiro = conectar_e_falar(endereco, 46, "ayanami", "primeira volta").await?;
     let primeira = primeiro.sessao().id;
-    let piloto = primeiro.sessao().pilot;
+    let pessoa = primeiro.sessao().person;
     drop(primeiro);
 
     let segundo = conectar_e_falar(endereco, 46, "ayanami", "de novo eu").await?;
     assert_eq!(segundo.estado(), Link::Online);
     assert_eq!(
-        segundo.sessao().pilot,
-        piloto,
-        "a mesma identidade voltou como outro piloto"
+        segundo.sessao().person,
+        pessoa,
+        "a mesma identidade voltou como outro pessoa"
     );
     assert_ne!(
         segundo.sessao().id,
@@ -275,7 +275,7 @@ async fn a_mesma_pessoa_volta_pela_tela_de_selecao() -> Result<()> {
     );
 
     // Este teste **não** olha a lotação do Cage, e a omissão é deliberada: com o
-    // mesmo piloto nos dois lados, o `vacate` da sessão que morre e o `seat` da
+    // mesmo pessoa nos dois lados, o `vacate` da sessão que morre e o `seat` da
     // que nasce disputam a mesma chave, e a lista pode acabar vazia. É a
     // pendência 11, encontrada lendo este teste — o defeito é do Dogma, não
     // daqui, e afirmar lotação neste ponto seria trocar um teste que pega falha

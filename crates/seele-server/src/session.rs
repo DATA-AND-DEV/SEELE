@@ -35,10 +35,10 @@ use anyhow::{bail, Context, Result};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use seele_proto::control::{
     AlertReason, AlertSeverity, AttachmentRefusal, CageInfo, ClientMessage, DisconnectReason,
-    LineInfo, Permission, PilotProfile, PilotState, Presence, Role, ServerMessage, Subsystem,
+    LineInfo, Permission, PersonProfile, PersonState, Presence, Role, ServerMessage, Subsystem,
     SubsystemHealth, Telemetry, Validate,
 };
-use seele_proto::ids::{CageId, LineId, PilotId, RoleId, ScreenId, SessionId, Ssrc};
+use seele_proto::ids::{CageId, LineId, PersonId, RoleId, ScreenId, SessionId, Ssrc};
 use seele_proto::screen::SCREEN_HEADER_LEN;
 use seele_proto::sync_ratio::{SyncInputs, SyncRatio};
 use seele_proto::transport::HANDSHAKE_TIMEOUT;
@@ -94,7 +94,7 @@ const TELEMETRY_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Hands out per-connection identifiers.
 ///
-/// Pilot identifiers come from PERSISTENCE and survive restarts; these do not need
+/// Person identifiers come from PERSISTENCE and survive restarts; these do not need
 /// to. An `ssrc` is meaningful only for the life of a connection.
 pub struct Registry {
     next_ssrc: AtomicU32,
@@ -148,7 +148,7 @@ impl Registry {
 /// A connection that has reached PATTERN: BLUE.
 pub struct Session {
     /// Which account this connection is.
-    pub pilot: PilotId,
+    pub person: PersonId,
     /// The media source bound to this connection.
     pub ssrc: Ssrc,
     /// Display name.
@@ -248,7 +248,7 @@ pub async fn serve(
     };
 
     tracing::info!(
-        pilot = %session.pilot,
+        person = %session.person,
         ssrc = %session.ssrc,
         nickname = %session.nickname,
         may_speak = session.may_speak,
@@ -260,12 +260,12 @@ pub async fn serve(
 
     // Out of every room, not out of the one this connection remembers. The loop
     // above can end at any `?`, and a path that returns early does not know
-    // where the pilot was sitting.
-    cages.leave_everywhere(session.pilot).await;
-    encerrar_telas_de(&dogma, session.pilot).await;
+    // where the person was sitting.
+    cages.leave_everywhere(session.person).await;
+    encerrar_telas_de(&dogma, session.person).await;
 
-    // And **announced**, which it was not. `Event::PilotLeft` was sent only
-    // from the `EjectPlug` branch, so a pilot who closed their client, lost
+    // And **announced**, which it was not. `Event::PersonLeft` was sent only
+    // from the `EjectPlug` branch, so a person who closed their client, lost
     // their network or hit any `?` in the loop stayed in everybody else's
     // roster until they reconnected. Nobody saw it while a client only drew the
     // Cage it was sitting in and only learned of that Cage's arrivals; now that
@@ -277,25 +277,25 @@ pub async fn serve(
         .occupancy
         .lock()
         .await
-        .vacate_everywhere(session.pilot)
+        .vacate_everywhere(session.person)
     {
-        let _ = dogma.events.send(Event::PilotLeft {
+        let _ = dogma.events.send(Event::PersonLeft {
             cage,
-            pilot: session.pilot,
+            person: session.person,
         });
     }
 
     // E some da lista de presentes, pelo mesmo caminho e pelo mesmo motivo do
     // laço acima: sem isto, todo cliente acumula o nome de quem já conectou
-    // alguma vez e desenha todos como presentes. `PilotLeft` não cobre — ele
+    // alguma vez e desenha todos como presentes. `PersonLeft` não cobre — ele
     // diz que uma sala esvaziou, e quem nunca se sentou não produz nenhum.
-    if dogma.presentes.lock().await.saiu(session.pilot) {
-        let _ = dogma.events.send(Event::PilotGone {
-            pilot: session.pilot,
+    if dogma.presentes.lock().await.saiu(session.person) {
+        let _ = dogma.events.send(Event::PersonGone {
+            person: session.person,
         });
     }
 
-    tracing::info!(pilot = %session.pilot, "session ended");
+    tracing::info!(person = %session.person, "session ended");
     result
 }
 
@@ -306,7 +306,7 @@ pub async fn serve(
 /// `Connection` é recolhida, e o QUIC derruba tudo — inclusive o quadro que
 /// ainda não tinha saído. **O cliente lia erro de conexão e mostrava "não foi
 /// possível alcançar o Dogma"**, mandando a pessoa procurar problema de rede
-/// enquanto a resposta era "esse apelido é de outro piloto".
+/// enquanto a resposta era "esse apelido é de outro pessoa".
 ///
 /// `stopped()` volta quando o outro lado reconheceu o fim do fluxo, que é a
 /// prova de que ele leu. O prazo existe porque um cliente que sumiu no meio da
@@ -568,7 +568,7 @@ async fn handshake(
         let guard = dogma.persistence.lock().await;
         let permissions = Permissions::new(&guard);
 
-        let pilot = permissions
+        let person = permissions
             .register_or_find(&public_key, &nickname)
             .map_err(|error| {
                 // O apelido tomado ganha razão própria, e é o conserto de um
@@ -599,10 +599,10 @@ async fn handshake(
                 }
             })?;
 
-        if permissions.is_banned(pilot.id).unwrap_or(false) {
+        if permissions.is_banned(person.id).unwrap_or(false) {
             return Err(Refusal {
                 reason: DisconnectReason::Banned,
-                detail: format!("pilot {} is banned", pilot.id),
+                detail: format!("person {} is banned", person.id),
             });
         }
 
@@ -611,22 +611,22 @@ async fn handshake(
         // it, so authorisation still has exactly one source of truth
         // (`specs/08-seguranca.md`).
         if config.observers.iter().any(|name| name == &nickname) {
-            let _ = permissions.revoke_role(pilot.id, permissions::PILOT_ROLE);
-            let _ = permissions.grant_role(pilot.id, permissions::OBSERVER_ROLE);
+            let _ = permissions.revoke_role(person.id, permissions::PERSON_ROLE);
+            let _ = permissions.grant_role(person.id, permissions::OBSERVER_ROLE);
         }
 
-        let may = |permission| permissions.may(pilot.id, permission).unwrap_or(false);
+        let may = |permission| permissions.may(person.id, permission).unwrap_or(false);
         let (cages, lines, roles) = read_dogma(&guard).map_err(|error| Refusal {
             reason: DisconnectReason::ServerShuttingDown,
             detail: format!("could not read the Dogma: {error}"),
         })?;
         // Resolved here rather than left for the shell to work out from `roles`:
         // "negadas vencem concedidas" is one rule and belongs in one place.
-        let permissions = permissions.permissions(pilot.id).unwrap_or_default();
+        let permissions = permissions.permissions(person.id).unwrap_or_default();
 
         Account {
-            id: pilot.id,
-            nickname: pilot.nickname,
+            id: person.id,
+            nickname: person.nickname,
             may_speak: may(Permission::Speak),
             may_write: may(Permission::WriteLine),
             cages,
@@ -643,7 +643,7 @@ async fn handshake(
     // `persistence::aparencia`.
     //
     // Uma segunda tomada do mutex, e não um campo a mais na `Account`: são duas
-    // perguntas sobre coisas diferentes — o que este piloto é, e o que este
+    // perguntas sobre coisas diferentes — o que este pessoa é, e o que este
     // Dogma é — e o aperto de mão já toma este mutex mais de uma vez.
     let (nome_do_dogma, icone_do_dogma) = {
         let guard = dogma.persistence.lock().await;
@@ -660,7 +660,7 @@ async fn handshake(
     let (fresh_ssrc, session_id) = registry.issue();
 
     // specs/02-protocolo.md: the server holds the slot for the same five minutes
-    // as the client's internal battery. A pilot returning inside that window
+    // as the client's internal battery. A person returning inside that window
     // gets their own seat and their own `ssrc` back, so to everybody else the
     // outage looks like an outage rather than a departure and an arrival.
     let reclaimed = {
@@ -676,7 +676,7 @@ async fn handshake(
         send,
         &ServerMessage::Session {
             id: session_id,
-            pilot: account.id,
+            person: account.id,
             ssrc,
             dogma: nome_do_dogma,
             cages: account.cages,
@@ -728,7 +728,7 @@ async fn handshake(
 
     let _ = client;
     Ok(Session {
-        pilot: account.id,
+        person: account.id,
         ssrc,
         nickname: account.nickname,
         may_speak: account.may_speak,
@@ -739,7 +739,7 @@ async fn handshake(
 
 /// What the handshake learned from PERMISSIONS and PERSISTENCE.
 struct Account {
-    id: PilotId,
+    id: PersonId,
     nickname: String,
     may_speak: bool,
     may_write: bool,
@@ -877,7 +877,7 @@ async fn run_session(
         let entrada = Arc::clone(dogma);
         let avisos = avisos_tx.clone();
         let conexao = connection.clone();
-        let piloto = session.pilot;
+        let pessoa = session.person;
         let apelido = session.nickname.clone();
         let salas = Arc::clone(cages);
         tokio::spawn(async move {
@@ -909,9 +909,9 @@ async fn run_session(
                         // arquivo.
                         tokio::spawn(async move {
                             if let Err(erro) =
-                                receber_tela(&contexto, &salas, piloto, &avisos, &mut fluxo).await
+                                receber_tela(&contexto, &salas, pessoa, &avisos, &mut fluxo).await
                             {
-                                tracing::debug!(%piloto, %erro, "o fluxo de tela terminou");
+                                tracing::debug!(%pessoa, %erro, "o fluxo de tela terminou");
                             }
                         });
                         continue;
@@ -924,7 +924,7 @@ async fn run_session(
                     // lado descubra agora.
                     Err(_) => {
                         let _ = fluxo.stop(quinn::VarInt::from_u32(crate::tela::CODIGO_DE_CORTE));
-                        tracing::debug!(%piloto, "um fluxo unidirecional chegou sem tipo conhecido");
+                        tracing::debug!(%pessoa, "um fluxo unidirecional chegou sem tipo conhecido");
                         continue;
                     }
                 }
@@ -951,7 +951,7 @@ async fn run_session(
                         }
                         return;
                     };
-                    match crate::transfer::receive(&anexos, &contexto, piloto, &apelido, &mut fluxo)
+                    match crate::transfer::receive(&anexos, &contexto, pessoa, &apelido, &mut fluxo)
                         .await
                     {
                         Ok(crate::transfer::Outcome::Published(_)) => {}
@@ -987,7 +987,7 @@ async fn run_session(
     let mut lines: Vec<LineId> = Vec::new();
     let mut current_cage: Option<CageId> = None;
 
-    // What this pilot has announced about themselves. Held here rather than
+    // What this person has announced about themselves. Held here rather than
     // rebuilt each tick, because the telemetry broadcast carries it and a tick
     // that reported a hardcoded `false` would undo every mute a second later.
     let mut at_field = false;
@@ -1000,20 +1000,20 @@ async fn run_session(
     let mut last_datagram: Option<Instant> = None;
     // The last Sync Ratio this connection measured. Carried so that announcing
     // a mute does not report a ratio of zero alongside it — every client folds
-    // the whole `PilotState` in, so a field left at a default is not left
+    // the whole `PersonState` in, so a field left at a default is not left
     // alone, it is overwritten.
     let mut last_ratio = 0_u8;
     let mut sync = SyncRatio::new();
     let mut telemetry = tokio::time::interval(TELEMETRY_INTERVAL);
     telemetry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
-    // A reclaimed seat means the pilot was already in a Cage when they dropped.
+    // A reclaimed seat means the person was already in a Cage when they dropped.
     if let Some(reclaimed) = session.reclaimed_cage {
         cages
             .of(reclaimed)
             .await
             .send(CageCommand::Join {
-                pilot: session.pilot,
+                person: session.person,
                 ssrc: session.ssrc,
                 may_speak: session.may_speak,
                 outbound: outbound_tx.clone(),
@@ -1024,12 +1024,12 @@ async fn run_session(
         dogma.occupancy.lock().await.seat(
             reclaimed,
             crate::dogma::Occupant {
-                pilot: session.pilot,
+                person: session.person,
                 nickname: session.nickname.clone(),
                 ssrc: session.ssrc,
             },
         );
-        tracing::info!(pilot = %session.pilot, "seat reclaimed");
+        tracing::info!(person = %session.person, "seat reclaimed");
     }
 
     // Who is already seated, in **every** Cage — the whole picture, once.
@@ -1042,7 +1042,7 @@ async fn run_session(
     // is the defect reported from a real session as the Cages showing empty
     // when they were not.
     //
-    // Sent as `PilotJoined`, which is what the client already folds in, so this
+    // Sent as `PersonJoined`, which is what the client already folds in, so this
     // needs no new message and no new arm in any of the three shells. From this
     // connection's point of view every one of these people did just arrive: it
     // is the moment it learned about them.
@@ -1062,14 +1062,14 @@ async fn run_session(
     {
         let mut presentes = dogma.presentes.lock().await;
         for quem in presentes.todos() {
-            if quem.pilot == session.pilot {
+            if quem.person == session.person {
                 continue;
             }
             frame::write(
                 &mut send,
-                &ServerMessage::PilotPresent {
-                    profile: PilotProfile {
-                        id: quem.pilot,
+                &ServerMessage::PersonPresent {
+                    profile: PersonProfile {
+                        id: quem.person,
                         nickname: quem.nickname.clone(),
                         roles: Vec::new(),
                     },
@@ -1082,14 +1082,14 @@ async fn run_session(
         // é chegada de verdade: uma reconexão dentro da carência é a mesma
         // pessoa, e um segundo anúncio faria a lista de todo mundo piscar.
         let chegou = presentes.chegou(crate::dogma::Occupant {
-            pilot: session.pilot,
+            person: session.person,
             nickname: session.nickname.clone(),
             ssrc: session.ssrc,
         });
         if chegou {
-            let _ = dogma.events.send(Event::PilotPresent {
+            let _ = dogma.events.send(Event::PersonPresent {
                 quem: crate::dogma::Occupant {
-                    pilot: session.pilot,
+                    person: session.person,
                     nickname: session.nickname.clone(),
                     ssrc: session.ssrc,
                 },
@@ -1098,15 +1098,15 @@ async fn run_session(
     }
 
     for (cage, occupant) in dogma.occupancy.lock().await.everywhere() {
-        if occupant.pilot == session.pilot {
+        if occupant.person == session.person {
             continue;
         }
         frame::write(
             &mut send,
-            &ServerMessage::PilotJoined {
+            &ServerMessage::PersonJoined {
                 cage,
-                profile: PilotProfile {
-                    id: occupant.pilot,
+                profile: PersonProfile {
+                    id: occupant.person,
                     nickname: occupant.nickname.clone(),
                     roles: Vec::new(),
                 },
@@ -1122,7 +1122,7 @@ async fn run_session(
     // §3.6 escreve esta regra como «reenviado a quem entra num Cage que já
     // está transmitindo», e ela é atendida aqui em vez de na entrada do Cage
     // porque `ScreenShareStarted` sai do barramento **sem filtro de sala** —
-    // do jeito que `PilotJoined` passou a sair quando o cliente começou a
+    // do jeito que `PersonJoined` passou a sair quando o cliente começou a
     // desenhar todos os Cages. Com a difusão cobrindo tudo o que acontece a
     // partir de agora, o que falta é exatamente o que já estava acontecendo
     // antes de esta conexão existir, e isso é uma varredura, uma vez.
@@ -1130,12 +1130,12 @@ async fn run_session(
     // Depois do `subscribe()` acima pelo mesmo motivo que a ocupação: a ordem
     // inversa pode perder uma transmissão que começou entre as duas linhas, e
     // uma transmissão perdida é uma tela que ninguém sabe que existe.
-    for (cage, pilot, screen) in dogma.telas.lock().await.todas() {
+    for (cage, person, screen) in dogma.telas.lock().await.todas() {
         frame::write(
             &mut send,
             &ServerMessage::ScreenShareStarted {
                 cage,
-                pilot,
+                person,
                 screen,
             },
         )
@@ -1183,7 +1183,7 @@ async fn run_session(
                 match vigia.avaliar(Instant::now()) {
                     Veredito::Passa => {}
                     Veredito::Avisa => {
-                        tracing::warn!(pilot = %session.pilot, "control frames over budget");
+                        tracing::warn!(person = %session.person, "control frames over budget");
                         frame::write(&mut send, &ServerMessage::Alert {
                             severity: AlertSeverity::Warning,
                             reason: AlertReason::RateLimited,
@@ -1194,7 +1194,7 @@ async fn run_session(
                     Veredito::Descarta => continue,
                     Veredito::Derruba => {
                         tracing::warn!(
-                            pilot = %session.pilot,
+                            person = %session.person,
                             descartados = vigia.descartados(),
                             "disconnecting: rate limited"
                         );
@@ -1230,13 +1230,13 @@ async fn run_session(
                         current_cage = Some(id);
                     }
                     ClientMessage::EjectPlug => {
-                        cages.leave_everywhere(session.pilot).await;
-                        encerrar_telas_de(dogma, session.pilot).await;
+                        cages.leave_everywhere(session.person).await;
+                        encerrar_telas_de(dogma, session.person).await;
                         if let Some(id) = current_cage.take() {
-                            dogma.occupancy.lock().await.vacate(id, session.pilot);
-                            let _ = dogma.events.send(Event::PilotLeft {
+                            dogma.occupancy.lock().await.vacate(id, session.person);
+                            let _ = dogma.events.send(Event::PersonLeft {
                                 cage: id,
-                                pilot: session.pilot,
+                                person: session.person,
                             });
                         }
                     }
@@ -1259,7 +1259,7 @@ async fn run_session(
                         // is what tells anybody it happened.
                         dogma.post(PendingMessage {
                             line,
-                            author: session.pilot,
+                            author: session.person,
                             author_nickname: session.nickname.clone(),
                             body,
                             replies_to,
@@ -1346,8 +1346,8 @@ async fn run_session(
                     // refusal nobody is told about is indistinguishable from a
                     // Dogma that is broken.
                     ClientMessage::CreateCage { name, limit, line } => {
-                        if !pode(dogma, session.pilot, Permission::ManageCages).await {
-                            recusar(&mut send, session.pilot, "CreateCage").await?;
+                        if !pode(dogma, session.person, Permission::ManageCages).await {
+                            recusar(&mut send, session.person, "CreateCage").await?;
                             continue;
                         }
                         let feito = {
@@ -1356,15 +1356,15 @@ async fn run_session(
                         };
                         match feito {
                             Ok(cage) => {
-                                tracing::info!(pilot = %session.pilot, cage = %cage.id, "cage created");
+                                tracing::info!(person = %session.person, cage = %cage.id, "cage created");
                                 let _ = dogma.events.send(Event::CageCreated { cage });
                             }
                             Err(erro) => nao_deu(&mut send, &erro).await?,
                         }
                     }
                     ClientMessage::CreateLine { name } => {
-                        if !pode(dogma, session.pilot, Permission::ManageCages).await {
-                            recusar(&mut send, session.pilot, "CreateLine").await?;
+                        if !pode(dogma, session.person, Permission::ManageCages).await {
+                            recusar(&mut send, session.person, "CreateLine").await?;
                             continue;
                         }
                         let feito = {
@@ -1373,15 +1373,15 @@ async fn run_session(
                         };
                         match feito {
                             Ok(line) => {
-                                tracing::info!(pilot = %session.pilot, line = %line.id, "line created");
+                                tracing::info!(person = %session.person, line = %line.id, "line created");
                                 let _ = dogma.events.send(Event::LineCreated { line });
                             }
                             Err(erro) => nao_deu(&mut send, &erro).await?,
                         }
                     }
                     ClientMessage::RenameCage { cage: id, name } => {
-                        if !pode(dogma, session.pilot, Permission::ManageCages).await {
-                            recusar(&mut send, session.pilot, "RenameCage").await?;
+                        if !pode(dogma, session.person, Permission::ManageCages).await {
+                            recusar(&mut send, session.person, "RenameCage").await?;
                             continue;
                         }
                         let feito = {
@@ -1396,8 +1396,8 @@ async fn run_session(
                         }
                     }
                     ClientMessage::RenameLine { line: id, name } => {
-                        if !pode(dogma, session.pilot, Permission::ManageCages).await {
-                            recusar(&mut send, session.pilot, "RenameLine").await?;
+                        if !pode(dogma, session.person, Permission::ManageCages).await {
+                            recusar(&mut send, session.person, "RenameLine").await?;
                             continue;
                         }
                         let feito = {
@@ -1433,8 +1433,8 @@ async fn run_session(
                     // then loses power comes back with the name everybody was
                     // told about.
                     ClientMessage::RenameDogma { name } => {
-                        if !pode(dogma, session.pilot, Permission::AdministerDogma).await {
-                            recusar(&mut send, session.pilot, "RenameDogma").await?;
+                        if !pode(dogma, session.person, Permission::AdministerDogma).await {
+                            recusar(&mut send, session.person, "RenameDogma").await?;
                             continue;
                         }
                         let feito = {
@@ -1443,15 +1443,15 @@ async fn run_session(
                         };
                         match feito {
                             Ok(name) => {
-                                tracing::info!(by = %session.pilot, %name, "the Dogma was renamed");
+                                tracing::info!(by = %session.person, %name, "the Dogma was renamed");
                                 let _ = dogma.events.send(Event::DogmaRenamed { name });
                             }
                             Err(erro) => nao_deu(&mut send, &erro).await?,
                         }
                     }
                     ClientMessage::SetDogmaIcon { icon } => {
-                        if !pode(dogma, session.pilot, Permission::AdministerDogma).await {
-                            recusar(&mut send, session.pilot, "SetDogmaIcon").await?;
+                        if !pode(dogma, session.person, Permission::AdministerDogma).await {
+                            recusar(&mut send, session.person, "SetDogmaIcon").await?;
                             continue;
                         }
                         // Nada confere o formato aqui. `frame::read` já recusou
@@ -1466,7 +1466,7 @@ async fn run_session(
                         match feito {
                             Ok(()) => {
                                 tracing::info!(
-                                    by = %session.pilot,
+                                    by = %session.person,
                                     bytes = icon.as_ref().map_or(0, Vec::len),
                                     "the Dogma changed its icon"
                                 );
@@ -1490,28 +1490,28 @@ async fn run_session(
                     // reconnection. And denial answers, because a refusal
                     // nobody is told about is indistinguishable from a Dogma
                     // that is broken.
-                    ClientMessage::KickPilot { pilot: alvo } => {
-                        if !moderavel(dogma, session.pilot, alvo, Permission::Kick).await {
-                            recusar(&mut send, session.pilot, "KickPilot").await?;
+                    ClientMessage::KickPerson { person: alvo } => {
+                        if !moderavel(dogma, session.person, alvo, Permission::Kick).await {
+                            recusar(&mut send, session.person, "KickPerson").await?;
                             continue;
                         }
-                        tracing::info!(by = %session.pilot, %alvo, "kicked");
+                        tracing::info!(by = %session.person, %alvo, "kicked");
                         // The target's own session does the disconnecting. It
                         // owns its stream and its cleanup, and reaching into
                         // another connection from here would need a second way
                         // to find one — see the note on `Event::SessionEnded`.
                         let _ = dogma.events.send(Event::SessionEnded {
-                            pilot: alvo,
+                            person: alvo,
                             reason: DisconnectReason::Kicked,
                         });
                     }
-                    ClientMessage::BanPilot { pilot: alvo, reason, expires_at } => {
+                    ClientMessage::BanPerson { person: alvo, reason, expires_at } => {
                         // Banning yourself locks a Dogma whose only Comandante
                         // is you, and there is no verb to undo it from outside.
-                        if alvo == session.pilot
-                            || !moderavel(dogma, session.pilot, alvo, Permission::Ban).await
+                        if alvo == session.person
+                            || !moderavel(dogma, session.person, alvo, Permission::Ban).await
                         {
-                            recusar(&mut send, session.pilot, "BanPilot").await?;
+                            recusar(&mut send, session.person, "BanPerson").await?;
                             continue;
                         }
                         // PERMISSIONS checks the permission again inside `ban`.
@@ -1523,20 +1523,20 @@ async fn run_session(
                             let guard = dogma.persistence.lock().await;
                             Permissions::new(&guard).ban(
                                 alvo,
-                                session.pilot,
+                                session.person,
                                 reason.as_deref(),
                                 expires_at,
                             )
                         };
                         match gravado {
                             Ok(()) => {
-                                tracing::info!(by = %session.pilot, %alvo, ?expires_at, "banned");
+                                tracing::info!(by = %session.person, %alvo, ?expires_at, "banned");
                                 // A ban that let the offender stay until they
                                 // chose to leave would do nothing about what
                                 // prompted it. The handshake refuses them from
                                 // here on; this is the session they are in now.
                                 let _ = dogma.events.send(Event::SessionEnded {
-                                    pilot: alvo,
+                                    person: alvo,
                                     reason: DisconnectReason::Banned,
                                 });
                             }
@@ -1560,9 +1560,9 @@ async fn run_session(
                             nao_deu(&mut send, &anyhow::anyhow!("no such message")).await?;
                             continue;
                         };
-                        let seu = alvo.author == session.pilot;
-                        if !seu && !pode(dogma, session.pilot, Permission::RemoveMessage).await {
-                            recusar(&mut send, session.pilot, "RemoveMessage").await?;
+                        let seu = alvo.author == session.person;
+                        if !seu && !pode(dogma, session.person, Permission::RemoveMessage).await {
+                            recusar(&mut send, session.person, "RemoveMessage").await?;
                             continue;
                         }
                         // Soft in PERSISTENCE, gone on screen — and the two are one
@@ -1581,7 +1581,7 @@ async fn run_session(
                         };
                         match feito {
                             Ok(()) => {
-                                tracing::info!(by = %session.pilot, %id, own = seu, "message removed");
+                                tracing::info!(by = %session.person, %id, own = seu, "message removed");
                                 // The Line comes from the stored row, never
                                 // from the asker: a Line the client filled in
                                 // is a Line the client can fill in wrong, and
@@ -1594,14 +1594,14 @@ async fn run_session(
                             Err(erro) => nao_deu(&mut send, &erro).await?,
                         }
                     }
-                    ClientMessage::MovePilot { pilot: alvo, cage: destino } => {
-                        if !moderavel(dogma, session.pilot, alvo, Permission::MovePilot).await {
-                            recusar(&mut send, session.pilot, "MovePilot").await?;
+                    ClientMessage::MovePerson { person: alvo, cage: destino } => {
+                        if !moderavel(dogma, session.person, alvo, Permission::MovePerson).await {
+                            recusar(&mut send, session.person, "MovePerson").await?;
                             continue;
                         }
-                        tracing::info!(by = %session.pilot, %alvo, cage = %destino, "moved");
-                        let _ = dogma.events.send(Event::PilotMoved {
-                            pilot: alvo,
+                        tracing::info!(by = %session.person, %alvo, cage = %destino, "moved");
+                        let _ = dogma.events.send(Event::PersonMoved {
+                            person: alvo,
                             cage: destino,
                         });
                     }
@@ -1619,8 +1619,8 @@ async fn run_session(
                     // configuration. Read now, from PERMISSIONS, like all the
                     // others.
                     ClientMessage::DeleteCage { cage: id } => {
-                        if !pode(dogma, session.pilot, Permission::AdministerDogma).await {
-                            recusar(&mut send, session.pilot, "DeleteCage").await?;
+                        if !pode(dogma, session.person, Permission::AdministerDogma).await {
+                            recusar(&mut send, session.person, "DeleteCage").await?;
                             continue;
                         }
                         let feito = {
@@ -1629,7 +1629,7 @@ async fn run_session(
                         };
                         match feito {
                             Ok(()) => {
-                                tracing::info!(by = %session.pilot, cage = %id, "cage destroyed");
+                                tracing::info!(by = %session.person, cage = %id, "cage destroyed");
                                 // A transmissão morre com a sala, e antes do
                                 // aviso de que a sala morreu: quem está
                                 // desenhando a tela para de desenhá-la porque
@@ -1657,8 +1657,8 @@ async fn run_session(
                         }
                     }
                     ClientMessage::DeleteLine { line: id } => {
-                        if !pode(dogma, session.pilot, Permission::AdministerDogma).await {
-                            recusar(&mut send, session.pilot, "DeleteLine").await?;
+                        if !pode(dogma, session.person, Permission::AdministerDogma).await {
+                            recusar(&mut send, session.person, "DeleteLine").await?;
                             continue;
                         }
                         let feito = {
@@ -1667,7 +1667,7 @@ async fn run_session(
                         };
                         match feito {
                             Ok(()) => {
-                                tracing::info!(by = %session.pilot, line = %id, "line destroyed");
+                                tracing::info!(by = %session.person, line = %id, "line destroyed");
                                 let _ = dogma.events.send(Event::LineDeleted { line: id });
                             }
                             Err(erro) => nao_deu(&mut send, &erro).await?,
@@ -1678,7 +1678,7 @@ async fn run_session(
                     // a Line looked to the person about to be asked whether
                     // they mean it.
                     //
-                    // No permission. Answering tells a pilot how much is in a
+                    // No permission. Answering tells a person how much is in a
                     // Line they may already read, and refusing would only mean
                     // the confirmation they are shown is the vaguer one.
                     ClientMessage::WeighLine { line: id } => {
@@ -1710,7 +1710,7 @@ async fn run_session(
                         // message somebody may read is part of that message,
                         // and `Permission::AttachFile` is about putting bytes
                         // on somebody's disk rather than about looking at them.
-                        if !pode(dogma, session.pilot, Permission::ReadLine).await {
+                        if !pode(dogma, session.person, Permission::ReadLine).await {
                             frame::write(&mut send, &ServerMessage::AttachmentUnavailable {
                                 attachment,
                                 reason: AttachmentRefusal::NotFound,
@@ -1780,7 +1780,7 @@ async fn run_session(
                         // recusar em silêncio, que é indistinguível de um Dogma
                         // quebrado.
                         let Some(cage) = current_cage else {
-                            recusar(&mut send, session.pilot, "StartScreenShare fora de Cage")
+                            recusar(&mut send, session.person, "StartScreenShare fora de Cage")
                                 .await?;
                             continue;
                         };
@@ -1789,15 +1789,15 @@ async fn run_session(
                         // transmitindo-a como imagem. `specs/08-seguranca.md`:
                         // verificado no servidor, sempre.
                         if !session.may_speak {
-                            recusar(&mut send, session.pilot, "StartScreenShare").await?;
+                            recusar(&mut send, session.person, "StartScreenShare").await?;
                             continue;
                         }
                         let screen = registry.issue_screen();
-                        match dogma.telas.lock().await.comecar(cage, session.pilot, screen) {
+                        match dogma.telas.lock().await.comecar(cage, session.person, screen) {
                             Ok(()) => {
                                 let _ = dogma.events.send(Event::ScreenShareStarted {
                                     cage,
-                                    pilot: session.pilot,
+                                    person: session.person,
                                     screen,
                                 });
                             }
@@ -1815,7 +1815,7 @@ async fn run_session(
                     }
                     ClientMessage::StopScreenShare => {
                         let parada = match current_cage {
-                            Some(cage) => dogma.telas.lock().await.parar(cage, session.pilot),
+                            Some(cage) => dogma.telas.lock().await.parar(cage, session.person),
                             None => None,
                         };
                         if let (Some(cage), Some(screen)) = (current_cage, parada) {
@@ -1837,7 +1837,7 @@ async fn run_session(
                             if corrente == screen {
                                 let _ = dogma.events.send(Event::KeyFrameRequested {
                                     screen,
-                                    pilot: session.pilot,
+                                    person: session.person,
                                     sharer,
                                 });
                             }
@@ -1903,7 +1903,7 @@ async fn run_session(
                     //
                     // Aqui havia um `let Ok(event) = event else { continue }`, e
                     // era a pendência nº 1 inteira: a sessão seguia, calada, com
-                    // um buraco permanente no que aquele piloto vê. Ninguém dos
+                    // um buraco permanente no que aquele pessoa vê. Ninguém dos
                     // dois lados ficava sabendo, e não havia número nenhum para
                     // olhar depois.
                     //
@@ -1917,7 +1917,7 @@ async fn run_session(
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(quantos)) => {
                         dogma.atrasos.registrar(quantos);
                         tracing::warn!(
-                            pilot = %session.pilot,
+                            person = %session.person,
                             quantos,
                             "o barramento passou à frente desta sessão; encerrando para ela ressincronizar"
                         );
@@ -1946,8 +1946,8 @@ async fn run_session(
                 // because a Dogma has no other way for one session to reach
                 // another — see the note beside `Event::SessionEnded`.
                 match &event {
-                    Event::SessionEnded { pilot, reason } if *pilot == session.pilot => {
-                        tracing::info!(pilot = %session.pilot, ?reason, "session ended by an operator");
+                    Event::SessionEnded { person, reason } if *person == session.person => {
+                        tracing::info!(person = %session.person, ?reason, "session ended by an operator");
                         // Told, and then closed. `specs/02-protocolo.md` wants
                         // a specific reason and `despedir` is what makes sure
                         // it reaches the other end before the connection dies
@@ -1956,7 +1956,7 @@ async fn run_session(
                         // somebody to look for a network problem.
                         // And the seat is **not** held. The grace period exists
                         // for a train going into a tunnel; applied here it
-                        // would put a kicked pilot straight back into the Cage
+                        // would put a kicked person straight back into the Cage
                         // they were removed from the moment they reconnected,
                         // which is the whole verb undone by a feature meant for
                         // something else.
@@ -1968,7 +1968,7 @@ async fn run_session(
                         despedir(&connection, &mut send, b"moderated").await;
                         break;
                     }
-                    Event::PilotMoved { pilot, cage: destino } if *pilot == session.pilot => {
+                    Event::PersonMoved { person, cage: destino } if *person == session.person => {
                         assentar(dogma, cages, session, &outbound_tx, &tela_tx, *destino).await?;
                         current_cage = Some(*destino);
                         // Where the plug is now, and then that somebody put it
@@ -1994,18 +1994,18 @@ async fn run_session(
                     // thing happening without being asked for — and only then
                     // does this client hear that the room is gone.
                     //
-                    // Order matters in the other direction too: `PilotLeft`
+                    // Order matters in the other direction too: `PersonLeft`
                     // goes out before `CageDeleted` reaches anybody, so no
                     // client is ever holding a roster for a room it has already
                     // been told to forget.
                     Event::CageDeleted { cage: id } if current_cage == Some(*id) => {
-                        cages.leave_everywhere(session.pilot).await;
-                        encerrar_telas_de(dogma, session.pilot).await;
+                        cages.leave_everywhere(session.person).await;
+                        encerrar_telas_de(dogma, session.person).await;
                         current_cage = None;
-                        dogma.occupancy.lock().await.vacate(*id, session.pilot);
-                        let _ = dogma.events.send(Event::PilotLeft {
+                        dogma.occupancy.lock().await.vacate(*id, session.person);
+                        let _ = dogma.events.send(Event::PersonLeft {
                             cage: *id,
-                            pilot: session.pilot,
+                            person: session.person,
                         });
                         frame::write(&mut send, &ServerMessage::CageDeleted {
                             cage: *id,
@@ -2042,7 +2042,7 @@ async fn run_session(
                     _ => {}
                 }
 
-                if let Some(message) = translate(&event, &lines, session.pilot) {
+                if let Some(message) = translate(&event, &lines, session.person) {
                     frame::write(&mut send, &message).await?;
                 }
             }
@@ -2075,8 +2075,8 @@ async fn run_session(
                     ],
                 })).await?;
 
-                let _ = dogma.events.send(Event::PilotState(PilotState {
-                    pilot: session.pilot,
+                let _ = dogma.events.send(Event::PersonState(PersonState {
+                    person: session.person,
                     at_field,
                     total_isolation,
                     speaking: speaking_now(last_datagram),
@@ -2091,7 +2091,7 @@ async fn run_session(
     // letting a tunnel cost somebody their place — specs/02-protocolo.md.
     if let Some(id) = current_cage {
         let mut slots = dogma.slots.lock().await;
-        slots.reserve(session.pilot, id, session.ssrc, Instant::now());
+        slots.reserve(session.person, id, session.ssrc, Instant::now());
     }
     // Coming out of the occupancy — and being announced — is `serve`'s job, and
     // it happens the moment this returns. It used to happen here, which meant
@@ -2109,7 +2109,7 @@ async fn run_session(
     // rede — com o conserto no lado oposto.
     if recusados > 0 {
         tracing::warn!(
-            pilot = %session.pilot,
+            person = %session.person,
             recusados,
             "o transporte recusou quadros de voz para este cliente; \
              o caminho até ele não comporta o tamanho do datagrama"
@@ -2127,7 +2127,7 @@ async fn run_session(
     let bloqueios = connection.stats().frame_tx.stream_data_blocked;
     if bloqueios > 0 {
         tracing::warn!(
-            pilot = %session.pilot,
+            person = %session.person,
             bloqueios,
             "o fluxo de controle para este cliente encheu; ele parou de ler"
         );
@@ -2138,8 +2138,8 @@ async fn run_session(
 
 /// Puts this connection's plug into a Cage, and tells the Dogma.
 ///
-/// One function because there are two ways in — the pilot asks
-/// ([`ClientMessage::InsertPlug`]) or somebody with [`Permission::MovePilot`]
+/// One function because there are two ways in — the person asks
+/// ([`ClientMessage::InsertPlug`]) or somebody with [`Permission::MovePerson`]
 /// decides — and the bookkeeping either way is identical: out of the old room
 /// before into the new one, the occupancy rewritten, the departure and the
 /// arrival both announced. Written twice, the copy that gets a line added is
@@ -2153,21 +2153,21 @@ async fn assentar(
     tela: &mpsc::Sender<crate::tela::AberturaDeTela>,
     destino: CageId,
 ) -> Result<()> {
-    // Out of the old room before into the new one. Without this a pilot who
+    // Out of the old room before into the new one. Without this a person who
     // walks from one Cage to another is still a member of the first, and goes
     // on hearing it.
-    cages.leave_everywhere(session.pilot).await;
+    cages.leave_everywhere(session.person).await;
     // E a tela vai junto. Uma transmissão não anda de sala com quem a manda:
     // quem ficou na sala anterior continuaria vendo o cabeçalho de um fluxo que
     // agora aponta para outro lugar, e o §6 item 3 só permite uma por sala —
     // levar a transmissão pela mão faria a pessoa tomar a vaga da sala nova sem
     // ter pedido.
-    encerrar_telas_de(dogma, session.pilot).await;
+    encerrar_telas_de(dogma, session.person).await;
     cages
         .of(destino)
         .await
         .send(CageCommand::Join {
-            pilot: session.pilot,
+            person: session.person,
             ssrc: session.ssrc,
             may_speak: session.may_speak,
             outbound: outbound.clone(),
@@ -2181,12 +2181,12 @@ async fn assentar(
     // walking into would be telling it something it already knows.
     let saiu_de = {
         let mut occupancy = dogma.occupancy.lock().await;
-        let mut saiu_de = occupancy.vacate_everywhere(session.pilot);
+        let mut saiu_de = occupancy.vacate_everywhere(session.person);
         saiu_de.retain(|anterior| *anterior != destino);
         occupancy.seat(
             destino,
             crate::dogma::Occupant {
-                pilot: session.pilot,
+                person: session.person,
                 nickname: session.nickname.clone(),
                 ssrc: session.ssrc,
             },
@@ -2196,18 +2196,18 @@ async fn assentar(
 
     // Walking from one Cage to another is a departure and an arrival, and both
     // have to be said. Without the first, everybody watching the old room keeps
-    // the pilot in it for ever — invisible while a client only drew its own
+    // the person in it for ever — invisible while a client only drew its own
     // Cage, and a ghost now that it draws all of them.
     for anterior in saiu_de {
-        let _ = dogma.events.send(Event::PilotLeft {
+        let _ = dogma.events.send(Event::PersonLeft {
             cage: anterior,
-            pilot: session.pilot,
+            person: session.person,
         });
     }
-    let _ = dogma.events.send(Event::PilotJoined {
+    let _ = dogma.events.send(Event::PersonJoined {
         cage: destino,
-        profile: PilotProfile {
-            id: session.pilot,
+        profile: PersonProfile {
+            id: session.person,
             nickname: session.nickname.clone(),
             roles: Vec::new(),
         },
@@ -2215,9 +2215,9 @@ async fn assentar(
     });
 
     // **Nada de tela é reenviado aqui**, e o §3.6 pede que seja — «também
-    // enviado a um piloto que entra num Cage onde já há transmissão». Ele é
+    // enviado a um pessoa que entra num Cage onde já há transmissão». Ele é
     // atendido em outro lugar e melhor: `ScreenShareStarted` sai pelo
-    // barramento **sem filtro**, como `PilotJoined` já sai desde que o cliente
+    // barramento **sem filtro**, como `PersonJoined` já sai desde que o cliente
     // passou a desenhar todos os Cages, e o que faltava — o que já estava
     // acontecendo antes de esta conexão existir — é mandado uma vez, no começo
     // da sessão, ao lado do retrato da ocupação. Reenviar aqui seria o mesmo
@@ -2225,7 +2225,7 @@ async fn assentar(
     Ok(())
 }
 
-/// Asks PERMISSIONS, right now, whether this pilot may do something.
+/// Asks PERMISSIONS, right now, whether this person may do something.
 ///
 /// Every call takes the PERSISTENCE lock, which is the point: the answer is the one
 /// that is true at the instant the verb is used, not the one that was true when
@@ -2236,14 +2236,14 @@ async fn assentar(
 ///
 /// A database error reads as denial. The alternative is to let a Dogma whose
 /// disk is failing hand out `ManageCages` to whoever asks while it fails.
-async fn pode(dogma: &Dogma, pilot: PilotId, permission: Permission) -> bool {
+async fn pode(dogma: &Dogma, person: PersonId, permission: Permission) -> bool {
     let guard = dogma.persistence.lock().await;
     Permissions::new(&guard)
-        .may(pilot, permission)
+        .may(person, permission)
         .unwrap_or(false)
 }
 
-/// Whether this pilot may aim a moderation verb at that one.
+/// Whether this person may aim a moderation verb at that one.
 ///
 /// Two questions, and both have to be yes.
 ///
@@ -2265,7 +2265,7 @@ async fn pode(dogma: &Dogma, pilot: PilotId, permission: Permission) -> bool {
 /// Dogma. It matters exactly at the line the spec draws between the two roles,
 /// and it matters more once ADR 0022 puts a Dogma on the open internet, where
 /// "the person I promoted" is not always somebody sitting in the same room.
-async fn moderavel(dogma: &Dogma, quem: PilotId, alvo: PilotId, permission: Permission) -> bool {
+async fn moderavel(dogma: &Dogma, quem: PersonId, alvo: PersonId, permission: Permission) -> bool {
     if !pode(dogma, quem, permission).await {
         return false;
     }
@@ -2296,7 +2296,7 @@ async fn moderavel(dogma: &Dogma, quem: PilotId, alvo: PilotId, permission: Perm
 ///
 /// O fluxo não carrega identidade nenhuma, e não deve carregar: quem manda é a
 /// conexão, como o `ssrc` de `Cage::forward`. Então a primeira pergunta é ao
-/// registro que decidiu a corrida do §6 item 3 — este piloto está transmitindo
+/// registro que decidiu a corrida do §6 item 3 — este pessoa está transmitindo
 /// em alguma sala? —, e o `ScreenId` que o cabeçalho declara é conferido contra
 /// o que **este Dogma** atribuiu. Sem essas duas linhas, abrir um fluxo seria
 /// uma maneira de compartilhar tela sem pedir, e de assinar a transmissão de
@@ -2304,11 +2304,11 @@ async fn moderavel(dogma: &Dogma, quem: PilotId, alvo: PilotId, permission: Perm
 async fn receber_tela(
     dogma: &Dogma,
     cages: &crate::cage::Cages,
-    pilot: PilotId,
+    person: PersonId,
     avisos: &mpsc::Sender<ServerMessage>,
     fluxo: &mut quinn::RecvStream,
 ) -> Result<()> {
-    let Some((cage, screen)) = dogma.telas.lock().await.de(pilot) else {
+    let Some((cage, screen)) = dogma.telas.lock().await.de(person) else {
         // Parar o fluxo e não ignorá-lo: um cliente que abriu sem pedir tem de
         // descobrir agora, e não pela imagem que nunca aparece do outro lado.
         let _ = fluxo.stop(quinn::VarInt::from_u32(crate::tela::CODIGO_DE_CORTE));
@@ -2334,7 +2334,7 @@ async fn receber_tela(
     // não teria o que dizer.
     let (fim_tx, mut fim_rx) = mpsc::channel::<crate::tela::FimDaTela>(1);
     sala.send(CageCommand::TelaAbriu {
-        from: pilot,
+        from: person,
         screen,
         abertura: abertura.to_vec(),
         fim: fim_tx,
@@ -2348,12 +2348,12 @@ async fn receber_tela(
         // no meio perderia os bytes já retirados do fluxo — o mesmo defeito que
         // a tarefa leitora do controle existe para não ter.
         if let Ok(motivo) = fim_rx.try_recv() {
-            tracing::info!(%pilot, %cage, %screen, ?motivo, "o Dogma encerrou uma transmissão");
+            tracing::info!(%person, %cage, %screen, ?motivo, "o Dogma encerrou uma transmissão");
             let _ = fluxo.stop(quinn::VarInt::from_u32(crate::tela::CODIGO_DE_CORTE));
             // Anunciado, porque o plano de controle é o único lugar de onde a
             // sala aprende que a tela parou. Sem isto ficaria desenhada uma
             // transmissão que já não tem quem a bombeie.
-            encerrar_telas_de(dogma, pilot).await;
+            encerrar_telas_de(dogma, person).await;
             // E com nome, para quem a mandava. `ScreenShareStopped` vai para a
             // sala inteira e não carrega razão de propósito — as duas maneiras
             // comuns de acabar já se distinguem sozinhas —, mas esta terceira
@@ -2386,7 +2386,7 @@ async fn receber_tela(
                 // contrapressão no QUIC de quem compartilha, que é onde ela
                 // conserta alguma coisa. Descartar aqui deslocaria o
                 // enquadramento de todos os espectadores de uma vez.
-                sala.send(CageCommand::TelaBytes { from: pilot, bytes })
+                sala.send(CageCommand::TelaBytes { from: person, bytes })
                     .await?;
             }
             None => break,
@@ -2395,20 +2395,20 @@ async fn receber_tela(
     // O fim limpo. Quem parou de propósito também manda `StopScreenShare` pelo
     // controle, e é ele que anuncia; quem sumiu é recolhido pelo fim da sessão.
     // Aqui só o encaminhamento morre, que é o que o §5.1 pôs sob esta função.
-    let _ = sala.send(CageCommand::TelaFechou { from: pilot }).await;
+    let _ = sala.send(CageCommand::TelaFechou { from: person }).await;
     Ok(())
 }
 
-/// Encerra e anuncia o que este piloto estivesse transmitindo, onde estivesse.
+/// Encerra e anuncia o que este pessoa estivesse transmitindo, onde estivesse.
 ///
 /// Chamado em todo lugar onde o plug sai de um Cage — sair, ser movido, ser
 /// expulso, ou a conexão acabar em qualquer `?` do meio do laço. Uma
 /// transmissão que sobrevivesse à saída de quem a manda ficaria desenhada para
 /// sempre na sala, prometendo um fluxo que não tem mais de onde vir: é o mesmo
-/// defeito do piloto fantasma que `serve` conserta logo acima, com a diferença
+/// defeito do pessoa fantasma que `serve` conserta logo acima, com a diferença
 /// de que aqui a promessa é de imagem em movimento.
-async fn encerrar_telas_de(dogma: &Dogma, pilot: PilotId) {
-    for (cage, screen) in dogma.telas.lock().await.encerrar_de(pilot) {
+async fn encerrar_telas_de(dogma: &Dogma, person: PersonId) {
+    for (cage, screen) in dogma.telas.lock().await.encerrar_de(person) {
         let _ = dogma
             .events
             .send(Event::ScreenShareStopped { cage, screen });
@@ -2416,8 +2416,8 @@ async fn encerrar_telas_de(dogma: &Dogma, pilot: PilotId) {
 }
 
 /// Tells a client the server said no, and why.
-async fn recusar(send: &mut quinn::SendStream, pilot: PilotId, verbo: &str) -> Result<()> {
-    tracing::warn!(%pilot, verbo, "refused: the server said no");
+async fn recusar(send: &mut quinn::SendStream, person: PersonId, verbo: &str) -> Result<()> {
+    tracing::warn!(%person, verbo, "refused: the server said no");
     frame::write(
         send,
         &ServerMessage::Alert {
@@ -2450,19 +2450,19 @@ async fn nao_deu(send: &mut quinn::SendStream, erro: &anyhow::Error) -> Result<(
     .await
 }
 
-/// How long after the last datagram a pilot still counts as speaking.
+/// How long after the last datagram a person still counts as speaking.
 ///
 /// One telemetry tick is too coarse and one frame is too twitchy: at 20 ms per
 /// frame, a quarter of a second is about a dozen frames of grace, which rides
 /// out a hiccup without leaving the mark lit through a pause.
 const SPEAKING_TAIL: Duration = Duration::from_millis(250);
 
-/// Whether audio has arrived recently enough to call this pilot speaking.
+/// Whether audio has arrived recently enough to call this person speaking.
 fn speaking_now(last_datagram: Option<Instant>) -> bool {
     last_datagram.is_some_and(|at| at.elapsed() < SPEAKING_TAIL)
 }
 
-/// Everything a `PilotState` broadcast carries about one pilot.
+/// Everything a `PersonState` broadcast carries about one person.
 ///
 /// Grouped rather than passed as six arguments because every one of them is
 /// overwritten wholesale on the receiving side: a client folds the entire
@@ -2476,10 +2476,10 @@ struct AnnouncedState {
     sync_ratio: u8,
 }
 
-/// Tells everybody what this pilot just announced about themselves.
+/// Tells everybody what this person just announced about themselves.
 fn announce(dogma: &Dogma, session: &Session, state: &AnnouncedState) {
-    let _ = dogma.events.send(Event::PilotState(PilotState {
-        pilot: session.pilot,
+    let _ = dogma.events.send(Event::PersonState(PersonState {
+        person: session.person,
         at_field: state.at_field,
         total_isolation: state.total_isolation,
         speaking: state.speaking,
@@ -2489,7 +2489,7 @@ fn announce(dogma: &Dogma, session: &Session, state: &AnnouncedState) {
 }
 
 /// Decides whether an event concerns this connection, and what to send.
-fn translate(event: &Event, lines: &[LineId], self_pilot: PilotId) -> Option<ServerMessage> {
+fn translate(event: &Event, lines: &[LineId], self_person: PersonId) -> Option<ServerMessage> {
     match event {
         Event::MessagePosted(message) => {
             lines
@@ -2537,48 +2537,48 @@ fn translate(event: &Event, lines: &[LineId], self_pilot: PilotId) -> Option<Ser
         // the only one of the three that is still true a second later.
         //
         // What it costs is that everybody learns where everybody is. That was
-        // already the case: `Event::PilotState` — speaking, Sync Ratio, both
+        // already the case: `Event::PersonState` — speaking, Sync Ratio, both
         // mutes — has always gone to every connection unfiltered, so a client
-        // was already being told about pilots it had no seat for, and drew them
+        // was already being told about people it had no seat for, and drew them
         // as ghosts with no room. `specs/04-servidor-seele.md` sizes a Dogma at
-        // fifty pilots and five Cages, and the Cage list itself is not filtered
-        // per pilot, so this reveals nothing that walking into the room would
+        // fifty people and five Cages, and the Cage list itself is not filtered
+        // per person, so this reveals nothing that walking into the room would
         // not. ADR 0022 opens a Dogma to the internet; what changes there is who
         // may hold an account, which is `crate::admissao`'s question, not this
         // one.
         //
-        // Not echoed to the pilot who caused it: they already know.
-        Event::PilotJoined {
+        // Not echoed to the person who caused it: they already know.
+        Event::PersonJoined {
             cage: joined,
             profile,
             ssrc,
-        } => (profile.id != self_pilot).then(|| ServerMessage::PilotJoined {
+        } => (profile.id != self_person).then(|| ServerMessage::PersonJoined {
             cage: *joined,
             profile: profile.clone(),
             ssrc: *ssrc,
         }),
-        Event::PilotLeft { cage: left, pilot } => {
-            (*pilot != self_pilot).then_some(ServerMessage::PilotLeft {
+        Event::PersonLeft { cage: left, person } => {
+            (*person != self_person).then_some(ServerMessage::PersonLeft {
                 cage: *left,
-                pilot: *pilot,
+                person: *person,
             })
         }
         // Estes dois **também** não voltam para quem os causou: quem acabou de
         // conectar sabe que conectou, e quem saiu não está mais aqui para ler.
-        Event::PilotPresent { quem } => (quem.pilot != self_pilot).then(|| {
-            ServerMessage::PilotPresent {
-                profile: PilotProfile {
-                    id: quem.pilot,
+        Event::PersonPresent { quem } => (quem.person != self_person).then(|| {
+            ServerMessage::PersonPresent {
+                profile: PersonProfile {
+                    id: quem.person,
                     nickname: quem.nickname.clone(),
                     roles: Vec::new(),
                 },
                 ssrc: quem.ssrc,
             }
         }),
-        Event::PilotGone { pilot } => {
-            (*pilot != self_pilot).then_some(ServerMessage::PilotGone { pilot: *pilot })
+        Event::PersonGone { person } => {
+            (*person != self_person).then_some(ServerMessage::PersonGone { person: *person })
         }
-        // Echoed back to the pilot it describes, unlike the two above.
+        // Echoed back to the person it describes, unlike the two above.
         //
         // "They already know" is true of joining and leaving — the client asked
         // for both — and false of everything in here. The Sync Ratio is measured
@@ -2586,16 +2586,16 @@ fn translate(event: &Event, lines: &[LineId], self_pilot: PilotId) -> Option<Ser
         // is the only thing that carries it; `speaking` is decided by whether
         // audio is actually arriving, which is likewise the server's to know.
         // Filtering self out left every client's own roster row frozen at
-        // `Pilot::new`'s defaults for the life of the session: nought per cent,
+        // `Person::new`'s defaults for the life of the session: nought per cent,
         // which by the three bands reads as critical, beside a telemetry bar
         // measuring the same connection at a hundred.
         //
-        // The two flags it also carries are the pilot's own, so echoing them
+        // The two flags it also carries are the person's own, so echoing them
         // costs nothing: the server is repeating what this client just said, and
         // a client that folds them back in lands on the value it sent.
-        Event::PilotState(state) => Some(ServerMessage::PilotState(*state)),
+        Event::PersonState(state) => Some(ServerMessage::PersonState(*state)),
 
-        // Unfiltered, and to the pilot who caused it as well.
+        // Unfiltered, and to the person who caused it as well.
         //
         // Unlike a Cage arrival, a new room is not something a client can infer
         // from having asked: the identifier is the server's to assign, and the
@@ -2612,7 +2612,7 @@ fn translate(event: &Event, lines: &[LineId], self_pilot: PilotId) -> Option<Ser
             name: name.clone(),
         }),
 
-        // Unfiltered, and to the pilot who asked as well, like the four above.
+        // Unfiltered, and to the person who asked as well, like the four above.
         // A header is drawn in every open window: filtering the asker out would
         // leave the one person who renamed the Dogma reading the old name.
         Event::DogmaRenamed { name } => Some(ServerMessage::DogmaRenamed { name: name.clone() }),
@@ -2622,16 +2622,16 @@ fn translate(event: &Event, lines: &[LineId], self_pilot: PilotId) -> Option<Ser
 
         // Acted on by the connection they name, in the loop, and carrying
         // nothing for anybody else. A move is visible to everybody as the
-        // `PilotLeft` and `PilotJoined` that `assentar` sends, and a session
-        // ending is visible as the `PilotLeft` that `serve` sends when the
+        // `PersonLeft` and `PersonJoined` that `assentar` sends, and a session
+        // ending is visible as the `PersonLeft` that `serve` sends when the
         // connection is gone — so there is nothing to translate here, and
         // inventing something would be a second way to say what those already
         // say.
-        Event::SessionEnded { .. } | Event::PilotMoved { .. } => None,
+        Event::SessionEnded { .. } | Event::PersonMoved { .. } => None,
 
         // Unfiltered, like the four announcements above and for the same
         // reason: a room that goes on being drawn until the next handshake is a
-        // room people keep trying to walk into. The pilot who asked included —
+        // room people keep trying to walk into. The person who asked included —
         // they need to stop drawing it as much as anybody.
         //
         // The connections that were *inside* the Cage, or had the Line open,
@@ -2649,18 +2649,18 @@ fn translate(event: &Event, lines: &[LineId], self_pilot: PilotId) -> Option<Ser
         // abrir um fluxo. Filtrar a si mesmo aqui deixaria quem apertou o botão
         // como a única pessoa incapaz de transmitir.
         //
-        // A todo mundo e não só ao Cage: é a mesma escolha que `PilotJoined`
+        // A todo mundo e não só ao Cage: é a mesma escolha que `PersonJoined`
         // fez ao deixar de filtrar por sala, e pelo mesmo motivo — a v3 desenha
         // todos os Cages, e uma sala que não diz que está transmitindo é uma
         // sala em que ninguém sabe que há o que assistir. Não revela nada que
         // entrar na sala já não revelasse.
         Event::ScreenShareStarted {
             cage,
-            pilot,
+            person,
             screen,
         } => Some(ServerMessage::ScreenShareStarted {
             cage: *cage,
-            pilot: *pilot,
+            person: *person,
             screen: *screen,
         }),
         Event::ScreenShareStopped { cage, screen } => Some(ServerMessage::ScreenShareStopped {
@@ -2692,11 +2692,11 @@ fn translate(event: &Event, lines: &[LineId], self_pilot: PilotId) -> Option<Ser
         // acordar para um pedido que não é dela.
         Event::KeyFrameRequested {
             screen,
-            pilot,
+            person,
             sharer,
-        } => (*sharer == self_pilot).then_some(ServerMessage::KeyFrameRequested {
+        } => (*sharer == self_person).then_some(ServerMessage::KeyFrameRequested {
             screen: *screen,
-            pilot: *pilot,
+            person: *person,
         }),
     }
 }

@@ -32,8 +32,8 @@ Ela agora custa menos, porque o nome comum já é a explicação.
 | Sala sem nome | SALA 1, SALA 2 | ROOM 1, ROOM 2 | — |
 | Canal de texto | canal de texto | text channel | `Line`, `LineId` |
 | Coluna de canais | CANAIS | CHANNELS | — |
-| Usuário | pessoa | person | `Pilot`, `PilotId` |
-| Nome escolhido pela pessoa | APELIDO | NICKNAME | `Pilot::nick` |
+| Usuário | pessoa | person | `Person`, `PersonId` |
+| Nome escolhido pela pessoa | APELIDO | NICKNAME | `Person::nick` |
 | Entrar em sala de voz | conectar · CONECTAR | connect · CONNECT | `insert_plug` |
 | Sair da sala de voz | sair · SAIR · sair da sala | leave · LEAVE | `eject` |
 | Mudo (microfone) | mudo · microfone fechado | muted · mic closed | `at_field` |
@@ -53,14 +53,14 @@ rótulo de tela. O binário continua `plug`.
 |---|---|---|
 | Comandante | Commander | `Role::Commander` |
 | Operador | Operator | `Role::Operator` |
-| Piloto | Pilot | `Role::Pilot` |
+| Pessoa | Person | `Role::Person` |
 | Observador | Observer | `Role::Observer` |
 
-**A colisão antiga acabou sozinha.** «O Piloto não tem permissão» era ambíguo
-porque `Piloto` nomeava ao mesmo tempo a conta e o papel. A conta agora é
-**pessoa**; `Piloto` sobrou só como papel, e a frase deixa de ter dois sentidos.
+**A colisão antiga acabou sozinha.** «O Pessoa não tem permissão» era ambíguo
+porque `Pessoa` nomeava ao mesmo tempo a conta e o papel. A conta agora é
+**pessoa**; `Pessoa` sobrou só como papel, e a frase deixa de ter dois sentidos.
 
-**Ponto em aberto:** `Role::Pilot` é o único rótulo de papel que ainda vem da
+**Ponto em aberto:** `Role::Person` é o único rótulo de papel que ainda vem da
 `07`. Os outros três são português comum e nada os obriga a mudar. O mapa de
 renomeação não decide este caso, e este documento não o inventa — fica como
 está até que decidam.
@@ -98,9 +98,9 @@ que **informa** ficou inteira, e é ela que aparece na tela agora.
 | `Ping` | `Ping` | cliente → servidor |
 | `Desafio` | `Challenge` | servidor → cliente |
 | `Sessao` | `Session` | servidor → cliente |
-| `UsuarioEntrou` | `PilotJoined` | servidor → cliente |
-| `UsuarioSaiu` | `PilotLeft` | servidor → cliente |
-| `EstadoUsuario` | `PilotState` | servidor → cliente |
+| `UsuarioEntrou` | `PersonJoined` | servidor → cliente |
+| `UsuarioSaiu` | `PersonLeft` | servidor → cliente |
+| `EstadoUsuario` | `PersonState` | servidor → cliente |
 | `MensagemRecebida` | `MessageReceived` | servidor → cliente |
 | `MensagemEditada` | `MessageEdited` | servidor → cliente |
 | `MensagemRemovida` | `MessageRemoved` | servidor → cliente |
@@ -111,7 +111,7 @@ que **informa** ficou inteira, e é ela que aparece na tela agora.
 
 Estes são nomes de mensagem: nenhum deles aparece na tela, e por isso o ADR 0033
 não os toca. A divergência que o glossário antigo apontava — `02` diz
-`UsuarioEntrou` e o código diz `PilotJoined` — deixou de ser deriva de
+`UsuarioEntrou` e o código diz `PersonJoined` — deixou de ser deriva de
 vocabulário e virou o que sempre foi por baixo: uma tradução pt↔en de nome de
 identificador, coberta pelo ADR 0023.
 
@@ -142,7 +142,7 @@ As chaves **não mudam**: são identificadores que a configuração em disco pro
 | ler o canal | `ler_linha` · `Permission::ReadLine` |
 | escrever no canal | `escrever_linha` · `Permission::WriteLine` |
 | remover mensagem | `remover_mensagem` · `Permission::RemoveMessage` |
-| mover pessoa | `mover_piloto` · `Permission::MovePilot` |
+| mover pessoa | `mover_persono` · `Permission::MovePerson` |
 | expulsar | `expulsar` · `Permission::Kick` |
 | banir | `banir` · `Permission::Ban` |
 | gerenciar salas | `gerenciar_cages` · `Permission::ManageCages` |

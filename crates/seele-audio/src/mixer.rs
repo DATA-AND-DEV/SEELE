@@ -82,7 +82,7 @@ impl Mixer {
     /// Sets the listener's gain for one source, by `ssrc`.
     ///
     /// `specs/02-protocolo.md` assigns `ssrc` on Cage entry and the client maps
-    /// it to a pilot from the control channel. Zero is mute; values above one
+    /// it to a person from the control channel. Zero is mute; values above one
     /// amplify, which is a legitimate thing to want for a quiet talker.
     pub fn set_gain(&mut self, ssrc: u32, gain: f32) {
         self.gains.insert(ssrc, gain.max(0.0));

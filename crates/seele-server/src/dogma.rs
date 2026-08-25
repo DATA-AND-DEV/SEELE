@@ -18,8 +18,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use seele_proto::control::{CageInfo, LineInfo, PilotProfile, PilotState};
-use seele_proto::ids::{CageId, LineId, MessageId, PilotId, ScreenId, Ssrc};
+use seele_proto::control::{CageInfo, LineInfo, PersonProfile, PersonState};
+use seele_proto::ids::{CageId, LineId, MessageId, PersonId, ScreenId, Ssrc};
 use tokio::sync::{broadcast, mpsc, Mutex};
 
 use crate::persistence::messages::{Messages, PendingMessage, StoredMessage};
@@ -35,7 +35,7 @@ pub const FLUSH_INTERVAL: Duration = Duration::from_millis(200);
 /// Events every connection may care about.
 ///
 /// Broadcast to all, filtered per connection. `specs/04-servidor-seele.md` sizes
-/// a Dogma at ~50 pilots, so filtering at the edge costs nothing and keeps the
+/// a Dogma at ~50 people, so filtering at the edge costs nothing and keeps the
 /// bus from needing to know who is subscribed to what.
 #[derive(Debug, Clone)]
 pub enum Event {
@@ -57,37 +57,37 @@ pub enum Event {
         /// Which message.
         id: MessageId,
     },
-    /// A pilot entered a Cage.
-    PilotJoined {
+    /// A person entered a Cage.
+    PersonJoined {
         /// Which Cage.
         cage: CageId,
         /// Who.
-        profile: PilotProfile,
+        profile: PersonProfile,
         /// Their media source.
         ssrc: Ssrc,
     },
-    /// A pilot left a Cage.
-    PilotLeft {
+    /// A person left a Cage.
+    PersonLeft {
         /// Which Cage.
         cage: CageId,
         /// Who.
-        pilot: PilotId,
+        person: PersonId,
     },
-    /// A pilot connected to the Dogma, whatever room they are in.
-    PilotPresent {
+    /// A person connected to the Dogma, whatever room they are in.
+    PersonPresent {
         /// Who, and what they are called.
         quem: Occupant,
     },
-    /// A pilot's connection ended.
-    PilotGone {
+    /// A person's connection ended.
+    PersonGone {
         /// Who.
-        pilot: PilotId,
+        person: PersonId,
     },
-    /// A pilot's state changed, including their Sync Ratio.
-    PilotState(PilotState),
+    /// A person's state changed, including their Sync Ratio.
+    PersonState(PersonState),
     /// A Cage was created.
     ///
-    /// Announced to **everybody**, the pilot who asked included, and this is the
+    /// Announced to **everybody**, the person who asked included, and this is the
     /// difference between a feature and a demonstration: a room that only shows
     /// up on the next handshake is a room whose maker has to tell their friends
     /// to reconnect before they can use it.
@@ -153,20 +153,20 @@ pub enum Event {
     // to find somebody, and the two would disagree the first time one of them
     // leaked.
     //
-    // Addressed to one pilot, delivered to all, acted on by the one. At fifty
+    // Addressed to one person, delivered to all, acted on by the one. At fifty
     // sessions that is forty-nine cheap comparisons, once, when an operator
     // presses a button.
-    /// An operator ended a pilot's session.
+    /// An operator ended a person's session.
     SessionEnded {
         /// Whose.
-        pilot: PilotId,
+        person: PersonId,
         /// Which of the enumerated reasons to send them.
         reason: seele_proto::control::DisconnectReason,
     },
-    /// An operator moved a pilot into a Cage.
-    PilotMoved {
+    /// An operator moved a person into a Cage.
+    PersonMoved {
         /// Who.
-        pilot: PilotId,
+        person: PersonId,
         /// Where to.
         cage: CageId,
     },
@@ -204,7 +204,7 @@ pub enum Event {
         /// Em qual Cage.
         cage: CageId,
         /// Quem.
-        pilot: PilotId,
+        person: PersonId,
         /// Como a transmissão se chama daqui em diante.
         screen: ScreenId,
     },
@@ -237,16 +237,16 @@ pub enum Event {
     },
     /// Alguém que assiste não tem de que predizer e pediu um quadro-chave.
     ///
-    /// Endereçado a um piloto e entregue a todos, como o [`Self::SessionEnded`]
+    /// Endereçado a um pessoa e entregue a todos, como o [`Self::SessionEnded`]
     /// — um Dogma não tem outra maneira de uma sessão alcançar outra, e o
     /// barramento já é o que toda conexão drena.
     KeyFrameRequested {
         /// Qual transmissão.
         screen: ScreenId,
         /// Quem pediu.
-        pilot: PilotId,
+        person: PersonId,
         /// A quem entregar: quem está compartilhando.
-        sharer: PilotId,
+        sharer: PersonId,
     },
 }
 
@@ -264,59 +264,59 @@ pub enum Event {
 /// que é o que [`Telas::encerrar_de`] existe para fazer numa chamada só.
 #[derive(Debug, Default)]
 pub struct Telas {
-    por_cage: HashMap<CageId, (PilotId, ScreenId)>,
+    por_cage: HashMap<CageId, (PersonId, ScreenId)>,
 }
 
 impl Telas {
     /// Registra uma transmissão, ou diz quem já está com a vaga.
     ///
-    /// `Err(pilot)` é quem chegou primeiro. Devolver o nome e não um `bool`
+    /// `Err(person)` é quem chegou primeiro. Devolver o nome e não um `bool`
     /// porque a frase que a interface tem de escrever é «fulano já está
     /// compartilhando», e um booleano obrigaria quem chama a procurar a resposta
     /// de novo em outro lugar.
     pub fn comecar(
         &mut self,
         cage: CageId,
-        pilot: PilotId,
+        person: PersonId,
         screen: ScreenId,
-    ) -> Result<(), PilotId> {
+    ) -> Result<(), PersonId> {
         match self.por_cage.get(&cage) {
             // Quem já está transmitindo pedindo de novo não é uma corrida
             // perdida: é um cliente que reabriu o botão, e devolver
             // `ScreenShareTaken` para a própria pessoa seria dizer que ela
             // perdeu para si mesma.
-            Some((dono, _)) if *dono != pilot => Err(*dono),
+            Some((dono, _)) if *dono != person => Err(*dono),
             _ => {
-                self.por_cage.insert(cage, (pilot, screen));
+                self.por_cage.insert(cage, (person, screen));
                 Ok(())
             }
         }
     }
 
-    /// Encerra a transmissão de um Cage, se for deste piloto.
+    /// Encerra a transmissão de um Cage, se for deste pessoa.
     ///
     /// Conferido, e não apagado às cegas: um `StopScreenShare` de quem não está
     /// transmitindo derrubaria a tela de quem está.
-    pub fn parar(&mut self, cage: CageId, pilot: PilotId) -> Option<ScreenId> {
+    pub fn parar(&mut self, cage: CageId, person: PersonId) -> Option<ScreenId> {
         let (dono, screen) = *self.por_cage.get(&cage)?;
-        if dono != pilot {
+        if dono != person {
             return None;
         }
         self.por_cage.remove(&cage);
         Some(screen)
     }
 
-    /// Encerra o que este piloto estivesse transmitindo, onde quer que fosse.
+    /// Encerra o que este pessoa estivesse transmitindo, onde quer que fosse.
     ///
     /// Devolve os Cages e as transmissões, porque alguém tem de anunciar o fim
     /// e quem chama nem sempre sabe a sala — uma sessão acaba em qualquer `?` do
     /// meio do laço dela. É o mesmo raciocínio de
     /// [`Occupancy::vacate_everywhere`].
-    pub fn encerrar_de(&mut self, pilot: PilotId) -> Vec<(CageId, ScreenId)> {
+    pub fn encerrar_de(&mut self, person: PersonId) -> Vec<(CageId, ScreenId)> {
         let encerradas: Vec<_> = self
             .por_cage
             .iter()
-            .filter(|(_, (dono, _))| *dono == pilot)
+            .filter(|(_, (dono, _))| *dono == person)
             .map(|(cage, (_, screen))| (*cage, *screen))
             .collect();
         for (cage, _) in &encerradas {
@@ -332,11 +332,11 @@ impl Telas {
 
     /// Quem está transmitindo neste Cage, se alguém está.
     #[must_use]
-    pub fn em(&self, cage: CageId) -> Option<(PilotId, ScreenId)> {
+    pub fn em(&self, cage: CageId) -> Option<(PersonId, ScreenId)> {
         self.por_cage.get(&cage).copied()
     }
 
-    /// Onde este piloto está transmitindo, se está.
+    /// Onde este pessoa está transmitindo, se está.
     ///
     /// A pergunta que o **encaminhamento** faz, e ela vem ao contrário de
     /// [`Self::em`] por um motivo concreto: a tarefa que aceita os fluxos
@@ -347,10 +347,10 @@ impl Telas {
     /// ela é o que garante que um fluxo de tela só é aceito de quem o controle
     /// já autorizou.
     #[must_use]
-    pub fn de(&self, pilot: PilotId) -> Option<(CageId, ScreenId)> {
+    pub fn de(&self, person: PersonId) -> Option<(CageId, ScreenId)> {
         self.por_cage
             .iter()
-            .find(|(_, (dono, _))| *dono == pilot)
+            .find(|(_, (dono, _))| *dono == person)
             .map(|(cage, (_, screen))| (*cage, *screen))
     }
 
@@ -360,18 +360,18 @@ impl Telas {
     /// lista uma vez para escrever um quadro por transmissão — a mesma razão
     /// que [`Occupancy::everywhere`] dá.
     #[must_use]
-    pub fn todas(&self) -> Vec<(CageId, PilotId, ScreenId)> {
+    pub fn todas(&self) -> Vec<(CageId, PersonId, ScreenId)> {
         self.por_cage
             .iter()
-            .map(|(cage, (pilot, screen))| (*cage, *pilot, *screen))
+            .map(|(cage, (person, screen))| (*cage, *person, *screen))
             .collect()
     }
 }
 
-/// A Cage seat held open for a pilot who dropped.
+/// A Cage seat held open for a person who dropped.
 ///
 /// `specs/02-protocolo.md`: "O servidor guarda o slot pelo mesmo período" — the
-/// five minutes of the internal battery. Without this a pilot whose train enters
+/// five minutes of the internal battery. Without this a person whose train enters
 /// a tunnel comes back to find their Cage full.
 #[derive(Debug, Clone, Copy)]
 struct ReservedSlot {
@@ -380,17 +380,17 @@ struct ReservedSlot {
     expires_at: Instant,
 }
 
-/// Seats held for pilots who are expected back.
+/// Seats held for people who are expected back.
 #[derive(Debug, Default)]
 pub struct Slots {
-    reserved: HashMap<PilotId, ReservedSlot>,
+    reserved: HashMap<PersonId, ReservedSlot>,
 }
 
 impl Slots {
     /// Holds a seat for the grace period.
-    pub fn reserve(&mut self, pilot: PilotId, cage: CageId, ssrc: Ssrc, now: Instant) {
+    pub fn reserve(&mut self, person: PersonId, cage: CageId, ssrc: Ssrc, now: Instant) {
         self.reserved.insert(
-            pilot,
+            person,
             ReservedSlot {
                 cage,
                 ssrc,
@@ -401,15 +401,15 @@ impl Slots {
 
     /// Reclaims a seat, if one is still being held.
     ///
-    /// Returns the Cage and the `ssrc` the pilot had, so a reconnection lands
+    /// Returns the Cage and the `ssrc` the person had, so a reconnection lands
     /// where it left off rather than looking like somebody new.
-    pub fn reclaim(&mut self, pilot: PilotId, now: Instant) -> Option<(CageId, Ssrc)> {
-        let slot = self.reserved.get(&pilot).copied()?;
+    pub fn reclaim(&mut self, person: PersonId, now: Instant) -> Option<(CageId, Ssrc)> {
+        let slot = self.reserved.get(&person).copied()?;
         if slot.expires_at <= now {
-            self.reserved.remove(&pilot);
+            self.reserved.remove(&person);
             return None;
         }
-        self.reserved.remove(&pilot);
+        self.reserved.remove(&person);
         Some((slot.cage, slot.ssrc))
     }
 
@@ -431,7 +431,7 @@ impl Slots {
 #[derive(Debug, Clone)]
 pub struct Occupant {
     /// Who.
-    pub pilot: PilotId,
+    pub person: PersonId,
     /// What they are called.
     pub nickname: String,
     /// Their media source.
@@ -444,7 +444,7 @@ pub struct Occupant {
 ///
 /// [`Occupancy`] responde «quem está em qual sala», e por muito tempo era a
 /// única tabela de presença que existia — então quem entrava no Dogma e ficava
-/// fora das salas não existia para mais ninguém. `PilotJoined` carrega um Cage
+/// fora das salas não existia para mais ninguém. `PersonJoined` carrega um Cage
 /// porque anuncia sentar-se num; não havia mensagem para estar aqui. O cliente
 /// escreveu isso num comentário e seguiu em frente: «não há mensagem na fita
 /// que diga quem entrou no servidor e ficou fora das salas».
@@ -453,44 +453,44 @@ pub struct Occupant {
 /// mesma pessoa, e duas linhas para ela seriam dois nomes na lista.
 #[derive(Debug, Default)]
 pub struct Presentes {
-    por_pilot: HashMap<PilotId, Occupant>,
+    por_person: HashMap<PersonId, Occupant>,
 }
 
 impl Presentes {
     /// Marca alguém como presente, e diz se ele ainda não estava.
     ///
     /// O `bool` é o que evita anunciar duas vezes: uma reconexão dentro da
-    /// carência passa por aqui de novo, e um segundo `PilotPresent` faria a
+    /// carência passa por aqui de novo, e um segundo `PersonPresent` faria a
     /// lista de todo mundo piscar sem nada ter mudado.
     pub fn chegou(&mut self, quem: Occupant) -> bool {
-        self.por_pilot.insert(quem.pilot, quem).is_none()
+        self.por_person.insert(quem.person, quem).is_none()
     }
 
     /// Tira alguém, e diz se havia o que tirar.
-    pub fn saiu(&mut self, pilot: PilotId) -> bool {
-        self.por_pilot.remove(&pilot).is_some()
+    pub fn saiu(&mut self, person: PersonId) -> bool {
+        self.por_person.remove(&person).is_some()
     }
 
     /// Todo mundo que está aqui agora.
     pub fn todos(&self) -> Vec<Occupant> {
-        self.por_pilot.values().cloned().collect()
+        self.por_person.values().cloned().collect()
     }
 }
 
 /// Who is in which Cage at this moment.
 ///
-/// Separate from [`Slots`], which holds seats for pilots who are *away*. This
+/// Separate from [`Slots`], which holds seats for people who are *away*. This
 /// is who is actually there, and it exists to answer one question the protocol
 /// could not: **who was already here before I was watching.**
 ///
 /// `specs/02-protocolo.md` announces arrivals going forward and nothing else,
-/// so a pilot entering an occupied Cage saw an empty room until somebody moved.
+/// so a person entering an occupied Cage saw an empty room until somebody moved.
 /// Gap G15, found by running two clients where the second started after the
 /// first had already sat down.
 ///
 /// # Why the whole map, and not one Cage
 ///
-/// G15 was closed for the Cage the pilot walked into, and only that one. The
+/// G15 was closed for the Cage the person walked into, and only that one. The
 /// screen `design/Entry Plug v3.dc.html` draws occupants under **every** Cage,
 /// and for the other four that data had never existed on the client at all:
 /// they were drawn empty, always, however many people were in them. Reported
@@ -499,44 +499,44 @@ impl Presentes {
 ///
 /// So [`Occupancy::everywhere`] hands back the entire picture, and a connection
 /// is given it once, at the start of its session. Everything after that is the
-/// unfiltered `PilotJoined` / `PilotLeft` broadcast.
+/// unfiltered `PersonJoined` / `PersonLeft` broadcast.
 #[derive(Debug, Default)]
 pub struct Occupancy {
     by_cage: HashMap<CageId, Vec<Occupant>>,
 }
 
 impl Occupancy {
-    /// Seats a pilot, replacing any earlier seat they held.
+    /// Seats a person, replacing any earlier seat they held.
     ///
     /// Replacing rather than appending: a reconnection inside the grace period
     /// re-enters the same Cage, and a roster with the same person twice is a
     /// roster nobody trusts.
     pub fn seat(&mut self, cage: CageId, occupant: Occupant) {
-        let _ = self.vacate_everywhere(occupant.pilot);
+        let _ = self.vacate_everywhere(occupant.person);
         self.by_cage.entry(cage).or_default().push(occupant);
     }
 
-    /// Removes a pilot from one Cage.
-    pub fn vacate(&mut self, cage: CageId, pilot: PilotId) {
+    /// Removes a person from one Cage.
+    pub fn vacate(&mut self, cage: CageId, person: PersonId) {
         if let Some(seated) = self.by_cage.get_mut(&cage) {
-            seated.retain(|occupant| occupant.pilot != pilot);
+            seated.retain(|occupant| occupant.person != person);
         }
     }
 
-    /// Removes a pilot from wherever they were, and says where that was.
+    /// Removes a person from wherever they were, and says where that was.
     ///
     /// The Cages come back because somebody has to announce the departure and
     /// the caller does not always know the room: a session can end at any `?`
-    /// in the middle of its loop, and that path has no idea where the pilot was
+    /// in the middle of its loop, and that path has no idea where the person was
     /// sitting. Returning the answer here is what lets one call at the end of a
     /// connection both clear the seat and tell everybody about it — the same
     /// reasoning `crate::cage::Cages::leave_everywhere` gives for being
     /// broadcast rather than aimed.
-    pub fn vacate_everywhere(&mut self, pilot: PilotId) -> Vec<CageId> {
+    pub fn vacate_everywhere(&mut self, person: PersonId) -> Vec<CageId> {
         let mut vacated = Vec::new();
         for (cage, seated) in &mut self.by_cage {
             let before = seated.len();
-            seated.retain(|occupant| occupant.pilot != pilot);
+            seated.retain(|occupant| occupant.person != person);
             if seated.len() != before {
                 vacated.push(*cage);
             }
@@ -570,7 +570,7 @@ impl Occupancy {
 /// because it is stuck writing to a peer that stopped reading — eventually falls
 /// off the back of the ring, and `recv` reports `Lagged(n)`: **n events that
 /// existed and no longer do**, for that connection. Committed messages among
-/// them are gone from that pilot's view of the conversation for as long as the
+/// them are gone from that person's view of the conversation for as long as the
 /// session lasts.
 ///
 /// It used to be swallowed by a `let Ok(event) = event else { continue }`, which
@@ -624,7 +624,7 @@ pub struct Dogma {
     pub events: broadcast::Sender<Event>,
     /// Where messages go to be batched.
     pub writes: mpsc::Sender<WriteRequest>,
-    /// Seats held for pilots who are expected back.
+    /// Seats held for people who are expected back.
     pub slots: Arc<Mutex<Slots>>,
     /// Who is sitting in which Cage right now — gap G15.
     pub occupancy: Arc<Mutex<Occupancy>>,
@@ -759,22 +759,22 @@ mod tests {
         // minutes as the client's internal battery.
         let mut slots = Slots::default();
         let now = instant();
-        slots.reserve(PilotId(1), CageId(1), Ssrc(7), now);
+        slots.reserve(PersonId(1), CageId(1), Ssrc(7), now);
 
-        let reclaimed = slots.reclaim(PilotId(1), now + Duration::from_secs(60));
+        let reclaimed = slots.reclaim(PersonId(1), now + Duration::from_secs(60));
         assert_eq!(reclaimed, Some((CageId(1), Ssrc(7))));
     }
 
     #[test]
-    fn a_reconnecting_pilot_gets_their_own_ssrc_back() {
-        // Otherwise a sixty-second outage looks to everybody else like the pilot
+    fn a_reconnecting_person_gets_their_own_ssrc_back() {
+        // Otherwise a sixty-second outage looks to everybody else like the person
         // left and a stranger arrived, and every listener's jitter buffer starts
         // from scratch.
         let mut slots = Slots::default();
         let now = instant();
-        slots.reserve(PilotId(1), CageId(2), Ssrc(42), now);
+        slots.reserve(PersonId(1), CageId(2), Ssrc(42), now);
 
-        let (cage, ssrc) = slots.reclaim(PilotId(1), now).expect("seat held");
+        let (cage, ssrc) = slots.reclaim(PersonId(1), now).expect("seat held");
         assert_eq!(cage, CageId(2));
         assert_eq!(ssrc, Ssrc(42));
     }
@@ -783,22 +783,22 @@ mod tests {
     fn an_expired_seat_is_not_reclaimable() {
         let mut slots = Slots::default();
         let now = instant();
-        slots.reserve(PilotId(1), CageId(1), Ssrc(7), now);
+        slots.reserve(PersonId(1), CageId(1), Ssrc(7), now);
 
         let after = now + seele_proto::transport::SESSION_GRACE + Duration::from_secs(1);
-        assert_eq!(slots.reclaim(PilotId(1), after), None);
+        assert_eq!(slots.reclaim(PersonId(1), after), None);
     }
 
     #[test]
     fn reclaiming_twice_only_works_once() {
         // The seat is taken by the reconnection. A second claim would let one
-        // pilot occupy two.
+        // person occupy two.
         let mut slots = Slots::default();
         let now = instant();
-        slots.reserve(PilotId(1), CageId(1), Ssrc(7), now);
+        slots.reserve(PersonId(1), CageId(1), Ssrc(7), now);
 
-        assert!(slots.reclaim(PilotId(1), now).is_some());
-        assert!(slots.reclaim(PilotId(1), now).is_none());
+        assert!(slots.reclaim(PersonId(1), now).is_some());
+        assert!(slots.reclaim(PersonId(1), now).is_none());
     }
 
     #[test]
@@ -807,8 +807,8 @@ mod tests {
         // never coming back, and specs/04 caps a Cage at a member limit.
         let mut slots = Slots::default();
         let now = instant();
-        slots.reserve(PilotId(1), CageId(1), Ssrc(1), now);
-        slots.reserve(PilotId(2), CageId(1), Ssrc(2), now);
+        slots.reserve(PersonId(1), CageId(1), Ssrc(1), now);
+        slots.reserve(PersonId(2), CageId(1), Ssrc(2), now);
         assert_eq!(slots.held(), 2);
 
         let after = now + seele_proto::transport::SESSION_GRACE + Duration::from_secs(1);
@@ -820,18 +820,18 @@ mod tests {
     fn the_sweeper_leaves_live_seats_alone() {
         let mut slots = Slots::default();
         let now = instant();
-        slots.reserve(PilotId(1), CageId(1), Ssrc(1), now);
+        slots.reserve(PersonId(1), CageId(1), Ssrc(1), now);
         assert_eq!(slots.sweep(now + Duration::from_secs(30)), 0);
         assert_eq!(slots.held(), 1);
     }
 
     // ---- who is in which Cage ----
 
-    fn occupant(pilot: u64, nickname: &str) -> Occupant {
+    fn occupant(person: u64, nickname: &str) -> Occupant {
         Occupant {
-            pilot: PilotId(pilot),
+            person: PersonId(person),
             nickname: nickname.to_owned(),
-            ssrc: Ssrc(u32::try_from(pilot * 10).expect("ssrc")),
+            ssrc: Ssrc(u32::try_from(person * 10).expect("ssrc")),
         }
     }
 
@@ -849,7 +849,7 @@ mod tests {
         let mut everywhere: Vec<(u32, u64)> = occupancy
             .everywhere()
             .into_iter()
-            .map(|(cage, seated)| (cage.0, seated.pilot.0))
+            .map(|(cage, seated)| (cage.0, seated.person.0))
             .collect();
         everywhere.sort_unstable();
 
@@ -859,13 +859,13 @@ mod tests {
     #[test]
     fn leaving_says_which_rooms_were_left() {
         // The caller that needs this is the end of a connection, which does not
-        // know where the pilot was sitting: a session can end at any `?`. If
+        // know where the person was sitting: a session can end at any `?`. If
         // this said nothing, the departure could not be announced, and the
-        // pilot would stay on everybody's screen until they came back.
+        // person would stay on everybody's screen until they came back.
         let mut occupancy = Occupancy::default();
         occupancy.seat(CageId(7), occupant(1, "ayanami"));
 
-        assert_eq!(occupancy.vacate_everywhere(PilotId(1)), vec![CageId(7)]);
+        assert_eq!(occupancy.vacate_everywhere(PersonId(1)), vec![CageId(7)]);
         assert!(occupancy.everywhere().is_empty());
     }
 
@@ -876,23 +876,23 @@ mod tests {
         // already left through `EjectPlug` and said so.
         let mut occupancy = Occupancy::default();
         occupancy.seat(CageId(7), occupant(1, "ayanami"));
-        occupancy.vacate(CageId(7), PilotId(1));
+        occupancy.vacate(CageId(7), PersonId(1));
 
         assert!(
-            occupancy.vacate_everywhere(PilotId(1)).is_empty(),
-            "a pilot who had already left was announced as leaving again"
+            occupancy.vacate_everywhere(PersonId(1)).is_empty(),
+            "a person who had already left was announced as leaving again"
         );
     }
 
     #[test]
     fn walking_between_rooms_reports_the_room_that_was_left() {
         // What `InsertPlug` needs in order to tell the old room. Seating alone
-        // clears the previous seat silently, and a silent clear is a pilot who
+        // clears the previous seat silently, and a silent clear is a person who
         // stays in the first Cage on every other client for ever.
         let mut occupancy = Occupancy::default();
         occupancy.seat(CageId(1), occupant(1, "ayanami"));
 
-        assert_eq!(occupancy.vacate_everywhere(PilotId(1)), vec![CageId(1)]);
+        assert_eq!(occupancy.vacate_everywhere(PersonId(1)), vec![CageId(1)]);
         occupancy.seat(CageId(2), occupant(1, "ayanami"));
 
         assert_eq!(occupancy.in_cage(CageId(1)).len(), 0);
@@ -911,17 +911,17 @@ mod tests {
         // e trocá-lo por um `bool` obrigaria quem chama a procurar a resposta
         // de novo em outro lugar — onde ela já pode ter mudado.
         let mut telas = Telas::default();
-        assert_eq!(telas.comecar(CageId(1), PilotId(10), ScreenId(1)), Ok(()));
+        assert_eq!(telas.comecar(CageId(1), PersonId(10), ScreenId(1)), Ok(()));
         assert_eq!(
-            telas.comecar(CageId(1), PilotId(20), ScreenId(2)),
-            Err(PilotId(10)),
+            telas.comecar(CageId(1), PersonId(20), ScreenId(2)),
+            Err(PersonId(10)),
             "duas telas na mesma sala"
         );
         // E a corrida perdida não derruba quem ganhou.
-        assert_eq!(telas.em(CageId(1)), Some((PilotId(10), ScreenId(1))));
+        assert_eq!(telas.em(CageId(1)), Some((PersonId(10), ScreenId(1))));
 
         // Outra sala é outra corrida.
-        assert_eq!(telas.comecar(CageId(2), PilotId(20), ScreenId(3)), Ok(()));
+        assert_eq!(telas.comecar(CageId(2), PersonId(20), ScreenId(3)), Ok(()));
     }
 
     #[test]
@@ -933,10 +933,10 @@ mod tests {
         // quem está compartilhando naquele instante.
         let mut telas = Telas::default();
         telas
-            .comecar(CageId(1), PilotId(10), ScreenId(1))
+            .comecar(CageId(1), PersonId(10), ScreenId(1))
             .expect("primeira");
-        assert_eq!(telas.comecar(CageId(1), PilotId(10), ScreenId(2)), Ok(()));
-        assert_eq!(telas.em(CageId(1)), Some((PilotId(10), ScreenId(2))));
+        assert_eq!(telas.comecar(CageId(1), PersonId(10), ScreenId(2)), Ok(()));
+        assert_eq!(telas.em(CageId(1)), Some((PersonId(10), ScreenId(2))));
     }
 
     #[test]
@@ -947,45 +947,45 @@ mod tests {
         // para separar as duas.
         let mut telas = Telas::default();
         telas
-            .comecar(CageId(1), PilotId(10), ScreenId(1))
+            .comecar(CageId(1), PersonId(10), ScreenId(1))
             .expect("começa");
 
-        assert_eq!(telas.parar(CageId(1), PilotId(20)), None);
-        assert_eq!(telas.em(CageId(1)), Some((PilotId(10), ScreenId(1))));
+        assert_eq!(telas.parar(CageId(1), PersonId(20)), None);
+        assert_eq!(telas.em(CageId(1)), Some((PersonId(10), ScreenId(1))));
 
-        assert_eq!(telas.parar(CageId(1), PilotId(10)), Some(ScreenId(1)));
+        assert_eq!(telas.parar(CageId(1), PersonId(10)), Some(ScreenId(1)));
         assert_eq!(telas.em(CageId(1)), None);
     }
 
     #[test]
     fn a_tela_de_quem_sai_para_junto_com_ele() {
         // O mesmo defeito que `Occupancy::vacate_everywhere` conserta para o
-        // piloto fantasma, com a diferença de que aqui a sala fica prometendo
+        // pessoa fantasma, com a diferença de que aqui a sala fica prometendo
         // imagem em movimento que não tem mais de onde vir: o fluxo morreu com
         // a conexão.
         let mut telas = Telas::default();
         telas
-            .comecar(CageId(1), PilotId(10), ScreenId(1))
+            .comecar(CageId(1), PersonId(10), ScreenId(1))
             .expect("começa");
         telas
-            .comecar(CageId(2), PilotId(20), ScreenId(2))
+            .comecar(CageId(2), PersonId(20), ScreenId(2))
             .expect("começa");
 
         assert_eq!(
-            telas.encerrar_de(PilotId(10)),
+            telas.encerrar_de(PersonId(10)),
             vec![(CageId(1), ScreenId(1))]
         );
         assert_eq!(telas.em(CageId(1)), None);
         // E não encosta na de mais ninguém.
-        assert_eq!(telas.em(CageId(2)), Some((PilotId(20), ScreenId(2))));
-        assert!(telas.encerrar_de(PilotId(10)).is_empty());
+        assert_eq!(telas.em(CageId(2)), Some((PersonId(20), ScreenId(2))));
+        assert!(telas.encerrar_de(PersonId(10)).is_empty());
     }
 
     #[test]
     fn uma_sala_destruida_leva_a_transmissao_dela() {
         let mut telas = Telas::default();
         telas
-            .comecar(CageId(1), PilotId(10), ScreenId(1))
+            .comecar(CageId(1), PersonId(10), ScreenId(1))
             .expect("começa");
         assert_eq!(telas.encerrar_cage(CageId(1)), Some(ScreenId(1)));
         assert_eq!(telas.encerrar_cage(CageId(1)), None);

@@ -18,7 +18,7 @@ Quando um subsistema está degradado, o cliente mostra isso explicitamente. "Os 
 Dogma (a instância)
  ├─ Cage       — canal de voz     (id, nome, limite, senha?, papel mínimo)
  ├─ Linha      — canal de texto   (id, nome, papel mínimo de leitura/escrita)
- ├─ Piloto     — conta de usuário (id, apelido, chave pública, papéis)
+ ├─ Pessoa     — conta de usuário (id, apelido, chave pública, papéis)
  └─ Papel      — conjunto de permissões
 ```
 
@@ -28,9 +28,9 @@ Cages e Linhas são independentes; um Cage pode ter uma Linha associada, mas nã
 
 Modelo simples e enumerado, sem sistema de expressão. Cada Papel carrega um conjunto:
 
-`ver_cage`, `inserir_plug`, `falar`, `ler_linha`, `escrever_linha`, `remover_mensagem`, `mover_piloto`, `expulsar`, `banir`, `gerenciar_cages`, `gerenciar_papeis`, `administrar_dogma`.
+`ver_cage`, `inserir_plug`, `falar`, `ler_linha`, `escrever_linha`, `remover_mensagem`, `mover_persono`, `expulsar`, `banir`, `gerenciar_cages`, `gerenciar_papeis`, `administrar_dogma`.
 
-Papéis padrão: **Comandante** (tudo), **Operador** (moderação), **Piloto** (uso normal), **Observador** (só ouvir e ler).
+Papéis padrão: **Comandante** (tudo), **Operador** (moderação), **Pessoa** (uso normal), **Observador** (só ouvir e ler).
 
 Regra: permissões negadas vencem concedidas. Sem herança em árvore — a complexidade não se paga na escala alvo.
 
@@ -53,7 +53,7 @@ Controle de fluxo: limite por remetente de quadros por segundo (um cliente hones
 
 ## Persistência (PERSISTENCE)
 
-SQLite, arquivo único, WAL ligado. Tabelas: `pilotos`, `papeis`, `piloto_papeis`, `cages`, `linhas`, `mensagens`, `banimentos`, `config`, `schema_version`.
+SQLite, arquivo único, WAL ligado. Tabelas: `pessoas`, `papeis`, `persono_papeis`, `cages`, `linhas`, `mensagens`, `banimentos`, `config`, `schema_version`.
 
 - Migrações embutidas no binário, aplicadas no boot, versionadas e irreversíveis.
 - Histórico de mensagens com retenção configurável (padrão: ilimitado).
@@ -68,7 +68,7 @@ Arquivo TOML único, mais variáveis de ambiente para segredos. Exemplo de forma
 [dogma]
 nome = "Terceira Tóquio"
 descricao = "..."
-max_pilotos = 50
+max_personos = 50
 
 [rede]
 escuta = "0.0.0.0:8383"
@@ -89,11 +89,11 @@ Recarga a quente de configuração: **[EM ABERTO]**. Provavelmente não em v1 �
 
 - Log estruturado com `tracing`, saída JSON opcional.
 - Endpoint de saúde: **[EM ABERTO]** — HTTP separado ou comando no protocolo de controle? Um HTTP mínimo facilita monitoramento externo.
-- Métricas em formato Prometheus: pilotos conectados, cages ativos, datagrams/s, taxa de descarte, uso de banda.
+- Métricas em formato Prometheus: pessoas conectados, cages ativos, datagrams/s, taxa de descarte, uso de banda.
 - Desligamento gracioso: avisar clientes com motivo `ManutencaoProgramada`, dar 3 s, encerrar.
 
 ## Critérios de aceite
 
 - Suporta 50 sessões e 5 Cages ativos em 1 vCPU / 512 MB.
 - Reinício não perde mensagem confirmada ao cliente.
-- Cliente malicioso não consegue: falar em Cage sem permissão, ler Linha sem permissão, saturar CPU com datagrams, ou forjar `ssrc` de outro piloto.
+- Cliente malicioso não consegue: falar em Cage sem permissão, ler Linha sem permissão, saturar CPU com datagrams, ou forjar `ssrc` de outro pessoa.

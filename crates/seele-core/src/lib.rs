@@ -64,7 +64,7 @@ pub use preview::{
     check_dogma_icon, IconRefusal, ImageFormat, Verdict as PreviewVerdict, PREVIEW_LIMIT,
 };
 pub use state::{
-    CageSync, Changed, ChavePedida, Ended, Message, Notice, Pilot, Room, Tela, TransferNotice,
+    CageSync, Changed, ChavePedida, Ended, Message, Notice, Person, Room, Tela, TransferNotice,
 };
 pub use tela::{
     menor_resolucao, resolucao_estimada_para, Envio, ErroDeTela, MotivoDeDescarte, MotivoDeParada,
@@ -116,7 +116,7 @@ pub use voice::{
 pub use seele_audio::telemetry::{AudioTelemetry, LocalTelemetry, SourceTelemetry};
 pub use seele_proto::control::{
     AlertReason, AlertSeverity, AttachmentInfo, AttachmentRefusal, AttachmentState, CageInfo,
-    DisconnectReason, LineInfo, Permission, PilotProfile, PilotState, Presence, ServerMessage,
+    DisconnectReason, LineInfo, Permission, PersonProfile, PersonState, Presence, ServerMessage,
     Subsystem, SubsystemHealth, Telemetry,
 };
 /// A impressão digital de uma chave pública, no formato que o produto mostra.
@@ -127,7 +127,7 @@ pub use seele_proto::control::{
 pub use seele_proto::transport::key_fingerprint;
 
 pub use seele_proto::ids::{
-    AttachmentId, CageId, ClientMessageId, LineId, MessageId, PilotId, RoleId, ScreenId, SessionId,
+    AttachmentId, CageId, ClientMessageId, LineId, MessageId, PersonId, RoleId, ScreenId, SessionId,
     Ssrc,
 };
 /// O cabeçalho de abertura de uma transmissão de tela, e o que ele carrega.

@@ -221,7 +221,7 @@ impl TofuVerifier {
     /// system can produce, and it would have fired the first time somebody
     /// tested between two machines.
     ///
-    /// The key should be the target as the pilot typed it, port included: two
+    /// The key should be the target as the person typed it, port included: two
     /// Dogmas on one host at different ports are two servers.
     #[must_use]
     pub fn new(store: Arc<dyn PinStore>, pin_key: String) -> Self {

@@ -21,7 +21,7 @@ use anyhow::Result;
 use ed25519_dalek::{Signer, SigningKey};
 use seele_proto::control::{ClientMessage, ServerMessage};
 use seele_proto::ids::{
-    CageId, ClientMessageId, LineId, MessageId, PilotId, ScreenId, SessionId, Ssrc,
+    CageId, ClientMessageId, LineId, MessageId, PersonId, ScreenId, SessionId, Ssrc,
 };
 use seele_proto::transport::{HANDSHAKE_TIMEOUT, IDLE_TIMEOUT, KEEPALIVE};
 
@@ -103,8 +103,8 @@ impl std::error::Error for ConnectError {}
 pub struct SessionInfo {
     /// Session identifier.
     pub id: SessionId,
-    /// Which pilot this connection is.
-    pub pilot: PilotId,
+    /// Which person this connection is.
+    pub person: PersonId,
     /// The media source the server assigned. Gap G1.
     pub ssrc: Ssrc,
     /// What the Dogma is called.
@@ -116,7 +116,7 @@ pub struct SessionInfo {
     /// Carried through rather than dropped: an interface that knows the Cages
     /// but not the Lines can only ever open whichever Line it was started with.
     pub lines: Vec<seele_proto::control::LineInfo>,
-    /// What this pilot may do, as PERMISSIONS resolved it.
+    /// What this person may do, as PERMISSIONS resolved it.
     ///
     /// So a shell can decide whether to offer a control at all. **Convenience,
     /// never enforcement** — `specs/08-seguranca.md` puts the security in the
@@ -383,7 +383,7 @@ impl Client {
     /// is a label and the pin key is the policy. Passing the same value for
     /// both is fine for a hostname and **wrong for an IP address**, where the
     /// TLS name has to be something the certificate carries and the pin key has
-    /// to be the address the pilot typed.
+    /// to be the address the person typed.
     ///
     /// # Errors
     ///
@@ -643,7 +643,7 @@ impl Client {
     /// Sends one media datagram.
     ///
     /// The `ssrc` must be the one in [`SessionInfo::ssrc`]; the server refuses
-    /// anything else (gap G2), which is what stops one pilot being credited with
+    /// anything else (gap G2), which is what stops one person being credited with
     /// another's audio.
     ///
     /// # Errors
@@ -807,7 +807,7 @@ impl Client {
 
     /// Asks the Dogma to make a Cage.
     ///
-    /// Asks, and nothing more. Nothing here checks whether this pilot may:
+    /// Asks, and nothing more. Nothing here checks whether this person may:
     /// `specs/08-seguranca.md` puts the decision on the server, and a core that
     /// refused on its own would be a second authority to keep in step with the
     /// first. What comes back is a `CageCreated` on the event stream if it
@@ -916,10 +916,10 @@ impl Client {
         frame::write(&mut self.send, &ClientMessage::SetDogmaIcon { icon }).await
     }
 
-    /// Asks the Dogma to end a pilot's session.
+    /// Asks the Dogma to end a person's session.
     ///
     /// Asks, like the four above, and for the same reason: nothing here checks
-    /// whether this pilot may. `specs/08-seguranca.md` puts that on the server,
+    /// whether this person may. `specs/08-seguranca.md` puts that on the server,
     /// and a core that refused on its own would be a second authority to keep
     /// in step with the first — and the one that would drift, because it is the
     /// one nobody re-reads.
@@ -927,25 +927,25 @@ impl Client {
     /// # Errors
     ///
     /// Fails if the control stream is closed.
-    pub async fn kick_pilot(&mut self, pilot: PilotId) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::KickPilot { pilot }).await
+    pub async fn kick_person(&mut self, person: PersonId) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::KickPerson { person }).await
     }
 
-    /// Asks the Dogma to bar a pilot from returning.
+    /// Asks the Dogma to bar a person from returning.
     ///
     /// # Errors
     ///
     /// Fails if the control stream is closed.
-    pub async fn ban_pilot(
+    pub async fn ban_person(
         &mut self,
-        pilot: PilotId,
+        person: PersonId,
         reason: Option<&str>,
         expires_at: Option<i64>,
     ) -> Result<()> {
         frame::write(
             &mut self.send,
-            &ClientMessage::BanPilot {
-                pilot,
+            &ClientMessage::BanPerson {
+                person,
                 reason: reason.map(str::to_owned),
                 expires_at,
             },
@@ -962,13 +962,13 @@ impl Client {
         frame::write(&mut self.send, &ClientMessage::RemoveMessage { message }).await
     }
 
-    /// Asks the Dogma to move a pilot into a Cage.
+    /// Asks the Dogma to move a person into a Cage.
     ///
     /// # Errors
     ///
     /// Fails if the control stream is closed.
-    pub async fn move_pilot(&mut self, pilot: PilotId, cage: CageId) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::MovePilot { pilot, cage }).await
+    pub async fn move_person(&mut self, person: PersonId, cage: CageId) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::MovePerson { person, cage }).await
     }
 
     /// Asks for a page of history, oldest of the page first on the wire.
@@ -1095,7 +1095,7 @@ impl Client {
         self.last_rtt
     }
 
-    /// Closes the connection: the pilot ejected.
+    /// Closes the connection: the person ejected.
     pub fn disconnect(&mut self) {
         self.close(EJECTED);
     }
@@ -1105,7 +1105,7 @@ impl Client {
     /// The reason travels in the QUIC `CONNECTION_CLOSE` frame and is what the
     /// Dogma's log records, so it is the only trace the other side keeps of why
     /// a session that had already completed the handshake went away. Every
-    /// close that is not a pilot leaving has to say so here: an invite that did
+    /// close that is not a person leaving has to say so here: an invite that did
     /// not match used to be recorded as an ejection, which is the one reading
     /// that hides a refusal.
     pub fn close(&mut self, reason: &[u8]) {
@@ -1122,7 +1122,7 @@ impl Client {
     // them is the smallest thing that can be added here.
     //
     // Asks, and nothing more, like every other verb in here. Nothing checks
-    // whether this pilot may — `specs/08-seguranca.md` puts that on the server,
+    // whether this person may — `specs/08-seguranca.md` puts that on the server,
     // and a core that refused on its own would be a second authority to keep in
     // step with the first.
 
@@ -1250,7 +1250,7 @@ impl Client {
     }
 }
 
-/// A pilot left. The ordinary end of a session.
+/// A person left. The ordinary end of a session.
 const EJECTED: &[u8] = b"ejected";
 
 /// The client refused the server: the invite named a different key.
@@ -1409,7 +1409,7 @@ async fn handshake(
     match answer {
         ServerMessage::Session {
             id,
-            pilot,
+            person,
             ssrc,
             dogma,
             cages,
@@ -1418,7 +1418,7 @@ async fn handshake(
             ..
         } => Ok(SessionInfo {
             id,
-            pilot,
+            person,
             ssrc,
             dogma,
             cages,

@@ -342,6 +342,46 @@ pub const MIGRATIONS: &[Migration] = &[
             -- botão não aceitou cerimônia nenhuma.
         "#,
     },
+    Migration {
+        version: 5,
+        description: "vocabulário: Pilot vira Person em tabela, coluna, papel e permissão",
+        sql: r#"
+            -- O vocabulário de Evangelion sai do código — o ADR 0033 já o tinha
+            -- tirado da tela —, e `Pilot` era o nome da conta de uma pessoa. O
+            -- lado Rust já mudou; esta migração é o outro lado do mesmo rename,
+            -- para que um banco que já existe continue casando com as consultas.
+            --
+            -- **Migração nova em vez de editar a 1**, que é a regra escrita no
+            -- alto deste arquivo: a 1 já chegou a banco de verdade, e editá-la
+            -- faria duas instalações reivindicarem a mesma versão com formas
+            -- diferentes. Uma varredura de renomeação a editou por acidente em
+            -- 2026-08-24; foi revertida, e o que ela queria fazer está aqui.
+
+            ALTER TABLE pilots RENAME TO people;
+            ALTER TABLE pilot_roles RENAME TO person_roles;
+            ALTER TABLE person_roles RENAME COLUMN pilot_id TO person_id;
+            ALTER TABLE bans RENAME COLUMN pilot_id TO person_id;
+
+            -- SQLite não renomeia índice; o caminho é derrubar e refazer.
+            -- Barato: `bans` é pequena por construção. `DROP INDEX` não é passo
+            -- de volta — não perde linha nenhuma —, e por isso não cai na regra
+            -- que `no_migration_contains_a_down_step` cobra.
+            DROP INDEX IF EXISTS bans_by_pilot;
+            CREATE INDEX bans_by_person ON bans (person_id, expires_at);
+
+            -- Dados semeados pela migração 1, gravados em todo banco existente.
+            -- `Pilot` é o papel de quem só conversa, e o nome dele aparece na
+            -- tela de papéis.
+            UPDATE roles SET name = 'Person' WHERE name = 'Pilot';
+
+            -- `permissions` e `denials` são arrays JSON de **nomes**, então o
+            -- rename do enum em Rust não chega sozinho até aqui: sem isto um
+            -- banco antigo guarda "MovePilot", o código procura "MovePerson", e
+            -- a permissão de mover alguém some sem erro nenhum.
+            UPDATE roles SET permissions = replace(permissions, 'MovePilot', 'MovePerson');
+            UPDATE roles SET denials     = replace(denials,     'MovePilot', 'MovePerson');
+        "#,
+    },
 ];
 
 #[cfg(test)]

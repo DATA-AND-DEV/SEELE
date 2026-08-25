@@ -140,14 +140,14 @@ impl EventListener for Bridge {
 ///
 /// The FFI takes a path because the shell knows where its platform keeps
 /// configuration and the core knows how to persist an identity. `$SEELE_HOME`
-/// comes first so the desktop app and `plug` can be told to be the same pilot —
+/// comes first so the desktop app and `plug` can be told to be the same person —
 /// which is what makes a session resumable between them.
 fn config_dir(app: &AppHandle) -> String {
     if let Ok(home) = std::env::var("SEELE_HOME") {
         return home;
     }
     // The same `~/.config/seele` the terminal client uses, deliberately: two
-    // clients on one machine should be one pilot unless told otherwise.
+    // clients on one machine should be one person unless told otherwise.
     if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
         return format!("{xdg}/seele");
     }
@@ -1035,8 +1035,8 @@ fn icone_do_dogma(session: State<'_, Session>) -> Result<Option<Vec<u8>>, PlugEr
 /// pedido sem a permissão não expulsa ninguém, e a `specs/08-seguranca.md` põe
 /// a segurança nessa recusa e não no botão escondido.
 #[tauri::command]
-fn expulsar_piloto(session: State<'_, Session>, pilot: u64) -> Result<(), PlugError> {
-    session.plug()?.kick_pilot(pilot)
+fn expulsar_persono(session: State<'_, Session>, person: u64) -> Result<(), PlugError> {
+    session.plug()?.kick_person(person)
 }
 
 /// Pede ao Dogma que impeça alguém de voltar — `banir`.
@@ -1044,13 +1044,13 @@ fn expulsar_piloto(session: State<'_, Session>, pilot: u64) -> Result<(), PlugEr
 /// `expires_at` em segundos desde a época; `None` é para sempre. O `reason` é
 /// para o registro de quem hospeda e nunca chega a quem foi banido.
 #[tauri::command]
-fn banir_piloto(
+fn banir_persono(
     session: State<'_, Session>,
-    pilot: u64,
+    person: u64,
     reason: Option<String>,
     expires_at: Option<i64>,
 ) -> Result<(), PlugError> {
-    session.plug()?.ban_pilot(pilot, reason, expires_at)
+    session.plug()?.ban_person(person, reason, expires_at)
 }
 
 /// Pede ao Dogma que tire uma mensagem da Linha.
@@ -1062,10 +1062,10 @@ fn remover_mensagem(session: State<'_, Session>, message: u64) -> Result<(), Plu
     session.plug()?.remove_message(message)
 }
 
-/// Pede ao Dogma que mova alguém para um Cage — `mover_piloto`.
+/// Pede ao Dogma que mova alguém para um Cage — `mover_persono`.
 #[tauri::command]
-fn mover_piloto(session: State<'_, Session>, pilot: u64, cage: u32) -> Result<(), PlugError> {
-    session.plug()?.move_pilot(pilot, cage)
+fn mover_persono(session: State<'_, Session>, person: u64, cage: u32) -> Result<(), PlugError> {
+    session.plug()?.move_person(person, cage)
 }
 
 /// Pede ao Dogma que destrua um Cage — `apagar_cage`.
@@ -1393,7 +1393,7 @@ fn microfone_escolhido(app: AppHandle) -> Option<String> {
 /// logo acima, e o que sumiu entre desenhá-la e clicar nela pode ser trocado por
 /// outro. Nenhuma delas é `PlugError::IdentityUnavailable`, que era o que este
 /// comando devolvia: a frase daquela fala de identidade em disco, e acusar a
-/// chave do piloto por causa de um arquivo de ajustes manda quem lê procurar no
+/// chave do pessoa por causa de um arquivo de ajustes manda quem lê procurar no
 /// lugar errado.
 #[derive(Debug, serde::Serialize)]
 enum FalhaAoEscolher {
@@ -1496,7 +1496,7 @@ fn caminho_dos_conhecidos(app: &AppHandle) -> std::path::PathBuf {
     std::path::PathBuf::from(config_dir(app)).join("conhecidos")
 }
 
-/// Os Dogmas onde este piloto já esteve.
+/// Os Dogmas onde este pessoa já esteve.
 ///
 /// Uma lista de atalhos corrompida não pode fechar a porta: `specs/05` diz que
 /// este arquivo é conveniência e pode ser apagado sem consequência. Por isso
@@ -2306,10 +2306,10 @@ fn main() {
             escolher_icone_do_dogma,
             tirar_icone_do_dogma,
             icone_do_dogma,
-            expulsar_piloto,
-            banir_piloto,
+            expulsar_persono,
+            banir_persono,
             remover_mensagem,
-            mover_piloto,
+            mover_persono,
             apagar_cage,
             apagar_linha,
             peso_da_linha,

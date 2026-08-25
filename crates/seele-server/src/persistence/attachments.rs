@@ -352,7 +352,7 @@ impl<'a> Attachments<'a> {
 
     /// How many live rows still point at these bytes.
     ///
-    /// The count that decides whether the blob may go. Removing one pilot's
+    /// The count that decides whether the blob may go. Removing one person's
     /// copy must not remove another's, and that is arithmetic rather than
     /// intention.
     ///
@@ -702,7 +702,7 @@ impl Store {
             }
             // The blob goes only when the last live row that referenced it has.
             // `RemoveMessage` deletes somebody else's message, and deleting one
-            // pilot's copy may not delete another's.
+            // person's copy may not delete another's.
             if attachments.live_copies(&oldest.content_hash)? == 0 {
                 let path = self.blob_path(&oldest.content_hash);
                 // What the file weighs, not what the row claims. They are the
@@ -858,14 +858,14 @@ mod tests {
     use crate::persistence::messages::{Messages, PendingMessage};
     use crate::persistence::Location;
 
-    /// A Dogma with one Line, one pilot, and a directory to put bytes in.
+    /// A Dogma with one Line, one person, and a directory to put bytes in.
     fn dogma() -> (Persistence, tempfile::TempDir) {
         let persistence = Persistence::open(&Location::Memory).unwrap();
         persistence
             .connection()
             .execute_batch(
                 "INSERT INTO lines (id, name) VALUES (1, 'geral');
-                 INSERT INTO pilots (id, nickname, public_key, created_at)
+                 INSERT INTO people (id, nickname, public_key, created_at)
                    VALUES (1, 'ayanami', X'01', 0);",
             )
             .unwrap();
@@ -877,7 +877,7 @@ mod tests {
         let stored = Messages::new(persistence)
             .append_batch(&[PendingMessage {
                 line: seele_proto::ids::LineId(1),
-                author: seele_proto::ids::PilotId(1),
+                author: seele_proto::ids::PersonId(1),
                 author_nickname: "ayanami".into(),
                 body: body.into(),
                 replies_to: None,
@@ -1243,7 +1243,7 @@ mod tests {
 
     #[test]
     fn expiring_one_copy_leaves_the_other_readable() {
-        // `RemoveMessage` deletes somebody else's message. Deleting one pilot's
+        // `RemoveMessage` deletes somebody else's message. Deleting one person's
         // copy may not delete another's, and that is a count rather than an
         // intention.
         let (mut persistence, directory) = dogma();

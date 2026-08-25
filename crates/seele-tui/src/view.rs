@@ -25,7 +25,7 @@ pub fn project(room: &Room, app: &mut App) {
     project_screen(room, app);
 }
 
-/// The Cages/Lines panel: Cages, their pilots nested under the open one, Lines.
+/// The Cages/Lines panel: Cages, their people nested under the open one, Lines.
 fn project_channels(room: &Room, app: &mut App) {
     app.dogmas = if room.dogma.is_empty() {
         Vec::new()
@@ -48,13 +48,13 @@ fn project_channels(room: &Room, app: &mut App) {
         if !open {
             continue;
         }
-        for pilot in room.roster(cage.id) {
-            tree.push(Node::Pilot(RosterEntry {
-                nickname: pilot.nickname.clone(),
-                sync: pilot.sync_ratio,
-                speaking: pilot.speaking,
-                at_field: pilot.at_field,
-                total_isolation: pilot.total_isolation,
+        for person in room.roster(cage.id) {
+            tree.push(Node::Person(RosterEntry {
+                nickname: person.nickname.clone(),
+                sync: person.sync_ratio,
+                speaking: person.speaking,
+                at_field: person.at_field,
+                total_isolation: person.total_isolation,
             }));
         }
     }
@@ -174,7 +174,7 @@ pub fn project_link(link: Link, remaining_seconds: u64, app: &mut App) {
 /// Turns a server timestamp into a local wall clock.
 ///
 /// The shell owns this. `seele-core` deals in the server's seconds and has no
-/// opinion about what time it is where the pilot is sitting.
+/// opinion about what time it is where the person is sitting.
 #[must_use]
 pub fn clock(at_seconds: i64) -> String {
     use chrono::TimeZone;
@@ -197,8 +197,8 @@ pub fn worth_retrying(reason: DisconnectReason) -> bool {
 mod tests {
     use super::*;
     use seele_core::{
-        AlertReason, CageId, CageInfo, LineId, LineInfo, MessageId, PilotId, PilotProfile,
-        PilotState, Presence, ServerMessage, SessionId, Ssrc,
+        AlertReason, CageId, CageInfo, LineId, LineInfo, MessageId, PersonId, PersonProfile,
+        PersonState, Presence, ServerMessage, SessionId, Ssrc,
     };
 
     const CAGE: CageId = CageId(1);
@@ -210,7 +210,7 @@ mod tests {
         // id — which is what happens to any shell that never says its own name.
         room.apply(&ServerMessage::Session {
             id: SessionId(1),
-            pilot: PilotId(7),
+            person: PersonId(7),
             ssrc: Ssrc(700),
             dogma: "Terceira Tóquio".into(),
             cages: vec![
@@ -242,10 +242,10 @@ mod tests {
     }
 
     fn joined(id: u64, nickname: &str) -> ServerMessage {
-        ServerMessage::PilotJoined {
+        ServerMessage::PersonJoined {
             cage: CAGE,
-            profile: PilotProfile {
-                id: PilotId(id),
+            profile: PersonProfile {
+                id: PersonId(id),
                 nickname: nickname.into(),
                 roles: Vec::new(),
             },
@@ -257,9 +257,9 @@ mod tests {
         ServerMessage::MessageReceived {
             line: LINE,
             id: MessageId(id),
-            author: PilotId(author),
+            author: PersonId(author),
             at_seconds: 1_700_000_000,
-            author_nickname: "piloto".into(),
+            author_nickname: "pessoa".into(),
             body: body.into(),
             replies_to: None,
             client_message_id: None,
@@ -351,17 +351,17 @@ mod tests {
     }
 
     #[test]
-    fn pilots_are_nested_under_the_open_cage_and_nowhere_else() {
+    fn persons_are_nested_under_the_open_cage_and_nowhere_else() {
         let mut room = room();
         room.apply(&joined(3, "ayanami"));
         let mut app = App::new();
 
         project(&room, &mut app);
 
-        // Ourselves first, then who arrived. The pilot reading the roster has
+        // Ourselves first, then who arrived. The person reading the roster has
         // to be on it — that was the M4 bug.
         let names: Vec<&str> = app.roster().map(|p| p.nickname.as_str()).collect();
-        assert_eq!(names, ["piloto 7", "ayanami"]);
+        assert_eq!(names, ["pessoa 7", "ayanami"]);
 
         // The closed Cage is a row, not a container.
         let cages = app
@@ -379,16 +379,16 @@ mod tests {
         // computed twice is a mean that will disagree once.
         let mut room = room();
         room.apply(&joined(3, "ayanami"));
-        room.apply(&ServerMessage::PilotState(PilotState {
-            pilot: PilotId(3),
+        room.apply(&ServerMessage::PersonState(PersonState {
+            person: PersonId(3),
             at_field: false,
             total_isolation: false,
             speaking: false,
             presence: Presence::Available,
             sync_ratio: 90,
         }));
-        room.apply(&ServerMessage::PilotState(PilotState {
-            pilot: PilotId(7),
+        room.apply(&ServerMessage::PersonState(PersonState {
+            person: PersonId(7),
             at_field: false,
             total_isolation: false,
             speaking: false,
@@ -425,7 +425,7 @@ mod tests {
     #[test]
     fn lines_come_after_every_cage() {
         // The composition specs/05-cliente-tui.md draws: Cages with their
-        // pilots, then Lines. A Line floating between two Cages reads as
+        // people, then Lines. A Line floating between two Cages reads as
         // belonging to the one above it.
         let mut room = room();
         room.apply(&joined(3, "ayanami"));
@@ -556,11 +556,11 @@ mod tests {
     }
 
     #[test]
-    fn pilot_state_reaches_the_roster_row() {
+    fn person_state_reaches_the_roster_row() {
         let mut room = room();
         room.apply(&joined(3, "ayanami"));
-        room.apply(&ServerMessage::PilotState(PilotState {
-            pilot: PilotId(3),
+        room.apply(&ServerMessage::PersonState(PersonState {
+            person: PersonId(3),
             at_field: true,
             total_isolation: false,
             speaking: true,
@@ -571,13 +571,13 @@ mod tests {
         let mut app = App::new();
         project(&room, &mut app);
 
-        let pilot = app
+        let person = app
             .roster()
-            .find(|pilot| pilot.nickname == "ayanami")
+            .find(|person| person.nickname == "ayanami")
             .expect("roster");
-        assert!(pilot.at_field);
-        assert!(pilot.speaking);
-        assert_eq!(pilot.sync, 42);
+        assert!(person.at_field);
+        assert!(person.speaking);
+        assert_eq!(person.sync, 42);
     }
 
     #[test]

@@ -40,7 +40,7 @@ async fn start() -> Result<(SocketAddr, Arc<Server>)> {
     Ok((address, server))
 }
 
-/// A scratch directory, so each test is a different pilot.
+/// A scratch directory, so each test is a different person.
 ///
 /// ADR 0017 binds a nickname to the identity that claimed it, which is exactly
 /// what makes two tests sharing a home directory fight over a name.
@@ -153,7 +153,7 @@ async fn entering_a_cage_puts_us_on_our_own_roster() -> Result<()> {
             snapshot
                 .cages
                 .iter()
-                .any(|cage| cage.occupied_by_us && cage.pilots.iter().any(|p| p.is_self))
+                .any(|cage| cage.occupied_by_us && cage.people.iter().any(|p| p.is_self))
         }),
         "we entered a Cage and are not on its roster"
     );
@@ -166,7 +166,7 @@ async fn entering_a_cage_puts_us_on_our_own_roster() -> Result<()> {
 async fn leaving_a_cage_takes_us_off_our_own_roster() -> Result<()> {
     // The mirror of the test above, and it was missing.
     //
-    // The Dogma does not echo `PilotLeft` to the pilot who caused it — "they
+    // The Dogma does not echo `PersonLeft` to the person who caused it — "they
     // already know" — so this side of the roster is the shell's own
     // bookkeeping. `insert_plug` did it and `eject_plug` did not, and the
     // asymmetry is invisible from inside `Room`, which both halves are correct
@@ -188,7 +188,7 @@ async fn leaving_a_cage_takes_us_off_our_own_roster() -> Result<()> {
             plug.snapshot()
                 .cages
                 .iter()
-                .any(|cage| cage.occupied_by_us && cage.pilots.iter().any(|p| p.is_self))
+                .any(|cage| cage.occupied_by_us && cage.people.iter().any(|p| p.is_self))
         }),
         "we entered a Cage and are not on its roster"
     );
@@ -201,7 +201,7 @@ async fn leaving_a_cage_takes_us_off_our_own_roster() -> Result<()> {
             !snapshot
                 .cages
                 .iter()
-                .any(|cage| cage.occupied_by_us || cage.pilots.iter().any(|p| p.is_self))
+                .any(|cage| cage.occupied_by_us || cage.people.iter().any(|p| p.is_self))
         }),
         "we left the Cage and our own screen still draws us in it: {:?}",
         plug.snapshot()
@@ -209,7 +209,7 @@ async fn leaving_a_cage_takes_us_off_our_own_roster() -> Result<()> {
             .iter()
             .map(|cage| (
                 cage.occupied_by_us,
-                cage.pilots.iter().filter(|p| p.is_self).count()
+                cage.people.iter().filter(|p| p.is_self).count()
             ))
             .collect::<Vec<_>>()
     );
@@ -226,7 +226,7 @@ async fn leaving_a_cage_takes_us_off_our_own_roster() -> Result<()> {
             plug.snapshot()
                 .cages
                 .iter()
-                .any(|cage| cage.occupied_by_us && cage.pilots.iter().any(|p| p.is_self))
+                .any(|cage| cage.occupied_by_us && cage.people.iter().any(|p| p.is_self))
         }),
         "we could not walk back into the Cage we had just left"
     );
@@ -297,9 +297,9 @@ async fn an_at_field_is_visible_to_everybody_else() -> Result<()> {
             snapshot
                 .cages
                 .iter()
-                .any(|cage| cage.pilots.iter().any(|pilot| pilot.nickname == "kaworu"))
+                .any(|cage| cage.people.iter().any(|person| person.nickname == "kaworu"))
         }),
-        "the other pilot never appeared"
+        "the other person never appeared"
     );
 
     muted.set_at_field(true)?;
@@ -308,9 +308,9 @@ async fn an_at_field_is_visible_to_everybody_else() -> Result<()> {
         until(&watcher, |plug| {
             let snapshot = plug.snapshot();
             snapshot.cages.iter().any(|cage| {
-                cage.pilots
+                cage.people
                     .iter()
-                    .any(|pilot| pilot.nickname == "kaworu" && pilot.at_field)
+                    .any(|person| person.nickname == "kaworu" && person.at_field)
             })
         }),
         "a mute was applied locally and never announced"
@@ -448,7 +448,7 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
 
     // Sem perda: quem escreveu, e quando — não só o corpo.
     assert_eq!(mensagem.author_nickname, "ayanami");
-    assert!(!mensagem.own, "atribuída ao piloto errado");
+    assert!(!mensagem.own, "atribuída ao pessoa errado");
     assert!(
         mensagem.at_seconds > 1_600_000_000,
         "sem horário do servidor: {mensagem:?}"
@@ -508,7 +508,7 @@ async fn the_volume_of_a_stranger_is_refused_by_name() -> Result<()> {
 
     assert_eq!(
         plug.set_volume("ninguem".into(), 50),
-        Err(PlugError::UnknownPilot)
+        Err(PlugError::UnknownPerson)
     );
 
     server.shutdown();

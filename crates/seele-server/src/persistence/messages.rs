@@ -35,7 +35,7 @@
 use anyhow::{Context, Result};
 use rusqlite::{params, OptionalExtension};
 use seele_proto::control::AttachmentInfo;
-use seele_proto::ids::{ClientMessageId, LineId, MessageId, PilotId};
+use seele_proto::ids::{ClientMessageId, LineId, MessageId, PersonId};
 
 use super::attachments::Attachments;
 use super::{now_seconds, Persistence};
@@ -56,7 +56,7 @@ pub struct PendingMessage {
     /// Which Line.
     pub line: LineId,
     /// Who wrote it.
-    pub author: PilotId,
+    pub author: PersonId,
     /// What the author is called, stamped by their own connection.
     ///
     /// Carried through rather than looked up when the message is broadcast: the
@@ -79,7 +79,7 @@ pub struct StoredMessage {
     /// Which Line.
     pub line: LineId,
     /// Who wrote it.
-    pub author: PilotId,
+    pub author: PersonId,
     /// What the author is called.
     ///
     /// Empty when read back from the database, where only the id is stored —
@@ -182,7 +182,7 @@ impl<'a> Messages<'a> {
             // Bodies differ under the defect below, which is real and open:
             // `client_message_id` restarts at 1 every session (`seele-tui`) or
             // every process (`seele-ffi`), while `author_id` is derived from the
-            // key on disk and never changes. So after a reconnection a pilot's
+            // key on disk and never changes. So after a reconnection a person's
             // messages 1, 2, 3… are all read as retries of the *previous*
             // session's. See pendency 19; the key itself is what has to change,
             // and this is only the half that is right either way.
@@ -280,14 +280,14 @@ impl<'a> Messages<'a> {
         let before = cursor.map_or(i64::MAX, |id| id.get() as i64);
 
         // The nickname is joined here rather than resolved per row by the
-        // caller: a client reading history has never seen most of these pilots
+        // caller: a client reading history has never seen most of these people
         // arrive and has no other way to learn their names, and a query per
         // message would be fifty round trips through SQLite for one page.
         let mut statement = self.persistence.connection().prepare(
             "SELECT m.id, m.line_id, m.author_id, m.body, m.created_at, m.edited_at,
                     m.replies_to, m.client_message_id, p.nickname
              FROM messages m
-             JOIN pilots p ON p.id = m.author_id
+             JOIN people p ON p.id = m.author_id
              WHERE m.line_id = ?1 AND m.id < ?2 AND m.deleted_at IS NULL
              ORDER BY m.id DESC
              LIMIT ?3",
@@ -298,7 +298,7 @@ impl<'a> Messages<'a> {
                 attachment: None,
                 id: MessageId(row.get::<_, i64>(0)? as u64),
                 line: LineId(row.get::<_, i64>(1)? as u32),
-                author: PilotId(row.get::<_, i64>(2)? as u64),
+                author: PersonId(row.get::<_, i64>(2)? as u64),
                 author_nickname: row.get(8)?,
                 body: row.get(3)?,
                 created_at: row.get(4)?,
@@ -348,7 +348,7 @@ impl<'a> Messages<'a> {
     ///
     /// Returns [`MessageRefusal::NotTheAuthor`] if somebody else wrote it, or
     /// [`MessageRefusal::NotFound`].
-    pub fn edit(&self, id: MessageId, editor: PilotId, body: &str) -> Result<StoredMessage> {
+    pub fn edit(&self, id: MessageId, editor: PersonId, body: &str) -> Result<StoredMessage> {
         let author: Option<i64> = self
             .persistence
             .connection()
@@ -410,14 +410,14 @@ impl<'a> Messages<'a> {
                 "SELECT m.id, m.line_id, m.author_id, m.body, m.created_at, m.edited_at,
                         m.replies_to, m.client_message_id, p.nickname
                  FROM messages m
-                 JOIN pilots p ON p.id = m.author_id
+                 JOIN people p ON p.id = m.author_id
                  WHERE m.id = ?1 AND m.deleted_at IS NULL",
                 [id.get() as i64],
                 |row| {
                     Ok(StoredMessage {
                         id: MessageId(row.get::<_, i64>(0)? as u64),
                         line: LineId(row.get::<_, i64>(1)? as u32),
-                        author: PilotId(row.get::<_, i64>(2)? as u64),
+                        author: PersonId(row.get::<_, i64>(2)? as u64),
                         author_nickname: row.get(8)?,
                         body: row.get(3)?,
                         created_at: row.get(4)?,
@@ -470,7 +470,7 @@ mod tests {
             .connection()
             .execute_batch(
                 "INSERT INTO lines (id, name) VALUES (1, 'geral'), (2, 'logs');
-                 INSERT INTO pilots (id, nickname, public_key, created_at)
+                 INSERT INTO people (id, nickname, public_key, created_at)
                    VALUES (1, 'ayanami', X'01', 0), (2, 'shinji', X'02', 0);",
             )
             .unwrap();
@@ -480,8 +480,8 @@ mod tests {
     fn pending(body: &str) -> PendingMessage {
         PendingMessage {
             line: LineId(1),
-            author: PilotId(1),
-            author_nickname: "piloto".into(),
+            author: PersonId(1),
+            author_nickname: "pessoa".into(),
             body: body.into(),
             replies_to: None,
             client_message_id: None,
@@ -566,7 +566,7 @@ mod tests {
         let edited = messages
             .edit(
                 first.first().expect("the first send stored something").id,
-                PilotId(1),
+                PersonId(1),
                 "padrão azul confirmado",
             )
             .unwrap();
@@ -614,7 +614,7 @@ mod tests {
                     ..pending("de ayanami")
                 },
                 PendingMessage {
-                    author: PilotId(2),
+                    author: PersonId(2),
                     client_message_id: Some(ClientMessageId(1)),
                     ..pending("de shinji")
                 },
@@ -734,8 +734,8 @@ mod tests {
         let stored = messages.append_batch(&[pending("original")]).unwrap();
         let id = stored.first().map(|m| m.id).unwrap();
 
-        assert!(messages.edit(id, PilotId(2), "sequestrado").is_err());
-        let edited = messages.edit(id, PilotId(1), "corrigido").unwrap();
+        assert!(messages.edit(id, PersonId(2), "sequestrado").is_err());
+        let edited = messages.edit(id, PersonId(1), "corrigido").unwrap();
         assert_eq!(edited.body, "corrigido");
         assert!(edited.edited_at.is_some());
     }
@@ -888,7 +888,7 @@ mod tests {
                 .connection()
                 .execute_batch(
                     "INSERT INTO lines (id, name) VALUES (1, 'geral');
-                     INSERT INTO pilots (id, nickname, public_key, created_at)
+                     INSERT INTO people (id, nickname, public_key, created_at)
                        VALUES (1, 'ayanami', X'01', 0);",
                 )
                 .unwrap();

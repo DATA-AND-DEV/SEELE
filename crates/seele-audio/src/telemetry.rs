@@ -28,7 +28,7 @@
 //! # Why the split into local and per-source
 //!
 //! `specs/07-tema-evangelion.md` makes the per-person Sync Ratio the signature
-//! element of the product: "each pilot in the roster has a live percentage
+//! element of the product: "each person in the roster has a live percentage
 //! derived from the RTT, jitter and loss **of that connection**". With an SFU
 //! (`specs/01-arquitetura.md`) every talker arrives as a separate stream with
 //! its own jitter buffer, so those numbers are genuinely per-source. Capture
@@ -251,7 +251,7 @@ impl FalhaLocal {
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct SourceTelemetry {
     /// Which stream this describes. Assigned by the server on Cage entry
-    /// (`specs/02-protocolo.md`); the client maps it to a pilot from the control
+    /// (`specs/02-protocolo.md`); the client maps it to a person from the control
     /// channel.
     pub ssrc: u32,
     /// `profundidade_jitter_ms` — how much delay the buffer is holding.
@@ -332,7 +332,7 @@ impl AudioTelemetry {
     ///
     /// A single bad talker should be visible without the shell having to scan
     /// the list, but the per-source numbers stay available because
-    /// `specs/07-tema-evangelion.md` puts a percentage next to each pilot.
+    /// `specs/07-tema-evangelion.md` puts a percentage next to each person.
     #[must_use]
     pub fn worst_loss_fraction(&self) -> f64 {
         self.sources
@@ -583,7 +583,7 @@ mod tests {
 
     #[test]
     fn per_source_numbers_survive_aggregation() {
-        // specs/07-tema-evangelion.md puts a live percentage next to each pilot,
+        // specs/07-tema-evangelion.md puts a live percentage next to each person,
         // so a summary that replaced the per-source list would remove the
         // product's signature element.
         let telemetry = AudioTelemetry {

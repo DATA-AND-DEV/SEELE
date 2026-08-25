@@ -222,7 +222,7 @@ impressão digital. Confira contra a do passo 4. Se conferir, é aquele servidor
 
 > Dois clientes com o mesmo `$SEELE_HOME` são **a mesma pessoa** — o servidor
 > vincula o apelido à identidade que o reivindicou primeiro. No mesmo PC, para
-> ser um segundo piloto:
+> ser um segundo pessoa:
 > ```powershell
 > $env:SEELE_HOME="$HOME\.seele-outro"
 > .\target\release\plug.exe --server 127.0.0.1:8383 --nick terceiro

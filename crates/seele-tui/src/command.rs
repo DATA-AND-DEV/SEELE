@@ -56,7 +56,7 @@ pub enum Command {
         /// Which mode was asked for.
         which: String,
     },
-    /// `:volume <piloto> <0-200>`.
+    /// `:volume <pessoa> <0-200>`.
     Volume {
         /// Whose.
         who: String,
@@ -72,7 +72,7 @@ pub enum Command {
 
 /// Parses a command line, with or without its leading colon.
 ///
-/// Accepts the leading `:` because a pilot who types `:q` into a prompt that
+/// Accepts the leading `:` because a person who types `:q` into a prompt that
 /// already shows `:` is not making a mistake worth an error message.
 #[must_use]
 pub fn parse(input: &str) -> Command {
@@ -193,7 +193,7 @@ mod tests {
     }
 
     #[test]
-    fn volume_takes_a_pilot_and_a_percentage() {
+    fn volume_takes_a_person_and_a_percentage() {
         assert_eq!(
             parse(":volume ayanami 40"),
             Command::Volume {
