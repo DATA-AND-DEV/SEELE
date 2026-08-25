@@ -283,7 +283,7 @@ async fn two_shells_hold_a_conversation() -> Result<()> {
 /// which only means something if the other side ever sees it. Before this the
 /// server ignored the message outright and the marker could never light up.
 #[tokio::test(flavor = "multi_thread")]
-async fn an_at_field_is_visible_to_everybody_else() -> Result<()> {
+async fn a_muted_mic_is_visible_to_everybody_else() -> Result<()> {
     let (address, server) = start().await?;
 
     let muted = tokio::task::spawn_blocking(move || connect(address, "kaworu")).await??;
@@ -302,7 +302,7 @@ async fn an_at_field_is_visible_to_everybody_else() -> Result<()> {
         "the other person never appeared"
     );
 
-    muted.set_at_field(true)?;
+    muted.set_muted(true)?;
 
     assert!(
         until(&watcher, |connection| {

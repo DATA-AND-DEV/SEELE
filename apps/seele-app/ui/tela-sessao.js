@@ -2569,7 +2569,7 @@ $("veredito-fechar").addEventListener("click", () => ($("veredito").hidden = tru
 
 $("botao-mudo").addEventListener("click", async () => {
   const snapshot = await invoke("snapshot");
-  await invoke("set_at_field", { on: !snapshot.muted });
+  await invoke("set_muted", { on: !snapshot.muted });
   await atualizar();
 });
 

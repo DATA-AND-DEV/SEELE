@@ -1297,7 +1297,7 @@ async fn run_session(
                     // The roster shows all three (specs/07-tema-evangelion.md).
                     // Ignoring them, as this did, made every mute local-only:
                     // the marker existed and could never light up.
-                    ClientMessage::SetAtField(on) => {
+                    ClientMessage::SetMuted(on) => {
                         muted = on;
                         announce(server, session, &AnnouncedState {
                             muted,

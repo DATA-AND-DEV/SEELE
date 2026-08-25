@@ -115,10 +115,10 @@ Superfície mínima e estável. **O `uniffi` entra em M6**, com o primeiro consu
 
 ```
 conectar(host, credencial) -> Sessao
-inserir_plug(voice_room_id)
-ejetar_plug()
-enviar_mensagem(linha_id, corpo)
-definir_at_field(bool)
+entrar_na_sala(sala_id)
+sair_da_sala()
+enviar_mensagem(canal_id, corpo)
+definir_mudo(bool)
 assinar_eventos(callback)
 estado_atual() -> Snapshot
 ```

@@ -363,7 +363,7 @@ if (git status --porcelain -- '$CONFIG_TAURI') {
 # lá. Uma lista curta que alguém revisa quando um escopo novo aparece é mais
 # honesta que uma heurística que erra em silêncio.
 ESCOPOS_DE_PRODUTO="alcance admissao anexos app atualizador audio media
-voice_rooms cascas chamada chegada cliente conformance convite core server encontro
+voice_rooms cascas chamada chegada cliente conformance convite core encontro
 enlace entrada escada fontes frases furo hospedagem interface marca medida
 permissions mensagens moderar mods plug porta portaria proto rede seguranca server
 sessao spike sync taxa tela telemetria tofu tui ui uri varredura voz"
@@ -723,15 +723,23 @@ conferir_config_tauri() {
     # `xtask/tests/empacotamento.rs` guardam o repositório; esta linha guarda
     # **este** empacotamento — começar com o arquivo já corrompido produziria um
     # instalador com «SEELE Â· Entry Plug» na barra de título.
+    #
+    # A conferência procurava aquele título inteiro até o ADR 0035, que o
+    # encurtou para `SEELE` — ASCII puro, sem nada que o cp1252 possa corromper.
+    # Procurar um título que não tem mais acento seria um guarda que não guarda,
+    # então o alvo passou a ser o **sinal do defeito**: o `Â` que aparece quando
+    # UTF-8 é lido como Latin-1. Vale para qualquer caractere acentuado que entre
+    # neste arquivo depois, e não só para o que estava lá quando o defeito
+    # apareceu.
     if ! python3 -c 'import sys
 sys.exit(1 if open(sys.argv[1], "rb").read(3) == b"\xef\xbb\xbf" else 0)' "$ct_caminho"; then
         morrer "o $CONFIG_TAURI está com BOM, e o Tauri recusa o arquivo assim." \
             "A mensagem que ele dá — «expected value at line 1 column 1» — não parece" \
             "ter nada a ver com BOM nenhum."
     fi
-    if ! grep -q 'SEELE · Entry Plug' "$ct_caminho"; then
-        morrer "o título da janela não está inteiro no $CONFIG_TAURI." \
-            "É o rastro de UTF-8 lido como Latin-1 em algum empacotamento anterior." \
+    if grep -q 'Â' "$ct_caminho"; then
+        morrer "o $CONFIG_TAURI tem o rastro de UTF-8 lido como Latin-1" \
+            "(um «Â» sobrando) de algum empacotamento anterior." \
             "Desfaça a mudança nesse arquivo antes de empacotar."
     fi
     passo "$CONFIG_TAURI íntegro"

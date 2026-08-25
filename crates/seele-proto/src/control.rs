@@ -763,7 +763,7 @@ pub enum ClientMessage {
         limit: u16,
     },
     /// Mutes or unmutes the microphone.
-    SetAtField(bool),
+    SetMuted(bool),
     /// Mutes or unmutes the speakers — gap G8.
     SetTotalIsolation(bool),
     /// Announces presence.
@@ -1853,7 +1853,7 @@ impl Validate for ClientMessage {
             Self::LeaveVoiceRoom
             | Self::JoinChannel { .. }
             | Self::FetchHistory { .. }
-            | Self::SetAtField(_)
+            | Self::SetMuted(_)
             | Self::SetTotalIsolation(_)
             | Self::SetPresence(_)
             | Self::Ping { .. }

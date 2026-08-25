@@ -313,7 +313,7 @@ export SEELE_WINDOWS_SSH=voce@windows  # docs/windows.md, seção 7
 ```
 
 O Windows é alcançado por SSH, e **a chave privada não vai para o disco de lá**:
-ela atravessa pela entrada padrão a cada empacotamento. Ligar o OpenSSH Daemon
+ela atravessa pela entrada padrão a cada empacotamento. Ligar o OpenSSH Server
 naquela máquina é a seção 7 de `docs/windows.md`.
 
 Rode o `--conferir` antes de sair da frente do computador. Ele responde em

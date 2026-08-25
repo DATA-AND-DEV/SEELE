@@ -508,7 +508,7 @@ enum Command {
         channel: ChannelId,
         body: String,
     },
-    SetAtField(bool),
+    SetMuted(bool),
     SetTotalIsolation(bool),
     CreateVoiceRoom {
         name: String,
@@ -1544,13 +1544,13 @@ impl Connection {
     /// # Errors
     ///
     /// [`ConnectionError::NotConnected`] once the session is over.
-    pub fn set_at_field(&self, on: bool) -> Result<(), ConnectionError> {
+    pub fn set_muted(&self, on: bool) -> Result<(), ConnectionError> {
         if let Ok(voice) = self.shared.voice.lock() {
             if let Some(voice) = voice.as_ref() {
-                voice.set_at_field(on);
+                voice.set_muted(on);
             }
         }
-        self.command(Command::SetAtField(on))
+        self.command(Command::SetMuted(on))
     }
 
     /// Mutes or unmutes the speakers — Isolamento total.
@@ -3277,7 +3277,7 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
                 return false;
             }
         }
-        Command::SetAtField(on) => {
+        Command::SetMuted(on) => {
             if client.muted(on).await.is_err() {
                 return false;
             }

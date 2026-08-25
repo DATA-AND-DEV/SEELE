@@ -224,7 +224,7 @@ pub enum Action {
     /// Stop transmitting.
     StopTalking,
     /// Toggle the microphone mute.
-    ToggleAtField,
+    ToggleMuted,
     /// Toggle the speaker mute.
     ToggleTotalIsolation,
     /// Enter the selected voice room or open the selected Channel.
@@ -471,7 +471,7 @@ impl App {
             Key::Char('k') | Key::Up => self.move_selection(-1),
             Key::Char('g') => self.jump(Edge::First),
             Key::Char('G') => self.jump(Edge::Last),
-            Key::Char('m') => return Some(Action::ToggleAtField),
+            Key::Char('m') => return Some(Action::ToggleMuted),
             Key::Char('d') => return Some(Action::ToggleTotalIsolation),
             // `s` de sair, na mesma escola de `m` de mudo: as letras desta tela
             // são mnemônicas da palavra em português. Estava livre em modo

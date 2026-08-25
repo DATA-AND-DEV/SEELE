@@ -1114,8 +1114,8 @@ async fn peso_da_linha(session: State<'_, Session>, channel: u32) -> Result<Chan
 }
 
 #[tauri::command]
-fn set_at_field(session: State<'_, Session>, on: bool) -> Result<(), ConnectionError> {
-    session.connection()?.set_at_field(on)
+fn set_muted(session: State<'_, Session>, on: bool) -> Result<(), ConnectionError> {
+    session.connection()?.set_muted(on)
 }
 
 #[tauri::command]
@@ -2313,7 +2313,7 @@ fn main() {
             apagar_voice_room,
             apagar_linha,
             peso_da_linha,
-            set_at_field,
+            set_muted,
             set_total_isolation,
             set_talking,
             set_voice_mode,

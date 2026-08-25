@@ -738,7 +738,7 @@ $("chamada-compartilhar").addEventListener("click", () => {
 $("chamada-at").addEventListener("click", async () => {
   const snapshot = await invoke("snapshot");
   const calar = !snapshot.muted;
-  await invoke("set_at_field", { on: calar });
+  await invoke("set_muted", { on: calar });
   registrarEventoDaChamada(
     calar ? "você desligou o seu microfone" : "você ligou o seu microfone",
     "anotacao",

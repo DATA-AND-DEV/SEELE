@@ -6,11 +6,18 @@
 //! máquina brasileira. O arquivo é UTF-8 **sem BOM**, e sem BOM não há o que
 //! detectar: ele supõe ANSI.
 //!
-//! O título da janela é `SEELE`. O `·` é `C2 B7` em UTF-8; lido
-//! como cp1252 vira `Â` seguido de `·`; e a escrita, que sempre esteve correta,
-//! grava esse par como UTF-8 de verdade. O arquivo passa a conter
-//! `SEELE Â· SEELE` — e como o script restaura ao sair a mesma string que
-//! leu, a corrupção fica **gravada no repositório de quem empacotou**.
+//! O caso que produziu este teste: o título da janela era
+//! `SEELE · Entry Plug`, e o `·` é `C2 B7` em UTF-8. Lido como cp1252 vira `Â`
+//! seguido de `·`; a escrita, que sempre esteve correta, grava esse par como
+//! UTF-8 de verdade, e o arquivo passa a conter `SEELE Â· Entry Plug` — como o
+//! script restaura ao sair a mesma string que leu, a corrupção fica **gravada
+//! no repositório de quem empacotou**.
+//!
+//! **O título é só `SEELE` desde o ADR 0035** e não tem mais nenhum byte fora
+//! do ASCII, então o caminho exato acima não se reproduz. O defeito não é do
+//! `·`: é do `pwsh` supondo ANSI num arquivo sem BOM, e o próximo caractere
+//! acentuado que entrar no `tauri.conf.json` o traz de volta. O teste fica, e
+//! esta nota existe para que ninguém o apague achando que era sobre o título.
 //!
 //! Nada disso aparece na máquina de quem escreveu o script: em macOS e Linux o
 //! `pwsh` lê UTF-8 por padrão, e o defeito só existe onde o pacote é produzido.
@@ -855,7 +862,7 @@ fn o_windows_inalcancavel_reprova_antes_do_linux_emulado() {
         saida.texto
     );
     assert!(
-        saida.texto.contains("OpenSSH Daemon"),
+        saida.texto.contains("OpenSSH Server"),
         "a mensagem tem que apontar o recurso que costuma estar desligado:\n{}",
         saida.texto
     );

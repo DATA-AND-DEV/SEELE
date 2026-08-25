@@ -780,8 +780,8 @@ impl Client {
     /// # Errors
     ///
     /// Fails if the control stream is closed.
-    pub async fn set_at_field(&mut self, on: bool) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::SetAtField(on)).await
+    pub async fn set_muted(&mut self, on: bool) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::SetMuted(on)).await
     }
 
     /// Announces Isolamento total — the speakers being muted.

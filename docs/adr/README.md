@@ -40,6 +40,7 @@ Formato e regra de criação em `specs/10-convencoes.md`: toda decisão marcada
 | [0032](0032-personalizacao-de-um-dogma.md) | Personalização de um Dogma: nome, cor e ícone | **proposto** | — (pedido do dono; reusa a resolução do `0029`) |
 | [0033](0033-o-vocabulario-sai-da-interface-a-estetica-fica.md) | O vocabulário de Evangelion sai da interface; a estética fica | aceito | `07` — o vocabulário na tela |
 | [0034](0034-a-marca-abandona-as-duas-citacoes-do-anime.md) | A marca abandona as duas citações do anime | aceito | `07` — a marca na imagem |
+| [0035](0035-o-codigo-deixa-de-falar-evangelion.md) | O código deixa de falar Evangelion | aceito | `07` — o vocabulário no código |
 
 ## O que ainda não tem ADR
 

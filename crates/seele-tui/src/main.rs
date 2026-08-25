@@ -1346,10 +1346,10 @@ async fn act(
             runtime.app.speaking = false;
         }
 
-        Action::ToggleAtField => {
+        Action::ToggleMuted => {
             runtime.app.muted = !runtime.app.muted;
             if let Some(voice) = &runtime.voice {
-                voice.set_at_field(runtime.app.muted);
+                voice.set_muted(runtime.app.muted);
             }
         }
         Action::ToggleTotalIsolation => {
@@ -1616,7 +1616,7 @@ async fn run_command(
         Command::Muted => {
             runtime.app.muted = !runtime.app.muted;
             if let Some(voice) = &runtime.voice {
-                voice.set_at_field(runtime.app.muted);
+                voice.set_muted(runtime.app.muted);
             }
         }
 

@@ -1762,7 +1762,7 @@ impl Motor {
                     let _ = cliente.join_channel(linha).await;
                 }
                 if self.muted {
-                    let _ = cliente.set_at_field(true).await;
+                    let _ = cliente.set_muted(true).await;
                 }
                 if self.isolamento {
                     let _ = cliente.set_total_isolation(true).await;
@@ -1804,7 +1804,7 @@ impl Motor {
             Comando::Historico { linha, limite } => {
                 cliente.fetch_history(linha, None, limite).await
             }
-            Comando::Muted(ligado) => cliente.set_at_field(ligado).await,
+            Comando::Muted(ligado) => cliente.set_muted(ligado).await,
             Comando::Isolamento(ligado) => cliente.set_total_isolation(ligado).await,
             Comando::CriarVoiceRoom {
                 nome,

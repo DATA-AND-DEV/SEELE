@@ -8,7 +8,7 @@ O objetivo desta etapa é reestruturar a camada de networking para permitir que 
 
 A infraestrutura central do SEELE **não deve transportar áudio, voz ou dados da aplicação**.
 
-O servidor central deve atuar exclusivamente como **Rendezvous / Discovery Daemon**, ajudando os peers a se encontrarem e coordenando o estabelecimento da conexão P2P.
+O servidor central deve atuar exclusivamente como **Rendezvous / Discovery Server**, ajudando os peers a se encontrarem e coordenando o estabelecimento da conexão P2P.
 
 A comunicação após o estabelecimento da conexão deve ser:
 
@@ -50,7 +50,7 @@ Nunca:
 ```text
 Peer A
    ↓
-SEELE Daemon
+SEELE Server
    ↓
 Peer B
 ```
@@ -61,7 +61,7 @@ O servidor central não deve funcionar como relay.
 
 ## 2.2 Zero tráfego de áudio no servidor
 
-O Rendezvous Daemon pode receber:
+O Rendezvous Server pode receber:
 
 - registro de peers;
 - informações de sessão;
@@ -70,7 +70,7 @@ O Rendezvous Daemon pode receber:
 - candidatos de conexão;
 - mensagens de coordenação para NAT traversal.
 
-O Rendezvous Daemon NÃO pode receber:
+O Rendezvous Server NÃO pode receber:
 
 - áudio;
 - voz;
@@ -131,7 +131,7 @@ Rendezvous
            idle
 ```
 
-O Rendezvous Daemon não deve participar da chamada.
+O Rendezvous Server não deve participar da chamada.
 
 ---
 
@@ -166,7 +166,7 @@ NAT B
 Peer B
 ```
 
-O fato de o Rendezvous Daemon conhecer os peers não significa que um peer consiga simplesmente conectar diretamente ao outro.
+O fato de o Rendezvous Server conhecer os peers não significa que um peer consiga simplesmente conectar diretamente ao outro.
 
 É necessário implementar uma estratégia apropriada de **NAT traversal**.
 
@@ -207,7 +207,7 @@ O sistema deve considerar:
 
 # 6. Endpoint discovery
 
-O Rendezvous Daemon deve ser capaz de observar o endpoint público utilizado pelo peer.
+O Rendezvous Server deve ser capaz de observar o endpoint público utilizado pelo peer.
 
 O cliente não deve simplesmente informar:
 
@@ -280,7 +280,7 @@ IPv6 local
 
 ### Daemon-reflexive candidates
 
-Endpoint observado pelo Rendezvous Daemon.
+Endpoint observado pelo Rendezvous Server.
 
 ### Futuras extensões
 
@@ -519,13 +519,13 @@ Failed
 Unable to establish direct connection
 ```
 
-Não enviar áudio através do Rendezvous Daemon.
+Não enviar áudio através do Rendezvous Server.
 
 ---
 
 # 14. Segurança
 
-O Rendezvous Daemon não deve ser considerado confiável para os dados da aplicação.
+O Rendezvous Server não deve ser considerado confiável para os dados da aplicação.
 
 A arquitetura deve manter:
 
@@ -541,7 +541,7 @@ O servidor deve apenas facilitar a descoberta.
 
 O agente deve preservar a identidade e autenticação existentes do SEELE.
 
-Não introduzir confiança adicional no Rendezvous Daemon sem justificativa.
+Não introduzir confiança adicional no Rendezvous Server sem justificativa.
 
 O servidor deve conhecer apenas o mínimo necessário para realizar:
 
@@ -554,7 +554,7 @@ O servidor deve conhecer apenas o mínimo necessário para realizar:
 
 # 15. Privacidade
 
-O Rendezvous Daemon deve armazenar o mínimo possível.
+O Rendezvous Server deve armazenar o mínimo possível.
 
 Idealmente:
 
@@ -606,7 +606,7 @@ VPS:
 100 × audio streams
 ```
 
-O Rendezvous Daemon deve permanecer extremamente leve.
+O Rendezvous Server deve permanecer extremamente leve.
 
 ---
 
@@ -782,8 +782,8 @@ O objetivo é **identificar precisamente quais casos funcionam e quais não func
 A implementação será considerada bem-sucedida quando:
 
 - [ ] dois peers atrás de NAT residencial conseguem estabelecer conexão P2P;
-- [ ] áudio nunca passa pelo Rendezvous Daemon;
-- [ ] Rendezvous Daemon não funciona como relay;
+- [ ] áudio nunca passa pelo Rendezvous Server;
+- [ ] Rendezvous Server não funciona como relay;
 - [ ] o endpoint público dos peers é descoberto automaticamente;
 - [ ] peers descobrem candidatos uns dos outros;
 - [ ] UDP hole punching ocorre automaticamente;
@@ -813,7 +813,7 @@ Não:
 - assumir que todos os NATs permitem hole punching;
 - remover QUIC sem análise;
 - substituir o protocolo SEELE inteiro por uma biblioteca externa sem necessidade;
-- armazenar dados desnecessários no Rendezvous Daemon;
+- armazenar dados desnecessários no Rendezvous Server;
 - esconder falhas de NAT como erros genéricos.
 
 ---
@@ -859,7 +859,7 @@ Ao final desta etapa, o SEELE deve funcionar conceitualmente assim:
 
 A regra fundamental é:
 
-> **The Rendezvous Daemon tells peers where to find each other. It never carries the conversation.**
+> **The Rendezvous Server tells peers where to find each other. It never carries the conversation.**
 
 ---
 

@@ -635,7 +635,7 @@ impl Voice {
 
     /// Puts this path's controls onto a freshly opened one.
     fn carry_over(&self, fresh: &Self) {
-        fresh.set_at_field(self.muted());
+        fresh.set_muted(self.muted());
         fresh.set_total_isolation(self.total_isolation());
         fresh.set_mode(self.mode());
         fresh.set_key_held(self.controls.key_held.load(Ordering::Relaxed));
@@ -689,7 +689,7 @@ impl Voice {
 }
 
     /// Mutes the microphone — A.T. Field.
-    pub fn set_at_field(&self, on: bool) {
+    pub fn set_muted(&self, on: bool) {
         self.controls.muted.store(on, Ordering::Relaxed);
     }
 

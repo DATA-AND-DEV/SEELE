@@ -9,10 +9,14 @@ governa é a estética, não a língua.
 Duas colunas e um corte no meio:
 
 - **na tela** é o que a pessoa lê. Muda por este documento.
-- **identificador** é o nome real da coisa no código. **Não muda.** `VoiceRoom`
-  continua `VoiceRoom`, `Server` continua `Server`, `muted` continua `muted`.
-  Renomear tipo é outro trabalho, com outro custo, e o ADR 0033 decidiu
-  explicitamente não fazê-lo.
+- **identificador** é o nome real da coisa no código.
+
+**A segunda coluna mudou em 2026-08-25, e o ADR 0035 conta por quê.** Até ali o
+ADR 0033 dizia, com todas as letras, que renomear tipo era outro trabalho e que
+`Cage`, `Pilot`, `Dogma` e `Line` continuavam como estavam. Aquele trabalho foi
+feito: o código deixou de falar Evangelion, e as duas colunas deste documento
+voltaram a dizer a mesma coisa em línguas diferentes, em vez de conceitos
+diferentes.
 
 Ler as duas colunas juntas é o ponto do documento: quem lê um relatório de bug
 que diz «não consigo entrar na sala 2» precisa achar `VoiceRoomId` sem intermediário.
@@ -26,26 +30,30 @@ Ela agora custa menos, porque o nome comum já é a explicação.
 |---|---|---|---|
 | Instância de servidor | servidor | server | `Server` |
 | Daemon | `seeled` | `seeled` | `seeled` |
-| Cliente de terminal | `connection` | `connection` | `connection` |
+| Cliente de terminal | `seele` | `seele` | `seele` — não distribuído desde o ADR 0035 |
 | Canal de voz | sala de voz | voice room | `VoiceRoom`, `VoiceRoomId` |
 | Coluna de salas | SALAS DE VOZ | VOICE ROOMS | — |
 | Sala sem nome | SALA 1, SALA 2 | ROOM 1, ROOM 2 | — |
-| Canal de texto | canal de texto | text channel | `Channel`, `LineId` |
+| Canal de texto | canal de texto | text channel | `Channel`, `ChannelId` |
 | Coluna de canais | CANAIS | CHANNELS | — |
 | Usuário | pessoa | person | `Person`, `PersonId` |
 | Nome escolhido pela pessoa | APELIDO | NICKNAME | `Person::nick` |
-| Entrar em sala de voz | conectar · CONECTAR | connect · CONNECT | `insert_plug` |
-| Sair da sala de voz | sair · SAIR · sair da sala | leave · LEAVE | `eject` |
+| Entrar em sala de voz | conectar · CONECTAR | connect · CONNECT | `EnterVoiceRoom` |
+| Sair da sala de voz | sair · SAIR · sair da sala | leave · LEAVE | `LeaveVoiceRoom` |
 | Mudo (microfone) | mudo · microfone fechado | muted · mic closed | `muted` |
 | Qualidade de conexão | sinal · SINAL | signal · SIGNAL | `Signal` |
 | Faixas do sinal | boa · fraca · crítica | good · weak · critical | ver ADR 0024 |
-| Sessão verificada | conexão segura · CONEXÃO SEGURA | secure connection | `LinkState::Verified` |
+| Sessão verificada | conexão segura · CONEXÃO SEGURA | secure connection | `LinkTrust::Verified` |
 | Latência | atraso | delay | `signal_delay_ms` |
-| Perda de pacote | perda | loss | `HarmonicDisturbance`, `loss_pct` |
+| Perda de pacote | perda | loss | `loss_pct` |
 
-**`SEELE` fica**, e só como nome interno: é o nome do cliente de terminal
-no código, na documentação de arquitetura e na forma desenhada da marca. Não é
-rótulo de tela. O binário continua `connection`.
+**`SEELE` fica, e é a única coisa que fica.** É o nome do produto — na tela, no
+binário, no repositório e na marca. O ADR 0034 já havia tirado da imagem as duas
+citações literais do anime, o katakana e a silhueta do plug de entrada; o nome
+latino nunca foi citação, e permanece por decisão do dono.
+
+O binário do cliente de terminal se chama `seele` desde a 0.7.8. Ele deixou de
+ser distribuído no ADR 0035 e o código continua no repositório.
 
 ## Papéis
 
@@ -67,7 +75,9 @@ está até que decidam.
 
 ## Subsistemas
 
-Fronteiras reais de módulo. **Não mudam, e o ADR 0033 diz isso em voz alta:**
+Fronteiras reais de módulo. O ADR 0033 as manteve com o nome dos três Magi,
+argumentando que a fronteira é real; o argumento continua verdadeiro, e por isso
+o ADR 0035 trocou só o nome:
 
 | Nome | Responsabilidade | Identificador |
 |---|---|---|
@@ -90,10 +100,10 @@ que **informa** ficou inteira, e é ela que aparece na tela agora.
 | `Resposta` | `Response` | cliente → servidor |
 | `InserirPlug` | `EnterVoiceRoom` | cliente → servidor |
 | `EjetarPlug` | `LeaveVoiceRoom` | cliente → servidor |
-| `EntrarNaLinha` | `JoinLine` | cliente → servidor |
+| `EntrarNaLinha` | `JoinChannel` | cliente → servidor |
 | `EnviarMensagem` | `SendMessage` | cliente → servidor |
 | `BuscarHistorico` | `FetchHistory` | cliente → servidor |
-| `DefinirATField` | `SetAtField` | cliente → servidor |
+| `DefinirATField` | `SetMuted` | cliente → servidor |
 | `DefinirEstado` | `SetPresence` | cliente → servidor |
 | `Ping` | `Ping` | cliente → servidor |
 | `Desafio` | `Challenge` | servidor → cliente |
