@@ -22,10 +22,10 @@ use ed25519_dalek::SigningKey;
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use seele_core::{Client, MemoryPinStore, Room};
-use seele_proto::ids::{VoiceRoomId, ClientMessageId, ChannelId};
+use seele_proto::ids::{ChannelId, ClientMessageId, VoiceRoomId};
 use seele_proto::ServerMessage;
 use seele_server::persistence::Location;
-use seele_server::{ServerConfig, Daemon};
+use seele_server::{Daemon, ServerConfig};
 use seele_tui::app::{App, Key, Mode, Screen};
 use seele_tui::theme::{Palette, Theme};
 use seele_tui::{ui, view};
@@ -117,7 +117,12 @@ where
 }
 
 /// Brings the interface up against a live connection, the way `connection` does.
-fn attach(client: &Client, nickname: &str, voice_room: VoiceRoomId, channel: Option<ChannelId>) -> (App, Room) {
+fn attach(
+    client: &Client,
+    nickname: &str,
+    voice_room: VoiceRoomId,
+    channel: Option<ChannelId>,
+) -> (App, Room) {
     let mut app = App::new();
     app.screen = Screen::PatternBlue;
     let mut room = Room::new();
@@ -222,7 +227,10 @@ async fn the_second_person_to_arrive_sees_the_first_one() -> Result<()> {
     })
     .await;
 
-    assert!(seen, "walked into an occupied voice room and saw an empty room");
+    assert!(
+        seen,
+        "walked into an occupied voice room and saw an empty room"
+    );
 
     let names: Vec<&str> = app.roster().map(|p| p.nickname.as_str()).collect();
     assert!(

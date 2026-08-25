@@ -44,9 +44,9 @@ use anyhow::Result;
 use seele_core::enlace::{Aviso, Destino, Enlace};
 use seele_core::{MemoryPinStore, PinStore};
 use seele_proto::control::{AlertReason, Permission, ServerMessage};
-use seele_proto::ids::{VoiceRoomId, ChannelId};
+use seele_proto::ids::{ChannelId, VoiceRoomId};
 use seele_server::persistence::Location;
-use seele_server::{ServerConfig, Daemon};
+use seele_server::{Daemon, ServerConfig};
 
 /// Sobe um servidor numa porta que o sistema escolhe.
 ///
@@ -207,7 +207,7 @@ async fn uma_sala_criada_aparece_para_quem_ja_estava_conectado() -> Result<()> {
         .await
         .expect("a sessão do anfitrião acabou");
     anfitriao
-        .criar_voice_room("VOICE_ROOM-02 SALA DOS FUNDOS".to_owned(), 8, None)
+        .criar_voice_room("SALA-02 SALA DOS FUNDOS".to_owned(), 8, None)
         .await
         .expect("a sessão do anfitrião acabou");
 
@@ -219,7 +219,7 @@ async fn uma_sala_criada_aparece_para_quem_ja_estava_conectado() -> Result<()> {
     assert!(
         vistos
             .iter()
-            .any(|aviso| e_voice_room_criado(aviso, "VOICE_ROOM-02 SALA DOS FUNDOS")),
+            .any(|aviso| e_voice_room_criado(aviso, "SALA-02 SALA DOS FUNDOS")),
         "a sala foi feita e quem já estava conectado não soube — teria de reconectar para vê-la"
     );
     assert!(
@@ -241,7 +241,7 @@ async fn uma_sala_criada_aparece_para_quem_ja_estava_conectado() -> Result<()> {
         .map(|voice_room| voice_room.name.as_str())
         .collect();
     assert!(
-        nomes.contains(&"VOICE_ROOM-02 SALA DOS FUNDOS"),
+        nomes.contains(&"SALA-02 SALA DOS FUNDOS"),
         "a sala não sobreviveu ao anúncio: {nomes:?}"
     );
 
@@ -272,7 +272,7 @@ async fn um_pessoa_sem_manage_voice_rooms_e_recusado_pelo_server_e_nao_pela_casc
     // `seele-core` não confere nada — o pedido sai no fio. É essa a razão de
     // este teste existir aqui e não em `seele-core`.
     sem_permissao
-        .criar_voice_room("VOICE_ROOM-DO-INTRUSO".to_owned(), 8, None)
+        .criar_voice_room("SALA-DO-INTRUSO".to_owned(), 8, None)
         .await
         .expect("a sessão acabou antes de o pedido sair");
 
@@ -291,7 +291,7 @@ async fn um_pessoa_sem_manage_voice_rooms_e_recusado_pelo_server_e_nao_pela_casc
     assert!(
         !no_anfitriao
             .iter()
-            .any(|aviso| e_voice_room_criado(aviso, "VOICE_ROOM-DO-INTRUSO")),
+            .any(|aviso| e_voice_room_criado(aviso, "SALA-DO-INTRUSO")),
         "a sala do intruso foi anunciada a quem estava conectado"
     );
 
@@ -305,7 +305,7 @@ async fn um_pessoa_sem_manage_voice_rooms_e_recusado_pelo_server_e_nao_pela_casc
         .map(|voice_room| voice_room.name.as_str())
         .collect();
     assert!(
-        !nomes.contains(&"VOICE_ROOM-DO-INTRUSO"),
+        !nomes.contains(&"SALA-DO-INTRUSO"),
         "a sala do intruso ficou gravada: {nomes:?}"
     );
 
@@ -377,7 +377,7 @@ async fn o_comandante_renomeia_e_todo_mundo_ve_o_nome_novo() -> Result<()> {
     let voice_room = anfitriao.sessao().voice_rooms[0].id;
 
     anfitriao
-        .renomear_voice_room(voice_room, "VOICE_ROOM-01 PONTE".to_owned())
+        .renomear_voice_room(voice_room, "SALA-01 PONTE".to_owned())
         .await
         .expect("a sessão do anfitrião acabou");
 
@@ -387,7 +387,7 @@ async fn o_comandante_renomeia_e_todo_mundo_ve_o_nome_novo() -> Result<()> {
             Aviso::Mensagem(mensagem)
                 if matches!(
                     &**mensagem,
-                    ServerMessage::VoiceRoomRenamed { name, .. } if name == "VOICE_ROOM-01 PONTE"
+                    ServerMessage::VoiceRoomRenamed { name, .. } if name == "SALA-01 PONTE"
                 )
         )
     })
@@ -397,7 +397,7 @@ async fn o_comandante_renomeia_e_todo_mundo_ve_o_nome_novo() -> Result<()> {
     // E ele sobrevive: uma renomeação que só existisse no fio voltaria ao nome
     // velho na próxima conexão, e ninguém saberia qual dos dois é o certo.
     let depois = conectar(endereco, 48, "asuka").await?;
-    assert_eq!(depois.sessao().voice_rooms[0].name, "VOICE_ROOM-01 PONTE");
+    assert_eq!(depois.sessao().voice_rooms[0].name, "SALA-01 PONTE");
     assert_eq!(
         depois.sessao().voice_rooms.len(),
         1,

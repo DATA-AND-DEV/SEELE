@@ -22,8 +22,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use seele_ffi::{ConnectConfig, Connection, ConnectionError};
-use seele_server::persistence::{Persistence, Location};
-use seele_server::{ServerConfig, Daemon};
+use seele_server::persistence::{Location, Persistence};
+use seele_server::{Daemon, ServerConfig};
 
 /// Um PNG quadrado e opaco, do tamanho que o protocolo aceita.
 fn png(lado: u32) -> Vec<u8> {
@@ -124,7 +124,9 @@ async fn quem_conecta_recebe_o_icone_que_o_server_ja_tinha() -> Result<()> {
     let casa = pasta.join("casa");
     let connection = {
         let casa = casa.to_string_lossy().into_owned();
-        let endereco = endereco;
+        // Sem `let endereco = endereco;` no meio: o `move` do closure abaixo já
+        // move os dois, e a linha era um no-op que o `redundant_locals` reprova
+        // — com `-D warnings` no CI, um erro.
         tokio::task::spawn_blocking(move || conectar(endereco, &casa)).await??
     };
 

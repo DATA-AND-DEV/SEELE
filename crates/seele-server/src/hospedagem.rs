@@ -23,7 +23,7 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use crate::persistence::Location;
-use crate::{ServerConfig, Daemon};
+use crate::{Daemon, ServerConfig};
 
 /// O PERSISTENCE de um servidor hospedado, compartilhado com quem o hospeda.
 ///

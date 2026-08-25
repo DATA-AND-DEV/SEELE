@@ -119,7 +119,7 @@ Esta é a face que carrega o que **a pessoa digita**: corpo de mensagem, apelido
 endereço de Server, link de convite. Por isso o recorte é generoso onde o da
 Saira é apertado — Latin Extended-A entra porque quem escreve não é o produto.
 O resto saiu de leitura, não de palpite: `ui/index.html`, `ui/seele.css`,
-`ui/seele.js` e `design/SEELE v2.dc.html` foram varridos caractere a
+`ui/seele.js` e `design/Entry Plug v2.dc.html` foram varridos caractere a
 caractere, e o que apareceu fora do ASCII alfanumérico foi `·  —  –  …  •  →  ←
 ↑  ↓  ≥  ≤  −  ×  █  ▓  ▒  ░  ▁▂▃▄▅▆▇  ─ │ ┌ ┐ └ ┘ ├ ┤ ┬ ┴ ┼ ═ ╞ ╡ ╪  ▸ ◂ ▶ ◀
 ▼ ⌘ ● ○ ≡`, mais os acentos do português. Os blocos e os traços de caixa vêm da

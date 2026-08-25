@@ -36,7 +36,7 @@ use sha2::{Digest as _, Sha256};
 use crate::control::{
     check_bounds, ControlError, Validate, MAX_BODY_LEN, MAX_DECLARED_TYPE_LEN, MAX_FILE_NAME_LEN,
 };
-use crate::ids::{AttachmentId, ClientMessageId, ChannelId, MessageId};
+use crate::ids::{AttachmentId, ChannelId, ClientMessageId, MessageId};
 
 /// Length of a SHA-256 digest, in bytes.
 pub const CONTENT_HASH_LEN: usize = 32;

@@ -802,7 +802,10 @@ mod tests {
         let ponto = bilhete.ponto().expect("separar o ponto");
         assert_eq!(ponto.maquina, "encontro.exemplo");
         assert_eq!(ponto.porta, crate::encontro::PORTA_PADRAO);
-        assert_ne!(ponto.porta, PORTA_PADRAO, "o ponto herdou a porta do servidor");
+        assert_ne!(
+            ponto.porta, PORTA_PADRAO,
+            "o ponto herdou a porta do servidor"
+        );
     }
 
     #[test]

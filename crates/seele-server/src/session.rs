@@ -34,23 +34,23 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context, Result};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use seele_proto::control::{
-    AlertReason, AlertSeverity, AttachmentRefusal, VoiceRoomInfo, ClientMessage, DisconnectReason,
-    ChannelInfo, Permission, PersonProfile, PersonState, Presence, Role, ServerMessage, Subsystem,
-    SubsystemHealth, Telemetry, Validate,
+    AlertReason, AlertSeverity, AttachmentRefusal, ChannelInfo, ClientMessage, DisconnectReason,
+    Permission, PersonProfile, PersonState, Presence, Role, ServerMessage, Subsystem,
+    SubsystemHealth, Telemetry, Validate, VoiceRoomInfo,
 };
-use seele_proto::ids::{VoiceRoomId, ChannelId, PersonId, RoleId, ScreenId, SessionId, Ssrc};
+use seele_proto::ids::{ChannelId, PersonId, RoleId, ScreenId, SessionId, Ssrc, VoiceRoomId};
 use seele_proto::screen::SCREEN_HEADER_LEN;
-use seele_proto::signal::{SyncInputs, Signal};
+use seele_proto::signal::{Signal, SyncInputs};
 use seele_proto::transport::HANDSHAKE_TIMEOUT;
 use tokio::sync::mpsc;
 
-use crate::voice_room::VoiceRoomCommand;
+use crate::permissions::{self, Permissions};
 use crate::persistence::channels::{Channels, LastVoiceRoom};
 use crate::persistence::messages::{Messages, PendingMessage, DEFAULT_PAGE};
 use crate::persistence::Persistence;
-use crate::server::{Server, Event};
-use crate::permissions::{self, Permissions};
+use crate::server::{Event, Server};
 use crate::taxa::{Veredito, Vigia};
+use crate::voice_room::VoiceRoomCommand;
 use crate::{frame, ServerConfig, PUBLIC_KEY_LEN};
 
 /// Bytes of nonce the client signs.
@@ -256,7 +256,16 @@ pub async fn serve(
         "link verified"
     );
 
-    let result = run_session(connection, send, recv, &session, &server, &voice_rooms, &registry).await;
+    let result = run_session(
+        connection,
+        send,
+        recv,
+        &session,
+        &server,
+        &voice_rooms,
+        &registry,
+    )
+    .await;
 
     // Out of every room, not out of the one this connection remembers. The loop
     // above can end at any `?`, and a path that returns early does not know
@@ -647,12 +656,13 @@ async fn handshake(
     // servidor é — e o aperto de mão já toma este mutex mais de uma vez.
     let (nome_do_server, icone_do_server) = {
         let guard = server.persistence.lock().await;
-        let nome = crate::persistence::aparencia::nome(&guard, &config.name).unwrap_or_else(|erro| {
-            // Um banco que não responde não pode deixar o servidor sem nome na
-            // tela de quem entra. O padrão da configuração é a resposta honesta.
-            tracing::warn!(%erro, "não deu para ler o nome do servidor");
-            config.name.clone()
-        });
+        let nome =
+            crate::persistence::aparencia::nome(&guard, &config.name).unwrap_or_else(|erro| {
+                // Um banco que não responde não pode deixar o servidor sem nome na
+                // tela de quem entra. O padrão da configuração é a resposta honesta.
+                tracing::warn!(%erro, "não deu para ler o nome do servidor");
+                config.name.clone()
+            });
         let icone = crate::persistence::aparencia::icone(&guard).unwrap_or_default();
         (nome, icone)
     };
@@ -750,7 +760,9 @@ struct Account {
 }
 
 /// Reads the voice room and Channel tree, and the roles, out of PERSISTENCE.
-fn read_server(persistence: &Persistence) -> Result<(Vec<VoiceRoomInfo>, Vec<ChannelInfo>, Vec<Role>)> {
+fn read_server(
+    persistence: &Persistence,
+) -> Result<(Vec<VoiceRoomInfo>, Vec<ChannelInfo>, Vec<Role>)> {
     let connection = persistence.connection();
 
     // The same reader the creating verbs use, so the tree the handshake sends
@@ -1038,7 +1050,7 @@ async fn run_session(
     // `EnterVoiceRoom`: walk into an occupied voice room and the server listed the people
     // in *that* voice room. Every other voice room stayed empty on the client for the whole
     // session, because nothing had ever carried who was in it — and the screen
-    // in `design/SEELE v3.dc.html` draws occupants under all of them. That
+    // in `design/Entry Plug v3.dc.html` draws occupants under all of them. That
     // is the defect reported from a real session as the voice_rooms showing empty
     // when they were not.
     //
@@ -2265,7 +2277,12 @@ async fn pode(server: &Server, person: PersonId, permission: Permission) -> bool
 /// server. It matters exactly at the channel the spec draws between the two roles,
 /// and it matters more once ADR 0022 puts a server on the open internet, where
 /// "the person I promoted" is not always somebody sitting in the same room.
-async fn moderavel(server: &Server, quem: PersonId, alvo: PersonId, permission: Permission) -> bool {
+async fn moderavel(
+    server: &Server,
+    quem: PersonId,
+    alvo: PersonId,
+    permission: Permission,
+) -> bool {
     if !pode(server, quem, permission).await {
         return false;
     }
@@ -2386,8 +2403,11 @@ async fn receber_tela(
                 // contrapressão no QUIC de quem compartilha, que é onde ela
                 // conserta alguma coisa. Descartar aqui deslocaria o
                 // enquadramento de todos os espectadores de uma vez.
-                sala.send(VoiceRoomCommand::TelaBytes { from: person, bytes })
-                    .await?;
+                sala.send(VoiceRoomCommand::TelaBytes {
+                    from: person,
+                    bytes,
+                })
+                .await?;
             }
             None => break,
         }
@@ -2395,7 +2415,9 @@ async fn receber_tela(
     // O fim limpo. Quem parou de propósito também manda `StopScreenShare` pelo
     // controle, e é ele que anuncia; quem sumiu é recolhido pelo fim da sessão.
     // Aqui só o encaminhamento morre, que é o que o §5.1 pôs sob esta função.
-    let _ = sala.send(VoiceRoomCommand::TelaFechou { from: person }).await;
+    let _ = sala
+        .send(VoiceRoomCommand::TelaFechou { from: person })
+        .await;
     Ok(())
 }
 
@@ -2489,7 +2511,11 @@ fn announce(server: &Server, session: &Session, state: &AnnouncedState) {
 }
 
 /// Decides whether an event concerns this connection, and what to send.
-fn translate(event: &Event, channels: &[ChannelId], self_person: PersonId) -> Option<ServerMessage> {
+fn translate(
+    event: &Event,
+    channels: &[ChannelId],
+    self_person: PersonId,
+) -> Option<ServerMessage> {
     match event {
         Event::MessagePosted(message) => {
             channels
@@ -2507,11 +2533,13 @@ fn translate(event: &Event, channels: &[ChannelId], self_person: PersonId) -> Op
                 })
         }
         Event::MessageEdited { channel, id, body } => {
-            channels.contains(channel).then(|| ServerMessage::MessageEdited {
-                channel: *channel,
-                id: *id,
-                body: body.clone(),
-            })
+            channels
+                .contains(channel)
+                .then(|| ServerMessage::MessageEdited {
+                    channel: *channel,
+                    id: *id,
+                    body: body.clone(),
+                })
         }
         Event::MessageRemoved { channel, id } => {
             channels
@@ -2557,24 +2585,25 @@ fn translate(event: &Event, channels: &[ChannelId], self_person: PersonId) -> Op
             profile: profile.clone(),
             ssrc: *ssrc,
         }),
-        Event::PersonLeft { voice_room: left, person } => {
-            (*person != self_person).then_some(ServerMessage::PersonLeft {
-                voice_room: *left,
-                person: *person,
-            })
-        }
+        Event::PersonLeft {
+            voice_room: left,
+            person,
+        } => (*person != self_person).then_some(ServerMessage::PersonLeft {
+            voice_room: *left,
+            person: *person,
+        }),
         // Estes dois **também** não voltam para quem os causou: quem acabou de
         // conectar sabe que conectou, e quem saiu não está mais aqui para ler.
-        Event::PersonPresent { quem } => (quem.person != self_person).then(|| {
-            ServerMessage::PersonPresent {
+        Event::PersonPresent { quem } => {
+            (quem.person != self_person).then(|| ServerMessage::PersonPresent {
                 profile: PersonProfile {
                     id: quem.person,
                     nickname: quem.nickname.clone(),
                     roles: Vec::new(),
                 },
                 ssrc: quem.ssrc,
-            }
-        }),
+            })
+        }
         Event::PersonGone { person } => {
             (*person != self_person).then_some(ServerMessage::PersonGone { person: *person })
         }
@@ -2601,8 +2630,12 @@ fn translate(event: &Event, channels: &[ChannelId], self_person: PersonId) -> Op
         // from having asked: the identifier is the server's to assign, and the
         // maker needs it as much as everybody else does. Filtering self out here
         // would leave whoever made the room as the one person who cannot see it.
-        Event::VoiceRoomCreated { voice_room } => Some(ServerMessage::VoiceRoomCreated { voice_room: voice_room.clone() }),
-        Event::ChannelCreated { channel } => Some(ServerMessage::ChannelCreated { channel: channel.clone() }),
+        Event::VoiceRoomCreated { voice_room } => Some(ServerMessage::VoiceRoomCreated {
+            voice_room: voice_room.clone(),
+        }),
+        Event::ChannelCreated { channel } => Some(ServerMessage::ChannelCreated {
+            channel: channel.clone(),
+        }),
         Event::VoiceRoomRenamed { voice_room, name } => Some(ServerMessage::VoiceRoomRenamed {
             voice_room: *voice_room,
             name: name.clone(),
@@ -2638,8 +2671,12 @@ fn translate(event: &Event, channels: &[ChannelId], self_person: PersonId) -> Op
         // never get here: the loop answers them itself and `continue`s, because
         // they have a connection to pull and a sentence to be told and this function
         // knows about neither.
-        Event::VoiceRoomDeleted { voice_room } => Some(ServerMessage::VoiceRoomDeleted { voice_room: *voice_room }),
-        Event::ChannelDeleted { channel } => Some(ServerMessage::ChannelDeleted { channel: *channel }),
+        Event::VoiceRoomDeleted { voice_room } => Some(ServerMessage::VoiceRoomDeleted {
+            voice_room: *voice_room,
+        }),
+        Event::ChannelDeleted { channel } => {
+            Some(ServerMessage::ChannelDeleted { channel: *channel })
+        }
 
         // ---- compartilhamento de tela ----
         //
@@ -2663,10 +2700,12 @@ fn translate(event: &Event, channels: &[ChannelId], self_person: PersonId) -> Op
             person: *person,
             screen: *screen,
         }),
-        Event::ScreenShareStopped { voice_room, screen } => Some(ServerMessage::ScreenShareStopped {
-            voice_room: *voice_room,
-            screen: *screen,
-        }),
+        Event::ScreenShareStopped { voice_room, screen } => {
+            Some(ServerMessage::ScreenShareStopped {
+                voice_room: *voice_room,
+                screen: *screen,
+            })
+        }
 
         // A todo mundo, como o `ScreenShareStarted` de que ele é a continuação.
         //

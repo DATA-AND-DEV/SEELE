@@ -37,11 +37,11 @@ use anyhow::Result;
 use seele_core::enlace::{Aviso, Destino, Enlace};
 use seele_core::{Link, MemoryPinStore};
 use seele_proto::control::ServerMessage;
-use seele_proto::ids::{VoiceRoomId, ClientMessageId, ChannelId};
+use seele_proto::ids::{ChannelId, ClientMessageId, VoiceRoomId};
+use seele_server::hospedagem::Hospedagem;
 use seele_server::persistence::Location;
 use seele_server::server::Occupant;
-use seele_server::hospedagem::Hospedagem;
-use seele_server::{ServerConfig, Daemon};
+use seele_server::{Daemon, ServerConfig};
 
 const VOICE_ROOM: u32 = 1;
 const LINE: u32 = 1;
@@ -197,7 +197,10 @@ async fn conectar_ejetar_e_conectar_de_novo_no_mesmo_processo() -> Result<()> {
     let (endereco, servidor) = server().await?;
 
     let primeiro = conectar_e_falar(endereco, 46, "ayanami", "primeira volta").await?;
-    assert!(primeiro.sessao().person.0 > 0, "a primeira sessão não subiu");
+    assert!(
+        primeiro.sessao().person.0 > 0,
+        "a primeira sessão não subiu"
+    );
     assert_eq!(primeiro.estado(), Link::Online);
     let primeira = primeiro.sessao().id;
 

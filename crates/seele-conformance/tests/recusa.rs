@@ -18,7 +18,7 @@ use anyhow::Result;
 use seele_core::enlace::{Destino, Enlace};
 use seele_core::{Client, ConnectError, MemoryPinStore, PinStore};
 use seele_server::persistence::Location;
-use seele_server::{ServerConfig, Daemon};
+use seele_server::{Daemon, ServerConfig};
 
 async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
     let config = ServerConfig {

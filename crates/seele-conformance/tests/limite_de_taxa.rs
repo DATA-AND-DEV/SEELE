@@ -26,7 +26,7 @@ use seele_core::{Client, ConnectError, MemoryPinStore};
 use seele_proto::control::{AlertReason, DisconnectReason, ServerMessage};
 use seele_server::persistence::Location;
 use seele_server::taxa::{APERTOS_DE_RAJADA, PACIENCIA, QUADROS_DE_RAJADA};
-use seele_server::{ServerConfig, Daemon};
+use seele_server::{Daemon, ServerConfig};
 
 async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
     let config = ServerConfig {

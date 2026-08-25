@@ -1167,7 +1167,7 @@ mod tests {
         app.servers = vec!["Terceira Tóquio".into(), "Geofront".into()];
         app.tree = vec![
             Node::VoiceRoom {
-                name: "VOICE_ROOM-01 CENTRAL".into(),
+                name: "SALA-01 CENTRAL".into(),
                 open: true,
                 sync: None,
             },
@@ -1227,7 +1227,7 @@ mod tests {
         // colour alone, and an average is not an exception to that.
         let mut app = populated();
         app.tree[0] = Node::VoiceRoom {
-            name: "VOICE_ROOM-01 CENTRAL".into(),
+            name: "SALA-01 CENTRAL".into(),
             open: true,
             // 98 and 44, which is what the two people below it read.
             sync: Some(seele_core::VoiceRoomSync {
@@ -1240,10 +1240,13 @@ mod tests {
 
         let row = screen
             .lines()
-            .find(|row| row.contains("VOICE_ROOM-01"))
+            .find(|row| row.contains("SALA-01"))
             .expect("the voice room row");
-        assert!(row.contains("▒ 71%"), "no average on the voice room row: {row:?}");
-        assert!(row.contains("VOICE_ROOM-01"), "the name was eaten: {row:?}");
+        assert!(
+            row.contains("▒ 71%"),
+            "no average on the voice room row: {row:?}"
+        );
+        assert!(row.contains("SALA-01"), "the name was eaten: {row:?}");
     }
 
     #[test]
@@ -1254,7 +1257,7 @@ mod tests {
 
         let row = screen
             .lines()
-            .find(|row| row.contains("VOICE_ROOM-01"))
+            .find(|row| row.contains("SALA-01"))
             .expect("the voice room row");
         assert!(
             !row.contains('%'),

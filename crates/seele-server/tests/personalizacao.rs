@@ -40,7 +40,7 @@ use anyhow::Result;
 use ed25519_dalek::{Signer, SigningKey};
 use seele_proto::control::{AlertReason, ClientMessage, ServerMessage, MAX_SERVER_ICON_SIDE};
 use seele_server::persistence::Location;
-use seele_server::{frame, ServerConfig, Daemon};
+use seele_server::{frame, Daemon, ServerConfig};
 
 /// Quanto se espera por um quadro que tem de vir.
 ///

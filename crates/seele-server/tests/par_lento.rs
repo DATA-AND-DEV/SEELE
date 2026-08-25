@@ -39,9 +39,9 @@ use std::time::Duration;
 use anyhow::Result;
 use ed25519_dalek::{Signer, SigningKey};
 use seele_proto::control::{ClientMessage, DisconnectReason, ServerMessage};
-use seele_proto::ids::{ClientMessageId, ChannelId};
+use seele_proto::ids::{ChannelId, ClientMessageId};
 use seele_server::persistence::Location;
-use seele_server::{frame, ServerConfig, Daemon};
+use seele_server::{frame, Daemon, ServerConfig};
 
 const LINE: u32 = 1;
 
@@ -217,7 +217,9 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
     let mut ouvinte = abrir(endereco, 1, 16 * 1024).await?;
     frame::write(
         &mut ouvinte.envio,
-        &ClientMessage::JoinChannel { channel: ChannelId(LINE) },
+        &ClientMessage::JoinChannel {
+            channel: ChannelId(LINE),
+        },
     )
     .await?;
 

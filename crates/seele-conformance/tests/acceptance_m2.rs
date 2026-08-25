@@ -17,10 +17,10 @@ use std::time::Duration;
 
 use anyhow::Result;
 use ed25519_dalek::SigningKey;
-use seele_core::{Client, MemoryPinStore, LinkTrust, PinDecision};
-use seele_proto::ids::{VoiceRoomId, Ssrc};
+use seele_core::{Client, LinkTrust, MemoryPinStore, PinDecision};
+use seele_proto::ids::{Ssrc, VoiceRoomId};
 use seele_proto::MediaHeader;
-use seele_server::{ServerConfig, Daemon};
+use seele_server::{Daemon, ServerConfig};
 
 /// How long to wait for a datagram before calling it lost.
 ///
@@ -154,7 +154,10 @@ async fn a_client_without_permission_is_refused() -> Result<()> {
     // The observer is in the voice room and may listen.
     observer.send_media(media(observer.session().ssrc, 1, b"should not carry"))?;
     let leaked = tokio::time::timeout(Duration::from_millis(600), person.next_media()).await;
-    assert!(leaked.is_err(), "an observer was forwarded to the voice room");
+    assert!(
+        leaked.is_err(),
+        "an observer was forwarded to the voice room"
+    );
 
     // The other direction still works, so the refusal is about permission rather
     // than a broken voice room.
@@ -189,7 +192,10 @@ async fn a_forged_ssrc_is_refused() -> Result<()> {
     shinji.send_media(forged)?;
 
     let delivered = tokio::time::timeout(Duration::from_millis(600), asuka.next_media()).await;
-    assert!(delivered.is_err(), "a forged datagram reached the voice room");
+    assert!(
+        delivered.is_err(),
+        "a forged datagram reached the voice room"
+    );
 
     // An honest datagram from the same connection still goes through, so the
     // refusal is about the forgery and not about Shinji.
@@ -364,7 +370,10 @@ async fn the_session_names_the_server_and_its_voice_room() -> Result<()> {
     let session = client.session();
     assert_eq!(session.server, "Terceira Tóquio");
     assert_eq!(session.voice_rooms.len(), 1);
-    assert_eq!(session.voice_rooms.first().map(|voice_room| voice_room.id), Some(VoiceRoomId(1)));
+    assert_eq!(
+        session.voice_rooms.first().map(|voice_room| voice_room.id),
+        Some(VoiceRoomId(1))
+    );
 
     Ok(())
 }
@@ -384,7 +393,10 @@ async fn media_before_entering_a_voice_room_goes_nowhere() -> Result<()> {
     listener.send_media(media(listener.session().ssrc, 1, b"nope"))?;
 
     let leaked = tokio::time::timeout(Duration::from_millis(600), inside.next_media()).await;
-    assert!(leaked.is_err(), "media from outside the voice room was forwarded");
+    assert!(
+        leaked.is_err(),
+        "media from outside the voice room was forwarded"
+    );
 
     Ok(())
 }

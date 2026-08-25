@@ -54,9 +54,9 @@ use std::time::Duration;
 use anyhow::Result;
 use seele_core::{Client, MemoryPinStore};
 use seele_proto::control::ServerMessage;
-use seele_proto::ids::{VoiceRoomId, ClientMessageId, ChannelId};
+use seele_proto::ids::{ChannelId, ClientMessageId, VoiceRoomId};
 use seele_server::persistence::Location;
-use seele_server::{ServerConfig, Daemon};
+use seele_server::{Daemon, ServerConfig};
 
 const VOICE_ROOM: u32 = 1;
 const LINE: u32 = 1;

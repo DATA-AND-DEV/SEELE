@@ -1,4 +1,4 @@
-/* SEELE · Entry Plug — a camada comum a toda tela.
+/* SEELE — a camada comum a toda tela.
    Consome `tokens.css`, congelado em M0.12 (ADR 0014). Nenhuma cor literal
    aparece aqui: se um valor não está nos tokens, ele não é do produto.
 

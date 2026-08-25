@@ -20,7 +20,7 @@ pub enum Command {
         /// Whatever was typed. Resolving it is the caller's problem.
         target: String,
     },
-    /// `:voice_room <nome>`.
+    /// `:sala <nome>` — ou `:room`.
     VoiceRoom {
         /// Name or number.
         which: String,
@@ -90,7 +90,7 @@ pub fn parse(input: &str) -> Command {
         "q" | "quit" | "sair" => Command::Quit,
         "ejetar" | "eject" => Command::Eject,
         "conectar" | "connect" if !joined.is_empty() => Command::Connect { target: joined },
-        "voice room" if !joined.is_empty() => Command::VoiceRoom { which: joined },
+        "sala" | "room" if !joined.is_empty() => Command::VoiceRoom { which: joined },
         "linha" | "channel" if !joined.is_empty() => Command::Channel { which: joined },
         "sync" => Command::Sync,
         "audio" | "áudio" => Command::Audio,
@@ -142,7 +142,7 @@ mod tests {
             }
         );
         assert_eq!(
-            parse(":voice room central"),
+            parse(":sala central"),
             Command::VoiceRoom {
                 which: "central".into()
             }
@@ -177,9 +177,9 @@ mod tests {
     #[test]
     fn a_voice_room_name_may_contain_spaces() {
         assert_eq!(
-            parse(":voice room VOICE_ROOM-01 CENTRAL"),
+            parse(":sala SALA-01 CENTRAL"),
             Command::VoiceRoom {
-                which: "VOICE_ROOM-01 CENTRAL".into()
+                which: "SALA-01 CENTRAL".into()
             }
         );
     }
@@ -189,7 +189,7 @@ mod tests {
         // `:conectar` alone connecting to the last host would be a surprise the
         // first time somebody mistypes it.
         assert!(matches!(parse(":conectar"), Command::Unknown { .. }));
-        assert!(matches!(parse(":voice room"), Command::Unknown { .. }));
+        assert!(matches!(parse(":sala"), Command::Unknown { .. }));
     }
 
     #[test]

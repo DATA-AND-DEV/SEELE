@@ -55,7 +55,7 @@ pub use bomba::{
 /// — um número medido e um número suposto merecem frases diferentes.
 pub use caminho::{Amostra as AmostraDoCaminho, Sonda, Transporte as TransporteDoCaminho};
 pub use client::{
-    AttachmentRequest, Client, ConnectError, FlowControl, MediaChannel, LinkTrust, Previewed, Sent,
+    AttachmentRequest, Client, ConnectError, FlowControl, LinkTrust, MediaChannel, Previewed, Sent,
     SessionInfo, Transfers,
 };
 pub use ed25519_dalek::SigningKey;
@@ -64,7 +64,7 @@ pub use preview::{
     check_server_icon, IconRefusal, ImageFormat, Verdict as PreviewVerdict, PREVIEW_LIMIT,
 };
 pub use state::{
-    VoiceRoomSync, Changed, ChavePedida, Ended, Message, Notice, Person, Room, Tela, TransferNotice,
+    Changed, ChavePedida, Ended, Message, Notice, Person, Room, Tela, TransferNotice, VoiceRoomSync,
 };
 pub use tela::{
     menor_resolucao, resolucao_estimada_para, Envio, ErroDeTela, MotivoDeDescarte, MotivoDeParada,
@@ -84,6 +84,7 @@ pub use video::{
     PermissaoDeTela,
 };
 
+pub use seele_audio::device::{consentimento_do_microfone, ConsentimentoDoMicrofone};
 /// O módulo do Cisco e os degraus que a pessoa escolhe.
 ///
 /// Reexportados porque [`PedidoDeTela`] pede os três e o ADR 0002 não deixa uma
@@ -95,7 +96,6 @@ pub use seele_video::modulo::{
     instalar_em as instalar_modulo_de_video, procurar_em as procurar_modulo_de_video,
     publicado_para_este_sistema as modulo_de_video_publicado, ModuloPublicado,
 };
-pub use seele_audio::device::{consentimento_do_microfone, ConsentimentoDoMicrofone};
 pub use seele_video::{BibliotecaDeVideo, ErroDeVideo};
 pub use voice::{
     capture_devices, playback_devices, CaptureDevice, DeviceChoice, DeviceRates, PlaybackDevice,
@@ -115,9 +115,9 @@ pub use voice::{
 /// and that belongs in the core.
 pub use seele_audio::telemetry::{AudioTelemetry, LocalTelemetry, SourceTelemetry};
 pub use seele_proto::control::{
-    AlertReason, AlertSeverity, AttachmentInfo, AttachmentRefusal, AttachmentState, VoiceRoomInfo,
-    DisconnectReason, ChannelInfo, Permission, PersonProfile, PersonState, Presence, ServerMessage,
-    Subsystem, SubsystemHealth, Telemetry,
+    AlertReason, AlertSeverity, AttachmentInfo, AttachmentRefusal, AttachmentState, ChannelInfo,
+    DisconnectReason, Permission, PersonProfile, PersonState, Presence, ServerMessage, Subsystem,
+    SubsystemHealth, Telemetry, VoiceRoomInfo,
 };
 /// A impressão digital de uma chave pública, no formato que o produto mostra.
 ///
@@ -127,8 +127,8 @@ pub use seele_proto::control::{
 pub use seele_proto::transport::key_fingerprint;
 
 pub use seele_proto::ids::{
-    AttachmentId, VoiceRoomId, ClientMessageId, ChannelId, MessageId, PersonId, RoleId, ScreenId, SessionId,
-    Ssrc,
+    AttachmentId, ChannelId, ClientMessageId, MessageId, PersonId, RoleId, ScreenId, SessionId,
+    Ssrc, VoiceRoomId,
 };
 /// O cabeçalho de abertura de uma transmissão de tela, e o que ele carrega.
 ///
@@ -139,7 +139,7 @@ pub use seele_proto::ids::{
 /// a tela não promete a escolha, e um número que a casca pudesse escrever no
 /// cabeçalho seria a casca prometendo.
 pub use seele_proto::screen::{ScreenCodec, ScreenHeader, ScreenSource};
-pub use seele_proto::signal::{SignalBand, SyncInputs, Signal};
+pub use seele_proto::signal::{Signal, SignalBand, SyncInputs};
 pub use seele_proto::transport::DEFAULT_PORT;
 pub use seele_proto::uri;
 pub use seele_proto::PROTOCOL_VERSION;

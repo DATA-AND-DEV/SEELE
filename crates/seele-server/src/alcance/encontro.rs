@@ -867,7 +867,8 @@ mod testes {
     #[test]
     fn o_server_de_pilha_dupla_alcanca_um_ponto_de_encontro_ipv4() {
         let escuta = SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, 0));
-        let Ok((server, crate::alcance::Pilha::Dupla)) = crate::alcance::abrir_escuta(escuta) else {
+        let Ok((server, crate::alcance::Pilha::Dupla)) = crate::alcance::abrir_escuta(escuta)
+        else {
             // Sem pilha dupla não há o que este teste afirme.
             return;
         };

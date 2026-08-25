@@ -1205,7 +1205,11 @@ pub(crate) mod tests {
             );
 
             let mut anterior = u32::MAX;
-            for faixa in [SignalBand::Nominal, SignalBand::Degraded, SignalBand::Critical] {
+            for faixa in [
+                SignalBand::Nominal,
+                SignalBand::Degraded,
+                SignalBand::Critical,
+            ] {
                 let agora = teto.teto(faixa);
 
                 // 1 — o vídeo nunca passa da fração medida, então a voz sempre
@@ -1348,7 +1352,9 @@ pub(crate) mod tests {
         // E continua sendo teto depois de o sinal cair: a faixa degradada corta
         // o que o caminho dá, e a escolha continua por cima do resultado.
         assert_eq!(
-            caminho.com_escolha(Some(400_000)).teto(SignalBand::Degraded),
+            caminho
+                .com_escolha(Some(400_000))
+                .teto(SignalBand::Degraded),
             Teto::Bps(400_000)
         );
     }

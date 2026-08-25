@@ -76,7 +76,8 @@ fn the_stylesheet_uses_no_colour_the_tokens_do_not_define() {
         .lines()
         .filter(|channel| channel.contains('#') && !channel.trim_start().starts_with("/*"))
         .filter(|channel| {
-            channel.split('#')
+            channel
+                .split('#')
                 .skip(1)
                 .any(|rest| rest.chars().take(3).all(|c| c.is_ascii_hexdigit()))
         })

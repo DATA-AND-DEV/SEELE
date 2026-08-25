@@ -13,8 +13,8 @@ use anyhow::Result;
 use ed25519_dalek::SigningKey;
 use seele_core::{Client, MemoryPinStore, PinDecision, PinStore};
 use seele_proto::ids::VoiceRoomId;
-use seele_server::persistence::{Persistence, Location};
-use seele_server::{admissao, ServerConfig, Daemon};
+use seele_server::persistence::{Location, Persistence};
+use seele_server::{admissao, Daemon, ServerConfig};
 
 const VOICE_ROOM: VoiceRoomId = VoiceRoomId(1);
 
@@ -508,7 +508,6 @@ async fn um_server_com_portaria_nao_admite_ninguem_por_um_caminho_lateral() -> R
         "trocar de apelido não resolveu: {:?}",
         com_outro_nome.err()
     );
-
 
     servidor.shutdown();
     Ok(())

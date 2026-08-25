@@ -32,18 +32,18 @@ use seele_proto::ids::VoiceRoomId;
 
 pub mod admissao;
 pub mod alcance;
-pub mod voice_room;
-pub mod persistence;
-pub mod server;
 pub mod frame;
 pub mod hospedagem;
 pub mod permissions;
+pub mod persistence;
 pub mod portaria;
+pub mod server;
 pub mod session;
 pub mod taxa;
 pub mod tela;
 pub mod tls;
 pub mod transfer;
+pub mod voice_room;
 
 /// O vocabulário de fio de um ponto de encontro, e **só** ele.
 ///
@@ -513,7 +513,8 @@ impl Daemon {
                 let peer = connection.remote_address();
                 tracing::info!(%peer, "link unverified");
 
-                if let Err(error) = session::serve(connection, config, registry, server, voice_rooms).await
+                if let Err(error) =
+                    session::serve(connection, config, registry, server, voice_rooms).await
                 {
                     tracing::info!(%peer, %error, "session closed");
                 }
@@ -602,7 +603,7 @@ impl Daemon {
 mod tests {
     use super::*;
     use crate::persistence::channels::Channels;
-    use crate::persistence::{Persistence, Location};
+    use crate::persistence::{Location, Persistence};
 
     fn born(config: &ServerConfig) -> Persistence {
         let mut persistence = Persistence::open(&config.database).expect("open");
@@ -624,11 +625,19 @@ mod tests {
         // `channels` depois do rename, e sombrear o DAO com o resultado dele
         // fazia a linha seguinte pedir `voice_rooms()` a um `Vec`.
         let channels = dao.channels().expect("channels");
-        assert_eq!(channels.len(), 1, "a server opened with no canal: {channels:?}");
+        assert_eq!(
+            channels.len(),
+            1,
+            "a server opened with no canal: {channels:?}"
+        );
         assert_eq!(channels[0].name, "geral");
 
         let voice_rooms = dao.voice_rooms().expect("voice_rooms");
-        assert_eq!(voice_rooms.len(), 1, "a server opened with na sala de voz: {voice_rooms:?}");
+        assert_eq!(
+            voice_rooms.len(),
+            1,
+            "a server opened with na sala de voz: {voice_rooms:?}"
+        );
         assert_eq!(voice_rooms[0].name, config.voice_room_name);
         assert_eq!(voice_rooms[0].limit, config.voice_room_limit);
         assert_eq!(
@@ -673,16 +682,21 @@ mod tests {
         };
 
         let persistence = born(&config);
-        let voice_room = Channels::new(&persistence).voice_rooms().expect("voice_rooms")[0].id;
+        let voice_room = Channels::new(&persistence)
+            .voice_rooms()
+            .expect("voice_rooms")[0]
+            .id;
         Channels::new(&persistence)
-            .rename_voice_room(voice_room, "VOICE_ROOM-01 PONTE")
+            .rename_voice_room(voice_room, "SALA-01 PONTE")
             .expect("rename");
         drop(persistence);
 
         let persistence = born(&config);
-        let voice_rooms = Channels::new(&persistence).voice_rooms().expect("voice_rooms");
+        let voice_rooms = Channels::new(&persistence)
+            .voice_rooms()
+            .expect("voice_rooms");
         assert_eq!(voice_rooms.len(), 1);
-        assert_eq!(voice_rooms[0].name, "VOICE_ROOM-01 PONTE");
+        assert_eq!(voice_rooms[0].name, "SALA-01 PONTE");
     }
 
     #[test]
@@ -710,7 +724,10 @@ mod tests {
 
         let persistence = born(&config);
         assert!(
-            Channels::new(&persistence).channels().expect("channels").is_empty(),
+            Channels::new(&persistence)
+                .channels()
+                .expect("channels")
+                .is_empty(),
             "o canal destroyed on purpose was written back by the next boot"
         );
     }
@@ -731,19 +748,21 @@ mod tests {
         let channels = Channels::new(&persistence);
         let inicial = channels.voice_rooms().expect("voice_rooms")[0].id;
         channels
-            .create_voice_room("VOICE_ROOM-02 PONTE", 8, None)
+            .create_voice_room("SALA-02 PONTE", 8, None)
             .expect("voice room");
         channels.delete_voice_room(inicial).expect("delete");
         drop(persistence);
 
         let persistence = born(&config);
-        let voice_rooms = Channels::new(&persistence).voice_rooms().expect("voice_rooms");
+        let voice_rooms = Channels::new(&persistence)
+            .voice_rooms()
+            .expect("voice_rooms");
         assert_eq!(
             voice_rooms.len(),
             1,
             "the opening voice room was written back: {voice_rooms:?}"
         );
-        assert_eq!(voice_rooms[0].name, "VOICE_ROOM-02 PONTE");
+        assert_eq!(voice_rooms[0].name, "SALA-02 PONTE");
     }
 
     #[test]

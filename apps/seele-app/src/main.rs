@@ -31,8 +31,8 @@ mod icone;
 use std::sync::{Arc, Mutex};
 
 use seele_ffi::{
-    ConnectConfig, ConnectFailure, Event, EventListener, ChannelWeight, Connection, ConnectionError, Preview,
-    PreviewRules, Snapshot, VoiceMode,
+    ChannelWeight, ConnectConfig, ConnectFailure, Connection, ConnectionError, Event,
+    EventListener, Preview, PreviewRules, Snapshot, VoiceMode,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -305,7 +305,9 @@ async fn connect(
             // grava em qual sala de voz a pessoa entrou e o lê de volta como padrão na
             // sua tela de seleção. Passar `None` daqui apagaria, a cada visita
             // pelo app, o que o terminal anotou.
-            let voice_room = lista.buscar(&alvo).and_then(|conhecido| conhecido.voice_room);
+            let voice_room = lista
+                .buscar(&alvo)
+                .and_then(|conhecido| conhecido.voice_room);
             // Falhar em gravar um atalho não pode derrubar uma conversa que já
             // está de pé.
             if let Err(erro) = lista.registrar(&alvo, &apelido, voice_room) {
@@ -406,7 +408,8 @@ async fn hospedar(
         }
     }
 
-    let banco = seele_server::persistence::banco_do_cliente(std::path::Path::new(&config_dir(&app)));
+    let banco =
+        seele_server::persistence::banco_do_cliente(std::path::Path::new(&config_dir(&app)));
     let server = seele_server::hospedagem::Hospedagem::iniciar(
         PORTA_PADRAO,
         seele_server::persistence::Location::File(banco),
@@ -493,7 +496,11 @@ fn classificar(erro: &anyhow::Error) -> FalhaAoHospedar {
 
 #[tauri::command]
 async fn disconnect(session: State<'_, Session>) -> Result<(), ()> {
-    let connection = session.connection.lock().ok().and_then(|mut slot| slot.take());
+    let connection = session
+        .connection
+        .lock()
+        .ok()
+        .and_then(|mut slot| slot.take());
     // Dropping the handle is what ends the session; taking it out of the slot
     // is what makes the next `connect` allowed.
     drop(connection);
@@ -553,7 +560,11 @@ fn open_channel(session: State<'_, Session>, channel: u32) -> Result<(), Connect
 }
 
 #[tauri::command]
-fn send_message(session: State<'_, Session>, channel: u32, body: String) -> Result<(), ConnectionError> {
+fn send_message(
+    session: State<'_, Session>,
+    channel: u32,
+    body: String,
+) -> Result<(), ConnectionError> {
     session.connection()?.send_message(channel, body)
 }
 
@@ -713,7 +724,11 @@ fn enviar_anexo(
 /// varrer.** É a guarda que o sistema já tem, e que só funciona se quem grava a
 /// acionar.
 #[tauri::command]
-fn salvar_anexo(session: State<'_, Session>, anexo: u64, destino: String) -> Result<(), ConnectionError> {
+fn salvar_anexo(
+    session: State<'_, Session>,
+    anexo: u64,
+    destino: String,
+) -> Result<(), ConnectionError> {
     session.connection()?.save_attachment(anexo, destino)
 }
 
@@ -793,7 +808,9 @@ fn criar_voice_room(
     limit: u16,
     channel: Option<u32>,
 ) -> Result<(), ConnectionError> {
-    session.connection()?.create_voice_room(name, limit, channel)
+    session
+        .connection()?
+        .create_voice_room(name, limit, channel)
 }
 
 /// Pede ao servidor que faça uma Linha.
@@ -804,13 +821,21 @@ fn criar_linha(session: State<'_, Session>, name: String) -> Result<(), Connecti
 
 /// Pede ao servidor que renomeie uma sala de voz.
 #[tauri::command]
-fn renomear_voice_room(session: State<'_, Session>, voice_room: u32, name: String) -> Result<(), ConnectionError> {
+fn renomear_voice_room(
+    session: State<'_, Session>,
+    voice_room: u32,
+    name: String,
+) -> Result<(), ConnectionError> {
     session.connection()?.rename_voice_room(voice_room, name)
 }
 
 /// Pede ao servidor que renomeie uma Linha.
 #[tauri::command]
-fn renomear_linha(session: State<'_, Session>, channel: u32, name: String) -> Result<(), ConnectionError> {
+fn renomear_linha(
+    session: State<'_, Session>,
+    channel: u32,
+    name: String,
+) -> Result<(), ConnectionError> {
     session.connection()?.rename_channel(channel, name)
 }
 
@@ -990,8 +1015,8 @@ async fn escolher_icone_do_server(
     // Fora da linha principal: uma foto de doze megapixels leva um tempo visível
     // para ser decodificada e reduzida, e fazer isso no laço de eventos congela
     // a janela inteira no meio de um gesto que parecia instantâneo.
-    let Ok(Some(pronto)) = tauri::async_runtime::spawn_blocking(move || icone::encolher(&bytes))
-        .await
+    let Ok(Some(pronto)) =
+        tauri::async_runtime::spawn_blocking(move || icone::encolher(&bytes)).await
     else {
         // Não é imagem, ou é uma que nem o último degrau fez caber. As duas
         // dizem a mesma coisa a quem escolheu: este arquivo não vira ícone.
@@ -1064,7 +1089,11 @@ fn remover_mensagem(session: State<'_, Session>, message: u64) -> Result<(), Con
 
 /// Pede ao servidor que mova alguém para uma sala de voz — `mover_pessoa`.
 #[tauri::command]
-fn mover_pessoa(session: State<'_, Session>, person: u64, voice_room: u32) -> Result<(), ConnectionError> {
+fn mover_pessoa(
+    session: State<'_, Session>,
+    person: u64,
+    voice_room: u32,
+) -> Result<(), ConnectionError> {
     session.connection()?.move_person(person, voice_room)
 }
 
@@ -1105,7 +1134,10 @@ fn apagar_linha(session: State<'_, Session>, channel: u32) -> Result<(), Connect
 /// Quem não conseguir resposta **não abre a caixa**. Não há versão honesta dela
 /// sem os três números.
 #[tauri::command]
-async fn peso_da_linha(session: State<'_, Session>, channel: u32) -> Result<ChannelWeight, ConnectionError> {
+async fn peso_da_linha(
+    session: State<'_, Session>,
+    channel: u32,
+) -> Result<ChannelWeight, ConnectionError> {
     // O `Arc` sai do cadeado antes do `await`, e é de propósito: `Session::connection`
     // devolve um clone justamente para que nada segure o `Mutex` atravessando um
     // ponto de espera.
@@ -1173,13 +1205,17 @@ fn set_volume(
 /// comandos separados e a janela chama os dois — uma lista vazia sem motivo é
 /// um beco.
 #[tauri::command]
-fn fontes_de_tela(session: State<'_, Session>) -> Result<Vec<seele_ffi::FonteDeTela>, ConnectionError> {
+fn fontes_de_tela(
+    session: State<'_, Session>,
+) -> Result<Vec<seele_ffi::FonteDeTela>, ConnectionError> {
     session.connection()?.fontes_de_tela()
 }
 
 /// O que o sistema operacional respondeu sobre gravar a tela.
 #[tauri::command]
-fn permissao_de_tela(session: State<'_, Session>) -> Result<seele_ffi::PermissaoDeTela, ConnectionError> {
+fn permissao_de_tela(
+    session: State<'_, Session>,
+) -> Result<seele_ffi::PermissaoDeTela, ConnectionError> {
     Ok(session.connection()?.permissao_de_tela())
 }
 
@@ -1278,7 +1314,9 @@ fn lembrar_aparencia_do_servidor(app: AppHandle, session: State<'_, Session>) {
     let Ok(Some(alvo)) = session.alvo.lock().map(|guardado| guardado.clone()) else {
         return;
     };
-    let Ok(connection) = session.connection() else { return };
+    let Ok(connection) = session.connection() else {
+        return;
+    };
     let nome = connection.snapshot().server;
     let icone = connection.server_icon();
 
@@ -1723,8 +1761,8 @@ async fn estado_da_porta(session: State<'_, Session>) -> Result<EstadoDaPorta, F
     let persistence = persistence.lock().await;
     let politica = seele_server::admissao::Politica::carregar(&persistence)
         .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
-    let portaria_ligada =
-        seele_server::portaria::ligada(&persistence).map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
+    let portaria_ligada = seele_server::portaria::ligada(&persistence)
+        .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
     let pendentes = seele_server::portaria::pendentes(&persistence)
         .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
 
@@ -1799,8 +1837,8 @@ async fn pedidos_da_portaria(
 ) -> Result<Vec<PedidoNaTela>, FalhaNaPortaria> {
     let persistence = casper_hospedado(&session)?;
     let persistence = persistence.lock().await;
-    let fila =
-        seele_server::portaria::pedidos(&persistence).map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
+    let fila = seele_server::portaria::pedidos(&persistence)
+        .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
 
     Ok(fila
         .into_iter()

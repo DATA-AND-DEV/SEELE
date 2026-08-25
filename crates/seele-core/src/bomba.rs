@@ -1329,7 +1329,10 @@ mod tests {
             panic!("a escolha não abriu fluxo novo");
         };
         assert_eq!(resolucao, Resolucao::P720, "a escolha não pegou");
-        assert_eq!(geracao, 2, "o fluxo tinha de recomeçar: o tamanho vai no cabeçalho");
+        assert_eq!(
+            geracao, 2,
+            "o fluxo tinha de recomeçar: o tamanho vai no cabeçalho"
+        );
         assert_eq!(
             captura.inicios(),
             vec![(1920, 1080), (1280, 720)],

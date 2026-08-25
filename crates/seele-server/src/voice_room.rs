@@ -21,7 +21,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use seele_proto::ids::{VoiceRoomId, PersonId, ScreenId, Ssrc};
+use seele_proto::ids::{PersonId, ScreenId, Ssrc, VoiceRoomId};
 use seele_proto::transport::MAX_FRAMES_PER_SECOND;
 use tokio::sync::{broadcast, mpsc};
 
@@ -774,7 +774,12 @@ mod tests {
         vistos
     }
 
-    fn member(voice_room: &mut VoiceRoom, person: u64, ssrc: u32, may_speak: bool) -> mpsc::Receiver<Vec<u8>> {
+    fn member(
+        voice_room: &mut VoiceRoom,
+        person: u64,
+        ssrc: u32,
+        may_speak: bool,
+    ) -> mpsc::Receiver<Vec<u8>> {
         let (tx, rx) = mpsc::channel(64);
         let (tela, _) = mpsc::channel(4);
         voice_room.handle(VoiceRoomCommand::Join {
@@ -1056,7 +1061,9 @@ mod tests {
         let mut bob = member(&mut voice_room, 2, 200, true);
         assert_eq!(voice_room.occupancy(), 2);
 
-        voice_room.handle(VoiceRoomCommand::Leave { person: PersonId(2) });
+        voice_room.handle(VoiceRoomCommand::Leave {
+            person: PersonId(2),
+        });
         assert_eq!(voice_room.occupancy(), 1);
 
         voice_room.handle(VoiceRoomCommand::Datagram {
@@ -1259,7 +1266,9 @@ mod tests {
         let _fim = compartilhar(&mut voice_room, 1, 7);
         let mut convite = bob.try_recv().unwrap();
 
-        voice_room.handle(VoiceRoomCommand::Leave { person: PersonId(1) });
+        voice_room.handle(VoiceRoomCommand::Leave {
+            person: PersonId(1),
+        });
         assert!(
             matches!(convite.pedacos.try_recv(), Ok(Pedaco::Fim)),
             "o espectador não foi avisado de que a transmissão acabou"
@@ -1334,7 +1343,9 @@ mod tests {
         assert_eq!(contagens(&mut ouvinte), vec![1, 2]);
 
         // E a saída é a metade boa de N mudar: ela devolve teto.
-        voice_room.handle(VoiceRoomCommand::Leave { person: PersonId(2) });
+        voice_room.handle(VoiceRoomCommand::Leave {
+            person: PersonId(2),
+        });
         assert_eq!(contagens(&mut ouvinte), vec![1]);
     }
 

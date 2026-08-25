@@ -30,10 +30,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use seele_ffi::{ConnectConfig, EndReason, Event, EventListener, NoticeReason, Connection, ConnectionError};
-use seele_server::persistence::{Persistence, Location};
+use seele_ffi::{
+    ConnectConfig, Connection, ConnectionError, EndReason, Event, EventListener, NoticeReason,
+};
 use seele_server::permissions::{Permissions, COMMANDER_ROLE, OPERATOR_ROLE, PERSON_ROLE};
-use seele_server::{ServerConfig, Daemon};
+use seele_server::persistence::{Location, Persistence};
+use seele_server::{Daemon, ServerConfig};
 
 const VOICE_ROOM: u32 = 1;
 const LINE: u32 = 1;
@@ -136,7 +138,8 @@ fn ate<F: Fn(&Connection) -> bool>(connection: &Connection, pronto: F) -> bool {
 
 /// Quantas pessoas o snapshot desenha num voice room.
 fn sentados(connection: &Connection, voice_room: u32) -> usize {
-    connection.snapshot()
+    connection
+        .snapshot()
         .voice_rooms
         .iter()
         .find(|desenhado| desenhado.id == voice_room)
@@ -184,7 +187,8 @@ fn dar_papel(
     person: seele_proto::ids::PersonId,
     papel: seele_proto::ids::RoleId,
 ) {
-    let persistence = Persistence::open(&Location::File(arquivo.to_path_buf())).expect("abrir o banco");
+    let persistence =
+        Persistence::open(&Location::File(arquivo.to_path_buf())).expect("abrir o banco");
     let permissions = Permissions::new(&persistence);
     for tinha in [COMMANDER_ROLE, OPERATOR_ROLE, PERSON_ROLE] {
         if tinha != papel {
@@ -295,7 +299,8 @@ async fn expulsar_acaba_com_a_sessao_e_deixa_voltar() -> Result<()> {
     visita.insert_plug(VOICE_ROOM)?;
     let quem = visita.snapshot().me.expect("a visita tem identidade");
     assert!(
-        ate(&anfitriao, |connection| sentados(connection, VOICE_ROOM) == 1),
+        ate(&anfitriao, |connection| sentados(connection, VOICE_ROOM)
+            == 1),
         "a visita não chegou a sentar; expulsar não mede nada"
     );
 
@@ -315,7 +320,8 @@ async fn expulsar_acaba_com_a_sessao_e_deixa_voltar() -> Result<()> {
 
     // Dois: a sala esvazia para quem ficou.
     assert!(
-        ate(&anfitriao, |connection| sentados(connection, VOICE_ROOM) == 0),
+        ate(&anfitriao, |connection| sentados(connection, VOICE_ROOM)
+            == 0),
         "quem foi expulso continua desenhado na sala de voz"
     );
 
@@ -434,9 +440,13 @@ async fn mover_leva_o_plug_e_conta_a_pessoa() -> Result<()> {
     let (endereco, servidor, _arquivo) = server("mover").await?;
 
     let anfitriao = entrar(endereco, "anfitriao-mover").await?;
-    anfitriao.create_voice_room("VOICE_ROOM-02 SALA DOS FUNDOS".into(), 8, None)?;
+    anfitriao.create_voice_room("SALA-02 SALA DOS FUNDOS".into(), 8, None)?;
     assert!(
-        ate(&anfitriao, |connection| connection.snapshot().voice_rooms.len() == 2),
+        ate(&anfitriao, |connection| connection
+            .snapshot()
+            .voice_rooms
+            .len()
+            == 2),
         "o segundo sala de voz não foi feito, e não há para onde mover ninguém"
     );
     let destino = anfitriao.snapshot().voice_rooms[1].id;
@@ -449,7 +459,9 @@ async fn mover_leva_o_plug_e_conta_a_pessoa() -> Result<()> {
             .snapshot()
             .voice_rooms
             .iter()
-            .any(|voice_room| voice_room.id == VOICE_ROOM && voice_room.occupied_by_us)),
+            .any(
+                |voice_room| voice_room.id == VOICE_ROOM && voice_room.occupied_by_us
+            )),
         "a visita não entrou no primeiro sala de voz"
     );
 
@@ -462,7 +474,9 @@ async fn mover_leva_o_plug_e_conta_a_pessoa() -> Result<()> {
             .snapshot()
             .voice_rooms
             .iter()
-            .any(|voice_room| voice_room.id == destino && voice_room.occupied_by_us)),
+            .any(
+                |voice_room| voice_room.id == destino && voice_room.occupied_by_us
+            )),
         "quem foi movido continua desenhado na sala de voz antigo"
     );
     assert!(

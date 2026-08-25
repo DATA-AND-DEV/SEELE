@@ -40,11 +40,11 @@ use seele_proto::ids::{AttachmentId, ClientMessageId, PersonId};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 
+use crate::permissions::Permissions;
 use crate::persistence::attachments::{self, Landing, Ledger, Refusal, Store};
 use crate::persistence::messages::{Messages, PendingMessage, StoredMessage};
 use crate::persistence::Persistence;
-use crate::server::{Server, Event};
-use crate::permissions::Permissions;
+use crate::server::{Event, Server};
 use crate::taxa::Vazao;
 
 /// Stream priority for the control stream.

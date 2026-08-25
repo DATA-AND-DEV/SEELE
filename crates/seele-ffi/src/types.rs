@@ -61,7 +61,7 @@ pub enum LinkTrust {
 /// thresholds. Two shells with two copies of "85 is nominal" is two shells that
 /// disagree the day one of them is updated.
 ///
-/// Three bands, from `design/SEELE v2.dc.html`. The fourth — `Acceptable`
+/// Three bands, from `design/Entry Plug v2.dc.html`. The fourth — `Acceptable`
 /// — is gone, and it is gone from the JSON the webview reads too: a shell that
 /// still branches on `"Acceptable"` now falls through to whatever it does with
 /// an unknown band, and never to a colour it drew last week.

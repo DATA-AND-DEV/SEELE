@@ -19,10 +19,10 @@ use std::time::Duration;
 use anyhow::Result;
 use ed25519_dalek::SigningKey;
 use seele_core::{Client, MemoryPinStore};
-use seele_proto::ids::{VoiceRoomId, ClientMessageId, ChannelId};
+use seele_proto::ids::{ChannelId, ClientMessageId, VoiceRoomId};
 use seele_proto::ServerMessage;
 use seele_server::persistence::Location;
-use seele_server::{ServerConfig, Daemon};
+use seele_server::{Daemon, ServerConfig};
 
 const LINE: ChannelId = ChannelId(1);
 const VOICE_ROOM: VoiceRoomId = VoiceRoomId(1);
@@ -307,7 +307,11 @@ async fn telemetry_carries_a_sync_ratio() -> Result<()> {
     };
     assert!(telemetry.rtt_ms.is_finite() && telemetry.rtt_ms >= 0.0);
     assert!((0.0..=1.0).contains(&telemetry.loss_fraction));
-    assert_eq!(telemetry.subsystems.len(), 3, "PERMISSIONS, MEDIA, PERSISTENCE");
+    assert_eq!(
+        telemetry.subsystems.len(),
+        3,
+        "PERMISSIONS, MEDIA, PERSISTENCE"
+    );
 
     let ratio = seele_proto::signal::raw(seele_proto::SyncInputs {
         rtt_ms: telemetry.rtt_ms,

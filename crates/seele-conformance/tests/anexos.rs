@@ -36,10 +36,10 @@ use seele_core::client::{AttachmentRequest, Previewed, Sent};
 use seele_core::preview::{data_uri, judge, ImageFormat, Verdict, PREVIEW_LIMIT};
 use seele_core::{Client, MemoryPinStore};
 use seele_proto::control::{AttachmentRefusal, AttachmentState, ServerMessage};
-use seele_proto::ids::{AttachmentId, ClientMessageId, ChannelId};
+use seele_proto::ids::{AttachmentId, ChannelId, ClientMessageId};
 use seele_server::persistence::attachments::per_file_limit;
 use seele_server::persistence::Location;
-use seele_server::{ServerConfig, Daemon};
+use seele_server::{Daemon, ServerConfig};
 
 /// How long a test waits for a file the server agreed to send.
 const ESPERA: Duration = Duration::from_secs(5);
@@ -54,7 +54,8 @@ async fn server(teto: u64) -> Result<(SocketAddr, Arc<Daemon>, tempfile::TempDir
     let casa = tempfile::tempdir()?;
     let banco = casa.path().join("seele.db");
     {
-        let persistence = seele_server::persistence::Persistence::open(&Location::File(banco.clone()))?;
+        let persistence =
+            seele_server::persistence::Persistence::open(&Location::File(banco.clone()))?;
         seele_server::persistence::attachments::set_quota(&persistence, teto)?;
     }
 

@@ -542,8 +542,10 @@ impl<'a> Permissions<'a> {
         if !self.may(issued_by, Permission::Ban)? {
             return Err(Refusal::PermissionDenied.into());
         }
-        self.connection
-            .execute("DELETE FROM bans WHERE person_id = ?1", [person.get() as i64])?;
+        self.connection.execute(
+            "DELETE FROM bans WHERE person_id = ?1",
+            [person.get() as i64],
+        )?;
         Ok(())
     }
 
@@ -644,7 +646,9 @@ mod tests {
         let permissions = Permissions::new(&persistence);
         let anfitriao = permissions.register_or_find(&[1; 32], "anfitriao").unwrap();
         assert_eq!(anfitriao.roles, vec![COMMANDER]);
-        assert!(permissions.may(anfitriao.id, Permission::ManageVoiceRooms).unwrap());
+        assert!(permissions
+            .may(anfitriao.id, Permission::ManageVoiceRooms)
+            .unwrap());
     }
 
     #[test]
@@ -734,7 +738,9 @@ mod tests {
             "uma conta anterior ao comando não conseguiu assumi-lo, e o servidor fica \
              inadministrável para sempre: {de_volta:?}"
         );
-        assert!(permissions.may(de_volta.id, Permission::ManageVoiceRooms).unwrap());
+        assert!(permissions
+            .may(de_volta.id, Permission::ManageVoiceRooms)
+            .unwrap());
     }
 
     #[test]
@@ -819,7 +825,10 @@ mod tests {
             .count();
         assert_eq!(comandantes, 1, "roles handed out: {papeis:?}");
         assert_eq!(
-            papeis.iter().filter(|roles| roles.contains(&PERSON)).count(),
+            papeis
+                .iter()
+                .filter(|roles| roles.contains(&PERSON))
+                .count(),
             1,
             "roles handed out: {papeis:?}"
         );
@@ -900,9 +909,13 @@ mod tests {
 
         assert!(permissions.may(operator, Permission::Kick).unwrap());
         assert!(permissions.may(operator, Permission::Ban).unwrap());
-        assert!(!permissions.may(operator, Permission::ManageVoiceRooms).unwrap());
+        assert!(!permissions
+            .may(operator, Permission::ManageVoiceRooms)
+            .unwrap());
         assert!(!permissions.may(operator, Permission::ManageRoles).unwrap());
-        assert!(!permissions.may(operator, Permission::AdministerServer).unwrap());
+        assert!(!permissions
+            .may(operator, Permission::AdministerServer)
+            .unwrap());
     }
 
     #[test]

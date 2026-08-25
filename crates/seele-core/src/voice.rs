@@ -661,32 +661,32 @@ impl Voice {
         }
     }
 
-/// Onde o relógio de mídia recomeça depois de trocar de dispositivo.
-///
-/// # Por que pular, e não só continuar
-///
-/// Porque os dois caminhos existem ao mesmo tempo por um instante: o novo é
-/// aberto **antes** de o velho ser largado, de propósito — um microfone que
-/// sumiu deixa a pessoa falando pelo antigo em vez de muda. Enquanto os dois
-/// vivem, o velho ainda manda quadros com carimbos que crescem, e um caminho
-/// novo que continuasse do último número visto ficaria atrás deles. Quem recebe
-/// descarta o que vem atrás do que já tocou, e a pessoa some de novo — pelo
-/// mesmo defeito, uma volta depois.
-///
-/// Um segundo de folga passa na frente de qualquer coisa que ainda esteja no ar
-/// e custa, a quem escuta, um silêncio de um segundo que **de fato aconteceu**:
-/// abrir um dispositivo de áudio leva esse tempo. O buffer de jitter lê o pulo
-/// como um vão, esconde o que dá e reacerta — que é exatamente o que ele existe
-/// para fazer.
-///
-/// A sequência anda um, e não mil: ela conta o que sai, e quem recebe usa a
-/// diferença entre ela e o carimbo para separar silêncio de perda (M1.9).
+    /// Onde o relógio de mídia recomeça depois de trocar de dispositivo.
+    ///
+    /// # Por que pular, e não só continuar
+    ///
+    /// Porque os dois caminhos existem ao mesmo tempo por um instante: o novo é
+    /// aberto **antes** de o velho ser largado, de propósito — um microfone que
+    /// sumiu deixa a pessoa falando pelo antigo em vez de muda. Enquanto os dois
+    /// vivem, o velho ainda manda quadros com carimbos que crescem, e um caminho
+    /// novo que continuasse do último número visto ficaria atrás deles. Quem recebe
+    /// descarta o que vem atrás do que já tocou, e a pessoa some de novo — pelo
+    /// mesmo defeito, uma volta depois.
+    ///
+    /// Um segundo de folga passa na frente de qualquer coisa que ainda esteja no ar
+    /// e custa, a quem escuta, um silêncio de um segundo que **de fato aconteceu**:
+    /// abrir um dispositivo de áudio leva esse tempo. O buffer de jitter lê o pulo
+    /// como um vão, esconde o que dá e reacerta — que é exatamente o que ele existe
+    /// para fazer.
+    ///
+    /// A sequência anda um, e não mil: ela conta o que sai, e quem recebe usa a
+    /// diferença entre ela e o carimbo para separar silêncio de perda (M1.9).
     fn salto_do_relogio(seq: u16, carimbo: u32) -> (u16, u32) {
-    (
-        seq.wrapping_add(1),
-        carimbo.wrapping_add(seele_audio::SAMPLE_RATE_HZ),
-    )
-}
+        (
+            seq.wrapping_add(1),
+            carimbo.wrapping_add(seele_audio::SAMPLE_RATE_HZ),
+        )
+    }
 
     /// Mutes the microphone — A.T. Field.
     pub fn set_muted(&self, on: bool) {
@@ -962,9 +962,7 @@ async fn pipeline(
             // out; the sequence counts only what does. That difference is what
             // lets the receiver tell DTX silence from real loss — M1.9.
             timestamp = timestamp.wrapping_add(u32::try_from(FRAME_SAMPLES).unwrap_or(FRAME_MS));
-            controls
-                .relogio_carimbo
-                .store(timestamp, Ordering::Relaxed);
+            controls.relogio_carimbo.store(timestamp, Ordering::Relaxed);
             if !speaking {
                 continue;
             }

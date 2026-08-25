@@ -197,8 +197,8 @@ pub fn worth_retrying(reason: DisconnectReason) -> bool {
 mod tests {
     use super::*;
     use seele_core::{
-        AlertReason, VoiceRoomId, VoiceRoomInfo, ChannelId, ChannelInfo, MessageId, PersonId, PersonProfile,
-        PersonState, Presence, ServerMessage, SessionId, Ssrc,
+        AlertReason, ChannelId, ChannelInfo, MessageId, PersonId, PersonProfile, PersonState,
+        Presence, ServerMessage, SessionId, Ssrc, VoiceRoomId, VoiceRoomInfo,
     };
 
     const VOICE_ROOM: VoiceRoomId = VoiceRoomId(1);
@@ -216,14 +216,14 @@ mod tests {
             voice_rooms: vec![
                 VoiceRoomInfo {
                     id: VOICE_ROOM,
-                    name: "VOICE_ROOM-01 CENTRAL".into(),
+                    name: "SALA-01 CENTRAL".into(),
                     limit: 20,
                     password_required: false,
                     channel: Some(CHANNEL),
                 },
                 VoiceRoomInfo {
                     id: VoiceRoomId(2),
-                    name: "VOICE_ROOM-02 TESTE".into(),
+                    name: "SALA-02 TESTE".into(),
                     limit: 20,
                     password_required: false,
                     channel: None,
@@ -403,7 +403,7 @@ mod tests {
             .tree
             .iter()
             .find_map(|node| match node {
-                Node::VoiceRoom { name, sync, .. } if name.contains("VOICE_ROOM-01") => Some(*sync),
+                Node::VoiceRoom { name, sync, .. } if name.contains("SALA-01") => Some(*sync),
                 _ => None,
             })
             .expect("the open voice room");
@@ -415,7 +415,7 @@ mod tests {
             .tree
             .iter()
             .find_map(|node| match node {
-                Node::VoiceRoom { name, sync, .. } if name.contains("VOICE_ROOM-02") => Some(*sync),
+                Node::VoiceRoom { name, sync, .. } if name.contains("SALA-02") => Some(*sync),
                 _ => None,
             })
             .expect("the closed voice room");

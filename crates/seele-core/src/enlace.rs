@@ -43,7 +43,7 @@ use std::time::{Duration, Instant};
 use ed25519_dalek::SigningKey;
 use seele_proto::control::ServerMessage;
 use seele_proto::ids::{
-    AttachmentId, VoiceRoomId, ClientMessageId, ChannelId, MessageId, PersonId, ScreenId,
+    AttachmentId, ChannelId, ClientMessageId, MessageId, PersonId, ScreenId, VoiceRoomId,
 };
 use seele_proto::signal::SignalBand;
 use tokio::sync::mpsc;
@@ -725,90 +725,127 @@ impl Enlace {
         // A lista é clonada porque ela é percorrida duas vezes; `Destino` é
         // barato — endereços e uma impressão digital.
         let todos: Vec<Destino> = std::iter::once(primeiro).chain(candidatos).collect();
+
+        // Quem merece a segunda volta, decidido na primeira.
+        //
+        // **A segunda volta existe para quem ficou sem tempo, e não para quem já
+        // respondeu.** Sem esta lista ela repassava por todo mundo, e isso
+        // desfazia duas garantias que já estavam escritas aqui do lado:
+        //
+        // - o comentário do prazo curto promete que «quatro endereços mortos
+        //   custam quatro segundos em vez de dezesseis», e com duas voltas
+        //   passaram a custar oito;
+        // - o comentário da repetição diz que avisar por um candidato que já
+        //   falhou gasta furo da janela do anfitrião — sessenta por dez segundos
+        //   — «por um caminho que ninguém vai tentar de novo», e a segunda volta
+        //   tentava de novo, dobrando os avisos.
+        //
+        // Duas condições, e cada uma tem um teste em
+        // `seele-conformance/tests/furo.rs`. Um candidato **de outra casa** não
+        // volta: o prazo dele é curto porque se sabe que ninguém responde, e
+        // insistir é gastar o dobro para saber o mesmo. E um candidato que falhou
+        // **sem ser por prazo** não volta: `Endpoint::connect` recusando um nome
+        // de TLS inválido dá a mesma resposta na segunda tentativa.
+        let mut merece_segunda: Vec<bool> = vec![true; todos.len()];
+
         for volta in 0..2_u8 {
-        for (indice, destino) in todos.iter().cloned().enumerate() {
-            let onde = destino.servidor;
-            let chave_do_pin = destino.chave_do_pin.clone();
-            let fixado_antes = pins.pinned(&chave_do_pin);
+            for (indice, destino) in todos.iter().cloned().enumerate() {
+                // Antes do aviso, de propósito: pular depois de avisar gastaria o
+                // furo sem tentar nada com ele.
+                if volta == 1 && !merece_segunda.get(indice).copied().unwrap_or(true) {
+                    continue;
+                }
+                let onde = destino.servidor;
+                let chave_do_pin = destino.chave_do_pin.clone();
+                let fixado_antes = pins.pinned(&chave_do_pin);
 
-            // O aviso sai **agora**, para este candidato, e o aperto de mão sai
-            // logo atrás dele. É a coordenação inteira desta tarefa: o furo do
-            // outro lado dura menos de um segundo, e a única forma de o `Initial`
-            // caber dentro dele é os dois saírem juntos.
-            let repeticao = avisar_pelo_candidato(batida, onde).await;
-            // Contado **depois** do aviso e antes do aperto de mão, porque é
-            // aqui que as duas metades existem ao mesmo tempo: o endereço, e se
-            // o `LEVE` saiu por ele.
-            contar(
-                olhos,
-                Tentativa {
-                    candidato: u8::try_from(indice).unwrap_or(u8::MAX),
-                    onde,
-                    avisou: repeticao.is_some(),
-                },
-            );
+                // O aviso sai **agora**, para este candidato, e o aperto de mão sai
+                // logo atrás dele. É a coordenação inteira desta tarefa: o furo do
+                // outro lado dura menos de um segundo, e a única forma de o `Initial`
+                // caber dentro dele é os dois saírem juntos.
+                let repeticao = avisar_pelo_candidato(batida, onde).await;
+                // Contado **depois** do aviso e antes do aperto de mão, porque é
+                // aqui que as duas metades existem ao mesmo tempo: o endereço, e se
+                // o `LEVE` saiu por ele.
+                contar(
+                    olhos,
+                    Tentativa {
+                        candidato: u8::try_from(indice).unwrap_or(u8::MAX),
+                        onde,
+                        avisou: repeticao.is_some(),
+                    },
+                );
 
-            // Um candidato privado de outra casa não devolve ICMP nenhum: ele
-            // queima o prazo inteiro sem nunca ter tido chance. Encurtar é o que
-            // faz quatro endereços mortos custarem quatro segundos em vez de
-            // dezesseis — e é só encurtar, nunca descartar, porque um /16 à mão
-            // ou uma VPN capturando a rota dão falso negativo.
-            let prazo = if e_de_outra_casa(onde) {
-                PRAZO_DE_CANDIDATO_DISTANTE
-            } else if volta == 0 {
-                PRAZO_DA_PRIMEIRA_VOLTA
-            } else {
-                PRAZO_POR_CANDIDATO
-            };
+                // Um candidato privado de outra casa não devolve ICMP nenhum: ele
+                // queima o prazo inteiro sem nunca ter tido chance. Encurtar é o que
+                // faz quatro endereços mortos custarem quatro segundos em vez de
+                // dezesseis — e é só encurtar, nunca descartar, porque um /16 à mão
+                // ou uma VPN capturando a rota dão falso negativo.
+                let prazo = if e_de_outra_casa(onde) {
+                    PRAZO_DE_CANDIDATO_DISTANTE
+                } else if volta == 0 {
+                    PRAZO_DA_PRIMEIRA_VOLTA
+                } else {
+                    PRAZO_POR_CANDIDATO
+                };
 
-            let tentativa = Self::conectar_por(
-                emprestar(),
-                bilhete.clone(),
-                destino,
-                chave.clone(),
-                Arc::clone(&pins),
-            );
+                let tentativa = Self::conectar_por(
+                    emprestar(),
+                    bilhete.clone(),
+                    destino,
+                    chave.clone(),
+                    Arc::clone(&pins),
+                );
 
-            let falha = match tokio::time::timeout(prazo, tentativa).await {
-                Ok(Ok(enlace)) => {
-                    if let Some(repeticao) = repeticao {
-                        repeticao.abort();
+                let falha = match tokio::time::timeout(prazo, tentativa).await {
+                    Ok(Ok(enlace)) => {
+                        if let Some(repeticao) = repeticao {
+                            repeticao.abort();
+                        }
+                        return Ok(enlace);
                     }
-                    return Ok(enlace);
+                    Ok(Err(erro)) => erro,
+                    Err(_) => {
+                        // O aperto de mão foi cancelado no meio, e o `conectar` não
+                        // chegou à limpeza dele. O pin que o TLS possa ter escrito
+                        // some aqui, pelo motivo escrito em `desfazer_pin_orfao`.
+                        desfazer_pin_orfao(pins.as_ref(), &chave_do_pin, fixado_antes.as_deref());
+                        ConnectError::HandshakeTimeout
+                    }
+                };
+                // A repetição para quando o candidato termina, dando certo ou não:
+                // avisar sobre um candidato que já falhou gastaria furo da janela do
+                // anfitrião — sessenta por dez segundos — por um caminho que ninguém
+                // vai tentar de novo.
+                if let Some(repeticao) = repeticao {
+                    repeticao.abort();
                 }
-                Ok(Err(erro)) => erro,
-                Err(_) => {
-                    // O aperto de mão foi cancelado no meio, e o `conectar` não
-                    // chegou à limpeza dele. O pin que o TLS possa ter escrito
-                    // some aqui, pelo motivo escrito em `desfazer_pin_orfao`.
-                    desfazer_pin_orfao(pins.as_ref(), &chave_do_pin, fixado_antes.as_deref());
-                    ConnectError::HandshakeTimeout
+                // E aqui se decide se ele volta. Ver `merece_segunda`.
+                if let Some(merece) = merece_segunda.get_mut(indice) {
+                    *merece =
+                        matches!(falha, ConnectError::HandshakeTimeout) && !e_de_outra_casa(onde);
                 }
-            };
-            // A repetição para quando o candidato termina, dando certo ou não:
-            // avisar sobre um candidato que já falhou gastaria furo da janela do
-            // anfitrião — sessenta por dez segundos — por um caminho que ninguém
-            // vai tentar de novo.
-            if let Some(repeticao) = repeticao {
-                repeticao.abort();
+                tracing::info!(%onde, erro = %falha, "este endereço do convite não deu; indo ao próximo");
+                if respondeu.is_none() && alguem_respondeu(&falha) {
+                    respondeu = Some(falha.clone());
+                }
+                if primeira_falha.is_none() {
+                    primeira_falha = Some(falha);
+                }
             }
-            tracing::info!(%onde, erro = %falha, "este endereço do convite não deu; indo ao próximo");
-            if respondeu.is_none() && alguem_respondeu(&falha) {
-                respondeu = Some(falha.clone());
-            }
-            if primeira_falha.is_none() {
-                primeira_falha = Some(falha);
-            }
-        }
 
-        // Alguém respondeu e disse não — portaria pendente, credencial
-        // recusada, apelido tomado. Isso é resposta, não silêncio, e insistir
-        // com mais paciência dá exatamente a mesma resposta mais devagar.
-        if respondeu.is_some() {
-            break;
-        }
-        // E um candidato de outra casa já teve o prazo dele nas duas voltas: o
-        // encurtamento não é impaciência, é saber que ninguém vai responder.
+            // Alguém respondeu e disse não — portaria pendente, credencial
+            // recusada, apelido tomado. Isso é resposta, não silêncio, e insistir
+            // com mais paciência dá exatamente a mesma resposta mais devagar.
+            if respondeu.is_some() {
+                break;
+            }
+            // E se ninguém merece a segunda volta, ela não acontece: repassar por
+            // uma lista inteira de candidatos que já deram resposta definitiva é
+            // tempo de quem está esperando a sala abrir.
+            if volta == 0 && !merece_segunda.iter().any(|merece| *merece) {
+                break;
+            }
         }
 
         Err(respondeu
@@ -1141,8 +1178,13 @@ impl Enlace {
     /// # Errors
     ///
     /// Falha se a sessão já tiver acabado.
-    pub async fn renomear_voice_room(&self, voice_room: VoiceRoomId, nome: String) -> Result<(), Fechado> {
-        self.mandar(Comando::RenomearVoiceRoom { voice_room, nome }).await
+    pub async fn renomear_voice_room(
+        &self,
+        voice_room: VoiceRoomId,
+        nome: String,
+    ) -> Result<(), Fechado> {
+        self.mandar(Comando::RenomearVoiceRoom { voice_room, nome })
+            .await
     }
 
     /// Pede ao servidor que renomeie uma Linha.
@@ -1244,8 +1286,13 @@ impl Enlace {
     /// # Errors
     ///
     /// Falha se a sessão já tiver acabado.
-    pub async fn mover_pessoa(&self, pessoa: PersonId, voice_room: VoiceRoomId) -> Result<(), Fechado> {
-        self.mandar(Comando::MoverPersono { pessoa, voice_room }).await
+    pub async fn mover_pessoa(
+        &self,
+        pessoa: PersonId,
+        voice_room: VoiceRoomId,
+    ) -> Result<(), Fechado> {
+        self.mandar(Comando::MoverPersono { pessoa, voice_room })
+            .await
     }
 
     /// Pede ao servidor que destrua uma sala de voz.
@@ -1812,7 +1859,9 @@ impl Motor {
                 linha,
             } => cliente.create_voice_room(&nome, limite, linha).await,
             Comando::CriarLinha { nome } => cliente.create_channel(&nome).await,
-            Comando::RenomearVoiceRoom { voice_room, nome } => cliente.rename_voice_room(voice_room, &nome).await,
+            Comando::RenomearVoiceRoom { voice_room, nome } => {
+                cliente.rename_voice_room(voice_room, &nome).await
+            }
             Comando::RenomearLinha { linha, nome } => cliente.rename_channel(linha, &nome).await,
             Comando::RenomearServer { nome } => cliente.rename_server(&nome).await,
             Comando::IconeDoServer { icone } => cliente.set_server_icon(icone).await,
@@ -1827,7 +1876,9 @@ impl Motor {
                     .await
             }
             Comando::RemoverMensagem { mensagem } => cliente.remove_message(mensagem).await,
-            Comando::MoverPersono { pessoa, voice_room } => cliente.move_person(pessoa, voice_room).await,
+            Comando::MoverPersono { pessoa, voice_room } => {
+                cliente.move_person(pessoa, voice_room).await
+            }
             Comando::ApagarVoiceRoom { voice_room } => cliente.delete_voice_room(voice_room).await,
             Comando::ApagarLinha { linha } => cliente.delete_channel(linha).await,
             Comando::PesarLinha { linha } => cliente.weigh_channel(linha).await,
@@ -3154,7 +3205,9 @@ mod tests {
         let mut motor = motor_de_teste();
         motor.lembrar(&Comando::InserirPlug(VoiceRoomId(2)));
 
-        motor.lembrar(&Comando::Expulsar { pessoa: PersonId(9) });
+        motor.lembrar(&Comando::Expulsar {
+            pessoa: PersonId(9),
+        });
         motor.lembrar(&Comando::Banir {
             pessoa: PersonId(9),
             motivo: None,

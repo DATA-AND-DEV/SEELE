@@ -16,9 +16,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use seele_ffi::{ConnectConfig, Event, EventListener, LinkTrust, Connection, ConnectionError, Trust};
+use seele_ffi::{
+    ConnectConfig, Connection, ConnectionError, Event, EventListener, LinkTrust, Trust,
+};
 use seele_server::persistence::Location;
-use seele_server::{ServerConfig, Daemon};
+use seele_server::{Daemon, ServerConfig};
 
 const VOICE_ROOM: u32 = 1;
 const CHANNEL: u32 = 1;
@@ -132,7 +134,10 @@ async fn a_shell_connects_and_the_snapshot_describes_the_server() -> Result<()> 
     assert_eq!(snapshot.server, "Terceira Tóquio");
     assert_eq!(snapshot.nickname, "ayanami");
     assert!(snapshot.me.is_some());
-    assert!(!snapshot.voice_rooms.is_empty(), "no voice_rooms in the snapshot");
+    assert!(
+        !snapshot.voice_rooms.is_empty(),
+        "no voice_rooms in the snapshot"
+    );
     assert!(!snapshot.audio_available, "audio was off for this session");
     assert!(snapshot.ended.is_none());
 
@@ -150,10 +155,9 @@ async fn entering_a_voice_room_puts_us_on_our_own_roster() -> Result<()> {
     assert!(
         until(&connection, |connection| {
             let snapshot = connection.snapshot();
-            snapshot
-                .voice_rooms
-                .iter()
-                .any(|voice_room| voice_room.occupied_by_us && voice_room.people.iter().any(|p| p.is_self))
+            snapshot.voice_rooms.iter().any(|voice_room| {
+                voice_room.occupied_by_us && voice_room.people.iter().any(|p| p.is_self)
+            })
         }),
         "we entered a voice room and are not on its roster"
     );
@@ -185,10 +189,9 @@ async fn leaving_a_voice_room_takes_us_off_our_own_roster() -> Result<()> {
     connection.insert_plug(VOICE_ROOM)?;
     assert!(
         until(&connection, |connection| {
-            connection.snapshot()
-                .voice_rooms
-                .iter()
-                .any(|voice_room| voice_room.occupied_by_us && voice_room.people.iter().any(|p| p.is_self))
+            connection.snapshot().voice_rooms.iter().any(|voice_room| {
+                voice_room.occupied_by_us && voice_room.people.iter().any(|p| p.is_self)
+            })
         }),
         "we entered a voice room and are not on its roster"
     );
@@ -198,13 +201,13 @@ async fn leaving_a_voice_room_takes_us_off_our_own_roster() -> Result<()> {
     assert!(
         until(&connection, |connection| {
             let snapshot = connection.snapshot();
-            !snapshot
-                .voice_rooms
-                .iter()
-                .any(|voice_room| voice_room.occupied_by_us || voice_room.people.iter().any(|p| p.is_self))
+            !snapshot.voice_rooms.iter().any(|voice_room| {
+                voice_room.occupied_by_us || voice_room.people.iter().any(|p| p.is_self)
+            })
         }),
         "we left the voice room and our own screen still draws us in it: {:?}",
-        connection.snapshot()
+        connection
+            .snapshot()
             .voice_rooms
             .iter()
             .map(|voice_room| (
@@ -223,10 +226,9 @@ async fn leaving_a_voice_room_takes_us_off_our_own_roster() -> Result<()> {
     connection.insert_plug(VOICE_ROOM)?;
     assert!(
         until(&connection, |connection| {
-            connection.snapshot()
-                .voice_rooms
-                .iter()
-                .any(|voice_room| voice_room.occupied_by_us && voice_room.people.iter().any(|p| p.is_self))
+            connection.snapshot().voice_rooms.iter().any(|voice_room| {
+                voice_room.occupied_by_us && voice_room.people.iter().any(|p| p.is_self)
+            })
         }),
         "we could not walk back into the voice room we had just left"
     );
@@ -254,7 +256,10 @@ async fn two_shells_hold_a_conversation() -> Result<()> {
 
     assert!(
         until(&listener, |connection| {
-            connection.messages().iter().any(|m| m.body == "sync caiu aqui")
+            connection
+                .messages()
+                .iter()
+                .any(|m| m.body == "sync caiu aqui")
         }),
         "the message never reached the other shell"
     );
@@ -294,10 +299,12 @@ async fn a_muted_mic_is_visible_to_everybody_else() -> Result<()> {
     assert!(
         until(&watcher, |connection| {
             let snapshot = connection.snapshot();
-            snapshot
-                .voice_rooms
-                .iter()
-                .any(|voice_room| voice_room.people.iter().any(|person| person.nickname == "kaworu"))
+            snapshot.voice_rooms.iter().any(|voice_room| {
+                voice_room
+                    .people
+                    .iter()
+                    .any(|person| person.nickname == "kaworu")
+            })
         }),
         "the other person never appeared"
     );
@@ -308,7 +315,8 @@ async fn a_muted_mic_is_visible_to_everybody_else() -> Result<()> {
         until(&watcher, |connection| {
             let snapshot = connection.snapshot();
             snapshot.voice_rooms.iter().any(|voice_room| {
-                voice_room.people
+                voice_room
+                    .people
                     .iter()
                     .any(|person| person.nickname == "kaworu" && person.muted)
             })
@@ -346,7 +354,8 @@ async fn a_second_client_resumes_the_conversation_with_its_history() -> Result<(
 
     assert!(
         until(&second, |connection| {
-            connection.messages()
+            connection
+                .messages()
                 .iter()
                 .any(|m| m.body == "primeira coisa dita")
         }),
@@ -378,7 +387,7 @@ async fn a_second_client_resumes_the_conversation_with_its_history() -> Result<(
 #[tokio::test(flavor = "multi_thread")]
 async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()> {
     use seele_core::{Client, MemoryPinStore, Room};
-    use seele_proto::ids::{VoiceRoomId, ClientMessageId, ChannelId};
+    use seele_proto::ids::{ChannelId, ClientMessageId, VoiceRoomId};
 
     let (address, server) = start().await?;
 
@@ -435,7 +444,10 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
 
     assert!(
         until(&desktop, |connection| {
-            connection.messages().iter().any(|m| m.body == "dito no terminal")
+            connection
+                .messages()
+                .iter()
+                .any(|m| m.body == "dito no terminal")
         }),
         "o app abriu a Linha e não viu o que o terminal disse"
     );
@@ -521,7 +533,10 @@ async fn dropping_the_handle_disconnects() -> Result<()> {
     let (address, server) = start().await?;
     let connection = tokio::task::spawn_blocking(move || connect(address, "aoba")).await??;
     connection.insert_plug(VOICE_ROOM)?;
-    assert!(until(&connection, |connection| connection.snapshot().link_state == LinkTrust::Verified));
+    assert!(until(&connection, |connection| connection
+        .snapshot()
+        .link_state
+        == LinkTrust::Verified));
 
     drop(connection);
     // Nothing to assert beyond not hanging: a handle whose driver thread
@@ -558,14 +573,16 @@ async fn a_shell_asks_for_a_room_and_the_server_makes_it() -> Result<()> {
     connection.subscribe(Arc::clone(&recorder) as Arc<dyn EventListener>);
 
     connection.create_channel("planejamento".into())?;
-    connection.create_voice_room("VOICE_ROOM-02 SALA DOS FUNDOS".into(), 8, None)?;
+    connection.create_voice_room("SALA-02 SALA DOS FUNDOS".into(), 8, None)?;
 
     assert!(
-        until(&connection, |connection| connection
-            .snapshot()
-            .voice_rooms
-            .iter()
-            .any(|voice_room| voice_room.name == "VOICE_ROOM-02 SALA DOS FUNDOS")),
+        until(&connection, |connection| {
+            connection
+                .snapshot()
+                .voice_rooms
+                .iter()
+                .any(|voice_room| voice_room.name == "SALA-02 SALA DOS FUNDOS")
+        }),
         "the room never reached the snapshot the screen reads"
     );
     assert!(
@@ -588,7 +605,9 @@ async fn a_shell_asks_for_a_room_and_the_server_makes_it() -> Result<()> {
         .snapshot()
         .voice_rooms
         .iter()
-        .any(|voice_room| voice_room.id == 2 && voice_room.occupied_by_us)));
+        .any(
+            |voice_room| voice_room.id == 2 && voice_room.occupied_by_us
+        )));
 
     drop(connection);
     server.shutdown();
@@ -617,7 +636,7 @@ async fn a_shell_without_the_permission_is_refused_by_the_server() -> Result<()>
     let recorder = Arc::new(Recorder::default());
     convidado.subscribe(Arc::clone(&recorder) as Arc<dyn EventListener>);
 
-    convidado.create_voice_room("VOICE_ROOM-DO-INTRUSO".into(), 8, None)?;
+    convidado.create_voice_room("SALA-DO-INTRUSO".into(), 8, None)?;
 
     assert!(
         until(&convidado, |_| {
@@ -644,7 +663,7 @@ async fn a_shell_without_the_permission_is_refused_by_the_server() -> Result<()>
         .snapshot()
         .voice_rooms
         .iter()
-        .any(|voice_room| voice_room.name == "VOICE_ROOM-DO-INTRUSO"));
+        .any(|voice_room| voice_room.name == "SALA-DO-INTRUSO"));
 
     drop(anfitria);
     drop(convidado);

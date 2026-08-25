@@ -268,7 +268,7 @@ impl Theme {
 
     /// Style for a Sync Ratio in a given band.
     ///
-    /// `design/SEELE v2.dc.html` gives each band a colour — phosphor,
+    /// `design/Entry Plug v2.dc.html` gives each band a colour — phosphor,
     /// orange, red — and bone appears in no sync scale at all. The caller is
     /// expected to print [`Self::sync_mark`] beside it, because the number and
     /// the mark are what survive when the colour does not.
@@ -412,7 +412,11 @@ mod tests {
     #[test]
     fn mono_style_carries_no_colour_anywhere() {
         let mono = Theme::with_palette(Palette::Mono);
-        for band in [SignalBand::Nominal, SignalBand::Degraded, SignalBand::Critical] {
+        for band in [
+            SignalBand::Nominal,
+            SignalBand::Degraded,
+            SignalBand::Critical,
+        ] {
             assert!(
                 mono.sync(band).fg.is_none(),
                 "a colour leaked into the no-colour mode"

@@ -28,15 +28,15 @@ pub mod encontro;
 pub mod ids;
 pub mod media;
 pub mod screen;
-pub mod stream;
 pub mod signal;
+pub mod stream;
 pub mod transport;
 pub mod uri;
 pub mod version;
 
 pub use control::{ClientMessage, ControlError, ServerMessage};
-pub use ids::{VoiceRoomId, ChannelId, PersonId, ScreenId, SessionId, Ssrc};
+pub use ids::{ChannelId, PersonId, ScreenId, SessionId, Ssrc, VoiceRoomId};
 pub use media::{MediaError, MediaHeader, HEADER_LEN, MAX_DATAGRAM_LEN, MAX_PAYLOAD_LEN};
+pub use signal::{Signal, SignalBand, SyncInputs};
 pub use stream::{StreamType, StreamTypeError, RESERVED_TYPE, STREAM_TYPE_LEN};
-pub use signal::{SignalBand, SyncInputs, Signal};
 pub use version::{oldest_supported_version, Incompatible, COMPATIBILITY_WINDOW, PROTOCOL_VERSION};

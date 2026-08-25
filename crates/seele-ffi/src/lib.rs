@@ -43,16 +43,16 @@ use std::time::{Duration, Instant};
 
 use seele_core::enlace::Enlace;
 use seele_core::{
-    identity, VoiceRoomId, ClientMessageId, FilePinStore, ChannelId, MediaChannel, MessageId, PersonId,
-    Room, Ssrc, SignalBand, SyncInputs, Signal, Voice,
+    identity, ChannelId, ClientMessageId, FilePinStore, MediaChannel, MessageId, PersonId, Room,
+    Signal, SignalBand, Ssrc, SyncInputs, Voice, VoiceRoomId,
 };
 
 pub use types::{
-    PermissaoDeMicrofone,
-    Attachment, AttachmentRefusal, VoiceRoom, VoiceRoomSync, CaptureDevice, EndReason, Event, FonteDeTela,
-    LimitesDeTela, Channel, ChannelWeight, LinkTrust, Message, Notice, NoticeReason, LinkState,
-    PermissaoDeTela, Person, PlaybackDevice, ConnectionError, Preview, PreviewRefusal, PreviewRules,
-    Severity, Snapshot, SignalBand as Band, TelaEmCurso, Telemetry, Transfer, Trust, VoiceMode,
+    Attachment, AttachmentRefusal, CaptureDevice, Channel, ChannelWeight, ConnectionError,
+    EndReason, Event, FonteDeTela, LimitesDeTela, LinkState, LinkTrust, Message, Notice,
+    NoticeReason, PermissaoDeMicrofone, PermissaoDeTela, Person, PlaybackDevice, Preview,
+    PreviewRefusal, PreviewRules, Severity, SignalBand as Band, Snapshot, TelaEmCurso, Telemetry,
+    Transfer, Trust, VoiceMode, VoiceRoom, VoiceRoomSync,
 };
 
 /// O que a casca gráfica precisa do core além de um [`Connection`] vivo.
@@ -125,7 +125,6 @@ pub fn playback_devices() -> Vec<PlaybackDevice> {
 pub fn permissao_de_microfone() -> PermissaoDeMicrofone {
     seele_core::consentimento_do_microfone().into()
 }
-
 
 /// A impressão digital da identidade desta máquina.
 ///
@@ -1080,7 +1079,9 @@ impl Connection {
             })?;
 
         // The thread reports the outcome of the handshake, then keeps running.
-        let trust = ready_rx.recv().map_err(|_| ConnectionError::Unreachable)??;
+        let trust = ready_rx
+            .recv()
+            .map_err(|_| ConnectionError::Unreachable)??;
 
         let connection = Arc::new(Self {
             commands: command_tx,
@@ -1164,7 +1165,11 @@ impl Connection {
     /// # Errors
     ///
     /// [`ConnectionError::NotConnected`] once the session is over.
-    pub fn save_attachment(&self, attachment: u64, destination: String) -> Result<(), ConnectionError> {
+    pub fn save_attachment(
+        &self,
+        attachment: u64,
+        destination: String,
+    ) -> Result<(), ConnectionError> {
         self.command(Command::SaveAttachment {
             attachment: seele_core::AttachmentId(attachment),
             destination: std::path::PathBuf::from(destination),
@@ -1493,7 +1498,9 @@ impl Connection {
     ///
     /// [`ConnectionError::NotConnected`] once the session is over.
     pub fn delete_voice_room(&self, voice_room: u32) -> Result<(), ConnectionError> {
-        self.command(Command::DeleteVoiceRoom { voice_room: VoiceRoomId(voice_room) })
+        self.command(Command::DeleteVoiceRoom {
+            voice_room: VoiceRoomId(voice_room),
+        })
     }
 
     /// Asks the server to destroy o canal, and everything written in it —
@@ -1503,7 +1510,9 @@ impl Connection {
     ///
     /// [`ConnectionError::NotConnected`] once the session is over.
     pub fn delete_channel(&self, channel: u32) -> Result<(), ConnectionError> {
-        self.command(Command::DeleteChannel { channel: ChannelId(channel) })
+        self.command(Command::DeleteChannel {
+            channel: ChannelId(channel),
+        })
     }
 
     /// Asks what destroying o canal would cost, and waits for the answer.
@@ -1813,7 +1822,11 @@ impl Connection {
     /// começar: a fonte escolhida não está na última lista, o módulo do Cisco
     /// não está em disco, ou este build não tem captura.
     /// [`ConnectionError::NotConnected`] quando a sessão já acabou.
-    pub fn compartilhar_tela(&self, fonte: u64, limites: LimitesDeTela) -> Result<(), ConnectionError> {
+    pub fn compartilhar_tela(
+        &self,
+        fonte: u64,
+        limites: LimitesDeTela,
+    ) -> Result<(), ConnectionError> {
         let comecou = self.comecar_a_transmitir(fonte, limites);
         // O pedido é guardado **quando há transmissão a que ele pertença**, e
         // apagado quando não há. Guardá-lo depois de uma recusa poria, na coluna
@@ -1831,7 +1844,11 @@ impl Connection {
     /// sair pelo fio, e é para isso que ela é síncrona: uma fonte que sumiu ou
     /// um codec que não está em disco viram uma resposta na mão de quem apertou,
     /// e não um silêncio no laço de comandos.
-    fn comecar_a_transmitir(&self, fonte: u64, limites: LimitesDeTela) -> Result<(), ConnectionError> {
+    fn comecar_a_transmitir(
+        &self,
+        fonte: u64,
+        limites: LimitesDeTela,
+    ) -> Result<(), ConnectionError> {
         let escolhida = self.fonte_escolhida(fonte)?;
         let biblioteca = modulo_de_video()?;
         let pedido = seele_core::PedidoDeTela {
@@ -3293,7 +3310,11 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
         // only honest source for it is the server saying it exists. Writing it in
         // optimistically would draw a room for the person who asked even when
         // the server refused them.
-        Command::CreateVoiceRoom { name, limit, channel } => {
+        Command::CreateVoiceRoom {
+            name,
+            limit,
+            channel,
+        } => {
             if client.criar_voice_room(name, limit, channel).await.is_err() {
                 return false;
             }
@@ -3629,8 +3650,15 @@ mod tests {
 
     #[test]
     fn the_pattern_survives_the_round_trip_through_an_atomic() {
-        for link_state in [LinkTrust::Offline, LinkTrust::Unverified, LinkTrust::Verified] {
-            assert_eq!(link_state_from_byte(link_state_byte(link_state)), link_state);
+        for link_state in [
+            LinkTrust::Offline,
+            LinkTrust::Unverified,
+            LinkTrust::Verified,
+        ] {
+            assert_eq!(
+                link_state_from_byte(link_state_byte(link_state)),
+                link_state
+            );
         }
     }
 
@@ -3662,7 +3690,7 @@ mod tests {
     fn the_snapshot_marks_which_person_is_us() {
         // Without this the shell has to compare ids, which means the shell has
         // to know what a `PersonId` is.
-        use seele_core::{VoiceRoomInfo, PersonId, PersonProfile, ServerMessage, SessionId, Ssrc};
+        use seele_core::{PersonId, PersonProfile, ServerMessage, SessionId, Ssrc, VoiceRoomInfo};
 
         let mut room = Room::new();
         room.apply(&ServerMessage::Session {
@@ -3672,7 +3700,7 @@ mod tests {
             server: "Terceira Tóquio".into(),
             voice_rooms: vec![VoiceRoomInfo {
                 id: VoiceRoomId(1),
-                name: "VOICE_ROOM-01".into(),
+                name: "SALA-01".into(),
                 limit: 20,
                 password_required: false,
                 channel: None,
@@ -3710,13 +3738,13 @@ mod tests {
         // number, and one that only got a number would have to know the
         // thresholds.
         use seele_core::{
-            VoiceRoomInfo, PersonId, PersonProfile, PersonState, Presence, ServerMessage, Ssrc,
+            PersonId, PersonProfile, PersonState, Presence, ServerMessage, Ssrc, VoiceRoomInfo,
         };
 
         let mut room = Room::new();
         room.voice_rooms = vec![VoiceRoomInfo {
             id: VoiceRoomId(1),
-            name: "VOICE_ROOM-01".into(),
+            name: "SALA-01".into(),
             limit: 20,
             password_required: false,
             channel: None,
@@ -3753,13 +3781,13 @@ mod tests {
         // the number, the band and the sample size and has nothing left to
         // decide. A voice room nobody is in carries `None`, not a critical zero.
         use seele_core::{
-            VoiceRoomInfo, PersonId, PersonProfile, PersonState, Presence, ServerMessage, Ssrc,
+            PersonId, PersonProfile, PersonState, Presence, ServerMessage, Ssrc, VoiceRoomInfo,
         };
 
         let mut room = Room::new();
         room.voice_rooms = vec![VoiceRoomInfo {
             id: VoiceRoomId(1),
-            name: "VOICE_ROOM-01".into(),
+            name: "SALA-01".into(),
             limit: 20,
             password_required: false,
             channel: None,
@@ -3786,7 +3814,9 @@ mod tests {
             }));
         }
 
-        let average = voice_rooms_of(&room)[0].sync.expect("two people are seated");
+        let average = voice_rooms_of(&room)[0]
+            .sync
+            .expect("two people are seated");
         assert_eq!(average.ratio, 85);
         assert_eq!(average.band, types::SignalBand::Nominal);
         assert_eq!(average.people, 2);
@@ -4079,9 +4109,7 @@ mod tests {
         // da tela inteira sem que nenhum dos outros testes veja.
         let source = include_str!("lib.rs");
         let Some(corpo) = source
-            .split(
-                "fn measure(sync: &mut Signal, client: &Enlace, shared: &Arc<Shared>) -> bool {",
-            )
+            .split("fn measure(sync: &mut Signal, client: &Enlace, shared: &Arc<Shared>) -> bool {")
             .nth(1)
             .and_then(|resto| resto.split("\n}").next())
         else {
@@ -4214,7 +4242,7 @@ mod tests {
         // folds it in, and the shell is told to redraw the list it already
         // knows how to draw. If this stopped firing, the person who made the
         // room would be looking at the old list with no way to know.
-        use seele_core::{VoiceRoomInfo, ServerMessage};
+        use seele_core::{ServerMessage, VoiceRoomInfo};
 
         #[derive(Default)]
         struct Recorder(Mutex<Vec<Event>>);
@@ -4239,7 +4267,7 @@ mod tests {
             &ServerMessage::VoiceRoomCreated {
                 voice_room: VoiceRoomInfo {
                     id: VoiceRoomId(2),
-                    name: "VOICE_ROOM-02 SALA DOS FUNDOS".into(),
+                    name: "SALA-02 SALA DOS FUNDOS".into(),
                     limit: 8,
                     password_required: false,
                     channel: None,
@@ -4254,7 +4282,7 @@ mod tests {
         );
         let room = shared.room.lock().unwrap();
         assert_eq!(voice_rooms_of(&room).len(), 1);
-        assert_eq!(voice_rooms_of(&room)[0].name, "VOICE_ROOM-02 SALA DOS FUNDOS");
+        assert_eq!(voice_rooms_of(&room)[0].name, "SALA-02 SALA DOS FUNDOS");
     }
 
     #[test]
@@ -4561,7 +4589,9 @@ mod tests {
         gorda.extend_from_slice(&128_u32.to_be_bytes());
         gorda.extend_from_slice(&128_u32.to_be_bytes());
         gorda.resize(64 * 1024, 0);
-        let Err(ConnectionError::IconTooBig { limit_bytes }) = connection.set_server_icon(Some(gorda)) else {
+        let Err(ConnectionError::IconTooBig { limit_bytes }) =
+            connection.set_server_icon(Some(gorda))
+        else {
             panic!("a picture over the ceiling was queued");
         };
         assert!(limit_bytes > 0);
@@ -4728,7 +4758,9 @@ mod tests {
             "a blank name was sent to the server"
         );
 
-        connection.create_voice_room("VOICE_ROOM-02".into(), 8, None).unwrap();
+        connection
+            .create_voice_room("SALA-02".into(), 8, None)
+            .unwrap();
         assert!(
             matches!(queue.try_recv(), Ok(Command::CreateVoiceRoom { .. })),
             "a real name was swallowed too"
@@ -4941,7 +4973,7 @@ mod tests {
     /// Devolve o `Room` para o teste acrescentar gente: é a contagem de
     /// espectadores que os testes abaixo mexem, e ela é o N do §5.1.
     fn sala_com_tela(quem_compartilha: seele_core::PersonId) -> Room {
-        use seele_core::{VoiceRoomInfo, PersonId, ScreenId, ServerMessage, SessionId, Ssrc};
+        use seele_core::{PersonId, ScreenId, ServerMessage, SessionId, Ssrc, VoiceRoomInfo};
 
         let mut room = Room::new();
         room.apply(&ServerMessage::Session {
@@ -4951,7 +4983,7 @@ mod tests {
             server: "Terceira Tóquio".into(),
             voice_rooms: vec![VoiceRoomInfo {
                 id: VoiceRoomId(1),
-                name: "VOICE_ROOM-01".into(),
+                name: "SALA-01".into(),
                 limit: 20,
                 password_required: false,
                 channel: None,
@@ -5030,7 +5062,7 @@ mod tests {
 
     #[test]
     fn nao_ha_tela_quando_ninguem_compartilha() {
-        use seele_core::{VoiceRoomInfo, PersonId, ServerMessage, SessionId, Ssrc};
+        use seele_core::{PersonId, ServerMessage, SessionId, Ssrc, VoiceRoomInfo};
 
         let mut room = Room::new();
         room.apply(&ServerMessage::Session {
@@ -5040,7 +5072,7 @@ mod tests {
             server: "Terceira Tóquio".into(),
             voice_rooms: vec![VoiceRoomInfo {
                 id: VoiceRoomId(1),
-                name: "VOICE_ROOM-01".into(),
+                name: "SALA-01".into(),
                 limit: 20,
                 password_required: false,
                 channel: None,
@@ -5218,7 +5250,7 @@ mod tests {
     #[test]
     fn um_ouvinte_sabe_que_a_tela_comecou_e_que_a_sala_cresceu() {
         use seele_core::{
-            VoiceRoomInfo, PersonId, PersonProfile, ScreenId, ServerMessage, SessionId, Ssrc,
+            PersonId, PersonProfile, ScreenId, ServerMessage, SessionId, Ssrc, VoiceRoomInfo,
         };
 
         #[derive(Default)]
@@ -5248,7 +5280,7 @@ mod tests {
                 server: "Terceira Tóquio".into(),
                 voice_rooms: vec![VoiceRoomInfo {
                     id: VoiceRoomId(1),
-                    name: "VOICE_ROOM-01".into(),
+                    name: "SALA-01".into(),
                     limit: 20,
                     password_required: false,
                     channel: None,

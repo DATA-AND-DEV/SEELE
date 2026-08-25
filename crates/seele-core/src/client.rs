@@ -21,7 +21,7 @@ use anyhow::Result;
 use ed25519_dalek::{Signer, SigningKey};
 use seele_proto::control::{ClientMessage, ServerMessage};
 use seele_proto::ids::{
-    VoiceRoomId, ClientMessageId, ChannelId, MessageId, PersonId, ScreenId, SessionId, Ssrc,
+    ChannelId, ClientMessageId, MessageId, PersonId, ScreenId, SessionId, Ssrc, VoiceRoomId,
 };
 use seele_proto::transport::{HANDSHAKE_TIMEOUT, IDLE_TIMEOUT, KEEPALIVE};
 
@@ -968,7 +968,11 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn move_person(&mut self, person: PersonId, voice_room: VoiceRoomId) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::MovePerson { person, voice_room }).await
+        frame::write(
+            &mut self.send,
+            &ClientMessage::MovePerson { person, voice_room },
+        )
+        .await
     }
 
     /// Asks for a page of history, oldest of the page first on the wire.
@@ -1132,7 +1136,11 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn delete_voice_room(&mut self, voice_room: VoiceRoomId) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::DeleteVoiceRoom { voice_room }).await
+        frame::write(
+            &mut self.send,
+            &ClientMessage::DeleteVoiceRoom { voice_room },
+        )
+        .await
     }
 
     /// Asks the server to destroy o canal, and everything written in it.

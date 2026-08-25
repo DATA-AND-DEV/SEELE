@@ -131,7 +131,11 @@ impl Politica {
     /// # Errors
     ///
     /// Falha se o banco não responder. Recusa é `Ok(Err(_))`, não erro.
-    pub fn avaliar(&self, persistence: &Persistence, segredo: Option<&str>) -> Result<Result<Passe, Recusa>> {
+    pub fn avaliar(
+        &self,
+        persistence: &Persistence,
+        segredo: Option<&str>,
+    ) -> Result<Result<Passe, Recusa>> {
         if self.aberto() {
             return Ok(Ok(Passe::livre()));
         }
@@ -289,7 +293,11 @@ pub fn criar_convite(persistence: &mut Persistence, observacao: &str) -> Result<
 /// Recusa quando o banco não responde. É a única resposta segura: uma consulta
 /// que falha não é prova de que a porta pode abrir.
 #[must_use]
-pub fn voice_room_liberado(persistence: &Persistence, voice_room: VoiceRoomId, senha: Option<&str>) -> bool {
+pub fn voice_room_liberado(
+    persistence: &Persistence,
+    voice_room: VoiceRoomId,
+    senha: Option<&str>,
+) -> bool {
     let hash: Option<Option<String>> = persistence
         .connection()
         .query_row(
@@ -313,7 +321,11 @@ pub fn voice_room_liberado(persistence: &Persistence, voice_room: VoiceRoomId, s
 /// # Errors
 ///
 /// Falha se o hash não puder ser calculado ou o banco não responder.
-pub fn definir_senha_voice_room(persistence: &mut Persistence, voice_room: VoiceRoomId, senha: Option<&str>) -> Result<()> {
+pub fn definir_senha_voice_room(
+    persistence: &mut Persistence,
+    voice_room: VoiceRoomId,
+    senha: Option<&str>,
+) -> Result<()> {
     let hash = senha.map(calcular_hash).transpose()?;
     persistence.connection().execute(
         "UPDATE voice_rooms SET password_hash = ?1 WHERE id = ?2",
@@ -404,7 +416,7 @@ mod tests {
         persistence
             .connection()
             .execute(
-                "INSERT INTO voice_rooms (id, name, member_limit, position) VALUES (1, 'VOICE_ROOM-01', 20, 0)",
+                "INSERT INTO voice_rooms (id, name, member_limit, position) VALUES (1, 'SALA-01', 20, 0)",
                 [],
             )
             .expect("semear a sala de voz");
@@ -653,11 +665,20 @@ mod tests {
         // A fechadura que existia no protocolo, era anunciada ao cliente em
         // `password_required` e nunca era conferida.
         let mut persistence = persistence();
-        definir_senha_voice_room(&mut persistence, VoiceRoomId(1), Some("geofront")).expect("definir");
+        definir_senha_voice_room(&mut persistence, VoiceRoomId(1), Some("geofront"))
+            .expect("definir");
 
         assert!(!voice_room_liberado(&persistence, VoiceRoomId(1), None));
-        assert!(!voice_room_liberado(&persistence, VoiceRoomId(1), Some("errada")));
-        assert!(voice_room_liberado(&persistence, VoiceRoomId(1), Some("geofront")));
+        assert!(!voice_room_liberado(
+            &persistence,
+            VoiceRoomId(1),
+            Some("errada")
+        ));
+        assert!(voice_room_liberado(
+            &persistence,
+            VoiceRoomId(1),
+            Some("geofront")
+        ));
     }
 
     #[test]
@@ -671,13 +692,16 @@ mod tests {
     #[test]
     fn a_senha_do_voice_room_tambem_e_hasheada() {
         let mut persistence = persistence();
-        definir_senha_voice_room(&mut persistence, VoiceRoomId(1), Some("geofront")).expect("definir");
+        definir_senha_voice_room(&mut persistence, VoiceRoomId(1), Some("geofront"))
+            .expect("definir");
 
         let guardado: String = persistence
             .connection()
-            .query_row("SELECT password_hash FROM voice_rooms WHERE id = 1", [], |l| {
-                l.get(0)
-            })
+            .query_row(
+                "SELECT password_hash FROM voice_rooms WHERE id = 1",
+                [],
+                |l| l.get(0),
+            )
             .expect("ler");
         assert!(guardado.starts_with("$argon2id$"), "{guardado}");
     }

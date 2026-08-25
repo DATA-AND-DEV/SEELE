@@ -11,7 +11,7 @@
 //! matters is that a keystroke means different things in different modes, and
 //! the one place that gets decided is [`App::on_key`].
 
-use seele_core::{VoiceRoomSync, Link, LinkTrust, SignalBand};
+use seele_core::{Link, LinkTrust, SignalBand, VoiceRoomSync};
 
 /// Which input mode the client is in. `specs/05-cliente-tui.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -694,7 +694,7 @@ mod tests {
         let mut app = App::new();
         app.tree = vec![
             Node::VoiceRoom {
-                name: "VOICE_ROOM-01 CENTRAL".into(),
+                name: "SALA-01 CENTRAL".into(),
                 open: true,
                 sync: None,
             },
@@ -706,7 +706,7 @@ mod tests {
                 total_isolation: false,
             }),
             Node::VoiceRoom {
-                name: "VOICE_ROOM-02 TESTE".into(),
+                name: "SALA-02 TESTE".into(),
                 open: false,
                 sync: None,
             },
@@ -1142,7 +1142,7 @@ mod tree_tests {
     fn tree() -> Vec<Node> {
         vec![
             Node::VoiceRoom {
-                name: "VOICE_ROOM-01".into(),
+                name: "SALA-01".into(),
                 open: true,
                 sync: None,
             },
@@ -1184,7 +1184,7 @@ mod tree_tests {
         let mut app = App::new();
         app.tree = vec![
             Node::VoiceRoom {
-                name: "VOICE_ROOM-01".into(),
+                name: "SALA-01".into(),
                 open: true,
                 sync: None,
             },

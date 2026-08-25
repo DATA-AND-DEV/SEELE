@@ -691,7 +691,12 @@ impl Store {
     /// same blob — which is exactly right, and why this loops rather than
     /// counting. It stops when there is nothing live left to expire, and the
     /// caller is the one that decides what a still-full ledger means.
-    fn evict_until(&self, ledger: &mut Ledger, persistence: &Persistence, wanted: u64) -> Result<()> {
+    fn evict_until(
+        &self,
+        ledger: &mut Ledger,
+        persistence: &Persistence,
+        wanted: u64,
+    ) -> Result<()> {
         let attachments = Attachments::new(persistence);
         while ledger.free() < wanted || ledger.spoken_for() > ledger.quota {
             let Some(oldest) = attachments.oldest_live()? else {
@@ -959,7 +964,10 @@ mod tests {
         // than a sixteenth of what is stored. A 900 MiB file into a 1 GiB server
         // would empty everybody's history in one act.
         assert_eq!(per_file_limit(DEFAULT_QUOTA_BYTES), 64 * 1024 * 1024);
-        assert!(per_file_limit(1) >= 1, "a tiny server still takes something");
+        assert!(
+            per_file_limit(1) >= 1,
+            "a tiny server still takes something"
+        );
         for quota in [1_024, 1_000_000, DEFAULT_QUOTA_BYTES, u64::MAX / 2] {
             assert!(
                 per_file_limit(quota) * PER_FILE_DIVISOR <= quota + PER_FILE_DIVISOR,
@@ -1139,7 +1147,10 @@ mod tests {
             let size = 16 + u64::from(seed % 7) * 16;
             let scratch = format!("s{step}");
 
-            match store.reserve(&mut ledger, &persistence, size, &scratch).unwrap() {
+            match store
+                .reserve(&mut ledger, &persistence, size, &scratch)
+                .unwrap()
+            {
                 Ok(reservation) => {
                     check(&ledger, step);
                     std::fs::write(reservation.scratch(), vec![seed; size as usize]).unwrap();
@@ -1237,7 +1248,10 @@ mod tests {
         }
 
         assert_eq!(ledger.stored(), 100, "the second copy took disk");
-        assert_eq!(Attachments::new(&persistence).live_copies(&hash).unwrap(), 2);
+        assert_eq!(
+            Attachments::new(&persistence).live_copies(&hash).unwrap(),
+            2
+        );
         assert_eq!(std::fs::read_dir(store.root()).unwrap().count(), 1);
     }
 
@@ -1324,7 +1338,10 @@ mod tests {
 
         let (_store, ledger) = open(directory.path(), &persistence);
         assert_eq!(ledger.stored(), 0, "the ledger counted bytes that are gone");
-        let row = Attachments::new(&persistence).one(landed.id).unwrap().unwrap();
+        let row = Attachments::new(&persistence)
+            .one(landed.id)
+            .unwrap()
+            .unwrap();
         assert!(row.expired_at.is_some());
         assert_eq!(row.info().state, AttachmentState::Expired);
     }

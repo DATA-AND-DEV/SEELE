@@ -36,10 +36,10 @@ use anyhow::Result;
 use ed25519_dalek::{Signer, SigningKey};
 use seele_proto::attachment::AttachmentHeader;
 use seele_proto::control::{AttachmentRefusal, ClientMessage, ServerMessage};
-use seele_proto::ids::{ClientMessageId, ChannelId};
+use seele_proto::ids::{ChannelId, ClientMessageId};
 use seele_proto::stream::{StreamType, RESERVED_TYPE};
 use seele_server::persistence::Location;
-use seele_server::{frame, ServerConfig, Daemon};
+use seele_server::{frame, Daemon, ServerConfig};
 
 /// Um verificador que aceita qualquer certificado.
 ///

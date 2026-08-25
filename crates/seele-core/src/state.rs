@@ -27,8 +27,8 @@
 
 use std::collections::HashMap;
 
-use seele_proto::control::{VoiceRoomInfo, ChannelInfo, Permission, PersonState};
-use seele_proto::ids::{VoiceRoomId, ChannelId, MessageId, PersonId, ScreenId, Ssrc};
+use seele_proto::control::{ChannelInfo, Permission, PersonState, VoiceRoomInfo};
+use seele_proto::ids::{ChannelId, MessageId, PersonId, ScreenId, Ssrc, VoiceRoomId};
 use seele_proto::signal::SignalBand;
 use seele_proto::ServerMessage;
 
@@ -144,7 +144,7 @@ pub enum TransferNotice {
 
 /// The average Sync Ratio of a voice room, already banded.
 ///
-/// The comp (`design/SEELE v2.dc.html`) draws this as **MÉDIA DO VOICE_ROOM**, a
+/// The comp (`design/Entry Plug v2.dc.html`) draws this as **MÉDIA DO VOICE_ROOM**, a
 /// number in the band's colour with the sample size beside it, and computes
 /// both in the shell. Here it is computed once, in the core, for the same
 /// reason `seele_ffi::types` gives for carrying a band beside every person's
@@ -552,7 +552,8 @@ impl Room {
     /// The average for whichever voice room this client is in.
     #[must_use]
     pub fn current_voice_room_sync(&self) -> Option<VoiceRoomSync> {
-        self.current_voice_room.and_then(|voice_room| self.voice_room_sync(voice_room))
+        self.current_voice_room
+            .and_then(|voice_room| self.voice_room_sync(voice_room))
     }
 
     /// A person's media source, addressed by nickname.
@@ -568,7 +569,11 @@ impl Room {
     #[must_use]
     pub fn find_voice_room(&self, which: &str) -> Option<VoiceRoomId> {
         if let Ok(number) = which.parse::<u32>() {
-            if let Some(voice_room) = self.voice_rooms.iter().find(|voice_room| voice_room.id.0 == number) {
+            if let Some(voice_room) = self
+                .voice_rooms
+                .iter()
+                .find(|voice_room| voice_room.id.0 == number)
+            {
                 return Some(voice_room.id);
             }
         }
@@ -884,7 +889,11 @@ impl Room {
             // event in would otherwise show the same room in the list twice, and
             // a duplicated room is one nobody can tell their friends to join.
             ServerMessage::VoiceRoomCreated { voice_room } => {
-                if !self.voice_rooms.iter().any(|known| known.id == voice_room.id) {
+                if !self
+                    .voice_rooms
+                    .iter()
+                    .any(|known| known.id == voice_room.id)
+                {
                     self.voice_rooms.push(voice_room.clone());
                     changed.channels = true;
                 }
@@ -898,7 +907,11 @@ impl Room {
             }
 
             ServerMessage::VoiceRoomRenamed { voice_room, name } => {
-                if let Some(known) = self.voice_rooms.iter_mut().find(|known| known.id == *voice_room) {
+                if let Some(known) = self
+                    .voice_rooms
+                    .iter_mut()
+                    .find(|known| known.id == *voice_room)
+                {
                     known.name.clone_from(name);
                     changed.channels = true;
                 }
@@ -1105,10 +1118,9 @@ impl Room {
     }
 
     fn absorb_state(&mut self, state: &PersonState) {
-        let person = self
-            .people
-            .entry(state.person)
-            .or_insert_with(|| Person::new(state.person, format!("pessoa {}", state.person.0), None));
+        let person = self.people.entry(state.person).or_insert_with(|| {
+            Person::new(state.person, format!("pessoa {}", state.person.0), None)
+        });
         person.muted = state.muted;
         person.total_isolation = state.total_isolation;
         person.speaking = state.speaking;
@@ -1135,7 +1147,7 @@ mod tests {
             server: "Terceira Tóquio".into(),
             voice_rooms: vec![VoiceRoomInfo {
                 id: VOICE_ROOM,
-                name: "VOICE_ROOM-01 CENTRAL".into(),
+                name: "SALA-01 CENTRAL".into(),
                 limit: 20,
                 password_required: false,
                 channel: Some(CHANNEL),
@@ -1512,13 +1524,25 @@ mod tests {
         // voice_rooms drawn in red is four alarms nobody set, and the voice room that is
         // genuinely in trouble stops standing out among them.
         let room = room();
-        assert_eq!(room.voice_room_sync(VoiceRoomId(9)), None, "a voice room nobody is in");
-        assert_eq!(watching().voice_room_sync(VOICE_ROOM), None, "a voice room nobody has sat in");
+        assert_eq!(
+            room.voice_room_sync(VoiceRoomId(9)),
+            None,
+            "a voice room nobody is in"
+        );
+        assert_eq!(
+            watching().voice_room_sync(VOICE_ROOM),
+            None,
+            "a voice room nobody has sat in"
+        );
 
         // And the person's own voice room, before anybody is in it, has no average
         // either — including no average of nobody.
         let mut alone = watching();
-        assert_eq!(alone.current_voice_room_sync(), None, "na sala de voz entered yet");
+        assert_eq!(
+            alone.current_voice_room_sync(),
+            None,
+            "na sala de voz entered yet"
+        );
         alone.enter_voice_room(VOICE_ROOM);
         assert_eq!(
             alone.current_voice_room_sync().map(|sync| sync.people),
@@ -1537,7 +1561,9 @@ mod tests {
         seated_with(&mut room, 4, "asuka", 81);
         seated_with(&mut room, 5, "shinji", 78);
 
-        let average = room.voice_room_sync(VOICE_ROOM).expect("three people are seated");
+        let average = room
+            .voice_room_sync(VOICE_ROOM)
+            .expect("three people are seated");
         assert_eq!(average.ratio, 83);
         assert_eq!(average.band, SignalBand::Degraded);
         assert_eq!(average.people, 3);
@@ -1553,11 +1579,17 @@ mod tests {
         seated_with(&mut room, 3, "ayanami", 84);
         seated_with(&mut room, 4, "asuka", 85);
 
-        let average = room.voice_room_sync(VOICE_ROOM).expect("two people are seated");
+        let average = room
+            .voice_room_sync(VOICE_ROOM)
+            .expect("two people are seated");
         assert_eq!(average.ratio, 85);
         assert_eq!(average.band, SignalBand::Nominal);
         assert_eq!(average.people, 2);
-        assert_eq!(room.current_voice_room_sync(), None, "our connection is elsewhere");
+        assert_eq!(
+            room.current_voice_room_sync(),
+            None,
+            "our connection is elsewhere"
+        );
     }
 
     #[test]
@@ -1570,14 +1602,19 @@ mod tests {
         seated_with(&mut room, 3, "ayanami", 90);
         seated_with(&mut room, 4, "asuka", 20);
 
-        assert_eq!(room.voice_room_sync(VOICE_ROOM).map(|sync| sync.ratio), Some(55));
+        assert_eq!(
+            room.voice_room_sync(VOICE_ROOM).map(|sync| sync.ratio),
+            Some(55)
+        );
 
         room.apply(&ServerMessage::PersonLeft {
             voice_room: VOICE_ROOM,
             person: PersonId(4),
         });
 
-        let average = room.voice_room_sync(VOICE_ROOM).expect("ayanami is still seated");
+        let average = room
+            .voice_room_sync(VOICE_ROOM)
+            .expect("ayanami is still seated");
         assert_eq!(average.ratio, 90, "somebody who left is still counted");
         assert_eq!(average.people, 1);
         assert_eq!(
@@ -1601,7 +1638,7 @@ mod tests {
         let changed = room.apply(&ServerMessage::VoiceRoomCreated {
             voice_room: VoiceRoomInfo {
                 id: VoiceRoomId(2),
-                name: "VOICE_ROOM-02 SALA DOS FUNDOS".into(),
+                name: "SALA-02 SALA DOS FUNDOS".into(),
                 limit: 8,
                 password_required: false,
                 channel: None,
@@ -1614,7 +1651,7 @@ mod tests {
         );
         assert_eq!(room.voice_rooms.len(), 2);
         assert_eq!(room.voice_rooms[1].id, VoiceRoomId(2));
-        assert_eq!(room.voice_rooms[1].name, "VOICE_ROOM-02 SALA DOS FUNDOS");
+        assert_eq!(room.voice_rooms[1].name, "SALA-02 SALA DOS FUNDOS");
     }
 
     #[test]
@@ -1643,7 +1680,7 @@ mod tests {
         let made = ServerMessage::VoiceRoomCreated {
             voice_room: VoiceRoomInfo {
                 id: VoiceRoomId(2),
-                name: "VOICE_ROOM-02".into(),
+                name: "SALA-02".into(),
                 limit: 8,
                 password_required: false,
                 channel: None,
@@ -1733,7 +1770,7 @@ mod tests {
         room.apply(&ServerMessage::VoiceRoomCreated {
             voice_room: VoiceRoomInfo {
                 id: VoiceRoomId(2),
-                name: "VOICE_ROOM-02".into(),
+                name: "SALA-02".into(),
                 limit: 8,
                 password_required: false,
                 channel: None,
@@ -1742,14 +1779,17 @@ mod tests {
 
         let changed = room.apply(&ServerMessage::VoiceRoomRenamed {
             voice_room: VOICE_ROOM,
-            name: "VOICE_ROOM-01 PONTE".into(),
+            name: "SALA-01 PONTE".into(),
         });
 
         assert!(changed.channels);
         assert_eq!(room.voice_rooms.len(), 2, "the rename made a second room");
         assert_eq!(room.voice_rooms[0].id, VOICE_ROOM);
-        assert_eq!(room.voice_rooms[0].name, "VOICE_ROOM-01 PONTE");
-        assert_eq!(room.voice_rooms[0].limit, 20, "the rename rewrote the rest of it");
+        assert_eq!(room.voice_rooms[0].name, "SALA-01 PONTE");
+        assert_eq!(
+            room.voice_rooms[0].limit, 20,
+            "the rename rewrote the rest of it"
+        );
     }
 
     #[test]
@@ -1776,15 +1816,24 @@ mod tests {
         // screen in the product claiming the room is there.
         let mut room = room();
         room.apply(&joined(3, "ayanami"));
-        assert_eq!(room.roster(VOICE_ROOM).count(), 2, "this client and ayanami");
+        assert_eq!(
+            room.roster(VOICE_ROOM).count(),
+            2,
+            "this client and ayanami"
+        );
 
-        let changed = room.apply(&ServerMessage::VoiceRoomDeleted { voice_room: VOICE_ROOM });
+        let changed = room.apply(&ServerMessage::VoiceRoomDeleted {
+            voice_room: VOICE_ROOM,
+        });
 
         assert!(
             changed.channels,
             "nothing told the shell to redraw the list"
         );
-        assert!(room.voice_rooms.is_empty(), "the destroyed voice room is still listed");
+        assert!(
+            room.voice_rooms.is_empty(),
+            "the destroyed voice room is still listed"
+        );
         assert_eq!(
             room.roster(VOICE_ROOM).count(),
             0,
@@ -1799,7 +1848,9 @@ mod tests {
         let mut room = room();
         assert_eq!(room.current_voice_room, Some(VOICE_ROOM));
 
-        room.apply(&ServerMessage::VoiceRoomDeleted { voice_room: VOICE_ROOM });
+        room.apply(&ServerMessage::VoiceRoomDeleted {
+            voice_room: VOICE_ROOM,
+        });
 
         assert_eq!(room.current_voice_room, None);
         assert_eq!(room.current_roster().count(), 0);
@@ -1813,18 +1864,24 @@ mod tests {
         room.apply(&ServerMessage::VoiceRoomCreated {
             voice_room: VoiceRoomInfo {
                 id: VoiceRoomId(2),
-                name: "VOICE_ROOM-02".into(),
+                name: "SALA-02".into(),
                 limit: 8,
                 password_required: false,
                 channel: None,
             },
         });
 
-        let changed = room.apply(&ServerMessage::VoiceRoomDeleted { voice_room: VoiceRoomId(2) });
+        let changed = room.apply(&ServerMessage::VoiceRoomDeleted {
+            voice_room: VoiceRoomId(2),
+        });
 
         assert!(changed.channels);
         assert_eq!(room.voice_rooms.len(), 1);
-        assert_eq!(room.current_voice_room, Some(VOICE_ROOM), "the wrong connection came out");
+        assert_eq!(
+            room.current_voice_room,
+            Some(VOICE_ROOM),
+            "the wrong connection came out"
+        );
     }
 
     #[test]
@@ -1851,8 +1908,12 @@ mod tests {
     #[test]
     fn destroying_a_room_this_client_never_heard_of_changes_nothing() {
         let mut room = room();
-        let voice_room = room.apply(&ServerMessage::VoiceRoomDeleted { voice_room: VoiceRoomId(404) });
-        let channel = room.apply(&ServerMessage::ChannelDeleted { channel: ChannelId(404) });
+        let voice_room = room.apply(&ServerMessage::VoiceRoomDeleted {
+            voice_room: VoiceRoomId(404),
+        });
+        let channel = room.apply(&ServerMessage::ChannelDeleted {
+            channel: ChannelId(404),
+        });
 
         assert!(!voice_room.channels);
         assert!(!channel.channels);
@@ -1894,7 +1955,9 @@ mod tests {
         room.apply(&joined(3, "ayanami"));
         assert_eq!(room.current_voice_room, Some(VOICE_ROOM));
 
-        let changed = room.apply(&ServerMessage::MovedToVoiceRoom { voice_room: VoiceRoomId(2) });
+        let changed = room.apply(&ServerMessage::MovedToVoiceRoom {
+            voice_room: VoiceRoomId(2),
+        });
 
         assert!(changed.roster, "nothing told the shell to redraw");
         assert_eq!(room.current_voice_room, Some(VoiceRoomId(2)));

@@ -1,4 +1,4 @@
-/* SEELE · Entry Plug — as preferências do sistema, por último.
+/* SEELE — as preferências do sistema, por último.
    Última folha da lista de propósito. As duas regras de contraste sobrescrevem
    `.rotulo` (de `base.css`), `.painel-titulo` e `.roster .pessoa` (de
    `tela-sessao.css`) com **a mesma especificidade** — elas ganham por ordem de

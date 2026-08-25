@@ -972,8 +972,7 @@ fn windows_consentimento() -> ConsentimentoDoMicrofone {
     use winreg::enums::HKEY_LOCAL_MACHINE;
     use winreg::RegKey;
 
-    const RAIZ: &str =
-        r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone";
+    const RAIZ: &str = r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone";
 
     /// `Deny` de forma exata: qualquer outro valor — inclusive lixo — não é
     /// negativa, e tratá-lo como negativa poria a tela a acusar o sistema por

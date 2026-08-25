@@ -41,9 +41,9 @@ use std::time::Duration;
 use anyhow::Result;
 use seele_core::enlace::{Aviso, Destino, Enlace};
 use seele_core::{MemoryPinStore, PinStore, Room};
-use seele_proto::ids::{VoiceRoomId, ChannelId};
+use seele_proto::ids::{ChannelId, VoiceRoomId};
 use seele_server::persistence::Location;
-use seele_server::{ServerConfig, Daemon};
+use seele_server::{Daemon, ServerConfig};
 
 /// Sobe um servidor numa porta que o sistema escolhe, com dois salas de voz.
 ///
@@ -142,9 +142,13 @@ fn sentados(room: &Room, voice_room: VoiceRoomId) -> Vec<String> {
 }
 
 /// Abre um segundo sala de voz, que só quem hospeda pode fazer.
-async fn segundo_voice_room(anfitriao: &Enlace, enlace: &mut Enlace, room: &mut Room) -> Result<VoiceRoomId> {
+async fn segundo_voice_room(
+    anfitriao: &Enlace,
+    enlace: &mut Enlace,
+    room: &mut Room,
+) -> Result<VoiceRoomId> {
     anfitriao
-        .criar_voice_room("VOICE_ROOM-02 SALA DOS FUNDOS".to_owned(), 8, None)
+        .criar_voice_room("SALA-02 SALA DOS FUNDOS".to_owned(), 8, None)
         .await
         .expect("a sessão do anfitrião acabou");
 
@@ -152,7 +156,10 @@ async fn segundo_voice_room(anfitriao: &Enlace, enlace: &mut Enlace, room: &mut 
         room.voice_rooms.len() >= 2
     })
     .await;
-    assert!(chegou, "o segundo sala de voz não chegou a quem estava conectado");
+    assert!(
+        chegou,
+        "o segundo sala de voz não chegou a quem estava conectado"
+    );
     Ok(room.voice_rooms[1].id)
 }
 
@@ -168,8 +175,14 @@ async fn quem_chega_ve_todos_os_voice_rooms_ocupados_e_nao_so_o_seu() -> Result<
 
     // Duas pessoas sentam, uma em cada sala de voz, **antes** de a testemunha existir.
     let mut shinji = conectar(endereco, 47, "shinji").await?;
-    shinji.inserir_plug(voice_room_um).await.expect("sessão acabou");
-    asuka.inserir_plug(voice_room_dois).await.expect("sessão acabou");
+    shinji
+        .inserir_plug(voice_room_um)
+        .await
+        .expect("sessão acabou");
+    asuka
+        .inserir_plug(voice_room_dois)
+        .await
+        .expect("sessão acabou");
     // Um instante para os dois assentos existirem no servidor antes do aperto de
     // mão seguinte, que é o que este teste mede.
     let mut sala_shinji = sala(&shinji);
@@ -186,7 +199,7 @@ async fn quem_chega_ve_todos_os_voice_rooms_ocupados_e_nao_so_o_seu() -> Result<
 
     assert!(
         viu_os_dois,
-        "quem chegou viu {:?} no VOICE_ROOM-01 e {:?} no VOICE_ROOM-02; \
+        "quem chegou viu {:?} no SALA-01 e {:?} no SALA-02; \
          os dois estão ocupados, e uma sala desenhada vazia é o defeito relatado",
         sentados(&sala_rei, voice_room_um),
         sentados(&sala_rei, voice_room_dois),
@@ -213,13 +226,18 @@ async fn entrar_num_voice_room_aparece_para_quem_esta_noutro() -> Result<()> {
     let voice_room_dois = segundo_voice_room(&anfitriao, &mut rei, &mut sala_rei).await?;
 
     // A testemunha senta no primeiro voice room e fica lá o teste inteiro.
-    rei.inserir_plug(voice_room_um).await.expect("sessão acabou");
+    rei.inserir_plug(voice_room_um)
+        .await
+        .expect("sessão acabou");
     sala_rei.enter_voice_room(voice_room_um);
 
     // Alguém entra **no outro**. Esta é a metade viva: um retrato pedido no
     // aperto de mão estaria certo até aqui e erraria a partir daqui.
     let shinji = conectar(endereco, 47, "shinji").await?;
-    shinji.inserir_plug(voice_room_dois).await.expect("sessão acabou");
+    shinji
+        .inserir_plug(voice_room_dois)
+        .await
+        .expect("sessão acabou");
 
     let apareceu = absorver_ate(&mut rei, &mut sala_rei, Duration::from_secs(15), |room| {
         room.roster(voice_room_dois).count() == 1
@@ -261,7 +279,10 @@ async fn uma_conexao_que_cai_sai_do_roster_de_todo_mundo() -> Result<()> {
     let voice_room_um = VoiceRoomId(anfitriao.sessao().voice_rooms[0].id.get());
 
     let shinji = conectar(endereco, 47, "shinji").await?;
-    shinji.inserir_plug(voice_room_um).await.expect("sessão acabou");
+    shinji
+        .inserir_plug(voice_room_um)
+        .await
+        .expect("sessão acabou");
     // Mais um comando atrás do primeiro, para que a entrada tenha sido
     // processada antes de a sessão morrer; sem isso o teste poderia medir uma
     // saída que nunca teve entrada e passar por engano.
@@ -282,7 +303,7 @@ async fn uma_conexao_que_cai_sai_do_roster_de_todo_mundo() -> Result<()> {
     .await;
     assert!(
         saiu,
-        "quem fechou o cliente ficou sentado no VOICE_ROOM-01 para todo mundo: {:?}\n\
+        "quem fechou o cliente ficou sentado no SALA-01 para todo mundo: {:?}\n\
          A saída só era anunciada pelo ramo do EjetarPlug, então toda queda \
          deixava um fantasma na tela.",
         sentados(&sala_rei, voice_room_um)

@@ -1,4 +1,4 @@
-/* SEELE · Entry Plug — a entrada no servidor (`#tela-auth`).
+/* SEELE — a entrada no servidor (`#tela-auth`).
    Só o que esta tela usa. A coordenada de painel, o travessão de valor ausente,
    `.campo`, `.rotulo` e `.botao` vêm de `base.css`, que carrega antes.
 

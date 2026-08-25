@@ -145,7 +145,7 @@ mod tests {
     use super::*;
     use crate::attachment::{hash, AttachmentHeader};
     use crate::control::{decode, encode};
-    use crate::ids::{ClientMessageId, ChannelId, ScreenId};
+    use crate::ids::{ChannelId, ClientMessageId, ScreenId};
     use crate::screen::{ScreenCodec, ScreenHeader, ScreenSource, SCREEN_HEADER_LEN};
     use crate::version::PROTOCOL_VERSION;
 

@@ -197,9 +197,10 @@ impl Conhecidos {
     /// arquivo sem alguém escrever `../` mais cedo ou mais tarde.
     fn caminho_do_icone(&self, alvo: &str) -> PathBuf {
         let mut pasta = self.caminho.clone();
-        let nome = pasta
-            .file_name()
-            .map_or_else(|| "conhecidos".to_owned(), |n| n.to_string_lossy().into_owned());
+        let nome = pasta.file_name().map_or_else(
+            || "conhecidos".to_owned(),
+            |n| n.to_string_lossy().into_owned(),
+        );
         pasta.set_file_name(format!("{nome}-icones"));
         pasta.join(format!("{}.png", digerir(alvo)))
     }
@@ -223,7 +224,8 @@ impl Conhecidos {
                     "{}\t{}\t{}\t{}\t{}\n",
                     e.alvo,
                     e.apelido,
-                    e.voice_room.map_or_else(|| "-".to_owned(), |c| c.to_string()),
+                    e.voice_room
+                        .map_or_else(|| "-".to_owned(), |c| c.to_string()),
                     e.visto_em,
                     // Uma coluna a mais no fim, e nunca no meio: uma linha de
                     // quatro campos escrita por uma versão anterior continua
@@ -352,12 +354,20 @@ mod tests {
         let caminho = pasta.join("conhecidos");
 
         let mut lista = Conhecidos::abrir(caminho.clone()).expect("abrir");
-        lista.registrar("server.exemplo:8383", "ayanami", Some(1)).expect("registrar");
         lista
-            .anotar_aparencia("server.exemplo:8383", Some("Terceira Tóquio"), Some(&[1, 2, 3]))
+            .registrar("server.exemplo:8383", "ayanami", Some(1))
+            .expect("registrar");
+        lista
+            .anotar_aparencia(
+                "server.exemplo:8383",
+                Some("Terceira Tóquio"),
+                Some(&[1, 2, 3]),
+            )
             .expect("anotar");
 
-        lista.registrar("server.exemplo:8383", "ayanami", Some(2)).expect("de novo");
+        lista
+            .registrar("server.exemplo:8383", "ayanami", Some(2))
+            .expect("de novo");
 
         let de_volta = Conhecidos::abrir(caminho).expect("reabrir");
         let entrada = de_volta.buscar("server.exemplo:8383").expect("está lá");

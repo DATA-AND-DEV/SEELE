@@ -276,10 +276,9 @@ impl std::fmt::Display for FalhaAoLiberar {
                 "esta máquina não tem endereço IPv6 próprio — quem fornece isso é \
                  a sua operadora"
             ),
-            Self::RoteadorNaoDescoberto => write!(
-                f,
-                "não deu para descobrir o roteador desta rede"
-            ),
+            Self::RoteadorNaoDescoberto => {
+                write!(f, "não deu para descobrir o roteador desta rede")
+            }
             Self::NaoDeuParaFalarComORoteador { roteador, erro } => write!(
                 f,
                 "não deu nem para mandar o pedido ao roteador ({roteador}): {erro}"

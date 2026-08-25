@@ -21,9 +21,9 @@ use std::sync::{Arc, Mutex};
 use seele_core::chegada::{Caminho, Chegada, Etapa};
 use seele_core::enlace::Destino;
 use seele_core::{MemoryPinStore, PinStore, SigningKey};
-use seele_ffi::{ConnectConfig, ConnectStage, Event, EventListener, Connection};
+use seele_ffi::{ConnectConfig, ConnectStage, Connection, Event, EventListener};
 use seele_server::persistence::Location;
-use seele_server::{ServerConfig, Daemon};
+use seele_server::{Daemon, ServerConfig};
 
 /// A base de uma configuração de entrada, para os testes que só trocam um campo.
 fn config_de_teste(server: String, casa: &std::path::Path) -> ConnectConfig {
@@ -442,7 +442,8 @@ async fn uma_conexao_que_venceu_por_um_candidato_avisado_diz_furo_de_nat() {
     config.expected_fingerprint = Some(servidor.fingerprint().to_owned());
     config.bilhete = Some(bilhete);
 
-    let Ok(entrada) = tokio::task::spawn_blocking(move || Connection::connect_with_trail(config)).await
+    let Ok(entrada) =
+        tokio::task::spawn_blocking(move || Connection::connect_with_trail(config)).await
     else {
         panic!("a thread que conecta caiu");
     };
@@ -480,7 +481,8 @@ async fn a_mesma_conexao_sem_aviso_nenhum_diz_endereco_publico() {
     let mut config = config_de_teste(format!("[::ffff:127.0.0.1]:{}", server.port()), casa.path());
     config.expected_fingerprint = Some(servidor.fingerprint().to_owned());
 
-    let Ok(entrada) = tokio::task::spawn_blocking(move || Connection::connect_with_trail(config)).await
+    let Ok(entrada) =
+        tokio::task::spawn_blocking(move || Connection::connect_with_trail(config)).await
     else {
         panic!("a thread que conecta caiu");
     };
@@ -603,7 +605,8 @@ fn quem_liga_a_ponte_antes_do_bloqueio_ve_as_etapas_acontecerem() {
     config.alternate_servers = vec![segundo.to_string()];
 
     let anotador = Arc::new(Anotador::default());
-    let resultado = Connection::connect_watching(config, Arc::clone(&anotador) as Arc<dyn EventListener>);
+    let resultado =
+        Connection::connect_watching(config, Arc::clone(&anotador) as Arc<dyn EventListener>);
     assert!(
         resultado.is_err(),
         "dois endereços mortos deixaram alguém entrar"

@@ -1313,7 +1313,8 @@ mod testes {
 
     /// A linha do relatório que começa com este rótulo, sem o rótulo.
     fn linha_de(saida: &str, rotulo: &str) -> String {
-        saida            .lines()
+        saida
+            .lines()
             .find(|linha| linha.starts_with(rotulo))
             .map(|linha| linha.chars().skip(ROTULO).collect())
             .unwrap_or_default()

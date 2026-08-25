@@ -175,7 +175,11 @@ pub fn semear_ligada(persistence: &mut Persistence) -> Result<()> {
 /// senha, porque `admitir` não tem terceira porta. Deduzir em vez de recalcular
 /// evita rodar Argon2 de novo, que é caro de propósito.
 #[must_use]
-pub fn como_chegou(persistence: &Persistence, aberto: bool, segredo: Option<&str>) -> (Segredo, String) {
+pub fn como_chegou(
+    persistence: &Persistence,
+    aberto: bool,
+    segredo: Option<&str>,
+) -> (Segredo, String) {
     if aberto {
         return (Segredo::Aberto, String::new());
     }

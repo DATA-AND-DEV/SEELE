@@ -168,11 +168,16 @@ function Write-Utf8SemBom([string]$Caminho, [string]$Texto) {
 # `tauri.conf.json` é UTF-8 sem BOM, e sem BOM não há o que o 5.1 detecte: ele
 # supõe ANSI e pronto.
 #
-# O estrago é silencioso e sobrevive ao empacotamento. O título da janela é
+# O estrago é silencioso e sobrevive ao empacotamento. O título da janela era
 # `SEELE · Entry Plug`; o `·` é `C2 B7` em UTF-8, lido como cp1252 vira os dois
 # caracteres `Â` e `·`, e a escrita — que está correta — grava esse par como
-# UTF-8 de verdade. O arquivo passa a conter `SEELE Â· Entry Plug`, e foi assim
+# UTF-8 de verdade. O arquivo passou a conter `SEELE Â· Entry Plug`, e foi assim
 # que ele apareceu na barra de título de um Windows de verdade.
+#
+# O título é só `SEELE` desde o ADR 0035, sem nenhum byte fora do ASCII, então
+# aquele caminho exato não se reproduz hoje. **A leitura continua tendo de ser
+# UTF-8 explícita**: o defeito não é do `·`, é do 5.1 supondo ANSI num arquivo
+# sem BOM, e o próximo acento que entrar no `tauri.conf.json` o traz de volta.
 #
 # O comentário logo acima já dizia que «o 5.1 lê os acentos como ANSI», sobre o
 # próprio `.ps1`. O mesmo raciocínio valia uma linha abaixo e não foi aplicado.

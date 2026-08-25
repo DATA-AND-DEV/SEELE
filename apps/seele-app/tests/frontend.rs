@@ -4908,7 +4908,10 @@ fn destroying_a_room_is_offered_by_the_permission_that_destroys_it() {
     // Scoped to the two functions that draw the controls, because the file
     // explains the distinction in prose too and an unscoped search for either
     // name would be satisfied by the paragraph that says why they differ.
-    for porta in ["function botaoDeApagarVoiceRoom", "function botaoDeApagarLinha"] {
+    for porta in [
+        "function botaoDeApagarVoiceRoom",
+        "function botaoDeApagarLinha",
+    ] {
         let corpo = body_of(&scripts(), porta);
         assert!(
             corpo.contains("may_delete_rooms"),

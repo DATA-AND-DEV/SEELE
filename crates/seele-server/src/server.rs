@@ -18,8 +18,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use seele_proto::control::{VoiceRoomInfo, ChannelInfo, PersonProfile, PersonState};
-use seele_proto::ids::{VoiceRoomId, ChannelId, MessageId, PersonId, ScreenId, Ssrc};
+use seele_proto::control::{ChannelInfo, PersonProfile, PersonState, VoiceRoomInfo};
+use seele_proto::ids::{ChannelId, MessageId, PersonId, ScreenId, Ssrc, VoiceRoomId};
 use tokio::sync::{broadcast, mpsc, Mutex};
 
 use crate::persistence::messages::{Messages, PendingMessage, StoredMessage};
@@ -327,7 +327,9 @@ impl Telas {
 
     /// Encerra tudo o que estivesse acontecendo num sala de voz que deixou de existir.
     pub fn encerrar_voice_room(&mut self, voice_room: VoiceRoomId) -> Option<ScreenId> {
-        self.por_voice_room.remove(&voice_room).map(|(_, screen)| screen)
+        self.por_voice_room
+            .remove(&voice_room)
+            .map(|(_, screen)| screen)
     }
 
     /// Quem está transmitindo neste sala de voz, se alguém está.
@@ -491,7 +493,7 @@ impl Presentes {
 /// # Why the whole map, and not one voice room
 ///
 /// G15 was closed for the voice room the person walked into, and only that one. The
-/// screen `design/SEELE v3.dc.html` draws occupants under **every** voice room,
+/// screen `design/Entry Plug v3.dc.html` draws occupants under **every** voice room,
 /// and for the other four that data had never existed on the client at all:
 /// they were drawn empty, always, however many people were in them. Reported
 /// from a real session as "o sistema de voice_rooms não está bem implementado,
@@ -513,7 +515,10 @@ impl Occupancy {
     /// roster nobody trusts.
     pub fn seat(&mut self, voice_room: VoiceRoomId, occupant: Occupant) {
         let _ = self.vacate_everywhere(occupant.person);
-        self.by_voice_room.entry(voice_room).or_default().push(occupant);
+        self.by_voice_room
+            .entry(voice_room)
+            .or_default()
+            .push(occupant);
     }
 
     /// Removes a person from one voice room.
@@ -547,7 +552,10 @@ impl Occupancy {
     /// Who is in a voice room, in the order they arrived.
     #[must_use]
     pub fn in_voice_room(&self, voice_room: VoiceRoomId) -> Vec<Occupant> {
-        self.by_voice_room.get(&voice_room).cloned().unwrap_or_default()
+        self.by_voice_room
+            .get(&voice_room)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Everybody seated anywhere, with the voice room they are seated in.
@@ -559,7 +567,11 @@ impl Occupancy {
     pub fn everywhere(&self) -> Vec<(VoiceRoomId, Occupant)> {
         self.by_voice_room
             .iter()
-            .flat_map(|(voice_room, seated)| seated.iter().map(|occupant| (*voice_room, occupant.clone())))
+            .flat_map(|(voice_room, seated)| {
+                seated
+                    .iter()
+                    .map(|occupant| (*voice_room, occupant.clone()))
+            })
             .collect()
     }
 }
@@ -865,7 +877,10 @@ mod tests {
         let mut occupancy = Occupancy::default();
         occupancy.seat(VoiceRoomId(7), occupant(1, "ayanami"));
 
-        assert_eq!(occupancy.vacate_everywhere(PersonId(1)), vec![VoiceRoomId(7)]);
+        assert_eq!(
+            occupancy.vacate_everywhere(PersonId(1)),
+            vec![VoiceRoomId(7)]
+        );
         assert!(occupancy.everywhere().is_empty());
     }
 
@@ -892,7 +907,10 @@ mod tests {
         let mut occupancy = Occupancy::default();
         occupancy.seat(VoiceRoomId(1), occupant(1, "ayanami"));
 
-        assert_eq!(occupancy.vacate_everywhere(PersonId(1)), vec![VoiceRoomId(1)]);
+        assert_eq!(
+            occupancy.vacate_everywhere(PersonId(1)),
+            vec![VoiceRoomId(1)]
+        );
         occupancy.seat(VoiceRoomId(2), occupant(1, "ayanami"));
 
         assert_eq!(occupancy.in_voice_room(VoiceRoomId(1)).len(), 0);
@@ -911,7 +929,10 @@ mod tests {
         // e trocá-lo por um `bool` obrigaria quem chama a procurar a resposta
         // de novo em outro lugar — onde ela já pode ter mudado.
         let mut telas = Telas::default();
-        assert_eq!(telas.comecar(VoiceRoomId(1), PersonId(10), ScreenId(1)), Ok(()));
+        assert_eq!(
+            telas.comecar(VoiceRoomId(1), PersonId(10), ScreenId(1)),
+            Ok(())
+        );
         assert_eq!(
             telas.comecar(VoiceRoomId(1), PersonId(20), ScreenId(2)),
             Err(PersonId(10)),
@@ -921,7 +942,10 @@ mod tests {
         assert_eq!(telas.em(VoiceRoomId(1)), Some((PersonId(10), ScreenId(1))));
 
         // Outra sala é outra corrida.
-        assert_eq!(telas.comecar(VoiceRoomId(2), PersonId(20), ScreenId(3)), Ok(()));
+        assert_eq!(
+            telas.comecar(VoiceRoomId(2), PersonId(20), ScreenId(3)),
+            Ok(())
+        );
     }
 
     #[test]
@@ -935,7 +959,10 @@ mod tests {
         telas
             .comecar(VoiceRoomId(1), PersonId(10), ScreenId(1))
             .expect("primeira");
-        assert_eq!(telas.comecar(VoiceRoomId(1), PersonId(10), ScreenId(2)), Ok(()));
+        assert_eq!(
+            telas.comecar(VoiceRoomId(1), PersonId(10), ScreenId(2)),
+            Ok(())
+        );
         assert_eq!(telas.em(VoiceRoomId(1)), Some((PersonId(10), ScreenId(2))));
     }
 

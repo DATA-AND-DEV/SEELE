@@ -14,7 +14,7 @@
 //! # Por que zero e por que ele engana
 //!
 //! Zero não é «não medido» aos olhos de quem lê: pelas três faixas do comp
-//! (`design/SEELE v2.dc.html`) zero é **crítico**, vermelho, a cor de «vá
+//! (`design/Entry Plug v2.dc.html`) zero é **crítico**, vermelho, a cor de «vá
 //! olhar». Numa sessão local, com RTT, jitter e perda em zero, o servidor calcula
 //! cem — e o roster acusava o pessoa de estar em colapso.
 //!
@@ -46,7 +46,7 @@ use seele_core::enlace::{Aviso, Destino, Enlace};
 use seele_core::{MemoryPinStore, Room, SignalBand};
 use seele_proto::ids::VoiceRoomId;
 use seele_server::persistence::Location;
-use seele_server::{ServerConfig, Daemon};
+use seele_server::{Daemon, ServerConfig};
 
 const VOICE_ROOM: u32 = 1;
 

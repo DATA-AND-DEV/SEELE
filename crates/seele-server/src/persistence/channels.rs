@@ -35,8 +35,8 @@
 
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
-use seele_proto::control::{VoiceRoomInfo, ChannelInfo};
-use seele_proto::ids::{VoiceRoomId, ChannelId};
+use seele_proto::control::{ChannelInfo, VoiceRoomInfo};
+use seele_proto::ids::{ChannelId, VoiceRoomId};
 
 /// The channel tree, over PERSISTENCE.
 pub struct Channels<'a> {
@@ -114,7 +114,12 @@ impl<'a> Channels<'a> {
     ///
     /// Returns [`NoSuchChannel`] if `channel` names o canal that is not there, or a
     /// database error.
-    pub fn create_voice_room(&self, name: &str, limit: u16, channel: Option<ChannelId>) -> Result<VoiceRoomInfo> {
+    pub fn create_voice_room(
+        &self,
+        name: &str,
+        limit: u16,
+        channel: Option<ChannelId>,
+    ) -> Result<VoiceRoomInfo> {
         let name = name.trim();
         if let Some(channel) = channel {
             if !self.channel_exists(channel)? {
@@ -342,7 +347,9 @@ impl<'a> Channels<'a> {
         if changed == 0 {
             return Err(NoSuchChannel.into());
         }
-        transaction.commit().context("could not destroy the Channel")?;
+        transaction
+            .commit()
+            .context("could not destroy the Channel")?;
         Ok(())
     }
 
@@ -389,7 +396,7 @@ pub struct ChannelWeight {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::persistence::{Persistence, Location};
+    use crate::persistence::{Location, Persistence};
 
     fn store() -> Persistence {
         Persistence::open(&Location::Memory).unwrap()
@@ -411,7 +418,7 @@ mod tests {
         let channels = Channels::new(&persistence);
         let channel = channels.create_channel("geral").unwrap();
         let voice_room = channels
-            .create_voice_room("VOICE_ROOM-01 CENTRAL", 15, Some(channel.id))
+            .create_voice_room("SALA-01 CENTRAL", 15, Some(channel.id))
             .unwrap();
 
         // What the creator is told, and what everybody else will read out of the
@@ -449,7 +456,7 @@ mod tests {
         // person who mistyped a number.
         let persistence = store();
         let channels = Channels::new(&persistence);
-        let refused = channels.create_voice_room("VOICE_ROOM-02", 8, Some(ChannelId(404)));
+        let refused = channels.create_voice_room("SALA-02", 8, Some(ChannelId(404)));
         assert!(refused
             .unwrap_err()
             .downcast_ref::<NoSuchChannel>()
@@ -628,7 +635,9 @@ mod tests {
         let persistence = store();
         let channels = Channels::new(&persistence);
         let channel = channels.create_channel("geral").unwrap();
-        let voice_room = channels.create_voice_room("VOICE_ROOM-01", 8, Some(channel.id)).unwrap();
+        let voice_room = channels
+            .create_voice_room("SALA-01", 8, Some(channel.id))
+            .unwrap();
 
         channels.delete_channel(channel.id).unwrap();
         let voice_rooms = channels.voice_rooms().unwrap();
@@ -677,7 +686,7 @@ mod tests {
         // another room first" instead of "check the identifier".
         let persistence = store();
         let channels = Channels::new(&persistence);
-        let unica = channels.create_voice_room("VOICE_ROOM-01", 8, None).unwrap();
+        let unica = channels.create_voice_room("SALA-01", 8, None).unwrap();
 
         assert!(channels
             .delete_voice_room(unica.id)
@@ -687,7 +696,7 @@ mod tests {
         assert_eq!(channels.voice_rooms().unwrap().len(), 1);
 
         // A segunda sala é o que destrava a primeira.
-        let segunda = channels.create_voice_room("VOICE_ROOM-02", 8, None).unwrap();
+        let segunda = channels.create_voice_room("SALA-02", 8, None).unwrap();
         channels.delete_voice_room(unica.id).unwrap();
         let restantes = channels.voice_rooms().unwrap();
         assert_eq!(restantes.len(), 1);
@@ -703,8 +712,10 @@ mod tests {
         let persistence = store();
         let channels = Channels::new(&persistence);
         let channel = channels.create_channel("geral").unwrap();
-        let voice_room = channels.create_voice_room("VOICE_ROOM-01", 8, Some(channel.id)).unwrap();
-        channels.create_voice_room("VOICE_ROOM-02", 8, None).unwrap();
+        let voice_room = channels
+            .create_voice_room("SALA-01", 8, Some(channel.id))
+            .unwrap();
+        channels.create_voice_room("SALA-02", 8, None).unwrap();
         let rei = person(&persistence, "rei", 1);
         say(&persistence, channel.id, rei, "sobrevive", 100);
 
@@ -717,8 +728,8 @@ mod tests {
     fn destroying_a_voice_room_that_is_not_there_says_so() {
         let persistence = store();
         let channels = Channels::new(&persistence);
-        channels.create_voice_room("VOICE_ROOM-01", 8, None).unwrap();
-        channels.create_voice_room("VOICE_ROOM-02", 8, None).unwrap();
+        channels.create_voice_room("SALA-01", 8, None).unwrap();
+        channels.create_voice_room("SALA-02", 8, None).unwrap();
         assert!(channels
             .delete_voice_room(VoiceRoomId(404))
             .unwrap_err()
@@ -742,12 +753,14 @@ mod tests {
         assert_eq!(channel.name, "geral");
         assert_eq!(channels.channels().unwrap()[0].name, "geral");
 
-        let voice_room = channels.create_voice_room("\tVOICE_ROOM-01  ", 4, None).unwrap();
-        assert_eq!(voice_room.name, "VOICE_ROOM-01");
+        let voice_room = channels.create_voice_room("\tSALA-01  ", 4, None).unwrap();
+        assert_eq!(voice_room.name, "SALA-01");
         assert_eq!(
-            channels.rename_voice_room(voice_room.id, " VOICE_ROOM-02 ").unwrap(),
-            "VOICE_ROOM-02"
+            channels
+                .rename_voice_room(voice_room.id, " SALA-02 ")
+                .unwrap(),
+            "SALA-02"
         );
-        assert_eq!(channels.voice_rooms().unwrap()[0].name, "VOICE_ROOM-02");
+        assert_eq!(channels.voice_rooms().unwrap()[0].name, "SALA-02");
     }
 }

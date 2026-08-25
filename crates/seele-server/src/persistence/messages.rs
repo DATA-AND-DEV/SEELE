@@ -35,7 +35,7 @@
 use anyhow::{Context, Result};
 use rusqlite::{params, OptionalExtension};
 use seele_proto::control::AttachmentInfo;
-use seele_proto::ids::{ClientMessageId, ChannelId, MessageId, PersonId};
+use seele_proto::ids::{ChannelId, ClientMessageId, MessageId, PersonId};
 
 use super::attachments::Attachments;
 use super::{now_seconds, Persistence};
@@ -293,22 +293,23 @@ impl<'a> Messages<'a> {
              LIMIT ?3",
         )?;
 
-        let rows = statement.query_map(params![i64::from(channel.get()), before, limit], |row| {
-            Ok(StoredMessage {
-                attachment: None,
-                id: MessageId(row.get::<_, i64>(0)? as u64),
-                channel: ChannelId(row.get::<_, i64>(1)? as u32),
-                author: PersonId(row.get::<_, i64>(2)? as u64),
-                author_nickname: row.get(8)?,
-                body: row.get(3)?,
-                created_at: row.get(4)?,
-                edited_at: row.get(5)?,
-                replies_to: row.get::<_, Option<i64>>(6)?.map(|id| MessageId(id as u64)),
-                client_message_id: row
-                    .get::<_, Option<i64>>(7)?
-                    .map(|id| ClientMessageId(id as u64)),
-            })
-        })?;
+        let rows =
+            statement.query_map(params![i64::from(channel.get()), before, limit], |row| {
+                Ok(StoredMessage {
+                    attachment: None,
+                    id: MessageId(row.get::<_, i64>(0)? as u64),
+                    channel: ChannelId(row.get::<_, i64>(1)? as u32),
+                    author: PersonId(row.get::<_, i64>(2)? as u64),
+                    author_nickname: row.get(8)?,
+                    body: row.get(3)?,
+                    created_at: row.get(4)?,
+                    edited_at: row.get(5)?,
+                    replies_to: row.get::<_, Option<i64>>(6)?.map(|id| MessageId(id as u64)),
+                    client_message_id: row
+                        .get::<_, Option<i64>>(7)?
+                        .map(|id| ClientMessageId(id as u64)),
+                })
+            })?;
 
         let mut page: Vec<StoredMessage> = rows.filter_map(Result::ok).collect();
         // One query for the page rather than one per row.

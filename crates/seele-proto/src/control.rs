@@ -37,8 +37,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{
-    AttachmentId, VoiceRoomId, ClientMessageId, ChannelId, MessageId, PersonId, RoleId, ScreenId, SessionId,
-    Ssrc,
+    AttachmentId, ChannelId, ClientMessageId, MessageId, PersonId, RoleId, ScreenId, SessionId,
+    Ssrc, VoiceRoomId,
 };
 use crate::version::PROTOCOL_VERSION;
 
@@ -64,7 +64,7 @@ pub const MAX_CLIENT_NAME_LEN: usize = 64;
 /// Longest voice room or Channel name, in bytes.
 ///
 /// A name is a label in a list, not a description. Long enough for
-/// `VOICE_ROOM-01 CENTRAL` several times over, short enough that no shell has to
+/// `SALA-01 CENTRAL` several times over, short enough that no shell has to
 /// decide where to cut one off.
 pub const MAX_CHANNEL_NAME_LEN: usize = 48;
 
@@ -1799,9 +1799,7 @@ impl Validate for PersonState {
         // hold 200, and a shell matching the bands of specs/07 would find no
         // band for it.
         if self.signal > 100 {
-            return Err(ControlError::FieldOutOfRange {
-                field: "signal",
-            });
+            return Err(ControlError::FieldOutOfRange { field: "signal" });
         }
         Ok(())
     }
@@ -1975,7 +1973,7 @@ mod tests {
             server: "Terceira Tóquio".into(),
             voice_rooms: vec![VoiceRoomInfo {
                 id: VoiceRoomId(1),
-                name: "VOICE_ROOM-01 CENTRAL".into(),
+                name: "SALA-01 CENTRAL".into(),
                 limit: 15,
                 password_required: false,
                 channel: Some(ChannelId(1)),
@@ -2161,14 +2159,17 @@ mod tests {
         else {
             panic!("not a session");
         };
-        assert_eq!(permissions, vec![Permission::EnterVoiceRoom, Permission::Speak]);
+        assert_eq!(
+            permissions,
+            vec![Permission::EnterVoiceRoom, Permission::Speak]
+        );
     }
 
     #[test]
     fn the_room_making_verbs_round_trip() {
         for message in [
             ClientMessage::CreateVoiceRoom {
-                name: "VOICE_ROOM-02 SALA DOS FUNDOS".into(),
+                name: "SALA-02 SALA DOS FUNDOS".into(),
                 limit: 8,
                 channel: Some(ChannelId(1)),
             },
@@ -2177,7 +2178,7 @@ mod tests {
             },
             ClientMessage::RenameVoiceRoom {
                 voice_room: VoiceRoomId(2),
-                name: "VOICE_ROOM-02 CENTRAL".into(),
+                name: "SALA-02 CENTRAL".into(),
             },
             ClientMessage::RenameChannel {
                 channel: ChannelId(3),
@@ -2195,7 +2196,7 @@ mod tests {
             ServerMessage::VoiceRoomCreated {
                 voice_room: VoiceRoomInfo {
                     id: VoiceRoomId(2),
-                    name: "VOICE_ROOM-02 SALA DOS FUNDOS".into(),
+                    name: "SALA-02 SALA DOS FUNDOS".into(),
                     limit: 8,
                     password_required: false,
                     channel: Some(ChannelId(1)),
@@ -2209,7 +2210,7 @@ mod tests {
             },
             ServerMessage::VoiceRoomRenamed {
                 voice_room: VoiceRoomId(2),
-                name: "VOICE_ROOM-02 CENTRAL".into(),
+                name: "SALA-02 CENTRAL".into(),
             },
             ServerMessage::ChannelRenamed {
                 channel: ChannelId(3),
@@ -2278,7 +2279,7 @@ mod tests {
         // 65 535 being written into a server sized for fifty.
         for limit in [0, MAX_VOICE_ROOM_LIMIT + 1, u16::MAX] {
             let ask = ClientMessage::CreateVoiceRoom {
-                name: "VOICE_ROOM-02".into(),
+                name: "SALA-02".into(),
                 limit,
                 channel: None,
             };
@@ -2304,7 +2305,7 @@ mod tests {
         for limit in [1, MAX_VOICE_ROOM_LIMIT] {
             assert!(
                 encode(&ClientMessage::CreateVoiceRoom {
-                    name: "VOICE_ROOM-02".into(),
+                    name: "SALA-02".into(),
                     limit,
                     channel: None,
                 })
@@ -2359,7 +2360,9 @@ mod tests {
     #[test]
     fn the_moderation_verbs_round_trip() {
         for message in [
-            ClientMessage::KickPerson { person: PersonId(42) },
+            ClientMessage::KickPerson {
+                person: PersonId(42),
+            },
             ClientMessage::BanPerson {
                 person: PersonId(42),
                 reason: Some("inundou a Linha".into()),
@@ -2429,7 +2432,9 @@ mod tests {
         // kick and a ban end in `Disconnecting`, a removal is
         // `MessageRemoved`; only "you are somewhere else now" had nothing that
         // could say it, because a client sets its own voice room on the way out.
-        let moved = ServerMessage::MovedToVoiceRoom { voice_room: VoiceRoomId(3) };
+        let moved = ServerMessage::MovedToVoiceRoom {
+            voice_room: VoiceRoomId(3),
+        };
         let frame = encode(&moved).unwrap();
         assert_eq!(decode::<ServerMessage>(&frame).unwrap(), moved);
     }
@@ -2472,7 +2477,10 @@ mod tests {
         // The one string here is the ban's operator note, which never leaves
         // the server — the person barred meets `DisconnectReason::Banned` and
         // nothing else.
-        let frame = encode(&ClientMessage::KickPerson { person: PersonId(42) }).unwrap();
+        let frame = encode(&ClientMessage::KickPerson {
+            person: PersonId(42),
+        })
+        .unwrap();
         assert!(
             frame.len() < 32,
             "a kick got big enough to be carrying prose: {} bytes",
@@ -2485,9 +2493,15 @@ mod tests {
     #[test]
     fn the_deleting_verbs_round_trip() {
         for message in [
-            ClientMessage::DeleteVoiceRoom { voice_room: VoiceRoomId(2) },
-            ClientMessage::DeleteChannel { channel: ChannelId(7) },
-            ClientMessage::WeighChannel { channel: ChannelId(7) },
+            ClientMessage::DeleteVoiceRoom {
+                voice_room: VoiceRoomId(2),
+            },
+            ClientMessage::DeleteChannel {
+                channel: ChannelId(7),
+            },
+            ClientMessage::WeighChannel {
+                channel: ChannelId(7),
+            },
         ] {
             let frame = encode(&message).unwrap();
             assert_eq!(decode::<ClientMessage>(&frame).unwrap(), message);
@@ -2528,8 +2542,12 @@ mod tests {
         // already has. A frame carrying the name of a room that no longer
         // exists would be inviting some shell to keep it.
         for gone in [
-            ServerMessage::VoiceRoomDeleted { voice_room: VoiceRoomId(2) },
-            ServerMessage::ChannelDeleted { channel: ChannelId(7) },
+            ServerMessage::VoiceRoomDeleted {
+                voice_room: VoiceRoomId(2),
+            },
+            ServerMessage::ChannelDeleted {
+                channel: ChannelId(7),
+            },
         ] {
             let frame = encode(&gone).unwrap();
             assert_eq!(decode::<ServerMessage>(&frame).unwrap(), gone);
@@ -2707,9 +2725,7 @@ mod numeric_tests {
         });
         assert!(matches!(
             encode(&state),
-            Err(ControlError::FieldOutOfRange {
-                field: "signal"
-            })
+            Err(ControlError::FieldOutOfRange { field: "signal" })
         ));
     }
 }

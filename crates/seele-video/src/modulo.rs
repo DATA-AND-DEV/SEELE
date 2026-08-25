@@ -252,16 +252,12 @@ pub fn instalar_em(pasta: &Path, comprimido: &[u8]) -> Result<PathBuf, ErroDeVid
 
     modulo.conferir_comprimido(comprimido)?;
 
-    let mut expandido = Vec::with_capacity(
-        usize::try_from(modulo.bytes_expandido).unwrap_or(1 << 20),
-    );
-    std::io::Read::read_to_end(
-        &mut bzip2::read::BzDecoder::new(comprimido),
-        &mut expandido,
-    )
-    .map_err(|erro| ErroDeVideo::ModuloDeVideoNaoExpandiu {
-        motivo: erro.to_string(),
-    })?;
+    let mut expandido =
+        Vec::with_capacity(usize::try_from(modulo.bytes_expandido).unwrap_or(1 << 20));
+    std::io::Read::read_to_end(&mut bzip2::read::BzDecoder::new(comprimido), &mut expandido)
+        .map_err(|erro| ErroDeVideo::ModuloDeVideoNaoExpandiu {
+            motivo: erro.to_string(),
+        })?;
 
     modulo.conferir_expandido(&expandido)?;
 

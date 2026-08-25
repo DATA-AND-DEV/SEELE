@@ -32,8 +32,8 @@ use seele_core::chegada::Chegada;
 use seele_core::conhecidos::Conhecidos;
 use seele_core::enlace::{Aviso, Destino, Enlace, Fechado, Motivo};
 use seele_core::{
-    identity, AudioTelemetry, VoiceRoomId, ClientMessageId, ConnectError, FilePinStore, ChannelId, Room,
-    SyncInputs, Signal, Verdict, Voice, VoiceMode,
+    identity, AudioTelemetry, ChannelId, ClientMessageId, ConnectError, FilePinStore, Room, Signal,
+    SyncInputs, Verdict, Voice, VoiceMode, VoiceRoomId,
 };
 use seele_tui::app::{Action, Alert, App, Bar, ChatLine, Key, Mode, Node, Screen};
 use seele_tui::command::{self, Command};
@@ -151,7 +151,11 @@ fn parse_args() -> Result<Option<Args>> {
             }
             "--nick" | "-n" => nickname = argv.next().context("--nick needs a name")?,
             "--voice_room" => {
-                voice_room = VoiceRoomId(argv.next().context("--voice_room needs a number")?.parse()?);
+                voice_room = VoiceRoomId(
+                    argv.next()
+                        .context("--voice_room needs a number")?
+                        .parse()?,
+                );
             }
             "--linha" | "--channel" => {
                 channel = ChannelId(argv.next().context("--linha needs a number")?.parse()?);
@@ -584,7 +588,9 @@ async fn sessao(
     let mut hospedagem = if args.hospedar {
         let server = seele_server::hospedagem::Hospedagem::iniciar(
             args.server.port(),
-            seele_server::persistence::Location::File(seele_server::persistence::banco_do_cliente(home)),
+            seele_server::persistence::Location::File(seele_server::persistence::banco_do_cliente(
+                home,
+            )),
             "Casa",
         )
         .await
@@ -938,7 +944,11 @@ fn construir_destinos(args: &Args) -> Vec<Destino> {
 ///
 /// Juntos porque falham juntos e pelo mesmo motivo: se o enlace fechou, nenhum
 /// dos três vai a lugar nenhum, e o que se faz com isso é um só.
-async fn entrar(client: &Enlace, voice_room: VoiceRoomId, channel: ChannelId) -> Result<(), Fechado> {
+async fn entrar(
+    client: &Enlace,
+    voice_room: VoiceRoomId,
+    channel: ChannelId,
+) -> Result<(), Fechado> {
     client.inserir_plug(voice_room).await?;
     client.abrir_linha(channel).await?;
     client.historico(channel, 50).await
@@ -1699,8 +1709,8 @@ mod tests {
     #[test]
     fn sair_da_sala_esvazia_o_assento_na_propria_tela() {
         use seele_core::{
-            VoiceRoomId, VoiceRoomInfo, ChannelId, ChannelInfo, PersonId, PersonProfile, Room, ServerMessage,
-            SessionId, Ssrc,
+            ChannelId, ChannelInfo, PersonId, PersonProfile, Room, ServerMessage, SessionId, Ssrc,
+            VoiceRoomId, VoiceRoomInfo,
         };
         use seele_tui::app::{App, Node};
         use seele_tui::view;

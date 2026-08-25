@@ -67,11 +67,11 @@ pub const SMOOTHING: f32 = 0.2;
 
 /// Floor of [`SignalBand::Nominal`], in points.
 ///
-/// `design/SEELE v2.dc.html`: `if (v >= 85) return FOS`.
+/// `design/Entry Plug v2.dc.html`: `if (v >= 85) return FOS`.
 pub const NOMINAL_FLOOR: u8 = 85;
 /// Floor of [`SignalBand::Degraded`], in points. Below this the ratio is critical.
 ///
-/// `design/SEELE v2.dc.html`: `if (v >= 60) return LAR`.
+/// `design/Entry Plug v2.dc.html`: `if (v >= 60) return LAR`.
 pub const DEGRADED_FLOOR: u8 = 60;
 
 /// What band a Sync Ratio falls into.
@@ -84,7 +84,7 @@ pub const DEGRADED_FLOOR: u8 = 60;
 ///
 /// This used to have a fourth band — `Acceptable`, 70 to 89, drawn in bone —
 /// taken from the table in `specs/07-tema-evangelion.md`. The v2 comp
-/// (`design/SEELE v2.dc.html`) bands the same number in three, at 85 and
+/// (`design/Entry Plug v2.dc.html`) bands the same number in three, at 85 and
 /// 60, and uses bone in no sync scale at all:
 ///
 /// ```text
@@ -107,7 +107,7 @@ pub enum SignalBand {
 }
 
 impl SignalBand {
-    /// Which band a ratio falls into. `design/SEELE v2.dc.html`.
+    /// Which band a ratio falls into. `design/Entry Plug v2.dc.html`.
     #[must_use]
     pub fn of(ratio: u8) -> Self {
         match ratio {
@@ -302,7 +302,7 @@ mod tests {
 
     #[test]
     fn the_bands_break_where_the_comp_breaks_them() {
-        // design/SEELE v2.dc.html: >= 85 fósforo, 60-85 laranja,
+        // design/Entry Plug v2.dc.html: >= 85 fósforo, 60-85 laranja,
         // < 60 vermelho. Only the two edges and the two ends are asserted —
         // a test that checked 98 and 20 would have passed against the four
         // bands this replaced, and so would have proved nothing.
