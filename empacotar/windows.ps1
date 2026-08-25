@@ -237,16 +237,16 @@ try {
     #
     # Antes do app, como no workflow: `seeled` e `plug` são o produto principal
     # (`specs/00-visao-geral.md`) e o que menos pode falhar. Eles entram
-    # **dentro** do instalador, para que quem baixa o app ganhe as duas metades
-    # e não precise de um segundo arquivo para hospedar ou usar o terminal.
-    Write-Host "→ compilando seeled e seele (a primeira vez demora)" -ForegroundColor Cyan
-    cargo build --release --bin seeled --bin seele
+    # **dentro** do instalador, para que quem baixa o app ganhe o servidor
+    # junto e não precise de um segundo arquivo para hospedar.
+    Write-Host "→ compilando seeled (a primeira vez demora)" -ForegroundColor Cyan
+    cargo build --release --bin seeled
     if ($LASTEXITCODE -ne 0) { throw "a compilação da CLI falhou" }
 
     # O Tauri procura acompanhantes pelo nome com o alvo no fim.
     $Binarios = "apps\seele-app\binaries"
     New-Item -ItemType Directory -Force -Path $Binarios | Out-Null
-    foreach ($b in @("seele", "seeled")) {
+    foreach ($b in @("seeled")) {
         Copy-Item "target\release\$b.exe" "$Binarios\$b-x86_64-pc-windows-msvc.exe" -Force
     }
 
@@ -303,7 +303,7 @@ $(if ($instaladores.Count -eq 0) { 'Nenhum: o empacotamento disse que deu certo 
     # O zip da CLI **não** é um segundo instalador: é o que o `install.ps1`
     # baixa. Sem ele o instalador de uma linha para de funcionar.
     Compress-Archive `
-        -Path "target\release\seeled.exe", "target\release\seele.exe" `
+        -Path "target\release\seeled.exe" `
         -DestinationPath "$Destino\seele-cli-$Versao-windows-x86_64.zip" -Force
 
     # -------------------------------------------------------------- conferir

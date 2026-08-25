@@ -4,7 +4,6 @@
     "linux": {
       "deb": {
         "files": {
-          "/usr/bin/seele": "binaries/seele-x86_64-unknown-linux-gnu",
           "/usr/bin/seeled": "binaries/seeled-x86_64-unknown-linux-gnu"
         }
       }

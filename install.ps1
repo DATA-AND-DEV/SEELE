@@ -1,4 +1,4 @@
-# Instala o `plug` e o `seeled` no Windows a partir de um release do GitHub.
+# Instala o `seeled` no Windows a partir de um release do GitHub.
 #
 #   irm https://raw.githubusercontent.com/DATA-AND-DEV/SEELE/main/install.ps1 | iex
 #
@@ -15,8 +15,8 @@
 #      SHA256SUMS publicado ao lado, e descompacte onde quiser.
 #
 # O que este script faz: baixa o pacote da versão pedida, **confere a soma
-# SHA-256** contra o arquivo publicado no mesmo release, e copia dois
-# executáveis para uma pasta. Não mexe no registro, não pede administrador,
+# SHA-256** contra o arquivo publicado no mesmo release, e copia o executável
+# do servidor para uma pasta. Não mexe no registro, não pede administrador,
 # não instala serviço.
 #
 # Variáveis:
@@ -113,7 +113,7 @@ A SOMA NÃO CONFERE.
     Expand-Archive "$trabalho\$pacote" -DestinationPath $trabalho -Force
     New-Item -ItemType Directory -Path $destino -Force | Out-Null
 
-    foreach ($programa in @('seele.exe', 'seeled.exe')) {
+    foreach ($programa in @('seeled.exe')) {
         $origem = Get-ChildItem -Path $trabalho -Filter $programa -Recurse |
             Select-Object -First 1
         if (-not $origem) { Falhar "o pacote não traz $programa." }
@@ -125,7 +125,6 @@ A SOMA NÃO CONFERE.
 
 Write-Host ''
 Write-Host "instalado em $destino"
-Write-Host '  seele.exe   o cliente de terminal'
 Write-Host '  seeled.exe  o servidor'
 
 $noCaminho = ($env:PATH -split ';') -contains $destino
@@ -143,4 +142,4 @@ Write-Host '  New-NetFirewallRule -DisplayName SEELE -Direction Inbound -Protoco
 Write-Host ''
 Write-Host 'para comecar:'
 Write-Host '  seeled 0.0.0.0:8383      numa maquina'
-Write-Host '  seele --server <ip>:8383  na outra'
+Write-Host '  e conecte pelo app SEELE da outra'

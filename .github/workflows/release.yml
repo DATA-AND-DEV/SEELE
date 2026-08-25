@@ -93,9 +93,9 @@ jobs:
           # antes de entender a diferença — e a primeira escolha de quem não
           # sabe é fechar a aba.
           #
-          # `.deb` e não AppImage: é o único formato que instala `plug` e
-          # `seeled` em `/usr/bin`, e o pedido era um arquivo que traga as duas
-          # metades. Quem não usa Debian nem Ubuntu tem o instalador por `curl`
+          # `.deb` e não AppImage: é o único formato que instala o `seeled` em
+          # `/usr/bin`, e o pedido era um arquivo que traga o servidor junto do
+          # app. Quem não usa Debian nem Ubuntu tem o instalador por `curl`
           # e o código-fonte.
           - os: ubuntu-24.04
             nome: linux
@@ -245,21 +245,29 @@ jobs:
 
       # ---------------------------------------------------------------- CLI
       #
-      # `seeled` e `plug` são o que faz o teste entre duas máquinas não exigir
-      # um compilador em cada uma delas. Vêm antes do app de propósito: são o
-      # produto principal (`specs/00-visao-geral.md`) e o que menos pode falhar.
+      # O `seeled` é o que faz o teste entre duas máquinas não exigir um
+      # compilador em cada uma delas. Vem antes do app de propósito: é o que
+      # menos pode falhar.
+      #
+      # **Este passo estava quebrado desde 2026-08-22 e nenhum release saiu por
+      # aqui desde então.** Ele compilava `--bin plug`, e aquele binário passou a
+      # se chamar `seele` na 0.7.8; `cargo build` respondia «no bin target named
+      # `plug`». Os pacotes que de fato saíram vieram dos scripts em
+      # `empacotar/`, que foram atualizados no mesmo commit do rename e este
+      # arquivo não. O cliente de terminal deixou de ser distribuído desde,
+      # então o conserto é ele sair daqui, e não passar a se chamar `seele`.
 
-      - name: Compilar seeled e plug
+      - name: Compilar seeled
         if: matrix.nome != 'macos'
-        run: cargo build --release --bin seeled --bin plug
+        run: cargo build --release --bin seeled
 
-      - name: Compilar seeled e plug (universal, macOS)
+      - name: Compilar seeled (universal, macOS)
         if: matrix.nome == 'macos'
         run: |
-          cargo build --release --bin seeled --bin plug --target aarch64-apple-darwin
-          cargo build --release --bin seeled --bin plug --target x86_64-apple-darwin
+          cargo build --release --bin seeled --target aarch64-apple-darwin
+          cargo build --release --bin seeled --target x86_64-apple-darwin
           mkdir -p target/release
-          for binario in seeled plug; do
+          for binario in seeled; do
             lipo -create -output "target/release/${binario}" \
               "target/aarch64-apple-darwin/release/${binario}" \
               "target/x86_64-apple-darwin/release/${binario}"
@@ -277,16 +285,16 @@ jobs:
       # **universal ele quer os três nomes**: um por arquitetura, porque compila
       # duas vezes, e o `-universal-apple-darwin`, porque é o que ele copia para
       # dentro do bundle. Descoberto tentando aqui: com só o universal ele para
-      # em "resource path binaries/plug-aarch64-apple-darwin doesn't exist", e
+      # em "resource path binaries/seeled-aarch64-apple-darwin doesnt exist", e
       # com só os dois por arquitetura ele compila e para na hora de empacotar.
-      - name: Pôr seeled e plug junto do app
+      - name: Pôr o seeled junto do app
         shell: bash
         run: |
           set -eu
           mkdir -p apps/seele-app/binaries
 
           if [ "${{ matrix.nome }}" = "macos" ]; then
-            for binario in plug seeled; do
+            for binario in seeled; do
               for alvo in aarch64-apple-darwin x86_64-apple-darwin; do
                 cp "target/${alvo}/release/${binario}" \
                    "apps/seele-app/binaries/${binario}-${alvo}"
@@ -299,7 +307,7 @@ jobs:
               windows) alvo="x86_64-pc-windows-msvc"; sufixo=".exe" ;;
               linux)   alvo="x86_64-unknown-linux-gnu"; sufixo="" ;;
             esac
-            for binario in plug seeled; do
+            for binario in seeled; do
               cp "target/release/${binario}${sufixo}" \
                  "apps/seele-app/binaries/${binario}-${alvo}${sufixo}"
             done
@@ -478,10 +486,10 @@ jobs:
           # funcionar.
           if [ "${{ matrix.nome }}" = "windows" ]; then
             7z a "$destino/seele-cli-${versao}-windows-x86_64.zip" \
-              ./target/release/seeled.exe ./target/release/plug.exe
+              ./target/release/seeled.exe
           else
             tar -czf "$destino/seele-cli-${versao}-${{ matrix.nome }}.tar.gz" \
-              -C target/release seeled plug
+              -C target/release seeled
           fi
 
           echo "--- reunido ---"

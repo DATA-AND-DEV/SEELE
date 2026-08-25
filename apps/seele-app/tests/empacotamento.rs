@@ -51,32 +51,53 @@ fn compilar_o_app_nao_exige_binario_nenhum_pronto() {
 }
 
 #[test]
-fn o_empacotamento_leva_as_duas_ferramentas() {
+fn o_empacotamento_leva_o_servidor_e_nao_leva_o_cliente_de_terminal() {
     // A outra metade da regra: separar não pode virar esquecer. Se este
     // arquivo sumir, o instalador volta a ser só a parte gráfica — que era o
     // problema que ele existe para resolver.
+    //
+    // **Este teste cobrava `binaries/seele` junto até 2026-08-24**, com a frase
+    // «o instalador sairia sem a metade de terminal». O cliente de terminal
+    // deixou de ser distribuído, e a razão está registrada: enquanto ele ia
+    // dentro do instalador, a instalação não distinguia quem o quis de quem o
+    // recebeu — e é essa distinção que decide se ele tem público.
+    //
+    // A ausência é cobrada, e não só deixada de cobrar. Um teste que apenas
+    // perdesse um item da lista deixaria a volta acontecer sem que ninguém
+    // percebesse, que é exatamente o que a versão anterior existia para impedir.
     let release = ler("tauri.release.conf.json");
-    for ferramenta in ["binaries/seele", "binaries/seeled"] {
-        assert!(
-            release.contains(ferramenta),
-            "tauri.release.conf.json não leva `{ferramenta}`: o instalador sairia \
-             sem a metade de terminal"
-        );
-    }
+    assert!(
+        release.contains("binaries/seeled"),
+        "tauri.release.conf.json não leva `binaries/seeled`: o instalador sairia \
+         sem o servidor, e hospedar deixaria de funcionar"
+    );
+    assert!(
+        !release.contains("binaries/seele\""),
+        "tauri.release.conf.json voltou a levar o cliente de terminal — se isso \
+         é intencional, é decisão de produto e o comentário acima precisa mudar \
+         junto"
+    );
 }
 
 #[test]
-fn no_linux_as_ferramentas_vao_para_o_path() {
+fn no_linux_o_servidor_vai_para_o_path() {
     // `.deb` é o formato escolhido justamente por isto. Se o mapeamento sumir,
     // o instalador do Linux vira só o app e ninguém percebe até tentar digitar
-    // `seele` num terminal.
+    // `seeled` num terminal.
+    //
+    // **Cobrava `/usr/bin/seele` junto até 2026-08-24**, pelo mesmo motivo e com
+    // a mesma data do teste acima: o cliente de terminal saiu do pacote. Sem o
+    // mapeamento, o `.deb` deixaria `/usr/bin/seele` órfão apontando para um
+    // arquivo que não é mais empacotado.
     let linux = ler("tauri.linux.conf.json");
-    for destino in ["/usr/bin/seele", "/usr/bin/seeled"] {
-        assert!(
-            linux.contains(destino),
-            "tauri.linux.conf.json não instala em `{destino}`"
-        );
-    }
+    assert!(
+        linux.contains("/usr/bin/seeled"),
+        "tauri.linux.conf.json não instala em `/usr/bin/seeled`"
+    );
+    assert!(
+        !linux.contains("/usr/bin/seele\""),
+        "tauri.linux.conf.json voltou a instalar o cliente de terminal"
+    );
     assert!(
         !linux.contains("externalBin"),
         "o Linux não deve levar acompanhante: os binários iriam duas vezes no \
