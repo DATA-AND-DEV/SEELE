@@ -269,7 +269,7 @@ function desenharModos(snapshot) {
     botao.disabled = semSessao;
     botao.setAttribute("aria-pressed", !semSessao && snapshot.voice_mode === botao.dataset.modo);
     if (semSessao) {
-      botao.title = "Como o microfone abre é da sessão: sem estar conectado não há microfone para abrir.";
+      botao.title = "Só dá para escolher isto com uma conversa aberta.";
     } else {
       botao.removeAttribute("title");
     }
@@ -704,7 +704,7 @@ function desenharAndamentoDoDownload(andamento) {
   if (!andamento.total) {
     naoMedido(
       barra,
-      "o servidor não disse de quantos bytes é o pacote: dá para dizer quanto já veio, nunca quanto falta",
+      "não dá para saber quanto falta — só quanto já veio",
     );
     contagem.textContent = `${emMegabytes(andamento.baixados)} até agora`;
     return;

@@ -219,7 +219,7 @@ function desenharNumerosDoPalco(tela) {
     medido($("palco-quadros"), `${tela.quadros}/s`);
     medido($("palco-banda"), `${tela.kbps} kbps`);
   } else {
-    const motivo = "esta versão não mede o que está saindo da transmissão";
+    const motivo = "ainda não há medida desta transmissão";
     naoMedido($("palco-altura"), motivo);
     naoMedido($("palco-quadros"), motivo);
     naoMedido($("palco-banda"), motivo);
@@ -259,8 +259,8 @@ function desenharNumerosDoPalco(tela) {
       (pedido.banda_bps !== null && tela.kbps * 1000 < pedido.banda_bps));
   aperto.hidden = !abaixo;
   aperto.textContent = abaixo
-    ? "O teto apertou, e é por isso que está saindo menos do que você pediu: " +
-      "ele sai do caminho medido, dividido por quem está assistindo."
+    ? "Está saindo menos do que você pediu: a conexão não dá conta de mandar " +
+      "mais para todo mundo que está assistindo."
     : "";
 }
 

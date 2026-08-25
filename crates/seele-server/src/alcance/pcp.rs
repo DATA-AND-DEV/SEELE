@@ -265,15 +265,20 @@ pub enum FalhaAoLiberar {
 impl std::fmt::Display for FalhaAoLiberar {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            // Auditoria de 2026-08-24: quem lê isto apertou HOSPEDAR AQUI e quer
+            // saber se o link funciona de fora. `PCP`, `NAT-PMP` e `gateway` são
+            // nomes de protocolo que não levam a ação nenhuma e saíram das
+            // frases; o nome e o código da RFC ficam onde ficaram, no fim da
+            // frase da recusa, porque ali servem a quem for procurar. O que a
+            // pessoa pode fazer vem na frente.
             Self::SemIpv6Global => write!(
                 f,
-                "esta máquina não tem endereço IPv6 próprio, então não há \
-                 firewall IPv6 a abrir — quem entrega IPv6 é a operadora"
+                "esta máquina não tem endereço IPv6 próprio — quem fornece isso é \
+                 a sua operadora"
             ),
             Self::RoteadorNaoDescoberto => write!(
                 f,
-                "não deu para descobrir o roteador desta rede, e o PCP só sabe \
-                 falar com o gateway padrão"
+                "não deu para descobrir o roteador desta rede"
             ),
             Self::NaoDeuParaFalarComORoteador { roteador, erro } => write!(
                 f,
@@ -281,13 +286,15 @@ impl std::fmt::Display for FalhaAoLiberar {
             ),
             Self::RoteadorNaoFalaPcp { roteador } => write!(
                 f,
-                "o roteador ({roteador}) não respondeu ao pedido de abrir o \
-                 firewall IPv6 — ele não fala PCP, ou o PCP está desligado nele"
+                "o roteador ({roteador}) não respondeu ao pedido de liberar a \
+                 entrada — ele não sabe atender esse pedido, ou isso está \
+                 desligado nos ajustes dele"
             ),
             Self::SoFalaNatPmp { roteador } => write!(
                 f,
-                "o roteador ({roteador}) só fala o NAT-PMP antigo, que é de IPv4 \
-                 e não sabe abrir firewall IPv6 — um firmware mais novo saberia"
+                "o roteador ({roteador}) só entende uma versão antiga do pedido, \
+                 que não sabe liberar entrada em IPv6 — um firmware mais novo \
+                 saberia"
             ),
             Self::RoteadorRecusou {
                 roteador,
@@ -295,19 +302,23 @@ impl std::fmt::Display for FalhaAoLiberar {
                 nome,
             } => write!(
                 f,
-                "o roteador ({roteador}) recusou abrir o firewall IPv6: {nome} \
+                "o roteador ({roteador}) recusou liberar a entrada: {nome} \
                  (código {codigo} da RFC 6887)"
             ),
+            // O limite aqui é **deste lado**, e o roteador está certo em
+            // recusar. A frase não manda ninguém mexer no roteador, e também não
+            // diz «o SEELE ainda não sabe» — que era a versão anterior e é o
+            // sistema falando de si em vez de falar com quem lê.
             Self::EnderecoNaoBate { roteador, pedido } => write!(
                 f,
-                "o roteador ({roteador}) exige que o pedido venha do próprio \
-                 {pedido}, e o SEELE ainda não sabe mandar de lá — não há nada a \
-                 mexer no roteador"
+                "o roteador ({roteador}) exige que o pedido saia do endereço \
+                 {pedido}, e não é de lá que ele sai — não há nada a mexer no \
+                 roteador"
             ),
             Self::NaoFoiBuracoNoFirewall { pedido, devolvido } => write!(
                 f,
-                "pedimos {pedido} e o roteador devolveu {devolvido}: isso é \
-                 tradução de endereço, e não abertura de firewall"
+                "o roteador respondeu com outro endereço ({devolvido}) em vez de \
+                 liberar {pedido} — não foi a entrada que ele abriu"
             ),
         }
     }

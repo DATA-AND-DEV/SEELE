@@ -292,7 +292,7 @@
             <span class="rotulo">APELIDO</span>
             <input id="campo-apelido" name="apelido" value="pessoa"
                    spellcheck="false" autocapitalize="off" maxlength="32" required>
-            <span class="nota">o nome que os outros veem; fica preso à sua chave neste servidor</span>
+            <span class="nota">o nome que os outros veem — fica reservado só para você neste servidor</span>
           </label>
           <!--
             A nota fica fora do `<label>` da caixa: dentro dela, cada palavra da
@@ -733,8 +733,7 @@
       </div>
 
       <div id="moderar-escolha" class="moderar-corpo">
-        <span class="nota">O que se faz aqui vale para a sessão de outra pessoa,
-          e ela não é consultada antes.</span>
+        <span class="nota">O que você escolher aqui acontece na hora, sem avisar a pessoa.</span>
 
         <!--
           Nenhuma sala de voz com gente dentro além de você. Não é falha nem
@@ -1670,11 +1669,14 @@
       <div class="chamada-bloco chamada-bloco-falando">
         <p class="rotulo">FALANDO AGORA</p>
         <p id="chamada-falando-nome" class="chamada-falando-nome">——</p>
-        <p class="nota">
-          A moldura laranja no cartão marca quem está com o microfone aberto
-          agora. A palavra ao lado do nome diz a mesma coisa, para quem não vê a
-          cor.
-        </p>
+        <!--
+          A legenda que explicava a moldura laranja e a palavra ao lado do nome
+          saiu na auditoria de 2026-08-24. Ela descrevia o desenho da própria
+          tela — e o cartão já escreve `FALANDO`, que é a informação. A
+          justificativa de acessibilidade que a segunda frase carregava não se
+          perdeu: ela é a razão de a palavra existir ao lado da cor, e mora aqui
+          e em `acessibilidade.css`, que é onde uma razão de desenho pertence.
+        -->
       </div>
 
       <!--
@@ -1689,10 +1691,7 @@
       -->
       <div class="chamada-bloco chamada-bloco-eventos">
         <p class="rotulo">EVENTOS</p>
-        <p class="nota">
-          O que esta janela viu acontecer, desde que abriu. O servidor não guarda
-          histórico, então não há nada anterior a mostrar.
-        </p>
+        <p class="nota">Desde que esta janela abriu. Não há registro anterior.</p>
         <ol id="chamada-eventos" class="chamada-eventos"
             aria-label="eventos vistos por esta janela"></ol>
       </div>
@@ -1991,8 +1990,7 @@
           desta máquina, e essa é a leitura que evita alguém procurar aqui o que
           é do servidor.
         -->
-        <p class="nota">Ajustes deste computador. A última seção é do servidor,
-          e só aparece para quem pode mudá-lo.</p>
+        <p class="nota">Ajustes deste computador.</p>
       </div>
 
       <!--
@@ -2148,9 +2146,7 @@
                   escrito enquanto o elemento ainda estava escondido.
                 -->
                 <p id="dogma-erro" class="erro" role="alert" hidden></p>
-                <p class="nota">A troca vale agora e fica gravada nesta máquina.
-                  A lista diz qual microfone <em>abriu</em>, que nem sempre é o
-                  que foi escolhido.</p>
+                <p class="nota">A troca vale agora e fica guardada nesta máquina.</p>
               </div>
 
               <div class="dogma-campo">
@@ -2168,8 +2164,7 @@
                   atrás dele — o nível só existe com áudio de pé.
                 -->
                 <p id="dogma-nivel" class="dogma-medidor" role="status">—</p>
-                <p class="nota">Fale normalmente. Os blocos sobem enquanto você
-                  fala, e só há nível com uma sessão aberta.</p>
+                <p class="nota">Fale normalmente: os blocos sobem com a sua voz.</p>
               </div>
 
               <!--
@@ -2239,9 +2234,7 @@
                   aparelhos que talvez não existam nesta máquina.
                 -->
                 <ul id="lista-saidas" class="dogma-dispositivos"></ul>
-                <p class="nota">Onde você ouve os outros. Trocar vale na hora,
-                  e o que estiver tocando muda de aparelho sem sair da
-                  conversa.</p>
+                <p class="nota">Trocar vale na hora, sem sair da conversa.</p>
               </div>
             </div>
           </div>
@@ -2266,7 +2259,7 @@
           <div class="dogma-bloco">
             <div class="dogma-bloco-topo">
               <h3 class="dogma-bloco-nome">ATALHOS DE TECLADO</h3>
-              <p class="nota">São fixos: não há onde guardar uma troca</p>
+              <p class="nota">Estas teclas não mudam.</p>
             </div>
             <ul class="dogma-atalhos">
               <li class="dogma-atalho">
@@ -2487,9 +2480,7 @@
                          spellcheck="false" autocomplete="off"
                          placeholder="nome do servidor">
                 </label>
-                <p class="nota">Vale ao sair do campo, ou ao apertar Enter. Não
-                  há botão de salvar: o que está escrito aqui é o nome que o
-                  servidor está usando agora.</p>
+                <p class="nota">Salva ao apertar Enter, ou ao sair do campo.</p>
               </div>
             </div>
           </div>
@@ -2748,9 +2739,8 @@
 
       <div class="compartilhar-limites">
         <p class="rotulo">LIMITES</p>
-        <p class="nota">Os três são teto, e nenhum é piso: o SEELE fica abaixo
-          deles sempre que subir mais atrapalharia a voz. O que está saindo de
-          verdade fica escrito na chamada, ao lado do que você pediu.</p>
+        <p class="nota">São limites máximos. A imagem pode sair abaixo deles
+          quando a conexão aperta — a chamada mostra o que está saindo.</p>
 
         <label class="compartilhar-campo">
           <span class="rotulo">RESOLUÇÃO</span>
@@ -2767,8 +2757,8 @@
           orçamento não compra nitidez — troca imagem parada por imagem grande
           e trêmula.
         -->
-        <p class="nota">Resolução não economiza internet: 1080p e 720p gastam o
-          mesmo. Num teto apertado o 1080p perde mais quadros e treme.</p>
+        <p class="nota">1080p e 720p gastam a mesma internet. Em conexão ruim o
+          1080p treme mais — 720p é a escolha segura.</p>
 
         <label class="compartilhar-campo">
           <span class="rotulo">QUADROS POR SEGUNDO</span>
@@ -2796,9 +2786,8 @@
             <option value="600000">600 kbps</option>
           </select>
         </label>
-        <p class="nota">Este produto não mede quanto a sua subida aguenta, então
-          não dá para dizer aqui o que cada teto custa. Sem teto seu, vale o que
-          o caminho permitir.</p>
+        <p class="nota">Deixe sem teto se não souber. Ponha um teto se
+          compartilhar a tela estiver atrapalhando o resto da sua internet.</p>
       </div>
 
       <p id="compartilhar-erro" class="erro" hidden></p>

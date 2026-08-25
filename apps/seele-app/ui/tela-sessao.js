@@ -2047,7 +2047,7 @@ async function hospedandoAqui() {
 function consequenciaDeTrocar(daqui, ate, hospedando) {
   const comum =
     `Você sai de ${daqui} agora, no meio do que estiver fazendo, e entra em ${ate}.\n` +
-    "Este produto mantém uma conexão por vez: entrar num servidor é sair do anterior.";
+    "Dá para estar em um servidor por vez: entrar em outro é sair deste.";
   if (!hospedando) return comum;
   return (
     `${comum}\n${daqui} está no ar dentro deste computador: ele cai junto, e ` +

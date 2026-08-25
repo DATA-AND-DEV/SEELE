@@ -353,7 +353,10 @@ function desconhecida(erro) {
     // Um objeto com ciclo. Raro, e ainda assim melhor dizer o tipo que nada.
     detalhe = Object.prototype.toString.call(erro);
   }
-  return `FALHA QUE ESTA TELA NÃO SABE NOMEAR:\n${detalhe}`;
+  // Sem a palavra «linha» aqui: neste produto ela é o canal de texto, e o
+  // guarda do ADR 0033 reprova o uso coloquial — com razão, porque quem lê
+  // aprendeu o outro sentido na tela ao lado.
+  return `ALGO FALHOU E ESTE APP NÃO SABE EXPLICAR O QUÊ.\nSe for relatar, copie o texto abaixo:\n${detalhe}`;
 }
 
 /**
@@ -389,22 +392,13 @@ const FRASES = {
       "ESTA VERSÃO NÃO SABE COMPARTILHAR TELA.\n" +
       "Não é a sua conexão nem permissão: a parte que captura a tela ainda não está neste app.",
 
-    // Separada da de cima porque as duas mandam a pessoa fazer coisas
-    // diferentes, e enquanto foram uma só quem lia parava de tentar: aquela diz
-    // que o recurso não existe, e esta diz que falta um arquivo.
-    //
-    // O módulo do OpenH264 não vem no pacote porque a licença não deixa. A
-    // frase diz o tamanho porque um megabyte é uma decisão fácil de tomar, e
-    // «baixar algo da internet» sem número é uma difícil.
+    // O arquivo veio e não ficou. É a única das três em que tentar de novo
+    // resolve às vezes, e por isso é a única que manda tentar — e, quando não
+    // resolver, a frase já diz onde olhar em vez de deixar a pessoa procurando.
     ScreenModuleRefused:
       "O MÓDULO DE VÍDEO NÃO INSTALOU.\n" +
       "Ou o download veio quebrado, ou a pasta de configuração não aceitou o arquivo. " +
       "Tente de novo; se insistir, é a pasta.",
-
-    ScreenModuleMissing:
-      "FALTA O MÓDULO DE VÍDEO.\n" +
-      "Este app captura a tela; o codec que comprime a imagem não vem junto, " +
-      "porque a licença dele não deixa. É cerca de 1 MB, uma vez só.",
 
     // Separada da de cima porque elas mandam a pessoa fazer coisas diferentes,
     // e enquanto foram uma só quem lia parava de tentar: a de cima diz que o
@@ -433,7 +427,8 @@ const FRASES = {
     // não `EnderecoInvalido` porque o que falta é outra coisa, e porque o resto
     // do link continua bom — o que se perde é o furo de NAT, não o Dogma.
     BilheteInvalido:
-      "ESTE CONVITE VEIO CORTADO NA PARTE QUE FURA O NAT.",
+      "ESTE CONVITE CHEGOU CORTADO NO FIM.\n" +
+      "Dá para entrar por ele na mesma rede; de fora, peça o link inteiro de novo.",
     ImpressaoDigitalInvalida: "ESTE CONVITE CHEGOU CORTADO OU ADULTERADO",
     TokenInvalido: "O CONVITE DENTRO DESTE LINK NÃO É UM CONVITE",
     CageInvalido: "A SALA DE VOZ DESTE CONVITE NÃO É UM NÚMERO",
@@ -510,8 +505,13 @@ const FRASES = {
       "UM PONTO DE ENCONTRO ABRIU O CAMINHO: SABE QUEM FALOU, NUNCA O QUE FOI DITO, " +
       "E DÁ PARA APONTAR PARA OUTRO.\n" +
       "O link vale enquanto o app estiver aberto; se fechar, gere outro.",
+    // Enquanto a pendência 26 estiver aberta, esta é a única frase da escada
+    // que anunciava alcance sem ter alcance. A medição de 2026-08-24 mostrou o
+    // firewall do roteador barrando a entrada, e o anfitrião não tem como saber
+    // daqui — então a frase diz o que se sabe, e não o que se esperava.
     Ipv6Direto:
-      "ESTE LINK LEVA UM ENDEREÇO IPv6.",
+      "ESTE LINK PODE NÃO FUNCIONAR DE FORA DA SUA REDE.\n" +
+      "Muitos roteadores bloqueiam a entrada. Teste com alguém antes de contar com ele.",
     // O degrau que nasceu de um defeito de campo: um Windows com Cloudflare
     // WARP tinha IPv6 global — do túnel —, e a escada declarava «alcança de
     // qualquer lugar» embaixo de um link que não aceita entrada nenhuma. Frase

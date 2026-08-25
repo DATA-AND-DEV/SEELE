@@ -156,27 +156,37 @@ pub enum FalhaAoAbrir {
 impl std::fmt::Display for FalhaAoAbrir {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            // Estas frases são lidas por quem acabou de apertar HOSPEDAR AQUI, e
+            // não por quem escreveu isto. Duas regras saíram da auditoria de
+            // 2026-08-24 e valem para todas as cinco: **nenhum termo de rede sem
+            // a tradução junto** — `UPnP` fica porque é a palavra que a pessoa
+            // vai procurar nos ajustes do roteador, `CGNAT` sai porque não é —,
+            // e **o que dá para fazer vem antes do que aconteceu**, porque é a
+            // parte que muda o dia de quem lê. O diagnóstico fino continua
+            // inteiro no `tracing`, que é de quem investiga.
             Self::NenhumRoteador => write!(
                 f,
-                "nenhum roteador respondeu ao pedido de porta — ligue o UPnP, se \
-                 o seu tiver"
+                "o roteador não respondeu ao pedido de abrir uma porta — procure \
+                 «UPnP» nos ajustes dele e ligue, se existir"
             ),
             Self::RoteadorRecusou(motivo) => {
                 write!(f, "o roteador recusou abrir a porta: {motivo}")
             }
             Self::SemSaidaParaInternet { externo } => write!(
                 f,
-                "o endereço do roteador ({externo}) não sai para a internet: é \
-                 CGNAT da operadora, ou um segundo roteador acima deste"
+                "o roteador não tem endereço próprio na internet ({externo}) — a \
+                 operadora divide um endereço entre várias casas, ou há um \
+                 segundo roteador acima deste. Não há o que ajustar aqui."
             ),
             Self::SemEnderecoExterno(motivo) => write!(
                 f,
-                "o roteador não disse qual é o endereço externo dele: {motivo}"
+                "o roteador não disse qual é o endereço dele na internet: {motivo}"
             ),
             Self::SemEnderecoNaRedeDoRoteador { roteador } => write!(
                 f,
-                "o roteador respondeu de {roteador} e nenhum endereço desta \
-                 máquina está na rede dele — costuma ser uma VPN ligada"
+                "parece haver uma VPN ligada nesta máquina: desligue e gere o \
+                 link de novo. O roteador respondeu de {roteador}, e nenhum \
+                 endereço desta máquina está na rede dele."
             ),
         }
     }

@@ -259,42 +259,54 @@ impl std::fmt::Display for FalhaNoEncontro {
             //
             // Quando o nome é um que a pessoa escolheu, aí sim a suspeita é do
             // lado dela, e a frase antiga é a certa.
+            // «é pendência nossa» e o nome da variável de ambiente saíram na
+            // auditoria de 2026-08-24: era a equipe escrevendo para quem usa, e
+            // era o exemplo que o dono do produto citou. O que **não** pode sair
+            // é «não é desta máquina» — é por isso que esta variante existe, e o
+            // comentário acima conta o caso real que a produziu. Quem opera e
+            // quer subir o próprio ponto tem `docs/ponto-de-encontro.md`; quem
+            // apertou HOSPEDAR não tem o que fazer com um nome de variável.
             Self::NaoResolve(nome) if nome == PONTO_PADRAO => write!(
                 f,
-                "o ponto de encontro padrão «{nome}» ainda não está no ar — é \
-                 pendência nossa, não desta máquina; aponte {VARIAVEL} para um \
-                 que você suba"
+                "o serviço que abre caminho pela internet ainda não está no ar — \
+                 não é problema desta máquina"
             ),
             Self::NaoResolve(nome) => write!(
                 f,
-                "não achei o ponto de encontro «{nome}»: o nome não resolve, ou \
-                 esta máquina está sem DNS"
+                "não achei «{nome}»: confira o endereço, ou esta máquina está sem \
+                 internet"
             ),
             // Duas frases porque apontam para lugares diferentes, e enquanto
             // foram uma só quem investigava procurava no lugar errado.
             Self::SemRespostaAoOnde => write!(
                 f,
-                "o ponto de encontro não respondeu a tempo — fora do ar, ou esta \
-                 rede não deixa UDP sair"
+                "o serviço não respondeu — pode estar fora do ar, ou esta rede \
+                 pode estar bloqueando a saída"
             ),
             // Esta é a informação mais específica que o degrau 4 consegue dar
             // sobre si mesmo: o serviço respondeu à primeira pergunta e não à
             // segunda, então o caminho até ele funciona e o que não funciona é o
             // socket do Dogma — que é justamente o que nenhum diagnóstico deste
             // projeto sabe exercitar.
+            // A distinção entre esta e a de cima continua valendo e continua
+            // importando para quem investiga — «respondeu» e «não respondeu»
+            // apontam para lugares diferentes. O que saiu foi `socket`, `furo` e
+            // `Dogma`, que não dizem nada a quem lê e diziam tudo a quem
+            // escreveu. O detalhe que elas carregavam está no `tracing`.
             Self::SemRespostaAoLeve => write!(
                 f,
-                "o ponto de encontro respondeu, mas não pelo socket do Dogma — o \
-                 caminho até ele funciona e o furo não sai desta porta"
+                "o serviço respondeu, mas não conseguiu abrir caminho de volta \
+                 até esta máquina"
             ),
             Self::SemEscutaDeAvisos(erro) => write!(
                 f,
-                "não deu para abrir a escuta de avisos do furo de NAT: {erro}"
+                "esta máquina não conseguiu abrir uma porta para receber o aviso \
+                 de quem está entrando: {erro}"
             ),
             Self::SemSocketDoDogma => write!(
                 f,
-                "não consegui falar com o ponto de encontro pelo mesmo socket em \
-                 que o Dogma atende"
+                "não deu para falar com o serviço pela mesma porta em que este \
+                 servidor atende"
             ),
         }
     }
@@ -1105,9 +1117,21 @@ mod testes {
             nosso.contains("pendência nossa") || nosso.contains("não está no ar"),
             "a frase não diz que a causa é nossa: {nosso}"
         );
+        // **Esta asserção era o contrário até 2026-08-24**: ela exigia que a
+        // frase contivesse `SEELE_ENCONTRO`, com a justificativa «a frase não
+        // diz o que fazer para usar o degrau 4 hoje». A auditoria de texto
+        // derrubou aquela decisão: quem lê isto apertou HOSPEDAR AQUI e não tem
+        // o que fazer com um nome de variável de ambiente — quem sobe o próprio
+        // ponto de encontro é operador, e operador tem
+        // `docs/ponto-de-encontro.md`. A informação não se perdeu; mudou de
+        // lugar, que é a única coisa que a auditoria pede.
+        //
+        // Cobrado pelo avesso de propósito: sem isto, a variável volta na
+        // primeira vez que alguém achar que está sendo prestativo.
         assert!(
-            nosso.contains(super::VARIAVEL),
-            "a frase não diz o que fazer para usar o degrau 4 hoje: {nosso}"
+            !nosso.contains(super::VARIAVEL),
+            "a frase do ponto padrão voltou a despejar o nome da variável de \
+             ambiente em quem só quer hospedar: {nosso}"
         );
 
         // E o outro lado da mesma moeda: um nome que a pessoa escolheu e não

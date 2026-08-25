@@ -142,11 +142,13 @@ function nomeDaResolucao(altura) {
 const PERMISSAO_DE_TELA = {
   NaoPerguntada: {
     diz: "ESTE APP AINDA NÃO PEDIU PARA GRAVAR A TELA",
+    // Sem `**` nem nenhuma outra marcação: isto é escrito com `textContent`
+    // (ver `mostrarPermissao`), então marcação aparece literal na tela. Foi o
+    // que aconteceu aqui.
     nota:
       "O sistema pergunta uma vez. Se você recusar, a volta é pelos ajustes " +
-      "dele, e não por aqui — e depois de marcar lá é preciso **fechar e abrir " +
-      "o SEELE**: o macOS guarda a resposta pela vida do processo, e conceder " +
-      "com o app aberto não muda nada até ele reabrir.",
+      "dele — e depois de marcar lá, feche e abra o SEELE, ou ele continua " +
+      "achando que não tem permissão.",
     pedir: true,
   },
   // Esta compilação não tem como perguntar ao sistema. A chamada nem desenha o

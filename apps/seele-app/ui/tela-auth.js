@@ -121,7 +121,7 @@ const PADROES = {
   },
   Orange: {
     rotulo: "CONEXÃO NÃO VERIFICADA",
-    nota: "Sessão não verificada. Captura suspensa até a chave ser confirmada.",
+    nota: "A identidade deste servidor ainda não foi conferida.",
   },
   Blue: {
     rotulo: "CONEXÃO SEGURA",
@@ -528,8 +528,7 @@ function levarParaAEspera(falha, endereco) {
   tela.dataset.foco = "auth-voltar";
   $("auth-parede").hidden = !recusado;
   $("auth-parede").textContent = recusado
-    ? "A decisão saiu e é durável: esta tela parou de bater, e bater de novo " +
-      "recebe a mesma resposta. Quem pode voltar atrás é quem hospeda."
+    ? "Tentar de novo dá na mesma. Só quem hospeda pode mudar essa resposta."
     : "";
 
   if (chegando) {
