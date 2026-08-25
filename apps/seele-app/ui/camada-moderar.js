@@ -661,7 +661,8 @@ $("lista-voice_rooms").addEventListener("click", async (evento) => {
     `APAGAR A SALA DE VOZ ${voice_room.name} ?`,
     consequenciaDeApagarVoiceRoom(voice_room, presa),
     `APAGAR ${voice_room.name}`,
-    () => invoke("apagar_voice_room", { voice_room: id }),
+    // camelCase: ver a nota em `tela-sessao.js`, no `insert_plug`.
+    () => invoke("apagar_voice_room", { voiceRoom: id }),
   );
 });
 
@@ -746,7 +747,7 @@ $("moderar-mover").addEventListener("click", () => {
   const para = $("moderar-para");
   const destino = para.options[para.selectedIndex]?.textContent ?? "";
   armarAto(`MOVER ${quem.nome}`, consequenciaDeMover(quem, destino), () =>
-    invoke("mover_pessoa", { person: quem.id, voice_room: Number(para.value) }),
+    invoke("mover_pessoa", { person: quem.id, voiceRoom: Number(para.value) }),
   );
 });
 

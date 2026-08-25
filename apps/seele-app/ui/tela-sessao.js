@@ -1956,7 +1956,12 @@ async function alternarCanal(evento) {
       if (item.dataset.dentro === "sim") {
         await invoke("eject_plug");
       } else {
-        await invoke("insert_plug", { voice_room });
+        // `voiceRoom` e não `voice_room`: o Tauri converte o nome do
+        // argumento para camelCase antes de procurá-lo no que o JS mandou
+        // (`ArgumentCase::Camel` é o padrão do `#[tauri::command]`). Enquanto
+        // o argumento se chamou `cage`, uma palavra só, as duas formas eram a
+        // mesma string e isso não aparecia.
+        await invoke("insert_plug", { voiceRoom: voice_room });
         entrou = true;
       }
     } else if (item.dataset.linha) {

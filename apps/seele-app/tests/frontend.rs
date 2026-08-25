@@ -146,6 +146,136 @@ fn registered_commands(source: &str) -> BTreeSet<String> {
         .collect()
 }
 
+/// Os parâmetros de cada `#[tauri::command]`, sem os que o Tauri injeta.
+///
+/// `State`, `AppHandle` e `Window` chegam do runtime e nunca do JS; cobrá-los de
+/// quem chama acusaria toda invocação do app.
+fn command_parameters(source: &str) -> std::collections::BTreeMap<String, BTreeSet<String>> {
+    let mut mapa = std::collections::BTreeMap::new();
+    for bloco in source.split("#[tauri::command").skip(1) {
+        let Some(inicio) = bloco.find("fn ") else {
+            continue;
+        };
+        let resto = &bloco[inicio + 3..];
+        let Some(abre) = resto.find('(') else {
+            continue;
+        };
+        let nome = resto[..abre].trim().to_owned();
+        let Some(fecha) = resto[abre..].find(')') else {
+            continue;
+        };
+        let mut parametros = BTreeSet::new();
+        for parte in resto[abre + 1..abre + fecha].split(',') {
+            let Some((chave, tipo)) = parte.split_once(':') else {
+                continue;
+            };
+            let injetado = ["State<", "AppHandle", "Window", "Emitter", "Runtime"]
+                .iter()
+                .any(|marca| tipo.contains(marca));
+            if !injetado {
+                parametros.insert(chave.trim().trim_start_matches("mut ").to_owned());
+            }
+        }
+        mapa.insert(nome, parametros);
+    }
+    mapa
+}
+
+/// O que o `#[tauri::command]` procura no objeto que o JS mandou.
+///
+/// `ArgumentCase::Camel` é o padrão do macro (conferido em
+/// `tauri-macros/src/command/wrapper.rs`), então um parâmetro `voice_room` é
+/// procurado como `voiceRoom`.
+fn como_o_tauri_procura(parametro: &str) -> String {
+    let mut saida = String::new();
+    let mut proxima_maiuscula = false;
+    for letra in parametro.chars() {
+        if letra == '_' {
+            proxima_maiuscula = true;
+        } else if proxima_maiuscula {
+            saida.extend(letra.to_uppercase());
+            proxima_maiuscula = false;
+        } else {
+            saida.push(letra);
+        }
+    }
+    saida
+}
+
+/// Cada `invoke("cmd", { … })` do frontend, com as chaves que ele manda.
+fn invoked_with_arguments(script: &str) -> Vec<(String, usize, String)> {
+    let script = without_comments(script);
+    let mut achados = Vec::new();
+    for pedaco in script.split("invoke(\"").skip(1) {
+        let Some(nome) = pedaco.split('"').next().map(str::to_owned) else {
+            continue;
+        };
+        let Some(abre) = pedaco.find('{') else {
+            continue;
+        };
+        // Só o objeto literal imediato: um `invoke` cujo argumento é uma
+        // variável não tem chave a conferir aqui.
+        let antes = &pedaco[..abre];
+        if antes.contains(';') || antes.contains("invoke(") || antes.len() > 60 {
+            continue;
+        }
+        let Some(fecha) = pedaco[abre..].find('}') else {
+            continue;
+        };
+        let corpo = &pedaco[abre + 1..abre + fecha];
+        for item in corpo.split(',') {
+            let chave = item.split(':').next().unwrap_or("").trim();
+            if !chave.is_empty() && chave.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                achados.push((nome.clone(), 0, chave.to_owned()));
+            }
+        }
+    }
+    achados
+}
+
+#[test]
+fn todo_argumento_que_o_frontend_manda_existe_no_comando() {
+    // **O guarda irmão do de baixo, e ele nasceu de um defeito de campo.**
+    //
+    // Aquele confere o **nome do comando**; este confere os **argumentos**, e a
+    // diferença custou uma sala em que ninguém conseguia entrar. A renomeação de
+    // 2026-08-25 trocou o parâmetro `cage` por `voice_room`, e o JS continuou
+    // mandando `voice_room` — mas o `#[tauri::command]` procura `voiceRoom`,
+    // porque `ArgumentCase::Camel` é o padrão do macro.
+    //
+    // **Por que isso nunca tinha aparecido:** até aquele dia, todo argumento do
+    // app era uma palavra só — `fonte`, `senha`, `person`, `channel` — e para
+    // uma palavra só snake_case e camelCase são a mesma string. O primeiro
+    // argumento de duas palavras foi o primeiro a poder quebrar.
+    //
+    // O sintoma é o pior tipo: build verde, testes verdes, e um `invoke` que
+    // rejeita em silêncio com uma mensagem que ninguém lê.
+    let script = scripts();
+    let source = read("src/main.rs");
+    let comandos = command_parameters(&source);
+
+    let mut erros: Vec<String> = Vec::new();
+    for (comando, _, chave) in invoked_with_arguments(&script) {
+        let Some(parametros) = comandos.get(&comando) else {
+            continue; // o guarda de baixo cuida de comando inexistente
+        };
+        let esperados: BTreeSet<String> =
+            parametros.iter().map(|p| como_o_tauri_procura(p)).collect();
+        if !esperados.contains(&chave) {
+            erros.push(format!(
+                "invoke(\"{comando}\") manda `{chave}`, e o comando procura {esperados:?}"
+            ));
+        }
+    }
+
+    assert!(
+        erros.is_empty(),
+        "o frontend manda argumento que o comando não procura — o `invoke` \
+         rejeita em silêncio e a ação simplesmente não acontece:\n  {}",
+        erros.join("\n  ")
+    );
+}
+
 #[test]
 fn every_command_the_frontend_calls_is_registered() {
     // A typo here is a promise rejected at runtime with a message nobody reads,
