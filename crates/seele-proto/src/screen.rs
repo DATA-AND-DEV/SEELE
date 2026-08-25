@@ -392,7 +392,7 @@ mod tests {
         // Once per transmission rather than fifty times a second, so the number
         // is not a budget the way `media::HEADER_LEN` is. It is pinned because
         // the receiver reads a fixed array off the stream: a field added here
-        // without moving this line reads the first bytes of the first picture
+        // without moving this channel reads the first bytes of the first picture
         // as a resolution.
         assert_eq!(SCREEN_HEADER_LEN, 1 + 4 + 1 + 1 + 2 + 2);
 

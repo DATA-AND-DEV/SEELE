@@ -35,7 +35,7 @@ pub fn alert(reason: AlertReason) -> &'static str {
         // frase, o que resta é uma sala que sumiu sozinha — que de onde se lê é
         // igualzinho a um cliente que perdeu a conta de onde estava.
         AlertReason::VoiceRoomDeleted => "A SALA DE VOZ EM QUE VOCÊ ESTAVA FOI APAGADA",
-        AlertReason::LineDeleted => {
+        AlertReason::ChannelDeleted => {
             "O CANAL DE TEXTO QUE VOCÊ LIA FOI APAGADO, COM TUDO QUE HAVIA NELE"
         }
         // A única recusa desta lista, e a única que ensina o passo seguinte.
@@ -153,7 +153,7 @@ mod tests {
         AlertReason::RateLimited,
         AlertReason::MovedByOperator,
         AlertReason::VoiceRoomDeleted,
-        AlertReason::LineDeleted,
+        AlertReason::ChannelDeleted,
         // The one that reads closest to `VoiceRoomEntryRefused`, and the reason it
         // is not that: "entry refused" is a sentence about walking into a room,
         // in front of somebody who was trying to destroy one.

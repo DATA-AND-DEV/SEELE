@@ -110,7 +110,7 @@ pub enum VoiceRoomCommand {
 /// Why a datagram was not forwarded.
 ///
 /// Counted rather than logged per event: at fifty frames a second per talker, a
-/// log line per drop is its own denial of service.
+/// log channel per drop is its own denial of service.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct DropCounts {
     /// The sender is not in this voice room.
@@ -572,7 +572,7 @@ impl VoiceRoom {
     /// identity" is handled because "`ssrc` is assigned by the server, never
     /// accepted from the client" — but `specs/02-protocolo.md` also says the
     /// server "forwards intact", and nothing anywhere stated that the two must
-    /// be checked against each other. Without this line a person could put
+    /// be checked against each other. Without this channel a person could put
     /// somebody else's `ssrc` in their own datagrams and every listener would
     /// attribute the audio to the wrong person.
     fn forward(&mut self, from: Ssrc, bytes: &[u8], now: Instant) {
@@ -1017,7 +1017,7 @@ mod tests {
         // the end of one window and the whole budget at the start of the next,
         // twice the contracted rate inside a couple of milliseconds — and
         // always at the same instant of the clock, which is the instant an
-        // attacker lines up with.
+        // attacker channels up with.
         let mut voice_room = VoiceRoom::new(VoiceRoomId(1));
         let _alice = member(&mut voice_room, 1, 100, true);
         let mut bob = member(&mut voice_room, 2, 200, true);

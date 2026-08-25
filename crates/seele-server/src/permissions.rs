@@ -104,8 +104,8 @@ fn name_to_permission(name: &str) -> Option<Permission> {
         "ViewVoiceRoom" => Permission::ViewVoiceRoom,
         "InsertPlug" => Permission::InsertPlug,
         "Speak" => Permission::Speak,
-        "ReadLine" => Permission::ReadLine,
-        "WriteLine" => Permission::WriteLine,
+        "ReadChannel" => Permission::ReadChannel,
+        "WriteChannel" => Permission::WriteChannel,
         "RemoveMessage" => Permission::RemoveMessage,
         "MovePerson" => Permission::MovePerson,
         "Kick" => Permission::Kick,
@@ -477,8 +477,8 @@ impl<'a> Permissions<'a> {
             Permission::ViewVoiceRoom,
             Permission::InsertPlug,
             Permission::Speak,
-            Permission::ReadLine,
-            Permission::WriteLine,
+            Permission::ReadChannel,
+            Permission::WriteChannel,
             Permission::RemoveMessage,
             Permission::MovePerson,
             Permission::Kick,
@@ -578,8 +578,8 @@ mod tests {
         Permission::ViewVoiceRoom,
         Permission::InsertPlug,
         Permission::Speak,
-        Permission::ReadLine,
-        Permission::WriteLine,
+        Permission::ReadChannel,
+        Permission::WriteChannel,
         Permission::RemoveMessage,
         Permission::MovePerson,
         Permission::Kick,
@@ -856,7 +856,7 @@ mod tests {
         let allowed = [
             Permission::ViewVoiceRoom,
             Permission::InsertPlug,
-            Permission::ReadLine,
+            Permission::ReadChannel,
         ];
         for permission in ALL {
             let expected = allowed.contains(permission);
@@ -893,7 +893,7 @@ mod tests {
 
     #[test]
     fn an_operator_moderates_but_does_not_administer() {
-        // The line specs/04 draws between Operador and Comandante.
+        // The channel specs/04 draws between Operador and Comandante.
         let persistence = store();
         let operator = person_with(&persistence, "operador", 2, OPERATOR);
         let permissions = Permissions::new(&persistence);
@@ -935,7 +935,7 @@ mod tests {
             "the Observer denial did not beat the Person grant"
         );
         // And the permissions the two roles agree on survive.
-        assert!(permissions.may(person, Permission::ReadLine).unwrap());
+        assert!(permissions.may(person, Permission::ReadChannel).unwrap());
     }
 
     #[test]

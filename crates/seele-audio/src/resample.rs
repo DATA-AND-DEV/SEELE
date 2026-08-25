@@ -478,7 +478,7 @@ mod tests {
         assert!(delay > 0, "a sinc filter cannot have zero delay");
 
         // ADR 0009 has a ~67 ms floor. A resampler costing more than a couple of
-        // milliseconds would deserve its own line in that budget.
+        // milliseconds would deserve its own channel in that budget.
         let delay_ms = delay as f64 / f64::from(SAMPLE_RATE_HZ) * 1000.0;
         assert!(delay_ms < 5.0, "resampler adds {delay_ms:.2} ms of delay");
     }

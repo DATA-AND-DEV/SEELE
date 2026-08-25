@@ -27,8 +27,8 @@
 
 use std::collections::HashMap;
 
-use seele_proto::control::{VoiceRoomInfo, LineInfo, Permission, PersonState};
-use seele_proto::ids::{VoiceRoomId, LineId, MessageId, PersonId, ScreenId, Ssrc};
+use seele_proto::control::{VoiceRoomInfo, ChannelInfo, Permission, PersonState};
+use seele_proto::ids::{VoiceRoomId, ChannelId, MessageId, PersonId, ScreenId, Ssrc};
 use seele_proto::sync_ratio::SyncBand;
 use seele_proto::ServerMessage;
 
@@ -75,8 +75,8 @@ impl Person {
 pub struct Message {
     /// Server-assigned identifier, ordered.
     pub id: MessageId,
-    /// Which Line it was said in.
-    pub line: LineId,
+    /// Which Channel it was said in.
+    pub channel: ChannelId,
     /// Who said it.
     pub author: PersonId,
     /// Their name at the time it arrived.
@@ -100,7 +100,7 @@ pub struct Message {
     /// **Still `Some` after the bytes are gone**, carrying
     /// `AttachmentState::Expired` with the name and the size the file had. That
     /// is the whole reason the server keeps the row after deleting the blob: a
-    /// message that had a picture and now draws as an empty line would leave
+    /// message that had a picture and now draws as an empty channel would leave
     /// nobody able to tell that there had ever been one.
     pub attachment: Option<seele_proto::control::AttachmentInfo>,
 }
@@ -199,7 +199,7 @@ pub struct Room {
     /// Voice channels visible to this person.
     pub voice_rooms: Vec<VoiceRoomInfo>,
     /// Text channels visible to this person.
-    pub lines: Vec<LineInfo>,
+    pub channels: Vec<ChannelInfo>,
     /// What this person may do, as PERMISSIONS resolved it.
     ///
     /// Here so a shell can ask "should this control exist at all" without
@@ -208,8 +208,8 @@ pub struct Room {
     pub permissions: Vec<Permission>,
     /// The voice room this person's plug is in.
     pub current_voice_room: Option<VoiceRoomId>,
-    /// The Line being read.
-    pub current_line: Option<LineId>,
+    /// The Channel being read.
+    pub current_channel: Option<ChannelId>,
     /// Everybody this client has heard of, by id.
     pub people: HashMap<PersonId, Person>,
     /// Who is seated in which voice room, in arrival order.
@@ -323,7 +323,7 @@ pub struct Changed {
     pub roster: bool,
     /// A message arrived, changed, or went away.
     pub messages: bool,
-    /// voice_rooms or Lines changed.
+    /// voice_rooms or Channels changed.
     pub channels: bool,
     /// The server renamed itself, or changed its picture.
     ///
@@ -393,7 +393,7 @@ impl Room {
         // drawing it for the rest of the session.
         self.icon = None;
         self.voice_rooms = info.voice_rooms.clone();
-        self.lines = info.lines.clone();
+        self.channels = info.channels.clone();
         self.permissions = info.permissions.clone();
         // Limpas pelo mesmo motivo do ícone, e o estrago aqui é maior: uma
         // conexão nova não tem fluxo de tela nenhum — o `Client` que os
@@ -474,15 +474,15 @@ impl Room {
         self.notice.take().is_some()
     }
 
-    /// Records that the client is now reading a Line.
+    /// Records that the client is now reading a Channel.
     ///
-    /// Clears the messages, because a new Line is a new conversation and keeping
-    /// the old one under a new heading misattributes every line of it.
-    pub fn open_line(&mut self, line: LineId) {
-        if self.current_line != Some(line) {
+    /// Clears the messages, because a new Channel is a new conversation and keeping
+    /// the old one under a new heading misattributes every channel of it.
+    pub fn open_channel(&mut self, channel: ChannelId) {
+        if self.current_channel != Some(channel) {
             self.messages.clear();
         }
-        self.current_line = Some(line);
+        self.current_channel = Some(channel);
     }
 
     /// The people seated in a voice room, in arrival order.
@@ -579,24 +579,24 @@ impl Room {
             .map(|voice_room| voice_room.id)
     }
 
-    /// The Line matching a name or a number, with or without its `#`.
+    /// The Channel matching a name or a number, with or without its `#`.
     #[must_use]
-    pub fn find_line(&self, which: &str) -> Option<LineId> {
+    pub fn find_channel(&self, which: &str) -> Option<ChannelId> {
         let wanted = which.trim_start_matches('#').to_lowercase();
         if let Ok(number) = wanted.parse::<u32>() {
-            if let Some(line) = self.lines.iter().find(|line| line.id.0 == number) {
-                return Some(line.id);
+            if let Some(channel) = self.channels.iter().find(|channel| channel.id.0 == number) {
+                return Some(channel.id);
             }
         }
-        self.lines
+        self.channels
             .iter()
-            .find(|line| line.name.to_lowercase().contains(&wanted))
-            .map(|line| line.id)
+            .find(|channel| channel.name.to_lowercase().contains(&wanted))
+            .map(|channel| channel.id)
     }
 
     /// The name to show for a person, even one never introduced.
     ///
-    /// Joining a Line mid-conversation means the first thing said can come from
+    /// Joining a Channel mid-conversation means the first thing said can come from
     /// somebody whose arrival was never seen. Showing an id beats dropping it.
     #[must_use]
     pub fn name_of(&self, person: PersonId) -> String {
@@ -670,7 +670,7 @@ impl Room {
                 ssrc,
                 server,
                 voice_rooms,
-                lines,
+                channels,
                 permissions,
                 ..
             } => {
@@ -681,7 +681,7 @@ impl Room {
                 // the server from scratch, picture included.
                 self.icon = None;
                 self.voice_rooms.clone_from(voice_rooms);
-                self.lines.clone_from(lines);
+                self.channels.clone_from(channels);
                 self.permissions.clone_from(permissions);
                 self.people
                     .entry(*person)
@@ -756,7 +756,7 @@ impl Room {
             }
 
             ServerMessage::MessageReceived {
-                line,
+                channel,
                 id,
                 author,
                 at_seconds,
@@ -767,13 +767,13 @@ impl Room {
                 ..
             } => {
                 // Idempotent by server id: a history fetch that overlaps what is
-                // already on screen must not double every line in the overlap.
+                // already on screen must not double every channel in the overlap.
                 if self.messages.iter().any(|known| known.id == *id) {
                     return changed;
                 }
                 self.messages.push(Message {
                     id: *id,
-                    line: *line,
+                    channel: *channel,
                     author: *author,
                     // The server's name for them wins over ours only when we
                     // have none: somebody we watched arrive is somebody whose
@@ -890,9 +890,9 @@ impl Room {
                 }
             }
 
-            ServerMessage::LineCreated { line } => {
-                if !self.lines.iter().any(|known| known.id == line.id) {
-                    self.lines.push(line.clone());
+            ServerMessage::ChannelCreated { channel } => {
+                if !self.channels.iter().any(|known| known.id == channel.id) {
+                    self.channels.push(channel.clone());
                     changed.channels = true;
                 }
             }
@@ -904,8 +904,8 @@ impl Room {
                 }
             }
 
-            ServerMessage::LineRenamed { line, name } => {
-                if let Some(known) = self.lines.iter_mut().find(|known| known.id == *line) {
+            ServerMessage::ChannelRenamed { channel, name } => {
+                if let Some(known) = self.channels.iter_mut().find(|known| known.id == *channel) {
                     known.name.clone_from(name);
                     changed.channels = true;
                 }
@@ -973,16 +973,16 @@ impl Room {
                 changed.roster = true;
             }
 
-            // The same, and the messages go too. A Line that is gone leaves no
+            // The same, and the messages go too. A Channel that is gone leaves no
             // conversation behind: keeping what was drawn would leave the last
-            // page of a destroyed Line readable under the heading of whatever
+            // page of a destroyed Channel readable under the heading of whatever
             // the shell shows next.
-            ServerMessage::LineDeleted { line } => {
-                let before = self.lines.len();
-                self.lines.retain(|known| known.id != *line);
-                changed.channels = self.lines.len() != before;
-                if self.current_line == Some(*line) {
-                    self.current_line = None;
+            ServerMessage::ChannelDeleted { channel } => {
+                let before = self.channels.len();
+                self.channels.retain(|known| known.id != *channel);
+                changed.channels = self.channels.len() != before;
+                if self.current_channel == Some(*channel) {
+                    self.current_channel = None;
                     self.messages.clear();
                     changed.messages = true;
                 }
@@ -992,7 +992,7 @@ impl Room {
             // where it was asked for — the shell holds it only as long as the
             // box it fills is open — so folding it into the room would be
             // storing a number whose whole value is being fresh.
-            ServerMessage::LineWeighed { .. } => {}
+            ServerMessage::ChannelWeighed { .. } => {}
 
             // ---- compartilhamento de tela ----
             //
@@ -1125,7 +1125,7 @@ mod tests {
     use seele_proto::ids::{ScreenId, SessionId};
 
     const VOICE_ROOM: VoiceRoomId = VoiceRoomId(1);
-    const LINE: LineId = LineId(1);
+    const CHANNEL: ChannelId = ChannelId(1);
 
     fn session() -> ServerMessage {
         ServerMessage::Session {
@@ -1138,10 +1138,10 @@ mod tests {
                 name: "VOICE_ROOM-01 CENTRAL".into(),
                 limit: 20,
                 password_required: false,
-                line: Some(LINE),
+                channel: Some(CHANNEL),
             }],
-            lines: vec![LineInfo {
-                id: LINE,
+            channels: vec![ChannelInfo {
+                id: CHANNEL,
                 name: "geral".into(),
             }],
             roles: Vec::new(),
@@ -1163,7 +1163,7 @@ mod tests {
 
     fn said(id: u64, author: u64, body: &str) -> ServerMessage {
         ServerMessage::MessageReceived {
-            line: LINE,
+            channel: CHANNEL,
             id: MessageId(id),
             author: PersonId(author),
             author_nickname: format!("pessoa {author}"),
@@ -1181,7 +1181,7 @@ mod tests {
         let mut room = Room::new();
         room.apply(&session());
         room.enter_voice_room(VOICE_ROOM);
-        room.open_line(LINE);
+        room.open_channel(CHANNEL);
         room
     }
 
@@ -1193,7 +1193,7 @@ mod tests {
         assert!(changed.channels);
         assert_eq!(room.server, "Terceira Tóquio");
         assert_eq!(room.voice_rooms.len(), 1);
-        assert_eq!(room.lines.len(), 1);
+        assert_eq!(room.channels.len(), 1);
         assert_eq!(room.me, Some(PersonId(7)));
     }
 
@@ -1209,7 +1209,7 @@ mod tests {
             ssrc: Ssrc(700),
             server: "Terceira Tóquio".into(),
             voice_rooms: Vec::new(),
-            lines: Vec::new(),
+            channels: Vec::new(),
             permissions: Vec::new(),
         };
         room.adopt(&info, "ayanami");
@@ -1233,7 +1233,7 @@ mod tests {
 
     #[test]
     fn a_person_who_leaves_keeps_their_name_for_what_they_already_said() {
-        // Dropping the name with the person would turn every line they wrote
+        // Dropping the name with the person would turn every channel they wrote
         // into "pessoa 3" the moment they close their client.
         let mut room = room();
         room.apply(&joined(3, "ayanami"));
@@ -1251,7 +1251,7 @@ mod tests {
     #[test]
     fn the_same_message_arriving_twice_is_stored_once() {
         // A history fetch that overlaps what is already on screen must not
-        // double every line in the overlap.
+        // double every channel in the overlap.
         let mut room = room();
         room.apply(&joined(3, "ayanami"));
 
@@ -1281,13 +1281,13 @@ mod tests {
         let mut room = room();
         room.apply(&said(1, 7, "sync caiu"));
         let changed = room.apply(&ServerMessage::MessageEdited {
-            line: LINE,
+            channel: CHANNEL,
             id: MessageId(1),
             body: "sync voltou".into(),
         });
 
         assert!(changed.messages);
-        assert_eq!(room.messages.len(), 1, "the edit appended a second line");
+        assert_eq!(room.messages.len(), 1, "the edit appended a second channel");
         assert_eq!(room.messages[0].body, "sync voltou");
         assert!(room.messages[0].edited);
     }
@@ -1296,7 +1296,7 @@ mod tests {
     fn editing_something_not_on_screen_changes_nothing() {
         let mut room = room();
         let changed = room.apply(&ServerMessage::MessageEdited {
-            line: LINE,
+            channel: CHANNEL,
             id: MessageId(99),
             body: "fantasma".into(),
         });
@@ -1310,7 +1310,7 @@ mod tests {
         let mut room = room();
         room.apply(&said(1, 7, "apagar isto"));
         let changed = room.apply(&ServerMessage::MessageRemoved {
-            line: LINE,
+            channel: CHANNEL,
             id: MessageId(1),
         });
 
@@ -1331,7 +1331,7 @@ mod tests {
 
     #[test]
     fn a_message_carries_the_servers_clock_and_not_the_arrival_time() {
-        // A page of history whose lines all claim to have been written the
+        // A page of history whose channels all claim to have been written the
         // moment the app opened has lost what makes it history.
         let mut room = room();
         room.apply(&said(1, 7, "olá"));
@@ -1392,19 +1392,19 @@ mod tests {
     fn changing_the_line_clears_what_belonged_to_the_old_one() {
         let mut room = room();
         room.apply(&said(1, 7, "na linha 1"));
-        room.open_line(LineId(2));
+        room.open_channel(ChannelId(2));
 
         assert!(room.messages.is_empty());
-        assert_eq!(room.current_line, Some(LineId(2)));
+        assert_eq!(room.current_channel, Some(ChannelId(2)));
     }
 
     #[test]
     fn opening_the_line_already_open_keeps_the_conversation() {
-        // Re-entering the same Line — a reconnection, a redraw — must not throw
+        // Re-entering the same Channel — a reconnection, a redraw — must not throw
         // the conversation away.
         let mut room = room();
         room.apply(&said(1, 7, "ainda aqui"));
-        room.open_line(LINE);
+        room.open_channel(CHANNEL);
 
         assert_eq!(room.messages.len(), 1);
     }
@@ -1469,9 +1469,9 @@ mod tests {
     #[test]
     fn a_line_is_found_with_or_without_its_hash() {
         let room = room();
-        assert_eq!(room.find_line("#geral"), Some(LINE));
-        assert_eq!(room.find_line("geral"), Some(LINE));
-        assert_eq!(room.find_line("1"), Some(LINE));
+        assert_eq!(room.find_channel("#geral"), Some(CHANNEL));
+        assert_eq!(room.find_channel("geral"), Some(CHANNEL));
+        assert_eq!(room.find_channel("1"), Some(CHANNEL));
     }
 
     #[test]
@@ -1604,7 +1604,7 @@ mod tests {
                 name: "VOICE_ROOM-02 SALA DOS FUNDOS".into(),
                 limit: 8,
                 password_required: false,
-                line: None,
+                channel: None,
             },
         });
 
@@ -1622,16 +1622,16 @@ mod tests {
         let mut room = Room::new();
         room.apply(&session());
 
-        let changed = room.apply(&ServerMessage::LineCreated {
-            line: LineInfo {
-                id: LineId(2),
+        let changed = room.apply(&ServerMessage::ChannelCreated {
+            channel: ChannelInfo {
+                id: ChannelId(2),
                 name: "planejamento".into(),
             },
         });
 
         assert!(changed.channels);
-        assert_eq!(room.lines.len(), 2);
-        assert_eq!(room.lines[1].name, "planejamento");
+        assert_eq!(room.channels.len(), 2);
+        assert_eq!(room.channels[1].name, "planejamento");
     }
 
     #[test]
@@ -1646,7 +1646,7 @@ mod tests {
                 name: "VOICE_ROOM-02".into(),
                 limit: 8,
                 password_required: false,
-                line: None,
+                channel: None,
             },
         };
 
@@ -1736,7 +1736,7 @@ mod tests {
                 name: "VOICE_ROOM-02".into(),
                 limit: 8,
                 password_required: false,
-                line: None,
+                channel: None,
             },
         });
 
@@ -1757,14 +1757,14 @@ mod tests {
         let mut room = Room::new();
         room.apply(&session());
 
-        let changed = room.apply(&ServerMessage::LineRenamed {
-            line: LineId(404),
+        let changed = room.apply(&ServerMessage::ChannelRenamed {
+            channel: ChannelId(404),
             name: "fantasma".into(),
         });
 
         assert!(!changed.channels);
-        assert_eq!(room.lines.len(), 1);
-        assert_eq!(room.lines[0].name, "geral");
+        assert_eq!(room.channels.len(), 1);
+        assert_eq!(room.channels[0].name, "geral");
     }
 
     // ---- rooms destroyed while this client was looking at them ----
@@ -1816,7 +1816,7 @@ mod tests {
                 name: "VOICE_ROOM-02".into(),
                 limit: 8,
                 password_required: false,
-                line: None,
+                channel: None,
             },
         });
 
@@ -1829,22 +1829,22 @@ mod tests {
 
     #[test]
     fn a_destroyed_line_takes_the_conversation_off_the_screen() {
-        // Keeping what was drawn would leave the last page of a destroyed Line
+        // Keeping what was drawn would leave the last page of a destroyed Channel
         // readable under the heading of whatever the shell shows next — which
         // is the one thing a verb that promises destruction may not do.
         let mut room = room();
         room.apply(&said(1, 3, "isto some junto"));
         assert_eq!(room.messages.len(), 1);
 
-        let changed = room.apply(&ServerMessage::LineDeleted { line: LINE });
+        let changed = room.apply(&ServerMessage::ChannelDeleted { channel: CHANNEL });
 
         assert!(changed.channels);
         assert!(changed.messages, "the shell was not told to clear the list");
-        assert!(room.lines.is_empty());
-        assert_eq!(room.current_line, None);
+        assert!(room.channels.is_empty());
+        assert_eq!(room.current_channel, None);
         assert!(
             room.messages.is_empty(),
-            "a destroyed Line left its conversation on screen"
+            "a destroyed Channel left its conversation on screen"
         );
     }
 
@@ -1852,14 +1852,14 @@ mod tests {
     fn destroying_a_room_this_client_never_heard_of_changes_nothing() {
         let mut room = room();
         let voice_room = room.apply(&ServerMessage::VoiceRoomDeleted { voice_room: VoiceRoomId(404) });
-        let line = room.apply(&ServerMessage::LineDeleted { line: LineId(404) });
+        let channel = room.apply(&ServerMessage::ChannelDeleted { channel: ChannelId(404) });
 
         assert!(!voice_room.channels);
-        assert!(!line.channels);
+        assert!(!channel.channels);
         assert_eq!(room.voice_rooms.len(), 1);
-        assert_eq!(room.lines.len(), 1);
+        assert_eq!(room.channels.len(), 1);
         assert_eq!(room.current_voice_room, Some(VOICE_ROOM));
-        assert_eq!(room.current_line, Some(LINE));
+        assert_eq!(room.current_channel, Some(CHANNEL));
     }
 
     #[test]
@@ -1870,15 +1870,15 @@ mod tests {
         let mut room = room();
         let before = room.clone();
 
-        let changed = room.apply(&ServerMessage::LineWeighed {
-            line: LINE,
+        let changed = room.apply(&ServerMessage::ChannelWeighed {
+            channel: CHANNEL,
             messages: 1_847,
             authors: 6,
             oldest_at_seconds: Some(1_678_600_000),
         });
 
-        assert!(!changed.any(), "weighing a Line changed the room");
-        assert_eq!(room.lines, before.lines);
+        assert!(!changed.any(), "weighing a Channel changed the room");
+        assert_eq!(room.channels, before.channels);
         assert_eq!(room.messages.len(), before.messages.len());
     }
 
@@ -1924,7 +1924,7 @@ mod tests {
             ssrc: Ssrc(700),
             server: "Terceira Tóquio".into(),
             voice_rooms: Vec::new(),
-            lines: Vec::new(),
+            channels: Vec::new(),
             roles: Vec::new(),
             permissions: vec![Permission::ManageVoiceRooms, Permission::Speak],
         });
@@ -2166,7 +2166,7 @@ mod tests {
                 ssrc: Ssrc(700),
                 server: "Terceira Tóquio".into(),
                 voice_rooms: Vec::new(),
-                lines: Vec::new(),
+                channels: Vec::new(),
                 permissions: Vec::new(),
             },
             "ayanami",

@@ -123,7 +123,7 @@ pub const SNIFF_LEN: usize = 12;
 #[must_use]
 pub fn sniff(bytes: &[u8]) -> Option<ImageFormat> {
     // Eight bytes, and the last five of them exist to catch a transfer that
-    // mangled line endings. Nothing else starts this way.
+    // mangled channel endings. Nothing else starts this way.
     if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
         return Some(ImageFormat::Png);
     }
@@ -239,7 +239,7 @@ const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx
 /// The account, in the shape ADR 0026 and ADR 0027 both used: the `base64`
 /// crate would be one crate in the tree — two, in fact, since two versions of
 /// it are already there transitively and neither is ours to reach for — in
-/// exchange for the twenty lines below. This encodes and does not decode, which
+/// exchange for the twenty channels below. This encodes and does not decode, which
 /// is the whole of what is needed, and it is exercised by its own test against
 /// the vectors in RFC 4648. A crate does not pay for itself at that size.
 fn encode_base64(bytes: &[u8], out: &mut String) {

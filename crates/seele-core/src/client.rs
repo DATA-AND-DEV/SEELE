@@ -21,7 +21,7 @@ use anyhow::Result;
 use ed25519_dalek::{Signer, SigningKey};
 use seele_proto::control::{ClientMessage, ServerMessage};
 use seele_proto::ids::{
-    VoiceRoomId, ClientMessageId, LineId, MessageId, PersonId, ScreenId, SessionId, Ssrc,
+    VoiceRoomId, ClientMessageId, ChannelId, MessageId, PersonId, ScreenId, SessionId, Ssrc,
 };
 use seele_proto::transport::{HANDSHAKE_TIMEOUT, IDLE_TIMEOUT, KEEPALIVE};
 
@@ -114,8 +114,8 @@ pub struct SessionInfo {
     /// Text channels visible to us.
     ///
     /// Carried through rather than dropped: an interface that knows the voice_rooms
-    /// but not the Lines can only ever open whichever Line it was started with.
-    pub lines: Vec<seele_proto::control::LineInfo>,
+    /// but not the Channels can only ever open whichever Channel it was started with.
+    pub channels: Vec<seele_proto::control::ChannelInfo>,
     /// What this person may do, as PERMISSIONS resolved it.
     ///
     /// So a shell can decide whether to offer a control at all. **Convenience,
@@ -218,7 +218,7 @@ const CONTROL_PRIORITY: i32 = 1;
 pub enum Sent {
     /// Every byte went out and the server took the stream to its end.
     ///
-    /// What follows is either the message appearing on the Line — which is how
+    /// What follows is either the message appearing on the Channel — which is how
     /// the sender learns it worked, matched by `client_message_id` — or an
     /// `AttachmentRefused` if what arrived did not hold together.
     Delivered {
@@ -253,8 +253,8 @@ pub enum Sent {
 /// compile in each other's place.
 #[derive(Debug, Clone, Copy)]
 pub struct AttachmentRequest<'a> {
-    /// Which Line the message goes to.
-    pub line: LineId,
+    /// Which Channel the message goes to.
+    pub channel: ChannelId,
     /// The idempotency key of the message. Gap G9, and here it is also what
     /// makes a retry after a fall safe.
     pub client_message_id: ClientMessageId,
@@ -668,8 +668,8 @@ impl Client {
     /// # Errors
     ///
     /// Fails if the control stream is closed.
-    pub async fn join_line(&mut self, line: LineId) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::JoinLine { line }).await
+    pub async fn join_channel(&mut self, channel: ChannelId) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::JoinChannel { channel }).await
     }
 
     /// Posts a message.
@@ -682,14 +682,14 @@ impl Client {
     /// Fails if the control stream is closed.
     pub async fn send_message(
         &mut self,
-        line: LineId,
+        channel: ChannelId,
         body: &str,
         client_message_id: ClientMessageId,
     ) -> Result<()> {
         frame::write(
             &mut self.send,
             &ClientMessage::SendMessage {
-                line,
+                channel,
                 body: body.to_owned(),
                 replies_to: None,
                 client_message_id,
@@ -820,28 +820,28 @@ impl Client {
         &mut self,
         name: &str,
         limit: u16,
-        line: Option<LineId>,
+        channel: Option<ChannelId>,
     ) -> Result<()> {
         frame::write(
             &mut self.send,
             &ClientMessage::CreateVoiceRoom {
                 name: name.to_owned(),
                 limit,
-                line,
+                channel,
             },
         )
         .await
     }
 
-    /// Asks the server to make a Line.
+    /// Asks the server to make a Channel.
     ///
     /// # Errors
     ///
     /// Fails if the control stream is closed.
-    pub async fn create_line(&mut self, name: &str) -> Result<()> {
+    pub async fn create_channel(&mut self, name: &str) -> Result<()> {
         frame::write(
             &mut self.send,
-            &ClientMessage::CreateLine {
+            &ClientMessage::CreateChannel {
                 name: name.to_owned(),
             },
         )
@@ -864,16 +864,16 @@ impl Client {
         .await
     }
 
-    /// Asks the server to rename a Line.
+    /// Asks the server to rename a Channel.
     ///
     /// # Errors
     ///
     /// Fails if the control stream is closed.
-    pub async fn rename_line(&mut self, line: LineId, name: &str) -> Result<()> {
+    pub async fn rename_channel(&mut self, channel: ChannelId, name: &str) -> Result<()> {
         frame::write(
             &mut self.send,
-            &ClientMessage::RenameLine {
-                line,
+            &ClientMessage::RenameChannel {
+                channel,
                 name: name.to_owned(),
             },
         )
@@ -953,7 +953,7 @@ impl Client {
         .await
     }
 
-    /// Asks the server to take a message off its Line.
+    /// Asks the server to take a message off its Channel.
     ///
     /// # Errors
     ///
@@ -978,14 +978,14 @@ impl Client {
     /// Fails if the control stream is closed.
     pub async fn fetch_history(
         &mut self,
-        line: LineId,
+        channel: ChannelId,
         cursor: Option<MessageId>,
         limit: u16,
     ) -> Result<()> {
         frame::write(
             &mut self.send,
             &ClientMessage::FetchHistory {
-                line,
+                channel,
                 cursor,
                 limit,
             },
@@ -1135,25 +1135,25 @@ impl Client {
         frame::write(&mut self.send, &ClientMessage::DeleteVoiceRoom { voice_room }).await
     }
 
-    /// Asks the server to destroy a Line, and everything written in it.
+    /// Asks the server to destroy a Channel, and everything written in it.
     ///
     /// # Errors
     ///
     /// Fails if the control stream is closed.
-    pub async fn delete_line(&mut self, line: LineId) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::DeleteLine { line }).await
+    pub async fn delete_channel(&mut self, channel: ChannelId) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::DeleteChannel { channel }).await
     }
 
-    /// Asks what destroying a Line would cost. Destroys nothing.
+    /// Asks what destroying a Channel would cost. Destroys nothing.
     ///
-    /// The answer arrives as a `LineWeighed` on the event stream, like every
+    /// The answer arrives as a `ChannelWeighed` on the event stream, like every
     /// other answer this client gets.
     ///
     /// # Errors
     ///
     /// Fails if the control stream is closed.
-    pub async fn weigh_line(&mut self, line: LineId) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::WeighLine { line }).await
+    pub async fn weigh_channel(&mut self, channel: ChannelId) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::WeighChannel { channel }).await
     }
 
     // ---- compartilhamento de tela ----
@@ -1413,7 +1413,7 @@ async fn handshake(
             ssrc,
             server,
             voice_rooms,
-            lines,
+            channels,
             permissions,
             ..
         } => Ok(SessionInfo {
@@ -1422,7 +1422,7 @@ async fn handshake(
             ssrc,
             server,
             voice_rooms,
-            lines,
+            channels,
             permissions,
         }),
         ServerMessage::Disconnecting { reason } => Err(ConnectError::Refused { reason }),
@@ -1469,11 +1469,11 @@ impl Transfers {
     /// Sends a file on a stream of its own, and reports the bytes as they go.
     ///
     /// **Never on the control stream.** Twenty megabytes written there stop
-    /// every presence event and every line of text from everybody behind them
+    /// every presence event and every channel of text from everybody behind them
     /// until the last byte goes through; the control stream is the one that may
     /// not queue.
     ///
-    /// The message is published on the Line **only once the bytes have
+    /// The message is published on the Channel **only once the bytes have
     /// arrived whole**, so while this is running the only person who can see it
     /// is the sender. That is the trade ADR 0027 takes on purpose: without it,
     /// "the file has not arrived yet" and "the file expired" would be two
@@ -1536,7 +1536,7 @@ impl Transfers {
             .write_all(&[seele_proto::stream::StreamType::Attachment.byte()])
             .await?;
         let header = AttachmentHeader {
-            line: request.line,
+            channel: request.channel,
             client_message_id: request.client_message_id,
             body: request.body.to_owned(),
             replies_to: request.replies_to,
@@ -1677,7 +1677,7 @@ impl Transfers {
     /// The other half of ADR 0027's preview rule: before anything can decide
     /// whether the bytes agree with the claim, somebody has to have the bytes.
     ///
-    /// **Nothing is written to disk, at any point.** That is the line between a
+    /// **Nothing is written to disk, at any point.** That is the channel between a
     /// preview and a save, and it is drawn here rather than left to a caller:
     /// saving is an act of the person who received the file, in a place they
     /// picked, and a thumbnail that quietly left a copy in a cache directory

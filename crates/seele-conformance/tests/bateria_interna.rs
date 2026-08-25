@@ -19,7 +19,7 @@ use std::time::Duration;
 use anyhow::Result;
 use seele_core::enlace::{Aviso, Destino, Enlace, Motivo};
 use seele_core::{Link, MemoryPinStore};
-use seele_proto::ids::{VoiceRoomId, ClientMessageId, LineId};
+use seele_proto::ids::{VoiceRoomId, ClientMessageId, ChannelId};
 use seele_server::persistence::Location;
 use seele_server::{ServerConfig, Daemon};
 
@@ -89,7 +89,7 @@ async fn o_server_cai_e_a_sessao_entra_na_bateria_em_vez_de_acabar() -> Result<(
     )
     .await?;
     enlace.inserir_plug(VoiceRoomId(VOICE_ROOM)).await?;
-    enlace.abrir_linha(LineId(LINE)).await?;
+    enlace.abrir_linha(ChannelId(LINE)).await?;
     assert_eq!(enlace.estado(), Link::Online);
 
     // ---- o servidor cai
@@ -137,7 +137,7 @@ async fn o_server_cai_e_a_sessao_entra_na_bateria_em_vez_de_acabar() -> Result<(
 
     // E continua servindo: reconectar sem poder falar seria voltar para nada.
     enlace
-        .dizer(LineId(LINE), "voltei".to_owned(), ClientMessageId(1))
+        .dizer(ChannelId(LINE), "voltei".to_owned(), ClientMessageId(1))
         .await?;
 
     de_novo.shutdown();
@@ -161,7 +161,7 @@ async fn o_que_a_pessoa_escolheu_volta_com_ela() -> Result<()> {
     )
     .await?;
     enlace.inserir_plug(VoiceRoomId(VOICE_ROOM)).await?;
-    enlace.abrir_linha(LineId(LINE)).await?;
+    enlace.abrir_linha(ChannelId(LINE)).await?;
     enlace.at_field(true).await?;
 
     servidor.shutdown();
@@ -185,10 +185,10 @@ async fn o_que_a_pessoa_escolheu_volta_com_ela() -> Result<()> {
         "a sessão nova não trouxe um ssrc"
     );
 
-    // Falar de novo prova que a sala de voz e a Linha foram refeitos: sem `join_line`
+    // Falar de novo prova que a sala de voz e a Linha foram refeitos: sem `join_channel`
     // o servidor aceita a mensagem e não a devolve para ninguém.
     enlace
-        .dizer(LineId(LINE), "de volta".to_owned(), ClientMessageId(1))
+        .dizer(ChannelId(LINE), "de volta".to_owned(), ClientMessageId(1))
         .await?;
 
     let ouviu = esperar(&mut enlace, Duration::from_secs(10), |aviso| {

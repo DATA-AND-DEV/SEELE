@@ -405,9 +405,9 @@ fn render_tree(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
         let selected = index == app.selected && app.focus == Panel::Channels;
         lines.push(match node {
             Node::VoiceRoom { name, open, sync } => {
-                voice_room_line(name, *open, *sync, selected, budget, theme)
+                voice_room_channel(name, *open, *sync, selected, budget, theme)
             }
-            Node::Line { name } => Line::from(Span::styled(
+            Node::Channel { name } => Line::from(Span::styled(
                 truncate(&format!("─ CANAL {name}"), budget),
                 if selected {
                     theme.accent()
@@ -428,7 +428,7 @@ fn render_tree(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
 /// panel this narrow, so what identifies it is its place: the same column as
 /// every person's number, on the row the people hang under. An empty voice room prints
 /// nothing rather than a zero — see [`seele_core::Room::voice_room_sync`].
-fn voice_room_line(
+fn voice_room_channel(
     name: &str,
     open: bool,
     sync: Option<seele_core::VoiceRoomSync>,
@@ -517,10 +517,10 @@ fn render_messages(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
         Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(inner);
     let budget = history.width as usize;
 
-    let (mut lines, current_line) = history_lines(app, budget, theme);
+    let (mut lines, current_channel) = history_lines(app, budget, theme);
 
     let visible = history.height as usize;
-    let skip = scroll(lines.len(), visible, current_line, app.busca.is_some());
+    let skip = scroll(lines.len(), visible, current_channel, app.busca.is_some());
 
     frame.render_widget(
         Paragraph::new(lines.split_off(skip)).style(dim(theme, app)),
@@ -539,13 +539,13 @@ fn history_lines(app: &App, budget: usize, theme: Theme) -> (Vec<Line<'static>>,
     let ordinal = app.busca.as_ref().and_then(Search::ordinal_in_message);
 
     let mut lines: Vec<Line<'static>> = Vec::new();
-    let mut current_line = None;
+    let mut current_channel = None;
     for (index, message) in app.messages.iter().chain(&app.local).enumerate() {
         let here = current.filter(|candidate| candidate.message == index);
         if here.is_some() {
             // Recorded before the message is laid out, so it is the row the
             // message starts on rather than wherever the last one ended.
-            current_line = Some(lines.len());
+            current_channel = Some(lines.len());
         }
         lines.extend(message_lines(
             message,
@@ -555,7 +555,7 @@ fn history_lines(app: &App, budget: usize, theme: Theme) -> (Vec<Line<'static>>,
             here.and(ordinal),
         ));
     }
-    (lines, current_line)
+    (lines, current_channel)
 }
 
 /// Which line the history starts drawing at.
@@ -566,9 +566,9 @@ fn history_lines(app: &App, budget: usize, theme: Theme) -> (Vec<Line<'static>>,
 /// occurrence off screen that nobody scrolls to is an occurrence that was not
 /// found. Never past the tail either way, because scrolling below the last line
 /// trades conversation for blank rows.
-fn scroll(total: usize, visible: usize, current_line: Option<usize>, searching: bool) -> usize {
+fn scroll(total: usize, visible: usize, current_channel: Option<usize>, searching: bool) -> usize {
     let tail = total.saturating_sub(visible);
-    match current_line {
+    match current_channel {
         Some(line) if searching => line.saturating_sub(visible / 2).min(tail),
         _ => tail,
     }
@@ -853,9 +853,9 @@ fn render_cramped(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
     frame.render_widget(Paragraph::new(Line::from(spans)), warning);
 
     let budget = history.width as usize;
-    let (mut lines, current_line) = history_lines(app, budget, theme);
+    let (mut lines, current_channel) = history_lines(app, budget, theme);
     let visible = history.height as usize;
-    let skip = scroll(lines.len(), visible, current_line, app.busca.is_some());
+    let skip = scroll(lines.len(), visible, current_channel, app.busca.is_some());
 
     frame.render_widget(Paragraph::new(lines.split_off(skip)), history);
 }
@@ -1185,7 +1185,7 @@ mod tests {
                 at_field: true,
                 total_isolation: false,
             }),
-            Node::Line {
+            Node::Channel {
                 name: "#geral".into(),
             },
         ];
@@ -1970,7 +1970,7 @@ mod tests {
         // (hits drawn, which one is emphasised, how many are, first line of the
         // message the cursor is in).
         let read = |app: &App| {
-            let (lines, current_line) = history_lines(app, 40, theme);
+            let (lines, current_channel) = history_lines(app, 40, theme);
             let spans: Vec<Span<'static>> = lines.into_iter().flat_map(|line| line.spans).collect();
             let drawn = spans.iter().filter(|span| span.content == "sync").count();
             let which = spans
@@ -1978,7 +1978,7 @@ mod tests {
                 .filter(|span| span.content == "sync")
                 .position(|span| span.style == reversed);
             let emphasised = spans.iter().filter(|span| span.style == reversed).count();
-            (drawn, which, emphasised, current_line)
+            (drawn, which, emphasised, current_channel)
         };
 
         // Three hits over two messages. All three are drawn whatever the cursor

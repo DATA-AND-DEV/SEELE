@@ -195,7 +195,7 @@ pub fn diretorio_de_anexos(config: &ServerConfig) -> Option<std::path::PathBuf> 
     }
 }
 
-/// Creates the configured voice room and its Line if they are not there yet.
+/// Creates the configured voice room and its Channel if they are not there yet.
 ///
 /// M2 kept these in the config struct; M3 keeps them in PERSISTENCE so a restart
 /// finds the same room rather than rebuilding it. Idempotent, because it runs
@@ -204,10 +204,10 @@ pub fn diretorio_de_anexos(config: &ServerConfig) -> Option<std::path::PathBuf> 
 /// # A server opens with somewhere to go
 ///
 /// This is what stops a fresh server being a screen that does not explain
-/// itself. A room with na sala de voz offers nowhere to speak and no Line to write in;
+/// itself. A room with na sala de voz offers nowhere to speak and no Channel to write in;
 /// the person who pressed **HOSPEDAR AQUI** looks at an empty list and has no
 /// way to tell a working server from a broken one. So the first boot writes a
-/// Line called `geral` and one voice room bound to it, and there is somewhere to
+/// Channel called `geral` and one voice room bound to it, and there is somewhere to
 /// stand from the first second.
 ///
 /// # Why here, and not in the migration
@@ -233,7 +233,7 @@ pub fn diretorio_de_anexos(config: &ServerConfig) -> Option<std::path::PathBuf> 
 /// # Why a flag, and not only `INSERT OR IGNORE`
 ///
 /// Because the identifiers are written out by hand, `INSERT OR IGNORE` means
-/// "unless row 1 is taken" — and once a Line can be **destroyed**, row 1 stops
+/// "unless row 1 is taken" — and once a Channel can be **destroyed**, row 1 stops
 /// being taken. A server whose operator destroyed `geral` on purpose, after a
 /// confirmation promising that nothing brings it back, would find it again at
 /// the next restart: same name, same identifier, empty. That is the product
@@ -261,11 +261,11 @@ fn seed(persistence: &mut persistence::Persistence, config: &ServerConfig) -> Re
     }
 
     connection.execute(
-        "INSERT OR IGNORE INTO lines (id, name) VALUES (1, 'geral')",
+        "INSERT OR IGNORE INTO channels (id, name) VALUES (1, 'geral')",
         [],
     )?;
     connection.execute(
-        "INSERT OR IGNORE INTO voice_rooms (id, name, member_limit, line_id)
+        "INSERT OR IGNORE INTO voice_rooms (id, name, member_limit, channel_id)
          VALUES (?1, ?2, ?3, 1)",
         rusqlite::params![
             i64::from(config.voice_room.get()),
@@ -528,7 +528,7 @@ impl Daemon {
         &self.server
     }
 
-    /// How many messages PERSISTENCE holds on a Line.
+    /// How many messages PERSISTENCE holds on a Channel.
     ///
     /// The counterpart of [`Self::mensagens_da_linha`], and the one that answers
     /// "did anything get lost": a page is capped, a count is not. See
@@ -537,12 +537,12 @@ impl Daemon {
     /// # Errors
     ///
     /// Fails if the database is busy or does not answer.
-    pub async fn quantas_mensagens(&self, line: seele_proto::ids::LineId) -> Result<u64> {
+    pub async fn quantas_mensagens(&self, channel: seele_proto::ids::ChannelId) -> Result<u64> {
         let mut guard = self.server.persistence.lock().await;
-        persistence::messages::Messages::new(&mut guard).count(line)
+        persistence::messages::Messages::new(&mut guard).count(channel)
     }
 
-    /// What PERSISTENCE actually recorded on a Line, newest first.
+    /// What PERSISTENCE actually recorded on a Channel, newest first.
     ///
     /// One page, capped at [`persistence::messages::MAX_PAGE`] like every other
     /// reader of history — [`Self::quantas_mensagens`] is what counts.
@@ -562,7 +562,7 @@ impl Daemon {
     /// passing after a migration renames a column and starts asserting about a
     /// table nobody meant it to know.
     ///
-    /// This asks the question instead of the storage: *what is on this Line?*
+    /// This asks the question instead of the storage: *what is on this Channel?*
     /// It goes through [`persistence::messages::Messages`] — the same reader the
     /// session uses for `FetchHistory` — so a test and a client see the same
     /// answer by construction, and the schema stays behind the crate wall.
@@ -572,11 +572,11 @@ impl Daemon {
     /// Fails if the database is busy or does not answer.
     pub async fn mensagens_da_linha(
         &self,
-        line: seele_proto::ids::LineId,
+        channel: seele_proto::ids::ChannelId,
         limite: u16,
     ) -> Result<Vec<persistence::messages::StoredMessage>> {
         let mut guard = self.server.persistence.lock().await;
-        persistence::messages::Messages::new(&mut guard).history(line, None, limite)
+        persistence::messages::Messages::new(&mut guard).history(channel, None, limite)
     }
 
     /// Stops accepting and closes the endpoint.
@@ -612,26 +612,29 @@ mod tests {
 
     #[test]
     fn a_new_server_opens_with_somewhere_to_go() {
-        // A server with na sala de voz offers nowhere to speak and no Line to write in.
+        // A server with na sala de voz offers nowhere to speak and no Channel to write in.
         // The person who pressed HOSPEDAR AQUI would look at an empty list with
         // no way to tell a working server from a broken one — and "hospede você
         // mesmo" would be a claim rather than a thing that happens.
         let config = ServerConfig::default();
         let persistence = born(&config);
-        let channels = Channels::new(&persistence);
+        let dao = Channels::new(&persistence);
 
-        let lines = channels.lines().expect("lines");
-        assert_eq!(lines.len(), 1, "a server opened with no Line: {lines:?}");
-        assert_eq!(lines[0].name, "geral");
+        // `dao` e não `channels`: o local que lista os canais também se chama
+        // `channels` depois do rename, e sombrear o DAO com o resultado dele
+        // fazia a linha seguinte pedir `voice_rooms()` a um `Vec`.
+        let channels = dao.channels().expect("channels");
+        assert_eq!(channels.len(), 1, "a server opened with no Channel: {channels:?}");
+        assert_eq!(channels[0].name, "geral");
 
-        let voice_rooms = channels.voice_rooms().expect("voice_rooms");
+        let voice_rooms = dao.voice_rooms().expect("voice_rooms");
         assert_eq!(voice_rooms.len(), 1, "a server opened with na sala de voz: {voice_rooms:?}");
         assert_eq!(voice_rooms[0].name, config.voice_room_name);
         assert_eq!(voice_rooms[0].limit, config.voice_room_limit);
         assert_eq!(
-            voice_rooms[0].line,
-            Some(lines[0].id),
-            "the opening voice room has no Line attached to it"
+            voice_rooms[0].channel,
+            Some(channels[0].id),
+            "the opening voice room has no Channel attached to it"
         );
         assert!(
             !voice_rooms[0].password_required,
@@ -653,7 +656,7 @@ mod tests {
         let persistence = born(&config);
 
         let channels = Channels::new(&persistence);
-        assert_eq!(channels.lines().expect("lines").len(), 1);
+        assert_eq!(channels.channels().expect("channels").len(), 1);
         assert_eq!(channels.voice_rooms().expect("voice_rooms").len(), 1);
     }
 
@@ -685,10 +688,10 @@ mod tests {
     #[test]
     fn a_destroyed_opening_line_does_not_come_back_at_the_next_boot() {
         // The confirmation in front of `apagar_linha` promises that no screen
-        // of this product brings the Line back. A `systemctl restart` is not a
-        // screen, and it was bringing this one back: the seed writes `lines`
+        // of this product brings the Channel back. A `systemctl restart` is not a
+        // screen, and it was bringing this one back: the seed writes `channels`
         // row 1 by hand, `INSERT OR IGNORE` means "unless row 1 is taken", and
-        // destroying the Line is precisely what makes row 1 free again. Same
+        // destroying the Channel is precisely what makes row 1 free again. Same
         // name, same identifier, empty — the product contradicting its own
         // confirmation.
         let directory = tempfile::tempdir().expect("tempdir");
@@ -699,16 +702,16 @@ mod tests {
 
         let persistence = born(&config);
         let channels = Channels::new(&persistence);
-        let line = channels.lines().expect("lines")[0].id;
+        let channel = channels.channels().expect("channels")[0].id;
         // The voice room bound to it is unbound by the delete; nothing else here
         // depends on that, and the voice room is not what this test is about.
-        channels.delete_line(line).expect("delete");
+        channels.delete_channel(channel).expect("delete");
         drop(persistence);
 
         let persistence = born(&config);
         assert!(
-            Channels::new(&persistence).lines().expect("lines").is_empty(),
-            "a Line destroyed on purpose was written back by the next boot"
+            Channels::new(&persistence).channels().expect("channels").is_empty(),
+            "a Channel destroyed on purpose was written back by the next boot"
         );
     }
 
@@ -763,16 +766,16 @@ mod tests {
             .execute("DELETE FROM configuracao WHERE chave = ?1", [SEMEADO])
             .expect("forget");
         Channels::new(&persistence)
-            .rename_line(
-                Channels::new(&persistence).lines().expect("lines")[0].id,
+            .rename_channel(
+                Channels::new(&persistence).channels().expect("channels")[0].id,
                 "avisos",
             )
             .expect("rename");
         drop(persistence);
 
         let persistence = born(&config);
-        let lines = Channels::new(&persistence).lines().expect("lines");
-        assert_eq!(lines.len(), 1, "a second `geral` appeared: {lines:?}");
-        assert_eq!(lines[0].name, "avisos");
+        let channels = Channels::new(&persistence).channels().expect("channels");
+        assert_eq!(channels.len(), 1, "a second `geral` appeared: {channels:?}");
+        assert_eq!(channels[0].name, "avisos");
     }
 }

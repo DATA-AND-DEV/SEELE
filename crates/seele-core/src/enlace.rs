@@ -43,7 +43,7 @@ use std::time::{Duration, Instant};
 use ed25519_dalek::SigningKey;
 use seele_proto::control::ServerMessage;
 use seele_proto::ids::{
-    AttachmentId, VoiceRoomId, ClientMessageId, LineId, MessageId, PersonId, ScreenId,
+    AttachmentId, VoiceRoomId, ClientMessageId, ChannelId, MessageId, PersonId, ScreenId,
 };
 use seele_proto::sync_ratio::SyncBand;
 use tokio::sync::mpsc;
@@ -193,14 +193,14 @@ pub enum Motivo {
 enum Comando {
     InserirPlug(VoiceRoomId),
     EjetarPlug,
-    AbrirLinha(LineId),
+    AbrirLinha(ChannelId),
     Dizer {
-        linha: LineId,
+        linha: ChannelId,
         corpo: String,
         id: ClientMessageId,
     },
     Historico {
-        linha: LineId,
+        linha: ChannelId,
         limite: u16,
     },
     AtField(bool),
@@ -208,7 +208,7 @@ enum Comando {
     CriarVoiceRoom {
         nome: String,
         limite: u16,
-        linha: Option<LineId>,
+        linha: Option<ChannelId>,
     },
     CriarLinha {
         nome: String,
@@ -218,7 +218,7 @@ enum Comando {
         nome: String,
     },
     RenomearLinha {
-        linha: LineId,
+        linha: ChannelId,
         nome: String,
     },
     RenomearServer {
@@ -246,10 +246,10 @@ enum Comando {
         voice_room: VoiceRoomId,
     },
     ApagarLinha {
-        linha: LineId,
+        linha: ChannelId,
     },
     PesarLinha {
-        linha: LineId,
+        linha: ChannelId,
     },
     Anexar(Box<Anexo>),
     SalvarAnexo {
@@ -305,7 +305,7 @@ const ESPERA_DE_ANEXO: Duration = Duration::from_secs(10);
 #[derive(Debug, Clone)]
 pub struct Anexo {
     /// Em que Linha.
-    pub linha: LineId,
+    pub linha: ChannelId,
     /// A chave de idempotência da mensagem. É por ela que a tela reconhece a
     /// própria subida, e é ela que torna uma retentativa segura.
     pub id: ClientMessageId,
@@ -1051,7 +1051,7 @@ impl Enlace {
     /// # Errors
     ///
     /// Falha se a sessão já tiver acabado.
-    pub async fn abrir_linha(&self, linha: LineId) -> Result<(), Fechado> {
+    pub async fn abrir_linha(&self, linha: ChannelId) -> Result<(), Fechado> {
         self.mandar(Comando::AbrirLinha(linha)).await
     }
 
@@ -1062,7 +1062,7 @@ impl Enlace {
     /// Falha se a sessão já tiver acabado.
     pub async fn dizer(
         &self,
-        linha: LineId,
+        linha: ChannelId,
         corpo: String,
         id: ClientMessageId,
     ) -> Result<(), Fechado> {
@@ -1074,7 +1074,7 @@ impl Enlace {
     /// # Errors
     ///
     /// Falha se a sessão já tiver acabado.
-    pub async fn historico(&self, linha: LineId, limite: u16) -> Result<(), Fechado> {
+    pub async fn historico(&self, linha: ChannelId, limite: u16) -> Result<(), Fechado> {
         self.mandar(Comando::Historico { linha, limite }).await
     }
 
@@ -1117,7 +1117,7 @@ impl Enlace {
         &self,
         nome: String,
         limite: u16,
-        linha: Option<LineId>,
+        linha: Option<ChannelId>,
     ) -> Result<(), Fechado> {
         self.mandar(Comando::CriarVoiceRoom {
             nome,
@@ -1150,7 +1150,7 @@ impl Enlace {
     /// # Errors
     ///
     /// Falha se a sessão já tiver acabado.
-    pub async fn renomear_linha(&self, linha: LineId, nome: String) -> Result<(), Fechado> {
+    pub async fn renomear_linha(&self, linha: ChannelId, nome: String) -> Result<(), Fechado> {
         self.mandar(Comando::RenomearLinha { linha, nome }).await
     }
 
@@ -1270,13 +1270,13 @@ impl Enlace {
     /// # Errors
     ///
     /// Falha se a sessão já tiver acabado.
-    pub async fn apagar_linha(&self, linha: LineId) -> Result<(), Fechado> {
+    pub async fn apagar_linha(&self, linha: ChannelId) -> Result<(), Fechado> {
         self.mandar(Comando::ApagarLinha { linha }).await
     }
 
     /// Pergunta quanto custaria destruir uma Linha. Não destrói nada.
     ///
-    /// A resposta chega como `LineWeighed` no fluxo de avisos, como toda
+    /// A resposta chega como `ChannelWeighed` no fluxo de avisos, como toda
     /// resposta deste enlace. É o que enche a caixa de confirmação com número
     /// contado no banco — uma casca segura uma página de histórico e chutaria
     /// para baixo por todo o passado da Linha.
@@ -1284,7 +1284,7 @@ impl Enlace {
     /// # Errors
     ///
     /// Falha se a sessão já tiver acabado.
-    pub async fn pesar_linha(&self, linha: LineId) -> Result<(), Fechado> {
+    pub async fn pesar_linha(&self, linha: ChannelId) -> Result<(), Fechado> {
         self.mandar(Comando::PesarLinha { linha }).await
     }
 
@@ -1442,7 +1442,7 @@ struct Motor {
     inicio: Instant,
     /// O que restaurar ao reconectar.
     voice_room: Option<VoiceRoomId>,
-    linha: Option<LineId>,
+    linha: Option<ChannelId>,
     at_field: bool,
     isolamento: bool,
     avisos: mpsc::UnboundedSender<Aviso>,
@@ -1759,7 +1759,7 @@ impl Motor {
                     let _ = cliente.insert_plug(voice_room).await;
                 }
                 if let Some(linha) = self.linha {
-                    let _ = cliente.join_line(linha).await;
+                    let _ = cliente.join_channel(linha).await;
                 }
                 if self.at_field {
                     let _ = cliente.set_at_field(true).await;
@@ -1799,7 +1799,7 @@ impl Motor {
         let resultado = match comando {
             Comando::InserirPlug(voice_room) => cliente.insert_plug(voice_room).await,
             Comando::EjetarPlug => cliente.eject_plug().await,
-            Comando::AbrirLinha(linha) => cliente.join_line(linha).await,
+            Comando::AbrirLinha(linha) => cliente.join_channel(linha).await,
             Comando::Dizer { linha, corpo, id } => cliente.send_message(linha, &corpo, id).await,
             Comando::Historico { linha, limite } => {
                 cliente.fetch_history(linha, None, limite).await
@@ -1811,9 +1811,9 @@ impl Motor {
                 limite,
                 linha,
             } => cliente.create_voice_room(&nome, limite, linha).await,
-            Comando::CriarLinha { nome } => cliente.create_line(&nome).await,
+            Comando::CriarLinha { nome } => cliente.create_channel(&nome).await,
             Comando::RenomearVoiceRoom { voice_room, nome } => cliente.rename_voice_room(voice_room, &nome).await,
-            Comando::RenomearLinha { linha, nome } => cliente.rename_line(linha, &nome).await,
+            Comando::RenomearLinha { linha, nome } => cliente.rename_channel(linha, &nome).await,
             Comando::RenomearServer { nome } => cliente.rename_server(&nome).await,
             Comando::IconeDoServer { icone } => cliente.set_server_icon(icone).await,
             Comando::Expulsar { pessoa } => cliente.kick_person(pessoa).await,
@@ -1829,8 +1829,8 @@ impl Motor {
             Comando::RemoverMensagem { mensagem } => cliente.remove_message(mensagem).await,
             Comando::MoverPersono { pessoa, voice_room } => cliente.move_person(pessoa, voice_room).await,
             Comando::ApagarVoiceRoom { voice_room } => cliente.delete_voice_room(voice_room).await,
-            Comando::ApagarLinha { linha } => cliente.delete_line(linha).await,
-            Comando::PesarLinha { linha } => cliente.weigh_line(linha).await,
+            Comando::ApagarLinha { linha } => cliente.delete_channel(linha).await,
+            Comando::PesarLinha { linha } => cliente.weigh_channel(linha).await,
 
             // Numa tarefa própria, e não aqui dentro. Executar vinte megabytes
             // no laço de comandos devolveria, dentro do cliente, exatamente o
@@ -1850,7 +1850,7 @@ impl Motor {
                         }));
                     };
                     let pedido = crate::client::AttachmentRequest {
-                        line: anexo.linha,
+                        channel: anexo.linha,
                         client_message_id: anexo.id,
                         body: &anexo.corpo,
                         replies_to: None,
@@ -2967,12 +2967,12 @@ mod tests {
         let mut motor = motor_de_teste();
 
         motor.lembrar(&Comando::InserirPlug(VoiceRoomId(2)));
-        motor.lembrar(&Comando::AbrirLinha(LineId(7)));
+        motor.lembrar(&Comando::AbrirLinha(ChannelId(7)));
         motor.lembrar(&Comando::AtField(true));
         motor.lembrar(&Comando::Isolamento(true));
 
         assert_eq!(motor.voice_room, Some(VoiceRoomId(2)));
-        assert_eq!(motor.linha, Some(LineId(7)));
+        assert_eq!(motor.linha, Some(ChannelId(7)));
         assert!(motor.at_field);
         assert!(motor.isolamento);
 
@@ -3139,7 +3139,7 @@ mod tests {
         // reenvio do **mesmo** identificador, não contra este erro.
         let mut motor = motor_de_teste();
         motor.lembrar(&Comando::Dizer {
-            linha: LineId(1),
+            linha: ChannelId(1),
             corpo: "oi".into(),
             id: ClientMessageId(1),
         });

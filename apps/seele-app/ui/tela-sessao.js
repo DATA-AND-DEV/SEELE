@@ -613,7 +613,7 @@ function desenharCanais(snapshot) {
   });
   repovoar($("lista-voice_rooms"), voice_rooms);
 
-  const linhas = snapshot.lines.map((linha) => {
+  const linhas = snapshot.channels.map((linha) => {
     const item = elemento("li", null);
 
     // Botão de verdade, e não um `<li>` com `cursor: pointer`: o ouvinte estava
@@ -630,7 +630,7 @@ function desenharCanais(snapshot) {
     cerquilha.setAttribute("aria-hidden", "true");
     botao.append(cerquilha, elemento("span", "linha-rotulo", linha.name));
 
-    // A contagem de pendências do comp não entra. `Line` é `{id, name, open}` —
+    // A contagem de pendências do comp não entra. `Channel` é `{id, name, open}` —
     // não há contagem de não-lidas nem marca d'água de leitura em lugar nenhum
     // do core —, e um travessão explicado ao lado de cada Linha seria meia
     // dúzia de perguntas que ninguém fez, numa tela que existe para ser
@@ -760,7 +760,7 @@ function desenharOperador(snapshot) {
  * campo que ninguém mediu.
  */
 function desenharLinha(snapshot) {
-  const aberta = snapshot.lines.find((linha) => linha.open);
+  const aberta = snapshot.channels.find((linha) => linha.open);
   const nome = $("linha-nome");
   nome.textContent = aberta ? aberta.name : "nenhum canal aberto";
   nome.classList.toggle("linha-nome-vazio", !aberta);
@@ -1471,7 +1471,7 @@ async function enviar(evento) {
   // volta parece travado numa rede ruim, que é justo quando não pode parecer.
   campo.value = "";
   try {
-    await invoke("send_message", { line: linhaAberta, body: corpo });
+    await invoke("send_message", { channel: linhaAberta, body: corpo });
   } catch (falha) {
     campo.value = corpo;
     console.warn("send_message:", falha);
@@ -1622,7 +1622,7 @@ async function subirAnexo(corpo) {
   $("anexo-estado").textContent = "SUBINDO";
   try {
     subindo = await invoke("enviar_anexo", {
-      line: linhaAberta,
+      channel: linhaAberta,
       body: corpo,
       caminho: arquivo.caminho,
       nome: arquivo.nome,
@@ -1961,7 +1961,7 @@ async function alternarCanal(evento) {
       }
     } else if (item.dataset.linha) {
       linhaAberta = Number(item.dataset.linha);
-      await invoke("open_line", { line: linhaAberta });
+      await invoke("open_channel", { channel: linhaAberta });
     }
     // Escolhido o destino, a gaveta fecha: ela é navegação, e a conversa que
     // se acabou de abrir está atrás dela. Em janela larga não há gaveta e isto
@@ -2522,7 +2522,7 @@ $("criar-voice_room").addEventListener("submit", (evento) => {
     invoke("criar_voice_room", {
       name: nome.value.trim(),
       limit: Number($("campo-voice_room-limite").value),
-      line: null,
+      channel: null,
     }),
     nome,
     "criar_voice_room",

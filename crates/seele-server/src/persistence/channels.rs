@@ -1,4 +1,4 @@
-//! voice_rooms and Lines — the rooms a server is made of.
+//! voice_rooms and Channels — the rooms a server is made of.
 //!
 //! `specs/04-servidor-seele.md`:
 //!
@@ -35,8 +35,8 @@
 
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
-use seele_proto::control::{VoiceRoomInfo, LineInfo};
-use seele_proto::ids::{VoiceRoomId, LineId};
+use seele_proto::control::{VoiceRoomInfo, ChannelInfo};
+use seele_proto::ids::{VoiceRoomId, ChannelId};
 
 /// The channel tree, over PERSISTENCE.
 pub struct Channels<'a> {
@@ -63,7 +63,7 @@ impl<'a> Channels<'a> {
     /// Fails on a database error.
     pub fn voice_rooms(&self) -> Result<Vec<VoiceRoomInfo>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, name, member_limit, password_hash IS NOT NULL, line_id
+            "SELECT id, name, member_limit, password_hash IS NOT NULL, channel_id
              FROM voice_rooms ORDER BY position, id",
         )?;
         let rows = statement
@@ -73,7 +73,7 @@ impl<'a> Channels<'a> {
                     name: row.get(1)?,
                     limit: row.get::<_, i64>(2)? as u16,
                     password_required: row.get(3)?,
-                    line: row.get::<_, Option<i64>>(4)?.map(|id| LineId(id as u32)),
+                    channel: row.get::<_, Option<i64>>(4)?.map(|id| ChannelId(id as u32)),
                 })
             })?
             .filter_map(Result::ok)
@@ -81,19 +81,19 @@ impl<'a> Channels<'a> {
         Ok(rows)
     }
 
-    /// Every Line, in the order a shell should draw them.
+    /// Every Channel, in the order a shell should draw them.
     ///
     /// # Errors
     ///
     /// Fails on a database error.
-    pub fn lines(&self) -> Result<Vec<LineInfo>> {
+    pub fn channels(&self) -> Result<Vec<ChannelInfo>> {
         let mut statement = self
             .connection
-            .prepare("SELECT id, name FROM lines ORDER BY position, id")?;
+            .prepare("SELECT id, name FROM channels ORDER BY position, id")?;
         let rows = statement
             .query_map([], |row| {
-                Ok(LineInfo {
-                    id: LineId(row.get::<_, i64>(0)? as u32),
+                Ok(ChannelInfo {
+                    id: ChannelId(row.get::<_, i64>(0)? as u32),
                     name: row.get(1)?,
                 })
             })?
@@ -104,32 +104,32 @@ impl<'a> Channels<'a> {
 
     /// Makes a voice room, and returns it as the wire will carry it.
     ///
-    /// `line` binds a text channel to the room. It is checked against the
-    /// `lines` table rather than trusted: SQLite enforces the foreign key, but
+    /// `channel` binds a text channel to the room. It is checked against the
+    /// `channels` table rather than trusted: SQLite enforces the foreign key, but
     /// the error it raises is a database error rather than something a caller
     /// can tell apart from the disk being full, and the difference matters to
     /// the person who mistyped a number.
     ///
     /// # Errors
     ///
-    /// Returns [`NoSuchChannel`] if `line` names a Line that is not there, or a
+    /// Returns [`NoSuchChannel`] if `channel` names a Channel that is not there, or a
     /// database error.
-    pub fn create_voice_room(&self, name: &str, limit: u16, line: Option<LineId>) -> Result<VoiceRoomInfo> {
+    pub fn create_voice_room(&self, name: &str, limit: u16, channel: Option<ChannelId>) -> Result<VoiceRoomInfo> {
         let name = name.trim();
-        if let Some(line) = line {
-            if !self.line_exists(line)? {
+        if let Some(channel) = channel {
+            if !self.channel_exists(channel)? {
                 return Err(NoSuchChannel.into());
             }
         }
 
         self.connection
             .execute(
-                "INSERT INTO voice_rooms (name, member_limit, line_id, position)
+                "INSERT INTO voice_rooms (name, member_limit, channel_id, position)
                  VALUES (?1, ?2, ?3, (SELECT COALESCE(MAX(position), 0) + 1 FROM voice_rooms))",
                 params![
                     name,
                     i64::from(limit),
-                    line.map(|line| i64::from(line.get()))
+                    channel.map(|channel| i64::from(channel.get()))
                 ],
             )
             .context("could not create the voice room")?;
@@ -143,27 +143,27 @@ impl<'a> Channels<'a> {
             // it, which is a separate decision taken later, with
             // `admissao::definir_senha_voice_room`.
             password_required: false,
-            line,
+            channel,
         })
     }
 
-    /// Makes a Line, and returns it as the wire will carry it.
+    /// Makes a Channel, and returns it as the wire will carry it.
     ///
     /// # Errors
     ///
     /// Fails on a database error.
-    pub fn create_line(&self, name: &str) -> Result<LineInfo> {
+    pub fn create_channel(&self, name: &str) -> Result<ChannelInfo> {
         let name = name.trim();
         self.connection
             .execute(
-                "INSERT INTO lines (name, position)
-                 VALUES (?1, (SELECT COALESCE(MAX(position), 0) + 1 FROM lines))",
+                "INSERT INTO channels (name, position)
+                 VALUES (?1, (SELECT COALESCE(MAX(position), 0) + 1 FROM channels))",
                 params![name],
             )
-            .context("could not create the Line")?;
+            .context("could not create the Channel")?;
 
-        Ok(LineInfo {
-            id: LineId(self.connection.last_insert_rowid() as u32),
+        Ok(ChannelInfo {
+            id: ChannelId(self.connection.last_insert_rowid() as u32),
             name: name.to_owned(),
         })
     }
@@ -185,16 +185,16 @@ impl<'a> Channels<'a> {
         Ok(name.to_owned())
     }
 
-    /// Renames a Line. Returns the trimmed name that was stored.
+    /// Renames a Channel. Returns the trimmed name that was stored.
     ///
     /// # Errors
     ///
-    /// Returns [`NoSuchChannel`] if there is no such Line, or a database error.
-    pub fn rename_line(&self, line: LineId, name: &str) -> Result<String> {
+    /// Returns [`NoSuchChannel`] if there is no such Channel, or a database error.
+    pub fn rename_channel(&self, channel: ChannelId, name: &str) -> Result<String> {
         let name = name.trim();
         let changed = self.connection.execute(
-            "UPDATE lines SET name = ?1 WHERE id = ?2",
-            params![name, i64::from(line.get())],
+            "UPDATE channels SET name = ?1 WHERE id = ?2",
+            params![name, i64::from(channel.get())],
         )?;
         if changed == 0 {
             return Err(NoSuchChannel.into());
@@ -202,13 +202,13 @@ impl<'a> Channels<'a> {
         Ok(name.to_owned())
     }
 
-    /// What destroying a Line would cost, counted now.
+    /// What destroying a Channel would cost, counted now.
     ///
     /// The three numbers the confirmation in the app is built out of, and they
     /// are read here rather than estimated anywhere else: a client holds one
-    /// page of history and would guess low by the whole of the Line's past.
+    /// page of history and would guess low by the whole of the Channel's past.
     ///
-    /// Messages already taken off the Line by `remover_mensagem` are left out.
+    /// Messages already taken off the Channel by `remover_mensagem` are left out.
     /// [`super::messages::Messages::remove`] is soft — it clears the body and
     /// stamps `deleted_at`, and `history` filters those rows out — so they are
     /// gone from every screen already. Counting them would inflate what the
@@ -217,19 +217,19 @@ impl<'a> Channels<'a> {
     ///
     /// # Errors
     ///
-    /// Returns [`NoSuchChannel`] if there is no such Line, or a database error.
-    pub fn weigh_line(&self, line: LineId) -> Result<LineWeight> {
-        if !self.line_exists(line)? {
+    /// Returns [`NoSuchChannel`] if there is no such Channel, or a database error.
+    pub fn weigh_channel(&self, channel: ChannelId) -> Result<ChannelWeight> {
+        if !self.channel_exists(channel)? {
             return Err(NoSuchChannel.into());
         }
         // One statement for the three numbers, and not three. Two of them would
-        // be counted a moment apart otherwise, and a Line being written to
+        // be counted a moment apart otherwise, and a Channel being written to
         // while somebody weighs it could answer "1.847 messages by 7 people"
         // with the seventh person's only message in neither count.
         let (messages, authors, oldest) = self.connection.query_row(
             "SELECT COUNT(*), COUNT(DISTINCT author_id), MIN(created_at)
-             FROM messages WHERE line_id = ?1 AND deleted_at IS NULL",
-            params![i64::from(line.get())],
+             FROM messages WHERE channel_id = ?1 AND deleted_at IS NULL",
+            params![i64::from(channel.get())],
             |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
@@ -238,7 +238,7 @@ impl<'a> Channels<'a> {
                 ))
             },
         )?;
-        Ok(LineWeight {
+        Ok(ChannelWeight {
             messages: messages.max(0) as u32,
             authors: authors.max(0) as u32,
             oldest_at_seconds: oldest,
@@ -259,11 +259,11 @@ impl<'a> Channels<'a> {
     /// Refused by name rather than by foreign key, so the shell can say why
     /// instead of showing the sentence it shows when the disk is full.
     ///
-    /// # The Line bound to it survives
+    /// # The Channel bound to it survives
     ///
-    /// `specs/04-servidor-seele.md` makes voice_rooms and Lines independent and the
+    /// `specs/04-servidor-seele.md` makes voice_rooms and Channels independent and the
     /// association optional. Destroying a voice room says nothing about the
-    /// writing that happened to hang off it, and taking the Line down with it
+    /// writing that happened to hang off it, and taking the Channel down with it
     /// would destroy history through a verb whose confirmation never mentioned
     /// any.
     ///
@@ -291,11 +291,11 @@ impl<'a> Channels<'a> {
         Ok(())
     }
 
-    /// Destroys a Line, and everything written in it.
+    /// Destroys a Channel, and everything written in it.
     ///
     /// Really destroys it. `remover_mensagem` is soft — it keeps the row so
     /// replies do not dangle and an operator can still answer "what was removed
-    /// and by whom" — and this is the verb that takes the Line those rows hang
+    /// and by whom" — and this is the verb that takes the Channel those rows hang
     /// from, so there is nothing left for either purpose to be about. The
     /// confirmation in front of it says so in the same words.
     ///
@@ -304,25 +304,25 @@ impl<'a> Channels<'a> {
     /// The messages go by `ON DELETE CASCADE`, which migration 1 already
     /// declares. The other two are the ones a cascade cannot do:
     ///
-    /// - a voice room bound to this Line keeps existing and loses the binding.
-    ///   `voice_rooms.line_id` has no `ON DELETE` clause, so without this the delete
+    /// - a voice room bound to this Channel keeps existing and loses the binding.
+    ///   `voice_rooms.channel_id` has no `ON DELETE` clause, so without this the delete
     ///   fails on the foreign key and reaches the shell as a database error —
-    ///   "could not destroy it", about a Line whose only sin is being useful to
+    ///   "could not destroy it", about a Channel whose only sin is being useful to
     ///   a room.
-    /// - a reply **from another Line** pointing at a message in this one is
+    /// - a reply **from another Channel** pointing at a message in this one is
     ///   unhooked first. `messages.replies_to` references `messages(id)` with
-    ///   no `ON DELETE` either, so one cross-Line reply is enough to make the
+    ///   no `ON DELETE` either, so one cross-Channel reply is enough to make the
     ///   cascade fail — and nothing stops a client sending one.
     ///
-    /// One transaction because a Line half destroyed is worse than one not
+    /// One transaction because a Channel half destroyed is worse than one not
     /// destroyed at all: rooms pointing at nothing, replies pointing at
     /// nothing, and a confirmation that already promised it was over.
     ///
     /// # Errors
     ///
-    /// Returns [`NoSuchChannel`] if there is no such Line, or a database error.
-    pub fn delete_line(&self, line: LineId) -> Result<()> {
-        let id = i64::from(line.get());
+    /// Returns [`NoSuchChannel`] if there is no such Channel, or a database error.
+    pub fn delete_channel(&self, channel: ChannelId) -> Result<()> {
+        let id = i64::from(channel.get());
         // `unchecked_transaction` because [`Channels`] borrows the connection
         // immutably, like every other method here. The nesting it does not
         // check for cannot happen: PERSISTENCE is one connection behind one mutex,
@@ -331,37 +331,37 @@ impl<'a> Channels<'a> {
         let transaction = self.connection.unchecked_transaction()?;
         transaction.execute(
             "UPDATE messages SET replies_to = NULL
-             WHERE replies_to IN (SELECT id FROM messages WHERE line_id = ?1)",
+             WHERE replies_to IN (SELECT id FROM messages WHERE channel_id = ?1)",
             params![id],
         )?;
         transaction.execute(
-            "UPDATE voice_rooms SET line_id = NULL WHERE line_id = ?1",
+            "UPDATE voice_rooms SET channel_id = NULL WHERE channel_id = ?1",
             params![id],
         )?;
-        let changed = transaction.execute("DELETE FROM lines WHERE id = ?1", params![id])?;
+        let changed = transaction.execute("DELETE FROM channels WHERE id = ?1", params![id])?;
         if changed == 0 {
             return Err(NoSuchChannel.into());
         }
-        transaction.commit().context("could not destroy the Line")?;
+        transaction.commit().context("could not destroy the Channel")?;
         Ok(())
     }
 
-    fn line_exists(&self, line: LineId) -> Result<bool> {
+    fn channel_exists(&self, channel: ChannelId) -> Result<bool> {
         let count: i64 = self.connection.query_row(
-            "SELECT COUNT(*) FROM lines WHERE id = ?1",
-            params![i64::from(line.get())],
+            "SELECT COUNT(*) FROM channels WHERE id = ?1",
+            params![i64::from(channel.get())],
             |row| row.get(0),
         )?;
         Ok(count > 0)
     }
 }
 
-/// The voice room or Line named does not exist.
+/// The voice room or Channel named does not exist.
 ///
 /// Enumerated rather than a sentence, like every other refusal that can reach a
 /// client: the shell decides how to say it. `specs/02-protocolo.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("no such voice room or Line")]
+#[error("no such voice room or Channel")]
 pub struct NoSuchChannel;
 
 /// The voice room named is the only one this server has.
@@ -374,15 +374,15 @@ pub struct NoSuchChannel;
 #[error("this is the only voice room in the server")]
 pub struct LastVoiceRoom;
 
-/// What a Line holds, as the confirmation in front of destroying it needs it.
+/// What a Channel holds, as the confirmation in front of destroying it needs it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LineWeight {
+pub struct ChannelWeight {
     /// How many messages are in it that anybody can read.
     pub messages: u32,
     /// How many distinct people wrote them.
     pub authors: u32,
     /// When the oldest was written, in seconds since the Unix epoch. `None`
-    /// when the Line is empty.
+    /// when the Channel is empty.
     pub oldest_at_seconds: Option<i64>,
 }
 
@@ -402,16 +402,16 @@ mod tests {
         let persistence = store();
         let channels = Channels::new(&persistence);
         assert!(channels.voice_rooms().unwrap().is_empty());
-        assert!(channels.lines().unwrap().is_empty());
+        assert!(channels.channels().unwrap().is_empty());
     }
 
     #[test]
     fn a_created_voice_room_reads_back_the_way_it_was_asked_for() {
         let persistence = store();
         let channels = Channels::new(&persistence);
-        let line = channels.create_line("geral").unwrap();
+        let channel = channels.create_channel("geral").unwrap();
         let voice_room = channels
-            .create_voice_room("VOICE_ROOM-01 CENTRAL", 15, Some(line.id))
+            .create_voice_room("VOICE_ROOM-01 CENTRAL", 15, Some(channel.id))
             .unwrap();
 
         // What the creator is told, and what everybody else will read out of the
@@ -419,7 +419,7 @@ mod tests {
         // is not the room that exists.
         assert_eq!(channels.voice_rooms().unwrap(), vec![voice_room.clone()]);
         assert_eq!(voice_room.limit, 15);
-        assert_eq!(voice_room.line, Some(line.id));
+        assert_eq!(voice_room.channel, Some(channel.id));
         assert!(!voice_room.password_required);
     }
 
@@ -431,13 +431,13 @@ mod tests {
         let persistence = store();
         let channels = Channels::new(&persistence);
         for name in ["geral", "avisos", "planejamento"] {
-            channels.create_line(name).unwrap();
+            channels.create_channel(name).unwrap();
         }
         let names: Vec<String> = channels
-            .lines()
+            .channels()
             .unwrap()
             .into_iter()
-            .map(|line| line.name)
+            .map(|channel| channel.name)
             .collect();
         assert_eq!(names, ["geral", "avisos", "planejamento"]);
     }
@@ -449,7 +449,7 @@ mod tests {
         // person who mistyped a number.
         let persistence = store();
         let channels = Channels::new(&persistence);
-        let refused = channels.create_voice_room("VOICE_ROOM-02", 8, Some(LineId(404)));
+        let refused = channels.create_voice_room("VOICE_ROOM-02", 8, Some(ChannelId(404)));
         assert!(refused
             .unwrap_err()
             .downcast_ref::<NoSuchChannel>()
@@ -470,7 +470,7 @@ mod tests {
             .downcast_ref::<NoSuchChannel>()
             .is_some());
         assert!(channels
-            .rename_line(LineId(404), "fantasma")
+            .rename_channel(ChannelId(404), "fantasma")
             .unwrap_err()
             .downcast_ref::<NoSuchChannel>()
             .is_some());
@@ -482,16 +482,16 @@ mod tests {
         // everybody watching, like the room was destroyed and a new one made.
         let persistence = store();
         let channels = Channels::new(&persistence);
-        channels.create_line("geral").unwrap();
-        let segunda = channels.create_line("avisos").unwrap();
+        channels.create_channel("geral").unwrap();
+        let segunda = channels.create_channel("avisos").unwrap();
 
         assert_eq!(
-            channels.rename_line(segunda.id, "recados").unwrap(),
+            channels.rename_channel(segunda.id, "recados").unwrap(),
             "recados"
         );
-        let lines = channels.lines().unwrap();
-        assert_eq!(lines[1].id, segunda.id);
-        assert_eq!(lines[1].name, "recados");
+        let channels = channels.channels().unwrap();
+        assert_eq!(channels[1].id, segunda.id);
+        assert_eq!(channels[1].name, "recados");
     }
 
     // ---- unmaking a room ----
@@ -508,13 +508,13 @@ mod tests {
         persistence.connection().last_insert_rowid()
     }
 
-    fn say(persistence: &Persistence, line: LineId, author: i64, body: &str, at: i64) -> i64 {
+    fn say(persistence: &Persistence, channel: ChannelId, author: i64, body: &str, at: i64) -> i64 {
         persistence
             .connection()
             .execute(
-                "INSERT INTO messages (line_id, author_id, body, created_at)
+                "INSERT INTO messages (channel_id, author_id, body, created_at)
                  VALUES (?1, ?2, ?3, ?4)",
-                params![i64::from(line.get()), author, body, at],
+                params![i64::from(channel.get()), author, body, at],
             )
             .unwrap();
         persistence.connection().last_insert_rowid()
@@ -526,20 +526,20 @@ mod tests {
         // messages, and the oldest one is the date the sentence gives.
         let persistence = store();
         let channels = Channels::new(&persistence);
-        let line = channels.create_line("sync-geral").unwrap();
-        let outra = channels.create_line("avisos").unwrap();
+        let channel = channels.create_channel("sync-geral").unwrap();
+        let outra = channels.create_channel("avisos").unwrap();
 
         let rei = person(&persistence, "rei", 1);
         let shinji = person(&persistence, "shinji", 2);
         let asuka = person(&persistence, "asuka", 3);
-        say(&persistence, line.id, rei, "primeira", 1_678_600_000);
-        say(&persistence, line.id, rei, "segunda", 1_678_600_060);
-        say(&persistence, line.id, shinji, "terceira", 1_678_600_120);
-        say(&persistence, line.id, asuka, "quarta", 1_678_600_180);
+        say(&persistence, channel.id, rei, "primeira", 1_678_600_000);
+        say(&persistence, channel.id, rei, "segunda", 1_678_600_060);
+        say(&persistence, channel.id, shinji, "terceira", 1_678_600_120);
+        say(&persistence, channel.id, asuka, "quarta", 1_678_600_180);
         // Noutra Linha, e portanto em nenhuma destas contas.
         say(&persistence, outra.id, asuka, "noutra sala", 1_600_000_000);
 
-        let peso = channels.weigh_line(line.id).unwrap();
+        let peso = channels.weigh_channel(channel.id).unwrap();
         assert_eq!(peso.messages, 4);
         assert_eq!(peso.authors, 3);
         assert_eq!(peso.oldest_at_seconds, Some(1_678_600_000));
@@ -553,10 +553,10 @@ mod tests {
         // about to destroy writing that nobody can read.
         let persistence = store();
         let channels = Channels::new(&persistence);
-        let line = channels.create_line("geral").unwrap();
+        let channel = channels.create_channel("geral").unwrap();
         let rei = person(&persistence, "rei", 1);
-        say(&persistence, line.id, rei, "fica", 100);
-        let removida = say(&persistence, line.id, rei, "removida", 50);
+        say(&persistence, channel.id, rei, "fica", 100);
+        let removida = say(&persistence, channel.id, rei, "removida", 50);
         persistence
             .connection()
             .execute(
@@ -565,7 +565,7 @@ mod tests {
             )
             .unwrap();
 
-        let peso = channels.weigh_line(line.id).unwrap();
+        let peso = channels.weigh_channel(channel.id).unwrap();
         assert_eq!(peso.messages, 1);
         assert_eq!(peso.authors, 1);
         // E a data é a da mais antiga que ainda dá para ler, não a da removida.
@@ -578,8 +578,8 @@ mod tests {
         // no "written since" when nobody wrote.
         let persistence = store();
         let channels = Channels::new(&persistence);
-        let line = channels.create_line("nova").unwrap();
-        let peso = channels.weigh_line(line.id).unwrap();
+        let channel = channels.create_channel("nova").unwrap();
+        let peso = channels.weigh_channel(channel.id).unwrap();
         assert_eq!(peso.messages, 0);
         assert_eq!(peso.authors, 0);
         assert_eq!(peso.oldest_at_seconds, None);
@@ -589,7 +589,7 @@ mod tests {
     fn weighing_something_that_is_not_there_says_so() {
         let persistence = store();
         assert!(Channels::new(&persistence)
-            .weigh_line(LineId(404))
+            .weigh_channel(ChannelId(404))
             .unwrap_err()
             .downcast_ref::<NoSuchChannel>()
             .is_some());
@@ -602,66 +602,66 @@ mod tests {
         // make the confirmation's last sentence false.
         let persistence = store();
         let channels = Channels::new(&persistence);
-        let line = channels.create_line("geral").unwrap();
+        let channel = channels.create_channel("geral").unwrap();
         let rei = person(&persistence, "rei", 1);
-        say(&persistence, line.id, rei, "some junto", 100);
+        say(&persistence, channel.id, rei, "some junto", 100);
 
-        channels.delete_line(line.id).unwrap();
-        assert!(channels.lines().unwrap().is_empty());
+        channels.delete_channel(channel.id).unwrap();
+        assert!(channels.channels().unwrap().is_empty());
         let left: i64 = persistence
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM messages WHERE line_id = ?1",
-                params![i64::from(line.id.get())],
+                "SELECT COUNT(*) FROM messages WHERE channel_id = ?1",
+                params![i64::from(channel.id.get())],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(left, 0, "the Line went and its messages stayed");
+        assert_eq!(left, 0, "the Channel went and its messages stayed");
     }
 
     #[test]
     fn a_voice_room_bound_to_a_destroyed_line_keeps_existing_without_it() {
         // `specs/04-servidor-seele.md` makes the association optional, so the
-        // room outlives the Line it pointed at. Without the unbinding, the
+        // room outlives the Channel it pointed at. Without the unbinding, the
         // foreign key refuses the delete and the shell shows the sentence it
         // shows when the disk is full.
         let persistence = store();
         let channels = Channels::new(&persistence);
-        let line = channels.create_line("geral").unwrap();
-        let voice_room = channels.create_voice_room("VOICE_ROOM-01", 8, Some(line.id)).unwrap();
+        let channel = channels.create_channel("geral").unwrap();
+        let voice_room = channels.create_voice_room("VOICE_ROOM-01", 8, Some(channel.id)).unwrap();
 
-        channels.delete_line(line.id).unwrap();
+        channels.delete_channel(channel.id).unwrap();
         let voice_rooms = channels.voice_rooms().unwrap();
-        assert_eq!(voice_rooms.len(), 1, "the voice room went with the Line");
+        assert_eq!(voice_rooms.len(), 1, "the voice room went with the Channel");
         assert_eq!(voice_rooms[0].id, voice_room.id);
-        assert_eq!(voice_rooms[0].line, None);
+        assert_eq!(voice_rooms[0].channel, None);
     }
 
     #[test]
     fn a_reply_from_another_line_does_not_block_the_destruction() {
-        // `messages.replies_to` has no `ON DELETE`, so one cross-Line reply is
+        // `messages.replies_to` has no `ON DELETE`, so one cross-Channel reply is
         // enough to make the cascade fail — and nothing on the wire stops a
         // client sending one. Found here rather than in front of somebody.
         let persistence = store();
         let channels = Channels::new(&persistence);
-        let condenada = channels.create_line("condenada").unwrap();
-        let outra = channels.create_line("outra").unwrap();
+        let condenada = channels.create_channel("condenada").unwrap();
+        let outra = channels.create_channel("outra").unwrap();
         let rei = person(&persistence, "rei", 1);
         let alvo = say(&persistence, condenada.id, rei, "original", 100);
         persistence
             .connection()
             .execute(
-                "INSERT INTO messages (line_id, author_id, body, created_at, replies_to)
+                "INSERT INTO messages (channel_id, author_id, body, created_at, replies_to)
                  VALUES (?1, ?2, 'resposta', 200, ?3)",
                 params![i64::from(outra.id.get()), rei, alvo],
             )
             .unwrap();
 
-        channels.delete_line(condenada.id).unwrap();
+        channels.delete_channel(condenada.id).unwrap();
         let pendurada: Option<i64> = persistence
             .connection()
             .query_row(
-                "SELECT replies_to FROM messages WHERE line_id = ?1",
+                "SELECT replies_to FROM messages WHERE channel_id = ?1",
                 params![i64::from(outra.id.get())],
                 |row| row.get(0),
             )
@@ -696,21 +696,21 @@ mod tests {
 
     #[test]
     fn destroying_a_voice_room_leaves_the_line_it_was_bound_to_alone() {
-        // The other half of "voice_rooms and Lines are independent". A voice room
+        // The other half of "voice_rooms and Channels are independent". A voice room
         // going away is no statement about the writing hanging off it, and
-        // taking the Line with it would destroy history through a verb whose
+        // taking the Channel with it would destroy history through a verb whose
         // confirmation never mentioned any.
         let persistence = store();
         let channels = Channels::new(&persistence);
-        let line = channels.create_line("geral").unwrap();
-        let voice_room = channels.create_voice_room("VOICE_ROOM-01", 8, Some(line.id)).unwrap();
+        let channel = channels.create_channel("geral").unwrap();
+        let voice_room = channels.create_voice_room("VOICE_ROOM-01", 8, Some(channel.id)).unwrap();
         channels.create_voice_room("VOICE_ROOM-02", 8, None).unwrap();
         let rei = person(&persistence, "rei", 1);
-        say(&persistence, line.id, rei, "sobrevive", 100);
+        say(&persistence, channel.id, rei, "sobrevive", 100);
 
         channels.delete_voice_room(voice_room.id).unwrap();
-        assert_eq!(channels.weigh_line(line.id).unwrap().messages, 1);
-        assert_eq!(channels.lines().unwrap(), vec![line]);
+        assert_eq!(channels.weigh_channel(channel.id).unwrap().messages, 1);
+        assert_eq!(channels.channels().unwrap(), vec![channel]);
     }
 
     #[test]
@@ -725,7 +725,7 @@ mod tests {
             .downcast_ref::<NoSuchChannel>()
             .is_some());
         assert!(channels
-            .delete_line(LineId(404))
+            .delete_channel(ChannelId(404))
             .unwrap_err()
             .downcast_ref::<NoSuchChannel>()
             .is_some());
@@ -738,9 +738,9 @@ mod tests {
         // nobody can see and everybody trips over.
         let persistence = store();
         let channels = Channels::new(&persistence);
-        let line = channels.create_line("  geral \n").unwrap();
-        assert_eq!(line.name, "geral");
-        assert_eq!(channels.lines().unwrap()[0].name, "geral");
+        let channel = channels.create_channel("  geral \n").unwrap();
+        assert_eq!(channel.name, "geral");
+        assert_eq!(channels.channels().unwrap()[0].name, "geral");
 
         let voice_room = channels.create_voice_room("\tVOICE_ROOM-01  ", 4, None).unwrap();
         assert_eq!(voice_room.name, "VOICE_ROOM-01");

@@ -29,7 +29,7 @@
 #![allow(
     clippy::print_stdout,
     clippy::print_stderr,
-    reason = "a command-line tool"
+    reason = "a command-channel tool"
 )]
 
 use std::time::{Duration, Instant};

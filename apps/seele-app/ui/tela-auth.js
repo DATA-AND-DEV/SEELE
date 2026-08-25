@@ -276,7 +276,7 @@ function dizerSeOConviteJaConferiu(veredito) {
 function desenharServerDaEntrada(snapshot) {
   $("auth-server-nome").textContent = snapshot?.server || AUSENTE;
   $("auth-voice_rooms").textContent = doisDigitos(snapshot?.voice_rooms?.length);
-  $("auth-linhas").textContent = doisDigitos(snapshot?.lines?.length);
+  $("auth-linhas").textContent = doisDigitos(snapshot?.channels?.length);
 }
 
 /** `03`, como o comp escreve — e `——` quando não há lista para contar. */
@@ -403,8 +403,8 @@ function tomDoPadrao(snapshot) {
 async function inserirPlug() {
   try {
     const snapshot = aperto?.snapshot;
-    if (snapshot?.lines?.length > 0) {
-      await invoke("open_line", { line: snapshot.lines[0].id });
+    if (snapshot?.channels?.length > 0) {
+      await invoke("open_channel", { channel: snapshot.channels[0].id });
     }
 
     $("tela-auth").hidden = true;

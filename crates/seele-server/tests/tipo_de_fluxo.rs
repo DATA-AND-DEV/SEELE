@@ -36,7 +36,7 @@ use anyhow::Result;
 use ed25519_dalek::{Signer, SigningKey};
 use seele_proto::attachment::AttachmentHeader;
 use seele_proto::control::{AttachmentRefusal, ClientMessage, ServerMessage};
-use seele_proto::ids::{ClientMessageId, LineId};
+use seele_proto::ids::{ClientMessageId, ChannelId};
 use seele_proto::stream::{StreamType, RESERVED_TYPE};
 use seele_server::persistence::Location;
 use seele_server::{frame, ServerConfig, Daemon};
@@ -181,7 +181,7 @@ async fn abrir(endereco: SocketAddr, semente: u8) -> Result<Par> {
 /// O quadro de um cabeçalho de transferência: quatro bytes de tamanho e o corpo.
 fn cabecalho_de_anexo(chave: u64) -> Vec<u8> {
     let header = AttachmentHeader {
-        line: LineId(1),
+        channel: ChannelId(1),
         client_message_id: ClientMessageId(chave),
         body: String::new(),
         replies_to: None,

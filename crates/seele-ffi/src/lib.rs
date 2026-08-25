@@ -43,14 +43,14 @@ use std::time::{Duration, Instant};
 
 use seele_core::enlace::Enlace;
 use seele_core::{
-    identity, VoiceRoomId, ClientMessageId, FilePinStore, LineId, MediaChannel, MessageId, PersonId,
+    identity, VoiceRoomId, ClientMessageId, FilePinStore, ChannelId, MediaChannel, MessageId, PersonId,
     Room, Ssrc, SyncBand, SyncInputs, SyncRatio, Voice,
 };
 
 pub use types::{
     PermissaoDeMicrofone,
     Attachment, AttachmentRefusal, VoiceRoom, VoiceRoomSync, CaptureDevice, EndReason, Event, FonteDeTela,
-    LimitesDeTela, Line, LineWeight, LinkState, Message, Notice, NoticeReason, Pattern,
+    LimitesDeTela, Channel, ChannelWeight, LinkState, Message, Notice, NoticeReason, Pattern,
     PermissaoDeTela, Person, PlaybackDevice, PlugError, Preview, PreviewRefusal, PreviewRules,
     Severity, Snapshot, SyncBand as Band, TelaEmCurso, Telemetry, Transfer, Trust, VoiceMode,
 };
@@ -155,7 +155,7 @@ pub fn impressao_desta_maquina(home: &str) -> Result<String, PlugError> {
 /// How often measurements are refreshed.
 const TICK: Duration = Duration::from_millis(250);
 
-/// How many messages of history to ask for when a Line opens.
+/// How many messages of history to ask for when a Channel opens.
 const HISTORY_PAGE: u16 = 50;
 
 /// What a shell needs to connect.
@@ -503,9 +503,9 @@ pub trait EventListener: Send + Sync {
 enum Command {
     InsertPlug(VoiceRoomId),
     EjectPlug,
-    OpenLine(LineId),
+    OpenChannel(ChannelId),
     Send {
-        line: LineId,
+        channel: ChannelId,
         body: String,
     },
     SetAtField(bool),
@@ -513,17 +513,17 @@ enum Command {
     CreateVoiceRoom {
         name: String,
         limit: u16,
-        line: Option<LineId>,
+        channel: Option<ChannelId>,
     },
-    CreateLine {
+    CreateChannel {
         name: String,
     },
     RenameVoiceRoom {
         voice_room: VoiceRoomId,
         name: String,
     },
-    RenameLine {
-        line: LineId,
+    RenameChannel {
+        channel: ChannelId,
         name: String,
     },
     RenameServer {
@@ -550,8 +550,8 @@ enum Command {
     DeleteVoiceRoom {
         voice_room: VoiceRoomId,
     },
-    DeleteLine {
-        line: LineId,
+    DeleteChannel {
+        channel: ChannelId,
     },
     /// The one command that carries somewhere to answer.
     ///
@@ -559,9 +559,9 @@ enum Command {
     /// confirmed at all — by the server announcing it to everybody. This is a
     /// question, and its answer is only useful to the caller who asked, while
     /// the box it fills is still open.
-    WeighLine {
-        line: LineId,
-        answer: tokio::sync::oneshot::Sender<LineWeight>,
+    WeighChannel {
+        channel: ChannelId,
+        answer: tokio::sync::oneshot::Sender<ChannelWeight>,
     },
     /// A file, on a stream of its own. ADR 0027.
     ///
@@ -576,7 +576,7 @@ enum Command {
     /// A picture to look at, and where to put the verdict. ADR 0027.
     ///
     /// The second command here that carries somewhere to answer, and the same
-    /// argument as [`Command::WeighLine`]: the answer is only useful to the
+    /// argument as [`Command::WeighChannel`]: the answer is only useful to the
     /// caller who asked, while the box it fills is still open.
     PreviewAttachment {
         attachment: seele_core::AttachmentId,
@@ -704,7 +704,7 @@ struct Shared {
     /// mesmo tempo não acontecem numa janela só, e se acontecessem um mapa
     /// atenderia uma e deixaria a outra esperando para sempre. Aqui as duas
     /// recebem a mesma resposta.
-    pending_weights: Mutex<Vec<(LineId, tokio::sync::oneshot::Sender<LineWeight>)>>,
+    pending_weights: Mutex<Vec<(ChannelId, tokio::sync::oneshot::Sender<ChannelWeight>)>>,
     /// Os limites que esta sessão pediu para a transmissão de tela dela.
     ///
     /// **Mora aqui porque a janela não sobrevive à transmissão.** O §5 manda
@@ -739,10 +739,10 @@ impl Shared {
     /// Says the conversation moved: bumps the revision, then notifies.
     ///
     /// One call and not two, because the two must never happen apart. They did:
-    /// `Command::OpenLine` clears the room's messages and emitted the event
+    /// `Command::OpenChannel` clears the room's messages and emitted the event
     /// **without** bumping the revision, so a shell that refetches only when the
     /// number moves — which is the whole point of the number — swallowed it.
-    /// Switching Line kept the previous Line's conversation on screen until
+    /// Switching Channel kept the previous Channel's conversation on screen until
     /// somebody said something.
     ///
     /// That was a regression of the fix that stopped the snapshot carrying the
@@ -890,16 +890,16 @@ impl Shared {
             .collect()
     }
 
-    fn answer_weight(&self, weight: LineWeight) {
+    fn answer_weight(&self, weight: ChannelWeight) {
         let Ok(mut pending) = self.pending_weights.lock() else {
             return;
         };
         let mut esperando = Vec::new();
-        for (line, answer) in pending.drain(..) {
-            if line.get() == weight.line {
+        for (channel, answer) in pending.drain(..) {
+            if channel.get() == weight.channel {
                 let _ = answer.send(weight);
             } else {
-                esperando.push((line, answer));
+                esperando.push((channel, answer));
             }
         }
         *pending = esperando;
@@ -1107,19 +1107,19 @@ impl Plug {
         self.command(Command::EjectPlug)
     }
 
-    /// Opens a Line and asks for the page of history behind it.
+    /// Opens a Channel and asks for the page of history behind it.
     ///
     /// # Errors
     ///
     /// [`PlugError::NotConnected`] once the session is over.
-    pub fn open_line(&self, line: u32) -> Result<(), PlugError> {
-        self.command(Command::OpenLine(LineId(line)))
+    pub fn open_channel(&self, channel: u32) -> Result<(), PlugError> {
+        self.command(Command::OpenChannel(ChannelId(channel)))
     }
 
     /// Sends a file, on a stream of its own. ADR 0027.
     ///
     /// Asks, and does not wait: the bar comes back as
-    /// [`Event::TransferChanged`], and the message appears on the Line only
+    /// [`Event::TransferChanged`], and the message appears on the Channel only
     /// once the bytes have arrived whole. While it is going up, the only person
     /// who can see it is the sender — the cost ADR 0027 takes on purpose, so
     /// that "not arrived yet" and "expired" are never two similar absences on
@@ -1132,7 +1132,7 @@ impl Plug {
     /// [`PlugError::NotConnected`] once the session is over.
     pub fn send_attachment(
         &self,
-        line: u32,
+        channel: u32,
         body: String,
         path: String,
         file_name: String,
@@ -1143,7 +1143,7 @@ impl Plug {
         // message has ever had to be known before it was sent.
         let id = next_client_message_id();
         self.command(Command::Attach(Box::new(seele_core::enlace::Anexo {
-            linha: LineId(line),
+            linha: ChannelId(channel),
             id: ClientMessageId(id),
             corpo: body,
             caminho: std::path::PathBuf::from(path),
@@ -1175,7 +1175,7 @@ impl Plug {
     ///
     /// **On a press, never on a scroll**, and that is a decision this call
     /// leaves no room to get wrong: it downloads. The file lives on the server,
-    /// so looking at it costs the host's uplink, and a Line that previewed
+    /// so looking at it costs the host's uplink, and a Channel that previewed
     /// everything as it scrolled would turn a 1 GiB disk ceiling into a 1 GiB
     /// transfer every time somebody opened it.
     ///
@@ -1223,17 +1223,17 @@ impl Plug {
         }
     }
 
-    /// Says something in a Line.
+    /// Says something in a Channel.
     ///
     /// # Errors
     ///
     /// [`PlugError::NotConnected`] once the session is over.
-    pub fn send_message(&self, line: u32, body: String) -> Result<(), PlugError> {
+    pub fn send_message(&self, channel: u32, body: String) -> Result<(), PlugError> {
         if body.trim().is_empty() {
             return Ok(());
         }
         self.command(Command::Send {
-            line: LineId(line),
+            channel: ChannelId(channel),
             body,
         })
     }
@@ -1248,7 +1248,7 @@ impl Plug {
     /// here would mean this method waiting on a round trip, which is the one
     /// thing every other command on this object promises not to do.
     ///
-    /// `line` binds a text channel to the room; `None` leaves it a voice room
+    /// `channel` binds a text channel to the room; `None` leaves it a voice room
     /// only, which `specs/04-servidor-seele.md` allows.
     ///
     /// The empty-name case returns `Ok` without sending anything, the same way
@@ -1264,7 +1264,7 @@ impl Plug {
         &self,
         name: String,
         limit: u16,
-        line: Option<u32>,
+        channel: Option<u32>,
     ) -> Result<(), PlugError> {
         if name.trim().is_empty() {
             return Ok(());
@@ -1272,20 +1272,20 @@ impl Plug {
         self.command(Command::CreateVoiceRoom {
             name,
             limit,
-            line: line.map(LineId),
+            channel: channel.map(ChannelId),
         })
     }
 
-    /// Asks the server to make a Line.
+    /// Asks the server to make a Channel.
     ///
     /// # Errors
     ///
     /// [`PlugError::NotConnected`] once the session is over.
-    pub fn create_line(&self, name: String) -> Result<(), PlugError> {
+    pub fn create_channel(&self, name: String) -> Result<(), PlugError> {
         if name.trim().is_empty() {
             return Ok(());
         }
-        self.command(Command::CreateLine { name })
+        self.command(Command::CreateChannel { name })
     }
 
     /// Asks the server to rename a voice room.
@@ -1303,17 +1303,17 @@ impl Plug {
         })
     }
 
-    /// Asks the server to rename a Line.
+    /// Asks the server to rename a Channel.
     ///
     /// # Errors
     ///
     /// [`PlugError::NotConnected`] once the session is over.
-    pub fn rename_line(&self, line: u32, name: String) -> Result<(), PlugError> {
+    pub fn rename_channel(&self, channel: u32, name: String) -> Result<(), PlugError> {
         if name.trim().is_empty() {
             return Ok(());
         }
-        self.command(Command::RenameLine {
-            line: LineId(line),
+        self.command(Command::RenameChannel {
+            channel: ChannelId(channel),
             name,
         })
     }
@@ -1449,7 +1449,7 @@ impl Plug {
         })
     }
 
-    /// Asks the server to take a message off its Line — `remover_mensagem`.
+    /// Asks the server to take a message off its Channel — `remover_mensagem`.
     ///
     /// It goes away for everybody, this client included, when the server says so.
     /// An author removing their own needs no permission, which is why a shell
@@ -1478,7 +1478,7 @@ impl Plug {
 
     /// Asks the server to destroy a voice room — `apagar_voice_room`.
     ///
-    /// Everybody inside is turned out of it and told; the Line bound to it, if
+    /// Everybody inside is turned out of it and told; the Channel bound to it, if
     /// there is one, is left alone. The server refuses the last voice room, and says so
     /// with [`NoticeReason::LastVoiceRoom`] rather than with the sentence it uses for
     /// a refused entry.
@@ -1496,30 +1496,30 @@ impl Plug {
         self.command(Command::DeleteVoiceRoom { voice_room: VoiceRoomId(voice_room) })
     }
 
-    /// Asks the server to destroy a Line, and everything written in it —
+    /// Asks the server to destroy a Channel, and everything written in it —
     /// `apagar_linha`.
     ///
     /// # Errors
     ///
     /// [`PlugError::NotConnected`] once the session is over.
-    pub fn delete_line(&self, line: u32) -> Result<(), PlugError> {
-        self.command(Command::DeleteLine { line: LineId(line) })
+    pub fn delete_channel(&self, channel: u32) -> Result<(), PlugError> {
+        self.command(Command::DeleteChannel { channel: ChannelId(channel) })
     }
 
-    /// Asks what destroying a Line would cost, and waits for the answer.
+    /// Asks what destroying a Channel would cost, and waits for the answer.
     ///
     /// The one call on this handle that waits, and the reason is the sentence it
     /// feeds: a confirmation promising to destroy 1.847 messages by 6 people
     /// written since a certain day has to have counted them, in the server's own
     /// database, at the moment of asking. This client holds one page of history
-    /// and would guess low by whatever the Line's whole past is — and a number
+    /// and would guess low by whatever the Channel's whole past is — and a number
     /// that is nearly right in that box is worse than no number at all.
     ///
     /// So the caller waits, and a shell that cannot get an answer must not open
     /// the box: there is no honest version of it without these three numbers.
     ///
     /// Destroys nothing, and needs no permission — the server answers about a
-    /// Line the asker may already read.
+    /// Channel the asker may already read.
     ///
     /// # Errors
     ///
@@ -1527,10 +1527,10 @@ impl Plug {
     /// ends while the question is in flight: the driver drops what it was going
     /// to answer with, and this returns rather than waiting for a server that is
     /// no longer there.
-    pub async fn weigh_line(&self, line: u32) -> Result<LineWeight, PlugError> {
+    pub async fn weigh_channel(&self, channel: u32) -> Result<ChannelWeight, PlugError> {
         let (answer, resposta) = tokio::sync::oneshot::channel();
-        self.command(Command::WeighLine {
-            line: LineId(line),
+        self.command(Command::WeighChannel {
+            channel: ChannelId(channel),
             answer,
         })?;
         resposta.await.map_err(|_| PlugError::NotConnected)
@@ -1925,7 +1925,7 @@ impl Plug {
         }
     }
 
-    /// The conversation in the open Line, oldest first.
+    /// The conversation in the open Channel, oldest first.
     ///
     /// Separate from [`Plug::snapshot`] because the two change at completely
     /// different rates. Telemetry moves on its own and wants reading twice a
@@ -1983,7 +1983,7 @@ impl Plug {
             nickname,
             voice_rooms: voice_rooms_of(&room),
             presentes: presentes_de(&room),
-            lines: lines_of(&room),
+            channels: lines_of(&room),
             messages_revision: self.shared.messages_revision.load(Ordering::Relaxed),
             telemetry: Telemetry {
                 rtt_ms,
@@ -2168,7 +2168,7 @@ fn voice_rooms_of(room: &Room) -> Vec<VoiceRoom> {
             limit: voice_room.limit,
             password_required: voice_room.password_required,
             occupied_by_us: room.current_voice_room == Some(voice_room.id),
-            line: voice_room.line.map(|line| line.0),
+            channel: voice_room.channel.map(|channel| channel.0),
             people: room
                 .roster(voice_room.id)
                 .map(|person| Person {
@@ -2190,13 +2190,13 @@ fn voice_rooms_of(room: &Room) -> Vec<VoiceRoom> {
         .collect()
 }
 
-fn lines_of(room: &Room) -> Vec<Line> {
-    room.lines
+fn lines_of(room: &Room) -> Vec<Channel> {
+    room.channels
         .iter()
-        .map(|line| Line {
-            id: line.id.0,
-            name: line.name.clone(),
-            open: room.current_line == Some(line.id),
+        .map(|channel| Channel {
+            id: channel.id.0,
+            name: channel.name.clone(),
+            open: room.current_channel == Some(channel.id),
         })
         .collect()
 }
@@ -2206,7 +2206,7 @@ fn messages_of(room: &Room) -> Vec<Message> {
         .iter()
         .map(|message| Message {
             id: message.id.0,
-            line: message.line.0,
+            channel: message.channel.0,
             author: message.author.0,
             author_nickname: message.author_nickname.clone(),
             at_seconds: message.at_seconds,
@@ -2787,11 +2787,11 @@ async fn drive(
                         // sala: ela vai para quem perguntou e não entra no
                         // `Room`. Antes do `fold` porque é onde ela para —
                         // `Room::apply` não tem arm que a guarde, de propósito.
-                        if let seele_core::ServerMessage::LineWeighed {
-                            line, messages, authors, oldest_at_seconds,
+                        if let seele_core::ServerMessage::ChannelWeighed {
+                            channel, messages, authors, oldest_at_seconds,
                         } = message.as_ref() {
-                            shared.answer_weight(LineWeight {
-                                line: line.get(),
+                            shared.answer_weight(ChannelWeight {
+                                channel: channel.get(),
                                 messages: *messages,
                                 authors: *authors,
                                 oldest_at_seconds: *oldest_at_seconds,
@@ -2922,7 +2922,7 @@ async fn drive(
         *media = None;
     }
     // Quem estava esperando o peso de uma Linha é acordado, e não deixado
-    // pendurado. Largar o remetente é o que faz `weigh_line` devolver
+    // pendurado. Largar o remetente é o que faz `weigh_channel` devolver
     // `NotConnected` em vez de esperar uma resposta que não vem mais — e o que
     // impede uma caixa de confirmação de ficar aberta e muda depois de a sessão
     // acabar debaixo dela.
@@ -3234,30 +3234,30 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             }
             shared.notify(&Event::RosterChanged);
         }
-        Command::OpenLine(line) => {
-            if client.abrir_linha(line).await.is_err() {
+        Command::OpenChannel(channel) => {
+            if client.abrir_linha(channel).await.is_err() {
                 return false;
             }
             if let Ok(mut room) = shared.room.lock() {
-                room.open_line(line);
+                room.open_channel(channel);
             }
             // The fetch is what makes "sem perda de histórico" true: a client
             // arriving late reads what was said instead of an empty room.
-            if client.historico(line, HISTORY_PAGE).await.is_err() {
+            if client.historico(channel, HISTORY_PAGE).await.is_err() {
                 return false;
             }
             // A Linha trocou, então a conversa trocou — mesmo que nenhuma
-            // mensagem nova tenha chegado. `Room::open_line` limpou a lista, e
+            // mensagem nova tenha chegado. `Room::open_channel` limpou a lista, e
             // sem isto a tela continuaria mostrando a conversa da Linha
             // anterior sob o nome da nova.
             shared.messages_changed();
         }
-        Command::Send { line, body } => {
+        Command::Send { channel, body } => {
             // specs/02-protocolo.md: idempotent by client_msg_id, so a resend
             // after a lost acknowledgement does not post twice.
             let id = ClientMessageId(next_client_message_id());
             if client
-                .dizer(line, body.trim().to_owned(), id)
+                .dizer(channel, body.trim().to_owned(), id)
                 .await
                 .is_err()
             {
@@ -3288,17 +3288,17 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             }
         }
         // Nothing is written into the local `Room` here, unlike entering a voice room
-        // or opening a Line. Those two are facts about this client, which the
+        // or opening a Channel. Those two are facts about this client, which the
         // server confirms by silence; a room is a fact about the server, and the
         // only honest source for it is the server saying it exists. Writing it in
         // optimistically would draw a room for the person who asked even when
         // the server refused them.
-        Command::CreateVoiceRoom { name, limit, line } => {
-            if client.criar_voice_room(name, limit, line).await.is_err() {
+        Command::CreateVoiceRoom { name, limit, channel } => {
+            if client.criar_voice_room(name, limit, channel).await.is_err() {
                 return false;
             }
         }
-        Command::CreateLine { name } => {
+        Command::CreateChannel { name } => {
             if client.criar_linha(name).await.is_err() {
                 return false;
             }
@@ -3308,8 +3308,8 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
                 return false;
             }
         }
-        Command::RenameLine { line, name } => {
-            if client.renomear_linha(line, name).await.is_err() {
+        Command::RenameChannel { channel, name } => {
+            if client.renomear_linha(channel, name).await.is_err() {
                 return false;
             }
         }
@@ -3370,20 +3370,20 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
                 return false;
             }
         }
-        Command::DeleteLine { line } => {
-            if client.apagar_linha(line).await.is_err() {
+        Command::DeleteChannel { channel } => {
+            if client.apagar_linha(channel).await.is_err() {
                 return false;
             }
         }
         // The question, and where to put the answer. Registered **before** the
         // ask goes out: the server is on the other side of a socket that can be
-        // faster than this thread's next line, and a reply arriving before its
+        // faster than this thread's next channel, and a reply arriving before its
         // slot exists is a reply with nowhere to go.
-        Command::WeighLine { line, answer } => {
+        Command::WeighChannel { channel, answer } => {
             if let Ok(mut pending) = shared.pending_weights.lock() {
-                pending.push((line, answer));
+                pending.push((channel, answer));
             }
-            if client.pesar_linha(line).await.is_err() {
+            if client.pesar_linha(channel).await.is_err() {
                 return false;
             }
         }
@@ -3400,7 +3400,7 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             // In a task of its own, and not awaited here. This queue is what
             // carries every keystroke of this session, and a download parked on
             // it would stop anybody saying anything until the picture came
-            // down — the head-of-line block that ADR 0027 gave each transfer
+            // down — the head-of-channel block that ADR 0027 gave each transfer
             // its own stream to avoid.
             tokio::spawn(async move {
                 let _ = answer.send(preview_of(attachment.get(), &claimed, caixa.await.ok()));
@@ -3675,9 +3675,9 @@ mod tests {
                 name: "VOICE_ROOM-01".into(),
                 limit: 20,
                 password_required: false,
-                line: None,
+                channel: None,
             }],
-            lines: Vec::new(),
+            channels: Vec::new(),
             roles: Vec::new(),
             permissions: Vec::new(),
         });
@@ -3719,7 +3719,7 @@ mod tests {
             name: "VOICE_ROOM-01".into(),
             limit: 20,
             password_required: false,
-            line: None,
+            channel: None,
         }];
         room.apply(&ServerMessage::PersonJoined {
             voice_room: VoiceRoomId(1),
@@ -3762,7 +3762,7 @@ mod tests {
             name: "VOICE_ROOM-01".into(),
             limit: 20,
             password_required: false,
-            line: None,
+            channel: None,
         }];
         assert_eq!(voice_rooms_of(&room)[0].sync, None, "an empty voice room");
 
@@ -4242,7 +4242,7 @@ mod tests {
                     name: "VOICE_ROOM-02 SALA DOS FUNDOS".into(),
                     limit: 8,
                     password_required: false,
-                    line: None,
+                    channel: None,
                 },
             },
         );
@@ -4274,7 +4274,7 @@ mod tests {
                 ssrc: Ssrc(700),
                 server: "Terceira Tóquio".into(),
                 voice_rooms: Vec::new(),
-                lines: Vec::new(),
+                channels: Vec::new(),
                 roles: Vec::new(),
                 permissions: vec![Permission::Speak],
             },
@@ -4297,7 +4297,7 @@ mod tests {
                 ssrc: Ssrc(700),
                 server: "Terceira Tóquio".into(),
                 voice_rooms: Vec::new(),
-                lines: Vec::new(),
+                channels: Vec::new(),
                 roles: Vec::new(),
                 permissions: vec![Permission::Speak, Permission::ManageVoiceRooms],
             },
@@ -4320,7 +4320,7 @@ mod tests {
                 ssrc: Ssrc(700),
                 server: "Terceira Tóquio".into(),
                 voice_rooms: Vec::new(),
-                lines: Vec::new(),
+                channels: Vec::new(),
                 roles: Vec::new(),
                 permissions: vec![Permission::Speak],
             },
@@ -4353,7 +4353,7 @@ mod tests {
             ssrc: Ssrc(700),
             server: "Terceira Tóquio".into(),
             voice_rooms: Vec::new(),
-            lines: Vec::new(),
+            channels: Vec::new(),
             roles: Vec::new(),
             permissions,
         };
@@ -4421,7 +4421,7 @@ mod tests {
             ssrc: Ssrc(700),
             server: "Terceira Tóquio".into(),
             voice_rooms: Vec::new(),
-            lines: Vec::new(),
+            channels: Vec::new(),
             roles: Vec::new(),
             permissions,
         };
@@ -4487,7 +4487,7 @@ mod tests {
                 ssrc: Ssrc(700),
                 server: "Casa".into(),
                 voice_rooms: Vec::new(),
-                lines: Vec::new(),
+                channels: Vec::new(),
                 roles: Vec::new(),
                 permissions: vec![Permission::AdministerServer],
             },
@@ -4596,7 +4596,7 @@ mod tests {
             ssrc: Ssrc(700),
             server: "Casa".into(),
             voice_rooms: Vec::new(),
-            lines: Vec::new(),
+            channels: Vec::new(),
             roles: Vec::new(),
             permissions,
         };
@@ -4640,16 +4640,16 @@ mod tests {
                 async move {
                     // The driver's half, by hand: take the command off the
                     // queue, park the sender, then let the answer arrive.
-                    let Some(Command::WeighLine { line, answer }) = queue.recv().await else {
+                    let Some(Command::WeighChannel { channel, answer }) = queue.recv().await else {
                         panic!("nothing asked the server to weigh anything");
                     };
                     shared
                         .pending_weights
                         .lock()
                         .expect("pending")
-                        .push((line, answer));
-                    shared.answer_weight(LineWeight {
-                        line: 7,
+                        .push((channel, answer));
+                    shared.answer_weight(ChannelWeight {
+                        channel: 7,
                         messages: 1_847,
                         authors: 6,
                         oldest_at_seconds: Some(1_678_600_000),
@@ -4657,7 +4657,7 @@ mod tests {
                 }
             });
 
-            let peso = plug.weigh_line(7).await.expect("weight");
+            let peso = plug.weigh_channel(7).await.expect("weight");
             pergunta.await.expect("driver");
 
             assert_eq!(peso.messages, 1_847);
@@ -4667,7 +4667,7 @@ mod tests {
 
         // And nothing was kept: the weight's whole value is being fresh, so
         // asking for it left the room exactly as it was.
-        assert!(shared.room.lock().expect("room").lines.is_empty());
+        assert!(shared.room.lock().expect("room").channels.is_empty());
         assert!(shared.pending_weights.lock().expect("pending").is_empty());
     }
 
@@ -4683,10 +4683,10 @@ mod tests {
             .pending_weights
             .lock()
             .expect("pending")
-            .push((seele_core::LineId(7), answer));
+            .push((seele_core::ChannelId(7), answer));
 
-        shared.answer_weight(LineWeight {
-            line: 9,
+        shared.answer_weight(ChannelWeight {
+            channel: 9,
             messages: 3,
             authors: 1,
             oldest_at_seconds: None,
@@ -4694,7 +4694,7 @@ mod tests {
 
         assert!(
             resposta.try_recv().is_err(),
-            "a count for another Line was handed to the box asking about this one"
+            "a count for another Channel was handed to the box asking about this one"
         );
         assert_eq!(
             shared.pending_weights.lock().expect("pending").len(),
@@ -4719,9 +4719,9 @@ mod tests {
 
         for blank in ["", "   ", "\t\n"] {
             plug.create_voice_room(blank.into(), 8, None).unwrap();
-            plug.create_line(blank.into()).unwrap();
+            plug.create_channel(blank.into()).unwrap();
             plug.rename_voice_room(1, blank.into()).unwrap();
-            plug.rename_line(1, blank.into()).unwrap();
+            plug.rename_channel(1, blank.into()).unwrap();
         }
         assert!(
             queue.try_recv().is_err(),
@@ -4954,9 +4954,9 @@ mod tests {
                 name: "VOICE_ROOM-01".into(),
                 limit: 20,
                 password_required: false,
-                line: None,
+                channel: None,
             }],
-            lines: Vec::new(),
+            channels: Vec::new(),
             roles: Vec::new(),
             permissions: Vec::new(),
         });
@@ -5043,9 +5043,9 @@ mod tests {
                 name: "VOICE_ROOM-01".into(),
                 limit: 20,
                 password_required: false,
-                line: None,
+                channel: None,
             }],
-            lines: Vec::new(),
+            channels: Vec::new(),
             roles: Vec::new(),
             permissions: Vec::new(),
         });
@@ -5251,9 +5251,9 @@ mod tests {
                     name: "VOICE_ROOM-01".into(),
                     limit: 20,
                     password_required: false,
-                    line: None,
+                    channel: None,
                 }],
-                lines: Vec::new(),
+                channels: Vec::new(),
                 roles: Vec::new(),
                 permissions: Vec::new(),
             },
@@ -5388,10 +5388,10 @@ mod aviso_de_mensagens {
     /// `Event::MessagesChanged` may only be raised by `Shared::messages_changed`.
     ///
     /// The two halves — bump the revision, then tell the shell — have to move
-    /// together, and they did not: `Command::OpenLine` clears the room's
+    /// together, and they did not: `Command::OpenChannel` clears the room's
     /// messages and raised the event **without** the bump. A shell that
     /// refetches only when the number moves, which is the entire point of the
-    /// number, swallowed it, and switching Line left the previous Line's
+    /// number, swallowed it, and switching Channel left the previous Channel's
     /// conversation on screen under the new heading.
     ///
     /// Nothing about that failed. The event fired, the listener ran, the guard
@@ -5427,7 +5427,7 @@ mod aviso_de_mensagens {
         let producao = fonte.split("#[cfg(test)]").next().unwrap_or(fonte);
         let sem_comentarios: String = producao
             .lines()
-            .filter(|line| !line.trim_start().starts_with("//"))
+            .filter(|channel| !channel.trim_start().starts_with("//"))
             .collect::<Vec<_>>()
             .join("\n");
         let mencoes = sem_comentarios.matches("Event::MessagesChanged").count();

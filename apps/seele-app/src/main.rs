@@ -31,7 +31,7 @@ mod icone;
 use std::sync::{Arc, Mutex};
 
 use seele_ffi::{
-    ConnectConfig, ConnectFailure, Event, EventListener, LineWeight, Plug, PlugError, Preview,
+    ConnectConfig, ConnectFailure, Event, EventListener, ChannelWeight, Plug, PlugError, Preview,
     PreviewRules, Snapshot, VoiceMode,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -130,7 +130,7 @@ struct Bridge {
 
 impl EventListener for Bridge {
     fn on_event(&self, event: Event) {
-        // A failed emit means the window is gone, which is not worth a log line
+        // A failed emit means the window is gone, which is not worth a log channel
         // per event during shutdown.
         let _ = self.app.emit(EVENT_CHANNEL, &event);
     }
@@ -548,13 +548,13 @@ fn eject_plug(session: State<'_, Session>) -> Result<(), PlugError> {
 }
 
 #[tauri::command]
-fn open_line(session: State<'_, Session>, line: u32) -> Result<(), PlugError> {
-    session.plug()?.open_line(line)
+fn open_channel(session: State<'_, Session>, channel: u32) -> Result<(), PlugError> {
+    session.plug()?.open_channel(channel)
 }
 
 #[tauri::command]
-fn send_message(session: State<'_, Session>, line: u32, body: String) -> Result<(), PlugError> {
-    session.plug()?.send_message(line, body)
+fn send_message(session: State<'_, Session>, channel: u32, body: String) -> Result<(), PlugError> {
+    session.plug()?.send_message(channel, body)
 }
 
 // ---------------------------------------------------------------- anexos
@@ -693,7 +693,7 @@ fn tipo_alegado(nome: &str) -> String {
 #[tauri::command]
 fn enviar_anexo(
     session: State<'_, Session>,
-    line: u32,
+    channel: u32,
     body: String,
     caminho: String,
     nome: String,
@@ -701,7 +701,7 @@ fn enviar_anexo(
 ) -> Result<u64, PlugError> {
     session
         .plug()?
-        .send_attachment(line, body, caminho, nome, tipo)
+        .send_attachment(channel, body, caminho, nome, tipo)
 }
 
 /// Salva um anexo onde quem recebeu escolheu.
@@ -791,15 +791,15 @@ fn criar_voice_room(
     session: State<'_, Session>,
     name: String,
     limit: u16,
-    line: Option<u32>,
+    channel: Option<u32>,
 ) -> Result<(), PlugError> {
-    session.plug()?.create_voice_room(name, limit, line)
+    session.plug()?.create_voice_room(name, limit, channel)
 }
 
 /// Pede ao servidor que faça uma Linha.
 #[tauri::command]
 fn criar_linha(session: State<'_, Session>, name: String) -> Result<(), PlugError> {
-    session.plug()?.create_line(name)
+    session.plug()?.create_channel(name)
 }
 
 /// Pede ao servidor que renomeie uma sala de voz.
@@ -810,8 +810,8 @@ fn renomear_voice_room(session: State<'_, Session>, voice_room: u32, name: Strin
 
 /// Pede ao servidor que renomeie uma Linha.
 #[tauri::command]
-fn renomear_linha(session: State<'_, Session>, line: u32, name: String) -> Result<(), PlugError> {
-    session.plug()?.rename_line(line, name)
+fn renomear_linha(session: State<'_, Session>, channel: u32, name: String) -> Result<(), PlugError> {
+    session.plug()?.rename_channel(channel, name)
 }
 
 // ------------------------------------------------- a cara e o nome do servidor
@@ -1086,8 +1086,8 @@ fn apagar_voice_room(session: State<'_, Session>, voice_room: u32) -> Result<(),
 /// Pede ao servidor que destrua uma Linha, e tudo que foi escrito nela —
 /// `apagar_linha`.
 #[tauri::command]
-fn apagar_linha(session: State<'_, Session>, line: u32) -> Result<(), PlugError> {
-    session.plug()?.delete_line(line)
+fn apagar_linha(session: State<'_, Session>, channel: u32) -> Result<(), PlugError> {
+    session.plug()?.delete_channel(channel)
 }
 
 /// Pergunta quanto custaria destruir uma Linha. Não destrói nada.
@@ -1105,12 +1105,12 @@ fn apagar_linha(session: State<'_, Session>, line: u32) -> Result<(), PlugError>
 /// Quem não conseguir resposta **não abre a caixa**. Não há versão honesta dela
 /// sem os três números.
 #[tauri::command]
-async fn peso_da_linha(session: State<'_, Session>, line: u32) -> Result<LineWeight, PlugError> {
+async fn peso_da_linha(session: State<'_, Session>, channel: u32) -> Result<ChannelWeight, PlugError> {
     // O `Arc` sai do cadeado antes do `await`, e é de propósito: `Session::plug`
     // devolve um clone justamente para que nada segure o `Mutex` atravessando um
     // ponto de espera.
     let plug = session.plug()?;
-    plug.weigh_line(line).await
+    plug.weigh_channel(channel).await
 }
 
 #[tauri::command]
@@ -2293,7 +2293,7 @@ fn main() {
             messages,
             insert_plug,
             eject_plug,
-            open_line,
+            open_channel,
             send_message,
             criar_voice_room,
             criar_linha,

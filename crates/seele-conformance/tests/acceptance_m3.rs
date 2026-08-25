@@ -19,12 +19,12 @@ use std::time::Duration;
 use anyhow::Result;
 use ed25519_dalek::SigningKey;
 use seele_core::{Client, MemoryPinStore};
-use seele_proto::ids::{VoiceRoomId, ClientMessageId, LineId};
+use seele_proto::ids::{VoiceRoomId, ClientMessageId, ChannelId};
 use seele_proto::ServerMessage;
 use seele_server::persistence::Location;
 use seele_server::{ServerConfig, Daemon};
 
-const LINE: LineId = LineId(1);
+const LINE: ChannelId = ChannelId(1);
 const VOICE_ROOM: VoiceRoomId = VoiceRoomId(1);
 const WAIT: Duration = Duration::from_secs(5);
 
@@ -93,7 +93,7 @@ async fn a_restarted_server_keeps_its_history() -> Result<()> {
     let posted = {
         let (address, server) = start(database.clone()).await?;
         let mut ayanami = connect(address, "ayanami", &key(1)).await?;
-        ayanami.join_line(LINE).await?;
+        ayanami.join_channel(LINE).await?;
         ayanami
             .send_message(LINE, "verificando harmônicos", ClientMessageId(1))
             .await?;
@@ -116,7 +116,7 @@ async fn a_restarted_server_keeps_its_history() -> Result<()> {
     // A new process, the same file.
     let (address, server) = start(database).await?;
     let mut ayanami = connect(address, "ayanami", &key(1)).await?;
-    ayanami.join_line(LINE).await?;
+    ayanami.join_channel(LINE).await?;
     ayanami.fetch_history(LINE, None, 50).await?;
 
     let event = wait_for(&mut ayanami, |event| {
@@ -174,8 +174,8 @@ async fn a_message_reaches_everybody_on_the_line() -> Result<()> {
 
     let mut ayanami = connect(address, "ayanami", &key(1)).await?;
     let mut shinji = connect(address, "shinji", &key(2)).await?;
-    ayanami.join_line(LINE).await?;
-    shinji.join_line(LINE).await?;
+    ayanami.join_channel(LINE).await?;
+    shinji.join_channel(LINE).await?;
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     ayanami
@@ -205,7 +205,7 @@ async fn a_resent_message_is_not_posted_twice() -> Result<()> {
     let (address, server) = start(directory.path().join("dogma.db")).await?;
 
     let mut ayanami = connect(address, "ayanami", &key(1)).await?;
-    ayanami.join_line(LINE).await?;
+    ayanami.join_channel(LINE).await?;
 
     ayanami
         .send_message(LINE, "uma vez", ClientMessageId(7))
@@ -222,7 +222,7 @@ async fn a_resent_message_is_not_posted_twice() -> Result<()> {
 
     // Fresh history should hold exactly one.
     let mut reader = connect(address, "shinji", &key(2)).await?;
-    reader.join_line(LINE).await?;
+    reader.join_channel(LINE).await?;
     reader.fetch_history(LINE, None, 50).await?;
 
     let mut seen = 0;
@@ -267,7 +267,7 @@ async fn a_person_without_write_permission_is_refused() -> Result<()> {
     // The bootstrap list makes this person an Observador, who by specs/04 may
     // "só ouvir e ler".
     let mut observer = connect(address, "observador", &key(3)).await?;
-    observer.join_line(LINE).await?;
+    observer.join_channel(LINE).await?;
     observer
         .send_message(LINE, "não deveria passar", ClientMessageId(1))
         .await?;
@@ -368,7 +368,7 @@ async fn history_pages_backwards_without_gaps() -> Result<()> {
     let (address, server) = start(directory.path().join("dogma.db")).await?;
 
     let mut ayanami = connect(address, "ayanami", &key(1)).await?;
-    ayanami.join_line(LINE).await?;
+    ayanami.join_channel(LINE).await?;
     for index in 1..=6_u64 {
         ayanami
             .send_message(LINE, &format!("mensagem {index}"), ClientMessageId(index))
@@ -377,7 +377,7 @@ async fn history_pages_backwards_without_gaps() -> Result<()> {
     tokio::time::sleep(Duration::from_millis(600)).await;
 
     let mut reader = connect(address, "shinji", &key(2)).await?;
-    reader.join_line(LINE).await?;
+    reader.join_channel(LINE).await?;
     reader.fetch_history(LINE, None, 3).await?;
 
     let mut page = Vec::new();

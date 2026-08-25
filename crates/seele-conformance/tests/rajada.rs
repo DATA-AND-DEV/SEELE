@@ -54,7 +54,7 @@ use std::time::Duration;
 use anyhow::Result;
 use seele_core::{Client, MemoryPinStore};
 use seele_proto::control::ServerMessage;
-use seele_proto::ids::{VoiceRoomId, ClientMessageId, LineId};
+use seele_proto::ids::{VoiceRoomId, ClientMessageId, ChannelId};
 use seele_server::persistence::Location;
 use seele_server::{ServerConfig, Daemon};
 
@@ -94,7 +94,7 @@ async fn entrar(address: SocketAddr, apelido: &str, semente: u8) -> Result<Clien
     )
     .await?;
     cliente.insert_plug(VoiceRoomId(VOICE_ROOM)).await?;
-    cliente.join_line(LineId(LINE)).await?;
+    cliente.join_channel(ChannelId(LINE)).await?;
     Ok(cliente)
 }
 
@@ -111,7 +111,7 @@ async fn uma_rajada_de_mensagens_grandes_chega_inteira() -> Result<()> {
         let corpo = format!("{numero:04}").repeat(CORPO / 4);
         autor
             .send_message(
-                LineId(LINE),
+                ChannelId(LINE),
                 &corpo,
                 ClientMessageId(u64::try_from(numero).expect("cabe") + 1),
             )
@@ -143,7 +143,7 @@ async fn uma_rajada_de_mensagens_grandes_chega_inteira() -> Result<()> {
     // é o diagnóstico: menos aqui é mensagem que o servidor nunca aceitou, menos
     // ali é mensagem que ele aceitou e não entregou.
     assert_eq!(
-        server.quantas_mensagens(LineId(LINE)).await?,
+        server.quantas_mensagens(ChannelId(LINE)).await?,
         QUANTAS as u64,
         "pendência nº 1: a rajada não chegou nem a ser gravada"
     );

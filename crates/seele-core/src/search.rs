@@ -19,23 +19,23 @@
 //! only correct thing to pass is what is on screen. That is a different string
 //! in each shell, and the difference is not a detail:
 //!
-//! - The terminal **collapses**. `seele-tui::ui::wrap` builds its lines with
+//! - The terminal **collapses**. `seele-tui::ui::wrap` builds its channels with
 //!   `split_whitespace`, so a run of whitespace is already gone by the time it
-//!   is drawn. It calls [`normalize`] first, and the offsets line up.
+//!   is drawn. It calls [`normalize`] first, and the offsets channel up.
 //! - The desktop app **preserves**. `.mensagens .corpo` is `white-space:
 //!   pre-wrap`, so newlines and double spaces are on screen. It passes the raw
-//!   body, and the offsets line up.
+//!   body, and the offsets channel up.
 //!
 //! A shell that normalises what it draws raw — or draws raw what it normalised
 //! — gets ranges that are silently off by one per collapsed run, which is a
-//! defect nobody sees until somebody pastes two blank lines. Answer "what
+//! defect nobody sees until somebody pastes two blank channels. Answer "what
 //! string is on screen?" before choosing, and never make the drawing follow the
 //! search: flattening a conversation to keep an index aligned is trading the
 //! product for the implementation.
 //!
 //! The honest cost of preserving is small and worth stating: with `' '` and
 //! `'\n'` being different characters, a term containing a space does not match
-//! across a line break.
+//! across a channel break.
 
 /// Where a term matched.
 ///

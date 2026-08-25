@@ -41,7 +41,7 @@ use std::time::Duration;
 use anyhow::Result;
 use seele_core::enlace::{Aviso, Destino, Enlace};
 use seele_core::{MemoryPinStore, PinStore, Room};
-use seele_proto::ids::{VoiceRoomId, LineId};
+use seele_proto::ids::{VoiceRoomId, ChannelId};
 use seele_server::persistence::Location;
 use seele_server::{ServerConfig, Daemon};
 
@@ -265,7 +265,7 @@ async fn uma_conexao_que_cai_sai_do_roster_de_todo_mundo() -> Result<()> {
     // Mais um comando atrás do primeiro, para que a entrada tenha sido
     // processada antes de a sessão morrer; sem isso o teste poderia medir uma
     // saída que nunca teve entrada e passar por engano.
-    let _ = shinji.abrir_linha(LineId(1)).await;
+    let _ = shinji.abrir_linha(ChannelId(1)).await;
 
     let entrou = absorver_ate(&mut rei, &mut sala_rei, Duration::from_secs(15), |room| {
         room.roster(voice_room_um).count() == 1

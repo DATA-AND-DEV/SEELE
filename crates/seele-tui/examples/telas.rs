@@ -108,10 +108,10 @@ fn operando() -> App {
             open: false,
             sync: None,
         },
-        Node::Line {
+        Node::Channel {
             name: "geral".into(),
         },
-        Node::Line {
+        Node::Channel {
             name: "combinados".into(),
         },
     ];

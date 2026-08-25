@@ -346,7 +346,7 @@ pub struct Voice {
     ///
     /// Same rule as [`Voice::capture`], and it carries more weight here: a
     /// fallback to the machine's default output makes no sound of its own, so
-    /// reading this line is the only way to find out it happened.
+    /// reading this channel is the only way to find out it happened.
     playback: Option<PlaybackDevice>,
     /// What was *asked* for, which is not what opened.
     ///

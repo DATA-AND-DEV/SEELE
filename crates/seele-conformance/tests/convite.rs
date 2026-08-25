@@ -46,7 +46,7 @@ use anyhow::Result;
 use seele_core::enlace::{Aviso, Destino, Enlace};
 use seele_core::{ConnectError, MemoryPinStore, PinStore, Verdict};
 use seele_proto::control::ServerMessage;
-use seele_proto::ids::{VoiceRoomId, ClientMessageId, LineId};
+use seele_proto::ids::{VoiceRoomId, ClientMessageId, ChannelId};
 use seele_server::persistence::Location;
 use seele_server::{ServerConfig, Daemon};
 
@@ -146,9 +146,9 @@ where
 /// `Ok` do mesmo jeito, e só cala quando alguém fala com ele.
 async fn falar_e_ouvir(enlace: &mut Enlace, o_que: &str) -> Result<()> {
     enlace.inserir_plug(VoiceRoomId(VOICE_ROOM)).await?;
-    enlace.abrir_linha(LineId(LINE)).await?;
+    enlace.abrir_linha(ChannelId(LINE)).await?;
     enlace
-        .dizer(LineId(LINE), o_que.to_owned(), ClientMessageId(1))
+        .dizer(ChannelId(LINE), o_que.to_owned(), ClientMessageId(1))
         .await?;
 
     let ouviu = esperar(enlace, Duration::from_secs(15), |aviso| {

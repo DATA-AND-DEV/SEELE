@@ -37,7 +37,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{
-    AttachmentId, VoiceRoomId, ClientMessageId, LineId, MessageId, PersonId, RoleId, ScreenId, SessionId,
+    AttachmentId, VoiceRoomId, ClientMessageId, ChannelId, MessageId, PersonId, RoleId, ScreenId, SessionId,
     Ssrc,
 };
 use crate::version::PROTOCOL_VERSION;
@@ -52,7 +52,7 @@ pub const MAX_FRAME_LEN: usize = 16 * 1024;
 /// Longest text message body, in bytes.
 ///
 /// `specs/02-protocolo.md` leaves the limit open; 4 KiB is far more than a chat
-/// line and far less than anything that would strain a frame.
+/// channel and far less than anything that would strain a frame.
 pub const MAX_BODY_LEN: usize = 4 * 1024;
 
 /// Longest nickname, in bytes.
@@ -61,7 +61,7 @@ pub const MAX_NICKNAME_LEN: usize = 32;
 /// Longest client name, in bytes.
 pub const MAX_CLIENT_NAME_LEN: usize = 64;
 
-/// Longest voice room or Line name, in bytes.
+/// Longest voice room or Channel name, in bytes.
 ///
 /// A name is a label in a list, not a description. Long enough for
 /// `VOICE_ROOM-01 CENTRAL` several times over, short enough that no shell has to
@@ -207,7 +207,7 @@ pub enum AttachmentRefusal {
     RateLimited,
     /// This server is not storing attachments at all.
     Unavailable,
-    /// No such attachment, or it belongs to a Line this person may not read.
+    /// No such attachment, or it belongs to a Channel this person may not read.
     NotFound,
     /// The bytes were evicted to keep the server under its ceiling.
     Expired,
@@ -305,10 +305,10 @@ pub enum Permission {
     InsertPlug,
     /// Transmit voice.
     Speak,
-    /// Read a Line.
-    ReadLine,
-    /// Post to a Line.
-    WriteLine,
+    /// Read a Channel.
+    ReadChannel,
+    /// Post to a Channel.
+    WriteChannel,
     /// Delete somebody else's message.
     RemoveMessage,
     /// Move a person between voice_rooms.
@@ -326,7 +326,7 @@ pub enum Permission {
 
     /// Put a file on the server's disk. ADR 0027.
     ///
-    /// **Not folded into [`Self::WriteLine`].** "May write" and "may put a
+    /// **Not folded into [`Self::WriteChannel`].** "May write" and "may put a
     /// gigabyte on my laptop" are different questions, and the point of hosting
     /// for your own friends is being able to answer the second one separately.
     /// The permission is what the ceiling cannot do: the ceiling bounds the
@@ -339,7 +339,7 @@ pub enum Permission {
     ///
     /// Migration 3 seeds it on Commander, Operator and Person, and **denies it
     /// explicitly on Observer** rather than merely leaving it out — the schema
-    /// already writes why on the Observer's line: denying on purpose makes
+    /// already writes why on the Observer's channel: denying on purpose makes
     /// granting Observer to somebody who is also a Person *silence* them,
     /// instead of quietly doing nothing.
     AttachFile,
@@ -383,16 +383,16 @@ pub struct VoiceRoomInfo {
     pub limit: u16,
     /// Whether entry needs a password.
     pub password_required: bool,
-    /// A Line bound to this voice room, if any. `specs/04-servidor-seele.md` makes the
+    /// A Channel bound to this voice room, if any. `specs/04-servidor-seele.md` makes the
     /// association optional.
-    pub line: Option<LineId>,
+    pub channel: Option<ChannelId>,
 }
 
 /// A text channel.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LineInfo {
+pub struct ChannelInfo {
     /// Identifier.
-    pub id: LineId,
+    pub id: ChannelId,
     /// Display name.
     pub name: String,
 }
@@ -407,7 +407,7 @@ pub enum Subsystem {
     Permissions,
     /// Media routing: voice room subscriptions, datagram forwarding, bandwidth.
     Media,
-    /// Persistent state: voice_rooms, Lines, history, configuration, migrations.
+    /// Persistent state: voice_rooms, Channels, history, configuration, migrations.
     Persistence,
 }
 
@@ -560,7 +560,7 @@ pub enum DisconnectReason {
     /// is the argument: this refusal happens **after** the signature is checked
     /// and **after** the doorkeeper admitted the peer. Nothing was guessed. And
     /// on a server with no doorkeeper — the only case where an anonymous peer
-    /// reaches this line — the nicknames it could enumerate are the ones the
+    /// reaches this channel — the nicknames it could enumerate are the ones the
     /// roster hands to anybody who walks in.
     ///
     /// Appended last, for the reason [`AlertReason::RateLimited`] gives.
@@ -629,14 +629,14 @@ pub enum AlertReason {
     /// Appended after `MovedByOperator`, for the reason that variant gives.
     VoiceRoomDeleted,
 
-    /// A Line this person had open no longer exists, and neither does anything
+    /// A Channel this person had open no longer exists, and neither does anything
     /// written in it.
     ///
     /// Separate from [`Self::VoiceRoomDeleted`] because the two sentences are not
     /// the same sentence: one says the room you were speaking in is gone, the
     /// other says the conversation you were reading was destroyed. A shell
     /// given one reason for both would have to write the vaguer of the two.
-    LineDeleted,
+    ChannelDeleted,
 
     /// The voice room asked about is the only one the server has, so it stays.
     ///
@@ -738,14 +738,14 @@ pub enum ClientMessage {
     /// Leaves the current voice room. "Ejetar".
     EjectPlug,
     /// Subscribes to a text channel.
-    JoinLine {
-        /// Which Line.
-        line: LineId,
+    JoinChannel {
+        /// Which Channel.
+        channel: ChannelId,
     },
     /// Posts a message.
     SendMessage {
-        /// Which Line.
-        line: LineId,
+        /// Which Channel.
+        channel: ChannelId,
         /// Body.
         body: String,
         /// Message being replied to.
@@ -755,8 +755,8 @@ pub enum ClientMessage {
     },
     /// Fetches history. Cursor-paged, never by offset.
     FetchHistory {
-        /// Which Line.
-        line: LineId,
+        /// Which Channel.
+        channel: ChannelId,
         /// Where to continue from. `None` starts at the newest.
         cursor: Option<MessageId>,
         /// How many messages.
@@ -790,12 +790,12 @@ pub enum ClientMessage {
         name: String,
         /// How many people may be inside at once.
         limit: u16,
-        /// A Line to bind to it, if any. `specs/04-servidor-seele.md` makes the
+        /// A Channel to bind to it, if any. `specs/04-servidor-seele.md` makes the
         /// association optional.
-        line: Option<LineId>,
+        channel: Option<ChannelId>,
     },
-    /// Creates a Line.
-    CreateLine {
+    /// Creates a Channel.
+    CreateChannel {
         /// What to call it.
         name: String,
     },
@@ -806,10 +806,10 @@ pub enum ClientMessage {
         /// The new name.
         name: String,
     },
-    /// Renames a Line.
-    RenameLine {
-        /// Which Line.
-        line: LineId,
+    /// Renames a Channel.
+    RenameChannel {
+        /// Which Channel.
+        channel: ChannelId,
         /// The new name.
         name: String,
     },
@@ -861,7 +861,7 @@ pub enum ClientMessage {
         /// permanent.
         expires_at: Option<i64>,
     },
-    /// Takes a message off the Line. `remover_mensagem` —
+    /// Takes a message off the Channel. `remover_mensagem` —
     /// [`Permission::RemoveMessage`].
     ///
     /// The permission is worded "delete somebody **else's** message", so an
@@ -869,8 +869,8 @@ pub enum ClientMessage {
     /// server where taking back your own typo requires an operator is a server
     /// where people ask an operator about typos.
     ///
-    /// Carries no Line. The identifier is the server's own and globally
-    /// unique, so the Line to announce the removal on is read out of the stored
+    /// Carries no Channel. The identifier is the server's own and globally
+    /// unique, so the Channel to announce the removal on is read out of the stored
     /// row rather than taken from the asker — a field the client fills in is a
     /// field the client can fill in wrong, and this one would aim somebody
     /// else's announcement.
@@ -922,8 +922,8 @@ pub enum ClientMessage {
     /// [`AlertReason::VoiceRoomDeleted`], for the reason
     /// [`AlertReason::MovedByOperator`] gives.
     ///
-    /// A Line bound to the voice room is **not** destroyed with it.
-    /// `specs/04-servidor-seele.md` makes voice_rooms and Lines independent, and the
+    /// A Channel bound to the voice room is **not** destroyed with it.
+    /// `specs/04-servidor-seele.md` makes voice_rooms and Channels independent, and the
     /// association optional; destroying a voice room is no statement about the
     /// writing that happened to hang off it.
     ///
@@ -934,35 +934,35 @@ pub enum ClientMessage {
         /// Which voice room.
         voice_room: VoiceRoomId,
     },
-    /// Destroys a Line and everything written in it. `apagar_linha` —
+    /// Destroys a Channel and everything written in it. `apagar_linha` —
     /// [`Permission::AdministerServer`].
     ///
     /// Not a soft delete, unlike [`Self::RemoveMessage`]. That one keeps a row
     /// so replies do not dangle and an operator can answer "what was removed";
-    /// this destroys the Line those rows hang from, so there is nothing left
+    /// this destroys the Channel those rows hang from, so there is nothing left
     /// for either to be about.
     ///
-    /// Any voice room bound to this Line keeps existing and loses the binding.
-    DeleteLine {
-        /// Which Line.
-        line: LineId,
+    /// Any voice room bound to this Channel keeps existing and loses the binding.
+    DeleteChannel {
+        /// Which Channel.
+        channel: ChannelId,
     },
-    /// Asks what destroying a Line would cost, without destroying anything.
+    /// Asks what destroying a Channel would cost, without destroying anything.
     ///
     /// A read, and the only verb in this enum that exists for a **sentence**: a
     /// confirmation that says "this destroys 1.847 messages by 6 people,
     /// written since 12/03" needs those three numbers counted in the database
     /// at the instant of asking. A client cannot count them for itself — it
-    /// holds one page of history and would guess low by whatever the Line's
+    /// holds one page of history and would guess low by whatever the Channel's
     /// whole past is — and a number that is nearly right in a box promising
     /// destruction is worse than no number at all.
     ///
-    /// Needs no permission. Answering it tells a person how much is in a Line
+    /// Needs no permission. Answering it tells a person how much is in a Channel
     /// they may already read, and refusing it would only mean the confirmation
     /// they see is the vaguer one.
-    WeighLine {
-        /// Which Line.
-        line: LineId,
+    WeighChannel {
+        /// Which Channel.
+        channel: ChannelId,
     },
 
     // ---- attachments ----
@@ -972,7 +972,7 @@ pub enum ClientMessage {
     // Only one verb, and that is the shape of ADR 0027: **sending** a file does
     // not cross the control stream at all. It opens its own unidirectional
     // stream, because twenty megabytes on the ordered control stream stop every
-    // presence event and every line of text behind them. What comes back here
+    // presence event and every channel of text behind them. What comes back here
     // is the answer.
     /// Asks for an attachment's bytes.
     ///
@@ -982,7 +982,7 @@ pub enum ClientMessage {
     /// enumerated reason — which is how «this file expired» reaches a screen at
     /// all.
     ///
-    /// Needs [`Permission::ReadLine`] and nothing more: a file hanging off a
+    /// Needs [`Permission::ReadChannel`] and nothing more: a file hanging off a
     /// message somebody may read is part of that message.
     FetchAttachment {
         /// Which attachment.
@@ -994,7 +994,7 @@ pub enum ClientMessage {
     // Appended last, for the reason [`AlertReason::RateLimited`] gives.
     //
     // Both need [`Permission::AdministerServer`], and **not** the
-    // [`Permission::ManageVoiceRooms`] the four room verbs use. The line
+    // [`Permission::ManageVoiceRooms`] the four room verbs use. The channel
     // `specs/04-servidor-seele.md` draws is between "criar e configurar voice_rooms"
     // and "todo o resto sobre o servidor"; the name and the picture of the servidor
     // itself are not a room, and whoever may build rooms is not thereby the
@@ -1120,7 +1120,7 @@ pub enum ServerMessage {
         /// Voice channels visible to this person.
         voice_rooms: Vec<VoiceRoomInfo>,
         /// Text channels visible to this person.
-        lines: Vec<LineInfo>,
+        channels: Vec<ChannelInfo>,
         /// Roles defined on this server.
         roles: Vec<Role>,
         /// What **this** person may do, as PERMISSIONS resolved it.
@@ -1160,8 +1160,8 @@ pub enum ServerMessage {
     PersonState(PersonState),
     /// A message was posted.
     MessageReceived {
-        /// Which Line.
-        line: LineId,
+        /// Which Channel.
+        channel: ChannelId,
         /// Server-assigned identifier.
         id: MessageId,
         /// Who wrote it.
@@ -1177,7 +1177,7 @@ pub enum ServerMessage {
         /// Without it a page of history has no time on it at all: the receiving
         /// client only knows when the *page* arrived, which is now.
         /// `specs/06-clientes-gui.md` requires a session to be resumable in
-        /// another client "sem perda de histórico", and history whose lines all
+        /// another client "sem perda de histórico", and history whose channels all
         /// claim to have been written the moment the app opened has lost
         /// something.
         at_seconds: i64,
@@ -1199,7 +1199,7 @@ pub enum ServerMessage {
         ///
         /// Carried with the message rather than fetched per message, for the
         /// reason `author_nickname` is: a client reading history would
-        /// otherwise need one round trip per line to find out whether there is
+        /// otherwise need one round trip per channel to find out whether there is
         /// a file at all.
         ///
         /// **The text survives the file.** When the bytes have been evicted
@@ -1211,8 +1211,8 @@ pub enum ServerMessage {
     },
     /// A message was edited.
     MessageEdited {
-        /// Which Line.
-        line: LineId,
+        /// Which Channel.
+        channel: ChannelId,
         /// Which message.
         id: MessageId,
         /// New body.
@@ -1220,8 +1220,8 @@ pub enum ServerMessage {
     },
     /// A message was removed.
     MessageRemoved {
-        /// Which Line.
-        line: LineId,
+        /// Which Channel.
+        channel: ChannelId,
         /// Which message.
         id: MessageId,
     },
@@ -1263,10 +1263,10 @@ pub enum ServerMessage {
         /// The voice room, as it now exists.
         voice_room: VoiceRoomInfo,
     },
-    /// A Line was created.
-    LineCreated {
-        /// The Line, as it now exists.
-        line: LineInfo,
+    /// A Channel was created.
+    ChannelCreated {
+        /// The Channel, as it now exists.
+        channel: ChannelInfo,
     },
     /// A voice room was renamed.
     VoiceRoomRenamed {
@@ -1275,10 +1275,10 @@ pub enum ServerMessage {
         /// Its new name.
         name: String,
     },
-    /// A Line was renamed.
-    LineRenamed {
-        /// Which Line.
-        line: LineId,
+    /// A Channel was renamed.
+    ChannelRenamed {
+        /// Which Channel.
+        channel: ChannelId,
         /// Its new name.
         name: String,
     },
@@ -1319,24 +1319,24 @@ pub enum ServerMessage {
         /// Which voice room.
         voice_room: VoiceRoomId,
     },
-    /// A Line was destroyed, and everything written in it with it.
-    LineDeleted {
-        /// Which Line.
-        line: LineId,
+    /// A Channel was destroyed, and everything written in it with it.
+    ChannelDeleted {
+        /// Which Channel.
+        channel: ChannelId,
     },
-    /// What destroying a Line would cost, counted now.
+    /// What destroying a Channel would cost, counted now.
     ///
-    /// The answer to [`ClientMessage::WeighLine`], and the numbers a
+    /// The answer to [`ClientMessage::WeighChannel`], and the numbers a
     /// confirmation is built out of. Counted at the moment of asking rather
-    /// than carried on [`LineInfo`], because a count on the room list would be
+    /// than carried on [`ChannelInfo`], because a count on the room list would be
     /// stale by every message sent since it was drawn — and stale is the one
     /// thing a number in this particular sentence may not be.
-    LineWeighed {
-        /// Which Line.
-        line: LineId,
+    ChannelWeighed {
+        /// Which Channel.
+        channel: ChannelId,
         /// How many messages are in it that anybody can read.
         ///
-        /// Messages already taken off the Line by [`ClientMessage::RemoveMessage`]
+        /// Messages already taken off the Channel by [`ClientMessage::RemoveMessage`]
         /// are not counted. They are gone from every screen already, so
         /// counting them would inflate what the reader is told they are about
         /// to lose by a number only the database can see.
@@ -1345,7 +1345,7 @@ pub enum ServerMessage {
         authors: u32,
         /// When the oldest one was written, in seconds since the Unix epoch.
         ///
-        /// `None` when the Line is empty, which is the one case where the
+        /// `None` when the Channel is empty, which is the one case where the
         /// sentence has no date to give and must say something else instead.
         oldest_at_seconds: Option<i64>,
     },
@@ -1414,7 +1414,7 @@ pub enum ServerMessage {
     ///
     /// Its own frame rather than a field on `Session`, for the third reason ADR
     /// 0032 gives against the icon: `Session` already carries the voice_rooms, the
-    /// Lines, the roles and the permissions inside [`MAX_FRAME_LEN`], and a
+    /// Channels, the roles and the permissions inside [`MAX_FRAME_LEN`], and a
     /// picture sharing that budget would make a big server fail to admit anybody
     /// because of a decoration.
     ///
@@ -1516,7 +1516,7 @@ pub enum ServerMessage {
     },
     /// What the server measured its own upward path to be, in bits per second.
     ///
-    /// The first line of the ceiling in §5.1 — `caminho de quem HOSPEDA × 60% ÷
+    /// The first channel of the ceiling in §5.1 — `caminho de quem HOSPEDA × 60% ÷
     /// N espectadores` — and it is the leg the sharer cannot see: the bytes
     /// leave the host's machine, not the sharer's, and until now the number
     /// standing in for it was the 2000 kbps pipe of `spikes/tela-no-transporte`.
@@ -1663,7 +1663,7 @@ pub fn check_bounds(field: &'static str, len: usize, limit: usize) -> Result<(),
     Ok(())
 }
 
-/// Bounds a voice room or Line name at both ends.
+/// Bounds a voice room or Channel name at both ends.
 ///
 /// The upper bound is [`MAX_CHANNEL_NAME_LEN`], like every other text field.
 /// The lower one is the half that is easy to leave out: a name that is empty,
@@ -1838,9 +1838,9 @@ impl Validate for ClientMessage {
                 check_name("name", name)?;
                 check_voice_room_limit(*limit)
             }
-            Self::CreateLine { name }
+            Self::CreateChannel { name }
             | Self::RenameVoiceRoom { name, .. }
-            | Self::RenameLine { name, .. } => check_name("name", name),
+            | Self::RenameChannel { name, .. } => check_name("name", name),
             // The operator's own words about their own server, bounded like the
             // other place they cross the wire.
             Self::BanPerson { reason, .. } => check(
@@ -1851,7 +1851,7 @@ impl Validate for ClientMessage {
             Self::RenameServer { name } => check_server_name(name),
             Self::SetServerIcon { icon } => check_icon(icon.as_ref()),
             Self::EjectPlug
-            | Self::JoinLine { .. }
+            | Self::JoinChannel { .. }
             | Self::FetchHistory { .. }
             | Self::SetAtField(_)
             | Self::SetTotalIsolation(_)
@@ -1861,8 +1861,8 @@ impl Validate for ClientMessage {
             | Self::RemoveMessage { .. }
             | Self::MovePerson { .. }
             | Self::DeleteVoiceRoom { .. }
-            | Self::DeleteLine { .. }
-            | Self::WeighLine { .. }
+            | Self::DeleteChannel { .. }
+            | Self::WeighChannel { .. }
             | Self::FetchAttachment { .. }
             | Self::StartScreenShare
             | Self::StopScreenShare
@@ -1878,7 +1878,7 @@ impl Validate for ServerMessage {
             Self::Session {
                 server,
                 voice_rooms,
-                lines,
+                channels,
                 ..
             } => {
                 check("server", server.len(), MAX_CLIENT_NAME_LEN)?;
@@ -1889,14 +1889,14 @@ impl Validate for ServerMessage {
                 for voice_room in voice_rooms {
                     check_name("name", &voice_room.name)?;
                 }
-                for line in lines {
-                    check_name("name", &line.name)?;
+                for channel in channels {
+                    check_name("name", &channel.name)?;
                 }
                 Ok(())
             }
             Self::VoiceRoomCreated { voice_room } => check_name("name", &voice_room.name),
-            Self::LineCreated { line } => check_name("name", &line.name),
-            Self::VoiceRoomRenamed { name, .. } | Self::LineRenamed { name, .. } => {
+            Self::ChannelCreated { channel } => check_name("name", &channel.name),
+            Self::VoiceRoomRenamed { name, .. } | Self::ChannelRenamed { name, .. } => {
                 check_name("name", name)
             }
             Self::PersonJoined { profile, .. } | Self::PersonPresent { profile, .. } => {
@@ -1939,8 +1939,8 @@ impl Validate for ServerMessage {
             | Self::Disconnecting { .. }
             | Self::MovedToVoiceRoom { .. }
             | Self::VoiceRoomDeleted { .. }
-            | Self::LineDeleted { .. }
-            | Self::LineWeighed { .. }
+            | Self::ChannelDeleted { .. }
+            | Self::ChannelWeighed { .. }
             | Self::AttachmentRefused { .. }
             | Self::AttachmentUnavailable { .. }
             | Self::ScreenShareStarted { .. }
@@ -1978,10 +1978,10 @@ mod tests {
                 name: "VOICE_ROOM-01 CENTRAL".into(),
                 limit: 15,
                 password_required: false,
-                line: Some(LineId(1)),
+                channel: Some(ChannelId(1)),
             }],
-            lines: vec![LineInfo {
-                id: LineId(1),
+            channels: vec![ChannelInfo {
+                id: ChannelId(1),
                 name: "geral".into(),
             }],
             roles: vec![Role {
@@ -2044,7 +2044,7 @@ mod tests {
         // Enforced on the way out so we cannot send one, and on the way in so a
         // peer cannot skip the check by hand-rolling a frame.
         let long = ClientMessage::SendMessage {
-            line: LineId(1),
+            channel: ChannelId(1),
             body: "x".repeat(MAX_BODY_LEN + 1),
             replies_to: None,
             client_message_id: ClientMessageId(1),
@@ -2132,7 +2132,7 @@ mod tests {
         // client_msg_id while leaving the field out of the payload. A retry
         // after a lost acknowledgement posts twice without it.
         let send = ClientMessage::SendMessage {
-            line: LineId(1),
+            channel: ChannelId(1),
             body: "verificando harmônicos".into(),
             replies_to: None,
             client_message_id: ClientMessageId(0xFEED),
@@ -2170,17 +2170,17 @@ mod tests {
             ClientMessage::CreateVoiceRoom {
                 name: "VOICE_ROOM-02 SALA DOS FUNDOS".into(),
                 limit: 8,
-                line: Some(LineId(1)),
+                channel: Some(ChannelId(1)),
             },
-            ClientMessage::CreateLine {
+            ClientMessage::CreateChannel {
                 name: "planejamento".into(),
             },
             ClientMessage::RenameVoiceRoom {
                 voice_room: VoiceRoomId(2),
                 name: "VOICE_ROOM-02 CENTRAL".into(),
             },
-            ClientMessage::RenameLine {
-                line: LineId(3),
+            ClientMessage::RenameChannel {
+                channel: ChannelId(3),
                 name: "avisos".into(),
             },
         ] {
@@ -2198,12 +2198,12 @@ mod tests {
                     name: "VOICE_ROOM-02 SALA DOS FUNDOS".into(),
                     limit: 8,
                     password_required: false,
-                    line: Some(LineId(1)),
+                    channel: Some(ChannelId(1)),
                 },
             },
-            ServerMessage::LineCreated {
-                line: LineInfo {
-                    id: LineId(3),
+            ServerMessage::ChannelCreated {
+                channel: ChannelInfo {
+                    id: ChannelId(3),
                     name: "planejamento".into(),
                 },
             },
@@ -2211,8 +2211,8 @@ mod tests {
                 voice_room: VoiceRoomId(2),
                 name: "VOICE_ROOM-02 CENTRAL".into(),
             },
-            ServerMessage::LineRenamed {
-                line: LineId(3),
+            ServerMessage::ChannelRenamed {
+                channel: ChannelId(3),
                 name: "avisos".into(),
             },
         ] {
@@ -2231,7 +2231,7 @@ mod tests {
             let ask = ClientMessage::CreateVoiceRoom {
                 name: blank.into(),
                 limit: 8,
-                line: None,
+                channel: None,
             };
             assert!(
                 matches!(
@@ -2257,7 +2257,7 @@ mod tests {
 
     #[test]
     fn an_oversized_room_name_is_refused() {
-        let long = ClientMessage::CreateLine {
+        let long = ClientMessage::CreateChannel {
             name: "n".repeat(MAX_CHANNEL_NAME_LEN + 1),
         };
         assert!(matches!(
@@ -2265,7 +2265,7 @@ mod tests {
             Err(ControlError::FieldTooLong { field: "name", .. })
         ));
         // Exactly at the limit is a name, not an overflow.
-        assert!(encode(&ClientMessage::CreateLine {
+        assert!(encode(&ClientMessage::CreateChannel {
             name: "n".repeat(MAX_CHANNEL_NAME_LEN),
         })
         .is_ok());
@@ -2280,7 +2280,7 @@ mod tests {
             let ask = ClientMessage::CreateVoiceRoom {
                 name: "VOICE_ROOM-02".into(),
                 limit,
-                line: None,
+                channel: None,
             };
             assert!(
                 matches!(
@@ -2306,7 +2306,7 @@ mod tests {
                 encode(&ClientMessage::CreateVoiceRoom {
                     name: "VOICE_ROOM-02".into(),
                     limit,
-                    line: None,
+                    channel: None,
                 })
                 .is_ok(),
                 "refused a voice room for {limit} people"
@@ -2324,7 +2324,7 @@ mod tests {
             person,
             ssrc,
             server,
-            lines,
+            channels,
             roles,
             permissions,
             ..
@@ -2342,9 +2342,9 @@ mod tests {
                 name: "   ".into(),
                 limit: 4,
                 password_required: false,
-                line: None,
+                channel: None,
             }],
-            lines,
+            channels,
             roles,
             permissions,
         };
@@ -2486,8 +2486,8 @@ mod tests {
     fn the_deleting_verbs_round_trip() {
         for message in [
             ClientMessage::DeleteVoiceRoom { voice_room: VoiceRoomId(2) },
-            ClientMessage::DeleteLine { line: LineId(7) },
-            ClientMessage::WeighLine { line: LineId(7) },
+            ClientMessage::DeleteChannel { channel: ChannelId(7) },
+            ClientMessage::WeighChannel { channel: ChannelId(7) },
         ] {
             let frame = encode(&message).unwrap();
             assert_eq!(decode::<ClientMessage>(&frame).unwrap(), message);
@@ -2502,15 +2502,15 @@ mod tests {
         // arrives as a default because `None` was flattened somewhere, produces
         // a confirmation that lies with total confidence.
         for weighed in [
-            ServerMessage::LineWeighed {
-                line: LineId(7),
+            ServerMessage::ChannelWeighed {
+                channel: ChannelId(7),
                 messages: 1_847,
                 authors: 6,
                 oldest_at_seconds: Some(1_678_600_000),
             },
-            // The empty Line, which is the case with no date to give.
-            ServerMessage::LineWeighed {
-                line: LineId(7),
+            // The empty Channel, which is the case with no date to give.
+            ServerMessage::ChannelWeighed {
+                channel: ChannelId(7),
                 messages: 0,
                 authors: 0,
                 oldest_at_seconds: None,
@@ -2529,7 +2529,7 @@ mod tests {
         // exists would be inviting some shell to keep it.
         for gone in [
             ServerMessage::VoiceRoomDeleted { voice_room: VoiceRoomId(2) },
-            ServerMessage::LineDeleted { line: LineId(7) },
+            ServerMessage::ChannelDeleted { channel: ChannelId(7) },
         ] {
             let frame = encode(&gone).unwrap();
             assert_eq!(decode::<ServerMessage>(&frame).unwrap(), gone);
@@ -2553,9 +2553,9 @@ mod tests {
             reason: AlertReason::VoiceRoomDeleted,
             operator_text: None,
         };
-        let line = ServerMessage::Alert {
+        let channel = ServerMessage::Alert {
             severity: AlertSeverity::Warning,
-            reason: AlertReason::LineDeleted,
+            reason: AlertReason::ChannelDeleted,
             operator_text: None,
         };
         // And the refusal of the last voice room is a third sentence, not either of
@@ -2565,10 +2565,10 @@ mod tests {
             reason: AlertReason::LastVoiceRoom,
             operator_text: None,
         };
-        assert_ne!(voice_room, line);
+        assert_ne!(voice_room, channel);
         assert_ne!(voice_room, ultimo);
-        assert_ne!(line, ultimo);
-        for alert in [voice_room, line, ultimo] {
+        assert_ne!(channel, ultimo);
+        for alert in [voice_room, channel, ultimo] {
             let frame = encode(&alert).unwrap();
             assert_eq!(decode::<ServerMessage>(&frame).unwrap(), alert);
         }
@@ -2598,11 +2598,11 @@ mod tests {
         #[test]
         fn text_messages_round_trip(
             body in ".{0,200}",
-            line: u32,
+            channel: u32,
             id: u64,
         ) {
             let send = ClientMessage::SendMessage {
-                line: LineId(line),
+                channel: ChannelId(channel),
                 body,
                 replies_to: None,
                 client_message_id: ClientMessageId(id),
@@ -3167,7 +3167,7 @@ mod screen_tests {
         // `——` the rest of the product shows where nothing was measured, and
         // not a link of no bits. A server that has not measured yet still has to
         // say so on entry — refusing zero here would leave it silent, and a
-        // sharer with no first line for the ceiling of §5.1 falls back to
+        // sharer with no first channel for the ceiling of §5.1 falls back to
         // guessing, which is what this frame exists to end.
         let quieto = ServerMessage::HostUplink { bps: 0 };
         let frame = encode(&quieto).unwrap();

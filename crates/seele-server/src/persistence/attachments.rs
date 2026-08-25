@@ -749,7 +749,7 @@ impl Store {
     /// Deduplication happens here, **after** the bytes arrived, and that is
     /// deliberate: answering "I already have that" before receiving would tell
     /// the sender, by timing alone, that somebody has already sent that exact
-    /// file — including into a Line they may not read. The disk is the resource
+    /// file — including into a Channel they may not read. The disk is the resource
     /// under a hard ceiling, and the disk is still spared.
     ///
     /// # Errors
@@ -858,13 +858,13 @@ mod tests {
     use crate::persistence::messages::{Messages, PendingMessage};
     use crate::persistence::Location;
 
-    /// A server with one Line, one person, and a directory to put bytes in.
+    /// A server with one Channel, one person, and a directory to put bytes in.
     fn server() -> (Persistence, tempfile::TempDir) {
         let persistence = Persistence::open(&Location::Memory).unwrap();
         persistence
             .connection()
             .execute_batch(
-                "INSERT INTO lines (id, name) VALUES (1, 'geral');
+                "INSERT INTO channels (id, name) VALUES (1, 'geral');
                  INSERT INTO people (id, nickname, public_key, created_at)
                    VALUES (1, 'ayanami', X'01', 0);",
             )
@@ -876,7 +876,7 @@ mod tests {
     fn message(persistence: &mut Persistence, body: &str) -> MessageId {
         let stored = Messages::new(persistence)
             .append_batch(&[PendingMessage {
-                line: seele_proto::ids::LineId(1),
+                channel: seele_proto::ids::ChannelId(1),
                 author: seele_proto::ids::PersonId(1),
                 author_nickname: "ayanami".into(),
                 body: body.into(),

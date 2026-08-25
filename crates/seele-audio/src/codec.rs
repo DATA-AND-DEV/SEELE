@@ -112,7 +112,7 @@ impl VoiceEncoder {
     /// one frame of slightly worse quality, which is why this is acceptable for
     /// a person changing a setting and **would not be** for an automatic
     /// congestion response adjusting bitrate every few seconds. If that is ever
-    /// wanted, this is the line that has to change first.
+    /// wanted, this is the channel that has to change first.
     ///
     /// Returns whether anything happened: asking for the current bitrate is not
     /// a reason to reset the encoder.

@@ -1,8 +1,8 @@
 //! The `cpal` seam: turns real devices into the ring buffers in [`crate::rt`].
 //!
 //! **This module is deliberately thin.** CI has no sound card, so almost
-//! nothing here can be covered by a test. Nearly every line in this file is a
-//! line no test protects, so the logic lives in [`crate::rt`] — which is fully
+//! nothing here can be covered by a test. Nearly every channel in this file is a
+//! channel no test protects, so the logic lives in [`crate::rt`] — which is fully
 //! tested — and this file does nothing but wire it up.
 //!
 //! When reviewing a change here, the question is not "is this correct?" but
@@ -226,7 +226,7 @@ pub struct AudioIo {
     ///
     /// Same rule as [`AudioIo::capture`], and it matters more here: the fallback
     /// to the default output is the one a person cannot hear happening. What
-    /// they can do is read this line and see the name is not the one they
+    /// they can do is read this channel and see the name is not the one they
     /// picked.
     pub playback: Option<PlaybackDevice>,
 }
@@ -481,7 +481,7 @@ pub fn open(wanted: Wanted<'_>, ring_ms: u32) -> Result<AudioIo, DeviceError> {
     let counters = StreamCounters::shared();
 
     // Every allocation on the audio path happens here, at setup. Nothing below
-    // this line may allocate — enforced by tests/realtime_safety.rs.
+    // this channel may allocate — enforced by tests/realtime_safety.rs.
     let (sink, captured) = capture_path(
         capacity_for_ms(ring_ms, capture_rate_hz),
         in_channels,
@@ -669,7 +669,7 @@ mod tests {
 
     #[test]
     fn a_refusal_carries_the_id_that_was_asked_for() {
-        // Without it the log line says a device is gone and never says which,
+        // Without it the log channel says a device is gone and never says which,
         // which is exactly the report nobody can act on.
         let Err(DeviceError::CaptureDeviceGone { id }) = open_capture("alsa:hw:99,99") else {
             // A machine that really does have `hw:99,99` would land here. It
@@ -752,7 +752,7 @@ mod tests {
             );
         }
         if found.len() < 2 {
-            // Said out loud, because the line below cannot fail with one row
+            // Said out loud, because the channel below cannot fail with one row
             // and a check that cannot fail reads like a check that passed.
             eprintln!(
                 "the capture default check proves nothing here: this machine lists one microphone"

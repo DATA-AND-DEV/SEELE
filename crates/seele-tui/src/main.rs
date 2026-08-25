@@ -32,7 +32,7 @@ use seele_core::chegada::Chegada;
 use seele_core::conhecidos::Conhecidos;
 use seele_core::enlace::{Aviso, Destino, Enlace, Fechado, Motivo};
 use seele_core::{
-    identity, AudioTelemetry, VoiceRoomId, ClientMessageId, ConnectError, FilePinStore, LineId, Room,
+    identity, AudioTelemetry, VoiceRoomId, ClientMessageId, ConnectError, FilePinStore, ChannelId, Room,
     SyncInputs, SyncRatio, Verdict, Voice, VoiceMode,
 };
 use seele_tui::app::{Action, Alert, App, Bar, ChatLine, Key, Mode, Node, Screen};
@@ -62,7 +62,7 @@ struct Args {
     alternativos: Vec<String>,
     nickname: String,
     voice_room: VoiceRoomId,
-    line: LineId,
+    channel: ChannelId,
     no_audio: bool,
     /// Convite ou senha, quando o servidor pede.
     join_secret: Option<String>,
@@ -94,7 +94,7 @@ impl Args {
             alternativos: Vec::new(),
             nickname: escolha.apelido.clone(),
             voice_room: VoiceRoomId(escolha.voice_room),
-            line: LineId(1),
+            channel: ChannelId(1),
             no_audio: false,
             join_secret: escolha.convite.clone(),
             expected_fingerprint: escolha.impressao_digital.clone(),
@@ -119,7 +119,7 @@ fn parse_args() -> Result<Option<Args>> {
     let mut target = "127.0.0.1:8383".to_owned();
     let mut nickname = "pessoa".to_owned();
     let mut voice_room = VoiceRoomId(1);
-    let mut line = LineId(1);
+    let mut channel = ChannelId(1);
     let mut no_audio = false;
     let mut join_secret: Option<String> = None;
     let mut expected_fingerprint: Option<String> = None;
@@ -153,8 +153,8 @@ fn parse_args() -> Result<Option<Args>> {
             "--voice_room" => {
                 voice_room = VoiceRoomId(argv.next().context("--voice_room needs a number")?.parse()?);
             }
-            "--linha" | "--line" => {
-                line = LineId(argv.next().context("--linha needs a number")?.parse()?);
+            "--linha" | "--channel" => {
+                channel = ChannelId(argv.next().context("--linha needs a number")?.parse()?);
             }
             // A terminal on a headless box has no sound card, and the text half
             // of the product needs none.
@@ -177,7 +177,7 @@ fn parse_args() -> Result<Option<Args>> {
         alternativos,
         nickname,
         voice_room,
-        line,
+        channel,
         no_audio,
         join_secret,
         expected_fingerprint,
@@ -635,7 +635,7 @@ async fn sessao(
     let voice_room = args.voice_room;
     // Um enlace que fecha antes mesmo de a sessão subir é uma sessão que
     // acabou, e não um defeito do programa. Ver [`enlace_fechado`].
-    if entrar(&client, voice_room, args.line).await.is_err() {
+    if entrar(&client, voice_room, args.channel).await.is_err() {
         enlace_fechado(&mut runtime);
         drop(client);
         return fim_de_sessao(terminal, key_rx, &mut runtime, &mut hospedagem).await;
@@ -677,7 +677,7 @@ async fn sessao(
 
     runtime.room.adopt(client.sessao(), &args.nickname);
     runtime.room.enter_voice_room(voice_room);
-    runtime.room.open_line(args.line);
+    runtime.room.open_channel(args.channel);
 
     if !args.no_audio {
         match Voice::start(client.media(), client.sessao().ssrc) {
@@ -742,7 +742,7 @@ async fn sessao(
                                 // mensagem por um enlace que acabou de fechar
                                 // virava `plug encerrou: …` numa linha de
                                 // stderr. Ver [`enlace_fechado`].
-                                if act(&mut runtime, &client, action, args.line).await.is_err() {
+                                if act(&mut runtime, &client, action, args.channel).await.is_err() {
                                     enlace_fechado(&mut runtime);
                                     drop(client);
                                     return fim_de_sessao(
@@ -938,10 +938,10 @@ fn construir_destinos(args: &Args) -> Vec<Destino> {
 ///
 /// Juntos porque falham juntos e pelo mesmo motivo: se o enlace fechou, nenhum
 /// dos três vai a lugar nenhum, e o que se faz com isso é um só.
-async fn entrar(client: &Enlace, voice_room: VoiceRoomId, line: LineId) -> Result<(), Fechado> {
+async fn entrar(client: &Enlace, voice_room: VoiceRoomId, channel: ChannelId) -> Result<(), Fechado> {
     client.inserir_plug(voice_room).await?;
-    client.abrir_linha(line).await?;
-    client.historico(line, 50).await
+    client.abrir_linha(channel).await?;
+    client.historico(channel, 50).await
 }
 
 /// O texto da tela de fim quando `Enlace::conectar` falha.
@@ -1317,7 +1317,7 @@ async fn act(
     runtime: &mut Runtime<'_>,
     client: &Enlace,
     action: Action,
-    line: LineId,
+    channel: ChannelId,
 ) -> Result<(), Fechado> {
     match action {
         Action::Quit => runtime.app.quit(),
@@ -1327,7 +1327,7 @@ async fn act(
             // after a lost acknowledgement does not post twice.
             let id = ClientMessageId(runtime.next_message_id);
             runtime.next_message_id += 1;
-            let target = runtime.room.current_line.unwrap_or(line);
+            let target = runtime.room.current_channel.unwrap_or(channel);
             client.dizer(target, body.trim().to_owned(), id).await?;
         }
 
@@ -1388,7 +1388,7 @@ fn sair_da_sala(room: &mut Room, app: &mut App) {
     app.refazer_busca();
 }
 
-/// Enter on the selected row: enter a voice room, or open a Line.
+/// Enter on the selected row: enter a voice room, or open a Channel.
 async fn activate(runtime: &mut Runtime<'_>, client: &Enlace) -> Result<(), Fechado> {
     let Some(node) = runtime.app.tree.get(runtime.app.selected).cloned() else {
         return Ok(());
@@ -1402,9 +1402,9 @@ async fn activate(runtime: &mut Runtime<'_>, client: &Enlace) -> Result<(), Fech
                 runtime.app.refazer_busca();
             }
         }
-        Node::Line { name } => {
-            if let Some(id) = runtime.room.find_line(&name) {
-                open_line(runtime, client, id).await?;
+        Node::Channel { name } => {
+            if let Some(id) = runtime.room.find_channel(&name) {
+                open_channel(runtime, client, id).await?;
             }
         }
         Node::Person(_) => {}
@@ -1412,19 +1412,19 @@ async fn activate(runtime: &mut Runtime<'_>, client: &Enlace) -> Result<(), Fech
     Ok(())
 }
 
-/// Opens a Line and asks for the page of history behind it.
+/// Opens a Channel and asks for the page of history behind it.
 ///
 /// The fetch is what makes `specs/06-clientes-gui.md`'s "sem perda de
 /// histórico" true: a client arriving late reads what was already said instead
 /// of an empty room.
-async fn open_line(
+async fn open_channel(
     runtime: &mut Runtime<'_>,
     client: &Enlace,
-    line: LineId,
+    channel: ChannelId,
 ) -> Result<(), Fechado> {
-    client.abrir_linha(line).await?;
-    runtime.room.open_line(line);
-    client.historico(line, 50).await?;
+    client.abrir_linha(channel).await?;
+    runtime.room.open_channel(channel);
+    client.historico(channel, 50).await?;
     runtime.app.local.clear();
     view::project(&runtime.room, &mut runtime.app);
     runtime.app.refazer_busca();
@@ -1452,9 +1452,9 @@ async fn run_command(
             }
         }
 
-        Command::Line { which } => {
-            if let Some(id) = runtime.room.find_line(which) {
-                open_line(runtime, client, id).await?;
+        Command::Channel { which } => {
+            if let Some(id) = runtime.room.find_channel(which) {
+                open_channel(runtime, client, id).await?;
             } else {
                 note(runtime, format!("nenhum canal de texto com «{which}»"));
             }
@@ -1699,7 +1699,7 @@ mod tests {
     #[test]
     fn sair_da_sala_esvazia_o_assento_na_propria_tela() {
         use seele_core::{
-            VoiceRoomId, VoiceRoomInfo, LineId, LineInfo, PersonId, PersonProfile, Room, ServerMessage,
+            VoiceRoomId, VoiceRoomInfo, ChannelId, ChannelInfo, PersonId, PersonProfile, Room, ServerMessage,
             SessionId, Ssrc,
         };
         use seele_tui::app::{App, Node};
@@ -1711,7 +1711,7 @@ mod tests {
         // todas as outras telas menos na de quem saiu. Quebrar o
         // `room.leave_voice_room()` de `sair_da_sala` deixa este teste vermelho.
         const SALA: VoiceRoomId = VoiceRoomId(1);
-        const CANAL: LineId = LineId(1);
+        const CANAL: ChannelId = ChannelId(1);
 
         let mut room = Room::new();
         room.apply(&ServerMessage::Session {
@@ -1724,9 +1724,9 @@ mod tests {
                 name: "SALA-01".into(),
                 limit: 20,
                 password_required: false,
-                line: Some(CANAL),
+                channel: Some(CANAL),
             }],
-            lines: vec![LineInfo {
+            channels: vec![ChannelInfo {
                 id: CANAL,
                 name: "geral".into(),
             }],
@@ -1975,7 +1975,7 @@ mod tests {
             pin_key: "127.0.0.1:8383".to_owned(),
             nickname: "pessoa".to_owned(),
             voice_room: VoiceRoomId(1),
-            line: LineId(1),
+            channel: ChannelId(1),
             no_audio: true,
             join_secret: None,
             expected_fingerprint,

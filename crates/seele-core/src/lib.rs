@@ -116,7 +116,7 @@ pub use voice::{
 pub use seele_audio::telemetry::{AudioTelemetry, LocalTelemetry, SourceTelemetry};
 pub use seele_proto::control::{
     AlertReason, AlertSeverity, AttachmentInfo, AttachmentRefusal, AttachmentState, VoiceRoomInfo,
-    DisconnectReason, LineInfo, Permission, PersonProfile, PersonState, Presence, ServerMessage,
+    DisconnectReason, ChannelInfo, Permission, PersonProfile, PersonState, Presence, ServerMessage,
     Subsystem, SubsystemHealth, Telemetry,
 };
 /// A impressão digital de uma chave pública, no formato que o produto mostra.
@@ -127,7 +127,7 @@ pub use seele_proto::control::{
 pub use seele_proto::transport::key_fingerprint;
 
 pub use seele_proto::ids::{
-    AttachmentId, VoiceRoomId, ClientMessageId, LineId, MessageId, PersonId, RoleId, ScreenId, SessionId,
+    AttachmentId, VoiceRoomId, ClientMessageId, ChannelId, MessageId, PersonId, RoleId, ScreenId, SessionId,
     Ssrc,
 };
 /// O cabeçalho de abertura de uma transmissão de tela, e o que ele carrega.

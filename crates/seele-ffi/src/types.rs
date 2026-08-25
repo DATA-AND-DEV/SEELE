@@ -135,8 +135,8 @@ pub enum NoticeReason {
     MovedByOperator,
     /// The voice room this person's plug was in no longer exists.
     VoiceRoomDeleted,
-    /// A Line this person had open no longer exists.
-    LineDeleted,
+    /// A Channel this person had open no longer exists.
+    ChannelDeleted,
     /// The voice room asked about is the only one the server has, so it stays.
     LastVoiceRoom,
     /// Somebody else is already sharing their screen in this room.
@@ -175,7 +175,7 @@ impl From<seele_core::AlertReason> for NoticeReason {
             seele_core::AlertReason::RateLimited => Self::RateLimited,
             seele_core::AlertReason::MovedByOperator => Self::MovedByOperator,
             seele_core::AlertReason::VoiceRoomDeleted => Self::VoiceRoomDeleted,
-            seele_core::AlertReason::LineDeleted => Self::LineDeleted,
+            seele_core::AlertReason::ChannelDeleted => Self::ChannelDeleted,
             seele_core::AlertReason::LastVoiceRoom => Self::LastVoiceRoom,
             seele_core::AlertReason::ScreenShareTaken => Self::ScreenShareTaken,
             seele_core::AlertReason::ScreenShareOverHostUplink => Self::ScreenShareOverHostUplink,
@@ -183,24 +183,24 @@ impl From<seele_core::AlertReason> for NoticeReason {
     }
 }
 
-/// What a Line holds, as the confirmation in front of destroying it needs it.
+/// What a Channel holds, as the confirmation in front of destroying it needs it.
 ///
 /// Counted in the server's database at the instant of asking, and carried across
 /// the bridge unrounded. A shell cannot work these out for itself: it holds one
-/// page of history and would guess low by whatever the Line's whole past is,
+/// page of history and would guess low by whatever the Channel's whole past is,
 /// and a number that is nearly right in a box promising to destroy 1.847
 /// messages is worse than no number at all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-pub struct LineWeight {
-    /// Which Line was weighed.
-    pub line: u32,
+pub struct ChannelWeight {
+    /// Which Channel was weighed.
+    pub channel: u32,
     /// How many messages are in it that anybody can read.
     pub messages: u32,
     /// How many distinct people wrote them.
     pub authors: u32,
     /// When the oldest was written, in seconds since the Unix epoch.
     ///
-    /// `None` when the Line is empty — the one case where the sentence has no
+    /// `None` when the Channel is empty — the one case where the sentence has no
     /// date to give and has to say something else instead. Turning it into a
     /// date somebody reads is a shell's job, like every other timestamp that
     /// crosses here.
@@ -295,7 +295,7 @@ pub enum Trust {
     ///
     /// `specs/08-seguranca.md` wants this stated rather than accepted in
     /// silence, which is why it is a value the shell must handle and not a log
-    /// line it may ignore.
+    /// channel it may ignore.
     FirstContact {
         /// What was pinned. Show it — somebody may want to check it elsewhere.
         fingerprint: String,
@@ -422,14 +422,14 @@ pub struct VoiceRoom {
     pub password_required: bool,
     /// Whether this person's plug is in it.
     pub occupied_by_us: bool,
-    /// The Line bound to it, if any. `specs/04-servidor-seele.md` makes the
+    /// The Channel bound to it, if any. `specs/04-servidor-seele.md` makes the
     /// association optional.
     ///
-    /// Carried so a shell can say what destroying that Line would do to this
-    /// room. The voice room survives it and comes out with no Line attached, which is
+    /// Carried so a shell can say what destroying that Channel would do to this
+    /// room. The voice room survives it and comes out with no Channel attached, which is
     /// a change nobody asked for — and a product whose confirmations name their
     /// consequences has to be able to name that one.
-    pub line: Option<u32>,
+    pub channel: Option<u32>,
     /// Who is inside, in arrival order.
     pub people: Vec<Person>,
     /// The average Sync Ratio of everybody inside, or `None` if nobody is.
@@ -441,12 +441,12 @@ pub struct VoiceRoom {
 
 /// A text channel.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
-pub struct Line {
+pub struct Channel {
     /// Identifier.
     pub id: u32,
     /// Display name.
     pub name: String,
-    /// Whether this is the Line being read.
+    /// Whether this is the Channel being read.
     pub open: bool,
 }
 
@@ -455,8 +455,8 @@ pub struct Line {
 pub struct Message {
     /// Server-assigned identifier. Ordered; the clock is not.
     pub id: u64,
-    /// Which Line.
-    pub line: u32,
+    /// Which Channel.
+    pub channel: u32,
     /// Who wrote it.
     pub author: u64,
     /// Their name.
@@ -821,7 +821,7 @@ pub struct Snapshot {
     /// de quem desenha.
     pub presentes: Vec<Person>,
     /// Text channels.
-    pub lines: Vec<Line>,
+    pub channels: Vec<Channel>,
     /// How many times the conversation has changed, this session.
     ///
     /// Not the conversation itself. This snapshot is read on every interface
@@ -868,10 +868,10 @@ pub struct Snapshot {
     /// The device that **opened**, read the same way [`Snapshot::capture`] is
     /// read, and needed more than that one: falling back to the machine's own
     /// speakers makes no sound of its own. A person who picked a headset and
-    /// hears nothing has this line and nothing else to tell them the pick did
+    /// hears nothing has this channel and nothing else to tell them the pick did
     /// not take.
     pub playback: Option<PlaybackDevice>,
-    /// Whether this person may make and rename voice_rooms and Lines.
+    /// Whether this person may make and rename voice_rooms and Channels.
     ///
     /// So a shell can decide whether the control exists at all. `ManageVoiceRooms`
     /// as PERMISSIONS resolved it, sent down in the handshake — a single boolean
@@ -899,7 +899,7 @@ pub struct Snapshot {
     pub may_kick: bool,
     /// Whether this person may bar somebody from returning — `banir`.
     pub may_ban: bool,
-    /// Whether this person may take somebody else's message off a Line.
+    /// Whether this person may take somebody else's message off a Channel.
     ///
     /// Only somebody else's: removing one's own needs no permission, so a shell
     /// offering the control on a message the reader wrote does not consult this.
@@ -918,7 +918,7 @@ pub struct Snapshot {
     ///
     /// **Convenience, never enforcement**, like every flag beside it.
     pub may_customise_server: bool,
-    /// Whether this person may destroy voice_rooms and Lines — `administrar_server`.
+    /// Whether this person may destroy voice_rooms and Channels — `administrar_server`.
     ///
     /// Its own boolean, and deliberately not [`Snapshot::may_manage_voice_rooms`].
     /// Making a room and renaming one are mistakes a server survives; destroying
@@ -953,7 +953,7 @@ pub enum Event {
     RosterChanged,
     /// A message arrived, changed, or went away.
     MessagesChanged,
-    /// voice_rooms or Lines changed.
+    /// voice_rooms or Channels changed.
     ChannelsChanged,
     /// The server renamed itself, or changed its picture.
     ///
@@ -1078,7 +1078,7 @@ pub enum Transfer {
         /// measure something nobody measured.
         total: u64,
     },
-    /// Every byte went out. The message appears on the Line next.
+    /// Every byte went out. The message appears on the Channel next.
     Sent {
         /// Which message.
         client_message_id: u64,
@@ -1168,7 +1168,7 @@ pub enum AttachmentRefusal {
     RateLimited,
     /// This server is not storing attachments at all.
     Unavailable,
-    /// No such attachment, or it is in a Line this person may not read.
+    /// No such attachment, or it is in a Channel this person may not read.
     NotFound,
     /// The bytes were evicted to keep the server under its ceiling.
     Expired,
@@ -1180,7 +1180,7 @@ pub enum AttachmentRefusal {
 ///
 /// ADR 0027. Present **even when the bytes are gone**, which is the whole
 /// reason the server keeps the row after deleting the blob: a message that had a
-/// picture and now draws as an empty line leaves nobody able to tell there had
+/// picture and now draws as an empty channel leaves nobody able to tell there had
 /// been one.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Attachment {
@@ -1202,7 +1202,7 @@ pub struct Attachment {
 ///
 /// The answer to one press of one button, and never anything a screen gets by
 /// scrolling: the file lives on the server, so looking at it is downloading it,
-/// and a Line that fetched every picture as it scrolled past would turn the
+/// and a Channel that fetched every picture as it scrolled past would turn the
 /// host's disk ceiling into everybody's uplink.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Preview {
@@ -1347,7 +1347,7 @@ pub enum PlugError {
     PlaybackDeviceGone,
     /// The named person is not in this voice room.
     UnknownPerson,
-    /// No voice room or Line by that name or number.
+    /// No voice room or Channel by that name or number.
     UnknownChannel,
     /// The control stream broke.
     LinkLost,
@@ -1493,7 +1493,7 @@ mod tests {
             seele_core::AlertReason::RateLimited,
             seele_core::AlertReason::MovedByOperator,
             seele_core::AlertReason::VoiceRoomDeleted,
-            seele_core::AlertReason::LineDeleted,
+            seele_core::AlertReason::ChannelDeleted,
             seele_core::AlertReason::LastVoiceRoom,
         ];
         let mapped: std::collections::HashSet<NoticeReason> =
@@ -1622,7 +1622,7 @@ mod tests {
         let campos: Vec<&str> = body
             .lines()
             .map(str::trim)
-            .filter(|line| !line.starts_with("//") && line.contains(known_field_marker()))
+            .filter(|channel| !channel.starts_with("//") && channel.contains(known_field_marker()))
             .collect();
 
         for campo in &campos {
@@ -1801,7 +1801,7 @@ mod tests {
         );
     }
 
-    /// What a field declaration looks like, so a doc line is not mistaken for one.
+    /// What a field declaration looks like, so a doc channel is not mistaken for one.
     fn known_field_marker() -> &'static str {
         "pub "
     }

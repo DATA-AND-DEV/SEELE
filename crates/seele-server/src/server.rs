@@ -1,7 +1,7 @@
 //! The server's shared state: storage, the write batch, and the event bus.
 //!
 //! `specs/04-servidor-seele.md` puts voice room state in a task per voice room with no global
-//! lock. Text is different: it is one durable log per Line, and the thing worth
+//! lock. Text is different: it is one durable log per Channel, and the thing worth
 //! avoiding is not contention but `fsync` per message. So storage sits behind a
 //! single mutex — SQLite in WAL mode has one writer anyway — and the batching
 //! happens in [`spawn_writer`].
@@ -18,8 +18,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use seele_proto::control::{VoiceRoomInfo, LineInfo, PersonProfile, PersonState};
-use seele_proto::ids::{VoiceRoomId, LineId, MessageId, PersonId, ScreenId, Ssrc};
+use seele_proto::control::{VoiceRoomInfo, ChannelInfo, PersonProfile, PersonState};
+use seele_proto::ids::{VoiceRoomId, ChannelId, MessageId, PersonId, ScreenId, Ssrc};
 use tokio::sync::{broadcast, mpsc, Mutex};
 
 use crate::persistence::messages::{Messages, PendingMessage, StoredMessage};
@@ -28,7 +28,7 @@ use crate::persistence::Persistence;
 /// How long the writer waits before committing what it has.
 ///
 /// `specs/04-servidor-seele.md`: "flush por tempo (~200 ms)". Long enough that a
-/// busy Line commits once instead of fifty times; short enough that a message
+/// busy Channel commits once instead of fifty times; short enough that a message
 /// still feels sent immediately.
 pub const FLUSH_INTERVAL: Duration = Duration::from_millis(200);
 
@@ -43,8 +43,8 @@ pub enum Event {
     MessagePosted(StoredMessage),
     /// A message was edited.
     MessageEdited {
-        /// Which Line.
-        line: LineId,
+        /// Which Channel.
+        channel: ChannelId,
         /// Which message.
         id: MessageId,
         /// New body.
@@ -52,8 +52,8 @@ pub enum Event {
     },
     /// A message was removed.
     MessageRemoved {
-        /// Which Line.
-        line: LineId,
+        /// Which Channel.
+        channel: ChannelId,
         /// Which message.
         id: MessageId,
     },
@@ -95,10 +95,10 @@ pub enum Event {
         /// The voice room, as it now exists.
         voice_room: VoiceRoomInfo,
     },
-    /// A Line was created.
-    LineCreated {
-        /// The Line, as it now exists.
-        line: LineInfo,
+    /// A Channel was created.
+    ChannelCreated {
+        /// The Channel, as it now exists.
+        channel: ChannelInfo,
     },
     /// A voice room was renamed.
     VoiceRoomRenamed {
@@ -107,10 +107,10 @@ pub enum Event {
         /// Its new name.
         name: String,
     },
-    /// A Line was renamed.
-    LineRenamed {
-        /// Which Line.
-        line: LineId,
+    /// A Channel was renamed.
+    ChannelRenamed {
+        /// Which Channel.
+        channel: ChannelId,
         /// Its new name.
         name: String,
     },
@@ -186,10 +186,10 @@ pub enum Event {
         /// Which voice room.
         voice_room: VoiceRoomId,
     },
-    /// A Line was destroyed, and everything written in it with it.
-    LineDeleted {
-        /// Which Line.
-        line: LineId,
+    /// A Channel was destroyed, and everything written in it with it.
+    ChannelDeleted {
+        /// Which Channel.
+        channel: ChannelId,
     },
 
     // ---- compartilhamento de tela ----

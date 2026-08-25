@@ -21,7 +21,7 @@ use seele_server::persistence::Location;
 use seele_server::{ServerConfig, Daemon};
 
 const VOICE_ROOM: u32 = 1;
-const LINE: u32 = 1;
+const CHANNEL: u32 = 1;
 const WAIT: Duration = Duration::from_secs(5);
 
 async fn start() -> Result<(SocketAddr, Arc<Daemon>)> {
@@ -54,8 +54,8 @@ fn home(name: &str) -> String {
 fn connect(address: SocketAddr, nickname: &str) -> Result<Arc<Plug>, PlugError> {
     // `seele-ffi`'s unit tests cover the two ends of this — what goes into
     // `Destino`, and how a `Verdict` maps to a `Trust` — and neither of them
-    // touches the one line that puts the second inside the value `connect`
-    // hands back. Replacing that line with a constant `Trust::Known` left the
+    // touches the one channel that puts the second inside the value `connect`
+    // hands back. Replacing that channel with a constant `Trust::Known` left the
     // whole workspace green: the shell would announce nothing on first contact
     // and nothing on a disagreeing link, pinning every key in silence, which is
     // the defect this branch exists to remove.
@@ -247,10 +247,10 @@ async fn two_shells_hold_a_conversation() -> Result<()> {
 
     for plug in [&speaker, &listener] {
         plug.insert_plug(VOICE_ROOM)?;
-        plug.open_line(LINE)?;
+        plug.open_channel(CHANNEL)?;
     }
 
-    speaker.send_message(LINE, "sync caiu aqui".into())?;
+    speaker.send_message(CHANNEL, "sync caiu aqui".into())?;
 
     assert!(
         until(&listener, |plug| {
@@ -330,8 +330,8 @@ async fn a_second_client_resumes_the_conversation_with_its_history() -> Result<(
 
     let first = tokio::task::spawn_blocking(move || connect(address, "maya")).await??;
     first.insert_plug(VOICE_ROOM)?;
-    first.open_line(LINE)?;
-    first.send_message(LINE, "primeira coisa dita".into())?;
+    first.open_channel(CHANNEL)?;
+    first.send_message(CHANNEL, "primeira coisa dita".into())?;
     assert!(
         until(&first, |plug| !plug.messages().is_empty()),
         "the message was never committed"
@@ -342,7 +342,7 @@ async fn a_second_client_resumes_the_conversation_with_its_history() -> Result<(
     drop(first);
 
     let second = tokio::task::spawn_blocking(move || connect(address, "makoto")).await??;
-    second.open_line(LINE)?;
+    second.open_channel(CHANNEL)?;
 
     assert!(
         until(&second, |plug| {
@@ -378,7 +378,7 @@ async fn a_second_client_resumes_the_conversation_with_its_history() -> Result<(
 #[tokio::test(flavor = "multi_thread")]
 async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()> {
     use seele_core::{Client, MemoryPinStore, Room};
-    use seele_proto::ids::{VoiceRoomId, ClientMessageId, LineId};
+    use seele_proto::ids::{VoiceRoomId, ClientMessageId, ChannelId};
 
     let (address, server) = start().await?;
 
@@ -398,10 +398,10 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
     room.adopt(terminal.session(), "ayanami");
     terminal.insert_plug(VoiceRoomId(VOICE_ROOM)).await?;
     room.enter_voice_room(VoiceRoomId(VOICE_ROOM));
-    terminal.join_line(LineId(LINE)).await?;
-    room.open_line(LineId(LINE));
+    terminal.join_channel(ChannelId(CHANNEL)).await?;
+    room.open_channel(ChannelId(CHANNEL));
     terminal
-        .send_message(LineId(LINE), "dito no terminal", ClientMessageId(1))
+        .send_message(ChannelId(CHANNEL), "dito no terminal", ClientMessageId(1))
         .await?;
 
     // Espera a mensagem voltar, que é quando ela está durável.
@@ -431,7 +431,7 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
 
     // ---- o lado do app: a mesma superfície que o Tauri chama.
     let desktop = tokio::task::spawn_blocking(move || connect(address, "shinji")).await??;
-    desktop.open_line(LINE)?;
+    desktop.open_channel(CHANNEL)?;
 
     assert!(
         until(&desktop, |plug| {
@@ -557,7 +557,7 @@ async fn a_shell_asks_for_a_room_and_the_server_makes_it() -> Result<()> {
     let recorder = Arc::new(Recorder::default());
     plug.subscribe(Arc::clone(&recorder) as Arc<dyn EventListener>);
 
-    plug.create_line("planejamento".into())?;
+    plug.create_channel("planejamento".into())?;
     plug.create_voice_room("VOICE_ROOM-02 SALA DOS FUNDOS".into(), 8, None)?;
 
     assert!(
@@ -571,10 +571,10 @@ async fn a_shell_asks_for_a_room_and_the_server_makes_it() -> Result<()> {
     assert!(
         until(&plug, |plug| plug
             .snapshot()
-            .lines
+            .channels
             .iter()
-            .any(|line| line.name == "planejamento")),
-        "the Line never reached the snapshot"
+            .any(|channel| channel.name == "planejamento")),
+        "the Channel never reached the snapshot"
     );
     assert!(
         recorder.saw(|event| matches!(event, Event::ChannelsChanged)),

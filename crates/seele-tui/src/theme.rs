@@ -128,7 +128,7 @@ pub const BONE: Ink = Ink {
     ansi16: Color::White,
 };
 
-/// Secondary labels and inactive log lines.
+/// Secondary labels and inactive log channels.
 ///
 /// 4.11:1 against the surface, which passes WCAG only as large text — see
 /// `docs/tokens-achados.md`. Never used alone for anything that must be read.
@@ -378,7 +378,7 @@ mod tests {
     fn the_panel_surface_collapses_onto_the_background_in_256() {
         // Not a bug, and worth pinning so nobody "fixes" it: both are the
         // nearest neighbour of the same grey, which is why specs/07 defines a
-        // surface as a 1px line around emptiness rather than a fill.
+        // surface as a 1px channel around emptiness rather than a fill.
         assert_eq!(
             SURFACE.resolve(Palette::Ansi256),
             BLACK.resolve(Palette::Ansi256)

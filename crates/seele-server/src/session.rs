@@ -35,10 +35,10 @@ use anyhow::{bail, Context, Result};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use seele_proto::control::{
     AlertReason, AlertSeverity, AttachmentRefusal, VoiceRoomInfo, ClientMessage, DisconnectReason,
-    LineInfo, Permission, PersonProfile, PersonState, Presence, Role, ServerMessage, Subsystem,
+    ChannelInfo, Permission, PersonProfile, PersonState, Presence, Role, ServerMessage, Subsystem,
     SubsystemHealth, Telemetry, Validate,
 };
-use seele_proto::ids::{VoiceRoomId, LineId, PersonId, RoleId, ScreenId, SessionId, Ssrc};
+use seele_proto::ids::{VoiceRoomId, ChannelId, PersonId, RoleId, ScreenId, SessionId, Ssrc};
 use seele_proto::screen::SCREEN_HEADER_LEN;
 use seele_proto::sync_ratio::{SyncInputs, SyncRatio};
 use seele_proto::transport::HANDSHAKE_TIMEOUT;
@@ -272,7 +272,7 @@ pub async fn serve(
     // every voice room is drawn with the people in it, a ghost is a ghost on screen.
     //
     // Here rather than at the end of `run_session` for the same reason as the
-    // line above: this is the one place every exit path passes through.
+    // channel above: this is the one place every exit path passes through.
     for voice_room in server
         .occupancy
         .lock()
@@ -616,7 +616,7 @@ async fn handshake(
         }
 
         let may = |permission| permissions.may(person.id, permission).unwrap_or(false);
-        let (voice_rooms, lines, roles) = read_server(&guard).map_err(|error| Refusal {
+        let (voice_rooms, channels, roles) = read_server(&guard).map_err(|error| Refusal {
             reason: DisconnectReason::ServerShuttingDown,
             detail: format!("could not read the server: {error}"),
         })?;
@@ -628,9 +628,9 @@ async fn handshake(
             id: person.id,
             nickname: person.nickname,
             may_speak: may(Permission::Speak),
-            may_write: may(Permission::WriteLine),
+            may_write: may(Permission::WriteChannel),
             voice_rooms,
-            lines,
+            channels,
             roles,
             permissions,
         }
@@ -680,7 +680,7 @@ async fn handshake(
             ssrc,
             server: nome_do_server,
             voice_rooms: account.voice_rooms,
-            lines: account.lines,
+            channels: account.channels,
             roles: account.roles,
             permissions: account.permissions,
         },
@@ -744,20 +744,20 @@ struct Account {
     may_speak: bool,
     may_write: bool,
     voice_rooms: Vec<VoiceRoomInfo>,
-    lines: Vec<LineInfo>,
+    channels: Vec<ChannelInfo>,
     roles: Vec<Role>,
     permissions: Vec<Permission>,
 }
 
-/// Reads the voice room and Line tree, and the roles, out of PERSISTENCE.
-fn read_server(persistence: &Persistence) -> Result<(Vec<VoiceRoomInfo>, Vec<LineInfo>, Vec<Role>)> {
+/// Reads the voice room and Channel tree, and the roles, out of PERSISTENCE.
+fn read_server(persistence: &Persistence) -> Result<(Vec<VoiceRoomInfo>, Vec<ChannelInfo>, Vec<Role>)> {
     let connection = persistence.connection();
 
     // The same reader the creating verbs use, so the tree the handshake sends
     // and the tree a new room lands in cannot drift apart.
     let channels = Channels::new(persistence);
     let voice_rooms = channels.voice_rooms()?;
-    let lines = channels.lines()?;
+    let channels = channels.channels()?;
 
     let mut role_statement = connection.prepare("SELECT id, name, permissions FROM roles")?;
     let roles = role_statement
@@ -772,7 +772,7 @@ fn read_server(persistence: &Persistence) -> Result<(Vec<VoiceRoomInfo>, Vec<Lin
         .filter_map(Result::ok)
         .collect();
 
-    Ok((voice_rooms, lines, roles))
+    Ok((voice_rooms, channels, roles))
 }
 
 /// The session loop.
@@ -984,7 +984,7 @@ async fn run_session(
     // Quadros de voz que o transporte recusou nesta sessão. Ver o `select!`.
     let mut recusados: u64 = 0;
     let mut events = server.events.subscribe();
-    let mut lines: Vec<LineId> = Vec::new();
+    let mut channels: Vec<ChannelId> = Vec::new();
     let mut current_voice_room: Option<VoiceRoomId> = None;
 
     // What this person has announced about themselves. Held here rather than
@@ -1240,12 +1240,12 @@ async fn run_session(
                             });
                         }
                     }
-                    ClientMessage::JoinLine { line } => {
-                        if !lines.contains(&line) {
-                            lines.push(line);
+                    ClientMessage::JoinChannel { channel } => {
+                        if !channels.contains(&channel) {
+                            channels.push(channel);
                         }
                     }
-                    ClientMessage::SendMessage { line, body, replies_to, client_message_id } => {
+                    ClientMessage::SendMessage { channel, body, replies_to, client_message_id } => {
                         // specs/08-seguranca.md: verified here, always.
                         if !session.may_write {
                             frame::write(&mut send, &ServerMessage::Alert {
@@ -1258,7 +1258,7 @@ async fn run_session(
                         // Queued, not confirmed. The broadcast after the commit
                         // is what tells anybody it happened.
                         server.post(PendingMessage {
-                            line,
+                            channel,
                             author: session.person,
                             author_nickname: session.nickname.clone(),
                             body,
@@ -1266,12 +1266,12 @@ async fn run_session(
                             client_message_id: Some(client_message_id),
                         }).await?;
                     }
-                    ClientMessage::FetchHistory { line, cursor, limit } => {
+                    ClientMessage::FetchHistory { channel, cursor, limit } => {
                         let page = {
                             let mut guard = server.persistence.lock().await;
                             let messages = Messages::new(&mut guard);
                             messages.history(
-                                line,
+                                channel,
                                 cursor,
                                 if limit == 0 { DEFAULT_PAGE } else { limit },
                             )?
@@ -1279,7 +1279,7 @@ async fn run_session(
                         // Oldest first on the wire, so a client can append.
                         for stored in page.into_iter().rev() {
                             frame::write(&mut send, &ServerMessage::MessageReceived {
-                                line: stored.line,
+                                channel: stored.channel,
                                 id: stored.id,
                                 author: stored.author,
                                 at_seconds: stored.created_at,
@@ -1345,14 +1345,14 @@ async fn run_session(
                     // security and the hidden button the convenience — but a
                     // refusal nobody is told about is indistinguishable from a
                     // server that is broken.
-                    ClientMessage::CreateVoiceRoom { name, limit, line } => {
+                    ClientMessage::CreateVoiceRoom { name, limit, channel } => {
                         if !pode(server, session.person, Permission::ManageVoiceRooms).await {
                             recusar(&mut send, session.person, "CreateVoiceRoom").await?;
                             continue;
                         }
                         let feito = {
                             let guard = server.persistence.lock().await;
-                            Channels::new(&guard).create_voice_room(&name, limit, line)
+                            Channels::new(&guard).create_voice_room(&name, limit, channel)
                         };
                         match feito {
                             Ok(voice_room) => {
@@ -1362,19 +1362,19 @@ async fn run_session(
                             Err(erro) => nao_deu(&mut send, &erro).await?,
                         }
                     }
-                    ClientMessage::CreateLine { name } => {
+                    ClientMessage::CreateChannel { name } => {
                         if !pode(server, session.person, Permission::ManageVoiceRooms).await {
-                            recusar(&mut send, session.person, "CreateLine").await?;
+                            recusar(&mut send, session.person, "CreateChannel").await?;
                             continue;
                         }
                         let feito = {
                             let guard = server.persistence.lock().await;
-                            Channels::new(&guard).create_line(&name)
+                            Channels::new(&guard).create_channel(&name)
                         };
                         match feito {
-                            Ok(line) => {
-                                tracing::info!(person = %session.person, line = %line.id, "line created");
-                                let _ = server.events.send(Event::LineCreated { line });
+                            Ok(channel) => {
+                                tracing::info!(person = %session.person, channel = %channel.id, "channel created");
+                                let _ = server.events.send(Event::ChannelCreated { channel });
                             }
                             Err(erro) => nao_deu(&mut send, &erro).await?,
                         }
@@ -1395,18 +1395,18 @@ async fn run_session(
                             Err(erro) => nao_deu(&mut send, &erro).await?,
                         }
                     }
-                    ClientMessage::RenameLine { line: id, name } => {
+                    ClientMessage::RenameChannel { channel: id, name } => {
                         if !pode(server, session.person, Permission::ManageVoiceRooms).await {
-                            recusar(&mut send, session.person, "RenameLine").await?;
+                            recusar(&mut send, session.person, "RenameChannel").await?;
                             continue;
                         }
                         let feito = {
                             let guard = server.persistence.lock().await;
-                            Channels::new(&guard).rename_line(id, &name)
+                            Channels::new(&guard).rename_channel(id, &name)
                         };
                         match feito {
                             Ok(name) => {
-                                let _ = server.events.send(Event::LineRenamed { line: id, name });
+                                let _ = server.events.send(Event::ChannelRenamed { channel: id, name });
                             }
                             Err(erro) => nao_deu(&mut send, &erro).await?,
                         }
@@ -1568,7 +1568,7 @@ async fn run_session(
                         // Soft in PERSISTENCE, gone on screen — and the two are one
                         // decision, not two. `Messages::remove` clears the body
                         // and stamps `deleted_at`; `history` filters those out
-                        // and `Room::apply` drops the line. So the message
+                        // and `Room::apply` drops the channel. So the message
                         // **disappears** for everybody, and what survives is a
                         // row that keeps replies pointing at it from dangling
                         // and keeps an operator able to answer "what was
@@ -1582,12 +1582,12 @@ async fn run_session(
                         match feito {
                             Ok(()) => {
                                 tracing::info!(by = %session.person, %id, own = seu, "message removed");
-                                // The Line comes from the stored row, never
-                                // from the asker: a Line the client filled in
-                                // is a Line the client can fill in wrong, and
+                                // The Channel comes from the stored row, never
+                                // from the asker: a Channel the client filled in
+                                // is a Channel the client can fill in wrong, and
                                 // it would aim somebody else's announcement.
                                 let _ = server.events.send(Event::MessageRemoved {
-                                    line: alvo.line,
+                                    channel: alvo.channel,
                                     id,
                                 });
                             }
@@ -1656,40 +1656,40 @@ async fn run_session(
                             Err(erro) => nao_deu(&mut send, &erro).await?,
                         }
                     }
-                    ClientMessage::DeleteLine { line: id } => {
+                    ClientMessage::DeleteChannel { channel: id } => {
                         if !pode(server, session.person, Permission::AdministerServer).await {
-                            recusar(&mut send, session.person, "DeleteLine").await?;
+                            recusar(&mut send, session.person, "DeleteChannel").await?;
                             continue;
                         }
                         let feito = {
                             let guard = server.persistence.lock().await;
-                            Channels::new(&guard).delete_line(id)
+                            Channels::new(&guard).delete_channel(id)
                         };
                         match feito {
                             Ok(()) => {
-                                tracing::info!(by = %session.person, line = %id, "line destroyed");
-                                let _ = server.events.send(Event::LineDeleted { line: id });
+                                tracing::info!(by = %session.person, channel = %id, "channel destroyed");
+                                let _ = server.events.send(Event::ChannelDeleted { channel: id });
                             }
                             Err(erro) => nao_deu(&mut send, &erro).await?,
                         }
                     }
                     // A read, answered straight down this connection rather
                     // than over the bus: it is nobody else's business how heavy
-                    // a Line looked to the person about to be asked whether
+                    // a Channel looked to the person about to be asked whether
                     // they mean it.
                     //
                     // No permission. Answering tells a person how much is in a
-                    // Line they may already read, and refusing would only mean
+                    // Channel they may already read, and refusing would only mean
                     // the confirmation they are shown is the vaguer one.
-                    ClientMessage::WeighLine { line: id } => {
+                    ClientMessage::WeighChannel { channel: id } => {
                         let pesado = {
                             let guard = server.persistence.lock().await;
-                            Channels::new(&guard).weigh_line(id)
+                            Channels::new(&guard).weigh_channel(id)
                         };
                         match pesado {
                             Ok(peso) => {
-                                frame::write(&mut send, &ServerMessage::LineWeighed {
-                                    line: id,
+                                frame::write(&mut send, &ServerMessage::ChannelWeighed {
+                                    channel: id,
                                     messages: peso.messages,
                                     authors: peso.authors,
                                     oldest_at_seconds: peso.oldest_at_seconds,
@@ -1706,11 +1706,11 @@ async fn run_session(
                     // directions. Sending is not here at all, because a sender
                     // opens its own stream — see the `accept_uni` task above.
                     ClientMessage::FetchAttachment { attachment } => {
-                        // ReadLine and nothing more: a file hanging off a
+                        // ReadChannel and nothing more: a file hanging off a
                         // message somebody may read is part of that message,
                         // and `Permission::AttachFile` is about putting bytes
                         // on somebody's disk rather than about looking at them.
-                        if !pode(server, session.person, Permission::ReadLine).await {
+                        if !pode(server, session.person, Permission::ReadChannel).await {
                             frame::write(&mut send, &ServerMessage::AttachmentUnavailable {
                                 attachment,
                                 reason: AttachmentRefusal::NotFound,
@@ -2022,19 +2022,19 @@ async fn run_session(
                         }).await?;
                         continue;
                     }
-                    // The same for a Line this connection had open. It is
-                    // dropped from `lines` here rather than left to rot: that
+                    // The same for a Channel this connection had open. It is
+                    // dropped from `channels` here rather than left to rot: that
                     // list is what `translate` filters message traffic by, and
-                    // a Line that stayed in it would make this connection the
+                    // a Channel that stayed in it would make this connection the
                     // one that still asks about a room that is gone.
-                    Event::LineDeleted { line: id } if lines.contains(id) => {
-                        lines.retain(|aberta| aberta != id);
-                        frame::write(&mut send, &ServerMessage::LineDeleted {
-                            line: *id,
+                    Event::ChannelDeleted { channel: id } if channels.contains(id) => {
+                        channels.retain(|aberta| aberta != id);
+                        frame::write(&mut send, &ServerMessage::ChannelDeleted {
+                            channel: *id,
                         }).await?;
                         frame::write(&mut send, &ServerMessage::Alert {
                             severity: AlertSeverity::Warning,
-                            reason: AlertReason::LineDeleted,
+                            reason: AlertReason::ChannelDeleted,
                             operator_text: None,
                         }).await?;
                         continue;
@@ -2042,7 +2042,7 @@ async fn run_session(
                     _ => {}
                 }
 
-                if let Some(message) = translate(&event, &lines, session.person) {
+                if let Some(message) = translate(&event, &channels, session.person) {
                     frame::write(&mut send, &message).await?;
                 }
             }
@@ -2098,7 +2098,7 @@ async fn run_session(
     // it did not happen at all on any path that left the loop through a `?`:
     // the seat was cleared for a clean shutdown and kept for ever for a broken
     // pipe, which is the case that actually occurs. Doing it there costs the
-    // few microseconds between this line and that one, and covers every exit.
+    // few microseconds between this channel and that one, and covers every exit.
 
     // Dito só quando aconteceu, e uma vez.
     //
@@ -2142,7 +2142,7 @@ async fn run_session(
 /// ([`ClientMessage::InsertPlug`]) or somebody with [`Permission::MovePerson`]
 /// decides — and the bookkeeping either way is identical: out of the old room
 /// before into the new one, the occupancy rewritten, the departure and the
-/// arrival both announced. Written twice, the copy that gets a line added is
+/// arrival both announced. Written twice, the copy that gets a channel added is
 /// never both of them, and the half that goes stale is the one that leaves
 /// somebody in a room they are not in.
 async fn assentar(
@@ -2262,7 +2262,7 @@ async fn pode(server: &Server, person: PersonId, permission: Permission) -> bool
 /// So: somebody holding [`Permission::AdministerServer`] can only be kicked,
 /// banned or moved by somebody who holds it too. Between two Comandantes it
 /// does nothing, which is right — they already trust each other with the whole
-/// server. It matters exactly at the line the spec draws between the two roles,
+/// server. It matters exactly at the channel the spec draws between the two roles,
 /// and it matters more once ADR 0022 puts a server on the open internet, where
 /// "the person I promoted" is not always somebody sitting in the same room.
 async fn moderavel(server: &Server, quem: PersonId, alvo: PersonId, permission: Permission) -> bool {
@@ -2489,13 +2489,13 @@ fn announce(server: &Server, session: &Session, state: &AnnouncedState) {
 }
 
 /// Decides whether an event concerns this connection, and what to send.
-fn translate(event: &Event, lines: &[LineId], self_person: PersonId) -> Option<ServerMessage> {
+fn translate(event: &Event, channels: &[ChannelId], self_person: PersonId) -> Option<ServerMessage> {
     match event {
         Event::MessagePosted(message) => {
-            lines
-                .contains(&message.line)
+            channels
+                .contains(&message.channel)
                 .then(|| ServerMessage::MessageReceived {
-                    line: message.line,
+                    channel: message.channel,
                     id: message.id,
                     author: message.author,
                     at_seconds: message.created_at,
@@ -2506,18 +2506,18 @@ fn translate(event: &Event, lines: &[LineId], self_person: PersonId) -> Option<S
                     attachment: message.attachment.clone(),
                 })
         }
-        Event::MessageEdited { line, id, body } => {
-            lines.contains(line).then(|| ServerMessage::MessageEdited {
-                line: *line,
+        Event::MessageEdited { channel, id, body } => {
+            channels.contains(channel).then(|| ServerMessage::MessageEdited {
+                channel: *channel,
                 id: *id,
                 body: body.clone(),
             })
         }
-        Event::MessageRemoved { line, id } => {
-            lines
-                .contains(line)
+        Event::MessageRemoved { channel, id } => {
+            channels
+                .contains(channel)
                 .then_some(ServerMessage::MessageRemoved {
-                    line: *line,
+                    channel: *channel,
                     id: *id,
                 })
         }
@@ -2602,13 +2602,13 @@ fn translate(event: &Event, lines: &[LineId], self_person: PersonId) -> Option<S
         // maker needs it as much as everybody else does. Filtering self out here
         // would leave whoever made the room as the one person who cannot see it.
         Event::VoiceRoomCreated { voice_room } => Some(ServerMessage::VoiceRoomCreated { voice_room: voice_room.clone() }),
-        Event::LineCreated { line } => Some(ServerMessage::LineCreated { line: line.clone() }),
+        Event::ChannelCreated { channel } => Some(ServerMessage::ChannelCreated { channel: channel.clone() }),
         Event::VoiceRoomRenamed { voice_room, name } => Some(ServerMessage::VoiceRoomRenamed {
             voice_room: *voice_room,
             name: name.clone(),
         }),
-        Event::LineRenamed { line, name } => Some(ServerMessage::LineRenamed {
-            line: *line,
+        Event::ChannelRenamed { channel, name } => Some(ServerMessage::ChannelRenamed {
+            channel: *channel,
             name: name.clone(),
         }),
 
@@ -2634,12 +2634,12 @@ fn translate(event: &Event, lines: &[LineId], self_person: PersonId) -> Option<S
         // room people keep trying to walk into. The person who asked included —
         // they need to stop drawing it as much as anybody.
         //
-        // The connections that were *inside* the voice room, or had the Line open,
+        // The connections that were *inside* the voice room, or had the Channel open,
         // never get here: the loop answers them itself and `continue`s, because
         // they have a plug to pull and a sentence to be told and this function
         // knows about neither.
         Event::VoiceRoomDeleted { voice_room } => Some(ServerMessage::VoiceRoomDeleted { voice_room: *voice_room }),
-        Event::LineDeleted { line } => Some(ServerMessage::LineDeleted { line: *line }),
+        Event::ChannelDeleted { channel } => Some(ServerMessage::ChannelDeleted { channel: *channel }),
 
         // ---- compartilhamento de tela ----
         //

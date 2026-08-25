@@ -203,7 +203,7 @@ async fn um_pessoa_comum_e_recusado_pelo_server_e_nao_pela_casca() -> Result<()>
     // dele acabaria, ou o plug dele mudaria de sala.
     let anfitriao = entrar(endereco, "anfitriao-recusa").await?;
     anfitriao.insert_plug(VOICE_ROOM)?;
-    anfitriao.open_line(LINE)?;
+    anfitriao.open_channel(LINE)?;
     anfitriao.send_message(LINE, "verificando harmônicos".into())?;
     assert!(
         ate(&anfitriao, |plug| !plug.messages().is_empty()),
@@ -376,10 +376,10 @@ async fn apagar_uma_mensagem_tira_ela_da_conversa_de_todo_mundo() -> Result<()> 
     let (endereco, servidor, _arquivo) = server("apagar").await?;
 
     let anfitriao = entrar(endereco, "anfitriao-apagar").await?;
-    anfitriao.open_line(LINE)?;
+    anfitriao.open_channel(LINE)?;
 
     let visita = entrar(endereco, "visita-apagar").await?;
-    visita.open_line(LINE)?;
+    visita.open_channel(LINE)?;
     visita.send_message(LINE, "padrão azul".into())?;
     visita.send_message(LINE, "isto some".into())?;
 

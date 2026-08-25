@@ -39,7 +39,7 @@ use std::time::Duration;
 use anyhow::Result;
 use ed25519_dalek::{Signer, SigningKey};
 use seele_proto::control::{ClientMessage, DisconnectReason, ServerMessage};
-use seele_proto::ids::{ClientMessageId, LineId};
+use seele_proto::ids::{ClientMessageId, ChannelId};
 use seele_server::persistence::Location;
 use seele_server::{frame, ServerConfig, Daemon};
 
@@ -217,7 +217,7 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
     let mut ouvinte = abrir(endereco, 1, 16 * 1024).await?;
     frame::write(
         &mut ouvinte.envio,
-        &ClientMessage::JoinLine { line: LineId(LINE) },
+        &ClientMessage::JoinChannel { channel: ChannelId(LINE) },
     )
     .await?;
 
@@ -233,7 +233,7 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
             frame::write(
                 &mut falante.envio,
                 &ClientMessage::SendMessage {
-                    line: LineId(LINE),
+                    channel: ChannelId(LINE),
                     body: corpo,
                     replies_to: None,
                     client_message_id: ClientMessageId(u64::try_from(numero).expect("cabe") + 1),
@@ -305,7 +305,7 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
     // O que se perdeu foi a **entrega**, e não a mensagem: tudo o que os
     // falantes disseram está em PERSISTENCE, que é o que faz de reconectar um
     // conserto e não um consolo.
-    let gravadas = servidor.quantas_mensagens(LineId(LINE)).await?;
+    let gravadas = servidor.quantas_mensagens(ChannelId(LINE)).await?;
     assert_eq!(
         gravadas, ditas as u64,
         "o servidor perdeu mensagem antes de gravar, e aí reconectar não repõe nada"

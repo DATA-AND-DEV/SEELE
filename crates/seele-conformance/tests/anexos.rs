@@ -9,7 +9,7 @@
 //! So these go through the wire, with the real client, and ask the four
 //! questions a person would notice:
 //!
-//! - a file sent arrives whole, and the message is only on the Line afterwards;
+//! - a file sent arrives whole, and the message is only on the Channel afterwards;
 //! - a file over the per-file limit is refused **with a reason**, not dropped;
 //! - a server that fills stays under its ceiling, and the message whose file was
 //!   evicted still says what the file was;
@@ -36,7 +36,7 @@ use seele_core::client::{AttachmentRequest, Previewed, Sent};
 use seele_core::preview::{data_uri, judge, ImageFormat, Verdict, PREVIEW_LIMIT};
 use seele_core::{Client, MemoryPinStore};
 use seele_proto::control::{AttachmentRefusal, AttachmentState, ServerMessage};
-use seele_proto::ids::{AttachmentId, ClientMessageId, LineId};
+use seele_proto::ids::{AttachmentId, ClientMessageId, ChannelId};
 use seele_server::persistence::attachments::per_file_limit;
 use seele_server::persistence::Location;
 use seele_server::{ServerConfig, Daemon};
@@ -44,7 +44,7 @@ use seele_server::{ServerConfig, Daemon};
 /// How long a test waits for a file the server agreed to send.
 const ESPERA: Duration = Duration::from_secs(5);
 
-const LINHA: LineId = LineId(1);
+const LINHA: ChannelId = ChannelId(1);
 
 /// A server with a real database file and a real `anexos/` beside it.
 ///
@@ -84,7 +84,7 @@ async fn entrar(endereco: SocketAddr, semente: u8) -> Result<Client> {
         None,
     )
     .await?;
-    cliente.join_line(LINHA).await?;
+    cliente.join_channel(LINHA).await?;
     Ok(cliente)
 }
 
@@ -97,7 +97,7 @@ fn arquivo(casa: &Path, nome: &str, tamanho: usize, semente: u8) -> std::path::P
 
 fn pedido<'a>(caminho: &'a Path, nome: &'a str, chave: u64) -> AttachmentRequest<'a> {
     AttachmentRequest {
-        line: LINHA,
+        channel: LINHA,
         client_message_id: ClientMessageId(chave),
         body: "olha isto",
         replies_to: None,

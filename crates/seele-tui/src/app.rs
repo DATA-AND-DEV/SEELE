@@ -46,7 +46,7 @@ impl Mode {
 pub enum Panel {
     /// The server list.
     Server,
-    /// voice_rooms and Lines.
+    /// voice_rooms and Channels.
     Channels,
     /// Messages.
     Messages,
@@ -127,7 +127,7 @@ impl RosterEntry {
     }
 }
 
-/// One row of the voice_rooms/Lines panel.
+/// One row of the voice_rooms/Channels panel.
 ///
 /// `specs/05-cliente-tui.md` draws people nested under their voice room rather than
 /// in a panel of their own, so the panel is a flattened tree and not a list.
@@ -149,8 +149,8 @@ pub enum Node {
     },
     /// A person inside the voice room above.
     Person(RosterEntry),
-    /// A Line — a text channel.
-    Line {
+    /// A Channel — a text channel.
+    Channel {
         /// Its name, including the `#`.
         name: String,
     },
@@ -167,7 +167,7 @@ impl Node {
     }
 }
 
-/// One line of conversation.
+/// One channel of conversation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChatLine {
     /// Wall-clock time, already formatted. The core does not format; the shell
@@ -201,7 +201,7 @@ pub struct Bar {
 /// An alert banner. `specs/07-tema-evangelion.md`: `Alerta · 警告`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Alert {
-    /// The line to show.
+    /// The channel to show.
     pub text: String,
     /// Whether it blocks until dismissed.
     ///
@@ -227,7 +227,7 @@ pub enum Action {
     ToggleAtField,
     /// Toggle the speaker mute.
     ToggleTotalIsolation,
-    /// Enter the selected voice room or open the selected Line.
+    /// Enter the selected voice room or open the selected Channel.
     Activate,
     /// Leave the voice room this client is in.
     ///
@@ -249,7 +249,7 @@ pub struct App {
     pub servers: Vec<String>,
     /// Which server is selected.
     pub selected_server: usize,
-    /// voice_rooms, their people, and Lines — flattened for drawing.
+    /// voice_rooms, their people, and Channels — flattened for drawing.
     pub tree: Vec<Node>,
     /// Which tree row is selected.
     pub selected: usize,
@@ -615,7 +615,7 @@ impl App {
     /// Redoes the search over the current history, keeping the term.
     ///
     /// Called when a message arrives: indices shift, and a cursor that does
-    /// not keep up points at the wrong line. The cursor is carried over to the
+    /// not keep up points at the wrong channel. The cursor is carried over to the
     /// first match at or after the one it was on, so a message arriving while
     /// somebody sits on the second of three occurrences does not throw them
     /// back to the first. If the current occurrence disappeared, the cursor
@@ -710,7 +710,7 @@ mod tests {
                 open: false,
                 sync: None,
             },
-            Node::Line {
+            Node::Channel {
                 name: "#geral".into(),
             },
         ];
@@ -760,7 +760,7 @@ mod tests {
 
     #[test]
     fn an_empty_message_is_not_sent() {
-        // Pressing enter on an empty line is how somebody leaves insert mode,
+        // Pressing enter on an empty channel is how somebody leaves insert mode,
         // not how they post nothing.
         let mut app = app();
         app.on_key(Key::Char('i'));
@@ -1082,7 +1082,7 @@ mod tests {
     #[test]
     fn a_new_message_during_a_search_is_rematched() {
         // Indices shift when a new message arrives; redoing the search is what
-        // stops the cursor from pointing at a line that moved.
+        // stops the cursor from pointing at a channel that moved.
         let mut app = app_with_history();
         app.on_key(Key::Char('/'));
         for character in "sync".chars() {
@@ -1160,7 +1160,7 @@ mod tree_tests {
                 at_field: false,
                 total_isolation: false,
             }),
-            Node::Line {
+            Node::Channel {
                 name: "#geral".into(),
             },
         ]
@@ -1169,7 +1169,7 @@ mod tree_tests {
     #[test]
     fn navigation_skips_over_persons() {
         // People are shown, not entered. Stopping on them on the way from a
-        // voice room to a Line is two wasted keystrokes per person in the room.
+        // voice room to a Channel is two wasted keystrokes per person in the room.
         let mut app = App::new();
         app.tree = tree();
         app.focus = Panel::Channels;

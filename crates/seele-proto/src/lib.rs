@@ -35,7 +35,7 @@ pub mod uri;
 pub mod version;
 
 pub use control::{ClientMessage, ControlError, ServerMessage};
-pub use ids::{VoiceRoomId, LineId, PersonId, ScreenId, SessionId, Ssrc};
+pub use ids::{VoiceRoomId, ChannelId, PersonId, ScreenId, SessionId, Ssrc};
 pub use media::{MediaError, MediaHeader, HEADER_LEN, MAX_DATAGRAM_LEN, MAX_PAYLOAD_LEN};
 pub use stream::{StreamType, StreamTypeError, RESERVED_TYPE, STREAM_TYPE_LEN};
 pub use sync_ratio::{SyncBand, SyncInputs, SyncRatio};

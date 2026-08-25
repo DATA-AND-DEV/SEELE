@@ -112,7 +112,7 @@ const AVISOS = {
   // A terceira não é sobre uma sala que foi: é uma recusa, e a única desta
   // lista que ensina o que fazer em seguida.
   VoiceRoomDeleted: "A SALA DE VOZ EM QUE VOCÊ ESTAVA FOI APAGADA",
-  LineDeleted: "O CANAL DE TEXTO QUE VOCÊ LIA FOI APAGADO, COM TUDO QUE HAVIA NELE",
+  ChannelDeleted: "O CANAL DE TEXTO QUE VOCÊ LIA FOI APAGADO, COM TUDO QUE HAVIA NELE",
   LastVoiceRoom:
     "ESTA É A ÚNICA SALA DE VOZ DO SERVIDOR, E ELA FICA.\nFaça outra sala antes de apagar esta.",
 };

@@ -30,7 +30,7 @@ Ela agora custa menos, porque o nome comum já é a explicação.
 | Canal de voz | sala de voz | voice room | `VoiceRoom`, `VoiceRoomId` |
 | Coluna de salas | SALAS DE VOZ | VOICE ROOMS | — |
 | Sala sem nome | SALA 1, SALA 2 | ROOM 1, ROOM 2 | — |
-| Canal de texto | canal de texto | text channel | `Line`, `LineId` |
+| Canal de texto | canal de texto | text channel | `Channel`, `LineId` |
 | Coluna de canais | CANAIS | CHANNELS | — |
 | Usuário | pessoa | person | `Person`, `PersonId` |
 | Nome escolhido pela pessoa | APELIDO | NICKNAME | `Person::nick` |

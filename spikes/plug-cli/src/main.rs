@@ -40,7 +40,7 @@ use seele_audio::resample::RateConverter;
 use seele_audio::{FRAME_MS, FRAME_SAMPLES, SAMPLE_RATE_HZ};
 use seele_core::{Client, MemoryPinStore, PinDecision};
 use seele_proto::MediaHeader;
-use seele_proto::ids::{CageId, ClientMessageId, LineId};
+use seele_proto::ids::{CageId, ClientMessageId, ChannelId};
 use seele_proto::ServerMessage;
 use shiguredo_opus::{
     Application, Decoder, DecoderConfig, Encoder, EncoderConfig, FrameDuration, InbandFec,
@@ -147,8 +147,8 @@ async fn main() -> Result<()> {
     }
 
     client.insert_plug(args.cage).await?;
-    client.join_line(LineId(1)).await?;
-    client.fetch_history(LineId(1), None, 20).await?;
+    client.join_channel(ChannelId(1)).await?;
+    client.fetch_history(ChannelId(1), None, 20).await?;
     println!("\nplug inserido no cage {} · linha 1\n", args.cage);
 
     if args.no_audio {
@@ -189,7 +189,7 @@ async fn protocol_only(mut client: Client) -> Result<()> {
                 }
                 // specs/02-protocolo.md: idempotent by client_msg_id, so a
                 // resend after a lost acknowledgement does not post twice.
-                client.send_message(LineId(1), body.trim(), ClientMessageId(next_key)).await?;
+                client.send_message(ChannelId(1), body.trim(), ClientMessageId(next_key)).await?;
                 next_key += 1;
             }
             event = client.next_event() => {

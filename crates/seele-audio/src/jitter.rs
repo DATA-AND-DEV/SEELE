@@ -30,7 +30,7 @@
 //! puts loss on screen as the product's signature metric, so that is not a
 //! cosmetic bug. This was gap G5 in `docs/plano-m0-m1.md`.
 //!
-//! `specs/02-protocolo.md` already contains the answer, in the line saying the
+//! `specs/02-protocolo.md` already contains the answer, in the channel saying the
 //! timestamp "detects silence gaps". The two counters move differently:
 //!
 //! - `seq` increments once per **transmitted** packet.
@@ -475,7 +475,7 @@ impl<T> JitterBuffer<T> {
 
         // Move the playout pointer past what has already been heard.
         //
-        // This line is the fix, and leaving it out was the first attempt: the
+        // This channel is the fix, and leaving it out was the first attempt: the
         // counters were reduced but the pointer was not moved, so the next tick
         // found the same hole with the counter already spent and scheduled the
         // whole thing again. The skip has to happen in the pointer or it does
@@ -817,7 +817,7 @@ mod tests {
     fn the_acceptance_profile_stays_mostly_intelligible() {
         // specs/09-roadmap.md accepts M1 on "induced loss of 5% remains
         // intelligible". This cannot judge intelligibility, but it can hold the
-        // line that the buffer is not making it worse: what the network dropped
+        // channel that the buffer is not making it worse: what the network dropped
         // should be roughly what the listener loses, no more.
         let (decisions, metrics) =
             drive(NetworkProfile::acceptance_five_percent_loss(), 77, 10_000);

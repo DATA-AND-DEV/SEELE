@@ -37,7 +37,7 @@ use anyhow::Result;
 use seele_core::enlace::{Aviso, Destino, Enlace};
 use seele_core::{Link, MemoryPinStore};
 use seele_proto::control::ServerMessage;
-use seele_proto::ids::{VoiceRoomId, ClientMessageId, LineId};
+use seele_proto::ids::{VoiceRoomId, ClientMessageId, ChannelId};
 use seele_server::persistence::Location;
 use seele_server::server::Occupant;
 use seele_server::hospedagem::Hospedagem;
@@ -144,9 +144,9 @@ async fn conectar_e_falar(
     )
     .await?;
     enlace.inserir_plug(VoiceRoomId(VOICE_ROOM)).await?;
-    enlace.abrir_linha(LineId(LINE)).await?;
+    enlace.abrir_linha(ChannelId(LINE)).await?;
     enlace
-        .dizer(LineId(LINE), o_que.to_owned(), proxima_chave())
+        .dizer(ChannelId(LINE), o_que.to_owned(), proxima_chave())
         .await?;
 
     let ouviu = esperar(&mut enlace, Duration::from_secs(15), |aviso| {

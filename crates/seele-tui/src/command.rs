@@ -25,9 +25,9 @@ pub enum Command {
         /// Name or number.
         which: String,
     },
-    /// `:linha <nome>` — not in the spec's list, but a client with Lines and no
+    /// `:linha <nome>` — not in the spec's list, but a client with Channels and no
     /// way to switch between them can only ever use the first one.
-    Line {
+    Channel {
         /// Name or number.
         which: String,
     },
@@ -70,7 +70,7 @@ pub enum Command {
     },
 }
 
-/// Parses a command line, with or without its leading colon.
+/// Parses a command channel, with or without its leading colon.
 ///
 /// Accepts the leading `:` because a person who types `:q` into a prompt that
 /// already shows `:` is not making a mistake worth an error message.
@@ -91,7 +91,7 @@ pub fn parse(input: &str) -> Command {
         "ejetar" | "eject" => Command::Eject,
         "conectar" | "connect" if !joined.is_empty() => Command::Connect { target: joined },
         "voice room" if !joined.is_empty() => Command::VoiceRoom { which: joined },
-        "linha" | "line" if !joined.is_empty() => Command::Line { which: joined },
+        "linha" | "channel" if !joined.is_empty() => Command::Channel { which: joined },
         "sync" => Command::Sync,
         "audio" | "áudio" => Command::Audio,
         "tema" | "theme" => Command::Theme {

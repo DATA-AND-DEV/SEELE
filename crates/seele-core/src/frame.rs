@@ -1,7 +1,7 @@
 //! Length-prefixed framing over a QUIC stream.
 //!
 //! Deliberately duplicated from `seele-server`: ADR 0002 keeps the daemon and the
-//! client from sharing a transport crate, and forty lines of framing is a much
+//! client from sharing a transport crate, and forty channels of framing is a much
 //! smaller cost than a crate both would depend on and neither would own.
 //!
 //! `specs/02-protocolo.md` puts control on "bidirectional stream #0, long
@@ -168,7 +168,7 @@ mod tests {
         // Um quadro em duas partes, com uma pausa no meio — exatamente o que
         // acontece quando o corpo chega num pacote posterior ao do tamanho.
         let corpo = seele_proto::control::encode(&ClientMessage::SendMessage {
-            line: seele_proto::ids::LineId(1),
+            channel: seele_proto::ids::ChannelId(1),
             body: "dito no terminal".to_owned(),
             replies_to: None,
             client_message_id: seele_proto::ids::ClientMessageId(1),

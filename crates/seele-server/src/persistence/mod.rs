@@ -262,8 +262,8 @@ mod tests {
         };
         assert!(permissions("Person").contains("Speak"));
         assert!(!permissions("Observer").contains("Speak"));
-        assert!(permissions("Observer").contains("ReadLine"));
-        assert!(!permissions("Observer").contains("WriteLine"));
+        assert!(permissions("Observer").contains("ReadChannel"));
+        assert!(!permissions("Observer").contains("WriteChannel"));
     }
 
     #[test]
@@ -337,6 +337,17 @@ mod tests {
                      -- o replay encontra `people` onde procura `pilots` e para
                      -- com «no such table» — que foi exatamente o que aconteceu
                      -- quando a 5 entrou.
+                     -- A parte da migração 8, pela mesma regra.
+                     ALTER TABLE channels RENAME TO lines;
+                     ALTER TABLE messages RENAME COLUMN channel_id TO line_id;
+                     ALTER TABLE voice_rooms RENAME COLUMN channel_id TO line_id;
+                     DROP INDEX IF EXISTS messages_by_channel_id;
+                     DROP INDEX IF EXISTS messages_by_channel_time;
+                     UPDATE roles SET permissions = replace(permissions, 'ReadChannel',  'ReadLine');
+                     UPDATE roles SET denials     = replace(denials,     'ReadChannel',  'ReadLine');
+                     UPDATE roles SET permissions = replace(permissions, 'WriteChannel', 'WriteLine');
+                     UPDATE roles SET denials     = replace(denials,     'WriteChannel', 'WriteLine');
+
                      -- A parte da migração 7, pela mesma regra.
                      UPDATE roles SET permissions = replace(permissions, 'AdministerServer', 'AdministerDogma');
                      UPDATE roles SET denials     = replace(denials,     'AdministerServer', 'AdministerDogma');
@@ -427,11 +438,11 @@ mod tests {
 
     #[test]
     fn foreign_keys_are_enforced() {
-        // Off by default in SQLite. A message pointing at a deleted Line would
+        // Off by default in SQLite. A message pointing at a deleted Channel would
         // otherwise survive happily and surface as a crash somewhere else.
         let persistence = memory();
         let result = persistence.connection().execute(
-            "INSERT INTO messages (line_id, author_id, body, created_at)
+            "INSERT INTO messages (channel_id, author_id, body, created_at)
              VALUES (999, 999, 'orphan', 0)",
             [],
         );

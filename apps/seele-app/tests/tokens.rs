@@ -74,9 +74,9 @@ fn the_stylesheet_uses_no_colour_the_tokens_do_not_define() {
 
     let literals: Vec<&str> = css
         .lines()
-        .filter(|line| line.contains('#') && !line.trim_start().starts_with("/*"))
-        .filter(|line| {
-            line.split('#')
+        .filter(|channel| channel.contains('#') && !channel.trim_start().starts_with("/*"))
+        .filter(|channel| {
+            channel.split('#')
                 .skip(1)
                 .any(|rest| rest.chars().take(3).all(|c| c.is_ascii_hexdigit()))
         })

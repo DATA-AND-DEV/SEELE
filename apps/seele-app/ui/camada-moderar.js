@@ -656,7 +656,7 @@ $("lista-voice_rooms").addEventListener("click", async (evento) => {
   if (!voice_room) return;
   // A Linha presa é lida da sala de voz, e não adivinhada pelo nome: um servidor pode ter
   // uma Linha chamada como a sala e nenhuma ligação entre as duas.
-  const presa = snapshot.lines.find((linha) => linha.id === voice_room.line) ?? null;
+  const presa = snapshot.channels.find((linha) => linha.id === voice_room.channel) ?? null;
   abrirConfirmacao(
     `APAGAR A SALA DE VOZ ${voice_room.name} ?`,
     consequenciaDeApagarVoiceRoom(voice_room, presa),
@@ -671,7 +671,7 @@ $("lista-linhas").addEventListener("click", async (evento) => {
   const id = Number(alvo.dataset.apagarLinha);
   const snapshot = await lerSnapshot();
   if (!snapshot) return;
-  const linha = snapshot.lines.find((l) => l.id === id);
+  const linha = snapshot.channels.find((l) => l.id === id);
   if (!linha) return;
 
   // O peso vem antes da caixa, e a caixa não abre sem ele. Os três números são
@@ -679,7 +679,7 @@ $("lista-linhas").addEventListener("click", async (evento) => {
   // pergunta que não informa nada.
   let peso = null;
   try {
-    peso = await invoke("peso_da_linha", { line: id });
+    peso = await invoke("peso_da_linha", { channel: id });
   } catch (falha) {
     abrirRecusa(
       `APAGAR O CANAL #${linha.name} ?`,
@@ -697,10 +697,10 @@ $("lista-linhas").addEventListener("click", async (evento) => {
     consequenciaDeApagarLinha(
       linha,
       peso,
-      snapshot.voice_rooms.filter((voice_room) => voice_room.line === id),
+      snapshot.voice_rooms.filter((voice_room) => voice_room.channel === id),
     ),
     `APAGAR #${linha.name}`,
-    () => invoke("apagar_linha", { line: id }),
+    () => invoke("apagar_linha", { channel: id }),
   );
 });
 

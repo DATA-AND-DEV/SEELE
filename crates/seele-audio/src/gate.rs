@@ -9,7 +9,7 @@
 //! > - Both feed the same `speaking: bool` signal, which is announced to the
 //! >   server so the interface can highlight who is talking.
 //!
-//! That last line is the design: whatever the user chose, everything downstream
+//! That last channel is the design: whatever the user chose, everything downstream
 //! sees one boolean. Nothing outside this module knows which mode is active.
 //!
 //! # Deviation from the spec: no `webrtc-vad`

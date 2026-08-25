@@ -3,7 +3,7 @@
 //! ADR 0027: **one unidirectional QUIC stream per transfer, and never the
 //! control stream.** The control stream is ordered, and an ordered stream blocks
 //! itself: twenty megabytes written into it stop every presence event, every
-//! line of text and every `Pong` from everybody behind them until the last byte
+//! channel of text and every `Pong` from everybody behind them until the last byte
 //! goes through. It is the one stream that may not queue.
 //!
 //! # There is no chunk framing here, on purpose
@@ -36,7 +36,7 @@ use sha2::{Digest as _, Sha256};
 use crate::control::{
     check_bounds, ControlError, Validate, MAX_BODY_LEN, MAX_DECLARED_TYPE_LEN, MAX_FILE_NAME_LEN,
 };
-use crate::ids::{AttachmentId, ClientMessageId, LineId, MessageId};
+use crate::ids::{AttachmentId, ClientMessageId, ChannelId, MessageId};
 
 /// Length of a SHA-256 digest, in bytes.
 pub const CONTENT_HASH_LEN: usize = 32;
@@ -55,12 +55,12 @@ pub const BLOCK_LEN: usize = 64 * 1024;
 /// **only** published once the bytes have arrived whole. That is why the body
 /// travels with the file rather than on a separate `SendMessage`: two channels
 /// carrying halves of one message would have an order to get wrong, and the
-/// cost of getting it wrong is a message on the Line pointing at a file that
+/// cost of getting it wrong is a message on the Channel pointing at a file that
 /// never landed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttachmentHeader {
-    /// Which Line the message belongs to.
-    pub line: LineId,
+    /// Which Channel the message belongs to.
+    pub channel: ChannelId,
     /// The idempotency key of the message this file belongs to.
     ///
     /// The same key that already makes a send idempotent (gap G9). A retry
@@ -215,7 +215,7 @@ mod tests {
 
     fn header() -> AttachmentHeader {
         AttachmentHeader {
-            line: LineId(1),
+            channel: ChannelId(1),
             client_message_id: ClientMessageId(0xFEED),
             body: "olha isto".into(),
             replies_to: None,

@@ -416,6 +416,36 @@ pub const MIGRATIONS: &[Migration] = &[
             UPDATE roles SET denials     = replace(denials,     'AdministerDogma', 'AdministerServer');
         "#,
     },
+    Migration {
+        version: 8,
+        description: "vocabulário: Line vira Channel em tabela, coluna, índice e permissão",
+        sql: r#"
+            -- Último dos quatro renames. `Line` não vinha de Evangelion, ao
+            -- contrário de `Dogma`, `Cage` e `Pilot` — mas a tela já dizia
+            -- "canal de texto" desde o ADR 0033, e deixar o único sotaque velho
+            -- no meio dos três novos era pior que trocar.
+
+            ALTER TABLE lines RENAME TO channels;
+            ALTER TABLE messages RENAME COLUMN line_id TO channel_id;
+            ALTER TABLE voice_rooms RENAME COLUMN line_id TO channel_id;
+
+            -- Índice não se renomeia em SQLite: derruba e refaz. Os dois
+            -- carregam o nome velho no próprio identificador, e `DROP INDEX`
+            -- não perde linha nenhuma — não é passo de volta.
+            DROP INDEX IF EXISTS messages_by_line_id;
+            DROP INDEX IF EXISTS messages_by_line_time;
+            CREATE INDEX messages_by_channel_id ON messages (channel_id, id DESC);
+            CREATE INDEX messages_by_channel_time ON messages (channel_id, created_at);
+
+            -- Como nas três anteriores: nome de permissão é texto dentro do
+            -- JSON de `roles`, e o rename do enum em Rust não chega aqui
+            -- sozinho.
+            UPDATE roles SET permissions = replace(permissions, 'ReadLine',  'ReadChannel');
+            UPDATE roles SET denials     = replace(denials,     'ReadLine',  'ReadChannel');
+            UPDATE roles SET permissions = replace(permissions, 'WriteLine', 'WriteChannel');
+            UPDATE roles SET denials     = replace(denials,     'WriteLine', 'WriteChannel');
+        "#,
+    },
 ];
 
 #[cfg(test)]

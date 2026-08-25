@@ -20,12 +20,12 @@ fn app_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// A file from `apps/seele-app/`, with its line endings normalised to `\n`.
+/// A file from `apps/seele-app/`, with its channel endings normalised to `\n`.
 ///
 /// The normalisation is not tidiness. Git on Windows checks out with CRLF by
 /// default and this repository ships no `.gitattributes`, so the very same
 /// commit reaches a Windows runner with every `\n` spelled `\r\n`. Several
-/// guards below cut text at a line boundary — `body_of` looks for `"\n}\n"` to
+/// guards below cut text at a channel boundary — `body_of` looks for `"\n}\n"` to
 /// find where a function ends — and against CRLF that needle is simply never
 /// found. `split` then returns the *whole remaining file* as the first piece,
 /// so a guard scoped to one function silently widens to everything after it and
@@ -33,12 +33,12 @@ fn app_dir() -> PathBuf {
 ///
 /// That is exactly how this was found: `a_person_card_…` passed on macOS and
 /// failed on Windows, accusing the call screen of drawing a per-person waveform
-/// out of `input_level` — a line that lives in a different function further
+/// out of `input_level` — a channel that lives in a different function further
 /// down the same file.
 ///
 /// Every guard here asks about **content**, and content does not change with
 /// how a checkout spells its newlines. So the spelling is settled once, here,
-/// rather than in each guard that happens to cut on a line.
+/// rather than in each guard that happens to cut on a channel.
 fn read(relative: &str) -> String {
     std::fs::read_to_string(app_dir().join(relative))
         .unwrap_or_else(|error| panic!("{relative}: {error}"))
@@ -249,7 +249,7 @@ fn nothing_waits_for_a_screen_that_already_draws_it() {
 
 #[test]
 fn every_element_the_script_reaches_for_exists_in_the_page() {
-    // `$("nao-existe")` returns null, and the next line throws. In a page with
+    // `$("nao-existe")` returns null, and the next channel throws. In a page with
     // no build step, nothing else would have said so.
     let script = scripts();
     let page = read("ui/index.html");
@@ -452,9 +452,9 @@ fn without_comments(text: &str) -> String {
     let out = without_blocks;
 
     out.lines()
-        .map(|line| match line.find("//") {
-            Some(at) if !line[..at].contains('"') => &line[..at],
-            _ => line,
+        .map(|channel| match channel.find("//") {
+            Some(at) if !channel[..at].contains('"') => &channel[..at],
+            _ => channel,
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -485,7 +485,7 @@ fn the_highlight_ranges_land_on_the_term_inside_the_body_the_page_draws() {
     assert_eq!(
         search.matches().len(),
         2,
-        "both occurrences should be found across the line break"
+        "both occurrences should be found across the channel break"
     );
 
     for found in search.matches() {
@@ -507,7 +507,7 @@ fn the_highlight_ranges_land_on_the_term_inside_the_body_the_page_draws() {
 fn neither_side_of_the_bridge_collapses_whitespace() {
     // The test above proves the arithmetic on raw bodies. This is what keeps
     // both callers on raw bodies — the failure it guards is a silent one-per-run
-    // offset drift, invisible until somebody pastes a message with two lines.
+    // offset drift, invisible until somebody pastes a message with two channels.
     let source = read("src/main.rs");
     let script = scripts();
 
@@ -738,7 +738,7 @@ fn the_event_name_the_script_branches_on_is_the_one_the_bridge_sends() {
 /// Two of the checks below are about one statement being inside one function,
 /// and `main.rs` as a whole says the word either way — the paragraph explaining
 /// why the invite dies in `disconnect` would satisfy a search for `convite`
-/// long after the line itself was deleted. Scoping and stripping is what makes
+/// long after the channel itself was deleted. Scoping and stripping is what makes
 /// those checks able to fail.
 ///
 /// `\n}\n` terminates: every brace inside a body is indented.
@@ -940,8 +940,8 @@ fn the_page_never_draws_a_glyph_the_data_face_does_not_have() {
     // The embedded IBM Plex Mono has 1049 cmap entries and exactly one glyph in
     // U+25A0–U+25CF, so every one of these fell through to whatever monospace
     // the machine happens to have — SF Mono, Consolas, something else — putting
-    // a second face in the middle of a line, in an interface whose whole claim
-    // is that every line is a grid.
+    // a second face in the middle of a channel, in an interface whose whole claim
+    // is that every channel is a grid.
     //
     // `docs/marca.md` settled the same argument one layer up: the brand's three
     // katakana are outlines and not text, because as text the mark would be
@@ -980,7 +980,7 @@ fn the_page_never_draws_a_glyph_the_data_face_does_not_have() {
             assert!(
                 !text.contains(glyph),
                 "{name} draws U+{:04X} as a character, and the data face has no glyph \
-                 for it — it falls through to the system monospace, mid-line. \
+                 for it — it falls through to the system monospace, mid-channel. \
                  `glifo()` in ui/glifos.js draws it instead.",
                 u32::from(glyph)
             );
@@ -1097,10 +1097,10 @@ fn variants_of(source: &str, name: &str) -> Vec<String> {
     let found: Vec<String> = without_comments(block)
         .lines()
         .map(str::trim)
-        .filter_map(|line| line.strip_suffix(','))
-        .filter(|line| {
-            !line.is_empty()
-                && line
+        .filter_map(|channel| channel.strip_suffix(','))
+        .filter(|channel| {
+            !channel.is_empty()
+                && channel
                     .chars()
                     .all(|character| character.is_alphanumeric() || character == '_')
         })
@@ -1248,7 +1248,7 @@ fn every_reason_a_screen_share_can_stop_for_has_a_sentence() {
     // The twin of the two guards above, on the list that arrived with screen
     // sharing. `TelaEmCurso::parada` crosses as a stable name — not as a
     // sentence — for the reason the FFI writes beside it: a ready-made
-    // Portuguese sentence coming over the bridge would be the one line of this
+    // Portuguese sentence coming over the bridge would be the one channel of this
     // window the vocabulary guard cannot see, and the one nobody could
     // translate.
     //
@@ -1350,7 +1350,7 @@ fn the_screen_never_invents_a_word_for_a_path_it_does_not_know() {
 fn the_path_is_written_beside_the_numbers_and_then_left_alone() {
     // Where it goes, and it is a product decision rather than a layout one: the
     // footer is numbers, and the rule that a sentence only exists if it changes
-    // what somebody does is a rule about sentences. The path is a line next to
+    // what somebody does is a rule about sentences. The path is a channel next to
     // them, written once when the session comes up and quiet afterwards.
     let page = read("ui/index.html");
     let Some(rodape) = page.split("<footer class=\"telemetria\">").nth(1) else {
@@ -1386,7 +1386,7 @@ fn the_arrival_stage_reaches_the_screen_while_the_arrival_is_happening() {
     // read one, because `Plug::connect` blocks and a listener subscribed after
     // it returns has the whole crossing already behind it.
     //
-    // Three things have to line up, and the middle one is the quiet one: the
+    // Three things have to channel up, and the middle one is the quiet one: the
     // command has to hand the FFI the listener before blocking, the event has
     // to cross under the name serde writes, and the script has to branch on
     // that name.
@@ -1394,7 +1394,7 @@ fn the_arrival_stage_reaches_the_screen_while_the_arrival_is_happening() {
     assert!(
         corpo.contains("Plug::connect_watching"),
         "the app still enters by the door that blocks with nobody listening, so \
-         the stages happen inside a line that answers only at the end:\n{corpo}"
+         the stages happen inside a channel that answers only at the end:\n{corpo}"
     );
 
     let sent = serde_json::to_string(&seele_ffi::Event::ConnectStageChanged {
@@ -1471,13 +1471,13 @@ fn the_stage_that_gives_up_names_no_cause_it_does_not_know() {
             !baixa.contains(causa),
             "the sentence for `Desistiu` says `{causa}`, which claims a cause \
              the stage does not have: the same stage carries `PinChanged` and \
-             `InviteMismatch`, and this line would print over the ADR 0003 \
+             `InviteMismatch`, and this channel would print over the ADR 0003 \
              alarm:\n{frase}"
         );
     }
 
     // And the cause stays with the half that has it. Without this the "fix"
-    // for the line above is to say nothing anywhere.
+    // for the channel above is to say nothing anywhere.
     assert!(
         file.contains("PinChanged") && file.contains("InviteMismatch"),
         "the two errors that are not network errors lost their sentence, so \
@@ -1576,7 +1576,7 @@ fn tag_with_id(page: &str, id: &str) -> String {
 
 #[test]
 fn the_alert_and_the_battery_are_layers_over_the_session_and_not_screens() {
-    // The comp's inventory settles this on line 281: `alerta` and `bateria` are
+    // The comp's inventory settles this on channel 281: `alerta` and `bateria` are
     // layers over `principal`, and `ehPrincipal` is true for all three. They are
     // not screens.
     //
@@ -1611,7 +1611,7 @@ fn the_alert_and_the_battery_are_layers_over_the_session_and_not_screens() {
     assert!(
         !session.contains("id=\"tela-chamada\""),
         "the call screen is nested inside the session, so it is a layer — but it \
-         replaces the Line's history instead of sitting over it, which is the one \
+         replaces the Channel's history instead of sitting over it, which is the one \
          thing a layer must not do"
     );
 }
@@ -2037,7 +2037,7 @@ fn the_two_ways_out_of_the_call_say_which_one_leaves_the_voice_room() {
     // what they promise. Here they have to differ for real, and say so.
     //
     // The failure without this guard is the one the LAN test found: somebody
-    // presses the button that goes back to the Lines and cannot tell whether
+    // presses the button that goes back to the Channels and cannot tell whether
     // they are still being heard.
     let page = without_comments(&read("ui/index.html"));
     let script = scripts();
@@ -2095,7 +2095,7 @@ fn the_two_ways_out_of_the_call_say_which_one_leaves_the_voice_room() {
     let out = hint_of("chamada-ejetar");
     assert!(
         !back.is_empty() && !out.is_empty(),
-        "one of the two exits explains itself with an empty line"
+        "one of the two exits explains itself with an empty channel"
     );
     assert_ne!(
         back, out,
@@ -2106,14 +2106,14 @@ fn the_two_ways_out_of_the_call_say_which_one_leaves_the_voice_room() {
 
 #[test]
 fn no_event_in_the_call_monitor_is_older_than_the_window() {
-    // The comp fills `EVENTOS` with five lines of history — `IKARI.S entrou`,
+    // The comp fills `EVENTOS` with five channels of history — `IKARI.S entrou`,
     // `HORAKI.H saiu` — and the inventory left open how much of that the server
     // keeps. It keeps none: `Event::RosterChanged` says the roster changed and
     // never what changed in it, and there is no record of arrivals, departures
     // or A.T. Field anywhere in the core.
     //
     // So the list may only carry what this window watched go by, and the
-    // tempting way to make it look full is a seeded line in the markup that
+    // tempting way to make it look full is a seeded channel in the markup that
     // nobody ever measured. An empty list under a heading that explains why is
     // the honest version, and this is what keeps it that way.
     let page = without_comments(&read("ui/index.html"));
@@ -2187,15 +2187,15 @@ fn ending_the_session_takes_the_call_screen_down_with_it() {
 }
 
 /// The class names a stylesheet *defines* — the first class of every selector
-/// that starts a line.
+/// that starts a channel.
 ///
 /// The first class and not all of them, because that first one is the owner:
 /// `.busca .botao-fantasma` is `tela-sessao.css` refining a primitive it did not
 /// invent, and only `.busca` says whose rule it is.
 fn classes_defined_in(css: &str) -> BTreeSet<String> {
     let mut found = BTreeSet::new();
-    for line in css.lines() {
-        let Some(rest) = line.strip_prefix('.') else {
+    for channel in css.lines() {
+        let Some(rest) = channel.strip_prefix('.') else {
             continue;
         };
         let name: String = rest
@@ -2297,7 +2297,7 @@ fn the_session_screen_omits_what_nothing_measures_rather_than_a_dash_per_row() {
     // question the screen just asked — the average with no plug in, the battery
     // bar, the alert's three cells — and all of those stay.
     //
-    // It is the wrong rule *per row*. A dash beside every Line and two more
+    // It is the wrong rule *per row*. A dash beside every Channel and two more
     // inside every person card is half a dozen explained em-dashes on a screen
     // whose entire purpose is being simple, each one asking to be read and none
     // of them answering anything. The v3 inverts it here: what has no data
@@ -2331,7 +2331,7 @@ fn the_bound_name_is_stated_once_and_never_worn_as_a_badge() {
     // The v3 comp draws a `verif` seal per person and another per message. Both
     // are gone, and the reasoning is in §1.2 of its inventory: the PERSISTENCE binds
     // a nickname to the identity that claimed it first and the PERMISSIONS refuses
-    // any other (ADR 0017), so the seal would be true on every line forever — and
+    // any other (ADR 0017), so the seal would be true on every channel forever — and
     // a badge everybody wears is a badge nobody learns to read, on the day one
     // of them is missing.
     //
@@ -2345,12 +2345,12 @@ fn the_bound_name_is_stated_once_and_never_worn_as_a_badge() {
     // saying about itself. It explained a property the product already
     // guarantees — the PERSISTENCE binds a nickname to the first identity that
     // claims it, and the PERMISSIONS refuses any other (ADR 0017) — to someone who
-    // never doubted it. Whoever does doubt it is not reassured by a line of
+    // never doubted it. Whoever does doubt it is not reassured by a channel of
     // text next to the name; they are reassured by the pin alarm of ADR 0003,
     // which is loud and blocking and lives somewhere else.
     //
     // What this still guards is the part that was never about wording: the
-    // per-line seal must not creep back in.
+    // per-channel seal must not creep back in.
     let sentence = "ninguém consegue usar o nome de outra pessoa";
     assert!(
         !page.contains(sentence),
@@ -2367,9 +2367,9 @@ fn the_bound_name_is_stated_once_and_never_worn_as_a_badge() {
 
 #[test]
 fn the_search_starts_closed_and_opens_from_something_that_says_buscar() {
-    // The search bar used to live open, spending 40px of the Line column on
+    // The search bar used to live open, spending 40px of the Channel column on
     // every session for something done once an hour. The v3 puts a labelled
-    // `BUSCAR` in the Line's header instead.
+    // `BUSCAR` in the Channel's header instead.
     //
     // Which creates one way to get this exactly wrong, and it is silent:
     // `focus()` on an input inside a `hidden` element does nothing and reports
@@ -2543,7 +2543,7 @@ fn entering_another_server_leaves_this_one_and_says_so_with_both_names() {
          to happen without saying to what: {frase}"
     );
 
-    // The line that only a host sees, and the only one that changes the answer:
+    // The channel that only a host sees, and the only one that changes the answer:
     // for them, switching is not leaving a conversation, it is closing
     // everybody's.
     assert!(
@@ -2646,7 +2646,7 @@ fn no_two_screens_claim_the_same_class_name() {
     // Everything that is *not* one of the four sheets below, rather than
     // everything named `tela-*`. The prefix spelling had this guard blind to
     // `camada-alerta.css` and `camada-bateria.css` the day they landed — 464
-    // lines of new CSS that could neither report a collision nor be reported
+    // channels of new CSS that could neither report a collision nor be reported
     // for one — and it was blind silently, which is the same failure the guard
     // exists to catch, one level up. A guard whose coverage depends on the next
     // author picking a blessed prefix is a guard with a hole in it.
@@ -3209,10 +3209,10 @@ fn both_sides_of_the_audio_picker_are_drawn_by_the_same_code() {
 /// belongs to that function.
 fn globals_declared_in(script: &str) -> BTreeSet<String> {
     let mut found = BTreeSet::new();
-    for line in without_comments(script).lines() {
+    for channel in without_comments(script).lines() {
         let Some(rest) = ["const ", "let ", "var ", "function ", "class "]
             .iter()
-            .find_map(|keyword| line.strip_prefix(keyword))
+            .find_map(|keyword| channel.strip_prefix(keyword))
         else {
             continue;
         };
@@ -3615,11 +3615,11 @@ fn top_level_chunks(script: &str) -> Vec<String> {
     let mut chunks = Vec::new();
     let mut current = String::new();
     let mut depth: i32 = 0;
-    for line in script.lines() {
-        current.push_str(line);
+    for channel in script.lines() {
+        current.push_str(channel);
         current.push('\n');
-        depth += i32::try_from(line.matches('{').count()).unwrap_or(0);
-        depth -= i32::try_from(line.matches('}').count()).unwrap_or(0);
+        depth += i32::try_from(channel.matches('{').count()).unwrap_or(0);
+        depth -= i32::try_from(channel.matches('}').count()).unwrap_or(0);
         if depth > 0 {
             continue;
         }
@@ -3641,7 +3641,7 @@ fn top_level_chunks(script: &str) -> Vec<String> {
 /// `$(volta)` and `abrirServer` hides `$(origem)`, and a check that only read
 /// literals would miss the one transition that has two possible destinations.
 /// A variable inside `$()` is only ever a screen here; everything else that
-/// toggles `hidden` — the banner, the battery, the invite, an error line —
+/// toggles `hidden` — the banner, the battery, the invite, an error channel —
 /// holds its element in a variable and writes `erro.hidden`, never `$(erro)`.
 fn reveals_a_screen(chunk: &str, screens: &BTreeSet<String>) -> bool {
     for piece in chunk.split("$(").skip(1) {
@@ -3799,8 +3799,8 @@ fn every_screen_says_where_the_focus_lands_and_what_to_announce() {
 /// the block above these entries explains *why* there are six sentences and not
 /// one, and a check satisfied by that explanation is a check that cannot fail.
 ///
-/// An entry ends at `",` followed by a line break, which is what closes the last
-/// piece of a sentence whether it is written on one line or concatenated over
+/// An entry ends at `",` followed by a channel break, which is what closes the last
+/// piece of a sentence whether it is written on one channel or concatenated over
 /// four — the `+` ending every intermediate piece is what keeps this from
 /// stopping early.
 fn sentence_for(variant: &str) -> String {
@@ -4522,7 +4522,7 @@ fn the_vpn_rung_names_the_vpn_that_is_why_the_link_stops_here() {
         "the sentence never says a VPN is why the link reaches no further, which          is the only thing this rung knows that `SoRedeLocal` does not:\n{frase}"
     );
     // The fix half («desligue a VPN») was cut on 2026-08-20 with the rest of the
-    // ladder's second lines. What this rung knows that `SoRedeLocal` does not —
+    // ladder's second channels. What this rung knows that `SoRedeLocal` does not —
     // that a VPN is why the link reaches no further — is asserted above and is
     // the reason the rung exists at all.
     assert!(
@@ -4684,7 +4684,7 @@ fn the_line_confirmation_counts_what_it_is_about_to_destroy() {
     //
     // The tempting wrong version is right there and free: this window already
     // holds a page of history, so `mensagens.length` would compile, render, and
-    // read as a real number. It would be low by whatever the Line's whole past
+    // read as a real number. It would be low by whatever the Channel's whole past
     // is — and a number that is nearly right in a box promising to destroy 1.847
     // messages is worse than no number at all.
     //
@@ -4699,14 +4699,14 @@ fn the_line_confirmation_counts_what_it_is_about_to_destroy() {
     ] {
         assert!(
             frase.contains(needle),
-            "the Line confirmation never says {what}, so it promises destruction \
+            "the Channel confirmation never says {what}, so it promises destruction \
              without saying how much:\n{frase}"
         );
     }
     assert!(
         !frase.contains("mensagens.length") && !frase.contains("messages.length"),
-        "the Line confirmation counts the page this window happens to be \
-         holding, which is low by the whole of the Line's past:\n{frase}"
+        "the Channel confirmation counts the page this window happens to be \
+         holding, which is low by the whole of the Channel's past:\n{frase}"
     );
 
     // And the count reaches it from the server, through the one command that
@@ -4719,11 +4719,11 @@ fn the_line_confirmation_counts_what_it_is_about_to_destroy() {
         .nth(1)
         .and_then(|resto| resto.split("\n});").next())
     else {
-        panic!("nothing listens for a press on the Line list in the moderation layer");
+        panic!("nothing listens for a press on the Channel list in the moderation layer");
     };
     assert!(
         porta.contains("invoke(\"peso_da_linha\""),
-        "the box about destroying a Line opens without asking the Server what is \
+        "the box about destroying a Channel opens without asking the Server what is \
          in it, so its numbers came from somewhere this window guessed:\n{porta}"
     );
 
@@ -4749,7 +4749,7 @@ fn a_count_that_did_not_arrive_stops_the_question_instead_of_rounding_it() {
     // confirmation that adds nothing and teaches people to press twice.
     //
     // So the failure path must not reach `abrirConfirmacao`, and must not
-    // invent a zero either — «isto destrói 0 mensagens» about a Line full of
+    // invent a zero either — «isto destrói 0 mensagens» about o canal full of
     // them is the worst sentence this screen could produce.
     let layer = without_comments(&read("ui/camada-moderar.js"));
     let Some(porta) = layer
@@ -4757,7 +4757,7 @@ fn a_count_that_did_not_arrive_stops_the_question_instead_of_rounding_it() {
         .nth(1)
         .and_then(|resto| resto.split("\n});").next())
     else {
-        panic!("nothing listens for a press on the Line list in the moderation layer");
+        panic!("nothing listens for a press on the Channel list in the moderation layer");
     };
 
     let Some(falhou) = porta
@@ -4772,7 +4772,7 @@ fn a_count_that_did_not_arrive_stops_the_question_instead_of_rounding_it() {
     };
     assert!(
         !falhou.contains("abrirConfirmacao("),
-        "a Line whose count never arrived is still offered for destruction, with \
+        "a Channel whose count never arrived is still offered for destruction, with \
          whatever number the sentence fell back to:\n{falhou}"
     );
     assert!(
@@ -4810,9 +4810,9 @@ fn destroying_a_room_says_what_it_does_to_the_people_and_to_the_other_room() {
     //
     // For a voice room: people are turned out of it in the middle of speaking, and
     // they are told. And the half that is easiest to get wrong from the other
-    // direction — the Line bound to it is **not** destroyed with it. Without
-    // that line, somebody who wanted a conversation gone destroys the voice room, sees
-    // the Line still there, and concludes the product did not do what it said.
+    // direction — the Channel bound to it is **not** destroyed with it. Without
+    // that channel, somebody who wanted a conversation gone destroys the voice room, sees
+    // the Channel still there, and concludes the product did not do what it said.
     let voice_room = body_of(&scripts(), "function consequenciaDeApagarVoiceRoom");
     for (what, needle) in [
         ("how many people are inside", "voice_room.people.length"),
@@ -4821,7 +4821,7 @@ fn destroying_a_room_says_what_it_does_to_the_people_and_to_the_other_room() {
             "no meio do que estiverem falando",
         ),
         ("that they are told", "aviso"),
-        ("that the bound Line survives", "não é apagado junto"),
+        ("that the bound Channel survives", "não é apagado junto"),
         (
             "that nothing here brings it back",
             "Nenhuma tela deste produto",
@@ -4833,8 +4833,8 @@ fn destroying_a_room_says_what_it_does_to_the_people_and_to_the_other_room() {
         );
     }
 
-    // For a Line: whoever is reading it loses it from the screen at that
-    // instant, and any voice room bound to it comes out with no Line — a change
+    // For a Channel: whoever is reading it loses it from the screen at that
+    // instant, and any voice room bound to it comes out with no Channel — a change
     // nobody asked for, which is exactly the kind this product names.
     let linha = body_of(&scripts(), "function consequenciaDeApagarLinha");
     for (what, needle) in [
@@ -4843,21 +4843,21 @@ fn destroying_a_room_says_what_it_does_to_the_people_and_to_the_other_room() {
             "Nenhuma tela deste produto",
         ),
         ("what happens to whoever is reading it", "perde da tela"),
-        ("which rooms come out without a Line", "sem canal"),
+        ("which rooms come out without a Channel", "sem canal"),
     ] {
         assert!(
             linha.contains(needle),
-            "the Line confirmation never says {what}:\n{linha}"
+            "the Channel confirmation never says {what}:\n{linha}"
         );
     }
 
-    // The empty Line has a branch of its own: there is no "written since" when
+    // The empty Channel has a branch of its own: there is no "written since" when
     // nobody wrote, and a sentence that says "destroys 0 messages since
     // Invalid Date" is a sentence that was never read by its author.
     assert!(
         linha.contains("peso.messages === 0"),
-        "the Line confirmation has one sentence for a Line with a past and a \
-         Line with none, so the empty one reads as a date that does not \
+        "the Channel confirmation has one sentence for a Channel with a past and a \
+         Channel with none, so the empty one reads as a date that does not \
          exist:\n{linha}"
     );
 }
@@ -4933,7 +4933,7 @@ fn destroying_a_room_is_offered_by_the_permission_that_destroys_it() {
 
 #[test]
 fn a_room_that_stopped_existing_has_a_sentence_and_not_a_shrug() {
-    // Somebody is standing in the voice room, or reading the Line, when it stops
+    // Somebody is standing in the voice room, or reading the Channel, when it stops
     // existing. The plug is already out and the conversation is already off the
     // screen by the time this arrives — so without the sentence what is left is
     // a room that vanished on its own, which from where the reader sits is
@@ -4951,7 +4951,7 @@ fn a_room_that_stopped_existing_has_a_sentence_and_not_a_shrug() {
     };
     let avisos = without_comments(avisos);
 
-    for reason in ["VoiceRoomDeleted", "LineDeleted", "LastVoiceRoom"] {
+    for reason in ["VoiceRoomDeleted", "ChannelDeleted", "LastVoiceRoom"] {
         assert!(
             avisos.contains(&format!("{reason}:")),
             "the Server can raise `{reason}` and `AVISOS` has no sentence for it, \
@@ -4966,7 +4966,7 @@ fn a_room_that_stopped_existing_has_a_sentence_and_not_a_shrug() {
 
     // Every one of the three has to be a reason the bridge can actually produce.
     let types = read("../../crates/seele-ffi/src/types.rs");
-    for reason in ["VoiceRoomDeleted", "LineDeleted", "LastVoiceRoom"] {
+    for reason in ["VoiceRoomDeleted", "ChannelDeleted", "LastVoiceRoom"] {
         assert!(
             types.contains(reason),
             "`AVISOS` writes a sentence for `{reason}`, which `NoticeReason` \
@@ -5084,7 +5084,7 @@ fn the_nat_punching_rung_names_its_cost_where_the_cost_is_paid() {
     let baixa = frase.to_lowercase();
 
     // Two of the three assertions were cut on 2026-08-20, by the product owner,
-    // when the ladder lost its second lines: «deve funcionar» (do not promise)
+    // when the ladder lost its second channels: «deve funcionar» (do not promise)
     // and «roteador» (name the way out). The third is not wording and did not
     // go — see below.
     //
@@ -5165,7 +5165,7 @@ fn js_function(source: &str, signature: &str) -> String {
 fn a_file_goes_on_its_own_path_and_never_through_send_message() {
     // ADR 0027: the body travels **with** the file, on the transfer's own
     // stream, and the message is published only once the bytes have arrived
-    // whole. A separate `send_message` would put the text on the Line first and
+    // whole. A separate `send_message` would put the text on the Channel first and
     // let the picture turn up minutes later with nothing saying the two were
     // one thing.
     let corpo = js_function(&read("ui/tela-sessao.js"), "async function enviar(");
@@ -5228,15 +5228,15 @@ fn a_transfer_that_falls_says_that_trying_again_starts_from_zero() {
         bloco.contains("Fell:"),
         "a fallen transfer has no sentence, so it is a bar that stopped"
     );
-    // Everything from `Fell:` to the next key. Not the first line after it: the
-    // sentence is several lines of concatenated string, and reading one line
+    // Everything from `Fell:` to the next key. Not the first channel after it: the
+    // sentence is several channels of concatenated string, and reading one channel
     // would let the half that matters live outside what is asserted about.
     let depois = bloco.split("Fell:").nth(1).unwrap_or_default();
     let caiu: String = depois
         .lines()
-        .take_while(|line| {
-            let trimmed = line.trim_start();
-            !(line.starts_with("  ")
+        .take_while(|channel| {
+            let trimmed = channel.trim_start();
+            !(channel.starts_with("  ")
                 && trimmed.split(':').next().is_some_and(|word| {
                     !word.is_empty() && word.chars().all(char::is_alphanumeric)
                 })
@@ -5276,9 +5276,9 @@ fn every_refusal_the_server_can_send_has_a_sentence() {
     let variantes: Vec<String> = without_comments(enumeracao)
         .lines()
         .map(str::trim)
-        .filter(|line| line.ends_with(',') || line.ends_with('{'))
-        .filter_map(|line| {
-            let name = line.trim_end_matches([',', ' ', '{']);
+        .filter(|channel| channel.ends_with(',') || channel.ends_with('{'))
+        .filter_map(|channel| {
+            let name = channel.trim_end_matches([',', ' ', '{']);
             name.chars()
                 .next()
                 .filter(char::is_ascii_uppercase)
@@ -5357,10 +5357,10 @@ fn saving_says_out_loud_what_this_product_does_not_promise() {
     // they press, not on a help page.
     let salvar = js_function(&read("ui/tela-sessao.js"), "function salvarAnexo(");
     // `abrirConfirmacao(` and not `armarAto(`, and the difference is the whole
-    // defect this line used to hold in place. `armarAto` writes the sentence
+    // defect this channel used to hold in place. `armarAto` writes the sentence
     // into `#moderar` and focuses CANCELAR; it never *reveals* `#moderar`. So
     // this assertion passed, in green, while pressing SALVAR did nothing at all
-    // — no box, no error, no console line, because `focus()` inside a `hidden`
+    // — no box, no error, no console channel, because `focus()` inside a `hidden`
     // element is a silent no-op. Only the three doors of `camada-moderar.js`
     // open the box, and saving has to go through one of them.
     assert!(
@@ -5493,9 +5493,9 @@ fn the_bridge_maps_every_refusal_the_wire_can_carry() {
         panic!("the bridge no longer mirrors `AttachmentRefusal`");
     };
 
-    for line in without_comments(enumeracao).lines() {
-        let line = line.trim();
-        let name = line.trim_end_matches([',', ' ', '{']);
+    for channel in without_comments(enumeracao).lines() {
+        let channel = channel.trim();
+        let name = channel.trim_end_matches([',', ' ', '{']);
         if name.is_empty() || !name.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
             continue;
         }
@@ -5694,7 +5694,7 @@ fn a_file_that_cannot_be_read_says_so_where_it_can_be_seen() {
 
 #[test]
 fn a_file_offered_with_no_line_open_is_refused_out_loud() {
-    // Both doors give up when there is no Line to send to, and both used to give
+    // Both doors give up when there is no Channel to send to, and both used to give
     // up with a bare `return`. From the outside that is the same event as the
     // bug this whole file was written for: the person acts, and the window does
     // not move.
@@ -5705,14 +5705,14 @@ fn a_file_offered_with_no_line_open_is_refused_out_loud() {
     ] {
         let corpo = js_function(&sessao, entrada);
         let Some(depois) = corpo.split("linhaAberta === null").nth(1) else {
-            panic!("`{entrada}` no longer checks whether a Line is open at all");
+            panic!("`{entrada}` no longer checks whether a Channel is open at all");
         };
         // Only as far as the end of that branch: a `recusarAnexo` further down,
         // on some other path, would say nothing about this one.
         let ramo = depois.split('}').next().unwrap_or_default();
         assert!(
             ramo.contains("recusarAnexo("),
-            "`{entrada}` gives up in silence when no Line is open, which reads \
+            "`{entrada}` gives up in silence when no Channel is open, which reads \
              exactly like a broken button: {ramo}"
         );
     }
@@ -5720,7 +5720,7 @@ fn a_file_offered_with_no_line_open_is_refused_out_loud() {
 
 #[test]
 fn the_reason_a_rung_failed_is_not_prefixed_by_a_label_it_already_carries() {
-    // From a real screen, on a real network: the detail line under the invite
+    // From a real screen, on a real network: the detail channel under the invite
     // read «o roteador respondeu: o roteador respondeu, e o endereço dele
     // (100.65.128.5) não sai para a internet».
     //
@@ -5741,7 +5741,7 @@ fn the_reason_a_rung_failed_is_not_prefixed_by_a_label_it_already_carries() {
         );
     }
 
-    // And the positive half, so the fix cannot be «delete the line». The reason
+    // And the positive half, so the fix cannot be «delete the channel». The reason
     // still has to reach the page.
     assert!(
         mostrar.contains("portaRecusada") && mostrar.contains("encontroRecusado"),
@@ -5760,7 +5760,7 @@ fn arriving_at_a_server_opens_a_line_and_does_not_put_anybody_in_a_voice_room() 
     // reason still holds for one of the two and never held for the other.
     //
     // Reading text is passive — nobody hears you for having read something — so
-    // opening the first Line answers the empty screen and commits the person to
+    // opening the first Channel answers the empty screen and commits the person to
     // nothing.
     //
     // Entering a voice room is not passive. It takes one of fifteen seats, shows the
@@ -5770,8 +5770,8 @@ fn arriving_at_a_server_opens_a_line_and_does_not_put_anybody_in_a_voice_room() 
     let entrar = body_of(&without_comments(&scripts()), "async function inserirPlug");
 
     assert!(
-        entrar.contains("open_line"),
-        "arriving no longer opens a Line, so the screen is empty again and the \
+        entrar.contains("open_channel"),
+        "arriving no longer opens a Channel, so the screen is empty again and the \
          reason the automatic step existed is lost:\n{entrar}"
     );
     assert!(
@@ -5925,7 +5925,7 @@ fn a_knock_is_identified_by_its_fingerprint_and_never_by_the_name_it_claims() {
     // looking fine. A nickname is text the person on the other side typed; the
     // fingerprint is the identity. If the card leads with the nickname, whoever
     // hosts approves a *name* — and `Rafae1` beside `Rafael` is a difference no
-    // code catches and no eye catches either, unless the line above it is the
+    // code catches and no eye catches either, unless the channel above it is the
     // one that carries the authority.
     //
     // Scoped to the function that builds a card and read without comments: the
@@ -5939,7 +5939,7 @@ fn a_knock_is_identified_by_its_fingerprint_and_never_by_the_name_it_claims() {
     // straight through it: swapping the arguments of `append` — which is the
     // whole defect — leaves `const impressao = …` above `const apelido = …`
     // untouched, because declaring a variable is not putting it on a page. The
-    // check has to read the line that decides what the eye meets first.
+    // check has to read the channel that decides what the eye meets first.
     let Some(ordem) = corpo.split("linha.append(").nth(1) else {
         panic!("the card no longer appends its parts in one call:\n{corpo}");
     };
@@ -6197,15 +6197,15 @@ fn every_reason_a_session_can_end_with_has_a_sentence_in_the_page() {
 // What the owner asked for after installing the app and using it. Four guards,
 // and three of them guard an **absence** — the hardest kind to keep, because
 // nothing about a deleted thing coming back is visible in a diff that only adds
-// lines.
+// channels.
 // ---------------------------------------------------------------------------
 
 #[test]
 fn a_preview_is_asked_for_by_a_press_and_by_nothing_else() {
     // The attachment lives on the server, so looking at it is downloading it. A
-    // Line that previewed every picture as it scrolled would turn whoever
+    // Channel that previewed every picture as it scrolled would turn whoever
     // hosts' disk ceiling into everybody's uplink, once per person per time
-    // anybody opened the Line — and it would do it silently, because it would
+    // anybody opened the Channel — and it would do it silently, because it would
     // look exactly like the feature working.
     let fonte = without_comments(&read("ui/tela-sessao.js"));
     let chamadas = fonte.matches("invoke(\"prever_anexo\"").count();
@@ -6240,7 +6240,7 @@ fn a_preview_is_asked_for_by_a_press_and_by_nothing_else() {
     // A press, and a press is a click on a button. Not a hover, not focus.
     let chamadores: Vec<&str> = fonte
         .lines()
-        .filter(|line| line.contains("verPrevia(") && !line.contains("function verPrevia"))
+        .filter(|channel| channel.contains("verPrevia(") && !channel.contains("function verPrevia"))
         .collect();
     assert_eq!(
         chamadores.len(),
@@ -6336,7 +6336,7 @@ fn the_page_never_composes_the_media_type_a_picture_is_decoded_with() {
     // promise the page is making; it is what the bytes already proved on the way
     // in. The alternative was `seele-core::preview::data_uri`, which this crate
     // may not name — ADR 0002 gives the shell `seele-ffi` and nothing past it —
-    // so the choice was this line or a second base64 encoder in `main.rs`.
+    // so the choice was this channel or a second base64 encoder in `main.rs`.
     //
     // The exception is held to exactly that shape below, rather than trusted.
     let excecao = "tela-server.js";
@@ -6370,7 +6370,7 @@ fn the_page_never_composes_the_media_type_a_picture_is_decoded_with() {
         limpo.matches("image/png").count(),
         1,
         "`{excecao}` names `image/png` more than once, so the exemption has \
-         spread beyond the single line that composes the server's picture"
+         spread beyond the single channel that composes the server's picture"
     );
     let compoe = js_function(&servidor, "function uriDeIcone(");
     assert!(
@@ -6465,7 +6465,7 @@ fn the_reason_a_picture_was_not_drawn_is_written_where_it_can_be_seen() {
 #[test]
 fn a_preview_is_not_an_open_and_is_not_a_save() {
     // The distance between drawing a picture and opening a file is where this
-    // could go wrong worst, so the line is written rather than assumed. A
+    // could go wrong worst, so the channel is written rather than assumed. A
     // preview holds bytes in this window's memory: no path, no file, nothing
     // handed to the operating system. Saving stays the one verb with a
     // destination, and it keeps its confirmation.
@@ -6646,7 +6646,7 @@ fn the_knock_is_read_out_once_per_appearance_and_not_once_per_poll() {
     // it is the argument ADR 0003 makes about the key-change warning.
     //
     // So the sentence belongs to the *transition* into view: it is guarded by
-    // the band having been hidden, and it happens before the line that stops it
+    // the band having been hidden, and it happens before the channel that stops it
     // being hidden.
     let corpo = body_of(&scripts(), "function avisarQueBatem");
 
@@ -6786,7 +6786,7 @@ fn the_waiting_screen_says_what_happened_what_to_do_and_what_is_useless() {
         assert!(
             bloco.contains(needle),
             "the waiting screen never says {o_que}, which is the half of this \
-             that a line of red error text could not carry:\n{bloco}"
+             that a channel of red error text could not carry:\n{bloco}"
         );
     }
 
@@ -6821,7 +6821,7 @@ fn the_waiting_screen_says_what_happened_what_to_do_and_what_is_useless() {
 
     // Only a pending knock takes the entrance over. Everything else stays on
     // the boot screen, where another server can be chosen — and the boot screen
-    // writes its own red line only when this screen did not take the failure.
+    // writes its own red channel only when this screen did not take the failure.
     let conectar = body_of(&scripts(), "async function conectar");
     let Some(desvio) = conectar.find("levarParaAEspera(") else {
         panic!("nothing sends a pending knock anywhere:\n{conectar}");
@@ -6831,7 +6831,7 @@ fn the_waiting_screen_says_what_happened_what_to_do_and_what_is_useless() {
     };
     assert!(
         desvio < linha,
-        "the entrance writes its error line before asking whether the failure \
+        "the entrance writes its error channel before asking whether the failure \
          belongs to the waiting screen, so both say it at once:\n{conectar}"
     );
 }
@@ -6871,7 +6871,7 @@ fn the_entrance_screen_stopped_drawing_the_four_values_this_protocol_never_carri
     }
 
     // And nothing writes into the ones that went. A script still filling an
-    // element that is not in the page throws on the line after `$()`.
+    // element that is not in the page throws on the channel after `$()`.
     let script = without_comments(&scripts());
     for morto in ["auth-chave", "auth-codec"] {
         assert!(
@@ -6917,14 +6917,14 @@ fn the_note_beside_a_control_is_not_painted_in_the_colour_reserved_for_large_tex
 
 #[test]
 fn the_note_beside_a_control_is_defined_once_and_never_by_a_screen() {
-    // `.nota` is the short line beside a control saying what pressing it causes.
+    // `.nota` is the short channel beside a control saying what pressing it causes.
     // On the call screen it is the *only* thing separating VER LINHAS from SAIR
     // DA JAULA; in the moderation box it is the only thing that says a ban has
     // no undo. One class, one rule in `base.css`, and it has to stay one.
     //
     // The failure this catches is a screen writing its own `.nota { … }`. That
     // screen's notes then answer to nobody: the day a rule here changes how
-    // these lines are drawn — or whether they are drawn at all — every screen
+    // these channels are drawn — or whether they are drawn at all — every screen
     // follows except that one, and nothing about the divergence is visible
     // without opening each screen and comparing.
     //
@@ -6953,7 +6953,7 @@ fn the_note_beside_a_control_is_defined_once_and_never_by_a_screen() {
             !owned.contains("nota"),
             "{name} claims `.nota`, which base.css owns. A screen that redefines \
              it decides on its own whether the explanation of a control appears, \
-             and nothing about that failure is visible — the line either keeps \
+             and nothing about that failure is visible — the channel either keeps \
              showing or stops showing on exactly one screen."
         );
     }
@@ -6962,18 +6962,18 @@ fn the_note_beside_a_control_is_defined_once_and_never_by_a_screen() {
 #[test]
 fn the_captions_mode_does_not_come_back_by_accident() {
     // `LEGENDAS SIMPLES` was a second copy of the interface: every explanatory
-    // line beside a control could be switched off from the settings screen, and
+    // channel beside a control could be switched off from the settings screen, and
     // it was on by default, so nobody ever saw the other copy — least of all
-    // whoever wrote a new line and never read the app without it.
+    // whoever wrote a new channel and never read the app without it.
     //
     // On the call screen the two exits are told apart by nothing but those
-    // lines; in the moderation box the only sentence saying a ban has no undo is
+    // channels; in the moderation box the only sentence saying a ban has no undo is
     // one of them. A mode that hides them is a mode in which this product lies
     // by omission to whoever turned it on.
     //
-    // So the mode is gone and the lines stayed, always visible, as `.nota`. The
+    // So the mode is gone and the channels stayed, always visible, as `.nota`. The
     // way this rots is somebody reintroducing "just a toggle" — and the failure
-    // is silent by construction, because a hidden line looks exactly like a line
+    // is silent by construction, because a hidden channel looks exactly like a channel
     // nobody ever wrote.
     //
     // Read with comments stripped, and that is not tidiness: the paragraph in
@@ -7027,7 +7027,7 @@ fn the_captions_mode_does_not_come_back_by_accident() {
     }
 
     // The other half, and it is what makes this a guard rather than a grep: the
-    // text those lines carried has to still be on screen. Removing the mode by
+    // text those channels carried has to still be on screen. Removing the mode by
     // deleting the sentences would pass everything above, and it is the one
     // outcome worse than the mode.
     let page = without_comments(&read("ui/index.html"));
@@ -7146,7 +7146,7 @@ fn nothing_arms_an_act_in_a_box_it_never_opened() {
     //
     // `salvarAnexo` called the middle instead of a door, and the result was the
     // quietest failure available: pressing SALVAR did nothing. No error, no
-    // console line, no frame — `focus()` inside a `hidden` element is a silent
+    // console channel, no frame — `focus()` inside a `hidden` element is a silent
     // no-op — and the act sat armed in a box nobody would ever see. The guard
     // covering saving asserted that `armarAto(` was called, so it stayed green
     // for as long as the button was dead.
@@ -7251,7 +7251,7 @@ const LIMITE_DE_FRASE: usize = 180;
 /// `camada-moderar.js` and `camada-portaria.js`, and those were measured when
 /// they were written — a ban, a deleted Linha, an update that takes a hosted
 /// server down with the window. Nor the two `fraseDeErro` composes for a changed
-/// key: those are two fingerprints with a line either side, and a fingerprint is
+/// key: those are two fingerprints with a channel either side, and a fingerprint is
 /// as long as it is. What this guards is the prose.
 const DICIONARIOS: [&str; 9] = [
     "MOTIVOS",
@@ -7265,16 +7265,16 @@ const DICIONARIOS: [&str; 9] = [
     "PREVIAS",
 ];
 
-/// Every string literal on one line, joined, with `\n` turned into a real break.
+/// Every string literal on one channel, joined, with `\n` turned into a real break.
 ///
-/// The entries are written both ways — one literal on one line, and four joined
-/// by `+` across four lines — so counting has to see the text somebody reads and
+/// The entries are written both ways — one literal on one channel, and four joined
+/// by `+` across four channels — so counting has to see the text somebody reads and
 /// not the source that produces it. Counting the source would let a sentence
 /// grow by being split into more pieces, which is exactly the move this exists
 /// to stop.
-fn literals_in(line: &str) -> String {
+fn literals_in(channel: &str) -> String {
     let mut out = String::new();
-    let mut chars = line.chars();
+    let mut chars = channel.chars();
     while let Some(quote) = chars.next() {
         if quote != '"' {
             continue;
@@ -7296,7 +7296,7 @@ fn literals_in(line: &str) -> String {
 
 /// Every sentence one dictionary of `ui/frases.js` writes, as (variant, text).
 ///
-/// An entry opens at `Name:` at the start of a line and runs until the next one
+/// An entry opens at `Name:` at the start of a channel and runs until the next one
 /// does, which is what holds a sentence together across the `+` that joins its
 /// pieces. Feed it comment-free source: the blocks above these entries quote the
 /// sentences they explain, and a length read off an explanation is a length read
@@ -7311,13 +7311,13 @@ fn sentences_of(file: &str, dictionary: &str) -> Vec<(String, String)> {
 
     let mut out: Vec<(String, String)> = Vec::new();
     let mut current: Option<(String, String)> = None;
-    for line in block.lines() {
-        let trimmed = line.trim();
+    for channel in block.lines() {
+        let trimmed = channel.trim();
         if trimmed.is_empty() {
             continue;
         }
         // ASCII only, so the byte index below lands on a character boundary and
-        // a line opening with a word like `Não` is not read as a variant name.
+        // o canal opening with a word like `Não` is not read as a variant name.
         let name: String = trimmed
             .chars()
             .take_while(|letter| letter.is_ascii_alphanumeric() || *letter == '_')
@@ -7400,15 +7400,15 @@ fn no_sentence_the_screen_writes_runs_past_the_length_that_gets_read() {
 
 #[test]
 fn no_sentence_the_screen_writes_reaches_a_third_line() {
-    // The shape the rule takes on screen: a line in capitals that says the
+    // The shape the rule takes on screen: a channel in capitals that says the
     // state, and one under it that says what to do. Characters alone would let
-    // three short lines through, and three lines is the thing itself — the
-    // FuroDeNat sentence that started this was three lines and 425 characters,
+    // three short channels through, and three channels is the thing itself — the
+    // FuroDeNat sentence that started this was three channels and 425 characters,
     // and the third was the one nobody was ever going to read.
     //
     // The two composed sentences keep to this by construction. `fraseDeAnexo`
     // and `fraseDePrevia` fold the byte limit into the headline instead of
-    // adding a line, because the number is what qualifies the «too big»: it
+    // adding a channel, because the number is what qualifies the «too big»: it
     // belongs to the sentence that says it, not under it.
     let file = without_comments(&read("ui/frases.js"));
 

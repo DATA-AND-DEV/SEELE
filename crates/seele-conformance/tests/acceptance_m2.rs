@@ -357,7 +357,7 @@ async fn a_ping_comes_back_as_a_pong() -> Result<()> {
 #[tokio::test]
 async fn the_session_names_the_server_and_its_voice_room() -> Result<()> {
     // specs/02-protocolo.md: the Session carries the server description and the
-    // tree of voice_rooms and Lines, which is what a shell draws its first screen from.
+    // tree of voice_rooms and Channels, which is what a shell draws its first screen from.
     let address = start(Vec::new()).await?;
     let client = connect(address, "ayanami").await?;
 

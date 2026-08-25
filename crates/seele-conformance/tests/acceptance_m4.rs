@@ -22,7 +22,7 @@ use ed25519_dalek::SigningKey;
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use seele_core::{Client, MemoryPinStore, Room};
-use seele_proto::ids::{VoiceRoomId, ClientMessageId, LineId};
+use seele_proto::ids::{VoiceRoomId, ClientMessageId, ChannelId};
 use seele_proto::ServerMessage;
 use seele_server::persistence::Location;
 use seele_server::{ServerConfig, Daemon};
@@ -31,7 +31,7 @@ use seele_tui::theme::{Palette, Theme};
 use seele_tui::{ui, view};
 
 const VOICE_ROOM: VoiceRoomId = VoiceRoomId(1);
-const LINE: LineId = LineId(1);
+const LINE: ChannelId = ChannelId(1);
 const WAIT: Duration = Duration::from_secs(5);
 
 /// The smallest terminal the spec supports, which is the one that has to work.
@@ -117,14 +117,14 @@ where
 }
 
 /// Brings the interface up against a live connection, the way `plug` does.
-fn attach(client: &Client, nickname: &str, voice_room: VoiceRoomId, line: Option<LineId>) -> (App, Room) {
+fn attach(client: &Client, nickname: &str, voice_room: VoiceRoomId, channel: Option<ChannelId>) -> (App, Room) {
     let mut app = App::new();
     app.screen = Screen::PatternBlue;
     let mut room = Room::new();
     room.adopt(client.session(), nickname);
     room.enter_voice_room(voice_room);
-    if let Some(line) = line {
-        room.open_line(line);
+    if let Some(channel) = channel {
+        room.open_channel(channel);
     }
     view::project(&room, &mut app);
     (app, room)
@@ -137,13 +137,13 @@ async fn an_outsider_connects_and_the_screen_shows_the_conversation() -> Result<
 
     let mut watcher = connect(address, "ayanami", 1).await?;
     watcher.insert_plug(VOICE_ROOM).await?;
-    watcher.join_line(LINE).await?;
+    watcher.join_channel(LINE).await?;
 
     let (mut app, mut room) = attach(&watcher, "ayanami", VOICE_ROOM, Some(LINE));
 
     let mut talker = connect(address, "shinji", 2).await?;
     talker.insert_plug(VOICE_ROOM).await?;
-    talker.join_line(LINE).await?;
+    talker.join_channel(LINE).await?;
     talker
         .send_message(LINE, "sync caiu aqui", ClientMessageId(1))
         .await?;
@@ -246,13 +246,13 @@ async fn sixteen_colours_over_ssh_lose_no_information() -> Result<()> {
 
     let mut watcher = connect(address, "ayanami", 5).await?;
     watcher.insert_plug(VOICE_ROOM).await?;
-    watcher.join_line(LINE).await?;
+    watcher.join_channel(LINE).await?;
 
     let (mut app, mut room) = attach(&watcher, "ayanami", VOICE_ROOM, Some(LINE));
 
     let mut talker = connect(address, "shinji", 6).await?;
     talker.insert_plug(VOICE_ROOM).await?;
-    talker.join_line(LINE).await?;
+    talker.join_channel(LINE).await?;
     talker
         .send_message(LINE, "verificando harmônicos", ClientMessageId(1))
         .await?;
@@ -290,7 +290,7 @@ async fn boot_to_ready_is_under_a_second_and_a_half() -> Result<()> {
     let started = Instant::now();
     let mut client = connect(address, "ayanami", 7).await?;
     client.insert_plug(VOICE_ROOM).await?;
-    client.join_line(LINE).await?;
+    client.join_channel(LINE).await?;
 
     let (app, _room) = attach(&client, "ayanami", VOICE_ROOM, Some(LINE));
     let screen = draw(&app, Palette::True);
@@ -318,11 +318,11 @@ async fn a_newcomer_can_hold_a_conversation_with_only_the_help_screen() -> Resul
 
     let mut newcomer = connect(address, "ayanami", 8).await?;
     newcomer.insert_plug(VOICE_ROOM).await?;
-    newcomer.join_line(LINE).await?;
+    newcomer.join_channel(LINE).await?;
 
     let mut listener = connect(address, "shinji", 9).await?;
     listener.insert_plug(VOICE_ROOM).await?;
-    listener.join_line(LINE).await?;
+    listener.join_channel(LINE).await?;
 
     let mut app = App::new();
     app.screen = Screen::PatternBlue;

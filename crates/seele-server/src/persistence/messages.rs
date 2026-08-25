@@ -35,7 +35,7 @@
 use anyhow::{Context, Result};
 use rusqlite::{params, OptionalExtension};
 use seele_proto::control::AttachmentInfo;
-use seele_proto::ids::{ClientMessageId, LineId, MessageId, PersonId};
+use seele_proto::ids::{ClientMessageId, ChannelId, MessageId, PersonId};
 
 use super::attachments::Attachments;
 use super::{now_seconds, Persistence};
@@ -53,8 +53,8 @@ pub const DEFAULT_PAGE: u16 = 50;
 /// A message waiting to be written.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingMessage {
-    /// Which Line.
-    pub line: LineId,
+    /// Which Channel.
+    pub channel: ChannelId,
     /// Who wrote it.
     pub author: PersonId,
     /// What the author is called, stamped by their own connection.
@@ -76,8 +76,8 @@ pub struct PendingMessage {
 pub struct StoredMessage {
     /// Server-assigned identifier, and the pagination cursor.
     pub id: MessageId,
-    /// Which Line.
-    pub line: LineId,
+    /// Which Channel.
+    pub channel: ChannelId,
     /// Who wrote it.
     pub author: PersonId,
     /// What the author is called.
@@ -206,7 +206,7 @@ impl<'a> Messages<'a> {
                 if let Some((id, body, created_at, edited_at, replies_to)) = existing {
                     stored.push(StoredMessage {
                         id: MessageId(id as u64),
-                        line: message.line,
+                        channel: message.channel,
                         author: message.author,
                         author_nickname: message.author_nickname.clone(),
                         body,
@@ -230,10 +230,10 @@ impl<'a> Messages<'a> {
 
             transaction.execute(
                 "INSERT INTO messages
-                   (line_id, author_id, body, created_at, replies_to, client_message_id)
+                   (channel_id, author_id, body, created_at, replies_to, client_message_id)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
-                    i64::from(message.line.get()),
+                    i64::from(message.channel.get()),
                     message.author.get() as i64,
                     message.body,
                     now,
@@ -243,7 +243,7 @@ impl<'a> Messages<'a> {
             )?;
             stored.push(StoredMessage {
                 id: MessageId(transaction.last_insert_rowid() as u64),
-                line: message.line,
+                channel: message.channel,
                 author: message.author,
                 author_nickname: message.author_nickname.clone(),
                 body: message.body.clone(),
@@ -272,7 +272,7 @@ impl<'a> Messages<'a> {
     /// Fails on a database error.
     pub fn history(
         &self,
-        line: LineId,
+        channel: ChannelId,
         cursor: Option<MessageId>,
         limit: u16,
     ) -> Result<Vec<StoredMessage>> {
@@ -284,20 +284,20 @@ impl<'a> Messages<'a> {
         // arrive and has no other way to learn their names, and a query per
         // message would be fifty round trips through SQLite for one page.
         let mut statement = self.persistence.connection().prepare(
-            "SELECT m.id, m.line_id, m.author_id, m.body, m.created_at, m.edited_at,
+            "SELECT m.id, m.channel_id, m.author_id, m.body, m.created_at, m.edited_at,
                     m.replies_to, m.client_message_id, p.nickname
              FROM messages m
              JOIN people p ON p.id = m.author_id
-             WHERE m.line_id = ?1 AND m.id < ?2 AND m.deleted_at IS NULL
+             WHERE m.channel_id = ?1 AND m.id < ?2 AND m.deleted_at IS NULL
              ORDER BY m.id DESC
              LIMIT ?3",
         )?;
 
-        let rows = statement.query_map(params![i64::from(line.get()), before, limit], |row| {
+        let rows = statement.query_map(params![i64::from(channel.get()), before, limit], |row| {
             Ok(StoredMessage {
                 attachment: None,
                 id: MessageId(row.get::<_, i64>(0)? as u64),
-                line: LineId(row.get::<_, i64>(1)? as u32),
+                channel: ChannelId(row.get::<_, i64>(1)? as u32),
                 author: PersonId(row.get::<_, i64>(2)? as u64),
                 author_nickname: row.get(8)?,
                 body: row.get(3)?,
@@ -322,7 +322,7 @@ impl<'a> Messages<'a> {
         Ok(page)
     }
 
-    /// How many messages a Line holds, removed ones excluded.
+    /// How many messages a Channel holds, removed ones excluded.
     ///
     /// Not a page: [`Self::history`] is capped at [`MAX_PAGE`], because a client
     /// scrolls and a screen holds a screenful. The question "how many are there"
@@ -333,10 +333,10 @@ impl<'a> Messages<'a> {
     /// # Errors
     ///
     /// Fails on a database error.
-    pub fn count(&self, line: LineId) -> Result<u64> {
+    pub fn count(&self, channel: ChannelId) -> Result<u64> {
         let total: i64 = self.persistence.connection().query_row(
-            "SELECT COUNT(*) FROM messages WHERE line_id = ?1 AND deleted_at IS NULL",
-            params![i64::from(line.get())],
+            "SELECT COUNT(*) FROM messages WHERE channel_id = ?1 AND deleted_at IS NULL",
+            params![i64::from(channel.get())],
             |row| row.get(0),
         )?;
         Ok(total.unsigned_abs())
@@ -407,7 +407,7 @@ impl<'a> Messages<'a> {
             .persistence
             .connection()
             .query_row(
-                "SELECT m.id, m.line_id, m.author_id, m.body, m.created_at, m.edited_at,
+                "SELECT m.id, m.channel_id, m.author_id, m.body, m.created_at, m.edited_at,
                         m.replies_to, m.client_message_id, p.nickname
                  FROM messages m
                  JOIN people p ON p.id = m.author_id
@@ -416,7 +416,7 @@ impl<'a> Messages<'a> {
                 |row| {
                     Ok(StoredMessage {
                         id: MessageId(row.get::<_, i64>(0)? as u64),
-                        line: LineId(row.get::<_, i64>(1)? as u32),
+                        channel: ChannelId(row.get::<_, i64>(1)? as u32),
                         author: PersonId(row.get::<_, i64>(2)? as u64),
                         author_nickname: row.get(8)?,
                         body: row.get(3)?,
@@ -469,7 +469,7 @@ mod tests {
         persistence
             .connection()
             .execute_batch(
-                "INSERT INTO lines (id, name) VALUES (1, 'geral'), (2, 'logs');
+                "INSERT INTO channels (id, name) VALUES (1, 'geral'), (2, 'logs');
                  INSERT INTO people (id, nickname, public_key, created_at)
                    VALUES (1, 'ayanami', X'01', 0), (2, 'shinji', X'02', 0);",
             )
@@ -479,7 +479,7 @@ mod tests {
 
     fn pending(body: &str) -> PendingMessage {
         PendingMessage {
-            line: LineId(1),
+            channel: ChannelId(1),
             author: PersonId(1),
             author_nickname: "pessoa".into(),
             body: body.into(),
@@ -526,7 +526,7 @@ mod tests {
         let second = messages.append_batch(&[with_key]).unwrap();
 
         assert_eq!(first.first().map(|m| m.id), second.first().map(|m| m.id));
-        assert_eq!(messages.history(LineId(1), None, 50).unwrap().len(), 1);
+        assert_eq!(messages.history(ChannelId(1), None, 50).unwrap().len(), 1);
     }
 
     #[test]
@@ -593,7 +593,7 @@ mod tests {
 
         // And the disk agrees with what was answered — the half that would still
         // be wrong if the answer were built from the incoming message.
-        let page = messages.history(LineId(1), None, 50).unwrap();
+        let page = messages.history(ChannelId(1), None, 50).unwrap();
         assert_eq!(page.len(), 1, "the second send must not have been written");
         assert_eq!(
             page.first().map(|m| m.body.as_str()),
@@ -621,7 +621,7 @@ mod tests {
             ])
             .unwrap();
 
-        assert_eq!(messages.history(LineId(1), None, 50).unwrap().len(), 2);
+        assert_eq!(messages.history(ChannelId(1), None, 50).unwrap().len(), 2);
     }
 
     #[test]
@@ -632,7 +632,7 @@ mod tests {
             .append_batch(&[pending("um"), pending("dois"), pending("três")])
             .unwrap();
 
-        let page = messages.history(LineId(1), None, 50).unwrap();
+        let page = messages.history(ChannelId(1), None, 50).unwrap();
         let bodies: Vec<&str> = page.iter().map(|m| m.body.as_str()).collect();
         assert_eq!(bodies, vec!["três", "dois", "um"]);
     }
@@ -649,7 +649,7 @@ mod tests {
         let mut seen = Vec::new();
         let mut cursor = None;
         loop {
-            let page = messages.history(LineId(1), cursor, 3).unwrap();
+            let page = messages.history(ChannelId(1), cursor, 3).unwrap();
             if page.is_empty() {
                 break;
             }
@@ -677,13 +677,13 @@ mod tests {
             )
             .unwrap();
 
-        let first_page = messages.history(LineId(1), None, 3).unwrap();
+        let first_page = messages.history(ChannelId(1), None, 3).unwrap();
         let cursor = first_page.last().map(|m| m.id);
 
         // Somebody speaks while the reader is paging.
         messages.append_batch(&[pending("nova")]).unwrap();
 
-        let second_page = messages.history(LineId(1), cursor, 3).unwrap();
+        let second_page = messages.history(ChannelId(1), cursor, 3).unwrap();
         let bodies: Vec<&str> = second_page.iter().map(|m| m.body.as_str()).collect();
         assert_eq!(bodies, vec!["3", "2", "1"], "the page shifted");
         assert!(
@@ -700,13 +700,13 @@ mod tests {
             .append_batch(&[
                 pending("geral"),
                 PendingMessage {
-                    line: LineId(2),
+                    channel: ChannelId(2),
                     ..pending("logs")
                 },
             ])
             .unwrap();
 
-        let geral = messages.history(LineId(1), None, 50).unwrap();
+        let geral = messages.history(ChannelId(1), None, 50).unwrap();
         assert_eq!(geral.len(), 1);
         assert_eq!(geral.first().map(|m| m.body.as_str()), Some("geral"));
     }
@@ -720,7 +720,7 @@ mod tests {
         let batch: Vec<PendingMessage> = (0..300).map(|i| pending(&format!("{i}"))).collect();
         messages.append_batch(&batch).unwrap();
 
-        let page = messages.history(LineId(1), None, u16::MAX).unwrap();
+        let page = messages.history(ChannelId(1), None, u16::MAX).unwrap();
         assert_eq!(page.len(), MAX_PAGE as usize);
     }
 
@@ -753,7 +753,7 @@ mod tests {
 
         messages.remove(id).unwrap();
 
-        assert_eq!(messages.history(LineId(1), None, 50).unwrap().len(), 1);
+        assert_eq!(messages.history(ChannelId(1), None, 50).unwrap().len(), 1);
         assert!(messages.one(id).unwrap().is_none());
         // The row survives, so a reply pointing at it still resolves.
         let count: i64 = persistence
@@ -808,7 +808,7 @@ mod tests {
             .unwrap();
 
         let page = Messages::new(&mut persistence)
-            .history(LineId(1), None, 50)
+            .history(ChannelId(1), None, 50)
             .unwrap();
         let com = page.iter().find(|m| m.id == com_foto).expect("a mensagem");
         let anexo = com.attachment.as_ref().expect("o anexo veio junto");
@@ -846,7 +846,7 @@ mod tests {
         Attachments::new(&persistence).expire(anexo.id).unwrap();
 
         let page = Messages::new(&mut persistence)
-            .history(LineId(1), None, 50)
+            .history(ChannelId(1), None, 50)
             .unwrap();
         let mensagem = page.first().expect("a mensagem continua no histórico");
         assert_eq!(
@@ -871,7 +871,7 @@ mod tests {
         let mut messages = Messages::new(&mut persistence);
         messages.append_batch(&[pending("um")]).unwrap();
         assert_eq!(messages.prune(0).unwrap(), 0);
-        assert_eq!(messages.history(LineId(1), None, 50).unwrap().len(), 1);
+        assert_eq!(messages.history(ChannelId(1), None, 50).unwrap().len(), 1);
     }
 
     #[test]
@@ -887,7 +887,7 @@ mod tests {
             persistence
                 .connection()
                 .execute_batch(
-                    "INSERT INTO lines (id, name) VALUES (1, 'geral');
+                    "INSERT INTO channels (id, name) VALUES (1, 'geral');
                      INSERT INTO people (id, nickname, public_key, created_at)
                        VALUES (1, 'ayanami', X'01', 0);",
                 )
@@ -900,7 +900,7 @@ mod tests {
 
         let mut persistence = Persistence::open(&location).unwrap();
         let messages = Messages::new(&mut persistence);
-        let history = messages.history(LineId(1), None, 50).unwrap();
+        let history = messages.history(ChannelId(1), None, 50).unwrap();
         assert_eq!(history.len(), 1);
         assert_eq!(
             history.first().map(|m| m.body.as_str()),

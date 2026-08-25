@@ -2,7 +2,7 @@
 //!
 //! ADR 0027. A file never crosses the control stream in either direction. The
 //! control stream is ordered, and an ordered stream blocks itself: twenty
-//! megabytes written into it stop every presence event, every line of text and
+//! megabytes written into it stop every presence event, every channel of text and
 //! every `Pong` from everybody behind them until the last byte goes through.
 //!
 //! So a sender opens a unidirectional stream, writes a header and then the
@@ -104,7 +104,7 @@ impl Vault {
 /// What became of an arriving transfer.
 #[derive(Debug)]
 pub enum Outcome {
-    /// The bytes landed whole and the message is on the Line.
+    /// The bytes landed whole and the message is on the Channel.
     Published(Box<StoredMessage>),
     /// Nothing was published, and here is why.
     ///
@@ -203,7 +203,7 @@ pub async fn receive(
         vault.scratches.fetch_add(1, Ordering::Relaxed)
     );
 
-    // The ceiling. Everything above this line is cheap; everything below it
+    // The ceiling. Everything above this channel is cheap; everything below it
     // touches the disk.
     let reservation = {
         // Ledger first, PERSISTENCE second. Always.
@@ -258,7 +258,7 @@ pub async fn receive(
 
     let content_hash = seele_proto::attachment::hex(&digest);
     let pending = PendingMessage {
-        line: header.line,
+        channel: header.channel,
         author: person,
         author_nickname: nickname.to_owned(),
         body: header.body.clone(),
@@ -272,7 +272,7 @@ pub async fn receive(
 
         // Written straight through rather than queued on `Server::post`, and
         // that is not an inconsistency: the batcher exists so that fifty typed
-        // lines cost one `fsync`, and a transfer that has just spent seconds on
+        // channels cost one `fsync`, and a transfer that has just spent seconds on
         // the wire is not that. What it needs and the queue cannot give is the
         // row identifier, now, to hang the attachment off.
         let mut stored = Messages::new(&mut guard)

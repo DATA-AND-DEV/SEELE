@@ -1,7 +1,7 @@
 //! Identifiers, as distinct types.
 //!
 //! Every one of these is a number on the wire, and every one of them would
-//! compile fine in the wrong slot if they were all `u32`. Passing a `LineId`
+//! compile fine in the wrong slot if they were all `u32`. Passing a `ChannelId`
 //! where a `VoiceRoomId` belongs is a bug the compiler can catch for free, and
 //! `specs/04-servidor-seele.md` makes voice_rooms and Linhas independent so the mix-up
 //! is available to make.
@@ -50,8 +50,8 @@ id_type!(
 );
 
 id_type!(
-    /// A text channel. `Linha` in Portuguese, `Line` in English.
-    LineId,
+    /// A text channel. `Linha` in Portuguese, `Channel` in English.
+    ChannelId,
     u32
 );
 
@@ -137,13 +137,13 @@ mod tests {
     #[test]
     fn identifiers_do_not_interchange() {
         // The whole point of the newtypes. This is a compile-time property, so
-        // the test documents it rather than proving it: `takes_voice_room(LineId(1))`
+        // the test documents it rather than proving it: `takes_voice_room(ChannelId(1))`
         // does not compile, and that is the guarantee.
         fn takes_voice_room(id: VoiceRoomId) -> u32 {
             id.get()
         }
         assert_eq!(takes_voice_room(VoiceRoomId(7)), 7);
-        assert_eq!(LineId::from(7).get(), 7);
+        assert_eq!(ChannelId::from(7).get(), 7);
     }
 
     #[test]

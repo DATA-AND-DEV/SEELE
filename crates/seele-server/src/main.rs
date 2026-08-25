@@ -304,7 +304,7 @@ fn tamanho(bytes: u64) -> String {
 /// Asked of the interfaces, not of the default route. A VPN captures the
 /// default route, and the address it hands back is the tunnel's — reachable by
 /// nobody on the local network. That was a real field failure, and it is why
-/// this is one call into `seele_server::alcance` instead of the four lines of
+/// this is one call into `seele_server::alcance` instead of the four channels of
 /// UDP trickery that used to live here.
 fn lan_address() -> Option<std::net::IpAddr> {
     seele_server::alcance::endereco_de_rede_local()

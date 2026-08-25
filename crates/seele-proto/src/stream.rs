@@ -145,7 +145,7 @@ mod tests {
     use super::*;
     use crate::attachment::{hash, AttachmentHeader};
     use crate::control::{decode, encode};
-    use crate::ids::{ClientMessageId, LineId, ScreenId};
+    use crate::ids::{ClientMessageId, ChannelId, ScreenId};
     use crate::screen::{ScreenCodec, ScreenHeader, ScreenSource, SCREEN_HEADER_LEN};
     use crate::version::PROTOCOL_VERSION;
 
@@ -241,7 +241,7 @@ mod tests {
         // this is the stream that already existed, so the byte in front of it
         // changes how a stream in the field is read.
         let header = AttachmentHeader {
-            line: LineId(1),
+            channel: ChannelId(1),
             client_message_id: ClientMessageId(0xFEED),
             body: String::new(),
             replies_to: None,

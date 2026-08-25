@@ -25,7 +25,7 @@ pub fn project(room: &Room, app: &mut App) {
     project_screen(room, app);
 }
 
-/// The voice_rooms/Lines panel: voice_rooms, their people nested under the open one, Lines.
+/// The voice_rooms/Channels panel: voice_rooms, their people nested under the open one, Channels.
 fn project_channels(room: &Room, app: &mut App) {
     app.servers = if room.server.is_empty() {
         Vec::new()
@@ -58,9 +58,9 @@ fn project_channels(room: &Room, app: &mut App) {
             }));
         }
     }
-    for line in &room.lines {
-        tree.push(Node::Line {
-            name: line.name.clone(),
+    for channel in &room.channels {
+        tree.push(Node::Channel {
+            name: channel.name.clone(),
         });
     }
 
@@ -81,7 +81,7 @@ fn project_messages(room: &Room, app: &mut App) {
                 } else {
                     message.body.clone()
                 };
-                // ADR 0027. Drawn on the line and never opened: this terminal
+                // ADR 0027. Drawn on the channel and never opened: this terminal
                 // has no button that opens a file and is not going to grow one.
                 // The word that matters is the one that says whether the bytes
                 // are still there — a message whose picture was evicted must
@@ -99,7 +99,7 @@ fn project_messages(room: &Room, app: &mut App) {
         .collect();
 }
 
-/// The one line a terminal draws for a file.
+/// The one channel a terminal draws for a file.
 ///
 /// Name, size, and whether it is still there. No preview, because a terminal
 /// has none to give, and no way to open it, because ADR 0027 gives no client of
@@ -197,12 +197,12 @@ pub fn worth_retrying(reason: DisconnectReason) -> bool {
 mod tests {
     use super::*;
     use seele_core::{
-        AlertReason, VoiceRoomId, VoiceRoomInfo, LineId, LineInfo, MessageId, PersonId, PersonProfile,
+        AlertReason, VoiceRoomId, VoiceRoomInfo, ChannelId, ChannelInfo, MessageId, PersonId, PersonProfile,
         PersonState, Presence, ServerMessage, SessionId, Ssrc,
     };
 
     const VOICE_ROOM: VoiceRoomId = VoiceRoomId(1);
-    const LINE: LineId = LineId(1);
+    const CHANNEL: ChannelId = ChannelId(1);
 
     fn room() -> Room {
         let mut room = Room::new();
@@ -219,25 +219,25 @@ mod tests {
                     name: "VOICE_ROOM-01 CENTRAL".into(),
                     limit: 20,
                     password_required: false,
-                    line: Some(LINE),
+                    channel: Some(CHANNEL),
                 },
                 VoiceRoomInfo {
                     id: VoiceRoomId(2),
                     name: "VOICE_ROOM-02 TESTE".into(),
                     limit: 20,
                     password_required: false,
-                    line: None,
+                    channel: None,
                 },
             ],
-            lines: vec![LineInfo {
-                id: LINE,
+            channels: vec![ChannelInfo {
+                id: CHANNEL,
                 name: "geral".into(),
             }],
             roles: Vec::new(),
             permissions: Vec::new(),
         });
         room.enter_voice_room(VOICE_ROOM);
-        room.open_line(LINE);
+        room.open_channel(CHANNEL);
         room
     }
 
@@ -255,7 +255,7 @@ mod tests {
 
     fn said(id: u64, author: u64, body: &str) -> ServerMessage {
         ServerMessage::MessageReceived {
-            line: LINE,
+            channel: CHANNEL,
             id: MessageId(id),
             author: PersonId(author),
             at_seconds: 1_700_000_000,
@@ -269,7 +269,7 @@ mod tests {
 
     fn com_anexo(id: u64, body: &str, expirado: bool) -> ServerMessage {
         let ServerMessage::MessageReceived {
-            line,
+            channel,
             author,
             at_seconds,
             author_nickname,
@@ -281,7 +281,7 @@ mod tests {
             unreachable!("said builds a MessageReceived")
         };
         ServerMessage::MessageReceived {
-            line,
+            channel,
             id: MessageId(id),
             author,
             at_seconds,
@@ -425,7 +425,7 @@ mod tests {
     #[test]
     fn lines_come_after_every_voice_room() {
         // The composition specs/05-cliente-tui.md draws: voice_rooms with their
-        // people, then Lines. A Line floating between two voice_rooms reads as
+        // people, then Channels. A Channel floating between two voice_rooms reads as
         // belonging to the one above it.
         let mut room = room();
         room.apply(&joined(3, "ayanami"));
@@ -440,8 +440,8 @@ mod tests {
         let first_line = app
             .tree
             .iter()
-            .position(|node| matches!(node, Node::Line { .. }))
-            .expect("a line");
+            .position(|node| matches!(node, Node::Channel { .. }))
+            .expect("a channel");
         assert!(first_line > last_voice_room);
     }
 
@@ -456,7 +456,7 @@ mod tests {
         app.selected = app.tree.len() - 1;
 
         room.voice_rooms.clear();
-        room.lines.clear();
+        room.channels.clear();
         project(&room, &mut app);
 
         assert!(app.selected < app.tree.len().max(1));
@@ -464,12 +464,12 @@ mod tests {
 
     #[test]
     fn an_edited_message_says_so_instead_of_changing_under_the_reader() {
-        // A line that quietly becomes different text is worse than one that
+        // A channel that quietly becomes different text is worse than one that
         // admits it: the reader has no way to know the conversation moved.
         let mut room = room();
         room.apply(&said(1, 7, "sync caiu"));
         room.apply(&ServerMessage::MessageEdited {
-            line: LINE,
+            channel: CHANNEL,
             id: MessageId(1),
             body: "sync voltou".into(),
         });

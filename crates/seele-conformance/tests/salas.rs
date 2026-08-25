@@ -44,7 +44,7 @@ use anyhow::Result;
 use seele_core::enlace::{Aviso, Destino, Enlace};
 use seele_core::{MemoryPinStore, PinStore};
 use seele_proto::control::{AlertReason, Permission, ServerMessage};
-use seele_proto::ids::{VoiceRoomId, LineId};
+use seele_proto::ids::{VoiceRoomId, ChannelId};
 use seele_server::persistence::Location;
 use seele_server::{ServerConfig, Daemon};
 
@@ -175,8 +175,8 @@ async fn quem_hospeda_vira_comandante_e_a_segunda_conta_nao() -> Result<()> {
     // que não pode fazer coisa nenhuma.
     for permissao in [
         Permission::Speak,
-        Permission::WriteLine,
-        Permission::ReadLine,
+        Permission::WriteChannel,
+        Permission::ReadChannel,
     ] {
         assert!(
             convidado.sessao().permissions.contains(&permissao),
@@ -226,7 +226,7 @@ async fn uma_sala_criada_aparece_para_quem_ja_estava_conectado() -> Result<()> {
         vistos.iter().any(|aviso| matches!(
             aviso,
             Aviso::Mensagem(mensagem)
-                if matches!(&**mensagem, ServerMessage::LineCreated { line } if line.name == "planejamento")
+                if matches!(&**mensagem, ServerMessage::ChannelCreated { channel } if channel.name == "planejamento")
         )),
         "a Linha nova não chegou à testemunha"
     );
@@ -313,10 +313,10 @@ async fn um_pessoa_sem_manage_voice_rooms_e_recusado_pelo_server_e_nao_pela_casc
     // permissão e não a checagem — cada um tem o seu `if`, e um `if` esquecido
     // é uma porta aberta que os outros três testes não veriam.
     let voice_room_de_sempre = VoiceRoomId(depois.sessao().voice_rooms[0].id.get());
-    let linha_de_sempre = LineId(depois.sessao().lines[0].id.get());
+    let linha_de_sempre = ChannelId(depois.sessao().channels[0].id.get());
     for (verbo, pedido) in [
         (
-            "CreateLine",
+            "CreateChannel",
             sem_permissao
                 .criar_linha("linha-do-intruso".to_owned())
                 .await,
@@ -328,7 +328,7 @@ async fn um_pessoa_sem_manage_voice_rooms_e_recusado_pelo_server_e_nao_pela_casc
                 .await,
         ),
         (
-            "RenameLine",
+            "RenameChannel",
             sem_permissao
                 .renomear_linha(linha_de_sempre, "tomada".to_owned())
                 .await,
@@ -350,13 +350,13 @@ async fn um_pessoa_sem_manage_voice_rooms_e_recusado_pelo_server_e_nao_pela_casc
         "o intruso renomeou a sala de voz"
     );
     assert_eq!(
-        ultimo.sessao().lines[0].name,
-        depois.sessao().lines[0].name,
+        ultimo.sessao().channels[0].name,
+        depois.sessao().channels[0].name,
         "o intruso renomeou a Linha"
     );
     assert_eq!(
-        ultimo.sessao().lines.len(),
-        depois.sessao().lines.len(),
+        ultimo.sessao().channels.len(),
+        depois.sessao().channels.len(),
         "o intruso criou uma Linha"
     );
 
