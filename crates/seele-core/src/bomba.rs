@@ -48,12 +48,20 @@
 //!
 //! # O que este módulo **não** faz
 //!
-//! **Não mede o caminho.** Continua a pergunta 2 do §8 e o padrão continua
-//! sendo o cano das provas. O que ele consome é o que o fio traz —
-//! [`crate::state::Room::teto_de_video`] junta os espectadores e a subida de
-//! quem hospeda —, e o que a voz mede, que é a [`SyncBand`]. RTT, jitter e
-//! perda (ADR 0024) dizem se o caminho está **doendo**; nenhum dos três diz
-//! quanto ele **aguenta**, e converter um no outro seria inventar uma medida.
+//! **Não mede o caminho, e agora alguém mede.** Quem mede é a
+//! [`crate::caminho::Sonda`], do outro lado do canal: ela lê os contadores do
+//! transporte enquanto **esta bomba** enche o cano — a tela é a coisa que
+//! enche, e era essa a pergunta 2 do §8. O que chega aqui continua sendo o
+//! resultado pronto, um [`TetoDeVideo`] com as três pernas do §5.1 já dentro
+//! ([`crate::state::Room::teto_de_video`] junta os espectadores, a subida de
+//! quem hospeda e a medida desta máquina), mais a [`SyncBand`] à parte.
+//!
+//! E a divisão de trabalho não mudou, porque ela é de propósito: RTT, jitter e
+//! perda (ADR 0024) dizem se o caminho está **doendo**, e é a voz que os lê; o
+//! `PathStats` do `quinn` diz quanto o caminho **aguentou**, e é a sonda que o
+//! lê. São duas perguntas diferentes, e responder uma com a outra seria
+//! inventar uma medida — ou cobrar duas vezes pelo mesmo sintoma, que é o que o
+//! cabeçalho de [`crate::caminho`] chama de segunda armadilha.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};

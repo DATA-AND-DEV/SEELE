@@ -1068,6 +1068,23 @@ impl Client {
         FlowControl::from(&self.connection.stats())
     }
 
+    /// O que o transporte contou sobre o caminho, para a [`crate::caminho::Sonda`].
+    ///
+    /// Lida da mesma `ConnectionStats` que [`Self::flow_control`], e por um
+    /// motivo que vale escrever: **é a única fonte que sabe quantos bytes de
+    /// fato saíram pelo soquete.** O que a bomba conta são os bytes que ela
+    /// escreveu no fluxo, e um byte escrito num fluxo QUIC não é um byte na
+    /// rede — pode estar na janela de congestionamento esperando a vez. É
+    /// justamente essa diferença que a sonda precisa medir, então contá-la aqui
+    /// em cima seria contar a coisa errada.
+    ///
+    /// Devolve o acumulado desde o começo desta conexão; a subtração é da sonda,
+    /// que é quem sabe onde a janela dela começou.
+    #[must_use]
+    pub fn amostra_do_transporte(&self) -> crate::caminho::Transporte {
+        crate::caminho::Transporte::from(&self.connection.stats())
+    }
+
     /// The most recent round trip, if a ping has been answered.
     ///
     /// `specs/02-protocolo.md` makes this the base of the Sync Ratio — and the

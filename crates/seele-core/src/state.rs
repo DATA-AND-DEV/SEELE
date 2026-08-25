@@ -622,20 +622,33 @@ impl Room {
     /// `HostUplink`, o N vem do `ScreenViewers`, e a escolha da pessoa vem da
     /// interface — sempre teto, nunca piso (§5).
     ///
-    /// A perna de quem compartilha **não** vem de lugar nenhum, e isto é
-    /// deliberado: o produto mede sinal, RTT e perda (ADR 0024), e nenhum dos
-    /// três diz quanto o caminho aguenta. Fica o cano das provas
-    /// ([`crate::tela::CAMINHO_DA_PROVA_BPS`]), que é a única suposição com
-    /// número atrás, e quem aperta de verdade num caminho ruim é a faixa do
-    /// sinal — [`crate::tela::TetoDeVideo::teto`] a recebe à parte. É a
-    /// pergunta 2 do §8, e ela continua aberta.
+    /// A perna de quem compartilha **entra por argumento**, e a `Room` não a
+    /// guarda. Não é omissão: aquela perna é a única das três que vem de uma
+    /// **medida em curso** — a [`crate::caminho::Sonda`] a tira do que o
+    /// transporte contou enquanto a tela enchia o cano —, e esta estrutura é
+    /// uma dobra de mensagens do fio. Guardá-la aqui poria um relógio dentro de
+    /// uma coisa que não tem nenhum, e faria duas cópias dela: a do
+    /// `crate::enlace`, que é quem mede, e esta, que estaria sempre um pouco
+    /// atrás. Quem chama passa `crate::caminho::Sonda::estimativa`, e quem não
+    /// mede nada passa [`crate::tela::CAMINHO_DA_PROVA_BPS`] — a suposição do
+    /// §8, que continua sendo por onde se começa.
+    ///
+    /// Era a pergunta 2 do §8, e ela deixou de estar aberta: ver o cabeçalho de
+    /// [`crate::caminho`].
     ///
     /// Ausência de medida do anfitrião **não** é zero: quando o `HostUplink`
     /// não chegou, ou chegou dizendo zero, a perna dele fica no cano das provas
-    /// em vez de zerar o teto — ver [`Self::caminho_de_quem_hospeda_bps`].
+    /// em vez de zerar o teto — ver [`Self::caminho_de_quem_hospeda_bps`]. E é
+    /// essa perna, e não esta, que trava o teto em 1200 kbps num Dogma que não
+    /// declarou a própria subida, por mais que esta ponta meça: o `min` do §5.1
+    /// é o menor dos três.
     #[must_use]
-    pub fn teto_de_video(&self, escolha_bps: Option<u32>) -> crate::tela::TetoDeVideo {
-        let mut teto = crate::tela::TetoDeVideo::novo();
+    pub fn teto_de_video(
+        &self,
+        caminho_bps: u32,
+        escolha_bps: Option<u32>,
+    ) -> crate::tela::TetoDeVideo {
+        let mut teto = crate::tela::TetoDeVideo::com_caminho(caminho_bps);
         if let Some(medido) = self.caminho_de_quem_hospeda_bps {
             teto = teto.com_caminho_de_quem_hospeda(medido);
         }
@@ -1968,11 +1981,13 @@ mod tests {
     fn a_subida_de_quem_hospeda_com_zero_e_ausencia_e_nao_um_teto_de_zero() {
         let mut room = room();
 
-        // Sem notícia nenhuma: fica o cano das provas, que é a única suposição
-        // com número atrás (§8 pergunta 2).
+        // Sem notícia nenhuma: a perna do anfitrião fica no cano das provas, que
+        // é a única suposição com número atrás — e é ela, e não a de quem
+        // compartilha, que continua sendo suposta neste ponto do §5.1.
         assert_eq!(room.caminho_de_quem_hospeda_bps, None);
         assert_eq!(
-            room.teto_de_video(None).teto(SyncBand::Nominal),
+            room.teto_de_video(crate::tela::CAMINHO_DA_PROVA_BPS, None)
+                .teto(SyncBand::Nominal),
             crate::tela::Teto::Bps(1_200_000)
         );
 
@@ -1984,7 +1999,8 @@ mod tests {
         );
         assert_eq!(room.caminho_de_quem_hospeda_bps, None);
         assert_eq!(
-            room.teto_de_video(None).teto(SyncBand::Nominal),
+            room.teto_de_video(crate::tela::CAMINHO_DA_PROVA_BPS, None)
+                .teto(SyncBand::Nominal),
             crate::tela::Teto::Bps(1_200_000),
             "o zero de «não medi» virou um teto de zero"
         );
@@ -2015,15 +2031,18 @@ mod tests {
         });
 
         // Sozinho: a subida do anfitrião dá 6 Mbps × 60% = 3,6, e quem manda é
-        // a **outra** perna — o cano das provas de quem compartilha, 2 Mbps ×
-        // 60% = 1,2. É a pergunta 2 do §8 aparecendo na conta: enquanto
-        // ninguém mede o caminho de quem compartilha, é ele que faz o teto.
+        // a **outra** perna — a de quem compartilha, 2 Mbps × 60% = 1,2. Aqui
+        // ela vale o cano das provas porque é o que a `crate::caminho::Sonda`
+        // devolve antes da primeira janela cheia; numa sessão em curso é ela
+        // que põe o número, e o resto desta conta não muda.
         assert_eq!(
-            room.teto_de_video(None).teto(SyncBand::Nominal),
+            room.teto_de_video(crate::tela::CAMINHO_DA_PROVA_BPS, None)
+                .teto(SyncBand::Nominal),
             crate::tela::Teto::Bps(1_200_000)
         );
         assert_eq!(
-            room.teto_de_video(None).perna_que_aperta(SyncBand::Nominal),
+            room.teto_de_video(crate::tela::CAMINHO_DA_PROVA_BPS, None)
+                .perna_que_aperta(SyncBand::Nominal),
             crate::tela::PernaQueAperta::QuemCompartilha
         );
 
@@ -2037,19 +2056,25 @@ mod tests {
         assert!(changed.telas, "a contagem mudou e o painel não soube");
         assert_eq!(room.minha_tela().map(|tela| tela.espectadores), Some(4));
         assert_eq!(
-            room.teto_de_video(None).teto(SyncBand::Nominal),
+            room.teto_de_video(crate::tela::CAMINHO_DA_PROVA_BPS, None)
+                .teto(SyncBand::Nominal),
             crate::tela::Teto::Bps(900_000),
             "as quatro cópias que o servidor sobe não foram divididas"
         );
         // E a razão é dizível, que é o que a tela escreve ao lado do degrau:
         // `720p · 4 pessoas assistindo`, e não `720p · sua conexão`.
         assert_eq!(
-            room.teto_de_video(None).perna_que_aperta(SyncBand::Nominal),
+            room.teto_de_video(crate::tela::CAMINHO_DA_PROVA_BPS, None)
+                .perna_que_aperta(SyncBand::Nominal),
             crate::tela::PernaQueAperta::QuemHospeda
         );
         // E a voz da máquina de quem compartilha nunca cedeu: os 40% do caminho
         // dela continuam de pé em toda a escada.
-        assert_eq!(room.teto_de_video(None).reserva_da_voz(), 800_000);
+        assert_eq!(
+            room.teto_de_video(crate::tela::CAMINHO_DA_PROVA_BPS, None)
+                .reserva_da_voz(),
+            800_000
+        );
 
         // O reenvio de `ScreenShareStarted` — o Dogma manda um a cada pessoa
         // que entra numa sala que já transmite — não pode zerar a contagem, ou
