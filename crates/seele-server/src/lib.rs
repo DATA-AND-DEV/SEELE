@@ -5,11 +5,11 @@
 //!
 //! | Subsystem | Responsibility | Module |
 //! |---|---|---|
-//! | **MELCHIOR** | Identity, authentication, sessions, roles | [`session`] |
-//! | **BALTHASAR** | Media routing, forwarding, bandwidth | [`cage`] |
-//! | **CASPER** | Persistent state, history, migrations | M3 |
+//! | **PERMISSIONS** | Identity, authentication, sessions, roles | [`session`] |
+//! | **MEDIA** | Media routing, forwarding, bandwidth | [`cage`] |
+//! | **PERSISTENCE** | Persistent state, history, migrations | M3 |
 //!
-//! M2 builds MELCHIOR's handshake and BALTHASAR's forwarding, with one fixed
+//! M2 builds PERMISSIONS's handshake and MEDIA's forwarding, with one fixed
 //! Cage and no persistence.
 //!
 //! # Why this is a library as well as a binary
@@ -33,11 +33,11 @@ use seele_proto::ids::CageId;
 pub mod admissao;
 pub mod alcance;
 pub mod cage;
-pub mod casper;
+pub mod persistence;
 pub mod dogma;
 pub mod frame;
 pub mod hospedagem;
-pub mod melchior;
+pub mod permissions;
 pub mod portaria;
 pub mod session;
 pub mod taxa;
@@ -117,10 +117,10 @@ pub struct DogmaConfig {
     ///
     /// M3 brought real accounts, so this is now only a bootstrap convenience:
     /// somebody has to be able to configure the first roles before there is an
-    /// operator to do it. Authorisation itself is MELCHIOR's, always.
+    /// operator to do it. Authorisation itself is PERMISSIONS's, always.
     pub observers: Vec<String>,
-    /// Where CASPER keeps the database.
-    pub database: crate::casper::Location,
+    /// Where PERSISTENCE keeps the database.
+    pub database: crate::persistence::Location,
     /// Where the attachment blobs live. ADR 0027.
     ///
     /// `None` derives it: `anexos/` beside the database file. Beside it, and
@@ -169,7 +169,7 @@ impl Default for DogmaConfig {
             cage_name: "SALA 1".into(),
             cage_limit: 15,
             observers: Vec::new(),
-            database: crate::casper::Location::Memory,
+            database: crate::persistence::Location::Memory,
             anexos: None,
             caminho_bps: None,
         }
@@ -186,18 +186,18 @@ pub fn diretorio_de_anexos(config: &DogmaConfig) -> Option<std::path::PathBuf> {
         return Some(escolhido.clone());
     }
     match &config.database {
-        casper::Location::File(path) => Some(
+        persistence::Location::File(path) => Some(
             path.parent()
                 .unwrap_or_else(|| std::path::Path::new("."))
                 .join("anexos"),
         ),
-        casper::Location::Memory => None,
+        persistence::Location::Memory => None,
     }
 }
 
 /// Creates the configured Cage and its Line if they are not there yet.
 ///
-/// M2 kept these in the config struct; M3 keeps them in CASPER so a restart
+/// M2 kept these in the config struct; M3 keeps them in PERSISTENCE so a restart
 /// finds the same room rather than rebuilding it. Idempotent, because it runs
 /// on every boot.
 ///
@@ -215,14 +215,14 @@ pub fn diretorio_de_anexos(config: &DogmaConfig) -> Option<std::path::PathBuf> {
 /// A migration would look cheaper — one more `INSERT` in migration 1 — and it
 /// is the wrong place, for two reasons that only show up later.
 ///
-/// **A migration is irreversible and append-only** ([`casper::schema`]). The
+/// **A migration is irreversible and append-only** ([`persistence::schema`]). The
 /// name of a Cage is not: `ClientMessage::RenameCage` exists, and the whole
 /// point of hosting your own Dogma is that the rooms are yours. Seeded content
 /// baked into a schema version would be a name the operator can change and the
 /// history of the schema still claims.
 ///
 /// **The Cage's name and limit come from [`DogmaConfig`]**, which a migration
-/// cannot see. Migrations run inside CASPER, before there is a config to
+/// cannot see. Migrations run inside PERSISTENCE, before there is a config to
 /// consult, and passing one in would make "which SQL is this database at" depend
 /// on a runtime value.
 ///
@@ -249,8 +249,8 @@ pub fn diretorio_de_anexos(config: &DogmaConfig) -> Option<std::path::PathBuf> {
 /// which is what `INSERT OR IGNORE` was already for.
 const SEMEADO: &str = "semeado";
 
-fn seed(casper: &mut casper::Casper, config: &DogmaConfig) -> Result<()> {
-    let connection = casper.connection();
+fn seed(persistence: &mut persistence::Persistence, config: &DogmaConfig) -> Result<()> {
+    let connection = persistence.connection();
     let ja: i64 = connection.query_row(
         "SELECT COUNT(*) FROM configuracao WHERE chave = ?1",
         [SEMEADO],
@@ -304,11 +304,11 @@ impl Server {
         // it here rather than in `main` means the integration tests get it too.
         let _ = rustls::crypto::ring::default_provider().install_default();
 
-        // CASPER first: the handshake needs accounts before it can answer
+        // PERSISTENCE first: the handshake needs accounts before it can answer
         // anybody, and migrations run at boot (specs/04-servidor-seele.md).
         // A identidade TLS também mora nele, então ele vem antes dela.
-        let mut casper = casper::Casper::open(&config.database)?;
-        seed(&mut casper, &config)?;
+        let mut persistence = persistence::Persistence::open(&config.database)?;
+        seed(&mut persistence, &config)?;
 
         // Lida do banco, não gerada a cada vez. Sem isto, reiniciar o Dogma
         // trocava a chave e todo cliente já conectado via `A CHAVE DO SERVIDOR
@@ -316,7 +316,7 @@ impl Server {
         // reservado para ataque disparando num reinício de rotina é como se
         // ensina a ignorá-lo.
         let identity = tls::Identity::load_or_create(
-            &casper,
+            &persistence,
             vec!["localhost".into(), config.listen.ip().to_string()],
         )?;
         let fingerprint = identity.fingerprint();
@@ -359,19 +359,19 @@ impl Server {
         // table and both are still ours alone at this point. ADR 0027 wants the
         // ceiling standing before the first connection, not after.
         let anexos = match diretorio_de_anexos(&config) {
-            Some(root) => Some(Arc::new(transfer::Vault::open(root, &casper)?)),
+            Some(root) => Some(Arc::new(transfer::Vault::open(root, &persistence)?)),
             None => {
                 tracing::info!("anexos: sem diretório, este Dogma não guarda arquivo");
                 None
             }
         };
 
-        let casper = Arc::new(tokio::sync::Mutex::new(casper));
+        let persistence = Arc::new(tokio::sync::Mutex::new(persistence));
 
         let (events, _) = tokio::sync::broadcast::channel(1024);
-        let writes = dogma::spawn_writer(Arc::clone(&casper), events.clone());
+        let writes = dogma::spawn_writer(Arc::clone(&persistence), events.clone());
         let dogma = Arc::new(dogma::Dogma {
-            casper,
+            persistence,
             events,
             writes,
             slots: Arc::new(tokio::sync::Mutex::new(dogma::Slots::default())),
@@ -465,8 +465,8 @@ impl Server {
     /// # Errors
     ///
     /// Falha se o banco não responder ou não tiver identidade ainda.
-    pub fn fingerprint_do_banco(casper: &casper::Casper) -> Result<String> {
-        let cert: Vec<u8> = casper.connection().query_row(
+    pub fn fingerprint_do_banco(persistence: &persistence::Persistence) -> Result<String> {
+        let cert: Vec<u8> = persistence.connection().query_row(
             "SELECT valor FROM configuracao WHERE chave = 'tls_cert'",
             [],
             |linha| linha.get(0),
@@ -482,7 +482,7 @@ impl Server {
     pub fn politica_de_admissao(&self) -> Result<admissao::Politica> {
         let guard = self
             .dogma
-            .casper
+            .persistence
             .try_lock()
             .map_err(|_| anyhow::anyhow!("o banco está ocupado"))?;
         admissao::Politica::carregar(&guard)
@@ -528,26 +528,26 @@ impl Server {
         &self.dogma
     }
 
-    /// How many messages CASPER holds on a Line.
+    /// How many messages PERSISTENCE holds on a Line.
     ///
     /// The counterpart of [`Self::mensagens_da_linha`], and the one that answers
     /// "did anything get lost": a page is capped, a count is not. See
-    /// [`casper::messages::Messages::count`].
+    /// [`persistence::messages::Messages::count`].
     ///
     /// # Errors
     ///
     /// Fails if the database is busy or does not answer.
     pub async fn quantas_mensagens(&self, line: seele_proto::ids::LineId) -> Result<u64> {
-        let mut guard = self.dogma.casper.lock().await;
-        casper::messages::Messages::new(&mut guard).count(line)
+        let mut guard = self.dogma.persistence.lock().await;
+        persistence::messages::Messages::new(&mut guard).count(line)
     }
 
-    /// What CASPER actually recorded on a Line, newest first.
+    /// What PERSISTENCE actually recorded on a Line, newest first.
     ///
-    /// One page, capped at [`casper::messages::MAX_PAGE`] like every other
+    /// One page, capped at [`persistence::messages::MAX_PAGE`] like every other
     /// reader of history — [`Self::quantas_mensagens`] is what counts.
     ///
-    /// # Why this exists, and why it is not `Casper::connection()`
+    /// # Why this exists, and why it is not `Persistence::connection()`
     ///
     /// `docs/pendencias.md` #1 is a delivery bug, and a delivery bug has two
     /// legs: what the Dogma **took in** and what it **handed out**. Measuring
@@ -555,7 +555,7 @@ impl Server {
     /// that was stored and never sent, and those two have nothing in common but
     /// the symptom. So a test needs to see the first leg.
     ///
-    /// The pendência recorded the obstacle as `Casper::connection()` being
+    /// The pendência recorded the obstacle as `Persistence::connection()` being
     /// `pub(crate)`. Making it public would have worked and would have been the
     /// wrong trade: it hands out a `rusqlite::Connection`, and from that moment
     /// the schema is the contract. A test that writes its own `SELECT` goes on
@@ -563,7 +563,7 @@ impl Server {
     /// table nobody meant it to know.
     ///
     /// This asks the question instead of the storage: *what is on this Line?*
-    /// It goes through [`casper::messages::Messages`] — the same reader the
+    /// It goes through [`persistence::messages::Messages`] — the same reader the
     /// session uses for `FetchHistory` — so a test and a client see the same
     /// answer by construction, and the schema stays behind the crate wall.
     ///
@@ -574,9 +574,9 @@ impl Server {
         &self,
         line: seele_proto::ids::LineId,
         limite: u16,
-    ) -> Result<Vec<casper::messages::StoredMessage>> {
-        let mut guard = self.dogma.casper.lock().await;
-        casper::messages::Messages::new(&mut guard).history(line, None, limite)
+    ) -> Result<Vec<persistence::messages::StoredMessage>> {
+        let mut guard = self.dogma.persistence.lock().await;
+        persistence::messages::Messages::new(&mut guard).history(line, None, limite)
     }
 
     /// Stops accepting and closes the endpoint.
@@ -601,13 +601,13 @@ impl Server {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::casper::channels::Channels;
-    use crate::casper::{Casper, Location};
+    use crate::persistence::channels::Channels;
+    use crate::persistence::{Persistence, Location};
 
-    fn born(config: &DogmaConfig) -> Casper {
-        let mut casper = Casper::open(&config.database).expect("open");
-        seed(&mut casper, config).expect("seed");
-        casper
+    fn born(config: &DogmaConfig) -> Persistence {
+        let mut persistence = Persistence::open(&config.database).expect("open");
+        seed(&mut persistence, config).expect("seed");
+        persistence
     }
 
     #[test]
@@ -617,8 +617,8 @@ mod tests {
         // no way to tell a working Dogma from a broken one — and "hospede você
         // mesmo" would be a claim rather than a thing that happens.
         let config = DogmaConfig::default();
-        let casper = born(&config);
-        let channels = Channels::new(&casper);
+        let persistence = born(&config);
+        let channels = Channels::new(&persistence);
 
         let lines = channels.lines().expect("lines");
         assert_eq!(lines.len(), 1, "a Dogma opened with no Line: {lines:?}");
@@ -650,9 +650,9 @@ mod tests {
         };
 
         drop(born(&config));
-        let casper = born(&config);
+        let persistence = born(&config);
 
-        let channels = Channels::new(&casper);
+        let channels = Channels::new(&persistence);
         assert_eq!(channels.lines().expect("lines").len(), 1);
         assert_eq!(channels.cages().expect("cages").len(), 1);
     }
@@ -669,15 +669,15 @@ mod tests {
             ..DogmaConfig::default()
         };
 
-        let casper = born(&config);
-        let cage = Channels::new(&casper).cages().expect("cages")[0].id;
-        Channels::new(&casper)
+        let persistence = born(&config);
+        let cage = Channels::new(&persistence).cages().expect("cages")[0].id;
+        Channels::new(&persistence)
             .rename_cage(cage, "CAGE-01 PONTE")
             .expect("rename");
-        drop(casper);
+        drop(persistence);
 
-        let casper = born(&config);
-        let cages = Channels::new(&casper).cages().expect("cages");
+        let persistence = born(&config);
+        let cages = Channels::new(&persistence).cages().expect("cages");
         assert_eq!(cages.len(), 1);
         assert_eq!(cages[0].name, "CAGE-01 PONTE");
     }
@@ -697,17 +697,17 @@ mod tests {
             ..DogmaConfig::default()
         };
 
-        let casper = born(&config);
-        let channels = Channels::new(&casper);
+        let persistence = born(&config);
+        let channels = Channels::new(&persistence);
         let line = channels.lines().expect("lines")[0].id;
         // The Cage bound to it is unbound by the delete; nothing else here
         // depends on that, and the Cage is not what this test is about.
         channels.delete_line(line).expect("delete");
-        drop(casper);
+        drop(persistence);
 
-        let casper = born(&config);
+        let persistence = born(&config);
         assert!(
-            Channels::new(&casper).lines().expect("lines").is_empty(),
+            Channels::new(&persistence).lines().expect("lines").is_empty(),
             "a Line destroyed on purpose was written back by the next boot"
         );
     }
@@ -724,17 +724,17 @@ mod tests {
             ..DogmaConfig::default()
         };
 
-        let casper = born(&config);
-        let channels = Channels::new(&casper);
+        let persistence = born(&config);
+        let channels = Channels::new(&persistence);
         let inicial = channels.cages().expect("cages")[0].id;
         channels
             .create_cage("CAGE-02 PONTE", 8, None)
             .expect("cage");
         channels.delete_cage(inicial).expect("delete");
-        drop(casper);
+        drop(persistence);
 
-        let casper = born(&config);
-        let cages = Channels::new(&casper).cages().expect("cages");
+        let persistence = born(&config);
+        let cages = Channels::new(&persistence).cages().expect("cages");
         assert_eq!(
             cages.len(),
             1,
@@ -755,23 +755,23 @@ mod tests {
             ..DogmaConfig::default()
         };
 
-        let casper = born(&config);
+        let persistence = born(&config);
         // Forget that this database was ever seeded, which is exactly the state
         // an older build leaves behind.
-        casper
+        persistence
             .connection()
             .execute("DELETE FROM configuracao WHERE chave = ?1", [SEMEADO])
             .expect("forget");
-        Channels::new(&casper)
+        Channels::new(&persistence)
             .rename_line(
-                Channels::new(&casper).lines().expect("lines")[0].id,
+                Channels::new(&persistence).lines().expect("lines")[0].id,
                 "avisos",
             )
             .expect("rename");
-        drop(casper);
+        drop(persistence);
 
-        let casper = born(&config);
-        let lines = Channels::new(&casper).lines().expect("lines");
+        let persistence = born(&config);
+        let lines = Channels::new(&persistence).lines().expect("lines");
         assert_eq!(lines.len(), 1, "a second `geral` appeared: {lines:?}");
         assert_eq!(lines[0].name, "avisos");
     }

@@ -35,7 +35,7 @@
 //!
 //! # Lock order
 //!
-//! [`Ledger`] first, `Casper` second, always. Eviction needs both — it picks
+//! [`Ledger`] first, `Persistence` second, always. Eviction needs both — it picks
 //! the oldest row from the database and deletes a file — and a path that took
 //! them the other way round would deadlock against a transfer arriving at the
 //! same moment. Both are passed in by the caller rather than held here, which
@@ -49,7 +49,7 @@ use rusqlite::{params, OptionalExtension};
 use seele_proto::control::{AttachmentInfo, AttachmentState, MAX_FILE_NAME_LEN};
 use seele_proto::ids::{AttachmentId, MessageId};
 
-use super::{now_seconds, Casper};
+use super::{now_seconds, Persistence};
 
 /// How many bytes of attachments a Dogma holds by default.
 ///
@@ -265,16 +265,16 @@ impl StoredAttachment {
     }
 }
 
-/// The attachment table, over CASPER.
+/// The attachment table, over PERSISTENCE.
 pub struct Attachments<'a> {
-    casper: &'a Casper,
+    persistence: &'a Persistence,
 }
 
 impl<'a> Attachments<'a> {
     /// Borrows a store.
     #[must_use]
-    pub fn new(casper: &'a Casper) -> Self {
-        Self { casper }
+    pub fn new(persistence: &'a Persistence) -> Self {
+        Self { persistence }
     }
 
     /// Reads one row, expired or not.
@@ -288,7 +288,7 @@ impl<'a> Attachments<'a> {
     /// Fails on a database error.
     pub fn one(&self, id: AttachmentId) -> Result<Option<StoredAttachment>> {
         Ok(self
-            .casper
+            .persistence
             .connection()
             .query_row(
                 "SELECT id, message_id, content_hash, file_name, declared_type,
@@ -307,7 +307,7 @@ impl<'a> Attachments<'a> {
     /// Fails on a database error.
     pub fn of_message(&self, message: MessageId) -> Result<Option<StoredAttachment>> {
         Ok(self
-            .casper
+            .persistence
             .connection()
             .query_row(
                 "SELECT id, message_id, content_hash, file_name, declared_type,
@@ -336,7 +336,7 @@ impl<'a> Attachments<'a> {
         if messages.is_empty() {
             return Ok(found);
         }
-        let mut statement = self.casper.connection().prepare(
+        let mut statement = self.persistence.connection().prepare(
             "SELECT id, message_id, content_hash, file_name, declared_type,
                     byte_size, created_at, expired_at
              FROM attachments WHERE message_id = ?1",
@@ -360,7 +360,7 @@ impl<'a> Attachments<'a> {
     ///
     /// Fails on a database error.
     pub fn live_copies(&self, content_hash: &str) -> Result<u64> {
-        let count: i64 = self.casper.connection().query_row(
+        let count: i64 = self.persistence.connection().query_row(
             "SELECT COUNT(*) FROM attachments
              WHERE content_hash = ?1 AND expired_at IS NULL",
             [content_hash],
@@ -379,7 +379,7 @@ impl<'a> Attachments<'a> {
     /// Fails on a database error.
     pub fn oldest_live(&self) -> Result<Option<StoredAttachment>> {
         Ok(self
-            .casper
+            .persistence
             .connection()
             .query_row(
                 "SELECT id, message_id, content_hash, file_name, declared_type,
@@ -402,7 +402,7 @@ impl<'a> Attachments<'a> {
     ///
     /// Fails on a database error.
     pub fn live_blobs(&self) -> Result<HashMap<String, u64>> {
-        let mut statement = self.casper.connection().prepare(
+        let mut statement = self.persistence.connection().prepare(
             "SELECT content_hash, MAX(byte_size) FROM attachments
              WHERE expired_at IS NULL GROUP BY content_hash",
         )?;
@@ -423,7 +423,7 @@ impl<'a> Attachments<'a> {
     ///
     /// Fails on a database error.
     pub fn expire(&self, id: AttachmentId) -> Result<bool> {
-        let affected = self.casper.connection().execute(
+        let affected = self.persistence.connection().execute(
             "UPDATE attachments SET expired_at = ?1 WHERE id = ?2 AND expired_at IS NULL",
             params![now_seconds(), id.get() as i64],
         )?;
@@ -439,7 +439,7 @@ impl<'a> Attachments<'a> {
     ///
     /// Fails on a database error.
     pub fn expire_blob(&self, content_hash: &str) -> Result<usize> {
-        Ok(self.casper.connection().execute(
+        Ok(self.persistence.connection().execute(
             "UPDATE attachments SET expired_at = ?1
              WHERE content_hash = ?2 AND expired_at IS NULL",
             params![now_seconds(), content_hash],
@@ -460,7 +460,7 @@ impl<'a> Attachments<'a> {
         byte_size: u64,
     ) -> Result<StoredAttachment> {
         let now = now_seconds();
-        self.casper.connection().execute(
+        self.persistence.connection().execute(
             "INSERT INTO attachments
                (message_id, content_hash, file_name, declared_type, byte_size, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -474,7 +474,7 @@ impl<'a> Attachments<'a> {
             ],
         )?;
         Ok(StoredAttachment {
-            id: AttachmentId(self.casper.connection().last_insert_rowid() as u64),
+            id: AttachmentId(self.persistence.connection().last_insert_rowid() as u64),
             message,
             content_hash: content_hash.to_owned(),
             file_name: file_name.to_owned(),
@@ -509,8 +509,8 @@ fn row_to_attachment(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredAttachme
 /// # Errors
 ///
 /// Fails on a database error.
-pub fn quota(casper: &Casper) -> Result<u64> {
-    let chosen: Option<i64> = casper
+pub fn quota(persistence: &Persistence) -> Result<u64> {
+    let chosen: Option<i64> = persistence
         .connection()
         .query_row(
             "SELECT valor FROM configuracao WHERE chave = ?1",
@@ -526,8 +526,8 @@ pub fn quota(casper: &Casper) -> Result<u64> {
 /// # Errors
 ///
 /// Fails on a database error.
-pub fn quota_is_chosen(casper: &Casper) -> Result<bool> {
-    let count: i64 = casper.connection().query_row(
+pub fn quota_is_chosen(persistence: &Persistence) -> Result<bool> {
+    let count: i64 = persistence.connection().query_row(
         "SELECT COUNT(*) FROM configuracao WHERE chave = ?1",
         [QUOTA_KEY],
         |row| row.get(0),
@@ -543,9 +543,9 @@ pub fn quota_is_chosen(casper: &Casper) -> Result<bool> {
 /// no attachment at all is spelled by not granting the permission, and a
 /// ceiling of zero would instead be a Dogma that accepts the transfer and then
 /// cannot keep it.
-pub fn set_quota(casper: &Casper, bytes: u64) -> Result<()> {
+pub fn set_quota(persistence: &Persistence, bytes: u64) -> Result<()> {
     anyhow::ensure!(bytes > 0, "o teto de anexos não pode ser zero");
-    casper.connection().execute(
+    persistence.connection().execute(
         "INSERT INTO configuracao (chave, valor) VALUES (?1, ?2)
          ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor",
         params![QUOTA_KEY, bytes as i64],
@@ -572,11 +572,11 @@ impl Store {
     ///
     /// Fails if the directory cannot be created or read, or the database cannot
     /// be queried.
-    pub fn open(root: PathBuf, casper: &Casper) -> Result<(Self, Ledger)> {
+    pub fn open(root: PathBuf, persistence: &Persistence) -> Result<(Self, Ledger)> {
         std::fs::create_dir_all(&root)
             .with_context(|| format!("could not create {}", root.display()))?;
 
-        let attachments = Attachments::new(casper);
+        let attachments = Attachments::new(persistence);
         let live = attachments.live_blobs()?;
 
         // Keyed by hash, valued by what the **file** weighs rather than what a
@@ -615,13 +615,13 @@ impl Store {
             }
         }
 
-        let quota = quota(casper)?;
+        let quota = quota(persistence)?;
         let store = Self { root };
         // A ceiling lowered below what is already there is not a mistake to
         // refuse: whoever hosts has said the disk is worth less than it was.
         // Evicting now is the only reading of that which keeps the promise.
         let mut ledger = Ledger::new(quota, stored);
-        store.evict_until(&mut ledger, casper, 0)?;
+        store.evict_until(&mut ledger, persistence, 0)?;
         Ok((store, ledger))
     }
 
@@ -660,7 +660,7 @@ impl Store {
     pub fn reserve(
         &self,
         ledger: &mut Ledger,
-        casper: &Casper,
+        persistence: &Persistence,
         declared: u64,
         scratch_name: &str,
     ) -> Result<std::result::Result<Reservation, Refusal>> {
@@ -669,7 +669,7 @@ impl Store {
             return Ok(Err(Refusal::TooLarge { declared, limit }));
         }
 
-        self.evict_until(ledger, casper, declared)?;
+        self.evict_until(ledger, persistence, declared)?;
 
         if ledger.free() < declared {
             return Ok(Err(Refusal::NoRoom {
@@ -691,8 +691,8 @@ impl Store {
     /// same blob — which is exactly right, and why this loops rather than
     /// counting. It stops when there is nothing live left to expire, and the
     /// caller is the one that decides what a still-full ledger means.
-    fn evict_until(&self, ledger: &mut Ledger, casper: &Casper, wanted: u64) -> Result<()> {
-        let attachments = Attachments::new(casper);
+    fn evict_until(&self, ledger: &mut Ledger, persistence: &Persistence, wanted: u64) -> Result<()> {
+        let attachments = Attachments::new(persistence);
         while ledger.free() < wanted || ledger.spoken_for() > ledger.quota {
             let Some(oldest) = attachments.oldest_live()? else {
                 return Ok(());
@@ -759,7 +759,7 @@ impl Store {
     pub fn keep(
         &self,
         ledger: &mut Ledger,
-        casper: &Casper,
+        persistence: &Persistence,
         reservation: Reservation,
         landing: &Landing<'_>,
     ) -> Result<StoredAttachment> {
@@ -783,7 +783,7 @@ impl Store {
             quarantine(&destination);
         }
 
-        let stored = Attachments::new(casper).record(
+        let stored = Attachments::new(persistence).record(
             message,
             content_hash,
             file_name,
@@ -855,13 +855,13 @@ pub fn file_name_is_usable(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::casper::messages::{Messages, PendingMessage};
-    use crate::casper::Location;
+    use crate::persistence::messages::{Messages, PendingMessage};
+    use crate::persistence::Location;
 
     /// A Dogma with one Line, one pilot, and a directory to put bytes in.
-    fn dogma() -> (Casper, tempfile::TempDir) {
-        let casper = Casper::open(&Location::Memory).unwrap();
-        casper
+    fn dogma() -> (Persistence, tempfile::TempDir) {
+        let persistence = Persistence::open(&Location::Memory).unwrap();
+        persistence
             .connection()
             .execute_batch(
                 "INSERT INTO lines (id, name) VALUES (1, 'geral');
@@ -869,12 +869,12 @@ mod tests {
                    VALUES (1, 'ayanami', X'01', 0);",
             )
             .unwrap();
-        (casper, tempfile::tempdir().unwrap())
+        (persistence, tempfile::tempdir().unwrap())
     }
 
     /// Writes a message so an attachment has something to hang off.
-    fn message(casper: &mut Casper, body: &str) -> MessageId {
-        let stored = Messages::new(casper)
+    fn message(persistence: &mut Persistence, body: &str) -> MessageId {
+        let stored = Messages::new(persistence)
             .append_batch(&[PendingMessage {
                 line: seele_proto::ids::LineId(1),
                 author: seele_proto::ids::PilotId(1),
@@ -894,20 +894,20 @@ mod tests {
     fn land(
         store: &Store,
         ledger: &mut Ledger,
-        casper: &mut Casper,
+        persistence: &mut Persistence,
         size: u64,
         seed: u8,
     ) -> Result<StoredAttachment, Refusal> {
         let hash = format!("{seed:064x}");
         let reservation = store
-            .reserve(ledger, casper, size, &format!("scratch-{seed}"))
+            .reserve(ledger, persistence, size, &format!("scratch-{seed}"))
             .unwrap()?;
         std::fs::write(reservation.scratch(), vec![seed; size as usize]).unwrap();
-        let id = message(casper, "com anexo");
+        let id = message(persistence, "com anexo");
         Ok(store
             .keep(
                 ledger,
-                casper,
+                persistence,
                 reservation,
                 &Landing {
                     content_hash: &hash,
@@ -919,8 +919,8 @@ mod tests {
             .unwrap())
     }
 
-    fn open(root: &Path, casper: &Casper) -> (Store, Ledger) {
-        Store::open(root.to_path_buf(), casper).unwrap()
+    fn open(root: &Path, persistence: &Persistence) -> (Store, Ledger) {
+        Store::open(root.to_path_buf(), persistence).unwrap()
     }
 
     #[test]
@@ -929,9 +929,9 @@ mod tests {
         // this row, so absence has to mean the default rather than zero — and a
         // quota of zero would be a Dogma that accepts a transfer and then
         // cannot keep it.
-        let (casper, _) = dogma();
-        assert_eq!(quota(&casper).unwrap(), DEFAULT_QUOTA_BYTES);
-        assert!(!quota_is_chosen(&casper).unwrap());
+        let (persistence, _) = dogma();
+        assert_eq!(quota(&persistence).unwrap(), DEFAULT_QUOTA_BYTES);
+        assert!(!quota_is_chosen(&persistence).unwrap());
     }
 
     #[test]
@@ -939,18 +939,18 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let location = Location::File(directory.path().join("dogma.db"));
         {
-            let casper = Casper::open(&location).unwrap();
-            set_quota(&casper, 4 * 1024 * 1024).unwrap();
+            let persistence = Persistence::open(&location).unwrap();
+            set_quota(&persistence, 4 * 1024 * 1024).unwrap();
         }
-        let casper = Casper::open(&location).unwrap();
-        assert_eq!(quota(&casper).unwrap(), 4 * 1024 * 1024);
-        assert!(quota_is_chosen(&casper).unwrap());
+        let persistence = Persistence::open(&location).unwrap();
+        assert_eq!(quota(&persistence).unwrap(), 4 * 1024 * 1024);
+        assert!(quota_is_chosen(&persistence).unwrap());
     }
 
     #[test]
     fn a_ceiling_of_zero_is_refused() {
-        let (casper, _) = dogma();
-        assert!(set_quota(&casper, 0).is_err());
+        let (persistence, _) = dogma();
+        assert!(set_quota(&persistence, 0).is_err());
     }
 
     #[test]
@@ -972,12 +972,12 @@ mod tests {
     fn a_file_over_the_per_file_limit_is_refused_and_nothing_is_evicted() {
         // Refused, not accepted to be thrown away afterwards — and refusing it
         // must not have cost anybody their history on the way.
-        let (mut casper, directory) = dogma();
-        set_quota(&casper, 1_600).unwrap();
-        let (store, mut ledger) = open(directory.path(), &casper);
+        let (mut persistence, directory) = dogma();
+        set_quota(&persistence, 1_600).unwrap();
+        let (store, mut ledger) = open(directory.path(), &persistence);
 
-        land(&store, &mut ledger, &mut casper, 100, 1).unwrap();
-        let refusal = land(&store, &mut ledger, &mut casper, 1_000, 2).unwrap_err();
+        land(&store, &mut ledger, &mut persistence, 100, 1).unwrap();
+        let refusal = land(&store, &mut ledger, &mut persistence, 1_000, 2).unwrap_err();
         assert!(matches!(refusal, Refusal::TooLarge { limit: 100, .. }));
         assert_eq!(ledger.stored(), 100, "a refusal evicted somebody's file");
     }
@@ -987,12 +987,12 @@ mod tests {
         // The plain case. Sixteen files of the per-file limit exactly fill the
         // quota; the seventeenth pushes the first out and the total does not
         // move.
-        let (mut casper, directory) = dogma();
-        set_quota(&casper, 1_600).unwrap();
-        let (store, mut ledger) = open(directory.path(), &casper);
+        let (mut persistence, directory) = dogma();
+        set_quota(&persistence, 1_600).unwrap();
+        let (store, mut ledger) = open(directory.path(), &persistence);
 
         for seed in 0..16 {
-            land(&store, &mut ledger, &mut casper, 100, seed).unwrap();
+            land(&store, &mut ledger, &mut persistence, 100, seed).unwrap();
             assert!(
                 ledger.spoken_for() <= ledger.quota(),
                 "the ceiling was passed at file {seed}"
@@ -1000,11 +1000,11 @@ mod tests {
         }
         assert_eq!(ledger.stored(), 1_600);
 
-        land(&store, &mut ledger, &mut casper, 100, 16).unwrap();
+        land(&store, &mut ledger, &mut persistence, 100, 16).unwrap();
         assert_eq!(ledger.stored(), 1_600, "the seventeenth file grew the disk");
 
         // And what was evicted is the oldest, which is the whole policy.
-        let survivors: Vec<String> = Attachments::new(&casper)
+        let survivors: Vec<String> = Attachments::new(&persistence)
             .live_blobs()
             .unwrap()
             .into_keys()
@@ -1022,17 +1022,17 @@ mod tests {
         // can actually fail: at the instant the reservation is granted, with
         // nothing written yet. If the check ran after the transfer, the ledger
         // here would be over the quota by exactly one file.
-        let (mut casper, directory) = dogma();
-        set_quota(&casper, 320).unwrap();
-        let (store, mut ledger) = open(directory.path(), &casper);
+        let (mut persistence, directory) = dogma();
+        set_quota(&persistence, 320).unwrap();
+        let (store, mut ledger) = open(directory.path(), &persistence);
 
         for seed in 0..16 {
-            land(&store, &mut ledger, &mut casper, 20, seed).unwrap();
+            land(&store, &mut ledger, &mut persistence, 20, seed).unwrap();
         }
         assert_eq!(ledger.stored(), 320);
 
         let reservation = store
-            .reserve(&mut ledger, &casper, 20, "medindo")
+            .reserve(&mut ledger, &persistence, 20, "medindo")
             .unwrap()
             .unwrap();
         assert!(
@@ -1055,19 +1055,19 @@ mod tests {
         // Two arriving at once is where a ceiling built on `stored` alone
         // fails: each looks at the same free space, each is told yes, and
         // together they pass the ceiling with nothing to evict.
-        let (casper, directory) = dogma();
-        set_quota(&casper, 160).unwrap();
-        let (store, mut ledger) = open(directory.path(), &casper);
+        let (persistence, directory) = dogma();
+        set_quota(&persistence, 160).unwrap();
+        let (store, mut ledger) = open(directory.path(), &persistence);
 
         let first = store
-            .reserve(&mut ledger, &casper, 10, "a")
+            .reserve(&mut ledger, &persistence, 10, "a")
             .unwrap()
             .unwrap();
         let mut held = vec![first];
         for numero in 1..16 {
             held.push(
                 store
-                    .reserve(&mut ledger, &casper, 10, &format!("f{numero}"))
+                    .reserve(&mut ledger, &persistence, 10, &format!("f{numero}"))
                     .unwrap()
                     .unwrap(),
             );
@@ -1075,7 +1075,7 @@ mod tests {
         }
 
         let refusal = store
-            .reserve(&mut ledger, &casper, 10, "excedente")
+            .reserve(&mut ledger, &persistence, 10, "excedente")
             .unwrap()
             .unwrap_err();
         assert!(
@@ -1108,10 +1108,10 @@ mod tests {
         // total never approaches the quota proves nothing about reservations —
         // it was written that way first, and a mutation that made the ceiling
         // count only what is on disk survived it.
-        let (mut casper, directory) = dogma();
+        let (mut persistence, directory) = dogma();
         let quota = 2_048_u64;
-        set_quota(&casper, quota).unwrap();
-        let (store, mut ledger) = open(directory.path(), &casper);
+        set_quota(&persistence, quota).unwrap();
+        let (store, mut ledger) = open(directory.path(), &persistence);
 
         let mut flying: Vec<(Reservation, u8)> = Vec::new();
         let mut refused = 0_u32;
@@ -1139,7 +1139,7 @@ mod tests {
             let size = 16 + u64::from(seed % 7) * 16;
             let scratch = format!("s{step}");
 
-            match store.reserve(&mut ledger, &casper, size, &scratch).unwrap() {
+            match store.reserve(&mut ledger, &persistence, size, &scratch).unwrap() {
                 Ok(reservation) => {
                     check(&ledger, step);
                     std::fs::write(reservation.scratch(), vec![seed; size as usize]).unwrap();
@@ -1160,14 +1160,14 @@ mod tests {
                 if step % 5 == 0 {
                     store.abandon(&mut ledger, reservation);
                 } else {
-                    let id = message(&mut casper, "com anexo");
+                    let id = message(&mut persistence, "com anexo");
                     // The size that came back is the size that was reserved,
                     // which is what the stream enforces on the wire.
                     let hash = format!("{:064x}", u32::from(seed) * 7 + 1);
                     store
                         .keep(
                             &mut ledger,
-                            &casper,
+                            &persistence,
                             reservation,
                             &Landing {
                                 content_hash: &hash,
@@ -1209,22 +1209,22 @@ mod tests {
 
     #[test]
     fn the_same_file_from_two_people_is_one_blob_and_two_rows() {
-        let (mut casper, directory) = dogma();
-        set_quota(&casper, 1_600).unwrap();
-        let (store, mut ledger) = open(directory.path(), &casper);
+        let (mut persistence, directory) = dogma();
+        set_quota(&persistence, 1_600).unwrap();
+        let (store, mut ledger) = open(directory.path(), &persistence);
 
         let hash = format!("{:064x}", 9);
         for numero in 0..2 {
             let reservation = store
-                .reserve(&mut ledger, &casper, 100, &format!("c{numero}"))
+                .reserve(&mut ledger, &persistence, 100, &format!("c{numero}"))
                 .unwrap()
                 .unwrap();
             std::fs::write(reservation.scratch(), vec![9; 100]).unwrap();
-            let id = message(&mut casper, "mesma foto");
+            let id = message(&mut persistence, "mesma foto");
             store
                 .keep(
                     &mut ledger,
-                    &casper,
+                    &persistence,
                     reservation,
                     &Landing {
                         content_hash: &hash,
@@ -1237,7 +1237,7 @@ mod tests {
         }
 
         assert_eq!(ledger.stored(), 100, "the second copy took disk");
-        assert_eq!(Attachments::new(&casper).live_copies(&hash).unwrap(), 2);
+        assert_eq!(Attachments::new(&persistence).live_copies(&hash).unwrap(), 2);
         assert_eq!(std::fs::read_dir(store.root()).unwrap().count(), 1);
     }
 
@@ -1246,24 +1246,24 @@ mod tests {
         // `RemoveMessage` deletes somebody else's message. Deleting one pilot's
         // copy may not delete another's, and that is a count rather than an
         // intention.
-        let (mut casper, directory) = dogma();
-        set_quota(&casper, 1_600).unwrap();
-        let (store, mut ledger) = open(directory.path(), &casper);
+        let (mut persistence, directory) = dogma();
+        set_quota(&persistence, 1_600).unwrap();
+        let (store, mut ledger) = open(directory.path(), &persistence);
 
         let hash = format!("{:064x}", 5);
         let mut rows = Vec::new();
         for numero in 0..2 {
             let reservation = store
-                .reserve(&mut ledger, &casper, 100, &format!("c{numero}"))
+                .reserve(&mut ledger, &persistence, 100, &format!("c{numero}"))
                 .unwrap()
                 .unwrap();
             std::fs::write(reservation.scratch(), vec![5; 100]).unwrap();
-            let id = message(&mut casper, "mesma foto");
+            let id = message(&mut persistence, "mesma foto");
             rows.push(
                 store
                     .keep(
                         &mut ledger,
-                        &casper,
+                        &persistence,
                         reservation,
                         &Landing {
                             content_hash: &hash,
@@ -1276,7 +1276,7 @@ mod tests {
             );
         }
 
-        let attachments = Attachments::new(&casper);
+        let attachments = Attachments::new(&persistence);
         attachments.expire(rows[0].id).unwrap();
         assert_eq!(attachments.live_copies(&hash).unwrap(), 1);
         assert!(
@@ -1287,16 +1287,16 @@ mod tests {
 
     #[test]
     fn expiring_keeps_the_row_so_the_message_can_still_say_what_was_here() {
-        let (mut casper, directory) = dogma();
-        set_quota(&casper, 320).unwrap();
-        let (store, mut ledger) = open(directory.path(), &casper);
+        let (mut persistence, directory) = dogma();
+        set_quota(&persistence, 320).unwrap();
+        let (store, mut ledger) = open(directory.path(), &persistence);
 
-        let first = land(&store, &mut ledger, &mut casper, 20, 1).unwrap();
+        let first = land(&store, &mut ledger, &mut persistence, 20, 1).unwrap();
         for seed in 2..18 {
-            land(&store, &mut ledger, &mut casper, 20, seed).unwrap();
+            land(&store, &mut ledger, &mut persistence, 20, seed).unwrap();
         }
 
-        let attachments = Attachments::new(&casper);
+        let attachments = Attachments::new(&persistence);
         let row = attachments
             .one(first.id)
             .unwrap()
@@ -1306,7 +1306,7 @@ mod tests {
         assert_eq!(row.byte_size, 20);
         assert_eq!(row.info().state, AttachmentState::Expired);
         // And the message it hangs off is untouched — body, and everything else.
-        let stored = Messages::new(&mut casper).one(row.message).unwrap();
+        let stored = Messages::new(&mut persistence).one(row.message).unwrap();
         assert_eq!(stored.map(|m| m.body), Some("com anexo".to_owned()));
     }
 
@@ -1315,27 +1315,27 @@ mod tests {
         // Two things to back up instead of one, and they can diverge. The rule
         // is that the row is the truth: a missing file is not a crash and not a
         // blank, it is the state the design already has.
-        let (mut casper, directory) = dogma();
-        set_quota(&casper, 1_600).unwrap();
-        let (store, mut ledger) = open(directory.path(), &casper);
-        let landed = land(&store, &mut ledger, &mut casper, 100, 3).unwrap();
+        let (mut persistence, directory) = dogma();
+        set_quota(&persistence, 1_600).unwrap();
+        let (store, mut ledger) = open(directory.path(), &persistence);
+        let landed = land(&store, &mut ledger, &mut persistence, 100, 3).unwrap();
         std::fs::remove_file(store.blob_path(&landed.content_hash)).unwrap();
         drop(store);
 
-        let (_store, ledger) = open(directory.path(), &casper);
+        let (_store, ledger) = open(directory.path(), &persistence);
         assert_eq!(ledger.stored(), 0, "the ledger counted bytes that are gone");
-        let row = Attachments::new(&casper).one(landed.id).unwrap().unwrap();
+        let row = Attachments::new(&persistence).one(landed.id).unwrap().unwrap();
         assert!(row.expired_at.is_some());
         assert_eq!(row.info().state, AttachmentState::Expired);
     }
 
     #[test]
     fn an_orphan_blob_is_swept_at_boot() {
-        let (casper, directory) = dogma();
+        let (persistence, directory) = dogma();
         std::fs::write(directory.path().join("deadbeef"), b"nobody points at me").unwrap();
         std::fs::write(directory.path().join("meio.parcial"), b"a fallen transfer").unwrap();
 
-        let (_store, ledger) = open(directory.path(), &casper);
+        let (_store, ledger) = open(directory.path(), &persistence);
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
         assert_eq!(ledger.stored(), 0);
     }
@@ -1344,17 +1344,17 @@ mod tests {
     fn lowering_the_ceiling_below_what_is_stored_evicts_at_the_next_boot() {
         // Whoever hosts has said the disk is worth less than it was. Keeping
         // the old bytes would be the product deciding it knows better.
-        let (mut casper, directory) = dogma();
-        set_quota(&casper, 1_600).unwrap();
-        let (store, mut ledger) = open(directory.path(), &casper);
+        let (mut persistence, directory) = dogma();
+        set_quota(&persistence, 1_600).unwrap();
+        let (store, mut ledger) = open(directory.path(), &persistence);
         for seed in 0..16 {
-            land(&store, &mut ledger, &mut casper, 100, seed).unwrap();
+            land(&store, &mut ledger, &mut persistence, 100, seed).unwrap();
         }
         assert_eq!(ledger.stored(), 1_600);
         drop(store);
 
-        set_quota(&casper, 500).unwrap();
-        let (_store, ledger) = open(directory.path(), &casper);
+        set_quota(&persistence, 500).unwrap();
+        let (_store, ledger) = open(directory.path(), &persistence);
         assert!(
             ledger.stored() <= 500,
             "a lowered ceiling was ignored: {} bytes",

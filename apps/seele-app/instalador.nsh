@@ -30,7 +30,7 @@
     ${AndIf} ${FileExists} "$R8\uninstall.exe"
       ; `/S` e **não** `/UPDATE`. São dois efeitos e os dois importam: `/S` não
       ; marca a caixa de apagar dados — ela nasce vazia e a página que a marca
-      ; não roda no modo silencioso —, então o CASPER, a identidade e os pinos
+      ; não roda no modo silencioso —, então o PERSISTENCE, a identidade e os pinos
       ; do ADR 0003 ficam onde estão; e a ausência de `/UPDATE` é o que faz o
       ; desinstalador remover os atalhos, que é o ponto inteiro deste gancho.
       ;

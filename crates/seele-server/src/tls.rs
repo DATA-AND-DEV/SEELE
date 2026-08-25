@@ -56,7 +56,7 @@ impl Identity {
     ///
     /// A chave privada fica no mesmo banco que o resto. Quem consegue lê-lo já
     /// tem as mensagens todas; o que se protege é o arquivo, não uma camada a
-    /// mais dentro dele — e é por isso que o CASPER cria o banco com permissão
+    /// mais dentro dele — e é por isso que o PERSISTENCE cria o banco com permissão
     /// restrita ao dono.
     ///
     /// # Errors
@@ -64,10 +64,10 @@ impl Identity {
     /// Falha se o banco não responder ou se o que está guardado não for uma
     /// identidade válida.
     pub fn load_or_create(
-        casper: &crate::casper::Casper,
+        persistence: &crate::persistence::Persistence,
         subject_alt_names: Vec<String>,
     ) -> Result<Self> {
-        let guardada: Option<(Vec<u8>, Vec<u8>)> = casper
+        let guardada: Option<(Vec<u8>, Vec<u8>)> = persistence
             .connection()
             .query_row(
                 "SELECT
@@ -97,7 +97,7 @@ impl Identity {
             .unwrap_or_default();
         let key = identidade.key.secret_der().to_vec();
 
-        let conexao = casper.connection();
+        let conexao = persistence.connection();
         conexao.execute(
             "INSERT INTO configuracao (chave, valor) VALUES ('tls_cert', ?1)
              ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor",

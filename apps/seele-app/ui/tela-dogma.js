@@ -284,7 +284,7 @@ function desenharModos(snapshot) {
  * impressão digital nem data nesta seção, e nem molduras vazias no lugar delas.
  *
  * Sem sessão não há apelido reivindicado, e o travessão é a resposta certa: o
- * nome que se digita na entrada só vira o seu depois que o CASPER o vincula.
+ * nome que se digita na entrada só vira o seu depois que o PERSISTENCE o vincula.
  */
 function desenharIdentidade(snapshot) {
   const alvo = $("dogma-apelido");
@@ -401,7 +401,7 @@ async function atualizarDogma() {
 // ---- o que esta metade decide, e o que ela não decide ----
 //
 // Ela não decide **nada** sobre quem pode. `may_customise_dogma` chega pronto
-// no snapshot, resolvido pelo MELCHIOR a partir das permissões desta conexão, e
+// no snapshot, resolvido pelo PERMISSIONS a partir das permissões desta conexão, e
 // esconder a seção não impede ninguém de nada: um pedido sem a permissão é
 // recusado no servidor e volta como aviso. Isto é não oferecer o que não ia
 // funcionar — a mesma decisão que a coluna de canais toma com os formulários de

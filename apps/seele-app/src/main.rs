@@ -406,10 +406,10 @@ async fn hospedar(
         }
     }
 
-    let banco = seele_server::casper::banco_do_cliente(std::path::Path::new(&config_dir(&app)));
+    let banco = seele_server::persistence::banco_do_cliente(std::path::Path::new(&config_dir(&app)));
     let dogma = seele_server::hospedagem::Hospedagem::iniciar(
         PORTA_PADRAO,
-        seele_server::casper::Location::File(banco),
+        seele_server::persistence::Location::File(banco),
         "Casa",
     )
     .await
@@ -423,9 +423,9 @@ async fn hospedar(
     // Semear, e não ligar: isto roda toda vez que a janela sobe um Dogma, e um
     // interruptor que se rearma sozinho é um interruptor quebrado.
     {
-        let banco = dogma.casper();
-        let mut casper = banco.lock().await;
-        if let Err(erro) = seele_server::portaria::semear_ligada(&mut casper) {
+        let banco = dogma.persistence();
+        let mut persistence = banco.lock().await;
+        if let Err(erro) = seele_server::portaria::semear_ligada(&mut persistence) {
             // Não impede de hospedar. Um Dogma no ar com a portaria desligada é
             // o comportamento de antes deste ADR, e a tela diz em que estado a
             // porta está — que é a metade que faltava de verdade.
@@ -449,7 +449,7 @@ async fn hospedar(
         // uma frase pedindo que alguém decida.
         let minha = seele_ffi::impressao_desta_maquina(&config_dir(&app))
             .map_err(|_| FalhaAoHospedar::NaoSubiu)?;
-        seele_server::portaria::admitir_o_dono(&mut casper, &minha)
+        seele_server::portaria::admitir_o_dono(&mut persistence, &minha)
             .map_err(|_| FalhaAoHospedar::NaoSubiu)?;
     }
 
@@ -818,7 +818,7 @@ fn renomear_linha(session: State<'_, Session>, line: u32, name: String) -> Resul
 //
 // O que quem hospeda personaliza: o nome que todo mundo lê no cabeçalho e a
 // imagem ao lado dele. Cinco comandos, e nenhum deles decide nada — a
-// permissão é conferida pelo MELCHIOR no instante do verbo, e o que é uma
+// permissão é conferida pelo PERMISSIONS no instante do verbo, e o que é uma
 // imagem aceitável é conferido pelo próprio protocolo, dentro de
 // `Plug::set_dogma_icon`.
 
@@ -1599,7 +1599,7 @@ fn nome_da_falha(erro: &seele_ffi::uri::ErroDeUri) -> &'static str {
 // A portaria — ADR 0030. A porta do Dogma que esta janela hospeda.
 // ---------------------------------------------------------------------------
 //
-// Estes comandos falam **direto com o CASPER do Dogma embutido**, e não pelo fio
+// Estes comandos falam **direto com o PERSISTENCE do Dogma embutido**, e não pelo fio
 // como toda a moderação faz. Não é atalho; é o ADR 0030:
 //
 // - fechar a porta não pode depender de estar dentro, senão a defesa depende do
@@ -1677,7 +1677,7 @@ struct PedidoNaTela {
     admitido: bool,
 }
 
-/// O `Arc` do CASPER do Dogma hospedado, ou a recusa.
+/// O `Arc` do PERSISTENCE do Dogma hospedado, ou a recusa.
 ///
 /// Clonado para fora do `Mutex` do app **antes** de qualquer `await`: segurar um
 /// `std::sync::MutexGuard` atravessando um ponto de espera trava os dois
@@ -1690,13 +1690,13 @@ fn casper_hospedado(
         .lock()
         .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
     let dogma = aberto.as_ref().ok_or(FalhaNaPortaria::NaoEstaHospedando)?;
-    Ok(dogma.casper())
+    Ok(dogma.persistence())
 }
 
 /// O estado das três camadas da porta.
 #[tauri::command]
 async fn estado_da_porta(session: State<'_, Session>) -> Result<EstadoDaPorta, FalhaNaPortaria> {
-    let (casper, alcance) = {
+    let (persistence, alcance) = {
         let aberto = session
             .hospedagem
             .lock()
@@ -1717,15 +1717,15 @@ async fn estado_da_porta(session: State<'_, Session>) -> Result<EstadoDaPorta, F
         let alcance = dogma
             .alcance()
             .map_or("SoRedeLocal", |alcance| alcance.degrau().nome());
-        (dogma.casper(), alcance)
+        (dogma.persistence(), alcance)
     };
 
-    let casper = casper.lock().await;
-    let politica = seele_server::admissao::Politica::carregar(&casper)
+    let persistence = persistence.lock().await;
+    let politica = seele_server::admissao::Politica::carregar(&persistence)
         .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
     let portaria_ligada =
-        seele_server::portaria::ligada(&casper).map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
-    let pendentes = seele_server::portaria::pendentes(&casper)
+        seele_server::portaria::ligada(&persistence).map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
+    let pendentes = seele_server::portaria::pendentes(&persistence)
         .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
 
     Ok(EstadoDaPorta {
@@ -1745,9 +1745,9 @@ async fn definir_senha_do_dogma(
     session: State<'_, Session>,
     senha: Option<String>,
 ) -> Result<(), FalhaNaPortaria> {
-    let casper = casper_hospedado(&session)?;
-    let mut casper = casper.lock().await;
-    seele_server::admissao::definir_senha(&mut casper, senha.as_deref())
+    let persistence = casper_hospedado(&session)?;
+    let mut persistence = persistence.lock().await;
+    seele_server::admissao::definir_senha(&mut persistence, senha.as_deref())
         .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)
 }
 
@@ -1760,18 +1760,18 @@ async fn criar_convite_do_dogma(
     session: State<'_, Session>,
     observacao: String,
 ) -> Result<String, FalhaNaPortaria> {
-    let (casper, ..) = {
+    let (persistence, ..) = {
         let aberto = session
             .hospedagem
             .lock()
             .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
         let dogma = aberto.as_ref().ok_or(FalhaNaPortaria::NaoEstaHospedando)?;
-        (dogma.casper(), ())
+        (dogma.persistence(), ())
     };
 
     let token = {
-        let mut casper = casper.lock().await;
-        seele_server::admissao::criar_convite(&mut casper, &observacao)
+        let mut persistence = persistence.lock().await;
+        seele_server::admissao::criar_convite(&mut persistence, &observacao)
             .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?
     };
 
@@ -1786,9 +1786,9 @@ async fn criar_convite_do_dogma(
 /// Liga ou desliga a portaria. ADR 0030.
 #[tauri::command]
 async fn ligar_portaria(session: State<'_, Session>, ligada: bool) -> Result<(), FalhaNaPortaria> {
-    let casper = casper_hospedado(&session)?;
-    let mut casper = casper.lock().await;
-    seele_server::portaria::ligar(&mut casper, ligada)
+    let persistence = casper_hospedado(&session)?;
+    let mut persistence = persistence.lock().await;
+    seele_server::portaria::ligar(&mut persistence, ligada)
         .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)
 }
 
@@ -1797,10 +1797,10 @@ async fn ligar_portaria(session: State<'_, Session>, ligada: bool) -> Result<(),
 async fn pedidos_da_portaria(
     session: State<'_, Session>,
 ) -> Result<Vec<PedidoNaTela>, FalhaNaPortaria> {
-    let casper = casper_hospedado(&session)?;
-    let casper = casper.lock().await;
+    let persistence = casper_hospedado(&session)?;
+    let persistence = persistence.lock().await;
     let fila =
-        seele_server::portaria::pedidos(&casper).map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
+        seele_server::portaria::pedidos(&persistence).map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
 
     Ok(fila
         .into_iter()
@@ -1824,9 +1824,9 @@ async fn decidir_pedido(
     impressao: String,
     admitir: bool,
 ) -> Result<(), FalhaNaPortaria> {
-    let casper = casper_hospedado(&session)?;
-    let mut casper = casper.lock().await;
-    seele_server::portaria::decidir(&mut casper, &impressao, admitir)
+    let persistence = casper_hospedado(&session)?;
+    let mut persistence = persistence.lock().await;
+    seele_server::portaria::decidir(&mut persistence, &impressao, admitir)
         .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)
 }
 
@@ -1839,9 +1839,9 @@ async fn revogar_admissao(
     session: State<'_, Session>,
     impressao: String,
 ) -> Result<(), FalhaNaPortaria> {
-    let casper = casper_hospedado(&session)?;
-    let mut casper = casper.lock().await;
-    seele_server::portaria::revogar(&mut casper, &impressao)
+    let persistence = casper_hospedado(&session)?;
+    let mut persistence = persistence.lock().await;
+    seele_server::portaria::revogar(&mut persistence, &impressao)
         .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)
 }
 

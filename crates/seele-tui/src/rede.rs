@@ -869,7 +869,7 @@ async fn quic_sobe() -> bool {
     let config = seele_server::DogmaConfig {
         name: "diagnóstico".to_owned(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
-        database: seele_server::casper::Location::Memory,
+        database: seele_server::persistence::Location::Memory,
         ..seele_server::DogmaConfig::default()
     };
     let Ok(servidor) = seele_server::Server::bind(config).await else {

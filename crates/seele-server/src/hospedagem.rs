@@ -22,16 +22,16 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use crate::casper::Location;
+use crate::persistence::Location;
 use crate::{DogmaConfig, Server};
 
-/// O CASPER de um Dogma hospedado, compartilhado com quem o hospeda.
+/// O PERSISTENCE de um Dogma hospedado, compartilhado com quem o hospeda.
 ///
 /// Apelido, e não o tipo escrito por extenso, porque quem chama é a casca do
 /// desktop e ela **não depende de `tokio`**. Sem este nome, expor o banco
 /// obrigaria o app a declarar a dependência só para escrever o tipo de uma
 /// variável — uma dependência inteira paga em nome de uma anotação.
-pub type CasperCompartilhado = Arc<tokio::sync::Mutex<crate::casper::Casper>>;
+pub type CasperCompartilhado = Arc<tokio::sync::Mutex<crate::persistence::Persistence>>;
 
 /// Um Dogma rodando dentro deste processo.
 ///
@@ -212,7 +212,7 @@ impl Hospedagem {
         }
     }
 
-    /// O CASPER deste Dogma, para quem hospeda mexer na própria porta.
+    /// O PERSISTENCE deste Dogma, para quem hospeda mexer na própria porta.
     ///
     /// ADR 0030. É por aqui que a janela fecha o Dogma, gera convite e decide
     /// quem entra — direto no banco da máquina, e não pelo fio como toda a
@@ -229,8 +229,8 @@ impl Hospedagem {
     /// segurar os dois. Clonar é barato, e o `await` acontece depois de o outro
     /// já ter sido solto.
     #[must_use]
-    pub fn casper(&self) -> CasperCompartilhado {
-        Arc::clone(&self.server.dogma().casper)
+    pub fn persistence(&self) -> CasperCompartilhado {
+        Arc::clone(&self.server.dogma().persistence)
     }
 
     /// O link para mandar a uma pessoa, com um convite de uso único dentro.

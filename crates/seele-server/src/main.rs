@@ -138,26 +138,26 @@ fn uso() {
 /// Onde o Dogma guarda tudo.
 ///
 /// `$SEELE_DB`, ou `seele.db` na pasta de onde o `seeled` foi executado.
-fn banco() -> seele_server::casper::Location {
+fn banco() -> seele_server::persistence::Location {
     let caminho = std::env::var("SEELE_DB").unwrap_or_else(|_| "seele.db".to_owned());
-    seele_server::casper::Location::File(std::path::PathBuf::from(caminho))
+    seele_server::persistence::Location::File(std::path::PathBuf::from(caminho))
 }
 
 /// Abre o banco do Dogma sem subir o servidor.
-fn abrir_banco() -> anyhow::Result<seele_server::casper::Casper> {
-    seele_server::casper::Casper::open(&banco())
+fn abrir_banco() -> anyhow::Result<seele_server::persistence::Persistence> {
+    seele_server::persistence::Persistence::open(&banco())
 }
 
 fn criar_convite(argumentos: &[String]) -> anyhow::Result<()> {
     let observacao = argumentos.get(1).cloned().unwrap_or_default();
-    let mut casper = abrir_banco()?;
-    let token = seele_server::admissao::criar_convite(&mut casper, &observacao)?;
+    let mut persistence = abrir_banco()?;
+    let token = seele_server::admissao::criar_convite(&mut persistence, &observacao)?;
 
     // Cria a identidade se o Dogma ainda não subiu nenhuma vez. Sem isto o
     // primeiro convite sairia sem impressão digital — justamente o convite que
     // mais precisa dela, porque é o primeiro contato de alguém.
-    let _ = seele_server::tls::Identity::load_or_create(&casper, vec!["localhost".into()]);
-    let impressao = seele_server::Server::fingerprint_do_banco(&casper).ok();
+    let _ = seele_server::tls::Identity::load_or_create(&persistence, vec!["localhost".into()]);
+    let impressao = seele_server::Server::fingerprint_do_banco(&persistence).ok();
     let alvo = lan_address().map_or_else(
         || format!("SEU-ENDERECO:{}", seele_proto::transport::DEFAULT_PORT),
         // `SocketAddr` e não `format!("{ip}:{porta}")`: o `Display` do
@@ -189,14 +189,14 @@ fn criar_convite(argumentos: &[String]) -> anyhow::Result<()> {
 }
 
 fn definir_senha(argumentos: &[String]) -> anyhow::Result<()> {
-    let mut casper = abrir_banco()?;
+    let mut persistence = abrir_banco()?;
     match argumentos.get(1).map(String::as_str) {
         Some("--remover") => {
-            seele_server::admissao::definir_senha(&mut casper, None)?;
+            seele_server::admissao::definir_senha(&mut persistence, None)?;
             println!("senha removida. O Dogma volta a aceitar qualquer um.");
         }
         Some(senha) if !senha.is_empty() => {
-            seele_server::admissao::definir_senha(&mut casper, Some(senha))?;
+            seele_server::admissao::definir_senha(&mut persistence, Some(senha))?;
             println!("senha definida. Quem entrar precisa dela.");
             println!();
             println!("  Um convite é melhor para uma pessoa só: vale uma vez e");
@@ -218,12 +218,12 @@ fn definir_senha(argumentos: &[String]) -> anyhow::Result<()> {
 /// Mexer no teto com o Dogma no ar é o caso normal, e o TOML que `specs/04`
 /// descreve **não existe**: não vai nascer por causa de um número.
 fn teto_de_anexos(argumentos: &[String]) -> anyhow::Result<()> {
-    use seele_server::casper::attachments;
+    use seele_server::persistence::attachments;
 
-    let casper = abrir_banco()?;
+    let persistence = abrir_banco()?;
     let Some(pedido) = argumentos.get(1) else {
-        let teto = attachments::quota(&casper)?;
-        let escolhido = attachments::quota_is_chosen(&casper)?;
+        let teto = attachments::quota(&persistence)?;
+        let escolhido = attachments::quota_is_chosen(&persistence)?;
         println!(
             "teto de anexos: {}{}",
             tamanho(teto),
@@ -244,8 +244,8 @@ fn teto_de_anexos(argumentos: &[String]) -> anyhow::Result<()> {
 
     let bytes = ler_tamanho(pedido)
         .with_context(|| format!("não entendi o tamanho «{pedido}»; tente 2G, 500M ou 1048576"))?;
-    let antes = attachments::quota(&casper)?;
-    attachments::set_quota(&casper, bytes)?;
+    let antes = attachments::quota(&persistence)?;
+    attachments::set_quota(&persistence, bytes)?;
     println!("teto de anexos: {}", tamanho(bytes));
     println!(
         "  por arquivo:  {}",

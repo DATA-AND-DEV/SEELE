@@ -45,7 +45,7 @@ use anyhow::Result;
 use seele_core::enlace::{Aviso, Destino, Enlace};
 use seele_core::{MemoryPinStore, Room, SyncBand};
 use seele_proto::ids::CageId;
-use seele_server::casper::Location;
+use seele_server::persistence::Location;
 use seele_server::{DogmaConfig, Server};
 
 const CAGE: u32 = 1;

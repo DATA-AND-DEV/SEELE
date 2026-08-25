@@ -1450,9 +1450,9 @@ mod tests {
         let screen = draw(&app, Palette::True, (80, 24));
 
         assert!(screen.contains("estabelecendo enlace"), "{screen}");
-        assert!(!screen.contains("MELCHIOR"), "{screen}");
-        assert!(!screen.contains("BALTHASAR"), "{screen}");
-        assert!(!screen.contains("CASPER"), "{screen}");
+        assert!(!screen.contains("PERMISSIONS"), "{screen}");
+        assert!(!screen.contains("MEDIA"), "{screen}");
+        assert!(!screen.contains("PERSISTENCE"), "{screen}");
     }
 
     #[test]

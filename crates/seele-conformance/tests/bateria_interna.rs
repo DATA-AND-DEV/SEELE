@@ -20,7 +20,7 @@ use anyhow::Result;
 use seele_core::enlace::{Aviso, Destino, Enlace, Motivo};
 use seele_core::{Link, MemoryPinStore};
 use seele_proto::ids::{CageId, ClientMessageId, LineId};
-use seele_server::casper::Location;
+use seele_server::persistence::Location;
 use seele_server::{DogmaConfig, Server};
 
 const CAGE: u32 = 1;

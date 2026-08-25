@@ -71,9 +71,9 @@ Fronteiras reais de módulo. **Não mudam, e o ADR 0033 diz isso em voz alta:**
 
 | Nome | Responsabilidade | Identificador |
 |---|---|---|
-| MELCHIOR | Identidade, autenticação, sessões, papéis, permissões | `Subsystem::Melchior` |
-| BALTHASAR | Roteamento de mídia, encaminhamento, controle de banda | `Subsystem::Balthasar` |
-| CASPER | Estado persistente, histórico, configuração, migrações | `Subsystem::Casper` |
+| PERMISSIONS | Identidade, autenticação, sessões, papéis, permissões | `Subsystem::Permissions` |
+| MEDIA | Roteamento de mídia, encaminhamento, controle de banda | `Subsystem::Media` |
+| PERSISTENCE | Estado persistente, histórico, configuração, migrações | `Subsystem::Persistence` |
 
 O que saiu foi o **diagrama das três luzes no rodapé**, não os três subsistemas.
 As luzes nunca mediram nada — eram cenário se passando por instrumento, e um
@@ -184,6 +184,6 @@ inventar um nome que a próxima tela não vai repetir.
 A postura de direitos sobre a franquia (`07`, `[EM ABERTO]`). A recomendação do
 plano continua sendo repositório privado até M4. O ADR 0033 encolheu a
 superfície do problema sem fechá-lo: `A.T. Field` saiu da tela, e `Entry Plug`
-sobrou como nome interno e como forma da marca desenhada. `MELCHIOR`,
-`BALTHASAR` e `CASPER` são nomes bíblicos e seguros. O risco que resta está no
+sobrou como nome interno e como forma da marca desenhada. `PERMISSIONS`,
+`MEDIA` e `PERSISTENCE` são nomes bíblicos e seguros. O risco que resta está no
 repositório, não no produto.

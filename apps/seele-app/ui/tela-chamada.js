@@ -31,7 +31,7 @@
 //   - **o atraso por pessoa.** `Telemetry.rtt_ms` é o desta máquina até o
 //     Dogma, um número só. Ele continua na telemetria da tela de operação, que
 //     é onde ele é verdade.
-//   - **a tag de subsistema** (`BALTHASAR·01`), que o protocolo não tem.
+//   - **a tag de subsistema** (`MEDIA·01`), que o protocolo não tem.
 //   - **a rota e o cronômetro da conexão**, pela mesma razão — ver `EM SESSÃO`,
 //     abaixo, para o que ficou no lugar do segundo.
 //

@@ -110,7 +110,7 @@ Conecte também na máquina A, com **apelido diferente**:
 ./target/release/plug --server 127.0.0.1:8383 --nick outronome
 ```
 
-> Dois clientes com o mesmo `$SEELE_HOME` são **a mesma pessoa** — o CASPER
+> Dois clientes com o mesmo `$SEELE_HOME` são **a mesma pessoa** — o PERSISTENCE
 > vincula o apelido à identidade que o reivindicou (ADR 0017). Para serem dois
 > pilotos na mesma máquina, `SEELE_HOME=~/.seele-outro`.
 

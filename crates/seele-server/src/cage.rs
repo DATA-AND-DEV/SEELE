@@ -1,4 +1,4 @@
-//! BALTHASAR — media routing.
+//! MEDIA — media routing.
 //!
 //! `specs/04-servidor-seele.md`:
 //!
@@ -668,7 +668,7 @@ pub fn spawn(
 /// # Lazily, not at boot
 ///
 /// A Cage task is a channel and a `HashMap`; the cost of one nobody has entered
-/// is not worth a boot-time scan of CASPER that would then be stale the first
+/// is not worth a boot-time scan of PERSISTENCE that would then be stale the first
 /// time somebody made a room. The task appears the first time a pilot walks in
 /// and lives until the Dogma stops.
 pub struct Cages {

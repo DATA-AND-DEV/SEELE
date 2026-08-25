@@ -22,7 +22,7 @@ use seele_core::chegada::{Caminho, Chegada, Etapa};
 use seele_core::enlace::Destino;
 use seele_core::{MemoryPinStore, PinStore, SigningKey};
 use seele_ffi::{ConnectConfig, ConnectStage, Event, EventListener, Plug};
-use seele_server::casper::Location;
+use seele_server::persistence::Location;
 use seele_server::{DogmaConfig, Server};
 
 /// A base de uma configuração de entrada, para os testes que só trocam um campo.

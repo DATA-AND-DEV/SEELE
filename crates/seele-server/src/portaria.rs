@@ -43,7 +43,7 @@
 use anyhow::Result;
 use rusqlite::{params, OptionalExtension};
 
-use crate::casper::{now_seconds, Casper};
+use crate::persistence::{now_seconds, Persistence};
 
 /// A chave de configuração que liga a portaria.
 const CHAVE: &str = "portaria";
@@ -115,8 +115,8 @@ pub struct Pedido {
 /// # Errors
 ///
 /// Falha se o banco não responder.
-pub fn ligada(casper: &Casper) -> Result<bool> {
-    let valor: Option<String> = casper
+pub fn ligada(persistence: &Persistence) -> Result<bool> {
+    let valor: Option<String> = persistence
         .connection()
         .query_row(
             "SELECT valor FROM configuracao WHERE chave = ?1",
@@ -132,8 +132,8 @@ pub fn ligada(casper: &Casper) -> Result<bool> {
 /// # Errors
 ///
 /// Falha se o banco não responder.
-pub fn ligar(casper: &mut Casper, ligada: bool) -> Result<()> {
-    casper.connection().execute(
+pub fn ligar(persistence: &mut Persistence, ligada: bool) -> Result<()> {
+    persistence.connection().execute(
         "INSERT INTO configuracao (chave, valor) VALUES (?1, ?2)
          ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor",
         params![CHAVE, if ligada { "ligada" } else { "desligada" }],
@@ -156,8 +156,8 @@ pub fn ligar(casper: &mut Casper, ligada: bool) -> Result<()> {
 /// # Errors
 ///
 /// Falha se o banco não responder.
-pub fn semear_ligada(casper: &mut Casper) -> Result<()> {
-    casper.connection().execute(
+pub fn semear_ligada(persistence: &mut Persistence) -> Result<()> {
+    persistence.connection().execute(
         "INSERT OR IGNORE INTO configuracao (chave, valor) VALUES (?1, 'ligada')",
         params![CHAVE],
     )?;
@@ -175,7 +175,7 @@ pub fn semear_ligada(casper: &mut Casper) -> Result<()> {
 /// senha, porque `admitir` não tem terceira porta. Deduzir em vez de recalcular
 /// evita rodar Argon2 de novo, que é caro de propósito.
 #[must_use]
-pub fn como_chegou(casper: &Casper, aberto: bool, segredo: Option<&str>) -> (Segredo, String) {
+pub fn como_chegou(persistence: &Persistence, aberto: bool, segredo: Option<&str>) -> (Segredo, String) {
     if aberto {
         return (Segredo::Aberto, String::new());
     }
@@ -183,7 +183,7 @@ pub fn como_chegou(casper: &Casper, aberto: bool, segredo: Option<&str>) -> (Seg
         return (Segredo::Aberto, String::new());
     };
 
-    let observacao: Option<String> = casper
+    let observacao: Option<String> = persistence
         .connection()
         .query_row(
             "SELECT observacao FROM convites WHERE token = ?1",
@@ -215,18 +215,18 @@ pub fn como_chegou(casper: &Casper, aberto: bool, segredo: Option<&str>) -> (Seg
 /// Falha se o banco não responder. Uma recusa é `Ok(Resposta::Recusado)`, não
 /// erro: recusar é resultado normal.
 pub fn bater(
-    casper: &mut Casper,
+    persistence: &mut Persistence,
     impressao: &str,
     apelido: &str,
     segredo: Segredo,
     observacao: &str,
 ) -> Result<Resposta> {
-    if !ligada(casper)? {
+    if !ligada(persistence)? {
         return Ok(Resposta::Entra);
     }
 
     let agora = now_seconds();
-    let conexao = casper.connection();
+    let conexao = persistence.connection();
 
     let atual: Option<(String, Option<i64>)> = conexao
         .query_row(
@@ -299,9 +299,9 @@ pub fn bater(
 /// # Errors
 ///
 /// Falha se o banco não responder.
-pub fn admitir_o_dono(casper: &mut Casper, impressao: &str) -> Result<()> {
+pub fn admitir_o_dono(persistence: &mut Persistence, impressao: &str) -> Result<()> {
     let agora = now_seconds();
-    casper.connection().execute(
+    persistence.connection().execute(
         "INSERT INTO portaria
              (impressao, veredito, apelido, segredo, observacao, bateu_em, decidido_em)
          VALUES (?1, 'admitido', '', 'aberto', 'quem hospeda', ?2, ?2)
@@ -317,9 +317,9 @@ pub fn admitir_o_dono(casper: &mut Casper, impressao: &str) -> Result<()> {
 /// # Errors
 ///
 /// Falha se o banco não responder.
-pub fn decidir(casper: &mut Casper, impressao: &str, admitir: bool) -> Result<()> {
+pub fn decidir(persistence: &mut Persistence, impressao: &str, admitir: bool) -> Result<()> {
     let veredito = if admitir { "admitido" } else { "recusado" };
-    casper.connection().execute(
+    persistence.connection().execute(
         "UPDATE portaria SET veredito = ?2, decidido_em = ?3 WHERE impressao = ?1",
         params![impressao, veredito, now_seconds()],
     )?;
@@ -334,15 +334,15 @@ pub fn decidir(casper: &mut Casper, impressao: &str, admitir: bool) -> Result<()
 /// apertar nada.
 ///
 /// É a linha que se apaga, e é de propósito que seja exatamente isso: o buraco
-/// já registrado do `unban` — que existe em `Melchior` e não tem verbo de
+/// já registrado do `unban` — que existe em `Permissions` e não tem verbo de
 /// protocolo — tem esta mesma forma, `DELETE FROM bans`. Este módulo não o
 /// conserta; mostra que a forma serve.
 ///
 /// # Errors
 ///
 /// Falha se o banco não responder.
-pub fn revogar(casper: &mut Casper, impressao: &str) -> Result<()> {
-    casper.connection().execute(
+pub fn revogar(persistence: &mut Persistence, impressao: &str) -> Result<()> {
+    persistence.connection().execute(
         "DELETE FROM portaria WHERE impressao = ?1",
         params![impressao],
     )?;
@@ -371,11 +371,11 @@ pub fn revogar(casper: &mut Casper, impressao: &str) -> Result<()> {
 /// # Errors
 ///
 /// Falha se o banco não responder.
-pub fn ja_admitido(casper: &Casper, impressao: &str) -> Result<bool> {
-    if !ligada(casper)? {
+pub fn ja_admitido(persistence: &Persistence, impressao: &str) -> Result<bool> {
+    if !ligada(persistence)? {
         return Ok(false);
     }
-    let decidido: Option<String> = casper
+    let decidido: Option<String> = persistence
         .connection()
         .query_row(
             "SELECT veredito FROM portaria
@@ -396,8 +396,8 @@ pub fn ja_admitido(casper: &Casper, impressao: &str) -> Result<bool> {
 /// # Errors
 ///
 /// Falha se o banco não responder.
-pub fn pedidos(casper: &Casper) -> Result<Vec<Pedido>> {
-    let conexao = casper.connection();
+pub fn pedidos(persistence: &Persistence) -> Result<Vec<Pedido>> {
+    let conexao = persistence.connection();
     let mut consulta = conexao.prepare(
         "SELECT impressao, apelido, segredo, observacao, bateu_em, batidas, decidido_em, veredito
            FROM portaria
@@ -432,8 +432,8 @@ pub fn pedidos(casper: &Casper) -> Result<Vec<Pedido>> {
 /// # Errors
 ///
 /// Falha se o banco não responder.
-pub fn pendentes(casper: &Casper) -> Result<i64> {
-    Ok(casper.connection().query_row(
+pub fn pendentes(persistence: &Persistence) -> Result<i64> {
+    Ok(persistence.connection().query_row(
         "SELECT COUNT(*) FROM portaria WHERE decidido_em IS NULL",
         [],
         |linha| linha.get(0),
@@ -443,10 +443,10 @@ pub fn pendentes(casper: &Casper) -> Result<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::casper::Location;
+    use crate::persistence::Location;
 
-    fn casper() -> Casper {
-        Casper::open(&Location::Memory).expect("banco em memória")
+    fn persistence() -> Persistence {
+        Persistence::open(&Location::Memory).expect("banco em memória")
     }
 
     const AYANAMI: &str = "aaaa1111";
@@ -458,7 +458,7 @@ mod tests {
         // o app conectava nele, e o porteiro tratava quem hospeda como
         // desconhecido — deixando o pedido esperando a decisão de alguém que
         // não conseguia entrar para decidir.
-        let mut banco = casper();
+        let mut banco = persistence();
         ligar(&mut banco, true).unwrap();
 
         admitir_o_dono(&mut banco, AYANAMI).unwrap();
@@ -483,7 +483,7 @@ mod tests {
     fn hospedar_de_novo_nao_desfaz_uma_recusa_que_ja_foi_dada() {
         // Hospedar roda toda vez que a janela sobe um Dogma, sobre o mesmo
         // banco. Tem de ser idempotente para o dono e inerte para todo o resto.
-        let mut banco = casper();
+        let mut banco = persistence();
         ligar(&mut banco, true).unwrap();
 
         bater(&mut banco, SORYU, "indesejada", Segredo::Aberto, "").unwrap();
@@ -507,7 +507,7 @@ mod tests {
     fn uma_portaria_desligada_deixa_tudo_como_estava() {
         // O comportamento de antes desta migração, e o do `seeled`, que o ADR
         // 0021 mantém aberto de propósito.
-        let mut c = casper();
+        let mut c = persistence();
         assert!(!ligada(&c).expect("ler"));
         assert_eq!(
             bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater"),
@@ -520,7 +520,7 @@ mod tests {
 
     #[test]
     fn o_primeiro_contato_de_uma_pessoa_fica_pendente_e_o_segundo_tambem() {
-        let mut c = casper();
+        let mut c = persistence();
         ligar(&mut c, true).expect("ligar");
 
         assert_eq!(
@@ -539,7 +539,7 @@ mod tests {
     #[test]
     fn aprovado_uma_vez_entra_nas_proximas_sem_perguntar() {
         // A promessa inteira do TOFU: pergunta-se uma vez.
-        let mut c = casper();
+        let mut c = persistence();
         ligar(&mut c, true).expect("ligar");
         bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater");
 
@@ -560,7 +560,7 @@ mod tests {
     fn recusado_continua_recusado_e_nao_volta_para_a_fila() {
         // O modo de falhar que importa: se bater de novo devolvesse a decisão à
         // fila, recusar seria adiar, e quem foi recusado teria só que insistir.
-        let mut c = casper();
+        let mut c = persistence();
         ligar(&mut c, true).expect("ligar");
         bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater");
         decidir(&mut c, AYANAMI, false).expect("decidir");
@@ -576,7 +576,7 @@ mod tests {
     fn decidir_sobre_uma_pessoa_nao_decide_sobre_outra() {
         // Aprovar é sobre uma chave. Se vazasse para as vizinhas, aprovar o
         // primeiro que bate abriria a porta para todos.
-        let mut c = casper();
+        let mut c = persistence();
         ligar(&mut c, true).expect("ligar");
         bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater");
         bater(&mut c, SORYU, "asuka", Segredo::Aberto, "").expect("bater");
@@ -597,7 +597,7 @@ mod tests {
     fn revogar_faz_a_pessoa_voltar_a_ser_desconhecida_em_vez_de_barrada() {
         // A diferença entre revogar e banir, no comportamento e não só na
         // prosa: depois de revogar, bater pergunta de novo — não recusa.
-        let mut c = casper();
+        let mut c = persistence();
         ligar(&mut c, true).expect("ligar");
         bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater");
         decidir(&mut c, AYANAMI, true).expect("decidir");
@@ -615,7 +615,7 @@ mod tests {
         // «Chegou com o convite *para o Rafael*» é a melhor prova que existe do
         // outro lado, e `criar_convite` já guardava a observação sem que nada a
         // lesse.
-        let mut c = casper();
+        let mut c = persistence();
         ligar(&mut c, true).expect("ligar");
         bater(&mut c, AYANAMI, "rei", Segredo::Convite, "para a Rei").expect("bater");
 
@@ -631,7 +631,7 @@ mod tests {
     fn o_apelido_de_quem_ja_foi_decidido_nao_e_reescrito_por_uma_batida() {
         // Senão a lista de admitidos mentiria sobre quem foi admitido: bastaria
         // ser aprovado como `rei` e voltar dizendo-se `comandante`.
-        let mut c = casper();
+        let mut c = persistence();
         ligar(&mut c, true).expect("ligar");
         bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater");
         decidir(&mut c, AYANAMI, true).expect("decidir");
@@ -643,7 +643,7 @@ mod tests {
 
     #[test]
     fn a_fila_poe_quem_espera_antes_de_quem_ja_foi_decidido() {
-        let mut c = casper();
+        let mut c = persistence();
         ligar(&mut c, true).expect("ligar");
         bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater");
         decidir(&mut c, AYANAMI, true).expect("decidir");
@@ -658,7 +658,7 @@ mod tests {
     fn a_semente_nao_rearma_o_interruptor_de_quem_o_desligou() {
         // `semear_ligada` roda toda vez que o app sobe um Dogma. Um interruptor
         // que se rearma sozinho é um interruptor quebrado.
-        let mut c = casper();
+        let mut c = persistence();
         semear_ligada(&mut c).expect("semear");
         assert!(ligada(&c).expect("ler"));
 
@@ -673,7 +673,7 @@ mod tests {
         // Desligar é «pare de perguntar», não «esqueça o que eu decidi». Religar
         // tem que devolver as decisões de antes, ou desligar por um minuto
         // viraria o jeito de apagar uma recusa.
-        let mut c = casper();
+        let mut c = persistence();
         ligar(&mut c, true).expect("ligar");
         bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater");
         decidir(&mut c, AYANAMI, false).expect("decidir");
@@ -699,7 +699,7 @@ mod a_volta_de_quem_ja_foi_aprovado {
 
     use super::*;
     use crate::admissao::{criar_convite, gastar, Politica};
-    use crate::casper::Location;
+    use crate::persistence::Location;
 
     const AYANAMI: &str = "aaaa1111";
 
@@ -718,43 +718,43 @@ mod a_volta_de_quem_ja_foi_aprovado {
     /// abriu.
     #[test]
     fn quem_foi_aprovado_volta_sem_precisar_de_um_convite_novo() {
-        let mut casper = Casper::open(&Location::Memory).expect("banco em memória");
+        let mut persistence = Persistence::open(&Location::Memory).expect("banco em memória");
         // A portaria vem desligada num banco novo, e sem ela `bater` responde
         // `Entra` a todo mundo — o cenário deste teste não existiria.
-        ligar(&mut casper, true).expect("ligar a portaria");
-        let token = criar_convite(&mut casper, "rafa").expect("criar convite");
+        ligar(&mut persistence, true).expect("ligar a portaria");
+        let token = criar_convite(&mut persistence, "rafa").expect("criar convite");
 
         // A chegada: o convite vale, a portaria põe em espera.
-        let politica = Politica::carregar(&casper).expect("política");
+        let politica = Politica::carregar(&persistence).expect("política");
         let passe = politica
-            .avaliar(&casper, Some(&token))
+            .avaliar(&persistence, Some(&token))
             .expect("avaliar")
             .expect("o convite vale na chegada");
-        let (segredo, observacao) = como_chegou(&casper, politica.aberto(), Some(&token));
+        let (segredo, observacao) = como_chegou(&persistence, politica.aberto(), Some(&token));
         assert_eq!(
-            bater(&mut casper, AYANAMI, "rafa", segredo, &observacao).expect("bater"),
+            bater(&mut persistence, AYANAMI, "rafa", segredo, &observacao).expect("bater"),
             Resposta::Pendente
         );
 
         // Quem hospeda aprova, e a pessoa entra. O convite é gasto agora.
-        decidir(&mut casper, AYANAMI, true).expect("aprovar");
-        let politica = Politica::carregar(&casper).expect("política");
-        let (segredo, observacao) = como_chegou(&casper, politica.aberto(), Some(&token));
+        decidir(&mut persistence, AYANAMI, true).expect("aprovar");
+        let politica = Politica::carregar(&persistence).expect("política");
+        let (segredo, observacao) = como_chegou(&persistence, politica.aberto(), Some(&token));
         assert_eq!(
-            bater(&mut casper, AYANAMI, "rafa", segredo, &observacao).expect("bater"),
+            bater(&mut persistence, AYANAMI, "rafa", segredo, &observacao).expect("bater"),
             Resposta::Entra
         );
-        gastar(&mut casper, &passe)
+        gastar(&mut persistence, &passe)
             .expect("gastar")
             .expect("o convite é gasto na entrada");
 
         // E ela volta no dia seguinte, com o mesmo link — que é o único que
         // ela tem. A política **recusa**, e isso está certo: o convite é de uso
         // único e foi gasto. Não é aqui que o conserto mora.
-        let politica = Politica::carregar(&casper).expect("política");
+        let politica = Politica::carregar(&persistence).expect("política");
         assert!(
             politica
-                .avaliar(&casper, Some(&token))
+                .avaliar(&persistence, Some(&token))
                 .expect("avaliar")
                 .is_err(),
             "o convite de uso único deixou de ser de uso único"
@@ -764,7 +764,7 @@ mod a_volta_de_quem_ja_foi_aprovado {
         // de devolvê-la, e a descarta depois da assinatura se esta chave já
         // tiver decisão de admitida. É esta a pergunta que faltava.
         assert!(
-            ja_admitido(&casper, AYANAMI).expect("perguntar"),
+            ja_admitido(&persistence, AYANAMI).expect("perguntar"),
             "quem já foi aprovado não é reconhecido na volta, e a política a \
              barra por convite gasto antes de a portaria poder dizer que a \
              conhece"
@@ -773,9 +773,9 @@ mod a_volta_de_quem_ja_foi_aprovado {
         // E a estreiteza que faz isso ser seguro: com a portaria desligada,
         // ninguém é «já admitido». Sem esta linha, o perdão da recusa deixaria
         // qualquer segredo errado entrar em todo Dogma que não usa portaria.
-        ligar(&mut casper, false).expect("desligar a portaria");
+        ligar(&mut persistence, false).expect("desligar a portaria");
         assert!(
-            !ja_admitido(&casper, AYANAMI).expect("perguntar"),
+            !ja_admitido(&persistence, AYANAMI).expect("perguntar"),
             "com a portaria desligada alguém continua contando como admitido, \
              e o perdão da recusa vira uma porta escancarada"
         );

@@ -116,7 +116,7 @@ pub struct SessionInfo {
     /// Carried through rather than dropped: an interface that knows the Cages
     /// but not the Lines can only ever open whichever Line it was started with.
     pub lines: Vec<seele_proto::control::LineInfo>,
-    /// What this pilot may do, as MELCHIOR resolved it.
+    /// What this pilot may do, as PERMISSIONS resolved it.
     ///
     /// So a shell can decide whether to offer a control at all. **Convenience,
     /// never enforcement** — `specs/08-seguranca.md` puts the security in the
@@ -372,7 +372,7 @@ impl Client {
     /// Connects, runs the handshake, and returns once PATTERN: BLUE is reached.
     ///
     /// `signing_key` is this client's identity (ADR 0004). ADR 0017 keeps it on
-    /// disk, because CASPER binds a nickname to the identity that claimed it.
+    /// disk, because PERSISTENCE binds a nickname to the identity that claimed it.
     ///
     /// `join_secret` is the invite token or the Dogma password, when the Dogma
     /// asks for one. `None` for an open Dogma, which is the default.

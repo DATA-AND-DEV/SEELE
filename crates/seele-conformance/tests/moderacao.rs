@@ -31,8 +31,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use seele_ffi::{ConnectConfig, EndReason, Event, EventListener, NoticeReason, Plug, PlugError};
-use seele_server::casper::{Casper, Location};
-use seele_server::melchior::{Melchior, COMMANDER_ROLE, OPERATOR_ROLE, PILOT_ROLE};
+use seele_server::persistence::{Persistence, Location};
+use seele_server::permissions::{Permissions, COMMANDER_ROLE, OPERATOR_ROLE, PILOT_ROLE};
 use seele_server::{DogmaConfig, Server};
 
 const CAGE: u32 = 1;
@@ -45,7 +45,7 @@ const PRAZO: Duration = Duration::from_secs(10);
 /// operador do Dogma para além do que o protocolo oferece: não há verbo para
 /// conceder papel, e a metade da moderação que só aparece entre um Operador e
 /// um Comandante ficaria sem teste. Abrir uma segunda conexão ao mesmo arquivo
-/// e mexer no MELCHIOR é encenar o que uma tela de papéis fará um dia.
+/// e mexer no PERMISSIONS é encenar o que uma tela de papéis fará um dia.
 async fn dogma(marca: &str) -> Result<(SocketAddr, Arc<Server>, std::path::PathBuf)> {
     let mut arquivo = std::env::temp_dir();
     arquivo.push(format!("seele-moderacao-{marca}-{}.db", std::process::id()));
@@ -177,21 +177,21 @@ impl Recusas {
 /// Dá um papel a uma conta, e tira os outros.
 ///
 /// Encena a tela de papéis que ainda não existe. Numa segunda conexão ao mesmo
-/// arquivo: o SQLite serializa escritores, e é assim que `melchior` já é testado
+/// arquivo: o SQLite serializa escritores, e é assim que `permissions` já é testado
 /// contra concorrência de verdade.
 fn dar_papel(
     arquivo: &std::path::Path,
     pilot: seele_proto::ids::PilotId,
     papel: seele_proto::ids::RoleId,
 ) {
-    let casper = Casper::open(&Location::File(arquivo.to_path_buf())).expect("abrir o banco");
-    let melchior = Melchior::new(&casper);
+    let persistence = Persistence::open(&Location::File(arquivo.to_path_buf())).expect("abrir o banco");
+    let permissions = Permissions::new(&persistence);
     for tinha in [COMMANDER_ROLE, OPERATOR_ROLE, PILOT_ROLE] {
         if tinha != papel {
-            melchior.revoke_role(pilot, tinha).expect("revogar");
+            permissions.revoke_role(pilot, tinha).expect("revogar");
         }
     }
-    melchior.grant_role(pilot, papel).expect("conceder");
+    permissions.grant_role(pilot, papel).expect("conceder");
 }
 
 #[tokio::test(flavor = "multi_thread")]

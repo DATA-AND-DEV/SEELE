@@ -362,10 +362,10 @@ if (git status --porcelain -- '$CONFIG_TAURI') {
 # produto" — que é falsa: `ffi` é ponte e `xtask` é ferramenta, e os dois moram
 # lá. Uma lista curta que alguém revisa quando um escopo novo aparece é mais
 # honesta que uma heurística que erra em silêncio.
-ESCOPOS_DE_PRODUTO="alcance admissao anexos app atualizador audio balthasar
+ESCOPOS_DE_PRODUTO="alcance admissao anexos app atualizador audio media
 cages cascas chamada chegada cliente conformance convite core dogma encontro
 enlace entrada escada fontes frases furo hospedagem interface marca medida
-melchior mensagens moderar mods plug porta portaria proto rede seguranca server
+permissions mensagens moderar mods plug porta portaria proto rede seguranca server
 sessao spike sync taxa tela telemetria tofu tui ui uri varredura voz"
 
 # Os escopos que existem para **montar** o SEELE, e não para usá-lo.

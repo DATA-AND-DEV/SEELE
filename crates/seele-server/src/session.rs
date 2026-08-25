@@ -1,4 +1,4 @@
-//! MELCHIOR's front door — one connection's handshake and session.
+//! PERMISSIONS's front door — one connection's handshake and session.
 //!
 //! # The handshake
 //!
@@ -18,10 +18,10 @@
 //! verified. The whole budget is 10 s, and failure produces a **specific**
 //! reason: `specs/02-protocolo.md` says "never generic".
 //!
-//! # What the key proves, and what MELCHIOR decides
+//! # What the key proves, and what PERMISSIONS decides
 //!
 //! Verifying the signature over the nonce proves the peer holds the private key.
-//! Turning that into an identity is [`crate::melchior`]'s job: it looks the key
+//! Turning that into an identity is [`crate::permissions`]'s job: it looks the key
 //! up, creates an account on first sight, and refuses a banned one. Roles and
 //! permissions come from there too — `specs/08-seguranca.md` is emphatic that
 //! the server denying is the security, and the interface hiding the button only
@@ -45,11 +45,11 @@ use seele_proto::transport::HANDSHAKE_TIMEOUT;
 use tokio::sync::mpsc;
 
 use crate::cage::CageCommand;
-use crate::casper::channels::{Channels, LastCage};
-use crate::casper::messages::{Messages, PendingMessage, DEFAULT_PAGE};
-use crate::casper::Casper;
+use crate::persistence::channels::{Channels, LastCage};
+use crate::persistence::messages::{Messages, PendingMessage, DEFAULT_PAGE};
+use crate::persistence::Persistence;
 use crate::dogma::{Dogma, Event};
-use crate::melchior::{self, Melchior};
+use crate::permissions::{self, Permissions};
 use crate::taxa::{Veredito, Vigia};
 use crate::{frame, DogmaConfig, PUBLIC_KEY_LEN};
 
@@ -94,7 +94,7 @@ const TELEMETRY_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Hands out per-connection identifiers.
 ///
-/// Pilot identifiers come from CASPER and survive restarts; these do not need
+/// Pilot identifiers come from PERSISTENCE and survive restarts; these do not need
 /// to. An `ssrc` is meaningful only for the life of a connection.
 pub struct Registry {
     next_ssrc: AtomicU32,
@@ -371,7 +371,7 @@ async fn handshake(
     // mandado tentar de novo, e queimar o convite dele nesta linha o deixaria
     // de fora para sempre — inclusive depois de aprovado.
     let (passe, recusa_adiada, chegada) = {
-        let guard = dogma.casper.lock().await;
+        let guard = dogma.persistence.lock().await;
         let politica = crate::admissao::Politica::carregar(&guard).map_err(|error| Refusal {
             reason: DisconnectReason::CredentialRejected,
             detail: format!("could not read the admission policy: {error}"),
@@ -484,7 +484,7 @@ async fn handshake(
     // Nada espera. Um pedido pendente derruba a conexão neste instante e fica
     // gravado; ver o cabeçalho de `portaria`.
     {
-        let mut guard = dogma.casper.lock().await;
+        let mut guard = dogma.persistence.lock().await;
         let impressao = seele_proto::transport::key_fingerprint(&public_key);
         let (segredo, observacao) = chegada;
 
@@ -563,12 +563,12 @@ async fn handshake(
         }
     }
 
-    // MELCHIOR turns the proven key into an account.
+    // PERMISSIONS turns the proven key into an account.
     let account = {
-        let guard = dogma.casper.lock().await;
-        let melchior = Melchior::new(&guard);
+        let guard = dogma.persistence.lock().await;
+        let permissions = Permissions::new(&guard);
 
-        let pilot = melchior
+        let pilot = permissions
             .register_or_find(&public_key, &nickname)
             .map_err(|error| {
                 // O apelido tomado ganha razão própria, e é o conserto de um
@@ -585,8 +585,8 @@ async fn handshake(
                 // e num Dogma sem portaria os apelidos que se poderiam
                 // enumerar aqui são os que o roster entrega a quem entra.
                 if matches!(
-                    error.downcast_ref::<crate::melchior::Refusal>(),
-                    Some(crate::melchior::Refusal::NicknameTaken)
+                    error.downcast_ref::<crate::permissions::Refusal>(),
+                    Some(crate::permissions::Refusal::NicknameTaken)
                 ) {
                     return Refusal {
                         reason: DisconnectReason::NicknameTaken,
@@ -599,7 +599,7 @@ async fn handshake(
                 }
             })?;
 
-        if melchior.is_banned(pilot.id).unwrap_or(false) {
+        if permissions.is_banned(pilot.id).unwrap_or(false) {
             return Err(Refusal {
                 reason: DisconnectReason::Banned,
                 detail: format!("pilot {} is banned", pilot.id),
@@ -607,22 +607,22 @@ async fn handshake(
         }
 
         // Bootstrap: somebody has to be able to set the first roles before there
-        // is an operator to do it. Applied through MELCHIOR rather than around
+        // is an operator to do it. Applied through PERMISSIONS rather than around
         // it, so authorisation still has exactly one source of truth
         // (`specs/08-seguranca.md`).
         if config.observers.iter().any(|name| name == &nickname) {
-            let _ = melchior.revoke_role(pilot.id, melchior::PILOT_ROLE);
-            let _ = melchior.grant_role(pilot.id, melchior::OBSERVER_ROLE);
+            let _ = permissions.revoke_role(pilot.id, permissions::PILOT_ROLE);
+            let _ = permissions.grant_role(pilot.id, permissions::OBSERVER_ROLE);
         }
 
-        let may = |permission| melchior.may(pilot.id, permission).unwrap_or(false);
+        let may = |permission| permissions.may(pilot.id, permission).unwrap_or(false);
         let (cages, lines, roles) = read_dogma(&guard).map_err(|error| Refusal {
             reason: DisconnectReason::ServerShuttingDown,
             detail: format!("could not read the Dogma: {error}"),
         })?;
         // Resolved here rather than left for the shell to work out from `roles`:
         // "negadas vencem concedidas" is one rule and belongs in one place.
-        let permissions = melchior.permissions(pilot.id).unwrap_or_default();
+        let permissions = permissions.permissions(pilot.id).unwrap_or_default();
 
         Account {
             id: pilot.id,
@@ -636,24 +636,24 @@ async fn handshake(
         }
     };
 
-    // Lido do CASPER, e não da [`DogmaConfig`] que subiu o processo: renomear
+    // Lido do PERSISTENCE, e não da [`DogmaConfig`] que subiu o processo: renomear
     // com o Dogma no ar é o caso normal — ADR 0032 —, e um nome que voltasse ao
     // do arranque no próximo reinício não seria um nome, seria uma sessão.
     // Ausência continua querendo dizer o padrão da configuração; ver
-    // `casper::aparencia`.
+    // `persistence::aparencia`.
     //
     // Uma segunda tomada do mutex, e não um campo a mais na `Account`: são duas
     // perguntas sobre coisas diferentes — o que este piloto é, e o que este
     // Dogma é — e o aperto de mão já toma este mutex mais de uma vez.
     let (nome_do_dogma, icone_do_dogma) = {
-        let guard = dogma.casper.lock().await;
-        let nome = crate::casper::aparencia::nome(&guard, &config.name).unwrap_or_else(|erro| {
+        let guard = dogma.persistence.lock().await;
+        let nome = crate::persistence::aparencia::nome(&guard, &config.name).unwrap_or_else(|erro| {
             // Um banco que não responde não pode deixar o Dogma sem nome na
             // tela de quem entra. O padrão da configuração é a resposta honesta.
             tracing::warn!(%erro, "não deu para ler o nome do Dogma");
             config.name.clone()
         });
-        let icone = crate::casper::aparencia::icone(&guard).unwrap_or_default();
+        let icone = crate::persistence::aparencia::icone(&guard).unwrap_or_default();
         (nome, icone)
     };
 
@@ -737,7 +737,7 @@ async fn handshake(
     })
 }
 
-/// What the handshake learned from MELCHIOR and CASPER.
+/// What the handshake learned from PERMISSIONS and PERSISTENCE.
 struct Account {
     id: PilotId,
     nickname: String,
@@ -749,13 +749,13 @@ struct Account {
     permissions: Vec<Permission>,
 }
 
-/// Reads the Cage and Line tree, and the roles, out of CASPER.
-fn read_dogma(casper: &Casper) -> Result<(Vec<CageInfo>, Vec<LineInfo>, Vec<Role>)> {
-    let connection = casper.connection();
+/// Reads the Cage and Line tree, and the roles, out of PERSISTENCE.
+fn read_dogma(persistence: &Persistence) -> Result<(Vec<CageInfo>, Vec<LineInfo>, Vec<Role>)> {
+    let connection = persistence.connection();
 
     // The same reader the creating verbs use, so the tree the handshake sends
     // and the tree a new room lands in cannot drift apart.
-    let channels = Channels::new(casper);
+    let channels = Channels::new(persistence);
     let cages = channels.cages()?;
     let lines = channels.lines()?;
 
@@ -766,7 +766,7 @@ fn read_dogma(casper: &Casper) -> Result<(Vec<CageInfo>, Vec<LineInfo>, Vec<Role
             Ok(Role {
                 id: RoleId(row.get::<_, i64>(0)? as u32),
                 name: row.get(1)?,
-                permissions: melchior::permissions_from_json(&permissions),
+                permissions: permissions::permissions_from_json(&permissions),
             })
         })?
         .filter_map(Result::ok)
@@ -1215,7 +1215,7 @@ async fn run_session(
                         // não está é pior que porta aberta: quem confia nela
                         // toma decisão errada sobre o que dizer ali dentro.
                         if !crate::admissao::cage_liberado(
-                            &*dogma.casper.lock().await,
+                            &*dogma.persistence.lock().await,
                             id,
                             password.as_deref(),
                         ) {
@@ -1268,7 +1268,7 @@ async fn run_session(
                     }
                     ClientMessage::FetchHistory { line, cursor, limit } => {
                         let page = {
-                            let mut guard = dogma.casper.lock().await;
+                            let mut guard = dogma.persistence.lock().await;
                             let messages = Messages::new(&mut guard);
                             messages.history(
                                 line,
@@ -1332,7 +1332,7 @@ async fn run_session(
                     }
                     // ---- rooms, made by whoever hosts ----
                     //
-                    // The permission is read **now**, from MELCHIOR, and not
+                    // The permission is read **now**, from PERMISSIONS, and not
                     // from anything the handshake cached. `may_speak` and
                     // `may_write` are cached because they are consulted per
                     // audio frame and per message; these four are consulted
@@ -1351,7 +1351,7 @@ async fn run_session(
                             continue;
                         }
                         let feito = {
-                            let guard = dogma.casper.lock().await;
+                            let guard = dogma.persistence.lock().await;
                             Channels::new(&guard).create_cage(&name, limit, line)
                         };
                         match feito {
@@ -1368,7 +1368,7 @@ async fn run_session(
                             continue;
                         }
                         let feito = {
-                            let guard = dogma.casper.lock().await;
+                            let guard = dogma.persistence.lock().await;
                             Channels::new(&guard).create_line(&name)
                         };
                         match feito {
@@ -1385,7 +1385,7 @@ async fn run_session(
                             continue;
                         }
                         let feito = {
-                            let guard = dogma.casper.lock().await;
+                            let guard = dogma.persistence.lock().await;
                             Channels::new(&guard).rename_cage(id, &name)
                         };
                         match feito {
@@ -1401,7 +1401,7 @@ async fn run_session(
                             continue;
                         }
                         let feito = {
-                            let guard = dogma.casper.lock().await;
+                            let guard = dogma.persistence.lock().await;
                             Channels::new(&guard).rename_line(id, &name)
                         };
                         match feito {
@@ -1422,7 +1422,7 @@ async fn run_session(
                     // and somebody trusted to build rooms is not thereby the
                     // person whose Dogma it is.
                     //
-                    // Read from MELCHIOR **now**, like every verb here and for
+                    // Read from PERMISSIONS **now**, like every verb here and for
                     // the same reason. Denial answers, because a refusal nobody
                     // is told about is indistinguishable from a Dogma that is
                     // broken.
@@ -1438,8 +1438,8 @@ async fn run_session(
                             continue;
                         }
                         let feito = {
-                            let guard = dogma.casper.lock().await;
-                            crate::casper::aparencia::definir_nome(&guard, &name)
+                            let guard = dogma.persistence.lock().await;
+                            crate::persistence::aparencia::definir_nome(&guard, &name)
                         };
                         match feito {
                             Ok(name) => {
@@ -1460,8 +1460,8 @@ async fn run_session(
                         // segunda regra neste arquivo seria a que ficaria para
                         // trás da primeira.
                         let feito = {
-                            let guard = dogma.casper.lock().await;
-                            crate::casper::aparencia::definir_icone(&guard, icon.as_deref())
+                            let guard = dogma.persistence.lock().await;
+                            crate::persistence::aparencia::definir_icone(&guard, icon.as_deref())
                         };
                         match feito {
                             Ok(()) => {
@@ -1484,7 +1484,7 @@ async fn run_session(
                     // any of them, so the app's `EJETAR PLUG DO OPERADOR` sat
                     // drawn and disabled with nothing to call.
                     //
-                    // Read from MELCHIOR **now**, like the four room verbs
+                    // Read from PERMISSIONS **now**, like the four room verbs
                     // above and for the same reason: an operator whose Kick was
                     // revoked a minute ago should not keep it until the next
                     // reconnection. And denial answers, because a refusal
@@ -1514,14 +1514,14 @@ async fn run_session(
                             recusar(&mut send, session.pilot, "BanPilot").await?;
                             continue;
                         }
-                        // MELCHIOR checks the permission again inside `ban`.
+                        // PERMISSIONS checks the permission again inside `ban`.
                         // Not redundant on purpose: the check above is what
                         // produces the enumerated refusal a client can read,
                         // and the one in there is what no future caller can
                         // forget. specs/08-seguranca.md asks for the second.
                         let gravado = {
-                            let guard = dogma.casper.lock().await;
-                            Melchior::new(&guard).ban(
+                            let guard = dogma.persistence.lock().await;
+                            Permissions::new(&guard).ban(
                                 alvo,
                                 session.pilot,
                                 reason.as_deref(),
@@ -1550,7 +1550,7 @@ async fn run_session(
                         // operator is a Dogma where people ask an operator
                         // about typos.
                         let alvo = {
-                            let mut guard = dogma.casper.lock().await;
+                            let mut guard = dogma.persistence.lock().await;
                             Messages::new(&mut guard).one(id).ok().flatten()
                         };
                         let Some(alvo) = alvo else {
@@ -1565,7 +1565,7 @@ async fn run_session(
                             recusar(&mut send, session.pilot, "RemoveMessage").await?;
                             continue;
                         }
-                        // Soft in CASPER, gone on screen — and the two are one
+                        // Soft in PERSISTENCE, gone on screen — and the two are one
                         // decision, not two. `Messages::remove` clears the body
                         // and stamps `deleted_at`; `history` filters those out
                         // and `Room::apply` drops the line. So the message
@@ -1576,7 +1576,7 @@ async fn run_session(
                         // stub was the alternative, and it preserves the
                         // disruption along with the fact of it.
                         let feito = {
-                            let mut guard = dogma.casper.lock().await;
+                            let mut guard = dogma.persistence.lock().await;
                             Messages::new(&mut guard).remove(id)
                         };
                         match feito {
@@ -1616,7 +1616,7 @@ async fn run_session(
                     // `gerenciar_cages` "criar e configurar Cages" and
                     // `administrar_dogma` "todo o resto sobre o Dogma";
                     // destroying every message six people wrote is not
-                    // configuration. Read now, from MELCHIOR, like all the
+                    // configuration. Read now, from PERMISSIONS, like all the
                     // others.
                     ClientMessage::DeleteCage { cage: id } => {
                         if !pode(dogma, session.pilot, Permission::AdministerDogma).await {
@@ -1624,7 +1624,7 @@ async fn run_session(
                             continue;
                         }
                         let feito = {
-                            let guard = dogma.casper.lock().await;
+                            let guard = dogma.persistence.lock().await;
                             Channels::new(&guard).delete_cage(id)
                         };
                         match feito {
@@ -1662,7 +1662,7 @@ async fn run_session(
                             continue;
                         }
                         let feito = {
-                            let guard = dogma.casper.lock().await;
+                            let guard = dogma.persistence.lock().await;
                             Channels::new(&guard).delete_line(id)
                         };
                         match feito {
@@ -1683,7 +1683,7 @@ async fn run_session(
                     // the confirmation they are shown is the vaguer one.
                     ClientMessage::WeighLine { line: id } => {
                         let pesado = {
-                            let guard = dogma.casper.lock().await;
+                            let guard = dogma.persistence.lock().await;
                             Channels::new(&guard).weigh_line(id)
                         };
                         match pesado {
@@ -1898,7 +1898,7 @@ async fn run_session(
                     // elas estão bloqueadas ninguém tira evento do barramento.
                     // Passado o anel, o `broadcast` descarta o mais antigo:
                     // `quantos` eventos que existiram e não existem mais **para
-                    // esta conexão**, mensagens já gravadas em CASPER entre
+                    // esta conexão**, mensagens já gravadas em PERSISTENCE entre
                     // eles.
                     //
                     // Aqui havia um `let Ok(event) = event else { continue }`, e
@@ -2069,9 +2069,9 @@ async fn run_session(
                     jitter_ms: inputs.jitter_ms,
                     loss_fraction: inputs.loss_fraction,
                     subsystems: vec![
-                        (Subsystem::Melchior, SubsystemHealth::Nominal),
-                        (Subsystem::Balthasar, SubsystemHealth::Nominal),
-                        (Subsystem::Casper, SubsystemHealth::Nominal),
+                        (Subsystem::Permissions, SubsystemHealth::Nominal),
+                        (Subsystem::Media, SubsystemHealth::Nominal),
+                        (Subsystem::Persistence, SubsystemHealth::Nominal),
                     ],
                 })).await?;
 
@@ -2225,9 +2225,9 @@ async fn assentar(
     Ok(())
 }
 
-/// Asks MELCHIOR, right now, whether this pilot may do something.
+/// Asks PERMISSIONS, right now, whether this pilot may do something.
 ///
-/// Every call takes the CASPER lock, which is the point: the answer is the one
+/// Every call takes the PERSISTENCE lock, which is the point: the answer is the one
 /// that is true at the instant the verb is used, not the one that was true when
 /// the connection opened. `specs/08-seguranca.md`: "Toda ação é verificada no
 /// servidor, sempre." Control verbs are rare enough that the lock costs nothing
@@ -2237,8 +2237,8 @@ async fn assentar(
 /// A database error reads as denial. The alternative is to let a Dogma whose
 /// disk is failing hand out `ManageCages` to whoever asks while it fails.
 async fn pode(dogma: &Dogma, pilot: PilotId, permission: Permission) -> bool {
-    let guard = dogma.casper.lock().await;
-    Melchior::new(&guard)
+    let guard = dogma.persistence.lock().await;
+    Permissions::new(&guard)
         .may(pilot, permission)
         .unwrap_or(false)
 }
@@ -2247,7 +2247,7 @@ async fn pode(dogma: &Dogma, pilot: PilotId, permission: Permission) -> bool {
 ///
 /// Two questions, and both have to be yes.
 ///
-/// The first is the permission, asked of MELCHIOR at the instant the verb is
+/// The first is the permission, asked of PERMISSIONS at the instant the verb is
 /// used — `specs/08-seguranca.md`: "Toda ação é verificada no servidor,
 /// sempre."
 ///
@@ -2272,14 +2272,14 @@ async fn moderavel(dogma: &Dogma, quem: PilotId, alvo: PilotId, permission: Perm
     if quem == alvo {
         return true;
     }
-    let guard = dogma.casper.lock().await;
-    let melchior = Melchior::new(&guard);
+    let guard = dogma.persistence.lock().await;
+    let permissions = Permissions::new(&guard);
     // A database error reads as denial, like `pode`: a Dogma whose disk is
     // failing must not answer "nobody here is an administrator".
-    let alvo_administra = melchior
+    let alvo_administra = permissions
         .may(alvo, Permission::AdministerDogma)
         .unwrap_or(true);
-    let quem_administra = melchior
+    let quem_administra = permissions
         .may(quem, Permission::AdministerDogma)
         .unwrap_or(false);
     !alvo_administra || quem_administra

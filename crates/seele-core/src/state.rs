@@ -200,7 +200,7 @@ pub struct Room {
     pub cages: Vec<CageInfo>,
     /// Text channels visible to this pilot.
     pub lines: Vec<LineInfo>,
-    /// What this pilot may do, as MELCHIOR resolved it.
+    /// What this pilot may do, as PERMISSIONS resolved it.
     ///
     /// Here so a shell can ask "should this control exist at all" without
     /// re-deriving `specs/04-servidor-seele.md`'s "negadas vencem concedidas"

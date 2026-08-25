@@ -31,7 +31,7 @@ Em **cada um dos dois PCs**.
 ### 1.1 Build Tools do Visual Studio
 
 O Rust no Windows usa o linker da Microsoft, e duas dependências compilam C:
-o SQLite embutido do CASPER e partes do QUIC.
+o SQLite embutido do PERSISTENCE e partes do QUIC.
 
 Baixe **Build Tools for Visual Studio** em
 <https://visualstudio.microsoft.com/downloads/> (seção *Tools for Visual

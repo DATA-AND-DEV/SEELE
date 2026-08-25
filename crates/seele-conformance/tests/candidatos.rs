@@ -34,7 +34,7 @@ use seele_core::enlace::{Aviso, Destino, Enlace};
 use seele_core::{MemoryPinStore, PinStore};
 use seele_proto::control::ServerMessage;
 use seele_proto::ids::{CageId, ClientMessageId, LineId};
-use seele_server::casper::Location;
+use seele_server::persistence::Location;
 use seele_server::{DogmaConfig, Server};
 
 const CAGE: u32 = 1;

@@ -40,11 +40,11 @@ use seele_proto::ids::{AttachmentId, ClientMessageId, PilotId};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 
-use crate::casper::attachments::{self, Landing, Ledger, Refusal, Store};
-use crate::casper::messages::{Messages, PendingMessage, StoredMessage};
-use crate::casper::Casper;
+use crate::persistence::attachments::{self, Landing, Ledger, Refusal, Store};
+use crate::persistence::messages::{Messages, PendingMessage, StoredMessage};
+use crate::persistence::Persistence;
 use crate::dogma::{Dogma, Event};
-use crate::melchior::Melchior;
+use crate::permissions::Permissions;
 use crate::taxa::Vazao;
 
 /// Stream priority for the control stream.
@@ -62,7 +62,7 @@ pub const TRANSFER_PRIORITY: i32 = -1;
 /// The store, the ledger and the byte budget travel together because no caller
 /// ever wants one without the others, and because the lock order between the
 /// first two is a rule rather than a suggestion — see
-/// [`crate::casper::attachments`].
+/// [`crate::persistence::attachments`].
 pub struct Vault {
     store: Store,
     ledger: Mutex<Ledger>,
@@ -79,8 +79,8 @@ impl Vault {
     /// # Errors
     ///
     /// Fails if the directory cannot be created or read.
-    pub fn open(root: PathBuf, casper: &Casper) -> Result<Self> {
-        let (store, ledger) = Store::open(root, casper)?;
+    pub fn open(root: PathBuf, persistence: &Persistence) -> Result<Self> {
+        let (store, ledger) = Store::open(root, persistence)?;
         tracing::info!(
             teto = ledger.quota(),
             guardado = ledger.stored(),
@@ -165,14 +165,14 @@ pub async fn receive(
         })
     };
 
-    // Asked of MELCHIOR at the instant the verb is used, and not read from
+    // Asked of PERMISSIONS at the instant the verb is used, and not read from
     // anything the handshake cached. `specs/08-seguranca.md`: "Toda ação é
     // verificada no servidor, sempre, mesmo que o cliente já esconda o botão."
     // A transfer is rare and expensive, so there is nothing to save by caching
     // it, and a role revoked an hour into a session must take effect now.
     let allowed = {
-        let guard = dogma.casper.lock().await;
-        Melchior::new(&guard)
+        let guard = dogma.persistence.lock().await;
+        Permissions::new(&guard)
             .may(pilot, Permission::AttachFile)
             .unwrap_or(false)
     };
@@ -206,9 +206,9 @@ pub async fn receive(
     // The ceiling. Everything above this line is cheap; everything below it
     // touches the disk.
     let reservation = {
-        // Ledger first, CASPER second. Always.
+        // Ledger first, PERSISTENCE second. Always.
         let mut ledger = vault.ledger.lock().await;
-        let guard = dogma.casper.lock().await;
+        let guard = dogma.persistence.lock().await;
         match vault
             .store
             .reserve(&mut ledger, &guard, header.declared_len, &scratch_name)?
@@ -268,7 +268,7 @@ pub async fn receive(
 
     let published = {
         let mut ledger = vault.ledger.lock().await;
-        let mut guard = dogma.casper.lock().await;
+        let mut guard = dogma.persistence.lock().await;
 
         // Written straight through rather than queued on `Dogma::post`, and
         // that is not an inconsistency: the batcher exists so that fifty typed
@@ -397,7 +397,7 @@ pub async fn deliver(
     id: AttachmentId,
 ) -> Result<std::result::Result<u64, AttachmentRefusal>> {
     let row = {
-        let guard = dogma.casper.lock().await;
+        let guard = dogma.persistence.lock().await;
         attachments::Attachments::new(&guard).one(id)?
     };
     let Some(row) = row else {
@@ -414,7 +414,7 @@ pub async fn deliver(
             // The row is the truth, and the row now says the bytes are gone.
             // Stamping it here rather than leaving the disagreement means the
             // next reader is told the same thing this one was.
-            let guard = dogma.casper.lock().await;
+            let guard = dogma.persistence.lock().await;
             let _ = attachments::Attachments::new(&guard).expire_blob(&row.content_hash);
             tracing::warn!(attachment = %id, "the bytes are missing; the row now reads as expired");
             return Ok(Err(AttachmentRefusal::Expired));

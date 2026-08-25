@@ -1,4 +1,4 @@
-//! CASPER — persistent state.
+//! PERSISTENCE — persistent state.
 //!
 //! `specs/04-servidor-seele.md`:
 //!
@@ -87,11 +87,11 @@ pub enum Location {
 }
 
 /// The persistent store.
-pub struct Casper {
+pub struct Persistence {
     connection: Connection,
 }
 
-impl Casper {
+impl Persistence {
     /// Opens the database and brings the schema up to date.
     ///
     /// # Errors
@@ -118,9 +118,9 @@ impl Casper {
         // Without this a second writer fails instantly instead of waiting.
         connection.busy_timeout(std::time::Duration::from_secs(5))?;
 
-        let mut casper = Self { connection };
-        casper.migrate()?;
-        Ok(casper)
+        let mut persistence = Self { connection };
+        persistence.migrate()?;
+        Ok(persistence)
     }
 
     /// Borrows the connection.
@@ -201,17 +201,17 @@ pub fn now_seconds() -> i64 {
 mod tests {
     use super::*;
 
-    fn memory() -> Casper {
-        Casper::open(&Location::Memory).expect("in-memory database")
+    fn memory() -> Persistence {
+        Persistence::open(&Location::Memory).expect("in-memory database")
     }
 
     #[test]
     fn a_fresh_database_reaches_the_latest_version() {
-        let casper = memory();
+        let persistence = memory();
         let expected = schema::MIGRATIONS
             .last()
             .map_or(0, |migration| migration.version);
-        assert_eq!(casper.schema_version().unwrap(), expected);
+        assert_eq!(persistence.schema_version().unwrap(), expected);
     }
 
     #[test]
@@ -221,19 +221,19 @@ mod tests {
         let path = tempfile::tempdir().unwrap();
         let file = Location::File(path.path().join("dogma.db"));
 
-        let first = Casper::open(&file).unwrap();
+        let first = Persistence::open(&file).unwrap();
         let version = first.schema_version().unwrap();
         drop(first);
 
-        let second = Casper::open(&file).unwrap();
+        let second = Persistence::open(&file).unwrap();
         assert_eq!(second.schema_version().unwrap(), version);
     }
 
     #[test]
     fn the_four_default_roles_exist() {
         // specs/04-servidor-seele.md: Comandante, Operador, Piloto, Observador.
-        let casper = memory();
-        let mut statement = casper
+        let persistence = memory();
+        let mut statement = persistence
             .connection()
             .prepare("SELECT name FROM roles ORDER BY id")
             .unwrap();
@@ -249,9 +249,9 @@ mod tests {
     fn an_observer_cannot_speak_and_a_pilot_can() {
         // The role definitions are data, so they deserve the same scrutiny as
         // code. specs/04 gives Observador "só ouvir e ler".
-        let casper = memory();
+        let persistence = memory();
         let permissions = |name: &str| -> String {
-            casper
+            persistence
                 .connection()
                 .query_row(
                     "SELECT permissions FROM roles WHERE name = ?1",
@@ -272,9 +272,9 @@ mod tests {
         // denies it on Observer **explicitly**. The difference between denying
         // and omitting is the whole of "negadas vencem concedidas": an omission
         // does nothing when the same person also holds Pilot.
-        let casper = memory();
+        let persistence = memory();
         let column = |role: &str, column: &str| -> String {
-            casper
+            persistence
                 .connection()
                 .query_row(
                     &format!("SELECT {column} FROM roles WHERE name = ?1"),
@@ -307,7 +307,7 @@ mod tests {
         let file = Location::File(directory.path().join("dogma.db"));
 
         {
-            let casper = Casper::open(&file).unwrap();
+            let persistence = Persistence::open(&file).unwrap();
             // Rewind to exactly what migration 1 left behind, and forget that
             // migration 3 ever ran.
             //
@@ -322,7 +322,7 @@ mod tests {
             // Found when migration 4 landed (ADR 0030). Every migration after 3
             // has to drop its own tables here too, for the same reason
             // `attachments` is dropped: the replay re-runs their `CREATE TABLE`.
-            casper
+            persistence
                 .connection()
                 .execute_batch(
                     "UPDATE roles SET permissions = replace(permissions, ',\"AttachFile\"', ''),
@@ -332,7 +332,7 @@ mod tests {
                      DROP TABLE portaria;",
                 )
                 .unwrap();
-            assert!(!casper
+            assert!(!persistence
                 .connection()
                 .query_row::<String, _, _>(
                     "SELECT permissions FROM roles WHERE name = 'Pilot'",
@@ -343,8 +343,8 @@ mod tests {
                 .contains("AttachFile"));
         }
 
-        let casper = Casper::open(&file).unwrap();
-        let pilot: String = casper
+        let persistence = Persistence::open(&file).unwrap();
+        let pilot: String = persistence
             .connection()
             .query_row(
                 "SELECT permissions FROM roles WHERE name = 'Pilot'",
@@ -363,8 +363,8 @@ mod tests {
         // `migrate` skips applied versions, so this can only happen if somebody
         // reruns the statement — but a migration that is not idempotent is a
         // migration nobody may ever replay, and the guard is one clause.
-        let casper = memory();
-        casper
+        let persistence = memory();
+        persistence
             .connection()
             .execute_batch(
                 schema::MIGRATIONS[2]
@@ -373,7 +373,7 @@ mod tests {
                     .map_or("", |(_, rest)| rest),
             )
             .unwrap();
-        let pilot: String = casper
+        let pilot: String = persistence
             .connection()
             .query_row(
                 "SELECT permissions FROM roles WHERE name = 'Pilot'",
@@ -389,8 +389,8 @@ mod tests {
         // specs/04-servidor-seele.md asks for it by name. Without WAL a reader
         // blocks the writer, and the Cage tasks read while messages are written.
         let path = tempfile::tempdir().unwrap();
-        let casper = Casper::open(&Location::File(path.path().join("dogma.db"))).unwrap();
-        let mode: String = casper
+        let persistence = Persistence::open(&Location::File(path.path().join("dogma.db"))).unwrap();
+        let mode: String = persistence
             .connection()
             .query_row("PRAGMA journal_mode", [], |row| row.get(0))
             .unwrap();
@@ -401,8 +401,8 @@ mod tests {
     fn foreign_keys_are_enforced() {
         // Off by default in SQLite. A message pointing at a deleted Line would
         // otherwise survive happily and surface as a crash somewhere else.
-        let casper = memory();
-        let result = casper.connection().execute(
+        let persistence = memory();
+        let result = persistence.connection().execute(
             "INSERT INTO messages (line_id, author_id, body, created_at)
              VALUES (999, 999, 'orphan', 0)",
             [],
@@ -412,9 +412,9 @@ mod tests {
 
     #[test]
     fn a_nickname_cannot_be_taken_twice() {
-        let casper = memory();
+        let persistence = memory();
         let insert = |nick: &str, key: &[u8]| {
-            casper.connection().execute(
+            persistence.connection().execute(
                 "INSERT INTO pilots (nickname, public_key, created_at) VALUES (?1, ?2, ?3)",
                 rusqlite::params![nick, key, now_seconds()],
             )

@@ -22,8 +22,8 @@ use seele_proto::control::{CageInfo, LineInfo, PilotProfile, PilotState};
 use seele_proto::ids::{CageId, LineId, MessageId, PilotId, ScreenId, Ssrc};
 use tokio::sync::{broadcast, mpsc, Mutex};
 
-use crate::casper::messages::{Messages, PendingMessage, StoredMessage};
-use crate::casper::Casper;
+use crate::persistence::messages::{Messages, PendingMessage, StoredMessage};
+use crate::persistence::Persistence;
 
 /// How long the writer waits before committing what it has.
 ///
@@ -134,7 +134,7 @@ pub enum Event {
     ///
     /// The bytes travel on the bus rather than a "go and read it again": the bus
     /// is what every connection is already draining, and telling fifty sessions
-    /// to each take the CASPER lock and read the same 8 KiB row would be fifty
+    /// to each take the PERSISTENCE lock and read the same 8 KiB row would be fifty
     /// reads of a value one reader already has in its hand.
     DogmaIconChanged {
         /// The picture, or `None` when it was taken down.
@@ -619,7 +619,7 @@ pub struct WriteRequest {
 /// Everything a connection needs from the Dogma.
 pub struct Dogma {
     /// Persistent state. One connection, one mutex — SQLite has one writer.
-    pub casper: Arc<Mutex<Casper>>,
+    pub persistence: Arc<Mutex<Persistence>>,
     /// The event bus.
     pub events: broadcast::Sender<Event>,
     /// Where messages go to be batched.
@@ -666,7 +666,7 @@ pub struct Dogma {
 /// transaction, and only then broadcasts them. See the module docs on why the
 /// order is fixed.
 pub fn spawn_writer(
-    casper: Arc<Mutex<Casper>>,
+    persistence: Arc<Mutex<Persistence>>,
     events: broadcast::Sender<Event>,
 ) -> mpsc::Sender<WriteRequest> {
     let (tx, mut rx) = mpsc::channel::<WriteRequest>(1024);
@@ -684,13 +684,13 @@ pub fn spawn_writer(
                         // The Dogma is shutting down. Flush what is left rather
                         // than dropping messages the clients believe are queued.
                         None => {
-                            flush(&casper, &events, &mut pending).await;
+                            flush(&persistence, &events, &mut pending).await;
                             return;
                         }
                     }
                 }
                 _ = ticker.tick() => {
-                    flush(&casper, &events, &mut pending).await;
+                    flush(&persistence, &events, &mut pending).await;
                 }
             }
         }
@@ -700,7 +700,7 @@ pub fn spawn_writer(
 }
 
 async fn flush(
-    casper: &Arc<Mutex<Casper>>,
+    persistence: &Arc<Mutex<Persistence>>,
     events: &broadcast::Sender<Event>,
     pending: &mut Vec<PendingMessage>,
 ) {
@@ -709,7 +709,7 @@ async fn flush(
     }
     let batch = std::mem::take(pending);
     let stored = {
-        let mut guard = casper.lock().await;
+        let mut guard = persistence.lock().await;
         let mut messages = Messages::new(&mut guard);
         match messages.append_batch(&batch) {
             Ok(stored) => stored,

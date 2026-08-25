@@ -1738,7 +1738,7 @@ fn o_instalador_do_windows_remove_a_instalacao_por_usuario_de_antes() {
     // E a que não pode acontecer de jeito nenhum.
     assert!(
         !corpo.contains("$APPDATA") && !corpo.contains("RMDir /r"),
-        "o gancho passou a apagar dados: o CASPER, a identidade e os pinos do \
+        "o gancho passou a apagar dados: o PERSISTENCE, a identidade e os pinos do \
          ADR 0003 moram aí, e uma migração de instalador não é lugar de \
          perdê-los:\n{corpo}"
     );

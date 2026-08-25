@@ -14,7 +14,7 @@
 //! else { continue }` transformava isso em nada — a sessão seguia, calada, com
 //! um buraco permanente no que aquele piloto vê.
 //!
-//! É por isso que a pendência é a número 1: a mensagem foi gravada em CASPER,
+//! É por isso que a pendência é a número 1: a mensagem foi gravada em PERSISTENCE,
 //! quem escreveu viu a sua aparecer, e o outro lado nunca soube que faltou.
 //!
 //! # Por que um par cru, e não um `Client`
@@ -40,7 +40,7 @@ use anyhow::Result;
 use ed25519_dalek::{Signer, SigningKey};
 use seele_proto::control::{ClientMessage, DisconnectReason, ServerMessage};
 use seele_proto::ids::{ClientMessageId, LineId};
-use seele_server::casper::Location;
+use seele_server::persistence::Location;
 use seele_server::{frame, DogmaConfig, Server};
 
 const LINE: u32 = 1;
@@ -303,7 +303,7 @@ async fn o_dogma_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Result
     }
 
     // O que se perdeu foi a **entrega**, e não a mensagem: tudo o que os
-    // falantes disseram está em CASPER, que é o que faz de reconectar um
+    // falantes disseram está em PERSISTENCE, que é o que faz de reconectar um
     // conserto e não um consolo.
     let gravadas = servidor.quantas_mensagens(LineId(LINE)).await?;
     assert_eq!(

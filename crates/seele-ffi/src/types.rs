@@ -874,7 +874,7 @@ pub struct Snapshot {
     /// Whether this pilot may make and rename Cages and Lines.
     ///
     /// So a shell can decide whether the control exists at all. `ManageCages`
-    /// as MELCHIOR resolved it, sent down in the handshake — a single boolean
+    /// as PERMISSIONS resolved it, sent down in the handshake — a single boolean
     /// and not the permission list, because this is the one a screen asks
     /// about, and a list would invite each shell to start deciding things out
     /// of it.

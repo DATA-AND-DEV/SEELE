@@ -24,7 +24,7 @@ use std::time::Duration;
 use anyhow::Result;
 use seele_core::{Client, ConnectError, MemoryPinStore};
 use seele_proto::control::{AlertReason, DisconnectReason, ServerMessage};
-use seele_server::casper::Location;
+use seele_server::persistence::Location;
 use seele_server::taxa::{APERTOS_DE_RAJADA, PACIENCIA, QUADROS_DE_RAJADA};
 use seele_server::{DogmaConfig, Server};
 

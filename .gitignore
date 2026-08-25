@@ -24,7 +24,7 @@
 # Throwaway spikes build their own targets (M1).
 /spikes/*/target/
 
-# A Dogma started for local testing writes its CASPER database here.
+# A Dogma started for local testing writes its persistence database here.
 seele.db
 seele.db-wal
 seele.db-shm

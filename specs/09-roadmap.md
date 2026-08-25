@@ -57,8 +57,8 @@ Se este milestone escorregar muito, o escopo do projeto precisa ser revisto — 
 
 ## M3 — Estado, texto e persistência
 
-- CASPER: SQLite, migrações, Cages e Linhas configuráveis.
-- MELCHIOR: contas, papéis, permissões, banimento.
+- PERSISTENCE: SQLite, migrações, Cages e Linhas configuráveis.
+- PERMISSIONS: contas, papéis, permissões, banimento.
 - Mensagens de texto com histórico paginado por cursor.
 - Telemetria e cálculo da Taxa de Sincronização.
 - Keepalive, reconexão e a janela de 5 minutos da bateria interna.

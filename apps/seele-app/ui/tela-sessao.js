@@ -262,7 +262,7 @@ function desenhar(snapshot) {
   }
 
   // Antes de qualquer desenho: `desenharMensagens` a lê, e ela chega do
-  // servidor como `may_remove_message` — resolvida no MELCHIOR a partir das
+  // servidor como `may_remove_message` — resolvida no PERMISSIONS a partir das
   // permissões desta conexão, e não decidida aqui.
   podeRemoverMensagem = snapshot.may_remove_message === true;
 
@@ -650,7 +650,7 @@ function desenharCanais(snapshot) {
   repovoar($("lista-linhas"), linhas);
 
   // Os dois formulários de criar sala só aparecem para quem pode criar. Quem
-  // responde é o servidor, em `may_manage_cages`, resolvido pelo MELCHIOR a
+  // responde é o servidor, em `may_manage_cages`, resolvido pelo PERMISSIONS a
   // partir das permissões desta conexão. Esconder aqui não impede ninguém de
   // nada — `CreateCage` de quem não tem `ManageCages` é recusado lá, e há teste
   // de conformidade provando que a recusa é de lá. Isto é não oferecer o que
@@ -1269,7 +1269,7 @@ function linhaDoRoster(piloto, temAudio) {
   const identidade = elemento("span", "piloto-identidade");
   identidade.append(elemento("span", "piloto-nome", piloto.nome));
 
-  // `MELCHIOR·01`, o subsistema por piloto, não entra. O protocolo não diz qual
+  // `PERMISSIONS·01`, o subsistema por piloto, não entra. O protocolo não diz qual
   // atende quem, e um travessão explicado em toda linha do roster é o ruído que
   // o v3 veio tirar desta tela.
 

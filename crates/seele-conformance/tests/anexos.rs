@@ -1,6 +1,6 @@
 //! Attachments, both ends, against a real Dogma.
 //!
-//! `crates/seele-server/src/casper/attachments.rs` proves the ceiling with time
+//! `crates/seele-server/src/persistence/attachments.rs` proves the ceiling with time
 //! and files under its own control, and no interleaved schedule can prove the
 //! thing this file is for: that the mechanism is **wired up**. A ceiling nobody
 //! consults is exactly the state `DisconnectReason::RateLimited` was in before
@@ -37,8 +37,8 @@ use seele_core::preview::{data_uri, judge, ImageFormat, Verdict, PREVIEW_LIMIT};
 use seele_core::{Client, MemoryPinStore};
 use seele_proto::control::{AttachmentRefusal, AttachmentState, ServerMessage};
 use seele_proto::ids::{AttachmentId, ClientMessageId, LineId};
-use seele_server::casper::attachments::per_file_limit;
-use seele_server::casper::Location;
+use seele_server::persistence::attachments::per_file_limit;
+use seele_server::persistence::Location;
 use seele_server::{DogmaConfig, Server};
 
 /// How long a test waits for a file the Dogma agreed to send.
@@ -54,8 +54,8 @@ async fn dogma(teto: u64) -> Result<(SocketAddr, Arc<Server>, tempfile::TempDir)
     let casa = tempfile::tempdir()?;
     let banco = casa.path().join("dogma.db");
     {
-        let casper = seele_server::casper::Casper::open(&Location::File(banco.clone()))?;
-        seele_server::casper::attachments::set_quota(&casper, teto)?;
+        let persistence = seele_server::persistence::Persistence::open(&Location::File(banco.clone()))?;
+        seele_server::persistence::attachments::set_quota(&persistence, teto)?;
     }
 
     let config = DogmaConfig {

@@ -568,7 +568,7 @@ async fn sessao(
     runtime.app.screen = Screen::Boot;
     terminal.draw(|frame| ui::render(frame, &runtime.app, *runtime.theme))?;
 
-    // ADR 0004, and the reason it has to be on disk: CASPER binds a nickname to
+    // ADR 0004, and the reason it has to be on disk: PERSISTENCE binds a nickname to
     // the identity that first claimed it, so a client that generates a fresh key
     // each run can never come back under its own name.
     let key = identity::load_or_create(&home.join("identity.key"))?;
@@ -584,7 +584,7 @@ async fn sessao(
     let mut hospedagem = if args.hospedar {
         let dogma = seele_server::hospedagem::Hospedagem::iniciar(
             args.server.port(),
-            seele_server::casper::Location::File(seele_server::casper::banco_do_cliente(home)),
+            seele_server::persistence::Location::File(seele_server::persistence::banco_do_cliente(home)),
             "Casa",
         )
         .await

@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use seele_ffi::{ConnectConfig, Plug, PlugError};
-use seele_server::casper::{Casper, Location};
+use seele_server::persistence::{Persistence, Location};
 use seele_server::{DogmaConfig, Server};
 
 /// Um PNG quadrado e opaco, do tamanho que o protocolo aceita.
@@ -116,8 +116,8 @@ async fn quem_conecta_recebe_o_icone_que_o_dogma_ja_tinha() -> Result<()> {
     // O ícone é gravado **antes** de qualquer sessão existir, que é o caso do
     // relato: quem hospeda já tinha escolhido a imagem noutro dia.
     {
-        let casper = Casper::open(&Location::File(banco.clone()))?;
-        seele_server::casper::aparencia::definir_icone(&casper, Some(&imagem))?;
+        let persistence = Persistence::open(&Location::File(banco.clone()))?;
+        seele_server::persistence::aparencia::definir_icone(&persistence, Some(&imagem))?;
     }
 
     let (endereco, servidor) = dogma(banco).await?;

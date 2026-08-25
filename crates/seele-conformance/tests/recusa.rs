@@ -17,7 +17,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use seele_core::enlace::{Destino, Enlace};
 use seele_core::{Client, ConnectError, MemoryPinStore, PinStore};
-use seele_server::casper::Location;
+use seele_server::persistence::Location;
 use seele_server::{DogmaConfig, Server};
 
 async fn dogma() -> Result<(SocketAddr, Arc<Server>)> {
@@ -53,7 +53,7 @@ async fn entrar(endereco: SocketAddr, semente: u8) -> Result<Client, ConnectErro
 async fn um_apelido_de_outro_dono_e_recusa_e_nao_rede() -> Result<()> {
     let (endereco, servidor) = dogma().await?;
 
-    // O primeiro reivindica o apelido. ADR 0017: CASPER prende o apelido à
+    // O primeiro reivindica o apelido. ADR 0017: PERSISTENCE prende o apelido à
     // identidade que o pegou primeiro.
     let primeiro = entrar(endereco, 1).await.expect("o primeiro deve entrar");
     drop(primeiro);

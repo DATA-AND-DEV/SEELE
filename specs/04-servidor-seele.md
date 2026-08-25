@@ -6,9 +6,9 @@ O daemon se chama `seeled`. Uma instância é um **Dogma Central**. Internamente
 
 | Subsistema | Responsabilidade |
 |---|---|
-| **MELCHIOR** | Identidade, autenticação, sessões, papéis e permissões |
-| **BALTHASAR** | Roteamento de mídia: assinaturas de Cage, encaminhamento de datagrams, controle de banda |
-| **CASPER** | Estado persistente: Cages, Linhas, histórico, configuração, migrações |
+| **PERMISSIONS** | Identidade, autenticação, sessões, papéis e permissões |
+| **MEDIA** | Roteamento de mídia: assinaturas de Cage, encaminhamento de datagrams, controle de banda |
+| **PERSISTENCE** | Estado persistente: Cages, Linhas, histórico, configuração, migrações |
 
 Quando um subsistema está degradado, o cliente mostra isso explicitamente. "Os três concordam" é o estado nominal.
 
@@ -40,7 +40,7 @@ Regra: permissões negadas vencem concedidas. Sem herança em árvore — a comp
 - Uma task por **Cage**, dona do estado daquele Cage. Entrada e saída por `mpsc`. Isso elimina lock global e torna o roteamento de mídia trivialmente paralelo.
 - Datagrams de mídia entram na task do Cage, que replica para os assinantes. Zero cópia sempre que possível (`Bytes`).
 
-## Encaminhamento de mídia (BALTHASAR)
+## Encaminhamento de mídia (MEDIA)
 
 1. Recebe datagram de um `ssrc` conhecido.
 2. Valida que o remetente está no Cage e tem permissão de falar. **Validar sempre** — não confiar no cliente.
@@ -51,7 +51,7 @@ Controle de fluxo: limite por remetente de quadros por segundo (um cliente hones
 
 **[EM ABERTO]** Política acima de 20 falantes simultâneos: encaminhar apenas os N mais ativos, medidos por energia reportada? Requer que o cliente reporte energia, o que é confiável apenas parcialmente.
 
-## Persistência (CASPER)
+## Persistência (PERSISTENCE)
 
 SQLite, arquivo único, WAL ligado. Tabelas: `pilotos`, `papeis`, `piloto_papeis`, `cages`, `linhas`, `mensagens`, `banimentos`, `config`, `schema_version`.
 

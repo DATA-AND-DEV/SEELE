@@ -18,8 +18,8 @@
 /**
  * O estado da tentativa de conexão.
  *
- * Um estado, e não três. Aqui havia um laço sobre `sub-melchior`,
- * `sub-balthasar` e `sub-casper`, que escrevia **a mesma coisa** nos três — e o
+ * Um estado, e não três. Aqui havia um laço sobre `sub-permissions`,
+ * `sub-media` e `sub-persistence`, que escrevia **a mesma coisa** nos três — e o
  * comentário desta função dizia o motivo em voz alta: saúde por subsistema não
  * existe no protocolo, o fato relatado é um só. Três nomes para um dado é
  * cenário se passando por instrumento, e o laço era a prova disso escrita em

@@ -34,7 +34,7 @@ piloto vê, e sem um número em lugar nenhum.
 
 Medido em `crates/seele-server/tests/par_lento.rs`, que **reprovava antes do
 conserto**: 969 de 1160 mensagens chegam, 191 somem, o piloto segue conectado e
-nenhum dos dois lados fica sabendo. As 1160 estão gravadas em CASPER — o que se
+nenhum dos dois lados fica sabendo. As 1160 estão gravadas em PERSISTENCE — o que se
 perde é a entrega, não a mensagem.
 
 **O conserto** é encerrar a sessão com `DisconnectReason::FellBehind`, contando
@@ -82,7 +82,7 @@ sintoma.
 `*_BLOCKED` dos dois sentidos, lidos do quinn), um aviso no fim de cada sessão
 com quantas vezes o controle de fluxo prendeu a escrita para aquele cliente, e
 `Server::quantas_mensagens` / `Server::mensagens_da_linha`, que abrem a pergunta
-"o que o Dogma gravou" sem tornar público o `Casper::connection()` — que era o
+"o que o Dogma gravou" sem tornar público o `Persistence::connection()` — que era o
 obstáculo anotado aqui, e cuja abertura entregaria uma `rusqlite::Connection` e
 faria do esquema o contrato.
 
@@ -634,7 +634,7 @@ souber que saiu versão nova simplesmente continua na antiga.
 em que ele próprio se justifica — o teto antes de qualquer byte trafegar, e a
 tela por último.
 
-**O teto.** `crates/seele-server/src/casper/attachments.rs`. A conferência
+**O teto.** `crates/seele-server/src/persistence/attachments.rs`. A conferência
 acontece contra o tamanho **declarado**, e o descarte também: receber e arrumar
 depois deixaria o disco acima do teto pelo tempo da transferência, que é a
 propriedade inteira que se perde. O que uma transferência em voo reserva conta
@@ -1059,14 +1059,14 @@ de o `Hello` ser lido, mas contida não é limitada. `convites` tem prazo e uma
 varredura; `portaria` não tem nenhum dos dois, e não há tela que apague em lote.
 
 **4 · Não administra o Dogma de outra pessoa.** Os sete comandos falam direto com
-o CASPER da máquina que hospeda, e isso é decisão do ADR 0030, não descuido: a
+o PERSISTENCE da máquina que hospeda, e isso é decisão do ADR 0030, não descuido: a
 alternativa era expor à internet a decisão sobre quem entra pela internet. O
 efeito é que um Comandante remoto continua sem fechar a porta da casa alheia —
 que é onde o ADR 0021 já tinha deixado a administração de verdade, na
 alternativa 3, e continua lá.
 
-**O que este trabalho encostou e não consertou.** `Melchior::unban` existe
-(`crates/seele-server/src/melchior.rs:541`) e **não tem verbo de protocolo**: um
+**O que este trabalho encostou e não consertou.** `Permissions::unban` existe
+(`crates/seele-server/src/permissions.rs:541`) e **não tem verbo de protocolo**: um
 banimento só se desfaz por quem tem o arquivo do Dogma, à mão, e é isso que a
 frase de confirmação do banimento diz. A portaria **não piora** aquilo, porque
 não acrescenta verbo nenhum, e mostra a forma da saída: uma decisão que se desfaz
@@ -1193,7 +1193,7 @@ porque as três não são a mesma coisa.
 teto de 64 em `MAX_CLIENT_NAME_LEN`), já chega ao `Snapshot`
 (`crates/seele-ffi/src/types.rs:557`) e já é desenhado. Falta quem escreve: um
 valor na tabela `configuracao`, pelo mesmo critério que o ADR 0027 usou para o
-teto de anexos, e um acessor no `Hospedagem` falando direto com o CASPER local
+teto de anexos, e um acessor no `Hospedagem` falando direto com o PERSISTENCE local
 como o ADR 0030 fez com a portaria — **sem verbo novo de protocolo**. Renomear
 com o Dogma no ar precisa de um evento, ou o nome novo só vale na próxima
 conexão e a tela tem de dizer isso.

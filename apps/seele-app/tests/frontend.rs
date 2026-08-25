@@ -2329,8 +2329,8 @@ fn the_session_screen_omits_what_nothing_measures_rather_than_a_dash_per_row() {
 #[test]
 fn the_bound_name_is_stated_once_and_never_worn_as_a_badge() {
     // The v3 comp draws a `verif` seal per pilot and another per message. Both
-    // are gone, and the reasoning is in §1.2 of its inventory: the CASPER binds
-    // a nickname to the identity that claimed it first and the MELCHIOR refuses
+    // are gone, and the reasoning is in §1.2 of its inventory: the PERSISTENCE binds
+    // a nickname to the identity that claimed it first and the PERMISSIONS refuses
     // any other (ADR 0017), so the seal would be true on every line forever — and
     // a badge everybody wears is a badge nobody learns to read, on the day one
     // of them is missing.
@@ -2343,8 +2343,8 @@ fn the_bound_name_is_stated_once_and_never_worn_as_a_badge() {
 
     // The sentence is gone too, and this is the third thing the screen stopped
     // saying about itself. It explained a property the product already
-    // guarantees — the CASPER binds a nickname to the first identity that
-    // claims it, and the MELCHIOR refuses any other (ADR 0017) — to someone who
+    // guarantees — the PERSISTENCE binds a nickname to the first identity that
+    // claims it, and the PERMISSIONS refuses any other (ADR 0017) — to someone who
     // never doubted it. Whoever does doubt it is not reassured by a line of
     // text next to the name; they are reassured by the pin alarm of ADR 0003,
     // which is loud and blocking and lives somewhere else.
@@ -2829,7 +2829,7 @@ fn every_section_of_the_settings_screen_carries_the_panel_and_the_heading_it_ope
 /// The server section is offered from the snapshot, and never decided here.
 ///
 /// The rule this screen shares with the channels column: hiding a control is
-/// **not** what stops anybody. `AdministerDogma` is checked by the MELCHIOR at
+/// **not** what stops anybody. `AdministerDogma` is checked by the PERMISSIONS at
 /// the instant of the verb, and a rename asked without it comes back as
 /// `Alert`/`PermissionDenied`. What the boolean buys is not offering what the
 /// server was going to refuse.
@@ -7633,7 +7633,7 @@ fn a_entrada_poe_o_convite_na_frente_e_explica_cada_campo() {
 /// `sincronização` sozinha não está aqui: `TEMPO ESGOTADO NA SINCRONIZAÇÃO
 /// INICIAL` é o aperto de mão, não a taxa, e o mapa não o cobre. Os três nomes
 /// MAGI também não: o mapa tirou as **três luzes do rodapé**, e não os nomes —
-/// eles seguem em `B·02 / APERTO DE MÃO — MELCHIOR` e no diagrama do arranque,
+/// eles seguem em `B·02 / APERTO DE MÃO — PERMISSIONS` e no diagrama do arranque,
 /// que nenhum guarda de texto sabe distinguir de uma luz.
 const APOSENTADOS: &[(&str, &str)] = &[
     ("dogma", "servidor"),

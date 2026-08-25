@@ -33,7 +33,7 @@ use rusqlite::{params, Connection};
 
 use seele_proto::ids::CageId;
 
-use crate::casper::{now_seconds, Casper};
+use crate::persistence::{now_seconds, Persistence};
 
 /// Quanto tempo um convite vale, em segundos. Sete dias.
 ///
@@ -82,8 +82,8 @@ impl Politica {
     /// # Errors
     ///
     /// Falha se o banco não responder.
-    pub fn carregar(casper: &Casper) -> Result<Self> {
-        let conexao = casper.connection();
+    pub fn carregar(persistence: &Persistence) -> Result<Self> {
+        let conexao = persistence.connection();
         let senha_hash: Option<String> = conexao
             .query_row(
                 "SELECT valor FROM configuracao WHERE chave = 'senha_dogma'",
@@ -131,7 +131,7 @@ impl Politica {
     /// # Errors
     ///
     /// Falha se o banco não responder. Recusa é `Ok(Err(_))`, não erro.
-    pub fn avaliar(&self, casper: &Casper, segredo: Option<&str>) -> Result<Result<Passe, Recusa>> {
+    pub fn avaliar(&self, persistence: &Persistence, segredo: Option<&str>) -> Result<Result<Passe, Recusa>> {
         if self.aberto() {
             return Ok(Ok(Passe::livre()));
         }
@@ -147,7 +147,7 @@ impl Politica {
         }
 
         if self.aceita_convites {
-            return Ok(conferir_convite(casper.connection(), segredo)?
+            return Ok(conferir_convite(persistence.connection(), segredo)?
                 .map(|()| Passe::com_convite(segredo)));
         }
 
@@ -164,11 +164,11 @@ impl Politica {
     /// Falha se o banco não responder. Recusa é `Ok(Err(_))`, não erro.
     pub fn admitir(
         &self,
-        casper: &mut Casper,
+        persistence: &mut Persistence,
         segredo: Option<&str>,
     ) -> Result<Result<(), Recusa>> {
-        match self.avaliar(casper, segredo)? {
-            Ok(passe) => gastar(casper, &passe),
+        match self.avaliar(persistence, segredo)? {
+            Ok(passe) => gastar(persistence, &passe),
             Err(recusa) => Ok(Err(recusa)),
         }
     }
@@ -219,7 +219,7 @@ impl Passe {
 ///
 /// Falha se o banco não responder. Perder a corrida por um convite é
 /// `Ok(Err(Recusa::ConviteGasto))`, não erro.
-pub fn gastar(casper: &mut Casper, passe: &Passe) -> Result<Result<(), Recusa>> {
+pub fn gastar(persistence: &mut Persistence, passe: &Passe) -> Result<Result<(), Recusa>> {
     let Some(token) = &passe.convite else {
         return Ok(Ok(()));
     };
@@ -227,7 +227,7 @@ pub fn gastar(casper: &mut Casper, passe: &Passe) -> Result<Result<(), Recusa>> 
     // `usado_em IS NULL` na cláusula: se dois clientes chegarem com o mesmo
     // convite no mesmo instante, só um vê linha alterada. A conferência de
     // `avaliar` sozinha seria uma corrida, e é por isso que ela não decide.
-    let alteradas = casper.connection().execute(
+    let alteradas = persistence.connection().execute(
         "UPDATE convites SET usado_em = ?1 WHERE token = ?2 AND usado_em IS NULL",
         params![now_seconds(), token],
     )?;
@@ -244,8 +244,8 @@ pub fn gastar(casper: &mut Casper, passe: &Passe) -> Result<Result<(), Recusa>> 
 /// # Errors
 ///
 /// Falha se o hash não puder ser calculado ou o banco não responder.
-pub fn definir_senha(casper: &mut Casper, senha: Option<&str>) -> Result<()> {
-    let conexao = casper.connection();
+pub fn definir_senha(persistence: &mut Persistence, senha: Option<&str>) -> Result<()> {
+    let conexao = persistence.connection();
     match senha {
         None => {
             conexao.execute("DELETE FROM configuracao WHERE chave = 'senha_dogma'", [])?;
@@ -270,10 +270,10 @@ pub fn definir_senha(casper: &mut Casper, senha: Option<&str>) -> Result<()> {
 /// # Errors
 ///
 /// Falha se o banco não responder.
-pub fn criar_convite(casper: &mut Casper, observacao: &str) -> Result<String> {
+pub fn criar_convite(persistence: &mut Persistence, observacao: &str) -> Result<String> {
     let token = gerar_token();
     let agora = now_seconds();
-    casper.connection().execute(
+    persistence.connection().execute(
         "INSERT INTO convites (token, criado_em, expira_em, observacao) VALUES (?1, ?2, ?3, ?4)",
         params![token, agora, agora + VALIDADE_CONVITE_S, observacao],
     )?;
@@ -289,8 +289,8 @@ pub fn criar_convite(casper: &mut Casper, observacao: &str) -> Result<String> {
 /// Recusa quando o banco não responde. É a única resposta segura: uma consulta
 /// que falha não é prova de que a porta pode abrir.
 #[must_use]
-pub fn cage_liberado(casper: &Casper, cage: CageId, senha: Option<&str>) -> bool {
-    let hash: Option<Option<String>> = casper
+pub fn cage_liberado(persistence: &Persistence, cage: CageId, senha: Option<&str>) -> bool {
+    let hash: Option<Option<String>> = persistence
         .connection()
         .query_row(
             "SELECT password_hash FROM cages WHERE id = ?1",
@@ -313,9 +313,9 @@ pub fn cage_liberado(casper: &Casper, cage: CageId, senha: Option<&str>) -> bool
 /// # Errors
 ///
 /// Falha se o hash não puder ser calculado ou o banco não responder.
-pub fn definir_senha_cage(casper: &mut Casper, cage: CageId, senha: Option<&str>) -> Result<()> {
+pub fn definir_senha_cage(persistence: &mut Persistence, cage: CageId, senha: Option<&str>) -> Result<()> {
     let hash = senha.map(calcular_hash).transpose()?;
-    casper.connection().execute(
+    persistence.connection().execute(
         "UPDATE cages SET password_hash = ?1 WHERE id = ?2",
         params![hash, i64::from(cage.get())],
     )?;
@@ -395,56 +395,56 @@ fn gerar_token() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::casper::Location;
+    use crate::persistence::Location;
 
-    fn casper() -> Casper {
-        let casper = Casper::open(&Location::Memory).expect("banco em memória");
+    fn persistence() -> Persistence {
+        let persistence = Persistence::open(&Location::Memory).expect("banco em memória");
         // O Dogma real semeia o Cage padrão ao subir; um banco recém-migrado
         // está vazio, e um teste de fechadura precisa de uma porta.
-        casper
+        persistence
             .connection()
             .execute(
                 "INSERT INTO cages (id, name, member_limit, position) VALUES (1, 'CAGE-01', 20, 0)",
                 [],
             )
             .expect("semear o Cage");
-        casper
+        persistence
     }
 
     #[test]
     fn um_dogma_sem_configuracao_deixa_qualquer_um_entrar() {
         // É o padrão de propósito: é o que faz o teste em rede local funcionar
         // sem cerimônia. O aviso ao subir é que impede isso de ser esquecido.
-        let mut casper = casper();
-        let politica = Politica::carregar(&casper).expect("política");
+        let mut persistence = persistence();
+        let politica = Politica::carregar(&persistence).expect("política");
 
         assert!(politica.aberto());
         assert_eq!(
-            politica.admitir(&mut casper, None).expect("admitir"),
+            politica.admitir(&mut persistence, None).expect("admitir"),
             Ok(())
         );
     }
 
     #[test]
     fn com_senha_configurada_a_porta_fecha() {
-        let mut casper = casper();
-        definir_senha(&mut casper, Some("terceiro impacto")).expect("definir");
-        let politica = Politica::carregar(&casper).expect("política");
+        let mut persistence = persistence();
+        definir_senha(&mut persistence, Some("terceiro impacto")).expect("definir");
+        let politica = Politica::carregar(&persistence).expect("política");
 
         assert!(!politica.aberto());
         assert_eq!(
-            politica.admitir(&mut casper, None).expect("admitir"),
+            politica.admitir(&mut persistence, None).expect("admitir"),
             Err(Recusa::SegredoAusente)
         );
         assert_eq!(
             politica
-                .admitir(&mut casper, Some("errada"))
+                .admitir(&mut persistence, Some("errada"))
                 .expect("admitir"),
             Err(Recusa::SegredoInvalido)
         );
         assert_eq!(
             politica
-                .admitir(&mut casper, Some("terceiro impacto"))
+                .admitir(&mut persistence, Some("terceiro impacto"))
                 .expect("admitir"),
             Ok(())
         );
@@ -454,10 +454,10 @@ mod tests {
     fn a_senha_nao_fica_em_texto_puro_no_banco() {
         // O operador tem o arquivo de qualquer jeito; o que se protege é o dia
         // em que o banco vaza por outro caminho — backup, disco, engano.
-        let mut casper = casper();
-        definir_senha(&mut casper, Some("terceiro impacto")).expect("definir");
+        let mut persistence = persistence();
+        definir_senha(&mut persistence, Some("terceiro impacto")).expect("definir");
 
-        let guardado: String = casper
+        let guardado: String = persistence
             .connection()
             .query_row(
                 "SELECT valor FROM configuracao WHERE chave = 'senha_dogma'",
@@ -474,19 +474,19 @@ mod tests {
     fn um_convite_vale_uma_vez_e_so() {
         // A propriedade que torna seguro pôr um convite numa URL: depois de
         // usado, vazar não vale nada.
-        let mut casper = casper();
-        let token = criar_convite(&mut casper, "ayanami").expect("criar");
-        let politica = Politica::carregar(&casper).expect("política");
+        let mut persistence = persistence();
+        let token = criar_convite(&mut persistence, "ayanami").expect("criar");
+        let politica = Politica::carregar(&persistence).expect("política");
 
         assert_eq!(
             politica
-                .admitir(&mut casper, Some(&token))
+                .admitir(&mut persistence, Some(&token))
                 .expect("admitir"),
             Ok(())
         );
         assert_eq!(
             politica
-                .admitir(&mut casper, Some(&token))
+                .admitir(&mut persistence, Some(&token))
                 .expect("admitir"),
             Err(Recusa::ConviteGasto)
         );
@@ -497,28 +497,28 @@ mod tests {
         // O defeito que a portaria do ADR 0030 tornou constante: quem bate e é
         // mandado esperar não pode ter o convite queimado pela batida, ou volta
         // aprovado e sem credencial nenhuma.
-        let mut casper = casper();
-        let token = criar_convite(&mut casper, "ayanami").expect("criar");
-        let politica = Politica::carregar(&casper).expect("política");
+        let mut persistence = persistence();
+        let token = criar_convite(&mut persistence, "ayanami").expect("criar");
+        let politica = Politica::carregar(&persistence).expect("política");
 
         let passe = politica
-            .avaliar(&casper, Some(&token))
+            .avaliar(&persistence, Some(&token))
             .expect("avaliar")
             .expect("aceito");
 
         // Conferido três vezes e ainda de pé.
         for _ in 0..3 {
             assert!(politica
-                .avaliar(&casper, Some(&token))
+                .avaliar(&persistence, Some(&token))
                 .expect("avaliar")
                 .is_ok());
         }
 
-        assert_eq!(gastar(&mut casper, &passe).expect("gastar"), Ok(()));
+        assert_eq!(gastar(&mut persistence, &passe).expect("gastar"), Ok(()));
         // E depois de gasto, gasto.
         assert_eq!(
             politica
-                .avaliar(&casper, Some(&token))
+                .avaliar(&persistence, Some(&token))
                 .expect("avaliar")
                 .unwrap_err(),
             Recusa::ConviteGasto
@@ -530,22 +530,22 @@ mod tests {
         // A corrida que o `UPDATE ... WHERE usado_em IS NULL` existe para
         // perder. Separar conferir de gastar não pode tê-la reaberto: os dois
         // conferem com sucesso, e é o gasto que decide.
-        let mut casper = casper();
-        let token = criar_convite(&mut casper, "").expect("criar");
-        let politica = Politica::carregar(&casper).expect("política");
+        let mut persistence = persistence();
+        let token = criar_convite(&mut persistence, "").expect("criar");
+        let politica = Politica::carregar(&persistence).expect("política");
 
         let primeiro = politica
-            .avaliar(&casper, Some(&token))
+            .avaliar(&persistence, Some(&token))
             .expect("avaliar")
             .expect("aceito");
         let segundo = politica
-            .avaliar(&casper, Some(&token))
+            .avaliar(&persistence, Some(&token))
             .expect("avaliar")
             .expect("aceito");
 
-        assert_eq!(gastar(&mut casper, &primeiro).expect("gastar"), Ok(()));
+        assert_eq!(gastar(&mut persistence, &primeiro).expect("gastar"), Ok(()));
         assert_eq!(
-            gastar(&mut casper, &segundo).expect("gastar"),
+            gastar(&mut persistence, &segundo).expect("gastar"),
             Err(Recusa::ConviteGasto)
         );
     }
@@ -555,23 +555,23 @@ mod tests {
         // Gastar tem que ser inócuo quando não houve convite, ou o caminho da
         // senha passaria por um `UPDATE` sem alvo e leria zero linhas alteradas
         // como recusa.
-        let mut casper = casper();
-        definir_senha(&mut casper, Some("terceiro impacto")).expect("definir");
-        let politica = Politica::carregar(&casper).expect("política");
+        let mut persistence = persistence();
+        definir_senha(&mut persistence, Some("terceiro impacto")).expect("definir");
+        let politica = Politica::carregar(&persistence).expect("política");
 
         let passe = politica
-            .avaliar(&casper, Some("terceiro impacto"))
+            .avaliar(&persistence, Some("terceiro impacto"))
             .expect("avaliar")
             .expect("aceito");
-        assert_eq!(gastar(&mut casper, &passe).expect("gastar"), Ok(()));
-        assert_eq!(gastar(&mut casper, &passe).expect("de novo"), Ok(()));
+        assert_eq!(gastar(&mut persistence, &passe).expect("gastar"), Ok(()));
+        assert_eq!(gastar(&mut persistence, &passe).expect("de novo"), Ok(()));
     }
 
     #[test]
     fn um_convite_vencido_nao_abre() {
-        let mut casper = casper();
-        let token = criar_convite(&mut casper, "atrasado").expect("criar");
-        casper
+        let mut persistence = persistence();
+        let token = criar_convite(&mut persistence, "atrasado").expect("criar");
+        persistence
             .connection()
             .execute(
                 "UPDATE convites SET expira_em = ?1 WHERE token = ?2",
@@ -579,10 +579,10 @@ mod tests {
             )
             .expect("envelhecer");
 
-        let politica = Politica::carregar(&casper).expect("política");
+        let politica = Politica::carregar(&persistence).expect("política");
         assert_eq!(
             politica
-                .admitir(&mut casper, Some(&token))
+                .admitir(&mut persistence, Some(&token))
                 .expect("admitir"),
             Err(Recusa::ConviteExpirado)
         );
@@ -592,20 +592,20 @@ mod tests {
     fn senha_e_convite_convivem() {
         // O operador pode ter uma senha para o grupo fixo e convites para
         // visitas, sem escolher entre os dois.
-        let mut casper = casper();
-        definir_senha(&mut casper, Some("terceiro impacto")).expect("definir");
-        let token = criar_convite(&mut casper, "visita").expect("criar");
-        let politica = Politica::carregar(&casper).expect("política");
+        let mut persistence = persistence();
+        definir_senha(&mut persistence, Some("terceiro impacto")).expect("definir");
+        let token = criar_convite(&mut persistence, "visita").expect("criar");
+        let politica = Politica::carregar(&persistence).expect("política");
 
         assert_eq!(
             politica
-                .admitir(&mut casper, Some("terceiro impacto"))
+                .admitir(&mut persistence, Some("terceiro impacto"))
                 .expect("admitir"),
             Ok(())
         );
         assert_eq!(
             politica
-                .admitir(&mut casper, Some(&token))
+                .admitir(&mut persistence, Some(&token))
                 .expect("admitir"),
             Ok(())
         );
@@ -613,19 +613,19 @@ mod tests {
 
     #[test]
     fn tirar_a_senha_reabre_o_dogma_se_nao_houver_convites() {
-        let mut casper = casper();
-        definir_senha(&mut casper, Some("temporária")).expect("definir");
-        assert!(!Politica::carregar(&casper).expect("política").aberto());
+        let mut persistence = persistence();
+        definir_senha(&mut persistence, Some("temporária")).expect("definir");
+        assert!(!Politica::carregar(&persistence).expect("política").aberto());
 
-        definir_senha(&mut casper, None).expect("remover");
-        assert!(Politica::carregar(&casper).expect("política").aberto());
+        definir_senha(&mut persistence, None).expect("remover");
+        assert!(Politica::carregar(&persistence).expect("política").aberto());
     }
 
     #[test]
     fn dois_tokens_nunca_saem_iguais() {
-        let mut casper = casper();
+        let mut persistence = persistence();
         let tokens: std::collections::HashSet<String> = (0..200)
-            .map(|_| criar_convite(&mut casper, "").expect("criar"))
+            .map(|_| criar_convite(&mut persistence, "").expect("criar"))
             .collect();
         assert_eq!(tokens.len(), 200);
     }
@@ -633,8 +633,8 @@ mod tests {
     #[test]
     fn o_token_da_para_ditar_por_telefone() {
         // Sem 0, 1, I, O e L. Alguém vai ler isto em voz alta.
-        let mut casper = casper();
-        let token = criar_convite(&mut casper, "").expect("criar");
+        let mut persistence = persistence();
+        let token = criar_convite(&mut persistence, "").expect("criar");
 
         assert_eq!(token.len(), 20);
         for confuso in ['0', '1', 'I', 'O', 'L'] {
@@ -644,36 +644,36 @@ mod tests {
 
     #[test]
     fn um_cage_sem_senha_aceita_qualquer_membro() {
-        let casper = casper();
-        assert!(cage_liberado(&casper, CageId(1), None));
+        let persistence = persistence();
+        assert!(cage_liberado(&persistence, CageId(1), None));
     }
 
     #[test]
     fn um_cage_com_senha_recusa_quem_nao_a_tem() {
         // A fechadura que existia no protocolo, era anunciada ao cliente em
         // `password_required` e nunca era conferida.
-        let mut casper = casper();
-        definir_senha_cage(&mut casper, CageId(1), Some("geofront")).expect("definir");
+        let mut persistence = persistence();
+        definir_senha_cage(&mut persistence, CageId(1), Some("geofront")).expect("definir");
 
-        assert!(!cage_liberado(&casper, CageId(1), None));
-        assert!(!cage_liberado(&casper, CageId(1), Some("errada")));
-        assert!(cage_liberado(&casper, CageId(1), Some("geofront")));
+        assert!(!cage_liberado(&persistence, CageId(1), None));
+        assert!(!cage_liberado(&persistence, CageId(1), Some("errada")));
+        assert!(cage_liberado(&persistence, CageId(1), Some("geofront")));
     }
 
     #[test]
     fn um_cage_que_nao_existe_nao_libera() {
         // Um erro de digitação não deve virar entrada silenciosa em lugar
         // nenhum.
-        let casper = casper();
-        assert!(!cage_liberado(&casper, CageId(9999), None));
+        let persistence = persistence();
+        assert!(!cage_liberado(&persistence, CageId(9999), None));
     }
 
     #[test]
     fn a_senha_do_cage_tambem_e_hasheada() {
-        let mut casper = casper();
-        definir_senha_cage(&mut casper, CageId(1), Some("geofront")).expect("definir");
+        let mut persistence = persistence();
+        definir_senha_cage(&mut persistence, CageId(1), Some("geofront")).expect("definir");
 
-        let guardado: String = casper
+        let guardado: String = persistence
             .connection()
             .query_row("SELECT password_hash FROM cages WHERE id = 1", [], |l| {
                 l.get(0)
@@ -685,8 +685,8 @@ mod tests {
     #[test]
     fn um_hash_corrompido_recusa_em_vez_de_aceitar() {
         // A falha tem de cair para o lado fechado.
-        let mut casper = casper();
-        casper
+        let mut persistence = persistence();
+        persistence
             .connection()
             .execute(
                 "INSERT INTO configuracao (chave, valor) VALUES ('senha_dogma', 'lixo')",
@@ -694,10 +694,10 @@ mod tests {
             )
             .expect("gravar lixo");
 
-        let politica = Politica::carregar(&casper).expect("política");
+        let politica = Politica::carregar(&persistence).expect("política");
         assert_eq!(
             politica
-                .admitir(&mut casper, Some("lixo"))
+                .admitir(&mut persistence, Some("lixo"))
                 .expect("admitir"),
             Err(Recusa::SegredoInvalido)
         );

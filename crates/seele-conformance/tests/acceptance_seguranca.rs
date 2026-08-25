@@ -13,7 +13,7 @@ use anyhow::Result;
 use ed25519_dalek::SigningKey;
 use seele_core::{Client, MemoryPinStore, PinDecision, PinStore};
 use seele_proto::ids::CageId;
-use seele_server::casper::{Casper, Location};
+use seele_server::persistence::{Persistence, Location};
 use seele_server::{admissao, DogmaConfig, Server};
 
 const CAGE: CageId = CageId(1);
@@ -106,8 +106,8 @@ async fn a_senha_do_dogma_fecha_a_porta() -> Result<()> {
 
     // O operador define a senha com o Dogma parado.
     {
-        let mut casper = Casper::open(&Location::File(banco.clone()))?;
-        admissao::definir_senha(&mut casper, Some("terceiro impacto"))?;
+        let mut persistence = Persistence::open(&Location::File(banco.clone()))?;
+        admissao::definir_senha(&mut persistence, Some("terceiro impacto"))?;
     }
 
     let (endereco, servidor) = subir(&banco).await?;
@@ -157,8 +157,8 @@ async fn um_convite_serve_a_uma_pessoa_so() -> Result<()> {
     let banco = pasta.path().join("seele.db");
 
     let token = {
-        let mut casper = Casper::open(&Location::File(banco.clone()))?;
-        admissao::criar_convite(&mut casper, "ayanami")?
+        let mut persistence = Persistence::open(&Location::File(banco.clone()))?;
+        admissao::criar_convite(&mut persistence, "ayanami")?
     };
 
     let (endereco, servidor) = subir(&banco).await?;
@@ -202,8 +202,8 @@ async fn a_senha_do_cage_e_conferida() -> Result<()> {
         // O Dogma semeia o Cage ao subir, então sobe uma vez antes de trancar.
         let (_, servidor) = subir(&banco).await?;
         servidor.shutdown();
-        let mut casper = Casper::open(&Location::File(banco.clone()))?;
-        admissao::definir_senha_cage(&mut casper, CAGE, Some("geofront"))?;
+        let mut persistence = Persistence::open(&Location::File(banco.clone()))?;
+        admissao::definir_senha_cage(&mut persistence, CAGE, Some("geofront"))?;
     }
 
     let (endereco, servidor) = subir(&banco).await?;
@@ -314,10 +314,10 @@ async fn um_dogma_com_portaria_nao_admite_ninguem_por_um_caminho_lateral() -> Re
     let banco = pasta.path().join("seele.db");
 
     let token = {
-        let mut casper = Casper::open(&Location::File(banco.clone()))?;
-        portaria::ligar(&mut casper, true)?;
-        admissao::definir_senha(&mut casper, Some("terceiro impacto"))?;
-        admissao::criar_convite(&mut casper, "para a Rei")?
+        let mut persistence = Persistence::open(&Location::File(banco.clone()))?;
+        portaria::ligar(&mut persistence, true)?;
+        admissao::definir_senha(&mut persistence, Some("terceiro impacto"))?;
+        admissao::criar_convite(&mut persistence, "para a Rei")?
     };
 
     let (endereco, servidor) = subir(&banco).await?;
@@ -385,11 +385,11 @@ async fn um_dogma_com_portaria_nao_admite_ninguem_por_um_caminho_lateral() -> Re
 
     // 5. Quem hospeda aprova **uma** chave, pelo banco, como a tela fará.
     {
-        let mut casper = Casper::open(&Location::File(banco.clone()))?;
+        let mut persistence = Persistence::open(&Location::File(banco.clone()))?;
         // Sete batidas da mesma pessoa são um pedido, não sete.
-        let fila = portaria::pedidos(&casper)?;
+        let fila = portaria::pedidos(&persistence)?;
         assert_eq!(fila.len(), 2, "a fila tem uma linha por pessoa: {fila:?}");
-        portaria::decidir(&mut casper, &impressao_de(9), true)?;
+        portaria::decidir(&mut persistence, &impressao_de(9), true)?;
     }
 
     let entra = conectar(
@@ -476,8 +476,8 @@ async fn um_dogma_com_portaria_nao_admite_ninguem_por_um_caminho_lateral() -> Re
     // vinha junto mandava conferir o convite, que é a única coisa que não era o
     // problema.
     {
-        let mut casper = Casper::open(&Location::File(banco.clone()))?;
-        portaria::decidir(&mut casper, &impressao_de(3), true)?;
+        let mut persistence = Persistence::open(&Location::File(banco.clone()))?;
+        portaria::decidir(&mut persistence, &impressao_de(3), true)?;
     }
     let homonimo_aprovado = conectar(
         endereco,
@@ -529,8 +529,8 @@ async fn quem_foi_recusado_ouve_outra_coisa_de_quem_so_espera() -> Result<()> {
     let banco = pasta.path().join("seele.db");
 
     {
-        let mut casper = Casper::open(&Location::File(banco.clone()))?;
-        portaria::ligar(&mut casper, true)?;
+        let mut persistence = Persistence::open(&Location::File(banco.clone()))?;
+        portaria::ligar(&mut persistence, true)?;
     }
 
     let (endereco, servidor) = subir(&banco).await?;
@@ -550,8 +550,8 @@ async fn quem_foi_recusado_ouve_outra_coisa_de_quem_so_espera() -> Result<()> {
 
     // Quem hospeda recusa uma e deixa a outra de pé.
     {
-        let mut casper = Casper::open(&Location::File(banco.clone()))?;
-        portaria::decidir(&mut casper, &impressao_de(4), false)?;
+        let mut persistence = Persistence::open(&Location::File(banco.clone()))?;
+        portaria::decidir(&mut persistence, &impressao_de(4), false)?;
     }
 
     let voltou = conectar(
@@ -585,8 +585,8 @@ async fn quem_foi_recusado_ouve_outra_coisa_de_quem_so_espera() -> Result<()> {
     // E recusar não é banir: revogar a decisão devolve a pessoa à fila em vez de
     // deixá-la barrada para sempre.
     {
-        let mut casper = Casper::open(&Location::File(banco.clone()))?;
-        portaria::revogar(&mut casper, &impressao_de(4))?;
+        let mut persistence = Persistence::open(&Location::File(banco.clone()))?;
+        portaria::revogar(&mut persistence, &impressao_de(4))?;
     }
     let de_novo = conectar(
         endereco,

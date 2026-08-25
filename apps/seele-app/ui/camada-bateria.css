@@ -126,7 +126,7 @@
 .bateria-dizeres .rotulo { letter-spacing: 0.2em; }
 
 /* A frase é da casca, e é a do comp menos o nome de rota. O comp escreve
-   "Conexão com BALTHASAR perdida"; o inventário §5 classifica a frase inteira
+   "Conexão com MEDIA perdida"; o inventário §5 classifica a frase inteira
    como **F/P** — "a frase é da casca, mas nomeia uma rota que não existe".
    Tirando o nome, o que sobra é verdade inteira. */
 .bateria-frase {

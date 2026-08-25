@@ -48,7 +48,7 @@ Estes termos são obrigatórios e consistentes em toda a superfície do produto.
 | Notificação crítica | **Alerta · 警告** | |
 | Configurações | **Terminal Dogma** | |
 | Papéis | Comandante, Operador, Piloto, Observador | |
-| Subsistemas | MELCHIOR, BALTHASAR, CASPER | ver `04` |
+| Subsistemas | PERMISSIONS, MEDIA, PERSISTENCE | ver `04` |
 
 ## O elemento assinatura
 

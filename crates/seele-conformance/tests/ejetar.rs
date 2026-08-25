@@ -38,7 +38,7 @@ use seele_core::enlace::{Aviso, Destino, Enlace};
 use seele_core::{Link, MemoryPinStore};
 use seele_proto::control::ServerMessage;
 use seele_proto::ids::{CageId, ClientMessageId, LineId};
-use seele_server::casper::Location;
+use seele_server::persistence::Location;
 use seele_server::dogma::Occupant;
 use seele_server::hospedagem::Hospedagem;
 use seele_server::{DogmaConfig, Server};
@@ -290,7 +290,7 @@ async fn a_mesma_pessoa_volta_pela_tela_de_selecao() -> Result<()> {
 //
 // O motivo é estrutural, e não estatístico. `Server::bind`
 // (`seele-server/src/lib.rs:126-150`) não tem **nenhum** ponto de espera entre
-// a entrada e o `quinn::Endpoint::server`: `Casper::open`, `seed`,
+// a entrada e o `quinn::Endpoint::server`: `Persistence::open`, `seed`,
 // `Identity::load_or_create` e `tls::server_config` são todos síncronos. Numa
 // thread só, a tarefa de aceitação portanto **não tem como ser escalonada**
 // entre soltar a hospedagem e religar a porta — se o `encerrar` não a esperou,

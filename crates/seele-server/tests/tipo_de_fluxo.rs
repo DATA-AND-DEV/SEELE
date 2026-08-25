@@ -38,7 +38,7 @@ use seele_proto::attachment::AttachmentHeader;
 use seele_proto::control::{AttachmentRefusal, ClientMessage, ServerMessage};
 use seele_proto::ids::{ClientMessageId, LineId};
 use seele_proto::stream::{StreamType, RESERVED_TYPE};
-use seele_server::casper::Location;
+use seele_server::persistence::Location;
 use seele_server::{frame, DogmaConfig, Server};
 
 /// Um verificador que aceita qualquer certificado.

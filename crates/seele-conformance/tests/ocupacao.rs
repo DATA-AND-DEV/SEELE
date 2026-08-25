@@ -42,7 +42,7 @@ use anyhow::Result;
 use seele_core::enlace::{Aviso, Destino, Enlace};
 use seele_core::{MemoryPinStore, PinStore, Room};
 use seele_proto::ids::{CageId, LineId};
-use seele_server::casper::Location;
+use seele_server::persistence::Location;
 use seele_server::{DogmaConfig, Server};
 
 /// Sobe um Dogma numa porta que o sistema escolhe, com dois Cages.

@@ -404,11 +404,11 @@ pub struct LineInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Subsystem {
     /// Identity, authentication, sessions, roles, permissions.
-    Melchior,
+    Permissions,
     /// Media routing: Cage subscriptions, datagram forwarding, bandwidth.
-    Balthasar,
+    Media,
     /// Persistent state: Cages, Lines, history, configuration, migrations.
-    Casper,
+    Persistence,
 }
 
 /// How a subsystem is doing.
@@ -718,7 +718,7 @@ pub enum ClientMessage {
         ///
         /// Not in the payload column of `specs/02-protocolo.md`, and it has to
         /// be: the server answers with a nonce and then verifies a signature,
-        /// which needs a key to verify against. In M3, MELCHIOR looks this key
+        /// which needs a key to verify against. In M3, PERMISSIONS looks this key
         /// up against known accounts; in M2 there is no persistence, so proving
         /// possession of the key is all the handshake can establish.
         public_key: Vec<u8>,
@@ -825,7 +825,7 @@ pub enum ClientMessage {
     // app's `EJETAR PLUG DO OPERADOR` has been drawn and disabled since v2 for
     // exactly that reason.
     //
-    // One permission each, checked by MELCHIOR at the instant the verb is used
+    // One permission each, checked by PERMISSIONS at the instant the verb is used
     // — not from anything the handshake cached. `specs/08-seguranca.md`: "Toda
     // ação é verificada no servidor, sempre, mesmo que o cliente já esconda o
     // botão."
@@ -999,12 +999,12 @@ pub enum ClientMessage {
     // and "todo o resto sobre o Dogma"; the name and the picture of the Dogma
     // itself are not a room, and whoever may build rooms is not thereby the
     // person whose Dogma it is. Migration 1 seeds `AdministerDogma` on the
-    // Comandante alone, and `Melchior::seat_the_arrival` gives the Comandante to
+    // Comandante alone, and `Permissions::seat_the_arrival` gives the Comandante to
     // whoever connects to their own Dogma first — so this reaches exactly the
     // person who pressed the button, plus anybody they deliberately promoted.
     //
     // ADR 0032 wanted the name written through an accessor on `Hospedagem`,
-    // straight into the CASPER on the machine, with no protocol verb at all —
+    // straight into the PERSISTENCE on the machine, with no protocol verb at all —
     // the argument being that naming a Dogma is a decision for whoever holds
     // the file. That argument is sound and it answers a different question:
     // it covers the app that is hosting **in this process**, and leaves a Dogma
@@ -1123,7 +1123,7 @@ pub enum ServerMessage {
         lines: Vec<LineInfo>,
         /// Roles defined on this Dogma.
         roles: Vec<Role>,
-        /// What **this** pilot may do, as MELCHIOR resolved it.
+        /// What **this** pilot may do, as PERMISSIONS resolved it.
         ///
         /// `roles` above is the Dogma's catalogue of roles; nothing on the wire
         /// ever told a client which of them it holds, so no shell could tell
@@ -1168,7 +1168,7 @@ pub enum ServerMessage {
         author: PilotId,
         /// When the server accepted it, in **seconds** since the Unix epoch.
         ///
-        /// The unit is in the name because it was wrong once: CASPER stores
+        /// The unit is in the name because it was wrong once: PERSISTENCE stores
         /// seconds, this field was declared in milliseconds, and every real
         /// message would have been drawn as 1970 while the tests — which used
         /// synthetic milliseconds — passed.
@@ -2622,7 +2622,7 @@ mod numeric_tests {
             rtt_ms: rtt,
             jitter_ms: jitter,
             loss_fraction: loss,
-            subsystems: vec![(Subsystem::Melchior, SubsystemHealth::Nominal)],
+            subsystems: vec![(Subsystem::Permissions, SubsystemHealth::Nominal)],
         })
     }
 

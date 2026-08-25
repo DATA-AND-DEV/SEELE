@@ -38,7 +38,7 @@ use seele_proto::control::AttachmentInfo;
 use seele_proto::ids::{ClientMessageId, LineId, MessageId, PilotId};
 
 use super::attachments::Attachments;
-use super::{now_seconds, Casper};
+use super::{now_seconds, Persistence};
 
 /// Largest page a client may ask for.
 ///
@@ -126,15 +126,15 @@ pub enum MessageRefusal {
 /// *is* here, and the answer to a retry is built out of it field by field.
 type StoredRow = (i64, String, i64, Option<i64>, Option<i64>);
 
-/// Message storage, over CASPER.
+/// Message storage, over PERSISTENCE.
 pub struct Messages<'a> {
-    casper: &'a mut Casper,
+    persistence: &'a mut Persistence,
 }
 
 impl<'a> Messages<'a> {
     /// Borrows a store.
-    pub fn new(casper: &'a mut Casper) -> Self {
-        Self { casper }
+    pub fn new(persistence: &'a mut Persistence) -> Self {
+        Self { persistence }
     }
 
     /// Writes a whole batch in one transaction, and returns what was stored.
@@ -159,7 +159,7 @@ impl<'a> Messages<'a> {
 
         let now = now_seconds();
         let transaction = self
-            .casper
+            .persistence
             .connection_mut()
             .transaction()
             .context("could not open the write batch")?;
@@ -283,7 +283,7 @@ impl<'a> Messages<'a> {
         // caller: a client reading history has never seen most of these pilots
         // arrive and has no other way to learn their names, and a query per
         // message would be fifty round trips through SQLite for one page.
-        let mut statement = self.casper.connection().prepare(
+        let mut statement = self.persistence.connection().prepare(
             "SELECT m.id, m.line_id, m.author_id, m.body, m.created_at, m.edited_at,
                     m.replies_to, m.client_message_id, p.nickname
              FROM messages m
@@ -313,7 +313,7 @@ impl<'a> Messages<'a> {
         let mut page: Vec<StoredMessage> = rows.filter_map(Result::ok).collect();
         // One query for the page rather than one per row.
         let ids: Vec<MessageId> = page.iter().map(|message| message.id).collect();
-        let found = Attachments::new(self.casper).for_messages(&ids)?;
+        let found = Attachments::new(self.persistence).for_messages(&ids)?;
         for message in &mut page {
             message.attachment = found
                 .get(&message.id)
@@ -334,7 +334,7 @@ impl<'a> Messages<'a> {
     ///
     /// Fails on a database error.
     pub fn count(&self, line: LineId) -> Result<u64> {
-        let total: i64 = self.casper.connection().query_row(
+        let total: i64 = self.persistence.connection().query_row(
             "SELECT COUNT(*) FROM messages WHERE line_id = ?1 AND deleted_at IS NULL",
             params![i64::from(line.get())],
             |row| row.get(0),
@@ -350,7 +350,7 @@ impl<'a> Messages<'a> {
     /// [`MessageRefusal::NotFound`].
     pub fn edit(&self, id: MessageId, editor: PilotId, body: &str) -> Result<StoredMessage> {
         let author: Option<i64> = self
-            .casper
+            .persistence
             .connection()
             .query_row(
                 "SELECT author_id FROM messages WHERE id = ?1 AND deleted_at IS NULL",
@@ -368,7 +368,7 @@ impl<'a> Messages<'a> {
         }
 
         let now = now_seconds();
-        self.casper.connection().execute(
+        self.persistence.connection().execute(
             "UPDATE messages SET body = ?1, edited_at = ?2 WHERE id = ?3",
             params![body, now, id.get() as i64],
         )?;
@@ -386,7 +386,7 @@ impl<'a> Messages<'a> {
     ///
     /// Returns [`MessageRefusal::NotFound`] if there is no such message.
     pub fn remove(&self, id: MessageId) -> Result<()> {
-        let affected = self.casper.connection().execute(
+        let affected = self.persistence.connection().execute(
             "UPDATE messages SET body = '', deleted_at = ?1
              WHERE id = ?2 AND deleted_at IS NULL",
             params![now_seconds(), id.get() as i64],
@@ -404,7 +404,7 @@ impl<'a> Messages<'a> {
     /// Fails on a database error.
     pub fn one(&self, id: MessageId) -> Result<Option<StoredMessage>> {
         let mut found = self
-            .casper
+            .persistence
             .connection()
             .query_row(
                 "SELECT m.id, m.line_id, m.author_id, m.body, m.created_at, m.edited_at,
@@ -432,7 +432,7 @@ impl<'a> Messages<'a> {
             )
             .optional()?;
         if let Some(message) = &mut found {
-            message.attachment = Attachments::new(self.casper)
+            message.attachment = Attachments::new(self.persistence)
                 .of_message(message.id)?
                 .map(|attachment| attachment.info());
         }
@@ -453,7 +453,7 @@ impl<'a> Messages<'a> {
         }
         let cutoff = now_seconds() - i64::from(retention_days) * 86_400;
         Ok(self
-            .casper
+            .persistence
             .connection()
             .execute("DELETE FROM messages WHERE created_at < ?1", [cutoff])?)
     }
@@ -462,11 +462,11 @@ impl<'a> Messages<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::casper::Location;
+    use crate::persistence::Location;
 
-    fn store() -> Casper {
-        let casper = Casper::open(&Location::Memory).unwrap();
-        casper
+    fn store() -> Persistence {
+        let persistence = Persistence::open(&Location::Memory).unwrap();
+        persistence
             .connection()
             .execute_batch(
                 "INSERT INTO lines (id, name) VALUES (1, 'geral'), (2, 'logs');
@@ -474,7 +474,7 @@ mod tests {
                    VALUES (1, 'ayanami', X'01', 0), (2, 'shinji', X'02', 0);",
             )
             .unwrap();
-        casper
+        persistence
     }
 
     fn pending(body: &str) -> PendingMessage {
@@ -490,8 +490,8 @@ mod tests {
 
     #[test]
     fn a_batch_is_written_and_comes_back_with_ids() {
-        let mut casper = store();
-        let mut messages = Messages::new(&mut casper);
+        let mut persistence = store();
+        let mut messages = Messages::new(&mut persistence);
         let stored = messages
             .append_batch(&[pending("um"), pending("dois"), pending("três")])
             .unwrap();
@@ -503,8 +503,8 @@ mod tests {
 
     #[test]
     fn an_empty_batch_touches_nothing() {
-        let mut casper = store();
-        let mut messages = Messages::new(&mut casper);
+        let mut persistence = store();
+        let mut messages = Messages::new(&mut persistence);
         assert!(messages.append_batch(&[]).unwrap().is_empty());
     }
 
@@ -513,8 +513,8 @@ mod tests {
         // specs/02-protocolo.md: "idempotente por client_msg_id". Gap G9 gave
         // the field a home; this is what it is for. Without it, a client that
         // resends after a lost acknowledgement duplicates the message.
-        let mut casper = store();
-        let mut messages = Messages::new(&mut casper);
+        let mut persistence = store();
+        let mut messages = Messages::new(&mut persistence);
         let with_key = PendingMessage {
             client_message_id: Some(ClientMessageId(42)),
             ..pending("verificando harmônicos")
@@ -546,8 +546,8 @@ mod tests {
         // live under an id whose row on disk holds the old text. Whoever has the
         // window open and whoever opens it a minute later would be reading two
         // different messages with the same id, and nothing anywhere would say so.
-        let mut casper = store();
-        let mut messages = Messages::new(&mut casper);
+        let mut persistence = store();
+        let mut messages = Messages::new(&mut persistence);
         let key = Some(ClientMessageId(7));
 
         let first = messages
@@ -605,8 +605,8 @@ mod tests {
     fn two_authors_may_use_the_same_key() {
         // The key is the client's, not the server's. Two clients choosing 1
         // independently is ordinary and must not collide.
-        let mut casper = store();
-        let mut messages = Messages::new(&mut casper);
+        let mut persistence = store();
+        let mut messages = Messages::new(&mut persistence);
         messages
             .append_batch(&[
                 PendingMessage {
@@ -626,8 +626,8 @@ mod tests {
 
     #[test]
     fn history_comes_back_newest_first() {
-        let mut casper = store();
-        let mut messages = Messages::new(&mut casper);
+        let mut persistence = store();
+        let mut messages = Messages::new(&mut persistence);
         messages
             .append_batch(&[pending("um"), pending("dois"), pending("três")])
             .unwrap();
@@ -639,8 +639,8 @@ mod tests {
 
     #[test]
     fn the_cursor_walks_backwards_without_gaps_or_repeats() {
-        let mut casper = store();
-        let mut messages = Messages::new(&mut casper);
+        let mut persistence = store();
+        let mut messages = Messages::new(&mut persistence);
         let batch: Vec<PendingMessage> = (1..=10)
             .map(|index| pending(&format!("mensagem {index}")))
             .collect();
@@ -667,8 +667,8 @@ mod tests {
         // The reason specs/02-protocolo.md says "nunca offset". With an offset,
         // inserting at the head pushes everything down and the reader sees the
         // same message twice.
-        let mut casper = store();
-        let mut messages = Messages::new(&mut casper);
+        let mut persistence = store();
+        let mut messages = Messages::new(&mut persistence);
         messages
             .append_batch(
                 &(1..=6)
@@ -694,8 +694,8 @@ mod tests {
 
     #[test]
     fn lines_do_not_leak_into_each_other() {
-        let mut casper = store();
-        let mut messages = Messages::new(&mut casper);
+        let mut persistence = store();
+        let mut messages = Messages::new(&mut persistence);
         messages
             .append_batch(&[
                 pending("geral"),
@@ -715,8 +715,8 @@ mod tests {
     fn a_page_is_bounded_however_much_is_asked_for() {
         // One FetchHistory must not be able to ask for a reply larger than the
         // frame it has to fit in.
-        let mut casper = store();
-        let mut messages = Messages::new(&mut casper);
+        let mut persistence = store();
+        let mut messages = Messages::new(&mut persistence);
         let batch: Vec<PendingMessage> = (0..300).map(|i| pending(&format!("{i}"))).collect();
         messages.append_batch(&batch).unwrap();
 
@@ -729,8 +729,8 @@ mod tests {
         // Editing is not moderation. Even a Commander does not get to put words
         // in somebody else's mouth — removal is the moderation tool, and it is
         // visible as removal.
-        let mut casper = store();
-        let mut messages = Messages::new(&mut casper);
+        let mut persistence = store();
+        let mut messages = Messages::new(&mut persistence);
         let stored = messages.append_batch(&[pending("original")]).unwrap();
         let id = stored.first().map(|m| m.id).unwrap();
 
@@ -744,8 +744,8 @@ mod tests {
     fn a_removed_message_leaves_history_but_not_its_body() {
         // Soft delete: a hard one would break every reply pointing at it, and
         // specs/02-protocolo.md has replies.
-        let mut casper = store();
-        let mut messages = Messages::new(&mut casper);
+        let mut persistence = store();
+        let mut messages = Messages::new(&mut persistence);
         let stored = messages
             .append_batch(&[pending("apagar"), pending("fica")])
             .unwrap();
@@ -756,7 +756,7 @@ mod tests {
         assert_eq!(messages.history(LineId(1), None, 50).unwrap().len(), 1);
         assert!(messages.one(id).unwrap().is_none());
         // The row survives, so a reply pointing at it still resolves.
-        let count: i64 = casper
+        let count: i64 = persistence
             .connection()
             .query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))
             .unwrap();
@@ -765,8 +765,8 @@ mod tests {
 
     #[test]
     fn removing_twice_is_refused_rather_than_silently_fine() {
-        let mut casper = store();
-        let mut messages = Messages::new(&mut casper);
+        let mut persistence = store();
+        let mut messages = Messages::new(&mut persistence);
         let stored = messages.append_batch(&[pending("um")]).unwrap();
         let id = stored.first().map(|m| m.id).unwrap();
 
@@ -776,8 +776,8 @@ mod tests {
 
     #[test]
     fn a_reply_keeps_pointing_at_its_parent() {
-        let mut casper = store();
-        let mut messages = Messages::new(&mut casper);
+        let mut persistence = store();
+        let mut messages = Messages::new(&mut persistence);
         let parent = messages.append_batch(&[pending("pergunta")]).unwrap();
         let parent_id = parent.first().map(|m| m.id).unwrap();
 
@@ -796,18 +796,18 @@ mod tests {
         // Joined once for the page rather than asked per row: a screenful is
         // fifty round trips through SQLite otherwise, and the shell has no way
         // to know a message has a file until it is told.
-        use crate::casper::attachments::Attachments;
+        use crate::persistence::attachments::Attachments;
 
-        let mut casper = store();
-        let stored = Messages::new(&mut casper)
+        let mut persistence = store();
+        let stored = Messages::new(&mut persistence)
             .append_batch(&[pending("com foto"), pending("sem nada")])
             .unwrap();
         let com_foto = stored[0].id;
-        Attachments::new(&casper)
+        Attachments::new(&persistence)
             .record(com_foto, &"a".repeat(64), "foto.png", "image/png", 2_048)
             .unwrap();
 
-        let page = Messages::new(&mut casper)
+        let page = Messages::new(&mut persistence)
             .history(LineId(1), None, 50)
             .unwrap();
         let com = page.iter().find(|m| m.id == com_foto).expect("a mensagem");
@@ -833,19 +833,19 @@ mod tests {
         // the row is not, and the page carries the name and the size with a
         // state that says «expirou». A `None` here would draw as a message with
         // nothing in it, and nobody would learn a file had been there.
-        use crate::casper::attachments::Attachments;
+        use crate::persistence::attachments::Attachments;
 
-        let mut casper = store();
-        let stored = Messages::new(&mut casper)
+        let mut persistence = store();
+        let stored = Messages::new(&mut persistence)
             .append_batch(&[pending("olha isto")])
             .unwrap();
         let id = stored[0].id;
-        let anexo = Attachments::new(&casper)
+        let anexo = Attachments::new(&persistence)
             .record(id, &"b".repeat(64), "recibo.pdf", "application/pdf", 900)
             .unwrap();
-        Attachments::new(&casper).expire(anexo.id).unwrap();
+        Attachments::new(&persistence).expire(anexo.id).unwrap();
 
-        let page = Messages::new(&mut casper)
+        let page = Messages::new(&mut persistence)
             .history(LineId(1), None, 50)
             .unwrap();
         let mensagem = page.first().expect("a mensagem continua no histórico");
@@ -867,8 +867,8 @@ mod tests {
         // specs/04-servidor-seele.md defaults to unlimited. A sweep that deleted
         // anything at the default would be a data-loss bug in a config nobody
         // touched.
-        let mut casper = store();
-        let mut messages = Messages::new(&mut casper);
+        let mut persistence = store();
+        let mut messages = Messages::new(&mut persistence);
         messages.append_batch(&[pending("um")]).unwrap();
         assert_eq!(messages.prune(0).unwrap(), 0);
         assert_eq!(messages.history(LineId(1), None, 50).unwrap().len(), 1);
@@ -883,8 +883,8 @@ mod tests {
         let location = Location::File(directory.path().join("dogma.db"));
 
         {
-            let mut casper = Casper::open(&location).unwrap();
-            casper
+            let mut persistence = Persistence::open(&location).unwrap();
+            persistence
                 .connection()
                 .execute_batch(
                     "INSERT INTO lines (id, name) VALUES (1, 'geral');
@@ -892,14 +892,14 @@ mod tests {
                        VALUES (1, 'ayanami', X'01', 0);",
                 )
                 .unwrap();
-            let mut messages = Messages::new(&mut casper);
+            let mut messages = Messages::new(&mut persistence);
             messages
                 .append_batch(&[pending("sobrevive ao reinício")])
                 .unwrap();
         }
 
-        let mut casper = Casper::open(&location).unwrap();
-        let messages = Messages::new(&mut casper);
+        let mut persistence = Persistence::open(&location).unwrap();
+        let messages = Messages::new(&mut persistence);
         let history = messages.history(LineId(1), None, 50).unwrap();
         assert_eq!(history.len(), 1);
         assert_eq!(

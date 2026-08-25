@@ -39,7 +39,7 @@ use std::time::Duration;
 use anyhow::Result;
 use ed25519_dalek::{Signer, SigningKey};
 use seele_proto::control::{AlertReason, ClientMessage, ServerMessage, MAX_DOGMA_ICON_SIDE};
-use seele_server::casper::Location;
+use seele_server::persistence::Location;
 use seele_server::{frame, DogmaConfig, Server};
 
 /// Quanto se espera por um quadro que tem de vir.
@@ -135,7 +135,7 @@ struct Par {
 /// `semente` é a chave: a mesma semente é a mesma pessoa, o que é o que permite
 /// a um teste reconectar depois do reinício como quem hospeda, e não como um
 /// estranho. A primeira conta criada num Dogma vira a Comandante — ver
-/// `melchior::seat_the_arrival` —, então a semente que abrir primeiro é a de
+/// `permissions::seat_the_arrival` —, então a semente que abrir primeiro é a de
 /// quem administra.
 async fn abrir(endereco: SocketAddr, semente: u8) -> Result<Par> {
     let _ = rustls::crypto::ring::default_provider().install_default();

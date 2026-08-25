@@ -1,4 +1,4 @@
-//! MELCHIOR — identity, roles, permissions and bans.
+//! PERMISSIONS — identity, roles, permissions and bans.
 //!
 //! `specs/04-servidor-seele.md`:
 //!
@@ -33,7 +33,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use seele_proto::control::Permission;
 use seele_proto::ids::{PilotId, RoleId};
 
-use crate::casper::{now_seconds, Casper};
+use crate::persistence::{now_seconds, Persistence};
 
 /// The Comandante role, seeded by migration 1.
 pub const COMMANDER_ROLE: RoleId = RoleId(1);
@@ -44,7 +44,7 @@ pub const PILOT_ROLE: RoleId = RoleId(3);
 /// The Observador role: may listen and read, and nothing else.
 pub const OBSERVER_ROLE: RoleId = RoleId(4);
 
-/// A pilot as MELCHIOR knows them.
+/// A pilot as PERMISSIONS knows them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pilot {
     /// Account identifier.
@@ -118,17 +118,17 @@ fn name_to_permission(name: &str) -> Option<Permission> {
     })
 }
 
-/// Identity and authorisation, over CASPER.
-pub struct Melchior<'a> {
+/// Identity and authorisation, over PERSISTENCE.
+pub struct Permissions<'a> {
     connection: &'a Connection,
 }
 
-impl<'a> Melchior<'a> {
+impl<'a> Permissions<'a> {
     /// Borrows a store.
     #[must_use]
-    pub fn new(casper: &'a Casper) -> Self {
+    pub fn new(persistence: &'a Persistence) -> Self {
         Self {
-            connection: casper.connection(),
+            connection: persistence.connection(),
         }
     }
 
@@ -169,7 +169,7 @@ impl<'a> Melchior<'a> {
             // tela dizendo por quê. Encontrado num teste entre duas máquinas —
             // a pessoa trocou de nome e a outra continuou vendo o antigo.
             //
-            // O histórico acompanha sozinho: `casper::messages` resolve o autor
+            // O histórico acompanha sozinho: `persistence::messages` resolve o autor
             // por `JOIN pilots` e lê o nome de agora, em vez de guardar uma
             // cópia por mensagem. Uma mensagem antiga passa a ser exibida com o
             // nome novo, que é o que uma pessoa espera de «mudei meu nome».
@@ -566,7 +566,7 @@ impl<'a> Melchior<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::casper::Location;
+    use crate::persistence::Location;
 
     const COMMANDER: RoleId = COMMANDER_ROLE;
     const OPERATOR: RoleId = OPERATOR_ROLE;
@@ -590,8 +590,8 @@ mod tests {
         Permission::AttachFile,
     ];
 
-    fn store() -> Casper {
-        Casper::open(&Location::Memory).unwrap()
+    fn store() -> Persistence {
+        Persistence::open(&Location::Memory).unwrap()
     }
 
     /// An account holding exactly one named role, whatever it arrived with.
@@ -601,15 +601,15 @@ mod tests {
     /// added a role would hand back a Comandante whenever it happened to be
     /// called first — and the permission matrix below would pass for the wrong
     /// reason, which is the worst way for it to pass.
-    fn pilot_with(casper: &Casper, nickname: &str, key: u8, role: RoleId) -> PilotId {
-        let melchior = Melchior::new(casper);
-        let pilot = melchior.register_or_find(&[key; 32], nickname).unwrap();
+    fn pilot_with(persistence: &Persistence, nickname: &str, key: u8, role: RoleId) -> PilotId {
+        let permissions = Permissions::new(persistence);
+        let pilot = permissions.register_or_find(&[key; 32], nickname).unwrap();
         for held in [COMMANDER, OPERATOR, PILOT, OBSERVER] {
             if held != role {
-                melchior.revoke_role(pilot.id, held).unwrap();
+                permissions.revoke_role(pilot.id, held).unwrap();
             }
         }
-        melchior.grant_role(pilot.id, role).unwrap();
+        permissions.grant_role(pilot.id, role).unwrap();
         pilot.id
     }
 
@@ -617,10 +617,10 @@ mod tests {
     fn a_key_gets_the_same_account_every_time() {
         // ADR 0004 makes the key the identity, so a returning pilot must find
         // their own history rather than a new empty account.
-        let casper = store();
-        let melchior = Melchior::new(&casper);
-        let first = melchior.register_or_find(&[7; 32], "ayanami").unwrap();
-        let second = melchior.register_or_find(&[7; 32], "ayanami").unwrap();
+        let persistence = store();
+        let permissions = Permissions::new(&persistence);
+        let first = permissions.register_or_find(&[7; 32], "ayanami").unwrap();
+        let second = permissions.register_or_find(&[7; 32], "ayanami").unwrap();
         assert_eq!(first.id, second.id);
     }
 
@@ -628,10 +628,10 @@ mod tests {
     fn a_different_key_cannot_take_a_nickname() {
         // Otherwise anybody could claim somebody else's name and inherit how the
         // room reads their messages.
-        let casper = store();
-        let melchior = Melchior::new(&casper);
-        melchior.register_or_find(&[7; 32], "ayanami").unwrap();
-        assert!(melchior.register_or_find(&[8; 32], "ayanami").is_err());
+        let persistence = store();
+        let permissions = Permissions::new(&persistence);
+        permissions.register_or_find(&[7; 32], "ayanami").unwrap();
+        assert!(permissions.register_or_find(&[8; 32], "ayanami").is_err());
     }
 
     #[test]
@@ -640,11 +640,11 @@ mod tests {
         // this, migration 1 seeds a Comandante role that no account can ever
         // hold, and ManageCages / ManageRoles / AdministerDogma are unreachable
         // by construction — every verb behind them dead on arrival.
-        let casper = store();
-        let melchior = Melchior::new(&casper);
-        let anfitriao = melchior.register_or_find(&[1; 32], "anfitriao").unwrap();
+        let persistence = store();
+        let permissions = Permissions::new(&persistence);
+        let anfitriao = permissions.register_or_find(&[1; 32], "anfitriao").unwrap();
         assert_eq!(anfitriao.roles, vec![COMMANDER]);
-        assert!(melchior.may(anfitriao.id, Permission::ManageCages).unwrap());
+        assert!(permissions.may(anfitriao.id, Permission::ManageCages).unwrap());
     }
 
     #[test]
@@ -654,14 +654,14 @@ mod tests {
         // mensagens e no roster. O pedido era descartado em silêncio, e não
         // havia nada na tela dizendo por quê.
         //
-        // O histórico acompanha sem trabalho nenhum: `casper::messages` resolve
+        // O histórico acompanha sem trabalho nenhum: `persistence::messages` resolve
         // o autor por `JOIN pilots`, então o nome exibido é o de agora e não uma
         // cópia congelada por mensagem.
-        let casper = store();
-        let melchior = Melchior::new(&casper);
+        let persistence = store();
+        let permissions = Permissions::new(&persistence);
 
-        let antes = melchior.register_or_find(&[1; 32], "piloto").unwrap();
-        let depois = melchior.register_or_find(&[1; 32], "ikari").unwrap();
+        let antes = permissions.register_or_find(&[1; 32], "piloto").unwrap();
+        let depois = permissions.register_or_find(&[1; 32], "ikari").unwrap();
 
         assert_eq!(depois.id, antes.id, "trocar de nome criou uma conta nova");
         assert_eq!(
@@ -677,17 +677,17 @@ mod tests {
         // renomear seria o caminho para herdar como outra pessoa é chamada — e
         // a proteção que existe na criação de conta seria contornável por
         // qualquer um que já tivesse uma.
-        let casper = store();
-        let melchior = Melchior::new(&casper);
+        let persistence = store();
+        let permissions = Permissions::new(&persistence);
 
-        melchior.register_or_find(&[1; 32], "ikari").unwrap();
-        let outra = melchior.register_or_find(&[2; 32], "ayanami").unwrap();
+        permissions.register_or_find(&[1; 32], "ikari").unwrap();
+        let outra = permissions.register_or_find(&[2; 32], "ayanami").unwrap();
 
         assert!(
-            melchior.register_or_find(&[2; 32], "ikari").is_err(),
+            permissions.register_or_find(&[2; 32], "ikari").is_err(),
             "uma conta renomeou-se para o nome de outra pessoa"
         );
-        let ainda = melchior.register_or_find(&[2; 32], "ayanami").unwrap();
+        let ainda = permissions.register_or_find(&[2; 32], "ayanami").unwrap();
         assert_eq!(
             ainda.nickname, outra.nickname,
             "a tentativa recusada mexeu no nome de quem tentou"
@@ -709,9 +709,9 @@ mod tests {
         // revogando o comando de uma conta nova seria outro caso — aquele deixa
         // a marca, e a marca é justamente o que impede a revogação de ser
         // desfeita.
-        let casper = store();
-        let melchior = Melchior::new(&casper);
-        casper
+        let persistence = store();
+        let permissions = Permissions::new(&persistence);
+        persistence
             .connection()
             .execute(
                 "INSERT INTO pilots (nickname, public_key, created_at, last_seen_at)
@@ -719,8 +719,8 @@ mod tests {
                 [&[1u8; 32][..]],
             )
             .unwrap();
-        let antigo = casper.connection().last_insert_rowid();
-        casper
+        let antigo = persistence.connection().last_insert_rowid();
+        persistence
             .connection()
             .execute(
                 "INSERT INTO pilot_roles (pilot_id, role_id) VALUES (?1, ?2)",
@@ -728,13 +728,13 @@ mod tests {
             )
             .unwrap();
 
-        let de_volta = melchior.register_or_find(&[1; 32], "anfitriao").unwrap();
+        let de_volta = permissions.register_or_find(&[1; 32], "anfitriao").unwrap();
         assert!(
             de_volta.roles.contains(&COMMANDER),
             "uma conta anterior ao comando não conseguiu assumi-lo, e o Dogma fica \
              inadministrável para sempre: {de_volta:?}"
         );
-        assert!(melchior.may(de_volta.id, Permission::ManageCages).unwrap());
+        assert!(permissions.may(de_volta.id, Permission::ManageCages).unwrap());
     }
 
     #[test]
@@ -743,13 +743,13 @@ mod tests {
         // vago» desfaria toda revogação na reconexão seguinte, e a revogação
         // viraria decoração. Um teste vizinho já dizia isso; este diz por que a
         // marca é o que separa os dois casos.
-        let casper = store();
-        let melchior = Melchior::new(&casper);
-        let dono = melchior.register_or_find(&[1; 32], "anfitriao").unwrap();
+        let persistence = store();
+        let permissions = Permissions::new(&persistence);
+        let dono = permissions.register_or_find(&[1; 32], "anfitriao").unwrap();
         assert!(dono.roles.contains(&COMMANDER));
 
-        melchior.revoke_role(dono.id, COMMANDER).unwrap();
-        let de_novo = melchior.register_or_find(&[1; 32], "anfitriao").unwrap();
+        permissions.revoke_role(dono.id, COMMANDER).unwrap();
+        let de_novo = permissions.register_or_find(&[1; 32], "anfitriao").unwrap();
         assert!(
             !de_novo.roles.contains(&COMMANDER),
             "reconectar desfez a revogação: {de_novo:?}"
@@ -761,11 +761,11 @@ mod tests {
         // The half that makes the rule a rule. "First account is Comandante"
         // implemented as "every account is Comandante" passes the test above and
         // hands the Dogma to whoever walks in.
-        let casper = store();
-        let melchior = Melchior::new(&casper);
-        melchior.register_or_find(&[1; 32], "anfitriao").unwrap();
+        let persistence = store();
+        let permissions = Permissions::new(&persistence);
+        permissions.register_or_find(&[1; 32], "anfitriao").unwrap();
 
-        let convidado = melchior.register_or_find(&[2; 32], "shinji").unwrap();
+        let convidado = permissions.register_or_find(&[2; 32], "shinji").unwrap();
         assert_eq!(convidado.roles, vec![PILOT]);
         for permission in [
             Permission::ManageCages,
@@ -773,7 +773,7 @@ mod tests {
             Permission::AdministerDogma,
         ] {
             assert!(
-                !melchior.may(convidado.id, permission).unwrap(),
+                !permissions.may(convidado.id, permission).unwrap(),
                 "the second account arrived holding {permission:?}"
             );
         }
@@ -789,7 +789,7 @@ mod tests {
         // done in Rust before the insert, which would race.
         let directory = tempfile::tempdir().unwrap();
         let file = directory.path().join("dogma.db");
-        Casper::open(&Location::File(file.clone())).unwrap();
+        Persistence::open(&Location::File(file.clone())).unwrap();
 
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
         let chegantes: Vec<_> = [(1_u8, "ayanami"), (2_u8, "shinji")]
@@ -798,9 +798,9 @@ mod tests {
                 let file = file.clone();
                 let barrier = std::sync::Arc::clone(&barrier);
                 std::thread::spawn(move || {
-                    let casper = Casper::open(&Location::File(file)).unwrap();
+                    let persistence = Persistence::open(&Location::File(file)).unwrap();
                     barrier.wait();
-                    Melchior::new(&casper)
+                    Permissions::new(&persistence)
                         .register_or_find(&[key; 32], nickname)
                         .unwrap()
                         .roles
@@ -831,12 +831,12 @@ mod tests {
         // as well as the create path would let the second pilot take the seat
         // the moment the first one's account was deleted mid-session — and, more
         // ordinarily, would re-grant a role an operator had just revoked.
-        let casper = store();
-        let melchior = Melchior::new(&casper);
-        let anfitriao = melchior.register_or_find(&[1; 32], "anfitriao").unwrap();
-        melchior.revoke_role(anfitriao.id, COMMANDER).unwrap();
+        let persistence = store();
+        let permissions = Permissions::new(&persistence);
+        let anfitriao = permissions.register_or_find(&[1; 32], "anfitriao").unwrap();
+        permissions.revoke_role(anfitriao.id, COMMANDER).unwrap();
 
-        let de_novo = melchior.register_or_find(&[1; 32], "anfitriao").unwrap();
+        let de_novo = permissions.register_or_find(&[1; 32], "anfitriao").unwrap();
         assert!(de_novo.roles.is_empty(), "roles came back: {de_novo:?}");
     }
 
@@ -849,9 +849,9 @@ mod tests {
     #[test]
     fn an_observer_is_denied_every_permission_it_should_not_have() {
         // specs/04: Observador is "só ouvir e ler".
-        let casper = store();
-        let observer = pilot_with(&casper, "observador", 4, OBSERVER);
-        let melchior = Melchior::new(&casper);
+        let persistence = store();
+        let observer = pilot_with(&persistence, "observador", 4, OBSERVER);
+        let permissions = Permissions::new(&persistence);
 
         let allowed = [
             Permission::ViewCage,
@@ -861,7 +861,7 @@ mod tests {
         for permission in ALL {
             let expected = allowed.contains(permission);
             assert_eq!(
-                melchior.may(observer, *permission).unwrap(),
+                permissions.may(observer, *permission).unwrap(),
                 expected,
                 "observer and {permission:?}"
             );
@@ -870,9 +870,9 @@ mod tests {
 
     #[test]
     fn a_pilot_is_denied_every_moderation_permission() {
-        let casper = store();
-        let pilot = pilot_with(&casper, "ayanami", 1, PILOT);
-        let melchior = Melchior::new(&casper);
+        let persistence = store();
+        let pilot = pilot_with(&persistence, "ayanami", 1, PILOT);
+        let permissions = Permissions::new(&persistence);
 
         let denied = [
             Permission::RemoveMessage,
@@ -885,7 +885,7 @@ mod tests {
         ];
         for permission in denied {
             assert!(
-                !melchior.may(pilot, permission).unwrap(),
+                !permissions.may(pilot, permission).unwrap(),
                 "a pilot should not have {permission:?}"
             );
         }
@@ -894,25 +894,25 @@ mod tests {
     #[test]
     fn an_operator_moderates_but_does_not_administer() {
         // The line specs/04 draws between Operador and Comandante.
-        let casper = store();
-        let operator = pilot_with(&casper, "operador", 2, OPERATOR);
-        let melchior = Melchior::new(&casper);
+        let persistence = store();
+        let operator = pilot_with(&persistence, "operador", 2, OPERATOR);
+        let permissions = Permissions::new(&persistence);
 
-        assert!(melchior.may(operator, Permission::Kick).unwrap());
-        assert!(melchior.may(operator, Permission::Ban).unwrap());
-        assert!(!melchior.may(operator, Permission::ManageCages).unwrap());
-        assert!(!melchior.may(operator, Permission::ManageRoles).unwrap());
-        assert!(!melchior.may(operator, Permission::AdministerDogma).unwrap());
+        assert!(permissions.may(operator, Permission::Kick).unwrap());
+        assert!(permissions.may(operator, Permission::Ban).unwrap());
+        assert!(!permissions.may(operator, Permission::ManageCages).unwrap());
+        assert!(!permissions.may(operator, Permission::ManageRoles).unwrap());
+        assert!(!permissions.may(operator, Permission::AdministerDogma).unwrap());
     }
 
     #[test]
     fn a_commander_has_everything() {
-        let casper = store();
-        let commander = pilot_with(&casper, "comandante", 9, COMMANDER);
-        let melchior = Melchior::new(&casper);
+        let persistence = store();
+        let commander = pilot_with(&persistence, "comandante", 9, COMMANDER);
+        let permissions = Permissions::new(&persistence);
         for permission in ALL {
             assert!(
-                melchior.may(commander, *permission).unwrap(),
+                permissions.may(commander, *permission).unwrap(),
                 "commander lacks {permission:?}"
             );
         }
@@ -923,36 +923,36 @@ mod tests {
         // specs/04-servidor-seele.md: "permissões negadas vencem concedidas".
         // Without an explicit denial the sentence has nothing to mean, and
         // giving somebody Observer alongside Pilot would quietly do nothing.
-        let casper = store();
-        let pilot = pilot_with(&casper, "silenciado", 3, PILOT);
-        let melchior = Melchior::new(&casper);
-        assert!(melchior.may(pilot, Permission::Speak).unwrap());
+        let persistence = store();
+        let pilot = pilot_with(&persistence, "silenciado", 3, PILOT);
+        let permissions = Permissions::new(&persistence);
+        assert!(permissions.may(pilot, Permission::Speak).unwrap());
 
-        melchior.grant_role(pilot, OBSERVER).unwrap();
+        permissions.grant_role(pilot, OBSERVER).unwrap();
 
         assert!(
-            !melchior.may(pilot, Permission::Speak).unwrap(),
+            !permissions.may(pilot, Permission::Speak).unwrap(),
             "the Observer denial did not beat the Pilot grant"
         );
         // And the permissions the two roles agree on survive.
-        assert!(melchior.may(pilot, Permission::ReadLine).unwrap());
+        assert!(permissions.may(pilot, Permission::ReadLine).unwrap());
     }
 
     #[test]
     fn a_ban_beats_every_permission() {
-        let casper = store();
-        let commander = pilot_with(&casper, "comandante", 9, COMMANDER);
-        let target = pilot_with(&casper, "ayanami", 1, PILOT);
-        let melchior = Melchior::new(&casper);
+        let persistence = store();
+        let commander = pilot_with(&persistence, "comandante", 9, COMMANDER);
+        let target = pilot_with(&persistence, "ayanami", 1, PILOT);
+        let permissions = Permissions::new(&persistence);
 
-        assert!(melchior.may(target, Permission::Speak).unwrap());
-        melchior
+        assert!(permissions.may(target, Permission::Speak).unwrap());
+        permissions
             .ban(target, commander, Some("flooding"), None)
             .unwrap();
 
         for permission in ALL {
             assert!(
-                !melchior.may(target, *permission).unwrap(),
+                !permissions.may(target, *permission).unwrap(),
                 "a banned pilot kept {permission:?}"
             );
         }
@@ -962,67 +962,67 @@ mod tests {
     fn banning_needs_the_permission_to_ban() {
         // specs/08-seguranca.md: every action verified on the server. The check
         // lives inside `ban` so no future caller can forget it.
-        let casper = store();
-        let ordinary = pilot_with(&casper, "ayanami", 1, PILOT);
-        let target = pilot_with(&casper, "shinji", 2, PILOT);
-        let melchior = Melchior::new(&casper);
+        let persistence = store();
+        let ordinary = pilot_with(&persistence, "ayanami", 1, PILOT);
+        let target = pilot_with(&persistence, "shinji", 2, PILOT);
+        let permissions = Permissions::new(&persistence);
 
-        assert!(melchior.ban(target, ordinary, None, None).is_err());
-        assert!(!melchior.is_banned(target).unwrap());
+        assert!(permissions.ban(target, ordinary, None, None).is_err());
+        assert!(!permissions.is_banned(target).unwrap());
     }
 
     #[test]
     fn an_expired_ban_stops_applying() {
-        let casper = store();
-        let commander = pilot_with(&casper, "comandante", 9, COMMANDER);
-        let target = pilot_with(&casper, "ayanami", 1, PILOT);
-        let melchior = Melchior::new(&casper);
+        let persistence = store();
+        let commander = pilot_with(&persistence, "comandante", 9, COMMANDER);
+        let target = pilot_with(&persistence, "ayanami", 1, PILOT);
+        let permissions = Permissions::new(&persistence);
 
-        melchior
+        permissions
             .ban(target, commander, None, Some(now_seconds() - 1))
             .unwrap();
-        assert!(!melchior.is_banned(target).unwrap());
-        assert!(melchior.may(target, Permission::Speak).unwrap());
+        assert!(!permissions.is_banned(target).unwrap());
+        assert!(permissions.may(target, Permission::Speak).unwrap());
     }
 
     #[test]
     fn a_ban_can_be_lifted() {
-        let casper = store();
-        let commander = pilot_with(&casper, "comandante", 9, COMMANDER);
-        let target = pilot_with(&casper, "ayanami", 1, PILOT);
-        let melchior = Melchior::new(&casper);
+        let persistence = store();
+        let commander = pilot_with(&persistence, "comandante", 9, COMMANDER);
+        let target = pilot_with(&persistence, "ayanami", 1, PILOT);
+        let permissions = Permissions::new(&persistence);
 
-        melchior.ban(target, commander, None, None).unwrap();
-        assert!(melchior.is_banned(target).unwrap());
+        permissions.ban(target, commander, None, None).unwrap();
+        assert!(permissions.is_banned(target).unwrap());
 
-        melchior.unban(target, commander).unwrap();
-        assert!(!melchior.is_banned(target).unwrap());
-        assert!(melchior.may(target, Permission::Speak).unwrap());
+        permissions.unban(target, commander).unwrap();
+        assert!(!permissions.is_banned(target).unwrap());
+        assert!(permissions.may(target, Permission::Speak).unwrap());
     }
 
     #[test]
     fn a_pilot_with_no_roles_can_do_nothing() {
         // The default has to be denial. A pilot whose roles were all revoked
         // must not fall through to some implicit baseline.
-        let casper = store();
-        let pilot = pilot_with(&casper, "sem-papel", 5, PILOT);
-        let melchior = Melchior::new(&casper);
-        melchior.revoke_role(pilot, PILOT).unwrap();
+        let persistence = store();
+        let pilot = pilot_with(&persistence, "sem-papel", 5, PILOT);
+        let permissions = Permissions::new(&persistence);
+        permissions.revoke_role(pilot, PILOT).unwrap();
 
         for permission in ALL {
             assert!(
-                !melchior.may(pilot, *permission).unwrap(),
+                !permissions.may(pilot, *permission).unwrap(),
                 "a roleless pilot had {permission:?}"
             );
         }
-        assert!(melchior.permissions(pilot).unwrap().is_empty());
+        assert!(permissions.permissions(pilot).unwrap().is_empty());
     }
 
     #[test]
     fn an_unknown_pilot_is_refused_rather_than_defaulted() {
-        let casper = store();
-        let melchior = Melchior::new(&casper);
-        assert!(melchior.pilot(PilotId(9999)).is_err());
-        assert!(!melchior.may(PilotId(9999), Permission::Speak).unwrap());
+        let persistence = store();
+        let permissions = Permissions::new(&persistence);
+        assert!(permissions.pilot(PilotId(9999)).is_err());
+        assert!(!permissions.may(PilotId(9999), Permission::Speak).unwrap());
     }
 }

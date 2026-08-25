@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use seele_ffi::{ConnectConfig, Event, EventListener, Pattern, Plug, PlugError, Trust};
-use seele_server::casper::Location;
+use seele_server::persistence::Location;
 use seele_server::{DogmaConfig, Server};
 
 const CAGE: u32 = 1;

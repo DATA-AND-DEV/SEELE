@@ -55,7 +55,7 @@ use anyhow::Result;
 use seele_core::{Client, MemoryPinStore};
 use seele_proto::control::ServerMessage;
 use seele_proto::ids::{CageId, ClientMessageId, LineId};
-use seele_server::casper::Location;
+use seele_server::persistence::Location;
 use seele_server::{DogmaConfig, Server};
 
 const CAGE: u32 = 1;

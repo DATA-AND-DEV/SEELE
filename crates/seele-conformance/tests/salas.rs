@@ -15,7 +15,7 @@
 //! produzir: o `Alert` com `PermissionDenied` volta; o **Comandante conectado
 //! ao lado não recebe `CageCreated` nenhum**, o que prova que a sala não foi
 //! feita em lugar nenhum; e um aperto de mão novo não a encontra, o que prova
-//! que ela não foi feita nem no CASPER.
+//! que ela não foi feita nem no PERSISTENCE.
 //!
 //! # 2. Quem hospeda vira Comandante, e só quem hospeda
 //!
@@ -45,7 +45,7 @@ use seele_core::enlace::{Aviso, Destino, Enlace};
 use seele_core::{MemoryPinStore, PinStore};
 use seele_proto::control::{AlertReason, Permission, ServerMessage};
 use seele_proto::ids::{CageId, LineId};
-use seele_server::casper::Location;
+use seele_server::persistence::Location;
 use seele_server::{DogmaConfig, Server};
 
 /// Sobe um Dogma numa porta que o sistema escolhe.
@@ -231,7 +231,7 @@ async fn uma_sala_criada_aparece_para_quem_ja_estava_conectado() -> Result<()> {
         "a Linha nova não chegou à testemunha"
     );
 
-    // E ela está no CASPER, não só no fio: quem chegar depois a encontra sem
+    // E ela está no PERSISTENCE, não só no fio: quem chegar depois a encontra sem
     // ninguém ter de repetir o anúncio.
     let depois = conectar(endereco, 48, "asuka").await?;
     let nomes: Vec<&str> = depois
@@ -295,7 +295,7 @@ async fn um_piloto_sem_manage_cages_e_recusado_pelo_dogma_e_nao_pela_casca() -> 
         "a sala do intruso foi anunciada a quem estava conectado"
     );
 
-    // Três: nem no CASPER. Um aperto de mão novo é a leitura mais crua que
+    // Três: nem no PERSISTENCE. Um aperto de mão novo é a leitura mais crua que
     // existe da árvore de canais.
     let depois = conectar(endereco, 48, "asuka").await?;
     let nomes: Vec<&str> = depois

@@ -26,7 +26,7 @@
 //!
 //! # Nothing here checks a permission
 //!
-//! On purpose, and it is the opposite of the choice [`crate::melchior::Melchior::ban`]
+//! On purpose, and it is the opposite of the choice [`crate::permissions::Permissions::ban`]
 //! makes. A ban is a single verb with a single caller; a room is written by the
 //! session handler, by [`crate::seed`] at boot, and by tests, and only the first
 //! of those has a pilot to check. The check therefore lives at the one call site
@@ -38,7 +38,7 @@ use rusqlite::{params, Connection};
 use seele_proto::control::{CageInfo, LineInfo};
 use seele_proto::ids::{CageId, LineId};
 
-/// The channel tree, over CASPER.
+/// The channel tree, over PERSISTENCE.
 pub struct Channels<'a> {
     connection: &'a Connection,
 }
@@ -46,9 +46,9 @@ pub struct Channels<'a> {
 impl<'a> Channels<'a> {
     /// Borrows a store.
     #[must_use]
-    pub fn new(casper: &'a super::Casper) -> Self {
+    pub fn new(persistence: &'a super::Persistence) -> Self {
         Self {
-            connection: casper.connection(),
+            connection: persistence.connection(),
         }
     }
 
@@ -325,7 +325,7 @@ impl<'a> Channels<'a> {
         let id = i64::from(line.get());
         // `unchecked_transaction` because [`Channels`] borrows the connection
         // immutably, like every other method here. The nesting it does not
-        // check for cannot happen: CASPER is one connection behind one mutex,
+        // check for cannot happen: PERSISTENCE is one connection behind one mutex,
         // and this is the only place that opens a transaction on it outside the
         // migration runner, which runs before anybody is connected.
         let transaction = self.connection.unchecked_transaction()?;
@@ -389,26 +389,26 @@ pub struct LineWeight {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::casper::{Casper, Location};
+    use crate::persistence::{Persistence, Location};
 
-    fn store() -> Casper {
-        Casper::open(&Location::Memory).unwrap()
+    fn store() -> Persistence {
+        Persistence::open(&Location::Memory).unwrap()
     }
 
     #[test]
     fn a_fresh_store_has_no_rooms_until_somebody_makes_one() {
         // The starting point, and the reason this module exists: the tables were
         // there and nothing outside a test block ever wrote to them.
-        let casper = store();
-        let channels = Channels::new(&casper);
+        let persistence = store();
+        let channels = Channels::new(&persistence);
         assert!(channels.cages().unwrap().is_empty());
         assert!(channels.lines().unwrap().is_empty());
     }
 
     #[test]
     fn a_created_cage_reads_back_the_way_it_was_asked_for() {
-        let casper = store();
-        let channels = Channels::new(&casper);
+        let persistence = store();
+        let channels = Channels::new(&persistence);
         let line = channels.create_line("geral").unwrap();
         let cage = channels
             .create_cage("CAGE-01 CENTRAL", 15, Some(line.id))
@@ -428,8 +428,8 @@ mod tests {
         // Without an explicit `position` this is whatever the query planner
         // feels like, and a channel list that reshuffles between two sessions is
         // a channel list nobody can build a habit around.
-        let casper = store();
-        let channels = Channels::new(&casper);
+        let persistence = store();
+        let channels = Channels::new(&persistence);
         for name in ["geral", "avisos", "planejamento"] {
             channels.create_line(name).unwrap();
         }
@@ -447,8 +447,8 @@ mod tests {
         // The foreign key would stop it too, but it would stop it as a database
         // error — indistinguishable from the disk being full, and useless to the
         // person who mistyped a number.
-        let casper = store();
-        let channels = Channels::new(&casper);
+        let persistence = store();
+        let channels = Channels::new(&persistence);
         let refused = channels.create_cage("CAGE-02", 8, Some(LineId(404)));
         assert!(refused
             .unwrap_err()
@@ -462,8 +462,8 @@ mod tests {
 
     #[test]
     fn renaming_something_that_is_not_there_says_so() {
-        let casper = store();
-        let channels = Channels::new(&casper);
+        let persistence = store();
+        let channels = Channels::new(&persistence);
         assert!(channels
             .rename_cage(CageId(404), "fantasma")
             .unwrap_err()
@@ -480,8 +480,8 @@ mod tests {
     fn a_rename_keeps_the_identifier_and_the_place_in_the_list() {
         // A rename that moved the room to the end of the list would look, to
         // everybody watching, like the room was destroyed and a new one made.
-        let casper = store();
-        let channels = Channels::new(&casper);
+        let persistence = store();
+        let channels = Channels::new(&persistence);
         channels.create_line("geral").unwrap();
         let segunda = channels.create_line("avisos").unwrap();
 
@@ -497,19 +497,19 @@ mod tests {
     // ---- unmaking a room ----
 
     /// A pilot to hang messages on, since `messages.author_id` is a real key.
-    fn pilot(casper: &Casper, nickname: &str, key: u8) -> i64 {
-        casper
+    fn pilot(persistence: &Persistence, nickname: &str, key: u8) -> i64 {
+        persistence
             .connection()
             .execute(
                 "INSERT INTO pilots (nickname, public_key, created_at) VALUES (?1, ?2, 0)",
                 params![nickname, [key; 32]],
             )
             .unwrap();
-        casper.connection().last_insert_rowid()
+        persistence.connection().last_insert_rowid()
     }
 
-    fn say(casper: &Casper, line: LineId, author: i64, body: &str, at: i64) -> i64 {
-        casper
+    fn say(persistence: &Persistence, line: LineId, author: i64, body: &str, at: i64) -> i64 {
+        persistence
             .connection()
             .execute(
                 "INSERT INTO messages (line_id, author_id, body, created_at)
@@ -517,27 +517,27 @@ mod tests {
                 params![i64::from(line.get()), author, body, at],
             )
             .unwrap();
-        casper.connection().last_insert_rowid()
+        persistence.connection().last_insert_rowid()
     }
 
     #[test]
     fn the_weight_of_a_line_is_counted_and_never_guessed() {
         // The number in the confirmation is this number. Three writers, five
         // messages, and the oldest one is the date the sentence gives.
-        let casper = store();
-        let channels = Channels::new(&casper);
+        let persistence = store();
+        let channels = Channels::new(&persistence);
         let line = channels.create_line("sync-geral").unwrap();
         let outra = channels.create_line("avisos").unwrap();
 
-        let rei = pilot(&casper, "rei", 1);
-        let shinji = pilot(&casper, "shinji", 2);
-        let asuka = pilot(&casper, "asuka", 3);
-        say(&casper, line.id, rei, "primeira", 1_678_600_000);
-        say(&casper, line.id, rei, "segunda", 1_678_600_060);
-        say(&casper, line.id, shinji, "terceira", 1_678_600_120);
-        say(&casper, line.id, asuka, "quarta", 1_678_600_180);
+        let rei = pilot(&persistence, "rei", 1);
+        let shinji = pilot(&persistence, "shinji", 2);
+        let asuka = pilot(&persistence, "asuka", 3);
+        say(&persistence, line.id, rei, "primeira", 1_678_600_000);
+        say(&persistence, line.id, rei, "segunda", 1_678_600_060);
+        say(&persistence, line.id, shinji, "terceira", 1_678_600_120);
+        say(&persistence, line.id, asuka, "quarta", 1_678_600_180);
         // Noutra Linha, e portanto em nenhuma destas contas.
-        say(&casper, outra.id, asuka, "noutra sala", 1_600_000_000);
+        say(&persistence, outra.id, asuka, "noutra sala", 1_600_000_000);
 
         let peso = channels.weigh_line(line.id).unwrap();
         assert_eq!(peso.messages, 4);
@@ -551,13 +551,13 @@ mod tests {
         // and an operator can still answer what was removed. It is gone from
         // every screen, though, so counting it would tell somebody they are
         // about to destroy writing that nobody can read.
-        let casper = store();
-        let channels = Channels::new(&casper);
+        let persistence = store();
+        let channels = Channels::new(&persistence);
         let line = channels.create_line("geral").unwrap();
-        let rei = pilot(&casper, "rei", 1);
-        say(&casper, line.id, rei, "fica", 100);
-        let removida = say(&casper, line.id, rei, "removida", 50);
-        casper
+        let rei = pilot(&persistence, "rei", 1);
+        say(&persistence, line.id, rei, "fica", 100);
+        let removida = say(&persistence, line.id, rei, "removida", 50);
+        persistence
             .connection()
             .execute(
                 "UPDATE messages SET body = '', deleted_at = 1 WHERE id = ?1",
@@ -576,8 +576,8 @@ mod tests {
     fn an_empty_line_weighs_nothing_and_has_no_date_to_give() {
         // The one case the sentence cannot be written the usual way: there is
         // no "written since" when nobody wrote.
-        let casper = store();
-        let channels = Channels::new(&casper);
+        let persistence = store();
+        let channels = Channels::new(&persistence);
         let line = channels.create_line("nova").unwrap();
         let peso = channels.weigh_line(line.id).unwrap();
         assert_eq!(peso.messages, 0);
@@ -587,8 +587,8 @@ mod tests {
 
     #[test]
     fn weighing_something_that_is_not_there_says_so() {
-        let casper = store();
-        assert!(Channels::new(&casper)
+        let persistence = store();
+        assert!(Channels::new(&persistence)
             .weigh_line(LineId(404))
             .unwrap_err()
             .downcast_ref::<NoSuchChannel>()
@@ -600,15 +600,15 @@ mod tests {
         // Really destroys it, which is the decision this whole path is built
         // around: not archived, not hidden from a list. A row left behind would
         // make the confirmation's last sentence false.
-        let casper = store();
-        let channels = Channels::new(&casper);
+        let persistence = store();
+        let channels = Channels::new(&persistence);
         let line = channels.create_line("geral").unwrap();
-        let rei = pilot(&casper, "rei", 1);
-        say(&casper, line.id, rei, "some junto", 100);
+        let rei = pilot(&persistence, "rei", 1);
+        say(&persistence, line.id, rei, "some junto", 100);
 
         channels.delete_line(line.id).unwrap();
         assert!(channels.lines().unwrap().is_empty());
-        let left: i64 = casper
+        let left: i64 = persistence
             .connection()
             .query_row(
                 "SELECT COUNT(*) FROM messages WHERE line_id = ?1",
@@ -625,8 +625,8 @@ mod tests {
         // room outlives the Line it pointed at. Without the unbinding, the
         // foreign key refuses the delete and the shell shows the sentence it
         // shows when the disk is full.
-        let casper = store();
-        let channels = Channels::new(&casper);
+        let persistence = store();
+        let channels = Channels::new(&persistence);
         let line = channels.create_line("geral").unwrap();
         let cage = channels.create_cage("CAGE-01", 8, Some(line.id)).unwrap();
 
@@ -642,13 +642,13 @@ mod tests {
         // `messages.replies_to` has no `ON DELETE`, so one cross-Line reply is
         // enough to make the cascade fail — and nothing on the wire stops a
         // client sending one. Found here rather than in front of somebody.
-        let casper = store();
-        let channels = Channels::new(&casper);
+        let persistence = store();
+        let channels = Channels::new(&persistence);
         let condenada = channels.create_line("condenada").unwrap();
         let outra = channels.create_line("outra").unwrap();
-        let rei = pilot(&casper, "rei", 1);
-        let alvo = say(&casper, condenada.id, rei, "original", 100);
-        casper
+        let rei = pilot(&persistence, "rei", 1);
+        let alvo = say(&persistence, condenada.id, rei, "original", 100);
+        persistence
             .connection()
             .execute(
                 "INSERT INTO messages (line_id, author_id, body, created_at, replies_to)
@@ -658,7 +658,7 @@ mod tests {
             .unwrap();
 
         channels.delete_line(condenada.id).unwrap();
-        let pendurada: Option<i64> = casper
+        let pendurada: Option<i64> = persistence
             .connection()
             .query_row(
                 "SELECT replies_to FROM messages WHERE line_id = ?1",
@@ -675,8 +675,8 @@ mod tests {
         // channel list with no voice room in it cannot tell a working Dogma from
         // a broken one. Refused with its own error, so the shell can say "make
         // another room first" instead of "check the identifier".
-        let casper = store();
-        let channels = Channels::new(&casper);
+        let persistence = store();
+        let channels = Channels::new(&persistence);
         let unica = channels.create_cage("CAGE-01", 8, None).unwrap();
 
         assert!(channels
@@ -700,13 +700,13 @@ mod tests {
         // going away is no statement about the writing hanging off it, and
         // taking the Line with it would destroy history through a verb whose
         // confirmation never mentioned any.
-        let casper = store();
-        let channels = Channels::new(&casper);
+        let persistence = store();
+        let channels = Channels::new(&persistence);
         let line = channels.create_line("geral").unwrap();
         let cage = channels.create_cage("CAGE-01", 8, Some(line.id)).unwrap();
         channels.create_cage("CAGE-02", 8, None).unwrap();
-        let rei = pilot(&casper, "rei", 1);
-        say(&casper, line.id, rei, "sobrevive", 100);
+        let rei = pilot(&persistence, "rei", 1);
+        say(&persistence, line.id, rei, "sobrevive", 100);
 
         channels.delete_cage(cage.id).unwrap();
         assert_eq!(channels.weigh_line(line.id).unwrap().messages, 1);
@@ -715,8 +715,8 @@ mod tests {
 
     #[test]
     fn destroying_a_cage_that_is_not_there_says_so() {
-        let casper = store();
-        let channels = Channels::new(&casper);
+        let persistence = store();
+        let channels = Channels::new(&persistence);
         channels.create_cage("CAGE-01", 8, None).unwrap();
         channels.create_cage("CAGE-02", 8, None).unwrap();
         assert!(channels
@@ -736,8 +736,8 @@ mod tests {
         // A name is trimmed once, here, rather than by each shell that draws it:
         // " geral" and "geral" sorting apart in a list is the kind of thing
         // nobody can see and everybody trips over.
-        let casper = store();
-        let channels = Channels::new(&casper);
+        let persistence = store();
+        let channels = Channels::new(&persistence);
         let line = channels.create_line("  geral \n").unwrap();
         assert_eq!(line.name, "geral");
         assert_eq!(channels.lines().unwrap()[0].name, "geral");

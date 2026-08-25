@@ -24,7 +24,7 @@ use ratatui::Terminal;
 use seele_core::{Client, MemoryPinStore, Room};
 use seele_proto::ids::{CageId, ClientMessageId, LineId};
 use seele_proto::ServerMessage;
-use seele_server::casper::Location;
+use seele_server::persistence::Location;
 use seele_server::{DogmaConfig, Server};
 use seele_tui::app::{App, Key, Mode, Screen};
 use seele_tui::theme::{Palette, Theme};

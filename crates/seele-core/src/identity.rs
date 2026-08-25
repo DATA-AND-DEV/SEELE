@@ -2,7 +2,7 @@
 //!
 //! ADR 0004 makes identity an Ed25519 key pair. What it did not say is where
 //! the key lives, and until M3 it did not matter: with no accounts, a fresh key
-//! every run was simply a fresh pilot every run. CASPER changed that. A Dogma
+//! every run was simply a fresh pilot every run. PERSISTENCE changed that. A Dogma
 //! now binds a nickname to the identity that first claimed it, so a client that
 //! forgets its key cannot come back — the server refuses the second connection
 //! with "nickname belongs to a different identity", which is exactly the
@@ -185,7 +185,7 @@ mod tests {
     #[test]
     fn an_identity_survives_the_process_that_made_it() {
         // The whole point. Without this the same nickname cannot be reclaimed
-        // from the same machine, because CASPER binds it to the first key.
+        // from the same machine, because PERSISTENCE binds it to the first key.
         let dir = scratch("survives");
         let path = dir.join("identity.key");
 

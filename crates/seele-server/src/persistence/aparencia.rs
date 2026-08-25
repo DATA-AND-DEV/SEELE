@@ -19,7 +19,7 @@
 //! # O que aqui **não** se confere
 //!
 //! Permissão. Este módulo escreve; quem pergunta se pode é [`crate::session`],
-//! no instante em que o verbo é usado, pelo MELCHIOR — a mesma divisão que
+//! no instante em que o verbo é usado, pelo PERMISSIONS — a mesma divisão que
 //! [`super::channels`] explica no cabeçalho dele, e pelo mesmo motivo: o
 //! arranque e os testes também escrevem aqui, e nenhum dos dois tem piloto para
 //! conferir.
@@ -33,7 +33,7 @@
 use anyhow::Result;
 use rusqlite::{params, OptionalExtension};
 
-use super::Casper;
+use super::Persistence;
 
 /// Onde o nome escolhido mora na tabela `configuracao`.
 pub const CHAVE_NOME: &str = "dogma_nome";
@@ -57,8 +57,8 @@ pub const CHAVE_ICONE: &str = "dogma_icone";
 /// # Errors
 ///
 /// Falha se o banco não responder.
-pub fn nome(casper: &Casper, padrao: &str) -> Result<String> {
-    let escolhido: Option<String> = casper
+pub fn nome(persistence: &Persistence, padrao: &str) -> Result<String> {
+    let escolhido: Option<String> = persistence
         .connection()
         .query_row(
             "SELECT valor FROM configuracao WHERE chave = ?1",
@@ -85,10 +85,10 @@ pub fn nome(casper: &Casper, padrao: &str) -> Result<String> {
 /// # Errors
 ///
 /// Falha se o nome for branco, ou se o banco não responder.
-pub fn definir_nome(casper: &Casper, nome: &str) -> Result<String> {
+pub fn definir_nome(persistence: &Persistence, nome: &str) -> Result<String> {
     let nome = nome.trim();
     anyhow::ensure!(!nome.is_empty(), "o nome do Dogma não pode ser branco");
-    casper.connection().execute(
+    persistence.connection().execute(
         "INSERT INTO configuracao (chave, valor) VALUES (?1, ?2)
          ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor",
         params![CHAVE_NOME, nome],
@@ -101,8 +101,8 @@ pub fn definir_nome(casper: &Casper, nome: &str) -> Result<String> {
 /// # Errors
 ///
 /// Falha se o banco não responder.
-pub fn icone(casper: &Casper) -> Result<Option<Vec<u8>>> {
-    let guardado: Option<Vec<u8>> = casper
+pub fn icone(persistence: &Persistence) -> Result<Option<Vec<u8>>> {
+    let guardado: Option<Vec<u8>> = persistence
         .connection()
         .query_row(
             "SELECT valor FROM configuracao WHERE chave = ?1",
@@ -127,8 +127,8 @@ pub fn icone(casper: &Casper) -> Result<Option<Vec<u8>>> {
 /// # Errors
 ///
 /// Falha se o banco não responder.
-pub fn definir_icone(casper: &Casper, icone: Option<&[u8]>) -> Result<()> {
-    let conexao = casper.connection();
+pub fn definir_icone(persistence: &Persistence, icone: Option<&[u8]>) -> Result<()> {
+    let conexao = persistence.connection();
     match icone {
         Some(bytes) => {
             conexao.execute(
@@ -155,85 +155,85 @@ pub fn definir_icone(casper: &Casper, icone: Option<&[u8]>) -> Result<()> {
 )]
 mod testes {
     use super::*;
-    use crate::casper::Location;
+    use crate::persistence::Location;
 
-    fn memoria() -> Casper {
-        Casper::open(&Location::Memory).expect("banco em memória")
+    fn memoria() -> Persistence {
+        Persistence::open(&Location::Memory).expect("banco em memória")
     }
 
     #[test]
     fn sem_escolha_vale_o_nome_do_arranque() {
-        let casper = memoria();
-        assert_eq!(nome(&casper, "Casa").unwrap(), "Casa");
+        let persistence = memoria();
+        assert_eq!(nome(&persistence, "Casa").unwrap(), "Casa");
     }
 
     #[test]
     fn o_nome_escolhido_vence_o_do_arranque() {
-        let casper = memoria();
-        definir_nome(&casper, "Terceira Tóquio").unwrap();
-        assert_eq!(nome(&casper, "Casa").unwrap(), "Terceira Tóquio");
+        let persistence = memoria();
+        definir_nome(&persistence, "Terceira Tóquio").unwrap();
+        assert_eq!(nome(&persistence, "Casa").unwrap(), "Terceira Tóquio");
     }
 
     #[test]
     fn o_nome_e_aparado_antes_de_ser_gravado() {
-        let casper = memoria();
+        let persistence = memoria();
         assert_eq!(
-            definir_nome(&casper, "  Terceira Tóquio \n").unwrap(),
+            definir_nome(&persistence, "  Terceira Tóquio \n").unwrap(),
             "Terceira Tóquio"
         );
-        assert_eq!(nome(&casper, "Casa").unwrap(), "Terceira Tóquio");
+        assert_eq!(nome(&persistence, "Casa").unwrap(), "Terceira Tóquio");
     }
 
     #[test]
     fn um_nome_branco_e_recusado() {
         // Um cabeçalho com nada dentro é uma coisa que ninguém consegue citar em
         // voz alta — a mesma razão que `check_name` dá sobre um Cage.
-        let casper = memoria();
+        let persistence = memoria();
         for branco in ["", "   ", "\t\n"] {
             assert!(
-                definir_nome(&casper, branco).is_err(),
+                definir_nome(&persistence, branco).is_err(),
                 "aceitou o nome branco {branco:?}"
             );
         }
-        assert_eq!(nome(&casper, "Casa").unwrap(), "Casa");
+        assert_eq!(nome(&persistence, "Casa").unwrap(), "Casa");
     }
 
     #[test]
     fn um_nome_branco_escrito_a_mao_no_banco_nao_chega_a_uma_tela() {
         // `definir_nome` recusa, mas quem tem o arquivo tem um `sqlite3`. O
         // padrão é melhor que um cabeçalho vazio.
-        let casper = memoria();
-        casper
+        let persistence = memoria();
+        persistence
             .connection()
             .execute(
                 "INSERT INTO configuracao (chave, valor) VALUES (?1, '   ')",
                 params![CHAVE_NOME],
             )
             .unwrap();
-        assert_eq!(nome(&casper, "Casa").unwrap(), "Casa");
+        assert_eq!(nome(&persistence, "Casa").unwrap(), "Casa");
     }
 
     #[test]
     fn um_dogma_sem_icone_diz_que_nao_tem() {
-        let casper = memoria();
-        assert_eq!(icone(&casper).unwrap(), None);
+        let persistence = memoria();
+        assert_eq!(icone(&persistence).unwrap(), None);
     }
 
     #[test]
     fn o_icone_gravado_volta_byte_a_byte() {
-        let casper = memoria();
+        let persistence = memoria();
         let bytes = vec![0x89, b'P', b'N', b'G', 1, 2, 3, 4, 5];
-        definir_icone(&casper, Some(&bytes)).unwrap();
-        assert_eq!(icone(&casper).unwrap(), Some(bytes));
+        definir_icone(&persistence, Some(&bytes)).unwrap();
+        assert_eq!(icone(&persistence).unwrap(), Some(bytes));
     }
 
     #[test]
     fn trocar_o_icone_nao_deixa_o_anterior_para_tras() {
-        let casper = memoria();
-        definir_icone(&casper, Some(&[1, 2, 3])).unwrap();
-        definir_icone(&casper, Some(&[9, 9])).unwrap();
-        assert_eq!(icone(&casper).unwrap(), Some(vec![9, 9]));
-        let linhas: i64 = casper
+        let persistence = memoria();
+        definir_icone(&persistence, Some(&[1, 2, 3])).unwrap();
+        definir_icone(&persistence, Some(&[9, 9])).unwrap();
+        assert_eq!(icone(&persistence).unwrap(), Some(vec![9, 9]));
+        let linhas: i64 = persistence
             .connection()
             .query_row(
                 "SELECT COUNT(*) FROM configuracao WHERE chave = ?1",
@@ -248,12 +248,12 @@ mod testes {
     fn tirar_o_icone_apaga_a_linha_em_vez_de_esvazia_la() {
         // Senão a tabela ganha um terceiro estado — «existe e está vazio» — que
         // todo leitor teria de distinguir de «não existe».
-        let casper = memoria();
-        definir_icone(&casper, Some(&[1, 2, 3])).unwrap();
-        definir_icone(&casper, None).unwrap();
+        let persistence = memoria();
+        definir_icone(&persistence, Some(&[1, 2, 3])).unwrap();
+        definir_icone(&persistence, None).unwrap();
 
-        assert_eq!(icone(&casper).unwrap(), None);
-        let linhas: i64 = casper
+        assert_eq!(icone(&persistence).unwrap(), None);
+        let linhas: i64 = persistence
             .connection()
             .query_row(
                 "SELECT COUNT(*) FROM configuracao WHERE chave = ?1",
@@ -273,13 +273,13 @@ mod testes {
         let bytes = vec![0x89, b'P', b'N', b'G', 7, 7, 7];
 
         {
-            let casper = Casper::open(&arquivo).unwrap();
-            definir_nome(&casper, "Terceira Tóquio").unwrap();
-            definir_icone(&casper, Some(&bytes)).unwrap();
+            let persistence = Persistence::open(&arquivo).unwrap();
+            definir_nome(&persistence, "Terceira Tóquio").unwrap();
+            definir_icone(&persistence, Some(&bytes)).unwrap();
         }
 
-        let casper = Casper::open(&arquivo).unwrap();
-        assert_eq!(nome(&casper, "Casa").unwrap(), "Terceira Tóquio");
-        assert_eq!(icone(&casper).unwrap(), Some(bytes));
+        let persistence = Persistence::open(&arquivo).unwrap();
+        assert_eq!(nome(&persistence, "Casa").unwrap(), "Terceira Tóquio");
+        assert_eq!(icone(&persistence).unwrap(), Some(bytes));
     }
 }

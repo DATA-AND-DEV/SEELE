@@ -1,4 +1,4 @@
-//! BALTHASAR encaminha a tela, como já encaminha a voz.
+//! MEDIA encaminha a tela, como já encaminha a voz.
 //!
 //! `docs/superpowers/specs/2026-08-22-compartilhamento-de-tela-design.md` §5.1,
 //! decidido em 22/08/2026: **o servidor encaminha.** A alternativa B pedia um
