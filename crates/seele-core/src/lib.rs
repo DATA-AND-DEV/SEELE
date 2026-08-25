@@ -26,6 +26,7 @@
 
 pub mod battery;
 pub mod bomba;
+pub mod caminho;
 pub mod chegada;
 pub mod client;
 pub mod conhecidos;
@@ -47,6 +48,12 @@ pub use bomba::{
     escoar, ligar, Arranjo, Bomba, Contagem, Escoadouro, EventoDaBomba, Ordem, QuadroParaOFio,
     NOME_DA_THREAD,
 };
+/// A medida do caminho de subida de quem compartilha.
+///
+/// Reexportada porque é a resposta à pergunta 2 do §8 da spec de tela, e quem
+/// desenha o painel de uma transmissão precisa poder dizer de onde o teto veio
+/// — um número medido e um número suposto merecem frases diferentes.
+pub use caminho::{Amostra as AmostraDoCaminho, Sonda, Transporte as TransporteDoCaminho};
 pub use client::{
     AttachmentRequest, Client, ConnectError, FlowControl, MediaChannel, Pattern, Previewed, Sent,
     SessionInfo, Transfers,

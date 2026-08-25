@@ -79,20 +79,23 @@ use thiserror::Error;
 /// que desperdiça tela.
 pub const FRACAO_DO_CAMINHO: u32 = 60;
 
-/// O caminho que se assume enquanto ninguém mediu, em bits por segundo.
+/// O caminho por onde se **começa** enquanto ninguém mediu, em bits por segundo.
 ///
-/// **Isto é uma hipótese, e está escrita como hipótese de propósito.** O §8
-/// pergunta 2 continua aberta — *«como se mede o caminho quando ninguém está
-/// enchendo?»* — e o produto hoje não tem resposta: o sinal da voz diz que está
-/// bom a 40 kbps, e não diz quanto cabe. Subir devagar até doer é o que todo
-/// mundo faz e é o que faz a voz doer.
+/// **Isto era a resposta e passou a ser o ponto de partida.** O §8 pergunta 2 —
+/// *«como se mede o caminho quando ninguém está enchendo?»* — ficou aberta
+/// enquanto o produto só sabia medir o sinal da voz, que diz que está bom a
+/// 40 kbps e não diz quanto cabe. A resposta acabou sendo curta: **enquanto a
+/// tela transmite, alguém está enchendo, e é a tela.** Quem mede é a
+/// [`crate::caminho::Sonda`], sobre os contadores que o `quinn` já mantém, e o
+/// cabeçalho daquele módulo tem a conta inteira — inclusive por que a medida
+/// tem de ser o que a janela **carregou**, e não o valor em que doeu.
 ///
-/// Então se assume o caminho sobre o qual as duas provas rodaram, 2000 kbps de
-/// subida, que dá o teto de 1200 kbps que `spikes/tela-no-codec` usou em todas
-/// as linhas. Assumir o cano da prova é a única suposição com número atrás;
-/// qualquer outra seria inventada. Quem tiver menos que isso descobre pela
-/// única medida que o produto de fato faz — o sinal da voz —, e é o que
-/// [`TetoDeVideo::teto`] usa para baixar e para parar.
+/// O que fica aqui é de onde a sonda parte: o caminho sobre o qual as duas
+/// provas rodaram, 2000 kbps de subida, que dá o teto de 1200 kbps que
+/// `spikes/tela-no-codec` usou em todas as linhas. Continua sendo a única
+/// suposição com número atrás, e continua valendo em três lugares —
+/// [`TetoDeVideo::novo`], a perna de quem hospeda enquanto o `HostUplink` não
+/// chega, e o primeiro instante de uma sessão, antes da primeira janela cheia.
 pub const CAMINHO_DA_PROVA_BPS: u32 = 2_000_000;
 
 /// Abaixo deste teto o compartilhamento **para**, em bits por segundo.
@@ -270,10 +273,13 @@ impl TetoDeVideo {
     /// O teto sobre o caminho de subida de **quem compartilha**, em bits por
     /// segundo.
     ///
-    /// **Nada no produto chama isto ainda**, e é honesto que assim seja: o §8
-    /// pergunta 2 é a pergunta de onde este número viria. Existe para o dia em
-    /// que existir, e para que a fração seja fração de algo em vez de virar um
-    /// literal escondido.
+    /// **O número vem da [`crate::caminho::Sonda`]**, que o mede enquanto a tela
+    /// enche o cano — era a pergunta 2 do §8, e este construtor foi escrito para
+    /// o dia em que ela tivesse resposta. Quem chama são
+    /// [`crate::state::Room::teto_de_video`] e o motor do `crate::enlace`, e o
+    /// que a sonda devolve antes da primeira janela cheia é exatamente
+    /// [`CAMINHO_DA_PROVA_BPS`] — de modo que a primeira transmissão de uma
+    /// sessão abre com o mesmo teto de sempre.
     #[must_use]
     pub const fn com_caminho(caminho_bps: u32) -> Self {
         Self {

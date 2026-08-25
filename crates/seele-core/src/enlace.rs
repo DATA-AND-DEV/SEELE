@@ -171,9 +171,7 @@ impl std::fmt::Debug for Aviso {
                 .field("chave", chave)
                 .field("bytes", &bytes.len())
                 .finish(),
-            Self::TelaFechou { tela } => {
-                f.debug_struct("TelaFechou").field("tela", tela).finish()
-            }
+            Self::TelaFechou { tela } => f.debug_struct("TelaFechou").field("tela", tela).finish(),
             Self::Encerrado(motivo) => f.debug_tuple("Encerrado").field(motivo).finish(),
         }
     }
@@ -939,6 +937,7 @@ impl Enlace {
             faixa: FAIXA_INICIAL,
             caminho_de_quem_hospeda_bps: None,
             espectadores: 0,
+            caminho: crate::caminho::Sonda::nova(),
         };
         let tarefa = tokio::spawn(motor.rodar(comandos_rx));
 
@@ -1478,6 +1477,19 @@ struct Motor {
     caminho_de_quem_hospeda_bps: Option<u32>,
     /// Quantos estão assistindo, como o `ScreenViewers` contou. O N do §5.1.
     espectadores: u32,
+    /// A subida **desta** máquina, medida enquanto a tela enche.
+    ///
+    /// Era a perna que faltava, e a falta estava escrita no lugar dela: o teto
+    /// respondia ao `HostUplink`, ao número de espectadores e à faixa da voz, e
+    /// para o caminho de quem compartilha usava a suposição de
+    /// `crate::tela::CAMINHO_DA_PROVA_BPS` — 2 Mbps do cano em que os spikes
+    /// rodaram. Quem tinha menos que isso descobria pela voz doendo; quem tinha
+    /// mais nunca descobria, e olhava 720p numa casa onde cabia 1080p.
+    ///
+    /// Quem mede é a [`crate::caminho::Sonda`], e quem a alimenta é este motor,
+    /// na tica que ele já tem — ver [`Motor::medir_o_caminho`]. Era a pergunta
+    /// 2 do §8.
+    caminho: crate::caminho::Sonda,
 }
 
 /// Uma transmissão desta pessoa que está no ar.
@@ -1624,6 +1636,9 @@ impl Motor {
 
     /// Um passo da bateria. Devolve `true` quando a sessão acabou.
     async fn passo(&mut self) -> bool {
+        // Antes da bateria, e não depois: o passo pode encerrar a sessão, e uma
+        // leitura depois disso seria contra um cliente que já foi embora.
+        self.medir_o_caminho();
         let agora = self.inicio.elapsed();
         match self.bateria.poll(agora) {
             Action::SendPing => {
@@ -1652,6 +1667,11 @@ impl Motor {
     /// A conexão morreu. Entra na bateria e conta para a casca.
     fn cair(&mut self) {
         self.cliente = None;
+        // Os contadores do `quinn` morrem com a conexão, e a janela aberta
+        // contra eles daria uma medida absurda na conexão seguinte. O que se
+        // aprendeu sobre a casa desta pessoa fica: quem cai e volta em cinco
+        // segundos volta para o mesmo cano.
+        self.caminho.esquecer_a_conexao();
         // **Uma bomba que sobrevive ao enlace é uma thread codificando para uma
         // conexão morta**, e ela não pararia sozinha: a captura continua
         // entregando quadros e `escoar` só descobre a queda no próximo fluxo
@@ -1941,6 +1961,7 @@ impl Motor {
                 // empréstimo de `self.cliente` que ainda está vivo na linha
                 // abaixo, e um método pegaria `self` inteiro.
                 self.espectadores = 0;
+                self.caminho.esquecer_a_conexao();
                 matar(self.tela_viva.take());
                 cliente.stop_screen_share().await
             }
@@ -2010,7 +2031,6 @@ impl Motor {
             _ => {}
         }
     }
-
 }
 
 /// A espera de uma fila que pode não existir.
@@ -2131,11 +2151,13 @@ impl Motor {
                 // transmissão a quem a produziu, e com razão.
                 let espelho = |visto: crate::bomba::EspelhoDaTela<'_>| {
                     let aviso = match visto {
-                        crate::bomba::EspelhoDaTela::Abriu { largura, altura } => Aviso::TelaAbriu {
-                            tela,
-                            largura,
-                            altura,
-                        },
+                        crate::bomba::EspelhoDaTela::Abriu { largura, altura } => {
+                            Aviso::TelaAbriu {
+                                tela,
+                                largura,
+                                altura,
+                            }
+                        }
                         crate::bomba::EspelhoDaTela::Quadro { chave, bytes } => Aviso::TelaQuadro {
                             tela,
                             chave,
@@ -2207,19 +2229,46 @@ impl Motor {
         });
     }
 
-    /// O teto de agora, com as pernas do §5.1 que este motor consegue ver.
+    /// O teto de agora, com as três pernas do §5.1.
     ///
-    /// Duas das três: a de quem hospeda chega pelo `HostUplink`, e o N pelo
-    /// `ScreenViewers`. A terceira — o caminho de subida **desta** máquina —
-    /// continua sendo o cano das provas, que é a pergunta 2 do §8 e não uma
-    /// omissão desta função.
+    /// As três, enfim: a de quem hospeda chega pelo `HostUplink`, o N pelo
+    /// `ScreenViewers`, e a de quem compartilha sai da [`crate::caminho::Sonda`]
+    /// — que é a pergunta 2 do §8 respondida, e não mais o cano das provas
+    /// assumido para sempre. Enquanto a sonda não mediu nada, ela devolve
+    /// exatamente aquela suposição, então a primeira transmissão de uma sessão
+    /// abre com o mesmo teto de antes.
     fn teto_de_video(&self, escolha_bps: Option<u32>) -> crate::tela::TetoDeVideo {
-        let mut teto = crate::tela::TetoDeVideo::novo();
+        let mut teto = crate::tela::TetoDeVideo::com_caminho(self.caminho.estimativa());
         if let Some(medido) = self.caminho_de_quem_hospeda_bps {
             teto = teto.com_caminho_de_quem_hospeda(medido);
         }
         teto.com_espectadores(self.espectadores)
             .com_escolha(escolha_bps)
+    }
+
+    /// Uma leitura do transporte para a sonda, e a ordem para a bomba quando a
+    /// estimativa andou.
+    ///
+    /// Chamado em toda volta do laço, que é cinco vezes por segundo — a janela
+    /// de amostragem é da sonda, não daqui, e ler mais vezes que o necessário
+    /// custa uma cópia de contadores.
+    ///
+    /// **Só enquanto esta pessoa está compartilhando**, e a condição é a medida
+    /// inteira: sem transmissão não há quem encha o cano, e o que sairia pelo
+    /// soquete seria a voz — que diz que está bom a 40 kbps e não diz quanto
+    /// cabe. É a frase do §8 pergunta 2, e é por isso que a resposta é a tela.
+    fn medir_o_caminho(&mut self) {
+        let (Some(cliente), Some(viva)) = (self.cliente.as_ref(), self.tela_viva.as_ref()) else {
+            return;
+        };
+        let amostra = crate::caminho::Amostra {
+            transporte: cliente.amostra_do_transporte(),
+            teto: self.teto_de_video(viva.limites.banda_bps).teto(self.faixa),
+            faixa: self.faixa,
+        };
+        if self.caminho.observar(Instant::now(), &amostra).is_some() {
+            self.reconferir_o_teto();
+        }
     }
 
     /// Conta à bomba que o teto andou.
@@ -2240,6 +2289,10 @@ impl Motor {
         // faria a próxima nascer dividindo a perna de quem hospeda pelo público
         // da anterior — um teto apertado sem que ninguém estivesse assistindo.
         self.espectadores = 0;
+        // E a janela da sonda também: entre esta transmissão e a próxima o cano
+        // fica vazio, e uma janela que atravessasse esse buraco mediria o
+        // silêncio. A estimativa fica — o cano é o mesmo.
+        self.caminho.esquecer_a_conexao();
         matar(self.tela_viva.take());
     }
 
@@ -3433,6 +3486,80 @@ mod tests {
         );
     }
 
+    /// **A perna que faltava no teto, ligada.**
+    ///
+    /// O motor usava `TetoDeVideo::novo()` para a perna de quem compartilha, o
+    /// que quer dizer o cano das provas — 2 Mbps — para sempre, em toda casa.
+    /// Quem tinha fibra via 720p a sessão inteira. Agora aquela perna sai da
+    /// [`crate::caminho::Sonda`], e este teste é o fio entre as duas: janelas
+    /// cheias e calmas entram, e o teto que sai da mesma função sobe.
+    #[test]
+    fn o_teto_sai_do_caminho_que_a_sonda_mediu_e_nao_da_suposicao() {
+        use crate::caminho::{Amostra, Transporte};
+        use crate::tela::Teto;
+
+        let mut motor = motor_de_teste();
+        // O Dogma declarou uma subida larga, então a perna dele sai da frente e
+        // quem manda no `min` do §5.1 é a desta máquina. Sem isto o teto ficaria
+        // preso em 1200 kbps por causa da **outra** perna, que é um achado
+        // separado — ver `caminho::tests::sem_a_subida_do_dogma_...`.
+        motor.caminho_de_quem_hospeda_bps = Some(100_000_000);
+
+        // Antes de medir, a suposição de sempre: a primeira transmissão de uma
+        // sessão abre exatamente com o teto que abria antes deste módulo.
+        assert_eq!(
+            motor.teto_de_video(None).teto(SyncBand::Nominal),
+            Teto::Bps(1_200_000)
+        );
+
+        // Cinco janelas cheias e sem piora, como a tica do motor as entregaria.
+        let inicio = Instant::now();
+        let mut bytes = 0_u64;
+        for segundo in 0..12_u32 {
+            let teto = motor.teto_de_video(None).teto(SyncBand::Nominal);
+            // O que sai pelo soquete numa janela em que a tela encheu o teto: o
+            // orçamento inteiro mais a voz.
+            bytes += u64::from(teto.bps() + 60_000) / 8;
+            let amostra = Amostra {
+                transporte: Transporte {
+                    bytes_enviados: bytes,
+                    ida_e_volta: Duration::from_millis(20),
+                    ..Transporte::default()
+                },
+                teto,
+                faixa: SyncBand::Nominal,
+            };
+            motor
+                .caminho
+                .observar(inicio + Duration::from_secs(u64::from(segundo)), &amostra);
+        }
+
+        let teto = motor.teto_de_video(None).teto(SyncBand::Nominal);
+        assert!(
+            teto.bps() > 1_200_000,
+            "doze janelas cheias e o teto continuou na suposição: {teto:?}"
+        );
+        assert_eq!(
+            teto.resolucao_estimada(),
+            Some(seele_video::codec::Resolucao::P1080),
+            "o caminho medido comprava 1080p e a tela continuou menor"
+        );
+    }
+
+    /// Sem transmissão não há quem encha o cano, e ler o transporte ali seria
+    /// medir a voz — que diz que está bom a 40 kbps e não diz quanto cabe.
+    #[test]
+    fn sem_tela_no_ar_a_sonda_nao_e_alimentada() {
+        let mut motor = motor_de_teste();
+        let antes = motor.caminho.estimativa();
+        motor.medir_o_caminho();
+        assert_eq!(motor.caminho.estimativa(), antes);
+        assert_eq!(
+            motor.teto_de_video(None).teto(SyncBand::Nominal),
+            crate::tela::Teto::Bps(1_200_000)
+        );
+    }
+
     fn motor_de_teste() -> Motor {
         let (avisos, _) = mpsc::unbounded_channel();
         Motor {
@@ -3461,6 +3588,7 @@ mod tests {
             faixa: FAIXA_INICIAL,
             caminho_de_quem_hospeda_bps: None,
             espectadores: 0,
+            caminho: crate::caminho::Sonda::nova(),
         }
     }
 }
