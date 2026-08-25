@@ -31,6 +31,7 @@ use anyhow::{Context, Result};
 pub mod encontro;
 pub mod firewall;
 pub mod interfaces;
+pub mod pcp;
 pub mod porta;
 
 /// Que famílias de endereço a escuta de um Dogma alcança de fato.
@@ -437,6 +438,24 @@ pub enum Tipo {
     /// Um endereço desta máquina que sai para a internet: IPv6 nativo, ou o
     /// IPv4 de uma VPS. Alcança de fora e também de dentro.
     Global,
+    /// O mesmo que [`Tipo::Global`], depois de o roteador ter **dito** que abriu
+    /// o firewall para ele. Degrau 2, ver [`pcp`].
+    ///
+    /// # É uma aposta, e não uma prova, e a distinção é o ponto da variante
+    ///
+    /// O que se sabe é que alguém que fala PCP respondeu `SUCCESS` a um pedido de
+    /// abrir a porta. Não se sabe que é ele quem filtra: a caixa da operadora
+    /// acima dele pode ser quem barra, e daqui não há como distinguir — é a
+    /// mesma armadilha que o degrau 3 pisou com o NAT duplo, e que
+    /// [`porta::FalhaAoAbrir::SemSaidaParaInternet`] nomeia.
+    ///
+    /// A única prova seria um pacote entrando de fora, e isso exige uma sonda
+    /// externa que não existe. Por isso a variante **não** nomeia degrau nenhum
+    /// e faz uma coisa só: passar na frente do [`Tipo::Global`] cru na lista de
+    /// candidatos. É uma aposta melhor fundamentada que a de hoje — hoje o
+    /// endereço IPv6 é anunciado sem que ninguém tenha pedido nada a ninguém — e
+    /// é barata de errar, porque a espera por candidato já foi encurtada.
+    GlobalLiberado,
     /// A porta que o roteador abriu a pedido (degrau 3). Refletido por
     /// **configuração**, e não por observação: existe porque alguém pediu.
     /// Alcança de fora, e de dentro só com *hairpin*, que muitos roteadores não
@@ -481,15 +500,31 @@ impl Tipo {
     /// mais barata que tudo — o ADR 0006 registra a 0.5.0 tendo quebrado isso —
     /// e `PortaNoRoteador` continua acima do furo porque ali alguém abriu a
     /// porta de propósito, e um Dogma com porta aberta nem chega a furar.
+    ///
+    /// # E é por isso que o PCP entra **abaixo** do refletido
+    ///
+    /// [`Tipo::GlobalLiberado`] é o `Global` de quem pediu ao roteador que
+    /// abrisse o firewall e ouviu `SUCCESS` (degrau 2, ver [`pcp`]). Isso é
+    /// afirmação mais bem fundamentada — alguém do outro lado respondeu alguma
+    /// coisa —, e continua sendo afirmação: o `Ok` não prova que quem respondeu é
+    /// quem filtra. Pô-lo acima do `Refletido` desfaria a medição de campo que
+    /// produziu esta ordem em troca de um palpite melhor, o que não é a mesma
+    /// coisa que uma observação.
+    ///
+    /// Então ele ganha só o que é seguro ganhar: passa na frente do `Global`
+    /// cru. Numa máquina com dois IPv6 globais isso decide qual dos dois
+    /// sobrevive ao corte do [`LIMITE_DE_CANDIDATOS`], e numa casa sem ponto de
+    /// encontro ele sobe para logo depois da porta do roteador.
     #[must_use]
     pub fn ordem(self) -> u8 {
         match self {
             Self::Local => 0,
             Self::PortaNoRoteador => 1,
             Self::Refletido => 2,
-            Self::Global => 3,
-            Self::Tunel => 4,
-            Self::Ponte => 5,
+            Self::GlobalLiberado => 3,
+            Self::Global => 4,
+            Self::Tunel => 5,
+            Self::Ponte => 6,
         }
     }
 
@@ -610,6 +645,21 @@ pub struct Alcance {
     /// informações, e a segunda é a que explica por que um amigo só-IPv4 não
     /// entra.
     porta_recusada: Option<String>,
+    /// Por que o pedido de abrir o firewall IPv6 não deu — quando não deu.
+    ///
+    /// Mesmo formato e mesma disciplina de [`Alcance::porta_recusada`], e a
+    /// mesma regra: guardado em relação ao que ele explica. Some quando o
+    /// roteador respondeu que abriu, e sobra quando não respondeu — que é o caso
+    /// em que quem hospeda precisa da frase, porque é ela que diz por que um
+    /// amigo com IPv6 nativo ainda pode não entrar pelo endereço IPv6 que está
+    /// no convite.
+    ///
+    /// Também é preenchido quando não havia o que pedir — sem IPv6 global, ou
+    /// com uma escuta que não atende IPv6 —, pelo mesmo critério que o degrau 3
+    /// usa para a escuta só-IPv6: "não pedi, e por isto" é informação, e a
+    /// ausência dela obrigaria quem lê a adivinhar entre "não pedi" e "pedi e
+    /// deu certo".
+    pcp_recusada: Option<String>,
 }
 
 impl Alcance {
@@ -621,15 +671,18 @@ impl Alcance {
     /// combinação que mordeu em campo — escuta só-IPv4 e IPv6 global na máquina
     /// — é encenável em duas linhas por causa desta separação.
     ///
-    /// `mapeada` é o que o degrau 3 abriu e `achados` são os endereços que as
-    /// interfaces desta máquina têm. Cada um ainda pode ser recusado aqui, se a
-    /// escuta não o servir.
+    /// `mapeada` é o que o degrau 3 abriu, `liberada` é o endereço IPv6 que o
+    /// roteador **disse** ter liberado no degrau 2, e `achados` são os endereços
+    /// que as interfaces desta máquina têm. Cada um ainda pode ser recusado
+    /// aqui, se a escuta não o servir.
     fn decidir(
         escuta: Escuta,
         mapeada: Option<SocketAddr>,
+        liberada: Option<SocketAddr>,
         encontrado: Option<SocketAddr>,
         achados: &[interfaces::Achado],
         porta_recusada: Option<String>,
+        pcp_recusada: Option<String>,
     ) -> Self {
         // A ordem de tentativa, e o motivo de cada posição:
         //
@@ -649,6 +702,16 @@ impl Alcance {
             };
             let tipo = match (achado.classe(), achado.e_da_rede_local()) {
                 (interfaces::Origem::Fisica, true) => Tipo::Local,
+                // O degrau 2 não acrescenta endereço nenhum: ele muda o que se
+                // sabe sobre um endereço que já estava aqui. Por isso a promoção
+                // é uma **reclassificação** deste candidato, e não um candidato
+                // novo — se fosse novo, o mesmo IPv6 apareceria duas vezes no
+                // convite e gastaria duas das quatro vagas.
+                (interfaces::Origem::Fisica, false)
+                    if liberada.is_some_and(|liberada| liberada.ip() == achado.ip) =>
+                {
+                    Tipo::GlobalLiberado
+                }
                 (interfaces::Origem::Fisica, false) => Tipo::Global,
                 (interfaces::Origem::Tunel, _) => Tipo::Tunel,
                 (interfaces::Origem::Virtual, _) => Tipo::Ponte,
@@ -783,6 +846,18 @@ impl Alcance {
             Degrau::SoRedeLocal
         };
 
+        // Guardada em relação ao que ela explica, como a do degrau 3 — e o que
+        // ela explica **não** é o degrau. O PCP não nomeia degrau nenhum, de
+        // propósito: um `Ok` dele não é prova de alcance, e o degrau 2 continua
+        // sendo `Ipv6Direto` com a frase honesta que ele sempre teve. O que o
+        // `Ok` produz é o candidato promovido, então é contra ele que a recusa
+        // some.
+        let pcp_recusada = if liberada.is_some_and(|alvo| alvos.contains(&alvo)) {
+            None
+        } else {
+            pcp_recusada
+        };
+
         Self {
             alvos,
             degrau,
@@ -792,6 +867,7 @@ impl Alcance {
             } else {
                 porta_recusada
             },
+            pcp_recusada,
         }
     }
 
@@ -839,6 +915,15 @@ impl Alcance {
     pub fn encontro_recusado(&self) -> Option<&str> {
         self.encontro_recusado.as_deref()
     }
+
+    /// Por que o firewall IPv6 do roteador não foi aberto, quando não foi.
+    ///
+    /// `None` quer dizer que o roteador respondeu que abriu — e ver
+    /// [`Tipo::GlobalLiberado`] para o que isso vale e o que não vale.
+    #[must_use]
+    pub fn pcp_recusada(&self) -> Option<&str> {
+        self.pcp_recusada.as_deref()
+    }
 }
 
 /// A escada do ADR 0022, subida uma vez, com o que ela abriu preso junto.
@@ -849,6 +934,7 @@ impl Alcance {
 pub struct Escada {
     alcance: Alcance,
     porta: Option<porta::PortaAberta>,
+    firewall: Option<pcp::BuracoAberto>,
     encontro: Option<encontro::Encontro>,
 }
 
@@ -871,24 +957,19 @@ impl Escada {
     pub async fn subir(escuta: Escuta, convocacao: Option<encontro::Convocacao>) -> Self {
         let achados = descobrir_enderecos();
 
-        // Degrau 3. Duas condições, e a segunda é nova: além de saber para onde
-        // o roteador deve encaminhar, a escuta tem de atender em IPv4 — um
-        // mapeamento para uma máquina que só atende IPv6 abriria uma porta que
-        // não leva a lugar nenhum, com o mesmo sucesso mentiroso do CGNAT.
-        let (mapeada, recusa) = if escuta.pilha().alcanca_ipv4() {
-            match porta::abrir(&achados, escuta.porta()).await {
-                Ok(aberta) => (Some(aberta), None),
-                Err(falha) => {
-                    tracing::info!(%falha, "o degrau 3 não deu");
-                    (None, Some(falha.to_string()))
-                }
-            }
-        } else {
-            (
-                None,
-                Some("esta escuta não atende em IPv4, então não há porta IPv4 a pedir".to_owned()),
-            )
-        };
+        // Os degraus 2 e 3 são pedidos independentes, em protocolos diferentes,
+        // sobre famílias diferentes: o UPnP fala SOAP por HTTP com o roteador
+        // sobre uma porta IPv4, e o PCP fala UDP na 5351 sobre um firewall IPv6.
+        // Feitos em fila eles somam os dois prazos de 3 s **antes de a sala
+        // abrir**, e é a pessoa que apertou HOSPEDAR AQUI que paga. Juntos, o
+        // relógio anda uma vez só. Não há ordem entre eles a preservar: nenhum
+        // lê o resultado do outro.
+        let (degrau_3, degrau_2) = tokio::join!(
+            abrir_porta(&achados, escuta),
+            abrir_firewall(&achados, escuta)
+        );
+        let (mapeada, recusa) = degrau_3;
+        let (liberada, recusa_do_pcp) = degrau_2;
 
         // Degrau 4, e uma condição só. Ela é sobre não pagar metadado à toa:
         // com um endereço IPv4 global esta máquina já é alcançável sem
@@ -918,9 +999,11 @@ impl Escada {
         let alcance = Alcance::decidir(
             escuta,
             mapeada.as_ref().map(porta::PortaAberta::externo),
+            liberada.as_ref().map(pcp::BuracoAberto::liberado),
             encontro.as_ref().map(encontro::Encontro::publico),
             &achados,
             recusa,
+            recusa_do_pcp,
         )
         .com_recusa_do_encontro(recusa_do_encontro);
         // A porta só é guardada se ela produziu o degrau. Um mapeamento que a
@@ -932,6 +1015,20 @@ impl Escada {
             Some(aberta) => {
                 tracing::warn!("o roteador abriu uma porta que esta escuta não atende; devolvendo");
                 aberta.fechar().await;
+                None
+            }
+            None => None,
+        };
+        // O mesmo cuidado, e o critério do candidato e não o do degrau — porque
+        // o degrau 2 de propósito não muda de nome por causa do PCP. Um buraco
+        // cujo endereço não sobreviveu ao corte do convite é uma regra no
+        // firewall do roteador apontando para uma porta que ninguém vai tentar,
+        // e renová-la seria falar com o roteador para sempre por nada.
+        let firewall = match liberada {
+            Some(aberto) if alcance.alvos().contains(&aberto.liberado()) => Some(aberto),
+            Some(aberto) => {
+                tracing::warn!("o buraco de firewall não virou candidato desta escuta; devolvendo");
+                aberto.fechar().await;
                 None
             }
             None => None,
@@ -954,6 +1051,7 @@ impl Escada {
         Self {
             alcance,
             porta,
+            firewall,
             encontro,
         }
     }
@@ -986,6 +1084,78 @@ impl Escada {
         }
         if let Some(porta) = self.porta {
             porta.fechar().await;
+        }
+        // Mesma sujeira, do outro lado do roteador: um buraco de firewall
+        // deixado para trás aponta para uma máquina que não atende mais, e só
+        // some quando o prazo da validade vence.
+        if let Some(firewall) = self.firewall {
+            firewall.fechar().await;
+        }
+    }
+}
+
+/// O degrau 3, com a condição que decide se ele chega a ser tentado.
+///
+/// Extraído de [`Escada::subir`] só para que ele e o degrau 2 possam ser
+/// esperados juntos: `tokio::join!` precisa de dois futuros, e um `if` no meio
+/// da função não é um futuro.
+///
+/// A condição é a de sempre, e a segunda metade dela é a que mordeu em campo:
+/// além de saber para onde o roteador deve encaminhar, a escuta tem de atender
+/// em IPv4 — um mapeamento para uma máquina que só atende IPv6 abriria uma porta
+/// que não leva a lugar nenhum, com o mesmo sucesso mentiroso do CGNAT.
+async fn abrir_porta(
+    achados: &[interfaces::Achado],
+    escuta: Escuta,
+) -> (Option<porta::PortaAberta>, Option<String>) {
+    if !escuta.pilha().alcanca_ipv4() {
+        return (
+            None,
+            Some("esta escuta não atende em IPv4, então não há porta IPv4 a pedir".to_owned()),
+        );
+    }
+    match porta::abrir(achados, escuta.porta()).await {
+        Ok(aberta) => (Some(aberta), None),
+        Err(falha) => {
+            tracing::info!(%falha, "o degrau 3 não deu");
+            (None, Some(falha.to_string()))
+        }
+    }
+}
+
+/// O degrau 2, com as condições que decidem se ele chega a ser tentado.
+///
+/// Duas, e as duas são a mesma pergunta que o degrau 3 faz na outra família: a
+/// escuta tem de atender em IPv6, senão o buraco abriria para uma porta em que
+/// ninguém está; e a porta tem de existir, porque o PCP a carrega num
+/// `NonZeroU16` — na RFC 6887 a porta interna zero tem significado próprio,
+/// "todas as portas", que é outro pedido.
+///
+/// Uma escuta com porta zero é impossível hoje — [`Escuta`] vem de um socket já
+/// ligado —, e a frase existe assim mesmo pelo mesmo motivo que a do IPv4: "não
+/// pedi, e por isto" é informação, e um `unwrap` aqui seria trocá-la por um
+/// pânico.
+async fn abrir_firewall(
+    achados: &[interfaces::Achado],
+    escuta: Escuta,
+) -> (Option<pcp::BuracoAberto>, Option<String>) {
+    if !escuta.pilha().alcanca_ipv6() {
+        return (
+            None,
+            Some("esta escuta não atende em IPv6, então não há firewall IPv6 a abrir".to_owned()),
+        );
+    }
+    let Some(porta) = std::num::NonZeroU16::new(escuta.porta()) else {
+        return (
+            None,
+            Some("esta escuta não tem porta, então não há o que pedir ao roteador".to_owned()),
+        );
+    };
+    match pcp::liberar(achados, porta).await {
+        Ok(aberto) => (Some(aberto), None),
+        Err(falha) => {
+            tracing::info!(%falha, "o degrau 2 não ganhou o firewall aberto");
+            (None, Some(falha.to_string()))
         }
     }
 }
@@ -1043,7 +1213,31 @@ impl Alcance {
         achados: &[interfaces::Achado],
         porta_recusada: Option<String>,
     ) -> Self {
-        Self::decidir(escuta, mapeada, None, achados, porta_recusada)
+        Self::decidir_sem_pcp(escuta, mapeada, None, achados, porta_recusada)
+    }
+
+    /// [`Alcance::decidir`] sem o pedido de firewall do degrau 2.
+    ///
+    /// A promoção que o PCP faz é sobre **um** candidato, e a maioria destes
+    /// testes não fala dele; passar `None` em cada chamada só faria a linha
+    /// crescer sem dizer nada. Quem é sobre o degrau 2 chama a `decidir`
+    /// inteira, e é assim que se vê de longe qual teste é sobre o quê.
+    fn decidir_sem_pcp(
+        escuta: Escuta,
+        mapeada: Option<SocketAddr>,
+        encontrado: Option<SocketAddr>,
+        achados: &[interfaces::Achado],
+        porta_recusada: Option<String>,
+    ) -> Self {
+        Self::decidir(
+            escuta,
+            mapeada,
+            None,
+            encontrado,
+            achados,
+            porta_recusada,
+            None,
+        )
     }
 }
 
@@ -1456,7 +1650,7 @@ mod testes {
         // entra no convite **junto** com o da rede de casa — que continua sendo
         // o primeiro, porque quem está na mesma casa não precisa de furo nenhum.
         let publico = SocketAddr::from(([45, 33, 32, 156], 41234));
-        let alcance = Alcance::decidir(
+        let alcance = Alcance::decidir_sem_pcp(
             Escuta::nova(8383, Pilha::Dupla),
             None,
             Some(publico),
@@ -1490,7 +1684,7 @@ mod testes {
         // perguntar ao ponto de encontro quando o roteador abriu.
         let externo = SocketAddr::from(([203, 0, 113, 7], 9000));
         let publico = SocketAddr::from(([45, 33, 32, 156], 41234));
-        let alcance = Alcance::decidir(
+        let alcance = Alcance::decidir_sem_pcp(
             Escuta::nova(8383, Pilha::Dupla),
             Some(externo),
             Some(publico),
@@ -1507,7 +1701,7 @@ mod testes {
         // encontro IPv6 e uma escuta só-IPv4 dariam um candidato aonde ninguém
         // atende — a promessa vazia que este módulo existe para não fazer.
         let publico = SocketAddr::new(um_ipv6_global().into(), 41234);
-        let alcance = Alcance::decidir(
+        let alcance = Alcance::decidir_sem_pcp(
             Escuta::nova(8383, Pilha::SoIpv4),
             None,
             Some(publico),
@@ -1581,7 +1775,7 @@ mod testes {
         // É exatamente a máquina de casa com CGNAT, que é o único caso que o
         // degrau 4 existe para servir.
         let furado = SocketAddr::from(([200, 100, 30, 40], 61234));
-        let alcance = Alcance::decidir(
+        let alcance = Alcance::decidir_sem_pcp(
             Escuta::nova(8383, Pilha::Dupla),
             None,
             Some(furado),
@@ -1612,7 +1806,7 @@ mod testes {
         // Quatro placas na rede de casa gastam o `LIMITE_DE_CANDIDATOS` inteiro
         // antes de o degrau 3 entrar na fila. Sem a reserva o convite sai só com
         // as quatro, o degrau cai para `SoRedeLocal`, e a porta é devolvida.
-        let so_a_rede_de_casa = Alcance::decidir(
+        let so_a_rede_de_casa = Alcance::decidir_sem_pcp(
             Escuta::nova(8383, Pilha::Dupla),
             Some(externo),
             None,
@@ -1637,7 +1831,7 @@ mod testes {
         // máquina passava a depender de um ponto de encontro, com um terceiro
         // sabendo quem falou com quem, tendo um caminho direto que funcionava.
         let furado = SocketAddr::from(([200, 100, 30, 40], 61234));
-        let com_o_furo = Alcance::decidir(
+        let com_o_furo = Alcance::decidir_sem_pcp(
             Escuta::nova(8383, Pilha::Dupla),
             Some(externo),
             Some(furado),
@@ -1672,7 +1866,7 @@ mod testes {
         //
         // É o mesmo argumento que o ADR 0022 usa para pôr o degrau 4 acima do 2
         // na frase, e é o defeito 3.2 com outro rótulo: prometer de menos.
-        let alcance = Alcance::decidir(
+        let alcance = Alcance::decidir_sem_pcp(
             Escuta::nova(8383, Pilha::Dupla),
             None,
             None,
@@ -1710,7 +1904,7 @@ mod testes {
         let furado = SocketAddr::from(([200, 100, 30, 40], 61234));
         let externo = SocketAddr::from(([203, 0, 113, 7], 9000));
         let escuta = Escuta::nova(8383, Pilha::Dupla);
-        let alcance = Alcance::decidir(escuta, Some(externo), Some(furado), &[], None);
+        let alcance = Alcance::decidir_sem_pcp(escuta, Some(externo), Some(furado), &[], None);
 
         // A porta ganha a frase — isto continua valendo.
         assert_eq!(alcance.degrau(), Degrau::PortaNoRoteador);
@@ -1845,7 +2039,7 @@ mod testes {
                 encontrado,
                 achados,
             } = caso;
-            let alcance = Alcance::decidir(*escuta, *mapeada, *encontrado, achados, None);
+            let alcance = Alcance::decidir_sem_pcp(*escuta, *mapeada, *encontrado, achados, None);
 
             // A metade da reserva, afirmada na mesma travessia: um endereço que
             // veio de fora desta máquina e que a escuta serve **está** no
@@ -1942,7 +2136,7 @@ mod testes {
         // `SoRedeLocal`, cuja frase manda encaminhar a porta 8383 num roteador que
         // não existe. É o defeito do relato do Cloudflare WARP com o sinal
         // invertido: lá a frase prometia demais, aqui promete de menos.
-        let alcance = Alcance::decidir(
+        let alcance = Alcance::decidir_sem_pcp(
             Escuta::nova(8383, Pilha::Dupla),
             None,
             None,
@@ -2108,5 +2302,210 @@ mod testes {
             erro.contains(&porta.to_string()),
             "o erro não diz qual porta colidiu: {erro}"
         );
+    }
+
+    /// O IPv6 global que o roteador **disse** ter liberado, no formato em que
+    /// `decidir` o recebe: o endereço da placa mais a porta da escuta.
+    fn liberado(ip: &str, porta: u16) -> SocketAddr {
+        SocketAddr::new(ip.parse().unwrap_or(IpAddr::from([0, 0, 0, 0])), porta)
+    }
+
+    #[test]
+    fn o_ok_do_pcp_nao_muda_o_degrau_nem_acrescenta_candidato() {
+        // Duas propriedades, e a primeira é a que importa mais: **o `Ok` do PCP
+        // não nomeia degrau**. Ele não é prova de que alguém de fora chega — quem
+        // respondeu pode não ser quem filtra —, e um `Degrau::Ipv6Liberado`
+        // acrescentado por engano faria a tela dizer "alcança" sobre uma
+        // afirmação do roteador. É esta asserção que fica vermelha nesse dia.
+        //
+        // A segunda é que o degrau 2 não descobre endereço nenhum: ele muda o
+        // que se sabe sobre um endereço que já estava na lista. Vale dizer que
+        // ela é fraca hoje, no espírito do comentário que já existe sobre os
+        // `contains` de `decidir`: a deduplicação de `alvos` a faria passar
+        // mesmo se a promoção empurrasse um candidato a mais. Fica como rede
+        // para o dia em que aquela deduplicação mudar.
+        let achados = [na_placa("192.168.0.30"), na_placa("2001:db8::1")];
+        let alcance = Alcance::decidir(
+            Escuta::nova(8383, Pilha::Dupla),
+            None,
+            Some(liberado("2001:db8::1", 8383)),
+            None,
+            &achados,
+            None,
+            None,
+        );
+        let seis = liberado("2001:db8::1", 8383);
+        assert_eq!(
+            alcance.alvos().iter().filter(|alvo| **alvo == seis).count(),
+            1,
+            "o IPv6 liberado saiu repetido: {:?}",
+            alcance.alvos()
+        );
+        // E o degrau **não** muda de nome por causa do PCP: um `Ok` do roteador
+        // não é prova de que alguém de fora chega. Ver `Tipo::GlobalLiberado`.
+        assert_eq!(alcance.degrau(), Degrau::Ipv6Direto);
+    }
+
+    #[test]
+    fn o_ok_do_pcp_nao_passa_na_frente_do_endereco_refletido() {
+        // A regra que a medição de campo produziu — observação vence afirmação —
+        // continua valendo. Um `SUCCESS` do PCP é afirmação melhor fundamentada
+        // e não é observação: quem respondeu pode não ser quem filtra. Pôr o
+        // IPv6 na frente do refletido desfaria os 9,6 s medidos em troca de um
+        // palpite melhor.
+        let achados = [na_placa("192.168.0.30"), na_placa("2001:db8::1")];
+        let furado = SocketAddr::from(([200, 160, 2, 3], 41000));
+        let alcance = Alcance::decidir(
+            Escuta::nova(8383, Pilha::Dupla),
+            None,
+            Some(liberado("2001:db8::1", 8383)),
+            Some(furado),
+            &achados,
+            None,
+            None,
+        );
+        let alvos = alcance.alvos();
+        let onde = |alvo: SocketAddr| {
+            alvos
+                .iter()
+                .position(|candidato| *candidato == alvo)
+                .unwrap_or(usize::MAX)
+        };
+        assert!(
+            onde(furado) < onde(liberado("2001:db8::1", 8383)),
+            "o palpite do PCP passou na frente da observação: {alvos:?}"
+        );
+    }
+
+    #[test]
+    fn entre_dois_ipv6_globais_o_liberado_e_o_que_sobrevive_ao_corte() {
+        // Onde a promoção paga de verdade. Uma máquina com IPv6 permanente e
+        // temporários (RFC 8981) tem vários globais, o convite cabe quatro, e
+        // sem o PCP quem decide é a ordem em que o sistema listou as interfaces.
+        // Com ele, quem decide é qual deles o roteador disse ter aberto.
+        let achados = [
+            na_placa("192.168.0.30"),
+            na_placa("192.168.0.31"),
+            na_placa("2001:db8::1"),
+            na_placa("2001:db8::2"),
+        ];
+        let alcance = Alcance::decidir(
+            Escuta::nova(8383, Pilha::Dupla),
+            None,
+            Some(liberado("2001:db8::2", 8383)),
+            None,
+            &achados,
+            None,
+            None,
+        );
+        assert!(
+            alcance.alvos().contains(&liberado("2001:db8::2", 8383)),
+            "o IPv6 liberado ficou de fora do convite: {:?}",
+            alcance.alvos()
+        );
+        // E ele vem antes do outro global, que é o efeito inteiro da promoção.
+        let alvos = alcance.alvos();
+        let onde = |alvo: SocketAddr| alvos.iter().position(|c| *c == alvo);
+        if let (Some(cru), Some(promovido)) = (
+            onde(liberado("2001:db8::1", 8383)),
+            onde(liberado("2001:db8::2", 8383)),
+        ) {
+            assert!(promovido < cru, "a promoção não mudou nada: {alvos:?}");
+        }
+    }
+
+    #[test]
+    fn a_recusa_do_pcp_sobra_quando_o_firewall_nao_abriu_e_some_quando_abriu() {
+        // Mesma disciplina de `porta_recusada`: a recusa é guardada em relação
+        // ao que ela explica. Enquanto o firewall não abriu, a frase é o que diz
+        // a quem hospeda por que um amigo com IPv6 nativo ainda pode não entrar
+        // pelo endereço IPv6 que está no convite.
+        let achados = [na_placa("192.168.0.30"), na_placa("2001:db8::1")];
+        let escuta = Escuta::nova(8383, Pilha::Dupla);
+        let motivo = "o roteador (fe80::1) não respondeu".to_owned();
+
+        let recusado = Alcance::decidir(
+            escuta,
+            None,
+            None,
+            None,
+            &achados,
+            None,
+            Some(motivo.clone()),
+        );
+        assert_eq!(recusado.pcp_recusada(), Some(motivo.as_str()));
+
+        let aberto = Alcance::decidir(
+            escuta,
+            None,
+            Some(liberado("2001:db8::1", 8383)),
+            None,
+            &achados,
+            None,
+            Some(motivo),
+        );
+        assert_eq!(aberto.pcp_recusada(), None);
+    }
+
+    #[test]
+    fn um_firewall_aberto_que_a_escuta_nao_serve_nao_vira_promocao_nem_apaga_a_recusa() {
+        // O caso simétrico ao da porta que a escuta não atende. Numa máquina em
+        // que a pilha dupla falhou, o `Ok` do roteador é sobre um endereço em
+        // que ninguém está escutando — e ele não pode nem entrar no convite nem
+        // fazer a frase de recusa sumir, ou quem hospeda leria "abriu" sobre um
+        // caminho que não existe.
+        let achados = [na_placa("192.168.0.30"), na_placa("2001:db8::1")];
+        let motivo = "esta escuta não atende em IPv6".to_owned();
+        let alcance = Alcance::decidir(
+            Escuta::nova(8383, Pilha::SoIpv4),
+            None,
+            Some(liberado("2001:db8::1", 8383)),
+            None,
+            &achados,
+            None,
+            Some(motivo.clone()),
+        );
+        assert!(
+            !alcance
+                .alvos()
+                .iter()
+                .any(|alvo| alvo.ip() == liberado("2001:db8::1", 8383).ip()),
+            "um IPv6 que a escuta não serve entrou no convite: {:?}",
+            alcance.alvos()
+        );
+        assert_eq!(alcance.pcp_recusada(), Some(motivo.as_str()));
+    }
+
+    #[test]
+    fn a_ordem_dos_tipos_nao_tem_empate_nem_buraco() {
+        // A ordem é a lista de tentativa, e um empate entre dois tipos faria o
+        // `sort_by_key` decidir por acidente de ordem de inserção. `GlobalLiberado`
+        // entrou no meio dela e empurrou o resto; isto é o que impede a próxima
+        // inserção de esquecer um.
+        let todos = [
+            Tipo::Local,
+            Tipo::PortaNoRoteador,
+            Tipo::Refletido,
+            Tipo::GlobalLiberado,
+            Tipo::Global,
+            Tipo::Tunel,
+            Tipo::Ponte,
+        ];
+        let mut ordens: Vec<u8> = todos.iter().map(|tipo| tipo.ordem()).collect();
+        ordens.sort_unstable();
+        let esperado: Vec<u8> = (0..u8::try_from(todos.len()).unwrap_or(u8::MAX)).collect();
+        assert_eq!(ordens, esperado, "a ordem dos tipos tem empate ou buraco");
+        // E o liberado continua abaixo do refletido, que é a decisão que a
+        // medição de campo produziu e que este ciclo não desfaz.
+        assert!(Tipo::Refletido.ordem() < Tipo::GlobalLiberado.ordem());
+        assert!(Tipo::GlobalLiberado.ordem() < Tipo::Global.ordem());
+    }
+
+    #[test]
+    fn a_promocao_do_pcp_nao_pede_furo_a_ninguem() {
+        // `precisa_de_furo` decide se o ponto de encontro é avisado antes de um
+        // candidato. Um IPv6 que o roteador liberou não depende de furo nenhum,
+        // e pedir um gastaria metadado e orçamento de furo por nada.
+        assert!(!Tipo::GlobalLiberado.precisa_de_furo());
     }
 }

@@ -12,11 +12,33 @@ publish.workspace = true
 # libopus into a process that has to fit in 1 vCPU / 512 MB.
 [dependencies]
 anyhow = "1.0.104"
+# PCP (RFC 6887) — degrau 2 do ADR 0022, a metade que faltava. Rust puro, e a
+# árvore inteira dele já estava aqui: `bytes`, `displaydoc`, `num_enum`, `rand`,
+# `thiserror`, `tokio` e `tracing` vieram com o quinn e com o rusqlite. Custo
+# medido contra o `Cargo.lock` deste workspace: **1 crate novo**, o próprio.
+# Ver `alcance::pcp` para por que PCP e não o UPnP que o degrau 3 já fala.
+crab_nat = "0.8.1"
 ed25519-dalek = "3.0.0"
 # UPnP IGD — degrau 3 do ADR 0022. Escolhido depois de medir a árvore de cada
 # candidato; `alcance::porta` registra por que este e não os outros, e o que ele
 # arrasta junto que não deveria.
 igd-next = { version = "0.17.1", default-features = false, features = ["aio_tokio"] }
+# A peça que o PCP não tem: descobrir o roteador. O UPnP acha por multicast
+# SSDP; a RFC 6887 manda o cliente falar com o gateway padrão, e ler a tabela de
+# rotas é código por sistema — `getifaddrs` não a responde, e fazer à mão seria
+# FFI, que o workspace proíbe (`unsafe_code = "forbid"`).
+#
+# `default-features = false` é o que torna isto pagável, e é medido: as features
+# `apple-wifi-extra` e `apple-system-configuration-extra` **não** são padrão na
+# 0.46, e são elas que traziam `objc2-core-wlan`/`objc2-security` — a conta de
+# 31 crates que fez o `portmapper` ser recusado em `alcance::porta`. Com só
+# `gateway`, e medido contra o `Cargo.lock` deste workspace no **macOS**
+# (aarch64-apple-darwin), entram **3 crates novos**: `netdev`, `mac-addr` e
+# `objc2-system-configuration`. O resto da árvore — `ipnet`, `libc`, `plist`,
+# `objc2-core-foundation` — já estava aqui. O número muda por sistema: no Linux
+# entram os `netlink-*` no lugar dos `objc2-*`, e no Windows nada além do
+# `windows-sys` que o quinn já traz. Ver `alcance::pcp::roteador_padrao`.
+netdev = { version = "0.46.1", default-features = false, features = ["gateway"] }
 seele-proto = { path = "../seele-proto" }
 quinn = "0.11.11"
 rand = "0.10.2"
