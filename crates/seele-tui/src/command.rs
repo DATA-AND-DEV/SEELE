@@ -9,7 +9,7 @@
 pub enum Command {
     /// `:q` — sair do programa.
     Quit,
-    /// `:ejetar` — leave this Dogma and go back to the selection screen.
+    /// `:ejetar` — leave this server and go back to the selection screen.
     ///
     /// Separate from [`Command::Quit`] on purpose: quitting the program and
     /// leaving a conversation are different things, and the app already

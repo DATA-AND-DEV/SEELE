@@ -13,7 +13,7 @@
 // endereço escrito nele para não prometer um lugar que não é o certo, e SAIR
 // fica como saída secundária.
 //
-// O endereço vem de `alvoDoDogma`, que a tela de autenticação guardou ao abrir
+// O endereço vem de `alvoDoServer`, que a tela de autenticação guardou ao abrir
 // a sessão; o campo de endereço da entrada é a segunda fonte. Sem nenhuma das
 // duas não há para onde reconectar, e a tela volta a ter um botão só — um
 // RECONECTAR sem destino é o botão que promete o lugar errado.
@@ -50,7 +50,7 @@ function mostrarFim(motivo) {
   // E a configuração, que abre por cima da sessão. Toda `.tela` tem a altura da
   // janela, então duas visíveis não se sobrepõem: empilham, e a segunda fica
   // abaixo da dobra onde ninguém a encontra.
-  abandonarDogma();
+  abandonarServer();
   // A chamada pela mesma razão, e ela é a mais provável das duas: um operador
   // que derruba alguém derruba quem está numa sala de voz, que é exatamente
   // quem está olhando esta tela.
@@ -68,7 +68,7 @@ function mostrarFim(motivo) {
 
   // Lido antes de qualquer coisa desta tela mexer no estado da anterior: é o
   // endereço da sessão que acabou, e é ele que dá destino ao RECONECTAR.
-  alvoDoFim = (typeof alvoDoDogma === "string" && alvoDoDogma) ||
+  alvoDoFim = (typeof alvoDoServer === "string" && alvoDoServer) ||
     $("campo-servidor").value.trim() || null;
   desenharSaidas();
 

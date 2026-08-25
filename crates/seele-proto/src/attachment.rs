@@ -13,7 +13,7 @@
 //! transfer is a header and then bytes to the end of the stream. The chunking
 //! that does exist is on **disk**: whoever receives writes in fixed blocks and
 //! never holds the whole file in memory — `specs/04-servidor-seele.md` sizes a
-//! Dogma at 1 vCPU and 512 MB, and a `Vec` of 20 MB per simultaneous transfer
+//! server at 1 vCPU and 512 MB, and a `Vec` of 20 MB per simultaneous transfer
 //! ends that.
 //!
 //! # The answer comes back on the control stream
@@ -64,7 +64,7 @@ pub struct AttachmentHeader {
     /// The idempotency key of the message this file belongs to.
     ///
     /// The same key that already makes a send idempotent (gap G9). A retry
-    /// after a fall that had in fact succeeded on the Dogma is recognised
+    /// after a fall that had in fact succeeded on the server is recognised
     /// before twenty megabytes go up again.
     pub client_message_id: ClientMessageId,
     /// What the sender wrote beside the file. May be empty.
@@ -93,20 +93,20 @@ pub struct AttachmentHeader {
     pub declared_len: u64,
     /// SHA-256 the sender says the bytes hash to.
     ///
-    /// The one question a Dogma can answer about a file — did it arrive whole.
+    /// The one question a server can answer about a file — did it arrive whole.
     /// It says nothing about the file being good, and no sentence of this
     /// product will pretend it does.
     pub content_hash: [u8; CONTENT_HASH_LEN],
 }
 
-/// What a Dogma writes before handing a file back.
+/// What a server writes before handing a file back.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttachmentDelivery {
     /// Which attachment this is.
     pub attachment: AttachmentId,
     /// How many bytes follow.
     pub byte_size: u64,
-    /// What they hash to, so the receiver can ask the same question the Dogma
+    /// What they hash to, so the receiver can ask the same question the server
     /// asked on the way in.
     pub content_hash: [u8; CONTENT_HASH_LEN],
 }

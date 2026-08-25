@@ -149,7 +149,7 @@ use crate::tela::{Teto, CAMINHO_DA_PROVA_BPS, FRACAO_DO_CAMINHO, PISO_DE_BANDA_B
 /// `crate::tela::Transmissao` se enche: a capacidade dele é *um segundo de
 /// orçamento*. Uma janela mais curta mediria um balde que ainda não repôs e
 /// leria a rajada de um quadro-chave como se fosse o cano. É também o intervalo
-/// em que o Dogma manda `PersonState`, então é o passo em que o resto da malha
+/// em que o servidor manda `PersonState`, então é o passo em que o resto da malha
 /// já anda.
 pub const JANELA: Duration = Duration::from_secs(1);
 
@@ -782,7 +782,7 @@ mod tests {
         }
     }
 
-    /// A subida que o Dogma declarou, nos testes em que a perna dele não é o
+    /// A subida que o servidor declarou, nos testes em que a perna dele não é o
     /// assunto.
     ///
     /// **Larga de propósito, e é a única maneira de estes testes serem sobre a
@@ -790,14 +790,14 @@ mod tests {
     /// quem hospeda no cano das provas, e com ela ali o `min` do §5.1 trava o
     /// teto em 1200 kbps por mais que esta máquina meça — que é um achado sobre
     /// o produto e não sobre a sonda, e tem teste próprio em
-    /// `sem_a_subida_do_dogma_a_medida_desta_maquina_nao_levanta_o_teto`.
-    const DOGMA_LARGO_BPS: u32 = 200_000_000;
+    /// `sem_a_subida_do_server_a_medida_desta_maquina_nao_levanta_o_teto`.
+    const SERVER_LARGO_BPS: u32 = 200_000_000;
 
     /// O teto com as pernas do §5.1 que estes testes querem: a nossa, medida,
     /// e a de quem hospeda fora do caminho.
     fn teto_de(estimativa_bps: u32, faixa: SyncBand) -> Teto {
         TetoDeVideo::com_caminho(estimativa_bps)
-            .com_caminho_de_quem_hospeda(DOGMA_LARGO_BPS)
+            .com_caminho_de_quem_hospeda(SERVER_LARGO_BPS)
             .teto(faixa)
     }
 
@@ -1257,7 +1257,7 @@ mod tests {
     /// que esta máquina mede não levanta o teto.**
     ///
     /// `TetoDeVideo::com_caminho` deixa a perna de quem hospeda no cano das
-    /// provas, e `Room::teto_de_video` só a troca quando o Dogma declara a
+    /// provas, e `Room::teto_de_video` só a troca quando o servidor declara a
     /// própria subida — `crate::tela::caminho_no_fio` do `seele-server` manda
     /// **zero** quando o operador não declarou nada, e zero é ausência. Então o
     /// `min` do §5.1 trava o teto em 1200 kbps por mais que esta ponta descubra
@@ -1266,17 +1266,17 @@ mod tests {
     /// Isto **não** é um defeito desta sonda, e consertá-lo daqui seria
     /// inventar a perna mais cara da conta — o §5.1 chama isso de o defeito mais
     /// caro daquela seção. Fica escrito como teste para que a próxima pessoa
-    /// saiba onde procurar: quem quiser 1080p numa fibra tem de fazer o Dogma
+    /// saiba onde procurar: quem quiser 1080p numa fibra tem de fazer o servidor
     /// declarar a subida dele, e a sonda serve para os dois casos que sobram —
     /// **descer** quando o cano desta máquina é pior que a suposição, e subir
-    /// quando o Dogma declarou.
+    /// quando o servidor declarou.
     #[test]
-    fn sem_a_subida_do_dogma_a_medida_desta_maquina_nao_levanta_o_teto() {
+    fn sem_a_subida_do_server_a_medida_desta_maquina_nao_levanta_o_teto() {
         let mut sonda = Sonda::nova();
         let mut cano = Cano::de(50_000_000);
         let inicio = Instant::now();
         let faixa = SyncBand::Nominal;
-        // Sem `com_caminho_de_quem_hospeda`: é o teto de uma sala cujo Dogma
+        // Sem `com_caminho_de_quem_hospeda`: é o teto de uma sala cujo servidor
         // não declarou nada, que é o padrão de fábrica.
         let mut teto = TetoDeVideo::com_caminho(sonda.estimativa()).teto(faixa);
         for k in 1..=ticas(60) {

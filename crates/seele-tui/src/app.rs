@@ -44,8 +44,8 @@ impl Mode {
 /// Which panel has focus. `specs/05-cliente-tui.md` has three, plus the bar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Panel {
-    /// The Dogma list.
-    Dogma,
+    /// The server list.
+    Server,
     /// voice_rooms and Lines.
     Channels,
     /// Messages.
@@ -57,9 +57,9 @@ impl Panel {
     #[must_use]
     pub fn next(self) -> Self {
         match self {
-            Self::Dogma => Self::Channels,
+            Self::Server => Self::Channels,
             Self::Channels => Self::Messages,
-            Self::Messages => Self::Dogma,
+            Self::Messages => Self::Server,
         }
     }
 
@@ -70,8 +70,8 @@ impl Panel {
     #[must_use]
     pub fn prev(self) -> Self {
         match self {
-            Self::Dogma => Self::Messages,
-            Self::Channels => Self::Dogma,
+            Self::Server => Self::Messages,
+            Self::Channels => Self::Server,
             Self::Messages => Self::Channels,
         }
     }
@@ -245,10 +245,10 @@ pub struct App {
     pub focus: Panel,
     /// Which of the six states is showing.
     pub screen: Screen,
-    /// The Dogmas this person knows about.
-    pub dogmas: Vec<String>,
-    /// Which Dogma is selected.
-    pub selected_dogma: usize,
+    /// The servers this person knows about.
+    pub servers: Vec<String>,
+    /// Which server is selected.
+    pub selected_server: usize,
     /// voice_rooms, their people, and Lines — flattened for drawing.
     pub tree: Vec<Node>,
     /// Which tree row is selected.
@@ -329,8 +329,8 @@ impl App {
             mode: Mode::Normal,
             focus: Panel::Channels,
             screen: Screen::Boot,
-            dogmas: Vec::new(),
-            selected_dogma: 0,
+            servers: Vec::new(),
+            selected_server: 0,
             tree: Vec::new(),
             selected: 0,
             messages: Vec::new(),
@@ -533,12 +533,12 @@ impl App {
     /// thing often enough that neither can be trusted.
     fn move_selection(&mut self, delta: isize) {
         match self.focus {
-            Panel::Dogma => {
-                let Some(last) = self.dogmas.len().checked_sub(1) else {
+            Panel::Server => {
+                let Some(last) = self.servers.len().checked_sub(1) else {
                     return;
                 };
-                let next = self.selected_dogma as isize + delta;
-                self.selected_dogma = next.clamp(0, last as isize) as usize;
+                let next = self.selected_server as isize + delta;
+                self.selected_server = next.clamp(0, last as isize) as usize;
             }
             Panel::Channels => self.step_tree(delta),
             // The message panel scrolls rather than selects, and scrolling is
@@ -568,10 +568,10 @@ impl App {
 
     fn jump(&mut self, edge: Edge) {
         match self.focus {
-            Panel::Dogma => {
-                self.selected_dogma = match edge {
+            Panel::Server => {
+                self.selected_server = match edge {
                     Edge::First => 0,
-                    Edge::Last => self.dogmas.len().saturating_sub(1),
+                    Edge::Last => self.servers.len().saturating_sub(1),
                 };
             }
             Panel::Channels => {
@@ -607,7 +607,7 @@ impl App {
         self.quit = true;
     }
 
-    /// Leaves this Dogma without quitting the program. `:ejetar`.
+    /// Leaves this server without quitting the program. `:ejetar`.
     pub fn ejetar(&mut self) {
         self.ejetou = true;
     }
@@ -959,7 +959,7 @@ mod tests {
         // `specs/05-cliente-tui.md:42` promises "h j k l / setas navegar", and
         // until now only j and k did anything.
         let mut app = App::new();
-        app.focus = Panel::Dogma;
+        app.focus = Panel::Server;
 
         app.on_key(Key::Char('l'));
         assert_eq!(app.focus, Panel::Channels);
@@ -967,7 +967,7 @@ mod tests {
         assert_eq!(app.focus, Panel::Messages);
         // Wraps around, the way Tab already does.
         app.on_key(Key::Char('l'));
-        assert_eq!(app.focus, Panel::Dogma);
+        assert_eq!(app.focus, Panel::Server);
 
         app.on_key(Key::Char('h'));
         assert_eq!(app.focus, Panel::Messages);
@@ -1217,12 +1217,12 @@ mod tree_tests {
         // Tab and j share the same j. Moving the wrong list is the bug.
         let mut app = App::new();
         app.tree = tree();
-        app.dogmas = vec!["Terceira Tóquio".into(), "Geofront".into()];
-        app.focus = Panel::Dogma;
+        app.servers = vec!["Terceira Tóquio".into(), "Geofront".into()];
+        app.focus = Panel::Server;
 
         app.on_key(Key::Char('j'));
 
-        assert_eq!(app.selected_dogma, 1);
-        assert_eq!(app.selected, 0, "the tree moved while Dogma had focus");
+        assert_eq!(app.selected_server, 1);
+        assert_eq!(app.selected, 0, "the tree moved while server had focus");
     }
 }

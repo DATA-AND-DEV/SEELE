@@ -367,7 +367,7 @@ impl AudioTelemetry {
     /// # Por que `Option`, e não zero
     ///
     /// Porque o pior de uma lista vazia seria zero, e zero é justamente o valor
-    /// que este conserto tirou da tela — o relatório do Dogma manda `0.0` fixo
+    /// que este conserto tirou da tela — o relatório do servidor manda `0.0` fixo
     /// porque um servidor não tem como medir jitter. Sem fonte nenhuma sendo
     /// recebida não há o que dizer, e quem chama decide o que fazer com isso.
     #[must_use]
@@ -657,7 +657,7 @@ mod tests {
     #[test]
     fn sem_fonte_nenhuma_nao_ha_jitter_de_chegada_a_dizer() {
         // `None` e não zero: o pior de uma lista vazia seria zero, e zero é o
-        // número que este conserto tirou da tela — o relatório do Dogma manda
+        // número que este conserto tirou da tela — o relatório do servidor manda
         // `0.0` fixo porque um servidor não tem como medir jitter. Quem chama
         // decide o que fazer com a ausência; as duas cascas escolhem manter o
         // último valor medido.

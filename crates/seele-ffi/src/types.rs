@@ -137,7 +137,7 @@ pub enum NoticeReason {
     VoiceRoomDeleted,
     /// A Line this person had open no longer exists.
     LineDeleted,
-    /// The voice room asked about is the only one the Dogma has, so it stays.
+    /// The voice room asked about is the only one the server has, so it stays.
     LastVoiceRoom,
     /// Somebody else is already sharing their screen in this room.
     ///
@@ -147,18 +147,18 @@ pub enum NoticeReason {
     /// is its own reason instead of `PermissionDenied`, which would say the
     /// wrong thing and send somebody looking for a role they already have.
     ScreenShareTaken,
-    /// O Dogma parou a transmissão desta pessoa: a sala cresceu além da subida
+    /// O servidor parou a transmissão desta pessoa: a sala cresceu além da subida
     /// de quem hospeda.
     ///
     /// §5.1 pôs o caminho de quem hospeda dentro do teto — `caminho × 60% ÷ N` —
-    /// porque é o Dogma que sobe as N cópias. Passado certo N nem o piso do §2
+    /// porque é o servidor que sobe as N cópias. Passado certo N nem o piso do §2
     /// cabe, e o §3.2 diz o que acontece então: *quem para é o vídeo*.
     ///
     /// Razão própria, e não [`Self::SyncDegraded`], que toda casca escreve como
     /// «sinal em queda» — uma frase sobre a conexão de quem lê, na frente de
     /// alguém cuja conexão está boa e cuja plateia cresceu. E não um
     /// `ScreenShareStopped` mudo: quem apertou parar sabe que apertou, e quem
-    /// foi parado pelo Dogma não ficaria sabendo de nada.
+    /// foi parado pelo servidor não ficaria sabendo de nada.
     ScreenShareOverHostUplink,
 }
 
@@ -185,7 +185,7 @@ impl From<seele_core::AlertReason> for NoticeReason {
 
 /// What a Line holds, as the confirmation in front of destroying it needs it.
 ///
-/// Counted in the Dogma's database at the instant of asking, and carried across
+/// Counted in the server's database at the instant of asking, and carried across
 /// the bridge unrounded. A shell cannot work these out for itself: it holds one
 /// page of history and would guess low by whatever the Line's whole past is,
 /// and a number that is nearly right in a box promising to destroy 1.847
@@ -221,8 +221,8 @@ pub enum EndReason {
     Kicked,
     /// An operator barred this person.
     Banned,
-    /// The Dogma is full.
-    DogmaFull,
+    /// The server is full.
+    ServerFull,
     /// Planned downtime.
     ScheduledMaintenance,
     /// The server is stopping.
@@ -233,7 +233,7 @@ pub enum EndReason {
     ProtocolViolation,
     /// The client exceeded its frame budget.
     RateLimited,
-    /// This connection fell behind the Dogma's events and lost some.
+    /// This connection fell behind the server's events and lost some.
     ///
     /// Reconnecting is the repair, not a refusal: the session's view of the
     /// conversation has a hole in it that only a full resync fills.
@@ -270,7 +270,7 @@ impl From<seele_core::DisconnectReason> for EndReason {
             seele_core::DisconnectReason::HandshakeTimeout => Self::HandshakeTimeout,
             seele_core::DisconnectReason::Kicked => Self::Kicked,
             seele_core::DisconnectReason::Banned => Self::Banned,
-            seele_core::DisconnectReason::DogmaFull => Self::DogmaFull,
+            seele_core::DisconnectReason::ServerFull => Self::ServerFull,
             seele_core::DisconnectReason::ScheduledMaintenance => Self::ScheduledMaintenance,
             seele_core::DisconnectReason::ServerShuttingDown => Self::ServerShuttingDown,
             seele_core::DisconnectReason::Timeout => Self::Timeout,
@@ -357,7 +357,7 @@ impl From<seele_core::tofu::Verdict> for Trust {
 /// One person in a voice room.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Person {
-    /// Stable identifier for this person on this Dogma.
+    /// Stable identifier for this person on this server.
     pub id: u64,
     /// Display name.
     pub nickname: String,
@@ -544,7 +544,7 @@ pub struct Telemetry {
     /// Voice frames this machine produced and never managed to send.
     ///
     /// The third kind of loss, and the one that had no name. `loss_fraction`
-    /// is the network's, reported by the Dogma. `local_fault` is this machine's
+    /// is the network's, reported by the server. `local_fault` is this machine's
     /// capture or playback stumbling. This is neither: the frame was encoded,
     /// it was ready, and the transport refused it.
     ///
@@ -705,7 +705,7 @@ pub struct TelaEmCurso {
     ///
     /// Contadas no roster **desta** máquina, que é a única contagem que existe
     /// aqui. É a razão que a tela escreve ao lado da resolução — `720p · 6
-    /// pessoas assistindo`, §5.1 — e **não** é, hoje, o N pelo qual o Dogma
+    /// pessoas assistindo`, §5.1 — e **não** é, hoje, o N pelo qual o servidor
     /// dividiu o teto: esse número é calculado em `VoiceRoom::reconferir_o_teto` e
     /// nenhum quadro de controle o carrega de volta ao cliente. Os dois
     /// coincidem sempre que o roster estiver em dia, e divergem no intervalo
@@ -725,7 +725,7 @@ pub struct TelaEmCurso {
     /// e hoje ninguém os mede: nada nesta ponte alcança o codificador de quem
     /// compartilha, e do lado de quem assiste nada abre a recepção. Sem este
     /// campo os três sairiam zerados e a tela escreveria `0p · 0 quadros`, que
-    /// é a mentira confiante — o mesmo defeito do jitter que o Dogma manda como
+    /// é a mentira confiante — o mesmo defeito do jitter que o servidor manda como
     /// `0.0` porque não tem como medi-lo.
     ///
     /// `false` significa **não sei**, e a casca não escreve nada.
@@ -752,7 +752,7 @@ pub struct TelaEmCurso {
     ///   seria devolver a medida como se fosse a escolha, que é exatamente a
     ///   promessa que o §5 proíbe;
     /// - **uma transmissão própria que este processo não começou** — a sessão
-    ///   caiu e voltou, ou o Dogma reanunciou uma tela de antes.
+    ///   caiu e voltou, ou o servidor reanunciou uma tela de antes.
     pub pedido: Option<LimitesDeTela>,
 }
 
@@ -785,13 +785,13 @@ pub struct Snapshot {
     pub link: LinkState,
     /// How far the connection has got.
     pub pattern: Pattern,
-    /// What the Dogma is called.
+    /// What the server is called.
     ///
-    /// Follows a rename **inside the session** now: the Dogma announces it to
+    /// Follows a rename **inside the session** now: the server announces it to
     /// everybody connected, so a shell that redraws its header on
-    /// [`Event::DogmaChanged`] never shows a name the server stopped using.
-    pub dogma: String,
-    /// How many times the Dogma's picture has changed, this session.
+    /// [`Event::ServerChanged`] never shows a name the server stopped using.
+    pub server: String,
+    /// How many times the server's picture has changed, this session.
     ///
     /// Not the picture. The same reasoning as [`Snapshot::messages_revision`],
     /// with the numbers a size smaller: this value is read on every interface
@@ -802,8 +802,8 @@ pub struct Snapshot {
     /// more than that as text, sixty times a minute, for ever.
     ///
     /// The number itself means nothing — only the difference does. A shell
-    /// keeps the last one it drew and calls [`crate::Plug::dogma_icon`] when it
-    /// moves. Zero, and never moving, is the ordinary Dogma: it has no picture.
+    /// keeps the last one it drew and calls [`crate::Plug::server_icon`] when it
+    /// moves. Zero, and never moving, is the ordinary server: it has no picture.
     pub icon_revision: u64,
     /// This person's identifier, once known.
     pub me: Option<u64>,
@@ -811,7 +811,7 @@ pub struct Snapshot {
     pub nickname: String,
     /// Voice channels, each carrying who is in it.
     pub voice_rooms: Vec<VoiceRoom>,
-    /// Quem está conectado neste Dogma, em sala ou fora dela.
+    /// Quem está conectado neste servidor, em sala ou fora dela.
     ///
     /// **Não é a soma de [`VoiceRoom::people`]**, e essa diferença é a razão de o
     /// campo existir: quem entra no servidor e fica fora das salas não aparece
@@ -906,25 +906,25 @@ pub struct Snapshot {
     pub may_remove_message: bool,
     /// Whether this person may move somebody between voice_rooms — `mover_pessoa`.
     pub may_move_person: bool,
-    /// Whether this person may name the Dogma and give it a picture.
+    /// Whether this person may name the server and give it a picture.
     ///
-    /// `AdministerDogma`, which is the same permission behind
+    /// `AdministerServer`, which is the same permission behind
     /// [`Snapshot::may_delete_rooms`] today — and a separate field anyway,
     /// because they are separate questions. A shell that read the destroy flag
     /// to decide whether to offer a rename box would be leaning on a
     /// coincidence between two verbs that the roles table can pull apart the
-    /// moment somebody makes a role that may dress the Dogma without being able
+    /// moment somebody makes a role that may dress the server without being able
     /// to destroy what people wrote in it.
     ///
     /// **Convenience, never enforcement**, like every flag beside it.
-    pub may_customise_dogma: bool,
-    /// Whether this person may destroy voice_rooms and Lines — `administrar_dogma`.
+    pub may_customise_server: bool,
+    /// Whether this person may destroy voice_rooms and Lines — `administrar_server`.
     ///
     /// Its own boolean, and deliberately not [`Snapshot::may_manage_voice_rooms`].
-    /// Making a room and renaming one are mistakes a Dogma survives; destroying
+    /// Making a room and renaming one are mistakes a server survives; destroying
     /// one ends what other people wrote, and no screen of this product brings
     /// it back. `specs/04-servidor-seele.md` calls `gerenciar_voice_rooms` "criar e
-    /// configurar salas de voz" and `administrar_dogma` "todo o resto sobre o Dogma",
+    /// configurar salas de voz" and `administrar_server` "todo o resto sobre o servidor",
     /// so a role that may build rooms without being able to unmake them is a
     /// role somebody can actually write — and a single boolean for both would
     /// make that role impossible to offer correctly.
@@ -934,7 +934,7 @@ pub struct Snapshot {
     /// A transmissão de tela desta sala de voz, quando há uma.
     ///
     /// `None` quando ninguém está compartilhando **na sala onde esta pessoa
-    /// está**. Uma transmissão noutra sala não aparece aqui: o Dogma só a
+    /// está**. Uma transmissão noutra sala não aparece aqui: o servidor só a
     /// anuncia a quem está lá dentro, e desenhá-la fora seria a casca contando
     /// algo que a sessão não viu.
     pub tela: Option<TelaEmCurso>,
@@ -955,7 +955,7 @@ pub enum Event {
     MessagesChanged,
     /// voice_rooms or Lines changed.
     ChannelsChanged,
-    /// The Dogma renamed itself, or changed its picture.
+    /// The server renamed itself, or changed its picture.
     ///
     /// Separate from [`Self::ChannelsChanged`] for the reason
     /// `seele_core::Changed` gives: what moved is the header and the badge, and
@@ -964,8 +964,8 @@ pub enum Event {
     ///
     /// The new name is on the next [`Snapshot`]. The picture is not — read
     /// [`Snapshot::icon_revision`] and fetch it with
-    /// [`crate::Plug::dogma_icon`] when the number moves.
-    DogmaChanged,
+    /// [`crate::Plug::server_icon`] when the number moves.
+    ServerChanged,
     /// New measurements.
     TelemetryChanged,
     /// Something to surface.
@@ -996,7 +996,7 @@ pub enum Event {
     /// A file moved, finished moving, or stopped moving. ADR 0027.
     ///
     /// Its own event and not folded into [`Self::MessagesChanged`]: while a
-    /// file is going up there is no message yet — the Dogma publishes it only
+    /// file is going up there is no message yet — the server publishes it only
     /// once the bytes have arrived whole — so there is nothing for a message
     /// event to be about. What the screen has is a bar.
     TransferChanged {
@@ -1083,7 +1083,7 @@ pub enum Transfer {
         /// Which message.
         client_message_id: u64,
     },
-    /// The Dogma cut the stream: it refused. The reason is still travelling.
+    /// The server cut the stream: it refused. The reason is still travelling.
     ///
     /// Two variants for one refusal, and it is not a duplication: this one is
     /// what the *sending* end observes — the stream stopped — and it arrives
@@ -1095,7 +1095,7 @@ pub enum Transfer {
         /// Which message.
         client_message_id: u64,
     },
-    /// The Dogma said **why** it refused.
+    /// The server said **why** it refused.
     RefusedBecause {
         /// Which message.
         client_message_id: u64,
@@ -1105,7 +1105,7 @@ pub enum Transfer {
     /// A file that was asked for is not coming, and why.
     ///
     /// The expected reason is [`AttachmentRefusal::Expired`]: the bytes were
-    /// evicted to keep the Dogma under its ceiling, the row survived, and this
+    /// evicted to keep the server under its ceiling, the row survived, and this
     /// is what turns that row into a sentence on somebody's screen.
     Unavailable {
         /// Which attachment.
@@ -1141,7 +1141,7 @@ pub enum Transfer {
     },
 }
 
-/// Why a Dogma would not take, or would not hand back, a file.
+/// Why a server would not take, or would not hand back, a file.
 ///
 /// Mirrored here rather than re-exported from the wire, like every other
 /// enumeration that crosses this boundary: the shape a shell matches on is this
@@ -1151,9 +1151,9 @@ pub enum Transfer {
 pub enum AttachmentRefusal {
     /// The person lacks the permission to attach.
     NotAllowed,
-    /// Larger than this Dogma's per-file limit.
+    /// Larger than this server's per-file limit.
     TooLarge {
-        /// The largest file this Dogma accepts, in bytes. Carried because "too
+        /// The largest file this server accepts, in bytes. Carried because "too
         /// big" with no number sends somebody to try again with a file that is
         /// also too big.
         limit: u64,
@@ -1166,11 +1166,11 @@ pub enum AttachmentRefusal {
     HashDidNotMatch,
     /// Bytes are going up faster than the budget allows.
     RateLimited,
-    /// This Dogma is not storing attachments at all.
+    /// This server is not storing attachments at all.
     Unavailable,
     /// No such attachment, or it is in a Line this person may not read.
     NotFound,
-    /// The bytes were evicted to keep the Dogma under its ceiling.
+    /// The bytes were evicted to keep the server under its ceiling.
     Expired,
     /// The header was not a header.
     Malformed,
@@ -1179,7 +1179,7 @@ pub enum AttachmentRefusal {
 /// A file hanging off a message, as a screen sees it.
 ///
 /// ADR 0027. Present **even when the bytes are gone**, which is the whole
-/// reason the Dogma keeps the row after deleting the blob: a message that had a
+/// reason the server keeps the row after deleting the blob: a message that had a
 /// picture and now draws as an empty line leaves nobody able to tell there had
 /// been one.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -1194,14 +1194,14 @@ pub struct Attachment {
     pub declared_type: String,
     /// How many bytes it was.
     pub byte_size: u64,
-    /// Whether the bytes are still on the Dogma.
+    /// Whether the bytes are still on the server.
     pub expired: bool,
 }
 
 /// What a window may draw for one attachment, and why. ADR 0027.
 ///
 /// The answer to one press of one button, and never anything a screen gets by
-/// scrolling: the file lives on the Dogma, so looking at it is downloading it,
+/// scrolling: the file lives on the server, so looking at it is downloading it,
 /// and a Line that fetched every picture as it scrolled past would turn the
 /// host's disk ceiling into everybody's uplink.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -1351,23 +1351,23 @@ pub enum PlugError {
     UnknownChannel,
     /// The control stream broke.
     LinkLost,
-    /// The file offered as the Dogma's icon is not a picture that fits there.
+    /// The file offered as the server's icon is not a picture that fits there.
     ///
     /// Answered **before** anything is sent, by
-    /// `seele_core::check_dogma_icon`, and that is the whole reason this
+    /// `seele_core::check_server_icon`, and that is the whole reason this
     /// variant exists: the rule lives on the wire, and a picture that breaks it
     /// makes the frame unbuildable — which everything above the link reads as a
     /// dropped connection. Without this, choosing a PDF would look exactly like
     /// the network falling over, five-minute internal battery included.
     IconNotAPicture,
-    /// The picture offered as the Dogma's icon is heavier than a Dogma takes.
+    /// The picture offered as the server's icon is heavier than a server takes.
     ///
     /// Separate from [`PlugError::IconNotAPicture`] because the next step
     /// differs: a photograph can be shrunk, and a PDF cannot be made into an
     /// icon. The ceiling travels with it so the sentence can carry the number
     /// — a shell has no other way to name a limit that lives in the protocol.
     IconTooBig {
-        /// The most bytes a Dogma accepts.
+        /// The most bytes a server accepts.
         limit_bytes: u64,
     },
     /// Alguém já está compartilhando a tela nesta sala de voz.
@@ -1377,7 +1377,7 @@ pub enum PlugError {
     /// [`PlugError::Refused`] ou o `PermissionDenied` de um aviso a mandaria
     /// procurar um papel que ela já tem.
     ///
-    /// Quem decide é o Dogma, e por isso este veredito chega **também** — hoje,
+    /// Quem decide é o servidor, e por isso este veredito chega **também** — hoje,
     /// só — pelo caminho assíncrono, como [`NoticeReason::ScreenShareTaken`]
     /// num [`Event::NoticeRaised`]. A variante existe aqui para o dia em que o
     /// pedido tiver resposta síncrona; esta ponte nunca a devolve por conta
@@ -1386,7 +1386,7 @@ pub enum PlugError {
     ScreenShareTaken,
     /// Esta máquina não tem como começar a compartilhar.
     ///
-    /// **Não é uma recusa do Dogma e não é rede.** É uma das quatro coisas que
+    /// **Não é uma recusa do servidor e não é rede.** É uma das quatro coisas que
     /// faltam **aqui**, e três delas a pessoa consegue mudar:
     ///
     /// 1. o módulo do Cisco não está em disco. O produto não vem com codec, e é
@@ -1456,7 +1456,7 @@ mod tests {
             seele_core::DisconnectReason::HandshakeTimeout,
             seele_core::DisconnectReason::Kicked,
             seele_core::DisconnectReason::Banned,
-            seele_core::DisconnectReason::DogmaFull,
+            seele_core::DisconnectReason::ServerFull,
             seele_core::DisconnectReason::ScheduledMaintenance,
             seele_core::DisconnectReason::ServerShuttingDown,
             seele_core::DisconnectReason::Timeout,
@@ -1637,18 +1637,18 @@ mod tests {
             assert!(
                 !campo.contains("Vec<u8>"),
                 "`Snapshot` carries raw bytes: `{campo}`\n\
-                 The one thing that would be, today, is the Dogma\u{2019}s icon, and it \
+                 The one thing that would be, today, is the Server\u{2019}s icon, and it \
                  is bounded rather than unbounded — but it is still kilobytes \
                  cloned and turned into JSON twice a second for a value that \
                  changes when somebody presses a button. Use `icon_revision` and \
-                 `Plug::dogma_icon`, which are the same answer one size smaller."
+                 `Plug::server_icon`, which are the same answer one size smaller."
             );
         }
 
         assert!(
             campos.iter().any(|campo| campo.contains("icon_revision")),
             "`icon_revision` is gone, and with it the only way a shell can tell \
-             that the Dogma\u{2019}s picture moved without being handed it on every frame"
+             that the Server\u{2019}s picture moved without being handed it on every frame"
         );
 
         assert!(

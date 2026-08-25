@@ -10,7 +10,7 @@ Servidor auto-hospedado, comunidades pequenas, operador confiável mas não nece
 |---|---|
 | Escuta passiva na rede | TLS 1.3 obrigatório via QUIC |
 | Man-in-the-middle no primeiro contato | TOFU com pinning e aviso explícito na troca de chave |
-| Cliente malicioso falando em VoiceRoom sem permissão | Validação server-side em todo datagram |
+| Cliente malicioso falando em VoiceRoom sem permissão | Validação servidor-side em todo datagram |
 | Cliente forjando identidade de outro | `ssrc` atribuído pelo servidor, nunca aceito do cliente |
 | Saturação de CPU/banda por flood | Limite de quadros por segundo por remetente, desconexão progressiva |
 | Vazamento de histórico por acesso ao disco do servidor | **Fora de escopo em v1** — documentar claramente |
@@ -35,7 +35,7 @@ Recomendação: TOFU como padrão, ACME como opção documentada. O aviso de mud
 1. **Chave pública (Ed25519)** — o cliente gera par de chaves no primeiro uso; o servidor guarda a pública. Desafio-resposta no handshake. Sem senha, sem hash para vazar, e prepara terreno para E2EE. Custo: recuperação de conta e uso em múltiplos dispositivos precisam de fluxo próprio.
 2. **Senha** — Argon2id com parâmetros modernos, salt por usuário. Familiar, fácil de usar em vários dispositivos. Traz todos os problemas conhecidos de senha.
 
-**Decidido em M5, exatamente como recomendado** (ADR 0021). Chave pública Ed25519 como identidade; entrada no Dogma por **convite de uso único** (160 bits, sete dias, consumido atomicamente) ou por **senha do Dogma** em Argon2id, à escolha do operador. Um Dogma sem nenhum dos dois é aberto, que segue sendo o padrão para rede local — e o `seeled` avisa em voz alta ao subir assim escutando fora do loopback.
+**Decidido em M5, exatamente como recomendado** (ADR 0021). Chave pública Ed25519 como identidade; entrada no servidor por **convite de uso único** (160 bits, sete dias, consumido atomicamente) ou por **senha do servidor** em Argon2id, à escolha do operador. Um servidor sem nenhum dos dois é aberto, que segue sendo o padrão para rede local — e o `seeled` avisa em voz alta ao subir assim escutando fora do loopback.
 
 O segredo viaja no `Hello`, antes do desafio-resposta: gastar verificação de assinatura com quem não devia estar batendo à porta é trabalho de graça para quem varre a internet. A recusa é sempre `CredentialRejected`, uniforme, com o motivo real só no log do operador.
 
@@ -44,7 +44,7 @@ O convite é o que torna um link compartilhável defensável — ver o esquema `
 Independente da escolha:
 - Rate limiting de tentativas, com backoff por IP e por identidade.
 - Mensagem de falha uniforme (não revelar se a conta existe).
-- Sessões com expiração e revogação server-side.
+- Sessões com expiração e revogação servidor-side.
 
 **Limitação de taxa decidida em M5** (ADR 0025), em balde de fichas e não em janela fixa. Antes de autenticar, por endereço de origem: trinta apertos de mão de rajada, trinta por minuto, consultados antes de o `Hello` ser lido — é o que impede que cada pacote de quem varre a rede compre um Argon2id de CPU do anfitrião. Depois de autenticar, por **conexão** e não por identidade: a mesma pessoa em duas máquinas são duas conexões legítimas, e quem abre conexões em série para diluir o limite esbarra antes no balde por endereço. Sessenta quadros de controle de rajada, vinte por segundo; o primeiro excedente rende `AlertReason::RateLimited` e o ducentésimo derruba com `DisconnectReason::RateLimited` — avisar antes de derrubar, porque derrubar calado é como um produto passa a parecer quebrado. O limite de quadros de mídia da tabela de ameaças acima usa o mesmo balde, descartando em vez de desconectar.
 
@@ -74,7 +74,7 @@ perguntar; um diretório `anexos/` é navegável por qualquer gerenciador de
 arquivos, e uma foto se lê de relance.
 
 **Guardado em claro, e documentado.** Cifra em repouso foi considerada e
-recusada: a chave teria de estar viva no mesmo disco, porque o Dogma precisa
+recusada: a chave teria de estar viva no mesmo disco, porque o servidor precisa
 servir o arquivo a quem tem permissão a qualquer momento. Isso protege contra
 notebook roubado e contra nada mais — e contra notebook roubado a cifra de disco
 inteiro do sistema protege melhor, é o que a pessoa já tem, e ela pode ligar
@@ -83,7 +83,7 @@ hoje.
 Em trânsito nada muda: TLS 1.3 dentro do QUIC, sem modo claro. **O arquivo não é
 legível na rede. É legível no disco de quem hospeda.**
 
-**Um Dogma não varre vírus.** Não há motor, não há base de assinaturas e não há
+**Um servidor não varre vírus.** Não há motor, não há base de assinaturas e não há
 caminho de atualização para uma. O que ele confere é se o arquivo chegou
 inteiro — tamanho contra o declarado, conteúdo contra o hash declarado — e é a
 única pergunta que ele consegue responder. **Não há lista de extensões
@@ -106,6 +106,6 @@ recebeu, num lugar que a pessoa escolheu.
 
 ## Não fazer
 
-- Telemetria enviada a terceiros. O produto não fala com ninguém além do Dogma escolhido.
+- Telemetria enviada a terceiros. O produto não fala com ninguém além do servidor escolhido.
 - Crash reporting automático sem consentimento explícito.
 - Qualquer criptografia caseira. Só primitivas de bibliotecas auditadas.

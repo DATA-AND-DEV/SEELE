@@ -99,7 +99,7 @@ pub struct Message {
     ///
     /// **Still `Some` after the bytes are gone**, carrying
     /// `AttachmentState::Expired` with the name and the size the file had. That
-    /// is the whole reason the Dogma keeps the row after deleting the blob: a
+    /// is the whole reason the server keeps the row after deleting the blob: a
     /// message that had a picture and now draws as an empty line would leave
     /// nobody able to tell that there had ever been one.
     pub attachment: Option<seele_proto::control::AttachmentInfo>,
@@ -175,24 +175,24 @@ pub struct Ended {
     pub reason: seele_proto::control::DisconnectReason,
 }
 
-/// Everything this client knows about the Dogma it is attached to.
+/// Everything this client knows about the server it is attached to.
 #[derive(Debug, Default, Clone)]
 pub struct Room {
     /// Which person this connection is.
     pub me: Option<PersonId>,
     /// The media source the server assigned — gap G1.
     pub ssrc: Option<Ssrc>,
-    /// What the Dogma is called.
-    pub dogma: String,
-    /// The picture the Dogma chose for itself, if it chose one.
+    /// What the server is called.
+    pub server: String,
+    /// The picture the server chose for itself, if it chose one.
     ///
     /// PNG bytes, already bounded by `seele_proto::control` on the way in —
-    /// a real PNG, at most `MAX_DOGMA_ICON_SIDE` a side, at most
-    /// `MAX_DOGMA_ICON_LEN` bytes. Nothing here decodes them: a shell draws
+    /// a real PNG, at most `MAX_SERVER_ICON_SIDE` a side, at most
+    /// `MAX_SERVER_ICON_LEN` bytes. Nothing here decodes them: a shell draws
     /// them, and the terminal one has nowhere to draw them at all, which is
     /// why this is bytes and not a decoded image.
     ///
-    /// `None` is the ordinary state and is what every Dogma that exists today
+    /// `None` is the ordinary state and is what every server that exists today
     /// is in. It is also what a handshake resets this to — see
     /// [`Room::adopt`].
     pub icon: Option<Vec<u8>>,
@@ -214,7 +214,7 @@ pub struct Room {
     pub people: HashMap<PersonId, Person>,
     /// Who is seated in which voice room, in arrival order.
     pub seats: HashMap<VoiceRoomId, Vec<PersonId>>,
-    /// Quem está conectado neste Dogma, esteja ou não numa sala.
+    /// Quem está conectado neste servidor, esteja ou não numa sala.
     ///
     /// # Por que não dá para deduzir de [`Self::seats`]
     ///
@@ -244,12 +244,12 @@ pub struct Room {
     ///
     /// Uma transmissão por sala de voz, que é o §6 item 3 da spec de compartilhamento
     /// de tela: *«duas dobram a subida de quem recebe e triplicam a
-    /// interface»*. Um mapa e não um campo em [`VoiceRoomInfo`] porque o Dogma
+    /// interface»*. Um mapa e não um campo em [`VoiceRoomInfo`] porque o servidor
     /// **não** pôs a transmissão lá — ele reenvia `ScreenShareStarted` a quem
     /// entra numa sala que já tem uma —, e um campo que só o reenvio preenche
     /// seria um campo mentindo no aperto de mão.
     pub telas: HashMap<VoiceRoomId, Tela>,
-    /// A subida que o Dogma mediu da própria máquina, em bits por segundo.
+    /// A subida que o servidor mediu da própria máquina, em bits por segundo.
     ///
     /// A primeira linha do teto do §5.1 — `caminho de quem HOSPEDA × 60% ÷ N` —
     /// e a única perna que quem compartilha **não** consegue ver: os bytes saem
@@ -280,7 +280,7 @@ pub struct Tela {
     /// Quantas pessoas estão recebendo esta transmissão, quem compartilha
     /// excluído.
     ///
-    /// **É o N do §5.1, e é o que o servidor sobe.** O Dogma encaminha os
+    /// **É o N do §5.1, e é o que o servidor sobe.** O servidor encaminha os
     /// quadros, então o que a máquina dele levanta é `N × teto` — e a correção
     /// que aquela seção torna obrigatória divide a subida de quem hospeda por
     /// este número. Sem ele quem compartilha aplica um `min(...)` com uma perna
@@ -295,7 +295,7 @@ pub struct Tela {
     pub person: PersonId,
     /// Como a transmissão se chama.
     ///
-    /// Atribuído pelo Dogma, como o `ssrc`, e **diferente** dele: a tabela de
+    /// Atribuído pelo servidor, como o `ssrc`, e **diferente** dele: a tabela de
     /// `ssrc` → pessoa é sobre quem fala, e uma tela não é um falante.
     pub screen: ScreenId,
 }
@@ -325,13 +325,13 @@ pub struct Changed {
     pub messages: bool,
     /// voice_rooms or Lines changed.
     pub channels: bool,
-    /// The Dogma renamed itself, or changed its picture.
+    /// The server renamed itself, or changed its picture.
     ///
     /// Its own flag and not folded into [`Self::channels`]: what moves is the
     /// header and the badge, not the room lists, and a shell that redrew every
     /// channel because the server was renamed would be redrawing the one part
     /// of the screen that did not change.
-    pub dogma: bool,
+    pub server: bool,
     /// New measurements.
     pub telemetry: bool,
     /// A notice was raised.
@@ -356,7 +356,7 @@ impl Changed {
         self.roster
             || self.messages
             || self.channels
-            || self.dogma
+            || self.server
             || self.telemetry
             || self.notice
             || self.transfers
@@ -376,7 +376,7 @@ impl Room {
     ///
     /// The handshake consumes the `Session` message while establishing PADRÃO:
     /// AZUL, so no shell ever sees it go by. Without this a client that
-    /// connected perfectly shows an empty Dogma — which looks exactly like a
+    /// connected perfectly shows an empty server — which looks exactly like a
     /// server with no voice_rooms.
     ///
     /// `nickname` is what this client asked to be called. It has to be passed
@@ -385,9 +385,9 @@ impl Room {
     pub fn adopt(&mut self, info: &SessionInfo, nickname: &str) {
         self.me = Some(info.person);
         self.ssrc = Some(info.ssrc);
-        self.dogma = info.dogma.clone();
+        self.server = info.server.clone();
         // Cleared, and not left alone, because this runs again on every
-        // reconnection. The handshake describes the Dogma from scratch and the
+        // reconnection. The handshake describes the server from scratch and the
         // picture arrives just behind it when there is one; keeping the old one
         // here would leave a client that was away while the icon was taken down
         // drawing it for the rest of the session.
@@ -398,14 +398,14 @@ impl Room {
         // Limpas pelo mesmo motivo do ícone, e o estrago aqui é maior: uma
         // conexão nova não tem fluxo de tela nenhum — o `Client` que os
         // carregava morreu com ela —, então uma transmissão herdada seria a
-        // interface prometendo uma tela que não tem por onde chegar. O Dogma
+        // interface prometendo uma tela que não tem por onde chegar. O servidor
         // reenvia `ScreenShareStarted` a quem entra num sala de voz que está
         // transmitindo, então o que é verdade volta sozinho.
         self.telas.clear();
         self.chave_pedida = None;
         // Pelo mesmo motivo, e com o mesmo estrago: a medida é da máquina que
         // hospeda **esta** conexão, e uma conexão nova pode ser com outro
-        // Dogma. Carregar a subida do anterior seria dimensionar o teto pela
+        // servidor. Carregar a subida do anterior seria dimensionar o teto pela
         // casa errada, que é o defeito que o §5.1 mandou corrigir.
         self.caminho_de_quem_hospeda_bps = None;
         self.people.insert(
@@ -437,7 +437,7 @@ impl Room {
     /// Records that this person's plug came **out**, and empties their seat.
     ///
     /// The other half of [`Self::enter_voice_room`], and it was missing for as long
-    /// as that one existed. The Dogma does not echo `PersonLeft` back to the
+    /// as that one existed. The server does not echo `PersonLeft` back to the
     /// person who caused it — "they already know" — so leaving, exactly like
     /// entering, is bookkeeping this side has to do for itself. Without it the
     /// server empties the seat, every other client empties the seat, and the
@@ -506,7 +506,7 @@ impl Room {
     /// # An empty voice room has no average
     ///
     /// Not zero. Zero is a measurement, and by the bands it is a critical one:
-    /// a Dogma with four idle voice_rooms would show four red rooms nobody is in,
+    /// a server with four idle voice_rooms would show four red rooms nobody is in,
     /// and the one voice room that is genuinely in trouble would stop standing out.
     /// `None` says "nothing to average", which is the truth, and leaves the
     /// shell to draw the absence — the comp draws `——` for a plug with no
@@ -639,7 +639,7 @@ impl Room {
     /// Ausência de medida do anfitrião **não** é zero: quando o `HostUplink`
     /// não chegou, ou chegou dizendo zero, a perna dele fica no cano das provas
     /// em vez de zerar o teto — ver [`Self::caminho_de_quem_hospeda_bps`]. E é
-    /// essa perna, e não esta, que trava o teto em 1200 kbps num Dogma que não
+    /// essa perna, e não esta, que trava o teto em 1200 kbps num servidor que não
     /// declarou a própria subida, por mais que esta ponta meça: o `min` do §5.1
     /// é o menor dos três.
     #[must_use]
@@ -668,7 +668,7 @@ impl Room {
             ServerMessage::Session {
                 person,
                 ssrc,
-                dogma,
+                server,
                 voice_rooms,
                 lines,
                 permissions,
@@ -676,9 +676,9 @@ impl Room {
             } => {
                 self.me = Some(*person);
                 self.ssrc = Some(*ssrc);
-                self.dogma.clone_from(dogma);
+                self.server.clone_from(server);
                 // For the reason [`Self::adopt`] gives: a handshake describes
-                // the Dogma from scratch, picture included.
+                // the server from scratch, picture included.
                 self.icon = None;
                 self.voice_rooms.clone_from(voice_rooms);
                 self.lines.clone_from(lines);
@@ -737,7 +737,7 @@ impl Room {
 
             ServerMessage::PersonGone { person } => {
                 self.presentes.retain(|presente| presente != person);
-                // Os assentos **não** são limpos aqui: o Dogma manda um
+                // Os assentos **não** são limpos aqui: o servidor manda um
                 // `PersonLeft` por sala que a pessoa ocupava, e limpar nos dois
                 // lugares poria duas autoridades sobre a mesma linha. O que se
                 // limpa é o que só esta mensagem sabe.
@@ -848,7 +848,7 @@ impl Room {
             ServerMessage::AttachmentUnavailable { attachment, reason } => {
                 // Fold the answer back into the message, so the screen stops
                 // offering a file that is gone without anybody having to fetch
-                // the page again. The row on the Dogma already says this; the
+                // the page again. The row on the server already says this; the
                 // page this client is holding was drawn before it did.
                 if *reason == seele_proto::control::AttachmentRefusal::Expired {
                     for message in &mut self.messages {
@@ -911,21 +911,21 @@ impl Room {
                 }
             }
 
-            // What the Dogma calls itself, changed while everybody is inside.
+            // What the server calls itself, changed while everybody is inside.
             //
             // Folded unconditionally, including when the value is the one
-            // already held: the Dogma only sends these when it committed a
+            // already held: the server only sends these when it committed a
             // change, and comparing here would mean this module deciding that a
             // rename to the same string is not news — which is a judgement
             // about a screen, and this module has none.
-            ServerMessage::DogmaRenamed { name } => {
-                self.dogma.clone_from(name);
-                changed.dogma = true;
+            ServerMessage::ServerRenamed { name } => {
+                self.server.clone_from(name);
+                changed.server = true;
             }
 
-            ServerMessage::DogmaIconChanged { icon } => {
+            ServerMessage::ServerIconChanged { icon } => {
                 self.icon.clone_from(icon);
-                changed.dogma = true;
+                changed.server = true;
             }
 
             // Somebody with the permission moved this plug.
@@ -996,7 +996,7 @@ impl Room {
 
             // ---- compartilhamento de tela ----
             //
-            // O Dogma manda `ScreenShareStarted` a **todo** mundo da sala de voz, quem
+            // O servidor manda `ScreenShareStarted` a **todo** mundo da sala de voz, quem
             // compartilha incluído: quem compartilha precisa do `ScreenId` para
             // poder abrir o fluxo, e todo o resto precisa saber que um fluxo
             // vem aí em vez de descobrir sendo entregue um.
@@ -1012,7 +1012,7 @@ impl Room {
                 screen,
             } => {
                 // A contagem sobrevive ao reenvio, e é por isso que ela é lida
-                // antes de inserir: o Dogma manda `ScreenShareStarted` de novo
+                // antes de inserir: o servidor manda `ScreenShareStarted` de novo
                 // a **cada** pessoa que entra num sala de voz que já transmite, e
                 // zerar ali faria a interface piscar «0 assistindo» e o teto
                 // subir por um instante — justamente no instante em que a sala
@@ -1132,7 +1132,7 @@ mod tests {
             id: SessionId(1),
             person: PersonId(7),
             ssrc: Ssrc(700),
-            dogma: "Terceira Tóquio".into(),
+            server: "Terceira Tóquio".into(),
             voice_rooms: vec![VoiceRoomInfo {
                 id: VOICE_ROOM,
                 name: "VOICE_ROOM-01 CENTRAL".into(),
@@ -1186,12 +1186,12 @@ mod tests {
     }
 
     #[test]
-    fn the_session_message_fills_in_the_dogma_and_the_channels() {
+    fn the_session_message_fills_in_the_server_and_the_channels() {
         let mut room = Room::new();
         let changed = room.apply(&session());
 
         assert!(changed.channels);
-        assert_eq!(room.dogma, "Terceira Tóquio");
+        assert_eq!(room.server, "Terceira Tóquio");
         assert_eq!(room.voice_rooms.len(), 1);
         assert_eq!(room.lines.len(), 1);
         assert_eq!(room.me, Some(PersonId(7)));
@@ -1207,7 +1207,7 @@ mod tests {
             id: SessionId(1),
             person: PersonId(7),
             ssrc: Ssrc(700),
-            dogma: "Terceira Tóquio".into(),
+            server: "Terceira Tóquio".into(),
             voice_rooms: Vec::new(),
             lines: Vec::new(),
             permissions: Vec::new(),
@@ -1661,20 +1661,20 @@ mod tests {
     }
 
     #[test]
-    fn renaming_the_dogma_reaches_a_client_that_never_asked() {
+    fn renaming_the_server_reaches_a_client_that_never_asked() {
         // ADR 0032 names the failure this prevents: the screen of whoever
         // renamed the server showing the new name and everybody else's showing
         // the old one until they reconnect.
         let mut room = Room::new();
         room.apply(&session());
-        assert_eq!(room.dogma, "Terceira Tóquio");
+        assert_eq!(room.server, "Terceira Tóquio");
 
-        let changed = room.apply(&ServerMessage::DogmaRenamed {
+        let changed = room.apply(&ServerMessage::ServerRenamed {
             name: "Quartel-General".into(),
         });
 
-        assert_eq!(room.dogma, "Quartel-General");
-        assert!(changed.dogma, "the header was not told to redraw");
+        assert_eq!(room.server, "Quartel-General");
+        assert!(changed.server, "the header was not told to redraw");
         assert!(
             !changed.channels,
             "renaming the server told the shell to redraw both channel lists,              which are the part of the screen that did not change"
@@ -1682,7 +1682,7 @@ mod tests {
     }
 
     #[test]
-    fn the_dogma_icon_arrives_and_can_be_taken_down_again() {
+    fn the_server_icon_arrives_and_can_be_taken_down_again() {
         // Both halves. An `Option` folded in only when it is `Some` is the
         // classic version of this bug: the picture goes up and never comes
         // down, so it stays on the screen after it has left the database.
@@ -1691,30 +1691,30 @@ mod tests {
         assert_eq!(room.icon, None, "a fresh room invented a picture");
 
         let bytes = vec![0x89, b'P', b'N', b'G', 1, 2, 3];
-        let changed = room.apply(&ServerMessage::DogmaIconChanged {
+        let changed = room.apply(&ServerMessage::ServerIconChanged {
             icon: Some(bytes.clone()),
         });
         assert_eq!(room.icon, Some(bytes));
-        assert!(changed.dogma);
+        assert!(changed.server);
 
-        let changed = room.apply(&ServerMessage::DogmaIconChanged { icon: None });
+        let changed = room.apply(&ServerMessage::ServerIconChanged { icon: None });
         assert_eq!(
             room.icon, None,
             "taking the picture down did not reach here"
         );
-        assert!(changed.dogma);
+        assert!(changed.server);
     }
 
     #[test]
     fn a_handshake_forgets_the_picture_the_last_one_left() {
-        // What makes "the Dogma sends the icon only when it has one" honest.
-        // A reconnection re-describes the Dogma from scratch, and a client that
+        // What makes "the server sends the icon only when it has one" honest.
+        // A reconnection re-describes the server from scratch, and a client that
         // was away while the picture was taken down would otherwise draw it for
-        // the rest of the session — the Dogma says nothing, because there is
+        // the rest of the session — the server says nothing, because there is
         // nothing to say.
         let mut room = Room::new();
         room.apply(&session());
-        room.apply(&ServerMessage::DogmaIconChanged {
+        room.apply(&ServerMessage::ServerIconChanged {
             icon: Some(vec![0x89, b'P', b'N', b'G']),
         });
 
@@ -1922,7 +1922,7 @@ mod tests {
             id: SessionId(1),
             person: PersonId(7),
             ssrc: Ssrc(700),
-            dogma: "Terceira Tóquio".into(),
+            server: "Terceira Tóquio".into(),
             voice_rooms: Vec::new(),
             lines: Vec::new(),
             roles: Vec::new(),
@@ -1991,7 +1991,7 @@ mod tests {
             crate::tela::Teto::Bps(1_200_000)
         );
 
-        // O Dogma dizendo «não medi». O teto não pode se mexer.
+        // O servidor dizendo «não medi». O teto não pode se mexer.
         let changed = room.apply(&ServerMessage::HostUplink { bps: 0 });
         assert!(
             !changed.telas,
@@ -2076,7 +2076,7 @@ mod tests {
             800_000
         );
 
-        // O reenvio de `ScreenShareStarted` — o Dogma manda um a cada pessoa
+        // O reenvio de `ScreenShareStarted` — o servidor manda um a cada pessoa
         // que entra numa sala que já transmite — não pode zerar a contagem, ou
         // o teto subiria justamente no instante em que a sala cresceu.
         room.apply(&ServerMessage::ScreenShareStarted {
@@ -2147,7 +2147,7 @@ mod tests {
     fn reconectar_nao_herda_transmissao_nenhuma() {
         // A conexão é nova e os fluxos morreram com a antiga, então uma
         // transmissão herdada seria a interface prometendo uma tela que não tem
-        // por onde chegar. O Dogma reenvia o que é verdade logo em seguida.
+        // por onde chegar. O servidor reenvia o que é verdade logo em seguida.
         let mut room = room();
         room.apply(&ServerMessage::ScreenShareStarted {
             voice_room: VOICE_ROOM,
@@ -2164,7 +2164,7 @@ mod tests {
                 id: SessionId(2),
                 person: PersonId(7),
                 ssrc: Ssrc(700),
-                dogma: "Terceira Tóquio".into(),
+                server: "Terceira Tóquio".into(),
                 voice_rooms: Vec::new(),
                 lines: Vec::new(),
                 permissions: Vec::new(),

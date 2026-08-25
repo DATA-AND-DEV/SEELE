@@ -1,6 +1,6 @@
 //! A escada de alcançabilidade do ADR 0022.
 //!
-//! Um Dogma na mesma rede sempre funcionou. Pela internet, atrás de um roteador
+//! Um servidor na mesma rede sempre funcionou. Pela internet, atrás de um roteador
 //! doméstico, não — e o ADR 0022 trata isso como uma **escada**, tentada em
 //! ordem, onde cada degrau vale por si e nenhum depende do seguinte:
 //!
@@ -22,7 +22,7 @@
 //! O degrau 4 aprende: um ponto de encontro vê que endereço falou com que
 //! endereço, e quando. Nunca o conteúdo — o TOFU e o TLS 1.3 continuam ponta a
 //! ponta —, e é por isso que ele é tentado **por último**, só quando os de cima
-//! não deram. Um Dogma que já alcança de fora não ganha terceiro nenhum.
+//! não deram. Um servidor que já alcança de fora não ganha terceiro nenhum.
 
 use std::net::{IpAddr, SocketAddr, UdpSocket};
 
@@ -34,11 +34,11 @@ pub mod interfaces;
 pub mod pcp;
 pub mod porta;
 
-/// Que famílias de endereço a escuta de um Dogma alcança de fato.
+/// Que famílias de endereço a escuta de um servidor alcança de fato.
 ///
-/// Existe para poder ser **dita**. Um Dogma que perdeu o IPv6 porque a máquina
+/// Existe para poder ser **dita**. Um servidor que perdeu o IPv6 porque a máquina
 /// não tem, ou que perdeu o IPv4 porque o sistema recusou pilha dupla, é um
-/// Dogma que metade de quem tentar não vai alcançar — e descobrir isso pelo
+/// servidor que metade de quem tentar não vai alcançar — e descobrir isso pelo
 /// silêncio de "não conecta" é o defeito que o ADR 0022 nomeia.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pilha {
@@ -64,14 +64,14 @@ impl Pilha {
     }
 }
 
-/// A escuta que o Dogma abriu **de verdade**, e a única fonte do que a escada
+/// A escuta que o servidor abriu **de verdade**, e a única fonte do que a escada
 /// pode prometer.
 ///
 /// # Por que a escada deixou de receber só a porta
 ///
 /// Ela recebia `local: u16`, e por isso não tinha como saber em que famílias o
 /// socket atende. Numa máquina em que a pilha dupla falha — Windows e os BSD,
-/// pelo quadro de [`abrir_escuta`] — o Dogma recua para `0.0.0.0`, e a escada
+/// pelo quadro de [`abrir_escuta`] — o servidor recua para `0.0.0.0`, e a escada
 /// continuava consultando o IPv6 global da máquina, achando um, e declarando
 /// [`Degrau::Ipv6Direto`]. O convite anunciava um endereço IPv6 em que ninguém
 /// estava escutando: nem um par com IPv6 nativo e firewall aberto entraria.
@@ -92,16 +92,16 @@ pub struct Escuta {
 }
 
 impl Escuta {
-    /// A escuta de um Dogma: a porta em que ele atende e o que o socket serve.
+    /// A escuta de um servidor: a porta em que ele atende e o que o socket serve.
     ///
-    /// Os dois vêm do socket já aberto — ver [`crate::Server::local_addr`] e
-    /// [`crate::Server::pilha`].
+    /// Os dois vêm do socket já aberto — ver [`crate::Daemon::local_addr`] e
+    /// [`crate::Daemon::pilha`].
     #[must_use]
     pub fn nova(porta: u16, pilha: Pilha) -> Self {
         Self { porta, pilha }
     }
 
-    /// A porta em que o Dogma atende.
+    /// A porta em que o servidor atende.
     #[must_use]
     pub fn porta(self) -> u16 {
         self.porta
@@ -140,7 +140,7 @@ impl Escuta {
     }
 }
 
-/// Abre o socket UDP em que o Dogma vai atender.
+/// Abre o socket UDP em que o servidor vai atender.
 ///
 /// # Por que isto não é `UdpSocket::bind`
 ///
@@ -168,12 +168,12 @@ impl Escuta {
 ///
 /// Então `IPV6_V6ONLY` é escrito à mão, e **conferido de volta**: no OpenBSD o
 /// `setsockopt` recusa desligar a opção, e há sistemas que devolvem `Ok` sem
-/// que ela valha. Um Dogma que *acha* que atende em IPv4 e não atende é
+/// que ela valha. Um servidor que *acha* que atende em IPv4 e não atende é
 /// exatamente o silêncio que este módulo existe para não produzir.
 ///
 /// # O que cada endereço quer dizer
 ///
-/// - `[::]` — tudo. Pilha dupla, e é o padrão de um Dogma.
+/// - `[::]` — tudo. Pilha dupla, e é o padrão de um servidor.
 /// - `0.0.0.0` — todas as interfaces **IPv4**, e só elas. Literal, porque é o
 ///   que o texto diz; quem escreve isso está pedindo IPv4.
 /// - qualquer outro — aquele endereço e mais nenhum. O operador nomeou uma
@@ -212,7 +212,7 @@ pub fn abrir_escuta(escuta: SocketAddr) -> Result<(UdpSocket, Pilha)> {
         Err(erro) => {
             tracing::warn!(
                 %erro,
-                "sem pilha dupla nesta máquina: o Dogma vai atender só em IPv4, \
+                "sem pilha dupla nesta máquina: o servidor vai atender só em IPv4, \
                  e quem só tem IPv6 não vai alcançar"
             );
             let quatro = SocketAddr::from(([0, 0, 0, 0], escuta.port()));
@@ -362,7 +362,7 @@ pub fn endereco_de_saida_v4() -> Option<std::net::IpAddr> {
     (!local.is_loopback() && !local.is_unspecified()).then_some(local)
 }
 
-/// Em que degrau da escada do ADR 0022 este Dogma parou.
+/// Em que degrau da escada do ADR 0022 este servidor parou.
 ///
 /// Nomes estáveis e não frases: `specs` manda a frase que a pessoa lê morar na
 /// casca, e este enum atravessa o `seele-ffi` até o JavaScript, onde a frase
@@ -499,7 +499,7 @@ impl Tipo {
     /// Observação vence afirmação. `Local` continua na frente porque a casa é
     /// mais barata que tudo — o ADR 0006 registra a 0.5.0 tendo quebrado isso —
     /// e `PortaNoRoteador` continua acima do furo porque ali alguém abriu a
-    /// porta de propósito, e um Dogma com porta aberta nem chega a furar.
+    /// porta de propósito, e um servidor com porta aberta nem chega a furar.
     ///
     /// # E é por isso que o PCP entra **abaixo** do refletido
     ///
@@ -606,7 +606,7 @@ impl Degrau {
     }
 }
 
-/// Até onde este Dogma é alcançável, e por quê.
+/// Até onde este servidor é alcançável, e por quê.
 ///
 /// Campos privados de propósito: o único construtor é [`Alcance::decidir`], que
 /// passa cada endereço pela [`Escuta`]. Um campo público deixaria escrever um
@@ -898,7 +898,7 @@ impl Alcance {
         &self.alvos
     }
 
-    /// Em que degrau da escada este Dogma parou.
+    /// Em que degrau da escada este servidor parou.
     #[must_use]
     pub fn degrau(&self) -> Degrau {
         self.degrau
@@ -929,7 +929,7 @@ impl Alcance {
 /// A escada do ADR 0022, subida uma vez, com o que ela abriu preso junto.
 ///
 /// Existe para que o mapeamento de porta tenha dono: uma porta pedida ao
-/// roteador precisa ser devolvida quando o Dogma fecha, e quem a devolve é
+/// roteador precisa ser devolvida quando o servidor fecha, e quem a devolve é
 /// quem a segura.
 pub struct Escada {
     alcance: Alcance,
@@ -952,7 +952,7 @@ impl Escada {
     /// O degrau mais alto vira a **frase**; os endereços de todos os degraus
     /// viram os candidatos do convite, em ordem. Ver [`Alcance`].
     ///
-    /// `escuta` é onde o Dogma está atendendo **de fato** — porta e famílias.
+    /// `escuta` é onde o servidor está atendendo **de fato** — porta e famílias.
     /// Nenhum degrau é declarado sem que ela o sirva; ver [`Escuta`].
     pub async fn subir(escuta: Escuta, convocacao: Option<encontro::Convocacao>) -> Self {
         let achados = descobrir_enderecos();
@@ -1065,7 +1065,7 @@ impl Escada {
         self.encontro.as_ref().map(encontro::Encontro::bilhete)
     }
 
-    /// Até onde este Dogma chega.
+    /// Até onde este servidor chega.
     #[must_use]
     pub fn alcance(&self) -> &Alcance {
         &self.alcance
@@ -1255,7 +1255,7 @@ mod testes {
     #[test]
     fn a_escuta_padrao_atende_as_duas_familias() {
         // O degrau 2 do ADR 0022 inteiro está nesta asserção. Sem ela, um
-        // Dogma com IPv6 dos dois lados continua não atendendo em IPv6 — que
+        // servidor com IPv6 dos dois lados continua não atendendo em IPv6 — que
         // era o estado antes desta mudança.
         let Ok((socket, pilha)) = abrir_escuta(qualquer_porta_v6()) else {
             eprintln!("pulado: esta máquina não liga em nenhuma porta UDP");
@@ -1300,7 +1300,7 @@ mod testes {
     #[test]
     fn um_endereco_nomeado_e_uma_ordem() {
         // O operador que escreve uma interface está excluindo as outras de
-        // propósito, e "melhorar" isso para pilha dupla abriria o Dogma numa
+        // propósito, e "melhorar" isso para pilha dupla abriria o servidor numa
         // rede em que ele foi mantido fechado.
         let Ok((socket, pilha)) = abrir_escuta(SocketAddr::from(([127, 0, 0, 1], 0))) else {
             eprintln!("pulado: esta máquina não liga em 127.0.0.1");

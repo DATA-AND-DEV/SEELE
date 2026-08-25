@@ -34,7 +34,7 @@ Cliente                                Servidor
    │── Ola { versao, cliente, apelido } ──▶│
    │◀── Desafio { nonce } ─────────────────│
    │── Resposta { prova } ────────────────▶│   (ver 08)
-   │◀── Sessao { id, dogma, voice_rooms, papeis }│   → PADRÃO: AZUL
+   │◀── Sessao { id, server, voice_rooms, papeis }│   → PADRÃO: AZUL
 ```
 
 Antes da `Sessao`, o cliente está em **PADRÃO: LARANJA** — conectado, não verificado. A interface deve refletir esse estado, não escondê-lo.
@@ -60,7 +60,7 @@ Timeout de handshake: 10 s. Falha → `PadraoAzulNaoEstabelecido` com motivo esp
 
 | Mensagem | Payload |
 |---|---|
-| `Sessao` | id da sessão, descrição do Dogma, árvore de VoiceRooms e Linhas, papéis |
+| `Sessao` | id da sessão, descrição do servidor, árvore de VoiceRooms e Linhas, papéis |
 | `UsuarioEntrou` / `UsuarioSaiu` | `voice_room_id`, perfil do usuário |
 | `EstadoUsuario` | A.T. Field, presença, taxa de sincronização |
 | `MensagemRecebida` | mensagem completa |
@@ -121,7 +121,7 @@ Suavizada com média móvel exponencial (α ≈ 0,2) para não piscar. Faixas: �
 - ~~Limite de tamanho de mensagem e política de anexos~~ — **resolvido**: as
   duas metades foram decididas separadamente, e uma delas mudou de resposta. O
   teto de corpo é 4 KiB e continua sendo (`MAX_BODY_LEN`); "sem anexos em v1"
-  deixou de valer. **O Dogma guarda anexo, com teto total fixo, e ao encher o
+  deixou de valer. **O servidor guarda anexo, com teto total fixo, e ao encher o
   mais velho sai** — 1 GiB por padrão, escolhido por quem hospeda com `seeled
   anexos`. Cada transferência abre um fluxo QUIC unidirecional próprio e nunca
   o de controle; a resposta volta pelo controle como razão enumerada. Ver

@@ -1,6 +1,6 @@
 //! `seeled` — the SEELE daemon.
 //!
-//! `specs/04-servidor-seele.md`: one instance is a **Dogma Central**. This binary
+//! `specs/04-servidor-seele.md`: one instance is a **server Central**. This binary
 //! is a thin wrapper; everything it does lives in the library beside it, so the
 //! integration tests can drive a server in process (`specs/10-convencoes.md`).
 
@@ -45,14 +45,14 @@ async fn main() -> Result<()> {
 
     let listen: SocketAddr = std::env::args()
         .nth(1)
-        // `[::]` e não `0.0.0.0`: o segundo atende só IPv4, e um Dogma que não
+        // `[::]` e não `0.0.0.0`: o segundo atende só IPv4, e um servidor que não
         // atende em IPv6 não tem o degrau 2 do ADR 0022 nem quando as duas
         // pontas têm IPv6. Ver `seele_server::alcance`.
         .unwrap_or_else(|| format!("[::]:{}", seele_proto::transport::DEFAULT_PORT))
         .parse()
         .context("could not parse the listen address")?;
 
-    let dogma = seele_server::DogmaConfig {
+    let server = seele_server::ServerConfig {
         name: "Terceira Tóquio".into(),
         listen,
         // Em arquivo, não em memória. O padrão da biblioteca é `Memory`, que é
@@ -61,10 +61,10 @@ async fn main() -> Result<()> {
         // critério de aceite de M3 — "servidor reiniciado preserva estado e
         // histórico" — só passava nos testes, que pedem arquivo explicitamente.
         database: banco(),
-        ..seele_server::DogmaConfig::default()
+        ..seele_server::ServerConfig::default()
     };
 
-    let server = seele_server::Server::bind(dogma).await?;
+    let server = seele_server::Daemon::bind(server).await?;
     let bound = server.local_addr()?;
     println!("seeled listening on {bound}");
 
@@ -99,12 +99,12 @@ async fn main() -> Result<()> {
     println!("to connect silently if it ever changes. Read it out over another");
     println!("channel if somebody asks whether a change was real.");
 
-    // Um Dogma sem porteiro na rede é a configuração certa para testar entre
+    // Um servidor sem porteiro na rede é a configuração certa para testar entre
     // duas máquinas e a errada para deixar ligada. Dizer isso em voz alta é o
     // que impede de virar padrão por esquecimento.
     if politica_aberta(&server) && !bound.ip().is_loopback() {
         println!();
-        println!("  ATENÇÃO: este Dogma aceita qualquer um que alcance a porta.");
+        println!("  ATENÇÃO: este servidor aceita qualquer um que alcance a porta.");
         println!("  Para fechar:  seeled senha <a senha>");
         println!("  Ou por convite:  seeled convite <para quem>");
     }
@@ -112,8 +112,8 @@ async fn main() -> Result<()> {
     server.run().await
 }
 
-/// Se o Dogma está aceitando qualquer um.
-fn politica_aberta(server: &seele_server::Server) -> bool {
+/// Se o servidor está aceitando qualquer um.
+fn politica_aberta(server: &seele_server::Daemon) -> bool {
     server
         .politica_de_admissao()
         .map(|politica| politica.aberto())
@@ -121,9 +121,9 @@ fn politica_aberta(server: &seele_server::Server) -> bool {
 }
 
 fn uso() {
-    println!("seeled — o servidor SEELE (um Dogma)");
+    println!("seeled — o servidor SEELE (um servidor)");
     println!();
-    println!("  seeled [endereço]              sobe o Dogma (padrão [::]:8383)");
+    println!("  seeled [endereço]              sobe o servidor (padrão [::]:8383)");
     println!("  seeled senha <senha>           exige esta senha para entrar");
     println!("  seeled senha --remover         volta a aceitar qualquer um");
     println!("  seeled convite [para quem]     gera um convite de uso único");
@@ -135,7 +135,7 @@ fn uso() {
     println!("  não precisa conferi-la por fora.");
 }
 
-/// Onde o Dogma guarda tudo.
+/// Onde o servidor guarda tudo.
 ///
 /// `$SEELE_DB`, ou `seele.db` na pasta de onde o `seeled` foi executado.
 fn banco() -> seele_server::persistence::Location {
@@ -143,7 +143,7 @@ fn banco() -> seele_server::persistence::Location {
     seele_server::persistence::Location::File(std::path::PathBuf::from(caminho))
 }
 
-/// Abre o banco do Dogma sem subir o servidor.
+/// Abre o banco do servidor sem subir o servidor.
 fn abrir_banco() -> anyhow::Result<seele_server::persistence::Persistence> {
     seele_server::persistence::Persistence::open(&banco())
 }
@@ -153,11 +153,11 @@ fn criar_convite(argumentos: &[String]) -> anyhow::Result<()> {
     let mut persistence = abrir_banco()?;
     let token = seele_server::admissao::criar_convite(&mut persistence, &observacao)?;
 
-    // Cria a identidade se o Dogma ainda não subiu nenhuma vez. Sem isto o
+    // Cria a identidade se o servidor ainda não subiu nenhuma vez. Sem isto o
     // primeiro convite sairia sem impressão digital — justamente o convite que
     // mais precisa dela, porque é o primeiro contato de alguém.
     let _ = seele_server::tls::Identity::load_or_create(&persistence, vec!["localhost".into()]);
-    let impressao = seele_server::Server::fingerprint_do_banco(&persistence).ok();
+    let impressao = seele_server::Daemon::fingerprint_do_banco(&persistence).ok();
     let alvo = lan_address().map_or_else(
         || format!("SEU-ENDERECO:{}", seele_proto::transport::DEFAULT_PORT),
         // `SocketAddr` e não `format!("{ip}:{porta}")`: o `Display` do
@@ -193,7 +193,7 @@ fn definir_senha(argumentos: &[String]) -> anyhow::Result<()> {
     match argumentos.get(1).map(String::as_str) {
         Some("--remover") => {
             seele_server::admissao::definir_senha(&mut persistence, None)?;
-            println!("senha removida. O Dogma volta a aceitar qualquer um.");
+            println!("senha removida. O servidor volta a aceitar qualquer um.");
         }
         Some(senha) if !senha.is_empty() => {
             seele_server::admissao::definir_senha(&mut persistence, Some(senha))?;
@@ -213,9 +213,9 @@ fn definir_senha(argumentos: &[String]) -> anyhow::Result<()> {
 /// Mostra ou escolhe o teto de disco dos anexos. ADR 0027.
 ///
 /// Subcomando, e não arquivo: o critério é o que a própria migração 2 escreveu
-/// ao criar a tabela `configuracao` — "configuração do Dogma que não cabe num
+/// ao criar a tabela `configuracao` — "configuração do servidor que não cabe num
 /// arquivo, porque muda em tempo de execução e precisa sobreviver a reinício".
-/// Mexer no teto com o Dogma no ar é o caso normal, e o TOML que `specs/04`
+/// Mexer no teto com o servidor no ar é o caso normal, e o TOML que `specs/04`
 /// descreve **não existe**: não vai nascer por causa de um número.
 fn teto_de_anexos(argumentos: &[String]) -> anyhow::Result<()> {
     use seele_server::persistence::attachments;
@@ -234,7 +234,7 @@ fn teto_de_anexos(argumentos: &[String]) -> anyhow::Result<()> {
             tamanho(attachments::per_file_limit(teto))
         );
         println!();
-        println!("  O Dogma nunca guarda mais que isso. Ao encher, o anexo mais");
+        println!("  O servidor nunca guarda mais que isso. Ao encher, o anexo mais");
         println!("  antigo sai, e a mensagem passa a dizer que o arquivo expirou —");
         println!("  o texto sobrevive ao arquivo.");
         println!();
@@ -258,7 +258,7 @@ fn teto_de_anexos(argumentos: &[String]) -> anyhow::Result<()> {
     if bytes < antes {
         println!();
         println!("  Isto é menos do que antes. Os anexos mais antigos que não");
-        println!("  couberem serão descartados na próxima vez que o Dogma subir,");
+        println!("  couberem serão descartados na próxima vez que o servidor subir,");
         println!("  e as mensagens deles passarão a dizer que o arquivo expirou.");
     }
     Ok(())
@@ -328,7 +328,7 @@ mod testes {
 
     #[test]
     fn um_tamanho_que_nao_e_tamanho_recusa_em_vez_de_virar_zero() {
-        // Virar zero seria um Dogma que aceita a transferência e não consegue
+        // Virar zero seria um servidor que aceita a transferência e não consegue
         // guardá-la, e ninguém teria digitado isso de propósito.
         for torto in ["", "muito", "-1", "1TB", "3,5G", "999999999999999999999G"] {
             assert!(ler_tamanho(torto).is_err(), "aceitou «{torto}»");

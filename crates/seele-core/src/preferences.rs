@@ -1,9 +1,9 @@
 //! Settings that stay on this machine.
 //!
-//! The comp calls the screen these belong to "Terminal Dogma · configuração
+//! The comp calls the screen these belong to "Terminal server · configuração
 //! local", and the word that matters is *local*: none of this is sent anywhere,
 //! none of it follows the person to another computer, and every one of them is
-//! about the hardware in front of the person rather than about the Dogma.
+//! about the hardware in front of the person rather than about the server.
 //!
 //! Today there are two — which microphone to open, and where the sound comes
 //! out. They are here rather than in the desktop shell because the terminal
@@ -13,7 +13,7 @@
 //!
 //! # Why not in `conhecidos`
 //!
-//! That file is one line per Dogma, and this is not per Dogma. A microphone
+//! That file is one line per server, and this is not per server. A microphone
 //! chosen while visiting one server is the same microphone at the next one, and
 //! folding it in there would either repeat it on every line or invent a line for
 //! a server nobody visited.

@@ -215,14 +215,14 @@ impl TofuVerifier {
     /// two are different things and conflating them was a real bug: this
     /// verifier never checks the certificate's names — it compares
     /// fingerprints — so the TLS name is only a label, and both shells were
-    /// labelling every IP address `localhost`. Two Dogmas on a LAN then shared
+    /// labelling every IP address `localhost`. Two servers on a LAN then shared
     /// one pin entry, and the second one to be contacted looked like the first
     /// one's key had changed. That is the most alarming false positive this
     /// system can produce, and it would have fired the first time somebody
     /// tested between two machines.
     ///
     /// The key should be the target as the person typed it, port included: two
-    /// Dogmas on one host at different ports are two servers.
+    /// servers on one host at different ports are two servers.
     #[must_use]
     pub fn new(store: Arc<dyn PinStore>, pin_key: String) -> Self {
         Self {
@@ -333,7 +333,7 @@ mod tests {
     #[test]
     fn the_first_contact_is_recorded_and_allowed() {
         let verifier = verifier();
-        let decision = verifier.decide("dogma.example", b"certificate-one");
+        let decision = verifier.decide("server.example", b"certificate-one");
 
         let PinDecision::FirstContact { fingerprint } = decision else {
             panic!("first contact should have been recorded");
@@ -347,9 +347,9 @@ mod tests {
     #[test]
     fn the_same_certificate_matches_afterwards() {
         let verifier = verifier();
-        verifier.decide("dogma.example", b"certificate-one");
+        verifier.decide("server.example", b"certificate-one");
         assert_eq!(
-            verifier.decide("dogma.example", b"certificate-one"),
+            verifier.decide("server.example", b"certificate-one"),
             PinDecision::Matches {
                 fingerprint: seele_proto::transport::certificate_fingerprint(b"certificate-one")
             }
@@ -361,10 +361,10 @@ mod tests {
         // specs/08-seguranca.md wants the warning impossible to ignore, and an
         // operator answering "was that you?" needs both values to compare.
         let verifier = verifier();
-        verifier.decide("dogma.example", b"certificate-one");
+        verifier.decide("server.example", b"certificate-one");
 
         let PinDecision::Changed { pinned, offered } =
-            verifier.decide("dogma.example", b"certificate-two")
+            verifier.decide("server.example", b"certificate-two")
         else {
             panic!("a changed certificate went unnoticed");
         };
@@ -384,12 +384,12 @@ mod tests {
         // Recording the new key would turn the second connection into a silent
         // acceptance, which is the failure mode TOFU exists to prevent.
         let verifier = verifier();
-        verifier.decide("dogma.example", b"certificate-one");
-        verifier.decide("dogma.example", b"certificate-two");
+        verifier.decide("server.example", b"certificate-one");
+        verifier.decide("server.example", b"certificate-two");
 
         assert!(
             matches!(
-                verifier.decide("dogma.example", b"certificate-two"),
+                verifier.decide("server.example", b"certificate-two"),
                 PinDecision::Changed { .. }
             ),
             "the impostor's key was pinned"
@@ -480,7 +480,7 @@ mod tests {
         // because `Matches` carried no fingerprint to compare against.
         // Trust on first use already proved this is yesterday's server, so
         // the link is what is wrong — refusing would lock somebody out of a
-        // Dogma they use because a friend sent a stale link.
+        // server they use because a friend sent a stale link.
         let decision = PinDecision::Matches {
             fingerprint: A.into(),
         };

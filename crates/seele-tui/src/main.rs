@@ -54,7 +54,7 @@ struct Args {
     server: SocketAddr,
     server_name: String,
     pin_key: String,
-    /// The invite's other addresses for the same Dogma, in try order.
+    /// The invite's other addresses for the same server, in try order.
     ///
     /// Text, not resolved addresses: an alternative that does not resolve is
     /// dropped when the attempt list is built, and dropping one is not a reason
@@ -64,7 +64,7 @@ struct Args {
     voice_room: VoiceRoomId,
     line: LineId,
     no_audio: bool,
-    /// Convite ou senha, quando o Dogma pede.
+    /// Convite ou senha, quando o servidor pede.
     join_secret: Option<String>,
     /// Impressão digital esperada, quando veio num link.
     expected_fingerprint: Option<String>,
@@ -74,7 +74,7 @@ struct Args {
     /// no ponto de encontro antes de tentar endereço nenhum, e o anfitrião fura o
     /// NAT para cá.
     bilhete: Option<seele_core::uri::Bilhete>,
-    /// Subir um Dogma neste processo e conectar nele.
+    /// Subir um servidor neste processo e conectar nele.
     hospedar: bool,
 }
 
@@ -89,7 +89,7 @@ impl Args {
             server,
             server_name,
             pin_key,
-            // A known Dogma is one address, the one it was reached at. The
+            // A known server is one address, the one it was reached at. The
             // list is a property of an invite, not of a place already visited.
             alternativos: Vec::new(),
             nickname: escolha.apelido.clone(),
@@ -98,7 +98,7 @@ impl Args {
             no_audio: false,
             join_secret: escolha.convite.clone(),
             expected_fingerprint: escolha.impressao_digital.clone(),
-            // Um Dogma conhecido é um endereço a que já se chegou, e o bilhete é
+            // Um servidor conhecido é um endereço a que já se chegou, e o bilhete é
             // propriedade de um convite — ele envelhece com o mapeamento de NAT
             // que o produziu. Quem volta a um lugar volta pelo endereço.
             bilhete: None,
@@ -159,7 +159,7 @@ fn parse_args() -> Result<Option<Args>> {
             // A terminal on a headless box has no sound card, and the text half
             // of the product needs none.
             "--sem-audio" | "--no-audio" => no_audio = true,
-            // Sobe o Dogma aqui dentro e entra nele. Um comando, um processo.
+            // Sobe o servidor aqui dentro e entra nele. Um comando, um processo.
             "--hospedar" | "--host" => hospedar = true,
             "--ajuda" | "--help" | "-h" => {
                 usage();
@@ -194,7 +194,7 @@ fn parse_args() -> Result<Option<Args>> {
 /// fingerprint is filed under, and it must be the target as typed.
 ///
 /// Keying the pin by the TLS label instead was a real bug. Both shells mapped
-/// every IP address to `localhost`, so two Dogmas on a LAN shared one entry and
+/// every IP address to `localhost`, so two servers on a LAN shared one entry and
 /// the second one contacted looked like the first one's key had changed.
 /// Até onde o link chega, dito em uma ou duas frases.
 ///
@@ -499,7 +499,7 @@ fn primeira_chave_de_mensagem() -> u64 {
 async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<()> {
     let home = config_dir();
     // Detectado uma vez, para o programa inteiro. Quem escolher outra paleta com
-    // `:tema` continua nela ao trocar de Dogma: redetectar a cada sessão
+    // `:tema` continua nela ao trocar de servidor: redetectar a cada sessão
     // devolveria a pessoa à paleta que ela acabou de recusar.
     let mut tema = Theme::detect();
 
@@ -535,8 +535,8 @@ async fn run(terminal: &mut Screen1, args: Option<Args>, holds: bool) -> Result<
 ///
 /// Returns `true` to send [`run`]'s loop back to the selection screen, and
 /// `false` only to leave the program. Every way a session can end returns
-/// `true` — ejecting, a Dogma that never answered, an invite that pointed at
-/// another Dogma, an internal battery that ran out — because none of those is
+/// `true` — ejecting, a server that never answered, an invite that pointed at
+/// another server, an internal battery that ran out — because none of those is
 /// a request to close the client. Quitting is `:q`, `:quit`, `:sair` and
 /// Ctrl-C, and nothing else.
 #[allow(
@@ -575,21 +575,21 @@ async fn sessao(
     // ADR 0003 is trust on *first* use, which needs the first use remembered.
     let pins = Arc::new(FilePinStore::open(home.join("pins"))?);
 
-    // `--hospedar`: o Dogma sobe aqui dentro, antes de conectar. Fica vivo pelo
-    // tempo desta função — quando o cliente sai, o Dogma vai junto, que é o
+    // `--hospedar`: o servidor sobe aqui dentro, antes de conectar. Fica vivo pelo
+    // tempo desta função — quando o cliente sai, o servidor vai junto, que é o
     // comportamento certo para "estou hospedando uma conversa".
     // `mut` e `take()` porque ejetar tem de **esperar** a porta voltar antes de
     // devolver o controle à tela de seleção; largar o handle no fim da função
     // não espera nada, e a próxima volta do laço acharia a porta ocupada.
     let mut hospedagem = if args.hospedar {
-        let dogma = seele_server::hospedagem::Hospedagem::iniciar(
+        let server = seele_server::hospedagem::Hospedagem::iniciar(
             args.server.port(),
             seele_server::persistence::Location::File(seele_server::persistence::banco_do_cliente(home)),
             "Casa",
         )
         .await
         .context("não consegui subir o servidor aqui")?;
-        Some(dogma)
+        Some(server)
     } else {
         None
     };
@@ -618,7 +618,7 @@ async fn sessao(
                 reason: motivo_de_conexao_perdida(falha.motivo()),
             };
             // Um endereço que não atende é o caso mais comum de todos, e
-            // justamente o que mais precisa da lista: escolher um Dogma morto
+            // justamente o que mais precisa da lista: escolher um servidor morto
             // dos conhecidos jogava a pessoa para fora do cliente, longe da
             // lista de onde ela acabou de escolher.
             return fim_de_sessao(terminal, key_rx, &mut runtime, &mut hospedagem).await;
@@ -643,7 +643,7 @@ async fn sessao(
 
     // Registrado só **depois** de dar certo. Guardar antes encheria a lista de
     // endereços errados digitados uma vez, que é o oposto de uma lista de
-    // atalhos. Um Dogma hospedado aqui não entra: `127.0.0.1` não é lugar aonde
+    // atalhos. Um servidor hospedado aqui não entra: `127.0.0.1` não é lugar aonde
     // se volta, é o botão "hospedar".
     if !args.hospedar {
         if let Ok(mut lista) = Conhecidos::abrir(home.join("conhecidos")) {
@@ -659,13 +659,13 @@ async fn sessao(
     }
     // O anfitrião precisa saber o que mandar para os amigos. Sem isto ele
     // hospeda e não tem como convidar ninguém, que é hospedar para nada.
-    if let Some(dogma) = &hospedagem {
-        let convite = dogma.convite();
+    if let Some(server) = &hospedagem {
+        let convite = server.convite();
         note(
             &mut runtime,
             "hospedando. `:convite` mostra o link.".to_owned(),
         );
-        runtime.app.alcance = dogma.alcance().map(frase_do_alcance);
+        runtime.app.alcance = server.alcance().map(frase_do_alcance);
         runtime.app.convite = Some(convite);
         // Aberta de saída: a primeira coisa que o anfitrião precisa é o link.
         runtime.app.convite_visivel = true;
@@ -722,7 +722,7 @@ async fn sessao(
             // bandeira de parada de uma thread de áudio que ainda segura uma
             // cópia da conexão. Soltar cedo torna o fechamento provável e
             // imediato; quem o torna **suficiente** é o `encerrar`, que fecha
-            // o endpoint do Dogma antes de esperar e ainda dá uma folga medida
+            // o endpoint do servidor antes de esperar e ainda dá uma folga medida
             // no fim. Quem for afirmar em teste que a sessão fechou tem de
             // afirmar sobre o `encerrar`, e não sobre estes dois `drop`.
             drop(client);
@@ -775,12 +775,12 @@ async fn sessao(
                             runtime.app.refazer_busca();
                             dirty = true;
                         }
-                        // O Dogma avisou que está desconectando. O motivo é
+                        // O servidor avisou que está desconectando. O motivo é
                         // deste momento e de mais nenhum: quando a conexão
                         // cair de fato, o `Aviso::Estado` escreve a bateria
                         // interna por cima, e cinco minutos depois a pessoa
                         // saberia que a sessão acabou sem saber que foi
-                        // expulsa, barrada ou que o Dogma estava lotado.
+                        // expulsa, barrada ou que o servidor estava lotado.
                         //
                         // `view::project` acabou de pôr na tela o texto que o
                         // `text::disconnect` dá para este `DisconnectReason`,
@@ -814,7 +814,7 @@ async fn sessao(
                     // A tela de outra pessoa chegando. Um terminal não desenha
                     // imagem, e descartar aqui não é perder nada: o fluxo é
                     // lido de qualquer jeito — quem o lê é a tarefa do enlace —,
-                    // então o Dogma não fica com um fluxo parado por causa
+                    // então o servidor não fica com um fluxo parado por causa
                     // deste cliente.
                     //
                     // O `_` não serve: um aviso novo tem de reprovar aqui em
@@ -873,7 +873,7 @@ async fn sessao(
                         };
                         // O enlace já desistiu por conta própria, então não há
                         // conexão a soltar antes de esperar a porta — o que
-                        // sobrou de pé é a voz e, se for o caso, o Dogma daqui.
+                        // sobrou de pé é a voz e, se for o caso, o servidor daqui.
                         return fim_de_sessao(terminal, key_rx, &mut runtime, &mut hospedagem).await;
                     }
                 }
@@ -892,14 +892,14 @@ async fn sessao(
 /// já resolveram, na ordem em que se tenta.
 ///
 /// Função à parte, e pura, para que o fio de `args.expected_fingerprint` até
-/// `Destino::impressao_esperada` seja conferível sem Dogma do outro lado — o
+/// `Destino::impressao_esperada` seja conferível sem servidor do outro lado — o
 /// mesmo motivo que fez `seele_core::enlace::conferir` sair de dentro de
 /// `Enlace::conectar`.
 ///
-/// Um convite pode trazer vários endereços do mesmo Dogma (ADR 0006), e todos
+/// Um convite pode trazer vários endereços do mesmo server (ADR 0006), e todos
 /// carregam a mesma credencial e a mesma impressão digital esperada: é o mesmo
-/// Dogma, por caminhos diferentes. O que muda de um para o outro é a chave do
-/// pin, que é o endereço — dois Dogmas distintos no mesmo endereço continuam
+/// servidor, por caminhos diferentes. O que muda de um para o outro é a chave do
+/// pin, que é o endereço — dois servidores distintos no mesmo endereço continuam
 /// sendo dois arquivos diferentes de confiança, como sempre foram.
 ///
 /// Um alternativo que não resolve é **descartado**, e não vira erro: o convite
@@ -963,7 +963,7 @@ fn motivo_de_conexao_perdida(error: &ConnectError) -> String {
 }
 
 /// O alerta a mostrar a partir do veredito de identidade — pura, e por isso
-/// testável sem Dogma do outro lado.
+/// testável sem servidor do outro lado.
 ///
 /// `Verdict::InviteRefused` não produz alerta aqui: a recusa derruba a conexão
 /// antes de existir um `Enlace` para perguntar `veredito()`, e o `ConnectError`
@@ -1003,7 +1003,7 @@ fn alerta_do_veredito(veredito: &Verdict) -> Option<Alert> {
 ///
 /// `specs/05-cliente-tui.md`: só `:q`, `:quit`, `:sair` e Ctrl-C saem do
 /// programa; toda outra forma de acabar mostra o motivo e volta à lista. Um
-/// enlace fechado é uma sessão que acabou — o Dogma não está mais do outro lado
+/// enlace fechado é uma sessão que acabou — o servidor não está mais do outro lado
 /// —, e não um defeito do cliente.
 ///
 /// Era o buraco: `Enlace::dizer` devolve [`Fechado`] quando a sessão já morreu,
@@ -1131,7 +1131,7 @@ fn tick(runtime: &mut Runtime<'_>, client: &Enlace) {
 /// Um cliente que some no instante em que perde o enlace leva o motivo junto,
 /// e por isso a pausa continua aqui. O que mudou é aonde a tecla leva: sair do
 /// programa é `:q`, `:quit`, `:sair` e Ctrl-C, e mais nada. Toda outra forma de
-/// uma sessão acabar — o Dogma não atendeu, o convite apontava para outro, a
+/// uma sessão acabar — o servidor não atendeu, o convite apontava para outro, a
 /// bateria interna esgotou — volta para a lista, que é de onde se escolhe o
 /// próximo. É o que o app já faz: a `tela-fim` dele tem um EJETAR que leva à
 /// tela de entrada.
@@ -1152,14 +1152,14 @@ async fn fim_de_sessao(
 
     // Tecla que chegou **antes** desta tela não é resposta a ela.
     //
-    // Entre escolher um Dogma na lista e o `conectar` devolver, ninguém lê o
-    // canal: a identidade é carregada de disco, os pins abrem, o Dogma de casa
+    // Entre escolher um servidor na lista e o `conectar` devolver, ninguém lê o
+    // canal: a identidade é carregada de disco, os pins abrem, o servidor de casa
     // sobe, o handshake acontece — e as sessenta e quatro vagas do canal vão
     // enchendo com quem apertou Enter de novo, ou segurou (a repetição conta
-    // como apertar). Se o Dogma estiver morto, a tela de motivo aparecia e era
+    // como apertar). Se o servidor estiver morto, a tela de motivo aparecia e era
     // dispensada no primeiro `recv()` por uma tecla de um segundo atrás: a
     // pessoa voltava à lista sem nunca ter lido `NÃO FOI POSSÍVEL ALCANÇAR O
-    // DOGMA`, que é justamente por que este ramo parou de matar o processo.
+    // SERVER`, que é justamente por que este ramo parou de matar o processo.
     //
     // Esvaziar **depois** de desenhar é o que separa uma coisa da outra: o que
     // for apertado com a tela já no ar chega depois daqui e continua valendo.
@@ -1198,8 +1198,8 @@ async fn desligar(
     hospedagem: &mut Option<seele_server::hospedagem::Hospedagem>,
 ) {
     runtime.voice = None;
-    if let Some(dogma) = hospedagem.take() {
-        dogma.encerrar().await;
+    if let Some(server) = hospedagem.take() {
+        server.encerrar().await;
     }
 }
 
@@ -1375,7 +1375,7 @@ async fn act(
 
 /// A metade local de sair de uma sala de voz — a que não passa pela rede.
 ///
-/// O Dogma não devolve o `PersonLeft` a quem o causou — «essa pessoa já sabe» —,
+/// O servidor não devolve o `PersonLeft` a quem o causou — «essa pessoa já sabe» —,
 /// então sair, exatamente como entrar, é contabilidade que cada casca faz para
 /// si. `ejetar_plug` sozinho esvazia o assento no servidor e em todas as outras
 /// telas; a única que continuaria desenhando a pessoa dentro da sala é a de
@@ -1575,7 +1575,7 @@ async fn run_command(
         Command::Theme { which } => {
             // Escrito no tema do **programa**, e não numa cópia da sessão: quem
             // trocou de paleta para conseguir ler a tela continua lendo depois
-            // de ejetar e entrar noutro Dogma.
+            // de ejetar e entrar noutro server.
             *runtime.theme = Theme::with_palette(match which.as_deref() {
                 Some("mono" | "sem-cor") => Palette::Mono,
                 Some("16") => Palette::Ansi16,
@@ -1706,7 +1706,7 @@ mod tests {
         use seele_tui::view;
 
         // O defeito irmão do aplicativo (`1019c8e` e o anterior), evitado aqui
-        // antes de existir: o Dogma não devolve o `PersonLeft` a quem o causou,
+        // antes de existir: o servidor não devolve o `PersonLeft` a quem o causou,
         // então `ejetar_plug` sozinho deixa a sala esvaziada no servidor e em
         // todas as outras telas menos na de quem saiu. Quebrar o
         // `room.leave_voice_room()` de `sair_da_sala` deixa este teste vermelho.
@@ -1718,7 +1718,7 @@ mod tests {
             id: SessionId(1),
             person: PersonId(7),
             ssrc: Ssrc(700),
-            dogma: "servidor de teste".into(),
+            server: "servidor de teste".into(),
             voice_rooms: vec![VoiceRoomInfo {
                 id: SALA,
                 name: "SALA-01".into(),
@@ -2008,7 +2008,7 @@ mod tests {
 
     #[test]
     fn os_outros_enderecos_do_convite_viram_destinos_com_a_mesma_credencial() {
-        // Um convite com vários endereços é **um** Dogma por caminhos
+        // Um convite com vários endereços é **um** servidor por caminhos
         // diferentes: mesma impressão esperada, mesmo apelido, mesmo convite de
         // uso único. O que muda é a chave do pin, que é o endereço.
         let args = args_com_alternativos(vec![
@@ -2115,7 +2115,7 @@ mod tests {
     }
 
     #[test]
-    fn um_dogma_ja_conhecido_nao_gera_alerta() {
+    fn um_server_ja_conhecido_nao_gera_alerta() {
         assert!(alerta_do_veredito(&Verdict::Known).is_none());
     }
 
@@ -2133,7 +2133,7 @@ mod tests {
     }
 
     #[test]
-    fn um_link_que_discorda_de_um_dogma_conhecido_mostra_as_duas_impressoes() {
+    fn um_link_que_discorda_de_um_server_conhecido_mostra_as_duas_impressoes() {
         // Com os 64 caracteres de verdade, que é o tamanho em que o alerta
         // deixa de caber numa linha só. `ui::alert_rows` é quem desenha isto em
         // mais de uma linha; aqui se guarda o que ele precisa receber.
@@ -2186,7 +2186,7 @@ mod tests {
 
     #[test]
     fn o_que_nao_e_tecla_nao_vira_tecla() {
-        // Redimensionar a janela não é escolher um Dogma nem dispensar uma
+        // Redimensionar a janela não é escolher um servidor nem dispensar uma
         // tela, e com a captura de mouse ligada há evento chegando o tempo todo.
         assert!(tecla_apertada(&Event::Resize(80, 24)).is_none());
         assert!(tecla_apertada(&Event::FocusGained).is_none());

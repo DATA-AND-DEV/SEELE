@@ -576,7 +576,7 @@ impl Voice {
     /// The item that hurts on this side is Isolamento total — somebody who
     /// changed output because they could not hear anything is, often enough,
     /// somebody whose speakers are muted, and a switch that quietly unmutes them
-    /// puts a Dogma into a room that had been silent.
+    /// puts a server into a room that had been silent.
     ///
     /// The microphone stays where it is, asked for exactly as this path asked
     /// for it.
@@ -1247,7 +1247,7 @@ mod tests {
     fn giving_up_one_side_leaves_the_other_alone() {
         // The rule the fallback is made of. A headset left in another room must
         // not cost somebody the microphone they picked: they would arrive at a
-        // Dogma with two things wrong and nothing saying the second was a
+        // server with two things wrong and nothing saying the second was a
         // consequence of the first.
         let sem_saida = both_chosen()
             .without(device::Side::Output)

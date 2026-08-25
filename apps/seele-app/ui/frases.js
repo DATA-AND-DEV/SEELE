@@ -23,7 +23,7 @@ const MOTIVOS = {
   HandshakeTimeout: "TEMPO ESGOTADO NA SINCRONIZAÇÃO INICIAL",
   Kicked: "DESCONECTADO POR UM OPERADOR",
   Banned: "ACESSO BARRADO POR UM OPERADOR",
-  DogmaFull: "SERVIDOR LOTADO",
+  ServerFull: "SERVIDOR LOTADO",
   ScheduledMaintenance: "MANUTENÇÃO PROGRAMADA",
   ServerShuttingDown: "O SERVIDOR ESTÁ ENCERRANDO",
   Timeout: "ENLACE PERDIDO",
@@ -82,7 +82,7 @@ const AVISOS = {
   PermissionDenied: "PERMISSÃO NEGADA",
   VoiceRoomFull: "SALA DE VOZ LOTADA",
   OperatorNotice: "AVISO DO OPERADOR",
-  // O aviso que o Dogma manda **antes** de derrubar. É o único da lista que
+  // O aviso que o servidor manda **antes** de derrubar. É o único da lista que
   // pede uma mudança de comportamento de quem o lê, e por isso ele existe:
   // derrubar sem ter avisado é o que faz o produto parecer quebrado.
   RateLimited: "VOCÊ ESTÁ FALANDO RÁPIDO DEMAIS PARA O SERVIDOR",
@@ -93,7 +93,7 @@ const AVISOS = {
   // seguida além de ler.
   ScreenShareTaken: "ALGUÉM JÁ ESTÁ COMPARTILHANDO A TELA NESTA SALA",
 
-  // O Dogma parou a transmissão desta pessoa porque a sala cresceu além da
+  // O servidor parou a transmissão desta pessoa porque a sala cresceu além da
   // subida de quem hospeda (§5.1: o teto é o caminho do anfitrião ÷ quem
   // assiste). A frase diz **de quem** é o caminho que faltou, e é para isso que
   // ela não é `SyncDegraded`: «sinal em queda» mandaria quem lê conferir a
@@ -311,7 +311,7 @@ function fraseDeErro(erro) {
         "Confirme por outro canal antes de continuar."
       );
     }
-    // O convite prometeu uma chave e o Dogma ofertou outra. Não é troca de
+    // O convite prometeu uma chave e o servidor ofertou outra. Não é troca de
     // chave — nada estava fixado aqui — então a frase acusa o link, e não a
     // continuidade do servidor. A conexão já caiu quando isto chega: o core
     // derruba e desfaz o pin, e é por isso que este caso é `#boot-erro` e não
@@ -425,7 +425,7 @@ const FRASES = {
       "FALTAM OS COLCHETES NESTE ENDEREÇO IPV6.\nEle vai assim: seele://[2001:db8::1]:8383",
     // Degrau 4 do ADR 0022: o `enc` do link veio pela metade. Frase própria e
     // não `EnderecoInvalido` porque o que falta é outra coisa, e porque o resto
-    // do link continua bom — o que se perde é o furo de NAT, não o Dogma.
+    // do link continua bom — o que se perde é o furo de NAT, não o servidor.
     BilheteInvalido:
       "ESTE CONVITE CHEGOU CORTADO NO FIM.\n" +
       "Dá para entrar por ele na mesma rede; de fora, peça o link inteiro de novo.",
@@ -442,7 +442,7 @@ const FRASES = {
     // A portaria — ADR 0030. As duas falam de uma porta que não existe daqui.
     //
     // `NaoEstaHospedando` não é engano de quem apertou: os comandos da portaria
-    // mexem no Dogma **desta** máquina, e quem está no Dogma de outra pessoa não
+    // mexem no servidor **desta** máquina, e quem está no servidor de outra pessoa não
     // tem porta nenhuma para mexer. A frase diz isso em vez de deixar a pessoa
     // procurando o que fez de errado.
     NaoEstaHospedando:
@@ -524,7 +524,7 @@ const FRASES = {
     SoRedeLocal:
       "ESTE LINK SÓ FUNCIONA NA SUA REDE.",
 
-    // Escolher microfone, no Terminal Dogma. Duas frases e não uma porque pedem
+    // Escolher microfone, no Terminal servidor. Duas frases e não uma porque pedem
     // coisas diferentes de quem lê: a primeira não tem conserto na tela, e a
     // segunda tem — a lista está logo acima, e o que sumiu entre desenhá-la e
     // clicar nela pode ser trocado por outro sem sair daqui.

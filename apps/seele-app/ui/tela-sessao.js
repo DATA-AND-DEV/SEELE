@@ -43,7 +43,7 @@
 // simples é ruído, não honestidade. Ver o cabeçalho de `tela-sessao.css`.
 //
 // O que ficou sem dado, e o que cada um exigiria, está em
-// `.superpowers/sdd/tela-dogma.md`.
+// `.superpowers/sdd/tela-server.md`.
 
 "use strict";
 
@@ -57,14 +57,14 @@ let linhaAberta = null;
  * Não vem do `Snapshot`: o protocolo não carrega para onde nos conectamos. Quem
  * o tem é a tela de autenticação, que o recebeu da tela de entrada, e ela o
  * entrega aqui no instante em que abre a sessão. `null` fora de sessão, e
- * apagado ao ejetar — um endereço que sobrevive à sessão diz do próximo Dogma
+ * apagado ao ejetar — um endereço que sobrevive à sessão diz do próximo Server
  * a porta do anterior.
  */
-let alvoDoDogma = null;
+let alvoDoServer = null;
 
 /** A tela de autenticação diz em que endereço esta sessão está começando. */
-function guardarAlvoDoDogma(endereco) {
-  alvoDoDogma = endereco || null;
+function guardarAlvoDoServer(endereco) {
+  alvoDoServer = endereco || null;
 }
 /**
  * Os servidores do histórico, como a trilha os lista.
@@ -101,7 +101,7 @@ let falando = false;
  * tempo de um `await`, e não vale um campo novo no protocolo para corrigir.
  *
  * `null` fora de sessão, e zerado ao ejetar: um uptime que sobrevive à sessão
- * conta o tempo de outro Dogma.
+ * conta o tempo de outro Server.
  *
  * `comeco`, e a escolha da palavra não é gosto: `tests/frontend.rs` proíbe a
  * tradução portuguesa de `start` em qualquer script, porque é assim que o campo
@@ -282,9 +282,9 @@ function desenhar(snapshot) {
  * O cabeçalho: a marca, o servidor, o estado da conexão, o apelido e o
  * relógio.
  *
- * O bloco do servidor é o `TÓQUIO-3 / DOGMA CENTRAL · 7743` do comp (§3.1),
+ * O bloco do servidor é o `TÓQUIO-3 / SERVER CENTRAL · 7743` do comp (§3.1),
  * com a segunda linha escrita `SERVIDOR · 7743`. Ele mora aqui e em mais lugar
- * nenhum — a ficha `C·02 / DOGMA` que já o mostrou era um painel que o comp
+ * nenhum — a ficha `C·02 / SERVER` que já o mostrou era um painel que o comp
  * não desenha, e saiu junto com a trilha voltando.
  */
 function desenharTopo(snapshot) {
@@ -302,8 +302,8 @@ function desenharTopo(snapshot) {
 
   $("topo-pessoa").textContent = snapshot.nickname;
 
-  const nome = snapshot.dogma;
-  const rotulo = $("topo-dogma-nome");
+  const nome = snapshot.server;
+  const rotulo = $("topo-server-nome");
   if (nome) {
     medido(rotulo, nome);
     // O `title` porque o nome pode ser mais largo que o bloco e sair em
@@ -315,7 +315,7 @@ function desenharTopo(snapshot) {
   }
 
   desenharTrilha(snapshot);
-  desenharPortaDoDogma();
+  desenharPortaDoServer();
 }
 
 /**
@@ -330,9 +330,9 @@ function desenharTopo(snapshot) {
  * pôr uma constante de protocolo dentro do JavaScript, que é exatamente o que
  * `specs/06-clientes-gui.md` proíbe. O motivo vai no `title`.
  */
-function desenharPortaDoDogma() {
-  const sub = $("topo-dogma-sub");
-  const porta = /:(\d+)$/.exec(alvoDoDogma ?? "");
+function desenharPortaDoServer() {
+  const sub = $("topo-server-sub");
+  const porta = /:(\d+)$/.exec(alvoDoServer ?? "");
   if (porta) {
     sub.textContent = `SERVIDOR · ${porta[1]}`;
     sub.removeAttribute("title");
@@ -421,9 +421,9 @@ async function recarregarTrilha() {
  * mesma sessão.
  */
 function desenharTrilha(snapshot) {
-  const nome = snapshot.dogma;
+  const nome = snapshot.server;
   const uri = iconeDesenhado.uri;
-  const outros = conhecidosDaTrilha.filter((conhecido) => conhecido.alvo !== alvoDoDogma);
+  const outros = conhecidosDaTrilha.filter((conhecido) => conhecido.alvo !== alvoDoServer);
   // A chave inclui nome e presença de imagem: sem isso, um servidor que ganhou
   // distintivo desde o último desenho não seria redesenhado — a lista teria
   // mudado e a comparação diria que não.
@@ -433,16 +433,16 @@ function desenharTrilha(snapshot) {
   if (
     trilhaDesenhada !== null &&
     trilhaDesenhada.nome === nome &&
-    trilhaDesenhada.alvo === alvoDoDogma &&
+    trilhaDesenhada.alvo === alvoDoServer &&
     trilhaDesenhada.icone === uri &&
     trilhaDesenhada.outros === chave
   ) {
     return;
   }
-  trilhaDesenhada = { nome, alvo: alvoDoDogma, icone: uri, outros: chave };
+  trilhaDesenhada = { nome, alvo: alvoDoServer, icone: uri, outros: chave };
 
   vestirItemDaTrilha(
-    $("trilha-dogma"),
+    $("trilha-server"),
     nome ? sigla(nome) : SEM_MEDIDA,
     // Um servidor sem nome é ele não tendo mandado um, e não um nome vazio — e
     // um botão sem nome acessível é anunciado pela sigla, que é desenho.
@@ -476,7 +476,7 @@ function desenharTrilha(snapshot) {
         // O endereço vai junto do nome no rótulo acessível: dois servidores
         // podem se chamar igual, e é o endereço que os separa.
         conhecido.nome ? `${conhecido.nome} · ${conhecido.alvo}` : conhecido.alvo,
-        // `uriDeIcone` de `tela-dogma.js`, e não uma cópia aqui: escrever
+        // `uriDeIcone` de `tela-server.js`, e não uma cópia aqui: escrever
         // `image/png` num segundo arquivo é o que `frontend.rs` proíbe, e com
         // razão. A exceção que ele abre é para **um** lugar compor o tipo, e
         // são os mesmos bytes — os que o protocolo já provou serem PNG nas duas
@@ -599,7 +599,7 @@ function desenharCanais(snapshot) {
       : `entrar e falar com quem está em ${voice_room.name}`;
 
     // Os dois botões da sala numa fileira só. Com um deles ausente — que é o
-    // caso de quem não administra o Dogma — a fileira tem um filho de
+    // caso de quem não administra o servidor — a fileira tem um filho de
     // `flex: 1`, e sai idêntica ao botão de largura cheia de antes.
     const botoes = elemento("div", "voice_room-botoes");
     botoes.append(entrar);
@@ -661,7 +661,7 @@ function desenharCanais(snapshot) {
 
   // O tamanho padrão da sala nova vem de uma sala que já existe, e não de um
   // número escrito no JavaScript: quem hospeda já disse que tamanho quer
-  // quando montou o Dogma, e repetir a escolha dele é mais honesto que
+  // quando montou o servidor, e repetir a escolha dele é mais honesto que
   // inventar quinze. Só enquanto o campo estiver como a marcação o deixou.
   const lugares = $("campo-voice_room-limite");
   if (pode && lugares.value === lugares.defaultValue && snapshot.voice_rooms.length > 0) {
@@ -961,14 +961,14 @@ function desenharMensagens() {
   const lista = $("lista-mensagens");
 
   // Sem layout não há o que redesenhar, e insistir corrompe a leitura de quem
-  // volta. A chamada e o Terminal Dogma abrem por cima da sessão, e um evento
+  // volta. A chamada e o Terminal server abrem por cima da sessão, e um evento
   // que chegue com uma delas aberta cai aqui com a lista em `display: none` —
   // onde `scrollHeight`, `scrollTop` e `clientHeight` valem todos 0. A conta
   // abaixo vira `0 - 0 - 0 < 32`, isto é, "estava no fim", para justamente
   // quem tinha subido para ler. O `repovoar` seguinte ainda troca todos os
   // filhos, o que zera a rolagem de qualquer forma.
   //
-  // A lista é redesenhada ao voltar — `fecharChamada` e `fecharDogma` pedem
+  // A lista é redesenhada ao voltar — `fecharChamada` e `fecharServer` pedem
   // isso —, então sair daqui não deixa nada velho na tela.
   if (lista.clientHeight === 0) return;
 
@@ -1661,7 +1661,7 @@ function transferenciaAndou(transfer) {
   if (tipo === "Sent") {
     if (transfer.client_message_id !== subindo) return;
     // O arquivo saiu inteiro. A mensagem aparece na Linha em seguida, pelo
-    // caminho de sempre — o Dogma publica quando os bytes chegam, e é o
+    // caminho de sempre — o servidor publica quando os bytes chegam, e é o
     // `MessagesChanged` que a desenha.
     tirarAnexo();
     anunciar(TRANSFERENCIAS.Sent);
@@ -1695,7 +1695,7 @@ function transferenciaAndou(transfer) {
 
   // Um arquivo pedido que não vem. O motivo esperado é `Expired`, e é assim que
   // «este arquivo expirou» chega a uma tela que já estava desenhada quando os
-  // bytes saíram do Dogma.
+  // bytes saíram do servidor.
   if (tipo === "Unavailable") {
     const alvo = document.querySelector(
       `[data-anexo-estado="${transfer.attachment}"]`,
@@ -1735,7 +1735,7 @@ function transferenciaAndou(transfer) {
  * O bloco que uma mensagem com arquivo ganha embaixo do corpo.
  *
  * Nome, tamanho, e o que dá para fazer com ele. A prévia entra por um botão e
- * **nunca por rolar**: o arquivo mora no Dogma, então ver é baixar, e uma Linha
+ * **nunca por rolar**: o arquivo mora no servidor, então ver é baixar, e uma Linha
  * que buscasse toda imagem enquanto a conversa rola transformaria o teto de
  * disco de quem hospeda em banda de todo mundo — um giga de saída cada vez que
  * alguém abrisse a Linha. Quem quer ver pede; quem só está lendo não paga.
@@ -1878,7 +1878,7 @@ async function verPrevia(anexo) {
  * Salva um anexo, com a consequência dita antes do ato.
  *
  * A frase de consequência é onde esta janela cumpre a parte do ADR 0027 que
- * ninguém pode descobrir depois: **quem hospeda o Dogma pôde ler este
+ * ninguém pode descobrir depois: **quem hospeda o servidor pôde ler este
  * arquivo**, e o SEELE não varre vírus. As duas coisas são verdade e as duas
  * têm de estar escritas antes de a pessoa apertar, não numa página de ajuda.
  *
@@ -2009,7 +2009,7 @@ function segurarFala(segurando) {
  * fala, e é justamente a metade que faz a pessoa lê-la.
  */
 function nomeDesteServidor() {
-  return desenhado?.dogma || alvoDoDogma || "este servidor";
+  return desenhado?.server || alvoDoServer || "este servidor";
 }
 
 /**
@@ -2173,10 +2173,10 @@ async function ejetar() {
   $("convite").hidden = true;
   $("bateria").hidden = true;
   // A moderação pela mesma razão que a bateria: aberta, ela voltaria por cima
-  // da próxima sessão com um ato armado sobre alguém do Dogma anterior.
+  // da próxima sessão com um ato armado sobre alguém do servidor anterior.
   abandonarModeracao();
   // O veredito era sobre a chave daquela sessão. Deixá-lo aceso sobre a
-  // próxima seria dizer de um Dogma o que se apurou de outro.
+  // próxima seria dizer de um servidor o que se apurou de outro.
   mostrarVeredito(null);
   document.body.classList.remove("na-bateria");
   // A gaveta pela mesma razão que a moderação: aberta, ela voltaria por cima
@@ -2185,11 +2185,11 @@ async function ejetar() {
   desenhado = null;
   linhaAberta = null;
   // O mesmo argumento do veredito, para o relógio e para o endereço: um uptime
-  // que sobrevive à sessão conta o tempo passado noutro Dogma, e um endereço
+  // que sobrevive à sessão conta o tempo passado noutro servidor, e um endereço
   // que sobrevive põe no cabeçalho do próximo a porta do anterior.
   comecoDaSessao = null;
-  alvoDoDogma = null;
-  // A conversa e a revisão pela mesma razão. A revisão do próximo Dogma começa
+  alvoDoServer = null;
+  // A conversa e a revisão pela mesma razão. A revisão do próximo servidor começa
   // em zero, e guardar a do anterior faria a primeira sincronização concluir
   // que nada mudou — a tela abriria com o histórico de outra sessão na frente.
   mensagens = [];
@@ -2198,12 +2198,12 @@ async function ejetar() {
   // já com o cursor num campo de busca sobre uma conversa que não existe.
   await alternarBusca(false);
   // O convite não sobrevive à sessão que ele abriu: quem sai, digita outro
-  // endereço e aperta INSERT mandaria o token do Dogma anterior ao novo.
+  // endereço e aperta INSERT mandaria o token do servidor anterior ao novo.
   limparConvite();
   // E os três blocos do boot voltam a apagar. Deixá-los acesos seria a tela de
   // entrada afirmando uma conexão que acabou de ser desfeita.
   subsistemas("", "·");
-  // Quem acabou de sair de um Dogma tem que vê-lo na lista.
+  // Quem acabou de sair de um servidor tem que vê-lo na lista.
   await desenharVisitados();
   // E o teclado sai junto. Sem isto o foco fica no `<body>`: quem apertou
   // DESCONECTAR com a tecla volta para a entrada tendo de tabular a tela toda
@@ -2439,7 +2439,7 @@ $("form-mensagem").addEventListener("submit", enviar);
 listen("tauri://drag-drop", (evento) => {
   const caminhos = evento?.payload?.paths;
   if (!Array.isArray(caminhos) || caminhos.length === 0) return;
-  // Fora desta tela, calado: quem está no Terminal Dogma não largou o arquivo
+  // Fora desta tela, calado: quem está no Terminal servidor não largou o arquivo
   // aqui. Sem Linha aberta, **não** calado — o gesto foi nesta tela, e o
   // silêncio é indistinguível de defeito.
   if ($("tela-sessao").hidden) return;
@@ -2483,7 +2483,7 @@ $("lista-voice_rooms").addEventListener("click", alternarCanal);
 $("lista-linhas").addEventListener("click", alternarCanal);
 
 /**
- * Pede uma sala nova ao Dogma.
+ * Pede uma sala nova ao servidor.
  *
  * Não há resposta a esperar, e isso é do desenho e não descuido: o servidor
  * anuncia a sala a **todos** os conectados, inclusive a quem pediu, e o anúncio
@@ -2502,7 +2502,7 @@ $("lista-linhas").addEventListener("click", alternarCanal);
 /// texto — um nome de comando que chega por parâmetro some desse laço, e o
 /// guarda passa a dizer que o comando vivo nunca é chamado. Foi exatamente o que
 /// aconteceu na primeira versão desta função, e antes dela na tabela de
-/// dispositivos do Terminal Dogma. Duas vezes no mesmo dia: o literal fica no
+/// dispositivos do Terminal server. Duas vezes no mesmo dia: o literal fica no
 /// lugar da chamada, sempre.
 async function pedirSala(pedido, campo, rotulo) {
   try {
@@ -2705,7 +2705,7 @@ listen("seele://event", (evento) => {
   // Só com uma busca de pé, e só neste evento: refazer a busca a cada tique de
   // telemetria seria uma volta de IPC por nada, duas vezes por segundo.
   // O andamento de um arquivo. Não passa por `atualizar()`: enquanto sobe não
-  // existe mensagem nenhuma na Linha — o Dogma só publica quando os bytes
+  // existe mensagem nenhuma na Linha — o servidor só publica quando os bytes
   // chegam inteiros —, então não há snapshot que carregue esta informação.
   if (payload && typeof payload === "object" && payload.TransferChanged) {
     transferenciaAndou(payload.TransferChanged.transfer);

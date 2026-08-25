@@ -15,13 +15,13 @@
 //!
 //! É por isso que `Batida` guarda o socket por onde bateu, em vez de só mandar
 //! o pacote: quem conecta em seguida tem de conectar por ele. É o mesmo motivo
-//! pelo qual o outro lado precisou de um espelho do socket do Dogma.
+//! pelo qual o outro lado precisou de um espelho do socket do servidor.
 //!
 //! # O que este lado nunca faz
 //!
 //! **Não lê resposta nenhuma do ponto de encontro.** Nem precisa: os endereços
 //! que serão tentados vieram todos do `seele://`, e a impressão digital contra a
-//! qual o Dogma é conferido também. Um ponto de encontro hostil consegue não
+//! qual o servidor é conferido também. Um ponto de encontro hostil consegue não
 //! avisar o anfitrião — e é só. Ele não tem por onde mandar ninguém para outro
 //! lugar, porque ninguém deste lado escuta o que ele diz.
 

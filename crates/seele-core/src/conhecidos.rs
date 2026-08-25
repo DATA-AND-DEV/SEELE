@@ -1,4 +1,4 @@
-//! Os Dogmas onde este cliente já esteve.
+//! Os servidores onde este cliente já esteve.
 //!
 //! Existe para que ninguém precise redigitar um endereço IP e um apelido toda
 //! vez. É o que alimenta a tela de conexão do `plug` e a lista do app.
@@ -17,7 +17,7 @@
 //!
 //! # Formato
 //!
-//! Uma linha por Dogma, campos separados por tabulação:
+//! Uma linha por servidor, campos separados por tabulação:
 //!
 //! ```text
 //! 192.168.0.7:8383 <TAB> ayanami <TAB> 1 <TAB> 1738000000
@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-/// Um Dogma que este cliente já visitou.
+/// Um servidor que este cliente já visitou.
 ///
 /// `Serialize` pelo mesmo motivo de [`crate::search::Match`]: a casca desktop
 /// manda esta lista para a webview, e nada aqui é segredo — endereço, apelido e
@@ -47,19 +47,19 @@ pub struct Conhecido {
     pub voice_room: Option<u32>,
     /// Quando foi a última visita, em segundos desde a época.
     pub visto_em: i64,
-    /// Como o Dogma se chamava na última visita.
+    /// Como o servidor se chamava na última visita.
     ///
     /// `None` numa entrada escrita antes de este campo existir, e a tela cai
     /// para o endereço nesse caso. Guardar o nome é o que faz esta lista servir
     /// a quem não decora IP: «Terceira Tóquio» é o que uma pessoa reconhece, e
     /// `192.168.0.39:8383` é o que ela copiou de alguém uma vez.
     pub nome: Option<String>,
-    /// A imagem do Dogma na última visita, se havia uma.
+    /// A imagem do servidor na última visita, se havia uma.
     ///
     /// Fora do arquivo de texto: são até 8 KiB de PNG, e binário em coluna de
     /// TSV faria uma limpeza de lista à mão virar conversa de suporte — que é
     /// exatamente o que o cabeçalho deste módulo recusa. Mora num arquivo por
-    /// Dogma, ao lado da lista, e vem carregada em [`Conhecidos::listar`].
+    /// server, ao lado da lista, e vem carregada em [`Conhecidos::listar`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icone: Option<Vec<u8>>,
 }
@@ -110,7 +110,7 @@ impl Conhecidos {
         Ok(lista)
     }
 
-    /// Os Dogmas conhecidos, do mais recente para o mais antigo.
+    /// Os servidores conhecidos, do mais recente para o mais antigo.
     ///
     /// Essa ordem é a única útil numa lista de atalhos: quem vai voltar,
     /// volta para onde esteve por último.
@@ -161,13 +161,13 @@ impl Conhecidos {
         self.gravar()
     }
 
-    /// Anota como o Dogma se chama e qual é a imagem dele.
+    /// Anota como o servidor se chama e qual é a imagem dele.
     ///
     /// Separado de [`Self::registrar`] porque acontece noutro momento: o
     /// endereço e o apelido são sabidos quando a conexão dá certo, e estes dois
-    /// chegam **depois**, no quadro que o Dogma manda logo após o aperto de mão.
+    /// chegam **depois**, no quadro que o servidor manda logo após o aperto de mão.
     ///
-    /// Não cria entrada: só anota sobre uma que já existe. Um Dogma que não está
+    /// Não cria entrada: só anota sobre uma que já existe. Um servidor que não está
     /// na lista de visitados não está por decisão de quem chamou `registrar` —
     /// um hospedado aqui, por exemplo — e esta função não pode desfazer isso.
     ///
@@ -189,9 +189,9 @@ impl Conhecidos {
         self.gravar()
     }
 
-    /// Onde a imagem de um Dogma é guardada.
+    /// Onde a imagem de um servidor é guardada.
     ///
-    /// Um arquivo por Dogma, num diretório ao lado da lista. O nome vem do
+    /// Um arquivo por server, num diretório ao lado da lista. O nome vem do
     /// endereço passado por um digestor, e não do endereço: um `alvo` é texto
     /// que alguém digitou, e texto que alguém digitou não pode virar caminho de
     /// arquivo sem alguém escrever `../` mais cedo ou mais tarde.
@@ -204,7 +204,7 @@ impl Conhecidos {
         pasta.join(format!("{}.png", digerir(alvo)))
     }
 
-    /// Esquece um Dogma.
+    /// Esquece um servidor.
     ///
     /// # Errors
     ///
@@ -352,15 +352,15 @@ mod tests {
         let caminho = pasta.join("conhecidos");
 
         let mut lista = Conhecidos::abrir(caminho.clone()).expect("abrir");
-        lista.registrar("dogma.exemplo:8383", "ayanami", Some(1)).expect("registrar");
+        lista.registrar("server.exemplo:8383", "ayanami", Some(1)).expect("registrar");
         lista
-            .anotar_aparencia("dogma.exemplo:8383", Some("Terceira Tóquio"), Some(&[1, 2, 3]))
+            .anotar_aparencia("server.exemplo:8383", Some("Terceira Tóquio"), Some(&[1, 2, 3]))
             .expect("anotar");
 
-        lista.registrar("dogma.exemplo:8383", "ayanami", Some(2)).expect("de novo");
+        lista.registrar("server.exemplo:8383", "ayanami", Some(2)).expect("de novo");
 
         let de_volta = Conhecidos::abrir(caminho).expect("reabrir");
-        let entrada = de_volta.buscar("dogma.exemplo:8383").expect("está lá");
+        let entrada = de_volta.buscar("server.exemplo:8383").expect("está lá");
         assert_eq!(entrada.nome.as_deref(), Some("Terceira Tóquio"));
         assert_eq!(entrada.icone.as_deref(), Some(&[1, 2, 3][..]));
         assert_eq!(entrada.voice_room, Some(2), "a visita nova não valeu");
@@ -373,7 +373,7 @@ mod tests {
         // O formato ganhou uma coluna. Uma lista escrita por uma versão
         // anterior tem quatro campos, e recusá-la faria a atualização apagar os
         // atalhos de quem já usava o produto.
-        let velha = analisar_linha("dogma.exemplo:8383\tayanami\t1\t1738000000")
+        let velha = analisar_linha("server.exemplo:8383\tayanami\t1\t1738000000")
             .expect("uma linha de quatro campos é válida");
         assert_eq!(velha.apelido, "ayanami");
         assert_eq!(velha.voice_room, Some(1));
@@ -409,7 +409,7 @@ mod tests {
 
     #[test]
     fn visitar_de_novo_atualiza_em_vez_de_duplicar() {
-        // Uma lista de atalhos com o mesmo Dogma três vezes é pior que nenhuma.
+        // Uma lista de atalhos com o mesmo servidor três vezes é pior que nenhuma.
         let caminho = rascunho("atualiza");
         let mut lista = Conhecidos::abrir(caminho.clone()).expect("abrir");
 

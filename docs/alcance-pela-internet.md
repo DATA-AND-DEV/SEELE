@@ -1,6 +1,6 @@
 # Por que "não conecta" de fora da sua rede
 
-Você hospedou um Dogma, mandou o link para um amigo, e ele não entra. Este
+Você hospedou um servidor, mandou o link para um amigo, e ele não entra. Este
 documento existe para você não ter que descobrir sozinho por quê.
 
 O resumo honesto: **em algumas casas o SEELE resolve isso sozinho, e em outras
@@ -220,7 +220,7 @@ e um serviço no meio aprende alguma coisa. O que ele aprende é isto:
 | Ele fica sabendo | Ele **não** fica sabendo |
 |---|---|
 | que o seu endereço falou com o endereço de outra pessoa, e quando | o que foi dito, em texto ou em voz |
-| o endereço público das duas máquinas | quem são vocês, que Dogma é, quais salas existem |
+| o endereço público das duas máquinas | quem são vocês, que Server é, quais salas existem |
 | que houve uma tentativa de conexão | se ela deu certo |
 
 O conteúdo continua ponta a ponta: o TLS 1.3 e a impressão digital do ADR 0003
@@ -273,11 +273,11 @@ Set-NetConnectionProfile -Name "<o nome da sua rede>" -NetworkCategory Private
 administrador:
 
 ```powershell
-New-NetFirewallRule -DisplayName "SEELE Dogma" -Direction Inbound `
+New-NetFirewallRule -DisplayName "SEELE server" -Direction Inbound `
   -Protocol UDP -LocalPort 8383 -Action Allow -Profile Private
 ```
 
-Para conferir que o Dogma está mesmo escutando, e **em quê**:
+Para conferir que o servidor está mesmo escutando, e **em quê**:
 
 ```powershell
 Get-NetUDPEndpoint -LocalPort 8383

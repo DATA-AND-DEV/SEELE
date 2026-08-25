@@ -22,22 +22,22 @@ use seele_core::{Client, MemoryPinStore};
 use seele_proto::ids::{VoiceRoomId, ClientMessageId, LineId};
 use seele_proto::ServerMessage;
 use seele_server::persistence::Location;
-use seele_server::{DogmaConfig, Server};
+use seele_server::{ServerConfig, Daemon};
 
 const LINE: LineId = LineId(1);
 const VOICE_ROOM: VoiceRoomId = VoiceRoomId(1);
 const WAIT: Duration = Duration::from_secs(5);
 
-/// Starts a Dogma backed by a file, and returns where to reach it plus a handle
+/// Starts a server backed by a file, and returns where to reach it plus a handle
 /// to stop it.
-async fn start(database: PathBuf) -> Result<(SocketAddr, Arc<Server>)> {
-    let config = DogmaConfig {
+async fn start(database: PathBuf) -> Result<(SocketAddr, Arc<Daemon>)> {
+    let config = ServerConfig {
         name: "Terceira Tóquio".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::File(database),
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let server = Arc::new(Server::bind(config).await?);
+    let server = Arc::new(Daemon::bind(config).await?);
     let address = server.local_addr()?;
     // `run` borrows, so the handle stays with the test and can shut the
     // endpoint down when it is finished with it.
@@ -83,7 +83,7 @@ where
 }
 
 #[tokio::test]
-async fn a_restarted_dogma_keeps_its_history() -> Result<()> {
+async fn a_restarted_server_keeps_its_history() -> Result<()> {
     // The headline criterion. specs/04-servidor-seele.md is stronger still:
     // "Reinício não perde mensagem confirmada ao cliente", which is why a
     // message is broadcast only after its batch has committed.
@@ -140,7 +140,7 @@ async fn a_restarted_dogma_keeps_its_history() -> Result<()> {
 }
 
 #[tokio::test]
-async fn a_restarted_dogma_keeps_its_accounts() -> Result<()> {
+async fn a_restarted_server_keeps_its_accounts() -> Result<()> {
     // The other half of "preserva estado". ADR 0004 makes the key the identity,
     // so the same key must find the same account — otherwise every restart
     // orphans everybody's history.
@@ -251,13 +251,13 @@ async fn a_person_without_write_permission_is_refused() -> Result<()> {
     // checks the wiring, that the refusal actually reaches the wire.
     // specs/08-seguranca.md: the server denying is the security.
     let directory = tempfile::tempdir()?;
-    let config = DogmaConfig {
+    let config = ServerConfig {
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::File(directory.path().join("dogma.db")),
         observers: vec!["observador".into()],
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let server = Arc::new(Server::bind(config).await?);
+    let server = Arc::new(Daemon::bind(config).await?);
     let address = server.local_addr()?;
     let accepting = Arc::clone(&server);
     tokio::spawn(async move {

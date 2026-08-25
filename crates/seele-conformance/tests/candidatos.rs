@@ -1,4 +1,4 @@
-//! An invite with several addresses, against a Dogma that only answers at one.
+//! An invite with several addresses, against a server that only answers at one.
 //!
 //! ADR 0006 grew a list of candidate addresses after a field failure: a Windows
 //! host with a VPN announced an address nobody on its own network could reach,
@@ -6,7 +6,7 @@
 //! One address is never enough — the one that works from outside is not the one
 //! that works from inside, and vice versa.
 //!
-//! # What only a live Dogma can prove
+//! # What only a live server can prove
 //!
 //! The ordering and the sentence are decisions over values, and they are tested
 //! where they are decided (`seele_server::alcance`, `seele_proto::uri`). What no
@@ -35,20 +35,20 @@ use seele_core::{MemoryPinStore, PinStore};
 use seele_proto::control::ServerMessage;
 use seele_proto::ids::{VoiceRoomId, ClientMessageId, LineId};
 use seele_server::persistence::Location;
-use seele_server::{DogmaConfig, Server};
+use seele_server::{ServerConfig, Daemon};
 
 const VOICE_ROOM: u32 = 1;
 const LINE: u32 = 1;
 
-/// Starts a Dogma on a port the system picks.
-async fn dogma() -> Result<(SocketAddr, Arc<Server>)> {
-    let config = DogmaConfig {
+/// Starts a server on a port the system picks.
+async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
+    let config = ServerConfig {
         name: "Terceira Tóquio".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let servidor = Arc::new(Server::bind(config).await?);
+    let servidor = Arc::new(Daemon::bind(config).await?);
     let endereco = servidor.local_addr()?;
     let aceitando = Arc::clone(&servidor);
     tokio::spawn(async move {
@@ -60,7 +60,7 @@ async fn dogma() -> Result<(SocketAddr, Arc<Server>)> {
 /// An address where nothing is listening.
 ///
 /// Bound and released, so the port is real and free: a number picked by hand
-/// could be somebody else's Dogma on the machine running the tests.
+/// could be somebody else's server on the machine running the tests.
 fn endereco_morto() -> SocketAddr {
     let socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("bind");
     let endereco = socket.local_addr().expect("local_addr");
@@ -106,7 +106,7 @@ async fn a_conexao_cai_para_o_proximo_endereco_do_convite() -> Result<()> {
     // host's own network uses, and the person opening the link is not on that
     // network. Before the candidate list this was the whole story — one address,
     // no second try, "it doesn't connect".
-    let (vivo, _servidor) = dogma().await?;
+    let (vivo, _servidor) = server().await?;
     let pins = Arc::new(MemoryPinStore::default());
 
     let comeco = Instant::now();
@@ -116,18 +116,18 @@ async fn a_conexao_cai_para_o_proximo_endereco_do_convite() -> Result<()> {
         Arc::clone(&pins) as Arc<dyn PinStore>,
     )
     .await
-    .expect("o segundo endereço do convite tinha um Dogma atendendo, e ninguém foi lá");
+    .expect("o segundo endereço do convite tinha um servidor atendendo, e ninguém foi lá");
     let levou = comeco.elapsed();
 
     falar_e_ouvir(&mut enlace, "padrão azul").await?;
 
     // The pin is filed under the address that actually answered, and not under
-    // the one that was tried first: two Dogmas are told apart by where they
+    // the one that was tried first: two servers are told apart by where they
     // answer, and filing the dead address would hand the next visitor a key
     // belonging to nobody.
     assert!(
         pins.pinned(&vivo.to_string()).is_some(),
-        "ninguém fixou a chave do Dogma que atendeu"
+        "ninguém fixou a chave do servidor que atendeu"
     );
     assert!(
         pins.pinned(&endereco_morto().to_string()).is_none(),
@@ -148,7 +148,7 @@ async fn um_convite_de_um_endereco_so_continua_conectando_como_antes() -> Result
     // Compatibility, and it is not decorative: an invite written before ADR 0006
     // grew the list arrives as a one-item list, and it must take exactly the old
     // path — no new deadline, no extra attempt.
-    let (vivo, _servidor) = dogma().await?;
+    let (vivo, _servidor) = server().await?;
     let pins = Arc::new(MemoryPinStore::default());
 
     let mut enlace = Enlace::conectar_entre(
@@ -181,7 +181,7 @@ async fn nenhum_endereco_atendendo_falha_e_nao_trava() -> Result<()> {
     )
     .await;
     let Err(erro) = erro else {
-        panic!("conectou em três endereços onde não há Dogma nenhum");
+        panic!("conectou em três endereços onde não há servidor nenhum");
     };
     let levou = comeco.elapsed();
 

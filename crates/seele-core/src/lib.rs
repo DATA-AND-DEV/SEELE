@@ -61,7 +61,7 @@ pub use client::{
 pub use ed25519_dalek::SigningKey;
 pub use identity::FilePinStore;
 pub use preview::{
-    check_dogma_icon, IconRefusal, ImageFormat, Verdict as PreviewVerdict, PREVIEW_LIMIT,
+    check_server_icon, IconRefusal, ImageFormat, Verdict as PreviewVerdict, PREVIEW_LIMIT,
 };
 pub use state::{
     VoiceRoomSync, Changed, ChavePedida, Ended, Message, Notice, Person, Room, Tela, TransferNotice,
@@ -121,7 +121,7 @@ pub use seele_proto::control::{
 };
 /// A impressão digital de uma chave pública, no formato que o produto mostra.
 ///
-/// Reexportada porque a casca precisa dela para se reconhecer no próprio Dogma
+/// Reexportada porque a casca precisa dela para se reconhecer no próprio servidor
 /// — quem hospeda tem de estar admitido antes de bater na própria porta — e a
 /// regra de dependência do ADR 0002 não deixa a casca ver `seele-proto`.
 pub use seele_proto::transport::key_fingerprint;

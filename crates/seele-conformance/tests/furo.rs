@@ -111,7 +111,7 @@ fn destino_com_nome(alvo: &str, nome_tls: &str) -> Destino {
         servidor,
         nome_tls: nome_tls.to_owned(),
         // Sob o endereço escrito, e não sob um nome fixo: dois candidatos são
-        // Dogmas diferentes até que um deles responda.
+        // servidores diferentes até que um deles responda.
         chave_do_pin: alvo.to_owned(),
         apelido: "pessoa".to_owned(),
         segredo: None,
@@ -122,7 +122,7 @@ fn destino_com_nome(alvo: &str, nome_tls: &str) -> Destino {
 /// Monta um convite com `alvos` de candidatos e `ponto` de ponto de encontro, e
 /// chama o caminho público de conexão do `seele-core`.
 ///
-/// **Sempre falha em conectar**, e é isso que se quer: não há Dogma nenhum em
+/// **Sempre falha em conectar**, e é isso que se quer: não há servidor nenhum em
 /// endereço nenhum destes. O que se mede é o relógio, não o sucesso.
 async fn tentar_convite_com_nome(
     ponto: SocketAddr,
@@ -440,7 +440,7 @@ async fn o_aviso_se_repete_enquanto_o_aperto_de_mao_corre() {
 async fn a_repeticao_para_quando_o_candidato_acaba() {
     // Avisar sobre um candidato que já terminou gasta furo da janela do
     // anfitrião por um caminho que ninguém vai tentar de novo — e a janela é o
-    // que separa "quem tem o link entra" de "quem tem o link faz o Dogma jorrar
+    // que separa "quem tem o link entra" de "quem tem o link faz o servidor jorrar
     // pacote".
     //
     // O que torna isto observável numa máquina só é o candidato **acabar

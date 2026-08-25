@@ -1,4 +1,4 @@
-//! O convite conferido contra um Dogma de verdade.
+//! O convite conferido contra um servidor de verdade.
 //!
 //! O ADR 0006 inventou o link para transformar o primeiro contato de cego em
 //! verificado. A política que decide isso é uma tabela pura, testada em
@@ -14,11 +14,11 @@
 //! **A impressão chega.** Se a chamada passasse `None` no lugar de
 //! `destino.impressao_esperada`, todo primeiro contato voltaria a ser cego e a
 //! conferência inteira viraria enfeite. O primeiro teste conecta com a
-//! impressão real do Dogma e exige `FirstContactVerified` — que é o único
+//! impressão real do servidor e exige `FirstContactVerified` — que é o único
 //! veredito que não existe sem a fiação.
 //!
 //! **A recusa não deixa sessão de pé.** A recusa acontece depois do aperto de
-//! mão, com uma sessão já servindo do lado do Dogma; deixá-la lá daria conexão
+//! mão, com uma sessão já servindo do lado do servidor; deixá-la lá daria conexão
 //! viva a quem acabou de ser rejeitado. O segundo teste espera o endpoint do
 //! servidor ficar ocioso, com prazo. Ele afirma o resultado, não o mecanismo —
 //! ver a nota no corpo do teste sobre o que essa asserção não distingue.
@@ -48,7 +48,7 @@ use seele_core::{ConnectError, MemoryPinStore, PinStore, Verdict};
 use seele_proto::control::ServerMessage;
 use seele_proto::ids::{VoiceRoomId, ClientMessageId, LineId};
 use seele_server::persistence::Location;
-use seele_server::{DogmaConfig, Server};
+use seele_server::{ServerConfig, Daemon};
 
 const VOICE_ROOM: u32 = 1;
 const LINE: u32 = 1;
@@ -61,20 +61,20 @@ const LINE: u32 = 1;
 /// certificado tem SHA-256 zerado.
 const NAO_E_DE_NINGUEM: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
-/// Sobe um Dogma numa porta que o sistema escolhe.
+/// Sobe um servidor numa porta que o sistema escolhe.
 ///
 /// Mesma forma do `ejetar.rs`, e pelo mesmo motivo: porta zero, nunca um número
-/// escrito à mão, que colidiria com o Dogma que a pessoa deixou rodando na
+/// escrito à mão, que colidiria com o servidor que a pessoa deixou rodando na
 /// própria máquina. Os três testes deste arquivo sobem cada um o seu, então
 /// nenhum vê o pin nem a lotação do outro.
-async fn dogma() -> Result<(SocketAddr, Arc<Server>)> {
-    let config = DogmaConfig {
+async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
+    let config = ServerConfig {
         name: "Terceira Tóquio".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let servidor = Arc::new(Server::bind(config).await?);
+    let servidor = Arc::new(Daemon::bind(config).await?);
     let endereco = servidor.local_addr()?;
     let aceitando = Arc::clone(&servidor);
     tokio::spawn(async move {
@@ -140,7 +140,7 @@ where
 /// Prova que a sessão **serve**, e não só que o construtor devolveu `Ok`.
 ///
 /// Entrar na sala de voz, abrir a Linha, dizer algo e ouvir de volta é o menor caminho
-/// que passa pelo Dogma inteiro — copiado do `conectar_e_falar` do `ejetar.rs`,
+/// que passa pelo servidor inteiro — copiado do `conectar_e_falar` do `ejetar.rs`,
 /// que é onde esta forma nasceu. É o que distingue "a conferência avisou e
 /// seguiu" de "a conferência avisou e derrubou": um enlace derrubado devolve
 /// `Ok` do mesmo jeito, e só cala quando alguém fala com ele.
@@ -161,22 +161,22 @@ async fn falar_e_ouvir(enlace: &mut Enlace, o_que: &str) -> Result<()> {
     .await;
     assert!(
         ouviu.is_some(),
-        "a sessão conectou e não fala: «{o_que}» não voltou do Dogma"
+        "a sessão conectou e não fala: «{o_que}» não voltou do servidor"
     );
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_impressao_que_o_convite_promete_verifica_o_primeiro_contato() -> Result<()> {
-    let (endereco, servidor) = dogma().await?;
-    // A impressão de verdade, lida do Dogma que está de pé: é isto que o
+    let (endereco, servidor) = server().await?;
+    // A impressão de verdade, lida do servidor que está de pé: é isto que o
     // `seeled convite` põe no link, e o que um link honesto carrega.
     let impressao = servidor.fingerprint().to_owned();
 
     let loja = Arc::new(MemoryPinStore::new());
     let mut enlace = conectar(endereco, 46, "ayanami", Some(&impressao), &loja)
         .await
-        .expect("o convite promete a impressão deste Dogma; não havia o que recusar");
+        .expect("o convite promete a impressão deste servidor; não havia o que recusar");
 
     // `FirstContactVerified` é o veredito que **só** existe com a impressão do
     // convite chegando até a conferência. Passar `None` no lugar dela daria
@@ -208,7 +208,7 @@ async fn a_impressao_que_o_convite_promete_verifica_o_primeiro_contato() -> Resu
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_impressao_que_nao_confere_derruba_a_conexao_e_desfaz_o_pin() -> Result<()> {
-    let (endereco, servidor) = dogma().await?;
+    let (endereco, servidor) = server().await?;
     let real = servidor.fingerprint().to_owned();
     let chave_do_pin = endereco.to_string();
     let loja = Arc::new(MemoryPinStore::new());
@@ -236,10 +236,10 @@ async fn a_impressao_que_nao_confere_derruba_a_conexao_e_desfaz_o_pin() -> Resul
         "a recusa deixou fixada a chave do servidor que ela acabou de recusar"
     );
 
-    // Metade dois: a conexão caiu **do lado do Dogma** também. A recusa vem
+    // Metade dois: a conexão caiu **do lado do servidor** também. A recusa vem
     // depois do aperto de mão, com a sessão já de pé lá, e o cliente mantém
     // keepalive a cada 5 s — uma conexão esquecida aqui não expira sozinha, o
-    // ADR 0003 não a protege mais, e o Dogma serviria uma sessão a quem foi
+    // ADR 0003 não a protege mais, e o servidor serviria uma sessão a quem foi
     // recusado. `wait_idle` só volta quando o endpoint não tem mais conexão
     // nenhuma, e o prazo é folga de loopback: na prática ela some em dezenas de
     // milissegundos.
@@ -248,7 +248,7 @@ async fn a_impressao_que_nao_confere_derruba_a_conexao_e_desfaz_o_pin() -> Resul
     // demais nela: apagar o `cliente.close(INVITE_REFUSED)` de
     // `Enlace::conectar` não a deixa vermelha. Medido — 84 ms com a queda
     // explícita, 87 ms sem ela. Soltar o `Client` acaba fechando a conexão pelo
-    // caminho longo (a tarefa leitora só se descobre sozinha quando o Dogma
+    // caminho longo (a tarefa leitora só se descobre sozinha quando o servidor
     // fala de novo), então o que se guarda aqui é o **resultado** — não sobra
     // sessão —, e não qual das duas coisas o produziu. A queda explícita
     // continua sendo a certa: ela não depende de o servidor dizer alguma coisa,
@@ -258,7 +258,7 @@ async fn a_impressao_que_nao_confere_derruba_a_conexao_e_desfaz_o_pin() -> Resul
     // fechamento a quem escreve um teste daqui.
     tokio::time::timeout(Duration::from_secs(10), servidor.wait_idle())
         .await
-        .expect("a conexão recusada continuou de pé no Dogma");
+        .expect("a conexão recusada continuou de pé no servidor");
 
     // Metade três, que é a que dá sentido às outras: a visita seguinte, sem
     // link nenhum para conferir, tem que ser primeiro contato de novo. Se o pin
@@ -272,7 +272,7 @@ async fn a_impressao_que_nao_confere_derruba_a_conexao_e_desfaz_o_pin() -> Resul
         &Verdict::FirstContact {
             fingerprint: real.clone()
         },
-        "depois da recusa o Dogma foi tratado como já conhecido"
+        "depois da recusa o servidor foi tratado como já conhecido"
     );
     assert_eq!(loja.pinned(&chave_do_pin), Some(real));
 
@@ -284,12 +284,12 @@ async fn a_impressao_que_nao_confere_derruba_a_conexao_e_desfaz_o_pin() -> Resul
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn um_link_velho_contra_um_dogma_ja_conhecido_avisa_e_nao_derruba() -> Result<()> {
+async fn um_link_velho_contra_um_server_ja_conhecido_avisa_e_nao_derruba() -> Result<()> {
     // A metade oposta da recusa, e a que some sem ninguém notar. Com pin
     // estabelecido, o TOFU já provou que este é o servidor de ontem: quem está
-    // errado é o link. Derrubar aqui trancaria a pessoa para fora de um Dogma
+    // errado é o link. Derrubar aqui trancaria a pessoa para fora de um servidor
     // que ela usa porque um amigo mandou um convite velho.
-    let (endereco, servidor) = dogma().await?;
+    let (endereco, servidor) = server().await?;
     let real = servidor.fingerprint().to_owned();
     let chave_do_pin = endereco.to_string();
     let loja = Arc::new(MemoryPinStore::new());
@@ -310,7 +310,7 @@ async fn um_link_velho_contra_um_dogma_ja_conhecido_avisa_e_nao_derruba() -> Res
 
     let mut segundo = conectar(endereco, 46, "ayanami", Some(NAO_E_DE_NINGUEM), &loja)
         .await
-        .expect("um link velho não pode trancar ninguém para fora de um Dogma conhecido");
+        .expect("um link velho não pode trancar ninguém para fora de um servidor conhecido");
     assert_eq!(
         segundo.veredito(),
         &Verdict::InviteDisagrees {
@@ -330,7 +330,7 @@ async fn um_link_velho_contra_um_dogma_ja_conhecido_avisa_e_nao_derruba() -> Res
     // condição no caminho de `Ok`, e o campo só muda dentro de `proximo()`.
     // Antes de alguém drenar avisos, a asserção não tem como reprovar — e este
     // é o arquivo que existe para provar uma coisa, não para parecer que prova.
-    falar_e_ouvir(&mut segundo, "o link estava velho, o Dogma é o mesmo").await?;
+    falar_e_ouvir(&mut segundo, "o link estava velho, o servidor é o mesmo").await?;
 
     // E o aviso não desfaz nada. Desfixar aqui é o erro simétrico: a visita
     // seguinte entraria cega num servidor que já era conhecido.

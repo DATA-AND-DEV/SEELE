@@ -1,16 +1,16 @@
-//! O endereço de um Dogma como um texto que se manda para alguém.
+//! O endereço de um servidor como um texto que se manda para alguém.
 //!
 //! Fecha o ADR 0006, que estava `proposto` desde M2.
 //!
 //! ```text
-//! seele://dogma.exemplo:8383/?fp=3cbcfb02…&convite=7K4M…
+//! seele://server.exemplo:8383/?fp=3cbcfb02…&convite=7K4M…
 //! ```
 //!
 //! # O que carrega, e por quê
 //!
 //! **Endereço** — obrigatório. Sem ele não há nada.
 //!
-//! **`alt`, os outros endereços do mesmo Dogma** — opcional, e a resposta a um
+//! **`alt`, os outros endereços do mesmo server** — opcional, e a resposta a um
 //! defeito de campo. Uma máquina tem vários endereços, e nenhum deles serve
 //! para todo mundo: o da rede de casa não é alcançável de fora, o público que o
 //! roteador abriu costuma não voltar para dentro — muitos roteadores domésticos
@@ -54,7 +54,7 @@
 //!
 //! # O que deliberadamente não carrega
 //!
-//! **A senha do Dogma.** Seria conveniente e é a coisa errada: uma senha vale
+//! **A senha do servidor.** Seria conveniente e é a coisa errada: uma senha vale
 //! para sempre e para todo mundo, e um link acaba em histórico de terminal,
 //! backup de conversa, captura de tela. O convite existe justamente para
 //! ocupar esse lugar. Quem usa senha digita a senha.
@@ -78,7 +78,7 @@ pub const PORTA_PADRAO: u16 = crate::transport::DEFAULT_PORT;
 /// cliente velho virar parede.
 pub const LIMITE_DE_ALVOS: usize = 4;
 
-/// Um convite para entrar num Dogma.
+/// Um convite para entrar num servidor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Convite {
     /// `host` ou `host:porta`, como estava escrito.
@@ -87,7 +87,7 @@ pub struct Convite {
     /// campo enxerga. Por isso ele é o da rede local: é o caso comum e o que
     /// sempre funcionou.
     pub alvo: String,
-    /// Os outros endereços do mesmo Dogma, na ordem em que se tenta.
+    /// Os outros endereços do mesmo servidor, na ordem em que se tenta.
     ///
     /// Vazio num convite antigo, e é assim que a compatibilidade se resolve nos
     /// dois sentidos: um convite de antes vira uma lista de um, e um cliente de
@@ -95,7 +95,7 @@ pub struct Convite {
     pub alternativos: Vec<String>,
     /// Onde bater para que o anfitrião fure o NAT, se o link trouxe um bilhete.
     ///
-    /// Degrau 4 do ADR 0022. `None` num convite de um Dogma que não precisou
+    /// Degrau 4 do ADR 0022. `None` num convite de um servidor que não precisou
     /// dele — o que alcança de fora por IPv6 ou por porta no roteador não tem
     /// terceiro nenhum no meio, e não deve ganhar um.
     pub bilhete: Option<Bilhete>,
@@ -128,7 +128,7 @@ impl Convite {
         self
     }
 
-    /// Acrescenta os outros endereços do mesmo Dogma, na ordem de tentativa.
+    /// Acrescenta os outros endereços do mesmo server, na ordem de tentativa.
     ///
     /// Endereço repetido é descartado, e a lista inteira cabe em
     /// [`LIMITE_DE_ALVOS`] contando o principal — quem monta o convite não
@@ -262,7 +262,7 @@ impl Bilhete {
 
     /// O ponto de encontro, separado em máquina e porta.
     ///
-    /// A porta padrão aqui **não** é a do Dogma: um ponto de encontro atende na
+    /// A porta padrão aqui **não** é a do servidor: um ponto de encontro atende na
     /// [`crate::encontro::PORTA_PADRAO`].
     ///
     /// # Errors
@@ -405,7 +405,7 @@ pub fn analisar(texto: &str) -> Result<Convite, ErroDeUri> {
                 validar_token(valor)?;
                 convite.token = Some(valor.to_ascii_uppercase());
             }
-            // Os outros endereços do mesmo Dogma. Cada um é validado como o
+            // Os outros endereços do mesmo servidor. Cada um é validado como o
             // principal: este texto termina num `connect` igual ao outro.
             "alt" => {
                 for alternativo in valor.split(',').filter(|parte| !parte.is_empty()) {
@@ -472,7 +472,7 @@ pub fn separar(alvo: &str) -> Result<Alvo<'_>, ErroDeUri> {
 
 /// O mesmo, dizendo qual é a porta de quem não escreveu uma.
 ///
-/// Existe porque nem todo endereço que atravessa um convite é um Dogma: o ponto
+/// Existe porque nem todo endereço que atravessa um convite é um servidor: o ponto
 /// de encontro do degrau 4 atende noutra porta, e herdar a 8383 ali mandaria o
 /// pedido para o lugar errado sem ninguém ter escrito nada errado.
 fn separar_com(alvo: &str, padrao: u16) -> Result<Alvo<'_>, ErroDeUri> {
@@ -571,15 +571,15 @@ mod tests {
 
     #[test]
     fn o_minimo_e_um_endereco() {
-        let convite = analisar("seele://dogma.exemplo:8383").expect("analisar");
-        assert_eq!(convite.alvo, "dogma.exemplo:8383");
+        let convite = analisar("seele://server.exemplo:8383").expect("analisar");
+        assert_eq!(convite.alvo, "server.exemplo:8383");
         assert_eq!(convite.impressao_digital, None);
         assert_eq!(convite.token, None);
     }
 
     #[test]
     fn ida_e_volta_com_tudo() {
-        let original = Convite::novo("dogma.exemplo:8383")
+        let original = Convite::novo("server.exemplo:8383")
             .com_impressao_digital(FP)
             .com_token("7K4MNPQRSTVWXYZ23456")
             .com_voice_room(2);
@@ -606,11 +606,11 @@ mod tests {
     #[test]
     fn outro_esquema_e_recusado() {
         assert_eq!(
-            analisar("https://dogma.exemplo"),
+            analisar("https://server.exemplo"),
             Err(ErroDeUri::EsquemaDesconhecido)
         );
         assert_eq!(
-            analisar("dogma.exemplo"),
+            analisar("server.exemplo"),
             Err(ErroDeUri::EsquemaDesconhecido)
         );
     }
@@ -697,12 +697,12 @@ mod tests {
         // Compatibilidade para trás, e ela é literal: um convite gerado por uma
         // versão anterior tem de virar exatamente o que virava, uma lista de
         // um, sem `alt` nenhum no texto.
-        let antigo = "seele://dogma.exemplo:8383";
+        let antigo = "seele://server.exemplo:8383";
         let lido = analisar(antigo).expect("analisar");
         assert!(lido.alternativos.is_empty());
         assert_eq!(
             lido.candidatos().collect::<Vec<_>>(),
-            vec!["dogma.exemplo:8383"]
+            vec!["server.exemplo:8383"]
         );
         assert_eq!(lido.to_string(), antigo, "o convite antigo mudou de forma");
     }
@@ -793,16 +793,16 @@ mod tests {
     }
 
     #[test]
-    fn o_ponto_de_encontro_sem_porta_nao_herda_a_porta_do_dogma() {
+    fn o_ponto_de_encontro_sem_porta_nao_herda_a_porta_do_server() {
         // Os dois lados do bilhete são endereços e **não** são o mesmo serviço:
-        // 8383 é onde um Dogma atende, e um ponto de encontro atende noutra
-        // porta. Herdar a do Dogma mandaria o pedido para o lugar errado sem
+        // 8383 é onde um servidor atende, e um ponto de encontro atende noutra
+        // porta. Herdar a do servidor mandaria o pedido para o lugar errado sem
         // ninguém ter escrito nada errado.
         let bilhete = Bilhete::novo("encontro.exemplo", "198.51.100.7:41234").expect("bom");
         let ponto = bilhete.ponto().expect("separar o ponto");
         assert_eq!(ponto.maquina, "encontro.exemplo");
         assert_eq!(ponto.porta, crate::encontro::PORTA_PADRAO);
-        assert_ne!(ponto.porta, PORTA_PADRAO, "o ponto herdou a porta do Dogma");
+        assert_ne!(ponto.porta, PORTA_PADRAO, "o ponto herdou a porta do servidor");
     }
 
     #[test]
@@ -991,9 +991,9 @@ mod tests {
     #[test]
     fn um_nome_e_um_ipv4_continuam_se_separando_como_antes() {
         assert_eq!(
-            separar("dogma.exemplo:8383"),
+            separar("server.exemplo:8383"),
             Ok(Alvo {
-                maquina: "dogma.exemplo",
+                maquina: "server.exemplo",
                 porta: 8383
             })
         );

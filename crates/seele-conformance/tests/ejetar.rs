@@ -16,7 +16,7 @@
 //! falha na integração contínua — e a culpa cairia no código, não no teste.
 //!
 //! O que dá para afirmar, e é o que importa para o laço, é: **reconectar
-//! funciona**, **a sala do Dogma esvazia**, e **encerrar a hospedagem devolve a
+//! funciona**, **a sala do servidor esvazia**, e **encerrar a hospedagem devolve a
 //! porta**. Um teardown que deixasse algo preso reprovaria numa dessas três.
 //!
 //! A do meio é a que enxerga vazamento. Sondar a lotação da sala de voz com prazo não
@@ -39,31 +39,31 @@ use seele_core::{Link, MemoryPinStore};
 use seele_proto::control::ServerMessage;
 use seele_proto::ids::{VoiceRoomId, ClientMessageId, LineId};
 use seele_server::persistence::Location;
-use seele_server::dogma::Occupant;
+use seele_server::server::Occupant;
 use seele_server::hospedagem::Hospedagem;
-use seele_server::{DogmaConfig, Server};
+use seele_server::{ServerConfig, Daemon};
 
 const VOICE_ROOM: u32 = 1;
 const LINE: u32 = 1;
 
-/// Sobe um Dogma numa porta que o sistema escolhe.
+/// Sobe um servidor numa porta que o sistema escolhe.
 ///
 /// Porta zero, e nunca um número escrito à mão: um número fixo colidiria com o
-/// Dogma que a pessoa deixou rodando na própria máquina.
+/// servidor que a pessoa deixou rodando na própria máquina.
 ///
 /// Não protege de tudo. Os dois testes deste arquivo correm ao mesmo tempo, e o
 /// `hospedar_...` devolve a porta efêmera dele e volta a ligar em `0.0.0.0`
 /// enquanto este aqui liga em `127.0.0.1:0`; se o sistema devolver exatamente
 /// aquele número no intervalo, colidem, porque ninguém liga `SO_REUSEADDR`. A
 /// chance é remota e o padrão é o da casa — fica dito para não parecer garantia.
-async fn dogma() -> Result<(SocketAddr, Arc<Server>)> {
-    let config = DogmaConfig {
+async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
+    let config = ServerConfig {
         name: "Terceira Tóquio".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let servidor = Arc::new(Server::bind(config).await?);
+    let servidor = Arc::new(Daemon::bind(config).await?);
     let endereco = servidor.local_addr()?;
     let aceitando = Arc::clone(&servidor);
     tokio::spawn(async move {
@@ -128,7 +128,7 @@ fn proxima_chave() -> ClientMessageId {
 /// `Ok`.
 ///
 /// Entrar na sala de voz, abrir a Linha, dizer algo e ouvir de volta é o menor
-/// caminho que passa pelo Dogma inteiro. Uma conexão que só existisse no papel
+/// caminho que passa pelo servidor inteiro. Uma conexão que só existisse no papel
 /// falharia aqui, e é justamente essa a diferença que este arquivo precisa
 /// enxergar na segunda volta.
 async fn conectar_e_falar(
@@ -159,28 +159,28 @@ async fn conectar_e_falar(
     .await;
     assert!(
         ouviu.is_some(),
-        "a sessão conectou e não fala: «{o_que}» não voltou do Dogma"
+        "a sessão conectou e não fala: «{o_que}» não voltou do servidor"
     );
 
     Ok(enlace)
 }
 
-/// Quem o Dogma acha que está na sala de voz, esperando até a conta bater.
+/// Quem o servidor acha que está na sala de voz, esperando até a conta bater.
 ///
 /// Sondar com prazo, e não olhar uma vez. O briefing proíbe afirmar que algo
 /// fechou **no instante** em que a alça foi solta — e com razão, porque o
-/// desmonte do lado do Dogma acontece quando a conexão morre, o que é
+/// desmonte do lado do servidor acontece quando a conexão morre, o que é
 /// assíncrono e não dá para esperar de fora. Mas «olhar até bater, com prazo» é
 /// outra forma: não afirma *quando* a cadeira é liberada, só que ela **é**. Não
 /// é intermitente, e é a mesma forma que o `esperar` daqui de cima já usa.
 ///
 /// Desiste devolvendo o que viu por último, para a asserção de quem chamou
 /// poder dizer o número errado em vez de um tempo esgotado sem número.
-async fn ocupantes(servidor: &Server, esperados: usize, prazo: Duration) -> Vec<Occupant> {
+async fn ocupantes(servidor: &Daemon, esperados: usize, prazo: Duration) -> Vec<Occupant> {
     let fim = tokio::time::Instant::now() + prazo;
     loop {
         let agora = servidor
-            .dogma()
+            .server()
             .occupancy
             .lock()
             .await
@@ -194,7 +194,7 @@ async fn ocupantes(servidor: &Server, esperados: usize, prazo: Duration) -> Vec<
 
 #[tokio::test(flavor = "multi_thread")]
 async fn conectar_ejetar_e_conectar_de_novo_no_mesmo_processo() -> Result<()> {
-    let (endereco, servidor) = dogma().await?;
+    let (endereco, servidor) = server().await?;
 
     let primeiro = conectar_e_falar(endereco, 46, "ayanami", "primeira volta").await?;
     assert!(primeiro.sessao().person.0 > 0, "a primeira sessão não subiu");
@@ -206,9 +206,9 @@ async fn conectar_ejetar_e_conectar_de_novo_no_mesmo_processo() -> Result<()> {
     drop(primeiro);
 
     // Semente diferente, e de propósito: aqui o que se mede é o **rastro** que a
-    // sessão ejetada deixa no Dogma, e com o mesmo pessoa não haveria rastro
+    // sessão ejetada deixa no servidor, e com o mesmo pessoa não haveria rastro
     // para medir. `Occupancy::seat` começa por `vacate_everywhere(person)`
-    // (`dogma.rs:171-174`), então o mesmo pessoa nunca aparece duas vezes na
+    // (`server.rs:171-174`), então o mesmo pessoa nunca aparece duas vezes na
     // lista, por construção — a asserção lá embaixo passaria mesmo com a
     // primeira sessão inteira pendurada. Com dois pessoas, uma sessão que não
     // se desfaz fica visível como uma cadeira ocupada a mais.
@@ -252,9 +252,9 @@ async fn conectar_ejetar_e_conectar_de_novo_no_mesmo_processo() -> Result<()> {
 async fn a_mesma_pessoa_volta_pela_tela_de_selecao() -> Result<()> {
     // A mesma chave e o mesmo apelido: é isto que o `:ejetar` faz de verdade —
     // a pessoa cai na tela de seleção e entra de novo, sendo ela mesma. Se o
-    // Dogma tratasse a volta como intrusa, o laço externo seria inviável, e o
+    // servidor tratasse a volta como intrusa, o laço externo seria inviável, e o
     // ADR 0017 prende o apelido à identidade, que aqui não muda.
-    let (endereco, servidor) = dogma().await?;
+    let (endereco, servidor) = server().await?;
 
     let primeiro = conectar_e_falar(endereco, 46, "ayanami", "primeira volta").await?;
     let primeira = primeiro.sessao().id;
@@ -277,7 +277,7 @@ async fn a_mesma_pessoa_volta_pela_tela_de_selecao() -> Result<()> {
     // Este teste **não** olha a lotação da sala de voz, e a omissão é deliberada: com o
     // mesmo pessoa nos dois lados, o `vacate` da sessão que morre e o `seat` da
     // que nasce disputam a mesma chave, e a lista pode acabar vazia. É a
-    // pendência 11, encontrada lendo este teste — o defeito é do Dogma, não
+    // pendência 11, encontrada lendo este teste — o defeito é do servidor, não
     // daqui, e afirmar lotação neste ponto seria trocar um teste que pega falha
     // por um que reprova sozinho de vez em quando.
     servidor.shutdown();
@@ -288,7 +288,7 @@ async fn a_mesma_pessoa_volta_pela_tela_de_selecao() -> Result<()> {
 // vizinhos: a espera do `encerrar` é o que este teste mede, e o `flavor` é o que
 // dá dentes à medição.
 //
-// O motivo é estrutural, e não estatístico. `Server::bind`
+// O motivo é estrutural, e não estatístico. `Daemon::bind`
 // (`seele-server/src/lib.rs:126-150`) não tem **nenhum** ponto de espera entre
 // a entrada e o `quinn::Endpoint::server`: `Persistence::open`, `seed`,
 // `Identity::load_or_create` e `tls::server_config` são todos síncronos. Numa

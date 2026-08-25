@@ -831,7 +831,7 @@ fn the_refused_invite_reaches_the_screen_with_both_fingerprints() {
     assert!(
         names(&script, "InviteMismatch"),
         "nothing in the script reads the refusal, so a link that names another \
-         Dogma fails with a sentence about nothing: {json}"
+         Server fails with a sentence about nothing: {json}"
     );
     for field in ["expected", "offered"] {
         assert!(
@@ -849,7 +849,7 @@ fn the_refused_invite_reaches_the_screen_with_both_fingerprints() {
 fn the_informative_verdicts_do_not_spend_the_alarm_reserved_for_a_key_change() {
     // `specs/08-seguranca.md` reserves the impossible-to-ignore treatment for a
     // key that changed, and `tokens.css:19` marks the red "EXCLUSIVO alerta e
-    // queda". A first contact and a link that names another Dogma stop nobody
+    // queda". A first contact and a link that names another server stop nobody
     // from entering; dressing them as an alarm is what teaches people to
     // dismiss the alarm on the day it means the other thing.
     let page = without_comments(&read("ui/index.html"));
@@ -925,7 +925,7 @@ fn the_comparison_stays_in_rust_and_only_its_verdict_crosses() {
 fn leaving_forgets_the_invite_that_let_us_in() {
     // Inert while nothing was checked, and not inert any more: the fingerprint
     // that `connect` checks against comes from this slot. Left behind, the next
-    // connection to a different Dogma would be checked against the previous
+    // connection to a different server would be checked against the previous
     // link's promise and refused for a reason nobody could explain.
     let body = body_of(&read("src/main.rs"), "async fn disconnect");
     assert!(
@@ -1130,7 +1130,7 @@ fn every_refusal_the_bridge_writes_itself_has_a_sentence_in_the_page() {
     let script = without_comments(&scripts());
 
     // `FalhaNaPortaria` joined the two for the same reason: the doorkeeper's
-    // commands talk to this machine's own Dogma rather than across the bridge,
+    // commands talk to this machine's own server rather than across the bridge,
     // so the FFI has no name for either of their failures.
     for enumeration in ["FalhaAoHospedar", "FalhaAoEscolher", "FalhaNaPortaria"] {
         for variant in variants_of(&source, enumeration) {
@@ -1731,7 +1731,7 @@ fn the_button_with_no_command_behind_it_cannot_be_pressed_and_the_one_that_grew_
     );
     assert!(
         ejetar.contains("title=\""),
-        "`alerta-ejetar` can still end up disabled — a Dogma that gave this person \
+        "`alerta-ejetar` can still end up disabled — a Server that gave this person \
          no moderation at all — and a disabled control that says nothing about \
          why reads as a bug: <{ejetar}>"
     );
@@ -1748,7 +1748,7 @@ fn the_button_with_no_command_behind_it_cannot_be_pressed_and_the_one_that_grew_
     assert!(
         porta.contains("podeModerarPersonos") || porta.contains("may_kick"),
         "`alerta-ejetar` is enabled without asking whether this session may \
-         moderate anybody, so it offers what the Dogma will refuse:\n{porta}"
+         moderate anybody, so it offers what the Server will refuse:\n{porta}"
     );
     assert!(
         porta.contains("title"),
@@ -2107,7 +2107,7 @@ fn the_two_ways_out_of_the_call_say_which_one_leaves_the_voice_room() {
 #[test]
 fn no_event_in_the_call_monitor_is_older_than_the_window() {
     // The comp fills `EVENTOS` with five lines of history — `IKARI.S entrou`,
-    // `HORAKI.H saiu` — and the inventory left open how much of that the Dogma
+    // `HORAKI.H saiu` — and the inventory left open how much of that the server
     // keeps. It keeps none: `Event::RosterChanged` says the roster changed and
     // never what changed in it, and there is no record of arrivals, departures
     // or A.T. Field anywhere in the core.
@@ -2256,7 +2256,7 @@ fn entering_and_leaving_a_voice_room_are_labelled_buttons_and_not_a_click_on_the
     // the `<ul>`. Nothing about it said it could be pressed, no keyboard could
     // reach it, and no screen reader announced it as anything at all. The LAN
     // test found the same defect one column over, on the `+` that was the only
-    // way out of a Dogma — this is that finding applied here.
+    // way out of a server — this is that finding applied here.
     //
     // Leaving is asserted beside entering on purpose. The comp writes
     // `VOCÊ ESTÁ AQUI` on the occupied sala de voz and wires it to nothing, and taking
@@ -2578,7 +2578,7 @@ fn the_trilha_lists_the_history_and_never_offers_the_server_it_is_already_on() {
          the server somebody is already in: {desenha}"
     );
     assert!(
-        desenha.contains("alvoDoDogma"),
+        desenha.contains("alvoDoServer"),
         "nothing in the trilha knows which server this session is on, so nothing \
          can be marked as current and nothing can be left out of the list: {desenha}"
     );
@@ -2686,7 +2686,7 @@ fn no_two_screens_claim_the_same_class_name() {
 }
 
 // ---------------------------------------------------------------------------
-// The Terminal Dogma — the settings screen, rebuilt against the v3 comp.
+// The Terminal server — the settings screen, rebuilt against the v3 comp.
 // ---------------------------------------------------------------------------
 
 /// The markup of one screen, cut out of the page by the id of the next one.
@@ -2760,13 +2760,13 @@ fn every_section_of_the_settings_screen_carries_the_panel_and_the_heading_it_ope
     // whose `data-painel` names a panel that is not in the page, which reads as
     // a section that opens nothing and blanks the heading on the way.
     let page = read("ui/index.html");
-    let dogma = screen_markup(&page, "tela-dogma", "tela-fim");
+    let server = screen_markup(&page, "tela-server", "tela-fim");
 
     let mut sections = Vec::new();
-    for rest in dogma.split("<button ").skip(1) {
+    for rest in server.split("<button ").skip(1) {
         let Some(end) = rest.find('>') else { continue };
         let tag = &rest[..end];
-        if attribute(tag, "class").as_deref() != Some("dogma-secao") {
+        if attribute(tag, "class").as_deref() != Some("server-secao") {
             continue;
         }
         let Some(id) = attribute(tag, "id") else {
@@ -2817,7 +2817,7 @@ fn every_section_of_the_settings_screen_carries_the_panel_and_the_heading_it_ope
             //
             // Last, and the position is the argument: this section is *usually
             // absent*. It is drawn only for a session that carries
-            // `may_customise_dogma`, so for everybody else the column ends at
+            // `may_customise_server`, so for everybody else the column ends at
             // the update section rather than showing a gap in its middle.
             "secao-servidor",
         ],
@@ -2829,7 +2829,7 @@ fn every_section_of_the_settings_screen_carries_the_panel_and_the_heading_it_ope
 /// The server section is offered from the snapshot, and never decided here.
 ///
 /// The rule this screen shares with the channels column: hiding a control is
-/// **not** what stops anybody. `AdministerDogma` is checked by the PERMISSIONS at
+/// **not** what stops anybody. `AdministerServer` is checked by the PERMISSIONS at
 /// the instant of the verb, and a rename asked without it comes back as
 /// `Alert`/`PermissionDenied`. What the boolean buys is not offering what the
 /// server was going to refuse.
@@ -2850,9 +2850,9 @@ fn the_server_section_is_offered_from_the_snapshot_and_never_judged_by_the_scree
          entry screen, where there is no session, it never stops: <{item}>"
     );
 
-    let desenha = js_function(&read("ui/tela-dogma.js"), "function desenharServidor(");
+    let desenha = js_function(&read("ui/tela-server.js"), "function desenharServidor(");
     assert!(
-        desenha.contains("may_customise_dogma"),
+        desenha.contains("may_customise_server"),
         "the section is shown without asking whether this session may customise \
          anything, so it offers what the server will refuse: {desenha}"
     );
@@ -2871,9 +2871,9 @@ fn the_server_section_is_offered_from_the_snapshot_and_never_judged_by_the_scree
         "async function escolherIcone(",
         "async function tirarIcone(",
     ] {
-        let corpo = js_function(&read("ui/tela-dogma.js"), verbo);
+        let corpo = js_function(&read("ui/tela-server.js"), verbo);
         assert!(
-            !corpo.contains("may_customise_dogma"),
+            !corpo.contains("may_customise_server"),
             "`{verbo}…` checks the permission before asking, so the refusal that \
              matters stops being the server's: {corpo}"
         );
@@ -2889,17 +2889,17 @@ fn the_server_section_is_offered_from_the_snapshot_and_never_judged_by_the_scree
 ///
 /// The second is subtler and is what the numbers coming from Rust prevents: two
 /// copies of a protocol constant drift, and the drift shows up as a screen
-/// promising to accept what the Dogma refuses. `regras_de_previa` made the same
+/// promising to accept what the server refuses. `regras_de_previa` made the same
 /// choice for the preview ceiling, and this follows it.
 #[test]
 fn the_ceiling_for_the_picture_is_said_before_the_picker_and_never_written_in_the_page() {
     let page = without_comments(&read("ui/index.html"));
-    let dogma = read("ui/tela-dogma.js");
+    let server = read("ui/tela-server.js");
 
-    let Some(regra) = page.find("id=\"dogma-icone-regra\"") else {
+    let Some(regra) = page.find("id=\"server-icone-regra\"") else {
         panic!("the page has nowhere to write what a picture may weigh");
     };
-    let Some(escolher) = page.find("id=\"dogma-icone-escolher\"") else {
+    let Some(escolher) = page.find("id=\"server-icone-escolher\"") else {
         panic!("the page has no button that opens the picker");
     };
     assert!(
@@ -2908,7 +2908,7 @@ fn the_ceiling_for_the_picture_is_said_before_the_picker_and_never_written_in_th
          picker, so it is read after the trip to the folder rather than before it"
     );
 
-    let escreve = js_function(&dogma, "function desenharRegraDoIcone(");
+    let escreve = js_function(&server, "function desenharRegraDoIcone(");
     for campo in ["limite_bytes", "lado"] {
         assert!(
             escreve.contains(campo),
@@ -2920,7 +2920,7 @@ fn the_ceiling_for_the_picture_is_said_before_the_picker_and_never_written_in_th
     // The refusal quotes the protocol's own number, and not the copy the shell
     // keeps to write the sentence above. They should agree; when they stop
     // agreeing, the one that decides is the one the person has to believe.
-    let frase = js_function(&dogma, "function fraseDeIcone(");
+    let frase = js_function(&server, "function fraseDeIcone(");
     assert!(
         frase.contains("limit_bytes"),
         "the refusal does not carry the number the `PlugError` brought, so \
@@ -2943,10 +2943,10 @@ fn the_ceiling_for_the_picture_is_said_before_the_picker_and_never_written_in_th
 /// that moved once.
 #[test]
 fn the_picture_crosses_the_bridge_only_when_its_revision_moved() {
-    let dogma = read("ui/tela-dogma.js");
-    let sincroniza = js_function(&dogma, "async function sincronizarIcone(");
+    let server = read("ui/tela-server.js");
+    let sincroniza = js_function(&server, "async function sincronizarIcone(");
 
-    let Some((antes, _)) = sincroniza.split_once("invoke(\"icone_do_dogma\")") else {
+    let Some((antes, _)) = sincroniza.split_once("invoke(\"icone_do_server\")") else {
         panic!("nothing fetches the picture at all: {sincroniza}");
     };
     assert!(
@@ -2957,13 +2957,13 @@ fn the_picture_crosses_the_bridge_only_when_its_revision_moved() {
 
     // And the drawing is separate from the fetching, which is what lets a redraw
     // be free: the panel and the header are painted from what is already here.
-    let pinta = js_function(&dogma, "function pintarIcone(");
+    let pinta = js_function(&server, "function pintarIcone(");
     assert!(
         !pinta.contains("invoke("),
         "painting the picture asks Rust for something, so a redraw is not free \
          after all: {pinta}"
     );
-    for id in ["topo-dogma-icone", "dogma-icone-previa"] {
+    for id in ["topo-server-icone", "server-icone-previa"] {
         assert!(
             pinta.contains(id),
             "`pintarIcone` never touches `{id}`, so one of the two places the \
@@ -2975,12 +2975,12 @@ fn the_picture_crosses_the_bridge_only_when_its_revision_moved() {
     // counting from zero again, so without this the picture of the server
     // somebody just left would sit in the header of the one they just entered —
     // and a server with no picture sends nothing that would contradict it.
-    let esquece = js_function(&dogma, "function esquecerIcone(");
+    let esquece = js_function(&server, "function esquecerIcone(");
     assert!(
         esquece.contains("null"),
         "leaving a server does not forget its picture: {esquece}"
     );
-    let ouvinte = dogma
+    let ouvinte = server
         .split("listen(\"seele://event\"")
         .nth(1)
         .unwrap_or_default();
@@ -3015,8 +3015,8 @@ fn the_server_section_confirms_by_state_and_not_by_a_save_button() {
         );
     }
 
-    let dogma = read("ui/tela-dogma.js");
-    let rodape = dogma
+    let server = read("ui/tela-server.js");
+    let rodape = server
         .split("// ------------------------------------------------------------------- ligação")
         .nth(1)
         .unwrap_or_default();
@@ -3029,14 +3029,14 @@ fn the_server_section_confirms_by_state_and_not_by_a_save_button() {
     // And the field shows what is in force rather than what was typed — except
     // while somebody is typing into it, because a screen that overwrites the
     // caret twice a second is a screen nobody can write in.
-    let desenha = js_function(&dogma, "function desenharServidor(");
+    let desenha = js_function(&server, "function desenharServidor(");
     assert!(
         desenha.contains("activeElement"),
         "the name field is rewritten from the snapshot even while it has the \
          caret, so typing into it is undone twice a second: {desenha}"
     );
     assert!(
-        desenha.contains("snapshot.dogma"),
+        desenha.contains("snapshot.server"),
         "the field is not filled from the name the server is using, so it shows \
          what was typed instead of what is in force: {desenha}"
     );
@@ -3106,7 +3106,7 @@ fn the_settings_screen_omits_what_the_product_lacks_instead_of_drawing_it_dead()
     // Comments are stripped, and that is the point: the paragraphs above the
     // markup have to be able to say *why* each of these is absent.
     let page = read("ui/index.html");
-    let dogma = screen_markup(&page, "tela-dogma", "tela-fim");
+    let server = screen_markup(&page, "tela-server", "tela-fim");
 
     for absent in [
         "SALVAR",
@@ -3119,7 +3119,7 @@ fn the_settings_screen_omits_what_the_product_lacks_instead_of_drawing_it_dead()
         "COPIAR",
     ] {
         assert!(
-            !names(&dogma, absent),
+            !names(&server, absent),
             "the settings screen draws `{absent}`, which nothing in this product \
              can carry out. The rule here is to omit, not to draw it dead — and \
              two of these would take an ADR back."
@@ -3367,7 +3367,7 @@ fn the_three_subsystems_look_different_while_they_are_loading() {
 }
 
 #[test]
-fn creating_a_room_is_offered_by_permission_and_sized_by_the_dogma() {
+fn creating_a_room_is_offered_by_permission_and_sized_by_the_server() {
     let body = body_of(&scripts(), "function desenharCanais");
 
     // Offered, not enforced. The server refuses `CreateVoiceRoom` from anybody
@@ -3381,8 +3381,8 @@ fn creating_a_room_is_offered_by_permission_and_sized_by_the_dogma() {
          create, so it either hides them from the host or shows them to everybody"
     );
 
-    // The size of a new room is the Dogma's answer, not a number typed in here.
-    // Whoever hosts already chose one when they set the Dogma up, and repeating
+    // The size of a new room is the server's answer, not a number typed in here.
+    // Whoever hosts already chose one when they set the server up, and repeating
     // their choice beats inventing a default in JavaScript.
     assert!(
         body.contains("voice_rooms[0].limit") || body.contains("limit"),
@@ -3415,14 +3415,14 @@ const VOID_TAGS: &[&str] = &["meta", "link", "img", "input", "br", "hr", "source
 ///
 /// Emptiness is the whole test, and it is the narrow thing that makes this
 /// guard true rather than merely broad. A list written out in `index.html` has
-/// as many rows as the page has: `.dogma-atalhos` is four shortcuts, `.luzes` is
-/// three subsystems, and no Dogma can make either longer. A list the page leaves
+/// as many rows as the page has: `.server-atalhos` is four shortcuts, `.luzes` is
+/// three subsystems, and no servidor can make either longer. A list the page leaves
 /// empty is one a script fills from a `Snapshot`, and nothing in the protocol
-/// caps how many voice_rooms, Linhas, people, messages, devices or visited Dogmas come
+/// caps how many voice_rooms, Linhas, people, messages, devices or visited servers come
 /// back. Those are the ones that can outgrow the window.
 ///
 /// So the distinction is not "long" against "short" — nobody can measure that
-/// from the source — it is *who decides the length*. The page, or the Dogma.
+/// from the source — it is *who decides the length*. The page, or the server.
 ///
 /// It also cannot be quietly silenced. Making this guard shut up means typing
 /// rows into a list a script is about to replace wholesale, which is a change
@@ -3519,7 +3519,7 @@ fn classes_that_scroll(css: &str) -> BTreeSet<String> {
 }
 
 #[test]
-fn every_list_the_dogma_fills_lives_inside_something_that_scrolls() {
+fn every_list_the_server_fills_lives_inside_something_that_scrolls() {
     // How this was found: somebody with more than a screenful of voice_rooms asked how
     // to see the rest. There was no way. `.canais` was `flex: 0 0 auto`, no panel
     // in the channel column declared `overflow-y`, and `base.css` puts
@@ -3528,7 +3528,7 @@ fn every_list_the_dogma_fills_lives_inside_something_that_scrolls() {
     // exist.
     //
     // The failure is silent twice over: nothing errors, and with the four rooms
-    // a test Dogma has, nothing looks wrong.
+    // a test server has, nothing looks wrong.
     let page = read("ui/index.html");
     let scrolls = classes_that_scroll(&styles());
     assert!(
@@ -3540,7 +3540,7 @@ fn every_list_the_dogma_fills_lives_inside_something_that_scrolls() {
     let lists = empty_lists_with_their_ancestry(&page);
     assert!(
         lists.len() >= 8,
-        "found {} lists the Dogma fills; the session alone has VoiceRooms, Linhas, \
+        "found {} lists the Server fills; the session alone has VoiceRooms, Linhas, \
          the messages and the roster",
         lists.len()
     );
@@ -3558,7 +3558,7 @@ fn every_list_the_dogma_fills_lives_inside_something_that_scrolls() {
 
     assert!(
         trapped.is_empty(),
-        "these lists are filled from the Dogma, so nothing caps how long they \
+        "these lists are filled from the Server, so nothing caps how long they \
          get, and neither they nor anything enclosing them scrolls — past the \
          bottom of the window their rows stop existing:\n{}",
         trapped.join("\n")
@@ -3637,8 +3637,8 @@ fn top_level_chunks(script: &str) -> Vec<String> {
 
 /// Whether this piece of script pulls a whole screen back into view.
 ///
-/// `$("…")` with a screen id, or `$(…)` with a variable — `fecharDogma` reveals
-/// `$(volta)` and `abrirDogma` hides `$(origem)`, and a check that only read
+/// `$("…")` with a screen id, or `$(…)` with a variable — `fecharServer` reveals
+/// `$(volta)` and `abrirServer` hides `$(origem)`, and a check that only read
 /// literals would miss the one transition that has two possible destinations.
 /// A variable inside `$()` is only ever a screen here; everything else that
 /// toggles `hidden` — the banner, the battery, the invite, an error line —
@@ -3892,14 +3892,14 @@ fn panel_markup(page: &str, id: &str) -> String {
 }
 
 #[test]
-fn the_update_screen_says_the_window_closes_and_that_a_hosted_dogma_falls_with_it() {
+fn the_update_screen_says_the_window_closes_and_that_a_hosted_server_falls_with_it() {
     // `instalar_atualizacao` closes and reopens SEELE on all three systems — on
     // Windows there is no choice, because the NSIS installer will not run with
     // the program open. An action that closes somebody's window has to say so
     // *before* it is pressed.
     //
     // The second half is the one that is easy to leave out, and it is the one
-    // that costs other people: this app can host a Dogma inside the very window
+    // that costs other people: this app can host a server inside the very window
     // that is about to be replaced (`hospedar`), and everybody inside it drops
     // when it goes. Whoever presses the button knows they are closing their own
     // window; nothing but this sentence tells them whose else.
@@ -3912,7 +3912,7 @@ fn the_update_screen_says_the_window_closes_and_that_a_hosted_dogma_falls_with_i
             "fecha e abre de novo",
         ),
         (
-            "that a Dogma hosted here falls too",
+            "that a server hosted here falls too",
             "hospedando um servidor",
         ),
         (
@@ -3994,11 +3994,11 @@ fn the_update_is_only_ever_asked_for_by_a_press() {
     // *button*.
     //
     // The tempting change is small and invisible: one call from the half-second
-    // tick this screen already runs, or one from `abrirDogma`, and the app
+    // tick this screen already runs, or one from `abrirServer`, and the app
     // quietly phones home whenever anybody opens the settings. So the check is
     // that the search is reachable from exactly two places — where it is
     // declared, and where a click is bound to it — and from nowhere else.
-    let file = read("ui/tela-dogma.js");
+    let file = read("ui/tela-server.js");
 
     let mut places = Vec::new();
     for chunk in top_level_chunks(&file) {
@@ -4023,7 +4023,7 @@ fn the_update_is_only_ever_asked_for_by_a_press() {
 
     // And the tick that keeps the input meter alive must not have grown a second
     // job. It runs twice a second for as long as this screen is open.
-    let tick = body_of(&scripts(), "async function atualizarDogma");
+    let tick = body_of(&scripts(), "async function atualizarServer");
     assert!(
         !tick.contains("procurar"),
         "the half-second loop of the settings screen asks whether there is a new \
@@ -4043,14 +4043,14 @@ const VERBOS_DE_MODERACAO: &[&str] = &[
     "mover_pessoa",
     // Destroying a room goes through the same machine, and belongs on the same
     // list. It is the most consequential of the six — a kick lasts a session, a
-    // ban is undone by whoever holds the Dogma's file, and this ends what other
+    // ban is undone by whoever holds the server's file, and this ends what other
     // people wrote with nothing anywhere that brings it back.
     "apagar_voice_room",
     "apagar_linha",
 ];
 
 #[test]
-fn no_moderation_act_reaches_the_dogma_without_a_sentence_that_says_what_it_costs() {
+fn no_moderation_act_reaches_the_server_without_a_sentence_that_says_what_it_costs() {
     // The rule this whole layer exists for. Kicking and banning are
     // irreversible **for the person on the receiving end**, removing a message
     // takes it away from everybody, and moving somebody takes them out of where
@@ -4131,7 +4131,7 @@ fn no_moderation_act_reaches_the_dogma_without_a_sentence_that_says_what_it_cost
 fn the_ban_says_that_nothing_in_this_product_undoes_it() {
     // The sharpest edge of the four, and the one a screen can hide by accident.
     // There is no `unban` verb in this protocol: a permanent ban is undone only
-    // by somebody with the Dogma's own file, by hand, on the machine hosting it.
+    // by somebody with the server's own file, by hand, on the machine hosting it.
     // A confirmation that says «bar this person?» and stops there is describing a
     // reversible act, and this one is not.
     //
@@ -4202,7 +4202,7 @@ fn moving_somebody_says_they_did_not_ask_and_that_both_rooms_watch_it_happen() {
 fn each_moderation_verb_is_offered_by_its_own_permission() {
     // `Snapshot` carries four booleans and not one, and the reason is on the
     // wire: `specs/04-servidor-seele.md` enumerates four permissions and a role
-    // may hold any subset. A Dogma can hand somebody `Kick` and nothing else.
+    // may hold any subset. A server can hand somebody `Kick` and nothing else.
     //
     // Gating the three on one boolean is the cheap version and it fails in both
     // directions at once — it offers `banir` to somebody who may only kick, and
@@ -4360,13 +4360,13 @@ fn opening_the_moderation_carries_the_keyboard_and_closing_gives_it_back() {
     );
 
     // And a session that ends with the box open must not leave it armed for the
-    // next one: the act inside it names somebody from a Dogma already left.
+    // next one: the act inside it names somebody from a server already left.
     let fim = body_of(&scripts(), "function mostrarFim");
     assert!(
         fim.contains("abandonarModeracao"),
         "the end-of-session screen leaves the moderation box open, so it comes \
          back over the *next* session armed with an act on somebody from the \
-         previous Dogma:\n{fim}"
+         previous Server:\n{fim}"
     );
 }
 
@@ -4679,7 +4679,7 @@ fn the_line_confirmation_counts_what_it_is_about_to_destroy() {
     // The requirement this whole path exists to satisfy, and the one a screen
     // can quietly fail: the box promises to destroy a specific number of
     // messages, written by a specific number of people, since a specific day.
-    // All three have to be **counted**, in the Dogma's database, at the moment
+    // All three have to be **counted**, in the server's database, at the moment
     // of asking.
     //
     // The tempting wrong version is right there and free: this window already
@@ -4709,7 +4709,7 @@ fn the_line_confirmation_counts_what_it_is_about_to_destroy() {
          holding, which is low by the whole of the Line's past:\n{frase}"
     );
 
-    // And the count reaches it from the Dogma, through the one command that
+    // And the count reaches it from the server, through the one command that
     // waits for an answer. Scoped to the door that opens the box, because the
     // file explains the rule in prose as well and an unscoped search would be
     // satisfied by the paragraph.
@@ -4723,7 +4723,7 @@ fn the_line_confirmation_counts_what_it_is_about_to_destroy() {
     };
     assert!(
         porta.contains("invoke(\"peso_da_linha\""),
-        "the box about destroying a Line opens without asking the Dogma what is \
+        "the box about destroying a Line opens without asking the Server what is \
          in it, so its numbers came from somewhere this window guessed:\n{porta}"
     );
 
@@ -4744,7 +4744,7 @@ fn the_line_confirmation_counts_what_it_is_about_to_destroy() {
 #[test]
 fn a_count_that_did_not_arrive_stops_the_question_instead_of_rounding_it() {
     // The other half of "counted, never estimated", and the half a screen fails
-    // by being helpful. When the Dogma does not answer, there is no honest
+    // by being helpful. When the server does not answer, there is no honest
     // version of this box: what is left is «apagar a Linha?», which is the
     // confirmation that adds nothing and teaches people to press twice.
     //
@@ -4766,7 +4766,7 @@ fn a_count_that_did_not_arrive_stops_the_question_instead_of_rounding_it() {
         .and_then(|resto| resto.split("\n  }").next())
     else {
         panic!(
-            "the weigh call is not wrapped in a `catch`, so a Dogma that does not \
+            "the weigh call is not wrapped in a `catch`, so a Server that does not \
              answer leaves the press doing nothing at all:\n{porta}"
         );
     };
@@ -4864,7 +4864,7 @@ fn destroying_a_room_says_what_it_does_to_the_people_and_to_the_other_room() {
 
 #[test]
 fn the_last_voice_room_is_offered_disabled_with_the_reason_written_on_it() {
-    // A Dogma with na sala de voz has nowhere to speak. The Dogma refuses the press,
+    // A server with na sala de voz has nowhere to speak. The server refuses the press,
     // and this window has to say why *before* it — a control that vanishes on
     // the last room teaches nothing, because an absence is not something anybody
     // reads. `moderar-acao-mover` hides instead, and the difference is real: it
@@ -4873,7 +4873,7 @@ fn the_last_voice_room_is_offered_disabled_with_the_reason_written_on_it() {
     assert!(
         porta.contains("botao.disabled = ultimo"),
         "the last VoiceRoom is offered for destruction like any other, so the only \
-         thing between a Dogma and having nowhere to speak is a refusal that \
+         thing between a Server and having nowhere to speak is a refusal that \
          arrives after the press:\n{porta}"
     );
     assert!(
@@ -4887,7 +4887,7 @@ fn the_last_voice_room_is_offered_disabled_with_the_reason_written_on_it() {
          reads:\n{porta}"
     );
 
-    // And the count comes from the Dogma's list, not from anything this file
+    // And the count comes from the server's list, not from anything this file
     // decides: one voice room left is one voice room in `snapshot.voice_rooms`.
     let desenho = body_of(&scripts(), "function desenharCanais");
     assert!(
@@ -4899,9 +4899,9 @@ fn the_last_voice_room_is_offered_disabled_with_the_reason_written_on_it() {
 #[test]
 fn destroying_a_room_is_offered_by_the_permission_that_destroys_it() {
     // The decision, asserted where a person meets it. Making a room and
-    // renaming one are mistakes a Dogma survives; destroying one ends what other
+    // renaming one are mistakes a server survives; destroying one ends what other
     // people wrote. `specs/04-servidor-seele.md` enumerates `gerenciar_voice_rooms`
-    // and `administrar_dogma` separately, so a role that builds rooms without
+    // and `administrar_server` separately, so a role that builds rooms without
     // being able to unmake them is a role somebody can actually write — and
     // gating both on one boolean makes it impossible to offer correctly.
     //
@@ -4954,7 +4954,7 @@ fn a_room_that_stopped_existing_has_a_sentence_and_not_a_shrug() {
     for reason in ["VoiceRoomDeleted", "LineDeleted", "LastVoiceRoom"] {
         assert!(
             avisos.contains(&format!("{reason}:")),
-            "the Dogma can raise `{reason}` and `AVISOS` has no sentence for it, \
+            "the Server can raise `{reason}` and `AVISOS` has no sentence for it, \
              so it reaches the person as the word AVISO and nothing else"
         );
     }
@@ -5012,7 +5012,7 @@ fn o_palco_le_o_que_foi_pedido_do_snapshot_e_nao_da_memoria_da_janela() {
 
 #[test]
 fn a_tela_parada_por_falta_de_subida_do_anfitriao_nao_acusa_quem_le() {
-    // O Dogma para a transmissão quando a sala cresce além da subida de quem
+    // O servidor para a transmissão quando a sala cresce além da subida de quem
     // hospeda (§5.1: o teto é o caminho do anfitrião ÷ quem assiste). A razão
     // mais parecida que já existia é `SyncDegraded`, que esta casca escreve como
     // «SINAL EM QUEDA» — uma frase sobre a conexão de quem lê, na frente de
@@ -5034,7 +5034,7 @@ fn a_tela_parada_por_falta_de_subida_do_anfitriao_nao_acusa_quem_le() {
         .and_then(|resto| resto.split(",\n").next())
     else {
         panic!(
-            "o Dogma pode parar uma transmissão por falta de subida do anfitrião \
+            "o servidor pode parar uma transmissão por falta de subida do anfitrião \
              e `AVISOS` não tem frase para isso, então ela chega como a palavra \
              AVISO e mais nada"
         );
@@ -5261,7 +5261,7 @@ fn a_transfer_that_falls_says_that_trying_again_starts_from_zero() {
 }
 
 #[test]
-fn every_refusal_the_dogma_can_send_has_a_sentence() {
+fn every_refusal_the_server_can_send_has_a_sentence() {
     // A refusal reaching somebody as the word FALHA is a refusal that teaches
     // nothing. Read against the enum itself, so a variant added on the wire
     // without a sentence fails here rather than in front of a person.
@@ -5301,7 +5301,7 @@ fn every_refusal_the_dogma_can_send_has_a_sentence() {
     for variante in &variantes {
         assert!(
             bloco.contains(&format!("{variante}:")),
-            "the Dogma can refuse with `{variante}` and `ANEXOS` has no \
+            "the Server can refuse with `{variante}` and `ANEXOS` has no \
              sentence for it"
         );
     }
@@ -5352,7 +5352,7 @@ fn no_screen_of_this_product_opens_a_file() {
 #[test]
 fn saving_says_out_loud_what_this_product_does_not_promise() {
     // ADR 0027 has two things nobody may discover afterwards: **whoever hosts
-    // the Dogma could read this file**, and **the SEELE does not scan for
+    // the server could read this file**, and **the SEELE does not scan for
     // viruses**. Both are true, and both belong in front of the person before
     // they press, not on a help page.
     let salvar = js_function(&read("ui/tela-sessao.js"), "function salvarAnexo(");
@@ -5416,7 +5416,7 @@ fn there_is_no_blocklist_of_extensions_anywhere_in_the_frontend() {
 
 #[test]
 fn a_message_whose_file_expired_still_says_what_the_file_was() {
-    // The whole reason the Dogma keeps the attachment row after deleting the
+    // The whole reason the server keeps the attachment row after deleting the
     // bytes. Without this the message renders as a message with nothing in it,
     // and nobody learns there was ever a file.
     let bloco = js_function(&read("ui/tela-sessao.js"), "function blocoDeAnexo(");
@@ -5754,7 +5754,7 @@ fn the_reason_a_rung_failed_is_not_prefixed_by_a_label_it_already_carries() {
 }
 
 #[test]
-fn arriving_at_a_dogma_opens_a_line_and_does_not_put_anybody_in_a_voice_room() {
+fn arriving_at_a_server_opens_a_line_and_does_not_put_anybody_in_a_voice_room() {
     // Both used to happen together on entry, with one good reason between them:
     // arriving at an empty screen is arriving without knowing what to do. The
     // reason still holds for one of the two and never held for the other.
@@ -5821,7 +5821,7 @@ fn the_button_that_stopped_inserting_the_plug_stopped_saying_it_does() {
 const ATOS_DA_PORTARIA: &[&str] = &["decidir_pedido", "revogar_admissao"];
 
 #[test]
-fn no_act_of_the_doorkeeper_reaches_the_dogma_without_a_sentence_that_says_what_it_costs() {
+fn no_act_of_the_doorkeeper_reaches_the_server_without_a_sentence_that_says_what_it_costs() {
     // The moderation rule, applied to the layer that decides who gets in. It is
     // a separate test rather than six more names on `VERBOS_DE_MODERACAO`
     // because that guard reads `ui/camada-moderar.js` and these live in their
@@ -5987,10 +5987,10 @@ fn the_doorkeeper_spends_the_alarm_red_only_on_a_door_open_to_the_internet() {
     //
     // Outwards: `tokens.css` marks the red "EXCLUSIVO alerta e queda", and the
     // moderation layer writes down that it does not spend it. This layer does,
-    // once — a Dogma with nothing closing it and an address reachable from
+    // once — a server with nothing closing it and an address reachable from
     // outside is the front door open to the street.
     //
-    // Inwards, and this is the half that matters: it must not fire on a Dogma
+    // Inwards, and this is the half that matters: it must not fire on a server
     // that is merely open on a home network. That is the ADR 0021 default,
     // defended there on purpose, and an alarm that goes off in the normal case
     // is an alarm people learn to dismiss — which is precisely what ADR 0003
@@ -6003,7 +6003,7 @@ fn the_doorkeeper_spends_the_alarm_red_only_on_a_door_open_to_the_internet() {
     );
     assert!(
         corpo.contains("ALCANCA_DE_FORA"),
-        "the alarm fires without asking how far this Dogma is reachable, so it \
+        "the alarm fires without asking how far this Server is reachable, so it \
          goes off on the local-network default that ADR 0021 defends:\n{corpo}"
     );
     assert!(
@@ -6018,7 +6018,7 @@ fn the_doorkeeper_spends_the_alarm_red_only_on_a_door_open_to_the_internet() {
     assert!(
         !lista.contains("SoRedeLocal"),
         "the local-network rung counts as reachable from outside, so every \
-         Dogma hosted on a laptop raises the alarm:\n{lista}"
+         Server hosted on a laptop raises the alarm:\n{lista}"
     );
 
     // The red belongs to that band and to nothing else in the sheet.
@@ -6039,7 +6039,7 @@ fn the_alarm_names_the_rungs_the_ladder_actually_reports() {
     // joined the two, and they had drifted all the way apart: the list named
     // `EnderecoGlobal`, `PortaAberta` and `PontoDeEncontro`, and **no such name
     // exists** in `Degrau::nome()`. The comparison never matched, so the red
-    // band saying this Dogma is open and reachable from the internet never
+    // band saying this server is open and reachable from the internet never
     // appeared at all.
     //
     // That is worse than a missing sentence. A missing sentence is silence; an
@@ -6111,7 +6111,7 @@ fn the_alarm_names_the_rungs_the_ladder_actually_reports() {
     assert!(
         faltando.is_empty(),
         "the ladder reports these rungs as reachable from outside and the alarm \
-         does not know them, so a Dogma open to the internet raises nothing: \
+         does not know them, so a Server open to the internet raises nothing: \
          {faltando:?}"
     );
     let inventados: Vec<&&str> = anunciados
@@ -6202,7 +6202,7 @@ fn every_reason_a_session_can_end_with_has_a_sentence_in_the_page() {
 
 #[test]
 fn a_preview_is_asked_for_by_a_press_and_by_nothing_else() {
-    // The attachment lives on the Dogma, so looking at it is downloading it. A
+    // The attachment lives on the server, so looking at it is downloading it. A
     // Line that previewed every picture as it scrolled would turn whoever
     // hosts' disk ceiling into everybody's uplink, once per person per time
     // anybody opened the Line — and it would do it silently, because it would
@@ -6323,13 +6323,13 @@ fn the_page_never_composes_the_media_type_a_picture_is_decoded_with() {
     //
     // ---- one exception, and why it is not a hole ----
     //
-    // `tela-dogma.js` composes `data:image/png;base64,…` for the server's own
+    // `tela-server.js` composes `data:image/png;base64,…` for the server's own
     // picture, and that is *not* the thing this test forbids. What it forbids is
     // a page joining a media type to bytes **whose type somebody else claimed**
     // — an attachment carries `declared_type`, chosen by the sender, and the
     // whole of ADR 0027 is that the claim must never reach a decoder.
     //
-    // The server's picture carries no claim to disagree with. `SetDogmaIcon`
+    // The server's picture carries no claim to disagree with. `SetServerIcon`
     // moves bytes and nothing else: the format is fixed by the message rather
     // than declared beside it, and both ends check the PNG signature and the
     // `IHDR` before the bytes travel any further. `image/png` there is not a
@@ -6339,7 +6339,7 @@ fn the_page_never_composes_the_media_type_a_picture_is_decoded_with() {
     // so the choice was this line or a second base64 encoder in `main.rs`.
     //
     // The exception is held to exactly that shape below, rather than trusted.
-    let excecao = "tela-dogma.js";
+    let excecao = "tela-server.js";
     let mut fonte = String::new();
     for name in ui_files(".js") {
         if name == excecao {
@@ -6362,7 +6362,7 @@ fn the_page_never_composes_the_media_type_a_picture_is_decoded_with() {
         assert!(
             !limpo.contains(tipo),
             "`{excecao}` writes out `{tipo}`. The exemption above is for the one \
-             format `SetDogmaIcon` fixes; a second one there is a page choosing \
+             format `SetServerIcon` fixes; a second one there is a page choosing \
              a decoder again"
         );
     }
@@ -6696,7 +6696,7 @@ fn a_espera_so_bate_enquanto_alguem_esta_olhando() {
     // Este guarda mudou de forma, e a mudança está registrada no ADR 0030.
     //
     // Ele exigia que **nada** batesse sozinho, e a razão citada era boa: uma
-    // tela que repete no relógio bate no Dogma de outra pessoa para sempre,
+    // tela que repete no relógio bate no servidor de outra pessoa para sempre,
     // contra o balde por endereço do ADR 0025.
     //
     // Duas metades daquela razão não se sustentaram, e uma sustentou.
@@ -6820,7 +6820,7 @@ fn the_waiting_screen_says_what_happened_what_to_do_and_what_is_useless() {
     );
 
     // Only a pending knock takes the entrance over. Everything else stays on
-    // the boot screen, where another Dogma can be chosen — and the boot screen
+    // the boot screen, where another server can be chosen — and the boot screen
     // writes its own red line only when this screen did not take the failure.
     let conectar = body_of(&scripts(), "async function conectar");
     let Some(desvio) = conectar.find("levarParaAEspera(") else {
@@ -6862,7 +6862,7 @@ fn the_entrance_screen_stopped_drawing_the_four_values_this_protocol_never_carri
     }
 
     // The ones that are real stay, or this passes by deleting the panel.
-    for vivo in ["auth-voice_rooms", "auth-linhas", "auth-dogma-nome"] {
+    for vivo in ["auth-voice_rooms", "auth-linhas", "auth-server-nome"] {
         assert!(
             tela.contains(vivo),
             "`{vivo}` left the entry screen too, and that one comes straight out \
@@ -6996,9 +6996,9 @@ fn the_captions_mode_does_not_come_back_by_accident() {
         "aplicarLegendas",
         "legendas-simples",
         "CHAVE_LEGENDAS",
-        "dogma-legendas",
-        "dogma-interruptor",
-        "dogma-chave",
+        "server-legendas",
+        "server-interruptor",
+        "server-chave",
     ] {
         assert!(
             !source.contains(gone),
@@ -7250,7 +7250,7 @@ const LIMITE_DE_FRASE: usize = 180;
 /// window on an irreversible act is written next to the act, in
 /// `camada-moderar.js` and `camada-portaria.js`, and those were measured when
 /// they were written — a ban, a deleted Linha, an update that takes a hosted
-/// Dogma down with the window. Nor the two `fraseDeErro` composes for a changed
+/// server down with the window. Nor the two `fraseDeErro` composes for a changed
 /// key: those are two fingerprints with a line either side, and a fingerprint is
 /// as long as it is. What this guards is the prose.
 const DICIONARIOS: [&str; 9] = [
@@ -7640,7 +7640,7 @@ fn a_entrada_poe_o_convite_na_frente_e_explica_cada_campo() {
 /// `Media` no código e na interface, então não há mais nome a acusar nem a
 /// isentar.
 const APOSENTADOS: &[(&str, &str)] = &[
-    ("dogma", "servidor"),
+    ("server", "servidor"),
     // Mesma regra do aviso alguns itens abaixo, e a varredura de `Cage` as
     // mordeu do mesmo jeito em 2026-08-25: a esquerda é o nome **aposentado**,
     // e reescrevê-la para `voice room` fazia o guarda procurar a palavra nova.
@@ -7674,10 +7674,10 @@ const APOSENTADOS: &[(&str, &str)] = &[
 /// quer.
 const AINDA_NA_TELA: &[(&str, &str)] = &[
     (
-        "Terminal Dogma",
-        "o nome da tela de ajustes locais. `DOGMA → SERVIDOR` descreveria errado \
+        "Terminal server",
+        "o nome da tela de ajustes locais. `SERVER → SERVIDOR` descreveria errado \
          uma tela cuja própria subtitulação diz «Ajustes deste computador»: aqui \
-         `Dogma` é o nome do lugar, e não a palavra para servidor. A subtitulação \
+         `Server` é o nome do lugar, e não a palavra para servidor. A subtitulação \
          perdeu a segunda metade — «e não deste servidor» — quando a seção do \
          servidor entrou, e o argumento não depende dela: quatro das cinco seções \
          continuam sendo desta máquina, e a quinta se anuncia. O mapa não tem \

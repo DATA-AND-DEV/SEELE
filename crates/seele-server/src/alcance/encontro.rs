@@ -6,26 +6,26 @@
 //!
 //! # O que acontece, na ordem
 //!
-//! 1. O Dogma abre uma **escuta de avisos** própria, num socket dele, e pergunta
+//! 1. O servidor abre uma **escuta de avisos** própria, num socket dele, e pergunta
 //!    ao ponto de encontro qual é o endereço público dela (`ONDE`). Esse
 //!    endereço é metade do bilhete que vai no `seele://`.
-//! 2. Pelo socket **do Dogma** — o mesmo que o QUIC usa —, manda um `LEVE`
+//! 2. Pelo socket **do servidor** — o mesmo que o QUIC usa —, manda um `LEVE`
 //!    apontando para aquela escuta de avisos. O ponto de encontro responde para
-//!    lá dizendo de onde aquele pacote veio: é o endereço público do Dogma, e é
+//!    lá dizendo de onde aquele pacote veio: é o endereço público do servidor, e é
 //!    ele que entra no convite como mais um candidato.
 //! 3. Quem recebe o convite manda o próprio `LEVE` para a escuta de avisos, pelo
 //!    socket com que vai conectar. Chega aqui um aviso com o endereço dele.
-//! 4. O Dogma manda alguns pacotes para aquele endereço, **pelo socket do
-//!    Dogma**. O roteador daqui passa a ter uma saída registrada para lá, e o
+//! 4. O servidor manda alguns pacotes para aquele endereço, **pelo socket do
+//!    servidor**. O roteador daqui passa a ter uma saída registrada para lá, e o
 //!    aperto de mão QUIC que vem em seguida entra.
 //!
-//! # Por que tem de ser o socket do Dogma, e não outro
+//! # Por que tem de ser o socket do servidor, e não outro
 //!
 //! Porque o NAT mapeia por porta interna. Um pacote saindo de outro socket abre
 //! caminho para *aquele* socket, e o QUIC continua batendo numa porta fechada. É
 //! o mesmo motivo pelo qual o furo tem de sair daqui e não da escuta de avisos:
 //! a escuta de avisos existe **só** porque este processo não pode ler do socket
-//! do Dogma — quem lê dele é o quinn.
+//! do servidor — quem lê dele é o quinn.
 //!
 //! # O que isto não faz, e não vai fazer
 //!
@@ -38,7 +38,7 @@
 //!
 //! **Nada do que é dito passa por aqui.** O ponto de encontro apresenta e sai; o
 //! TLS 1.3 e o TOFU do ADR 0003 continuam ponta a ponta, e a impressão digital
-//! continua sendo conferida contra a do Dogma. O que ele aprende é metadado —
+//! continua sendo conferida contra a do servidor. O que ele aprende é metadado —
 //! que endereço falou com que endereço, e quando —, e isso está escrito em
 //! `docs/alcance-pela-internet.md` em vez de ficar implícito.
 
@@ -144,7 +144,7 @@ const REPETICAO: Duration = Duration::from_millis(300);
 /// bilhete vira um endereço para onde não chega mais aviso nenhum.
 const REAVIVAR: Duration = Duration::from_secs(15);
 
-/// Quantos pacotes o Dogma manda para abrir o caminho.
+/// Quantos pacotes o servidor manda para abrir o caminho.
 ///
 /// **Um.** Eram cinco, e os cinco nunca compraram resistência a perda: o
 /// mapeamento de NAT nasce quando o pacote **sai** do roteador do anfitrião, não
@@ -154,7 +154,7 @@ const REAVIVAR: Duration = Duration::from_secs(15);
 /// que é a mesma cobertura pelo lado que sabe quando ela é precisa.
 ///
 /// A conta de segurança melhora junto. A origem de um UDP é forjável, então um
-/// `LEVE` forjado com o endereço de uma vítima faz o Dogma mandar pacotes para
+/// `LEVE` forjado com o endereço de uma vítima faz o servidor mandar pacotes para
 /// ela. Com cinco, o ganho era 5:1; com um, é **1:1**, que é o teto que o ADR
 /// 0022 fixou. Quem repete paga 96 bytes por repetição.
 const PACOTES_DO_FURO: u8 = 1;
@@ -168,7 +168,7 @@ const PACOTES_DO_FURO: u8 = 1;
 /// barato; tirar a pausa exigiria reescrever `furar`, e isso é de outra tarefa.
 const INTERVALO_DO_FURO: Duration = Duration::from_millis(120);
 
-/// Quantos furos cabem numa janela, para o Dogma não virar refletor.
+/// Quantos furos cabem numa janela, para o servidor não virar refletor.
 ///
 /// A marca do aviso já limita quem consegue provocar um furo a quem tem o link
 /// (ver [`Marca`]), e isto é o segundo cinto: mesmo com o link, ninguém faz este
@@ -185,7 +185,7 @@ const INTERVALO_DO_FURO: Duration = Duration::from_millis(120);
 /// barrar o caso normal em vez do abuso, que é a definição de limite errado.
 ///
 /// A conta que diz que subir é seguro: a janela existe para um varredor não
-/// fazer o Dogma jorrar pacote, e com a amplificação em 1:1 (ver
+/// fazer o servidor jorrar pacote, e com a amplificação em 1:1 (ver
 /// [`PACOTES_DO_FURO`]) cada furo é um datagrama de
 /// [`encontro::TAMANHO`] = 96 bytes. Vinte por dez segundos são 1,9 kB; sessenta
 /// são 5,8 kB. Os dois são desprezíveis como vetor — o que a janela limita
@@ -220,23 +220,23 @@ pub enum FalhaNoEncontro {
     SemRespostaAoOnde,
     /// O ponto de encontro respondeu ao `ONDE` e **não** ao `LEVE`.
     ///
-    /// É a pergunta que só o socket do Dogma pode fazer, porque o NAT mapeia por
+    /// É a pergunta que só o socket do servidor pode fazer, porque o NAT mapeia por
     /// porta interna e é a porta do QUIC que precisa do furo. Ela sai pelo
     /// espelho daquele socket e a resposta volta pela escuta de avisos.
     ///
     /// Falhar **só aqui** é informação forte: o caminho até o ponto de encontro
     /// funciona — a primeira pergunta acabou de provar isso — e o que não
-    /// funciona é o espelho do socket do Dogma, ou a volta até a escuta de
+    /// funciona é o espelho do socket do servidor, ou a volta até a escuta de
     /// avisos. Nenhuma ferramenta de diagnóstico deste projeto exercita esse
     /// caminho; ele só acontece ao hospedar.
     SemRespostaAoLeve,
     /// A escuta de avisos não abriu nesta máquina.
     SemEscutaDeAvisos(String),
-    /// O socket do Dogma não pôde ser usado para falar com o ponto de encontro.
+    /// O socket do servidor não pôde ser usado para falar com o ponto de encontro.
     ///
     /// Sem ele não há furo possível: o pacote tem de sair da porta em que o QUIC
     /// atende, ou o roteador abre caminho para o socket errado.
-    SemSocketDoDogma,
+    SemSocketDoServer,
 }
 
 impl std::fmt::Display for FalhaNoEncontro {
@@ -286,12 +286,12 @@ impl std::fmt::Display for FalhaNoEncontro {
             // Esta é a informação mais específica que o degrau 4 consegue dar
             // sobre si mesmo: o serviço respondeu à primeira pergunta e não à
             // segunda, então o caminho até ele funciona e o que não funciona é o
-            // socket do Dogma — que é justamente o que nenhum diagnóstico deste
+            // socket do servidor — que é justamente o que nenhum diagnóstico deste
             // projeto sabe exercitar.
             // A distinção entre esta e a de cima continua valendo e continua
             // importando para quem investiga — «respondeu» e «não respondeu»
             // apontam para lugares diferentes. O que saiu foi `socket`, `furo` e
-            // `Dogma`, que não dizem nada a quem lê e diziam tudo a quem
+            // `Server`, que não dizem nada a quem lê e diziam tudo a quem
             // escreveu. O detalhe que elas carregavam está no `tracing`.
             Self::SemRespostaAoLeve => write!(
                 f,
@@ -303,7 +303,7 @@ impl std::fmt::Display for FalhaNoEncontro {
                 "esta máquina não conseguiu abrir uma porta para receber o aviso \
                  de quem está entrando: {erro}"
             ),
-            Self::SemSocketDoDogma => write!(
+            Self::SemSocketDoServer => write!(
                 f,
                 "não deu para falar com o serviço pela mesma porta em que este \
                  servidor atende"
@@ -319,11 +319,11 @@ impl std::error::Error for FalhaNoEncontro {}
 /// Existe para o degrau ser **fácil de não usar**: um `None` na
 /// [`super::Escada::subir`] e nenhum pacote sai desta máquina para ninguém.
 pub struct Convocacao {
-    /// O socket em que o Dogma atende, clonado.
+    /// O socket em que o servidor atende, clonado.
     ///
     /// Tem de ser este e não outro: ver o cabeçalho do módulo.
     pub socket: Arc<std::net::UdpSocket>,
-    /// A impressão digital do Dogma, de onde sai a marca que os avisos trazem.
+    /// A impressão digital do servidor, de onde sai a marca que os avisos trazem.
     pub impressao_digital: String,
     /// O endereço do ponto de encontro, como texto.
     pub ponto: String,
@@ -350,12 +350,12 @@ impl Convocacao {
 }
 
 /// A marca que um aviso legítimo traz: os primeiros dígitos da impressão
-/// digital do Dogma.
+/// digital do servidor.
 ///
 /// Ela está no `seele://` e em nenhum outro lugar, então um aviso com esta marca
 /// veio de alguém com o link na mão. Não é autenticação — quem tem o link, tem —
 /// e não precisa ser: o que ela faz é impedir que um varredor de portas faça
-/// este Dogma mandar pacotes para onde ele quiser.
+/// este servidor mandar pacotes para onde ele quiser.
 fn marca_do_convite(impressao_digital: &str) -> Option<Marca> {
     Marca::nova(impressao_digital.get(..16)?)
 }
@@ -379,7 +379,7 @@ impl std::fmt::Debug for Encontro {
 }
 
 impl Encontro {
-    /// O endereço público do Dogma, para entrar no convite como candidato.
+    /// O endereço público do servidor, para entrar no convite como candidato.
     #[must_use]
     pub fn publico(&self) -> SocketAddr {
         self.publico
@@ -425,11 +425,11 @@ pub async fn abrir(convocacao: &Convocacao) -> Result<Encontro, FalhaNoEncontro>
     let Some(marca_de_quem_chega) = marca_do_convite(&convocacao.impressao_digital) else {
         // Uma impressão digital que não tem 16 dígitos hexadecimais não é uma
         // impressão digital, e sem marca não há como separar aviso de ruído.
-        return Err(FalhaNoEncontro::SemSocketDoDogma);
+        return Err(FalhaNoEncontro::SemSocketDoServer);
     };
 
     let candidatos = resolver(&convocacao.ponto, ate).await?;
-    let minha_marca = Marca::nova("anfitriao").ok_or(FalhaNoEncontro::SemSocketDoDogma)?;
+    let minha_marca = Marca::nova("anfitriao").ok_or(FalhaNoEncontro::SemSocketDoServer)?;
 
     // Um de cada vez, até um responder, e **cada um com a sua fatia do prazo**.
     //
@@ -487,12 +487,12 @@ pub async fn abrir(convocacao: &Convocacao) -> Result<Encontro, FalhaNoEncontro>
         return Err(FalhaNoEncontro::SemRespostaAoOnde);
     };
 
-    // Segunda pergunta, e a que só o socket do Dogma pode fazer: qual é o
+    // Segunda pergunta, e a que só o socket do servidor pode fazer: qual é o
     // endereço público **dele**. A resposta vem pela escuta de avisos, porque
     // deste socket não dá para ler — quem lê é o quinn.
     let publico = tokio::time::timeout_at(
         ate,
-        perguntar_pelo_dogma(&convocacao.socket, &avisos, ponto, aviso, &minha_marca),
+        perguntar_pelo_server(&convocacao.socket, &avisos, ponto, aviso, &minha_marca),
     )
     .await
     .map_err(|_| FalhaNoEncontro::SemRespostaAoLeve)?
@@ -523,7 +523,7 @@ async fn resolver(
     ate: tokio::time::Instant,
 ) -> Result<Vec<SocketAddr>, FalhaNoEncontro> {
     // O mesmo `Bilhete` que lê o endereço do link lê o do ambiente: a porta
-    // padrão de um ponto de encontro não é a de um Dogma, e essa regra mora em
+    // padrão de um ponto de encontro não é a de um servidor, e essa regra mora em
     // um lugar só.
     let alvo = Bilhete::novo(texto, "0.0.0.0:0").ok().and_then(|bilhete| {
         bilhete
@@ -566,7 +566,7 @@ async fn resolver(
     // ganhou IPv6 ao mudar de rede, o AAAA passou a responder antes, e o link
     // saiu sem **nenhum** caminho IPv4 — `enc=` em IPv6, `alt=` só de IPv6, e o
     // endereço da frente sendo o de rede local. Quem estava no 5G não tinha por
-    // onde entrar. Antes do IPv6 o mesmo Dogma funcionava.
+    // onde entrar. Antes do IPv6 o mesmo servidor funcionava.
     //
     // Os IPv6 não se perdem: eles viajam no `alt=`, que é onde um endereço
     // global direto pertence. O que esta ordem protege é o furo.
@@ -598,7 +598,7 @@ async fn resolver(
 /// pessoa usar. Um par que só tem IPv6 é raro; um que só tem IPv4 é a maioria,
 /// e um link sem caminho IPv4 não serve a ele. Foi exatamente o que aconteceu
 /// em campo: a máquina ganhou IPv6, o link saiu inteiro em IPv6, e quem estava
-/// no 5G ficou de fora de um Dogma que funcionava no dia anterior.
+/// no 5G ficou de fora de um servidor que funcionava no dia anterior.
 ///
 /// Sem IPv4 utilizável, IPv6 — a última linha continua servindo de recuo.
 fn rede_do_padrao() -> Option<SocketAddr> {
@@ -656,13 +656,13 @@ async fn perguntar(
     }
 }
 
-/// O mesmo, mas o pedido sai pelo socket do Dogma.
+/// O mesmo, mas o pedido sai pelo socket do servidor.
 ///
 /// É a única forma de descobrir o endereço público **daquele** socket, que é o
 /// que vai no convite: o NAT mapeia por porta interna, e o endereço da escuta de
 /// avisos não diz nada sobre a porta em que o QUIC atende.
-async fn perguntar_pelo_dogma(
-    dogma: &std::net::UdpSocket,
+async fn perguntar_pelo_server(
+    server: &std::net::UdpSocket,
     avisos: &tokio::net::UdpSocket,
     ponto: SocketAddr,
     para: SocketAddr,
@@ -670,7 +670,7 @@ async fn perguntar_pelo_dogma(
 ) -> Option<SocketAddr> {
     let pedido = encontro::leve(para, esperada);
     loop {
-        mandar_pelo_dogma(dogma, &pedido, ponto);
+        mandar_pelo_server(server, &pedido, ponto);
         if let Ok(Some(endereco)) =
             tokio::time::timeout(REPETICAO, esperar_aqui(avisos, |marca| marca == esperada)).await
         {
@@ -687,22 +687,22 @@ async fn perguntar_pelo_dogma(
 ///
 /// O destino é escrito na família **deste** socket antes de sair. Ver
 /// [`na_familia_de`], que existe por causa de um degrau 4 que nunca aconteceu.
-fn mandar_pelo_dogma(dogma: &std::net::UdpSocket, datagrama: &[u8], destino: SocketAddr) {
-    let destino = match na_familia_de(dogma, destino) {
+fn mandar_pelo_server(server: &std::net::UdpSocket, datagrama: &[u8], destino: SocketAddr) {
+    let destino = match na_familia_de(server, destino) {
         Ok(escrito) => escrito,
         Err(motivo) => {
             tracing::debug!(%motivo, %destino, "este socket não alcança esta família");
             return;
         }
     };
-    if let Err(erro) = dogma.send_to(datagrama, destino) {
-        tracing::debug!(%erro, %destino, "não saiu pelo socket do Dogma");
+    if let Err(erro) = server.send_to(datagrama, destino) {
+        tracing::debug!(%erro, %destino, "não saiu pelo socket do servidor");
     }
 }
 
 /// O mesmo destino, escrito na família em que um socket sabe falar.
 ///
-/// Um socket `AF_INET6` — que é o que o Dogma abre, porque `[::]` é o único
+/// Um socket `AF_INET6` — que é o que o servidor abre, porque `[::]` é o único
 /// jeito de atender às duas famílias num descritor só — recusa um
 /// `SocketAddr::V4` com `EINVAL`. Não é rota ausente nem firewall: é o
 /// endereço escrito na forma errada. O mesmo destino na forma mapeada
@@ -711,7 +711,7 @@ fn mandar_pelo_dogma(dogma: &std::net::UdpSocket, datagrama: &[u8], destino: Soc
 /// Isto custou um ciclo inteiro de campo. O `ONDE` chegava ao ponto de
 /// encontro e o `LEVE` não, e a diferença entre os dois é só esta: o primeiro
 /// sai por uma escuta própria, aberta na família do destino, e o segundo tem de
-/// sair pelo socket do Dogma, porque furar um NAT exige a porta em que o QUIC
+/// sair pelo socket do servidor, porque furar um NAT exige a porta em que o QUIC
 /// atende. Toda máquina de pilha dupla falhava igual, e o erro do sistema ia
 /// para um `debug!` que nenhum dos dois clientes coleta.
 ///
@@ -754,7 +754,7 @@ async fn esperar_aqui(
     }
 }
 
-/// O laço que mantém o degrau 4 de pé enquanto o Dogma estiver.
+/// O laço que mantém o degrau 4 de pé enquanto o servidor estiver.
 ///
 /// Duas coisas ao mesmo tempo, e as duas precisam do mesmo socket de leitura:
 ///
@@ -764,7 +764,7 @@ async fn esperar_aqui(
 ///   cada um traz.
 async fn atender(
     avisos: tokio::net::UdpSocket,
-    dogma: Arc<std::net::UdpSocket>,
+    server: Arc<std::net::UdpSocket>,
     ponto: SocketAddr,
     aviso: SocketAddr,
     minha_marca: Marca,
@@ -779,9 +779,9 @@ async fn atender(
         tokio::select! {
             _ = relogio.tick() => {
                 // Os dois caminhos, porque são dois mapeamentos: o da escuta de
-                // avisos e o do socket do Dogma.
+                // avisos e o do socket do servidor.
                 let _ = avisos.send_to(&encontro::onde(&minha_marca), ponto).await;
-                mandar_pelo_dogma(&dogma, &encontro::leve(aviso, &minha_marca), ponto);
+                mandar_pelo_server(&server, &encontro::leve(aviso, &minha_marca), ponto);
             }
             recebido = avisos.recv_from(&mut balde) => {
                 let Ok((lidos, origem)) = recebido else { continue };
@@ -803,7 +803,7 @@ async fn atender(
                     continue;
                 }
                 tracing::info!(%endereco, "degrau 4: alguém com o link está chegando; furando");
-                furar(&dogma, endereco, &de_quem_chega).await;
+                furar(&server, endereco, &de_quem_chega).await;
             }
         }
     }
@@ -835,7 +835,7 @@ fn cabe_mais_um_furo(furos: &mut Vec<tokio::time::Instant>) -> bool {
     true
 }
 
-/// Abre o caminho para um endereço, pelo socket do Dogma.
+/// Abre o caminho para um endereço, pelo socket do servidor.
 ///
 /// **Um pacote por aviso**, e é o teto do ADR 0022: a origem de um UDP é
 /// forjável, então o que sai daqui não pode ser maior que o datagrama que o
@@ -846,10 +846,10 @@ fn cabe_mais_um_furo(furos: &mut Vec<tokio::time::Instant>) -> bool {
 /// O conteúdo é irrelevante para quem recebe — o quinn do outro lado descarta o
 /// que não for QUIC —, e é um `FURO` nomeado para que quem estiver olhando um
 /// `tcpdump` saiba o que é.
-async fn furar(dogma: &std::net::UdpSocket, destino: SocketAddr, marca: &Marca) {
+async fn furar(server: &std::net::UdpSocket, destino: SocketAddr, marca: &Marca) {
     let pacote = encontro::furo(marca);
     for _ in 0..PACOTES_DO_FURO {
-        mandar_pelo_dogma(dogma, &pacote, destino);
+        mandar_pelo_server(server, &pacote, destino);
         tokio::time::sleep(INTERVALO_DO_FURO).await;
     }
 }
@@ -857,7 +857,7 @@ async fn furar(dogma: &std::net::UdpSocket, destino: SocketAddr, marca: &Marca) 
 #[cfg(test)]
 mod testes {
 
-    /// O socket do Dogma atende em `[::]` e o ponto de encontro é IPv4 puro.
+    /// O socket do servidor atende em `[::]` e o ponto de encontro é IPv4 puro.
     ///
     /// Este é o caso de campo, e ele falhava calado: um `send_to` com um
     /// `SocketAddr::V4` num socket `AF_INET6` devolve `EINVAL`, e o degrau 4
@@ -865,9 +865,9 @@ mod testes {
     /// igual. O `ONDE` chegava, porque sai por socket próprio; o `LEVE` não,
     /// porque é o único que sai por este.
     #[test]
-    fn o_dogma_de_pilha_dupla_alcanca_um_ponto_de_encontro_ipv4() {
+    fn o_server_de_pilha_dupla_alcanca_um_ponto_de_encontro_ipv4() {
         let escuta = SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, 0));
-        let Ok((dogma, crate::alcance::Pilha::Dupla)) = crate::alcance::abrir_escuta(escuta) else {
+        let Ok((server, crate::alcance::Pilha::Dupla)) = crate::alcance::abrir_escuta(escuta) else {
             // Sem pilha dupla não há o que este teste afirme.
             return;
         };
@@ -881,7 +881,7 @@ mod testes {
         };
         let (servico, onde) = ponto;
 
-        mandar_pelo_dogma(&dogma, b"ONDE", onde);
+        mandar_pelo_server(&server, b"ONDE", onde);
 
         let mut balde = [0_u8; 8];
         match servico.recv_from(&mut balde) {
@@ -1026,7 +1026,7 @@ mod testes {
         // difícil de prever: uma máquina que não tinha IPv6 ganhou IPv6 ao
         // mudar de rede. O DNS passou a responder AAAA antes, o AAAA respondeu,
         // e o link saiu com `enc=` em IPv6 — sem nenhum caminho IPv4. Quem
-        // estava no 5G não tinha por onde entrar num Dogma que funcionava no
+        // estava no 5G não tinha por onde entrar num servidor que funcionava no
         // dia anterior.
         //
         // O reflexo do primeiro candidato **é** o que vai no link, e é por isso
@@ -1200,8 +1200,8 @@ mod testes {
     #[tokio::test]
     async fn um_ponto_de_encontro_que_nao_existe_nao_segura_ninguem() {
         // O requisito do ADR 0022 escrito como asserção: com o ponto de
-        // encontro fora do ar, subir um Dogma não pode demorar mais nem falhar.
-        // Aqui isso é o prazo; em `hospedagem` é o Dogma inteiro.
+        // encontro fora do ar, subir um servidor não pode demorar mais nem falhar.
+        // Aqui isso é o prazo; em `hospedagem` é o servidor inteiro.
         //
         // O endereço é de documentação (RFC 5737): não existe rota para ele em
         // lugar nenhum, que é a forma mais próxima de "fora do ar" que cabe num
@@ -1293,7 +1293,7 @@ mod testes {
     #[tokio::test]
     async fn a_janela_fecha_dentro_do_atender_e_nao_so_no_auxiliar() {
         // O outro lado de `a_janela_cabe_uma_entrada_legitima_inteira`, e o que
-        // faltava para a propriedade existir de verdade: **o Dogma não vira
+        // faltava para a propriedade existir de verdade: **o servidor não vira
         // refletor**. É a razão de o ADR 0022 ter aceitado construir o degrau 4,
         // e ela não tinha fiação nenhuma.
         //
@@ -1346,7 +1346,7 @@ mod testes {
         assert_eq!(
             furos, FUROS_POR_JANELA,
             "{alem_do_teto} avisos legítimos produziram {furos} furos, e o teto é \
-             de {FUROS_POR_JANELA}. Acima do teto, o Dogma vira refletor sem \
+             de {FUROS_POR_JANELA}. Acima do teto, o servidor vira refletor sem \
              limite para quem tem o link; abaixo dele, a janela barra uma entrada \
              que tinha direito de acontecer"
         );
@@ -1354,7 +1354,7 @@ mod testes {
 
     #[test]
     fn a_janela_de_furos_fecha_e_depois_reabre() {
-        // Sem isto, quem tem o link faz este Dogma mandar pacotes sem parar
+        // Sem isto, quem tem o link faz este servidor mandar pacotes sem parar
         // para um endereço escolhido — um refletor com dono.
         let mut furos = Vec::new();
         for _ in 0..FUROS_POR_JANELA {
@@ -1380,7 +1380,7 @@ mod testes {
 
     #[tokio::test]
     async fn um_aqui_de_origem_estranha_nao_vira_furo() {
-        // O `AQUI` é o único datagrama que faz o Dogma mandar pacote para um
+        // O `AQUI` é o único datagrama que faz o servidor mandar pacote para um
         // endereço que outra pessoa escolheu. Forjá-lo direto na escuta de avisos é
         // mais barato que forjar um `LEVE`: não passa pelo ponto de encontro, então
         // nem a marca nem a janela de furos são pagas duas vezes.
@@ -1424,8 +1424,8 @@ mod testes {
             panic!("a escuta de avisos de teste não tem endereço local");
         };
 
-        let Ok(dogma) = std::net::UdpSocket::bind("127.0.0.1:0") else {
-            panic!("não deu para abrir o socket do Dogma de teste");
+        let Ok(server) = std::net::UdpSocket::bind("127.0.0.1:0") else {
+            panic!("não deu para abrir o socket do servidor de teste");
         };
 
         let Ok(alvo) = tokio::net::UdpSocket::bind("127.0.0.1:0").await else {
@@ -1444,7 +1444,7 @@ mod testes {
 
         let tarefa = tokio::spawn(atender(
             avisos,
-            Arc::new(dogma),
+            Arc::new(server),
             ponto,
             avisos_endereco,
             minha_marca,
@@ -1572,7 +1572,7 @@ mod testes {
         tarefa.abort();
         assert!(
             segundo.is_err(),
-            "um segundo FURO saiu pelo mesmo AQUI: o Dogma virou amplificador, \
+            "um segundo FURO saiu pelo mesmo AQUI: o servidor virou amplificador, \
              que é o que o ADR 0022 não aceita em hipótese nenhuma"
         );
     }
@@ -1587,7 +1587,7 @@ mod testes {
             FalhaNoEncontro::SemRespostaAoOnde,
             FalhaNoEncontro::SemRespostaAoLeve,
             FalhaNoEncontro::SemEscutaDeAvisos("endereço em uso".to_owned()),
-            FalhaNoEncontro::SemSocketDoDogma,
+            FalhaNoEncontro::SemSocketDoServer,
         ];
         let frases: Vec<String> = falhas.iter().map(ToString::to_string).collect();
         for frase in &frases {

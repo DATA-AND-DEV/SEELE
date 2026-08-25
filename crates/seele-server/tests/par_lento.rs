@@ -41,7 +41,7 @@ use ed25519_dalek::{Signer, SigningKey};
 use seele_proto::control::{ClientMessage, DisconnectReason, ServerMessage};
 use seele_proto::ids::{ClientMessageId, LineId};
 use seele_server::persistence::Location;
-use seele_server::{frame, DogmaConfig, Server};
+use seele_server::{frame, ServerConfig, Daemon};
 
 const LINE: u32 = 1;
 
@@ -52,7 +52,7 @@ const CORPO: usize = 3_900;
 ///
 /// Vinte, e não uma, porque o [`seele_server::taxa::Vigia`] limita cada conexão
 /// a sessenta quadros de rajada — e com razão. Vinte pessoas falando de uma vez
-/// é um Dogma cheio numa hora movimentada, que `specs/04-servidor-seele.md`
+/// é um servidor cheio numa hora movimentada, que `specs/04-servidor-seele.md`
 /// dimensiona em cinquenta pessoas.
 const FALANTES: usize = 20;
 
@@ -62,7 +62,7 @@ const CADA: usize = 58;
 /// Um verificador que aceita qualquer certificado.
 ///
 /// O que está sob teste é a entrega, não o TOFU — que tem os testes dele em
-/// `seele-core/src/tofu.rs`. Aqui o certificado é o que o próprio Dogma acabou
+/// `seele-core/src/tofu.rs`. Aqui o certificado é o que o próprio servidor acabou
 /// de gerar nesta função de teste.
 #[derive(Debug)]
 struct AceitaQualquer(Arc<rustls::crypto::CryptoProvider>);
@@ -112,15 +112,15 @@ impl rustls::client::danger::ServerCertVerifier for AceitaQualquer {
     }
 }
 
-/// Um Dogma em memória, já atendendo.
-async fn dogma() -> Result<(SocketAddr, Arc<Server>)> {
-    let config = DogmaConfig {
+/// Um servidor em memória, já atendendo.
+async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
+    let config = ServerConfig {
         name: "Terceira Tóquio".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let servidor = Arc::new(Server::bind(config).await?);
+    let servidor = Arc::new(Daemon::bind(config).await?);
     let endereco = servidor.local_addr()?;
     let aceitando = Arc::clone(&servidor);
     tokio::spawn(async move {
@@ -183,7 +183,7 @@ async fn abrir(endereco: SocketAddr, semente: u8, janela: u32) -> Result<Par> {
 
     let ServerMessage::Challenge { nonce } = frame::read::<ServerMessage>(&mut recebe).await?
     else {
-        anyhow::bail!("o Dogma não mandou Challenge");
+        anyhow::bail!("o servidor não mandou Challenge");
     };
     frame::write(
         &mut envio,
@@ -193,7 +193,7 @@ async fn abrir(endereco: SocketAddr, semente: u8, janela: u32) -> Result<Par> {
     )
     .await?;
     let ServerMessage::Session { .. } = frame::read::<ServerMessage>(&mut recebe).await? else {
-        anyhow::bail!("o Dogma não mandou Session");
+        anyhow::bail!("o servidor não mandou Session");
     };
 
     Ok(Par {
@@ -210,8 +210,8 @@ async fn abrir(endereco: SocketAddr, semente: u8, janela: u32) -> Result<Par> {
 /// pode acontecer é a terceira coisa — seguir conectado, calado, com um buraco
 /// no meio da conversa que ninguém dos dois lados consegue nomear.
 #[tokio::test(flavor = "multi_thread")]
-async fn o_dogma_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Result<()> {
-    let (endereco, servidor) = dogma().await?;
+async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Result<()> {
+    let (endereco, servidor) = server().await?;
 
     // O ouvinte anuncia uma janela pequena e para de ler no instante seguinte.
     let mut ouvinte = abrir(endereco, 1, 16 * 1024).await?;
@@ -276,19 +276,19 @@ async fn o_dogma_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Result
         }
     }
 
-    let perdidos = servidor.dogma().atrasos.eventos();
+    let perdidos = servidor.server().atrasos.eventos();
     println!(
         "ditas {ditas}, chegaram {chegaram}, perdidos no barramento {perdidos}, \
          desligado {desligado:?}"
     );
 
-    // Uma das duas, e nunca a terceira: ou chegou tudo, ou o Dogma disse, com
+    // Uma das duas, e nunca a terceira: ou chegou tudo, ou o servidor disse, com
     // esse nome, que ficou faltando. O que ninguém pode aceitar é o par voltar
     // a ler, seguir conectado, e faltar conversa no meio sem uma palavra de
     // nenhum dos dois lados.
     assert!(
         chegaram == ditas || desligado == Some(DisconnectReason::FellBehind),
-        "pendência nº 1: {chegaram} de {ditas} chegaram e o Dogma não disse nada — \
+        "pendência nº 1: {chegaram} de {ditas} chegaram e o servidor não disse nada — \
          {perdidos} eventos morreram no barramento"
     );
 
@@ -299,7 +299,7 @@ async fn o_dogma_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Result
             perdidos > 0,
             "a sessão foi encerrada por ter ficado para trás e o contador marcou zero"
         );
-        assert!(servidor.dogma().atrasos.sessoes() > 0);
+        assert!(servidor.server().atrasos.sessoes() > 0);
     }
 
     // O que se perdeu foi a **entrega**, e não a mensagem: tudo o que os
@@ -308,7 +308,7 @@ async fn o_dogma_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Result
     let gravadas = servidor.quantas_mensagens(LineId(LINE)).await?;
     assert_eq!(
         gravadas, ditas as u64,
-        "o Dogma perdeu mensagem antes de gravar, e aí reconectar não repõe nada"
+        "o servidor perdeu mensagem antes de gravar, e aí reconectar não repõe nada"
     );
 
     servidor.shutdown();

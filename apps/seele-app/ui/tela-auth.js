@@ -183,9 +183,9 @@ function entrarNaAutenticacao(snapshot, veredito, endereco) {
   $("auth-endereco").textContent = endereco || AUSENTE;
   // A sessão precisa do mesmo endereço para a porta do cabeçalho, e este é o
   // último ponto do caminho que ainda o tem: o `Snapshot` não o carrega.
-  guardarAlvoDoDogma(endereco);
+  guardarAlvoDoServer(endereco);
   desenharPadrao(snapshot);
-  desenharDogmaDaEntrada(snapshot);
+  desenharServerDaEntrada(snapshot);
   dizerSeOConviteJaConferiu(veredito);
 
   // Um botão, um movimento. Conferir e entrar eram dois passos deste mesmo
@@ -273,8 +273,8 @@ function dizerSeOConviteJaConferiu(veredito) {
  * travessão é um campo, e não uma lacuna: a telemetria de verdade está na barra
  * permanente da sessão, que é onde ela tem o que medir.
  */
-function desenharDogmaDaEntrada(snapshot) {
-  $("auth-dogma-nome").textContent = snapshot?.dogma || AUSENTE;
+function desenharServerDaEntrada(snapshot) {
+  $("auth-server-nome").textContent = snapshot?.server || AUSENTE;
   $("auth-voice_rooms").textContent = doisDigitos(snapshot?.voice_rooms?.length);
   $("auth-linhas").textContent = doisDigitos(snapshot?.lines?.length);
 }
@@ -363,7 +363,7 @@ async function verificarIdentidade() {
     const snapshot = await invoke("snapshot");
     aperto.snapshot = snapshot;
     desenharPadrao(snapshot);
-    desenharDogmaDaEntrada(snapshot);
+    desenharServerDaEntrada(snapshot);
     registrar(PADROES[snapshot.pattern]?.rotulo ?? PADROES.Offline.rotulo, tomDoPadrao(snapshot));
   } catch (falha) {
     console.warn("snapshot:", falha);
@@ -416,8 +416,8 @@ async function inserirPlug() {
     // A imagem do servidor, uma vez, aqui.
     //
     // Ela **não** vem por evento nesta hora, e essa é a razão de esta linha
-    // existir: o Dogma manda `DogmaIconChanged` logo depois do aperto de mão, a
-    // ponte dobra a mensagem e emite `DogmaChanged` — e ninguém está ouvindo
+    // existir: o servidor manda `ServerIconChanged` logo depois do aperto de mão, a
+    // ponte dobra a mensagem e emite `ServerChanged` — e ninguém está ouvindo
     // ainda. A casca só se inscreve depois de `Plug::connect` voltar, e a
     // travessia inteira já aconteceu quando ela volta. O único evento que
     // atravessa essa janela é `ConnectStageChanged`, e ele existe justamente
@@ -647,7 +647,7 @@ function escreverContagem() {
  * é recusada e desconecta, sem segurar recurso nenhum do outro lado. Mas uma
  * janela minimizada batendo na porta de um estranho a cada quinze segundos, por
  * horas, com ninguém na frente da tela para ver a resposta, é a versão de
- * cliente do mesmo defeito: gasto no Dogma de outra pessoa por uma espera que
+ * cliente do mesmo defeito: gasto no servidor de outra pessoa por uma espera que
  * ninguém está esperando.
  *
  * Então a espera acompanha o olho. Quem está olhando entra sem apertar nada;

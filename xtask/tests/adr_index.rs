@@ -3,7 +3,7 @@
 //! This exists because it did not hold. Eleven ADRs — 0016 through 0026 — sat in
 //! `docs/adr/` without ever reaching the table in `docs/adr/README.md`, and the
 //! gap went unnoticed for as long as it took to write eleven of them. Among the
-//! missing were `0022`, which governs how a Dogma is reached over the internet,
+//! missing were `0022`, which governs how a server is reached over the internet,
 //! and `0026`, which governs how this product updates itself.
 //!
 //! An index that silently stops being an index is worse than no index: the file

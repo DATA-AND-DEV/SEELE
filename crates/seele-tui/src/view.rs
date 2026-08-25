@@ -27,10 +27,10 @@ pub fn project(room: &Room, app: &mut App) {
 
 /// The voice_rooms/Lines panel: voice_rooms, their people nested under the open one, Lines.
 fn project_channels(room: &Room, app: &mut App) {
-    app.dogmas = if room.dogma.is_empty() {
+    app.servers = if room.server.is_empty() {
         Vec::new()
     } else {
-        vec![room.dogma.clone()]
+        vec![room.server.clone()]
     };
 
     let mut tree = Vec::new();
@@ -212,7 +212,7 @@ mod tests {
             id: SessionId(1),
             person: PersonId(7),
             ssrc: Ssrc(700),
-            dogma: "Terceira Tóquio".into(),
+            server: "Terceira Tóquio".into(),
             voice_rooms: vec![
                 VoiceRoomInfo {
                     id: VOICE_ROOM,
@@ -325,7 +325,7 @@ mod tests {
     #[test]
     fn a_message_whose_file_expired_says_so_instead_of_drawing_nothing() {
         // A mensagem com o arquivo ido não pode ficar igual a uma mensagem sem
-        // arquivo nenhum: é para isso que o Dogma guarda a linha depois de
+        // arquivo nenhum: é para isso que o servidor guarda a linha depois de
         // apagar os bytes, e é aqui que essa decisão vira ou não vira uma
         // frase na tela.
         let mut room = room();
@@ -603,6 +603,6 @@ mod tests {
 
         assert!(app.tree.is_empty());
         assert!(app.messages.is_empty());
-        assert!(app.dogmas.is_empty());
+        assert!(app.servers.is_empty());
     }
 }

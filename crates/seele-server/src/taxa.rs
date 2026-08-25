@@ -1,6 +1,6 @@
 //! Limitação de taxa: o que segura quem abusa depois de a porta existir.
 //!
-//! O ADR 0021 pôs um porteiro no Dogma e disse, na própria lista de
+//! O ADR 0021 pôs um porteiro no servidor e disse, na própria lista de
 //! consequências, o que ele **não** resolvia: *"um convidado legítimo pode
 //! inundar de mensagens; não há limitação de taxa"*. Isto é a outra metade.
 //!
@@ -8,14 +8,14 @@
 //!
 //! 1. **Antes de autenticar** — [`Portaria`], com chave no endereço de origem.
 //!    Segura quem bate à porta em laço. Um aperto de mão custa Argon2id quando
-//!    o Dogma tem senha (ADR 0021: "de propósito, não é caminho quente"), e um
+//!    o servidor tem senha (ADR 0021: "de propósito, não é caminho quente"), e um
 //!    pacote que compra dezenas de milissegundos de CPU alheia é amplificação
 //!    boa demais para deixar de graça na internet.
 //! 2. **Depois de autenticar** — [`Vigia`], com chave na conexão. Segura o
 //!    convidado legítimo que inunda, que é o caso que o ADR 0021 nomeia.
 //!
 //! O terceiro uso é a mídia, em [`crate::voice_room`]: aquele limite já existia como
-//! janela fixa e passou a usar o mesmo [`Balde`], para o Dogma ter **um**
+//! janela fixa e passou a usar o mesmo [`Balde`], para o servidor ter **um**
 //! mecanismo de limitação e não três parecidos.
 //!
 //! # Por que balde de fichas e não janela fixa
@@ -30,7 +30,7 @@
 //! # O tempo entra por parâmetro
 //!
 //! Nada aqui lê relógio. Quem chama passa o instante, como em
-//! [`crate::dogma::Slots`] e no `battery.rs` do `seele-core`. É o que torna
+//! [`crate::server::Slots`] e no `battery.rs` do `seele-core`. É o que torna
 //! testável o comportamento que importa — o que acontece no limite — sem um
 //! único `sleep`, e sem depender de a máquina de CI estar desocupada.
 
@@ -64,8 +64,8 @@ pub const APERTOS_POR_MINUTO: f64 = 30.0;
 /// Quantos endereços a [`Portaria`] lembra ao mesmo tempo.
 ///
 /// A tabela é ela própria uma superfície: um balde por endereço, sem teto, é
-/// memória do Dogma para quem tiver endereços de sobra. Quatro mil e noventa e
-/// seis baldes cabem em algumas centenas de kilobytes, e um Dogma de amigos
+/// memória do servidor para quem tiver endereços de sobra. Quatro mil e noventa e
+/// seis baldes cabem em algumas centenas de kilobytes, e um servidor de amigos
 /// (`specs/04-servidor-seele.md` dimensiona uns cinquenta pessoas) nunca vê
 /// número dessa ordem.
 pub const ENDERECOS_LEMBRADOS: usize = 4096;
@@ -89,7 +89,7 @@ pub const QUADROS_POR_SEGUNDO: f64 = 20.0;
 /// Quantos quadros excedentes se descarta antes de derrubar a conexão.
 ///
 /// Derrubar no primeiro quadro excedente puniria um cliente que só está mal
-/// escrito, e derrubar nunca deixaria a sessão gastar o Dogma para sempre. O
+/// escrito, e derrubar nunca deixaria a sessão gastar o servidor para sempre. O
 /// primeiro excedente vira aviso, os seguintes viram descarte, e duzentos
 /// descartes — dez segundos inteiros no dobro do teto — são a prova de que
 /// ninguém do outro lado leu o aviso.
@@ -123,7 +123,7 @@ pub const BYTES_POR_SEGUNDO: f64 = 256.0 * 1024.0;
 /// Quantos pessoas a [`Vazao`] lembra ao mesmo tempo.
 ///
 /// Pelo mesmo motivo que a [`Portaria`] tem teto: um balde por chave, sem teto,
-/// é memória do Dogma para quem tiver chaves de sobra. Um Dogma aberto
+/// é memória do servidor para quem tiver chaves de sobra. Um servidor aberto
 /// (ADR 0021) aceita identidade nova a cada aperto de mão.
 pub const PERSONOS_LEMBRADOS: usize = 4096;
 
@@ -240,7 +240,7 @@ impl Portaria {
         }
         if self.baldes.len() >= ENDERECOS_LEMBRADOS {
             // Milhares de endereços distintos gastando fichas ao mesmo tempo é
-            // um Dogma sob rede de máquinas, não um amigo chegando. Recusar o
+            // um servidor sob rede de máquinas, não um amigo chegando. Recusar o
             // desconhecido é a falha correta: o custo cai sobre quem chega
             // durante o ataque, e não sobre quem já está dentro.
             self.lotada += 1;
@@ -581,7 +581,7 @@ mod testes {
     #[test]
     fn a_tabela_da_portaria_tem_teto() {
         // A tabela é ela própria uma superfície: sem teto, um balde por
-        // endereço é memória do Dogma para quem tiver endereços de sobra.
+        // endereço é memória do servidor para quem tiver endereços de sobra.
         let inicio = zero();
         let mut portaria = Portaria::nova();
         for numero in 0..u32::try_from(ENDERECOS_LEMBRADOS).expect("cabe") + 10 {
@@ -715,7 +715,7 @@ mod testes {
     }
 
     #[test]
-    fn esvaziar_o_dogma_repetidamente_passa_a_custar_horas() {
+    fn esvaziar_o_server_repetidamente_passa_a_custar_horas() {
         // O que o ADR compra com este balde, medido em vez de afirmado: gasta a
         // rajada, e o gibibyte seguinte leva o tempo que a reposição impõe.
         let inicio = zero();

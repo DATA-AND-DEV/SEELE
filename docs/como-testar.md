@@ -3,7 +3,7 @@
 Estado em M4: o `plug` é uma TUI de verdade, contra um `seeled` de verdade. Texto
 funciona sem placa de som; voz precisa de microfone e alto-falante.
 
-## Subir um Dogma
+## Subir um servidor
 
 ```sh
 cargo build --release --bin seeled --bin plug
@@ -26,7 +26,7 @@ Instalador do macOS, se quiser:
 cd apps/seele-app && cargo tauri build      # gera .app e .dmg em target/release/bundle
 ```
 
-O app pede o Dogma e o apelido, entra no primeiro VoiceRoom e abre a primeira Linha.
+O app pede o servidor e o apelido, entra no primeiro VoiceRoom e abre a primeira Linha.
 Barra de espaço fala enquanto segurada — aqui a janela relata a soltura de
 verdade, então não há a trava que os terminais precisam (ADR 0016). Clicar no
 VoiceRoom em que já se está sai dele. O deslizante de volume aparece ao apontar uma
@@ -117,5 +117,5 @@ sozinho, a mensagem estará na tela normal, não perdida na tela alternativa. Se
 o terminal ficar estranho mesmo assim, `reset`.
 
 Recusa de conexão com apelido já usado significa que aquele nome pertence a
-outra identidade naquele Dogma. Ou use `$SEELE_HOME` com a identidade certa, ou
+outra identidade naquele Server. Ou use `$SEELE_HOME` com a identidade certa, ou
 escolha outro apelido.

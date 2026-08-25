@@ -5,8 +5,8 @@
 //! pessoa lê.
 //!
 //! Encontrado no uso, não na leitura: tentei entrar com um apelido que já
-//! pertencia a outra identidade, o Dogma recusou dizendo exatamente isso no
-//! log, e o cliente mostrou "NÃO FOI POSSÍVEL ALCANÇAR O DOGMA". Passei um bom
+//! pertencia a outra identidade, o servidor recusou dizendo exatamente isso no
+//! log, e o cliente mostrou "NÃO FOI POSSÍVEL ALCANÇAR O servidor". Passei um bom
 //! tempo procurando problema de rede que não existia.
 
 #![allow(clippy::expect_used)]
@@ -18,16 +18,16 @@ use anyhow::Result;
 use seele_core::enlace::{Destino, Enlace};
 use seele_core::{Client, ConnectError, MemoryPinStore, PinStore};
 use seele_server::persistence::Location;
-use seele_server::{DogmaConfig, Server};
+use seele_server::{ServerConfig, Daemon};
 
-async fn dogma() -> Result<(SocketAddr, Arc<Server>)> {
-    let config = DogmaConfig {
+async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
+    let config = ServerConfig {
         name: "Terceira Tóquio".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let servidor = Arc::new(Server::bind(config).await?);
+    let servidor = Arc::new(Daemon::bind(config).await?);
     let endereco = servidor.local_addr()?;
     let aceitando = Arc::clone(&servidor);
     tokio::spawn(async move {
@@ -51,7 +51,7 @@ async fn entrar(endereco: SocketAddr, semente: u8) -> Result<Client, ConnectErro
 
 #[tokio::test(flavor = "multi_thread")]
 async fn um_apelido_de_outro_dono_e_recusa_e_nao_rede() -> Result<()> {
-    let (endereco, servidor) = dogma().await?;
+    let (endereco, servidor) = server().await?;
 
     // O primeiro reivindica o apelido. ADR 0017: PERSISTENCE prende o apelido à
     // identidade que o pegou primeiro.
@@ -65,7 +65,7 @@ async fn um_apelido_de_outro_dono_e_recusa_e_nao_rede() -> Result<()> {
 
     assert!(
         matches!(erro, ConnectError::Refused { .. }),
-        "o Dogma recusou com um motivo e o cliente entendeu «{erro:?}».\n\
+        "o servidor recusou com um motivo e o cliente entendeu «{erro:?}».\n\
          Quem lê isso vai procurar problema de rede que não existe."
     );
 
@@ -82,7 +82,7 @@ async fn um_apelido_de_outro_dono_e_recusa_e_nao_rede() -> Result<()> {
 /// aviso em vez de uma recusa, sem ninguém ter decidido isso.
 #[tokio::test(flavor = "multi_thread")]
 async fn uma_recusa_depois_do_tls_nao_deixa_a_chave_fixada() -> Result<()> {
-    let (endereco, servidor) = dogma().await?;
+    let (endereco, servidor) = server().await?;
 
     let primeiro = entrar(endereco, 1).await.expect("o primeiro deve entrar");
     drop(primeiro);

@@ -40,7 +40,7 @@
 <link rel="stylesheet" href="camada-ajuda.css">
 <link rel="stylesheet" href="tela-chamada.css">
 <link rel="stylesheet" href="camada-compartilhar.css">
-<link rel="stylesheet" href="tela-dogma.css">
+<link rel="stylesheet" href="tela-server.css">
 <link rel="stylesheet" href="tela-fim.css">
 <link rel="stylesheet" href="tela-auth.css">
 <link rel="stylesheet" href="acessibilidade.css">
@@ -86,7 +86,7 @@
   ---- por que fora das telas ----
 
   O chip PORTA conta os pendentes desde o começo, e ele mora dentro de
-  `#tela-sessao`. Entrar numa jaula ou abrir o Terminal Dogma esconde aquela
+  `#tela-sessao`. Entrar numa jaula ou abrir o Terminal Server esconde aquela
   `<section>` inteira, e o número vai junto: o único lugar onde a batida
   aparecia some justamente quando quem hospeda está ocupado com outra coisa.
   Esta faixa pertence à janela, como `#anuncio` e como a varredura, e por isso
@@ -112,7 +112,7 @@
   em SQLite e não vence.
 
   Sem vermelho. `tokens.css` o reserva a alerta e queda, e alguém batendo à
-  porta não é nem uma nem outra: é a coisa mais comum que acontece num Dogma
+  porta não é nem uma nem outra: é a coisa mais comum que acontece num Server
   fechado.
 -->
 <div id="portaria-batendo" class="portaria-batendo" hidden>
@@ -148,7 +148,7 @@
   Na marcação e não numa tabela em JavaScript, pela razão de sempre nesta
   página: o alvo do foco fica ao lado da tela de que ele é, e não numa segunda
   lista que alguém vai esquecer de atualizar no dia em que o botão mudar de
-  nome. `data-painel` e `data-titulo` do Terminal Dogma seguem a mesma regra.
+  nome. `data-painel` e `data-titulo` do Terminal Server seguem a mesma regra.
 
   `tabindex="-1"` põe a `<section>` ao alcance de `focus()` sem pô-la na ordem
   de tabulação: é onde o foco pousa quando a tela não nomeia um controle melhor,
@@ -342,7 +342,7 @@
         <span class="nota boot-nota-hospedar">cria um servidor neste computador e entra nele — o link de convite aparece no topo da sessão</span>
 
         <!--
-          A entrada para o Terminal Dogma, daqui e da sessão. Daqui porque
+          A entrada para o Terminal Server, daqui e da sessão. Daqui porque
           escolher microfone é coisa que se faz **antes** de entrar tanto quanto
           durante, e uma configuração que só existisse com sessão aberta poria o
           controle atrás da porta que ele serve para abrir: quem descobre que o
@@ -352,7 +352,7 @@
           do que se vai fazer, e quem nunca abriu a tela não sabe o nome dela. O
           nome continua no cabeçalho de lá, que é onde ele nomeia um lugar.
         -->
-        <button id="botao-dogma" type="button" class="botao-fantasma dogma-entrada">
+        <button id="botao-server" type="button" class="botao-fantasma server-entrada">
           <span class="boot-engrenagem" data-glifo="engrenagem"></span>CONFIGURAÇÕES
         </button>
         <p class="nota boot-nota-config">microfone e som — teste antes de entrar</p>
@@ -405,9 +405,9 @@
   <header class="topo">
     <span class="topo-marca marca">SEELE</span>
     <!--
-      O bloco que o comp escreve `TÓQUIO-3 / DOGMA CENTRAL · 7743`. Ele voltou
-      para cá quando a ficha `C·02 / DOGMA` saiu: aquele painel não existe no
-      comp, e o nome do Dogma é a primeira coisa que o desenho diz.
+      O bloco que o comp escreve `TÓQUIO-3 / SERVER CENTRAL · 7743`. Ele voltou
+      para cá quando a ficha `C·02 / SERVER` saiu: aquele painel não existe no
+      comp, e o nome do servidor é a primeira coisa que o desenho diz.
     -->
     <!--
       A imagem do servidor — o «à esquerda» do pedido, e o lugar onde ela vale
@@ -420,18 +420,18 @@
 
       Nasce escondida e continua escondida enquanto não houver imagem — a
       maioria dos servidores não tem uma, e um quadrado vazio no cabeçalho seria
-      uma moldura prometendo o que não existe. Quem a revela é `tela-dogma.js`,
+      uma moldura prometendo o que não existe. Quem a revela é `tela-server.js`,
       que é quem sabe quando a imagem mudou.
 
-      A classe é `dogma-` e não `topo-` porque quem a pinta é `tela-dogma.css`:
+      A classe é `server-` e não `topo-` porque quem a pinta é `tela-server.css`:
       esta imagem é a metade visível da tela de personalização, e as duas
-      metades mudam juntas. `tela-dogma.css` carrega depois de `tela-sessao.css`,
+      metades mudam juntas. `tela-server.css` carrega depois de `tela-sessao.css`,
       então nenhum empate de especificidade depende de sorte.
     -->
-    <img id="topo-dogma-icone" class="dogma-icone-topo" alt="" hidden>
-    <span class="topo-dogma">
-      <span id="topo-dogma-nome" class="topo-dogma-nome">—</span>
-      <span id="topo-dogma-sub" class="topo-dogma-sub">SERVIDOR</span>
+    <img id="topo-server-icone" class="server-icone-topo" alt="" hidden>
+    <span class="topo-server">
+      <span id="topo-server-nome" class="topo-server-nome">—</span>
+      <span id="topo-server-sub" class="topo-server-sub">SERVIDOR</span>
     </span>
     <span class="topo-bloco">
       <span id="padrao" class="padrao">CONEXÃO SEGURA</span>
@@ -444,7 +444,7 @@
     <!--
       A mesma tela da entrada, alcançada de dentro da sessão. Trocar de microfone
       no meio de uma conversa é o caso que importa — é falando que se descobre
-      que a máquina abriu o errado — e a troca vale na hora, sem sair do Dogma.
+      que a máquina abriu o errado — e a troca vale na hora, sem sair do servidor.
     -->
     <!--
       A grade do VoiceRoom — a tela `chamada` do comp. Ela é a mesma sala vista de
@@ -454,15 +454,15 @@
     <button id="botao-chamada" class="botao-fantasma" type="button"
             title="a grade da sala de voz, um cartão por pessoa">CHAMADA</button>
     <!--
-      O `DOGMA` que ficava aqui virou a engrenagem no rodapé da coluna de
+      O `SERVER` que ficava aqui virou a engrenagem no rodapé da coluna de
       canais, que é onde o comp v3 a põe: a configuração é do operador, e o
-      operador está lá embaixo. O `id` não mudou — `tela-dogma.js` registra o
+      operador está lá embaixo. O `id` não mudou — `tela-server.js` registra o
       ouvinte dele por nome, e mudar o nome só para mudar de lugar quebraria
       outra tela sem necessidade.
     -->
     <!--
       A saída, escrita. «DESCONECTAR» e não «SAIR» porque esta tela já tem um
-      botão chamado `DOGMA`, e «sair do Dogma» ao lado dele leria como sair da
+      botão chamado `SERVER`, e «sair do servidor» ao lado dele leria como sair da
       configuração. E não «EJETAR», que é o vocabulário do tema mas não diz a
       quem chega o que vai acontecer — o produto tem uma tela inteira chamada
       Entry Plug, e ejetar pode ser lida como ejetar alguém.
@@ -592,7 +592,7 @@
   </div>
 
   <!--
-    O que a chave deste Dogma acabou de ser. `crates/seele-core/src/tofu.rs`
+    O que a chave deste Server acabou de ser. `crates/seele-core/src/tofu.rs`
     manda a casca dizer o que acabou de confiar, e o `plug` no terminal já diz;
     esta janela fixava em silêncio.
 
@@ -710,8 +710,8 @@
 
     Nada nelas é lista de leitura: são escolhas, e uma escolha é o que um
     `select` é. Ele também resolve de graça o que o guarda
-    `every_list_the_dogma_fills_lives_inside_something_that_scrolls` cobra de
-    toda lista que o Dogma preenche — um Dogma com quarenta pessoas não estica
+    `every_list_the_server_fills_lives_inside_something_that_scrolls` cobra de
+    toda lista que o servidor preenche — um servidor com quarenta pessoas não estica
     esta caixa para fora da janela, porque quem rola é o próprio controle.
 
     ---- nenhuma cor de alarme aqui ----
@@ -847,8 +847,8 @@
         A porta, ao lado do link que a atravessa. ADR 0030.
 
         Aqui, e não numa entrada de menu, porque este bloco só aparece para quem
-        está hospedando — e a porta do Dogma só é assunto de quem hospeda. Quem
-        entrou no Dogma de outra pessoa não vê esta linha, e não deve mesmo: a
+        está hospedando — e a porta do servidor só é assunto de quem hospeda. Quem
+        entrou no servidor de outra pessoa não vê esta linha, e não deve mesmo: a
         portaria é estado da máquina que hospeda, e não um verbo de protocolo.
 
         O rótulo do botão é escrito pelo script a cada leitura, porque ele
@@ -865,13 +865,13 @@
     A portaria — ADR 0030.
 
     Camada sobre a sessão, e não tela, pela mesma razão escrita em `#moderar`:
-    decidir sobre quem está batendo é uma decisão tomada **olhando** o Dogma, e
+    decidir sobre quem está batendo é uma decisão tomada **olhando** o servidor, e
     uma tela apagaria a conversa no instante em que alguém decide sobre uma
     pessoa. `specs/07-tema-evangelion.md` não deixa este cliente substituir a
     conversa.
 
     Fica dentro de `#tela-sessao` porque é para lá que HOSPEDAR AQUI leva: o
-    botão sobe o Dogma e **entra nele**, então quem hospeda pelo app está sempre
+    botão sobe o servidor e **entra nele**, então quem hospeda pelo app está sempre
     numa sessão.
 
     Abaixo de `#moderar` na pilha (`z-index`), de propósito: as confirmações
@@ -929,7 +929,7 @@
 
         <!--
           A fila e o histórico dividem **um** contêiner que rola, e não um cada.
-          `every_list_the_dogma_fills_lives_inside_something_that_scrolls`: nada
+          `every_list_the_server_fills_lives_inside_something_that_scrolls`: nada
           limita quantas pessoas batem, e uma lista que passa da borda do painel
           é uma lista cujas últimas linhas deixam de existir.
         -->
@@ -985,7 +985,7 @@
     -->
     <nav class="trilha" aria-labelledby="trilha-titulo">
       <h2 id="trilha-titulo" class="trilha-titulo">REDES</h2>
-      <button id="trilha-dogma" class="trilha-item trilha-atual" type="button"
+      <button id="trilha-server" class="trilha-item trilha-atual" type="button"
               aria-current="true" disabled>—</button>
       <!--
         O histórico, desenhado por `desenharTrilha`. Vazio na marcação porque
@@ -997,7 +997,7 @@
       <!--
         O `+`, e com **um** significado — que é a correção do comp v3.
 
-        No v2 ele acumulava «entrar noutro Dogma» e «sair deste», e um teste
+        No v2 ele acumulava «entrar noutro Server» e «sair deste», e um teste
         entre duas máquinas encontrou o que isso significa na prática: a pessoa
         não achou como sair. A resposta daquela vez foi tirar o `+` da tela e pôr
         `DESCONECTAR` escrito no cabeçalho. O `DESCONECTAR` fica onde está; o que
@@ -1036,9 +1036,9 @@
         As duas listas, os dois cabeçalhos e os dois formulários dentro de um
         contêiner que rola, e a tira do operador **fora** dele.
 
-        A divisão é o conserto de um defeito que só aparece com Dogma cheio: as
+        A divisão é o conserto de um defeito que só aparece com Server cheio: as
         duas listas são desenhadas do `Snapshot`, e nada no protocolo limita
-        quantos VoiceRooms ou quantas Linhas um Dogma tem. Sem este `<div>` a coluna
+        quantos VoiceRooms ou quantas Linhas um servidor tem. Sem este `<div>` a coluna
         crescia além da janela e os de baixo simplesmente não existiam — `body`
         é `overflow: hidden` em `base.css`, então nem a página rolava.
 
@@ -1081,7 +1081,7 @@
           <label class="criar-campo criar-campo-numero">
             <span class="rotulo">LUGARES</span>
             <!--
-              O padrão vem do Dogma e não daqui: `desenharCanais` o copia do
+              O padrão vem do servidor e não daqui: `desenharCanais` o copia do
               limite de um VoiceRoom que já existe. Um número escrito neste arquivo
               seria a casca decidindo o tamanho de uma sala.
             -->
@@ -1132,7 +1132,7 @@
             é forma, e `specs/05-cliente-tui.md` não aceita forma sozinha mais
             do que aceita cor sozinha.
           -->
-          <button id="botao-dogma-sessao" class="operador-config" type="button"
+          <button id="botao-server-sessao" class="operador-config" type="button"
                   aria-label="Abrir configurações"
                   title="configuração local desta máquina"
                   data-glifo="engrenagem"></button>
@@ -1209,7 +1209,7 @@
         O arquivo escolhido, antes de ele subir. ADR 0027.
 
         Fica **acima** do campo e não dentro dele: enquanto sobe, a mensagem não
-        existe na Linha — o Dogma só a publica quando os bytes chegam inteiros —,
+        existe na Linha — o servidor só a publica quando os bytes chegam inteiros —,
         então não há linha na conversa em que pendurar a barra. Este é o lugar
         onde ela pode existir sem inventar uma mensagem que ainda não é.
 
@@ -1682,7 +1682,7 @@
       <!--
         `EVENTOS` do comp, com uma diferença que o inventário §9.8 deixou em
         aberto e esta tela responde: só entra aqui o que **esta janela viu
-        passar**. O Dogma não guarda histórico de entrada, saída nem A.T. Field
+        passar**. O servidor não guarda histórico de entrada, saída nem A.T. Field
         — `Event::RosterChanged` diz que mudou, nunca o quê — então uma lista
         que começasse cheia estaria inventando o passado.
 
@@ -1700,7 +1700,7 @@
 </section>
 
 <!--
-  Autenticação — a entrada em Dogma Central, painéis A·02, B·02 e C·02.
+  Autenticação — a entrada em Server Central, painéis A·02, B·02 e C·02.
 
   Passo próprio, e não uma tarja dentro da sessão (Q8 do inventário: "Tela
   própria, como o comp. Dá lugar para o aperto de mão aparecer"). Hoje o único
@@ -1716,7 +1716,7 @@
   movimento não são duas decisões; são uma decisão cobrada duas vezes, e foi
   assim que quem usou descreveu — «fica clicando repetidas vezes num mesmo
   lugar». A conferência continua acontecendo e continua escrita no B·02:
-  ninguém entra num VoiceRoom sem que a impressão digital do Dogma tenha passado por
+  ninguém entra num VoiceRoom sem que a impressão digital do servidor tenha passado por
   uma tela. O que ela deixou de ser é um pedágio.
 -->
 <!--
@@ -1727,7 +1727,7 @@
   lido antes de o plug entrar em VoiceRoom nenhum.
 
   `espera` — o `connect` foi derrubado por `AdmissionPending`. Não há snapshot,
-  não há veredito e não há sessão: a cartela de padrão e a ficha do Dogma não
+  não há veredito e não há sessão: a cartela de padrão e a ficha do servidor não
   têm o que dizer, e a folha as esconde em vez de desenhá-las vazias. O botão
   fica, desabilitado, dizendo o estado — porque um botão que some é um botão que
   a pessoa procura —, e o que aparece no lugar é o que aconteceu, o que fazer, e
@@ -1765,7 +1765,7 @@
             Marcado à esquerda em laranja, como no comp: dos dois campos, só
             este tem a marca. Lá é um `input`; aqui é leitura, porque o endereço
             já foi digitado no boot e o aperto de mão já chegou a ele. Um campo
-            editável aqui ofereceria trocar de Dogma sem desfazer a conexão
+            editável aqui ofereceria trocar de Server sem desfazer a conexão
             que está aberta.
           -->
           <output id="auth-endereco" class="auth-valor auth-valor-marcado">——</output>
@@ -1792,11 +1792,11 @@
           A espera pela portaria — ADR 0030, e o trabalho novo desta tela.
 
           Só aparece em `data-modo="espera"`, e aí ela é a tela: quem bateu num
-          Dogma com portaria é **derrubado no mesmo instante**, de propósito, e
+          Server com portaria é **derrubado no mesmo instante**, de propósito, e
           antes disto o que ele via era uma linha de erro na tela de entrada.
 
           As três coisas que quem espera precisa saber, e nesta ordem: o que
-          aconteceu — escrito pelo script, a partir da razão que o Dogma mandou,
+          aconteceu — escrito pelo script, a partir da razão que o servidor mandou,
           porque enum vira frase num lugar só (`frases.js`) —, o que fazer
           agora, e o que não adianta fazer.
 
@@ -1870,7 +1870,7 @@
           A saída para a entrada, e só em espera. No aperto de mão ela não existe
           porque não há para onde voltar: a sessão está aberta e o caminho de
           volta é encerrá-la. Aqui não há sessão nenhuma — quem espera precisa
-          poder trocar de Dogma, de apelido, ou simplesmente sair.
+          poder trocar de Server, de apelido, ou simplesmente sair.
         -->
         <button id="auth-voltar" class="botao-fantasma auth-voltar" type="button">
           VOLTAR À ENTRADA
@@ -1887,24 +1887,24 @@
         janela **observou**: o endereço que ela resolveu, o veredito que o
         `connect` devolveu, e o padrão em que a sessão ficou. O carimbo é o
         relógio local no instante da observação — estado da casca, que o
-        inventário classifica como **L**, e não um tempo que veio do Dogma.
+        inventário classifica como **L**, e não um tempo que veio do servidor.
       -->
       <ol id="auth-registro" class="registro-linhas"></ol>
     </div>
 
     <!-- ---------------- C·02 ---------------- -->
-    <div class="auth-dogma">
+    <div class="auth-server">
       <h2 class="coordenada">C·02 / SERVIDOR</h2>
-      <div class="auth-dogma-corpo">
+      <div class="auth-server-corpo">
         <div>
-          <p id="auth-dogma-nome" class="auth-dogma-nome">——</p>
-          <p class="auth-dogma-sub">SERVIDOR</p>
+          <p id="auth-server-nome" class="auth-server-nome">——</p>
+          <p class="auth-server-sub">SERVIDOR</p>
         </div>
         <!--
           Duas linhas, e não sete.
 
           O que saiu daqui e do painel ao lado: OPERADORES e ROTA, que o comp v2
-          preenche e o protocolo não tem — não existe população total do Dogma, e
+          preenche e o protocolo não tem — não existe população total do servidor, e
           "rota" não é conceito em lugar nenhum do core; CODEC, que só ganha
           valor depois de o plug entrar num VoiceRoom, e nesta tela ninguém entrou
           ainda; e a CHAVE DE IDENTIDADE local, que não atravessa a FFI.
@@ -1926,7 +1926,7 @@
 </section>
 
 <!--
-  Terminal Dogma — a configuração local. §8 do comp v3.
+  Terminal Server — a configuração local. §8 do comp v3.
 
   Nasce escondida, como toda tela que não é a de entrada, e volta para a tela de
   onde foi aberta — da entrada e da sessão, que são os dois lugares de onde se
@@ -1968,20 +1968,20 @@
     Barato ainda não é construído.
   - **COPIAR CHAVE PÚBLICA** e **GERAR NOVA CHAVE** — a chave está em disco
     (ADR 0017) e não há comando que a leia. A segunda, além disso, custa o
-    apelido em **todo** Dogma já visitado, porque o PERSISTENCE vincula o apelido à
+    apelido em **todo** Server já visitado, porque o PERSISTENCE vincula o apelido à
     identidade que o reivindicou; ela não entra sem uma confirmação que diga
     essa frase, e não «tem certeza?».
   - **TROCAR A TECLA DE UM ATALHO** — os atalhos existem e são fixos: não há
     tabela editável nem lugar para guardá-la. A lista abaixo é o que eles são.
 -->
-<section id="tela-dogma" class="tela" tabindex="-1" hidden
+<section id="tela-server" class="tela" tabindex="-1" hidden
          data-foco="secao-audio"
-         data-anuncio="Terminal Dogma. Configuração deste computador, e do servidor para quem pode mudá-lo.">
-  <div class="dogma">
+         data-anuncio="Terminal servidor. Configuração deste computador, e do servidor para quem pode mudá-lo.">
+  <div class="server">
 
-    <nav class="dogma-coluna" aria-label="seções da configuração">
-      <div class="dogma-marca">
-        <h1 class="dogma-marca-titulo">TERMINAL DOGMA</h1>
+    <nav class="server-coluna" aria-label="seções da configuração">
+      <div class="server-marca">
+        <h1 class="server-marca-titulo">TERMINAL SERVER</h1>
         <!--
           A frase era «Ajustes deste computador, e não deste servidor», e a
           segunda metade deixou de ser verdade no dia em que a última seção
@@ -2004,27 +2004,27 @@
         tabela paralela em JavaScript: o texto do cabeçalho fica ao lado do
         botão que o abre, e não há duas listas para alguém manter em dia.
       -->
-      <ul class="dogma-secoes">
+      <ul class="server-secoes">
         <li>
-          <button id="secao-audio" class="dogma-secao" type="button"
+          <button id="secao-audio" class="server-secao" type="button"
                   data-painel="painel-audio"
                   data-titulo="MICROFONE E SOM"
                   data-sub="Escolha os aparelhos e ouça antes de entrar numa sala de voz">
-            <span class="dogma-secao-icone" data-glifo="audio"></span>
-            <span class="dogma-secao-texto">
-              <span class="dogma-secao-nome">ÁUDIO</span>
+            <span class="server-secao-icone" data-glifo="audio"></span>
+            <span class="server-secao-texto">
+              <span class="server-secao-nome">ÁUDIO</span>
               <span class="nota">Microfone e som</span>
             </span>
           </button>
         </li>
         <li>
-          <button id="secao-atalhos" class="dogma-secao" type="button"
+          <button id="secao-atalhos" class="server-secao" type="button"
                   data-painel="painel-atalhos"
                   data-titulo="ATALHOS"
                   data-sub="Teclas para agir sem tirar a mão do teclado">
-            <span class="dogma-secao-icone" data-glifo="teclado"></span>
-            <span class="dogma-secao-texto">
-              <span class="dogma-secao-nome">ATALHOS</span>
+            <span class="server-secao-icone" data-glifo="teclado"></span>
+            <span class="server-secao-texto">
+              <span class="server-secao-nome">ATALHOS</span>
               <span class="nota">Teclas de acesso</span>
             </span>
           </button>
@@ -2037,13 +2037,13 @@
           com nada dentro promete um ajuste que não há.
         -->
         <li>
-          <button id="secao-identidade" class="dogma-secao" type="button"
+          <button id="secao-identidade" class="server-secao" type="button"
                   data-painel="painel-identidade"
                   data-titulo="IDENTIDADE"
                   data-sub="A chave que prova quem você é nos servidores">
-            <span class="dogma-secao-icone" data-glifo="chave"></span>
-            <span class="dogma-secao-texto">
-              <span class="dogma-secao-nome">IDENTIDADE</span>
+            <span class="server-secao-icone" data-glifo="chave"></span>
+            <span class="server-secao-texto">
+              <span class="server-secao-nome">IDENTIDADE</span>
               <span class="nota">Sua chave</span>
             </span>
           </button>
@@ -2060,13 +2060,13 @@
           que é de onde atualizar não custa a conversa de ninguém.
         -->
         <li>
-          <button id="secao-atualizacao" class="dogma-secao" type="button"
+          <button id="secao-atualizacao" class="server-secao" type="button"
                   data-painel="painel-atualizacao"
                   data-titulo="VERSÃO E ATUALIZAÇÃO"
                   data-sub="Pergunte se há versão nova, e instale-a sem sair daqui">
-            <span class="dogma-secao-icone" data-glifo="atualizar"></span>
-            <span class="dogma-secao-texto">
-              <span class="dogma-secao-nome">ATUALIZAÇÃO</span>
+            <span class="server-secao-icone" data-glifo="atualizar"></span>
+            <span class="server-secao-texto">
+              <span class="server-secao-nome">ATUALIZAÇÃO</span>
               <span class="nota">Versão nova</span>
             </span>
           </button>
@@ -2091,13 +2091,13 @@
           visível prometeria por um quadro o que ela talvez não possa cumprir.
         -->
         <li id="secao-servidor-item" hidden>
-          <button id="secao-servidor" class="dogma-secao" type="button"
+          <button id="secao-servidor" class="server-secao" type="button"
                   data-painel="painel-servidor"
                   data-titulo="ESTE SERVIDOR"
                   data-sub="O nome e a imagem que todo mundo vê ao entrar aqui">
-            <span class="dogma-secao-icone" data-glifo="aparencia"></span>
-            <span class="dogma-secao-texto">
-              <span class="dogma-secao-nome">SERVIDOR</span>
+            <span class="server-secao-icone" data-glifo="aparencia"></span>
+            <span class="server-secao-texto">
+              <span class="server-secao-nome">SERVIDOR</span>
               <span class="nota">Nome e imagem</span>
             </span>
           </button>
@@ -2105,51 +2105,51 @@
       </ul>
 
       <!--
-        O comp escreve `VOLTAR AO DOGMA`, e daqui isso só é verdade metade das
-        vezes: esta tela também é aberta da entrada, onde não há Dogma nenhum
+        O comp escreve `VOLTAR AO SERVIDOR`, e daqui isso só é verdade metade das
+        vezes: esta tela também é aberta da entrada, onde não há Server nenhum
         para voltar. O texto é escrito ao abrir, pela tela que abriu.
       -->
-      <button id="dogma-fechar" class="dogma-voltar" type="button">
+      <button id="server-fechar" class="server-voltar" type="button">
         <span data-glifo="recuar"></span>
-        <span id="dogma-voltar-texto">VOLTAR</span>
+        <span id="server-voltar-texto">VOLTAR</span>
       </button>
     </nav>
 
-    <div class="dogma-corpo">
-      <header class="dogma-faixa">
+    <div class="server-corpo">
+      <header class="server-faixa">
         <!--
           Título e subtítulo da seção aberta, escritos do `data-titulo` e do
           `data-sub` do botão. Vazios na marcação de propósito: preenchê-los aqui
           seria uma terceira cópia das mesmas duas frases.
         -->
-        <h2 id="dogma-titulo" class="dogma-titulo"></h2>
-        <p id="dogma-subtitulo" class="nota"></p>
+        <h2 id="server-titulo" class="server-titulo"></h2>
+        <p id="server-subtitulo" class="nota"></p>
       </header>
 
-      <div class="dogma-painel">
+      <div class="server-painel">
 
         <!-- ---------------------------------------------------------- ÁUDIO -->
-        <section id="painel-audio" class="dogma-painel-secao" aria-labelledby="secao-audio">
+        <section id="painel-audio" class="server-painel-secao" aria-labelledby="secao-audio">
 
-          <div class="dogma-bloco">
-            <div class="dogma-bloco-topo">
-              <h3 class="dogma-bloco-nome">MICROFONE</h3>
+          <div class="server-bloco">
+            <div class="server-bloco-topo">
+              <h3 class="server-bloco-nome">MICROFONE</h3>
               <p class="nota">O que os outros ouvem de você</p>
             </div>
-            <div class="dogma-bloco-corpo">
+            <div class="server-bloco-corpo">
 
-              <div class="dogma-campo">
+              <div class="server-campo">
                 <h4 class="rotulo">DISPOSITIVO DE ENTRADA</h4>
-                <ul id="lista-microfones" class="dogma-dispositivos"></ul>
+                <ul id="lista-microfones" class="server-dispositivos"></ul>
                 <!--
                   Revelado antes de escrito: `role="alert"` não anuncia o que foi
                   escrito enquanto o elemento ainda estava escondido.
                 -->
-                <p id="dogma-erro" class="erro" role="alert" hidden></p>
+                <p id="server-erro" class="erro" role="alert" hidden></p>
                 <p class="nota">A troca vale agora e fica guardada nesta máquina.</p>
               </div>
 
-              <div class="dogma-campo">
+              <div class="server-campo">
                 <h4 class="rotulo">NÍVEL DE ENTRADA</h4>
                 <!--
                   O medidor, do mesmo `input_level` que a telemetria da sessão
@@ -2163,7 +2163,7 @@
                   comp desenha um botão TESTAR ao lado, e não há teste nenhum
                   atrás dele — o nível só existe com áudio de pé.
                 -->
-                <p id="dogma-nivel" class="dogma-medidor" role="status">—</p>
+                <p id="server-nivel" class="server-medidor" role="status">—</p>
                 <p class="nota">Fale normalmente: os blocos sobem com a sua voz.</p>
               </div>
 
@@ -2179,23 +2179,23 @@
                 `title` — a exceção que esta tela abre para um controle morto, e
                 ela é temporária por natureza, não estrutural.
               -->
-              <div class="dogma-campo">
+              <div class="server-campo">
                 <h4 class="rotulo">COMO O MICROFONE ABRE</h4>
-                <div class="dogma-modos" role="group" aria-label="como o microfone abre">
-                  <button id="dogma-modo-tecla" class="dogma-modo" type="button"
+                <div class="server-modos" role="group" aria-label="como o microfone abre">
+                  <button id="server-modo-tecla" class="server-modo" type="button"
                           data-modo="PushToTalk" aria-pressed="false">
-                    <span class="dogma-modo-nome">TECLA</span>
-                    <span class="dogma-modo-desc">abre só enquanto você segura</span>
+                    <span class="server-modo-nome">TECLA</span>
+                    <span class="server-modo-desc">abre só enquanto você segura</span>
                   </button>
-                  <button id="dogma-modo-voz" class="dogma-modo" type="button"
+                  <button id="server-modo-voz" class="server-modo" type="button"
                           data-modo="VoiceActivated" aria-pressed="false">
-                    <span class="dogma-modo-nome">VOZ</span>
-                    <span class="dogma-modo-desc">abre quando você fala</span>
+                    <span class="server-modo-nome">VOZ</span>
+                    <span class="server-modo-desc">abre quando você fala</span>
                   </button>
-                  <button id="dogma-modo-aberto" class="dogma-modo" type="button"
+                  <button id="server-modo-aberto" class="server-modo" type="button"
                           data-modo="Open" aria-pressed="false">
-                    <span class="dogma-modo-nome">ABERTO</span>
-                    <span class="dogma-modo-desc">fica aberto o tempo todo</span>
+                    <span class="server-modo-nome">ABERTO</span>
+                    <span class="server-modo-desc">fica aberto o tempo todo</span>
                   </button>
                 </div>
               </div>
@@ -2220,20 +2220,20 @@
             Quando a enumeração chegar, a lista é a mesma forma da de cima e é
             preenchida do mesmo jeito.
           -->
-          <div class="dogma-bloco">
-            <div class="dogma-bloco-topo">
-              <h3 class="dogma-bloco-nome">SAÍDA DE SOM</h3>
+          <div class="server-bloco">
+            <div class="server-bloco-topo">
+              <h3 class="server-bloco-nome">SAÍDA DE SOM</h3>
               <p class="nota">Por onde você ouve os outros</p>
             </div>
-            <div class="dogma-bloco-corpo">
-              <div class="dogma-campo">
+            <div class="server-bloco-corpo">
+              <div class="server-campo">
                 <h4 class="rotulo">DISPOSITIVO DE SAÍDA</h4>
                 <!--
                   Vazia na marcação, como a de microfones: quem a preenche é
                   `desenharDispositivos()`, e semear linhas aqui seria desenhar
                   aparelhos que talvez não existam nesta máquina.
                 -->
-                <ul id="lista-saidas" class="dogma-dispositivos"></ul>
+                <ul id="lista-saidas" class="server-dispositivos"></ul>
                 <p class="nota">Trocar vale na hora, sem sair da conversa.</p>
               </div>
             </div>
@@ -2254,45 +2254,45 @@
           confere: uma linha aqui que nenhum script escuta é documentação
           mentindo, que é pior que documentação nenhuma.
         -->
-        <section id="painel-atalhos" class="dogma-painel-secao"
+        <section id="painel-atalhos" class="server-painel-secao"
                  aria-labelledby="secao-atalhos" hidden>
-          <div class="dogma-bloco">
-            <div class="dogma-bloco-topo">
-              <h3 class="dogma-bloco-nome">ATALHOS DE TECLADO</h3>
+          <div class="server-bloco">
+            <div class="server-bloco-topo">
+              <h3 class="server-bloco-nome">ATALHOS DE TECLADO</h3>
               <p class="nota">Estas teclas não mudam.</p>
             </div>
-            <ul class="dogma-atalhos">
-              <li class="dogma-atalho">
-                <span class="dogma-atalho-texto">
-                  <span class="dogma-atalho-acao">Falar enquanto segura</span>
-                  <span class="dogma-atalho-desc">o microfone abre com a tecla
+            <ul class="server-atalhos">
+              <li class="server-atalho">
+                <span class="server-atalho-texto">
+                  <span class="server-atalho-acao">Falar enquanto segura</span>
+                  <span class="server-atalho-desc">o microfone abre com a tecla
                     pressionada, fora de um campo de texto</span>
                 </span>
-                <kbd class="dogma-atalho-tecla" data-tecla="Space">ESPAÇO</kbd>
+                <kbd class="server-atalho-tecla" data-tecla="Space">ESPAÇO</kbd>
               </li>
-              <li class="dogma-atalho">
-                <span class="dogma-atalho-texto">
-                  <span class="dogma-atalho-acao">Buscar no canal aberto</span>
-                  <span class="dogma-atalho-desc">põe o cursor na busca, como no
+              <li class="server-atalho">
+                <span class="server-atalho-texto">
+                  <span class="server-atalho-acao">Buscar no canal aberto</span>
+                  <span class="server-atalho-desc">põe o cursor na busca, como no
                     terminal</span>
                 </span>
-                <kbd class="dogma-atalho-tecla" data-tecla="/">/</kbd>
+                <kbd class="server-atalho-tecla" data-tecla="/">/</kbd>
               </li>
-              <li class="dogma-atalho">
-                <span class="dogma-atalho-texto">
-                  <span class="dogma-atalho-acao">Andar na busca</span>
-                  <span class="dogma-atalho-desc">com SHIFT, volta para a
+              <li class="server-atalho">
+                <span class="server-atalho-texto">
+                  <span class="server-atalho-acao">Andar na busca</span>
+                  <span class="server-atalho-desc">com SHIFT, volta para a
                     ocorrência anterior</span>
                 </span>
-                <kbd class="dogma-atalho-tecla" data-tecla="Enter">ENTER</kbd>
+                <kbd class="server-atalho-tecla" data-tecla="Enter">ENTER</kbd>
               </li>
-              <li class="dogma-atalho">
-                <span class="dogma-atalho-texto">
-                  <span class="dogma-atalho-acao">Fechar o que está por cima</span>
-                  <span class="dogma-atalho-desc">a busca, a chamada, ou esta
+              <li class="server-atalho">
+                <span class="server-atalho-texto">
+                  <span class="server-atalho-acao">Fechar o que está por cima</span>
+                  <span class="server-atalho-desc">a busca, a chamada, ou esta
                     tela</span>
                 </span>
-                <kbd class="dogma-atalho-tecla" data-tecla="Escape">ESC</kbd>
+                <kbd class="server-atalho-tecla" data-tecla="Escape">ESC</kbd>
               </li>
             </ul>
           </div>
@@ -2312,22 +2312,22 @@
           dita uma vez — um selo que todo mundo tem é um selo que ninguém
           aprende a ler.
         -->
-        <section id="painel-identidade" class="dogma-painel-secao"
+        <section id="painel-identidade" class="server-painel-secao"
                  aria-labelledby="secao-identidade" hidden>
-          <div class="dogma-bloco">
-            <div class="dogma-bloco-topo">
-              <h3 class="dogma-bloco-nome">SUA IDENTIDADE</h3>
+          <div class="server-bloco">
+            <div class="server-bloco-topo">
+              <h3 class="server-bloco-nome">SUA IDENTIDADE</h3>
               <p class="nota">A chave que prova quem você é nos servidores</p>
             </div>
-            <div class="dogma-bloco-corpo">
-              <div class="dogma-par">
+            <div class="server-bloco-corpo">
+              <div class="server-par">
                 <span class="rotulo">APELIDO EM USO</span>
-                <span id="dogma-apelido" class="dogma-par-valor ausente">——</span>
+                <span id="server-apelido" class="server-par-valor ausente">——</span>
               </div>
-              <p class="dogma-frase">Neste servidor os apelidos são presos a chaves.
+              <p class="server-frase">Neste servidor os apelidos são presos a chaves.
                 O seu ficou reservado para a sua chave no dia em que você entrou
                 pela primeira vez, e ninguém mais consegue usá-lo.</p>
-              <p class="dogma-frase">A chave mora nesta máquina, num arquivo só
+              <p class="server-frase">A chave mora nesta máquina, num arquivo só
                 seu. Perdê-la ou trocá-la custa o apelido em <em>todo</em> servidor
                 que você já visitou, e não há como recuperá-lo sem um operador de
                 cada um deles.</p>
@@ -2357,18 +2357,18 @@
           nos outros dois o processo seguiria vivo rodando o código velho. Uma
           ação que fecha a janela de alguém tem que dizer isso **antes** de ser
           apertada, e tem que dizer a parte que não é sobre quem aperta: um
-          Dogma hospedado nesta janela cai junto, com todo mundo que estiver
+          Server hospedado nesta janela cai junto, com todo mundo que estiver
           dentro dele.
         -->
-        <section id="painel-atualizacao" class="dogma-painel-secao"
+        <section id="painel-atualizacao" class="server-painel-secao"
                  aria-labelledby="secao-atualizacao" hidden>
-          <div class="dogma-bloco">
-            <div class="dogma-bloco-topo">
-              <h3 class="dogma-bloco-nome">VERSÃO NOVA</h3>
+          <div class="server-bloco">
+            <div class="server-bloco-topo">
+              <h3 class="server-bloco-nome">VERSÃO NOVA</h3>
             </div>
-            <div class="dogma-bloco-corpo">
+            <div class="server-bloco-corpo">
 
-              <div class="dogma-campo">
+              <div class="server-campo">
                 <button id="atualizacao-procurar" class="botao" type="button">
                   PROCURAR ATUALIZAÇÃO
                 </button>
@@ -2377,7 +2377,7 @@
                   escreve quando a resposta chega. É a resposta boa e comum —
                   «você está em dia» — que mora aqui.
                 -->
-                <p id="atualizacao-estado" class="dogma-atualizacao-estado" role="status"></p>
+                <p id="atualizacao-estado" class="server-atualizacao-estado" role="status"></p>
                 <!--
                   Revelado antes de escrito: `role="alert"` não anuncia o que
                   foi escrito enquanto o elemento ainda estava escondido.
@@ -2385,13 +2385,13 @@
                 <p id="atualizacao-erro" class="erro" role="alert" hidden></p>
               </div>
 
-              <div id="atualizacao-achado" class="dogma-campo" hidden>
-                <div id="atualizacao-notas-bloco" class="dogma-campo" hidden>
+              <div id="atualizacao-achado" class="server-campo" hidden>
+                <div id="atualizacao-notas-bloco" class="server-campo" hidden>
                   <h4 class="rotulo">O QUE MUDA</h4>
-                  <p id="atualizacao-notas" class="dogma-atualizacao-notas"></p>
+                  <p id="atualizacao-notas" class="server-atualizacao-notas"></p>
                 </div>
 
-                <div class="dogma-atualizacao-aviso">
+                <div class="server-atualizacao-aviso">
                   <h4 class="rotulo">ANTES DE INSTALAR</h4>
                   <p>O SEELE <strong>fecha e abre de novo</strong>. É assim nos
                     três sistemas: no Windows o instalador não roda com o
@@ -2419,10 +2419,10 @@
                 que a barra da bateria interna toma, pelo mesmo motivo. A
                 contagem ao lado é verdade nos dois casos.
               -->
-              <div id="atualizacao-andamento" class="dogma-campo" hidden>
+              <div id="atualizacao-andamento" class="server-campo" hidden>
                 <h4 class="rotulo">BAIXANDO</h4>
-                <p id="atualizacao-barra" class="dogma-atualizacao-barra"></p>
-                <p id="atualizacao-baixados" class="dogma-atualizacao-baixados"></p>
+                <p id="atualizacao-barra" class="server-atualizacao-barra"></p>
+                <p id="atualizacao-baixados" class="server-atualizacao-baixados"></p>
               </div>
 
             </div>
@@ -2451,23 +2451,23 @@
           ---- o limite é dito antes, e não depois ----
 
           A frase com o teto e o tamanho fica **acima** do botão que abre o
-          seletor, e os dois números vêm do Rust (`regras_do_icone_do_dogma`) em
+          seletor, e os dois números vêm do Rust (`regras_do_icone_do_server`) em
           vez de escritos aqui: uma pessoa que só descobre o limite pela recusa
           já perdeu a viagem até a pasta das fotos. Quando a recusa vier assim
           mesmo, ela traz o número que o `PlugError` carrega — que é o do
           protocolo, e o único que manda.
         -->
-        <section id="painel-servidor" class="dogma-painel-secao"
+        <section id="painel-servidor" class="server-painel-secao"
                  aria-labelledby="secao-servidor" hidden>
 
-          <div class="dogma-bloco">
-            <div class="dogma-bloco-topo">
-              <h3 class="dogma-bloco-nome">NOME</h3>
+          <div class="server-bloco">
+            <div class="server-bloco-topo">
+              <h3 class="server-bloco-nome">NOME</h3>
               <p class="nota">O que se lê no alto da tela de quem está aqui dentro</p>
             </div>
-            <div class="dogma-bloco-corpo">
-              <div class="dogma-campo">
-                <label class="dogma-nome-campo">
+            <div class="server-bloco-corpo">
+              <div class="server-campo">
+                <label class="server-nome-campo">
                   <span class="rotulo">NOME DESTE SERVIDOR</span>
                   <!--
                     `maxlength` é a mesma aproximação que os campos de criar
@@ -2476,7 +2476,7 @@
                     acentuadas ainda pode ser recusado. A recusa é do servidor e
                     chega como aviso, como a de qualquer outro verbo.
                   -->
-                  <input id="dogma-nome-valor" name="nome" maxlength="64"
+                  <input id="server-nome-valor" name="nome" maxlength="64"
                          spellcheck="false" autocomplete="off"
                          placeholder="nome do servidor">
                 </label>
@@ -2485,14 +2485,14 @@
             </div>
           </div>
 
-          <div class="dogma-bloco">
-            <div class="dogma-bloco-topo">
-              <h3 class="dogma-bloco-nome">IMAGEM</h3>
+          <div class="server-bloco">
+            <div class="server-bloco-topo">
+              <h3 class="server-bloco-nome">IMAGEM</h3>
               <p class="nota">O quadrado à esquerda do nome, no alto da tela</p>
             </div>
-            <div class="dogma-bloco-corpo">
+            <div class="server-bloco-corpo">
 
-              <div class="dogma-campo">
+              <div class="server-campo">
                 <h4 class="rotulo">O QUE ESTÁ VALENDO</h4>
                 <!--
                   A moldura fica mesmo sem imagem, e o dizer é escrito dentro
@@ -2500,20 +2500,20 @@
                   diferença entre «este servidor não tem imagem» e «esta tela
                   não conseguiu buscá-la».
                 -->
-                <div class="dogma-icone-molde">
-                  <img id="dogma-icone-previa" class="dogma-icone-previa" alt="" hidden>
-                  <span id="dogma-icone-vazio" class="dogma-icone-vazio">SEM IMAGEM</span>
+                <div class="server-icone-molde">
+                  <img id="server-icone-previa" class="server-icone-previa" alt="" hidden>
+                  <span id="server-icone-vazio" class="server-icone-vazio">SEM IMAGEM</span>
                 </div>
               </div>
 
-              <div class="dogma-campo">
+              <div class="server-campo">
                 <h4 class="rotulo">O QUE ACONTECE COM ELA</h4>
                 <!--
-                  Escrito pelo script a partir de `regras_do_icone_do_dogma`, e
+                  Escrito pelo script a partir de `regras_do_icone_do_server`, e
                   vazio na marcação de propósito: os dois números moram no Rust,
                   e uma cópia deles aqui seria a terceira.
                 -->
-                <p id="dogma-icone-regra" class="dogma-frase"></p>
+                <p id="server-icone-regra" class="server-frase"></p>
                 <!--
                   Esta frase dizia o contrário — «ninguém converte nem encolhe
                   nada por você» —, e era verdade e era ruim: o teto é de 8 KiB,
@@ -2521,15 +2521,15 @@
                   recusa vinha sem dizer como obedecer. Encolher virou trabalho
                   do app.
                 -->
-                <p class="dogma-frase">Ela é reduzida e recomprimida aqui, antes
+                <p class="server-frase">Ela é reduzida e recomprimida aqui, antes
                   de sair. Uma imagem que já era pequena atravessa sem mudar
                   nenhum pixel.</p>
 
-                <div class="dogma-icone-botoes">
-                  <button id="dogma-icone-escolher" class="botao" type="button">
+                <div class="server-icone-botoes">
+                  <button id="server-icone-escolher" class="botao" type="button">
                     ESCOLHER IMAGEM
                   </button>
-                  <button id="dogma-icone-tirar" class="botao-fantasma" type="button">
+                  <button id="server-icone-tirar" class="botao-fantasma" type="button">
                     TIRAR A IMAGEM
                   </button>
                 </div>
@@ -2538,7 +2538,7 @@
                   Revelado antes de escrito: `role="alert"` não anuncia o que já
                   estava na página enquanto ela estava escondida.
                 -->
-                <p id="dogma-servidor-erro" class="erro" role="alert" hidden></p>
+                <p id="server-servidor-erro" class="erro" role="alert" hidden></p>
               </div>
 
             </div>
@@ -2838,7 +2838,7 @@
 -->
 <script src="palco-imagem.js"></script>
 <script src="camada-compartilhar.js"></script>
-<script src="tela-dogma.js"></script>
+<script src="tela-server.js"></script>
 <script src="tela-fim.js"></script>
 <script src="tela-auth.js"></script>
 </body>

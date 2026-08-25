@@ -10,7 +10,7 @@ Duas colunas e um corte no meio:
 
 - **na tela** é o que a pessoa lê. Muda por este documento.
 - **identificador** é o nome real da coisa no código. **Não muda.** `VoiceRoom`
-  continua `VoiceRoom`, `Dogma` continua `Dogma`, `at_field` continua `at_field`.
+  continua `VoiceRoom`, `Server` continua `Server`, `at_field` continua `at_field`.
   Renomear tipo é outro trabalho, com outro custo, e o ADR 0033 decidiu
   explicitamente não fazê-lo.
 
@@ -24,7 +24,7 @@ Ela agora custa menos, porque o nome comum já é a explicação.
 
 | Conceito | na tela (pt-BR) | na tela (en) | Identificador Rust |
 |---|---|---|---|
-| Instância de servidor | servidor | server | `Dogma` |
+| Instância de servidor | servidor | server | `Server` |
 | Daemon | `seeled` | `seeled` | `seeled` |
 | Cliente de terminal | `plug` | `plug` | `plug` |
 | Canal de voz | sala de voz | voice room | `VoiceRoom`, `VoiceRoomId` |
@@ -147,7 +147,7 @@ As chaves **não mudam**: são identificadores que a configuração em disco pro
 | banir | `banir` · `Permission::Ban` |
 | gerenciar salas | `gerenciar_voice_rooms` · `Permission::ManageVoiceRooms` |
 | gerenciar papéis | `gerenciar_papeis` · `Permission::ManageRoles` |
-| administrar o servidor | `administrar_dogma` · `Permission::AdministerDogma` |
+| administrar o servidor | `administrar_server` · `Permission::AdministerServer` |
 
 ## Japonês
 
@@ -172,7 +172,7 @@ mapa de renomeação não os cobre. Ficam registrados para quem fechar o mapa:
 | Isolamento total | surdo (alto-falante) | «surdo» / «som desligado» |
 | Distúrbio harmônico | perda de pacote | «perda» |
 | Bateria interna | reconectando | «reconectando» |
-| Terminal Dogma | configurações | «configurações» |
+| Terminal Server | configurações | «configurações» |
 | Alerta · 警告 | notificação crítica | «alerta», sem o kanji |
 
 Aplicar qualquer uma delas exige entrada no mapa. Até lá, quem encontrar uma

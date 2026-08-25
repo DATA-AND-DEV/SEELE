@@ -173,7 +173,7 @@ perguntar só para TCP, e é por isso que a regra acima é explícita.
 
 ---
 
-## 4 · Subir o Dogma
+## 4 · Subir o servidor
 
 No **PC A**:
 
@@ -257,7 +257,7 @@ sem o GitHub Actions. O Tauri não cross-compila — o empacotador NSIS e o WebV
 precisam de Windows de verdade —, então o `empacotar/publicar.sh` do Mac monta o
 macOS e o Linux lá e vem buscar o Windows aqui.
 
-Quem faz isso é o **OpenSSH Server**, que o Windows 10 e o 11 já trazem como
+Quem faz isso é o **OpenSSH Daemon**, que o Windows 10 e o 11 já trazem como
 recurso opcional. Ele vem **desligado de fábrica**; sem ligá-lo, o script do Mac
 não tem como chegar aqui e para no começo dizendo isso.
 
@@ -266,7 +266,7 @@ não tem como chegar aqui e para no começo dizendo isso.
 PowerShell **como administrador**:
 
 ```powershell
-Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+Add-WindowsCapability -Online -Name OpenSSH.Daemon~~~~0.0.1.0
 Set-Service -Name sshd -StartupType Automatic
 Start-Service sshd
 ```

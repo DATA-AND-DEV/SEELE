@@ -116,7 +116,7 @@ nenhuma tela.
 ```
 
 Esta é a face que carrega o que **a pessoa digita**: corpo de mensagem, apelido,
-endereço de Dogma, link de convite. Por isso o recorte é generoso onde o da
+endereço de Server, link de convite. Por isso o recorte é generoso onde o da
 Saira é apertado — Latin Extended-A entra porque quem escreve não é o produto.
 O resto saiu de leitura, não de palpite: `ui/index.html`, `ui/seele.css`,
 `ui/seele.js` e `design/Entry Plug v2.dc.html` foram varridos caractere a

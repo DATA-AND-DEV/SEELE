@@ -145,7 +145,7 @@
 
 .tela[data-modo="espera"] .cartela-padrao,
 .tela[data-modo="espera"] .auth-nota,
-.tela[data-modo="espera"] .auth-dogma { display: none; }
+.tela[data-modo="espera"] .auth-server { display: none; }
 
 .tela[data-modo="aperto"] .auth-espera,
 .tela[data-modo="aperto"] .auth-voltar { display: none; }
@@ -212,7 +212,7 @@
 }
 
 .auth-aperto > .coordenada,
-.auth-dogma > .coordenada {
+.auth-server > .coordenada {
   padding: 12px 16px;
   border-bottom: 1px solid var(--seele-linha);
   flex: 0 0 auto;
@@ -246,14 +246,14 @@
 
 /* ---- C·02, a ficha do servidor ---- */
 
-.auth-dogma {
+.auth-server {
   display: flex;
   flex-direction: column;
   min-height: 0;
   background: var(--seele-negro-painel);
 }
 
-.auth-dogma-corpo {
+.auth-server-corpo {
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -261,7 +261,7 @@
   overflow-y: auto;
 }
 
-.auth-dogma-nome {
+.auth-server-nome {
   margin: 0;
   font-family: var(--seele-display);
   font-weight: 900;
@@ -270,7 +270,7 @@
   overflow-wrap: anywhere;
 }
 
-.auth-dogma-sub {
+.auth-server-sub {
   margin: 0;
   font-size: var(--seele-t-rotulo);
   letter-spacing: 0.16em;

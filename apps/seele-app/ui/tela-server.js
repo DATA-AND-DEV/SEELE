@@ -1,4 +1,4 @@
-// SEELE · Entry Plug — o Terminal Dogma (`#tela-dogma`).
+// SEELE · Entry Plug — o Terminal server (`#tela-server`).
 //
 // A configuração local: o que é desta máquina e não deste servidor. Quatro seções —
 // ÁUDIO, ATALHOS, IDENTIDADE e ATUALIZAÇÃO. As três primeiras são a forma do
@@ -87,7 +87,7 @@ const BLOCOS_DO_MEDIDOR = 26;
 /**
  * O que a porta de saída diz, conforme de onde se entrou.
  *
- * O comp escreve `VOLTAR AO DOGMA` e daqui isso só é verdade metade das vezes:
+ * O comp escreve `VOLTAR AO SERVIDOR` e daqui isso só é verdade metade das vezes:
  * esta tela também abre da entrada, onde não há servidor nenhum para voltar. Um
  * botão que promete o lugar errado é pior que um botão genérico.
  */
@@ -111,13 +111,13 @@ const VOLTA = {
  * das duas.
  */
 function abrirSecao(id) {
-  for (const botao of document.querySelectorAll(".dogma-secao")) {
+  for (const botao of document.querySelectorAll(".server-secao")) {
     const atual = botao.id === id;
     botao.setAttribute("aria-current", atual ? "true" : "false");
     $(botao.dataset.painel).hidden = !atual;
     if (!atual) continue;
-    $("dogma-titulo").textContent = botao.dataset.titulo;
-    $("dogma-subtitulo").textContent = botao.dataset.sub;
+    $("server-titulo").textContent = botao.dataset.titulo;
+    $("server-subtitulo").textContent = botao.dataset.sub;
   }
 }
 
@@ -147,7 +147,7 @@ async function desenharUmLado(lado) {
   if (dispositivos.length === 0) {
     // Lista vazia é "a máquina não quis enumerar", e não "não há aparelho".
     // Quem escreve a segunda frase aqui mente para quem tem áudio funcionando.
-    const vazio = elemento("li", "dogma-dispositivos-vazio", "ESTA MÁQUINA NÃO LISTOU DISPOSITIVO NENHUM");
+    const vazio = elemento("li", "server-dispositivos-vazio", "ESTA MÁQUINA NÃO LISTOU DISPOSITIVO NENHUM");
     repovoar(lista, [vazio]);
     return;
   }
@@ -172,13 +172,13 @@ async function desenharUmLado(lado) {
  */
 function linhaDeDispositivo(lado, id, nome, ehPadrao) {
   const linha = elemento("li");
-  const botao = elemento("button", "dogma-dispositivo");
+  const botao = elemento("button", "server-dispositivo");
   botao.type = "button";
   botao.dataset.dispositivo = id;
   botao.dataset.padrao = ehPadrao ? "sim" : "nao";
   botao.append(
-    elemento("span", "dogma-dispositivo-nome", nome),
-    elemento("span", "dogma-dispositivo-marca"),
+    elemento("span", "server-dispositivo-nome", nome),
+    elemento("span", "server-dispositivo-marca"),
   );
   // O id sai daqui exatamente como entrou. Nada nesta janela o interpreta —
   // vazio vira `null`, que é como o Rust escreve "o padrão da máquina".
@@ -213,7 +213,7 @@ function marcarLinhas(snapshot) {
 }
 
 function marcarUmaLista(chave, lista, aberto) {
-  for (const botao of lista.querySelectorAll(".dogma-dispositivo")) {
+  for (const botao of lista.querySelectorAll(".server-dispositivo")) {
     const id = botao.dataset.dispositivo === "" ? null : botao.dataset.dispositivo;
     const escolhido = escolhidoDe[chave] === id;
     botao.dataset.escolhido = escolhido ? "sim" : "nao";
@@ -223,7 +223,7 @@ function marcarUmaLista(chave, lista, aberto) {
     else if (escolhido) marca = "ESCOLHIDO";
     else if (botao.dataset.padrao === "sim") marca = "PADRÃO";
 
-    const alvo = botao.querySelector(".dogma-dispositivo-marca");
+    const alvo = botao.querySelector(".server-dispositivo-marca");
     if (alvo) alvo.textContent = marca;
   }
 }
@@ -235,7 +235,7 @@ function marcarUmaLista(chave, lista, aberto) {
  * capta nada", que é uma frase diferente e falsa — daí o travessão.
  */
 function desenharNivel(snapshot) {
-  const medidor = $("dogma-nivel");
+  const medidor = $("server-nivel");
   if (!snapshot || !snapshot.audio_available) {
     medidor.dataset.vivo = "nao";
     medidor.textContent = "— SEM SESSÃO DE ÁUDIO";
@@ -265,7 +265,7 @@ function desenharNivel(snapshot) {
  */
 function desenharModos(snapshot) {
   const semSessao = !snapshot;
-  for (const botao of document.querySelectorAll(".dogma-modo")) {
+  for (const botao of document.querySelectorAll(".server-modo")) {
     botao.disabled = semSessao;
     botao.setAttribute("aria-pressed", !semSessao && snapshot.voice_mode === botao.dataset.modo);
     if (semSessao) {
@@ -287,7 +287,7 @@ function desenharModos(snapshot) {
  * nome que se digita na entrada só vira o seu depois que o PERSISTENCE o vincula.
  */
 function desenharIdentidade(snapshot) {
-  const alvo = $("dogma-apelido");
+  const alvo = $("server-apelido");
   const apelido = snapshot?.nickname ?? "";
   alvo.textContent = apelido === "" ? "——" : apelido;
   alvo.classList.toggle("ausente", apelido === "");
@@ -297,7 +297,7 @@ function desenharIdentidade(snapshot) {
 
 /** Escolhe um microfone, ou volta para o padrão da máquina com `null`. */
 async function escolher(lado, id) {
-  const erro = $("dogma-erro");
+  const erro = $("server-erro");
   erro.hidden = true;
   try {
     await lado.escolher(id);
@@ -308,7 +308,7 @@ async function escolher(lado, id) {
     erro.textContent = fraseDeErro(falha);
   }
   await desenharDispositivos();
-  await atualizarDogma();
+  await atualizarServer();
 }
 
 /** Troca o modo do microfone. O nome do modo volta como chegou. */
@@ -318,42 +318,42 @@ async function escolherModo(modo) {
   } catch (falha) {
     console.warn("set_voice_mode:", falha);
   }
-  await atualizarDogma();
+  await atualizarServer();
 }
 
 /** Abre a configuração, lembrando de onde. */
-async function abrirDogma(origem) {
+async function abrirServer(origem) {
   // Com a tela de origem ainda visível, ou não há foco a lembrar: é o que
-  // devolve a engrenagem — ou o TERMINAL DOGMA da entrada — a quem a apertou.
+  // devolve a engrenagem — ou o TERMINAL SERVER da entrada — a quem a apertou.
   guardarFoco(origem);
   telaDeOrigem = origem;
   $(origem).hidden = true;
-  $("tela-dogma").hidden = false;
-  $("dogma-erro").hidden = true;
+  $("tela-server").hidden = false;
+  $("server-erro").hidden = true;
   // A recusa da seção do servidor some junto: ela é sobre o arquivo que alguém
   // escolheu da última vez, e reabrir a tela não é tentar de novo.
-  $("dogma-servidor-erro").hidden = true;
-  $("dogma-voltar-texto").textContent = VOLTA[origem] ?? "VOLTAR";
+  $("server-servidor-erro").hidden = true;
+  $("server-voltar-texto").textContent = VOLTA[origem] ?? "VOLTAR";
   await desenharDispositivos();
-  await atualizarDogma();
-  abrirTela("tela-dogma");
+  await atualizarServer();
+  abrirTela("tela-server");
 }
 
 /** Fecha e devolve para a tela que a abriu. */
-function fecharDogma() {
-  guardarFoco("tela-dogma");
-  $("tela-dogma").hidden = true;
+function fecharServer() {
+  guardarFoco("tela-server");
+  $("tela-server").hidden = true;
   const volta = telaDeOrigem ?? "tela-boot";
   $(volta).hidden = false;
   telaDeOrigem = null;
   // A mesma porta, dos dois lados: quem entrou pela engrenagem da sessão sai
-  // nela, e quem entrou pelo TERMINAL DOGMA da entrada sai nele.
+  // nela, e quem entrou pelo TERMINAL SERVER da entrada sai nele.
   voltarParaTela(volta);
   // Só quando se volta para a sessão: `desenharMensagens` sai cedo enquanto a
   // lista está sem layout, e redesenhar aqui é o outro lado desse acordo. Vindo
   // da tela de entrada não há sessão nenhuma a redesenhar.
   if (volta === "tela-sessao") {
-    atualizar().catch((falha) => console.warn("voltar do Terminal Dogma:", falha));
+    atualizar().catch((falha) => console.warn("voltar do Terminal server:", falha));
   }
 }
 
@@ -366,8 +366,8 @@ function fecharDogma() {
  * origem ali reabriria a sessão que acabou de terminar; não fechar deixaria duas
  * telas empilhadas, porque toda `.tela` tem a altura da janela.
  */
-function abandonarDogma() {
-  $("tela-dogma").hidden = true;
+function abandonarServer() {
+  $("tela-server").hidden = true;
   telaDeOrigem = null;
 }
 
@@ -378,7 +378,7 @@ function abandonarDogma() {
  * Sem sessão isto falha, e falhar é o estado normal desta tela quando aberta da
  * entrada — não é aviso de nada.
  */
-async function atualizarDogma() {
+async function atualizarServer() {
   let snapshot = null;
   try {
     snapshot = await invoke("snapshot");
@@ -400,7 +400,7 @@ async function atualizarDogma() {
 //
 // ---- o que esta metade decide, e o que ela não decide ----
 //
-// Ela não decide **nada** sobre quem pode. `may_customise_dogma` chega pronto
+// Ela não decide **nada** sobre quem pode. `may_customise_server` chega pronto
 // no snapshot, resolvido pelo PERMISSIONS a partir das permissões desta conexão, e
 // esconder a seção não impede ninguém de nada: um pedido sem a permissão é
 // recusado no servidor e volta como aviso. Isto é não oferecer o que não ia
@@ -427,7 +427,7 @@ let regrasDoIcone = null;
  * `revisao` é o `icon_revision` do snapshot, e é o acordo inteiro: os bytes não
  * viajam no snapshot — ele atravessa a ponte em JSON duas vezes por segundo —,
  * então o que se compara é um número, e só quando ele anda é que
- * `icone_do_dogma` é chamado. `null` quer dizer «não há sessão que eu tenha
+ * `icone_do_server` é chamado. `null` quer dizer «não há sessão que eu tenha
  * desenhado», e não «revisão zero»: um servidor novo começa a contar do zero de
  * novo, e sem essa distinção a imagem do servidor anterior ficaria no
  * cabeçalho do seguinte.
@@ -462,7 +462,7 @@ function uriDeIcone(bytes) {
 /** Põe a imagem guardada nos dois lugares que a desenham, ou tira os dois. */
 function pintarIcone() {
   const uri = iconeDesenhado.uri;
-  for (const id of ["topo-dogma-icone", "dogma-icone-previa"]) {
+  for (const id of ["topo-server-icone", "server-icone-previa"]) {
     const alvo = $(id);
     if (uri) alvo.src = uri;
     else alvo.removeAttribute("src");
@@ -470,7 +470,7 @@ function pintarIcone() {
   }
   // O dizer só existe na tela de configuração: no cabeçalho, a ausência de
   // imagem é o cabeçalho de sempre, e não uma lacuna a explicar.
-  $("dogma-icone-vazio").hidden = Boolean(uri);
+  $("server-icone-vazio").hidden = Boolean(uri);
 }
 
 /** Esquece a imagem desenhada. Toda sessão nova começa por aqui. */
@@ -497,12 +497,12 @@ async function sincronizarIcone(snapshot) {
   if (iconeDesenhado.revisao === snapshot.icon_revision) return;
   iconeDesenhado.revisao = snapshot.icon_revision;
   try {
-    const bytes = await invoke("icone_do_dogma");
+    const bytes = await invoke("icone_do_server");
     iconeDesenhado.uri = bytes ? uriDeIcone(bytes) : null;
   } catch (falha) {
     // A sessão acabou entre o snapshot e esta chamada. Não é aviso de nada, e
     // a revisão volta a `null` para que a próxima leitura busque de novo.
-    if (falha !== "NotConnected") console.warn("icone_do_dogma:", falha);
+    if (falha !== "NotConnected") console.warn("icone_do_server:", falha);
     iconeDesenhado.revisao = null;
     iconeDesenhado.uri = null;
   }
@@ -512,7 +512,7 @@ async function sincronizarIcone(snapshot) {
 /**
  * Puxa um snapshot só para a imagem, fora do laço desta tela.
  *
- * Chamado pelo `DogmaChanged` e por mais nada. Uma volta de IPC por troca de
+ * Chamado pelo `ServerChanged` e por mais nada. Uma volta de IPC por troca de
  * nome ou de imagem é barata; o que seria caro — e o que o `icon_revision`
  * existe para evitar — é buscar os **bytes**, e isso continua acontecendo só
  * quando o número anda.
@@ -537,7 +537,7 @@ async function seguirOServidor() {
  * escrever nada.
  */
 function desenharServidor(snapshot) {
-  const pode = snapshot?.may_customise_dogma === true;
+  const pode = snapshot?.may_customise_server === true;
   $("secao-servidor-item").hidden = !pode;
 
   // Perder a permissão — ou a sessão — com a seção aberta deixaria o painel de
@@ -548,8 +548,8 @@ function desenharServidor(snapshot) {
   }
   if (!pode) return;
 
-  const campo = $("dogma-nome-valor");
-  if (document.activeElement !== campo) campo.value = snapshot.dogma ?? "";
+  const campo = $("server-nome-valor");
+  if (document.activeElement !== campo) campo.value = snapshot.server ?? "";
 }
 
 /**
@@ -563,7 +563,7 @@ function desenharServidor(snapshot) {
  */
 function desenharRegraDoIcone() {
   if (!regrasDoIcone) return;
-  $("dogma-icone-regra").textContent =
+  $("server-icone-regra").textContent =
     "Qualquer imagem. Ela é reduzida a um distintivo de até " +
     `${regrasDoIcone.lado} pixels e ${emKibibytes(regrasDoIcone.limite_bytes)} ` +
     "antes de ir para quem está conectado.";
@@ -599,40 +599,40 @@ function fraseDeIcone(falha) {
 
 /** Mostra o que deu errado, revelando antes de escrever. */
 function erroDoServidor(falha) {
-  const onde = $("dogma-servidor-erro");
+  const onde = $("server-servidor-erro");
   onde.hidden = false;
   onde.textContent = fraseDeIcone(falha);
 }
 
 /** Manda o nome que está na caixa. Sai do campo, vale. */
 async function renomearServidor() {
-  const campo = $("dogma-nome-valor");
+  const campo = $("server-nome-valor");
   const nome = campo.value.trim();
-  $("dogma-servidor-erro").hidden = true;
+  $("server-servidor-erro").hidden = true;
   // Vazio é desistir da edição, e não pedir um servidor sem nome: a FFI engole
   // o nome em branco antes de mandá-lo, e a tela devolve o que está valendo
   // para que a caixa não fique mentindo.
   if (nome === "") {
-    await atualizarDogma();
+    await atualizarServer();
     return;
   }
   try {
-    await invoke("renomear_dogma", { name: nome });
+    await invoke("renomear_server", { name: nome });
   } catch (falha) {
     erroDoServidor(falha);
   }
-  await atualizarDogma();
+  await atualizarServer();
 }
 
 /** Abre o seletor do sistema e põe o que a pessoa escolher. */
 async function escolherIcone() {
-  const botao = $("dogma-icone-escolher");
-  $("dogma-servidor-erro").hidden = true;
+  const botao = $("server-icone-escolher");
+  $("server-servidor-erro").hidden = true;
   botao.disabled = true;
   try {
     // `false` é ter fechado o seletor sem escolher, que é o desfecho mais
     // comum de todos e não é falha nenhuma.
-    if (await invoke("escolher_icone_do_dogma")) {
+    if (await invoke("escolher_icone_do_server")) {
       anunciar("Imagem do servidor trocada.");
     }
   } catch (falha) {
@@ -640,19 +640,19 @@ async function escolherIcone() {
   } finally {
     botao.disabled = false;
   }
-  await atualizarDogma();
+  await atualizarServer();
 }
 
 /** Tira a imagem, deixando o servidor sem nenhuma. */
 async function tirarIcone() {
-  $("dogma-servidor-erro").hidden = true;
+  $("server-servidor-erro").hidden = true;
   try {
-    await invoke("tirar_icone_do_dogma");
+    await invoke("tirar_icone_do_server");
     anunciar("Este servidor ficou sem imagem.");
   } catch (falha) {
     erroDoServidor(falha);
   }
-  await atualizarDogma();
+  await atualizarServer();
 }
 
 // --------------------------------------------------------------- atualizar
@@ -810,49 +810,49 @@ async function instalarAtualizacao() {
 
 // ------------------------------------------------------------------- ligação
 
-$("botao-dogma").addEventListener("click", () => abrirDogma("tela-boot"));
-$("botao-dogma-sessao").addEventListener("click", () => abrirDogma("tela-sessao"));
-$("dogma-fechar").addEventListener("click", fecharDogma);
+$("botao-server").addEventListener("click", () => abrirServer("tela-boot"));
+$("botao-server-sessao").addEventListener("click", () => abrirServer("tela-sessao"));
+$("server-fechar").addEventListener("click", fecharServer);
 
-for (const botao of document.querySelectorAll(".dogma-secao")) {
+for (const botao of document.querySelectorAll(".server-secao")) {
   botao.addEventListener("click", () => abrirSecao(botao.id));
 }
 
-for (const botao of document.querySelectorAll(".dogma-modo")) {
+for (const botao of document.querySelectorAll(".server-modo")) {
   botao.addEventListener("click", () => escolherModo(botao.dataset.modo));
 }
 
 $("atualizacao-procurar").addEventListener("click", procurarAtualizacao);
 $("atualizacao-instalar").addEventListener("click", instalarAtualizacao);
 
-$("dogma-icone-escolher").addEventListener("click", escolherIcone);
-$("dogma-icone-tirar").addEventListener("click", tirarIcone);
+$("server-icone-escolher").addEventListener("click", escolherIcone);
+$("server-icone-tirar").addEventListener("click", tirarIcone);
 
 // Sair do campo é mandar. `change` é o evento que diz as duas coisas de uma vez
 // — o valor mudou **e** a edição terminou —, e é ele que faz o Enter e o clique
 // fora valerem a mesma coisa sem um botão no meio. Um valor escrito pelo script
 // não o dispara, então o redesenho de meio em meio segundo não se manda de volta
 // para o servidor.
-$("dogma-nome-valor").addEventListener("change", renomearServidor);
+$("server-nome-valor").addEventListener("change", renomearServidor);
 // O Enter só tira o foco; quem manda continua sendo o `change` acima. Sem isto
 // o cursor fica na caixa depois de renomear, e nada na tela diz que acabou.
-$("dogma-nome-valor").addEventListener("keydown", (evento) => {
-  if (evento.key === "Enter") $("dogma-nome-valor").blur();
+$("server-nome-valor").addEventListener("keydown", (evento) => {
+  if (evento.key === "Enter") $("server-nome-valor").blur();
 });
 
 // Os dois números da imagem, uma vez. São constantes do protocolo — não mudam
 // enquanto este binário for este binário —, e a frase que os usa fica vazia até
 // eles chegarem, em vez de trazer números escritos à mão que possam divergir.
-invoke("regras_do_icone_do_dogma")
+invoke("regras_do_icone_do_server")
   .then((regras) => {
     regrasDoIcone = regras;
     desenharRegraDoIcone();
   })
-  .catch((falha) => console.warn("regras_do_icone_do_dogma:", falha));
+  .catch((falha) => console.warn("regras_do_icone_do_server:", falha));
 
 // A imagem do cabeçalho tem de acompanhar a sessão, e o cabeçalho fica na tela
 // **ao lado** desta: o laço lá embaixo só roda com a configuração na frente. Daí
-// este ouvinte, e daí ele ser estreito — `DogmaChanged` é o único evento que a
+// este ouvinte, e daí ele ser estreito — `ServerChanged` é o único evento que a
 // imagem pode ter mudado, e ele não chega por telemetria nem por mensagem.
 //
 // `ConnectStageChanged` é o zerar, e é ele porque é o único aviso que existe
@@ -862,8 +862,8 @@ invoke("regras_do_icone_do_dogma")
 // contradizer o que já estava desenhado.
 listen("seele://event", (evento) => {
   const payload = evento.payload;
-  if (payload === "DogmaChanged") {
-    seguirOServidor().catch((falha) => console.warn("DogmaChanged:", falha));
+  if (payload === "ServerChanged") {
+    seguirOServidor().catch((falha) => console.warn("ServerChanged:", falha));
     return;
   }
   if (payload && typeof payload === "object" && (payload.Ended || payload.ConnectStageChanged)) {
@@ -882,9 +882,9 @@ listen("seele://atualizacao", (evento) => {
 // Escape fecha, que é o que uma tela sobreposta faz. Só com ela na frente, ou
 // engoliria a tecla de quem está fechando uma busca na sessão.
 window.addEventListener("keydown", (evento) => {
-  if (evento.key === "Escape" && !$("tela-dogma").hidden) {
+  if (evento.key === "Escape" && !$("tela-server").hidden) {
     evento.preventDefault();
-    fecharDogma();
+    fecharServer();
   }
 });
 
@@ -896,5 +896,5 @@ abrirSecao("secao-audio");
 // meio segundo da telemetria da sessão, e só com a tela na frente: um `invoke`
 // duas vezes por segundo para uma tela escondida é uma volta de IPC por nada.
 setInterval(() => {
-  if (!$("tela-dogma").hidden) atualizarDogma();
+  if (!$("tela-server").hidden) atualizarServer();
 }, 500);

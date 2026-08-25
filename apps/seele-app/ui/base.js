@@ -239,7 +239,7 @@ function voltarParaTela(tela) {
 //
 // O modo `LEGENDAS SIMPLES` — `legendasSimples`, `aplicarLegendas`, a chave no
 // `localStorage`, a classe `legendas-simples` no `body` e o interruptor no
-// Terminal Dogma — não existe mais. Ele nasceu ligado por omissão e ninguém
+// Terminal servidor — não existe mais. Ele nasceu ligado por omissão e ninguém
 // nunca o desligou, então o que ele de fato era é uma segunda forma de a mesma
 // frase existir: escondida atrás de uma preferência que só quem construiu o app
 // sabia que havia.

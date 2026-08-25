@@ -71,7 +71,7 @@ pub const MAX_CHANNEL_NAME_LEN: usize = 48;
 /// Largest number of people a voice room may be created with.
 ///
 /// `specs/04-servidor-seele.md` sizes the target at "50 sessões e 5 voice_rooms
-/// ativos em 1 vCPU / 512 MB", so this is five times the whole Dogma: generous
+/// ativos em 1 vCPU / 512 MB", so this is five times the whole server: generous
 /// rather than tight, and there to stop a `u16` of 65 535 being written into a
 /// room nobody could fill.
 pub const MAX_VOICE_ROOM_LIMIT: u16 = 250;
@@ -79,7 +79,7 @@ pub const MAX_VOICE_ROOM_LIMIT: u16 = 250;
 /// Longest operator-supplied alert text, in bytes.
 pub const MAX_ALERT_TEXT_LEN: usize = 512;
 
-/// Largest Dogma icon, in bytes.
+/// Largest server icon, in bytes.
 ///
 /// An icon is the one thing in this enum a stranger's machine both **stores**
 /// and **re-broadcasts**, so the number is a security limit and not a taste.
@@ -99,7 +99,7 @@ pub const MAX_ALERT_TEXT_LEN: usize = 512;
 ///   anyway.
 /// - **Whoever hosts pays for it fifty times.** Changing the icon writes one
 ///   row and then sends it to every connected session; `specs/04-servidor-seele.md`
-///   sizes a Dogma at ~50 people, so one change costs 50 × 8 KiB ≈ 400 KiB of a
+///   sizes a server at ~50 people, so one change costs 50 × 8 KiB ≈ 400 KiB of a
 ///   home upstream. That is a hiccup. With no ceiling at all the same act is an
 ///   upload channel with a fifty-fold amplifier pointed at a machine somebody
 ///   runs in their living room, which is the whole reason there is a number
@@ -108,11 +108,11 @@ pub const MAX_ALERT_TEXT_LEN: usize = 512;
 /// ADR 0032 wrote 16 KiB into its "when it is wanted" section, before there was
 /// a frame to put it in; halving it is what buys the property above — the icon
 /// can never be the reason a control frame is refused.
-pub const MAX_DOGMA_ICON_LEN: usize = 8 * 1024;
+pub const MAX_SERVER_ICON_LEN: usize = 8 * 1024;
 
-/// Largest side of a Dogma icon, in pixels.
+/// Largest side of a server icon, in pixels.
 ///
-/// Not redundant with [`MAX_DOGMA_ICON_LEN`], and this is the half that is easy
+/// Not redundant with [`MAX_SERVER_ICON_LEN`], and this is the half that is easy
 /// to leave out: PNG compresses uniform colour to almost nothing, so 8 KiB is
 /// enough to declare a 20 000 × 20 000 image that costs 1.6 GB the moment
 /// anything decodes it. The bytes are small; the picture is not. Refusing the
@@ -121,7 +121,7 @@ pub const MAX_DOGMA_ICON_LEN: usize = 8 * 1024;
 ///
 /// 256 because the badge it is drawn in is 56 px in the v3 comp, and 256 covers
 /// that at four times the density with nothing left over.
-pub const MAX_DOGMA_ICON_SIDE: u32 = 256;
+pub const MAX_SERVER_ICON_SIDE: u32 = 256;
 
 /// Longest sender-chosen file name, in bytes.
 ///
@@ -145,9 +145,9 @@ pub const MAX_DECLARED_TYPE_LEN: usize = 128;
 /// row had been deleted would draw as a message with nothing in it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AttachmentState {
-    /// The bytes are on the Dogma and may be fetched.
+    /// The bytes are on the server and may be fetched.
     Available,
-    /// The bytes were evicted to keep the Dogma under its ceiling.
+    /// The bytes were evicted to keep the server under its ceiling.
     ///
     /// The name and the size are still here, which is the point.
     Expired,
@@ -173,7 +173,7 @@ pub struct AttachmentInfo {
     pub state: AttachmentState,
 }
 
-/// Why a Dogma would not take, or would not hand back, a file.
+/// Why a server would not take, or would not hand back, a file.
 ///
 /// Every one of these is a refusal somebody is waiting on, so each says
 /// something a shell can turn into a different sentence. A single
@@ -182,12 +182,12 @@ pub struct AttachmentInfo {
 pub enum AttachmentRefusal {
     /// The person lacks [`Permission::AttachFile`].
     NotAllowed,
-    /// Larger than this Dogma's per-file limit.
+    /// Larger than this server's per-file limit.
     ///
     /// Carries the limit, because "too big" without a number sends somebody to
     /// try again with a file that is also too big.
     TooLarge {
-        /// The largest file this Dogma accepts, in bytes.
+        /// The largest file this server accepts, in bytes.
         limit: u64,
     },
     /// Every byte of the ceiling is held by transfers already under way.
@@ -200,16 +200,16 @@ pub enum AttachmentRefusal {
     SizeMismatch,
     /// The bytes did not hash to what the header declared.
     ///
-    /// The one question ADR 0027 says a Dogma can answer about a file: did it
+    /// The one question ADR 0027 says a server can answer about a file: did it
     /// arrive whole. It says nothing about whether the file is good.
     HashDidNotMatch,
     /// The person is sending bytes faster than their budget.
     RateLimited,
-    /// This Dogma is not storing attachments at all.
+    /// This server is not storing attachments at all.
     Unavailable,
     /// No such attachment, or it belongs to a Line this person may not read.
     NotFound,
-    /// The bytes were evicted to keep the Dogma under its ceiling.
+    /// The bytes were evicted to keep the server under its ceiling.
     Expired,
     /// The header was not a header, or a field was outside its bounds.
     Malformed,
@@ -321,10 +321,10 @@ pub enum Permission {
     ManageVoiceRooms,
     /// Create and assign roles.
     ManageRoles,
-    /// Everything else about the Dogma.
-    AdministerDogma,
+    /// Everything else about the server.
+    AdministerServer,
 
-    /// Put a file on the Dogma's disk. ADR 0027.
+    /// Put a file on the server's disk. ADR 0027.
     ///
     /// **Not folded into [`Self::WriteLine`].** "May write" and "may put a
     /// gigabyte on my laptop" are different questions, and the point of hosting
@@ -475,8 +475,8 @@ pub enum DisconnectReason {
     Kicked,
     /// An operator barred this person.
     Banned,
-    /// The Dogma is full.
-    DogmaFull,
+    /// The server is full.
+    ServerFull,
     /// Planned downtime. `specs/04-servidor-seele.md` gives clients 3 s.
     ScheduledMaintenance,
     /// The server is stopping for another reason.
@@ -488,9 +488,9 @@ pub enum DisconnectReason {
     /// The client exceeded its frame budget. `specs/04-servidor-seele.md`.
     RateLimited,
 
-    /// This connection fell so far behind the Dogma's events that some were lost.
+    /// This connection fell so far behind the server's events that some were lost.
     ///
-    /// The bus a Dogma broadcasts on is a fixed ring. A connection that stops
+    /// The bus a server broadcasts on is a fixed ring. A connection that stops
     /// draining it — because the peer stopped reading and the writes back to it
     /// blocked — eventually falls off the back, and the events that scrolled
     /// past **no longer exist** for that session. Committed messages are among
@@ -518,7 +518,7 @@ pub enum DisconnectReason {
     /// the connection open would force a deadline, and a deadline manufactures
     /// a third answer — "nobody was there" — that whoever knocked cannot act
     /// on. A standing request the host can grant hours later is a stronger
-    /// promise than a bar that does not move, and it costs the Dogma nothing to
+    /// promise than a bar that does not move, and it costs the server nothing to
     /// keep, which is the same argument [`Self::CredentialRejected`] makes for
     /// refusing before the signature is checked.
     ///
@@ -526,7 +526,7 @@ pub enum DisconnectReason {
     /// `specs/08-seguranca.md` requires to be uniform. Those are uniform
     /// because a caller guessing a secret would learn which guess landed
     /// closer. Here nothing was guessed: the peer proved a key it holds, and
-    /// the answer is about that peer alone. That a Dogma has a doorkeeper is
+    /// the answer is about that peer alone. That a server has a doorkeeper is
     /// not a secret worth keeping — somebody who is not told to wait leaves
     /// believing the address was wrong.
     ///
@@ -548,7 +548,7 @@ pub enum DisconnectReason {
     /// # Why this is not [`Self::CredentialRejected`]
     ///
     /// It used to be, and it cost somebody an evening. The report: "I host a
-    /// Dogma, somebody knocks, I approve them — and they still get credential
+    /// server, somebody knocks, I approve them — and they still get credential
     /// rejected, even after closing the app." Four unrelated failures wore that
     /// one sentence, and this is the one that does not go away by trying again,
     /// by being approved, or by reinstalling: the name is simply somebody
@@ -559,7 +559,7 @@ pub enum DisconnectReason {
     /// closer. That rule does not reach here, and the position in the handshake
     /// is the argument: this refusal happens **after** the signature is checked
     /// and **after** the doorkeeper admitted the peer. Nothing was guessed. And
-    /// on a Dogma with no doorkeeper — the only case where an anonymous peer
+    /// on a server with no doorkeeper — the only case where an anonymous peer
     /// reaches this line — the nicknames it could enumerate are the ones the
     /// roster hands to anybody who walks in.
     ///
@@ -638,7 +638,7 @@ pub enum AlertReason {
     /// given one reason for both would have to write the vaguer of the two.
     LineDeleted,
 
-    /// The voice room asked about is the only one the Dogma has, so it stays.
+    /// The voice room asked about is the only one the server has, so it stays.
     ///
     /// A refusal with a sentence of its own, and that is the whole reason it
     /// exists: the nearest existing reason is [`Self::VoiceRoomEntryRefused`], which
@@ -669,10 +669,10 @@ pub enum AlertReason {
     /// Appended after `LastVoiceRoom`, for the reason [`Self::RateLimited`] gives.
     ScreenShareTaken,
 
-    /// The Dogma stopped this person's transmission: the room outgrew its uplink.
+    /// The server stopped this person's transmission: the room outgrew its uplink.
     ///
     /// §5.1 made the host's upward path a term of the ceiling —
-    /// `caminho de quem HOSPEDA × 60% ÷ N espectadores` — because the Dogma is
+    /// `caminho de quem HOSPEDA × 60% ÷ N espectadores` — because the servidor is
     /// what lifts `N` copies. Past some `N` not even the floor of §2 fits, and
     /// §3.2 says what happens then: *"quando o sinal cai de faixa, quem baixa é
     /// o vídeo; se continuar caindo, quem para é o vídeo."* The alternative is
@@ -683,7 +683,7 @@ pub enum AlertReason {
     /// [`ServerMessage::ScreenShareStopped`] goes to the whole voice room and carries
     /// no reason on purpose — the two ordinary endings tell themselves apart —
     /// and this is the third: somebody who pressed stop knows they pressed it,
-    /// and somebody stopped by the Dogma would otherwise learn nothing at all.
+    /// and somebody stopped by the server would otherwise learn nothing at all.
     /// The nearest existing reason is [`Self::SyncDegraded`], which every shell
     /// writes as "signal falling" — a sentence about this person's connection,
     /// in front of somebody whose connection is fine and whose audience grew.
@@ -698,7 +698,7 @@ pub enum AlertReason {
 pub enum ClientMessage {
     /// Opens the handshake. `specs/02-protocolo.md`.
     Hello {
-        /// Convite de uso único ou senha do Dogma, quando ele exige um.
+        /// Convite de uso único ou senha do servidor, quando ele exige um.
         ///
         /// Viaja no `Hello`, portanto **antes** do desafio-resposta. Isso é
         /// deliberado: o segredo diz se esta conexão tem direito de existir, e
@@ -706,7 +706,7 @@ pub enum ClientMessage {
         /// porta é trabalho de graça para quem varre a internet. O canal já é
         /// TLS 1.3 desde o primeiro byte, então o segredo nunca vai em claro.
         ///
-        /// `None` num Dogma aberto é o caso normal.
+        /// `None` num servidor aberto é o caso normal.
         join_secret: Option<String>,
         /// Protocol version the client speaks.
         version: u8,
@@ -852,7 +852,7 @@ pub enum ClientMessage {
         ///
         /// Not a hole in the enumerated-reasons rule, and the same exception
         /// [`ServerMessage::Alert::operator_text`] documents: an operator
-        /// writing about their own Dogma is data, not an error reason. It is
+        /// writing about their own server is data, not an error reason. It is
         /// **not** sent to the person banned — `specs/08-seguranca.md` wants
         /// uniform failures, and the refusal they meet on the way back in is
         /// the same [`DisconnectReason::Banned`] whatever this says.
@@ -866,7 +866,7 @@ pub enum ClientMessage {
     ///
     /// The permission is worded "delete somebody **else's** message", so an
     /// author removing their own does not need it. That is not a courtesy: a
-    /// Dogma where taking back your own typo requires an operator is a Dogma
+    /// server where taking back your own typo requires an operator is a server
     /// where people ask an operator about typos.
     ///
     /// Carries no Line. The identifier is the server's own and globally
@@ -906,16 +906,16 @@ pub enum ClientMessage {
     // back.
     //
     // `specs/04-servidor-seele.md` enumerates `gerenciar_voice_rooms` as "criar e
-    // configurar salas de voz" and `administrar_dogma` as "todo o resto sobre o
-    // Dogma". Destroying every message six people wrote is not configuration.
-    // So it sits on [`Permission::AdministerDogma`], which migration 1 seeds on
+    // configurar salas de voz" and `administrar_server` as "todo o resto sobre o
+    // server". Destroying every message six people wrote is not configuration.
+    // So it sits on [`Permission::AdministerServer`], which migration 1 seeds on
     // the Comandante alone — and the separation is real rather than notional
     // the moment an operator makes a role that may build rooms without being
     // able to unmake them. It is deliberately **not** the moderation
     // permissions either: `specs/04` gives the Operador `expulsar` and `banir`,
     // and somebody trusted to remove a person for the evening is not thereby
-    // trusted to destroy the Dogma's history.
-    /// Destroys a voice room. `apagar_voice_room` — [`Permission::AdministerDogma`].
+    // trusted to destroy the server's history.
+    /// Destroys a voice room. `apagar_voice_room` — [`Permission::AdministerServer`].
     ///
     /// Everybody inside is turned out of it: a voice room does not vanish from under
     /// the feet of the people speaking in it. They are told, with
@@ -927,7 +927,7 @@ pub enum ClientMessage {
     /// association optional; destroying a voice room is no statement about the
     /// writing that happened to hang off it.
     ///
-    /// The server refuses the last one. A Dogma with na sala de voz has nowhere to
+    /// The server refuses the last one. A server with na sala de voz has nowhere to
     /// speak, which is the product's first sentence — and the refusal is a
     /// refusal rather than a silence, so a shell can say why.
     DeleteVoiceRoom {
@@ -935,7 +935,7 @@ pub enum ClientMessage {
         voice_room: VoiceRoomId,
     },
     /// Destroys a Line and everything written in it. `apagar_linha` —
-    /// [`Permission::AdministerDogma`].
+    /// [`Permission::AdministerServer`].
     ///
     /// Not a soft delete, unlike [`Self::RemoveMessage`]. That one keeps a row
     /// so replies do not dangle and an operator can answer "what was removed";
@@ -976,7 +976,7 @@ pub enum ClientMessage {
     // is the answer.
     /// Asks for an attachment's bytes.
     ///
-    /// The Dogma opens a unidirectional stream back and writes an
+    /// The server opens a unidirectional stream back and writes an
     /// `attachment::AttachmentDelivery` followed by the file. When it will not,
     /// it answers [`ServerMessage::AttachmentUnavailable`] here, with an
     /// enumerated reason — which is how «this file expired» reaches a screen at
@@ -989,39 +989,39 @@ pub enum ClientMessage {
         attachment: AttachmentId,
     },
 
-    // ---- what the Dogma calls itself ----
+    // ---- what the server calls itself ----
     //
     // Appended last, for the reason [`AlertReason::RateLimited`] gives.
     //
-    // Both need [`Permission::AdministerDogma`], and **not** the
+    // Both need [`Permission::AdministerServer`], and **not** the
     // [`Permission::ManageVoiceRooms`] the four room verbs use. The line
     // `specs/04-servidor-seele.md` draws is between "criar e configurar voice_rooms"
-    // and "todo o resto sobre o Dogma"; the name and the picture of the Dogma
+    // and "todo o resto sobre o servidor"; the name and the picture of the servidor
     // itself are not a room, and whoever may build rooms is not thereby the
-    // person whose Dogma it is. Migration 1 seeds `AdministerDogma` on the
+    // person whose server it is. Migration 1 seeds `AdministerServer` on the
     // Comandante alone, and `Permissions::seat_the_arrival` gives the Comandante to
-    // whoever connects to their own Dogma first — so this reaches exactly the
+    // whoever connects to their own server first — so this reaches exactly the
     // person who pressed the button, plus anybody they deliberately promoted.
     //
     // ADR 0032 wanted the name written through an accessor on `Hospedagem`,
     // straight into the PERSISTENCE on the machine, with no protocol verb at all —
-    // the argument being that naming a Dogma is a decision for whoever holds
+    // the argument being that naming a server is a decision for whoever holds
     // the file. That argument is sound and it answers a different question:
-    // it covers the app that is hosting **in this process**, and leaves a Dogma
+    // it covers the app that is hosting **in this process**, and leaves a server
     // run by `seeled` on a VPS with no way to be named by the person who
     // administers it. Both paths write the same row, and the permission above
     // is what makes the wire path no wider than the local one.
-    /// Renames the Dogma. [`Permission::AdministerDogma`].
+    /// Renames the server. [`Permission::AdministerServer`].
     ///
     /// Bounded by [`MAX_CLIENT_NAME_LEN`], which is what
     /// [`ServerMessage::Session`] already carries the name under, and refused
     /// blank for the reason `check_name` gives about a voice room: a header with
     /// nothing in it is a thing nobody can refer to out loud.
-    RenameDogma {
+    RenameServer {
         /// The new name.
         name: String,
     },
-    /// Sets or clears the Dogma's icon. [`Permission::AdministerDogma`].
+    /// Sets or clears the server's icon. [`Permission::AdministerServer`].
     ///
     /// `None` takes the icon off, and that is a verb rather than a gap: an
     /// operator who wants no picture must be able to say so after having said
@@ -1039,7 +1039,7 @@ pub enum ClientMessage {
     /// hurt be refused by construction: a GIF, which `specs/07-tema-evangelion.md`
     /// would have animating in a badge, and an SVG, which is a document with
     /// script and network fetches in it rather than a picture.
-    SetDogmaIcon {
+    SetServerIcon {
         /// The picture, or `None` to have none.
         icon: Option<Vec<u8>>,
     },
@@ -1063,7 +1063,7 @@ pub enum ClientMessage {
     /// is a voice room the asker can aim somewhere else. What comes back is
     /// [`ServerMessage::ScreenShareStarted`], and the [`ScreenId`] in it is
     /// what the sender then writes at the head of the stream it opens — a
-    /// sender cannot open the stream first, because until the Dogma answers
+    /// sender cannot open the stream first, because until the server answers
     /// there is nothing to call the transmission.
     ///
     /// It carries no resolution and no codec either. Those describe what is
@@ -1115,17 +1115,17 @@ pub enum ServerMessage {
         /// from the client. A client needs to know its own in order to read its
         /// own telemetry back.
         ssrc: Ssrc,
-        /// Name of the Dogma.
-        dogma: String,
+        /// Name of the server.
+        server: String,
         /// Voice channels visible to this person.
         voice_rooms: Vec<VoiceRoomInfo>,
         /// Text channels visible to this person.
         lines: Vec<LineInfo>,
-        /// Roles defined on this Dogma.
+        /// Roles defined on this server.
         roles: Vec<Role>,
         /// What **this** person may do, as PERMISSIONS resolved it.
         ///
-        /// `roles` above is the Dogma's catalogue of roles; nothing on the wire
+        /// `roles` above is the server's catalogue of roles; nothing on the wire
         /// ever told a client which of them it holds, so no shell could tell
         /// whether to offer a control at all. Resolved server-side rather than
         /// sent as role identifiers for the shell to intersect, because
@@ -1374,7 +1374,7 @@ pub enum ServerMessage {
     /// A file that was asked for is not coming.
     ///
     /// The expected case is [`AttachmentRefusal::Expired`]: the bytes were
-    /// evicted to keep the Dogma under its ceiling, the row survived, and this
+    /// evicted to keep the server under its ceiling, the row survived, and this
     /// is what turns that row into a sentence on somebody's screen.
     AttachmentUnavailable {
         /// Which attachment.
@@ -1383,29 +1383,29 @@ pub enum ServerMessage {
         reason: AttachmentRefusal,
     },
 
-    // ---- what the Dogma calls itself ----
+    // ---- what the server calls itself ----
     //
     // Appended last, for the reason [`AlertReason::RateLimited`] gives.
     //
     // Sent to **everybody connected**, the person who asked included, exactly
-    // like the four room announcements: a Dogma that goes on being drawn under
+    // like the four room announcements: a server that goes on being drawn under
     // its old name until the next handshake is the failure ADR 0032 names —
     // the screen of whoever renamed it showing one thing and everybody else's
     // showing another.
-    /// The Dogma has a new name.
-    DogmaRenamed {
+    /// The server has a new name.
+    ServerRenamed {
         /// What it is called now.
         name: String,
     },
-    /// The Dogma has a new icon, or none.
+    /// The server has a new icon, or none.
     ///
     /// Also sent **once per session, straight after
-    /// [`ServerMessage::Session`], when the Dogma has one**. Silence there
-    /// means there is none: `Session` describes the Dogma from scratch — the
+    /// [`ServerMessage::Session`], when the server has one**. Silence there
+    /// means there is none: `Session` describes the server from scratch — the
     /// name and both channel lists come out of it — so a client that reconnects
-    /// into a Dogma whose picture was taken down while it was away stops
-    /// drawing the old one by having been introduced to the Dogma again, not by
-    /// being handed a `None`. A Dogma with no icon, which is every Dogma that
+    /// into a server whose picture was taken down while it was away stops
+    /// drawing the old one by having been introduced to the server again, not by
+    /// being handed a `None`. A server with no icon, which is every server that
     /// exists today, therefore exchanges exactly the frames it did before this
     /// message was added.
     ///
@@ -1415,17 +1415,17 @@ pub enum ServerMessage {
     /// Its own frame rather than a field on `Session`, for the third reason ADR
     /// 0032 gives against the icon: `Session` already carries the voice_rooms, the
     /// Lines, the roles and the permissions inside [`MAX_FRAME_LEN`], and a
-    /// picture sharing that budget would make a big Dogma fail to admit anybody
+    /// picture sharing that budget would make a big server fail to admit anybody
     /// because of a decoration.
     ///
     /// What this costs, said plainly: the bytes cross once per session instead
     /// of once per machine. Addressing the picture by the hash of its content
     /// and letting a client say it already has that one is the cheaper design
     /// and needs a stream of its own to fetch it on; at
-    /// [`MAX_DOGMA_ICON_LEN`] the saving is 8 KiB per reconnection, which does
+    /// [`MAX_SERVER_ICON_LEN`] the saving is 8 KiB per reconnection, which does
     /// not yet pay for a second transfer path.
-    DogmaIconChanged {
-        /// The picture, or `None` when the Dogma has none.
+    ServerIconChanged {
+        /// The picture, or `None` when the server has none.
         icon: Option<Vec<u8>>,
     },
 
@@ -1441,7 +1441,7 @@ pub enum ServerMessage {
     ///
     /// Also sent to a person who **enters** a voice room where a transmission is
     /// already running, straight after their [`Self::PersonJoined`]. That is a
-    /// rule for the Dogma rather than a message of its own, and it is the
+    /// rule for the server rather than a message of its own, and it is the
     /// reason [`VoiceRoomInfo`] gained no field: a client learns about a
     /// transmission the same way whether it was there when it began or not,
     /// and there is only one frame to understand instead of two.
@@ -1452,7 +1452,7 @@ pub enum ServerMessage {
         person: PersonId,
         /// What to call the transmission from now on.
         ///
-        /// Assigned here, by the Dogma, and never taken from the sender — the
+        /// Assigned here, by the server, and never taken from the sender — the
         /// rule `specs/08-seguranca.md` applies to [`Ssrc`], and a **different**
         /// identifier from it for the reason §3.6 gives: a screen is not a
         /// talker, and the table of `ssrc` → person must not have to grow a
@@ -1487,7 +1487,7 @@ pub enum ServerMessage {
     /// How many people are receiving a transmission.
     ///
     /// The `N` of §5.1, and it travels because the ceiling cannot be computed
-    /// without it: the Dogma forwards the pictures, so what it has to lift is
+    /// without it: the server forwards the pictures, so what it has to lift is
     /// `N × ceiling`, and the correction §5.1 makes mandatory divides the
     /// host's measured path by this number. Without it a sharer applies a
     /// `min(...)` with a leg it invented, which is the "measure one leg and
@@ -1514,7 +1514,7 @@ pub enum ServerMessage {
         /// How many are receiving it, the sharer excluded.
         quantos: u32,
     },
-    /// What the Dogma measured its own upward path to be, in bits per second.
+    /// What the server measured its own upward path to be, in bits per second.
     ///
     /// The first line of the ceiling in §5.1 — `caminho de quem HOSPEDA × 60% ÷
     /// N espectadores` — and it is the leg the sharer cannot see: the bytes
@@ -1540,7 +1540,7 @@ pub enum ServerMessage {
         /// Bits per second, or zero for "not measured".
         bps: u32,
     },
-    /// Somebody is connected to this Dogma, whether or not they are in a voice room.
+    /// Somebody is connected to this server, whether or not they are in a voice room.
     ///
     /// # Why this exists at all
     ///
@@ -1568,7 +1568,7 @@ pub enum ServerMessage {
         /// Their media source, for the ssrc-to-person table every client keeps.
         ssrc: Ssrc,
     },
-    /// Somebody's connection to this Dogma ended.
+    /// Somebody's connection to this server ended.
     ///
     /// The twin of [`Self::PersonPresent`], and the half that hurts to leave
     /// out: without it every client accumulates the names of everyone who has
@@ -1678,14 +1678,14 @@ fn check_name(field: &'static str, name: &str) -> Result<(), ControlError> {
     check(field, name.len(), MAX_CHANNEL_NAME_LEN)
 }
 
-/// Bounds the Dogma's own name at both ends.
+/// Bounds the server's own name at both ends.
 ///
 /// The upper bound is [`MAX_CLIENT_NAME_LEN`], because that is what
 /// [`ServerMessage::Session`] has always carried this string under and a rename
-/// that accepted more would produce a Dogma whose own handshake refuses to
+/// that accepted more would produce a server whose own handshake refuses to
 /// describe it. The lower one is [`check_name`]'s, word for word: a header with
 /// nothing in it is a thing nobody can refer to out loud.
-fn check_dogma_name(name: &str) -> Result<(), ControlError> {
+fn check_server_name(name: &str) -> Result<(), ControlError> {
     if name.trim().is_empty() {
         return Err(ControlError::FieldOutOfRange { field: "name" });
     }
@@ -1695,7 +1695,7 @@ fn check_dogma_name(name: &str) -> Result<(), ControlError> {
 /// Refuses anything that is not a small PNG.
 ///
 /// Three questions, and all three are asked here rather than in the server,
-/// because both ends have to agree about what an icon is: the Dogma refuses
+/// because both ends have to agree about what an icon is: the server refuses
 /// what it is sent, and refuses again on the way out, so a picture that arrived
 /// from an older build or straight from somebody's `sqlite3` prompt cannot
 /// travel further than one a client could have asked for. It is the rule
@@ -1711,21 +1711,21 @@ fn check_dogma_name(name: &str) -> Result<(), ControlError> {
 ///
 /// # Errors
 ///
-/// [`ControlError::FieldTooLong`] over [`MAX_DOGMA_ICON_LEN`];
+/// [`ControlError::FieldTooLong`] over [`MAX_SERVER_ICON_LEN`];
 /// [`ControlError::FieldOutOfRange`] for anything that is not a PNG within
-/// [`MAX_DOGMA_ICON_SIDE`].
-pub fn check_dogma_icon(icon: Option<&[u8]>) -> Result<(), ControlError> {
+/// [`MAX_SERVER_ICON_SIDE`].
+pub fn check_server_icon(icon: Option<&[u8]>) -> Result<(), ControlError> {
     let Some(bytes) = icon else {
         return Ok(());
     };
-    check("icon", bytes.len(), MAX_DOGMA_ICON_LEN)?;
+    check("icon", bytes.len(), MAX_SERVER_ICON_LEN)?;
     let Some((width, height)) = png_header(bytes) else {
         return Err(ControlError::FieldOutOfRange { field: "icon" });
     };
     // Zero is refused with the same breath as too large: a PNG declaring a side
     // of nothing is not a picture, and it is far more often a truncated file
     // than a deliberate one.
-    if width == 0 || height == 0 || width > MAX_DOGMA_ICON_SIDE || height > MAX_DOGMA_ICON_SIDE {
+    if width == 0 || height == 0 || width > MAX_SERVER_ICON_SIDE || height > MAX_SERVER_ICON_SIDE {
         return Err(ControlError::FieldOutOfRange { field: "icon" });
     }
     Ok(())
@@ -1733,7 +1733,7 @@ pub fn check_dogma_icon(icon: Option<&[u8]>) -> Result<(), ControlError> {
 
 /// The same question, asked of the field as the messages carry it.
 fn check_icon(icon: Option<&Vec<u8>>) -> Result<(), ControlError> {
-    check_dogma_icon(icon.map(Vec::as_slice))
+    check_server_icon(icon.map(Vec::as_slice))
 }
 
 /// The size a PNG declares about itself, if it is a PNG at all.
@@ -1745,7 +1745,7 @@ fn check_icon(icon: Option<&Vec<u8>>) -> Result<(), ControlError> {
 ///
 /// Every read is [`slice::get`]: this parses bytes from the network, and
 /// `specs/08-seguranca.md` names that as the surface where a panicking
-/// indexation turns a malformed frame into a dead Dogma.
+/// indexation turns a malformed frame into a dead server.
 fn png_header(bytes: &[u8]) -> Option<(u32, u32)> {
     const SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
     if bytes.get(..8)? != SIGNATURE {
@@ -1841,15 +1841,15 @@ impl Validate for ClientMessage {
             Self::CreateLine { name }
             | Self::RenameVoiceRoom { name, .. }
             | Self::RenameLine { name, .. } => check_name("name", name),
-            // The operator's own words about their own Dogma, bounded like the
+            // The operator's own words about their own server, bounded like the
             // other place they cross the wire.
             Self::BanPerson { reason, .. } => check(
                 "reason",
                 reason.as_ref().map_or(0, String::len),
                 MAX_ALERT_TEXT_LEN,
             ),
-            Self::RenameDogma { name } => check_dogma_name(name),
-            Self::SetDogmaIcon { icon } => check_icon(icon.as_ref()),
+            Self::RenameServer { name } => check_server_name(name),
+            Self::SetServerIcon { icon } => check_icon(icon.as_ref()),
             Self::EjectPlug
             | Self::JoinLine { .. }
             | Self::FetchHistory { .. }
@@ -1876,12 +1876,12 @@ impl Validate for ServerMessage {
         match self {
             Self::Challenge { nonce } => check("nonce", nonce.len(), MAX_PROOF_LEN),
             Self::Session {
-                dogma,
+                server,
                 voice_rooms,
                 lines,
                 ..
             } => {
-                check("dogma", dogma.len(), MAX_CLIENT_NAME_LEN)?;
+                check("server", server.len(), MAX_CLIENT_NAME_LEN)?;
                 // The same bound the creating verb enforces, applied to the
                 // tree on the way out. A voice room whose name came from an older
                 // build, or straight from somebody's `sqlite3` prompt, must not
@@ -1930,8 +1930,8 @@ impl Validate for ServerMessage {
             ),
             Self::Telemetry(telemetry) => telemetry.validate(),
             Self::PersonState(state) => state.validate(),
-            Self::DogmaRenamed { name } => check_dogma_name(name),
-            Self::DogmaIconChanged { icon } => check_icon(icon.as_ref()),
+            Self::ServerRenamed { name } => check_server_name(name),
+            Self::ServerIconChanged { icon } => check_icon(icon.as_ref()),
             Self::PersonLeft { .. }
             | Self::PersonGone { .. }
             | Self::MessageRemoved { .. }
@@ -1972,7 +1972,7 @@ mod tests {
             id: SessionId(7),
             person: PersonId(42),
             ssrc: Ssrc(0xABCD),
-            dogma: "Terceira Tóquio".into(),
+            server: "Terceira Tóquio".into(),
             voice_rooms: vec![VoiceRoomInfo {
                 id: VoiceRoomId(1),
                 name: "VOICE_ROOM-01 CENTRAL".into(),
@@ -2151,7 +2151,7 @@ mod tests {
 
     #[test]
     fn the_session_says_what_this_person_may_do() {
-        // `roles` is the Dogma's catalogue; nothing ever said which of them this
+        // `roles` is the server's catalogue; nothing ever said which of them this
         // connection holds. Without this field a shell has no honest way to
         // decide whether to offer a control at all, and the only alternative is
         // to offer everything and let the server refuse — which teaches people
@@ -2275,7 +2275,7 @@ mod tests {
     fn a_voice_room_that_holds_nobody_or_everybody_is_refused() {
         // Zero is far more often a field left at its default than a decision,
         // and a room nobody may enter is not a room. The ceiling stops a u16 of
-        // 65 535 being written into a Dogma sized for fifty.
+        // 65 535 being written into a server sized for fifty.
         for limit in [0, MAX_VOICE_ROOM_LIMIT + 1, u16::MAX] {
             let ask = ClientMessage::CreateVoiceRoom {
                 name: "VOICE_ROOM-02".into(),
@@ -2315,7 +2315,7 @@ mod tests {
     }
 
     #[test]
-    fn a_blank_name_never_leaves_the_dogma_inside_a_session() {
+    fn a_blank_name_never_leaves_the_server_inside_a_session() {
         // The tree on the way out gets the same bound the verb enforces on the
         // way in. A row written straight into the database by hand must not
         // reach a shell that has no sentence for it.
@@ -2323,7 +2323,7 @@ mod tests {
             id,
             person,
             ssrc,
-            dogma,
+            server,
             lines,
             roles,
             permissions,
@@ -2336,7 +2336,7 @@ mod tests {
             id,
             person,
             ssrc,
-            dogma,
+            server,
             voice_rooms: vec![VoiceRoomInfo {
                 id: VoiceRoomId(9),
                 name: "   ".into(),
@@ -2470,7 +2470,7 @@ mod tests {
         // kick that carried "why" as text would be a second error language
         // growing beside the enumerated one, written by whoever is angriest.
         // The one string here is the ban's operator note, which never leaves
-        // the Dogma — the person barred meets `DisconnectReason::Banned` and
+        // the server — the person barred meets `DisconnectReason::Banned` and
         // nothing else.
         let frame = encode(&ClientMessage::KickPerson { person: PersonId(42) }).unwrap();
         assert!(
@@ -2785,13 +2785,13 @@ mod icon_tests {
 
     #[test]
     fn an_icon_round_trips_in_both_directions() {
-        let set = ClientMessage::SetDogmaIcon {
+        let set = ClientMessage::SetServerIcon {
             icon: Some(png(128, 64)),
         };
         let frame = encode(&set).unwrap();
         assert_eq!(decode::<ClientMessage>(&frame).unwrap(), set);
 
-        let announced = ServerMessage::DogmaIconChanged {
+        let announced = ServerMessage::ServerIconChanged {
             icon: Some(png(128, 64)),
         };
         let frame = encode(&announced).unwrap();
@@ -2801,10 +2801,10 @@ mod icon_tests {
     #[test]
     fn having_no_icon_is_a_value_and_not_a_refusal() {
         // `None` is how an operator takes the picture down, and it is also what
-        // every session is told when the Dogma has none. If this were refused,
-        // a client reconnecting into a Dogma whose icon was removed while it was
+        // every session is told when the server has none. If this were refused,
+        // a client reconnecting into a server whose icon was removed while it was
         // away would go on drawing the old one until it restarted.
-        let none = ServerMessage::DogmaIconChanged { icon: None };
+        let none = ServerMessage::ServerIconChanged { icon: None };
         let frame = encode(&none).unwrap();
         assert_eq!(decode::<ServerMessage>(&frame).unwrap(), none);
     }
@@ -2814,8 +2814,8 @@ mod icon_tests {
         // On the way out so we cannot send one, and on the way in so a peer
         // cannot skip the check by hand-rolling a frame — the rule
         // `an_oversized_body_is_refused_in_both_directions` already states.
-        let fat = ClientMessage::SetDogmaIcon {
-            icon: Some(png(128, MAX_DOGMA_ICON_LEN)),
+        let fat = ClientMessage::SetServerIcon {
+            icon: Some(png(128, MAX_SERVER_ICON_LEN)),
         };
         assert!(matches!(
             encode(&fat),
@@ -2838,8 +2838,8 @@ mod icon_tests {
         // kibibyte is far more than the handful of bytes postcard adds — it is
         // there so that raising the ceiling towards the cap trips this test
         // rather than a stranger's connection.
-        let biggest = ClientMessage::SetDogmaIcon {
-            icon: Some(png(256, MAX_DOGMA_ICON_LEN - 24)),
+        let biggest = ClientMessage::SetServerIcon {
+            icon: Some(png(256, MAX_SERVER_ICON_LEN - 24)),
         };
         let frame = encode(&biggest).unwrap();
         assert!(
@@ -2862,7 +2862,7 @@ mod icon_tests {
             b"\xff\xd8\xff\xe0JFIF".to_vec(),
             Vec::new(),
         ] {
-            let set = ClientMessage::SetDogmaIcon {
+            let set = ClientMessage::SetServerIcon {
                 icon: Some(pretender.clone()),
             };
             assert!(
@@ -2883,7 +2883,7 @@ mod icon_tests {
         // — 1.6 GB the moment anything decodes it. The bytes are small; the
         // picture is not, and it is the picture that kills the machine drawing
         // it.
-        let bomb = ClientMessage::SetDogmaIcon {
+        let bomb = ClientMessage::SetServerIcon {
             icon: Some(png(20_000, 128)),
         };
         assert!(matches!(
@@ -2894,7 +2894,7 @@ mod icon_tests {
 
     #[test]
     fn a_side_of_zero_is_refused() {
-        let flat = ClientMessage::SetDogmaIcon {
+        let flat = ClientMessage::SetServerIcon {
             icon: Some(png(0, 128)),
         };
         assert!(matches!(
@@ -2907,10 +2907,10 @@ mod icon_tests {
     fn a_png_that_stops_inside_its_own_header_is_refused_and_does_not_panic() {
         // `specs/08-seguranca.md` names this surface for fuzzing: a malformed
         // frame must be a refusal, never a panicking indexation, or a truncated
-        // upload is a way to stop a Dogma.
+        // upload is a way to stop a server.
         let whole = png(64, 0);
         for cut in 0..whole.len() {
-            let set = ClientMessage::SetDogmaIcon {
+            let set = ClientMessage::SetServerIcon {
                 icon: Some(whole.get(..cut).unwrap_or_default().to_vec()),
             };
             assert!(
@@ -2924,7 +2924,7 @@ mod icon_tests {
     }
 
     #[test]
-    fn a_dogma_name_is_bounded_at_both_ends() {
+    fn a_server_name_is_bounded_at_both_ends() {
         // The upper bound is what `Session` already carries the name under; the
         // lower one is `check_name`'s, and it is the half that is easy to leave
         // out — a header with nothing in it is a thing nobody can refer to out
@@ -2932,7 +2932,7 @@ mod icon_tests {
         for blank in ["", "   ", "\t\n"] {
             assert!(
                 matches!(
-                    encode(&ClientMessage::RenameDogma { name: blank.into() }),
+                    encode(&ClientMessage::RenameServer { name: blank.into() }),
                     Err(ControlError::FieldOutOfRange { field: "name" })
                 ),
                 "a blank name was accepted: {blank:?}"
@@ -2940,13 +2940,13 @@ mod icon_tests {
         }
 
         assert!(matches!(
-            encode(&ClientMessage::RenameDogma {
+            encode(&ClientMessage::RenameServer {
                 name: "n".repeat(MAX_CLIENT_NAME_LEN + 1),
             }),
             Err(ControlError::FieldTooLong { field: "name", .. })
         ));
 
-        let ok = ClientMessage::RenameDogma {
+        let ok = ClientMessage::RenameServer {
             name: "Terceira Tóquio".into(),
         };
         let frame = encode(&ok).unwrap();
@@ -2954,12 +2954,12 @@ mod icon_tests {
     }
 
     #[test]
-    fn a_blank_name_never_leaves_the_dogma_either() {
+    fn a_blank_name_never_leaves_the_server_either() {
         // The same bound applied on the way out. A name that came from an older
         // build, or straight from somebody's `sqlite3` prompt, must not travel
         // further than one a client could have asked for.
         assert!(matches!(
-            encode(&ServerMessage::DogmaRenamed { name: "  ".into() }),
+            encode(&ServerMessage::ServerRenamed { name: "  ".into() }),
             Err(ControlError::FieldOutOfRange { field: "name" })
         ));
     }
@@ -2986,7 +2986,7 @@ mod screen_tests {
         // version older reads byte 25 as whatever *it* has at 25 — which is
         // nothing, so it refuses the frame, which is the contract. What would
         // break it is somebody inserting a variant above these to keep the list
-        // tidy: `SetDogmaIcon` would arrive as `StartScreenShare` and a picture
+        // tidy: `SetServerIcon` would arrive as `StartScreenShare` and a picture
         // would become a room full of people watching nothing.
         //
         // Byte 0 is the protocol version, byte 1 the variant, so `frame[1]` is
@@ -3047,11 +3047,11 @@ mod screen_tests {
 
         // And the neighbours that were last before them have not moved either.
         assert_eq!(
-            postcard::to_extend(&ClientMessage::SetDogmaIcon { icon: None }, Vec::new()).unwrap(),
+            postcard::to_extend(&ClientMessage::SetServerIcon { icon: None }, Vec::new()).unwrap(),
             vec![24_u8, 0]
         );
         assert_eq!(
-            postcard::to_extend(&ServerMessage::DogmaIconChanged { icon: None }, Vec::new())
+            postcard::to_extend(&ServerMessage::ServerIconChanged { icon: None }, Vec::new())
                 .unwrap(),
             vec![23_u8, 0]
         );
@@ -3165,7 +3165,7 @@ mod screen_tests {
     fn an_unmeasured_uplink_travels_as_zero_rather_than_being_refused() {
         // The contract written on `HostUplink`: zero is **absence**, the same
         // `——` the rest of the product shows where nothing was measured, and
-        // not a link of no bits. A Dogma that has not measured yet still has to
+        // not a link of no bits. A server that has not measured yet still has to
         // say so on entry — refusing zero here would leave it silent, and a
         // sharer with no first line for the ceiling of §5.1 falls back to
         // guessing, which is what this frame exists to end.

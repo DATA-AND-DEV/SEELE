@@ -1,4 +1,4 @@
-//! Attachments, both ends, against a real Dogma.
+//! Attachments, both ends, against a real server.
 //!
 //! `crates/seele-server/src/persistence/attachments.rs` proves the ceiling with time
 //! and files under its own control, and no interleaved schedule can prove the
@@ -11,7 +11,7 @@
 //!
 //! - a file sent arrives whole, and the message is only on the Line afterwards;
 //! - a file over the per-file limit is refused **with a reason**, not dropped;
-//! - a Dogma that fills stays under its ceiling, and the message whose file was
+//! - a server that fills stays under its ceiling, and the message whose file was
 //!   evicted still says what the file was;
 //! - a file can be fetched back, and one that expired says so instead.
 //!
@@ -39,18 +39,18 @@ use seele_proto::control::{AttachmentRefusal, AttachmentState, ServerMessage};
 use seele_proto::ids::{AttachmentId, ClientMessageId, LineId};
 use seele_server::persistence::attachments::per_file_limit;
 use seele_server::persistence::Location;
-use seele_server::{DogmaConfig, Server};
+use seele_server::{ServerConfig, Daemon};
 
-/// How long a test waits for a file the Dogma agreed to send.
+/// How long a test waits for a file the server agreed to send.
 const ESPERA: Duration = Duration::from_secs(5);
 
 const LINHA: LineId = LineId(1);
 
-/// A Dogma with a real database file and a real `anexos/` beside it.
+/// A server with a real database file and a real `anexos/` beside it.
 ///
 /// On disk rather than in memory, because the ceiling is a promise about a
 /// directory and `Location::Memory` has none.
-async fn dogma(teto: u64) -> Result<(SocketAddr, Arc<Server>, tempfile::TempDir)> {
+async fn server(teto: u64) -> Result<(SocketAddr, Arc<Daemon>, tempfile::TempDir)> {
     let casa = tempfile::tempdir()?;
     let banco = casa.path().join("dogma.db");
     {
@@ -58,13 +58,13 @@ async fn dogma(teto: u64) -> Result<(SocketAddr, Arc<Server>, tempfile::TempDir)
         seele_server::persistence::attachments::set_quota(&persistence, teto)?;
     }
 
-    let config = DogmaConfig {
+    let config = ServerConfig {
         name: "Terceira Tóquio".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::File(banco),
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let servidor = Arc::new(Server::bind(config).await?);
+    let servidor = Arc::new(Daemon::bind(config).await?);
     let endereco = servidor.local_addr()?;
     let aceitando = Arc::clone(&servidor);
     tokio::spawn(async move {
@@ -129,7 +129,7 @@ async fn ate<T>(
 
 #[tokio::test(flavor = "current_thread")]
 async fn um_arquivo_sobe_inteiro_e_a_mensagem_so_aparece_depois() -> Result<()> {
-    let (endereco, servidor, casa) = dogma(64 * 1024).await?;
+    let (endereco, servidor, casa) = server(64 * 1024).await?;
     let quem_manda = entrar(endereco, 7).await?;
     let mut quem_espera = entrar(endereco, 9).await?;
 
@@ -188,7 +188,7 @@ async fn um_arquivo_grande_demais_e_recusado_com_razao_e_nao_em_silencio() -> Re
     // recusado — não aceito para ser jogado fora depois. A razão carrega o
     // limite, senão a pessoa tenta de novo com um arquivo igualmente grande.
     let teto = 64 * 1024_u64;
-    let (endereco, servidor, casa) = dogma(teto).await?;
+    let (endereco, servidor, casa) = server(teto).await?;
     let mut cliente = entrar(endereco, 7).await?;
 
     let grande = usize::try_from(per_file_limit(teto)).unwrap() + 1;
@@ -200,7 +200,7 @@ async fn um_arquivo_grande_demais_e_recusado_com_razao_e_nao_em_silencio() -> Re
         .await?;
     assert!(
         matches!(fim, Sent::Stopped { .. }),
-        "o Dogma tem de cortar o fluxo em vez de engolir os bytes de um \
+        "o servidor tem de cortar o fluxo em vez de engolir os bytes de um \
          arquivo que já recusou: {fim:?}"
     );
 
@@ -226,18 +226,18 @@ async fn um_arquivo_grande_demais_e_recusado_com_razao_e_nao_em_silencio() -> Re
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn o_dogma_enche_sem_passar_do_teto_e_a_mensagem_diz_que_o_arquivo_expirou() -> Result<()> {
+async fn o_server_enche_sem_passar_do_teto_e_a_mensagem_diz_que_o_arquivo_expirou() -> Result<()> {
     // O teste que mais importa, pela porta da frente: o disco enchendo de
     // verdade, medido a cada arquivo, e o texto sobrevivendo ao anexo.
     let teto = 64 * 1024_u64;
-    let (endereco, servidor, casa) = dogma(teto).await?;
+    let (endereco, servidor, casa) = server(teto).await?;
     let mut cliente = entrar(endereco, 7).await?;
 
     let por_arquivo = usize::try_from(per_file_limit(teto)).unwrap();
     let anexos = casa.path().join("anexos");
 
     let mut primeiro = None;
-    // Vinte e quatro arquivos do tamanho máximo num Dogma que cabe dezesseis.
+    // Vinte e quatro arquivos do tamanho máximo num servidor que cabe dezesseis.
     for numero in 0..24_u64 {
         let nome = format!("f{numero}.bin");
         let caminho = arquivo(
@@ -305,7 +305,7 @@ async fn o_dogma_enche_sem_passar_do_teto_e_a_mensagem_diz_que_o_arquivo_expirou
         _ => None,
     })
     .await
-    .expect("o Dogma disse por que o arquivo não vem");
+    .expect("o servidor disse por que o arquivo não vem");
     assert_eq!(razao, AttachmentRefusal::Expired);
 
     // As mensagens todas continuam lá: expirar apaga bytes, não linhas.
@@ -316,7 +316,7 @@ async fn o_dogma_enche_sem_passar_do_teto_e_a_mensagem_diz_que_o_arquivo_expirou
 #[tokio::test(flavor = "current_thread")]
 async fn a_mesma_foto_de_duas_pessoas_e_um_arquivo_so() -> Result<()> {
     let teto = 64 * 1024_u64;
-    let (endereco, _servidor, casa) = dogma(teto).await?;
+    let (endereco, _servidor, casa) = server(teto).await?;
     let caminho = arquivo(casa.path(), "igual.png", 2_000, 0x5A);
     let anexos = casa.path().join("anexos");
 
@@ -348,14 +348,14 @@ async fn quem_nao_pode_anexar_e_recusado_com_razao() -> Result<()> {
     // diferentes, e esta é a segunda. O Observador é negado explicitamente.
     let casa = tempfile::tempdir()?;
     let banco = casa.path().join("dogma.db");
-    let config = DogmaConfig {
+    let config = ServerConfig {
         name: "Terceira Tóquio".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::File(banco),
         observers: vec!["ayanami".into()],
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let servidor = Arc::new(Server::bind(config).await?);
+    let servidor = Arc::new(Daemon::bind(config).await?);
     let endereco = servidor.local_addr()?;
     let aceitando = Arc::clone(&servidor);
     tokio::spawn(async move {
@@ -382,19 +382,19 @@ async fn quem_nao_pode_anexar_e_recusado_com_razao() -> Result<()> {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn um_dogma_que_nao_guarda_arquivo_diz_isso_em_vez_de_deixar_pendurado() -> Result<()> {
-    // Um Dogma em memória não tem diretório para chamar de seu, e a resposta
+async fn um_server_que_nao_guarda_arquivo_diz_isso_em_vez_de_deixar_pendurado() -> Result<()> {
+    // Um servidor em memória não tem diretório para chamar de seu, e a resposta
     // certa é uma frase. Não aceitar o fluxo deixaria a barra do outro lado
     // parada em zero até o tempo ocioso do QUIC recolher a conexão — que é a
     // forma de falhar que este projeto recusa em toda outra porta.
     let casa = tempfile::tempdir()?;
-    let config = DogmaConfig {
+    let config = ServerConfig {
         name: "Terceira Tóquio".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let servidor = Arc::new(Server::bind(config).await?);
+    let servidor = Arc::new(Daemon::bind(config).await?);
     let endereco = servidor.local_addr()?;
     let aceitando = Arc::clone(&servidor);
     tokio::spawn(async move {
@@ -413,7 +413,7 @@ async fn um_dogma_que_nao_guarda_arquivo_diz_isso_em_vez_de_deixar_pendurado() -
         _ => None,
     })
     .await
-    .expect("o Dogma disse que não guarda arquivo, em vez de calar");
+    .expect("o servidor disse que não guarda arquivo, em vez de calar");
     assert_eq!(razao, AttachmentRefusal::Unavailable);
     assert_eq!(servidor.quantas_mensagens(LINHA).await?, 0);
     Ok(())
@@ -424,7 +424,7 @@ async fn um_dogma_que_nao_guarda_arquivo_diz_isso_em_vez_de_deixar_pendurado() -
 // A metade da regra do ADR 0027 que ficou escrita e não construída: só uma
 // lista curta de tipos de imagem é desenhada embutida, e **só quando os bytes
 // concordam com a alegação**. Estes quatro encenam a coisa inteira contra um
-// Dogma de verdade — um arquivo escrito em disco, subido pela rede, buscado de
+// servidor de verdade — um arquivo escrito em disco, subido pela rede, buscado de
 // volta e julgado —, porque ler o código e concluir que ele decide certo é
 // exatamente o que não prova nada aqui.
 
@@ -489,7 +489,7 @@ async fn um_arquivo_cujos_bytes_discordam_do_nome_nao_e_desenhado() -> Result<()
     // O teste que mais importa deste trabalho. O arquivo se chama `foto.png` e
     // é alegado `image/png` — as duas coisas escritas por quem mandou —, e os
     // bytes dele são de um JPEG.
-    let (endereco, _servidor, casa) = dogma(64 * 1024).await?;
+    let (endereco, _servidor, casa) = server(64 * 1024).await?;
     let quem_manda = entrar(endereco, 7).await?;
     let mut quem_espera = entrar(endereco, 9).await?;
 
@@ -539,7 +539,7 @@ async fn um_programa_com_nome_de_imagem_tambem_nao_e_desenhado() -> Result<()> {
     // O caso mais afiado do mesmo defeito: os bytes não são de imagem nenhuma.
     // `MZ` é o começo de um executável do Windows, e o arquivo se chama
     // `gatinho.png`.
-    let (endereco, _servidor, casa) = dogma(64 * 1024).await?;
+    let (endereco, _servidor, casa) = server(64 * 1024).await?;
     let quem_manda = entrar(endereco, 7).await?;
     let mut quem_espera = entrar(endereco, 9).await?;
 
@@ -572,7 +572,7 @@ async fn um_programa_com_nome_de_imagem_tambem_nao_e_desenhado() -> Result<()> {
 async fn um_arquivo_que_e_o_que_diz_ser_vira_uma_figura() -> Result<()> {
     // O outro ramo, pela mesma porta: os bytes concordam com a alegação, e o
     // tipo de mídia do `data:` sai do que foi **achado**.
-    let (endereco, _servidor, casa) = dogma(64 * 1024).await?;
+    let (endereco, _servidor, casa) = server(64 * 1024).await?;
     let quem_manda = entrar(endereco, 7).await?;
     let mut quem_espera = entrar(endereco, 9).await?;
 
@@ -609,17 +609,17 @@ async fn um_arquivo_que_e_o_que_diz_ser_vira_uma_figura() -> Result<()> {
 async fn um_arquivo_maior_que_o_limite_da_previa_nao_e_baixado() -> Result<()> {
     // O limite da prévia é decidido **separado** do limite por arquivo, porque
     // as duas coisas protegem máquinas diferentes: aquele é o disco de quem
-    // hospeda, este é a memória de quem lê. Aqui o Dogma aceita o arquivo de bom
+    // hospeda, este é a memória de quem lê. Aqui o servidor aceita o arquivo de bom
     // grado — ele cabe no teto dele — e a prévia o recusa assim mesmo.
     let teto = 128 * 1024 * 1024_u64;
-    let (endereco, _servidor, casa) = dogma(teto).await?;
+    let (endereco, _servidor, casa) = server(teto).await?;
     let quem_manda = entrar(endereco, 7).await?;
     let mut quem_espera = entrar(endereco, 9).await?;
 
     let tamanho = usize::try_from(PREVIEW_LIMIT).unwrap() + 4096;
     assert!(
         u64::try_from(tamanho).unwrap() < per_file_limit(teto),
-        "o arquivo deste teste tem de caber no Dogma para a recusa ser da prévia"
+        "o arquivo deste teste tem de caber no servidor para a recusa ser da prévia"
     );
     let enorme = arquivo_com(
         casa.path(),

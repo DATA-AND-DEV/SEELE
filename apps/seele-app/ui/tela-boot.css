@@ -354,9 +354,9 @@
 
 /* A engrenagem ao lado da palavra, e não no lugar dela: um glifo sozinho é uma
    adivinhação, e `docs/marca.md` já resolveu o argumento uma camada acima. Mais
-   específico que `.dogma-entrada` de propósito — `tela-dogma.css` carrega
+   específico que `.server-entrada` de propósito — `tela-server.css` carrega
    depois desta folha, e um empate ali seria decidido pela ordem. */
-.registro-corpo .dogma-entrada {
+.registro-corpo .server-entrada {
   margin: 16px 0 0;
   display: flex;
   align-items: center;

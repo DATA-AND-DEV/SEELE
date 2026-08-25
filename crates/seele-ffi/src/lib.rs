@@ -58,7 +58,7 @@ pub use types::{
 /// O que a casca gráfica precisa do core além de um [`Plug`] vivo.
 ///
 /// ADR 0002 deixa `seele-app` ver `seele-ffi` e mais nada, e as telas do app
-/// precisam dos mesmos módulos que o `plug` usa direto: a lista de Dogmas
+/// precisam dos mesmos módulos que o `plug` usa direto: a lista de servidores
 /// visitados, a busca no histórico, a leitura de um `seele://` e os ajustes
 /// que ficam nesta máquina. Nenhum deles é lógica de casca — se fossem escritos
 /// aqui, seriam escritos de novo no terminal e mais uma vez no cliente móvel.
@@ -129,11 +129,11 @@ pub fn permissao_de_microfone() -> PermissaoDeMicrofone {
 
 /// A impressão digital da identidade desta máquina.
 ///
-/// A mesma chave com que este computador entra em qualquer Dogma, e a mesma
+/// A mesma chave com que este computador entra em qualquer servidor, e a mesma
 /// impressão que o outro lado vê — `identity.key` sob o `home`, criada na
 /// primeira vez se ainda não existir.
 ///
-/// Existe porque quem hospeda precisa se reconhecer no próprio Dogma **antes**
+/// Existe porque quem hospeda precisa se reconhecer no próprio servidor **antes**
 /// de bater na própria porta, e o app não pode calcular isso sozinho: a regra de
 /// dependência do ADR 0002 o deixa ver `seele-ffi` e `seele-server`, e nunca
 /// `seele-core` nem `seele-proto`. A ponte é aqui.
@@ -163,7 +163,7 @@ const HISTORY_PAGE: u16 = 50;
 pub struct ConnectConfig {
     /// `host` or `host:port`.
     pub server: String,
-    /// The invite's other addresses for the same Dogma, in try order.
+    /// The invite's other addresses for the same server, in try order.
     ///
     /// Empty for an address typed by hand, and for every invite written before
     /// ADR 0006 grew the field. One address per entry, same syntax as
@@ -177,9 +177,9 @@ pub struct ConnectConfig {
     /// A path rather than a key, because the shell knows where its platform
     /// keeps configuration and the core knows how to persist an identity.
     pub home: String,
-    /// Convite de uso único ou senha, quando o Dogma exige um.
+    /// Convite de uso único ou senha, quando o servidor exige um.
     ///
-    /// `None` num Dogma aberto, que é o padrão.
+    /// `None` num servidor aberto, que é o padrão.
     pub join_secret: Option<String>,
     /// A impressão digital que o convite prometeu, quando veio de um link.
     pub expected_fingerprint: Option<String>,
@@ -200,7 +200,7 @@ pub struct ConnectConfig {
     /// there was a screen to choose on. A device that is gone by the time the
     /// session opens does **not** refuse the connection — see `drive`, which
     /// falls back to the default rather than turning a stale preference into a
-    /// Dogma nobody can enter.
+    /// server nobody can enter.
     pub capture_device: Option<String>,
     /// Where the sound comes out, as a [`PlaybackDevice::id`].
     ///
@@ -526,10 +526,10 @@ enum Command {
         line: LineId,
         name: String,
     },
-    RenameDogma {
+    RenameServer {
         name: String,
     },
-    SetDogmaIcon {
+    SetServerIcon {
         icon: Option<Vec<u8>>,
     },
     KickPerson {
@@ -556,7 +556,7 @@ enum Command {
     /// The one command that carries somewhere to answer.
     ///
     /// Everything else on this queue is a thing to do, confirmed — when it is
-    /// confirmed at all — by the Dogma announcing it to everybody. This is a
+    /// confirmed at all — by the server announcing it to everybody. This is a
     /// question, and its answer is only useful to the caller who asked, while
     /// the box it fills is still open.
     WeighLine {
@@ -633,7 +633,7 @@ struct Shared {
     /// Guardado aqui porque quem o calcula é [`measure`], no laço de voz, e quem
     /// o mostra é o [`Plug::snapshot`], na casca — e antes disto ele era
     /// calculado, usado no Sync Ratio e jogado fora, enquanto a tela lia o zero
-    /// que o Dogma manda de propósito (`session.rs` diz em comentário que o
+    /// que o servidor manda de propósito (`session.rs` diz em comentário que o
     /// servidor não tem como medir jitter, porque jitter se mede no receptor).
     ///
     /// Microssegundos inteiros, e não os milissegundos em `f32` que a tela
@@ -682,7 +682,7 @@ struct Shared {
     /// O número em si não significa nada; só a diferença significa. A casca
     /// guarda o último que desenhou e busca o histórico quando ele muda.
     messages_revision: std::sync::atomic::AtomicU64,
-    /// Quantas vezes a imagem do Dogma mudou desde que esta sessão começou.
+    /// Quantas vezes a imagem do servidor mudou desde que esta sessão começou.
     ///
     /// Existe pelo mesmo motivo do `messages_revision`, num tamanho menor: o
     /// [`Snapshot`] é lido a cada quadro de interface, e carregar os bytes nele
@@ -696,7 +696,7 @@ struct Shared {
     /// Quem está esperando o peso de uma Linha, e por qual Linha.
     ///
     /// A única pergunta com resposta deste crate. Todo o resto que a casca pede
-    /// é ordem — o Dogma confirma anunciando a mudança a todo mundo —, e este é
+    /// é ordem — o servidor confirma anunciando a mudança a todo mundo —, e este é
     /// o número de uma frase que só serve a quem perguntou, enquanto a caixa
     /// que ela enche estiver aberta.
     ///
@@ -1174,7 +1174,7 @@ impl Plug {
     /// Fetches a small attachment and says whether a window may draw it.
     ///
     /// **On a press, never on a scroll**, and that is a decision this call
-    /// leaves no room to get wrong: it downloads. The file lives on the Dogma,
+    /// leaves no room to get wrong: it downloads. The file lives on the server,
     /// so looking at it costs the host's uplink, and a Line that previewed
     /// everything as it scrolled would turn a 1 GiB disk ceiling into a 1 GiB
     /// transfer every time somebody opened it.
@@ -1238,10 +1238,10 @@ impl Plug {
         })
     }
 
-    /// Asks the Dogma to make a voice room.
+    /// Asks the server to make a voice room.
     ///
     /// Asks. It does not decide, and it does not report back whether it worked
-    /// — because it cannot: the answer comes from the Dogma, arrives on the
+    /// — because it cannot: the answer comes from the server, arrives on the
     /// event stream, and reaches the shell as [`Event::ChannelsChanged`] when
     /// the room exists or [`Event::NoticeRaised`] carrying
     /// [`NoticeReason::PermissionDenied`] when it does not. Returning a result
@@ -1276,7 +1276,7 @@ impl Plug {
         })
     }
 
-    /// Asks the Dogma to make a Line.
+    /// Asks the server to make a Line.
     ///
     /// # Errors
     ///
@@ -1288,7 +1288,7 @@ impl Plug {
         self.command(Command::CreateLine { name })
     }
 
-    /// Asks the Dogma to rename a voice room.
+    /// Asks the server to rename a voice room.
     ///
     /// # Errors
     ///
@@ -1303,7 +1303,7 @@ impl Plug {
         })
     }
 
-    /// Asks the Dogma to rename a Line.
+    /// Asks the server to rename a Line.
     ///
     /// # Errors
     ///
@@ -1318,37 +1318,37 @@ impl Plug {
         })
     }
 
-    /// Asks the Dogma to rename itself.
+    /// Asks the server to rename itself.
     ///
     /// Asks, and reports nothing back, like [`Plug::rename_voice_room`]: the answer
-    /// comes from the Dogma, as [`Event::DogmaChanged`] with the new name on
+    /// comes from the server, as [`Event::ServerChanged`] with the new name on
     /// the next [`Snapshot`], or as [`Event::NoticeRaised`] carrying
     /// [`NoticeReason::PermissionDenied`].
     ///
     /// A blank name is swallowed here rather than sent, exactly as
     /// [`Plug::rename_voice_room`] swallows one: a shell with an empty box and a
-    /// button is not a shell reporting an error, and the Dogma would refuse it
+    /// button is not a shell reporting an error, and the server would refuse it
     /// anyway.
     ///
-    /// A shell may read [`Snapshot::may_customise_dogma`] to decide whether to
+    /// A shell may read [`Snapshot::may_customise_server`] to decide whether to
     /// draw the control. **Convenience, never enforcement** — pressing it
     /// without the permission gets a refusal and nothing changes.
     ///
     /// # Errors
     ///
     /// [`PlugError::NotConnected`] once the session is over.
-    pub fn rename_dogma(&self, name: String) -> Result<(), PlugError> {
+    pub fn rename_server(&self, name: String) -> Result<(), PlugError> {
         if name.trim().is_empty() {
             return Ok(());
         }
-        self.command(Command::RenameDogma { name })
+        self.command(Command::RenameServer { name })
     }
 
-    /// Asks the Dogma to change its picture, or `None` to have none.
+    /// Asks the server to change its picture, or `None` to have none.
     ///
-    /// PNG bytes, and the Dogma refuses anything else — a real PNG, at most
-    /// `seele_proto::control::MAX_DOGMA_ICON_SIDE` a side, at most
-    /// `seele_proto::control::MAX_DOGMA_ICON_LEN` bytes. A shell hands over
+    /// PNG bytes, and the server refuses anything else — a real PNG, at most
+    /// `seele_proto::control::MAX_SERVER_ICON_SIDE` a side, at most
+    /// `seele_proto::control::MAX_SERVER_ICON_LEN` bytes. A shell hands over
     /// what the person picked; the picture that comes back to everybody is the
     /// proof it was taken.
     ///
@@ -1363,17 +1363,17 @@ impl Plug {
     ///
     /// [`PlugError::IconNotAPicture`] or [`PlugError::IconTooBig`] when the
     /// bytes will not do; [`PlugError::NotConnected`] once the session is over.
-    pub fn set_dogma_icon(&self, icon: Option<Vec<u8>>) -> Result<(), PlugError> {
-        seele_core::check_dogma_icon(icon.as_deref()).map_err(|recusa| match recusa {
+    pub fn set_server_icon(&self, icon: Option<Vec<u8>>) -> Result<(), PlugError> {
+        seele_core::check_server_icon(icon.as_deref()).map_err(|recusa| match recusa {
             seele_core::IconRefusal::NotAnIcon => PlugError::IconNotAPicture,
             seele_core::IconRefusal::TooBig { limit_bytes } => {
                 PlugError::IconTooBig { limit_bytes }
             }
         })?;
-        self.command(Command::SetDogmaIcon { icon })
+        self.command(Command::SetServerIcon { icon })
     }
 
-    /// The Dogma's picture, if it has one.
+    /// The server's picture, if it has one.
     ///
     /// Separate from [`Plug::snapshot`] for the reason [`Plug::messages`] is
     /// separate from it: the two change at completely different rates, and
@@ -1382,7 +1382,7 @@ impl Plug {
     /// somebody presses a button. Ask for this when
     /// [`Snapshot::icon_revision`] changes, and not otherwise.
     #[must_use]
-    pub fn dogma_icon(&self) -> Option<Vec<u8>> {
+    pub fn server_icon(&self) -> Option<Vec<u8>> {
         self.shared
             .room
             .lock()
@@ -1392,7 +1392,7 @@ impl Plug {
 
     /// Esquece o aviso que está na tela. Ver `seele_core::Room::dispensar_aviso`.
     ///
-    /// Síncrono e sem passar pelo Dogma: o aviso é desta ponta, e nada do outro
+    /// Síncrono e sem passar pelo servidor: o aviso é desta ponta, e nada do outro
     /// lado precisa saber que alguém o leu.
     pub fn dispensar_aviso(&self) {
         let dispensou = self
@@ -1407,10 +1407,10 @@ impl Plug {
         }
     }
 
-    /// Asks the Dogma to end a person's session — `expulsar`.
+    /// Asks the server to end a person's session — `expulsar`.
     ///
     /// Asks, and reports nothing back, for the same reason [`Plug::create_voice_room`]
-    /// gives: the answer comes from the Dogma. The roster losing them arrives as
+    /// gives: the answer comes from the server. The roster losing them arrives as
     /// [`Event::RosterChanged`]; a refusal arrives as [`Event::NoticeRaised`]
     /// carrying [`NoticeReason::PermissionDenied`].
     ///
@@ -1427,7 +1427,7 @@ impl Plug {
         })
     }
 
-    /// Asks the Dogma to bar a person from returning — `banir`.
+    /// Asks the server to bar a person from returning — `banir`.
     ///
     /// `expires_at` is seconds since the Unix epoch; `None` is permanent. The
     /// `reason` is for whoever hosts, in their own records, and never reaches
@@ -1449,9 +1449,9 @@ impl Plug {
         })
     }
 
-    /// Asks the Dogma to take a message off its Line — `remover_mensagem`.
+    /// Asks the server to take a message off its Line — `remover_mensagem`.
     ///
-    /// It goes away for everybody, this client included, when the Dogma says so.
+    /// It goes away for everybody, this client included, when the server says so.
     /// An author removing their own needs no permission, which is why a shell
     /// drawing this control on one's own message may draw it for anybody.
     ///
@@ -1464,7 +1464,7 @@ impl Plug {
         })
     }
 
-    /// Asks the Dogma to move a person into a voice room — `mover_pessoa`.
+    /// Asks the server to move a person into a voice room — `mover_pessoa`.
     ///
     /// # Errors
     ///
@@ -1476,15 +1476,15 @@ impl Plug {
         })
     }
 
-    /// Asks the Dogma to destroy a voice room — `apagar_voice_room`.
+    /// Asks the server to destroy a voice room — `apagar_voice_room`.
     ///
     /// Everybody inside is turned out of it and told; the Line bound to it, if
-    /// there is one, is left alone. The Dogma refuses the last voice room, and says so
+    /// there is one, is left alone. The server refuses the last voice room, and says so
     /// with [`NoticeReason::LastVoiceRoom`] rather than with the sentence it uses for
     /// a refused entry.
     ///
     /// Asks, and nothing more. Nothing is removed from this client's own idea of
-    /// the Dogma until the Dogma says the room is gone — a room removed
+    /// the server until the server says the room is gone — a room removed
     /// optimistically would vanish off the screen of the person who asked
     /// whether or not it worked, and the refusal is the case they most need to
     /// see did not happen.
@@ -1496,7 +1496,7 @@ impl Plug {
         self.command(Command::DeleteVoiceRoom { voice_room: VoiceRoomId(voice_room) })
     }
 
-    /// Asks the Dogma to destroy a Line, and everything written in it —
+    /// Asks the server to destroy a Line, and everything written in it —
     /// `apagar_linha`.
     ///
     /// # Errors
@@ -1510,7 +1510,7 @@ impl Plug {
     ///
     /// The one call on this handle that waits, and the reason is the sentence it
     /// feeds: a confirmation promising to destroy 1.847 messages by 6 people
-    /// written since a certain day has to have counted them, in the Dogma's own
+    /// written since a certain day has to have counted them, in the server's own
     /// database, at the moment of asking. This client holds one page of history
     /// and would guess low by whatever the Line's whole past is — and a number
     /// that is nearly right in that box is worse than no number at all.
@@ -1518,14 +1518,14 @@ impl Plug {
     /// So the caller waits, and a shell that cannot get an answer must not open
     /// the box: there is no honest version of it without these three numbers.
     ///
-    /// Destroys nothing, and needs no permission — the Dogma answers about a
+    /// Destroys nothing, and needs no permission — the server answers about a
     /// Line the asker may already read.
     ///
     /// # Errors
     ///
     /// [`PlugError::NotConnected`] once the session is over, and equally if it
     /// ends while the question is in flight: the driver drops what it was going
-    /// to answer with, and this returns rather than waiting for a Dogma that is
+    /// to answer with, and this returns rather than waiting for a server that is
     /// no longer there.
     pub async fn weigh_line(&self, line: u32) -> Result<LineWeight, PlugError> {
         let (answer, resposta) = tokio::sync::oneshot::channel();
@@ -1538,7 +1538,7 @@ impl Plug {
 
     /// Mutes or unmutes the microphone — A.T. Field.
     ///
-    /// Announced to the Dogma as well as applied locally: the roster shows it,
+    /// Announced to the server as well as applied locally: the roster shows it,
     /// and a mute nobody else can see is half a feature.
     ///
     /// # Errors
@@ -1589,7 +1589,7 @@ impl Plug {
     ///
     /// Takes effect **now**, not on the next voice room. That is worth the extra
     /// mechanism: somebody opens this screen because the microphone they are
-    /// speaking into is the wrong one, and telling them to leave the Dogma and
+    /// speaking into is the wrong one, and telling them to leave the server and
     /// come back is telling them to solve it themselves.
     ///
     /// Synchronous rather than queued, because the answer is the point: a device
@@ -1626,7 +1626,7 @@ impl Plug {
     ///
     /// Takes effect **now**, for the reason its twin does and one more: somebody
     /// changes output in the middle of a conversation they cannot hear, and
-    /// "leave the Dogma and come back" is not an instruction you can give
+    /// "leave the server and come back" is not an instruction you can give
     /// somebody who is already unable to follow what is being said.
     ///
     /// Isolamento total survives the switch. That is decided in
@@ -1796,7 +1796,7 @@ impl Plug {
     /// Começa a transmitir a fonte escolhida, com os limites escolhidos.
     ///
     /// Uma por sala de voz: se outra pessoa já estiver compartilhando, quem
-    /// perde a corrida é avisado pelo Dogma — [`NoticeReason::ScreenShareTaken`]
+    /// perde a corrida é avisado pelo servidor — [`NoticeReason::ScreenShareTaken`]
     /// num [`Event::NoticeRaised`]. Esta ponte **não** confere a corrida por
     /// conta própria: `specs/08-seguranca.md` põe a decisão no servidor, e uma
     /// casca que recusasse aqui seria uma segunda autoridade discordando da
@@ -1885,7 +1885,7 @@ impl Plug {
         // O que foi pedido morre com a transmissão, e parar é uma das duas
         // maneiras de ela acabar — a outra é o `ScreenShareStopped` que `fold`
         // dobra. As duas limpam, porque só uma delas acontece de cada vez:
-        // quando esta pessoa aperta PARAR, o quadro do Dogma pode nunca chegar.
+        // quando esta pessoa aperta PARAR, o quadro do servidor pode nunca chegar.
         self.shared.gravar_pedido_da_tela(None);
         self.command(Command::StopScreenShare)
     }
@@ -1977,7 +1977,7 @@ impl Plug {
             caminho: self.shared.caminho(),
             link: self.shared.enlace(),
             pattern: pattern_from_byte(self.shared.pattern.load(Ordering::Relaxed)),
-            dogma: room.dogma.clone(),
+            server: room.server.clone(),
             icon_revision: self.shared.icon_revision.load(Ordering::Relaxed),
             me: room.me.map(|person| person.0),
             nickname,
@@ -1988,7 +1988,7 @@ impl Plug {
             telemetry: Telemetry {
                 rtt_ms,
                 // O jitter que a pessoa quer saber é o de chegada, medido
-                // aqui — e não o do relatório do Dogma, que é sempre `0.0`
+                // aqui — e não o do relatório do servidor, que é sempre `0.0`
                 // porque o servidor não tem como medir jitter. Ver
                 // [`Shared::jitter_de_chegada_micros`].
                 jitter_ms: self.shared.jitter_de_chegada_ms(),
@@ -2023,12 +2023,12 @@ impl Plug {
             may_move_person: room
                 .permissions
                 .contains(&seele_core::Permission::MovePerson),
-            may_customise_dogma: room
+            may_customise_server: room
                 .permissions
-                .contains(&seele_core::Permission::AdministerDogma),
+                .contains(&seele_core::Permission::AdministerServer),
             may_delete_rooms: room
                 .permissions
-                .contains(&seele_core::Permission::AdministerDogma),
+                .contains(&seele_core::Permission::AdministerServer),
             tela: tela_de(&room, self.shared.pedido_da_tela()),
             ended: room.ended.map(|end| end.reason.into()),
         }
@@ -2138,7 +2138,7 @@ impl Drop for Plug {
 /// listas para desenhar «no servidor, fora das salas» sem fazer conta de menos
 /// — subtrair uma da outra é trabalho de quem desenha, e ele é uma linha.
 ///
-/// A própria pessoa entra aqui: o Dogma não anuncia a chegada de volta para
+/// A própria pessoa entra aqui: o servidor não anuncia a chegada de volta para
 /// quem chegou, então quem monta esta lista soma o `me` que a sessão já tem.
 /// Sem isso, cada um seria o único ausente da própria lista de presentes.
 fn presentes_de(room: &Room) -> Vec<Person> {
@@ -2459,7 +2459,7 @@ pub fn motivos_de_parada_da_tela() -> Vec<&'static str> {
 /// escolha — o oposto exato da regra do §5.
 ///
 /// `pedido` é a outra metade dessa mesma regra, e entra por parâmetro em vez de
-/// sair do `Room`: o `Room` é o que o Dogma contou, e o que esta pessoa
+/// sair do `Room`: o `Room` é o que o servidor contou, e o que esta pessoa
 /// escolheu nunca passou por ele. Ele só sai daqui quando a transmissão é
 /// desta pessoa — ver [`TelaEmCurso::pedido`].
 fn tela_de(room: &Room, pedido: Option<LimitesDeTela>) -> Option<TelaEmCurso> {
@@ -2702,7 +2702,7 @@ async fn drive(
     let chegado = match chegou {
         Ok(chegado) => chegado,
         Err(falha) => {
-            tracing::warn!(motivo = %falha, "could not reach the Dogma");
+            tracing::warn!(motivo = %falha, "could not reach the server");
             registrar_trilha(falha.trilha());
             let _ = ready.send(Err(ConnectFailure {
                 error: classify_connect_failure(falha.motivo()),
@@ -2744,7 +2744,7 @@ async fn drive(
         // `start_preferring` and not `start_on`: it falls back to the machine's
         // own device, per side, rather than refusing the session. A preference
         // written down last week names a device that may be in another room by
-        // now, and turning that into a Dogma nobody can enter would make the
+        // now, and turning that into a server nobody can enter would make the
         // picker the most dangerous control in the app. The screen shows what
         // actually opened, so the fallback is visible — and per side, so a
         // headset left behind does not also throw away the microphone.
@@ -2967,7 +2967,7 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
     if changed.channels {
         shared.notify(&Event::ChannelsChanged);
     }
-    if changed.dogma {
+    if changed.server {
         // A revisão sobe **antes** do aviso, como em `messages_changed` e pelo
         // mesmo motivo: uma casca que reage ao evento leria o número velho e
         // concluiria que não há imagem nova para buscar.
@@ -2975,12 +2975,12 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
         // Só quando foi a imagem que mudou. Um nome novo já viaja inteiro no
         // `Snapshot`, e mexer no número faria toda casca rebuscar 8 KiB por
         // causa de uma string que ela acabou de receber.
-        if matches!(message, seele_core::ServerMessage::DogmaIconChanged { .. }) {
+        if matches!(message, seele_core::ServerMessage::ServerIconChanged { .. }) {
             shared
                 .icon_revision
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
-        shared.notify(&Event::DogmaChanged);
+        shared.notify(&Event::ServerChanged);
     }
     if changed.telemetry {
         shared.notify(&Event::TelemetryChanged);
@@ -3050,7 +3050,7 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
 /// reprovar aqui, num teste desta casa, em vez de na tela de outra pessoa.
 ///
 /// O que a tela lia antes deste conserto não era nenhum dos dois: era o jitter
-/// do relatório do Dogma, que é `0.0` fixo porque o servidor não tem como medir
+/// do relatório do servidor, que é `0.0` fixo porque o servidor não tem como medir
 /// uma grandeza que só existe no receptor.
 fn jitter_para_a_tela(chegada_ms: f32, profundidade_do_anel_ms: f32) -> f32 {
     let _ = profundidade_do_anel_ms;
@@ -3145,7 +3145,7 @@ fn measure(sync: &mut SyncRatio, client: &Enlace, shared: &Arc<Shared>) -> bool 
 /// # Sem fonte nenhuma, nada é gravado
 ///
 /// É contrapartida deliberada de não gravar zero: zero é o número que este
-/// conserto tirou dali — o relatório do Dogma manda `0.0` fixo porque um
+/// conserto tirou dali — o relatório do servidor manda `0.0` fixo porque um
 /// servidor não tem como medir jitter —, e escrevê-lo quando a voz cai faria a
 /// tela afirmar «rede perfeita» sobre uma sessão sem áudio nenhum.
 ///
@@ -3200,7 +3200,7 @@ fn medir_a_volta(
     // shell redrawing thirty times a second for nothing.
     //
     // O jitter entra nesta conta desde que ele passou a ser um número de
-    // verdade. Antes ele era o `0.0` do relatório do Dogma e nunca se mexia, e o
+    // verdade. Antes ele era o `0.0` do relatório do servidor e nunca se mexia, e o
     // evento nunca precisou falar dele; agora ele varia sozinho, e sem esta
     // parcela quem depende do evento — em vez de puxar `snapshot` em laço, como
     // o app faz — desenha o número velho até outra coisa mudar.
@@ -3223,7 +3223,7 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             if client.ejetar_plug().await.is_err() {
                 return false;
             }
-            // O espelho do `InsertPlug` acima, e ele faltava. O Dogma não
+            // O espelho do `InsertPlug` acima, e ele faltava. O servidor não
             // devolve o `PersonLeft` a quem o causou — «essa pessoa já sabe» —,
             // então esta metade do roster é contabilidade desta casca. Sem ela
             // o assento se esvazia no servidor e em todos os outros clientes, e
@@ -3289,8 +3289,8 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
         }
         // Nothing is written into the local `Room` here, unlike entering a voice room
         // or opening a Line. Those two are facts about this client, which the
-        // server confirms by silence; a room is a fact about the Dogma, and the
-        // only honest source for it is the Dogma saying it exists. Writing it in
+        // server confirms by silence; a room is a fact about the server, and the
+        // only honest source for it is the server saying it exists. Writing it in
         // optimistically would draw a room for the person who asked even when
         // the server refused them.
         Command::CreateVoiceRoom { name, limit, line } => {
@@ -3314,17 +3314,17 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             }
         }
         // Nothing is written into the local `Room` here either, and for the
-        // sharpest version of the reason above: the Dogma's own name is what
+        // sharpest version of the reason above: the server's own name is what
         // every window in the session is drawing. Writing it in optimistically
         // would put the new name on the screen of the one person who is not
         // allowed to change it, and put it there identically whether the server
         // agreed or refused.
-        Command::RenameDogma { name } => {
-            if client.renomear_dogma(name).await.is_err() {
+        Command::RenameServer { name } => {
+            if client.renomear_server(name).await.is_err() {
                 return false;
             }
         }
-        Command::SetDogmaIcon { icon } => {
+        Command::SetServerIcon { icon } => {
             if client.definir_icone(icon).await.is_err() {
                 return false;
             }
@@ -3332,7 +3332,7 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
         // Nothing is written into the local `Room` for these either, and for a
         // sharper version of the reason above: what a moderation verb changes
         // is somebody **else's** session. The only honest source for "they are
-        // gone" is the `PersonLeft` the Dogma sends when it is true. Marking it
+        // gone" is the `PersonLeft` the server sends when it is true. Marking it
         // here would draw a roster the person who pressed the button is alone
         // in believing — and draw it identically whether the server did it or
         // refused, which is the exact difference the button exists to expose.
@@ -3363,7 +3363,7 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
         // Nothing is written into the local `Room` for these either, and here
         // the reason is at its sharpest: a room removed optimistically would
         // vanish off the screen of the person who asked whether or not the
-        // Dogma agreed — and the one case where it refuses, the last voice room, is
+        // server agreed — and the one case where it refuses, the last voice room, is
         // exactly the case they most need to see did not happen.
         Command::DeleteVoiceRoom { voice_room } => {
             if client.apagar_voice_room(voice_room).await.is_err() {
@@ -3376,7 +3376,7 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             }
         }
         // The question, and where to put the answer. Registered **before** the
-        // ask goes out: the Dogma is on the other side of a socket that can be
+        // ask goes out: the server is on the other side of a socket that can be
         // faster than this thread's next line, and a reply arriving before its
         // slot exists is a reply with nowhere to go.
         Command::WeighLine { line, answer } => {
@@ -3388,7 +3388,7 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             }
         }
         // The claim is read out of this client's own history here, before
-        // anything is asked of the Dogma, and it never travels through the
+        // anything is asked of the server, and it never travels through the
         // window: a page that handed it back could hand back a different one,
         // and the whole of ADR 0027's rule is that the claim does not get to
         // choose the decoder.
@@ -3669,7 +3669,7 @@ mod tests {
             id: SessionId(1),
             person: PersonId(7),
             ssrc: Ssrc(700),
-            dogma: "Terceira Tóquio".into(),
+            server: "Terceira Tóquio".into(),
             voice_rooms: vec![VoiceRoomInfo {
                 id: VoiceRoomId(1),
                 name: "VOICE_ROOM-01".into(),
@@ -3870,7 +3870,7 @@ mod tests {
         //   e é o que a pessoa quer saber.
         //
         // E o que a tela lia antes deste conserto era um terceiro valor: o do
-        // relatório do Dogma, que é sempre `0.0` porque o servidor não tem como
+        // relatório do servidor, que é sempre `0.0` porque o servidor não tem como
         // saber — `session.rs` diz isso em comentário desde sempre.
         // Uma reserva de anel saudável (42 ms) ao lado de um jitter de rede baixo
         // (7,5 ms): mostrar a primeira faria uma conexão boa parecer ruim.
@@ -3878,7 +3878,7 @@ mod tests {
             (jitter_para_a_tela(7.5, 42.0) - 7.5).abs() < 0.01,
             "a tela mostra o jitter de chegada, não a profundidade do anel"
         );
-        // E nunca o zero que o Dogma manda de propósito, que era o que a tela lia.
+        // E nunca o zero que o servidor manda de propósito, que era o que a tela lia.
         assert!(jitter_para_a_tela(7.5, 42.0) > 0.0);
     }
 
@@ -3962,7 +3962,7 @@ mod tests {
     fn gravar_o_mesmo_jitter_duas_vezes_nao_e_uma_mudanca() {
         // O evento de telemetria existe para quem **não** puxa `snapshot` em
         // laço, e ele não falava do jitter: enquanto o número era o `0.0` fixo
-        // do relatório do Dogma isso não custava nada, porque ele nunca se
+        // do relatório do servidor isso não custava nada, porque ele nunca se
         // mexia. Agora ele varia sozinho, e quem depende do evento ficaria com o
         // número velho até outra coisa mudar.
         //
@@ -4029,7 +4029,7 @@ mod tests {
     fn o_evento_de_telemetria_conta_a_variacao_do_jitter() {
         // A pendência do ledger, como comportamento. O evento existe para quem
         // **não** puxa `snapshot` em laço, e ele não falava do jitter: enquanto
-        // o número era o `0.0` fixo do relatório do Dogma isso não custava nada,
+        // o número era o `0.0` fixo do relatório do servidor isso não custava nada,
         // porque ele nunca se mexia.
         //
         // A parcela é isolada deixando o Sync Ratio assentar primeiro: ele é
@@ -4129,16 +4129,16 @@ mod tests {
     }
 
     #[test]
-    fn o_snapshot_le_o_jitter_que_o_laco_de_voz_gravou_e_nao_o_do_dogma() {
+    fn o_snapshot_le_o_jitter_que_o_laco_de_voz_gravou_e_nao_o_do_server() {
         // As duas linhas que consertam o defeito são de fiação, e fiação não se
         // afirma testando a função pura dos dois lados dela: `jitter_para_a_tela`
         // podia estar perfeita enquanto o `snapshot` continuava lendo o relatório
-        // do Dogma, e a suíte continuaria verde. Isto aqui é o teste que fica
+        // do servidor, e a suíte continuaria verde. Isto aqui é o teste que fica
         // vermelho quando alguém desfaz o conserto.
         //
         // Os dois números são plantados de propósito para não poderem ser
         // confundidos: 12,75 ms é o de chegada, medido neste receptor, e é o que
-        // a tela tem de mostrar; 99,0 ms é o que o relatório do Dogma diz, e é o
+        // a tela tem de mostrar; 99,0 ms é o que o relatório do servidor diz, e é o
         // caminho errado. Na vida real esse campo é `0.0` fixo — o servidor não
         // tem como medir jitter, que só existe no receptor —, mas plantar um 99
         // aqui faz o teste distinguir "leu o certo" de "leu um zero que calhou de
@@ -4167,7 +4167,7 @@ mod tests {
         );
         assert!(
             (mostrado - 99.0).abs() > 0.01,
-            "a tela voltou a ler o jitter do relatório do Dogma, que é o defeito 3.3"
+            "a tela voltou a ler o jitter do relatório do servidor, que é o defeito 3.3"
         );
     }
 
@@ -4176,7 +4176,7 @@ mod tests {
         // O campo guarda microssegundos inteiros justamente para isto: num
         // enlace local o jitter fica abaixo de um milissegundo, e guardá-lo em
         // milissegundos inteiros faria a tela dizer zero num caminho excelente —
-        // indistinguível do zero que o Dogma manda.
+        // indistinguível do zero que o servidor manda.
         let compartilhado = bare_shared();
         compartilhado.gravar_jitter_de_chegada(0.25);
 
@@ -4210,7 +4210,7 @@ mod tests {
 
     #[test]
     fn a_room_made_now_reaches_the_shell_as_a_channel_change() {
-        // The bridge invents nothing: the Dogma says a voice room exists, the room
+        // The bridge invents nothing: the server says a voice room exists, the room
         // folds it in, and the shell is told to redraw the list it already
         // knows how to draw. If this stopped firing, the person who made the
         // room would be looking at the old list with no way to know.
@@ -4272,7 +4272,7 @@ mod tests {
                 id: SessionId(1),
                 person: seele_core::PersonId(7),
                 ssrc: Ssrc(700),
-                dogma: "Terceira Tóquio".into(),
+                server: "Terceira Tóquio".into(),
                 voice_rooms: Vec::new(),
                 lines: Vec::new(),
                 roles: Vec::new(),
@@ -4295,7 +4295,7 @@ mod tests {
                 id: SessionId(1),
                 person: seele_core::PersonId(7),
                 ssrc: Ssrc(700),
-                dogma: "Terceira Tóquio".into(),
+                server: "Terceira Tóquio".into(),
                 voice_rooms: Vec::new(),
                 lines: Vec::new(),
                 roles: Vec::new(),
@@ -4318,7 +4318,7 @@ mod tests {
                 id: SessionId(1),
                 person: seele_core::PersonId(7),
                 ssrc: Ssrc(700),
-                dogma: "Terceira Tóquio".into(),
+                server: "Terceira Tóquio".into(),
                 voice_rooms: Vec::new(),
                 lines: Vec::new(),
                 roles: Vec::new(),
@@ -4351,7 +4351,7 @@ mod tests {
             id: SessionId(1),
             person: seele_core::PersonId(7),
             ssrc: Ssrc(700),
-            dogma: "Terceira Tóquio".into(),
+            server: "Terceira Tóquio".into(),
             voice_rooms: Vec::new(),
             lines: Vec::new(),
             roles: Vec::new(),
@@ -4400,11 +4400,11 @@ mod tests {
     #[test]
     fn destroying_a_room_is_a_permission_of_its_own_and_not_the_one_that_makes_them() {
         // The decision this whole path turns on, asserted where a shell reads
-        // it. Making and renaming a room are mistakes a Dogma survives;
+        // it. Making and renaming a room are mistakes a server survives;
         // destroying one ends what other people wrote. A role that may build
         // rooms without being able to unmake them is a role somebody can
         // actually write — `specs/04-servidor-seele.md` enumerates
-        // `gerenciar_voice_rooms` and `administrar_dogma` separately — and a single
+        // `gerenciar_voice_rooms` and `administrar_server` separately — and a single
         // boolean for both would make it impossible to offer correctly.
         use seele_core::{Permission, ServerMessage, SessionId, Ssrc};
 
@@ -4419,7 +4419,7 @@ mod tests {
             id: SessionId(1),
             person: seele_core::PersonId(7),
             ssrc: Ssrc(700),
-            dogma: "Terceira Tóquio".into(),
+            server: "Terceira Tóquio".into(),
             voice_rooms: Vec::new(),
             lines: Vec::new(),
             roles: Vec::new(),
@@ -4437,13 +4437,13 @@ mod tests {
         );
 
         // And the reverse, so the two are not simply the same field read twice.
-        fold(&shared, &sessao(vec![Permission::AdministerDogma]));
+        fold(&shared, &sessao(vec![Permission::AdministerServer]));
         let administra = plug.snapshot();
         assert!(administra.may_delete_rooms);
         assert!(!administra.may_manage_voice_rooms);
 
         // Never the moderation permissions either: somebody trusted to remove a
-        // person for the evening is not thereby trusted with the Dogma's past.
+        // person for the evening is not thereby trusted with the server's past.
         fold(
             &shared,
             &sessao(vec![
@@ -4463,13 +4463,13 @@ mod tests {
         assert!(!plug.snapshot().may_delete_rooms);
     }
 
-    /// A shell watching a Dogma dress itself, from the outside.
+    /// A shell watching a server dress itself, from the outside.
     ///
     /// The three properties a screen depends on and no type can state: the name
     /// arrives whole, the picture does not, and the two do not move each
     /// other\u{2019}s counter.
     #[test]
-    fn the_dogma_name_rides_the_snapshot_and_the_picture_rides_a_revision() {
+    fn the_server_name_rides_the_snapshot_and_the_picture_rides_a_revision() {
         use seele_core::{Permission, ServerMessage, SessionId, Ssrc};
 
         let shared = bare_shared();
@@ -4485,31 +4485,31 @@ mod tests {
                 id: SessionId(1),
                 person: seele_core::PersonId(7),
                 ssrc: Ssrc(700),
-                dogma: "Casa".into(),
+                server: "Casa".into(),
                 voice_rooms: Vec::new(),
                 lines: Vec::new(),
                 roles: Vec::new(),
-                permissions: vec![Permission::AdministerDogma],
+                permissions: vec![Permission::AdministerServer],
             },
         );
         let inicio = plug.snapshot();
-        assert_eq!(inicio.dogma, "Casa");
+        assert_eq!(inicio.server, "Casa");
         assert_eq!(inicio.icon_revision, 0);
-        assert_eq!(plug.dogma_icon(), None);
+        assert_eq!(plug.server_icon(), None);
         assert!(
-            inicio.may_customise_dogma,
-            "whoever administers the Dogma was not offered the control"
+            inicio.may_customise_server,
+            "whoever administers the server was not offered the control"
         );
 
         // The name travels whole, because it is a string and it is cheap.
         fold(
             &shared,
-            &ServerMessage::DogmaRenamed {
+            &ServerMessage::ServerRenamed {
                 name: "Terceira Tóquio".into(),
             },
         );
         let renomeado = plug.snapshot();
-        assert_eq!(renomeado.dogma, "Terceira Tóquio");
+        assert_eq!(renomeado.server, "Terceira Tóquio");
         assert_eq!(
             renomeado.icon_revision, 0,
             "a rename made every shell refetch a picture that did not change"
@@ -4519,19 +4519,19 @@ mod tests {
         let bytes = vec![0x89, b'P', b'N', b'G', 4, 5, 6];
         fold(
             &shared,
-            &ServerMessage::DogmaIconChanged {
+            &ServerMessage::ServerIconChanged {
                 icon: Some(bytes.clone()),
             },
         );
         assert_eq!(plug.snapshot().icon_revision, 1);
-        assert_eq!(plug.dogma_icon(), Some(bytes));
+        assert_eq!(plug.server_icon(), Some(bytes));
 
         // Including when it moves to nothing. A revision that only counted
         // arrivals would leave the old picture on screen after it was taken
         // down, because the shell would never be told to look again.
-        fold(&shared, &ServerMessage::DogmaIconChanged { icon: None });
+        fold(&shared, &ServerMessage::ServerIconChanged { icon: None });
         assert_eq!(plug.snapshot().icon_revision, 2);
-        assert_eq!(plug.dogma_icon(), None);
+        assert_eq!(plug.server_icon(), None);
     }
 
     #[test]
@@ -4545,12 +4545,12 @@ mod tests {
         let plug = Plug { commands, shared };
 
         assert_eq!(
-            plug.set_dogma_icon(Some(b"%PDF-1.7".to_vec())),
+            plug.set_server_icon(Some(b"%PDF-1.7".to_vec())),
             Err(PlugError::IconNotAPicture)
         );
         assert!(
             fila.try_recv().is_err(),
-            "a picture the Dogma would refuse was queued to be sent anyway"
+            "a picture the server would refuse was queued to be sent anyway"
         );
 
         // And the heavy one answers with the ceiling, because the sentence
@@ -4561,7 +4561,7 @@ mod tests {
         gorda.extend_from_slice(&128_u32.to_be_bytes());
         gorda.extend_from_slice(&128_u32.to_be_bytes());
         gorda.resize(64 * 1024, 0);
-        let Err(PlugError::IconTooBig { limit_bytes }) = plug.set_dogma_icon(Some(gorda)) else {
+        let Err(PlugError::IconTooBig { limit_bytes }) = plug.set_server_icon(Some(gorda)) else {
             panic!("a picture over the ceiling was queued");
         };
         assert!(limit_bytes > 0);
@@ -4569,15 +4569,15 @@ mod tests {
 
         // Taking the picture down is never refused: it carries no bytes to
         // refuse, and whoever put one up has to be able to take it away.
-        assert_eq!(plug.set_dogma_icon(None), Ok(()));
+        assert_eq!(plug.set_server_icon(None), Ok(()));
         assert!(
-            matches!(fila.try_recv(), Ok(Command::SetDogmaIcon { icon: None })),
+            matches!(fila.try_recv(), Ok(Command::SetServerIcon { icon: None })),
             "taking the picture down was swallowed instead of sent"
         );
     }
 
     #[test]
-    fn dressing_the_dogma_is_a_permission_of_its_own_field() {
+    fn dressing_the_server_is_a_permission_of_its_own_field() {
         // Same permission as `may_delete_rooms` today, separate question. A
         // shell reading the destroy flag to decide whether to draw a rename box
         // would be leaning on a coincidence between two verbs.
@@ -4594,7 +4594,7 @@ mod tests {
             id: SessionId(1),
             person: seele_core::PersonId(7),
             ssrc: Ssrc(700),
-            dogma: "Casa".into(),
+            server: "Casa".into(),
             voice_rooms: Vec::new(),
             lines: Vec::new(),
             roles: Vec::new(),
@@ -4603,16 +4603,16 @@ mod tests {
 
         fold(&shared, &sessao(vec![Permission::ManageVoiceRooms]));
         assert!(
-            !plug.snapshot().may_customise_dogma,
-            "the permission to make rooms was read as the permission to name the Dogma"
+            !plug.snapshot().may_customise_server,
+            "the permission to make rooms was read as the permission to name the server"
         );
 
-        fold(&shared, &sessao(vec![Permission::AdministerDogma]));
-        assert!(plug.snapshot().may_customise_dogma);
+        fold(&shared, &sessao(vec![Permission::AdministerServer]));
+        assert!(plug.snapshot().may_customise_server);
 
         fold(&shared, &sessao(Vec::new()));
         assert!(
-            !plug.snapshot().may_customise_dogma,
+            !plug.snapshot().may_customise_server,
             "the snapshot went on offering the control after the permission went away"
         );
     }
@@ -4622,7 +4622,7 @@ mod tests {
         // The number in the confirmation, and the one call on this bridge that
         // waits for an answer. A shell that cannot get these three numbers must
         // not open the box at all, so the wiring that carries them is worth
-        // pinning: the question registers a slot, the Dogma's reply fills it,
+        // pinning: the question registers a slot, the server's reply fills it,
         // and the caller wakes with the counts unrounded.
         let shared = bare_shared();
         let (commands, mut queue) = tokio::sync::mpsc::unbounded_channel();
@@ -4641,7 +4641,7 @@ mod tests {
                     // The driver's half, by hand: take the command off the
                     // queue, park the sender, then let the answer arrive.
                     let Some(Command::WeighLine { line, answer }) = queue.recv().await else {
-                        panic!("nothing asked the Dogma to weigh anything");
+                        panic!("nothing asked the server to weigh anything");
                     };
                     shared
                         .pending_weights
@@ -4725,7 +4725,7 @@ mod tests {
         }
         assert!(
             queue.try_recv().is_err(),
-            "a blank name was sent to the Dogma"
+            "a blank name was sent to the server"
         );
 
         plug.create_voice_room("VOICE_ROOM-02".into(), 8, None).unwrap();
@@ -4948,7 +4948,7 @@ mod tests {
             id: SessionId(1),
             person: PersonId(7),
             ssrc: Ssrc(700),
-            dogma: "Terceira Tóquio".into(),
+            server: "Terceira Tóquio".into(),
             voice_rooms: vec![VoiceRoomInfo {
                 id: VoiceRoomId(1),
                 name: "VOICE_ROOM-01".into(),
@@ -5037,7 +5037,7 @@ mod tests {
             id: SessionId(1),
             person: PersonId(7),
             ssrc: Ssrc(700),
-            dogma: "Terceira Tóquio".into(),
+            server: "Terceira Tóquio".into(),
             voice_rooms: vec![VoiceRoomInfo {
                 id: VoiceRoomId(1),
                 name: "VOICE_ROOM-01".into(),
@@ -5063,7 +5063,7 @@ mod tests {
         //
         // Este teste existe para que preenchê-los com o que foi pedido — ou com
         // o degrau que o teto compraria — custe uma linha vermelha. Era o defeito
-        // exato do jitter, que a tela lia do relatório do Dogma como `0.0` porque
+        // exato do jitter, que a tela lia do relatório do servidor como `0.0` porque
         // o servidor não tem como medir uma grandeza do receptor.
         use seele_core::PersonId;
 
@@ -5245,7 +5245,7 @@ mod tests {
                 id: SessionId(1),
                 person: PersonId(7),
                 ssrc: Ssrc(700),
-                dogma: "Terceira Tóquio".into(),
+                server: "Terceira Tóquio".into(),
                 voice_rooms: vec![VoiceRoomInfo {
                     id: VoiceRoomId(1),
                     name: "VOICE_ROOM-01".into(),
@@ -5356,7 +5356,7 @@ mod tests {
     fn esta_ponte_nao_decide_quem_perdeu_a_corrida_da_tela() {
         // `specs/08-seguranca.md`: a interface esconder é conveniência; o
         // servidor negar é a segurança. Uma transmissão por sala (§6.3) é regra
-        // do Dogma, e quem perde a corrida é avisado por ele —
+        // do servidor, e quem perde a corrida é avisado por ele —
         // `AlertReason::ScreenShareTaken`, que já atravessa como
         // `NoticeReason::ScreenShareTaken`.
         //
@@ -5378,7 +5378,7 @@ mod tests {
         );
         assert!(
             !corpo.contains("telas"),
-            "`compartilhar_tela` lê o mapa de transmissões para decidir; quem decide é o Dogma:\n{corpo}"
+            "`compartilhar_tela` lê o mapa de transmissões para decidir; quem decide é o servidor:\n{corpo}"
         );
     }
 }

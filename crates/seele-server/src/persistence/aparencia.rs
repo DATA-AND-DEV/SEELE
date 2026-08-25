@@ -1,17 +1,17 @@
-//! O nome e o ícone que o Dogma diz sobre si mesmo.
+//! O nome e o ícone que o servidor diz sobre si mesmo.
 //!
 //! Duas linhas na tabela `configuracao`, pelo critério que a própria migração 2
-//! escreveu ao criá-la — «configuração do Dogma que não cabe num arquivo,
+//! escreveu ao criá-la — «configuração do servidor que não cabe num arquivo,
 //! porque muda em tempo de execução e precisa sobreviver a reinício» — e que o
-//! teto de anexos do ADR 0027 já reusou sem emenda. Trocar o nome com o Dogma
+//! teto de anexos do ADR 0027 já reusou sem emenda. Trocar o nome com o servidor
 //! no ar é o caso normal, e não o excepcional.
 //!
 //! # Por que a ausência é o padrão, e não uma linha escrita no primeiro arranque
 //!
 //! O mesmo desenho de [`super::attachments::quota`]: linha ausente quer dizer «o
 //! padrão», e escolher é o que escreve. Duas consequências, e as duas são
-//! desejadas. Um Dogma que existia antes disto sobe com o nome que a
-//! `DogmaConfig` sempre lhe deu, sem migração nenhuma tocar nele. E quem nunca
+//! desejadas. Um servidor que existia antes disto sobe com o nome que a
+//! `ServerConfig` sempre lhe deu, sem migração nenhuma tocar nele. E quem nunca
 //! escolheu nome segue o que estiver no arranque — trocar o `--nome` da linha de
 //! comando volta a valer, em vez de ser silenciosamente vencido por uma linha
 //! que ninguém pediu.
@@ -27,7 +27,7 @@
 //! O **formato** do ícone, esse sim, é conferido — mas não aqui. Ele é conferido
 //! onde os bytes entram, em `seele_proto::control`, que os recusa nas duas
 //! direções: PNG de verdade, lado declarado até
-//! `MAX_DOGMA_ICON_SIDE`, e no máximo `MAX_DOGMA_ICON_LEN` bytes. Repetir a
+//! `MAX_SERVER_ICON_SIDE`, e no máximo `MAX_SERVER_ICON_LEN` bytes. Repetir a
 //! conferência aqui seria uma segunda regra para ficar para trás da primeira.
 
 use anyhow::Result;
@@ -36,7 +36,7 @@ use rusqlite::{params, OptionalExtension};
 use super::Persistence;
 
 /// Onde o nome escolhido mora na tabela `configuracao`.
-pub const CHAVE_NOME: &str = "dogma_nome";
+pub const CHAVE_NOME: &str = "server_nome";
 
 /// Onde o ícone mora.
 ///
@@ -47,11 +47,11 @@ pub const CHAVE_NOME: &str = "dogma_nome";
 /// arquivo à parte custaria um diretório, uma varredura de órfãos e um caso a
 /// mais de «a linha existe e os bytes sumiram» — três coisas que os anexos
 /// pagam porque não têm escolha, e que uma linha de 8 KiB não paga.
-pub const CHAVE_ICONE: &str = "dogma_icone";
+pub const CHAVE_ICONE: &str = "server_icone";
 
-/// Como este Dogma se chama agora.
+/// Como este servidor se chama agora.
 ///
-/// `padrao` é o que a [`crate::DogmaConfig`] trouxe, e é o que vale enquanto
+/// `padrao` é o que a [`crate::ServerConfig`] trouxe, e é o que vale enquanto
 /// ninguém tiver escolhido. Ver o cabeçalho do módulo.
 ///
 /// # Errors
@@ -87,7 +87,7 @@ pub fn nome(persistence: &Persistence, padrao: &str) -> Result<String> {
 /// Falha se o nome for branco, ou se o banco não responder.
 pub fn definir_nome(persistence: &Persistence, nome: &str) -> Result<String> {
     let nome = nome.trim();
-    anyhow::ensure!(!nome.is_empty(), "o nome do Dogma não pode ser branco");
+    anyhow::ensure!(!nome.is_empty(), "o nome do servidor não pode ser branco");
     persistence.connection().execute(
         "INSERT INTO configuracao (chave, valor) VALUES (?1, ?2)
          ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor",
@@ -96,7 +96,7 @@ pub fn definir_nome(persistence: &Persistence, nome: &str) -> Result<String> {
     Ok(nome.to_owned())
 }
 
-/// O ícone deste Dogma, se ele tiver um.
+/// O ícone deste servidor, se ele tiver um.
 ///
 /// # Errors
 ///
@@ -214,7 +214,7 @@ mod testes {
     }
 
     #[test]
-    fn um_dogma_sem_icone_diz_que_nao_tem() {
+    fn um_server_sem_icone_diz_que_nao_tem() {
         let persistence = memoria();
         assert_eq!(icone(&persistence).unwrap(), None);
     }

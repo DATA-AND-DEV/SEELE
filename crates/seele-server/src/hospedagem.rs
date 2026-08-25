@@ -1,6 +1,6 @@
-//! Subir um Dogma dentro de outro programa.
+//! Subir um servidor dentro de outro programa.
 //!
-//! O `seeled` existe para quem quer um Dogma no ar o tempo todo, numa VPS, sob
+//! O `seeled` existe para quem quer um servidor no ar o tempo todo, numa VPS, sob
 //! um supervisor. Este módulo é para o outro caso, que é o mais comum entre
 //! amigos: **alguém quer conversar agora e está disposto a ser o anfitrião
 //! enquanto a conversa dura.**
@@ -12,9 +12,9 @@
 //!
 //! # O que isto **não** é
 //!
-//! Não substitui o `seeled`. Um Dogma hospedado por um cliente morre quando o
+//! Não substitui o `seeled`. Um servidor hospedado por um cliente morre quando o
 //! cliente fecha, e isso é correto para "estou hospedando uma conversa" e
-//! errado para "mantenho um Dogma no ar". São dois produtos e continuam sendo
+//! errado para "mantenho um servidor no ar". São dois produtos e continuam sendo
 //! dois programas.
 
 use std::net::SocketAddr;
@@ -23,9 +23,9 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use crate::persistence::Location;
-use crate::{DogmaConfig, Server};
+use crate::{ServerConfig, Daemon};
 
-/// O PERSISTENCE de um Dogma hospedado, compartilhado com quem o hospeda.
+/// O PERSISTENCE de um servidor hospedado, compartilhado com quem o hospeda.
 ///
 /// Apelido, e não o tipo escrito por extenso, porque quem chama é a casca do
 /// desktop e ela **não depende de `tokio`**. Sem este nome, expor o banco
@@ -33,12 +33,12 @@ use crate::{DogmaConfig, Server};
 /// variável — uma dependência inteira paga em nome de uma anotação.
 pub type CasperCompartilhado = Arc<tokio::sync::Mutex<crate::persistence::Persistence>>;
 
-/// Um Dogma rodando dentro deste processo.
+/// Um servidor rodando dentro deste processo.
 ///
-/// Descartar isto encerra o Dogma e derruba quem estiver conectado. É o
+/// Descartar isto encerra o servidor e derruba quem estiver conectado. É o
 /// comportamento certo: o anfitrião fechou.
 pub struct Hospedagem {
-    server: Arc<Server>,
+    server: Arc<Daemon>,
     endereco: SocketAddr,
     /// A escada do ADR 0022, já subida, com a porta do roteador presa nela.
     escada: Option<crate::alcance::Escada>,
@@ -60,12 +60,12 @@ impl std::fmt::Debug for Hospedagem {
 }
 
 impl Hospedagem {
-    /// Sobe um Dogma e começa a aceitar conexões.
+    /// Sobe um servidor e começa a aceitar conexões.
     ///
     /// `porta` zero deixa o sistema escolher — útil para teste, e ruim para uso
     /// real, onde o anfitrião precisa dizer aos amigos onde bater.
     ///
-    /// Escuta em `[::]` de propósito: um Dogma hospedado que só aceitasse
+    /// Escuta em `[::]` de propósito: um servidor hospedado que só aceitasse
     /// `localhost` não serviria para nada além de falar consigo mesmo, e o
     /// ponto todo é receber gente. `[::]` e não `0.0.0.0` porque o segundo
     /// atende só IPv4 — degrau 2 do ADR 0022, ver [`crate::alcance`].
@@ -74,17 +74,17 @@ impl Hospedagem {
     ///
     /// Falha se a porta já estiver em uso ou se o banco não abrir.
     pub async fn iniciar(porta: u16, banco: Location, nome: &str) -> Result<Self> {
-        let config = DogmaConfig {
+        let config = ServerConfig {
             name: nome.to_owned(),
             listen: SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, porta)),
             database: banco,
-            ..DogmaConfig::default()
+            ..ServerConfig::default()
         };
 
-        let server = Arc::new(Server::bind(config).await?);
+        let server = Arc::new(Daemon::bind(config).await?);
         let endereco = server.local_addr()?;
 
-        // A escada do ADR 0022, aqui e não no `Server`: quem hospeda de dentro
+        // A escada do ADR 0022, aqui e não no `Daemon`: quem hospeda de dentro
         // do cliente é justamente quem está atrás de um roteador doméstico. Um
         // `seeled` numa VPS já é o degrau 1 e não tem o que pedir a ninguém.
         //
@@ -93,12 +93,12 @@ impl Hospedagem {
         // isso que aquele prazo é curto.
         //
         // A escuta **inteira**, e não só a porta: numa máquina em que a pilha
-        // dupla falhou o Dogma atende só em IPv4, e a escada não pode prometer
+        // dupla falhou o servidor atende só em IPv4, e a escada não pode prometer
         // um degrau que este socket não serve. Ver `alcance::Escuta`.
         //
         // O degrau 4 vai junto, e ele é opcional em três sentidos: só é tentado
         // se os degraus de cima não resolveram, só existe se o ambiente pedir
-        // (`$SEELE_ENCONTRO`), e só funciona com o socket do próprio Dogma — sem
+        // (`$SEELE_ENCONTRO`), e só funciona com o socket do próprio servidor — sem
         // ele não há furo possível, e o degrau simplesmente não acontece.
         //
         // Custa até `alcance::encontro::PRAZO` a mais, e só no caminho que hoje
@@ -114,11 +114,11 @@ impl Hospedagem {
         tracing::info!(alcance = ?escada.alcance(), "escada do ADR 0022 subida");
 
         // O laço de aceitação numa tarefa própria: quem chamou tem interface
-        // para desenhar, e o `run` só volta quando o Dogma acaba.
+        // para desenhar, e o `run` só volta quando o servidor acaba.
         let referencia = Arc::clone(&server);
         let aceitando = tokio::spawn(async move {
             if let Err(erro) = referencia.run().await {
-                tracing::error!(%erro, "o Dogma hospedado parou");
+                tracing::error!(%erro, "o servidor hospedado parou");
             }
         });
 
@@ -130,7 +130,7 @@ impl Hospedagem {
         })
     }
 
-    /// Até onde este Dogma é alcançável, e por qual degrau do ADR 0022.
+    /// Até onde este servidor é alcançável, e por qual degrau do ADR 0022.
     ///
     /// É o que permite à casca dizer "só na sua rede, e foi por isto" em vez de
     /// deixar quem hospeda achando que abriu para o mundo.
@@ -139,7 +139,7 @@ impl Hospedagem {
         self.escada.as_ref().map(crate::alcance::Escada::alcance)
     }
 
-    /// Onde o Dogma está escutando.
+    /// Onde o servidor está escutando.
     #[must_use]
     pub fn endereco(&self) -> SocketAddr {
         self.endereco
@@ -200,7 +200,7 @@ impl Hospedagem {
             .com_alternativos(resto.to_vec())
             .com_impressao_digital(self.impressao_digital());
         // O bilhete de encontro só entra quando o degrau 4 deu — e ele só é
-        // tentado quando os de cima não deram. Um Dogma alcançável de fora não
+        // tentado quando os de cima não deram. Um servidor alcançável de fora não
         // põe ponto de encontro nenhum no link de ninguém.
         match self
             .escada
@@ -212,9 +212,9 @@ impl Hospedagem {
         }
     }
 
-    /// O PERSISTENCE deste Dogma, para quem hospeda mexer na própria porta.
+    /// O PERSISTENCE deste servidor, para quem hospeda mexer na própria porta.
     ///
-    /// ADR 0030. É por aqui que a janela fecha o Dogma, gera convite e decide
+    /// ADR 0030. É por aqui que a janela fecha o servidor, gera convite e decide
     /// quem entra — direto no banco da máquina, e não pelo fio como toda a
     /// moderação faz.
     ///
@@ -230,7 +230,7 @@ impl Hospedagem {
     /// já ter sido solto.
     #[must_use]
     pub fn persistence(&self) -> CasperCompartilhado {
-        Arc::clone(&self.server.dogma().persistence)
+        Arc::clone(&self.server.server().persistence)
     }
 
     /// O link para mandar a uma pessoa, com um convite de uso único dentro.
@@ -249,7 +249,7 @@ impl Hospedagem {
         }
     }
 
-    /// Encerra o Dogma e devolve a porta.
+    /// Encerra o servidor e devolve a porta.
     ///
     /// Consome, e a espera está aqui de propósito. Fechar uma conversa e abrir
     /// outra é o caso normal, e sem esperar isso falha com "endereço já em
@@ -304,7 +304,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn um_dogma_hospedado_aceita_conexao() {
+    async fn um_server_hospedado_aceita_conexao() {
         let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa")
             .await
             .expect("subir");
@@ -319,7 +319,7 @@ mod tests {
 
     #[tokio::test]
     async fn escuta_em_todas_as_interfaces_e_nao_so_em_localhost() {
-        // Um Dogma hospedado que só aceitasse localhost serviria para falar
+        // Um servidor hospedado que só aceitasse localhost serviria para falar
         // sozinho, que é o oposto do motivo de existir.
         let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa")
             .await
@@ -405,7 +405,7 @@ mod tests {
             None => std::env::remove_var(crate::alcance::encontro::VARIAVEL),
         };
 
-        // Sem degrau 4 nenhum: é o Dogma de antes desta mudança, e é a régua.
+        // Sem degrau 4 nenhum: é o servidor de antes desta mudança, e é a régua.
         std::env::set_var(crate::alcance::encontro::VARIAVEL, "nao");
         let relogio = std::time::Instant::now();
         let sem = Hospedagem::iniciar(0, Location::Memory, "Casa")

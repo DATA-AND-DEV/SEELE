@@ -1,4 +1,4 @@
-//! Se o firewall desta máquina deixa alguém de fora chegar até o Dogma.
+//! Se o firewall desta máquina deixa alguém de fora chegar até o servidor.
 //!
 //! Só existe no Windows, e o motivo é assimetria real e não preguiça: no macOS
 //! e no Linux o firewall padrão não barra entrada de um programa que já está
@@ -99,7 +99,7 @@ fn nome_de_arquivo(caminho: &str) -> &str {
 
 /// O comando que cria a regra, pronto para a pessoa colar.
 ///
-/// `Direction=Inbound` e UDP, que é o que o Dogma precisa; e sem `Profile`, para
+/// `Direction=Inbound` e UDP, que é o que o servidor precisa; e sem `Profile`, para
 /// herdar o que o sistema achar certo — escolher perfil por ela seria decidir
 /// sobre a segurança da máquina de outra pessoa a partir daqui.
 #[must_use]

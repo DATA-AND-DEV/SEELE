@@ -3,7 +3,7 @@
 //! O número que `specs/07-tema-evangelion.md` chama de «a coisa mais visível da
 //! tela» aparece em dois lugares ao mesmo tempo: na barra de telemetria, medida
 //! pela casca contra a própria conexão, e no roster, uma linha por pessoa, vinda
-//! do `PersonState` que o Dogma difunde a cada segundo.
+//! do `PersonState` que o servidor difunde a cada segundo.
 //!
 //! Para todo mundo **menos você** os dois batem. Para você, a linha do roster
 //! nunca recebia difusão nenhuma: `translate` descartava o `Event::PersonState`
@@ -15,7 +15,7 @@
 //!
 //! Zero não é «não medido» aos olhos de quem lê: pelas três faixas do comp
 //! (`design/Entry Plug v2.dc.html`) zero é **crítico**, vermelho, a cor de «vá
-//! olhar». Numa sessão local, com RTT, jitter e perda em zero, o Dogma calcula
+//! olhar». Numa sessão local, com RTT, jitter e perda em zero, o servidor calcula
 //! cem — e o roster acusava o pessoa de estar em colapso.
 //!
 //! E não para na linha: `Room::voice_room_sync` tira a média das cadeiras, então numa
@@ -46,30 +46,30 @@ use seele_core::enlace::{Aviso, Destino, Enlace};
 use seele_core::{MemoryPinStore, Room, SyncBand};
 use seele_proto::ids::VoiceRoomId;
 use seele_server::persistence::Location;
-use seele_server::{DogmaConfig, Server};
+use seele_server::{ServerConfig, Daemon};
 
 const VOICE_ROOM: u32 = 1;
 
 /// Quanto se espera a difusão periódica.
 ///
-/// O `TELEMETRY_INTERVAL` do Dogma é de um segundo. Quinze dá folga de sobra
+/// O `TELEMETRY_INTERVAL` do servidor é de um segundo. Quinze dá folga de sobra
 /// para uma máquina de integração contínua carregada sem transformar uma
 /// regressão numa espera longa: o laço abaixo devolve assim que o número chega.
 const PRAZO: Duration = Duration::from_secs(15);
 
-/// Sobe um Dogma numa porta que o sistema escolhe.
+/// Sobe um servidor numa porta que o sistema escolhe.
 ///
 /// Mesma forma do `ejetar.rs` e do `convite.rs`, e pelo mesmo motivo: porta
-/// zero, nunca um número escrito à mão, que colidiria com o Dogma que a pessoa
+/// zero, nunca um número escrito à mão, que colidiria com o servidor que a pessoa
 /// deixou rodando na própria máquina.
-async fn dogma() -> Result<(SocketAddr, Arc<Server>)> {
-    let config = DogmaConfig {
+async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
+    let config = ServerConfig {
         name: "Terceira Tóquio".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let servidor = Arc::new(Server::bind(config).await?);
+    let servidor = Arc::new(Daemon::bind(config).await?);
     let endereco = servidor.local_addr()?;
     let aceitando = Arc::clone(&servidor);
     tokio::spawn(async move {
@@ -93,7 +93,7 @@ fn destino(endereco: SocketAddr, apelido: &str) -> Destino {
 /// Conecta, entra na sala de voz e monta a sala como a casca monta.
 ///
 /// `adopt` e `enter_voice_room` na mão são o que `plug` e o aplicativo fazem: o
-/// aperto de mão consome o `Session` antes de qualquer casca ver, e o Dogma
+/// aperto de mão consome o `Session` antes de qualquer casca ver, e o servidor
 /// confirma a entrada na sala de voz pelo silêncio. Sem os dois, o roster deste teste
 /// começaria vazio e não haveria linha de `me` para medir.
 async fn sentar(endereco: SocketAddr, semente: u8, apelido: &str) -> Result<(Enlace, Room)> {
@@ -144,7 +144,7 @@ fn minha_taxa(sala: &Room) -> Option<u8> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn o_roster_mostra_a_taxa_do_proprio_pessoa() -> Result<()> {
-    let (endereco, servidor) = dogma().await?;
+    let (endereco, servidor) = server().await?;
     let (mut enlace, mut sala) = sentar(endereco, 46, "ayanami").await?;
 
     assert_eq!(
@@ -186,7 +186,7 @@ async fn a_media_do_voice_room_conta_a_propria_linha() -> Result<()> {
     // sala de voz cheio cada pessoa via a média puxada para baixo pela própria linha,
     // cada uma por um valor diferente. Uma média que discorda entre as telas da
     // mesma sala não é média de nada.
-    let (endereco, servidor) = dogma().await?;
+    let (endereco, servidor) = server().await?;
     let (mut enlace, mut sala) = sentar(endereco, 47, "shikinami").await?;
 
     let mediu = dobrar_ate(&mut enlace, &mut sala, PRAZO, |sala| {

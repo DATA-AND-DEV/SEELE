@@ -25,7 +25,7 @@ use seele_proto::ids::{VoiceRoomId, PersonId, ScreenId, Ssrc};
 use seele_proto::transport::MAX_FRAMES_PER_SECOND;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::dogma::Event;
+use crate::server::Event;
 use crate::tela::{AberturaDeTela, Enquadramento, FimDaTela, Pedaco};
 
 /// How many datagrams a voice room task will hold before it starts shedding.
@@ -85,11 +85,11 @@ pub enum VoiceRoomCommand {
         /// Quem. Vem da **sessão**, nunca do fluxo, pelo motivo que
         /// [`VoiceRoom::forward`] dá sobre o `ssrc`.
         from: PersonId,
-        /// Como o Dogma batizou esta transmissão.
+        /// Como o servidor batizou esta transmissão.
         screen: ScreenId,
         /// Os bytes do cabeçalho de abertura, para repassar a cada espectador.
         abertura: Vec<u8>,
-        /// Por onde avisar quem compartilha se o Dogma encerrar por conta
+        /// Por onde avisar quem compartilha se o servidor encerrar por conta
         /// própria.
         fim: mpsc::Sender<FimDaTela>,
     },
@@ -158,7 +158,7 @@ struct Member {
 
 /// A transmissão de tela que está passando por esta sala agora.
 ///
-/// # Por que mora aqui e não ao lado de [`crate::dogma::Telas`]
+/// # Por que mora aqui e não ao lado de [`crate::server::Telas`]
 ///
 /// `Telas` é o **plano de controle**: quem tem a vaga da sala, para responder
 /// `ScreenShareTaken` a quem chega depois. Isto é o **plano de dados**, e ele
@@ -168,7 +168,7 @@ struct Member {
 /// primeiro, porque é o mesmo mapa de onde saem as cópias.
 struct EmCurso {
     dono: PersonId,
-    /// Como o Dogma batizou esta transmissão. Vai no convite de cada
+    /// Como o servidor batizou esta transmissão. Vai no convite de cada
     /// espectador; o cabeçalho de abertura o repete, porque é ele que atravessa
     /// o fio.
     screen: ScreenId,
@@ -188,16 +188,16 @@ pub struct VoiceRoom {
     by_ssrc: HashMap<Ssrc, PersonId>,
     drops: DropCounts,
     forwarded: u64,
-    /// A subida que se assume deste Dogma, em bits por segundo.
+    /// A subida que se assume deste servidor, em bits por segundo.
     ///
     /// Parâmetro e não constante para que o teto do §5.1 seja testável sem
     /// depender do número que ninguém mediu — ver
-    /// [`crate::tela::CAMINHO_DO_DOGMA_BPS`].
+    /// [`crate::tela::CAMINHO_DO_SERVER_BPS`].
     caminho_bps: u32,
     tela: Option<EmCurso>,
     /// Por onde o **N** desta sala chega ao plano de controle.
     ///
-    /// A sala de voz é o único lugar do Dogma que sabe quem está na sala sem
+    /// A sala de voz é o único lugar do servidor que sabe quem está na sala sem
     /// perguntar a ninguém, e o §5.1 fez desse número um termo do teto que as
     /// **duas** pontas calculam. Ou ele sai daqui, ou a outra ponta conta a
     /// mesma coisa de novo em outro lugar — e a segunda conta é a que fica
@@ -212,10 +212,10 @@ impl VoiceRoom {
     /// An empty voice room.
     #[must_use]
     pub fn new(id: VoiceRoomId) -> Self {
-        Self::com_caminho(id, crate::tela::CAMINHO_DO_DOGMA_BPS, None)
+        Self::com_caminho(id, crate::tela::CAMINHO_DO_SERVER_BPS, None)
     }
 
-    /// A mesma sala, sobre uma subida de Dogma conhecida e com quem avisar.
+    /// A mesma sala, sobre uma subida de servidor conhecida e com quem avisar.
     #[must_use]
     pub fn com_caminho(
         id: VoiceRoomId,
@@ -355,7 +355,7 @@ impl VoiceRoom {
     /// Refaz a conta do §5.1 depois de N mudar, e para se ela não fecha.
     ///
     /// **Onde o número que só o encaminhador sabe é aplicado.** A subida deste
-    /// Dogma é `N × teto`, então cada pessoa que entra na sala encolhe o teto
+    /// servidor é `N × teto`, então cada pessoa que entra na sala encolhe o teto
     /// de todo mundo; quando ele passa por baixo do piso do §2, a transmissão
     /// para com motivo, que é a escalada que o §3.2 escreve. A alternativa —
     /// continuar subindo o que a máquina não tem — é a sala inteira picotando
@@ -387,7 +387,7 @@ impl VoiceRoom {
         let _ = eventos.send(Event::ScreenViewers {
             voice_room: self.id,
             screen: curso.screen,
-            // Um Dogma é dimensionado em cinquenta pessoas
+            // Um servidor é dimensionado em cinquenta pessoas
             // (`specs/04-servidor-seele.md`), então isto nunca satura; saturar
             // ainda assim é melhor que dar a volta, porque um N pequeno demais
             // devolveria um teto grande demais.
@@ -487,7 +487,7 @@ impl VoiceRoom {
     ///
     /// Byte por byte, sem tocar no conteúdo — `specs/04-servidor-seele.md` diz
     /// que o servidor nunca decodifica o Opus, e a imagem herda a regra e o
-    /// motivo: é ela que mantém a CPU do Dogma plana e que deixa o E2EE de
+    /// motivo: é ela que mantém a CPU do servidor plana e que deixa o E2EE de
     /// mídia ser um acréscimo. Os cinco bytes que o [`Enquadramento`] lê dizem
     /// onde um quadro acaba, e nada sobre o que há dentro dele.
     fn tela_bytes(&mut self, from: PersonId, bytes: &[u8]) {
@@ -547,7 +547,7 @@ impl VoiceRoom {
     ///
     /// `None` é o fim honesto — quem mandava parou ou saiu —, e cada espectador
     /// recebe [`Pedaco::Fim`] para que o fluxo dele **termine** em vez de ser
-    /// cortado. `Some` é o Dogma encerrando por conta própria, e o motivo sobe
+    /// cortado. `Some` é o servidor encerrando por conta própria, e o motivo sobe
     /// para a sessão de quem compartilha, que é quem tem como anunciá-lo.
     fn encerrar_tela(&mut self, motivo: Option<FimDaTela>) {
         let Some(curso) = self.tela.take() else {
@@ -653,13 +653,13 @@ pub fn spawn(
     tx
 }
 
-/// Every voice room task this Dogma is running.
+/// Every voice room task this server is running.
 ///
-/// # Why this had to exist the moment a Dogma could grow a second room
+/// # Why this had to exist the moment a server could grow a second room
 ///
-/// The Dogma used to spawn exactly one voice room task, at boot, for the one voice room in
-/// `DogmaConfig` — and every session held that single sender. That was correct
-/// while a Dogma had one room and *silently wrong* the instant it could have
+/// The server used to spawn exactly one voice room task, at boot, for the one voice room in
+/// `ServerConfig` — and every session held that single sender. That was correct
+/// while a server had one room and *silently wrong* the instant it could have
 /// two: two people in two different rooms would have had their datagrams
 /// delivered to each other, because there was only ever one room to deliver
 /// into. A voice channel that is not a channel is worse than a missing feature,
@@ -670,23 +670,23 @@ pub fn spawn(
 /// A voice room task is a channel and a `HashMap`; the cost of one nobody has entered
 /// is not worth a boot-time scan of PERSISTENCE that would then be stale the first
 /// time somebody made a room. The task appears the first time a person walks in
-/// and lives until the Dogma stops.
+/// and lives until the server stops.
 pub struct VoiceRooms {
     tasks: tokio::sync::Mutex<HashMap<VoiceRoomId, mpsc::Sender<VoiceRoomCommand>>>,
-    /// A subida deste Dogma, repassada a cada sala que nasce.
+    /// A subida deste servidor, repassada a cada sala que nasce.
     ///
     /// Uma cópia só, e ela é a mesma que viaja no `HostUplink`: a sala divide
     /// este número por N e o cliente o divide de novo, e as duas contas têm de
-    /// partir do mesmo lugar. Ver [`crate::tela::caminho_do_dogma`].
+    /// partir do mesmo lugar. Ver [`crate::tela::caminho_do_server`].
     caminho_bps: u32,
     eventos: broadcast::Sender<Event>,
 }
 
 impl VoiceRooms {
-    /// A Dogma with na sala de voz task running yet.
+    /// A server with na sala de voz task running yet.
     ///
     /// Sem `Default`, e de propósito: uma sala precisa saber quanto a subida
-    /// deste Dogma carrega antes de deixar alguém transmitir nela, e um
+    /// deste servidor carrega antes de deixar alguém transmitir nela, e um
     /// `Default` teria de inventar esse número.
     #[must_use]
     pub fn new(caminho_bps: u32, eventos: broadcast::Sender<Event>) -> Self {
@@ -715,7 +715,7 @@ impl VoiceRooms {
     /// copy of a fact, and the copy that goes stale is the one that leaves
     /// somebody's `ssrc` receiving audio in a room they left. `Leave` for a
     /// person who is not there is a no-op, and `specs/04-servidor-seele.md` sizes
-    /// a Dogma at five active voice_rooms, so the fan-out is five sends.
+    /// a server at five active voice_rooms, so the fan-out is five sends.
     pub async fn leave_everywhere(&self, person: PersonId) {
         let tasks: Vec<mpsc::Sender<VoiceRoomCommand>> =
             self.tasks.lock().await.values().cloned().collect();
@@ -738,7 +738,7 @@ mod tests {
     /// Um conjunto de salas sobre o cano das duas provas, 2000 kbps.
     fn salas() -> VoiceRooms {
         let (eventos, _) = broadcast::channel(64);
-        VoiceRooms::new(crate::tela::CAMINHO_DO_DOGMA_BPS, eventos)
+        VoiceRooms::new(crate::tela::CAMINHO_DO_SERVER_BPS, eventos)
     }
 
     fn datagram(ssrc: u32, seq: u16) -> Vec<u8> {
@@ -825,7 +825,7 @@ mod tests {
         bytes
     }
 
-    /// Abre uma transmissão de `person` e devolve por onde o Dogma reclamaria.
+    /// Abre uma transmissão de `person` e devolve por onde o servidor reclamaria.
     fn compartilhar(
         voice_room: &mut VoiceRoom,
         person: u64,
@@ -1075,7 +1075,7 @@ mod tests {
 
     #[tokio::test]
     async fn two_rooms_do_not_hear_each_other() {
-        // The whole reason [`voice_rooms`] exists. With one task for the whole Dogma
+        // The whole reason [`voice_rooms`] exists. With one task for the whole server
         // — which is what there was — a person in the room made at nine o'clock
         // and a person in the room made at ten would have been delivered each
         // other's audio, because there was only ever one room to deliver into.
@@ -1321,7 +1321,7 @@ mod tests {
         // com uma perna que inventa, que é o defeito que a seção chama de mais
         // caro. Vem daqui, e não de junto do `PersonJoined`, porque este é o
         // único mapa que sabe quem está na sala sem perguntar a ninguém.
-        let (mut voice_room, mut ouvinte) = sala_com_barramento(crate::tela::CAMINHO_DO_DOGMA_BPS);
+        let (mut voice_room, mut ouvinte) = sala_com_barramento(crate::tela::CAMINHO_DO_SERVER_BPS);
         let _alice = espectador(&mut voice_room, 1);
         let _fim = compartilhar(&mut voice_room, 1, 7);
         // Zero é uma resposta, e ela tem de sair: quem compartilha para uma
@@ -1341,9 +1341,9 @@ mod tests {
     #[test]
     fn uma_sala_sem_transmissao_nao_anuncia_contagem_nenhuma() {
         // O número só quer dizer alguma coisa enquanto há transmissão: fora
-        // disso ele seria um quadro por entrada e saída em toda sala do Dogma,
+        // disso ele seria um quadro por entrada e saída em toda sala do servidor,
         // sobre um teto que ninguém está calculando.
-        let (mut voice_room, mut ouvinte) = sala_com_barramento(crate::tela::CAMINHO_DO_DOGMA_BPS);
+        let (mut voice_room, mut ouvinte) = sala_com_barramento(crate::tela::CAMINHO_DO_SERVER_BPS);
         let _alice = espectador(&mut voice_room, 1);
         let _bob = espectador(&mut voice_room, 2);
         assert_eq!(contagens(&mut ouvinte), Vec::<u32>::new());
@@ -1369,7 +1369,7 @@ mod tests {
     }
 
     #[test]
-    fn a_sala_que_cresce_alem_da_subida_do_dogma_para_a_transmissao() {
+    fn a_sala_que_cresce_alem_da_subida_do_server_para_a_transmissao() {
         // A primeira linha do `min` do §5.1, que é a que faltava: a subida de
         // quem hospeda é `N × teto`, então cada pessoa que entra encolhe o teto
         // de todo mundo. Quando ele passa por baixo do piso do §2, o que para é

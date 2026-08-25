@@ -17,8 +17,8 @@
 //! de fora precisa contar — e é só isso que o ponto de encontro faz.
 //!
 //! O anfitrião pergunta `ONDE` e aprende o endereço público da escuta de avisos
-//! dele; pergunta `LEVE <aquele endereço>` **pelo socket do Dogma** e aprende o
-//! endereço público do Dogma, que é o que vai no convite. Quem recebe o convite
+//! dele; pergunta `LEVE <aquele endereço>` **pelo socket do servidor** e aprende o
+//! endereço público do servidor, que é o que vai no convite. Quem recebe o convite
 //! manda um `LEVE <endereço de avisos do anfitrião>` pelo socket com que vai
 //! conectar; o ponto de encontro conta ao anfitrião de onde aquele pacote veio,
 //! e o anfitrião manda alguns pacotes para lá. Os dois roteadores passam a ter
@@ -56,7 +56,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 /// Porta padrão de um ponto de encontro.
 ///
-/// 8384, ao lado do 8383 do Dogma: quem for abrir uma no firewall vai abrir as
+/// 8384, ao lado do 8383 do servidor: quem for abrir uma no firewall vai abrir as
 /// duas na mesma tarde.
 pub const PORTA_PADRAO: u16 = 8383 + 1;
 
@@ -101,7 +101,7 @@ pub const LIMITE_DA_MARCA: usize = 32;
 /// nenhum.
 ///
 /// Não é autenticação e não tenta ser: quem tem o link, tem. É o que impede um
-/// varredor de portas de fazer um Dogma mandar pacotes para onde ele quiser.
+/// varredor de portas de fazer um servidor mandar pacotes para onde ele quiser.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Marca(String);
 
@@ -622,7 +622,7 @@ mod testes {
     }
 
     #[test]
-    fn a_porta_padrao_fica_ao_lado_da_do_dogma() {
+    fn a_porta_padrao_fica_ao_lado_da_do_server() {
         assert_eq!(PORTA_PADRAO, 8384);
     }
 }

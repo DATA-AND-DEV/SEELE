@@ -363,7 +363,7 @@ if (git status --porcelain -- '$CONFIG_TAURI') {
 # lá. Uma lista curta que alguém revisa quando um escopo novo aparece é mais
 # honesta que uma heurística que erra em silêncio.
 ESCOPOS_DE_PRODUTO="alcance admissao anexos app atualizador audio media
-voice_rooms cascas chamada chegada cliente conformance convite core dogma encontro
+voice_rooms cascas chamada chegada cliente conformance convite core server encontro
 enlace entrada escada fontes frases furo hospedagem interface marca medida
 permissions mensagens moderar mods plug porta portaria proto rede seguranca server
 sessao spike sync taxa tela telemetria tofu tui ui uri varredura voz"

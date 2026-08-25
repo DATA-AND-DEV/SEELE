@@ -44,7 +44,7 @@
    informação. O que não tem dado sai da tela em vez de virar um campo vazio.
 
    Saíram por essa regra: a descrição por Linha (`linhaDesc` — o protocolo não
-   tem o campo), a população do Dogma (`412 operadores` — não existe), a
+   tem o campo), a população do servidor (`412 operadores` — não existe), a
    contagem de pendências por Linha (`Line` é `{id, name, open}`), o atraso por
    pessoa no roster (`rtt_ms` é **nosso**, um número só) e o subsistema por
    pessoa (`PERMISSIONS·01` — o protocolo não diz qual atende quem).
@@ -111,9 +111,9 @@
   border-left: 1px solid var(--seele-linha);
 }
 
-/* `TÓQUIO-3` sobre `DOGMA CENTRAL · 7743`: duas linhas, empilhadas e centradas
+/* `TÓQUIO-3` sobre `SERVER CENTRAL · 7743`: duas linhas, empilhadas e centradas
    na altura do cabeçalho. */
-.topo-dogma {
+.topo-server {
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -124,11 +124,11 @@
   flex: 0 1 auto;
 }
 
-/* `topo-` no nome, e não `.dogma-nome`: o Terminal Dogma é uma tela inteira com
+/* `topo-` no nome, e não `.server-nome`: o Terminal Server é uma tela inteira com
    folha própria, e `no_two_screens_claim_the_same_class_name` decide empates
    entre duas folhas de tela pela ordem de carga, em silêncio. Este é o nome do
-   Dogma **no cabeçalho da sessão**, e o prefixo diz de quem ele é. */
-.topo-dogma-nome {
+   Server **no cabeçalho da sessão**, e o prefixo diz de quem ele é. */
+.topo-server-nome {
   font-family: var(--seele-display);
   font-weight: 900;
   font-size: 20px;
@@ -140,7 +140,7 @@
   white-space: nowrap;
 }
 
-.topo-dogma-sub {
+.topo-server-sub {
   font-size: var(--seele-t-micro);
   letter-spacing: 0.2em;
   color: var(--seele-osso-apagado);
@@ -1110,7 +1110,7 @@
 
 /* O arquivo escolhido, acima do campo e fora da conversa.
 
-   Fora dela porque enquanto sobe **não há mensagem**: o Dogma só publica quando
+   Fora dela porque enquanto sobe **não há mensagem**: o servidor só publica quando
    os bytes chegam inteiros, então não existe linha na Linha em que pendurar
    isto. É a metade que o ADR paga de propósito, e desenhar uma mensagem
    fantasma aqui seria desfazer a escolha. */
@@ -1192,7 +1192,7 @@
 
 /* Expirado: a moldura tracejada é o que diz «houve um arquivo aqui e ele não
    está mais», sem gastar cor. O nome e o tamanho continuam legíveis, porque é
-   exatamente isso que o Dogma guardou a linha para poder dizer. */
+   exatamente isso que o servidor guardou a linha para poder dizer. */
 .anexo-expirado {
   border-style: dashed;
   color: var(--seele-osso-apagado);

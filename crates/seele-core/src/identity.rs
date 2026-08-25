@@ -2,7 +2,7 @@
 //!
 //! ADR 0004 makes identity an Ed25519 key pair. What it did not say is where
 //! the key lives, and until M3 it did not matter: with no accounts, a fresh key
-//! every run was simply a fresh person every run. PERSISTENCE changed that. A Dogma
+//! every run was simply a fresh person every run. PERSISTENCE changed that. A server
 //! now binds a nickname to the identity that first claimed it, so a client that
 //! forgets its key cannot come back — the server refuses the second connection
 //! with "nickname belongs to a different identity", which is exactly the

@@ -36,7 +36,7 @@
 //!
 //! **As duas pernas, separadas.** Mensagem que nunca entrou e mensagem que
 //! entrou e não saiu não têm nada em comum além do sintoma, e contar só o que
-//! chegou não distingue as duas. Agora se pergunta ao Dogma quantas ele gravou.
+//! chegou não distingue as duas. Agora se pergunta ao servidor quantas ele gravou.
 //!
 //! **A primeira suspeita da pendência, em número.** Ela era "a janela de
 //! controle de fluxo do QUIC no começo da conexão". A janela de fluxo por
@@ -56,7 +56,7 @@ use seele_core::{Client, MemoryPinStore};
 use seele_proto::control::ServerMessage;
 use seele_proto::ids::{VoiceRoomId, ClientMessageId, LineId};
 use seele_server::persistence::Location;
-use seele_server::{DogmaConfig, Server};
+use seele_server::{ServerConfig, Daemon};
 
 const VOICE_ROOM: u32 = 1;
 const LINE: u32 = 1;
@@ -66,14 +66,14 @@ const LINE: u32 = 1;
 const CORPO: usize = 3_900;
 const QUANTAS: usize = 10;
 
-async fn dogma() -> Result<(SocketAddr, Arc<Server>)> {
-    let config = DogmaConfig {
+async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
+    let config = ServerConfig {
         name: "Terceira Tóquio".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let server = Arc::new(Server::bind(config).await?);
+    let server = Arc::new(Daemon::bind(config).await?);
     let address = server.local_addr()?;
     let aceitando = Arc::clone(&server);
     tokio::spawn(async move {
@@ -100,7 +100,7 @@ async fn entrar(address: SocketAddr, apelido: &str, semente: u8) -> Result<Clien
 
 #[tokio::test(flavor = "multi_thread")]
 async fn uma_rajada_de_mensagens_grandes_chega_inteira() -> Result<()> {
-    let (address, server) = dogma().await?;
+    let (address, server) = server().await?;
 
     let mut autor = entrar(address, "ayanami", 11).await?;
     let mut ouvinte = entrar(address, "shinji", 22).await?;
@@ -140,7 +140,7 @@ async fn uma_rajada_de_mensagens_grandes_chega_inteira() -> Result<()> {
     );
 
     // A outra perna. Se um dia isto e a linha acima discordarem, a discordância
-    // é o diagnóstico: menos aqui é mensagem que o Dogma nunca aceitou, menos
+    // é o diagnóstico: menos aqui é mensagem que o servidor nunca aceitou, menos
     // ali é mensagem que ele aceitou e não entregou.
     assert_eq!(
         server.quantas_mensagens(LineId(LINE)).await?,
@@ -150,7 +150,7 @@ async fn uma_rajada_de_mensagens_grandes_chega_inteira() -> Result<()> {
 
     // E o barramento não passou à frente de ninguém: nenhuma sessão ficou com
     // um buraco calado, que é o defeito de `seele-server/tests/par_lento.rs`.
-    assert_eq!(server.dogma().atrasos.eventos(), 0);
+    assert_eq!(server.server().atrasos.eventos(), 0);
 
     // A primeira suspeita da pendência, medida. Trinta e nove kilobytes contra
     // uma janela de 1,25 MB: nunca houve bloqueio, em nenhum dos dois sentidos.

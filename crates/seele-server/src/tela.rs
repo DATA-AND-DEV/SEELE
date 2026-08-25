@@ -19,7 +19,7 @@
 //! # O servidor nunca olha dentro do quadro
 //!
 //! É a mesma regra que `specs/04-servidor-seele.md` dá para o Opus, e pelo
-//! mesmo motivo: é ela que mantém a CPU do Dogma plana e que deixa o E2EE de
+//! mesmo motivo: é ela que mantém a CPU do servidor plana e que deixa o E2EE de
 //! mídia (`specs/09`) ser um acréscimo em vez de uma reescrita. O que o
 //! [`Enquadramento`] lê são os cinco bytes que separam um quadro do outro —
 //! tipo e tamanho — e nada além disso. Cinco bytes não são um decodificador.
@@ -44,7 +44,7 @@ use tokio::sync::mpsc;
 /// `seele_core::tela::CABECALHO_DE_QUADRO_LEN` — ver o cabeçalho deste módulo.
 pub const CABECALHO_DE_QUADRO_LEN: usize = 5;
 
-/// Maior quadro codificado que este Dogma repassa, em bytes.
+/// Maior quadro codificado que este servidor repassa, em bytes.
 ///
 /// `specs/08-seguranca.md`: o tamanho anunciado por um par é conferido **antes**
 /// de qualquer alocação. Aqui ele não aloca nada — o encaminhamento é por
@@ -68,7 +68,7 @@ pub const FRACAO_DO_CAMINHO: u32 = 60;
 /// e está aqui com o mesmo valor que `seele_core::tela::PISO_DE_BANDA_BPS`.
 pub const PISO_DE_BANDA_BPS: u32 = 200_000;
 
-/// O caminho de subida que se **assume** para este Dogma, em bits por segundo.
+/// O caminho de subida que se **assume** para este servidor, em bits por segundo.
 ///
 /// **Hipótese, e escrita como hipótese.** O §8 pergunta 2 continua aberta —
 /// ninguém mede quanto cabe num caminho que não está sendo enchido — e o
@@ -77,49 +77,49 @@ pub const PISO_DE_BANDA_BPS: u32 = 200_000;
 ///
 /// É o número que o §5.1 chama de *«caminho de quem hospeda»*, e é a perna que
 /// o produto até agora **não media**: o teto saía do caminho de quem
-/// compartilha, e com o servidor encaminhando é a subida do Dogma que estoura
+/// compartilha, e com o servidor encaminhando é a subida do servidor que estoura
 /// primeiro.
 ///
 /// Só a admissão deste lado sai daqui. **No fio ele não vai** — ver
 /// [`caminho_no_fio`], e a diferença entre os dois é o assunto inteiro destas
 /// vinte linhas.
-pub const CAMINHO_DO_DOGMA_BPS: u32 = 2_000_000;
+pub const CAMINHO_DO_SERVER_BPS: u32 = 2_000_000;
 
-/// A subida por que este Dogma divide N ao admitir uma transmissão.
+/// A subida por que este servidor divide N ao admitir uma transmissão.
 ///
-/// O que o operador declarou, ou a hipótese de [`CAMINHO_DO_DOGMA_BPS`].
+/// O que o operador declarou, ou a hipótese de [`CAMINHO_DO_SERVER_BPS`].
 /// Zero declarado é tratado como nada declarado: um caminho de zero bit por
-/// segundo pararia toda transmissão deste Dogma, e um campo de configuração em
+/// segundo pararia toda transmissão deste servidor, e um campo de configuração em
 /// branco não é um pedido para desligar o recurso.
 ///
 /// Recusar-se a admitir sem um número seria a outra escolha, e é pior: um
-/// Dogma que não sabe a própria subida ainda tem de decidir o que faz quando
+/// servidor que não sabe a própria subida ainda tem de decidir o que faz quando
 /// alguém aperta o botão, e a hipótese de 2000 kbps é conservadora — ela erra
 /// para o lado de encerrar cedo, que é o lado que o §3.2 manda errar.
 #[must_use]
-pub fn caminho_do_dogma(declarado: Option<u32>) -> u32 {
+pub fn caminho_do_server(declarado: Option<u32>) -> u32 {
     declarado
         .filter(|bps| *bps > 0)
-        .unwrap_or(CAMINHO_DO_DOGMA_BPS)
+        .unwrap_or(CAMINHO_DO_SERVER_BPS)
 }
 
-/// O que o Dogma diz da própria subida no `HostUplink`, em bits por segundo.
+/// O que o servidor diz da própria subida no `HostUplink`, em bits por segundo.
 ///
 /// **Zero quer dizer «não medi»**, o mesmo contrato do `——` que o resto do
 /// produto usa, e quem recebe trata isso como ausência — o termo do §5.1 some
 /// do `min` em vez de virar um teto de zero.
 ///
-/// A diferença para [`caminho_do_dogma`] é que a hipótese **não atravessa o
+/// A diferença para [`caminho_do_server`] é que a hipótese **não atravessa o
 /// fio**. Dentro desta máquina ela é uma decisão de admissão, e assumir é o que
 /// se faz na falta de medida; posta no fio ela vira uma promessa de banda que
 /// ninguém conferiu, e o cliente a usaria para escolher resolução. Uma medida
 /// inventada é pior que a ausência declarada.
 ///
-/// **E não há medida.** O que este Dogma sabe do próprio caminho é o que o
+/// **E não há medida.** O que este servidor sabe do próprio caminho é o que o
 /// `quinn` conta por conexão — RTT, perda, janela de congestionamento —, e
 /// nenhum deles diz quanto **cabe** num cano que não está sendo enchido, que é
 /// exatamente a pergunta 2 do §8. Somar o que já saiu daria um piso
-/// demonstrado, não uma capacidade: num Dogma parado ele desabaria abaixo do
+/// demonstrado, não uma capacidade: num servidor parado ele desabaria abaixo do
 /// piso do §2 e pararia transmissões que cabiam. Então: o que o operador
 /// declarou, ou nada.
 #[must_use]
@@ -135,9 +135,9 @@ pub const ABERTURAS_DEPTH: usize = 4;
 
 /// Quantos pedaços de tela esperam por espectador antes do corte.
 ///
-/// O teto de memória do Dogma sai daqui: no pior caso são
+/// O teto de memória do servidor sai daqui: no pior caso são
 /// `ABERTURAS_DEPTH + PEDACOS_DEPTH` pedaços de [`LEITURA_LEN`] por espectador,
-/// meio megabyte, e um Dogma é dimensionado em 512 MB
+/// meio megabyte, e um servidor é dimensionado em 512 MB
 /// (`specs/04-servidor-seele.md`). Cheia, a fila **corta aquele espectador** —
 /// nunca descarta um pedaço — pelo motivo que [`Pedaco`] escreve.
 pub const PEDACOS_DEPTH: usize = 64;
@@ -145,7 +145,7 @@ pub const PEDACOS_DEPTH: usize = 64;
 /// Quantos bytes do fluxo de quem compartilha se lê de uma vez.
 pub const LEITURA_LEN: usize = 8 * 1024;
 
-/// Prioridade do fluxo de tela, abaixo de tudo o mais que o Dogma escreve.
+/// Prioridade do fluxo de tela, abaixo de tudo o mais que o servidor escreve.
 ///
 /// O controle é `crate::transfer::CONTROL_PRIORITY` e as transferências são
 /// `TRANSFER_PRIORITY`. A tela fica abaixo das duas, e a ordem importa menos do
@@ -162,7 +162,7 @@ pub const PRIORIDADE_DA_TELA: i32 = -2;
 /// chamar de fim o que foi uma queda.
 pub const CODIGO_DE_CORTE: u32 = 1;
 
-/// O teto que a subida do Dogma impõe a cada cópia, em bits por segundo.
+/// O teto que a subida do servidor impõe a cada cópia, em bits por segundo.
 ///
 /// É a **primeira linha** do `min` do §5.1, e é a linha que faltava:
 ///
@@ -217,20 +217,20 @@ pub struct AberturaDeTela {
     /// Qual transmissão.
     pub screen: ScreenId,
     /// O cabeçalho de abertura, **byte por byte como quem compartilha o
-    /// escreveu**. O Dogma não o reescreve: ele já foi conferido, e o
-    /// `ScreenId` dentro dele é o que o próprio Dogma atribuiu.
+    /// escreveu**. O servidor não o reescreve: ele já foi conferido, e o
+    /// `ScreenId` dentro dele é o que o próprio servidor atribuiu.
     pub abertura: Vec<u8>,
     /// Por onde o corpo chega.
     pub pedacos: mpsc::Receiver<Pedaco>,
 }
 
-/// Por que o Dogma encerrou uma transmissão que ninguém mandou parar.
+/// Por que o servidor encerrou uma transmissão que ninguém mandou parar.
 ///
 /// Enumerado, como `specs/02-protocolo.md` manda em toda razão: quem recebe
 /// isto tem de escrever uma frase, e uma string de erro não deixa.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FimDaTela {
-    /// A sala cresceu além do que a subida deste Dogma carrega.
+    /// A sala cresceu além do que a subida deste servidor carrega.
     ///
     /// §5.1: a subida do hospedeiro é `N × teto`, e com N grande o suficiente
     /// nem o piso do §2 cabe. Parar é a escalada que o §3.2 escreve — *«quando
@@ -256,7 +256,7 @@ pub enum FimDaTela {
 /// O que ele **não** faz é remontar quadro. Remontar o quadro-chave para
 /// reenviá-lo inteiro desfaria o §3.3, que é a medida mais barata de toda a
 /// spec: espalhar o mesmo quadro-chave em quatro tiques leva o p95 da voz de
-/// 78,9 para 35,8 ms **com o mesmo bitrate entregue**. O Dogma repassa o pedaço
+/// 78,9 para 35,8 ms **com o mesmo bitrate entregue**. O servidor repassa o pedaço
 /// que chegou, quando chegou, e só conta os bytes para saber onde está.
 #[derive(Debug, Default)]
 pub struct Enquadramento {
@@ -341,7 +341,7 @@ impl Enquadramento {
 ///
 /// O `write_all` é onde a contrapressão mora: um espectador lento faz esta
 /// tarefa parar, a fila dele encher, e o [`crate::voice_room::VoiceRoom`] cortá-lo. Nunca
-/// faz o Dogma esperar e nunca faz os outros esperarem.
+/// faz o servidor esperar e nunca faz os outros esperarem.
 pub async fn bombear(conexao: quinn::Connection, mut aberturas: mpsc::Receiver<AberturaDeTela>) {
     while let Some(mut convite) = aberturas.recv().await {
         let Ok(mut fluxo) = conexao.open_uni().await else {
@@ -416,7 +416,7 @@ mod tests {
         // erra para o lado de encerrar cedo — e o fio leva zero, que pelo §5.1
         // quer dizer «não medi» e faz o termo sumir do `min` do outro lado.
         // Mandar a hipótese seria prometer 2000 kbps que ninguém conferiu.
-        assert_eq!(caminho_do_dogma(None), CAMINHO_DO_DOGMA_BPS);
+        assert_eq!(caminho_do_server(None), CAMINHO_DO_SERVER_BPS);
         assert_eq!(caminho_no_fio(None), 0);
     }
 
@@ -424,17 +424,17 @@ mod tests {
     fn o_que_o_operador_declara_vale_nos_dois_lugares() {
         // Declarado, as duas contas partem do mesmo número — que é a regra 2 do
         // §3.2: nada de um segundo medidor discordando do primeiro.
-        assert_eq!(caminho_do_dogma(Some(50_000_000)), 50_000_000);
+        assert_eq!(caminho_do_server(Some(50_000_000)), 50_000_000);
         assert_eq!(caminho_no_fio(Some(50_000_000)), 50_000_000);
     }
 
     #[test]
     fn zero_declarado_e_um_campo_em_branco_e_nao_um_pedido_para_desligar() {
         // Um caminho de zero bit por segundo pararia toda transmissão deste
-        // Dogma, e no fio ele já quer dizer «não medi». Ler os dois como
+        // servidor, e no fio ele já quer dizer «não medi». Ler os dois como
         // ausência é o que impede uma configuração meio preenchida de desligar
         // o recurso em silêncio.
-        assert_eq!(caminho_do_dogma(Some(0)), CAMINHO_DO_DOGMA_BPS);
+        assert_eq!(caminho_do_server(Some(0)), CAMINHO_DO_SERVER_BPS);
         assert_eq!(caminho_no_fio(Some(0)), 0);
     }
 

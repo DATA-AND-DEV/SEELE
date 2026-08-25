@@ -403,6 +403,19 @@ pub const MIGRATIONS: &[Migration] = &[
             UPDATE roles SET denials     = replace(denials,     'ViewCage', 'ViewVoiceRoom');
         "#,
     },
+    Migration {
+        version: 7,
+        description: "vocabulário: Dogma vira Server na permissão gravada",
+        sql: r#"
+            -- Terceiro lado do rename das migrações 5 e 6. `Dogma` era o termo
+            -- de Evangelion para o próprio servidor, e a única aparição dele em
+            -- **dado gravado** é o nome da permissão dentro dos arrays JSON de
+            -- `roles` — o resto era tipo, campo e comentário, que o Rust
+            -- resolveu sozinho.
+            UPDATE roles SET permissions = replace(permissions, 'AdministerDogma', 'AdministerServer');
+            UPDATE roles SET denials     = replace(denials,     'AdministerDogma', 'AdministerServer');
+        "#,
+    },
 ];
 
 #[cfg(test)]

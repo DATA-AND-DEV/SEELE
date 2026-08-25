@@ -251,14 +251,14 @@ pub fn render(frame: &mut Frame<'_>, app: &App, theme: Theme) {
         );
     }
 
-    let [dogma, tree, messages] = Layout::horizontal([
+    let [server, tree, messages] = Layout::horizontal([
         Constraint::Length(18),
         Constraint::Length(24),
         Constraint::Min(20),
     ])
     .areas(panels);
 
-    render_dogma(frame, app, theme, dogma);
+    render_server(frame, app, theme, server);
     render_tree(frame, app, theme, tree);
     render_messages(frame, app, theme, messages);
     render_bar(frame, app, theme, bar);
@@ -365,18 +365,18 @@ fn panel(title: &str, focused: bool, theme: Theme) -> Block<'static> {
         ))
 }
 
-fn render_dogma(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
-    let block = panel("SERVIDOR", app.focus == Panel::Dogma, theme);
+fn render_server(frame: &mut Frame<'_>, app: &App, theme: Theme, area: Rect) {
+    let block = panel("SERVIDOR", app.focus == Panel::Server, theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
     let budget = inner.width as usize;
     let lines: Vec<Line<'_>> = app
-        .dogmas
+        .servers
         .iter()
         .enumerate()
         .map(|(index, name)| {
-            let selected = index == app.selected_dogma;
+            let selected = index == app.selected_server;
             let marker = if selected { "▸ " } else { "  " };
             let style = if selected {
                 theme.accent()
@@ -959,7 +959,7 @@ fn marked(row: &str, cut: bool, budget: usize) -> String {
 /// invite verdicts carry two sixty-four-character fingerprints, and the whole
 /// point of showing them is that they be read against each other. On one row at
 /// 80 columns the sentence plus `esperada:` already spends the budget, so the
-/// offered fingerprint — the half that says what the Dogma actually is — was
+/// offered fingerprint — the half that says what the server actually is — was
 /// never on the screen. `render_lost` reached the same conclusion for the
 /// refusal, and the app's band carries `white-space: pre-line`; this is the
 /// same rule in the third shell.
@@ -1164,7 +1164,7 @@ mod tests {
         let mut app = App::new();
         app.screen = Screen::PatternBlue;
         app.clock = "12:04:33".into();
-        app.dogmas = vec!["Terceira Tóquio".into(), "Geofront".into()];
+        app.servers = vec!["Terceira Tóquio".into(), "Geofront".into()];
         app.tree = vec![
             Node::VoiceRoom {
                 name: "VOICE_ROOM-01 CENTRAL".into(),
@@ -1208,7 +1208,7 @@ mod tests {
     /// The alert band's own rows, cut out of the screen.
     ///
     /// `screen.contains('…')` is not an assertion about the band: `populated()`
-    /// draws `▸ Terceira Tóqu…` in DOGMA on every single frame, so the whole
+    /// draws `▸ Terceira Tóqu…` in SERVER on every single frame, so the whole
     /// screen always has an ellipsis in it and the check passes with a band
     /// that marked nothing. The band lives between the frame's top border and
     /// the first row of the panels, and that is the only region worth asking.
@@ -1509,7 +1509,7 @@ mod tests {
 
     #[test]
     fn the_reason_keeps_the_line_breaks_that_carry_its_meaning() {
-        // `docs/pendencias.md` #12 promises the refused Dogma is shown "com a
+        // `docs/pendencias.md` #12 promises the refused servidor is shown "com a
         // esperada e a ofertada lado a lado". `wrap` splits on whitespace, so
         // handing it the whole reason reflowed two sixty-four-character hex
         // strings into one paragraph — the one shape in which they cannot be

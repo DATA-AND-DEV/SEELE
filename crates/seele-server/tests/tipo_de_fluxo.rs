@@ -1,7 +1,7 @@
-//! Um fluxo unidirecional diz o que é, e o Dogma não adivinha mais.
+//! Um fluxo unidirecional diz o que é, e o servidor não adivinha mais.
 //!
 //! §5.2 de `docs/superpowers/specs/2026-08-22-compartilhamento-de-tela-design.md`:
-//! um Dogma recebe **dois** tipos de fluxo unidirecional — transferência de
+//! um servidor recebe **dois** tipos de fluxo unidirecional — transferência de
 //! anexo e tela — e até esta onda nada no fio dizia qual era qual. O que os
 //! separava era aritmética sobre o primeiro byte: zero era transferência,
 //! porque o quadro dela cabe em 16 KiB e o byte mais significativo do
@@ -39,7 +39,7 @@ use seele_proto::control::{AttachmentRefusal, ClientMessage, ServerMessage};
 use seele_proto::ids::{ClientMessageId, LineId};
 use seele_proto::stream::{StreamType, RESERVED_TYPE};
 use seele_server::persistence::Location;
-use seele_server::{frame, DogmaConfig, Server};
+use seele_server::{frame, ServerConfig, Daemon};
 
 /// Um verificador que aceita qualquer certificado.
 ///
@@ -93,19 +93,19 @@ impl rustls::client::danger::ServerCertVerifier for AceitaQualquer {
     }
 }
 
-/// Um Dogma em memória, já atendendo.
+/// Um servidor em memória, já atendendo.
 ///
 /// **Sem diretório de anexos**, e é o que faz o segundo teste ser barato: a
 /// resposta honesta a uma transferência é `Unavailable`, que só sai depois de o
 /// cabeçalho ter sido lido inteiro — que é exatamente o que se quer provar.
-async fn dogma() -> Result<(SocketAddr, Arc<Server>)> {
-    let config = DogmaConfig {
+async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
+    let config = ServerConfig {
         name: "Terceira Tóquio".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let servidor = Arc::new(Server::bind(config).await?);
+    let servidor = Arc::new(Daemon::bind(config).await?);
     let endereco = servidor.local_addr()?;
     let aceitando = Arc::clone(&servidor);
     tokio::spawn(async move {
@@ -158,7 +158,7 @@ async fn abrir(endereco: SocketAddr, semente: u8) -> Result<Par> {
 
     let ServerMessage::Challenge { nonce } = frame::read::<ServerMessage>(&mut recebe).await?
     else {
-        anyhow::bail!("o Dogma não mandou Challenge");
+        anyhow::bail!("o servidor não mandou Challenge");
     };
     frame::write(
         &mut envio,
@@ -168,7 +168,7 @@ async fn abrir(endereco: SocketAddr, semente: u8) -> Result<Par> {
     )
     .await?;
     let ServerMessage::Session { .. } = frame::read::<ServerMessage>(&mut recebe).await? else {
-        anyhow::bail!("o Dogma não mandou Session");
+        anyhow::bail!("o servidor não mandou Session");
     };
 
     Ok(Par {
@@ -216,7 +216,7 @@ fn cabecalho_de_anexo(chave: u64) -> Vec<u8> {
 /// transferência volta, e o fluxo é cortado de propósito e não por acidente.
 #[tokio::test(flavor = "multi_thread")]
 async fn o_byte_reservado_e_recusado_em_vez_de_ser_lido_como_anexo() -> Result<()> {
-    let (endereco, _servidor) = dogma().await?;
+    let (endereco, _servidor) = server().await?;
     let mut par = abrir(endereco, 1).await?;
 
     let mut fluxo = par.conexao.open_uni().await?;
@@ -226,7 +226,7 @@ async fn o_byte_reservado_e_recusado_em_vez_de_ser_lido_como_anexo() -> Result<(
     fluxo.write_all(&[1, 2, 3, 4]).await?;
     fluxo.finish()?;
 
-    // Nada volta. Se voltasse, o Dogma teria lido o cabeçalho — quer dizer,
+    // Nada volta. Se voltasse, o servidor teria lido o cabeçalho — quer dizer,
     // teria adivinhado o tipo do fluxo a partir do conteúdo dele.
     let resposta = tokio::time::timeout(
         Duration::from_millis(1500),
@@ -234,12 +234,12 @@ async fn o_byte_reservado_e_recusado_em_vez_de_ser_lido_como_anexo() -> Result<(
     )
     .await;
     if let Ok(Ok(ServerMessage::AttachmentRefused { .. })) = resposta {
-        panic!("o Dogma leu um fluxo de tipo reservado como transferência");
+        panic!("o servidor leu um fluxo de tipo reservado como transferência");
     }
 
     // E o corte foi deliberado: `CODIGO_DE_CORTE`, e não o zero que um fluxo
-    // largado no chão produziria. A diferença é entre o Dogma ter recusado e o
-    // Dogma ter caído.
+    // largado no chão produziria. A diferença é entre o servidor ter recusado e o
+    // server ter caído.
     let mut segundo = par.conexao.open_uni().await?;
     segundo.write_all(&[RESERVED_TYPE]).await?;
     let veredito = tokio::time::timeout(Duration::from_secs(5), async {
@@ -257,7 +257,7 @@ async fn o_byte_reservado_e_recusado_em_vez_de_ser_lido_como_anexo() -> Result<(
             Ok(quinn::WriteError::Stopped(codigo))
                 if codigo == quinn::VarInt::from_u32(seele_server::tela::CODIGO_DE_CORTE)
         ),
-        "o Dogma não cortou o tipo reservado de propósito: {veredito:?}"
+        "o servidor não cortou o tipo reservado de propósito: {veredito:?}"
     );
     Ok(())
 }
@@ -272,7 +272,7 @@ async fn o_byte_reservado_e_recusado_em_vez_de_ser_lido_como_anexo() -> Result<(
 /// cabeçalho foi lido do começo.
 #[tokio::test(flavor = "multi_thread")]
 async fn um_fluxo_que_diz_ser_anexo_e_lido_como_anexo() -> Result<()> {
-    let (endereco, _servidor) = dogma().await?;
+    let (endereco, _servidor) = server().await?;
     let mut par = abrir(endereco, 2).await?;
 
     let mut fluxo = par.conexao.open_uni().await?;
@@ -281,7 +281,7 @@ async fn um_fluxo_que_diz_ser_anexo_e_lido_como_anexo() -> Result<()> {
     fluxo.write_all(&[1, 2, 3, 4]).await?;
     fluxo.finish()?;
 
-    // Este Dogma não guarda arquivo, então a resposta honesta é `Unavailable` —
+    // Este servidor não guarda arquivo, então a resposta honesta é `Unavailable` —
     // e ela só existe porque o cabeçalho foi lido: é dele que sai o nome a quem
     // responder.
     let resposta = tokio::time::timeout(Duration::from_secs(5), async {

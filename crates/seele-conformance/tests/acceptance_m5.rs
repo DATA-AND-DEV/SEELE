@@ -1,4 +1,4 @@
-//! The `seele-ffi` surface, exercised against a real Dogma.
+//! The `seele-ffi` surface, exercised against a real server.
 //!
 //! `specs/06-clientes-gui.md` specifies this surface and the rules it must
 //! keep. The unit tests in `seele-ffi` pin the shapes; what is here is the part
@@ -18,20 +18,20 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use seele_ffi::{ConnectConfig, Event, EventListener, Pattern, Plug, PlugError, Trust};
 use seele_server::persistence::Location;
-use seele_server::{DogmaConfig, Server};
+use seele_server::{ServerConfig, Daemon};
 
 const VOICE_ROOM: u32 = 1;
 const LINE: u32 = 1;
 const WAIT: Duration = Duration::from_secs(5);
 
-async fn start() -> Result<(SocketAddr, Arc<Server>)> {
-    let config = DogmaConfig {
+async fn start() -> Result<(SocketAddr, Arc<Daemon>)> {
+    let config = ServerConfig {
         name: "Terceira Tóquio".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let server = Arc::new(Server::bind(config).await?);
+    let server = Arc::new(Daemon::bind(config).await?);
     let address = server.local_addr()?;
     let accepting = Arc::clone(&server);
     tokio::spawn(async move {
@@ -61,7 +61,7 @@ fn connect(address: SocketAddr, nickname: &str) -> Result<Arc<Plug>, PlugError> 
     // the defect this branch exists to remove.
     //
     // `home()` is wiped per nickname, so every connection here is a genuine
-    // first contact with a Dogma that was just born. Saying so out loud is what
+    // first contact with a server that was just born. Saying so out loud is what
     // makes the constant impossible.
     Plug::connect(ConnectConfig {
         server: address.to_string(),
@@ -79,7 +79,7 @@ fn connect(address: SocketAddr, nickname: &str) -> Result<Arc<Plug>, PlugError> 
     .map(|(plug, trust)| {
         assert!(
             matches!(trust, Trust::FirstContact { .. }),
-            "a fresh home against a fresh Dogma is first contact, and the shell \
+            "a fresh home against a fresh Server is first contact, and the shell \
              was told {trust:?}"
         );
         plug
@@ -120,7 +120,7 @@ fn until<F: Fn(&Plug) -> bool>(plug: &Plug, done: F) -> bool {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_shell_connects_and_the_snapshot_describes_the_dogma() -> Result<()> {
+async fn a_shell_connects_and_the_snapshot_describes_the_server() -> Result<()> {
     let (address, server) = start().await?;
 
     // `connect` blocks, and a shell must call it off the thread that draws.
@@ -129,7 +129,7 @@ async fn a_shell_connects_and_the_snapshot_describes_the_dogma() -> Result<()> {
 
     let snapshot = plug.snapshot();
     assert_eq!(snapshot.pattern, Pattern::Blue);
-    assert_eq!(snapshot.dogma, "Terceira Tóquio");
+    assert_eq!(snapshot.server, "Terceira Tóquio");
     assert_eq!(snapshot.nickname, "ayanami");
     assert!(snapshot.me.is_some());
     assert!(!snapshot.voice_rooms.is_empty(), "no voice_rooms in the snapshot");
@@ -166,7 +166,7 @@ async fn entering_a_voice_room_puts_us_on_our_own_roster() -> Result<()> {
 async fn leaving_a_voice_room_takes_us_off_our_own_roster() -> Result<()> {
     // The mirror of the test above, and it was missing.
     //
-    // The Dogma does not echo `PersonLeft` to the person who caused it — "they
+    // The server does not echo `PersonLeft` to the person who caused it — "they
     // already know" — so this side of the roster is the shell's own
     // bookkeeping. `insert_plug` did it and `eject_plug` did not, and the
     // asymmetry is invisible from inside `Room`, which both halves are correct
@@ -177,7 +177,7 @@ async fn leaving_a_voice_room_takes_us_off_our_own_roster() -> Result<()> {
     // to be one: "não dá pra sair de uma jaula e deixá-la vazia" — the sala de voz
     // never empties on the screen of the person who left it — and "o usuário
     // está numa jaula com outro, mas o segundo não consegue ver esse usuário" —
-    // which is the same picture from the other chair, where the Dogma is right
+    // which is the same picture from the other chair, where the server is right
     // and the leaver's own screen is the one lying.
     let (address, server) = start().await?;
     let plug = tokio::task::spawn_blocking(move || connect(address, "rei")).await??;
@@ -460,7 +460,7 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
 
 /// Every failure is an enum a shell can write its own sentence for.
 #[tokio::test(flavor = "multi_thread")]
-async fn an_unreachable_dogma_is_an_enum_and_not_a_message() -> Result<()> {
+async fn an_unreachable_server_is_an_enum_and_not_a_message() -> Result<()> {
     // Port 1 on the loopback: nothing listens, and nothing will.
     let nowhere = SocketAddr::from(([127, 0, 0, 1], 1));
     let failure = tokio::task::spawn_blocking(move || connect(nowhere, "ninguem"))
@@ -533,7 +533,7 @@ async fn dropping_the_handle_disconnects() -> Result<()> {
     Ok(())
 }
 
-/// A shell asks for a room and the Dogma makes one.
+/// A shell asks for a room and the server makes one.
 ///
 /// The bridge's own unit tests stop at the command queue: they prove the right
 /// `Command` is enqueued and that a blank name is swallowed, and they cannot
@@ -542,16 +542,16 @@ async fn dropping_the_handle_disconnects() -> Result<()> {
 /// `seele-ffi` and `seele-conformance` entirely green until this test existed.
 /// The button would have done nothing at all, silently, in the shipped app.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_shell_asks_for_a_room_and_the_dogma_makes_it() -> Result<()> {
+async fn a_shell_asks_for_a_room_and_the_server_makes_it() -> Result<()> {
     let (address, server) = start().await?;
     let plug = tokio::task::spawn_blocking(move || connect(address, "anfitria")).await??;
 
-    // The first account on a Dogma is its Comandante, which is what makes this
+    // The first account on a server is its Comandante, which is what makes this
     // shell the one that may ask. The field exists so a screen can decide
     // whether to draw the control at all.
     assert!(
         plug.snapshot().may_manage_voice_rooms,
-        "the shell that hosted this Dogma was not told it may make rooms"
+        "the shell that hosted this server was not told it may make rooms"
     );
 
     let recorder = Arc::new(Recorder::default());
@@ -595,14 +595,14 @@ async fn a_shell_asks_for_a_room_and_the_dogma_makes_it() -> Result<()> {
     Ok(())
 }
 
-/// A shell that asks without the permission is refused by the Dogma.
+/// A shell that asks without the permission is refused by the server.
 ///
 /// `may_manage_voice_rooms` is convenience — `specs/08-seguranca.md` puts the
 /// security in the server refusing — so this shell ignores it and asks anyway,
 /// which is exactly what a hostile client would do. What comes back is an
 /// enumerated notice and no room.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_shell_without_the_permission_is_refused_by_the_dogma() -> Result<()> {
+async fn a_shell_without_the_permission_is_refused_by_the_server() -> Result<()> {
     let (address, server) = start().await?;
 
     // Whoever connects first hosts. This one is the guest.
@@ -626,7 +626,7 @@ async fn a_shell_without_the_permission_is_refused_by_the_dogma() -> Result<()> 
             Event::NoticeRaised { notice } if notice.reason == seele_ffi::NoticeReason::PermissionDenied
         ))
         }),
-        "the Dogma refused in silence, which looks exactly like a Dogma that is broken"
+        "the server refused in silence, which looks exactly like a server that is broken"
     );
 
     // The half that proves the refusal was the server's: the host is connected

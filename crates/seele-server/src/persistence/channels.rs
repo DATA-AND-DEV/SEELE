@@ -1,4 +1,4 @@
-//! voice_rooms and Lines — the rooms a Dogma is made of.
+//! voice_rooms and Lines — the rooms a server is made of.
 //!
 //! `specs/04-servidor-seele.md`:
 //!
@@ -13,7 +13,7 @@
 //! The tables have been in [`super::schema`] since migration 1, with every
 //! column the spec names. What was missing was any way to put a row in one:
 //! outside test modules, the whole repository could read the channel tree and
-//! could not write to it. A Dogma therefore had exactly the rooms
+//! could not write to it. A server therefore had exactly the rooms
 //! [`crate::seed`] gave it at boot and could never have another.
 //!
 //! # Why this reads as well as writes
@@ -54,7 +54,7 @@ impl<'a> Channels<'a> {
 
     /// Every voice room, in the order a shell should draw them.
     ///
-    /// `position` first and `id` as the tiebreak, so a Dogma that has never
+    /// `position` first and `id` as the tiebreak, so a server that has never
     /// reordered anything still lists its rooms in the order they were made
     /// rather than in whatever order SQLite finds them.
     ///
@@ -249,9 +249,9 @@ impl<'a> Channels<'a> {
     ///
     /// # The last one is refused
     ///
-    /// A Dogma with na sala de voz has nowhere to speak, and speaking is what this
+    /// A server with na sala de voz has nowhere to speak, and speaking is what this
     /// product is. Somebody looking at a channel list with na sala de voz in it
-    /// cannot tell a working Dogma from a broken one — which is the exact
+    /// cannot tell a working server from a broken one — which is the exact
     /// condition [`crate::seed`] exists to prevent on the first boot, and it
     /// would be strange to spend a paragraph avoiding it there and then let a
     /// button walk into it.
@@ -364,14 +364,14 @@ impl<'a> Channels<'a> {
 #[error("no such voice room or Line")]
 pub struct NoSuchChannel;
 
-/// The voice room named is the only one this Dogma has.
+/// The voice room named is the only one this server has.
 ///
 /// Its own refusal rather than [`NoSuchChannel`], because the two ask different
 /// things of whoever reads them: one means "check the identifier", this one
 /// means "make another room first". `specs/02-protocolo.md` keeps the sentence
 /// out of the protocol; the shell writes it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("this is the only voice room in the Dogma")]
+#[error("this is the only voice room in the server")]
 pub struct LastVoiceRoom;
 
 /// What a Line holds, as the confirmation in front of destroying it needs it.
@@ -671,8 +671,8 @@ mod tests {
 
     #[test]
     fn the_last_voice_room_is_refused_by_name() {
-        // A Dogma with na sala de voz has nowhere to speak, and somebody looking at a
-        // channel list with na sala de voz in it cannot tell a working Dogma from
+        // A server with na sala de voz has nowhere to speak, and somebody looking at a
+        // channel list with na sala de voz in it cannot tell a working server from
         // a broken one. Refused with its own error, so the shell can say "make
         // another room first" instead of "check the identifier".
         let persistence = store();

@@ -1,4 +1,4 @@
-//! O enlace com um Dogma, incluindo o que fazer quando ele cai.
+//! O enlace com um servidor, incluindo o que fazer quando ele cai.
 //!
 //! [`Client`] é uma conexão: enquanto ela existe, funciona; quando cai, acaba.
 //! Isto é a **sessão**, que é outra coisa — ela atravessa quedas. É aqui que
@@ -58,7 +58,7 @@ use crate::video::{LimitesDeTela, PedidoDeTela};
 /// Onde ficar batendo, e com que credencial.
 #[derive(Debug, Clone)]
 pub struct Destino {
-    /// Endereço do Dogma.
+    /// Endereço do servidor.
     pub servidor: SocketAddr,
     /// O nome que o TLS recebe. Ver [`Client::connect`].
     pub nome_tls: String,
@@ -66,7 +66,7 @@ pub struct Destino {
     pub chave_do_pin: String,
     /// Como aparecer no roster.
     pub apelido: String,
-    /// Convite de uso único ou senha do Dogma.
+    /// Convite de uso único ou senha do servidor.
     pub segredo: Option<String>,
     /// A impressão digital que o convite prometeu, quando veio de um link.
     ///
@@ -77,7 +77,7 @@ pub struct Destino {
 
 /// O que a casca precisa saber.
 pub enum Aviso {
-    /// O Dogma disse algo.
+    /// O servidor disse algo.
     Mensagem(Box<ServerMessage>),
     /// Onde o enlace está, e quanto resta da bateria.
     ///
@@ -182,7 +182,7 @@ impl std::fmt::Debug for Aviso {
 pub enum Motivo {
     /// A bateria interna descarregou: cinco minutos sem reconectar.
     Descarregou,
-    /// O Dogma recusou, e insistir não muda a resposta.
+    /// O servidor recusou, e insistir não muda a resposta.
     Recusado(String),
     /// Alguém pediu para sair.
     Pedido,
@@ -221,10 +221,10 @@ enum Comando {
         linha: LineId,
         nome: String,
     },
-    RenomearDogma {
+    RenomearServer {
         nome: String,
     },
-    IconeDoDogma {
+    IconeDoServer {
         icone: Option<Vec<u8>>,
     },
     Expulsar {
@@ -289,11 +289,11 @@ enum Comando {
     Sair,
 }
 
-/// Quanto tempo se espera o Dogma abrir o fluxo de um anexo pedido.
+/// Quanto tempo se espera o servidor abrir o fluxo de um anexo pedido.
 ///
 /// Uma recusa nunca abre fluxo nenhum — a razão vem pelo controle —, então sem
 /// prazo esta espera seria para sempre. Dez segundos é muito mais do que um
-/// Dogma doméstico leva para começar a mandar e pouco para deixar uma tela
+/// servidor doméstico leva para começar a mandar e pouco para deixar uma tela
 /// esperando por bytes que não vêm.
 const ESPERA_DE_ANEXO: Duration = Duration::from_secs(10);
 
@@ -334,11 +334,11 @@ pub enum Previa {
     /// Enumerado e não erro: nada deu errado, e quem está olhando merece uma
     /// frase diferente da que uma transferência quebrada recebe.
     GrandeDemais {
-        /// O que o Dogma teria mandado.
+        /// O que o servidor teria mandado.
         tamanho: u64,
     },
     /// Não veio: expirou, não existe, ou não chegou inteiro. A razão, quando é
-    /// do Dogma, chega pelo controle como `ServerMessage::AttachmentUnavailable`.
+    /// do servidor, chega pelo controle como `ServerMessage::AttachmentUnavailable`.
     NaoVeio,
 }
 
@@ -366,7 +366,7 @@ pub enum Transferencia {
         /// Qual mensagem.
         id: ClientMessageId,
     },
-    /// O Dogma cortou o fluxo: recusou. A razão vem pelo controle, como
+    /// O servidor cortou o fluxo: recusou. A razão vem pelo controle, como
     /// `ServerMessage::AttachmentRefused`.
     Recusada {
         /// Qual mensagem.
@@ -393,7 +393,7 @@ pub enum Transferencia {
         /// Onde ficou.
         caminho: std::path::PathBuf,
     },
-    /// Não deu para salvar. Se o motivo for do Dogma, ele vem pelo controle
+    /// Não deu para salvar. Se o motivo for do servidor, ele vem pelo controle
     /// como `ServerMessage::AttachmentUnavailable`.
     NaoSalvou {
         /// Qual anexo.
@@ -427,7 +427,7 @@ pub struct Tentativa {
     pub avisou: bool,
 }
 
-/// A sessão com um Dogma, viva através de quedas.
+/// A sessão com um servidor, viva através de quedas.
 pub struct Enlace {
     comandos: mpsc::Sender<Comando>,
     avisos: mpsc::UnboundedReceiver<Aviso>,
@@ -454,7 +454,7 @@ impl std::fmt::Debug for Enlace {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Enlace")
             .field("estado", &self.estado)
-            .field("dogma", &self.sessao.dogma)
+            .field("server", &self.sessao.server)
             .finish()
     }
 }
@@ -511,7 +511,7 @@ const PRAZO_DE_CANDIDATO_DISTANTE: Duration = Duration::from_secs(1);
 /// # Por que existem duas voltas
 ///
 /// Porque a lista é tentada em série e um candidato morto custa o prazo
-/// inteiro. Medido em campo, com o cliente rodando de um 5G contra um Dogma de
+/// inteiro. Medido em campo, com o cliente rodando de um 5G contra um servidor de
 /// verdade: quatro candidatos, os três primeiros sem chance, **9,6 segundos**
 /// queimados — e o quarto respondeu em **358 ms**. Com o prazo geral apertado,
 /// o quarto nunca era alcançado e a tela dizia «tempo esgotado» sobre um
@@ -532,14 +532,14 @@ const PRAZO_DA_PRIMEIRA_VOLTA: Duration = Duration::from_millis(1500);
 impl Enlace {
     /// Conecta no primeiro endereço que atender, tentando um de cada vez.
     ///
-    /// Um convite pode trazer vários endereços do mesmo Dogma — ADR 0006 — e
+    /// Um convite pode trazer vários endereços do mesmo server — ADR 0006 — e
     /// eles não são intercambiáveis: o da rede de casa não é alcançável de
     /// fora, e o público que o roteador abriu costuma não voltar para dentro,
     /// porque a maioria dos roteadores domésticos não faz *hairpin*.
     ///
     /// # Em série, e não em corrida
     ///
-    /// Uma corrida abriria vários apertos de mão contra o mesmo Dogma para
+    /// Uma corrida abriria vários apertos de mão contra o mesmo servidor para
     /// descartar todos menos um — e cada aperto de mão fixa chave, gasta o
     /// convite de uso único do ADR 0021 e aparece no log de quem hospeda como
     /// uma tentativa. Em série nada disso acontece: no caso comum, o primeiro
@@ -554,7 +554,7 @@ impl Enlace {
     ///
     /// # Que erro sai quando nenhum entra
     ///
-    /// O de quem **respondeu**, se algum respondeu: "a chave deste Dogma
+    /// O de quem **respondeu**, se algum respondeu: "a chave deste servidor
     /// mudou" diz o que aconteceu, e "não alcancei" de um endereço que nunca ia
     /// voltar não diz nada. Sem nenhuma resposta, sai o erro do primeiro
     /// candidato, que é o endereço que a pessoa mais provavelmente esperava
@@ -882,11 +882,11 @@ impl Enlace {
                 // Derrubar, não só relatar. E explicitamente, não por `Drop`.
                 //
                 // Soltar o `Client` **acaba** fechando a conexão — medido em
-                // ~85 ms contra um Dogma de verdade, com e sem esta linha —, mas
+                // ~85 ms contra um servidor de verdade, com e sem esta linha —, mas
                 // pelo caminho longo: `Client::connect` deixa uma tarefa de
                 // leitura dona do `RecvStream`, e ela só descobre que ninguém
                 // escuta quando o servidor manda o quadro seguinte. Contra um
-                // Dogma que fala (telemetria a cada segundo) isso é rápido;
+                // servidor que fala (telemetria a cada segundo) isso é rápido;
                 // contra um que emudeceu, é o tempo ocioso do QUIC inteiro,
                 // com uma sessão de pé do lado de quem acabou de ser recusado.
                 //
@@ -897,7 +897,7 @@ impl Enlace {
                 // deixa nenhum teste vermelho, e isso está dito lá por escrito.
                 //
                 // E fecha **dizendo o que foi**: o motivo viaja no
-                // `CONNECTION_CLOSE` e é o que fica no log do Dogma. Fechar
+                // `CONNECTION_CLOSE` e é o que fica no log do servidor. Fechar
                 // como `ejected` faria uma recusa de convite parecer um pessoa
                 // saindo, que é o único jeito de esconder a recusa de quem tem
                 // o log na mão.
@@ -1096,7 +1096,7 @@ impl Enlace {
         self.mandar(Comando::Isolamento(ligado)).await
     }
 
-    /// Pede ao Dogma que faça uma sala de voz.
+    /// Pede ao servidor que faça uma sala de voz.
     ///
     /// Pede, e só. Nada aqui confere se este pessoa pode: a `specs/08-seguranca.md`
     /// põe a decisão no servidor, e um core que recusasse por conta própria
@@ -1127,7 +1127,7 @@ impl Enlace {
         .await
     }
 
-    /// Pede ao Dogma que faça uma Linha.
+    /// Pede ao servidor que faça uma Linha.
     ///
     /// # Errors
     ///
@@ -1136,7 +1136,7 @@ impl Enlace {
         self.mandar(Comando::CriarLinha { nome }).await
     }
 
-    /// Pede ao Dogma que renomeie uma sala de voz.
+    /// Pede ao servidor que renomeie uma sala de voz.
     ///
     /// # Errors
     ///
@@ -1145,7 +1145,7 @@ impl Enlace {
         self.mandar(Comando::RenomearVoiceRoom { voice_room, nome }).await
     }
 
-    /// Pede ao Dogma que renomeie uma Linha.
+    /// Pede ao servidor que renomeie uma Linha.
     ///
     /// # Errors
     ///
@@ -1154,12 +1154,12 @@ impl Enlace {
         self.mandar(Comando::RenomearLinha { linha, nome }).await
     }
 
-    /// Pede ao Dogma que troque o próprio nome.
+    /// Pede ao servidor que troque o próprio nome.
     ///
     /// Pede, e só, como os verbos de sala e pelo mesmo motivo: quem decide é o
-    /// Dogma, que quer `AdministerDogma` para isto e responde `Alert` com
+    /// servidor, que quer `AdministerServer` para isto e responde `Alert` com
     /// `PermissionDenied` quando nega. Quando aceita, o nome novo volta para
-    /// **todo mundo** como `DogmaRenamed`, inclusive para quem pediu — é o que
+    /// **todo mundo** como `ServerRenamed`, inclusive para quem pediu — é o que
     /// impede a tela de quem renomeou de ser a única com o nome certo.
     ///
     /// **Não** é refeito ao reconectar, como os verbos de sala e de moderação:
@@ -1169,11 +1169,11 @@ impl Enlace {
     /// # Errors
     ///
     /// Falha se a sessão já tiver acabado.
-    pub async fn renomear_dogma(&self, nome: String) -> Result<(), Fechado> {
-        self.mandar(Comando::RenomearDogma { nome }).await
+    pub async fn renomear_server(&self, nome: String) -> Result<(), Fechado> {
+        self.mandar(Comando::RenomearServer { nome }).await
     }
 
-    /// Pede ao Dogma que troque a própria imagem, ou que fique sem nenhuma.
+    /// Pede ao servidor que troque a própria imagem, ou que fique sem nenhuma.
     ///
     /// `None` tira a imagem, e é um verbo e não uma ausência: quem pôs tem que
     /// poder tirar.
@@ -1184,16 +1184,16 @@ impl Enlace {
     ///
     /// Falha se a sessão já tiver acabado.
     pub async fn definir_icone(&self, icone: Option<Vec<u8>>) -> Result<(), Fechado> {
-        self.mandar(Comando::IconeDoDogma { icone }).await
+        self.mandar(Comando::IconeDoServer { icone }).await
     }
 
-    /// Pede ao Dogma que acabe com a sessão de alguém.
+    /// Pede ao servidor que acabe com a sessão de alguém.
     ///
     /// Pede, e só — como os verbos de sala, e pela mesma razão: a
     /// `specs/08-seguranca.md` põe a decisão no servidor, e um core que
     /// recusasse por conta própria seria uma segunda autoridade para manter de
     /// acordo com a primeira. Esconder o botão é conveniência; quem nega é o
-    /// Dogma, e ele responde com `Alert` de `PermissionDenied` quando nega.
+    /// servidor, e ele responde com `Alert` de `PermissionDenied` quando nega.
     ///
     /// **Não** é refeito ao reconectar, como os verbos de sala e pelo mesmo
     /// motivo: expulsar é coisa que se faz uma vez, e repetida minutos depois
@@ -1206,7 +1206,7 @@ impl Enlace {
         self.mandar(Comando::Expulsar { pessoa }).await
     }
 
-    /// Pede ao Dogma que impeça alguém de voltar.
+    /// Pede ao servidor que impeça alguém de voltar.
     ///
     /// `expira_em` em segundos desde a época; `None` é para sempre. O `motivo`
     /// é para o registro de quem hospeda e nunca chega a quem foi banido — a
@@ -1230,7 +1230,7 @@ impl Enlace {
         .await
     }
 
-    /// Pede ao Dogma que tire uma mensagem da Linha.
+    /// Pede ao servidor que tire uma mensagem da Linha.
     ///
     /// # Errors
     ///
@@ -1239,7 +1239,7 @@ impl Enlace {
         self.mandar(Comando::RemoverMensagem { mensagem }).await
     }
 
-    /// Pede ao Dogma que mova alguém para uma sala de voz.
+    /// Pede ao servidor que mova alguém para uma sala de voz.
     ///
     /// # Errors
     ///
@@ -1248,10 +1248,10 @@ impl Enlace {
         self.mandar(Comando::MoverPersono { pessoa, voice_room }).await
     }
 
-    /// Pede ao Dogma que destrua uma sala de voz.
+    /// Pede ao servidor que destrua uma sala de voz.
     ///
-    /// Pede, e só, como todo verbo daqui. Quem recusa é o Dogma: sem
-    /// `administrar_dogma` volta `Alert` com `PermissionDenied`, e no único
+    /// Pede, e só, como todo verbo daqui. Quem recusa é o servidor: sem
+    /// `administrar_server` volta `Alert` com `PermissionDenied`, e no único
     /// sala de voz que resta volta `Alert` com `LastVoiceRoom`, que é frase diferente.
     ///
     /// **Não** é refeito ao reconectar, como os verbos de sala e de moderação e
@@ -1265,7 +1265,7 @@ impl Enlace {
         self.mandar(Comando::ApagarVoiceRoom { voice_room }).await
     }
 
-    /// Pede ao Dogma que destrua uma Linha, e tudo que foi escrito nela.
+    /// Pede ao servidor que destrua uma Linha, e tudo que foi escrito nela.
     ///
     /// # Errors
     ///
@@ -1352,7 +1352,7 @@ impl Enlace {
     /// [`ScreenId`] — só chega depois, num `ScreenShareStarted` do fluxo de
     /// eventos. É por isso que este verbo não devolve nada além de «foi
     /// mandado»: entre o botão e o primeiro quadro há uma volta de rede, e
-    /// prometer aqui seria prometer no lugar do Dogma.
+    /// prometer aqui seria prometer no lugar do servidor.
     ///
     /// **Não é refeito depois de uma queda**, ao contrário da sala de voz e da Linha.
     /// Ver o comentário de `Motor::lembrar`: uma transmissão que voltasse
@@ -1387,7 +1387,7 @@ impl Enlace {
     /// Para de compartilhar.
     ///
     /// Idempotente: parar sem estar compartilhando manda o verbo assim mesmo, e
-    /// o Dogma o ignora. A alternativa — conferir aqui — poria uma segunda
+    /// o servidor o ignora. A alternativa — conferir aqui — poria uma segunda
     /// autoridade sobre quem está transmitindo, e ela discordaria da primeira no
     /// primeiro atraso de rede.
     ///
@@ -1457,14 +1457,14 @@ struct Motor {
     tela_pedida: Option<(Box<PedidoDeTela>, LimitesDeTela)>,
     /// A bomba viva desta pessoa, quando há uma.
     tela_viva: Option<TelaViva>,
-    /// A faixa do sinal da **própria** voz, lida do que o Dogma devolve.
+    /// A faixa do sinal da **própria** voz, lida do que o servidor devolve.
     ///
     /// Era uma constante `Nominal`, e a dívida estava escrita no lugar dela: o
     /// teto respondia ao `HostUplink` e ao número de espectadores e **não** ao
     /// sinal da voz piorando — numa sala onde a voz começava a doer, a tela não
     /// cedia sozinha. Faltava metade da regra de aceite do §3.2.
     ///
-    /// O que fechava a dívida já vinha pelo fio e ninguém guardava: o Dogma
+    /// O que fechava a dívida já vinha pelo fio e ninguém guardava: o servidor
     /// calcula a taxa de cada pessoa e a devolve em `PersonState`, uma vez por
     /// segundo. O `SyncRatio` da casca é a mesma conta feita de novo para
     /// desenhar — não é fonte, é cópia —, e é por isso que isto não precisou de
@@ -1500,7 +1500,7 @@ struct Motor {
 /// quadro e deixar quem assiste esperando o resto dele.
 #[derive(Debug)]
 struct TelaViva {
-    /// O nome que o Dogma deu a esta transmissão.
+    /// O nome que o servidor deu a esta transmissão.
     tela: ScreenId,
     /// A alça da thread do codificador. Largá-la para a bomba.
     bomba: crate::bomba::Bomba,
@@ -1509,7 +1509,7 @@ struct TelaViva {
     limites: LimitesDeTela,
 }
 
-/// Em que faixa o sinal da voz começa, antes de o Dogma dizer a primeira.
+/// Em que faixa o sinal da voz começa, antes de o servidor dizer a primeira.
 ///
 /// Otimista de propósito, e o motivo é qual erro custa mais: começar em
 /// `Critical` pararia a tela de alguém cuja voz está ótima, por causa de um
@@ -1814,8 +1814,8 @@ impl Motor {
             Comando::CriarLinha { nome } => cliente.create_line(&nome).await,
             Comando::RenomearVoiceRoom { voice_room, nome } => cliente.rename_voice_room(voice_room, &nome).await,
             Comando::RenomearLinha { linha, nome } => cliente.rename_line(linha, &nome).await,
-            Comando::RenomearDogma { nome } => cliente.rename_dogma(&nome).await,
-            Comando::IconeDoDogma { icone } => cliente.set_dogma_icon(icone).await,
+            Comando::RenomearServer { nome } => cliente.rename_server(&nome).await,
+            Comando::IconeDoServer { icone } => cliente.set_server_icon(icone).await,
             Comando::Expulsar { pessoa } => cliente.kick_person(pessoa).await,
             Comando::Banir {
                 pessoa,
@@ -1920,7 +1920,7 @@ impl Motor {
             }
 
             // O pedido é guardado **antes** de o verbo sair, e a ordem
-            // importa: a resposta do Dogma chega pelo mesmo laço que trouxe
+            // importa: a resposta do servidor chega pelo mesmo laço que trouxe
             // este comando, e guardar depois abriria uma janela em que o
             // `ScreenShareStarted` chega e não encontra a escolha da pessoa.
             Comando::CompartilharTela { fonte, limites } => {
@@ -1930,7 +1930,7 @@ impl Motor {
 
             // Os tetos da pessoa, na transmissão que já existe.
             //
-            // Sem verbo para o Dogma: os tetos são desta ponta. O que atravessa
+            // Sem verbo para o servidor: os tetos são desta ponta. O que atravessa
             // a rede é o resultado deles — a resolução no cabeçalho do fluxo
             // novo —, e não a escolha em si. `TelaEmCurso::pedido` é lido do
             // que está guardado aqui, e é por isso que ele é escrito antes de a
@@ -1954,7 +1954,7 @@ impl Motor {
 
             // A bomba morre aqui, e não quando o `ScreenShareStopped` voltar:
             // quem apertou parar não deve continuar capturando enquanto uma
-            // volta de rede acontece, e o Dogma pode nunca responder.
+            // volta de rede acontece, e o servidor pode nunca responder.
             Comando::PararDeCompartilhar => {
                 self.tela_pedida = None;
                 // Pelos campos e não por [`Self::parar_a_tela`]: `cliente` é um
@@ -1975,11 +1975,11 @@ impl Motor {
 
     // ------------------------------------------------------------------ tela
 
-    /// O que uma mensagem do Dogma faz com a tela desta pessoa.
+    /// O que uma mensagem do servidor faz com a tela desta pessoa.
     fn a_tela_ouviu(&mut self, mensagem: &ServerMessage) {
         match *mensagem {
             // A faixa da **própria** voz, que é a perna que faltava no teto do
-            // §3.2. O Dogma calcula a taxa de cada pessoa e a devolve aqui uma
+            // §3.2. O servidor calcula a taxa de cada pessoa e a devolve aqui uma
             // vez por segundo; o que faltava era guardar a sua.
             //
             // `SyncBand::of` e não um limiar escrito aqui: a conta de onde
@@ -2121,13 +2121,13 @@ impl Motor {
     /// O pedido guardado vira bomba, se este `ScreenShareStarted` for o dele.
     ///
     /// A guarda que mora aqui é uma só, e é a que precisa do [`Client`]: **é
-    /// desta pessoa?** O quadro sai do barramento do Dogma para a sala de voz inteiro,
+    /// desta pessoa?** O quadro sai do barramento do servidor para a sala de voz inteiro,
     /// e sem ela quem apenas assiste ligaria a captura da própria tela ao ver
     /// outro começar. As outras duas — já há uma viva, e o pedido existe — moram
     /// em [`Self::nascer_a_tela`], porque valem também para quem o chama de um
     /// teste.
     ///
-    /// **A `Bomba` não vai para uma bomba a mais quando o Dogma reenvia.** Ele
+    /// **A `Bomba` não vai para uma bomba a mais quando o servidor reenvia.** Ele
     /// reenvia `ScreenShareStarted` a cada pessoa que entra num sala de voz onde já há
     /// transmissão, e quem transmite recebe o reenvio junto; o pedido já foi
     /// consumido no primeiro, então o segundo não acha nada.
@@ -2147,7 +2147,7 @@ impl Motor {
                 // O espelho: os mesmos avisos que uma tela alheia produz, pelo
                 // mesmo caminho, para a casca não ter dois modos de desenhar a
                 // mesma coisa. Quem compartilha era a única pessoa da sala que
-                // não via o que estava mostrando — o Dogma não devolve a
+                // não via o que estava mostrando — o servidor não devolve a
                 // transmissão a quem a produziu, e com razão.
                 let espelho = |visto: crate::bomba::EspelhoDaTela<'_>| {
                     let aviso = match visto {
@@ -2183,7 +2183,7 @@ impl Motor {
     /// Quem escoa entra por fora, e a costura é o que torna esta máquina de
     /// estados afirmável: escrever no fio é a única metade daqui que precisa de
     /// uma conexão QUIC viva, e sem separá-la «pedido guardado → nome chegando →
-    /// bomba nascendo» só seria exercível contra um Dogma de verdade — que é o
+    /// bomba nascendo» só seria exercível contra um servidor de verdade — que é o
     /// mesmo que dizer que nunca seria exercido.
     fn nascer_a_tela(
         &mut self,
@@ -2314,11 +2314,11 @@ impl Motor {
             // minutos de bateria, derrubaria de novo alguém que já tinha
             // voltado, e ninguém entenderia por quê.
             //
-            // Nomear o Dogma e dar-lhe uma imagem também não entram, pelo
+            // Nomear o servidor e dar-lhe uma imagem também não entram, pelo
             // primeiro motivo: são coisas que se fazem uma vez. Refeito depois
-            // da queda, um `RenomearDogma` desfaria o nome que **outra pessoa**
+            // da queda, um `RenomearServer` desfaria o nome que **outra pessoa**
             // pôs nos cinco minutos em que este cliente esteve fora — e o nome
-            // do Dogma é de todo mundo que está dentro, ao contrário da sala de voz em
+            // do servidor é de todo mundo que está dentro, ao contrário da sala de voz em
             // que esta pessoa estava sentada.
             //
             // Apagar é o pior dos três, e por isso vale escrevê-lo: refeito
@@ -2380,11 +2380,11 @@ fn matar(viva: Option<TelaViva>) {
 /// cair. Uma função à parte de [`Enlace::conectar`] porque tudo aqui é decisão
 /// sobre valores, e sem isso a fiação inteira ficava sem guarda.
 ///
-/// Os cinco desfechos são exercidos por teste, sem Dogma do outro lado — e os
+/// Os cinco desfechos são exercidos por teste, sem servidor do outro lado — e os
 /// dois de `PinDecision::Matches` importam tanto quanto os de primeiro contato:
 /// é neles que mora a política de **não** derrubar. Um link velho contra um
 /// servidor já conhecido avisa e segue, porque o TOFU já provou que é o mesmo
-/// servidor de ontem; recusar ali trancaria a pessoa para fora de um Dogma que
+/// servidor de ontem; recusar ali trancaria a pessoa para fora de um servidor que
 /// ela usa. Enquanto `Matches` não tinha teste, alargar esta função para
 /// recusar também nesse caso passava a suíte inteira.
 fn conferir(
@@ -2604,12 +2604,12 @@ fn e_privado(ip: IpAddr) -> bool {
 /// O que ela custa, e não é hipótese: o loopback mapeado **pode** entrar num
 /// convite. `alcance::anunciar_com_porta` empurra o endereço refletido para a
 /// lista conferindo só a família contra a pilha da escuta, sem filtro de
-/// loopback nenhum — então um Dogma cujo ponto de encontro roda na mesma
+/// loopback nenhum — então um servidor cujo ponto de encontro roda na mesma
 /// máquina, atrás de socket de pilha dupla, observa `::ffff:127.0.0.1` como
 /// origem e publica isso. Quando acontece, quem entra gasta
 /// [`AVISOS_POR_CANDIDATO`] furos da janela do anfitrião (três, não um),
 /// 3 × 96 bytes de metadado que ninguém pediu, e [`ESPERA_DO_FURO`] a mais antes
-/// do aperto de mão; o Dogma fura contra o próprio loopback, e a conexão sobe
+/// do aperto de mão; o servidor fura contra o próprio loopback, e a conexão sobe
 /// assim mesmo, porque o candidato sempre foi alcançável sem furo nenhum.
 ///
 /// O que ela **não** custa é segurança, e é por isso que o preço é aceitável: o
@@ -2721,11 +2721,11 @@ fn mesma_rede(daqui: IpAddr, la: IpAddr) -> bool {
 
 /// Se este erro veio de alguém que **respondeu**.
 ///
-/// A diferença decide qual erro sobra quando nenhum candidato entra. Um Dogma
+/// A diferença decide qual erro sobra quando nenhum candidato entra. Um servidor
 /// que recusou o convite, ou cuja chave mudou, disse alguma coisa sobre o
 /// mundo; um "não alcancei" de um endereço que nunca ia voltar não disse nada,
 /// e mostrá-lo no lugar do outro manda a pessoa procurar problema de rede
-/// enquanto o Dogma está ali, recusando.
+/// enquanto o servidor está ali, recusando.
 fn alguem_respondeu(erro: &ConnectError) -> bool {
     matches!(
         erro,
@@ -2807,7 +2807,7 @@ mod tests {
     /// Um destino de teste onde a chave do pin e o nome TLS são **diferentes**.
     ///
     /// Diferentes de propósito: confundir os dois já custou caro a este projeto
-    /// uma vez — dois Dogmas numa LAN dividindo a entrada `localhost`, e o
+    /// uma vez — dois servidores numa LAN dividindo a entrada `localhost`, e o
     /// segundo parecendo o primeiro com a chave trocada (`tofu.rs`). Um teste
     /// em que os dois valores são iguais não pega essa troca.
     fn destino_de_teste(impressao_esperada: Option<&str>) -> Destino {
@@ -2892,7 +2892,7 @@ mod tests {
         // A metade oposta da recusa, e a que some sem ninguém notar: com pin
         // estabelecido, o TOFU já provou que este é o servidor de ontem, então
         // quem está errado é o link. Derrubar aqui trancaria a pessoa para fora
-        // de um Dogma que ela usa porque um amigo mandou um link velho.
+        // de um servidor que ela usa porque um amigo mandou um link velho.
         let loja = crate::tofu::MemoryPinStore::new();
         loja.pin("casa", "aaaa1111".into());
         let decisao = PinDecision::Matches {
@@ -2991,30 +2991,30 @@ mod tests {
         // **e** porta.
         //
         // Não precisa de NAT nenhum para ser provado: bastam dois sockets no
-        // loopback, um fazendo de ponto de encontro e outro fazendo de Dogma.
+        // loopback, um fazendo de ponto de encontro e outro fazendo de server.
         // Nenhum dos dois responde nada — o que se mede é de onde os pacotes
         // saíram, e é isso que o outro lado usaria.
         //
         // # Por que o convite tem dois endereços, e por que o primeiro é público
         //
         // Porque desde o aviso por candidato **nem todo candidato avisa**: o da
-        // rede de casa não precisa de furo nenhum, e o loopback do Dogma de
+        // rede de casa não precisa de furo nenhum, e o loopback do servidor de
         // teste é ainda menos. Com um convite de um endereço só, no loopback,
         // nada chegaria ao ponto de encontro e este teste mediria o silêncio.
         //
         // Então o convite traz `203.0.113.7` — TEST-NET-3, RFC 5737, público em
-        // tudo que importa aqui e onde não há Dogma nenhum — na frente, e o
-        // Dogma de teste atrás. O aviso sai por causa do primeiro; o aperto de
+        // tudo que importa aqui e onde não há servidor nenhum — na frente, e o
+        // server de teste atrás. O aviso sai por causa do primeiro; o aperto de
         // mão que chega ao segundo é o do mesmo laço, pelo socket emprestado da
         // mesma `Batida`. É exatamente a fiação de produção, e é a porta dela
         // que se compara.
         let ponto = tokio::net::UdpSocket::bind("127.0.0.1:0")
             .await
             .expect("o loopback não abriu");
-        let dogma = tokio::net::UdpSocket::bind("127.0.0.1:0")
+        let server = tokio::net::UdpSocket::bind("127.0.0.1:0")
             .await
             .expect("o loopback não abriu");
-        let onde_o_dogma_atende = dogma.local_addr().expect("endereço");
+        let onde_o_server_atende = server.local_addr().expect("endereço");
 
         let bilhete = seele_proto::uri::Bilhete::novo(
             ponto.local_addr().expect("endereço").to_string(),
@@ -3039,14 +3039,14 @@ mod tests {
         // que interessa acontece nos primeiros segundos, e a tarefa é
         // abandonada no fim.
         let tentativa = tokio::spawn(Enlace::conectar_entre_com_bilhete(
-            vec![destino(refletido), destino(onde_o_dogma_atende)],
+            vec![destino(refletido), destino(onde_o_server_atende)],
             Some(bilhete),
             SigningKey::from_bytes(&[7; 32]),
             Arc::new(crate::tofu::MemoryPinStore::new()),
         ));
 
         let mut balde = [0_u8; 1500];
-        // Folgado: o Dogma de teste é o **segundo** candidato, e só é tentado
+        // Folgado: o servidor de teste é o **segundo** candidato, e só é tentado
         // depois de o primeiro queimar o prazo dele.
         let prazo = Duration::from_secs(15);
 
@@ -3054,10 +3054,10 @@ mod tests {
             .await
             .expect("nada chegou ao ponto de encontro")
             .expect("o ponto de encontro não leu");
-        let (_, de_quem_conecta) = tokio::time::timeout(prazo, dogma.recv_from(&mut balde))
+        let (_, de_quem_conecta) = tokio::time::timeout(prazo, server.recv_from(&mut balde))
             .await
-            .expect("nada chegou ao Dogma")
-            .expect("o Dogma não leu");
+            .expect("nada chegou ao servidor")
+            .expect("o servidor não leu");
 
         tentativa.abort();
 
@@ -3271,7 +3271,7 @@ mod tests {
     }
 
     #[test]
-    fn a_bomba_so_nasce_quando_o_dogma_da_nome_a_transmissao() {
+    fn a_bomba_so_nasce_quando_o_server_da_nome_a_transmissao() {
         let Some(biblioteca) = biblioteca_de_teste() else {
             return;
         };
@@ -3288,7 +3288,7 @@ mod tests {
             "o pedido sozinho já tinha ligado a captura"
         );
 
-        // O Dogma respondeu, e a transmissão ganhou nome.
+        // O servidor respondeu, e a transmissão ganhou nome.
         let mut canal = None;
         motor.nascer_a_tela(ScreenId(7), |origem, eventos| {
             canal = Some((origem, eventos));
@@ -3407,7 +3407,7 @@ mod tests {
 
     #[test]
     fn sem_pedido_guardado_um_nome_de_transmissao_nao_liga_nada() {
-        // O Dogma reenvia `ScreenShareStarted` a cada pessoa que entra num sala de voz
+        // O servidor reenvia `ScreenShareStarted` a cada pessoa que entra num sala de voz
         // onde já há transmissão — inclusive a quem está transmitindo. Sem esta
         // guarda, cada pessoa entrando na sala ligaria outra captura da mesma
         // tela.
@@ -3433,11 +3433,11 @@ mod tests {
     ///
     /// O teto respondia ao `HostUplink` e ao número de espectadores e **não**
     /// ao sinal da voz piorando: numa sala onde a voz começava a doer, a tela
-    /// não cedia sozinha. A perna que faltava já vinha pelo fio — o Dogma
+    /// não cedia sozinha. A perna que faltava já vinha pelo fio — o servidor
     /// devolve a taxa de cada pessoa em `PersonState`, uma vez por segundo — e
     /// ninguém guardava a sua.
     #[test]
-    fn a_faixa_da_voz_desce_pelo_que_o_dogma_devolve() {
+    fn a_faixa_da_voz_desce_pelo_que_o_server_devolve() {
         use seele_proto::control::{PersonState, Presence};
 
         let eu = PersonId(7);
@@ -3499,10 +3499,10 @@ mod tests {
         use crate::tela::Teto;
 
         let mut motor = motor_de_teste();
-        // O Dogma declarou uma subida larga, então a perna dele sai da frente e
+        // O servidor declarou uma subida larga, então a perna dele sai da frente e
         // quem manda no `min` do §5.1 é a desta máquina. Sem isto o teto ficaria
         // preso em 1200 kbps por causa da **outra** perna, que é um achado
-        // separado — ver `caminho::tests::sem_a_subida_do_dogma_...`.
+        // separado — ver `caminho::tests::sem_a_subida_do_server_...`.
         motor.caminho_de_quem_hospeda_bps = Some(100_000_000);
 
         // Antes de medir, a suposição de sempre: a primeira transmissão de uma

@@ -3,7 +3,7 @@
 //!
 //! # Por que encolher em vez de subir o teto
 //!
-//! O teto é `seele_proto::control::MAX_DOGMA_ICON_LEN`, 8 KiB, e ele não é
+//! O teto é `seele_proto::control::MAX_SERVER_ICON_LEN`, 8 KiB, e ele não é
 //! folgado por descuido: o ícone viaja num quadro de controle de 16 KiB e quem
 //! hospeda o reenvia para cada pessoa conectada, umas cinquenta. Subir o teto
 //! sobe as duas contas ao mesmo tempo, e a segunda é a de uma máquina que
@@ -25,11 +25,11 @@
 
 /// O maior lado, em pixels, que o protocolo aceita.
 ///
-/// Cópia de `seele_proto::control::MAX_DOGMA_ICON_SIDE`, pelo mesmo motivo que
+/// Cópia de `seele_proto::control::MAX_SERVER_ICON_SIDE`, pelo mesmo motivo que
 /// `TETO_DO_ICONE` é cópia: esta casca não depende do `seele-proto`.
 const LADO: u32 = 256;
 
-/// O teto em bytes, cópia de `seele_proto::control::MAX_DOGMA_ICON_LEN`.
+/// O teto em bytes, cópia de `seele_proto::control::MAX_SERVER_ICON_LEN`.
 const TETO: usize = 8 * 1024;
 
 /// Quanto ler do disco antes de desistir.

@@ -2,7 +2,7 @@
 
 ## Identidade
 
-O daemon se chama `seeled`. Uma instância é um **Dogma Central**. Internamente, três subsistemas nomeados — não é decoração: são fronteiras reais de módulo, e o estado de cada um aparece nas telas de diagnóstico do cliente.
+O daemon se chama `seeled`. Uma instância é um **Server Central**. Internamente, três subsistemas nomeados — não é decoração: são fronteiras reais de módulo, e o estado de cada um aparece nas telas de diagnóstico do cliente.
 
 | Subsistema | Responsabilidade |
 |---|---|
@@ -15,7 +15,7 @@ Quando um subsistema está degradado, o cliente mostra isso explicitamente. "Os 
 ## Modelo de domínio
 
 ```
-Dogma (a instância)
+Server (a instância)
  ├─ VoiceRoom       — canal de voz     (id, nome, limite, senha?, papel mínimo)
  ├─ Linha      — canal de texto   (id, nome, papel mínimo de leitura/escrita)
  ├─ Pessoa     — conta de usuário (id, apelido, chave pública, papéis)
@@ -28,7 +28,7 @@ VoiceRooms e Linhas são independentes; um VoiceRoom pode ter uma Linha associad
 
 Modelo simples e enumerado, sem sistema de expressão. Cada Papel carrega um conjunto:
 
-`ver_voice_room`, `inserir_plug`, `falar`, `ler_linha`, `escrever_linha`, `remover_mensagem`, `mover_pessoa`, `expulsar`, `banir`, `gerenciar_voice_rooms`, `gerenciar_papeis`, `administrar_dogma`.
+`ver_voice_room`, `inserir_plug`, `falar`, `ler_linha`, `escrever_linha`, `remover_mensagem`, `mover_pessoa`, `expulsar`, `banir`, `gerenciar_voice_rooms`, `gerenciar_papeis`, `administrar_server`.
 
 Papéis padrão: **Comandante** (tudo), **Operador** (moderação), **Pessoa** (uso normal), **Observador** (só ouvir e ler).
 
@@ -65,7 +65,7 @@ SQLite, arquivo único, WAL ligado. Tabelas: `pessoas`, `papeis`, `pessoas_papei
 Arquivo TOML único, mais variáveis de ambiente para segredos. Exemplo de forma esperada:
 
 ```toml
-[dogma]
+[server]
 nome = "Terceira Tóquio"
 descricao = "..."
 max_pessoas = 50

@@ -1,4 +1,4 @@
-//! Os quatro verbos de moderação, contra um Dogma de verdade.
+//! Os quatro verbos de moderação, contra um servidor de verdade.
 //!
 //! # Por que aqui, e conduzindo um `Plug`
 //!
@@ -8,7 +8,7 @@
 //! `seele-core` nem o `seele-ffi` conferem permissão nenhuma — de propósito,
 //! porque a `specs/08-seguranca.md` põe a decisão no servidor —, então o pedido
 //! de um pessoa sem `Kick` **sai no fio**. Um teste que só olhasse o cliente não
-//! distinguiria «a casca não mandou» de «o Dogma recusou», e as duas dão
+//! distinguiria «a casca não mandou» de «o servidor recusou», e as duas dão
 //! exatamente a mesma tela. Aqui a diferença é medida por fora: a vítima
 //! continua conectada e sentada, o que só é observável de outra sessão.
 //!
@@ -33,31 +33,31 @@ use anyhow::Result;
 use seele_ffi::{ConnectConfig, EndReason, Event, EventListener, NoticeReason, Plug, PlugError};
 use seele_server::persistence::{Persistence, Location};
 use seele_server::permissions::{Permissions, COMMANDER_ROLE, OPERATOR_ROLE, PERSON_ROLE};
-use seele_server::{DogmaConfig, Server};
+use seele_server::{ServerConfig, Daemon};
 
 const VOICE_ROOM: u32 = 1;
 const LINE: u32 = 1;
 const PRAZO: Duration = Duration::from_secs(10);
 
-/// Sobe um Dogma numa porta que o sistema escolhe, com o banco num arquivo.
+/// Sobe um servidor numa porta que o sistema escolhe, com o banco num arquivo.
 ///
 /// Num arquivo e não em memória porque alguns testes daqui precisam **ser** o
-/// operador do Dogma para além do que o protocolo oferece: não há verbo para
+/// operador do servidor para além do que o protocolo oferece: não há verbo para
 /// conceder papel, e a metade da moderação que só aparece entre um Operador e
 /// um Comandante ficaria sem teste. Abrir uma segunda conexão ao mesmo arquivo
 /// e mexer no PERMISSIONS é encenar o que uma tela de papéis fará um dia.
-async fn dogma(marca: &str) -> Result<(SocketAddr, Arc<Server>, std::path::PathBuf)> {
+async fn server(marca: &str) -> Result<(SocketAddr, Arc<Daemon>, std::path::PathBuf)> {
     let mut arquivo = std::env::temp_dir();
     arquivo.push(format!("seele-moderacao-{marca}-{}.db", std::process::id()));
     let _ = std::fs::remove_file(&arquivo);
 
-    let config = DogmaConfig {
+    let config = ServerConfig {
         name: "Terceira Tóquio".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::File(arquivo.clone()),
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let servidor = Arc::new(Server::bind(config).await?);
+    let servidor = Arc::new(Daemon::bind(config).await?);
     let endereco = servidor.local_addr()?;
     let aceitando = Arc::clone(&servidor);
     tokio::spawn(async move {
@@ -109,7 +109,7 @@ fn conectar(endereco: SocketAddr, apelido: &str) -> Result<Arc<Plug>, PlugError>
 /// Conecta fora da thread que desenha, como o comando do Tauri faz.
 ///
 /// Estreia um apelido: a casa é apagada primeiro, então esta é uma identidade
-/// nova contra um Dogma recém-nascido. Voltar usa [`voltar`], que guarda a
+/// nova contra um servidor recém-nascido. Voltar usa [`voltar`], que guarda a
 /// chave.
 async fn entrar(endereco: SocketAddr, apelido: &str) -> Result<Arc<Plug>> {
     let _ = nascer(apelido);
@@ -195,8 +195,8 @@ fn dar_papel(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn um_pessoa_comum_e_recusado_pelo_dogma_e_nao_pela_casca() -> Result<()> {
-    let (endereco, servidor, _arquivo) = dogma("recusa").await?;
+async fn um_pessoa_comum_e_recusado_pelo_server_e_nao_pela_casca() -> Result<()> {
+    let (endereco, servidor, _arquivo) = server("recusa").await?;
 
     // O anfitrião conecta primeiro e vira Comandante. Aqui ele é a vítima e a
     // testemunha ao mesmo tempo: se qualquer verbo tivesse passado, a sessão
@@ -240,7 +240,7 @@ async fn um_pessoa_comum_e_recusado_pelo_dogma_e_nao_pela_casca() -> Result<()> 
         esperadas += 1;
         assert!(
             ate(&intruso, |_| recusas.quantas() >= esperadas),
-            "{verbo}: o Dogma recusou em silêncio — {} recusas depois de {esperadas} \
+            "{verbo}: o servidor recusou em silêncio — {} recusas depois de {esperadas} \
              pedidos, e um silêncio não se distingue de um servidor quebrado",
             recusas.quantas()
         );
@@ -283,7 +283,7 @@ async fn um_pessoa_comum_e_recusado_pelo_dogma_e_nao_pela_casca() -> Result<()> 
 
 #[tokio::test(flavor = "multi_thread")]
 async fn expulsar_acaba_com_a_sessao_e_deixa_voltar() -> Result<()> {
-    let (endereco, servidor, _arquivo) = dogma("expulsar").await?;
+    let (endereco, servidor, _arquivo) = server("expulsar").await?;
 
     let anfitriao = entrar(endereco, "anfitriao-expulsar").await?;
     assert!(
@@ -341,7 +341,7 @@ async fn expulsar_acaba_com_a_sessao_e_deixa_voltar() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn banir_acaba_com_a_sessao_e_impede_de_voltar() -> Result<()> {
-    let (endereco, servidor, _arquivo) = dogma("banir").await?;
+    let (endereco, servidor, _arquivo) = server("banir").await?;
 
     let anfitriao = entrar(endereco, "anfitriao-banir").await?;
     let visita = entrar(endereco, "visita-banir").await?;
@@ -373,7 +373,7 @@ async fn banir_acaba_com_a_sessao_e_impede_de_voltar() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn apagar_uma_mensagem_tira_ela_da_conversa_de_todo_mundo() -> Result<()> {
-    let (endereco, servidor, _arquivo) = dogma("apagar").await?;
+    let (endereco, servidor, _arquivo) = server("apagar").await?;
 
     let anfitriao = entrar(endereco, "anfitriao-apagar").await?;
     anfitriao.open_line(LINE)?;
@@ -407,8 +407,8 @@ async fn apagar_uma_mensagem_tira_ela_da_conversa_de_todo_mundo() -> Result<()> 
 
     // E a outra metade da permissão: o autor apaga a **própria** sem ter
     // `RemoveMessage`. A permissão do specs/04 diz «de outra pessoa», e um
-    // Dogma onde consertar o próprio erro de digitação precisa de um operador é
-    // um Dogma onde se fala com o operador sobre erros de digitação.
+    // servidor onde consertar o próprio erro de digitação precisa de um operador é
+    // um servidor onde se fala com o operador sobre erros de digitação.
     assert!(
         !visita.snapshot().may_remove_message,
         "a visita tem a permissão, e esta metade do teste não mede nada"
@@ -431,7 +431,7 @@ async fn apagar_uma_mensagem_tira_ela_da_conversa_de_todo_mundo() -> Result<()> 
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mover_leva_o_plug_e_conta_a_pessoa() -> Result<()> {
-    let (endereco, servidor, _arquivo) = dogma("mover").await?;
+    let (endereco, servidor, _arquivo) = server("mover").await?;
 
     let anfitriao = entrar(endereco, "anfitriao-mover").await?;
     anfitriao.create_voice_room("VOICE_ROOM-02 SALA DOS FUNDOS".into(), 8, None)?;
@@ -503,7 +503,7 @@ async fn mover_leva_o_plug_e_conta_a_pessoa() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn um_operador_modera_pessoas_e_nao_o_comandante() -> Result<()> {
-    let (endereco, servidor, arquivo) = dogma("hierarquia").await?;
+    let (endereco, servidor, arquivo) = server("hierarquia").await?;
 
     // O anfitrião é Comandante por ser o primeiro a chegar.
     let anfitriao = entrar(endereco, "anfitriao-hierarquia").await?;
@@ -539,24 +539,24 @@ async fn um_operador_modera_pessoas_e_nao_o_comandante() -> Result<()> {
     // E não funciona para cima. A `specs/04-servidor-seele.md` dá «moderação»
     // ao Operador e tudo ao Comandante, o que sozinho deixaria promover um
     // amigo por uma noite significar entregar-lhe a chave de trancar você fora
-    // do seu próprio Dogma, para sempre, com um verbo que a spec diz que ele
+    // do seu próprio servidor, para sempre, com um verbo que a spec diz que ele
     // deve ter.
     operador.ban_person(comandante, None, None)?;
     assert!(
         ate(&operador, |plug| aviso(plug)
             == Some(NoticeReason::PermissionDenied)),
-        "o Dogma deixou o Operador banir o Comandante em silêncio"
+        "o servidor deixou o Operador banir o Comandante em silêncio"
     );
     assert_eq!(
         anfitriao.snapshot().ended,
         None,
-        "o Operador baniu o Comandante do Dogma que ele hospeda"
+        "o Operador baniu o Comandante do servidor que ele hospeda"
     );
     let ainda =
         tokio::task::spawn_blocking(move || conectar(endereco, "anfitriao-hierarquia")).await?;
     assert!(
         ainda.is_ok(),
-        "o Comandante ficou trancado para fora do próprio Dogma: {ainda:?}"
+        "o Comandante ficou trancado para fora do próprio servidor: {ainda:?}"
     );
 
     servidor.shutdown();

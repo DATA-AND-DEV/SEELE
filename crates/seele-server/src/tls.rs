@@ -28,7 +28,7 @@ impl Identity {
     /// Generates a fresh self-signed identity.
     ///
     /// `subject_alt_names` should include every name and address clients will
-    /// use to reach this Dogma. With TOFU the names matter less than the key —
+    /// use to reach this server. With TOFU the names matter less than the key —
     /// a client pins the key, not the name — but a certificate with no matching
     /// name still fails before pinning ever happens.
     ///
@@ -48,7 +48,7 @@ impl Identity {
 
     /// Lê a identidade guardada no banco, ou gera e guarda uma.
     ///
-    /// **Sem isto, reiniciar o `seeled` trocava a chave do Dogma.** Todo
+    /// **Sem isto, reiniciar o `seeled` trocava a chave do servidor.** Todo
     /// cliente que já tinha se conectado via `A CHAVE DO SERVIDOR MUDOU` — o
     /// alerta bloqueante do ADR 0003 — e era recusado. Um reinício de rotina
     /// disparando o aviso reservado para ataque é pior que não ter o aviso:

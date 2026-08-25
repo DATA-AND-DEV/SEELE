@@ -23,7 +23,7 @@ use seele_core::enlace::Destino;
 use seele_core::{MemoryPinStore, PinStore, SigningKey};
 use seele_ffi::{ConnectConfig, ConnectStage, Event, EventListener, Plug};
 use seele_server::persistence::Location;
-use seele_server::{DogmaConfig, Server};
+use seele_server::{ServerConfig, Daemon};
 
 /// A base de uma configuração de entrada, para os testes que só trocam um campo.
 fn config_de_teste(server: String, casa: &std::path::Path) -> ConnectConfig {
@@ -45,7 +45,7 @@ fn config_de_teste(server: String, casa: &std::path::Path) -> ConnectConfig {
 /// Um endereço onde não há ninguém.
 ///
 /// Aberto e devolvido, para a porta ser real e estar livre: um número escolhido
-/// à mão poderia ser o Dogma de outra pessoa na máquina que roda os testes. É o
+/// à mão poderia ser o servidor de outra pessoa na máquina que roda os testes. É o
 /// mesmo auxiliar de `candidatos.rs`, e falha do jeito que um endereço errado
 /// falha em campo.
 fn endereco_morto() -> SocketAddr {
@@ -59,7 +59,7 @@ fn endereco_morto() -> SocketAddr {
     endereco
 }
 
-/// Dois candidatos que ninguém atende — um convite cujo Dogma não existe.
+/// Dois candidatos que ninguém atende — um convite cujo servidor não existe.
 fn destinos_mortos_de_teste() -> Vec<Destino> {
     (0..2)
         .map(|_| {
@@ -380,21 +380,21 @@ fn a_trilha_de_uma_chegada_que_falhou_atravessa_ate_a_casca() {
 //
 // # O par, e por que ele é um par
 //
-// Os dois testes conectam ao **mesmo endereço**, ao mesmo Dogma, com a mesma
+// Os dois testes conectam ao **mesmo endereço**, ao mesmo servidor, com a mesma
 // impressão digital. A única diferença é o bilhete, e portanto o `LEVE`. Um
 // deles sozinho não separaria a forma do endereço do aviso: os dois são a
 // linha da tabela em que a forma não decide, e é para isso que a tabela tem
 // duas linhas de IPv4 público.
 
-/// Sobe um Dogma de verdade numa porta que o sistema escolhe.
-async fn dogma_de_teste() -> Option<(SocketAddr, Arc<Server>)> {
-    let config = DogmaConfig {
+/// Sobe um servidor de verdade numa porta que o sistema escolhe.
+async fn server_de_teste() -> Option<(SocketAddr, Arc<Daemon>)> {
+    let config = ServerConfig {
         name: "Terceira Tóquio".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let servidor = Arc::new(Server::bind(config).await.ok()?);
+    let servidor = Arc::new(Daemon::bind(config).await.ok()?);
     let endereco = servidor.local_addr().ok()?;
     let aceitando = Arc::clone(&servidor);
     tokio::spawn(async move {
@@ -424,8 +424,8 @@ async fn ponto_que_conta() -> Option<(SocketAddr, Arc<AtomicUsize>)> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn uma_conexao_que_venceu_por_um_candidato_avisado_diz_furo_de_nat() {
-    let Some((dogma, servidor)) = dogma_de_teste().await else {
-        panic!("o Dogma de teste não subiu");
+    let Some((server, servidor)) = server_de_teste().await else {
+        panic!("o servidor de teste não subiu");
     };
     let Some((ponto, avisos)) = ponto_que_conta().await else {
         panic!("o ponto de encontro de teste não subiu");
@@ -438,7 +438,7 @@ async fn uma_conexao_que_venceu_por_um_candidato_avisado_diz_furo_de_nat() {
         panic!("o bilhete de teste não se monta");
     };
 
-    let mut config = config_de_teste(format!("[::ffff:127.0.0.1]:{}", dogma.port()), casa.path());
+    let mut config = config_de_teste(format!("[::ffff:127.0.0.1]:{}", server.port()), casa.path());
     config.expected_fingerprint = Some(servidor.fingerprint().to_owned());
     config.bilhete = Some(bilhete);
 
@@ -448,7 +448,7 @@ async fn uma_conexao_que_venceu_por_um_candidato_avisado_diz_furo_de_nat() {
     };
     let (plug, _) = match entrada {
         Ok(entrada) => entrada,
-        Err(falha) => panic!("o Dogma de teste não deixou entrar: {falha:?}"),
+        Err(falha) => panic!("o servidor de teste não deixou entrar: {falha:?}"),
     };
 
     assert!(
@@ -466,18 +466,18 @@ async fn uma_conexao_que_venceu_por_um_candidato_avisado_diz_furo_de_nat() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_mesma_conexao_sem_aviso_nenhum_diz_endereco_publico() {
-    // O outro lado do par. Mesmo endereço, mesmo Dogma, mesma impressão
+    // O outro lado do par. Mesmo endereço, mesmo server, mesma impressão
     // digital: só o bilhete sai. Sem ele nenhum `LEVE` é mandado, e o nome tem
     // de mudar — se não mudar, `Snapshot.caminho` está sendo decidido só pela
     // forma do endereço, que é a metade da tabela que não precisa do `avisou`.
-    let Some((dogma, servidor)) = dogma_de_teste().await else {
-        panic!("o Dogma de teste não subiu");
+    let Some((server, servidor)) = server_de_teste().await else {
+        panic!("o servidor de teste não subiu");
     };
     let Ok(casa) = tempfile::tempdir() else {
         panic!("sem diretório temporário não há identidade para conectar");
     };
 
-    let mut config = config_de_teste(format!("[::ffff:127.0.0.1]:{}", dogma.port()), casa.path());
+    let mut config = config_de_teste(format!("[::ffff:127.0.0.1]:{}", server.port()), casa.path());
     config.expected_fingerprint = Some(servidor.fingerprint().to_owned());
 
     let Ok(entrada) = tokio::task::spawn_blocking(move || Plug::connect_with_trail(config)).await
@@ -486,7 +486,7 @@ async fn a_mesma_conexao_sem_aviso_nenhum_diz_endereco_publico() {
     };
     let (plug, _) = match entrada {
         Ok(entrada) => entrada,
-        Err(falha) => panic!("o Dogma de teste não deixou entrar: {falha:?}"),
+        Err(falha) => panic!("o servidor de teste não deixou entrar: {falha:?}"),
     };
 
     assert_eq!(

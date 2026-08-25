@@ -1,8 +1,8 @@
-//! Quem pode entrar num Dogma.
+//! Quem pode entrar num servidor.
 //!
 //! Fecha o **[EM ABERTO — escolher em M2]** de `specs/08-seguranca.md`, que
 //! recomendava: "chave pública como mecanismo primário, com convite por token
-//! de uso único para entrada em um Dogma. Senha como fallback opcional
+//! de uso único para entrada em um servidor. Senha como fallback opcional
 //! configurável pelo operador."
 //!
 //! Até M5 não havia porteiro nenhum: quem alcançasse a porta UDP completava o
@@ -17,12 +17,12 @@
 //! segura: um token já gasto que vaze depois não vale nada — coisa que jamais
 //! se pode dizer de uma senha.
 //!
-//! **Senha do Dogma** é a alternativa, para quem prefere um segredo só para o
+//! **Senha do servidor** é a alternativa, para quem prefere um segredo só para o
 //! grupo todo. Argon2id, como `specs/08` exige. Mais frágil por natureza: um
 //! segredo compartilhado vaza pelo membro mais descuidado e não dá para
 //! revogar sem trocar para todo mundo.
 //!
-//! Um Dogma sem nenhum dos dois configurados é **aberto**, e continua sendo o
+//! Um servidor sem nenhum dos dois configurados é **aberto**, e continua sendo o
 //! padrão: é o que faz o teste em rede local funcionar sem cerimônia. O
 //! `seeled` avisa em voz alta ao subir assim escutando fora do loopback.
 
@@ -51,7 +51,7 @@ pub const VALIDADE_CONVITE_S: i64 = 7 * 24 * 60 * 60;
 /// tem direito de saber o que houve na máquina dele.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Recusa {
-    /// O Dogma exige segredo e nenhum foi apresentado.
+    /// O servidor exige segredo e nenhum foi apresentado.
     SegredoAusente,
     /// Não é a senha nem um convite conhecido.
     SegredoInvalido,
@@ -61,17 +61,17 @@ pub enum Recusa {
     ConviteExpirado,
 }
 
-/// Como o Dogma decide quem entra.
+/// Como o servidor decide quem entra.
 #[derive(Debug, Clone, Default)]
 pub struct Politica {
-    /// Hash Argon2id da senha do Dogma, se o operador configurou uma.
+    /// Hash Argon2id da senha do servidor, se o operador configurou uma.
     senha_hash: Option<String>,
     /// Se convites são aceitos. Ligado sempre que existe pelo menos um.
     aceita_convites: bool,
 }
 
 impl Politica {
-    /// Um Dogma sem porteiro.
+    /// Um servidor sem porteiro.
     #[must_use]
     pub fn aberta() -> Self {
         Self::default()
@@ -86,7 +86,7 @@ impl Politica {
         let conexao = persistence.connection();
         let senha_hash: Option<String> = conexao
             .query_row(
-                "SELECT valor FROM configuracao WHERE chave = 'senha_dogma'",
+                "SELECT valor FROM configuracao WHERE chave = 'senha_server'",
                 [],
                 |linha| linha.get(0),
             )
@@ -101,13 +101,13 @@ impl Politica {
         })
     }
 
-    /// Se este Dogma deixa qualquer um entrar.
+    /// Se este servidor deixa qualquer um entrar.
     #[must_use]
     pub fn aberto(&self) -> bool {
         self.senha_hash.is_none() && !self.aceita_convites
     }
 
-    /// Se há senha do Dogma configurada.
+    /// Se há senha do servidor configurada.
     ///
     /// Para a tela de quem hospeda dizer **qual** camada está de pé, e não só se
     /// a porta está aberta: «sem senha e sem convites» e «com senha» pedem
@@ -199,7 +199,7 @@ pub struct Passe {
 }
 
 impl Passe {
-    /// Uma entrada que não deve nada: Dogma aberto, ou senha.
+    /// Uma entrada que não deve nada: servidor aberto, ou senha.
     #[must_use]
     fn livre() -> Self {
         Self::default()
@@ -239,7 +239,7 @@ pub fn gastar(persistence: &mut Persistence, passe: &Passe) -> Result<Result<(),
     }
 }
 
-/// Grava a senha do Dogma, ou a remove.
+/// Grava a senha do servidor, ou a remove.
 ///
 /// # Errors
 ///
@@ -248,12 +248,12 @@ pub fn definir_senha(persistence: &mut Persistence, senha: Option<&str>) -> Resu
     let conexao = persistence.connection();
     match senha {
         None => {
-            conexao.execute("DELETE FROM configuracao WHERE chave = 'senha_dogma'", [])?;
+            conexao.execute("DELETE FROM configuracao WHERE chave = 'senha_server'", [])?;
         }
         Some(senha) => {
             let hash = calcular_hash(senha)?;
             conexao.execute(
-                "INSERT INTO configuracao (chave, valor) VALUES ('senha_dogma', ?1)
+                "INSERT INTO configuracao (chave, valor) VALUES ('senha_server', ?1)
                  ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor",
                 params![hash],
             )?;
@@ -282,9 +282,9 @@ pub fn criar_convite(persistence: &mut Persistence, observacao: &str) -> Result<
 
 /// Se uma sala de voz aceita esta entrada.
 ///
-/// A senha da sala de voz é coisa diferente da admissão no Dogma: aquela decide quem
+/// A senha da sala de voz é coisa diferente da admissão no servidor: aquela decide quem
 /// entra na casa, esta decide quem entra num cômodo. Uma sala de voz sem senha aceita
-/// qualquer membro do Dogma, que é o caso normal.
+/// qualquer membro do servidor, que é o caso normal.
 ///
 /// Recusa quando o banco não responde. É a única resposta segura: uma consulta
 /// que falha não é prova de que a porta pode abrir.
@@ -367,7 +367,7 @@ fn verificar_senha(senha: &str, hash: &str) -> bool {
     let Ok(analisado) = PasswordHash::new(hash) else {
         // Hash corrompido no banco. Recusar é a única resposta segura: aceitar
         // seria transformar corrupção em porta aberta.
-        tracing::error!("o hash da senha do Dogma está corrompido; ninguém entra por senha");
+        tracing::error!("o hash da senha do servidor está corrompido; ninguém entra por senha");
         return false;
     };
     Argon2::default()
@@ -399,7 +399,7 @@ mod tests {
 
     fn persistence() -> Persistence {
         let persistence = Persistence::open(&Location::Memory).expect("banco em memória");
-        // O Dogma real semeia a sala de voz padrão ao subir; um banco recém-migrado
+        // O servidor real semeia a sala de voz padrão ao subir; um banco recém-migrado
         // está vazio, e um teste de fechadura precisa de uma porta.
         persistence
             .connection()
@@ -412,7 +412,7 @@ mod tests {
     }
 
     #[test]
-    fn um_dogma_sem_configuracao_deixa_qualquer_um_entrar() {
+    fn um_server_sem_configuracao_deixa_qualquer_um_entrar() {
         // É o padrão de propósito: é o que faz o teste em rede local funcionar
         // sem cerimônia. O aviso ao subir é que impede isso de ser esquecido.
         let mut persistence = persistence();
@@ -460,7 +460,7 @@ mod tests {
         let guardado: String = persistence
             .connection()
             .query_row(
-                "SELECT valor FROM configuracao WHERE chave = 'senha_dogma'",
+                "SELECT valor FROM configuracao WHERE chave = 'senha_server'",
                 [],
                 |linha| linha.get(0),
             )
@@ -612,7 +612,7 @@ mod tests {
     }
 
     #[test]
-    fn tirar_a_senha_reabre_o_dogma_se_nao_houver_convites() {
+    fn tirar_a_senha_reabre_o_server_se_nao_houver_convites() {
         let mut persistence = persistence();
         definir_senha(&mut persistence, Some("temporária")).expect("definir");
         assert!(!Politica::carregar(&persistence).expect("política").aberto());
@@ -689,7 +689,7 @@ mod tests {
         persistence
             .connection()
             .execute(
-                "INSERT INTO configuracao (chave, valor) VALUES ('senha_dogma', 'lixo')",
+                "INSERT INTO configuracao (chave, valor) VALUES ('senha_server', 'lixo')",
                 [],
             )
             .expect("gravar lixo");

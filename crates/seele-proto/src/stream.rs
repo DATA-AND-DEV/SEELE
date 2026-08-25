@@ -5,7 +5,7 @@
 //!
 //! # Why a byte exists where arithmetic used to do the job
 //!
-//! A Dogma accepts unidirectional streams for two different things — an
+//! A server accepts unidirectional streams for two different things — an
 //! attachment transfer (ADR 0027) and a screen transmission (§3.1) — and until
 //! now nothing on the wire said which. What told them apart was a sum over the
 //! first byte: an attachment opens with a four-byte big-endian length whose

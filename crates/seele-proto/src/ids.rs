@@ -88,7 +88,7 @@ id_type!(
     /// becoming a second talker, so it gets an identifier of its own and nobody
     /// has to rewrite that table to make room for something that never speaks.
     ///
-    /// Assigned by the Dogma when the transmission is announced, never taken
+    /// Assigned by the server when the transmission is announced, never taken
     /// from the sender — the rule `specs/08-seguranca.md` already applies to
     /// [`Ssrc`], for the same reason: an identifier a client chooses is an
     /// identifier a client can choose somebody else's.

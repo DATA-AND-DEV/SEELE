@@ -38,8 +38,8 @@ nenhum dos dois lados fica sabendo. As 1160 estão gravadas em PERSISTENCE — o
 perde é a entrega, não a mensagem.
 
 **O conserto** é encerrar a sessão com `DisconnectReason::FellBehind`, contando
-em `Dogma::atrasos` quantos eventos morreram. Não é castigo: o buraco não tem
-remendo no lugar, porque evento não tem endereço — o Dogma não sabe dizer quais
+em `Server::atrasos` quantos eventos morreram. Não é castigo: o buraco não tem
+remendo no lugar, porque evento não tem endereço — o servidor não sabe dizer quais
 faltaram e o cliente não sabe pedir. Reconectar e buscar histórico repõe tudo, é
 caminho que já existe, e a bateria interna o percorre sozinha.
 
@@ -66,7 +66,7 @@ sintoma.
    janela por stream do quinn abre em 1,25 MB; dez corpos de 3,9 KB são 39 KB.
    `tests/rajada.rs` afirma que nenhum dos dois lados jamais emitiu
    `STREAM_DATA_BLOCKED` nessa rajada, via `Client::flow_control`.
-2. **A fila da tarefa que grava em lote — não descarta.** `Dogma::post` é canal
+2. **A fila da tarefa que grava em lote — não descarta.** `Server::post` é canal
    limitado com `send().await`: cheio, ele faz contrapressão até a sessão, e a
    contrapressão volta pelo QUIC. Falha de transação já era registrada em log.
    Nenhum caminho ali perde calado.
@@ -78,11 +78,11 @@ sintoma.
 
 ### O que ficou instrumentado
 
-`Dogma::atrasos` (eventos e sessões), `Client::flow_control` (os quadros
+`Server::atrasos` (eventos e sessões), `Client::flow_control` (os quadros
 `*_BLOCKED` dos dois sentidos, lidos do quinn), um aviso no fim de cada sessão
 com quantas vezes o controle de fluxo prendeu a escrita para aquele cliente, e
-`Server::quantas_mensagens` / `Server::mensagens_da_linha`, que abrem a pergunta
-"o que o Dogma gravou" sem tornar público o `Persistence::connection()` — que era o
+`Daemon::quantas_mensagens` / `Daemon::mensagens_da_linha`, que abrem a pergunta
+"o que o servidor gravou" sem tornar público o `Persistence::connection()` — que era o
 obstáculo anotado aqui, e cuja abertura entregaria uma `rusqlite::Connection` e
 faria do esquema o contrato.
 
@@ -217,7 +217,7 @@ para no degrau mais alto que funcionar, sem que ninguém configure nada:
 
 - **Degrau 3 — UPnP.** Pede a porta ao próprio roteador do anfitrião. Nenhum
   terceiro em lugar nenhum. Resolve boa parte das casas.
-- **Degrau 2 — IPv6.** A escuta era `0.0.0.0`, que atende **só IPv4**: o Dogma
+- **Degrau 2 — IPv6.** A escuta era `0.0.0.0`, que atende **só IPv4**: o servidor
   não estava em IPv6 nem quando as duas pontas tinham. Agora é `[::]` com pilha
   dupla escrita à mão, e o cliente também deixou de ligar só em IPv4.
 - **Degrau 1.** Continua sendo a resposta quando os dois de cima não dão.
@@ -248,7 +248,7 @@ de mapear. Na primeira rede real em que rodou, era exatamente esse o caso.
 ## 5 · Fechada em 2026-08-15 · Não havia limitação de taxa
 
 **O que era.** `DisconnectReason::RateLimited` existia no protocolo e **nunca
-era enviado**. Um convidado legítimo podia inundar o Dogma de mensagens, e
+era enviado**. Um convidado legítimo podia inundar o servidor de mensagens, e
 qualquer um podia bater à porta em laço — cada tentativa comprando um Argon2id
 inteiro de CPU do anfitrião, que o ADR 0021 escolheu caro de propósito.
 
@@ -269,7 +269,7 @@ consultado em três lugares. ADR 0025 conta as escolhas; em resumo:
 
 **Como se sabe que não é enfeite.**
 `crates/seele-conformance/tests/limite_de_taxa.rs` cobra as duas pontas contra
-um Dogma de verdade, e o mecanismo tem teste próprio com o tempo entrando por
+um servidor de verdade, e o mecanismo tem teste próprio com o tempo entrando por
 parâmetro — nenhum `sleep`, nada dependendo de a máquina estar desocupada. Cada
 teste foi visto reprovar com o código sabotado antes de ser dado por bom: o
 balde que nunca esvazia, a portaria que sempre deixa passar, o vigia que só
@@ -280,7 +280,7 @@ como janela fixa.
 aperto de mão TLS: quem só abre conexões e não fala ainda gasta uma assinatura
 por tentativa. Fechar isso é `Incoming::refuse()` do quinn, antes de qualquer
 cripto, e tem o custo de recusar sem conseguir dizer por quê. Fica anotado no
-ADR 0025 como o degrau seguinte, para o dia em que um Dogma for de fato
+ADR 0025 como o degrau seguinte, para o dia em que um servidor for de fato
 inundado.
 
 ## 6 · Apelido é validado só por tamanho
@@ -290,7 +290,7 @@ ratatui filtra todo caractere de controle, verificado — e o app usa
 `textContent`. Sobra a possibilidade de sósia: caracteres de direção invertida
 ou parecidos com os de outra pessoa no roster.
 
-Baixo impacto num Dogma de amigos, real num aberto.
+Baixo impacto num Server de amigos, real num aberto.
 
 ## 7 · A matriz de três SOs nunca foi verde por inteiro
 
@@ -308,7 +308,7 @@ mídia já é pós-v1 — mas é perda real.
 
 O comando existe e avisa que não faz. **`:ejetar` agora resolve o caso comum**:
 volta à tela de seleção, com a conexão e o áudio derrubados de verdade, e de lá
-se escolhe outro Dogma. O que continua faltando é trocar de destino num comando
+se escolhe outro Server. O que continua faltando é trocar de destino num comando
 só, sem passar pela tela.
 
 O que o laço externo mostrou é que o teardown fecha —
@@ -330,9 +330,9 @@ própria pessoa — até o movimento de alguém redesenhar a lista.
 
 **O que se sabe.** É uma corrida entre a sessão que morre e a que nasce, e as
 duas mexem na lotação pela mesma chave. `Occupancy::seat` começa apagando o
-pessoa de toda parte antes de sentá-lo (`dogma.rs:171-174`), e o desmonte da
+pessoa de toda parte antes de sentá-lo (`server.rs:171-174`), e o desmonte da
 sessão antiga chama `occupancy.vacate(voice_room, person)` (`session.rs:845`). Como
-`vacate` filtra só por `PersonId` (`dogma.rs:177-181`), ele não distingue a
+`vacate` filtra só por `PersonId` (`server.rs:177-181`), ele não distingue a
 cadeira da sessão velha da cadeira da sessão nova: se o desmonte da primeira
 chegar **depois** do `seat` da segunda, apaga a segunda. A ordem depende de
 quando a conexão QUIC antiga é dada por morta, o que ninguém controla.
@@ -347,10 +347,10 @@ do teste usavam a mesma semente. **Não foi reproduzido em uso**, e fica
 registrado como defeito de leitura, e não como relato de campo.
 
 **A janela tem dois tamanhos, e o segundo não é estreito.** Com a rede
-entregando, o `CONNECTION_CLOSE` da conexão antiga chega e o Dogma desmonta
+entregando, o `CONNECTION_CLOSE` da conexão antiga chega e o servidor desmonta
 aquela sessão em milissegundos — aí a corrida exige que o desmonte caia depois
 de um handshake inteiro, e é de fato improvável. Mas o `CONNECTION_CLOSE` é um
-pacote só e não é retransmitido: se ele se perder, o Dogma não fica sabendo de
+pacote só e não é retransmitido: se ele se perder, o servidor não fica sabendo de
 nada e só derruba a sessão pelo tempo ocioso, que é o
 `seele_proto::transport::IDLE_TIMEOUT` de **20 s**. Contra um handshake com
 orçamento de 10 s, a janela deixa de ser uma corrida e passa a ser a regra —
@@ -364,7 +364,7 @@ que faz a mesma pessoa voltar não olha a lotação. Está comentado nos dois
 lugares, senão alguém junta os dois "simplificando" e ganha uma reprovação
 intermitente no lugar do defeito.
 
-**Por que não foi resolvido.** O conserto é no Dogma, não no cliente: `vacate`
+**Por que não foi resolvido.** O conserto é no servidor, não no cliente: `vacate`
 precisa saber de qual sessão veio o pedido — carregar o `SessionId` no
 `Occupant` e só desocupar se for o mesmo —, e isso mexe em `seat`, `vacate`,
 `vacate_everywhere` e nos avisos de roster. É tarefa própria, com revisão
@@ -390,7 +390,7 @@ comparação acontece antes de haver sessão. No primeiro contato, um convite qu
 não confere **recusa**: derruba a conexão e desfaz o pin que o TLS já tinha
 escrito — sem essa segunda metade a recusa seria decorativa, porque a visita
 seguinte, sem link para conferir, entraria calada no servidor recusado. Contra
-um Dogma já fixado, um convite que discorda **avisa** e não derruba: o TOFU já
+um servidor já fixado, um convite que discorda **avisa** e não derruba: o TOFU já
 provou que é o servidor de ontem, e trancar alguém para fora por causa de um
 link velho seria o erro oposto. As duas cascas leem o mesmo veredito; o `plug`
 não compara mais nada por conta própria.
@@ -401,7 +401,7 @@ convite. Enquanto nada era conferido isso era inerte; deixou de ser no mesmo
 dia em que a conferência passou a existir.
 
 **Como se sabe que não é enfeite.** `crates/seele-conformance/tests/convite.rs`
-prova os três desfechos contra um Dogma de verdade — a impressão certa
+prova os três desfechos contra um servidor de verdade — a impressão certa
 verificando, a errada recusando e desfixando, e o link velho avisando sobre uma
 sessão que continua falando. Cada um foi visto ficar vermelho com a política
 desligada antes de ser dado por bom.
@@ -413,7 +413,7 @@ está contada.
 ## 13 · As três telas novas do app nunca foram vistas por ninguém
 
 **Sintoma.** Não há sintoma relatado, e é justamente esse o problema. Três
-regiões da janela — a lista de Dogmas visitados na tela de entrada, a faixa de
+regiões da janela — a lista de Servers visitados na tela de entrada, a faixa de
 veredito de identidade que a sessão acende, e a barra de busca com o contador
 `[n/m]` — foram escritas, testadas por fora e **nunca desenhadas para um
 humano**. O ambiente onde este ramo foi feito não consegue capturar tela, e
@@ -481,7 +481,7 @@ acontece: a mensagem na tela deixa de ser a mensagem que a pessoa escreveu.
 
 ## 15 · Uma máquina ouve picotado e a outra não
 
-**Sintoma.** Duas máquinas na mesma rede, o Mac hospedando o Dogma e o Windows
+**Sintoma.** Duas máquinas na mesma rede, o Mac hospedando o servidor e o Windows
 conectando. O Windows fala e o Mac ouve perfeitamente; o Mac fala e o Windows
 ouve picotado. O texto atravessa inteiro nos dois sentidos, o tempo todo.
 
@@ -584,11 +584,11 @@ do macOS — a que oferece "Mover para o Lixo" — é a mais assustadora das tr�
 
 ## 17 · Fechada em 2026-08-17 · O botão de atualizar existe em Rust e não tem tela
 
-**Como fechou.** A tela existe: quinta seção do Terminal Dogma, `ATUALIZAÇÃO`.
+**Como fechou.** A tela existe: quinta seção do Terminal Server, `ATUALIZAÇÃO`.
 Procurar não baixa, instalar instala o que a última procura mostrou, e nenhuma
 das duas roda sozinha — o ADR 0026 pede as três coisas. O aviso que esta
 pendência exigia está escrito antes do ato, com a parte que mais importa: se
-houver um Dogma hospedado naquela janela, quem estiver dentro cai junto.
+houver um servidor hospedado naquela janela, quem estiver dentro cai junto.
 
 O andamento vem pelo canal `seele://atualizacao`. Quando o pacote traz `total`,
 é barra com porcentagem; quando não traz, é travessão com o motivo no `title` —
@@ -622,7 +622,7 @@ garantido.
 
 **Por que não foi resolvido.** Falta a tela, e ela não é um botão qualquer:
 `instalar_atualizacao` **fecha e reabre o SEELE** nos três sistemas, então quem a
-desenhar tem um aviso a escrever antes — e, se houver um Dogma hospedado naquela
+desenhar tem um aviso a escrever antes — e, se houver um servidor hospedado naquela
 janela, dizer que quem estiver dentro dele cai junto.
 
 **Quando dói.** Em toda versão nova, em toda máquina. E dói em silêncio: quem não
@@ -644,7 +644,7 @@ despejar. O teto por arquivo é derivado (um dezesseis avos do total) e não
 configurado, para os dois números não poderem ser postos num par absurdo.
 
 Quem hospeda escolhe com `seeled anexos 2G`, gravado na tabela `configuracao`.
-Ausência da chave significa o padrão de 1 GiB, e nada é gravado: um Dogma que já
+Ausência da chave significa o padrão de 1 GiB, e nada é gravado: um servidor que já
 existia sobe com o teto sem que nenhuma migração escreva por ele.
 
 **O caminho.** Um fluxo QUIC unidirecional por transferência, nos dois sentidos,
@@ -685,7 +685,7 @@ arquivo ali para salvar: não desenhar é diferente de esconder. É a separaçã
 as `NOTAS-DE-RELEASE` fazem entre «chegou inteiro» e «é o que diz ser», e a
 segunda pergunta passa a ter resposta para estes quatro formatos.
 
-**A busca acontece ao apertar, nunca ao rolar.** O anexo mora no Dogma: ver é
+**A busca acontece ao apertar, nunca ao rolar.** O anexo mora no servidor: ver é
 baixar, e uma Linha que buscasse toda imagem ao rolar transformaria o teto de
 disco de quem hospeda em banda de todo mundo. O que voltou fica guardado por
 anexo, inclusive quando é recusa.
@@ -730,10 +730,10 @@ depois que a limitação de taxa fechou (pendência 5) e a escada de alcance sub
 dois degraus (pendência 4).
 
 **O que se sabe.** Tudo o que dá para saber sem escrever código está no
-**ADR 0027**, que está **proposto** e não aceito: o Dogma guarda os anexos com
+**ADR 0027**, que está **proposto** e não aceito: o servidor guarda os anexos com
 teto total fixo — 1 GiB por padrão, escolhido por quem hospeda — e ao encher
 descarta o mais antigo, com a mensagem passando a dizer que o arquivo expirou. O
-motivo da escolha é que um Dogma doméstico roda no notebook de alguém, e o pior
+motivo da escolha é que um servidor doméstico roda no notebook de alguém, e o pior
 caso de disco tem que ser conhecido no dia um.
 
 O ADR também decide o caminho: fluxo QUIC unidirecional próprio por
@@ -746,7 +746,7 @@ documento, e ele existe antes do código pelo mesmo motivo que o ADR 0022 existi
 antes do degrau 4: as perguntas caras aqui não são de implementação. Quem
 hospeda passa a poder ler toda foto que chega (`specs/08-seguranca.md` já põe
 "vazamento de histórico por acesso ao disco do servidor" fora de escopo em v1, e
-manda documentar), e um Dogma doméstico não varre vírus e não vai varrer.
+manda documentar), e um servidor doméstico não varre vírus e não vai varrer.
 
 **Por que não foi resolvido.** Falta a decisão humana sobre um ADR proposto, e
 faltam quatro coisas que o próprio ADR nomeia como sem saída boa: justiça sob
@@ -834,7 +834,7 @@ saía com cara de certo e com a frase «alcança de qualquer lugar» embaixo del
 **Três defeitos independentes, com o mesmo sintoma.**
 
 1. **A escada declarava degrau que o socket não servia.** `Escada::subir`
-   recebia só a porta. Naquela máquina a pilha dupla falhou e o Dogma recuou
+   recebia só a porta. Naquela máquina a pilha dupla falhou e o servidor recuou
    para `0.0.0.0` — comportamento certo, e medido: `Get-NetUDPEndpoint` mostrou
    `0.0.0.0:8383`. A escada, sem saber disso, achou o IPv6 global da máquina e
    declarou degrau 2. O convite anunciava um endereço IPv6 onde ninguém
@@ -876,7 +876,7 @@ apareceu**, e é o esperado para escuta UDP de programa de console — quem espe
 por ela espera para sempre. Está documentado em `docs/alcance-pela-internet.md`,
 junto com a VPN.
 
-**O que ficou de fora, e é pequeno.** Um Dogma hospedado numa máquina com IPv4
+**O que ficou de fora, e é pequeno.** Um servidor hospedado numa máquina com IPv4
 público direto — uma VPS, ou uma casa sem NAT — e sem UPnP continua caindo em
 `SoRedeLocal`, cuja frase diz «só funciona na sua rede» quando na verdade
 funciona de qualquer lugar. É um erro na direção segura (promete menos do que
@@ -971,7 +971,7 @@ O esquema é fechado e só cresce; **a versão 1 traz uma capacidade só, `cor`*
 pela regra de que uma capacidade entra quando a tabela e o consumidor dela já
 existem — glifo, frase, som, atalho, comando e painel são recusados um a um com o
 motivo. O `plug` fica com a palheta congelada em v1. Um MOD **não acompanha um
-Dogma**: a sala pode recomendar, e instalar continua sendo ato de quem instala.
+Server**: a sala pode recomendar, e instalar continua sendo ato de quem instala.
 
 **O que ficou tentado.** Nada de código, de propósito — a mesma postura da
 pendência 18 e do degrau 4 do ADR 0022: as perguntas caras aqui não são de
@@ -993,7 +993,7 @@ as pessoas usam e um que elas fazem seu.
 **O que existe.** A portaria do **ADR 0030** está construída inteira: a camada no
 servidor (`crates/seele-server/src/portaria.rs`, migração 4), as duas razões de
 protocolo, os sete comandos e a tela (`apps/seele-app/ui/camada-portaria.js`).
-Quem hospeda pelo botão HOSPEDAR AQUI fecha o Dogma, gera convite e decide quem
+Quem hospeda pelo botão HOSPEDAR AQUI fecha o servidor, gera convite e decide quem
 entra sem abrir terminal, que era o buraco relatado.
 
 **O que foi feito depois, em 2026-08-18, e o que sobrou.**
@@ -1010,7 +1010,7 @@ pendente é uma linha em SQLite e sobrevive à janela minimizada, ao app fechado
 qualquer coisa que *chamasse*.
 
 O chip PORTA já contava os pendentes a cada cinco segundos, e ele **mora dentro
-de `#tela-sessao`**: entrar numa jaula ou abrir o Terminal Dogma esconde a
+de `#tela-sessao`**: entrar numa jaula ou abrir o Terminal Server esconde a
 `<section>` inteira e leva o número junto, que é justamente quando quem hospeda
 está ocupado com outra coisa. Agora há uma faixa (`#portaria-batendo`, em
 `camada-portaria.*`) fora de todas as telas, como a região viva e a varredura,
@@ -1035,7 +1035,7 @@ atendeu», que quem a recebe não sabe o que fazer com ela —, e por isso
 novo.
 
 Esta entrada previa um botão na tela de fim. Ele foi para a tela de entrada em
-Dogma Central (`#tela-auth`, `data-modo="espera"`), e o motivo é que a tela de
+Server Central (`#tela-auth`, `data-modo="espera"`), e o motivo é que a tela de
 fim é sobre uma sessão que houve: aqui não houve nenhuma, e o que a pessoa
 precisa não é de um botão solto mas de uma tela que diga *o que aconteceu*, *o
 que fazer agora* e *o que não adianta fazer* — que o pedido não vence, que nada
@@ -1053,12 +1053,12 @@ guarda que impede alguém de reintroduzi-la achando que ajuda.
 
 **3 · Pedido não vence, e a tabela não é varrida.** `portaria` guarda uma linha
 por impressão digital, para sempre, inclusive de quem nunca entrou e nunca vai
-entrar. Num Dogma exposto à internet, com portaria ligada, isso é uma linha por
+entrar. Num Server exposto à internet, com portaria ligada, isso é uma linha por
 chave que bater — contida pelo balde por endereço do ADR 0025, que responde antes
 de o `Hello` ser lido, mas contida não é limitada. `convites` tem prazo e uma
 varredura; `portaria` não tem nenhum dos dois, e não há tela que apague em lote.
 
-**4 · Não administra o Dogma de outra pessoa.** Os sete comandos falam direto com
+**4 · Não administra o servidor de outra pessoa.** Os sete comandos falam direto com
 o PERSISTENCE da máquina que hospeda, e isso é decisão do ADR 0030, não descuido: a
 alternativa era expor à internet a decisão sobre quem entra pela internet. O
 efeito é que um Comandante remoto continua sem fechar a porta da casa alheia —
@@ -1067,7 +1067,7 @@ alternativa 3, e continua lá.
 
 **O que este trabalho encostou e não consertou.** `Permissions::unban` existe
 (`crates/seele-server/src/permissions.rs:541`) e **não tem verbo de protocolo**: um
-banimento só se desfaz por quem tem o arquivo do Dogma, à mão, e é isso que a
+banimento só se desfaz por quem tem o arquivo do servidor, à mão, e é isso que a
 frase de confirmação do banimento diz. A portaria **não piora** aquilo, porque
 não acrescenta verbo nenhum, e mostra a forma da saída: uma decisão que se desfaz
 é uma linha que se apaga, e `unban` já é literalmente `DELETE FROM bans`. Falta a
@@ -1090,26 +1090,26 @@ que exista hoje.
 
 ## 24 · Várias sessões estão desenhadas e não construídas
 
-**Sintoma.** Não dá para estar em dois Dogmas ao mesmo tempo. O `+` da trilha
+**Sintoma.** Não dá para estar em dois Servers ao mesmo tempo. O `+` da trilha
 existe na tela, desabilitado, com a limitação escrita no `title`
 (`apps/seele-app/ui/index.html:906`): «este produto mantém um Plug por vez: para
-trocar de Dogma, use DESCONECTAR». `Session` guarda um
+trocar de Server, use DESCONECTAR». `Session` guarda um
 `plug: Mutex<Option<Arc<Plug>>>` (`apps/seele-app/src/main.rs:49`) e `connect`
 recusa com `AlreadyConnected` (`main.rs:168-170`). Quem quer ler a Linha de outro
-Dogma desconecta deste.
+Server desconecta deste.
 
 **O que se sabe.** Tudo o que dá para saber sem escrever código está no
 **ADR 0031**, que está **proposto** e não aceito. Em resumo: várias sessões, um
-caminho de voz. A sessão é do Dogma — VoiceRooms, Linhas, histórico, roster,
+caminho de voz. A sessão é do servidor — VoiceRooms, Linhas, histórico, roster,
 telemetria, apelido, permissões. O microfone, a saída, o modo de voz, o A.T.
 Field, o isolamento total, a tecla, a chave, o atualizador e o MOD são desta
 máquina, e não se multiplicam.
 
 **A resposta sobre voz é não**, e é decisão e não limitação: não dá para estar em
-jaula de dois Dogmas ao mesmo tempo. O microfone é um e a pessoa é uma; a barra
+jaula de dois Servers ao mesmo tempo. O microfone é um e a pessoa é uma; a barra
 de espaço deixaria de ter referente (`ui/tela-sessao.js:1714-1723` é um `keydown`
 de janela sem alvo); e o orçamento do ADR 0009 é de um caminho, com 21 ms já
-gastos pelo ADR 0028. Entrar num VoiceRoom de outro Dogma **ejeta** o anterior, e o
+gastos pelo ADR 0028. Entrar num VoiceRoom de outro Server **ejeta** o anterior, e o
 VoiceRoom que se deixou é nomeado.
 
 **Três achados no código mudaram o desenho**, e valem mesmo sem o ADR:
@@ -1125,12 +1125,12 @@ VoiceRoom que se deixou é nomeado.
    Faltava o dono do caminho, não o mecanismo.
 3. **Nada no `Event` diz de qual sessão ele é.** O canal é um
    (`main.rs:36`) e a `Bridge` emite o `Event` cru (`main.rs:110-116`). Com duas
-   sessões isso não quebra: desenha a mensagem do Dogma B na Linha do Dogma A,
+   sessões isso não quebra: desenha a mensagem do servidor B na Linha do servidor A,
    calado. É o defeito mais barato de introduzir e mais caro de achar.
 
 **O tamanho, sem estimar para baixo.** O `Snapshot` **não** vira plural — nasce
 uma camada acima dele, para preservar `messages_revision` e porque as 28 funções
-de desenho continuam desenhando um Dogma cada. Ele **perde sete campos** de áudio
+de desenho continuam desenhando um servidor cada. Ele **perde sete campos** de áudio
 para um bloco de máquina. O `main.rs` tem **51 `#[tauri::command]`**, dos quais
 **23 resolvem `session.plug()?`** e mais quatro alcançam o `Plug` de outra forma
 (`set_talking`, `escolher_microfone`, `escolher_saida` e o `connect`, que é onde a
@@ -1138,7 +1138,7 @@ regra de uma sessão é aplicada). `apps/seele-app/ui/` são ~13 mil linhas, das
 quais `tela-sessao.js` sozinho são 1771; a janela lê **23 dos 24 campos** do
 `Snapshot`. Há ainda **23 variáveis de módulo no JavaScript que já são estado de
 sessão** sem nunca terem sido chamadas assim, e o **endereço do servidor não está
-no `Snapshot`** — ele sobrevive só no global `alvoDoDogma`
+no `Snapshot`** — ele sobrevive só no global `alvoDoServer`
 (`ui/tela-auth.js:74`). Não há roteador: seis telas trocadas por `hidden`, e
 nenhum conceito de sessão corrente em que rotear. **Nada no protocolo, no
 servidor nem no banco muda** — é o que torna o custo grande em vez de perigoso.
@@ -1147,19 +1147,19 @@ servidor nem no banco muda** — é o que torna o custo grande em vez de perigos
 `crates/seele-tui` **não consome `Snapshot`**: zero menções, e ele nem depende do
 `seele-ffi` — só de `seele-core` e `seele-server`, pela regra do ADR 0002. Mudar
 o `Snapshot` não custa nada ao terminal, ao contrário do que a primeira versão do
-ADR dizia. O terminal fica para trás de outro jeito: ele continua com um Dogma
+ADR dizia. O terminal fica para trás de outro jeito: ele continua com um servidor
 por processo, e a resposta dele são dois terminais com dois `$SEELE_HOME` — que
 dá duas identidades de brinde e não compartilha nem microfone, nem lista de
 visitados, nem trilha.
 
 **O teste que reprova no primeiro minuto tem nome:**
-`the_add_dogma_button_promises_nothing_this_product_can_do`
+`the_add_server_button_promises_nothing_this_product_can_do`
 (`apps/seele-app/tests/frontend.rs:2150-2183`), que exige `disabled`, `title`,
 `aria-label` e que **nenhum script mencione `$("trilha-adicionar")`**. É a moldura
 sendo cobrada como moldura; quando o `+` funcionar, ele vira o teste do
 contrário.
 
-**Um operador de outro Dogma pode inserir o seu plug.**
+**Um operador de outro Server pode inserir o seu plug.**
 `crates/seele-server/src/session.rs:1220-1230`: `MovePerson` transmite
 `PersonMoved` sem exigir que o pessoa já esteja num VoiceRoom. A regra do ADR 0031 é
 que o servidor decide quem está na sala e **esta máquina decide para onde o
@@ -1168,20 +1168,20 @@ reivindica o caminho de voz.
 
 **Por que não foi resolvido.** Falta a decisão humana sobre um ADR proposto. E
 cinco coisas o próprio ADR nomeia como sem saída boa — uma chave para todos os
-Dogmas, uma pessoa só fala num lugar de cada vez, a placa em segundo plano conta
+Servers, uma pessoa só fala num lugar de cada vez, a placa em segundo plano conta
 que aconteceu e não o quê, o terminal não ganha nada pela segunda vez seguida, e
-não há número para quantos Dogmas cabem.
+não há número para quantos Servers cabem.
 
-**Quando dói.** Dói em uso, e não só em pedido: hoje ler a Linha de outro Dogma
+**Quando dói.** Dói em uso, e não só em pedido: hoje ler a Linha de outro Server
 custa a conversa em que a pessoa está.
 
-## 25 · Personalização de um Dogma está desenhada e não construída, e o nome é o pedaço barato
+## 25 · Personalização de um servidor está desenhada e não construída, e o nome é o pedaço barato
 
-**Sintoma.** Um Dogma não tem nada além do nome, e nem o nome se escolhe pela
+**Sintoma.** Um servidor não tem nada além do nome, e nem o nome se escolhe pela
 janela: `hospedar` passa a string literal `"Casa"`
-(`apps/seele-app/src/main.rs:372-376`), então **todo Dogma hospedado pelo botão
+(`apps/seele-app/src/main.rs:372-376`), então **todo Server hospedado pelo botão
 HOSPEDAR AQUI se chama Casa**, e é assim que ele aparece no cabeçalho de quem
-entra. `DogmaConfig::name` é campo de struct montada no `main.rs`
+entra. `ServerConfig::name` é campo de struct montada no `main.rs`
 (`crates/seele-server/src/lib.rs:57-58`).
 
 **O que se sabe.** Tudo o que dá para saber sem escrever código está no
@@ -1189,18 +1189,18 @@ entra. `DogmaConfig::name` é campo de struct montada no `main.rs`
 porque as três não são a mesma coisa.
 
 **O nome é o caso fácil, e vale dizer que é fácil.** O campo já viaja
-(`ServerMessage::Session.dogma`, `crates/seele-proto/src/control.rs:909`, com
+(`ServerMessage::Session.server`, `crates/seele-proto/src/control.rs:909`, com
 teto de 64 em `MAX_CLIENT_NAME_LEN`), já chega ao `Snapshot`
 (`crates/seele-ffi/src/types.rs:557`) e já é desenhado. Falta quem escreve: um
 valor na tabela `configuracao`, pelo mesmo critério que o ADR 0027 usou para o
 teto de anexos, e um acessor no `Hospedagem` falando direto com o PERSISTENCE local
 como o ADR 0030 fez com a portaria — **sem verbo novo de protocolo**. Renomear
-com o Dogma no ar precisa de um evento, ou o nome novo só vale na próxima
+com o servidor no ar precisa de um evento, ou o nome novo só vale na próxima
 conexão e a tela tem de dizer isso.
 
-**A cor: um Dogma não repinta a janela de quem entra.** É a mesma resposta do
+**A cor: um servidor não repinta a janela de quem entra.** É a mesma resposta do
 ADR 0029 sobre MODs, e mais firme aqui, porque lá havia pelo menos o ato de
-instalar em que pendurar o consentimento. O que um Dogma ganha é **a placa dele
+instalar em que pendurar o consentimento. O que um servidor ganha é **a placa dele
 na trilha, 56 px, e mais nada** — aplicada por CSSOM num nó, nunca num token,
 nunca numa folha, nunca num seletor. E ele declara **um nome de uma lista
 fechada, nunca um valor**, que é o 0029 apertado em um grau: a lista é curta
@@ -1221,7 +1221,7 @@ fora da placa.
 **A ordem, porque um depende do outro e o outro não.** O **nome** não depende de
 nada e pode ser construído sozinho hoje. A **cor** depende do ADR 0031: sem a
 trilha não existe superfície pequena o bastante para uma cor escolhida por outra
-pessoa, e a pergunta «um Dogma pode repintar a janela alheia» só tem resposta
+pessoa, e a pergunta «um servidor pode repintar a janela alheia» só tem resposta
 útil quando existe uma placa de 56 px para responder «pode pintar a dele». O
 **ícone** depende da conferência de bytes que o ADR 0027 deixou anotada. Os três
 não devem ser construídos juntos: juntá-los esconde o mais barato atrás do mais
@@ -1233,7 +1233,7 @@ não há mais, a sigla é derivada e derivação erra, a cor não protege de imi
 (só a impressão digital protege), e um nome escolhido por outra pessoa aparece na
 tela de quem entra sem moderação nenhuma.
 
-**Quando dói.** O nome dói hoje, em uso: todo Dogma hospedado pelo app tem o
+**Quando dói.** O nome dói hoje, em uso: todo Server hospedado pelo app tem o
 mesmo. A cor e o ícone doem em pedido, e a cor só passa a fazer sentido depois da
 pendência 24.
 
@@ -1254,7 +1254,7 @@ chegaram. A escuta funciona, o Windows deixa passar, o endereço está certo —
 quem bloqueia é o roteador.
 
 **O que isso custa a quem entra.** Os dois IPv6 ficam na frente da lista e
-custam quatro segundos cada. Medido de um 5G contra um Dogma real: 9,6 s
+custam quatro segundos cada. Medido de um 5G contra um servidor real: 9,6 s
 queimados em três candidatos sem chance, e o quarto respondeu em 358 ms. A
 ordem já foi consertada (`4c9429c`) e a espera também (`3b5510f`), mas as duas
 tratam o sintoma: o endereço continua sendo anunciado e continua não

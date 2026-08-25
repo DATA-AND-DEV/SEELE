@@ -107,8 +107,8 @@ pub struct SessionInfo {
     pub person: PersonId,
     /// The media source the server assigned. Gap G1.
     pub ssrc: Ssrc,
-    /// What the Dogma is called.
-    pub dogma: String,
+    /// What the server is called.
+    pub server: String,
     /// Voice channels visible to us.
     pub voice_rooms: Vec<seele_proto::control::VoiceRoomInfo>,
     /// Text channels visible to us.
@@ -216,7 +216,7 @@ const CONTROL_PRIORITY: i32 = 1;
 /// coming, and the other has nothing coming ever.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sent {
-    /// Every byte went out and the Dogma took the stream to its end.
+    /// Every byte went out and the server took the stream to its end.
     ///
     /// What follows is either the message appearing on the Line — which is how
     /// the sender learns it worked, matched by `client_message_id` — or an
@@ -225,7 +225,7 @@ pub enum Sent {
         /// How many bytes went.
         bytes: u64,
     },
-    /// The Dogma stopped the stream: it refused **before** taking the bytes.
+    /// The server stopped the stream: it refused **before** taking the bytes.
     ///
     /// Not a failure of this end, and not something to retry blindly: the
     /// enumerated reason is on its way on the control stream, and it may well
@@ -264,7 +264,7 @@ pub struct AttachmentRequest<'a> {
     pub replies_to: Option<MessageId>,
     /// Where the file is on this machine.
     ///
-    /// Never sent. The Dogma stores the blob under the hash of its content, so
+    /// Never sent. The server stores the blob under the hash of its content, so
     /// nothing about this path crosses the wire.
     pub path: &'a std::path::Path,
     /// The name to give it on the other side.
@@ -273,7 +273,7 @@ pub struct AttachmentRequest<'a> {
     pub declared_type: &'a str,
 }
 
-/// Tells a Dogma that refused apart from a link that fell.
+/// Tells a server that refused apart from a link that fell.
 ///
 /// `Stopped` is QUIC's `STOP_SENDING`: somebody at the other end decided, on
 /// purpose, not to take these bytes. Anything else is the connection going
@@ -374,8 +374,8 @@ impl Client {
     /// `signing_key` is this client's identity (ADR 0004). ADR 0017 keeps it on
     /// disk, because PERSISTENCE binds a nickname to the identity that claimed it.
     ///
-    /// `join_secret` is the invite token or the Dogma password, when the Dogma
-    /// asks for one. `None` for an open Dogma, which is the default.
+    /// `join_secret` is the invite token or the server password, when the server
+    /// asks for one. `None` for an open server, which is the default.
     ///
     /// `server_name` is what TLS is told; `pin_key` is what the pin is filed
     /// under. They are separate on purpose — the TOFU verifier compares
@@ -716,7 +716,7 @@ impl Client {
         }
     }
 
-    /// Asks the Dogma for an attachment's bytes.
+    /// Asks the server for an attachment's bytes.
     ///
     /// The bytes arrive on a stream of their own; [`Transfers::receive_attachment`]
     /// is what reads them. A refusal arrives here instead, as
@@ -746,7 +746,7 @@ impl Client {
     /// # Errors
     ///
     /// Fails if the file cannot be written, if the bytes do not hash to what the
-    /// Dogma said, or if nothing arrives inside `wait`.
+    /// server said, or if nothing arrives inside `wait`.
     pub async fn download_attachment(
         &mut self,
         attachment: seele_proto::ids::AttachmentId,
@@ -805,7 +805,7 @@ impl Client {
         frame::write(&mut self.send, &ClientMessage::SetPresence(presence)).await
     }
 
-    /// Asks the Dogma to make a voice room.
+    /// Asks the server to make a voice room.
     ///
     /// Asks, and nothing more. Nothing here checks whether this person may:
     /// `specs/08-seguranca.md` puts the decision on the server, and a core that
@@ -833,7 +833,7 @@ impl Client {
         .await
     }
 
-    /// Asks the Dogma to make a Line.
+    /// Asks the server to make a Line.
     ///
     /// # Errors
     ///
@@ -848,7 +848,7 @@ impl Client {
         .await
     }
 
-    /// Asks the Dogma to rename a voice room.
+    /// Asks the server to rename a voice room.
     ///
     /// # Errors
     ///
@@ -864,7 +864,7 @@ impl Client {
         .await
     }
 
-    /// Asks the Dogma to rename a Line.
+    /// Asks the server to rename a Line.
     ///
     /// # Errors
     ///
@@ -880,28 +880,28 @@ impl Client {
         .await
     }
 
-    /// Asks the Dogma to rename itself.
+    /// Asks the server to rename itself.
     ///
     /// Asks, like the four above, and for the same reason: what may be done is
-    /// the Dogma's to decide, and it wants `Permission::AdministerDogma` for
+    /// the server's to decide, and it wants `Permission::AdministerServer` for
     /// this. A refusal comes back as an `Alert` carrying `PermissionDenied`;
-    /// success comes back as `ServerMessage::DogmaRenamed`, to everybody.
+    /// success comes back as `ServerMessage::ServerRenamed`, to everybody.
     ///
     /// # Errors
     ///
     /// Fails if the control stream is closed, or if the name is blank or longer
     /// than `MAX_CLIENT_NAME_LEN` — `encode` refuses it before it leaves.
-    pub async fn rename_dogma(&mut self, name: &str) -> Result<()> {
+    pub async fn rename_server(&mut self, name: &str) -> Result<()> {
         frame::write(
             &mut self.send,
-            &ClientMessage::RenameDogma {
+            &ClientMessage::RenameServer {
                 name: name.to_owned(),
             },
         )
         .await
     }
 
-    /// Asks the Dogma to change its picture, or to have none.
+    /// Asks the server to change its picture, or to have none.
     ///
     /// The bytes are refused before they leave if they are not a PNG within the
     /// bounds `seele_proto::control` sets, which is what keeps a shell from
@@ -912,11 +912,11 @@ impl Client {
     ///
     /// Fails if the control stream is closed, or if the picture is not an
     /// acceptable icon.
-    pub async fn set_dogma_icon(&mut self, icon: Option<Vec<u8>>) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::SetDogmaIcon { icon }).await
+    pub async fn set_server_icon(&mut self, icon: Option<Vec<u8>>) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::SetServerIcon { icon }).await
     }
 
-    /// Asks the Dogma to end a person's session.
+    /// Asks the server to end a person's session.
     ///
     /// Asks, like the four above, and for the same reason: nothing here checks
     /// whether this person may. `specs/08-seguranca.md` puts that on the server,
@@ -931,7 +931,7 @@ impl Client {
         frame::write(&mut self.send, &ClientMessage::KickPerson { person }).await
     }
 
-    /// Asks the Dogma to bar a person from returning.
+    /// Asks the server to bar a person from returning.
     ///
     /// # Errors
     ///
@@ -953,7 +953,7 @@ impl Client {
         .await
     }
 
-    /// Asks the Dogma to take a message off its Line.
+    /// Asks the server to take a message off its Line.
     ///
     /// # Errors
     ///
@@ -962,7 +962,7 @@ impl Client {
         frame::write(&mut self.send, &ClientMessage::RemoveMessage { message }).await
     }
 
-    /// Asks the Dogma to move a person into a voice room.
+    /// Asks the server to move a person into a voice room.
     ///
     /// # Errors
     ///
@@ -1103,7 +1103,7 @@ impl Client {
     /// Closes the connection, naming what closed it.
     ///
     /// The reason travels in the QUIC `CONNECTION_CLOSE` frame and is what the
-    /// Dogma's log records, so it is the only trace the other side keeps of why
+    /// server's log records, so it is the only trace the other side keeps of why
     /// a session that had already completed the handshake went away. Every
     /// close that is not a person leaving has to say so here: an invite that did
     /// not match used to be recorded as an ejection, which is the one reading
@@ -1126,7 +1126,7 @@ impl Client {
     // and a core that refused on its own would be a second authority to keep in
     // step with the first.
 
-    /// Asks the Dogma to destroy a voice room.
+    /// Asks the server to destroy a voice room.
     ///
     /// # Errors
     ///
@@ -1135,7 +1135,7 @@ impl Client {
         frame::write(&mut self.send, &ClientMessage::DeleteVoiceRoom { voice_room }).await
     }
 
-    /// Asks the Dogma to destroy a Line, and everything written in it.
+    /// Asks the server to destroy a Line, and everything written in it.
     ///
     /// # Errors
     ///
@@ -1164,10 +1164,10 @@ impl Client {
     // `spikes/tela-no-transporte` mediu 16,1% da voz perdida quando os dois
     // dividem a fila de datagramas do `quinn`.
 
-    /// Pede ao Dogma para começar a compartilhar tela na sala de voz onde este plug
+    /// Pede ao servidor para começar a compartilhar tela na sala de voz onde este plug
     /// está.
     ///
-    /// Não carrega sala de voz, resolução nem codec. A sala de voz é o que o Dogma já sabe —
+    /// Não carrega sala de voz, resolução nem codec. A sala de voz é o que o servidor já sabe —
     /// uma sala de voz vindo de quem pergunta é uma sala de voz que quem pergunta pode apontar
     /// para outro lugar —, e os outros dois descrevem o que sai do encoder, que
     /// não está decidido quando o botão é apertado e **muda depois** (§5: a tela
@@ -1176,7 +1176,7 @@ impl Client {
     ///
     /// A resposta é um `ScreenShareStarted` no fluxo de eventos, e o `ScreenId`
     /// dele é o que [`Self::abrir_tela`] precisa. Não dá para abrir o fluxo
-    /// antes: até o Dogma responder, a transmissão não tem nome.
+    /// antes: até o servidor responder, a transmissão não tem nome.
     ///
     /// # Errors
     ///
@@ -1185,7 +1185,7 @@ impl Client {
         frame::write(&mut self.send, &ClientMessage::StartScreenShare).await
     }
 
-    /// Diz ao Dogma que esta transmissão acabou.
+    /// Diz ao servidor que esta transmissão acabou.
     ///
     /// Fechar o fluxo diz a mesma coisa e é o que acontece quando a máquina
     /// some. Os dois existem porque a sala precisa distinguir «ela parou de
@@ -1256,7 +1256,7 @@ const EJECTED: &[u8] = b"ejected";
 /// The client refused the server: the invite named a different key.
 ///
 /// `seele_core::enlace::Enlace::conectar` drops the connection when
-/// `tofu::verdict` returns `InviteRefused`, and this is what the Dogma sees.
+/// `tofu::verdict` returns `InviteRefused`, and this is what the server sees.
 /// The string matters more than it looks: `docs/pendencias.md` #12 accepted
 /// that the explicit drop has no automatic guard precisely because this reason
 /// is the one remaining observable difference between dropping the connection
@@ -1268,8 +1268,8 @@ pub const INVITE_REFUSED: &[u8] = b"invite refused";
 /// # Why `[::]` and not `0.0.0.0`
 ///
 /// An IPv4 socket cannot send to an IPv6 destination at all. A client bound to
-/// `0.0.0.0` therefore could not reach a Dogma over IPv6 no matter what the
-/// Dogma did — which is the other half of why step 2 of ADR 0022 had not
+/// `0.0.0.0` therefore could not reach a server over IPv6 no matter what the
+/// server did — which is the other half of why step 2 of ADR 0022 had not
 /// started, and the half that no amount of work on the server would have fixed.
 ///
 /// An IPv6 socket with `IPV6_V6ONLY` cleared reaches both families, and quinn
@@ -1288,7 +1288,7 @@ pub const INVITE_REFUSED: &[u8] = b"invite refused";
 /// # What is deliberately not checked here
 ///
 /// The server reads `IPV6_V6ONLY` back after setting it (`alcance::abrir_escuta`
-/// in `seele-server`), because a Dogma that silently stops answering half the
+/// in `seele-server`), because a server that silently stops answering half the
 /// internet is a bug nobody can diagnose from the outside. This side does not:
 /// quinn owns the socket and does not lend it out, and on the four targets
 /// `deny.toml` builds for — Linux, the two macOS, Windows — clearing the option
@@ -1411,7 +1411,7 @@ async fn handshake(
             id,
             person,
             ssrc,
-            dogma,
+            server,
             voice_rooms,
             lines,
             permissions,
@@ -1420,7 +1420,7 @@ async fn handshake(
             id,
             person,
             ssrc,
-            dogma,
+            server,
             voice_rooms,
             lines,
             permissions,
@@ -1462,7 +1462,7 @@ impl Transfers {
         let mut fila = self.anexos.lock().await;
         tokio::time::timeout(wait, fila.recv())
             .await
-            .map_err(|_| anyhow::anyhow!("o Dogma não mandou o arquivo em {wait:?}"))?
+            .map_err(|_| anyhow::anyhow!("o servidor não mandou o arquivo em {wait:?}"))?
             .ok_or_else(|| anyhow::anyhow!("a conexão acabou antes do arquivo"))
     }
 
@@ -1526,7 +1526,7 @@ impl Transfers {
         // somebody else's `Pong` on this connection. It says nothing about
         // another connection — see ADR 0027 on what has no way out.
         stream.set_priority(TRANSFER_PRIORITY)?;
-        // O tipo do fluxo, antes de tudo. Um Dogma recebe dois tipos de fluxo
+        // O tipo do fluxo, antes de tudo. Um servidor recebe dois tipos de fluxo
         // unidirecional — anexo e tela — e até a 0.7.8 o que os separava era
         // aritmética sobre o primeiro byte do cabeçalho. O §5.2 da spec do
         // compartilhamento de tela conta a dívida e este byte é o pagamento
@@ -1559,7 +1559,7 @@ impl Transfers {
             if read == 0 {
                 break;
             }
-            // A write that fails is not this end's failure. The Dogma refusing
+            // A write that fails is not this end's failure. The server refusing
             // stops the stream **before** taking the bytes — which is the right
             // thing for it to do, and the reason is already travelling on the
             // control stream — and a link that fell looks almost the same here.
@@ -1611,7 +1611,7 @@ impl Transfers {
     /// # Errors
     ///
     /// Fails if the file cannot be written, if the bytes do not hash to what the
-    /// Dogma said, or if nothing arrives inside `wait`. A refusal arrives
+    /// server said, or if nothing arrives inside `wait`. A refusal arrives
     /// separately, as [`ServerMessage::AttachmentUnavailable`] on the control
     /// stream — that is where the enumerated reason lives, and the expected one
     /// is `Expired`.
@@ -1625,7 +1625,7 @@ impl Transfers {
         use seele_proto::attachment::{AttachmentDelivery, ContentDigest, BLOCK_LEN};
         use tokio::io::AsyncWriteExt;
 
-        // The Dogma opens the stream, so this waits for it. A refusal never
+        // The server opens the stream, so this waits for it. A refusal never
         // opens one, which is why there is a deadline: the reason is on its way
         // through `next_event` and this call must not hang for ever waiting for
         // bytes that were never coming.
@@ -1638,7 +1638,7 @@ impl Transfers {
         let delivery: AttachmentDelivery = frame::read(&mut stream).await?;
         anyhow::ensure!(
             delivery.attachment == attachment,
-            "o Dogma mandou o anexo {} no lugar de {attachment}",
+            "o servidor mandou o anexo {} no lugar de {attachment}",
             delivery.attachment
         );
 
@@ -1660,7 +1660,7 @@ impl Transfers {
         file.flush().await?;
         drop(file);
 
-        // The same question the Dogma asked on the way in: did it arrive whole.
+        // The same question the server asked on the way in: did it arrive whole.
         // It says nothing about the file being good, and nothing here pretends
         // it does.
         if digest.finish() != delivery.content_hash || got != delivery.byte_size {
@@ -1686,14 +1686,14 @@ impl Transfers {
     ///
     /// `limit` is checked against the **declared** size in the header, before a
     /// single byte of the body is read, and the stream is stopped rather than
-    /// drained. It is the same shape as the Dogma's own ceiling check, for the
+    /// drained. It is the same shape as the server's own ceiling check, for the
     /// same reason: reading twenty megabytes and then deciding not to look at
     /// them costs the whole download.
     ///
     /// # Errors
     ///
     /// Fails if nothing arrives inside `wait`, if the stream ends early, or if
-    /// the bytes do not hash to what the Dogma said. A refusal — the expected
+    /// the bytes do not hash to what the server said. A refusal — the expected
     /// one being `Expired` — arrives separately on the control stream.
     pub async fn preview_attachment(
         &self,
@@ -1708,7 +1708,7 @@ impl Transfers {
         let delivery: AttachmentDelivery = frame::read(&mut stream).await?;
         anyhow::ensure!(
             delivery.attachment == attachment,
-            "o Dogma mandou o anexo {} no lugar de {attachment}",
+            "o servidor mandou o anexo {} no lugar de {attachment}",
             delivery.attachment
         );
 
@@ -1736,7 +1736,7 @@ impl Transfers {
             // the one way the limit above could be walked past. It cannot.
             anyhow::ensure!(
                 u64::try_from(bytes.len()).unwrap_or(u64::MAX) <= limit,
-                "o Dogma mandou mais bytes do que declarou"
+                "o servidor mandou mais bytes do que declarou"
             );
         }
 
@@ -1763,7 +1763,7 @@ pub enum Previewed {
     Whole(Vec<u8>),
     /// Over the limit. Nothing was read, and the stream was stopped.
     TooBig {
-        /// What the Dogma said it would have sent.
+        /// What the server said it would have sent.
         byte_size: u64,
     },
 }

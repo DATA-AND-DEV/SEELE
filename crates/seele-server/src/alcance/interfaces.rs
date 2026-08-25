@@ -82,7 +82,7 @@ pub struct Achado {
     /// A máscara da sub-rede, quando a enumeração a trouxe.
     ///
     /// É o que responde à pergunta do degrau 3: **qual dos meus endereços está
-    /// na mesma rede do roteador**. Sem ela, um Dogma com VPN pedia ao roteador
+    /// na mesma rede do roteador**. Sem ela, um servidor com VPN pedia ao roteador
     /// que encaminhasse a porta para o endereço do túnel.
     pub mascara: Option<IpAddr>,
     /// De onde ele veio.

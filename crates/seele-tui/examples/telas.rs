@@ -75,7 +75,7 @@ fn operando() -> App {
     let mut app = App::new();
     app.screen = Screen::PatternBlue;
     app.clock = "12:04:33".into();
-    app.dogmas = vec!["Casa do Alexandre".into()];
+    app.servers = vec!["Casa do Alexandre".into()];
     app.tree = vec![
         Node::VoiceRoom {
             name: "SALA 1".into(),

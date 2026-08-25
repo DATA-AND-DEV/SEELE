@@ -101,7 +101,7 @@ fn o_aviso_chega_ao_anfitriao_com_o_endereco_para_onde_furar() {
     let campainha = anfitriao.local_addr().unwrap();
     let de_onde = visitante.local_addr().unwrap();
 
-    // Os primeiros dígitos da impressão digital do Dogma: está no `seele://` e
+    // Os primeiros dígitos da impressão digital do servidor: está no `seele://` e
     // em nenhum outro lugar, e é assim que o anfitrião sabe que quem bateu tem
     // o link dele.
     let fp = marca("3cbcfb0212da738f");

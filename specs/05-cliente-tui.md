@@ -10,7 +10,7 @@ O produto principal. Tudo o mais imita esta interface.
 
 ```
 ┌ SEELE ─────────────────────── 同期率 ─── 第3新東京市 ─────── 12:04:33 ┐
-│ DOGMA          │ VOICE_ROOMS / LINHAS       │ MENSAGENS                  │
+│ SERVER          │ VOICE_ROOMS / LINHAS       │ MENSAGENS                  │
 │ ▸ Terceira Tó… │ ▼ VOICE_ROOM-01 CENTRAL    │ 12:01 ayanami              │
 │   Geofront     │   ● ayanami    98%   │   verificando harmônicos   │
 │   Matsushiro   │   ● shinji     71%   │                            │
@@ -66,7 +66,7 @@ metade textual disso: sem ele o destaque seria informação só na cor, que esta
 spec proíbe. O cursor dá a volta nas duas pontas, porque quem procura trata a
 última ocorrência e a primeira como vizinhas.
 
-Comandos: `:conectar <host>`, `:voice_room <nome>`, `:sync` (diagnóstico detalhado), `:audio` (dispositivos), `:tema`, `:sobre`, `:ejetar` (sair deste Dogma e escolher outro).
+Comandos: `:conectar <host>`, `:voice_room <nome>`, `:sync` (diagnóstico detalhado), `:audio` (dispositivos), `:tema`, `:sobre`, `:ejetar` (sair deste Server e escolher outro).
 
 **Resolvido em M4, e eram duas causas independentes.** A colisão com digitação: PTT só no modo Normal, onde não há nada com que colidir (decisão D19). E uma que esta spec não previa: **a maioria dos terminais não reporta soltura de tecla**, então "segurar espaço" abre um microfone que nunca fecha. Onde o protocolo de teclado do Kitty existe, é segurar de verdade; onde não existe, a barra vira trava — aperta para abrir, aperta para fechar (ADR 0016). A barra de telemetria diz qual estado está valendo nos dois casos.
 
@@ -84,7 +84,7 @@ Tecla dedicada configurável não resolveria: o problema não é *qual* tecla, �
 ### A tela de conexão não é o sétimo
 
 Os seis acima descrevem uma **sessão**. `plug` sem argumento nenhum abre antes
-disso uma tela de conexão — Dogmas visitados, endereço novo, colar convite,
+disso uma tela de conexão — Servers visitados, endereço novo, colar convite,
 hospedar aqui — que não tem roster, telemetria nem Taxa de Sincronização.
 Encaixá-la no mesmo enum custaria campos vazios nos outros seis, então ela vive
 fora, em `seele-tui::selecao`, e some quando a conexão começa.
@@ -99,23 +99,23 @@ conexão, onde espera por alguém. Quem chama `plug` de dentro de um script tem
 de contar com isso — é um programa interativo do começo ao fim, e não um
 comando que termina sozinho quando dá errado.
 
-Os Dogmas visitados ficam num arquivo à parte dos pins, e a separação é
+Os servidores visitados ficam num arquivo à parte dos pins, e a separação é
 deliberada: o arquivo de pins decide se um servidor é o mesmo de ontem e por
 isso é curto e legível a olho. Apelido e último VoiceRoom são conveniência — um pode
 ser apagado sem consequência, o outro não.
 
-### Sair do programa é uma coisa; sair do Dogma é outra
+### Sair do programa é uma coisa; sair do servidor é outra
 
 `:q`, `:quit`, `:sair` e Ctrl-C fecham o cliente. **Nada mais fecha.**
 
 Toda outra forma de uma sessão acabar volta à tela de conexão. `:ejetar` volta
 direto, porque quem ejetou já sabe por quê. As outras mostram antes o motivo e
-esperam ser lidas: o Dogma que não atendeu, o convite cuja impressão digital não
-bate com a do Dogma que respondeu, o Dogma que desconectou — expulso, barrado,
+esperam ser lidas: o servidor que não atendeu, o convite cuja impressão digital não
+bate com a do servidor que respondeu, o servidor que desconectou — expulso, barrado,
 lotado —, a bateria interna que esgotou os cinco minutos.
 
 Em todos os casos o enlace e o áudio são derrubados de verdade antes da volta, e
-com `--hospedar` o Dogma daqui também: a tela de conexão não tem roster,
+com `--hospedar` o servidor daqui também: a tela de conexão não tem roster,
 telemetria nem som.
 
 Um cliente que some no instante em que perde o enlace leva o motivo junto, e
@@ -124,11 +124,11 @@ pedido; perder a conexão não é.
 
 ### Hospedar sem daemon
 
-`plug --hospedar` sobe um Dogma dentro do próprio processo e entra nele; o link
+`plug --hospedar` sobe um servidor dentro do próprio processo e entra nele; o link
 de convite aparece de saída numa sobreposição de largura inteira, e `:convite`
-o traz de volta. Não substitui o `seeled`: este Dogma morre quando o cliente
+o traz de volta. Não substitui o `seeled`: este servidor morre quando o cliente
 fecha, que é o certo para "estou hospedando uma conversa" e errado para
-"mantenho um Dogma no ar".
+"mantenho um servidor no ar".
 
 ## Restrições de renderização
 

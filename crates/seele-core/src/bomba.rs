@@ -804,7 +804,7 @@ impl Escoadouro {
 ///
 /// # Por que existe
 ///
-/// O Dogma não devolve a transmissão a quem a produziu — `VoiceRoom::ligar` tira o
+/// O servidor não devolve a transmissão a quem a produziu — `VoiceRoom::ligar` tira o
 /// autor da lista de espectadores de propósito, porque mandar de volta o que
 /// acabou de subir é pagar a banda duas vezes. O efeito colateral é que quem
 /// compartilha era a única pessoa da sala que não via o que estava mostrando.

@@ -75,7 +75,7 @@ const RULES: &[(&str, &[&str])] = &[
     // A exceção do `seele-server` é nomeada e tem **dois** motivos, e os dois
     // dizem a mesma coisa: este binário contém os dois papéis.
     //
-    // 1. `--hospedar` sobe um Dogma no próprio processo, para que quem hospeda
+    // 1. `--hospedar` sobe um servidor no próprio processo, para que quem hospeda
     //    entre amigos não precise saber o que é um daemon.
     // 2. `--rede` (`crates/seele-tui/src/rede.rs`) diagnostica o alcance **de
     //    quem hospeda**: enumera as interfaces por `alcance::interfaces`, abre o

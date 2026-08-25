@@ -93,7 +93,7 @@ impl ImageFormat {
 
 /// How many bytes a window will pull down to look at a file.
 ///
-/// **Decided apart from the Dogma's per-file limit, and it has to be.** That
+/// **Decided apart from the server's per-file limit, and it has to be.** That
 /// one is a fraction of a ceiling whoever hosts chose, and it protects *their*
 /// disk: at the default it is 64 MiB. This one protects the machine of whoever
 /// is reading, which is a different machine and a different resource — a
@@ -271,7 +271,7 @@ fn symbol(bits: u32) -> char {
     char::from(ALPHABET.get(index).copied().unwrap_or(b'A'))
 }
 
-/// Why a picture will not do as a Dogma's icon.
+/// Why a picture will not do as a server's icon.
 ///
 /// Two outcomes and not one, because they need different sentences and have
 /// different next steps: a photograph that is too heavy can be shrunk, and a
@@ -285,21 +285,21 @@ pub enum IconRefusal {
     /// here» — and splitting them would ask a shell to explain a chunk layout
     /// to somebody who chose a photo of a cat.
     NotAnIcon,
-    /// A PNG, and heavier than a Dogma accepts.
+    /// A PNG, and heavier than a server accepts.
     TooBig {
         /// The ceiling, in bytes, so the sentence can carry the number.
         limit_bytes: u64,
     },
 }
 
-/// Whether these bytes may be a Dogma's icon, asked before anything is sent.
+/// Whether these bytes may be a server's icon, asked before anything is sent.
 ///
 /// `None` — taking the picture down — always passes.
 ///
-/// # Why a shell asks at all, when the Dogma refuses anyway
+/// # Why a shell asks at all, when the server refuses anyway
 ///
 /// Because of *how* it would refuse. The rule lives on the wire, in
-/// `seele_proto::control::check_dogma_icon`, and a picture that fails it makes
+/// `seele_proto::control::check_server_icon`, and a picture that fails it makes
 /// the frame unbuildable — which reaches `seele_core::enlace` as a failed send,
 /// and a failed send is how a dropped connection looks from there. Somebody
 /// choosing the wrong file would watch the app start its five-minute internal
@@ -309,8 +309,8 @@ pub enum IconRefusal {
 /// # Errors
 ///
 /// [`IconRefusal`], which is the sentence a shell writes.
-pub fn check_dogma_icon(icon: Option<&[u8]>) -> Result<(), IconRefusal> {
-    match seele_proto::control::check_dogma_icon(icon) {
+pub fn check_server_icon(icon: Option<&[u8]>) -> Result<(), IconRefusal> {
+    match seele_proto::control::check_server_icon(icon) {
         Ok(()) => Ok(()),
         Err(seele_proto::ControlError::FieldTooLong { limit, .. }) => Err(IconRefusal::TooBig {
             limit_bytes: u64::try_from(limit).unwrap_or(u64::MAX),
@@ -466,19 +466,19 @@ mod tests {
         // The whole point of the check being here: without it the refusal
         // happens where the frame is built, and a frame that cannot be built
         // looks exactly like a connection that fell over.
-        assert_eq!(check_dogma_icon(None), Ok(()));
-        assert_eq!(check_dogma_icon(Some(&icone(128, 32))), Ok(()));
+        assert_eq!(check_server_icon(None), Ok(()));
+        assert_eq!(check_server_icon(Some(&icone(128, 32))), Ok(()));
 
-        assert_eq!(check_dogma_icon(Some(JPEG)), Err(IconRefusal::NotAnIcon));
+        assert_eq!(check_server_icon(Some(JPEG)), Err(IconRefusal::NotAnIcon));
         assert_eq!(
-            check_dogma_icon(Some(b"%PDF-1.7")),
+            check_server_icon(Some(b"%PDF-1.7")),
             Err(IconRefusal::NotAnIcon)
         );
         // A real PNG declaring a picture nobody could draw. Small file, huge
         // image — the two are not the same question, and this is the one the
         // byte ceiling cannot answer.
         assert_eq!(
-            check_dogma_icon(Some(&icone(20_000, 32))),
+            check_server_icon(Some(&icone(20_000, 32))),
             Err(IconRefusal::NotAnIcon)
         );
     }
@@ -488,20 +488,20 @@ mod tests {
         // A photograph can be shrunk and a PDF cannot be made into an icon, so
         // the two refusals have different next steps — and the sentence about
         // the first one wants the number, which no shell can name for itself.
-        let gorda = icone(128, seele_proto::control::MAX_DOGMA_ICON_LEN);
-        let Err(IconRefusal::TooBig { limit_bytes }) = check_dogma_icon(Some(&gorda)) else {
+        let gorda = icone(128, seele_proto::control::MAX_SERVER_ICON_LEN);
+        let Err(IconRefusal::TooBig { limit_bytes }) = check_server_icon(Some(&gorda)) else {
             panic!("a picture over the ceiling was accepted, or refused as the wrong thing");
         };
         assert_eq!(
             limit_bytes,
-            seele_proto::control::MAX_DOGMA_ICON_LEN as u64,
+            seele_proto::control::MAX_SERVER_ICON_LEN as u64,
             "the ceiling a shell would print is not the one the protocol enforces"
         );
     }
 
     #[test]
-    fn the_preview_limit_is_far_under_the_dogma_default_per_file_limit() {
-        // The Dogma's default ceiling is 1 GiB and its per-file limit is a
+    fn the_preview_limit_is_far_under_the_server_default_per_file_limit() {
+        // The server's default ceiling is 1 GiB and its per-file limit is a
         // sixteenth of it. This has to be a small fraction of that, or the
         // separate limit is not a separate limit.
         let per_file = (1024 * 1024 * 1024_u64) / 16;

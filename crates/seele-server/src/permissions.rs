@@ -63,7 +63,7 @@ pub enum Refusal {
     /// The person holds no role granting it, or a role denying it.
     #[error("permission denied")]
     PermissionDenied,
-    /// The person is barred from the Dogma.
+    /// The person is barred from the server.
     #[error("banned")]
     Banned,
     /// No such account.
@@ -112,7 +112,7 @@ fn name_to_permission(name: &str) -> Option<Permission> {
         "Ban" => Permission::Ban,
         "ManageVoiceRooms" => Permission::ManageVoiceRooms,
         "ManageRoles" => Permission::ManageRoles,
-        "AdministerDogma" => Permission::AdministerDogma,
+        "AdministerServer" => Permission::AdministerServer,
         "AttachFile" => Permission::AttachFile,
         _ => return None,
     })
@@ -184,10 +184,10 @@ impl<'a> Permissions<'a> {
             //
             // O problema: contas criadas antes de o comando existir nunca
             // passaram por `seat_the_arrival`, então o assento ficava vazio para
-            // sempre. Num Dogma real, com histórico real, o formulário de criar
+            // sempre. Num servidor real, com histórico real, o formulário de criar
             // sala não aparecia para ninguém e não havia como fazer aparecer; a
             // única saída era entrar com um apelido nunca usado, que é uma
-            // resposta absurda para «administre o seu próprio Dogma».
+            // resposta absurda para «administre o seu próprio servidor».
             //
             // Por que não «vago agora»: um operador revoga o comando de alguém,
             // essa pessoa reconecta, e recuperaria o papel sozinha. A revogação
@@ -195,7 +195,7 @@ impl<'a> Permissions<'a> {
             //
             // A marca em `config` é o que separa as duas: ela é escrita na
             // primeira vez que o assento é ocupado e nunca sai. Sem marca, o
-            // Dogma nunca teve Comandante; com marca, quem não tem o papel não
+            // servidor nunca teve Comandante; com marca, quem não tem o papel não
             // o tem por decisão de alguém.
             self.claim_never_held_commandership(id)?;
             return self.person(PersonId(id as u64));
@@ -226,15 +226,15 @@ impl<'a> Permissions<'a> {
 
     /// Gives a freshly created account its opening role.
     ///
-    /// # The first account created on a Dogma becomes the Comandante
+    /// # The first account created on a server becomes the Comandante
     ///
     /// Every account used to arrive as a Pessoa, which meant **nobody ever
     /// became a Comandante**. Migration 1 seeds the role with `ManageVoiceRooms`,
-    /// `ManageRoles` and `AdministerDogma`, and nothing granted it: a Dogma
+    /// `ManageRoles` and `AdministerServer`, and nothing granted it: a server
     /// shipped with three permissions no account in it could ever hold, so
     /// every verb behind them was unreachable by construction.
     ///
-    /// Whoever hosts is whoever connects to their own Dogma first — they press
+    /// Whoever hosts is whoever connects to their own server first — they press
     /// the button and then they connect, in that order, and nobody else has the
     /// address yet. That fact is enough to answer "who hosts" with no
     /// configuration file, no flag, and no question on screen, all three of
@@ -243,7 +243,7 @@ impl<'a> Permissions<'a> {
     ///
     /// # The race
     ///
-    /// Two clients reaching a virgin Dogma at the same moment must not both
+    /// Two clients reaching a virgin server at the same moment must not both
     /// become Comandante, and must not both miss. The claim is therefore **one
     /// statement**, conditional on nobody holding the role yet — the same shape
     /// `crate::admissao` uses to spend an invite exactly once with
@@ -253,9 +253,9 @@ impl<'a> Permissions<'a> {
     /// anybody else.
     ///
     /// Deliberately keyed on *the role being unheld*, not on "is this the first
-    /// person row". A Dogma whose Comandante account was deleted has no
+    /// person row". A server whose Comandante account was deleted has no
     /// Comandante again, and the next arrival should be able to take the seat
-    /// rather than leave the Dogma permanently unadministrable.
+    /// rather than leave the server permanently unadministrable.
     /// Points an account at a different display name.
     ///
     /// Does nothing when the name is already the one held — the common case, on
@@ -307,9 +307,9 @@ impl<'a> Permissions<'a> {
     /// role come back the next time that person connected, and the revocation
     /// would be decoration — a test in this file says so, and it is right.
     ///
-    /// What this asks instead is whether the seat was *ever* occupied. A Dogma
+    /// What this asks instead is whether the seat was *ever* occupied. A server
     /// that gained accounts before the commandership existed answers no, and
-    /// the next arrival may take it. A Dogma whose Comandante was demoted
+    /// the next arrival may take it. A server whose Comandante was demoted
     /// answers yes, forever, and nobody takes it back by reconnecting.
     ///
     /// The mark is written inside the same transaction as the claim: a claim
@@ -334,7 +334,7 @@ impl<'a> Permissions<'a> {
     ///
     /// One statement, conditional on the role being unheld — the same shape
     /// `crate::admissao` uses to spend an invite exactly once. SQLite serialises
-    /// writers, so of two clients racing for a virgin Dogma the second sees the
+    /// writers, so of two clients racing for a virgin server the second sees the
     /// first's row, inserts nothing, and reports zero rows changed. Neither a
     /// check-then-insert in Rust nor two statements would survive that.
     fn claim_vacant_commandership(&self, person_row: i64) -> Result<bool> {
@@ -485,7 +485,7 @@ impl<'a> Permissions<'a> {
             Permission::Ban,
             Permission::ManageVoiceRooms,
             Permission::ManageRoles,
-            Permission::AdministerDogma,
+            Permission::AdministerServer,
             Permission::AttachFile,
         ];
         let mut held = Vec::new();
@@ -586,7 +586,7 @@ mod tests {
         Permission::Ban,
         Permission::ManageVoiceRooms,
         Permission::ManageRoles,
-        Permission::AdministerDogma,
+        Permission::AdministerServer,
         Permission::AttachFile,
     ];
 
@@ -596,7 +596,7 @@ mod tests {
 
     /// An account holding exactly one named role, whatever it arrived with.
     ///
-    /// Normalising rather than assuming: the first account on a Dogma arrives as
+    /// Normalising rather than assuming: the first account on a server arrives as
     /// a Comandante and every one after it as a Pessoa, so a fixture that only
     /// added a role would hand back a Comandante whenever it happened to be
     /// called first — and the permission matrix below would pass for the wrong
@@ -636,9 +636,9 @@ mod tests {
 
     #[test]
     fn the_first_account_becomes_the_commander() {
-        // Whoever hosts is whoever connects to their own Dogma first. Without
+        // Whoever hosts is whoever connects to their own server first. Without
         // this, migration 1 seeds a Comandante role that no account can ever
-        // hold, and ManageVoiceRooms / ManageRoles / AdministerDogma are unreachable
+        // hold, and ManageVoiceRooms / ManageRoles / AdministerServer are unreachable
         // by construction — every verb behind them dead on arrival.
         let persistence = store();
         let permissions = Permissions::new(&persistence);
@@ -696,13 +696,13 @@ mod tests {
 
     #[test]
     fn an_account_older_than_the_commandership_can_still_take_it() {
-        // O caso que este conserto existe para resolver, e ele veio de um Dogma
+        // O caso que este conserto existe para resolver, e ele veio de um servidor
         // de verdade: contas criadas **antes** de o comando existir nunca
         // passaram por `seat_the_arrival`, então o assento ficou vazio e nunca
         // marcado. O formulário de criar sala não aparecia para ninguém e não
         // havia como fazer aparecer — a única saída era entrar com um apelido
         // nunca usado, que é uma resposta absurda para «administre o seu
-        // próprio Dogma».
+        // próprio server».
         //
         // O cenário é encenado como o banco antigo de verdade era: a linha do
         // pessoa escrita à mão, com o papel de Pessoa e nada mais. Encená-lo
@@ -731,7 +731,7 @@ mod tests {
         let de_volta = permissions.register_or_find(&[1; 32], "anfitriao").unwrap();
         assert!(
             de_volta.roles.contains(&COMMANDER),
-            "uma conta anterior ao comando não conseguiu assumi-lo, e o Dogma fica \
+            "uma conta anterior ao comando não conseguiu assumi-lo, e o servidor fica \
              inadministrável para sempre: {de_volta:?}"
         );
         assert!(permissions.may(de_volta.id, Permission::ManageVoiceRooms).unwrap());
@@ -760,7 +760,7 @@ mod tests {
     fn the_second_account_is_only_a_person() {
         // The half that makes the rule a rule. "First account is Comandante"
         // implemented as "every account is Comandante" passes the test above and
-        // hands the Dogma to whoever walks in.
+        // hands the server to whoever walks in.
         let persistence = store();
         let permissions = Permissions::new(&persistence);
         permissions.register_or_find(&[1; 32], "anfitriao").unwrap();
@@ -770,7 +770,7 @@ mod tests {
         for permission in [
             Permission::ManageVoiceRooms,
             Permission::ManageRoles,
-            Permission::AdministerDogma,
+            Permission::AdministerServer,
         ] {
             assert!(
                 !permissions.may(convidado.id, permission).unwrap(),
@@ -781,7 +781,7 @@ mod tests {
 
     #[test]
     fn two_arrivals_at_once_produce_exactly_one_commander() {
-        // Not "neither", which leaves the Dogma unadministrable forever, and not
+        // Not "neither", which leaves the server unadministrable forever, and not
         // "both", which hands a stranger every permission there is. Two real
         // connections on the same file, because the claim's whole correctness is
         // that SQLite serialises the two writers and the second sees the first's
@@ -881,7 +881,7 @@ mod tests {
             Permission::Ban,
             Permission::ManageVoiceRooms,
             Permission::ManageRoles,
-            Permission::AdministerDogma,
+            Permission::AdministerServer,
         ];
         for permission in denied {
             assert!(
@@ -902,7 +902,7 @@ mod tests {
         assert!(permissions.may(operator, Permission::Ban).unwrap());
         assert!(!permissions.may(operator, Permission::ManageVoiceRooms).unwrap());
         assert!(!permissions.may(operator, Permission::ManageRoles).unwrap());
-        assert!(!permissions.may(operator, Permission::AdministerDogma).unwrap());
+        assert!(!permissions.may(operator, Permission::AdministerServer).unwrap());
     }
 
     #[test]

@@ -1,7 +1,7 @@
 # 07 — Tema
 
 > **Nota — 2026-08-21, ADR 0033.** A **camada de linguagem deste documento foi
-> retirada da interface.** O vocabulário abaixo — Dogma Central, VoiceRoom, Linha,
+> retirada da interface.** O vocabulário abaixo — Server Central, VoiceRoom, Linha,
 > Pessoa, inserir plug, ejetar, A.T. Field, Taxa de Sincronização, PADRÃO: AZUL,
 > e o japonês decorativo — **não é mais o que aparece na tela**. A autoridade
 > sobre a palavra que a pessoa lê passou a ser `docs/glossario.md`.
@@ -29,7 +29,7 @@ Estes termos são obrigatórios e consistentes em toda a superfície do produto.
 
 | Conceito | Termo | Nota |
 |---|---|---|
-| Instância de servidor | **Dogma Central** | Plural: Dogmas |
+| Instância de servidor | **Server Central** | Plural: Servers |
 | Daemon | **seeled** | |
 | Cliente | **Entry Plug** / `plug` | |
 | Canal de voz | **VoiceRoom** | |
@@ -46,7 +46,7 @@ Estes termos são obrigatórios e consistentes em toda a superfície do produto.
 | Sessão não verificada | **PADRÃO: LARANJA** | |
 | Reconectando | **Bateria interna** | contagem de 04:59 |
 | Notificação crítica | **Alerta · 警告** | |
-| Configurações | **Terminal Dogma** | |
+| Configurações | **Terminal Server** | |
 | Papéis | Comandante, Operador, Pessoa, Observador | |
 | Subsistemas | PERMISSIONS, MEDIA, PERSISTENCE | ver `04` |
 

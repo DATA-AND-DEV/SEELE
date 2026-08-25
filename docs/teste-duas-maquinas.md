@@ -10,7 +10,7 @@ Leva vinte minutos. Anote os resultados em `docs/m1-medicoes.md`.
 
 ## Antes de começar
 
-Uma máquina é o **Dogma** (servidor + cliente) e a outra é só cliente. Podem ser
+Uma máquina é o **Server** (servidor + cliente) e a outra é só cliente. Podem ser
 os dois sistemas operacionais que você tiver — quanto mais diferentes, melhor,
 porque a matriz de três SOs em CI nunca executou.
 
@@ -28,7 +28,7 @@ cargo build --release -p seele-app
 
 ---
 
-## 1 · Subir o Dogma
+## 1 · Subir o servidor
 
 Na máquina A:
 
@@ -54,7 +54,7 @@ mudar depois.
 Se a linha "na outra máquina" não aparecer, o `seeled` não achou um endereço de
 rede — provavelmente está sem rede, ou só em loopback.
 
-### Fechar o Dogma, se quiser
+### Fechar o servidor, se quiser
 
 Por padrão qualquer um que alcance a porta entra — o certo para testar em rede
 local, e o `seeled` avisa ao subir assim. Para fechar:

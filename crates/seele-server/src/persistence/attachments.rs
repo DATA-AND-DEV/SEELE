@@ -1,6 +1,6 @@
 //! Attachments: the bytes beside the database, under a fixed ceiling.
 //!
-//! ADR 0027. The whole of this module exists to keep one promise: **a Dogma
+//! ADR 0027. The whole of this module exists to keep one promise: **a server
 //! never holds more attachment bytes than the number whoever hosts it chose.**
 //! Everything else here — deduplication, expiry, the sweep at boot — is
 //! bookkeeping in service of that.
@@ -51,20 +51,20 @@ use seele_proto::ids::{AttachmentId, MessageId};
 
 use super::{now_seconds, Persistence};
 
-/// How many bytes of attachments a Dogma holds by default.
+/// How many bytes of attachments a server holds by default.
 ///
 /// ADR 0027 picks a gibibyte, and picks a **number** rather than a policy: the
 /// point of the whole decision is that the worst case on disk is knowable on
-/// day one. A Dogma that has never been configured is a Dogma at this number.
+/// day one. A server that has never been configured is a server at this number.
 pub const DEFAULT_QUOTA_BYTES: u64 = 1024 * 1024 * 1024;
 
 /// Where the chosen ceiling lives in the `configuracao` table.
 ///
 /// Not a TOML file: `specs/04-servidor-seele.md` describes one that does not
 /// exist, and migration 2 wrote the criterion for this table when it created it
-/// — "configuração do Dogma que não cabe num arquivo, porque muda em tempo de
+/// — "configuração do servidor que não cabe num arquivo, porque muda em tempo de
 /// execução e precisa sobreviver a reinício". Changing the ceiling with the
-/// Dogma up is the normal case.
+/// server up is the normal case.
 pub const QUOTA_KEY: &str = "anexos_teto";
 
 /// The per-file limit is the total divided by this.
@@ -72,11 +72,11 @@ pub const QUOTA_KEY: &str = "anexos_teto";
 /// Derived and never configured, so the two numbers cannot be set to an absurd
 /// pair. Sixteen is the smallest divisor that keeps the property worth stating:
 /// **one upload can never cost more than a sixteenth of the history.** A single
-/// 900 MiB file into a 1 GiB Dogma would otherwise empty everybody's history in
+/// 900 MiB file into a 1 GiB server would otherwise empty everybody's history in
 /// one act, which is the failure this exists to prevent.
 pub const PER_FILE_DIVISOR: u64 = 16;
 
-/// The largest single file a Dogma with this quota accepts.
+/// The largest single file a server with this quota accepts.
 #[must_use]
 pub fn per_file_limit(quota: u64) -> u64 {
     (quota / PER_FILE_DIVISOR).max(1)
@@ -90,18 +90,18 @@ pub fn per_file_limit(quota: u64) -> u64 {
 /// transfer that fell, which is swept.
 const SCRATCH_SUFFIX: &str = ".parcial";
 
-/// Why the Dogma would not take a file.
+/// Why the server would not take a file.
 ///
 /// Enumerated, and turned into `AttachmentRefusal` on the wire by the caller.
 /// `specs/02-protocolo.md`: no free-form string reaches an interface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum Refusal {
-    /// Larger than [`per_file_limit`] for this Dogma's quota.
+    /// Larger than [`per_file_limit`] for this server's quota.
     #[error("file is {declared} bytes, over the {limit}-byte per-file limit")]
     TooLarge {
         /// What the sender declared.
         declared: u64,
-        /// What this Dogma allows.
+        /// What this server allows.
         limit: u64,
     },
     /// Every byte of the quota is already spoken for by transfers in flight.
@@ -133,7 +133,7 @@ pub struct Ledger {
 }
 
 impl Ledger {
-    /// A ledger for a Dogma holding `stored` bytes under a ceiling of `quota`.
+    /// A ledger for a server holding `stored` bytes under a ceiling of `quota`.
     #[must_use]
     pub fn new(quota: u64, stored: u64) -> Self {
         Self {
@@ -501,7 +501,7 @@ fn row_to_attachment(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredAttachme
 
 /// The ceiling read out of `configuracao`, or the default.
 ///
-/// Absence means the default rather than a written row, so a Dogma that existed
+/// Absence means the default rather than a written row, so a server that existed
 /// before attachments did comes up at [`DEFAULT_QUOTA_BYTES`] without any
 /// migration touching it — and a later build that changed the default would
 /// change it for everybody who never chose. Choosing writes the row.
@@ -539,9 +539,9 @@ pub fn quota_is_chosen(persistence: &Persistence) -> Result<bool> {
 ///
 /// # Errors
 ///
-/// Fails on a database error, or if the number is zero — a Dogma that accepts
+/// Fails on a database error, or if the number is zero — a server that accepts
 /// no attachment at all is spelled by not granting the permission, and a
-/// ceiling of zero would instead be a Dogma that accepts the transfer and then
+/// ceiling of zero would instead be a server that accepts the transfer and then
 /// cannot keep it.
 pub fn set_quota(persistence: &Persistence, bytes: u64) -> Result<()> {
     anyhow::ensure!(bytes > 0, "o teto de anexos não pode ser zero");
@@ -801,7 +801,7 @@ impl Store {
 
 /// Marks a freshly written file with the operating system's own quarantine.
 ///
-/// ADR 0027: the Dogma does not scan for viruses, does not have an engine and
+/// ADR 0027: the server does not scan for viruses, does not have an engine and
 /// will not grow one. What it can do is set the flag Gatekeeper and SmartScreen
 /// already look at — the same thing a browser does, and the only concrete
 /// answer this product has. It is not antivirus; it is the guard the system
@@ -858,8 +858,8 @@ mod tests {
     use crate::persistence::messages::{Messages, PendingMessage};
     use crate::persistence::Location;
 
-    /// A Dogma with one Line, one person, and a directory to put bytes in.
-    fn dogma() -> (Persistence, tempfile::TempDir) {
+    /// A server with one Line, one person, and a directory to put bytes in.
+    fn server() -> (Persistence, tempfile::TempDir) {
         let persistence = Persistence::open(&Location::Memory).unwrap();
         persistence
             .connection()
@@ -924,12 +924,12 @@ mod tests {
     }
 
     #[test]
-    fn a_dogma_that_was_never_configured_is_at_the_default() {
-        // The first boot of a Dogma that already existed. No migration writes
+    fn a_server_that_was_never_configured_is_at_the_default() {
+        // The first boot of a server that already existed. No migration writes
         // this row, so absence has to mean the default rather than zero — and a
-        // quota of zero would be a Dogma that accepts a transfer and then
+        // quota of zero would be a server that accepts a transfer and then
         // cannot keep it.
-        let (persistence, _) = dogma();
+        let (persistence, _) = server();
         assert_eq!(quota(&persistence).unwrap(), DEFAULT_QUOTA_BYTES);
         assert!(!quota_is_chosen(&persistence).unwrap());
     }
@@ -949,17 +949,17 @@ mod tests {
 
     #[test]
     fn a_ceiling_of_zero_is_refused() {
-        let (persistence, _) = dogma();
+        let (persistence, _) = server();
         assert!(set_quota(&persistence, 0).is_err());
     }
 
     #[test]
     fn the_per_file_limit_is_derived_and_leaves_room_for_a_history() {
         // The property, stated as arithmetic: one upload can never cost more
-        // than a sixteenth of what is stored. A 900 MiB file into a 1 GiB Dogma
+        // than a sixteenth of what is stored. A 900 MiB file into a 1 GiB server
         // would empty everybody's history in one act.
         assert_eq!(per_file_limit(DEFAULT_QUOTA_BYTES), 64 * 1024 * 1024);
-        assert!(per_file_limit(1) >= 1, "a tiny Dogma still takes something");
+        assert!(per_file_limit(1) >= 1, "a tiny server still takes something");
         for quota in [1_024, 1_000_000, DEFAULT_QUOTA_BYTES, u64::MAX / 2] {
             assert!(
                 per_file_limit(quota) * PER_FILE_DIVISOR <= quota + PER_FILE_DIVISOR,
@@ -972,7 +972,7 @@ mod tests {
     fn a_file_over_the_per_file_limit_is_refused_and_nothing_is_evicted() {
         // Refused, not accepted to be thrown away afterwards — and refusing it
         // must not have cost anybody their history on the way.
-        let (mut persistence, directory) = dogma();
+        let (mut persistence, directory) = server();
         set_quota(&persistence, 1_600).unwrap();
         let (store, mut ledger) = open(directory.path(), &persistence);
 
@@ -987,7 +987,7 @@ mod tests {
         // The plain case. Sixteen files of the per-file limit exactly fill the
         // quota; the seventeenth pushes the first out and the total does not
         // move.
-        let (mut persistence, directory) = dogma();
+        let (mut persistence, directory) = server();
         set_quota(&persistence, 1_600).unwrap();
         let (store, mut ledger) = open(directory.path(), &persistence);
 
@@ -1022,7 +1022,7 @@ mod tests {
         // can actually fail: at the instant the reservation is granted, with
         // nothing written yet. If the check ran after the transfer, the ledger
         // here would be over the quota by exactly one file.
-        let (mut persistence, directory) = dogma();
+        let (mut persistence, directory) = server();
         set_quota(&persistence, 320).unwrap();
         let (store, mut ledger) = open(directory.path(), &persistence);
 
@@ -1055,7 +1055,7 @@ mod tests {
         // Two arriving at once is where a ceiling built on `stored` alone
         // fails: each looks at the same free space, each is told yes, and
         // together they pass the ceiling with nothing to evict.
-        let (persistence, directory) = dogma();
+        let (persistence, directory) = server();
         set_quota(&persistence, 160).unwrap();
         let (store, mut ledger) = open(directory.path(), &persistence);
 
@@ -1108,7 +1108,7 @@ mod tests {
         // total never approaches the quota proves nothing about reservations —
         // it was written that way first, and a mutation that made the ceiling
         // count only what is on disk survived it.
-        let (mut persistence, directory) = dogma();
+        let (mut persistence, directory) = server();
         let quota = 2_048_u64;
         set_quota(&persistence, quota).unwrap();
         let (store, mut ledger) = open(directory.path(), &persistence);
@@ -1209,7 +1209,7 @@ mod tests {
 
     #[test]
     fn the_same_file_from_two_people_is_one_blob_and_two_rows() {
-        let (mut persistence, directory) = dogma();
+        let (mut persistence, directory) = server();
         set_quota(&persistence, 1_600).unwrap();
         let (store, mut ledger) = open(directory.path(), &persistence);
 
@@ -1246,7 +1246,7 @@ mod tests {
         // `RemoveMessage` deletes somebody else's message. Deleting one person's
         // copy may not delete another's, and that is a count rather than an
         // intention.
-        let (mut persistence, directory) = dogma();
+        let (mut persistence, directory) = server();
         set_quota(&persistence, 1_600).unwrap();
         let (store, mut ledger) = open(directory.path(), &persistence);
 
@@ -1287,7 +1287,7 @@ mod tests {
 
     #[test]
     fn expiring_keeps_the_row_so_the_message_can_still_say_what_was_here() {
-        let (mut persistence, directory) = dogma();
+        let (mut persistence, directory) = server();
         set_quota(&persistence, 320).unwrap();
         let (store, mut ledger) = open(directory.path(), &persistence);
 
@@ -1315,7 +1315,7 @@ mod tests {
         // Two things to back up instead of one, and they can diverge. The rule
         // is that the row is the truth: a missing file is not a crash and not a
         // blank, it is the state the design already has.
-        let (mut persistence, directory) = dogma();
+        let (mut persistence, directory) = server();
         set_quota(&persistence, 1_600).unwrap();
         let (store, mut ledger) = open(directory.path(), &persistence);
         let landed = land(&store, &mut ledger, &mut persistence, 100, 3).unwrap();
@@ -1331,7 +1331,7 @@ mod tests {
 
     #[test]
     fn an_orphan_blob_is_swept_at_boot() {
-        let (persistence, directory) = dogma();
+        let (persistence, directory) = server();
         std::fs::write(directory.path().join("deadbeef"), b"nobody points at me").unwrap();
         std::fs::write(directory.path().join("meio.parcial"), b"a fallen transfer").unwrap();
 
@@ -1344,7 +1344,7 @@ mod tests {
     fn lowering_the_ceiling_below_what_is_stored_evicts_at_the_next_boot() {
         // Whoever hosts has said the disk is worth less than it was. Keeping
         // the old bytes would be the product deciding it knows better.
-        let (mut persistence, directory) = dogma();
+        let (mut persistence, directory) = server();
         set_quota(&persistence, 1_600).unwrap();
         let (store, mut ledger) = open(directory.path(), &persistence);
         for seed in 0..16 {

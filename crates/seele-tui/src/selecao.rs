@@ -1,6 +1,6 @@
 //! A tela de onde se escolhe para onde ir.
 //!
-//! `plug` sem argumento nenhum cai aqui: os Dogmas onde você já esteve, mais
+//! `plug` sem argumento nenhum cai aqui: os servidores onde você já esteve, mais
 //! *novo endereço*, *colar convite* e *hospedar aqui*. Com qualquer flag, esta
 //! tela não aparece — quem digitou `plug --server casa:8383` já disse aonde
 //! vai, e um menu no caminho seria só uma tecla a mais entre a intenção e o
@@ -47,7 +47,7 @@ pub struct Escolha {
     pub convite: Option<String>,
     /// Impressão digital esperada, quando veio de um link.
     pub impressao_digital: Option<String>,
-    /// Subir o Dogma neste processo em vez de procurar um.
+    /// Subir o servidor neste processo em vez de procurar um.
     pub hospedar: bool,
 }
 
@@ -60,7 +60,7 @@ pub enum Resultado {
     Pronto(Box<Escolha>),
     /// Desistiu.
     Sai,
-    /// Pediu para esquecer um Dogma da lista.
+    /// Pediu para esquecer um servidor da lista.
     ///
     /// Quem chamou é que sabe gravar em disco; esta máquina não escreve nada.
     Esquecer(String),
@@ -69,7 +69,7 @@ pub enum Resultado {
 /// Uma linha da lista.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Item {
-    /// Um Dogma já visitado.
+    /// Um servidor já visitado.
     Visitado(Conhecido),
     /// Digitar um endereço.
     Novo,
@@ -102,7 +102,7 @@ pub struct Selecao {
 
 /// Quando não se sabe o apelido de ninguém.
 const APELIDO_PADRAO: &str = "pessoa";
-/// Onde um Dogma hospedado aqui escuta.
+/// Onde um servidor hospedado aqui escuta.
 const AQUI: &str = "127.0.0.1:8383";
 
 impl Selecao {
@@ -178,7 +178,7 @@ impl Selecao {
 
     fn ir_para(&mut self, item: &Item) -> Resultado {
         match item {
-            // Um Dogma conhecido já tem tudo: endereço, apelido e a sala de voz de
+            // Um servidor conhecido já tem tudo: endereço, apelido e a sala de voz de
             // onde se parou. Uma tecla e pronto — é para isso que a lista
             // existe.
             Item::Visitado(conhecido) => {
@@ -206,13 +206,13 @@ impl Selecao {
 
     /// Aponta o rascunho para outro endereço, largando o que era do anterior.
     ///
-    /// Um convite vale para o Dogma dele e para mais nenhum. A impressão
+    /// Um convite vale para o servidor dele e para mais nenhum. A impressão
     /// digital e o token vieram de um link que fala de um endereço só, e
-    /// arrastá-los para o Dogma seguinte produz as duas piores telas que este
-    /// cliente tem: contra um Dogma ainda não fixado, uma recusa
+    /// arrastá-los para o servidor seguinte produz as duas piores telas que este
+    /// cliente tem: contra um servidor ainda não fixado, uma recusa
     /// ("ESTE NÃO É O SERVIDOR DO CONVITE") que ninguém pediu e que não há como
     /// desfazer sem reiniciar; contra um já fixado, uma acusação laranja contra
-    /// o Dogma de todo dia. O token faz o par disso do outro lado — um Dogma
+    /// o servidor de todo dia. O token faz o par disso do outro lado — um servidor
     /// que nunca pediu credencial nenhuma responderia `CredentialRejected`.
     ///
     /// O app já tem esta disciplina (`apps/seele-app/src/main.rs` descarta o
@@ -222,7 +222,7 @@ impl Selecao {
     /// preserva o rascunho de propósito.
     ///
     /// Voltar ao **mesmo** endereço não larga nada: aí o convite continua sendo
-    /// daquele Dogma, e limpá-lo seria perder a conferência que o link existe
+    /// daquele servidor, e limpá-lo seria perder a conferência que o link existe
     /// para fazer.
     fn apontar_para(&mut self, alvo: String) {
         if self.rascunho.alvo != alvo {
@@ -246,7 +246,7 @@ impl Selecao {
     ///
     /// **Vazia**, e não preenchida com a sugestão. Preencher parece atencioso e
     /// é uma armadilha: quem quer outro nome digita, e o que digita gruda no que
-    /// já estava. Foi assim que o primeiro teste desta tela entrou num Dogma
+    /// já estava. Foi assim que o primeiro teste desta tela entrou num servidor
     /// como `pessoaasuka`. Sugestão se mostra apagada e se aceita com Enter;
     /// digitar escreve por cima.
     fn perguntar_apelido(&mut self) {
@@ -513,7 +513,7 @@ mod tests {
             voice_room,
             visto_em: 0,
             // Os dois campos que a lista de conhecidos ganhou depois: o nome do
-            // Dogma e o ícone dele. Nenhum teste desta tela olha para eles — o
+            // servidor e o ícone dele. Nenhum teste desta tela olha para eles — o
             // que se testa aqui é a busca e a seleção, que trabalham sobre
             // `alvo` e `apelido` —, e `None` é o que uma entrada escrita antes
             // de os campos existirem carrega, que é o caso mais comum em disco.
@@ -565,7 +565,7 @@ mod tests {
     #[test]
     fn digitar_um_apelido_escreve_por_cima_da_sugestao() {
         // Achado dirigindo a tela de verdade: com o campo preenchido pela
-        // sugestão, digitar `asuka` entrava no Dogma como `pessoaasuka`.
+        // sugestão, digitar `asuka` entrava no servidor como `pessoaasuka`.
         let mut selecao = Selecao::nova(vec![conhecido("casa:8383", "pessoa", None)]);
 
         selecao.tecla(KeyCode::Char('n'));
@@ -606,15 +606,15 @@ mod tests {
     }
 
     #[test]
-    fn o_convite_colado_nao_segue_para_outro_dogma() {
+    fn o_convite_colado_nao_segue_para_outro_server() {
         // O caminho mais curto até o defeito, e o que o reproduziu: colar um
         // convite, apertar Esc na pergunta do apelido — que preserva o rascunho
-        // de propósito — e entrar num Dogma da lista. A impressão digital ia
-        // junto, e `plug` acusava de impostor um Dogma que o convite nem cita.
+        // de propósito — e entrar num server da lista. A impressão digital ia
+        // junto, e `plug` acusava de impostor um servidor que o convite nem cita.
         let mut selecao = Selecao::nova(vec![conhecido("outro:8383", "ayanami", None)]);
 
         selecao.tecla(KeyCode::Char('c'));
-        digitar(&mut selecao, &link_de_teste("dogma-do-link:8383"));
+        digitar(&mut selecao, &link_de_teste("server-do-link:8383"));
         assert_eq!(selecao.tecla(KeyCode::Enter), Resultado::Segue);
         assert_eq!(selecao.tecla(KeyCode::Esc), Resultado::Segue);
 
@@ -624,11 +624,11 @@ mod tests {
         assert_eq!(escolha.alvo, "outro:8383");
         assert_eq!(
             escolha.impressao_digital, None,
-            "a impressão do link foi cobrada de um Dogma que ele não menciona"
+            "a impressão do link foi cobrada de um servidor que ele não menciona"
         );
         assert_eq!(
             escolha.convite, None,
-            "o token foi mandado a um Dogma que não pediu credencial nenhuma"
+            "o token foi mandado a um servidor que não pediu credencial nenhuma"
         );
     }
 
@@ -638,7 +638,7 @@ mod tests {
         let mut selecao = Selecao::nova(Vec::new());
 
         selecao.tecla(KeyCode::Char('c'));
-        digitar(&mut selecao, &link_de_teste("dogma-do-link:8383"));
+        digitar(&mut selecao, &link_de_teste("server-do-link:8383"));
         selecao.tecla(KeyCode::Enter);
         selecao.tecla(KeyCode::Esc);
 
@@ -656,12 +656,12 @@ mod tests {
 
     #[test]
     fn hospedar_depois_de_um_convite_nao_confere_o_convite_contra_si_mesmo() {
-        // O Dogma que sobe aqui é deste computador; um convite de outro lugar
+        // O servidor que sobe aqui é deste computador; um convite de outro lugar
         // não tem nada a dizer sobre ele.
         let mut selecao = Selecao::nova(Vec::new());
 
         selecao.tecla(KeyCode::Char('c'));
-        digitar(&mut selecao, &link_de_teste("dogma-do-link:8383"));
+        digitar(&mut selecao, &link_de_teste("server-do-link:8383"));
         selecao.tecla(KeyCode::Enter);
         selecao.tecla(KeyCode::Esc);
 
@@ -676,20 +676,20 @@ mod tests {
 
     #[test]
     fn voltar_ao_mesmo_endereco_do_convite_mantem_a_conferencia() {
-        // O outro lado da regra: o convite é daquele Dogma, e continua sendo
+        // O outro lado da regra: o convite é daquele servidor, e continua sendo
         // dele. Limpá-lo aqui perderia a conferência que o link existe para
         // fazer — que é o defeito oposto, e igualmente caro.
-        let mut selecao = Selecao::nova(vec![conhecido("dogma-do-link:8383", "ayanami", None)]);
+        let mut selecao = Selecao::nova(vec![conhecido("server-do-link:8383", "ayanami", None)]);
 
         selecao.tecla(KeyCode::Char('c'));
-        digitar(&mut selecao, &link_de_teste("dogma-do-link:8383"));
+        digitar(&mut selecao, &link_de_teste("server-do-link:8383"));
         selecao.tecla(KeyCode::Enter);
         selecao.tecla(KeyCode::Esc);
 
         let Resultado::Pronto(escolha) = selecao.tecla(KeyCode::Enter) else {
             panic!("não escolheu");
         };
-        assert_eq!(escolha.alvo, "dogma-do-link:8383");
+        assert_eq!(escolha.alvo, "server-do-link:8383");
         assert_eq!(escolha.impressao_digital, Some("ab".repeat(32)));
         assert_eq!(escolha.convite, Some("A1B2C3D4".to_owned()));
     }
@@ -737,7 +737,7 @@ mod tests {
 
     #[test]
     fn esc_no_campo_desfaz_a_intencao_de_hospedar() {
-        // Sem isto, entrar em "hospedar", voltar, e escolher outro Dogma subiria
+        // Sem isto, entrar em "hospedar", voltar, e escolher outro servidor subiria
         // um servidor que ninguém pediu.
         let mut selecao = Selecao::nova(vec![conhecido("casa:8383", "ayanami", None)]);
         selecao.tecla(KeyCode::Char('h'));
@@ -746,7 +746,7 @@ mod tests {
         let Resultado::Pronto(escolha) = selecao.tecla(KeyCode::Enter) else {
             panic!("não escolheu");
         };
-        assert!(!escolha.hospedar, "subiria um Dogma sem ninguém pedir");
+        assert!(!escolha.hospedar, "subiria um servidor sem ninguém pedir");
         assert_eq!(escolha.alvo, "casa:8383");
     }
 

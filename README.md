@@ -463,7 +463,7 @@ explica por que uma linha é daquele jeito, a razão inteira está numa delas.
 
 Ainda não definida, mas o que a segurava saiu do caminho.
 
-A interface usava o vocabulário de Evangelion — Dogma, VoiceRoom, Pessoa, A.T. Field,
+A interface usava o vocabulário de Evangelion — Server, VoiceRoom, Pessoa, A.T. Field,
 e a assinatura em katakana —, e definir direitos com isso dentro era o tipo de
 decisão que se toma errado. Uma avaliação de usabilidade mostrou que o
 vocabulário também cobrava um preço de quem chegava, e as duas razões apontaram

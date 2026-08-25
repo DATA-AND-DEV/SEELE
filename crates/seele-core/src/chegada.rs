@@ -357,7 +357,7 @@ pub enum Caminho {
     ///
     /// # O caso real em que isso aparece
     ///
-    /// Um Dogma cujo ponto de encontro roda **na mesma máquina**, atrás de um
+    /// Um servidor cujo ponto de encontro roda **na mesma máquina**, atrás de um
     /// socket de pilha dupla — o arranjo de quem hospeda na máquina de
     /// desenvolvimento. O ponto observa a origem de quem bateu como
     /// `::ffff:127.0.0.1` e publica isso no convite;
@@ -380,7 +380,7 @@ pub enum Caminho {
     Ipv6Direto,
     /// Um IPv4 público respondeu sem que precisássemos avisar ninguém.
     ///
-    /// O degrau que uma porta mapeada no roteador produz, e o que um Dogma com
+    /// O degrau que uma porta mapeada no roteador produz, e o que um servidor com
     /// endereço próprio produz sempre.
     EnderecoPublico,
     /// Um IPv4 público respondeu, e avisamos o ponto de encontro por ele.

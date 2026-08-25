@@ -209,7 +209,7 @@ pub struct ScreenHeader {
     pub version: u8,
     /// Which transmission this stream carries.
     ///
-    /// Assigned by the Dogma when the transmission is announced
+    /// Assigned by the server when the transmission is announced
     /// ([`crate::control::ServerMessage::ScreenShareStarted`]) and never chosen
     /// by the sender, which is the rule [`crate::ids::Ssrc`] already follows in
     /// `specs/08-seguranca.md`: an identifier a client picks is an identifier a
@@ -256,7 +256,7 @@ impl ScreenHeader {
             height: self.height,
         };
         // Zero is refused with the same breath as too large, for the reason
-        // `check_dogma_icon` gives about a PNG declaring a side of nothing: it
+        // `check_server_icon` gives about a PNG declaring a side of nothing: it
         // is far more often a capture that failed than a deliberate choice, and
         // there is no screen behind it either way.
         if self.width == 0 || self.height == 0 {

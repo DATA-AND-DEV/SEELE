@@ -2,7 +2,7 @@
 //!
 //! A terceira camada de admissão, e a única que decide sobre **gente**.
 //! `admissao` decide sobre um segredo: quem sabe a senha ou traz um convite
-//! passa, e o Dogma não pergunta quem é. Aqui pergunta.
+//! passa, e o servidor não pergunta quem é. Aqui pergunta.
 //!
 //! # Por que isto cabe neste produto
 //!
@@ -33,7 +33,7 @@
 //! a conexão obrigaria a um prazo, e um prazo fabrica a resposta «ninguém
 //! atendeu», que quem a recebe não sabe o que fazer com ela. Um pedido durável
 //! que quem hospeda concede horas depois é promessa mais forte que uma barra
-//! girando — e não custa recurso do Dogma por alguém que ainda não entrou, que é
+//! girando — e não custa recurso do servidor por alguém que ainda não entrou, que é
 //! o mesmo argumento de `admissao`.
 //!
 //! É também a resposta a «e se ninguém estiver olhando»: o pedido é uma linha em
@@ -66,9 +66,9 @@ pub enum Resposta {
 /// porque isso transformaria a camada mais forte na mais fraca.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Segredo {
-    /// O Dogma não pedia nenhum.
+    /// O servidor não pedia nenhum.
     Aberto,
-    /// A senha do Dogma.
+    /// A senha do servidor.
     Senha,
     /// Um convite de uso único, que esta batida gastou.
     Convite,
@@ -107,9 +107,9 @@ pub struct Pedido {
     pub admitido: bool,
 }
 
-/// Se este Dogma pergunta antes de deixar entrar quem nunca entrou.
+/// Se este servidor pergunta antes de deixar entrar quem nunca entrou.
 ///
-/// Ausente significa desligada: um Dogma que já existia não muda de
+/// Ausente significa desligada: um servidor que já existia não muda de
 /// comportamento por ter sido migrado.
 ///
 /// # Errors
@@ -149,7 +149,7 @@ pub fn ligar(persistence: &mut Persistence, ligada: bool) -> Result<()> {
 /// nenhuma, e para ele o padrão é perguntar.
 ///
 /// `INSERT` que não sobrescreve, e não `ligar(true)`, porque isto roda **toda
-/// vez** que o app sobe um Dogma. Quem desligou a portaria de propósito não
+/// vez** que o app sobe um servidor. Quem desligou a portaria de propósito não
 /// pode vê-la voltar sozinha na próxima abertura da janela — um interruptor que
 /// se rearma é um interruptor quebrado.
 ///
@@ -279,12 +279,12 @@ pub fn bater(
     }
 }
 
-/// Admite de saída quem hospeda, no próprio Dogma.
+/// Admite de saída quem hospeda, no próprio servidor.
 ///
 /// # Por que isto existe
 ///
 /// A portaria trancou o dono para fora da própria casa, e o relato veio de um
-/// app instalado: apertar **HOSPEDAR AQUI** subia o Dogma, o app conectava
+/// app instalado: apertar **HOSPEDAR AQUI** subia o servidor, o app conectava
 /// nele, e o porteiro tratava quem hospeda como desconhecido — o pedido ficava
 /// esperando a decisão de alguém que não conseguia entrar para decidir.
 /// Deadlock no caminho principal do produto.
@@ -355,11 +355,11 @@ pub fn revogar(persistence: &mut Persistence, impressao: &str) -> Result<()> {
 /// `true` só quando a portaria está ligada **e** existe uma decisão gravada de
 /// `admitido` para esta impressão. Não é [`bater`], que responde `Entra` a todo
 /// mundo quando a portaria está desligada — usar aquela aqui deixaria qualquer
-/// segredo errado entrar em qualquer Dogma sem portaria.
+/// segredo errado entrar em qualquer servidor sem portaria.
 ///
 /// # Para que ela existe
 ///
-/// A política de admissão não tem memória: com o Dogma fechado, ela exige
+/// A política de admissão não tem memória: com o servidor fechado, ela exige
 /// segredo de todo mundo, sempre. O convite que trouxe alguém é de uso único e
 /// é gasto na entrada — então, na volta, a pessoa aprovada é barrada por
 /// `ConviteGasto` **antes** de a portaria poder dizer que a conhece.
@@ -454,7 +454,7 @@ mod tests {
 
     #[test]
     fn quem_hospeda_entra_na_propria_casa_sem_esperar_ninguem() {
-        // O defeito que fechou o produto. Apertar HOSPEDAR AQUI subia o Dogma,
+        // O defeito que fechou o produto. Apertar HOSPEDAR AQUI subia o servidor,
         // o app conectava nele, e o porteiro tratava quem hospeda como
         // desconhecido — deixando o pedido esperando a decisão de alguém que
         // não conseguia entrar para decidir.
@@ -481,7 +481,7 @@ mod tests {
 
     #[test]
     fn hospedar_de_novo_nao_desfaz_uma_recusa_que_ja_foi_dada() {
-        // Hospedar roda toda vez que a janela sobe um Dogma, sobre o mesmo
+        // Hospedar roda toda vez que a janela sobe um servidor, sobre o mesmo
         // banco. Tem de ser idempotente para o dono e inerte para todo o resto.
         let mut banco = persistence();
         ligar(&mut banco, true).unwrap();
@@ -656,7 +656,7 @@ mod tests {
 
     #[test]
     fn a_semente_nao_rearma_o_interruptor_de_quem_o_desligou() {
-        // `semear_ligada` roda toda vez que o app sobe um Dogma. Um interruptor
+        // `semear_ligada` roda toda vez que o app sobe um servidor. Um interruptor
         // que se rearma sozinho é um interruptor quebrado.
         let mut c = persistence();
         semear_ligada(&mut c).expect("semear");
@@ -772,7 +772,7 @@ mod a_volta_de_quem_ja_foi_aprovado {
 
         // E a estreiteza que faz isso ser seguro: com a portaria desligada,
         // ninguém é «já admitido». Sem esta linha, o perdão da recusa deixaria
-        // qualquer segredo errado entrar em todo Dogma que não usa portaria.
+        // qualquer segredo errado entrar em todo servidor que não usa portaria.
         ligar(&mut persistence, false).expect("desligar a portaria");
         assert!(
             !ja_admitido(&persistence, AYANAMI).expect("perguntar"),

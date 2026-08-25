@@ -1,9 +1,9 @@
-//! Quem hospeda dá nome e cara ao Dogma, e todo mundo fica sabendo na hora.
+//! Quem hospeda dá nome e cara ao servidor, e todo mundo fica sabendo na hora.
 //!
 //! Pedido de quem paga a conta, nas palavras dele: «o host do servidor pode
 //! personalizar algumas coisas, como: ícone do servidor (que fica à esquerda) e
 //! nome do servidor». O ADR 0032 já dizia onde o nome mora — a tabela
-//! `configuracao` — e por que ele precisa de um aviso quando muda com o Dogma
+//! `configuracao` — e por que ele precisa de um aviso quando muda com o servidor
 //! no ar: sem isso, a tela de quem renomeou mostra o nome novo e a de todo
 //! mundo mostra o velho.
 //!
@@ -38,9 +38,9 @@ use std::time::Duration;
 
 use anyhow::Result;
 use ed25519_dalek::{Signer, SigningKey};
-use seele_proto::control::{AlertReason, ClientMessage, ServerMessage, MAX_DOGMA_ICON_SIDE};
+use seele_proto::control::{AlertReason, ClientMessage, ServerMessage, MAX_SERVER_ICON_SIDE};
 use seele_server::persistence::Location;
-use seele_server::{frame, DogmaConfig, Server};
+use seele_server::{frame, ServerConfig, Daemon};
 
 /// Quanto se espera por um quadro que tem de vir.
 ///
@@ -51,7 +51,7 @@ const PRAZO: Duration = Duration::from_secs(5);
 /// Um verificador que aceita qualquer certificado.
 ///
 /// O que está sob teste não é o TOFU — que tem os testes dele em
-/// `seele-core/src/tofu.rs`. O certificado aqui é o que este Dogma acabou de
+/// `seele-core/src/tofu.rs`. O certificado aqui é o que este servidor acabou de
 /// gerar dentro desta função.
 #[derive(Debug)]
 struct AceitaQualquer(Arc<rustls::crypto::CryptoProvider>);
@@ -101,15 +101,15 @@ impl rustls::client::danger::ServerCertVerifier for AceitaQualquer {
     }
 }
 
-/// Um Dogma já atendendo, no banco que se pedir.
-async fn dogma(banco: Location) -> Result<(SocketAddr, Arc<Server>)> {
-    let config = DogmaConfig {
+/// Um servidor já atendendo, no banco que se pedir.
+async fn server(banco: Location) -> Result<(SocketAddr, Arc<Daemon>)> {
+    let config = ServerConfig {
         name: "Casa".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: banco,
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let servidor = Arc::new(Server::bind(config).await?);
+    let servidor = Arc::new(Daemon::bind(config).await?);
     let endereco = servidor.local_addr()?;
     let aceitando = Arc::clone(&servidor);
     tokio::spawn(async move {
@@ -124,8 +124,8 @@ struct Par {
     _conexao: quinn::Connection,
     envio: quinn::SendStream,
     recebe: quinn::RecvStream,
-    /// O nome que o Dogma disse ter no aperto de mão.
-    nome_do_dogma: String,
+    /// O nome que o servidor disse ter no aperto de mão.
+    nome_do_server: String,
     /// O ícone que veio logo depois do `Session`, se veio algum.
     icone: Option<Vec<u8>>,
 }
@@ -134,7 +134,7 @@ struct Par {
 ///
 /// `semente` é a chave: a mesma semente é a mesma pessoa, o que é o que permite
 /// a um teste reconectar depois do reinício como quem hospeda, e não como um
-/// estranho. A primeira conta criada num Dogma vira a Comandante — ver
+/// estranho. A primeira conta criada num server vira a Comandante — ver
 /// `permissions::seat_the_arrival` —, então a semente que abrir primeiro é a de
 /// quem administra.
 async fn abrir(endereco: SocketAddr, semente: u8) -> Result<Par> {
@@ -174,7 +174,7 @@ async fn abrir(endereco: SocketAddr, semente: u8) -> Result<Par> {
 
     let ServerMessage::Challenge { nonce } = frame::read::<ServerMessage>(&mut recebe).await?
     else {
-        anyhow::bail!("o Dogma não mandou Challenge");
+        anyhow::bail!("o servidor não mandou Challenge");
     };
     frame::write(
         &mut envio,
@@ -184,15 +184,15 @@ async fn abrir(endereco: SocketAddr, semente: u8) -> Result<Par> {
     )
     .await?;
     let ServerMessage::Session {
-        dogma: nome_do_dogma,
+        server: nome_do_server,
         ..
     } = frame::read::<ServerMessage>(&mut recebe).await?
     else {
-        anyhow::bail!("o Dogma não mandou Session");
+        anyhow::bail!("o servidor não mandou Session");
     };
 
     // O ícone vem logo depois, **num quadro próprio**, e só quando existe. Um
-    // Dogma sem ícone não manda nada, e é por isso que esta espera é curta: o
+    // servidor sem ícone não manda nada, e é por isso que esta espera é curta: o
     // silêncio é a resposta, não um tempo esgotado.
     let icone = match tokio::time::timeout(
         Duration::from_millis(500),
@@ -200,7 +200,7 @@ async fn abrir(endereco: SocketAddr, semente: u8) -> Result<Par> {
     )
     .await
     {
-        Ok(Ok(ServerMessage::DogmaIconChanged { icon })) => icon,
+        Ok(Ok(ServerMessage::ServerIconChanged { icon })) => icon,
         _ => None,
     };
 
@@ -208,7 +208,7 @@ async fn abrir(endereco: SocketAddr, semente: u8) -> Result<Par> {
         _conexao: conexao,
         envio,
         recebe,
-        nome_do_dogma,
+        nome_do_server,
         icone,
     })
 }
@@ -248,26 +248,26 @@ fn png(lado: u32) -> Vec<u8> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn renomear_com_o_dogma_no_ar_chega_a_quem_nao_pediu_nada() -> Result<()> {
+async fn renomear_com_o_server_no_ar_chega_a_quem_nao_pediu_nada() -> Result<()> {
     // O defeito que o ADR 0032 manda não construir: o nome novo na tela de quem
     // renomeou e o velho na de todo mundo, até alguém reconectar.
-    let (endereco, servidor) = dogma(Location::Memory).await?;
+    let (endereco, servidor) = server(Location::Memory).await?;
 
     let mut anfitria = abrir(endereco, 1).await?;
     let mut visita = abrir(endereco, 2).await?;
-    assert_eq!(anfitria.nome_do_dogma, "Casa");
-    assert_eq!(visita.nome_do_dogma, "Casa");
+    assert_eq!(anfitria.nome_do_server, "Casa");
+    assert_eq!(visita.nome_do_server, "Casa");
 
     frame::write(
         &mut anfitria.envio,
-        &ClientMessage::RenameDogma {
+        &ClientMessage::RenameServer {
             name: "Terceira Tóquio".into(),
         },
     )
     .await?;
 
     let na_visita = esperar(&mut visita, |quadro| match quadro {
-        ServerMessage::DogmaRenamed { name } => Some(name.clone()),
+        ServerMessage::ServerRenamed { name } => Some(name.clone()),
         _ => None,
     })
     .await;
@@ -279,7 +279,7 @@ async fn renomear_com_o_dogma_no_ar_chega_a_quem_nao_pediu_nada() -> Result<()> 
 
     // E de volta para quem pediu, que também tem um cabeçalho para redesenhar.
     let em_casa = esperar(&mut anfitria, |quadro| match quadro {
-        ServerMessage::DogmaRenamed { name } => Some(name.clone()),
+        ServerMessage::ServerRenamed { name } => Some(name.clone()),
         _ => None,
     })
     .await;
@@ -291,23 +291,23 @@ async fn renomear_com_o_dogma_no_ar_chega_a_quem_nao_pediu_nada() -> Result<()> 
 
 #[tokio::test(flavor = "multi_thread")]
 async fn o_icone_chega_a_quem_esta_dentro_e_a_quem_entra_depois() -> Result<()> {
-    let (endereco, servidor) = dogma(Location::Memory).await?;
+    let (endereco, servidor) = server(Location::Memory).await?;
 
     let mut anfitria = abrir(endereco, 1).await?;
     let mut visita = abrir(endereco, 2).await?;
-    assert_eq!(visita.icone, None, "um Dogma novo não tem ícone");
+    assert_eq!(visita.icone, None, "um servidor novo não tem ícone");
 
     let imagem = png(128);
     frame::write(
         &mut anfitria.envio,
-        &ClientMessage::SetDogmaIcon {
+        &ClientMessage::SetServerIcon {
             icon: Some(imagem.clone()),
         },
     )
     .await?;
 
     let recebido = esperar(&mut visita, |quadro| match quadro {
-        ServerMessage::DogmaIconChanged { icon } => Some(icon.clone()),
+        ServerMessage::ServerIconChanged { icon } => Some(icon.clone()),
         _ => None,
     })
     .await;
@@ -326,31 +326,31 @@ async fn o_icone_chega_a_quem_esta_dentro_e_a_quem_entra_depois() -> Result<()> 
 async fn tirar_o_icone_e_dito_a_quem_esta_dentro() -> Result<()> {
     // A metade que um `Option` esquecido deixa passar: pôr funciona e tirar não
     // chega a ninguém, então a imagem some do banco e continua na tela.
-    let (endereco, servidor) = dogma(Location::Memory).await?;
+    let (endereco, servidor) = server(Location::Memory).await?;
 
     let mut anfitria = abrir(endereco, 1).await?;
     let mut visita = abrir(endereco, 2).await?;
 
     frame::write(
         &mut anfitria.envio,
-        &ClientMessage::SetDogmaIcon {
+        &ClientMessage::SetServerIcon {
             icon: Some(png(64)),
         },
     )
     .await?;
     esperar(&mut visita, |quadro| {
-        matches!(quadro, ServerMessage::DogmaIconChanged { icon: Some(_) }).then_some(())
+        matches!(quadro, ServerMessage::ServerIconChanged { icon: Some(_) }).then_some(())
     })
     .await
     .expect("o ícone não chegou");
 
     frame::write(
         &mut anfitria.envio,
-        &ClientMessage::SetDogmaIcon { icon: None },
+        &ClientMessage::SetServerIcon { icon: None },
     )
     .await?;
     esperar(&mut visita, |quadro| {
-        matches!(quadro, ServerMessage::DogmaIconChanged { icon: None }).then_some(())
+        matches!(quadro, ServerMessage::ServerIconChanged { icon: None }).then_some(())
     })
     .await
     .expect("tirar o ícone não chegou a quem estava dentro");
@@ -370,7 +370,7 @@ async fn quem_nao_administra_e_recusado_e_nada_muda() -> Result<()> {
     // `specs/08-seguranca.md`: a interface esconder é conveniência; o servidor
     // negar é a segurança. A casca pergunta e obedece — e este par cru não
     // pergunta nada, que é exatamente a casca que não existe.
-    let (endereco, servidor) = dogma(Location::Memory).await?;
+    let (endereco, servidor) = server(Location::Memory).await?;
 
     // A primeira conta vira a Comandante, então a segunda é uma Pessoa comum.
     let anfitria = abrir(endereco, 1).await?;
@@ -378,14 +378,14 @@ async fn quem_nao_administra_e_recusado_e_nada_muda() -> Result<()> {
 
     frame::write(
         &mut visita.envio,
-        &ClientMessage::RenameDogma {
+        &ClientMessage::RenameServer {
             name: "Meu Agora".into(),
         },
     )
     .await?;
     frame::write(
         &mut visita.envio,
-        &ClientMessage::SetDogmaIcon {
+        &ClientMessage::SetServerIcon {
             icon: Some(png(64)),
         },
     )
@@ -405,12 +405,12 @@ async fn quem_nao_administra_e_recusado_e_nada_muda() -> Result<()> {
         (recusas == 2).then_some(())
     })
     .await
-    .expect("o Dogma recusou calado, que é indistinguível de estar quebrado");
+    .expect("o servidor recusou calado, que é indistinguível de estar quebrado");
 
     // E a recusa foi de verdade: quem entra depois lê o nome de antes e não
     // recebe imagem nenhuma.
     let depois = abrir(endereco, 3).await?;
-    assert_eq!(depois.nome_do_dogma, "Casa");
+    assert_eq!(depois.nome_do_server, "Casa");
     assert_eq!(depois.icone, None);
 
     drop(anfitria);
@@ -421,26 +421,26 @@ async fn quem_nao_administra_e_recusado_e_nada_muda() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn o_nome_e_o_icone_sobrevivem_a_um_reinicio() -> Result<()> {
     // O critério com que a tabela `configuracao` foi criada, cobrado de ponta a
-    // ponta: o processo do Dogma cai, o banco continua no disco, e quem volta
-    // encontra o que quem hospeda escolheu — e não o `name` da `DogmaConfig`,
+    // ponta: o processo do servidor cai, o banco continua no disco, e quem volta
+    // encontra o que quem hospeda escolheu — e não o `name` da `ServerConfig`,
     // que é o que estava sendo mandado antes desta mudança.
     let diretorio = tempfile::tempdir()?;
     let arquivo = diretorio.path().join("dogma.db");
-    let imagem = png(MAX_DOGMA_ICON_SIDE);
+    let imagem = png(MAX_SERVER_ICON_SIDE);
 
     {
-        let (endereco, servidor) = dogma(Location::File(arquivo.clone())).await?;
+        let (endereco, servidor) = server(Location::File(arquivo.clone())).await?;
         let mut anfitria = abrir(endereco, 1).await?;
         frame::write(
             &mut anfitria.envio,
-            &ClientMessage::RenameDogma {
+            &ClientMessage::RenameServer {
                 name: "Terceira Tóquio".into(),
             },
         )
         .await?;
         frame::write(
             &mut anfitria.envio,
-            &ClientMessage::SetDogmaIcon {
+            &ClientMessage::SetServerIcon {
                 icon: Some(imagem.clone()),
             },
         )
@@ -448,17 +448,17 @@ async fn o_nome_e_o_icone_sobrevivem_a_um_reinicio() -> Result<()> {
         // Esperar o próprio aviso é o que garante que a gravação aconteceu: ele
         // sai **depois** do banco ter aceitado.
         esperar(&mut anfitria, |quadro| {
-            matches!(quadro, ServerMessage::DogmaIconChanged { icon: Some(_) }).then_some(())
+            matches!(quadro, ServerMessage::ServerIconChanged { icon: Some(_) }).then_some(())
         })
         .await
-        .expect("o Dogma não confirmou o ícone");
+        .expect("o servidor não confirmou o ícone");
         servidor.shutdown();
     }
 
-    let (endereco, servidor) = dogma(Location::File(arquivo)).await?;
+    let (endereco, servidor) = server(Location::File(arquivo)).await?;
     let de_volta = abrir(endereco, 1).await?;
     assert_eq!(
-        de_volta.nome_do_dogma, "Terceira Tóquio",
+        de_volta.nome_do_server, "Terceira Tóquio",
         "o reinício devolveu o nome do arranque por cima do que quem hospeda escolheu"
     );
     assert_eq!(de_volta.icone, Some(imagem));

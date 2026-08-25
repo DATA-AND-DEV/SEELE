@@ -7,7 +7,7 @@
 //! `DisconnectReason::RateLimited` no protocolo e em lugar nenhum do servidor.
 //!
 //! Então isto passa pelo fio de verdade, com o cliente de verdade, e cobra as
-//! duas coisas que uma pessoa percebe: **o Dogma avisa antes de derrubar**, e
+//! duas coisas que uma pessoa percebe: **o servidor avisa antes de derrubar**, e
 //! **quem não para, sai**.
 //!
 //! Os dois testes rodam em `current_thread` de propósito. Um `select!` com
@@ -26,16 +26,16 @@ use seele_core::{Client, ConnectError, MemoryPinStore};
 use seele_proto::control::{AlertReason, DisconnectReason, ServerMessage};
 use seele_server::persistence::Location;
 use seele_server::taxa::{APERTOS_DE_RAJADA, PACIENCIA, QUADROS_DE_RAJADA};
-use seele_server::{DogmaConfig, Server};
+use seele_server::{ServerConfig, Daemon};
 
-async fn dogma() -> Result<(SocketAddr, Arc<Server>)> {
-    let config = DogmaConfig {
+async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
+    let config = ServerConfig {
         name: "Terceira Tóquio".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let servidor = Arc::new(Server::bind(config).await?);
+    let servidor = Arc::new(Daemon::bind(config).await?);
     let endereco = servidor.local_addr()?;
     let aceitando = Arc::clone(&servidor);
     tokio::spawn(async move {
@@ -59,12 +59,12 @@ async fn entrar(endereco: SocketAddr) -> Result<Client, ConnectError> {
 
 /// Bater à porta em laço acaba em recusa, com o motivo certo.
 ///
-/// É o balde que importa para expor um Dogma à internet: o aperto de mão
-/// custa Argon2id quando o Dogma tem senha, e sem isto cada pacote de quem
+/// É o balde que importa para expor um servidor à internet: o aperto de mão
+/// custa Argon2id quando o servidor tem senha, e sem isto cada pacote de quem
 /// varre a rede compra milissegundos de CPU do anfitrião.
 #[tokio::test(flavor = "current_thread")]
 async fn quem_bate_a_porta_em_laco_e_recusado_por_taxa() -> Result<()> {
-    let (endereco, servidor) = dogma().await?;
+    let (endereco, servidor) = server().await?;
 
     // A rajada inteira passa. Uma casa atrás de um NAT, com três clientes
     // gastando a bateria interna depois de o roteador reiniciar, chega perto
@@ -103,10 +103,10 @@ async fn quem_bate_a_porta_em_laco_e_recusado_por_taxa() -> Result<()> {
 ///
 /// O caso que o ADR 0021 nomeia na lista do que ele não resolvia: "um convidado
 /// legítimo pode inundar de mensagens". Ele já entrou, já é quem diz ser, e
-/// mesmo assim não pode gastar o Dogma inteiro.
+/// mesmo assim não pode gastar o servidor inteiro.
 #[tokio::test(flavor = "current_thread")]
 async fn quem_inunda_depois_de_entrar_e_avisado_e_depois_derrubado() -> Result<()> {
-    let (endereco, servidor) = dogma().await?;
+    let (endereco, servidor) = server().await?;
     let mut cliente = entrar(endereco).await.expect("o convidado entra");
 
     // Muito acima da rajada mais a paciência, com folga para as fichas que o
@@ -115,7 +115,7 @@ async fn quem_inunda_depois_de_entrar_e_avisado_e_depois_derrubado() -> Result<(
     let quantos = (QUADROS_DE_RAJADA + PACIENCIA) * 4;
     for _ in 0..quantos {
         if cliente.send_ping().await.is_err() {
-            // O Dogma já fechou o fio. É um desfecho legítimo desta rajada.
+            // O servidor já fechou o fio. É um desfecho legítimo desta rajada.
             break;
         }
     }
@@ -142,7 +142,7 @@ async fn quem_inunda_depois_de_entrar_e_avisado_e_depois_derrubado() -> Result<(
 
     assert!(
         avisou,
-        "o Dogma derrubou sem avisar antes; derrubar calado é o que faz alguém \
+        "o servidor derrubou sem avisar antes; derrubar calado é o que faz alguém \
          achar que o produto está quebrado"
     );
     assert!(

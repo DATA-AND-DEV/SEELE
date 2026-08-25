@@ -1,5 +1,5 @@
 //! The M4 acceptance criteria from `specs/09-roadmap.md` and
-//! `specs/05-cliente-tui.md`, executed against a real Dogma.
+//! `specs/05-cliente-tui.md`, executed against a real server.
 //!
 //! > **Aceite:** alguém de fora do projeto consegue conectar e conversar só com
 //! > `?`. Funciona por SSH em terminal de 16 cores sem perder informação. Do
@@ -25,7 +25,7 @@ use seele_core::{Client, MemoryPinStore, Room};
 use seele_proto::ids::{VoiceRoomId, ClientMessageId, LineId};
 use seele_proto::ServerMessage;
 use seele_server::persistence::Location;
-use seele_server::{DogmaConfig, Server};
+use seele_server::{ServerConfig, Daemon};
 use seele_tui::app::{App, Key, Mode, Screen};
 use seele_tui::theme::{Palette, Theme};
 use seele_tui::{ui, view};
@@ -37,14 +37,14 @@ const WAIT: Duration = Duration::from_secs(5);
 /// The smallest terminal the spec supports, which is the one that has to work.
 const SIZE: (u16, u16) = (80, 24);
 
-async fn start() -> Result<(SocketAddr, Arc<Server>)> {
-    let config = DogmaConfig {
+async fn start() -> Result<(SocketAddr, Arc<Daemon>)> {
+    let config = ServerConfig {
         name: "Terceira Tóquio".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let server = Arc::new(Server::bind(config).await?);
+    let server = Arc::new(Daemon::bind(config).await?);
     let address = server.local_addr()?;
     let accepting = Arc::clone(&server);
     tokio::spawn(async move {
@@ -157,10 +157,10 @@ async fn an_outsider_connects_and_the_screen_shows_the_conversation() -> Result<
     let screen = draw(&app, Palette::True);
     assert!(screen.contains("sync caiu aqui"), "{screen}");
     assert!(screen.contains("shinji"), "unattributed:\n{screen}");
-    // Truncated, not missing: the Dogma panel is 18 cells and the name is
+    // Truncated, not missing: the server panel is 18 cells and the name is
     // longer. Asserting the full string here would be asserting that truncation
     // does not work.
-    assert!(screen.contains("Terceira"), "no Dogma:\n{screen}");
+    assert!(screen.contains("Terceira"), "no servidor:\n{screen}");
 
     server.shutdown();
     Ok(())

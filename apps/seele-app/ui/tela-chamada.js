@@ -29,7 +29,7 @@
 //     afirmações de silêncio; oscilando, vinte e quatro mentiras animadas com o
 //     nome de outra pessoa embaixo.
 //   - **o atraso por pessoa.** `Telemetry.rtt_ms` é o desta máquina até o
-//     Dogma, um número só. Ele continua na telemetria da tela de operação, que
+//     servidor, um número só. Ele continua na telemetria da tela de operação, que
 //     é onde ele é verdade.
 //   - **a tag de subsistema** (`MEDIA·01`), que o protocolo não tem.
 //   - **a rota e o cronômetro da conexão**, pela mesma razão — ver `EM SESSÃO`,
@@ -75,7 +75,7 @@ const PASSO_DE_VOLUME = 10;
  * Os eventos que **esta janela** viu passar, do mais novo para o mais velho.
  *
  * O comp desenha cinco linhas de histórico — `IKARI.S entrou`,
- * `HORAKI.H saiu` — e o inventário §9.8 deixou em aberto quanto disso o Dogma
+ * `HORAKI.H saiu` — e o inventário §9.8 deixou em aberto quanto disso o servidor
  * guarda. A resposta é: nada. `Event::RosterChanged` diz que o roster mudou,
  * nunca o quê, e não há histórico de entrada, saída nem A.T. Field em lugar
  * nenhum do core.
@@ -704,7 +704,7 @@ function fecharChamada() {
  * descarrega — e `mostrarFim` escolhe a tela seguinte por conta própria.
  * Devolver para a operação ali reabriria uma sessão que acabou de terminar; não
  * fechar deixaria duas telas empilhadas, porque toda `.tela` tem a altura da
- * janela. Mesma razão e mesma forma que `abandonarDogma`.
+ * janela. Mesma razão e mesma forma que `abandonarServer`.
  */
 function abandonarChamada() {
   $("tela-chamada").hidden = true;

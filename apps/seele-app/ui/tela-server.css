@@ -1,9 +1,9 @@
-/* SEELE · Entry Plug — o Terminal Dogma (`#tela-dogma`).
+/* SEELE · Entry Plug — o Terminal Server (`#tela-server`).
    A configuração local: o que é desta máquina e não deste servidor. §8 do comp v3.
 
-   Carrega depois de `base.css` e depende disso: `.dogma-entrada`, o botão que
+   Carrega depois de `base.css` e depende disso: `.server-entrada`, o botão que
    abre esta tela lá da entrada, refina o `.botao-fantasma` de lá, e
-   `.dogma-painel .rotulo` refina o `.rotulo` — os dois perderiam o empate na
+   `.server-painel .rotulo` refina o `.rotulo` — os dois perderiam o empate na
    ordem inversa.
 
    ---- a grade ----
@@ -11,9 +11,9 @@
    O comp v3 desenha `250px minmax(0,1fr)`. Aqui são 248px, que é 31 células de
    8 — o mesmo arredondamento que `docs/tokens-achados.md` já registra entre a
    célula de 8×16 dos tokens e a grade de 4px do comp, e dois pixels não mudam
-   onde TERMINAL DOGMA quebra. Todo o resto do espaçamento aqui é célula.
+   onde TERMINAL SERVER quebra. Todo o resto do espaçamento aqui é célula.
 
-   ---- toda classe daqui começa por `dogma-` ----
+   ---- toda classe daqui começa por `server-` ----
 
    Não é gosto nem verbosidade. As folhas de tela caem num só espaço de nomes,
    na ordem em que `index.html` as carrega, e duas telas escolhendo o mesmo nome
@@ -29,7 +29,7 @@
    esta tela decidindo sozinha se a explicação de um controle aparece, e
    `the_note_beside_a_control_is_defined_once_and_never_by_a_screen` reprova. */
 
-.dogma {
+.server {
   flex: 1;
   min-height: 0;
   display: grid;
@@ -38,7 +38,7 @@
 
 /* ---------- a coluna das seções ---------- */
 
-.dogma-coluna {
+.server-coluna {
   background: var(--seele-negro-painel);
   border-right: 1px solid var(--seele-linha-forte);
   display: flex;
@@ -47,7 +47,7 @@
   overflow-y: auto;
 }
 
-.dogma-marca {
+.server-marca {
   padding: 16px;
   border-bottom: 1px solid var(--seele-linha);
   display: flex;
@@ -58,7 +58,7 @@
 
 /* `line-height: 1` porque a cartela é 22px numa página de entrelinha 16: sem
    isto a linha da marca cresce e empurra a primeira seção meia célula. */
-.dogma-marca-titulo {
+.server-marca-titulo {
   margin: 0;
   font-family: var(--seele-display);
   font-weight: var(--seele-cartela);
@@ -68,7 +68,7 @@
   color: var(--seele-laranja-nerv);
 }
 
-.dogma-secoes {
+.server-secoes {
   margin: 0;
   padding: 0;
   list-style: none;
@@ -77,7 +77,7 @@
 
 /* Uma seção. Botão de verdade — e não o `<span>` que esta tela usava quando só
    havia uma —, porque agora as quatro levam a painéis diferentes. */
-.dogma-secao {
+.server-secao {
   width: 100%;
   min-height: 56px;
   padding: 8px 16px;
@@ -96,35 +96,35 @@
   cursor: pointer;
 }
 
-.dogma-secao:hover { background: var(--seele-negro-absoluto); }
-.dogma-secao:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: -2px; }
+.server-secao:hover { background: var(--seele-negro-absoluto); }
+.server-secao:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: -2px; }
 
 /* A seção aberta. Nunca só pela cor: `aria-current` é o que um leitor de tela
    anuncia, e a barra da esquerda é o que sobra em monocromático —
    `specs/05-cliente-tui.md` proíbe informação transmitida só por cor. */
-.dogma-secao[aria-current="true"] {
+.server-secao[aria-current="true"] {
   border-left-color: var(--seele-laranja-nerv);
   background: var(--seele-laranja-fraco);
   color: var(--seele-laranja-nerv);
 }
 
-.dogma-secao-icone {
+.server-secao-icone {
   flex-shrink: 0;
   font-size: 16px;
   line-height: 1;
   color: var(--seele-osso-apagado);
 }
 
-.dogma-secao[aria-current="true"] .dogma-secao-icone { color: var(--seele-laranja-nerv); }
+.server-secao[aria-current="true"] .server-secao-icone { color: var(--seele-laranja-nerv); }
 
-.dogma-secao-texto {
+.server-secao-texto {
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.dogma-secao-nome {
+.server-secao-nome {
   font-family: var(--seele-display);
   font-weight: var(--seele-cartela);
   font-size: 15px;
@@ -135,7 +135,7 @@
 /* A porta de saída, colada no rodapé da coluna. `margin-top: auto` e não um
    espaçador vazio: um `<div>` só para empurrar é um elemento que um leitor de
    tela percorre sem nada a dizer. */
-.dogma-voltar {
+.server-voltar {
   margin-top: auto;
   width: 100%;
   min-height: 48px;
@@ -154,19 +154,19 @@
   cursor: pointer;
 }
 
-.dogma-voltar:hover { color: var(--seele-laranja-nerv); }
-.dogma-voltar:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: -2px; }
+.server-voltar:hover { color: var(--seele-laranja-nerv); }
+.server-voltar:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: -2px; }
 
 /* ---------- o corpo ---------- */
 
-.dogma-corpo {
+.server-corpo {
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
-.dogma-faixa {
+.server-faixa {
   padding: 16px 24px;
   border-bottom: 1px solid var(--seele-linha);
   display: flex;
@@ -180,7 +180,7 @@
    está valendo — a lista de microfones diz qual abriu, e não qual foi pedido —,
    de modo que não há estado sujo para um rótulo reportar nem nada pendente para
    um botão confirmar. §8.1 do inventário do comp v3 registra a decisão. */
-.dogma-titulo {
+.server-titulo {
   margin: 0;
   font-family: var(--seele-display);
   font-weight: var(--seele-cartela);
@@ -190,7 +190,7 @@
   color: var(--seele-osso);
 }
 
-.dogma-painel {
+.server-painel {
   min-height: 0;
   padding: 24px;
   overflow-y: auto;
@@ -202,7 +202,7 @@
   max-width: 860px;
 }
 
-.dogma-painel .rotulo {
+.server-painel .rotulo {
   display: block;
   margin: 0;
   font: inherit;
@@ -215,7 +215,7 @@
 
 /* O painel de uma seção. Quatro deles, um só visível — `hidden` em `base.css`
    é `display: none !important`, então esconder não deixa a grade com buracos. */
-.dogma-painel-secao {
+.server-painel-secao {
   display: flex;
   flex-direction: column;
   gap: 24px;
@@ -223,13 +223,13 @@
 
 /* ---------- um bloco ---------- */
 
-.dogma-bloco {
+.server-bloco {
   border: 1px solid var(--seele-linha);
   display: flex;
   flex-direction: column;
 }
 
-.dogma-bloco-topo {
+.server-bloco-topo {
   padding: 8px 16px;
   border-bottom: 1px solid var(--seele-linha);
   display: flex;
@@ -237,7 +237,7 @@
   gap: 2px;
 }
 
-.dogma-bloco-nome {
+.server-bloco-nome {
   margin: 0;
   font-family: var(--seele-display);
   font-weight: var(--seele-cartela);
@@ -247,14 +247,14 @@
   color: var(--seele-laranja-nerv);
 }
 
-.dogma-bloco-corpo {
+.server-bloco-corpo {
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-.dogma-campo {
+.server-campo {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -262,7 +262,7 @@
 
 /* ---------- as listas de dispositivo ---------- */
 
-.dogma-dispositivos {
+.server-dispositivos {
   margin: 0;
   padding: 0;
   list-style: none;
@@ -275,7 +275,7 @@
   border: 1px solid var(--seele-linha);
 }
 
-.dogma-dispositivo {
+.server-dispositivo {
   width: 100%;
   display: flex;
   align-items: baseline;
@@ -291,33 +291,33 @@
   cursor: pointer;
 }
 
-.dogma-dispositivo:hover:not(:disabled) { background: var(--seele-negro-absoluto); }
-.dogma-dispositivo:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: -2px; }
+.server-dispositivo:hover:not(:disabled) { background: var(--seele-negro-absoluto); }
+.server-dispositivo:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: -2px; }
 
 /* O escolhido. Nunca só pela cor: o rótulo `EM USO` vem junto, desenhado pelo
    JavaScript, porque `specs/05-cliente-tui.md` proíbe informação transmitida só
    por cor e uma marca laranja sozinha é exatamente isso. */
-.dogma-dispositivo[data-escolhido="sim"] {
+.server-dispositivo[data-escolhido="sim"] {
   border-left-color: var(--seele-laranja-nerv);
   background: var(--seele-laranja-fraco);
 }
 
-.dogma-dispositivo-nome { flex: 1; overflow-wrap: anywhere; }
+.server-dispositivo-nome { flex: 1; overflow-wrap: anywhere; }
 
-.dogma-dispositivo-marca {
+.server-dispositivo-marca {
   font-size: 11px;
   letter-spacing: 0.1em;
   color: var(--seele-osso-apagado);
 }
 
-.dogma-dispositivo[data-escolhido="sim"] .dogma-dispositivo-marca {
+.server-dispositivo[data-escolhido="sim"] .server-dispositivo-marca {
   color: var(--seele-laranja-nerv);
 }
 
 /* Nada para escolher. Uma lista vazia não quer dizer "sem microfone" — quer
    dizer que a máquina não quis enumerar —, e a frase que o JavaScript escreve
    aqui diz isso. */
-.dogma-dispositivos-vazio {
+.server-dispositivos-vazio {
   padding: 12px;
   font-size: var(--seele-t-dado);
   color: var(--seele-osso-apagado);
@@ -326,7 +326,7 @@
 
 /* ---------- o medidor de entrada ---------- */
 
-.dogma-medidor {
+.server-medidor {
   margin: 0;
   font-size: 11px;
   line-height: 1.6;
@@ -336,17 +336,17 @@
 }
 
 /* Sem sessão não há nível, e um medidor apagado não é um medidor em zero. */
-.dogma-medidor[data-vivo="nao"] { color: var(--seele-osso-apagado); }
+.server-medidor[data-vivo="nao"] { color: var(--seele-osso-apagado); }
 
 /* ---------- os modos do microfone ---------- */
 
-.dogma-modos {
+.server-modos {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
 }
 
-.dogma-modo {
+.server-modo {
   flex: 1;
   min-width: 168px;
   min-height: 56px;
@@ -363,16 +363,16 @@
   cursor: pointer;
 }
 
-.dogma-modo:hover:not(:disabled) { border-color: var(--seele-laranja-nerv); }
-.dogma-modo:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
+.server-modo:hover:not(:disabled) { border-color: var(--seele-laranja-nerv); }
+.server-modo:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
 
-.dogma-modo[aria-pressed="true"] {
+.server-modo[aria-pressed="true"] {
   border-color: var(--seele-laranja-nerv);
   background: var(--seele-laranja-fraco);
   color: var(--seele-laranja-nerv);
 }
 
-.dogma-modo-nome {
+.server-modo-nome {
   font-family: var(--seele-display);
   font-weight: var(--seele-cartela);
   font-size: 14px;
@@ -380,17 +380,17 @@
   letter-spacing: 0.1em;
 }
 
-.dogma-modo-desc {
+.server-modo-desc {
   font-size: var(--seele-t-micro);
   line-height: 1.35;
   color: var(--seele-osso-apagado);
 }
 
-.dogma-modo[aria-pressed="true"] .dogma-modo-desc { color: var(--seele-laranja-nerv); }
+.server-modo[aria-pressed="true"] .server-modo-desc { color: var(--seele-laranja-nerv); }
 
 /* ---------- o que saiu daqui ----------
 
-   `.dogma-chaves`, `.dogma-chave*` e `.dogma-interruptor*` desenhavam a seção
+   `.server-chaves`, `.server-chave*` e `.server-interruptor*` desenhavam a seção
    APARÊNCIA, e ela tinha uma chave só: LEGENDAS SIMPLES. Aquela camada de texto
    não é mais um modo — a nota ao lado de um controle é do controle, e aparece
    sempre —, então não sobrou comportamento nenhum para aquela seção ajustar. Ela
@@ -399,13 +399,13 @@
 
 /* ---------- a tabela de atalhos ---------- */
 
-.dogma-atalhos {
+.server-atalhos {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.dogma-atalho {
+.server-atalho {
   padding: 12px 16px;
   border-top: 1px solid var(--seele-linha);
   display: flex;
@@ -414,18 +414,18 @@
   gap: 16px;
 }
 
-.dogma-atalho:first-child { border-top: none; }
+.server-atalho:first-child { border-top: none; }
 
-.dogma-atalho-texto {
+.server-atalho-texto {
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.dogma-atalho-acao { font-size: var(--seele-t-dado); }
+.server-atalho-acao { font-size: var(--seele-t-dado); }
 
-.dogma-atalho-desc {
+.server-atalho-desc {
   font-size: var(--seele-t-micro);
   line-height: 1.35;
   color: var(--seele-osso-apagado);
@@ -433,7 +433,7 @@
 
 /* A tecla desenhada como tecla. Contorno e fundo do painel, porque ela é a
    única coisa nesta lista que a pessoa vai procurar com o olho. */
-.dogma-atalho-tecla {
+.server-atalho-tecla {
   flex-shrink: 0;
   padding: 8px;
   font-size: 12px;
@@ -449,7 +449,7 @@
 /* Uma frase que o produto tem para dizer, e que não é o rótulo de controle
    nenhum. `60ch` porque abaixo disso a linha de 13px monoespaçado ainda é uma
    linha que se lê de ponta a ponta sem perder a próxima. */
-.dogma-frase {
+.server-frase {
   margin: 0;
   max-width: 60ch;
   font-size: var(--seele-t-dado);
@@ -457,7 +457,7 @@
   color: var(--seele-osso);
 }
 
-.dogma-par {
+.server-par {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -466,7 +466,7 @@
   border-bottom: 1px solid var(--seele-linha);
 }
 
-.dogma-par-valor {
+.server-par-valor {
   font-size: var(--seele-t-dado);
   text-align: right;
   overflow-wrap: anywhere;
@@ -481,14 +481,14 @@
 
    `title` obrigatório junto, sempre: um controle apagado que não diz por quê
    se lê como defeito, e não como lacuna. */
-.dogma-dispositivo:disabled,
-.dogma-modo:disabled {
+.server-dispositivo:disabled,
+.server-modo:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
-.dogma-dispositivo[title]:disabled,
-.dogma-modo[title]:disabled {
+.server-dispositivo[title]:disabled,
+.server-modo[title]:disabled {
   cursor: help;
 }
 
@@ -496,7 +496,7 @@
 
    A quinta seção, e a única que o comp v3 não desenha — ele é anterior ao botão
    de atualizar existir. Por isso não há geometria dele a seguir aqui: o que há
-   são os primitivos desta própria folha (`.dogma-bloco`, `.dogma-campo`,
+   são os primitivos desta própria folha (`.server-bloco`, `.server-campo`,
    `.rotulo`) reusados, que é o que mantém a seção parecendo parte da tela em vez
    de um enxerto.
 
@@ -507,7 +507,7 @@
    de um erro de conexão. O aviso de antes de instalar é laranja: ele é o acento
    institucional avisando, e não um alarme. */
 
-.dogma-atualizacao-estado {
+.server-atualizacao-estado {
   margin: 0;
   font-size: var(--seele-t-dado);
   line-height: 1.6;
@@ -519,7 +519,7 @@
 /* As notas do release chegam como o autor as escreveu, com as quebras de linha
    dele. `pre-line` é o que as preserva sem virar `<pre>`, que reflui mal numa
    coluna estreita. */
-.dogma-atualizacao-notas {
+.server-atualizacao-notas {
   margin: 0;
   max-width: 72ch;
   font-size: var(--seele-t-dado);
@@ -531,7 +531,7 @@
 
 /* O aviso do que instalar custa. Moldura laranja e não vermelha: ele não
    relata falha nenhuma, ele diz o preço de uma ação que ainda não aconteceu. */
-.dogma-atualizacao-aviso {
+.server-atualizacao-aviso {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -540,7 +540,7 @@
   background: var(--seele-laranja-fraco);
 }
 
-.dogma-atualizacao-aviso p {
+.server-atualizacao-aviso p {
   margin: 0;
   max-width: 72ch;
   font-size: var(--seele-t-dado);
@@ -552,7 +552,7 @@
    deste produto. Quando o servidor não diz o total ela vira travessão e ganha
    `.ausente` de `base.css` — a mesma forma que a barra da bateria interna usa
    para a mesma falta. */
-.dogma-atualizacao-barra {
+.server-atualizacao-barra {
   margin: 0;
   font-size: 11px;
   line-height: 1.6;
@@ -561,7 +561,7 @@
   overflow-wrap: anywhere;
 }
 
-.dogma-atualizacao-baixados {
+.server-atualizacao-baixados {
   margin: 0;
   font-size: var(--seele-t-dado);
   color: var(--seele-osso);
@@ -570,7 +570,7 @@
 /* ---------- a porta, lá da entrada ----------
    Refina o `.botao-fantasma` de `base.css`, cujo `margin-left: auto` o
    empurraria para a direita dentro do cartão da entrada. */
-.dogma-entrada {
+.server-entrada {
   margin: 16px 0 0;
   width: 100%;
   color: var(--seele-osso-apagado);
@@ -579,11 +579,11 @@
 /* ---------- o servidor: nome e imagem ----------
 
    A sexta seção, e a única desta tela que não é desta máquina. Sem geometria
-   nova: os primitivos daqui (`.dogma-bloco`, `.dogma-campo`, `.dogma-frase`,
+   nova: os primitivos daqui (`.server-bloco`, `.server-campo`, `.server-frase`,
    `.rotulo`) reusados, que é o que faz uma seção parecer parte da tela em vez
    de um enxerto. */
 
-.dogma-nome-campo {
+.server-nome-campo {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -593,14 +593,14 @@
 /* O nome do servidor cabe em 64 bytes, e uma caixa da largura do painel
    convidaria a escrever um parágrafo. `48ch` é folga sobre o teto sem ser
    convite. */
-.dogma-nome-campo input {
+.server-nome-campo input {
   max-width: 48ch;
 }
 
 /* A moldura do que está valendo. Fica de pé com imagem ou sem, e é isso que a
    faz dizer alguma coisa: um espaço em branco onde a imagem apareceria não
    distingue «este servidor não tem imagem» de «esta tela não a buscou». */
-.dogma-icone-molde {
+.server-icone-molde {
   width: 96px;
   height: 96px;
   display: flex;
@@ -614,20 +614,20 @@
 /* `contain` e não `cover`: recortar a imagem de alguém para caber na moldura é
    a tela decidindo o que da imagem importa. O que o servidor aceita já é
    quadrado o bastante — 256px de lado no máximo —, e o que sobra é margem. */
-.dogma-icone-previa {
+.server-icone-previa {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
 }
 
-.dogma-icone-vazio {
+.server-icone-vazio {
   font-size: var(--seele-t-rotulo);
   letter-spacing: var(--seele-tracking-rotulo);
   color: var(--seele-osso-apagado);
   text-align: center;
 }
 
-.dogma-icone-botoes {
+.server-icone-botoes {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -637,21 +637,21 @@
 /* `margin-left: 0` porque `.botao-fantasma` de `base.css` traz um
    `margin-left: auto` que o empurraria para a outra ponta da fileira, longe do
    botão de que ele é o par. */
-.dogma-icone-botoes .botao-fantasma {
+.server-icone-botoes .botao-fantasma {
   margin-left: 0;
 }
 
 /* ---------- a mesma imagem, no cabeçalho da sessão ----------
 
    Mora nesta folha e não em `tela-sessao.css` porque é aqui que ela é decidida:
-   `tela-dogma.js` é quem sabe quando a imagem mudou e quem a pinta nos dois
+   `tela-server.js` é quem sabe quando a imagem mudou e quem a pinta nos dois
    lugares. Esta folha carrega depois daquela, então o empate de especificidade
    com `.topo` e vizinhos é ganho por ordem, e não por sorte.
 
    56px é a altura do cabeçalho e a largura que o comp v3 dá ao quadrado da
    marca, do outro lado da mesma fileira. A imagem fica no meio dele, contida,
    com a divisória de 1px que separa todo bloco daquele cabeçalho. */
-.dogma-icone-topo {
+.server-icone-topo {
   width: 56px;
   height: 56px;
   flex: 0 0 auto;

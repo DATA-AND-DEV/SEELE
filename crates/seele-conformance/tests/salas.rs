@@ -1,4 +1,4 @@
-//! Salas feitas por quem hospeda, contra um Dogma de verdade.
+//! Salas feitas por quem hospeda, contra um servidor de verdade.
 //!
 //! Três coisas que só existem com um servidor do outro lado, e que nenhum teste
 //! de unidade dos dois lados consegue enxergar sozinho.
@@ -9,7 +9,7 @@
 //! permissão nenhuma — de propósito, porque a `specs/08-seguranca.md` põe a
 //! decisão no servidor —, então o pedido de um pessoa sem `ManageVoiceRooms`
 //! **sai no fio**. Um teste que só olhasse o cliente não distinguiria «a casca
-//! não mandou» de «o Dogma recusou», e as duas dão a mesma tela.
+//! não mandou» de «o servidor recusou», e as duas dão a mesma tela.
 //!
 //! Então este arquivo separa as duas com três asserções que só o servidor pode
 //! produzir: o `Alert` com `PermissionDenied` volta; o **Comandante conectado
@@ -22,7 +22,7 @@
 //! Medido no fio, em `Sessao::permissions`, e não no banco: é isso que a casca
 //! recebe, e é aí que a regra vira produto. A segunda conta é metade do teste —
 //! «a primeira vira Comandante» implementado como «toda conta vira Comandante»
-//! passaria sem ela e entregaria o Dogma a quem entrasse.
+//! passaria sem ela e entregaria o servidor a quem entrasse.
 //!
 //! # 3. A sala aparece para quem já estava conectado
 //!
@@ -46,24 +46,24 @@ use seele_core::{MemoryPinStore, PinStore};
 use seele_proto::control::{AlertReason, Permission, ServerMessage};
 use seele_proto::ids::{VoiceRoomId, LineId};
 use seele_server::persistence::Location;
-use seele_server::{DogmaConfig, Server};
+use seele_server::{ServerConfig, Daemon};
 
-/// Sobe um Dogma numa porta que o sistema escolhe.
+/// Sobe um servidor numa porta que o sistema escolhe.
 ///
-/// Porta zero, nunca um número escrito à mão, que colidiria com o Dogma que a
+/// Porta zero, nunca um número escrito à mão, que colidiria com o servidor que a
 /// pessoa deixou rodando na própria máquina. Cada teste sobe o seu, e isso
-/// importa mais aqui do que nos vizinhos: **a primeira conta a chegar num Dogma
+/// importa mais aqui do que nos vizinhos: **a primeira conta a chegar num servidor
 /// vira Comandante**, então dois testes dividindo um servidor dividiriam também
 /// quem manda nele, e a ordem em que o `cargo test` os roda passaria a decidir
 /// o resultado.
-async fn dogma() -> Result<(SocketAddr, Arc<Server>)> {
-    let config = DogmaConfig {
+async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
+    let config = ServerConfig {
         name: "Terceira Tóquio".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let servidor = Arc::new(Server::bind(config).await?);
+    let servidor = Arc::new(Daemon::bind(config).await?);
     let endereco = servidor.local_addr()?;
     let aceitando = Arc::clone(&servidor);
     tokio::spawn(async move {
@@ -112,7 +112,7 @@ where
 /// Drena o que já chegou, sem esperar por nada.
 ///
 /// Para as asserções negativas: «isto **não** chegou» só vale depois de dar ao
-/// Dogma tempo de mandar, e um `proximo()` sem prazo esperaria para sempre.
+/// servidor tempo de mandar, e um `proximo()` sem prazo esperaria para sempre.
 async fn drenar(enlace: &mut Enlace, por: Duration) -> Vec<Aviso> {
     let mut vistos = Vec::new();
     let fim = tokio::time::Instant::now() + por;
@@ -146,9 +146,9 @@ fn e_recusa(aviso: &Aviso) -> bool {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn quem_hospeda_vira_comandante_e_a_segunda_conta_nao() -> Result<()> {
-    let (endereco, servidor) = dogma().await?;
+    let (endereco, servidor) = server().await?;
 
-    // Quem hospeda é quem conecta primeiro ao próprio Dogma. Medido em
+    // Quem hospeda é quem conecta primeiro ao próprio servidor. Medido em
     // `Sessao::permissions`, que é o que a casca recebe — no banco a regra
     // poderia estar certa e não chegar até aqui, que é o defeito que importa.
     let anfitriao = conectar(endereco, 46, "anfitriao").await?;
@@ -167,7 +167,7 @@ async fn quem_hospeda_vira_comandante_e_a_segunda_conta_nao() -> Result<()> {
             .sessao()
             .permissions
             .contains(&Permission::ManageVoiceRooms),
-        "a segunda conta chegou podendo gerenciar o Dogma dos outros: {:?}",
+        "a segunda conta chegou podendo gerenciar o servidor dos outros: {:?}",
         convidado.sessao().permissions
     );
     // E não é que a segunda conta chegou sem nada: ela é um Pessoa inteiro.
@@ -192,7 +192,7 @@ async fn quem_hospeda_vira_comandante_e_a_segunda_conta_nao() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn uma_sala_criada_aparece_para_quem_ja_estava_conectado() -> Result<()> {
-    let (endereco, servidor) = dogma().await?;
+    let (endereco, servidor) = server().await?;
 
     let anfitriao = conectar(endereco, 46, "anfitriao").await?;
     let mut testemunha = conectar(endereco, 47, "shinji").await?;
@@ -200,7 +200,7 @@ async fn uma_sala_criada_aparece_para_quem_ja_estava_conectado() -> Result<()> {
     // A testemunha entrou antes de a sala existir, e é isso que se mede: ela
     // conhece a lista que o aperto de mão dela trouxe, e mais nada.
     let antes = testemunha.sessao().voice_rooms.len();
-    assert_eq!(antes, 1, "o Dogma não abriu com a sala de voz de sempre");
+    assert_eq!(antes, 1, "o servidor não abriu com a sala de voz de sempre");
 
     anfitriao
         .criar_linha("planejamento".to_owned())
@@ -212,7 +212,7 @@ async fn uma_sala_criada_aparece_para_quem_ja_estava_conectado() -> Result<()> {
         .expect("a sessão do anfitrião acabou");
 
     // Drenado em vez de esperado um a um, e a diferença não é estilo: os dois
-    // anúncios chegam na ordem em que o Dogma os fez, e um `esperar` pelo
+    // anúncios chegam na ordem em que o servidor os fez, e um `esperar` pelo
     // segundo descartaria o primeiro pelo caminho. Isto reprovou assim na
     // primeira execução.
     let vistos = drenar(&mut testemunha, Duration::from_secs(3)).await;
@@ -253,11 +253,11 @@ async fn uma_sala_criada_aparece_para_quem_ja_estava_conectado() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn um_pessoa_sem_manage_voice_rooms_e_recusado_pelo_dogma_e_nao_pela_casca() -> Result<()> {
-    let (endereco, servidor) = dogma().await?;
+async fn um_pessoa_sem_manage_voice_rooms_e_recusado_pelo_server_e_nao_pela_casca() -> Result<()> {
+    let (endereco, servidor) = server().await?;
 
     // O anfitrião conecta primeiro e fica de pé, calado, como testemunha. Ele é
-    // a peça que separa «a casca não mandou» de «o Dogma recusou»: se a sala
+    // a peça que separa «a casca não mandou» de «o servidor recusou»: se a sala
     // tivesse sido feita, o anúncio chegaria a ele.
     let mut anfitriao = conectar(endereco, 46, "anfitriao").await?;
     let mut sem_permissao = conectar(endereco, 47, "shinji").await?;
@@ -281,7 +281,7 @@ async fn um_pessoa_sem_manage_voice_rooms_e_recusado_pelo_dogma_e_nao_pela_casca
     let recusa = esperar(&mut sem_permissao, Duration::from_secs(15), e_recusa).await;
     assert!(
         recusa.is_some(),
-        "o Dogma recusou em silêncio: nada distingue isso de um servidor quebrado"
+        "o servidor recusou em silêncio: nada distingue isso de um servidor quebrado"
     );
 
     // Dois: **ninguém** viu a sala nascer. Esta é a asserção que prova que a
@@ -370,7 +370,7 @@ async fn um_pessoa_sem_manage_voice_rooms_e_recusado_pelo_dogma_e_nao_pela_casca
 
 #[tokio::test(flavor = "multi_thread")]
 async fn o_comandante_renomeia_e_todo_mundo_ve_o_nome_novo() -> Result<()> {
-    let (endereco, servidor) = dogma().await?;
+    let (endereco, servidor) = server().await?;
 
     let anfitriao = conectar(endereco, 46, "anfitriao").await?;
     let mut testemunha = conectar(endereco, 47, "shinji").await?;

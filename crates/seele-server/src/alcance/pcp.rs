@@ -108,7 +108,7 @@ use crab_nat::{
 /// Quanto tempo de validade o buraco pede ao roteador.
 ///
 /// Uma hora, e não "para sempre", pelo mesmo motivo que o `VALIDADE` de
-/// [`super::porta`] tem prazo: um buraco permanente sobrevive ao processo que o pediu. Se o Dogma
+/// [`super::porta`] tem prazo: um buraco permanente sobrevive ao processo que o pediu. Se o servidor
 /// morrer de mau jeito — queda de energia, `kill -9`, pânico — o firewall fica
 /// aberto apontando para uma máquina que não atende mais, e ninguém nunca mais o
 /// fecha. Com prazo, o pior caso se conserta sozinho em uma hora.
@@ -248,7 +248,7 @@ pub enum FalhaAoLiberar {
     /// Num firewall IPv6 sem NAT o par externo devolvido tem de ser **o mesmo**
     /// que o interno: não há tradução a fazer, só uma regra a criar. Quando ele
     /// vem diferente, o roteador fez outra coisa — NAT64, NPTv6, um mapeamento
-    /// IPv4 —, e o endereço que este Dogma anuncia no `seele://` não é o que foi
+    /// IPv4 —, e o endereço que este servidor anuncia no `seele://` não é o que foi
     /// aberto.
     ///
     /// Tratar isso como sucesso seria promover na lista um candidato que o
@@ -476,7 +476,7 @@ pub async fn liberar(
     })
 }
 
-/// Mantém o buraco vivo enquanto o Dogma estiver de pé.
+/// Mantém o buraco vivo enquanto o servidor estiver de pé.
 ///
 /// Sem isto o firewall fecha no meio de uma conversa, uma hora depois de abrir, e
 /// o sintoma é a pior coisa possível: funcionou, e parou de funcionar sem
@@ -823,7 +823,7 @@ mod testes {
     fn o_recuo_para_nat_pmp_e_uma_falha_e_nunca_um_sucesso() {
         // O degrau 3 já faz mapeamento IPv4, e o NAT-PMP não tem verbo nenhum
         // para firewall IPv6 (a RFC 6886 é IPv4 e só). Se isto virasse `Ok`, o
-        // Dogma promoveria o candidato IPv6 na lista por causa de um mapeamento
+        // server promoveria o candidato IPv6 na lista por causa de um mapeamento
         // IPv4 — sucesso mentiroso, que é o defeito que o módulo vizinho existe
         // para não ter.
         let roteador = IpAddr::from([0xfe80, 0, 0, 0, 0, 0, 0, 1]);

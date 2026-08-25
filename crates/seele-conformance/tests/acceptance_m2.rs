@@ -20,7 +20,7 @@ use ed25519_dalek::SigningKey;
 use seele_core::{Client, MemoryPinStore, Pattern, PinDecision};
 use seele_proto::ids::{VoiceRoomId, Ssrc};
 use seele_proto::MediaHeader;
-use seele_server::{DogmaConfig, Server};
+use seele_server::{ServerConfig, Daemon};
 
 /// How long to wait for a datagram before calling it lost.
 ///
@@ -28,15 +28,15 @@ use seele_server::{DogmaConfig, Server};
 /// rather than slowness.
 const DELIVERY_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// Starts a Dogma on an ephemeral port and returns where to reach it.
+/// Starts a server on an ephemeral port and returns where to reach it.
 async fn start(observers: Vec<String>) -> Result<SocketAddr> {
-    let config = DogmaConfig {
+    let config = ServerConfig {
         name: "Terceira Tóquio".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         observers,
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let server = Server::bind(config).await?;
+    let server = Daemon::bind(config).await?;
     let address = server.local_addr()?;
     tokio::spawn(async move {
         let _ = server.run().await;
@@ -217,10 +217,10 @@ async fn the_first_connection_pins_the_certificate() -> Result<()> {
 }
 
 #[tokio::test]
-async fn two_dogmas_on_one_machine_do_not_share_a_pin() -> Result<()> {
+async fn two_servers_on_one_machine_do_not_share_a_pin() -> Result<()> {
     // The bug this exists to stop: both shells hand TLS the name `localhost`
     // for any IP address, because that is the name the M2 certificate carries.
-    // While the pin was filed under that same label, two Dogmas shared one
+    // While the pin was filed under that same label, two servers shared one
     // entry — and the second one contacted looked like the first one's key had
     // changed. That is the most alarming false positive this system can
     // produce, and the first LAN test between two machines would have hit it.
@@ -247,7 +247,7 @@ async fn two_dogmas_on_one_machine_do_not_share_a_pin() -> Result<()> {
         PinDecision::FirstContact { .. }
     ));
 
-    // A different Dogma with a different self-signed certificate. This must be
+    // A different server with a different self-signed certificate. This must be
     // a first contact too, not a key change.
     let second = Client::connect(
         second_address,
@@ -261,7 +261,7 @@ async fn two_dogmas_on_one_machine_do_not_share_a_pin() -> Result<()> {
     .await
     .map_err(|error| {
         anyhow::anyhow!(
-            "a second Dogma was refused as if the first one's key had changed: {error:?}"
+            "a second server was refused as if the first one's key had changed: {error:?}"
         )
     })?;
     assert!(matches!(
@@ -355,14 +355,14 @@ async fn a_ping_comes_back_as_a_pong() -> Result<()> {
 }
 
 #[tokio::test]
-async fn the_session_names_the_dogma_and_its_voice_room() -> Result<()> {
-    // specs/02-protocolo.md: the Session carries the Dogma description and the
+async fn the_session_names_the_server_and_its_voice_room() -> Result<()> {
+    // specs/02-protocolo.md: the Session carries the server description and the
     // tree of voice_rooms and Lines, which is what a shell draws its first screen from.
     let address = start(Vec::new()).await?;
     let client = connect(address, "ayanami").await?;
 
     let session = client.session();
-    assert_eq!(session.dogma, "Terceira Tóquio");
+    assert_eq!(session.server, "Terceira Tóquio");
     assert_eq!(session.voice_rooms.len(), 1);
     assert_eq!(session.voice_rooms.first().map(|voice_room| voice_room.id), Some(VoiceRoomId(1)));
 

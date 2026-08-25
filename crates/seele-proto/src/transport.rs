@@ -202,7 +202,7 @@ mod fingerprint_tests {
     #[test]
     fn a_person_prints_in_the_same_shape_as_a_machine() {
         // ADR 0030 puts the two side by side in front of the same person: the
-        // Dogma's fingerprint on the entry screen, the knocker's on the host's
+        // server's fingerprint on the entry screen, the knocker's on the host's
         // approval card. One of them formatted differently — uppercase, or with
         // colons — is one more way to compare two strings wrongly.
         let pessoa = key_fingerprint(&[7_u8; 32]);

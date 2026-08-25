@@ -1,4 +1,4 @@
-//! A ocupação das salas de voz, contra um Dogma de verdade.
+//! A ocupação das salas de voz, contra um servidor de verdade.
 //!
 //! O defeito, relatado de uma sessão real: «o sistema de voice_rooms não está bem
 //! implementado, mostra que as salas de voz estão vazias quando não deveriam estar».
@@ -14,7 +14,7 @@
 //! entrada para uma sala de voz e a tela desenhava os outros vazios para sempre.
 //!
 //! Uma falha de junção, com cada peça correta. Só um `Enlace` de verdade contra
-//! um `Server` de verdade a enxerga, e é por isso que este arquivo existe aqui e
+//! um `Daemon` de verdade a enxerga, e é por isso que este arquivo existe aqui e
 //! não em `seele-core`.
 //!
 //! # As três coisas medidas
@@ -43,20 +43,20 @@ use seele_core::enlace::{Aviso, Destino, Enlace};
 use seele_core::{MemoryPinStore, PinStore, Room};
 use seele_proto::ids::{VoiceRoomId, LineId};
 use seele_server::persistence::Location;
-use seele_server::{DogmaConfig, Server};
+use seele_server::{ServerConfig, Daemon};
 
-/// Sobe um Dogma numa porta que o sistema escolhe, com dois salas de voz.
+/// Sobe um servidor numa porta que o sistema escolhe, com dois salas de voz.
 ///
 /// Dois, e esse é o ponto do arquivo inteiro: com um só, o filtro que este
 /// teste existe para pegar não filtra nada e tudo passa.
-async fn dogma() -> Result<(SocketAddr, Arc<Server>)> {
-    let config = DogmaConfig {
+async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
+    let config = ServerConfig {
         name: "Terceira Tóquio".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let servidor = Arc::new(Server::bind(config).await?);
+    let servidor = Arc::new(Daemon::bind(config).await?);
     let endereco = servidor.local_addr()?;
     let aceitando = Arc::clone(&servidor);
     tokio::spawn(async move {
@@ -112,7 +112,7 @@ async fn absorver(enlace: &mut Enlace, room: &mut Room, por: Duration) {
 ///
 /// Com prazo em vez de uma espera fixa: a asserção positiva não deve depender de
 /// quanto a máquina demorou, e a negativa está sempre depois de uma positiva que
-/// já provou que o Dogma teve tempo de falar.
+/// já provou que o servidor teve tempo de falar.
 async fn absorver_ate<F>(enlace: &mut Enlace, room: &mut Room, prazo: Duration, pronto: F) -> bool
 where
     F: Fn(&Room) -> bool,
@@ -158,7 +158,7 @@ async fn segundo_voice_room(anfitriao: &Enlace, enlace: &mut Enlace, room: &mut 
 
 #[tokio::test(flavor = "multi_thread")]
 async fn quem_chega_ve_todos_os_voice_rooms_ocupados_e_nao_so_o_seu() -> Result<()> {
-    let (endereco, servidor) = dogma().await?;
+    let (endereco, servidor) = server().await?;
 
     let anfitriao = conectar(endereco, 46, "anfitriao").await?;
     let mut asuka = conectar(endereco, 48, "asuka").await?;
@@ -170,7 +170,7 @@ async fn quem_chega_ve_todos_os_voice_rooms_ocupados_e_nao_so_o_seu() -> Result<
     let mut shinji = conectar(endereco, 47, "shinji").await?;
     shinji.inserir_plug(voice_room_um).await.expect("sessão acabou");
     asuka.inserir_plug(voice_room_dois).await.expect("sessão acabou");
-    // Um instante para os dois assentos existirem no Dogma antes do aperto de
+    // Um instante para os dois assentos existirem no servidor antes do aperto de
     // mão seguinte, que é o que este teste mede.
     let mut sala_shinji = sala(&shinji);
     sala_shinji.enter_voice_room(voice_room_um);
@@ -204,7 +204,7 @@ async fn quem_chega_ve_todos_os_voice_rooms_ocupados_e_nao_so_o_seu() -> Result<
 
 #[tokio::test(flavor = "multi_thread")]
 async fn entrar_num_voice_room_aparece_para_quem_esta_noutro() -> Result<()> {
-    let (endereco, servidor) = dogma().await?;
+    let (endereco, servidor) = server().await?;
 
     let anfitriao = conectar(endereco, 46, "anfitriao").await?;
     let mut rei = conectar(endereco, 49, "rei").await?;
@@ -253,7 +253,7 @@ async fn entrar_num_voice_room_aparece_para_quem_esta_noutro() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn uma_conexao_que_cai_sai_do_roster_de_todo_mundo() -> Result<()> {
-    let (endereco, servidor) = dogma().await?;
+    let (endereco, servidor) = server().await?;
 
     let anfitriao = conectar(endereco, 46, "anfitriao").await?;
     let mut rei = conectar(endereco, 49, "rei").await?;

@@ -20,9 +20,9 @@ Requisito não negociável: **nenhuma lógica de protocolo em JavaScript**. Se o
 
 ### A tela de entrada
 
-Acima do formulário fica **ONDE VOCÊ JÁ ESTEVE**: os Dogmas visitados, com o
+Acima do formulário fica **ONDE VOCÊ JÁ ESTEVE**: os servidores visitados, com o
 apelido usado em cada um e quando foi a última vez. Clicar numa linha preenche
-e conecta; cada linha tem um *esquecer*. Sem Dogmas visitados a seção some
+e conecta; cada linha tem um *esquecer*. Sem Servers visitados a seção some
 inteira e a tela é exatamente a de antes — o estado vazio não piora, e nada
 fica escondido atrás de um clique. A lista é conveniência, como manda `05`:
 ilegível ou corrompida, a seção não aparece e conectar continua funcionando.
@@ -45,16 +45,16 @@ uma vez só, para as duas cascas. O `plug` lê o mesmo resultado; não há duas
 conferências para discordar uma da outra.
 
 O que volta da conferência é um veredito, não um booleano: primeiro contato
-cego, primeiro contato verificado, Dogma já conhecido, convite que discorda de
-um Dogma conhecido, e convite que não confere no primeiro contato. Os dois
+cego, primeiro contato verificado, Server já conhecido, convite que discorda de
+um servidor conhecido, e convite que não confere no primeiro contato. Os dois
 últimos são coisas diferentes e a tela os trata como tais. Um convite que não
 confere no primeiro contato **recusa**: a conexão cai, a chave que o TLS tinha
 acabado de fixar é desfeita, e a tela de entrada mostra a esperada e a ofertada
-lado a lado. Um convite que discorda de um Dogma já fixado **avisa**: o TOFU já
+lado a lado. Um convite que discorda de um servidor já fixado **avisa**: o TOFU já
 provou que é o servidor de sempre, então quem está errado é o link, a sessão
 entra, e a ressalva fica visível dentro dela. Primeiro contato — verificado ou
 cego — também aparece: o app diz o que acabou de fixar, porque fixar em
-silêncio é fixar sem ninguém saber que havia o que conferir. Só o Dogma já
+silêncio é fixar sem ninguém saber que havia o que conferir. Só o servidor já
 conhecido, sem nada que o contradiga, não vira frase; repetir "a chave é a
 mesma de sempre" a cada entrada ensina a não ler a linha no dia em que ela não
 for.
@@ -62,7 +62,7 @@ for.
 Nenhuma frase dessas é escrita em Rust e nenhuma comparação é feita em
 JavaScript — a fronteira é a mesma de sempre: o núcleo decide, a casca desenha.
 
-O convite guardado vale para o Dogma dele e para nenhum outro. Trocar o
+O convite guardado vale para o servidor dele e para nenhum outro. Trocar o
 endereço no campo descarta a impressão do link anterior, e a sessão que ele
 abriu leva-a embora ao terminar. Sem isso, quem cola um link, entra, sai e
 volta a entrar noutro endereço levaria consigo uma promessa que aquele servidor
@@ -70,7 +70,7 @@ nunca fez, e a recusa apareceria sem nada na tela que a explicasse.
 
 ### Hospedar pelo app
 
-A tela de entrada tem **HOSPEDAR AQUI** ao lado de INSERIR PLUG. Sobe um Dogma
+A tela de entrada tem **HOSPEDAR AQUI** ao lado de INSERIR PLUG. Sobe um servidor
 dentro do processo do app — o mesmo `seele-server::hospedagem` do
 `plug --hospedar` — e devolve o link de convite, que aparece no topo da sessão
 pronto para copiar. Ele vive enquanto a janela estiver aberta.
@@ -82,7 +82,7 @@ ganharia. É a única exceção nomeada à regra de dependência do lado do app
 binário contém os dois papéis.
 
 O comando **não conecta**. Conectar continua sendo o caminho de sempre, com o
-endereço que ele devolve: um Dogma hospedado aqui e um do outro lado do mundo
+endereço que ele devolve: um servidor hospedado aqui e um do outro lado do mundo
 entram pela mesma porta.
 
 ### A marca

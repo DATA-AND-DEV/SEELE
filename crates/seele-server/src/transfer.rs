@@ -6,7 +6,7 @@
 //! every `Pong` from everybody behind them until the last byte goes through.
 //!
 //! So a sender opens a unidirectional stream, writes a header and then the
-//! bytes; a Dogma handing a file back opens one of its own. **The answer always
+//! bytes; a server handing a file back opens one of its own. **The answer always
 //! comes back on control**, as an enumerated reason, because that is where
 //! `specs/02-protocolo.md` keeps every reason.
 //!
@@ -24,7 +24,7 @@
 //! # Nothing here ever holds a file
 //!
 //! Blocks of [`BLOCK_LEN`] between the network and the disk, both ways. A
-//! Dogma is sized at 1 vCPU and 512 MB (`specs/04-servidor-seele.md`), and a
+//! server is sized at 1 vCPU and 512 MB (`specs/04-servidor-seele.md`), and a
 //! `Vec` of twenty megabytes per simultaneous transfer ends that.
 
 use std::path::PathBuf;
@@ -43,7 +43,7 @@ use tokio::sync::Mutex;
 use crate::persistence::attachments::{self, Landing, Ledger, Refusal, Store};
 use crate::persistence::messages::{Messages, PendingMessage, StoredMessage};
 use crate::persistence::Persistence;
-use crate::dogma::{Dogma, Event};
+use crate::server::{Server, Event};
 use crate::permissions::Permissions;
 use crate::taxa::Vazao;
 
@@ -57,7 +57,7 @@ pub const CONTROL_PRIORITY: i32 = 1;
 /// Stream priority for a transfer.
 pub const TRANSFER_PRIORITY: i32 = -1;
 
-/// Everything a Dogma needs to take a file or hand one back.
+/// Everything a server needs to take a file or hand one back.
 ///
 /// The store, the ledger and the byte budget travel together because no caller
 /// ever wants one without the others, and because the lock order between the
@@ -120,8 +120,8 @@ pub enum Outcome {
 
 /// Reads only enough of a transfer to know whom to answer.
 ///
-/// For the Dogma that has nowhere to keep files. The idempotency key is the
-/// only name the two ends share before the Dogma has assigned anything, so a
+/// For the server that has nowhere to keep files. The idempotency key is the
+/// only name the two ends share before the server has assigned anything, so a
 /// refusal that could not name it would be a refusal addressed to nobody — and
 /// simply not accepting the stream would leave the sender's bar at zero until
 /// the connection went idle, which is the way of failing this project refuses
@@ -148,7 +148,7 @@ pub async fn quem_perguntou(stream: &mut quinn::RecvStream) -> Result<ClientMess
 /// to be told.
 pub async fn receive(
     vault: &Vault,
-    dogma: &Dogma,
+    server: &Server,
     person: PersonId,
     nickname: &str,
     stream: &mut quinn::RecvStream,
@@ -171,7 +171,7 @@ pub async fn receive(
     // A transfer is rare and expensive, so there is nothing to save by caching
     // it, and a role revoked an hour into a session must take effect now.
     let allowed = {
-        let guard = dogma.persistence.lock().await;
+        let guard = server.persistence.lock().await;
         Permissions::new(&guard)
             .may(person, Permission::AttachFile)
             .unwrap_or(false)
@@ -208,7 +208,7 @@ pub async fn receive(
     let reservation = {
         // Ledger first, PERSISTENCE second. Always.
         let mut ledger = vault.ledger.lock().await;
-        let guard = dogma.persistence.lock().await;
+        let guard = server.persistence.lock().await;
         match vault
             .store
             .reserve(&mut ledger, &guard, header.declared_len, &scratch_name)?
@@ -268,9 +268,9 @@ pub async fn receive(
 
     let published = {
         let mut ledger = vault.ledger.lock().await;
-        let mut guard = dogma.persistence.lock().await;
+        let mut guard = server.persistence.lock().await;
 
-        // Written straight through rather than queued on `Dogma::post`, and
+        // Written straight through rather than queued on `Server::post`, and
         // that is not an inconsistency: the batcher exists so that fifty typed
         // lines cost one `fsync`, and a transfer that has just spent seconds on
         // the wire is not that. What it needs and the queue cannot give is the
@@ -320,8 +320,8 @@ pub async fn receive(
     };
 
     // Committed, therefore durable, therefore safe to announce — the order
-    // `crate::dogma` fixes for every message, and a transfer is no exception.
-    let _ = dogma.events.send(Event::MessagePosted(published.clone()));
+    // `crate::server` fixes for every message, and a transfer is no exception.
+    let _ = server.events.send(Event::MessagePosted(published.clone()));
     Ok(Outcome::Published(Box::new(published)))
 }
 
@@ -392,12 +392,12 @@ async fn drain<R: tokio::io::AsyncRead + Unpin>(
 /// the connection or the disk does.
 pub async fn deliver(
     vault: &Vault,
-    dogma: &Dogma,
+    server: &Server,
     connection: &quinn::Connection,
     id: AttachmentId,
 ) -> Result<std::result::Result<u64, AttachmentRefusal>> {
     let row = {
-        let guard = dogma.persistence.lock().await;
+        let guard = server.persistence.lock().await;
         attachments::Attachments::new(&guard).one(id)?
     };
     let Some(row) = row else {
@@ -414,7 +414,7 @@ pub async fn deliver(
             // The row is the truth, and the row now says the bytes are gone.
             // Stamping it here rather than leaving the disagreement means the
             // next reader is told the same thing this one was.
-            let guard = dogma.persistence.lock().await;
+            let guard = server.persistence.lock().await;
             let _ = attachments::Attachments::new(&guard).expire_blob(&row.content_hash);
             tracing::warn!(attachment = %id, "the bytes are missing; the row now reads as expired");
             return Ok(Err(AttachmentRefusal::Expired));

@@ -57,7 +57,7 @@
 //! nenhuma execução solitária pode dizer que ele falhou. Fora do modo par a
 //! linha diz `não testado`, **nunca** `FALHOU`. O modo par é `plug --rede
 //! --esperar` de um lado, que imprime um bilhete, e `plug --rede <bilhete>` do
-//! outro: é o degrau 4 inteiro, sem Dogma atrás.
+//! outro: é o degrau 4 inteiro, sem servidor atrás.
 //!
 //! # Por que aqui dentro, e não num binário novo
 //!
@@ -518,7 +518,7 @@ async fn sondar(
 /// Onde um ponto de encontro atende — no máximo um endereço por família.
 async fn resolver(ponto: &str) -> Vec<SocketAddr> {
     // O mesmo `Bilhete` que lê o endereço do link lê este: a porta padrão de um
-    // ponto de encontro não é a de um Dogma, e essa regra mora em um lugar só.
+    // ponto de encontro não é a de um servidor, e essa regra mora em um lugar só.
     let Ok(bilhete) = Bilhete::novo(ponto, "0.0.0.0:0") else {
         return Vec::new();
     };
@@ -675,7 +675,7 @@ async fn entrada_de_fora_chega(
     tokio::time::timeout(prazo, trabalho).await.unwrap_or(false)
 }
 
-/// O degrau 4 inteiro, sem Dogma atrás. Fora dele, `Furo::NaoTestado`.
+/// O degrau 4 inteiro, sem servidor atrás. Fora dele, `Furo::NaoTestado`.
 async fn modo_par<A>(
     plano: &Plano,
     socket: &tokio::net::UdpSocket,
@@ -862,17 +862,17 @@ async fn bater_no_par(
 
 /// Se o aperto de mão QUIC sobe nesta máquina, medido no laço local.
 ///
-/// Um Dogma em memória no `127.0.0.1` e um cliente batendo nele. Separa
+/// Um servidor em memória no `127.0.0.1` e um cliente batendo nele. Separa
 /// "a máquina não fala QUIC" — antivírus, política de grupo, biblioteca de
 /// criptografia recusada — de "a rede não deixa", que é tudo o mais nesta saída.
 async fn quic_sobe() -> bool {
-    let config = seele_server::DogmaConfig {
+    let config = seele_server::ServerConfig {
         name: "diagnóstico".to_owned(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: seele_server::persistence::Location::Memory,
-        ..seele_server::DogmaConfig::default()
+        ..seele_server::ServerConfig::default()
     };
-    let Ok(servidor) = seele_server::Server::bind(config).await else {
+    let Ok(servidor) = seele_server::Daemon::bind(config).await else {
         return false;
     };
     let servidor = Arc::new(servidor);
@@ -1583,7 +1583,7 @@ mod testes {
 
     #[tokio::test]
     async fn o_modo_par_mede_o_furo_de_verdade() {
-        // O degrau 4 inteiro, sem Dogma atrás: um lado espera e anuncia o
+        // O degrau 4 inteiro, sem servidor atrás: um lado espera e anuncia o
         // bilhete, o outro avisa o ponto de encontro, o aviso chega ao primeiro,
         // ele fura para o endereço que veio no aviso, e os dois só afirmam
         // «abriu» depois de os 96 bytes atravessarem **nos dois sentidos**.
@@ -1690,7 +1690,7 @@ mod testes {
             linha_de(&saida, "QUIC"),
             "sobe nesta máquina",
             "ou a fiação desta linha quebrou, ou esta máquina não fala QUIC — a \
-             suíte de conformidade diz qual, porque ela sobe o mesmo Dogma sem \
+             suíte de conformidade diz qual, porque ela sobe o mesmo Server sem \
              passar por aqui\n{saida}"
         );
     }

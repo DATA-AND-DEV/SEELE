@@ -55,8 +55,8 @@
 }
 
 /* ---------- a caixa ----------
-   `overflow-y: auto` e altura limitada porque o que ela mostra vem do Dogma: a
-   frase de consequência cresce com o nome e com a jaula, e um Dogma com muitas
+   `overflow-y: auto` e altura limitada porque o que ela mostra vem do servidor: a
+   frase de consequência cresce com o nome e com a jaula, e um servidor com muitas
    salas estica o campo de destino. Sem isto a caixa passaria da janela num
    corpo com `overflow: hidden`, e o botão de confirmar sairia de vista — que é
    o pior lugar possível para um botão sumir. */

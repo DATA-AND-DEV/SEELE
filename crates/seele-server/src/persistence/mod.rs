@@ -15,7 +15,7 @@
 //! # Why a single connection behind a mutex, and not a pool
 //!
 //! SQLite in WAL mode allows one writer and many readers, and the target is a
-//! Dogma of ~50 people on 1 vCPU (`specs/00-visao-geral.md`). A pool would add
+//! server of ~50 people on 1 vCPU (`specs/00-visao-geral.md`). A pool would add
 //! contention management for a workload that is a few writes a second. What
 //! matters far more is not calling `fsync` per message. `specs/04` asks for
 //! batched writes with a ~200 ms flush, which arrives with the text channel in
@@ -81,7 +81,7 @@ pub enum Location {
     /// A file on disk. `specs/04-servidor-seele.md` defaults to
     /// `/var/lib/seeled/seele.db`.
     File(std::path::PathBuf),
-    /// Memory only. Tests, and nothing else: a Dogma that forgets everything on
+    /// Memory only. Tests, and nothing else: a server that forgets everything on
     /// restart fails its own acceptance criterion.
     Memory,
 }
@@ -298,10 +298,10 @@ mod tests {
     }
 
     #[test]
-    fn a_dogma_that_predates_attachments_gets_the_permission_at_the_next_boot() {
+    fn a_server_that_predates_attachments_gets_the_permission_at_the_next_boot() {
         // The upgrade path, which is the case that matters: the roles are JSON
         // inside a column, so the thirteenth variant is free in the code and
-        // costs a migration in the database. Without this, nobody on a Dogma
+        // costs a migration in the database. Without this, nobody on a server
         // that already exists could ever send a file.
         let directory = tempfile::tempdir().unwrap();
         let file = Location::File(directory.path().join("dogma.db"));
@@ -337,6 +337,10 @@ mod tests {
                      -- o replay encontra `people` onde procura `pilots` e para
                      -- com «no such table» — que foi exatamente o que aconteceu
                      -- quando a 5 entrou.
+                     -- A parte da migração 7, pela mesma regra.
+                     UPDATE roles SET permissions = replace(permissions, 'AdministerServer', 'AdministerDogma');
+                     UPDATE roles SET denials     = replace(denials,     'AdministerServer', 'AdministerDogma');
+
                      -- A parte da migração 6, pela mesma regra.
                      ALTER TABLE voice_rooms RENAME TO cages;
                      UPDATE roles SET permissions = replace(permissions, 'ManageVoiceRooms', 'ManageCages');
@@ -378,7 +382,7 @@ mod tests {
             .unwrap();
         assert!(
             person.contains("AttachFile"),
-            "the old Dogma was left behind"
+            "the old server was left behind"
         );
     }
 

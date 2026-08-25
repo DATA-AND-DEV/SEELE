@@ -55,7 +55,7 @@ const CANAL_DE_ATUALIZACAO: &str = "seele://atualizacao";
 #[derive(Default)]
 struct Session {
     plug: Mutex<Option<Arc<Plug>>>,
-    /// O Dogma que este app está hospedando, quando está.
+    /// O servidor que este app está hospedando, quando está.
     ///
     /// Vive aqui e não numa variável local porque tem que sobreviver ao comando
     /// que o criou: o servidor fica de pé enquanto a janela estiver aberta.
@@ -66,13 +66,13 @@ struct Session {
     /// O endereço com que esta sessão entrou, como a lista de visitados o
     /// conhece.
     ///
-    /// Guardado porque a aparência do Dogma — nome e imagem — só chega **depois**
+    /// Guardado porque a aparência do servidor — nome e imagem — só chega **depois**
     /// do aperto de mão, e quem a anota precisa saber sob qual chave. A
     /// alternativa era a tela devolver o endereço, e aí a chave da lista
     /// passaria a depender de o JavaScript normalizar a string do mesmo jeito
     /// que o Rust normalizou.
     ///
-    /// `None` quando não há sessão, e também quando o Dogma é hospedado aqui:
+    /// `None` quando não há sessão, e também quando o servidor é hospedado aqui:
     /// esse não entra na lista de para-onde-voltar, e anotar sobre ele seria
     /// escrever numa entrada que não existe.
     alvo: Mutex<Option<String>>,
@@ -169,7 +169,7 @@ fn config_dir(app: &AppHandle) -> String {
 struct Entrada {
     /// A tela inteira, como sempre.
     snapshot: Snapshot,
-    /// O que a chave deste Dogma acabou de ser.
+    /// O que a chave deste servidor acabou de ser.
     ///
     /// `crates/seele-core/src/tofu.rs` é explícito: a casca tem que dizer o que
     /// acabou de confiar. Um pin que se estabelece invisível é um pin que
@@ -190,7 +190,7 @@ async fn connect(
         return Err(PlugError::AlreadyConnected.into());
     }
 
-    // O convite guardado vale para o Dogma dele e para nenhum outro. Quem cola
+    // O convite guardado vale para o servidor dele e para nenhum outro. Quem cola
     // um link e depois troca o endereço no campo deixaria para trás uma
     // confirmação de identidade que não é deste servidor — e agora que a FFI
     // sabe conferi-la, uma sobra dessas seria uma recusa que ninguém consegue
@@ -199,9 +199,9 @@ async fn connect(
     // O que sobrevive ao descarte é o que vai conferir esta conexão.
     //
     // Os outros endereços do convite saem daqui pelo mesmo caminho e pela mesma
-    // razão: eles pertencem ao Dogma daquele link, e quem trocou o endereço no
+    // razão: eles pertencem ao servidor daquele link, e quem trocou o endereço no
     // campo está indo a outro lugar — tentar os alternativos do link anterior
-    // seria bater à porta de um Dogma que ninguém pediu.
+    // seria bater à porta de um servidor que ninguém pediu.
     let (esperada, alternativos, bilhete) = match session.convite.lock() {
         Ok(mut slot) => {
             if slot.as_ref().is_some_and(|convite| convite.alvo != server) {
@@ -214,7 +214,7 @@ async fn connect(
                     .map(|convite| convite.alternativos.clone())
                     .unwrap_or_default(),
                 // Degrau 4 do ADR 0022. Sai daqui pela mesma porta e pela mesma
-                // razão que os alternativos: o bilhete é do Dogma **daquele**
+                // razão que os alternativos: o bilhete é do servidor **daquele**
                 // link, e bater no ponto de encontro de outro seria apresentar
                 // esta máquina a um anfitrião que ninguém pediu.
                 slot.as_ref().and_then(|convite| convite.bilhete.clone()),
@@ -241,7 +241,7 @@ async fn connect(
         join_secret: join_secret.filter(|s| !s.trim().is_empty()),
         expected_fingerprint: esperada,
         bilhete,
-        // O microfone escolhido no Terminal Dogma, lido do disco a cada
+        // O microfone escolhido no Terminal servidor, lido do disco a cada
         // conexão em vez de guardado em memória: quem escolheu ontem não
         // escolhe de novo hoje, e quem nunca escolheu continua no padrão da
         // máquina. Um dispositivo que sumiu não impede de entrar — a FFI cai
@@ -289,7 +289,7 @@ async fn connect(
     //
     // Registrado só **depois** de dar certo — guardar antes encheria a lista de
     // endereços errados digitados uma vez, que é o oposto de uma lista de
-    // atalhos. E um Dogma hospedado aqui não entra: `127.0.0.1` não é lugar
+    // atalhos. E um servidor hospedado aqui não entra: `127.0.0.1` não é lugar
     // aonde se volta, é o botão HOSPEDAR. O `plug` decide isso pela bandeira
     // `--hospedar`; aqui não há bandeira, e o endereço é o que sobrou para
     // dizer a mesma coisa.
@@ -309,7 +309,7 @@ async fn connect(
             // Falhar em gravar um atalho não pode derrubar uma conversa que já
             // está de pé.
             if let Err(erro) = lista.registrar(&alvo, &apelido, voice_room) {
-                tracing::warn!(%erro, "não guardei este Dogma na lista de visitados");
+                tracing::warn!(%erro, "não guardei este servidor na lista de visitados");
             }
         }
     }
@@ -377,19 +377,19 @@ enum FalhaAoHospedar {
     JaHospedando,
     /// A porta 8383 está ocupada — quase sempre outro SEELE aberto.
     PortaOcupada,
-    /// Qualquer outro motivo para o Dogma não subir.
+    /// Qualquer outro motivo para o servidor não subir.
     NaoSubiu,
 }
 
-/// Sobe um Dogma dentro do app e devolve o link do convite.
+/// Sobe um servidor dentro do app e devolve o link do convite.
 ///
 /// Este comando é o item de UX que faltava: sem ele, hospedar exige abrir um
 /// terminal, e num produto cujo argumento é "hospede você mesmo" isso exclui
 /// justamente quem só quer clicar. O mesmo caminho do `plug --hospedar`, o
-/// mesmo módulo, o mesmo Dogma.
+/// mesmo módulo, o mesmo server.
 ///
 /// Não conecta. Quem conecta é o `connect` de sempre, com o endereço que este
-/// comando devolve — um caminho só para entrar num Dogma, hospedado aqui ou do
+/// comando devolve — um caminho só para entrar num servidor, hospedado aqui ou do
 /// outro lado do mundo.
 #[tauri::command]
 async fn hospedar(
@@ -407,7 +407,7 @@ async fn hospedar(
     }
 
     let banco = seele_server::persistence::banco_do_cliente(std::path::Path::new(&config_dir(&app)));
-    let dogma = seele_server::hospedagem::Hospedagem::iniciar(
+    let server = seele_server::hospedagem::Hospedagem::iniciar(
         PORTA_PADRAO,
         seele_server::persistence::Location::File(banco),
         "Casa",
@@ -420,13 +420,13 @@ async fn hospedar(
     // aceitou cerimônia; quem apertou um botão não, e para ele o padrão é
     // perguntar.
     //
-    // Semear, e não ligar: isto roda toda vez que a janela sobe um Dogma, e um
+    // Semear, e não ligar: isto roda toda vez que a janela sobe um servidor, e um
     // interruptor que se rearma sozinho é um interruptor quebrado.
     {
-        let banco = dogma.persistence();
+        let banco = server.persistence();
         let mut persistence = banco.lock().await;
         if let Err(erro) = seele_server::portaria::semear_ligada(&mut persistence) {
-            // Não impede de hospedar. Um Dogma no ar com a portaria desligada é
+            // Não impede de hospedar. Um servidor no ar com a portaria desligada é
             // o comportamento de antes deste ADR, e a tela diz em que estado a
             // porta está — que é a metade que faltava de verdade.
             tracing::warn!(%erro, "não consegui semear a portaria");
@@ -434,7 +434,7 @@ async fn hospedar(
 
         // E quem hospeda entra na própria casa.
         //
-        // Sem isto a portaria tranca o dono para fora: o app conecta no Dogma
+        // Sem isto a portaria tranca o dono para fora: o app conecta no servidor
         // que acabou de subir, o porteiro trata quem hospeda como desconhecido,
         // e o pedido fica esperando a decisão de alguém que não consegue entrar
         // para decidir. Foi o que aconteceu numa máquina de verdade, e é
@@ -444,7 +444,7 @@ async fn hospedar(
         // corrida, porque a decisão precisa existir **antes** de haver alguém a
         // decidir.
         //
-        // Falhar aqui é grave o bastante para não hospedar. Um Dogma no ar em
+        // Falhar aqui é grave o bastante para não hospedar. Um servidor no ar em
         // que o dono não entra não é meio funcional — é uma janela travada com
         // uma frase pedindo que alguém decida.
         let minha = seele_ffi::impressao_desta_maquina(&config_dir(&app))
@@ -453,10 +453,10 @@ async fn hospedar(
             .map_err(|_| FalhaAoHospedar::NaoSubiu)?;
     }
 
-    let alcance = dogma.alcance();
+    let alcance = server.alcance();
     let anfitriao = Anfitriao {
         aqui: format!("127.0.0.1:{PORTA_PADRAO}"),
-        convite: dogma.convite(),
+        convite: server.convite(),
         alcance: alcance.map_or("SoRedeLocal", |alcance| alcance.degrau().nome()),
         porta_recusada: alcance.and_then(|alcance| alcance.porta_recusada().map(str::to_owned)),
         encontro_recusado: alcance
@@ -467,12 +467,12 @@ async fn hospedar(
         .hospedagem
         .lock()
         .map_err(|_| FalhaAoHospedar::NaoSubiu)?
-        .replace(dogma);
+        .replace(server);
 
     Ok(anfitriao)
 }
 
-/// A porta em que um Dogma escuta por padrão.
+/// A porta em que um servidor escuta por padrão.
 const PORTA_PADRAO: u16 = 8383;
 
 /// Separa "já tem um SEELE aberto" de todo o resto.
@@ -501,7 +501,7 @@ async fn disconnect(session: State<'_, Session>) -> Result<(), ()> {
     // O convite morre com a sessão que ele abriu. Enquanto nada era conferido
     // isto era inerte; deixou de ser no momento em que `expected_fingerprint`
     // passou a sair daqui — quem sai, digita outro endereço e entra de novo
-    // levaria a impressão prometida por um link anterior para um Dogma que
+    // levaria a impressão prometida por um link anterior para um servidor que
     // nunca a prometeu, e a recusa apareceria sem nada na tela que a explique.
     if let Ok(mut slot) = session.convite.lock() {
         *slot = None;
@@ -510,13 +510,13 @@ async fn disconnect(session: State<'_, Session>) -> Result<(), ()> {
     // Quem hospedava para de hospedar ao sair, e quem estava dentro é
     // derrubado. É o comportamento certo: o anfitrião fechou. `encerrar`
     // espera a porta voltar, para hospedar de novo em seguida funcionar.
-    let dogma = session
+    let server = session
         .hospedagem
         .lock()
         .ok()
         .and_then(|mut slot| slot.take());
-    if let Some(dogma) = dogma {
-        dogma.encerrar().await;
+    if let Some(server) = server {
+        server.encerrar().await;
     }
     Ok(())
 }
@@ -572,7 +572,7 @@ fn send_message(session: State<'_, Session>, line: u32, body: String) -> Result<
 /// O que se sabe de um arquivo antes de mandá-lo.
 #[derive(serde::Serialize)]
 struct ArquivoEscolhido {
-    /// O caminho nesta máquina. Nunca sai daqui: o Dogma guarda o blob sob o
+    /// O caminho nesta máquina. Nunca sai daqui: o servidor guarda o blob sob o
     /// hash do conteúdo, então nada deste caminho atravessa a rede.
     caminho: String,
     /// O nome que vai junto. **Não renomeado e sem extensão cortada** — o ADR
@@ -653,7 +653,7 @@ async fn escolher_arquivo(app: AppHandle) -> Result<Option<ArquivoEscolhido>, Pl
 
 /// O tipo que a extensão sugere.
 ///
-/// Uma **alegação**, e o único uso dela é registro: o Dogma a guarda como
+/// Uma **alegação**, e o único uso dela é registro: o servidor a guarda como
 /// alegação e nenhuma tela deste app decide o que desenhar por causa dela. Não
 /// há lista de extensões proibidas, e não vai haver: o ADR 0027 explica por
 /// que uma lista dessas é pior que lista nenhuma — contorna-se com um
@@ -731,7 +731,7 @@ fn salvar_anexo(session: State<'_, Session>, anexo: u64, destino: String) -> Res
 /// arquivo. Salvar continua sendo o único verbo com destino, e continua tendo a
 /// confirmação que diz em voz alta o que este produto não promete.
 ///
-/// **Acontece ao apertar, nunca ao rolar.** O anexo está no Dogma: ver é baixar.
+/// **Acontece ao apertar, nunca ao rolar.** O anexo está no servidor: ver é baixar.
 /// Uma Linha que buscasse toda imagem enquanto a conversa rola transformaria o
 /// teto de disco de quem hospeda em banda de todo mundo, uma vez por vez que
 /// alguém abrisse a Linha.
@@ -747,7 +747,7 @@ async fn prever_anexo(session: State<'_, Session>, anexo: u64) -> Result<Preview
 /// `TooBig` ou `NotAPicture`, e a decisão continua sendo tomada no lado que
 /// baixa e olha os bytes.
 ///
-/// O número é do cliente e não do Dogma de propósito. O teto por arquivo é uma
+/// O número é do cliente e não do servidor de propósito. O teto por arquivo é uma
 /// fração do teto de disco de quem hospeda e protege o disco **dele**; este
 /// protege a memória de quem está lendo, que é outra máquina. E a lista dos
 /// tipos vem daqui em vez de ser escrita de novo na página: duas cópias da
@@ -774,10 +774,10 @@ fn pasta_de_downloads(app: AppHandle) -> String {
         .unwrap_or_default()
 }
 
-/// Pede ao Dogma que faça uma sala de voz.
+/// Pede ao servidor que faça uma sala de voz.
 ///
 /// Devolve assim que o pedido entra na fila, e **não** quando a sala existe.
-/// Quem responde isso é o Dogma, e a resposta chega pela mesma porta que todo o
+/// Quem responde isso é o servidor, e a resposta chega pela mesma porta que todo o
 /// resto: `ChannelsChanged` se ele fez, `NoticeRaised` com `PermissionDenied`
 /// se recusou. A tela redesenha a lista pelo evento, como já faz quando alguém
 /// entra num sala de voz — não há caminho novo a aprender.
@@ -796,41 +796,41 @@ fn criar_voice_room(
     session.plug()?.create_voice_room(name, limit, line)
 }
 
-/// Pede ao Dogma que faça uma Linha.
+/// Pede ao servidor que faça uma Linha.
 #[tauri::command]
 fn criar_linha(session: State<'_, Session>, name: String) -> Result<(), PlugError> {
     session.plug()?.create_line(name)
 }
 
-/// Pede ao Dogma que renomeie uma sala de voz.
+/// Pede ao servidor que renomeie uma sala de voz.
 #[tauri::command]
 fn renomear_voice_room(session: State<'_, Session>, voice_room: u32, name: String) -> Result<(), PlugError> {
     session.plug()?.rename_voice_room(voice_room, name)
 }
 
-/// Pede ao Dogma que renomeie uma Linha.
+/// Pede ao servidor que renomeie uma Linha.
 #[tauri::command]
 fn renomear_linha(session: State<'_, Session>, line: u32, name: String) -> Result<(), PlugError> {
     session.plug()?.rename_line(line, name)
 }
 
-// ------------------------------------------------- a cara e o nome do Dogma
+// ------------------------------------------------- a cara e o nome do servidor
 //
 // O que quem hospeda personaliza: o nome que todo mundo lê no cabeçalho e a
 // imagem ao lado dele. Cinco comandos, e nenhum deles decide nada — a
 // permissão é conferida pelo PERMISSIONS no instante do verbo, e o que é uma
 // imagem aceitável é conferido pelo próprio protocolo, dentro de
-// `Plug::set_dogma_icon`.
+// `Plug::set_server_icon`.
 
-/// Pede ao Dogma que troque o próprio nome.
+/// Pede ao servidor que troque o próprio nome.
 ///
-/// A tela pode consultar `Snapshot::may_customise_dogma` para decidir se
+/// A tela pode consultar `Snapshot::may_customise_server` para decidir se
 /// desenha o campo. Conveniência, como em `criar_voice_room`: quem pede sem a
 /// permissão recebe `Alert`/`PermissionDenied` do servidor, e é lá que a
 /// `specs/08-seguranca.md` põe a segurança — nunca no controle escondido.
 #[tauri::command]
-fn renomear_dogma(session: State<'_, Session>, name: String) -> Result<(), PlugError> {
-    session.plug()?.rename_dogma(name)
+fn renomear_server(session: State<'_, Session>, name: String) -> Result<(), PlugError> {
+    session.plug()?.rename_server(name)
 }
 
 /// O que a tela pode dizer sobre a imagem **antes** de alguém escolher uma.
@@ -838,23 +838,23 @@ fn renomear_dogma(session: State<'_, Session>, name: String) -> Result<(), PlugE
 /// Os dois números que o protocolo cobra, num lugar só, para que a frase da
 /// tela não os traga escritos à mão. É a forma de `regras_de_previa`, pelo
 /// mesmo motivo dela: duas cópias da mesma regra discordam um dia, e a
-/// discordância aqui seria a tela prometendo aceitar o que o Dogma recusa.
+/// discordância aqui seria a tela prometendo aceitar o que o servidor recusa.
 ///
 /// **Isto ainda é uma cópia**, e a nota é a dívida: os números de verdade são
-/// `seele_proto::control::MAX_DOGMA_ICON_LEN` e `MAX_DOGMA_ICON_SIDE`, e o
+/// `seele_proto::control::MAX_SERVER_ICON_LEN` e `MAX_SERVER_ICON_SIDE`, e o
 /// ADR 0002 impede este binário de enxergá-los — ele vê `seele-ffi` e nada
 /// além. `Plug::preview_rules()` existe justamente para não fazer isto com o
-/// teto de prévia; falta o irmão dela, `Plug::dogma_icon_rules()`, e enquanto
+/// teto de prévia; falta o irmão dela, `Plug::server_icon_rules()`, e enquanto
 /// ele não existe a cópia mora aqui, em Rust, onde uma linha a substitui.
 ///
 /// O que a cópia **não** faz é julgar. Nenhum comando abaixo recusa uma imagem
-/// por causa destes números: quem recusa é `Plug::set_dogma_icon`, com a
+/// por causa destes números: quem recusa é `Plug::set_server_icon`, com a
 /// função do protocolo, e o número que a tela escreve no erro é o que o
 /// `PlugError::IconTooBig` carrega. Se esta cópia envelhecer, a tela mostra
 /// dois números diferentes — que é ruim, e ainda assim é melhor que uma casca
 /// recusando em nome de uma regra que deixou de ser a regra.
 #[tauri::command]
-fn regras_do_icone_do_dogma() -> RegrasDoIcone {
+fn regras_do_icone_do_server() -> RegrasDoIcone {
     RegrasDoIcone {
         limite_bytes: TETO_DO_ICONE,
         lado: LADO_DO_ICONE,
@@ -909,7 +909,7 @@ async fn baixar_modulo_de_video(app: AppHandle) -> Result<String, seele_ffi::Plu
     Ok(caminho)
 }
 
-/// Quanto pesa e quão grande é a imagem que o Dogma aceita.
+/// Quanto pesa e quão grande é a imagem que o servidor aceita.
 #[derive(Debug, Clone, Copy, serde::Serialize)]
 struct RegrasDoIcone {
     /// O máximo de bytes.
@@ -918,13 +918,13 @@ struct RegrasDoIcone {
     lado: u32,
 }
 
-/// Cópia do teto do protocolo. Veja `regras_do_icone_do_dogma`.
+/// Cópia do teto do protocolo. Veja `regras_do_icone_do_server`.
 const TETO_DO_ICONE: u64 = 8 * 1024;
 
-/// Cópia do lado máximo do protocolo. Veja `regras_do_icone_do_dogma`.
+/// Cópia do lado máximo do protocolo. Veja `regras_do_icone_do_server`.
 const LADO_DO_ICONE: u32 = 256;
 
-/// Abre o seletor, lê o que a pessoa escolheu e o põe como imagem do Dogma.
+/// Abre o seletor, lê o que a pessoa escolheu e o põe como imagem do servidor.
 ///
 /// Um comando e não dois — escolher e aplicar — porque esta tela não tem
 /// SALVAR: a escolha vale na hora, como a do microfone ao lado. `Ok(false)` é
@@ -949,7 +949,7 @@ const LADO_DO_ICONE: u32 = 256;
 /// não o do ícone: sem um corte, escolher um vídeo de dois gigabytes seria
 /// lê-lo inteiro para a memória antes de descobrir que não é imagem.
 #[tauri::command]
-async fn escolher_icone_do_dogma(
+async fn escolher_icone_do_server(
     app: AppHandle,
     session: State<'_, Session>,
 ) -> Result<bool, PlugError> {
@@ -973,7 +973,7 @@ async fn escolher_icone_do_dogma(
     };
 
     let Ok(arquivo) = std::fs::File::open(&caminho) else {
-        // Um arquivo que não abre não é uma imagem que este Dogma possa usar, e
+        // Um arquivo que não abre não é uma imagem que este servidor possa usar, e
         // é a única frase honesta que esta casca tem: ela não sabe se o disco
         // sumiu ou se a permissão é de outra pessoa.
         return Err(PlugError::IconNotAPicture);
@@ -998,17 +998,17 @@ async fn escolher_icone_do_dogma(
         return Err(PlugError::IconNotAPicture);
     };
 
-    session.plug()?.set_dogma_icon(Some(pronto))?;
+    session.plug()?.set_server_icon(Some(pronto))?;
     Ok(true)
 }
 
-/// Tira a imagem do Dogma, deixando-o sem nenhuma.
+/// Tira a imagem do servidor, deixando-o sem nenhuma.
 ///
 /// Verbo próprio e não `escolher` com um argumento vazio: são duas coisas que
 /// uma pessoa faz por motivos diferentes, e são dois botões na tela.
 #[tauri::command]
-fn tirar_icone_do_dogma(session: State<'_, Session>) -> Result<(), PlugError> {
-    session.plug()?.set_dogma_icon(None)
+fn tirar_icone_do_server(session: State<'_, Session>) -> Result<(), PlugError> {
+    session.plug()?.set_server_icon(None)
 }
 
 /// Os bytes da imagem que está valendo, ou nada.
@@ -1018,14 +1018,14 @@ fn tirar_icone_do_dogma(session: State<'_, Session>) -> Result<(), PlugError> {
 /// ele carrega `icon_revision` — um número — e a casca só vem buscar os bytes
 /// quando o número anda. É o precedente de `messages_revision`.
 #[tauri::command]
-fn icone_do_dogma(session: State<'_, Session>) -> Result<Option<Vec<u8>>, PlugError> {
-    Ok(session.plug()?.dogma_icon())
+fn icone_do_server(session: State<'_, Session>) -> Result<Option<Vec<u8>>, PlugError> {
+    Ok(session.plug()?.server_icon())
 }
 
-/// Pede ao Dogma que acabe com a sessão de alguém — `expulsar`.
+/// Pede ao servidor que acabe com a sessão de alguém — `expulsar`.
 ///
 /// Devolve quando o pedido entra na fila, e não quando a pessoa saiu. Quem
-/// responde isso é o Dogma: `RosterChanged` quando ela sai de fato,
+/// responde isso é o servidor: `RosterChanged` quando ela sai de fato,
 /// `NoticeRaised` com `PermissionDenied` quando ele recusa. É o mesmo caminho
 /// dos verbos de sala, e não há porta nova a aprender.
 ///
@@ -1039,7 +1039,7 @@ fn expulsar_pessoa(session: State<'_, Session>, person: u64) -> Result<(), PlugE
     session.plug()?.kick_person(person)
 }
 
-/// Pede ao Dogma que impeça alguém de voltar — `banir`.
+/// Pede ao servidor que impeça alguém de voltar — `banir`.
 ///
 /// `expires_at` em segundos desde a época; `None` é para sempre. O `reason` é
 /// para o registro de quem hospeda e nunca chega a quem foi banido.
@@ -1053,7 +1053,7 @@ fn banir_pessoa(
     session.plug()?.ban_person(person, reason, expires_at)
 }
 
-/// Pede ao Dogma que tire uma mensagem da Linha.
+/// Pede ao servidor que tire uma mensagem da Linha.
 ///
 /// Sem permissão nenhuma quando a mensagem é de quem pede: a permissão do
 /// `specs/04-servidor-seele.md` diz «de outra pessoa».
@@ -1062,16 +1062,16 @@ fn remover_mensagem(session: State<'_, Session>, message: u64) -> Result<(), Plu
     session.plug()?.remove_message(message)
 }
 
-/// Pede ao Dogma que mova alguém para uma sala de voz — `mover_pessoa`.
+/// Pede ao servidor que mova alguém para uma sala de voz — `mover_pessoa`.
 #[tauri::command]
 fn mover_pessoa(session: State<'_, Session>, person: u64, voice_room: u32) -> Result<(), PlugError> {
     session.plug()?.move_person(person, voice_room)
 }
 
-/// Pede ao Dogma que destrua uma sala de voz — `apagar_voice_room`.
+/// Pede ao servidor que destrua uma sala de voz — `apagar_voice_room`.
 ///
 /// Quem estiver dentro é posto para fora e avisado; a Linha presa a ele, se
-/// houver, fica onde está. O Dogma recusa o último sala de voz e diz isso com
+/// houver, fica onde está. O servidor recusa o último sala de voz e diz isso com
 /// `LastVoiceRoom`, que é frase diferente da de entrada recusada.
 ///
 /// A tela pode consultar `Snapshot::may_delete_rooms` para decidir se desenha o
@@ -1083,7 +1083,7 @@ fn apagar_voice_room(session: State<'_, Session>, voice_room: u32) -> Result<(),
     session.plug()?.delete_voice_room(voice_room)
 }
 
-/// Pede ao Dogma que destrua uma Linha, e tudo que foi escrito nela —
+/// Pede ao servidor que destrua uma Linha, e tudo que foi escrito nela —
 /// `apagar_linha`.
 #[tauri::command]
 fn apagar_linha(session: State<'_, Session>, line: u32) -> Result<(), PlugError> {
@@ -1092,7 +1092,7 @@ fn apagar_linha(session: State<'_, Session>, line: u32) -> Result<(), PlugError>
 
 /// Pergunta quanto custaria destruir uma Linha. Não destrói nada.
 ///
-/// O único comando desta janela que **espera** o Dogma responder, e a razão é a
+/// O único comando desta janela que **espera** o servidor responder, e a razão é a
 /// frase que ele alimenta: a caixa de confirmação promete um número exato de
 /// mensagens, de gente e uma data, e os três são contados no banco no instante
 /// de perguntar. A janela segura uma página de histórico e chutaria para baixo
@@ -1260,11 +1260,11 @@ fn tela_cheia(app: AppHandle, ligada: bool) {
     }
 }
 
-/// Anota o nome e a imagem do Dogma na lista de visitados.
+/// Anota o nome e a imagem do servidor na lista de visitados.
 ///
 /// # Por que a tela chama isto, e não o Rust sozinho
 ///
-/// Porque o momento é da tela. A aparência chega num quadro que o Dogma manda
+/// Porque o momento é da tela. A aparência chega num quadro que o servidor manda
 /// **depois** do aperto de mão, e `Plug::connect` já voltou quando ele chega —
 /// é a mesma janela cega que faz o cabeçalho precisar sincronizar o ícone à mão
 /// ao entrar. A tela é quem sabe que já sincronizou; daqui não dá para saber
@@ -1279,8 +1279,8 @@ fn lembrar_aparencia_do_servidor(app: AppHandle, session: State<'_, Session>) {
         return;
     };
     let Ok(plug) = session.plug() else { return };
-    let nome = plug.snapshot().dogma;
-    let icone = plug.dogma_icon();
+    let nome = plug.snapshot().server;
+    let icone = plug.server_icon();
 
     let Ok(mut lista) = seele_ffi::conhecidos::Conhecidos::abrir(caminho_dos_conhecidos(&app))
     else {
@@ -1289,7 +1289,7 @@ fn lembrar_aparencia_do_servidor(app: AppHandle, session: State<'_, Session>) {
     if let Err(erro) = lista.anotar_aparencia(&alvo, Some(&nome), icone.as_deref()) {
         // Um distintivo que não gravou é uma lista sem enfeite, e não uma falha
         // que valha interromper quem está entrando numa conversa.
-        tracing::debug!(%erro, "não anotei a aparência deste Dogma");
+        tracing::debug!(%erro, "não anotei a aparência deste servidor");
     }
 }
 
@@ -1349,7 +1349,7 @@ fn dispensar_aviso(session: State<'_, Session>) -> Result<(), PlugError> {
 ///
 /// `Option` e não `Result` porque nenhum chamador tem o que fazer com o motivo:
 /// sem o arquivo, todo ajuste é o padrão, e é exatamente onde o app já estava
-/// antes de o Terminal Dogma existir. A mesma política da lista de visitados.
+/// antes de o Terminal servidor existir. A mesma política da lista de visitados.
 fn preferencias(app: &AppHandle) -> Option<seele_ffi::preferences::Preferences> {
     seele_ffi::preferences::Preferences::open(
         std::path::PathBuf::from(config_dir(app)).join("preferences"),
@@ -1465,7 +1465,7 @@ fn saida_escolhida(app: AppHandle) -> Option<String> {
 /// dá. Uma diferença de peso está do outro lado, no core: trocar de saída não
 /// desliga o Isolamento total. Quem mexe neste controle costuma ser exatamente
 /// quem não está ouvindo nada, e às vezes o motivo de não ouvir é que se mutou —
-/// uma troca que desmutasse calada poria um Dogma dentro de uma sala que estava
+/// uma troca que desmutasse calada poria um servidor dentro de uma sala que estava
 /// em silêncio.
 #[tauri::command]
 fn escolher_saida(
@@ -1491,12 +1491,12 @@ fn escolher_saida(
     })
 }
 
-/// Onde fica a lista de Dogmas visitados.
+/// Onde fica a lista de servidores visitados.
 fn caminho_dos_conhecidos(app: &AppHandle) -> std::path::PathBuf {
     std::path::PathBuf::from(config_dir(app)).join("conhecidos")
 }
 
-/// Os Dogmas onde este pessoa já esteve.
+/// Os servidores onde este pessoa já esteve.
 ///
 /// Uma lista de atalhos corrompida não pode fechar a porta: `specs/05` diz que
 /// este arquivo é conveniência e pode ser apagado sem consequência. Por isso
@@ -1509,7 +1509,7 @@ fn conhecidos(app: AppHandle) -> Vec<seele_ffi::conhecidos::Conhecido> {
         .unwrap_or_default()
 }
 
-/// Tira um Dogma da lista.
+/// Tira um servidor da lista.
 ///
 /// Um `Ok` quando a lista nem abriu é a resposta certa e não uma mentira: o que
 /// se pediu foi que aquele endereço não estivesse mais lá, e ele não está.
@@ -1537,7 +1537,7 @@ fn esquecer(app: AppHandle, alvo: String) -> Result<(), ()> {
 /// frase própria na tela.
 #[derive(Debug, serde::Serialize)]
 struct ConviteLido {
-    /// O endereço do Dogma, para o campo DOGMA.
+    /// O endereço do servidor, para o campo SERVER.
     alvo: String,
     /// O convite de uso único, quando o link trouxe um.
     token: Option<String>,
@@ -1596,10 +1596,10 @@ fn nome_da_falha(erro: &seele_ffi::uri::ErroDeUri) -> &'static str {
 }
 
 // ---------------------------------------------------------------------------
-// A portaria — ADR 0030. A porta do Dogma que esta janela hospeda.
+// A portaria — ADR 0030. A porta do servidor que esta janela hospeda.
 // ---------------------------------------------------------------------------
 //
-// Estes comandos falam **direto com o PERSISTENCE do Dogma embutido**, e não pelo fio
+// Estes comandos falam **direto com o PERSISTENCE do servidor embutido**, e não pelo fio
 // como toda a moderação faz. Não é atalho; é o ADR 0030:
 //
 // - fechar a porta não pode depender de estar dentro, senão a defesa depende do
@@ -1609,8 +1609,8 @@ fn nome_da_falha(erro: &seele_ffi::uri::ErroDeUri) -> &'static str {
 // - e nenhum verbo novo de protocolo é nenhuma superfície nova exposta à
 //   internet para uma decisão que é, por definição, de quem está na máquina.
 //
-// O custo, que é real e está no ADR: isto não administra o Dogma de outra
-// pessoa. Quem está conectado ao Dogma de um amigo não vê nenhuma destas telas,
+// O custo, que é real e está no ADR: isto não administra o servidor de outra
+// pessoa. Quem está conectado ao servidor de um amigo não vê nenhuma destas telas,
 // e é por isso que todas começam por `NaoEstaHospedando`.
 
 /// Por que um comando da portaria não deu.
@@ -1620,23 +1620,23 @@ fn nome_da_falha(erro: &seele_ffi::uri::ErroDeUri) -> &'static str {
 enum FalhaNaPortaria {
     /// Esta janela não está hospedando nada, então não há porta para mexer.
     NaoEstaHospedando,
-    /// O banco do Dogma não respondeu.
+    /// O banco do servidor não respondeu.
     BancoNaoRespondeu,
 }
 
-/// Em que estado está a porta do Dogma que esta janela hospeda.
+/// Em que estado está a porta do servidor que esta janela hospeda.
 ///
 /// Uma leitura só, porque as quatro coisas são lidas juntas e mostradas juntas:
 /// quem hospeda precisa ver **as três camadas ao mesmo tempo** para entender o
 /// que está valendo. Ver `portaria` em `seele-server` e o ADR 0030.
 #[derive(Debug, serde::Serialize)]
 struct EstadoDaPorta {
-    /// Se há um Dogma no ar nesta janela.
+    /// Se há um servidor no ar nesta janela.
     hospedando: bool,
     /// Sem senha e sem convites: qualquer um que alcance a porta passa a
     /// primeira camada. ADR 0021.
     aberto: bool,
-    /// Se há senha do Dogma configurada.
+    /// Se há senha do servidor configurada.
     tem_senha: bool,
     /// Se há pelo menos um convite emitido.
     aceita_convites: bool,
@@ -1645,7 +1645,7 @@ struct EstadoDaPorta {
     /// Quantos pedidos esperam decisão. O número que o cartão mostra sem
     /// desenhar a fila inteira.
     pendentes: i64,
-    /// Até onde este Dogma é alcançável, pelo degrau do ADR 0022.
+    /// Até onde este servidor é alcançável, pelo degrau do ADR 0022.
     ///
     /// É o que transforma «está aberto» em «está aberto **para a internet**»,
     /// que são duas frases com urgências diferentes.
@@ -1677,7 +1677,7 @@ struct PedidoNaTela {
     admitido: bool,
 }
 
-/// O `Arc` do PERSISTENCE do Dogma hospedado, ou a recusa.
+/// O `Arc` do PERSISTENCE do servidor hospedado, ou a recusa.
 ///
 /// Clonado para fora do `Mutex` do app **antes** de qualquer `await`: segurar um
 /// `std::sync::MutexGuard` atravessando um ponto de espera trava os dois
@@ -1689,8 +1689,8 @@ fn casper_hospedado(
         .hospedagem
         .lock()
         .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
-    let dogma = aberto.as_ref().ok_or(FalhaNaPortaria::NaoEstaHospedando)?;
-    Ok(dogma.persistence())
+    let server = aberto.as_ref().ok_or(FalhaNaPortaria::NaoEstaHospedando)?;
+    Ok(server.persistence())
 }
 
 /// O estado das três camadas da porta.
@@ -1701,7 +1701,7 @@ async fn estado_da_porta(session: State<'_, Session>) -> Result<EstadoDaPorta, F
             .hospedagem
             .lock()
             .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
-        let Some(dogma) = aberto.as_ref() else {
+        let Some(server) = aberto.as_ref() else {
             // Não hospedar não é falha: é a resposta, e a tela desenha a partir
             // dela em vez de mostrar um erro a quem não pediu nada.
             return Ok(EstadoDaPorta {
@@ -1714,10 +1714,10 @@ async fn estado_da_porta(session: State<'_, Session>) -> Result<EstadoDaPorta, F
                 alcance: "SoRedeLocal",
             });
         };
-        let alcance = dogma
+        let alcance = server
             .alcance()
             .map_or("SoRedeLocal", |alcance| alcance.degrau().nome());
-        (dogma.persistence(), alcance)
+        (server.persistence(), alcance)
     };
 
     let persistence = persistence.lock().await;
@@ -1739,9 +1739,9 @@ async fn estado_da_porta(session: State<'_, Session>) -> Result<EstadoDaPorta, F
     })
 }
 
-/// Põe ou tira a senha do Dogma. `None` tira. ADR 0021.
+/// Põe ou tira a senha do servidor. `None` tira. ADR 0021.
 #[tauri::command]
-async fn definir_senha_do_dogma(
+async fn definir_senha_do_server(
     session: State<'_, Session>,
     senha: Option<String>,
 ) -> Result<(), FalhaNaPortaria> {
@@ -1756,7 +1756,7 @@ async fn definir_senha_do_dogma(
 /// O link, e não o token cru: o token sozinho obriga quem recebe a saber o
 /// endereço por outro caminho, e é o link que a outra ponta já sabe colar.
 #[tauri::command]
-async fn criar_convite_do_dogma(
+async fn criar_convite_do_server(
     session: State<'_, Session>,
     observacao: String,
 ) -> Result<String, FalhaNaPortaria> {
@@ -1765,8 +1765,8 @@ async fn criar_convite_do_dogma(
             .hospedagem
             .lock()
             .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
-        let dogma = aberto.as_ref().ok_or(FalhaNaPortaria::NaoEstaHospedando)?;
-        (dogma.persistence(), ())
+        let server = aberto.as_ref().ok_or(FalhaNaPortaria::NaoEstaHospedando)?;
+        (server.persistence(), ())
     };
 
     let token = {
@@ -1779,8 +1779,8 @@ async fn criar_convite_do_dogma(
         .hospedagem
         .lock()
         .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
-    let dogma = aberto.as_ref().ok_or(FalhaNaPortaria::NaoEstaHospedando)?;
-    Ok(dogma.convite_com_token(&token))
+    let server = aberto.as_ref().ok_or(FalhaNaPortaria::NaoEstaHospedando)?;
+    Ok(server.convite_com_token(&token))
 }
 
 /// Liga ou desliga a portaria. ADR 0030.
@@ -2176,7 +2176,7 @@ async fn procurar_atualizacao(
 ///
 /// Uniformizado de propósito: uma ação que às vezes fecha a janela e às vezes
 /// não é uma ação que ninguém consegue avisar direito. **A tela tem que dizer
-/// antes que o SEELE vai fechar e abrir de novo** — e, se houver um Dogma
+/// antes que o SEELE vai fechar e abrir de novo** — e, se houver um servidor
 /// hospedado nesta janela, que quem estiver dentro dele cai junto.
 #[tauri::command]
 async fn instalar_atualizacao(
@@ -2299,13 +2299,13 @@ fn main() {
             criar_linha,
             renomear_voice_room,
             renomear_linha,
-            renomear_dogma,
-            regras_do_icone_do_dogma,
+            renomear_server,
+            regras_do_icone_do_server,
             modulo_de_video_a_baixar,
             baixar_modulo_de_video,
-            escolher_icone_do_dogma,
-            tirar_icone_do_dogma,
-            icone_do_dogma,
+            escolher_icone_do_server,
+            tirar_icone_do_server,
+            icone_do_server,
             expulsar_pessoa,
             banir_pessoa,
             remover_mensagem,
@@ -2351,8 +2351,8 @@ fn main() {
             regras_de_previa,
             pasta_de_downloads,
             estado_da_porta,
-            definir_senha_do_dogma,
-            criar_convite_do_dogma,
+            definir_senha_do_server,
+            criar_convite_do_server,
             ligar_portaria,
             pedidos_da_portaria,
             decidir_pedido,

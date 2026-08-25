@@ -855,7 +855,7 @@ fn o_windows_inalcancavel_reprova_antes_do_linux_emulado() {
         saida.texto
     );
     assert!(
-        saida.texto.contains("OpenSSH Server"),
+        saida.texto.contains("OpenSSH Daemon"),
         "a mensagem tem que apontar o recurso que costuma estar desligado:\n{}",
         saida.texto
     );
@@ -1468,7 +1468,7 @@ fn um_escopo_desconhecido_aparece_em_vez_de_sumir() {
     // conserto de empacotamento à vista custa uma linha feia; enterrar uma
     // mudança que a pessoa sente custa ela não saber que existe. O erro barato
     // é o que fica sendo o padrão.
-    let texto = notas("feat(telepatia): o Dogma adivinha o que você ia dizer\n");
+    let texto = notas("feat(telepatia): o servidor adivinha o que você ia dizer\n");
 
     let em_cima = texto
         .split("## Por baixo")
@@ -1497,7 +1497,7 @@ fn um_escopo_desconhecido_pede_para_ser_classificado() {
         .expect("o orquestrador tem que executar");
     if let Some(entrada) = filho.stdin.as_mut() {
         use std::io::Write;
-        let _ = entrada.write_all(b"feat(telepatia): o Dogma adivinha\n");
+        let _ = entrada.write_all(b"feat(telepatia): o servidor adivinha\n");
     }
     let saida = filho.wait_with_output().expect("o filho termina");
     let erro = String::from_utf8_lossy(&saida.stderr);
@@ -1677,7 +1677,7 @@ fn o_windows_instala_para_a_maquina_e_nao_para_o_usuario() {
     // sem essa regra ninguém alcança quem hospeda. `perMachine` pede o UAC uma
     // vez, na instalação, e resolve os dois.
     //
-    // O troco é real e está aceito: quem só quer entrar num Dogma de outra
+    // O troco é real e está aceito: quem só quer entrar num servidor de outra
     // pessoa também paga o aviso do UAC. Entre pedir uma confirmação e o app
     // não ser encontrável, a confirmação é a mais barata das duas.
     let conf = std::fs::read_to_string(raiz().join("apps/seele-app/tauri.conf.json"))

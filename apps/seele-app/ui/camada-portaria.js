@@ -1,7 +1,7 @@
-// SEELE · Entry Plug — a portaria: a porta do Dogma que esta janela hospeda.
+// SEELE · Entry Plug — a portaria: a porta do servidor que esta janela hospeda.
 //
 // ADR 0030. O buraco que isto fecha, nas palavras do dono: «precisava ter uma
-// tela de permissão para usuários não registrados nos dogmas, assim não entra
+// tela de permissão para usuários não registrados nos servidores, assim não entra
 // qualquer um». O servidor sabia fechar a porta desde o ADR 0021 e o único
 // caminho até lá era o terminal — que é exatamente o que o público do botão
 // HOSPEDAR AQUI não abre.
@@ -45,13 +45,13 @@ let focoAntesDaPortaria = null;
  * Nasceu divergente. A lista dizia `EnderecoGlobal`, `PortaAberta` e
  * `PontoDeEncontro`, e **nenhum desses três nomes existe** do lado Rust — o
  * alarme comparava contra invenções, nunca dava igual, e o vermelho de «este
- * Dogma está aberto e alcançável de fora» simplesmente não aparecia. Um alarme
+ * Server está aberto e alcançável de fora» simplesmente não aparecia. Um alarme
  * que não dispara não é um alarme silencioso: é um alarme que ninguém sabe que
  * está quebrado.
  *
  * `SoRedeLocal` e `RedeLocalOuVpn` são os que não estão aqui, e a distinção é o
- * alarme inteiro: um Dogma aberto na rede de casa é o padrão que o ADR 0021
- * defende de propósito; o mesmo Dogma aberto com endereço alcançável da
+ * alarme inteiro: um servidor aberto na rede de casa é o padrão que o ADR 0021
+ * defende de propósito; o mesmo Server aberto com endereço alcançável da
  * internet é outra coisa, e é dessa que o vermelho é reservado.
  */
 const ALCANCA_DE_FORA = [
@@ -67,7 +67,7 @@ const ALCANCA_DE_FORA = [
  * Sessenta e quatro caracteres seguidos não se comparam por olho — quem tenta
  * perde o lugar no meio e conclui que bate. Em grupos de oito, a conferência é
  * de oito pedaços curtos, que é a mesma razão de o ADR 0006 pôr a impressão do
- * Dogma num link em vez de mandar alguém ditá-la.
+ * Server num link em vez de mandar alguém ditá-la.
  */
 function agrupar(impressao) {
   return (impressao.match(/.{1,8}/g) ?? [impressao]).join(" ");
@@ -92,7 +92,7 @@ function comoChegou(pedido) {
  * se confere por outro canal, e é a única coisa aqui que outra pessoa não pode
  * escolher. O apelido vem abaixo, entre aspas e apresentado como afirmação —
  * *diz chamar-se* —, nunca como título do cartão. Título é do que a pessoa é, e
- * quem bateu ainda não é nada neste Dogma.
+ * quem bateu ainda não é nada neste Server.
  *
  * É o mesmo corte que as `NOTAS-DE-RELEASE` fazem entre «o arquivo chegou
  * inteiro» e «este arquivo é bom»: uma coisa é o que se verificou, outra é o
@@ -343,7 +343,7 @@ function perguntarETirarSenha(estado) {
     `Ninguém mais precisa saber a senha para chegar à porta deste servidor.\n${sobra}`,
     "TIRAR",
     async () => {
-      await invoke("definir_senha_do_dogma", { senha: null });
+      await invoke("definir_senha_do_server", { senha: null });
       await desenharPortaria();
     },
   );
@@ -441,7 +441,7 @@ function fecharPortaria() {
  * de ela existir apesar do rótulo.
  *
  * Cinco segundos, e não o quarto de segundo de `atualizar()`: ninguém bate à
- * porta quatro vezes por segundo, e uma consulta ao banco do Dogma por quadro
+ * porta quatro vezes por segundo, e uma consulta ao banco do servidor por quadro
  * seria pagar caro por um número que muda uma vez por dia. Quando não se está
  * hospedando, `estado_da_porta` responde `hospedando: false` na hora, o rótulo
  * volta a ser a palavra sem estado e a faixa some.
@@ -465,7 +465,7 @@ async function atualizarPorta() {
 // A pendência 23, item 1, na metade que não precisa de dependência nova: o
 // pedido durava e nada *chamava*. O chip acima já contava — e ele mora dentro
 // de `#tela-sessao`, então some inteiro quando quem hospeda entra numa jaula ou
-// abre o Terminal Dogma, que é justo a hora em que ninguém está olhando para
+// abre o Terminal servidor, que é justo a hora em que ninguém está olhando para
 // ele. A faixa fica fora das telas e sobrevive a todas.
 //
 // O que ela **não** faz está escrito ao lado da marcação e vale repetir aqui,
@@ -587,7 +587,7 @@ $("portaria-por-senha").addEventListener("click", () => {
   const senha = campo.value;
   if (senha === "") return;
   fechando(async () => {
-    await invoke("definir_senha_do_dogma", { senha });
+    await invoke("definir_senha_do_server", { senha });
     campo.value = "";
   });
 });
@@ -604,7 +604,7 @@ $("portaria-gerar").addEventListener("click", () => {
     // O link inteiro cai no campo de convite que já existe, em vez de numa
     // caixa nova: é de lá que quem hospeda já copia, e um segundo lugar para
     // copiar um link é um lugar a mais para copiar o link errado.
-    const link = await invoke("criar_convite_do_dogma", {
+    const link = await invoke("criar_convite_do_server", {
       observacao: observacao.value.trim(),
     });
     $("convite-link").value = link;

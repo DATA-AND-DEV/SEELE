@@ -1,4 +1,4 @@
-//! `seeled` — the SEELE daemon. One instance is a **Dogma Central**.
+//! `seeled` — the SEELE daemon. One instance is a **server Central**.
 //!
 //! `specs/04-servidor-seele.md` names three subsystems, and they are real module
 //! boundaries rather than decoration:
@@ -34,7 +34,7 @@ pub mod admissao;
 pub mod alcance;
 pub mod voice_room;
 pub mod persistence;
-pub mod dogma;
+pub mod server;
 pub mod frame;
 pub mod hospedagem;
 pub mod permissions;
@@ -91,20 +91,20 @@ pub mod encontro {
 /// Length of an Ed25519 public key, in bytes.
 pub const PUBLIC_KEY_LEN: usize = seele_proto::control::PUBLIC_KEY_LEN;
 
-/// How a Dogma is configured.
+/// How a server is configured.
 ///
 /// `specs/04-servidor-seele.md` describes a TOML file; M2 takes the same fields
 /// as a struct and leaves parsing for M3, when there is persistent state worth
 /// configuring.
 #[derive(Debug, Clone)]
-pub struct DogmaConfig {
-    /// What this Dogma is called.
+pub struct ServerConfig {
+    /// What this server is called.
     pub name: String,
     /// Where to listen. UDP; QUIC needs no second port.
     ///
     /// O padrão é `[::]`, e a diferença importa: um socket IPv6 de pilha dupla
     /// atende as duas famílias, e `0.0.0.0` atende só IPv4. Era `0.0.0.0` até o
-    /// degrau 2 do ADR 0022 — e por isso um Dogma não atendia em IPv6 nem
+    /// degrau 2 do ADR 0022 — e por isso um servidor não atendia em IPv6 nem
     /// quando as duas pontas tinham. Ver [`alcance::abrir_escuta`].
     pub listen: SocketAddr,
     /// The one voice room M2 offers.
@@ -129,7 +129,7 @@ pub struct DogmaConfig {
     /// mark rather than the ceiling, which is the one property this whole
     /// decision was taken for.
     ///
-    /// Nothing to derive from means no attachments: a Dogma in memory has no
+    /// Nothing to derive from means no attachments: a server in memory has no
     /// directory to own, and the honest answer to a transfer is
     /// `AttachmentRefusal::Unavailable` rather than a folder appearing in
     /// whatever directory the process happened to start in. Tests that want
@@ -144,13 +144,13 @@ pub struct DogmaConfig {
     ///
     /// **Declarado, não medido**, e a diferença viaja no fio. `None` é o caso
     /// comum e quer dizer que ninguém sabe: a admissão daqui cai na hipótese de
-    /// `crate::tela::CAMINHO_DO_DOGMA_BPS` e o `HostUplink` sai **zero**, que
+    /// `crate::tela::CAMINHO_DO_SERVER_BPS` e o `HostUplink` sai **zero**, que
     /// pelo protocolo é «não medi» e não «zero bit por segundo». Ver
     /// `crate::tela::caminho_no_fio`.
     pub caminho_bps: Option<u32>,
 }
 
-impl Default for DogmaConfig {
+impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             // Neutro, como todo o resto do que a pessoa lê: quem sobe um
@@ -181,7 +181,7 @@ impl Default for DogmaConfig {
 /// `anexos/` beside `seele.db`. A database with no file — the in-memory one
 /// tests use — has nowhere to put them, and says so instead of guessing.
 #[must_use]
-pub fn diretorio_de_anexos(config: &DogmaConfig) -> Option<std::path::PathBuf> {
+pub fn diretorio_de_anexos(config: &ServerConfig) -> Option<std::path::PathBuf> {
     if let Some(escolhido) = &config.anexos {
         return Some(escolhido.clone());
     }
@@ -201,12 +201,12 @@ pub fn diretorio_de_anexos(config: &DogmaConfig) -> Option<std::path::PathBuf> {
 /// finds the same room rather than rebuilding it. Idempotent, because it runs
 /// on every boot.
 ///
-/// # A Dogma opens with somewhere to go
+/// # A server opens with somewhere to go
 ///
-/// This is what stops a fresh Dogma being a screen that does not explain
+/// This is what stops a fresh server being a screen that does not explain
 /// itself. A room with na sala de voz offers nowhere to speak and no Line to write in;
 /// the person who pressed **HOSPEDAR AQUI** looks at an empty list and has no
-/// way to tell a working Dogma from a broken one. So the first boot writes a
+/// way to tell a working server from a broken one. So the first boot writes a
 /// Line called `geral` and one voice room bound to it, and there is somewhere to
 /// stand from the first second.
 ///
@@ -217,11 +217,11 @@ pub fn diretorio_de_anexos(config: &DogmaConfig) -> Option<std::path::PathBuf> {
 ///
 /// **A migration is irreversible and append-only** ([`persistence::schema`]). The
 /// name of a voice room is not: `ClientMessage::RenameVoiceRoom` exists, and the whole
-/// point of hosting your own Dogma is that the rooms are yours. Seeded content
+/// point of hosting your own server is that the rooms are yours. Seeded content
 /// baked into a schema version would be a name the operator can change and the
 /// history of the schema still claims.
 ///
-/// **The voice room's name and limit come from [`DogmaConfig`]**, which a migration
+/// **The voice room's name and limit come from [`ServerConfig`]**, which a migration
 /// cannot see. Migrations run inside PERSISTENCE, before there is a config to
 /// consult, and passing one in would make "which SQL is this database at" depend
 /// on a runtime value.
@@ -234,7 +234,7 @@ pub fn diretorio_de_anexos(config: &DogmaConfig) -> Option<std::path::PathBuf> {
 ///
 /// Because the identifiers are written out by hand, `INSERT OR IGNORE` means
 /// "unless row 1 is taken" — and once a Line can be **destroyed**, row 1 stops
-/// being taken. A Dogma whose operator destroyed `geral` on purpose, after a
+/// being taken. A server whose operator destroyed `geral` on purpose, after a
 /// confirmation promising that nothing brings it back, would find it again at
 /// the next restart: same name, same identifier, empty. That is the product
 /// contradicting its own confirmation with a `systemctl restart`, and it is not
@@ -249,7 +249,7 @@ pub fn diretorio_de_anexos(config: &DogmaConfig) -> Option<std::path::PathBuf> {
 /// which is what `INSERT OR IGNORE` was already for.
 const SEMEADO: &str = "semeado";
 
-fn seed(persistence: &mut persistence::Persistence, config: &DogmaConfig) -> Result<()> {
+fn seed(persistence: &mut persistence::Persistence, config: &ServerConfig) -> Result<()> {
     let connection = persistence.connection();
     let ja: i64 = connection.query_row(
         "SELECT COUNT(*) FROM configuracao WHERE chave = ?1",
@@ -280,26 +280,26 @@ fn seed(persistence: &mut persistence::Persistence, config: &DogmaConfig) -> Res
     Ok(())
 }
 
-/// A running Dogma.
-pub struct Server {
+/// A running server.
+pub struct Daemon {
     endpoint: quinn::Endpoint,
-    config: Arc<DogmaConfig>,
+    config: Arc<ServerConfig>,
     pilha: alcance::Pilha,
-    /// O mesmo socket do endpoint, para escrever. Ver [`Server::espelho`].
+    /// O mesmo socket do endpoint, para escrever. Ver [`Daemon::espelho`].
     espelho: Option<Arc<std::net::UdpSocket>>,
     fingerprint: String,
     registry: Arc<session::Registry>,
-    dogma: Arc<dogma::Dogma>,
+    server: Arc<server::Server>,
     voice_rooms: Arc<voice_room::VoiceRooms>,
 }
 
-impl Server {
+impl Daemon {
     /// Binds the endpoint and starts the voice room task.
     ///
     /// # Errors
     ///
     /// Fails if the certificate cannot be generated or the socket cannot bind.
-    pub async fn bind(config: DogmaConfig) -> Result<Self> {
+    pub async fn bind(config: ServerConfig) -> Result<Self> {
         // rustls 0.23 requires a crypto provider to be chosen explicitly. Doing
         // it here rather than in `main` means the integration tests get it too.
         let _ = rustls::crypto::ring::default_provider().install_default();
@@ -310,7 +310,7 @@ impl Server {
         let mut persistence = persistence::Persistence::open(&config.database)?;
         seed(&mut persistence, &config)?;
 
-        // Lida do banco, não gerada a cada vez. Sem isto, reiniciar o Dogma
+        // Lida do banco, não gerada a cada vez. Sem isto, reiniciar o servidor
         // trocava a chave e todo cliente já conectado via `A CHAVE DO SERVIDOR
         // MUDOU` — o alerta bloqueante do ADR 0003 — e era recusado. O aviso
         // reservado para ataque disparando num reinício de rotina é como se
@@ -353,7 +353,7 @@ impl Server {
             runtime,
         )
         .with_context(|| format!("could not bind {}", config.listen))?;
-        tracing::info!(?pilha, escuta = %endpoint.local_addr()?, "o Dogma está atendendo");
+        tracing::info!(?pilha, escuta = %endpoint.local_addr()?, "o servidor está atendendo");
 
         // Before the mutex, because opening it sweeps the directory against the
         // table and both are still ours alone at this point. ADR 0027 wants the
@@ -361,7 +361,7 @@ impl Server {
         let anexos = match diretorio_de_anexos(&config) {
             Some(root) => Some(Arc::new(transfer::Vault::open(root, &persistence)?)),
             None => {
-                tracing::info!("anexos: sem diretório, este Dogma não guarda arquivo");
+                tracing::info!("anexos: sem diretório, este servidor não guarda arquivo");
                 None
             }
         };
@@ -369,24 +369,24 @@ impl Server {
         let persistence = Arc::new(tokio::sync::Mutex::new(persistence));
 
         let (events, _) = tokio::sync::broadcast::channel(1024);
-        let writes = dogma::spawn_writer(Arc::clone(&persistence), events.clone());
-        let dogma = Arc::new(dogma::Dogma {
+        let writes = server::spawn_writer(Arc::clone(&persistence), events.clone());
+        let server = Arc::new(server::Server {
             persistence,
             events,
             writes,
-            slots: Arc::new(tokio::sync::Mutex::new(dogma::Slots::default())),
-            occupancy: Arc::new(tokio::sync::Mutex::new(dogma::Occupancy::default())),
-            presentes: Arc::new(tokio::sync::Mutex::new(dogma::Presentes::default())),
+            slots: Arc::new(tokio::sync::Mutex::new(server::Slots::default())),
+            occupancy: Arc::new(tokio::sync::Mutex::new(server::Occupancy::default())),
+            presentes: Arc::new(tokio::sync::Mutex::new(server::Presentes::default())),
             portaria: Arc::new(tokio::sync::Mutex::new(taxa::Portaria::nova())),
-            atrasos: Arc::new(dogma::Atrasos::default()),
-            telas: Arc::new(tokio::sync::Mutex::new(dogma::Telas::default())),
+            atrasos: Arc::new(server::Atrasos::default()),
+            telas: Arc::new(tokio::sync::Mutex::new(server::Telas::default())),
             anexos,
             caminho_bps: config.caminho_bps,
         });
 
-        // Held seats have to be released even if nobody reconnects, or a Dogma
+        // Held seats have to be released even if nobody reconnects, or a server
         // slowly fills with places kept for people who left for good.
-        let sweeper = Arc::clone(&dogma.slots);
+        let sweeper = Arc::clone(&server.slots);
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(std::time::Duration::from_secs(30));
             loop {
@@ -399,12 +399,12 @@ impl Server {
         });
 
         // Uma tarefa por sala de voz, criada quando alguém entra. Antes havia
-        // exatamente uma, a da sala de voz do `DogmaConfig`, e toda sessão segurava
-        // esse único remetente: correto enquanto um Dogma tinha uma sala,
+        // exatamente uma, a da sala de voz do `ServerConfig`, e toda sessão segurava
+        // esse único remetente: correto enquanto um servidor tinha uma sala,
         // silenciosamente errado no instante em que passou a poder ter duas.
         let voice_rooms = Arc::new(voice_room::VoiceRooms::new(
-            tela::caminho_do_dogma(dogma.caminho_bps),
-            dogma.events.clone(),
+            tela::caminho_do_server(server.caminho_bps),
+            server.events.clone(),
         ));
 
         Ok(Self {
@@ -414,7 +414,7 @@ impl Server {
             espelho,
             fingerprint,
             registry: Arc::new(session::Registry::new()),
-            dogma,
+            server,
             voice_rooms,
         })
     }
@@ -434,7 +434,7 @@ impl Server {
         &self.fingerprint
     }
 
-    /// O socket em que o Dogma atende, para **escrever**. Degrau 4 do ADR 0022.
+    /// O socket em que o servidor atende, para **escrever**. Degrau 4 do ADR 0022.
     ///
     /// Furar um NAT exige mandar pacotes da porta em que o QUIC atende: o
     /// roteador abre caminho por porta interna, e um pacote saído de outro
@@ -449,7 +449,7 @@ impl Server {
     /// Que famílias de endereço esta escuta alcança. Degrau 2 do ADR 0022.
     ///
     /// Quem hospeda precisa poder dizer isto a quem está na frente da tela: um
-    /// Dogma que caiu para IPv4 é um Dogma que ninguém só-IPv6 alcança, e essa
+    /// servidor que caiu para IPv4 é um servidor que ninguém só-IPv6 alcança, e essa
     /// é a diferença entre "não conecta" e "não conecta **porque**".
     #[must_use]
     pub fn pilha(&self) -> alcance::Pilha {
@@ -458,7 +458,7 @@ impl Server {
 
     /// A impressão digital lida direto do banco, sem subir servidor.
     ///
-    /// É o que `seeled convite` precisa: o operador está com o Dogma parado
+    /// É o que `seeled convite` precisa: o operador está com o servidor parado
     /// quando gera um convite, e o link tem de carregar a mesma impressão que
     /// o servidor vai apresentar depois.
     ///
@@ -474,14 +474,14 @@ impl Server {
         Ok(seele_proto::transport::certificate_fingerprint(&cert))
     }
 
-    /// A política de admissão deste Dogma.
+    /// A política de admissão deste server.
     ///
     /// # Errors
     ///
     /// Falha se o banco não responder.
     pub fn politica_de_admissao(&self) -> Result<admissao::Politica> {
         let guard = self
-            .dogma
+            .server
             .persistence
             .try_lock()
             .map_err(|_| anyhow::anyhow!("o banco está ocupado"))?;
@@ -499,7 +499,7 @@ impl Server {
         while let Some(incoming) = self.endpoint.accept().await {
             let config = Arc::clone(&self.config);
             let registry = Arc::clone(&self.registry);
-            let dogma = Arc::clone(&self.dogma);
+            let server = Arc::clone(&self.server);
             let voice_rooms = Arc::clone(&self.voice_rooms);
 
             tokio::spawn(async move {
@@ -513,7 +513,7 @@ impl Server {
                 let peer = connection.remote_address();
                 tracing::info!(%peer, "pattern orange");
 
-                if let Err(error) = session::serve(connection, config, registry, dogma, voice_rooms).await
+                if let Err(error) = session::serve(connection, config, registry, server, voice_rooms).await
                 {
                     tracing::info!(%peer, %error, "session closed");
                 }
@@ -524,8 +524,8 @@ impl Server {
 
     /// Borrows the shared state, for tests and for tooling.
     #[must_use]
-    pub fn dogma(&self) -> &Arc<dogma::Dogma> {
-        &self.dogma
+    pub fn server(&self) -> &Arc<server::Server> {
+        &self.server
     }
 
     /// How many messages PERSISTENCE holds on a Line.
@@ -538,7 +538,7 @@ impl Server {
     ///
     /// Fails if the database is busy or does not answer.
     pub async fn quantas_mensagens(&self, line: seele_proto::ids::LineId) -> Result<u64> {
-        let mut guard = self.dogma.persistence.lock().await;
+        let mut guard = self.server.persistence.lock().await;
         persistence::messages::Messages::new(&mut guard).count(line)
     }
 
@@ -550,7 +550,7 @@ impl Server {
     /// # Why this exists, and why it is not `Persistence::connection()`
     ///
     /// `docs/pendencias.md` #1 is a delivery bug, and a delivery bug has two
-    /// legs: what the Dogma **took in** and what it **handed out**. Measuring
+    /// legs: what the server **took in** and what it **handed out**. Measuring
     /// only the second leg cannot tell a message that was never stored from one
     /// that was stored and never sent, and those two have nothing in common but
     /// the symptom. So a test needs to see the first leg.
@@ -575,7 +575,7 @@ impl Server {
         line: seele_proto::ids::LineId,
         limite: u16,
     ) -> Result<Vec<persistence::messages::StoredMessage>> {
-        let mut guard = self.dogma.persistence.lock().await;
+        let mut guard = self.server.persistence.lock().await;
         persistence::messages::Messages::new(&mut guard).history(line, None, limite)
     }
 
@@ -604,28 +604,28 @@ mod tests {
     use crate::persistence::channels::Channels;
     use crate::persistence::{Persistence, Location};
 
-    fn born(config: &DogmaConfig) -> Persistence {
+    fn born(config: &ServerConfig) -> Persistence {
         let mut persistence = Persistence::open(&config.database).expect("open");
         seed(&mut persistence, config).expect("seed");
         persistence
     }
 
     #[test]
-    fn a_new_dogma_opens_with_somewhere_to_go() {
-        // A Dogma with na sala de voz offers nowhere to speak and no Line to write in.
+    fn a_new_server_opens_with_somewhere_to_go() {
+        // A server with na sala de voz offers nowhere to speak and no Line to write in.
         // The person who pressed HOSPEDAR AQUI would look at an empty list with
-        // no way to tell a working Dogma from a broken one — and "hospede você
+        // no way to tell a working server from a broken one — and "hospede você
         // mesmo" would be a claim rather than a thing that happens.
-        let config = DogmaConfig::default();
+        let config = ServerConfig::default();
         let persistence = born(&config);
         let channels = Channels::new(&persistence);
 
         let lines = channels.lines().expect("lines");
-        assert_eq!(lines.len(), 1, "a Dogma opened with no Line: {lines:?}");
+        assert_eq!(lines.len(), 1, "a server opened with no Line: {lines:?}");
         assert_eq!(lines[0].name, "geral");
 
         let voice_rooms = channels.voice_rooms().expect("voice_rooms");
-        assert_eq!(voice_rooms.len(), 1, "a Dogma opened with na sala de voz: {voice_rooms:?}");
+        assert_eq!(voice_rooms.len(), 1, "a server opened with na sala de voz: {voice_rooms:?}");
         assert_eq!(voice_rooms[0].name, config.voice_room_name);
         assert_eq!(voice_rooms[0].limit, config.voice_room_limit);
         assert_eq!(
@@ -641,12 +641,12 @@ mod tests {
 
     #[test]
     fn a_second_boot_does_not_add_a_second_set_of_rooms() {
-        // `seed` runs on every boot. Not being idempotent would mean a Dogma
+        // `seed` runs on every boot. Not being idempotent would mean a server
         // that has been restarted twenty times shows twenty `geral`s.
         let directory = tempfile::tempdir().expect("tempdir");
-        let config = DogmaConfig {
+        let config = ServerConfig {
             database: Location::File(directory.path().join("dogma.db")),
-            ..DogmaConfig::default()
+            ..ServerConfig::default()
         };
 
         drop(born(&config));
@@ -661,12 +661,12 @@ mod tests {
     fn a_renamed_opening_voice_room_keeps_its_new_name_across_a_restart() {
         // The seed and `RenameVoiceRoom` write the same row, and a seed that
         // overwrote would undo the rename on the next restart — silently, and
-        // only for the room the Dogma came with, which is the hardest kind of
+        // only for the room the server came with, which is the hardest kind of
         // bug to believe when somebody reports it.
         let directory = tempfile::tempdir().expect("tempdir");
-        let config = DogmaConfig {
+        let config = ServerConfig {
             database: Location::File(directory.path().join("dogma.db")),
-            ..DogmaConfig::default()
+            ..ServerConfig::default()
         };
 
         let persistence = born(&config);
@@ -692,9 +692,9 @@ mod tests {
         // name, same identifier, empty — the product contradicting its own
         // confirmation.
         let directory = tempfile::tempdir().expect("tempdir");
-        let config = DogmaConfig {
+        let config = ServerConfig {
             database: Location::File(directory.path().join("dogma.db")),
-            ..DogmaConfig::default()
+            ..ServerConfig::default()
         };
 
         let persistence = born(&config);
@@ -716,12 +716,12 @@ mod tests {
     fn a_destroyed_opening_voice_room_does_not_come_back_at_the_next_boot() {
         // The same for the voice room, which the seed also writes by identifier. It
         // takes a second room to get here at all, because the last voice room is
-        // refused — and that is the shape a real Dogma has when somebody
+        // refused — and that is the shape a real server has when somebody
         // destroys the one it came with: they made theirs first.
         let directory = tempfile::tempdir().expect("tempdir");
-        let config = DogmaConfig {
+        let config = ServerConfig {
             database: Location::File(directory.path().join("dogma.db")),
-            ..DogmaConfig::default()
+            ..ServerConfig::default()
         };
 
         let persistence = born(&config);
@@ -744,15 +744,15 @@ mod tests {
     }
 
     #[test]
-    fn a_dogma_seeded_by_an_older_build_is_not_seeded_twice() {
+    fn a_server_seeded_by_an_older_build_is_not_seeded_twice() {
         // The upgrade path. A database from before the flag has its rooms and
         // no flag; the first boot on this code has to write the flag and leave
         // the rooms exactly as they are, which is what `INSERT OR IGNORE` was
         // already doing on its own.
         let directory = tempfile::tempdir().expect("tempdir");
-        let config = DogmaConfig {
+        let config = ServerConfig {
             database: Location::File(directory.path().join("dogma.db")),
-            ..DogmaConfig::default()
+            ..ServerConfig::default()
         };
 
         let persistence = born(&config);

@@ -197,7 +197,7 @@
   display: inline-block;
 }
 
-/* A frase do aviso: `operator_text` quando o Dogma mandou uma, e a frase da
+/* A frase do aviso: `operator_text` quando o servidor mandou uma, e a frase da
    razão enumerada quando não. É o único valor desta caixa que tem dado por
    trás — ver o bloco das células, logo abaixo. */
 .alerta-frase {

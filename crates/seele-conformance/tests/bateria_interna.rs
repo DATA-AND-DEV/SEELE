@@ -7,8 +7,8 @@
 //! do próprio módulo; ao cair, o cliente ia direto para "ENLACE PERDIDO".
 //!
 //! Testes de unidade não pegam isso — cada unidade passa. Este teste derruba o
-//! Dogma de verdade, confere que a sessão entra na bateria em vez de acabar,
-//! sobe o Dogma de novo na mesma porta, e confere que ela volta sozinha.
+//! servidor de verdade, confere que a sessão entra na bateria em vez de acabar,
+//! sobe o servidor de novo na mesma porta, e confere que ela volta sozinha.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -21,20 +21,20 @@ use seele_core::enlace::{Aviso, Destino, Enlace, Motivo};
 use seele_core::{Link, MemoryPinStore};
 use seele_proto::ids::{VoiceRoomId, ClientMessageId, LineId};
 use seele_server::persistence::Location;
-use seele_server::{DogmaConfig, Server};
+use seele_server::{ServerConfig, Daemon};
 
 const VOICE_ROOM: u32 = 1;
 const LINE: u32 = 1;
 
-/// Sobe um Dogma numa porta escolhida — a mesma na segunda vez.
-async fn dogma(porta: u16, banco: Location) -> Result<(SocketAddr, Arc<Server>)> {
-    let config = DogmaConfig {
+/// Sobe um servidor numa porta escolhida — a mesma na segunda vez.
+async fn server(porta: u16, banco: Location) -> Result<(SocketAddr, Arc<Daemon>)> {
+    let config = ServerConfig {
         name: "Terceira Tóquio".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], porta)),
         database: banco,
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let servidor = Arc::new(Server::bind(config).await?);
+    let servidor = Arc::new(Daemon::bind(config).await?);
     let endereco = servidor.local_addr()?;
     let aceitando = Arc::clone(&servidor);
     tokio::spawn(async move {
@@ -71,15 +71,15 @@ where
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn o_dogma_cai_e_a_sessao_entra_na_bateria_em_vez_de_acabar() -> Result<()> {
-    // O banco em arquivo, e não em memória: o Dogma que sobe depois tem que ser
-    // o mesmo Dogma, com o mesmo certificado. Um certificado novo pareceria uma
+async fn o_server_cai_e_a_sessao_entra_na_bateria_em_vez_de_acabar() -> Result<()> {
+    // O banco em arquivo, e não em memória: o servidor que sobe depois tem que ser
+    // o mesmo servidor, com o mesmo certificado. Um certificado novo pareceria uma
     // troca de chave ao cliente, que é o alerta do ADR 0003 e não uma
     // reconexão.
     let pasta = tempfile::tempdir()?;
     let banco = pasta.path().join("dogma.db");
 
-    let (endereco, servidor) = dogma(0, Location::File(banco.clone())).await?;
+    let (endereco, servidor) = server(0, Location::File(banco.clone())).await?;
     let porta = endereco.port();
 
     let mut enlace = Enlace::conectar(
@@ -92,7 +92,7 @@ async fn o_dogma_cai_e_a_sessao_entra_na_bateria_em_vez_de_acabar() -> Result<()
     enlace.abrir_linha(LineId(LINE)).await?;
     assert_eq!(enlace.estado(), Link::Online);
 
-    // ---- o Dogma cai
+    // ---- o servidor cai
     servidor.shutdown();
     servidor.wait_idle().await;
     drop(servidor);
@@ -122,8 +122,8 @@ async fn o_dogma_cai_e_a_sessao_entra_na_bateria_em_vez_de_acabar() -> Result<()
         "a contagem não começou perto de cinco minutos: {restante:?}"
     );
 
-    // ---- o Dogma volta, no mesmo endereço e com o mesmo banco
-    let (_, de_novo) = dogma(porta, Location::File(banco)).await?;
+    // ---- o servidor volta, no mesmo endereço e com o mesmo banco
+    let (_, de_novo) = server(porta, Location::File(banco)).await?;
 
     let voltou = esperar(&mut enlace, Duration::from_secs(30), |aviso| {
         matches!(aviso, Aviso::Reconectado { .. })
@@ -131,7 +131,7 @@ async fn o_dogma_cai_e_a_sessao_entra_na_bateria_em_vez_de_acabar() -> Result<()
     .await;
     assert!(
         voltou.is_some(),
-        "a sessão não voltou sozinha depois que o Dogma subiu"
+        "a sessão não voltou sozinha depois que o servidor subiu"
     );
     assert_eq!(enlace.estado(), Link::Online);
 
@@ -151,7 +151,7 @@ async fn o_que_a_pessoa_escolheu_volta_com_ela() -> Result<()> {
     // quê.
     let pasta = tempfile::tempdir()?;
     let banco = pasta.path().join("dogma.db");
-    let (endereco, servidor) = dogma(0, Location::File(banco.clone())).await?;
+    let (endereco, servidor) = server(0, Location::File(banco.clone())).await?;
     let porta = endereco.port();
 
     let mut enlace = Enlace::conectar(
@@ -169,7 +169,7 @@ async fn o_que_a_pessoa_escolheu_volta_com_ela() -> Result<()> {
     drop(servidor);
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    let (_, de_novo) = dogma(porta, Location::File(banco)).await?;
+    let (_, de_novo) = server(porta, Location::File(banco)).await?;
 
     let voltou = esperar(&mut enlace, Duration::from_secs(30), |aviso| {
         matches!(aviso, Aviso::Reconectado { .. })
@@ -186,7 +186,7 @@ async fn o_que_a_pessoa_escolheu_volta_com_ela() -> Result<()> {
     );
 
     // Falar de novo prova que a sala de voz e a Linha foram refeitos: sem `join_line`
-    // o Dogma aceita a mensagem e não a devolve para ninguém.
+    // o servidor aceita a mensagem e não a devolve para ninguém.
     enlace
         .dizer(LineId(LINE), "de volta".to_owned(), ClientMessageId(1))
         .await?;
@@ -210,7 +210,7 @@ async fn o_que_a_pessoa_escolheu_volta_com_ela() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn sair_encerra_sem_esperar_a_bateria() -> Result<()> {
-    let (endereco, servidor) = dogma(0, Location::Memory).await?;
+    let (endereco, servidor) = server(0, Location::Memory).await?;
     let mut enlace = Enlace::conectar(
         destino(endereco),
         ed25519_dalek::SigningKey::from_bytes(&[44; 32]),
@@ -238,7 +238,7 @@ async fn as_tentativas_aparecem_enquanto_a_bateria_corre() -> Result<()> {
     // `specs/07-tema-evangelion.md` pede "tentativas de reconexão listadas". Um
     // contador que fica em zero enquanto o programa tenta é pior que não ter:
     // parece que ninguém está fazendo nada.
-    let (endereco, servidor) = dogma(0, Location::Memory).await?;
+    let (endereco, servidor) = server(0, Location::Memory).await?;
     let mut enlace = Enlace::conectar(
         destino(endereco),
         ed25519_dalek::SigningKey::from_bytes(&[45; 32]),

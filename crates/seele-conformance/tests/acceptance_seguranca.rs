@@ -1,4 +1,4 @@
-//! Os pontos de segurança que valem para um Dogma exposto a outras pessoas.
+//! Os pontos de segurança que valem para um servidor exposto a outras pessoas.
 //!
 //! Cada teste aqui corresponde a algo que estava errado ou ausente até M5, e
 //! todos foram escritos depois de verificar o comportamento antigo — não são
@@ -14,18 +14,18 @@ use ed25519_dalek::SigningKey;
 use seele_core::{Client, MemoryPinStore, PinDecision, PinStore};
 use seele_proto::ids::VoiceRoomId;
 use seele_server::persistence::{Persistence, Location};
-use seele_server::{admissao, DogmaConfig, Server};
+use seele_server::{admissao, ServerConfig, Daemon};
 
 const VOICE_ROOM: VoiceRoomId = VoiceRoomId(1);
 
-async fn subir(caminho: &std::path::Path) -> Result<(SocketAddr, Arc<Server>)> {
-    let config = DogmaConfig {
+async fn subir(caminho: &std::path::Path) -> Result<(SocketAddr, Arc<Daemon>)> {
+    let config = ServerConfig {
         name: "Terceira Tóquio".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::File(caminho.to_path_buf()),
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let server = Arc::new(Server::bind(config).await?);
+    let server = Arc::new(Daemon::bind(config).await?);
     let address = server.local_addr()?;
     let aceitando = Arc::clone(&server);
     tokio::spawn(async move {
@@ -44,7 +44,7 @@ async fn conectar(
     Client::connect(
         address,
         "localhost",
-        "dogma-de-teste",
+        "server-de-teste",
         apelido,
         &SigningKey::from_bytes(&[semente; 32]),
         pins,
@@ -53,14 +53,14 @@ async fn conectar(
     .await
 }
 
-/// Reiniciar o Dogma não pode expulsar quem já se conectou.
+/// Reiniciar o servidor não pode expulsar quem já se conectou.
 ///
 /// O certificado era gerado a cada boot, então todo reinício trocava a chave e
 /// todo cliente via o alerta bloqueante do ADR 0003 — o aviso reservado para
 /// ataque, disparado por um reinício de rotina. Isso não só quebra a conexão:
 /// ensina a ignorar o único aviso que não pode ser ignorado.
 #[tokio::test]
-async fn reiniciar_o_dogma_nao_troca_a_chave() -> Result<()> {
+async fn reiniciar_o_server_nao_troca_a_chave() -> Result<()> {
     let pasta = tempfile::tempdir()?;
     let banco = pasta.path().join("seele.db");
 
@@ -83,7 +83,7 @@ async fn reiniciar_o_dogma_nao_troca_a_chave() -> Result<()> {
     assert_eq!(
         servidor.fingerprint(),
         impressao_inicial,
-        "o Dogma trocou de identidade ao reiniciar"
+        "o servidor trocou de identidade ao reiniciar"
     );
 
     let cliente = conectar(endereco, "ayanami", 1, pins, None)
@@ -98,13 +98,13 @@ async fn reiniciar_o_dogma_nao_troca_a_chave() -> Result<()> {
     Ok(())
 }
 
-/// Um Dogma com senha recusa quem não a tem.
+/// Um servidor com senha recusa quem não a tem.
 #[tokio::test]
-async fn a_senha_do_dogma_fecha_a_porta() -> Result<()> {
+async fn a_senha_do_server_fecha_a_porta() -> Result<()> {
     let pasta = tempfile::tempdir()?;
     let banco = pasta.path().join("seele.db");
 
-    // O operador define a senha com o Dogma parado.
+    // O operador define a senha com o servidor parado.
     {
         let mut persistence = Persistence::open(&Location::File(banco.clone()))?;
         admissao::definir_senha(&mut persistence, Some("terceiro impacto"))?;
@@ -199,7 +199,7 @@ async fn a_senha_do_voice_room_e_conferida() -> Result<()> {
     let banco = pasta.path().join("seele.db");
 
     {
-        // O Dogma semeia a sala de voz ao subir, então sobe uma vez antes de trancar.
+        // O servidor semeia a sala de voz ao subir, então sobe uma vez antes de trancar.
         let (_, servidor) = subir(&banco).await?;
         servidor.shutdown();
         let mut persistence = Persistence::open(&Location::File(banco.clone()))?;
@@ -247,9 +247,9 @@ async fn aguardar_recusa(cliente: &mut Client) {
     }
 }
 
-/// Um Dogma sem configuração continua aberto — e isso é escolha, não descuido.
+/// Um servidor sem configuração continua aberto — e isso é escolha, não descuido.
 #[tokio::test]
-async fn um_dogma_novo_aceita_qualquer_um() -> Result<()> {
+async fn um_server_novo_aceita_qualquer_um() -> Result<()> {
     let pasta = tempfile::tempdir()?;
     let (endereco, servidor) = subir(&pasta.path().join("seele.db")).await?;
 
@@ -275,7 +275,7 @@ async fn um_dogma_novo_aceita_qualquer_um() -> Result<()> {
 // A portaria — ADR 0030. TOFU aplicado a gente.
 // ---------------------------------------------------------------------------
 
-/// A razão que o Dogma deu, ou o pânico que diz o que ele deu no lugar.
+/// A razão que o servidor deu, ou o pânico que diz o que ele deu no lugar.
 ///
 /// Escrito assim, e não como `is_err()`, porque a portaria inteira existe para
 /// distinguir três respostas. Um teste que só perguntasse se falhou passaria com
@@ -284,7 +284,7 @@ async fn um_dogma_novo_aceita_qualquer_um() -> Result<()> {
 fn razao(erro: Option<seele_core::ConnectError>) -> seele_proto::control::DisconnectReason {
     match erro {
         Some(seele_core::ConnectError::Refused { reason }) => reason,
-        outra => panic!("esperava uma recusa enumerada do Dogma, veio {outra:?}"),
+        outra => panic!("esperava uma recusa enumerada do servidor, veio {outra:?}"),
     }
 }
 
@@ -297,7 +297,7 @@ fn impressao_de(semente: u8) -> String {
     )
 }
 
-/// Um Dogma com portaria não deixa ninguém entrar por um caminho lateral.
+/// Um servidor com portaria não deixa ninguém entrar por um caminho lateral.
 ///
 /// O guarda central do ADR 0030, e ele encena cada tentativa em vez de ler o
 /// código. Cada bloco abaixo é uma porta dos fundos que alguém tentaria de
@@ -306,7 +306,7 @@ fn impressao_de(semente: u8) -> String {
 /// portaria. Se atravessasse, a camada mais forte teria virado a mais fraca —
 /// bastaria vazar um convite para pular a decisão de quem hospeda.
 #[tokio::test]
-async fn um_dogma_com_portaria_nao_admite_ninguem_por_um_caminho_lateral() -> Result<()> {
+async fn um_server_com_portaria_nao_admite_ninguem_por_um_caminho_lateral() -> Result<()> {
     use seele_proto::control::DisconnectReason;
     use seele_server::portaria;
 
@@ -412,9 +412,9 @@ async fn um_dogma_com_portaria_nao_admite_ninguem_por_um_caminho_lateral() -> Re
     // e dá credencial recusada; mesmo fechando o app dá credencial recusada».
     //
     // O que acontece do outro lado é isto: o app que já entrou uma vez guarda o
-    // Dogma na lista de visitados e reconecta **sem** o convite — ele era de uso
+    // servidor na lista de visitados e reconecta **sem** o convite — ele era de uso
     // único e já foi gasto — e sem a senha, que ninguém digitou. A política não
-    // tem memória: com o Dogma fechado ela exige segredo de todo mundo, sempre.
+    // tem memória: com o servidor fechado ela exige segredo de todo mundo, sempre.
     //
     // A portaria **é** a credencial durável de uma pessoa. Se aprovar não
     // dispensar o segredo na volta, aprovar não serviu para nada: a pessoa fica

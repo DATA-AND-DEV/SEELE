@@ -1,4 +1,4 @@
-//! O ícone de um Dogma que **já tinha um** chega a quem acabou de conectar?
+//! O ícone de um servidor que **já tinha um** chega a quem acabou de conectar?
 //!
 //! # Por que este arquivo existe
 //!
@@ -23,7 +23,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use seele_ffi::{ConnectConfig, Plug, PlugError};
 use seele_server::persistence::{Persistence, Location};
-use seele_server::{DogmaConfig, Server};
+use seele_server::{ServerConfig, Daemon};
 
 /// Um PNG quadrado e opaco, do tamanho que o protocolo aceita.
 fn png(lado: u32) -> Vec<u8> {
@@ -36,7 +36,7 @@ fn png(lado: u32) -> Vec<u8> {
 /// O menor PNG válido que dá para escrever à mão, no lado pedido.
 ///
 /// À mão e não com um crate de imagem: o que este teste precisa é de bytes que
-/// `check_dogma_icon` aceite, e trazer um decodificador para produzir oito
+/// `check_server_icon` aceite, e trazer um decodificador para produzir oito
 /// dezenas de bytes seria pagar caro por uma constante.
 fn image_de_teste(lado: u32) -> Vec<u8> {
     let mut png = Vec::new();
@@ -73,14 +73,14 @@ fn crc(dados: &[u8]) -> u32 {
     valor ^ 0xFFFF_FFFF
 }
 
-async fn dogma(arquivo: std::path::PathBuf) -> Result<(SocketAddr, Arc<Server>)> {
-    let config = DogmaConfig {
+async fn server(arquivo: std::path::PathBuf) -> Result<(SocketAddr, Arc<Daemon>)> {
+    let config = ServerConfig {
         name: "Terceira Tóquio".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::File(arquivo),
-        ..DogmaConfig::default()
+        ..ServerConfig::default()
     };
-    let servidor = Arc::new(Server::bind(config).await?);
+    let servidor = Arc::new(Daemon::bind(config).await?);
     let endereco = servidor.local_addr()?;
     let aceitando = Arc::clone(&servidor);
     tokio::spawn(async move {
@@ -106,7 +106,7 @@ fn conectar(endereco: SocketAddr, casa: &str) -> Result<Arc<Plug>, PlugError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn quem_conecta_recebe_o_icone_que_o_dogma_ja_tinha() -> Result<()> {
+async fn quem_conecta_recebe_o_icone_que_o_server_ja_tinha() -> Result<()> {
     let pasta = std::env::temp_dir().join(format!("seele-icone-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&pasta);
     std::fs::create_dir_all(&pasta)?;
@@ -120,7 +120,7 @@ async fn quem_conecta_recebe_o_icone_que_o_dogma_ja_tinha() -> Result<()> {
         seele_server::persistence::aparencia::definir_icone(&persistence, Some(&imagem))?;
     }
 
-    let (endereco, servidor) = dogma(banco).await?;
+    let (endereco, servidor) = server(banco).await?;
     let casa = pasta.join("casa");
     let plug = {
         let casa = casa.to_string_lossy().into_owned();
@@ -145,7 +145,7 @@ async fn quem_conecta_recebe_o_icone_que_o_dogma_ja_tinha() -> Result<()> {
     );
 
     assert_eq!(
-        plug.dogma_icon().as_deref(),
+        plug.server_icon().as_deref(),
         Some(imagem.as_slice()),
         "a revisão andou e os bytes não vieram"
     );

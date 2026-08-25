@@ -12,7 +12,7 @@ gráfico e as duas ferramentas de terminal.
 Dentro de cada um vão três programas: **`SEELE`**, o cliente gráfico, que tem um
 botão **HOSPEDAR AQUI** e com o qual você nunca precisa abrir um terminal;
 **`plug`**, o cliente de terminal; e **`seeled`**, o servidor, para quem quer um
-Dogma no ar o tempo todo — só uma das máquinas precisa dele.
+Server no ar o tempo todo — só uma das máquinas precisa dele.
 
 Os outros arquivos desta página não são para instalar. O `SHA256SUMS` serve para
 conferir que o download chegou inteiro; os `.sig` e o `latest.json` são como o

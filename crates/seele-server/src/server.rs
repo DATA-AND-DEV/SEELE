@@ -1,4 +1,4 @@
-//! The Dogma's shared state: storage, the write batch, and the event bus.
+//! The server's shared state: storage, the write batch, and the event bus.
 //!
 //! `specs/04-servidor-seele.md` puts voice room state in a task per voice room with no global
 //! lock. Text is different: it is one durable log per Line, and the thing worth
@@ -35,7 +35,7 @@ pub const FLUSH_INTERVAL: Duration = Duration::from_millis(200);
 /// Events every connection may care about.
 ///
 /// Broadcast to all, filtered per connection. `specs/04-servidor-seele.md` sizes
-/// a Dogma at ~50 people, so filtering at the edge costs nothing and keeps the
+/// a server at ~50 people, so filtering at the edge costs nothing and keeps the
 /// bus from needing to know who is subscribed to what.
 #[derive(Debug, Clone)]
 pub enum Event {
@@ -73,7 +73,7 @@ pub enum Event {
         /// Who.
         person: PersonId,
     },
-    /// A person connected to the Dogma, whatever room they are in.
+    /// A person connected to the server, whatever room they are in.
     PersonPresent {
         /// Who, and what they are called.
         quem: Occupant,
@@ -115,7 +115,7 @@ pub enum Event {
         name: String,
     },
 
-    // ---- what the Dogma calls itself ----
+    // ---- what the server calls itself ----
     //
     // The same shape as `VoiceRoomRenamed`, one level up: committed first, announced
     // after, forwarded to every connection including the one that asked.
@@ -125,18 +125,18 @@ pub enum Event {
     // window, so a rename that only reached the next handshake would put the new
     // name on the screen of whoever typed it and the old one on everybody
     // else's — which is the exact failure ADR 0032 says not to ship.
-    /// The Dogma was renamed.
-    DogmaRenamed {
+    /// The server was renamed.
+    ServerRenamed {
         /// What it is called now.
         name: String,
     },
-    /// The Dogma's icon changed, or was taken down.
+    /// The server's icon changed, or was taken down.
     ///
     /// The bytes travel on the bus rather than a "go and read it again": the bus
     /// is what every connection is already draining, and telling fifty sessions
     /// to each take the PERSISTENCE lock and read the same 8 KiB row would be fifty
     /// reads of a value one reader already has in its hand.
-    DogmaIconChanged {
+    ServerIconChanged {
         /// The picture, or `None` when it was taken down.
         icon: Option<Vec<u8>>,
     },
@@ -145,7 +145,7 @@ pub enum Event {
     //
     // These two are the odd ones on this bus: every other event is something a
     // connection **forwards** to its client, and these are something a
-    // connection **does to itself**. They are here anyway because a Dogma has no
+    // connection **does to itself**. They are here anyway because a server has no
     // other way for one session to reach another — there is no map of live
     // sessions, deliberately, since `specs/04-servidor-seele.md` puts voice room state
     // in a task per voice room with no global lock. The bus already reaches every
@@ -219,11 +219,11 @@ pub enum Event {
     ///
     /// **N**, e ele é um termo do teto do §5.1 —
     /// `caminho de quem hospeda × 60% ÷ N` — que até aqui só existia dentro do
-    /// Dogma. Sem ele no fio, quem compartilha aplica um `min` com uma perna
+    /// servidor. Sem ele no fio, quem compartilha aplica um `min` com uma perna
     /// que inventa; com ele, a mesma conta é feita nas duas pontas a partir do
     /// mesmo número.
     ///
-    /// Mandado pelo [`crate::voice_room::VoiceRoom`], que é o único lugar deste Dogma que
+    /// Mandado pelo [`crate::voice_room::VoiceRoom`], que é o único lugar deste servidor que
     /// sabe quem está na sala sem perguntar a ninguém, e no mesmo instante em
     /// que ele refaz o teto. Dois donos de N seriam duas contas discordando no
     /// primeiro dia ruim.
@@ -238,7 +238,7 @@ pub enum Event {
     /// Alguém que assiste não tem de que predizer e pediu um quadro-chave.
     ///
     /// Endereçado a um pessoa e entregue a todos, como o [`Self::SessionEnded`]
-    /// — um Dogma não tem outra maneira de uma sessão alcançar outra, e o
+    /// — um servidor não tem outra maneira de uma sessão alcançar outra, e o
     /// barramento já é o que toda conexão drena.
     KeyFrameRequested {
         /// Qual transmissão.
@@ -438,12 +438,12 @@ pub struct Occupant {
     pub ssrc: Ssrc,
 }
 
-/// Quem está conectado neste Dogma agora, sentado numa sala ou não.
+/// Quem está conectado neste servidor agora, sentado numa sala ou não.
 ///
 /// # Por que não bastava a ocupação
 ///
 /// [`Occupancy`] responde «quem está em qual sala», e por muito tempo era a
-/// única tabela de presença que existia — então quem entrava no Dogma e ficava
+/// única tabela de presença que existia — então quem entrava no servidor e ficava
 /// fora das salas não existia para mais ninguém. `PersonJoined` carrega uma sala de voz
 /// porque anuncia sentar-se num; não havia mensagem para estar aqui. O cliente
 /// escreveu isso num comentário e seguiu em frente: «não há mensagem na fita
@@ -580,7 +580,7 @@ impl Occupancy {
 /// on this connection at this second".
 ///
 /// Process-wide rather than per-session on purpose: an operator reading a log
-/// wants to know whether this Dogma has ever done it at all, and a counter that
+/// wants to know whether this server has ever done it at all, and a counter that
 /// dies with the connection that incremented it answers that with silence.
 #[derive(Debug, Default)]
 pub struct Atrasos {
@@ -616,8 +616,8 @@ pub struct WriteRequest {
     pub message: PendingMessage,
 }
 
-/// Everything a connection needs from the Dogma.
-pub struct Dogma {
+/// Everything a connection needs from the server.
+pub struct Server {
     /// Persistent state. One connection, one mutex — SQLite has one writer.
     pub persistence: Arc<Mutex<Persistence>>,
     /// The event bus.
@@ -641,16 +641,16 @@ pub struct Dogma {
     pub telas: Arc<Mutex<Telas>>,
     /// The attachment store, its ceiling, and the byte budget. ADR 0027.
     ///
-    /// `None` when this Dogma has nowhere to keep blobs, which is the in-memory
+    /// `None` when this server has nowhere to keep blobs, which is the in-memory
     /// case. A transfer then meets `AttachmentRefusal::Unavailable` — a
     /// sentence — rather than a directory appearing wherever the process
     /// started.
     pub anexos: Option<Arc<crate::transfer::Vault>>,
     /// Quanto a subida desta máquina carrega, em bits por segundo, ou `None`.
     ///
-    /// A cópia de `DogmaConfig::caminho_bps` que o resto do daemon alcança, e
+    /// A cópia de `ServerConfig::caminho_bps` que o resto do daemon alcança, e
     /// ela mora aqui pela mesma razão que [`Self::telas`]: é um fato sobre
-    /// **este Dogma** que duas partes distantes precisam, e a alternativa era
+    /// **este servidor** que duas partes distantes precisam, e a alternativa era
     /// passar a configuração inteira por assinaturas que já estão cheias.
     ///
     /// Duas leituras saem daqui e elas discordam de propósito — a admissão de
@@ -681,7 +681,7 @@ pub fn spawn_writer(
                 request = rx.recv() => {
                     match request {
                         Some(request) => pending.push(request.message),
-                        // The Dogma is shutting down. Flush what is left rather
+                        // The server is shutting down. Flush what is left rather
                         // than dropping messages the clients believe are queued.
                         None => {
                             flush(&persistence, &events, &mut pending).await;
@@ -729,7 +729,7 @@ async fn flush(
     }
 }
 
-impl Dogma {
+impl Server {
     /// Queues a message for the next batch.
     ///
     /// Returns once it is queued, not once it is durable. The caller must not
@@ -803,7 +803,7 @@ mod tests {
 
     #[test]
     fn the_sweeper_frees_expired_seats() {
-        // Without this a Dogma slowly fills with seats held for people who are
+        // Without this a server slowly fills with seats held for people who are
         // never coming back, and specs/04 caps a voice room at a member limit.
         let mut slots = Slots::default();
         let now = instant();
@@ -836,7 +836,7 @@ mod tests {
     }
 
     #[test]
-    fn the_whole_dogma_is_readable_at_once_and_not_one_room_at_a_time() {
+    fn the_whole_server_is_readable_at_once_and_not_one_room_at_a_time() {
         // The half of gap G15 that was missing. `in_voice_room` answered "who is in
         // the room I am walking into"; nothing answered "who is in the other
         // four", and the v3 layout draws those four with their occupants under

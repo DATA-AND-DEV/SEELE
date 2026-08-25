@@ -508,7 +508,7 @@ segunda máquina, que é por que `seele-server` é biblioteca além de binário.
 | `the_first_connection_pins_the_certificate` | TOFU do ADR 0003 |
 | `a_second_connection_reuses_the_pin` | o pin persiste entre conexões |
 | `a_ping_comes_back_as_a_pong` | base do RTT da Taxa de Sincronização |
-| `the_session_names_the_dogma_and_its_voice_room` | a `Sessao` traz a árvore de que a casca desenha a primeira tela |
+| `the_session_names_the_server_and_its_voice_room` | a `Sessao` traz a árvore de que a casca desenha a primeira tela |
 
 Fuzzing: 29,4 milhões de execuções no parser de controle e 70,8 milhões no de
 mídia, zero crashes — depois de o primeiro achar o bug de NaN.

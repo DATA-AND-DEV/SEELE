@@ -74,7 +74,7 @@ pub fn disconnect(reason: DisconnectReason) -> &'static str {
         DisconnectReason::HandshakeTimeout => "TEMPO ESGOTADO NA SINCRONIZAÇÃO INICIAL",
         DisconnectReason::Kicked => "DESCONECTADO POR UM OPERADOR",
         DisconnectReason::Banned => "ACESSO BARRADO POR UM OPERADOR",
-        DisconnectReason::DogmaFull => "SERVIDOR LOTADO",
+        DisconnectReason::ServerFull => "SERVIDOR LOTADO",
         DisconnectReason::ScheduledMaintenance => "MANUTENÇÃO PROGRAMADA",
         DisconnectReason::ServerShuttingDown => "O SERVIDOR ESTÁ ENCERRANDO",
         DisconnectReason::Timeout => "ENLACE PERDIDO",
@@ -97,7 +97,7 @@ pub fn disconnect(reason: DisconnectReason) -> &'static str {
         DisconnectReason::AdmissionDenied => "QUEM HOSPEDA RECUSOU A SUA ENTRADA",
         // A única recusa deste conjunto que a pessoa conserta sozinha, e por
         // isso ela diz o que fazer em vez de só o que houve.
-        DisconnectReason::NicknameTaken => "ESTE APELIDO É DE OUTRA PESSOA NESTE DOGMA",
+        DisconnectReason::NicknameTaken => "ESTE APELIDO É DE OUTRA PESSOA NESTE SERVER",
     }
 }
 
@@ -112,7 +112,7 @@ pub fn worth_retrying(reason: DisconnectReason) -> bool {
         DisconnectReason::Timeout
         | DisconnectReason::ScheduledMaintenance
         | DisconnectReason::ServerShuttingDown
-        | DisconnectReason::DogmaFull
+        | DisconnectReason::ServerFull
         | DisconnectReason::HandshakeTimeout
         // Reconectar **é** o conserto aqui: a sessão perdeu evento e só uma
         // sincronização inteira a repõe. Tratar isto como recusa deixaria o
@@ -166,7 +166,7 @@ mod tests {
         DisconnectReason::HandshakeTimeout,
         DisconnectReason::Kicked,
         DisconnectReason::Banned,
-        DisconnectReason::DogmaFull,
+        DisconnectReason::ServerFull,
         DisconnectReason::ScheduledMaintenance,
         DisconnectReason::ServerShuttingDown,
         DisconnectReason::Timeout,

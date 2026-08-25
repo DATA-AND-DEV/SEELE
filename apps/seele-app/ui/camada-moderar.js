@@ -17,7 +17,7 @@
 //
 // Expulsar e banir são irreversíveis **para quem sofre**, e banir não tem
 // desfazer em lugar nenhum deste produto: `unban` não é verbo do protocolo, e
-// um banimento hoje só se desfaz por quem tem acesso ao arquivo do Dogma, à
+// um banimento hoje só se desfaz por quem tem acesso ao arquivo do servidor, à
 // mão, no computador que o hospeda. Isso decide a forma: é preciso uma
 // superfície larga o bastante para escrever a **consequência** antes de o ato
 // sair, com o nome de quem vai sofrê-la dentro da frase.
@@ -71,7 +71,7 @@ let caixaComEscolha = false;
 const ondeEstaOPersono = new Map();
 
 /**
- * As salas do Dogma, como estavam quando a caixa abriu.
+ * As salas do servidor, como estavam quando a caixa abriu.
  *
  * Guardadas porque o destino de uma mudança depende de **quem** está escolhido:
  * a jaula em que a pessoa já está não é destino nenhum, e quem está escolhido
@@ -79,7 +79,7 @@ const ondeEstaOPersono = new Map();
  * a cada quadro — a lista por baixo é redesenhada duas vezes por segundo, e
  * refazer as opções nesse ritmo apagaria a escolha de quem está escolhendo.
  */
-let salasDoDogma = [];
+let salasDoServer = [];
 
 /** Quantos dias vale cada opção de banimento. Vazio é para sempre. */
 const SEGUNDOS_POR_DIA = 86400;
@@ -145,14 +145,14 @@ function botaoDeRemoverMensagem(mensagem, pode) {
  * O botão que destrói um VoiceRoom, ou `null` quando não há o que oferecer.
  *
  * `may_delete_rooms` e não `may_manage_voice_rooms`, e a diferença é a decisão inteira:
- * fazer uma sala é um erro que o Dogma sobrevive, destruir uma acaba com o que
+ * fazer uma sala é um erro que o servidor sobrevive, destruir uma acaba com o que
  * outra pessoa escreveu. A `specs/04-servidor-seele.md` enumera
- * `gerenciar_voice_rooms` e `administrar_dogma` separados justamente para que exista
+ * `gerenciar_voice_rooms` e `administrar_server` separados justamente para que exista
  * um papel que ergue salas sem poder derrubá-las.
  *
  * ---- o último VoiceRoom vem desabilitado, e não escondido ----
  *
- * Um Dogma sem VoiceRoom nenhum não tem onde falar, e o Dogma recusa o pedido. Some
+ * Um servidor sem VoiceRoom nenhum não tem onde falar, e o servidor recusa o pedido. Some
  * quem tem o objeto ausente — mover sem destino, moderar sem ninguém —, e aqui o
  * objeto existe: a sala está ali, e a razão de ela não poder ir embora é uma
  * coisa que se aprende lendo, não notando uma ausência.
@@ -173,7 +173,7 @@ function botaoDeApagarVoiceRoom(voice_room, snapshot, ultimo) {
 /**
  * O botão que destrói uma Linha, ou `null` quando não há o que oferecer.
  *
- * Sem o par desabilitado do VoiceRoom: a última Linha pode ir. Um Dogma sem Linha
+ * Sem o par desabilitado do VoiceRoom: a última Linha pode ir. Um servidor sem Linha
  * nenhuma continua sendo o que este produto é — a `specs/04-servidor-seele.md`
  * faz a Linha presa a um VoiceRoom **opcional**, então uma sala de voz sem texto é
  * uma configuração que o produto já prevê. Sem VoiceRoom não há onde falar; sem
@@ -227,7 +227,7 @@ function atualizarPortaDoAlerta(snapshot) {
  */
 function desenharModeracao(snapshot) {
   ondeEstaOPersono.clear();
-  salasDoDogma = snapshot.voice_rooms;
+  salasDoServer = snapshot.voice_rooms;
 
   const quem = $("moderar-quem");
   const opcoes = [];
@@ -246,7 +246,7 @@ function desenharModeracao(snapshot) {
   }
   repovoar(quem, opcoes);
 
-  // Ninguém a moderar não é falha nem permissão que falta: é um Dogma em que
+  // Ninguém a moderar não é falha nem permissão que falta: é um servidor em que
   // todas as jaulas estão vazias, ou em que só você está dentro de uma. A frase
   // diz isso, e os três verbos somem — não ficam apagados, porque não há o que
   // explicar sobre um controle cujo objeto não existe.
@@ -264,7 +264,7 @@ function desenharModeracao(snapshot) {
   // banir, e quem só move não vê nenhum dos dois.
   $("moderar-acao-expulsar").hidden = !snapshot.may_kick;
   $("moderar-acao-banir").hidden = !snapshot.may_ban;
-  // Mover some também quando não há para onde: um Dogma de uma jaula só não
+  // Mover some também quando não há para onde: um servidor de uma jaula só não
   // tem destino, e um controle cujo objeto não existe é ruído, não lacuna.
   $("moderar-acao-mover").hidden = !snapshot.may_move_person || desenharDestinos() === 0;
 }
@@ -278,7 +278,7 @@ function desenharModeracao(snapshot) {
  */
 function desenharDestinos() {
   const escolhido = ondeEstaOPersono.get($("moderar-quem").value);
-  const destinos = salasDoDogma.filter((voice_room) => voice_room.id !== escolhido?.voice_roomId);
+  const destinos = salasDoServer.filter((voice_room) => voice_room.id !== escolhido?.voice_roomId);
   repovoar(
     $("moderar-para"),
     destinos.map((voice_room) => {
@@ -340,7 +340,7 @@ function desarmarAto() {
 // ---------------------------------------------------------------- navegação
 
 /**
- * O estado do Dogma agora, ou `null` quando não há sessão.
+ * O estado do servidor agora, ou `null` quando não há sessão.
  *
  * Toda porta desta camada começa por aqui, e nenhuma delas desenha a partir do
  * que a lista de trás mostrava: a lista é redesenhada duas vezes por segundo, e
@@ -458,9 +458,9 @@ function fecharModeracao() {
  * `mostrarFim` escolhe a tela seguinte por conta própria. Devolver o foco ao
  * botão de trás ali seria pô-lo numa tela que acabou de ser escondida, e deixar
  * a caixa aberta a faria reaparecer sobre a **próxima** sessão, armada com um
- * ato sobre alguém de um Dogma que já ficou para trás.
+ * ato sobre alguém de um servidor que já ficou para trás.
  *
- * Mesma razão e mesma forma que `abandonarDogma` e `abandonarChamada`.
+ * Mesma razão e mesma forma que `abandonarServer` e `abandonarChamada`.
  */
 function abandonarModeracao() {
   $("moderar").hidden = true;
@@ -497,7 +497,7 @@ function consequenciaDeExpulsar(quem) {
  *
  * Banir para sempre é o único ato deste produto que **nenhuma tela dele
  * desfaz**: não há verbo de `unban` no protocolo, então o que foi barrado só
- * volta pelas mãos de quem tem acesso ao arquivo do Dogma no computador que o
+ * volta pelas mãos de quem tem acesso ao arquivo do servidor no computador que o
  * hospeda. Um prazo é o único banimento que se desfaz sozinho, e a frase diz
  * qual dos dois está prestes a sair.
  */
@@ -562,7 +562,7 @@ function consequenciaDeApagarVoiceRoom(voice_room, linhaPresa) {
  * A frase de consequência de apagar uma Linha.
  *
  * Os três números são requisito e não enfeite: quantas mensagens, de quanta
- * gente, desde quando. Eles vêm de `peso_da_linha`, contados no banco do Dogma
+ * gente, desde quando. Eles vêm de `peso_da_linha`, contados no banco do servidor
  * no instante de perguntar — esta janela segura uma página de histórico e
  * chutaria para baixo por todo o passado da Linha, e um número quase certo numa
  * caixa que promete destruir mil e oitocentas mensagens é pior que nenhum.
@@ -654,7 +654,7 @@ $("lista-voice_rooms").addEventListener("click", async (evento) => {
   if (!snapshot) return;
   const voice_room = snapshot.voice_rooms.find((c) => c.id === id);
   if (!voice_room) return;
-  // A Linha presa é lida da sala de voz, e não adivinhada pelo nome: um Dogma pode ter
+  // A Linha presa é lida da sala de voz, e não adivinhada pelo nome: um servidor pode ter
   // uma Linha chamada como a sala e nenhuma ligação entre as duas.
   const presa = snapshot.lines.find((linha) => linha.id === voice_room.line) ?? null;
   abrirConfirmacao(
@@ -772,7 +772,7 @@ $("moderar-confirmar").addEventListener("click", async () => {
     return;
   }
   fecharModeracao();
-  // O pedido entrou na fila; quem responde é o Dogma, pelo mesmo evento de
+  // O pedido entrou na fila; quem responde é o servidor, pelo mesmo evento de
   // sempre. Redesenhar aqui é o que tira a pessoa da lista no quadro seguinte
   // quando ele responde depressa.
   await atualizar();

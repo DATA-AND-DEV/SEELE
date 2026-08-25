@@ -30,7 +30,7 @@
 //!
 //! Não é teoria: na primeira rede real em que isto rodou, o roteador que
 //! respondeu à busca informou WAN `192.168.0.30` — ele mesmo pendurado em outro
-//! roteador. A conferência pegou de primeira, e sem ela o Dogma teria montado
+//! roteador. A conferência pegou de primeira, e sem ela o servidor teria montado
 //! um `seele://` para um endereço aonde ninguém chega.
 //!
 //! # Por que `igd-next`, e o que ele arrasta junto
@@ -79,7 +79,7 @@ use igd_next::{PortMappingProtocol, SearchOptions};
 /// Quanto tempo de validade o mapeamento pede ao roteador.
 ///
 /// Uma hora, e não "para sempre". Um mapeamento permanente sobrevive ao
-/// processo que o pediu: se o Dogma morrer de mau jeito — queda de energia,
+/// processo que o pediu: se o servidor morrer de mau jeito — queda de energia,
 /// `kill -9`, pânico — a porta fica aberta no roteador apontando para uma
 /// máquina que não atende mais, e ninguém nunca mais a fecha. Com prazo, o pior
 /// caso se conserta sozinho em uma hora.
@@ -103,7 +103,7 @@ const PROCURA: Duration = Duration::from_secs(3);
 /// O nome que aparece na lista de encaminhamentos do roteador.
 ///
 /// Quem for olhar aquela tela merece ver de onde a regra veio.
-const DESCRICAO: &str = "SEELE Dogma";
+const DESCRICAO: &str = "SEELE server";
 
 /// Por que não deu para abrir a porta.
 ///
@@ -369,7 +369,7 @@ async fn mapear(roteador: &Gateway<Tokio>, interno: SocketAddr) -> Result<u16, F
     }
 }
 
-/// Mantém o mapeamento vivo enquanto o Dogma estiver de pé.
+/// Mantém o mapeamento vivo enquanto o servidor estiver de pé.
 ///
 /// Sem isto a porta fecha no meio de uma conversa, uma hora depois de abrir, e
 /// o sintoma é a pior coisa possível: funcionou, e parou de funcionar sem
@@ -462,7 +462,7 @@ mod testes {
     fn a_faixa_de_cgnat_nao_conta_como_saida() {
         // A descoberta que este módulo existe para não repetir: atrás de CGNAT
         // o roteador **abre a porta** e devolve sucesso. Se `100.64.0.0/10`
-        // passar por endereço global aqui, o Dogma monta um `seele://` com um
+        // passar por endereço global aqui, o servidor monta um `seele://` com um
         // endereço da operadora, manda para o amigo, e ninguém nunca descobre
         // por que "não conecta".
         for texto in [
