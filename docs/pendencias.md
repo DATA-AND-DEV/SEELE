@@ -292,10 +292,49 @@ ou parecidos com os de outra pessoa no roster.
 
 Baixo impacto num Server de amigos, real num aberto.
 
-## 7 · A matriz de três SOs nunca foi verde por inteiro
+## 7 · Alargada em 2026-08-25 · A matriz de três SOs nunca foi verde por inteiro
 
-Linux e Windows compilam no CI, mas ninguém rodou o `connection` neles fora disso.
-`docs/teste-duas-maquinas.md` é o roteiro.
+**O que esta entrada dizia, e por que estava pequena demais.** Ela dizia que
+Linux e Windows compilam no CI e que ninguém tinha rodado o cliente neles fora
+disso — como se faltasse apenas exercitar o produto à mão. Faltava mais que
+isso.
+
+**Um crate de produto não compilava no Windows, e atravessou um release.**
+`crates/seele-audio/src/device.rs` usava `winreg::enums::HKEY`, e o tipo mora na
+raiz do crate — `enums` só carrega as constantes. O bloco inteiro é
+`cfg(windows)`, então nenhum compilador de macOS jamais o viu. Entrou em
+2026-08-24 com a detecção de consentimento de microfone e ficou assim até alguém
+mandar compilar num Windows de verdade, em 2026-08-25.
+
+Junto veio um segundo, mais antigo: `xtask/tests/empacotamento.rs` usava
+`std::os::unix::fs::PermissionsExt` sem `cfg` nenhum, derrubando a compilação do
+`xtask` no Windows com «cannot find `unix` in `os`».
+
+**O que isso diz sobre o CI, e é a parte que importa.**
+`.github/workflows/ci.yml` **tem** o job `windows-2022` rodando
+`cargo test --workspace`, com `fail-fast: false`. Ele existia o tempo todo e
+teria pegado os dois. Um guarda que existe, roda e é ignorado é pior que guarda
+nenhum: ele produz a sensação de cobertura sem a cobertura. **Antes de tratar
+esta pendência como técnica, é preciso olhar a aba Actions e descobrir se aquele
+job está vermelho, se não está rodando, ou se não é obrigatório para integrar.**
+
+**O que ficou no lugar.** `xtask/tests/plataforma.rs` reprova import que só
+existe numa plataforma sem `#[cfg(...)]` que o autorize, e roda em qualquer
+sistema — o defeito do `xtask` passa a aparecer na máquina de quem escreve.
+Ele **não** cobre o caso do `winreg`: o import estava gateado corretamente e o
+caminho é que estava errado, e só um compilador de verdade sabe se um caminho
+existe. Para essa classe não há substituto para compilar nos três.
+
+**Medido em 2026-08-25, numa máquina Windows real, por SSH.** Com os dois
+consertos: `cargo check --workspace --all-targets` fecha, 174 testes passam,
+`cargo build --release --bin seeled` produz o executável. Falha um binário —
+`seele-app --test permissoes`, o único que constrói um app Tauri com webview —
+com `STATUS_ENTRYPOINT_NOT_FOUND`. É ambiental daquela máquina e **anterior a
+tudo isto**: um worktree em `d613fdc` com o mesmo conserto mínimo falha com o
+mesmo código de saída, e o mesmo teste passa no macOS.
+
+`docs/teste-duas-maquinas.md` continua sendo o roteiro para a parte que exige
+gente.
 
 ## 8 · Sem troca de chaves pós-quântica
 
