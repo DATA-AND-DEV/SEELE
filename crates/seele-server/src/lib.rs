@@ -377,6 +377,7 @@ impl Daemon {
             slots: Arc::new(tokio::sync::Mutex::new(server::Slots::default())),
             occupancy: Arc::new(tokio::sync::Mutex::new(server::Occupancy::default())),
             presentes: Arc::new(tokio::sync::Mutex::new(server::Presentes::default())),
+            subida: Arc::new(tokio::sync::Mutex::new(crate::tela::Subida::nova())),
             portaria: Arc::new(tokio::sync::Mutex::new(taxa::Portaria::nova())),
             atrasos: Arc::new(server::Atrasos::default()),
             telas: Arc::new(tokio::sync::Mutex::new(server::Telas::default())),

@@ -256,6 +256,10 @@ pub async fn serve(
         "link verified"
     );
 
+    // Guardado antes de a conexão ser movida: a limpeza lá embaixo precisa dele
+    // para tirar esta conexão da soma da subida, e ali ela não existe mais.
+    let id_da_conexao = connection.stable_id() as u64;
+
     let result = run_session(
         connection,
         send,
@@ -303,6 +307,14 @@ pub async fn serve(
             person: session.person,
         });
     }
+
+    // E os contadores desta conexão saem da soma da subida.
+    //
+    // Sem isto eles ficariam para sempre: a janela seguinte veria os bytes de
+    // quem saiu sumirem de uma vez, o `saturating_sub` transformaria o delta
+    // negativo em zero, e uma janela que carregou o cano inteiro apareceria como
+    // «não entregou nada» — a sonda recuaria por causa de alguém desligando.
+    server.subida.lock().await.esquecer(id_da_conexao);
 
     tracing::info!(person = %session.person, "session ended");
     result
@@ -1171,10 +1183,20 @@ async fn run_session(
     // a transmissão já tivesse começado. Uma vez, porque é uma declaração de
     // configuração e não uma medida: enquanto ninguém medir, ela não muda de
     // faixa e não há segundo quadro a mandar. Ver `crate::tela::caminho_no_fio`.
+    // A trava sai **antes** da escrita, e a linha existe por causa disso.
+    //
+    // Escrito como argumento de `frame::write`, o `MutexGuard` é um temporário
+    // que vive até o fim da instrução — e a instrução contém um `.await` que
+    // escreve na rede. Um par que parou de ler bloqueia essa escrita, o mutex
+    // fica preso, e todo aperto de mão novo e todo tique de telemetria param
+    // atrás dele: o sintoma foi `HandshakeTimeout` no `acceptance_m3`. É a mesma
+    // família da pendência 1 — segurar um recurso compartilhado enquanto se
+    // escreve para quem não lê.
+    let subida_medida = server.subida.lock().await.medida();
     frame::write(
         &mut send,
         &ServerMessage::HostUplink {
-            bps: crate::tela::caminho_no_fio(server.caminho_bps),
+            bps: crate::tela::caminho_no_fio(server.caminho_bps, subida_medida),
         },
     )
     .await?;
@@ -1957,6 +1979,21 @@ async fn run_session(
                 // forwarded by it. They are on the same bus as everything else
                 // because a server has no other way for one session to reach
                 // another — see the note beside `Event::SessionEnded`.
+                // Quantos assistem decide **o que o cano tinha licença de
+                // gastar**, e sem esse número a `Subida` não sabe distinguir «não
+                // coube» de «não havia o que mandar». Aqui e não no conversor
+                // evento→quadro porque aquele é síncrono e este mutex é `await`.
+                //
+                // Toda sessão faz isto com o mesmo valor, e é idempotente de
+                // propósito: o barramento entrega o evento a todas, e escolher
+                // uma delas para ser a dona seria inventar um líder onde não há.
+                if let Event::ScreenViewers { quantos, .. } = &event {
+                    server.subida.lock().await.assistindo(*quantos);
+                }
+                if matches!(event, Event::ScreenShareStopped { .. }) {
+                    server.subida.lock().await.assistindo(0);
+                }
+
                 match &event {
                     Event::SessionEnded { person, reason } if *person == session.person => {
                         tracing::info!(person = %session.person, ?reason, "session ended by an operator");
@@ -2065,6 +2102,30 @@ async fn run_session(
                 // measured at the receiver, so the server reports zero rather
                 // than a number it cannot know.
                 let stats = connection.stats();
+
+                // A subida deste servidor, medida enquanto ele empurra cópias.
+                //
+                // Aqui e não numa tarefa própria: este tique já existe, já lê
+                // `connection.stats()`, e um relógio a mais para ler o mesmo
+                // contador seria uma tarefa por sessão sem nada a mostrar. Quem
+                // soma sobre as conexões é a `Subida`; esta linha só entrega a
+                // fatia desta.
+                let andou = {
+                    let mut subida = server.subida.lock().await;
+                    subida.observar(
+                        std::time::Instant::now(),
+                        connection.stable_id() as u64,
+                        (&stats).into(),
+                    )
+                };
+                if let Some(bps) = andou {
+                    // Difundido, e não escrito aqui: a subida é do **cano**, e
+                    // as três pernas do §5.1 são calculadas em cada cliente.
+                    // Mandar só para este par deixaria os outros com o número
+                    // velho e a mesma sala com dois tetos diferentes.
+                    let _ = server.events.send(Event::HostUplink { bps });
+                }
+
                 let rtt_ms = connection.rtt().as_secs_f32() * 1000.0;
                 let sent = stats.path.sent_packets.max(1) as f32;
                 let lost = stats.path.lost_packets as f32;
@@ -2517,6 +2578,9 @@ fn translate(
     self_person: PersonId,
 ) -> Option<ServerMessage> {
     match event {
+        // A subida medida andou. Todo mundo recebe, porque o `min` do §5.1 é
+        // calculado em cada cliente e esta é uma das três pernas dele.
+        Event::HostUplink { bps } => Some(ServerMessage::HostUplink { bps: *bps }),
         Event::MessagePosted(message) => {
             channels
                 .contains(&message.channel)

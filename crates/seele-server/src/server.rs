@@ -39,6 +39,16 @@ pub const FLUSH_INTERVAL: Duration = Duration::from_millis(200);
 /// bus from needing to know who is subscribed to what.
 #[derive(Debug, Clone)]
 pub enum Event {
+    /// A subida medida do servidor andou, e quem está conectado precisa saber.
+    ///
+    /// **O `HostUplink` deixou de ser dito uma vez só.** Ele saía na entrada da
+    /// sessão com o comentário «é uma declaração de configuração e não uma
+    /// medida: enquanto ninguém medir, ela não muda de faixa e não há segundo
+    /// quadro a mandar». Agora alguém mede, e o segundo quadro existe.
+    HostUplink {
+        /// A subida estimada, em bits por segundo.
+        bps: u32,
+    },
     /// A message was committed and is now durable.
     MessagePosted(StoredMessage),
     /// A message was edited.
@@ -642,6 +652,11 @@ pub struct Server {
     pub occupancy: Arc<Mutex<Occupancy>>,
     /// Quem está conectado, sentado ou não. Ver [`Presentes`].
     pub presentes: Arc<Mutex<Presentes>>,
+    /// A subida deste servidor, medida enquanto ele empurra cópias.
+    ///
+    /// Compartilhada porque é do **cano**, e o cano é um só: cada sessão vê a
+    /// fatia dela e nunca o total. Ver [`crate::tela::Subida`].
+    pub subida: Arc<Mutex<crate::tela::Subida>>,
     /// Quantos apertos de mão cada endereço ainda pode gastar.
     ///
     /// Antes de autenticar, portanto sem identidade nenhuma para contar: a

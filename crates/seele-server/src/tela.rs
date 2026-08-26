@@ -35,6 +35,8 @@
 //! dono. **O que não pode divergir é o formato**, e ele está escrito nos dois
 //! lados a partir do mesmo §3.
 
+use std::time::{Duration, Instant};
+
 use seele_proto::ids::ScreenId;
 use tokio::sync::mpsc;
 
@@ -115,16 +117,23 @@ pub fn caminho_do_server(declarado: Option<u32>) -> u32 {
 /// ninguém conferiu, e o cliente a usaria para escolher resolução. Uma medida
 /// inventada é pior que a ausência declarada.
 ///
-/// **E não há medida.** O que este servidor sabe do próprio caminho é o que o
-/// `quinn` conta por conexão — RTT, perda, janela de congestionamento —, e
-/// nenhum deles diz quanto **cabe** num cano que não está sendo enchido, que é
-/// exatamente a pergunta 2 do §8. Somar o que já saiu daria um piso
-/// demonstrado, não uma capacidade: num servidor parado ele desabaria abaixo do
-/// piso do §2 e pararia transmissões que cabiam. Então: o que o operador
-/// declarou, ou nada.
+/// **Agora há medida, e a objeção que estava escrita aqui continua certa.** Este
+/// parágrafo dizia que somar o que já saiu daria «um piso demonstrado, não uma
+/// capacidade», e que num servidor parado isso desabaria abaixo do piso do §2 e
+/// pararia transmissões que cabiam. Está certo — e é exatamente por isso que
+/// [`Subida`] **descarta** toda janela que não encheu o teto: uma sala parada
+/// não é notícia sobre o cano. Só janela cheia move a estimativa, e é a mesma
+/// disciplina que a sonda do cliente usa.
+///
+/// A ordem é medida, depois declarado, depois nada. A medida vence o declarado
+/// porque o operador declara de memória e a medida vem do cano; e a **hipótese**
+/// continua sem atravessar o fio, porque ela não é nem uma coisa nem outra —
+/// ver [`Subida::medida`].
 #[must_use]
-pub fn caminho_no_fio(declarado: Option<u32>) -> u32 {
-    declarado.filter(|bps| *bps > 0).unwrap_or(0)
+pub fn caminho_no_fio(declarado: Option<u32>, medido: Option<u32>) -> u32 {
+    medido
+        .or_else(|| declarado.filter(|bps| *bps > 0))
+        .unwrap_or(0)
 }
 
 /// Quantas aberturas de transmissão esperam por espectador.
@@ -188,6 +197,335 @@ pub fn teto_do_hospedeiro(caminho_bps: u32, espectadores: usize) -> Option<u32> 
     let n = espectadores.max(1) as u64;
     let por_espectador = u32::try_from(cabe / n).unwrap_or(u32::MAX);
     (por_espectador >= PISO_DE_BANDA_BPS).then_some(por_espectador)
+}
+
+// ---------------------------------------------------------------------------
+// A subida deste servidor, medida em vez de suposta
+// ---------------------------------------------------------------------------
+
+/// De quanto em quanto tempo a subida é reavaliada.
+///
+/// Um segundo, e é o mesmo número da sonda do cliente de propósito: uma janela
+/// curta demais mede rajada de codificador em vez de caminho, e uma longa demais
+/// deixa a estimativa atrás da realidade justamente quando a sala cresce.
+pub const JANELA_DA_SUBIDA: Duration = Duration::from_secs(1);
+
+/// Quanto do permitido a janela tem de ter gasto para valer como medida.
+///
+/// **A objeção que este módulo escreveu contra si mesmo, e a resposta.** O doc
+/// de [`caminho_no_fio`] dizia que somar o que saiu daria «um piso demonstrado,
+/// não uma capacidade», e que num servidor parado isso desabaria abaixo do piso
+/// e pararia transmissões que cabiam. Está certo, e é exatamente por isso que
+/// uma janela que **não** encheu o teto nunca move a estimativa: ela não diz
+/// nada sobre o cano, diz que não havia o que mandar.
+///
+/// 85% pelo mesmo motivo da sonda do cliente: `spikes/tela-no-codec` mediu o
+/// OpenH264 entregando 872 de 1200 kbps em 720p, e exigir mais descartaria toda
+/// janela boa.
+pub const OCUPACAO_MINIMA: u32 = 85;
+
+/// Quanto a estimativa sobe por janela cheia e sem dor, em por cento.
+pub const SUBIDA: u32 = 125;
+
+/// Quanto a estimativa recua quando doeu e não dá para dizer o tamanho.
+pub const QUEDA: u32 = 80;
+
+/// O maior valor que a estimativa pode alcançar, em bits por segundo.
+///
+/// Cinquenta megabits, e o número importa menos do que parece: a subida é de
+/// 25% por janela **cheia**, e encher exige o vídeo de fato gastar o que recebeu.
+/// Sair de 2 Mbps e chegar aqui leva uns quinze segundos de tráfego real — se o
+/// cano não carrega, a estimativa para no caminho sozinha.
+pub const TETO_DA_SUBIDA_BPS: u32 = 50_000_000;
+
+/// O menor valor que a estimativa pode alcançar.
+///
+/// Conta, e não literal: é o ponto em que [`FRACAO_DO_CAMINHO`] ainda deixa
+/// [`PISO_DE_BANDA_BPS`] para um espectador. Abaixo daqui quem responde é o
+/// `None` de [`teto_do_hospedeiro`], que é a resposta com motivo — e não uma
+/// estimativa cada vez menor.
+///
+/// **`div_ceil` e não `/`.** A divisão inteira truncava para 333 333, e
+/// 333 333 × 60% devolve 199 999 — um bit abaixo do piso, fazendo
+/// [`teto_do_hospedeiro`] responder `None` por arredondamento em vez de por
+/// decisão. O teste `a_subida_nunca_cai_abaixo_do_que_o_piso_do_video_exige`
+/// existe por causa disso e confere as duas pontas, não só a constante.
+pub const PISO_DA_SUBIDA_BPS: u32 =
+    ((PISO_DE_BANDA_BPS as u64 * 100).div_ceil(FRACAO_DO_CAMINHO as u64)) as u32;
+
+const _: () = assert!(
+    (PISO_DA_SUBIDA_BPS as u64 * FRACAO_DO_CAMINHO as u64) / 100 >= PISO_DE_BANDA_BPS as u64,
+    "o piso da subida não sustenta o piso da banda depois da fração"
+);
+
+/// O que as conexões do servidor contaram neste instante, somadas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct LeituraDaSubida {
+    /// `udp_tx.bytes` de **todas** as conexões, somado.
+    ///
+    /// Todas e não só as que assistem: o cano é um só, e voz, controle e tela
+    /// disputam o mesmo. O que se mede é o cano.
+    pub bytes_enviados: u64,
+    /// `path.lost_packets`, somado.
+    pub pacotes_perdidos: u64,
+    /// `path.congestion_events`, somado.
+    pub eventos_de_congestionamento: u64,
+    /// O que a sala tinha licença de gastar na janela, em bits por segundo.
+    ///
+    /// [`teto_do_hospedeiro`] vezes o número de espectadores — o teto é **por
+    /// cópia**, e o que sai do cano são todas elas.
+    pub permitido_bps: u32,
+}
+
+/// Onde uma janela começou.
+#[derive(Debug, Clone, Copy)]
+struct JanelaDaSubida {
+    abriu: Instant,
+    leitura: LeituraDaSubida,
+}
+
+/// A profundidade da subida deste servidor, medida enquanto ele empurra cópias.
+///
+/// **Parente da sonda do cliente, e não a mesma coisa.** Aquela mede *um*
+/// caminho — o do compartilhador até aqui. Esta mede o cano deste servidor
+/// carregando N cópias para N pares diferentes, então soma sobre conexões e
+/// trata dor em qualquer uma como dor no cano. A regra de descartar janela
+/// limitada por conteúdo é a mesma, e é o que impede as duas de confundir
+/// «ninguém mandou nada» com «o cano é estreito».
+///
+/// Pura: recebe o instante e a leitura, devolve a estimativa. Não lê relógio,
+/// não fala com o `quinn`.
+#[derive(Debug, Clone, Copy)]
+pub struct SondaDaSubida {
+    estimativa_bps: u32,
+    /// Até onde a subida larga pode ir depois da primeira dor.
+    limite_bps: Option<u32>,
+    janela: Option<JanelaDaSubida>,
+}
+
+impl Default for SondaDaSubida {
+    fn default() -> Self {
+        Self::nova()
+    }
+}
+
+impl SondaDaSubida {
+    /// Começa na suposição de sempre, que continua sendo o único número com
+    /// medida atrás — ver [`CAMINHO_DO_SERVER_BPS`].
+    #[must_use]
+    pub const fn nova() -> Self {
+        Self {
+            estimativa_bps: CAMINHO_DO_SERVER_BPS,
+            limite_bps: None,
+            janela: None,
+        }
+    }
+
+    /// A subida que este servidor acredita ter agora.
+    #[must_use]
+    pub const fn estimativa(&self) -> u32 {
+        self.estimativa_bps
+    }
+
+    /// Uma leitura. Devolve a estimativa nova **quando ela mudou**.
+    ///
+    /// `None` na maior parte das vezes, e isso é o normal: a janela ainda não
+    /// fechou, ou fechou sem dizer nada sobre o cano.
+    pub fn observar(&mut self, agora: Instant, leitura: &LeituraDaSubida) -> Option<u32> {
+        let Some(janela) = self.janela else {
+            self.janela = Some(JanelaDaSubida {
+                abriu: agora,
+                leitura: *leitura,
+            });
+            return None;
+        };
+        let decorrido = agora.saturating_duration_since(janela.abriu);
+        if decorrido < JANELA_DA_SUBIDA {
+            return None;
+        }
+        self.janela = Some(JanelaDaSubida {
+            abriu: agora,
+            leitura: *leitura,
+        });
+
+        let antes = self.estimativa_bps;
+        let bytes = leitura
+            .bytes_enviados
+            .saturating_sub(janela.leitura.bytes_enviados);
+        let segundos = decorrido.as_secs_f64().max(0.001);
+        let entregue_bps =
+            u32::try_from(((bytes as f64 * 8.0) / segundos) as u64).unwrap_or(u32::MAX);
+
+        let doeu = leitura.pacotes_perdidos > janela.leitura.pacotes_perdidos
+            || leitura.eventos_de_congestionamento > janela.leitura.eventos_de_congestionamento;
+        let permitido = janela.leitura.permitido_bps;
+        let cheia = permitido > 0
+            && u64::from(entregue_bps) * 100 >= u64::from(permitido) * u64::from(OCUPACAO_MINIMA);
+
+        if doeu && cheia {
+            // Doeu enchendo: o cano acaba onde a janela entregou. É a única
+            // leitura que dá um número em vez de uma direção.
+            self.estimativa_bps = entregue_bps;
+            self.limite_bps = Some(entregue_bps);
+        } else if doeu {
+            // Doeu sem encher — outra coisa apertou o caminho. Recua um passo,
+            // sem fingir saber o tamanho.
+            self.estimativa_bps = (u64::from(antes) * u64::from(QUEDA) / 100) as u32;
+        } else if cheia {
+            let passo = (u64::from(antes) * u64::from(SUBIDA) / 100) as u32;
+            let teto = self.limite_bps.unwrap_or(TETO_DA_SUBIDA_BPS);
+            self.estimativa_bps = passo.min(teto).min(TETO_DA_SUBIDA_BPS);
+        }
+        // E o quarto caso — não doeu e não encheu — não move nada. É a tela
+        // parada, e ela não é notícia sobre o cano.
+
+        self.estimativa_bps = self
+            .estimativa_bps
+            .clamp(PISO_DA_SUBIDA_BPS, TETO_DA_SUBIDA_BPS);
+        (self.estimativa_bps != antes).then_some(self.estimativa_bps)
+    }
+}
+
+/// O que **uma** conexão contou.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct LeituraDaConexao {
+    /// `udp_tx.bytes`.
+    pub bytes_enviados: u64,
+    /// `path.lost_packets`.
+    pub pacotes_perdidos: u64,
+    /// `path.congestion_events`.
+    pub eventos_de_congestionamento: u64,
+}
+
+impl From<&quinn::ConnectionStats> for LeituraDaConexao {
+    fn from(stats: &quinn::ConnectionStats) -> Self {
+        Self {
+            bytes_enviados: stats.udp_tx.bytes,
+            pacotes_perdidos: stats.path.lost_packets,
+            eventos_de_congestionamento: stats.path.congestion_events,
+        }
+    }
+}
+
+/// A subida do servidor, somada sobre as conexões que existem agora.
+///
+/// **Por que somar aqui e não em cada sessão.** O cano é um só e as conexões são
+/// muitas: uma sessão sozinha vê a fatia dela e nunca o total, e é o total que
+/// enche o cano. Este é o único lugar do servidor que enxerga todas.
+///
+/// Guarda o último contador de cada conexão, e não um acumulado próprio, porque
+/// os contadores do `quinn` são por conexão e morrem com ela — somar deltas de
+/// uma conexão que fechou contaria a saída dela duas vezes, uma no delta e outra
+/// na ausência.
+#[derive(Debug, Default)]
+pub struct Subida {
+    sonda: SondaDaSubida,
+    por_conexao: std::collections::HashMap<u64, LeituraDaConexao>,
+    /// Se a estimativa já saiu da suposição alguma vez.
+    ///
+    /// **A hipótese não atravessa o fio**, e o doc de [`caminho_no_fio`] diz por
+    /// quê: posta lá ela vira uma promessa de banda que ninguém conferiu. Só
+    /// depois de uma janela cheia mover a estimativa é que existe medida para
+    /// declarar.
+    mediu: bool,
+    /// Quantos assistem à transmissão de agora. Zero quando não há nenhuma.
+    ///
+    /// Mora aqui porque é ele que decide **o que o cano tinha licença de
+    /// gastar**, e sem isso não há como distinguir «não coube» de «não havia o
+    /// que mandar» — a distinção inteira desta medida.
+    espectadores: u32,
+}
+
+impl Subida {
+    /// Uma subida que ainda não mediu nada.
+    #[must_use]
+    pub fn nova() -> Self {
+        Self {
+            sonda: SondaDaSubida::nova(),
+            por_conexao: std::collections::HashMap::new(),
+            mediu: false,
+            espectadores: 0,
+        }
+    }
+
+    /// A subida **medida**, ou `None` enquanto ela ainda é a suposição.
+    ///
+    /// É o único valor que pode ir para o fio.
+    #[must_use]
+    pub const fn medida(&self) -> Option<u32> {
+        if self.mediu {
+            Some(self.sonda.estimativa())
+        } else {
+            None
+        }
+    }
+
+    /// Quantos estão assistindo agora. Zero quando a transmissão acabou.
+    pub fn assistindo(&mut self, quantos: u32) {
+        self.espectadores = quantos;
+    }
+
+    /// O que o cano tinha licença de gastar, em bits por segundo.
+    ///
+    /// [`teto_do_hospedeiro`] é **por cópia**; o que sai do cano são todas elas.
+    /// Zero sem transmissão, e é o que faz toda janela ser descartada nesse
+    /// caso.
+    fn permitido_bps(&self) -> u32 {
+        if self.espectadores == 0 {
+            return 0;
+        }
+        teto_do_hospedeiro(self.sonda.estimativa(), self.espectadores as usize)
+            .map_or(0, |por_copia| por_copia.saturating_mul(self.espectadores))
+    }
+
+    /// A subida que este servidor acredita ter agora.
+    #[must_use]
+    pub const fn estimativa(&self) -> u32 {
+        self.sonda.estimativa()
+    }
+
+    /// Uma leitura de uma conexão. Devolve a estimativa **quando ela mudou**.
+    ///
+    /// O que o cano tinha licença de gastar sai de [`Self::permitido_bps`], e
+    /// é **zero quando não há transmissão nenhuma** — aí toda janela é
+    /// descartada: um servidor sem tela não está enchendo o cano, e o que ele
+    /// mede não diz nada sobre ele.
+    pub fn observar(
+        &mut self,
+        agora: Instant,
+        quem: u64,
+        conexao: LeituraDaConexao,
+    ) -> Option<u32> {
+        self.por_conexao.insert(quem, conexao);
+        let mut soma = LeituraDaSubida {
+            permitido_bps: self.permitido_bps(),
+            ..LeituraDaSubida::default()
+        };
+        for leitura in self.por_conexao.values() {
+            soma.bytes_enviados = soma.bytes_enviados.saturating_add(leitura.bytes_enviados);
+            soma.pacotes_perdidos = soma
+                .pacotes_perdidos
+                .saturating_add(leitura.pacotes_perdidos);
+            soma.eventos_de_congestionamento = soma
+                .eventos_de_congestionamento
+                .saturating_add(leitura.eventos_de_congestionamento);
+        }
+        let andou = self.sonda.observar(agora, &soma);
+        if andou.is_some() {
+            self.mediu = true;
+        }
+        andou
+    }
+
+    /// Uma conexão foi embora.
+    ///
+    /// Sem isto a soma carregaria para sempre os contadores de quem saiu, e a
+    /// janela seguinte veria os bytes dela sumirem de uma vez — um delta
+    /// negativo que o `saturating_sub` transforma em zero, e uma janela boa
+    /// virando «não entregou nada».
+    pub fn esquecer(&mut self, quem: u64) {
+        self.por_conexao.remove(&quem);
+    }
 }
 
 /// Um pedaço de uma transmissão a caminho de um espectador.
@@ -385,6 +723,143 @@ pub async fn bombear(conexao: quinn::Connection, mut aberturas: mpsc::Receiver<A
 
 #[cfg(test)]
 mod tests {
+    // ---- a sonda da subida ----
+
+    /// Uma leitura com os contadores acumulados que se quer.
+    fn leitura(bytes: u64, perdidos: u64, permitido_bps: u32) -> LeituraDaSubida {
+        LeituraDaSubida {
+            bytes_enviados: bytes,
+            pacotes_perdidos: perdidos,
+            eventos_de_congestionamento: 0,
+            permitido_bps,
+        }
+    }
+
+    /// Quantos bytes saem em um segundo a uma dada taxa.
+    fn bytes_em_um_segundo(bps: u32) -> u64 {
+        u64::from(bps) / 8
+    }
+
+    #[test]
+    fn uma_sala_parada_nao_derruba_a_subida() {
+        // **A objeção que o doc de `caminho_no_fio` levantou contra medir**, e a
+        // razão de ela não valer: somar o que saiu daria um piso demonstrado, e
+        // num servidor parado desabaria abaixo do piso do §2. Não desaba, porque
+        // janela que não encheu o teto não move nada.
+        let mut sonda = SondaDaSubida::nova();
+        let inicio = Instant::now();
+        let permitido = 1_000_000;
+        let mut bytes = 0;
+        for segundo in 1..=60 {
+            bytes += bytes_em_um_segundo(20_000);
+            sonda.observar(
+                inicio + Duration::from_secs(segundo),
+                &leitura(bytes, 0, permitido),
+            );
+        }
+        assert_eq!(
+            sonda.estimativa(),
+            CAMINHO_DO_SERVER_BPS,
+            "uma sala parada mexeu na estimativa da subida: o servidor passou a \
+             confundir «ninguém mandou nada» com «o cano é estreito»"
+        );
+    }
+
+    #[test]
+    fn encher_o_teto_sem_dor_levanta_a_subida() {
+        // O caso que o relato de campo pedia: numa rede que aguenta, a
+        // estimativa tem de sair da suposição em vez de ficar presa nela.
+        let mut sonda = SondaDaSubida::nova();
+        let inicio = Instant::now();
+        let mut bytes = 0;
+        for segundo in 1..=12 {
+            let permitido =
+                (u64::from(sonda.estimativa()) * u64::from(FRACAO_DO_CAMINHO) / 100) as u32;
+            bytes += bytes_em_um_segundo(permitido);
+            sonda.observar(
+                inicio + Duration::from_secs(segundo),
+                &leitura(bytes, 0, permitido),
+            );
+        }
+        assert!(
+            sonda.estimativa() > CAMINHO_DO_SERVER_BPS * 4,
+            "doze janelas cheias e sem dor levaram a subida só a {} bps: a \
+             estimativa não sai da suposição, e uma LAN continua tratada como \
+             internet ruim",
+            sonda.estimativa()
+        );
+    }
+
+    #[test]
+    fn a_dor_com_o_teto_cheio_fixa_a_subida_no_que_passou() {
+        // Doer enchendo é a única leitura que dá um **número**: o cano acaba
+        // onde a janela entregou. Um recuo por fator aqui chutaria.
+        let mut sonda = SondaDaSubida::nova();
+        let inicio = Instant::now();
+        let permitido = 1_000_000;
+        let entregue = 900_000;
+        sonda.observar(inicio, &leitura(0, 0, permitido));
+        let novo = sonda.observar(
+            inicio + Duration::from_secs(1),
+            &leitura(bytes_em_um_segundo(entregue), 7, permitido),
+        );
+        assert_eq!(
+            novo,
+            Some(entregue),
+            "doeu com o teto cheio e a subida não virou o que a janela de fato \
+             carregou"
+        );
+    }
+
+    #[test]
+    fn a_subida_nunca_cai_abaixo_do_que_o_piso_do_video_exige() {
+        // Abaixo daqui quem responde é o `None` de `teto_do_hospedeiro`, que é
+        // uma resposta com motivo. Uma estimativa cada vez menor seria o produto
+        // desistindo em silêncio.
+        let mut sonda = SondaDaSubida::nova();
+        let inicio = Instant::now();
+        let mut bytes = 0;
+        let mut perdidos = 0;
+        for segundo in 1..=40 {
+            perdidos += 3;
+            bytes += bytes_em_um_segundo(10_000);
+            sonda.observar(
+                inicio + Duration::from_secs(segundo),
+                &leitura(bytes, perdidos, 1_000_000),
+            );
+        }
+        assert!(
+            sonda.estimativa() >= PISO_DA_SUBIDA_BPS,
+            "a subida caiu a {} bps, abaixo do piso de {}",
+            sonda.estimativa(),
+            PISO_DA_SUBIDA_BPS
+        );
+        assert!(
+            teto_do_hospedeiro(sonda.estimativa(), 1).is_some(),
+            "a subida caiu tanto que o teto do hospedeiro virou `None` por \
+             aritmética, e não por decisão"
+        );
+    }
+
+    #[test]
+    fn antes_da_janela_fechar_a_sonda_nao_responde() {
+        // Ler mais vezes que o necessário é barato; **mover** a estimativa antes
+        // da janela fechar mediria rajada de codificador em vez de caminho.
+        let mut sonda = SondaDaSubida::nova();
+        let inicio = Instant::now();
+        sonda.observar(inicio, &leitura(0, 0, 1_000_000));
+        for centesimo in 1..=9 {
+            assert_eq!(
+                sonda.observar(
+                    inicio + Duration::from_millis(centesimo * 100),
+                    &leitura(bytes_em_um_segundo(900_000), 0, 1_000_000)
+                ),
+                None,
+                "a sonda respondeu antes de a janela de {JANELA_DA_SUBIDA:?} fechar"
+            );
+        }
+    }
+
     use super::*;
 
     /// Um quadro como `seele_core::tela` o escreve: tipo, tamanho, corpo.
@@ -417,7 +892,7 @@ mod tests {
         // quer dizer «não medi» e faz o termo sumir do `min` do outro lado.
         // Mandar a hipótese seria prometer 2000 kbps que ninguém conferiu.
         assert_eq!(caminho_do_server(None), CAMINHO_DO_SERVER_BPS);
-        assert_eq!(caminho_no_fio(None), 0);
+        assert_eq!(caminho_no_fio(None, None), 0);
     }
 
     #[test]
@@ -425,7 +900,7 @@ mod tests {
         // Declarado, as duas contas partem do mesmo número — que é a regra 2 do
         // §3.2: nada de um segundo medidor discordando do primeiro.
         assert_eq!(caminho_do_server(Some(50_000_000)), 50_000_000);
-        assert_eq!(caminho_no_fio(Some(50_000_000)), 50_000_000);
+        assert_eq!(caminho_no_fio(Some(50_000_000), None), 50_000_000);
     }
 
     #[test]
@@ -435,7 +910,32 @@ mod tests {
         // ausência é o que impede uma configuração meio preenchida de desligar
         // o recurso em silêncio.
         assert_eq!(caminho_do_server(Some(0)), CAMINHO_DO_SERVER_BPS);
-        assert_eq!(caminho_no_fio(Some(0)), 0);
+        assert_eq!(caminho_no_fio(Some(0), None), 0);
+    }
+
+    #[test]
+    fn a_medida_vence_o_que_o_operador_declarou() {
+        // Precedência, e ela tem um lado certo: o operador declara de memória e
+        // a medida vem do cano. Quando as duas existem, a que foi conferida
+        // manda — e é a única forma de um número errado no arquivo de
+        // configuração deixar de estrangular a tela para sempre.
+        assert_eq!(
+            caminho_no_fio(Some(2_000_000), Some(40_000_000)),
+            40_000_000
+        );
+        // E sem medida, o declarado continua valendo: ele é melhor que nada.
+        assert_eq!(caminho_no_fio(Some(2_000_000), None), 2_000_000);
+    }
+
+    #[test]
+    fn a_suposicao_nunca_atravessa_o_fio() {
+        // A regra que o doc de `caminho_no_fio` escreve: posta no fio, a
+        // hipótese vira uma promessa de banda que ninguém conferiu. Uma sonda
+        // recém-criada tem estimativa — a suposição — e **não** tem medida.
+        let subida = Subida::nova();
+        assert_eq!(subida.estimativa(), CAMINHO_DO_SERVER_BPS);
+        assert_eq!(subida.medida(), None, "a suposição vazou para o fio");
+        assert_eq!(caminho_no_fio(None, subida.medida()), 0);
     }
 
     #[test]
