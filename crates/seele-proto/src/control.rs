@@ -14,7 +14,7 @@
 //!   and a client had no way to learn its own. [`ServerMessage::Session`] and
 //!   [`ServerMessage::PersonJoined`] now carry it.
 //! - **G8.** "Isolamento total" (deafen) is defined in
-//!   `specs/07-estetica.md` and bound to a key in `specs/05-cliente-tui.md`,
+//!   `specs/07-estetica.md` and bound to a key in `specs/06-clientes-gui.md`,
 //!   but had no protocol representation, so a roster could not show who was not
 //!   listening. [`PersonState`] carries it beside the mudo.
 //! - **G9.** `EnviarMensagem` is documented as "idempotent by `client_msg_id`"
@@ -2183,7 +2183,7 @@ mod tests {
     #[test]
     fn person_state_carries_both_mute_controls() {
         // Gap G8. specs/07-estetica.md defines "Isolamento total" and
-        // specs/05-cliente-tui.md binds it to a key, but nothing carried it, so
+        // specs/06-clientes-gui.md binds it to a key, but nothing carried it, so
         // a roster could not show who was not listening.
         let state = ServerMessage::PersonState(PersonState {
             person: PersonId(1),

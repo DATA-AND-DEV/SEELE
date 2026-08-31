@@ -17,7 +17,7 @@
 - **Idioma** (`specs/10-convencoes.md` + ADR 0013): código, identificadores e comentários em inglês; documentação e specs em português. **Exceção real e deliberada deste plano:** `seele-tui/src/selecao.rs` e as partes novas do `main.rs` do app estão em português. Cada arquivo tocado mantém o idioma que já usa. Código novo em `seele-core` segue o inglês do crate.
 - **ADR 0002 — regra de dependência:** uma casca vê `seele-core` e mais nada. Verificado por `cargo xtask check-deps`.
 - **`specs/06-clientes-gui.md:19` — inegociável:** nenhuma lógica de protocolo em JavaScript. O teste `the_frontend_never_names_a_protocol_concept` em `apps/seele-app/tests/frontend.rs:171` guarda isso.
-- **`specs/05-cliente-tui.md:105`:** nenhuma informação transmitida **só** por cor. Todo realce precisa de acompanhante textual.
+- **`specs/06-clientes-gui.md:105`:** nenhuma informação transmitida **só** por cor. Todo realce precisa de acompanhante textual.
 - Comandos de verificação: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all --check`.
 
 ---
@@ -431,7 +431,7 @@ Acrescente ao `mod tests` de `crates/seele-tui/src/app.rs`:
 ```rust
 #[test]
 fn h_and_l_move_between_panels_and_wrap() {
-    // `specs/05-cliente-tui.md:42` promises "h j k l / setas navegar", and
+    // `specs/06-clientes-gui.md:42` promises "h j k l / setas navegar", and
     // until now only j and k did anything.
     let mut app = App::new();
     app.focus = Panel::Dogma;
@@ -808,7 +808,7 @@ Acrescente ao `mod tests` de `crates/seele-tui/src/ui.rs`, seguindo o padrão de
 ```rust
 #[test]
 fn the_search_shows_the_counter_and_marks_the_current_line() {
-    // `specs/05-cliente-tui.md:105`: nothing may be conveyed by colour alone.
+    // `specs/06-clientes-gui.md:105`: nothing may be conveyed by colour alone.
     // The counter is the highlight's textual companion, and it is what
     // survives NO_COLOR and a 16-colour SSH terminal.
     let mut app = App::new();
@@ -1520,7 +1520,7 @@ No painel de mensagens (linha 148), depois do `<h2 class="painel-titulo">`:
 
 ```html
       <!--
-        A busca. `[1/3]` não é enfeite: `specs/05-cliente-tui.md` proíbe
+        A busca. `[1/3]` não é enfeite: `specs/06-clientes-gui.md` proíbe
         informação transmitida só por cor, e o contador é o acompanhante
         textual do realce.
       -->
@@ -1788,7 +1788,7 @@ Em `apps/seele-app/ui/seele.css`, acrescente. Use **só** variáveis de `tokens.
 .busca-contador { color: var(--rotulo); font-variant-numeric: tabular-nums; }
 
 /*
-  O realce. `specs/05-cliente-tui.md:105` não deixa informação viver só na
+  O realce. `specs/06-clientes-gui.md:105` não deixa informação viver só na
   cor, e o contador [1/3] é o acompanhante textual — mas o sublinhado aqui
   faz a ocorrência sobreviver a um monitor ruim sem depender dele.
 */
@@ -1829,12 +1829,12 @@ frontend não teria como saber onde o casamento começou."
 
 **Files:**
 - Modify: `docs/pendencias.md`
-- Modify: `specs/05-cliente-tui.md`
+- Modify: `specs/06-clientes-gui.md`
 - Modify: `specs/06-clientes-gui.md`
 
 - [ ] **Step 1: Atualizar as specs**
 
-Em `specs/05-cliente-tui.md`, na lista de atalhos (linhas 41-52), acrescente:
+Em `specs/06-clientes-gui.md`, na lista de atalhos (linhas 41-52), acrescente:
 
 ```
 n / N             próxima / anterior ocorrência da busca
@@ -1873,7 +1873,7 @@ baixo de uma sessão viva, com roster e áudio de pé.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add docs/pendencias.md specs/05-cliente-tui.md specs/06-clientes-gui.md
+git add docs/pendencias.md specs/06-clientes-gui.md specs/06-clientes-gui.md
 git commit -m "docs: as specs alcançam a navegação que as cascas agora têm
 
 A pendência #9 encolheu em vez de sumir: ejetar resolve o caso comum e o

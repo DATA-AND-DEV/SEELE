@@ -23,7 +23,7 @@ lista sem gravar depois de conectar entregaria uma seção permanentemente vazia
 ## O que fica verdade no fim
 
 **Paridade de composição, não de teclas.** Cada casca fica completa nos próprios
-termos. A TUI cumpre o que `specs/05-cliente-tui.md` promete; a GUI ganha a tela
+termos. A TUI cumpre o que `specs/06-clientes-gui.md` promete; a GUI ganha a tela
 de entrada que falta e teclado só onde o mouse é lento. Não se persegue mapear
 tecla por tecla no app — `specs/06-clientes-gui.md` pede que quem usa a TUI
 saiba *onde tudo está* ao abrir o app, e isso é sobre composição.

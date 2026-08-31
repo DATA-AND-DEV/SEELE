@@ -1,7 +1,7 @@
 //! Finding a term in what a shell is showing.
 //!
 //! This lives here rather than in a shell because it would be identical in
-//! both — the rule `seele-tui::view` already wrote down. How case and accent
+//! both — the rule the terminal shell wrote down first. How case and accent
 //! fold, and the order `n` and `N` walk in, is one decision with one set of
 //! tests.
 //!
@@ -19,7 +19,7 @@
 //! only correct thing to pass is what is on screen. That is a different string
 //! in each shell, and the difference is not a detail:
 //!
-//! - The terminal **collapses**. `seele-tui::ui::wrap` builds its channels with
+//! - A shell that wraps text **collapses** runs of whitespace, building lines with
 //!   `split_whitespace`, so a run of whitespace is already gone by the time it
 //!   is drawn. It calls [`normalize`] first, and the offsets channel up.
 //! - The desktop app **preserves**. `.mensagens .corpo` is `white-space:
@@ -52,7 +52,7 @@ pub struct Match {
     pub end: usize,
 }
 
-/// Collapses runs of whitespace, the way `seele-tui::ui::wrap` displays text.
+/// Collapses runs of whitespace, the way a wrapping shell displays text.
 ///
 /// For a shell that draws what it was given, this is the wrong function: see
 /// the module docs. It exists for the terminal, which collapses before drawing
@@ -387,7 +387,7 @@ mod tests {
 
     #[test]
     fn normalize_collapses_whitespace_the_way_the_tui_wrap_does() {
-        // `seele-tui::ui::wrap` uses `split_whitespace`, which collapses. Without
+        // A wrapping shell uses `split_whitespace`, which collapses. Without
         // this normalisation the offsets would point to the wrong place in any
         // body with a double space.
         assert_eq!(normalize("a  b\tc\nd "), "a b c d");

@@ -1246,7 +1246,7 @@ fechada, nunca um valor**, que é o 0029 apertado em um grau: a lista é curta
 (`laranja-nerv`, `fosforo`, `padrao-azul`, `osso` — quatro), o vermelho não está
 nela, e a preferência local de quem olha vence, numa coluna a mais no
 `conhecidos`. Quatro é pouco e está escrito; o que torna isso custo estético e
-não funcional é a sigla na placa e a regra de `specs/05-cliente-tui.md:143`.
+não funcional é a sigla na placa e a regra de `specs/06-clientes-gui.md:143`.
 
 **O ícone é recusado em v1**, com três razões: a prévia embutida de imagem de um
 anexo que alguém **pediu** ainda não está construída (ADR 0027, no alto dele); a

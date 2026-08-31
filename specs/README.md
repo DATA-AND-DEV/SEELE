@@ -14,7 +14,7 @@ Estes documentos são a fonte de verdade para o planejamento. Eles descrevem **o
 | `02-protocolo.md` | Formato de mensagens, handshake, canais QUIC |
 | `03-audio.md` | Pipeline de captura, codec, jitter buffer, mixagem |
 | `04-servidor-seele.md` | Estado, permissões, subsistemas, persistência |
-| `05-cliente-tui.md` | Layout, atalhos, modelo de interação do terminal |
+| `06-clientes-gui.md` | Layout, atalhos, modelo de interação do terminal |
 | `06-clientes-gui.md` | Desktop e mobile, camada FFI |
 | `07-estetica.md` | Densidade, tokens de cor, tipografia, movimento, voz da interface |
 | `08-seguranca.md` | Transporte, autenticação, caminho para E2EE |

@@ -30,7 +30,7 @@ use crate::tofu::{PinDecision, PinStore, TofuVerifier};
 
 /// How far a connection has got.
 ///
-/// `specs/07-estetica.md` names these, and `specs/05-cliente-tui.md`
+/// `specs/07-estetica.md` names these, and `specs/06-clientes-gui.md`
 /// requires both to be visible states rather than a spinner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkTrust {

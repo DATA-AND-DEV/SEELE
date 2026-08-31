@@ -2595,7 +2595,7 @@ fn link_state_from_byte(byte: u8) -> LinkTrust {
 /// Resolves `host` or `host:port` into an address, a TLS label, and a pin key.
 ///
 /// Three values because they are three things — see the same function in
-/// `seele-tui`, and `TofuVerifier::new` for why keying the pin by the TLS label
+/// the shell, and `TofuVerifier::new` for why keying the pin by the TLS label
 /// was wrong.
 /// The split is `seele_core::uri::separar` and not `rsplit_once(':')`: the port
 /// separator and an IPv6's own separator are the same character, and doing it by
@@ -3758,7 +3758,7 @@ mod tests {
 
     #[test]
     fn a_sync_band_travels_beside_its_number() {
-        // specs/05-cliente-tui.md forbids carrying it by colour alone, and the
+        // specs/06-clientes-gui.md forbids carrying it by colour alone, and the
         // same applies here: a shell that only got a hue could not print a
         // number, and one that only got a number would have to know the
         // thresholds.

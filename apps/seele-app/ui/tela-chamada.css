@@ -97,7 +97,7 @@
 
 /* O rótulo de conexão do comp: ponto e palavra dentro de um contorno. A cor do
    ponto e a da palavra andam juntas e nenhuma das duas está sozinha — trocar a
-   cor sem trocar a palavra é o que `specs/05-cliente-tui.md` proíbe. */
+   cor sem trocar a palavra é o que `specs/06-clientes-gui.md` proíbe. */
 .chamada-enlace {
   display: flex;
   align-items: center;
@@ -342,7 +342,7 @@
 /* O halo do comp: `inset 0 0 0 2px` em laranja quando a pessoa transmite, mais
    o fundo de bloco em carga. Nunca sozinho — a pastilha do canto diz
    `FALANDO` em palavra, que é o acompanhante textual que
-   `specs/05-cliente-tui.md` exige de toda faixa colorida.
+   `specs/06-clientes-gui.md` exige de toda faixa colorida.
 
    `[data-fala]` e não uma classe `.falando`: nome curto num namespace plano é
    nome que outra tela vai querer também. */
@@ -483,7 +483,7 @@
 
 /* A marca de bloco fica em face monoespaçada ao lado do número porque a Saira
    Condensed, que desenha o número, não tem `U+2588`. É ela que carrega a faixa
-   quando não há cor (`specs/05-cliente-tui.md`) — mesma construção do roster da
+   quando não há cor (`specs/06-clientes-gui.md`) — mesma construção do roster da
    tela de operação. */
 .chamada-cartao-marca {
   font-family: var(--seele-mono);

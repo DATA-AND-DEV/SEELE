@@ -168,7 +168,7 @@
 
 /* ---------- a severidade, em palavra ----------
 
-   `specs/05-cliente-tui.md` proíbe informação transmitida só por cor ou só por
+   `specs/06-clientes-gui.md` proíbe informação transmitida só por cor ou só por
    forma, e a severidade de um `Notice` é informação: `Info`, `Warning` e
    `Critical` são três coisas diferentes que o core decidiu. Uma borda mais
    grossa não as separa para quem não enxerga a diferença.

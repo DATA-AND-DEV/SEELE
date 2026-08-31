@@ -66,7 +66,7 @@ O que existe hoje, e que condiciona todo o desenho abaixo:
 - **Cor nunca anda sozinha, e não é o token que garante isso.** `theme.rs` tem
   `sync_mark()` devolvendo `█ ▒ ░` em toda palheta, `alert()` virando
   `REVERSED | BOLD` em monocromático, e a marca de bloco mais o número acompanham
-  toda Taxa de Sincronização. `specs/05-cliente-tui.md:143` é onde a regra mora:
+  toda Taxa de Sincronização. `specs/06-clientes-gui.md:143` é onde a regra mora:
   *"Nenhuma informação transmitida **só** por cor"*.
 - **`acessibilidade.css` corrige por token, e é a última folha da lista.** Sob
   `prefers-contrast: more` ela troca `osso-apagado` por `osso` em rótulo, título

@@ -61,7 +61,7 @@ O que existe hoje, e que condiciona todo o desenho abaixo:
   desconfortável: **`laranja-nerv` × `vermelho-alerta` = ΔE76 19,00**, o par mais
   próximo entre as seis cores que carregam significado, por mais que o dobro.
   A palheta não se sustenta em distância cromática; sustenta-se nos guardas.
-- **Nenhuma informação transmitida só por cor.** `specs/05-cliente-tui.md:143`.
+- **Nenhuma informação transmitida só por cor.** `specs/06-clientes-gui.md:143`.
   É por isso que `theme.rs` tem `sync_mark()` devolvendo `█ ▒ ░` em toda palheta
   e que a marca de bloco acompanha toda Taxa de Sincronização.
 - **A CSP é restritiva**, e a linha inteira está em
@@ -206,7 +206,7 @@ intransferível, e o 0029 já escreveu essa frase.
 **Quatro é pouco, e isso é dito em vez de escondido.** Cinco Dogmas e duas placas
 repetem a cor. O que torna isso um custo estético e não funcional é uma regra
 que já existe: **a placa carrega a sigla**, que é texto, e
-`specs/05-cliente-tui.md:143` proíbe informação transmitida só por cor. A cor
+`specs/06-clientes-gui.md:143` proíbe informação transmitida só por cor. A cor
 nunca é o que distingue um Dogma; ela é o que torna a distinção rápida. Acabar a
 lista custa velocidade de leitura, e não a leitura.
 

@@ -77,7 +77,7 @@ pub const DEGRADED_FLOOR: u8 = 60;
 /// What band a Sync Ratio falls into.
 ///
 /// `specs/07-estetica.md` gives each a colour. The colour is **not** here:
-/// that is the shell's decision, and `specs/05-cliente-tui.md` requires a
+/// that is the shell's decision, and `specs/06-clientes-gui.md` requires a
 /// no-colour mode where the band still has to be conveyable.
 ///
 /// # Three bands, not four

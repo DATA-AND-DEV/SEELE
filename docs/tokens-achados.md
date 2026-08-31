@@ -42,7 +42,7 @@ mais precisa ser legível estava reprovando em v1.
 "rótulo secundário, log inativo", e a escala tipográfica coloca rótulo em **10px
 com tracking de 0,22em** — que é texto pequeno.
 
-`specs/05-cliente-tui.md` exige modo alto contraste e nota que a paleta depende
+`specs/06-clientes-gui.md` exige modo alto contraste e nota que a paleta depende
 muito de vermelho e verde. **Trabalho de M4:** ou subir `osso-apagado` para
 ≥ 4,5:1, ou aceitar e garantir que nenhuma informação necessária use só ele.
 
@@ -85,7 +85,7 @@ linha. **Trabalho de M4.**
 
 ## 6. O que ainda não existe: modo sem cor
 
-`specs/05-cliente-tui.md` exige modo sem cor (só forma e texto) e respeito a
+`specs/06-clientes-gui.md` exige modo sem cor (só forma e texto) e respeito a
 `NO_COLOR`. O design entregue cobre truecolor e terminal em 256 cores; **não
 define o modo monocromático**. Continua sendo a lacuna G14 do plano.
 

@@ -2,14 +2,15 @@
 
 # SEELE
 
-**Voz e texto auto-hospedados, com o terminal em primeiro lugar.**
+**Voz e texto auto-hospedados. O servidor é seu.**
 
 Você sobe um servidor na sua máquina. Seus amigos conectam nele. Não existe
-serviço no meio, não existe cadastro em lugar nenhum, e o cliente principal
-roda inteiro no terminal — inclusive por SSH, num terminal de 16 cores.
+serviço no meio e não existe cadastro em lugar nenhum: quem hospeda decide quem
+entra, e a conversa não passa por ninguém.
 
-Não é um clone de Discord com tema escuro. É a suposição oposta: o servidor é
-seu, os dados são seus, e a interface de referência é aquela que cabe em 80×24.
+Não é um clone de Discord com tema escuro. É a suposição oposta — e a estética
+vem daí: densidade de informação e hierarquia de console, não superfície
+amigável.
 
 A marca diz o sistema inteiro: **dois nós e uma ligação.** O cheio é quem
 hospeda, o vazio é quem chega, a diagonal é o enlace.
@@ -19,11 +20,11 @@ hospeda, o vazio é quem chega, a diagonal é o enlace.
 ## Como é por dentro
 
 ```text
-   connection (terminal)          SEELE.app (desktop)
-          │                        │
-          └────────┬───────────────┘
+                        SEELE.app (desktop)
+                                 │
+                   ┌─────────────┘
                    │  seele-core — sessão, protocolo, áudio, estado
-                   │  (nenhuma lógica vive nas interfaces)
+                   │  (nenhuma lógica vive na interface)
                    ▼
              ── QUIC / TLS 1.3 ──
                    ▼
@@ -54,180 +55,38 @@ enxergar o protocolo direto.
 
 ## A interface
 
-Retratos de verdade: saem do mesmo código que desenha no terminal, rodando
-`cargo run --example telas -p seele-tui`. O que o texto não mostra é a cor — e
-é de propósito que nada dependa dela.
+Tauri sobre o mesmo núcleo, e é a única casca do produto — o cliente de terminal
+saiu no [ADR 0039](docs/adr/0039-o-produto-passa-a-ter-uma-casca-so.md).
 
-### Em operação
-
-```text
-┌ ■—□ SEELE ─ 12:04:33 ────────────────────────────────────────────────────────┐
-│┌ SERVIDOR ──────┐┌ SALAS / CANAIS ──────┐┌ MENSAGENS ───────────────────────┐│
-││▸ Casa do Alexa…││▼ SALA 1              ││12:01 alexandre                   ││
-││                ││  ● alexandre    █ 98%││  subi o servidor aqui em casa    ││
-││                ││  ○ rafa         ▒ 71%││12:03 rafa                        ││
-││                ││  ○ bia     MUDO ░ 44%││  meu sinal caiu, um segundo      ││
-││                ││▶ JOGOS               ││12:04 você                        ││
-││                ││─ CANAL geral         ││  vendo — o atraso subiu junto    ││
-││                ││─ CANAL combinados    ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││▸ _                               ││
-│└────────────────┘└──────────────────────┘└──────────────────────────────────┘│
-│ NORMAL │ SINAL █ 94% │ RTT 38ms │ JIT 12ms │ LOSS 0.2% │ OPUS 32k │ MUDO OFF │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
-
-Três painéis e uma barra de telemetria permanente. Ninguém precisa abrir menu
-para saber que a conexão está ruim.
-
-### Buscar no que foi dito
-
-```text
-┌ ■—□ SEELE ─ 12:04:33 ────────────────────────────────────────────────────────┐
-│┌ SERVIDOR ──────┐┌ SALAS / CANAIS ──────┐┌ MENSAGENS ───────────────────────┐│
-││▸ Casa do Alexa…││▼ SALA 1              ││12:01 alexandre                   ││
-││                ││  ● alexandre    █ 98%││  subi o servidor aqui em casa    ││
-││                ││  ○ rafa         ▒ 71%││12:03 rafa                        ││
-││                ││  ○ bia     MUDO ░ 44%││  meu sinal caiu, um segundo      ││
-││                ││▶ JOGOS               ││12:04 você                        ││
-││                ││─ CANAL geral         ││  vendo — o atraso subiu junto    ││
-││                ││─ CANAL combinados    ││12:05 alexandre                   ││
-││                ││                      ││  o sync voltou a subir           ││
-││                ││                      ││12:06 bia                         ││
-││                ││                      ││  aqui o sync nem caiu            ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││/ sync_  [1/2]                    ││
-│└────────────────┘└──────────────────────┘└──────────────────────────────────┘│
-│ BUSCA │ SINAL █ 94% │ RTT 38ms │ JIT 12ms │ LOSS 0.2% │ OPUS 32k │ MUDO OFF  │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
-
-### A ajuda cabe numa tela
-
-```text
-┌ ■—□ SEELE ─ 12:04:33 ────────────────────────────────────────────────────────┐
-│┌ SERVIDOR ──────┐┌ SALAS / CANAIS ──────┐┌ MENSAGENS ───────────────────────┐│
-││▸ Casa do A┌ AJUDA ─────────────────────────────────────────────┐           ││
-││           │h j k l / setas   navegar                           │em casa    ││
-││           │Tab / Shift+Tab   alternar painel                   │           ││
-││           │Enter             entrar na sala / abrir canal      │gundo      ││
-││           │s                 sair da sala de voz               │           ││
-││           │i                 escrever mensagem                 │u junto    ││
-││           │Espaço (segurar)  falar                             │           ││
-││           │m                 mudo (microfone fechado)          │           ││
-││           │d                 isolamento total (surdo)          │           ││
-││           │g / G             topo / fim                        │           ││
-││           │/                 buscar no histórico               │           ││
-││           │n / N             ocorrência seguinte / anterior    │           ││
-││           │?                 esta ajuda                        │           ││
-││           │:conectar <host>  conectar a um servidor            │           ││
-││           │:voice_room <nome>      entrar numa sala de voz           │           ││
-││           │:sync             diagnóstico detalhado             │           ││
-││           │:audio            dispositivos                      │           ││
-││           │:sair             sair do servidor e escolher outro │           ││
-││           │:q                sair do programa                  │           ││
-│└───────────└────────────────────────────────────────────────────┘───────────┘│
-│ NORMAL │ SINAL █ 94% │ RTT 38ms │ JIT 12ms │ LOSS 0.2% │ OPUS 32k │ MUDO OFF │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
-
-Uma tecla, de qualquer tela, nos dois clientes. O critério é que dê para usar o
-produto sabendo só ela.
-
-### Quando o enlace cai
-
-```text
-┌ ■—□ SEELE ─ 12:04:33 ────────────────────────────────────────────────────────┐
-│BATERIA INTERNA 04:47 · 3 tentativas                                          │
-│ENLACE PERDIDO                                                                │
-│┌ SERVIDOR ──────┐┌ SALAS / CANAIS ──────┐┌ MENSAGENS ───────────────────────┐│
-││▸ Casa do Alexa…││▼ SALA 1              ││12:01 alexandre                   ││
-││                ││  ● alexandre    █ 98%││  subi o servidor aqui em casa    ││
-││                ││  ○ rafa         ▒ 71%││12:03 rafa                        ││
-││                ││  ○ bia     MUDO ░ 44%││  meu sinal caiu, um segundo      ││
-││                ││▶ JOGOS               ││12:04 você                        ││
-││                ││─ CANAL geral         ││  vendo — o atraso subiu junto    ││
-││                ││─ CANAL combinados    ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││                                  ││
-││                ││                      ││▸ _                               ││
-│└────────────────┘└──────────────────────┘└──────────────────────────────────┘│
-│ NORMAL │ SINAL █ 94% │ RTT 38ms │ JIT 12ms │ LOSS 0.2% │ OPUS 32k │ MUDO OFF │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
-
-Cinco minutos de tentativa com espera exponencial, e o assento fica reservado
-esse tempo todo: quem entrou num túnel volta para a mesma sala.
-
-### Num terminal apertado
-
-```text
-TERMINAL 56×14 < 80×24
-12:01 alexandre
-  subi o servidor aqui em casa
-12:03 rafa
-  meu sinal caiu, um segundo
-12:04 você
-  vendo — o atraso subiu junto
-
-
-
-
-
-
-
-```
-
-Abaixo de 80×24 degrada para painel único com aviso. O que sobrevive é a
-conversa, porque um cliente que não mostra o que foi dito não está degradado,
-está quebrado.
-
-### O cliente gráfico
-
-Tauri sobre o mesmo núcleo. A composição é deliberadamente a mesma da TUI:
-mesmas colunas, mesma barra permanente no rodapé. Quem usa um abre o outro e
-sabe onde tudo está.
-
-**HOSPEDAR AQUI** sobe um servidor dentro do próprio app e entra nele — quem só
+**HOSPEDAR AQUI** sobe um servidor dentro do próprio app e entra nele: quem só
 quer clicar nunca precisa abrir um terminal. Ele vive enquanto a janela estiver
-aberta, e o link de convite aparece no topo, pronto para copiar.
+aberta, e o link de convite aparece no topo, pronto para copiar. Quem prefere um
+servidor que sobrevive à janela instala o `seeled` e o roda como daemon.
 
-Três coisas que o app tem e o terminal ainda não:
+O que a tela mostra, e por que:
 
-- **a trilha de servidores**, à esquerda. O histórico de onde você já esteve;
-  apertar um troca de servidor, e a troca pergunta antes porque ela derruba a
-  sessão — e derruba o servidor junto, se for esta máquina que hospeda;
+- **a trilha de servidores**, à esquerda: o histórico de onde você já esteve.
+  Apertar um troca de servidor, e a troca pergunta antes — ela derruba a sessão,
+  e derruba o servidor junto se for esta máquina que hospeda;
+- **as salas e os canais**, ao centro, com quem está em cada sala;
+- **a faixa de pessoas**, fixa à direita, agrupada por sala, com o sinal de cada
+  uma dentro do cartão;
 - **personalização**, para quem administra: nome e ícone do servidor. O ícone é
   PNG, no máximo 8 KiB e 256 px, e o limite está escrito na tela **antes** de
-  você escolher o arquivo;
-- **a faixa de pessoas**, fixa à direita, agrupada por sala, com o sinal de cada
-  uma dentro do cartão.
+  você escolher o arquivo.
 
----
+Nenhuma informação é transmitida só por cor. O sinal vem sempre com o número ao
+lado, e o mudo tem marcador de texto além da cor — a regra está em
+`specs/06-clientes-gui.md` e vale em toda a superfície.
+
+Quando o enlace cai, a interface **não fecha e não mostra um spinner**: ela
+esmaece, conta cinco minutos, lista as tentativas de reconexão, e o histórico
+continua ali para leitura. Quem entrou num túnel volta para a mesma sala.
+
+> **Capturas:** as que estavam aqui eram retratos do cliente de terminal,
+> gerados por um exemplo daquele crate. Saíram com ele. As da interface gráfica
+> ainda não existem, e prometer imagem que não há é pior que não ter seção de
+> imagem.
 
 ## Alcançar de fora
 
@@ -270,7 +129,7 @@ ou abrir pelo botão direito → **Abrir**. No Windows o SmartScreen avisa e o
 caminho é **Mais informações** → **Executar assim mesmo**. As notas de release
 explicam cada caso.
 
-### Só o terminal, numa linha
+### Só o servidor, numa linha
 
 **macOS e Linux:**
 
@@ -444,7 +303,6 @@ O que está frouxo está em `docs/pendencias.md`, com nome e motivo.
 | `crates/seele-core` | o núcleo: sessão, estado, voz. Tudo que pensa |
 | `crates/seele-server` | `seeled`, o servidor |
 | `crates/seele-encontro` | o ponto de encontro do furo de NAT |
-| `crates/seele-tui` | `connection`, o cliente de terminal |
 | `crates/seele-ffi` | a superfície que as cascas gráficas falam |
 | `apps/seele-app` | o cliente desktop, Tauri |
 | `design/marca/` | a marca, e o gerador de todos os tamanhos dela |

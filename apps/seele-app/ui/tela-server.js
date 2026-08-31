@@ -201,7 +201,7 @@ function linhaDeDispositivo(lado, id, nome, ehPadrao) {
  * É também o que substitui o `SALVAR` do comp: não há o que confirmar quando a
  * tela já diz o que está valendo.
  *
- * A marca é texto, e não só a barra laranja: `specs/05-cliente-tui.md` proíbe
+ * A marca é texto, e não só a barra laranja: `specs/06-clientes-gui.md` proíbe
  * informação transmitida só por cor.
  */
 function marcarLinhas(snapshot) {
@@ -711,7 +711,7 @@ function desenharAndamentoDoDownload(andamento) {
   }
 
   const parte = Math.max(0, Math.min(100, Math.round((andamento.baixados / andamento.total) * 100)));
-  // A porcentagem ao lado dos blocos, sempre: `specs/05-cliente-tui.md` proíbe
+  // A porcentagem ao lado dos blocos, sempre: `specs/06-clientes-gui.md` proíbe
   // informação que só a forma carregue, e uma parede de blocos é forma.
   medido(barra, `${blocos(parte, BLOCOS_DO_DOWNLOAD)} ${parte}%`);
   contagem.textContent = `${emMegabytes(andamento.baixados)} de ${emMegabytes(andamento.total)}`;

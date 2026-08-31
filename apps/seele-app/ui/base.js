@@ -68,7 +68,7 @@ function quando(segundos) {
 /**
  * A marca de bloco de uma faixa do sinal.
  *
- * `specs/05-cliente-tui.md`: nenhuma informação transmitida só por cor. A marca
+ * `specs/06-clientes-gui.md`: nenhuma informação transmitida só por cor. A marca
  * é a metade que sobrevive sem cor nenhuma, e é desenhada em toda paleta — uma
  * marca que só aparece quando piora é uma marca que ninguém aprendeu a ler.
  *

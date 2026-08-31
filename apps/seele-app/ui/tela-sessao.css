@@ -567,7 +567,7 @@
 
    A palavra ao lado do nome é o que separa isto de um enfeite: o glifo dá a
    varredura de relance, e `fala`/`mudo` é a mesma informação sem depender de
-   enxergar forma nem cor (`specs/05-cliente-tui.md`). */
+   enxergar forma nem cor (`specs/06-clientes-gui.md`). */
 .voice_room-dentro {
   list-style: none;
   margin: 0;
@@ -1379,7 +1379,7 @@
 .roster-sala-conta { flex: 0 0 auto; }
 
 /* A sala em que se está, marcada na borda **e** em palavra: a borda é cor, e
-   `specs/05-cliente-tui.md` não aceita informação que só a cor carregue. */
+   `specs/06-clientes-gui.md` não aceita informação que só a cor carregue. */
 .roster-grupo[data-nossa="sim"] .roster-sala {
   border-left: 2px solid var(--seele-laranja-nerv);
   color: var(--seele-laranja-nerv);
@@ -1429,7 +1429,7 @@
 }
 
 /* A marca de bloco: a metade da faixa que sobrevive sem cor
-   (`specs/05-cliente-tui.md`). Em face monoespaçada porque a Saira Condensed,
+   (`specs/06-clientes-gui.md`). Em face monoespaçada porque a Saira Condensed,
    que desenha os números ao lado dela, não tem `U+2588`. Vale no cartão e na
    célula do rodapé, que são os dois lugares em que uma faixa é escrita. */
 .sync-marca {
@@ -1723,7 +1723,7 @@
 .busca input { flex: 1; min-width: 0; border: none; background: none; padding: 0; }
 .busca .botao-fantasma { margin-left: 0; }
 
-/* O contador é o acompanhante textual do realce: `specs/05-cliente-tui.md`
+/* O contador é o acompanhante textual do realce: `specs/06-clientes-gui.md`
    proíbe informação transmitida só por cor, e "[2/7]" é a mesma informação sem
    depender de enxergar o laranja.
 
@@ -1738,7 +1738,7 @@
 }
 
 /* O realce, e o realce onde o cursor está — duas coisas, e a diferença entre
-   elas nunca é só a cor (`specs/05-cliente-tui.md:144`).
+   elas nunca é só a cor (`specs/06-clientes-gui.md:144`).
 
    O terminal resolveu isto com REVERSED contra o acento puro (`ui.rs`), e aqui
    é a mesma ideia com o que o navegador tem: o corrente inverte o bloco e

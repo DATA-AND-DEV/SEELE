@@ -2,7 +2,7 @@
 
 Status: aceito
 
-Contexto: `specs/05-cliente-tui.md` pede `Espaço (hold)` para push-to-talk e marca **[EM ABERTO]** a colisão com digitação. A decisão D19 já resolvia a colisão — PTT só no modo Normal, onde não há nada com que colidir. Ao implementar M4.3 apareceu um problema que a spec não previu e que é anterior a esse: **a maioria dos terminais não informa quando uma tecla é solta.**
+Contexto: `specs/06-clientes-gui.md` pede `Espaço (hold)` para push-to-talk e marca **[EM ABERTO]** a colisão com digitação. A decisão D19 já resolvia a colisão — PTT só no modo Normal, onde não há nada com que colidir. Ao implementar M4.3 apareceu um problema que a spec não previu e que é anterior a esse: **a maioria dos terminais não informa quando uma tecla é solta.**
 
 Eventos de soltura só existem no protocolo de teclado do Kitty (`CSI > 1 u`, `REPORT_EVENT_TYPES`), suportado por kitty, foot, WezTerm, Ghostty e pouco mais. Terminal.app, iTerm2, o Terminal do GNOME em configuração padrão e praticamente tudo a que alguém chega por SSH mandam apenas o pressionamento. Num terminal desses, "segurar espaço" é indistinguível de "apertar espaço" — e um microfone aberto por um evento que nunca recebe o seu par é um microfone que nunca fecha.
 
@@ -24,6 +24,6 @@ Consequências:
 
 - Duas experiências de PTT em campo. Isso é real e é o custo. A mitigação é que ambas são estados visíveis e explícitos, não modos escondidos: quem abre o cliente num terminal com trava vê a barra dizendo que está transmitindo, e vê o próprio `●` no roster.
 - A consulta é feita **uma vez**. Chamar `supports_keyboard_enhancement()` por uso custa uma pergunta ao terminal e a espera pela resposta a cada uso; num terminal que não responde, custa o timeout inteiro. Esse foi um travamento real de 2,4 s no arranque antes de ser corrigido — medido, não hipotético.
-- `specs/05-cliente-tui.md` deveria registrar que o item **[EM ABERTO]** tem duas causas independentes, e que esta ADR resolve a segunda. A primeira continua resolvida por D19.
+- `specs/06-clientes-gui.md` deveria registrar que o item **[EM ABERTO]** tem duas causas independentes, e que esta ADR resolve a segunda. A primeira continua resolvida por D19.
 
 Custo de reverter: **baixo**. O ramo inteiro está em duas funções de `crates/seele-tui/src/main.rs`, e o modelo em `app.rs` só conhece `SpaceDown` e `SpaceUp` — ele não sabe nem se importa com qual dos dois caminhos os produziu.

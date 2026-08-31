@@ -226,7 +226,7 @@
   outline-offset: -2px;
 }
 
-/* A escolhida, e ela é dita em palavra também: `specs/05-cliente-tui.md` proíbe
+/* A escolhida, e ela é dita em palavra também: `specs/06-clientes-gui.md` proíbe
    informação transmitida só por cor, e qual fonte está armada é informação. A
    palavra vem no `aria-pressed` e no rótulo que o script escreve. */
 .compartilhar-fonte[aria-pressed="true"] {

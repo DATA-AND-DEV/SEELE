@@ -26,7 +26,7 @@
  * código.
  *
  * A marca de texto continua sendo o que diz qual estado é qual, porque a cor
- * sozinha não pode (`specs/05-cliente-tui.md`), e o movimento continua durando
+ * sozinha não pode (`specs/06-clientes-gui.md`), e o movimento continua durando
  * o tempo real da conexão e parando com ela.
  */
 function subsistemas(estado, marca) {
@@ -161,7 +161,7 @@ async function conectar(evento) {
   botao.disabled = true;
   erro.hidden = true;
   // A linha de CONEXÃO reporta enquanto a conexão acontece. Dura o tempo real
-  // dela: `specs/05-cliente-tui.md` chama animação decorativa que atrasa o
+  // dela: `specs/06-clientes-gui.md` chama animação decorativa que atrasa o
   // usuário de falha de design.
   subsistemas("carga", "…");
   // A linha de etapa nasce vazia a cada tentativa: a de uma conexão anterior

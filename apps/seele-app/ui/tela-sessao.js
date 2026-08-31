@@ -176,7 +176,7 @@ function medido(nodo, texto) {
  * Igual à `blocos()` do comp e à da TUI, e a igualdade é o ponto — 20 blocos
  * são 5% cada nos dois clientes, e quem aprendeu a ler a barra no terminal lê
  * a mesma barra aqui. Nunca sozinha: o número que ela desenha está sempre ao
- * lado (`specs/05-cliente-tui.md`).
+ * lado (`specs/06-clientes-gui.md`).
  */
 function blocos(pct, total) {
   const cheios = Math.max(0, Math.min(total, Math.round((pct / 100) * total)));
@@ -681,7 +681,7 @@ function desenharCanais(snapshot) {
  * Uma pessoa na lista de quem está dentro de uma sala de voz.
  *
  * O comp marca o estado com um ponto colorido e nada mais.
- * `specs/05-cliente-tui.md` proíbe informação que só a cor carregue, e um ponto
+ * `specs/06-clientes-gui.md` proíbe informação que só a cor carregue, e um ponto
  * é também só forma — então o que muda o estado vira **palavra**: `fala` e
  * `mudo`. O repouso não ganha palavra nenhuma, pela mesma razão que a pastilha
  * `EM ESCUTA` do roster não ganha bloco: é onde toda linha está quase sempre, e
@@ -1111,7 +1111,7 @@ function desenharPessoas(snapshot) {
     );
 
   // Fora de sala, o próprio operador ganha um grupo com o nome do lugar onde
-  // ele está. O sinal é a medida que `specs/05-cliente-tui.md` chama de
+  // ele está. O sinal é a medida que `specs/06-clientes-gui.md` chama de
   // permanente, e sumir com ela porque ainda não se entrou em sala nenhuma
   // seria escondê-la justo enquanto se decide em qual entrar. O rótulo do grupo
   // é o mesmo `FORA DE SALA` que o rodapé escreve, e não um grupo sem nome:
@@ -1204,7 +1204,7 @@ function grupoDeSala(nome, ocupacao, nossa, cartoes) {
   cabeca.append(elemento("span", "roster-sala-nome", nome));
   if (ocupacao !== null) cabeca.append(elemento("span", "roster-sala-conta", ocupacao));
   // Que se está nesta sala, em palavra e não só na marca da borda: a borda é
-  // cor, e `specs/05-cliente-tui.md` não aceita informação que só a cor carregue.
+  // cor, e `specs/06-clientes-gui.md` não aceita informação que só a cor carregue.
   if (nossa) cabeca.append(elemento("span", "roster-sala-aqui", "você está aqui"));
 
   const lista = elemento("ul", "roster-pessoas");
@@ -1257,7 +1257,7 @@ function desenharMedia(voice_room) {
  * Três faixas de informação, e todas as três têm acompanhante textual: o
  * número ao lado da marca de bloco, a barra de 20 blocos, e a pastilha de
  * estado em palavra. Nenhuma delas depende de enxergar a cor
- * (`specs/05-cliente-tui.md`), e é essa a propriedade que a mudança de coluna
+ * (`specs/06-clientes-gui.md`), e é essa a propriedade que a mudança de coluna
  * tinha de preservar inteira — ela veio junto, sem uma linha de diferença.
  */
 function linhaDoRoster(pessoa, temAudio) {

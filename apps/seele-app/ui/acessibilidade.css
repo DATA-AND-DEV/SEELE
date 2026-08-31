@@ -7,7 +7,7 @@
 
 /* ---------- acessibilidade ---------- */
 
-/* specs/05-cliente-tui.md: modo sem cor, e daltonismo é comum no público. Aqui
+/* specs/06-clientes-gui.md: modo sem cor, e daltonismo é comum no público. Aqui
    a forma e o texto continuam suficientes — a marca de bloco e o número
    acompanham toda sinal. */
 @media (prefers-contrast: more) {

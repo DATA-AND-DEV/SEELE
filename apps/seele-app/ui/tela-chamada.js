@@ -455,7 +455,7 @@ function pintarCartao(cartao, pessoa, temAudio) {
   // fosse defensável.
   cartao.querySelector(".nota").textContent = fraseDoEstado(pessoa);
 
-  // A palavra, e não só a cor. `specs/05-cliente-tui.md` proíbe informação
+  // A palavra, e não só a cor. `specs/06-clientes-gui.md` proíbe informação
   // transmitida só por cor, e o estado de quem está na sala é informação: o
   // halo laranja de quem transmite e a pastilha dizem a mesma coisa, e são
   // duas porque uma delas não chega a quem não vê a cor.

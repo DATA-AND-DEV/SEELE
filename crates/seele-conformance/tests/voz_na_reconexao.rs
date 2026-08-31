@@ -66,10 +66,12 @@ fn braco_da_reconexao(fonte: &str, arquivo: &str) -> String {
 #[test]
 fn nenhuma_casca_reabre_a_voz_jogando_fora_os_controles() {
     let raiz = raiz();
-    let cascas = [
-        ("seele-ffi", "crates/seele-ffi/src/lib.rs"),
-        ("seele", "crates/seele-tui/src/main.rs"),
-    ];
+    // Uma casca, e eram duas até o ADR 0039 tirar a TUI do produto.
+    //
+    // A lista fica como lista, e não vira uma conferência sobre um arquivo só:
+    // o dia em que a casca móvel do M6 chegar, ela entra aqui e herda a mesma
+    // cobrança. Um teste reescrito para uma casca teria de ser reescrito de novo.
+    let cascas = [("seele-ffi", "crates/seele-ffi/src/lib.rs")];
 
     for (casca, caminho) in cascas {
         let fonte = std::fs::read_to_string(raiz.join(caminho))

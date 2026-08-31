@@ -180,7 +180,7 @@ impl<'a> Messages<'a> {
             // than a message that fails to send.
             //
             // Bodies differ under the defect below, which is real and open:
-            // `client_message_id` restarts at 1 every session (`seele-tui`) or
+            // `client_message_id` restarts at 1 every session, or
             // every process (`seele-ffi`), while `author_id` is derived from the
             // key on disk and never changes. So after a reconnection a person's
             // messages 1, 2, 3… are all read as retries of the *previous*
@@ -537,7 +537,7 @@ mod tests {
         // Equal bodies made the substitution invisible.
         //
         // Different bodies is not a hypothetical. `client_message_id` restarts
-        // at 1 every session in `seele-tui` and every process in `seele-ffi`,
+        // at 1 every session, and every process in `seele-ffi`,
         // while `author_id` is derived from the key on disk and never changes —
         // so after a reconnection message 1 of the new session is read as a
         // retry of message 1 of the old one, and the bodies have nothing to do

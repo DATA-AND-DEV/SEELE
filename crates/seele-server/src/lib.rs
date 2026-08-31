@@ -48,7 +48,7 @@ pub mod voice_room;
 
 /// O vocabulário de fio de um ponto de encontro, e **só** ele.
 ///
-/// Existe porque quem diagnostica a rede (`connection --rede`, em `seele-tui`) precisa
+/// Existe porque quem diagnostica a rede precisa
 /// escrever e ler estes datagramas, e a regra de dependência do ADR 0002 não
 /// deixa uma casca ver `seele-proto`.
 ///

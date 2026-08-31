@@ -35,7 +35,7 @@
    primário, e a ênfase inversa da TUI dita em pixels.
 
    O rótulo é escrito por extenso (`CONEXÃO SEGURA`), então a cor não carrega a
-   informação sozinha; `specs/05-cliente-tui.md` não deixaria. */
+   informação sozinha; `specs/06-clientes-gui.md` não deixaria. */
 .cartela-padrao {
   display: flex;
   align-items: baseline;

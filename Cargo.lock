@@ -4926,7 +4926,6 @@ dependencies = [
  "seele-ffi",
  "seele-proto",
  "seele-server",
- "seele-tui",
  "tempfile",
  "tokio",
 ]
@@ -5007,22 +5006,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "seele-tui"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "chrono",
- "crossterm",
- "ed25519-dalek",
- "rand 0.10.2",
- "ratatui",
- "seele-core",
- "seele-server",
- "tokio",
- "unicode-width",
 ]
 
 [[package]]

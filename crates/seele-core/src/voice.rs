@@ -1,7 +1,7 @@
 //! The voice path, as one thing a shell can hold.
 //!
 //! `specs/01-arquitetura.md` puts all session, protocol and audio logic in this
-//! crate, and ADR 0002 keeps `seele-tui` from depending on `seele-audio` at all.
+//! crate, and ADR 0002 keeps the shells from depending on `seele-audio` at all.
 //! Those two together mean the capture → encode → send → receive → jitter →
 //! decode → mix → play loop cannot live in the interface, however convenient
 //! that would be. The M2 spike put it in the client binary because a spike is
@@ -168,7 +168,7 @@ struct Controls {
 ///
 /// Its own type rather than a re-export of `seele_audio::device::CaptureDevice`
 /// for the same reason [`DeviceRates`] is its own type: ADR 0002 keeps
-/// `seele-ffi` and `seele-tui` from naming `seele-audio` at all, and a
+/// `seele-ffi` from naming `seele-audio` at all, and a
 /// re-export would make them name it through this crate's front door.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CaptureDevice {

@@ -11,7 +11,7 @@
 //! # Plain data, and nothing else
 //!
 //! No formatting, no colour, no bands. `specs/07-estetica.md` defines
-//! four Sync Ratio bands with four colours, and `specs/05-cliente-tui.md`
+//! four Sync Ratio bands with four colours, and `specs/06-clientes-gui.md`
 //! requires a no-colour mode — both are shell concerns. A `to_string()` here
 //! would be the architecture error `specs/01-arquitetura.md` warns about, and
 //! it would have to be written twice more for the desktop and mobile shells.

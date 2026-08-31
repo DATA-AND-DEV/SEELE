@@ -284,7 +284,7 @@ function desenharFontesDeTela(fontes, permissao, listou) {
       botao.dataset.fonte = String(fonte.id);
       const armada = fonte.id === fonteArmada;
       // `aria-pressed` e a palavra `ESCOLHIDA` dizem a mesma coisa que a cor de
-      // fundo diz. `specs/05-cliente-tui.md` proíbe informação transmitida só
+      // fundo diz. `specs/06-clientes-gui.md` proíbe informação transmitida só
       // por cor, e qual fonte está armada é informação.
       botao.setAttribute("aria-pressed", armada ? "true" : "false");
       botao.append(

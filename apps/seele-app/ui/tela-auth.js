@@ -288,7 +288,7 @@ function doisDigitos(quantos) {
  * Uma linha no B·02, com o relógio local do instante em que ela foi observada.
  *
  * `tom` escolhe a cor, e nunca é o que carrega a informação: o texto da linha
- * diz o que aconteceu por escrito (`specs/05-cliente-tui.md`).
+ * diz o que aconteceu por escrito (`specs/06-clientes-gui.md`).
  */
 function registrar(texto, tom) {
   const linha = elemento("li", "registro-linha");

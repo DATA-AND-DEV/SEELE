@@ -286,7 +286,7 @@ pub async fn serve(
         // Recusado com motivo, e não em silêncio: quem estoura este balde por
         // engano — um cliente com laço de reconexão defeituoso, uma casa
         // inteira saindo do mesmo NAT — precisa poder ler o que houve.
-        // `worth_retrying` no `seele-tui` já trata `RateLimited` como coisa que
+        // `worth_retrying` na casca já trata `RateLimited` como coisa que
         // não se repete na hora, então o aviso também serve para o laço parar.
         tracing::warn!(peer = %connection.remote_address(), "handshake refused: rate limited");
         let _ = frame::write(

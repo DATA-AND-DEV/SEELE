@@ -101,7 +101,7 @@
 
 /* A seção aberta. Nunca só pela cor: `aria-current` é o que um leitor de tela
    anuncia, e a barra da esquerda é o que sobra em monocromático —
-   `specs/05-cliente-tui.md` proíbe informação transmitida só por cor. */
+   `specs/06-clientes-gui.md` proíbe informação transmitida só por cor. */
 .server-secao[aria-current="true"] {
   border-left-color: var(--seele-laranja-nerv);
   background: var(--seele-laranja-fraco);
@@ -295,7 +295,7 @@
 .server-dispositivo:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: -2px; }
 
 /* O escolhido. Nunca só pela cor: o rótulo `EM USO` vem junto, desenhado pelo
-   JavaScript, porque `specs/05-cliente-tui.md` proíbe informação transmitida só
+   JavaScript, porque `specs/06-clientes-gui.md` proíbe informação transmitida só
    por cor e uma marca laranja sozinha é exatamente isso. */
 .server-dispositivo[data-escolhido="sim"] {
   border-left-color: var(--seele-laranja-nerv);

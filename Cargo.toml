@@ -7,7 +7,6 @@ members = [
     "crates/seele-video",
     "crates/seele-core",
     "crates/seele-server",
-    "crates/seele-tui",
     "crates/seele-ffi",
     "apps/seele-app",
     "crates/seele-conformance",
@@ -16,7 +15,7 @@ members = [
 
 # Every crate specs/01-arquitetura.md names now exists. Each arrived with the
 # first code that belonged to it, never before (risk R10): `seele-server` with
-# M2, `seele-tui` with M4, `seele-ffi` with M5.
+# M2, `seele-ffi` with M5. `seele-tui` existiu de M4 até o ADR 0039.
 
 [workspace.package]
 version = "0.0.0"

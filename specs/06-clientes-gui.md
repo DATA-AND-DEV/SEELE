@@ -135,6 +135,26 @@ O design gráfico (ver `PROMPT-CLAUDE-DESIGN.md`) tem liberdade tipográfica e d
 
 Toda tela gráfica precisa ter uma resposta para: "como isso ficaria em 80×24 monocromático?" Se não tiver, está fora do produto.
 
+## Acessibilidade
+
+Estas regras vieram da `06-clientes-gui.md` quando a TUI saiu do produto
+(ADR 0039). Elas nunca foram sobre o terminal: são sobre **não depender de cor
+para transmitir informação**, e valem em qualquer superfície.
+
+- **Modo alto contraste e modo sem cor** — só forma e texto. Daltonismo é comum
+  no público e a palheta depende muito de vermelho e verde.
+- **Nenhuma informação transmitida só por cor.** O sinal vem sempre acompanhado
+  do número; o mudo tem marcador textual além da cor. É a regra que mais é
+  citada de dentro do código, e a que mais silenciosamente se perde: uma cor a
+  mais é fácil de acrescentar e ninguém percebe que ela virou a única fonte.
+- **[EM ABERTO]** Leitor de tela. Numa TUI era limitado a ponto de a pergunta
+  ficar aberta por viabilidade; numa casca web o caminho existe — ARIA — e a
+  pergunta passa a ser de escopo, não de possibilidade.
+
+O que **não** veio: as regras de renderização em células, o `NO_COLOR`, o
+terminal mínimo de 80×24 e os critérios de aceite por SSH. Aquilo era sobre o
+terminal, e saiu com ele.
+
 ## Critérios de aceite
 
 - Desktop: binário abaixo de 30 MB, RSS abaixo de 150 MB, inicialização abaixo de 2 s.

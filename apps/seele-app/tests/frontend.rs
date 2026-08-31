@@ -888,7 +888,7 @@ fn the_ordinal_indexes_the_same_list_the_page_groups_by_message() {
 
 #[test]
 fn the_current_occurrence_is_not_marked_out_by_colour_alone() {
-    // `specs/05-cliente-tui.md:144`. The terminal separates the two states with
+    // `specs/06-clientes-gui.md:144`. The terminal separates the two states with
     // REVERSED against plain accent; the browser has weight and decoration, and
     // has to use one of them. A rule that only swaps hues would leave the
     // cursor invisible on a monochrome display — which is the same failure as
@@ -1855,7 +1855,7 @@ fn the_alert_and_the_battery_are_layers_over_the_session_and_not_screens() {
 
 #[test]
 fn the_severity_of_a_notice_reads_without_colour() {
-    // `specs/05-cliente-tui.md` forbids information carried by colour alone, and
+    // `specs/06-clientes-gui.md` forbids information carried by colour alone, and
     // the severity of a `Notice` is information: the core decided between three
     // values and the shell has to show which one. The alert box is one orange
     // box for all three — the comp's own legend says orange for mention and
@@ -2115,7 +2115,7 @@ fn a_person_card_passes_the_band_through_and_never_measures_anything_itself() {
 
 #[test]
 fn the_state_of_a_person_is_a_word_and_never_only_a_colour() {
-    // `specs/05-cliente-tui.md` forbids information carried by colour alone, and
+    // `specs/06-clientes-gui.md` forbids information carried by colour alone, and
     // who is transmitting is information: the comp marks it with an orange halo
     // around the card and nothing else. A halo is invisible to anybody who does
     // not see the hue, and this card carries three facts that way — the
@@ -2456,7 +2456,7 @@ fn the_voice_room_says_who_is_inside_and_says_their_state_in_words() {
     //
     // The second half is the part that would rot silently. The comp marks who
     // is talking with a coloured dot and nothing else, and
-    // `specs/05-cliente-tui.md` forbids information carried by colour alone —
+    // `specs/06-clientes-gui.md` forbids information carried by colour alone —
     // a dot is carried by shape alone too, which is the same failure wearing
     // the other hat. So the states that change something have to be a *word*.
     // Deleting the words leaves a screen that still looks right in a
@@ -3596,7 +3596,7 @@ fn the_three_subsystems_look_different_while_they_are_loading() {
     );
 
     // And the word still has to say it, for anybody reading with no colour at
-    // all — `specs/05-cliente-tui.md`.
+    // all — `specs/06-clientes-gui.md`.
     let script = without_comments(&scripts());
     assert!(
         script.contains("subsistemas(\"carga\""),
@@ -4219,7 +4219,7 @@ fn the_download_bar_is_left_unmeasured_when_the_package_carries_no_total() {
     );
     assert!(
         body.contains("${parte}%"),
-        "the bar has no number beside it, and `specs/05-cliente-tui.md` forbids \
+        "the bar has no number beside it, and `specs/06-clientes-gui.md` forbids \
          information carried by shape alone — a wall of blocks is shape:\n{body}"
     );
 }

@@ -104,7 +104,7 @@ pub use voice::{
 
 /// The surface a shell is allowed to see.
 ///
-/// ADR 0002 keeps `seele-tui` and `seele-ffi` from depending on `seele-proto` or
+/// ADR 0002 keeps `seele-ffi` from depending on `seele-proto` or
 /// `seele-audio` directly. That is not bureaucracy: a shell that can name an
 /// `ssrc` has protocol knowledge in it, and the same knowledge would then have
 /// to be written twice more for the desktop and mobile shells.
