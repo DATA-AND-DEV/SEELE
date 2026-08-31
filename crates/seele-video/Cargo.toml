@@ -82,5 +82,47 @@ core-graphics = "0.25"
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-capture = "2.0.1"
 
+# As duas que substituíram o laço de conversão à mão. O `spikes/tela-na-cor`
+# achou o motivo: dos 8 ms que o laço gastava por quadro, **94% eram
+# redimensionar** e só 6% converter cor — o contrário do que todo mundo supunha,
+# e a razão de trocar só a conversão não adiantar nada.
+#
+# Medido no Ryzen 7 5800X3D, que é o alvo: **17,69 ms → 7,42 ms, 2,4×.** A
+# tabela com os dois lados da conta está no cabeçalho do
+# `captura/reamostragem.rs`.
+#
+# Custo aceito, contado no `Cargo.lock` e não estimado: **4 crates novos** —
+# elas duas, mais `pastey` e `spin` —, e uma segunda versão de `itertools`, que
+# o `multiple-versions = "warn"` do `deny.toml` aceita reclamando. O resto da
+# árvore das duas já estava aqui. (Uma estimativa anterior falava em ~27; ela
+# saiu de compilá-las isoladas num spike, onde nada mais existia para
+# compartilhar.)
+#
+# O macOS não precisa de nenhuma das duas: pede `420v` à ScreenCaptureKit, e o
+# compositor já entrega reduzido e no formato certo. É a mesma coisa que este
+# commit passa a fazer no Windows — só que lá o compositor não faz por nós.
+#
+# `dcv-color-primitives` é MIT-0 e vem do NICE DCV, o desktop remoto da Amazon —
+# converter pixel de tela em formato de vídeo é a razão de ela existir. Ela tem
+# NEON além de AVX2, o que a documentação não diz e a própria biblioteca
+# reporta; foi o que permitiu medir num Mac o que vai rodar num Ryzen.
+dcv-color-primitives = "1.0.0"
+fast_image_resize = "6.1.0"
+
+# As mesmas, de novo, para os testes.
+#
+# O `captura/reamostragem.rs` é compilado sob `test` em toda plataforma de
+# propósito — quatro dos cinco testes daquela aritmética nunca rodaram fora do
+# Windows, e essa era a doença. Sem estas duas linhas, tirá-los de trás do
+# `cfg` não adiantaria nada: o módulo não compilaria no Mac.
+#
+# Repetir a versão em dois lugares é uma trava a manter — se divergirem, o teste
+# passa a exercitar uma biblioteca diferente da que vai para produção. Está aqui
+# em vez de nas dependências normais porque o preço de errar isso é menor que o
+# de pôr 27 crates no binário que o macOS e o Linux distribuem.
+[dev-dependencies]
+dcv-color-primitives = "1.0.0"
+fast_image_resize = "6.1.0"
+
 [lints]
 workspace = true

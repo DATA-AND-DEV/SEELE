@@ -62,9 +62,14 @@ private = { ignore = true }
 # parser and friends, pulled in by Tauri, used unmodified. If we ever *modify*
 # one, those files must be published — which is the whole obligation, and it is
 # one we can meet. ADR 0020.
+#
+# MIT-0 is MIT with the attribution clause removed — strictly more permissive
+# than MIT, which is already allowed. It arrived with `dcv-color-primitives`,
+# the BGRA-to-I420 converter on the Windows capture path.
 allow = [
     "MPL-2.0",
     "MIT",
+    "MIT-0",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",

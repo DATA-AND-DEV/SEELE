@@ -380,7 +380,11 @@ impl GraphicsCaptureApiHandler for Manipulador {
         if self.mapa.as_ref().is_none_or(|mapa| mapa.origem != origem) {
             self.mapa = Some(Mapa::novo(origem, self.destino));
         }
-        let Some(mapa) = self.mapa.as_ref() else {
+        // `as_mut` porque o mapa guarda os buffers intermediários da conversão
+        // — cinco megabytes em 1440p — e reaproveitá-los entre quadros é parte
+        // do ganho. Alocá-los por quadro devolveria à alocação o custo que a
+        // troca de biblioteca acabou de tirar do laço.
+        let Some(mapa) = self.mapa.as_mut() else {
             return Ok(());
         };
 
