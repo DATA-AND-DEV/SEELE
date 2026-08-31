@@ -1439,3 +1439,38 @@ aparelho, não sobre este código.
 
 **Quando dói.** Numa casa cujo roteador tenha tabela de NAT pequena ou limite de
 criação de mapeamento por segundo. Não aparece em LAN, onde nenhum aviso sai.
+
+## 29 · A conformidade reprova sob a carga da própria suíte
+
+**Sintoma, observado em 2026-08-31.** `cargo test --workspace` reprova um teste
+de conformidade por rodada, **sempre um diferente**, e sempre estourando um prazo
+de ~20 s. Vistos numa única sessão: `uma_rajada_de_mensagens_grandes_chega_inteira`,
+`two_shells_hold_a_conversation`, `a_muted_mic_is_visible_to_everybody_else`,
+`a_restarted_server_keeps_its_accounts`, e um do `acceptance_m5`.
+
+**A prova de que é carga e não regressão.** Cada um deles passa sozinho em menos
+de um segundo — `a_restarted_server_keeps_its_accounts` roda em **0,25 s** — e
+estoura em **20,1 s** quando a suíte inteira corre junto. O `cargo` roda os
+binários de teste em paralelo, esta máquina tem quinze núcleos, e cada teste de
+conformidade levanta um servidor QUIC de verdade com aperto de mão, TLS e banco.
+
+**Por que dói mais do que parece.** Não é o tempo perdido: é que uma suíte que
+reprova aleatoriamente **deixa de ser evidência**. Numa sessão de trabalho isto
+apareceu cinco vezes, e em cada uma foi preciso rodar de novo para distinguir «o
+que eu acabei de escrever quebrou» de «a máquina estava cheia». Uma suíte assim
+treina quem a lê a reexecutar em vez de investigar — e o dia em que a falha for
+de verdade, ela vai ser reexecutada também.
+
+**O que ainda não se sabe.** Se o prazo é curto demais para uma máquina carregada
+ou se há contenção de verdade — porta, disco, ou o `Daemon::bind` esperando algo
+que a saturação atrasa. As duas têm conserto diferente: a primeira é o prazo, a
+segunda é o teste.
+
+**Por onde começar.** Rodar a conformidade com `--test-threads=1` e ver se some.
+Se sumir, é carga, e a escolha é entre prazo maior e serializar aquele crate
+(`test-threads` no `Cargo.toml` do `seele-conformance`, que não afeta o resto do
+workspace). Se não sumir com uma linha só de execução, é contenção de recurso e o
+alvo é outro.
+
+**Quando dói.** Em toda rodada de `cargo test --workspace`, que é o comando que
+este projeto usa para dizer que está verde.
