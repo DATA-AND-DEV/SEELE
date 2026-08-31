@@ -1034,3 +1034,65 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod a_sonda_em_lan {
+    use super::{
+        LeituraDaConexao, Subida, CAMINHO_DO_SERVER_BPS, JANELA_DA_SUBIDA, TETO_DA_SUBIDA_BPS,
+    };
+    use std::time::Instant;
+
+    /// Numa LAN a sonda tem de **subir**, e a pergunta é se ela sobe.
+    ///
+    /// O sintoma relatado em campo: áudio perfeito e vídeo muito pixelado entre
+    /// duas máquinas na mesma rede. A suspeita é que a perna do anfitrião fica
+    /// travada na suposição de 2 Mbps — que dá teto de 1,2 Mbps, e 1,2 Mbps para
+    /// jogo em 720p é exatamente «pixelado».
+    ///
+    /// Este teste encena o caso: uma pessoa assistindo, e janelas que entregam
+    /// o que a estimativa permitiu, sem perda e sem congestionamento. É a LAN.
+    #[test]
+    fn com_uma_pessoa_assistindo_e_sem_dor_a_estimativa_sobe() {
+        let inicio = Instant::now();
+        let mut subida = Subida::nova();
+        subida.assistindo(1);
+
+        assert_eq!(
+            subida.estimativa(),
+            CAMINHO_DO_SERVER_BPS,
+            "a sonda não parte da suposição"
+        );
+
+        let mut bytes = 0_u64;
+        // Vinte segundos de transmissão saudável.
+        for volta in 1..=20_u32 {
+            // O que a estimativa de agora permite, entregue inteiro: é o que a
+            // LAN faz. Oito bits por byte, uma janela de um segundo.
+            let permitido = subida.estimativa() / 100 * super::FRACAO_DO_CAMINHO;
+            bytes += u64::from(permitido) / 8;
+            subida.observar(
+                inicio + JANELA_DA_SUBIDA * volta,
+                1,
+                LeituraDaConexao {
+                    bytes_enviados: bytes,
+                    pacotes_perdidos: 0,
+                    eventos_de_congestionamento: 0,
+                },
+            );
+        }
+
+        assert!(
+            subida.estimativa() > CAMINHO_DO_SERVER_BPS * 4,
+            "em vinte segundos de LAN sem dor a estimativa saiu de {} e chegou só a {} — \
+             a perna do anfitrião está travada na suposição, e é ela que trava o vídeo",
+            CAMINHO_DO_SERVER_BPS,
+            subida.estimativa()
+        );
+        assert!(subida.estimativa() <= TETO_DA_SUBIDA_BPS);
+        assert!(
+            subida.medida().is_some(),
+            "a estimativa andou e a medida continuou sendo `None`, então nada disso \
+             atravessa o fio e o cliente segue com a suposição"
+        );
+    }
+}
