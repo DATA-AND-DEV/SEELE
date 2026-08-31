@@ -2975,6 +2975,31 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
         Err(_) => return,
     };
 
+    // A malha do ADR 0036, ligada aqui e não dentro do `Room`.
+    //
+    // O `Room` é o que se sabe do **servidor**, e encolher o próprio microfone é
+    // decisão do lado do áudio; ele não conhece o `Voice` e não deveria. Este é
+    // o único lugar que segura os dois.
+    //
+    // Um servidor v1 nunca manda este quadro, e então nada disto acontece: a
+    // faixa fica onde nasceu, que é o teto, e o comportamento é o de antes.
+    if let seele_core::ServerMessage::UplinkLoss { fraction } = message {
+        if let Ok(voice) = shared.voice.lock() {
+            if let Some(voice) = voice.as_ref() {
+                if let Some(bps) = voice.observar_perda(*fraction, std::time::Instant::now()) {
+                    // Registrado só quando **muda**, que é o que a malha
+                    // devolve. Uma linha por medida seriam sessenta por minuto
+                    // por sessão, dizendo quase sempre a mesma coisa.
+                    tracing::info!(
+                        bps,
+                        perda = fraction,
+                        "a faixa de bitrate mudou por perda de subida"
+                    );
+                }
+            }
+        }
+    }
+
     if changed.roster {
         shared.notify(&Event::RosterChanged);
     }
