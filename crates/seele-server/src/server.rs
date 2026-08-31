@@ -258,6 +258,24 @@ pub enum Event {
         /// A quem entregar: quem está compartilhando.
         sharer: PersonId,
     },
+
+    // ---- o bitrate adaptativo do ADR 0036 ----
+    /// Quanto da voz de alguém não está chegando.
+    ///
+    /// Endereçado a uma pessoa e entregue a todas, como o
+    /// [`Self::KeyFrameRequested`] acima e pelo mesmo motivo: um servidor não
+    /// tem outra maneira de uma sessão alcançar outra, e a sala que mede não
+    /// conhece sessão nenhuma. Quem estreita a audiência é `session::translate`.
+    ///
+    /// **A audiência é uma pessoa só**, e isso é promessa e não detalhe:
+    /// difundir a perda de subida contaria a toda a sala a qualidade da rede de
+    /// cada um.
+    UplinkLoss {
+        /// De quem é a subida medida.
+        person: PersonId,
+        /// A fração perdida, de zero a um.
+        fraction: f32,
+    },
 }
 
 /// Quem está compartilhando tela em cada sala de voz.

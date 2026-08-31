@@ -19,7 +19,7 @@
 //! routing trivially parallel." No `Mutex` appears in this module.
 
 use std::collections::HashMap;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use seele_proto::ids::{PersonId, ScreenId, Ssrc, VoiceRoomId};
 use seele_proto::transport::MAX_FRAMES_PER_SECOND;
@@ -35,6 +35,14 @@ use crate::tela::{AberturaDeTela, Enquadramento, FimDaTela, Pedaco};
 /// stopped keeping up, and buffering more of it only adds latency to audio that
 /// is already late.
 const CHANNEL_DEPTH: usize = 1024;
+
+/// De quanto em quanto tempo a perda de subida de cada pessoa é recalculada.
+///
+/// Uma vez por segundo e não a cada pacote: `PerdaDeSubida::fracao` varre a
+/// janela, e fazê-lo cinquenta vezes por segundo por participante seria pagar a
+/// varredura cinquenta vezes por um número que o cliente só usa uma. Ver o
+/// ADR 0036.
+const INTERVALO_DE_MEDIDA: Duration = Duration::from_secs(1);
 
 /// What a connection asks its voice room to do.
 pub enum VoiceRoomCommand {
@@ -154,6 +162,10 @@ struct Member {
     orcamento: crate::taxa::Balde,
     /// Por onde convidar esta pessoa a assistir. Ver [`VoiceRoomCommand::Join`].
     tela: mpsc::Sender<AberturaDeTela>,
+    /// Quanto da voz desta pessoa não está chegando. Ver o ADR 0036.
+    perda: crate::perda_de_subida::PerdaDeSubida,
+    /// Quando medir de novo. Ver [`INTERVALO_DE_MEDIDA`].
+    proxima_medida: Instant,
 }
 
 /// A transmissão de tela que está passando por esta sala agora.
@@ -290,6 +302,8 @@ impl VoiceRoom {
                             now,
                         ),
                         tela,
+                        perda: crate::perda_de_subida::PerdaDeSubida::nova(),
+                        proxima_medida: now + INTERVALO_DE_MEDIDA,
                     },
                 );
                 // Quem chega no meio de uma transmissão entra na fila, e não no
@@ -599,6 +613,30 @@ impl VoiceRoom {
         if !member.may_speak {
             self.drops.not_permitted += 1;
             return;
+        }
+
+        // A perda de subida desta pessoa, contada aqui porque é aqui que o
+        // cabeçalho já foi decodificado — a conferência do `ssrc` acima precisa
+        // dele, então `seq` vem de graça e nenhum byte de payload é tocado.
+        //
+        // **Antes do limitador de taxa, de propósito.** Um quadro que o
+        // limitador descarta *chegou*; contá-lo como perda misturaria uma
+        // decisão nossa com o que a rede fez, e o número passaria a acusar o
+        // enlace de alguém por uma política do servidor.
+        member.perda.chegou(header.seq, now);
+        let medida = if now >= member.proxima_medida {
+            member.proxima_medida = now + INTERVALO_DE_MEDIDA;
+            member.perda.fracao(now)
+        } else {
+            None
+        };
+        if let Some(fracao) = medida {
+            if let Some(eventos) = self.eventos.as_ref() {
+                let _ = eventos.send(Event::UplinkLoss {
+                    person,
+                    fraction: fracao,
+                });
+            }
         }
 
         // specs/04-servidor-seele.md: a per-sender frames-per-second limit, so a
@@ -1490,5 +1528,120 @@ mod tests {
         }
 
         assert!(voice_room.drops().subscriber_lagging > 0);
+    }
+
+    /// A sala mede a subida de quem fala, e conta a quem falou.
+    ///
+    /// O sinal do ADR 0036. Cem quadros com o de número cinquenta faltando: uma
+    /// lacuna de `seq` que é, pela definição do protocolo, um pacote que saiu e
+    /// não chegou.
+    #[test]
+    fn a_sala_relata_a_perda_de_subida_de_quem_fala() {
+        let (mut voice_room, mut ouvinte) = sala_com_barramento(crate::tela::CAMINHO_DO_SERVER_BPS);
+        let _alice = member(&mut voice_room, 1, 100, true);
+        let _bob = member(&mut voice_room, 2, 200, true);
+
+        let inicio = Instant::now();
+        for passo in 0..100_u16 {
+            if passo == 50 {
+                continue;
+            }
+            voice_room.handle_at(
+                VoiceRoomCommand::Datagram {
+                    from: Ssrc(100),
+                    bytes: datagram(100, passo),
+                },
+                inicio + std::time::Duration::from_millis(u64::from(passo) * 20),
+            );
+        }
+
+        let mut relatada = None;
+        while let Ok(evento) = ouvinte.try_recv() {
+            if let Event::UplinkLoss { person, fraction } = evento {
+                assert_eq!(person, PersonId(1), "a perda foi atribuída a outra pessoa");
+                relatada = Some(fraction);
+            }
+        }
+        let fracao = relatada.expect("a sala não relatou perda nenhuma");
+        assert!(
+            (fracao - 0.01).abs() < 0.01,
+            "um perdido em cem foi relatado como {fracao}"
+        );
+    }
+
+    /// Quem fala sem perder nada não vira notícia ruim.
+    #[test]
+    fn uma_subida_limpa_e_relatada_como_zero() {
+        let (mut voice_room, mut ouvinte) = sala_com_barramento(crate::tela::CAMINHO_DO_SERVER_BPS);
+        let _alice = member(&mut voice_room, 1, 100, true);
+        let _bob = member(&mut voice_room, 2, 200, true);
+
+        let inicio = Instant::now();
+        for passo in 0..100_u16 {
+            voice_room.handle_at(
+                VoiceRoomCommand::Datagram {
+                    from: Ssrc(100),
+                    bytes: datagram(100, passo),
+                },
+                inicio + std::time::Duration::from_millis(u64::from(passo) * 20),
+            );
+        }
+
+        let mut relatada = None;
+        while let Ok(evento) = ouvinte.try_recv() {
+            if let Event::UplinkLoss { fraction, .. } = evento {
+                relatada = Some(fraction);
+            }
+        }
+        assert_eq!(relatada, Some(0.0));
+    }
+
+    /// A medida é da rede, e não da política do servidor.
+    ///
+    /// Um quadro que o limitador de taxa descarta **chegou**. Se ele contasse
+    /// como perda, quem estourasse o limite — um cliente com soluço de
+    /// escalonamento, que é o caso comum e não o ataque — receberia de volta a
+    /// acusação de que a rede dele está ruim, e encolheria o próprio microfone
+    /// por causa de uma decisão nossa.
+    #[test]
+    fn quadro_barrado_pelo_limitador_nao_conta_como_perda() {
+        let (mut voice_room, mut ouvinte) = sala_com_barramento(crate::tela::CAMINHO_DO_SERVER_BPS);
+        let _alice = member(&mut voice_room, 1, 100, true);
+        let _bob = member(&mut voice_room, 2, 200, true);
+
+        // Trezentos quadros em 1,5 s — o dobro do teto de sessenta por segundo,
+        // então o balde estoura e o limitador descarta. A sequência, porém, não
+        // tem lacuna nenhuma: nada se perdeu na rede.
+        //
+        // O tempo precisa **andar**: a medida só é recalculada uma vez por
+        // segundo, e uma rajada inteira no mesmo instante nunca chega a cruzar
+        // esse intervalo com amostra suficiente. A primeira redação deste teste
+        // fazia isso e reprovava com `None`.
+        let inicio = Instant::now();
+        for passo in 0..300_u16 {
+            voice_room.handle_at(
+                VoiceRoomCommand::Datagram {
+                    from: Ssrc(100),
+                    bytes: datagram(100, passo),
+                },
+                inicio + std::time::Duration::from_millis(u64::from(passo) * 5),
+            );
+        }
+        assert!(
+            voice_room.drops().rate_limited > 0,
+            "o limitador não chegou a barrar nada, e este teste não prova o que prova"
+        );
+
+        let mut relatada = None;
+        while let Ok(evento) = ouvinte.try_recv() {
+            if let Event::UplinkLoss { fraction, .. } = evento {
+                relatada = Some(fraction);
+            }
+        }
+        assert_eq!(
+            relatada,
+            Some(0.0),
+            "o que o limitador barrou foi contado como perda de rede"
+        );
     }
 }

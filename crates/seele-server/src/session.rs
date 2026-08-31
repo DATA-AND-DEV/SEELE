@@ -2226,7 +2226,20 @@ async fn run_session(
                 }
 
                 if let Some(message) = translate(&event, &channels, session.person) {
-                    frame::write(&mut send, &message).await?;
+                    // Um cliente v1 não conhece as variantes que a v2
+                    // acrescentou, e o postcard não é autodescritivo: mandá-la
+                    // não seria ignorada do outro lado — deslocaria o fluxo de
+                    // controle dele para sempre, e a partir dali ele segue
+                    // conectado sem entender mais nenhum quadro. A janela de
+                    // compatibilidade do ADR 0036 promete que ele continua
+                    // funcionando, e esta é a linha que cumpre a promessa.
+                    let entende = match message {
+                        ServerMessage::UplinkLoss { .. } => session.protocol_version >= 2,
+                        _ => true,
+                    };
+                    if entende {
+                        frame::write(&mut send, &message).await?;
+                    }
                 }
             }
 
@@ -2711,6 +2724,19 @@ fn translate(
         // A subida medida andou. Todo mundo recebe, porque o `min` do §5.1 é
         // calculado em cada cliente e esta é uma das três pernas dele.
         Event::HostUplink { bps } => Some(ServerMessage::HostUplink { bps: *bps }),
+
+        // E esta, ao contrário da de cima, é de uma pessoa só.
+        //
+        // O filtro está aqui e não em quem emite porque a `VoiceRoom` que mede
+        // não conhece sessão nenhuma — o barramento é o único caminho de uma
+        // para outra. Difundir contaria a toda a sala a qualidade da rede de
+        // cada um, que é o oposto da promessa do ADR 0036.
+        Event::UplinkLoss { person, fraction } if *person == self_person => {
+            Some(ServerMessage::UplinkLoss {
+                fraction: *fraction,
+            })
+        }
+        Event::UplinkLoss { .. } => None,
         Event::MessagePosted(message) => {
             channels
                 .contains(&message.channel)
