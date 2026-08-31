@@ -529,6 +529,128 @@ const PRAZO_DE_CANDIDATO_DISTANTE: Duration = Duration::from_secs(1);
 /// esquecimento.
 const PRAZO_DA_PRIMEIRA_VOLTA: Duration = Duration::from_millis(1500);
 
+/// Quanto se espera antes de disparar o próximo candidato da corrida.
+///
+/// 250 ms, que é o número do RFC 8305. A medição da pendência nº 26 o justifica:
+/// com quatro candidatos o último começa em 750 ms, e o bom respondeu em 358 ms
+/// depois disso — contra os 9,6 s que a série cobrava. Encurtar para 150 ms
+/// ganharia ~300 ms e poria mais apertos de mão simultâneos numa rede lenta,
+/// onde vários teriam fechado sozinhos. Ver o ADR 0037.
+#[allow(
+    dead_code,
+    reason = "usada na tarefa 3 deste plano, que separa a corrida da série"
+)]
+const DEFASAGEM_ENTRE_CANDIDATOS: Duration = Duration::from_millis(250);
+
+/// O que uma corrida produziu.
+///
+/// As falhas vêm junto com o vencedor de propósito: quem chama precisa delas
+/// para a limpeza de pin órfão dos perdedores, e precisa saber **quem** venceu
+/// para pular a chave dele. Ver o ADR 0037.
+#[allow(
+    dead_code,
+    reason = "usada na tarefa 3 deste plano, que separa a corrida da série"
+)]
+#[derive(Debug)]
+struct Corrida<T> {
+    /// Quem fechou primeiro, e a posição dele na lista que foi corrida.
+    vencedor: Option<(usize, T)>,
+    /// Quem não fechou, na ordem em que desistiram.
+    falhas: Vec<(usize, ConnectError)>,
+}
+
+/// Corre `quantos` tentativas, disparando uma a cada `defasagem`, e fica com a
+/// primeira que fechar.
+///
+/// É o RFC 8305 — «Happy Eyeballs» — e a razão de existir está medida na
+/// pendência nº 26: em série, três candidatos sem chance custam 9,6 s antes de o
+/// quarto sequer ser tentado.
+///
+/// # Por que genérica sobre `T`
+///
+/// Para que a defasagem e o «primeiro vence» tenham teste. Um teste que
+/// provasse isto com sockets de verdade dependeria de rede, e o que precisa ser
+/// provado aqui não é a rede: é que o segundo candidato **começa** sem esperar o
+/// primeiro terminar, e que o rápido vence mesmo estando por último na lista.
+///
+/// # Por que `JoinSet` e não `futures::FuturesUnordered`
+///
+/// Para não acrescentar dependência. O `tokio` já entra com `features =
+/// ["full"]`, e este repositório documenta em `Cargo.toml` o que cada
+/// dependência arrasta — uma a mais para isto seria custo sem necessidade.
+///
+/// # Cancelamento
+///
+/// As tentativas perdedoras são derrubadas com o `JoinSet` ao fim desta função.
+/// Elas não continuam escrevendo em lugar nenhum, e o que uma delas possa ter
+/// escrito em disco — um pin de TLS — é assunto de quem chama, que sabe qual
+/// chave o vencedor usou.
+#[allow(
+    dead_code,
+    reason = "usada na tarefa 3 deste plano, que separa a corrida da série"
+)]
+async fn correr<T, F, Fut>(quantos: usize, defasagem: Duration, tentar: F) -> Corrida<T>
+where
+    T: Send + 'static,
+    F: Fn(usize) -> Fut,
+    Fut: std::future::Future<Output = Result<T, ConnectError>> + Send + 'static,
+{
+    let mut corredores = tokio::task::JoinSet::new();
+    let mut falhas: Vec<(usize, ConnectError)> = Vec::new();
+    let mut proximo = 0_usize;
+
+    loop {
+        // Dispara o próximo, se ainda houver. O primeiro sai sem espera nenhuma.
+        if proximo < quantos {
+            let posicao = proximo;
+            let futuro = tentar(posicao);
+            corredores.spawn(async move { (posicao, futuro.await) });
+            proximo += 1;
+        }
+
+        if corredores.is_empty() {
+            break;
+        }
+
+        // Enquanto os que já estão no ar correm, o relógio da defasagem anda. Se
+        // alguém fechar antes dela, a corrida acaba ali — que é o caso comum, e
+        // é o motivo de isto existir.
+        let terminou = if proximo < quantos {
+            tokio::select! {
+                terminou = corredores.join_next() => terminou,
+                () = tokio::time::sleep(defasagem) => continue,
+            }
+        } else {
+            corredores.join_next().await
+        };
+
+        match terminou {
+            Some(Ok((posicao, Ok(pronto)))) => {
+                // O `JoinSet` derruba o resto ao ser recolhido no fim desta
+                // função.
+                return Corrida {
+                    vencedor: Some((posicao, pronto)),
+                    falhas,
+                };
+            }
+            Some(Ok((posicao, Err(erro)))) => falhas.push((posicao, erro)),
+            // Uma tentativa que entrou em pânico ou foi cancelada. Não é
+            // vencedora e não tem erro próprio a contar.
+            Some(Err(_)) => {}
+            None => {
+                if proximo >= quantos {
+                    break;
+                }
+            }
+        }
+    }
+
+    Corrida {
+        vencedor: None,
+        falhas,
+    }
+}
+
 impl Enlace {
     /// Conecta no primeiro endereço que atender, tentando um de cada vez.
     ///
@@ -3753,5 +3875,100 @@ mod quem_precisa_de_furo {
     #[test]
     fn o_laco_local_nao_precisa() {
         assert!(!precisa_de_furo(alvo("127.0.0.1:8384")));
+    }
+}
+
+#[cfg(test)]
+mod a_corrida {
+    use super::{correr, ConnectError};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    /// O primeiro a fechar vence, mesmo estando por último na lista.
+    ///
+    /// É a propriedade inteira do RFC 8305, e a que a série não tem: em série o
+    /// candidato lento **precisa** terminar antes de o rápido começar.
+    #[tokio::test(start_paused = true)]
+    async fn o_rapido_vence_mesmo_estando_por_ultimo() {
+        let corrida = correr(3, Duration::from_millis(250), |posicao| async move {
+            // Os dois primeiros demoram uma eternidade; o terceiro fecha logo.
+            let espera = if posicao == 2 { 50 } else { 100_000 };
+            tokio::time::sleep(Duration::from_millis(espera)).await;
+            Ok::<usize, ConnectError>(posicao)
+        })
+        .await;
+
+        assert_eq!(corrida.vencedor.map(|(posicao, _)| posicao), Some(2));
+    }
+
+    /// O segundo candidato começa sem esperar o primeiro terminar.
+    ///
+    /// Sem esta propriedade não há Happy Eyeballs nenhum — é literalmente a
+    /// diferença entre 9,6 s e ~1,1 s na pendência nº 26.
+    #[tokio::test(start_paused = true)]
+    async fn o_segundo_comeca_antes_de_o_primeiro_terminar() {
+        let comecaram = Arc::new(AtomicUsize::new(0));
+        let contador = Arc::clone(&comecaram);
+
+        let corrida = correr(2, Duration::from_millis(250), move |posicao| {
+            let contador = Arc::clone(&contador);
+            async move {
+                contador.fetch_add(1, Ordering::SeqCst);
+                // O primeiro nunca termina dentro do horizonte deste teste.
+                let espera = if posicao == 0 { 100_000 } else { 10 };
+                tokio::time::sleep(Duration::from_millis(espera)).await;
+                Ok::<usize, ConnectError>(posicao)
+            }
+        })
+        .await;
+
+        assert_eq!(corrida.vencedor.map(|(posicao, _)| posicao), Some(1));
+        assert_eq!(
+            comecaram.load(Ordering::SeqCst),
+            2,
+            "o segundo candidato não chegou a começar"
+        );
+    }
+
+    /// Quando todos falham, todas as falhas voltam — quem chama precisa delas
+    /// para escolher a que melhor descreve o que houve, e para limpar os pins.
+    #[tokio::test(start_paused = true)]
+    async fn todas_as_falhas_voltam_quando_ninguem_fecha() {
+        let corrida = correr(3, Duration::from_millis(250), |_| async {
+            Err::<usize, ConnectError>(ConnectError::Unreachable)
+        })
+        .await;
+
+        assert!(corrida.vencedor.is_none());
+        assert_eq!(corrida.falhas.len(), 3);
+    }
+
+    /// Uma lista vazia não trava: devolve sem vencedor e sem falha.
+    #[tokio::test(start_paused = true)]
+    async fn uma_corrida_sem_candidatos_termina() {
+        let corrida = correr(0, Duration::from_millis(250), |_| async {
+            Ok::<usize, ConnectError>(0)
+        })
+        .await;
+
+        assert!(corrida.vencedor.is_none());
+        assert!(corrida.falhas.is_empty());
+    }
+
+    /// Quem falha cedo não impede quem vem depois de vencer.
+    #[tokio::test(start_paused = true)]
+    async fn uma_falha_imediata_nao_encerra_a_corrida() {
+        let corrida = correr(2, Duration::from_millis(250), |posicao| async move {
+            if posicao == 0 {
+                return Err(ConnectError::Unreachable);
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            Ok::<usize, ConnectError>(posicao)
+        })
+        .await;
+
+        assert_eq!(corrida.vencedor.map(|(posicao, _)| posicao), Some(1));
+        assert_eq!(corrida.falhas.len(), 1);
     }
 }

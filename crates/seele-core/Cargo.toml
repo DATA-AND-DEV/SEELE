@@ -54,6 +54,17 @@ serde = "1.0.229"
 # Só para o par QUIC do teste de dessincronização do `frame`. Já está na árvore
 # do workspace via `seele-server`, então não acrescenta superfície de auditoria.
 rcgen = "0.14.8"
+# O relógio virtual do tokio, e nada além dele.
+#
+# `features = ["full"]` **não** inclui `test-util`, que é o que dá
+# `#[tokio::test(start_paused = true)]`. Sem ele, provar que a corrida do ADR
+# 0037 não espera o primeiro candidato terminar exigiria esperas de verdade — e
+# um dos testes finge um candidato que demora cem segundos, justamente porque
+# «nunca termina» é a condição que ele encena.
+#
+# Custo nenhum sobre o que já se audita: mesmo crate, já na árvore, e
+# `dev-dependencies` não entra em binário publicado.
+tokio = { version = "1.53.1", features = ["test-util"] }
 
 [lints]
 workspace = true
