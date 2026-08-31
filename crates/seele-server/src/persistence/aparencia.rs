@@ -177,10 +177,7 @@ mod testes {
     #[test]
     fn o_nome_e_aparado_antes_de_ser_gravado() {
         let persistence = memoria();
-        assert_eq!(
-            definir_nome(&persistence, "  Casa \n").unwrap(),
-            "Casa"
-        );
+        assert_eq!(definir_nome(&persistence, "  Casa \n").unwrap(), "Casa");
         assert_eq!(nome(&persistence, "Casa").unwrap(), "Casa");
     }
 

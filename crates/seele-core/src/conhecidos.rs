@@ -358,11 +358,7 @@ mod tests {
             .registrar("server.exemplo:8383", "ayanami", Some(1))
             .expect("registrar");
         lista
-            .anotar_aparencia(
-                "server.exemplo:8383",
-                Some("Casa"),
-                Some(&[1, 2, 3]),
-            )
+            .anotar_aparencia("server.exemplo:8383", Some("Casa"), Some(&[1, 2, 3]))
             .expect("anotar");
 
         lista

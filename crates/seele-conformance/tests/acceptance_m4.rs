@@ -39,7 +39,7 @@ const SIZE: (u16, u16) = (80, 24);
 
 async fn start() -> Result<(SocketAddr, Arc<Daemon>)> {
     let config = ServerConfig {
-        name: "Casa".into(),
+        name: NOME_LONGO.into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
         ..ServerConfig::default()
@@ -136,6 +136,15 @@ fn attach(
 }
 
 /// Somebody outside the project connects, sees the room, and reads what is said.
+/// Um nome que **não cabe** no painel de servidor, que tem 18 células.
+///
+/// Existe como constante para o motivo do comprimento ficar escrito: o teste
+/// abaixo prova que o nome é truncado, e um nome curto o faria passar sem provar
+/// nada. Quando os nomes de servidor deixaram de ser `Terceira Tóquio` — que era
+/// citação de anime e por acaso era longo — este precisou ser escolhido de
+/// propósito, e não herdado.
+const NOME_LONGO: &str = "Casa dos Fundos da Vila";
+
 #[tokio::test]
 async fn an_outsider_connects_and_the_screen_shows_the_conversation() -> Result<()> {
     let (address, server) = start().await?;
@@ -165,7 +174,7 @@ async fn an_outsider_connects_and_the_screen_shows_the_conversation() -> Result<
     // Truncated, not missing: the server panel is 18 cells and the name is
     // longer. Asserting the full string here would be asserting that truncation
     // does not work.
-    assert!(screen.contains("Terceira"), "no servidor:\n{screen}");
+    assert!(screen.contains("Casa dos"), "no servidor:\n{screen}");
 
     server.shutdown();
     Ok(())
