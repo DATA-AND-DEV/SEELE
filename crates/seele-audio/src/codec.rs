@@ -45,7 +45,13 @@ pub const MIN_BITRATE_BPS: u32 = 16_000;
 /// line crediting ADR 0010 with having "narrowed" the range; ADR 0010 is about
 /// in-band FEC and says nothing about bitrate. The number and the sentence were
 /// both wrong, and both are gone. See ADR 0036.
-pub const MAX_BITRATE_BPS: u32 = 48_000;
+///
+/// **Re-exported, and declared in `seele_proto::transport`.** The server counts
+/// what a room costs and needs the worst case a client can send, but it never
+/// decodes Opus (spec 04) and does not depend on this crate (ADR 0002). Two
+/// copies of the number would be two ceilings drifting apart; the one that
+/// survives is the one both sides can see. See ADR 0038.
+pub use seele_proto::transport::MAX_BITRATE_BPS;
 
 /// Why the codec refused.
 #[derive(Debug, Clone, PartialEq, Eq)]

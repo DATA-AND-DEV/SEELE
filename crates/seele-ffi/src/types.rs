@@ -160,6 +160,18 @@ pub enum NoticeReason {
     /// `ScreenShareStopped` mudo: quem apertou parar sabe que apertou, e quem
     /// foi parado pelo servidor não ficaria sabendo de nada.
     ScreenShareOverHostUplink,
+
+    /// A sala cresceu além do que a subida medida desta máquina comporta.
+    ///
+    /// Os dois números viajam porque «a sala está grande» não é acionável e
+    /// «precisa de 6,5 Mbps, e a medida é 4 Mbps» é. A casca escreve a frase;
+    /// aqui só chegam os valores. Ver o ADR 0038.
+    VoiceRoomOverHostUplink {
+        /// Quanto a sala pede no pior caso, todos falando ao mesmo tempo.
+        precisa_bps: u64,
+        /// A subida que esta máquina mediu para si. Nunca zero.
+        medido_bps: u32,
+    },
 }
 
 impl From<seele_core::AlertReason> for NoticeReason {
@@ -172,6 +184,13 @@ impl From<seele_core::AlertReason> for NoticeReason {
             seele_core::AlertReason::PermissionDenied => Self::PermissionDenied,
             seele_core::AlertReason::VoiceRoomFull => Self::VoiceRoomFull,
             seele_core::AlertReason::OperatorNotice => Self::OperatorNotice,
+            seele_core::AlertReason::VoiceRoomOverHostUplink {
+                precisa_bps,
+                medido_bps,
+            } => Self::VoiceRoomOverHostUplink {
+                precisa_bps,
+                medido_bps,
+            },
             seele_core::AlertReason::RateLimited => Self::RateLimited,
             seele_core::AlertReason::MovedByOperator => Self::MovedByOperator,
             seele_core::AlertReason::VoiceRoomDeleted => Self::VoiceRoomDeleted,

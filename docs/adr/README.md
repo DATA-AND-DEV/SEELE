@@ -43,6 +43,7 @@ Formato e regra de criação em `specs/10-convencoes.md`: toda decisão marcada
 | [0035](0035-o-codigo-deixa-de-falar-evangelion.md) | O código deixa de falar Evangelion | aceito | `07` — o vocabulário no código |
 | [0036](0036-bitrate-adaptativo-em-faixas.md) | Bitrate adaptativo em faixas, sobre perda de subida medida no servidor | aceito | `03` — o bitrate adaptativo que a spec pede |
 | [0037](0037-candidatos-do-convite-em-paralelo.md) | Um `Endpoint`, muitas conexões: os candidatos do convite correm juntos | aceito | `02` — alcançar um servidor pela internet |
+| [0038](0038-o-teto-da-sala-e-contado-nao-declarado.md) | O teto da sala é contado, e quem hospeda é avisado | aceito | `04` — o dimensionamento da sala |
 
 ## O que ainda não tem ADR
 

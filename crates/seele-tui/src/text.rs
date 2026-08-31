@@ -31,6 +31,15 @@ pub fn alert(reason: AlertReason) -> &'static str {
         AlertReason::OperatorNotice => "AVISO DO OPERADOR",
         AlertReason::RateLimited => "VOCÊ ESTÁ FALANDO RÁPIDO DEMAIS PARA O SERVIDOR",
         AlertReason::MovedByOperator => "UM OPERADOR MOVEU VOCÊ DE SALA",
+        // **Sem os números, e esta casca é a única que os perde.** O motivo
+        // carrega `precisa_bps` e `medido_bps` justamente porque «a sala está
+        // grande» não é acionável (ADR 0038) — mas esta função devolve
+        // `&\'static str`, e formatar dois valores exige uma `String`. Trocar a
+        // assinatura mexe em todas as frases da TUI por causa de uma; a casca
+        // gráfica, que é onde quem hospeda administra, recebe os dois valores.
+        AlertReason::VoiceRoomOverHostUplink { .. } => {
+            "ESTA SALA PEDE MAIS SUBIDA DO QUE ESTA MÁQUINA MEDIU"
+        }
         // O connection já saiu e a conversa já saiu da tela quando isto chega. Sem a
         // frase, o que resta é uma sala que sumiu sozinha — que de onde se lê é
         // igualzinho a um cliente que perdeu a conta de onde estava.

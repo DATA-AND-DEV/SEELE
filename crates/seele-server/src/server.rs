@@ -276,6 +276,24 @@ pub enum Event {
         /// A fração perdida, de zero a um.
         fraction: f32,
     },
+
+    // ---- o teto contado do ADR 0038 ----
+    /// Uma sala cresceu além do que a subida medida desta máquina comporta.
+    ///
+    /// Difundido, e entregue **só a quem tem `AdministerServer`** — o filtro
+    /// mora no laço da sessão, e não em `translate`, porque conferir permissão é
+    /// uma pergunta ao banco e `translate` é síncrona.
+    ///
+    /// Ninguém é impedido de nada por causa disto. É aviso, e o `limit` que quem
+    /// hospeda escreveu continua sendo o único que barra alguém.
+    VoiceRoomOverHostUplink {
+        /// Qual sala cresceu.
+        voice_room: VoiceRoomId,
+        /// Quanto ela pede no pior caso, todos falando ao mesmo tempo.
+        precisa_bps: u64,
+        /// A subida medida desta máquina. Nunca zero: sem medida não há aviso.
+        medido_bps: u32,
+    },
 }
 
 /// Quem está compartilhando tela em cada sala de voz.
@@ -547,6 +565,18 @@ impl Occupancy {
             .entry(voice_room)
             .or_default()
             .push(occupant);
+    }
+
+    /// Quantas pessoas estão nesta sala.
+    ///
+    /// Existe para o teto contado do ADR 0038: a conta da subida cresce com o
+    /// quadrado deste número, e quem a faz precisa dele **depois** de sentar a
+    /// pessoa que acabou de entrar.
+    #[must_use]
+    pub fn quantos(&self, voice_room: VoiceRoomId) -> usize {
+        self.by_voice_room
+            .get(&voice_room)
+            .map_or(0, std::vec::Vec::len)
     }
 
     /// Removes a person from one voice room.

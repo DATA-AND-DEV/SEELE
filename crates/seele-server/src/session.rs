@@ -2126,6 +2126,31 @@ async fn run_session(
                 }
 
                 match &event {
+                    // O teto contado do ADR 0038. Entregue só a quem pode agir:
+                    // quem entrou numa sala não decide nada sobre o cano da
+                    // casa, e um alerta sobre banda na tela de quem não pode
+                    // fazer nada a respeito é ruído com aparência de informação.
+                    Event::VoiceRoomOverHostUplink {
+                        precisa_bps,
+                        medido_bps,
+                        ..
+                    } => {
+                        if pode(server, session.person, Permission::AdministerServer).await {
+                            frame::write(
+                                &mut send,
+                                &ServerMessage::Alert {
+                                    severity: AlertSeverity::Warning,
+                                    reason: AlertReason::VoiceRoomOverHostUplink {
+                                        precisa_bps: *precisa_bps,
+                                        medido_bps: *medido_bps,
+                                    },
+                                    operator_text: None,
+                                },
+                            )
+                            .await?;
+                        }
+                        continue;
+                    }
                     Event::SessionEnded { person, reason } if *person == session.person => {
                         tracing::info!(person = %session.person, ?reason, "session ended by an operator");
                         // Told, and then closed. `specs/02-protocolo.md` wants
@@ -2414,6 +2439,50 @@ async fn assentar(
         );
         saiu_de
     };
+
+    // O teto contado do ADR 0038, conferido no instante em que a sala cresceu.
+    //
+    // Dentro de um `lock` próprio e depois do `seat` acima: o que a conta quer é
+    // quantas pessoas há **com** esta, porque é essa sala que passou a existir.
+    //
+    // Nada aqui barra ninguém. A subida é uma estimativa, e recusar entrada por
+    // estimativa tranca a pessoa fora do servidor dela por causa de um número que
+    // o servidor deduziu — o `limit` que quem hospeda escreveu continua sendo o
+    // único que barra.
+    {
+        let quantos = server.occupancy.lock().await.quantos(destino);
+        let medido = server.subida.lock().await.medida().unwrap_or(0);
+        // Os mesmos 60% que o §5.1 do compartilhamento de tela usa. Reusado, e
+        // não inventado: uma segunda margem para a mesma máquina seria dois
+        // orçamentos discordando sobre o mesmo cano.
+        let orcamento = (u64::from(medido) * u64::from(crate::tela::FRACAO_DO_CAMINHO)) / 100;
+        let pessoas = u32::try_from(quantos).unwrap_or(u32::MAX);
+        // No teto do codec, que é o pior caso: quem está com rede ruim já manda
+        // menos por causa do ADR 0036, então o pior caso real é um pouco menor.
+        // Errar para cima num aviso é o lado seguro de errar.
+        if seele_proto::transport::a_sala_acabou_de_estourar(
+            pessoas,
+            seele_proto::transport::MAX_BITRATE_BPS,
+            orcamento,
+        ) {
+            let precisa = seele_proto::transport::subida_da_sala_bps(
+                pessoas,
+                seele_proto::transport::MAX_BITRATE_BPS,
+            );
+            tracing::info!(
+                voice_room = %destino,
+                pessoas,
+                precisa_bps = precisa,
+                medido_bps = medido,
+                "esta sala passou do que a subida medida comporta"
+            );
+            let _ = server.events.send(Event::VoiceRoomOverHostUplink {
+                voice_room: destino,
+                precisa_bps: precisa,
+                medido_bps: medido,
+            });
+        }
+    }
 
     // Walking from one voice room to another is a departure and an arrival, and both
     // have to be said. Without the first, everybody watching the old room keeps
@@ -2737,6 +2806,12 @@ fn translate(
             })
         }
         Event::UplinkLoss { .. } => None,
+
+        // Nunca por aqui. A audiência deste depende de `AdministerServer`, e
+        // conferir permissão é uma pergunta ao banco — `translate` é síncrona e
+        // não tem como fazê-la. Quem o entrega é o braço de eventos do laço, que
+        // pode esperar. Ver o ADR 0038.
+        Event::VoiceRoomOverHostUplink { .. } => None,
         Event::MessagePosted(message) => {
             channels
                 .contains(&message.channel)

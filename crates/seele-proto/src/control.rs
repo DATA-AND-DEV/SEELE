@@ -691,6 +691,40 @@ pub enum AlertReason {
     /// Appended after `ScreenShareTaken`, for the reason [`Self::RateLimited`]
     /// gives.
     ScreenShareOverHostUplink,
+
+    /// A sala cresceu além do que a subida medida de quem hospeda comporta.
+    ///
+    /// O gêmeo de [`Self::ScreenShareOverHostUplink`] na voz, com uma diferença
+    /// que importa: aquele **para** a transmissão, e este não para nada. Ninguém
+    /// é impedido de entrar — a subida é uma estimativa, e recusar entrada por
+    /// estimativa tranca a pessoa fora do servidor dela por causa de um número
+    /// que o servidor deduziu. Ver o ADR 0038.
+    ///
+    /// Vai só para quem tem [`Permission::AdministerServer`]: quem entrou numa
+    /// sala não decide nada sobre o cano da casa, e um alerta sobre banda na
+    /// tela de quem não pode agir é ruído com aparência de informação.
+    ///
+    /// # Por que os dois números viajam
+    ///
+    /// Porque «a sala está grande» não é acionável e «esta sala precisa de
+    /// 6,5 Mbps no pior caso, e a medida daqui é 4 Mbps» é. Os valores vêm em
+    /// campos, e não formatados: a regra dos motivos enumerados é que a casca
+    /// escreve a frase, para poder traduzi-la (ADR 0012).
+    ///
+    /// Acrescentado após `ScreenShareOverHostUplink`, pela razão que
+    /// [`Self::RateLimited`] dá.
+    VoiceRoomOverHostUplink {
+        /// Quanto a sala pede no pior caso — todos falando ao mesmo tempo.
+        ///
+        /// De `seele_proto::transport::subida_da_sala_bps`, que documenta a
+        /// conta e o que ela supõe.
+        precisa_bps: u64,
+        /// A subida que o servidor mediu para si, em bits por segundo.
+        ///
+        /// Nunca zero: sem medida não há aviso, porque «não sei» não vira
+        /// número inventado.
+        medido_bps: u32,
+    },
 }
 
 /// Client to server.
