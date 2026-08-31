@@ -42,7 +42,7 @@ Formato e regra de criação em `specs/10-convencoes.md`: toda decisão marcada
 | [0034](0034-a-marca-abandona-as-duas-citacoes-do-anime.md) | A marca abandona as duas citações do anime | aceito | `07` — a marca na imagem |
 | [0035](0035-o-codigo-deixa-de-falar-evangelion.md) | O código deixa de falar Evangelion | aceito | `07` — o vocabulário no código |
 | [0036](0036-bitrate-adaptativo-em-faixas.md) | Bitrate adaptativo em faixas, sobre perda de subida medida no servidor | aceito | `03` — o bitrate adaptativo que a spec pede |
-| [0037](0037-candidatos-do-convite-em-paralelo.md) | Os candidatos do convite são tentados em paralelo, quando não dividem socket | aceito | `02` — alcançar um servidor pela internet |
+| [0037](0037-candidatos-do-convite-em-paralelo.md) | Um `Endpoint`, muitas conexões: os candidatos do convite correm juntos | aceito | `02` — alcançar um servidor pela internet |
 
 ## O que ainda não tem ADR
 

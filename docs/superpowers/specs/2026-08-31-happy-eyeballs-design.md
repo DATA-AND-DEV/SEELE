@@ -19,102 +19,57 @@ O RFC 8305 resolve isto há anos, e o nome é conhecido: dispara o primeiro
 candidato, e a cada ~250 ms dispara o próximo **sem cancelar os anteriores**.
 Fica com o primeiro aperto de mão que fechar.
 
-## 0 · Por que isto não é «trocar o `for` por um `join_all`»
+## 0 · Por que isto não é «trocar o `for` por um `join_all`» — e por que quase virou pior
 
-O laço de hoje não é ingênuo. Ele coordena três coisas, e duas resistem a
-paralelismo. Este documento existe principalmente por causa delas.
-
-### O socket é um só, e é de propósito
-
-Quando há bilhete de ponto de encontro, cada tentativa chama
-`Batida::emprestar_socket`, que é um `try_clone` do **mesmo** socket UDP. O
-comentário no fonte diz por quê:
+O laço de hoje não é ingênuo, e a série existe por uma razão escrita no fonte:
 
 > Preparado antes do laço porque o socket tem de ser um só — o NAT mapeia por
 > porta interna.
 
-Um `try_clone` dá dois descritores para o **mesmo** socket, com uma fila de
-recepção só. Dois `Endpoint` do quinn lendo dali **roubam pacote um do outro**:
-o `Initial` do candidato A pode ser consumido e descartado pelo Endpoint do
-candidato B, que não sabe o que fazer com ele.
+Cada tentativa faz `try_clone` do mesmo socket UDP, e `client.rs::local_endpoint`
+constrói um `quinn::Endpoint` **novo** sobre a cópia. Dois `Endpoint` sobre o
+mesmo socket dividem uma fila de recepção e **roubam pacote um do outro**: o
+`Initial` de um candidato pode ser consumido e descartado pelo Endpoint de outro.
+Isso não é lentidão, é incorreção, e falha de forma intermitente.
 
-Correr candidatos que dividem socket não é lento. É **incorreto**, e o modo de
-falhar é o pior possível: intermitente, dependente de quem ganhou a corrida do
-`recv`, e indistinguível de rede ruim.
+**A primeira versão deste desenho respondeu a isso dividindo os candidatos em
+dois grupos**, por um predicado sobre endereço: correria quem não precisasse de
+furo. Ela foi aprovada, implementada até a metade, e derrubada por dois testes de
+`crates/seele-conformance/tests/furo.rs` — que não foram tocados, e que pegaram
+duas coisas:
 
-### O aviso e o aperto de mão saem colados
+1. **a decisão já existia.** «Quem precisa de furo» é `e_publico(onde.ip())`,
+   dentro de `avisar_pelo_candidato`. O predicado novo era uma segunda opinião,
+   e onde as duas discordavam o aviso deixava de sair;
+2. **a justificativa tinha um erro de fato.** O desenho afirmava que IPv6 nunca
+   precisa de furo, «porque furar NAT não abre firewall». Firewall IPv6 doméstico
+   é *stateful*: o pacote de saída que o aviso provoca abre o buraco de volta
+   igual ao NAT.
 
-`avisar_pelo_candidato` existe porque o furo que ele provoca do outro lado dura
-menos de um segundo. Isso **sobrevive** ao paralelismo — cada candidato leva o
-seu aviso, e a janela do anfitrião é de sessenta por dez segundos, folgada para
-quatro.
+Corrigido o predicado, a divisão deixava de entregar o que prometia — os
+candidatos públicos, que são os lentos, ficariam em série e o ganho evaporava.
 
-O que não sobrevive é o que existe hoje: com bilhete, o aviso sai para **todo**
-candidato, inclusive os que não têm NAT nenhum para furar.
+**A saída veio de conferir a premissa.** A restrição não é «uma conexão por
+socket». É **um leitor por socket**, e um `quinn::Endpoint` é esse leitor: ele
+dirige quantas conexões simultâneas se queira, demultiplexando por connection ID
+— que é como o lado servidor do quinn atende a sala inteira com um Endpoint só.
 
-### O TOFU tem uma armadilha sob concorrência
+## 1 · A decisão: um `Endpoint`, muitas conexões
 
-`desfazer_pin_orfao` apaga o pin que um aperto de mão cancelado escreveu, e a
-regra dele é «só apaga o que este aperto escreveu»:
+O `Endpoint` sobe **uma vez**, sobre o socket compartilhado, e cada candidato é
+um `Endpoint::connect` nele. Não há separação em grupos, não há predicado novo, e
+`avisar_pelo_candidato` não muda — `e_publico` continua sendo a única opinião
+sobre quem precisa de furo, e os avisos saem escalonados junto com os apertos de
+mão que eles acompanham.
 
-```rust
-if fixado_antes.is_none() && pins.pinned(chave_do_pin).is_some() {
-    pins.unpin(chave_do_pin);
-}
-```
+### A conta de furos muda de perfil
 
-Em série isso é exato. **Em paralelo, não é.** Dois candidatos podem
-compartilhar `chave_do_pin` — ela é `host:porta` do nome do convite, então
-endereços alternativos resolvidos do mesmo nome colidem. Cancelar o perdedor
-depois de o vencedor ter escrito encontraria `fixado_antes == None` e
-`pinned() == Some`, e **apagaria o pin do vencedor**.
-
-O estrago não é uma conexão perdida: é a confiança de primeiro contato sendo
-desfeita em silêncio, num caminho que o ADR 0003 existe para tornar durável.
-Correr sem tratar isto troca oito segundos por um defeito de segurança calado.
-
-## 1 · A regra: o socket decide quem corre
-
-**Corre quem não divide socket. Fica em série quem divide.**
-
-A regra é sobre o recurso, e não sobre o tipo do candidato — o que evita uma
-segunda taxonomia de endereços ao lado da que o `alcance` já tem no servidor.
-
-Hoje `emprestar()` é chamado para todo candidato quando há bilhete. Passa a ser
-chamado **só para quem precisa do furo**. A consequência é a que interessa:
-
-- **quem não precisa de furo** — rede local, IPv6 direto, endereço público de
-  quem não está atrás de NAT — ganha socket próprio e **corre**, mesmo havendo
-  bilhete;
-- **quem precisa** continua em série, no socket compartilhado, com os prazos e
-  as duas voltas exatamente como estão.
-
-E é justamente no primeiro grupo que os 9,6 s estão sendo queimados: os três
-candidatos mortos da pendência nº 26 são endereços **IPv6**, e IPv6 não tem NAT
-para furar. O que os bloqueia é o firewall do roteador, que é assunto do PCP e
-não do ponto de encontro.
-
-### Quem precisa de furo, escrito como predicado
-
-Um candidato precisa do aviso quando é um **IPv4 público** — o caso do
-anfitrião atrás de NAT, que é o degrau 4 do ADR 0022. Não precisam:
-
-- endereços privados e CGNAT, que `e_privado` já reconhece — ou são desta rede,
-  e aí não há NAT no meio, ou são de outra casa, e aí `e_de_outra_casa` já os
-  trata com prazo curto porque ninguém vai responder;
-- **IPv6**, em qualquer forma. Não há tradução de endereço; há firewall, e furar
-  NAT não abre firewall. Avisar por um candidato IPv6 gasta janela do anfitrião
-  por um caminho que o aviso não ajuda — que é a mesma frase que o código já usa
-  para justificar não avisar por candidato que falhou;
-- laço local.
-
-### O que **não** muda
-
-A série de quem precisa de furo fica intacta: os dois prazos, as duas voltas, e
-a lista `merece_segunda`. Aquilo foi consertado com medida e com três testes em
-`crates/seele-conformance/tests/furo.rs` no commit `9750f00`, e a corrida não a
-melhora em nada — um candidato que exige furo e não responde não responde mais
-rápido por ter vizinhos correndo ao lado.
+Hoje os avisos saem em série e param quando um candidato fecha. Correndo, os
+quatro saem dentro de ~750 ms. Um candidato público custa `AVISOS_POR_CANDIDATO`
+= 3 avisos, então quatro deles custam até **doze** furos quase simultâneos,
+contra doze espalhados por dezesseis segundos. Cabe nos `FUROS_POR_JANELA` = 60
+do anfitrião — mas o perfil deixou de ser gotejamento e virou rajada, e quem
+mexer naquele teto precisa saber.
 
 ## 2 · A corrida
 
