@@ -3,7 +3,7 @@
 **Estado:** aceito
 **Data:** 2026-08-21
 
-A `specs/07-tema-evangelion.md` decidiu que o tema é **vocabulário de produto,
+A `specs/07-estetica.md` decidiu que o tema é **vocabulário de produto,
 não skin**, e que ele vale em toda a superfície: interface, erro, log,
 documentação, nome de binário. Este ADR revoga **metade** daquela frase. O tema
 continua sendo o desenho do produto inteiro. Ele deixa de ser a **língua** dele.

@@ -1,6 +1,6 @@
 //! A bateria interna, ponta a ponta.
 //!
-//! `specs/07-tema-evangelion.md` chama isto de "o melhor casamento entre tema e
+//! `specs/07-estetica.md` chama isto de "o melhor casamento entre tema e
 //! engenharia no projeto" e manda proteger de simplificações. Estava protegido
 //! de simplificações e desprotegido de outra coisa: as peças existiam, cada uma
 //! testada, e **nada ligava uma na outra**. `Battery::new` não era chamado fora
@@ -235,7 +235,7 @@ async fn sair_encerra_sem_esperar_a_bateria() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn as_tentativas_aparecem_enquanto_a_bateria_corre() -> Result<()> {
-    // `specs/07-tema-evangelion.md` pede "tentativas de reconexão listadas". Um
+    // `specs/07-estetica.md` pede "tentativas de reconexão listadas". Um
     // contador que fica em zero enquanto o programa tenta é pior que não ter:
     // parece que ninguém está fazendo nada.
     let (endereco, servidor) = server(0, Location::Memory).await?;

@@ -2,7 +2,7 @@
 
 **Autoridade sobre a palavra que aparece na tela.** Desde o **ADR 0033**, o
 vocabulário da interface é o comum — servidor, sala de voz, canal de texto,
-pessoa — e não mais o de `specs/07-tema-evangelion.md`. A `07` continua no
+pessoa — e não mais o de `specs/07-estetica.md`. A `07` continua no
 repositório com uma nota no alto dizendo o que foi retirado; o que ela ainda
 governa é a estética, não a língua.
 

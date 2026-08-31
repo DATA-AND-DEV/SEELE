@@ -34,7 +34,7 @@ Cliente                                Servidor
    │── Ola { versao, cliente, apelido } ──▶│
    │◀── Desafio { nonce } ─────────────────│
    │── Resposta { prova } ────────────────▶│   (ver 08)
-   │◀── Sessao { id, server, voice_rooms, papeis }│   → PADRÃO: AZUL
+   │◀── Sessao { id, server, voice_rooms, papeis }│   → conexão segura
 ```
 
 Antes da `Sessao`, o cliente está em **PADRÃO: LARANJA** — conectado, não verificado. A interface deve refletir esse estado, não escondê-lo.
@@ -62,7 +62,7 @@ Timeout de handshake: 10 s. Falha → `PadraoAzulNaoEstabelecido` com motivo esp
 |---|---|
 | `Sessao` | id da sessão, descrição do servidor, árvore de VoiceRooms e Linhas, papéis |
 | `UsuarioEntrou` / `UsuarioSaiu` | `voice_room_id`, perfil do usuário |
-| `EstadoUsuario` | A.T. Field, presença, taxa de sincronização |
+| `EstadoUsuario` | mudo, presença, sinal |
 | `MensagemRecebida` | mensagem completa |
 | `MensagemEditada` / `MensagemRemovida` | id + novo corpo |
 | `Telemetria` | RTT, jitter, perda, estado dos subsistemas |
@@ -91,9 +91,9 @@ Datagram QUIC tem entrega não confiável e sem ordem, que é exatamente o desej
 
 O servidor reescreve apenas o `ssrc` ao encaminhar? **Não** — encaminha íntegro e o cliente resolve `ssrc` → usuário pela tabela recebida no controle. Isso mantém o servidor sem tocar no payload, o que é pré-requisito para E2EE.
 
-## Cálculo da Taxa de Sincronização
+## Cálculo do sinal
 
-A métrica assinatura do produto (`07-tema-evangelion.md`). É derivada, não inventada:
+A métrica assinatura do produto (`07-estetica.md`). É derivada, não inventada:
 
 ```
 sync = 100

@@ -66,7 +66,7 @@ Arquivo TOML único, mais variáveis de ambiente para segredos. Exemplo de forma
 
 ```toml
 [server]
-nome = "Terceira Tóquio"
+nome = "Casa"
 descricao = "..."
 max_pessoas = 50
 

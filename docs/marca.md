@@ -1,6 +1,6 @@
 # A marca
 
-Normativo, como `specs/07-tema-evangelion.md`. A diferença é o alcance: o tema
+Normativo, como `specs/07-estetica.md`. A diferença é o alcance: o tema
 governa a estética do produto — cores, densidade, o ar de terminal — e esta
 folha governa a única imagem que o produto tem de si mesmo.
 
@@ -292,7 +292,7 @@ contorno não existe `letter-spacing`, existe a posição de cada glifo.
 
 ## Direitos
 
-`specs/07-tema-evangelion.md` já trata disso e vale aqui inteiro: a estética é
+`specs/07-estetica.md` já trata disso e vale aqui inteiro: a estética é
 referência, não material do anime. O ADR 0033 tirou o vocabulário da tela e o
 ADR 0034 tirou as duas últimas citações da imagem — o katakana e o connection. Nenhum
 frame, nenhum logotipo da NERV, nenhum asset de terceiro entra no produto ou no

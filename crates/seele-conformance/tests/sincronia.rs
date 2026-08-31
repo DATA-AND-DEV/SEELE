@@ -1,6 +1,6 @@
 //! A própria Taxa de Sincronização, vista do roster.
 //!
-//! O número que `specs/07-tema-evangelion.md` chama de «a coisa mais visível da
+//! O número que `specs/07-estetica.md` chama de «a coisa mais visível da
 //! tela» aparece em dois lugares ao mesmo tempo: na barra de telemetria, medida
 //! pela casca contra a própria conexão, e no roster, uma linha por pessoa, vinda
 //! do `PersonState` que o servidor difunde a cada segundo.

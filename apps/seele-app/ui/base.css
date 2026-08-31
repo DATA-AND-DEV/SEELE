@@ -38,7 +38,7 @@ html, body {
   font-size: 13px;
   line-height: 16px;
   /* Zero border-radius e zero sombra em todo o arquivo: é regra de tema
-     (specs/07-tema-evangelion.md), não gosto. */
+     (specs/07-estetica.md), não gosto. */
   -webkit-font-smoothing: antialiased;
 }
 

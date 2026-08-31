@@ -42,7 +42,7 @@ pub enum DeviceState {
     /// The device failed and reopening is in progress.
     ///
     /// `specs/03-audio.md` wants the interface told about this; it is the audio
-    /// equivalent of the reconnection state in `specs/07-tema-evangelion.md`.
+    /// equivalent of the reconnection state in `specs/07-estetica.md`.
     Recovering {
         /// Attempts made so far.
         attempt: u32,

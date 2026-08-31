@@ -26,7 +26,7 @@
 //!
 //! With DTX and voice activation on (`specs/03-audio.md`), a sender puts nothing
 //! on the wire while nobody is speaking. A buffer that reads every gap as loss
-//! reports heavy loss whenever the room is quiet — and `specs/07-tema-evangelion.md`
+//! reports heavy loss whenever the room is quiet — and `specs/07-estetica.md`
 //! puts loss on screen as the product's signature metric, so that is not a
 //! cosmetic bug. This was gap G5 in `docs/plano-m0-m1.md`.
 //!
@@ -200,7 +200,7 @@ impl JitterMetrics {
     /// [`JitterMetrics::frames_comfort`] deliberately does **not** count, and is
     /// excluded from the denominator too. A quiet room is not a bad connection,
     /// and reporting it as one would make the signature metric of
-    /// `specs/07-tema-evangelion.md` say the opposite of the truth.
+    /// `specs/07-estetica.md` say the opposite of the truth.
     #[must_use]
     pub fn loss_fraction(&self) -> f64 {
         let slots = self.frames_played + self.frames_concealed + self.frames_silenced;
@@ -1036,7 +1036,7 @@ mod tests {
     #[test]
     fn a_quiet_conversation_reports_no_loss_at_all() {
         // The headline case. A talker who speaks in bursts, on a perfect link,
-        // must report exactly zero loss — otherwise specs/07-tema-evangelion.md's
+        // must report exactly zero loss — otherwise specs/07-estetica.md's
         // signature metric says the opposite of the truth every time somebody
         // pauses for breath.
         let frames = crate::netsim::talker_stream(25, 50, 20);

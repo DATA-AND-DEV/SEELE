@@ -30,7 +30,7 @@ use crate::tofu::{PinDecision, PinStore, TofuVerifier};
 
 /// How far a connection has got.
 ///
-/// `specs/07-tema-evangelion.md` names these, and `specs/05-cliente-tui.md`
+/// `specs/07-estetica.md` names these, and `specs/05-cliente-tui.md`
 /// requires both to be visible states rather than a spinner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkTrust {
@@ -778,7 +778,7 @@ impl Client {
     ///
     /// Announced rather than kept local because the roster shows it: talking to
     /// somebody whose microphone is off is worth knowing, and the mute is only
-    /// half a feature if nobody else can see it. `specs/07-tema-evangelion.md`
+    /// half a feature if nobody else can see it. `specs/07-estetica.md`
     /// gives it a marker in the roster for exactly this reason.
     ///
     /// # Errors

@@ -48,7 +48,7 @@ ignore = [
 version = 2
 confidence-threshold = 0.9
 # Our own crates carry no `license` field yet: the rights posture around the
-# Evangelion vocabulary is still open (specs/07-tema-evangelion.md), and inventing
+# Evangelion vocabulary is still open (specs/07-estetica.md), and inventing
 # a licence before that decision would be worse than leaving it blank. They are
 # all `publish = false`, so skip them rather than fail on them.
 private = { ignore = true }

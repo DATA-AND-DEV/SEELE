@@ -14,7 +14,7 @@
 //!   and a client had no way to learn its own. [`ServerMessage::Session`] and
 //!   [`ServerMessage::PersonJoined`] now carry it.
 //! - **G8.** "Isolamento total" (deafen) is defined in
-//!   `specs/07-tema-evangelion.md` and bound to a key in `specs/05-cliente-tui.md`,
+//!   `specs/07-estetica.md` and bound to a key in `specs/05-cliente-tui.md`,
 //!   but had no protocol representation, so a roster could not show who was not
 //!   listening. [`PersonState`] carries it beside the A.T. Field.
 //! - **G9.** `EnviarMensagem` is documented as "idempotent by `client_msg_id`"
@@ -271,7 +271,7 @@ pub enum ControlError {
     /// Sync Ratio from RTT, jitter and loss, so a `NaN` in any of them poisons
     /// the product's signature metric — and silently, because every comparison
     /// against `NaN` is false and the band logic in
-    /// `specs/07-tema-evangelion.md` would fall through to the wrong branch
+    /// `specs/07-estetica.md` would fall through to the wrong branch
     /// rather than error.
     #[error("field `{field}` holds a value outside its allowed range")]
     FieldOutOfRange {
@@ -424,7 +424,7 @@ pub enum SubsystemHealth {
 
 /// What a person's client is currently doing.
 ///
-/// Carries both mute controls. `specs/07-tema-evangelion.md` names them
+/// Carries both mute controls. `specs/07-estetica.md` names them
 /// "A.T. Field" (microphone) and "Isolamento total" (speakers); the second had
 /// no protocol representation before — gap G8.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -574,7 +574,7 @@ pub enum AlertSeverity {
     Info,
     /// Something is degrading.
     Warning,
-    /// Something is wrong. `specs/07-tema-evangelion.md` reserves red for this.
+    /// Something is wrong. `specs/07-estetica.md` reserves red for this.
     Critical,
 }
 
@@ -1070,7 +1070,7 @@ pub enum ClientMessage {
     /// surface needs alpha and must not lose it to a re-encode, because every
     /// platform this product draws on decodes it without a codec being chosen,
     /// and because fixing one format is what lets the two formats that would
-    /// hurt be refused by construction: a GIF, which `specs/07-tema-evangelion.md`
+    /// hurt be refused by construction: a GIF, which `specs/07-estetica.md`
     /// would have animating in a badge, and an SVG, which is a document with
     /// script and network fetches in it rather than a picture.
     SetServerIcon {
@@ -2182,7 +2182,7 @@ mod tests {
 
     #[test]
     fn person_state_carries_both_mute_controls() {
-        // Gap G8. specs/07-tema-evangelion.md defines "Isolamento total" and
+        // Gap G8. specs/07-estetica.md defines "Isolamento total" and
         // specs/05-cliente-tui.md binds it to a key, but nothing carried it, so
         // a roster could not show who was not listening.
         let state = ServerMessage::PersonState(PersonState {
@@ -2728,7 +2728,7 @@ mod numeric_tests {
     fn a_nan_never_reaches_the_sync_ratio() {
         // Found by fuzzing on the first run. specs/02-protocolo.md derives the
         // Sync Ratio from these three numbers, and every comparison against NaN
-        // is false — so the bands in specs/07-tema-evangelion.md would not error,
+        // is false — so the bands in specs/07-estetica.md would not error,
         // they would quietly pick the wrong colour.
         for message in [
             telemetry(f32::NAN, 12.0, 0.0),
@@ -2942,7 +2942,7 @@ mod icon_tests {
     #[test]
     fn a_picture_that_is_not_a_png_is_refused() {
         // The two that would hurt, by their own first bytes: a GIF, which
-        // `specs/07-tema-evangelion.md` would have animating in a badge, and an
+        // `specs/07-estetica.md` would have animating in a badge, and an
         // SVG, which is a document with script in it rather than a picture.
         // Plus an empty one, which is neither and arrives as a truncated file.
         for pretender in [

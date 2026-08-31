@@ -67,7 +67,7 @@ fn the_served_tokens_are_the_frozen_tokens() {
 
 #[test]
 fn the_stylesheet_uses_no_colour_the_tokens_do_not_define() {
-    // specs/07-tema-evangelion.md fixes the palette, and ADR 0014 makes v2
+    // specs/07-estetica.md fixes the palette, and ADR 0014 makes v2
     // canonical. A hex literal in the stylesheet is a colour that exists in one
     // of the two clients and not the other.
     let css = stylesheets();

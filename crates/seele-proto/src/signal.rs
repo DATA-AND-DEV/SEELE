@@ -1,6 +1,6 @@
 //! The Sync Ratio — Taxa de Sincronização.
 //!
-//! `specs/07-tema-evangelion.md` calls this the product's signature element:
+//! `specs/07-estetica.md` calls this the product's signature element:
 //!
 //! > **A Taxa de Sincronização por pessoa.** Cada pessoa no roster tem um
 //! > percentual vivo derivado do RTT, jitter e perda daquela conexão. Nenhum
@@ -76,14 +76,14 @@ pub const DEGRADED_FLOOR: u8 = 60;
 
 /// What band a Sync Ratio falls into.
 ///
-/// `specs/07-tema-evangelion.md` gives each a colour. The colour is **not** here:
+/// `specs/07-estetica.md` gives each a colour. The colour is **not** here:
 /// that is the shell's decision, and `specs/05-cliente-tui.md` requires a
 /// no-colour mode where the band still has to be conveyable.
 ///
 /// # Three bands, not four
 ///
 /// This used to have a fourth band — `Acceptable`, 70 to 89, drawn in bone —
-/// taken from the table in `specs/07-tema-evangelion.md`. The v2 comp
+/// taken from the table in `specs/07-estetica.md`. The v2 comp
 /// (`design/Entry Plug v2.dc.html`) bands the same number in three, at 85 and
 /// 60, and uses bone in no sync scale at all:
 ///
@@ -178,7 +178,7 @@ pub fn raw(inputs: SyncInputs) -> f32 {
 
 /// A Sync Ratio that smooths over time.
 ///
-/// One per person in the roster, since `specs/07-tema-evangelion.md` makes the
+/// One per person in the roster, since `specs/07-estetica.md` makes the
 /// number per-person.
 #[derive(Debug, Clone, Copy)]
 pub struct Signal {

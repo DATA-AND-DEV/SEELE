@@ -106,7 +106,7 @@ impl Mixer {
 
     /// Sets the master output gain.
     ///
-    /// This is the deafen control from `specs/07-tema-evangelion.md` —
+    /// This is the deafen control from `specs/07-estetica.md` —
     /// "Isolamento total" — when set to zero.
     pub fn set_master(&mut self, gain: f32) {
         self.master = gain.max(0.0);
@@ -243,7 +243,7 @@ mod tests {
 
     #[test]
     fn master_gain_at_zero_is_total_isolation() {
-        // specs/07-tema-evangelion.md calls deafen "Isolamento total".
+        // specs/07-estetica.md calls deafen "Isolamento total".
         let mut mixer = Mixer::new();
         mixer.set_master(0.0);
         let source = [0.9_f32; 4];

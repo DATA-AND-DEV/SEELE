@@ -1,6 +1,6 @@
 //! The internal battery — bateria interna.
 //!
-//! `specs/07-tema-evangelion.md`:
+//! `specs/07-estetica.md`:
 //!
 //! > Quando a conexão cai, o cliente não fecha nem mostra um spinner. Ele entra
 //! > em **bateria interna**: contagem regressiva de 5 minutos em vermelho,
@@ -55,7 +55,7 @@ pub enum Link {
     Online,
     /// Running on the internal battery.
     ///
-    /// A shell shows the countdown and the attempts; `specs/07-tema-evangelion.md`
+    /// A shell shows the countdown and the attempts; `specs/07-estetica.md`
     /// asks for both, in red, over an interface that stays legible.
     InternalBattery {
         /// Reconnection attempts made so far.
@@ -125,7 +125,7 @@ impl Battery {
 
     /// How much of the five minutes is left.
     ///
-    /// `specs/07-tema-evangelion.md` puts this on screen as a countdown from
+    /// `specs/07-estetica.md` puts this on screen as a countdown from
     /// 04:59. Returns `None` while online, because there is nothing counting.
     #[must_use]
     pub fn remaining(&self, now: Duration) -> Option<Duration> {
@@ -135,7 +135,7 @@ impl Battery {
 
     /// Reconnection attempts made in the current outage.
     ///
-    /// `specs/07-tema-evangelion.md` asks for the attempts to be listed.
+    /// `specs/07-estetica.md` asks for the attempts to be listed.
     #[must_use]
     pub fn attempts(&self) -> u32 {
         self.attempts
@@ -312,7 +312,7 @@ mod tests {
 
     #[test]
     fn the_countdown_is_five_minutes() {
-        // specs/07-tema-evangelion.md shows 04:59 counting down;
+        // specs/07-estetica.md shows 04:59 counting down;
         // specs/02-protocolo.md sets the window at five minutes.
         let mut battery = Battery::new();
         battery.on_connection_lost(at(100));
@@ -438,7 +438,7 @@ mod tests {
 
     #[test]
     fn attempts_are_counted_for_the_interface() {
-        // specs/07-tema-evangelion.md asks for the attempts to be listed, so the
+        // specs/07-estetica.md asks for the attempts to be listed, so the
         // count has to be available rather than internal.
         let mut battery = Battery::new();
         battery.on_connection_lost(at(0));

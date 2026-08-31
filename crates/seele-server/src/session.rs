@@ -169,7 +169,7 @@ impl Midia {
 
 /// How often the server pushes telemetry.
 ///
-/// `specs/07-tema-evangelion.md` wants the Sync Ratio alive on screen; once a
+/// `specs/07-estetica.md` wants the Sync Ratio alive on screen; once a
 /// second looks live and costs nothing.
 const TELEMETRY_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -1484,7 +1484,7 @@ async fn run_session(
                     ClientMessage::Ping { timestamp } => {
                         frame::write(&mut send, &ServerMessage::Pong { timestamp }).await?;
                     }
-                    // The roster shows all three (specs/07-tema-evangelion.md).
+                    // The roster shows all three (specs/07-estetica.md).
                     // Ignoring them, as this did, made every mute local-only:
                     // the marker existed and could never light up.
                     ClientMessage::SetMuted(on) => {

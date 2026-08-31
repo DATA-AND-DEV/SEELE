@@ -290,7 +290,7 @@ async fn a_person_without_write_permission_is_refused() -> Result<()> {
 
 #[tokio::test]
 async fn telemetry_carries_a_sync_ratio() -> Result<()> {
-    // specs/07-tema-evangelion.md makes this the most visible number on screen,
+    // specs/07-estetica.md makes this the most visible number on screen,
     // and specs/02-protocolo.md derives it from RTT, jitter and loss. On
     // loopback it should be nominal.
     let directory = tempfile::tempdir()?;

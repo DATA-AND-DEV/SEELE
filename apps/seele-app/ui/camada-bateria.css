@@ -2,7 +2,7 @@
 
    O comp v2, tela `bateria` (`.superpowers/sdd/comp-inventario.md` §5). Camada
    sobre a operação, como o alerta, e pela mesma razão (inventário, linha 281):
-   `specs/07-tema-evangelion.md` proíbe fechar ou trocar de tela quando a
+   `specs/07-estetica.md` proíbe fechar ou trocar de tela quando a
    conexão cai — a interface esmaece, conta cinco minutos, e o histórico
    continua ali para leitura. Uma tela que substituísse a conversa seria
    exatamente o que a spec veta.
@@ -89,7 +89,7 @@
    ---- a piscada ----
 
    `magiRespiro 1000ms steps(2,end)`, do comp, que é o respiro de 2400ms virado
-   numa piscada dura de 1 Hz. `specs/07-tema-evangelion.md` chama movimento
+   numa piscada dura de 1 Hz. `specs/07-estetica.md` chama movimento
    decorativo de erro, e esta não é: ela bate a um por segundo sobre um número
    que decrementa a um por segundo, ou seja, ela **é** o segundo passando. Um
    contador parado e um contador correndo se parecem numa foto; com a piscada,

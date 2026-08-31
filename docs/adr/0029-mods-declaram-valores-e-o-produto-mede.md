@@ -95,7 +95,7 @@ O que existe hoje, e que condiciona todo o desenho abaixo:
   licença antes dessa decisão seria pior que deixar em branco."* Isso importa
   para a exigência de código aberto, e está tratado abaixo.
 
-E há uma frase de `specs/07-tema-evangelion.md:3` que este ADR tem de encarar de
+E há uma frase de `specs/07-estetica.md:3` que este ADR tem de encarar de
 frente, porque é a tese contrária: *"O tema é **vocabulário de produto**, não
 skin. É definido aqui uma vez e aplicado em todo lugar."*
 

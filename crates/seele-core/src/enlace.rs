@@ -2,7 +2,7 @@
 //!
 //! [`Client`] é uma conexão: enquanto ela existe, funciona; quando cai, acaba.
 //! Isto é a **sessão**, que é outra coisa — ela atravessa quedas. É aqui que
-//! mora a bateria interna de `specs/07-tema-evangelion.md`:
+//! mora a bateria interna de `specs/07-estetica.md`:
 //!
 //! > Quando a conexão cai, o cliente não fecha nem mostra um spinner. Ele entra
 //! > em bateria interna: contagem regressiva de 5 minutos, tentativas de
@@ -82,7 +82,7 @@ pub enum Aviso {
     /// Onde o enlace está, e quanto resta da bateria.
     ///
     /// Repetido a cada tica enquanto a bateria corre, porque a contagem
-    /// regressiva **é** a informação: `specs/07-tema-evangelion.md` pede 04:59
+    /// regressiva **é** a informação: `specs/07-estetica.md` pede 04:59
     /// descendo na tela, e um número que só muda quando o estado muda ficaria
     /// parado exatamente durante os cinco minutos em que ele importa.
     Estado {

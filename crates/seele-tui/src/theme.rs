@@ -1,4 +1,4 @@
-//! The theme, as `specs/07-tema-evangelion.md` defines it.
+//! The theme, as `specs/07-estetica.md` defines it.
 //!
 //! > O tema é **vocabulário de produto**, não skin. É definido aqui uma vez e
 //! > aplicado em todo lugar: interface, mensagens de erro, logs, documentação,
@@ -98,7 +98,7 @@ pub const BLACK: Ink = Ink {
 ///
 /// In 256 colours this collapses onto [`BLACK`] — both are the nearest
 /// neighbour of the same grey. That is not a rounding bug: it is why
-/// `specs/07-tema-evangelion.md` defines a surface as "linha 1px + vazio". Over
+/// `specs/07-estetica.md` defines a surface as "linha 1px + vazio". Over
 /// SSH the panel is its border, never its fill. Recorded in
 /// `docs/tokens-achados.md`.
 pub const SURFACE: Ink = Ink {
@@ -304,7 +304,7 @@ impl Theme {
 
     /// Whether kanji accents should be drawn at all.
     ///
-    /// `specs/07-tema-evangelion.md` makes kanji a typographic accent that never
+    /// `specs/07-estetica.md` makes kanji a typographic accent that never
     /// carries information: "um usuário que não lê japonês não perde nada". A
     /// terminal that cannot render it therefore loses nothing either, and a
     /// mojibake box in a status bar is worse than an empty one.
@@ -360,7 +360,7 @@ mod tests {
 
     #[test]
     fn alert_and_accent_stay_distinct_in_sixteen_colours() {
-        // specs/07-tema-evangelion.md reserves red for error and disconnection:
+        // specs/07-estetica.md reserves red for error and disconnection:
         // "Se aparece, algo está errado". Collapsing orange onto red over SSH
         // would break that promise exactly where the user is least able to
         // check anything.

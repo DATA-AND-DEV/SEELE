@@ -46,7 +46,7 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// How long a disconnected client keeps its session alive locally.
 ///
-/// `specs/07-tema-evangelion.md` calls this the "bateria interna" and gives it a
+/// `specs/07-estetica.md` calls this the "bateria interna" and gives it a
 /// 04:59 countdown; `specs/02-protocolo.md` has the server hold the slot for the
 /// same period.
 pub const SESSION_GRACE: Duration = Duration::from_secs(5 * 60);

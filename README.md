@@ -141,7 +141,7 @@ para saber que a conexão está ruim.
 ││           │:voice_room <nome>      entrar numa sala de voz           │           ││
 ││           │:sync             diagnóstico detalhado             │           ││
 ││           │:audio            dispositivos                      │           ││
-││           │:ejetar           sair do servidor e escolher outro │           ││
+││           │:sair             sair do servidor e escolher outro │           ││
 ││           │:q                sair do programa                  │           ││
 │└───────────└────────────────────────────────────────────────────┘───────────┘│
 │ NORMAL │ SINAL █ 94% │ RTT 38ms │ JIT 12ms │ LOSS 0.2% │ OPUS 32k │ MUDO OFF │
@@ -463,12 +463,15 @@ explica por que uma linha é daquele jeito, a razão inteira está numa delas.
 
 Ainda não definida, mas o que a segurava saiu do caminho.
 
-A interface usava o vocabulário de Evangelion — Server, VoiceRoom, Pessoa, A.T. Field,
-e a assinatura em katakana —, e definir direitos com isso dentro era o tipo de
-decisão que se toma errado. Uma avaliação de usabilidade mostrou que o
-vocabulário também cobrava um preço de quem chegava, e as duas razões apontaram
-para o mesmo lugar: os nomes passaram a ser o que as coisas são, e a marca
-passou a ser dois nós e uma ligação.
+A interface carregava vocabulário e citações vindos de uma obra de terceiro, e
+definir direitos com isso dentro era o tipo de decisão que se toma errado. Uma
+avaliação de usabilidade mostrou que aquele vocabulário também cobrava um preço
+de quem chegava, e as duas razões apontaram para o mesmo lugar: os nomes
+passaram a ser o que as coisas são, e a marca passou a ser dois nós e uma
+ligação. O que saiu, de onde, e por quê está nos ADRs
+[0033](docs/adr/0033-o-vocabulario-sai-da-interface-a-estetica-fica.md),
+[0034](docs/adr/0034-a-marca-abandona-as-duas-citacoes-do-anime.md) e
+[0035](docs/adr/0035-o-codigo-deixa-de-falar-evangelion.md).
 
 Fica a estética inteira, que nunca foi o problema: mono, laranja sobre
 quase-preto, canto reto, sem sombra.

@@ -44,7 +44,7 @@ impl From<VoiceMode> for seele_core::VoiceMode {
     }
 }
 
-/// How far the connection has got. `specs/07-tema-evangelion.md`.
+/// How far the connection has got. `specs/07-estetica.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum LinkTrust {
     /// Not connected.
@@ -797,7 +797,7 @@ pub struct Snapshot {
     pub caminho: Option<&'static str>,
     /// Onde o enlace está: no ar, na bateria interna, ou acabado.
     ///
-    /// `specs/07-tema-evangelion.md` manda a interface não fechar quando a
+    /// `specs/07-estetica.md` manda a interface não fechar quando a
     /// conexão cai — ela esmaece, conta cinco minutos e continua legível. Sem
     /// este campo a casca gráfica não tinha como saber disso e pulava direto
     /// para "encerrado", que é a simplificação que a spec proíbe.

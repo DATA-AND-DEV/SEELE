@@ -60,7 +60,7 @@ Se este milestone escorregar muito, o escopo do projeto precisa ser revisto — 
 - PERSISTENCE: SQLite, migrações, VoiceRooms e Linhas configuráveis.
 - PERMISSIONS: contas, papéis, permissões, banimento.
 - Mensagens de texto com histórico paginado por cursor.
-- Telemetria e cálculo da Taxa de Sincronização.
+- Telemetria e cálculo do sinal.
 - Keepalive, reconexão e a janela de 5 minutos da bateria interna.
 
 **Aceite:** servidor reiniciado preserva estado e histórico. Queda de rede de 60 s é recuperada de forma transparente. Matriz de permissões coberta por testes.
@@ -73,7 +73,7 @@ O primeiro milestone com o produto de verdade.
 
 - Layout completo conforme `05`.
 - Modos Normal, Inserção, Comando e Busca.
-- Push-to-talk, VAD, A.T. Field, volume por usuário.
+- Push-to-talk, VAD, mudo, volume por pessoa.
 - Todos os seis estados visuais, incluindo boot e bateria interna.
 - Tema aplicado conforme `07`, com degradação para 256 e 16 cores e modo sem cor.
 

@@ -284,7 +284,7 @@ async fn two_shells_hold_a_conversation() -> Result<()> {
 
 /// Muting is announced, not just applied.
 ///
-/// `specs/07-tema-evangelion.md` gives the A.T. Field a marker in the roster,
+/// `specs/07-estetica.md` gives the A.T. Field a marker in the roster,
 /// which only means something if the other side ever sees it. Before this the
 /// server ignored the message outright and the marker could never light up.
 #[tokio::test(flavor = "multi_thread")]

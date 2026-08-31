@@ -1114,7 +1114,7 @@ fn centred(area: Rect, want_width: u16, want_height: u16) -> Rect {
 
 /// The dim style used while the internal battery runs down.
 ///
-/// `specs/07-tema-evangelion.md` wants the interface "esmaecida mas ainda
+/// `specs/07-estetica.md` wants the interface "esmaecida mas ainda
 /// legível — o histórico continua ali para leitura". Dim, not hidden.
 fn dim(theme: Theme, app: &App) -> Style {
     if app.dimmed() {
@@ -1567,7 +1567,7 @@ mod tests {
 
     #[test]
     fn the_battery_keeps_the_history_on_screen() {
-        // specs/07-tema-evangelion.md: "o histórico continua ali para leitura".
+        // specs/07-estetica.md: "o histórico continua ali para leitura".
         let mut app = populated();
         app.screen = Screen::InternalBattery {
             remaining: 287,

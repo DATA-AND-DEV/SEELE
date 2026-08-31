@@ -282,7 +282,7 @@
   color: var(--seele-osso-apagado);
 }
 
-/* Enquanto a tentativa dura, e só. `specs/07-tema-evangelion.md` só admite
+/* Enquanto a tentativa dura, e só. `specs/07-estetica.md` só admite
    movimento que diagnostique: este para quando a conexão para. */
 .boot-tentativa[data-estado="carga"] .boot-tentativa-marca {
   color: var(--seele-laranja-nerv);

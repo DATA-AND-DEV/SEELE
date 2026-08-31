@@ -223,7 +223,7 @@ link **perfeito**, que não descarta nada:
 | **perda reportada** | **0,00 %** |
 
 Contar aquele silêncio como perda reportaria **66,1 % de perda num link que não
-perdeu um único pacote**. Como `specs/07-tema-evangelion.md` põe a Taxa de
+perdeu um único pacote**. Como `specs/07-estetica.md` põe a Taxa de
 Sincronização como o elemento mais visível da tela, e `specs/02-protocolo.md` dá
 à perda até 30 pontos de penalidade, o efeito seria todo mundo aparecendo em
 vermelho sempre que a sala ficasse quieta.
@@ -459,7 +459,7 @@ lidos como `f32` little-endian são **NaN**.
 ### Por que isso importa mais do que parece
 
 `specs/02-protocolo.md` deriva a Taxa de Sincronização de RTT, jitter e perda. Um
-NaN em qualquer um propaga para a métrica que `specs/07-tema-evangelion.md` chama
+NaN em qualquer um propaga para a métrica que `specs/07-estetica.md` chama
 de elemento assinatura do produto.
 
 E o modo de falha é silencioso: **toda comparação contra NaN é falsa**. A lógica

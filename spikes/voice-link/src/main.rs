@@ -84,7 +84,7 @@ fn parse_args() -> Option<Args> {
             "--peer" => peer = argv.next()?.parse().ok(),
             "--ssrc" => ssrc = argv.next()?.parse().ok()?,
             "--push-to-talk" => voice_activated = false,
-            // specs/07-tema-evangelion.md calls this "Isolamento total". Also the
+            // specs/07-estetica.md calls this "Isolamento total". Also the
             // only safe way to exercise the loop on one machine with built-in
             // speakers, which would otherwise howl.
             "--deafen" => deafen = true,

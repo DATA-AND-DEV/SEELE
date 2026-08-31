@@ -1608,7 +1608,7 @@ fn the_path_is_written_beside_the_numbers_and_then_left_alone() {
          a second and is thrown away:\n{corpo}"
     );
     // Written once. Without the guard the footer rewrites the same two words on
-    // every frame — twice a second — which `specs/07-tema-evangelion.md` calls a
+    // every frame — twice a second — which `specs/07-estetica.md` calls a
     // design failure by name: movement that diagnoses nothing.
     assert!(
         corpo.contains("caminho !== null") && corpo.contains("!== caminho"),
@@ -4496,7 +4496,7 @@ fn each_moderation_verb_is_offered_by_its_own_permission() {
 #[test]
 fn the_moderation_is_a_layer_over_the_session_and_never_replaces_it() {
     // Same decision as the alert and the battery, and for the same written
-    // reason: `specs/07-tema-evangelion.md` does not let this client replace the
+    // reason: `specs/07-estetica.md` does not let this client replace the
     // conversation, and moderating is a decision taken while *looking* at the
     // room. A full screen would blank out who is talking at the exact moment
     // somebody is deciding what to do about a person.

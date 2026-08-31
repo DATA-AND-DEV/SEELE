@@ -161,7 +161,7 @@ Unificado). O varrimento devolveu **trinta e cinco**; quatro ficaram de fora, e
 os dois casos são diferentes:
 
 - `定` e `診` só existem em nota de trabalho (`.superpowers/`), não em produto.
-- `発` e `令` formam `発令`, que `specs/07-tema-evangelion.md:67` lista como
+- `発` e `令` formam `発令`, que `specs/07-estetica.md:67` lista como
   **fragmento aprovado** ao lado de `警告`, `同期率` e `第3新東京市` — mas que
   nenhuma tela usa. Se algum dia entrar numa tela, cai na Hiragino/Yu Gothic em
   silêncio, que é exatamente a falha que embarcar as faces existe para acabar.

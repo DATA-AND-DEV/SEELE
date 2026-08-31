@@ -10,7 +10,7 @@
 //!
 //! # Plain data, and nothing else
 //!
-//! No formatting, no colour, no bands. `specs/07-tema-evangelion.md` defines
+//! No formatting, no colour, no bands. `specs/07-estetica.md` defines
 //! four Sync Ratio bands with four colours, and `specs/05-cliente-tui.md`
 //! requires a no-colour mode — both are shell concerns. A `to_string()` here
 //! would be the architecture error `specs/01-arquitetura.md` warns about, and
@@ -27,7 +27,7 @@
 //!
 //! # Why the split into local and per-source
 //!
-//! `specs/07-tema-evangelion.md` makes the per-person Sync Ratio the signature
+//! `specs/07-estetica.md` makes the per-person Sync Ratio the signature
 //! element of the product: "each person in the roster has a live percentage
 //! derived from the RTT, jitter and loss **of that connection**". With an SFU
 //! (`specs/01-arquitetura.md`) every talker arrives as a separate stream with
@@ -332,7 +332,7 @@ impl AudioTelemetry {
     ///
     /// A single bad talker should be visible without the shell having to scan
     /// the list, but the per-source numbers stay available because
-    /// `specs/07-tema-evangelion.md` puts a percentage next to each person.
+    /// `specs/07-estetica.md` puts a percentage next to each person.
     #[must_use]
     pub fn worst_loss_fraction(&self) -> f64 {
         self.sources
@@ -583,7 +583,7 @@ mod tests {
 
     #[test]
     fn per_source_numbers_survive_aggregation() {
-        // specs/07-tema-evangelion.md puts a live percentage next to each person,
+        // specs/07-estetica.md puts a live percentage next to each person,
         // so a summary that replaced the per-source list would remove the
         // product's signature element.
         let telemetry = AudioTelemetry {

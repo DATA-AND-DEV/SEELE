@@ -12,7 +12,7 @@ Três coisas definem o projeto:
 
 1. **Terminal como cidadão de primeira classe.** A TUI não é uma versão reduzida — é a referência. Os clientes gráficos é que imitam ela.
 2. **Auto-hospedado e pequeno.** Um binário, um arquivo de configuração, um banco SQLite. Deve rodar confortavelmente em uma VPS de 1 vCPU / 512 MB atendendo ~50 usuários simultâneos.
-3. **Identidade visual completa e coerente.** O tema Evangelion não é skin: é o vocabulário do produto inteiro, do nome dos canais às mensagens de erro. Ver `07-tema-evangelion.md`.
+3. **Identidade visual completa e coerente.** A estética não é skin: é densidade de informação e hierarquia de comando, aplicadas da tela às mensagens de erro. Ver `07-estetica.md`; o vocabulário é do `docs/glossario.md`.
 
 ## Escopo — v1.0
 

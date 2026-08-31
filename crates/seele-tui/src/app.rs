@@ -198,7 +198,7 @@ pub struct Bar {
     pub bitrate: u32,
 }
 
-/// An alert banner. `specs/07-tema-evangelion.md`: `Alerta · 警告`.
+/// An alert banner. `specs/07-estetica.md`: `Alerta · 警告`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Alert {
     /// The channel to show.
@@ -378,7 +378,7 @@ impl App {
 
     /// Whether the interface should be drawn dimmed but legible.
     ///
-    /// `specs/07-tema-evangelion.md`: during the internal battery the interface
+    /// `specs/07-estetica.md`: during the internal battery the interface
     /// is "esmaecida mas ainda legível — o histórico continua ali para leitura".
     /// Blanking it would be the simplification the spec warns against.
     #[must_use]
@@ -908,7 +908,7 @@ mod tests {
 
     #[test]
     fn the_battery_dims_the_interface_without_clearing_it() {
-        // specs/07-tema-evangelion.md: "interface esmaecida mas ainda legível —
+        // specs/07-estetica.md: "interface esmaecida mas ainda legível —
         // o histórico continua ali para leitura". Blanking it is the
         // simplification the spec asks to be protected from.
         let mut app = app();

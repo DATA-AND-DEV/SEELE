@@ -44,7 +44,7 @@ Tab / Shift+Tab   alternar painel, adiante e para trás
 Enter             inserir connection na sala de voz / abrir Linha
 i                 escrever mensagem
 Espaço (hold)     push-to-talk
-m                 alternar A.T. Field (mudo)
+m                 alternar mudo (microfone)
 d                 alternar surdo
 g / G             topo / fim do histórico
 /                 buscar no histórico
@@ -76,7 +76,7 @@ Tecla dedicada configurável não resolveria: o problema não é *qual* tecla, �
 
 1. **Boot** — sequência de inicialização, três subsistemas reportando, barra de sincronização subindo. Dura o tempo real da conexão; se conectar em 200 ms, não inventar espera artificial. Animação decorativa que atrasa o usuário é falha de design.
 2. **PADRÃO: LARANJA** — conectado, não autenticado.
-3. **PADRÃO: AZUL** — operação normal.
+3. **Conexão segura** — operação normal.
 4. **Falando** — destaque no roster, indicador de nível.
 5. **Bateria interna** — desconectado, contagem 04:59 regressiva, interface esmaecida mas legível, tentativas listadas.
 6. **Alerta** — banner 警告 para menção direta ou evento crítico. Ocupa as linhas que o texto pedir, **até quatro**, e essas linhas saem mesmo das da conversa — os painéis têm piso de três linhas e a barra de telemetria fica fora da conta. Cresce porque um veredito de convite carrega duas impressões digitais de 64 caracteres, e em 80 colunas elas não cabem numa linha só: mostrar metade de uma comparação é o mesmo que não mostrar nenhuma. Para em quatro porque o texto do alerta pode vir do operador do outro lado — 512 bytes sem filtro de quebra de linha —, e uma banda que se dimensiona ao que o servidor mandar é o servidor decidindo quanto da conversa você enxerga. O que passar disso é cortado com `…`, e a dica `[enter]` do alerta bloqueante nunca é o que se corta — quando ela não cabe na última linha, a linha que ela toma sai marcada como qualquer outro corte.
@@ -85,7 +85,7 @@ Tecla dedicada configurável não resolveria: o problema não é *qual* tecla, �
 
 Os seis acima descrevem uma **sessão**. `connection` sem argumento nenhum abre antes
 disso uma tela de conexão — Servers visitados, endereço novo, colar convite,
-hospedar aqui — que não tem roster, telemetria nem Taxa de Sincronização.
+hospedar aqui — que não tem roster, telemetria nem sinal.
 Encaixá-la no mesmo enum custaria campos vazios nos outros seis, então ela vive
 fora, em `seele-tui::selecao`, e some quando a conexão começa.
 
@@ -141,7 +141,7 @@ fecha, que é o certo para "estou hospedando uma conversa" e errado para
 ## Acessibilidade
 
 - Modo alto contraste e modo sem cor (só forma e texto) — daltonismo é comum no público e a paleta depende muito de vermelho/verde.
-- Nenhuma informação transmitida **só** por cor: a Taxa de Sincronização é sempre acompanhada do número; A.T. Field tem marcador textual além da cor.
+- Nenhuma informação transmitida **só** por cor: o sinal é sempre acompanhado do número; o mudo tem marcador textual além da cor.
 - Respeitar `NO_COLOR`.
 - **[EM ABERTO]** Leitor de tela em TUI é limitado. Investigar viabilidade mínima.
 

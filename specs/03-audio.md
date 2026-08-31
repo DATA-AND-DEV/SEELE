@@ -72,7 +72,7 @@ O componente que separa "funciona" de "funciona bem". Um buffer **adaptativo** p
 - Cresce rápido sob instabilidade, encolhe devagar sob estabilidade — assimetria intencional, porque cortar áudio é pior que atrasar.
 - Quadro faltante → PLC do Opus (`decode` com `null`) para um quadro; a partir do segundo, silêncio com fade.
 - Quadro atrasado além do alvo → descartado, contabilizado como perda.
-- Expõe métricas: profundidade atual, perdas, quadros ocultados, descartes tardios. Isso alimenta a Taxa de Sincronização.
+- Expõe métricas: profundidade atual, perdas, quadros ocultados, descartes tardios. Isso alimenta o sinal.
 
 Escrever o jitter buffer como módulo **puro e determinístico**, testável sem áudio real: entra sequência de quadros com timestamps, sai sequência de decisões. Isso permite testes de propriedade contra padrões de rede sintéticos.
 

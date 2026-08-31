@@ -1379,7 +1379,7 @@ function desenharTelemetria(snapshot) {
   // Escrito uma vez e calado depois. O caminho não muda dentro de uma sessão —
   // a reconexão do núcleo volta ao mesmo endereço —, e reescrever o mesmo texto
   // duas vezes por segundo seria movimento sem informação, que é o que
-  // `specs/07-tema-evangelion.md` chama de falha de design.
+  // `specs/07-estetica.md` chama de falha de design.
   //
   // Sem nome, nada é escrito e o travessão fica: é a métrica dizendo que não
   // sabe, e não a tela inventando um «DIRETO» que apagaria a distinção que
@@ -1425,7 +1425,7 @@ function desenharAviso(snapshot) {
 /**
  * A bateria interna, desenhada sobre a sessão.
  *
- * `specs/07-tema-evangelion.md` proíbe fechar ou trocar de tela quando a
+ * `specs/07-estetica.md` proíbe fechar ou trocar de tela quando a
  * conexão cai: esmaece, conta, e deixa o histórico legível. Por isso isto só
  * acende uma faixa e uma classe no corpo — nada some.
  */

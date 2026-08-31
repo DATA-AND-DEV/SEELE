@@ -602,7 +602,7 @@ async fn sessao(
 
     // `Enlace` e não `Client`: um `Client` é uma conexão e acaba quando ela
     // cai; o enlace é a **sessão**, que atravessa quedas. É ele que carrega a
-    // bateria interna e a reconexão de `specs/07-tema-evangelion.md`.
+    // bateria interna e a reconexão de `specs/07-estetica.md`.
     let destinos = construir_destinos(args);
     // Uma `Chegada`, que é quem dá nome a cada etapa desta travessia. Com
     // bilhete ela avisa o ponto de encontro pelos candidatos que precisam de
@@ -827,7 +827,7 @@ async fn sessao(
                     // vez de virar silenciosamente um dos de cima.
                     Aviso::TelaAbriu { .. } | Aviso::TelaQuadro { .. } | Aviso::TelaFechou { .. } => {
                     }
-                    // A queda não encerra nada. `specs/07-tema-evangelion.md`:
+                    // A queda não encerra nada. `specs/07-estetica.md`:
                     // a interface esmaece e continua legível, a contagem desce,
                     // e o histórico fica ali para leitura.
                     Aviso::Estado { estado, restante } => {

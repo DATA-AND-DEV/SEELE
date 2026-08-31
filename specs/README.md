@@ -1,7 +1,7 @@
 # SEELE — Especificações
 
 Sistema de comunicação por voz e texto operado via terminal, com clientes gráficos opcionais.
-Estética e vocabulário derivados de *Neon Genesis Evangelion*.
+Estética de console de operação: densidade de informação e hierarquia de comando. O vocabulário é do `docs/glossario.md` desde o ADR 0033.
 
 ## Como usar esta pasta
 
@@ -16,7 +16,7 @@ Estes documentos são a fonte de verdade para o planejamento. Eles descrevem **o
 | `04-servidor-seele.md` | Estado, permissões, subsistemas, persistência |
 | `05-cliente-tui.md` | Layout, atalhos, modelo de interação do terminal |
 | `06-clientes-gui.md` | Desktop e mobile, camada FFI |
-| `07-tema-evangelion.md` | Glossário canônico, tokens, regras de aplicação |
+| `07-estetica.md` | Densidade, tokens de cor, tipografia, movimento, voz da interface |
 | `08-seguranca.md` | Transporte, autenticação, caminho para E2EE |
 | `09-roadmap.md` | Milestones M0–M6 com critérios de aceite |
 | `10-convencoes.md` | Estilo, testes, CI, commits, versionamento |

@@ -807,7 +807,7 @@ mod tests {
     fn a_talker_keeps_sequence_contiguous_across_silence() {
         // The property the whole of M1.9 rests on. If this ever stops holding,
         // silence becomes indistinguishable from loss and the Sync Ratio of
-        // specs/07-tema-evangelion.md drops every time nobody speaks.
+        // specs/07-estetica.md drops every time nobody speaks.
         let frames = talker_stream(3, 10, 2);
         assert_eq!(frames.len(), 6);
 

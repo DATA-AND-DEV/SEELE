@@ -6,7 +6,7 @@
 - **Documentação, specs e ADRs: português.**
 - **Strings visíveis ao usuário: i18n desde o início**, com pt-BR e en como locales iniciais. Nunca literal de string direto na interface — o custo de retrofit é alto e o vocabulário temático (`07`) tem que ser traduzido com cuidado.
 
-O glossário de `07` é normativo em ambos os idiomas: `VoiceRoom` permanece `VoiceRoom`, `Pessoa` vira `Person`, `Taxa de Sincronização` vira `Sync Ratio`.
+O `docs/glossario.md` é normativo em ambos os idiomas, e é a autoridade sobre a palavra que a pessoa lê desde o ADR 0033: `sala de voz` é `VoiceRoom`, `pessoa` é `Person`, `sinal` é `Signal`.
 
 ## Estilo
 

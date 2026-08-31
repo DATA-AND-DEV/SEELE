@@ -46,7 +46,7 @@ const INTERVALO_DE_MEDIDA: Duration = Duration::from_secs(1);
 
 /// What a connection asks its voice room to do.
 pub enum VoiceRoomCommand {
-    /// A person entered. `specs/07-tema-evangelion.md` calls it "inserir connection".
+    /// A person entered. `specs/07-estetica.md` calls it "inserir connection".
     Join {
         /// Who.
         person: PersonId,
