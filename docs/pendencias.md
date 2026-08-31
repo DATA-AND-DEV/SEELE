@@ -1299,45 +1299,57 @@ ordem já foi consertada (`4c9429c`) e a espera também (`3b5510f`), mas as duas
 tratam o sintoma: o endereço continua sendo anunciado e continua não
 funcionando.
 
-### O que fecharia
+### Fechada no código em 2026-08-24 · aberta na prova
 
-**PCP — Port Control Protocol, RFC 6887.** É a mesma conversa que o degrau 3
-já tem com o roteador da própria casa, num protocolo mais novo, e ele tem o
-verbo que falta: **abrir buraco no firewall IPv6**. Em IPv6 não há NAT a
-mapear; o que existe é entrada bloqueada, e o PCP é como se pede que ela seja
-liberada para uma porta.
+**O PCP existe, pede, e confere.** O commit `002ccef` entregou
+`crates/seele-server/src/alcance/pcp.rs`, ligado à escada em
+`alcance.rs::abrir_firewall` e coberto por catorze testes. `crab_nat` fala a RFC
+6887, `netdev` descobre o gateway — que o PCP não descobre sozinho —, e o pedido
+leva o **nosso IPv6 global** como cliente, que é o que o transforma em abertura
+de firewall em vez de mapeamento.
 
-Se o roteador atender, o degrau 2 deixa de ser afirmação e vira observação —
-e aí o `Tipo::Global` volta a merecer a frente da lista, que é de onde ele
-saiu hoje justamente por ser palpite.
+**Esta seção dizia «o que fecharia» e listava o que já estava feito.** Ela não foi
+atualizada depois daquele commit, e o custo disso foi medido em 2026-08-31: uma
+sessão inteira começou a reconstruir as 933 linhas de `pcp.rs` antes de conferir
+se elas existiam. Uma pendência que descreve como futuro um trabalho entregue é
+pior que uma pendência que não existe — a primeira manda alguém trabalhar de
+novo, a segunda só não ajuda.
 
-O ganho para quem hospeda atrás de CGNAT é o maior que existe nesta escada:
-um endereço **estável**, que não morre quando o app fecha, sem ponto de
-encontro, sem furo e sem VPS. É o único item que **apaga** a dependência de
-terceiro em vez de mudá-la de dono.
+As duas armadilhas que esta entrada nomeava foram fechadas por escrito:
 
-### O que já foi levantado, para não refazer
+- **o recuo do `crab_nat` para NAT-PMP** devolveria um mapeamento IPv4 como se
+  fosse abertura de firewall IPv6 — sucesso mentiroso, da mesma família do CGNAT
+  que o degrau 3 já vigia. O caminho passou a ser `pcp::port_mapping` direto, e o
+  recuo virou a falha `SoFalaNatPmp`;
+- **o par externo é conferido contra o interno.** Se o roteador traduziu em vez
+  de abrir, é `NaoFoiBuracoNoFirewall`, e o mapeamento é desfeito na hora.
 
-- **O crate.** `crab_nat` 0.8.1, Rust puro, fala PCP com recuo para NAT-PMP.
-  `PortMapping::new(gateway, client, protocol, porta_interna, opcoes)` — e é
-  passar o **nosso IPv6 global** como `client` que faz o pedido virar abertura
-  de firewall em vez de mapeamento.
-- **O que falta e não estava previsto: descobrir o roteador.** O UPnP acha por
-  multicast SSDP; o PCP **não tem descoberta** — a RFC manda falar com o
-  gateway padrão, e lê-lo é código por sistema. `netdev` 0.46 resolve por três
-  crates, medido com `cargo add --dry-run`.
-- **Onde encaixa.** `crates/seele-server/src/alcance/porta.rs` é o vizinho:
-  mesma forma, mesma disciplina de nunca falhar em silêncio — todo caminho
-  termina numa falha que **diz qual foi**, porque um pedido de porta que não
-  deu certo tem de dizer que não deu.
-- **A armadilha que o degrau 3 já pisou, e que vale de novo.** Um roteador
-  atrás de outro roteador responde `Ok` e abre a porta na WAN dele, que não
-  sai para a internet. `FalhaAoAbrir::SemSaidaParaInternet` existe por causa
-  disso. O equivalente em IPv6 é um roteador que aceita o pedido e não é quem
-  filtra.
-- **Como saber se funcionou de verdade.** Não confiar no `Ok`: a única prova é
-  um pacote entrando de fora. A VPS do ponto de encontro serve de sonda, e o
-  método com controle está descrito acima.
+E a disciplina que esta entrada mais cobrava foi respeitada: **o `Ok` não nomeia
+degrau nenhum.** Ele produz `Tipo::GlobalLiberado`, que passa na frente do
+`Global` cru e fica **abaixo** do `Refletido` — a ordem de `4c9429c` veio de
+medição de campo, e um palpite melhor não vira uma observação.
+
+### O que continua aberto, e é só isto
+
+**Nenhum roteador disse sim ainda.** Medido na casa do commit: o roteador não
+respondeu ao PCP nem ao NAT-PMP, em nenhuma das duas famílias. O degrau 2
+continua palpite ali — a diferença é que agora ele **diz** que é.
+
+A prova que falta é a que esta entrada sempre descreveu, e ela não é código: um
+pacote entrando de fora, com controle. A VPS do ponto de encontro serve de sonda,
+e o método é o do parágrafo «A prova, com controle» acima — três pacotes UDP da
+VPS para o IPv6 da máquina, na porta da escuta, com o firewall do sistema já
+liberando; e os mesmos três de outra máquina da mesma casa, como controle.
+
+O critério de sucesso é estreito de propósito: **não basta o PCP responder `Ok`**.
+O que se quer ver é o pacote de fora chegando **depois** do `Ok` e não chegando
+antes dele, na mesma casa e na mesma sessão. Sem o «não chegando antes», o teste
+não distingue um firewall aberto pelo pedido de um firewall que já estava aberto.
+
+**Onde procurar um roteador que responda.** O PCP é comum em roteador de
+operadora com IPv6 nativo e raro em roteador de varejo. Vale tentar em mais de
+uma casa antes de concluir que o degrau não serve: uma amostra de um é o que esta
+entrada tem hoje.
 
 **Quando dói.** Hoje, em toda casa com CGNAT e IPv6 — que é a combinação mais
 comum no Brasil de 2026. Quem cai nela depende do degrau 4, e o link do degrau
