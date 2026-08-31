@@ -2370,39 +2370,40 @@ fn no_event_in_the_call_monitor_is_older_than_the_window() {
 }
 
 #[test]
-fn the_battery_bar_stays_empty_because_nothing_carries_its_total() {
-    // `remaining_seconds` crosses; the total does not. The comp divides by a
-    // literal 299, which is the shell guessing the spec and being wrong the day
-    // the spec changes — and the count beside the bar is already the same
-    // information with no denominator at all.
+fn nothing_draws_a_battery_bar_out_of_a_denominator_the_wire_never_sent() {
+    // **Este guarda substituiu um que cobrava o contrário**, e a troca é a
+    // decisão e não um relaxamento.
     //
-    // Two halves, because either one alone passes while the defect is present:
-    // the element has to be marked absent, *and* no script may fill it.
+    // O anterior — `the_battery_bar_stays_empty_because_nothing_carries_its_total`
+    // — exigia que a barra **existisse**, marcada como ausente, com o argumento
+    // de que «a moldura é o que torna a lacuna visível». A moldura foi removida:
+    // o `title` dela mesmo dizia que «a contagem ao lado já é a mesma
+    // informação», e uma linha que só existe para dizer que não tem nada a dizer
+    // é ruído com cara de dado.
+    //
+    // O defeito que aquele guarda protegia continua sendo real, e é este: o comp
+    // divide por um literal `299`, que é a casca chutando a spec e ficando errada
+    // no dia em que a spec mudar. `remaining_seconds` atravessa o fio; o
+    // **total** não. Então o que se cobra aqui é a ausência do denominador
+    // inventado, e não a presença de uma moldura vazia.
     let page = without_comments(&read("ui/index.html"));
     let script = without_comments(&scripts());
 
-    let Some(after) = page.split("class=\"bateria-barra").nth(1) else {
-        panic!(
-            "index.html no longer draws the battery bar at all — the frame is \
-                what makes the gap visible"
+    assert!(
+        !page.contains("bateria-barra") && !script.contains("bateria-barra"),
+        "a barra da queda voltou; se ela voltou com denominador, ele foi inventado"
+    );
+
+    // O literal do comp, procurado onde ele faria estrago: junto do que desenha
+    // a queda. Um `299` noutro lugar do script é outro número.
+    for trecho in script.split("bateria").skip(1) {
+        let vizinhanca: String = trecho.chars().take(400).collect();
+        assert!(
+            !vizinhanca.contains("299"),
+            "algo perto da faixa da queda usa o literal 299 como total: \
+             o protocolo nunca mandou de quanto a contagem partiu"
         );
-    };
-    let Some(tag) = after.split('>').next() else {
-        panic!("unterminated battery bar tag");
-    };
-    assert!(
-        tag.contains("ausente"),
-        "the battery bar is drawn as a measured value: <{tag}>"
-    );
-    assert!(
-        tag.contains("title=\""),
-        "the battery bar is empty and says nothing about why: <{tag}>"
-    );
-    assert!(
-        !script.contains("bateria-barra"),
-        "a script writes into the battery bar, so it is being filled from a \
-         denominator this protocol never sent"
-    );
+    }
 }
 
 #[test]

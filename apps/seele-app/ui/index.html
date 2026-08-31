@@ -613,45 +613,45 @@
   </div>
 
   <!--
-    Bateria interna. `specs/07-estetica.md` é explícito: o cliente não
-    fecha nem mostra um spinner. A interface esmaece, conta cinco minutos, e o
-    histórico continua ali para leitura. Por isso isto é uma faixa **sobre** a
-    sessão, e não uma tela que substitui o que estava escrito.
+    A queda, e o período de graça que ela abre. `specs/07-estetica.md` é
+    explícito: o cliente não fecha nem mostra um spinner. A interface esmaece,
+    conta cinco minutos, e o histórico continua ali para leitura. Por isso isto é
+    uma faixa **sobre** a sessão, e não uma tela que substitui o que estava
+    escrito — a `tela-fim` é outro momento, e só aparece quando a contagem acaba.
+
+    **Os identificadores dizem `bateria` e o texto não, de propósito.** O estado
+    se chama `Link::InternalBattery` no fio, e o nome de classe seguindo o nome do
+    protocolo é o que permite achar uma coisa a partir da outra. O que mudou foi
+    a **tela**: `BATERIA INTERNA` e `ENERGIA RESTANTE ANTES DA SAÍDA FORÇADA`
+    eram metáfora de anime — a bateria do EVA quando cortam o cabo — e
+    sobreviveram ao ADR 0033 porque pareciam termo técnico. Não são: quem lê
+    quer saber se a conversa volta, e agora a faixa responde isso.
   -->
   <div id="bateria" class="camada-bateria" role="status" hidden>
     <div class="bateria-caixa">
       <div class="bateria-cabeca">
-        <span class="bateria-nome">BATERIA INTERNA</span>
-        <!--
-          O kanji de acento (`内部電源`) saiu com o resto do japonês decorativo:
-          `BATERIA INTERNA` ao lado já dizia tudo o que ele dizia.
-        -->
+        <span class="bateria-nome">CONEXÃO PERDIDA · RECONECTANDO</span>
       </div>
 
       <div class="bateria-corpo">
         <time id="bateria-conta">--:--</time>
         <div class="bateria-dizeres">
-          <p class="rotulo">ENERGIA RESTANTE ANTES DA SAÍDA FORÇADA</p>
+          <p class="rotulo">ATÉ A SESSÃO SER ENCERRADA</p>
           <!--
             A frase do comp menos o nome de rota. Ele escreve "Conexão com
             MEDIA perdida", e o inventário §5 classifica a frase inteira
             como **F/P**: ela é da casca, mas nomeia uma rota que não existe em
             lugar nenhum do core. Sem o nome, o que sobra é verdade inteira.
           -->
-          <p class="bateria-frase">Conexão perdida. Sessão mantida em memória local. Áudio suspenso.</p>
+          <p class="bateria-frase">Sessão mantida em memória local. Áudio suspenso.</p>
           <!--
-            A barra de 28 blocos, vazia. `remaining_seconds` chega; o **total**
-            não (§16, "mudança de protocolo (menor)"). O único denominador
-            disponível seria o 299 literal do comp, que é a casca chutando a
-            spec e ficando errada no dia em que a spec mudar — e a contagem ao
-            lado já é a mesma informação, sem precisar de denominador nenhum.
-
-            O `title` diz a consequência e não o mecanismo: quem passa o
-            ponteiro numa barra vazia quer saber se ela vai encher, e não que
-            campo falta no protocolo.
+            A linha de `——` que ficava aqui saiu. Ela era o lugar de uma barra de
+            progresso que nunca encheu: `remaining_seconds` atravessa o fio e o
+            **total** não, então não havia denominador. Reduzi-la ao travessão
+            foi honesto, e mantê-la não: o `title` dela mesmo dizia que «a
+            contagem ao lado já é a mesma informação». Uma linha que só existe
+            para dizer que não tem nada a dizer é ruído com cara de dado.
           -->
-          <p class="bateria-barra ausente"
-             title="o tempo que falta é conhecido; de quanto ele partiu, não — por isso a barra fica vazia">——</p>
         </div>
       </div>
 

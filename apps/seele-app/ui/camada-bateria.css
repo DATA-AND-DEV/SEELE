@@ -136,17 +136,6 @@
   color: var(--seele-osso);
 }
 
-/* A barra de 28 blocos do comp. Ela fica desenhada e vazia: `remaining_seconds`
-   chega, o **total** não (inventário §16, "mudança de protocolo (menor)"). Uma
-   barra precisa de denominador, e o único disponível seria o 299 literal do
-   comp — que é a casca chutando a spec e ficando errada no dia em que a spec
-   mudar. A contagem ao lado é a mesma informação sem denominador nenhum. */
-.bateria-barra {
-  margin: 0;
-  font-size: var(--seele-t-dado);
-  letter-spacing: 0.02em;
-}
-
 /* ---------- o corpo de baixo: as tentativas ---------- */
 
 .bateria-pe {

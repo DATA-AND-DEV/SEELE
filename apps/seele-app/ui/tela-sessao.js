@@ -1423,11 +1423,16 @@ function desenharAviso(snapshot) {
 }
 
 /**
- * A bateria interna, desenhada sobre a sessão.
+ * A faixa da queda, desenhada sobre a sessão.
  *
- * `specs/07-estetica.md` proíbe fechar ou trocar de tela quando a
- * conexão cai: esmaece, conta, e deixa o histórico legível. Por isso isto só
- * acende uma faixa e uma classe no corpo — nada some.
+ * `specs/07-estetica.md` proíbe fechar ou trocar de tela quando a conexão cai:
+ * esmaece, conta, e deixa o histórico legível. Por isso isto só acende uma faixa
+ * e uma classe no corpo — nada some.
+ *
+ * Os identificadores dizem `bateria` porque o estado se chama
+ * `Link::InternalBattery` no fio, e o nome de classe seguindo o do protocolo é o
+ * que permite achar um a partir do outro. O que a pessoa lê é outra coisa, e a
+ * razão está no `index.html`.
  */
 function desenharEnlace(link) {
   const faixa = $("bateria");
