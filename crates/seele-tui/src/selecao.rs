@@ -11,7 +11,7 @@
 //!
 //! `specs/05-cliente-tui.md` descreve seis estados visuais, e todos os seis
 //! descrevem uma **sessão**. Esta tela roda antes de existir sessão: não há
-//! roster, nem telemetria, nem Taxa de Sincronização, e nada aqui pode ser
+//! roster, nem telemetria, nem sinal, e nada aqui pode ser
 //! expresso em [`crate::app::Screen`] sem inventar campos vazios para os outros
 //! cinco. Por isso mora fora do `App`, com estado próprio, e some quando a
 //! conexão começa.
@@ -469,7 +469,7 @@ fn desenhar_campo(
             ui::truncate(valor, area.width.saturating_sub(6) as usize),
             tema.body(),
         ),
-        Span::styled("█", tema.fg(theme::NERV)),
+        Span::styled("█", tema.fg(theme::ORANGE)),
     ];
 
     // A sugestão fica apagada **depois** do cursor enquanto o campo está vazio,

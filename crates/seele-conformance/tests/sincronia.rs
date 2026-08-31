@@ -1,4 +1,4 @@
-//! A própria Taxa de Sincronização, vista do roster.
+//! A própria sinal, vista do roster.
 //!
 //! O número que `specs/07-estetica.md` chama de «a coisa mais visível da
 //! tela» aparece em dois lugares ao mesmo tempo: na barra de telemetria, medida
@@ -162,7 +162,7 @@ async fn o_roster_mostra_a_taxa_do_proprio_pessoa() -> Result<()> {
     let taxa = minha_taxa(&sala).expect("o próprio pessoa sumiu do roster");
     assert!(
         mediu,
-        "a barra de telemetria mede a Taxa de Sincronização e o roster continua \
+        "a barra de telemetria mede a sinal e o roster continua \
          em {taxa}%: a difusão do `PersonState` nunca chegou ao pessoa que ela \
          descreve"
     );

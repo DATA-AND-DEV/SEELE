@@ -8,7 +8,7 @@
 //! allowed to; this is the version that survives.
 //!
 //! What a shell gets is a handle with verbs from the product's own vocabulary —
-//! A.T. Field, Isolamento total, push-to-talk — and a telemetry snapshot. What
+//! mudo, Isolamento total, push-to-talk — and a telemetry snapshot. What
 //! it does not get is a sample, a sequence number, or an opinion about Opus.
 //!
 //! # Why its own thread
@@ -583,10 +583,10 @@ impl Voice {
     ///
     /// # What has to survive, and why it is decided here
     ///
-    /// A.T. Field, Isolamento total, the mode, the held key and every per-talker
+    /// mudo, Isolamento total, the mode, the held key and every per-talker
     /// volume. Left to a shell, this list would be written once per shell and
     /// each copy would forget a different item — and the item that hurts is
-    /// A.T. Field: a switch that quietly unmutes a microphone is a switch that
+    /// mudo: a switch that quietly unmutes a microphone is a switch that
     /// puts a room on the air.
     ///
     /// # Errors
@@ -729,7 +729,7 @@ impl Voice {
         )
     }
 
-    /// Mutes the microphone — A.T. Field.
+    /// Mutes the microphone — mudo.
     pub fn set_muted(&self, on: bool) {
         self.controls.muted.store(on, Ordering::Relaxed);
     }

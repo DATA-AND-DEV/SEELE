@@ -43,7 +43,7 @@ pub struct Person {
     pub nickname: String,
     /// Their media source, for per-talker volume.
     pub ssrc: Option<Ssrc>,
-    /// Microphone muted — A.T. Field.
+    /// Microphone muted — mudo.
     pub muted: bool,
     /// Speakers muted — Isolamento total.
     pub total_isolation: bool,

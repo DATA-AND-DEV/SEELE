@@ -9,7 +9,7 @@
 
 /* specs/05-cliente-tui.md: modo sem cor, e daltonismo é comum no público. Aqui
    a forma e o texto continuam suficientes — a marca de bloco e o número
-   acompanham toda Taxa de Sincronização. */
+   acompanham toda sinal. */
 @media (prefers-contrast: more) {
   .roster .pessoa { color: var(--seele-osso); }
   /* `.coordenada` entra pela mesma razão que `.painel-titulo`: é o nome do

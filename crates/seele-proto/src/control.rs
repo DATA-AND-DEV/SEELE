@@ -16,7 +16,7 @@
 //! - **G8.** "Isolamento total" (deafen) is defined in
 //!   `specs/07-estetica.md` and bound to a key in `specs/05-cliente-tui.md`,
 //!   but had no protocol representation, so a roster could not show who was not
-//!   listening. [`PersonState`] carries it beside the A.T. Field.
+//!   listening. [`PersonState`] carries it beside the mudo.
 //! - **G9.** `EnviarMensagem` is documented as "idempotent by `client_msg_id`"
 //!   while the field was missing from its payload. It is explicit here.
 //!
@@ -425,13 +425,13 @@ pub enum SubsystemHealth {
 /// What a person's client is currently doing.
 ///
 /// Carries both mute controls. `specs/07-estetica.md` names them
-/// "A.T. Field" (microphone) and "Isolamento total" (speakers); the second had
+/// "mudo" (microphone) and "Isolamento total" (speakers); the second had
 /// no protocol representation before — gap G8.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersonState {
     /// Whose state this is.
     pub person: PersonId,
-    /// Microphone muted — "A.T. Field" active.
+    /// Microphone muted — "mudo" active.
     pub muted: bool,
     /// Speakers muted — "Isolamento total".
     ///

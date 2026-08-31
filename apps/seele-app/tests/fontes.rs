@@ -198,7 +198,7 @@ fn every_face_carries_the_licence_it_was_given_under() {
 fn the_faces_are_held_rather_than_swapped_in() {
     // `font-display: swap` paints the fallback and replaces it a beat later.
     // Everywhere else that is the kind choice; here the fallback is Arial
-    // Narrow inside a NERV console, and a flash of it is worse than a beat of
+    // Narrow inside a ORANGE console, and a flash of it is worse than a beat of
     // nothing. The files are local, so the beat is a disk read.
     //
     // Scoped to the blocks, not to the file: the prose at the top of the sheet

@@ -935,7 +935,7 @@ impl std::fmt::Debug for Connection {
 impl Connection {
     /// Connects, authenticates, and starts the driver thread.
     ///
-    /// **Blocks** until the session reaches PADRÃO: AZUL or fails.
+    /// **Blocks** until the session reaches CONEXÃO SEGURA or fails.
     ///
     /// A porta antiga, e o que ela perde: o erro sem a trilha. Ela fica porque
     /// oito arquivos de teste entram por aqui, e trocá-los todos no commit que
@@ -1545,7 +1545,7 @@ impl Connection {
         resposta.await.map_err(|_| ConnectionError::NotConnected)
     }
 
-    /// Mutes or unmutes the microphone — A.T. Field.
+    /// Mutes or unmutes the microphone — mudo.
     ///
     /// Announced to the server as well as applied locally: the roster shows it,
     /// and a mute nobody else can see is half a feature.
@@ -1615,7 +1615,7 @@ impl Connection {
     pub fn set_capture_device(&self, device: Option<String>) -> Result<(), ConnectionError> {
         // The new path opens before the old one is dropped, so a microphone that
         // turns out to be gone leaves the session speaking instead of silent.
-        // `switch_capture` is what carries A.T. Field and the rest across — in
+        // `switch_capture` is what carries mudo and the rest across — in
         // the core, so the terminal client gets the same list of what survives,
         // and the chosen output with it.
         self.switch_device(|running, media, ssrc| {
@@ -2867,14 +2867,14 @@ async fn drive(
                             if let Some(atual) = slot.as_ref() {
                                 // `reopen` e não `start_on`, porque os controles
                                 // têm que atravessar a reabertura. A lista mora
-                                // em `Voice::switch_capture` — A.T. Field,
+                                // em `Voice::switch_capture` — mudo,
                                 // Isolamento total, o modo, a tecla segura, cada
                                 // ganho por interlocutor — e está lá justamente
                                 // para que nenhuma casca esqueça um item. Esta
                                 // esquecia todos.
                                 //
                                 // O que torna isto pior que "volta desmutado" é
-                                // que `Enlace::tentar` **restaura** o A.T. Field
+                                // que `Enlace::tentar` **restaura** o mudo
                                 // no servidor: o roster continuava mostrando a
                                 // pessoa muda enquanto o portão local voltava
                                 // aberto, e o indicador que todo mundo lê

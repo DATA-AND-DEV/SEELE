@@ -138,9 +138,13 @@ pub const BONE_DIM: Ink = Ink {
     ansi16: Color::DarkGray,
 };
 
-/// NERV orange — the institutional accent. **Not** a success colour
-/// (`specs/07`).
-pub const NERV: Ink = Ink {
+/// The institutional accent. **Not** a success colour (`specs/07-estetica.md`).
+///
+/// Chamava-se `NERV`, e o ADR 0035 não o alcançou: a varredura procurou
+/// vocabulário de domínio — `Cage`, `Pilot`, `Dogma` — e este era nome de
+/// **cor**, num arquivo de tema. Ficou como o último identificador de código a
+/// citar a obra, e saiu em 2026-08-31.
+pub const ORANGE: Ink = Ink {
     truecolor: (0xF2, 0x52, 0x1F),
     ansi256: 202,
     ansi16: Color::Yellow,
@@ -149,7 +153,7 @@ pub const NERV: Ink = Ink {
 /// Alert red. Reserved for error and disconnection; if it appears, something is
 /// wrong (`specs/07`).
 ///
-/// In sixteen colours this must not collide with [`NERV`], or the exclusivity
+/// In sixteen colours this must not collide with [`ORANGE`], or the exclusivity
 /// the theme promises disappears exactly where it matters most.
 pub const ALERT: Ink = Ink {
     truecolor: (0xFF, 0x1A, 0x1A),
@@ -164,8 +168,8 @@ pub const PHOSPHOR: Ink = Ink {
     ansi16: Color::LightGreen,
 };
 
-/// Verified identity — PADRÃO: AZUL.
-pub const PATTERN_BLUE: Ink = Ink {
+/// Verified identity — CONEXÃO SEGURA.
+pub const VERIFIED: Ink = Ink {
     truecolor: (0x2F, 0x8F, 0xE0),
     ansi256: 32,
     ansi16: Color::LightBlue,
@@ -250,7 +254,7 @@ impl Theme {
     /// Style for the institutional accent.
     #[must_use]
     pub fn accent(self) -> Style {
-        self.fg(NERV).add_modifier(Modifier::BOLD)
+        self.fg(ORANGE).add_modifier(Modifier::BOLD)
     }
 
     /// Style for an alert.
@@ -276,7 +280,7 @@ impl Theme {
     pub fn sync(self, band: SignalBand) -> Style {
         match band {
             SignalBand::Nominal => self.fg(PHOSPHOR),
-            SignalBand::Degraded => self.fg(NERV),
+            SignalBand::Degraded => self.fg(ORANGE),
             SignalBand::Critical => self.alert(),
         }
     }
@@ -296,10 +300,10 @@ impl Theme {
         }
     }
 
-    /// Style for verified identity — PADRÃO: AZUL.
+    /// Style for verified identity — CONEXÃO SEGURA.
     #[must_use]
     pub fn pattern_blue(self) -> Style {
-        self.fg(PATTERN_BLUE).add_modifier(Modifier::BOLD)
+        self.fg(VERIFIED).add_modifier(Modifier::BOLD)
     }
 
     /// Whether kanji accents should be drawn at all.
@@ -327,10 +331,10 @@ mod tests {
             RULE_STRONG,
             BONE,
             BONE_DIM,
-            NERV,
+            ORANGE,
             ALERT,
             PHOSPHOR,
-            PATTERN_BLUE,
+            VERIFIED,
         ];
         for ink in inks {
             assert!(ink.resolve(Palette::True).is_some());
@@ -347,15 +351,15 @@ mod tests {
     fn the_values_match_the_frozen_tokens() {
         // design/seele-tokens.json is the source; this is the translation. A
         // silent drift between them is how a design stops being the design.
-        assert_eq!(NERV.truecolor, (0xF2, 0x52, 0x1F));
-        assert_eq!(NERV.ansi256, 202);
+        assert_eq!(ORANGE.truecolor, (0xF2, 0x52, 0x1F));
+        assert_eq!(ORANGE.ansi256, 202);
         assert_eq!(ALERT.truecolor, (0xFF, 0x1A, 0x1A));
         assert_eq!(ALERT.ansi256, 196);
         assert_eq!(PHOSPHOR.truecolor, (0x6B, 0xFF, 0xB6));
         assert_eq!(PHOSPHOR.ansi256, 85);
         assert_eq!(BONE.truecolor, (0xEA, 0xE3, 0xCF));
         assert_eq!(BONE.ansi256, 254);
-        assert_eq!(PATTERN_BLUE.ansi256, 32);
+        assert_eq!(VERIFIED.ansi256, 32);
     }
 
     #[test]
@@ -365,7 +369,7 @@ mod tests {
         // would break that promise exactly where the user is least able to
         // check anything.
         assert_ne!(
-            NERV.resolve(Palette::Ansi16),
+            ORANGE.resolve(Palette::Ansi16),
             ALERT.resolve(Palette::Ansi16)
         );
         assert_ne!(

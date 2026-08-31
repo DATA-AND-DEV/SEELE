@@ -88,7 +88,7 @@ async fn three_clients_in_one_voice_room_hear_each_other() -> Result<()> {
     let mut rafael = connect(address, "rafael").await?;
     let mut carla = connect(address, "carla").await?;
 
-    // The handshake reached PADRÃO: AZUL for all three.
+    // The handshake reached CONEXÃO SEGURA for all three.
     assert_eq!(marcela.link_state(), LinkTrust::Verified);
     assert_eq!(rafael.link_state(), LinkTrust::Verified);
     assert_eq!(carla.link_state(), LinkTrust::Verified);

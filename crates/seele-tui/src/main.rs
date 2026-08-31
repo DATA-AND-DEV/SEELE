@@ -845,7 +845,7 @@ async fn sessao(
                         // `reopen` e não `start`: os controles têm que atravessar
                         // a reabertura. A lista está no `voice.rs` e mora lá
                         // justamente para que nenhuma casca esqueça um item — o
-                        // A.T. Field é o que dói, porque `Enlace` restaura o
+                        // mudo é o que dói, porque `Enlace` restaura o
                         // silêncio no servidor e o roster continua mostrando
                         // esta pessoa muda enquanto o portão local volta aberto.
                         // Esta casca esquecia todos, e a gráfica também.

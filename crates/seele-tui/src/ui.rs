@@ -467,7 +467,7 @@ fn voice_room_channel(
 /// One person row: presence, name, and the Sync Ratio with its mark.
 ///
 /// `specs/05-cliente-tui.md`: "Nenhuma informação transmitida **só** por cor: a
-/// Taxa de Sincronização é sempre acompanhada do número". So the number is
+/// sinal é sempre acompanhada do número". So the number is
 /// always printed, the band mark is always printed, and colour is the third
 /// channel rather than the only one.
 fn person_line(person: &crate::app::RosterEntry, budget: usize, theme: Theme) -> Line<'static> {

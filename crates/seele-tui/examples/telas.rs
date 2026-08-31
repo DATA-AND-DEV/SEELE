@@ -10,7 +10,7 @@
 //! de novo e cola.
 //!
 //! Sem cor, porque é texto. O que o texto **não** mostra é justamente o que a
-//! paleta carrega: a Taxa de Sincronização muda de cor por faixa. Mas o número
+//! paleta carrega: a sinal muda de cor por faixa. Mas o número
 //! e a marca de bloco continuam ali, e é essa a promessa de
 //! `specs/05-cliente-tui.md` — nenhuma informação transmitida só por cor.
 

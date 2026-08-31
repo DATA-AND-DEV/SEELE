@@ -77,7 +77,7 @@ const PASSO_DE_VOLUME = 10;
  * O comp desenha cinco linhas de histórico — `NUNES.S entrou`,
  * `HORAKI.H saiu` — e o inventário §9.8 deixou em aberto quanto disso o servidor
  * guarda. A resposta é: nada. `Event::RosterChanged` diz que o roster mudou,
- * nunca o quê, e não há histórico de entrada, saída nem A.T. Field em lugar
+ * nunca o quê, e não há histórico de entrada, saída nem mudo em lugar
  * nenhum do core.
  *
  * Então esta lista carrega só o que passou por aqui de verdade: os avisos que o

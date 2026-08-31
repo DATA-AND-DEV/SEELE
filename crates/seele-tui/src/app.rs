@@ -88,7 +88,7 @@ pub enum Screen {
     Boot,
     /// PADRÃO: LARANJA — connected, not verified.
     PatternOrange,
-    /// PADRÃO: AZUL — normal operation.
+    /// CONEXÃO SEGURA — normal operation.
     PatternBlue,
     /// Internal battery: disconnected, counting down, still readable.
     InternalBattery {
@@ -113,7 +113,7 @@ pub struct RosterEntry {
     pub sync: u8,
     /// Whether they are transmitting.
     pub speaking: bool,
-    /// Microphone muted — A.T. Field.
+    /// Microphone muted — mudo.
     pub muted: bool,
     /// Speakers muted — Isolamento total.
     pub total_isolation: bool,

@@ -382,7 +382,7 @@ pub struct Person {
     pub nickname: String,
     /// Transmitting right now.
     pub speaking: bool,
-    /// Microphone muted — A.T. Field.
+    /// Microphone muted — mudo.
     pub muted: bool,
     /// Speakers muted — Isolamento total.
     pub total_isolation: bool,

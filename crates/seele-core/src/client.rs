@@ -4,7 +4,7 @@
 //! audio and state logic live: "one core, three shells". Nothing here formats
 //! text, chooses a colour or knows what a terminal is.
 //!
-//! # PADRÃO: LARANJA and PADRÃO: AZUL
+//! # PADRÃO: LARANJA and CONEXÃO SEGURA
 //!
 //! `specs/02-protocolo.md`:
 //!
@@ -774,7 +774,7 @@ impl Client {
         frame::write(&mut self.send, &ClientMessage::LeaveVoiceRoom).await
     }
 
-    /// Announces the A.T. Field — the microphone being muted.
+    /// Announces the mudo — the microphone being muted.
     ///
     /// Announced rather than kept local because the roster shows it: talking to
     /// somebody whose microphone is off is worth knowing, and the mute is only

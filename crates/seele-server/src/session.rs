@@ -11,7 +11,7 @@
 //!    │── Ola { versao, cliente, apelido } ──▶│
 //!    │◀── Desafio { nonce } ─────────────────│
 //!    │── Resposta { prova } ────────────────▶│
-//!    │◀── Sessao { id, server, voice_rooms, papeis }│   → PADRÃO: AZUL
+//!    │◀── Sessao { id, server, voice_rooms, papeis }│   → CONEXÃO SEGURA
 //! ```
 //!
 //! Before `Sessao` the client is in **PADRÃO: LARANJA** — connected, not

@@ -30,7 +30,7 @@
 //!
 //! # O que a reconexão restaura, e o que não
 //!
-//! Restaura a sala de voz, a Linha, o A.T. Field e o isolamento: é o que a pessoa
+//! Restaura a sala de voz, a Linha, o mudo e o isolamento: é o que a pessoa
 //! escolheu, e voltar sem isso seria voltar para outro lugar. **Não** restaura
 //! a voz sozinha — a conexão é nova, e com ela o canal de mídia. A casca recebe
 //! [`Aviso::Reconectado`] com o canal novo e reabre o áudio. É honesto: o
@@ -1239,7 +1239,7 @@ impl Enlace {
         self.mandar(Comando::Historico { linha, limite }).await
     }
 
-    /// Liga ou desliga o A.T. Field. Restaurado depois de uma reconexão.
+    /// Liga ou desliga o mudo. Restaurado depois de uma reconexão.
     ///
     /// # Errors
     ///

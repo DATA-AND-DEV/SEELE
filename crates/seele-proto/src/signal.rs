@@ -1,8 +1,8 @@
-//! The Sync Ratio — Taxa de Sincronização.
+//! The Sync Ratio — sinal.
 //!
 //! `specs/07-estetica.md` calls this the product's signature element:
 //!
-//! > **A Taxa de Sincronização por pessoa.** Cada pessoa no roster tem um
+//! > **A sinal por pessoa.** Cada pessoa no roster tem um
 //! > percentual vivo derivado do RTT, jitter e perda daquela conexão. Nenhum
 //! > concorrente mostra isso; aqui é a coisa mais visível da tela. É a métrica
 //! > que dá caráter ao produto e, não por acaso, é genuinamente útil — quando

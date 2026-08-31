@@ -12,7 +12,7 @@
    janela. Então ele as carrega.
 
    `font-display: block` nas oito regras, e é decisão, não descuido. `swap`
-   pinta com a face de reserva e troca no meio — numa interface da NERV, um
+   pinta com a face de reserva e troca no meio — numa interface da ORANGE, um
    instante de Arial Narrow é pior que um instante de nada. `block` segura o
    texto invisível pelo período curto e desenha uma vez só; os arquivos são
    locais, então o período curto é o tempo de ler disco.

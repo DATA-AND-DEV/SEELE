@@ -15,7 +15,7 @@
 //!
 //! Numa reconexão o `ssrc` e o canal de mídia são novos, então a voz **tem**
 //! que ser reaberta. Reabrir com [`seele_core::Voice::start`] ou `start_on`
-//! constrói controles zerados: A.T. Field desligado, Isolamento total
+//! constrói controles zerados: mudo desligado, Isolamento total
 //! desligado, modo de volta em `PushToTalk`, ganhos por interlocutor perdidos.
 //! `Voice::switch_capture` e as irmãs dela existem para carregar tudo isso por
 //! cima da reabertura, e a documentação diz, com todas as letras, que a lista
@@ -78,7 +78,7 @@ fn nenhuma_casca_reabre_a_voz_jogando_fora_os_controles() {
 
         assert!(
             braco.contains("reopen"),
-            "a casca `{casca}` reabre a voz na reconexão sem `reopen`, então A.T. Field, \
+            "a casca `{casca}` reabre a voz na reconexão sem `reopen`, então mudo, \
              Isolamento total, o modo e os ganhos voltam zerados. O roster continua \
              mostrando quem estava mudo como mudo — `Enlace::tentar` restaura isso no \
              servidor — e o microfone volta aberto."
