@@ -519,7 +519,7 @@ function vestirItemDaTrilha(botao, abreviacao, nomeInteiro, uri) {
 /**
  * As iniciais de um apelido, para o avatar das mensagens.
  *
- * `IKARI.S` vira `IS`, como no comp. Sem ponto, as duas primeiras letras;
+ * `NUNES.S` vira `IS`, como no comp. Sem ponto, as duas primeiras letras;
  * com uma letra só, essa letra. Por ponto de código e não por índice de unidade
  * de código — um apelido que comece com emoji devolveria meio par substituto,
  * que é um caractere de substituição desenhado no lugar da inicial.
@@ -908,7 +908,7 @@ function itemDeMensagem(mensagem, indice, segue) {
   } else {
     // O avatar de iniciais. Desenho e não dado: o nome inteiro está a doze
     // pixels dali, então ele sai `aria-hidden` — anunciar `KM` antes de
-    // `KATSURAGI.M` é ler a mesma coisa duas vezes, uma delas em código.
+    // `RODRIGUES.M` é ler a mesma coisa duas vezes, uma delas em código.
     //
     // O `m.selo` do comp, ao lado do autor, **não** entra: ver o §1.2 do
     // inventário v3 e a frase no rodapé da coluna de canais.

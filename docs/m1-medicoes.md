@@ -503,7 +503,7 @@ segunda máquina, que é por que `seele-server` é biblioteca além de binário.
 |---|---|
 | `three_clients_in_one_voice_room_hear_each_other` | o critério principal, com payload byte a byte idêntico e sem eco de volta ao falante |
 | `a_client_without_permission_is_refused` | Observador entra e ouve, mas não é encaminhado |
-| `a_forged_ssrc_is_refused` | lacuna G2: Shinji com o `ssrc` de Ayanami é recusado, e o dele próprio continua passando |
+| `a_forged_ssrc_is_refused` | lacuna G2: Rafael com o `ssrc` de Marcela é recusado, e o dele próprio continua passando |
 | `media_before_entering_a_voice_room_goes_nowhere` | conexão autenticada mas sem connection inserido não alcança a sala de voz |
 | `the_first_connection_pins_the_certificate` | TOFU do ADR 0003 |
 | `a_second_connection_reuses_the_pin` | o pin persiste entre conexões |

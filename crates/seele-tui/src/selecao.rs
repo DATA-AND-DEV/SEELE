@@ -247,7 +247,7 @@ impl Selecao {
     /// **Vazia**, e não preenchida com a sugestão. Preencher parece atencioso e
     /// é uma armadilha: quem quer outro nome digita, e o que digita gruda no que
     /// já estava. Foi assim que o primeiro teste desta tela entrou num servidor
-    /// como `pessoaasuka`. Sugestão se mostra apagada e se aceita com Enter;
+    /// como `pessoacarla`. Sugestão se mostra apagada e se aceita com Enter;
     /// digitar escreve por cima.
     fn perguntar_apelido(&mut self) {
         self.aberta = Some((Pergunta::Apelido, String::new()));
@@ -533,7 +533,7 @@ mod tests {
         // A lista chega ordenada do mais recente para o mais antigo, e o cursor
         // começa em cima. Uma tecla para voltar à última conversa.
         let mut selecao = Selecao::nova(vec![
-            conhecido("recente:8383", "ayanami", Some(2)),
+            conhecido("recente:8383", "marcela", Some(2)),
             conhecido("antigo:8383", "rei", None),
         ]);
 
@@ -541,7 +541,7 @@ mod tests {
             panic!("não escolheu");
         };
         assert_eq!(escolha.alvo, "recente:8383");
-        assert_eq!(escolha.apelido, "ayanami");
+        assert_eq!(escolha.apelido, "marcela");
         assert_eq!(escolha.voice_room, 2);
         assert!(!escolha.hospedar);
     }
@@ -549,7 +549,7 @@ mod tests {
     #[test]
     fn um_endereco_novo_pergunta_o_apelido_e_sugere_o_ultimo() {
         // Ninguém troca de nome entre uma conversa e outra. Enter aceita.
-        let mut selecao = Selecao::nova(vec![conhecido("casa:8383", "ayanami", None)]);
+        let mut selecao = Selecao::nova(vec![conhecido("casa:8383", "marcela", None)]);
 
         assert_eq!(selecao.tecla(KeyCode::Char('n')), Resultado::Segue);
         digitar(&mut selecao, "192.168.0.9");
@@ -559,24 +559,24 @@ mod tests {
             panic!("não escolheu");
         };
         assert_eq!(escolha.alvo, "192.168.0.9:8383", "não completou a porta");
-        assert_eq!(escolha.apelido, "ayanami", "não sugeriu o último apelido");
+        assert_eq!(escolha.apelido, "marcela", "não sugeriu o último apelido");
     }
 
     #[test]
     fn digitar_um_apelido_escreve_por_cima_da_sugestao() {
         // Achado dirigindo a tela de verdade: com o campo preenchido pela
-        // sugestão, digitar `asuka` entrava no servidor como `pessoaasuka`.
+        // sugestão, digitar `carla` entrava no servidor como `pessoacarla`.
         let mut selecao = Selecao::nova(vec![conhecido("casa:8383", "pessoa", None)]);
 
         selecao.tecla(KeyCode::Char('n'));
         digitar(&mut selecao, "novo:8383");
         selecao.tecla(KeyCode::Enter);
-        digitar(&mut selecao, "asuka");
+        digitar(&mut selecao, "carla");
 
         let Resultado::Pronto(escolha) = selecao.tecla(KeyCode::Enter) else {
             panic!("não escolheu");
         };
-        assert_eq!(escolha.apelido, "asuka", "o nome grudou na sugestão");
+        assert_eq!(escolha.apelido, "carla", "o nome grudou na sugestão");
     }
 
     #[test]
@@ -611,7 +611,7 @@ mod tests {
         // convite, apertar Esc na pergunta do apelido — que preserva o rascunho
         // de propósito — e entrar num server da lista. A impressão digital ia
         // junto, e `connection` acusava de impostor um servidor que o convite nem cita.
-        let mut selecao = Selecao::nova(vec![conhecido("outro:8383", "ayanami", None)]);
+        let mut selecao = Selecao::nova(vec![conhecido("outro:8383", "marcela", None)]);
 
         selecao.tecla(KeyCode::Char('c'));
         digitar(&mut selecao, &link_de_teste("server-do-link:8383"));
@@ -679,7 +679,7 @@ mod tests {
         // O outro lado da regra: o convite é daquele servidor, e continua sendo
         // dele. Limpá-lo aqui perderia a conferência que o link existe para
         // fazer — que é o defeito oposto, e igualmente caro.
-        let mut selecao = Selecao::nova(vec![conhecido("server-do-link:8383", "ayanami", None)]);
+        let mut selecao = Selecao::nova(vec![conhecido("server-do-link:8383", "marcela", None)]);
 
         selecao.tecla(KeyCode::Char('c'));
         digitar(&mut selecao, &link_de_teste("server-do-link:8383"));
@@ -739,7 +739,7 @@ mod tests {
     fn esc_no_campo_desfaz_a_intencao_de_hospedar() {
         // Sem isto, entrar em "hospedar", voltar, e escolher outro servidor subiria
         // um servidor que ninguém pediu.
-        let mut selecao = Selecao::nova(vec![conhecido("casa:8383", "ayanami", None)]);
+        let mut selecao = Selecao::nova(vec![conhecido("casa:8383", "marcela", None)]);
         selecao.tecla(KeyCode::Char('h'));
         selecao.tecla(KeyCode::Esc);
 
@@ -752,7 +752,7 @@ mod tests {
 
     #[test]
     fn d_esquece_um_conhecido_e_nao_toca_nas_acoes() {
-        let mut selecao = Selecao::nova(vec![conhecido("casa:8383", "ayanami", None)]);
+        let mut selecao = Selecao::nova(vec![conhecido("casa:8383", "marcela", None)]);
 
         assert_eq!(
             selecao.tecla(KeyCode::Char('d')),
@@ -797,7 +797,7 @@ mod tests {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
 
-        let selecao = Selecao::nova(vec![conhecido("192.168.0.7:8383", "ayanami", Some(1))]);
+        let selecao = Selecao::nova(vec![conhecido("192.168.0.7:8383", "marcela", Some(1))]);
         let mut terminal =
             Terminal::new(TestBackend::new(ui::MIN_WIDTH, ui::MIN_HEIGHT)).expect("terminal");
         terminal

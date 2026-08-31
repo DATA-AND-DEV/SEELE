@@ -102,8 +102,8 @@ async fn entrar(address: SocketAddr, apelido: &str, semente: u8) -> Result<Clien
 async fn uma_rajada_de_mensagens_grandes_chega_inteira() -> Result<()> {
     let (address, server) = server().await?;
 
-    let mut autor = entrar(address, "ayanami", 11).await?;
-    let mut ouvinte = entrar(address, "shinji", 22).await?;
+    let mut autor = entrar(address, "marcela", 11).await?;
+    let mut ouvinte = entrar(address, "rafael", 22).await?;
 
     // Sem ler nada no meio: é essa a condição da pendência. Drenar entre lotes
     // escondia o defeito.

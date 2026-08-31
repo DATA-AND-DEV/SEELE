@@ -2343,7 +2343,7 @@ fn the_two_ways_out_of_the_call_say_which_one_leaves_the_voice_room() {
 
 #[test]
 fn no_event_in_the_call_monitor_is_older_than_the_window() {
-    // The comp fills `EVENTOS` with five channels of history — `IKARI.S entrou`,
+    // The comp fills `EVENTOS` with five channels of history — `NUNES.S entrou`,
     // `HORAKI.H saiu` — and the inventory left open how much of that the server
     // keeps. It keeps none: `Event::RosterChanged` says the roster changed and
     // never what changed in it, and there is no record of arrivals, departures

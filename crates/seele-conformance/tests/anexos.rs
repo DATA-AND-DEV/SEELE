@@ -79,7 +79,7 @@ async fn entrar(endereco: SocketAddr, semente: u8) -> Result<Client> {
         endereco,
         "localhost",
         &endereco.to_string(),
-        if semente == 7 { "ayanami" } else { "shinji" },
+        if semente == 7 { "marcela" } else { "rafael" },
         &ed25519_dalek::SigningKey::from_bytes(&[semente; 32]),
         Arc::new(MemoryPinStore::new()),
         None,
@@ -353,7 +353,7 @@ async fn quem_nao_pode_anexar_e_recusado_com_razao() -> Result<()> {
         name: "Casa".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::File(banco),
-        observers: vec!["ayanami".into()],
+        observers: vec!["marcela".into()],
         ..ServerConfig::default()
     };
     let servidor = Arc::new(Daemon::bind(config).await?);

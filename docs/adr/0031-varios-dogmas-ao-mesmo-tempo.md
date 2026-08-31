@@ -221,7 +221,7 @@ hardware.
 
 **O apelido é por Dogma, e sempre foi.** `register_or_find` roda no CASPER de
 cada Dogma, e o ADR 0017 prende o apelido à chave **dentro** daquele Dogma.
-Então ser outra pessoa noutro lugar já funciona, para o nome: `ayanami` num,
+Então ser outra pessoa noutro lugar já funciona, para o nome: `marcela` num,
 `Rafael` noutro, e nada no cliente impede. O `conhecidos` já guarda um apelido
 por endereço, exatamente para isso.
 
@@ -257,7 +257,7 @@ para M5 naquele ADR, de propósito, e este não a antecipa de carona.
   significado, sempre. **Esta é a propriedade que a exclusividade compra**, e é o
   argumento mais concreto a favor dela.
 - **Volume por falante** (`set_volume(nickname, percent)`) — por sessão, porque
-  apelido é por Dogma. Um `ayanami` num Dogma não é o `ayanami` do outro.
+  apelido é por Dogma. Um `marcela` num Dogma não é o `marcela` do outro.
 - **O atualizador** (ADR 0026) — da máquina, um botão, inalterado. O que muda é o
   custo de apertá-lo: instalar derruba **três** conversas em vez de uma, e a tela
   de instalação passa a ter de dizer quantas.

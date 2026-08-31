@@ -69,7 +69,7 @@ async fn reiniciar_o_server_nao_troca_a_chave() -> Result<()> {
 
     // Um pessoa se conecta e fixa a chave.
     let pins: Arc<dyn PinStore> = Arc::new(MemoryPinStore::new());
-    let cliente = conectar(endereco, "ayanami", 1, Arc::clone(&pins), None).await?;
+    let cliente = conectar(endereco, "marcela", 1, Arc::clone(&pins), None).await?;
     assert!(matches!(
         cliente.pin_decision(),
         PinDecision::FirstContact { .. }
@@ -86,7 +86,7 @@ async fn reiniciar_o_server_nao_troca_a_chave() -> Result<()> {
         "o servidor trocou de identidade ao reiniciar"
     );
 
-    let cliente = conectar(endereco, "ayanami", 1, pins, None)
+    let cliente = conectar(endereco, "marcela", 1, pins, None)
         .await
         .map_err(|erro| anyhow::anyhow!("o pessoa foi recusado após um reinício: {erro:?}"))?;
     assert!(matches!(
@@ -134,7 +134,7 @@ async fn a_senha_do_server_fecha_a_porta() -> Result<()> {
 
     let certa = conectar(
         endereco,
-        "ayanami",
+        "marcela",
         1,
         Arc::new(MemoryPinStore::new()),
         Some("terceiro impacto"),
@@ -158,14 +158,14 @@ async fn um_convite_serve_a_uma_pessoa_so() -> Result<()> {
 
     let token = {
         let mut persistence = Persistence::open(&Location::File(banco.clone()))?;
-        admissao::criar_convite(&mut persistence, "ayanami")?
+        admissao::criar_convite(&mut persistence, "marcela")?
     };
 
     let (endereco, servidor) = subir(&banco).await?;
 
     let primeiro = conectar(
         endereco,
-        "ayanami",
+        "marcela",
         1,
         Arc::new(MemoryPinStore::new()),
         Some(&token),
@@ -209,7 +209,7 @@ async fn a_senha_do_voice_room_e_conferida() -> Result<()> {
     let (endereco, servidor) = subir(&banco).await?;
     let mut cliente = conectar(
         endereco,
-        "ayanami",
+        "marcela",
         1,
         Arc::new(MemoryPinStore::new()),
         None,

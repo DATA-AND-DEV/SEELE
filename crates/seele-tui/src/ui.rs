@@ -1172,14 +1172,14 @@ mod tests {
                 sync: None,
             },
             Node::Person(RosterEntry {
-                nickname: "ayanami".into(),
+                nickname: "marcela".into(),
                 sync: 98,
                 speaking: true,
                 muted: false,
                 total_isolation: false,
             }),
             Node::Person(RosterEntry {
-                nickname: "asuka".into(),
+                nickname: "carla".into(),
                 sync: 44,
                 speaking: false,
                 muted: true,
@@ -1191,7 +1191,7 @@ mod tests {
         ];
         app.messages = vec![ChatLine {
             at: "12:01".into(),
-            author: "ayanami".into(),
+            author: "marcela".into(),
             body: "verificando harmônicos".into(),
             own: false,
         }];
@@ -1314,7 +1314,7 @@ mod tests {
 
     #[test]
     fn truncation_leaves_short_text_alone() {
-        assert_eq!(truncate("ayanami", 20), "ayanami");
+        assert_eq!(truncate("marcela", 20), "marcela");
         assert_eq!(truncate("同期率", 6), "同期率");
     }
 
@@ -1655,7 +1655,7 @@ mod tests {
         );
         // And the panels kept their rows: the roster, the tree and the history
         // are all still readable.
-        for kept in ["harmônicos", "ayanami", "#geral"] {
+        for kept in ["harmônicos", "marcela", "#geral"] {
             assert!(
                 screen.contains(kept),
                 "`{kept}` was pushed off by the alert:\n{screen}"
@@ -1808,7 +1808,7 @@ mod tests {
     fn said(body: &str) -> ChatLine {
         ChatLine {
             at: "12:03".into(),
-            author: "shinji".into(),
+            author: "rafael".into(),
             body: body.into(),
             own: false,
         }

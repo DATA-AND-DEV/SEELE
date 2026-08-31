@@ -41,7 +41,7 @@ async fn entrar(endereco: SocketAddr, semente: u8) -> Result<Client, ConnectErro
         endereco,
         "localhost",
         &endereco.to_string(),
-        "ayanami",
+        "marcela",
         &ed25519_dalek::SigningKey::from_bytes(&[semente; 32]),
         Arc::new(MemoryPinStore::new()),
         None,
@@ -93,7 +93,7 @@ async fn uma_recusa_depois_do_tls_nao_deixa_a_chave_fixada() -> Result<()> {
         servidor: endereco,
         nome_tls: "localhost".into(),
         chave_do_pin: chave_do_pin.clone(),
-        apelido: "ayanami".into(),
+        apelido: "marcela".into(),
         segredo: None,
         impressao_esperada: None,
     };

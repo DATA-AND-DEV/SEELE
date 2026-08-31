@@ -149,13 +149,13 @@ const NOME_LONGO: &str = "Casa dos Fundos da Vila";
 async fn an_outsider_connects_and_the_screen_shows_the_conversation() -> Result<()> {
     let (address, server) = start().await?;
 
-    let mut watcher = connect(address, "ayanami", 1).await?;
+    let mut watcher = connect(address, "marcela", 1).await?;
     watcher.insert_plug(VOICE_ROOM).await?;
     watcher.join_channel(LINE).await?;
 
-    let (mut app, mut room) = attach(&watcher, "ayanami", VOICE_ROOM, Some(LINE));
+    let (mut app, mut room) = attach(&watcher, "marcela", VOICE_ROOM, Some(LINE));
 
-    let mut talker = connect(address, "shinji", 2).await?;
+    let mut talker = connect(address, "rafael", 2).await?;
     talker.insert_plug(VOICE_ROOM).await?;
     talker.join_channel(LINE).await?;
     talker
@@ -170,7 +170,7 @@ async fn an_outsider_connects_and_the_screen_shows_the_conversation() -> Result<
 
     let screen = draw(&app, Palette::True);
     assert!(screen.contains("sync caiu aqui"), "{screen}");
-    assert!(screen.contains("shinji"), "unattributed:\n{screen}");
+    assert!(screen.contains("rafael"), "unattributed:\n{screen}");
     // Truncated, not missing: the server panel is 18 cells and the name is
     // longer. Asserting the full string here would be asserting that truncation
     // does not work.
@@ -185,16 +185,16 @@ async fn an_outsider_connects_and_the_screen_shows_the_conversation() -> Result<
 async fn the_roster_shows_who_actually_entered_the_voice_room() -> Result<()> {
     let (address, server) = start().await?;
 
-    let mut watcher = connect(address, "ayanami", 3).await?;
+    let mut watcher = connect(address, "marcela", 3).await?;
     watcher.insert_plug(VOICE_ROOM).await?;
 
-    let (mut app, mut room) = attach(&watcher, "ayanami", VOICE_ROOM, None);
+    let (mut app, mut room) = attach(&watcher, "marcela", VOICE_ROOM, None);
 
-    let mut talker = connect(address, "asuka", 4).await?;
+    let mut talker = connect(address, "carla", 4).await?;
     talker.insert_plug(VOICE_ROOM).await?;
 
     let seen = pump(&mut watcher, &mut app, &mut room, |app| {
-        app.roster().any(|person| person.nickname == "asuka")
+        app.roster().any(|person| person.nickname == "carla")
     })
     .await;
     assert!(seen, "a person entered the voice room and never appeared");
@@ -202,7 +202,7 @@ async fn the_roster_shows_who_actually_entered_the_voice_room() -> Result<()> {
     // The Sync Ratio is shown as a number beside a mark, in every palette —
     // specs/05-cliente-tui.md forbids carrying it by colour alone.
     let mono = draw(&app, Palette::Mono);
-    assert!(mono.contains("asuka"), "{mono}");
+    assert!(mono.contains("carla"), "{mono}");
     assert!(
         mono.contains('█') || mono.contains('▓') || mono.contains('▒') || mono.contains('░'),
         "no band mark survived without colour:\n{mono}"
@@ -223,16 +223,16 @@ async fn the_second_person_to_arrive_sees_the_first_one() -> Result<()> {
     let (address, server) = start().await?;
 
     // The first person sits down and stops being interesting.
-    let mut early = connect(address, "shinji", 10).await?;
+    let mut early = connect(address, "rafael", 10).await?;
     early.insert_plug(VOICE_ROOM).await?;
 
     // The second arrives afterwards, and has never seen an announcement.
-    let mut late = connect(address, "asuka", 11).await?;
+    let mut late = connect(address, "carla", 11).await?;
     late.insert_plug(VOICE_ROOM).await?;
 
-    let (mut app, mut room) = attach(&late, "asuka", VOICE_ROOM, None);
+    let (mut app, mut room) = attach(&late, "carla", VOICE_ROOM, None);
     let seen = pump(&mut late, &mut app, &mut room, |app| {
-        app.roster().any(|person| person.nickname == "shinji")
+        app.roster().any(|person| person.nickname == "rafael")
     })
     .await;
 
@@ -243,11 +243,11 @@ async fn the_second_person_to_arrive_sees_the_first_one() -> Result<()> {
 
     let names: Vec<&str> = app.roster().map(|p| p.nickname.as_str()).collect();
     assert!(
-        names.contains(&"asuka"),
+        names.contains(&"carla"),
         "we are not on our own roster: {names:?}"
     );
     assert_eq!(
-        names.iter().filter(|name| **name == "shinji").count(),
+        names.iter().filter(|name| **name == "rafael").count(),
         1,
         "the same person is seated twice: {names:?}"
     );
@@ -261,13 +261,13 @@ async fn the_second_person_to_arrive_sees_the_first_one() -> Result<()> {
 async fn sixteen_colours_over_ssh_lose_no_information() -> Result<()> {
     let (address, server) = start().await?;
 
-    let mut watcher = connect(address, "ayanami", 5).await?;
+    let mut watcher = connect(address, "marcela", 5).await?;
     watcher.insert_plug(VOICE_ROOM).await?;
     watcher.join_channel(LINE).await?;
 
-    let (mut app, mut room) = attach(&watcher, "ayanami", VOICE_ROOM, Some(LINE));
+    let (mut app, mut room) = attach(&watcher, "marcela", VOICE_ROOM, Some(LINE));
 
-    let mut talker = connect(address, "shinji", 6).await?;
+    let mut talker = connect(address, "rafael", 6).await?;
     talker.insert_plug(VOICE_ROOM).await?;
     talker.join_channel(LINE).await?;
     talker
@@ -305,11 +305,11 @@ async fn boot_to_ready_is_under_a_second_and_a_half() -> Result<()> {
     let (address, server) = start().await?;
 
     let started = Instant::now();
-    let mut client = connect(address, "ayanami", 7).await?;
+    let mut client = connect(address, "marcela", 7).await?;
     client.insert_plug(VOICE_ROOM).await?;
     client.join_channel(LINE).await?;
 
-    let (app, _room) = attach(&client, "ayanami", VOICE_ROOM, Some(LINE));
+    let (app, _room) = attach(&client, "marcela", VOICE_ROOM, Some(LINE));
     let screen = draw(&app, Palette::True);
     let elapsed = started.elapsed();
 
@@ -333,11 +333,11 @@ async fn boot_to_ready_is_under_a_second_and_a_half() -> Result<()> {
 async fn a_newcomer_can_hold_a_conversation_with_only_the_help_screen() -> Result<()> {
     let (address, server) = start().await?;
 
-    let mut newcomer = connect(address, "ayanami", 8).await?;
+    let mut newcomer = connect(address, "marcela", 8).await?;
     newcomer.insert_plug(VOICE_ROOM).await?;
     newcomer.join_channel(LINE).await?;
 
-    let mut listener = connect(address, "shinji", 9).await?;
+    let mut listener = connect(address, "rafael", 9).await?;
     listener.insert_plug(VOICE_ROOM).await?;
     listener.join_channel(LINE).await?;
 

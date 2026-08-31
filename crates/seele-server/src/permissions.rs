@@ -621,8 +621,8 @@ mod tests {
         // their own history rather than a new empty account.
         let persistence = store();
         let permissions = Permissions::new(&persistence);
-        let first = permissions.register_or_find(&[7; 32], "ayanami").unwrap();
-        let second = permissions.register_or_find(&[7; 32], "ayanami").unwrap();
+        let first = permissions.register_or_find(&[7; 32], "marcela").unwrap();
+        let second = permissions.register_or_find(&[7; 32], "marcela").unwrap();
         assert_eq!(first.id, second.id);
     }
 
@@ -632,8 +632,8 @@ mod tests {
         // room reads their messages.
         let persistence = store();
         let permissions = Permissions::new(&persistence);
-        permissions.register_or_find(&[7; 32], "ayanami").unwrap();
-        assert!(permissions.register_or_find(&[8; 32], "ayanami").is_err());
+        permissions.register_or_find(&[7; 32], "marcela").unwrap();
+        assert!(permissions.register_or_find(&[8; 32], "marcela").is_err());
     }
 
     #[test]
@@ -665,11 +665,11 @@ mod tests {
         let permissions = Permissions::new(&persistence);
 
         let antes = permissions.register_or_find(&[1; 32], "pessoa").unwrap();
-        let depois = permissions.register_or_find(&[1; 32], "ikari").unwrap();
+        let depois = permissions.register_or_find(&[1; 32], "nunes").unwrap();
 
         assert_eq!(depois.id, antes.id, "trocar de nome criou uma conta nova");
         assert_eq!(
-            depois.nickname, "ikari",
+            depois.nickname, "nunes",
             "o nome pedido foi descartado, e a pessoa continua sendo chamada do \
              nome antigo para todo mundo"
         );
@@ -684,14 +684,14 @@ mod tests {
         let persistence = store();
         let permissions = Permissions::new(&persistence);
 
-        permissions.register_or_find(&[1; 32], "ikari").unwrap();
-        let outra = permissions.register_or_find(&[2; 32], "ayanami").unwrap();
+        permissions.register_or_find(&[1; 32], "nunes").unwrap();
+        let outra = permissions.register_or_find(&[2; 32], "marcela").unwrap();
 
         assert!(
-            permissions.register_or_find(&[2; 32], "ikari").is_err(),
+            permissions.register_or_find(&[2; 32], "nunes").is_err(),
             "uma conta renomeou-se para o nome de outra pessoa"
         );
-        let ainda = permissions.register_or_find(&[2; 32], "ayanami").unwrap();
+        let ainda = permissions.register_or_find(&[2; 32], "marcela").unwrap();
         assert_eq!(
             ainda.nickname, outra.nickname,
             "a tentativa recusada mexeu no nome de quem tentou"
@@ -771,7 +771,7 @@ mod tests {
         let permissions = Permissions::new(&persistence);
         permissions.register_or_find(&[1; 32], "anfitriao").unwrap();
 
-        let convidado = permissions.register_or_find(&[2; 32], "shinji").unwrap();
+        let convidado = permissions.register_or_find(&[2; 32], "rafael").unwrap();
         assert_eq!(convidado.roles, vec![PERSON]);
         for permission in [
             Permission::ManageVoiceRooms,
@@ -798,7 +798,7 @@ mod tests {
         Persistence::open(&Location::File(file.clone())).unwrap();
 
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
-        let chegantes: Vec<_> = [(1_u8, "ayanami"), (2_u8, "shinji")]
+        let chegantes: Vec<_> = [(1_u8, "marcela"), (2_u8, "rafael")]
             .into_iter()
             .map(|(key, nickname)| {
                 let file = file.clone();
@@ -880,7 +880,7 @@ mod tests {
     #[test]
     fn a_person_is_denied_every_moderation_permission() {
         let persistence = store();
-        let person = person_with(&persistence, "ayanami", 1, PERSON);
+        let person = person_with(&persistence, "marcela", 1, PERSON);
         let permissions = Permissions::new(&persistence);
 
         let denied = [
@@ -955,7 +955,7 @@ mod tests {
     fn a_ban_beats_every_permission() {
         let persistence = store();
         let commander = person_with(&persistence, "comandante", 9, COMMANDER);
-        let target = person_with(&persistence, "ayanami", 1, PERSON);
+        let target = person_with(&persistence, "marcela", 1, PERSON);
         let permissions = Permissions::new(&persistence);
 
         assert!(permissions.may(target, Permission::Speak).unwrap());
@@ -976,8 +976,8 @@ mod tests {
         // specs/08-seguranca.md: every action verified on the server. The check
         // lives inside `ban` so no future caller can forget it.
         let persistence = store();
-        let ordinary = person_with(&persistence, "ayanami", 1, PERSON);
-        let target = person_with(&persistence, "shinji", 2, PERSON);
+        let ordinary = person_with(&persistence, "marcela", 1, PERSON);
+        let target = person_with(&persistence, "rafael", 2, PERSON);
         let permissions = Permissions::new(&persistence);
 
         assert!(permissions.ban(target, ordinary, None, None).is_err());
@@ -988,7 +988,7 @@ mod tests {
     fn an_expired_ban_stops_applying() {
         let persistence = store();
         let commander = person_with(&persistence, "comandante", 9, COMMANDER);
-        let target = person_with(&persistence, "ayanami", 1, PERSON);
+        let target = person_with(&persistence, "marcela", 1, PERSON);
         let permissions = Permissions::new(&persistence);
 
         permissions
@@ -1002,7 +1002,7 @@ mod tests {
     fn a_ban_can_be_lifted() {
         let persistence = store();
         let commander = person_with(&persistence, "comandante", 9, COMMANDER);
-        let target = person_with(&persistence, "ayanami", 1, PERSON);
+        let target = person_with(&persistence, "marcela", 1, PERSON);
         let permissions = Permissions::new(&persistence);
 
         permissions.ban(target, commander, None, None).unwrap();

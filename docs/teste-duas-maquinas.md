@@ -60,7 +60,7 @@ Por padrão qualquer um que alcance a porta entra — o certo para testar em red
 local, e o `seeled` avisa ao subir assim. Para fechar:
 
 ```sh
-./target/release/seeled convite ayanami   # link de uso único, sete dias
+./target/release/seeled convite marcela   # link de uso único, sete dias
 ./target/release/seeled senha "a senha"   # ou um segredo para o grupo
 ./target/release/seeled senha --remover   # volta a aceitar qualquer um
 ```

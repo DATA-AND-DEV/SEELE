@@ -84,21 +84,21 @@ async fn three_clients_in_one_voice_room_hear_each_other() -> Result<()> {
     // The headline criterion of specs/09-roadmap.md.
     let address = start(Vec::new()).await?;
 
-    let mut ayanami = connect(address, "ayanami").await?;
-    let mut shinji = connect(address, "shinji").await?;
-    let mut asuka = connect(address, "asuka").await?;
+    let mut marcela = connect(address, "marcela").await?;
+    let mut rafael = connect(address, "rafael").await?;
+    let mut carla = connect(address, "carla").await?;
 
     // The handshake reached PADRÃO: AZUL for all three.
-    assert_eq!(ayanami.link_state(), LinkTrust::Verified);
-    assert_eq!(shinji.link_state(), LinkTrust::Verified);
-    assert_eq!(asuka.link_state(), LinkTrust::Verified);
+    assert_eq!(marcela.link_state(), LinkTrust::Verified);
+    assert_eq!(rafael.link_state(), LinkTrust::Verified);
+    assert_eq!(carla.link_state(), LinkTrust::Verified);
 
     // Gap G1: each client learned its own ssrc, and they are distinct. Without
     // this nobody could attribute audio to anybody.
     let sources = [
-        ayanami.session().ssrc,
-        shinji.session().ssrc,
-        asuka.session().ssrc,
+        marcela.session().ssrc,
+        rafael.session().ssrc,
+        carla.session().ssrc,
     ];
     assert_eq!(
         sources
@@ -109,29 +109,29 @@ async fn three_clients_in_one_voice_room_hear_each_other() -> Result<()> {
         "the server handed out a duplicate ssrc"
     );
 
-    for client in [&mut ayanami, &mut shinji, &mut asuka] {
+    for client in [&mut marcela, &mut rafael, &mut carla] {
         client.insert_plug(VoiceRoomId(1)).await?;
     }
     // The voice room task processes joins asynchronously; give it a moment before
     // anybody speaks, or the first datagram races the membership.
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    let spoken = media(ayanami.session().ssrc, 1, b"harmonics");
-    ayanami.send_media(spoken.clone())?;
+    let spoken = media(marcela.session().ssrc, 1, b"harmonics");
+    marcela.send_media(spoken.clone())?;
 
     // specs/04-servidor-seele.md: forwarded to every *other* subscriber, payload
     // untouched.
-    let heard_by_shinji = tokio::time::timeout(DELIVERY_TIMEOUT, shinji.next_media()).await??;
-    let heard_by_asuka = tokio::time::timeout(DELIVERY_TIMEOUT, asuka.next_media()).await??;
+    let heard_by_rafael = tokio::time::timeout(DELIVERY_TIMEOUT, rafael.next_media()).await??;
+    let heard_by_carla = tokio::time::timeout(DELIVERY_TIMEOUT, carla.next_media()).await??;
 
     assert_eq!(
-        heard_by_shinji, spoken,
+        heard_by_rafael, spoken,
         "the payload was modified in transit"
     );
-    assert_eq!(heard_by_asuka, spoken);
+    assert_eq!(heard_by_carla, spoken);
 
     // And not back to the speaker.
-    let echo = tokio::time::timeout(Duration::from_millis(400), ayanami.next_media()).await;
+    let echo = tokio::time::timeout(Duration::from_millis(400), marcela.next_media()).await;
     assert!(echo.is_err(), "the speaker heard their own voice");
 
     Ok(())
@@ -145,7 +145,7 @@ async fn a_client_without_permission_is_refused() -> Result<()> {
     let address = start(vec!["observador".into()]).await?;
 
     let mut observer = connect(address, "observador").await?;
-    let mut person = connect(address, "ayanami").await?;
+    let mut person = connect(address, "marcela").await?;
 
     observer.insert_plug(VoiceRoomId(1)).await?;
     person.insert_plug(VoiceRoomId(1)).await?;
@@ -178,30 +178,30 @@ async fn a_forged_ssrc_is_refused() -> Result<()> {
     // credits them with the wrong voice.
     let address = start(Vec::new()).await?;
 
-    let mut ayanami = connect(address, "ayanami").await?;
-    let mut shinji = connect(address, "shinji").await?;
-    let mut asuka = connect(address, "asuka").await?;
+    let mut marcela = connect(address, "marcela").await?;
+    let mut rafael = connect(address, "rafael").await?;
+    let mut carla = connect(address, "carla").await?;
 
-    for client in [&mut ayanami, &mut shinji, &mut asuka] {
+    for client in [&mut marcela, &mut rafael, &mut carla] {
         client.insert_plug(VoiceRoomId(1)).await?;
     }
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    // Shinji claims to be Ayanami.
-    let forged = media(ayanami.session().ssrc, 1, b"impersonation");
-    shinji.send_media(forged)?;
+    // Rafael claims to be Marcela.
+    let forged = media(marcela.session().ssrc, 1, b"impersonation");
+    rafael.send_media(forged)?;
 
-    let delivered = tokio::time::timeout(Duration::from_millis(600), asuka.next_media()).await;
+    let delivered = tokio::time::timeout(Duration::from_millis(600), carla.next_media()).await;
     assert!(
         delivered.is_err(),
         "a forged datagram reached the voice room"
     );
 
     // An honest datagram from the same connection still goes through, so the
-    // refusal is about the forgery and not about Shinji.
-    let honest = media(shinji.session().ssrc, 2, b"honest");
-    shinji.send_media(honest.clone())?;
-    let heard = tokio::time::timeout(DELIVERY_TIMEOUT, asuka.next_media()).await??;
+    // refusal is about the forgery and not about Rafael.
+    let honest = media(rafael.session().ssrc, 2, b"honest");
+    rafael.send_media(honest.clone())?;
+    let heard = tokio::time::timeout(DELIVERY_TIMEOUT, carla.next_media()).await??;
     assert_eq!(heard, honest);
 
     Ok(())
@@ -212,7 +212,7 @@ async fn the_first_connection_pins_the_certificate() -> Result<()> {
     // ADR 0003. The pin is what makes the change warning of specs/08 possible at
     // all, so the first contact has to record something.
     let address = start(Vec::new()).await?;
-    let client = connect(address, "ayanami").await?;
+    let client = connect(address, "marcela").await?;
 
     let PinDecision::FirstContact { fingerprint } = client.pin_decision() else {
         panic!("the first connection should have pinned the certificate");
@@ -242,7 +242,7 @@ async fn two_servers_on_one_machine_do_not_share_a_pin() -> Result<()> {
         first_address,
         "localhost",
         &first_address.to_string(),
-        "ayanami",
+        "marcela",
         &key,
         Arc::clone(&pins) as Arc<_>,
         None,
@@ -259,7 +259,7 @@ async fn two_servers_on_one_machine_do_not_share_a_pin() -> Result<()> {
         second_address,
         "localhost",
         &second_address.to_string(),
-        "ayanami",
+        "marcela",
         &key,
         Arc::clone(&pins) as Arc<_>,
         None,
@@ -280,7 +280,7 @@ async fn two_servers_on_one_machine_do_not_share_a_pin() -> Result<()> {
         first_address,
         "localhost",
         &first_address.to_string(),
-        "ayanami",
+        "marcela",
         &key,
         Arc::clone(&pins) as Arc<_>,
         None,
@@ -304,7 +304,7 @@ async fn a_second_connection_reuses_the_pin() -> Result<()> {
         address,
         "localhost",
         &address.to_string(),
-        "ayanami",
+        "marcela",
         &key,
         Arc::clone(&pins) as Arc<_>,
         None,
@@ -319,7 +319,7 @@ async fn a_second_connection_reuses_the_pin() -> Result<()> {
         address,
         "localhost",
         &address.to_string(),
-        "ayanami",
+        "marcela",
         &key,
         Arc::clone(&pins) as Arc<_>,
         None,
@@ -339,7 +339,7 @@ async fn a_ping_comes_back_as_a_pong() -> Result<()> {
     // the control stream carries telemetry and roster changes too, and a second
     // reader would swallow whatever the first was waiting for.
     let address = start(Vec::new()).await?;
-    let mut client = connect(address, "ayanami").await?;
+    let mut client = connect(address, "marcela").await?;
 
     client.send_ping().await?;
     tokio::time::timeout(DELIVERY_TIMEOUT, async {
@@ -365,7 +365,7 @@ async fn the_session_names_the_server_and_its_voice_room() -> Result<()> {
     // specs/02-protocolo.md: the Session carries the server description and the
     // tree of voice_rooms and Channels, which is what a shell draws its first screen from.
     let address = start(Vec::new()).await?;
-    let client = connect(address, "ayanami").await?;
+    let client = connect(address, "marcela").await?;
 
     let session = client.session();
     assert_eq!(session.server, "Casa");
@@ -384,8 +384,8 @@ async fn media_before_entering_a_voice_room_goes_nowhere() -> Result<()> {
     // business reaching a voice room. specs/04: validate that the sender is in it.
     let address = start(Vec::new()).await?;
 
-    let listener = connect(address, "ayanami").await?;
-    let mut inside = connect(address, "shinji").await?;
+    let listener = connect(address, "marcela").await?;
+    let mut inside = connect(address, "rafael").await?;
     inside.insert_plug(VoiceRoomId(1)).await?;
     tokio::time::sleep(Duration::from_millis(200)).await;
 

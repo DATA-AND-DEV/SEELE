@@ -462,8 +462,8 @@ mod tests {
                 rusqlite::params![nick, key, now_seconds()],
             )
         };
-        assert!(insert("ayanami", &[1; 32]).is_ok());
-        assert!(insert("ayanami", &[2; 32]).is_err(), "duplicate nickname");
-        assert!(insert("shinji", &[1; 32]).is_err(), "duplicate public key");
+        assert!(insert("marcela", &[1; 32]).is_ok());
+        assert!(insert("marcela", &[2; 32]).is_err(), "duplicate nickname");
+        assert!(insert("rafael", &[1; 32]).is_err(), "duplicate public key");
     }
 }

@@ -20,7 +20,7 @@
 //! Uma linha por servidor, campos separados por tabulação:
 //!
 //! ```text
-//! 192.168.0.7:8383 <TAB> ayanami <TAB> 1 <TAB> 1738000000
+//! 192.168.0.7:8383 <TAB> marcela <TAB> 1 <TAB> 1738000000
 //! ```
 //!
 //! endereço, apelido, último sala de voz, e quando foi a última visita. Texto porque
@@ -355,14 +355,14 @@ mod tests {
 
         let mut lista = Conhecidos::abrir(caminho.clone()).expect("abrir");
         lista
-            .registrar("server.exemplo:8383", "ayanami", Some(1))
+            .registrar("server.exemplo:8383", "marcela", Some(1))
             .expect("registrar");
         lista
             .anotar_aparencia("server.exemplo:8383", Some("Casa"), Some(&[1, 2, 3]))
             .expect("anotar");
 
         lista
-            .registrar("server.exemplo:8383", "ayanami", Some(2))
+            .registrar("server.exemplo:8383", "marcela", Some(2))
             .expect("de novo");
 
         let de_volta = Conhecidos::abrir(caminho).expect("reabrir");
@@ -379,9 +379,9 @@ mod tests {
         // O formato ganhou uma coluna. Uma lista escrita por uma versão
         // anterior tem quatro campos, e recusá-la faria a atualização apagar os
         // atalhos de quem já usava o produto.
-        let velha = analisar_linha("server.exemplo:8383\tayanami\t1\t1738000000")
+        let velha = analisar_linha("server.exemplo:8383\tmarcela\t1\t1738000000")
             .expect("uma linha de quatro campos é válida");
-        assert_eq!(velha.apelido, "ayanami");
+        assert_eq!(velha.apelido, "marcela");
         assert_eq!(velha.voice_room, Some(1));
         assert_eq!(velha.nome, None, "um campo ausente virou nome vazio");
     }
@@ -401,13 +401,13 @@ mod tests {
         {
             let mut lista = Conhecidos::abrir(caminho.clone()).expect("abrir");
             lista
-                .registrar("192.168.0.7:8383", "ayanami", Some(1))
+                .registrar("192.168.0.7:8383", "marcela", Some(1))
                 .expect("registrar");
         }
 
         let lista = Conhecidos::abrir(caminho.clone()).expect("reabrir");
         let encontrado = lista.buscar("192.168.0.7:8383").expect("achar");
-        assert_eq!(encontrado.apelido, "ayanami");
+        assert_eq!(encontrado.apelido, "marcela");
         assert_eq!(encontrado.voice_room, Some(1));
 
         let _ = std::fs::remove_dir_all(caminho.parent().expect("pai"));
@@ -420,7 +420,7 @@ mod tests {
         let mut lista = Conhecidos::abrir(caminho.clone()).expect("abrir");
 
         lista
-            .registrar("host:8383", "ayanami", Some(1))
+            .registrar("host:8383", "marcela", Some(1))
             .expect("um");
         lista.registrar("host:8383", "rei", Some(2)).expect("dois");
 
@@ -459,7 +459,7 @@ mod tests {
         {
             let mut lista = Conhecidos::abrir(caminho.clone()).expect("abrir");
             lista
-                .registrar("host:8383", "aya\tnami\nrei", Some(1))
+                .registrar("host:8383", "mar\tcela\nlima", Some(1))
                 .expect("registrar");
         }
 
@@ -467,7 +467,7 @@ mod tests {
         assert_eq!(lista.listar().len(), 1);
         assert_eq!(
             lista.buscar("host:8383").expect("achar").apelido,
-            "ayanamirei"
+            "marcelalima"
         );
 
         let _ = std::fs::remove_dir_all(caminho.parent().expect("pai"));
@@ -481,7 +481,7 @@ mod tests {
         std::fs::create_dir_all(caminho.parent().expect("pai")).expect("mkdir");
         std::fs::write(
             &caminho,
-            "\n\nhost:8383\tayanami\t1\t100\nlixo sem tabulação\n",
+            "\n\nhost:8383\tmarcela\t1\t100\nlixo sem tabulação\n",
         )
         .expect("escrever");
 
@@ -495,7 +495,7 @@ mod tests {
     fn esquecer_tira_da_lista() {
         let caminho = rascunho("esquecer");
         let mut lista = Conhecidos::abrir(caminho.clone()).expect("abrir");
-        lista.registrar("host:8383", "ayanami", None).expect("um");
+        lista.registrar("host:8383", "marcela", None).expect("um");
         lista.esquecer("host:8383").expect("esquecer");
 
         assert!(lista.listar().is_empty());
@@ -511,7 +511,7 @@ mod tests {
 
         let caminho = rascunho("modo");
         let mut lista = Conhecidos::abrir(caminho.clone()).expect("abrir");
-        lista.registrar("host:8383", "ayanami", None).expect("um");
+        lista.registrar("host:8383", "marcela", None).expect("um");
 
         let modo = std::fs::metadata(&caminho)
             .expect("stat")

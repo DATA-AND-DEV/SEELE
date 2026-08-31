@@ -699,7 +699,7 @@ mod tests {
                 sync: None,
             },
             Node::Person(RosterEntry {
-                nickname: "ayanami".into(),
+                nickname: "marcela".into(),
                 sync: 98,
                 speaking: true,
                 muted: false,
@@ -914,7 +914,7 @@ mod tests {
         let mut app = app();
         app.messages.push(ChatLine {
             at: "12:01".into(),
-            author: "ayanami".into(),
+            author: "marcela".into(),
             body: "verificando harmônicos".into(),
             own: false,
         });
@@ -1147,14 +1147,14 @@ mod tree_tests {
                 sync: None,
             },
             Node::Person(RosterEntry {
-                nickname: "ayanami".into(),
+                nickname: "marcela".into(),
                 sync: 98,
                 speaking: false,
                 muted: false,
                 total_isolation: false,
             }),
             Node::Person(RosterEntry {
-                nickname: "shinji".into(),
+                nickname: "rafael".into(),
                 sync: 71,
                 speaking: false,
                 muted: false,
@@ -1189,7 +1189,7 @@ mod tree_tests {
                 sync: None,
             },
             Node::Person(RosterEntry {
-                nickname: "ayanami".into(),
+                nickname: "marcela".into(),
                 sync: 98,
                 speaking: false,
                 muted: false,
@@ -1209,7 +1209,7 @@ mod tree_tests {
         let mut app = App::new();
         app.tree = tree();
         let names: Vec<&str> = app.roster().map(|p| p.nickname.as_str()).collect();
-        assert_eq!(names, ["ayanami", "shinji"]);
+        assert_eq!(names, ["marcela", "rafael"]);
     }
 
     #[test]

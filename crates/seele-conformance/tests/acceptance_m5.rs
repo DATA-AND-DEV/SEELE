@@ -127,12 +127,12 @@ async fn a_shell_connects_and_the_snapshot_describes_the_server() -> Result<()> 
 
     // `connect` blocks, and a shell must call it off the thread that draws.
     // Here that is `spawn_blocking`, which is what the Tauri command does too.
-    let connection = tokio::task::spawn_blocking(move || connect(address, "ayanami")).await??;
+    let connection = tokio::task::spawn_blocking(move || connect(address, "marcela")).await??;
 
     let snapshot = connection.snapshot();
     assert_eq!(snapshot.link_state, LinkTrust::Verified);
     assert_eq!(snapshot.server, "Casa");
-    assert_eq!(snapshot.nickname, "ayanami");
+    assert_eq!(snapshot.nickname, "marcela");
     assert!(snapshot.me.is_some());
     assert!(
         !snapshot.voice_rooms.is_empty(),
@@ -241,8 +241,8 @@ async fn leaving_a_voice_room_takes_us_off_our_own_roster() -> Result<()> {
 async fn two_shells_hold_a_conversation() -> Result<()> {
     let (address, server) = start().await?;
 
-    let speaker = tokio::task::spawn_blocking(move || connect(address, "shinji")).await??;
-    let listener = tokio::task::spawn_blocking(move || connect(address, "asuka")).await??;
+    let speaker = tokio::task::spawn_blocking(move || connect(address, "rafael")).await??;
+    let listener = tokio::task::spawn_blocking(move || connect(address, "carla")).await??;
 
     let heard = Arc::new(Recorder::default());
     listener.subscribe(Arc::clone(&heard) as Arc<dyn EventListener>);
@@ -274,7 +274,7 @@ async fn two_shells_hold_a_conversation() -> Result<()> {
         .iter()
         .find(|m| m.body == "sync caiu aqui")
         .expect("message");
-    assert_eq!(message.author_nickname, "shinji");
+    assert_eq!(message.author_nickname, "rafael");
     assert!(!message.own);
     assert!(message.at_seconds > 0, "no timestamp: {message:?}");
 
@@ -291,8 +291,8 @@ async fn two_shells_hold_a_conversation() -> Result<()> {
 async fn a_muted_mic_is_visible_to_everybody_else() -> Result<()> {
     let (address, server) = start().await?;
 
-    let muted = tokio::task::spawn_blocking(move || connect(address, "kaworu")).await??;
-    let watcher = tokio::task::spawn_blocking(move || connect(address, "misato")).await??;
+    let muted = tokio::task::spawn_blocking(move || connect(address, "helena")).await??;
+    let watcher = tokio::task::spawn_blocking(move || connect(address, "daniel")).await??;
 
     muted.insert_plug(VOICE_ROOM)?;
     watcher.insert_plug(VOICE_ROOM)?;
@@ -303,7 +303,7 @@ async fn a_muted_mic_is_visible_to_everybody_else() -> Result<()> {
                 voice_room
                     .people
                     .iter()
-                    .any(|person| person.nickname == "kaworu")
+                    .any(|person| person.nickname == "helena")
             })
         }),
         "the other person never appeared"
@@ -318,7 +318,7 @@ async fn a_muted_mic_is_visible_to_everybody_else() -> Result<()> {
                 voice_room
                     .people
                     .iter()
-                    .any(|person| person.nickname == "kaworu" && person.muted)
+                    .any(|person| person.nickname == "helena" && person.muted)
             })
         }),
         "a mute was applied locally and never announced"
@@ -396,7 +396,7 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
         address,
         "localhost",
         &address.to_string(),
-        "ayanami",
+        "marcela",
         &ed25519_dalek::SigningKey::from_bytes(&[42; 32]),
         Arc::new(MemoryPinStore::new()),
         None,
@@ -404,7 +404,7 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
     .await?;
 
     let mut room = Room::new();
-    room.adopt(terminal.session(), "ayanami");
+    room.adopt(terminal.session(), "marcela");
     terminal.insert_plug(VoiceRoomId(VOICE_ROOM)).await?;
     room.enter_voice_room(VoiceRoomId(VOICE_ROOM));
     terminal.join_channel(ChannelId(CHANNEL)).await?;
@@ -439,7 +439,7 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
     drop(terminal);
 
     // ---- o lado do app: a mesma superfície que o Tauri chama.
-    let desktop = tokio::task::spawn_blocking(move || connect(address, "shinji")).await??;
+    let desktop = tokio::task::spawn_blocking(move || connect(address, "rafael")).await??;
     desktop.open_channel(CHANNEL)?;
 
     assert!(
@@ -459,7 +459,7 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
         .expect("mensagem");
 
     // Sem perda: quem escreveu, e quando — não só o corpo.
-    assert_eq!(mensagem.author_nickname, "ayanami");
+    assert_eq!(mensagem.author_nickname, "marcela");
     assert!(!mensagem.own, "atribuída ao pessoa errado");
     assert!(
         mensagem.at_seconds > 1_600_000_000,

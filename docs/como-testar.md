@@ -57,8 +57,8 @@ A identidade mora em `$SEELE_HOME` (ADR 0017). Dois clientes com o mesmo
 ser duas pessoas, dois diretórios:
 
 ```sh
-SEELE_HOME=~/.seele-shinji ./target/release/connection -n shinji
-SEELE_HOME=~/.seele-asuka  ./target/release/connection -n asuka
+SEELE_HOME=~/.seele-rafael ./target/release/connection -n rafael
+SEELE_HOME=~/.seele-carla  ./target/release/connection -n carla
 ```
 
 O padrão é `~/.config/seele`.
@@ -78,7 +78,7 @@ Comandos úteis para olhar o sistema por dentro:
 | `:audio` | taxas reais dos dispositivos e o modo de voz |
 | `:tema` | desce um degrau na paleta — truecolor → 256 → 16 → mono |
 | `:voz vad` | troca push-to-talk por ativação por voz |
-| `:volume ayanami 40` | volume por pessoa |
+| `:volume marcela 40` | volume por pessoa |
 | `:sobre` | versão do cliente e do protocolo |
 
 `:tema` existe principalmente para você **conferir a degradação**: aperte três

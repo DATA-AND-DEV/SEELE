@@ -1249,14 +1249,14 @@ mod tests {
             channels: Vec::new(),
             permissions: Vec::new(),
         };
-        room.adopt(&info, "ayanami");
+        room.adopt(&info, "marcela");
         room.enter_voice_room(VOICE_ROOM);
 
         let names: Vec<&str> = room
             .current_roster()
             .map(|person| person.nickname.as_str())
             .collect();
-        assert_eq!(names, ["ayanami"]);
+        assert_eq!(names, ["marcela"]);
     }
 
     #[test]
@@ -1273,7 +1273,7 @@ mod tests {
         // Dropping the name with the person would turn every channel they wrote
         // into "pessoa 3" the moment they close their client.
         let mut room = room();
-        room.apply(&joined(3, "ayanami"));
+        room.apply(&joined(3, "marcela"));
         room.apply(&said(1, 3, "verificando harmônicos"));
         room.apply(&ServerMessage::PersonLeft {
             voice_room: VOICE_ROOM,
@@ -1281,8 +1281,8 @@ mod tests {
         });
 
         assert_eq!(room.current_roster().count(), 1, "only us should be left");
-        assert_eq!(room.name_of(PersonId(3)), "ayanami");
-        assert_eq!(room.messages[0].author_nickname, "ayanami");
+        assert_eq!(room.name_of(PersonId(3)), "marcela");
+        assert_eq!(room.messages[0].author_nickname, "marcela");
     }
 
     #[test]
@@ -1290,7 +1290,7 @@ mod tests {
         // A history fetch that overlaps what is already on screen must not
         // double every channel in the overlap.
         let mut room = room();
-        room.apply(&joined(3, "ayanami"));
+        room.apply(&joined(3, "marcela"));
 
         let first = room.apply(&said(1, 3, "olá"));
         let second = room.apply(&said(1, 3, "olá"));
@@ -1358,7 +1358,7 @@ mod tests {
     #[test]
     fn our_own_messages_are_marked_as_ours() {
         let mut room = room();
-        room.apply(&joined(3, "ayanami"));
+        room.apply(&joined(3, "marcela"));
         room.apply(&said(1, 3, "deles"));
         room.apply(&said(2, 7, "nosso"));
 
@@ -1400,7 +1400,7 @@ mod tests {
     #[test]
     fn state_updates_reach_the_person_they_are_about() {
         let mut room = room();
-        room.apply(&joined(3, "ayanami"));
+        room.apply(&joined(3, "marcela"));
         room.apply(&ServerMessage::PersonState(PersonState {
             person: PersonId(3),
             muted: true,
@@ -1421,7 +1421,7 @@ mod tests {
         // A hundred that nobody measured looks like an answer. A zero looks
         // like a question, which is what it is.
         let mut room = room();
-        room.apply(&joined(3, "ayanami"));
+        room.apply(&joined(3, "marcela"));
         assert_eq!(room.people[&PersonId(3)].signal, 0);
     }
 
@@ -1513,12 +1513,12 @@ mod tests {
 
     #[test]
     fn a_media_source_is_addressable_by_nickname() {
-        // What `:volume ayanami 40` needs, in the one place that knows both.
+        // What `:volume marcela 40` needs, in the one place that knows both.
         let mut room = room();
-        room.apply(&joined(3, "ayanami"));
+        room.apply(&joined(3, "marcela"));
 
-        assert_eq!(room.ssrc_of("ayanami"), Some(Ssrc(30)));
-        assert_eq!(room.ssrc_of("AYANAMI"), Some(Ssrc(30)));
+        assert_eq!(room.ssrc_of("marcela"), Some(Ssrc(30)));
+        assert_eq!(room.ssrc_of("MARCELA"), Some(Ssrc(30)));
         assert_eq!(room.ssrc_of("ninguém"), None);
     }
 
@@ -1582,9 +1582,9 @@ mod tests {
         // the average and not off the members: two of these three are nominal
         // on their own, and together the room is degraded.
         let mut room = watching();
-        seated_with(&mut room, 3, "ayanami", 90);
-        seated_with(&mut room, 4, "asuka", 81);
-        seated_with(&mut room, 5, "shinji", 78);
+        seated_with(&mut room, 3, "marcela", 90);
+        seated_with(&mut room, 4, "carla", 81);
+        seated_with(&mut room, 5, "rafael", 78);
 
         let average = room
             .voice_room_sync(VOICE_ROOM)
@@ -1601,8 +1601,8 @@ mod tests {
         // floor, which is exactly the tie where guessing changes the colour of
         // the room.
         let mut room = watching();
-        seated_with(&mut room, 3, "ayanami", 84);
-        seated_with(&mut room, 4, "asuka", 85);
+        seated_with(&mut room, 3, "marcela", 84);
+        seated_with(&mut room, 4, "carla", 85);
 
         let average = room
             .voice_room_sync(VOICE_ROOM)
@@ -1624,8 +1624,8 @@ mod tests {
         // down from outside it — and this client has no third state where a
         // person is in the voice room but ejected.
         let mut room = watching();
-        seated_with(&mut room, 3, "ayanami", 90);
-        seated_with(&mut room, 4, "asuka", 20);
+        seated_with(&mut room, 3, "marcela", 90);
+        seated_with(&mut room, 4, "carla", 20);
 
         assert_eq!(
             room.voice_room_sync(VOICE_ROOM).map(|sync| sync.ratio),
@@ -1639,12 +1639,12 @@ mod tests {
 
         let average = room
             .voice_room_sync(VOICE_ROOM)
-            .expect("ayanami is still seated");
+            .expect("marcela is still seated");
         assert_eq!(average.ratio, 90, "somebody who left is still counted");
         assert_eq!(average.people, 1);
         assert_eq!(
             room.name_of(PersonId(4)),
-            "asuka",
+            "carla",
             "the name left with the seat"
         );
     }
@@ -1840,11 +1840,11 @@ mod tests {
         // promised destruction; a client still drawing the row would be the one
         // screen in the product claiming the room is there.
         let mut room = room();
-        room.apply(&joined(3, "ayanami"));
+        room.apply(&joined(3, "marcela"));
         assert_eq!(
             room.roster(VOICE_ROOM).count(),
             2,
-            "this client and ayanami"
+            "this client and marcela"
         );
 
         let changed = room.apply(&ServerMessage::VoiceRoomDeleted {
@@ -1977,7 +1977,7 @@ mod tests {
         // person stays drawn in the room they left — sending voice into it and
         // reading its roster — while everybody else sees them somewhere new.
         let mut room = room();
-        room.apply(&joined(3, "ayanami"));
+        room.apply(&joined(3, "marcela"));
         assert_eq!(room.current_voice_room, Some(VOICE_ROOM));
 
         let changed = room.apply(&ServerMessage::MovedToVoiceRoom {
@@ -1995,7 +1995,7 @@ mod tests {
             room.roster(VOICE_ROOM)
                 .map(|p| p.nickname.as_str())
                 .collect::<Vec<_>>(),
-            ["ayanami"],
+            ["marcela"],
             "a copy was left behind in the old voice room"
         );
     }
@@ -2257,7 +2257,7 @@ mod tests {
                 channels: Vec::new(),
                 permissions: Vec::new(),
             },
-            "ayanami",
+            "marcela",
         );
         assert!(room.telas.is_empty());
         assert_eq!(room.chave_pedida, None);

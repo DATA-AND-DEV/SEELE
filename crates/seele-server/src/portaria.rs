@@ -453,8 +453,8 @@ mod tests {
         Persistence::open(&Location::Memory).expect("banco em memória")
     }
 
-    const AYANAMI: &str = "aaaa1111";
-    const SORYU: &str = "bbbb2222";
+    const MARCELA: &str = "aaaa1111";
+    const PIRES: &str = "bbbb2222";
 
     #[test]
     fn quem_hospeda_entra_na_propria_casa_sem_esperar_ninguem() {
@@ -465,10 +465,10 @@ mod tests {
         let mut banco = persistence();
         ligar(&mut banco, true).unwrap();
 
-        admitir_o_dono(&mut banco, AYANAMI).unwrap();
+        admitir_o_dono(&mut banco, MARCELA).unwrap();
 
         assert_eq!(
-            bater(&mut banco, AYANAMI, "quem hospeda", Segredo::Aberto, "").unwrap(),
+            bater(&mut banco, MARCELA, "quem hospeda", Segredo::Aberto, "").unwrap(),
             Resposta::Entra,
             "quem hospeda bateu na própria porta e ficou esperando alguém abrir"
         );
@@ -477,7 +477,7 @@ mod tests {
         // esperando. Um conserto que abrisse a porta para todo mundo passaria
         // na asserção de cima e falharia aqui.
         assert_eq!(
-            bater(&mut banco, SORYU, "estranha", Segredo::Aberto, "").unwrap(),
+            bater(&mut banco, PIRES, "estranha", Segredo::Aberto, "").unwrap(),
             Resposta::Pendente,
             "admitir o dono abriu a porta para todo mundo"
         );
@@ -490,18 +490,18 @@ mod tests {
         let mut banco = persistence();
         ligar(&mut banco, true).unwrap();
 
-        bater(&mut banco, SORYU, "indesejada", Segredo::Aberto, "").unwrap();
-        decidir(&mut banco, SORYU, false).unwrap();
+        bater(&mut banco, PIRES, "indesejada", Segredo::Aberto, "").unwrap();
+        decidir(&mut banco, PIRES, false).unwrap();
 
-        admitir_o_dono(&mut banco, AYANAMI).unwrap();
-        admitir_o_dono(&mut banco, AYANAMI).unwrap();
+        admitir_o_dono(&mut banco, MARCELA).unwrap();
+        admitir_o_dono(&mut banco, MARCELA).unwrap();
 
         assert_eq!(
-            bater(&mut banco, AYANAMI, "quem hospeda", Segredo::Aberto, "").unwrap(),
+            bater(&mut banco, MARCELA, "quem hospeda", Segredo::Aberto, "").unwrap(),
             Resposta::Entra
         );
         assert_eq!(
-            bater(&mut banco, SORYU, "indesejada", Segredo::Aberto, "").unwrap(),
+            bater(&mut banco, PIRES, "indesejada", Segredo::Aberto, "").unwrap(),
             Resposta::Recusado,
             "hospedar de novo desfez uma recusa que quem hospeda tinha dado"
         );
@@ -514,7 +514,7 @@ mod tests {
         let mut c = persistence();
         assert!(!ligada(&c).expect("ler"));
         assert_eq!(
-            bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater"),
+            bater(&mut c, MARCELA, "rei", Segredo::Aberto, "").expect("bater"),
             Resposta::Entra
         );
         // E não grava nada: uma portaria desligada não é uma portaria que
@@ -528,11 +528,11 @@ mod tests {
         ligar(&mut c, true).expect("ligar");
 
         assert_eq!(
-            bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater"),
+            bater(&mut c, MARCELA, "rei", Segredo::Aberto, "").expect("bater"),
             Resposta::Pendente
         );
         assert_eq!(
-            bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater"),
+            bater(&mut c, MARCELA, "rei", Segredo::Aberto, "").expect("bater"),
             Resposta::Pendente
         );
         // Uma linha, não duas: tentar de novo é o que a frase manda fazer.
@@ -545,16 +545,16 @@ mod tests {
         // A promessa inteira do TOFU: pergunta-se uma vez.
         let mut c = persistence();
         ligar(&mut c, true).expect("ligar");
-        bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater");
+        bater(&mut c, MARCELA, "rei", Segredo::Aberto, "").expect("bater");
 
-        decidir(&mut c, AYANAMI, true).expect("decidir");
+        decidir(&mut c, MARCELA, true).expect("decidir");
 
         assert_eq!(
-            bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater"),
+            bater(&mut c, MARCELA, "rei", Segredo::Aberto, "").expect("bater"),
             Resposta::Entra
         );
         assert_eq!(
-            bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater"),
+            bater(&mut c, MARCELA, "rei", Segredo::Aberto, "").expect("bater"),
             Resposta::Entra
         );
         assert_eq!(pendentes(&c).expect("contar"), 0);
@@ -566,11 +566,11 @@ mod tests {
         // fila, recusar seria adiar, e quem foi recusado teria só que insistir.
         let mut c = persistence();
         ligar(&mut c, true).expect("ligar");
-        bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater");
-        decidir(&mut c, AYANAMI, false).expect("decidir");
+        bater(&mut c, MARCELA, "rei", Segredo::Aberto, "").expect("bater");
+        decidir(&mut c, MARCELA, false).expect("decidir");
 
         assert_eq!(
-            bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater"),
+            bater(&mut c, MARCELA, "rei", Segredo::Aberto, "").expect("bater"),
             Resposta::Recusado
         );
         assert_eq!(pendentes(&c).expect("contar"), 0);
@@ -582,17 +582,17 @@ mod tests {
         // primeiro que bate abriria a porta para todos.
         let mut c = persistence();
         ligar(&mut c, true).expect("ligar");
-        bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater");
-        bater(&mut c, SORYU, "asuka", Segredo::Aberto, "").expect("bater");
+        bater(&mut c, MARCELA, "rei", Segredo::Aberto, "").expect("bater");
+        bater(&mut c, PIRES, "carla", Segredo::Aberto, "").expect("bater");
 
-        decidir(&mut c, AYANAMI, true).expect("decidir");
+        decidir(&mut c, MARCELA, true).expect("decidir");
 
         assert_eq!(
-            bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater"),
+            bater(&mut c, MARCELA, "rei", Segredo::Aberto, "").expect("bater"),
             Resposta::Entra
         );
         assert_eq!(
-            bater(&mut c, SORYU, "asuka", Segredo::Aberto, "").expect("bater"),
+            bater(&mut c, PIRES, "carla", Segredo::Aberto, "").expect("bater"),
             Resposta::Pendente
         );
     }
@@ -603,13 +603,13 @@ mod tests {
         // prosa: depois de revogar, bater pergunta de novo — não recusa.
         let mut c = persistence();
         ligar(&mut c, true).expect("ligar");
-        bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater");
-        decidir(&mut c, AYANAMI, true).expect("decidir");
+        bater(&mut c, MARCELA, "rei", Segredo::Aberto, "").expect("bater");
+        decidir(&mut c, MARCELA, true).expect("decidir");
 
-        revogar(&mut c, AYANAMI).expect("revogar");
+        revogar(&mut c, MARCELA).expect("revogar");
 
         assert_eq!(
-            bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater"),
+            bater(&mut c, MARCELA, "rei", Segredo::Aberto, "").expect("bater"),
             Resposta::Pendente
         );
     }
@@ -621,7 +621,7 @@ mod tests {
         // lesse.
         let mut c = persistence();
         ligar(&mut c, true).expect("ligar");
-        bater(&mut c, AYANAMI, "rei", Segredo::Convite, "para a Rei").expect("bater");
+        bater(&mut c, MARCELA, "rei", Segredo::Convite, "para a Rei").expect("bater");
 
         let pedido = &pedidos(&c).expect("ler")[0];
         assert_eq!(pedido.segredo, "convite");
@@ -637,10 +637,10 @@ mod tests {
         // ser aprovado como `rei` e voltar dizendo-se `comandante`.
         let mut c = persistence();
         ligar(&mut c, true).expect("ligar");
-        bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater");
-        decidir(&mut c, AYANAMI, true).expect("decidir");
+        bater(&mut c, MARCELA, "rei", Segredo::Aberto, "").expect("bater");
+        decidir(&mut c, MARCELA, true).expect("decidir");
 
-        bater(&mut c, AYANAMI, "comandante", Segredo::Aberto, "").expect("bater");
+        bater(&mut c, MARCELA, "comandante", Segredo::Aberto, "").expect("bater");
 
         assert_eq!(pedidos(&c).expect("ler")[0].apelido, "rei");
     }
@@ -649,13 +649,13 @@ mod tests {
     fn a_fila_poe_quem_espera_antes_de_quem_ja_foi_decidido() {
         let mut c = persistence();
         ligar(&mut c, true).expect("ligar");
-        bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater");
-        decidir(&mut c, AYANAMI, true).expect("decidir");
-        bater(&mut c, SORYU, "asuka", Segredo::Aberto, "").expect("bater");
+        bater(&mut c, MARCELA, "rei", Segredo::Aberto, "").expect("bater");
+        decidir(&mut c, MARCELA, true).expect("decidir");
+        bater(&mut c, PIRES, "carla", Segredo::Aberto, "").expect("bater");
 
         let fila = pedidos(&c).expect("ler");
-        assert_eq!(fila[0].impressao, SORYU, "o pendente vem primeiro");
-        assert_eq!(fila[1].impressao, AYANAMI);
+        assert_eq!(fila[0].impressao, PIRES, "o pendente vem primeiro");
+        assert_eq!(fila[1].impressao, MARCELA);
     }
 
     #[test]
@@ -679,19 +679,19 @@ mod tests {
         // viraria o jeito de apagar uma recusa.
         let mut c = persistence();
         ligar(&mut c, true).expect("ligar");
-        bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater");
-        decidir(&mut c, AYANAMI, false).expect("decidir");
+        bater(&mut c, MARCELA, "rei", Segredo::Aberto, "").expect("bater");
+        decidir(&mut c, MARCELA, false).expect("decidir");
 
         ligar(&mut c, false).expect("desligar");
         assert_eq!(
-            bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater"),
+            bater(&mut c, MARCELA, "rei", Segredo::Aberto, "").expect("bater"),
             Resposta::Entra,
             "desligada, ela deixa passar"
         );
 
         ligar(&mut c, true).expect("religar");
         assert_eq!(
-            bater(&mut c, AYANAMI, "rei", Segredo::Aberto, "").expect("bater"),
+            bater(&mut c, MARCELA, "rei", Segredo::Aberto, "").expect("bater"),
             Resposta::Recusado
         );
     }
@@ -705,7 +705,7 @@ mod a_volta_de_quem_ja_foi_aprovado {
     use crate::admissao::{criar_convite, gastar, Politica};
     use crate::persistence::Location;
 
-    const AYANAMI: &str = "aaaa1111";
+    const MARCELA: &str = "aaaa1111";
 
     /// Relatado em campo: «aprovei a entrada de alguém e deu como credencial
     /// recusada».
@@ -736,16 +736,16 @@ mod a_volta_de_quem_ja_foi_aprovado {
             .expect("o convite vale na chegada");
         let (segredo, observacao) = como_chegou(&persistence, politica.aberto(), Some(&token));
         assert_eq!(
-            bater(&mut persistence, AYANAMI, "rafa", segredo, &observacao).expect("bater"),
+            bater(&mut persistence, MARCELA, "rafa", segredo, &observacao).expect("bater"),
             Resposta::Pendente
         );
 
         // Quem hospeda aprova, e a pessoa entra. O convite é gasto agora.
-        decidir(&mut persistence, AYANAMI, true).expect("aprovar");
+        decidir(&mut persistence, MARCELA, true).expect("aprovar");
         let politica = Politica::carregar(&persistence).expect("política");
         let (segredo, observacao) = como_chegou(&persistence, politica.aberto(), Some(&token));
         assert_eq!(
-            bater(&mut persistence, AYANAMI, "rafa", segredo, &observacao).expect("bater"),
+            bater(&mut persistence, MARCELA, "rafa", segredo, &observacao).expect("bater"),
             Resposta::Entra
         );
         gastar(&mut persistence, &passe)
@@ -768,7 +768,7 @@ mod a_volta_de_quem_ja_foi_aprovado {
         // de devolvê-la, e a descarta depois da assinatura se esta chave já
         // tiver decisão de admitida. É esta a pergunta que faltava.
         assert!(
-            ja_admitido(&persistence, AYANAMI).expect("perguntar"),
+            ja_admitido(&persistence, MARCELA).expect("perguntar"),
             "quem já foi aprovado não é reconhecido na volta, e a política a \
              barra por convite gasto antes de a portaria poder dizer que a \
              conhece"
@@ -779,7 +779,7 @@ mod a_volta_de_quem_ja_foi_aprovado {
         // qualquer segredo errado entrar em todo servidor que não usa portaria.
         ligar(&mut persistence, false).expect("desligar a portaria");
         assert!(
-            !ja_admitido(&persistence, AYANAMI).expect("perguntar"),
+            !ja_admitido(&persistence, MARCELA).expect("perguntar"),
             "com a portaria desligada alguém continua contando como admitido, \
              e o perdão da recusa vira uma porta escancarada"
         );

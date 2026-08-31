@@ -168,26 +168,26 @@ async fn quem_chega_ve_todos_os_voice_rooms_ocupados_e_nao_so_o_seu() -> Result<
     let (endereco, servidor) = server().await?;
 
     let anfitriao = conectar(endereco, 46, "anfitriao").await?;
-    let mut asuka = conectar(endereco, 48, "asuka").await?;
-    let mut sala_asuka = sala(&asuka);
+    let mut carla = conectar(endereco, 48, "carla").await?;
+    let mut sala_carla = sala(&carla);
     let voice_room_um = VoiceRoomId(anfitriao.sessao().voice_rooms[0].id.get());
-    let voice_room_dois = segundo_voice_room(&anfitriao, &mut asuka, &mut sala_asuka).await?;
+    let voice_room_dois = segundo_voice_room(&anfitriao, &mut carla, &mut sala_carla).await?;
 
     // Duas pessoas sentam, uma em cada sala de voz, **antes** de a testemunha existir.
-    let mut shinji = conectar(endereco, 47, "shinji").await?;
-    shinji
+    let mut rafael = conectar(endereco, 47, "rafael").await?;
+    rafael
         .inserir_plug(voice_room_um)
         .await
         .expect("sessão acabou");
-    asuka
+    carla
         .inserir_plug(voice_room_dois)
         .await
         .expect("sessão acabou");
     // Um instante para os dois assentos existirem no servidor antes do aperto de
     // mão seguinte, que é o que este teste mede.
-    let mut sala_shinji = sala(&shinji);
-    sala_shinji.enter_voice_room(voice_room_um);
-    absorver(&mut shinji, &mut sala_shinji, Duration::from_secs(1)).await;
+    let mut sala_rafael = sala(&rafael);
+    sala_rafael.enter_voice_room(voice_room_um);
+    absorver(&mut rafael, &mut sala_rafael, Duration::from_secs(1)).await;
 
     // A testemunha chega agora, e não pediu nada a ninguém.
     let mut rei = conectar(endereco, 49, "rei").await?;
@@ -204,12 +204,12 @@ async fn quem_chega_ve_todos_os_voice_rooms_ocupados_e_nao_so_o_seu() -> Result<
         sentados(&sala_rei, voice_room_um),
         sentados(&sala_rei, voice_room_dois),
     );
-    assert_eq!(sentados(&sala_rei, voice_room_um), ["shinji"]);
-    assert_eq!(sentados(&sala_rei, voice_room_dois), ["asuka"]);
+    assert_eq!(sentados(&sala_rei, voice_room_um), ["rafael"]);
+    assert_eq!(sentados(&sala_rei, voice_room_dois), ["carla"]);
 
     drop(anfitriao);
-    drop(asuka);
-    drop(shinji);
+    drop(carla);
+    drop(rafael);
     drop(rei);
     servidor.shutdown();
     Ok(())
@@ -233,8 +233,8 @@ async fn entrar_num_voice_room_aparece_para_quem_esta_noutro() -> Result<()> {
 
     // Alguém entra **no outro**. Esta é a metade viva: um retrato pedido no
     // aperto de mão estaria certo até aqui e erraria a partir daqui.
-    let shinji = conectar(endereco, 47, "shinji").await?;
-    shinji
+    let rafael = conectar(endereco, 47, "rafael").await?;
+    rafael
         .inserir_plug(voice_room_dois)
         .await
         .expect("sessão acabou");
@@ -248,10 +248,10 @@ async fn entrar_num_voice_room_aparece_para_quem_esta_noutro() -> Result<()> {
         "quem entrou na sala de voz-02 não apareceu para quem está na sala de voz-01: {:?}",
         sentados(&sala_rei, voice_room_dois)
     );
-    assert_eq!(sentados(&sala_rei, voice_room_dois), ["shinji"]);
+    assert_eq!(sentados(&sala_rei, voice_room_dois), ["rafael"]);
 
     // E sair do outro sala de voz também chega. Sem isto a tela só cresce.
-    shinji.ejetar_plug().await.expect("sessão acabou");
+    rafael.ejetar_plug().await.expect("sessão acabou");
     let sumiu = absorver_ate(&mut rei, &mut sala_rei, Duration::from_secs(15), |room| {
         room.roster(voice_room_dois).count() == 0
     })
@@ -264,7 +264,7 @@ async fn entrar_num_voice_room_aparece_para_quem_esta_noutro() -> Result<()> {
 
     drop(anfitriao);
     drop(rei);
-    drop(shinji);
+    drop(rafael);
     servidor.shutdown();
     Ok(())
 }
@@ -278,15 +278,15 @@ async fn uma_conexao_que_cai_sai_do_roster_de_todo_mundo() -> Result<()> {
     let mut sala_rei = sala(&rei);
     let voice_room_um = VoiceRoomId(anfitriao.sessao().voice_rooms[0].id.get());
 
-    let shinji = conectar(endereco, 47, "shinji").await?;
-    shinji
+    let rafael = conectar(endereco, 47, "rafael").await?;
+    rafael
         .inserir_plug(voice_room_um)
         .await
         .expect("sessão acabou");
     // Mais um comando atrás do primeiro, para que a entrada tenha sido
     // processada antes de a sessão morrer; sem isso o teste poderia medir uma
     // saída que nunca teve entrada e passar por engano.
-    let _ = shinji.abrir_linha(ChannelId(1)).await;
+    let _ = rafael.abrir_linha(ChannelId(1)).await;
 
     let entrou = absorver_ate(&mut rei, &mut sala_rei, Duration::from_secs(15), |room| {
         room.roster(voice_room_um).count() == 1
@@ -295,7 +295,7 @@ async fn uma_conexao_que_cai_sai_do_roster_de_todo_mundo() -> Result<()> {
     assert!(entrou, "a entrada não chegou; a saída não mede nada");
 
     // Solta a alça: é o que uma janela fechada faz.
-    drop(shinji);
+    drop(rafael);
 
     let saiu = absorver_ate(&mut rei, &mut sala_rei, Duration::from_secs(30), |room| {
         room.roster(voice_room_um).count() == 0

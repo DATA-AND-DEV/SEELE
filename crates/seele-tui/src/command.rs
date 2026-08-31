@@ -195,16 +195,16 @@ mod tests {
     #[test]
     fn volume_takes_a_person_and_a_percentage() {
         assert_eq!(
-            parse(":volume ayanami 40"),
+            parse(":volume marcela 40"),
             Command::Volume {
-                who: "ayanami".into(),
+                who: "marcela".into(),
                 percent: 40
             }
         );
         assert_eq!(
-            parse(":vol ayanami 40%"),
+            parse(":vol marcela 40%"),
             Command::Volume {
-                who: "ayanami".into(),
+                who: "marcela".into(),
                 percent: 40
             }
         );
@@ -213,9 +213,9 @@ mod tests {
     #[test]
     fn volume_is_capped_rather_than_refused() {
         assert_eq!(
-            parse(":volume ayanami 9000"),
+            parse(":volume marcela 9000"),
             Command::Volume {
-                who: "ayanami".into(),
+                who: "marcela".into(),
                 percent: 200
             }
         );

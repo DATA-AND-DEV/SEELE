@@ -537,14 +537,14 @@ mod tests {
         let outra = channels.create_channel("avisos").unwrap();
 
         let rei = person(&persistence, "rei", 1);
-        let shinji = person(&persistence, "shinji", 2);
-        let asuka = person(&persistence, "asuka", 3);
+        let rafael = person(&persistence, "rafael", 2);
+        let carla = person(&persistence, "carla", 3);
         say(&persistence, channel.id, rei, "primeira", 1_678_600_000);
         say(&persistence, channel.id, rei, "segunda", 1_678_600_060);
-        say(&persistence, channel.id, shinji, "terceira", 1_678_600_120);
-        say(&persistence, channel.id, asuka, "quarta", 1_678_600_180);
+        say(&persistence, channel.id, rafael, "terceira", 1_678_600_120);
+        say(&persistence, channel.id, carla, "quarta", 1_678_600_180);
         // Noutra Linha, e portanto em nenhuma destas contas.
-        say(&persistence, outra.id, asuka, "noutra sala", 1_600_000_000);
+        say(&persistence, outra.id, carla, "noutra sala", 1_600_000_000);
 
         let peso = channels.weigh_channel(channel.id).unwrap();
         assert_eq!(peso.messages, 4);

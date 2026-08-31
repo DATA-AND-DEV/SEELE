@@ -353,7 +353,7 @@ mod tests {
     #[test]
     fn persons_are_nested_under_the_open_voice_room_and_nowhere_else() {
         let mut room = room();
-        room.apply(&joined(3, "ayanami"));
+        room.apply(&joined(3, "marcela"));
         let mut app = App::new();
 
         project(&room, &mut app);
@@ -361,7 +361,7 @@ mod tests {
         // Ourselves first, then who arrived. The person reading the roster has
         // to be on it — that was the M4 bug.
         let names: Vec<&str> = app.roster().map(|p| p.nickname.as_str()).collect();
-        assert_eq!(names, ["pessoa 7", "ayanami"]);
+        assert_eq!(names, ["pessoa 7", "marcela"]);
 
         // The closed voice room is a row, not a container.
         let voice_rooms = app
@@ -378,7 +378,7 @@ mod tests {
         // same value from `Room::voice_room_sync` through `seele-ffi`, and a mean
         // computed twice is a mean that will disagree once.
         let mut room = room();
-        room.apply(&joined(3, "ayanami"));
+        room.apply(&joined(3, "marcela"));
         room.apply(&ServerMessage::PersonState(PersonState {
             person: PersonId(3),
             muted: false,
@@ -428,7 +428,7 @@ mod tests {
         // people, then Channels. A Channel floating between two voice_rooms reads as
         // belonging to the one above it.
         let mut room = room();
-        room.apply(&joined(3, "ayanami"));
+        room.apply(&joined(3, "marcela"));
         let mut app = App::new();
         project(&room, &mut app);
 
@@ -558,7 +558,7 @@ mod tests {
     #[test]
     fn person_state_reaches_the_roster_row() {
         let mut room = room();
-        room.apply(&joined(3, "ayanami"));
+        room.apply(&joined(3, "marcela"));
         room.apply(&ServerMessage::PersonState(PersonState {
             person: PersonId(3),
             muted: true,
@@ -573,7 +573,7 @@ mod tests {
 
         let person = app
             .roster()
-            .find(|person| person.nickname == "ayanami")
+            .find(|person| person.nickname == "marcela")
             .expect("roster");
         assert!(person.muted);
         assert!(person.speaking);

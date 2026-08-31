@@ -1747,7 +1747,7 @@ mod tests {
             voice_room: SALA,
             profile: PersonProfile {
                 id: PersonId(7),
-                nickname: "ayanami".into(),
+                nickname: "marcela".into(),
                 roles: Vec::new(),
             },
             ssrc: Ssrc(700),

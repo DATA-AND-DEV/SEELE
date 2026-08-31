@@ -49,7 +49,7 @@ async fn entrar(endereco: SocketAddr) -> Result<Client, ConnectError> {
         endereco,
         "localhost",
         &endereco.to_string(),
-        "ayanami",
+        "marcela",
         &ed25519_dalek::SigningKey::from_bytes(&[7; 32]),
         Arc::new(MemoryPinStore::new()),
         None,

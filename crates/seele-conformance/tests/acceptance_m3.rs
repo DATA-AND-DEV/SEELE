@@ -92,14 +92,14 @@ async fn a_restarted_server_keeps_its_history() -> Result<()> {
 
     let posted = {
         let (address, server) = start(database.clone()).await?;
-        let mut ayanami = connect(address, "ayanami", &key(1)).await?;
-        ayanami.join_channel(LINE).await?;
-        ayanami
+        let mut marcela = connect(address, "marcela", &key(1)).await?;
+        marcela.join_channel(LINE).await?;
+        marcela
             .send_message(LINE, "verificando harmônicos", ClientMessageId(1))
             .await?;
 
         // The broadcast is the confirmation: it happens after the commit.
-        let event = wait_for(&mut ayanami, |event| {
+        let event = wait_for(&mut marcela, |event| {
             matches!(event, ServerMessage::MessageReceived { .. })
         })
         .await?;
@@ -115,11 +115,11 @@ async fn a_restarted_server_keeps_its_history() -> Result<()> {
 
     // A new process, the same file.
     let (address, server) = start(database).await?;
-    let mut ayanami = connect(address, "ayanami", &key(1)).await?;
-    ayanami.join_channel(LINE).await?;
-    ayanami.fetch_history(LINE, None, 50).await?;
+    let mut marcela = connect(address, "marcela", &key(1)).await?;
+    marcela.join_channel(LINE).await?;
+    marcela.fetch_history(LINE, None, 50).await?;
 
-    let event = wait_for(&mut ayanami, |event| {
+    let event = wait_for(&mut marcela, |event| {
         matches!(event, ServerMessage::MessageReceived { .. })
     })
     .await?;
@@ -149,14 +149,14 @@ async fn a_restarted_server_keeps_its_accounts() -> Result<()> {
 
     let first_person = {
         let (address, server) = start(database.clone()).await?;
-        let client = connect(address, "ayanami", &key(1)).await?;
+        let client = connect(address, "marcela", &key(1)).await?;
         let person = client.session().person;
         server.shutdown();
         person
     };
 
     let (address, server) = start(database).await?;
-    let client = connect(address, "ayanami", &key(1)).await?;
+    let client = connect(address, "marcela", &key(1)).await?;
     assert_eq!(
         client.session().person,
         first_person,
@@ -172,17 +172,17 @@ async fn a_message_reaches_everybody_on_the_line() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let (address, server) = start(directory.path().join("seele.db")).await?;
 
-    let mut ayanami = connect(address, "ayanami", &key(1)).await?;
-    let mut shinji = connect(address, "shinji", &key(2)).await?;
-    ayanami.join_channel(LINE).await?;
-    shinji.join_channel(LINE).await?;
+    let mut marcela = connect(address, "marcela", &key(1)).await?;
+    let mut rafael = connect(address, "rafael", &key(2)).await?;
+    marcela.join_channel(LINE).await?;
+    rafael.join_channel(LINE).await?;
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    ayanami
+    marcela
         .send_message(LINE, "sync caiu aqui", ClientMessageId(1))
         .await?;
 
-    let event = wait_for(&mut shinji, |event| {
+    let event = wait_for(&mut rafael, |event| {
         matches!(event, ServerMessage::MessageReceived { .. })
     })
     .await?;
@@ -190,7 +190,7 @@ async fn a_message_reaches_everybody_on_the_line() -> Result<()> {
         panic!("not a message");
     };
     assert_eq!(body, "sync caiu aqui");
-    assert_eq!(author, ayanami.session().person);
+    assert_eq!(author, marcela.session().person);
 
     server.shutdown();
     Ok(())
@@ -204,24 +204,24 @@ async fn a_resent_message_is_not_posted_twice() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let (address, server) = start(directory.path().join("seele.db")).await?;
 
-    let mut ayanami = connect(address, "ayanami", &key(1)).await?;
-    ayanami.join_channel(LINE).await?;
+    let mut marcela = connect(address, "marcela", &key(1)).await?;
+    marcela.join_channel(LINE).await?;
 
-    ayanami
+    marcela
         .send_message(LINE, "uma vez", ClientMessageId(7))
         .await?;
-    let first = wait_for(&mut ayanami, |event| {
+    let first = wait_for(&mut marcela, |event| {
         matches!(event, ServerMessage::MessageReceived { .. })
     })
     .await?;
 
-    ayanami
+    marcela
         .send_message(LINE, "uma vez", ClientMessageId(7))
         .await?;
     tokio::time::sleep(Duration::from_millis(600)).await;
 
     // Fresh history should hold exactly one.
-    let mut reader = connect(address, "shinji", &key(2)).await?;
+    let mut reader = connect(address, "rafael", &key(2)).await?;
     reader.join_channel(LINE).await?;
     reader.fetch_history(LINE, None, 50).await?;
 
@@ -295,7 +295,7 @@ async fn telemetry_carries_a_sync_ratio() -> Result<()> {
     // loopback it should be nominal.
     let directory = tempfile::tempdir()?;
     let (address, server) = start(directory.path().join("seele.db")).await?;
-    let mut client = connect(address, "ayanami", &key(1)).await?;
+    let mut client = connect(address, "marcela", &key(1)).await?;
 
     let event = wait_for(&mut client, |event| {
         matches!(event, ServerMessage::Telemetry(_))
@@ -338,18 +338,18 @@ async fn a_returning_person_reclaims_their_seat_and_their_ssrc() -> Result<()> {
     let (address, server) = start(directory.path().join("seele.db")).await?;
 
     let before = {
-        let mut ayanami = connect(address, "ayanami", &key(1)).await?;
-        ayanami.insert_plug(VOICE_ROOM).await?;
+        let mut marcela = connect(address, "marcela", &key(1)).await?;
+        marcela.insert_plug(VOICE_ROOM).await?;
         tokio::time::sleep(Duration::from_millis(150)).await;
-        let session = ayanami.session().clone();
+        let session = marcela.session().clone();
         // The train enters the tunnel.
-        ayanami.disconnect();
+        marcela.disconnect();
         session
     };
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    let after = connect(address, "ayanami", &key(1)).await?;
+    let after = connect(address, "marcela", &key(1)).await?;
     assert_eq!(
         after.session().person,
         before.person,
@@ -371,16 +371,16 @@ async fn history_pages_backwards_without_gaps() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let (address, server) = start(directory.path().join("seele.db")).await?;
 
-    let mut ayanami = connect(address, "ayanami", &key(1)).await?;
-    ayanami.join_channel(LINE).await?;
+    let mut marcela = connect(address, "marcela", &key(1)).await?;
+    marcela.join_channel(LINE).await?;
     for index in 1..=6_u64 {
-        ayanami
+        marcela
             .send_message(LINE, &format!("mensagem {index}"), ClientMessageId(index))
             .await?;
     }
     tokio::time::sleep(Duration::from_millis(600)).await;
 
-    let mut reader = connect(address, "shinji", &key(2)).await?;
+    let mut reader = connect(address, "rafael", &key(2)).await?;
     reader.join_channel(LINE).await?;
     reader.fetch_history(LINE, None, 3).await?;
 

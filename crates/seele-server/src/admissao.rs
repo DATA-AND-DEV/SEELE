@@ -487,7 +487,7 @@ mod tests {
         // A propriedade que torna seguro pôr um convite numa URL: depois de
         // usado, vazar não vale nada.
         let mut persistence = persistence();
-        let token = criar_convite(&mut persistence, "ayanami").expect("criar");
+        let token = criar_convite(&mut persistence, "marcela").expect("criar");
         let politica = Politica::carregar(&persistence).expect("política");
 
         assert_eq!(
@@ -510,7 +510,7 @@ mod tests {
         // mandado esperar não pode ter o convite queimado pela batida, ou volta
         // aprovado e sem credencial nenhuma.
         let mut persistence = persistence();
-        let token = criar_convite(&mut persistence, "ayanami").expect("criar");
+        let token = criar_convite(&mut persistence, "marcela").expect("criar");
         let politica = Politica::carregar(&persistence).expect("política");
 
         let passe = politica

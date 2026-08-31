@@ -196,7 +196,7 @@ async fn ocupantes(servidor: &Daemon, esperados: usize, prazo: Duration) -> Vec<
 async fn conectar_ejetar_e_conectar_de_novo_no_mesmo_processo() -> Result<()> {
     let (endereco, servidor) = server().await?;
 
-    let primeiro = conectar_e_falar(endereco, 46, "ayanami", "primeira volta").await?;
+    let primeiro = conectar_e_falar(endereco, 46, "marcela", "primeira volta").await?;
     assert!(
         primeiro.sessao().person.0 > 0,
         "a primeira sessão não subiu"
@@ -259,12 +259,12 @@ async fn a_mesma_pessoa_volta_pela_tela_de_selecao() -> Result<()> {
     // ADR 0017 prende o apelido à identidade, que aqui não muda.
     let (endereco, servidor) = server().await?;
 
-    let primeiro = conectar_e_falar(endereco, 46, "ayanami", "primeira volta").await?;
+    let primeiro = conectar_e_falar(endereco, 46, "marcela", "primeira volta").await?;
     let primeira = primeiro.sessao().id;
     let pessoa = primeiro.sessao().person;
     drop(primeiro);
 
-    let segundo = conectar_e_falar(endereco, 46, "ayanami", "de novo eu").await?;
+    let segundo = conectar_e_falar(endereco, 46, "marcela", "de novo eu").await?;
     assert_eq!(segundo.estado(), Link::Online);
     assert_eq!(
         segundo.sessao().person,
@@ -331,7 +331,7 @@ async fn hospedar_ejetar_e_hospedar_de_novo_libera_a_porta() -> Result<()> {
     let enlace = conectar_e_falar(
         SocketAddr::from(([127, 0, 0, 1], porta)),
         47,
-        "ayanami",
+        "marcela",
         "hospedado de novo",
     )
     .await?;

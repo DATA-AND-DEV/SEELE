@@ -162,13 +162,13 @@ informação textual que sobrevive ao `NO_COLOR`.
 
 ```
 MENSAGENS
-  12:01 ayanami
+  12:01 marcela
     verificando harmônicos
 
-  12:03 shinji
+  12:03 rafael
     o [sync] caiu aqui        ◀ 1/3
 
-  12:04 asuka
+  12:04 carla
     sync normalizou
 
 / sync                    [1/3]  n ▸ N ◂

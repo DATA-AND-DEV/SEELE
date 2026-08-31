@@ -917,9 +917,9 @@ mod tests {
         // four", and the v3 layout draws those four with their occupants under
         // them. They were drawn empty however many people were in them.
         let mut occupancy = Occupancy::default();
-        occupancy.seat(VoiceRoomId(1), occupant(1, "ayanami"));
-        occupancy.seat(VoiceRoomId(1), occupant(2, "shinji"));
-        occupancy.seat(VoiceRoomId(2), occupant(3, "asuka"));
+        occupancy.seat(VoiceRoomId(1), occupant(1, "marcela"));
+        occupancy.seat(VoiceRoomId(1), occupant(2, "rafael"));
+        occupancy.seat(VoiceRoomId(2), occupant(3, "carla"));
 
         let mut everywhere: Vec<(u32, u64)> = occupancy
             .everywhere()
@@ -938,7 +938,7 @@ mod tests {
         // this said nothing, the departure could not be announced, and the
         // person would stay on everybody's screen until they came back.
         let mut occupancy = Occupancy::default();
-        occupancy.seat(VoiceRoomId(7), occupant(1, "ayanami"));
+        occupancy.seat(VoiceRoomId(7), occupant(1, "marcela"));
 
         assert_eq!(
             occupancy.vacate_everywhere(PersonId(1)),
@@ -953,7 +953,7 @@ mod tests {
         // twice: `serve` calls this after every session, including the ones that
         // already left through `LeaveVoiceRoom` and said so.
         let mut occupancy = Occupancy::default();
-        occupancy.seat(VoiceRoomId(7), occupant(1, "ayanami"));
+        occupancy.seat(VoiceRoomId(7), occupant(1, "marcela"));
         occupancy.vacate(VoiceRoomId(7), PersonId(1));
 
         assert!(
@@ -968,13 +968,13 @@ mod tests {
         // clears the previous seat silently, and a silent clear is a person who
         // stays in the first voice room on every other client for ever.
         let mut occupancy = Occupancy::default();
-        occupancy.seat(VoiceRoomId(1), occupant(1, "ayanami"));
+        occupancy.seat(VoiceRoomId(1), occupant(1, "marcela"));
 
         assert_eq!(
             occupancy.vacate_everywhere(PersonId(1)),
             vec![VoiceRoomId(1)]
         );
-        occupancy.seat(VoiceRoomId(2), occupant(1, "ayanami"));
+        occupancy.seat(VoiceRoomId(2), occupant(1, "marcela"));
 
         assert_eq!(occupancy.in_voice_room(VoiceRoomId(1)).len(), 0);
         assert_eq!(occupancy.in_voice_room(VoiceRoomId(2)).len(), 1);

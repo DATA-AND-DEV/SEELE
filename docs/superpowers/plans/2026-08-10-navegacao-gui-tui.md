@@ -814,7 +814,7 @@ fn the_search_shows_the_counter_and_marks_the_current_line() {
     let mut app = App::new();
     app.messages = vec![ChatLine {
         at: "12:03".into(),
-        author: "shinji".into(),
+        author: "rafael".into(),
         body: "o sync caiu aqui".into(),
         own: false,
     }];
@@ -832,7 +832,7 @@ fn a_search_with_no_results_says_zero_instead_of_disappearing() {
     let mut app = App::new();
     app.messages = vec![ChatLine {
         at: "12:03".into(),
-        author: "shinji".into(),
+        author: "rafael".into(),
         body: "o sync caiu aqui".into(),
         own: false,
     }];

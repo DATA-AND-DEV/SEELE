@@ -2033,7 +2033,7 @@ mod tests {
             join_secret: None,
             version: PROTOCOL_VERSION,
             client: "connection/0.0.0".into(),
-            nickname: "ayanami".into(),
+            nickname: "marcela".into(),
             public_key: vec![7; PUBLIC_KEY_LEN],
         }
     }
@@ -2171,7 +2171,7 @@ mod tests {
             voice_room: VoiceRoomId(1),
             profile: PersonProfile {
                 id: PersonId(2),
-                nickname: "shinji".into(),
+                nickname: "rafael".into(),
                 roles: vec![RoleId(1)],
             },
             ssrc: Ssrc(99),
@@ -2818,7 +2818,7 @@ mod key_tests {
                 join_secret: None,
                 version: PROTOCOL_VERSION,
                 client: "connection".into(),
-                nickname: "ayanami".into(),
+                nickname: "marcela".into(),
                 public_key: vec![0; len],
             };
             assert!(
@@ -2839,7 +2839,7 @@ mod key_tests {
             join_secret: None,
             version: PROTOCOL_VERSION,
             client: "connection".into(),
-            nickname: "ayanami".into(),
+            nickname: "marcela".into(),
             public_key: vec![9; PUBLIC_KEY_LEN],
         };
         let frame = encode(&hello).unwrap();

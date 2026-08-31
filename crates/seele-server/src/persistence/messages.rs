@@ -472,7 +472,7 @@ mod tests {
             .execute_batch(
                 "INSERT INTO channels (id, name) VALUES (1, 'geral'), (2, 'logs');
                  INSERT INTO people (id, nickname, public_key, created_at)
-                   VALUES (1, 'ayanami', X'01', 0), (2, 'shinji', X'02', 0);",
+                   VALUES (1, 'marcela', X'01', 0), (2, 'rafael', X'02', 0);",
             )
             .unwrap();
         persistence
@@ -612,12 +612,12 @@ mod tests {
             .append_batch(&[
                 PendingMessage {
                     client_message_id: Some(ClientMessageId(1)),
-                    ..pending("de ayanami")
+                    ..pending("de marcela")
                 },
                 PendingMessage {
                     author: PersonId(2),
                     client_message_id: Some(ClientMessageId(1)),
-                    ..pending("de shinji")
+                    ..pending("de rafael")
                 },
             ])
             .unwrap();
@@ -890,7 +890,7 @@ mod tests {
                 .execute_batch(
                     "INSERT INTO channels (id, name) VALUES (1, 'geral');
                      INSERT INTO people (id, nickname, public_key, created_at)
-                       VALUES (1, 'ayanami', X'01', 0);",
+                       VALUES (1, 'marcela', X'01', 0);",
                 )
                 .unwrap();
             let mut messages = Messages::new(&mut persistence);

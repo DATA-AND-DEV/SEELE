@@ -871,7 +871,7 @@ mod tests {
             .execute_batch(
                 "INSERT INTO channels (id, name) VALUES (1, 'geral');
                  INSERT INTO people (id, nickname, public_key, created_at)
-                   VALUES (1, 'ayanami', X'01', 0);",
+                   VALUES (1, 'marcela', X'01', 0);",
             )
             .unwrap();
         (persistence, tempfile::tempdir().unwrap())
@@ -883,7 +883,7 @@ mod tests {
             .append_batch(&[PendingMessage {
                 channel: seele_proto::ids::ChannelId(1),
                 author: seele_proto::ids::PersonId(1),
-                author_nickname: "ayanami".into(),
+                author_nickname: "marcela".into(),
                 body: body.into(),
                 replies_to: None,
                 client_message_id: None,

@@ -74,7 +74,7 @@ const PASSO_DE_VOLUME = 10;
 /**
  * Os eventos que **esta janela** viu passar, do mais novo para o mais velho.
  *
- * O comp desenha cinco linhas de histórico — `IKARI.S entrou`,
+ * O comp desenha cinco linhas de histórico — `NUNES.S entrou`,
  * `HORAKI.H saiu` — e o inventário §9.8 deixou em aberto quanto disso o servidor
  * guarda. A resposta é: nada. `Event::RosterChanged` diz que o roster mudou,
  * nunca o quê, e não há histórico de entrada, saída nem A.T. Field em lugar
@@ -528,7 +528,7 @@ function pintarVolume(cartao, apelido) {
 /**
  * As iniciais de um apelido, para o avatar do cartão.
  *
- * `IKARI.S` vira `IS`, `Misato` vira `MI`. Separado por ponto, espaço, traço ou
+ * `NUNES.S` vira `IS`, `Daniel` vira `MI`. Separado por ponto, espaço, traço ou
  * sublinhado, que é como um apelido se divide em partes neste produto.
  */
 function iniciaisDoCartao(apelido) {

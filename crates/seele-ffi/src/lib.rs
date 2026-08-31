@@ -3644,7 +3644,7 @@ mod tests {
         let with_fingerprint = ConnectConfig {
             server: "localhost:8383".into(),
             alternate_servers: Vec::new(),
-            nickname: "shinji".into(),
+            nickname: "rafael".into(),
             home: "/tmp/does-not-matter".into(),
             join_secret: None,
             expected_fingerprint: Some("aaaa1111".into()),
@@ -3739,7 +3739,7 @@ mod tests {
             voice_room: VoiceRoomId(1),
             profile: PersonProfile {
                 id: PersonId(3),
-                nickname: "ayanami".into(),
+                nickname: "marcela".into(),
                 roles: Vec::new(),
             },
             ssrc: Ssrc(30),
@@ -3778,7 +3778,7 @@ mod tests {
             voice_room: VoiceRoomId(1),
             profile: PersonProfile {
                 id: PersonId(3),
-                nickname: "ayanami".into(),
+                nickname: "marcela".into(),
                 roles: Vec::new(),
             },
             ssrc: Ssrc(30),
@@ -3899,7 +3899,7 @@ mod tests {
             listeners: Mutex::new(Vec::new()),
             voice: Mutex::new(None),
             media: Mutex::new(None),
-            nickname: Mutex::new("ayanami".into()),
+            nickname: Mutex::new("marcela".into()),
             link_state: AtomicU8::new(0),
             rtt_micros: std::sync::atomic::AtomicU64::new(0),
             jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
@@ -4970,7 +4970,7 @@ mod tests {
             listeners: Mutex::new(Vec::new()),
             voice: Mutex::new(None),
             media: Mutex::new(None),
-            nickname: Mutex::new("ayanami".into()),
+            nickname: Mutex::new("marcela".into()),
             link_state: AtomicU8::new(0),
             rtt_micros: std::sync::atomic::AtomicU64::new(0),
             jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
@@ -5324,7 +5324,7 @@ mod tests {
                 voice_room: VoiceRoomId(1),
                 profile: PersonProfile {
                     id: PersonId(3),
-                    nickname: "ayanami".into(),
+                    nickname: "marcela".into(),
                     roles: Vec::new(),
                 },
                 ssrc: Ssrc(30),
@@ -5367,7 +5367,7 @@ mod tests {
                 voice_room: VoiceRoomId(1),
                 profile: PersonProfile {
                     id: PersonId(4),
-                    nickname: "soryu".into(),
+                    nickname: "pires".into(),
                     roles: Vec::new(),
                 },
                 ssrc: Ssrc(40),

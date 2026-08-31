@@ -11,10 +11,10 @@ O produto principal. Tudo o mais imita esta interface.
 ```
 ┌ SEELE ─────────────────────── 同期率 ─── 第3新東京市 ─────── 12:04:33 ┐
 │ SERVER          │ VOICE_ROOMS / LINHAS       │ MENSAGENS                  │
-│ ▸ Terceira Tó… │ ▼ SALA-01 CENTRAL    │ 12:01 ayanami              │
-│   Geofront     │   ● ayanami    98%   │   verificando harmônicos   │
-│   Matsushiro   │   ● shinji     71%   │                            │
-│                │   ○ asuka    A.T.    │ 12:03 shinji               │
+│ ▸ Terceira Tó… │ ▼ SALA-01 CENTRAL    │ 12:01 marcela              │
+│   Geofront     │   ● marcela    98%   │   verificando harmônicos   │
+│   Matsushiro   │   ● rafael     71%   │                            │
+│                │   ○ carla    A.T.    │ 12:03 rafael               │
 │                │ ▼ SALA-02 TESTE      │   sync caiu aqui           │
 │                │ ─ LINHA #geral       │                            │
 │                │ ─ LINHA #logs        │ ▸ _                        │

@@ -145,7 +145,7 @@ fn minha_taxa(sala: &Room) -> Option<u8> {
 #[tokio::test(flavor = "multi_thread")]
 async fn o_roster_mostra_a_taxa_do_proprio_pessoa() -> Result<()> {
     let (endereco, servidor) = server().await?;
-    let (mut enlace, mut sala) = sentar(endereco, 46, "ayanami").await?;
+    let (mut enlace, mut sala) = sentar(endereco, 46, "marcela").await?;
 
     assert_eq!(
         minha_taxa(&sala),

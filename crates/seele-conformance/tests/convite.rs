@@ -174,7 +174,7 @@ async fn a_impressao_que_o_convite_promete_verifica_o_primeiro_contato() -> Resu
     let impressao = servidor.fingerprint().to_owned();
 
     let loja = Arc::new(MemoryPinStore::new());
-    let mut enlace = conectar(endereco, 46, "ayanami", Some(&impressao), &loja)
+    let mut enlace = conectar(endereco, 46, "marcela", Some(&impressao), &loja)
         .await
         .expect("o convite promete a impressão deste servidor; não havia o que recusar");
 
@@ -213,7 +213,7 @@ async fn a_impressao_que_nao_confere_derruba_a_conexao_e_desfaz_o_pin() -> Resul
     let chave_do_pin = endereco.to_string();
     let loja = Arc::new(MemoryPinStore::new());
 
-    let erro = conectar(endereco, 46, "ayanami", Some(NAO_E_DE_NINGUEM), &loja)
+    let erro = conectar(endereco, 46, "marcela", Some(NAO_E_DE_NINGUEM), &loja)
         .await
         .expect_err("um convite que não confere tinha que derrubar a conexão");
 
@@ -264,7 +264,7 @@ async fn a_impressao_que_nao_confere_derruba_a_conexao_e_desfaz_o_pin() -> Resul
     // link nenhum para conferir, tem que ser primeiro contato de novo. Se o pin
     // tivesse sobrado, este veredito seria `Known` — a pessoa entraria calada
     // no servidor recusado, e a recusa teria sido um susto sem consequência.
-    let mut de_novo = conectar(endereco, 46, "ayanami", None, &loja)
+    let mut de_novo = conectar(endereco, 46, "marcela", None, &loja)
         .await
         .expect("sem link não há o que conferir; a conexão tinha que subir");
     assert_eq!(
@@ -294,7 +294,7 @@ async fn um_link_velho_contra_um_server_ja_conhecido_avisa_e_nao_derruba() -> Re
     let chave_do_pin = endereco.to_string();
     let loja = Arc::new(MemoryPinStore::new());
 
-    let primeiro = conectar(endereco, 46, "ayanami", None, &loja)
+    let primeiro = conectar(endereco, 46, "marcela", None, &loja)
         .await
         .expect("quem digitou o endereço à mão não tem o que conferir");
     assert_eq!(
@@ -308,7 +308,7 @@ async fn um_link_velho_contra_um_server_ja_conhecido_avisa_e_nao_derruba() -> Re
     // do teste de "link velho" para "outra pessoa".
     drop(primeiro);
 
-    let mut segundo = conectar(endereco, 46, "ayanami", Some(NAO_E_DE_NINGUEM), &loja)
+    let mut segundo = conectar(endereco, 46, "marcela", Some(NAO_E_DE_NINGUEM), &loja)
         .await
         .expect("um link velho não pode trancar ninguém para fora de um servidor conhecido");
     assert_eq!(

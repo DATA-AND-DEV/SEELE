@@ -161,7 +161,7 @@ async fn quem_hospeda_vira_comandante_e_a_segunda_conta_nao() -> Result<()> {
         anfitriao.sessao().permissions
     );
 
-    let convidado = conectar(endereco, 47, "shinji").await?;
+    let convidado = conectar(endereco, 47, "rafael").await?;
     assert!(
         !convidado
             .sessao()
@@ -195,7 +195,7 @@ async fn uma_sala_criada_aparece_para_quem_ja_estava_conectado() -> Result<()> {
     let (endereco, servidor) = server().await?;
 
     let anfitriao = conectar(endereco, 46, "anfitriao").await?;
-    let mut testemunha = conectar(endereco, 47, "shinji").await?;
+    let mut testemunha = conectar(endereco, 47, "rafael").await?;
 
     // A testemunha entrou antes de a sala existir, e é isso que se mede: ela
     // conhece a lista que o aperto de mão dela trouxe, e mais nada.
@@ -233,7 +233,7 @@ async fn uma_sala_criada_aparece_para_quem_ja_estava_conectado() -> Result<()> {
 
     // E ela está no PERSISTENCE, não só no fio: quem chegar depois a encontra sem
     // ninguém ter de repetir o anúncio.
-    let depois = conectar(endereco, 48, "asuka").await?;
+    let depois = conectar(endereco, 48, "carla").await?;
     let nomes: Vec<&str> = depois
         .sessao()
         .voice_rooms
@@ -260,7 +260,7 @@ async fn um_pessoa_sem_manage_voice_rooms_e_recusado_pelo_server_e_nao_pela_casc
     // a peça que separa «a casca não mandou» de «o servidor recusou»: se a sala
     // tivesse sido feita, o anúncio chegaria a ele.
     let mut anfitriao = conectar(endereco, 46, "anfitriao").await?;
-    let mut sem_permissao = conectar(endereco, 47, "shinji").await?;
+    let mut sem_permissao = conectar(endereco, 47, "rafael").await?;
     assert!(
         !sem_permissao
             .sessao()
@@ -297,7 +297,7 @@ async fn um_pessoa_sem_manage_voice_rooms_e_recusado_pelo_server_e_nao_pela_casc
 
     // Três: nem no PERSISTENCE. Um aperto de mão novo é a leitura mais crua que
     // existe da árvore de canais.
-    let depois = conectar(endereco, 48, "asuka").await?;
+    let depois = conectar(endereco, 48, "carla").await?;
     let nomes: Vec<&str> = depois
         .sessao()
         .voice_rooms
@@ -373,7 +373,7 @@ async fn o_comandante_renomeia_e_todo_mundo_ve_o_nome_novo() -> Result<()> {
     let (endereco, servidor) = server().await?;
 
     let anfitriao = conectar(endereco, 46, "anfitriao").await?;
-    let mut testemunha = conectar(endereco, 47, "shinji").await?;
+    let mut testemunha = conectar(endereco, 47, "rafael").await?;
     let voice_room = anfitriao.sessao().voice_rooms[0].id;
 
     anfitriao
@@ -396,7 +396,7 @@ async fn o_comandante_renomeia_e_todo_mundo_ve_o_nome_novo() -> Result<()> {
 
     // E ele sobrevive: uma renomeação que só existisse no fio voltaria ao nome
     // velho na próxima conexão, e ninguém saberia qual dos dois é o certo.
-    let depois = conectar(endereco, 48, "asuka").await?;
+    let depois = conectar(endereco, 48, "carla").await?;
     assert_eq!(depois.sessao().voice_rooms[0].name, "SALA-01 PONTE");
     assert_eq!(
         depois.sessao().voice_rooms.len(),

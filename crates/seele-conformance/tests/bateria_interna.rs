@@ -48,7 +48,7 @@ fn destino(endereco: SocketAddr) -> Destino {
         servidor: endereco,
         nome_tls: "localhost".into(),
         chave_do_pin: endereco.to_string(),
-        apelido: "ayanami".into(),
+        apelido: "marcela".into(),
         segredo: None,
         impressao_esperada: None,
     }
