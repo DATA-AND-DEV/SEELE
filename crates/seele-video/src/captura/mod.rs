@@ -49,5 +49,12 @@ pub mod macos;
 
 /// A Windows Graphics Capture, que é a única que enxerga janelas com aceleração
 /// e composição.
+/// A aritmética de reamostragem e cor, que não é de plataforma nenhuma.
+///
+/// Sob `test` em toda parte: os testes dela não falam de Windows e não têm por
+/// que só rodar lá. Ver o cabeçalho do módulo.
+#[cfg(any(target_os = "windows", test))]
+mod reamostragem;
+
 #[cfg(target_os = "windows")]
 pub mod windows;
