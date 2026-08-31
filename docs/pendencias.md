@@ -1342,3 +1342,39 @@ terceiro em vez de mudá-la de dono.
 **Quando dói.** Hoje, em toda casa com CGNAT e IPv6 — que é a combinação mais
 comum no Brasil de 2026. Quem cai nela depende do degrau 4, e o link do degrau
 4 morre quando o app fecha (ver o aviso acrescentado em `d229074`).
+
+## 27 · Os números do bitrate adaptativo são ponto de partida, não medida
+
+**O que existe.** O [ADR 0036](adr/0036-bitrate-adaptativo-em-faixas.md) construiu
+a malha que `specs/03-audio.md` pedia desde a primeira redação e que nunca tinha
+sido escrita: três faixas — 48, 32 e 16 kbps — comandadas por perda de subida
+medida no servidor a partir de lacunas de `seq`.
+
+**O que não existe.** Nenhum dos cinco números foi medido contra rede de verdade:
+
+| | valor | de onde veio |
+|---|---|---|
+| Faixas | 48 / 32 / 16 kbps | os extremos são da spec; o meio é o ponto médio |
+| Limiar de descida | perda > 5% | `specs/03-audio.md` linha 55, textual |
+| Limiar de subida | perda < 2% | histerese de três pontos, escolhida por argumento |
+| Permanência | 10 s | duas janelas: uma para medir, outra para confirmar |
+| Janela de medida | 5 s | ~250 pacotes a 50/s, para 5% não ser decidido por dois deles |
+
+Só o limiar de descida vem da spec. Os outros quatro vêm de aritmética
+defensável, que não é a mesma coisa que medida.
+
+**Qual deles dói mais, se estiver errado.** A **janela**. Curta demais e a malha
+persegue ruído, trocando de faixa por acaso — e cada troca reconstrói o encoder,
+porque o binding do Opus não tem setter em tempo de execução. Longa demais e ela
+reage depois de a conversa já ter picotado. Os outros quatro erram devagar; este
+erra rápido e nos dois sentidos.
+
+**Com o que se confirma.** Os perfis de `crates/seele-audio/src/netsim.rs`, que
+já existem e já foram usados para o M1.7 — `lan`, `acceptance 5%`, `wifi`,
+`mobile_poor`. O que se quer ver é a faixa acompanhando o regime sem trocar
+quando o regime não muda. O número a olhar é quantas trocas por minuto cada
+perfil produz: num perfil estável, zero.
+
+**Quando dói.** Numa conexão que oscila em torno de 5% — que é justamente o
+`acceptance 5%` do M1.7, o perfil que a spec escolheu como critério de aceite.
+Não aparece em LAN, onde a perda é zero e a faixa nunca sai do teto.
