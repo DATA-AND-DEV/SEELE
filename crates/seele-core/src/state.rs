@@ -232,6 +232,18 @@ pub struct Room {
     pub messages: Vec<Message>,
     /// Connection quality as the server reports it.
     pub telemetry: Option<seele_proto::control::Telemetry>,
+    /// Quanto da **nossa** voz não está chegando ao servidor, se ele já disse.
+    ///
+    /// `None` até a primeira medida, e num servidor v1 para sempre — a variante
+    /// que carrega isto nasceu na v2 do protocolo (ADR 0036). Distinto de
+    /// `Some(0.0)`, que é o servidor afirmando que nada se perdeu.
+    ///
+    /// **Não é o `loss_fraction` do [`Room::telemetry`]**, e a diferença é a
+    /// razão de haver dois campos: aquele mede a direção servidor→cliente e é
+    /// cumulativo desde o início da conexão; este mede a subida desta conexão
+    /// numa janela que desliza. Confundi-los faria a interface acusar a rede
+    /// errada.
+    pub perda_de_subida: Option<f32>,
     /// The last thing worth surfacing.
     pub notice: Option<Notice>,
     /// What became of the files this client has been moving, oldest first.
@@ -408,6 +420,12 @@ impl Room {
         // servidor. Carregar a subida do anterior seria dimensionar o teto pela
         // casa errada, que é o defeito que o §5.1 mandou corrigir.
         self.caminho_de_quem_hospeda_bps = None;
+        // E pelo mesmo motivo outra vez: a perda de subida é o que **este**
+        // enlace estava perdendo, e o enlace acabou. Herdá-la faria a interface
+        // acusar a rede nova pelo que a velha fez, e — pior — o servidor novo
+        // pode ser v1 e nunca mandar nada, deixando o número velho na tela para
+        // sempre, sem nada que o contradiga.
+        self.perda_de_subida = None;
         self.people.insert(
             info.person,
             Person::new(info.person, nickname.to_owned(), Some(info.ssrc)),
@@ -1107,6 +1125,13 @@ impl Room {
                     person: *person,
                 });
                 changed.telas = true;
+            }
+
+            // Quanto da nossa voz não chega. Só o servidor pode medi-la, e
+            // ele a manda só para quem a produziu. Ver o ADR 0036.
+            ServerMessage::UplinkLoss { fraction } => {
+                self.perda_de_subida = Some(*fraction);
+                changed.telemetry = true;
             }
 
             // Consumed by the handshake and by the round-trip measurement, both

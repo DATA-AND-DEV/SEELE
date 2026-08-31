@@ -240,6 +240,13 @@ pub struct Session {
     pub may_write: bool,
     /// A seat reclaimed from an earlier connection, if any.
     pub reclaimed_voice_room: Option<VoiceRoomId>,
+    /// A versão de protocolo que este par declarou no `Hello`.
+    ///
+    /// Guardada porque quadro acrescentado depois da v1 só pode ser escrito para
+    /// quem sabe decodificá-lo: o postcard não é autodescritivo, e uma variante
+    /// desconhecida não é ignorada — ela desloca a leitura do fluxo daquele par
+    /// para sempre. Ver o ADR 0036 e `seele_proto::version`.
+    pub protocol_version: u8,
 }
 
 /// Runs the handshake, then the session, then cleans up.
@@ -837,6 +844,9 @@ async fn handshake(
         may_speak: account.may_speak,
         may_write: account.may_write,
         reclaimed_voice_room,
+        // O que **o par** declarou, e não `PROTOCOL_VERSION`: o que se decide
+        // com isto é o que ele consegue ler.
+        protocol_version: version,
     })
 }
 
