@@ -6,7 +6,7 @@ Status: aceito
 
 `specs/07-estetica.md` bandava a Taxa de Sincronização em quatro: `≥ 90` nominal, `70–89` aceitável em osso, `40–69` degradado, `< 40` crítico. O código obedecia, em `seele_proto::sync_ratio::SyncBand`, e as duas cascas pintavam a partir daí.
 
-O comp `design/Entry Plug v2.dc.html` banda o mesmo número em três:
+O comp `comp v2` banda o mesmo número em três:
 
 ```js
 function corSync(v){ if (v >= 85) return FOS; if (v >= 60) return LAR; return VER; }

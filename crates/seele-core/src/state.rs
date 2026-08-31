@@ -144,7 +144,7 @@ pub enum TransferNotice {
 
 /// The average Sync Ratio of a voice room, already banded.
 ///
-/// The comp (`design/Entry Plug v2.dc.html`) draws this as **MÉDIA DO VOICE_ROOM**, a
+/// The comp (`comp v2`) draws this as **MÉDIA DO VOICE_ROOM**, a
 /// number in the band's colour with the sample size beside it, and computes
 /// both in the shell. Here it is computed once, in the core, for the same
 /// reason `seele_ffi::types` gives for carrying a band beside every person's

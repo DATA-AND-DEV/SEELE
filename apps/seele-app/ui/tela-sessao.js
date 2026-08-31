@@ -7,7 +7,7 @@
 //
 // ---- o que esta tela desenha, e o que ela recusa a desenhar ----
 //
-// A composição é a do comp **v3** (`design/Entry Plug v3.dc.html`, tela
+// A composição é a do comp **v3** (`comp v3`, tela
 // `principal`), inventariada em `.superpowers/sdd/comp-inventario-v3.md` §6.
 // Quatro colunas — a trilha de servidores, as salas e os canais, o canal
 // aberto, a faixa de pessoas — em `60px 268px minmax(0,1fr) 328px`.

@@ -149,3 +149,21 @@ uma cor escolhida para bater exatamente 4,5:1 no vácuo chegaria à tela reprova
 
 `osso-apagado` não mudou. A palheta v2 continua canônica; o que mudou foi de
 onde o rótulo miúdo tira a cor dele.
+
+## Adendo — 2026-08-31 · os comps saíram da árvore
+
+Os três arquivos que davam procedência a esta palheta — `Entry Plug v1`, `v2` e
+`v3`, em `design/` — foram removidos. Eles carregavam no nome a citação que os
+ADRs 0033, 0034 e 0035 tiraram do resto do produto, e eram o último lugar da
+árvore onde ela aparecia como **nome de arquivo**.
+
+**A palheta não muda com isto**, e é o que este adendo existe para dizer: os
+valores congelados aqui e em `design/seele-tokens.css` continuam exatamente os
+mesmos. O que saiu foi o desenho de onde eles foram lidos, não o que foi lido.
+
+As dezenove citações espalhadas pelo código passaram a dizer `comp v2` e
+`comp v3` em vez do caminho — a prosa ao redor delas já falava assim, e um
+caminho que não resolve é pior que nome nenhum: ele manda alguém procurar.
+
+Quem precisar dos comps os encontra no histórico do git, no commit anterior a
+este. Eles não foram perdidos; deixaram de ser árvore viva.

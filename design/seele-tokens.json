@@ -2,7 +2,7 @@
   "$meta": {
     "produto": "SEELE · Entry Plug",
     "versao": "2",
-    "origem": "design/Entry Plug v2.dc.html — palheta v2 adotada como canônica (ADR 0014, tarefa M0.12)",
+    "origem": "comp v2 — palheta v2 adotada como canônica (ADR 0014, tarefa M0.12)",
     "celula": { "largura": 8, "altura": 16, "nota": "TUI: 1 célula = 8×16px. Todo espaçamento é múltiplo." },
     "regras": [
       "border-radius: 0 em qualquer lugar",

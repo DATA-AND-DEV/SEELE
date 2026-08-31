@@ -272,7 +272,7 @@ impl Theme {
 
     /// Style for a Sync Ratio in a given band.
     ///
-    /// `design/Entry Plug v2.dc.html` gives each band a colour — phosphor,
+    /// `comp v2` gives each band a colour — phosphor,
     /// orange, red — and bone appears in no sync scale at all. The caller is
     /// expected to print [`Self::sync_mark`] beside it, because the number and
     /// the mark are what survive when the colour does not.

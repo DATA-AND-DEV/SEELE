@@ -14,7 +14,7 @@
 //! # Por que zero e por que ele engana
 //!
 //! Zero não é «não medido» aos olhos de quem lê: pelas três faixas do comp
-//! (`design/Entry Plug v2.dc.html`) zero é **crítico**, vermelho, a cor de «vá
+//! (`comp v2`) zero é **crítico**, vermelho, a cor de «vá
 //! olhar». Numa sessão local, com RTT, jitter e perda em zero, o servidor calcula
 //! cem — e o roster acusava o pessoa de estar em colapso.
 //!

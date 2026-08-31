@@ -539,7 +539,7 @@ impl Presentes {
 /// # Why the whole map, and not one voice room
 ///
 /// G15 was closed for the voice room the person walked into, and only that one. The
-/// screen `design/Entry Plug v3.dc.html` draws occupants under **every** voice room,
+/// screen `comp v3` draws occupants under **every** voice room,
 /// and for the other four that data had never existed on the client at all:
 /// they were drawn empty, always, however many people were in them. Reported
 /// from a real session as "o sistema de voice_rooms não está bem implementado,

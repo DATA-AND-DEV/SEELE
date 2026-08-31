@@ -1216,7 +1216,7 @@ async fn run_session(
     // `EnterVoiceRoom`: walk into an occupied voice room and the server listed the people
     // in *that* voice room. Every other voice room stayed empty on the client for the whole
     // session, because nothing had ever carried who was in it — and the screen
-    // in `design/Entry Plug v3.dc.html` draws occupants under all of them. That
+    // in `comp v3` draws occupants under all of them. That
     // is the defect reported from a real session as the voice_rooms showing empty
     // when they were not.
     //
