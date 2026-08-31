@@ -2390,6 +2390,7 @@ impl Motor {
             faixa: self.faixa,
             escolha_de_resolucao: limites.resolucao,
             cadencia: limites.cadencia,
+            prioridade: limites.prioridade,
         };
 
         // `|| {}` é a resposta que este crate consegue dar ao §2, e a bomba diz

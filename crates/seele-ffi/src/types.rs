@@ -699,6 +699,37 @@ pub struct LimitesDeTela {
     pub altura_maxima: u32,
     /// Quadros por segundo, no máximo: 30, 15 ou 8.
     pub quadros_maximos: u32,
+    /// O que cede primeiro quando o orçamento aperta.
+    ///
+    /// **Não é teto como os três acima**, e por isso não é um número: os outros
+    /// dizem «no máximo isto», este diz o que sacrificar quando o máximo não
+    /// couber.
+    ///
+    /// Ausente no JSON é [`Prioridade::Nitidez`], que é o padrão do §2 — uma
+    /// casca antiga que não conheça este campo continua pedindo o que sempre
+    /// pediu.
+    #[serde(default)]
+    pub prioridade: Prioridade,
+}
+
+/// O que cede primeiro quando o orçamento aperta.
+///
+/// `nitidez` é a regra do §2 — a resolução segura, o quadro cede —, e é certa
+/// para texto: ele continua legível a 8 quadros e vira borrão se a resolução
+/// baixar. `movimento` é o contrário, e é o que jogo pede: a 8 quadros um jogo
+/// não é pior, é inutilizável.
+///
+/// Atravessa como texto minúsculo — `"nitidez"`, `"movimento"` — porque a casca
+/// gráfica escreve este JSON à mão, e um número seria uma tabela a manter dos
+/// dois lados.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Prioridade {
+    /// A resolução segura, o quadro cede. O padrão.
+    #[default]
+    Nitidez,
+    /// O quadro segura, a resolução cede.
+    Movimento,
 }
 
 /// A transmissão de tela desta sala de voz, quando há uma.
@@ -1715,6 +1746,7 @@ mod tests {
                 banda_bps: Some(1_200_000),
                 altura_maxima: 1080,
                 quadros_maximos: 30,
+                prioridade: Prioridade::Nitidez,
             }),
         };
         let json = serde_json::to_string(&tela).expect("uma estrutura simples sempre serializa");

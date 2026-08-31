@@ -522,6 +522,70 @@ pub const TETO_ESTIMADO_PARA_720P_BPS: u32 = 900_000;
 /// O resultado é **teto**, como tudo no §5: quem escolheu 540p continua em
 /// 540p num caminho de fibra. Combinar as duas escolhas é
 /// [`menor_resolucao`].
+/// O que cede primeiro quando o orçamento aperta.
+///
+/// # Por que isto é uma escolha, e não uma regra
+///
+/// O §2 fixou uma: *«a resolução segura, o quadro cede — texto continua legível
+/// a 8 quadros e vira borrão no instante em que se reduz a resolução»*. Está
+/// certo, e está certo **para texto**, que é o conteúdo que a spec tinha em
+/// mente.
+///
+/// Jogo quer o contrário, e a diferença não é de grau: a 8 quadros um jogo não
+/// é «pior», é inutilizável, enquanto a mesma partida a 540p continua sendo
+/// jogável. Medido em campo entre um Mac e um Windows em LAN — «imagens muito
+/// pixeladas» —, que é a regra do §2 aplicada ao conteúdo para o qual ela não
+/// foi escrita.
+///
+/// Então a regra vira eixo, e quem compartilha escolhe. O padrão continua sendo
+/// o do §2, porque compartilhar tela ainda é, na maioria das vezes, mostrar uma
+/// tela.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Prioridade {
+    /// A resolução segura, o quadro cede. Texto, apresentação, código.
+    ///
+    /// O padrão, e o §2.
+    #[default]
+    Nitidez,
+    /// O quadro segura, a resolução cede. Jogo, vídeo, qualquer coisa que mexe.
+    Movimento,
+}
+
+/// Um degrau abaixo, ou o mesmo quando já se está no piso.
+///
+/// É como [`Prioridade::Movimento`] paga os quadros: com resolução. Um degrau, e
+/// não uma fração do teto, **porque não há medida para uma fração**. A tabela de
+/// onde saem [`TETO_ESTIMADO_PARA_1080P_BPS`] e [`TETO_ESTIMADO_PARA_720P_BPS`]
+/// foi levantada com texto; quanto a mais um jogo pede na mesma resolução é
+/// pergunta em aberto, e um multiplicador inventado aqui seria precisão fingida.
+///
+/// Um degrau é uma regra que se lê e se prevê: a 6 Mbps, onde nitidez pede
+/// 1080p, movimento pede 720p e devolve os bits ao quadro.
+const fn um_degrau_abaixo(resolucao: Resolucao) -> Resolucao {
+    match resolucao {
+        Resolucao::P1080 => Resolucao::P720,
+        // 540p é o piso da lista do §5, e abaixo dele não há degrau. Quem nem a
+        // 540p sustenta o quadro está num caminho que o piso de banda vai parar,
+        // com motivo enumerado — não numa quarta resolução.
+        Resolucao::P720 | Resolucao::P540 => Resolucao::P540,
+    }
+}
+
+/// A resolução que este teto compra, dado o que se escolheu proteger.
+#[must_use]
+pub const fn resolucao_para(teto_bps: u32, prioridade: Prioridade) -> Resolucao {
+    let nitida = resolucao_estimada_para(teto_bps);
+    match prioridade {
+        Prioridade::Nitidez => nitida,
+        Prioridade::Movimento => um_degrau_abaixo(nitida),
+    }
+}
+
+/// A resolução que este teto compra pela regra do §2 — a resolução segura.
+///
+/// É a metade «nitidez» de [`resolucao_para`], e continua pública porque é ela
+/// que carrega os limiares medidos: quem for remedi-los mexe aqui, e o eixo de
+/// [`Prioridade`] se ajusta sozinho por cima.
 #[must_use]
 pub const fn resolucao_estimada_para(teto_bps: u32) -> Resolucao {
     if teto_bps >= TETO_ESTIMADO_PARA_1080P_BPS {
@@ -1992,5 +2056,64 @@ pub(crate) mod tests {
             .await
             .expect_err("aceitou 1920×1920");
         assert!(matches!(erro, ErroDeTela::Cabecalho(_)));
+    }
+}
+
+#[cfg(test)]
+mod o_eixo_da_degradacao {
+    use super::{resolucao_para, Prioridade};
+    use seele_video::codec::Resolucao;
+
+    /// O mesmo teto compra resoluções diferentes conforme o que se protege.
+    ///
+    /// É o eixo inteiro num teste: seis megabits compram 1080p para quem mostra
+    /// texto e 720p para quem joga — e os bits que a segunda não gastou em
+    /// pixels vão para o quadro, que é o que jogo precisa.
+    #[test]
+    fn movimento_troca_um_degrau_de_resolucao_por_quadros() {
+        for teto in [1_500_000, 3_000_000, 6_000_000, 50_000_000] {
+            let nitida = resolucao_para(teto, Prioridade::Nitidez);
+            let movida = resolucao_para(teto, Prioridade::Movimento);
+            assert!(
+                movida.altura() <= nitida.altura(),
+                "a {teto} bps, movimento pediu {movida:?} e nitidez pediu {nitida:?} — \
+                 movimento nunca pede mais resolução que nitidez"
+            );
+        }
+        assert_eq!(
+            resolucao_para(6_000_000, Prioridade::Nitidez),
+            Resolucao::P1080
+        );
+        assert_eq!(
+            resolucao_para(6_000_000, Prioridade::Movimento),
+            Resolucao::P720
+        );
+    }
+
+    /// O piso é o piso nos dois eixos.
+    ///
+    /// 540p é o fundo da lista do §5, e movimento não inventa um quarto degrau
+    /// para descer: quem nem a 540p sustenta o quadro está num caminho que o
+    /// piso de banda vai parar, com motivo enumerado.
+    #[test]
+    fn movimento_nao_desce_abaixo_do_piso_da_lista() {
+        assert_eq!(
+            resolucao_para(1, Prioridade::Movimento),
+            Resolucao::P540,
+            "movimento inventou um degrau abaixo do piso do §5"
+        );
+    }
+
+    /// O padrão é o do §2, e isto é uma decisão e não um acaso do `Default`.
+    ///
+    /// Compartilhar tela ainda é, na maioria das vezes, mostrar uma tela. Quem
+    /// não escolher nada continua recebendo a regra que a spec fechou.
+    #[test]
+    fn o_padrao_continua_sendo_o_do_paragrafo_dois() {
+        assert_eq!(Prioridade::default(), Prioridade::Nitidez);
+        assert_eq!(
+            resolucao_para(6_000_000, Prioridade::default()),
+            resolucao_para(6_000_000, Prioridade::Nitidez)
+        );
     }
 }

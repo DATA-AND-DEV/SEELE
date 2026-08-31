@@ -45,7 +45,7 @@ use seele_video::codec::{
 use seele_video::{BibliotecaDeVideo, ErroDeVideo};
 use thiserror::Error;
 
-use crate::tela::{menor_resolucao, MotivoDeParada, Teto, TetoDeVideo};
+use crate::tela::{menor_resolucao, MotivoDeParada, Prioridade, Teto, TetoDeVideo};
 use seele_proto::signal::SignalBand;
 
 /// De onde os quadros vêm.
@@ -568,6 +568,12 @@ pub struct LimitesDeTela {
     pub resolucao: Resolucao,
     /// A cadência escolhida, também máximo.
     pub cadencia: Cadencia,
+    /// O que cede primeiro quando o orçamento aperta.
+    ///
+    /// Não é teto como os três acima: é **direção**. Os outros dizem «no
+    /// máximo isto»; este diz o que sacrificar quando o máximo não couber. Ver
+    /// [`crate::tela::Prioridade`].
+    pub prioridade: Prioridade,
 }
 
 impl Default for LimitesDeTela {
@@ -578,6 +584,9 @@ impl Default for LimitesDeTela {
             banda_bps: None,
             resolucao: Resolucao::P720,
             cadencia: Cadencia::Q30,
+            // O padrão é o do §2: texto. Compartilhar tela ainda é, na
+            // maioria das vezes, mostrar uma tela.
+            prioridade: Prioridade::Nitidez,
         }
     }
 }
@@ -684,8 +693,10 @@ pub fn config_para(
     teto: Teto,
     escolha: Resolucao,
     cadencia: Cadencia,
+    prioridade: Prioridade,
 ) -> Option<ConfigDoCodificador> {
-    let degrau = teto.resolucao_estimada()?;
+    let Teto::Bps(bps) = teto else { return None };
+    let degrau = crate::tela::resolucao_para(bps, prioridade);
     Some(ConfigDoCodificador {
         resolucao: menor_resolucao(degrau, escolha),
         cadencia,
@@ -707,6 +718,7 @@ pub struct Compartilhamento {
     biblioteca: BibliotecaDeVideo,
     codificador: Codificador,
     escolha_de_resolucao: Resolucao,
+    prioridade: Prioridade,
     teto: Teto,
 }
 
@@ -725,9 +737,13 @@ impl Compartilhamento {
         faixa: SignalBand,
         escolha_de_resolucao: Resolucao,
         cadencia: Cadencia,
+        prioridade: Prioridade,
     ) -> Result<Self, ErroDeCompartilhamento> {
         let teto = teto_de_video.teto(faixa);
-        let config = match (teto, config_para(teto, escolha_de_resolucao, cadencia)) {
+        let config = match (
+            teto,
+            config_para(teto, escolha_de_resolucao, cadencia, prioridade),
+        ) {
             (_, Some(config)) => config,
             (Teto::Parado(motivo), None) => return Err(ErroDeCompartilhamento::Parado(motivo)),
             // `config_para` só devolve `None` para um teto parado, e um teto
@@ -743,6 +759,7 @@ impl Compartilhamento {
             biblioteca,
             codificador,
             escolha_de_resolucao,
+            prioridade,
             teto,
         })
     }
@@ -816,11 +833,15 @@ impl Compartilhamento {
             self.codificador.ajustar_teto(bps)?;
         }
 
-        let degrau = menor_resolucao(
-            novo.resolucao_estimada()
-                .unwrap_or(self.escolha_de_resolucao),
-            self.escolha_de_resolucao,
-        );
+        // O eixo entra aqui, e num lugar só: `resolucao_para` é
+        // `resolucao_estimada_para` mais um degrau abaixo quando quem
+        // compartilha escolheu movimento. A escolha explícita da pessoa continua
+        // sendo teto por cima disso — os dois são teto, e manda o menor (§5).
+        let do_teto = match novo {
+            Teto::Bps(bps) => crate::tela::resolucao_para(bps, self.prioridade),
+            Teto::Parado(_) => self.escolha_de_resolucao,
+        };
+        let degrau = menor_resolucao(do_teto, self.escolha_de_resolucao);
         if degrau != self.codificador.resolucao() {
             return Ok(Ajuste::ResolucaoPedida {
                 de: self.codificador.resolucao(),
@@ -978,20 +999,25 @@ mod tests {
         // A decisão inteira é aritmética, e esta é ela: o degrau sai do teto
         // (§5.1) e a escolha da pessoa fica por cima como teto (§5).
         let fibra = Teto::Bps(4_000_000);
-        let config = config_para(fibra, Resolucao::P1080, Cadencia::Q30)
+        let config = config_para(fibra, Resolucao::P1080, Cadencia::Q30, Prioridade::Nitidez)
             .expect("um teto de 4 Mbps compra alguma coisa");
         assert_eq!(config.resolucao, Resolucao::P1080);
         assert_eq!(config.teto_bps, 4_000_000);
 
         // A mesma fibra, com quem escolheu 540p: continua 540p.
-        let modesto = config_para(fibra, Resolucao::P540, Cadencia::Q8)
+        let modesto = config_para(fibra, Resolucao::P540, Cadencia::Q8, Prioridade::Nitidez)
             .expect("um teto de 4 Mbps compra alguma coisa");
         assert_eq!(modesto.resolucao, Resolucao::P540);
         assert_eq!(modesto.cadencia, Cadencia::Q8);
 
         // E o teto apertado não obedece a quem pediu 1080p.
-        let apertado = config_para(Teto::Bps(500_000), Resolucao::P1080, Cadencia::Q30)
-            .expect("500 kbps ainda compram 540p");
+        let apertado = config_para(
+            Teto::Bps(500_000),
+            Resolucao::P1080,
+            Cadencia::Q30,
+            Prioridade::Nitidez,
+        )
+        .expect("500 kbps ainda compram 540p");
         assert_eq!(apertado.resolucao, Resolucao::P540);
 
         // Parado não tem configuração: não há como armar um codificador para
@@ -999,7 +1025,8 @@ mod tests {
         assert!(config_para(
             Teto::Parado(MotivoDeParada::SinalCritico),
             Resolucao::P720,
-            Cadencia::Q30
+            Cadencia::Q30,
+            Prioridade::Nitidez,
         )
         .is_none());
     }
@@ -1024,6 +1051,7 @@ mod tests {
             SignalBand::Nominal,
             Resolucao::P1080,
             Cadencia::Q30,
+            Prioridade::Nitidez,
         )
         .expect("armar o codificador com 3,6 Mbps de teto");
         assert_eq!(compartilhamento.resolucao(), Resolucao::P1080);
@@ -1087,6 +1115,7 @@ mod tests {
             SignalBand::Nominal,
             Resolucao::P720,
             Cadencia::Q30,
+            Prioridade::Nitidez,
         )
         .expect("armar o codificador no cano da prova");
 
@@ -1132,6 +1161,7 @@ mod tests {
             SignalBand::Nominal,
             Resolucao::P720,
             Cadencia::Q30,
+            Prioridade::Nitidez,
         )
         .expect_err("120 kbps estão abaixo do piso");
         assert!(matches!(

@@ -355,6 +355,9 @@ function limitesEscolhidos() {
     banda_bps: banda === "" ? null : Number(banda),
     altura_maxima: Number($("compartilhar-altura").value),
     quadros_maximos: Number($("compartilhar-quadros").value),
+    // Texto, e não número: a fronteira o desserializa num enum, e um número
+    // aqui seria uma tabela a manter dos dois lados. Ver `types::Prioridade`.
+    prioridade: $("compartilhar-prioridade").value,
   };
 }
 

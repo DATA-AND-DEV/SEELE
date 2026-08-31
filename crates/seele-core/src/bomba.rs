@@ -241,6 +241,9 @@ pub struct Arranjo {
     pub escolha_de_resolucao: Resolucao,
     /// A cadência que a pessoa escolheu, também teto.
     pub cadencia: Cadencia,
+    /// O que cede primeiro quando o orçamento aperta. Ver
+    /// [`seele_core::tela::Prioridade`](crate::tela::Prioridade).
+    pub prioridade: crate::tela::Prioridade,
 }
 
 /// A alça de uma bomba viva.
@@ -650,6 +653,7 @@ impl<C: Captura> Laco<C> {
             arranjo.faixa,
             arranjo.escolha_de_resolucao,
             arranjo.cadencia,
+            arranjo.prioridade,
         ) {
             Ok(compartilhamento) => compartilhamento,
             Err(ErroDeCompartilhamento::Parado(motivo)) => {
@@ -1136,6 +1140,7 @@ mod tests {
 
     fn arranjo(teto: TetoDeVideo, faixa: SignalBand, escolha: Resolucao) -> Arranjo {
         Arranjo {
+            prioridade: crate::tela::Prioridade::Nitidez,
             teto,
             faixa,
             escolha_de_resolucao: escolha,

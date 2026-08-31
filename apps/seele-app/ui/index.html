@@ -2742,6 +2742,29 @@
         <p class="nota">São limites máximos. A imagem pode sair abaixo deles
           quando a conexão aperta — a chamada mostra o que está saindo.</p>
 
+        <!--
+          **O que cede primeiro**, e é o primeiro controle de propósito: ele
+          muda o significado dos dois abaixo. Os outros dizem «no máximo isto»;
+          este diz o que sacrificar quando o máximo não couber.
+
+          A regra da `specs/07` foi escrita para texto — «a resolução segura, o
+          quadro cede», porque texto continua legível a 8 quadros e vira borrão
+          se a resolução baixar. Para jogo ela está invertida: a 8 quadros um
+          jogo não é pior, é inutilizável. Medido em campo entre um Mac e um
+          Windows em LAN, e o relato foi «imagens muito pixeladas».
+        -->
+        <label class="compartilhar-campo">
+          <span class="rotulo">O QUE PROTEGER</span>
+          <select id="compartilhar-prioridade" class="compartilhar-select">
+            <option value="nitidez" selected>nitidez — texto e código</option>
+            <option value="movimento">movimento — jogo e vídeo</option>
+          </select>
+        </label>
+        <p class="nota">Em <b>nitidez</b>, a resolução segura e os quadros
+          caem. Em <b>movimento</b>, os quadros seguram e a resolução desce um
+          degrau — o mesmo teto que compraria 1080p compra 720p, e os bits
+          poupados viram fluidez.</p>
+
         <label class="compartilhar-campo">
           <span class="rotulo">RESOLUÇÃO</span>
           <select id="compartilhar-altura" class="compartilhar-select">

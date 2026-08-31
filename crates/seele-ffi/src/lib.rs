@@ -2276,10 +2276,15 @@ fn limites_do_nucleo(limites: LimitesDeTela) -> seele_core::LimitesDeTela {
         .rev()
         .find(|degrau| degrau.hz() <= limites.quadros_maximos)
         .unwrap_or(seele_core::Cadencia::Q8);
+    let prioridade = match limites.prioridade {
+        crate::types::Prioridade::Movimento => seele_core::tela::Prioridade::Movimento,
+        crate::types::Prioridade::Nitidez => seele_core::tela::Prioridade::Nitidez,
+    };
     seele_core::LimitesDeTela {
         banda_bps: limites.banda_bps,
         resolucao,
         cadencia,
+        prioridade,
     }
 }
 
@@ -5142,6 +5147,7 @@ mod tests {
             banda_bps: Some(1_200_000),
             altura_maxima: 1080,
             quadros_maximos: 30,
+            prioridade: crate::types::Prioridade::Nitidez,
         }
     }
 
@@ -5660,6 +5666,7 @@ mod trilha_no_log {
                 banda_bps: Some(1_200_000),
                 altura_maxima: altura,
                 quadros_maximos: quadros,
+                prioridade: crate::types::Prioridade::Nitidez,
             })
         };
 
