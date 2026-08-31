@@ -398,8 +398,9 @@ impl Client {
         pins: Arc<dyn PinStore>,
         join_secret: Option<&str>,
     ) -> Result<Self, ConnectError> {
+        let endpoint = local_endpoint(None)?;
         Self::connect_por(
-            None,
+            &endpoint,
             server,
             server_name,
             pin_key,
@@ -430,7 +431,7 @@ impl Client {
         reason = "um argumento a mais que o `connect` público, que já os tinha"
     )]
     pub(crate) async fn connect_por(
-        local: Option<std::net::UdpSocket>,
+        endpoint: &quinn::Endpoint,
         server: SocketAddr,
         server_name: &str,
         pin_key: &str,
@@ -463,11 +464,14 @@ impl Client {
         transport.keep_alive_interval(Some(KEEPALIVE));
         client_config.transport_config(Arc::new(transport));
 
-        let mut endpoint = local_endpoint(local)?;
-        endpoint.set_default_client_config(client_config);
-
+        // `connect_with` e não `set_default_client_config` + `connect`: o
+        // `client_config` acima carrega o `TofuVerifier` **deste** candidato,
+        // com a `pin_key` dele. Um `Endpoint` compartilhado por vários
+        // candidatos não pode ter um config padrão — o de quem chegou por
+        // último valeria para todos, e a conferência de certificado passaria a
+        // ser feita contra o pin do vizinho. Ver o ADR 0037.
         let connection = endpoint
-            .connect(server, server_name)
+            .connect_with(client_config, server, server_name)
             .map_err(|error| {
                 tracing::warn!(%error, "could not start the QUIC connection");
                 ConnectError::Unreachable
@@ -1302,7 +1306,9 @@ pub const INVITE_REFUSED: &[u8] = b"invite refused";
 /// `deny.toml` builds for — Linux, the two macOS, Windows — clearing the option
 /// works. A platform that refuses it would leave a client that reaches IPv6 and
 /// not IPv4, and that is the trade being taken knowingly rather than missed.
-fn local_endpoint(local: Option<std::net::UdpSocket>) -> Result<quinn::Endpoint, ConnectError> {
+pub(crate) fn local_endpoint(
+    local: Option<std::net::UdpSocket>,
+) -> Result<quinn::Endpoint, ConnectError> {
     // Um socket já aberto: o do degrau 4 do ADR 0022. Ele foi aberto com o mesmo
     // cuidado que `Endpoint::client` teria tido — ver `crate::encontro` —, e vem
     // pronto porque o furo de NAT já saiu dele.

@@ -506,40 +506,41 @@ const INTERVALO_DO_AVISO: Duration = Duration::from_millis(700);
 /// capturando a rota dão falso negativo, e falso negativo só custa velocidade.
 const PRAZO_DE_CANDIDATO_DISTANTE: Duration = Duration::from_secs(1);
 
-/// O prazo da **primeira** volta por todos os candidatos.
-///
-/// # Por que existem duas voltas
-///
-/// Porque a lista é tentada em série e um candidato morto custa o prazo
-/// inteiro. Medido em campo, com o cliente rodando de um 5G contra um servidor de
-/// verdade: quatro candidatos, os três primeiros sem chance, **9,6 segundos**
-/// queimados — e o quarto respondeu em **358 ms**. Com o prazo geral apertado,
-/// o quarto nunca era alcançado e a tela dizia «tempo esgotado» sobre um
-/// servidor que estava no ar.
-///
-/// A primeira volta pergunta a todos com pouca paciência: quem está vivo
-/// costuma responder em menos de meio segundo, e um segundo e meio cobre uma
-/// rede móvel ruim com folga. Só se **ninguém** responder é que vale gastar os
-/// quatro segundos por candidato — e aí a lentidão é do caminho, não da ordem.
-///
-/// O que isto **não** faz é tentar em paralelo, que seria melhor ainda. Vários
-/// apertos de mão ao mesmo tempo escrevem pins ao mesmo tempo, e o pin é a
-/// propriedade do ADR 0003: um vencedor e três órfãos exigem um desenho próprio
-/// para decidir qual fica. Fica registrado como o próximo passo, e não como
-/// esquecimento.
-const PRAZO_DA_PRIMEIRA_VOLTA: Duration = Duration::from_millis(1500);
-
 /// Quanto se espera antes de disparar o próximo candidato da corrida.
 ///
-/// 250 ms, que é o número do RFC 8305. A medição da pendência nº 26 o justifica:
+/// # O número que esta constante existe para apagar
+///
+/// Medido em campo, com o cliente rodando de um 5G contra um servidor de
+/// verdade: quatro candidatos, os três primeiros sem chance, **9,6 segundos**
+/// queimados — e o quarto respondeu em **358 ms**. Em série, o quarto quase
+/// nunca era alcançado, e a tela dizia «tempo esgotado» sobre um servidor que
+/// estava no ar.
+///
+/// Aqui o quarto **começa** em 750 ms, e a conversa abre em ~1,1 s.
+///
+/// # A previsão que estava escrita aqui, e a resposta
+///
+/// O que esta constante substituiu — `PRAZO_DA_PRIMEIRA_VOLTA`, a paciência
+/// curta da primeira de duas voltas em série — carregava esta frase, e ela
+/// merece sobreviver ao código que a hospedava:
+///
+/// > O que isto **não** faz é tentar em paralelo, que seria melhor ainda. Vários
+/// > apertos de mão ao mesmo tempo escrevem pins ao mesmo tempo, e o pin é a
+/// > propriedade do ADR 0003: um vencedor e três órfãos exigem um desenho
+/// > próprio para decidir qual fica. Fica registrado como o próximo passo, e não
+/// > como esquecimento.
+///
+/// Este é o próximo passo, e o desenho próprio existe: a limpeza de pin dos
+/// perdedores roda depois do vencedor e pula a chave dele. Ver o ADR 0037, e o
+/// bloco que faz isso em [`Enlace::tentar_entre`].
+///
+/// # Por que 250 ms
+///
+/// É o número do RFC 8305. A medição da pendência nº 26 o justifica:
 /// com quatro candidatos o último começa em 750 ms, e o bom respondeu em 358 ms
 /// depois disso — contra os 9,6 s que a série cobrava. Encurtar para 150 ms
 /// ganharia ~300 ms e poria mais apertos de mão simultâneos numa rede lenta,
 /// onde vários teriam fechado sozinhos. Ver o ADR 0037.
-#[allow(
-    dead_code,
-    reason = "usada na tarefa 3 deste plano, que separa a corrida da série"
-)]
 const DEFASAGEM_ENTRE_CANDIDATOS: Duration = Duration::from_millis(250);
 
 /// O que uma corrida produziu.
@@ -547,10 +548,6 @@ const DEFASAGEM_ENTRE_CANDIDATOS: Duration = Duration::from_millis(250);
 /// As falhas vêm junto com o vencedor de propósito: quem chama precisa delas
 /// para a limpeza de pin órfão dos perdedores, e precisa saber **quem** venceu
 /// para pular a chave dele. Ver o ADR 0037.
-#[allow(
-    dead_code,
-    reason = "usada na tarefa 3 deste plano, que separa a corrida da série"
-)]
 #[derive(Debug)]
 struct Corrida<T> {
     /// Quem fechou primeiro, e a posição dele na lista que foi corrida.
@@ -585,10 +582,6 @@ struct Corrida<T> {
 /// Elas não continuam escrevendo em lugar nenhum, e o que uma delas possa ter
 /// escrito em disco — um pin de TLS — é assunto de quem chama, que sabe qual
 /// chave o vencedor usou.
-#[allow(
-    dead_code,
-    reason = "usada na tarefa 3 deste plano, que separa a corrida da série"
-)]
 async fn correr<T, F, Fut>(quantos: usize, defasagem: Duration, tentar: F) -> Corrida<T>
 where
     T: Send + 'static,
@@ -809,7 +802,18 @@ impl Enlace {
         // Uma cópia por tentativa, e o original vivo até o fim: um `Endpoint`
         // fecha o socket dele ao ser recolhido, e sem o original a porta que o
         // anfitrião furou voltaria para o sistema no meio do caminho.
-        let emprestar = || batida.and_then(crate::encontro::Batida::emprestar_socket);
+        // **Um `Endpoint`, e não um por tentativa.**
+        //
+        // A razão de o socket ser um só continua a mesma — o NAT mapeia por porta
+        // interna, e o furo que o anfitrião abriu vale para aquela porta. O que
+        // mudou é a leitura da restrição: ela nunca foi «uma conexão por
+        // socket», e sim **um leitor por socket**. Dois `Endpoint` sobre cópias
+        // do mesmo descritor dividem uma fila de recepção e roubam pacote um do
+        // outro; um `Endpoint` só dirige quantas conexões se queira,
+        // demultiplexando por connection ID. Ver o ADR 0037.
+        let endpoint = crate::client::local_endpoint(
+            batida.and_then(crate::encontro::Batida::emprestar_socket),
+        )?;
         let mut candidatos = destinos.into_iter().peekable();
         let Some(primeiro) = candidatos.next() else {
             // Ninguém chama assim, e devolver um erro é melhor que entrar num
@@ -831,7 +835,7 @@ impl Enlace {
                     avisou: repeticao.is_some(),
                 },
             );
-            let resultado = Self::conectar_por(emprestar(), bilhete, primeiro, chave, pins).await;
+            let resultado = Self::conectar_por(&endpoint, bilhete, primeiro, chave, pins).await;
             if let Some(repeticao) = repeticao {
                 repeticao.abort();
             }
@@ -848,125 +852,122 @@ impl Enlace {
         // barato — endereços e uma impressão digital.
         let todos: Vec<Destino> = std::iter::once(primeiro).chain(candidatos).collect();
 
-        // Quem merece a segunda volta, decidido na primeira.
+        // A corrida do RFC 8305, no lugar das duas voltas em série.
         //
-        // **A segunda volta existe para quem ficou sem tempo, e não para quem já
-        // respondeu.** Sem esta lista ela repassava por todo mundo, e isso
-        // desfazia duas garantias que já estavam escritas aqui do lado:
+        // As duas voltas existiam para dar pouca paciência a todo mundo antes de
+        // dar a paciência inteira a quem merecia. A corrida torna a primeira
+        // metade desnecessária: ninguém espera o prazo de ninguém, então não há
+        // por que encurtá-lo. `PRAZO_DA_PRIMEIRA_VOLTA` fica sem uso aqui e
+        // continua valendo no caminho de candidato único, logo acima.
         //
-        // - o comentário do prazo curto promete que «quatro endereços mortos
-        //   custam quatro segundos em vez de dezesseis», e com duas voltas
-        //   passaram a custar oito;
-        // - o comentário da repetição diz que avisar por um candidato que já
-        //   falhou gasta furo da janela do anfitrião — sessenta por dez segundos
-        //   — «por um caminho que ninguém vai tentar de novo», e a segunda volta
-        //   tentava de novo, dobrando os avisos.
-        //
-        // Duas condições, e cada uma tem um teste em
-        // `seele-conformance/tests/furo.rs`. Um candidato **de outra casa** não
-        // volta: o prazo dele é curto porque se sabe que ninguém responde, e
-        // insistir é gastar o dobro para saber o mesmo. E um candidato que falhou
-        // **sem ser por prazo** não volta: `Endpoint::connect` recusando um nome
-        // de TLS inválido dá a mesma resposta na segunda tentativa.
-        let mut merece_segunda: Vec<bool> = vec![true; todos.len()];
+        // O que **não** muda: `avisar_pelo_candidato` decide sozinho quem precisa
+        // de furo, por `e_publico`, e o aviso continua saindo colado ao aperto de
+        // mão que ele acompanha — agora escalonado junto com ele. Ver o ADR 0037.
+        let chaves: Vec<(String, Option<String>)> = todos
+            .iter()
+            .map(|destino| {
+                let chave = destino.chave_do_pin.clone();
+                let antes = pins.pinned(&chave);
+                (chave, antes)
+            })
+            .collect();
 
-        for volta in 0..2_u8 {
-            for (indice, destino) in todos.iter().cloned().enumerate() {
-                // Antes do aviso, de propósito: pular depois de avisar gastaria o
-                // furo sem tentar nada com ele.
-                if volta == 1 && !merece_segunda.get(indice).copied().unwrap_or(true) {
-                    continue;
-                }
+        let corredores = Arc::new(todos.clone());
+        let quantos = corredores.len();
+        let corrida = correr(quantos, DEFASAGEM_ENTRE_CANDIDATOS, |posicao| {
+            let corredores = Arc::clone(&corredores);
+            let batida = batida.cloned();
+            let bilhete = bilhete.clone();
+            let chave = chave.clone();
+            let pins = Arc::clone(&pins);
+            let endpoint = endpoint.clone();
+            let olhos = olhos.cloned();
+            async move {
+                let Some(destino) = corredores.get(posicao).cloned() else {
+                    return Err(ConnectError::Unreachable);
+                };
                 let onde = destino.servidor;
-                let chave_do_pin = destino.chave_do_pin.clone();
-                let fixado_antes = pins.pinned(&chave_do_pin);
 
-                // O aviso sai **agora**, para este candidato, e o aperto de mão sai
-                // logo atrás dele. É a coordenação inteira desta tarefa: o furo do
-                // outro lado dura menos de um segundo, e a única forma de o `Initial`
-                // caber dentro dele é os dois saírem juntos.
-                let repeticao = avisar_pelo_candidato(batida, onde).await;
-                // Contado **depois** do aviso e antes do aperto de mão, porque é
-                // aqui que as duas metades existem ao mesmo tempo: o endereço, e se
-                // o `LEVE` saiu por ele.
+                // O aviso sai **agora**, para este candidato, e o aperto de mão
+                // sai logo atrás dele. O furo do outro lado dura menos de um
+                // segundo, e a única forma de o `Initial` caber dentro dele é os
+                // dois saírem juntos — que continua valendo com a corrida,
+                // porque cada corredor leva o seu.
+                let repeticao = avisar_pelo_candidato(batida.as_ref(), onde).await;
                 contar(
-                    olhos,
+                    olhos.as_ref(),
                     Tentativa {
-                        candidato: u8::try_from(indice).unwrap_or(u8::MAX),
+                        candidato: u8::try_from(posicao).unwrap_or(u8::MAX),
                         onde,
                         avisou: repeticao.is_some(),
                     },
                 );
 
-                // Um candidato privado de outra casa não devolve ICMP nenhum: ele
-                // queima o prazo inteiro sem nunca ter tido chance. Encurtar é o que
-                // faz quatro endereços mortos custarem quatro segundos em vez de
-                // dezesseis — e é só encurtar, nunca descartar, porque um /16 à mão
-                // ou uma VPN capturando a rota dão falso negativo.
+                // Um candidato privado de outra casa não devolve ICMP nenhum:
+                // ele queima o prazo inteiro sem nunca ter tido chance. Aqui o
+                // prazo curto não economiza tempo de parede — a corrida já faz
+                // isso — e sim **solta** o corredor, em vez de deixá-lo
+                // pendurado enquanto os outros terminam.
                 let prazo = if e_de_outra_casa(onde) {
                     PRAZO_DE_CANDIDATO_DISTANTE
-                } else if volta == 0 {
-                    PRAZO_DA_PRIMEIRA_VOLTA
                 } else {
                     PRAZO_POR_CANDIDATO
                 };
 
-                let tentativa = Self::conectar_por(
-                    emprestar(),
-                    bilhete.clone(),
-                    destino,
-                    chave.clone(),
-                    Arc::clone(&pins),
-                );
-
-                let falha = match tokio::time::timeout(prazo, tentativa).await {
-                    Ok(Ok(enlace)) => {
-                        if let Some(repeticao) = repeticao {
-                            repeticao.abort();
-                        }
-                        return Ok(enlace);
-                    }
-                    Ok(Err(erro)) => erro,
-                    Err(_) => {
-                        // O aperto de mão foi cancelado no meio, e o `conectar` não
-                        // chegou à limpeza dele. O pin que o TLS possa ter escrito
-                        // some aqui, pelo motivo escrito em `desfazer_pin_orfao`.
-                        desfazer_pin_orfao(pins.as_ref(), &chave_do_pin, fixado_antes.as_deref());
-                        ConnectError::HandshakeTimeout
-                    }
+                let tentativa = Self::conectar_por(&endpoint, bilhete, destino, chave, pins);
+                let resultado = match tokio::time::timeout(prazo, tentativa).await {
+                    Ok(resultado) => resultado,
+                    Err(_) => Err(ConnectError::HandshakeTimeout),
                 };
-                // A repetição para quando o candidato termina, dando certo ou não:
-                // avisar sobre um candidato que já falhou gastaria furo da janela do
-                // anfitrião — sessenta por dez segundos — por um caminho que ninguém
-                // vai tentar de novo.
+                // A repetição para quando o candidato termina, dando certo ou
+                // não: avisar sobre um candidato que já falhou gastaria furo da
+                // janela do anfitrião por um caminho que ninguém vai tentar de
+                // novo.
                 if let Some(repeticao) = repeticao {
                     repeticao.abort();
                 }
-                // E aqui se decide se ele volta. Ver `merece_segunda`.
-                if let Some(merece) = merece_segunda.get_mut(indice) {
-                    *merece =
-                        matches!(falha, ConnectError::HandshakeTimeout) && !e_de_outra_casa(onde);
-                }
-                tracing::info!(%onde, erro = %falha, "este endereço do convite não deu; indo ao próximo");
-                if respondeu.is_none() && alguem_respondeu(&falha) {
-                    respondeu = Some(falha.clone());
-                }
-                if primeira_falha.is_none() {
-                    primeira_falha = Some(falha);
-                }
+                resultado
             }
+        })
+        .await;
 
-            // Alguém respondeu e disse não — portaria pendente, credencial
-            // recusada, apelido tomado. Isso é resposta, não silêncio, e insistir
-            // com mais paciência dá exatamente a mesma resposta mais devagar.
-            if respondeu.is_some() {
-                break;
+        // A limpeza de pin órfão dos perdedores, **depois** do vencedor e
+        // pulando a chave dele.
+        //
+        // `desfazer_pin_orfao` promete «só apaga o que este aperto escreveu», e
+        // isso é exato em série e falso aqui: dois candidatos podem compartilhar
+        // `chave_do_pin` — ela é `host:porta` do nome do convite, e alternativos
+        // do mesmo nome colidem. Sem esta condição, limpar um perdedor
+        // encontraria `fixado_antes == None` e `pinned() == Some`, e apagaria o
+        // pin que o vencedor acabou de escrever: a confiança de primeiro contato
+        // do ADR 0003 desfeita em silêncio.
+        let chave_do_vencedor = corrida
+            .vencedor
+            .as_ref()
+            .and_then(|(posicao, _)| chaves.get(*posicao))
+            .map(|(chave, _)| chave.clone());
+        for (posicao, _) in &corrida.falhas {
+            let Some((chave_perdida, antes)) = chaves.get(*posicao) else {
+                continue;
+            };
+            if chave_do_vencedor.as_deref() == Some(chave_perdida.as_str()) {
+                continue;
             }
-            // E se ninguém merece a segunda volta, ela não acontece: repassar por
-            // uma lista inteira de candidatos que já deram resposta definitiva é
-            // tempo de quem está esperando a sala abrir.
-            if volta == 0 && !merece_segunda.iter().any(|merece| *merece) {
-                break;
+            desfazer_pin_orfao(pins.as_ref(), chave_perdida, antes.as_deref());
+        }
+
+        if let Some((_, enlace)) = corrida.vencedor {
+            return Ok(enlace);
+        }
+
+        for (posicao, falha) in corrida.falhas {
+            let onde = todos.get(posicao).map(|destino| destino.servidor);
+            tracing::info!(?onde, erro = %falha, "este endereço do convite não deu");
+            if respondeu.is_none() && alguem_respondeu(&falha) {
+                respondeu = Some(falha.clone());
+            }
+            if primeira_falha.is_none() {
+                primeira_falha = Some(falha);
             }
         }
 
@@ -991,7 +992,8 @@ impl Enlace {
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
     ) -> Result<Self, ConnectError> {
-        Self::conectar_por(None, None, destino, chave, pins).await
+        let endpoint = crate::client::local_endpoint(None)?;
+        Self::conectar_por(&endpoint, None, destino, chave, pins).await
     }
 
     /// O mesmo, pelo socket que já furou o NAT. Degrau 4 do ADR 0022.
@@ -1000,7 +1002,7 @@ impl Enlace {
     ///
     /// O mesmo de [`Enlace::conectar`].
     async fn conectar_por(
-        local: Option<std::net::UdpSocket>,
+        endpoint: &quinn::Endpoint,
         bilhete: Option<seele_proto::uri::Bilhete>,
         destino: Destino,
         chave: SigningKey,
@@ -1011,7 +1013,7 @@ impl Enlace {
         let fixado_antes = pins.pinned(&destino.chave_do_pin);
 
         let resultado = Client::connect_por(
-            local,
+            endpoint,
             destino.servidor,
             &destino.nome_tls,
             &destino.chave_do_pin,
@@ -1900,17 +1902,25 @@ impl Motor {
         let furo = batida
             .as_ref()
             .and_then(crate::encontro::Batida::emprestar_socket);
-        let resultado = Client::connect_por(
-            furo,
-            self.destino.servidor,
-            &self.destino.nome_tls,
-            &self.destino.chave_do_pin,
-            &self.destino.apelido,
-            &self.chave,
-            Arc::clone(&self.pins),
-            self.destino.segredo.as_deref(),
-        )
-        .await;
+        // O Endpoint desta reconexão. `match` e não `?` porque esta função não
+        // devolve `Result`: uma falha aqui é a mesma coisa que uma tentativa que
+        // não deu, e segue pelo mesmo caminho que todas as outras.
+        let resultado = match crate::client::local_endpoint(furo) {
+            Ok(endpoint) => {
+                Client::connect_por(
+                    &endpoint,
+                    self.destino.servidor,
+                    &self.destino.nome_tls,
+                    &self.destino.chave_do_pin,
+                    &self.destino.apelido,
+                    &self.chave,
+                    Arc::clone(&self.pins),
+                    self.destino.segredo.as_deref(),
+                )
+                .await
+            }
+            Err(erro) => Err(erro),
+        };
 
         // Esta tentativa acabou, dando certo ou não, e o que a repetição
         // avisaria daqui para a frente é sobre uma porta que já foi usada.
