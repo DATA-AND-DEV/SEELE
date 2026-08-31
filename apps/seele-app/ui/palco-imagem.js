@@ -199,18 +199,30 @@ function quadroDaTela(tela, chave, base64) {
     esperandoChave = false;
   }
 
+  // Microssegundos, que é a unidade que o `EncodedVideoChunk` pede. Inteiro
+  // porque um carimbo fracionário é recusado.
+  carimbo = Math.round(performance.now() * 1000);
+
   try {
     decodificador.decode(
       new EncodedVideoChunk({
         type: chave ? "key" : "delta",
         // Um relógio nosso, e monotônico: o protocolo não carrega carimbo de
-        // tempo, e o `VideoDecoder` exige um. O valor não é lido por ninguém —
-        // não há sincronismo com áudio a fazer aqui —, só precisa crescer.
+        // tempo, e o `VideoDecoder` exige um.
+        //
+        // **O relógio da máquina, e não um contador de passo fixo.** Aqui havia
+        // `carimbo += 33_333`, que é o intervalo de 30 quadros por segundo
+        // escrito à mão — e o dia em que quem transmite escolhe 60 é o dia em
+        // que esse carimbo passa a andar na metade da velocidade dos quadros
+        // que chegam. É a mesma forma do defeito do perfil: um lado supondo o
+        // que o outro decide.
+        //
+        // `performance.now()` cresce sozinho e no ritmo certo qualquer que seja
+        // a cadência, sem esta janela precisar saber qual é.
         timestamp: carimbo,
         data: bytes,
       }),
     );
-    carimbo += 33_333;
   } catch (falha) {
     console.warn("decode:", falha);
   }

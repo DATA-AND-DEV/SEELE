@@ -782,7 +782,17 @@ que o recurso.
    não; o portal depende do compositor. Um recurso que existe num sistema só
    ensina a pessoa errada.
 9. **Controle remoto.** Outro produto.
-10. **HDR, mais de 1080p, mais de 30 quadros.** Nada disso cabe no §2 nem no §3.
+10. **HDR, mais de 1080p, ~~mais de 30 quadros~~.** Nada disso cabe no §2 nem
+    no §3.
+
+    > **Emendado em 31/08/2026 — os 60 quadros entraram.** A razão de CPU era do
+    > §2 e era categórica: o caminho de captura do Windows gastava 17,69 ms por
+    > quadro num Ryzen 7 5800X3D, e a 60 quadros um quadro chega a cada 16,6 ms.
+    > A troca do laço de conversão pôs isso em 7,42 ms. **A razão do §3 não
+    > mudou** — sessenta quadros não pedem mais banda, pedem metade dos bytes
+    > por quadro —, e por isso 30 continua o padrão e a interface diz o preço.
+    > HDR e mais de 1080p continuam fora. Ver
+    > [ADR 0040](../../adr/0040-sessenta-quadros-entram-por-medida.md).
 11. **Compartilhar de dentro do `plug`.** O cliente de terminal não tem como
     mostrar tela. Ele **recebe o aviso** de que alguém está compartilhando e
     **diz que não consegue mostrar** — nunca ignora em silêncio.

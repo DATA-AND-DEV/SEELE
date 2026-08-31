@@ -45,6 +45,7 @@ Formato e regra de criação em `specs/10-convencoes.md`: toda decisão marcada
 | [0037](0037-candidatos-do-convite-em-paralelo.md) | Um `Endpoint`, muitas conexões: os candidatos do convite correm juntos | aceito | `02` — alcançar um servidor pela internet |
 | [0038](0038-o-teto-da-sala-e-contado-nao-declarado.md) | O teto da sala é contado, e quem hospeda é avisado | aceito | `04` — o dimensionamento da sala |
 | [0039](0039-o-produto-passa-a-ter-uma-casca-so.md) | O produto passa a ter uma casca só | aceito | `05` e `06` — as cascas |
+| [0040](0040-sessenta-quadros-entram-por-medida.md) | Sessenta quadros entram, por medida | aceito | design da tela, §6 item 10 |
 
 ## O que ainda não tem ADR
 

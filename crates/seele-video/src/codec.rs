@@ -111,14 +111,44 @@ pub enum Cadencia {
     Q8,
     /// 15 por segundo.
     Q15,
-    /// 30 por segundo. O padrão, e o máximo (§6 item 10).
+    /// 30 por segundo. **O padrão**, e continua sendo.
     #[default]
     Q30,
+    /// 60 por segundo, para quem está mostrando movimento.
+    ///
+    /// # O item 10 que isto emenda, e por que a emenda é honesta
+    ///
+    /// O §6 item 10 do design do compartilhamento punha «mais de 30 quadros»
+    /// fora da v1 com uma razão de uma linha: *«nada disso cabe no §2 nem no
+    /// §3»*. Duas razões, e as duas foram olhadas antes de mexer aqui.
+    ///
+    /// **O §2 (codec e captura) mudou, e mudou por medida.** O que não cabia
+    /// era a CPU: no Ryzen 7 5800X3D o caminho de captura do Windows gastava
+    /// 17,69 ms por quadro, e a 60 quadros um quadro chega a cada 16,6 ms — a
+    /// thread ficava permanentemente para trás. **Impossível, não difícil.**
+    /// A troca do laço de conversão pôs isso em 7,42 ms, com 55% de folga, e o
+    /// codificador custa 0,105 de núcleo a 1080p30 na mesma máquina.
+    ///
+    /// **O §3 (transporte) não mudou, e é por isso que isto não é uma promessa
+    /// de qualidade.** O §5 diz a verdade que governa aqui: *«1080p a 1 Mbps e
+    /// 720p a 1 Mbps gastam o mesmo»*. Sessenta quadros não pedem mais banda —
+    /// pedem **metade dos bytes por quadro** dentro do mesmo teto. Quem
+    /// escolher isto num caminho estreito troca nitidez por fluidez, e é
+    /// exatamente essa a troca que [`crate::codec::Cadencia`] existe para
+    /// oferecer e que a [`Prioridade`](../../seele_core/tela/enum.Prioridade.html)
+    /// nomeia.
+    ///
+    /// Por isso não é o padrão e não vai ser: 30 continua servindo o caso que o
+    /// §2 nomeia — mostrar texto —, e quem está mostrando um jogo é quem tem a
+    /// pergunta que este degrau responde.
+    ///
+    /// O que **continua** fora do item 10, intocado: HDR e mais de 1080p.
+    Q60,
 }
 
 impl Cadencia {
-    /// As três, da menor para a maior.
-    pub const TODAS: [Self; 3] = [Self::Q8, Self::Q15, Self::Q30];
+    /// As quatro, da menor para a maior.
+    pub const TODAS: [Self; 4] = [Self::Q8, Self::Q15, Self::Q30, Self::Q60];
 
     /// Quadros por segundo.
     #[must_use]
@@ -127,6 +157,7 @@ impl Cadencia {
             Self::Q8 => 8,
             Self::Q15 => 15,
             Self::Q30 => 30,
+            Self::Q60 => 60,
         }
     }
 }
@@ -704,10 +735,19 @@ mod testes {
         // O 5 é o piso da faixa automática, e escolher o piso é escolher
         // desistir. Desistir é o que o sistema faz sozinho, com motivo
         // enumerado — não é uma opção de tela (§5).
-        assert_eq!(Cadencia::TODAS.map(Cadencia::hz), [8, 15, 30]);
-        assert_eq!(Cadencia::default(), Cadencia::Q30);
+        assert_eq!(Cadencia::TODAS.map(Cadencia::hz), [8, 15, 30, 60]);
         assert!(!Cadencia::TODAS.iter().any(|c| c.hz() == PISO_DE_QUADROS));
-        assert!(Cadencia::TODAS.iter().all(|c| c.hz() <= 30));
+
+        // **30 continua o padrão, e o teto passou a 60** (ADR 0040). O teto
+        // subiu por medida — o caminho de captura do Windows caiu de 17,69 ms
+        // por quadro para 7,42, e o intervalo de 60 quadros é 16,6 —, mas o
+        // padrão não sobe junto: dentro do mesmo teto de banda, 60 quadros dão
+        // metade dos bytes a cada um, e quem compartilha texto perde com isso.
+        //
+        // As duas linhas juntas, e não uma: um dia em que o padrão virasse 60
+        // por descuido passaria despercebido se aqui só se cobrasse o teto.
+        assert_eq!(Cadencia::default(), Cadencia::Q30);
+        assert!(Cadencia::TODAS.iter().all(|c| c.hz() <= 60));
     }
 
     #[test]

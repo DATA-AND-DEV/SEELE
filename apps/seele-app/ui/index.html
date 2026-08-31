@@ -2805,12 +2805,21 @@
         <label class="compartilhar-campo">
           <span class="rotulo">QUADROS POR SEGUNDO</span>
           <select id="compartilhar-quadros" class="compartilhar-select">
+            <option value="60">60</option>
             <option value="30" selected>30</option>
             <option value="15">15</option>
             <option value="8">8</option>
           </select>
         </label>
-        <p class="nota">Texto continua legível a 8 por segundo. Vídeo não.</p>
+        <!--
+          60 **não** é o padrão, e a nota abaixo diz o preço em vez de vender o
+          número. `crates/seele-video/src/codec.rs` carrega o porquê inteiro: o
+          teto de banda é o mesmo nos quatro degraus, então dobrar os quadros é
+          dar metade dos bytes a cada um. Quem mostra texto perde com isso; quem
+          mostra jogo ganha.
+        -->
+        <p class="nota">Texto continua legível a 8 por segundo. Vídeo não. Em
+          60, cada quadro recebe metade dos bytes — mais fluido, menos nítido.</p>
 
         <label class="compartilhar-campo">
           <span class="rotulo">TETO DE BANDA</span>
