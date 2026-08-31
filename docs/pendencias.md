@@ -1343,6 +1343,29 @@ terceiro em vez de mudá-la de dono.
 comum no Brasil de 2026. Quem cai nela depende do degrau 4, e o link do degrau
 4 morre quando o app fecha (ver o aviso acrescentado em `d229074`).
 
+### Estreitada em 2026-08-31 · o custo da série saiu; o firewall continua
+
+Os 9,6 s medidos acima eram **custo de série**, e não custo de firewall. O
+[ADR 0037](adr/0037-candidatos-do-convite-em-paralelo.md) trocou a série por uma
+corrida escalonada: os quatro candidatos partem dentro de 750 ms em vez de um
+depois do outro, e o bom fecha em ~1,1 s. Medido no
+`um_convite_de_enderecos_mortos_termina_em_segundos_e_nao_em_dezenas`, que é a
+versão de laboratório deste cenário: **4,02 s antes, 1,77 s depois**. O número
+de campo é maior nos dois lados — lá os candidatos são públicos e gastam o prazo
+inteiro de quatro segundos — e a razão entre eles é a que interessa.
+
+**O que continua aberto é o firewall, e é o que esta entrada sempre foi.** Os
+endereços IPv6 seguem sem responder; a corrida só faz com que não responder pare
+de custar tempo de quem espera. Com PCP eles passam a responder, e aí os dois
+consertos se somam em vez de um substituir o outro.
+
+Uma frase da primeira redação do ADR 0037 estava errada e vale corrigir aqui,
+porque ela contradizia esta entrada: dizia que «furar NAT não abre firewall»,
+logo IPv6 não precisaria do aviso do ponto de encontro. Firewall IPv6 doméstico é
+**stateful** — o pacote de saída que o aviso provoca abre o buraco de volta igual
+ao NAT. O aviso serve para IPv6, e o PCP continua sendo o conserto para quem não
+tem ponto de encontro.
+
 ## 27 · Os números do bitrate adaptativo são ponto de partida, não medida
 
 **O que existe.** O [ADR 0036](adr/0036-bitrate-adaptativo-em-faixas.md) construiu
@@ -1378,3 +1401,29 @@ perfil produz: num perfil estável, zero.
 **Quando dói.** Numa conexão que oscila em torno de 5% — que é justamente o
 `acceptance 5%` do M1.7, o perfil que a spec escolheu como critério de aceite.
 Não aparece em LAN, onde a perda é zero e a faixa nunca sai do teto.
+
+## 28 · A defasagem da corrida vem do RFC, e não desta rede
+
+**O que existe.** O [ADR 0037](adr/0037-candidatos-do-convite-em-paralelo.md) põe
+os candidatos do convite para correr com `DEFASAGEM_ENTRE_CANDIDATOS` = 250 ms,
+que é o número do RFC 8305.
+
+**O que não existe.** Nenhuma medição em rede de verdade que diga que 250 ms é o
+valor certo **aqui**. O que há é uma medição de laboratório da razão — 4,02 s
+para 1,77 s no teste de endereços mortos — e a medição de campo da série, de
+9,6 s, que veio de antes.
+
+**O que confirma.** Refazer a medição da pendência nº 26 com a corrida no lugar:
+cliente num 5G, quatro candidatos, três sem chance. O que se quer saber é o tempo
+até o aperto de mão fechar, e se ele mudaria com defasagem de 150 ms.
+
+**Um segundo número que ninguém mediu, e que importa mais.** O perfil de furos
+deixou de gotejar e virou rajada: um candidato público custa três avisos, então
+quatro correndo custam até **doze furos em ~750 ms**, contra doze espalhados por
+dezesseis segundos. Cabe nos `FUROS_POR_JANELA` = 60 do anfitrião, que são por
+dez segundos — a conta fecha. O que não foi medido é o que doze furos quase
+simultâneos fazem com um roteador doméstico ruim, e essa é uma pergunta sobre o
+aparelho, não sobre este código.
+
+**Quando dói.** Numa casa cujo roteador tenha tabela de NAT pequena ou limite de
+criação de mapeamento por segundo. Não aparece em LAN, onde nenhum aviso sai.
