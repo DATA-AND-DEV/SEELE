@@ -245,8 +245,21 @@ try {
     # **dentro** do instalador, para que quem baixa o app ganhe o servidor
     # junto e não precise de um segundo arquivo para hospedar.
     Write-Host "→ compilando seeled (a primeira vez demora)" -ForegroundColor Cyan
+    # A versão vai **para dentro** do binário, e não pelo `Cargo.toml`.
+    #
+    # A versão do workspace é `0.0.0` de propósito, e quem carimba o número de
+    # verdade é este script — no `tauri.conf.json`, que é do app. O `seeled` não
+    # passa por ali, então sem esta variável ele responderia
+    # `local (sem versão carimbada)` num pacote de release. Ver a pendência 30 e
+    # `seele_server::main::versao`; o `empacotar/macos.sh` e o workflow fazem o
+    # mesmo, cada um na sintaxe da sua concha.
+    $env:SEELE_VERSAO = $Versao
     cargo build --release --bin seeled
     if ($LASTEXITCODE -ne 0) { throw "a compilação da CLI falhou" }
+    # Limpa a variável para o `cargo build` do app, logo abaixo, não a herdar.
+    # Ele não a lê hoje, e uma variável de ambiente que sobra é a que aparece
+    # num build futuro sem que ninguém a tenha posto ali.
+    Remove-Item Env:\SEELE_VERSAO -ErrorAction SilentlyContinue
 
     # O Tauri procura acompanhantes pelo nome com o alvo no fim.
     $Binarios = "apps\seele-app\binaries"
