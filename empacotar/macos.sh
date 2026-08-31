@@ -92,7 +92,13 @@ PY
 # principal e o que menos pode falhar. Eles entram **dentro** do `.app`, para
 # que quem baixa ganhe as duas metades num arquivo só.
 echo "→ compilando seeled"
-cargo build --release --bin seeled --target "$ALVO"
+# A versão vai **para dentro** do binário aqui, e não pelo `Cargo.toml`.
+#
+# A versão do workspace é `0.0.0` de propósito, e quem a carimba é este script —
+# no `tauri.conf.json`, que é do app. O `seeled` não passa por ali, então sem
+# esta linha ele não teria como responder `--versao` com a verdade. Ver a
+# pendência 30 e `seele_server::main::versao`.
+SEELE_VERSAO="$VERSAO" cargo build --release --bin seeled --target "$ALVO"
 
 mkdir -p apps/seele-app/binaries
 for b in seeled; do

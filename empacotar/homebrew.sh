@@ -109,13 +109,15 @@ cat <<'FORMULA'
   # garantida e sem rede prometida. Subir um servidor QUIC ali produziria uma
   # falha que não é sobre a instalação — que é o único assunto deste teste.
   #
-  # `--ajuda` e não `--version`: **o `seeled` não tem `--version`**. Conferido
-  # em 2026-08-31, e não é omissão deste arquivo — está registrado como
-  # pendência. Enquanto não tiver, o que prova que o binário certo foi instalado
-  # e executa nesta arquitetura é ele responder à ajuda com a própria primeira
-  # linha. Um pacote da arquitetura errada não chega até aqui.
+  # A versão, que é o que a instalação de fato promete: este binário, e não
+  # outro. Um pacote da arquitetura errada não chega a executar, e um montado do
+  # commit errado responde um número que não é o desta fórmula.
+  #
+  # Só passou a ser possível quando a pendência 30 fechou — antes disto o
+  # `seeled` não tinha `--versao`, e este teste se contentava com `--ajuda`, que
+  # prova que o binário roda e não prova qual build é.
   test do
-    assert_match "seeled", shell_output("#{bin}/seeled --ajuda")
+    assert_match version.to_s, shell_output("#{bin}/seeled --versao")
   end
 end
 FORMULA

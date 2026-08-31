@@ -303,3 +303,35 @@ async fn um_fluxo_que_diz_ser_anexo_e_lido_como_anexo() -> Result<()> {
     );
     Ok(())
 }
+
+/// O `seeled` diz qual build é, e diz a verdade quando não sabe.
+///
+/// A pendência 30 existia porque a primeira pergunta de qualquer suporte — «qual
+/// versão está rodando?» — não tinha resposta pelo binário: `--version` caía no
+/// ramo do endereço de escuta e o processo morria falando de outra coisa.
+///
+/// O que este teste guarda é a **honestidade do fallback**, e não a presença da
+/// bandeira. Um binário compilado sem `SEELE_VERSAO` — todo build de
+/// desenvolvimento — não pode responder um número: `0.0.0` é a versão do
+/// workspace e `0.8.4` seria invenção. Os dois mentem para quem está tentando
+/// descobrir o que está rodando, e o segundo mente de forma convincente.
+#[test]
+fn a_versao_sem_carimbo_diz_que_nao_foi_carimbada() {
+    let versao = option_env!("SEELE_VERSAO").unwrap_or("local (sem versão carimbada)");
+
+    if std::option_env!("SEELE_VERSAO").is_none() {
+        assert!(
+            !versao.chars().next().is_some_and(|c| c.is_ascii_digit()),
+            "um build sem carimbo respondeu «{versao}», que se parece com uma versão"
+        );
+        assert!(
+            versao.contains("local"),
+            "um build sem carimbo tem de dizer que é local, e disse «{versao}»"
+        );
+    } else {
+        assert!(
+            versao.chars().next().is_some_and(|c| c.is_ascii_digit()),
+            "um build carimbado respondeu «{versao}», que não começa com número"
+        );
+    }
+}

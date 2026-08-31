@@ -259,10 +259,17 @@ jobs:
 
       - name: Compilar seeled
         if: matrix.nome != 'macos'
+        env:
+          # A versão vai para dentro do binário. Ver a pendência 30: sem isto o
+          # `seeled --versao` responderia `0.0.0`, que é a versão do workspace e
+          # não a do produto.
+          SEELE_VERSAO: ${{ needs.versao.outputs.numero }}
         run: cargo build --release --bin seeled
 
       - name: Compilar seeled (universal, macOS)
         if: matrix.nome == 'macos'
+        env:
+          SEELE_VERSAO: ${{ needs.versao.outputs.numero }}
         run: |
           cargo build --release --bin seeled --target aarch64-apple-darwin
           cargo build --release --bin seeled --target x86_64-apple-darwin

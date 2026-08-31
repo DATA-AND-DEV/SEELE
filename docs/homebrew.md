@@ -70,15 +70,16 @@ de propósito: escrever num segundo repositório a partir de um script de releas
 é o tipo de coisa que se faz com credencial de escrita ampla, e a decisão de dar
 essa credencial ao release é de quem hospeda o projeto, não deste documento.
 
-## O `--version` que não existe
+## A versão, conferida
 
-O `seeled` **não aceita `--version`**. Ele aceita `--ajuda`, `--help`, `-h`, e os
-subcomandos `convite`, `senha` e `anexos`; qualquer outro primeiro argumento é
-lido como endereço de escuta.
+O `test do` da fórmula roda `seeled --versao` e compara com a versão que a
+fórmula declara. É o que a instalação promete: **este** binário, e não outro —
+um pacote da arquitetura errada não chega a executar, e um montado do commit
+errado responde um número que não bate.
 
-Por isso o `test do` da fórmula confere `--ajuda` e não a versão — o que ele
-prova é que o binário instalado executa nesta arquitetura, e não qual versão ele
-é. É menos do que se quer, e está na `docs/pendencias.md` como pendência 30.
+Isso só passou a ser possível quando a pendência 30 fechou. Antes, o `seeled`
+não tinha `--versao` e o teste se contentava com `--ajuda`, que prova que o
+binário roda e não prova qual build é.
 
 ## O que conferir antes do primeiro tap
 

@@ -1475,7 +1475,7 @@ alvo é outro.
 **Quando dói.** Em toda rodada de `cargo test --workspace`, que é o comando que
 este projeto usa para dizer que está verde.
 
-## 30 · O `seeled` não sabe dizer que versão é
+## 30 · Fechada em 2026-08-31 · O `seeled` não sabia dizer que versão é
 
 **Sintoma.** `seeled --version` não existe. O argumento cai no ramo que lê
 endereço de escuta e o processo morre com `could not parse the listen address` —
@@ -1504,3 +1504,20 @@ versão do workspace é `0.0.0` — ela vem do `Cargo.toml` da raiz e é substit
 empacotamento —, então imprimir a constante crua diria `0.0.0` em todo lugar. O
 número de verdade é o que o `publicar.sh` carimba, e é dele que a linha tem de
 sair.
+
+### Fechada em 2026-08-31
+
+`seeled --versao` (e `--version`, e `-V`) responde. O número entra **no binário**
+por `SEELE_VERSAO`, exportada por `empacotar/macos.sh` e pelas duas etapas de
+build do workflow de release — e não pelo `Cargo.toml`, cuja versão é `0.0.0` de
+propósito e continua sendo.
+
+**O fallback é o que merece atenção, e tem teste.** Um build sem carimbo — todo
+build de desenvolvimento — responde `local (sem versão carimbada)`, e não um
+número. `0.0.0` seria a versão do workspace e qualquer outro seria invenção; os
+dois mentem para quem está tentando descobrir o que está rodando, e um número
+mente de forma convincente. `a_versao_sem_carimbo_diz_que_nao_foi_carimbada`
+cobra isso nos dois sentidos.
+
+Também sai da fórmula de Homebrew a ressalva sobre isto: o `brew test` pode
+voltar a conferir a versão, que é o que aquele teste existe para fazer.

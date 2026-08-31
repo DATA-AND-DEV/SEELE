@@ -39,6 +39,10 @@ async fn main() -> Result<()> {
                 uso();
                 return Ok(());
             }
+            "--versao" | "--version" | "-V" => {
+                println!("seeled {}", versao());
+                return Ok(());
+            }
             _ => {}
         }
     }
@@ -123,6 +127,27 @@ fn politica_aberta(server: &seele_server::Daemon) -> bool {
         .unwrap_or(false)
 }
 
+/// A versão deste binário, como quem empacotou a carimbou.
+///
+/// # Por que não `CARGO_PKG_VERSION`
+///
+/// Porque ele diria `0.0.0` em todo lugar. A versão do workspace é `0.0.0` de
+/// propósito — o número de verdade é escolhido no empacotamento e gravado no
+/// `tauri.conf.json` —, então a constante do Cargo não é a versão do produto: é
+/// o valor que ninguém atualiza.
+///
+/// `SEELE_VERSAO` é passada por `empacotar/macos.sh` e pelo workflow de release
+/// no momento em que compilam. Um build feito à mão não a tem, e **diz isso**
+/// em vez de inventar um número: um `seeled` de desenvolvimento respondendo
+/// `0.8.4` é pior que um que responde «local», porque o primeiro mente para
+/// quem está tentando descobrir qual binário está rodando.
+///
+/// É a pendência 30, e ela existia porque a primeira pergunta de qualquer
+/// suporte — «qual versão está rodando?» — não tinha resposta pelo binário.
+fn versao() -> &'static str {
+    option_env!("SEELE_VERSAO").unwrap_or("local (sem versão carimbada)")
+}
+
 fn uso() {
     println!("seeled — o servidor SEELE (um servidor)");
     println!();
@@ -132,6 +157,7 @@ fn uso() {
     println!("  seeled convite [para quem]     gera um convite de uso único");
     println!("  seeled anexos                  mostra o teto de disco dos anexos");
     println!("  seeled anexos <tamanho>        escolhe o teto (ex.: 2G, 500M)");
+    println!("  seeled --versao                diz qual build é este");
     println!();
     println!("  O convite sai como link seele://, pronto para mandar. Ele já");
     println!("  carrega a impressão digital do certificado, então quem receber");
