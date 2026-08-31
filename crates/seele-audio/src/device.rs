@@ -27,6 +27,7 @@ use crate::rt::{
     capacity_for_ms, capture_path, playback_path, CaptureSink, PlaybackSource, RawSample,
     StreamCounters,
 };
+use crate::SAMPLE_RATE_HZ;
 
 /// Builds an input stream for one concrete device sample format.
 ///
@@ -415,6 +416,100 @@ pub fn open_default(ring_ms: u32) -> Result<AudioIo, DeviceError> {
     open(Wanted::default(), ring_ms)
 }
 
+/// A configuração de um lado, pedindo [`SAMPLE_RATE_HZ`] quando o aparelho a
+/// oferece.
+///
+/// # Por que perguntar, em vez de aceitar o padrão
+///
+/// Porque o padrão do sistema não é escolhido pensando em voz. Um microfone que
+/// **suporta** 48 kHz frequentemente tem 44,1 kHz como padrão — é a taxa do CD,
+/// e é o que o sistema oferece a quem toca música. Aceitá-la punha um
+/// reamostrador no caminho de captura e outro no de reprodução, para uma
+/// conversão que o aparelho faria de graça se alguém pedisse.
+///
+/// O custo não é só de CPU. `specs/03-audio.md` fixa 48 kHz como a taxa do
+/// projeto inteiro, e cada conversão a mais é filtro a mais entre a voz de quem
+/// fala e o ouvido de quem escuta.
+///
+/// # O que isto **não** conserta, e é honesto dizer
+///
+/// Um fone Bluetooth em HFP — o modo que o sistema liga quando o microfone dele
+/// é usado — não *oferece* 48 kHz: ele oferece 8 ou 16 kHz e mais nada. Aqui
+/// não há o que pedir, e o resultado continua sendo o som abafado que esse modo
+/// produz. O que esta função faz nesse caso é o que dá para fazer: devolve a
+/// configuração de verdade, e a taxa aparece em [`AudioIo::capture_rate_hz`]
+/// para quem quiser dizer à pessoa por que o microfone dela soa assim.
+/// Qual das faixas oferecidas serve, se alguma serve.
+///
+/// Separada de [`negociar`] porque é a única parte dela que **não** precisa de
+/// uma placa de som: é uma escolha sobre uma lista, e o cabeçalho deste módulo
+/// pede exatamente isto — a lógica sai daqui para onde um teste alcança, e o
+/// que fica é fiação.
+///
+/// Mesmo formato e mesma contagem de canais que o padrão, de propósito: o que
+/// se está trocando é a **taxa**, e só ela. Trocar formato ou canal junto seria
+/// escolher por quem não pediu, e a mistura de dois canais para um já acontece
+/// em [`crate::rt`] de um jeito que esta função não deve adivinhar.
+fn escolher_taxa(
+    padrao: &cpal::SupportedStreamConfig,
+    faixas: Vec<cpal::SupportedStreamConfigRange>,
+) -> Option<cpal::SupportedStreamConfig> {
+    faixas
+        .into_iter()
+        .filter(|faixa| {
+            faixa.sample_format() == padrao.sample_format() && faixa.channels() == padrao.channels()
+        })
+        .find_map(|faixa| faixa.try_with_sample_rate(SAMPLE_RATE_HZ))
+}
+
+fn negociar(device: &cpal::Device, side: Side) -> Result<cpal::SupportedStreamConfig, DeviceError> {
+    let padrao = match side {
+        Side::Input => device.default_input_config(),
+        Side::Output => device.default_output_config(),
+    }
+    .map_err(|source| DeviceError::Device {
+        side,
+        stage: Stage::Config,
+        source,
+    })?;
+
+    if padrao.sample_rate() == SAMPLE_RATE_HZ {
+        return Ok(padrao);
+    }
+
+    // Uma falha ao listar não é uma falha ao abrir: o padrão já está na mão e
+    // funciona. Este caminho existe para melhorar o que há, nunca para impedir
+    // alguém de entrar.
+    let faixas = match side {
+        Side::Input => device.supported_input_configs().map(Iterator::collect),
+        Side::Output => device.supported_output_configs().map(Iterator::collect),
+    };
+    let Ok(faixas): Result<Vec<_>, _> = faixas else {
+        return Ok(padrao);
+    };
+
+    match escolher_taxa(&padrao, faixas) {
+        Some(config) => {
+            tracing::info!(
+                ?side,
+                padrao_hz = padrao.sample_rate(),
+                pedido_hz = SAMPLE_RATE_HZ,
+                "o aparelho oferece a taxa do projeto; pedida em vez do padrão do sistema"
+            );
+            Ok(config)
+        }
+        None => {
+            tracing::info!(
+                ?side,
+                taxa_hz = padrao.sample_rate(),
+                projeto_hz = SAMPLE_RATE_HZ,
+                "o aparelho não oferece a taxa do projeto; reamostragem no caminho"
+            );
+            Ok(padrao)
+        }
+    }
+}
+
 /// Opens the chosen devices, taking the host's default for each side left unset.
 ///
 /// Each half of `wanted` is an id — a [`CaptureDevice::id`] or a
@@ -436,21 +531,8 @@ pub fn open(wanted: Wanted<'_>, ring_ms: u32) -> Result<AudioIo, DeviceError> {
     let input_device = resolve(&host, wanted.capture, Side::Input)?;
     let output_device = resolve(&host, wanted.playback, Side::Output)?;
 
-    let in_config = input_device
-        .default_input_config()
-        .map_err(|source| DeviceError::Device {
-            side: Side::Input,
-            stage: Stage::Config,
-            source,
-        })?;
-    let out_config =
-        output_device
-            .default_output_config()
-            .map_err(|source| DeviceError::Device {
-                side: Side::Output,
-                stage: Stage::Config,
-                source,
-            })?;
+    let in_config = negociar(&input_device, Side::Input)?;
+    let out_config = negociar(&output_device, Side::Output)?;
 
     // Read off the device that opened, not off the request: with `None` asked
     // for — which is most of the time — the request has no name in it at all.
@@ -1014,5 +1096,101 @@ fn windows_consentimento() -> ConsentimentoDoMicrofone {
         ConsentimentoDoMicrofone::Permitido
     } else {
         ConsentimentoDoMicrofone::NaoSeSabe
+    }
+}
+
+#[cfg(test)]
+mod taxa_do_aparelho {
+    use super::{escolher_taxa, SAMPLE_RATE_HZ};
+    use cpal::{
+        SampleFormat, SupportedBufferSize, SupportedStreamConfig, SupportedStreamConfigRange,
+    };
+
+    const BLOCO: SupportedBufferSize = SupportedBufferSize::Range { min: 64, max: 4096 };
+
+    fn padrao(canais: u16, taxa: u32, formato: SampleFormat) -> SupportedStreamConfig {
+        SupportedStreamConfig::new(canais, taxa, BLOCO, formato)
+    }
+
+    fn faixa(
+        canais: u16,
+        minima: u32,
+        maxima: u32,
+        formato: SampleFormat,
+    ) -> SupportedStreamConfigRange {
+        SupportedStreamConfigRange::new(canais, minima, maxima, BLOCO, formato)
+    }
+
+    /// O caso comum, e a razão de esta função existir.
+    ///
+    /// Um microfone cujo padrão do sistema é 44,1 kHz — a taxa do CD, escolhida
+    /// pensando em música — e que aceita 48 kHz sem reclamar. Aceitar o padrão
+    /// punha um reamostrador no caminho para uma conversão que o aparelho faz
+    /// de graça.
+    #[test]
+    fn um_aparelho_que_aceita_a_taxa_do_projeto_recebe_o_pedido() {
+        let escolhida = escolher_taxa(
+            &padrao(1, 44_100, SampleFormat::F32),
+            vec![faixa(1, 44_100, 48_000, SampleFormat::F32)],
+        );
+        assert_eq!(
+            escolhida.map(|config| config.sample_rate()),
+            Some(SAMPLE_RATE_HZ)
+        );
+    }
+
+    /// O fone Bluetooth em HFP, que é o que produz «abafado».
+    ///
+    /// Ele não oferece 48 kHz: oferece 16 kHz e mais nada. Não há o que pedir, e
+    /// inventar um pedido fora da faixa faria `with_sample_rate` entrar em
+    /// pânico. A resposta certa é «nenhuma serve», e quem chama fica com o
+    /// padrão de verdade — que é o que permite dizer à pessoa por quê.
+    #[test]
+    fn um_aparelho_que_so_oferece_taxa_baixa_nao_e_forcado() {
+        let escolhida = escolher_taxa(
+            &padrao(1, 16_000, SampleFormat::F32),
+            vec![faixa(1, 8_000, 16_000, SampleFormat::F32)],
+        );
+        assert!(
+            escolhida.is_none(),
+            "pediu-se ao aparelho uma taxa que ele não oferece"
+        );
+    }
+
+    /// A taxa é a única coisa que se troca.
+    ///
+    /// Uma faixa que chega a 48 kHz com outro formato, ou com outra contagem de
+    /// canais, resolveria a taxa e mudaria duas coisas que ninguém pediu. O
+    /// caminho de conversão de formato e a mistura de canais vivem em
+    /// `crate::rt` e são escolhidos lá.
+    #[test]
+    fn nem_formato_nem_canal_sao_trocados_de_carona() {
+        let alvo = padrao(1, 44_100, SampleFormat::F32);
+        assert!(
+            escolher_taxa(&alvo, vec![faixa(1, 48_000, 48_000, SampleFormat::I16)]).is_none(),
+            "trocou o formato do aparelho para conseguir a taxa"
+        );
+        assert!(
+            escolher_taxa(&alvo, vec![faixa(2, 48_000, 48_000, SampleFormat::F32)]).is_none(),
+            "trocou a contagem de canais para conseguir a taxa"
+        );
+    }
+
+    /// Entre várias, serve a primeira que couber — e nenhuma tem de caber.
+    #[test]
+    fn a_lista_e_varrida_ate_achar_uma_que_sirva() {
+        let escolhida = escolher_taxa(
+            &padrao(2, 44_100, SampleFormat::F32),
+            vec![
+                faixa(2, 8_000, 8_000, SampleFormat::F32),
+                faixa(2, 44_100, 44_100, SampleFormat::F32),
+                faixa(2, 32_000, 96_000, SampleFormat::F32),
+            ],
+        );
+        assert_eq!(
+            escolhida.map(|config| config.sample_rate()),
+            Some(SAMPLE_RATE_HZ),
+            "a faixa que contém a taxa do projeto estava na lista e não foi achada"
+        );
     }
 }
