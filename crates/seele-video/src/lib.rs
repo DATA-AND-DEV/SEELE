@@ -48,6 +48,7 @@ pub mod captura;
 pub mod codec;
 pub mod erro;
 pub mod modulo;
+pub mod vui;
 
 pub use erro::ErroDeVideo;
 pub use modulo::BibliotecaDeVideo;

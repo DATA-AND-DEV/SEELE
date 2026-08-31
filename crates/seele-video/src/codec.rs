@@ -563,9 +563,24 @@ impl Codificador {
                 detalhe: erro.to_string(),
             })?;
 
-        Ok(saida.map(|bruto| QuadroCodificado {
-            chave: bruto.frame_type == FrameType::Idr,
-            bytes: montar_annex_b(&bruto),
+        Ok(saida.map(|bruto| {
+            let chave = bruto.frame_type == FrameType::Idr;
+            let bytes = montar_annex_b(&bruto);
+            // A descrição de cor entra aqui, e só no quadro-chave: é ele que
+            // carrega o SPS. O `EncoderConfig` do binding não tem campo de cor,
+            // e sem VUI quem recebe adivinha — errado a 540p, que tem menos que
+            // as 576 linhas do corte da regra. Ver `crate::vui`.
+            //
+            // Varrer só o quadro-chave, e não todos: chave é sob demanda (§3.3),
+            // então isto não é custo por quadro. E `com_descricao_de_cor`
+            // devolve o fluxo intacto quando não há SPS, quando ele já tem VUI,
+            // ou quando não foi reconhecido — nunca um fluxo pela metade.
+            let bytes = if chave {
+                crate::vui::com_descricao_de_cor(&bytes)
+            } else {
+                bytes
+            };
+            QuadroCodificado { chave, bytes }
         }))
     }
 }
