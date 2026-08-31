@@ -22,6 +22,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod bitrate;
 pub mod codec;
 pub mod device;
 pub mod drift;

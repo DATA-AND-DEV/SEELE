@@ -34,6 +34,7 @@ pub mod admissao;
 pub mod alcance;
 pub mod frame;
 pub mod hospedagem;
+pub mod perda_de_subida;
 pub mod permissions;
 pub mod persistence;
 pub mod portaria;

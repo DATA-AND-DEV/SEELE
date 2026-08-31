@@ -196,8 +196,17 @@ async fn o_aviso_sai_imediatamente_antes_do_candidato_que_precisa_dele() {
         panic!("nenhum aviso saiu; o degrau 4 não aconteceu");
     };
     let atraso = primeiro_aviso.duration_since(comeco);
+    // **200 ms, e eram 500 até o ADR 0037.** O número antigo não media o aviso:
+    // media o tempo que o candidato 1 queimava **em série** antes de o 2
+    // começar. Com a corrida o candidato 2 parte na defasagem de 250 ms, e o
+    // aviso dele sai colado — em 253 ms.
+    //
+    // O que este limite prende continua sendo o defeito de origem, que é o aviso
+    // sair no instante zero, antes do laço. Quem prende o resto são as duas
+    // asserções de **ordem** logo abaixo, e o comentário no alto deste teste já
+    // dizia que é assim: «um limite inferior sozinho não prende nada».
     assert!(
-        atraso > Duration::from_millis(500),
+        atraso > Duration::from_millis(200),
         "o aviso saiu no instante zero — é o defeito de origem: ele tem de sair \
          colado ao candidato refletido, e não antes do laço (saiu em {atraso:?})"
     );
@@ -404,10 +413,22 @@ async fn o_aviso_se_repete_enquanto_o_aperto_de_mao_corre() {
         return;
     };
 
-    // Abandonada no fim: nenhum destes endereços responde, e o que interessa
-    // acontece dentro do prazo do primeiro candidato.
+    // **Um candidato, e eram dois até o ADR 0037.**
+    //
+    // A propriedade sob teste é por candidato: as repetições **daquele** aviso,
+    // espaçadas, enquanto **aquele** aperto de mão corre. Com dois candidatos e a
+    // corrida, os três primeiros avisos vistos aqui deixam de ser as três
+    // repetições de um: são o candidato 1 em zero, o 2 na defasagem de 250 ms, e
+    // a primeira repetição do 1 em 700 ms. A janela encolhe para ~900 ms sem que
+    // nada tenha piorado — o contador é que somava candidatos diferentes.
+    //
+    // Com um candidato a medição fica sem ambiguidade sobre quem produziu qual
+    // aviso, que é o que este teste sempre quis medir.
+    //
+    // Abandonada no fim: este endereço não responde, e o que interessa acontece
+    // dentro do prazo dele.
     let tentativa = tokio::spawn(async move {
-        let _ = tentar_convite_de_teste(ponto, &["203.0.113.7:8383", "203.0.113.8:8383"]).await;
+        let _ = tentar_convite_de_teste(ponto, &["203.0.113.7:8383"]).await;
     });
     tokio::time::sleep(Duration::from_millis(2500)).await;
     tentativa.abort();

@@ -28,13 +28,24 @@ use shiguredo_opus::{
 
 use crate::{FRAME_SAMPLES, SAMPLE_RATE_HZ};
 
-/// Default encoder bitrate. `specs/03-audio.md`, narrowed by ADR 0010.
-pub const DEFAULT_BITRATE_BPS: u32 = 32_000;
+/// Default encoder bitrate — the top band.
+///
+/// The top and not the middle: the controller in [`crate::bitrate`] starts here
+/// and comes down on evidence, which is what "adaptativo" means in
+/// `specs/03-audio.md`. Starting in the middle out of caution and never rising
+/// is the behaviour this replaced — see ADR 0036.
+pub const DEFAULT_BITRATE_BPS: u32 = 48_000;
 
-/// The range `specs/03-audio.md` allows, after ADR 0010 narrowed it.
+/// Bottom of the range `specs/03-audio.md` declares.
 pub const MIN_BITRATE_BPS: u32 = 16_000;
-/// Upper end of the allowed range.
-pub const MAX_BITRATE_BPS: u32 = 64_000;
+
+/// Top of the range `specs/03-audio.md` declares.
+///
+/// **This was 64 000, and the spec always said 48.** The old value carried a doc
+/// line crediting ADR 0010 with having "narrowed" the range; ADR 0010 is about
+/// in-band FEC and says nothing about bitrate. The number and the sentence were
+/// both wrong, and both are gone. See ADR 0036.
+pub const MAX_BITRATE_BPS: u32 = 48_000;
 
 /// Why the codec refused.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1579,6 +1579,38 @@ pub enum ServerMessage {
         /// Who.
         person: PersonId,
     },
+
+    // ---- o bitrate adaptativo do ADR 0036 ----
+    //
+    // No fim do enum, e pela razão que [`Self::PersonPresent`] já escreve: o
+    // postcard grava o índice da variante e nada mais.
+    /// Quanto da voz **desta** conexão não está chegando ao servidor.
+    ///
+    /// Escrito para uma sessão só, e nunca difundido: a perda de subida de
+    /// alguém não é assunto de mais ninguém, e espalhá-la contaria a toda a sala
+    /// a qualidade da rede de cada um. O filtro está em `session::translate`,
+    /// porque a sala que mede não conhece sessão nenhuma.
+    ///
+    /// # Por que não o `loss_fraction` de [`Telemetry`]
+    ///
+    /// Porque aquele não serve para isto, por duas razões que não se corrigem
+    /// uma à outra. Ele vem de `stats.path` do quinn, então mede a direção
+    /// **servidor→cliente** — encolher o microfone de alguém porque o download
+    /// dele está ruim é o oposto do que `specs/03-audio.md` pede. E é
+    /// **cumulativo desde o início da conexão**: uma razão monótona que só decai
+    /// assintoticamente, o que torna o «sobe de volta gradualmente» da spec
+    /// aritmeticamente impossível.
+    ///
+    /// Este é medido por quem recebe, contando lacunas de `seq` numa janela que
+    /// desliza. Lacuna de `seq` é perda e nunca silêncio, porque o DTX não
+    /// incrementa a sequência — ver `seele_server::perda_de_subida`.
+    ///
+    /// **A variante que fez a versão do protocolo subir para 2.** Um cliente v1
+    /// não a conhece e não a recebe.
+    UplinkLoss {
+        /// A fração perdida na janela mais recente, de zero a um.
+        fraction: f32,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -1928,6 +1960,13 @@ impl Validate for ServerMessage {
             ),
             Self::Telemetry(telemetry) => telemetry.validate(),
             Self::PersonState(state) => state.validate(),
+            // Conferido como a perda do `Telemetry`, e não posto no braço de
+            // `Ok(())` junto com os quadros sem campo a validar: este número
+            // atravessa o fio e vai direto para uma malha que escolhe o bitrate.
+            // Um `NaN` — que `check_range` recusa, porque toda comparação com
+            // ele é falsa — atravessaria os dois limiares e prenderia a faixa
+            // onde estivesse, calada.
+            Self::UplinkLoss { fraction } => check_range("fraction", *fraction, 0.0, 1.0),
             Self::ServerRenamed { name } => check_server_name(name),
             Self::ServerIconChanged { icon } => check_icon(icon.as_ref()),
             Self::PersonLeft { .. }

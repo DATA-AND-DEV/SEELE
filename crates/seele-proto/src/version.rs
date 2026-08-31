@@ -15,7 +15,14 @@ use thiserror::Error;
 /// Version of the wire protocol implemented by this build.
 ///
 /// Versioned independently of the product version (`specs/10-convencoes.md`).
-pub const PROTOCOL_VERSION: u8 = 1;
+///
+/// **2 desde o ADR 0036**, que acrescentou [`crate::control::ServerMessage::UplinkLoss`].
+/// O postcard indexa variante por posição e não é autodescritivo, então um
+/// cliente v1 não sabe decodificar a variante nova — e uma variante desconhecida
+/// não é ignorada, ela desloca a leitura do fluxo para sempre. A janela de
+/// compatibilidade abaixo é o que garante que ele continue conectando e
+/// simplesmente não a receba; quem decide não mandá-la é a sessão do servidor.
+pub const PROTOCOL_VERSION: u8 = 2;
 
 /// How many past versions a peer accepts, beyond the current one.
 ///
@@ -101,6 +108,25 @@ mod tests {
     #[test]
     fn compatibility_window_never_underflows() {
         assert!(oldest_supported_version() <= PROTOCOL_VERSION);
+    }
+
+    /// Um cliente da versão anterior continua entrando.
+    ///
+    /// O ADR 0036 sobe a versão para carregar `ServerMessage::UplinkLoss`, e a
+    /// promessa que acompanha a subida é esta: ninguém que já instalou perde o
+    /// servidor. Um cliente v1 conecta, não recebe o quadro novo, e roda no
+    /// bitrate fixo — que é exatamente o comportamento que ele já tinha.
+    ///
+    /// Escrito como teste e não como comentário porque a janela é a única coisa
+    /// entre «subimos a versão» e «quebramos todo mundo que não atualizou no
+    /// mesmo minuto».
+    #[test]
+    fn a_versao_anterior_continua_dentro_da_janela() {
+        assert_eq!(PROTOCOL_VERSION, 2);
+        assert_eq!(oldest_supported_version(), 1);
+        assert!(negotiate(1).is_ok(), "um cliente v1 foi recusado");
+        assert!(negotiate(2).is_ok());
+        assert!(negotiate(3).is_err(), "um cliente do futuro foi aceito");
     }
 
     #[test]

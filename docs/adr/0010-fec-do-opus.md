@@ -23,4 +23,23 @@ Em LAN o buffer assenta exatamente no piso de 20 ms e a perda é zero. Ligar FEC
 
 Reavaliar em M2, com medição de perda em internet regional e canal de realimentação disponível.
 
+## Adendo — 2026-08-30
+
+O [ADR 0036](0036-bitrate-adaptativo-em-faixas.md) construiu o bitrate
+adaptativo, e ao fazê-lo criou a medida que faltava aqui: perda de subida por
+pessoa, em janela deslizante, medida no servidor por lacuna de `seq`.
+
+Este ADR recusou o FEC por, entre outras coisas, não haver medição de perda em
+internet real. Agora há. **A decisão não muda com este adendo** — nada foi medido
+ainda, e mudar a decisão sem medida seria repetir o erro que a primeira redação
+deste documento evitou ao ficar `proposto` esperando dados. O que mudou é que o
+obstáculo saiu do caminho: reavaliar FEC passa a ser trabalho que alguém pode
+fazer, em vez de trabalho que alguém precisa esperar.
+
+**Um dos dois bloqueios que este ADR nomeou continua de pé**, e vale repetir para
+quem ler os dois documentos em sequência: o `shiguredo_opus` não expõe setter de
+bitrate em tempo de execução. Conferido no fonte do binding — `OPUS_SET_BITRATE`
+é aplicado dentro de `Encoder::new`, num caminho privado. O ADR 0036 não o
+contorna; ele desenha em faixas por causa dele.
+
 Custo de reverter: **médio**. Ligar FEC muda a profundidade mínima do jitter buffer e portanto o orçamento do ADR 0009.

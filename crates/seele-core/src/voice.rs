@@ -363,6 +363,15 @@ pub struct Voice {
     /// vez. Ver [`FalhaLocal`] — e por que isto não é mais uma comparação com
     /// zero.
     falha_local: Mutex<FalhaLocal>,
+    /// Escolhe a faixa de bitrate a partir da perda de subida que o servidor
+    /// relata. Ver o ADR 0036.
+    ///
+    /// `Mutex` e não atômico porque o controlador tem estado — o índice da faixa
+    /// e desde quando a rede está boa — e porque ele é tocado uma vez por
+    /// segundo, no fio que dobra quadros de controle. O que o laço de áudio lê
+    /// continua sendo `Controls::bitrate`, que é atômico e não espera por
+    /// ninguém: nada deste cadeado alcança a thread que não pode bloquear.
+    faixa: Mutex<seele_audio::bitrate::Controlador>,
 }
 
 impl Voice {
@@ -488,6 +497,7 @@ impl Voice {
             playback,
             chosen,
             falha_local: Mutex::new(FalhaLocal::new()),
+            faixa: Mutex::new(seele_audio::bitrate::Controlador::novo()),
         })
     }
 
@@ -495,6 +505,37 @@ impl Voice {
     #[must_use]
     pub fn rates(&self) -> DeviceRates {
         self.rates
+    }
+
+    /// Dobra a perda de subida que o servidor relatou, e move a faixa se ela
+    /// mudou.
+    ///
+    /// Devolve o bitrate novo quando houve troca, para quem quiser registrá-la.
+    /// `None` é o caso comum e **não** é falha: a maior parte das medidas não
+    /// muda nada, e é exatamente isso que mantém rara a reconstrução do encoder
+    /// que uma troca custa. Ver `seele_audio::bitrate` e o ADR 0036.
+    ///
+    /// O relógio é parâmetro pela mesma razão que no controlador: a permanência
+    /// é a metade da malha que mais erra, e ela tem de ser testável sem esperar
+    /// dez segundos de verdade.
+    pub fn observar_perda(&self, perda: f32, agora: Instant) -> Option<u32> {
+        let Ok(mut faixa) = self.faixa.lock() else {
+            return None;
+        };
+        let novo = faixa.observar(perda, agora)?;
+        // O laço de voz lê isto a cada volta e chama `VoiceEncoder::set_bitrate`,
+        // que só reconstrói quando o valor mudou de verdade.
+        self.controls.bitrate.store(novo, Ordering::Relaxed);
+        Some(novo)
+    }
+
+    /// A faixa de bitrate em vigor, em bits por segundo.
+    ///
+    /// Lida do `Controls`, e não do controlador: é o valor que o laço de áudio
+    /// vai usar, que é o que a pergunta quer saber.
+    #[must_use]
+    pub fn bitrate_bps(&self) -> u32 {
+        self.controls.bitrate.load(Ordering::Relaxed)
     }
 
     /// The microphone this path is actually capturing from.
@@ -1279,5 +1320,63 @@ mod tests {
         let wanted = chosen.wanted();
         assert_eq!(wanted.capture, Some("o microfone"));
         assert_eq!(wanted.playback, Some("a caixa"));
+    }
+}
+
+#[cfg(test)]
+mod faixa_de_bitrate {
+    use seele_audio::bitrate::{Controlador, FAIXAS_BPS};
+    use seele_audio::codec::{DEFAULT_BITRATE_BPS, MAX_BITRATE_BPS, MIN_BITRATE_BPS};
+
+    /// O padrão do codec é a faixa de cima do controlador.
+    ///
+    /// Os dois números moram em módulos diferentes e nada no tipo os obriga a
+    /// concordar. Se divergirem, a primeira medida de rede boa «subiria» para um
+    /// valor que já estava em vigor, e a primeira de rede ruim desceria a partir
+    /// de outro lugar — o encoder e a malha discordando sobre onde a conversa
+    /// começou, sem nada na tela que contradissesse.
+    #[test]
+    fn o_padrao_do_codec_e_a_faixa_de_cima() {
+        assert_eq!(DEFAULT_BITRATE_BPS, FAIXAS_BPS[0]);
+    }
+
+    /// Nenhuma faixa cai fora do que o codec aceita.
+    ///
+    /// `VoiceEncoder::new` satura no intervalo permitido, calado. Uma faixa fora
+    /// dele viraria outro bitrate na hora de codificar, e a malha passaria a
+    /// mandar num número enquanto o encoder roda noutro — a pior forma de errar,
+    /// porque a telemetria mostraria o valor certo.
+    #[test]
+    fn toda_faixa_cabe_no_que_o_codec_aceita() {
+        for faixa in FAIXAS_BPS {
+            assert!(
+                (MIN_BITRATE_BPS..=MAX_BITRATE_BPS).contains(&faixa),
+                "a faixa {faixa} está fora de {MIN_BITRATE_BPS}..={MAX_BITRATE_BPS}, \
+                 e o encoder a trocaria em silêncio"
+            );
+        }
+    }
+
+    /// As faixas descem, e o piso é o da spec.
+    #[test]
+    fn as_faixas_vao_do_teto_ao_piso_da_spec() {
+        assert_eq!(FAIXAS_BPS[0], MAX_BITRATE_BPS);
+        assert_eq!(
+            FAIXAS_BPS[FAIXAS_BPS.len() - 1],
+            MIN_BITRATE_BPS,
+            "a última faixa não é o piso que `specs/03-audio.md` declara"
+        );
+        for par in FAIXAS_BPS.windows(2) {
+            assert!(
+                par[0] > par[1],
+                "as faixas não estão em ordem decrescente: {par:?}"
+            );
+        }
+    }
+
+    /// Um controlador recém-criado já concorda com o `Controls` recém-criado.
+    #[test]
+    fn o_controlador_nasce_no_mesmo_valor_que_o_encoder() {
+        assert_eq!(Controlador::novo().bitrate_bps(), DEFAULT_BITRATE_BPS);
     }
 }
