@@ -86,6 +86,87 @@ impl Drop for AbortaAoSair {
     }
 }
 
+/// O que o plano de mídia e o de controle precisam dizer um ao outro.
+///
+/// # Por que atômicos, e não um mutex
+///
+/// Porque um mutex aqui recriaria o defeito que a separação existe para
+/// remover. O plano de mídia toca isto cinquenta vezes por segundo, e o de
+/// controle o toca no meio de tratadores que já esperam o mutex do SQLite: pôr
+/// um segundo cadeado entre os dois faria a voz voltar a esperar o disco, por
+/// um caminho mais curto e mais difícil de ver.
+///
+/// Nenhum destes três valores precisa de leitura consistente com outro. Cada um
+/// é uma palavra de máquina, lida e escrita sozinha, e `Relaxed` basta porque
+/// não há nada cuja visibilidade dependa da ordem entre eles.
+#[derive(Debug, Default)]
+struct Midia {
+    /// A sala de voz em que esta conexão está, **mais um**. Zero é «nenhuma».
+    ///
+    /// O deslocamento de um, e não `0` como sentinela: o `id` vem de uma
+    /// `INTEGER PRIMARY KEY` do SQLite e hoje nunca vale zero, mas escrever a
+    /// sentinela em cima dessa suposição amarra este arquivo a uma escolha do
+    /// esquema que ninguém prometeu manter.
+    sala: AtomicU32,
+    /// Quando o último datagrama chegou, em milissegundos desde o início da
+    /// sessão. [`u64::MAX`] enquanto nenhum chegou.
+    ///
+    /// Milissegundos desde uma origem, e não um `Instant`: `Instant` não cabe
+    /// num atômico, e o que se pergunta a este valor — «faz menos de 250 ms?» —
+    /// se responde igual com a diferença de dois números.
+    ultimo_datagrama_ms: AtomicU64,
+    /// Quadros de voz que o transporte recusou nesta sessão.
+    recusados: AtomicU64,
+}
+
+impl Midia {
+    fn nova() -> Self {
+        Self {
+            sala: AtomicU32::new(0),
+            ultimo_datagrama_ms: AtomicU64::new(u64::MAX),
+            recusados: AtomicU64::new(0),
+        }
+    }
+
+    /// Onde esta conexão está, do ponto de vista de quem encaminha voz.
+    fn sala(&self) -> Option<VoiceRoomId> {
+        match self.sala.load(Ordering::Relaxed) {
+            0 => None,
+            mais_um => Some(VoiceRoomId(mais_um - 1)),
+        }
+    }
+
+    /// Anuncia ao plano de mídia para onde a voz vai agora.
+    ///
+    /// Chamado de todo lugar que move `current_voice_room`, e é por isso que
+    /// aquele valor continua existindo: o plano de controle decide com ele, em
+    /// código síncrono e legível, e esta linha é a única ponte.
+    fn entrou(&self, sala: Option<VoiceRoomId>) {
+        let escrito = sala.map_or(0, |id| id.get().saturating_add(1));
+        self.sala.store(escrito, Ordering::Relaxed);
+    }
+
+    /// Marca que voz acabou de chegar por esta conexão.
+    fn chegou(&self, desde: Instant) {
+        let ms = u64::try_from(desde.elapsed().as_millis()).unwrap_or(u64::MAX);
+        self.ultimo_datagrama_ms.store(ms, Ordering::Relaxed);
+    }
+
+    /// Se voz atravessou esta conexão nos últimos [`SPEAKING_TAIL`].
+    ///
+    /// A fonte honesta de «está falando» é o áudio chegando, e não o cliente
+    /// dizendo que sim — um cliente que anuncia fala sem mandar nada acenderia
+    /// o nome dele na lista de todo mundo por silêncio.
+    fn falando(&self, desde: Instant) -> bool {
+        let ms = self.ultimo_datagrama_ms.load(Ordering::Relaxed);
+        if ms == u64::MAX {
+            return false;
+        }
+        let agora = u64::try_from(desde.elapsed().as_millis()).unwrap_or(u64::MAX);
+        Duration::from_millis(agora.saturating_sub(ms)) < SPEAKING_TAIL
+    }
+}
+
 /// How often the server pushes telemetry.
 ///
 /// `specs/07-tema-evangelion.md` wants the Sync Ratio alive on screen; once a
@@ -1005,11 +1086,78 @@ async fn run_session(
     let _recebedora = AbortaAoSair(recebedora);
 
     let (outbound_tx, mut outbound_rx) = mpsc::channel::<Vec<u8>>(OUTBOUND_DEPTH);
-    // Quadros de voz que o transporte recusou nesta sessão. Ver o `select!`.
-    let mut recusados: u64 = 0;
     let mut events = server.events.subscribe();
     let mut channels: Vec<ChannelId> = Vec::new();
     let mut current_voice_room: Option<VoiceRoomId> = None;
+
+    // A origem contra a qual o plano de mídia carimba o último datagrama.
+    let inicio = Instant::now();
+    let midia = Arc::new(Midia::nova());
+
+    // O plano de mídia sai do `select!` do controle, e esta é a correção.
+    //
+    // # O defeito, escrito antes de ser removido
+    //
+    // Os dois braços de voz — `read_datagram` e `outbound_rx` — viviam no
+    // mesmo `select!` que os quadros de controle, o barramento de eventos e o
+    // tique de telemetria. O `select!` roda o corpo do braço vencedor **até o
+    // fim** antes de voltar ao topo, e os tratadores de controle esperam duas
+    // coisas demoradas: `server.persistence.lock().await`, num mutex de SQLite
+    // que é um só para todas as sessões, e `frame::write(...).await`, que
+    // bloqueia quando o par para de ler. Enquanto qualquer uma delas esperava,
+    // esta conexão não lia nem escrevia voz.
+    //
+    // Medido em `tests/voz_sob_carga.rs`, que reprovava antes desta tarefa
+    // existir: com o fluxo de controle do falante fechado, **zero** de cinquenta
+    // quadros atravessavam. Não era voz picotada, era voz nenhuma.
+    //
+    // É a mesma forma que a tarefa leitora acima já removeu do fluxo de
+    // controle, e a mesma da pendência nº 1. A regra que fica: **o plano de
+    // mídia não espera nada que o plano de controle espera.** Ele não toca no
+    // banco, não escreve no fluxo de controle e não lê o barramento.
+    let _tarefa_de_midia = AbortaAoSair({
+        let connection = connection.clone();
+        let voice_rooms = Arc::clone(voice_rooms);
+        let midia = Arc::clone(&midia);
+        let ssrc = session.ssrc;
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    datagram = connection.read_datagram() => {
+                        let Ok(bytes) = datagram else { break };
+                        // Para a sala em que esta conexão está agora. Mandar
+                        // para uma sala fixa era correto enquanto um servidor
+                        // tinha uma, e virou fio trocado quando pôde ter duas.
+                        let Some(id) = midia.sala() else { continue };
+                        midia.chegou(inicio);
+                        let _ = voice_rooms.of(id).await.send(VoiceRoomCommand::Datagram {
+                            from: ssrc,
+                            bytes: bytes.to_vec(),
+                        }).await;
+                    }
+
+                    outbound = outbound_rx.recv() => {
+                        let Some(bytes) = outbound else { break };
+                        // Contado, e não descartado. Um datagrama do QUIC não é
+                        // fragmentado: o texto viaja num fluxo e se adapta ao
+                        // caminho sozinho, a voz viaja aqui e um datagrama que
+                        // não cabe é recusado inteiro. É assim que um enlace
+                        // entrega toda a conversa escrita e ainda pica a voz — e
+                        // num sentido só, porque o caminho de ida não é o de
+                        // volta.
+                        //
+                        // Contado por sessão e dito uma vez ao fim, e não por
+                        // quadro: isto passa cinquenta vezes por segundo, e um
+                        // log por quadro afogaria o arquivo no instante em que
+                        // alguém precisa lê-lo.
+                        if connection.send_datagram(bytes.into()).is_err() {
+                            midia.recusados.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                }
+            }
+        })
+    });
 
     // What this person has announced about themselves. Held here rather than
     // rebuilt each tick, because the telemetry broadcast carries it and a tick
@@ -1017,11 +1165,6 @@ async fn run_session(
     let mut muted = false;
     let mut total_isolation = false;
     let mut presence = Presence::Available;
-    // Whether they are transmitting. Not announceable on the control channel,
-    // and it should not be: the truthful source is whether audio is actually
-    // arriving. A client that says it is speaking while sending nothing would
-    // light up somebody else's roster for silence.
-    let mut last_datagram: Option<Instant> = None;
     // The last Sync Ratio this connection measured. Carried so that announcing
     // a mute does not report a ratio of zero alongside it — every client folds
     // the whole `PersonState` in, so a field left at a default is not left
@@ -1045,6 +1188,7 @@ async fn run_session(
             })
             .await?;
         current_voice_room = Some(reclaimed);
+        midia.entrou(current_voice_room);
         server.occupancy.lock().await.seat(
             reclaimed,
             crate::server::Occupant {
@@ -1262,11 +1406,13 @@ async fn run_session(
                         }
                         assentar(server, voice_rooms, session, &outbound_tx, &tela_tx, id).await?;
                         current_voice_room = Some(id);
+                        midia.entrou(current_voice_room);
                     }
                     ClientMessage::LeaveVoiceRoom => {
                         voice_rooms.leave_everywhere(session.person).await;
                         encerrar_telas_de(server, session.person).await;
                         if let Some(id) = current_voice_room.take() {
+                            midia.entrou(current_voice_room);
                             server.occupancy.lock().await.vacate(id, session.person);
                             let _ = server.events.send(Event::PersonLeft {
                                 voice_room: id,
@@ -1336,7 +1482,7 @@ async fn run_session(
                         announce(server, session, &AnnouncedState {
                             muted,
                             total_isolation,
-                            speaking: speaking_now(last_datagram),
+                            speaking: midia.falando(inicio),
                             presence,
                             signal: last_ratio,
                         });
@@ -1346,7 +1492,7 @@ async fn run_session(
                         announce(server, session, &AnnouncedState {
                             muted,
                             total_isolation,
-                            speaking: speaking_now(last_datagram),
+                            speaking: midia.falando(inicio),
                             presence,
                             signal: last_ratio,
                         });
@@ -1359,7 +1505,7 @@ async fn run_session(
                         announce(server, session, &AnnouncedState {
                             muted,
                             total_isolation,
-                            speaking: speaking_now(last_datagram),
+                            speaking: midia.falando(inicio),
                             presence,
                             signal: last_ratio,
                         });
@@ -1884,18 +2030,10 @@ async fn run_session(
                 }
             }
 
-            datagram = connection.read_datagram() => {
-                let Ok(bytes) = datagram else { break };
-                // Into the room this connection is actually in. Sending to a
-                // fixed voice room was correct while a server had one and became a
-                // crossed wire the moment it could have two.
-                let Some(id) = current_voice_room else { continue };
-                last_datagram = Some(Instant::now());
-                let _ = voice_rooms.of(id).await.send(VoiceRoomCommand::Datagram {
-                    from: session.ssrc,
-                    bytes: bytes.to_vec(),
-                }).await;
-            }
+            // Os dois braços de voz que ficavam aqui vivem agora na tarefa de
+            // mídia, criada acima. Ver a nota lá: enquanto estavam neste
+            // `select!`, uma espera do plano de controle — o mutex do SQLite,
+            // ou uma escrita para um par que parou de ler — parava a voz.
 
             aviso = avisos_rx.recv() => {
                 // A razão de uma transferência recusada, ou de um arquivo que
@@ -1903,23 +2041,6 @@ async fn run_session(
                 // controle, e não pela tarefa que descobriu o motivo.
                 let Some(aviso) = aviso else { break };
                 frame::write(&mut send, &aviso).await?;
-            }
-
-            outbound = outbound_rx.recv() => {
-                let Some(bytes) = outbound else { break };
-                // Contado, e não descartado. Um datagrama do QUIC não é
-                // fragmentado: o texto viaja num fluxo e se adapta ao caminho
-                // sozinho, a voz viaja aqui e um datagrama que não cabe é
-                // recusado inteiro. É assim que um enlace entrega toda a
-                // conversa escrita e ainda pica a voz — e num sentido só,
-                // porque o caminho de ida não é o de volta.
-                //
-                // Contado por sessão e dito uma vez ao fim, e não por quadro:
-                // isto passa cinquenta vezes por segundo, e um log por quadro
-                // afogaria o arquivo no instante em que alguém precisa lê-lo.
-                if connection.send_datagram(bytes.into()).is_err() {
-                    recusados = recusados.saturating_add(1);
-                }
             }
 
             event = events.recv() => {
@@ -2010,6 +2131,7 @@ async fn run_session(
                         // which is the whole verb undone by a feature meant for
                         // something else.
                         current_voice_room = None;
+                        midia.entrou(current_voice_room);
                         let _ = frame::write(&mut send, &ServerMessage::Disconnecting {
                             reason: *reason,
                         }).await;
@@ -2020,6 +2142,7 @@ async fn run_session(
                     Event::PersonMoved { person, voice_room: destino } if *person == session.person => {
                         assentar(server, voice_rooms, session, &outbound_tx, &tela_tx, *destino).await?;
                         current_voice_room = Some(*destino);
+                        midia.entrou(current_voice_room);
                         // Where the connection is now, and then that somebody put it
                         // there. Two frames because they are two different
                         // things: one is state this client has to fold in or go
@@ -2051,6 +2174,7 @@ async fn run_session(
                         voice_rooms.leave_everywhere(session.person).await;
                         encerrar_telas_de(server, session.person).await;
                         current_voice_room = None;
+                        midia.entrou(current_voice_room);
                         server.occupancy.lock().await.vacate(*id, session.person);
                         let _ = server.events.send(Event::PersonLeft {
                             voice_room: *id,
@@ -2152,7 +2276,7 @@ async fn run_session(
                     person: session.person,
                     muted,
                     total_isolation,
-                    speaking: speaking_now(last_datagram),
+                    speaking: midia.falando(inicio),
                     presence,
                     signal: ratio,
                 }));
@@ -2180,6 +2304,7 @@ async fn run_session(
     // e que quem ouviu culpou a rede. Sem esta linha não havia como saber: a
     // recusa era descartada, e recusa de envio soa exatamente igual a perda de
     // rede — com o conserto no lado oposto.
+    let recusados = midia.recusados.load(Ordering::Relaxed);
     if recusados > 0 {
         tracing::warn!(
             person = %session.person,
@@ -2540,11 +2665,6 @@ async fn nao_deu(send: &mut quinn::SendStream, erro: &anyhow::Error) -> Result<(
 /// out a hiccup without leaving the mark lit through a pause.
 const SPEAKING_TAIL: Duration = Duration::from_millis(250);
 
-/// Whether audio has arrived recently enough to call this person speaking.
-fn speaking_now(last_datagram: Option<Instant>) -> bool {
-    last_datagram.is_some_and(|at| at.elapsed() < SPEAKING_TAIL)
-}
-
 /// Everything a `PersonState` broadcast carries about one person.
 ///
 /// Grouped rather than passed as six arguments because every one of them is
@@ -2801,5 +2921,62 @@ fn translate(
             screen: *screen,
             person: *person,
         }),
+    }
+}
+
+#[cfg(test)]
+mod plano_de_midia {
+    /// Toda mudança de sala tem de chegar ao plano de mídia.
+    ///
+    /// # Por que ler o próprio código, e não afirmar sobre um valor
+    ///
+    /// Porque a propriedade é invisível ao compilador e a qualquer asserção
+    /// sobre uma sessão só. `current_voice_room` decide o plano de controle e
+    /// `Midia::sala` decide para onde a voz vai; nada no tipo dos dois liga um
+    /// ao outro. Uma sétima atribuição escrita amanhã sem a ponte compila,
+    /// passa em todo teste que existe, e produz um defeito de uma forma cruel:
+    /// a pessoa entra na sala, a lista mostra que ela entrou, o texto funciona,
+    /// e a voz dela vai para a sala anterior — ou para lugar nenhum.
+    ///
+    /// A regra é estreita de propósito. Não se cobra que a ponte seja a linha
+    /// seguinte por estilo: cobra-se porque ela **é** a única coisa que faz a
+    /// atribuição valer, e separá-la da atribuição é o começo de esquecê-la.
+    #[test]
+    fn toda_troca_de_sala_atravessa_para_o_plano_de_midia() {
+        let fonte = include_str!("session.rs");
+
+        let mut linhas = fonte.lines().enumerate().peekable();
+        let mut atribuicoes = 0_usize;
+        let mut orfas = Vec::new();
+
+        while let Some((numero, linha)) = linhas.next() {
+            let corte = linha.trim();
+            // A declaração não é uma troca, e o `Midia::entrou` que a segue não
+            // existiria: a tarefa de mídia nasce logo depois dela.
+            let e_troca = corte.starts_with("current_voice_room = ") && corte.ends_with(';');
+            let e_take = corte == "if let Some(id) = current_voice_room.take() {";
+            if !e_troca && !e_take {
+                continue;
+            }
+            atribuicoes += 1;
+            let seguinte = linhas.peek().map(|(_, texto)| texto.trim()).unwrap_or("");
+            if seguinte != "midia.entrou(current_voice_room);" {
+                orfas.push(numero + 1);
+            }
+        }
+
+        assert!(
+            orfas.is_empty(),
+            "estas linhas movem `current_voice_room` e não avisam o plano de mídia: {orfas:?}\n\
+             A voz é encaminhada a partir de `Midia::sala`, e não deste valor. Sem a ponte, \
+             quem trocar de sala continua falando para a sala de antes — e a lista de pessoas \
+             mostra a mudança, então nada na tela contradiz o defeito."
+        );
+        // Se as trocas sumirem, este guarda passa a não guardar nada e ninguém
+        // percebe. O número não precisa estar certo; precisa não ser zero.
+        assert!(
+            atribuicoes >= 6,
+            "só {atribuicoes} trocas de sala encontradas — o guarda perdeu o alvo"
+        );
     }
 }
