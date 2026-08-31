@@ -330,6 +330,24 @@ impl Codificador {
         biblioteca: &BibliotecaDeVideo,
         config: ConfigDoCodificador,
     ) -> Result<Self, ErroDeVideo> {
+        Self::novo_com_entropia(biblioteca, config, EntropyCodingMode::Cabac)
+    }
+
+    /// O mesmo, escolhendo o modo de entropia.
+    ///
+    /// Existe para `examples/entropia.rs` poder **medir** CAVLC contra CABAC no
+    /// mesmo conteúdo, em vez de a escolha continuar sendo feita por leitura de
+    /// documentação — que é como ela foi feita, e errado: o comentário abaixo
+    /// dizia que CABAC levaria o OpenH264 ao perfil High, e o fonte do binding
+    /// diz que a capacidade fica em «Constrained Baseline + CABAC».
+    ///
+    /// Público porque a medição mora fora deste módulo; não é para uso na
+    /// composição do produto, que passa por [`Self::novo`].
+    pub fn novo_com_entropia(
+        biblioteca: &BibliotecaDeVideo,
+        config: ConfigDoCodificador,
+        entropia: EntropyCodingMode,
+    ) -> Result<Self, ErroDeVideo> {
         let resolucao = config.resolucao;
         let quadros = config.cadencia.hz();
         let teto = config.teto_efetivo_bps();
@@ -346,11 +364,28 @@ impl Codificador {
         // ele pula quadro sozinho — o que é informação, não defeito, e sai daqui
         // como `Ok(None)`.
         bruta.rate_control_mode = Some(RateControlMode::Bitrate);
-        // CAVLC é o que faz o OpenH264 escolher o perfil baseline; CABAC o
-        // levaria a High. O §2 pediu baseline, e é também o único perfil que ele
-        // sabe codificar — dizê-lo aqui não muda o que os spikes mediram, torna
-        // a decisão visível no lugar onde alguém iria mexer nela.
-        bruta.entropy_coding_mode = Some(EntropyCodingMode::Cavlc);
+        // **CABAC, e era CAVLC até 2026-08-31.**
+        //
+        // O comentário que estava aqui dizia que «CAVLC é o que faz o OpenH264
+        // escolher o perfil baseline; CABAC o levaria a High». Isso está errado,
+        // e o fonte do binding diz o contrário com todas as letras:
+        // «PRO_MAIN/PRO_HIGH são aceitos por `InitializeExt`, mas a capacidade
+        // real fica em **Constrained Baseline + CABAC**; a transformada 8×8
+        // (exigida por High) não está implementada».
+        //
+        // Medido em `examples/entropia.rs`, mesmo conteúdo e mesmo teto: CABAC
+        // gasta **13,4% menos bytes a 540p e 15,7% menos a 720p** com teto de
+        // 6 Mbps. A 1200 kbps os dois empatam, porque ali o controle de taxa
+        // está saturado e nenhum dos dois tem folga para gastar melhor — o que
+        // significa que o ganho aparece exatamente onde havia banda sobrando,
+        // que é a rede local.
+        //
+        // E o outro lado decodifica: o mesmo exemplo faz a ida e volta pelo
+        // `Decodificador`, e os quadros voltam inteiros. Era a pergunta que
+        // decidia — a razão 4 do §2 é «é o codec que o outro lado fala», e uma
+        // economia que só nós entendêssemos seria incompatibilidade, não
+        // economia.
+        bruta.entropy_coding_mode = Some(entropia);
         // Zero é «nenhum quadro-chave periódico», que é o §3.3: chave **sob
         // demanda**, quando quem recebe pede. O preço do periódico está medido —
         // forçar um a cada 2 s tira 21% dos quadros por segundo e sobe o
