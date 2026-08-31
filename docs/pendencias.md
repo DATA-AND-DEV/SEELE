@@ -1474,3 +1474,33 @@ alvo é outro.
 
 **Quando dói.** Em toda rodada de `cargo test --workspace`, que é o comando que
 este projeto usa para dizer que está verde.
+
+## 30 · O `seeled` não sabe dizer que versão é
+
+**Sintoma.** `seeled --version` não existe. O argumento cai no ramo que lê
+endereço de escuta e o processo morre com `could not parse the listen address` —
+uma mensagem sobre outra coisa, para uma pergunta razoável.
+
+O que existe é `--ajuda` / `--help` / `-h`, e os subcomandos `convite`, `senha`
+e `anexos`.
+
+**Por que dói mais do que parece.** Quem hospeda roda o `seeled` num VPS e o
+esquece. Quando algo der errado — e a pendência 26 e a 29 são exemplos de coisas
+que dão —, a primeira pergunta de qualquer suporte é «qual versão está rodando»,
+e hoje a resposta exige olhar o arquivo, a data, ou o histórico do shell.
+
+É pior com o pipeline de release quebrado desde 2026-08-22: um binário que não
+diz a versão dele, entregue por um pipeline que pode ter montado o commit errado,
+não tem como ser conferido a não ser pela soma — que quem hospeda não guardou.
+
+**Onde dói junto.** A fórmula de Homebrew (`empacotar/homebrew.sh`) queria
+conferir a versão no `brew test`, que é exatamente o que aquele teste existe para
+fazer, e teve de se contentar com `--ajuda`. Ele prova que o binário executa
+nesta arquitetura e não prova qual build é.
+
+**O conserto.** Um ramo a mais no `match` de `crates/seele-server/src/main.rs`,
+imprimindo `env!("CARGO_PKG_VERSION")`. O que exige um pouco de cuidado é que a
+versão do workspace é `0.0.0` — ela vem do `Cargo.toml` da raiz e é substituída no
+empacotamento —, então imprimir a constante crua diria `0.0.0` em todo lugar. O
+número de verdade é o que o `publicar.sh` carimba, e é dele que a linha tem de
+sair.

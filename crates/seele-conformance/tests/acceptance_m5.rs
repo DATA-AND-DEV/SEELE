@@ -28,7 +28,7 @@ const WAIT: Duration = Duration::from_secs(5);
 
 async fn start() -> Result<(SocketAddr, Arc<Daemon>)> {
     let config = ServerConfig {
-        name: "Terceira Tóquio".into(),
+        name: "Casa".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
         ..ServerConfig::default()
@@ -131,7 +131,7 @@ async fn a_shell_connects_and_the_snapshot_describes_the_server() -> Result<()> 
 
     let snapshot = connection.snapshot();
     assert_eq!(snapshot.link_state, LinkTrust::Verified);
-    assert_eq!(snapshot.server, "Terceira Tóquio");
+    assert_eq!(snapshot.server, "Casa");
     assert_eq!(snapshot.nickname, "ayanami");
     assert!(snapshot.me.is_some());
     assert!(

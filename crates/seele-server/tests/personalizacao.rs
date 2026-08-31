@@ -261,7 +261,7 @@ async fn renomear_com_o_server_no_ar_chega_a_quem_nao_pediu_nada() -> Result<()>
     frame::write(
         &mut anfitria.envio,
         &ClientMessage::RenameServer {
-            name: "Terceira Tóquio".into(),
+            name: "Casa".into(),
         },
     )
     .await?;
@@ -273,7 +273,7 @@ async fn renomear_com_o_server_no_ar_chega_a_quem_nao_pediu_nada() -> Result<()>
     .await;
     assert_eq!(
         na_visita.as_deref(),
-        Some("Terceira Tóquio"),
+        Some("Casa"),
         "quem não pediu nada continuou lendo o nome velho"
     );
 
@@ -283,7 +283,7 @@ async fn renomear_com_o_server_no_ar_chega_a_quem_nao_pediu_nada() -> Result<()>
         _ => None,
     })
     .await;
-    assert_eq!(em_casa.as_deref(), Some("Terceira Tóquio"));
+    assert_eq!(em_casa.as_deref(), Some("Casa"));
 
     servidor.shutdown();
     Ok(())
@@ -434,7 +434,7 @@ async fn o_nome_e_o_icone_sobrevivem_a_um_reinicio() -> Result<()> {
         frame::write(
             &mut anfitria.envio,
             &ClientMessage::RenameServer {
-                name: "Terceira Tóquio".into(),
+                name: "Casa".into(),
             },
         )
         .await?;
@@ -458,7 +458,7 @@ async fn o_nome_e_o_icone_sobrevivem_a_um_reinicio() -> Result<()> {
     let (endereco, servidor) = server(Location::File(arquivo)).await?;
     let de_volta = abrir(endereco, 1).await?;
     assert_eq!(
-        de_volta.nome_do_server, "Terceira Tóquio",
+        de_volta.nome_do_server, "Casa",
         "o reinício devolveu o nome do arranque por cima do que quem hospeda escolheu"
     );
     assert_eq!(de_volta.icone, Some(imagem));

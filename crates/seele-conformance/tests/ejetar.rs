@@ -58,7 +58,7 @@ const LINE: u32 = 1;
 /// chance é remota e o padrão é o da casa — fica dito para não parecer garantia.
 async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
     let config = ServerConfig {
-        name: "Terceira Tóquio".into(),
+        name: "Casa".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
         ..ServerConfig::default()

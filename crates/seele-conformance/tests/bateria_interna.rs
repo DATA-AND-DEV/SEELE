@@ -29,7 +29,7 @@ const LINE: u32 = 1;
 /// Sobe um servidor numa porta escolhida — a mesma na segunda vez.
 async fn server(porta: u16, banco: Location) -> Result<(SocketAddr, Arc<Daemon>)> {
     let config = ServerConfig {
-        name: "Terceira Tóquio".into(),
+        name: "Casa".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], porta)),
         database: banco,
         ..ServerConfig::default()

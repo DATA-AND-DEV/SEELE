@@ -58,7 +58,7 @@ use seele_server::{Daemon, ServerConfig};
 /// o resultado.
 async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
     let config = ServerConfig {
-        name: "Terceira Tóquio".into(),
+        name: "Casa".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
         ..ServerConfig::default()

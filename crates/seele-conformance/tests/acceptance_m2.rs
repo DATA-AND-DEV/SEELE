@@ -31,7 +31,7 @@ const DELIVERY_TIMEOUT: Duration = Duration::from_secs(3);
 /// Starts a server on an ephemeral port and returns where to reach it.
 async fn start(observers: Vec<String>) -> Result<SocketAddr> {
     let config = ServerConfig {
-        name: "Terceira Tóquio".into(),
+        name: "Casa".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         observers,
         ..ServerConfig::default()
@@ -368,7 +368,7 @@ async fn the_session_names_the_server_and_its_voice_room() -> Result<()> {
     let client = connect(address, "ayanami").await?;
 
     let session = client.session();
-    assert_eq!(session.server, "Terceira Tóquio");
+    assert_eq!(session.server, "Casa");
     assert_eq!(session.voice_rooms.len(), 1);
     assert_eq!(
         session.voice_rooms.first().map(|voice_room| voice_room.id),

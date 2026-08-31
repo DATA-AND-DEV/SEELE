@@ -389,7 +389,7 @@ fn a_trilha_de_uma_chegada_que_falhou_atravessa_ate_a_casca() {
 /// Sobe um servidor de verdade numa porta que o sistema escolhe.
 async fn server_de_teste() -> Option<(SocketAddr, Arc<Daemon>)> {
     let config = ServerConfig {
-        name: "Terceira Tóquio".into(),
+        name: "Casa".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
         ..ServerConfig::default()

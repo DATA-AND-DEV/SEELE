@@ -3722,7 +3722,7 @@ mod tests {
             id: SessionId(1),
             person: PersonId(7),
             ssrc: Ssrc(700),
-            server: "Terceira Tóquio".into(),
+            server: "Casa".into(),
             voice_rooms: vec![VoiceRoomInfo {
                 id: VoiceRoomId(1),
                 name: "SALA-01".into(),
@@ -4325,7 +4325,7 @@ mod tests {
                 id: SessionId(1),
                 person: seele_core::PersonId(7),
                 ssrc: Ssrc(700),
-                server: "Terceira Tóquio".into(),
+                server: "Casa".into(),
                 voice_rooms: Vec::new(),
                 channels: Vec::new(),
                 roles: Vec::new(),
@@ -4348,7 +4348,7 @@ mod tests {
                 id: SessionId(1),
                 person: seele_core::PersonId(7),
                 ssrc: Ssrc(700),
-                server: "Terceira Tóquio".into(),
+                server: "Casa".into(),
                 voice_rooms: Vec::new(),
                 channels: Vec::new(),
                 roles: Vec::new(),
@@ -4371,7 +4371,7 @@ mod tests {
                 id: SessionId(1),
                 person: seele_core::PersonId(7),
                 ssrc: Ssrc(700),
-                server: "Terceira Tóquio".into(),
+                server: "Casa".into(),
                 voice_rooms: Vec::new(),
                 channels: Vec::new(),
                 roles: Vec::new(),
@@ -4404,7 +4404,7 @@ mod tests {
             id: SessionId(1),
             person: seele_core::PersonId(7),
             ssrc: Ssrc(700),
-            server: "Terceira Tóquio".into(),
+            server: "Casa".into(),
             voice_rooms: Vec::new(),
             channels: Vec::new(),
             roles: Vec::new(),
@@ -4472,7 +4472,7 @@ mod tests {
             id: SessionId(1),
             person: seele_core::PersonId(7),
             ssrc: Ssrc(700),
-            server: "Terceira Tóquio".into(),
+            server: "Casa".into(),
             voice_rooms: Vec::new(),
             channels: Vec::new(),
             roles: Vec::new(),
@@ -4558,11 +4558,11 @@ mod tests {
         fold(
             &shared,
             &ServerMessage::ServerRenamed {
-                name: "Terceira Tóquio".into(),
+                name: "Casa".into(),
             },
         );
         let renomeado = connection.snapshot();
-        assert_eq!(renomeado.server, "Terceira Tóquio");
+        assert_eq!(renomeado.server, "Casa");
         assert_eq!(
             renomeado.icon_revision, 0,
             "a rename made every shell refetch a picture that did not change"
@@ -5005,7 +5005,7 @@ mod tests {
             id: SessionId(1),
             person: PersonId(7),
             ssrc: Ssrc(700),
-            server: "Terceira Tóquio".into(),
+            server: "Casa".into(),
             voice_rooms: vec![VoiceRoomInfo {
                 id: VoiceRoomId(1),
                 name: "SALA-01".into(),
@@ -5094,7 +5094,7 @@ mod tests {
             id: SessionId(1),
             person: PersonId(7),
             ssrc: Ssrc(700),
-            server: "Terceira Tóquio".into(),
+            server: "Casa".into(),
             voice_rooms: vec![VoiceRoomInfo {
                 id: VoiceRoomId(1),
                 name: "SALA-01".into(),
@@ -5302,7 +5302,7 @@ mod tests {
                 id: SessionId(1),
                 person: PersonId(7),
                 ssrc: Ssrc(700),
-                server: "Terceira Tóquio".into(),
+                server: "Casa".into(),
                 voice_rooms: vec![VoiceRoomInfo {
                     id: VoiceRoomId(1),
                     name: "SALA-01".into(),

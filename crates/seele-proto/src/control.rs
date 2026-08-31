@@ -2043,7 +2043,7 @@ mod tests {
             id: SessionId(7),
             person: PersonId(42),
             ssrc: Ssrc(0xABCD),
-            server: "Terceira Tóquio".into(),
+            server: "Casa".into(),
             voice_rooms: vec![VoiceRoomInfo {
                 id: VoiceRoomId(1),
                 name: "SALA-01 CENTRAL".into(),
@@ -3036,7 +3036,7 @@ mod icon_tests {
         ));
 
         let ok = ClientMessage::RenameServer {
-            name: "Terceira Tóquio".into(),
+            name: "Casa".into(),
         };
         let frame = encode(&ok).unwrap();
         assert_eq!(decode::<ClientMessage>(&frame).unwrap(), ok);

@@ -51,7 +51,7 @@ pub struct Conhecido {
     ///
     /// `None` numa entrada escrita antes de este campo existir, e a tela cai
     /// para o endereço nesse caso. Guardar o nome é o que faz esta lista servir
-    /// a quem não decora IP: «Terceira Tóquio» é o que uma pessoa reconhece, e
+    /// a quem não decora IP: «Casa» é o que uma pessoa reconhece, e
     /// `192.168.0.39:8383` é o que ela copiou de alguém uma vez.
     pub nome: Option<String>,
     /// A imagem do servidor na última visita, se havia uma.
@@ -360,7 +360,7 @@ mod tests {
         lista
             .anotar_aparencia(
                 "server.exemplo:8383",
-                Some("Terceira Tóquio"),
+                Some("Casa"),
                 Some(&[1, 2, 3]),
             )
             .expect("anotar");
@@ -371,7 +371,7 @@ mod tests {
 
         let de_volta = Conhecidos::abrir(caminho).expect("reabrir");
         let entrada = de_volta.buscar("server.exemplo:8383").expect("está lá");
-        assert_eq!(entrada.nome.as_deref(), Some("Terceira Tóquio"));
+        assert_eq!(entrada.nome.as_deref(), Some("Casa"));
         assert_eq!(entrada.icone.as_deref(), Some(&[1, 2, 3][..]));
         assert_eq!(entrada.voice_room, Some(2), "a visita nova não valeu");
 

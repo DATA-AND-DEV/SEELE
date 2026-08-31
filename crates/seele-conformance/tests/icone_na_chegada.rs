@@ -75,7 +75,7 @@ fn crc(dados: &[u8]) -> u32 {
 
 async fn server(arquivo: std::path::PathBuf) -> Result<(SocketAddr, Arc<Daemon>)> {
     let config = ServerConfig {
-        name: "Terceira Tóquio".into(),
+        name: "Casa".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::File(arquivo),
         ..ServerConfig::default()

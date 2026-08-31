@@ -60,7 +60,7 @@ async fn server(teto: u64) -> Result<(SocketAddr, Arc<Daemon>, tempfile::TempDir
     }
 
     let config = ServerConfig {
-        name: "Terceira Tóquio".into(),
+        name: "Casa".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::File(banco),
         ..ServerConfig::default()
@@ -350,7 +350,7 @@ async fn quem_nao_pode_anexar_e_recusado_com_razao() -> Result<()> {
     let casa = tempfile::tempdir()?;
     let banco = casa.path().join("seele.db");
     let config = ServerConfig {
-        name: "Terceira Tóquio".into(),
+        name: "Casa".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::File(banco),
         observers: vec!["ayanami".into()],
@@ -390,7 +390,7 @@ async fn um_server_que_nao_guarda_arquivo_diz_isso_em_vez_de_deixar_pendurado() 
     // forma de falhar que este projeto recusa em toda outra porta.
     let casa = tempfile::tempdir()?;
     let config = ServerConfig {
-        name: "Terceira Tóquio".into(),
+        name: "Casa".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
         ..ServerConfig::default()

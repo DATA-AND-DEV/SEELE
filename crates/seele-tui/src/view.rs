@@ -212,7 +212,7 @@ mod tests {
             id: SessionId(1),
             person: PersonId(7),
             ssrc: Ssrc(700),
-            server: "Terceira Tóquio".into(),
+            server: "Casa".into(),
             voice_rooms: vec![
                 VoiceRoomInfo {
                     id: VOICE_ROOM,

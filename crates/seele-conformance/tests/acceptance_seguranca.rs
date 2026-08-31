@@ -20,7 +20,7 @@ const VOICE_ROOM: VoiceRoomId = VoiceRoomId(1);
 
 async fn subir(caminho: &std::path::Path) -> Result<(SocketAddr, Arc<Daemon>)> {
     let config = ServerConfig {
-        name: "Terceira Tóquio".into(),
+        name: "Casa".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::File(caminho.to_path_buf()),
         ..ServerConfig::default()

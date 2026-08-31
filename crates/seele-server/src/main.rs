@@ -53,7 +53,7 @@ async fn main() -> Result<()> {
         .context("could not parse the listen address")?;
 
     let server = seele_server::ServerConfig {
-        name: "Terceira Tóquio".into(),
+        name: "Casa".into(),
         listen,
         // Em arquivo, não em memória. O padrão da biblioteca é `Memory`, que é
         // o certo para teste e o errado para um daemon: com ele o `seeled`

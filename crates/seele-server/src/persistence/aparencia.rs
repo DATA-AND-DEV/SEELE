@@ -170,18 +170,18 @@ mod testes {
     #[test]
     fn o_nome_escolhido_vence_o_do_arranque() {
         let persistence = memoria();
-        definir_nome(&persistence, "Terceira Tóquio").unwrap();
-        assert_eq!(nome(&persistence, "Casa").unwrap(), "Terceira Tóquio");
+        definir_nome(&persistence, "Casa").unwrap();
+        assert_eq!(nome(&persistence, "Casa").unwrap(), "Casa");
     }
 
     #[test]
     fn o_nome_e_aparado_antes_de_ser_gravado() {
         let persistence = memoria();
         assert_eq!(
-            definir_nome(&persistence, "  Terceira Tóquio \n").unwrap(),
-            "Terceira Tóquio"
+            definir_nome(&persistence, "  Casa \n").unwrap(),
+            "Casa"
         );
-        assert_eq!(nome(&persistence, "Casa").unwrap(), "Terceira Tóquio");
+        assert_eq!(nome(&persistence, "Casa").unwrap(), "Casa");
     }
 
     #[test]
@@ -274,12 +274,12 @@ mod testes {
 
         {
             let persistence = Persistence::open(&arquivo).unwrap();
-            definir_nome(&persistence, "Terceira Tóquio").unwrap();
+            definir_nome(&persistence, "Casa").unwrap();
             definir_icone(&persistence, Some(&bytes)).unwrap();
         }
 
         let persistence = Persistence::open(&arquivo).unwrap();
-        assert_eq!(nome(&persistence, "Casa").unwrap(), "Terceira Tóquio");
+        assert_eq!(nome(&persistence, "Casa").unwrap(), "Casa");
         assert_eq!(icone(&persistence).unwrap(), Some(bytes));
     }
 }

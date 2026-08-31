@@ -1164,7 +1164,7 @@ mod tests {
         let mut app = App::new();
         app.screen = Screen::PatternBlue;
         app.clock = "12:04:33".into();
-        app.servers = vec!["Terceira Tóquio".into(), "Geofront".into()];
+        app.servers = vec!["Casa".into(), "Geofront".into()];
         app.tree = vec![
             Node::VoiceRoom {
                 name: "SALA-01 CENTRAL".into(),

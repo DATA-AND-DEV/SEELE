@@ -1169,7 +1169,7 @@ mod tests {
             id: SessionId(1),
             person: PersonId(7),
             ssrc: Ssrc(700),
-            server: "Terceira Tóquio".into(),
+            server: "Casa".into(),
             voice_rooms: vec![VoiceRoomInfo {
                 id: VOICE_ROOM,
                 name: "SALA-01 CENTRAL".into(),
@@ -1228,7 +1228,7 @@ mod tests {
         let changed = room.apply(&session());
 
         assert!(changed.channels);
-        assert_eq!(room.server, "Terceira Tóquio");
+        assert_eq!(room.server, "Casa");
         assert_eq!(room.voice_rooms.len(), 1);
         assert_eq!(room.channels.len(), 1);
         assert_eq!(room.me, Some(PersonId(7)));
@@ -1244,7 +1244,7 @@ mod tests {
             id: SessionId(1),
             person: PersonId(7),
             ssrc: Ssrc(700),
-            server: "Terceira Tóquio".into(),
+            server: "Casa".into(),
             voice_rooms: Vec::new(),
             channels: Vec::new(),
             permissions: Vec::new(),
@@ -1729,7 +1729,7 @@ mod tests {
         // the old one until they reconnect.
         let mut room = Room::new();
         room.apply(&session());
-        assert_eq!(room.server, "Terceira Tóquio");
+        assert_eq!(room.server, "Casa");
 
         let changed = room.apply(&ServerMessage::ServerRenamed {
             name: "Quartel-General".into(),
@@ -2010,7 +2010,7 @@ mod tests {
             id: SessionId(1),
             person: PersonId(7),
             ssrc: Ssrc(700),
-            server: "Terceira Tóquio".into(),
+            server: "Casa".into(),
             voice_rooms: Vec::new(),
             channels: Vec::new(),
             roles: Vec::new(),
@@ -2252,7 +2252,7 @@ mod tests {
                 id: SessionId(2),
                 person: PersonId(7),
                 ssrc: Ssrc(700),
-                server: "Terceira Tóquio".into(),
+                server: "Casa".into(),
                 voice_rooms: Vec::new(),
                 channels: Vec::new(),
                 permissions: Vec::new(),

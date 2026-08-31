@@ -381,7 +381,7 @@ superfície não servem para distinguir nada porque a função delas é não apa
 Não há versão desta decisão em que caibam doze Dogmas com doze cores distintas
 sem abrir a palheta, e abrir a palheta é a alternativa 1.
 
-**A sigla é derivada, e derivação erra.** Dois Dogmas chamados «Terceira Tóquio»
+**A sigla é derivada, e derivação erra.** Dois Dogmas chamados «Casa»
 e «Torre 3» viram `T3` os dois, e nenhuma regra automática conserta isso sem
 inventar uma exceção por caso. É o mesmo gênero do `Rafae1` ao lado de `Rafael`
 que o ADR 0030 nomeia e não resolve: contra parecido não há verificação, só o

@@ -32,7 +32,7 @@ const WAIT: Duration = Duration::from_secs(5);
 /// to stop it.
 async fn start(database: PathBuf) -> Result<(SocketAddr, Arc<Daemon>)> {
     let config = ServerConfig {
-        name: "Terceira Tóquio".into(),
+        name: "Casa".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::File(database),
         ..ServerConfig::default()

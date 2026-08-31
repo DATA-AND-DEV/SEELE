@@ -54,7 +54,7 @@ async fn server(marca: &str) -> Result<(SocketAddr, Arc<Daemon>, std::path::Path
     let _ = std::fs::remove_file(&arquivo);
 
     let config = ServerConfig {
-        name: "Terceira Tóquio".into(),
+        name: "Casa".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::File(arquivo.clone()),
         ..ServerConfig::default()

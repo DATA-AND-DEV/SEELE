@@ -1217,7 +1217,7 @@ mod tree_tests {
         // Tab and j share the same j. Moving the wrong list is the bug.
         let mut app = App::new();
         app.tree = tree();
-        app.servers = vec!["Terceira Tóquio".into(), "Geofront".into()];
+        app.servers = vec!["Casa".into(), "Geofront".into()];
         app.focus = Panel::Server;
 
         app.on_key(Key::Char('j'));
