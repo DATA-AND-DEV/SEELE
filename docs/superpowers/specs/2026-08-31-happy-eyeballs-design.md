@@ -1,4 +1,4 @@
-# Happy Eyeballs — desenho, e o socket que decide quem pode correr
+# Happy Eyeballs — desenho, e o leitor que decide, não o socket
 
 **Data:** 2026-08-31
 **Estado:** aprovado em conversa; registrado no [ADR 0037](../../adr/0037-candidatos-do-convite-em-paralelo.md)
@@ -101,8 +101,8 @@ não existe para economizar tempo de parede — a corrida já faz isso — e sim
 até o fim. `PRAZO_POR_CANDIDATO` vale para o resto.
 
 `PRAZO_DA_PRIMEIRA_VOLTA` **não** entra aqui: ele existe para que a primeira
-passada em série seja curta, e não há primeira passada em série. Ele continua
-valendo no ramo que ficou serial.
+passada em série seja curta, e não há mais passada em série sobre a lista. Ele
+continua valendo no caminho de candidato único, que não virou corrida.
 
 ## 3 · O conserto do TOFU
 
@@ -134,16 +134,16 @@ de tentar o local. Em paralelo, o local fecha em milissegundos e ninguém repara
 - **Não abre firewall IPv6.** É a pendência nº 26 e é o PCP; este desenho apenas
   para de *esperar* por endereços que o firewall bloqueia. Os dois se somam: com
   PCP os IPv6 passam a responder, e com a corrida quem não responde não custa.
-- **Não mexe na série de quem precisa de furo**, pelas razões da seção 1.
+- **Não mexe em `avisar_pelo_candidato`.** `e_publico` continua sendo a única
+  opinião sobre quem precisa de furo, e os avisos continuam saindo colados ao
+  aperto de mão que acompanham — agora escalonados, junto com ele.
 - **Não muda o convite.** Os endereços já viajam desde a pendência nº 20.
 - **Não toca no `alcance` do servidor.** Quem monta a lista de candidatos
   continua como está; o que muda é como quem recebe a percorre.
 
 ## 6 · Como se prova
 
-- **A escolha de quem corre**, pura: dado um conjunto de candidatos, quais vão
-  para a corrida e quais para a série. É a função que carrega a regra da seção 1
-  e é testável sem socket nenhum.
+- **A corrida**, pura e genérica: sem socket nenhum, com relógio de teste.
 - **A defasagem**, com relógio de teste: que o segundo candidato começa 250 ms
   depois do primeiro e **não** espera o primeiro terminar.
 - **O primeiro que fecha vence**, com um candidato lento e um rápido em ordem
@@ -153,20 +153,23 @@ de tentar o local. Em paralelo, o local fecha em milissegundos e ninguém repara
 - **O pin do vencedor sobrevive**, com dois candidatos de mesma `chave_do_pin`.
   É o teste que mais importa aqui: sem o conserto da seção 3 ele reprova, e o
   que ele guarda é a confiança de primeiro contato do ADR 0003.
-- **A série de quem precisa de furo continua intacta**: os três testes de
-  `furo.rs` continuam verdes sem serem tocados. Se algum precisar mudar, a regra
-  da seção 1 foi violada.
+- **Os sete testes de `furo.rs` continuam verdes sem serem tocados.** Foram eles
+  que derrubaram a primeira versão deste desenho, e continuam sendo o portão: se
+  algum precisar mudar, o aviso por candidato foi quebrado.
 
 ## 7 · Riscos
 
 - **A defasagem de 250 ms não foi medida nesta rede.** Vem do RFC. O que a
   confirma é a mesma medição da pendência nº 26, refeita com a corrida no lugar.
-- **Quatro apertos de mão simultâneos custam quatro `Endpoint`** do quinn por um
-  instante. São efêmeros e morrem com o cancelamento, mas é alocação que antes
-  não existia, e numa máquina fraca vale medir.
-- **A regra da seção 1 é um predicado sobre endereço**, e predicados sobre
-  endereço erram em rede exótica — um `/16` à mão, uma VPN capturando a rota. O
-  erro é benigno nos dois sentidos: quem for classificado como «precisa de furo»
-  sem precisar apenas fica em série, como hoje; quem for classificado ao
-  contrário perde o aviso e falha como falharia sem bilhete nenhum. Nenhum dos
-  dois é regressão sobre o estado atual daquele candidato.
+- **Quatro conexões QUIC simultâneas** onde antes havia uma. Um `Endpoint` só,
+  então não são quatro sockets nem quatro leitores — mas é estado de conexão que
+  antes não coexistia, e numa máquina fraca vale medir.
+- **A rajada de avisos.** Doze furos em ~750 ms contra doze em dezesseis
+  segundos. Cabe nos sessenta da janela do anfitrião, e a janela é por dez
+  segundos, então cabe com folga. O que não foi medido é o que doze furos quase
+  simultâneos fazem com um roteador doméstico ruim — que é uma pergunta sobre o
+  aparelho, não sobre este código.
+- **O `Endpoint` compartilhado é um ponto de falha único que antes não existia.**
+  Em série, um Endpoint que não subisse derrubava uma tentativa; aqui derruba
+  todas. O caminho continua sendo o de hoje — `local_endpoint` já falha assim —,
+  mas a consequência ficou maior.
