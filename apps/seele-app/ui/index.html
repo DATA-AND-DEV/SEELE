@@ -2266,9 +2266,28 @@
                 <span class="server-atalho-texto">
                   <span class="server-atalho-acao">Falar enquanto segura</span>
                   <span class="server-atalho-desc">o microfone abre com a tecla
-                    pressionada, fora de um campo de texto</span>
+                    pressionada, fora de um campo de texto. Clique na tecla ao
+                    lado para trocá-la</span>
                 </span>
-                <kbd class="server-atalho-tecla" data-tecla="Space">ESPAÇO</kbd>
+                <!--
+                  A única linha desta lista que é botão, e é de propósito.
+
+                  As outras quatro documentam teclas fixas. Esta é remarcável, e
+                  se o controle morasse noutro lugar da tela a lista passaria a
+                  poder mentir: ela diria ESPAÇO enquanto o microfone abre no F.
+                  **Sendo o mesmo elemento, não há duas coisas para discordar.**
+
+                  `data-tecla` continua sendo o padrão — é o que o
+                  `every_key_the_shortcut_table_names_is_one_a_script_listens_for`
+                  confere contra o script —, e o script reescreve os dois
+                  quando há outra gravada.
+                -->
+                <button
+                  type="button"
+                  class="server-atalho-tecla server-atalho-tecla-troca"
+                  id="server-tecla-falar"
+                  data-tecla="Space"
+                >ESPAÇO</button>
               </li>
               <li class="server-atalho">
                 <span class="server-atalho-texto">

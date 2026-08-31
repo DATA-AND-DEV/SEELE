@@ -44,6 +44,24 @@ impl From<VoiceMode> for seele_core::VoiceMode {
     }
 }
 
+/// A volta, e ela **precisa morar junto da ida**.
+///
+/// Esta conversão existia como um `match` solto dentro de `snapshot`, e a de
+/// cima aqui: o mesmo mapeamento escrito em dois lugares, que é como um ganha
+/// um quarto modo e o outro não. É exatamente a forma do defeito que custou uma
+/// versão inteira em campo — o `palco-imagem.js` declarava o perfil do vídeo
+/// que o `codec.rs` decidia, e os dois deixaram de concordar sem que nada
+/// avisasse.
+impl From<seele_core::VoiceMode> for VoiceMode {
+    fn from(mode: seele_core::VoiceMode) -> Self {
+        match mode {
+            seele_core::VoiceMode::PushToTalk => Self::PushToTalk,
+            seele_core::VoiceMode::VoiceActivated => Self::VoiceActivated,
+            seele_core::VoiceMode::Open => Self::Open,
+        }
+    }
+}
+
 /// How far the connection has got. `specs/07-estetica.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum LinkTrust {

@@ -259,20 +259,25 @@ function desenharNivel(snapshot) {
  * o terceiro estado — o aberto, que é justamente o que ninguém quer ligar sem
  * saber. `aria-pressed` carrega a escolha para quem não vê o preenchimento.
  *
- * Sem sessão os três ficam apagados: `set_voice_mode` fala com uma sessão
- * aberta, e não há preferência em disco que os lembre. Apagado **e** dizendo por quê, ou
- * a lacuna se lê como defeito.
+ * **Sem sessão eles funcionam**, e isto mudou. O texto aqui dizia que ficavam
+ * apagados porque «`set_voice_mode` fala com uma sessão aberta, e não há
+ * preferência em disco que os lembre» — as duas metades deixaram de ser
+ * verdade no mesmo commit: o comando passou a gravar antes de aplicar, e
+ * `preferences` ganhou a linha `voice_mode`.
+ *
+ * Então escolher o modo na tela de entrada vale, e vale para a próxima conexão.
+ * Com sessão, o que manda é o `snapshot` — é o que o microfone está fazendo de
+ * verdade, e ele vence o que estava escrito.
+ *
+ * @param {object|null} snapshot a sessão, ou `null` quando não há
+ * @param {string|null} gravado o modo em disco, para quando não há sessão
  */
-function desenharModos(snapshot) {
-  const semSessao = !snapshot;
+function desenharModos(snapshot, gravado) {
+  const valendo = snapshot ? snapshot.voice_mode : gravado;
   for (const botao of document.querySelectorAll(".server-modo")) {
-    botao.disabled = semSessao;
-    botao.setAttribute("aria-pressed", !semSessao && snapshot.voice_mode === botao.dataset.modo);
-    if (semSessao) {
-      botao.title = "Só dá para escolher isto com uma conversa aberta.";
-    } else {
-      botao.removeAttribute("title");
-    }
+    botao.disabled = false;
+    botao.removeAttribute("title");
+    botao.setAttribute("aria-pressed", valendo === botao.dataset.modo);
   }
 }
 
@@ -316,6 +321,8 @@ async function escolherModo(modo) {
   try {
     await invoke("set_voice_mode", { mode: modo });
   } catch (falha) {
+    // Gravar é o que pode falhar; aplicar sem sessão não é falha. Um aviso e
+    // o redesenho abaixo, que mostra o que ficou valendo de verdade.
     console.warn("set_voice_mode:", falha);
   }
   await atualizarServer();
@@ -330,6 +337,9 @@ async function abrirServer(origem) {
   $(origem).hidden = true;
   $("tela-server").hidden = false;
   $("server-erro").hidden = true;
+  // A tecla gravada, relida a cada abertura: ela pode ter sido trocada noutra
+  // janela, e a lista de atalhos que mente é o defeito que esta linha impede.
+  recarregarTeclaDeFalar().then(desenharTeclaDeFalar);
   // A recusa da seção do servidor some junto: ela é sobre o arquivo que alguém
   // escolheu da última vez, e reabrir a tela não é tentar de novo.
   $("server-servidor-erro").hidden = true;
@@ -385,9 +395,21 @@ async function atualizarServer() {
   } catch (falha) {
     if (falha !== "NotConnected") console.warn("snapshot:", falha);
   }
+  // O modo em disco só é perguntado quando não há sessão para responder — com
+  // ela, o `snapshot` já diz o que o microfone está fazendo, e uma volta de IPC
+  // a cada meio segundo por um valor que não seria usado é volta desperdiçada.
+  let gravado = null;
+  if (!snapshot) {
+    try {
+      gravado = await invoke("modo_de_voz_escolhido");
+    } catch (falha) {
+      console.warn("modo_de_voz_escolhido:", falha);
+    }
+  }
+
   desenharNivel(snapshot);
   marcarLinhas(snapshot);
-  desenharModos(snapshot);
+  desenharModos(snapshot, gravado);
   desenharIdentidade(snapshot);
   desenharServidor(snapshot);
   await sincronizarIcone(snapshot);
@@ -898,3 +920,102 @@ abrirSecao("secao-audio");
 setInterval(() => {
   if (!$("tela-server").hidden) atualizarServer();
 }, 500);
+
+/**
+ * O nome que uma pessoa lê para o código que o navegador dá.
+ *
+ * **Este é o único lugar do produto que nomeia teclas**, e é de propósito: o
+ * `preferences.rs` diz, por escrito, que o valor atravessa opaco por lá porque
+ * «quem lê teclado é a casca, e é o único lugar que pode nomeá-las».
+ *
+ * O que não estiver na tabela sai como o próprio código. Um nome feio é melhor
+ * que um nome errado, e melhor ainda que uma tecla que a lista não sabe
+ * mostrar.
+ */
+function nomeDaTecla(codigo) {
+  const nomes = {
+    Space: "ESPAÇO",
+    Enter: "ENTER",
+    Tab: "TAB",
+    Backquote: "`",
+    ShiftLeft: "SHIFT ESQ",
+    ShiftRight: "SHIFT DIR",
+    ControlLeft: "CTRL ESQ",
+    ControlRight: "CTRL DIR",
+    AltLeft: "ALT ESQ",
+    AltRight: "ALT DIR",
+    CapsLock: "CAPS",
+  };
+  if (nomes[codigo]) return nomes[codigo];
+  // `KeyF` vira `F`, `Digit4` vira `4`, `F9` fica `F9`.
+  const letra = /^Key([A-Z])$/.exec(codigo);
+  if (letra) return letra[1];
+  const numero = /^Digit([0-9])$/.exec(codigo);
+  if (numero) return numero[1];
+  return codigo;
+}
+
+/** Se o botão está esperando a próxima tecla. */
+let ouvindoTecla = false;
+
+/** Escreve na lista de atalhos qual tecla está valendo. */
+function desenharTeclaDeFalar(codigo) {
+  const botao = $("server-tecla-falar");
+  if (!botao) return;
+  botao.dataset.tecla = codigo;
+  botao.textContent = nomeDaTecla(codigo);
+  botao.setAttribute("aria-label", `Falar enquanto segura: ${nomeDaTecla(codigo)}. Clique para trocar`);
+}
+
+/**
+ * Para de esperar tecla, com ou sem escolha.
+ *
+ * Sempre redesenha a partir do que está valendo de verdade, e não do que se
+ * esperava gravar: se a gravação falhou, a lista tem de voltar a mostrar a
+ * tecla antiga, que é a que ainda abre o microfone.
+ */
+function pararDeOuvirTecla() {
+  ouvindoTecla = false;
+  const botao = $("server-tecla-falar");
+  if (botao) delete botao.dataset.ouvindo;
+  recarregarTeclaDeFalar().then(desenharTeclaDeFalar);
+}
+
+if ($("server-tecla-falar")) {
+  $("server-tecla-falar").addEventListener("click", () => {
+    ouvindoTecla = true;
+    const botao = $("server-tecla-falar");
+    botao.dataset.ouvindo = "sim";
+    // O rótulo muda junto da cor: `06-clientes-gui.md` proíbe informação que
+    // só a cor carregue, e «este botão está esperando» é informação.
+    botao.textContent = "APERTE UMA TECLA";
+  });
+
+  // Fase de captura: esta janela tem outros ouvintes de `keydown`, e enquanto
+  // se escolhe uma tecla nenhum deles pode agir. Escolher ESC não pode fechar
+  // a tela no mesmo gesto.
+  window.addEventListener(
+    "keydown",
+    (evento) => {
+      if (!ouvindoTecla) return;
+      evento.preventDefault();
+      evento.stopPropagation();
+      // Escape desiste sem trocar: é preciso haver uma saída para quem abriu
+      // isto sem querer, e ela não pode ser «escolher alguma tecla».
+      if (evento.code === "Escape") {
+        pararDeOuvirTecla();
+        return;
+      }
+      invoke("escolher_tecla_de_falar", { tecla: evento.code })
+        .catch((falha) => console.warn("não consegui gravar a tecla:", falha))
+        .finally(pararDeOuvirTecla);
+    },
+    true,
+  );
+
+  // Perder o foco desiste. Um botão deixado à espera capturaria a primeira
+  // tecla de quem voltasse à janela para fazer outra coisa.
+  window.addEventListener("blur", () => {
+    if (ouvindoTecla) pararDeOuvirTecla();
+  });
+}

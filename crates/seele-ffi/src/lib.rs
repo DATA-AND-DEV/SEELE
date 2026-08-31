@@ -2073,11 +2073,7 @@ impl Connection {
         let telemetry = voice.telemetry();
         AudioState {
             available: true,
-            mode: match voice.mode() {
-                seele_core::VoiceMode::PushToTalk => VoiceMode::PushToTalk,
-                seele_core::VoiceMode::VoiceActivated => VoiceMode::VoiceActivated,
-                seele_core::VoiceMode::Open => VoiceMode::Open,
-            },
+            mode: voice.mode().into(),
             speaking: telemetry.local.speaking,
             muted: voice.muted(),
             total_isolation: voice.total_isolation(),

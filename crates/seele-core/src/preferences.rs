@@ -40,6 +40,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
+use crate::voice::VoiceMode;
+
 /// The name of the microphone setting on disk.
 ///
 /// Written once here rather than at both ends: a reader and a writer that
@@ -52,12 +54,24 @@ const CAPTURE: &str = "capture";
 /// Spelled once, for the reason [`CAPTURE`] gives.
 const PLAYBACK: &str = "playback";
 
+/// The name of the microphone-gate setting on disk.
+///
+/// Spelled once, for the reason [`CAPTURE`] gives.
+const VOICE_MODE: &str = "voice_mode";
+
+/// The name of the push-to-talk key setting on disk.
+///
+/// Spelled once, for the reason [`CAPTURE`] gives.
+const PUSH_TO_TALK_KEY: &str = "push_to_talk_key";
+
 /// The local settings, on disk.
 #[derive(Debug, Clone, Default)]
 pub struct Preferences {
     path: PathBuf,
     capture: Option<String>,
     playback: Option<String>,
+    voice_mode: Option<VoiceMode>,
+    push_to_talk_key: Option<String>,
 }
 
 impl Preferences {
@@ -77,6 +91,8 @@ impl Preferences {
             path,
             capture: None,
             playback: None,
+            voice_mode: None,
+            push_to_talk_key: None,
         };
         if let Ok(text) = std::fs::read_to_string(&settings.path) {
             for line in text.lines() {
@@ -90,6 +106,13 @@ impl Preferences {
                 match name.trim() {
                     CAPTURE => settings.capture = value,
                     PLAYBACK => settings.playback = value,
+                    // A name this build does not know for a mode it does not
+                    // know reads as unset, not as the default: see
+                    // `VoiceMode::from_name`.
+                    VOICE_MODE => {
+                        settings.voice_mode = value.as_deref().and_then(VoiceMode::from_name)
+                    }
+                    PUSH_TO_TALK_KEY => settings.push_to_talk_key = value,
                     _ => {}
                 }
             }
@@ -149,12 +172,64 @@ impl Preferences {
         self.write()
     }
 
+    /// How the microphone opens. `None` is what `specs/03-audio.md` defaults to.
+    ///
+    /// Push-to-talk is the default *because it never false-triggers*, and that
+    /// argument is about a person who has not chosen. Somebody who has chosen
+    /// voice activation and finds push-to-talk again the next morning was not
+    /// protected by the default — they were ignored by it.
+    #[must_use]
+    pub const fn voice_mode(&self) -> Option<VoiceMode> {
+        self.voice_mode
+    }
+
+    /// Writes down how the microphone opens. `None` goes back to the default.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the file cannot be written.
+    pub fn set_voice_mode(&mut self, mode: Option<VoiceMode>) -> Result<()> {
+        self.voice_mode = mode;
+        self.write()
+    }
+
+    /// Which key opens the microphone in push-to-talk, or `None` for the space bar.
+    ///
+    /// A `KeyboardEvent.code` — `Space`, `KeyF`, `ControlLeft`. **Opaque here**,
+    /// exactly like a device id: this side never decides what a key means, it
+    /// only remembers which one was chosen. The shell that reads keyboards is
+    /// the only place that can name them, and it is the only place that does.
+    ///
+    /// The layout-independent `code` and not `key`: `key` on an AZERTY keyboard
+    /// gives a different letter for the same physical spot, so a choice made on
+    /// one layout would land somewhere else on another.
+    #[must_use]
+    pub fn push_to_talk_key(&self) -> Option<&str> {
+        self.push_to_talk_key.as_deref()
+    }
+
+    /// Writes down which key opens the microphone. `None` goes back to the space bar.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the file cannot be written.
+    pub fn set_push_to_talk_key(&mut self, key: Option<&str>) -> Result<()> {
+        self.push_to_talk_key = key.map(sanitise).filter(|key| !key.trim().is_empty());
+        self.write()
+    }
+
     fn write(&self) -> Result<()> {
         // Every setting, not only the one that just changed: this rewrites the
         // whole file, so a line left out here is a line deleted from disk. That
         // is how a second setting turns into a bug in the first one.
         let mut text = String::new();
-        for (name, value) in [(CAPTURE, &self.capture), (PLAYBACK, &self.playback)] {
+        let modo = self.voice_mode.map(|mode| mode.as_str().to_owned());
+        for (name, value) in [
+            (CAPTURE, &self.capture),
+            (PLAYBACK, &self.playback),
+            (VOICE_MODE, &modo),
+            (PUSH_TO_TALK_KEY, &self.push_to_talk_key),
+        ] {
             let Some(value) = value else {
                 continue;
             };
@@ -245,15 +320,80 @@ mod tests {
         // and the way that shows up is somebody choosing an output and finding
         // their microphone quietly back on the machine's default the next time
         // they start, with nothing anywhere connecting the two.
+        // **Cada ajuste novo multiplica esta armadilha**, e por isso os quatro
+        // são escritos um por um, na ordem em que um esquecimento apareceria:
+        // quem escreve o último é quem tem mais chance de ter deixado os
+        // outros três de fora do `write`.
         let path = scratch("both");
         {
             let mut settings = Preferences::open(path.clone()).expect("open");
             settings.set_capture(Some("alsa:hw:1,0")).expect("write");
             settings.set_playback(Some("alsa:hw:2,0")).expect("write");
+            settings
+                .set_voice_mode(Some(VoiceMode::VoiceActivated))
+                .expect("write");
+            settings.set_push_to_talk_key(Some("KeyF")).expect("write");
         }
         let settings = Preferences::open(path).expect("reopen");
         assert_eq!(settings.capture(), Some("alsa:hw:1,0"));
         assert_eq!(settings.playback(), Some("alsa:hw:2,0"));
+        assert_eq!(settings.voice_mode(), Some(VoiceMode::VoiceActivated));
+        assert_eq!(settings.push_to_talk_key(), Some("KeyF"));
+    }
+
+    #[test]
+    fn o_modo_escolhido_atravessa_o_processo() {
+        // O pedido que trouxe este ajuste: quem escolhe voz não quer achar
+        // push-to-talk de volta amanhã. Os três, porque um `match` que
+        // esquecesse um ramo só erraria naquele.
+        for modo in [
+            VoiceMode::PushToTalk,
+            VoiceMode::VoiceActivated,
+            VoiceMode::Open,
+        ] {
+            let path = scratch(&format!("modo-{}", modo.as_str()));
+            {
+                let mut settings = Preferences::open(path.clone()).expect("open");
+                settings.set_voice_mode(Some(modo)).expect("write");
+            }
+            let settings = Preferences::open(path).expect("reopen");
+            assert_eq!(settings.voice_mode(), Some(modo), "{}", modo.as_str());
+        }
+    }
+
+    #[test]
+    fn um_modo_que_esta_versao_nao_conhece_le_como_nao_escolhido() {
+        // Uma versão mais nova pode escrever um quarto modo. Esta não pode
+        // adivinhar qual é — e transformá-lo em push-to-talk seria sobrescrever
+        // uma escolha que ela apenas não entendeu. Fica sem valor, que é o que
+        // o cabeçalho do módulo promete para nome desconhecido.
+        let path = scratch("modo-do-futuro");
+        // O `open` é quem cria o diretório; semear antes dele escreveria no nada.
+        Preferences::open(path.clone()).expect("criar o diretório");
+        std::fs::write(&path, "voice_mode\tsussurro\n").expect("semear");
+        let settings = Preferences::open(path).expect("open");
+        assert_eq!(settings.voice_mode(), None);
+    }
+
+    #[test]
+    fn a_tecla_nao_pode_quebrar_o_formato() {
+        // Uma tabulação dentro do valor faria a próxima leitura ver dois
+        // ajustes onde há um. O `code` de um teclado nunca teria uma — mas o
+        // que chega aqui vem da casca, e o que a casca manda é dela.
+        let path = scratch("tecla-suja");
+        {
+            let mut settings = Preferences::open(path.clone()).expect("open");
+            settings
+                .set_push_to_talk_key(Some("Key\tF\nplayback\tfalso"))
+                .expect("write");
+        }
+        let settings = Preferences::open(path).expect("reopen");
+        assert_eq!(settings.push_to_talk_key(), Some("KeyFplaybackfalso"));
+        assert_eq!(
+            settings.playback(),
+            None,
+            "a tecla inventou um segundo ajuste"
+        );
     }
 
     #[test]

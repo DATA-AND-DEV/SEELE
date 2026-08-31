@@ -87,6 +87,42 @@ impl VoiceMode {
             Self::Open => 2,
         }
     }
+
+    /// How this mode is written down in `preferences`.
+    ///
+    /// Words rather than the byte [`VoiceMode::as_byte`] uses, because that
+    /// file is meant to be read and edited by hand — the module says so — and
+    /// `voice_mode <TAB> 1` tells nobody anything. The two spellings coexist
+    /// for two different readers: a machine word for the audio thread, a word
+    /// for the person.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::PushToTalk => "push_to_talk",
+            Self::VoiceActivated => "voice_activated",
+            Self::Open => "open",
+        }
+    }
+
+    /// The mode a written-down name refers to, or `None` if it names none.
+    ///
+    /// `from_name` e não `from_str`: o segundo é o nome do método do traço
+    /// `FromStr` da biblioteca padrão, e um método inerente com o mesmo nome é
+    /// resolvido por regra de escopo — quem importar o traço passa a chamar
+    /// outra coisa sem mudar uma linha. O `clippy` recusa, e está certo.
+    ///
+    /// `None` and not a default: a value this build does not know is a value a
+    /// newer build wrote, and quietly turning it into push-to-talk would be
+    /// this build overwriting a choice it merely failed to understand.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "push_to_talk" => Some(Self::PushToTalk),
+            "voice_activated" => Some(Self::VoiceActivated),
+            "open" => Some(Self::Open),
+            _ => None,
+        }
+    }
 }
 
 /// What the person has set, read by the audio thread every frame.

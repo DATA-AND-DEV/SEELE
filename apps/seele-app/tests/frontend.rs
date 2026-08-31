@@ -3282,12 +3282,23 @@ fn the_server_section_confirms_by_state_and_not_by_a_save_button() {
 
 #[test]
 fn every_key_the_shortcut_table_names_is_one_a_script_listens_for() {
-    // The shortcuts section is a *list of what the keys are*, because they are
-    // fixed: there is no editable table and nowhere to save a rebinding. A list
-    // like that has exactly one way to fail, and it fails silently — the key it
-    // names stops being the key that acts, and the screen goes on documenting a
+    // The shortcuts section is a *list of what the keys are*. A list like that
+    // has exactly one way to fail, and it fails silently — the key it names
+    // stops being the key that acts, and the screen goes on documenting a
     // program that no longer exists. Nothing about that is visible from the
     // page, from the script, or from a running window.
+    //
+    // **One of them is now reboundable, and the sentence that used to be here
+    // said the opposite**: «they are fixed: there is no editable table and
+    // nowhere to save a rebinding». `preferences` gained a `push_to_talk_key`
+    // line, so it does.
+    //
+    // The row did not grow a control somewhere else on the screen — it *became*
+    // the control. The `<kbd>` for talking is a `<button>`, and the script
+    // writes both its `data-tecla` and its label from what is on disk. Two
+    // separate things could disagree; one thing cannot. What this test still
+    // checks is the *defaults*, which is what the page ships with and what the
+    // script falls back to.
     //
     // `data-tecla` carries the name the *browser* gives the key, not the word a
     // person reads, so this compares the row against the listener rather than
@@ -3317,6 +3328,49 @@ fn every_key_the_shortcut_table_names_is_one_a_script_listens_for() {
              listens for it — so the screen documents a program this is not"
         );
     }
+}
+
+#[test]
+fn o_padrao_da_tecla_de_falar_e_o_mesmo_nos_dois_lugares() {
+    // A tecla de falar é escrita em dois lugares que **têm** de concordar: o
+    // `data-tecla` que o HTML traz — o que a lista mostra antes de qualquer
+    // leitura de disco — e o `teclaDeFalar` de que o script parte quando não há
+    // nada gravado, ou quando a leitura falha.
+    //
+    // Discordando, a janela abre dizendo que se fala numa tecla e falando
+    // noutra, até alguém abrir a configuração. É o mesmo defeito que custou uma
+    // versão em campo, na escala pequena: um lado declarando o que o outro
+    // decide.
+    //
+    // Não dá para fundi-los num só — o HTML precisa de um valor antes de o
+    // script rodar. Então eles ficam dois e são conferidos aqui.
+    let page = read("ui/index.html");
+    let script = without_comments(&scripts());
+
+    let do_html = page
+        .split("id=\"server-tecla-falar\"")
+        .nth(1)
+        .and_then(|resto| resto.split("data-tecla=\"").nth(1))
+        .or_else(|| {
+            // O atributo pode vir antes do `id`, e a ordem é do gosto de quem
+            // escreveu o HTML, não uma regra. Então procura-se dos dois lados.
+            page.split("server-atalho-tecla-troca")
+                .nth(1)
+                .and_then(|resto| resto.split("data-tecla=\"").nth(1))
+        })
+        .and_then(|resto| resto.split('"').next())
+        .expect("o botão da tecla de falar tem de trazer um `data-tecla`");
+
+    let do_script = script
+        .split("let teclaDeFalar = \"")
+        .nth(1)
+        .and_then(|resto| resto.split('"').next())
+        .expect("o script tem de partir de uma tecla");
+
+    assert_eq!(
+        do_html, do_script,
+        "a lista de atalhos abre dizendo `{do_html}` e o script escuta `{do_script}`"
+    );
 }
 
 #[test]

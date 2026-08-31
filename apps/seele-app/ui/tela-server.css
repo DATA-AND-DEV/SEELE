@@ -444,6 +444,35 @@
   border: 1px solid var(--seele-linha-forte);
 }
 
+/*
+  A tecla que se pode trocar.
+
+  Herda o desenho da `kbd` ao lado para que a lista continue lendo como uma
+  lista — o que muda é o cursor e a moldura ao focar, que é o que diz «isto
+  responde». Sem `appearance`, o botão do sistema traria fundo e canto
+  arredondados, e o `07-estetica.md` proíbe os dois.
+*/
+.server-atalho-tecla-troca {
+  appearance: none;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.server-atalho-tecla-troca:hover {
+  border-color: var(--seele-laranja-nerv);
+}
+
+/*
+  Enquanto espera a tecla. Não é só a cor que muda: o rótulo vira «APERTE UMA
+  TECLA», porque `06-clientes-gui.md` proíbe informação que só a cor carregue.
+*/
+.server-atalho-tecla-troca[data-ouvindo="sim"] {
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
+}
+
 /* ---------- prosa e pares ---------- */
 
 /* Uma frase que o produto tem para dizer, e que não é o rótulo de controle

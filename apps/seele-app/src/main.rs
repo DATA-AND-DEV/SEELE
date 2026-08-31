@@ -277,6 +277,17 @@ async fn connect(
             .map_err(|_| ConnectFailure::from(ConnectionError::Unreachable))??;
 
     connection.subscribe(ponte);
+
+    // O modo de microfone gravado, aplicado assim que há o que aplicar.
+    //
+    // Aqui e não num campo de `connect`: a sessão nasce no padrão da spec —
+    // push-to-talk, microfone fechado — e só então abre para o que a pessoa
+    // escolheu. A ordem é a segura; a inversa teria um instante em que um
+    // microfone poderia estar aberto antes de alguém ter dito que podia.
+    if let Some(modo) = preferencias(&app).and_then(|p| p.voice_mode()) {
+        connection.set_voice_mode(VoiceMode::from(modo));
+    }
+
     let snapshot = connection.snapshot();
 
     if let Ok(mut slot) = session.connection.lock() {
@@ -1167,10 +1178,82 @@ fn set_talking(session: State<'_, Session>, talking: bool) {
     }
 }
 
+/// Escolhe como o microfone abre: grava no disco e, se houver sessão, aplica agora.
+///
+/// **As duas metades, nesta ordem**, pelo mesmo argumento que
+/// [`escolher_microfone`] escreve por extenso: a escrita é o que faz a escolha
+/// valer amanhã, a aplicação é o que faz valer agora.
+///
+/// Antes daqui só existia a segunda, e o preço tinha duas faces. Quem escolhia
+/// voz achava push-to-talk de volta no dia seguinte — e o padrão é
+/// push-to-talk *porque nunca dispara sozinho*, argumento que vale para quem
+/// não escolheu e não para quem escolheu. E, por exigir sessão, não dava para
+/// escolher o modo na tela de entrada; agora dá.
+///
+/// # Errors
+///
+/// [`FalhaAoEscolher::NaoGravei`] se o disco recusar. Sem sessão **não** é
+/// falha: a escolha ficou gravada, que era tudo o que havia para fazer.
 #[tauri::command]
-fn set_voice_mode(session: State<'_, Session>, mode: VoiceMode) -> Result<(), ConnectionError> {
-    session.connection()?.set_voice_mode(mode);
+fn set_voice_mode(
+    app: AppHandle,
+    session: State<'_, Session>,
+    mode: VoiceMode,
+) -> Result<(), FalhaAoEscolher> {
+    let Some(mut ajustes) = preferencias(&app) else {
+        return Err(FalhaAoEscolher::NaoGravei);
+    };
+    if let Err(erro) = ajustes.set_voice_mode(Some(mode.into())) {
+        tracing::warn!(%erro, "não consegui gravar o modo de voz escolhido");
+        return Err(FalhaAoEscolher::NaoGravei);
+    }
+    if let Ok(connection) = session.connection() {
+        connection.set_voice_mode(mode);
+    }
     Ok(())
+}
+
+/// Qual modo de microfone está escolhido, ou `None` para o padrão da spec.
+///
+/// Do disco e não do `Snapshot`, pela mesma razão que [`microfone_escolhido`]:
+/// esta pergunta tem resposta sem sessão nenhuma, e é a que a tela de entrada
+/// precisa fazer.
+#[tauri::command]
+fn modo_de_voz_escolhido(app: AppHandle) -> Option<VoiceMode> {
+    preferencias(&app)
+        .and_then(|p| p.voice_mode())
+        .map(VoiceMode::from)
+}
+
+/// Qual tecla abre o microfone em push-to-talk, ou `None` para a barra de espaço.
+///
+/// O valor é um `KeyboardEvent.code` e **atravessa opaco**: este lado nunca
+/// decide o que uma tecla significa, só lembra qual foi escolhida. Quem lê
+/// teclado é a casca, e é o único lugar que pode nomeá-las.
+#[tauri::command]
+fn tecla_de_falar(app: AppHandle) -> Option<String> {
+    preferencias(&app).and_then(|p| p.push_to_talk_key().map(str::to_owned))
+}
+
+/// Escolhe a tecla que abre o microfone. `None` volta para a barra de espaço.
+///
+/// Só grava: não há nada a aplicar numa sessão viva, porque quem lê a tecla é a
+/// casca e ela relê esta preferência quando muda.
+///
+/// # Errors
+///
+/// [`FalhaAoEscolher::NaoGravei`] se o disco recusar.
+#[tauri::command]
+fn escolher_tecla_de_falar(app: AppHandle, tecla: Option<String>) -> Result<(), FalhaAoEscolher> {
+    let Some(mut ajustes) = preferencias(&app) else {
+        return Err(FalhaAoEscolher::NaoGravei);
+    };
+    ajustes
+        .set_push_to_talk_key(tecla.as_deref())
+        .map_err(|erro| {
+            tracing::warn!(%erro, "não consegui gravar a tecla de falar");
+            FalhaAoEscolher::NaoGravei
+        })
 }
 
 #[tauri::command]
@@ -2369,6 +2452,9 @@ fn main() {
             tela_cheia,
             microfones,
             microfone_escolhido,
+            modo_de_voz_escolhido,
+            tecla_de_falar,
+            escolher_tecla_de_falar,
             escolher_microfone,
             saidas,
             saida_escolhida,

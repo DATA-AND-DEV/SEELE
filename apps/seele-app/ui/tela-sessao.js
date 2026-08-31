@@ -2012,6 +2012,42 @@ async function alternarCanal(evento) {
  * A janela relata teclas soltas de verdade, então aqui é segurar de fato — sem
  * a trava que o ADR 0016 precisou inventar para terminais que não relatam.
  */
+/**
+ * O código da tecla que abre o microfone.
+ *
+ * `Space` é o padrão, e é o mesmo que o `data-tecla` da lista de atalhos traz
+ * escrito no HTML — os dois têm de dizer a mesma coisa, e o
+ * `o_padrao_da_tecla_de_falar_e_o_mesmo_nos_dois_lugares` conferere isso.
+ *
+ * Um `code` e não um `key`: `code` nomeia a **posição física**, então uma
+ * escolha feita num teclado ABNT continua na mesma tecla num americano. `key`
+ * daria a letra impressa, que muda com o layout.
+ */
+let teclaDeFalar = "Space";
+
+/**
+ * Relê do disco qual tecla abre o microfone.
+ *
+ * Chamada ao carregar e de novo sempre que a tela de configuração troca a
+ * escolha — o valor mora aqui porque é aqui que ele é usado, e quem o muda
+ * avisa em vez de este arquivo perguntar a cada tecla digitada.
+ *
+ * Uma leitura que falha deixa o padrão de pé. Ficar sem tecla de falar seria
+ * pior que ficar com a errada.
+ */
+async function recarregarTeclaDeFalar() {
+  try {
+    const gravada = await invoke("tecla_de_falar");
+    teclaDeFalar = gravada || "Space";
+  } catch (falha) {
+    console.warn("não consegui ler a tecla de falar:", falha);
+    teclaDeFalar = "Space";
+  }
+  return teclaDeFalar;
+}
+
+recarregarTeclaDeFalar();
+
 function segurarFala(segurando) {
   if (falando === segurando) return;
   falando = segurando;
@@ -2694,13 +2730,13 @@ window.addEventListener("keydown", (evento) => {
     alternarCanais(false);
     return;
   }
-  if (evento.code === "Space" && !digitando() && !evento.repeat) {
+  if (evento.code === teclaDeFalar && !digitando() && !evento.repeat) {
     evento.preventDefault();
     segurarFala(true);
   }
 });
 window.addEventListener("keyup", (evento) => {
-  if (evento.code === "Space" && !digitando()) segurarFala(false);
+  if (evento.code === teclaDeFalar && !digitando()) segurarFala(false);
 });
 // Uma janela que perde o foco com o microfone aberto é um microfone esquecido.
 window.addEventListener("blur", () => segurarFala(false));
