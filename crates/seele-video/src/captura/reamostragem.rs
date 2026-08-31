@@ -587,3 +587,76 @@ mod medicao {
         );
     }
 }
+
+#[cfg(test)]
+mod varredura {
+    use super::*;
+
+    /// Varre os formatos que a captura de verdade produz.
+    ///
+    /// **Nasceu como investigação de um defeito de campo** — «a transmissão
+    /// começou funcionando e parou, tela preta» — para responder se a troca
+    /// desta função era a causa. Só havia dois jeitos de ela ser: devolvendo
+    /// `Err`, que o `?` do manipulador de quadro transforma em captura morta,
+    /// ou devolvendo preto. As 135 combinações abaixo procuram os dois, e não
+    /// acharam nenhum: a causa era outra, no `palco-imagem.js`.
+    ///
+    /// Fica porque a pergunta volta. Custa ~22 s em `debug` — é o preço de
+    /// converter quadros de 4K de verdade em vez de miniaturas, e miniaturas
+    /// não responderiam a pergunta que ele existe para responder.
+    #[test]
+    fn nenhum_formato_real_falha_nem_sai_preto() {
+        let fontes = [
+            (2560, 1440),
+            (1920, 1080),
+            (3840, 2160),
+            (1024, 768),
+            (1023, 769),
+            (800, 600),
+            (1920, 1200),
+            (2560, 1080),
+            (1366, 768),
+            (1280, 800),
+            (3440, 1440),
+            (2, 2),
+            (1, 1),
+            (0, 0),
+            (1920, 1),
+        ];
+        let destinos = [Resolucao::P540, Resolucao::P720, Resolucao::P1080];
+        // O D3D11 alinha o passo; 0 é `largura*4`, os outros são folga.
+        let folgas = [0usize, 64, 256];
+
+        let mut quebrados = Vec::new();
+        for fonte in fontes {
+            for destino in destinos {
+                for folga in folgas {
+                    let passo = fonte.0 * 4 + folga;
+                    let bytes = vec![0xFFu8; passo * fonte.1.max(1)];
+                    let mut mapa = Mapa::novo(fonte, destino);
+                    match mapa.converter(&bytes, passo) {
+                        Err(e) => quebrados.push(format!(
+                            "{fonte:?} -> {destino:?} folga {folga}: ERRO {e:?}"
+                        )),
+                        Ok(q) => {
+                            let claro = q.luma().iter().any(|&l| l > PRETO_LUMA);
+                            // Fonte de lado < 2 não tem o que converter: preto é
+                            // a resposta certa, não o defeito procurado.
+                            if !claro && fonte.0 >= 2 && fonte.1 >= 2 {
+                                quebrados.push(format!(
+                                    "{fonte:?} -> {destino:?} folga {folga}: PRETO com origem branca"
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            quebrados.is_empty(),
+            "{} casos:\n{}",
+            quebrados.len(),
+            quebrados.join("\n")
+        );
+    }
+}

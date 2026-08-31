@@ -32,19 +32,50 @@ let esperandoChave = true;
 /** O relógio dos quadros, em microssegundos. */
 let carimbo = 0;
 
+/** As medidas que a transmissão anunciou, guardadas até o SPS chegar. */
+let medidasDaTela = null;
+
+/** Se `armarPeloSps` está em curso: `isConfigSupported` é assíncrona. */
+let armando = false;
+
 /**
- * O nível do H.264 que cabe uma imagem desta altura.
+ * A string do codec, **lida do SPS que chegou** — nunca suposta.
  *
- * O perfil é sempre baseline — `crates/seele-video/src/codec.rs` escolhe CAVLC
- * justamente para o OpenH264 não subir para High —, então o que varia é o
- * nível, e ele tem de caber a resolução ou o decodificador recusa a configuração
- * inteira. Os números são os da tabela A-1 do H.264.
+ * # Por que ler, e não escrever o que se espera
+ *
+ * Aqui havia `avc1.42e0XX`, com um comentário que dizia: «o perfil é sempre
+ * baseline — `codec.rs` escolhe CAVLC justamente para o OpenH264 não subir
+ * para High». Era verdade quando foi escrito, e deixou de ser no commit que
+ * adotou CABAC: **CABAC não existe em Baseline**, e o codificador subiu para
+ * High (`profile_idc` 100) sem que este arquivo soubesse.
+ *
+ * O resultado é o pior tipo de defeito: o decodificador aceita a configuração,
+ * desenha por um tempo, e morre quando encontra o que não foi armado para ler.
+ * «Começou funcionando e parou.»
+ *
+ * A lição não é «corrigir o número». É que **um lado não pode declarar o que o
+ * outro decide.** O SPS já viaja em todo quadro-chave e já carrega perfil,
+ * restrições e nível — os três bytes que a string precisa. Lê-los é a única
+ * versão disto que não pode envelhecer.
+ *
+ * @param {Uint8Array} bytes um quadro em Annex-B
+ * @returns {string|null} `avc1.PPCCLL`, ou `null` se não houver SPS
  */
-function nivelDoCodec(altura) {
-  if (altura <= 480) return "1e"; // 3.0
-  if (altura <= 720) return "1f"; // 3.1
-  if (altura <= 1080) return "28"; // 4.0
-  return "33"; // 5.1, para monitores acima de 1080p
+function codecDoSps(bytes) {
+  const hex = (n) => n.toString(16).padStart(2, "0");
+  // Annex-B separa os NAL por `00 00 01` ou `00 00 00 01`; o SPS é o tipo 7.
+  for (let i = 0; i + 4 < bytes.length; i += 1) {
+    if (bytes[i] !== 0 || bytes[i + 1] !== 0) continue;
+    let comeco = -1;
+    if (bytes[i + 2] === 1) comeco = i + 3;
+    else if (bytes[i + 2] === 0 && bytes[i + 3] === 1) comeco = i + 4;
+    if (comeco < 0 || comeco + 3 >= bytes.length) continue;
+    if ((bytes[comeco] & 0x1f) !== 7) continue;
+    // profile_idc, os oito bits de restrição, level_idc — nessa ordem, logo
+    // depois do byte de cabeçalho do NAL. É a tabela A-1 do H.264.
+    return `avc1.${hex(bytes[comeco + 1])}${hex(bytes[comeco + 2])}${hex(bytes[comeco + 3])}`;
+  }
+  return null;
 }
 
 /** Desenha um quadro decodificado e o solta. */
@@ -84,46 +115,68 @@ async function abrirImagemDaTela(tela, largura, altura) {
     return;
   }
 
-  const config = {
-    codec: `avc1.42e0${nivelDoCodec(altura)}`,
-    codedWidth: largura,
-    codedHeight: altura,
-    // Sem `description`: é o que diz ao decodificador que o fluxo é Annex-B,
-    // que é como o OpenH264 entrega e como `Transmissao` põe no fio.
-    optimizeForLatency: true,
-  };
+  // **O decodificador não nasce aqui.** Ele precisa do perfil, e o perfil está
+  // no SPS, que só chega com o primeiro quadro-chave. Ver `codecDoSps`.
+  medidasDaTela = { largura, altura };
+}
 
+/**
+ * Arma o decodificador com o perfil que o quadro-chave declarou.
+ *
+ * Assíncrona porque `isConfigSupported` é — e enquanto ela corre, os quadros
+ * que chegam são descartados por `armando`. Não custa nada: já se estava
+ * esperando um quadro-chave, e o próximo serve.
+ */
+async function armarPeloSps(bytes) {
+  if (!medidasDaTela) return;
+  armando = true;
+  const daTela = telaEmCurso;
   try {
+    const codec = codecDoSps(bytes);
+    if (!codec) {
+      console.warn("o quadro-chave veio sem SPS; não dá para saber o perfil");
+      return;
+    }
+    const config = {
+      codec,
+      codedWidth: medidasDaTela.largura,
+      codedHeight: medidasDaTela.altura,
+      // Sem `description`: é o que diz ao decodificador que o fluxo é Annex-B,
+      // que é como o OpenH264 entrega e como `Transmissao` põe no fio.
+      optimizeForLatency: true,
+    };
+
     const veredito = await VideoDecoder.isConfigSupported(config);
+    // A transmissão pode ter trocado enquanto se esperava.
+    if (daTela !== telaEmCurso) return;
     if (!veredito.supported) {
       console.warn("esta janela não decodifica", config.codec);
       return;
     }
-  } catch (falha) {
-    console.warn("isConfigSupported:", falha);
-    return;
-  }
 
-  decodificador = new VideoDecoder({
-    output: pintar,
-    error: (falha) => {
-      console.warn("decodificador de tela:", falha);
-      // Morreu: o próximo quadro-chave arma outro. Não adianta insistir com
-      // este — um `VideoDecoder` em erro não volta.
-      decodificador = null;
-      esperandoChave = true;
-    },
-  });
-  decodificador.configure(config);
+    decodificador = new VideoDecoder({
+      output: pintar,
+      error: (falha) => {
+        console.warn("decodificador de tela:", falha);
+        // Morreu: o próximo quadro-chave arma outro. Não adianta insistir com
+        // este — um `VideoDecoder` em erro não volta.
+        decodificador = null;
+        esperandoChave = true;
+      },
+    });
+    decodificador.configure(config);
+    // Armado, mas ainda sem quadro: o próximo chave é que começa a desenhar.
+    esperandoChave = true;
+  } catch (falha) {
+    console.warn("armar o decodificador:", falha);
+  } finally {
+    armando = false;
+  }
 }
 
 /** Recebe um quadro comprimido em base64 e o entrega ao decodificador. */
 function quadroDaTela(tela, chave, base64) {
-  if (tela !== telaEmCurso || !decodificador) return;
-  if (esperandoChave) {
-    if (!chave) return;
-    esperandoChave = false;
-  }
+  if (tela !== telaEmCurso) return;
 
   let bytes;
   try {
@@ -133,6 +186,17 @@ function quadroDaTela(tela, chave, base64) {
   } catch (falha) {
     console.warn("quadro de tela ilegível:", falha);
     return;
+  }
+
+  // Os bytes são desembrulhados **antes** desta conferência porque é deles que
+  // sai o perfil: sem quadro-chave lido, não há decodificador a armar.
+  if (!decodificador) {
+    if (chave && !armando) armarPeloSps(bytes);
+    return;
+  }
+  if (esperandoChave) {
+    if (!chave) return;
+    esperandoChave = false;
   }
 
   try {
@@ -164,6 +228,8 @@ function fecharImagemDaTela() {
   decodificador = null;
   telaEmCurso = null;
   esperandoChave = true;
+  medidasDaTela = null;
+  armando = false;
   delete document.body.dataset.vendoTela;
   const tela = $("palco-imagem");
   if (tela) {

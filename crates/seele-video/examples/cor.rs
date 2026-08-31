@@ -87,7 +87,11 @@ fn main() -> Result<(), String> {
     // 540p **de propósito**: é a resolução em que o defeito aparece. Com 540
     // linhas ela fica abaixo das 576 do corte, e sem VUI o decodificador
     // adivinha BT.601 sobre um quadro que a captura fez em BT.709.
-    for (resolucao, nome) in [(Resolucao::P540, "540p"), (Resolucao::P720, "720p")] {
+    for (resolucao, nome) in [
+        (Resolucao::P540, "540p"),
+        (Resolucao::P720, "720p"),
+        (Resolucao::P1080, "1080p"),
+    ] {
         let (largura, altura) = (resolucao.largura(), resolucao.altura());
         let mut codificador = Codificador::novo(
             &biblioteca,

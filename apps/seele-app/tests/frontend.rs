@@ -8349,3 +8349,50 @@ fn todo_caminho_que_troca_de_servidor_larga_o_convite_do_anterior() {
         );
     }
 }
+
+#[test]
+fn the_decoder_profile_is_read_from_the_stream_and_never_spelled_out() {
+    // **This guard exists because the bug already happened, in the field.**
+    //
+    // `palco-imagem.js` used to configure the `VideoDecoder` with a literal
+    // `avc1.42e0…` — `42` being `profile_idc` 66, Baseline — under a comment
+    // that said, in so many words, «the profile is always baseline, because
+    // `codec.rs` picks CAVLC precisely so OpenH264 does not go up to High».
+    //
+    // That was true when it was written. The commit that adopted CABAC made it
+    // false the same day: **CABAC does not exist in Baseline**, so the encoder
+    // moved to High (`profile_idc` 100) and this file was never told. The
+    // `examples/perfil.rs` prints both, side by side.
+    //
+    // The failure was the worst kind. A hardware decoder accepts a config that
+    // lies to it, draws for a while, and dies when it meets what it was not
+    // armed to read. What reached the person sharing was «it worked and then
+    // it stopped».
+    //
+    // The lesson is not «fix the number» — a corrected literal would rot on the
+    // next encoder change exactly like the first one did. It is that **one side
+    // must not declare what the other side decides.** The SPS rides in every
+    // keyframe and already carries profile, constraints and level; reading them
+    // is the only version of this that cannot age.
+    let script = without_comments(&scripts());
+
+    // Any `avc1.` followed by a hex digit is a profile someone wrote by hand.
+    // Inside a template string the profile is the part *before* any `${`, so a
+    // literal prefix is exactly what this catches.
+    for trecho in script.split("avc1.").skip(1) {
+        let seguinte = trecho.chars().next().unwrap_or(' ');
+        assert!(
+            !seguinte.is_ascii_hexdigit(),
+            "a codec string voltou a trazer o perfil escrito à mão (`avc1.{seguinte}…`). \
+             O perfil vem do SPS: ver `codecDoSps` e `examples/perfil.rs`."
+        );
+    }
+
+    // And the reader has to still be there. Deleting it and going back to a
+    // literal would pass the check above only if the literal were gone too —
+    // this is what makes the pair a guard instead of half of one.
+    assert!(
+        script.contains("codecDoSps"),
+        "sumiu quem lê o perfil do SPS; sem ele a configuração volta a ser palpite"
+    );
+}
