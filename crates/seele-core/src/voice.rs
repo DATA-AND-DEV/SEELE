@@ -1009,6 +1009,10 @@ async fn pipeline(
     let mut som_da_tela = VoiceDecoder::new().ok();
 
     let (mut captured, mut at_48k, mut pending) = (Vec::new(), Vec::new(), Vec::<f32>::new());
+    // O ganho automático do microfone. Um por caminho de voz, e ele guarda
+    // estado entre quadros — é isso que faz a subida ser lenta o bastante para
+    // ninguém ouvir.
+    let mut ganho = seele_audio::ganho::Ganho::novo();
     let mut datagram = vec![0_u8; seele_proto::MAX_DATAGRAM_LEN];
     let mut mixed = vec![0.0_f32; FRAME_SAMPLES];
     let mut for_device = Vec::new();
@@ -1103,6 +1107,13 @@ async fn pipeline(
             if !speaking {
                 continue;
             }
+
+            // **O ganho, aqui e não antes do portão.** Multiplicar antes faria
+            // ruído de sala virar fala, e cada abertura à toa do portão é banda
+            // gasta e voz de alguém sendo cortada para dar lugar a um
+            // ventilador. Ver `seele_audio::ganho`.
+            let mut frame = frame;
+            ganho.aplicar(&mut frame);
 
             // Encoded from `f32` directly: the pipeline is `f32` end to end,
             // and the conversion to `i16` that used to be here was a rounding
@@ -1368,6 +1379,35 @@ mod relogio_de_midia {
 
 #[cfg(test)]
 mod tests {
+
+    /// O ganho do microfone corre **depois** do portão de voz.
+    ///
+    /// A ordem é a coisa toda, e ela some numa refatoração sem que nada quebre:
+    /// ganho antes do portão faz ruído de sala passar do limiar e virar fala. O
+    /// §3 paga caro por um portão que abre à toa — cada abertura é banda gasta e
+    /// é a voz de alguém sendo cortada para dar lugar a um ventilador —, e o
+    /// sintoma seria «o SEELE está transmitindo o meu ar-condicionado», que
+    /// ninguém liga a um ganho posto no lugar errado.
+    ///
+    /// Ler o fonte porque não há tipo que expresse «esta linha vem depois
+    /// daquela». É o mesmo recurso da costura do codec, pela mesma razão.
+    #[test]
+    fn o_ganho_do_microfone_corre_depois_do_portao() {
+        let fonte = include_str!("voice.rs");
+        let portao = fonte
+            .find("gate.update(&frame)")
+            .expect("o portão de voz sumiu do laço de captura");
+        let ganho = fonte
+            .find("ganho.aplicar(&mut frame)")
+            .expect("o ganho do microfone sumiu do laço de captura");
+        assert!(
+            portao < ganho,
+            "o ganho passou a correr antes do portão de voz.\n\
+             Nessa ordem o portão mede o sinal já amplificado, ruído de sala \
+             passa a abrir a transmissão, e a banda vai embora em ventilador."
+        );
+    }
+
     use super::*;
 
     #[test]

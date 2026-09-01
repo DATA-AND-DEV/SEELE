@@ -26,6 +26,7 @@ pub mod bitrate;
 pub mod codec;
 pub mod device;
 pub mod drift;
+pub mod ganho;
 pub mod gate;
 pub mod jitter;
 pub mod laco;
