@@ -333,8 +333,9 @@ async function abrirServer(origem) {
   // Com a tela de origem ainda visível, ou não há foco a lembrar: é o que
   // devolve a engrenagem — ou o TERMINAL SERVER da entrada — a quem a apertou.
   guardarFoco(origem);
+  // A tela de origem **fica visível atrás**: este é um diálogo desde a 0.9.0,
+  // e o que está atrás é justamente o que se está tentando consertar.
   telaDeOrigem = origem;
-  $(origem).hidden = true;
   $("tela-server").hidden = false;
   $("server-erro").hidden = true;
   // A tecla gravada, relida a cada abertura: ela pode ter sido trocada noutra
@@ -354,7 +355,6 @@ function fecharServer() {
   guardarFoco("tela-server");
   $("tela-server").hidden = true;
   const volta = telaDeOrigem ?? "tela-boot";
-  $(volta).hidden = false;
   telaDeOrigem = null;
   // A mesma porta, dos dois lados: quem entrou pela engrenagem da sessão sai
   // nela, e quem entrou pelo TERMINAL SERVER da entrada sai nele.
@@ -835,6 +835,15 @@ async function instalarAtualizacao() {
 $("botao-server").addEventListener("click", () => abrirServer("tela-boot"));
 $("botao-server-sessao").addEventListener("click", () => abrirServer("tela-sessao"));
 $("server-fechar").addEventListener("click", fecharServer);
+
+// Clicar no véu fecha, como em toda camada desta janela — o
+// `toda_camada_fecha_apertando_fora_dela` cobra isso de todas, e a
+// configuração passou a ser uma na 0.9.0.
+//
+// A regra vale mais aqui que nas outras: esta camada tem cinco seções e muitos
+// campos, e quem a abriu por engano no meio de uma conversa não deve ter de
+// procurar o FECHAR entre eles.
+fecharAoClicarFora("tela-server", fecharServer);
 
 for (const botao of document.querySelectorAll(".server-secao")) {
   botao.addEventListener("click", () => abrirSecao(botao.id));

@@ -1862,9 +1862,31 @@
   - **TROCAR A TECLA DE UM ATALHO** — os atalhos existem e são fixos: não há
     tabela editável nem lugar para guardá-la. A lista abaixo é o que eles são.
 -->
-<section id="tela-server" class="tela" tabindex="-1" hidden
-         data-foco="secao-audio"
-         data-anuncio="Terminal servidor. Configuração deste computador, e do servidor para quem pode mudá-lo.">
+<!--
+  **Diálogo, e não tela**, desde a 0.9.0. A comp a põe centrada por cima do
+  que estava ali.
+
+  A razão é de produto e não de gosto: **trocar de microfone no meio de uma
+  conversa é o caso de uso desta configuração**, e uma tela que substitui a
+  sessão esconde exatamente o que se está tentando consertar. É o mesmo
+  argumento que a `set_playback_device` escreve por extenso do lado do Rust —
+  «não dá para dizer *saia do servidor e volte* a quem já não consegue
+  acompanhar».
+
+  Ela passa a declarar-se diálogo para quem usa leitor de tela, e o
+  `data-anuncio` e o `data-foco` continuam sendo lidos pelas mesmas funções,
+  que não distinguem tela de camada — o que muda é o que fica visível atrás.
+
+  (Uma versão anterior deste comentário citava o atributo entre crases, e o
+  `toda_camada_fecha_apertando_fora_dela` o encontrou: ele lê a página crua e
+  procura o `id` mais próximo antes de cada declaração de diálogo. Achou um
+  comentário e culpou o elemento errado. Escrever o nome do atributo dentro de
+  um comentário é escondê-lo de quem lê e mostrá-lo a quem varre.)
+-->
+<div id="tela-server" class="camada-server" role="dialog" aria-modal="true"
+     tabindex="-1" hidden
+     data-foco="secao-audio"
+     data-anuncio="Configurações. Deste computador, e do servidor para quem pode mudá-lo.">
   <div class="server">
 
     <nav class="server-coluna" aria-label="seções da configuração">
@@ -2455,7 +2477,7 @@
       </div>
     </div>
   </div>
-</section>
+</div>
 
 <!-- Sessão encerrada. Diz por quê; um app que fecha calado vira suporte. -->
 <!--

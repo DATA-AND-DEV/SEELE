@@ -1,3 +1,36 @@
+/* A camada que põe a configuração por cima, e não no lugar.
+   Valores da comp da 0.9.0: véu de 0,78 sobre o negro absoluto, e a caixa
+   centrada com folga de 32px em toda volta — abaixo disso, numa janela
+   estreita, ela encosta nas bordas e deixa de parecer um diálogo. */
+.camada-server {
+  position: fixed;
+  inset: 0;
+  z-index: 24;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+
+.camada-server::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--seele-negro-absoluto);
+  opacity: 0.78;
+}
+
+/* `relative` para ficar sobre o véu; `max-height` porque um diálogo mais alto
+   que a janela é uma tela com outro nome, e o que passa disso rola dentro. */
+.camada-server > .server {
+  position: relative;
+  width: 100%;
+  max-width: 1040px;
+  max-height: 100%;
+  border: 1px solid var(--seele-laranja-nerv);
+  overflow: hidden;
+}
+
 /* SEELE — o Terminal Server (`#tela-server`).
    A configuração local: o que é desta máquina e não deste servidor. §8 do comp v3.
 
