@@ -154,6 +154,30 @@ async function abrirImagemDaTela(tela, largura, altura) {
   // **O decodificador não nasce aqui.** Ele precisa do perfil, e o perfil está
   // no SPS, que só chega com o primeiro quadro-chave. Ver `codecDoSps`.
   medidasDaTela = { largura, altura };
+
+  // **E um quadro-chave é pedido.**
+  //
+  // Um fluxo H.264 é um quadro-chave e uma corrente de diferenças que só fazem
+  // sentido a partir dele. O codificador manda um no começo e depois **só
+  // quando alguém pede** — é medida, não descuido: um quadro-chave de 1080p
+  // custa quatro vezes um comum.
+  //
+  // Quem estava na sala quando a transmissão começou recebe o fluxo desde o
+  // primeiro byte, e o primeiro byte é aquele quadro-chave. Quem **entra
+  // depois** pega a corrente no meio: só diferenças, de um quadro que nunca
+  // viu, que o decodificador descarta uma a uma. A tela ficava vazia até a
+  // transmissão acabar e recomeçar — «quando alguém entra numa call que alguém
+  // tá compartilhando tela, a pessoa não consegue ver a transmissão».
+  //
+  // O pedido existia dos dois lados desde sempre, e ninguém o fazia. Feito aqui
+  // e não depois do primeiro quadro porque é aqui que se sabe que há uma
+  // transmissão: esperar por um quadro-chave para pedir um quadro-chave é a
+  // espera que nunca termina.
+  invoke("pedir_quadro_chave", { tela }).catch((falha) => {
+    // Sem sessão não há a quem pedir, e é o caso do espelho de quem compartilha
+    // — a imagem dele não passa pelo servidor.
+    if (falha !== "NotConnected") console.warn("pedir_quadro_chave:", falha);
+  });
 }
 
 /**

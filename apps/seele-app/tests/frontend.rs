@@ -9337,3 +9337,41 @@ fn the_key_frame_that_arms_the_decoder_is_handed_to_it() {
         "`entregarAoDecodificador` não entrega nada ao decodificador: {entrega}"
     );
 }
+
+/// Quem descobre uma transmissão em curso pede um quadro-chave.
+///
+/// Um fluxo H.264 é um quadro-chave e uma corrente de diferenças que só fazem
+/// sentido a partir dele, e o codificador manda um no começo e depois **só
+/// quando alguém pede** — é medida e não descuido: um quadro-chave de 1080p
+/// custa quatro vezes um quadro comum.
+///
+/// Quem estava na sala quando a transmissão começou recebe o fluxo desde o
+/// primeiro byte, e o primeiro byte é aquele quadro-chave. Quem **entra depois**
+/// pega a corrente no meio: só diferenças, de um quadro que nunca viu, que o
+/// decodificador descarta uma a uma. A tela ficava vazia — «quando alguém entra
+/// numa call que alguém tá compartilhando tela, a pessoa não consegue ver a
+/// transmissão».
+///
+/// O pedido existia dos dois lados desde sempre — `Client::request_key_frame`
+/// no cliente, `ClientMessage::RequestKeyFrame` no servidor, que já o traduz num
+/// aviso a quem compartilha — e **ninguém chamava nenhum dos dois**.
+#[test]
+fn opening_a_stream_asks_for_a_key_frame() {
+    let palco = read("ui/palco-imagem.js");
+    let abre = js_function(&palco, "async function abrirImagemDaTela(");
+
+    assert!(
+        abre.contains("invoke(\"pedir_quadro_chave\""),
+        "abrir uma transmissão não pede quadro-chave, então quem entra no meio \
+         dela recebe só diferenças de um quadro que nunca viu:\n{abre}"
+    );
+
+    // E pedido **ao abrir**, não depois do primeiro quadro: esperar um
+    // quadro-chave para poder pedir um quadro-chave é a espera que nunca acaba.
+    let entrega = js_function(&palco, "function quadroDaTela(");
+    assert!(
+        !entrega.contains("pedir_quadro_chave"),
+        "o pedido está no caminho de um quadro que chegou, e quem entra no meio \
+         não recebe o quadro que dispararia o pedido:\n{entrega}"
+    );
+}

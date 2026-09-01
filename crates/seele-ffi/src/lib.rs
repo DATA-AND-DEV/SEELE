@@ -607,6 +607,22 @@ enum Command {
         limites: seele_core::LimitesDeTela,
     },
     StopScreenShare,
+    /// Pede um quadro-chave a quem está compartilhando.
+    ///
+    /// **Quem chega no meio de uma transmissão precisa dele para ver alguma
+    /// coisa.** Um fluxo H.264 é um quadro-chave e uma corrente de diferenças
+    /// que só fazem sentido a partir dele; o codificador manda um no começo e
+    /// depois **só quando alguém pede**. Entrar numa sala em que já se
+    /// compartilha era receber deltas sobre um passado que nunca se viu, e ficar
+    /// olhando para o nada — «quando alguém entra numa call que alguém tá
+    /// compartilhando tela, a pessoa não consegue ver a transmissão».
+    ///
+    /// O pedido existia dos dois lados desde sempre: `Client::request_key_frame`
+    /// aqui e `ClientMessage::RequestKeyFrame` no servidor, que já o traduz num
+    /// aviso a quem compartilha. **Ninguém chamava nenhum dos dois.**
+    RequestKeyFrame {
+        tela: seele_core::ScreenId,
+    },
     Shutdown,
 }
 
@@ -1718,6 +1734,21 @@ impl Connection {
                 })
         })?;
         self.conferir_troca(pedido.as_deref(), Lado::Entrada)
+    }
+
+    /// Pede um quadro-chave a quem está compartilhando a tela.
+    ///
+    /// Chamado por quem **recebe**, quando descobre que há uma transmissão em
+    /// curso: sem isto, quem entra numa sala que já compartilha recebe só
+    /// diferenças de um quadro que nunca viu. Ver [`Command::RequestKeyFrame`].
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::NotConnected`] sem sessão.
+    pub fn pedir_quadro_chave(&self, tela: u32) -> Result<(), ConnectionError> {
+        self.command(Command::RequestKeyFrame {
+            tela: seele_core::ScreenId(tela),
+        })
     }
 
     /// Switches this session to another sound output.
@@ -3712,6 +3743,14 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
         Command::AdjustScreenLimits { limites } => {
             if client.ajustar_limites_da_tela(limites).await.is_err() {
                 return false;
+            }
+        }
+        Command::RequestKeyFrame { tela } => {
+            // Falhar aqui não derruba a sessão: sem o quadro-chave a tela
+            // alheia demora a aparecer, e com a sessão fechada não aparece
+            // nunca mais.
+            if let Err(erro) = client.pedir_quadro_chave(tela).await {
+                tracing::debug!(%erro, "não consegui pedir um quadro-chave");
             }
         }
         Command::StopScreenShare => {

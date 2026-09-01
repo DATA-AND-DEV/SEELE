@@ -296,6 +296,15 @@ enum Comando {
     },
     /// Pare de transmitir.
     PararDeCompartilhar,
+    /// Peça um quadro-chave a quem está compartilhando.
+    ///
+    /// De quem **recebe**, e é o que faz alguém que entra no meio de uma
+    /// transmissão ver alguma coisa: sem ele chegam só diferenças de um quadro
+    /// que nunca se viu, e o decodificador as descarta.
+    PedirQuadroChave {
+        /// Qual transmissão. O servidor confere se ela é mesmo a da sala.
+        tela: ScreenId,
+    },
     Sair,
 }
 
@@ -1610,6 +1619,15 @@ impl Enlace {
         self.mandar(Comando::PararDeCompartilhar).await
     }
 
+    /// Pede um quadro-chave a quem está compartilhando.
+    ///
+    /// # Errors
+    ///
+    /// [`Fechado`] quando a conexão já foi embora.
+    pub async fn pedir_quadro_chave(&self, tela: ScreenId) -> Result<(), Fechado> {
+        self.mandar(Comando::PedirQuadroChave { tela }).await
+    }
+
     /// Encerra por vontade própria.
     pub async fn sair(&self) {
         let _ = self.mandar(Comando::Sair).await;
@@ -2191,6 +2209,8 @@ impl Motor {
                 matar(self.tela_viva.take());
                 cliente.stop_screen_share().await
             }
+
+            Comando::PedirQuadroChave { tela } => cliente.request_key_frame(tela).await,
 
             Comando::Sair => return,
         };

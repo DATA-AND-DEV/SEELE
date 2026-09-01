@@ -1715,18 +1715,34 @@ fn parar_de_compartilhar(session: State<'_, Session>) -> Result<(), ConnectionEr
     session.connection()?.parar_de_compartilhar()
 }
 
-/// Muda os limites no meio da transmissão, sem cortá-la.
+/// Pede um quadro-chave a quem está compartilhando.
 ///
-/// Comando próprio e não um `compartilhar_tela` de novo: recomeçar a
-/// transmissão para trocar um teto piscaria a imagem de todo mundo que está
-/// assistindo por causa de um controle mexido por uma pessoa só.
+/// Chamado por quem **recebe**, no instante em que descobre uma transmissão em
+/// curso. Sem ele, entrar numa sala em que alguém já compartilha é receber
+/// diferenças de um quadro que nunca se viu — e o decodificador as descarta,
+/// então a tela fica vazia até a transmissão recomeçar.
+///
+/// # Errors
+///
+/// [`ConnectionError::NotConnected`] sem sessão.
 #[tauri::command]
-fn ajustar_limites_da_tela(
-    session: State<'_, Session>,
-    limites: seele_ffi::LimitesDeTela,
-) -> Result<(), ConnectionError> {
-    session.connection()?.ajustar_limites_da_tela(limites)
+fn pedir_quadro_chave(session: State<'_, Session>, tela: u32) -> Result<(), ConnectionError> {
+    session.connection()?.pedir_quadro_chave(tela)
 }
+
+// `ajustar_limites_da_tela` saiu daqui.
+//
+// Ela mudava os tetos no meio da transmissão sem cortá-la — comando próprio e
+// não um `compartilhar_tela` de novo, porque recomeçar piscaria a imagem de
+// todo mundo por causa de um controle mexido por uma pessoa só.
+//
+// Os controles saíram: a caixa de compartilhar pergunta qual monitor e mais
+// nada, e os tetos são constantes. Sem controle não há o que ajustar, e um
+// comando registrado que ninguém chama é superfície de ponte sem dono —
+// `no_command_is_registered_and_never_called` recusa, com razão.
+//
+// O método continua em `seele-ffi`, onde o terminal o alcança. Voltar a oferecer
+// a escolha é desenhar a caixa e registrar o comando de novo.
 
 /// Põe a janela em tela cheia, ou a tira de lá.
 ///
@@ -2917,7 +2933,7 @@ fn main() {
             pedir_permissao_de_tela,
             compartilhar_tela,
             parar_de_compartilhar,
-            ajustar_limites_da_tela,
+            pedir_quadro_chave,
             dispensar_aviso,
             permissao_de_microfone,
             abrir_ajustes_do_microfone,

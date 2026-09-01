@@ -2929,91 +2929,35 @@
         </div>
       </div>
 
-      <div class="compartilhar-limites">
-        <p class="rotulo">LIMITES</p>
-        <p class="nota">São limites máximos. A imagem pode sair abaixo deles
-          quando a conexão aperta — a chamada mostra o que está saindo.</p>
+      <!--
+        **Os quatro controles de limite saíram**, e a escolha que eles pediam
+        virou uma decisão do produto.
 
-        <!--
-          **O que cede primeiro**, e é o primeiro controle de propósito: ele
-          muda o significado dos dois abaixo. Os outros dizem «no máximo isto»;
-          este diz o que sacrificar quando o máximo não couber.
+        Eram: o que proteger quando a banda aperta — nitidez ou movimento —, a
+        altura máxima, os quadros por segundo e o teto de banda. Quatro
+        perguntas antes de mostrar a tela, e o relato de campo é o veredito:
+        «pro usuário comum, escolher entre nitidez e movimento é bem chato,
+        assim como teto de banda».
 
-          A regra da `specs/07` foi escrita para texto — «a resolução segura, o
-          quadro cede», porque texto continua legível a 8 quadros e vira borrão
-          se a resolução baixar. Para jogo ela está invertida: a 8 quadros um
-          jogo não é pior, é inutilizável. Medido em campo entre um Mac e um
-          Windows em LAN, e o relato foi «imagens muito pixeladas».
-        -->
-        <label class="compartilhar-campo">
-          <span class="rotulo">O QUE PROTEGER</span>
-          <select id="compartilhar-prioridade" class="compartilhar-select">
-            <option value="nitidez" selected>nitidez — texto e código</option>
-            <option value="movimento">movimento — jogo e vídeo</option>
-          </select>
-        </label>
-        <p class="nota">Em <b>nitidez</b>, a resolução segura e os quadros
-          caem. Em <b>movimento</b>, os quadros seguram e a resolução desce um
-          degrau — o mesmo teto que compraria 1080p compra 720p, e os bits
-          poupados viram fluidez.</p>
+        O que fica no lugar, e por quê:
 
-        <label class="compartilhar-campo">
-          <span class="rotulo">RESOLUÇÃO</span>
-          <select id="compartilhar-altura" class="compartilhar-select">
-            <option value="1080">1080p</option>
-            <option value="720" selected>720p</option>
-            <option value="540">540p</option>
-          </select>
-        </label>
-        <!--
-          Medido, e não opinião: `spikes/tela-no-codec` num teto de 1200 kbps
-          viu o próprio controle de taxa do codificador jogar fora 16% dos
-          quadros em 1080p contra 11% em 720p. Resolução alta demais para o
-          orçamento não compra nitidez — troca imagem parada por imagem grande
-          e trêmula.
-        -->
-        <p class="nota">1080p e 720p gastam a mesma internet. Em conexão ruim o
-          1080p treme mais — 720p é a escolha segura.</p>
+        - **Movimento**, e não nitidez. A `specs/07` escreve «a resolução
+          segura, o quadro cede», e ela foi escrita pensando em texto: um
+          documento continua legível a 8 quadros e vira borrão se a resolução
+          baixar. Para o que se mostra aqui — um jogo, uma janela em que se
+          mexe — a regra é o contrário: a 8 quadros um jogo não fica pior, fica
+          inutilizável. Quem compartilha um documento perde nitidez só quando a
+          conexão aperta, e vê o que está saindo escrito ao lado do palco.
+        - **720p e 30 quadros**, que eram o padrão que quase ninguém trocava.
+        - **Sem teto de banda escolhido a mão.** Ele nunca foi a única defesa:
+          o servidor mede a própria subida e derruba o teto sozinho quando a
+          sala cresce (`teto_do_hospedeiro`). O controle era um segundo teto,
+          por cima de um que já funciona, para quem soubesse estimar quantos
+          bits por segundo cabem na própria casa.
 
-        <label class="compartilhar-campo">
-          <span class="rotulo">QUADROS POR SEGUNDO</span>
-          <select id="compartilhar-quadros" class="compartilhar-select">
-            <option value="60">60</option>
-            <option value="30" selected>30</option>
-            <option value="15">15</option>
-            <option value="8">8</option>
-          </select>
-        </label>
-        <!--
-          60 **não** é o padrão, e a nota abaixo diz o preço em vez de vender o
-          número. `crates/seele-video/src/codec.rs` carrega o porquê inteiro: o
-          teto de banda é o mesmo nos quatro degraus, então dobrar os quadros é
-          dar metade dos bytes a cada um. Quem mostra texto perde com isso; quem
-          mostra jogo ganha.
-        -->
-        <p class="nota">Texto continua legível a 8 por segundo. Vídeo não. Em
-          60, cada quadro recebe metade dos bytes — mais fluido, menos nítido.</p>
-
-        <label class="compartilhar-campo">
-          <span class="rotulo">TETO DE BANDA</span>
-          <!--
-            A lista está em aberto de propósito, e o comentário é o registro
-            disso: o spike do transporte mediu **um** teto, o de 1200 kbps, e
-            fixar uma lista exige medir quanto o caminho aguenta — a pergunta
-            que a spec deixou aberta. Estes três degraus saem daquele único
-            número, e a nota abaixo não os vende como medida.
-          -->
-          <select id="compartilhar-banda" class="compartilhar-select">
-            <option value="" selected>sem teto seu</option>
-            <option value="2000000">2000 kbps</option>
-            <option value="1200000">1200 kbps</option>
-            <option value="600000">600 kbps</option>
-          </select>
-        </label>
-        <p class="nota">Deixe sem teto se não souber. Ponha um teto se
-          compartilhar a tela estiver atrapalhando o resto da sua internet.</p>
-      </div>
-
+        Nada disso some do protocolo: `LimitesDeTela` continua atravessando
+        inteiro, e voltar a oferecer a escolha é desenhar a caixa de novo.
+      -->
       <p id="compartilhar-erro" class="erro" hidden></p>
 
       <div class="compartilhar-botoes">

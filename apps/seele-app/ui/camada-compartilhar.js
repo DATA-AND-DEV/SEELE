@@ -316,9 +316,21 @@ function desenharBotoesDeTela(snapshot) {
   const minha = Boolean(tela && tela.e_minha);
   const deOutro = Boolean(tela) && !minha;
 
+  // **`COMPARTILHAR` some enquanto a transmissão é sua.**
+  //
+  // Ele dizia `APLICAR OS LIMITES` nesse caso, porque havia limites a aplicar
+  // sem recomeçar a transmissão. Os controles saíram, e um botão que aplica
+  // quatro valores fixos aos mesmos quatro valores fixos é um botão que não faz
+  // nada. O que resta a fazer numa transmissão própria é pará-la, e `PARAR`
+  // está logo ao lado.
+  //
+  // Trocar de monitor no meio continua sendo parar e começar de novo, que é o
+  // que sempre foi: `compartilhar_tela` recomeça o fluxo, e a caixa fecha
+  // quando ele começa.
   const comecar = $("compartilhar-comecar");
-  comecar.textContent = minha ? "APLICAR OS LIMITES" : "COMPARTILHAR";
-  comecar.disabled = !snapshot || deOutro || (!minha && fonteArmada === null);
+  comecar.hidden = minha;
+  comecar.textContent = "COMPARTILHAR";
+  comecar.disabled = !snapshot || deOutro || fonteArmada === null;
   comecar.title = deOutro
     ? FRASES.ScreenShareTaken
     : !minha && fonteArmada === null
@@ -344,20 +356,27 @@ function mostrarErroDeTela(falha) {
 /**
  * Os três tetos, como o Rust os recebe.
  *
+ * **Constantes, e não escolhas.** Quatro controles pediam à pessoa o que
+ * proteger quando a banda aperta, a altura, os quadros e o teto de banda —
+ * quatro perguntas antes de mostrar a tela. A caixa hoje pergunta uma coisa só:
+ * qual monitor. Ver a nota no `index.html` sobre o que cada valor substitui.
+ *
+ * `Movimento` e não `Nitidez`: a `specs/07` manda a resolução segurar e o
+ * quadro ceder, e essa regra foi escrita para texto. Para o que se mostra numa
+ * chamada — um jogo, uma janela em que se mexe — ela está invertida: a 8
+ * quadros um jogo não fica pior, fica inutilizável.
+ *
  * Nomes de campo em `snake_case` porque é assim que `LimitesDeTela` atravessa —
- * o mesmo acordo de `muted` e `sync_band` no snapshot. Banda vazia é `null`
- * e não zero: zero seria um teto de zero bit por segundo, que é o contrário de
- * «sem teto meu».
+ * o mesmo acordo de `muted` e `sync_band` no snapshot. Banda vazia é `null` e
+ * não zero: zero seria um teto de zero bit por segundo, que é o contrário de
+ * «sem teto meu». O do servidor continua valendo, e ele é medido.
  */
 function limitesEscolhidos() {
-  const banda = $("compartilhar-banda").value;
   return {
-    banda_bps: banda === "" ? null : Number(banda),
-    altura_maxima: Number($("compartilhar-altura").value),
-    quadros_maximos: Number($("compartilhar-quadros").value),
-    // Texto, e não número: a fronteira o desserializa num enum, e um número
-    // aqui seria uma tabela a manter dos dois lados. Ver `types::Prioridade`.
-    prioridade: $("compartilhar-prioridade").value,
+    banda_bps: null,
+    altura_maxima: 720,
+    quadros_maximos: 30,
+    prioridade: "Movimento",
   };
 }
 
@@ -463,18 +482,12 @@ $("compartilhar-baixar").addEventListener("click", async () => {
 
 $("compartilhar-comecar").addEventListener("click", async () => {
   const limites = limitesEscolhidos();
-  const comecando = $("compartilhar-parar").hidden;
   erroDeTela = null;
   try {
-    if (comecando) {
-      await invoke("compartilhar_tela", { fonte: fonteArmada, limites });
-    } else {
-      // Já transmitindo: trocar o teto não recomeça a transmissão. Recomeçá-la
-      // piscaria a imagem de todo mundo que está assistindo por causa de um
-      // controle que uma pessoa mexeu.
-      await invoke("ajustar_limites_da_tela", { limites });
-    }
-    if (comecando) {
+    // O botão só existe quando não há transmissão própria — ver
+    // `desenharBotoesDeTela` —, então este caminho é sempre o de começar.
+    await invoke("compartilhar_tela", { fonte: fonteArmada, limites });
+    {
       // **Aqui havia um `registrarEventoDaChamada`, e ele não existe mais.**
       //
       // O registro de eventos era da tela de chamada, que a comp da 0.9.0
