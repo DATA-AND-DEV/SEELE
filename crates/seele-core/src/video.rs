@@ -40,7 +40,7 @@
 //!   sendo o cano das provas.
 
 use seele_video::codec::{
-    Cadencia, Codificador, ConfigDoCodificador, QuadroCodificado, QuadroI420, Resolucao,
+    armar, Cadencia, CodificaVideo, ConfigDoCodificador, QuadroCodificado, QuadroI420, Resolucao,
 };
 use seele_video::{BibliotecaDeVideo, ErroDeVideo};
 use thiserror::Error;
@@ -212,7 +212,7 @@ impl CapturaRecusou {
 /// Porque trocar de degrau não é ajustar nada: é recomeçar. A ScreenCaptureKit
 /// é armada com largura e altura fixas — `CapturaDaTela::iniciar` põe
 /// `with_width`/`with_height` na `SCStreamConfiguration` e o comentário dela diz
-/// por quê: *«[`Codificador`] é armado com uma [`Resolucao`] e recusa qualquer
+/// por quê: *«[`seele_video::codec::Codificador`] é armado com uma [`Resolucao`] e recusa qualquer
 /// quadro de outro tamanho»*. Então um degrau novo tem três metades que andam
 /// juntas — captura nova, codificador novo, fluxo novo (§3.6, a resolução mora
 /// no cabeçalho de abertura) —, e uma captura entregue pronta deixaria a
@@ -821,7 +821,12 @@ pub fn config_para(
 #[derive(Debug)]
 pub struct Compartilhamento {
     biblioteca: BibliotecaDeVideo,
-    codificador: Codificador,
+    /// Atrás da costura de propósito, e não um [`seele_video::codec::Codificador`] concreto.
+    ///
+    /// Ver [`CodificaVideo`]: é por aqui que o codificador por hardware entra,
+    /// sem que esta cola precise saber qual está armado. Quem escolhe é
+    /// [`armar`], num lugar só.
+    codificador: Box<dyn CodificaVideo>,
     escolha_de_resolucao: Resolucao,
     prioridade: Prioridade,
     teto: Teto,
@@ -859,7 +864,7 @@ impl Compartilhamento {
                 return Err(ErroDeCompartilhamento::Parado(MotivoDeParada::AbaixoDoPiso))
             }
         };
-        let codificador = Codificador::novo(&biblioteca, config)?;
+        let codificador = armar(&biblioteca, config)?;
         Ok(Self {
             biblioteca,
             codificador,
@@ -881,8 +886,15 @@ impl Compartilhamento {
     /// A diferença é a regra do §5: *a tela não promete a escolha*. Quem mostra
     /// «o que está saindo agora ao lado do que foi pedido» lê este número de um
     /// lado e [`Self::escolha_de_resolucao`] do outro.
+    ///
+    /// **Deixou de ser `const`** quando o codificador foi para trás da costura,
+    /// e o mesmo vale para [`Self::cadencia`] e [`Self::quadros_por_segundo`]:
+    /// método de trait não é `const`, e não há como ser enquanto a
+    /// implementação for escolhida em tempo de execução — que é o ponto inteiro
+    /// de haver costura. Ninguém as chamava em contexto `const`; se chamasse,
+    /// isto não compilaria e a troca teria aparecido aqui em vez de em campo.
     #[must_use]
-    pub const fn resolucao(&self) -> Resolucao {
+    pub fn resolucao(&self) -> Resolucao {
         self.codificador.resolucao()
     }
 
@@ -899,13 +911,13 @@ impl Compartilhamento {
     /// `Arranjo` que abriu a transmissão seria ler a intenção em vez do que o
     /// codificador de fato aceitou.
     #[must_use]
-    pub const fn cadencia(&self) -> Cadencia {
+    pub fn cadencia(&self) -> Cadencia {
         self.codificador.cadencia()
     }
 
     /// Quantos quadros por segundo o codificador está armado para aceitar.
     #[must_use]
-    pub const fn quadros_por_segundo(&self) -> u32 {
+    pub fn quadros_por_segundo(&self) -> u32 {
         self.codificador.quadros_por_segundo()
     }
 
@@ -976,7 +988,7 @@ impl Compartilhamento {
             cadencia: self.codificador.cadencia(),
             teto_bps: self.teto.bps(),
         };
-        self.codificador = Codificador::novo(&self.biblioteca, config)?;
+        self.codificador = armar(&self.biblioteca, config)?;
         Ok(())
     }
 
@@ -1016,6 +1028,33 @@ mod tests {
 
     use super::*;
     use crate::tela::{CAMINHO_DA_PROVA_BPS, PISO_DE_BANDA_BPS};
+
+    /// A cola arma codificador **só** pela costura.
+    ///
+    /// Uma costura que alguém pode contornar não é costura: bastaria um
+    /// `Codificador::novo` aqui para o codificador por hardware nascer valendo
+    /// em metade dos caminhos. O compilador não pega isso — `Box::new` de um
+    /// concreto satisfaz `Box<dyn CodificaVideo>` sem reclamar —, então quem
+    /// pega é este teste, lendo o próprio arquivo.
+    ///
+    /// Ler o fonte é o mesmo recurso que `apps/seele-app/tests/frontend.rs` usa
+    /// para as regras que não viram tipo. Aqui ele cobre uma invariante de uma
+    /// linha e é o único jeito de cobri-la.
+    #[test]
+    fn a_cola_nao_arma_codificador_por_fora_da_costura() {
+        let fonte = include_str!("video.rs");
+        // A agulha é montada e não escrita: um literal com a chamada inteira
+        // estaria **neste arquivo**, que é o arquivo que o teste lê, e ele
+        // falharia sozinho. Foi o que aconteceu na primeira versão.
+        let agulha = format!("{}::novo(", "Codificador");
+        assert!(
+            !fonte.contains(&agulha),
+            "`video.rs` voltou a armar um `Codificador` concreto.\n\
+             Quem arma é `seele_video::codec::armar`, e é lá que o codificador \
+             por hardware entra com queda para o OpenH264: uma chamada direta \
+             aqui fica de fora dessa escolha e some do dia da troca."
+        );
+    }
 
     /// Uma captura de mentira, para provar a cola sem uma tela na frente.
     ///

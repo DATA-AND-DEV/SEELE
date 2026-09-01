@@ -338,6 +338,122 @@ fn montar_annex_b(quadro: &EncodedFrame) -> Vec<u8> {
 
 /// Um fluxo de saída. Um por transmissão.
 ///
+/// O que a cola precisa de um codificador, seja ele qual for.
+///
+/// # Por que existe
+///
+/// Porque hoje há um só — o OpenH264, em software, na CPU — e o próximo é por
+/// hardware: VideoToolbox no macOS, Media Foundation no Windows. Quem
+/// transmite é, quase sempre, quem está jogando, e o custo de codificar sai do
+/// mesmo processador que desenha o jogo. Do outro lado isso já está resolvido:
+/// quem assiste entrega os bytes ao decodificador do sistema, que é acelerado
+/// por GPU. A conta desequilibrada é só de quem transmite.
+///
+/// Esta interface é o lugar onde o segundo entra sem que a cola saiba. Ela
+/// carrega **o que a cola usa**, e nada além: `ajustar_quadros` existe no
+/// [`Codificador`] e não está aqui porque ninguém o chama — pôr no contrato uma
+/// coisa que ninguém pede é obrigar toda implementação futura a inventar uma
+/// resposta para uma pergunta que não é feita.
+///
+/// # O que fica de fora, e por quê
+///
+/// **Construir.** Armar o OpenH264 pede uma [`BibliotecaDeVideo`], que é o
+/// módulo do Cisco carregado do disco; um codificador de hardware não vai
+/// querer nada disso. Quem escolhe é [`armar`], que é a outra metade desta
+/// costura.
+///
+/// `Send` e não `Sync` no contrato, pela mesma razão que está escrita no
+/// [`Codificador`]: o §2 manda o encoder morar numa thread própria, e dois
+/// lados codificando no mesmo embaralhariam a predição.
+pub trait CodificaVideo: Send + std::fmt::Debug {
+    /// A resolução com que está armado — a que **está saindo**, e não a que
+    /// alguém pediu.
+    fn resolucao(&self) -> Resolucao;
+
+    /// A cadência com que está armado.
+    fn cadencia(&self) -> Cadencia;
+
+    /// Quantos quadros por segundo ele foi mandado produzir.
+    fn quadros_por_segundo(&self) -> u32;
+
+    /// O teto de banda que está valendo, em bits por segundo.
+    fn teto_bps(&self) -> u32;
+
+    /// Muda o teto sem refazer o codificador — e sem custar um quadro-chave.
+    ///
+    /// # Errors
+    ///
+    /// [`ErroDeVideo::CodecRecusou`] quando o codificador não aceita o número.
+    fn ajustar_teto(&mut self, teto_bps: u32) -> Result<(), ErroDeVideo>;
+
+    /// Codifica um quadro. `Ok(None)` é o controle de taxa tendo pulado este
+    /// quadro para não estourar o teto: **não é perda e não é erro**.
+    ///
+    /// # Errors
+    ///
+    /// [`ErroDeVideo::QuadroDeTamanhoErrado`] se o quadro não é do tamanho com
+    /// que ele foi armado; [`ErroDeVideo::CodecRecusou`] se o codificador
+    /// recusar.
+    fn codificar(
+        &mut self,
+        quadro: &QuadroI420,
+        pedido_de_chave: bool,
+    ) -> Result<Option<QuadroCodificado>, ErroDeVideo>;
+}
+
+impl CodificaVideo for Codificador {
+    fn resolucao(&self) -> Resolucao {
+        Self::resolucao(self)
+    }
+
+    fn cadencia(&self) -> Cadencia {
+        Self::cadencia(self)
+    }
+
+    fn quadros_por_segundo(&self) -> u32 {
+        Self::quadros_por_segundo(self)
+    }
+
+    fn teto_bps(&self) -> u32 {
+        Self::teto_bps(self)
+    }
+
+    fn ajustar_teto(&mut self, teto_bps: u32) -> Result<(), ErroDeVideo> {
+        Self::ajustar_teto(self, teto_bps)
+    }
+
+    fn codificar(
+        &mut self,
+        quadro: &QuadroI420,
+        pedido_de_chave: bool,
+    ) -> Result<Option<QuadroCodificado>, ErroDeVideo> {
+        Self::codificar(self, quadro, pedido_de_chave)
+    }
+}
+
+/// Arma o melhor codificador que esta máquina tem para o que foi pedido.
+///
+/// **É aqui que o codificador por hardware vai entrar**, e é para isto que a
+/// costura existe: tentar o do sistema primeiro e cair para o OpenH264 quando
+/// ele recusar. Cair é obrigatório e não é gentileza — uma máquina sem suporte,
+/// ou um driver que recusa 1080p60, não pode perder o compartilhamento inteiro
+/// por causa disso.
+///
+/// Hoje há um caminho só, e a função existe assim mesmo: a alternativa era a
+/// cola chamar `Codificador::novo` direto e alguém ter de caçar as chamadas no
+/// dia da troca. Uma porta com uma saída só continua sendo a porta.
+///
+/// # Errors
+///
+/// [`ErroDeVideo::CodecRecusou`] quando nenhum codificador aceita a
+/// configuração.
+pub fn armar(
+    biblioteca: &BibliotecaDeVideo,
+    config: ConfigDoCodificador,
+) -> Result<Box<dyn CodificaVideo>, ErroDeVideo> {
+    Ok(Box::new(Codificador::novo(biblioteca, config)?))
+}
+
 /// É `Send` porque o §2 manda o encoder morar numa **thread própria**, com
 /// prioridade abaixo do normal, e nunca no runtime que carrega os datagramas de
 /// voz. Não é `Sync`, e isso é certo: dois lados codificando no mesmo encoder
