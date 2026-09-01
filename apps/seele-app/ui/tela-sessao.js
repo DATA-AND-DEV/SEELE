@@ -1528,6 +1528,20 @@ let regrasDePrevia = null;
 const previas = new Map();
 
 /**
+ * Quais prévias a pessoa **fechou**, por id de anexo.
+ *
+ * Um conjunto à parte, e não um `delete` no `previas`, e a diferença é banda:
+ * o mapa é o cache do que já foi baixado, e o comentário do `verPrevia` diz
+ * que «ver é baixar» — apagar dali faria reabrir custar o arquivo inteiro de
+ * novo, ao dono do servidor.
+ *
+ * Antes disto **não havia como fechar**: `verPrevia` trocava o botão pela
+ * figura com `replaceWith`, destruindo o próprio botão que a abriu. Uma vez
+ * aberta, a imagem ficava na Linha para sempre.
+ */
+const previasFechadas = new Set();
+
+/**
  * Guarda um arquivo para ir junto da próxima mensagem.
  *
  * O tamanho vem junto porque é ele que faz a barra ser barra: o total aqui é
@@ -1577,6 +1591,94 @@ async function abrirSeletorDeArquivo() {
     return;
   }
   if (arquivo) guardarAnexo(arquivo);
+}
+
+/**
+ * Uma imagem colada com Ctrl+V vira o anexo pendente.
+ *
+ * # Por que ela precisa de um caminho próprio
+ *
+ * Todo anexo deste produto viaja por **caminho de arquivo**, e uma imagem
+ * colada não tem um: o que existe é um `Blob` que nunca esteve no disco. O
+ * `guardar_colado` inventa o caminho — grava um temporário e devolve o mesmo
+ * `ArquivoEscolhido` que o seletor devolveria. Daqui em diante o fluxo é o que
+ * já existia, e é por isso que este arquivo não ganhou barra de progresso nova
+ * nem tela nova.
+ *
+ * # O que **não** se cola
+ *
+ * Texto. Colar texto num campo de texto é colar texto, e sequestrar isso para
+ * anexar seria estragar o gesto mais comum que existe nesta barra. Só o que a
+ * área de transferência entrega como arquivo de imagem entra por aqui.
+ *
+ * # A ordem das recusas
+ *
+ * Sem Linha aberta, a recusa vem **antes** de ler os bytes: ler megabytes para
+ * depois dizer que não havia para onde mandar é trabalho jogado fora, e a
+ * pessoa esperaria por nada.
+ */
+async function colarImagem(evento) {
+  const itens = evento.clipboardData?.items;
+  if (!itens) return;
+  let arquivo = null;
+  for (const item of itens) {
+    if (item.kind === "file" && item.type.startsWith("image/")) {
+      arquivo = item.getAsFile();
+      break;
+    }
+  }
+  // Sem imagem, este ouvinte não existe: colar texto continua colando texto.
+  if (!arquivo) return;
+  evento.preventDefault();
+
+  if (linhaAberta === null) {
+    recusarAnexo("ABRA UM CANAL ANTES DE COLAR UMA IMAGEM");
+    return;
+  }
+
+  let base64;
+  try {
+    base64 = await new Promise((pronto, falhou) => {
+      const leitor = new FileReader();
+      // `readAsDataURL` e não `readAsArrayBuffer`: o resultado já vem em
+      // base64, que é a forma em que a ponte carrega bytes. Converter um
+      // `ArrayBuffer` à mão em JavaScript seria escrever de novo, mais devagar,
+      // o que o navegador faz nativamente aqui.
+      leitor.onload = () => pronto(String(leitor.result));
+      leitor.onerror = () => falhou(leitor.error);
+      leitor.readAsDataURL(arquivo);
+    });
+  } catch (falha) {
+    console.warn("ler a imagem colada:", falha);
+    recusarAnexo("NÃO CONSEGUI LER A IMAGEM COLADA");
+    return;
+  }
+
+  // `data:image/png;base64,AAAA…` — o que interessa é o que vem depois da
+  // vírgula. O tipo vai à parte porque é ele que decide a extensão.
+  const virgula = base64.indexOf(",");
+  const conteudo = virgula === -1 ? "" : base64.slice(virgula + 1);
+
+  let guardado;
+  try {
+    guardado = await invoke("guardar_colado", {
+      tipo: arquivo.type,
+      base64: conteudo,
+    });
+  } catch (falha) {
+    console.warn("guardar_colado:", falha);
+    recusarAnexo(fraseDeColagem(falha));
+    return;
+  }
+  guardarAnexo(guardado);
+}
+
+/** O que dizer quando uma imagem colada não entra. */
+function fraseDeColagem(falha) {
+  const nome = typeof falha === "string" ? falha : falha?.kind ?? falha;
+  if (nome === "GrandeDemais") return "ESSA IMAGEM É GRANDE DEMAIS PARA COLAR · MANDE COMO ARQUIVO";
+  if (nome === "NaoGravei") return "NÃO CONSEGUI GUARDAR A IMAGEM NESTA MÁQUINA";
+  return "O QUE FOI COLADO NÃO É UMA IMAGEM";
 }
 
 /** Põe na tela o arquivo que vai junto da próxima mensagem. */
@@ -1793,13 +1895,17 @@ function blocoDeAnexo(anexo) {
     bloco.append(salvar);
 
     const buscada = previas.get(anexo.id);
-    if (buscada) {
-      bloco.append(desenhoDaPrevia(buscada, anexo.file_name));
-    } else if (podeOferecerPrevia(anexo)) {
+    if (buscada && !previasFechadas.has(anexo.id)) {
+      bloco.append(desenhoDaPrevia(buscada, anexo.file_name, anexo.id));
+    } else if (buscada || podeOferecerPrevia(anexo)) {
       const ver = elemento("button", "anexo-previa", "PRÉVIA");
       ver.type = "button";
       ver.dataset.anexoPrevia = String(anexo.id);
-      ver.title = "baixa o arquivo e desenha, se os bytes forem de imagem";
+      // Já baixada, o botão volta e **não custa nada**: o que ele reabre está
+      // no `previas`. O aviso só vale para a primeira vez.
+      ver.title = buscada
+        ? "mostra de novo o que já foi baixado"
+        : "baixa o arquivo e desenha, se os bytes forem de imagem";
       bloco.append(ver);
     }
   }
@@ -1837,9 +1943,10 @@ function podeOferecerPrevia(anexo) {
  * `default-src 'self'` e **não afrouxa**. Ela já permite `data:` em imagem, e
  * nenhuma figura vale uma entrada nova nela.
  */
-function desenhoDaPrevia(previa, nomeDoArquivo) {
+function desenhoDaPrevia(previa, nomeDoArquivo, anexo) {
   if (previa.image) {
     const figura = elemento("span", "anexo-desenho");
+    if (anexo !== undefined) figura.append(fecharDaPrevia(anexo));
     const imagem = document.createElement("img");
     imagem.src = previa.image;
     // O nome do arquivo é a única descrição honesta que existe aqui: ninguém
@@ -1849,7 +1956,20 @@ function desenhoDaPrevia(previa, nomeDoArquivo) {
     figura.append(imagem);
     return figura;
   }
-  return elemento("span", "anexo-recusa", fraseDePrevia(previa));
+  // A recusa também fecha: ela ocupa uma linha da conversa e dizia a mesma
+  // frase para sempre, sem nada que a dispensasse.
+  const recusa = elemento("span", "anexo-recusa", fraseDePrevia(previa));
+  if (anexo !== undefined) recusa.append(fecharDaPrevia(anexo));
+  return recusa;
+}
+
+/** O botão que recolhe uma prévia aberta. */
+function fecharDaPrevia(anexo) {
+  const fechar = elemento("button", "anexo-previa-fechar", "FECHAR");
+  fechar.type = "button";
+  fechar.dataset.anexoFechar = String(anexo);
+  fechar.title = "recolhe esta prévia; reabrir não baixa de novo";
+  return fechar;
 }
 
 /**
@@ -1866,6 +1986,12 @@ function desenhoDaPrevia(previa, nomeDoArquivo) {
  * coisa nenhuma acontecer.
  */
 async function verPrevia(anexo) {
+  // Reabrir o que já se tem é de graça, e é o caso normal depois de FECHAR.
+  if (previas.has(anexo)) {
+    previasFechadas.delete(anexo);
+    desenharMensagens();
+    return;
+  }
   const botao = document.querySelector(`button[data-anexo-previa="${anexo}"]`);
   if (botao) {
     botao.disabled = true;
@@ -1882,7 +2008,7 @@ async function verPrevia(anexo) {
   previas.set(anexo, previa);
   const nomeDoArquivo = botao?.closest(".anexo")?.querySelector(".anexo-arquivo")
     ?.textContent ?? "";
-  const desenho = desenhoDaPrevia(previa, nomeDoArquivo);
+  const desenho = desenhoDaPrevia(previa, nomeDoArquivo, anexo);
   if (botao) botao.replaceWith(desenho);
   if (!previa.image) anunciar(fraseDePrevia(previa));
 }
@@ -2482,6 +2608,40 @@ $("botao-buscar").addEventListener("click", () => alternarBusca());
 $("busca-fechar").addEventListener("click", () => alternarBusca(false));
 $("form-mensagem").addEventListener("submit", enviar);
 
+// Colar imagem anexa. Na janela e não só no campo: quem copia uma captura de
+// tela e aperta Ctrl+V raramente clicou no campo antes, e exigir o clique faria
+// o gesto falhar exatamente na primeira vez que a pessoa o tenta.
+window.addEventListener("paste", (evento) => {
+  if ($("tela-sessao").hidden) return;
+  colarImagem(evento).catch((falha) => console.warn("colar:", falha));
+});
+
+// **Enter manda, e este ouvinte existe para que isso não dependa de sorte.**
+//
+// A nota ao lado do campo diz «Enter também envia». Até aqui essa promessa
+// vinha inteira do *envio implícito* do navegador — o comportamento que faz um
+// `<form>` com um campo de texto e um botão `type="submit"` mandar sozinho ao
+// apertar Enter. Ele funciona, e tem pré-condições: exatamente um campo de
+// texto, um botão de submissão que não esteja desabilitado, e nenhum ouvinte
+// de tecla antes na fila. Três coisas que o próximo controle acrescentado a
+// esta barra pode quebrar sem que nada avise — e o que quebra é uma frase
+// escrita na tela.
+//
+// Foi relatado em campo que Enter não mandava. A causa não foi encontrada
+// lendo: nada aqui desabilita o botão, nada intercepta a tecla, e o formulário
+// tem a forma exata que o envio implícito pede. **Isto não conserta uma causa
+// achada** — passa a promessa a ser dona de si, para que a resposta não dependa
+// mais de qual das pré-condições valia naquele instante.
+//
+// `isComposing`: quem digita com IME — japonês, coreano, chinês — usa Enter
+// para confirmar a palavra que está montando. Mandar ali cortaria a frase no
+// meio, e a tecla que confirma viraria a tecla que erra.
+$("campo-mensagem").addEventListener("keydown", (evento) => {
+  if (evento.key !== "Enter" || evento.shiftKey || evento.isComposing) return;
+  evento.preventDefault();
+  enviar(evento);
+});
+
 // Arrastar é o segundo jeito de escolher um arquivo, e não é mais o único: o
 // botão ARQUIVO abre o seletor do sistema. Este ouvinte continua porque quem
 // arrasta espera que arrastar funcione — não porque não haja alternativa.
@@ -2518,6 +2678,12 @@ $("lista-mensagens").addEventListener("click", (evento) => {
   // A prévia é buscada aqui e em nenhum outro lugar: no clique, e nunca na
   // rolagem nem no redesenho. Ver é baixar, e o teto de disco de quem hospeda
   // não pode virar banda de todo mundo por alguém abrir uma Linha.
+  const fechar = evento.target.closest("button[data-anexo-fechar]");
+  if (fechar) {
+    previasFechadas.add(Number(fechar.dataset.anexoFechar));
+    desenharMensagens();
+    return;
+  }
   const ver = evento.target.closest("button[data-anexo-previa]");
   if (ver) verPrevia(Number(ver.dataset.anexoPrevia));
 });

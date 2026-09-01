@@ -2332,6 +2332,65 @@ fn base64(bytes: &[u8]) -> String {
     texto
 }
 
+/// A volta: base64 padrão para os bytes que ele descreve.
+///
+/// **Mora colada na ida, e é regra e não arrumação.** Um par de conversões
+/// escrito em dois arquivos é um par que ganha um caso de um lado só — e este
+/// projeto pagou por isso em campo no mesmo mês: o `palco-imagem.js` declarava
+/// o perfil do vídeo que o `codec.rs` decidia, e os dois deixaram de concordar
+/// sem que nada avisasse.
+///
+/// Existe porque uma imagem **colada** não tem caminho de arquivo: o que a
+/// janela tem são bytes, e a ponte carrega texto. A janela codifica com o que
+/// já tem — `FileReader`, nativo — e este lado desfaz.
+///
+/// `None` quando o texto não é base64: caractere fora da tabela, ou um resto de
+/// um caractere só, que não completa byte nenhum. Devolver bytes truncados
+/// daria um arquivo corrompido com cara de arquivo bom, e o defeito apareceria
+/// como «esta imagem não abre» na máquina de quem recebeu.
+#[must_use]
+pub fn de_base64(texto: &str) -> Option<Vec<u8>> {
+    /// O inverso da tabela do RFC 4648, resolvido por conta e não por tabela:
+    /// são quatro faixas contíguas, e escrever 256 entradas à mão seria mais
+    /// linhas e mais lugares para errar uma.
+    const fn valor(byte: u8) -> Option<u32> {
+        match byte {
+            b'A'..=b'Z' => Some((byte - b'A') as u32),
+            b'a'..=b'z' => Some((byte - b'a') as u32 + 26),
+            b'0'..=b'9' => Some((byte - b'0') as u32 + 52),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        }
+    }
+
+    // O preenchimento sai antes: ele marca o fim e não carrega bits. Espaço em
+    // branco também — quem cola base64 de um e-mail cola as quebras de linha
+    // junto, e recusar por causa delas seria recusar o caso comum.
+    let uteis: Vec<u8> = texto
+        .bytes()
+        .filter(|b| !b.is_ascii_whitespace() && *b != b'=')
+        .collect();
+
+    let mut bytes = Vec::with_capacity(uteis.len() / 4 * 3);
+    for grupo in uteis.chunks(4) {
+        // Um caractere sozinho são seis bits: não fecha byte nenhum, e é a
+        // marca de um texto cortado no meio.
+        if grupo.len() < 2 {
+            return None;
+        }
+        let mut junto = 0u32;
+        for (casa, letra) in grupo.iter().enumerate() {
+            junto |= valor(*letra)? << (18 - 6 * casa);
+        }
+        // Dois caracteres dão um byte, três dão dois, quatro dão três.
+        for casa in 0..grupo.len() - 1 {
+            bytes.push(((junto >> (16 - 8 * casa)) & 0xFF) as u8);
+        }
+    }
+    Some(bytes)
+}
+
 fn pastas_do_modulo() -> Vec<std::path::PathBuf> {
     let mut pastas = Vec::new();
     if let Some(apontado) = std::env::var_os("SEELE_OPENH264") {
@@ -5824,5 +5883,57 @@ mod base64_escrito_a_mao {
         assert_eq!(base64(&[0xFB, 0xFF, 0xBE]), "+/++");
         // E o Annex-B começa sempre assim: `00 00 00 01`.
         assert_eq!(base64(&[0x00, 0x00, 0x00, 0x01]), "AAAAAQ==");
+    }
+}
+
+#[cfg(test)]
+mod base64_ida_e_volta {
+    use super::{base64, de_base64};
+
+    #[test]
+    fn a_volta_desfaz_a_ida_em_todo_tamanho() {
+        // Os três restos, porque é neles que base64 erra: múltiplo de três,
+        // sobra de um byte (dois `=`) e sobra de dois (um `=`). Um decodificador
+        // que ignorasse o resto devolveria bytes a mais no último grupo.
+        for tamanho in 0..=64usize {
+            let bytes: Vec<u8> = (0..tamanho).map(|i| (i * 7 % 256) as u8).collect();
+            let texto = base64(&bytes);
+            assert_eq!(
+                de_base64(&texto).as_deref(),
+                Some(bytes.as_slice()),
+                "não fechou em {tamanho} bytes: {texto}"
+            );
+        }
+    }
+
+    #[test]
+    fn o_que_o_navegador_escreve_e_lido() {
+        // Um vetor de fora, para o par não provar só que concorda consigo
+        // mesmo: `btoa("Olá, SEELE")` numa janela dá exatamente isto.
+        assert_eq!(
+            de_base64("T2zDoSwgU0VFTEU=").as_deref(),
+            Some("Olá, SEELE".as_bytes())
+        );
+    }
+
+    #[test]
+    fn espaco_em_branco_nao_atrapalha() {
+        // Base64 de e-mail vem quebrado em linhas, e recusar por isso seria
+        // recusar o caso comum de quem cola de fora.
+        assert_eq!(
+            de_base64("T2zDoSwg\n  U0VFTEU =").as_deref(),
+            Some("Olá, SEELE".as_bytes())
+        );
+    }
+
+    #[test]
+    fn texto_que_nao_e_base64_nao_vira_bytes_truncados() {
+        // O caso que importa: devolver o que deu para ler produziria um arquivo
+        // corrompido com cara de arquivo bom, e o defeito só apareceria na
+        // máquina de quem recebeu.
+        assert_eq!(de_base64("não é base64"), None);
+        // Um caractere sozinho são seis bits e não fecha byte nenhum.
+        assert_eq!(de_base64("QUJD RA=="), Some(b"ABCD".to_vec()));
+        assert_eq!(de_base64("QUJDR"), None);
     }
 }

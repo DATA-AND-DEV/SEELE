@@ -1245,9 +1245,49 @@
   border-style: dashed;
 }
 
+/*
+  O FECHAR de uma prévia aberta.
+
+  Mesmo desenho do PRÉVIA — é o mesmo par de estados do mesmo controle —, mas
+  posicionado sobre a figura, no canto de cima e à direita, para não empurrar a
+  conversa para baixo com uma linha a mais por imagem aberta.
+
+  `position: absolute` sobre um `.anexo-desenho` que ganha `position: relative`
+  logo abaixo. Fundo opaco, e não translúcido: por cima de uma foto clara, um
+  rótulo translúcido some, e `06-clientes-gui.md` proíbe informação que dependa
+  de sorte para ser lida.
+*/
+.anexo-previa-fechar {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 3px 10px;
+  font-family: var(--seele-display);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: var(--seele-osso-apagado);
+  background: var(--seele-negro-absoluto);
+  border: 1px solid var(--seele-linha-forte);
+  cursor: pointer;
+}
+
+.anexo-previa-fechar:hover {
+  color: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
+}
+
+/* Numa recusa não há figura sobre a qual flutuar: ele fica na linha. */
+.anexo-recusa .anexo-previa-fechar {
+  position: static;
+  margin-left: 10px;
+}
+
 /* A figura ocupa a linha inteira do bloco: `flex-basis: 100%` é o que a tira de
    dentro da fileira do nome em vez de espremê-la ao lado dele. */
 .anexo-desenho {
+  /* A âncora do FECHAR, que flutua no canto dela. */
+  position: relative;
   flex: 0 0 100%;
   display: block;
   margin-top: 6px;

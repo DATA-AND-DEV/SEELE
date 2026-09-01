@@ -8450,3 +8450,42 @@ fn the_decoder_profile_is_read_from_the_stream_and_never_spelled_out() {
         "sumiu quem lê o perfil do SPS; sem ele a configuração volta a ser palpite"
     );
 }
+
+#[test]
+fn a_nota_que_promete_o_enter_tem_quem_a_cumpra() {
+    // A barra de compor traz uma nota escrita: «Enter também envia». É uma
+    // promessa, e até agosto de 2026 ela não tinha dono — quem a cumpria era o
+    // *envio implícito* do navegador, o comportamento que manda um `<form>`
+    // sozinho quando ele tem um campo de texto e um botão `type="submit"`.
+    //
+    // Aquilo funciona e tem pré-condições, e as pré-condições são sobre a forma
+    // do formulário. Um controle a mais nesta barra, um botão que passe a nascer
+    // desabilitado, um ouvinte de tecla acrescentado antes na fila — qualquer um
+    // dos três apaga a promessa sem tocar na frase que a faz.
+    //
+    // Foi relatado em campo que Enter não mandava, e a causa não foi encontrada.
+    // O que este guarda prende não é a causa: é que a frase e o código que a
+    // cumpre existam **juntos**, para que apagar um deles não deixe o outro
+    // mentindo sozinho na tela.
+    let page = without_comments(&read("ui/index.html"));
+    let script = without_comments(&scripts());
+
+    let promete = page.contains("Enter também envia");
+    let cumpre = script.contains("campo-mensagem") && script.contains("evento.key !== \"Enter\"");
+
+    assert_eq!(
+        promete,
+        cumpre,
+        "a tela {} e o script {} — a promessa e quem a cumpre andam juntas",
+        if promete {
+            "promete Enter"
+        } else {
+            "não promete Enter"
+        },
+        if cumpre {
+            "trata Enter"
+        } else {
+            "não trata Enter"
+        }
+    );
+}

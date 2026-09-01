@@ -633,6 +633,115 @@ fn descrever_arquivo(caminho: String) -> Result<ArquivoEscolhido, ConnectionErro
     })
 }
 
+/// O maior que uma imagem colada pode ter, em bytes.
+///
+/// **Não é o limite do servidor** — quem decide se um anexo cabe é ele, e a
+/// recusa dele já tem nome (`AttachmentRefusal::TooLarge`). Este é o limite
+/// desta ponte: os bytes colados atravessam para cá **em base64 dentro de uma
+/// chamada**, e base64 engorda um terço. Vinte e cinco megabytes viram um texto
+/// de trinta e três, montado de uma vez na memória da janela e de novo aqui.
+///
+/// Acima disso a resposta honesta é «mande como arquivo»: o caminho do seletor
+/// não paga essa travessia, porque manda o caminho e o Rust lê do disco.
+const MAIOR_COLAGEM_BYTES: usize = 25 * 1024 * 1024;
+
+/// Guarda em disco uma imagem que veio da área de transferência.
+///
+/// # Por que existe, e por que não dá para reaproveitar o seletor
+///
+/// Todo anexo deste produto viaja por **caminho de arquivo**: `enviar_anexo`
+/// recebe um caminho e lê do disco. Uma imagem colada não tem caminho — o que a
+/// janela tem são bytes de um `Blob` que nunca esteve num arquivo.
+///
+/// Então o caminho é inventado aqui: os bytes viram um arquivo temporário, e o
+/// que volta é o mesmo [`ArquivoEscolhido`] que o seletor devolve. Deste ponto
+/// em diante **não há caminho novo nenhum** — a barra de progresso, a recusa do
+/// servidor, o nome que vai junto, tudo é o fluxo que já existia.
+///
+/// # O nome
+///
+/// A área de transferência não traz um. `colado-<carimbo>.<extensão>` é
+/// legível, ordena por tempo, e a extensão sai do tipo que a janela relatou —
+/// que é uma **alegação**, como toda extensão neste produto (ADR 0027). Nada
+/// aqui decodifica a imagem para conferir.
+///
+/// # Onde o arquivo fica
+///
+/// Na pasta temporária do sistema, e não na de configuração: é um arquivo
+/// descartável cujo dono é o sistema operacional. Ele **não** é apagado aqui —
+/// entre esta chamada e o envio existe a tela, onde a pessoa pode desistir,
+/// trocar de arquivo ou fechar a janela, e um apagamento cedo demais tiraria o
+/// arquivo debaixo do envio.
+///
+/// # Errors
+///
+/// [`FalhaAoColar::GrandeDemais`] acima de [`MAIOR_COLAGEM_BYTES`],
+/// [`FalhaAoColar::NaoEImagem`] quando o texto não é base64, e
+/// [`FalhaAoColar::NaoGravei`] quando o disco recusa.
+#[tauri::command]
+fn guardar_colado(tipo: String, base64: String) -> Result<ArquivoEscolhido, FalhaAoColar> {
+    // Conferido **antes** de decodificar: decodificar para depois recusar seria
+    // montar na memória exatamente o que se quer recusar.
+    if base64.len() > MAIOR_COLAGEM_BYTES / 3 * 4 {
+        return Err(FalhaAoColar::GrandeDemais);
+    }
+    let bytes = seele_ffi::de_base64(&base64).ok_or(FalhaAoColar::NaoEImagem)?;
+    if bytes.len() > MAIOR_COLAGEM_BYTES {
+        return Err(FalhaAoColar::GrandeDemais);
+    }
+    if bytes.is_empty() {
+        return Err(FalhaAoColar::NaoEImagem);
+    }
+
+    let extensao = match tipo.as_str() {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        // Um tipo que esta versão não conhece **não** vira `.png`: a extensão é
+        // o que o outro lado usa para decidir como abrir, e chutar seria fazer
+        // o arquivo mentir. Sem extensão ele chega como o que é — desconhecido.
+        _ => "",
+    };
+    let carimbo = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|desde| desde.as_millis())
+        .unwrap_or(0);
+    let nome = if extensao.is_empty() {
+        format!("colado-{carimbo}")
+    } else {
+        format!("colado-{carimbo}.{extensao}")
+    };
+
+    let alvo = std::env::temp_dir().join(&nome);
+    let tamanho = bytes.len() as u64;
+    std::fs::write(&alvo, &bytes).map_err(|erro| {
+        tracing::warn!(%erro, "não consegui gravar a imagem colada");
+        FalhaAoColar::NaoGravei
+    })?;
+
+    Ok(ArquivoEscolhido {
+        tipo: tipo_alegado(&nome),
+        caminho: alvo.to_string_lossy().into_owned(),
+        nome,
+        tamanho,
+    })
+}
+
+/// Por que não deu para guardar o que foi colado.
+///
+/// Enum e não frase, pela razão de sempre nesta fronteira: quem escreve a frase
+/// é a casca, que sabe em que idioma a pessoa está lendo.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+enum FalhaAoColar {
+    /// Acima do que esta ponte carrega.
+    GrandeDemais,
+    /// O que veio não era base64, ou não veio nada.
+    NaoEImagem,
+    /// O disco recusou o arquivo temporário.
+    NaoGravei,
+}
+
 /// Abre o seletor de arquivos do sistema e descreve o que a pessoa escolheu.
 ///
 /// `Ok(None)` é desistir, e é o caso mais comum de todos: quem abre um seletor
@@ -2468,6 +2577,7 @@ fn main() {
             procurar_atualizacao,
             instalar_atualizacao,
             descrever_arquivo,
+            guardar_colado,
             escolher_arquivo,
             enviar_anexo,
             salvar_anexo,

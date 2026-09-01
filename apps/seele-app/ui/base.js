@@ -282,3 +282,58 @@ function fecharAoClicarFora(id, fechar) {
     comecouNoVeu = false;
   });
 }
+
+// --------------------------------------------------- recarregar não é opção
+//
+// **Recarregar quebra o produto, e o menu do botão direito oferece isso.**
+//
+// A janela é uma casca sobre uma sessão que vive no Rust. Um `location.reload()`
+// não derruba a sessão — ela continua conectada, o áudio continua correndo —,
+// mas joga fora tudo que esta camada sabe: em que tela se estava, qual Linha
+// estava aberta, o histórico desenhado. O resultado é a tela de entrada por
+// cima de uma conversa em andamento, e nada dizendo o que aconteceu.
+//
+// Num site, recarregar é o gesto universal de «tenta de novo». Aqui é o gesto
+// que estraga. Nenhum aviso resolve isso: a pessoa que aperta recarregar já
+// decidiu que é inofensivo, porque em todo lugar é.
+//
+// ---- por que não simplesmente apagar o menu ----
+//
+// Porque o mesmo menu carrega copiar e colar, e num campo de texto eles são
+// úteis de verdade. Apagar tudo trocaria um defeito por outro, e o segundo
+// atingiria quem só queria colar um endereço.
+//
+// Então o menu **fica onde edita e onde há texto escolhido**, e some no resto —
+// que é exatamente onde o item «recarregar» mora.
+//
+// ---- e o teclado ----
+//
+// F5, Ctrl+R e ⌘R fazem a mesma coisa sem passar por menu nenhum, e são o
+// caminho de quem tem o dedo treinado. Ficam bloqueados pelo mesmo motivo.
+
+/** Se este alvo é um lugar onde o menu do sistema serve para alguma coisa. */
+function editavel(alvo) {
+  if (!alvo || !alvo.closest) return false;
+  return Boolean(alvo.closest("input, textarea, [contenteditable='true']"));
+}
+
+window.addEventListener("contextmenu", (evento) => {
+  if (editavel(evento.target)) return;
+  // Texto escolhido com o mouse: o menu é como se copia sem saber o atalho.
+  const escolha = window.getSelection();
+  if (escolha && !escolha.isCollapsed && String(escolha).trim() !== "") return;
+  evento.preventDefault();
+});
+
+window.addEventListener(
+  "keydown",
+  (evento) => {
+    const recarrega =
+      evento.key === "F5" ||
+      ((evento.ctrlKey || evento.metaKey) && (evento.key === "r" || evento.key === "R"));
+    if (recarrega) evento.preventDefault();
+  },
+  // Fase de captura, para chegar antes de qualquer tela que também escute
+  // teclado. Um `preventDefault` tardio não impede o navegador de recarregar.
+  true,
+);
