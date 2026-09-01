@@ -105,6 +105,12 @@ SEELE_RESPOSTAS.messages = [
 SEELE_RESPOSTAS.snapshot = SEELE_QUADRO;
 SEELE_RESPOSTAS.connect = { snapshot: SEELE_QUADRO, veredito: null };
 window.__SEELE_CHAMADAS = [];
+window.__SEELE_OUVINTES = {};
+window.__SEELE_EMITIR = (carga) => {
+  for (const ouvinte of window.__SEELE_OUVINTES["seele://event"] ?? []) {
+    ouvinte({ payload: carga });
+  }
+};
 window.__TAURI__ = {
   core: {
     invoke: async (cmd, args) => {
@@ -122,7 +128,16 @@ window.__TAURI__ = {
     },
     convertFileSrc: (p) => p,
   },
-  event: { listen: async () => () => {}, emit: async () => {} },
+  // Os ouvintes ficam guardados: um roteiro pode emitir eventos do produto —
+  // `ScreenOpened`, `ScreenFrame` — e testar a metade da casca que só existe
+  // em resposta a eles.
+  event: {
+    listen: async (nome, ouvinte) => {
+      (window.__SEELE_OUVINTES[nome] ||= []).push(ouvinte);
+      return () => {};
+    },
+    emit: async () => {},
+  },
   window: { getCurrentWindow: () => ({
     minimize: async () => {}, toggleMaximize: async () => {}, close: async () => {},
     isFullscreen: async () => false, setFullscreen: async () => {},
@@ -190,6 +205,9 @@ def main() -> int:
     # A foto é tirada sempre; isto só a guarda em vez de deixá-la sumir com a
     # pasta temporária. Ver o que a tela ficou é metade do diagnóstico.
     argumentos.add_argument("--foto", type=pathlib.Path, default=None)
+    # Todo `console.*` da página, e não só os estouros: quando a casca falha em
+    # silêncio, o `console.warn` é o que ela tinha para dizer.
+    argumentos.add_argument("--tudo", action="store_true")
     opcoes = argumentos.parse_args()
 
     with tempfile.TemporaryDirectory() as temporaria:
@@ -225,6 +243,10 @@ def main() -> int:
     estouros = sorted(set(re.findall(r"Uncaught [A-Za-z]*Error: [^\"]*", tudo)))
     relatos = re.findall(r"SEELE-RELATO ([^\"]*)", tudo)
 
+    if opcoes.tudo:
+        for linha in tudo.splitlines():
+            if "CONSOLE" in linha:
+                print(linha.split("CONSOLE:", 1)[-1].strip())
     for linha in relatos:
         for parte in linha.split(" | "):
             print(parte)

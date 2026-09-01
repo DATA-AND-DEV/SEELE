@@ -9278,3 +9278,56 @@ fn the_remove_control_hides_at_rest_and_the_keyboard_still_finds_it() {
          chegar nele:\n{revela}"
     );
 }
+
+/// O quadro-chave que arma o decodificador é entregue a ele, e não descartado.
+///
+/// **Este é o defeito que deixou o compartilhamento de tela sem imagem nos dois
+/// sistemas, sem erro nenhum na tela.**
+///
+/// `armarPeloSps` lê o perfil do vídeo no primeiro quadro-chave — é dele que sai
+/// o `avc1.PPCCLL` que o `VideoDecoder` precisa — e depois configurava o
+/// decodificador deixando `esperandoChave = true`. O quadro que trouxe o SPS ia
+/// embora, e a partir dali todo delta era pulado **até chegar outro
+/// quadro-chave**.
+///
+/// Um segundo quadro-chave não vem sozinho: o codificador manda um no começo e
+/// depois só quando alguém pede. Então o decodificador ficava armado, em
+/// silêncio, esperando um quadro que não existia. Nada falhava — e é por isso
+/// que a tela ficava preta sem uma frase explicando por quê: não havia falha a
+/// explicar.
+///
+/// O quadro que carrega o SPS **é** um quadro-chave por definição, e é
+/// exatamente o que um decodificador recém-configurado precisa receber
+/// primeiro. Provado num navegador de verdade, com quadros que saíram do mesmo
+/// `Codificador` que roda em produção: `tools/roteiros/palco.js`. Sem a entrega
+/// o canvas fica escondido em 0×0; com ela ele desenha 960×540 com metade dos
+/// pixels claros, que é o xadrez que entrou.
+#[test]
+fn the_key_frame_that_arms_the_decoder_is_handed_to_it() {
+    let palco = read("ui/palco-imagem.js");
+    let arma = js_function(&palco, "async function armarPeloSps(");
+
+    let Some((_, depois)) = arma.split_once("configure(config)") else {
+        panic!("`armarPeloSps` não configura mais o decodificador: {arma}");
+    };
+    assert!(
+        depois.contains("entregarAoDecodificador"),
+        "o quadro-chave que trouxe o SPS é lido e jogado fora, então o \
+         decodificador fica armado esperando um segundo quadro-chave que o \
+         codificador não manda sozinho — e a tela fica preta sem erro:\n{arma}"
+    );
+    assert!(
+        !depois.contains("esperandoChave = true"),
+        "`armarPeloSps` volta pedindo outro quadro-chave, o que descarta todo \
+         delta que chegar até um que talvez nunca venha:\n{arma}"
+    );
+
+    // E a entrega é uma função à parte, para quem arma e quem recebe usarem o
+    // mesmo caminho. Duas cópias divergem, e foi uma divergência assim que
+    // deixou o assento devolvido sem anúncio no servidor.
+    let entrega = js_function(&palco, "function entregarAoDecodificador(");
+    assert!(
+        entrega.contains("EncodedVideoChunk"),
+        "`entregarAoDecodificador` não entrega nada ao decodificador: {entrega}"
+    );
+}

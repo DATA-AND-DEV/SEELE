@@ -206,8 +206,22 @@ async function armarPeloSps(bytes) {
       },
     });
     decodificador.configure(config);
-    // Armado, mas ainda sem quadro: o próximo chave é que começa a desenhar.
-    esperandoChave = true;
+
+    // **E o quadro que armou é entregue, e não jogado fora.**
+    //
+    // Ele é um quadro-chave por definição — é dele que o SPS saiu — e é
+    // exatamente o que um decodificador recém-configurado precisa receber
+    // primeiro. Aqui estava escrito «armado, mas ainda sem quadro: o próximo
+    // chave é que começa a desenhar», e o próximo chave **não vem sozinho**: o
+    // codificador manda um no começo e depois só quando alguém pede.
+    //
+    // Para quem assistia, a tela ficava preta para sempre, sem erro nenhum —
+    // nada tinha falhado. O decodificador estava armado e em silêncio,
+    // esperando um quadro que não existia, e todo delta que chegava era pulado
+    // pelo `esperandoChave`. Foi assim que o compartilhamento apareceu nos dois
+    // sistemas: «sem erro mas tela preta».
+    esperandoChave = false;
+    entregarAoDecodificador(true, bytes);
   } catch (falha) {
     console.warn("armar o decodificador:", falha);
     naoDeuParaMostrar("NÃO CONSEGUI PREPARAR O VÍDEO NESTA MÁQUINA");
@@ -237,6 +251,19 @@ function quadroDaTela(tela, chave, base64) {
     if (chave && !armando) armarPeloSps(bytes);
     return;
   }
+  entregarAoDecodificador(chave, bytes);
+}
+
+/**
+ * Entrega um quadro ao decodificador já armado.
+ *
+ * Separada de `quadroDaTela` porque **quem arma também entrega**: o
+ * quadro-chave que trouxe o SPS é o primeiro que o decodificador tem de
+ * receber, e antes desta separação ele era lido para descobrir o perfil e
+ * depois descartado.
+ */
+function entregarAoDecodificador(chave, bytes) {
+  if (!decodificador) return;
   if (esperandoChave) {
     if (!chave) return;
     esperandoChave = false;

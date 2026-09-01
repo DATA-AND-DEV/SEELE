@@ -148,7 +148,7 @@ function desenharPalco(snapshot, voice_room) {
     // desenhado, mandar apertar um botão que não existe é pior ainda.
     nota.hidden = !voice_room;
     nota.textContent = temControleDeTela()
-      ? "Use COMPARTILHAR A TELA aqui embaixo para mostrar um monitor ou uma janela sua."
+      ? "Use COMPARTILHAR, aqui em cima, para mostrar um monitor ou uma janela sua."
       : "Esta versão não sabe compartilhar tela desta máquina. A de outra pessoa apareceria aqui.";
     $("palco-parada").hidden = true;
     $("palco-numeros").hidden = true;

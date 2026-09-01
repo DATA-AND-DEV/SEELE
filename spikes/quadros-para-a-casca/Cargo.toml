@@ -1,0 +1,13 @@
+# Descartável: gera quadros H.264 de verdade para provar a metade de quem
+# **recebe**, dentro de um navegador. Ver o cabeçalho de `src/main.rs`.
+[package]
+name = "quadros-para-a-casca"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+seele-video = { path = "../../crates/seele-video" }
+
+
+[workspace]
