@@ -1775,12 +1775,6 @@ button.voice_room-nome:hover { text-decoration: underline; }
 .na-bateria .paineis { opacity: 0.55; }
 .na-bateria .compor { opacity: 0.4; }
 
-/* ---- o botão de falar diz o que fazer ---- */
-.botao-falar[data-ativo="sim"] {
-  color: var(--seele-negro-absoluto);
-  background: var(--seele-fosforo);
-  border-color: var(--seele-fosforo);
-}
 
 /* ---- a busca no painel de mensagens ---- */
 .busca {
@@ -2004,3 +1998,33 @@ button.voice_room-nome:hover { text-decoration: underline; }
 
 #vista-chamada[hidden],
 #vista-conversa[hidden] { display: none; }
+
+
+/* Os dois controles de ícone do operador — microfone e som.
+ *
+ * Quadrado, para o desenho não ficar esticado dentro de um botão de rótulo. O
+ * glifo em `1.4em` porque ele tem de ser lido a três metros de distância, que é
+ * onde a pessoa está quando percebe que está muda. */
+.botao-glifo {
+  width: 34px;
+  min-height: 34px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.botao-glifo .glifo {
+  width: 1.4em;
+  height: 1.4em;
+  vertical-align: middle;
+}
+
+/* A linha que substituiu o botão de falar: estado, não instrução. */
+.operador-frase {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--seele-osso-apagado);
+}

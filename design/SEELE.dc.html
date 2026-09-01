@@ -29,6 +29,10 @@
   input:focus{outline:none;border-color:var(--seele-laranja-nerv)}
   button:focus-visible{outline:2px solid var(--seele-osso);outline-offset:1px}
   .glifo{width:1em;height:1em;vertical-align:-0.2em;fill:currentColor}
+  @keyframes seele-digita{from{width:0}}
+  @keyframes seele-cursor{0%,49%{opacity:1}50%,100%{opacity:0}}
+  @keyframes seele-surge{from{opacity:0}to{opacity:1}}
+  @media (prefers-reduced-motion: reduce){*{animation:none !important}}
 </style>
 </helmet>
 
@@ -53,24 +57,42 @@
   <sc-if value="{{ ehBoot }}" hint-placeholder-val="{{ false }}">
     <div style="flex:1 1 auto;display:flex;min-height:0;overflow:auto">
       <div style="margin:auto;width:480px;padding:32px;border:1px solid var(--seele-linha-forte);background:var(--seele-negro-painel)">
-        <div style="margin:0 0 32px;display:flex;flex-direction:column;align-items:flex-start;gap:8px">
-          <span style="font-family:var(--seele-display);font-weight:900;font-size:56px;line-height:1;letter-spacing:0.02em;color:var(--seele-laranja-nerv)">SEELE</span>
-          <span style="font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:var(--seele-rotulo-painel)">voz e texto auto-hospedados</span>
+        <div style="margin:0 0 40px;display:flex;align-items:center;gap:20px">
+          <svg viewBox="0 0 96 96" width="72" height="72" role="img" aria-label="SEELE" style="flex:0 0 auto">
+            <title>SEELE</title>
+            <path d="M34 34L62 62" stroke="#EAE3CF" stroke-width="4"></path>
+            <rect x="12" y="12" width="24" height="24" fill="#F2521F"></rect>
+            <rect x="62" y="62" width="20" height="20" fill="none" stroke="#F2521F" stroke-width="4"></rect>
+          </svg>
+          <span style="display:flex;flex-direction:column;align-items:flex-start;gap:8px;min-width:0">
+            <span style="font-family:var(--seele-display);font-weight:900;font-size:56px;line-height:1;letter-spacing:0.02em;color:var(--seele-laranja-nerv)">SEELE</span>
+            <span style="font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:var(--seele-rotulo-painel)">voz, vídeo e texto auto-hospedados</span>
+          </span>
         </div>
-        <div style="display:flex;flex-direction:column;gap:16px">
-          <label style="display:flex;flex-direction:column;gap:6px">
-            <span style="font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:var(--seele-rotulo-painel)">ENDEREÇO</span>
-            <input value="192.168.0.7:8383" spellcheck="false" style="width:100%">
-          </label>
-          <label style="display:flex;flex-direction:column;gap:6px">
-            <span style="font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:var(--seele-rotulo-painel)">APELIDO</span>
-            <input value="rafa" spellcheck="false" style="width:100%">
-          </label>
-          <span style="display:block;font-size:13px;line-height:1.4;color:var(--seele-osso)">A porta 8383 é UDP. Fones dos dois lados: não há cancelamento de eco.</span>
-          <div style="display:flex;gap:8px">
-            <button type="button" onClick="{{ entrar }}" style="flex:1;font:inherit;letter-spacing:0.22em;padding:10px 16px;color:var(--seele-negro-absoluto);background:var(--seele-laranja-nerv);border:1px solid var(--seele-laranja-nerv);cursor:pointer">ENTRAR</button>
-            <button type="button" onClick="{{ hospedar }}" style="flex:1;font:inherit;letter-spacing:0.22em;padding:10px 16px;color:var(--seele-laranja-nerv);background:none;border:1px solid var(--seele-laranja-nerv);cursor:pointer">HOSPEDAR AQUI</button>
-          </div>
+        <div style="display:flex;flex-direction:column;gap:2px;margin:0 0 32px;padding:12px 14px;border:1px solid var(--seele-linha);background:var(--seele-negro-absoluto);font-size:12px;line-height:18px;color:var(--seele-fosforo);overflow:hidden">
+          <span style="display:block;width:21ch;max-width:100%;overflow:hidden;white-space:nowrap;animation:seele-digita 720ms steps(21) 120ms both">$ seeled 0.0.0.0:8383</span>
+          <span style="display:block;width:30ch;max-width:100%;overflow:hidden;white-space:nowrap;color:var(--seele-osso-apagado);animation:seele-digita 900ms steps(30) 900ms both">quic/tls1.3 · porta udp aberta</span>
+          <span style="display:block;width:26ch;max-width:100%;overflow:hidden;white-space:nowrap;color:var(--seele-osso-apagado);animation:seele-digita 780ms steps(26) 1900ms both">ed25519 782cc791… fixada</span>
+          <span style="display:flex;align-items:center;gap:6px;animation:seele-surge 200ms 2800ms both">
+            <span style="color:var(--seele-laranja-nerv)">pronto.</span>
+            <span aria-hidden="true" style="display:inline-block;width:8px;height:14px;background:var(--seele-laranja-nerv);animation:seele-cursor 1s steps(1) infinite"></span>
+          </span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <button type="button" onClick="{{ abrirServidores }}" style="width:100%;font:inherit;letter-spacing:0.22em;padding:14px 16px;color:var(--seele-negro-absoluto);background:var(--seele-laranja-nerv);border:1px solid var(--seele-laranja-nerv);cursor:pointer">CONECTAR</button>
+          <button type="button" onClick="{{ hospedar }}" style="width:100%;font:inherit;letter-spacing:0.22em;padding:14px 16px;color:var(--seele-laranja-nerv);background:none;border:1px solid var(--seele-laranja-nerv);cursor:pointer" style-hover="color:var(--seele-negro-absoluto);background:var(--seele-laranja-nerv)">HOSPEDAR AQUI</button>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:24px;padding-top:16px;border-top:1px solid var(--seele-linha)">
+          <button type="button" onClick="{{ abrirPerfil }}" style="flex:1;display:flex;align-items:center;gap:10px;padding:10px 12px;font:inherit;text-align:left;color:var(--seele-osso-apagado);background:none;border:1px solid var(--seele-linha-forte);cursor:pointer" style-hover="color:var(--seele-laranja-nerv);border-color:var(--seele-laranja-nerv)">
+            <span style="{{ estiloAvatarPequeno }}">{{ perfilInicial }}</span>
+            <span style="display:flex;flex-direction:column;gap:2px;min-width:0">
+              <span style="font-size:9px;letter-spacing:0.2em;color:var(--seele-rotulo-painel)">PERFIL</span>
+              <span style="font-size:13px;color:var(--seele-osso);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ perfilNome }}</span>
+            </span>
+          </button>
+          <button type="button" aria-label="Abrir configurações" title="configuração local desta máquina" onClick="{{ abrirConfig }}" style="width:44px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;color:var(--seele-osso-apagado);background:none;border:1px solid var(--seele-linha-forte);cursor:pointer" style-hover="color:var(--seele-laranja-nerv);border-color:var(--seele-laranja-nerv)">
+            <svg class="glifo" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.1" fill="none" stroke="currentColor" stroke-width="1.3"></circle><path d="M8 1.9v2.1M8 12v2.1M14.1 8h-2.1M4 8H1.9M12.3 3.7l-1.5 1.5M5.2 10.8l-1.5 1.5M12.3 12.3l-1.5-1.5M5.2 5.2L3.7 3.7" stroke="currentColor" stroke-width="1.3" fill="none"></path></svg>
+          </button>
         </div>
       </div>
     </div>
@@ -148,22 +170,38 @@
         <!-- o operador: voz, chamada e configuração no mesmo bloco -->
         <div style="border-top:1px solid var(--seele-linha);padding:10px 12px;display:flex;flex-direction:column;gap:8px;flex:0 0 auto;background:var(--seele-negro-painel)">
           <div style="display:flex;align-items:center;gap:8px">
-            <span style="display:flex;flex-direction:column;gap:2px;min-width:0;flex:1">
-              <span style="font-size:9px;letter-spacing:0.2em;color:var(--seele-rotulo-painel)">OPERADOR</span>
-              <span style="font-size:13px;color:var(--seele-padrao-azul);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">rafa</span>
-            </span>
+            <button type="button" onClick="{{ abrirPerfil }}" aria-label="Personalizar seu perfil" title="seu nome e sua imagem" style="display:flex;align-items:center;gap:8px;min-width:0;flex:1;padding:0;font:inherit;text-align:left;background:none;border:0;cursor:pointer">
+              <span style="{{ estiloAvatarPequeno }}">{{ perfilInicial }}</span>
+              <span style="display:flex;flex-direction:column;gap:2px;min-width:0">
+                <span style="font-size:9px;letter-spacing:0.2em;color:var(--seele-rotulo-painel)">OPERADOR</span>
+                <span style="font-size:13px;color:var(--seele-padrao-azul);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ perfilNome }}</span>
+              </span>
+            </button>
             <button type="button" aria-label="{{ micRotulo }}" title="{{ micRotulo }}" onClick="{{ alternarMudo }}" style="{{ estiloMic }}">
-              <svg class="glifo" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="1.3"></circle><rect x="6.6" y="4.4" width="2.8" height="7.2"></rect></svg>
+              <svg class="glifo" viewBox="0 0 16 16" aria-hidden="true" style="width:1.15em;height:1.15em">
+                <rect x="6.2" y="2" width="3.6" height="7" fill="none" stroke="currentColor" stroke-width="1.3"></rect>
+                <path d="M4 7.6v0.6a4 4 0 0 0 8 0V7.6" fill="none" stroke="currentColor" stroke-width="1.3"></path>
+                <path d="M8 12.2v1.8M5.6 14h4.8" fill="none" stroke="currentColor" stroke-width="1.3"></path>
+                <sc-if value="{{ mudo }}" hint-placeholder-val="{{ false }}">
+                  <path d="M2.6 2.6L13.4 13.4" fill="none" stroke="currentColor" stroke-width="1.6"></path>
+                </sc-if>
+              </svg>
             </button>
             <button type="button" aria-label="{{ surdoRotulo }}" title="{{ surdoRotulo }}" onClick="{{ alternarSurdo }}" style="{{ estiloSurdo }}">
-              <svg class="glifo" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3"></circle></svg>
+              <svg class="glifo" viewBox="0 0 16 16" aria-hidden="true" style="width:1.15em;height:1.15em">
+                <path d="M2.8 9.4V8a5.2 5.2 0 0 1 10.4 0v1.4" fill="none" stroke="currentColor" stroke-width="1.3"></path>
+                <rect x="1.6" y="9" width="3.4" height="4.6" fill="none" stroke="currentColor" stroke-width="1.3"></rect>
+                <rect x="11" y="9" width="3.4" height="4.6" fill="none" stroke="currentColor" stroke-width="1.3"></rect>
+                <sc-if value="{{ surdo }}" hint-placeholder-val="{{ false }}">
+                  <path d="M2.6 2.6L13.4 13.4" fill="none" stroke="currentColor" stroke-width="1.6"></path>
+                </sc-if>
+              </svg>
             </button>
             <button type="button" aria-label="Abrir configurações" title="configuração local desta máquina" onClick="{{ abrirConfig }}" style="width:34px;height:34px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--seele-osso-apagado);background:none;border:1px solid var(--seele-linha-forte);cursor:pointer" style-hover="color:var(--seele-laranja-nerv);border-color:var(--seele-laranja-nerv)">
               <svg class="glifo" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.1" fill="none" stroke="currentColor" stroke-width="1.3"></circle><path d="M8 1.9v2.1M8 12v2.1M14.1 8h-2.1M4 8H1.9M12.3 3.7l-1.5 1.5M5.2 10.8l-1.5 1.5M12.3 12.3l-1.5-1.5M5.2 5.2L3.7 3.7" stroke="currentColor" stroke-width="1.3" fill="none"></path></svg>
             </button>
           </div>
           <span style="font-size:11px;line-height:1.4;color:var(--seele-osso-apagado)">{{ vozEstado }}</span>
-          <button type="button" style="{{ estiloFalar }}">{{ falarRotulo }}</button>
           <div style="display:flex;gap:6px">
             <button type="button" title="{{ salaAcaoDica }}" onClick="{{ sairDaSala }}" style="{{ estiloSairSala }}">SAIR DA SALA</button>
             <button type="button" title="a grade da sala de voz no lugar da conversa" onClick="{{ alternarVista }}" style="{{ estiloChamada }}">{{ chamadaRotulo }}</button>
@@ -511,6 +549,72 @@
     </div>
   </sc-if>
 
+  <!-- ---------------- modal: perfil ---------------- -->
+  <sc-if value="{{ modalPerfil }}" hint-placeholder-val="{{ false }}">
+    <div role="dialog" aria-modal="true" aria-labelledby="perfil-titulo" style="position:fixed;inset:0;z-index:27;display:flex;align-items:center;justify-content:center;padding:32px">
+      <span style="position:absolute;inset:0;background:var(--seele-negro-absoluto);opacity:0.78"></span>
+      <div style="position:relative;width:100%;max-width:460px;background:var(--seele-negro-painel);border:1px solid var(--seele-laranja-nerv)">
+        <div style="display:flex;align-items:center;gap:16px;padding:8px 16px;background:var(--seele-laranja-nerv);color:var(--seele-negro-absoluto)">
+          <h2 id="perfil-titulo" style="flex:1 1 auto;margin:0;font-family:var(--seele-display);font-weight:900;font-size:15px;letter-spacing:0.08em">SEU PERFIL</h2>
+          <button type="button" onClick="{{ fecharModal }}" style="background:none;border:1px solid var(--seele-negro-absoluto);color:var(--seele-negro-absoluto);font:inherit;font-size:11px;letter-spacing:0.1em;padding:2px 8px;cursor:pointer">FECHAR</button>
+        </div>
+        <div style="padding:24px;display:flex;flex-direction:column;gap:20px">
+          <div style="display:flex;align-items:center;gap:16px">
+            <span role="img" aria-label="{{ perfilNome }}" style="{{ estiloAvatarGrande }}">{{ perfilAvatarTexto }}</span>
+            <div style="display:flex;flex-direction:column;gap:8px;min-width:0;flex:1">
+              <span style="font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:var(--seele-rotulo-painel)">IMAGEM</span>
+              <span style="display:block;font-size:13px;line-height:1.4;color:var(--seele-osso)">PNG, no máximo 8 KiB e 256 px. O limite está aqui antes de você escolher o arquivo.</span>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button type="button" onClick="{{ escolherImagem }}" style="font:inherit;font-size:11px;letter-spacing:0.1em;color:var(--seele-laranja-nerv);background:none;border:1px solid var(--seele-laranja-nerv);padding:6px 12px;cursor:pointer">ESCOLHER</button>
+                <button type="button" onClick="{{ tirarImagem }}" style="{{ estiloTirarImagem }}">TIRAR</button>
+              </div>
+              <input ref="{{ campoArquivo }}" type="file" accept="image/png,image/jpeg" onChange="{{ aoEscolherArquivo }}" style="display:none">
+            </div>
+          </div>
+          <label style="display:flex;flex-direction:column;gap:6px">
+            <span style="font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:var(--seele-rotulo-painel)">APELIDO</span>
+            <input ref="{{ campoPerfil }}" maxlength="24" spellcheck="false" autocomplete="off" placeholder="como as pessoas te veem" onKeyDown="{{ aoTeclarPerfil }}" style="width:100%">
+          </label>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button type="button" onClick="{{ fecharModal }}" style="font:inherit;font-size:11px;letter-spacing:0.14em;color:var(--seele-osso-apagado);background:none;border:1px solid var(--seele-linha-forte);padding:8px 14px;cursor:pointer">CANCELAR</button>
+            <button type="button" onClick="{{ salvarPerfil }}" style="font:inherit;font-size:12px;letter-spacing:0.14em;padding:8px 18px;color:var(--seele-negro-absoluto);background:var(--seele-laranja-nerv);border:1px solid var(--seele-laranja-nerv);cursor:pointer">SALVAR</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ---------------- modal: onde você já esteve ---------------- -->
+  <sc-if value="{{ modalServidores }}" hint-placeholder-val="{{ false }}">
+    <div role="dialog" aria-modal="true" aria-labelledby="servidores-titulo" style="position:fixed;inset:0;z-index:26;display:flex;align-items:center;justify-content:center;padding:32px">
+      <span style="position:absolute;inset:0;background:var(--seele-negro-absoluto);opacity:0.78"></span>
+      <div style="position:relative;width:100%;max-width:520px;max-height:calc(100vh - 96px);display:flex;flex-direction:column;background:var(--seele-negro-painel);border:1px solid var(--seele-laranja-nerv)">
+        <div style="display:flex;align-items:center;gap:16px;padding:8px 16px;background:var(--seele-laranja-nerv);color:var(--seele-negro-absoluto);flex:0 0 auto">
+          <h2 id="servidores-titulo" style="flex:1 1 auto;margin:0;font-family:var(--seele-display);font-weight:900;font-size:15px;letter-spacing:0.08em">ONDE VOCÊ JÁ ESTEVE</h2>
+          <button type="button" onClick="{{ fecharModal }}" style="background:none;border:1px solid var(--seele-negro-absoluto);color:var(--seele-negro-absoluto);font:inherit;font-size:11px;letter-spacing:0.1em;padding:2px 8px;cursor:pointer">FECHAR</button>
+        </div>
+        <ul style="list-style:none;margin:0;padding:0;overflow-y:auto;flex:1 1 auto;min-height:0">
+          <sc-for list="{{ conhecidos }}" as="k" hint-placeholder-count="3">
+            <li>
+              <button type="button" onClick="{{ k.conectar }}" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;font:inherit;text-align:left;color:var(--seele-osso);background:none;border:none;border-bottom:1px solid var(--seele-linha);border-left:2px solid transparent;cursor:pointer" style-hover="background:var(--seele-negro-absoluto);border-left-color:var(--seele-laranja-nerv)">
+                <span style="width:40px;height:40px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-family:var(--seele-display);font-weight:900;font-size:15px;letter-spacing:0.06em;color:var(--seele-osso-apagado);border:1px solid var(--seele-linha-forte)">{{ k.sigla }}</span>
+                <span style="display:flex;flex-direction:column;gap:3px;min-width:0;flex:1">
+                  <span style="font-family:var(--seele-display);font-weight:700;font-size:16px;line-height:1;letter-spacing:0.06em;color:var(--seele-osso);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ k.nome }}</span>
+                  <span style="font-size:11px;color:var(--seele-osso-apagado);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ k.endereco }}</span>
+                </span>
+                <span style="flex:0 0 auto;font-size:9px;letter-spacing:0.16em;text-transform:uppercase;color:var(--seele-rotulo-painel)">{{ k.visto }}</span>
+              </button>
+            </li>
+          </sc-for>
+        </ul>
+        <div style="flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:16px;border-top:1px solid var(--seele-linha-forte)">
+          <input ref="{{ campoEndereco }}" onKeyDown="{{ aoTeclarEndereco }}" spellcheck="false" autocomplete="off" placeholder="outro endereço, ou um link seele://" style="flex:1;min-width:0">
+          <button type="button" onClick="{{ entrar }}" style="flex:0 0 auto;font:inherit;font-size:12px;letter-spacing:0.14em;padding:9px 16px;color:var(--seele-negro-absoluto);background:var(--seele-laranja-nerv);border:1px solid var(--seele-laranja-nerv);cursor:pointer">ENTRAR</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
   <!-- ---------------- modal: nomear ---------------- -->
   <sc-if value="{{ modalNome }}" hint-placeholder-val="{{ false }}">
     <div role="dialog" aria-modal="true" aria-labelledby="nome-titulo" style="position:fixed;inset:0;z-index:26;display:flex;align-items:center;justify-content:center;padding:32px">
@@ -596,11 +700,16 @@ class Component extends DCLogic {
     this.campo = React.createRef();
     this.campoNome = React.createRef();
     this.log = React.createRef();
+    this.campoEndereco = React.createRef();
+    this.campoPerfil = React.createRef();
+    this.campoArquivo = React.createRef();
     let salvo = null;
     try { salvo = JSON.parse(localStorage.getItem(CHAVE) || "null"); } catch (e) { salvo = null; }
     this.state = Object.assign({
       tela: "sessao",
       vista: "conversa",
+      perfilNome: "rafa",
+      perfilImagem: null,
       modoVoz: "tecla",
       modal: null,
       secao: "porta",
@@ -671,7 +780,7 @@ class Component extends DCLogic {
       const s = this.state;
       try {
         localStorage.setItem(CHAVE, JSON.stringify({
-          tela: s.tela, vista: s.vista, modoVoz: s.modoVoz, secao: s.secao, mudo: s.mudo, surdo: s.surdo,
+          tela: s.tela, vista: s.vista, perfilNome: s.perfilNome, perfilImagem: s.perfilImagem, modoVoz: s.modoVoz, secao: s.secao, mudo: s.mudo, surdo: s.surdo,
           salaAtual: s.salaAtual, canalAtual: s.canalAtual,
           salas: s.salas, canais: s.canais, mensagens: s.mensagens,
         }));
@@ -892,8 +1001,8 @@ class Component extends DCLogic {
     const acaoBase = "display:flex;align-items:center;gap:8px;min-width:0;padding:8px 14px;font:inherit;text-align:left;border:0;border-right:1px solid var(--seele-linha);cursor:pointer;";
 
     return {
-      servidorNome: "TÓQUIO-3",
-      servidorSub: "SERVIDOR · CONEXÃO SEGURA",
+      servidorNome: s.tela === "boot" ? "" : "TÓQUIO-3",
+      servidorSub: s.tela === "boot" ? "" : "SERVIDOR · CONEXÃO SEGURA",
       relogio: s.relogio,
       emSessao: this.duracao(),
       ehBoot: s.tela === "boot",
@@ -941,8 +1050,8 @@ class Component extends DCLogic {
       ],
       micRotulo: s.mudo ? "Microfone mudo — clique para abrir" : "Microfone aberto — clique para silenciar",
       surdoRotulo: s.surdo ? "Você não está ouvindo — clique para voltar a ouvir" : "Ouvindo — clique para não ouvir ninguém",
-      vozEstado: (s.mudo ? "microfone mudo" : "microfone aberto") + " · " + (s.surdo ? "não está ouvindo" : "ouvindo"),
-      estiloMic, estiloSurdo,
+      vozEstado: (s.mudo ? "microfone mudo" : "microfone aberto") + " · " + (s.surdo ? "não está ouvindo" : "ouvindo") + " · " + (s.modoVoz === "tecla" ? "abre com ESPAÇO" : s.modoVoz === "voz" ? "abre por voz" : "sempre aberto"),
+      estiloMic, estiloSurdo, mudo: s.mudo, surdo: s.surdo,
       falarRotulo: s.modoVoz === "tecla" ? "SEGURE ESPAÇO" : s.modoVoz === "voz" ? "ABRE QUANDO VOCÊ FALA" : "MICROFONE SEMPRE ABERTO",
       estiloFalar: "font:inherit;font-size:10px;letter-spacing:0.14em;padding:10px;cursor:pointer;text-align:left;width:100%;border:1px solid var(--seele-linha-forte);background:none;color:var(--seele-osso-apagado)",
       micTitulo: s.mudo ? "MICROFONE DESLIGADO" : "MICROFONE LIGADO",
@@ -956,6 +1065,49 @@ class Component extends DCLogic {
       anexoNome: s.anexo ? s.anexo.nome : "",
       anexoTamanho: s.anexo ? s.anexo.tamanho : "",
       estiloAnexoPrevia: "width:72px;height:72px;flex:0 0 auto;border:1px solid var(--seele-linha-forte);background-color:var(--seele-negro-absoluto);background-repeat:no-repeat;background-position:center;background-size:cover" + (s.anexo ? ";background-image:url(" + s.anexo.url + ")" : ""),
+      modalPerfil: s.modal === "perfil",
+      perfilNome: s.perfilNome,
+      perfilInicial: s.perfilImagem ? "" : s.perfilNome.slice(0, 2).toUpperCase(),
+      perfilAvatarTexto: s.perfilImagem ? "" : s.perfilNome.slice(0, 2).toUpperCase(),
+      estiloAvatarPequeno: "width:32px;height:32px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-family:var(--seele-display);font-weight:900;font-size:12px;letter-spacing:0.04em;color:var(--seele-padrao-azul);border:1px solid var(--seele-linha-forte);background-repeat:no-repeat;background-position:center;background-size:cover" + (s.perfilImagem ? ";background-image:url(" + s.perfilImagem + ")" : ""),
+      estiloAvatarGrande: "width:96px;height:96px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-family:var(--seele-display);font-weight:900;font-size:32px;letter-spacing:0.04em;color:var(--seele-padrao-azul);border:1px solid var(--seele-linha-forte);background-color:var(--seele-negro-absoluto);background-repeat:no-repeat;background-position:center;background-size:cover" + (s.perfilImagem ? ";background-image:url(" + s.perfilImagem + ")" : ""),
+      estiloTirarImagem: "font:inherit;font-size:11px;letter-spacing:0.1em;background:none;padding:6px 12px;border:1px solid " + (s.perfilImagem ? "var(--seele-linha-forte);color:var(--seele-osso-apagado);cursor:pointer" : "var(--seele-linha);color:var(--seele-linha-forte);cursor:not-allowed"),
+      campoPerfil: this.campoPerfil,
+      campoArquivo: this.campoArquivo,
+      abrirPerfil: () => this.setState({ modal: "perfil" }, () => {
+        const el = this.campoPerfil.current;
+        if (el) { el.value = this.state.perfilNome; el.focus(); el.select(); }
+      }),
+      escolherImagem: () => { const el = this.campoArquivo.current; if (el) el.click(); },
+      tirarImagem: () => this.setState({ perfilImagem: null }),
+      aoEscolherArquivo: (ev) => {
+        const arquivo = ev.target.files && ev.target.files[0];
+        if (!arquivo) return;
+        const leitor = new FileReader();
+        leitor.onload = () => this.setState({ perfilImagem: leitor.result });
+        leitor.readAsDataURL(arquivo);
+      },
+      salvarPerfil: () => {
+        const el = this.campoPerfil.current;
+        const nome = el && el.value.trim() ? el.value.trim() : this.state.perfilNome;
+        this.guardar({ perfilNome: nome, modal: null });
+      },
+      aoTeclarPerfil: (ev) => {
+        if (ev.key === "Enter") { ev.preventDefault(); const el = this.campoPerfil.current; const nome = el && el.value.trim() ? el.value.trim() : this.state.perfilNome; this.guardar({ perfilNome: nome, modal: null }); }
+        if (ev.key === "Escape") this.setState({ modal: null });
+      },
+      modalServidores: s.modal === "servidores",
+      campoEndereco: this.campoEndereco,
+      abrirServidores: () => this.setState({ modal: "servidores" }),
+      aoTeclarEndereco: (ev) => {
+        if (ev.key === "Enter") { ev.preventDefault(); this.guardar({ tela: "sessao", modal: null }); }
+        if (ev.key === "Escape") this.setState({ modal: null });
+      },
+      conhecidos: [
+        { sigla: "T3", nome: "TÓQUIO-3", endereco: "192.168.0.7:8383", visto: "há 2 h" },
+        { sigla: "ES", nome: "ESTÚDIO", endereco: "estudio.local:8383", visto: "ontem" },
+        { sigla: "CA", nome: "CASA", endereco: "[2804:14d:...]:8383", visto: "há 6 dias" },
+      ].map((k) => Object.assign({}, k, { conectar: () => this.guardar({ tela: "sessao", modal: null }) })),
       modalPorta: s.modal === "porta",
       modalConfig: s.modal === "config",
       modalNome: s.modal === "nome",
@@ -972,7 +1124,7 @@ class Component extends DCLogic {
       },
       campo: this.campo,
       campoNome: this.campoNome,
-      entrar: () => this.guardar({ tela: "sessao" }),
+      entrar: () => this.guardar({ tela: "sessao", modal: null }),
       hospedar: () => this.guardar({ tela: "sessao", modal: "porta" }),
       desconectar: () => this.guardar({ tela: "boot", modal: null }),
       irChamada: () => this.guardar({ tela: "chamada" }),

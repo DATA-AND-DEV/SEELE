@@ -782,13 +782,39 @@ function desenharOperador(snapshot) {
   // O botão diz em que estado o microfone está, e não o que apertá-lo vai
   // fazer. Um botão escrito com o verbo é um botão que ninguém sabe ler quando
   // volta a olhar para a tela.
+  // **Ícones, como a comp da 0.9.0 os desenha**, e não mais as palavras que
+  // estavam aqui. O microfone é uma cápsula com haste e pé; o som, um fone com
+  // arco e duas conchas — e os dois ganham uma **barra diagonal** quando estão
+  // desligados.
+  //
+  // A barra não é enfeite: é ela que carrega o estado sem depender de cor, que
+  // é o que `06-clientes-gui.md` cobra. Um microfone laranja contra um cinza
+  // some da leitura de quem não distingue os dois; um cortado contra um
+  // inteiro, não. E o `aria-label` diz a mesma coisa em palavra, para quem não
+  // vê nenhum dos dois.
   const mudo = $("botao-mudo");
-  mudo.textContent = snapshot.muted ? "MICROFONE FECHADO" : "MICROFONE ABERTO";
+  const mudoRotulo = snapshot.muted ? "MICROFONE FECHADO" : "MICROFONE ABERTO";
+  mudo.replaceChildren(glifoComEstado("microfone", snapshot.muted, mudoRotulo));
+  mudo.setAttribute("aria-label", mudoRotulo);
+  mudo.title = snapshot.muted ? "abrir o microfone" : "silenciar o microfone";
   mudo.dataset.ativo = snapshot.muted ? "sim" : "nao";
 
   const surdo = $("botao-surdo");
-  surdo.textContent = snapshot.total_isolation ? "ISOLAMENTO TOTAL" : "OUVINDO";
+  const surdoRotulo = snapshot.total_isolation ? "ISOLAMENTO TOTAL" : "OUVINDO";
+  surdo.replaceChildren(glifoComEstado("fone", snapshot.total_isolation, surdoRotulo));
+  surdo.setAttribute("aria-label", surdoRotulo);
+  surdo.title = snapshot.total_isolation ? "voltar a ouvir" : "não ouvir ninguém";
   surdo.dataset.ativo = snapshot.total_isolation ? "sim" : "nao";
+
+  // A linha que substituiu o botão de falar: o que o microfone e o som estão
+  // fazendo, nas palavras da comp — «microfone aberto · ouvindo».
+  $("voz-estado").textContent = [
+    snapshot.muted ? "microfone mudo" : "microfone aberto",
+    snapshot.total_isolation ? "não está ouvindo" : "ouvindo",
+    snapshot.speaking ? "no ar" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   const voz = $("botao-voz");
   // "MODO:" na frente porque `TECLA` sozinho não diz que é um seletor — e um
@@ -799,23 +825,6 @@ function desenharOperador(snapshot) {
   voz.disabled = !snapshot.audio_available;
   voz.dataset.ativo = snapshot.voice_mode === "Open" ? "sim" : "nao";
 
-  const falar = $("botao-falar");
-  falar.dataset.ativo = snapshot.speaking ? "sim" : "nao";
-  // O rótulo é a instrução. Um botão escrito "FALAR" que não faz nada ao ser
-  // clicado é pior que nenhum botão: ensina a coisa errada.
-  // `PODE FALAR` e não `MICROFONE ABERTO` no modo aberto: o botão de mudo ao
-  // lado passou a dizer exatamente essa frase, e dois controles vizinhos com o
-  // mesmo rótulo são dois controles que ninguém distingue. O rótulo daqui é a
-  // instrução; o de lá é o estado.
-  $("falar-rotulo").textContent = snapshot.speaking
-    ? "NO AR"
-    : { PushToTalk: "SEGURE ESPAÇO", VoiceActivated: "FALE", Open: "PODE FALAR" }[
-        snapshot.voice_mode
-      ] ?? "SEGURE ESPAÇO";
-  falar.disabled = !snapshot.audio_available;
-  falar.title = snapshot.audio_available
-    ? "segure a barra de espaço, ou este botão"
-    : "esta sessão não tem áudio";
 }
 
 /**
@@ -2281,7 +2290,6 @@ recarregarTeclaDeFalar();
 function segurarFala(segurando) {
   if (falando === segurando) return;
   falando = segurando;
-  $("botao-falar").dataset.ativo = segurando ? "sim" : "nao";
   invoke("set_talking", { talking: segurando }).catch(() => {});
 }
 
@@ -2926,9 +2934,6 @@ $("botao-voz").addEventListener("click", async () => {
   await atualizar();
 });
 
-$("botao-falar").addEventListener("pointerdown", () => segurarFala(true));
-$("botao-falar").addEventListener("pointerup", () => segurarFala(false));
-$("botao-falar").addEventListener("pointerleave", () => segurarFala(false));
 
 $("convite-copiar").addEventListener("click", async () => {
   const campo = $("convite-link");

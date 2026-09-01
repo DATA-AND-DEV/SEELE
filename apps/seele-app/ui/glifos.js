@@ -70,6 +70,59 @@ const GLIFOS = {
   avancar: [["path", { d: "M5.5 4.5L10.5 8L5.5 11.5Z" }]],
   recuar: [["path", { d: "M10.5 4.5L5.5 8L10.5 11.5Z" }]],
 
+  // O microfone, da comp da 0.9.0: cápsula, arco da haste e o pé.
+  //
+  // Substitui o desenho anterior — um círculo com uma barra dentro —, que lia
+  // como «gravar» e não como microfone. Quem desenha apontou, e tinha razão.
+  microfone: [
+    [
+      "rect",
+      { x: "6.2", y: "2", width: "3.6", height: "7", fill: "none", stroke: "currentColor", "stroke-width": "1.3" },
+    ],
+    [
+      "path",
+      { d: "M4 7.6v0.6a4 4 0 0 0 8 0V7.6", fill: "none", stroke: "currentColor", "stroke-width": "1.3" },
+    ],
+    [
+      "path",
+      { d: "M8 12.2v1.8M5.6 14h4.8", fill: "none", stroke: "currentColor", "stroke-width": "1.3" },
+    ],
+  ],
+
+  // O fone, da comp: o arco por cima e as duas conchas. Substitui um ponto
+  // preto sólido, que não dizia coisa nenhuma.
+  fone: [
+    [
+      "path",
+      { d: "M2.8 9.4V8a5.2 5.2 0 0 1 10.4 0v1.4", fill: "none", stroke: "currentColor", "stroke-width": "1.3" },
+    ],
+    [
+      "rect",
+      { x: "1.6", y: "9", width: "3.4", height: "4.6", fill: "none", stroke: "currentColor", "stroke-width": "1.3" },
+    ],
+    [
+      "rect",
+      { x: "11", y: "9", width: "3.4", height: "4.6", fill: "none", stroke: "currentColor", "stroke-width": "1.3" },
+    ],
+  ],
+
+  // A barra que corta os dois quando estão desligados.
+  //
+  // **Ela é o que torna o estado legível sem cor.** `06-clientes-gui.md` proíbe
+  // informação que só a cor carregue, e um microfone laranja contra um cinza é
+  // exatamente isso. A barra é forma: aparece ou não aparece, e some da leitura
+  // de quem não distingue as duas cores. O `aria-label` diz a mesma coisa em
+  // palavra, para quem não vê nenhuma das duas.
+  //
+  // Traço 1,6 contra o 1,3 do desenho por baixo: ela precisa vencer as linhas
+  // que cruza, ou vira mais uma delas.
+  cortado: [
+    [
+      "path",
+      { d: "M2.6 2.6L13.4 13.4", fill: "none", stroke: "currentColor", "stroke-width": "1.6" },
+    ],
+  ],
+
   // A chave, da comp da 0.9.0: o anel à esquerda e a haste com dois dentes
   // descendo à direita. É o desenho de «quem passa por aqui», e ele nomeia
   // tanto a seção A PORTA quanto a identidade — as duas são sobre credencial.
@@ -318,4 +371,27 @@ function glifo(nome, rotulo) {
 // qualquer pintura: nenhum quadro chega a mostrar o buraco.
 for (const alvo of document.querySelectorAll("[data-glifo]")) {
   alvo.replaceChildren(glifo(alvo.dataset.glifo));
+}
+
+/**
+ * Um glifo com a barra de «desligado» por cima, quando for o caso.
+ *
+ * Existe porque o estado de dois controles desta janela — microfone e som —
+ * é desenhado como o mesmo ícone com e sem um corte, e a comp da 0.9.0 os
+ * desenha assim. Compor aqui evita dois glifos quase idênticos na tabela, que
+ * é onde um deles ficaria para trás no dia em que o desenho mudasse.
+ *
+ * @param {string} nome    o desenho de base
+ * @param {boolean} cortado se o controle está desligado
+ * @param {string} rotulo  o nome acessível, que diz o estado em palavra
+ */
+function glifoComEstado(nome, cortado, rotulo) {
+  const desenho = glifo(nome, rotulo);
+  if (!cortado) return desenho;
+  for (const [tag, atributos] of GLIFOS.cortado) {
+    const forma = document.createElementNS(SVG, tag);
+    for (const [atributo, valor] of Object.entries(atributos)) forma.setAttribute(atributo, valor);
+    desenho.append(forma);
+  }
+  return desenho;
 }

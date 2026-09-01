@@ -1091,13 +1091,31 @@
                   title="configuração local desta máquina"
                   data-glifo="engrenagem"></button>
         </div>
-        <button id="botao-falar" class="botao-estado botao-falar" type="button">
-          <span id="falar-rotulo">SEGURE ESPAÇO</span>
-        </button>
+        <!--
+          **O botão de falar saiu.** A comp da 0.9.0 o tira e põe no lugar uma
+          linha de estado — `{{ vozEstado }}` lá, `#voz-estado` aqui.
+
+          Ele era um botão que, no modo tecla, dizia `SEGURE ESPAÇO`: uma
+          instrução sobre o teclado, desenhada como se fosse o controle. Quem o
+          apertava com o mouse falava enquanto segurasse o botão, o que
+          funciona e não é o que o rótulo ensina — e quem lia o rótulo já
+          sabia da tecla, ou não teria como saber que aquilo era segurável.
+
+          A tecla continua sendo a tecla, e é configurável desde `3994d7d`. O
+          que sobra aqui é dizer o que está acontecendo.
+        -->
+        <p id="voz-estado" class="operador-frase" role="status"></p>
         <button id="botao-voz" class="botao-estado" type="button"
                 title="como o microfone abre">MODO: TECLA</button>
-        <button id="botao-mudo" class="botao-estado" type="button">MICROFONE ABERTO</button>
-        <button id="botao-surdo" class="botao-estado" type="button">OUVINDO</button>
+        <!--
+          Ícones, e o script os desenha: o microfone e o fone da comp da 0.9.0,
+          com a barra diagonal quando estão desligados. Nascem vazios porque o
+          estado só é conhecido no primeiro snapshot, e um desenho fixo aqui
+          seria um estado escrito na marcação para ser desmentido meio segundo
+          depois.
+        -->
+        <button id="botao-mudo" class="botao-estado botao-glifo" type="button"></button>
+        <button id="botao-surdo" class="botao-estado botao-glifo" type="button"></button>
         <!--
           A fileira que a comp da 0.9.0 põe no pé do operador: sair da sala e
           alternar o que a coluna do meio mostra. As duas juntas porque a
