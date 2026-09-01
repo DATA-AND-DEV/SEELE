@@ -1,0 +1,89 @@
+/* Onde você já esteve — a lista de servidores conhecidos.
+ *
+ * Herda a caixa do diálogo de nomear; o que muda é a lista. */
+
+.servidores-caixa { max-width: 520px; }
+
+.servidores-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+/* A linha inteira é o botão, e não um `<li>` com `cursor: pointer`: o alvo do
+   gesto é a linha, e um `<li>` é inalcançável pelo teclado e não se anuncia
+   como coisa que se aperta. É a mesma correção que a lista de canais levou. */
+.servidor-linha {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  font: inherit;
+  text-align: left;
+  color: var(--seele-osso);
+  background: none;
+  border: 1px solid var(--seele-linha-forte);
+  cursor: pointer;
+}
+
+.servidor-linha:hover {
+  border-color: var(--seele-laranja-nerv);
+}
+
+/* A sigla, do mesmo tamanho da que a trilha de 60px desenha: quem reconhece um
+   servidor por ela ali reconhece aqui, sem reaprender. */
+.servidor-sigla {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--seele-linha-forte);
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  color: var(--seele-laranja-nerv);
+}
+
+.servidor-texto {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.servidor-nome {
+  font-family: var(--seele-display);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.servidor-endereco {
+  font-size: 11px;
+  color: var(--seele-osso-apagado);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Quando foi, em palavra relativa. À direita porque é o que se compara entre
+   linhas, e comparar pede que os valores fiquem alinhados. */
+.servidor-visto {
+  flex: 0 0 auto;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--seele-osso-apagado);
+  font-variant-numeric: tabular-nums;
+}

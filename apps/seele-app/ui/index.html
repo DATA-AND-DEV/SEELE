@@ -39,6 +39,7 @@
 <link rel="stylesheet" href="camada-moderar.css">
 <link rel="stylesheet" href="camada-ajuda.css">
 <link rel="stylesheet" href="camada-nomear.css">
+<link rel="stylesheet" href="camada-servidores.css">
 <link rel="stylesheet" href="tela-chamada.css">
 <link rel="stylesheet" href="camada-compartilhar.css">
 <link rel="stylesheet" href="tela-server.css">
@@ -2762,6 +2763,37 @@
   estão **escritos antes de escolher o arquivo**, como a comp os escreve. Um
   limite que só aparece na recusa é um limite que a pessoa descobre errando.
 -->
+<!--
+  Onde você já esteve: os servidores conhecidos, e um campo para outro.
+
+  A comp da 0.9.0 tira o endereço da tela de entrada e o traz para cá. O ganho
+  é o caso comum: quem já usou o produto volta ao mesmo lugar, e voltar deixa de
+  ser digitar um endereço para virar apertar uma linha.
+
+  O campo continua existindo, embaixo, porque o caso raro não pode sumir — e ele
+  aceita `seele://` além do endereço cru, que é o que se recebe de alguém.
+-->
+<div id="servidores" class="camada-nomear" role="dialog" aria-modal="true"
+     aria-labelledby="servidores-titulo" tabindex="-1" hidden>
+  <div class="nomear-caixa servidores-caixa">
+    <div class="nomear-cabeca perfil-cabeca">
+      <h2 id="servidores-titulo" class="nomear-titulo">ONDE VOCÊ JÁ ESTEVE</h2>
+      <button id="servidores-fechar" class="botao-fantasma" type="button">FECHAR</button>
+    </div>
+    <div class="nomear-corpo">
+      <ul id="servidores-lista" class="servidores-lista"></ul>
+      <p id="servidores-vazio" class="nota" hidden>Você ainda não entrou em
+        nenhum servidor. Cole o endereço ou o link que alguém te mandou.</p>
+      <form id="servidores-forma" class="porta-linha" autocomplete="off">
+        <input id="servidores-endereco" name="endereco" spellcheck="false"
+               autocomplete="off" placeholder="outro endereço, ou um link seele://">
+        <button type="submit" class="nomear-confirmar">ENTRAR</button>
+      </form>
+      <p id="servidores-erro" class="nomear-erro" role="alert" hidden></p>
+    </div>
+  </div>
+</div>
+
 <div id="perfil" class="camada-nomear" role="dialog" aria-modal="true"
      aria-labelledby="perfil-titulo" tabindex="-1" hidden>
   <div class="nomear-caixa perfil-caixa">
@@ -3112,6 +3144,7 @@
 <script src="camada-portaria.js"></script>
 <script src="camada-ajuda.js"></script>
 <script src="camada-nomear.js"></script>
+<script src="camada-servidores.js"></script>
 <!--
   Depois de `tela-sessao.js`, e não é gosto: a chamada usa `naoMedido`,
   `medido`, `SEM_MEDIDA` e `blocos`, que são declarados lá. Declaração de função
