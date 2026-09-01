@@ -112,13 +112,38 @@ impl CapturaDaSaida {
         // A **saída**, aberta como entrada: é isso que liga o loopback.
         let saida = crate::device::resolver(&host, dispositivo, Side::Output)?;
 
-        // `default_input_config` numa saída é o que o cpal usa para descrever o
-        // fluxo de loopback. Num sistema sem loopback ele falha aqui, que é o
+        // **`default_output_config` e não `default_input_config`.**
+        //
+        // Estava escrito `default_input_config` aqui, com o comentário «é o que
+        // o cpal usa para descrever o fluxo de loopback». Não é, e a afirmação
+        // nunca foi conferida — este caminho não roda em máquina nenhuma de
+        // desenvolvimento. Em `cpal-0.18.2`, `device.rs:807`:
+        //
+        // ```
+        // pub fn default_input_config(&self) -> Result<SupportedStreamConfig, Error> {
+        //     if self.data_flow() == Audio::eCapture { self.default_format() }
+        //     else { Err(... "Device does not support input") }
+        // }
+        // ```
+        //
+        // Numa saída — `eRender` — ele **recusa**, antes de qualquer loopback
+        // existir. O efeito era o pior possível: `abrir` falhava, o par ficava
+        // com `som: None`, `tomar_som` devolvia vazio para sempre, e a
+        // transmissão saía muda com um aviso no log e nada na tela. O som da
+        // tela nunca funcionou no Windows, em nenhuma versão.
+        //
+        // O loopback do cpal é real, mas mora um degrau adiante: ao **construir**
+        // o fluxo de entrada num dispositivo `eRender`, ele liga o
+        // `AUDCLNT_STREAMFLAGS_LOOPBACK` sozinho (`device.rs:855`). O que faltava
+        // era o formato, e o formato do loopback é o formato de mixagem da
+        // saída — que é exatamente o que `default_output_config` devolve.
+        //
+        // Num sistema sem saída nenhuma ele falha aqui, que continua sendo o
         // lugar certo para falhar: antes de qualquer anel ser alocado.
         let config = saida
-            .default_input_config()
+            .default_output_config()
             .map_err(|source| DeviceError::Device {
-                side: Side::Input,
+                side: Side::Output,
                 stage: Stage::Config,
                 source,
             })?;
@@ -233,6 +258,45 @@ impl CapturaDaSaida {
 
 #[cfg(test)]
 mod testes {
+    use cpal::traits::{DeviceTrait as _, HostTrait as _};
+
+    /// A suposição que faltava conferir, e que custou o som da tela inteiro.
+    ///
+    /// [`CapturaDaSaida::abrir`] pergunta o formato à **saída**. A pergunta era
+    /// `default_input_config`, com um comentário afirmando que era assim que o
+    /// cpal descreve o fluxo de loopback. Não é: numa saída ele recusa, e o
+    /// resultado foi uma transmissão muda em toda versão que já saiu para o
+    /// Windows — sem erro na tela, com um aviso num log que ninguém lia.
+    ///
+    /// Este teste roda em qualquer sistema porque a regra não é do WASAPI: um
+    /// dispositivo de saída não tem configuração de entrada em backend nenhum.
+    /// O loopback do Windows entra um degrau adiante, ao construir o fluxo, e é
+    /// por isso que o formato tem de vir do lado de saída.
+    ///
+    /// Se um dia o cpal passar a responder `default_input_config` numa saída,
+    /// este teste falha — e falha dizendo o que mudou, em vez de deixar alguém
+    /// reintroduzir a chamada antiga achando que ela sempre serviu.
+    #[test]
+    fn uma_saida_nao_responde_configuracao_de_entrada() {
+        let host = cpal::default_host();
+        let Some(saida) = host.default_output_device() else {
+            eprintln!("PULADO: esta máquina não tem saída padrão.");
+            return;
+        };
+
+        assert!(
+            saida.default_output_config().is_ok(),
+            "a saída padrão não descreve o próprio formato de saída, que é de \
+             onde `CapturaDaSaida::abrir` tira o formato do loopback"
+        );
+        assert!(
+            saida.default_input_config().is_err(),
+            "uma saída passou a responder `default_input_config`.\n\
+             Era o que o código antigo supunha e o que o cpal recusa — se isso \
+             mudou, releia `CapturaDaSaida::abrir` antes de confiar na resposta."
+        );
+    }
+
     use super::*;
 
     /// A prova de campo: o som que esta máquina está tocando.
@@ -251,9 +315,17 @@ mod testes {
         let captura = match CapturaDaSaida::abrir(None) {
             Ok(captura) => captura,
             Err(erro) => {
+                // **A mensagem não absolve mais ninguém.**
+                //
+                // Ela dizia «no macOS é esperado», e era isso que escondia o
+                // defeito: a falha real era `default_input_config` recusando
+                // numa saída, o que acontece em **todo** sistema, e este teste
+                // pulava em todos eles anunciando que pular era o certo. No
+                // Windows, onde não é, o pulo tinha a mesma cara.
                 eprintln!(
-                    "PULADO: este sistema não empresta a saída como entrada ({erro}). \
-                     No macOS é esperado — o áudio da tela vem do ScreenCaptureKit."
+                    "PULADO: a saída desta máquina não abriu como entrada ({erro}). \
+                     Isso é normal onde não há loopback; **não** é normal no \
+                     Windows, onde é o caminho do som da tela."
                 );
                 return;
             }
