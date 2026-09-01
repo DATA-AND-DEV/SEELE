@@ -70,6 +70,23 @@ const GLIFOS = {
   avancar: [["path", { d: "M5.5 4.5L10.5 8L5.5 11.5Z" }]],
   recuar: [["path", { d: "M10.5 4.5L5.5 8L10.5 11.5Z" }]],
 
+  // A chave, da comp da 0.9.0: o anel à esquerda e a haste com dois dentes
+  // descendo à direita. É o desenho de «quem passa por aqui», e ele nomeia
+  // tanto a seção A PORTA quanto a identidade — as duas são sobre credencial.
+  chave: [
+    [
+      "circle",
+      { cx: "5.2", cy: "5.2", r: "2.6", fill: "none", stroke: "currentColor", "stroke-width": "1.3" },
+    ],
+    [
+      "path",
+      {
+        d: "M7 7l5.4 5.4M10.2 10.2l-1.6 1.6M12.4 12.4l-1.6 1.6",
+        fill: "none", stroke: "currentColor", "stroke-width": "1.3",
+      },
+    ],
+  ],
+
   // Aparência: um quadrado com a metade esquerda cheia, que é o desenho
   // universal de contraste. Da comp da 0.9.0.
   aparencia: [

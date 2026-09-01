@@ -285,3 +285,83 @@
   color: var(--seele-osso);
   letter-spacing: 0.08em;
 }
+
+
+/* A porta, quando a rede sobe. Mesmos valores do diálogo de nomear — véu de
+   0,78 e moldura laranja —, porque são o mesmo tipo de coisa: uma camada que
+   espera uma resposta. Mais larga porque carrega um link inteiro. */
+.camada-porta {
+  position: fixed;
+  inset: 0;
+  z-index: 26;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+
+.camada-porta::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--seele-negro-absoluto);
+  opacity: 0.78;
+}
+
+.porta-caixa {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  background: var(--seele-negro-painel);
+  border: 1px solid var(--seele-laranja-nerv);
+}
+
+.porta-cabeca {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--seele-laranja-nerv);
+  color: var(--seele-negro-absoluto);
+}
+
+.porta-titulo {
+  margin: 0;
+  flex: 1;
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 15px;
+  letter-spacing: 0.08em;
+}
+
+.porta-corpo {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.porta-prosa {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--seele-osso);
+}
+
+/* O link ocupa o que sobrar; o rótulo e o botão não encolhem, porque um botão
+   `copiar` cortado é um botão que ninguém aperta. */
+.porta-linha {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.porta-linha > .rotulo,
+.porta-linha > button { flex: 0 0 auto; }
+.porta-linha > input { flex: 1 1 auto; min-width: 0; }
+
+.porta-acoes {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}

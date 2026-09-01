@@ -326,6 +326,18 @@ async function hospedar() {
       anfitriao.encontro_recusado,
     );
     $("convite").hidden = false;
+
+    // **O link, guardado e mostrado.** A comp da 0.9.0 promove a um diálogo o
+    // que era um bloco entre outros nesta tela: quem acabou de hospedar precisa
+    // de uma coisa só — o link — e precisa dela agora. Um bloco é uma coisa que
+    // se acha; um diálogo é uma coisa que chega.
+    //
+    // Guardado antes de mostrado porque a configuração é onde ele mora depois,
+    // e o diálogo promete isso por escrito. Um diálogo que prometesse um lugar
+    // vazio seria pior que não prometer nada.
+    guardarOLinkDaPorta(anfitriao.convite);
+    abrirPorta($("convite-alcance").textContent);
+
     await conectar();
   } catch (falha) {
     erro.hidden = false;

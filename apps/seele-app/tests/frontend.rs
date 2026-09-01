@@ -3004,6 +3004,9 @@ fn every_section_of_the_settings_screen_carries_the_panel_and_the_heading_it_ope
     assert_eq!(
         sections,
         [
+            // A PORTA abre o trilho, como na comp — e só existe para quem
+            // hospeda, do mesmo jeito que a de SERVIDOR.
+            "secao-porta",
             "secao-audio",
             "secao-atalhos",
             // **APARÊNCIA voltou na 0.9.0**, e o registro de por que ela

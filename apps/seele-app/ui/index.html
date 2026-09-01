@@ -1915,6 +1915,23 @@
         botão que o abre, e não há duas listas para alguém manter em dia.
       -->
       <ul class="server-secoes">
+        <li id="secao-porta-item" hidden>
+          <!--
+            A PORTA só existe para quem hospeda, como o bloco do convite na
+            tela de entrada: a porta do servidor é estado da máquina que o
+            hospeda, e quem entrou no servidor de outra pessoa não tem porta
+            nenhuma para configurar.
+          -->
+          <button id="secao-porta" class="server-secao" type="button"
+                  data-painel="painel-porta"
+                  data-titulo="A PORTA"
+                  data-sub="O link deste servidor e quem pode atravessá-lo">
+            <span class="server-secao-icone" data-glifo="chave"></span>
+            <span class="server-secao-texto">
+              <span class="server-secao-nome">A PORTA</span>
+            </span>
+          </button>
+        </li>
         <li>
           <button id="secao-audio" class="server-secao" type="button"
                   data-painel="painel-audio"
@@ -2064,6 +2081,30 @@
       <div class="server-painel">
 
         <!-- ---------------------------------------------------------- ÁUDIO -->
+        <section id="painel-porta" class="server-painel-secao"
+                 aria-labelledby="secao-porta" hidden>
+          <p class="nota">O link de convite deste servidor. Ele aparece uma vez
+            quando a rede sobe, e mora aqui depois disso.</p>
+          <div class="porta-linha">
+            <input id="porta-link-config" class="convite-link" readonly spellcheck="false">
+            <button id="porta-copiar-config" class="botao-fantasma" type="button">copiar</button>
+          </div>
+          <!--
+            **As três camadas ficam na portaria, e o botão leva até lá.**
+
+            A comp as desenha aqui dentro: senha do servidor, convite de uso
+            único, portaria. Elas existem, funcionam, e moram em
+            `camada-portaria` — 625 linhas com estado, alarme, lista de quem
+            bateu e o histórico de decisões.
+
+            Trazê-las para cá seria duplicar aquilo ou mudá-lo de casa no mesmo
+            commit que introduz esta seção. O que este painel faz é o que a
+            promessa do diálogo exige — dar ao link um lugar permanente — e
+            abrir a porta para o resto.
+          -->
+          <button id="porta-camadas" class="botao-fantasma" type="button">AS TRÊS CAMADAS DA PORTA</button>
+        </section>
+
         <section id="painel-audio" class="server-painel-secao" aria-labelledby="secao-audio">
 
           <div class="server-bloco">
@@ -2636,6 +2677,51 @@
   navegação é um convite a preencher, e criar canal não é o que se faz ali toda
   hora.
 -->
+<!--
+  A porta, quando a rede sobe.
+
+  A comp da 0.9.0 promove a um diálogo o que era um bloco na tela de entrada:
+  quem acabou de hospedar precisa de **uma** coisa, o link, e precisa dela
+  agora. Um bloco entre outros na mesma tela é uma coisa que se acha; um
+  diálogo é uma coisa que chega.
+
+  E ele promete onde o link mora depois — `CONFIGURAÇÕES · A PORTA` —, porque
+  o custo de um diálogo que aparece uma vez é a pessoa achar que perdeu o que
+  ele mostrava.
+-->
+<div id="porta" class="camada-porta" role="dialog" aria-modal="true"
+     aria-labelledby="porta-titulo" tabindex="-1" hidden>
+  <div class="porta-caixa">
+    <div class="porta-cabeca">
+      <h2 id="porta-titulo" class="porta-titulo">A PORTA DESTE SERVIDOR</h2>
+      <button id="porta-fechar" class="botao-fantasma" type="button">FECHAR</button>
+    </div>
+    <div class="porta-corpo">
+      <p class="porta-prosa">Este servidor está de pé nesta máquina. Mande o
+        link para quem você quer dentro — ele carrega a impressão digital do
+        certificado, então quem recebe não precisa conferi-la por outro canal.</p>
+      <div class="porta-linha">
+        <span class="rotulo">CONVITE</span>
+        <input id="porta-link" class="convite-link" readonly spellcheck="false">
+        <button id="porta-copiar" class="botao-fantasma" type="button">copiar</button>
+      </div>
+      <!--
+        O alcance sai do mesmo lugar que já o escrevia na tela de entrada: o
+        `hospedar` responde em que degrau parou. Nasce escondido porque, antes
+        da resposta, esta janela não sabe — e um texto de exemplo mentiria
+        durante o intervalo.
+      -->
+      <p id="porta-alcance" class="convite-alcance" hidden></p>
+      <p class="nota">Depois de fechar, o link e as três camadas da porta
+        continuam em CONFIGURAÇÕES · A PORTA.</p>
+      <div class="porta-acoes">
+        <button id="porta-configuracoes" class="botao-fantasma" type="button">ABRIR CONFIGURAÇÕES</button>
+        <button id="porta-entendi" class="nomear-confirmar" type="button">ENTENDI</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="nomear" class="camada-nomear" role="dialog" aria-modal="true"
      aria-labelledby="nomear-titulo" tabindex="-1" hidden>
   <div class="nomear-caixa">

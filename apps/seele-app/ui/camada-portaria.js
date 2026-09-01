@@ -607,7 +607,7 @@ $("portaria-gerar").addEventListener("click", () => {
     const link = await invoke("criar_convite_do_server", {
       observacao: observacao.value.trim(),
     });
-    $("convite-link").value = link;
+    guardarOLinkDaPorta(link);
     observacao.value = "";
     anunciar("Convite gerado. O link no campo CONVITE agora leva este convite.");
   });
@@ -623,3 +623,128 @@ $("portaria-ligar").addEventListener("click", () => {
   }
   fechando(() => invoke("ligar_portaria", { ligada: true }));
 });
+
+
+// --------------------------------------------------------------- a porta nova
+//
+// O diálogo que aparece quando a rede sobe, e o painel que guarda o link
+// depois. Os dois moram aqui, junto da portaria, porque é ela que sabe o que
+// há atrás da porta — e um terceiro arquivo para dois campos e um botão seria
+// um lugar a mais para o link ser escrito com outra grafia.
+
+/**
+ * Escreve o link da porta **em todos os lugares onde ele aparece**.
+ *
+ * São três: o campo da tela de entrada, o do diálogo que sobe com a rede, e o
+ * do painel `A PORTA` da configuração — que é onde ele mora depois.
+ *
+ * Uma função e não três atribuições espalhadas, e o motivo apareceu ao
+ * escrevê-la: gerar um convite de uso único escrevia **só** no campo da tela
+ * de entrada, e o painel da configuração continuava mostrando o link anterior.
+ * Dois campos com o mesmo rótulo e conteúdos diferentes é um lugar a mais para
+ * alguém copiar o link errado — que é exatamente o risco que o comentário do
+ * próprio gerador diz estar evitando.
+ *
+ * O link não vai para o disco: ele é derivado do servidor que **esta** máquina
+ * hospeda agora, e um guardado entre execuções seria o link de um servidor que
+ * pode não estar mais no ar, com uma impressão digital que pode ter mudado.
+ */
+function guardarOLinkDaPorta(link) {
+  for (const campo of ["convite-link", "porta-link", "porta-link-config"]) {
+    const onde = $(campo);
+    if (onde) onde.value = link;
+  }
+  $("secao-porta-item").hidden = false;
+}
+
+/** Para onde o teclado volta quando o diálogo da porta fecha. */
+let focoAntesDaPorta = null;
+
+/**
+ * Mostra o link, uma vez, para quem acabou de hospedar.
+ *
+ * O link já está nos campos: quem o põe lá é `guardarOLinkDaPorta`, e chamá-lo
+ * antes é o que faz este diálogo cumprir a promessa que ele escreve — que o
+ * link continua na configuração depois de fechado.
+ *
+ * @param {string} [alcance] a frase do alcance, quando `hospedar` já a disse
+ */
+function abrirPorta(alcance) {
+  focoAntesDaPorta = document.activeElement;
+  const onde = $("porta-alcance");
+  if (alcance) {
+    onde.textContent = alcance;
+    onde.hidden = false;
+  } else {
+    onde.hidden = true;
+  }
+  $("porta").hidden = false;
+  // O link selecionado de saída: o gesto seguinte é copiar, e quem não confia
+  // no botão — ou a quem a área de transferência for negada — já tem a seleção
+  // feita para o atalho do teclado.
+  $("porta-link").focus();
+  $("porta-link").select();
+  anunciar("A porta deste servidor. O link de convite. Escape fecha.");
+}
+
+/** Fecha, devolvendo o teclado a quem estava com ele. */
+function fecharPorta() {
+  $("porta").hidden = true;
+  if (focavel(focoAntesDaPorta)) focoAntesDaPorta.focus();
+  focoAntesDaPorta = null;
+}
+
+/**
+ * Copia um campo de link e diz que copiou, no próprio botão.
+ *
+ * `select()` antes de tudo: se a área de transferência for negada, a pessoa
+ * ainda fica com o link selecionado e copia pelo teclado. É a mesma escolha
+ * que o `convite-copiar` da tela de entrada já fazia, e ela está aqui em vez
+ * de repetida porque agora são três campos com o mesmo link.
+ */
+async function copiarLink(campo, botao) {
+  campo.select();
+  try {
+    await navigator.clipboard.writeText(campo.value);
+    botao.textContent = "copiado";
+  } catch (falha) {
+    console.warn("copiar o link:", falha);
+    botao.textContent = "copie com Ctrl+C";
+  }
+}
+
+$("porta-fechar").addEventListener("click", fecharPorta);
+$("porta-entendi").addEventListener("click", fecharPorta);
+fecharAoClicarFora("porta", fecharPorta);
+
+$("porta-copiar").addEventListener("click", () => {
+  copiarLink($("porta-link"), $("porta-copiar"));
+});
+
+$("porta-configuracoes").addEventListener("click", () => {
+  fecharPorta();
+  abrirServer("tela-boot");
+  abrirSecao("secao-porta");
+});
+
+$("porta-copiar-config").addEventListener("click", () => {
+  copiarLink($("porta-link-config"), $("porta-copiar-config"));
+});
+
+// As três camadas continuam na portaria, e este botão leva até lá — ver a nota
+// no `painel-porta`.
+$("porta-camadas").addEventListener("click", () => {
+  abrirPortaria();
+});
+
+// `Escape` fecha, em fase de captura: com ele aberto, é a coisa mais de cima.
+window.addEventListener(
+  "keydown",
+  (evento) => {
+    if (evento.key !== "Escape" || $("porta").hidden) return;
+    evento.preventDefault();
+    evento.stopPropagation();
+    fecharPorta();
+  },
+  true,
+);
