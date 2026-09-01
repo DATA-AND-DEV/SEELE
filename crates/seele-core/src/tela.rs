@@ -551,33 +551,47 @@ pub enum Prioridade {
     Movimento,
 }
 
-/// Um degrau abaixo, ou o mesmo quando já se está no piso.
-///
-/// É como [`Prioridade::Movimento`] paga os quadros: com resolução. Um degrau, e
-/// não uma fração do teto, **porque não há medida para uma fração**. A tabela de
-/// onde saem [`TETO_ESTIMADO_PARA_1080P_BPS`] e [`TETO_ESTIMADO_PARA_720P_BPS`]
-/// foi levantada com texto; quanto a mais um jogo pede na mesma resolução é
-/// pergunta em aberto, e um multiplicador inventado aqui seria precisão fingida.
-///
-/// Um degrau é uma regra que se lê e se prevê: a 6 Mbps, onde nitidez pede
-/// 1080p, movimento pede 720p e devolve os bits ao quadro.
-const fn um_degrau_abaixo(resolucao: Resolucao) -> Resolucao {
-    match resolucao {
-        Resolucao::P1080 => Resolucao::P720,
-        // 540p é o piso da lista do §5, e abaixo dele não há degrau. Quem nem a
-        // 540p sustenta o quadro está num caminho que o piso de banda vai parar,
-        // com motivo enumerado — não numa quarta resolução.
-        Resolucao::P720 | Resolucao::P540 => Resolucao::P540,
-    }
-}
-
 /// A resolução que este teto compra, dado o que se escolheu proteger.
 #[must_use]
 pub const fn resolucao_para(teto_bps: u32, prioridade: Prioridade) -> Resolucao {
-    let nitida = resolucao_estimada_para(teto_bps);
     match prioridade {
-        Prioridade::Nitidez => nitida,
-        Prioridade::Movimento => um_degrau_abaixo(nitida),
+        Prioridade::Nitidez => resolucao_estimada_para(teto_bps),
+        // **Limiares mais altos, e não um degrau abaixo do que couber.**
+        //
+        // A versão anterior descia um degrau, sempre. Ela cumpria a intenção
+        // quando o teto apertava e a estragava quando não apertava: a 50 Mbps
+        // ela continuava descendo, e por isso `Movimento` **nunca alcançava
+        // 1080p, em banda nenhuma**. Como ele virou o padrão ao sair da caixa
+        // de compartilhar, 1080p passou a ser inalcançável no produto inteiro —
+        // e foi assim que a pergunta chegou: «se eu quero transmitir em 1080p60
+        // para 5-6 pessoas, fica impossível então?».
+        //
+        // O que a intenção quer dizer é «para movimento, a mesma resolução
+        // custa mais», e isso é um limiar e não um degrau. O dobro, e a razão é
+        // a mesma tabela que os limiares de nitidez usam: ela mediu conteúdo
+        // parado, e conteúdo em movimento gasta cerca do dobro por quadro
+        // porque a predição entre quadros para de acertar.
+        //
+        // O efeito nas pontas é o certo: a 1,2 Mbps `Movimento` continua dando
+        // 540p, exatamente como antes; a 8 Mbps ele passa a dar 1080p, que
+        // antes era impossível.
+        Prioridade::Movimento => resolucao_para_movimento(teto_bps),
+    }
+}
+
+/// A escada de [`Prioridade::Movimento`]: os mesmos degraus, o dobro do preço.
+///
+/// Separada de [`resolucao_estimada_para`] em vez de ser um degrau por cima
+/// dela, para que os dois eixos sejam duas tabelas e não uma tabela e uma
+/// correção — uma correção não tem como dizer «a 50 Mbps não corrija nada».
+#[must_use]
+pub const fn resolucao_para_movimento(teto_bps: u32) -> Resolucao {
+    if teto_bps >= TETO_ESTIMADO_PARA_1080P_BPS * 2 {
+        Resolucao::P1080
+    } else if teto_bps >= TETO_ESTIMADO_PARA_720P_BPS * 2 {
+        Resolucao::P720
+    } else {
+        Resolucao::P540
     }
 }
 
@@ -2329,13 +2343,47 @@ mod o_eixo_da_degradacao {
                  movimento nunca pede mais resolução que nitidez"
             );
         }
+        // **A afirmação de cima é a invariante; esta era a regra que a
+        // implementava, e ela mudou.**
+        //
+        // Aqui estava escrito que a 6 Mbps movimento pede 720p — porque a regra
+        // era «um degrau abaixo, sempre». Ela cumpria a intenção quando o teto
+        // apertava e a estragava quando não apertava: `Movimento` nunca
+        // alcançava 1080p, em banda nenhuma, e como ele virou o padrão, 1080p
+        // ficou inalcançável no produto inteiro.
+        //
+        // A regra agora é limiar e não degrau: o dobro do preço para a mesma
+        // resolução. O que a invariante do laço acima guarda continua valendo —
+        // movimento nunca pede **mais** que nitidez —, e o que muda é que a 6
+        // Mbps o dobro de 1,5 já cabe.
         assert_eq!(
             resolucao_para(6_000_000, Prioridade::Nitidez),
             Resolucao::P1080
         );
         assert_eq!(
             resolucao_para(6_000_000, Prioridade::Movimento),
+            Resolucao::P1080,
+            "a seis megabits, o dobro do limiar de 1080p cabe com folga"
+        );
+
+        // E o aperto continua apertando, que é a razão de o eixo existir.
+        assert_eq!(
+            resolucao_para(1_200_000, Prioridade::Nitidez),
             Resolucao::P720
+        );
+        assert_eq!(
+            resolucao_para(1_200_000, Prioridade::Movimento),
+            Resolucao::P540,
+            "a 1,2 Mbps movimento continua cedendo resolução para segurar o quadro"
+        );
+
+        // **E 1080p tem de ser alcançável.** Sem esta linha, a regra pode voltar
+        // a ser um teto disfarçado de degrau e nada reprova.
+        assert_eq!(
+            resolucao_para(u32::MAX, Prioridade::Movimento),
+            Resolucao::P1080,
+            "movimento não alcança 1080p nem com banda infinita: a regra virou \
+             um teto, e foi assim que 1080p ficou impossível no produto"
         );
     }
 
