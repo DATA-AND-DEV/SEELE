@@ -537,13 +537,27 @@ const FRASES = {
     SoRedeLocal:
       "ESTE LINK SÓ FUNCIONA NA SUA REDE.",
 
-    // Escolher microfone, no Terminal servidor. Duas frases e não uma porque pedem
-    // coisas diferentes de quem lê: a primeira não tem conserto na tela, e a
-    // segunda tem — a lista está logo acima, e o que sumiu entre desenhá-la e
-    // clicar nela pode ser trocado por outro sem sair daqui.
+    // Escolher microfone **ou saída de som**, no Terminal Server. Duas frases e
+    // não uma porque pedem coisas diferentes de quem lê: a primeira não tem
+    // conserto na tela, e a segunda tem — a lista está logo acima, e o que
+    // falhou pode ser trocado por outro sem sair daqui.
     NaoGravei: "NÃO CONSEGUI GRAVAR ESSE AJUSTE NESTA MÁQUINA",
+    // **Ela deixou de falar só de microfone, e deixou de falar só de sumiço.**
+    //
+    // O mesmo desfecho cobre a saída de som, e cobre um segundo caso que antes
+    // não dizia nada: a troca voltar sem erro e o dispositivo aberto continuar
+    // sendo o de antes. Era assim que ela aparecia em campo — «mostra EM USO num
+    // e ESCOLHIDO no que eu escolhi, mas não muda» —, e um produto que grava a
+    // ordem e não a cumpre, calado, é pior que um que recusa.
+    //
+    // Sem nomear a causa, porque desta tela não dá para distinguir: um
+    // dispositivo desligado no meio do clique e um que o sistema não entrega
+    // terminam no mesmo lugar. O que a frase precisa dar é o próximo passo, e
+    // ele é o mesmo nos dois.
     DispositivoSumiu:
-      "ESSE MICROFONE NÃO ESTÁ MAIS AQUI.",
+      "NÃO CONSEGUI PASSAR PARA ESSE DISPOSITIVO.\n" +
+      "Ele pode ter sido desligado, ou estar preso a outro programa. " +
+      "O de antes continua valendo; escolha outro na lista acima.",
 
     // ---- atualizar (ADR 0026) ----
     //

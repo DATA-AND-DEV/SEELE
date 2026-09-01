@@ -950,6 +950,16 @@ impl std::fmt::Debug for Connection {
     }
 }
 
+/// Qual metade do áudio uma troca mexeu.
+///
+/// Só para [`Connection::conferir_troca`]: a conferência é a mesma dos dois
+/// lados, e duas cópias dela divergiriam no dia em que uma ganhasse um caso.
+#[derive(Debug, Clone, Copy)]
+enum Lado {
+    Entrada,
+    Saida,
+}
+
 impl Connection {
     /// Connects, authenticates, and starts the driver thread.
     ///
@@ -1698,6 +1708,7 @@ impl Connection {
         // `switch_capture` is what carries mudo and the rest across — in
         // the core, so the terminal client gets the same list of what survives,
         // and the chosen output with it.
+        let pedido = device.clone();
         self.switch_device(|running, media, ssrc| {
             running
                 .switch_capture(device.as_deref(), media, ssrc)
@@ -1705,7 +1716,8 @@ impl Connection {
                     tracing::warn!(%error, "could not open the chosen microphone");
                     ConnectionError::CaptureDeviceGone
                 })
-        })
+        })?;
+        self.conferir_troca(pedido.as_deref(), Lado::Entrada)
     }
 
     /// Switches this session to another sound output.
@@ -1730,6 +1742,7 @@ impl Connection {
     /// coming out of the old one. [`ConnectionError::NoAudioDevice`] when this session
     /// has no audio at all.
     pub fn set_playback_device(&self, device: Option<String>) -> Result<(), ConnectionError> {
+        let pedido = device.clone();
         self.switch_device(|running, media, ssrc| {
             running
                 .switch_playback(device.as_deref(), media, ssrc)
@@ -1737,6 +1750,63 @@ impl Connection {
                     tracing::warn!(%error, "could not open the chosen sound output");
                     ConnectionError::PlaybackDeviceGone
                 })
+        })?;
+        self.conferir_troca(pedido.as_deref(), Lado::Saida)
+    }
+
+    /// Confere que a troca **aconteceu**, e não só que ninguém devolveu erro.
+    ///
+    /// # Por que isto existe
+    ///
+    /// Trocar a saída de som no Windows era relatado assim: «ele mostra EM USO
+    /// num e ESCOLHIDO no que eu escolhi, mas não muda». `EM USO` sai do
+    /// dispositivo que o `Voice` **abriu**, e `ESCOLHIDO` da preferência —
+    /// então os dois discordando é o produto dizendo, sem saber, que a ordem
+    /// foi gravada e não cumprida.
+    ///
+    /// Nada nesse caminho devolvia erro: `resolve` acha o dispositivo, `open`
+    /// abre, a troca volta `Ok`. Um sucesso que não é sucesso é a forma exata
+    /// dos três defeitos que custaram versões inteiras nesta casca — o `{}` do
+    /// compartilhamento, o quadro-chave descartado, o assento devolvido sem
+    /// anúncio. Todos silenciosos, todos achados só quando alguém foi conferir
+    /// se o que se pediu foi feito.
+    ///
+    /// Conferir é barato: uma leitura de campo depois de uma troca que só
+    /// acontece quando alguém aperta um botão. E ela é o que transforma «não
+    /// muda e não diz nada» em uma frase que aponta para o lugar certo.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::PlaybackDeviceGone`] ou
+    /// [`ConnectionError::CaptureDeviceGone`] quando o dispositivo aberto não é
+    /// o que foi pedido. Sem pedido — o padrão do sistema — não há o que
+    /// conferir: qualquer dispositivo que abra é o certo.
+    fn conferir_troca(&self, pedido: Option<&str>, lado: Lado) -> Result<(), ConnectionError> {
+        let Some(pedido) = pedido else {
+            return Ok(());
+        };
+        let Ok(voice) = self.shared.voice.lock() else {
+            return Ok(());
+        };
+        let Some(running) = voice.as_ref() else {
+            return Ok(());
+        };
+        let aberto = match lado {
+            Lado::Entrada => running.capture().map(|d| d.id.clone()),
+            Lado::Saida => running.playback().map(|d| d.id.clone()),
+        };
+        if aberto.as_deref() == Some(pedido) {
+            return Ok(());
+        }
+        tracing::warn!(
+            ?pedido,
+            ?aberto,
+            ?lado,
+            "a troca de dispositivo voltou sem erro e o aberto não é o pedido"
+        );
+        Err(match lado {
+            Lado::Entrada => ConnectionError::CaptureDeviceGone,
+            Lado::Saida => ConnectionError::PlaybackDeviceGone,
         })
     }
 
@@ -6059,5 +6129,69 @@ mod base64_ida_e_volta {
         // Um caractere sozinho são seis bits e não fecha byte nenhum.
         assert_eq!(de_base64("QUJD RA=="), Some(b"ABCD".to_vec()));
         assert_eq!(de_base64("QUJDR"), None);
+    }
+}
+
+#[cfg(test)]
+mod conferir_a_troca {
+    //! A troca de dispositivo que volta `Ok` tem de ter acontecido.
+    //!
+    //! Não há como abrir uma placa de som num teste, então o que se prende aqui
+    //! é a **forma** da conferência: que ela exista no caminho dos dois lados, e
+    //! que ela compare o pedido com o aberto em vez de confiar no `Ok`.
+    //!
+    //! O defeito que ela existe para acusar foi relatado assim: «mostra EM USO
+    //! num e ESCOLHIDO no que eu escolhi, mas não muda». `EM USO` sai do
+    //! dispositivo que o `Voice` abriu e `ESCOLHIDO` da preferência gravada —
+    //! os dois discordando é o produto dizendo, sem saber, que a ordem foi
+    //! gravada e não cumprida. Nada no caminho devolvia erro.
+
+    const FONTE: &str = include_str!("lib.rs");
+
+    fn corpo(assinatura: &str) -> &'static str {
+        let depois = FONTE
+            .split(assinatura)
+            .nth(1)
+            .unwrap_or_else(|| panic!("`{assinatura}` mudou de forma"));
+        depois
+            .split("\n    }")
+            .next()
+            .unwrap_or_else(|| panic!("`{assinatura}` nunca fecha"))
+    }
+
+    #[test]
+    fn as_duas_trocas_conferem_o_que_pediram() {
+        for assinatura in [
+            "pub fn set_capture_device(&self, device: Option<String>)",
+            "pub fn set_playback_device(&self, device: Option<String>)",
+        ] {
+            let corpo = corpo(assinatura);
+            assert!(
+                corpo.contains("conferir_troca"),
+                "`{assinatura}` devolve `Ok` sem conferir se a troca aconteceu, \
+                 e um sucesso que não é sucesso é o defeito que custou três \
+                 versões nesta casca:\n{corpo}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_conferencia_compara_o_aberto_com_o_pedido() {
+        let corpo = corpo("fn conferir_troca(&self, pedido: Option<&str>, lado: Lado)");
+        assert!(
+            corpo.contains("running.playback()") && corpo.contains("running.capture()"),
+            "a conferência não lê o dispositivo que de fato abriu:\n{corpo}"
+        );
+        assert!(
+            corpo.contains("aberto.as_deref() == Some(pedido)"),
+            "a conferência não compara o aberto com o pedido:\n{corpo}"
+        );
+        // Sem pedido não há o que conferir: o padrão do sistema é qualquer um
+        // que abra, e exigir igualdade ali recusaria o caso mais comum de todos.
+        assert!(
+            corpo.contains("let Some(pedido) = pedido else"),
+            "a conferência exige igualdade mesmo quando ninguém pediu um \
+             dispositivo em particular, o que recusaria o padrão do sistema:\n{corpo}"
+        );
     }
 }
