@@ -1251,6 +1251,92 @@ mod tests {
         }
     }
 
+    /// Uma fonte muda de imagem e **com** som, para provar o elo seguinte.
+    ///
+    /// O som escoa fora do `match` do quadro — «um tique sem imagem nova não é
+    /// um tique sem som» —, então não ter imagem não atrapalha: separa.
+    #[derive(Debug, Default, Clone)]
+    struct CapturaComTom;
+
+    #[derive(Debug)]
+    struct FonteComTom;
+
+    impl FonteDeQuadros for FonteComTom {
+        fn tomar(&self) -> Option<QuadroI420> {
+            None
+        }
+
+        fn tomar_som(&self) -> Vec<f32> {
+            // Um tom, e não uma constante: o silêncio exato é descartado de
+            // propósito antes de entrar no fio, e um bloco de `0.5` repetido
+            // passaria por qualquer coisa. Meio período de seno por amostra dá
+            // um sinal que o Opus tem o que codificar.
+            (0..seele_audio::FRAME_SAMPLES * 2)
+                .map(|i| {
+                    let fase = i as f32 / 48_000.0 * 440.0 * std::f32::consts::TAU;
+                    fase.sin() * 0.25
+                })
+                .collect()
+        }
+    }
+
+    impl Captura for CapturaComTom {
+        type Fonte = FonteComTom;
+
+        fn iniciar(
+            &mut self,
+            _resolucao: Resolucao,
+            _cadencia: Cadencia,
+        ) -> Result<Self::Fonte, CapturaRecusou> {
+            Ok(FonteComTom)
+        }
+    }
+
+    /// O som que a captura entrega chega ao fio como pacote Opus.
+    ///
+    /// O elo entre «a captura ouviu» e «o outro lado ouviu». O de baixo está
+    /// provado em `seele-video`, onde o teste do macOS toca um som e exige
+    /// ouvi-lo; deste ponto em diante quem responde é esta bomba, e o relato de
+    /// campo — «coloquei uma música no computador que estava transmitindo e não
+    /// ouvi» — não dizia em qual dos dois o som se perdia.
+    #[test]
+    fn o_som_da_captura_vira_pacote_no_fio() {
+        let Some(biblioteca) = biblioteca() else {
+            return;
+        };
+        let fibra = TetoDeVideo::com_caminho(6_000_000)
+            .com_caminho_de_quem_hospeda(6_000_000)
+            .com_espectadores(1);
+        let (bomba, mut eventos) = ligar(
+            biblioteca,
+            CapturaComTom,
+            arranjo(fibra, SignalBand::Nominal, Resolucao::P1080),
+            || {},
+        )
+        .expect("criar a thread da tela");
+
+        let mut viu_som = false;
+        for _ in 0..40 {
+            match esperar(&mut eventos) {
+                Some(EventoDaBomba::Som(pacote)) => {
+                    assert!(!pacote.is_empty(), "o pacote de som saiu vazio");
+                    viu_som = true;
+                    break;
+                }
+                Some(_) => {}
+                None => break,
+            }
+        }
+        drop(bomba);
+
+        assert!(
+            viu_som,
+            "a captura entregou som e nenhum pacote saiu para o fio.\n\
+             É a metade de baixo do relato «não ouvi»: a máquina ouviu, o \
+             codificador de voz não produziu, e a transmissão sai muda sem erro."
+        );
+    }
+
     /// A tela parada tem de pedir o escoamento do que ficou pela metade.
     ///
     /// O defeito de campo: «a tela ficou travada pra mim que estou

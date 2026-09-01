@@ -1123,19 +1123,76 @@ mod testes {
             return;
         };
 
+        // **Tocar, e não esperar que algo esteja tocando.**
+        //
+        // A versão anterior deste teste exigia só que *chegassem* buffers, e
+        // passava com eles inteiramente zerados — que é exatamente o estado em
+        // que a transmissão sai muda. Um sucesso que não é sucesso, o mesmo
+        // padrão que já custou versões nesta casa. Medido: com o som do sistema
+        // parado, `escritas` era 960 e o pico era 0,000000, e o teste ficava
+        // verde.
+        // **A captura primeiro, o som depois.** Escrito na ordem inversa, este
+        // teste passou três vezes e falhou na quarta: o `Submarine.aiff` dura
+        // cerca de um segundo e o `SCStream` demora a subir, então o som
+        // acabava antes de haver quem o ouvisse. Tocar depois de a captura
+        // estar de pé tira a corrida em vez de escondê-la com uma espera maior.
         let captura = CapturaDaTela::iniciar(monitor, Resolucao::P720, Cadencia::Q30)
             .expect("a captura começa");
         let som = captura.som();
+        // O que a fila juntou enquanto a captura subia é silêncio de antes do
+        // som, e só atrapalharia a leitura do pico.
+        let _ = som.tomar(96_000);
+
+        let mut tocando = match std::process::Command::new("afplay")
+            .arg("/System/Library/Sounds/Submarine.aiff")
+            .spawn()
+        {
+            Ok(filho) => filho,
+            Err(_) => {
+                captura.parar().expect("a captura para");
+                eprintln!("PULADO: esta máquina não tem `afplay` para produzir som.");
+                return;
+            }
+        };
+
         let comeco = Instant::now();
-        while comeco.elapsed().as_secs_f64() < 3.0 && som.escritas() == 0 {
+        let mut pico = 0.0_f32;
+        while comeco.elapsed().as_secs_f64() < 5.0 && pico == 0.0 {
+            for amostra in som.tomar(96_000) {
+                pico = pico.max(amostra.abs());
+            }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         let escritas = som.escritas();
         captura.parar().expect("a captura para");
+        let _ = tocando.kill();
+        let _ = tocando.wait();
 
         assert!(
             escritas > 0,
-            "nenhuma amostra de som em três segundos. O `with_captures_audio`              voltou a `false`, ou o entregador parou de atender o tipo `Audio` —              e a transmissão sai muda sem erro nenhum, que foi como este defeito              chegou do campo."
+            "nenhuma amostra de som em três segundos. O `with_captures_audio` \
+             voltou a `false`, ou o entregador parou de atender o tipo `Audio` \
+             — e a transmissão sai muda sem erro nenhum, que foi como este \
+             defeito chegou do campo."
+        );
+        // O CI não tem caixa de som. Um runner do GitHub abre o `SCStream`, não
+        // toca nada, e leria silêncio legítimo como defeito — um teste que
+        // acusa por causa do lugar onde roda é pior que um teste fraco, porque
+        // ensina a ignorá-lo.
+        if std::env::var_os("CI").is_some() {
+            eprintln!(
+                "PARCIAL: em CI só se confere que o som chega ({escritas} amostras). \
+                 O conteúdo é conferido em máquina com saída de áudio."
+            );
+            return;
+        }
+        assert!(
+            pico > 0.0,
+            "chegaram {escritas} amostras e todas são zero, com um som tocando \
+             nesta máquina. Buffers do tamanho certo e conteúdo mudo é a \
+             transmissão saindo sem som exatamente como o campo relatou: \
+             «coloquei uma música no computador que estava transmitindo e não \
+             ouvi»."
         );
     }
 }
