@@ -104,7 +104,6 @@ function desenharChamada(snapshot) {
   desenharBarraDaChamada(snapshot, voice_room);
   desenharPalco(snapshot, voice_room);
   desenharCartoes(snapshot, voice_room);
-  desenharMonitor(snapshot, voice_room);
 }
 
 /**
@@ -557,157 +556,91 @@ function fraseDoEstado(pessoa) {
   return "está só ouvindo";
 }
 
-/** A coluna da direita: quem fala. */
-function desenharMonitor(snapshot, voice_room) {
-  const falando = $("chamada-falando-nome");
-  const nomes = voice_room ? voice_room.people.filter((p) => p.speaking).map((p) => p.nickname) : [];
-
-  if (!voice_room) {
-    naoMedido(falando, snapshot ? "fora de uma sala de voz" : "sem sessão");
-    return;
-  }
-  // `NINGUÉM` e não travessão: uma sala em silêncio é uma medida, e o travessão
-  // está reservado para o que este protocolo não sabe dizer.
-  medido(falando, nomes.length === 0 ? "NINGUÉM" : nomes.join(" · "));
-}
+/* `desenharMonitor` saiu com a tela.
+ *
+ * Ela escrevia `QUEM FALA` numa coluna própria da chamada. A coluna de pessoas
+ * — que a comp mantém à direita e que agora fica visível **junto** com a grade,
+ * porque a grade deixou de tomar a janela — já marca quem está falando, por
+ * pessoa e não numa lista à parte. */
 
 // -------------------------------------------------------------------- eventos
 
-/**
- * Guarda uma linha do que aconteceu, e redesenha a lista.
+
+/* `desenharEventosDaChamada` e `registrarEventoDaChamada` saíram com a tela.
  *
- * A hora é a desta máquina, e é a única possível: o que está sendo registrado é
- * o instante em que **esta janela** soube da coisa. `tom` separa aviso de
- * anotação, e a severidade que o decide chega decidida do core.
- */
-function registrarEventoDaChamada(texto, tom) {
-  EVENTOS_DA_CHAMADA.unshift({ hora: relogio(Date.now() / 1000), texto, tom });
-  EVENTOS_DA_CHAMADA.length = Math.min(EVENTOS_DA_CHAMADA.length, EVENTOS_LEMBRADOS);
-  desenharEventosDaChamada();
-}
+ * Elas mantinham um `EVENTOS` que dizia de si mesmo «desde que esta janela
+ * abriu; não há registro anterior» — uma lista que nascia vazia toda vez e não
+ * sobrevivia a um recarregar. A comp não a traz, e o que ela mostrava de útil
+ * (as quedas, os avisos do núcleo) chega pela faixa de alerta, que é anunciada
+ * e não precisa de uma tela aberta para ser vista. */
 
-/** A lista de eventos, do mais novo para o mais velho. */
-function desenharEventosDaChamada() {
-  repovoar(
-    $("chamada-eventos"),
-    EVENTOS_DA_CHAMADA.map((evento) => {
-      const item = elemento("li", "chamada-evento");
-      item.dataset.tom = evento.tom;
-      item.append(
-        elemento("span", "chamada-evento-hora", evento.hora),
-        elemento("span", "chamada-evento-texto", evento.texto),
-      );
-      return item;
-    }),
-  );
-}
-
-/** Os quatro botões da barra de ações. */
-function desenharAcoesDaChamada(snapshot) {
-  // O verbo grande em cima, o estado na linha de baixo. Quem olha para a barra
-  // de ações está procurando o que fazer, e é o que fazer que precisa ser
-  // legível de longe; o estado continua escrito, embaixo e no cartão desta
-  // pessoa, em vez de ocupar o único lugar que a pessoa lê antes de apertar.
-  // Um rótulo grande que diz o estado é o que fazia alguém apertar o contrário
-  // do que queria — lia `MICROFONE LIGADO` e entendia uma promessa.
-  const at = $("chamada-at");
-  const calado = Boolean(snapshot?.muted);
-  at.dataset.ativo = calado ? "sim" : "nao";
-  at.disabled = !snapshot;
-  $("chamada-at-titulo").textContent = calado ? "LIGAR O MICROFONE" : "DESLIGAR O MICROFONE";
-  $("chamada-at-nota").textContent = calado
-    ? "seu microfone está desligado"
-    : "seu microfone está ligado";
-
-  const surdez = $("chamada-surdez");
-  const surdo = Boolean(snapshot?.total_isolation);
-  surdez.dataset.ativo = surdo ? "sim" : "nao";
-  surdez.disabled = !snapshot;
-  $("chamada-surdez-titulo").textContent = surdo ? "LIGAR O SOM" : "DESLIGAR O SOM";
-  $("chamada-surdez-nota").textContent = surdo
-    ? "você não está ouvindo ninguém"
-    : "você está ouvindo a sala";
-
-  // O terceiro botão abre a escolha em vez de agir, e o rótulo diz qual dos
-  // dois trabalhos ele vai fazer: começar, ou mexer no que já está saindo. A
-  // nota diz o estado, que é onde o estado mora nesta barra.
-  const tela = snapshot ? snapshot.tela : null;
-  const minha = Boolean(tela && tela.e_minha);
-  const compartilhar = $("chamada-compartilhar");
-  // Some inteiro, e não desabilitado: `PermissaoDeTela::NaoSeSabe` quer dizer
-  // que esta compilação não tem como perguntar ao sistema, e um botão apagado
-  // ali seria uma pergunta («por que não posso?») cuja resposta não muda nada
-  // do que a pessoa faz.
-  compartilhar.hidden = !temControleDeTela();
-  compartilhar.dataset.ativo = minha ? "sim" : "nao";
-  compartilhar.disabled = !snapshot;
-  $("chamada-compartilhar-titulo").textContent = minha
-    ? "AJUSTAR OU PARAR"
-    : "COMPARTILHAR A TELA";
-  $("chamada-compartilhar-nota").textContent = minha
-    ? "sua tela está saindo agora"
-    : tela
-      ? "outra pessoa está compartilhando agora"
-      : "escolhe um monitor ou uma janela sua";
-
-  $("chamada-ejetar").disabled = !snapshot;
-}
+/* `desenharAcoesDaChamada` saiu na 0.9.0.
+ *
+ * Ela pintava `chamada-at`, `chamada-surdez`, `chamada-compartilhar` e
+ * `chamada-ejetar` — microfone, isolamento, compartilhar e sair do servidor —
+ * numa fileira própria da tela de chamada. A comp dissolve aquela tela e põe
+ * microfone e isolamento no **operador**, que já os tinha; sair do servidor já
+ * era `botao-desconectar`; e o compartilhar foi para a fileira do operador.
+ *
+ * Quatro botões que existiam em dois lugares viraram quatro em um. */
 
 // ---------------------------------------------------------------- navegação
 
-/** Abre a chamada por cima da operação. */
+/**
+ * Mostra a grade da sala **no lugar da conversa**.
+ *
+ * # O que mudou na 0.9.0, e por quê
+ *
+ * Isto era `abrirChamada`, e abria uma **tela**: `tela-sessao` sumia inteira e
+ * `tela-chamada` tomava a janela, com barra, ações e registro próprios. A comp
+ * dissolve aquela tela — a grade é uma das duas vistas da coluna do meio, e as
+ * outras três colunas continuam onde estavam.
+ *
+ * O ganho não é de arrumação. Trocar de tela apagava a lista de canais, o
+ * roster e a telemetria; quem entrava na chamada perdia de vista quem estava
+ * em que sala, que é exatamente o que se quer saber ao entrar numa. E o
+ * caminho de volta era um botão que existia só porque a ida tinha sido larga
+ * demais.
+ */
 async function abrirChamada() {
-  // Antes do `hidden`, com a operação ainda na tela: depois dela sumir o foco
-  // já é o `<body>` e não há mais o que lembrar. É o que devolve o botão
-  // CHAMADA a quem o apertou, na hora de voltar.
-  guardarFoco("tela-sessao");
-  $("tela-sessao").hidden = true;
-  $("tela-chamada").hidden = false;
+  $("vista-conversa").hidden = true;
+  $("vista-chamada").hidden = false;
   // Antes do desenho, porque é ela que decide se o botão de compartilhar
   // existe: desenhar primeiro e esconder depois é um botão que ninguém viu
   // chegar nem sair.
   await conferirPermissaoDeTela();
-  // E o foco só **depois** do desenho: `desenharAcoesDaChamada` é quem tira o
-  // `disabled` da chave do microfone, e um botão desabilitado recusa o foco em
-  // silêncio.
   await atualizarChamada();
-  abrirTela("tela-chamada");
 }
 
 /**
- * Volta para os canais de texto **sem sair da sala**.
+ * Volta para a conversa **sem sair da sala**.
  *
- * Metade da distinção que o v3 traz (inventário §7.1): trocar de tela não é
- * sair da sala. No protótipo os dois botões do rodapé chamam a mesma coisa e o
- * que os separa é só o que prometem; aqui um troca de tela e o outro chama
- * `eject_plug`, e a nota de cada um diz qual é qual.
+ * Metade da distinção que o v3 traz (inventário §7.1) e que a comp mantém:
+ * trocar de vista não é sair da sala. Um alterna o que a coluna mostra, o
+ * outro chama `eject_plug`, e a nota de cada um diz qual é qual.
  */
 function fecharChamada() {
-  guardarFoco("tela-chamada");
-  $("tela-chamada").hidden = true;
-  $("tela-sessao").hidden = false;
-  // Devolve o CHAMADA do cabeçalho a quem o apertou. Quem chegou aqui pelo
-  // Escape volta para onde estava, que é o que a tecla promete.
-  voltarParaTela("tela-sessao");
-  // A sessão não foi redesenhada enquanto esteve por baixo — `desenharMensagens`
-  // sai cedo quando a lista está sem layout, porque ali não dá para saber se a
-  // pessoa estava lendo o histórico ou acompanhando o fim. Redesenhar agora é o
-  // outro lado desse acordo, e sem ele o canal volta parado no instante em que
-  // a chamada abriu.
-  atualizar().catch((falha) => console.warn("voltar da chamada:", falha));
+  $("vista-chamada").hidden = true;
+  $("vista-conversa").hidden = false;
+  // O registro não foi redesenhado enquanto esteve escondido —
+  // `desenharMensagens` sai cedo quando a lista está sem layout, porque ali não
+  // dá para saber se a pessoa estava lendo o histórico ou acompanhando o fim.
+  // Redesenhar agora é o outro lado desse acordo, e sem ele o canal volta
+  // parado no instante em que a grade abriu.
+  atualizar().catch((falha) => console.warn("voltar da grade:", falha));
 }
 
 /**
- * Some sem devolver ninguém.
+ * Volta à conversa sem devolver foco a ninguém.
  *
- * A sessão pode acabar com esta tela aberta — um operador derruba, o enlace
+ * A sessão pode acabar com a grade aberta — um operador derruba, o enlace
  * descarrega — e `mostrarFim` escolhe a tela seguinte por conta própria.
- * Devolver para a operação ali reabriria uma sessão que acabou de terminar; não
- * fechar deixaria duas telas empilhadas, porque toda `.tela` tem a altura da
- * janela. Mesma razão e mesma forma que `abandonarServer`.
+ * Deixar a grade de pé faria a sessão seguinte abrir mostrando a sala da
+ * anterior.
  */
 function abandonarChamada() {
-  $("tela-chamada").hidden = true;
+  $("vista-chamada").hidden = true;
+  $("vista-conversa").hidden = false;
 }
 
 /**
@@ -724,38 +657,50 @@ async function atualizarChamada() {
     if (falha !== "NotConnected") console.warn("snapshot:", falha);
   }
   desenharChamada(snapshot);
-  desenharAcoesDaChamada(snapshot);
 }
 
 // ------------------------------------------------------------------- ligação
 
 $("botao-chamada").addEventListener("click", abrirChamada);
-$("chamada-voltar").addEventListener("click", fecharChamada);
+
+/**
+ * O alternador da comp: a grade da sala **no lugar da conversa**, e de volta.
+ *
+ * Um botão só para os dois sentidos, e o rótulo diz para onde ele leva — não
+ * onde se está. `CHAMADA` quando se está na conversa, `CONVERSA` quando se
+ * está na grade. Dois botões seriam um deles sempre inútil.
+ */
+$("operador-vista").addEventListener("click", () => {
+  const naGrade = !$("vista-chamada").hidden;
+  if (naGrade) {
+    fecharChamada();
+  } else {
+    abrirChamada().catch((falha) => console.warn("abrir a grade:", falha));
+  }
+  $("operador-vista").textContent = naGrade ? "CHAMADA" : "CONVERSA";
+});
+
+/**
+ * Sair da sala de voz — e **só** dela.
+ *
+ * O par do alternador acima, e a distinção entre os dois é o que o
+ * `as_duas_saidas_continuam_dizendo_qual_delas_larga_a_sala` prende: um troca
+ * o que se vê, o outro para de ouvir e de falar. A conexão com o servidor não
+ * é tocada por nenhum dos dois; quem sai do servidor é o `botao-desconectar`.
+ */
+$("operador-sair").addEventListener("click", async () => {
+  try {
+    await invoke("eject_plug");
+  } catch (falha) {
+    console.warn("eject_plug:", falha);
+  }
+  await atualizar();
+});
 $("chamada-compartilhar").addEventListener("click", () => {
   abrirCompartilhar().catch((falha) => console.warn("compartilhar:", falha));
 });
 
-$("chamada-at").addEventListener("click", async () => {
-  const snapshot = await invoke("snapshot");
-  const calar = !snapshot.muted;
-  await invoke("set_muted", { on: calar });
-  registrarEventoDaChamada(
-    calar ? "você desligou o seu microfone" : "você ligou o seu microfone",
-    "anotacao",
-  );
-  await atualizarChamada();
-});
 
-$("chamada-surdez").addEventListener("click", async () => {
-  const snapshot = await invoke("snapshot");
-  const calar = !snapshot.total_isolation;
-  await invoke("set_total_isolation", { on: calar });
-  registrarEventoDaChamada(
-    calar ? "você desligou o som" : "você ligou o som de volta",
-    "anotacao",
-  );
-  await atualizarChamada();
-});
 
 /**
  * `SAIR DA SALA` — a outra metade da distinção do §7.1.
@@ -765,16 +710,6 @@ $("chamada-surdez").addEventListener("click", async () => {
  * tem grade nenhuma para desenhar e ficar nela mostraria o vazio de uma sala
  * que a pessoa acabou de deixar de propósito.
  */
-$("chamada-ejetar").addEventListener("click", async () => {
-  try {
-    await invoke("eject_plug");
-    registrarEventoDaChamada("você saiu da sala", "anotacao");
-  } catch (falha) {
-    console.warn("eject_plug:", falha);
-  }
-  fecharChamada();
-  await atualizar();
-});
 
 /**
  * O volume, por delegação.
@@ -820,7 +755,7 @@ window.addEventListener("keydown", (evento) => {
   // nos canais de texto. `role="dialog"` e não uma lista de `id`: uma terceira
   // caixa amanhã já entra coberta.
   const porCima = document.querySelector('[role="dialog"]:not([hidden])');
-  if (evento.key === "Escape" && !$("tela-chamada").hidden && !porCima) {
+  if (evento.key === "Escape" && !$("vista-chamada").hidden && !porCima) {
     evento.preventDefault();
     fecharChamada();
   }
@@ -843,12 +778,6 @@ listen("seele://event", (evento) => {
   if (!payload || typeof payload !== "object" || !payload.NoticeRaised) return;
 
   const aviso = payload.NoticeRaised.notice;
-  registrarEventoDaChamada(
-    aviso.operator_text ?? AVISOS[aviso.reason] ?? "AVISO",
-    // A severidade chega decidida do core. Esta tela não classifica nada: ela
-    // só separa o que veio marcado como mais alto que informação.
-    aviso.severity === "Info" ? "anotacao" : "aviso",
-  );
 });
 
 // Quem fala muda a cada instante, e é a coisa viva desta tela. Meio segundo, o
@@ -856,5 +785,5 @@ listen("seele://event", (evento) => {
 // desliga o laço dela pela mesma condição, então as duas nunca puxam o snapshot
 // ao mesmo tempo.
 setInterval(() => {
-  if (!$("tela-chamada").hidden) atualizarChamada();
+  if (!$("vista-chamada").hidden) atualizarChamada();
 }, 500);

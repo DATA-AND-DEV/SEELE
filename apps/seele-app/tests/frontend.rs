@@ -2267,105 +2267,65 @@ fn the_volume_control_does_not_hide_behind_the_pointer() {
 }
 
 #[test]
-fn the_two_ways_out_of_the_call_say_which_one_leaves_the_voice_room() {
-    // The v3 comp's finding, and the inventory settles it in §7.1: changing
-    // screen is not leaving the voice room. The prototype collapses the two — both
-    // buttons call `ir('principal')` — and what separates them there is only
-    // what they promise. Here they have to differ for real, and say so.
+fn as_duas_saidas_continuam_dizendo_qual_delas_larga_a_sala() {
+    // A distinção que o v3 trouxe e que a comp da 0.9.0 mantém: **trocar de
+    // vista não é sair da sala.** No protótipo os dois botões chamavam a mesma
+    // coisa e só as palavras os separavam.
     //
-    // The failure without this guard is the one the LAN test found: somebody
-    // presses the button that goes back to the Channels and cannot tell whether
-    // they are still being heard.
+    // O que mudou na 0.9.0 é onde eles moram. A tela de chamada deixou de
+    // existir, então não há mais `VER CANAIS` nem `chamada-ejetar`: o par vive
+    // na fileira do operador — `operador-vista`, que alterna o que a coluna do
+    // meio mostra, e `operador-sair`, que larga a sala.
+    //
+    // O erro que este guarda impede é o mesmo de sempre: um dos dois passar a
+    // fazer o que o outro faz, e a tela continuar prometendo dois caminhos.
+    let script = without_comments(&scripts());
     let page = without_comments(&read("ui/index.html"));
-    let script = scripts();
 
-    // `VER CANAIS` is navigation. Whatever it runs must not pull the connection.
-    let leaving = body_of(&script, "function fecharChamada");
+    for id in ["operador-vista", "operador-sair"] {
+        assert!(
+            page.contains(id),
+            "sumiu `{id}`, e com ele metade do par que separa trocar de vista de \
+             sair da sala"
+        );
+    }
+
+    // Alternar a vista não pode puxar a conexão nem largar a sala.
+    let trocar = body_of(&script, "function fecharChamada");
     assert!(
-        !leaving.contains("eject_plug"),
-        "`VER CANAIS` ejects the connection, so the two buttons do the same thing again \
-         and the screen's own words are wrong"
-    );
-
-    // `SAIR DA SALA` is the eject, and nothing else on this screen is.
-    let Some(exit) = script
-        .split("$(\"chamada-ejetar\").addEventListener")
-        .nth(1)
-        .and_then(|rest| rest.split("\n});").next())
-    else {
-        panic!("nothing is listening on `chamada-ejetar` at all");
-    };
-    // The call, and not the word. The handler names `eject_plug` in the string
-    // it logs a failure with, so a `contains` on the bare name stays green with
-    // the command itself deleted — which is exactly the state where the red
-    // button looks like it leaves and does not. Found by breaking it on purpose
-    // and watching this pass.
-    assert!(
-        exit.contains("invoke(\"eject_plug\")"),
-        "`SAIR DA SALA` does not eject the connection, so leaving the VoiceRoom has no \
-         button anywhere on this screen:{exit}"
-    );
-
-    // And both have to say, in the markup and beside themselves, what they do.
-    let hint_of = |id: &str| {
-        let Some(button) = page
-            .split(&format!("id=\"{id}\""))
-            .nth(1)
-            .and_then(|rest| rest.split("</button>").next())
-        else {
-            panic!("index.html has no `{id}` button");
-        };
-        let Some(hint) = button
-            .split("class=\"nota\">")
-            .nth(1)
-            .and_then(|rest| rest.split('<').next())
-        else {
-            panic!(
-                "`{id}` carries no hint beside it, so the distinction between \
-                 changing screen and leaving the VoiceRoom is nowhere on the screen"
-            );
-        };
-        hint.split_whitespace().collect::<Vec<_>>().join(" ")
-    };
-
-    let back = hint_of("chamada-voltar");
-    let out = hint_of("chamada-ejetar");
-    assert!(
-        !back.is_empty() && !out.is_empty(),
-        "one of the two exits explains itself with an empty channel"
-    );
-    assert_ne!(
-        back, out,
-        "both exits are explained with the same sentence, which is the prototype's \
-         collapse written out in words"
+        !trocar.contains("eject_plug") && !trocar.contains("leave_voice_room"),
+        "voltar para a conversa está largando a sala, então os dois botões fazem \
+         a mesma coisa e as palavras da tela ficaram erradas:\n{trocar}"
     );
 }
 
 #[test]
-fn no_event_in_the_call_monitor_is_older_than_the_window() {
-    // The comp fills `EVENTOS` with five channels of history — `NUNES.S entrou`,
-    // `HORAKI.H saiu` — and the inventory left open how much of that the server
-    // keeps. It keeps none: `Event::RosterChanged` says the roster changed and
-    // never what changed in it, and there is no record of arrivals, departures
-    // or A.T. Field anywhere in the core.
+fn nada_finge_ter_um_passado_que_esta_janela_nao_viu() {
+    // **A lista `EVENTOS` saiu com a tela de chamada na 0.9.0**, e este guarda
+    // mudou de alvo em vez de sumir com ela.
     //
-    // So the list may only carry what this window watched go by, and the
-    // tempting way to make it look full is a seeded channel in the markup that
-    // nobody ever measured. An empty list under a heading that explains why is
-    // the honest version, and this is what keeps it that way.
+    // O que ele protegia não era a lista: era a regra de que **nada nesta
+    // janela finge lembrar do que aconteceu antes de ela abrir**. O `EVENTOS`
+    // nascia vazio toda vez e dizia isso por escrito; a tentação, sempre, é
+    // preenchê-lo com algo plausível — «sessão iniciada», «entrou na sala» —
+    // e inventar um passado que ninguém mediu.
+    //
+    // A comp não traz a lista. A regra continua, e o que se cobra agora é que
+    // ninguém tenha reinventado um registro semeado: uma lista de eventos que
+    // nasça com linhas dentro é a mesma mentira noutra marcação.
     let page = without_comments(&read("ui/index.html"));
 
-    let Some(list) = page
-        .split("id=\"chamada-eventos\"")
-        .nth(1)
-        .and_then(|rest| rest.split("</ol>").next())
-    else {
-        panic!("index.html no longer has the events list");
-    };
     assert!(
-        !list.contains("<li"),
-        "the events list ships with lines already in it, and this product has no \
-         history to have taken them from:{list}"
+        !page.contains("id=\"chamada-eventos\""),
+        "a lista de eventos da chamada voltou; se ela precisa voltar, este guarda \
+         precisa voltar a cobrar que ela nasça vazia"
+    );
+
+    // E a frase que a acompanhava não pode ter sobrevivido sozinha: ela promete
+    // um registro, e prometer sem entregar é pior que não ter.
+    assert!(
+        !page.contains("Não há registro anterior"),
+        "ficou a frase que explicava uma lista que não existe mais"
     );
 }
 

@@ -1947,3 +1947,43 @@
     border-color: var(--seele-laranja-nerv);
   }
 }
+
+
+/* A fileira do pé do operador: sair da sala, alternar a vista, compartilhar.
+ *
+ * `flex-wrap` porque a coluna tem 268px e os três rótulos não cabem numa
+ * linha em toda largura de janela — e um rótulo cortado é pior que uma
+ * segunda linha. */
+.operador-fileira {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.operador-fileira > button { flex: 1 1 auto; }
+
+/* A barra da vista da chamada, com os valores da comp da 0.9.0. */
+.vista-chamada-barra {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 48px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+  flex: 0 0 auto;
+}
+
+/* As duas vistas ocupam a coluna inteira, uma de cada vez. `min-height: 0` em
+   ambas porque as duas têm filhos que rolam, e sem ele um filho que cresce
+   empurra a coluna para fora da janela em vez de rolar dentro dela. */
+#vista-chamada,
+#vista-conversa {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+#vista-chamada[hidden],
+#vista-conversa[hidden] { display: none; }

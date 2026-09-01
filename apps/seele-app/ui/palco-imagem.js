@@ -315,7 +315,7 @@ let noCinema = false;
  * Marca o caminho da imagem até o `<body>` e esconde tudo o que fica de fora.
  *
  * Sobe nó a nó em vez de confiar num seletor com a estrutura escrita dentro
- * dele. A primeira versão da tela cheia usava `#tela-chamada > *:not(#palco)`,
+ * dele. A primeira versão da tela cheia usava `#vista-chamada > *:not(#palco)`,
  * e o palco está **três** níveis abaixo — a regra escondia a caixa que o
  * continha, e a tela cheia abria vazia. Uma `<div>` a mais no HTML quebraria a
  * regra de novo, e quebraria em silêncio.
