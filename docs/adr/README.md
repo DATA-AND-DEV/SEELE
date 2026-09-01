@@ -46,6 +46,7 @@ Formato e regra de criação em `specs/10-convencoes.md`: toda decisão marcada
 | [0038](0038-o-teto-da-sala-e-contado-nao-declarado.md) | O teto da sala é contado, e quem hospeda é avisado | aceito | `04` — o dimensionamento da sala |
 | [0039](0039-o-produto-passa-a-ter-uma-casca-so.md) | O produto passa a ter uma casca só | aceito | `05` e `06` — as cascas |
 | [0040](0040-sessenta-quadros-entram-por-medida.md) | Sessenta quadros entram, por medida | aceito | design da tela, §6 item 10 |
+| [0041](0041-o-codec-por-hardware-e-a-excecao-ao-unsafe.md) | O codec por hardware, e a exceção nomeada ao `unsafe` | **aceito** | — (reverte a recusa registrada no `Cargo.toml` do `seele-video`) |
 
 ## O que ainda não tem ADR
 
