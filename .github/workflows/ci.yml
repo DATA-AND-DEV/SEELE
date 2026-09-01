@@ -58,6 +58,14 @@ jobs:
     # with `-D warnings` and failing the build on somebody else's warning.
     env:
       RUSTFLAGS: -D warnings
+      # **Onde há módulo publicado, faltar é falha e não licença para pular.**
+      #
+      # Sem isto os testes de codec voltavam cedo e contavam como passados, e
+      # ninguém distinguia «rodou» de «pulou» num relatório verde. Foi assim que
+      # o `ida_e_volta` ficou verde por anos enquanto **falhava** com o módulo
+      # que o próprio produto baixa. No Linux o Cisco não publica nada e a
+      # variável não tem efeito — a checagem pergunta isso ao código.
+      SEELE_EXIGE_CODEC: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -73,6 +81,33 @@ jobs:
         uses: ./.github/actions/deps-linux
 
       - uses: Swatinem/rust-cache@v2
+
+      # O módulo do Cisco, que o produto não pode distribuir mas o CI pode
+      # buscar. Sem ele metade dos testes de tela não roda, e não rodar tem a
+      # mesma cor de passar.
+      #
+      # As URLs saem de `seele-video/src/modulo.rs`, e são copiadas aqui porque
+      # `xtask` não conhece aquele crate — criar a dependência para uma linha
+      # mexeria na regra que o próprio `check-deps` guarda. A cópia é presa por
+      # `crates/seele-video/tests/modulo_publicado.rs`, que lê este arquivo.
+      #
+      # Descomprimido por Python e não por `bunzip2`: os três runners têm
+      # Python, e o Windows não tem `bunzip2`.
+      - name: Módulo de vídeo (macOS)
+        if: matrix.name == 'macos'
+        shell: bash
+        run: |
+          curl -sSLo /tmp/modulo.bz2 https://ciscobinary.openh264.org/libopenh264-2.6.0-mac-arm64.dylib.bz2
+          python3 -c "import bz2,pathlib; pathlib.Path('$HOME/libopenh264.dylib').write_bytes(bz2.decompress(pathlib.Path('/tmp/modulo.bz2').read_bytes()))"
+          echo "SEELE_OPENH264=$HOME/libopenh264.dylib" >> "$GITHUB_ENV"
+
+      - name: Módulo de vídeo (Windows)
+        if: matrix.name == 'windows'
+        shell: bash
+        run: |
+          curl -sSLo /tmp/modulo.bz2 https://ciscobinary.openh264.org/openh264-2.6.0-win64.dll.bz2
+          python -c "import bz2,pathlib; pathlib.Path(r'$USERPROFILE\\openh264.dll').write_bytes(bz2.decompress(pathlib.Path('/tmp/modulo.bz2').read_bytes()))"
+          echo "SEELE_OPENH264=$USERPROFILE\openh264.dll" >> "$GITHUB_ENV"
 
       # Uma passada só. `cargo test` compila as bibliotecas, os binários e os
       # testes — inclusive a casca Tauri, que é onde a falta do `icon.ico`

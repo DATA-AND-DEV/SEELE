@@ -50,8 +50,8 @@ declara a regra:
 também, e é toda a mudança de política: um crate a mais na lista de quem declara
 o próprio bloco.
 
-Dentro dele, `deny` e não `forbid`, e `allow` **só** no módulo do codificador de
-hardware. A garantia deixa de ser «não existe `unsafe` neste crate» e passa a
+Dentro dele, `deny` e não `forbid`, e `allow` **só** nos módulos de plataforma do codificador —
+`codec/macos.rs` hoje, `codec/windows.rs` amanhã. A garantia deixa de ser «não existe `unsafe` neste crate» e passa a
 ser «existe em um módulo nomeado, e o compilador recusa em qualquer outro» — que
 é uma garantia mais fraca, e é a mais forte que este trabalho admite.
 

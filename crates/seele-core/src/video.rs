@@ -1113,9 +1113,20 @@ mod tests {
             Err(motivo) => {
                 let onde = modulo::publicado_para_este_sistema()
                     .map_or_else(|| "—".to_owned(), |m| m.url());
+                // Ver `seele-video/tests/ida_e_volta.rs`: onde o codec é
+                // exigido, faltar é falha e não licença para pular.
+                // Só onde **há** módulo publicado. No Linux o Cisco não
+                // publica nada, e ali pular é a resposta certa e não um buraco.
+                assert!(
+                    std::env::var_os("SEELE_EXIGE_CODEC").is_none()
+                        || modulo::publicado_para_este_sistema().is_none(),
+                    "SEELE_EXIGE_CODEC está ligado, este sistema tem módulo publicado \
+                     e ele não está aqui: {motivo}.\n  Buscar: {onde}"
+                );
                 eprintln!(
                     "PULADO: {motivo}.\n  O produto não vem com codec, e é a licença que impõe \
-                     isso.\n  Busque {onde} e aponte-o com SEELE_OPENH264."
+                     isso.\n  Busque {onde} e aponte-o com SEELE_OPENH264.\n  Ligue \
+                     SEELE_EXIGE_CODEC para que faltar vire falha em vez de pulo."
                 );
                 None
             }

@@ -64,9 +64,26 @@ fn biblioteca() -> Option<BibliotecaDeVideo> {
         Err(motivo) => {
             let onde =
                 modulo::publicado_para_este_sistema().map_or_else(|| "—".to_owned(), |m| m.url());
+            // **Onde o codec é exigido, faltar é falha e não licença para
+            // pular.** Um teste que volta cedo conta como passado, e ninguém
+            // distingue «rodou» de «pulou» num relatório de CI — foi assim que
+            // o `ida_e_volta` ficou verde por anos enquanto **falhava** com o
+            // módulo que o próprio produto baixa, e assim que o som da tela do
+            // Windows atravessou seis versões quebrado.
+            // Só onde **há** módulo publicado. No Linux o Cisco não publica
+            // nada, e ali pular é a resposta certa e não um buraco.
+            assert!(
+                std::env::var_os("SEELE_EXIGE_CODEC").is_none()
+                    || modulo::publicado_para_este_sistema().is_none(),
+                "SEELE_EXIGE_CODEC está ligado, este sistema tem módulo publicado e ele \
+                 não está aqui: {motivo}.\n\
+                 Quem liga essa variável está dizendo «neste lugar o codec tem de \
+                 existir», e é o CI que a liga. Buscar: {onde}"
+            );
             eprintln!(
                 "PULADO: {motivo}.\n  O produto não vem com codec, e é a licença que impõe isso.\n  \
-                 Busque {onde} e aponte-o com SEELE_OPENH264."
+                 Busque {onde} e aponte-o com SEELE_OPENH264.\n  \
+                 Ligue SEELE_EXIGE_CODEC para que faltar vire falha em vez de pulo."
             );
             None
         }
@@ -87,6 +104,24 @@ fn quadro_com_textura(resolucao: Resolucao, passo: usize) -> QuadroI420 {
     }
     let croma = vec![128; largura.div_ceil(2) * altura.div_ceil(2)];
     QuadroI420::novo(largura, altura, y, croma.clone(), croma).expect("planos de um I420")
+}
+
+/// Os tipos dos NALs de um fluxo Annex-B, na ordem em que aparecem.
+fn tipos_de_nal(bytes: &[u8]) -> Vec<u8> {
+    let mut achados = Vec::new();
+    let mut i = 0;
+    while i + 4 < bytes.len() {
+        match bytes.get(i..i + 4) {
+            Some([0, 0, 0, 1]) => {
+                if let Some(cabeca) = bytes.get(i + 4) {
+                    achados.push(cabeca & 0x1F);
+                }
+                i += 4;
+            }
+            _ => i += 1,
+        }
+    }
+    achados
 }
 
 #[test]
@@ -117,11 +152,41 @@ fn um_quadro_atravessa_o_codec_e_volta_com_o_tamanho_certo() {
     // decoder do mundo o abriria. O sintoma seria uma tela preta do outro lado,
     // sem erro nenhum de nenhum dos dois lados.
     assert!(primeiro.chave, "o primeiro quadro é sempre um quadro-chave");
+    assert_eq!(
+        tipos_de_nal(&primeiro.bytes),
+        vec![7, 8, 5],
+        "o quadro-chave tem de sair como SPS, PPS e IDR, nessa ordem"
+    );
+
+    // **A primeira decodificação não devolve imagem, e isso é do OpenH264.**
+    //
+    // Medido: alimentando o mesmo IDR três vezes, a primeira chamada devolve
+    // nada e a segunda e a terceira devolvem o quadro. O decodificador gasta a
+    // primeira consumindo SPS e PPS e se armando; o `DecodeFrameNoDelay` não
+    // muda isso, porque o atraso não é de reordenação, é de inicialização.
+    //
+    // Este teste afirmava «um quadro-chave sozinho tem de bastar para o
+    // decoder» e **falhava** — com o módulo que o próprio produto baixa. Ficou
+    // anos verde porque sem `SEELE_OPENH264` ele pula, que é como o CI o via.
+    // A afirmação era sobre a biblioteca, não sobre o nosso fluxo, e estava
+    // errada: o fluxo sempre esteve certo, e a linha acima é quem prova isso.
+    //
+    // Nada disto alcança quem usa: quem assiste decodifica pelo sistema, e não
+    // por este módulo — só quem transmite precisa dele.
+    let armando = decodificador
+        .decodificar(&primeiro.bytes)
+        .expect("decodificar a primeira vez");
+    assert!(
+        armando.is_none(),
+        "o decodificador devolveu imagem na primeira chamada.\n\
+         Se o OpenH264 mudou, ótimo — mas o comentário acima deixou de valer e \
+         quem mexer aqui tem de refazer a medição antes de confiar nele."
+    );
 
     let voltou = decodificador
         .decodificar(&primeiro.bytes)
         .expect("decodificar")
-        .expect("um quadro-chave sozinho tem de bastar para o decoder");
+        .expect("com o decodificador armado, o mesmo quadro-chave tem de abrir");
 
     assert_eq!(voltou.largura(), Resolucao::P540.largura());
     assert_eq!(voltou.altura(), Resolucao::P540.altura());

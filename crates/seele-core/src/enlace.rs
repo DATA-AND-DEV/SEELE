@@ -3537,9 +3537,21 @@ mod tests {
         match seele_video::BibliotecaDeVideo::procurar_e_carregar(&pastas) {
             Ok(biblioteca) => Some(biblioteca),
             Err(motivo) => {
+                // Ver `seele-video/tests/ida_e_volta.rs`: onde o codec é
+                // exigido, faltar é falha e não licença para pular. Um teste
+                // que volta cedo conta como passado, e é assim que uma suíte
+                // fica verde sem nunca ter rodado.
+                // Só onde há módulo publicado; no Linux o Cisco não publica.
+                assert!(
+                    std::env::var_os("SEELE_EXIGE_CODEC").is_none()
+                        || seele_video::modulo::publicado_para_este_sistema().is_none(),
+                    "SEELE_EXIGE_CODEC está ligado, este sistema tem módulo publicado \
+                     e ele não está aqui: {motivo}"
+                );
                 eprintln!(
                     "PULADO: {motivo}.\n  O produto não vem com codec, e é a licença que impõe \
-                     isso. Aponte-o com SEELE_OPENH264."
+                     isso. Aponte-o com SEELE_OPENH264.\n  Ligue SEELE_EXIGE_CODEC para que \
+                     faltar vire falha em vez de pulo."
                 );
                 None
             }

@@ -67,7 +67,7 @@ fn main() -> Result<(), String> {
         }
         #[cfg(target_os = "macos")]
         "hardware" => Box::new(
-            seele_video::codec::hardware::Codificador::novo(&config)
+            seele_video::codec::macos::Codificador::novo(&config)
                 .map_err(|erro| format!("armar o hardware: {erro}"))?,
         ),
         // A linha de base: monta os quadros e não codifica nada.

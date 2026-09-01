@@ -338,9 +338,15 @@ fn montar_annex_b(quadro: &EncodedFrame) -> Vec<u8> {
 
 /// Um fluxo de saída. Um por transmissão.
 ///
-/// O codificador do sistema, quando existe. Ver o ADR 0041.
+/// O codificador do sistema no macOS: VideoToolbox. Ver o ADR 0041.
+///
+/// O nome é da plataforma e não «hardware», e isso é a convenção que
+/// `captura/macos.rs` e `captura/windows.rs` já seguem: o `mod` é gateado por
+/// `cfg`, então o nome do arquivo **é** a guarda — `xtask/tests/plataforma.rs`
+/// conta com isso e reprovou o nome antigo. E abre o lugar do `codec/windows.rs`
+/// do Media Foundation sem que um dos dois tenha de mudar de nome depois.
 #[cfg(target_os = "macos")]
-pub mod hardware;
+pub mod macos;
 
 /// O que a cola precisa de um codificador, seja ele qual for.
 ///
@@ -466,7 +472,7 @@ pub fn armar(
     // responde é «por que este computador ferveu transmitindo», e ela é feita
     // depois do fato, por alguém lendo o arquivo.
     #[cfg(target_os = "macos")]
-    match hardware::Codificador::novo(&config) {
+    match macos::Codificador::novo(&config) {
         Ok(codificador) => {
             tracing::info!(
                 resolucao = ?config.resolucao,

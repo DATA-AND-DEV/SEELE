@@ -138,7 +138,7 @@ fast_image_resize = "6.1.0"
 # invólucro seguro não existe — a alternativa a esta exceção não é outro crate,
 # é não ter codec por hardware.
 #
-# `deny` e não `forbid`: o `allow` vive num módulo só, `codec/hardware.rs`, e em
+# `deny` e não `forbid`: o `allow` vive num módulo só, `codec/macos.rs`, e em
 # qualquer outro arquivo deste crate o compilador continua recusando. A garantia
 # deixa de ser «não existe `unsafe` aqui» e passa a ser «existe num lugar
 # nomeado», que é a mais forte que este trabalho admite.
