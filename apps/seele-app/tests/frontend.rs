@@ -8681,6 +8681,35 @@ fn the_flag_that_skips_the_key_check_is_cleared_before_the_attempt_and_not_after
         "`hospedar` não liga a bandeira, então subir um servidor aqui ainda \
          pede para conferir a própria chave: {hospedar}"
     );
+
+    // **E a bandeira tem de decidir alguma coisa do outro lado.**
+    //
+    // Ela chegava a `entrarNaAutenticacao`, era combinada num `direto` — e o
+    // `if` continuava testando só o `liberado` de antes. O valor calculado e
+    // nunca lido: nada quebra, nada avisa, e hospedar continuou pedindo para
+    // conferir a própria chave por mais uma versão. Foi relatado em campo duas
+    // vezes, a segunda depois de eu dizer que estava consertado.
+    let auth = read("ui/tela-auth.js");
+    let entrar = js_function(&auth, "function entrarNaAutenticacao(");
+    assert!(
+        entrar.contains("nossoServidor"),
+        "`entrarNaAutenticacao` não recebe a bandeira: {entrar}"
+    );
+    let Some((antes_do_ramo, _)) = entrar.split_once("if (direto)") else {
+        panic!(
+            "nada em `entrarNaAutenticacao` ramifica por `direto`, então a \
+             bandeira é calculada e nunca lida: {entrar}"
+        );
+    };
+    assert!(
+        antes_do_ramo.contains("const direto"),
+        "`direto` é usado antes de ser definido: {entrar}"
+    );
+    assert!(
+        antes_do_ramo.contains("nossoServidor"),
+        "`direto` não leva a bandeira em conta, então hospedar continua \
+         passando pela conferência: {entrar}"
+    );
 }
 
 /// A frase de uma falha desconhecida lê `Error` antes de tentar `JSON.stringify`.

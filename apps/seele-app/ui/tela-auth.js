@@ -211,7 +211,20 @@ function entrarNaAutenticacao(snapshot, veredito, endereco, nossoServidor = fals
   botao.textContent = "ENTRAR NO SERVIDOR";
   botao.disabled = false;
 
-  if (liberado) {
+  if (direto) {
+    // O servidor desta máquina passa direto, e sai por aqui antes do resto:
+    // o que vem abaixo é o texto de quem estava **esperando** permissão, e
+    // quem acabou de subir o próprio servidor não esperou por nada.
+    //
+    // A entrada fica escrita mesmo passando batido. O registro é o que
+    // alguém lê depois para entender por onde a janela andou, e um degrau
+    // que não deixa rastro é um degrau que ninguém consegue investigar.
+    if (!liberado) {
+      registrar("SERVIDOR DESTA MÁQUINA — ENTRANDO", "azul");
+      anunciar("Servidor desta máquina. Entrando.");
+      entrarNoServidor().catch((falha) => console.warn("entrada:", falha));
+      return;
+    }
     // O registro da espera **não** é limpo aqui: ele é o histórico das
     // tentativas, e a última linha dele é a boa notícia.
     registrar("PERMISSÃO CONCEDIDA — ENTRANDO NO SERVIDOR", "azul");
