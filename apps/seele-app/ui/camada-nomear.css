@@ -1,0 +1,104 @@
+/* Nomear — o diálogo de dar nome, da comp da 0.9.0.
+ *
+ * Os valores são os da comp, e onde este arquivo e `design/SEELE.dc.html`
+ * discordarem, ela vence.
+ *
+ * O véu tem `opacity` e não `rgba`: o fundo é o mesmo negro absoluto do resto,
+ * e o que se quer é apagá-lo, não tingi-lo. */
+
+.camada-nomear {
+  position: fixed;
+  inset: 0;
+  z-index: 26;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+
+.camada-nomear::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--seele-negro-absoluto);
+  opacity: 0.78;
+}
+
+/* `position: relative` para ficar sobre o véu, que é irmão dele no `::before`.
+ * A moldura laranja é o que separa este diálogo dos painéis atrás: eles usam
+ * `--seele-linha`, e a cor de identidade aqui diz «isto está esperando você». */
+.nomear-caixa {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  background: var(--seele-negro-painel);
+  border: 1px solid var(--seele-laranja-nerv);
+}
+
+.nomear-cabeca {
+  padding: 8px 16px;
+  background: var(--seele-laranja-nerv);
+  color: var(--seele-negro-absoluto);
+}
+
+.nomear-titulo {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 15px;
+  letter-spacing: 0.08em;
+}
+
+.nomear-corpo {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.nomear-campo {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nomear-campo input { width: 100%; }
+
+/* Vermelho, que o `07-estetica.md` reserva para erro — «se aparece, algo está
+ * errado» — e imediatamente abaixo do campo, que é onde os olhos estão. */
+.nomear-erro {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--seele-vermelho-alerta);
+}
+
+.nomear-acoes {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* Sólido: é a ação principal do diálogo e a única que o fecha fazendo algo. */
+.nomear-confirmar {
+  min-height: 34px;
+  padding: 0 16px;
+  font: inherit;
+  letter-spacing: 0.14em;
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-laranja-nerv);
+  border: 1px solid var(--seele-laranja-nerv);
+  cursor: pointer;
+}
+
+.nomear-confirmar:hover:not([disabled]) {
+  color: var(--seele-laranja-nerv);
+  background: none;
+}
+
+/* Enquanto o servidor responde. `progress` e não `not-allowed`: o botão não
+ * está proibido, está ocupado. */
+.nomear-confirmar[disabled] {
+  cursor: progress;
+  opacity: 0.6;
+}

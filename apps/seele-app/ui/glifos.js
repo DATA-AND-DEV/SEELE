@@ -70,6 +70,28 @@ const GLIFOS = {
   avancar: [["path", { d: "M5.5 4.5L10.5 8L5.5 11.5Z" }]],
   recuar: [["path", { d: "M10.5 4.5L5.5 8L10.5 11.5Z" }]],
 
+  // O botão de desligar: arco aberto em cima com uma haste subindo por dentro
+  // dele. Desenho da comp da 0.9.0, e é o gesto que todo aparelho do mundo já
+  // usa para «pare de fazer o que está fazendo» — aqui, sair da sala de voz.
+  //
+  // O arco abre exatamente onde a haste passa, e é isso que o faz ler como
+  // desligar em vez de como um relógio.
+  sair: [
+    [
+      "path",
+      {
+        d: "M4.8 4.8A4.5 4.5 0 1 0 11.2 4.8",
+        fill: "none",
+        stroke: "currentColor",
+        "stroke-width": "1.3",
+      },
+    ],
+    [
+      "path",
+      { d: "M8 2.2v5.4", fill: "none", stroke: "currentColor", "stroke-width": "1.3" },
+    ],
+  ],
+
   // ▼ e ▶ — o mesmo triângulo girado 90°, aresta de 9 e altura de 6.
   aberto: [["path", { d: "M3.5 5L12.5 5L8 11Z" }]],
   fechado: [["path", { d: "M5 3.5L11 8L5 12.5Z" }]],

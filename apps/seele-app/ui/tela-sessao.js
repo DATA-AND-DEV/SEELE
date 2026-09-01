@@ -51,6 +51,16 @@
 let desenhado = null;
 /** A Linha aberta, para saber para onde vai o que se digita. */
 let linhaAberta = null;
+
+/**
+ * Quantos lugares uma sala nova tem.
+ *
+ * Copiado da primeira sala que o servidor já tem — ver `desenharCanais`. O 250
+ * é só o piso da ignorância: o teto que o protocolo aceita
+ * (`MAX_VOICE_ROOM_LIMIT`), usado enquanto não há sala nenhuma de onde copiar,
+ * que é o primeiro minuto de um servidor recém-montado.
+ */
+let lugaresDeUmaSalaNova = 250;
 /**
  * O endereço que esta janela discou, para a porta do cabeçalho.
  *
@@ -595,29 +605,43 @@ function desenharCanais(snapshot) {
       dentro.append(...voice_room.people.map((pessoa) => linhaDeQuemEstaDentro(pessoa, snapshot)));
     }
 
-    const entrar = elemento(
-      "button",
-      "voice_room-entrar",
-      voice_room.occupied_by_us ? "SAIR DA SALA" : "ENTRAR NA SALA",
-    );
-    entrar.type = "button";
-    entrar.dataset.voice_room = String(voice_room.id);
-    entrar.dataset.dentro = voice_room.occupied_by_us ? "sim" : "nao";
-    entrar.title = voice_room.occupied_by_us
-      ? "sair: você para de ouvir e de falar nesta sala"
-      : `entrar e falar com quem está em ${voice_room.name}`;
+    // **As ações sobem para a linha do nome**, como a comp da 0.9.0 as põe.
+    //
+    // Antes eram uma fileira própria embaixo, com `ENTRAR`/`SAIR` e o apagar
+    // lado a lado. A comp separa por peso: o que se faz raramente — apagar,
+    // sair — vira quadrado de 22px ao lado do nome; o que se faz sempre —
+    // entrar — fica como barra de largura cheia, e **só quando se está fora**.
+    //
+    // Sair deixa de ser uma barra do tamanho de entrar. As duas nunca aparecem
+    // juntas, e dar-lhes o mesmo peso fazia a lista parecer que oferecia as
+    // duas o tempo todo.
+    cabeca.append(elemento("span", "espaco"));
 
-    // Os dois botões da sala numa fileira só. Com um deles ausente — que é o
-    // caso de quem não administra o servidor — a fileira tem um filho de
-    // `flex: 1`, e sai idêntica ao botão de largura cheia de antes.
-    const botoes = elemento("div", "voice_room-botoes");
-    botoes.append(entrar);
-    // O último sala de voz vem desabilitado e não escondido: a razão de ele não poder
-    // ir embora é coisa que se lê, e uma ausência não se lê.
+    // O último sala de voz vem desabilitado e não escondido: a razão de ele
+    // não poder ir embora é coisa que se lê, e uma ausência não se lê.
     const apagar = botaoDeApagarVoiceRoom(voice_room, snapshot, snapshot.voice_rooms.length === 1);
-    if (apagar) botoes.append(apagar);
+    if (apagar) cabeca.append(apagar);
 
-    item.append(cabeca, dentro, botoes);
+    if (voice_room.occupied_by_us) {
+      const sair = elemento("button", "voice_room-sair");
+      sair.type = "button";
+      sair.dataset.voice_room = String(voice_room.id);
+      sair.dataset.dentro = "sim";
+      sair.title = "sair: você para de ouvir e de falar nesta sala";
+      // `aria-label` porque o botão é um desenho: um caminho SVG não é nome, e
+      // sem ele um leitor de tela anuncia «botão» e nada mais.
+      sair.setAttribute("aria-label", `Sair de ${voice_room.name}`);
+      sair.append(glifo("sair", "Sair da sala"));
+      cabeca.append(sair);
+      item.append(cabeca, dentro);
+    } else {
+      const entrar = elemento("button", "voice_room-entrar", "ENTRAR NA SALA");
+      entrar.type = "button";
+      entrar.dataset.voice_room = String(voice_room.id);
+      entrar.dataset.dentro = "nao";
+      entrar.title = `entrar e falar com quem está em ${voice_room.name}`;
+      item.append(cabeca, dentro, entrar);
+    }
     return item;
   });
   repovoar($("lista-voice_rooms"), voice_rooms);
@@ -665,16 +689,21 @@ function desenharCanais(snapshot) {
   // de conformidade provando que a recusa é de lá. Isto é não oferecer o que
   // não ia funcionar.
   const pode = snapshot.may_manage_voice_rooms === true;
-  $("criar-voice_room").hidden = !pode;
-  $("criar-linha").hidden = !pode;
+  // Os dois `+` dos cabeçalhos, no lugar dos formulários que a comp tirou.
+  $("nova-voice_room").hidden = !pode;
+  $("nova-linha").hidden = !pode;
 
   // O tamanho padrão da sala nova vem de uma sala que já existe, e não de um
   // número escrito no JavaScript: quem hospeda já disse que tamanho quer
   // quando montou o servidor, e repetir a escolha dele é mais honesto que
-  // inventar quinze. Só enquanto o campo estiver como a marcação o deixou.
-  const lugares = $("campo-voice_room-limite");
-  if (pode && lugares.value === lugares.defaultValue && snapshot.voice_rooms.length > 0) {
-    lugares.value = String(snapshot.voice_rooms[0].limit);
+  // inventar quinze.
+  //
+  // A regra é anterior à comp e **sobreviveu a ela**: a comp tirou o campo de
+  // lugares do formulário, e tirar um campo não é escolher um número. Ela
+  // passou de valor inicial de um `<input>` a resposta guardada aqui, lida na
+  // hora de criar.
+  if (snapshot.voice_rooms.length > 0) {
+    lugaresDeUmaSalaNova = snapshot.voice_rooms[0].limit;
   }
 }
 
@@ -2772,35 +2801,30 @@ $("lista-linhas").addEventListener("click", alternarCanal);
 /// aconteceu na primeira versão desta função, e antes dela na tabela de
 /// dispositivos do Terminal server. Duas vezes no mesmo dia: o literal fica no
 /// lugar da chamada, sempre.
-async function pedirSala(pedido, campo, rotulo) {
-  try {
-    await pedido;
-    // Limpo só depois de o pedido ter saído. Limpar antes perderia o que a
-    // pessoa escreveu se a chamada estourasse.
-    campo.value = "";
-  } catch (falha) {
-    console.warn(`${rotulo}:`, falha);
-  }
-}
 
-$("criar-voice_room").addEventListener("submit", (evento) => {
-  evento.preventDefault();
-  const nome = $("campo-voice_room-nome");
-  pedirSala(
-    invoke("criar_voice_room", {
-      name: nome.value.trim(),
-      limit: Number($("campo-voice_room-limite").value),
-      channel: null,
-    }),
-    nome,
-    "criar_voice_room",
-  );
+$("nova-voice_room").addEventListener("click", () => {
+  abrirNomear({
+    titulo: "NOVA SALA DE VOZ",
+    rotulo: "NOME DA SALA",
+    exemplo: "nome da sala",
+    acao: "CRIAR",
+    aoConfirmar: (nome) =>
+      invoke("criar_voice_room", {
+        name: nome,
+        limit: lugaresDeUmaSalaNova,
+        channel: null,
+      }),
+  });
 });
 
-$("criar-linha").addEventListener("submit", (evento) => {
-  evento.preventDefault();
-  const nome = $("campo-linha-nome");
-  pedirSala(invoke("criar_linha", { name: nome.value.trim() }), nome, "criar_linha");
+$("nova-linha").addEventListener("click", () => {
+  abrirNomear({
+    titulo: "NOVO CANAL",
+    rotulo: "NOME DO CANAL",
+    exemplo: "nome do canal",
+    acao: "CRIAR",
+    aoConfirmar: (nome) => invoke("criar_linha", { name: nome }),
+  });
 });
 // O `×` da caixa de alerta, e o único fechamento dela: o `RECONHECER` de baixo
 // saiu, porque duas portas para o mesmo ato numa caixa de 720px é a pessoa

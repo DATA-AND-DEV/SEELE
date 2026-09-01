@@ -38,6 +38,7 @@
 <link rel="stylesheet" href="camada-portaria.css">
 <link rel="stylesheet" href="camada-moderar.css">
 <link rel="stylesheet" href="camada-ajuda.css">
+<link rel="stylesheet" href="camada-nomear.css">
 <link rel="stylesheet" href="tela-chamada.css">
 <link rel="stylesheet" href="camada-compartilhar.css">
 <link rel="stylesheet" href="tela-server.css">
@@ -1048,9 +1049,14 @@
       -->
       <div class="canais-rolagem">
         <div class="canais-cabeca">
-          <h2 class="painel-titulo">
-            <span>SALAS DE VOZ</span><span class="painel-codigo">B·03</span>
-          </h2>
+          <!--
+            **O código do painel saiu.** `B·03` era herança do comp v2, que
+            numerava os painéis como um console numera módulos. A comp da 0.9.0
+            não os traz, e o espaço vale mais para os botões que agem.
+          -->
+          <h2 class="painel-titulo"><span>SALAS DE VOZ</span></h2>
+          <button id="nova-voice_room" class="painel-acao" type="button"
+                  aria-label="Nova sala de voz" title="nova sala de voz">+</button>
           <!--
             A ajuda, e ela fica aqui por um motivo: é neste canto que a pessoa
             encontra primeiro as palavras deste produto — o que é uma sala de
@@ -1062,49 +1068,14 @@
         </div>
         <ul id="lista-voice_rooms" class="canais"></ul>
 
-        <!--
-          Criar sala só aparece para quem pode criar. `Snapshot.may_manage_voice_rooms`
-          é a resposta do servidor, resolvida no PERMISSIONS — a casca pergunta e
-          obedece, e não decide.
-
-          Esconder o formulário **não** é o que impede alguém de criar: o servidor
-          recusa `CreateVoiceRoom` de quem não tem `ManageVoiceRooms`, e há teste de
-          conformidade provando que a recusa é de lá. Isto aqui é só não oferecer
-          o que não vai funcionar.
-        -->
-        <form id="criar-voice_room" class="criar" hidden>
-          <label class="criar-campo">
-            <span class="rotulo">NOVA SALA</span>
-            <input id="campo-voice_room-nome" name="nome" maxlength="48" required
-                   spellcheck="false" autocomplete="off" placeholder="nome da sala">
-          </label>
-          <label class="criar-campo criar-campo-numero">
-            <span class="rotulo">LUGARES</span>
-            <!--
-              O padrão vem do servidor e não daqui: `desenharCanais` o copia do
-              limite de uma sala de voz que já existe. Um número escrito neste arquivo
-              seria a casca decidindo o tamanho de uma sala.
-            -->
-            <input id="campo-voice_room-limite" name="lugares" type="number" min="1" max="250" required>
-          </label>
-          <button type="submit" class="botao-fantasma">CRIAR</button>
-        </form>
 
         <div class="canais-cabeca canais-cabeca-linhas">
-          <h2 class="painel-titulo">
-            <span>CANAIS</span><span class="painel-codigo">B·04</span>
-          </h2>
+          <h2 class="painel-titulo"><span>CANAIS</span></h2>
+          <button id="nova-linha" class="painel-acao" type="button"
+                  aria-label="Novo canal" title="novo canal">+</button>
         </div>
         <ul id="lista-linhas" class="canais"></ul>
 
-        <form id="criar-linha" class="criar" hidden>
-          <label class="criar-campo">
-            <span class="rotulo">NOVO CANAL</span>
-            <input id="campo-linha-nome" name="nome" maxlength="48" required
-                   spellcheck="false" autocomplete="off" placeholder="nome do canal">
-          </label>
-          <button type="submit" class="botao-fantasma">CRIAR</button>
-        </form>
       </div>
 
       <!--
@@ -1160,7 +1131,6 @@
         <span class="linha-barra-cerquilha" aria-hidden="true">#</span>
         <span id="linha-nome" class="linha-nome">—</span>
         <span class="espaco"></span>
-        <span class="painel-codigo">C·05</span>
         <!--
           `BUSCAR` com rótulo, que é o remédio do v3 para todo controle que era
           só forma: a barra de busca vivia aberta debaixo do cabeçalho, ocupando
@@ -2636,6 +2606,47 @@
   `aria-modal` e `tabindex="-1"` como nas outras duas camadas: a caixa recebe o
   foco ao abrir e o devolve ao fechar.
 -->
+<!--
+  Nomear: um diálogo para dar nome a qualquer coisa.
+
+  Título, rótulo, exemplo e verbo são escritos pelo script a cada abertura,
+  porque as três coisas que passam por aqui pedem palavras diferentes — criar
+  uma sala de voz, criar um canal, renomear uma sala. Um diálogo por caso seriam
+  três marcações, três armadilhas de foco e três lugares para o `maxlength`
+  divergir.
+
+  Ele substitui os dois formulários `criar` que moravam abertos na coluna da
+  esquerda. A comp da 0.9.0 os troca por um `+` no cabeçalho de cada lista, e o
+  ganho não é de espaço: um formulário permanentemente visível numa coluna de
+  navegação é um convite a preencher, e criar canal não é o que se faz ali toda
+  hora.
+-->
+<div id="nomear" class="camada-nomear" role="dialog" aria-modal="true"
+     aria-labelledby="nomear-titulo" tabindex="-1" hidden>
+  <div class="nomear-caixa">
+    <div class="nomear-cabeca">
+      <h2 id="nomear-titulo" class="nomear-titulo">NOMEAR</h2>
+    </div>
+    <form id="nomear-forma" class="nomear-corpo" autocomplete="off">
+      <label class="nomear-campo">
+        <span id="nomear-rotulo" class="rotulo">NOME</span>
+        <input id="nomear-valor" name="nome" maxlength="48" required
+               spellcheck="false" autocomplete="off">
+      </label>
+      <!--
+        A recusa do servidor, escrita aqui e não só anunciada: um nome repetido
+        ou sem permissão volta como enum, e quem está olhando precisa ler o
+        motivo no lugar onde acabou de digitar.
+      -->
+      <p id="nomear-erro" class="nomear-erro" role="alert" hidden></p>
+      <div class="nomear-acoes">
+        <button type="button" id="nomear-cancelar" class="botao-fantasma">CANCELAR</button>
+        <button type="submit" id="nomear-confirmar" class="nomear-confirmar">CRIAR</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div id="ajuda" class="camada-ajuda" role="dialog" aria-modal="true"
      aria-labelledby="ajuda-titulo" tabindex="-1" hidden>
   <div class="ajuda-caixa">
@@ -2898,6 +2909,7 @@
 -->
 <script src="camada-portaria.js"></script>
 <script src="camada-ajuda.js"></script>
+<script src="camada-nomear.js"></script>
 <!--
   Depois de `tela-sessao.js`, e não é gosto: a chamada usa `naoMedido`,
   `medido`, `SEM_MEDIDA` e `blocos`, que são declarados lá. Declaração de função

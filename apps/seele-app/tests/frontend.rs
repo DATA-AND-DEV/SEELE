@@ -2514,13 +2514,29 @@ fn entering_and_leaving_a_voice_room_are_labelled_buttons_and_not_a_click_on_the
         "the channel handler is back to catching the row, which is the shape \
          that has no keyboard and no accessible name"
     );
-    for label in ["ENTRAR NA SALA", "SAIR DA SALA"] {
-        assert!(
-            lista.contains(label),
-            "the VoiceRoom no longer offers `{label}`, so one half of the pair the v3 \
-             split apart has gone missing again"
-        );
-    }
+    // **`SAIR DA SALA` deixou de ser um rótulo na 0.9.0**, e a exigência mudou
+    // de forma junto com a comp — não de conteúdo.
+    //
+    // O par que o v3 separou continua sendo o assunto: entrar e sair precisam
+    // ser dois controles, nomeados, e não um clique na fileira. O que a comp
+    // muda é o **peso**: entrar é a barra de largura cheia com o rótulo por
+    // extenso, e sair virou um quadrado de 22px na linha do nome, ao lado do
+    // apagar — porque as duas nunca aparecem juntas, e dar-lhes o mesmo
+    // tamanho fazia a lista parecer que oferecia as duas o tempo todo.
+    //
+    // Um botão que é um desenho não tem rótulo para procurar. O que se cobra
+    // dele é o `aria-label`, que é o que um leitor de tela anuncia — e é
+    // exatamente a metade que se perderia por descuido, porque ela não aparece
+    // na tela de ninguém que enxerga.
+    assert!(
+        lista.contains("ENTRAR NA SALA"),
+        "a sala deixou de oferecer `ENTRAR NA SALA` por extenso"
+    );
+    assert!(
+        lista.contains("voice_room-sair") && lista.contains("aria-label"),
+        "o botão de sair da sala sumiu, ou ficou sem nome acessível — e sem nome \
+         ele anuncia como «botão» e mais nada"
+    );
     assert!(
         lista.contains("eject_plug") || handler.contains("eject_plug"),
         "nothing on this screen takes the connection out, and the only other way out \

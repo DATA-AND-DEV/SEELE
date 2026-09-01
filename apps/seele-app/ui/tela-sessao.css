@@ -451,14 +451,55 @@
   margin-top: 16px;
 }
 
-/* A coordenada (`B·03`, `C·05`). Ela continua no apagado de propósito: o achado
-   de contraste manda garantir que **informação necessária** não dependa dessa
-   cor, e a coordenada não é necessária para operar o painel — ela é o endereço
-   do painel numa conversa sobre a tela. O comp a desenha ainda mais fraca. */
-.painel-codigo {
-  font-size: var(--seele-t-micro);
-  letter-spacing: 0.02em;
+/* Os códigos de painel — `B·03`, `C·05` — saíram na 0.9.0. Eram herança do
+   comp v2, que numerava painéis como um console numera módulos; a comp da
+   0.9.0 não os traz, e o espaço do cabeçalho vale mais para o que age.
+
+   O `+` que os substitui: quadrado de 22px, do tamanho do `?` que já morava
+   ali, porque são irmãos na mesma fileira. */
+/* O sair da sala, na linha do nome.
+ *
+ * Quadrado de 22px como o apagar ao lado, e laranja porque é o único controle
+ * daquela fileira que age sobre a **sua** presença — os outros agem sobre a
+ * sala. Ao passar o mouse ele inverte, que é o que a comp faz com todo botão
+ * de contorno laranja. */
+.voice_room-sair {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--seele-laranja-nerv);
+  background: none;
+  border: 1px solid var(--seele-laranja-nerv);
+  cursor: pointer;
+}
+
+.voice_room-sair:hover {
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-laranja-nerv);
+}
+
+.painel-acao {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
   color: var(--seele-osso-apagado);
+  background: none;
+  border: 1px solid var(--seele-linha-forte);
+  cursor: pointer;
+}
+
+.painel-acao:hover {
+  color: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
 }
 
 .espaco { flex: 1; }
@@ -627,15 +668,11 @@
   background: var(--seele-laranja-nerv);
 }
 
-.voice_room-entrar[data-dentro="sim"] {
-  color: var(--seele-negro-absoluto);
-  background: var(--seele-laranja-nerv);
-}
-
-.voice_room-entrar[data-dentro="sim"]:hover {
-  color: var(--seele-laranja-nerv);
-  background: none;
-}
+/* O `[data-dentro="sim"]` saiu com a comp da 0.9.0: este botão só existe
+   quando se está **fora** da sala. Dentro, quem oferece a saída é o
+   `.voice_room-sair`, do tamanho do apagar ao lado dele. O atributo continua
+   sendo escrito porque é por ele que o manipulador de clique decide o que
+   mandar — ele só não pinta mais nada. */
 
 /* ---- destruir uma sala ----
 
