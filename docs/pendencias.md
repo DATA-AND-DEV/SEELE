@@ -1521,3 +1521,48 @@ cobra isso nos dois sentidos.
 
 Também sai da fórmula de Homebrew a ressalva sobre isto: o `brew test` pode
 voltar a conferir a versão, que é o que aquele teste existe para fazer.
+
+## 31 · Trocar de fone ou microfone no Windows exige reiniciar o aplicativo
+
+**Sintoma, relatado por quem usa em 2026-08-31**, num teste em LAN entre Mac e
+Windows: *«no Windows a troca de fone e microfone não aconteceu em tempo real,
+precisou reiniciar o aplicativo para aplicar corretamente.»*
+
+**Por que isto está aberto e não foi investigado.** Foi relatado junto de outros
+quatro pontos, e os outros quatro foram feitos. Este não, e não houve decisão
+nenhuma por trás disso — ele simplesmente não virou tarefa. Está escrito aqui
+porque um defeito relatado e não registrado é um defeito que volta pela mesma
+porta: **esta mesma sessão perdeu uma versão inteira em campo** por um
+comentário que envelheceu sem que ninguém notasse.
+
+**O que se sabe do desenho, e é o que torna o sintoma estranho.** O caminho
+existe e promete o contrário. `escolher_microfone` grava e chama
+`set_capture_device`, cuja documentação diz «*takes effect now*» e abre o
+caminho novo antes de soltar o velho. `crates/seele-audio/src/supervisor.rs`
+existe inteiro para «manter o áudio vivo através de trocas de aparelho», com
+máquina de estados coberta por teste.
+
+Ou seja: ou aquele caminho não é o que roda no Windows, ou ele roda e não
+alcança o que o WASAPI precisa que se faça.
+
+**As três suspeitas, e nenhuma foi testada.**
+
+1. **A troca acontece e a interface não conta.** A lista mostraria o dispositivo
+   escolhido enquanto o áudio já mudou — o oposto do que parece, e o mais barato
+   de descartar: comparar `snapshot.capture` («o que abriu de verdade») com o que
+   a preferência guarda.
+2. **O `cpal` no WASAPI não reabre no dispositivo pedido.** O backend do Windows
+   tem modo exclusivo e compartilhado, e um fluxo preso em exclusivo não solta o
+   aparelho — reiniciar o processo solta.
+3. **O supervisor está tratando a troca voluntária como queda**, entrando no
+   ciclo de repetição em vez de trocar direto.
+
+**Por onde começar.** A máquina do teste é alcançável por SSH e foi usada em
+2026-08-31 para medir o caminho de vídeo, então a instrumentação pode ser lida
+de fora. Mas **a troca em si precisa de sessão gráfica** e de alguém plugando um
+fone: SSH mede, não reproduz.
+
+**Quando dói.** Em toda troca de fone durante uma conversa, que é exatamente o
+momento em que a pessoa não consegue ouvir e não pode receber a instrução «saia
+do servidor e volte» — o argumento que a própria `set_playback_device` escreve
+para justificar valer na hora.
