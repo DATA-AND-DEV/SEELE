@@ -895,6 +895,11 @@ pub struct Transmissao {
     cabecalho: ScreenHeader,
     balde: Balde,
     em_voo: Option<ChaveEmVoo>,
+    /// Os pacotes de som esperando o fluxo ficar entre quadros.
+    ///
+    /// **Existe porque escrever no meio de um quadro-chave corrompe o fluxo.**
+    /// Ver [`Self::enviar_som`].
+    som_pendente: std::collections::VecDeque<Vec<u8>>,
     enviados: u64,
     descartados: u64,
     bytes_enviados: u64,
@@ -947,6 +952,7 @@ impl Transmissao {
             .map_err(|erro| ErroDeTela::Fluxo(erro.to_string()))?;
 
         Ok(Self {
+            som_pendente: std::collections::VecDeque::new(),
             fluxo,
             cabecalho,
             balde: Balde::novo(teto_bps, agora),
@@ -992,40 +998,80 @@ impl Transmissao {
     /// erro: volta como [`Envio::Descartado`], porque descartar é a política.
     /// Manda um pacote de som junto com a imagem.
     ///
-    /// # O que ele **não** faz, e é a decisão que importa
+    /// # Ele espera o quadro-chave acabar, e **é obrigatório**
     ///
-    /// Ele não passa pelo balde do teto de banda, e não é descartado quando a
-    /// imagem é. O som custa 32 kbps contra os 1200 kbps do vídeo — menos de 3%
-    /// do orçamento — e é a metade da transmissão que continua útil quando a
-    /// imagem engasga: um jogo a 8 quadros **com som** é acompanhável; a 30
-    /// quadros mudo, não.
+    /// Um quadro-chave sai em [`FATIAS_DO_QUADRO_CHAVE`] fatias, uma por tique.
+    /// O cabeçalho anuncia o tamanho **inteiro** e as fatias vão preenchendo:
+    /// não há bandeira de continuação, porque um fluxo QUIC é uma sequência
+    /// ordenada de bytes e quem lê só termina quando a última fatia chega.
     ///
-    /// Isso inverte a regra do vídeo de propósito, e é a mesma inversão que fez
-    /// `Movimento` virar o padrão da transmissão: a `specs/07` foi escrita
-    /// pensando em texto.
+    /// Escrever qualquer outra coisa no meio disso corrompe o fluxo. O receptor
+    /// está contando bytes do quadro-chave, e um cabeçalho de som no meio vira
+    /// payload de imagem: o quadro sai errado, o enquadramento perde o passo, e
+    /// **tudo depois dele é lixo**.
     ///
-    /// Ele também não espera um quadro-chave em voo. Um quadro-chave sai em
-    /// quatro fatias ao longo de quatro tiques, e segurar o som por quatro
-    /// tiques é 80 ms de silêncio a cada quadro-chave — audível, e por um
-    /// motivo que não é dele.
+    /// A primeira versão não esperava, de propósito — para não segurar o som
+    /// por quatro tiques, que são 80 ms de silêncio a cada quadro-chave. O
+    /// resultado em campo foi a transmissão inteira parar no primeiro quadro:
+    /// «exibe apenas 1 frame e o Windows não consegue ver», sem som nenhum,
+    /// porque o som tinha sido lido como imagem. Trocar 80 ms de silêncio por
+    /// uma transmissão que não anda é um negócio ruim.
+    ///
+    /// Então ele enfileira. A fila tem teto e joga fora o **mais velho** —
+    /// quem está atrasado meio segundo já perdeu a sincronia com a imagem, e
+    /// insistir nele afasta o som cada vez mais.
+    ///
+    /// # O que continua valendo
+    ///
+    /// Ele não passa pelo balde do teto de banda. O som custa 32 kbps contra os
+    /// 1200 kbps do vídeo — menos de 3% do orçamento — e é a metade da
+    /// transmissão que continua útil quando a imagem engasga: um jogo a 8
+    /// quadros **com som** é acompanhável; a 30 quadros mudo, não.
     ///
     /// # Errors
     ///
     /// [`ErroDeTela::Fluxo`] quando o fluxo já foi embora.
     pub async fn enviar_som(&mut self, bytes: &[u8]) -> Result<Envio, ErroDeTela> {
+        /// Meio segundo a 20 ms por pacote.
+        const TETO_DA_FILA: usize = 25;
+
         if bytes.is_empty() {
             return Ok(Envio::Descartado(MotivoDeDescarte::Vazio));
         }
         if bytes.len() > MAX_QUADRO_LEN {
             return Ok(Envio::Descartado(MotivoDeDescarte::GrandeDemais));
         }
-        // `u32` cabe: `MAX_QUADRO_LEN` é 512 KiB e já foi conferido acima.
-        let tamanho = u32::try_from(bytes.len()).unwrap_or(u32::MAX);
-        self.escrever(&escrever_cabecalho_de_quadro(TipoDeQuadro::Som, tamanho))
-            .await?;
-        self.escrever(bytes).await?;
-        self.bytes_enviados += (CABECALHO_DE_QUADRO_LEN + bytes.len()) as u64;
-        Ok(Envio::Enviado)
+
+        while self.som_pendente.len() >= TETO_DA_FILA {
+            self.som_pendente.pop_front();
+        }
+        self.som_pendente.push_back(bytes.to_vec());
+        self.escoar_som().await
+    }
+
+    /// Escreve o som enfileirado, se o fluxo estiver entre quadros.
+    ///
+    /// Chamada por [`Self::enviar_som`] e por quem termina um quadro-chave: as
+    /// duas portas por onde o fluxo pode ficar livre.
+    async fn escoar_som(&mut self) -> Result<Envio, ErroDeTela> {
+        if self.em_voo.is_some() {
+            return Ok(Envio::Espalhando);
+        }
+        let mut foi = false;
+        while let Some(pacote) = self.som_pendente.pop_front() {
+            // `u32` cabe: `MAX_QUADRO_LEN` é 512 KiB e já foi conferido.
+            let tamanho = u32::try_from(pacote.len()).unwrap_or(u32::MAX);
+            self.escrever(&escrever_cabecalho_de_quadro(TipoDeQuadro::Som, tamanho))
+                .await?;
+            self.escrever(&pacote).await?;
+            self.bytes_enviados += (CABECALHO_DE_QUADRO_LEN + pacote.len()) as u64;
+            foi = true;
+        }
+        Ok(if foi {
+            Envio::Enviado
+        } else {
+            Envio::Espalhando
+        })
     }
 
     /// Entrega um quadro codificado ao fluxo, ou diz por que não.
@@ -1052,6 +1098,11 @@ impl Transmissao {
             let acabou = self.escrever_fatia(&mut voando).await?;
             if !acabou {
                 self.em_voo = Some(voando);
+            } else {
+                // O quadro-chave acabou de fechar, e o fluxo está entre quadros
+                // pela primeira vez desde que ele começou: é aqui que o som que
+                // esperou pode sair, e antes do próximo quadro entrar na frente.
+                self.escoar_som().await?;
             }
             self.descartados += 1;
             return Ok(Envio::Descartado(MotivoDeDescarte::QuadroChaveEmVoo));
@@ -2070,6 +2121,74 @@ pub(crate) mod tests {
                 .expect("não cabe"),
             Envio::Descartado(MotivoDeDescarte::AcimaDoTeto)
         );
+    }
+
+    /// O som nunca é escrito no meio de um quadro-chave.
+    ///
+    /// **É o defeito que parou a transmissão inteira no primeiro quadro.** Um
+    /// quadro-chave sai em quatro fatias, uma por tique, e o cabeçalho anuncia o
+    /// tamanho **inteiro**: quem lê conta bytes até fechar a conta. Um cabeçalho
+    /// de som escrito no meio disso vira payload de imagem — o quadro sai
+    /// errado, o enquadramento perde o passo, e tudo depois é lixo.
+    ///
+    /// Em campo: «exibe apenas 1 frame e o Windows não consegue ver», sem som
+    /// nenhum, porque o som tinha sido lido como imagem.
+    ///
+    /// O teste lê o outro lado do fio e exige que os quadros voltem inteiros e
+    /// na ordem certa. Sem a fila, o segundo quadro volta corrompido ou o
+    /// enquadramento estoura.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn o_som_nao_atravessa_um_quadro_chave_pela_metade() {
+        let (saida, entrada) = par().await;
+        let agora = Instant::now();
+        // Teto largo: o que se mede aqui é a ordem no fio, não o balde.
+        let mut transmissao = Transmissao::abrir(&saida, cabecalho(), 800_000_000, agora)
+            .await
+            .expect("abrir");
+
+        // Um quadro-chave grande o bastante para sair em quatro fatias, e som
+        // empurrado **entre** elas — que é o que a bomba faz a cada tique.
+        let chave = vec![7_u8; 40_000];
+        assert_eq!(
+            transmissao
+                .enviar_quadro(&chave, true, agora)
+                .await
+                .expect("chave"),
+            Envio::Espalhando
+        );
+        for _ in 0..FATIAS_DO_QUADRO_CHAVE {
+            transmissao.enviar_som(&[1, 2, 3, 4]).await.expect("som");
+            let _ = transmissao
+                .enviar_quadro(&[9_u8; 100], false, agora)
+                .await
+                .expect("tique");
+        }
+
+        let mut recepcao = Recepcao::aceitar(&entrada).await.expect("aceitar");
+        let primeiro = recepcao
+            .proximo_quadro()
+            .await
+            .expect("ler")
+            .expect("o quadro-chave");
+        assert_eq!(
+            primeiro.tipo,
+            TipoDeQuadro::Chave,
+            "o primeiro quadro do fluxo não é o quadro-chave"
+        );
+        assert_eq!(
+            primeiro.bytes, chave,
+            "o quadro-chave voltou diferente do que saiu: alguma coisa foi \
+             escrita no meio das fatias dele"
+        );
+
+        // E o que vem depois é som, inteiro — não os bytes de um quadro cortado.
+        let segundo = recepcao
+            .proximo_quadro()
+            .await
+            .expect("ler")
+            .expect("o que veio depois");
+        assert_eq!(segundo.tipo, TipoDeQuadro::Som);
+        assert_eq!(segundo.bytes, vec![1, 2, 3, 4]);
     }
 
     #[tokio::test(flavor = "multi_thread")]

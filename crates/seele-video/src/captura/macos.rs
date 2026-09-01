@@ -1040,6 +1040,60 @@ mod testes {
         captura.parar().expect("a captura para");
     }
 
+    /// A captura entrega quadros **ao longo do tempo**, e não um só.
+    ///
+    /// **O teste que faltava, e o defeito que ele encontra.** O outro teste de
+    /// campo pega um quadro e para — é o que ele precisa para provar que a
+    /// conversão não sai preta. Uma captura que entrega o primeiro e trava
+    /// passa por ele inteira, e foi assim que o relato chegou: «compartilhamento
+    /// de tela no Mac exibe apenas 1 frame».
+    ///
+    /// Três segundos a 30 quadros são noventa; exigir vinte é folga de sobra
+    /// para uma máquina ocupada e ainda assim uma ordem de grandeza acima de
+    /// «um».
+    #[test]
+    fn a_captura_entrega_quadros_ao_longo_do_tempo() {
+        if !permissao().concedida() {
+            eprintln!("PULADO: o TCC não concedeu gravação de tela a este processo.");
+            return;
+        }
+        let lista = match fontes() {
+            Ok(l) => l,
+            Err(ErroDeCaptura::NadaParaCapturar) => {
+                eprintln!("PULADO: esta máquina não tem monitor nem janela.");
+                return;
+            }
+            Err(erro) => panic!("listar as fontes falhou: {erro}"),
+        };
+        let Some(monitor) = lista.iter().find(|f| matches!(f, Fonte::Monitor { .. })) else {
+            eprintln!("PULADO: nenhum monitor na lista.");
+            return;
+        };
+
+        let captura = CapturaDaTela::iniciar(monitor, Resolucao::P720, Cadencia::Q30)
+            .expect("a captura começa");
+        let comeco = Instant::now();
+        let mut pegos = 0_usize;
+        while comeco.elapsed().as_secs_f64() < 3.0 {
+            if captura.tomar().is_some() {
+                pegos += 1;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let vaga = captura.vaga();
+        let escritos = vaga.escritos();
+        captura.parar().expect("a captura para");
+
+        assert!(
+            pegos >= 20,
+            "a captura entregou {pegos} quadros em três segundos, e a 30 por \
+             segundo deveria haver noventa. A tela parada não explica: o \
+             ScreenCaptureKit reentrega o mesmo quadro. O que explica é a \
+             captura ter travado depois dos primeiros — escritos pelo sistema: \
+             {escritos}"
+        );
+    }
+
     /// O som do sistema chega pelo mesmo fluxo da imagem.
     ///
     /// **Pula em voz alta** sem permissão ou sem monitor, como a prova da
