@@ -26,7 +26,20 @@ fn app() -> PathBuf {
 
 fn ler(nome: &str) -> String {
     let caminho = app().join(nome);
-    std::fs::read_to_string(&caminho).unwrap_or_else(|erro| panic!("não li {nome}: {erro}"))
+    let texto =
+        std::fs::read_to_string(&caminho).unwrap_or_else(|erro| panic!("não li {nome}: {erro}"));
+    // **Fim de linha normalizado**, e isto é conserto de um defeito que só o
+    // Windows mostrava.
+    //
+    // Os guardas daqui procuram texto com `\n` dentro — `!macro NOME\n`, por
+    // exemplo. O git faz checkout com CRLF no Windows, e lá as quatro provas do
+    // firewall falhavam dizendo que o gancho não existia, num arquivo em que ele
+    // está. No macOS passavam. Um guarda que reprova conforme o sistema em que
+    // roda é um guarda que ensina a ser ignorado.
+    //
+    // Achado rodando a bateria numa máquina Windows de verdade, que é o que
+    // esta sessão passou a conseguir fazer.
+    texto.replace("\r\n", "\n")
 }
 
 #[test]
