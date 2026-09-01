@@ -386,6 +386,24 @@ impl Codificador {
                 "declarar o teto de banda",
             )?;
             limitar(&sessao.0, teto_bps)?;
+            // **O piso de qualidade foi tentado aqui, e medido, e não serve.**
+            //
+            // Sob teto apertado os dois codificadores obedecem de formas
+            // opostas: o OpenH264 joga quadro fora e gasta os bits nos que
+            // sobram; o do sistema entrega todos e borra cada um. Medido a 720p
+            // com 2 Mbps: 26,8 dB em 13 quadros de 120 contra 16,2 dB em 120 de
+            // 120. «Mais pixelado» é a cara exata da segunda troca, e foi o
+            // relato de campo — daí a tentação de pôr um teto de quantização
+            // com `kVTCompressionPropertyKey_MaxAllowedFrameQP`.
+            //
+            // Com QP máximo 35 o mesmo teste deu **29,23 dB e 30,19 Mbps**:
+            // 1510% do teto. O VideoToolbox honra o piso de qualidade e
+            // **abandona** o `DataRateLimits` — troca o defeito que a linha
+            // acima acabou de consertar por um três vezes maior. Quem passaria a
+            // jogar quadro fora seria o balde do transporte, depois de a CPU já
+            // ter pago para codificá-los.
+            //
+            // Fica escrito para ninguém tentar de novo achando que é de graça.
         }
 
         Ok(Self {
