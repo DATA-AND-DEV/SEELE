@@ -82,7 +82,11 @@ fn a_folha_deste_crate_so_difere_do_workspace_no_unsafe() {
         "esperava exatamente uma divergência — o `unsafe_code` do ADR 0041 — e \
          vieram {divergentes:?}"
     );
-    let (chave, la, aqui) = divergentes[0];
+    // `first` e não `[0]`: o `indexing_slicing` desta casa é `warn`, e um teste
+    // que avisa é um teste que ensina a conviver com aviso.
+    let Some((chave, la, aqui)) = divergentes.first() else {
+        unreachable!("a asserção acima já garantiu exatamente uma divergência")
+    };
     assert_eq!(
         (chave.as_str(), la.as_str(), aqui.as_str()),
         esperada,
