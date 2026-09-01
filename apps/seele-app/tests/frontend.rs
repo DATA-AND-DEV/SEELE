@@ -9419,7 +9419,13 @@ fn the_variant_names_the_shell_sends_are_the_ones_the_wire_uses() {
             .join("src")
             .join("types.rs"),
     )
-    .expect("`seele-ffi/src/types.rs` é onde os tipos da ponte moram");
+    .expect("`seele-ffi/src/types.rs` é onde os tipos da ponte moram")
+    // O mesmo `\r\n` que `read` normaliza, e que este teste não usava por ler
+    // fora de `ui/`. No Windows ele reprovava aqui dizendo que `Prioridade`
+    // deixou de ser minúscula, num arquivo em que ela é — porque a comparação é
+    // um `ends_with` que termina em `\n`. Achado rodando a bateria numa máquina
+    // Windows de verdade.
+    .replace("\r\n", "\n");
 
     // As variantes de `Prioridade`, como o serde as escreve no fio.
     let Some(depois) = ffi.split("pub enum Prioridade {").nth(1) else {
