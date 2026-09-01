@@ -158,6 +158,7 @@ jobs:
           AZURE_ARTIFACT_SIGNING_ACCOUNT: ${{ secrets.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
           AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          SISTEMA: ${{ matrix.nome }}
         run: |
           python3 - <<'PY'
           import json, os, pathlib
@@ -208,8 +209,38 @@ jobs:
                   "cmd": "artifact-signing-cli",
                   "args": ["-e", endereco, "-a", conta, "-c", perfil, "-d", "SEELE", "%1"],
               }
-          elif endereco or conta or perfil:
-              print("::warning::só parte da credencial do Windows está configurada; o instalador sai sem assinatura.")
+              print("::notice::o instalador do Windows sai assinado.")
+          elif os.environ.get("SISTEMA", "") == "windows":
+              # Parar aqui, e não avisar e seguir.
+              #
+              # Um instalador NSIS sem assinatura é barrado pelo SmartScreen na
+              # primeira execução em máquina limpa: quem baixou lê «o Windows
+              # protegeu seu PC» e não encontra o botão de continuar, que está
+              # escondido atrás de «mais informações». O mesmo arquivo instala
+              # sem uma reclamação quando é o atualizador que o executa, porque
+              # aí ele não chega pela mão de ninguém. O resultado é uma versão
+              # que só entra em quem já tinha a anterior — que foi exatamente o
+              # relato da 0.9.9.
+              #
+              # Antes daqui faltar parte da credencial era um `::warning::` e
+              # não haver nenhuma era silêncio absoluto. As duas saídas punham
+              # no release um `.exe` de aparência normal, e a diferença entre
+              # uma versão instalável e uma barrada não estava em diff nenhum:
+              # um segredo que expira não muda arquivo. Um release que ninguém
+              # consegue instalar não é um release, então o build morre aqui,
+              # antes de gastar vinte minutos compilando para nada.
+              faltam = [nome for nome, valor in (
+                  ("AZURE_ENDPOINT", endereco),
+                  ("AZURE_ARTIFACT_SIGNING_ACCOUNT", conta),
+                  ("AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE", perfil),
+              ) if not valor]
+              print(
+                  "::error::o instalador do Windows sairia sem assinatura, e o "
+                  "SmartScreen o barra em máquina limpa. Falta: "
+                  + ", ".join(faltam)
+                  + ". Ver docs/assinatura-e-atualizacao.md."
+              )
+              raise SystemExit(1)
 
           # ------------------------------------------------------ atualizador
           #
