@@ -165,23 +165,54 @@ async function desenharPrevia(pessoa, apelido) {
 async function abrirPerfil() {
   focoAntesDoPerfil = document.activeElement;
   $("perfil-erro").hidden = true;
+
+  // **Dois modos, e a diferença é haver servidor.**
+  //
+  // Dentro de uma sessão, o perfil é o daquele servidor: o apelido vem do
+  // `snapshot` e a troca é um comando de protocolo, porque o nome é único lá e
+  // o roster de todo mundo tem de saber.
+  //
+  // Antes de conectar não há servidor nem sessão — e a tela de entrada da 0.9.0
+  // abre o perfil justamente aí, porque tirou o campo de apelido de si mesma.
+  // O que se edita então é a preferência desta máquina: o nome com que se entra
+  // quando não se diz outro.
   let snapshot = null;
   try {
     snapshot = await invoke("snapshot");
   } catch (falha) {
-    console.warn("snapshot:", falha);
+    // `NotConnected` não é falha: é a tela de entrada.
+    if (falha !== "NotConnected") console.warn("snapshot:", falha);
   }
-  const apelido = snapshot?.nickname ?? "";
+
+  let apelido = snapshot?.nickname ?? "";
+  if (!snapshot) {
+    try {
+      apelido = (await invoke("apelido_local")) ?? "";
+    } catch (falha) {
+      console.warn("apelido_local:", falha);
+    }
+  }
   $("perfil-apelido").value = apelido;
-  await desenharPrevia(snapshot?.me ?? 0, apelido);
+
+  // A imagem é do servidor, e sem servidor não há imagem a mostrar nem a
+  // escolher. Os dois botões somem em vez de recusar: um botão que recusa
+  // promete um caminho e o fecha depois do clique.
+  $("perfil-imagem").hidden = !snapshot;
+  if (snapshot) await desenharPrevia(snapshot.me ?? 0, apelido);
   $("perfil").hidden = false;
-  $("perfil-escolher").focus();
+  // Sem sessão o foco vai para o apelido, que é a única coisa editável ali.
+  ($("perfil-imagem").hidden ? $("perfil-apelido") : $("perfil-escolher")).focus();
   anunciar("Seu perfil. Escape fecha.");
 }
 
 /** Fecha, devolvendo o teclado. */
 function fecharPerfil() {
   $("perfil").hidden = true;
+  // O rodapé da entrada mostra o nome escolhido, e ele pode ter acabado de
+  // mudar. Redesenhar aqui é o que faz a caixa e o rodapé nunca discordarem.
+  if (typeof desenharPerfilDaEntrada === "function") {
+    desenharPerfilDaEntrada().catch(() => {});
+  }
   if (focavel(focoAntesDoPerfil)) focoAntesDoPerfil.focus();
   focoAntesDoPerfil = null;
 }
@@ -243,8 +274,20 @@ $("perfil-apelido").addEventListener("change", async () => {
     return;
   }
   $("perfil-erro").hidden = true;
+  // Com sessão, o comando de protocolo; sem ela, a preferência desta máquina.
+  //
+  // Dois `invoke` com o nome escrito, e **não um com o nome escolhido por
+  // ternário**: o `no_command_is_registered_and_never_called` varre os scripts
+  // procurando `invoke("nome")`, e um nome montado em tempo de execução é um
+  // comando que aquele guarda não vê. Ele reprovou aqui, e estava certo — a
+  // varredura é o que garante que nada fique registrado e inalcançável.
+  const naSessao = !$("perfil-imagem").hidden;
   try {
-    await invoke("escolher_apelido", { apelido: escolhido });
+    if (naSessao) {
+      await invoke("escolher_apelido", { apelido: escolhido });
+    } else {
+      await invoke("escolher_apelido_local", { apelido: escolhido });
+    }
     anunciar(`Agora você é ${escolhido}.`);
   } catch (falha) {
     console.warn("escolher_apelido:", falha);

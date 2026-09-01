@@ -15,146 +15,67 @@
 
 "use strict";
 
-/**
- * O estado da tentativa de conexão.
+/* `subsistemas` saiu com a sequência de boot animada da tela antiga.
  *
- * Um estado, e não três. Aqui havia um laço sobre `sub-permissions`,
- * `sub-media` e `sub-persistence`, que escrevia **a mesma coisa** nos três — e o
- * comentário desta função dizia o motivo em voz alta: saúde por subsistema não
- * existe no protocolo, o fato relatado é um só. Três nomes para um dado é
- * cenário se passando por instrumento, e o laço era a prova disso escrita em
- * código.
+ * Ela acendia uma marca por subsistema enquanto a conexão andava. A leitura de
+ * boot da 0.9.0 é fixa e verdadeira — diz o que o produto é, e não o que está
+ * acontecendo agora —, e o andamento da conexão continua sendo dito pelo
+ * `boot-etapa`, que é uma frase e não um enfeite. */
+
+/* `convitePendente` saiu na 0.9.0.
  *
- * A marca de texto continua sendo o que diz qual estado é qual, porque a cor
- * sozinha não pode (`specs/06-clientes-gui.md`), e o movimento continua durando
- * o tempo real da conexão e parando com ela.
- */
-function subsistemas(estado, marca) {
-  const alvo = $("boot-tentativa-marca");
-  alvo.textContent = marca;
-  alvo.parentElement.dataset.estado = estado;
-}
-
-/** O convite lido do último `seele://` colado, se houver. */
-let convitePendente = null;
-
-/**
- * A lista de servidores onde esta pessoa já esteve.
+ * Ele guardava o convite lido do campo da entrada até o momento de conectar — e
+ * um convite guardado é um convite que pode ser aplicado ao servidor errado, que
+ * é o que o `nenhum_convite_sobrevive_a_troca_de_servidor` cobrava em cada
+ * caminho de troca.
  *
- * Quem já entrou uma vez não deveria ter que redigitar um endereço IP. A lista
- * chega pronta do Rust, do mais recente para o mais antigo — a única ordem útil
- * numa lista de atalhos.
- */
-async function desenharVisitados() {
-  const lista = await invoke("conhecidos");
-  const secao = $("visitados");
-  // Sem visitados, a seção some inteira: a tela volta a ser exatamente a de
-  // antes desta seção existir, e o estado vazio não piora.
-  secao.hidden = lista.length === 0;
-  if (lista.length === 0) return;
+ * Agora o token viaja como argumento de `conectar`, dentro da mesma chamada em
+ * que foi lido. Não há o que sobreviver a nada. */
 
-  // O apelido da última visita vira o padrão do campo.
-  //
-  // `Conhecidos::listar` ordena do mais recente para o mais antigo, então o
-  // primeiro é o nome com que esta pessoa entrou por último. Sem isto o campo
-  // volta ao padrão da marcação a cada abertura do app — o nome estava gravado o tempo
-  // todo, e a tela é que não o lia.
-  //
-  // Só quando o campo ainda está como a marcação o deixou. `defaultValue` é
-  // exatamente essa pergunta, respondida pelo DOM: quem já digitou alguma coisa
-  // não tem o que digitou trocado por baixo.
-  const campo = $("campo-apelido");
-  if (campo.value === campo.defaultValue) campo.value = lista[0].apelido;
+/* `desenharVisitados` saiu com o formulário da entrada.
+ *
+ * A lista de visitados virou o diálogo `ONDE VOCÊ JÁ ESTEVE`, em
+ * `camada-servidores.js`, e lá ela ganhou o que não tinha: o nome de quando se
+ * esteve no servidor, há quanto tempo foi, e uma frase para quando está vazia. */
 
-  repovoar(
-    $("lista-visitados"),
-    lista.map((conhecido) => {
-      const linha = elemento("li", "visitado");
-      const ir = elemento("button", "visitado-ir", conhecido.alvo);
-      ir.type = "button";
-      ir.title = `entrar em ${conhecido.alvo} como ${conhecido.apelido}`;
-      ir.addEventListener("click", () => {
-        $("campo-servidor").value = conhecido.alvo;
-        $("campo-apelido").value = conhecido.apelido;
-        // Escolher da lista não é usar o convite colado.
-        limparConvite();
-        conectar();
-      });
-      const esquecer = elemento("button", "botao-fantasma", "esquecer");
-      esquecer.type = "button";
-      esquecer.addEventListener("click", async () => {
-        try {
-          await invoke("esquecer", { alvo: conhecido.alvo });
-        } catch (falha) {
-          // A lista não pôde ser reescrita — disco cheio, permissão. A linha
-          // continua ali, e dizer isso é melhor que uma promessa recusada em
-          // silêncio e uma linha que teima em voltar.
-          console.warn("esquecer:", falha);
-          const erro = $("boot-erro");
-          erro.hidden = false;
-          erro.textContent = "NÃO CONSEGUI REESCREVER A LISTA DE VISITADOS";
-        }
-        await desenharVisitados();
-      });
-      linha.append(
-        ir,
-        elemento("span", "visitado-apelido", conhecido.apelido),
-        elemento("span", "visitado-quando", quando(conhecido.visto_em)),
-        esquecer,
-      );
-      return linha;
-    }),
-  );
-}
+/* `lerConvite` e `limparConvite` saíram com o campo que liam.
+ *
+ * O `seele://` passou a ser aceito pelo mesmo campo que aceita o endereço, no
+ * diálogo de servidores — porque as duas coisas respondem à mesma pergunta, e
+ * duas caixas para ela eram duas chances de colar na errada. */
+
 
 /**
- * Lê o `seele://` colado no campo CONVITE.
+ * Onde e como se entrou por último.
  *
- * Quem lê o link é o Rust: um segundo analisador aqui seria um segundo conjunto
- * de casos de borda para discordar do primeiro. A confirmação de identidade que
- * o link carrega fica lá também, guardada até o `connect` conferi-la — o que
- * volta para cá é o veredito, depois, e nunca o valor a comparar.
+ * `conectar()` sem argumento significa **de novo, no mesmo lugar** — é o que a
+ * reconexão depois de uma queda pede, e o que a tela de fim chama. Sem esta
+ * memória, aqueles caminhos teriam de carregar o endereço por conta própria, e
+ * seriam três lugares guardando a mesma coisa.
  */
-async function lerConvite() {
-  const campo = $("campo-convite");
-  const link = campo.value.trim();
-  const erro = $("boot-erro");
-  if (link === "") {
-    limparConvite();
+let ultimoAlvo = null;
+let ultimoApelido = null;
+
+async function conectar(alvo, apelido, token) {
+  ultimoAlvo = alvo ?? ultimoAlvo;
+  ultimoApelido = apelido ?? ultimoApelido;
+  // O token **não** é lembrado: um convite de uso único vale uma vez, e
+  // reenviá-lo numa reconexão seria gastar de novo o que já foi gasto.
+  if (!ultimoAlvo) {
+    // Sem lugar nenhum a que voltar: quem chegou aqui apertou reconectar antes
+    // de ter entrado em algum lugar, e o diálogo é onde se escolhe.
+    abrirServidores().catch((falha) => console.warn("abrir servidores:", falha));
     return;
   }
-
-  try {
-    const convite = await invoke("analisar_convite", { link });
-    $("campo-servidor").value = convite.alvo;
-    convitePendente = convite;
-    erro.hidden = true;
-  } catch (falha) {
-    // O resto do formulário fica intacto: quem colou errado não perde o que já
-    // tinha digitado nos outros campos.
-    convitePendente = null;
-    // Revelar antes de escrever: `#boot-erro` é `role="alert"`, e um alerta
-    // escrito enquanto ainda está escondido não é anunciado por leitor de tela.
-    erro.hidden = false;
-    erro.textContent = fraseDeErro(falha);
-  }
-}
-
-/**
- * Esquece o convite colado, campo e tudo.
- *
- * O token vale para o servidor daquele link. Deixá-lo para trás numa troca de
- * endereço manda a credencial de um servidor para outro, que a recusa — e a
- * recusa aparece como "credencial rejeitada" num servidor que nunca pediu
- * credencial nenhuma.
- */
-function limparConvite() {
-  $("campo-convite").value = "";
-  convitePendente = null;
-}
-
-async function conectar(evento) {
-  evento?.preventDefault();
+  alvo = ultimoAlvo;
+  apelido = ultimoApelido ?? "";
+  // **Os valores chegam por argumento desde a 0.9.0.**
+  //
+  // Eles vinham de dois campos desta tela, e a comp tirou os dois: o endereço
+  // foi para o diálogo de servidores conhecidos, e o apelido para o perfil, que
+  // o grava nesta máquina. Manter os campos escondidos só para carregá-los
+  // seria guardar estado numa marcação que ninguém vê — e um campo invisível é
+  // onde um valor errado sobrevive sem ser notado.
   const botao = $("botao-conectar");
   const erro = $("boot-erro");
 
@@ -163,7 +84,6 @@ async function conectar(evento) {
   // A linha de CONEXÃO reporta enquanto a conexão acontece. Dura o tempo real
   // dela: `specs/06-clientes-gui.md` chama animação decorativa que atrasa o
   // usuário de falha de design.
-  subsistemas("carga", "…");
   // A linha de etapa nasce vazia a cada tentativa: a de uma conexão anterior
   // descreveria uma travessia que já acabou.
   mostrarEtapa(null);
@@ -173,17 +93,20 @@ async function conectar(evento) {
     // de ser. A segunda vem do mesmo `connect` porque é lá que ela é decidida —
     // um ouvinte inscrito depois chegaria sempre tarde.
     const { snapshot, veredito } = await invoke("connect", {
-      server: $("campo-servidor").value.trim(),
-      nickname: $("campo-apelido").value.trim(),
-      audio: $("campo-audio").checked,
+      server: alvo,
+      nickname: apelido,
+      // Sempre com áudio. A caixa de «entrar com áudio» saiu com a tela antiga,
+      // e quem não quer falar tem o microfone mudo no operador — que é
+      // reversível, e é o que se procura quando se muda de ideia. Uma sessão
+      // aberta sem áudio não ganha voz sem sair e entrar de novo.
+      audio: true,
       // O token do convite, quando o link trouxe um. `join_secret` do outro
       // lado: a ponte do Tauri converte para camelCase. A confirmação de
       // identidade do mesmo link não passa por aqui: ela ficou no Rust, que é
       // quem confere.
-      joinSecret: convitePendente?.token ?? null,
+      joinSecret: token ?? null,
     });
 
-    subsistemas("ok", "ok");
 
     // Daqui em diante quem manda é `#tela-auth`: o veredito da chave é lido
     // numa tela antes de se entrar em sala de voz nenhuma, e a entrada mudou de
@@ -191,9 +114,8 @@ async function conectar(evento) {
     // desenhada com o que o `connect` já devolveu — quem chegar nela não espera
     // o primeiro tique do laço de snapshot.
     desenhar(snapshot);
-    entrarNaAutenticacao(snapshot, veredito, $("campo-servidor").value.trim());
+    entrarNaAutenticacao(snapshot, veredito, alvo);
   } catch (falha) {
-    subsistemas("", "·");
     // `connect` responde por `ConnectFailure` desde esta tarefa: o erro de
     // sempre **mais a trilha**. Quem escreve a frase quer o erro; a trilha vai
     // para o console, que é onde alguém que está investigando a procura — «o
@@ -210,7 +132,7 @@ async function conectar(evento) {
     // uma falha que chega enquanto essa tela está na frente pertence a ela:
     // `#boot-erro` estaria escondido atrás. `levarParaAEspera` responde se
     // tratou a falha, e só o que sobra vira a linha vermelha daqui.
-    if (!levarParaAEspera(motivo, $("campo-servidor").value.trim())) {
+    if (!levarParaAEspera(motivo, ultimoAlvo ?? "")) {
       erro.hidden = false;
       erro.textContent = fraseDeErro(motivo);
     }
@@ -318,7 +240,10 @@ async function hospedar() {
 
   try {
     const anfitriao = await invoke("hospedar");
-    $("campo-servidor").value = anfitriao.aqui;
+    // Hospedar aqui é entrar aqui: o endereço da própria máquina vira o
+    // alvo da conexão que vem em seguida, e é o que `conectar()` sem argumento
+    // vai usar.
+    ultimoAlvo = anfitriao.aqui;
     $("convite-link").value = anfitriao.convite;
     mostrarAlcance(
       anfitriao.alcance,
@@ -349,14 +274,10 @@ async function hospedar() {
 
 // ------------------------------------------------------------------- ligação
 
-$("form-conectar").addEventListener("submit", conectar);
-$("campo-convite").addEventListener("change", lerConvite);
 // `paste` dispara antes de o valor entrar no campo; o tique seguinte já o tem.
-$("campo-convite").addEventListener("paste", () => setTimeout(lerConvite, 0));
 
 // Digitar outro endereço à mão desfaz o convite. `lerConvite` escreve neste
 // campo por código, e atribuição não dispara `input` — só o teclado chega aqui.
-$("campo-servidor").addEventListener("input", limparConvite);
 
 $("botao-hospedar").addEventListener("click", hospedar);
 
@@ -374,27 +295,43 @@ desenharVisitados().catch((falha) => console.warn("conhecidos:", falha));
 // exatamente o que aconteceu num teste de campo, e a única coisa que a tela
 // daquela pessoa dizia era «SEM ÁUDIO».
 
-/** Mostra o bloqueio do microfone, ou esconde quando não há o que dizer. */
-async function conferirMicrofone() {
-  const bloco = $("boot-microfone");
-  if (!bloco) return;
-  let permissao = "NaoSeSabe";
-  try {
-    permissao = await invoke("permissao_de_microfone");
-  } catch (falha) {
-    console.warn("permissao_de_microfone:", falha);
-  }
-  const dito = PERMISSAO_DE_MICROFONE[permissao];
-  bloco.hidden = !dito;
-  if (!dito) return;
-  $("boot-microfone-diz").textContent = dito.diz;
-  $("boot-microfone-nota").textContent = dito.nota;
-}
+/* `conferirMicrofone` saiu da entrada.
+ *
+ * Ela conferia o microfone antes de conectar, numa tela que a comp da 0.9.0
+ * dissolveu. O que ela fazia mora em CONFIGURAÇÕES · MICROFONE E SOM, com o
+ * medidor de entrada e a lista de aparelhos — alcançável da entrada pela
+ * engrenagem, e também de dentro de uma conversa, que é quando se descobre que
+ * a máquina abriu o microfone errado. */
 
-$("boot-microfone-ajustes").addEventListener("click", () => {
-  invoke("abrir_ajustes_do_microfone").catch((falha) =>
-    console.warn("abrir_ajustes_do_microfone:", falha),
-  );
+// ----------------------------------------------- as duas saídas da entrada
+//
+// `CONECTAR` abre onde se escolhe o servidor; `HOSPEDAR AQUI` faz desta máquina
+// o servidor. A comp da 0.9.0 põe as duas lado a lado e nada entre elas: a
+// entrada deixou de ser um formulário a preencher e virou uma pergunta de duas
+// respostas.
+
+$("botao-conectar").addEventListener("click", () => {
+  abrirServidores().catch((falha) => console.warn("abrir servidores:", falha));
 });
 
-conferirMicrofone().catch((falha) => console.warn("microfone:", falha));
+/** Desenha o perfil no rodapé da entrada: a inicial e o nome desta máquina. */
+async function desenharPerfilDaEntrada() {
+  let apelido = "";
+  try {
+    apelido = (await invoke("apelido_local")) ?? "";
+  } catch (falha) {
+    console.warn("apelido_local:", falha);
+  }
+  // Sem nome escolhido, o travessão — e não um exemplo. Um nome de exemplo no
+  // rodapé é um nome que a pessoa acha que já é o dela.
+  $("boot-perfil-nome").textContent = apelido || "—";
+  $("boot-perfil-inicial").textContent = (apelido || "?").trim().charAt(0).toUpperCase();
+}
+
+$("boot-perfil").addEventListener("click", () => {
+  abrirPerfil()
+    .then(desenharPerfilDaEntrada)
+    .catch((falha) => console.warn("abrir o perfil:", falha));
+});
+
+desenharPerfilDaEntrada().catch((falha) => console.warn("perfil da entrada:", falha));

@@ -2433,23 +2433,22 @@ async function trocarDeServidor(alvo, apelido) {
   //
   // O sintoma é cruel de depurar porque a recusa fala da coisa errada:
   // «credencial recusada» num servidor que não pediu credencial nenhuma.
-  limparConvite();
-  $("campo-servidor").value = alvo;
-  $("campo-apelido").value = apelido;
-  await conectar();
+  // Os valores vão por argumento desde a 0.9.0: a entrada não tem mais campos
+  // para carregá-los. Ver `conectar` em `tela-boot.js`.
+  await conectar(alvo, apelido);
 }
 
 /**
  * Sai para a entrada com o campo do endereço vazio.
  *
- * A diferença inteira entre o `+` e o `DESCONECTAR`, e ela é do formulário: quem
- * desconecta costuma voltar ao mesmo lugar e o endereço de lá continua no campo;
- * quem apertou «conectar a outro servidor» já disse que não é aquele, e um
- * endereço velho num formulário que promete um servidor novo é o começo de uma
- * conexão errada.
+ * A diferença entre o `+` e o `DESCONECTAR` era do formulário: quem desconecta
+ * costuma voltar ao mesmo lugar e o endereço continuava no campo; quem apertou
+ * «conectar a outro servidor» já disse que não é aquele.
  *
- * O cursor já está no campo: `ejetar` termina em `abrirTela("tela-boot")`, e o
- * `data-foco` daquela tela é este campo.
+ * **A entrada da 0.9.0 não tem campo**, e a distinção mudou de forma: os dois
+ * caminhos voltam à mesma tela, e quem quer outro servidor abre o diálogo de
+ * conhecidos — onde escolher outro é apertar uma linha, e não apagar um
+ * endereço que alguém deixou ali.
  */
 async function sairParaAEntrada() {
   await ejetar();
@@ -2457,7 +2456,6 @@ async function sairParaAEntrada() {
   // apertou «conectar a outro servidor» já disse que não é aquele, e o token
   // daquele não tem o que fazer no formulário do próximo.
   limparConvite();
-  $("campo-servidor").value = "";
 }
 
 /** Ejeta e volta para a tela de entrada, sem fechar o programa. */

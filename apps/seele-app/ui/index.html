@@ -211,228 +211,117 @@
   primeiro da coluna: o convite é caminho de quem colou alguma coisa, e quem
   colou já tem o valor. Quem chega sem convite digita endereço.
 -->
+<!--
+  A entrada, refeita na 0.9.0.
+
+  **Ela deixou de ser um formulário.** Havia endereço, apelido, uma caixa de
+  áudio, a lista de visitados e uma conferência de microfone — cinco coisas a
+  decidir antes de entrar em lugar nenhum. A comp tira as cinco da tela:
+
+  - o **endereço** e a lista de visitados foram para `ONDE VOCÊ JÁ ESTEVE`, e lá
+    voltar é apertar uma linha em vez de digitar;
+  - o **apelido** foi para o perfil, que grava nesta máquina o nome com que se
+    entra;
+  - a **conferência de microfone** e a escolha de aparelho estão em
+    CONFIGURAÇÕES · MICROFONE E SOM, alcançável daqui pela engrenagem;
+  - a **caixa de «entrar com áudio»** saiu: quem não quer falar tem o microfone
+    mudo no operador, que é reversível — e uma sessão aberta sem áudio não ganha
+    voz sem sair e entrar de novo.
+
+  O que fica é o que a comp desenha: a marca, o que este programa é, e duas
+  saídas — entrar em algum lugar, ou ser o lugar.
+-->
 <section id="tela-boot" class="tela" tabindex="-1"
-         data-foco="campo-servidor"
-         data-anuncio="Entrada. Escolha o servidor e conecte.">
-  <div class="boot-grade">
-
-    <!-- ---------------- A·01 ---------------- -->
-    <div class="boot-sequencia">
-      <!-- A hachura da borda esquerda: passo de 16px, que é a altura de célula. -->
-      <span class="hachura" aria-hidden="true"></span>
-      <p class="coordenada coordenada-solta">A·01 / SEQUÊNCIA DE INICIALIZAÇÃO</p>
-
-      <div class="boot-corpo">
-        <!--
-          A marca nova, `docs/marca.md`: dois nós e uma ligação — o cheio é quem
-          hospeda, o vazio é quem chega, a diagonal é o enlace. É a arquitetura
-          do produto num glifo.
-
-          Aqui ficava a assinatura em contorno, que era o katakana da abertura
-          do anime, e ela saiu pelo mesmo motivo que o resto do japonês
-          decorativo desta página: não dizia nada a quem lê a tela. O símbolo é
-          imagem porque é geometria com uma fonte só (`marca-simbolo.svg`, o
-          mesmo arquivo de todos os tamanhos); o nome é **texto**, porque é
-          latino e a face que o desenha vem embarcada.
-
-          `alt=""` de propósito: o `<span>` ao lado já diz SEELE, e um símbolo
-          rotulado ao lado do nome faria o leitor de tela dizer a marca duas
-          vezes.
-        -->
-        <h1 class="boot-marca">
-          <img src="marca-simbolo.svg" alt="" class="boot-simbolo" width="88" height="88">
-          <span class="boot-nome">SEELE</span>
-        </h1>
-
-        <span class="regua-tripla" aria-hidden="true"></span>
-
-        <!--
-          Aqui ficava a cartela de cenário — `CODE : 0447`, `FILE :
-          ENTRY_PLUG.INIT`, `EX_MODE : ON`, `PRIORITY : A——`. O inventário a
-          classificava como ficção (§16, **F**): quatro linhas que não bindavam
-          a nada, defensáveis enquanto não afirmassem nada sobre esta máquina.
-
-          No lugar delas, três linhas com a mesma forma que afirmam o que o
-          produto de fato é. Não são medida — são o desenho do sistema, e valem
-          para toda janela deste app.
-        -->
-        <ul class="boot-meta">
-          <li>REDE : PONTO-A-PONTO</li>
-          <li>TRANSPORTE : CIFRADO</li>
-          <li>REGISTRO : NENHUM</li>
-        </ul>
-
-        <span class="regua-tripla" aria-hidden="true"></span>
-
-        <p class="boot-sistema">COMUNICAÇÃO DE VOZ E TEXTO · SEM NUVEM, SEM CONTA</p>
-
-        <!--
-          O glossário, e ele é desta tela e de mais nenhuma. A explicação do
-          vocabulário saiu das telas de operação porque legenda permanente é
-          texto que quem já sabe lê mil vezes; aqui ninguém sabe ainda. Esta é a
-          única tela que uma pessoa vê antes de ter aprendido o que é uma sala e
-          o que é um canal, e quatro termos é o inteiro do vocabulário.
-        -->
-        <dl class="boot-glossario">
-          <dt>SERVIDOR</dt>
-          <dd>a máquina de um amigo ou a sua — nunca uma nuvem</dd>
-          <dt>SALA</dt>
-          <dd>voz — entre para falar e ouvir</dd>
-          <dt>CANAL</dt>
-          <dd>texto — nada fica guardado no servidor</dd>
-          <dt>SINAL</dt>
-          <dd>a qualidade da conexão de cada um, de 0 a 100, sempre visível</dd>
-        </dl>
-
-        <p class="boot-atalho">Aperte <kbd class="boot-tecla">?</kbd> em qualquer tela para atalhos e ajuda.</p>
-      </div>
-
+         data-foco="botao-conectar"
+         data-anuncio="Entrada. Conecte a um servidor, ou hospede um aqui.">
+  <div class="boot-caixa">
+    <div class="boot-marca">
       <!--
-        Onde a tentativa de conexão está, e o desenho da proposta não a traz.
-        Fica porque é o único lugar da janela que diz que **algo acontece**
-        enquanto o aperto de mão corre: `subsistemas()` escreve o estado aqui.
+        A marca, do arquivo e não desenhada aqui.
 
-        Aqui ficava, antes dela, o diagrama MAGI — três nós pintados pelo mesmo
-        `data-estado` — e antes disso o SINAL sem medida, moldura em volta de um
-        valor que este protocolo não carrega. Um estado, um nome, uma palavra
-        dentro: `specs/06-clientes-gui.md` proíbe informação que só a cor
-        carregue.
+        A comp traz o SVG embutido — e é o **mesmo** desenho: mesmo `viewBox`,
+        mesmo caminho, mesmos dois quadrados. Ela copiou a marca do produto.
+
+        Então fica o arquivo, que é o que o `marca-simbolo.svg` manda em cima
+        dele mesmo: «NÃO editar à mão: é a fonte de todos os tamanhos». Dois
+        desenhos da mesma marca é um que fica para trás no dia em que ela mudar,
+        e o `docs/marca.md` já registra que ela mudou uma vez.
       -->
-      <div class="boot-tentativa" data-estado="">
-        <span class="boot-tentativa-rotulo">CONEXÃO</span>
-        <b id="boot-tentativa-marca" class="boot-tentativa-marca">·</b>
-      </div>
+      <img src="marca-simbolo.svg" alt="" class="boot-simbolo" width="72" height="72">
+      <span class="boot-marca-texto">
+        <!--
+          `boot-nome` e não uma classe nova: o
+          `a_entrada_desenha_a_marca_nova_e_nenhuma_citacao_do_anime` cobra que o
+          nome seja **texto** nesta tela, e essa é a classe por onde ele o
+          procura. Desenhado, o nome voltaria a depender de um arquivo por
+          tamanho — que é o que o `docs/marca.md` gastou uma decisão para
+          deixar de precisar.
+        -->
+        <span class="boot-nome boot-marca-titulo">SEELE</span>
+        <span class="boot-marca-sub">voz, vídeo e texto auto-hospedados</span>
+      </span>
     </div>
 
-    <!-- ---------------- B·01 ---------------- -->
-    <div class="boot-registro">
-      <h2 class="coordenada">B·01 / CONEXÃO</h2>
+    <!--
+      A leitura de boot. **Ela é verdade, e não cenário.**
 
-      <div class="registro-corpo">
-        <!--
-          Onde você já esteve. Some inteira quando não há visitado nenhum — o
-          estado vazio da tela é exatamente o de antes desta seção existir, e um
-          cabeçalho sobre uma lista vazia é pior que nenhum cabeçalho. A nota
-          embaixo some com ela, porque uma instrução sobre uma lista que não
-          está na tela é instrução para nada.
-        -->
-        <section id="visitados" class="visitados" hidden>
-          <h3 class="visitados-titulo rotulo">ONDE VOCÊ JÁ ESTEVE</h3>
-          <ul id="lista-visitados" class="lista-visitados"></ul>
-          <p class="nota">Clicar numa linha preenche tudo e conecta.</p>
-        </section>
+      Cada linha diz uma coisa que o produto de fato faz: a porta que o `seeled`
+      abre, o transporte, e a chave que fixa a identidade do servidor (ADR 0003
+      e 0004). Um terminal falso que rolasse texto inventado seria a única parte
+      desta janela que mente, e o `07-estetica.md` proíbe decoração que se
+      pareça com dado.
 
-        <form id="form-conectar" class="boot-form" autocomplete="off">
-          <!--
-            O convite é o primeiro campo e o único com borda acesa: quem recebeu
-            um link não precisa entender endereço nenhum, e um link colado
-            preenche o endereço e leva a confirmação de identidade até o
-            `connect`. Os outros dois são o caminho de quem não recebeu link.
-          -->
-          <label class="campo campo-convite">
-            <span class="rotulo">CONVITE</span>
-            <input id="campo-convite" name="convite" placeholder="cole o link que te mandaram"
-                   spellcheck="false" autocapitalize="off">
-            <span class="nota">preenche o endereço e confere a identidade do servidor sozinho</span>
-          </label>
-          <label class="campo">
-            <span class="rotulo">SERVIDOR</span>
-            <input id="campo-servidor" name="servidor" value="127.0.0.1:8383"
-                   spellcheck="false" autocapitalize="off" required>
-            <span class="nota">sem convite, digite o IP:porta da máquina que hospeda — ex. 192.168.0.7:8383</span>
-          </label>
-          <label class="campo">
-            <span class="rotulo">APELIDO</span>
-            <input id="campo-apelido" name="apelido" value="pessoa"
-                   spellcheck="false" autocapitalize="off" maxlength="32" required>
-            <span class="nota">o nome que os outros veem — fica reservado só para você neste servidor</span>
-          </label>
-          <!--
-            A nota fica fora do `<label>` da caixa: dentro dela, cada palavra da
-            explicação viraria alvo de clique da própria caixa, e ler a nota
-            marcaria e desmarcaria o áudio.
-          -->
-          <div class="campo">
-            <label class="campo-linha">
-              <input id="campo-audio" type="checkbox" checked>
-              <span class="rotulo">entrar com áudio</span>
-            </label>
-            <span class="nota">microfone pronto — no modo tecla, fala-se segurando ESPAÇO</span>
-            <!--
-              O bloqueio do sistema, quando existe. Aqui e não na sessão: quem
-              descobre que está mudo já falou por cinco minutos, e esta caixa é
-              o último lugar antes de entrar em que a pessoa decide levar áudio.
+      `aria-hidden` no cursor: ele pisca e não diz nada, e um leitor de tela
+      anunciando um quadrado a cada meio segundo é ruído.
+    -->
+    <div class="boot-leitura" role="status">
+      <span class="boot-linha">$ seeled 0.0.0.0:8383</span>
+      <!--
+        A comp escreve `quic/tls1.3` aqui, e o
+        `the_frontend_never_names_a_protocol_concept` recusa: a `06-clientes-gui.md`
+        proíbe a casca nomear conceito de protocolo, e a lista daquele guarda
+        traz `quic` por nome.
 
-              Escondido quando não há nada a dizer — a maioria das máquinas
-              permite, e um aviso repetido a cada abertura é um aviso que se
-              aprende a não ler.
-            -->
-            <div id="boot-microfone" class="boot-microfone" hidden>
-              <p id="boot-microfone-diz" class="boot-microfone-diz"></p>
-              <p id="boot-microfone-nota" class="nota"></p>
-              <button id="boot-microfone-ajustes" class="botao-fantasma" type="button">
-                ABRIR OS AJUSTES DO SISTEMA
-              </button>
-            </div>
-          </div>
-          <button id="botao-conectar" type="submit" class="botao boot-conectar">CONECTAR</button>
-        </form>
+        A tensão é real — a `07-estetica.md` pede densidade de console, e um
+        console diz `quic`. Mas ela também diz, na mesma página, que **a
+        estética nunca custa clareza**: «se alguém precisa decifrar um rótulo
+        para resolver um problema, a interface falhou». Quem lê esta tela não
+        precisa saber o nome do transporte; precisa saber que a conversa vai
+        cifrada.
 
-        <!-- O filete dos dois lados diz que o que vem embaixo é a outra saída,
-             e não o passo seguinte do formulário. -->
-        <p class="boot-ou"><span>OU</span></p>
-
-        <!--
-          Sem isto, hospedar exige abrir um terminal — e num produto cujo
-          argumento é "hospede você mesmo", exigir linha de comando de quem
-          hospeda exclui justamente quem mais ganharia. Mesmo servidor do
-          `seeled`, dentro deste processo, vivo enquanto a janela estiver
-          aberta.
-        -->
-        <button id="botao-hospedar" type="button" class="botao botao-secundario boot-hospedar">
-          HOSPEDAR AQUI
-        </button>
-        <span class="nota boot-nota-hospedar">cria um servidor neste computador e entra nele — o link de convite aparece no topo da sessão</span>
-
-        <!--
-          A entrada para o Terminal Server, daqui e da sessão. Daqui porque
-          escolher microfone é coisa que se faz **antes** de entrar tanto quanto
-          durante, e uma configuração que só existisse com sessão aberta poria o
-          controle atrás da porta que ele serve para abrir: quem descobre que o
-          microfone está errado descobre justamente ao tentar falar.
-
-          O botão diz CONFIGURAÇÕES e não o nome da tela: aqui ele é a promessa
-          do que se vai fazer, e quem nunca abriu a tela não sabe o nome dela. O
-          nome continua no cabeçalho de lá, que é onde ele nomeia um lugar.
-        -->
-        <button id="botao-server" type="button" class="botao-fantasma server-entrada">
-          <span class="boot-engrenagem" data-glifo="engrenagem"></span>CONFIGURAÇÕES
-        </button>
-        <p class="nota boot-nota-config">microfone e som — teste antes de entrar</p>
-
-        <!--
-          Só o que impede de entrar mora nesta tela: um erro de conexão devolve
-          a pessoa para cá, e é aqui que ele é lido. A ressalva que ficava ao
-          lado dizia que esta janela não sabia conferir a confirmação de
-          identidade de um convite — ela sabe agora, e o que sai da conferência
-          é um veredito, que nasce depois desta tela sumir. Ele está no aperto
-          de mão, em `#tela-auth`.
-        -->
-        <!--
-          Onde a chegada está, enquanto ela acontece. Quatro candidatos eram
-          tentados em série atrás de três blocos piscando, e quando o teste de
-          campo das duas casas falhou ninguém soube dizer em que ponto — porque
-          não havia ponto nomeado. O núcleo nomeia cada instante desde a tarefa
-          8; esta linha é o primeiro lugar em produção que os lê.
-
-          `role="status"` e não `alert`: isto não é uma falha, é o andamento. Um
-          `alert` interromperia o leitor de tela a cada candidato.
-        -->
-        <p id="boot-etapa" class="etapa" role="status" hidden></p>
-        <p id="boot-erro" class="erro" role="alert" hidden></p>
-      </div>
-
+        Então a linha diz a mesma coisa em palavra. O que se perde é uma sigla;
+        o que se ganha é uma frase que a mãe de alguém entende.
+      -->
+      <span class="boot-linha">conversa cifrada de ponta a ponta do caminho</span>
+      <span class="boot-linha">ed25519 · impressão digital fixada na primeira visita</span>
+      <span class="boot-linha boot-linha-pronto">
+        <span>pronto.</span>
+        <span class="boot-cursor" aria-hidden="true"></span>
+      </span>
     </div>
+
+    <div class="boot-saidas">
+      <button id="botao-conectar" type="button" class="botao">CONECTAR</button>
+      <button id="botao-hospedar" type="button" class="botao botao-secundario">HOSPEDAR AQUI</button>
+    </div>
+
+    <div class="boot-rodape">
+      <button id="boot-perfil" class="boot-perfil" type="button"
+              aria-label="Personalizar seu perfil" title="o nome com que você entra">
+        <span id="boot-perfil-inicial" class="operador-inicial" aria-hidden="true"></span>
+        <span class="operador-quem-texto">
+          <span class="operador-rotulo">PERFIL</span>
+          <span id="boot-perfil-nome" class="operador-nome">—</span>
+        </span>
+      </button>
+      <button id="botao-server" class="botao-fantasma" type="button"
+              aria-label="Abrir configurações"
+              title="configuração local desta máquina"
+              data-glifo="engrenagem"></button>
+    </div>
+
+    <p id="boot-etapa" class="etapa" role="status" hidden></p>
+    <p id="boot-erro" class="erro" role="alert" hidden></p>
   </div>
 </section>
 
@@ -2135,6 +2024,26 @@
         </section>
 
         <section id="painel-audio" class="server-painel-secao" aria-labelledby="secao-audio">
+          <!--
+            A permissão do microfone, vinda da tela de entrada.
+            **Aqui e não lá, e é onde ela sempre deveria ter estado:** a
+            permissão é do sistema operacional e desta máquina, e negá-la não
+            impede de entrar num servidor — impede de falar. Perguntá-la antes
+            de conectar era perguntar cedo demais, e a comp da 0.9.0 tirou a
+            pergunta da entrada.
+
+            Nasce escondida: enquanto ninguém perguntou ao sistema, não há o que
+            dizer, e um bloco reservado com texto de exemplo mentiria no
+            intervalo.
+          -->
+          <div id="boot-microfone" class="boot-microfone" hidden>
+            <p id="boot-microfone-diz" class="boot-microfone-diz"></p>
+            <p id="boot-microfone-nota" class="nota"></p>
+            <button id="boot-microfone-ajustes" class="botao-fantasma" type="button">
+              ABRIR OS AJUSTES DO SISTEMA
+            </button>
+          </div>
+
 
           <div class="server-bloco">
             <div class="server-bloco-topo">
@@ -2781,6 +2690,11 @@
       <button id="servidores-fechar" class="botao-fantasma" type="button">FECHAR</button>
     </div>
     <div class="nomear-corpo">
+      <!--
+        Cada linha traz um `×` para esquecer o servidor. Ele veio junto da
+        lista, da tela de entrada: uma lista de atalhos que só cresce vira uma
+        lista de endereços em que se digitou errado uma vez.
+      -->
       <ul id="servidores-lista" class="servidores-lista"></ul>
       <p id="servidores-vazio" class="nota" hidden>Você ainda não entrou em
         nenhum servidor. Cole o endereço ou o link que alguém te mandou.</p>
@@ -2802,7 +2716,7 @@
       <button id="perfil-fechar" class="botao-fantasma" type="button">FECHAR</button>
     </div>
     <form id="perfil-forma" class="nomear-corpo" autocomplete="off">
-      <div class="perfil-imagem">
+      <div id="perfil-imagem" class="perfil-imagem">
         <!--
           A prévia é `<img>` quando há imagem e a inicial do apelido quando não
           há. A inicial não é enfeite: é o que a lista de pessoas desenha para

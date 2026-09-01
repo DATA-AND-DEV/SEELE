@@ -1217,6 +1217,37 @@ async fn escolher_minha_imagem(
     Ok(true)
 }
 
+/// O apelido com que se entra, guardado nesta máquina.
+///
+/// **Antes de haver servidor.** A tela de entrada da 0.9.0 não tem campo de
+/// apelido: ele mora no perfil, que se abre sem sessão nenhuma, e um nome
+/// escolhido ali não tem onde ser gravado a não ser em disco.
+///
+/// O apelido **do servidor** é outra coisa: cada um guarda o seu, único, e
+/// trocá-lo lá é [`escolher_apelido`]. Este é o que se leva ao entrar.
+#[tauri::command]
+fn apelido_local(app: AppHandle) -> Option<String> {
+    preferencias(&app).and_then(|p| p.nickname().map(str::to_owned))
+}
+
+/// Escreve o apelido de entrada nesta máquina.
+///
+/// # Errors
+///
+/// [`FalhaAoEscolher::NaoGravei`] se o disco recusar.
+#[tauri::command]
+fn escolher_apelido_local(app: AppHandle, apelido: String) -> Result<(), FalhaAoEscolher> {
+    let Some(mut ajustes) = preferencias(&app) else {
+        return Err(FalhaAoEscolher::NaoGravei);
+    };
+    ajustes
+        .set_nickname(Some(apelido.trim()).filter(|nome| !nome.is_empty()))
+        .map_err(|erro| {
+            tracing::warn!(%erro, "não consegui gravar o apelido");
+            FalhaAoEscolher::NaoGravei
+        })
+}
+
 /// Troca o seu apelido.
 ///
 /// O histórico não muda: cada mensagem guarda o nome de quem a escreveu no
@@ -2704,6 +2735,8 @@ fn main() {
             escolher_icone_do_server,
             escolher_minha_imagem,
             escolher_apelido,
+            apelido_local,
+            escolher_apelido_local,
             tirar_minha_imagem,
             imagem_da_pessoa,
             tirar_icone_do_server,

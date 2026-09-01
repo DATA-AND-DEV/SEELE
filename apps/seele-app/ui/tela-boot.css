@@ -397,3 +397,136 @@
   letter-spacing: var(--seele-tracking-cartela);
   color: var(--seele-laranja-nerv);
 }
+
+/* ---------------------------------------------- a entrada da 0.9.0
+ *
+ * Ela deixou de ser um formulário e virou uma pergunta de duas respostas. A
+ * caixa é centrada e estreita — 480px, da comp —, porque não há nada a
+ * comparar lado a lado: o que se escolhe aqui é entrar ou hospedar. */
+
+.boot-caixa {
+  margin: auto;
+  width: 480px;
+  max-width: 100%;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  border: 1px solid var(--seele-linha-forte);
+  background: var(--seele-negro-painel);
+}
+
+.boot-marca {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.boot-simbolo { flex: 0 0 auto; }
+
+.boot-marca-texto {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.boot-marca-titulo {
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 40px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: var(--seele-laranja-nerv);
+}
+
+.boot-marca-sub {
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--seele-rotulo-painel);
+}
+
+/* A leitura de boot: monoespaçada e apagada, porque é o que o produto é e não
+   o que ele está fazendo. Ela não pisca nem rola — ver a nota no `index.html`
+   sobre por que ela é verdade e não cenário. */
+.boot-leitura {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--seele-linha);
+  background: var(--seele-negro-absoluto);
+}
+
+.boot-linha {
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--seele-osso-apagado);
+}
+
+.boot-linha-pronto {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--seele-fosforo);
+}
+
+/* O cursor pisca, e é a única animação desta tela.
+ *
+ * `07-estetica.md`: movimento é diagnóstico, nunca decorativo — e este diz uma
+ * coisa, que o programa está pronto e esperando. Sob `prefers-reduced-motion`
+ * ele para **sem sumir**, que é a regra que a varredura já segue: parado ele
+ * continua sendo o cursor. */
+.boot-cursor {
+  width: 7px;
+  height: 14px;
+  background: var(--seele-fosforo);
+  animation: boot-cursor 1s steps(1) infinite;
+}
+
+@keyframes boot-cursor {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boot-cursor { animation: none; }
+}
+
+.boot-saidas {
+  display: flex;
+  gap: 8px;
+}
+
+.boot-saidas > button { flex: 1; }
+
+/* O rodapé: quem você é, e os ajustes desta máquina. Separado por um filete
+   porque é outra coisa — não é uma terceira saída. */
+.boot-rodape {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--seele-linha);
+}
+
+.boot-perfil {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.boot-perfil:hover .operador-inicial {
+  color: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
+}

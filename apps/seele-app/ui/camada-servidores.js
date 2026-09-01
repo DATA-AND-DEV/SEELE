@@ -73,7 +73,17 @@ async function desenharServidores() {
         elemento("span", "servidor-visto", quandoFoi(conhecido.visto_em)),
       );
       botao.title = `entrar em ${nome} como ${conhecido.apelido || "você mesmo"}`;
-      return item.appendChild(botao).parentNode;
+      item.append(botao);
+
+      // O esquecer, **fora** do botão que entra: um `<button>` dentro de outro
+      // não é marcação válida, e o alvo de cada gesto tem de ser só o seu.
+      const esquecer = elemento("button", "servidor-esquecer", "×");
+      esquecer.type = "button";
+      esquecer.dataset.esquecer = conhecido.alvo;
+      esquecer.title = `esquecer ${nome}`;
+      esquecer.setAttribute("aria-label", `Esquecer ${nome}`);
+      item.append(esquecer);
+      return item;
     }),
   );
 }
@@ -104,7 +114,20 @@ function recusarServidor(frase) {
 }
 
 // Uma linha da lista: entra naquele servidor, com o apelido daquela vez.
-$("servidores-lista").addEventListener("click", (evento) => {
+$("servidores-lista").addEventListener("click", async (evento) => {
+  // O esquecer primeiro: ele está dentro do mesmo `<li>` que a linha, e
+  // procurar a linha antes o pegaria como se fosse ela.
+  const esquecer = evento.target.closest("button[data-esquecer]");
+  if (esquecer) {
+    try {
+      await invoke("esquecer", { alvo: esquecer.dataset.esquecer });
+      anunciar("Servidor esquecido.");
+    } catch (falha) {
+      console.warn("esquecer:", falha);
+    }
+    await desenharServidores();
+    return;
+  }
   const linha = evento.target.closest("button[data-alvo]");
   if (!linha) return;
   fecharServidores();
@@ -123,10 +146,15 @@ $("servidores-forma").addEventListener("submit", async (evento) => {
   $("servidores-erro").hidden = true;
 
   let alvo = escrito;
+  let token = null;
   if (escrito.startsWith("seele://")) {
     try {
       const convite = await invoke("analisar_convite", { link: escrito });
       alvo = convite.alvo;
+      // **O token vem junto, e é a metade que faz o link valer.** Um
+      // `seele://` com convite de uso único é uma credencial; ler só o
+      // endereço dele é chegar sem ela, e o servidor recusa na porta.
+      token = convite.token ?? null;
     } catch (falha) {
       console.warn("analisar_convite:", falha);
       recusarServidor(fraseDeErro(falha));
@@ -134,7 +162,7 @@ $("servidores-forma").addEventListener("submit", async (evento) => {
     }
   }
   fecharServidores();
-  irParaOServidor(alvo, null);
+  irParaOServidor(alvo, null, token);
 });
 
 $("servidores-fechar").addEventListener("click", fecharServidores);
@@ -165,13 +193,15 @@ window.addEventListener(
  * O apelido vem junto quando se sabe — é o daquela visita, gravado com o
  * servidor. Sem ele, o campo da entrada decide.
  */
-function irParaOServidor(alvo, apelido) {
+function irParaOServidor(alvo, apelido, token) {
   const naSessao = !$("tela-sessao").hidden;
   if (naSessao) {
     pedirTrocaDeServidor(alvo, apelido || undefined);
     return;
   }
-  $("campo-servidor").value = alvo;
-  if (apelido) $("campo-apelido").value = apelido;
-  conectar().catch((falha) => console.warn("conectar:", falha));
+  // O apelido daquela visita quando se sabe; senão o desta máquina, que é o
+  // que o perfil grava antes de haver servidor.
+  Promise.resolve(apelido || invoke("apelido_local"))
+    .then((nome) => conectar(alvo, (nome || "").trim() || "pessoa", token))
+    .catch((falha) => console.warn("conectar:", falha));
 }

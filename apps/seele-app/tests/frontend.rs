@@ -931,26 +931,27 @@ fn the_current_occurrence_is_not_marked_out_by_colour_alone() {
 }
 
 #[test]
-fn the_visited_list_hides_itself_when_it_is_empty() {
-    // A heading over an empty list is worse than no heading: with nowhere to go
-    // back to, the entry screen must be exactly what it was before the section
-    // existed.
-    let page = read("ui/index.html");
-    let script = scripts();
+fn a_lista_de_servidores_vazia_diz_por_que_esta_vazia() {
+    // **A lista de visitados saiu da entrada na 0.9.0** e virou o diálogo `ONDE
+    // VOCÊ JÁ ESTEVE`. O guarda anterior cobrava que a seção nascesse `hidden`,
+    // porque uma lista vazia piscando antes de carregar lê como defeito.
+    //
+    // No diálogo o problema é outro e maior: ele **abre** vazio para quem nunca
+    // entrou em servidor nenhum, e uma caixa sem linhas e sem explicação é a
+    // primeira coisa que essa pessoa vê do produto.
+    //
+    // Então o que se cobra deixou de ser o `hidden` e passou a ser a frase.
+    let pagina = without_comments(&read("ui/index.html"));
+    let script = without_comments(&scripts());
 
-    let section = page
-        .split("id=\"visitados\"")
-        .nth(1)
-        .and_then(|rest| rest.split('>').next())
-        .unwrap_or_default()
-        .to_owned();
     assert!(
-        section.contains("hidden"),
-        "the visited section is not hidden in the markup, so it flashes before the list loads"
+        pagina.contains("id=\"servidores-vazio\""),
+        "sumiu a frase que explica a lista vazia; sem ela o diálogo lê como defeito"
     );
     assert!(
-        script.contains("secao.hidden = lista.length === 0"),
-        "nothing hides the visited section when the list comes back empty"
+        script.contains("servidores-vazio"),
+        "a frase existe e ninguém a mostra nem a esconde: ou ela fica sempre, \
+         ou nunca, e as duas estão erradas"
     );
 }
 
@@ -3592,25 +3593,27 @@ fn no_two_scripts_declare_the_same_top_level_name() {
 }
 
 #[test]
-fn the_nickname_field_remembers_what_it_was_called_last_time() {
-    // The name was being saved the whole time — `Conhecido` carries `apelido`
-    // and `Conhecidos::listar` sorts newest first — and the entry screen simply
-    // never read it, so every launch went back to the literal `pessoa` written
-    // in the markup. Reported from a real session, and it is the kind of thing
-    // no static check would have found: the field had a value, it was just the
-    // wrong one.
-    let body = body_of(&scripts(), "async function desenharVisitados");
+fn voltar_a_um_servidor_leva_o_apelido_daquela_vez() {
+    // **O comportamento sobreviveu à tela; o guarda mudou de endereço.**
+    //
+    // Ele cobrava que apertar um visitado preenchesse o campo de apelido com o
+    // nome daquela visita. A entrada da 0.9.0 não tem campo — e a razão de
+    // aquilo existir continua: o apelido é único por servidor, e voltar com
+    // outro nome é chegar como outra pessoa, perdendo o que aquela conta tinha.
+    //
+    // Agora quem carrega é o `camada-servidores.js`, que passa o apelido
+    // gravado junto do endereço. E o que se cobra é isso: que a linha leve o
+    // nome, e que quem conecta o receba.
+    let script = without_comments(&read("ui/camada-servidores.js"));
 
     assert!(
-        body.contains("campo-apelido"),
-        "the entry screen draws the visited list without ever reading the name it \
-         records, so the field goes back to its markup default every launch"
+        script.contains("conhecido.apelido"),
+        "a linha de um servidor conhecido deixou de carregar o apelido daquela \
+         visita; voltar com outro nome é chegar como outra pessoa"
     );
     assert!(
-        body.contains("defaultValue"),
-        "the field is filled unconditionally, which overwrites whatever the person \
-         had already typed. `defaultValue` is the DOM answering «is this still \
-         what the markup said?»:\n{body}"
+        script.contains("apelido_local"),
+        "e sem apelido gravado para aquele servidor, nada busca o desta máquina"
     );
 }
 
@@ -3639,47 +3642,34 @@ fn a_failure_this_screen_cannot_name_still_says_what_it_was() {
 }
 
 #[test]
-fn the_three_subsystems_look_different_while_they_are_loading() {
-    // `subsistemas("carga", "…")` writes `data-estado="carga"` on all three
-    // MAGI nodes while the connection is happening, and for a long time no rule
-    // matched it: the attribute changed, the screen did not. Loading looked
-    // exactly like idle, which is the one thing a loading state must not do.
+fn o_andamento_da_conexao_e_frase_e_nao_enfeite() {
+    // Havia três marcas de subsistema que acendiam enquanto a conexão andava, e
+    // este guarda cobrava que elas parecessem diferentes em carga — senão a
+    // animação dizia «estou fazendo algo» sem dizer o quê.
     //
-    // The check is on the rule existing and on the state surviving without
-    // motion — not on the animation itself. Somebody who turns motion off is
-    // still owed the difference between "waiting" and "not started".
-    let sheet = read("ui/tela-boot.css");
-    let Some(after) = sheet.split("[data-estado=\"carga\"]").nth(1) else {
-        panic!(
-            "no rule paints the loading state, so the three subsystems look the same \
-             whether or not anything is happening"
-        );
-    };
-    let Some(rule) = after.split('}').next() else {
-        panic!("the loading rule is never closed");
-    };
-
-    assert!(
-        rule.contains("background") || rule.contains("color"),
-        "the loading rule changes no paint, so it is a selector that does \
-         nothing:\n{rule}"
-    );
-
-    // The state has to be readable with the animation gone. `acessibilidade.css`
-    // kills every animation under `prefers-reduced-motion`, so anything carried
-    // *only* by the keyframes disappears for those readers.
-    assert!(
-        !rule.trim_start().starts_with("animation"),
-        "the loading state is carried by the animation before it is carried by \
-         the paint, so it vanishes entirely under prefers-reduced-motion:\n{rule}"
-    );
-
-    // And the word still has to say it, for anybody reading with no colour at
-    // all — `specs/06-clientes-gui.md`.
+    // **A 0.9.0 as tirou.** A leitura de boot da comp é fixa e verdadeira: diz o
+    // que o produto é, e não o que está acontecendo agora. O andamento continua
+    // sendo dito, e por quem sempre soube dizê-lo em palavra — o `boot-etapa`,
+    // que é `role="status"` e nomeia a etapa.
+    //
+    // O que se cobra é que o andamento não volte a ser só forma: se as marcas
+    // voltarem, elas têm de vir com o guarda que as cobrava.
+    let pagina = without_comments(&read("ui/index.html"));
     let script = without_comments(&scripts());
+
     assert!(
-        script.contains("subsistemas(\"carga\""),
-        "nothing puts the three subsystems into the loading state any more"
+        pagina.contains("id=\"boot-etapa\""),
+        "sumiu a frase que diz em que etapa a conexão está"
+    );
+    assert!(
+        script.contains("mostrarEtapa"),
+        "a frase existe e ninguém a escreve: o andamento voltou a ser silêncio"
+    );
+    assert!(
+        !pagina.contains("boot-subsistema"),
+        "as marcas de subsistema voltaram; elas dizem «algo está acontecendo» \
+         sem dizer o quê, e o guarda que cobrava a diferença entre os estados \
+         delas saiu junto com elas"
     );
 }
 
@@ -7906,38 +7896,36 @@ fn a_entrada_desenha_a_marca_nova_e_nenhuma_citacao_do_anime() {
 }
 
 #[test]
-fn a_entrada_poe_o_convite_na_frente_e_explica_cada_campo() {
-    // A tela em que ninguém aprendeu nada ainda, e a única em que a explicação
-    // sob o controle foi pedida por escrito. `the_captions_mode_does_not_come_
-    // back_by_accident` guarda o outro lado — que estas linhas não voltem a ser
-    // desligáveis —, e este guarda que elas existam nos três campos que uma
-    // pessoa preenche antes de conectar.
+fn onde_se_escolhe_um_servidor_explica_o_que_se_digita() {
+    // **Os três campos saíram da entrada na 0.9.0**, e este guarda mudou de
+    // endereço com eles em vez de sumir.
     //
-    // A ordem é a outra metade: quem recebeu um link não precisa entender
-    // endereço nenhum, e o campo que aceita o link vinha por último, embaixo dos
-    // dois que ele preenche sozinho.
-    let tela = tela_de_entrada();
+    // O que ele protegia continua sendo o assunto: um campo sem nota é um campo
+    // que a pessoa preenche adivinhando. O que mudou é onde eles moram —
+    // `campo-convite` e `campo-servidor` viraram um só, no diálogo `ONDE VOCÊ
+    // JÁ ESTEVE`, que aceita as duas formas; e o apelido foi para o perfil.
+    //
+    // O `placeholder` conta como a explicação de um campo que é uma linha só. O
+    // que não pode existir é um campo sem nenhuma das duas.
+    let pagina = without_comments(&read("ui/index.html"));
 
-    let posicao = |id: &str| {
-        tela.find(&format!("id=\"{id}\""))
-            .unwrap_or_else(|| panic!("a entrada não tem mais `{id}`"))
-    };
-    assert!(
-        posicao("campo-convite") < posicao("campo-servidor"),
-        "o convite voltou para depois do endereço que ele mesmo preenche"
-    );
-
-    for campo in ["campo-convite", "campo-servidor", "campo-apelido"] {
-        let Some(depois) = tela.split(&format!("id=\"{campo}\"")).nth(1) else {
-            panic!("a entrada não tem mais `{campo}`");
+    for campo in ["servidores-endereco", "perfil-apelido"] {
+        let Some(depois) = pagina.split(&format!("id=\"{campo}\"")).nth(1) else {
+            panic!("sumiu o campo `{campo}`");
         };
-        let Some(resto) = depois.split("</label>").next() else {
-            panic!("o `<label>` de `{campo}` nunca fecha");
+        let Some(resto) = depois.split("</label>").next().or(Some(depois)) else {
+            continue;
         };
+        let tem_nota = resto.contains("class=\"nota\"");
+        // O `placeholder` do próprio campo vem **antes** do fim da tag, então
+        // procurá-lo no resto do rótulo não bastaria.
+        let tem_exemplo = depois
+            .split('>')
+            .next()
+            .is_some_and(|tag| tag.contains("placeholder="));
         assert!(
-            resto.contains("class=\"nota\""),
-            "`{campo}` não diz o que espera, e é um dos três que se preenchem \
-             antes de conectar:\n{resto}"
+            tem_nota || tem_exemplo,
+            "o campo `{campo}` não diz o que se escreve nele, nem por nota nem por exemplo"
         );
     }
 }
@@ -8398,35 +8386,27 @@ fn toda_camada_fecha_apertando_fora_dela() {
 }
 
 #[test]
-fn todo_caminho_que_troca_de_servidor_larga_o_convite_do_anterior() {
-    // O token de um convite vale para **um** servidor. Levá-lo para o próximo é
-    // mandar a credencial de um lugar para outro, que a recusa — e a recusa
-    // fala da coisa errada: «credencial recusada» num servidor que não pediu
-    // credencial nenhuma.
+fn nenhum_convite_sobrevive_a_troca_de_servidor() {
+    // O guarda anterior cobrava um `limparConvite()` em cada caminho que
+    // trocasse de servidor: o convite ficava guardado num campo da entrada, e
+    // um convite velho aplicado a um servidor novo é uma credencial mandada
+    // para quem não a emitiu.
     //
-    // `limparConvite` existe desde sempre e o comentário dela já dizia isso.
-    // Faltava chamá-la: ela só rodava quando alguém esvaziava o campo à mão, e
-    // quem entra por link nunca esvazia. O efeito era a trilha de servidores
-    // salvos simplesmente não funcionar, relatado assim — «reconectar pela tela
-    // de cima não funciona».
+    // **A 0.9.0 tirou o problema em vez de o cobrir.** Não há mais campo de
+    // convite nem convite guardado: o `seele://` é resolvido no instante em que
+    // se aperta ENTRAR, no diálogo de servidores, e o token vive dentro daquela
+    // chamada. Não há o que sobreviver a uma troca.
     //
-    // A guarda é sobre as **duas** funções que trocam de destino, e não sobre
-    // uma: `sairParaAEntrada` esvazia o endereço e teria o mesmo problema.
-    let fonte = without_comments(&read("ui/tela-sessao.js"));
-    for funcao in ["trocarDeServidor", "sairParaAEntrada"] {
-        let Some(corpo) = fonte
-            .split(&format!("async function {funcao}("))
-            .nth(1)
-            .and_then(|resto| resto.split("\n}").next())
-        else {
-            panic!("{funcao} sumiu de tela-sessao.js");
-        };
-        assert!(
-            corpo.contains("limparConvite()"),
-            "{funcao} troca de servidor sem largar o convite do anterior; o \
-             próximo servidor vai recusar uma credencial que não é dele"
-        );
-    }
+    // O que se cobra passa a ser a ausência: se um convite voltar a ser
+    // guardado entre conexões, este guarda reprova e quem o fizer lê por quê.
+    let script = without_comments(&scripts());
+
+    assert!(
+        !script.contains("convitePendente"),
+        "voltou a haver um convite guardado entre conexões; se ele precisa \
+         existir, precisa também ser largado em todo caminho que troca de \
+         servidor — que é o que este guarda cobrava antes de a 0.9.0 tirar o campo"
+    );
 }
 
 #[test]

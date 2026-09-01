@@ -341,6 +341,7 @@ async function abrirServer(origem) {
   // A tecla gravada, relida a cada abertura: ela pode ter sido trocada noutra
   // janela, e a lista de atalhos que mente é o defeito que esta linha impede.
   recarregarTeclaDeFalar().then(desenharTeclaDeFalar);
+  conferirMicrofone().catch((falha) => console.warn("microfone:", falha));
   // A recusa da seção do servidor some junto: ela é sobre o arquivo que alguém
   // escolheu da última vez, e reabrir a tela não é tentar de novo.
   $("server-servidor-erro").hidden = true;
@@ -988,6 +989,7 @@ function pararDeOuvirTecla() {
   const botao = $("server-tecla-falar");
   if (botao) delete botao.dataset.ouvindo;
   recarregarTeclaDeFalar().then(desenharTeclaDeFalar);
+  conferirMicrofone().catch((falha) => console.warn("microfone:", falha));
 }
 
 if ($("server-tecla-falar")) {
@@ -1028,3 +1030,36 @@ if ($("server-tecla-falar")) {
     if (ouvindoTecla) pararDeOuvirTecla();
   });
 }
+
+// ----------------------------------------------- a permissão do microfone
+//
+// Veio da tela de entrada, que a comp da 0.9.0 dissolveu — e este é o lugar
+// certo: a permissão é do sistema operacional e desta máquina, negá-la não
+// impede de entrar num servidor, impede de falar. Perguntá-la antes de conectar
+// era perguntar cedo demais.
+//
+// Conferida ao abrir a configuração, e não uma vez ao carregar a janela: num app
+// não assinado a concessão morre a cada build, e quem foi aos ajustes do sistema
+// resolver isso volta aqui para ver se resolveu.
+
+async function conferirMicrofone() {
+  const bloco = $("boot-microfone");
+  if (!bloco) return;
+  let permissao = "NaoSeSabe";
+  try {
+    permissao = await invoke("permissao_de_microfone");
+  } catch (falha) {
+    console.warn("permissao_de_microfone:", falha);
+  }
+  const dito = PERMISSAO_DE_MICROFONE[permissao];
+  bloco.hidden = !dito;
+  if (!dito) return;
+  $("boot-microfone-diz").textContent = dito.diz;
+  $("boot-microfone-nota").textContent = dito.nota;
+}
+
+$("boot-microfone-ajustes").addEventListener("click", () => {
+  invoke("abrir_ajustes_do_microfone").catch((falha) =>
+    console.warn("abrir_ajustes_do_microfone:", falha),
+  );
+});

@@ -87,3 +87,32 @@
   color: var(--seele-osso-apagado);
   font-variant-numeric: tabular-nums;
 }
+
+/* O `<li>` passa a ter dois filhos: a linha que entra e o `×` que esquece. */
+.servidores-lista li {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.servidores-lista li > .servidor-linha { flex: 1; min-width: 0; }
+
+/* Vermelho ao passar, e só ao passar: `07-estetica.md` reserva o vermelho para
+   o que não tem volta, e esquecer um servidor não tem — mas mostrá-lo aceso em
+   toda linha faria a lista inteira parecer um alerta. */
+.servidor-esquecer {
+  width: 34px;
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 13px;
+  color: var(--seele-osso-apagado);
+  background: none;
+  border: 1px solid var(--seele-linha-forte);
+  cursor: pointer;
+}
+
+.servidor-esquecer:hover {
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-vermelho-alerta);
+  border-color: var(--seele-vermelho-alerta);
+}

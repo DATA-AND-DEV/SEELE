@@ -69,7 +69,7 @@ function mostrarFim(motivo) {
   // Lido antes de qualquer coisa desta tela mexer no estado da anterior: é o
   // endereço da sessão que acabou, e é ele que dá destino ao RECONECTAR.
   alvoDoFim = (typeof alvoDoServer === "string" && alvoDoServer) ||
-    $("campo-servidor").value.trim() || null;
+    ultimoAlvo || null;
   desenharSaidas();
 
   const frase = MOTIVOS[motivo] ?? null;
@@ -124,7 +124,9 @@ async function reconectar() {
   await limparSessaoEncerrada();
   $("tela-fim").hidden = true;
   $("tela-boot").hidden = false;
-  $("campo-servidor").value = alvoDoFim;
+  // O alvo volta pela memória do `conectar`, e não por um campo: a tela de
+  // entrada da 0.9.0 não tem mais nenhum. Ver `ultimoAlvo` em `tela-boot.js`.
+  ultimoAlvo = alvoDoFim;
   await conectar();
   // Só se a conexão não levou ninguém a lugar nenhum: deu errado, o erro está
   // escrito na entrada, e o teclado precisa chegar até ele.

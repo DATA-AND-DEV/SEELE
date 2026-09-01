@@ -64,6 +64,11 @@ const VOICE_MODE: &str = "voice_mode";
 /// Spelled once, for the reason [`CAPTURE`] gives.
 const PUSH_TO_TALK_KEY: &str = "push_to_talk_key";
 
+/// The name of the local nickname setting on disk.
+///
+/// Spelled once, for the reason [`CAPTURE`] gives.
+const NICKNAME: &str = "nickname";
+
 /// The local settings, on disk.
 #[derive(Debug, Clone, Default)]
 pub struct Preferences {
@@ -72,6 +77,7 @@ pub struct Preferences {
     playback: Option<String>,
     voice_mode: Option<VoiceMode>,
     push_to_talk_key: Option<String>,
+    nickname: Option<String>,
 }
 
 impl Preferences {
@@ -93,6 +99,7 @@ impl Preferences {
             playback: None,
             voice_mode: None,
             push_to_talk_key: None,
+            nickname: None,
         };
         if let Ok(text) = std::fs::read_to_string(&settings.path) {
             for line in text.lines() {
@@ -113,6 +120,7 @@ impl Preferences {
                         settings.voice_mode = value.as_deref().and_then(VoiceMode::from_name)
                     }
                     PUSH_TO_TALK_KEY => settings.push_to_talk_key = value,
+                    NICKNAME => settings.nickname = value,
                     _ => {}
                 }
             }
@@ -218,6 +226,36 @@ impl Preferences {
         self.write()
     }
 
+    /// O apelido com que se entra, quando não se disse outro.
+    ///
+    /// # Por que ele mora aqui, e não no servidor
+    ///
+    /// Porque é **antes** de haver servidor. A comp da 0.9.0 tira o campo de
+    /// apelido da tela de entrada e o põe num perfil que se abre sem sessão
+    /// nenhuma — e um nome escolhido antes de conectar não tem onde ser gravado
+    /// a não ser aqui.
+    ///
+    /// O apelido **do servidor** é outra coisa e continua sendo dele: cada
+    /// servidor guarda o seu, único, e trocá-lo lá é o `SetNickname`. Este é o
+    /// que se leva ao entrar num servidor novo, e o que o `conhecidos` já
+    /// grava por servidor sobrescreve para os que já se conhece.
+    #[must_use]
+    pub fn nickname(&self) -> Option<&str> {
+        self.nickname.as_deref()
+    }
+
+    /// Escreve o apelido de entrada. `None` volta a não ter nenhum.
+    ///
+    /// # Errors
+    ///
+    /// Falha se o arquivo não puder ser escrito.
+    pub fn set_nickname(&mut self, nickname: Option<&str>) -> Result<()> {
+        self.nickname = nickname
+            .map(sanitise)
+            .filter(|nickname| !nickname.trim().is_empty());
+        self.write()
+    }
+
     fn write(&self) -> Result<()> {
         // Every setting, not only the one that just changed: this rewrites the
         // whole file, so a line left out here is a line deleted from disk. That
@@ -229,6 +267,7 @@ impl Preferences {
             (PLAYBACK, &self.playback),
             (VOICE_MODE, &modo),
             (PUSH_TO_TALK_KEY, &self.push_to_talk_key),
+            (NICKNAME, &self.nickname),
         ] {
             let Some(value) = value else {
                 continue;
@@ -333,12 +372,14 @@ mod tests {
                 .set_voice_mode(Some(VoiceMode::VoiceActivated))
                 .expect("write");
             settings.set_push_to_talk_key(Some("KeyF")).expect("write");
+            settings.set_nickname(Some("marcela")).expect("write");
         }
         let settings = Preferences::open(path).expect("reopen");
         assert_eq!(settings.capture(), Some("alsa:hw:1,0"));
         assert_eq!(settings.playback(), Some("alsa:hw:2,0"));
         assert_eq!(settings.voice_mode(), Some(VoiceMode::VoiceActivated));
         assert_eq!(settings.push_to_talk_key(), Some("KeyF"));
+        assert_eq!(settings.nickname(), Some("marcela"));
     }
 
     #[test]
