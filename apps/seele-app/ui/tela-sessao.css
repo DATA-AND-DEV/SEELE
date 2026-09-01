@@ -592,6 +592,23 @@
 
 .voice_room.aberto .voice_room-nome { color: var(--seele-laranja-nerv); }
 
+/* O nome como botão de renomear, para quem administra as salas.
+ *
+ * Sem moldura e sem fundo: ele **é** o nome, e desenhá-lo como botão faria a
+ * lista parecer uma barra de ferramentas. O que diz que ele responde é o
+ * cursor e o sublinhado ao passar — e o `title` e o `aria-label`, que dizem o
+ * verbo por extenso para quem não tem mouse nem enxerga. */
+button.voice_room-nome {
+  font: inherit;
+  text-align: left;
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+button.voice_room-nome:hover { text-decoration: underline; }
+
 /* `4/8` — a ocupação em número, e sozinha: a barra de blocos que a acompanhava
    saiu junto com o v2. A lista de nomes logo abaixo diz o mesmo com os nomes
    dentro, e duas leituras da mesma medida numa coluna de 268px é uma a mais. */

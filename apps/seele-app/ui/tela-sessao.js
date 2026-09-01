@@ -590,7 +590,38 @@ function desenharCanais(snapshot) {
     );
 
     const cabeca = elemento("span", "canal-cabeca");
-    cabeca.append(elemento("span", "voice_room-nome", voice_room.name));
+
+    // **O nome é o botão de renomear**, como a comp da 0.9.0 o desenha — e não
+    // um lápis ao lado dele. O alvo do gesto é a coisa que se quer mudar, que
+    // é o que quem usa já tenta primeiro; um ícone à parte é um segundo
+    // elemento na fileira para dizer o que o primeiro já diz.
+    //
+    // Só para quem administra as salas. Para os outros o nome continua sendo
+    // texto — um botão que recusa é pior que a ausência dele, porque promete
+    // um caminho e o fecha depois do clique.
+    if (snapshot.may_manage_voice_rooms === true) {
+      const nome = elemento("button", "voice_room-nome", voice_room.name);
+      nome.type = "button";
+      nome.title = `renomear ${voice_room.name}`;
+      nome.setAttribute("aria-label", `Renomear ${voice_room.name}`);
+      nome.addEventListener("click", () => {
+        abrirNomear({
+          titulo: "RENOMEAR A SALA",
+          rotulo: "NOME DA SALA",
+          exemplo: voice_room.name,
+          valor: voice_room.name,
+          acao: "RENOMEAR",
+          aoConfirmar: (escolhido) =>
+            invoke("renomear_voice_room", {
+              voiceRoom: voice_room.id,
+              name: escolhido,
+            }),
+        });
+      });
+      cabeca.append(nome);
+    } else {
+      cabeca.append(elemento("span", "voice_room-nome", voice_room.name));
+    }
     // `4/8` — a ocupação em número. Ela não acompanha mais uma barra de blocos:
     // a lista de nomes logo abaixo é a mesma informação com os nomes dentro,
     // e duas leituras da mesma coisa numa coluna de 268px é uma a mais.

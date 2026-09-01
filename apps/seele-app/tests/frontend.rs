@@ -439,7 +439,13 @@ fn every_command_the_frontend_calls_is_registered() {
 /// The seven of ADR 0030 were here for exactly one commit, and this is the note
 /// they left: `camada-portaria.js` draws all of them, so the check below said so
 /// by name and they came out. That is the list working the way it is meant to.
-const AGUARDANDO_TELA: &[&str] = &["renomear_voice_room", "renomear_linha"];
+// `renomear_voice_room` saiu daqui na 0.9.0: a comp faz do **nome da sala** o
+// botão que renomeia, e o diálogo de nomear existe desde `bbe45b3`. A pilha
+// inteira já estava construída — protocolo, servidor, núcleo, FFI e comando do
+// app —, e o que faltava era exatamente o que esta lista existe para lembrar.
+//
+// `renomear_linha` fica: o canal ainda não tem por onde ser renomeado.
+const AGUARDANDO_TELA: &[&str] = &["renomear_linha"];
 
 #[test]
 fn no_command_is_registered_and_never_called() {
