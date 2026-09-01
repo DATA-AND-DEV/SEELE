@@ -2784,6 +2784,21 @@ fn arquivo_de_log() -> Option<std::fs::File> {
         std::path::PathBuf::from(xdg).join("seele")
     } else if let Ok(home) = std::env::var("HOME") {
         std::path::PathBuf::from(home).join(".config").join("seele")
+    } else if let Ok(appdata) = std::env::var("APPDATA") {
+        // **O Windows não define nenhuma das três de cima.** Sem esta linha o
+        // rastro caía em `"."` — o diretório de onde o processo foi iniciado,
+        // que num app instalado é `Program Files`, onde ninguém escreve. O
+        // arquivo não nascia, o `tracing` voltava para a saída padrão, e
+        // `windows_subsystem = "windows"` mata o console em release: o log não
+        // existia em lugar nenhum exatamente no sistema onde ele era mais
+        // preciso. Perguntado por quem usa: «onde fica o seele.log no Windows?»
+        //
+        // `APPDATA` mais o identificador do pacote é onde `config_dir` também
+        // vai parar pelo `app_config_dir` do Tauri, e é o ponto: o rastro tem de
+        // ficar ao lado das preferências, que é onde este arquivo promete que
+        // ele fica. Aqui não dá para chamar o Tauri — isto roda antes de haver
+        // `AppHandle` —, então o caminho é montado à mão.
+        std::path::PathBuf::from(appdata).join("tech.datadev.seele")
     } else {
         std::path::PathBuf::from(".")
     };

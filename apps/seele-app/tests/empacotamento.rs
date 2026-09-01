@@ -429,3 +429,30 @@ fn a_instalacao_e_da_maquina_porque_a_regra_de_firewall_depende_disso() {
          ninguém consegue entrar em quem hospedar."
     );
 }
+
+#[test]
+fn o_rastro_do_windows_fica_ao_lado_das_preferencias() {
+    // `arquivo_de_log` roda antes de existir `AppHandle`, então não pode
+    // perguntar ao Tauri onde fica a pasta de configuração: ela é montada à mão
+    // como `%APPDATA%\<identificador>`. Isso duplica o identificador, e cópia é
+    // o que apodrece — renomear o pacote separaria o log das preferências sem
+    // que nada quebrasse, e o sintoma seria alguém procurando um arquivo que
+    // está noutro lugar.
+    //
+    // A pergunta que gerou isto veio de quem usa: «onde fica o seele.log no
+    // Windows?». Antes deste caminho a resposta era «depende de onde o
+    // executável foi iniciado», porque o Windows não define `HOME`,
+    // `XDG_CONFIG_HOME` nem `SEELE_HOME` e a última opção era `"."`.
+    let identificador = config()["identifier"]
+        .as_str()
+        .expect("o tauri.conf.json tem de declarar um `identifier`")
+        .to_owned();
+    let fonte = ler("src/main.rs");
+    assert!(
+        fonte.contains(&format!("join(\"{identificador}\")")),
+        "o `arquivo_de_log` não monta o caminho do Windows com o identificador \
+         do pacote (`{identificador}`).\n\
+         Sem isso o rastro não fica ao lado das preferências, e quem for buscá-lo \
+         não vai achar."
+    );
+}
