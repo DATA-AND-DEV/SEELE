@@ -793,3 +793,93 @@ mod testes {
         assert!(matches!(erro, ErroDeVideo::QuadroDeTamanhoErrado { .. }));
     }
 }
+
+#[cfg(test)]
+mod medida_de_memoria {
+    use super::super::{CodificaVideo as _, ConfigDoCodificador, QuadroI420};
+    use super::*;
+
+    /// O conjunto de trabalho deste processo, em MB.
+    fn memoria_mb() -> f64 {
+        use windows::Win32::System::ProcessStatus::{
+            GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+        };
+        use windows::Win32::System::Threading::GetCurrentProcess;
+
+        let mut info = PROCESS_MEMORY_COUNTERS::default();
+        let tamanho = u32::try_from(std::mem::size_of::<PROCESS_MEMORY_COUNTERS>()).unwrap_or(0);
+        // SAFETY: o destino é um local válido do tamanho declarado, e o
+        // pseudo-handle do processo atual não precisa ser fechado.
+        let ok = unsafe { GetProcessMemoryInfo(GetCurrentProcess(), &mut info, tamanho) };
+        if ok.is_err() {
+            return 0.0;
+        }
+        info.WorkingSetSize as f64 / (1024.0 * 1024.0)
+    }
+
+    fn quadro(resolucao: Resolucao, passo: usize) -> QuadroI420 {
+        let (largura, altura) = (resolucao.largura(), resolucao.altura());
+        let mut luma = Vec::with_capacity(largura * altura);
+        for linha in 0..altura {
+            for coluna in 0..largura {
+                luma.push(if ((coluna + passo) / 8 + linha / 12).is_multiple_of(2) {
+                    235
+                } else {
+                    16
+                });
+            }
+        }
+        let croma = vec![128_u8; largura.div_ceil(2) * altura.div_ceil(2)];
+        QuadroI420::novo(largura, altura, luma, croma.clone(), croma).expect("os planos")
+    }
+
+    /// Quanto o codificador custa, e se o custo **cresce**.
+    ///
+    /// A pergunta veio de campo: «estou acostumado com o SEELE a 15 MB;
+    /// compartilhando tela ele vai para 120». Duas coisas muito diferentes podem
+    /// produzir isso — um custo fixo de sessão de hardware, que é o preço do
+    /// que se está usando, ou um vazamento, que é defeito. Só medir duas
+    /// rodadas iguais separa as duas: se a segunda custa como a primeira, vaza.
+    ///
+    /// Não reprova por número: o custo legítimo de um MFT de hardware varia por
+    /// driver e por GPU, e um limiar fixo aqui reprovaria máquina honesta. O que
+    /// ele imprime é o que responde.
+    #[test]
+    fn quanto_o_codificador_segura_de_memoria() {
+        let resolucao = Resolucao::P1080;
+        let config = ConfigDoCodificador {
+            resolucao,
+            cadencia: Cadencia::Q60,
+            teto_bps: 4_000_000,
+        };
+        // Os quadros são montados antes de tudo: eles também ocupam memória, e
+        // medi-los junto com o codificador confundiria as duas contas.
+        let quadros: Vec<QuadroI420> = (0..60).map(|p| quadro(resolucao, p)).collect();
+        let antes = memoria_mb();
+
+        let Ok(mut codificador) = Codificador::novo(&config) else {
+            eprintln!("PULADO: esta máquina não deu um codificador de H.264.");
+            return;
+        };
+        let armado = memoria_mb();
+
+        let mut marcos = Vec::new();
+        for rodada in 0..5 {
+            for (i, q) in quadros.iter().enumerate() {
+                let _ = codificador.codificar(q, rodada == 0 && i == 0);
+            }
+            marcos.push(memoria_mb());
+        }
+
+        eprintln!(
+            "MEMÓRIA 1080p60: antes {antes:.1} MB | armado {armado:.1} MB (+{:.1}) | \
+             depois de 60, 120, 180, 240, 300 quadros: {}",
+            armado - antes,
+            marcos
+                .iter()
+                .map(|m| format!("{m:.1}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+    }
+}
