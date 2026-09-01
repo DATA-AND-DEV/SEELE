@@ -2405,13 +2405,29 @@ function consequenciaDeIrParaAEntrada(daqui, hospedando) {
  * produto: a que escreve a consequência com o nome dentro e põe o foco no
  * CANCELAR. Uma segunda seria uma segunda forma de esquecer de escrever a frase.
  */
-async function pedirTrocaDeServidor(alvo, apelido) {
+async function pedirTrocaDeServidor(alvo, apelido, nome) {
   const daqui = nomeDesteServidor();
   const hospedando = await hospedandoAqui();
+  // **O nome, e o endereço só quando não há nome.**
+  //
+  // A caixa dizia `ENTRAR EM 192.168.0.39:8383` — um endereço IP no meio de uma
+  // pergunta que a pessoa precisa entender para responder. Ela sabe que aquele
+  // lugar se chama «Casa»; foi assim que ela o viu na coluna da esquerda, na
+  // lista de conhecidos e na barra da janela, e é o único nome dele que ela tem.
+  //
+  // O endereço fica de fora e não some: ele está escrito na lista de onde se
+  // clicou, e quem precisa dele já sabe onde procurá-lo. O que não pode é ser a
+  // única coisa escrita — «mostra o IP de conexão, algo que é pouco usual para o
+  // usuário comum».
+  //
+  // Sem nome guardado, o endereço volta a ser o nome: um servidor onde nunca se
+  // esteve não tem outro, e uma caixa que dissesse `ENTRAR EM` e mais nada seria
+  // pior que um endereço.
+  const chamado = (nome ?? "").trim() || alvo;
   abrirConfirmacao(
     "TROCAR DE SERVIDOR",
-    consequenciaDeTrocar(daqui, alvo, hospedando),
-    `ENTRAR EM ${alvo}`,
+    consequenciaDeTrocar(daqui, chamado, hospedando),
+    `ENTRAR EM ${chamado}`,
     () => trocarDeServidor(alvo, apelido),
   );
 }
@@ -2979,7 +2995,7 @@ $("lista-roster").addEventListener("input", (evento) => {
 $("trilha-outros").addEventListener("click", (evento) => {
   const item = evento.target.closest("button[data-alvo]");
   if (!item) return;
-  pedirTrocaDeServidor(item.dataset.alvo, item.dataset.apelido);
+  pedirTrocaDeServidor(item.dataset.alvo, item.dataset.apelido, item.dataset.nome);
 });
 
 $("trilha-adicionar").addEventListener("click", pedirAEntrada);

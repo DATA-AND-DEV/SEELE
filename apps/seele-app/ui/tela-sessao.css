@@ -368,7 +368,9 @@
    sob `prefers-contrast: more`. */
 .painel-titulo {
   margin: 0;
-  padding: 12px 16px 8px;
+  padding: 0;
+  flex: 1;
+  min-width: 0;
   display: flex;
   justify-content: space-between;
   align-items: baseline;
@@ -388,14 +390,21 @@
    passaria a decidir sozinha se aquela frase existe, que é como a explicação de
    um controle some de uma tela só e de mais nenhuma
    (`the_note_beside_a_control_is_defined_once_and_never_by_a_screen`). */
+/* A faixa de cabeçalho de painel, com os valores da comp: `padding:10px 12px 8px`,
+   tudo **centrado** na vertical e `gap:8px`.
+ *
+ * O alinhamento morava em três lugares que discordavam: a faixa alinhava pelo
+ * topo, o título trazia a própria folga de 12px, e o `?` compensava com uma
+ * margem de 10px. O resultado era o `+` colado no alto e o `?` dez pixels
+ * abaixo dele — «o botão + e o botão ? não estão alinhados». A folga é da faixa
+ * agora, e o que estiver nela fica no meio dela sem ninguém compensar nada. */
 .canais-cabeca {
   flex: 0 0 auto;
   border-bottom: 1px solid var(--seele-linha);
-  /* Em linha para o `?` caber ao lado do título sem uma segunda faixa. O
-     `.painel-titulo` já é `flex` por dentro e continua ocupando o que sobra. */
   display: flex;
-  align-items: flex-start;
-  gap: var(--seele-e2);
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 8px;
 }
 
 .canais-cabeca .painel-titulo { flex: 1; padding-bottom: 2px; }
@@ -404,26 +413,17 @@
    Quadrado e do tamanho do texto ao lado: ele não compete com o título, e não
    deve — quem já sabe o que é uma sala de voz nunca mais precisa dele. Vira laranja no
    hover e no foco como todo alvo desta janela. */
+/* O `?` é um `.painel-acao` como o `+`, e o que sobra aqui é só a face: a comp
+   escreve o `+` na monoespaçada de 14 e o `?` na de 10, porque uma interrogação
+   no corpo do sinal de mais fica maior que ele. Tamanho, moldura e alinhamento
+   vêm do `+`, uma vez, para os dois nunca mais divergirem. */
 .painel-ajuda {
-  flex: 0 0 auto;
-  margin: 10px 16px 0 0;
-  width: 20px;
-  height: 20px;
   font-family: var(--seele-mono);
-  font-size: var(--seele-t-micro);
-  line-height: 1;
-  color: var(--seele-osso-apagado);
-  background: none;
-  border: 1px solid var(--seele-linha-forte);
-  cursor: pointer;
+  font-size: 10px;
 }
 
-.painel-ajuda:hover,
-.painel-ajuda:focus-visible {
-  color: var(--seele-osso);
-  border-color: var(--seele-laranja-nerv);
-}
-.canais-cabeca .nota { padding: 0 16px 12px; }
+
+.canais-cabeca .nota { padding: 0 12px 8px; }
 
 .canais-cabeca-linhas {
   border-top: 1px solid var(--seele-linha);

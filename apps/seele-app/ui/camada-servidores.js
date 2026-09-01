@@ -58,6 +58,8 @@ async function desenharServidores() {
       botao.type = "button";
       botao.dataset.alvo = conhecido.alvo;
       botao.dataset.apelido = conhecido.apelido ?? "";
+      // O nome, para a caixa de confirmação da troca falar por nome.
+      if (conhecido.nome) botao.dataset.nome = conhecido.nome;
 
       const nome = conhecido.nome || conhecido.alvo;
       // **O ladrilho traz a imagem do servidor quando há uma.**
@@ -148,7 +150,7 @@ $("servidores-lista").addEventListener("click", async (evento) => {
   const linha = evento.target.closest("button[data-alvo]");
   if (!linha) return;
   fecharServidores();
-  irParaOServidor(linha.dataset.alvo, linha.dataset.apelido);
+  irParaOServidor(linha.dataset.alvo, linha.dataset.apelido, null, linha.dataset.nome);
 });
 
 // O campo: um endereço cru ou um `seele://`.
@@ -210,10 +212,12 @@ window.addEventListener(
  * O apelido vem junto quando se sabe — é o daquela visita, gravado com o
  * servidor. Sem ele, o campo da entrada decide.
  */
-function irParaOServidor(alvo, apelido, token) {
+function irParaOServidor(alvo, apelido, token, nome) {
   const naSessao = !$("tela-sessao").hidden;
   if (naSessao) {
-    pedirTrocaDeServidor(alvo, apelido || undefined);
+    // O nome junto: a caixa de confirmação fala por nome, e quem clicou numa
+    // linha desta lista acabou de ler o nome nela.
+    pedirTrocaDeServidor(alvo, apelido || undefined, nome);
     return;
   }
   // O apelido daquela visita quando se sabe; senão o desta máquina, que é o

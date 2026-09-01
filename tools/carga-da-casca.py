@@ -114,6 +114,9 @@ window.__TAURI__ = {
       // Um retrato para uma pessoa só: o que se quer ver é a diferença entre um
       // avatar com imagem e um com iniciais, lado a lado no mesmo quadro.
       if (cmd === "imagem_da_pessoa") return args && args.person === 2 ? SEELE_RETRATO : null;
+      // O retrato desta máquina, que é o que faz os dois diálogos de perfil
+      // terem o mesmo conteúdo com sessão e sem.
+      if (cmd === "meu_retrato") return SEELE_RETRATO;
       if (/apelido|nickname|preferenc|link|caminho/i.test(cmd)) return "";
       return null;
     },

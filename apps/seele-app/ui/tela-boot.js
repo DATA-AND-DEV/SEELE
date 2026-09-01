@@ -365,7 +365,28 @@ async function desenharPerfilDaEntrada() {
   // Sem nome escolhido, o travessão — e não um exemplo. Um nome de exemplo no
   // rodapé é um nome que a pessoa acha que já é o dela.
   $("boot-perfil-nome").textContent = apelido || "—";
-  $("boot-perfil-inicial").textContent = (apelido || "?").trim().charAt(0).toUpperCase();
+
+  // E o retrato, no mesmo quadrado. Ele é desta máquina e não do servidor —
+  // ver `meu_retrato` no `main.rs` —, então a entrada mostra o mesmo rosto que
+  // a sessão vai mostrar. Um rodapé que só sabe a inicial enquanto o diálogo
+  // que ele abre mostra a foto é o mesmo desencontro que este trabalho
+  // consertou um nível acima.
+  const quadrado = $("boot-perfil-inicial");
+  quadrado.textContent = (apelido || "?").trim().charAt(0).toUpperCase();
+  let retrato = null;
+  try {
+    retrato = await invoke("meu_retrato");
+  } catch (falha) {
+    console.warn("meu_retrato:", falha);
+  }
+  if (retrato) {
+    quadrado.style.backgroundImage = `url(${retrato})`;
+    quadrado.dataset.comRetrato = "sim";
+    quadrado.textContent = "";
+  } else {
+    quadrado.style.removeProperty("background-image");
+    delete quadrado.dataset.comRetrato;
+  }
 }
 
 $("boot-perfil").addEventListener("click", () => {

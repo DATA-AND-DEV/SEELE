@@ -136,13 +136,18 @@ window.addEventListener(
 let focoAntesDoPerfil = null;
 
 /** Desenha a prévia: a imagem, ou a inicial que os outros veem sem ela. */
-async function desenharPrevia(pessoa, apelido) {
+async function desenharPrevia(apelido) {
   const onde = $("perfil-previa");
+  // **`meu_retrato` e não `imagem_da_pessoa`**, e é o que faz os dois diálogos
+  // serem o mesmo: o retrato é seu e mora nesta máquina, então a prévia tem
+  // resposta com sessão e sem. Perguntar ao servidor pela própria imagem só
+  // funcionava dentro dele — era por isso que a tela inicial escondia o bloco
+  // inteiro e mostrava um diálogo diferente com o mesmo nome.
   let imagem = null;
   try {
-    imagem = await invoke("imagem_da_pessoa", { person: pessoa });
+    imagem = await invoke("meu_retrato");
   } catch (falha) {
-    console.warn("imagem_da_pessoa:", falha);
+    console.warn("meu_retrato:", falha);
   }
   onde.replaceChildren();
   if (imagem) {
@@ -194,14 +199,22 @@ async function abrirPerfil() {
   }
   $("perfil-apelido").value = apelido;
 
-  // A imagem é do servidor, e sem servidor não há imagem a mostrar nem a
-  // escolher. Os dois botões somem em vez de recusar: um botão que recusa
-  // promete um caminho e o fecha depois do clique.
-  $("perfil-imagem").hidden = !snapshot;
-  if (snapshot) await desenharPrevia(snapshot.me ?? 0, apelido);
+  // **O bloco da imagem aparece sempre**, e é o que faz os dois diálogos serem
+  // um só.
+  //
+  // Ele ficava escondido sem sessão, porque o retrato só existia do lado do
+  // servidor — e o diálogo da tela inicial virava outro diálogo, com o mesmo
+  // título e metade do conteúdo. O relato de campo foi exatamente esse: «o
+  // modal de perfil da tela inicial é diferente do modal de perfil dentro do
+  // server».
+  //
+  // Hoje o retrato mora nesta máquina, como o apelido, e sobe junto com a
+  // conexão. Escolher uma imagem antes de entrar em qualquer lugar passou a
+  // ter consequência.
+  $("perfil-imagem").hidden = false;
+  await desenharPrevia(apelido);
   $("perfil").hidden = false;
-  // Sem sessão o foco vai para o apelido, que é a única coisa editável ali.
-  ($("perfil-imagem").hidden ? $("perfil-apelido") : $("perfil-escolher")).focus();
+  $("perfil-escolher").focus();
   anunciar("Seu perfil. Escape fecha.");
 }
 

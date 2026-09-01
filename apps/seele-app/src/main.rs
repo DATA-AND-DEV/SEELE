@@ -288,6 +288,22 @@ async fn connect(
         connection.set_voice_mode(VoiceMode::from(modo));
     }
 
+    // **O retrato desta máquina sobe junto com a conexão.**
+    //
+    // É o mesmo acordo do apelido, que já viaja no `connect`: a imagem é sua e
+    // não do servidor, então cada servidor em que você entra passa a te ver como
+    // você se desenhou. Sem isto, escolher a imagem na tela inicial não teria
+    // consequência nenhuma — que era a metade que faltava para os dois diálogos
+    // de perfil serem a mesma coisa.
+    //
+    // Falhar aqui não derruba a conexão: uma sessão sem retrato é uma sessão com
+    // iniciais, e uma sessão que não abre é uma pessoa que não entrou.
+    if let Some(bytes) = retrato_guardado(&app) {
+        if let Err(erro) = connection.set_person_icon(Some(bytes)) {
+            tracing::warn!(?erro, "não mandei o retrato desta máquina ao entrar");
+        }
+    }
+
     let snapshot = connection.snapshot();
 
     if let Ok(mut slot) = session.connection.lock() {
@@ -1213,8 +1229,74 @@ async fn escolher_minha_imagem(
         return Err(ConnectionError::IconNotAPicture);
     };
 
-    session.connection()?.set_person_icon(Some(pronto))?;
+    // **Guardado aqui antes de ser mandado.**
+    //
+    // O retrato é seu, e não do servidor em que você está: o apelido já é assim
+    // — `preferences` o guarda nesta máquina e a conexão o leva — e não havia
+    // razão para a imagem ser diferente. Enquanto ela só existia do lado do
+    // servidor, o diálogo de perfil da tela inicial não tinha o que mostrar, e
+    // sumia com o bloco inteiro: dois diálogos com o mesmo nome e conteúdos
+    // diferentes, que foi o relato de campo.
+    //
+    // Gravar antes de mandar, e não depois: uma gravação que falha é uma
+    // imagem que some no próximo início do programa, e é melhor descobrir isso
+    // agora do que no dia em que a pessoa reabrir o app.
+    gravar_retrato(&app, Some(&pronto))?;
+    // E, se há sessão, o servidor sabe agora. Sem sessão não é erro nenhum —
+    // é o caso da tela inicial, e a imagem sobe no próximo `connect`.
+    if let Ok(connection) = session.connection() {
+        connection.set_person_icon(Some(pronto))?;
+    }
     Ok(true)
+}
+
+/// Onde o retrato desta pessoa mora nesta máquina.
+///
+/// Um arquivo ao lado das preferências, e não uma linha dentro delas: são até
+/// 8 KiB de PNG, e binário num arquivo de `nome <TAB> valor` faria uma edição à
+/// mão virar conversa de suporte. É a mesma decisão que `conhecidos` já tomou
+/// para a imagem de cada servidor.
+fn caminho_do_retrato(app: &AppHandle) -> std::path::PathBuf {
+    std::path::PathBuf::from(config_dir(app)).join("retrato.png")
+}
+
+/// Grava o retrato, ou o apaga. Falhar em gravar é falha de verdade: sem isto o
+/// diálogo diria que guardou uma imagem que não existe.
+fn gravar_retrato(app: &AppHandle, bytes: Option<&[u8]>) -> Result<(), ConnectionError> {
+    let caminho = caminho_do_retrato(app);
+    match bytes {
+        Some(bytes) => std::fs::write(&caminho, bytes).map_err(|erro| {
+            tracing::warn!(%erro, "não gravei o retrato nesta máquina");
+            ConnectionError::IconNotAPicture
+        }),
+        None => match std::fs::remove_file(&caminho) {
+            Ok(()) => Ok(()),
+            // Apagar o que não existe é o estado que se pediu, e não uma falha.
+            Err(erro) if erro.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(erro) => {
+                tracing::warn!(%erro, "não apaguei o retrato desta máquina");
+                Err(ConnectionError::IconNotAPicture)
+            }
+        },
+    }
+}
+
+/// Os bytes do retrato desta máquina, se há um.
+fn retrato_guardado(app: &AppHandle) -> Option<Vec<u8>> {
+    std::fs::read(caminho_do_retrato(app)).ok()
+}
+
+/// O retrato desta máquina, pronto para uma `<img>`.
+///
+/// **Sem sessão também**, que é o ponto: é ele que faz o diálogo de perfil da
+/// tela inicial ter o mesmo conteúdo do de dentro do servidor.
+#[tauri::command]
+fn meu_retrato(app: AppHandle) -> Option<String> {
+    let bytes = retrato_guardado(&app)?;
+    Some(format!(
+        "data:image/png;base64,{}",
+        seele_ffi::base64_de(&bytes)
+    ))
 }
 
 /// O apelido com que se entra, guardado nesta máquina.
@@ -1270,8 +1352,12 @@ fn escolher_apelido(session: State<'_, Session>, apelido: String) -> Result<(), 
 ///
 /// O que a sessão devolver.
 #[tauri::command]
-fn tirar_minha_imagem(session: State<'_, Session>) -> Result<(), ConnectionError> {
-    session.connection()?.set_person_icon(None)
+fn tirar_minha_imagem(app: AppHandle, session: State<'_, Session>) -> Result<(), ConnectionError> {
+    gravar_retrato(&app, None)?;
+    if let Ok(connection) = session.connection() {
+        connection.set_person_icon(None)?;
+    }
+    Ok(())
 }
 
 /// A imagem de perfil de alguém, em `data:` para a janela desenhar.
@@ -2764,6 +2850,7 @@ fn main() {
             escolher_apelido_local,
             tirar_minha_imagem,
             imagem_da_pessoa,
+            meu_retrato,
             tirar_icone_do_server,
             icone_do_server,
             expulsar_pessoa,

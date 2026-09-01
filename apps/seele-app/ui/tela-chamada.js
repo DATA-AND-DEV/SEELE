@@ -101,6 +101,7 @@ const EVENTOS_LEMBRADOS = 40;
 function desenharChamada(snapshot) {
   const voice_room = snapshot ? snapshot.voice_rooms.find((c) => c.occupied_by_us) : null;
 
+  rotularOAlternador();
   desenharBarraDaChamada(snapshot, voice_room);
   desenharPalco(snapshot, voice_room);
   desenharCartoes(snapshot, voice_room);
@@ -675,13 +676,39 @@ async function atualizarChamada() {
  */
 $("operador-vista").addEventListener("click", () => {
   const naGrade = !$("vista-chamada").hidden;
+  // O rótulo é relido **depois** da troca, e não antes: `abrirChamada` é
+  // assíncrona, e relê-lo no mesmo tique leria o estado que acabou de sair.
+  // `desenharChamada` corrigiria no quadro seguinte de qualquer forma; isto é
+  // para o botão não piscar a palavra errada no meio do caminho.
   if (naGrade) {
     fecharChamada();
+    rotularOAlternador();
   } else {
-    abrirChamada().catch((falha) => console.warn("abrir a grade:", falha));
+    abrirChamada()
+      .then(rotularOAlternador)
+      .catch((falha) => console.warn("abrir a grade:", falha));
   }
-  $("operador-vista").textContent = naGrade ? "CHAMADA" : "CONVERSA";
 });
+
+/**
+ * O rótulo do alternador, **lido da tela e não escrito no clique**.
+ *
+ * Ele era escrito uma vez, dentro do ouvinte do botão. Qualquer outro caminho
+ * que trocasse a vista deixava a palavra velha — e há pelo menos um que a troca
+ * sozinho: começar a compartilhar a tela chama `abrirChamada`, porque quem
+ * acabou de escolher um monitor quer ver o que está saindo. Depois disso o botão
+ * dizia `CHAMADA` estando já na chamada, oferecendo o lugar onde a pessoa
+ * estava. Foi relatado assim: «às vezes já está na visualização de chamada e
+ * ainda aparece como chamada em vez de conversa».
+ *
+ * O rótulo diz **para onde o botão leva**, e não onde se está: `CHAMADA` na
+ * conversa, `CONVERSA` na grade. Um botão que nomeia o lugar em que já se está é
+ * um botão que promete não fazer nada.
+ */
+function rotularOAlternador() {
+  const naGrade = !$("vista-chamada").hidden;
+  $("operador-vista").textContent = naGrade ? "CONVERSA" : "CHAMADA";
+}
 
 /**
  * Sair da sala de voz — e **só** dela.
