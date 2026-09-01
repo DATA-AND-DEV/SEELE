@@ -376,7 +376,13 @@ function limitesEscolhidos() {
     banda_bps: null,
     altura_maxima: 720,
     quadros_maximos: 30,
-    prioridade: "Movimento",
+    // **Minúsculo**, que é como o `Prioridade` do Rust atravessa: ele carrega
+    // `#[serde(rename_all = "lowercase")]`, e o `<select>` que existia aqui
+    // mandava `value="movimento"`. Ao trocar o controle por uma constante eu
+    // escrevi o nome da variante em vez do nome do fio, e a ponte recusou com
+    // «unknown variant `Movimento`, expected `nitidez` or `movimento`» —
+    // compartilhar a tela parou de funcionar de uma vez.
+    prioridade: "movimento",
   };
 }
 

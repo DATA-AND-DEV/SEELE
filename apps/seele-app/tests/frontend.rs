@@ -9375,3 +9375,78 @@ fn opening_a_stream_asks_for_a_key_frame() {
          não recebe o quadro que dispararia o pedido:\n{entrega}"
     );
 }
+
+/// Todo nome de variante que a casca manda ao Rust é o nome do **fio**.
+///
+/// **Este guarda nasceu de um defeito que derrubou o compartilhamento de tela
+/// por inteiro**, com esta frase na cara de quem tentou: «unknown variant
+/// `Movimento`, expected `nitidez` or `movimento`».
+///
+/// Os quatro controles de limite saíram da caixa de compartilhar, e os valores
+/// que eles escolhiam viraram constantes no JavaScript. O `<select>` mandava
+/// `value="movimento"` — minúsculo, porque `Prioridade` carrega
+/// `#[serde(rename_all = "lowercase")]`. Ao escrever a constante eu usei o nome
+/// da **variante** em Rust, `Movimento`, que é o nome que se lê no código e não
+/// o que atravessa a ponte. A ponte recusou, e não havia nada entre os dois
+/// lados que soubesse compará-los.
+///
+/// Um `<select>` protegia por acidente: os valores estavam escritos ao lado do
+/// rótulo, e trocá-los era mexer no HTML que a pessoa vê. Uma constante no meio
+/// de um arquivo de script não tem esse acidente — então tem este guarda.
+#[test]
+fn the_variant_names_the_shell_sends_are_the_ones_the_wire_uses() {
+    let ffi = std::fs::read_to_string(
+        app_dir()
+            .join("..")
+            .join("..")
+            .join("crates")
+            .join("seele-ffi")
+            .join("src")
+            .join("types.rs"),
+    )
+    .expect("`seele-ffi/src/types.rs` é onde os tipos da ponte moram");
+
+    // As variantes de `Prioridade`, como o serde as escreve no fio.
+    let Some(depois) = ffi.split("pub enum Prioridade {").nth(1) else {
+        panic!("`Prioridade` mudou de forma; este guarda tem de mudar com ela");
+    };
+    let Some(corpo) = depois.split('}').next() else {
+        panic!("`Prioridade` nunca fecha");
+    };
+    assert!(
+        ffi.split("pub enum Prioridade {")
+            .next()
+            .is_some_and(|antes| antes.ends_with("#[serde(rename_all = \"lowercase\")]\n")),
+        "`Prioridade` deixou de ser minúscula no fio, e a casca continua \
+         mandando minúsculo"
+    );
+    let no_fio: Vec<String> = without_comments(corpo)
+        .lines()
+        .filter_map(|linha| {
+            let nome = linha.trim().trim_end_matches(',');
+            (!nome.is_empty() && nome.chars().next().is_some_and(char::is_uppercase))
+                .then(|| nome.to_lowercase())
+        })
+        .collect();
+    assert!(
+        !no_fio.is_empty(),
+        "não achei variante nenhuma em `Prioridade`"
+    );
+
+    // E o que a casca manda.
+    let limites = js_function(&scripts(), "function limitesEscolhidos(");
+    let Some((_, resto)) = limites.split_once("prioridade: \"") else {
+        panic!("`limitesEscolhidos` não manda mais prioridade nenhuma: {limites}");
+    };
+    let Some((mandado, _)) = resto.split_once('"') else {
+        panic!("a prioridade que a casca manda nunca fecha as aspas: {limites}");
+    };
+
+    assert!(
+        no_fio.iter().any(|nome| nome == mandado),
+        "a casca manda `{mandado}` e o fio aceita {no_fio:?}. É o nome da \
+         variante em Rust em vez do nome que atravessa a ponte, e a ponte \
+         recusa o comando inteiro — foi assim que compartilhar a tela parou de \
+         funcionar de uma vez."
+    );
+}
