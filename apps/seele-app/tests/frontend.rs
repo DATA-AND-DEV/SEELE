@@ -3006,13 +3006,27 @@ fn every_section_of_the_settings_screen_carries_the_panel_and_the_heading_it_ope
         [
             "secao-audio",
             "secao-atalhos",
-            // APARÊNCIA was the third and is not here. It held exactly one
-            // control — the simple-captions switch — and that layer stopped
-            // being a mode: the note beside a control is part of the control and
-            // is always on screen now. What was left was a settings section with
-            // nothing to settle, which promises an adjustment that does not
-            // exist; this screen's own rule is to omit what it does not have
-            // rather than draw it dead.
+            // **APARÊNCIA voltou na 0.9.0**, e o registro de por que ela
+            // tinha saído fica, porque ele é a regra que a volta teve de
+            // respeitar.
+            //
+            // Ela saiu por ter exatamente um controle — a chave de legendas
+            // simples — que deixou de existir. O que sobrou era «uma seção de
+            // configuração sem nada a configurar, que promete um ajuste que não
+            // existe», e a regra desta tela é **omitir o que não se tem em vez
+            // de desenhá-lo morto**.
+            //
+            // A comp da 0.9.0 a desenha de novo, e continua sem controle
+            // nenhum — mas o que ela põe ali não é um ajuste apagado: é **onde
+            // o contraste mora**, que é o sistema operacional. Isso a seção
+            // tem, e quem procura contraste aqui e não acha nada conclui que o
+            // produto não o oferece.
+            //
+            // A regra foi respeitada tirando a promessa: os dois cartões da
+            // comp são botões com `aria-pressed`, e aqui são itens de lista com
+            // o estado escrito por extenso. Um botão desabilitado promete um
+            // ajuste; uma linha que diz `DESLIGADO NO SISTEMA` informa.
+            "secao-aparencia",
             "secao-identidade",
             // The fourth is not the comp's — it predates the update button
             // existing at all (ADR 0026). It lands here because what this screen

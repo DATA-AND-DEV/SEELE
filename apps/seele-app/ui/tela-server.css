@@ -721,3 +721,52 @@
   object-fit: contain;
   border-right: 1px solid var(--seele-linha);
 }
+
+
+/* APARÊNCIA: dois cartões que dizem o que o tema é, e não o alternam.
+ *
+ * `disabled` e ainda assim desenhados como cartão: eles informam, e um
+ * `cursor: not-allowed` diria que a pessoa tentou fazer algo proibido — ela
+ * não tentou, ela leu. Daí `cursor: default` e sem esmaecer o texto, que é o
+ * conteúdo. */
+.aparencia-lista {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.aparencia-cartao {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  color: var(--seele-osso);
+  border: 1px solid var(--seele-linha-forte);
+}
+
+/* O que está valendo, marcado pela moldura, pelo nome em laranja **e pela
+   palavra** — nunca só pela cor (`06-clientes-gui.md`). */
+.aparencia-cartao[data-valendo="sim"] {
+  border-color: var(--seele-laranja-nerv);
+}
+
+.aparencia-cartao[data-valendo="sim"] .aparencia-nome,
+.aparencia-cartao[data-valendo="sim"] .aparencia-estado {
+  color: var(--seele-laranja-nerv);
+}
+
+.aparencia-estado {
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--seele-osso-apagado);
+}
+
+.aparencia-nome {
+  font-family: var(--seele-display);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.1em;
+}

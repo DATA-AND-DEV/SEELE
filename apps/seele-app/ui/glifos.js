@@ -70,6 +70,19 @@ const GLIFOS = {
   avancar: [["path", { d: "M5.5 4.5L10.5 8L5.5 11.5Z" }]],
   recuar: [["path", { d: "M10.5 4.5L5.5 8L10.5 11.5Z" }]],
 
+  // Aparência: um quadrado com a metade esquerda cheia, que é o desenho
+  // universal de contraste. Da comp da 0.9.0.
+  aparencia: [
+    [
+      "rect",
+      {
+        x: "2.5", y: "2.5", width: "11", height: "11",
+        fill: "none", stroke: "currentColor", "stroke-width": "1.3",
+      },
+    ],
+    ["rect", { x: "3.2", y: "3.2", width: "4.8", height: "9.6" }],
+  ],
+
   // O botão de desligar: arco aberto em cima com uma haste subindo por dentro
   // dele. Desenho da comp da 0.9.0, e é o gesto que todo aparelho do mundo já
   // usa para «pare de fazer o que está fazendo» — aqui, sair da sala de voz.

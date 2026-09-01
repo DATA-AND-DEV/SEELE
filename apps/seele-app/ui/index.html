@@ -1922,8 +1922,11 @@
                   data-sub="Escolha os aparelhos e ouça antes de entrar numa sala de voz">
             <span class="server-secao-icone" data-glifo="audio"></span>
             <span class="server-secao-texto">
-              <span class="server-secao-nome">ÁUDIO</span>
-              <span class="nota">Microfone e som</span>
+              <!-- `MICROFONE E SOM` é o nome que a comp da 0.9.0 dá, e é o
+                   que o `data-titulo` deste botão já dizia: o trilho chamava a
+                   seção de uma coisa e o painel de outra. A nota saiu junto —
+                   ela era «Microfone e som», que agora é o próprio nome. -->
+              <span class="server-secao-nome">MICROFONE E SOM</span>
             </span>
           </button>
         </li>
@@ -1946,6 +1949,28 @@
           para virar parte do controle que ela explica. Uma seção de configuração
           com nada dentro promete um ajuste que não há.
         -->
+        <li>
+          <!--
+            APARÊNCIA, da comp da 0.9.0. **Informativa e não um controle**, e é
+            assim que a comp a desenha: dois cartões que dizem o que o tema é e
+            de onde ele vem, com `aria-pressed` marcando qual está valendo.
+
+            Não há chave de mais contraste porque não há o que ligar: o
+            `acessibilidade.css` segue `prefers-contrast` do sistema, e uma
+            chave no app que competisse com a do sistema é a receita para as
+            duas discordarem. O que faltava era **dizer isso** — quem procura
+            contraste nesta tela precisa saber onde a resposta mora.
+          -->
+          <button id="secao-aparencia" class="server-secao" type="button"
+                  data-painel="painel-aparencia"
+                  data-titulo="APARÊNCIA"
+                  data-sub="De onde vêm as cores e o contraste desta janela">
+            <span class="server-secao-icone" data-glifo="aparencia"></span>
+            <span class="server-secao-texto">
+              <span class="server-secao-nome">APARÊNCIA</span>
+            </span>
+          </button>
+        </li>
         <li>
           <button id="secao-identidade" class="server-secao" type="button"
                   data-painel="painel-identidade"
@@ -2241,6 +2266,46 @@
           dita uma vez — um selo que todo mundo tem é um selo que ninguém
           aprende a ler.
         -->
+        <section id="painel-aparencia" class="server-painel-secao"
+                 aria-labelledby="secao-aparencia" hidden>
+          <p class="nota">O tema desta versão subiu o contraste dos rótulos e
+            das bordas: o cinza secundário media 4,11:1 sobre o painel e
+            reprovava AA em texto pequeno.</p>
+          <ul class="aparencia-lista">
+            <!--
+              **Não são botões, e a diferença importa.**
+
+              A comp os desenha como botões com `aria-pressed`. Mas nenhum dos
+              dois alterna coisa alguma: um é o tema, o outro é uma leitura de
+              `prefers-contrast` do sistema. Um botão desabilitado promete um
+              ajuste que não existe — e esta tela já tirou uma seção inteira
+              por isso, com a regra escrita no guarda
+              `every_section_of_the_settings_screen_carries_the_panel_and_the_heading_it_opens`:
+              «omitir o que não se tem em vez de desenhá-lo morto».
+
+              Então ficam o desenho e o conteúdo da comp, e sai a promessa. O
+              estado vira **palavra** — `EM USO`, `DESLIGADO NO SISTEMA` —, que
+              é o que `06-clientes-gui.md` exige de qualquer informação que a
+              cor sozinha carregaria.
+
+              E a seção existe, apesar da regra, porque ela **tem** o que dizer:
+              onde mora o contraste. Quem o procura aqui e não acha conclui que
+              o produto não o tem.
+            -->
+            <li class="aparencia-cartao" data-valendo="sim">
+              <span class="aparencia-nome">LARANJA SOBRE NEGRO</span>
+              <span class="nota">o tema do produto, com contraste corrigido</span>
+              <span class="aparencia-estado">EM USO</span>
+            </li>
+            <li class="aparencia-cartao" data-valendo="nao">
+              <span class="aparencia-nome">MAIS CONTRASTE</span>
+              <span class="nota">segue <code>prefers-contrast</code> do sistema; ligue nas
+                preferências de acessibilidade dele e esta janela acompanha</span>
+              <span class="aparencia-estado">DESLIGADO NO SISTEMA</span>
+            </li>
+          </ul>
+        </section>
+
         <section id="painel-identidade" class="server-painel-secao"
                  aria-labelledby="secao-identidade" hidden>
           <div class="server-bloco">
