@@ -161,17 +161,16 @@ impl FonteDeQuadros for CapturaComSom {
         // que a folga do anel, para nunca esvaziá-lo de uma vez.
         const TETO: usize = 9_600;
 
-        // A taxa do dispositivo quase sempre é a da casa. Quando não for, o que
-        // sai daqui está na taxa dele e o pacote sairia rápido ou lento demais —
-        // é melhor não mandar som nenhum do que mandar som errado, e o `debug`
-        // diz a quem investiga por que a transmissão saiu muda.
-        if captura.taxa() != seele_audio::SAMPLE_RATE_HZ {
-            tracing::debug!(
-                taxa = captura.taxa(),
-                "a saída desta máquina não toca na taxa da casa; a transmissão sai muda"
-            );
-            return Vec::new();
-        }
+        // **A conversão de taxa mora na captura**, e não aqui.
+        //
+        // Aqui havia uma conferência: fora de 48 kHz, devolvia vazio. A razão
+        // escrita era «melhor som nenhum que som errado» — uma escolha entre
+        // duas coisas ruins quando existe uma terceira. 44,1 kHz é a taxa de
+        // metade das placas do mundo, e o efeito foi a transmissão sair muda
+        // para quem tem uma delas, com um `debug!` que ninguém vê.
+        //
+        // `CapturaDaSaida` converte, com o mesmo `RateConverter` que a voz usa
+        // desde sempre. O que sai de `tomar` está na taxa da casa, sempre.
         captura.tomar(TETO)
     }
 }

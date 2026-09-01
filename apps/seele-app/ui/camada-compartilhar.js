@@ -374,8 +374,21 @@ function mostrarErroDeTela(falha) {
 function limitesEscolhidos() {
   return {
     banda_bps: null,
-    altura_maxima: 720,
-    quadros_maximos: 30,
+    // **O máximo, e não o provável.** Estes dois eram 720 e 30 — o padrão dos
+    // controles que saíram, copiado sem pensar no que ele significava depois de
+    // deixar de ser escolha. Eles são **tetos**: a escada de `resolucao_para`
+    // decide o que o cano de fato compra, e pedir menos do que o cano compra é
+    // jogar banda fora.
+    //
+    // Foi o que aconteceu em campo: com a escada consertada a imagem ficou
+    // estável e boa, e ainda assim «não ia pra 60fps» — porque eu tinha
+    // escrito 30 aqui. O limite não era a rede, era esta linha.
+    //
+    // Pedir 1080p60 não obriga ninguém a mandar 1080p60: numa casa apertada a
+    // escada desce para 720p ou 540p sozinha, que é exatamente o trabalho dela.
+    // O que ela não sabe fazer é subir acima do que se pediu.
+    altura_maxima: 1080,
+    quadros_maximos: 60,
     // **Minúsculo**, que é como o `Prioridade` do Rust atravessa: ele carrega
     // `#[serde(rename_all = "lowercase")]`, e o `<select>` que existia aqui
     // mandava `value="movimento"`. Ao trocar o controle por uma constante eu

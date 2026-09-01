@@ -69,6 +69,18 @@ pub struct CapturaDaSaida {
     /// tipo que não usa. Aqui, o formato do anel é assunto deste módulo, e o que
     /// atravessa é `Vec<f32>`, que é o mesmo que a captura do macOS entrega.
     amostras: std::sync::Mutex<Consumer<f32>>,
+    /// O reamostrador, quando o dispositivo não toca na taxa da casa.
+    ///
+    /// **Ele existe porque a primeira versão desistia.** Ela conferia a taxa e,
+    /// se não fosse 48 kHz, devolvia vazio com um `debug!` — «melhor som nenhum
+    /// que som errado». Só que 44,1 kHz é a taxa de metade das placas do mundo,
+    /// e o efeito foi a transmissão sair muda para quem tem uma delas, sem uma
+    /// palavra na tela. Foi o relato: o Mac assistindo não ouvia o jogo.
+    ///
+    /// «Melhor som nenhum que som errado» é uma escolha entre duas coisas ruins
+    /// quando existe uma terceira: converter. A voz já faz isso, com este mesmo
+    /// `RateConverter`, e desde sempre.
+    reamostrador: Option<std::sync::Mutex<crate::resample::RateConverter>>,
     contadores: Arc<StreamCounters>,
     taxa_do_dispositivo: u32,
     canais: NonZeroU16,
@@ -127,9 +139,30 @@ impl CapturaDaSaida {
             source,
         })?;
 
+        // O reamostrador só existe quando é preciso: na taxa da casa, converter
+        // seria copiar amostra por amostra por nada.
+        let reamostrador = if taxa_do_dispositivo == SAMPLE_RATE_HZ {
+            None
+        } else {
+            match crate::resample::RateConverter::new(taxa_do_dispositivo, SAMPLE_RATE_HZ) {
+                Ok(conversor) => Some(std::sync::Mutex::new(conversor)),
+                Err(erro) => {
+                    // Aqui sim não há o que fazer: sem conversor e fora da taxa,
+                    // qualquer amostra entregue sairia rápida ou lenta demais.
+                    tracing::warn!(%erro, taxa = taxa_do_dispositivo,
+                        "não converso a taxa desta saída; a transmissão sai muda");
+                    // `NoOutputDevice` porque é o que sobra de verdade: existe
+                    // uma saída, e ela não serve a esta captura. Quem chama trata
+                    // do mesmo jeito — transmite muda, e não deixa de transmitir.
+                    return Err(DeviceError::NoOutputDevice);
+                }
+            }
+        };
+
         Ok(Self {
             _fluxo: fluxo,
             amostras: std::sync::Mutex::new(consumidor),
+            reamostrador,
             contadores,
             taxa_do_dispositivo,
             canais,
@@ -146,12 +179,25 @@ impl CapturaDaSaida {
         let Ok(mut amostras) = self.amostras.lock() else {
             return Vec::new();
         };
-        let mut saida = Vec::new();
-        while saida.len() < quantas {
+        let mut cruas = Vec::new();
+        while cruas.len() < quantas {
             let Ok(amostra) = amostras.pop() else {
                 break;
             };
-            saida.push(amostra);
+            cruas.push(amostra);
+        }
+
+        // Na taxa da casa, as amostras saem como entraram.
+        let Some(reamostrador) = self.reamostrador.as_ref() else {
+            return cruas;
+        };
+        let Ok(mut reamostrador) = reamostrador.lock() else {
+            return Vec::new();
+        };
+        let mut saida = Vec::new();
+        if let Err(erro) = reamostrador.push(&cruas, &mut saida) {
+            tracing::debug!(%erro, "o reamostrador recusou um bloco do som da tela");
+            return Vec::new();
         }
         saida
     }
@@ -231,6 +277,19 @@ mod testes {
              Num sistema com loopback isto é o fluxo aberto sobre o dispositivo \
              errado, e não silêncio — o silêncio também produz amostras."
         );
+        // E as amostras saem na taxa da casa, convertidas quando preciso.
+        //
+        // **Sem esta linha o teste passaria com a versão que desistia**: ela
+        // devolvia vazio fora de 48 kHz, e `lidas > 0` seria falso — mas por um
+        // motivo que a mensagem de erro acima atribui a outra coisa. Ela diz
+        // «o fluxo abriu e não andou», e o defeito era «andou e foi jogado
+        // fora».
+        assert!(
+            captura.taxa() >= 8_000,
+            "a taxa do dispositivo não faz sentido: {}",
+            captura.taxa()
+        );
+
         assert_eq!(
             captura.perdidas(),
             0,
