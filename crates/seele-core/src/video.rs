@@ -632,8 +632,18 @@ impl Captura for CapturaDoSistema {
             // O som ao lado, e **sem derrubar a transmissão quando não abre**:
             // mostrar a tela sem som é metade do que se queria; não mostrar
             // nada é zero.
+            // **`info!` e não `debug!` no caminho bom.** A pergunta que este log
+            // responde é «a transmissão saiu muda por quê», e ela é feita depois
+            // do fato, por alguém lendo o arquivo: um caminho bom silencioso não
+            // distingue «abriu e não veio som» de «nem abriu».
             let som = match seele_audio::laco::CapturaDaSaida::abrir(None) {
-                Ok(captura) => Some(captura),
+                Ok(captura) => {
+                    tracing::info!(
+                        taxa = captura.taxa(),
+                        "o som desta máquina abriu para a transmissão"
+                    );
+                    Some(captura)
+                }
                 Err(erro) => {
                     tracing::warn!(%erro, "não abri o som desta máquina; a transmissão sai muda");
                     None

@@ -361,6 +361,7 @@ where
         // Um codificador por transmissão, com o teto de voz. `None` é uma
         // máquina cujo Opus não abriu: a imagem continua indo, muda.
         som: seele_audio::codec::VoiceEncoder::with_defaults().ok(),
+        conta_do_som: (0, 0),
         sobra: VecDeque::new(),
         biblioteca,
         captura,
@@ -429,6 +430,17 @@ struct Laco<C: Captura> {
     /// `None` é uma transmissão muda, e não uma transmissão que não sai: a
     /// imagem é o assunto, e o som é o que a acompanha.
     som: Option<seele_audio::codec::VoiceEncoder>,
+    /// Quantas amostras a captura já entregou, e quantos pacotes saíram.
+    ///
+    /// **Existe para o log dizer onde o som parou**, e não para telemetria. As
+    /// duas metades separadas porque elas apontam para lugares diferentes: zero
+    /// amostras é a captura não entregando — o dispositivo não abriu, ou o
+    /// sistema não empresta a saída. Amostras sem pacotes é tudo o que chegou
+    /// ser silêncio exato, ou o codificador recusando.
+    ///
+    /// Sem os dois separados, «a transmissão saiu muda» é uma frase sem lugar
+    /// para procurar — e foi assim que ela chegou de campo duas vezes.
+    conta_do_som: (u64, u64),
     /// As amostras que sobraram de um pacote de 20 ms para o próximo.
     ///
     /// A captura entrega o que juntou desde o último tique, e o tique do vídeo
@@ -565,7 +577,13 @@ impl<C: Captura> Laco<C> {
         if self.som.is_none() {
             return;
         }
-        self.sobra.extend(fonte.tomar_som());
+        let chegaram = fonte.tomar_som();
+        let primeiras = self.conta_do_som.0 == 0 && !chegaram.is_empty();
+        self.conta_do_som.0 += chegaram.len() as u64;
+        if primeiras {
+            tracing::info!("o som da tela começou a chegar da captura");
+        }
+        self.sobra.extend(chegaram);
 
         // Os pacotes são feitos antes de qualquer um sair, para o empréstimo do
         // codificador acabar antes de `entregar_evento` pegar `self` de novo.
@@ -580,6 +598,11 @@ impl<C: Captura> Laco<C> {
             if let Some(Ok(pacote)) = self.som.as_mut().map(|codec| codec.encode(&quadro)) {
                 pacotes.push(pacote);
             }
+        }
+        let primeiros = self.conta_do_som.1 == 0 && !pacotes.is_empty();
+        self.conta_do_som.1 += pacotes.len() as u64;
+        if primeiros {
+            tracing::info!("o som da tela começou a sair para o fio");
         }
         for pacote in pacotes {
             self.entregar_evento(EventoDaBomba::Som(pacote));

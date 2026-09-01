@@ -229,10 +229,27 @@ pub const JANELA_DA_SUBIDA: Duration = Duration::from_secs(1);
 /// uma janela que **não** encheu o teto nunca move a estimativa: ela não diz
 /// nada sobre o cano, diz que não havia o que mandar.
 ///
-/// 85% pelo mesmo motivo da sonda do cliente: `spikes/tela-no-codec` mediu o
+/// **70%, e o número anterior contradizia a própria justificativa.**
+///
+/// Estava escrito 85%, com esta razão ao lado: «`spikes/tela-no-codec` mediu o
 /// OpenH264 entregando 872 de 1200 kbps em 720p, e exigir mais descartaria toda
-/// janela boa.
-pub const OCUPACAO_MINIMA: u32 = 85;
+/// janela boa». A conta não fecha — 872 de 1200 são **72,7%**, e exigir 85% já
+/// descartava toda janela boa. O raciocínio estava certo e o número ficou doze
+/// pontos acima dele.
+///
+/// O efeito é uma estimativa que sobe enquanto o conteúdo é exigente e **para**
+/// quando ele acomoda: o codificador entrega o que a cena pede, que é menos que
+/// o teto, a janela deixa de contar como cheia, e a estimativa congela onde
+/// estava. Em campo isso apareceu como 720p60 estável — boa imagem, e presa a um
+/// degrau abaixo do que o cano comportava.
+///
+/// Setenta é abaixo do que o codificador de fato entrega quando está confortável,
+/// então uma transmissão saudável conta como cheia e a estimativa continua
+/// subindo. O risco de subir sem o vídeo estar usando tudo é o de sondar sem
+/// dado — e ele é limitado pelo outro lado da regra: só sobe com perda abaixo de
+/// [`PERDA_QUE_ACALMA`], e recua acima de [`PERDA_QUE_DOI`]. Sondar demais custa
+/// uma janela e volta.
+pub const OCUPACAO_MINIMA: u32 = 70;
 /// A partir de que fração de perda a estimativa recua, em por cento.
 ///
 /// **A estimativa recuava com um pacote perdido, e era isso que a fazia
