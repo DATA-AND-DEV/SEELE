@@ -2455,7 +2455,7 @@ async function ejetar() {
   $("tela-sessao").hidden = true;
   $("tela-fim").hidden = true;
   $("tela-boot").hidden = false;
-  $("convite").hidden = true;
+  esquecerOLinkDaPorta();
   $("bateria").hidden = true;
   // A moderação pela mesma razão que a bateria: aberta, ela voltaria por cima
   // da próxima sessão com um ato armado sobre alguém do servidor anterior.
@@ -2923,27 +2923,6 @@ $("lista-roster").addEventListener("input", (evento) => {
 // tinha de passar por TECLA para chegar lá.
 
 
-$("convite-copiar").addEventListener("click", async () => {
-  const campo = $("convite-link");
-  // `select()` antes de tudo: se a área de transferência for negada, a pessoa
-  // ainda fica com o link selecionado e copia com o teclado.
-  campo.select();
-  const botao = $("convite-copiar");
-  try {
-    await navigator.clipboard.writeText(campo.value);
-    botao.textContent = "copiado";
-    botao.classList.add("convite-copiado");
-  } catch {
-    // A tecla desenhada, e com nome: ela não está ao lado de um rótulo, ela é
-    // metade da instrução. Sem nome a frase chegaria a um leitor de tela como
-    // "copie com C", que manda apertar a tecla errada.
-    botao.replaceChildren(
-      document.createTextNode("copie com "),
-      glifo("comando", "Command"),
-      document.createTextNode("C"),
-    );
-  }
-});
 
 
 // A trilha, por delegação: os botões do histórico são reconstruídos quando a

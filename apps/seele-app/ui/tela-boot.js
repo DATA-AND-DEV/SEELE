@@ -244,13 +244,11 @@ async function hospedar() {
     // alvo da conexão que vem em seguida, e é o que `conectar()` sem argumento
     // vai usar.
     ultimoAlvo = anfitriao.aqui;
-    $("convite-link").value = anfitriao.convite;
     mostrarAlcance(
       anfitriao.alcance,
       anfitriao.porta_recusada,
       anfitriao.encontro_recusado,
     );
-    $("convite").hidden = false;
 
     // **O link, guardado e mostrado.** A comp da 0.9.0 promove a um diálogo o
     // que era um bloco entre outros nesta tela: quem acabou de hospedar precisa

@@ -1661,30 +1661,17 @@ button.voice_room-nome:hover { text-decoration: underline; }
   border: 1px solid var(--seele-osso-apagado);
 }
 
-/* ---- convite, para quem está hospedando ---- */
-.convite {
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--seele-linha);
-  background: var(--seele-laranja-fraco);
-  font-size: var(--seele-t-dado);
-}
+/* ---- o link da porta, onde quer que ele apareça ----
 
-/* A fila que antes era o bloco inteiro. Ela virou filha quando o alcance passou
-   a ser dito embaixo dela: o `align-items: center` que alinha rótulo, campo e
-   botão é exatamente o que empilharia mal uma frase de duas linhas. */
-.convite-linha {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
+   A faixa laranja que morava no topo da sessão saiu: a comp não a desenha, e o
+   link já tinha dois lugares melhores — o diálogo que aparece uma vez para quem
+   acaba de hospedar, e a seção `A PORTA` da configuração, onde ele mora depois
+   disso. Uma faixa permanente sobre a sessão para um texto que se copia uma vez
+   é o produto cobrando atenção todo dia por uma coisa que se faz num dia.
 
-.convite-rotulo {
-  font-size: var(--seele-t-rotulo);
-  letter-spacing: var(--seele-tracking-rotulo);
-  color: var(--seele-laranja-nerv);
-}
+   O que sobra é o campo, que os dois lugares usam.
 
-/* O link inteiro, selecionável. Um campo que corta o fim do endereço produz
+   O link inteiro, selecionável. Um campo que corta o fim do endereço produz
    convites que não funcionam e ninguém entende por quê. */
 .convite-link {
   flex: 1;
@@ -1695,8 +1682,6 @@ button.voice_room-nome:hover { text-decoration: underline; }
   border: 1px solid var(--seele-linha-forte);
   padding: 4px 8px;
 }
-
-.convite-copiado { color: var(--seele-fosforo); }
 
 
 /* Até onde o link chega (ADR 0022).

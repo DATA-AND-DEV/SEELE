@@ -155,9 +155,9 @@ async function sairParaAEntrada() {
  */
 async function limparSessaoEncerrada() {
   await invoke("disconnect");
-  // O `disconnect` também derruba o servidor hospedado. A caixa some junto, ou
-  // ficaria oferecendo um link que não leva mais a lugar nenhum.
-  $("convite").hidden = true;
+  // O `disconnect` também derruba o servidor hospedado. O link some junto, ou
+  // a configuração ficaria oferecendo um que não leva mais a lugar nenhum.
+  esquecerOLinkDaPorta();
   mostrarVeredito(null);
   desenhado = null;
   linhaAberta = null;

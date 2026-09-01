@@ -678,48 +678,6 @@
   </div>
 
   <!--
-    O link de convite, para quem está hospedando. Fica de fora do painel de
-    mensagens de propósito: são uns noventa caracteres, e num painel estreito
-    ele quebra em duas linhas. Um convite que não dá para copiar inteiro não
-    serve para nada, e copiar é a única coisa que se faz com ele.
-  -->
-  <!--
-    O convite, e **até onde ele chega** (ADR 0022).
-
-    As duas coisas juntas de propósito, e não numa tela de diagnóstico à parte:
-    um link que só funciona na rede de casa e um link que funciona pela internet
-    são o mesmo texto. Separá-los é o que faz o anfitrião mandar o primeiro
-    achando que mandou o segundo — e quem descobre é o amigo, do outro lado,
-    como «não conecta».
-
-    `#convite-alcance` nasce vazio e escondido: antes de `hospedar` responder,
-    esta janela não sabe em que degrau parou, e um lugar reservado com texto de
-    exemplo mentiria durante o intervalo.
-  -->
-  <div id="convite" class="convite" hidden>
-    <div class="convite-linha">
-      <span class="convite-rotulo">CONVITE</span>
-      <input id="convite-link" class="convite-link" readonly spellcheck="false">
-      <button id="convite-copiar" class="botao-fantasma" type="button">copiar</button>
-      <!--
-        A porta, ao lado do link que a atravessa. ADR 0030.
-
-        Aqui, e não numa entrada de menu, porque este bloco só aparece para quem
-        está hospedando — e a porta do servidor só é assunto de quem hospeda. Quem
-        entrou no servidor de outra pessoa não vê esta linha, e não deve mesmo: a
-        portaria é estado da máquina que hospeda, e não um verbo de protocolo.
-
-        O rótulo do botão é escrito pelo script a cada leitura, porque ele
-        carrega o estado da porta — «PORTA · ABERTA» é a única coisa nesta
-        janela que diz que qualquer um entra, e um rótulo fixo esconderia
-        justamente isso.
-      -->
-      <button id="portaria-abrir" class="botao-fantasma" type="button">porta</button>
-    </div>
-    <p id="convite-alcance" class="convite-alcance" hidden></p>
-  </div>
-
-  <!--
     A portaria — ADR 0030.
 
     Camada sobre a sessão, e não tela, pela mesma razão escrita em `#moderar`:
@@ -2004,19 +1962,38 @@
             <button id="porta-copiar-config" class="botao-fantasma" type="button">copiar</button>
           </div>
           <!--
-            **As três camadas ficam na portaria, e o botão leva até lá.**
+            **O alcance do link, e ele veio da faixa que saiu.**
+
+            Um link que só funciona na rede de casa e um link que funciona pela
+            internet são o mesmo texto. Separá-los é o que faz o anfitrião
+            mandar o primeiro achando que mandou o segundo — e quem descobre é
+            o amigo, do outro lado, como «não conecta». Era a única coisa da
+            faixa que não estava dita em nenhum outro lugar, então ela desceu
+            para junto do link em vez de sair com ela.
+
+            Nasce vazio e escondido: antes de `hospedar` responder, esta janela
+            não sabe em que degrau parou, e um lugar reservado com texto de
+            exemplo mentiria durante o intervalo.
+          -->
+          <p id="convite-alcance" class="convite-alcance" hidden></p>
+          <!--
+            **As três camadas ficam na portaria, e este botão leva até lá.**
 
             A comp as desenha aqui dentro: senha do servidor, convite de uso
             único, portaria. Elas existem, funcionam, e moram em
             `camada-portaria` — 625 linhas com estado, alarme, lista de quem
-            bateu e o histórico de decisões.
+            bateu e o histórico de decisões. Trazê-las para cá seria duplicar
+            aquilo ou mudá-lo de casa no mesmo commit.
 
-            Trazê-las para cá seria duplicar aquilo ou mudá-lo de casa no mesmo
-            commit que introduz esta seção. O que este painel faz é o que a
-            promessa do diálogo exige — dar ao link um lugar permanente — e
-            abrir a porta para o resto.
+            O rótulo é escrito pelo script a cada leitura, porque ele carrega o
+            **estado da porta**: «PORTA · ABERTA» é a única coisa nesta janela
+            que diz que qualquer um entra, e um rótulo fixo esconderia
+            justamente isso. Era o que a faixa fazia, e é por isso que o botão
+            daqui é o `portaria-abrir` dela e não o `porta-camadas` que estava
+            neste lugar — dois botões para o mesmo diálogo, e só um deles
+            dizia alguma coisa.
           -->
-          <button id="porta-camadas" class="botao-fantasma" type="button">AS TRÊS CAMADAS DA PORTA</button>
+          <button id="portaria-abrir" class="botao-fantasma" type="button">porta</button>
         </section>
 
         <section id="painel-audio" class="server-painel-secao" aria-labelledby="secao-audio">

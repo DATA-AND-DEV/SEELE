@@ -650,11 +650,36 @@ $("portaria-ligar").addEventListener("click", () => {
  * pode não estar mais no ar, com uma impressão digital que pode ter mudado.
  */
 function guardarOLinkDaPorta(link) {
-  for (const campo of ["convite-link", "porta-link", "porta-link-config"]) {
+  for (const campo of ["porta-link", "porta-link-config"]) {
     const onde = $(campo);
     if (onde) onde.value = link;
   }
   $("secao-porta-item").hidden = false;
+}
+
+/**
+ * Esquece o link da porta. Toda saída passa por aqui.
+ *
+ * O `disconnect` também derruba o servidor que esta máquina hospedava, e um
+ * link para ele deixa de levar a lugar nenhum no mesmo instante. Enquanto ele
+ * morava numa faixa sobre a sessão, sumir era a faixa se esconder; agora ele
+ * mora na configuração, que continua aberta a qualquer momento — então a
+ * entrada `A PORTA` volta a se esconder, os campos voltam a ficar vazios, e o
+ * alcance junto com eles.
+ *
+ * Sem isto, quem hospedasse, saísse e abrisse a configuração encontraria o link
+ * do servidor que acabou de derrubar, com a impressão digital de um certificado
+ * que pode não existir mais — e copiá-lo é a única coisa que se faz com ele.
+ */
+function esquecerOLinkDaPorta() {
+  for (const campo of ["porta-link", "porta-link-config"]) {
+    const onde = $(campo);
+    if (onde) onde.value = "";
+  }
+  const alcance = $("convite-alcance");
+  alcance.textContent = "";
+  alcance.hidden = true;
+  $("secao-porta-item").hidden = true;
 }
 
 /** Para onde o teclado volta quando o diálogo da porta fecha. */
@@ -698,9 +723,9 @@ function fecharPorta() {
  * Copia um campo de link e diz que copiou, no próprio botão.
  *
  * `select()` antes de tudo: se a área de transferência for negada, a pessoa
- * ainda fica com o link selecionado e copia pelo teclado. É a mesma escolha
- * que o `convite-copiar` da tela de entrada já fazia, e ela está aqui em vez
- * de repetida porque agora são três campos com o mesmo link.
+ * ainda fica com o link selecionado e copia pelo teclado. Aqui e não repetida
+ * porque são dois campos com o mesmo link: o do diálogo que aparece uma vez ao
+ * hospedar, e o da configuração, onde ele mora depois disso.
  */
 async function copiarLink(campo, botao) {
   campo.select();
@@ -729,12 +754,6 @@ $("porta-configuracoes").addEventListener("click", () => {
 
 $("porta-copiar-config").addEventListener("click", () => {
   copiarLink($("porta-link-config"), $("porta-copiar-config"));
-});
-
-// As três camadas continuam na portaria, e este botão leva até lá — ver a nota
-// no `painel-porta`.
-$("porta-camadas").addEventListener("click", () => {
-  abrirPortaria();
 });
 
 // `Escape` fecha, em fase de captura: com ele aberto, é a coisa mais de cima.
