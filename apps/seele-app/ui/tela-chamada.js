@@ -447,7 +447,13 @@ function pintarCartao(cartao, pessoa, temAudio) {
   cartao.dataset.faixa = pessoa.sync_band;
   cartao.dataset.fala = pessoa.speaking ? "sim" : "nao";
 
-  cartao.querySelector(".chamada-avatar").textContent = iniciaisDoCartao(pessoa.nickname);
+  // As iniciais **e** o retrato: as primeiras são o que se vê de quem não pôs
+  // imagem, e `vestirAvatar` as substitui quando há uma. A grade da chamada era
+  // a terceira superfície que a comp desenha com avatar e a única que continuou
+  // só com letras — «ícone do usuário não aparece na chamada».
+  const avatar = cartao.querySelector(".chamada-avatar");
+  avatar.textContent = iniciaisDoCartao(pessoa.nickname);
+  vestirAvatar(avatar, pessoa.id);
   cartao.querySelector(".chamada-cartao-nome").textContent =
     pessoa.nickname + (pessoa.is_self ? " (você)" : "");
   // O estado em frase, ao lado do estado em palavra, e sempre visível: é o dado

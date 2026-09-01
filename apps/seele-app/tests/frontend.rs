@@ -9450,3 +9450,51 @@ fn the_variant_names_the_shell_sends_are_the_ones_the_wire_uses() {
          funcionar de uma vez."
     );
 }
+
+/// As três superfícies que desenham uma pessoa vestem o retrato dela.
+///
+/// A comp da 0.9.0 desenha um avatar em três lugares — o bloco do operador, a
+/// linha de cada mensagem, e o cartão de cada pessoa na grade da chamada. O
+/// retrato passou a existir de verdade num commit, e **a grade ficou de fora**:
+/// duas superfícies com foto e uma com letras, na mesma janela. Foi relatado
+/// assim: «ícone do usuário não aparece na chamada».
+///
+/// O guarda é sobre a chamada a `vestirAvatar` e não sobre o desenho, porque é a
+/// chamada que se esquece. Uma superfície nova entra por aqui.
+#[test]
+fn every_surface_that_draws_a_person_dresses_their_portrait() {
+    for (arquivo, funcao, onde) in [
+        (
+            "ui/tela-sessao.js",
+            "function desenharOperador(",
+            "o bloco do operador",
+        ),
+        (
+            "ui/tela-chamada.js",
+            "function pintarCartao(",
+            "o cartão da grade da chamada",
+        ),
+    ] {
+        let corpo = js_function(&read(arquivo), funcao);
+        assert!(
+            corpo.contains("vestirAvatar("),
+            "{onde} desenha uma pessoa e não veste o retrato dela, então ela \
+             aparece com iniciais enquanto as outras superfícies mostram a \
+             foto:\n{corpo}"
+        );
+    }
+
+    // A linha da mensagem não é uma função inteira, e o avatar dela é desenhado
+    // dentro do ramo de quem **não** repete o autor da linha anterior.
+    let sessao = read("ui/tela-sessao.js");
+    let Some((_, depois)) = sessao.split_once("\"mensagem-avatar\"") else {
+        panic!("a linha da mensagem não desenha mais avatar nenhum");
+    };
+    let Some(perto) = depois.get(..400) else {
+        panic!("o arquivo acaba logo depois do avatar da mensagem");
+    };
+    assert!(
+        perto.contains("vestirAvatar("),
+        "a linha da mensagem desenha um avatar e não veste o retrato:\n{perto}"
+    );
+}
