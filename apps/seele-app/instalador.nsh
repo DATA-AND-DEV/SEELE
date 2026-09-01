@@ -53,3 +53,66 @@
     ${EndIf}
   ${EndIf}
 !macroend
+
+; # A regra de firewall de entrada
+;
+; No macOS e no Linux o firewall padrão não barra entrada de um programa que já
+; está escutando. No Windows barra: a regra nasce quando alguém clica «permitir»
+; num diálogo que aparece uma vez, na primeira execução — e não nasce se a
+; pessoa apertar Cancelar, ou se a rede estiver marcada como pública, que é o
+; que o Windows faz sozinho com metade das redes domésticas. Sem a regra o
+; anfitrião sobe o servidor, vê tudo verde do lado dele, e ninguém entra.
+;
+; Até aqui o SEELE só sabia **olhar** para essa regra: `alcance::firewall` lê a
+; saída do `netsh` e responde se há uma. Ele se recusava a criar, e a razão
+; escrita no cabeçalho dele era que o instalador rodava por usuário e não tinha
+; elevação. Essa razão caducou na 0.7.2, quando a instalação passou a ser da
+; máquina — e o comentário no topo deste arquivo diz que ela passou a ser da
+; máquina **por causa disto**. A elevação foi conquistada para criar a regra e a
+; regra nunca foi criada.
+;
+; ## As escolhas
+;
+; **Por programa e não por porta.** `program=` e não `localport=8383`: a porta
+; do encontro é a 8384, ao lado da do servidor, e uma regra por porta deixaria
+; metade do problema de pé. É também a forma que `alcance::firewall::ha_regra_para`
+; sabe reconhecer — ele compara a linha `Program`, então uma regra por porta
+; seria invisível para o próprio código que confere.
+;
+; **`profile=any`.** É o que todos os nossos documentos mandam a pessoa colar à
+; mão, e é o que resolve a rede doméstica que o Windows classificou como
+; pública — que é metade do sintoma. Vale dizer o que isso é: mais permissivo
+; que o diálogo do Windows, que vem com «pública» desmarcada. O que segura o
+; risco é o escopo, que é um executável em UDP, e não uma porta aberta para
+; qualquer programa.
+;
+; **Apagar antes de criar.** O `netsh` aceita duas regras com o mesmo nome sem
+; reclamar, e este gancho roda de novo a cada atualização: sem o `delete` a
+; lista de regras cresceria uma por versão. O `delete` é por nome e não por
+; caminho de propósito — é o que varre também a regra da instalação por usuário
+; antiga, que aponta para um `.exe` no `AppData` que não existe mais.
+;
+; **Falhar aqui não derruba a instalação.** O código de saída do `netsh` é
+; retirado da pilha e ignorado: quem não conseguiu a regra ainda tem um app que
+; funciona para entrar nos servidores dos outros, e trocar isso por uma
+; instalação abortada seria péssimo negócio. A saída do `netsh` fica no log do
+; instalador, atrás de «mostrar detalhes».
+;
+; `$SYSDIR\netsh.exe` com caminho inteiro, e não `netsh` solto: este gancho roda
+; elevado, e resolver o nome pelo PATH num processo com administrador é entregar
+; a quem escreve no PATH o direito de escolher o que roda.
+
+!macro NSIS_HOOK_POSTINSTALL
+  nsExec::ExecToLog '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="SEELE" dir=in'
+  Pop $0
+  nsExec::ExecToLog '"$SYSDIR\netsh.exe" advfirewall firewall add rule name="SEELE" dir=in action=allow protocol=udp profile=any enable=yes program="$INSTDIR\${MAINBINARYNAME}.exe" description="Deixa entrar conexão para o servidor SEELE hospedado nesta máquina."'
+  Pop $0
+!macroend
+
+; Sai junto com o programa. Numa atualização o desinstalador antigo roda antes
+; do instalador novo, que recria a regra no gancho de cima — a ordem converge
+; sozinha e não precisa perguntar se é atualização ou remoção de verdade.
+!macro NSIS_HOOK_PREUNINSTALL
+  nsExec::ExecToLog '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="SEELE" dir=in'
+  Pop $0
+!macroend

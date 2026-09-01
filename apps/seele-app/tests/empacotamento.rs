@@ -310,3 +310,122 @@ fn o_modulo_de_video_e_procurado_fora_do_pacote() {
          de configuração; toda atualização vai apagá-lo de novo"
     );
 }
+
+/// Só o corpo de um dos ganchos do `instalador.nsh`.
+///
+/// Recortado porque as asserções deste arquivo falam de **ordem dentro de um
+/// gancho**, e procurar no arquivo inteiro daria verde para um `delete` que
+/// mora no gancho de desinstalar e um `add` que mora no de instalar — que é
+/// justamente o arranjo errado que estes testes existem para pegar.
+fn gancho(nome: &str) -> String {
+    let nsh = ler("instalador.nsh");
+    let inicio = nsh
+        .find(&format!("!macro {nome}\n"))
+        .unwrap_or_else(|| panic!("o instalador.nsh não tem o gancho {nome}"));
+    let resto = &nsh[inicio..];
+    let fim = resto
+        .find("!macroend")
+        .unwrap_or_else(|| panic!("o gancho {nome} não fecha com !macroend"));
+    resto[..fim].to_string()
+}
+
+#[test]
+fn o_instalador_cria_a_regra_de_firewall_de_entrada() {
+    // No Windows, um programa que escuta não recebe de fora sem regra. Sem
+    // este gancho a regra só nasce se a pessoa acertar um diálogo que aparece
+    // uma vez — e que não aparece de novo se ela errar. O sintoma de errar é o
+    // pior que este projeto tem: o anfitrião sobe o servidor, vê tudo verde do
+    // lado dele, e ninguém consegue entrar.
+    let pos = gancho("NSIS_HOOK_POSTINSTALL");
+    assert!(
+        pos.contains("advfirewall firewall add rule"),
+        "o gancho de pós-instalação não cria mais a regra de firewall; \
+         quem hospedar no Windows volta a depender de acertar o diálogo do sistema"
+    );
+    assert!(
+        pos.contains("dir=in") && pos.contains("protocol=udp"),
+        "a regra de firewall deixou de ser entrada em UDP.\n\
+         O transporte é QUIC, que é UDP, e é entrada que o Windows barra: \
+         uma regra de saída ou de TCP não resolve nada e parece resolver"
+    );
+}
+
+#[test]
+fn a_regra_de_firewall_e_por_programa_e_nao_por_porta() {
+    // Duas razões, e a segunda é a que morde.
+    //
+    // A porta do encontro é a 8384, ao lado da 8383 do servidor, então uma
+    // regra presa a uma porta deixaria metade do caminho fechada.
+    //
+    // E `alcance::firewall::ha_regra_para` reconhece a nossa regra comparando a
+    // linha `Program` da saída do `netsh`. Uma regra por porta não tem essa
+    // linha: ela funcionaria, e o código que confere continuaria respondendo
+    // `Barrada` para uma máquina liberada.
+    let pos = gancho("NSIS_HOOK_POSTINSTALL");
+    assert!(
+        pos.contains("program="),
+        "a regra de firewall deixou de ser presa ao executável"
+    );
+    assert!(
+        !pos.contains("localport="),
+        "a regra de firewall virou regra de porta.\n\
+         Isso abre a porta para qualquer programa, deixa a 8384 do encontro de \
+         fora, e fica invisível para `alcance::firewall::ha_regra_para`, que \
+         compara a linha `Program`"
+    );
+}
+
+#[test]
+fn a_regra_de_firewall_e_apagada_antes_de_ser_criada() {
+    // O `netsh` aceita duas regras com o mesmo nome sem reclamar, e este gancho
+    // roda de novo a cada atualização. Sem o `delete` antes, a lista de regras
+    // do Windows cresceria uma entrada por versão instalada, para sempre.
+    let pos = gancho("NSIS_HOOK_POSTINSTALL");
+    let apaga = pos
+        .find("delete rule")
+        .expect("o gancho de pós-instalação não apaga a regra antes de criá-la");
+    let cria = pos.find("add rule").expect("já coberto pelo teste de cima");
+    assert!(
+        apaga < cria,
+        "o `delete` da regra de firewall passou a vir depois do `add`.\n\
+         Nessa ordem cada atualização deixa uma regra a mais na máquina de quem instala"
+    );
+}
+
+#[test]
+fn a_regra_de_firewall_sai_junto_com_o_programa() {
+    // Desinstalar tem de devolver a máquina ao estado anterior. Uma regra de
+    // firewall apontando para um `.exe` que não existe mais é lixo que só quem
+    // sabe procurar encontra.
+    assert!(
+        gancho("NSIS_HOOK_PREUNINSTALL").contains("delete rule"),
+        "o desinstalador deixou de remover a regra de firewall"
+    );
+}
+
+#[test]
+fn a_instalacao_e_da_maquina_porque_a_regra_de_firewall_depende_disso() {
+    // Este teste guarda uma dependência que não se vê olhando para nenhum dos
+    // dois arquivos sozinho.
+    //
+    // Criar regra de firewall exige administrador. A instalação da máquina
+    // eleva; a por usuário não. Voltar `installMode` para `currentUser` não
+    // quebraria build nenhum e não faria o gancho falhar de forma visível: o
+    // `netsh` recusaria, o código de saída seria ignorado — como tem de ser,
+    // porque isso não pode derrubar a instalação — e o instalador terminaria
+    // dizendo que deu tudo certo, com o firewall fechado.
+    //
+    // O comentário no topo do `instalador.nsh` conta que a instalação virou da
+    // máquina na 0.7.2 **por causa disto**, entre outras coisas. A regra só foi
+    // criada muito depois; o motivo estava lá antes do efeito.
+    let config = config();
+    let modo = config["bundle"]["windows"]["nsis"]["installMode"].as_str();
+    assert_eq!(
+        modo,
+        Some("perMachine"),
+        "o `installMode` do NSIS saiu de `perMachine`.\n\
+         Sem elevação o gancho de pós-instalação não cria a regra de firewall, \
+         e ele falha em silêncio: a instalação termina dizendo que deu certo e \
+         ninguém consegue entrar em quem hospedar."
+    );
+}

@@ -2,15 +2,23 @@
 //!
 //! Só existe no Windows, e o motivo é assimetria real e não preguiça: no macOS
 //! e no Linux o firewall padrão não barra entrada de um programa que já está
-//! escutando, e no Windows barra — a regra nasce quando alguém clica «permitir»
-//! num diálogo que aparece uma vez, na primeira execução, e que some se a pessoa
-//! apertar Cancelar ou se a rede estiver marcada como pública.
+//! escutando, e no Windows barra.
+//!
+//! Quem cria a regra é o instalador, no `NSIS_HOOK_POSTINSTALL` de
+//! `apps/seele-app/instalador.nsh`: uma regra de entrada em UDP para o
+//! executável, criada com a elevação que a instalação da máquina já tem. Antes
+//! dela só havia um caminho, e era ruim — o diálogo do Windows que aparece uma
+//! vez, na primeira execução, e que não deixa regra nenhuma se a pessoa apertar
+//! Cancelar ou se a rede estiver marcada como pública.
 //!
 //! # O que este módulo se recusa a fazer
 //!
-//! **Não cria regra nenhuma.** Criar exige administrador, o instalador do SEELE
-//! roda por usuário (`installMode: currentUser`) e um app de conversa que pede
-//! elevação está pedindo uma coisa grande por uma coisa pequena.
+//! **Não cria regra nenhuma**, mesmo agora que existe quem crie. Não é
+//! duplicação de trabalho: o instalador cobre o caso comum e este módulo cobre
+//! o que sobra dele — a regra que alguém apagou, a que uma política de domínio
+//! não deixou nascer, e a instalação anterior ao gancho. Criar aqui exigiria
+//! pedir elevação em tempo de execução, e um app de conversa que pede
+//! administrador para conversar está pedindo uma coisa grande por uma pequena.
 //!
 //! **E não adivinha.** [`Entrada::NaoSei`] é uma resposta de primeira classe, e
 //! é a que sai sempre que a consulta não pôde ser feita ou não pôde ser lida.
