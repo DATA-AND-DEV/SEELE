@@ -2830,8 +2830,23 @@ fn main() {
     // máquina mora. Um arquivo só, aberto em modo de acréscimo: rotação é uma
     // decisão que este log ainda não precisa, e um arquivo que some é pior que
     // um arquivo grande.
-    let filtro = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "seele_app=info,seele_ffi=info,seele_core=info".into());
+    // **Todos os crates, e não três.**
+    //
+    // Faltavam `seele_video`, `seele_audio` e `seele_server`, e a falta era
+    // invisível: o `tracing` não reclama de um alvo que ninguém declarou, ele
+    // apenas não mostra. O custo apareceu em campo — a linha que diz qual
+    // codificador pegou, `a tela vai pelo codificador do sistema`, mora em
+    // `seele_video` e nunca chegou ao arquivo. Pedi ao dono um log para
+    // responder uma pergunta que o log estava proibido de responder.
+    //
+    // `tests/empacotamento.rs` prende a lista: um crate novo amanhã entra mudo
+    // se ninguém o acrescentar aqui, e mudo é como este ficou.
+    let filtro = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        "seele_app=info,seele_ffi=info,seele_core=info,\
+         seele_video=info,seele_audio=info,seele_server=info,seele_proto=info,\
+         seele_encontro=info"
+            .into()
+    });
     match arquivo_de_log() {
         Some(arquivo) => tracing_subscriber::fmt()
             .with_env_filter(filtro)

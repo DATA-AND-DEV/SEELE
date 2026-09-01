@@ -456,3 +456,44 @@ fn o_rastro_do_windows_fica_ao_lado_das_preferencias() {
          não vai achar."
     );
 }
+
+#[test]
+fn todo_crate_do_produto_pode_falar_no_log() {
+    // O filtro padrão listava três crates de sete, e a falta era invisível: o
+    // `tracing` não reclama de um alvo ausente, ele apenas não mostra. O custo
+    // apareceu em campo — a linha que diz qual codificador de vídeo pegou mora
+    // em `seele_video`, e eu passei uma sessão inteira pedindo ao dono um log
+    // para responder uma pergunta que o log estava proibido de responder.
+    //
+    // A regra é «todo crate deste repositório», e não «os que o app liga»:
+    // acertar a lista de ligados exigiria resolver o grafo de dependências num
+    // teste, e uma diretiva a mais no filtro não custa nada — o `EnvFilter`
+    // ignora em silêncio um alvo que ninguém emite. Errar para o lado de sobrar
+    // é de graça; errar para o lado de faltar custou esta sessão.
+    let fonte = ler("src/main.rs");
+    let raiz = app().join("../../crates");
+    let mut faltando = Vec::new();
+    for entrada in std::fs::read_dir(&raiz).expect("li a pasta de crates") {
+        let entrada = entrada.expect("li uma entrada");
+        if !entrada.path().is_dir() {
+            continue;
+        }
+        let nome = entrada.file_name().to_string_lossy().replace('-', "_");
+        // Estes dois não entram num binário do produto: um é o cliente de
+        // terminal e o outro é a bateria de conformidade.
+        if nome == "seele_tui" || nome == "seele_conformance" {
+            continue;
+        }
+        if !fonte.contains(&format!("{nome}=info")) {
+            faltando.push(nome);
+        }
+    }
+    faltando.sort();
+    assert!(
+        faltando.is_empty(),
+        "estes crates não aparecem no filtro padrão do log e por isso não \
+         conseguem falar: {faltando:?}.\n\
+         Um alvo que falta não dá erro — ele só não aparece, e quem for depurar \
+         vai procurar uma linha que nunca vai chegar."
+    );
+}

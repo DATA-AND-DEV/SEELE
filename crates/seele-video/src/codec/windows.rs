@@ -36,6 +36,7 @@ use windows::Win32::Media::MediaFoundation::{
     MFVideoFormat_NV12, MFVideoInterlace_Progressive, MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS,
     MFT_CATEGORY_VIDEO_ENCODER, MFT_ENUM_FLAG_ASYNCMFT, MFT_ENUM_FLAG_HARDWARE,
     MFT_ENUM_FLAG_SORTANDFILTER, MFT_ENUM_FLAG_SYNCMFT, MFT_MESSAGE_NOTIFY_BEGIN_STREAMING,
+    MFT_MESSAGE_NOTIFY_END_OF_STREAM, MFT_MESSAGE_NOTIFY_END_STREAMING,
     MFT_MESSAGE_NOTIFY_START_OF_STREAM, MFT_OUTPUT_DATA_BUFFER, MFT_REGISTER_TYPE_INFO,
     MF_E_TRANSFORM_NEED_MORE_INPUT, MF_MT_AVG_BITRATE, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE,
     MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_TRANSFORM_ASYNC,
@@ -525,6 +526,36 @@ fn botao(transformador: &IMFTransform, chave: &GUID, valor: i32) {
     let valor = windows::Win32::System::Variant::VARIANT::from(valor);
     // SAFETY: a chave é estática do sistema e o valor vive até o fim da chamada.
     let _ = unsafe { api.SetValue(chave, &raw const valor) };
+}
+
+impl Drop for Codificador {
+    /// Avisa o transformador de que acabou, antes de soltá-lo.
+    ///
+    /// **Soltar a interface não é a mesma coisa que encerrar o fluxo.** Um MFT
+    /// de hardware segura recursos da GPU entre o `NOTIFY_BEGIN_STREAMING` e o
+    /// `NOTIFY_END_STREAMING`, e a contagem de referências do COM não sabe
+    /// disso: quem tem de dizer que acabou é quem começou.
+    ///
+    /// Importa mais do que parece porque este objeto **morre com frequência**.
+    /// Trocar de degrau na escada de resolução recomeça captura, codificador e
+    /// fluxo juntos — o §3.6 —, e um log de campo mostrou três recomeços em
+    /// trinta segundos. Cada sessão abandonada sem aviso é um pedaço de memória
+    /// que só volta quando o processo morre.
+    ///
+    /// Erros são ignorados: já estamos no caminho de desmonte, e não há a quem
+    /// contar.
+    fn drop(&mut self) {
+        // SAFETY: mensagens de ciclo de vida, sem ponteiros nossos, num
+        // transformador que ainda é válido — ele só é solto depois deste bloco.
+        unsafe {
+            let _ = self
+                .transformador
+                .ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, 0);
+            let _ = self
+                .transformador
+                .ProcessMessage(MFT_MESSAGE_NOTIFY_END_STREAMING, 0);
+        }
+    }
 }
 
 impl Codificador {
