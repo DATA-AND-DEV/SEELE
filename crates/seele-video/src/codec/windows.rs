@@ -195,7 +195,20 @@ pub struct Codificador {
     /// O quadro convertido para NV12, reaproveitado entre chamadas. Alocar 3 MB
     /// por quadro a 60 quadros seria 180 MB por segundo passando pelo alocador.
     nv12: Vec<u8>,
+    /// As amostras que vão ao MFT, reaproveitadas em rodízio. Ver
+    /// [`Codificador::amostra`] para por que são várias e não uma.
+    anel: Vec<IMFSample>,
+    /// Qual delas é a vez.
+    proxima_do_anel: usize,
 }
+
+/// Quantas amostras giram no anel de entrada.
+///
+/// Quatro: o laço espera a saída de cada quadro antes de entregar o próximo,
+/// então o MFT nunca tem mais de um ou dois na mão. O que sobra é margem para um
+/// codificador que segure um pouco mais, e o teto de memória fica em quatro
+/// quadros — 12 MB a 1080p — em vez de crescer com o tempo de transmissão.
+const ANEL: usize = 4;
 
 // SAFETY: as interfaces COM daqui são todas de apartamento livre — o MFT é
 // criado sem `CoInitialize` de STA e a documentação do Media Foundation trata
@@ -322,6 +335,8 @@ impl Codificador {
             quadros_por_segundo: quadros,
             teto_bps: config.teto_bps,
             contador: 0,
+            anel: Vec::with_capacity(ANEL),
+            proxima_do_anel: 0,
             // Y inteiro mais um plano de croma com metade das linhas.
             nv12: vec![0; largura * altura + largura * altura.div_ceil(2)],
         })
@@ -388,14 +403,41 @@ impl Codificador {
 
 impl Codificador {
     /// Embrulha o NV12 já convertido numa amostra com carimbo e duração.
-    fn amostra(&self) -> Result<IMFSample, ErroDeVideo> {
-        // SAFETY: criam objetos novos, sem entrada nossa.
-        let amostra =
-            unsafe { MFCreateSample() }.map_err(|erro| recusa("criar a amostra", erro))?;
+    fn amostra(&mut self) -> Result<IMFSample, ErroDeVideo> {
+        // **Reaproveitar, e não alocar por quadro.** Aqui iam os 120 MB.
+        //
+        // Um quadro de 1080p em NV12 são 3 MB. Criar uma amostra e um buffer
+        // novos a cada um, a 60 por segundo, são **180 MB por segundo** passando
+        // pelo alocador — e o do Windows não devolve isso ao sistema na mesma
+        // velocidade em que recebe de volta. O relato: «estou acostumado com o
+        // SEELE a 15 MB; compartilhando tela ele vai para 120».
+        //
+        // Um anel e não uma amostra só: depois do `ProcessInput` o MFT **segura
+        // a referência** até terminar com ela, e reescrever o buffer nesse
+        // intervalo seria trocar o conteúdo de um quadro que está sendo
+        // codificado. Quatro é folga larga para um laço que espera a saída de
+        // cada quadro antes de entregar o próximo; o custo teto é 12 MB a 1080p,
+        // constante, em vez de crescer sem fim.
         let tamanho = u32::try_from(self.nv12.len()).unwrap_or(u32::MAX);
-        // SAFETY: idem.
-        let buffer = unsafe { MFCreateMemoryBuffer(tamanho) }
-            .map_err(|erro| recusa("criar o buffer da amostra", erro))?;
+        let volta = self.proxima_do_anel;
+        self.proxima_do_anel = (self.proxima_do_anel + 1) % ANEL;
+        if self.anel.len() < ANEL {
+            // SAFETY: criam objetos novos, sem entrada nossa.
+            let nova =
+                unsafe { MFCreateSample() }.map_err(|erro| recusa("criar a amostra", erro))?;
+            // SAFETY: idem.
+            let buffer = unsafe { MFCreateMemoryBuffer(tamanho) }
+                .map_err(|erro| recusa("criar o buffer da amostra", erro))?;
+            // SAFETY: a amostra é nossa e ainda não foi entregue a ninguém.
+            unsafe { nova.AddBuffer(&buffer) }.map_err(|erro| recusa("montar a amostra", erro))?;
+            self.anel.push(nova);
+        }
+        let Some(amostra) = self.anel.get(volta).cloned() else {
+            return Err(recusa("montar a amostra", "o anel de amostras encolheu"));
+        };
+        // SAFETY: a amostra é do anel e tem exatamente um buffer, posto acima.
+        let buffer = unsafe { amostra.GetBufferByIndex(0) }
+            .map_err(|erro| recusa("reencontrar o buffer da amostra", erro))?;
 
         let mut destino: *mut u8 = std::ptr::null_mut();
         let mut cabe: u32 = 0;
@@ -424,11 +466,15 @@ impl Codificador {
         // Foundation. Sem eles o controle de taxa não tem eixo do tempo e o
         // teto vira sugestão.
         let duracao = 10_000_000_i64 / i64::from(self.quadros_por_segundo.max(1));
-        // SAFETY: a amostra é nossa.
+        // **Sem `AddBuffer` aqui.** O buffer entra uma vez, quando a amostra
+        // nasce; chamá-lo a cada quadro acrescentaria o mesmo buffer de novo à
+        // lista dela, e a lista cresceria para sempre — o vazamento que este
+        // anel existe para tirar, com outra cara.
+        //
+        // SAFETY: a amostra é do nosso anel.
         unsafe {
             amostra
-                .AddBuffer(&buffer)
-                .and_then(|()| amostra.SetSampleTime(self.contador))
+                .SetSampleTime(self.contador)
                 .and_then(|()| amostra.SetSampleDuration(duracao))
         }
         .map_err(|erro| recusa("montar a amostra", erro))?;
