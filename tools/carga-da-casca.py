@@ -138,6 +138,9 @@ window.__TAURI__ = {
       // O retrato desta máquina, que é o que faz os dois diálogos de perfil
       // terem o mesmo conteúdo com sessão e sem.
       if (cmd === "meu_retrato") return SEELE_RETRATO;
+      // Os bytes do retrato do servidor, que o roteiro pode trocar para provar
+      // que a tela acompanha uma mudança.
+      if (cmd === "icone_do_server") return window.__SEELE_ICONE_DO_SERVER ?? null;
       // O apelido desta máquina, como as preferências o guardam. O roteiro
       // pode trocá-lo por `window.__SEELE_APELIDO`.
       if (cmd === "apelido_local") return window.__SEELE_APELIDO ?? "";

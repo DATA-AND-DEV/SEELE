@@ -115,10 +115,64 @@ impl FonteDeQuadros for seele_video::captura::macos::CapturaDaTela {
     }
 }
 
+/// A captura do Windows, com o som que a máquina está tocando ao lado dela.
+///
+/// **Duas capturas e não uma**, ao contrário do macOS, onde a imagem e o som
+/// saem do mesmo `SCStream`. No Windows são coisas separadas: a imagem vem do
+/// Desktop Duplication e o som vem do *loopback* do WASAPI, que é uma saída
+/// aberta como entrada. Este par é o que as junta numa fonte só, para o resto
+/// do produto não precisar saber de qual sistema está falando.
+///
+/// O som é opcional dentro do par: uma máquina que não empresta a saída — ou um
+/// dispositivo que sumiu no meio — transmite **muda**, e não deixa de
+/// transmitir. Mostrar a tela sem som é metade do que se queria; não mostrar
+/// nada é zero.
 #[cfg(target_os = "windows")]
-impl FonteDeQuadros for seele_video::captura::windows::Captura {
+pub struct CapturaComSom {
+    imagem: seele_video::captura::windows::Captura,
+    som: Option<seele_audio::laco::CapturaDaSaida>,
+}
+
+/// `Fonte` tem de ser `Send`: ela nasce na thread que abre a captura e vive na
+/// do codificador. O `cpal::Stream` **não** é `Send` em todo backend — o WASAPI
+/// o declara e é por isso que este par existe no Windows e não em toda parte.
+///
+/// Aqui, e não num comentário: no dia em que o cpal tirar aquele `unsafe impl`,
+/// o erro aponta para esta linha e diz o nome do tipo, em vez de aparecer como
+/// um limite não satisfeito no meio de `Captura for CapturaDoSistema`.
+#[cfg(target_os = "windows")]
+const _: fn() = || {
+    fn exige_send<T: Send>() {}
+    exige_send::<CapturaComSom>();
+};
+
+#[cfg(target_os = "windows")]
+impl FonteDeQuadros for CapturaComSom {
     fn tomar(&self) -> Option<QuadroI420> {
-        self.pegar()
+        self.imagem.pegar()
+    }
+
+    fn tomar_som(&self) -> Vec<f32> {
+        let Some(captura) = self.som.as_ref() else {
+            return Vec::new();
+        };
+        // Um quinto de segundo por vez, como no macOS: mais que um tique de
+        // vídeo, para uma pausa de captura não virar um buraco no som, e menos
+        // que a folga do anel, para nunca esvaziá-lo de uma vez.
+        const TETO: usize = 9_600;
+
+        // A taxa do dispositivo quase sempre é a da casa. Quando não for, o que
+        // sai daqui está na taxa dele e o pacote sairia rápido ou lento demais —
+        // é melhor não mandar som nenhum do que mandar som errado, e o `debug`
+        // diz a quem investiga por que a transmissão saiu muda.
+        if captura.taxa() != seele_audio::SAMPLE_RATE_HZ {
+            tracing::debug!(
+                taxa = captura.taxa(),
+                "a saída desta máquina não toca na taxa da casa; a transmissão sai muda"
+            );
+            return Vec::new();
+        }
+        captura.tomar(TETO)
     }
 }
 
@@ -288,7 +342,7 @@ type AlvoDoSistema = std::convert::Infallible;
 #[cfg(target_os = "macos")]
 type FonteDoSistema = seele_video::captura::macos::CapturaDaTela;
 #[cfg(target_os = "windows")]
-type FonteDoSistema = seele_video::captura::windows::Captura;
+type FonteDoSistema = CapturaComSom;
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 type FonteDoSistema = std::convert::Infallible;
 
@@ -573,8 +627,20 @@ impl Captura for CapturaDoSistema {
         }
         #[cfg(target_os = "windows")]
         {
-            seele_video::captura::windows::Captura::iniciar(&self.alvo, resolucao, cadencia)
-                .map_err(|erro| CapturaRecusou::nova(resolucao, erro.to_string()))
+            let imagem =
+                seele_video::captura::windows::Captura::iniciar(&self.alvo, resolucao, cadencia)
+                    .map_err(|erro| CapturaRecusou::nova(resolucao, erro.to_string()))?;
+            // O som ao lado, e **sem derrubar a transmissão quando não abre**:
+            // mostrar a tela sem som é metade do que se queria; não mostrar
+            // nada é zero.
+            let som = match seele_audio::laco::CapturaDaSaida::abrir(None) {
+                Ok(captura) => Some(captura),
+                Err(erro) => {
+                    tracing::warn!(%erro, "não abri o som desta máquina; a transmissão sai muda");
+                    None
+                }
+            };
+            Ok(CapturaComSom { imagem, som })
         }
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {

@@ -61,6 +61,14 @@ const FOLGA_MS: u32 = 500;
 /// [`Self::abrir`]. Soltá-la para a captura.
 pub struct CapturaDaSaida {
     _fluxo: cpal::Stream,
+    /// As amostras esperando quem as leia.
+    ///
+    /// **Dentro da captura, e não devolvida ao lado dela.** A primeira versão
+    /// entregava o `Consumer` do anel, e com ele entregava o `rtrb` a quem
+    /// chamasse — `seele-core` teria de ganhar uma dependência para guardar um
+    /// tipo que não usa. Aqui, o formato do anel é assunto deste módulo, e o que
+    /// atravessa é `Vec<f32>`, que é o mesmo que a captura do macOS entrega.
+    amostras: std::sync::Mutex<Consumer<f32>>,
     contadores: Arc<StreamCounters>,
     taxa_do_dispositivo: u32,
     canais: NonZeroU16,
@@ -87,7 +95,7 @@ impl CapturaDaSaida {
     /// [`DeviceError`] quando não há saída, quando o sistema não a empresta como
     /// entrada — que é o caso de todo sistema sem *loopback* — ou quando o fluxo
     /// não abre.
-    pub fn abrir(dispositivo: Option<&str>) -> Result<(Self, Consumer<f32>), DeviceError> {
+    pub fn abrir(dispositivo: Option<&str>) -> Result<Self, DeviceError> {
         let host = cpal::default_host();
         // A **saída**, aberta como entrada: é isso que liga o loopback.
         let saida = crate::device::resolver(&host, dispositivo, Side::Output)?;
@@ -119,15 +127,33 @@ impl CapturaDaSaida {
             source,
         })?;
 
-        Ok((
-            Self {
-                _fluxo: fluxo,
-                contadores,
-                taxa_do_dispositivo,
-                canais,
-            },
-            consumidor,
-        ))
+        Ok(Self {
+            _fluxo: fluxo,
+            amostras: std::sync::Mutex::new(consumidor),
+            contadores,
+            taxa_do_dispositivo,
+            canais,
+        })
+    }
+
+    /// Tira até `quantas` amostras, na ordem em que chegaram.
+    ///
+    /// Vazio quando não há nada — que é diferente de não haver caminho: o
+    /// silêncio também produz amostras, e é [`Self::capturadas`] que separa os
+    /// dois.
+    #[must_use]
+    pub fn tomar(&self, quantas: usize) -> Vec<f32> {
+        let Ok(mut amostras) = self.amostras.lock() else {
+            return Vec::new();
+        };
+        let mut saida = Vec::new();
+        while saida.len() < quantas {
+            let Ok(amostra) = amostras.pop() else {
+                break;
+            };
+            saida.push(amostra);
+        }
+        saida
     }
 
     /// A taxa em que as amostras saem, que **não** é a da casa.
@@ -176,8 +202,8 @@ mod testes {
     /// perde amostras — as três coisas que decidem se este caminho existe.
     #[test]
     fn a_saida_desta_maquina_abre_como_entrada() {
-        let (captura, mut amostras) = match CapturaDaSaida::abrir(None) {
-            Ok(par) => par,
+        let captura = match CapturaDaSaida::abrir(None) {
+            Ok(captura) => captura,
             Err(erro) => {
                 eprintln!(
                     "PULADO: este sistema não empresta a saída como entrada ({erro}). \
@@ -190,9 +216,7 @@ mod testes {
         let comeco = std::time::Instant::now();
         let mut lidas = 0_usize;
         while comeco.elapsed().as_secs_f64() < 2.0 && lidas < 4800 {
-            while amostras.pop().is_ok() {
-                lidas += 1;
-            }
+            lidas += captura.tomar(4800).len();
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
 
