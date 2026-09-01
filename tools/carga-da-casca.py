@@ -50,6 +50,7 @@ CASCA = RAIZ / "apps" / "seele-app" / "ui"
 DUBLE = """<script>
 // O duble do Tauri. Responde o bastante para a casca andar; ver o cabeçalho de
 // `tools/carga-da-casca.py` sobre o que ele deliberadamente não finge.
+const SEELE_RETRATO = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGP4FCSPFTEMLQkA4oZYwU22lhgAAAAASUVORK5CYII=";
 const SEELE_RESPOSTAS = {
   hospedar: { aqui: "127.0.0.1:8383", convite: "seele://127.0.0.1:8383?fp=abc",
               alcance: "SoRedeLocal", porta_recusada: null, encontro_recusado: null },
@@ -84,6 +85,7 @@ const SEELE_QUADRO = {
                signal: 92, sync_band: "Verde", input_level: 0.4, local_fault: false,
                frames_refused: 0 },
   notice: null, muted: false, total_isolation: false, speaking: false,
+  person_icons_revision: 1,
   voice_mode: "PushToTalk", audio_available: true, capture: null, playback: null,
   may_manage_voice_rooms: true, may_kick: true, may_ban: true, may_remove_message: true,
   may_move_person: true, may_customise_server: true, may_delete_rooms: true,
@@ -109,6 +111,9 @@ window.__TAURI__ = {
       window.__SEELE_CHAMADAS.push(cmd);
       if (cmd in SEELE_RESPOSTAS) return SEELE_RESPOSTAS[cmd];
       if (/conhecid|fontes|lista|dispositiv|visitad|salas|canais|pessoas/i.test(cmd)) return [];
+      // Um retrato para uma pessoa só: o que se quer ver é a diferença entre um
+      // avatar com imagem e um com iniciais, lado a lado no mesmo quadro.
+      if (cmd === "imagem_da_pessoa") return args && args.person === 2 ? SEELE_RETRATO : null;
       if (/apelido|nickname|preferenc|link|caminho/i.test(cmd)) return "";
       return null;
     },

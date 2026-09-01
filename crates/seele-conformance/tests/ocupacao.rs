@@ -314,3 +314,88 @@ async fn uma_conexao_que_cai_sai_do_roster_de_todo_mundo() -> Result<()> {
     servidor.shutdown();
     Ok(())
 }
+
+#[tokio::test]
+async fn quem_volta_para_o_assento_guardado_reaparece_para_quem_ficou() -> Result<()> {
+    // **O defeito que este teste registra veio de campo assim:** «se você fecha o
+    // app dentro de uma sala, ao entrar no servidor, você volta para a sala no
+    // áudio, mas não aparece para o host».
+    //
+    // O servidor guarda o assento de quem cai, por uma janela de carência, para
+    // que uma queda de rede não pareça uma saída e uma chegada a todo mundo que
+    // está ouvindo. Quando a pessoa volta, ele a sentava de novo — entrava na
+    // tarefa da sala, marcava a ocupação, religava a mídia — **numa cópia** da
+    // contabilidade que a entrada normal faz. E a cópia não tinha a metade que os
+    // outros enxergam: o `PersonJoined`.
+    //
+    // Por isso o áudio funcionava. As duas metades vivem em lugares diferentes —
+    // a voz numa tarefa por sala, o roster num evento difundido —, e só a segunda
+    // faltava. Do lado de quem voltou não havia sintoma nenhum.
+    //
+    // O teste que já existia (`a_returning_person_reclaims_their_seat_and_their_ssrc`)
+    // olhava a volta pelos olhos de **quem voltou**: mesma conta, mesmo ssrc. Este
+    // olha pelos olhos de quem ficou, que é onde o buraco estava.
+    let (endereco, servidor) = server().await?;
+
+    // Quem fica. É o roster dele que tem de contar a verdade no fim.
+    let mut anfitriao = conectar(endereco, 61, "anfitriao").await?;
+    let mut sala_do_anfitriao = sala(&anfitriao);
+
+    let visitante = {
+        let visitante = conectar(endereco, 62, "visitante").await?;
+        visitante.inserir_plug(VoiceRoomId(1)).await?;
+        // O anfitrião tem de **ver** a entrada normal antes, ou a asserção do fim
+        // poderia passar por um `PersonJoined` que nunca foi embora.
+        assert!(
+            absorver_ate(
+                &mut anfitriao,
+                &mut sala_do_anfitriao,
+                Duration::from_secs(2),
+                |sala| sala.roster(VoiceRoomId(1)).count() == 1,
+            )
+            .await,
+            "o anfitrião não viu nem a entrada normal; o teste não chegou a medir a volta"
+        );
+        let sessao = visitante.sessao().clone();
+        // Fechar o app é isto: o enlace some sem despedida.
+        drop(visitante);
+        sessao
+    };
+
+    // A saída chega ao anfitrião, e o assento fica guardado no servidor.
+    assert!(
+        absorver_ate(
+            &mut anfitriao,
+            &mut sala_do_anfitriao,
+            Duration::from_secs(2),
+            |sala| sala.roster(VoiceRoomId(1)).next().is_none(),
+        )
+        .await,
+        "a sala do anfitrião continuou mostrando quem já tinha caído"
+    );
+
+    // E a pessoa volta, com a mesma chave — que é o que faz o servidor
+    // reconhecê-la e devolver o assento.
+    let devolvido = conectar(endereco, 62, "visitante").await?;
+    assert_eq!(
+        devolvido.sessao().ssrc,
+        visitante.ssrc,
+        "o assento não foi devolvido, e o resto deste teste mediria outra coisa"
+    );
+
+    assert!(
+        absorver_ate(
+            &mut anfitriao,
+            &mut sala_do_anfitriao,
+            Duration::from_secs(2),
+            |sala| sala.roster(VoiceRoomId(1)).count() == 1,
+        )
+        .await,
+        "quem voltou para o assento guardado está na sala, ouve e é ouvido, e \
+         **não aparece** no roster de quem ficou: o servidor devolveu o assento \
+         sem anunciar que devolveu"
+    );
+
+    servidor.shutdown();
+    Ok(())
+}

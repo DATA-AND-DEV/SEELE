@@ -2692,6 +2692,31 @@ fn main() {
                     }
                 }
             }
+
+            // **E no macOS o título nativo é apagado.**
+            //
+            // O `titleBarStyle: Overlay` deixa a barra do sistema transparente e
+            // a nossa aparece por baixo dela — mas o **título** continua sendo
+            // desenhado pelo sistema, em cinza, logo depois dos semáforos. É
+            // exatamente onde a nossa barra escreve o nome do servidor, e as
+            // duas frases saíam uma por cima da outra: numa foto de campo lia-se
+            // `SCasaE`, que é `SEELE` e `Casa` no mesmo lugar.
+            //
+            // Vazio e não outra coisa: o nome do produto já está escrito na
+            // própria barra, à direita, e o menu do sistema continua vindo do
+            // pacote e não daqui. Uma janela sem título nativo é o que toda
+            // aplicação de barra própria faz.
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::Manager;
+                if let Some(janela) = app.get_webview_window("main") {
+                    if let Err(erro) = janela.set_title("") {
+                        // Pelo mesmo motivo do Windows: feio e funcionando é
+                        // melhor que não abrir.
+                        tracing::warn!(%erro, "não consegui apagar o título nativo da janela");
+                    }
+                }
+            }
             // O módulo de vídeo passa a morar ao lado do banco, e não dentro do
             // pacote.
             //

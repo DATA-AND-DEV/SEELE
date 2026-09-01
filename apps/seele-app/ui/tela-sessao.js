@@ -51,6 +51,8 @@
 let desenhado = null;
 /** A Linha aberta, para saber para onde vai o que se digita. */
 let linhaAberta = null;
+/** Um desenho de mensagens que a tela escondida engoliu. Ver `desenharMensagens`. */
+let mensagensPorDesenhar = false;
 
 /**
  * Quantos lugares uma sala nova tem.
@@ -282,6 +284,18 @@ function desenhar(snapshot) {
   desenharLinha(snapshot);
   abrirLinhaSozinho(snapshot);
   sincronizarMensagens(snapshot.messages_revision);
+  // E o desenho que a tela escondida engoliu, agora que ela pode ter altura.
+  if (mensagensPorDesenhar) desenharMensagens();
+  // Os retratos, quando a revisão anda. `desenharMensagens` é chamada de novo se
+  // algo mudou — sem isso, uma imagem nova só apareceria na próxima mensagem.
+  sincronizarRetratos(snapshot)
+    .then((mudou) => {
+      if (mudou) {
+        desenharMensagens();
+        desenharOperador(snapshot);
+      }
+    })
+    .catch((falha) => console.warn("retratos:", falha));
   desenharPessoas(snapshot);
   desenharTelemetria(snapshot);
   desenharAviso(snapshot);
@@ -764,6 +778,9 @@ function linhaDeQuemEstaDentro(pessoa, snapshot) {
 /** A tira do operador, no rodapé da coluna de canais. */
 function desenharOperador(snapshot) {
   $("operador-nome").textContent = snapshot.nickname;
+  // O próprio retrato, no quadrado que já mostrava a inicial. `snapshot.me` é
+  // quem esta janela é para o servidor; sem ele não há a quem pedir a imagem.
+  vestirAvatar($("operador-inicial"), snapshot.me);
   // A inicial ao lado do nome, como a comp a desenha — e é a mesma que a prévia
   // do perfil mostra para quem não pôs imagem, para que as duas contem a mesma
   // coisa sobre a mesma pessoa.
@@ -1011,6 +1028,8 @@ function itemDeMensagem(mensagem, indice, segue) {
     // inventário v3 e a frase no rodapé da coluna de canais.
     const avatar = elemento("span", "mensagem-avatar", iniciaisDoApelido(mensagem.author_nickname));
     avatar.setAttribute("aria-hidden", "true");
+    // E o retrato de quem escreveu, quando essa pessoa pôs um.
+    vestirAvatar(avatar, mensagem.author);
     item.append(avatar);
   }
 
@@ -1075,7 +1094,19 @@ function desenharMensagens() {
   //
   // A lista é redesenhada ao voltar — `fecharChamada` e `fecharServer` pedem
   // isso —, então sair daqui não deixa nada velho na tela.
-  if (lista.clientHeight === 0) return;
+  //
+  // **Mas a primeira vez não tem quem peça, e por isso a bandeira.** `conectar`
+  // chama `desenhar(snapshot)` antes de `entrarNaAutenticacao`, de propósito —
+  // para a sessão chegar pronta em vez de esperar o primeiro tique do laço —, e
+  // nesse instante `#tela-sessao` ainda está escondida. `sincronizarMensagens`
+  // já marcou a revisão como desenhada quando a execução chega aqui, e a
+  // revisão só anda **quando alguém fala**: sem a bandeira, a conversa que já
+  // existia ficava invisível até outra pessoa escrever.
+  if (lista.clientHeight === 0) {
+    mensagensPorDesenhar = true;
+    return;
+  }
+  mensagensPorDesenhar = false;
 
   // Só rola sozinho se já estava no fim: puxar alguém de volta para baixo no
   // meio de uma leitura é pior do que não acompanhar.
@@ -2469,6 +2500,7 @@ async function ejetar() {
   $("tela-boot").hidden = false;
   esvaziarBarraDoServidor();
   esquecerOLinkDaPorta();
+  esquecerRetratos();
   $("bateria").hidden = true;
   // A moderação pela mesma razão que a bateria: aberta, ela voltaria por cima
   // da próxima sessão com um ato armado sobre alguém do servidor anterior.
@@ -3051,3 +3083,97 @@ listen("seele://event", (evento) => {
 setInterval(() => {
   if (!$("tela-sessao").hidden) atualizar();
 }, 500);
+
+// ------------------------------------------------- os retratos das pessoas
+
+/**
+ * **O retrato de quem fala, onde a comp desenha iniciais.**
+ *
+ * Ele existia por inteiro e não aparecia em lugar nenhum: protocolo
+ * (`SetPersonIcon`), disco, comando `imagem_da_pessoa` e um modal para escolher
+ * a imagem — e o único lugar que chamava o comando era o próprio modal, para
+ * mostrar de volta a quem acabou de escolher. Quem punha uma foto não era visto
+ * por ninguém, nem por si mesmo fora daquela caixa. Foi assim que o relato de
+ * campo chegou: «ícone e nome do usuário não serve pra nada».
+ *
+ * As superfícies são as que a comp já desenha — o avatar de cada mensagem e o
+ * do operador —, então nada novo aparece na tela: o que muda é o que está
+ * dentro do quadrado que já estava lá.
+ *
+ * # Por que um cache com revisão, e não uma busca por quadro
+ *
+ * Os bytes são até 8 KiB de PNG por pessoa, e a sessão redesenha duas vezes por
+ * segundo. Buscar a cada quadro seria atravessar a ponte com megabytes por
+ * minuto por causa de imagens que mudam quando alguém aperta um botão.
+ *
+ * `Snapshot::person_icons_revision` é o mesmo acordo que o retrato do servidor
+ * já tem: um número que não significa nada sozinho, e cuja **diferença** manda
+ * rebuscar. Enquanto ele não muda, o que está desenhado continua valendo.
+ */
+const retratos = new Map();
+let revisaoDosRetratos = null;
+
+/** Esquece tudo. Toda sessão nova começa por aqui. */
+function esquecerRetratos() {
+  retratos.clear();
+  revisaoDosRetratos = null;
+}
+
+/**
+ * Põe em dia os retratos de quem está na tela, e diz se algum mudou.
+ *
+ * Busca só quem ainda não foi buscado — e, quando a revisão anda, busca todo
+ * mundo de novo. Uma pessoa sem imagem entra no cache como `null`, que é o que
+ * impede de perguntar de novo por ela a cada quadro.
+ */
+async function sincronizarRetratos(snapshot) {
+  const revisao = snapshot.person_icons_revision ?? 0;
+  if (revisaoDosRetratos !== revisao) {
+    retratos.clear();
+    revisaoDosRetratos = revisao;
+  }
+
+  const querem = new Set();
+  for (const sala of snapshot.voice_rooms ?? []) {
+    for (const pessoa of sala.people ?? []) querem.add(pessoa.id);
+  }
+  for (const pessoa of snapshot.presentes ?? []) querem.add(pessoa.id);
+
+  const faltando = [...querem].filter((id) => !retratos.has(id));
+  if (faltando.length === 0) return false;
+
+  await Promise.all(
+    faltando.map(async (id) => {
+      try {
+        retratos.set(id, (await invoke("imagem_da_pessoa", { person: id })) ?? null);
+      } catch (falha) {
+        // Uma sessão que caiu no meio da busca não é motivo de aviso na tela: o
+        // próximo quadro ou não vem, ou vem com a lista vazia.
+        console.warn("imagem_da_pessoa:", falha);
+        retratos.set(id, null);
+      }
+    }),
+  );
+  return true;
+}
+
+/**
+ * Põe o retrato num quadrado de avatar, ou deixa as iniciais.
+ *
+ * As iniciais **continuam sendo o padrão**, e não um lugar reservado: quem não
+ * pôs imagem é desenhado como a comp o desenha. O retrato as substitui em vez
+ * de conviver com elas — texto por cima de foto é o que nenhuma das duas coisas
+ * queria ser.
+ */
+function vestirAvatar(quadrado, pessoaId) {
+  const uri = pessoaId === null || pessoaId === undefined ? null : retratos.get(pessoaId);
+  if (uri) {
+    quadrado.style.backgroundImage = `url(${uri})`;
+    quadrado.dataset.comRetrato = "sim";
+    quadrado.textContent = "";
+  } else {
+    quadrado.style.removeProperty("background-image");
+    delete quadrado.dataset.comRetrato;
+  }
+  return quadrado;
+}

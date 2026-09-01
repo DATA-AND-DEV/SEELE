@@ -2065,3 +2065,16 @@ button.voice_room-nome:hover { text-decoration: underline; }
 }
 
 .pessoa-nome-porta:hover { color: var(--seele-laranja-nerv); }
+
+/* Um quadrado de avatar com retrato dentro.
+ *
+ * `cover` e não `contain`: o quadrado tem 34px e a imagem chega com no máximo
+ * 256, em proporção qualquer — deixar barras ao redor de um retrato desse
+ * tamanho o transforma num selo. O fundo negro é o que aparece enquanto os
+ * bytes não chegaram, e não um vazio claro piscando na coluna. */
+[data-com-retrato="sim"] {
+  background-color: var(--seele-negro-absoluto);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
+}

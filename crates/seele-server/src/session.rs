@@ -1236,28 +1236,31 @@ async fn run_session(
     telemetry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     // A reclaimed seat means the person was already in a voice room when they dropped.
+    //
+    // **Por `assentar`, e não por uma cópia dela.** Este bloco reimplementava a
+    // contabilidade de entrar numa sala — a tarefa da sala, a ocupação, a mídia
+    // — e deixava de fora a única parte que os **outros** enxergam: o
+    // `Event::PersonJoined`. Quem fechava o app dentro de uma sala e voltava era
+    // sentado de verdade, ouvia e era ouvido, e não aparecia no roster de mais
+    // ninguém. Relatado assim: «você volta para a sala no áudio, mas não aparece
+    // para o host».
+    //
+    // Duas cópias da mesma contabilidade divergem, e esta divergiu na metade que
+    // não dá erro nenhum: o áudio funcionava, então nada parecia quebrado do
+    // lado de quem voltou. Agora há uma função só, e o anúncio vem junto com o
+    // assento porque são a mesma coisa dita para dentro e para fora.
     if let Some(reclaimed) = session.reclaimed_voice_room {
-        voice_rooms
-            .of(reclaimed)
-            .await
-            .send(VoiceRoomCommand::Join {
-                person: session.person,
-                ssrc: session.ssrc,
-                may_speak: session.may_speak,
-                outbound: outbound_tx.clone(),
-                tela: tela_tx.clone(),
-            })
-            .await?;
+        assentar(
+            server,
+            voice_rooms,
+            session,
+            &outbound_tx,
+            &tela_tx,
+            reclaimed,
+        )
+        .await?;
         current_voice_room = Some(reclaimed);
         midia.entrou(current_voice_room);
-        server.occupancy.lock().await.seat(
-            reclaimed,
-            crate::server::Occupant {
-                person: session.person,
-                nickname: session.nickname.clone(),
-                ssrc: session.ssrc,
-            },
-        );
         tracing::info!(person = %session.person, "seat reclaimed");
     }
 

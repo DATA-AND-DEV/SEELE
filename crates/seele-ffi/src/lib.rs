@@ -702,6 +702,14 @@ struct Shared {
     /// O número em si não significa nada; só a diferença significa. A casca
     /// guarda o último que desenhou e busca a imagem quando ele muda.
     icon_revision: std::sync::atomic::AtomicU64,
+    /// O mesmo número, para as imagens **das pessoas**.
+    ///
+    /// Um só para todas, e não um por pessoa: quem desenha os retratos desenha
+    /// todos no mesmo quadro, então uma casca que descobre que algo mudou
+    /// rebusca o que está na tela e pronto. Um contador por pessoa custaria um
+    /// campo em cada `Person` do `Snapshot`, duas vezes por segundo, para
+    /// distinguir um caso que ninguém trata separadamente.
+    person_icons_revision: std::sync::atomic::AtomicU64,
     /// Quem está esperando o peso de uma Linha, e por qual Linha.
     ///
     /// A única pergunta com resposta deste crate. Todo o resto que a casca pede
@@ -1034,6 +1042,7 @@ impl Connection {
             link_attempts: std::sync::atomic::AtomicU32::new(0),
             messages_revision: std::sync::atomic::AtomicU64::new(0),
             icon_revision: std::sync::atomic::AtomicU64::new(0),
+            person_icons_revision: std::sync::atomic::AtomicU64::new(0),
             room: Mutex::new(Room::new()),
             listeners: Mutex::new(Vec::new()),
             voice: Mutex::new(None),
@@ -2045,12 +2054,31 @@ impl Connection {
             Ok(room) => room.clone(),
             Err(_) => Room::new(),
         };
-        let nickname = self
-            .shared
-            .nickname
-            .lock()
-            .map(|name| name.clone())
-            .unwrap_or_default();
+        // **O nome vem do roster quando o roster nos conhece.**
+        //
+        // O `Mutex` local guarda o que se digitou ao conectar, e só isso: ele é
+        // escrito uma vez, na construção. Trocar de apelido manda um comando, o
+        // servidor confirma com `PersonRenamed`, o roster muda — e este número
+        // continuava lendo o nome antigo, para sempre. Quem trocasse via o
+        // próprio nome mudar na lista de gente e **não** no bloco do operador,
+        // que é onde ele está escrito ao lado do próprio retrato. Foi relatado
+        // assim: «nome do usuário não altera em tempo real».
+        //
+        // O `Mutex` continua sendo a resposta antes de o servidor apresentar
+        // esta conexão a si mesma — entre o `connect` e o `Welcome` não há
+        // roster, e um nome vazio ali seria a janela dizendo que ninguém está
+        // usando ela.
+        let nickname = room
+            .me
+            .and_then(|me| room.people.get(&me))
+            .map(|person| person.nickname.clone())
+            .unwrap_or_else(|| {
+                self.shared
+                    .nickname
+                    .lock()
+                    .map(|name| name.clone())
+                    .unwrap_or_default()
+            });
 
         let audio = self.audio_state();
 
@@ -2067,6 +2095,7 @@ impl Connection {
             link_state: link_state_from_byte(self.shared.link_state.load(Ordering::Relaxed)),
             server: room.server.clone(),
             icon_revision: self.shared.icon_revision.load(Ordering::Relaxed),
+            person_icons_revision: self.shared.person_icons_revision.load(Ordering::Relaxed),
             me: room.me.map(|person| person.0),
             nickname,
             voice_rooms: voice_rooms_of(&room),
@@ -3159,6 +3188,12 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
                 .icon_revision
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
+        // E o das pessoas, pela mesma razão e com a mesma ordem: antes do aviso.
+        if matches!(message, seele_core::ServerMessage::PersonIconChanged { .. }) {
+            shared
+                .person_icons_revision
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
         shared.notify(&Event::ServerChanged);
     }
     if changed.telemetry {
@@ -4042,6 +4077,7 @@ mod tests {
             link_attempts: std::sync::atomic::AtomicU32::new(0),
             messages_revision: std::sync::atomic::AtomicU64::new(0),
             icon_revision: std::sync::atomic::AtomicU64::new(0),
+            person_icons_revision: std::sync::atomic::AtomicU64::new(0),
             room: Mutex::new(Room::new()),
             listeners: Mutex::new(Vec::new()),
             voice: Mutex::new(None),
@@ -5113,6 +5149,7 @@ mod tests {
             link_attempts: std::sync::atomic::AtomicU32::new(0),
             messages_revision: std::sync::atomic::AtomicU64::new(0),
             icon_revision: std::sync::atomic::AtomicU64::new(0),
+            person_icons_revision: std::sync::atomic::AtomicU64::new(0),
             room: Mutex::new(Room::new()),
             listeners: Mutex::new(Vec::new()),
             voice: Mutex::new(None),

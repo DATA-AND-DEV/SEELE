@@ -873,6 +873,13 @@ pub struct Snapshot {
     /// keeps the last one it drew and calls [`crate::Connection::server_icon`] when it
     /// moves. Zero, and never moving, is the ordinary server: it has no picture.
     pub icon_revision: u64,
+    /// Sobe quando **qualquer** retrato de pessoa muda.
+    ///
+    /// A casca guarda o último que desenhou e rebusca os retratos que estão na
+    /// tela quando ele muda — o mesmo acordo de [`Snapshot::icon_revision`], e
+    /// pela mesma razão: os bytes não atravessam a ponte duas vezes por segundo
+    /// por causa de uma imagem que muda quando alguém aperta um botão.
+    pub person_icons_revision: u64,
     /// This person's identifier, once known.
     pub me: Option<u64>,
     /// This person's name.
