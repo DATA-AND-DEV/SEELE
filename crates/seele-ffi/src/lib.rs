@@ -3286,6 +3286,29 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
     }
 
     if changed.roster {
+        // **A revisão dos retratos sobe aqui, e não no ramo do servidor.**
+        //
+        // Ela nasceu ao lado da revisão do retrato **do servidor**, por
+        // semelhança — as duas fazem a mesma coisa pelo mesmo motivo. Mas o
+        // `ServerIconChanged` marca `changed.server` e o `PersonIconChanged`
+        // marca `changed.roster`: são partes diferentes do estado, e o ramo em
+        // que a subida morava nunca rodava para ela.
+        //
+        // O efeito era completo e silencioso. A revisão ficava parada, o cache
+        // de retratos da casca nunca invalidava, e **nenhuma** superfície
+        // mudava: nem o bloco do operador, nem a grade da chamada, nem a
+        // mensagem, e nem para as outras pessoas — o cliente delas tinha o
+        // mesmo ramo morto. Só a prévia do próprio diálogo acompanhava, porque
+        // ela lê o arquivo desta máquina e não passa por aqui.
+        //
+        // Antes do aviso, como a do servidor e pelo mesmo motivo: uma casca que
+        // reage ao evento leria o número velho e concluiria que não há imagem
+        // nova para buscar.
+        if matches!(message, seele_core::ServerMessage::PersonIconChanged { .. }) {
+            shared
+                .person_icons_revision
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
         shared.notify(&Event::RosterChanged);
     }
     if changed.messages {
@@ -3308,11 +3331,6 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
         // E o das pessoas, pela mesma razão e com a mesma ordem: antes do aviso.
-        if matches!(message, seele_core::ServerMessage::PersonIconChanged { .. }) {
-            shared
-                .person_icons_revision
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        }
         shared.notify(&Event::ServerChanged);
     }
     if changed.telemetry {
@@ -5308,6 +5326,94 @@ mod tests {
     ///
     /// Devolve o `Room` para o teste acrescentar gente: é a contagem de
     /// espectadores que os testes abaixo mexem, e ela é o N do §5.1.
+    /// Um `Shared` vazio, para exercer o `fold` sem uma conexão.
+    fn compartilhado_de_teste() -> Arc<Shared> {
+        Arc::new(Shared {
+            link_battery: AtomicBool::new(false),
+            link_seconds: std::sync::atomic::AtomicU64::new(0),
+            link_attempts: std::sync::atomic::AtomicU32::new(0),
+            messages_revision: std::sync::atomic::AtomicU64::new(0),
+            icon_revision: std::sync::atomic::AtomicU64::new(0),
+            person_icons_revision: std::sync::atomic::AtomicU64::new(0),
+            room: Mutex::new(Room::new()),
+            listeners: Mutex::new(Vec::new()),
+            voice: Mutex::new(None),
+            media: Mutex::new(None),
+            nickname: Mutex::new("marcela".into()),
+            link_state: AtomicU8::new(0),
+            rtt_micros: std::sync::atomic::AtomicU64::new(0),
+            jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
+            caminho: Mutex::new(None),
+            signal: AtomicU8::new(0),
+            running: AtomicBool::new(true),
+            pending_weights: Mutex::new(Vec::new()),
+            limites_da_tela: Mutex::new(None),
+            fontes_de_tela: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// Um retrato novo faz a revisão dos retratos andar.
+    ///
+    /// **É a diferença deste número que manda a casca rebuscar as imagens.**
+    /// Parada, o cache dela nunca invalida — e o efeito era completo e
+    /// silencioso: quem trocava a própria imagem via a prévia do diálogo mudar,
+    /// porque ela lê o arquivo desta máquina, e mais nada mudava em lugar
+    /// nenhum. Nem o bloco do operador, nem a grade da chamada, nem para as
+    /// outras pessoas, cujo cliente tinha o mesmo defeito.
+    ///
+    /// A causa foi a subida ter nascido no ramo errado: ao lado da revisão do
+    /// retrato **do servidor**, por semelhança, dentro de um `if changed.server`
+    /// — e `PersonIconChanged` marca `changed.roster`. Duas partes diferentes do
+    /// estado, e o ramo nunca rodava para ela.
+    #[test]
+    fn um_retrato_novo_faz_a_revisao_dos_retratos_andar() {
+        use seele_core::{PersonId, ServerMessage};
+
+        let shared = compartilhado_de_teste();
+        let antes = shared.person_icons_revision.load(Ordering::Relaxed);
+
+        fold(
+            &shared,
+            &ServerMessage::PersonIconChanged {
+                person: PersonId(7),
+                icon: Some(vec![1, 2, 3]),
+            },
+        );
+
+        assert!(
+            shared.person_icons_revision.load(Ordering::Relaxed) > antes,
+            "a revisão dos retratos não andou com um `PersonIconChanged`, e o \
+             cache da casca nunca vai rebuscar imagem nenhuma"
+        );
+    }
+
+    /// E uma mensagem que não é de retrato **não** a faz andar.
+    ///
+    /// Sem isto, a asserção acima passaria com a subida solta fora de qualquer
+    /// condição — e cada quadro do roster mandaria a casca rebuscar 8 KiB por
+    /// pessoa, que é exatamente o custo que a revisão existe para evitar.
+    #[test]
+    fn um_nome_novo_nao_faz_a_revisao_dos_retratos_andar() {
+        use seele_core::{PersonId, ServerMessage};
+
+        let shared = compartilhado_de_teste();
+        let antes = shared.person_icons_revision.load(Ordering::Relaxed);
+
+        fold(
+            &shared,
+            &ServerMessage::PersonRenamed {
+                person: PersonId(7),
+                nickname: "aleta".into(),
+            },
+        );
+
+        assert_eq!(
+            shared.person_icons_revision.load(Ordering::Relaxed),
+            antes,
+            "trocar de nome mandou a casca rebuscar todos os retratos"
+        );
+    }
+
     fn sala_com_tela(quem_compartilha: seele_core::PersonId) -> Room {
         use seele_core::{PersonId, ScreenId, ServerMessage, SessionId, Ssrc, VoiceRoomInfo};
 
