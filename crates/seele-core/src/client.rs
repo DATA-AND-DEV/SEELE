@@ -920,6 +920,15 @@ impl Client {
         frame::write(&mut self.send, &ClientMessage::SetServerIcon { icon }).await
     }
 
+    /// Põe ou tira a imagem de perfil de quem está usando este cliente.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn set_person_icon(&mut self, icon: Option<Vec<u8>>) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::SetPersonIcon { icon }).await
+    }
+
     /// Asks the server to end a person's session.
     ///
     /// Asks, like the four above, and for the same reason: nothing here checks

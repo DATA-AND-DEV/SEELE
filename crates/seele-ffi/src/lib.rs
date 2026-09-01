@@ -528,6 +528,11 @@ enum Command {
     RenameServer {
         name: String,
     },
+    /// Põe ou tira a imagem de perfil de quem está usando este cliente.
+    SetPersonIcon {
+        /// A figura, ou `None` para não ter.
+        icon: Option<Vec<u8>>,
+    },
     SetServerIcon {
         icon: Option<Vec<u8>>,
     },
@@ -1376,6 +1381,45 @@ impl Connection {
             }
         })?;
         self.command(Command::SetServerIcon { icon })
+    }
+
+    /// Põe ou tira **a sua** imagem de perfil.
+    ///
+    /// Os mesmos limites do ícone do servidor, e conferidos aqui antes de o
+    /// comando sair: só PNG, 8 KiB, 256 px de lado. Conferir deste lado é o que
+    /// permite a casca dizer o motivo — a recusa do servidor derruba a conexão
+    /// por violação de protocolo, e uma figura grande demais não é um ataque,
+    /// é um arquivo que alguém escolheu.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::IconNotAPicture`] se não for um PNG,
+    /// [`ConnectionError::IconTooBig`] se passar do teto, e
+    /// [`ConnectionError::NotConnected`] quando não há sessão.
+    pub fn set_person_icon(&self, icon: Option<Vec<u8>>) -> Result<(), ConnectionError> {
+        seele_core::check_server_icon(icon.as_deref()).map_err(|recusa| match recusa {
+            seele_core::IconRefusal::NotAnIcon => ConnectionError::IconNotAPicture,
+            seele_core::IconRefusal::TooBig { limit_bytes } => {
+                ConnectionError::IconTooBig { limit_bytes }
+            }
+        })?;
+        self.command(Command::SetPersonIcon { icon })
+    }
+
+    /// A imagem de perfil de alguém, ou `None` quando não tem.
+    ///
+    /// Fora do [`Snapshot`] de propósito, e pela razão que
+    /// [`Connection::server_icon`] escreve: o snapshot atravessa a ponte duas
+    /// vezes por segundo, e uma figura de 8 KiB **por pessoa** ali dentro seria
+    /// megabytes por minuto de uma coisa que muda quase nunca. A casca pede a
+    /// imagem quando a lista muda, e não a cada tique.
+    #[must_use]
+    pub fn person_icon(&self, person: u64) -> Option<Vec<u8>> {
+        self.shared
+            .room
+            .lock()
+            .ok()
+            .and_then(|room| room.person_icons.get(&PersonId(person)).cloned())
     }
 
     /// The server's picture, if it has one.
@@ -2299,7 +2343,13 @@ fn limites_do_nucleo(limites: LimitesDeTela) -> seele_core::LimitesDeTela {
 /// Sem o crate `base64`, pela mesma razão que `seele-video` escreveu quando
 /// recusou o `hex`: ele entraria na árvore só para isto, e isto são vinte
 /// linhas. A tabela é a do RFC 4648, que é a que o navegador decodifica.
-fn base64(bytes: &[u8]) -> String {
+///
+/// **Público desde a imagem de perfil.** A casca desenha figuras que vêm da
+/// rede, e uma `data:` URL é a única forma de pôr bytes num `<img>` sem um
+/// arquivo no disco. O `seele-app` precisava exatamente disto, e escrever um
+/// segundo codificador lá seria dois lugares para o mesmo alfabeto — a forma
+/// de defeito que o `de_base64` logo abaixo existe para não repetir.
+pub fn base64_de(bytes: &[u8]) -> String {
     const TABELA: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut texto = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for grupo in bytes.chunks(3) {
@@ -2903,7 +2953,7 @@ async fn drive(
                         shared.notify(&Event::ScreenFrame {
                             screen: tela.0,
                             key: chave,
-                            data: base64(&bytes),
+                            data: base64_de(&bytes),
                         });
                     }
                     seele_core::enlace::Aviso::TelaFechou { tela } => {
@@ -3432,6 +3482,11 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
         }
         Command::SetServerIcon { icon } => {
             if client.definir_icone(icon).await.is_err() {
+                return false;
+            }
+        }
+        Command::SetPersonIcon { icon } => {
+            if client.definir_minha_imagem(icon).await.is_err() {
                 return false;
             }
         }
@@ -5851,7 +5906,7 @@ mod trilha_no_log {
 
 #[cfg(test)]
 mod base64_escrito_a_mao {
-    use super::base64;
+    use super::base64_de;
 
     #[test]
     fn os_vetores_do_rfc_4648() {
@@ -5863,13 +5918,13 @@ mod base64_escrito_a_mao {
         //
         // Os vetores são os do §10 do RFC 4648, que existem exatamente para
         // isto e cobrem os três restos possíveis.
-        assert_eq!(base64(b""), "");
-        assert_eq!(base64(b"f"), "Zg==");
-        assert_eq!(base64(b"fo"), "Zm8=");
-        assert_eq!(base64(b"foo"), "Zm9v");
-        assert_eq!(base64(b"foob"), "Zm9vYg==");
-        assert_eq!(base64(b"fooba"), "Zm9vYmE=");
-        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+        assert_eq!(base64_de(b""), "");
+        assert_eq!(base64_de(b"f"), "Zg==");
+        assert_eq!(base64_de(b"fo"), "Zm8=");
+        assert_eq!(base64_de(b"foo"), "Zm9v");
+        assert_eq!(base64_de(b"foob"), "Zm9vYg==");
+        assert_eq!(base64_de(b"fooba"), "Zm9vYmE=");
+        assert_eq!(base64_de(b"foobar"), "Zm9vYmFy");
     }
 
     #[test]
@@ -5878,17 +5933,17 @@ mod base64_escrito_a_mao {
         // pode sair dela — mas um `>>` com o deslocamento errado sai, e sai
         // justamente nos bytes altos, que texto ASCII nunca exercita. Um quadro
         // de vídeo é quase só byte alto.
-        assert_eq!(base64(&[0xFF, 0xFF, 0xFF]), "////");
-        assert_eq!(base64(&[0x00, 0x00, 0x00]), "AAAA");
-        assert_eq!(base64(&[0xFB, 0xFF, 0xBE]), "+/++");
+        assert_eq!(base64_de(&[0xFF, 0xFF, 0xFF]), "////");
+        assert_eq!(base64_de(&[0x00, 0x00, 0x00]), "AAAA");
+        assert_eq!(base64_de(&[0xFB, 0xFF, 0xBE]), "+/++");
         // E o Annex-B começa sempre assim: `00 00 00 01`.
-        assert_eq!(base64(&[0x00, 0x00, 0x00, 0x01]), "AAAAAQ==");
+        assert_eq!(base64_de(&[0x00, 0x00, 0x00, 0x01]), "AAAAAQ==");
     }
 }
 
 #[cfg(test)]
 mod base64_ida_e_volta {
-    use super::{base64, de_base64};
+    use super::{base64_de, de_base64};
 
     #[test]
     fn a_volta_desfaz_a_ida_em_todo_tamanho() {
@@ -5897,7 +5952,7 @@ mod base64_ida_e_volta {
         // que ignorasse o resto devolveria bytes a mais no último grupo.
         for tamanho in 0..=64usize {
             let bytes: Vec<u8> = (0..tamanho).map(|i| (i * 7 % 256) as u8).collect();
-            let texto = base64(&bytes);
+            let texto = base64_de(&bytes);
             assert_eq!(
                 de_base64(&texto).as_deref(),
                 Some(bytes.as_slice()),

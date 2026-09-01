@@ -224,6 +224,11 @@ enum Comando {
     RenomearServer {
         nome: String,
     },
+    /// A imagem de perfil de quem está usando este cliente.
+    MinhaImagem {
+        /// A figura, ou `None` para não ter.
+        icone: Option<Vec<u8>>,
+    },
     IconeDoServer {
         icone: Option<Vec<u8>>,
     },
@@ -1353,6 +1358,23 @@ impl Enlace {
         self.mandar(Comando::IconeDoServer { icone }).await
     }
 
+    /// Põe ou tira **a sua** imagem de perfil.
+    ///
+    /// Diferente do ícone do servidor num ponto: aquele exige permissão, este
+    /// não. O servidor grava na linha de quem pediu e em nenhuma outra, e uma
+    /// permissão aqui seria alguém podendo escolher a cara dos outros.
+    ///
+    /// **Não** é refeita ao reconectar, pelo mesmo motivo do nome e do ícone:
+    /// ela está gravada no servidor, e reenviá-la a cada volta seria escrever
+    /// de novo o que já está lá.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn definir_minha_imagem(&self, icone: Option<Vec<u8>>) -> Result<(), Fechado> {
+        self.mandar(Comando::MinhaImagem { icone }).await
+    }
+
     /// Pede ao servidor que acabe com a sessão de alguém.
     ///
     /// Pede, e só — como os verbos de sala, e pela mesma razão: a
@@ -1997,6 +2019,7 @@ impl Motor {
             Comando::RenomearLinha { linha, nome } => cliente.rename_channel(linha, &nome).await,
             Comando::RenomearServer { nome } => cliente.rename_server(&nome).await,
             Comando::IconeDoServer { icone } => cliente.set_server_icon(icone).await,
+            Comando::MinhaImagem { icone } => cliente.set_person_icon(icone).await,
             Comando::Expulsar { pessoa } => cliente.kick_person(pessoa).await,
             Comando::Banir {
                 pessoa,

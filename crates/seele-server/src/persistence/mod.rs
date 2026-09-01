@@ -23,6 +23,8 @@
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
+use rusqlite::OptionalExtension;
+use seele_proto::ids::PersonId;
 
 pub mod aparencia;
 pub mod attachments;
@@ -197,6 +199,73 @@ pub fn now_seconds() -> i64 {
         .map_or(0, |elapsed| elapsed.as_secs() as i64)
 }
 
+/// A imagem de perfil de uma pessoa, ou `None` quando ela não tem.
+///
+/// # Errors
+///
+/// Falha se o banco não responder.
+pub fn icone_da_pessoa(persistence: &Persistence, person: PersonId) -> Result<Option<Vec<u8>>> {
+    let guardado: Option<Option<Vec<u8>>> = persistence
+        .connection()
+        .query_row(
+            "SELECT icon FROM people WHERE id = ?1",
+            rusqlite::params![person.get() as i64],
+            |linha| linha.get(0),
+        )
+        .optional()?;
+    // Zero byte é ausência, e não uma imagem vazia — a mesma leitura que
+    // `aparencia::icone` faz do ícone do servidor, e pelo mesmo motivo: um
+    // `BLOB` de tamanho zero não é um PNG, então guardá-lo como se fosse um
+    // seria guardar uma figura que nenhum lado consegue desenhar.
+    Ok(guardado.flatten().filter(|bytes| !bytes.is_empty()))
+}
+
+/// Grava a imagem de perfil de alguém. `None` a tira.
+///
+/// # Errors
+///
+/// Falha se o banco não responder.
+pub fn definir_icone_da_pessoa(
+    persistence: &Persistence,
+    person: PersonId,
+    icone: Option<&[u8]>,
+) -> Result<()> {
+    persistence.connection().execute(
+        "UPDATE people SET icon = ?1 WHERE id = ?2",
+        rusqlite::params![icone, person.get() as i64],
+    )?;
+    Ok(())
+}
+
+/// Todas as imagens de perfil que existem, por pessoa.
+///
+/// Lida de uma vez ao abrir a sessão, e não uma consulta por pessoa: o roster
+/// chega inteiro num instante só, e uma consulta por linha é o padrão que
+/// transforma uma sala de vinte em vinte idas ao banco.
+///
+/// **Só quem tem.** Uma pessoa sem imagem não aparece no resultado, e o quadro
+/// dela não é mandado — quem não tem imagem não custa nada a quem entra.
+///
+/// # Errors
+///
+/// Falha se o banco não responder.
+pub fn icones_das_pessoas(persistence: &Persistence) -> Result<Vec<(PersonId, Vec<u8>)>> {
+    let mut consulta = persistence
+        .connection()
+        .prepare("SELECT id, icon FROM people WHERE icon IS NOT NULL")?;
+    let mut linhas = consulta.query([])?;
+    let mut achados = Vec::new();
+    while let Some(linha) = linhas.next()? {
+        let id: i64 = linha.get(0)?;
+        let bytes: Vec<u8> = linha.get(1)?;
+        if bytes.is_empty() {
+            continue;
+        }
+        achados.push((PersonId(id as u64), bytes));
+    }
+    Ok(achados)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -330,6 +399,13 @@ mod tests {
                      DELETE FROM schema_version WHERE version >= 3;
                      DROP TABLE attachments;
                      DROP TABLE portaria;
+
+                     -- A parte da migração 10, pela mesma regra: ela acrescenta
+                     -- uma coluna, e um `ALTER TABLE ADD COLUMN` reaplicado
+                     -- para com «duplicate column name». O SQLite sabe
+                     -- `DROP COLUMN` desde a 3.35, que é a que o `rusqlite`
+                     -- deste projeto embute.
+                     ALTER TABLE people DROP COLUMN icon;
 
                      -- A parte da migração 5, desfeita pela mesma regra que o
                      -- comentário acima escreve. Ela não cria tabela: renomeia.

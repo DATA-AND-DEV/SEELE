@@ -457,6 +457,33 @@ pub const MIGRATIONS: &[Migration] = &[
             UPDATE roles SET denials     = replace(denials,     'InsertPlug', 'EnterVoiceRoom');
         "#,
     },
+    Migration {
+        version: 10,
+        description: "cada pessoa pode ter uma imagem, como o servidor já tinha",
+        sql: r#"
+            -- A imagem de perfil, pedida pela comp da 0.9.0.
+            --
+            -- Coluna e não tabela: é no máximo uma por pessoa, sempre lida
+            -- junto do apelido, e uma tabela seria uma junção em toda leitura
+            -- de roster para guardar um campo opcional.
+            --
+            -- `BLOB` com os mesmos limites do ícone do servidor —
+            -- `MAX_SERVER_ICON_LEN` e `MAX_SERVER_ICON_SIDE`, 8 KiB e 256 px,
+            -- só PNG. Os limites são conferidos no protocolo, antes de o byte
+            -- chegar aqui: `specs/08-seguranca.md` manda limitar toda entrada
+            -- de rede antes de gravá-la, e o banco não sabe o que é um PNG.
+            --
+            -- `NULL` é «não tem», e é onde toda conta que já existe começa.
+            --
+            -- **`people` e não `pilots`.** A tabela nasceu `pilots` na migração
+            -- 1 e a 5 a renomeou — «piloto» era vocabulário de Evangelion, e o
+            -- ADR 0035 o tirou do código gravado. Uma migração nova escreve o
+            -- nome de agora; o nome antigo só aparece nas migrações que são
+            -- anteriores ao rename, e é assim que elas continuam corretas
+            -- quando rodam num banco vazio.
+            ALTER TABLE people ADD COLUMN icon BLOB;
+        "#,
+    },
 ];
 
 #[cfg(test)]

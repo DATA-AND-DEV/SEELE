@@ -1124,6 +1124,31 @@ pub enum ClientMessage {
         /// Which transmission.
         screen: ScreenId,
     },
+
+    // ---- a imagem de perfil, da comp da 0.9.0 ----
+    //
+    // No fim do enum, pela razão que as variantes acima já escrevem.
+    /// Põe ou tira a **sua** imagem de perfil.
+    ///
+    /// # Sem permissão, e é a diferença para o ícone do servidor
+    ///
+    /// `SetServerIcon` exige `AdministerServer` porque muda o que todo mundo vê
+    /// do servidor. Esta muda o que todo mundo vê **de quem a mandou**, e não há
+    /// terceiro envolvido: o servidor grava na linha de quem pediu e em nenhuma
+    /// outra. Uma permissão aqui seria um operador podendo escolher a cara dos
+    /// outros, que é uma funcionalidade diferente e que ninguém pediu.
+    ///
+    /// Os limites são os mesmos de [`check_server_icon`] — só PNG, 8 KiB,
+    /// 256 px de lado —, e a razão de serem os mesmos é que o desenho é o
+    /// mesmo: uma figura pequena num quadrado pequeno, que atravessa a rede
+    /// inteira toda vez que alguém entra.
+    ///
+    /// `None` tira a imagem, e é verbo e não lacuna: quem pôs uma precisa poder
+    /// dizer que não quer mais nenhuma.
+    SetPersonIcon {
+        /// A figura, ou `None` para não ter.
+        icon: Option<Vec<u8>>,
+    },
 }
 
 /// Server to client.
@@ -1645,6 +1670,41 @@ pub enum ServerMessage {
         /// A fração perdida na janela mais recente, de zero a um.
         fraction: f32,
     },
+
+    // ---- a imagem de perfil, da comp da 0.9.0 ----
+    //
+    // No fim do enum, pela razão que as variantes acima já escrevem: o postcard
+    // grava o índice e nada mais.
+    /// A imagem de alguém mudou, ou é apresentada a quem acabou de chegar.
+    ///
+    /// # Quadro próprio, e por quê
+    ///
+    /// Pelo terceiro motivo que o [`Self::ServerIconChanged`] escreve, e ele
+    /// vale mais aqui: `Session` já leva as salas, os canais, os papéis e as
+    /// permissões dentro de [`MAX_FRAME_LEN`], e uma figura dividindo aquele
+    /// orçamento faria um servidor grande falhar em admitir alguém por causa de
+    /// uma decoração.
+    ///
+    /// **E a conta é pior do que a do ícone do servidor.** Aquele é um, e
+    /// atravessa uma vez por sessão; este é um **por pessoa**. Num quadro só,
+    /// vinte pessoas com imagem estourariam o limite sozinhas. Um quadro por
+    /// pessoa cabe sempre — 8 KiB contra os 16 KiB de [`MAX_FRAME_LEN`] — e o
+    /// custo vira largura de banda em vez de uma sessão que não abre.
+    ///
+    /// O que isso custa, dito por extenso: quem entra numa sala de vinte
+    /// pessoas com imagem recebe 160 KiB antes de ver o roster completo. Como
+    /// no ícone do servidor, endereçar a figura pelo hash do conteúdo e deixar
+    /// o cliente dizer que já tem aquela é o desenho mais barato — e continua
+    /// não pagando um segundo caminho de transferência enquanto o teto for este.
+    ///
+    /// `None` é «esta pessoa não tem imagem», e é o estado de toda conta que
+    /// existe hoje.
+    PersonIconChanged {
+        /// De quem.
+        person: PersonId,
+        /// A figura, ou `None` quando não há.
+        icon: Option<Vec<u8>>,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -1914,6 +1974,7 @@ impl Validate for ClientMessage {
             ),
             Self::RenameServer { name } => check_server_name(name),
             Self::SetServerIcon { icon } => check_icon(icon.as_ref()),
+            Self::SetPersonIcon { icon } => check_icon(icon.as_ref()),
             Self::LeaveVoiceRoom
             | Self::JoinChannel { .. }
             | Self::FetchHistory { .. }
@@ -2003,6 +2064,12 @@ impl Validate for ServerMessage {
             Self::UplinkLoss { fraction } => check_range("fraction", *fraction, 0.0, 1.0),
             Self::ServerRenamed { name } => check_server_name(name),
             Self::ServerIconChanged { icon } => check_icon(icon.as_ref()),
+            // Conferido na saída também, e não só na entrada: o byte pode ter
+            // vindo do banco, gravado por uma versão anterior ou por um
+            // `sqlite3` de alguém. É a mesma política que o nome de sala segue
+            // acima — o limite vale na árvore que sai, não só no verbo que
+            // entra.
+            Self::PersonIconChanged { icon, .. } => check_icon(icon.as_ref()),
             Self::PersonLeft { .. }
             | Self::PersonGone { .. }
             | Self::MessageRemoved { .. }

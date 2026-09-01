@@ -1156,6 +1156,95 @@ fn tirar_icone_do_server(session: State<'_, Session>) -> Result<(), ConnectionEr
     session.connection()?.set_server_icon(None)
 }
 
+/// Abre o seletor e põe a imagem escolhida como **a sua**.
+///
+/// Gêmeo de [`escolher_icone_do_server`], e o corpo é o mesmo por escolha e não
+/// por descuido: a imagem é do mesmo formato, do mesmo tamanho, e passa pelo
+/// mesmo `icone::encolher` — que é o que permite escolher uma foto de câmera e
+/// não um arquivo já preparado.
+///
+/// A diferença está uma camada abaixo: aquele exige `AdministerServer`, este
+/// não exige nada. O servidor grava na linha de quem pediu.
+///
+/// `Ok(false)` é ter fechado o seletor sem escolher, e é o desfecho mais comum
+/// de todos.
+///
+/// # Errors
+///
+/// [`ConnectionError::IconNotAPicture`] quando o arquivo não vira um PNG dentro
+/// do teto, e o que a sessão devolver.
+#[tauri::command]
+async fn escolher_minha_imagem(
+    app: AppHandle,
+    session: State<'_, Session>,
+) -> Result<bool, ConnectionError> {
+    use std::io::Read as _;
+    use tauri_plugin_dialog::DialogExt as _;
+
+    let (envia, mut recebe) = tauri::async_runtime::channel(1);
+    app.dialog()
+        .file()
+        .set_title("Escolha a sua imagem")
+        .pick_file(move |escolha| {
+            let _ = envia.try_send(escolha);
+        });
+
+    let Some(Some(escolha)) = recebe.recv().await else {
+        return Ok(false);
+    };
+    let Ok(caminho) = escolha.into_path() else {
+        return Err(ConnectionError::IconNotAPicture);
+    };
+    let Ok(arquivo) = std::fs::File::open(&caminho) else {
+        return Err(ConnectionError::IconNotAPicture);
+    };
+    let mut bytes = Vec::new();
+    if arquivo
+        .take(icone::TETO_DA_ORIGEM.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .is_err()
+    {
+        return Err(ConnectionError::IconNotAPicture);
+    }
+
+    let Ok(Some(pronto)) =
+        tauri::async_runtime::spawn_blocking(move || icone::encolher(&bytes)).await
+    else {
+        return Err(ConnectionError::IconNotAPicture);
+    };
+
+    session.connection()?.set_person_icon(Some(pronto))?;
+    Ok(true)
+}
+
+/// Tira a sua imagem.
+///
+/// # Errors
+///
+/// O que a sessão devolver.
+#[tauri::command]
+fn tirar_minha_imagem(session: State<'_, Session>) -> Result<(), ConnectionError> {
+    session.connection()?.set_person_icon(None)
+}
+
+/// A imagem de perfil de alguém, em `data:` para a janela desenhar.
+///
+/// Fora do `Snapshot` de propósito, pela razão que a FFI escreve: o snapshot
+/// atravessa a ponte duas vezes por segundo, e figuras de 8 KiB **por pessoa**
+/// ali dentro seriam megabytes por minuto de uma coisa que muda quase nunca.
+///
+/// # Errors
+///
+/// Não falha: quem não tem imagem, e uma sessão que não existe, devolvem `None`.
+#[tauri::command]
+fn imagem_da_pessoa(session: State<'_, Session>, person: u64) -> Option<String> {
+    let bytes = session.connection().ok()?.person_icon(person)?;
+    Some(format!(
+        "data:image/png;base64,{}",
+        seele_ffi::base64_de(&bytes)
+    ))
+}
+
 /// Os bytes da imagem que está valendo, ou nada.
 ///
 /// Fora do `Snapshot` de propósito, e a tela respeita o mesmo acordo: o
@@ -2597,6 +2686,9 @@ fn main() {
             modulo_de_video_a_baixar,
             baixar_modulo_de_video,
             escolher_icone_do_server,
+            escolher_minha_imagem,
+            tirar_minha_imagem,
+            imagem_da_pessoa,
             tirar_icone_do_server,
             icone_do_server,
             expulsar_pessoa,

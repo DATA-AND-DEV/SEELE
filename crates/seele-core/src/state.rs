@@ -196,6 +196,17 @@ pub struct Room {
     /// is in. It is also what a handshake resets this to — see
     /// [`Room::adopt`].
     pub icon: Option<Vec<u8>>,
+
+    /// A imagem de perfil de cada pessoa que tem uma.
+    ///
+    /// Um mapa por conta, e não um campo de [`Person`], porque `Person` é
+    /// reconstruído a cada `PersonJoined`: quem sai de uma sala e entra noutra
+    /// vira uma linha nova, e a imagem sobreviveria por acidente ou se perderia,
+    /// conforme a ordem dos quadros.
+    ///
+    /// Quem não tem imagem não aparece aqui — ausência é a resposta, e não um
+    /// `None` guardado.
+    pub person_icons: std::collections::HashMap<PersonId, Vec<u8>>,
     /// Voice channels visible to this person.
     pub voice_rooms: Vec<VoiceRoomInfo>,
     /// Text channels visible to this person.
@@ -404,6 +415,12 @@ impl Room {
         // here would leave a client that was away while the icon was taken down
         // drawing it for the rest of the session.
         self.icon = None;
+        // As imagens de perfil, pela mesma razão que o ícone do servidor logo
+        // acima: quem estava fora enquanto alguém tirou a sua continuaria
+        // desenhando a antiga, e o servidor reapresenta as que existem logo
+        // depois do aperto de mão. Guardá-las seria confiar num quadro que
+        // pode não vir.
+        self.person_icons.clear();
         self.voice_rooms = info.voice_rooms.clone();
         self.channels = info.channels.clone();
         self.permissions = info.permissions.clone();
@@ -957,6 +974,30 @@ impl Room {
             ServerMessage::ServerIconChanged { icon } => {
                 self.icon.clone_from(icon);
                 changed.server = true;
+            }
+
+            // A imagem de alguém.
+            //
+            // Guardada num mapa por pessoa, e **não num campo de `Person`**,
+            // porque `Person` é reconstruído a cada `PersonJoined` — quem sai
+            // de uma sala e entra noutra vira uma linha nova, e a imagem
+            // sobreviveria por acidente ou não sobreviveria de jeito nenhum,
+            // conforme a ordem dos quadros. O mapa é por conta e dura o que a
+            // sessão durar.
+            //
+            // `None` **apaga a entrada** em vez de guardar um `None`: quem
+            // tirou a imagem não tem imagem, e um mapa que cresce com ausências
+            // é um mapa que só cresce.
+            ServerMessage::PersonIconChanged { person, icon } => {
+                match icon {
+                    Some(bytes) => {
+                        self.person_icons.insert(*person, bytes.clone());
+                    }
+                    None => {
+                        self.person_icons.remove(person);
+                    }
+                }
+                changed.roster = true;
             }
 
             // Somebody with the permission moved this connection.

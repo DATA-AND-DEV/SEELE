@@ -102,3 +102,70 @@
   cursor: progress;
   opacity: 0.6;
 }
+
+/* ------------------------------------------------------------ seu perfil */
+
+.perfil-caixa { max-width: 480px; }
+
+.perfil-cabeca {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.perfil-cabeca .nomear-titulo { flex: 1; }
+
+.perfil-imagem {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+/* A prévia: 72px, que é o dobro do avatar da lista de pessoas — grande o
+   bastante para se ver o que se escolheu, pequena o bastante para caber ao
+   lado do texto que explica o limite. Quadrada e de canto reto, como tudo. */
+.perfil-previa {
+  width: 72px;
+  height: 72px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid var(--seele-linha-forte);
+  background: var(--seele-negro-absoluto);
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 28px;
+  color: var(--seele-laranja-nerv);
+}
+
+.perfil-previa img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.perfil-imagem-texto {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.perfil-imagem-acoes {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* O apelido é leitura, e o desenho diz isso: mesmo corpo do dado, sem moldura
+   de campo. Uma caixa em volta prometeria que se digita ali. */
+.perfil-apelido {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: 0.06em;
+  color: var(--seele-osso);
+}

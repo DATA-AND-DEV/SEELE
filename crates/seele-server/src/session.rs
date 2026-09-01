@@ -754,7 +754,7 @@ async fn handshake(
     // Uma segunda tomada do mutex, e não um campo a mais na `Account`: são duas
     // perguntas sobre coisas diferentes — o que este pessoa é, e o que este
     // servidor é — e o aperto de mão já toma este mutex mais de uma vez.
-    let (nome_do_server, icone_do_server) = {
+    let (nome_do_server, icone_do_server, icones_das_pessoas) = {
         let guard = server.persistence.lock().await;
         let nome =
             crate::persistence::aparencia::nome(&guard, &config.name).unwrap_or_else(|erro| {
@@ -764,7 +764,16 @@ async fn handshake(
                 config.name.clone()
             });
         let icone = crate::persistence::aparencia::icone(&guard).unwrap_or_default();
-        (nome, icone)
+        // As imagens de perfil, lidas de uma vez com o resto: uma consulta por
+        // pessoa transformaria uma sala de vinte em vinte idas ao banco no
+        // instante mais sensível da conexão. Uma leitura que falha não impede
+        // ninguém de entrar — segue sem imagem, como segue sem ícone.
+        let imagens = crate::persistence::icones_das_pessoas(&guard).unwrap_or_else(|erro| {
+            tracing::warn!(%erro, "não deu para ler as imagens de perfil");
+            Vec::new()
+        });
+
+        (nome, icone, imagens)
     };
 
     let (fresh_ssrc, session_id) = registry.issue();
@@ -832,6 +841,38 @@ async fn handshake(
                 })?,
             Err(erro) => {
                 tracing::warn!(%erro, "o ícone guardado não é um ícone; seguindo sem ele");
+            }
+        }
+    }
+
+    // As imagens de perfil de quem já existe, uma por quadro.
+    //
+    // **Um quadro por pessoa, e não um só com todas**, pela razão que o
+    // `PersonIconChanged` escreve: 8 KiB cabem nos 16 KiB de `MAX_FRAME_LEN`, e
+    // vinte imagens juntas não caberiam. O custo vira largura de banda em vez
+    // de uma sessão que não abre por causa de uma decoração.
+    //
+    // **Só quem tem.** Quem não pôs imagem não gera quadro nenhum, então um
+    // servidor onde ninguém pôs troca exatamente os quadros que trocava antes.
+    //
+    // E uma imagem que não passa na conferência é descartada em vez de derrubar
+    // o aperto de mão — a mesma regra do ícone do servidor logo acima, e pela
+    // mesma razão: quem tem o arquivo do banco tem um `sqlite3`, e uma linha
+    // escrita à mão não pode impedir todo mundo de entrar.
+    for (pessoa, imagem) in icones_das_pessoas {
+        let anuncio = ServerMessage::PersonIconChanged {
+            person: pessoa,
+            icon: Some(imagem),
+        };
+        match anuncio.validate() {
+            Ok(()) => frame::write(send, &anuncio)
+                .await
+                .map_err(|error| Refusal {
+                    reason: DisconnectReason::ProtocolViolation,
+                    detail: format!("could not send a person icon: {error}"),
+                })?,
+            Err(erro) => {
+                tracing::warn!(%erro, %pessoa, "a imagem guardada não é uma imagem; seguindo sem ela");
             }
         }
     }
@@ -1635,6 +1676,42 @@ async fn run_session(
                             Ok(name) => {
                                 tracing::info!(by = %session.person, %name, "the server was renamed");
                                 let _ = server.events.send(Event::ServerRenamed { name });
+                            }
+                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                        }
+                    }
+                    ClientMessage::SetPersonIcon { icon } => {
+                        // **Sem permissão, e é a diferença para o ícone do
+                        // servidor.** Aquele muda o que todo mundo vê do
+                        // servidor e exige `AdministerServer`; este muda o que
+                        // todo mundo vê de quem mandou, e a linha escrita é a
+                        // de `session.person` e nenhuma outra. Não há terceiro
+                        // envolvido, então não há permissão a conferir.
+                        //
+                        // O formato não é conferido aqui pela mesma razão que o
+                        // do servidor: `frame::read` já recusou o quadro se
+                        // aqueles bytes não fossem um PNG dentro do teto, e uma
+                        // segunda regra neste arquivo seria a que ficaria para
+                        // trás da primeira.
+                        let feito = {
+                            let guard = server.persistence.lock().await;
+                            crate::persistence::definir_icone_da_pessoa(
+                                &guard,
+                                session.person,
+                                icon.as_deref(),
+                            )
+                        };
+                        match feito {
+                            Ok(()) => {
+                                tracing::info!(
+                                    person = %session.person,
+                                    bytes = icon.as_ref().map_or(0, Vec::len),
+                                    "somebody changed their picture"
+                                );
+                                let _ = server.events.send(Event::PersonIconChanged {
+                                    person: session.person,
+                                    icon,
+                                });
                             }
                             Err(erro) => nao_deu(&mut send, &erro).await?,
                         }
@@ -2812,6 +2889,13 @@ fn translate(
         // não tem como fazê-la. Quem o entrega é o braço de eventos do laço, que
         // pode esperar. Ver o ADR 0038.
         Event::VoiceRoomOverHostUplink { .. } => None,
+        // A imagem de alguém, para todo mundo. Sem filtro de canal nem de
+        // sala: o roster é do servidor inteiro, e uma pessoa aparece em
+        // qualquer lista onde tenha estado — a imagem tem de chegar junto.
+        Event::PersonIconChanged { person, icon } => Some(ServerMessage::PersonIconChanged {
+            person: *person,
+            icon: icon.clone(),
+        }),
         Event::MessagePosted(message) => {
             channels
                 .contains(&message.channel)

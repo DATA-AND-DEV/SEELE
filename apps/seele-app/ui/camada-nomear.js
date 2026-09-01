@@ -125,3 +125,122 @@ window.addEventListener(
   },
   true,
 );
+
+// --------------------------------------------------------------- seu perfil
+//
+// A imagem e o apelido. Mora aqui, junto do diálogo de nomear, porque é o
+// mesmo tipo de coisa — uma camada que pergunta uma coisa e fecha — e porque
+// as duas dividem o desenho da caixa.
+
+/** Para onde o teclado volta quando o perfil fecha. */
+let focoAntesDoPerfil = null;
+
+/** Desenha a prévia: a imagem, ou a inicial que os outros veem sem ela. */
+async function desenharPrevia(pessoa, apelido) {
+  const onde = $("perfil-previa");
+  let imagem = null;
+  try {
+    imagem = await invoke("imagem_da_pessoa", { person: pessoa });
+  } catch (falha) {
+    console.warn("imagem_da_pessoa:", falha);
+  }
+  onde.replaceChildren();
+  if (imagem) {
+    const figura = document.createElement("img");
+    figura.src = imagem;
+    figura.alt = "";
+    onde.append(figura);
+    onde.setAttribute("aria-label", `imagem de ${apelido}`);
+    onde.dataset.tem = "sim";
+  } else {
+    // A inicial, que é o que a lista de pessoas desenha para quem não pôs
+    // imagem: a prévia mostra o que os outros veem, e não um vazio.
+    onde.textContent = (apelido || "?").trim().charAt(0).toUpperCase();
+    onde.setAttribute("aria-label", `${apelido} não tem imagem`);
+    onde.dataset.tem = "nao";
+  }
+}
+
+/** Abre o perfil de quem está usando esta janela. */
+async function abrirPerfil() {
+  focoAntesDoPerfil = document.activeElement;
+  $("perfil-erro").hidden = true;
+  let snapshot = null;
+  try {
+    snapshot = await invoke("snapshot");
+  } catch (falha) {
+    console.warn("snapshot:", falha);
+  }
+  const apelido = snapshot?.nickname ?? "—";
+  $("perfil-apelido").textContent = apelido;
+  await desenharPrevia(snapshot?.me ?? 0, apelido);
+  $("perfil").hidden = false;
+  $("perfil-escolher").focus();
+  anunciar("Seu perfil. Escape fecha.");
+}
+
+/** Fecha, devolvendo o teclado. */
+function fecharPerfil() {
+  $("perfil").hidden = true;
+  if (focavel(focoAntesDoPerfil)) focoAntesDoPerfil.focus();
+  focoAntesDoPerfil = null;
+}
+
+/** Diz por que a imagem não entrou, onde se acabou de tentar. */
+function recusarPerfil(frase) {
+  const onde = $("perfil-erro");
+  onde.hidden = false;
+  onde.textContent = frase;
+}
+
+$("perfil-escolher").addEventListener("click", async () => {
+  $("perfil-erro").hidden = true;
+  try {
+    // `false` é ter fechado o seletor sem escolher, e é o desfecho mais comum
+    // de todos — não é falha e não escreve nada.
+    if (await invoke("escolher_minha_imagem")) {
+      anunciar("Imagem trocada.");
+      await abrirPerfil();
+    }
+  } catch (falha) {
+    console.warn("escolher_minha_imagem:", falha);
+    recusarPerfil(fraseDeErro(falha));
+  }
+});
+
+$("perfil-tirar").addEventListener("click", async () => {
+  $("perfil-erro").hidden = true;
+  try {
+    await invoke("tirar_minha_imagem");
+    anunciar("Imagem tirada.");
+    await abrirPerfil();
+  } catch (falha) {
+    console.warn("tirar_minha_imagem:", falha);
+    recusarPerfil(fraseDeErro(falha));
+  }
+});
+
+// O formulário não tem botão de mandar — ver a nota no `index.html`. O ouvinte
+// de `submit` fica porque um Enter dentro de um `<form>` ainda o dispara, e sem
+// ele o navegador recarregaria a página: exatamente o que a barra de janela
+// desta versão foi ao trabalho de impedir.
+$("perfil-forma").addEventListener("submit", (evento) => {
+  evento.preventDefault();
+  fecharPerfil();
+});
+$("perfil-fechar").addEventListener("click", fecharPerfil);
+$("operador-quem").addEventListener("click", () => {
+  abrirPerfil().catch((falha) => console.warn("abrir o perfil:", falha));
+});
+fecharAoClicarFora("perfil", fecharPerfil);
+
+window.addEventListener(
+  "keydown",
+  (evento) => {
+    if (evento.key !== "Escape" || $("perfil").hidden) return;
+    evento.preventDefault();
+    evento.stopPropagation();
+    fecharPerfil();
+  },
+  true,
+);

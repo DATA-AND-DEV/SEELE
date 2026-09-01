@@ -1071,10 +1071,19 @@
       -->
       <div class="operador">
         <div class="operador-topo">
-          <span class="operador-quem">
-            <span class="operador-rotulo">OPERADOR</span>
-            <span id="operador-nome" class="operador-nome">—</span>
-          </span>
+          <!--
+            O bloco do operador vira botão na 0.9.0, e abre o perfil. A comp o
+            desenha assim, e o gesto é o que quem usa já tenta: clicar no
+            próprio nome para mudar o que os outros veem.
+          -->
+          <button id="operador-quem" class="operador-quem" type="button"
+                  aria-label="Personalizar seu perfil" title="sua imagem">
+            <span id="operador-inicial" class="operador-inicial" aria-hidden="true"></span>
+            <span class="operador-quem-texto">
+              <span class="operador-rotulo">OPERADOR</span>
+              <span id="operador-nome" class="operador-nome">—</span>
+            </span>
+          </button>
           <!--
             O `⚙` do comp, desenhado e não digitado: `U+2699` não está entre os
             499 pontos de código da face embarcada, e digitá-lo cairia na
@@ -2738,6 +2747,80 @@
         <button id="porta-entendi" class="nomear-confirmar" type="button">ENTENDI</button>
       </div>
     </div>
+  </div>
+</div>
+
+<!--
+  Seu perfil: a imagem e o apelido, da comp da 0.9.0.
+
+  As duas metades têm idades muito diferentes. O apelido atravessa o protocolo
+  desde sempre; a **imagem de pessoa não existia** — foi construída para esta
+  tela, do banco ao fio: migração 10, `SetPersonIcon`, `PersonIconChanged`, e um
+  quadro por pessoa ao entrar.
+
+  Os limites são os mesmos do ícone do servidor — só PNG, 8 KiB, 256 px —, e
+  estão **escritos antes de escolher o arquivo**, como a comp os escreve. Um
+  limite que só aparece na recusa é um limite que a pessoa descobre errando.
+-->
+<div id="perfil" class="camada-nomear" role="dialog" aria-modal="true"
+     aria-labelledby="perfil-titulo" tabindex="-1" hidden>
+  <div class="nomear-caixa perfil-caixa">
+    <div class="nomear-cabeca perfil-cabeca">
+      <h2 id="perfil-titulo" class="nomear-titulo">SEU PERFIL</h2>
+      <button id="perfil-fechar" class="botao-fantasma" type="button">FECHAR</button>
+    </div>
+    <form id="perfil-forma" class="nomear-corpo" autocomplete="off">
+      <div class="perfil-imagem">
+        <!--
+          A prévia é `<img>` quando há imagem e a inicial do apelido quando não
+          há. A inicial não é enfeite: é o que a lista de pessoas desenha para
+          quem não pôs imagem, então a prévia mostra o que os outros veem.
+        -->
+        <span id="perfil-previa" class="perfil-previa" role="img"></span>
+        <div class="perfil-imagem-texto">
+          <span class="rotulo">IMAGEM</span>
+          <p class="nota">PNG, no máximo 8 KiB e 256 px. O limite está aqui
+            antes de você escolher o arquivo.</p>
+          <div class="perfil-imagem-acoes">
+            <button id="perfil-escolher" class="botao-fantasma" type="button">ESCOLHER</button>
+            <button id="perfil-tirar" class="botao-fantasma" type="button">TIRAR</button>
+          </div>
+        </div>
+      </div>
+      <!--
+        **O apelido é leitura, e não campo — por ora.**
+
+        A comp o desenha editável, e mudá-lo exige um verbo de protocolo que
+        **não existe**: o apelido chega no aperto de mão e é gravado ali. Não é
+        o mesmo trabalho que a imagem — a coluna é `UNIQUE`, e trocar de nome no
+        meio de uma sessão mexe no roster e na autoria de tudo que já foi dito.
+        É funcionalidade própria, e está perguntada.
+
+        Um campo desabilitado promete um ajuste que não existe — a regra que a
+        seção APARÊNCIA acabou de seguir. Então aqui é texto, com o lugar onde
+        se troca escrito ao lado.
+      -->
+      <div class="nomear-campo">
+        <span class="rotulo">APELIDO</span>
+        <p id="perfil-apelido" class="perfil-apelido">—</p>
+        <p class="nota">Escolhido ao entrar no servidor. Para trocar, saia e
+          entre de novo com outro.</p>
+      </div>
+      <!--
+        **Sem `SALVAR` e sem `CANCELAR`**, e a comp os desenha.
+
+        O `the_server_section_confirms_by_state_and_not_by_a_save_button` cobra
+        a regra desta janela: confirma-se **mostrando o estado**, não com um
+        botão. E aqui ela é mais que estilo — as duas ações desta caixa,
+        escolher e tirar, valem no instante em que se aperta. Um `SALVAR` ao pé
+        seria um botão que não salva nada, e um `CANCELAR` prometeria desfazer
+        o que já foi feito.
+
+        A prévia acima é a confirmação: ela é redesenhada depois de cada ação, e
+        mostra o que os outros passam a ver. O `FECHAR` da cabeça fecha.
+      -->
+      <p id="perfil-erro" class="nomear-erro" role="alert" hidden></p>
+    </form>
   </div>
 </div>
 

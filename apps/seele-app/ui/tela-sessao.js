@@ -778,6 +778,10 @@ function linhaDeQuemEstaDentro(pessoa, snapshot) {
 /** A tira do operador, no rodapé da coluna de canais. */
 function desenharOperador(snapshot) {
   $("operador-nome").textContent = snapshot.nickname;
+  // A inicial ao lado do nome, como a comp a desenha — e é a mesma que a prévia
+  // do perfil mostra para quem não pôs imagem, para que as duas contem a mesma
+  // coisa sobre a mesma pessoa.
+  $("operador-inicial").textContent = (snapshot.nickname || "?").trim().charAt(0).toUpperCase();
 
   // O botão diz em que estado o microfone está, e não o que apertá-lo vai
   // fazer. Um botão escrito com o verbo é um botão que ninguém sabe ler quando

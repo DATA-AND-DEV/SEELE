@@ -2028,3 +2028,47 @@ button.voice_room-nome:hover { text-decoration: underline; }
   letter-spacing: 0.04em;
   color: var(--seele-osso-apagado);
 }
+
+
+/* O bloco do operador virou botão na 0.9.0: ele abre o perfil. Sem moldura,
+   porque continua sendo o cabeçalho do bloco e não um controle à parte — o que
+   diz que responde é o cursor e a inicial acendendo ao passar. */
+.operador-quem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.operador-quem-texto {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* A inicial, que é o que os outros veem de quem não pôs imagem. */
+.operador-inicial {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--seele-linha-forte);
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 13px;
+  color: var(--seele-osso-apagado);
+}
+
+.operador-quem:hover .operador-inicial {
+  color: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
+}
