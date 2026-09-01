@@ -3676,9 +3676,24 @@ fn voltar_a_um_servidor_leva_o_apelido_daquela_vez() {
         "a linha de um servidor conhecido deixou de carregar o apelido daquela \
          visita; voltar com outro nome é chegar como outra pessoa"
     );
+    // **A busca pelo apelido desta máquina mudou de casa, e o guarda com ela.**
+    //
+    // Ela morava aqui, e era a única porta que a fazia: quem apertava `HOSPEDAR
+    // AQUI` não passava por este diálogo e conectava **sem nome nenhum** —
+    // «coloquei meu nome na tela inicial e hospedei, o server não puxou meu
+    // nome». Ela desceu para o `conectar`, que é por onde toda conexão passa:
+    // hospedar, reconectar, a trilha e este diálogo.
+    let boot = without_comments(&read("ui/tela-boot.js"));
+    let conectar = js_function(&boot, "async function conectar(");
     assert!(
-        script.contains("apelido_local"),
-        "e sem apelido gravado para aquele servidor, nada busca o desta máquina"
+        conectar.contains("apelido_local"),
+        "sem apelido gravado para aquele servidor, nada busca o desta \
+         máquina:\n{conectar}"
+    );
+    assert!(
+        conectar.contains("\"pessoa\""),
+        "e sem nome nenhum a conexão sai com o apelido vazio, que é uma linha \
+         em branco no roster de todo mundo:\n{conectar}"
     );
 }
 

@@ -220,9 +220,13 @@ function irParaOServidor(alvo, apelido, token, nome) {
     pedirTrocaDeServidor(alvo, apelido || undefined, nome);
     return;
   }
-  // O apelido daquela visita quando se sabe; senão o desta máquina, que é o
-  // que o perfil grava antes de haver servidor.
-  Promise.resolve(apelido || invoke("apelido_local"))
-    .then((nome) => conectar(alvo, (nome || "").trim() || "pessoa", token))
-    .catch((falha) => console.warn("conectar:", falha));
+  // O apelido daquela visita quando se sabe; senão nenhum, e `conectar` lê o
+  // desta máquina.
+  //
+  // Esta leitura morava aqui, e era a **única** porta que a fazia: quem
+  // hospedava não passava por ela e conectava sem nome. Ela desceu para o
+  // `conectar`, que é por onde toda conexão passa.
+  conectar(alvo, apelido || undefined, token).catch((falha) =>
+    console.warn("conectar:", falha),
+  );
 }

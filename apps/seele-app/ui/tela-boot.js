@@ -95,7 +95,30 @@ async function conectar(alvo, apelido, token) {
     return;
   }
   alvo = ultimoAlvo;
-  apelido = ultimoApelido ?? "";
+  // **O apelido desta máquina, quando esta chamada não trouxe um.**
+  //
+  // Ele era `ultimoApelido ?? ""`, e o `ultimoApelido` só existe depois de
+  // alguém ter conectado a algum lugar nesta execução. Quem escreve o nome no
+  // perfil da tela inicial e aperta `HOSPEDAR AQUI` não passou por lugar
+  // nenhum: `hospedar` chama `conectar()` sem argumento, e o servidor recebia
+  // vazio. «Coloquei meu nome no Windows na tela inicial e hospedei, o server
+  // não puxou meu nome.»
+  //
+  // Aqui e não em `hospedar` porque aqui é o único lugar por onde **toda**
+  // conexão passa — hospedar, reconectar, a trilha, o diálogo de conhecidos. O
+  // diálogo já fazia esta leitura sozinho, e era a única porta que a fazia.
+  apelido = (ultimoApelido ?? "").trim();
+  if (apelido === "") {
+    try {
+      apelido = ((await invoke("apelido_local")) ?? "").trim();
+    } catch (falha) {
+      console.warn("apelido_local:", falha);
+    }
+  }
+  // E um nome, sempre: entrar sem nome nenhum é aparecer no roster como uma
+  // linha vazia, que não é um estado que alguém escolheu.
+  if (apelido === "") apelido = "pessoa";
+  ultimoApelido = apelido;
   // **A bandeira é lida e apagada aqui, e não depois do `connect`.**
   //
   // Apagá-la só no caminho feliz a deixaria ligada quando o `connect` falha —

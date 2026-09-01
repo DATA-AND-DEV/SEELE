@@ -105,7 +105,9 @@ SEELE_RESPOSTAS.messages = [
 SEELE_RESPOSTAS.snapshot = SEELE_QUADRO;
 SEELE_RESPOSTAS.connect = { snapshot: SEELE_QUADRO, veredito: null };
 window.__SEELE_CHAMADAS = [];
+window.__SEELE_ARGS = {};
 window.__SEELE_EM_SESSAO = false;
+window.__SEELE_APELIDO = "";
 window.__SEELE_OUVINTES = {};
 window.__SEELE_EMITIR = (carga) => {
   for (const ouvinte of window.__SEELE_OUVINTES["seele://event"] ?? []) {
@@ -116,6 +118,11 @@ window.__TAURI__ = {
   core: {
     invoke: async (cmd, args) => {
       window.__SEELE_CHAMADAS.push(cmd);
+      // Os argumentos de cada comando, para um roteiro poder afirmar sobre o
+      // que a casca **mandou** e não só sobre o que ela chamou. No duble e não
+      // num embrulho de fora: os módulos capturam o `invoke` na carga, e trocá-lo
+      // depois não alcança ninguém.
+      window.__SEELE_ARGS[cmd] = args;
       // **Sem sessão, `snapshot` recusa** — como o produto faz. Responder um
       // quadro na tela inicial faria o duble mentir sobre a única pergunta que
       // separa os dois modos do diálogo de perfil, e um aparelho que mente
@@ -131,6 +138,13 @@ window.__TAURI__ = {
       // O retrato desta máquina, que é o que faz os dois diálogos de perfil
       // terem o mesmo conteúdo com sessão e sem.
       if (cmd === "meu_retrato") return SEELE_RETRATO;
+      // O apelido desta máquina, como as preferências o guardam. O roteiro
+      // pode trocá-lo por `window.__SEELE_APELIDO`.
+      if (cmd === "apelido_local") return window.__SEELE_APELIDO ?? "";
+      if (cmd === "escolher_apelido_local") {
+        window.__SEELE_APELIDO = args && args.apelido;
+        return null;
+      }
       if (/apelido|nickname|preferenc|link|caminho/i.test(cmd)) return "";
       return null;
     },
