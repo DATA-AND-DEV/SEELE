@@ -35,16 +35,16 @@ use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
 
-use objc2_core_foundation::{CFNumber, CFRetained, CFType};
+use objc2_core_foundation::{CFArray, CFNumber, CFRetained, CFType};
 use objc2_core_media::{
     CMBlockBuffer, CMSampleBuffer, CMTime, CMVideoCodecType, CMVideoFormatDescription,
 };
 use objc2_core_video::{CVImageBuffer, CVPixelBuffer, CVPixelBufferLockFlags};
 use objc2_video_toolbox::{
     kVTCompressionPropertyKey_AllowFrameReordering, kVTCompressionPropertyKey_AverageBitRate,
-    kVTCompressionPropertyKey_ExpectedFrameRate, kVTCompressionPropertyKey_MaxKeyFrameInterval,
-    kVTCompressionPropertyKey_RealTime, kVTEncodeFrameOptionKey_ForceKeyFrame,
-    VTCompressionSession, VTEncodeInfoFlags,
+    kVTCompressionPropertyKey_DataRateLimits, kVTCompressionPropertyKey_ExpectedFrameRate,
+    kVTCompressionPropertyKey_MaxKeyFrameInterval, kVTCompressionPropertyKey_RealTime,
+    kVTEncodeFrameOptionKey_ForceKeyFrame, VTCompressionSession, VTEncodeInfoFlags,
 };
 
 use super::{Cadencia, QuadroCodificado, QuadroI420, Resolucao};
@@ -238,6 +238,46 @@ fn conjunto_de_parametros(formato: &CMVideoFormatDescription, indice: usize) -> 
     Some(unsafe { std::slice::from_raw_parts(ponteiro, tamanho) }.to_vec())
 }
 
+/// O **limite duro** de banda, que é diferente do alvo médio.
+///
+/// `AverageBitRate` é uma média que o VideoToolbox persegue ao longo do tempo, e
+/// não um teto: com conteúdo duro — degradê, borda de texto e ruído juntos — ele
+/// estoura. Medido: 5,66 Mbps sob um teto declarado de 2,00, **283% do
+/// orçamento**.
+///
+/// Isso não é um detalhe de qualidade, é o transporte sendo enganado. Toda a
+/// conta do §3 — o caminho de quem hospeda dividido pelos espectadores — parte
+/// do princípio de que o codificador respeita o número que recebeu. Recebendo o
+/// triplo, o fluxo congestiona, perde, e a imagem chega pixelada. É o relato de
+/// campo: «está mais pixelado que antes», logo depois de o codec do sistema
+/// entrar.
+///
+/// `DataRateLimits` é um par — quantos bytes, em quantos segundos — e é o único
+/// que o VideoToolbox trata como limite de verdade. Uma janela de um segundo:
+/// mais curta faria o codificador engasgar em cada quadro-chave, que legitimamente
+/// custa mais que a média; mais longa deixaria o estouro durar tempo demais para
+/// o balde do transporte absorver.
+///
+/// # Errors
+///
+/// [`ErroDeVideo::CodecRecusou`] se a sessão recusar o par.
+fn limitar(sessao: &VTCompressionSession, teto_bps: u32) -> Result<(), ErroDeVideo> {
+    let bytes_por_segundo = i64::from(teto_bps) / 8;
+    let limite = CFArray::from_retained_objects(&[
+        CFNumber::new_i64(bytes_por_segundo),
+        CFNumber::new_i64(1),
+    ]);
+    // SAFETY: a chave é estática da biblioteca e o vetor vive até o fim daqui.
+    unsafe {
+        ajustar(
+            sessao,
+            kVTCompressionPropertyKey_DataRateLimits,
+            limite.as_ref(),
+            "declarar o limite duro de banda",
+        )
+    }
+}
+
 /// Uma propriedade da sessão, com o erro em português quando o sistema recusa.
 fn ajustar(
     sessao: &VTCompressionSession,
@@ -345,6 +385,7 @@ impl Codificador {
                 CFNumber::new_i32(i32::try_from(teto_bps).unwrap_or(i32::MAX)).as_ref(),
                 "declarar o teto de banda",
             )?;
+            limitar(&sessao.0, teto_bps)?;
         }
 
         Ok(Self {
@@ -485,6 +526,9 @@ impl super::CodificaVideo for Codificador {
                 "mudar o teto de banda",
             )?;
         }
+        // O limite duro anda junto: mudar só a média deixaria o teto novo valendo
+        // para a perseguição e o antigo valendo para o estouro.
+        limitar(&self.sessao.0, teto_bps)?;
         self.teto_bps = teto_bps;
         Ok(())
     }
