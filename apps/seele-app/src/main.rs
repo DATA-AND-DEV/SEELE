@@ -2767,18 +2767,66 @@ async fn instalar_atualizacao(
     app.restart()
 }
 
+/// Abre o arquivo de log desta máquina, em modo de acréscimo.
+///
+/// A mesma pasta do banco e das preferências, pela mesma ordem de
+/// [`config_dir`] — `SEELE_HOME`, `XDG_CONFIG_HOME`, `HOME` — menos o último
+/// degrau: aquele pede o `AppHandle`, que ainda não existe quando o log é
+/// armado. Sem nenhuma das três, a pasta corrente, que é onde um binário rodado
+/// à mão escreve.
+///
+/// `None` quando a pasta não abre e o arquivo não cria. Aí o log volta para a
+/// saída padrão: melhor que log nenhum, e muito melhor que programa nenhum.
+fn arquivo_de_log() -> Option<std::fs::File> {
+    let pasta = if let Ok(home) = std::env::var("SEELE_HOME") {
+        std::path::PathBuf::from(home)
+    } else if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        std::path::PathBuf::from(xdg).join("seele")
+    } else if let Ok(home) = std::env::var("HOME") {
+        std::path::PathBuf::from(home).join(".config").join("seele")
+    } else {
+        std::path::PathBuf::from(".")
+    };
+    std::fs::create_dir_all(&pasta).ok()?;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(pasta.join("seele.log"))
+        .ok()
+}
+
 fn main() {
     // Marca de arranque. `specs/06-clientes-gui.md` aceita M5 com inicialização
     // abaixo de 2 s, e um critério que ninguém mede é um critério que passa a
     // valer o que a lembrança de alguém sobre "pareceu rápido" valer.
     let arranque = std::time::Instant::now();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "seele_app=info,seele_ffi=info,seele_core=info".into()),
-        )
-        .init();
+    // **O log num arquivo, e não só na saída padrão.**
+    //
+    // No Windows, um build de release carrega `windows_subsystem = "windows"`:
+    // a janela não tem console, e o que se escreve na saída padrão não vai a
+    // lugar nenhum. Quem instalou o app e viu alguma coisa dar errado não tem o
+    // que copiar, e quem conserta não tem o que ler.
+    //
+    // Isso já custou: «sem áudio» chegou três vezes de campo, e as três sem um
+    // lugar onde olhar — eu cheguei a pedir um arquivo de log que não existia.
+    //
+    // Ao lado do banco e das preferências, que é onde o resto do estado desta
+    // máquina mora. Um arquivo só, aberto em modo de acréscimo: rotação é uma
+    // decisão que este log ainda não precisa, e um arquivo que some é pior que
+    // um arquivo grande.
+    let filtro = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "seele_app=info,seele_ffi=info,seele_core=info".into());
+    match arquivo_de_log() {
+        Some(arquivo) => tracing_subscriber::fmt()
+            .with_env_filter(filtro)
+            .with_writer(std::sync::Arc::new(arquivo))
+            // Sem cor num arquivo: as sequências de escape viram lixo entre as
+            // palavras para quem abre o arquivo num editor.
+            .with_ansi(false)
+            .init(),
+        None => tracing_subscriber::fmt().with_env_filter(filtro).init(),
+    }
 
     // A window that cannot open is not a case with a graceful path: there is
     // nowhere left to show the reason. It goes to the log and to the exit code.
