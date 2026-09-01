@@ -270,6 +270,7 @@ function desenhar(snapshot) {
   desenharCanais(snapshot);
   desenharOperador(snapshot);
   desenharLinha(snapshot);
+  abrirLinhaSozinho(snapshot);
   sincronizarMensagens(snapshot.messages_revision);
   desenharPessoas(snapshot);
   desenharTelemetria(snapshot);
@@ -791,6 +792,46 @@ function desenharLinha(snapshot) {
 let mensagens = [];
 let revisaoDesenhada = null;
 let buscandoMensagens = false;
+
+/** Se um pedido de abrir Linha está em voo, para não mandar outro por cima. */
+let abrindoLinha = false;
+
+/**
+ * Abre a primeira Linha quando nenhuma está aberta.
+ *
+ * # O defeito que isto fecha, e ele foi de campo
+ *
+ * Entrar na sessão abre a primeira Linha sozinho, em `tela-auth.js`. Aquilo
+ * lia o snapshot **do aperto de mão**, e a lista de Linhas chega do servidor
+ * depois dele: numa corrida perdida, nenhuma Linha abria.
+ *
+ * E não abrir não é só não desenhar. O servidor **só entrega mensagem a quem
+ * entrou no canal** — `session.rs` filtra por `channels.contains` —, então uma
+ * sessão sem Linha aberta é uma sessão que não recebe conversa nenhuma, sem
+ * nada na tela dizendo isso. O relato: *«o chat do meu amigo só puxou uma
+ * mensagem minha quando meu amigo mandou uma mensagem»* — porque clicar numa
+ * Linha para digitar é o que entrava no canal e buscava o histórico, e aí as
+ * duas apareciam juntas.
+ *
+ * Ler o snapshot na hora certa conserta o caso comum. Isto fecha o resto: roda
+ * a cada desenho, e um desenho acontece a cada 500 ms. Se a lista chegar tarde,
+ * a Linha abre no tique seguinte.
+ *
+ * **Não briga com quem escolheu outra.** Só age quando não há nenhuma aberta, e
+ * `Room::open_channel` nunca desabre — depois da primeira, esta função não tem
+ * mais o que fazer pelo resto da sessão.
+ */
+function abrirLinhaSozinho(snapshot) {
+  if (abrindoLinha || linhaAberta !== null) return;
+  const primeira = snapshot.channels?.[0];
+  if (!primeira) return;
+  abrindoLinha = true;
+  invoke("open_channel", { channel: primeira.id })
+    .catch((falha) => console.warn("abrir a primeira Linha:", falha))
+    .finally(() => {
+      abrindoLinha = false;
+    });
+}
 
 /**
  * Busca e redesenha a conversa, se ela mudou desde a última vez.

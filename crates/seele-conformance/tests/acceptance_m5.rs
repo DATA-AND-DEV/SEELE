@@ -670,3 +670,136 @@ async fn a_shell_without_the_permission_is_refused_by_the_server() -> Result<()>
     server.shutdown();
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_revisao_das_mensagens_anda_quando_alguem_fala() -> Result<()> {
+    // **O que o `two_shells_hold_a_conversation` não cobre.**
+    //
+    // Aquele teste lê `listener.messages()` direto, e prova que a mensagem
+    // chegou ao núcleo. A tela não faz isso: ela só refaz a busca quando
+    // `Snapshot::messages_revision` muda — a documentação daquele campo diz
+    // isso com todas as letras, «changes, and not otherwise». Entre o núcleo
+    // ter a mensagem e a tela mostrá-la há esse número, e ele não estava
+    // exercitado por teste nenhum.
+    //
+    // Relato de campo em 2026-08-31: *«o chat do meu amigo só puxou uma
+    // mensagem minha quando meu amigo mandou uma mensagem»* — que é exatamente
+    // o que se vê quando o núcleo recebe e a revisão não anda: a lista fica
+    // parada até que outra coisa a empurre, e aí as duas aparecem juntas.
+    let (address, server) = start().await?;
+
+    let speaker = tokio::task::spawn_blocking(move || connect(address, "rafael")).await??;
+    let listener = tokio::task::spawn_blocking(move || connect(address, "carla")).await??;
+
+    for connection in [&speaker, &listener] {
+        connection.open_channel(CHANNEL)?;
+    }
+
+    // **Esperar o canal abrir de verdade antes de medir.** `open_channel`
+    // enfileira um comando; ler a revisão logo depois pegaria a batida daquela
+    // abertura — `Room::open_channel` limpa a lista e a bate, com razão — em vez
+    // da que este teste procura.
+    let abriu = espere_ate(|| {
+        listener
+            .snapshot()
+            .channels
+            .iter()
+            .any(|linha| linha.id == CHANNEL && linha.open)
+    });
+    assert!(abriu, "a Linha nunca ficou aberta para quem escuta");
+    std::thread::sleep(Duration::from_millis(200));
+    let antes = listener.snapshot().messages_revision;
+
+    speaker.send_message(CHANNEL, "isto tem de acender a tela".into())?;
+
+    // Primeiro que a mensagem chegou ao núcleo — sem isso, o resto não tem o
+    // que medir.
+    let chegou = espere_ate(|| {
+        listener
+            .messages()
+            .iter()
+            .any(|mensagem| mensagem.body == "isto tem de acender a tela")
+    });
+    assert!(chegou, "a mensagem não chegou ao núcleo de quem escuta");
+
+    // E então o número de que a tela depende. Este é o assunto do teste: o
+    // núcleo ter a mensagem e a revisão não andar é exatamente o relato de
+    // campo — a lista fica parada até que outra coisa a empurre.
+    let depois = listener.snapshot().messages_revision;
+    assert_ne!(
+        depois, antes,
+        "o núcleo recebeu a mensagem e a revisão ficou em {antes}: a tela não \
+         tem como saber que precisa buscá-la"
+    );
+
+    server.shutdown();
+    Ok(())
+}
+
+/// Espera uma condição virar verdadeira, com prazo.
+///
+/// Prazo e não `sleep` fixo: a máquina que roda a suíte inteira em paralelo é
+/// outra máquina, e um número que basta aqui reprova lá — é a pendência 29
+/// inteira.
+fn espere_ate(mut condicao: impl FnMut() -> bool) -> bool {
+    let limite = std::time::Instant::now() + Duration::from_secs(10);
+    while std::time::Instant::now() < limite {
+        if condicao() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    false
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn quem_nao_abriu_a_linha_nao_recebe_nada_e_isso_e_a_regra() -> Result<()> {
+    // **A regra que fez um defeito de corrida virar uma conversa muda.**
+    //
+    // O servidor entrega `MessageReceived` filtrando por `channels.contains`, e
+    // aquela lista só cresce com `ClientMessage::JoinChannel`. Uma sessão que
+    // nunca abriu Linha nenhuma está conectada, autenticada, com o roster certo
+    // e a voz funcionando — e **não recebe uma linha de conversa**, sem nada em
+    // lugar nenhum dizendo isso.
+    //
+    // Não é defeito: é o desenho, e é o que evita mandar toda Linha do servidor
+    // para todo mundo. O que era defeito foi a casca entrar sem abrir Linha
+    // alguma, por uma corrida com a chegada da lista de canais — e o custo
+    // dessa corrida é este teste inteiro.
+    //
+    // Ele existe para que a regra pare de ser implícita. Quem mudar o filtro do
+    // servidor quebra isto aqui e vê por quê; quem mexer na entrada da casca lê
+    // isto e sabe o que está em jogo.
+    let (address, server) = start().await?;
+
+    let speaker = tokio::task::spawn_blocking(move || connect(address, "rafael")).await??;
+    let mudo = tokio::task::spawn_blocking(move || connect(address, "carla")).await??;
+
+    // Só quem fala abre. Quem escuta entra e fica como estava.
+    speaker.open_channel(CHANNEL)?;
+    let abriu = espere_ate(|| {
+        speaker
+            .snapshot()
+            .channels
+            .iter()
+            .any(|linha| linha.id == CHANNEL && linha.open)
+    });
+    assert!(abriu, "quem fala nunca abriu a Linha");
+
+    speaker.send_message(CHANNEL, "ninguém do outro lado vai ver isto".into())?;
+
+    // A ida e volta de quem falou é o relógio: quando **ele** já tem a
+    // mensagem, o servidor já a difundiu, e o silêncio do outro lado deixa de
+    // poder ser «ainda não chegou».
+    let voltou = espere_ate(|| !speaker.messages().is_empty());
+    assert!(voltou, "nem quem falou recebeu a própria mensagem de volta");
+
+    assert!(
+        mudo.messages().is_empty(),
+        "quem não abriu Linha nenhuma recebeu conversa: {:?}",
+        mudo.messages()
+    );
+
+    server.shutdown();
+    Ok(())
+}

@@ -402,7 +402,23 @@ function tomDoPadrao(snapshot) {
  */
 async function inserirPlug() {
   try {
-    const snapshot = aperto?.snapshot;
+    // **Lido agora, e não o do aperto de mão.** `aperto.snapshot` é o retrato
+    // de quando a conexão foi feita, e a lista de Linhas chega do servidor
+    // *depois* dele. Quando esta função corria com aquele retrato ainda vazio,
+    // nenhuma Linha era aberta — e o servidor **só entrega mensagem a quem
+    // entrou no canal** (`session.rs`, `channels.contains`). O resultado em
+    // campo foi uma conversa que não chegava, até a pessoa clicar numa Linha
+    // para digitar: o clique entra no canal e busca o histórico, e tudo aparecia
+    // de uma vez.
+    //
+    // Ler agora fecha o caso comum. O caso em que a lista ainda não chegou nem
+    // agora é fechado do outro lado, em `tela-sessao.js`: ver `abrirLinhaSozinho`.
+    let snapshot = aperto?.snapshot;
+    try {
+      snapshot = await invoke("snapshot");
+    } catch (falha) {
+      console.warn("snapshot ao entrar:", falha);
+    }
     if (snapshot?.channels?.length > 0) {
       await invoke("open_channel", { channel: snapshot.channels[0].id });
     }
