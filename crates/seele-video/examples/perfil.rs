@@ -63,8 +63,20 @@ fn sps(bytes: &[u8]) -> Option<&[u8]> {
 }
 
 fn main() -> Result<(), String> {
-    let caminho = PathBuf::from(std::env::var("HOME").map_err(|_| "sem HOME")?)
-        .join(".config/seele/libopenh264.dylib");
+    // `SEELE_OPENH264` primeiro, e o caminho do macOS como último recurso.
+    //
+    // **Sem a variável, este exemplo só rodava no Mac** — o nome do arquivo
+    // termina em `.dylib`, e no Windows o módulo é uma `.dll` noutra pasta. O
+    // efeito foi maior que a inconveniência: a prova de que o SPS reescrito
+    // sobrevive ao codificador nunca foi feita contra o OpenH264 do Windows, e
+    // é exatamente lá que o compartilhamento de tela parou de funcionar.
+    let caminho = std::env::var_os("SEELE_OPENH264").map_or_else(
+        || {
+            PathBuf::from(std::env::var("HOME").unwrap_or_default())
+                .join(".config/seele/libopenh264.dylib")
+        },
+        PathBuf::from,
+    );
     if !caminho.exists() {
         return Err(format!("não achei o módulo em {}", caminho.display()));
     }
