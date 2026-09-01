@@ -27,11 +27,13 @@ use std::sync::Once;
 
 use windows::core::{Interface as _, GUID};
 use windows::Win32::Media::MediaFoundation::{
-    CODECAPI_AVEncCommonMeanBitRate, CODECAPI_AVEncVideoForceKeyFrame, ICodecAPI, IMFActivate,
-    IMFMediaEventGenerator, IMFMediaType, IMFSample, IMFTransform, METransformHaveOutput,
-    METransformNeedInput, MFCreateMediaType, MFCreateMemoryBuffer, MFCreateSample,
-    MFMediaType_Video, MFStartup, MFTEnumEx, MFVideoFormat_H264, MFVideoFormat_NV12,
-    MFVideoInterlace_Progressive, MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS,
+    eAVEncCommonRateControlMode_CBR, CODECAPI_AVEncCommonMeanBitRate,
+    CODECAPI_AVEncCommonRateControlMode, CODECAPI_AVEncMPVDefaultBPictureCount,
+    CODECAPI_AVEncMPVGOPSize, CODECAPI_AVEncVideoForceKeyFrame, CODECAPI_AVLowLatencyMode,
+    ICodecAPI, IMFActivate, IMFMediaEventGenerator, IMFMediaType, IMFSample, IMFTransform,
+    METransformHaveOutput, METransformNeedInput, MFCreateMediaType, MFCreateMemoryBuffer,
+    MFCreateSample, MFMediaType_Video, MFStartup, MFTEnumEx, MFVideoFormat_H264,
+    MFVideoFormat_NV12, MFVideoInterlace_Progressive, MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS,
     MFT_CATEGORY_VIDEO_ENCODER, MFT_ENUM_FLAG_ASYNCMFT, MFT_ENUM_FLAG_HARDWARE,
     MFT_ENUM_FLAG_SORTANDFILTER, MFT_ENUM_FLAG_SYNCMFT, MFT_MESSAGE_NOTIFY_BEGIN_STREAMING,
     MFT_MESSAGE_NOTIFY_START_OF_STREAM, MFT_OUTPUT_DATA_BUFFER, MFT_REGISTER_TYPE_INFO,
@@ -231,6 +233,46 @@ impl Codificador {
             unsafe { atributos.SetUINT32(&MF_TRANSFORM_ASYNC_UNLOCK, 1) }
                 .map_err(|erro| recusa("destrancar o codificador assíncrono", erro))?;
         }
+
+        // **O que o macOS ganhou e este caminho não tinha.**
+        //
+        // Lá foram declarados tempo real, ausência de reordenação, cadência e
+        // intervalo de quadro-chave. Aqui só o teto ia no tipo de saída, e o
+        // resto ficava no que o driver achasse — que varia de fabricante para
+        // fabricante e é a diferença entre uma conversa e um arquivo. O relato
+        // que trouxe isto: «está mais pixelado que antes», no Windows.
+        //
+        // Nenhum destes é obrigatório e nenhum derruba nada ao falhar: um MFT
+        // que não expõe o botão simplesmente não muda de comportamento.
+        //
+        // Latência baixa **antes** dos tipos, que é o que a documentação do MFT
+        // pede: depois de negociado, o modo já não muda.
+        botao(&transformador, &CODECAPI_AVLowLatencyMode, 1);
+        // Taxa constante e a média igual ao teto. Sem dizer o modo, o padrão de
+        // vários encoders é mirar **qualidade** e ignorar o número — e um teto
+        // ignorado é uma imagem que não usa a banda que tem.
+        botao(
+            &transformador,
+            &CODECAPI_AVEncCommonRateControlMode,
+            eAVEncCommonRateControlMode_CBR.0,
+        );
+        botao(
+            &transformador,
+            &CODECAPI_AVEncCommonMeanBitRate,
+            i32::try_from(config.teto_bps).unwrap_or(i32::MAX),
+        );
+        // Zero quadros B, pela mesma razão que o macOS desliga a reordenação:
+        // um quadro que só decodifica depois do que vem adiante troca latência
+        // por bits, e esta é uma conversa.
+        botao(&transformador, &CODECAPI_AVEncMPVDefaultBPictureCount, 0);
+        // Um quadro-chave por conta própria a cada dois segundos, como no
+        // macOS: é o piso que faz quem chega atrasado não esperar para sempre
+        // se ninguém pedir.
+        botao(
+            &transformador,
+            &CODECAPI_AVEncMPVGOPSize,
+            i32::try_from(quadros.saturating_mul(2)).unwrap_or(60),
+        );
 
         // **A saída primeiro.** Um codificador não sabe descrever a entrada que
         // aceita antes de saber o que tem de produzir, e a ordem inversa faz o
@@ -450,21 +492,23 @@ impl Codificador {
     }
 }
 
+/// Um botão do `ICodecAPI`, quando o codificador oferece um.
+///
+/// **Falhar aqui não é erro.** Nem todo MFT expõe `ICodecAPI`, e os que expõem
+/// não expõem os mesmos botões: pedir um quadro-chave a quem não atende deve
+/// custar um quadro-chave a menos, e não a transmissão inteira.
+fn botao(transformador: &IMFTransform, chave: &GUID, valor: i32) {
+    let Ok(api) = transformador.cast::<ICodecAPI>() else {
+        return;
+    };
+    let valor = windows::Win32::System::Variant::VARIANT::from(valor);
+    // SAFETY: a chave é estática do sistema e o valor vive até o fim da chamada.
+    let _ = unsafe { api.SetValue(chave, &raw const valor) };
+}
+
 impl Codificador {
-    /// Um botão do `ICodecAPI`, quando o codificador oferece um.
-    ///
-    /// **Falhar aqui não é erro.** Nem todo MFT expõe `ICodecAPI`, e os que
-    /// expõem não expõem os mesmos botões: pedir um quadro-chave a quem não
-    /// atende deve custar um quadro-chave a menos, e não a transmissão inteira.
-    /// Quem depende de verdade do teto é o tipo de saída, declarado na abertura.
-    fn botao(&self, chave: &GUID, valor: u32) {
-        let Ok(api) = self.transformador.cast::<ICodecAPI>() else {
-            return;
-        };
-        let valor = windows::Win32::System::Variant::VARIANT::from(valor as i32);
-        // SAFETY: a chave é estática do sistema e o valor vive até o fim da
-        // chamada.
-        let _ = unsafe { api.SetValue(chave, &raw const valor) };
+    fn botao(&self, chave: &GUID, valor: i32) {
+        botao(&self.transformador, chave, valor);
     }
 }
 
@@ -489,7 +533,10 @@ impl super::CodificaVideo for Codificador {
         // Pelo `ICodecAPI` e **não** refazendo o tipo de saída: trocar o tipo no
         // meio do fluxo obriga a renegociar, e renegociar custa um quadro-chave
         // — que é exatamente o que a costura promete que mudar o teto não custa.
-        self.botao(&CODECAPI_AVEncCommonMeanBitRate, teto_bps);
+        self.botao(
+            &CODECAPI_AVEncCommonMeanBitRate,
+            i32::try_from(teto_bps).unwrap_or(i32::MAX),
+        );
         self.teto_bps = teto_bps;
         Ok(())
     }
