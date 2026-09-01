@@ -233,6 +233,29 @@ pub const JANELA_DA_SUBIDA: Duration = Duration::from_secs(1);
 /// OpenH264 entregando 872 de 1200 kbps em 720p, e exigir mais descartaria toda
 /// janela boa.
 pub const OCUPACAO_MINIMA: u32 = 85;
+/// A partir de que fração de perda a estimativa recua, em por cento.
+///
+/// **A estimativa recuava com um pacote perdido, e era isso que a fazia
+/// oscilar.** A condição era binária — «perdeu algum, ou houve algum evento de
+/// congestionamento» —, e um pacote perdido por segundo é rotina em qualquer
+/// rede com wifi no meio. O efeito em campo foi relatado assim: «às vezes ela
+/// ficava boa, às vezes ficava péssima, não tinha uma ordem certa». A estimativa
+/// subia 25%, um pacote caía, ela desabava, e recomeçava.
+///
+/// Nenhum controle de congestionamento sério lê perda assim. O do WebRTC recua
+/// acima de 10%, sobe abaixo de 2%, e **segura** entre os dois — porque a perda
+/// que importa é a que o cano produz por estar cheio, e um pacote solto não diz
+/// nada sobre o tamanho do cano.
+///
+/// Os dois números daqui são os de lá, e não uma invenção: são o ponto de
+/// operação de uma década de vídeo em tempo real na internet.
+pub const PERDA_QUE_DOI: u32 = 10;
+/// Abaixo de que fração de perda a estimativa pode subir, em por cento.
+///
+/// Entre [`PERDA_QUE_DOI`] e este número a estimativa **segura**: nem sobe nem
+/// desce. É a faixa em que a perda existe e não é o cano falando — insistir em
+/// subir ali é procurar a dor, e recuar é abrir mão de banda que está lá.
+pub const PERDA_QUE_ACALMA: u32 = 2;
 
 /// Quanto a estimativa sobe por janela cheia e sem dor, em por cento.
 pub const SUBIDA: u32 = 125;
@@ -278,6 +301,11 @@ pub struct LeituraDaSubida {
     pub bytes_enviados: u64,
     /// `path.lost_packets`, somado.
     pub pacotes_perdidos: u64,
+    /// Quantos datagramas saíram, para a perda virar **fração**.
+    ///
+    /// Sem este número a perda é uma contagem, e uma contagem não distingue um
+    /// pacote em dez mil de mil em dez mil. Ver a nota de [`PERDA_QUE_DOI`].
+    pub pacotes_enviados: u64,
     /// `path.congestion_events`, somado.
     pub eventos_de_congestionamento: u64,
     /// O que a sala tinha licença de gastar na janela, em bits por segundo.
@@ -366,8 +394,26 @@ impl SondaDaSubida {
         let entregue_bps =
             u32::try_from(((bytes as f64 * 8.0) / segundos) as u64).unwrap_or(u32::MAX);
 
-        let doeu = leitura.pacotes_perdidos > janela.leitura.pacotes_perdidos
-            || leitura.eventos_de_congestionamento > janela.leitura.eventos_de_congestionamento;
+        // A perda como **fração do que saiu**, e não como contagem. Ver
+        // `PERDA_QUE_DOI`: a contagem fazia um pacote solto derrubar a
+        // estimativa, e um pacote solto por segundo é rotina.
+        let perdidos = leitura
+            .pacotes_perdidos
+            .saturating_sub(janela.leitura.pacotes_perdidos);
+        let enviados = leitura
+            .pacotes_enviados
+            .saturating_sub(janela.leitura.pacotes_enviados);
+        // Sem pacote nenhum na janela não há fração a calcular, e zero é a
+        // resposta certa: nada saiu, nada se perdeu.
+        let perda_pct = perdidos
+            .saturating_mul(100)
+            .checked_div(enviados)
+            .and_then(|pct| u32::try_from(pct).ok())
+            .unwrap_or(0);
+        let doeu = perda_pct >= PERDA_QUE_DOI;
+        // A faixa do meio segura: nem sobe nem desce. É onde a perda existe e
+        // não é o cano falando.
+        let calma = perda_pct <= PERDA_QUE_ACALMA;
         let permitido = janela.leitura.permitido_bps;
         let cheia = permitido > 0
             && u64::from(entregue_bps) * 100 >= u64::from(permitido) * u64::from(OCUPACAO_MINIMA);
@@ -381,7 +427,7 @@ impl SondaDaSubida {
             // Doeu sem encher — outra coisa apertou o caminho. Recua um passo,
             // sem fingir saber o tamanho.
             self.estimativa_bps = (u64::from(antes) * u64::from(QUEDA) / 100) as u32;
-        } else if cheia {
+        } else if cheia && calma {
             let passo = (u64::from(antes) * u64::from(SUBIDA) / 100) as u32;
             let teto = self.limite_bps.unwrap_or(TETO_DA_SUBIDA_BPS);
             self.estimativa_bps = passo.min(teto).min(TETO_DA_SUBIDA_BPS);
@@ -403,6 +449,11 @@ pub struct LeituraDaConexao {
     pub bytes_enviados: u64,
     /// `path.lost_packets`.
     pub pacotes_perdidos: u64,
+    /// Quantos datagramas saíram, para a perda virar **fração**.
+    ///
+    /// Sem este número a perda é uma contagem, e uma contagem não distingue um
+    /// pacote em dez mil de mil em dez mil. Ver a nota de [`PERDA_QUE_DOI`].
+    pub pacotes_enviados: u64,
     /// `path.congestion_events`.
     pub eventos_de_congestionamento: u64,
 }
@@ -412,6 +463,7 @@ impl From<&quinn::ConnectionStats> for LeituraDaConexao {
         Self {
             bytes_enviados: stats.udp_tx.bytes,
             pacotes_perdidos: stats.path.lost_packets,
+            pacotes_enviados: stats.udp_tx.datagrams,
             eventos_de_congestionamento: stats.path.congestion_events,
         }
     }
@@ -745,10 +797,17 @@ mod tests {
     // ---- a sonda da subida ----
 
     /// Uma leitura com os contadores acumulados que se quer.
+    /// Uma leitura de janela.
+    ///
+    /// `pacotes_enviados` sai de uma conta e não de um argumento: a perda virou
+    /// **fração**, e uma leitura de teste que não dissesse quantos pacotes
+    /// saíram faria toda perda parecer 100%. Mil e duzentos bytes por
+    /// datagrama, que é o que cabe num caminho comum sem fragmentar.
     fn leitura(bytes: u64, perdidos: u64, permitido_bps: u32) -> LeituraDaSubida {
         LeituraDaSubida {
             bytes_enviados: bytes,
             pacotes_perdidos: perdidos,
+            pacotes_enviados: bytes / 1200,
             eventos_de_congestionamento: 0,
             permitido_bps,
         }
@@ -817,10 +876,15 @@ mod tests {
         let inicio = Instant::now();
         let permitido = 1_000_000;
         let entregue = 900_000;
+        // **Perda de 20%**, e não sete pacotes soltos. A regra deixou de ser
+        // «perdeu algum» e passou a ser fração — ver `PERDA_QUE_DOI`. Sete
+        // pacotes em noventa e três são 7,5%, que hoje é a faixa que segura, e é
+        // a mesma leitura que fazia a estimativa oscilar quando ela contava.
+        let saidos = bytes_em_um_segundo(entregue) / 1200;
         sonda.observar(inicio, &leitura(0, 0, permitido));
         let novo = sonda.observar(
             inicio + Duration::from_secs(1),
-            &leitura(bytes_em_um_segundo(entregue), 7, permitido),
+            &leitura(bytes_em_um_segundo(entregue), saidos / 5, permitido),
         );
         assert_eq!(
             novo,
@@ -1131,6 +1195,7 @@ mod a_sonda_em_lan {
                 LeituraDaConexao {
                     bytes_enviados: bytes,
                     pacotes_perdidos: 0,
+                    pacotes_enviados: bytes / 1200,
                     eventos_de_congestionamento: 0,
                 },
             );
