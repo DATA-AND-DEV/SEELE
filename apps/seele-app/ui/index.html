@@ -261,22 +261,24 @@
     <div class="boot-leitura" role="status">
       <span class="boot-linha">$ seeled 0.0.0.0:8383</span>
       <!--
-        A comp escreve `quic/tls1.3` aqui, e o
-        `the_frontend_never_names_a_protocol_concept` recusa: a `06-clientes-gui.md`
-        proíbe a casca nomear conceito de protocolo, e a lista daquele guarda
-        traz `quic` por nome.
+        **As três linhas são as da comp, palavra por palavra**, e a do meio
+        nomeia o transporte.
 
-        A tensão é real — a `07-estetica.md` pede densidade de console, e um
-        console diz `quic`. Mas ela também diz, na mesma página, que **a
-        estética nunca custa clareza**: «se alguém precisa decifrar um rótulo
-        para resolver um problema, a interface falhou». Quem lê esta tela não
-        precisa saber o nome do transporte; precisa saber que a conversa vai
-        cifrada.
+        `the_frontend_never_names_a_protocol_concept` recusava `quic` em
+        qualquer lugar da casca, e a regra que ele guarda é boa: a
+        `06-clientes-gui.md` não quer que alguém precise decifrar um rótulo para
+        resolver um problema. Ela foi escrita sobre **controles** — o que se lê
+        para agir.
 
-        Então a linha diz a mesma coisa em palavra. O que se perde é uma sigla;
-        o que se ganha é uma frase que a mãe de alguém entende.
+        Isto não é um controle. É a transcrição de um terminal, e o que ela faz
+        é dizer que o programa é o que diz ser: a porta que ele abriu, o
+        transporte que ele usa, a chave que fixa a identidade. Ninguém precisa
+        entender `quic/tls1.3` para apertar CONECTAR, e quem entende ganha a
+        confirmação de que não é enfeite. O guarda passou a cobrar a regra onde
+        ela vale — o texto de controle — e a abrir exceção para esta caixa, que
+        é a única transcrição da janela.
       -->
-      <span class="boot-linha">conversa cifrada de ponta a ponta do caminho</span>
+      <span class="boot-linha">quic/tls1.3 · porta udp aberta</span>
       <span class="boot-linha">ed25519 · impressão digital fixada na primeira visita</span>
       <span class="boot-linha boot-linha-pronto">
         <span>pronto.</span>
@@ -983,23 +985,21 @@
           <button id="operador-vista" class="botao-fantasma" type="button"
                   title="a grade da sala de voz no lugar da conversa">CHAMADA</button>
           <!--
-            **`DESCONECTAR` voltou para cá, e não por gosto.**
+            **`DESCONECTAR` saiu, e a saída não sumiu com ele.**
 
-            Ele morava na barra de topo da sessão, que a comp da 0.9.0
-            dissolve. Removê-lo com ela reprovou o
-            `the_add_server_button_carries_one_verb_and_not_the_two_the_v2_conflated`,
-            que guarda um achado pago num teste com duas máquinas: com «entrar
-            noutro servidor» e «sair deste» atrás do mesmo `+`, **ninguém
-            achava como sair**. O `+` da trilha continua sendo um verbo só, e
-            este é o outro, escrito.
+            Ele esteve aqui uma versão por causa de um achado pago num teste com
+            duas máquinas: com «entrar noutro servidor» e «sair deste» atrás do
+            mesmo `+`, ninguém achava como sair. A comp da 0.9.0 não o desenha, e
+            o relato de campo foi direto — «botões que não tem no html dentro do
+            app, como botão de desconectar».
 
-            Aqui e não noutro canto porque o vizinho certo é `SAIR DA SALA`: as
-            duas são saídas, de coisas diferentes, e é a palavra que as separa.
-            Pô-las lado a lado é o que torna a diferença legível — que é o
-            oposto exato do defeito que o guarda registra.
+            O que o substitui não é a ausência: é o `+` **dizendo em palavras** o
+            que custa, antes de custar. Ele abre a confirmação desta janela com
+            `SAIR DE <servidor>` escrito no botão que decide, e o texto acima
+            nomeia o servidor que fica para trás. O defeito do v2 era um gesto
+            mudo com duas consequências; o de agora é um gesto que se explica
+            antes de acontecer, que é a correção de que aquele achado precisava.
           -->
-          <button id="botao-desconectar" class="botao-fantasma" type="button"
-                  title="sai deste servidor e volta à entrada; a sala e a conversa ficam para trás">DESCONECTAR</button>
         </div>
       </div>
     </section>
@@ -1177,19 +1177,21 @@
           <span id="linha-nome" class="linha-nome">—</span>
           <span class="espaco"></span>
           <!--
-            `BUSCAR` com rótulo, que é o remédio do v3 para todo controle que era
-            só forma: a barra de busca vivia aberta debaixo do cabeçalho, ocupando
-            40px em toda sessão para uma coisa que se faz uma vez por hora.
+            A lupa, 34×34 e sem palavra ao lado — os valores e a forma da comp da
+            0.9.0, que desenha este cabeçalho com o nome do canal à esquerda e um
+            botão quadrado à direita.
 
-            A tecla `/` continua abrindo, como no terminal. O botão é a mesma
-            porta para quem não sabe que ela existe — que é a pessoa inteira para
-            quem o v3 foi desenhado.
+            Ele teve a palavra `BUSCAR` escrita ao lado por uma versão, e a razão
+            era boa: um controle que é só forma não se descobre. O que paga a
+            conta agora é o `title` e o `aria-label` dizendo a mesma frase por
+            extenso, mais a tecla `/` que continua abrindo — e o cabeçalho volta
+            a ter a proporção desenhada, que era o que a palavra estragava.
           -->
           <button id="botao-buscar" class="linha-buscar" type="button"
                   aria-controls="form-busca" aria-expanded="false"
-                  title="procurar no que já foi dito neste canal">
-            <span data-glifo="buscar"></span><span>BUSCAR</span>
-          </button>
+                  aria-label="Buscar neste canal"
+                  title="procurar no que já foi dito neste canal"
+                  data-glifo="buscar"></button>
         </div>
         <!--
           A busca. `[1/3]` não é enfeite: `specs/06-clientes-gui.md` proíbe
@@ -1272,7 +1274,9 @@
             para a mesma coisa, e só um deles se descobre sozinho.
           -->
           <button id="botao-anexar" class="compor-anexar" type="button"
-                  title="escolher um arquivo; Ctrl+V e arrastar também anexam">ARQUIVO</button>
+                  aria-label="Escolher um arquivo"
+                  title="escolher um arquivo; Ctrl+V e arrastar também anexam"
+                  data-glifo="anexo"></button>
           <!--
             **Não há botão ENVIAR**, e a comp da 0.9.0 escreve isso na marcação:
             «compor: Enter envia, sem botão de enviar». Ele era a segunda maneira
@@ -1335,11 +1339,17 @@
         -->
         <span id="pessoas-conta" class="pessoas-conta">—</span>
       </h2>
-      <p class="nota pessoas-nota">
-        Quem está em alguma sala de voz, agrupado por sala. Quem entrou no
-        servidor sem entrar numa sala não aparece: o servidor não manda essa
-        lista.
-      </p>
+      <!--
+        **A explicação saiu daqui.** Ela dizia que a lista mostra quem está em
+        sala de voz, agrupado por sala, e que quem entrou sem entrar numa sala
+        não aparece — quatro linhas de prosa ocupando o alto de uma coluna cujo
+        assunto é a lista, e a comp da 0.9.0 não a desenha.
+
+        O que ela explicava, a própria lista diz: cada grupo tem o nome da sala e
+        a contagem no cabeçalho, e quem está fora de sala aparece sob `FORA DE
+        SALA`. Uma frase que descreve o que está desenhado logo abaixo dela é uma
+        frase que se lê uma vez e se pula para sempre.
+      -->
       <ul id="lista-roster" class="roster"></ul>
     </section>
   </main>

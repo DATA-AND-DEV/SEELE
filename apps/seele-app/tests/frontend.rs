@@ -1736,14 +1736,47 @@ fn the_frontend_never_names_a_protocol_concept() {
     let script = without_comments(&scripts());
     let page = without_comments(&read("ui/index.html"));
 
+    // **A transcrição de boot fica de fora, e é a única coisa que fica.**
+    //
+    // A regra da `06-clientes-gui.md` é sobre o que se lê **para agir**: «se
+    // alguém precisa decifrar um rótulo para resolver um problema, a interface
+    // falhou». `#boot-leitura` não é rótulo de nada — é um terminal escrito, e a
+    // comp da 0.9.0 o desenha dizendo a porta, o transporte e a chave. Ninguém
+    // precisa entender `quic/tls1.3` para apertar CONECTAR; quem entende ganha a
+    // confirmação de que a caixa não é cenário.
+    //
+    // O recorte é por elemento e não por palavra, de propósito: `quic` continua
+    // proibido em todo botão, rótulo, aviso e frase de erro desta janela.
+    let pagina_sem_leitura = fora_da_leitura_de_boot(&page);
+
     for forbidden in ["ssrc", "opus_frame", "datagram", "quic", "postcard"] {
-        for (name, text) in [("the scripts", &script), ("index.html", &page)] {
+        for (name, text) in [
+            ("the scripts", &script),
+            (
+                "index.html outside the boot transcript",
+                &pagina_sem_leitura,
+            ),
+        ] {
             assert!(
                 !text.to_lowercase().contains(forbidden),
                 "{name} names `{forbidden}`, which is protocol knowledge in a shell"
             );
         }
     }
+}
+
+/// A página sem o bloco `#boot-leitura` — ver o guarda acima.
+fn fora_da_leitura_de_boot(pagina: &str) -> String {
+    let Some(de) = pagina.find("class=\"boot-leitura\"") else {
+        panic!("`#boot-leitura` sumiu da entrada; o recorte deste guarda ficou sem assunto");
+    };
+    let Some(fim) = pagina[de..].find("</div>") else {
+        panic!("o bloco de `boot-leitura` nunca fecha");
+    };
+    let mut sem = String::with_capacity(pagina.len());
+    sem.push_str(&pagina[..de]);
+    sem.push_str(&pagina[de + fim..]);
+    sem
 }
 
 /// Every screen carries an id, and the app opens on exactly one of them.
@@ -2651,10 +2684,11 @@ fn the_add_server_button_carries_one_verb_and_not_the_two_the_v2_conflated() {
     // test: with "enter another" and "leave this" behind the same glyph, nobody
     // found how to leave. That is what this now holds.
     //
-    // - `DESCONECTAR` stays in the header, written and pressable. The moment it
-    //   goes, the `+` is the only way out again and the v2 is back;
     // - the `+` names one thing, and it is not leaving. Leaving is what it
-    //   costs, and the cost is what the confirmation says;
+    //   costs, and the cost is what the confirmation says — **in words, with the
+    //   server's name in them**, which is the half the v2 never had. A separate
+    //   `DESCONECTAR` stood beside it for one version and the 0.9.0 comp does
+    //   not draw it; what replaced it is not silence but the sentence;
     // - it asks before it spends a live session, through the one confirmation
     //   surface of this product rather than a second box of its own;
     // - and it is still a glyph, so it still needs an accessible name.
@@ -2679,12 +2713,26 @@ fn the_add_server_button_carries_one_verb_and_not_the_two_the_v2_conflated() {
          costs — a live session — is not in the word `+`: <{tag}>"
     );
 
-    let sair = tag_with_id(&page, "botao-desconectar");
+    // The sentence is the mitigation, so the sentence is what is held: pressing
+    // the `+` has to reach a confirmation whose deciding button spells out
+    // leaving, naming the server being left. Without this the `+` is once again
+    // a mute glyph with two consequences, which is the state the two-machine
+    // test found and nobody escaped from.
+    let pede = js_function(&sessao, "async function pedirAEntrada(");
     assert!(
-        !sair.contains("disabled") && !sair.contains("hidden"),
-        "`DESCONECTAR` is gone from the header or cannot be pressed, so leaving \
-         is back behind the `+` — which is exactly the state the two-machine \
-         test found and nobody escaped from: <{sair}>"
+        pede.contains("abrirConfirmacao"),
+        "the `+` no longer asks before spending a live session: {pede}"
+    );
+    assert!(
+        pede.contains("SAIR DE"),
+        "the `+`'s confirmation does not say `SAIR DE` on the button that \
+         decides, so leaving is unnamed again and the glyph carries two \
+         consequences in silence: {pede}"
+    );
+    assert!(
+        pede.contains("nomeDesteServidor()"),
+        "the confirmation does not name the server being left, so it warns \
+         about leaving somewhere without saying where: {pede}"
     );
 
     assert!(
@@ -4565,12 +4613,17 @@ fn each_moderation_verb_is_offered_by_its_own_permission() {
          everybody or to nobody"
     );
 
-    // And never on yourself: kicking yourself is DESCONECTAR, banning yourself
-    // is not a thing, and moving yourself is ENTRAR NA SALA.
-    let porta = body_of(&scripts(), "function botaoDeModerar");
+    // And never on yourself: kicking yourself is leaving the server, banning
+    // yourself is not a thing, and moving yourself is ENTRAR NA SALA.
+    //
+    // The door used to be a `MODERAR` button drawn inside the voice-room list;
+    // the 0.9.0 comp draws that list as names and nothing else, so the door
+    // became the person's own name in the roster. The decision this guards —
+    // who gets one — did not move with it.
+    let porta = body_of(&scripts(), "function quemPodeSerModerado");
     assert!(
         porta.contains("pessoa.is_self"),
-        "the moderation door is drawn on one's own row too:\n{porta}"
+        "the moderation door is offered on one's own row too:\n{porta}"
     );
 }
 

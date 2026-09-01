@@ -684,14 +684,24 @@ button.voice_room-nome:hover { text-decoration: underline; }
 .voice_room-botoes { display: flex; gap: 6px; }
 .voice_room-botoes .voice_room-entrar { flex: 1; width: auto; }
 
+/* O `×` de apagar: 22×22, com os valores da comp.
+ *
+ * Ele foi `APAGAR` escrito por extenso durante uma versão, e a palavra tinha 38
+ * pixels de altura e uma moldura em toda linha de sala e de canal — uma coluna
+ * de 268px em que o verbo mais raro era o elemento mais pesado. O nome do que
+ * ele apaga continua dito por extenso, no `aria-label` e no `title`, que é onde
+ * ele é lido por quem procura o verbo em vez de esbarrar nele. */
 .voice_room-apagar, .linha-apagar {
+  width: 22px;
+  height: 22px;
   flex: 0 0 auto;
-  min-height: 38px;
-  padding: 0 10px;
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 12px;
-  letter-spacing: 0.12em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
   color: var(--seele-osso-apagado);
   background: none;
   border: 1px solid var(--seele-linha-forte);
@@ -718,7 +728,6 @@ button.voice_room-nome:hover { text-decoration: underline; }
    `<li>` continua sendo o que era: um único botão de largura cheia. */
 .linha-fileira { display: flex; align-items: stretch; }
 .linha-fileira .linha { min-width: 0; flex: 1; }
-.linha-apagar { min-height: 40px; }
 
 .barra {
   display: block;
@@ -904,18 +913,21 @@ button.voice_room-nome:hover { text-decoration: underline; }
   color: var(--seele-osso-apagado);
 }
 
-/* `BUSCAR` com rótulo. Contorno e não campo sólido: ele é a segunda coisa desta
-   coluna, e o compositor lá embaixo é a primeira. */
+/* A lupa: 34×34 quadrada, contornada, sem rótulo ao lado. Valores da comp.
+
+   Ela teve `BUSCAR` escrito ao lado por uma versão. Cabeçalho e compositor são
+   a mesma coluna, e as duas palavras — `BUSCAR` e `ARQUIVO` — empurravam o nome
+   do canal e o campo de escrever para dentro. O que o rótulo pagava, o
+   `aria-label` e o `title` pagam sem ocupar largura. */
 .linha-buscar {
+  width: 34px;
+  height: 34px;
   display: flex;
   align-items: center;
-  gap: 7px;
-  min-height: 34px;
-  padding: 0 12px;
+  justify-content: center;
   flex: 0 0 auto;
+  padding: 0;
   font: inherit;
-  font-size: 11px;
-  letter-spacing: 0.1em;
   color: var(--seele-osso-apagado);
   background: none;
   border: 1px solid var(--seele-linha-forte);
@@ -1106,17 +1118,20 @@ button.voice_room-nome:hover { text-decoration: underline; }
 /* O `ENVIAR` saiu na 0.9.0 — ver `index.html`. A instrução que ele carregava
    mora agora no `placeholder`, que é onde se olha quando se precisa dela. */
 
-/* `ARQUIVO` ao lado de `ENVIAR`, e fantasma contra ele: escolher um arquivo é
-   preparar, e transmitir é o ato. Duas ações sólidas lado a lado deixariam a
-   fileira sem uma principal. */
+/* O documento: 44×44, a altura do campo de escrever ao lado. Valores da comp.
+
+   Não há `ENVIAR` para ele contrastar desde a 0.9.0 — Enter envia —, então o
+   par que ele formava com um botão sólido deixou de existir, e com ele a razão
+   de a palavra estar escrita. */
 .compor-anexar {
-  min-height: 44px;
-  padding: 0 14px;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex: 0 0 auto;
-  font-family: var(--seele-display);
-  font-weight: 700;
-  font-size: 13px;
-  letter-spacing: 0.14em;
+  padding: 0;
+  font: inherit;
   color: var(--seele-osso-apagado);
   background: none;
   border: 1px solid var(--seele-linha-forte);
@@ -2032,3 +2047,21 @@ button.voice_room-nome:hover { text-decoration: underline; }
   color: var(--seele-laranja-nerv);
   border-color: var(--seele-laranja-nerv);
 }
+
+/* O nome de uma pessoa na faixa, quando ele é a porta da moderação.
+ *
+ * Sem moldura e sem cor própria: ele **é** o nome, e a única coisa que o
+ * distingue é o cursor e o sublinhado ao passar. A comp desenha esta linha sem
+ * controle nenhum, e a regra que ela segue é a do resto da janela — não
+ * acrescentar pixel para um verbo que a pessoa só usa quando precisa. */
+.pessoa-nome-porta {
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.pessoa-nome-porta:hover { color: var(--seele-laranja-nerv); }

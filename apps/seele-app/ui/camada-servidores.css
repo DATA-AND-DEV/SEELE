@@ -51,7 +51,15 @@
   font-size: 14px;
   letter-spacing: 0.06em;
   color: var(--seele-laranja-nerv);
+  background-color: var(--seele-negro-absoluto);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
 }
+
+/* Com imagem o ladrilho é a imagem: a sigla existe para quando não há uma, e
+   deixar as duas juntas seria escrever por cima do retrato do servidor. */
+.servidor-sigla[data-com-imagem="sim"] { border-color: var(--seele-linha); }
 
 .servidor-texto {
   display: flex;

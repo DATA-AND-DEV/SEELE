@@ -54,13 +54,52 @@ const SEELE_RESPOSTAS = {
   hospedar: { aqui: "127.0.0.1:8383", convite: "seele://127.0.0.1:8383?fp=abc",
               alcance: "SoRedeLocal", porta_recusada: null, encontro_recusado: null },
 };
+// A mesma massa que a comp desenha, para as duas telas poderem ser postas lado
+// a lado. Nomes de campo do `Snapshot` de `seele-ffi`, e não inventados: um
+// campo com nome errado desenha um buraco, e o buraco parece defeito da casca.
+const P = (id, nome, opcoes = {}) => ({
+  id, nickname: nome, speaking: false, muted: false, total_isolation: false,
+  signal: 96, sync_band: "Verde", is_self: false, ...opcoes,
+});
 const SEELE_QUADRO = {
-  server: "AQUI", ended: null, people: [], voice_rooms: [], channels: [], messages: [],
-  link_state: "Verified", nickname: "eu", muted: false, total_isolation: false,
-  voice_mode: "Open", audio_available: true, speaking: false, revision: 1, tela: null,
-  my_voice_room: null, may_remove_message: false, permissions: {},
-  telemetry: { signal: 100, latency_ms: 0, jitter_ms: 0, loss: 0, codec: "OPUS", path: "LOCAL" },
+  caminho: "UPNP", link: "Up", link_state: "Verified", server: "TÓQUIO-3",
+  icon_revision: 0, me: 1, nickname: "rafa",
+  voice_rooms: [
+    { id: 1, name: "PONTE", limit: 8, password_required: false, occupied_by_us: true,
+      channel: null, sync: null,
+      people: [P(1, "rafa", { is_self: true }), P(2, "juli", { speaking: true, signal: 88 }),
+               P(3, "vitor", { signal: 71, sync_band: "Laranja" })] },
+    { id: 2, name: "OFICINA", limit: 6, password_required: false, occupied_by_us: false,
+      channel: null, sync: null, people: [P(4, "dani", { signal: 54, sync_band: "Laranja" })] },
+    { id: 3, name: "SILÊNCIO", limit: 4, password_required: false, occupied_by_us: false,
+      channel: null, sync: null, people: [] },
+  ],
+  presentes: [P(1, "rafa", { is_self: true }), P(2, "juli"), P(3, "vitor"), P(4, "dani")],
+  channels: [
+    { id: 1, name: "geral", open: true }, { id: 2, name: "obras", open: false },
+    { id: 3, name: "links", open: false }, { id: 4, name: "ruido", open: false },
+  ],
+  messages_revision: 1,
+  telemetry: { rtt_ms: 23, jitter_ms: 4, loss_fraction: 0.002, bitrate_bps: 48000,
+               signal: 92, sync_band: "Verde", input_level: 0.4, local_fault: false,
+               frames_refused: 0 },
+  notice: null, muted: false, total_isolation: false, speaking: false,
+  voice_mode: "PushToTalk", audio_available: true, capture: null, playback: null,
+  may_manage_voice_rooms: true, may_kick: true, may_ban: true, may_remove_message: true,
+  may_move_person: true, may_customise_server: true, may_delete_rooms: true,
+  tela: null, ended: null,
 };
+const M = (id, autor, nome, quando, corpo, propria = false) => ({
+  id, channel: 1, author: autor, author_nickname: nome, at_seconds: quando,
+  body: corpo, own: propria, edited: false, attachment: null,
+});
+SEELE_RESPOSTAS.messages = [
+  M(1, 2, "juli", 1756000442, "subi o seeled aqui de casa, a porta 8383 tá aberta no roteador"),
+  M(2, 3, "vitor", 1756000480, "UDP? levei meia hora pra descobrir que a regra que eu tinha escrito era TCP"),
+  M(3, 1, "rafa", 1756000511, "UDP. tá escrito no README, duas linhas depois do comando", true),
+  M(4, 2, "juli", 1756000563, "o furo de NAT funcionou daqui pro celular do vitor, o encontro só apresentou os dois e esqueceu"),
+  M(5, 4, "dani", 1756000649, "entrei na oficina, alguém vem?"),
+];
 SEELE_RESPOSTAS.snapshot = SEELE_QUADRO;
 SEELE_RESPOSTAS.connect = { snapshot: SEELE_QUADRO, veredito: null };
 window.__SEELE_CHAMADAS = [];
@@ -101,10 +140,6 @@ const telas = (quando) =>
   `${quando}: boot=${visivel("tela-boot")} auth=${visivel("tela-auth")} sessao=${visivel("tela-sessao")}`;
 setTimeout(async () => {
   try {
-    // A casca desenha a sessão inteira a partir do Snapshot, e o duble não tem
-    // como fabricar um fiel. Anulados: o que se mede aqui é o caminho.
-    desenhar = () => {};
-    atualizar = async () => {};
 """
 
 PE_DO_ROTEIRO = """

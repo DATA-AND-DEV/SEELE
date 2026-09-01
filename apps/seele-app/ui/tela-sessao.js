@@ -755,17 +755,9 @@ function linhaDeQuemEstaDentro(pessoa, snapshot) {
   } else if (pessoa.speaking) {
     item.append(elemento("span", "voice_room-pessoa-marca", "fala"));
   }
-  // A porta da moderação, quando esta sessão tem algum verbo sobre gente.
-  // `camada-moderar.js` decide se há o que oferecer.
-  //
-  // Ela continua morando só aqui. A faixa de pessoas passou a listar todo mundo
-  // em toda sala também — era a razão de esta lista ser a única com a porta —,
-  // mas duas portas para o mesmo verbo é uma a mais, e a que existe é a que já
-  // tem teste. Mover a porta para a faixa, ou dar uma a ela, é decisão de quem
-  // coordena: o comentário de `botaoDeModerar` em `camada-moderar.js` ainda diz
-  // que o roster mostra só a sala ocupada, e ele tem de mudar junto.
-  const porta = botaoDeModerar(pessoa, snapshot);
-  if (porta) item.append(porta);
+  // **Sem porta de moderação aqui.** A comp da 0.9.0 desenha esta lista como
+  // uma lista de nomes e mais nada, e a porta foi para o nome da pessoa na
+  // faixa da direita — ver o ouvinte de `lista-roster` em `camada-moderar.js`.
   return item;
 }
 
@@ -1208,6 +1200,7 @@ function desenharPessoas(snapshot) {
               // nada, porque a própria voz nunca entra na mistura
               // (`specs/03-audio.md`).
               volume: pessoa.is_self ? null : pessoa.nickname,
+              moderar: quemPodeSerModerado(pessoa, snapshot),
             },
             snapshot.audio_available,
           ),
@@ -1380,7 +1373,18 @@ function linhaDoRoster(pessoa, temAudio) {
 
   const cabeca = elemento("span", "pessoa-cabeca");
   const identidade = elemento("span", "pessoa-identidade");
-  identidade.append(elemento("span", "pessoa-nome", pessoa.nome));
+  // O nome vira botão quando esta sessão tem algum verbo sobre esta pessoa.
+  // Nenhum elemento novo é desenhado: é o mesmo nome, que passa a responder.
+  if (pessoa.moderar) {
+    const porta = elemento("button", "pessoa-nome pessoa-nome-porta", pessoa.nome);
+    porta.type = "button";
+    porta.dataset.moderarPessoa = pessoa.moderar;
+    porta.setAttribute("aria-label", `moderar ${pessoa.nome}`);
+    porta.title = `expulsar, banir ou mover ${pessoa.nome}`;
+    identidade.append(porta);
+  } else {
+    identidade.append(elemento("span", "pessoa-nome", pessoa.nome));
+  }
 
   // `PERMISSIONS·01`, o subsistema por pessoa, não entra. O protocolo não diz qual
   // atende quem, e um travessão explicado em toda linha do roster é o ruído que
@@ -2950,7 +2954,9 @@ $("trilha-adicionar").addEventListener("click", pedirAEntrada);
 
 // A outra saída, escrita — ver a nota no `index.html`. Ela sai deste servidor;
 // o `SAIR DA SALA` ao lado sai só da sala de voz.
-$("botao-desconectar").addEventListener("click", ejetar);
+// O `DESCONECTAR` saiu da tela com a comp da 0.9.0. Quem chama `ejetar` agora é
+// a confirmação do `+` da trilha, que diz `SAIR DE <servidor>` antes de sair —
+// ver `pedirAEntrada` e `sairDoServidorParaAEntrada`.
 
 // A barra de espaço fala, exceto enquanto se digita — a mesma colisão que a TUI
 // resolve mantendo o push-to-talk fora do modo de inserção (decisão D19).

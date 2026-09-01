@@ -109,16 +109,9 @@ function podeModerarPersonos(snapshot) {
  * Nunca sobre si mesmo: expulsar-se é o `DESCONECTAR` do cabeçalho, banir-se
  * não é coisa que exista, e mover-se é o `ENTRAR NA SALA` da própria lista.
  */
-function botaoDeModerar(pessoa, snapshot) {
+function quemPodeSerModerado(pessoa, snapshot) {
   if (pessoa.is_self || !podeModerarPersonos(snapshot)) return null;
-  const botao = elemento("button", "moderar-porta", "MODERAR");
-  botao.type = "button";
-  botao.dataset.moderarPersono = String(pessoa.id);
-  // O nome no rótulo acessível porque `MODERAR` sozinho se repete uma vez por
-  // pessoa, e uma lista de botões idênticos é uma lista que não se navega.
-  botao.setAttribute("aria-label", `moderar ${pessoa.nickname}`);
-  botao.title = `expulsar, banir ou mover ${pessoa.nickname}`;
-  return botao;
+  return String(pessoa.id);
 }
 
 /**
@@ -159,7 +152,7 @@ function botaoDeRemoverMensagem(mensagem, pode) {
  */
 function botaoDeApagarVoiceRoom(voice_room, snapshot, ultimo) {
   if (snapshot.may_delete_rooms !== true) return null;
-  const botao = elemento("button", "voice_room-apagar", "APAGAR");
+  const botao = elemento("button", "voice_room-apagar", "\u00d7");
   botao.type = "button";
   botao.dataset.apagarVoiceRoom = String(voice_room.id);
   botao.setAttribute("aria-label", `apagar a sala de voz ${voice_room.name}`);
@@ -181,7 +174,7 @@ function botaoDeApagarVoiceRoom(voice_room, snapshot, ultimo) {
  */
 function botaoDeApagarLinha(linha, snapshot) {
   if (snapshot.may_delete_rooms !== true) return null;
-  const botao = elemento("button", "linha-apagar", "APAGAR");
+  const botao = elemento("button", "linha-apagar", "\u00d7");
   botao.type = "button";
   botao.dataset.apagarLinha = String(linha.id);
   botao.setAttribute("aria-label", `apagar o canal ${linha.name}`);
@@ -619,10 +612,20 @@ function dataDeInicio(segundos) {
 // Delegação, e não um ouvinte por botão: as linhas das salas de voz são refeitas a
 // cada snapshot, duas vezes por segundo, e um ouvinte por botão seria
 // registrado de novo a cada quadro. A mesma técnica de `alternarCanal`.
-$("lista-voice_rooms").addEventListener("click", (evento) => {
+// **A porta é o nome da pessoa na faixa, e não um botão ao lado dela.**
+//
+// Ela era um `MODERAR` escrito dentro da lista de salas, e a comp da 0.9.0 não
+// o desenha: a lista de quem está numa sala é, lá, uma lista de nomes e mais
+// nada. A faixa da direita é onde as pessoas moram, e o nome de cada uma vira o
+// botão — nenhum elemento novo aparece na tela, e o verbo continua alcançável.
+//
+// O botão antigo, além de fora do desenho, **não funcionava**: ele escrevia
+// `data-moderar-persono` (de `dataset.moderarPersono`) e este seletor procurava
+// `data-moderar-pessoa`. Nunca casaram, e clicar nele não fazia nada.
+$("lista-roster").addEventListener("click", (evento) => {
   const alvo = evento.target.closest("button[data-moderar-pessoa]");
   if (!alvo) return;
-  abrirModeracao(alvo.dataset.moderarPersono);
+  abrirModeracao(alvo.dataset.moderarPessoa);
 });
 
 $("lista-mensagens").addEventListener("click", (evento) => {

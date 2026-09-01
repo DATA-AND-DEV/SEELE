@@ -580,7 +580,8 @@ function fraseDoEstado(pessoa) {
  * `chamada-ejetar` — microfone, isolamento, compartilhar e sair do servidor —
  * numa fileira própria da tela de chamada. A comp dissolve aquela tela e põe
  * microfone e isolamento no **operador**, que já os tinha; sair do servidor já
- * era `botao-desconectar`; e o compartilhar foi para o cabeçalho do palco, ao
+ * era o `+` da trilha, que confirma antes; e o compartilhar foi para o
+ * cabeçalho do palco, ao
  * lado de `TELA CHEIA` — a comp não o desenha em lugar nenhum, e a fileira do
  * operador, onde ele parou primeiro, o deixava na tela o tempo todo, inclusive
  * fora da chamada, onde não há palco que receba o que ele produz.
@@ -688,7 +689,7 @@ $("operador-vista").addEventListener("click", () => {
  * O par do alternador acima, e a distinção entre os dois é o que o
  * `as_duas_saidas_continuam_dizendo_qual_delas_larga_a_sala` prende: um troca
  * o que se vê, o outro para de ouvir e de falar. A conexão com o servidor não
- * é tocada por nenhum dos dois; quem sai do servidor é o `botao-desconectar`.
+ * é tocada por nenhum dos dois; quem sai do servidor é o `+` da trilha.
  */
 $("operador-sair").addEventListener("click", async () => {
   try {

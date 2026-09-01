@@ -60,8 +60,25 @@ async function desenharServidores() {
       botao.dataset.apelido = conhecido.apelido ?? "";
 
       const nome = conhecido.nome || conhecido.alvo;
+      // **O ladrilho traz a imagem do servidor quando há uma.**
+      //
+      // Ela é gravada desde que `lembrar_aparencia_do_servidor` existe, e esta
+      // lista nunca a leu: desenhava sempre a sigla, e a sigla vinha do
+      // **endereço** mesmo quando o nome estava guardado. Duas coisas erradas na
+      // mesma caixa de 34px — «lista de server não trazem o último nome salvo
+      // nem o ícone».
+      //
+      // A sigla continua sendo o que aparece sem imagem, e passa a sair do nome
+      // quando ele existe: `CA` de «Casa» é o que alguém reconhece, e `19` de
+      // `192.168.0.39` não é nada.
+      const ladrilho = elemento("span", "servidor-sigla", siglaDoAlvo(nome));
+      if (conhecido.icone) {
+        ladrilho.style.backgroundImage = `url(${uriDeIcone(conhecido.icone)})`;
+        ladrilho.textContent = "";
+        ladrilho.dataset.comImagem = "sim";
+      }
       botao.append(
-        elemento("span", "servidor-sigla", siglaDoAlvo(conhecido.alvo)),
+        ladrilho,
         (() => {
           const texto = elemento("span", "servidor-texto");
           texto.append(
