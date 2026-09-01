@@ -62,6 +62,23 @@ pub struct Conhecido {
     /// server, ao lado da lista, e vem carregada em [`Conhecidos::listar`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icone: Option<Vec<u8>>,
+    /// Os outros endereços do mesmo servidor, na ordem em que se tenta.
+    ///
+    /// **Sem isto, voltar a um servidor só tenta o endereço primário do
+    /// convite** — que é o da rede local, porque é o que funciona para quem
+    /// está na mesma casa e por isso é o primeiro da lista. Quem recebeu o link
+    /// pela internet conectava uma vez, pelo caminho de fora, e nunca mais:
+    /// a lista de para-onde-voltar tinha guardado o endereço errado dos três.
+    ///
+    /// Vazio numa entrada escrita antes desta coluna existir, e num servidor
+    /// cujo endereço foi digitado à mão — aí não há alternativa que alguém
+    /// tenha prometido.
+    pub caminhos: Vec<String>,
+    /// O bilhete de encontro do convite, como texto. Degrau 4 do ADR 0022.
+    ///
+    /// Pelo mesmo motivo dos caminhos: sem ele, voltar a um servidor atrás de
+    /// NAT perde o degrau que o fez funcionar da primeira vez.
+    pub bilhete: Option<String>,
 }
 
 /// A lista, em disco.
@@ -143,11 +160,21 @@ impl Conhecidos {
         // não os traz: `registrar` reescreve a entrada inteira, e apagá-los aqui
         // faria a lista esquecer a aparência a cada conexão do terminal, que não
         // tem como saber dela.
-        let (nome, icone) = self
+        // Os caminhos e o bilhete sobrevivem pela mesma razão que o nome e a
+        // imagem: uma visita que não os traz — o terminal, um endereço digitado
+        // — não pode apagar o que o convite ensinou.
+        let (nome, icone, caminhos, bilhete) = self
             .entradas
             .iter()
             .find(|e| e.alvo == alvo)
-            .map_or((None, None), |e| (e.nome.clone(), e.icone.clone()));
+            .map_or((None, None, Vec::new(), None), |e| {
+                (
+                    e.nome.clone(),
+                    e.icone.clone(),
+                    e.caminhos.clone(),
+                    e.bilhete.clone(),
+                )
+            });
 
         self.entradas.retain(|e| e.alvo != alvo);
         self.entradas.push(Conhecido {
@@ -157,7 +184,38 @@ impl Conhecidos {
             visto_em: agora,
             nome,
             icone,
+            caminhos,
+            bilhete,
         });
+        self.gravar()
+    }
+
+    /// Guarda os outros endereços do mesmo servidor, e o bilhete de encontro.
+    ///
+    /// Chamado depois de uma conexão que veio de um link: é o link que os
+    /// conhece, e é a única vez que este processo os vê.
+    ///
+    /// # Errors
+    ///
+    /// O que [`Self::gravar`] devolver.
+    pub fn anotar_caminhos(
+        &mut self,
+        alvo: &str,
+        caminhos: &[String],
+        bilhete: Option<&str>,
+    ) -> Result<()> {
+        let alvo = higienizar(alvo);
+        let Some(entrada) = self.entradas.iter_mut().find(|e| e.alvo == alvo) else {
+            return Ok(());
+        };
+        // Só quando há o que guardar: uma reconexão pelo endereço salvo não
+        // traz convite, e passar vazio aqui apagaria a escada que o link
+        // ensinou — o oposto do que esta função existe para fazer.
+        if caminhos.is_empty() && bilhete.is_none() {
+            return Ok(());
+        }
+        entrada.caminhos = caminhos.iter().map(|c| higienizar(c)).collect();
+        entrada.bilhete = bilhete.map(higienizar);
         self.gravar()
     }
 
@@ -221,16 +279,18 @@ impl Conhecidos {
             .iter()
             .map(|e| {
                 format!(
-                    "{}\t{}\t{}\t{}\t{}\n",
+                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
                     e.alvo,
                     e.apelido,
                     e.voice_room
                         .map_or_else(|| "-".to_owned(), |c| c.to_string()),
                     e.visto_em,
-                    // Uma coluna a mais no fim, e nunca no meio: uma linha de
-                    // quatro campos escrita por uma versão anterior continua
-                    // sendo lida, e o campo que falta vira ausência de nome.
-                    e.nome.as_deref().unwrap_or("")
+                    // Colunas a mais vão sempre no fim, e nunca no meio: uma
+                    // linha de quatro campos escrita por uma versão anterior
+                    // continua sendo lida, e cada campo que falta vira ausência.
+                    e.nome.as_deref().unwrap_or(""),
+                    e.caminhos.join(","),
+                    e.bilhete.as_deref().unwrap_or("")
                 )
             })
             .collect();
@@ -281,12 +341,29 @@ fn analisar_linha(linha: &str) -> Option<Conhecido> {
         .filter(|n| !n.is_empty())
         .map(str::to_owned);
 
+    // Os outros endereços, separados por vírgula. Vírgula e não tabulação
+    // porque a tabulação é o separador de campo deste arquivo, e um endereço
+    // nunca a contém — nem a vírgula, que não é caractere de `host:porta`.
+    let caminhos: Vec<String> = campos
+        .next()
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+        .map(|c| c.split(',').map(str::trim).map(str::to_owned).collect())
+        .unwrap_or_default();
+    let bilhete = campos
+        .next()
+        .map(str::trim)
+        .filter(|b| !b.is_empty())
+        .map(str::to_owned);
+
     Some(Conhecido {
         alvo: alvo.to_owned(),
         apelido,
         voice_room,
         visto_em,
         nome,
+        caminhos,
+        bilhete,
         // Carregada em `abrir`, que é quem conhece o caminho.
         icone: None,
     })
@@ -520,5 +597,107 @@ mod tests {
         assert_eq!(modo & 0o077, 0, "outros conseguem ler a lista");
 
         let _ = std::fs::remove_dir_all(caminho.parent().expect("pai"));
+    }
+}
+
+#[cfg(test)]
+mod a_escada_do_convite {
+    //! Voltar a um servidor tem de tentar os mesmos endereços da primeira vez.
+    //!
+    //! Um convite traz três caminhos para o mesmo servidor: o da rede local
+    //! primeiro, os de fora depois, e o bilhete de encontro para furar o NAT. A
+    //! lista de para-onde-voltar guardava **só o primeiro** — e o primeiro é o
+    //! da rede local, porque é o que serve a quem está na mesma casa.
+    //!
+    //! Quem recebeu o link pela internet conectava uma vez, pelo caminho de
+    //! fora, e nunca mais: dos três endereços, a lista tinha guardado o único
+    //! que não serve a ela.
+
+    use super::*;
+
+    /// Uma pasta só deste teste. `tempfile` não é dependência deste crate, e o
+    /// resto do arquivo já usa `temp_dir` com o pid dentro pelo mesmo motivo.
+    fn pasta_de(nome: &str) -> std::path::PathBuf {
+        let pasta =
+            std::env::temp_dir().join(format!("seele-escada-{}-{nome}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&pasta);
+        std::fs::create_dir_all(&pasta).expect("criar a pasta");
+        pasta
+    }
+
+    fn lista(pasta: &std::path::Path) -> Conhecidos {
+        Conhecidos::abrir(pasta.join("conhecidos")).expect("abrir")
+    }
+
+    #[test]
+    fn os_outros_caminhos_sobrevivem_a_uma_volta_sem_convite() {
+        let pasta = pasta_de("volta");
+        let mut lista = lista(&pasta);
+
+        // A primeira visita, pelo link: ela conhece a escada inteira.
+        lista
+            .registrar("192.168.0.7:8383", "aleta", None)
+            .expect("registrar");
+        lista
+            .anotar_caminhos(
+                "192.168.0.7:8383",
+                &["187.255.97.152:9455".to_owned()],
+                Some("encontro.seele.app.br/187.255.97.152:9454"),
+            )
+            .expect("anotar");
+
+        // A volta, pelo endereço salvo: não há convite nenhum a oferecer.
+        lista
+            .registrar("192.168.0.7:8383", "aleta", None)
+            .expect("registrar");
+        lista
+            .anotar_caminhos("192.168.0.7:8383", &[], None)
+            .expect("anotar sem nada");
+
+        let guardado = lista.buscar("192.168.0.7:8383").expect("está na lista");
+        assert_eq!(
+            guardado.caminhos,
+            vec!["187.255.97.152:9455".to_owned()],
+            "a segunda visita apagou os endereços de fora, e quem está pela \
+             internet não volta mais"
+        );
+        assert_eq!(
+            guardado.bilhete.as_deref(),
+            Some("encontro.seele.app.br/187.255.97.152:9454"),
+            "o bilhete de encontro sumiu, e com ele o degrau que furava o NAT"
+        );
+    }
+
+    #[test]
+    fn a_escada_sobrevive_a_ida_e_volta_do_arquivo() {
+        let pasta = pasta_de("ida-e-volta");
+        {
+            let mut lista = lista(&pasta);
+            lista
+                .registrar("casa:8383", "aleta", None)
+                .expect("registrar");
+            lista
+                .anotar_caminhos("casa:8383", &["fora:9455".to_owned()], Some("ponto/aviso"))
+                .expect("anotar");
+        }
+        let relido = lista(&pasta);
+        let guardado = relido.buscar("casa:8383").expect("está na lista");
+        assert_eq!(guardado.caminhos, vec!["fora:9455".to_owned()]);
+        assert_eq!(guardado.bilhete.as_deref(), Some("ponto/aviso"));
+    }
+
+    #[test]
+    fn uma_linha_de_versao_anterior_continua_sendo_lida() {
+        // Cinco campos, que é o que a versão anterior a esta escrevia. As
+        // colunas novas viram ausência, e não uma linha descartada — a lista de
+        // quem atualiza não pode chegar vazia.
+        let caminho = pasta_de("antiga").join("conhecidos");
+        std::fs::write(&caminho, "casa:8383\taleta\t-\t1756000000\tCasa\n").expect("escrever");
+
+        let lista = Conhecidos::abrir(caminho).expect("abrir");
+        let guardado = lista.buscar("casa:8383").expect("a linha antiga foi lida");
+        assert_eq!(guardado.nome.as_deref(), Some("Casa"));
+        assert!(guardado.caminhos.is_empty());
+        assert_eq!(guardado.bilhete, None);
     }
 }

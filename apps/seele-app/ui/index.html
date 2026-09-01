@@ -2735,18 +2735,24 @@
         <span class="nota">O que você já disse continua com o nome de então.</span>
       </label>
       <!--
-        **Sem `SALVAR` e sem `CANCELAR`**, e a comp os desenha.
+        **`SALVAR` e `CANCELAR`, como a comp os desenha** — e a versão sem eles
+        perdeu um nome em campo.
 
-        O `the_server_section_confirms_by_state_and_not_by_a_save_button` cobra
-        a regra desta janela: confirma-se **mostrando o estado**, não com um
-        botão. E aqui ela é mais que estilo — as duas ações desta caixa,
-        escolher e tirar, valem no instante em que se aperta. Um `SALVAR` ao pé
-        seria um botão que não salva nada, e um `CANCELAR` prometeria desfazer
-        o que já foi feito.
+        Eu os tinha tirado por uma razão que vale para **metade** desta caixa: a
+        imagem aplica no instante em que se escolhe, então um `SALVAR` para ela
+        seria um botão que não salva nada. O apelido não é assim. Ele era
+        gravado num `change`, que dispara ao sair do campo — quem digitasse o
+        nome e apertasse `FECHAR` fechava sem que o campo tivesse perdido o foco,
+        e o nome ia embora sem uma palavra. Foi o relato: «o modal de perfil na
+        tela inicial não salva o nome».
 
-        A prévia acima é a confirmação: ela é redesenhada depois de cada ação, e
-        mostra o que os outros passam a ver. O `FECHAR` da cabeça fecha.
+        Então o botão existe, e ele é do apelido. A imagem continua se
+        confirmando sozinha — a prévia acima é a confirmação dela.
       -->
+      <div class="perfil-fim">
+        <button id="perfil-cancelar" class="botao-fantasma" type="button">CANCELAR</button>
+        <button id="perfil-salvar" class="botao" type="submit">SALVAR</button>
+      </div>
       <p id="perfil-erro" class="nomear-erro" role="alert" hidden></p>
     </form>
   </div>

@@ -3301,7 +3301,13 @@ fn the_picture_crosses_the_bridge_only_when_its_revision_moved() {
 #[test]
 fn the_server_section_confirms_by_state_and_not_by_a_save_button() {
     let page = read("ui/index.html");
-    let painel = screen_markup(&page, "painel-servidor", "ajuda-titulo");
+    // Até `tela-fim`, que é a próxima coisa depois do painel, e **não** até
+    // `ajuda-titulo`, que fica muito adiante: a fatia larga engolia todos os
+    // diálogos entre os dois, e o `SALVAR` que o perfil ganhou — porque a comp o
+    // desenha, e porque sem ele um nome digitado se perdia ao fechar — caía
+    // dentro dela. Um guarda que acusa o vizinho é um guarda que se aprende a
+    // ignorar.
+    let painel = screen_markup(&page, "painel-servidor", "tela-fim");
     for palavra in ["SALVAR", "APLICAR", "DESCARTAR"] {
         assert!(
             !painel.contains(palavra),

@@ -169,3 +169,14 @@
   letter-spacing: 0.06em;
   color: var(--seele-osso);
 }
+
+/* O pé do perfil: `CANCELAR` fantasma e `SALVAR` sólido, à direita, com os
+   valores da comp. Ele é do apelido — a imagem já se aplicou quando se apertou
+   `ESCOLHER`, e a prévia acima é a confirmação dela. */
+.perfil-fim {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}

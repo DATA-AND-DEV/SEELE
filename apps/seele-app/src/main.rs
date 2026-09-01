@@ -226,12 +226,50 @@ async fn connect(
         Err(_) => (None, Vec::new(), None),
     };
 
+    // **Sem convite, a escada vem da lista de conhecidos.**
+    //
+    // Um convite traz três coisas para chegar ao mesmo servidor: o endereço da
+    // rede local primeiro, os de fora depois, e o bilhete de encontro para
+    // furar o NAT. Quem volta a um servidor pela lista não tem convite nenhum —
+    // ele foi lido uma vez, num processo que já fechou — e a lista guardava só
+    // o primeiro dos três. O primeiro é o da **rede local**, porque é o que
+    // funciona para quem está na mesma casa.
+    //
+    // Então quem recebeu o link pela internet conectava uma vez e nunca mais: a
+    // lista de para-onde-voltar tinha guardado, dos três endereços, o único que
+    // não serve a ela. «Ele salva apenas o endereço LAN, o que não faz sentido
+    // algum para pessoas que se conversam pela internet.»
+    let (alternativos, bilhete) = if alternativos.is_empty() && bilhete.is_none() {
+        seele_ffi::conhecidos::Conhecidos::abrir(
+            std::path::PathBuf::from(config_dir(&app)).join("conhecidos"),
+        )
+        .ok()
+        .and_then(|lista| {
+            lista.buscar(&server).map(|conhecido| {
+                (
+                    conhecido.caminhos.clone(),
+                    conhecido
+                        .bilhete
+                        .as_deref()
+                        .and_then(|texto| seele_ffi::uri::Bilhete::ler(texto).ok()),
+                )
+            })
+        })
+        .unwrap_or_default()
+    } else {
+        (alternativos, bilhete)
+    };
+
     let home = config_dir(&app);
     // Guardados antes de a configuração levar os originais para a outra thread:
     // a lista de visitados só é escrita lá embaixo, depois de a conexão existir.
     let alvo = server.clone();
     let apelido = nickname.clone();
     let casa = home.clone();
+    // A escada, para a mesma lista: é este `connect` que a conhece, e é a única
+    // vez que este processo a vê.
+    let caminhos = alternativos.clone();
+    let bilhete_texto = bilhete.as_ref().map(ToString::to_string);
     let config = ConnectConfig {
         server,
         alternate_servers: alternativos,
@@ -339,6 +377,15 @@ async fn connect(
             // está de pé.
             if let Err(erro) = lista.registrar(&alvo, &apelido, voice_room) {
                 tracing::warn!(%erro, "não guardei este servidor na lista de visitados");
+            }
+            // **E a escada, quando esta conexão a conhece.**
+            //
+            // `anotar_caminhos` não apaga o que já estava guardado quando não há
+            // nada a anotar: uma volta pelo endereço salvo não traz convite, e
+            // passar vazio aqui desfaria, na segunda visita, o que o link
+            // ensinou na primeira.
+            if let Err(erro) = lista.anotar_caminhos(&alvo, &caminhos, bilhete_texto.as_deref()) {
+                tracing::debug!(%erro, "não guardei os outros caminhos deste servidor");
             }
         }
     }

@@ -268,33 +268,37 @@ $("perfil-tirar").addEventListener("click", async () => {
 // de `submit` fica porque um Enter dentro de um `<form>` ainda o dispara, e sem
 // ele o navegador recarregaria a página: exatamente o que a barra de janela
 // desta versão foi ao trabalho de impedir.
-$("perfil-forma").addEventListener("submit", (evento) => {
-  evento.preventDefault();
-  fecharPerfil();
-});
-// Sair do campo manda, como o nome do servidor na configuração: `change` diz
-// «o valor mudou **e** a edição acabou» de uma vez, e é ele que faz o Enter e o
-// clique fora valerem a mesma coisa sem um botão no meio.
-//
-// Um valor escrito pelo script não dispara `change`, então reabrir o perfil não
-// se manda de volta para o servidor.
-$("perfil-apelido").addEventListener("change", async () => {
+/**
+ * Guarda o apelido, e diz quem o guardou.
+ *
+ * **`naSessao` vinha da tela, e a tela mentiu.** Aqui estava
+ * `!$("perfil-imagem").hidden` — o bloco da imagem só aparecia dentro de um
+ * servidor, então a visibilidade dele servia de resposta. No dia em que o bloco
+ * passou a aparecer sempre, para os dois diálogos serem o mesmo, a resposta
+ * virou «sim» em todo lugar: a tela inicial passou a chamar o comando de
+ * sessão, que não tem sessão a que obedecer, e o nome não era gravado em canto
+ * nenhum.
+ *
+ * A pergunta agora é feita a quem sabe respondê-la. Uma tela lida como estado é
+ * um estado que muda quando alguém mexe no desenho.
+ */
+async function guardarOApelido() {
   const escolhido = $("perfil-apelido").value.trim();
   if (escolhido === "") {
-    // Vazio é desistir da edição, e não pedir um apelido sem nome. Devolve o
-    // que está valendo, para o campo não ficar mentindo.
     await abrirPerfil();
-    return;
+    return false;
   }
   $("perfil-erro").hidden = true;
-  // Com sessão, o comando de protocolo; sem ela, a preferência desta máquina.
-  //
-  // Dois `invoke` com o nome escrito, e **não um com o nome escolhido por
-  // ternário**: o `no_command_is_registered_and_never_called` varre os scripts
-  // procurando `invoke("nome")`, e um nome montado em tempo de execução é um
-  // comando que aquele guarda não vê. Ele reprovou aqui, e estava certo — a
-  // varredura é o que garante que nada fique registrado e inalcançável.
-  const naSessao = !$("perfil-imagem").hidden;
+
+  let naSessao = false;
+  try {
+    naSessao = (await invoke("snapshot")) !== null;
+  } catch (falha) {
+    // `NotConnected` é a resposta, e não uma falha: quem não está num servidor
+    // grava nesta máquina.
+    if (falha !== "NotConnected") console.warn("snapshot:", falha);
+  }
+
   try {
     if (naSessao) {
       await invoke("escolher_apelido", { apelido: escolhido });
@@ -302,12 +306,30 @@ $("perfil-apelido").addEventListener("change", async () => {
       await invoke("escolher_apelido_local", { apelido: escolhido });
     }
     anunciar(`Agora você é ${escolhido}.`);
+    return true;
   } catch (falha) {
     console.warn("escolher_apelido:", falha);
     recusarPerfil(fraseDeErro(falha));
     await abrirPerfil();
+    return false;
   }
+}
+
+// `SALVAR` é o `submit` da forma, então o Enter dentro do campo continua
+// valendo — são a mesma porta, e não duas.
+$("perfil-forma").addEventListener("submit", (evento) => {
+  evento.preventDefault();
+  guardarOApelido()
+    .then((deuCerto) => {
+      if (deuCerto) fecharPerfil();
+    })
+    .catch((falha) => console.warn("guardar o apelido:", falha));
 });
+
+// `CANCELAR` fecha sem gravar o campo. A imagem já foi aplicada quando se
+// apertou `ESCOLHER`, e este botão não promete desfazê-la: ele é do apelido,
+// que é a única coisa aqui que espera para valer.
+$("perfil-cancelar").addEventListener("click", fecharPerfil);
 
 $("perfil-fechar").addEventListener("click", fecharPerfil);
 $("operador-quem").addEventListener("click", () => {

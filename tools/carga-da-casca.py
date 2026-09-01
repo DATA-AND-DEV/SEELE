@@ -105,6 +105,7 @@ SEELE_RESPOSTAS.messages = [
 SEELE_RESPOSTAS.snapshot = SEELE_QUADRO;
 SEELE_RESPOSTAS.connect = { snapshot: SEELE_QUADRO, veredito: null };
 window.__SEELE_CHAMADAS = [];
+window.__SEELE_EM_SESSAO = false;
 window.__SEELE_OUVINTES = {};
 window.__SEELE_EMITIR = (carga) => {
   for (const ouvinte of window.__SEELE_OUVINTES["seele://event"] ?? []) {
@@ -115,6 +116,13 @@ window.__TAURI__ = {
   core: {
     invoke: async (cmd, args) => {
       window.__SEELE_CHAMADAS.push(cmd);
+      // **Sem sessão, `snapshot` recusa** — como o produto faz. Responder um
+      // quadro na tela inicial faria o duble mentir sobre a única pergunta que
+      // separa os dois modos do diálogo de perfil, e um aparelho que mente
+      // sobre isso não prova nada sobre ele.
+      if (cmd === "connect" || cmd === "hospedar") window.__SEELE_EM_SESSAO = true;
+      if (cmd === "disconnect") window.__SEELE_EM_SESSAO = false;
+      if (cmd === "snapshot" && !window.__SEELE_EM_SESSAO) throw "NotConnected";
       if (cmd in SEELE_RESPOSTAS) return SEELE_RESPOSTAS[cmd];
       if (/conhecid|fontes|lista|dispositiv|visitad|salas|canais|pessoas/i.test(cmd)) return [];
       // Um retrato para uma pessoa só: o que se quer ver é a diferença entre um
