@@ -338,6 +338,10 @@ fn montar_annex_b(quadro: &EncodedFrame) -> Vec<u8> {
 
 /// Um fluxo de saída. Um por transmissão.
 ///
+/// O codificador do sistema, quando existe. Ver o ADR 0041.
+#[cfg(target_os = "macos")]
+pub mod hardware;
+
 /// O que a cola precisa de um codificador, seja ele qual for.
 ///
 /// # Por que existe
@@ -451,6 +455,33 @@ pub fn armar(
     biblioteca: &BibliotecaDeVideo,
     config: ConfigDoCodificador,
 ) -> Result<Box<dyn CodificaVideo>, ErroDeVideo> {
+    // **O hardware primeiro, e a queda é obrigatória.**
+    //
+    // Uma máquina sem suporte, um driver que recusa esta resolução, uma sessão
+    // que o sistema não concede — nada disso pode custar o compartilhamento
+    // inteiro. Quem transmite não fica sabendo por um erro na tela, e sim por
+    // não sentir a CPU.
+    //
+    // `info!` e não `debug!` nos dois desfechos: a pergunta que este log
+    // responde é «por que este computador ferveu transmitindo», e ela é feita
+    // depois do fato, por alguém lendo o arquivo.
+    #[cfg(target_os = "macos")]
+    match hardware::Codificador::novo(&config) {
+        Ok(codificador) => {
+            tracing::info!(
+                resolucao = ?config.resolucao,
+                "a tela vai pelo codificador do sistema"
+            );
+            return Ok(Box::new(codificador));
+        }
+        Err(erro) => {
+            tracing::info!(
+                %erro,
+                "o codificador do sistema recusou; a tela vai por software"
+            );
+        }
+    }
+
     Ok(Box::new(Codificador::novo(biblioteca, config)?))
 }
 

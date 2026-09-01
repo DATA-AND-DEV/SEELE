@@ -3574,6 +3574,8 @@ checksum = "05bf9a3c14831a7d9641b0d81d87dd913ee238a012b2fde27db5a84b56f5df3e"
 dependencies = [
  "bitflags 2.13.1",
  "objc2-core-foundation",
+ "objc2-core-media",
+ "objc2-core-video",
 ]
 
 [[package]]
@@ -5083,6 +5085,7 @@ dependencies = [
  "screencapturekit",
  "sha2 0.11.0",
  "shiguredo_openh264",
+ "tracing",
  "windows-capture",
 ]
 

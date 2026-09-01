@@ -46,6 +46,7 @@ sha2 = "0.11.0"
 # somar um toolchain de C a essa conta era o custo que o §2 recusou por escrito
 # quando pesou nasm mais CMake.
 bzip2 = "0.6.1"
+tracing = "0.1.44"
 
 # ---- captura, uma por sistema ----
 #
@@ -71,8 +72,8 @@ bzip2 = "0.6.1"
 [target.'cfg(target_os = "macos")'.dependencies]
 screencapturekit = "8.0.1"
 core-graphics = "0.25"
-objc2-video-toolbox = { version = "0.3.2", default-features = false, features = ["std", "VTBase", "VTErrors", "VTCompressionSession", "VTCompressionProperties"] }
-objc2-core-video = { version = "0.3.2", default-features = false, features = ["std", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVReturn", "CVPixelFormatDescription"] }
+objc2-video-toolbox = { version = "0.3.2", default-features = false, features = ["std", "VTBase", "VTErrors", "VTSession", "VTCompressionSession", "VTCompressionProperties", "objc2-core-media", "objc2-core-video"] }
+objc2-core-video = { version = "0.3.2", default-features = false, features = ["std", "CVBase", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVReturn", "CVPixelFormatDescription"] }
 objc2-core-media = { version = "0.3.2", default-features = false, features = ["std", "CMBase", "CMTime", "CMSampleBuffer", "CMFormatDescription", "CMBlockBuffer"] }
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFBase", "CFDictionary", "CFString", "CFNumber"] }
 
