@@ -7,6 +7,14 @@
 // dele na janela era o `CONEXÃO SEGURA` no cabeçalho da sessão, escrito depois
 // de tudo já ter acontecido, inclusive de já se estar dentro de uma sala de voz.
 //
+// Ela **não** aparece quando o servidor é o que esta janela acabou de subir. A
+// conferência é o assunto inteiro desta tela, e hospedando não há chave alheia
+// a conferir: o certificado foi gerado por este mesmo processo, nesta máquina,
+// segundos antes. A pergunta veio de campo assim — «se eu vou hospedar o
+// server, por que preciso ir pra tela onde mostra entrar no servidor?» — e um
+// pedágio que não decide nada ensina a atravessar sem ler, o que estraga a tela
+// justamente no dia em que ela decidir alguma coisa.
+//
 // `espera` — chega pelo `connect` **derrubado** com `AdmissionPending`, a
 // portaria do ADR 0030. Nasceu de um teste de verdade: um amigo bateu, leu a
 // frase certa numa linha de erro da tela de entrada, e ficou sem saber o que
@@ -159,9 +167,18 @@ const LINHAS_DO_REGISTRO = 200;
  * enquanto o dono decidia. Pedir a ele mais um aperto seria devolver o pedágio
  * na única entrada em que, por construção, ninguém está olhando para a tela.
  */
-function entrarNaAutenticacao(snapshot, veredito, endereco) {
+function entrarNaAutenticacao(snapshot, veredito, endereco, nossoServidor = false) {
   const tela = $("tela-auth");
+  // Dois casos entram direto, e por razões diferentes.
+  //
+  // `liberado` — a portaria acabou de conceder a permissão pela qual esta tela
+  // estava esperando. A pessoa já pediu para entrar; fazê-la pedir de novo é
+  // não ter ouvido.
+  //
+  // `nossoServidor` — é o servidor que esta janela subiu. Não há chave alheia a
+  // conferir, e a conferência é o assunto inteiro desta tela.
   const liberado = !tela.hidden && tela.dataset.modo === "espera";
+  const direto = liberado || nossoServidor;
   esperando = false;
   pararDeBater();
 

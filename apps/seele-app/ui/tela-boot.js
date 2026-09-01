@@ -56,6 +56,27 @@
 let ultimoAlvo = null;
 let ultimoApelido = null;
 
+/**
+ * **Este `connect` é para o servidor que esta janela acabou de subir.**
+ *
+ * A `#tela-auth` existe para o momento TOFU do ADR 0003: quem chega a um
+ * servidor de outra pessoa **olha** a impressão digital antes de entrar, e é
+ * esse olhar que detecta alguém no meio do caminho. Hospedando não há meio do
+ * caminho — o certificado foi gerado por este mesmo processo, nesta mesma
+ * máquina, segundos antes, e a chave a conferir é a nossa contra a nossa.
+ *
+ * O relato de campo foi a pergunta certa: «se eu vou hospedar o server, por que
+ * preciso ir pra tela onde mostra entrar no servidor?». Um pedágio que não
+ * decide nada ensina a atravessar sem ler — e o dia em que ele decidir alguma
+ * coisa, num servidor alheio de verdade, o dedo já vai estar treinado a passar
+ * batido. A tela vale mais quando aparece menos.
+ *
+ * Uma bandeira e não um argumento de `conectar`: quem chama `conectar` de fora
+ * — reconectar, trocar de servidor, um link de convite — está sempre indo a um
+ * servidor que não é este, e não deveria precisar dizer isso.
+ */
+let hospedandoAqui = false;
+
 async function conectar(alvo, apelido, token) {
   ultimoAlvo = alvo ?? ultimoAlvo;
   ultimoApelido = apelido ?? ultimoApelido;
@@ -69,6 +90,15 @@ async function conectar(alvo, apelido, token) {
   }
   alvo = ultimoAlvo;
   apelido = ultimoApelido ?? "";
+  // **A bandeira é lida e apagada aqui, e não depois do `connect`.**
+  //
+  // Apagá-la só no caminho feliz a deixaria ligada quando o `connect` falha —
+  // e a próxima conexão, essa a um servidor alheio de verdade, entraria sem a
+  // conferência de identidade que é a razão de a `#tela-auth` existir. Uma
+  // tentativa de hospedar que dá errado não pode virar permissão para a
+  // seguinte.
+  const nossoServidor = hospedandoAqui;
+  hospedandoAqui = false;
   // **Os valores chegam por argumento desde a 0.9.0.**
   //
   // Eles vinham de dois campos desta tela, e a comp tirou os dois: o endereço
@@ -114,7 +144,7 @@ async function conectar(alvo, apelido, token) {
     // desenhada com o que o `connect` já devolveu — quem chegar nela não espera
     // o primeiro tique do laço de snapshot.
     desenhar(snapshot);
-    entrarNaAutenticacao(snapshot, veredito, alvo);
+    entrarNaAutenticacao(snapshot, veredito, alvo, nossoServidor);
   } catch (falha) {
     // `connect` responde por `ConnectFailure` desde esta tarefa: o erro de
     // sempre **mais a trilha**. Quem escreve a frase quer o erro; a trilha vai
@@ -244,6 +274,8 @@ async function hospedar() {
     // alvo da conexão que vem em seguida, e é o que `conectar()` sem argumento
     // vai usar.
     ultimoAlvo = anfitriao.aqui;
+    // E entrar aqui não pede para conferir a própria chave — ver `hospedandoAqui`.
+    hospedandoAqui = true;
     mostrarAlcance(
       anfitriao.alcance,
       anfitriao.porta_recusada,

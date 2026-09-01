@@ -8632,3 +8632,50 @@ fn no_class_is_drawn_by_two_stylesheets_without_being_a_declared_refinement() {
         acusadas.join("\n  ")
     );
 }
+
+/// Hospedar entra direto; conectar a outro servidor nunca entra direto.
+///
+/// A `#tela-auth` existe para o momento TOFU do ADR 0003: quem chega a um
+/// servidor de outra pessoa olha a impressão digital antes de entrar, e é esse
+/// olhar que detecta alguém no meio do caminho. Hospedando não há meio do
+/// caminho — o certificado foi gerado por este mesmo processo, nesta máquina,
+/// segundos antes.
+///
+/// O que este guarda protege é o **outro** lado da bandeira. Uma tentativa de
+/// hospedar que falha não pode deixá-la ligada para a próxima conexão, que essa
+/// vai a um servidor alheio de verdade: ela é lida e apagada no começo de
+/// `conectar`, antes do `connect`, e não no caminho feliz depois dele.
+#[test]
+fn the_flag_that_skips_the_key_check_is_cleared_before_the_attempt_and_not_after() {
+    let boot = read("ui/tela-boot.js");
+    let conectar = js_function(&boot, "async function conectar(");
+
+    let Some((antes, depois)) = conectar.split_once("hospedandoAqui = false;") else {
+        panic!("`conectar` nunca apaga a bandeira de hospedagem: {conectar}");
+    };
+    assert!(
+        !antes.contains("invoke(\"connect\""),
+        "a bandeira é apagada **depois** do `connect`, então uma tentativa de \
+         hospedar que falha a deixa ligada — e a próxima conexão, a um servidor \
+         alheio, entra sem a conferência de identidade do ADR 0003:\n{conectar}"
+    );
+    assert!(
+        depois.contains("invoke(\"connect\""),
+        "`conectar` apaga a bandeira mas nunca chama `connect`: {conectar}"
+    );
+
+    // E quem a liga é só o hospedar. Qualquer outro caminho ligando-a seria uma
+    // conexão a servidor alheio dispensando a conferência.
+    let ligam = boot.matches("hospedandoAqui = true").count();
+    assert_eq!(
+        ligam, 1,
+        "a bandeira que dispensa a conferência de chave é ligada em {ligam} \
+         lugares; só `hospedar` pode ligá-la"
+    );
+    let hospedar = js_function(&boot, "async function hospedar(");
+    assert!(
+        hospedar.contains("hospedandoAqui = true"),
+        "`hospedar` não liga a bandeira, então subir um servidor aqui ainda \
+         pede para conferir a própria chave: {hospedar}"
+    );
+}
