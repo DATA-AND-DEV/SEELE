@@ -1545,22 +1545,46 @@ máquina de estados coberta por teste.
 Ou seja: ou aquele caminho não é o que roda no Windows, ou ele roda e não
 alcança o que o WASAPI precisa que se faça.
 
-**As três suspeitas, e nenhuma foi testada.**
+**As três suspeitas — as três caíram em 2026-08-31.** Ficam escritas com o que
+as derrubou, para ninguém refazer o caminho:
 
-1. **A troca acontece e a interface não conta.** A lista mostraria o dispositivo
-   escolhido enquanto o áudio já mudou — o oposto do que parece, e o mais barato
-   de descartar: comparar `snapshot.capture` («o que abriu de verdade») com o que
-   a preferência guarda.
-2. **O `cpal` no WASAPI não reabre no dispositivo pedido.** O backend do Windows
-   tem modo exclusivo e compartilhado, e um fluxo preso em exclusivo não solta o
-   aparelho — reiniciar o processo solta.
-3. **O supervisor está tratando a troca voluntária como queda**, entrando no
-   ciclo de repetição em vez de trocar direto.
+1. ~~**A troca acontece e a interface não conta.**~~ **Falsa.** O
+   `marcarUmaLista` já desenha as duas coisas separadas — `ESCOLHIDO`, que sai
+   do disco, e `EM USO`, que sai de `snapshot.capture`, o que a máquina
+   conseguiu abrir. O comentário da função diz que ela «existe para mostrar a
+   divergência» entre as duas. A tela não esconde nada.
+2. ~~**O `cpal` no WASAPI não reabre com o fluxo velho vivo.**~~ **Falsa, e
+   medida na máquina do defeito.** Uma sonda abriu dois dispositivos de saída ao
+   mesmo tempo, nas duas ordens — que é exatamente a ordem do produto, porque
+   `switch_to` abre o novo antes de largar o velho. Os quatro abriram e tocaram.
+   O WASAPI não impede.
+3. ~~**O supervisor trata a troca voluntária como queda.**~~ **Improvável.** O
+   `seele-audio::supervisor` não é referenciado de `voice.rs`; a troca não passa
+   por ele.
 
-**Por onde começar.** A máquina do teste é alcançável por SSH e foi usada em
-2026-08-31 para medir o caminho de vídeo, então a instrumentação pode ser lida
-de fora. Mas **a troca em si precisa de sessão gráfica** e de alguém plugando um
-fone: SSH mede, não reproduz.
+**E o caminho de erro é visível.** Se `start_on` falhasse, a FFI devolveria
+`DispositivoSumiu` e a tela escreveria «ESSE MICROFONE NÃO ESTÁ MAIS AQUI» —
+`start_on` é o irmão que **não** cai para o padrão da máquina, ao contrário de
+`start_preferring`, que é o do disco. Quem relatou não mencionou erro nenhum.
+
+**O que sobrou, e é uma pergunta de dez segundos.** Ao trocar de aparelho com a
+conversa aberta, para onde vai a marca `EM USO` na lista?
+
+- **Vai para o aparelho novo** → o áudio trocou de verdade, e o problema é
+  depois disto: ou o outro lado não recebe, ou o que se ouve não mudou por
+  outra razão.
+- **Fica no velho, sem mensagem de erro** → `set_capture_device` devolveu
+  sucesso sem trocar nada, e o alvo passa a ser a camada da sessão.
+- **Fica no velho, com a mensagem de erro** → `start_on` recusou, e aí falta só
+  o motivo que o `cpal` deu.
+
+As três apontam para lugares diferentes, e nenhuma investigação a mais vale a
+pena antes de saber qual é.
+
+**Por que não foi consertada.** Nenhuma das três causas prováveis sobreviveu à
+prova, e consertar sem causa seria escolher uma no escuro. Por SSH a máquina
+enumera **um** microfone só — a sessão gráfica de quem usa vê mais —, então a
+troca de entrada não é reproduzível de fora. A de saída é, e foi: passou.
 
 **Quando dói.** Em toda troca de fone durante uma conversa, que é exatamente o
 momento em que a pessoa não consegue ouvir e não pode receber a instrução «saia
