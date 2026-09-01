@@ -2234,11 +2234,46 @@
               </li>
               <li class="server-atalho">
                 <span class="server-atalho-texto">
-                  <span class="server-atalho-acao">Andar na busca</span>
-                  <span class="server-atalho-desc">com SHIFT, volta para a
-                    ocorrência anterior</span>
+                  <span class="server-atalho-acao">Enviar a mensagem</span>
+                  <!--
+                    **A linha mudou de assunto na 0.9.0.** Ela dizia «andar na
+                    busca», que é o que o Enter faz com a busca aberta — e é
+                    verdade, mas é o caso raro. O comum é o campo de compor, e
+                    ele deixou de ter botão de enviar: a tecla é agora o único
+                    caminho, e uma tabela de atalhos que não a lista é uma
+                    tabela que esconde o principal.
+
+                    O que o Enter faz na busca continua escrito onde a busca
+                    está, que é onde alguém com a busca aberta procura.
+                  -->
+                  <span class="server-atalho-desc">o campo de compor não tem
+                    botão de enviar; com a busca aberta, anda para a próxima
+                    ocorrência</span>
                 </span>
                 <kbd class="server-atalho-tecla" data-tecla="Enter">ENTER</kbd>
+              </li>
+              <li class="server-atalho">
+                <span class="server-atalho-texto">
+                  <span class="server-atalho-acao">Colar uma imagem</span>
+                  <span class="server-atalho-desc">cai na prévia acima do
+                    campo, pronta para enviar com Enter</span>
+                </span>
+                <!--
+                  **A única linha da tabela que não é uma tecla nossa.**
+
+                  As outras quatro nomeiam teclas que um script desta janela
+                  escuta, e o guarda compara as duas listas. Ctrl+V não é uma
+                  delas: nenhum script escuta essa combinação, porque quem a
+                  entrega é o sistema — ela chega como o evento `paste`, já
+                  traduzida, com o conteúdo da área de transferência dentro.
+                  É por isso que ela funciona com o Cmd do Mac sem nós sabermos.
+
+                  `data-evento` em vez de `data-tecla`, então, e o guarda cobra
+                  dele a mesma coisa por outro caminho: que exista script
+                  escutando aquele evento. Uma exceção que não é conferida é uma
+                  linha que pode passar a mentir sozinha.
+                -->
+                <kbd class="server-atalho-tecla" data-evento="paste">CTRL+V</kbd>
               </li>
               <li class="server-atalho">
                 <span class="server-atalho-texto">

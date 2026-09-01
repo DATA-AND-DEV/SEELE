@@ -3318,6 +3318,32 @@ fn every_key_the_shortcut_table_names_is_one_a_script_listens_for() {
              listens for it — so the screen documents a program this is not"
         );
     }
+
+    // **A outra metade da tabela: os gestos que o sistema entrega prontos.**
+    //
+    // Ctrl+V não é uma tecla que esta janela escute. Nenhum script procura
+    // aquela combinação, porque o sistema a traduz antes: ela chega como o
+    // evento `paste`, com o conteúdo da área de transferência dentro. É também
+    // por isso que ela funciona com o Cmd do Mac sem ninguém aqui saber disso.
+    //
+    // Uma linha assim escaparia da conferência acima por não ter `data-tecla`
+    // — e uma exceção que não é conferida é uma linha livre para mentir. Então
+    // ela declara `data-evento`, e o que se cobra é o mesmo por outro caminho:
+    // que exista script escutando aquele evento.
+    let mut eventos = Vec::new();
+    for piece in without_comments(&page).split("data-evento=\"").skip(1) {
+        let Some(evento) = piece.split('"').next() else {
+            continue;
+        };
+        eventos.push(evento.to_owned());
+    }
+
+    for evento in eventos {
+        assert!(
+            script.contains(&format!("addEventListener(\"{evento}\"")),
+            "a tabela diz que `{evento}` faz alguma coisa, e nenhum script o escuta"
+        );
+    }
 }
 
 #[test]
