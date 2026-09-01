@@ -5086,6 +5086,7 @@ dependencies = [
  "sha2 0.11.0",
  "shiguredo_openh264",
  "tracing",
+ "windows 0.62.2",
  "windows-capture",
 ]
 

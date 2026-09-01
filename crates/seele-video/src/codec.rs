@@ -348,6 +348,10 @@ fn montar_annex_b(quadro: &EncodedFrame) -> Vec<u8> {
 #[cfg(target_os = "macos")]
 pub mod macos;
 
+/// O codificador do sistema no Windows: Media Foundation. Ver o ADR 0041.
+#[cfg(target_os = "windows")]
+pub mod windows;
+
 /// O que a cola precisa de um codificador, seja ele qual for.
 ///
 /// # Por que existe
@@ -441,6 +445,32 @@ impl CodificaVideo for Codificador {
     }
 }
 
+/// Se um fluxo Annex-B carrega um IDR — ou seja, se alguém pode entrar por ele.
+///
+/// O tipo do NAL são os cinco bits baixos do byte que segue o código de início,
+/// e 5 é IDR. Serve para os codificadores que já entregam Annex-B, que é o caso
+/// do Media Foundation; o VideoToolbox entrega AVCC e decide isso enquanto
+/// converte, porque ali a varredura já acontece de qualquer forma.
+#[must_use]
+pub fn nal_e_chave(bytes: &[u8]) -> bool {
+    let mut i = 0;
+    while i + 4 < bytes.len() {
+        let (salto, cabeca) = match bytes.get(i..i + 4) {
+            Some([0, 0, 0, 1]) => (4, bytes.get(i + 4)),
+            Some([0, 0, 1, _]) => (3, bytes.get(i + 3)),
+            _ => {
+                i += 1;
+                continue;
+            }
+        };
+        if cabeca.is_some_and(|b| b & 0x1F == 5) {
+            return true;
+        }
+        i += salto;
+    }
+    false
+}
+
 /// Arma o melhor codificador que esta máquina tem para o que foi pedido.
 ///
 /// **É aqui que o codificador por hardware vai entrar**, e é para isto que a
@@ -471,6 +501,23 @@ pub fn armar(
     // `info!` e não `debug!` nos dois desfechos: a pergunta que este log
     // responde é «por que este computador ferveu transmitindo», e ela é feita
     // depois do fato, por alguém lendo o arquivo.
+    #[cfg(target_os = "windows")]
+    match windows::Codificador::novo(&config) {
+        Ok(codificador) => {
+            tracing::info!(
+                resolucao = ?config.resolucao,
+                "a tela vai pelo codificador do sistema"
+            );
+            return Ok(Box::new(codificador));
+        }
+        Err(erro) => {
+            tracing::info!(
+                %erro,
+                "o codificador do sistema recusou; a tela vai por software"
+            );
+        }
+    }
+
     #[cfg(target_os = "macos")]
     match macos::Codificador::novo(&config) {
         Ok(codificador) => {
