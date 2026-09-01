@@ -9215,3 +9215,66 @@ fn no_script_calls_a_function_that_no_script_declares() {
         lista.join("\n  ")
     );
 }
+
+/// O `remover` de uma mensagem some em repouso, e o teclado continua o achando.
+///
+/// A comp da 0.9.0 desenha a mensagem com avatar, autor, hora e corpo — e nada
+/// mais. O `remover` sublinhado, repetido uma vez por mensagem, era uma coluna
+/// de links descendo pelo lado direito de toda conversa, e o relato de campo o
+/// pôs na mesma lista dos outros controles que a comp não desenha.
+///
+/// Ele não saiu: apagar a própria mensagem não pede permissão nenhuma, e apagar
+/// a de outra pessoa é um verbo que a `specs/04` dá a quem tem a permissão.
+/// Esconder um verbo é diferente de tirá-lo, e o que este guarda cobra é a
+/// diferença.
+///
+/// **A metade que apodrece calada é a do teclado.** Um controle revelado só por
+/// `:hover` é um controle que existe na ordem de tabulação e não aparece quando
+/// o Tab chega nele — a pessoa aperta espaço num botão invisível. Sem o
+/// `:focus-visible` isto seria acessibilidade trocada por estética, que é
+/// exatamente o que a `specs/06-clientes-gui.md` recusa.
+#[test]
+fn the_remove_control_hides_at_rest_and_the_keyboard_still_finds_it() {
+    let folha = without_comments(&read("ui/camada-moderar.css"));
+
+    let Some(regra) = folha
+        .split(".moderar-remover {")
+        .nth(1)
+        .and_then(|resto| resto.split('}').next())
+    else {
+        panic!("`camada-moderar.css` não desenha mais `.moderar-remover`");
+    };
+    assert!(
+        regra.contains("visibility: hidden"),
+        "o `remover` volta a ficar desenhado em toda mensagem, e a comp não o \
+         desenha em nenhuma:\n{regra}"
+    );
+    // `visibility` e não `display`: o espaço fica reservado, e o texto da
+    // mensagem não pula para o lado quando o controle aparece.
+    assert!(
+        !regra.contains("display: none"),
+        "escondido por `display: none`, o controle tira o próprio espaço da \
+         linha e o texto salta quando o ponteiro entra:\n{regra}"
+    );
+
+    // A regra que revela: procurada pelo que ela **faz**, e não pelo primeiro
+    // `:focus-visible` da folha — a primeira versão deste guarda caiu no
+    // `button:focus-visible` genérico que mora bem acima.
+    let Some(revela) = folha
+        .split('}')
+        .map(|regra| regra.trim_start_matches(['\n', ' ']).to_owned())
+        .find(|regra| regra.contains("visibility: visible") && regra.contains(".moderar-remover"))
+    else {
+        panic!("nada revela o `remover`, então ele está escondido para sempre:\n{folha}");
+    };
+    assert!(
+        revela.contains(".moderar-remover:focus-visible"),
+        "o `remover` é revelado por hover mas não pelo foco, então o Tab pára \
+         num botão invisível:\n{revela}"
+    );
+    assert!(
+        revela.contains(":hover .moderar-remover"),
+        "o `remover` só aparece no foco do teclado, e o ponteiro não tem como \
+         chegar nele:\n{revela}"
+    );
+}

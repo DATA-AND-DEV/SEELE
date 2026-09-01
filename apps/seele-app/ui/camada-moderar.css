@@ -287,7 +287,22 @@
 .moderar-porta:hover { color: var(--seele-laranja-nerv); border-color: var(--seele-laranja-nerv); }
 .moderar-porta:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 1px; }
 
+/* **Em repouso ele não está lá.** A comp da 0.9.0 desenha a mensagem com
+ * avatar, autor, hora e corpo, e mais nada — e o `remover` sublinhado, repetido
+ * uma vez por mensagem, era uma coluna de links descendo pelo lado direito de
+ * toda conversa. O relato de campo pôs isto na mesma lista dos outros controles
+ * que a comp não desenha.
+ *
+ * Ele aparece quando o ponteiro entra na mensagem, e quando o **teclado** chega
+ * nele: sem o `:focus-visible` a tecla Tab passaria por um botão invisível, que
+ * é a forma de esconder um controle que só quem enxerga pode usar. O
+ * `visibility` e não `display` porque o espaço já está reservado — o texto não
+ * pula quando ele aparece.
+ *
+ * Apagar uma mensagem continua sendo confirmado depois, na caixa desta janela:
+ * revelar não é executar, e o gesto que revela é passar o mouse. */
 .moderar-remover {
+  visibility: hidden;
   margin-left: auto;
   font: inherit;
   font-size: 11px;
@@ -297,6 +312,17 @@
   padding: 0;
   cursor: pointer;
   text-decoration: underline;
+}
+
+/* Pelo `<li>` da mensagem e não pela classe dela: `.mensagem` é de
+   `tela-sessao.css`, e uma segunda folha abrindo uma regra com ela reivindicaria
+   um nome que não é seu — que é o empate silencioso que
+   `no_two_screens_claim_the_same_class_name` existe para recusar. O `li` é
+   preciso o bastante porque `.moderar-remover` só existe dentro de uma
+   mensagem. */
+li:hover .moderar-remover,
+.moderar-remover:focus-visible {
+  visibility: visible;
 }
 
 .moderar-remover:hover { color: var(--seele-laranja-nerv); }
