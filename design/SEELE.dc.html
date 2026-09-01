@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="app">
+<link rel="stylesheet" href="fontes.css">
+<link rel="stylesheet" href="tokens.css">
+<style>
+  html,body{margin:0;height:100%;background:var(--seele-negro-absoluto);color:var(--seele-osso);font-family:var(--seele-mono);font-size:13px;line-height:16px;-webkit-font-smoothing:antialiased;overflow:hidden}
+  *,*::before,*::after{box-sizing:border-box}
+  a{color:var(--seele-laranja-nerv);text-decoration:none}
+  a:hover{color:var(--seele-osso)}
+  /* contraste corrigido: osso-apagado media 4,11:1 e reprovava AA em texto pequeno */
+  :root{--seele-osso-apagado:#9C907C;--seele-linha:#2E2820;--seele-linha-forte:#4A4036;--seele-rotulo-painel:#A79A87}
+  /* o scroll, no mesmo estilo do resto: canto reto, sem sombra */
+  *::-webkit-scrollbar{width:10px;height:10px}
+  *::-webkit-scrollbar-track{background:var(--seele-negro-absoluto)}
+  *::-webkit-scrollbar-thumb{background:var(--seele-linha-forte);border:3px solid var(--seele-negro-absoluto)}
+  *::-webkit-scrollbar-thumb:hover{background:var(--seele-laranja-nerv)}
+  *::-webkit-scrollbar-corner{background:var(--seele-negro-absoluto)}
+  *{scrollbar-width:thin;scrollbar-color:var(--seele-linha-forte) var(--seele-negro-absoluto)}
+  input{font:inherit;color:var(--seele-osso);background:var(--seele-negro-absoluto);border:1px solid var(--seele-linha-forte);padding:8px}
+  input:focus{outline:none;border-color:var(--seele-laranja-nerv)}
+  button:focus-visible{outline:2px solid var(--seele-osso);outline-offset:1px}
+  .glifo{width:1em;height:1em;vertical-align:-0.2em;fill:currentColor}
+</style>
+</helmet>
+
+<div style="height:100vh;display:flex;flex-direction:column;background:var(--seele-negro-absoluto);overflow:hidden">
+
+  <!-- barra de janela customizada, no lugar da barra do sistema -->
+  <div style="height:32px;flex:0 0 auto;display:flex;align-items:stretch;background:var(--seele-negro-painel);border-bottom:1px solid var(--seele-linha);user-select:none">
+    <span style="width:56px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;border-right:1px solid var(--seele-linha);font-family:var(--seele-display);font-weight:900;font-size:14px;letter-spacing:0.06em;color:var(--seele-laranja-nerv)">SEELE</span>
+    <span style="display:flex;align-items:center;gap:10px;padding:0 14px;min-width:0;flex:1">
+      <span style="font-family:var(--seele-display);font-weight:900;font-size:13px;letter-spacing:0.08em;color:var(--seele-osso);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ servidorNome }}</span>
+      <span style="font-size:9px;letter-spacing:0.2em;color:var(--seele-osso-apagado);white-space:nowrap">{{ servidorSub }}</span>
+    </span>
+    <span style="display:flex;align-items:center;gap:12px;padding:0 14px;border-left:1px solid var(--seele-linha);font-size:11px;letter-spacing:0.08em;color:var(--seele-osso);font-variant-numeric:tabular-nums">{{ relogio }}</span>
+    <div style="display:flex;align-items:stretch;flex:0 0 auto">
+      <button type="button" aria-label="Minimizar" title="minimizar" style="width:44px;border:0;border-left:1px solid var(--seele-linha);background:none;color:var(--seele-osso-apagado);font:inherit;font-size:14px;line-height:1;cursor:pointer" style-hover="color:var(--seele-osso);background:var(--seele-linha)">–</button>
+      <button type="button" aria-label="Maximizar" title="maximizar" style="width:44px;border:0;border-left:1px solid var(--seele-linha);background:none;color:var(--seele-osso-apagado);font:inherit;font-size:11px;line-height:1;cursor:pointer" style-hover="color:var(--seele-osso);background:var(--seele-linha)">□</button>
+      <button type="button" aria-label="Fechar" title="fechar" style="width:44px;border:0;border-left:1px solid var(--seele-linha);background:none;color:var(--seele-osso-apagado);font:inherit;font-size:14px;line-height:1;cursor:pointer" style-hover="color:var(--seele-negro-absoluto);background:var(--seele-vermelho-alerta)">×</button>
+    </div>
+  </div>
+
+  <!-- ---------------- entrada ---------------- -->
+  <sc-if value="{{ ehBoot }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1 1 auto;display:flex;min-height:0;overflow:auto">
+      <div style="margin:auto;width:480px;padding:32px;border:1px solid var(--seele-linha-forte);background:var(--seele-negro-painel)">
+        <div style="margin:0 0 32px;display:flex;flex-direction:column;align-items:flex-start;gap:8px">
+          <span style="font-family:var(--seele-display);font-weight:900;font-size:56px;line-height:1;letter-spacing:0.02em;color:var(--seele-laranja-nerv)">SEELE</span>
+          <span style="font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:var(--seele-rotulo-painel)">voz e texto auto-hospedados</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <label style="display:flex;flex-direction:column;gap:6px">
+            <span style="font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:var(--seele-rotulo-painel)">ENDEREÇO</span>
+            <input value="192.168.0.7:8383" spellcheck="false" style="width:100%">
+          </label>
+          <label style="display:flex;flex-direction:column;gap:6px">
+            <span style="font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:var(--seele-rotulo-painel)">APELIDO</span>
+            <input value="rafa" spellcheck="false" style="width:100%">
+          </label>
+          <span style="display:block;font-size:13px;line-height:1.4;color:var(--seele-osso)">A porta 8383 é UDP. Fones dos dois lados: não há cancelamento de eco.</span>
+          <div style="display:flex;gap:8px">
+            <button type="button" onClick="{{ entrar }}" style="flex:1;font:inherit;letter-spacing:0.22em;padding:10px 16px;color:var(--seele-negro-absoluto);background:var(--seele-laranja-nerv);border:1px solid var(--seele-laranja-nerv);cursor:pointer">ENTRAR</button>
+            <button type="button" onClick="{{ hospedar }}" style="flex:1;font:inherit;letter-spacing:0.22em;padding:10px 16px;color:var(--seele-laranja-nerv);background:none;border:1px solid var(--seele-laranja-nerv);cursor:pointer">HOSPEDAR AQUI</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ---------------- sessão ---------------- -->
+  <sc-if value="{{ ehSessao }}" hint-placeholder-val="{{ true }}">
+    <main style="flex:1 1 auto;display:grid;grid-template-columns:60px 268px minmax(0,1fr) 328px;min-height:0">
+
+      <!-- trilha de servidores -->
+      <nav style="display:flex;flex-direction:column;border-right:1px solid var(--seele-linha);background:var(--seele-negro-painel);overflow-y:auto">
+        <h2 style="margin:0;height:24px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;border-bottom:1px solid var(--seele-linha);font-family:var(--seele-mono);font-size:8px;font-weight:normal;letter-spacing:0.16em;color:var(--seele-rotulo-painel)">REDES</h2>
+        <button type="button" aria-current="true" style="height:56px;flex:0 0 auto;border:0;border-bottom:1px solid var(--seele-linha);border-left:3px solid var(--seele-laranja-nerv);background:var(--seele-laranja-fraco);font-family:var(--seele-display);font-weight:900;font-size:15px;letter-spacing:0.06em;color:var(--seele-laranja-nerv);cursor:default">T3</button>
+        <button type="button" aria-label="ESTUDIO" style="height:56px;flex:0 0 auto;border:0;border-bottom:1px solid var(--seele-linha);border-left:3px solid transparent;background:none;font-family:var(--seele-display);font-weight:900;font-size:15px;letter-spacing:0.06em;color:var(--seele-osso-apagado);cursor:pointer" style-hover="border-left-color:var(--seele-linha-forte);color:var(--seele-osso)">ES</button>
+        <button type="button" aria-label="CASA" style="height:56px;flex:0 0 auto;border:0;border-bottom:1px solid var(--seele-linha);border-left:3px solid transparent;background:none;font-family:var(--seele-display);font-weight:900;font-size:15px;letter-spacing:0.06em;color:var(--seele-osso-apagado);cursor:pointer" style-hover="border-left-color:var(--seele-linha-forte);color:var(--seele-osso)">CA</button>
+        <button type="button" aria-label="Conectar a outro servidor" title="sai deste servidor e volta à entrada para você digitar outro endereço" onClick="{{ desconectar }}" style="height:48px;flex:0 0 auto;border:0;border-bottom:1px solid var(--seele-linha);border-left:3px solid transparent;background:none;font:inherit;font-size:18px;color:var(--seele-osso-apagado);cursor:pointer" style-hover="border-left-color:var(--seele-linha-forte);color:var(--seele-osso)">+</button>
+      </nav>
+
+      <!-- salas e canais -->
+      <section aria-label="Salas de voz e canais" style="display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--seele-linha);background:var(--seele-negro-painel)">
+        <div style="flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column">
+
+          <div style="flex:0 0 auto;border-bottom:1px solid var(--seele-linha);display:flex;align-items:center;gap:8px;padding:10px 12px 8px">
+            <h2 style="margin:0;flex:1;font-family:var(--seele-mono);font-size:9px;font-weight:normal;letter-spacing:0.2em;color:var(--seele-rotulo-painel)">SALAS DE VOZ</h2>
+            <button type="button" aria-label="Nova sala de voz" title="nova sala de voz" onClick="{{ abrirNovaSala }}" style="width:22px;height:22px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font:inherit;font-size:14px;line-height:1;color:var(--seele-osso-apagado);background:none;border:1px solid var(--seele-linha-forte);cursor:pointer" style-hover="color:var(--seele-laranja-nerv);border-color:var(--seele-laranja-nerv)">+</button>
+            <button type="button" aria-label="Ajuda: o vocabulário do SEELE e as teclas" title="ajuda" style="width:22px;height:22px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-family:var(--seele-mono);font-size:10px;line-height:1;color:var(--seele-osso-apagado);background:none;border:1px solid var(--seele-linha-forte);cursor:pointer" style-hover="color:var(--seele-osso);border-color:var(--seele-laranja-nerv)">?</button>
+          </div>
+
+          <ul style="list-style:none;margin:0;padding:0;flex:0 0 auto">
+            <sc-for list="{{ salas }}" as="s" hint-placeholder-count="3">
+              <li style="{{ s.estiloItem }}">
+                <div style="display:flex;align-items:center;gap:6px">
+                  <button type="button" aria-label="{{ s.rotuloRenomear }}" title="{{ s.rotuloRenomear }}" onClick="{{ s.renomear }}" style="{{ s.estiloNome }}">{{ s.nome }}</button>
+                  <span style="font-size:10px;color:var(--seele-osso-apagado);font-variant-numeric:tabular-nums;flex:0 0 auto">{{ s.ocupacao }}</span>
+                  <span style="flex:1"></span>
+                  <button type="button" aria-label="{{ s.rotuloApagar }}" title="{{ s.rotuloApagar }}" style="width:22px;height:22px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font:inherit;font-size:13px;line-height:1;color:var(--seele-osso-apagado);background:none;border:1px solid var(--seele-linha-forte);cursor:pointer" style-hover="color:var(--seele-vermelho-alerta);border-color:var(--seele-vermelho-alerta)">×</button>
+                  <sc-if value="{{ s.dentro }}" hint-placeholder-val="{{ false }}">
+                    <button type="button" aria-label="Sair da sala" title="sair: você para de ouvir e de falar nesta sala" onClick="{{ s.sair }}" style="width:22px;height:22px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;color:var(--seele-laranja-nerv);background:none;border:1px solid var(--seele-laranja-nerv);cursor:pointer" style-hover="color:var(--seele-negro-absoluto);background:var(--seele-laranja-nerv)">
+                      <svg class="glifo" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.8 4.8A4.5 4.5 0 1 0 11.2 4.8" fill="none" stroke="currentColor" stroke-width="1.3"></path><path d="M8 2.2v5.4" stroke="currentColor" stroke-width="1.3" fill="none"></path></svg>
+                    </button>
+                  </sc-if>
+                </div>
+                <ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px">
+                  <sc-for list="{{ s.pessoas }}" as="p" hint-placeholder-count="2">
+                    <li style="display:flex;align-items:center;gap:7px;font-size:11px;color:var(--seele-osso-apagado)">
+                      <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ p.nome }}</span>
+                      <span style="{{ p.estiloEu }}">{{ p.eu }}</span>
+                    </li>
+                  </sc-for>
+                </ul>
+                <sc-if value="{{ s.fora }}" hint-placeholder-val="{{ true }}">
+                  <button type="button" onClick="{{ s.entrar }}" style="width:100%;min-height:34px;display:flex;align-items:center;justify-content:center;font-family:var(--seele-display);font-weight:900;font-size:14px;letter-spacing:0.14em;color:var(--seele-laranja-nerv);background:none;border:1px solid var(--seele-laranja-nerv);cursor:pointer" style-hover="color:var(--seele-negro-absoluto);background:var(--seele-laranja-nerv)">ENTRAR NA SALA</button>
+                </sc-if>
+              </li>
+            </sc-for>
+          </ul>
+
+          <div style="flex:0 0 auto;border-top:1px solid var(--seele-linha);border-bottom:1px solid var(--seele-linha);margin-top:16px;display:flex;align-items:center;gap:8px;padding:10px 12px 8px">
+            <h2 style="margin:0;flex:1;font-family:var(--seele-mono);font-size:9px;font-weight:normal;letter-spacing:0.2em;color:var(--seele-rotulo-painel)">CANAIS</h2>
+            <button type="button" aria-label="Novo canal" title="novo canal" onClick="{{ abrirNovoCanal }}" style="width:22px;height:22px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font:inherit;font-size:14px;line-height:1;color:var(--seele-osso-apagado);background:none;border:1px solid var(--seele-linha-forte);cursor:pointer" style-hover="color:var(--seele-laranja-nerv);border-color:var(--seele-laranja-nerv)">+</button>
+          </div>
+
+          <ul style="list-style:none;margin:0;padding:0;flex:0 0 auto">
+            <sc-for list="{{ canais }}" as="c" hint-placeholder-count="4">
+              <li style="display:flex;align-items:stretch">
+                <button type="button" onClick="{{ c.abrir }}" style="{{ c.estilo }}">
+                  <span style="{{ c.estiloCerquilha }}" aria-hidden="true">#</span>
+                  <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ c.nome }}</span>
+                </button>
+              </li>
+            </sc-for>
+          </ul>
+        </div>
+
+        <!-- o operador: voz, chamada e configuração no mesmo bloco -->
+        <div style="border-top:1px solid var(--seele-linha);padding:10px 12px;display:flex;flex-direction:column;gap:8px;flex:0 0 auto;background:var(--seele-negro-painel)">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="display:flex;flex-direction:column;gap:2px;min-width:0;flex:1">
+              <span style="font-size:9px;letter-spacing:0.2em;color:var(--seele-rotulo-painel)">OPERADOR</span>
+              <span style="font-size:13px;color:var(--seele-padrao-azul);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">rafa</span>
+            </span>
+            <button type="button" aria-label="{{ micRotulo }}" title="{{ micRotulo }}" onClick="{{ alternarMudo }}" style="{{ estiloMic }}">
+              <svg class="glifo" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="1.3"></circle><rect x="6.6" y="4.4" width="2.8" height="7.2"></rect></svg>
+            </button>
+            <button type="button" aria-label="{{ surdoRotulo }}" title="{{ surdoRotulo }}" onClick="{{ alternarSurdo }}" style="{{ estiloSurdo }}">
+              <svg class="glifo" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3"></circle></svg>
+            </button>
+            <button type="button" aria-label="Abrir configurações" title="configuração local desta máquina" onClick="{{ abrirConfig }}" style="width:34px;height:34px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--seele-osso-apagado);background:none;border:1px solid var(--seele-linha-forte);cursor:pointer" style-hover="color:var(--seele-laranja-nerv);border-color:var(--seele-laranja-nerv)">
+              <svg class="glifo" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.1" fill="none" stroke="currentColor" stroke-width="1.3"></circle><path d="M8 1.9v2.1M8 12v2.1M14.1 8h-2.1M4 8H1.9M12.3 3.7l-1.5 1.5M5.2 10.8l-1.5 1.5M12.3 12.3l-1.5-1.5M5.2 5.2L3.7 3.7" stroke="currentColor" stroke-width="1.3" fill="none"></path></svg>
+            </button>
+          </div>
+          <span style="font-size:11px;line-height:1.4;color:var(--seele-osso-apagado)">{{ vozEstado }}</span>
+          <button type="button" style="{{ estiloFalar }}">{{ falarRotulo }}</button>
+          <div style="display:flex;gap:6px">
+            <button type="button" title="{{ salaAcaoDica }}" onClick="{{ sairDaSala }}" style="{{ estiloSairSala }}">SAIR DA SALA</button>
+            <button type="button" title="a grade da sala de voz no lugar da conversa" onClick="{{ alternarVista }}" style="{{ estiloChamada }}">{{ chamadaRotulo }}</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- o canal aberto -->
+      <section aria-label="Registro do canal" style="display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--seele-linha);background:var(--seele-negro-absoluto)">
+        <sc-if value="{{ vistaChamada }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:center;gap:16px;min-height:48px;padding:6px 16px;border-bottom:1px solid var(--seele-linha);background:var(--seele-negro-painel);flex:0 0 auto">
+            <span style="font-family:var(--seele-display);font-weight:900;font-size:16px;letter-spacing:0.06em;padding:4px 10px;color:var(--seele-negro-absoluto);background:var(--seele-laranja-nerv);white-space:nowrap;flex:0 0 auto">SALA DE VOZ</span>
+            <span style="font-size:14px;color:var(--seele-osso);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ salaAtualNome }}</span>
+            <span style="flex:1"></span>
+            <span style="display:flex;align-items:center;gap:8px;padding:5px 10px;border:1px solid var(--seele-linha-forte);font-size:11px;white-space:nowrap;color:var(--seele-fosforo)">
+              <span aria-hidden="true" style="width:6px;height:6px;background:currentColor;flex:0 0 auto"></span>
+              <span>NO AR</span>
+            </span>
+            <span style="display:flex;align-items:baseline;gap:8px;font-size:13px;font-variant-numeric:tabular-nums;color:var(--seele-osso);flex:0 0 auto">
+              <span style="font-size:10px;letter-spacing:0.18em;text-transform:uppercase;color:var(--seele-rotulo-painel)">EM SESSÃO</span>
+              <span>{{ emSessao }}</span>
+            </span>
+          </div>
+          <ol aria-label="pessoas na sala de voz" style="list-style:none;margin:0;padding:0;flex:1 1 auto;min-height:0;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));grid-auto-rows:minmax(160px,auto);align-content:start">
+            <sc-for list="{{ cartoes }}" as="c" hint-placeholder-count="3">
+              <li style="{{ c.estiloCartao }}">
+                <span style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+                  <span style="display:flex;align-items:center;gap:8px;min-width:0">
+                    <span style="{{ c.estiloAvatar }}">{{ c.inicial }}</span>
+                    <span style="{{ c.estiloNome }}">{{ c.nome }}</span>
+                  </span>
+                  <span style="{{ c.estiloPastilha }}">{{ c.estado }}</span>
+                </span>
+                <span style="display:flex;flex-direction:column;gap:6px">
+                  <span style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+                    <span style="font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:var(--seele-rotulo-painel)">SINAL</span>
+                    <span style="{{ c.estiloNumero }}">
+                      <span style="font-family:var(--seele-mono);font-size:11px;line-height:1">{{ c.marca }}</span>
+                      <span style="font-family:var(--seele-display);font-weight:900;font-size:26px;line-height:1;font-variant-numeric:tabular-nums">{{ c.sinal }}</span>
+                    </span>
+                  </span>
+                  <span style="{{ c.estiloBarra }}">{{ c.barra }}</span>
+                </span>
+              </li>
+            </sc-for>
+            <sc-if value="{{ salaVazia }}" hint-placeholder-val="{{ false }}">
+              <li style="grid-column:1 / -1;display:flex;align-items:center;justify-content:center;padding:24px;font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:var(--seele-osso-apagado)">{{ salaVaziaTexto }}</li>
+            </sc-if>
+          </ol>
+        </sc-if>
+
+        <sc-if value="{{ vistaConversa }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;align-items:center;gap:12px;min-height:48px;padding:6px 16px;border-bottom:1px solid var(--seele-linha);flex:0 0 auto">
+          <span style="font-size:16px;color:var(--seele-laranja-nerv);flex:0 0 auto" aria-hidden="true">#</span>
+          <span style="font-family:var(--seele-display);font-weight:700;font-size:17px;letter-spacing:0.06em;color:var(--seele-osso);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ canalAberto }}</span>
+          <span style="flex:1"></span>
+          <button type="button" title="procurar no que já foi dito neste canal" aria-label="Buscar" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;font:inherit;color:var(--seele-osso-apagado);background:none;border:1px solid var(--seele-linha-forte);cursor:pointer" style-hover="color:var(--seele-laranja-nerv);border-color:var(--seele-laranja-nerv)">
+            <svg class="glifo" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="3.6" fill="none" stroke="currentColor" stroke-width="1.3"></circle><path d="M9.7 9.7L13 13" stroke="currentColor" stroke-width="1.3" fill="none"></path></svg>
+          </button>
+        </div>
+
+        <ol ref="{{ log }}" onScroll="{{ aoRolar }}" style="list-style:none;margin:0;padding:16px 16px 8px;overflow-y:auto;flex:1 1 auto;display:flex;flex-direction:column;gap:10px">
+          <sc-for list="{{ mensagens }}" as="m" hint-placeholder-count="5">
+            <li style="display:grid;grid-template-columns:34px minmax(0,1fr);gap:12px;border-left:2px solid var(--seele-linha);padding-left:12px">
+              <span style="{{ m.estiloAvatar }}">{{ m.inicial }}</span>
+              <span style="display:flex;flex-direction:column;gap:3px;min-width:0">
+                <span style="display:flex;align-items:baseline;gap:9px;flex-wrap:wrap">
+                  <span style="{{ m.estiloAutor }}">{{ m.autor }}</span>
+                  <span style="font-size:10px;color:var(--seele-osso-apagado);font-variant-numeric:tabular-nums">{{ m.hora }}</span>
+                </span>
+                <span style="font-size:14px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;text-wrap:pretty">{{ m.corpo }}</span>
+                <sc-if value="{{ m.temImagem }}" hint-placeholder-val="{{ false }}">
+                  <span style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:6px;padding:6px 10px;border:1px solid var(--seele-linha-forte);background:var(--seele-negro-painel)">
+                    <svg class="glifo" viewBox="0 0 16 16" aria-hidden="true" style="color:var(--seele-osso-apagado)"><path d="M4 2.5h5l3 3v8h-8Z" fill="none" stroke="currentColor" stroke-width="1.3"></path><path d="M9 2.5v3h3" fill="none" stroke="currentColor" stroke-width="1.3"></path></svg>
+                    <span style="font-size:13px;color:var(--seele-osso);overflow-wrap:anywhere;min-width:0">{{ m.imagemNome }}</span>
+                    <span style="font-size:10px;color:var(--seele-osso-apagado);flex:0 0 auto">{{ m.imagemTamanho }}</span>
+                    <span style="flex:0 0 100%;display:block;margin-top:6px;min-width:0">
+                      <span role="img" aria-label="{{ m.imagemNome }}" style="{{ m.estiloImagem }}"></span>
+                    </span>
+                  </span>
+                </sc-if>
+              </span>
+            </li>
+          </sc-for>
+        </ol>
+
+        <!-- a prévia do anexo, com fechamento -->
+        <sc-if value="{{ temAnexo }}" hint-placeholder-val="{{ false }}">
+          <div aria-live="polite" style="flex:0 0 auto;display:flex;align-items:flex-start;gap:12px;padding:10px 16px;border-top:1px solid var(--seele-linha);background:var(--seele-negro-painel)">
+            <span role="img" aria-label="{{ anexoNome }}" style="{{ estiloAnexoPrevia }}"></span>
+            <span style="display:flex;flex-direction:column;gap:4px;min-width:0;flex:1">
+              <span style="font-size:13px;color:var(--seele-osso);overflow-wrap:anywhere">{{ anexoNome }}</span>
+              <span style="font-size:10px;letter-spacing:0.1em;color:var(--seele-osso-apagado)">{{ anexoTamanho }} · pronto para enviar com Enter</span>
+            </span>
+            <button type="button" aria-label="Fechar a prévia e tirar o arquivo" title="fechar a prévia e tirar o arquivo" onClick="{{ tirarAnexo }}" style="width:26px;height:26px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font:inherit;font-size:14px;line-height:1;color:var(--seele-osso-apagado);background:none;border:1px solid var(--seele-linha-forte);cursor:pointer" style-hover="color:var(--seele-negro-absoluto);background:var(--seele-vermelho-alerta);border-color:var(--seele-vermelho-alerta)">×</button>
+          </div>
+        </sc-if>
+
+        <!-- compor: Enter envia, sem botão de enviar -->
+        <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-top:1px solid var(--seele-linha);flex:0 0 auto">
+          <span style="flex:1;min-width:0;display:flex;align-items:center;gap:9px;padding:0 12px;min-height:44px;border:1px solid var(--seele-linha-forte);background:var(--seele-negro-painel)">
+            <span style="color:var(--seele-laranja-nerv);font-size:14px;flex:0 0 auto" aria-hidden="true">&gt;</span>
+            <input ref="{{ campo }}" onKeyDown="{{ aoTeclar }}" onPaste="{{ aoColar }}" placeholder="transmitir no canal — Enter envia, Ctrl+V cola uma imagem" maxlength="4000" autocomplete="off" style="flex:1;min-width:0;border:none;background:none;padding:8px 0;font-size:14px">
+          </span>
+          <button type="button" aria-label="Escolher um arquivo" title="escolher um arquivo; Ctrl+V e arrastar também anexam" onClick="{{ colarExemplo }}" style="width:44px;height:44px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;color:var(--seele-osso-apagado);background:none;border:1px solid var(--seele-linha-forte);cursor:pointer" style-hover="color:var(--seele-laranja-nerv);border-color:var(--seele-laranja-nerv)">
+            <svg class="glifo" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h5l3 3v8h-8Z" fill="none" stroke="currentColor" stroke-width="1.3"></path><path d="M9 2.5v3h3" fill="none" stroke="currentColor" stroke-width="1.3"></path></svg>
+          </button>
+        </div>
+        </sc-if>
+      </section>
+
+      <!-- pessoas -->
+      <section aria-labelledby="titulo-pessoas" style="display:flex;flex-direction:column;min-height:0;background:var(--seele-negro-painel)">
+        <h2 id="titulo-pessoas" style="margin:0;padding:8px 16px;display:flex;justify-content:space-between;align-items:baseline;gap:8px;background:var(--seele-laranja-nerv);color:var(--seele-negro-absoluto);font-family:var(--seele-display);font-weight:900;font-size:15px;letter-spacing:0.14em;flex:0 0 auto">
+          <span>PESSOAS</span>
+          <span style="font-family:var(--seele-mono);font-size:9px;font-weight:normal;letter-spacing:0.14em;flex:0 0 auto">{{ pessoasConta }}</span>
+        </h2>
+        <ul style="list-style:none;margin:0;padding:0;overflow-y:auto;flex:1 1 auto">
+          <sc-for list="{{ grupos }}" as="g" hint-placeholder-count="2">
+            <li style="display:block">
+              <p style="{{ g.estiloSala }}">
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ g.nome }}</span>
+                <span style="flex:0 0 auto">{{ g.conta }}</span>
+                <span style="{{ g.estiloAqui }}">{{ g.aqui }}</span>
+              </p>
+              <ul style="list-style:none;margin:0;padding:0">
+                <sc-for list="{{ g.pessoas }}" as="p" hint-placeholder-count="3">
+                  <li style="{{ p.estiloItem }}">
+                    <span style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+                      <span style="font-size:13px;letter-spacing:0.06em;color:var(--seele-osso);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ p.nome }}</span>
+                      <span style="{{ p.estiloSync }}">
+                        <span style="font-family:var(--seele-mono);font-size:11px;line-height:1">{{ p.marca }}</span>
+                        <span style="font-family:var(--seele-display);font-weight:900;font-size:26px;line-height:1;font-variant-numeric:tabular-nums">{{ p.sinal }}</span>
+                      </span>
+                    </span>
+                    <span aria-hidden="true" style="{{ p.estiloBarra }}">{{ p.barra }}</span>
+                    <span style="display:flex;justify-content:flex-end;align-items:center;gap:6px;font-size:9px;letter-spacing:0.12em">
+                      <span style="{{ p.estiloPastilha }}">{{ p.estado }}</span>
+                    </span>
+                  </li>
+                </sc-for>
+              </ul>
+            </li>
+          </sc-for>
+        </ul>
+      </section>
+    </main>
+  </sc-if>
+
+  <!-- telemetria -->
+  <sc-if value="{{ mostraTelemetria }}" hint-placeholder-val="{{ true }}">
+    <footer style="display:flex;align-items:stretch;height:40px;border-top:1px solid var(--seele-linha-forte);background:var(--seele-negro-painel);font-variant-numeric:tabular-nums;flex:0 0 auto;overflow-x:auto">
+      <span style="display:flex;align-items:center;gap:8px;padding:0 16px;border-right:1px solid var(--seele-linha);white-space:nowrap"><b style="font-size:9px;letter-spacing:0.18em;font-weight:normal;color:var(--seele-osso-apagado)">ATRASO</b> <span style="font-size:12px;color:var(--seele-osso)">23ms</span></span>
+      <span style="display:flex;align-items:center;gap:8px;padding:0 16px;border-right:1px solid var(--seele-linha);white-space:nowrap"><b style="font-size:9px;letter-spacing:0.18em;font-weight:normal;color:var(--seele-osso-apagado)">JITTER</b> <span style="font-size:12px;color:var(--seele-osso)">4ms</span></span>
+      <span style="display:flex;align-items:center;gap:8px;padding:0 16px;border-right:1px solid var(--seele-linha);white-space:nowrap"><b style="font-size:9px;letter-spacing:0.18em;font-weight:normal;color:var(--seele-osso-apagado)">DISTÚRBIO</b> <span style="font-size:12px;color:var(--seele-osso)">0.2%</span></span>
+      <span style="display:flex;align-items:center;gap:8px;padding:0 16px;border-right:1px solid var(--seele-linha);white-space:nowrap"><b style="font-size:9px;letter-spacing:0.18em;font-weight:normal;color:var(--seele-osso-apagado)">CODEC</b> <span style="font-size:12px;color:var(--seele-osso)">OPUS 48K</span></span>
+      <span style="display:flex;align-items:center;gap:8px;padding:0 16px;border-right:1px solid var(--seele-linha);white-space:nowrap"><b style="font-size:9px;letter-spacing:0.18em;font-weight:normal;color:var(--seele-osso-apagado)">UPTIME</b> <span style="font-size:12px;color:var(--seele-osso)">{{ emSessao }}</span></span>
+      <span style="display:flex;align-items:center;gap:8px;padding:0 16px;border-right:1px solid var(--seele-linha);white-space:nowrap"><b style="font-size:9px;letter-spacing:0.18em;font-weight:normal;color:var(--seele-osso-apagado)">SALA</b> <span style="font-size:12px;color:var(--seele-osso)">{{ salaAtualNome }}</span></span>
+      <span style="display:flex;align-items:center;gap:6px;padding:0 16px;border-right:1px solid var(--seele-linha);white-space:nowrap"><b style="font-size:9px;letter-spacing:0.18em;font-weight:normal;color:var(--seele-osso-apagado);margin-right:2px">SINAL DA SALA</b> <span style="font-family:var(--seele-mono);font-size:11px;line-height:1;color:var(--seele-fosforo)">█</span> <span style="font-size:12px;color:var(--seele-fosforo)">92</span></span>
+      <span style="display:flex;align-items:center;gap:8px;padding:0 16px;border-right:1px solid var(--seele-linha);white-space:nowrap"><b style="font-size:9px;letter-spacing:0.18em;font-weight:normal;color:var(--seele-osso-apagado)">CAMINHO</b> <span style="font-size:12px;color:var(--seele-osso)">UPNP</span></span>
+      <span style="flex:1"></span>
+    </footer>
+  </sc-if>
+
+  <!-- ---------------- modal: a porta, ao abrir a rede ---------------- -->
+  <sc-if value="{{ modalPorta }}" hint-placeholder-val="{{ false }}">
+    <div role="dialog" aria-modal="true" aria-labelledby="porta-titulo" style="position:fixed;inset:0;z-index:25;display:flex;align-items:center;justify-content:center;padding:32px">
+      <span style="position:absolute;inset:0;background:var(--seele-negro-absoluto);opacity:0.78"></span>
+      <div style="position:relative;width:100%;max-width:640px;display:flex;flex-direction:column;background:var(--seele-negro-painel);border:2px solid var(--seele-laranja-nerv)">
+        <div style="display:flex;align-items:center;gap:16px;padding:8px 16px;background:var(--seele-laranja-nerv);color:var(--seele-negro-absoluto);flex:0 0 auto">
+          <span style="display:inline-flex;align-items:center">
+            <svg class="glifo" viewBox="0 0 16 16" aria-hidden="true"><circle cx="5.2" cy="5.2" r="2.6" fill="none" stroke="currentColor" stroke-width="1.3"></circle><path d="M7 7l5.4 5.4M10.2 10.2l-1.6 1.6M12.4 12.4l-1.6 1.6" stroke="currentColor" stroke-width="1.3" fill="none"></path></svg>
+          </span>
+          <h2 id="porta-titulo" style="flex:1 1 auto;margin:0;font-family:var(--seele-display);font-weight:900;font-size:16px;letter-spacing:0.08em">A PORTA DESTE SERVIDOR</h2>
+          <button type="button" onClick="{{ fecharModal }}" style="background:none;border:1px solid var(--seele-negro-absoluto);color:var(--seele-negro-absoluto);font:inherit;font-size:11px;letter-spacing:0.1em;padding:2px 8px;cursor:pointer">FECHAR</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:16px;padding:24px">
+          <span style="display:block;font-size:13px;line-height:1.5;color:var(--seele-osso)">Este servidor está de pé nesta máquina. Mande o link para quem você quer dentro — ele carrega a impressão digital do certificado, então quem recebe não precisa conferi-la por outro canal.</span>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:10px;letter-spacing:0.22em;color:var(--seele-laranja-nerv);flex:0 0 auto">CONVITE</span>
+            <input readonly spellcheck="false" value="seele://192.168.0.7:8383?fp=782cc791…&amp;convite=2QKPAXPP97W5459H3TPA" style="flex:1;min-width:0;padding:6px 8px;font-size:12px">
+            <button type="button" onClick="{{ copiar }}" style="{{ estiloCopiar }}">{{ copiarRotulo }}</button>
+          </div>
+          <p style="margin:0;padding:10px 12px;border:1px solid var(--seele-linha-forte);font-size:13px;line-height:1.5;color:var(--seele-osso)">
+            <span style="color:var(--seele-fosforo)">ALCANCE: PELA INTERNET</span><br>Porta pedida ao roteador por UPnP. Qualquer um que tenha o link entra.
+          </p>
+          <span style="display:block;font-size:13px;line-height:1.4;color:var(--seele-osso-apagado)">Depois de fechar, o link e as três camadas da porta continuam em CONFIGURAÇÕES · A PORTA.</span>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button type="button" onClick="{{ abrirConfigPorta }}" style="font:inherit;font-size:11px;letter-spacing:0.14em;color:var(--seele-osso-apagado);background:none;border:1px solid var(--seele-linha-forte);padding:8px 14px;cursor:pointer" style-hover="color:var(--seele-osso);border-color:var(--seele-osso-apagado)">ABRIR CONFIGURAÇÕES</button>
+            <button type="button" onClick="{{ fecharModal }}" style="font:inherit;letter-spacing:0.14em;font-size:12px;padding:8px 18px;color:var(--seele-negro-absoluto);background:var(--seele-laranja-nerv);border:1px solid var(--seele-laranja-nerv);cursor:pointer">ENTENDI</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ---------------- modal: configurações, ao meio ---------------- -->
+  <sc-if value="{{ modalConfig }}" hint-placeholder-val="{{ false }}">
+    <div role="dialog" aria-modal="true" aria-labelledby="config-titulo" style="position:fixed;inset:0;z-index:24;display:flex;align-items:center;justify-content:center;padding:32px">
+      <span style="position:absolute;inset:0;background:var(--seele-negro-absoluto);opacity:0.78"></span>
+      <div style="position:relative;width:100%;max-width:840px;height:min(620px,calc(100vh - 96px));display:grid;grid-template-columns:216px minmax(0,1fr);background:var(--seele-negro-painel);border:1px solid var(--seele-linha-forte)">
+        <div style="display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--seele-linha-forte);overflow-y:auto">
+          <div style="padding:16px;border-bottom:1px solid var(--seele-linha)">
+            <h2 id="config-titulo" style="margin:0;font-family:var(--seele-display);font-weight:700;font-size:20px;line-height:1;letter-spacing:0.06em;color:var(--seele-laranja-nerv)">CONFIGURAÇÕES</h2>
+          </div>
+          <ul style="margin:0;padding:0;list-style:none">
+            <li>
+              <button type="button" onClick="{{ irPorta }}" style="{{ estiloSecPorta }}">
+                <span style="{{ iconePorta }}"><svg class="glifo" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 5L12.5 5L8 11Z"></path></svg></span>
+                <span style="font-family:var(--seele-display);font-weight:700;font-size:14px;line-height:1;letter-spacing:0.1em">A PORTA</span>
+              </button>
+            </li>
+            <li>
+              <button type="button" onClick="{{ irAudio }}" style="{{ estiloSecAudio }}">
+                <span style="{{ iconeAudio }}"><svg class="glifo" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="1.3"></circle><rect x="6.6" y="4.4" width="2.8" height="7.2"></rect></svg></span>
+                <span style="font-family:var(--seele-display);font-weight:700;font-size:14px;line-height:1;letter-spacing:0.1em">MICROFONE E SOM</span>
+              </button>
+            </li>
+            <li>
+              <button type="button" onClick="{{ irAtalhos }}" style="{{ estiloSecAtalhos }}">
+                <span style="{{ iconeAtalhos }}"><svg class="glifo" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.8" y="4.5" width="12.4" height="7" fill="none" stroke="currentColor" stroke-width="1.2"></rect><path d="M4 6.7h1.2M6.6 6.7h1.2M9.2 6.7h1.2M11.8 6.7h1.2M4 9.3h8.9" stroke="currentColor" stroke-width="1.1" fill="none"></path></svg></span>
+                <span style="font-family:var(--seele-display);font-weight:700;font-size:14px;line-height:1;letter-spacing:0.1em">ATALHOS</span>
+              </button>
+            </li>
+            <li>
+              <button type="button" onClick="{{ irAparencia }}" style="{{ estiloSecAparencia }}">
+                <span style="{{ iconeAparencia }}"><svg class="glifo" viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.3"></rect><rect x="3.2" y="3.2" width="4.8" height="9.6"></rect></svg></span>
+                <span style="font-family:var(--seele-display);font-weight:700;font-size:14px;line-height:1;letter-spacing:0.1em">APARÊNCIA</span>
+              </button>
+            </li>
+            <li>
+              <button type="button" onClick="{{ irIdentidade }}" style="{{ estiloSecIdentidade }}">
+                <span style="{{ iconeIdentidade }}"><svg class="glifo" viewBox="0 0 16 16" aria-hidden="true"><circle cx="5.2" cy="5.2" r="2.6" fill="none" stroke="currentColor" stroke-width="1.3"></circle><path d="M7 7l5.4 5.4M10.2 10.2l-1.6 1.6M12.4 12.4l-1.6 1.6" stroke="currentColor" stroke-width="1.3" fill="none"></path></svg></span>
+                <span style="font-family:var(--seele-display);font-weight:700;font-size:14px;line-height:1;letter-spacing:0.1em">IDENTIDADE</span>
+              </button>
+            </li>
+          </ul>
+          <button type="button" onClick="{{ fecharModal }}" style="margin-top:auto;width:100%;min-height:48px;padding:16px;display:flex;align-items:center;gap:8px;font:inherit;font-size:12px;letter-spacing:0.1em;text-align:left;color:var(--seele-osso-apagado);background:none;border:none;border-top:1px solid var(--seele-linha);cursor:pointer" style-hover="color:var(--seele-laranja-nerv)">FECHAR</button>
+        </div>
+        <div style="min-width:0;min-height:0;display:flex;flex-direction:column">
+          <div style="padding:16px 24px;border-bottom:1px solid var(--seele-linha);flex-shrink:0">
+            <h3 style="margin:0;font-family:var(--seele-display);font-weight:700;font-size:22px;line-height:1;letter-spacing:0.08em;color:var(--seele-osso)">{{ secaoNome }}</h3>
+          </div>
+          <div style="min-height:0;padding:24px;overflow-y:auto;display:flex;flex-direction:column;gap:24px">
+            <sc-if value="{{ secaoEhPorta }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-direction:column;gap:16px">
+                <span style="display:block;font-size:13px;line-height:1.5;color:var(--seele-osso)">O link de convite deste servidor. Ele aparece uma vez quando a rede sobe, e mora aqui depois disso.</span>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <input readonly spellcheck="false" value="seele://192.168.0.7:8383?fp=782cc791…&amp;convite=2QKPAXPP97W5459H3TPA" style="flex:1;min-width:0;padding:6px 8px;font-size:12px">
+                  <button type="button" onClick="{{ copiar }}" style="{{ estiloCopiar }}">{{ copiarRotulo }}</button>
+                </div>
+                <div style="border:1px solid var(--seele-linha);display:flex;flex-direction:column">
+                  <div style="padding:8px 16px;border-bottom:1px solid var(--seele-linha)">
+                    <p style="margin:0;font-family:var(--seele-display);font-weight:700;font-size:14px;line-height:1;letter-spacing:0.12em;color:var(--seele-laranja-nerv)">AS TRÊS CAMADAS</p>
+                  </div>
+                  <div style="padding:16px;display:flex;flex-direction:column;gap:12px">
+                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px;border:1px solid var(--seele-linha)">
+                      <span style="font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:var(--seele-rotulo-painel);flex:0 0 auto">SENHA DO SERVIDOR</span>
+                      <span style="flex:1 1 120px;color:var(--seele-osso);font-size:12px">não definida</span>
+                      <button type="button" style="font:inherit;font-size:11px;color:var(--seele-osso);background:none;border:1px solid currentColor;padding:2px 8px;cursor:pointer">DEFINIR</button>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px;border:1px solid var(--seele-linha)">
+                      <span style="font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:var(--seele-rotulo-painel);flex:0 0 auto">CONVITE DE USO ÚNICO</span>
+                      <span style="flex:1 1 120px;color:var(--seele-osso);font-size:12px">1 em aberto</span>
+                      <button type="button" style="font:inherit;font-size:11px;color:var(--seele-osso);background:none;border:1px solid currentColor;padding:2px 8px;cursor:pointer">GERAR</button>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px;border:1px solid var(--seele-linha)">
+                      <span style="font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:var(--seele-rotulo-painel);flex:0 0 auto">PORTARIA</span>
+                      <span style="flex:1 1 120px;color:var(--seele-osso);font-size:12px">desligada — qualquer um que alcance a porta entra</span>
+                      <button type="button" aria-pressed="false" style="font:inherit;font-size:11px;color:var(--seele-laranja-nerv);background:none;border:1px solid currentColor;padding:2px 8px;cursor:pointer">LIGAR</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ secaoEhAudio }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:16px">
+                <span style="font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:var(--seele-rotulo-painel)">ENTRADA</span>
+                <ul style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:1px;background:var(--seele-linha);border:1px solid var(--seele-linha)">
+                  <li><button type="button" style="width:100%;display:flex;align-items:baseline;gap:8px;padding:12px;font:inherit;font-size:13px;text-align:left;color:var(--seele-osso);background:var(--seele-laranja-fraco);border:none;border-left:2px solid var(--seele-laranja-nerv);cursor:pointer"><span style="flex:1">Microfone (Realtek Audio)</span><span style="font-size:11px;letter-spacing:0.1em;color:var(--seele-laranja-nerv)">EM USO</span></button></li>
+                  <li><button type="button" style="width:100%;display:flex;align-items:baseline;gap:8px;padding:12px;font:inherit;font-size:13px;text-align:left;color:var(--seele-osso);background:var(--seele-negro-painel);border:none;border-left:2px solid transparent;cursor:pointer"><span style="flex:1">Headset USB</span></button></li>
+                </ul>
+                <p style="margin:0;font-size:11px;line-height:1.6;letter-spacing:0.04em;color:var(--seele-fosforo);overflow-wrap:anywhere">████████████░░░░░░░░  −18 dBFS</p>
+                <span style="font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:var(--seele-rotulo-painel);margin-top:8px">MODO DE VOZ</span>
+                <span style="display:block;font-size:13px;line-height:1.5;color:var(--seele-osso)">Como o microfone abre. Antes isto era um botão na coluna de canais; ele saiu de lá porque é uma escolha que se faz uma vez.</span>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                  <button type="button" onClick="{{ modoTecla }}" style="{{ estiloModoTecla }}">
+                    <span style="font-family:var(--seele-display);font-weight:700;font-size:14px;line-height:1;letter-spacing:0.1em">TECLA</span>
+                    <span style="{{ estiloModoDescTecla }}">abre enquanto você segura ESPAÇO</span>
+                  </button>
+                  <button type="button" onClick="{{ modoVoz }}" style="{{ estiloModoVoz }}">
+                    <span style="font-family:var(--seele-display);font-weight:700;font-size:14px;line-height:1;letter-spacing:0.1em">POR VOZ</span>
+                    <span style="{{ estiloModoDescVoz }}">abre sozinho quando você fala</span>
+                  </button>
+                  <button type="button" onClick="{{ modoAberto }}" style="{{ estiloModoAberto }}">
+                    <span style="font-family:var(--seele-display);font-weight:700;font-size:14px;line-height:1;letter-spacing:0.1em">SEMPRE ABERTO</span>
+                    <span style="{{ estiloModoDescAberto }}">não fecha até você mutar</span>
+                  </button>
+                </div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ secaoEhAparencia }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:16px">
+                <span style="display:block;font-size:13px;line-height:1.5;color:var(--seele-osso)">O tema desta versão subiu o contraste dos rótulos e das bordas: o cinza secundário media 4,11:1 sobre o painel e reprovava AA em texto pequeno.</span>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                  <button type="button" aria-pressed="true" style="flex:1;min-width:168px;min-height:56px;padding:8px 16px;display:flex;flex-direction:column;justify-content:center;gap:2px;font:inherit;text-align:left;color:var(--seele-laranja-nerv);background:var(--seele-laranja-fraco);border:1px solid var(--seele-laranja-nerv);cursor:pointer">
+                    <span style="font-family:var(--seele-display);font-weight:700;font-size:14px;line-height:1;letter-spacing:0.1em">LARANJA SOBRE NEGRO</span>
+                    <span style="font-size:9px;line-height:1.35;color:var(--seele-laranja-nerv)">o tema do produto, com contraste corrigido</span>
+                  </button>
+                  <button type="button" aria-pressed="false" style="flex:1;min-width:168px;min-height:56px;padding:8px 16px;display:flex;flex-direction:column;justify-content:center;gap:2px;font:inherit;text-align:left;color:var(--seele-osso);background:none;border:1px solid var(--seele-linha-forte);cursor:pointer">
+                    <span style="font-family:var(--seele-display);font-weight:700;font-size:14px;line-height:1;letter-spacing:0.1em">MAIS CONTRASTE</span>
+                    <span style="font-size:9px;line-height:1.35;color:var(--seele-osso-apagado)">segue prefers-contrast do sistema</span>
+                  </button>
+                </div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ secaoEhAtalhos }}" hint-placeholder-val="{{ false }}">
+              <ul style="margin:0;padding:0;list-style:none;border:1px solid var(--seele-linha)">
+                <sc-for list="{{ atalhos }}" as="a" hint-placeholder-count="4">
+                  <li style="padding:12px 16px;border-top:1px solid var(--seele-linha);display:flex;align-items:center;justify-content:space-between;gap:16px">
+                    <span style="min-width:0;display:flex;flex-direction:column;gap:2px">
+                      <span style="font-size:13px;color:var(--seele-osso)">{{ a.acao }}</span>
+                      <span style="font-size:9px;line-height:1.35;color:var(--seele-osso-apagado)">{{ a.desc }}</span>
+                    </span>
+                    <span style="flex-shrink:0;padding:8px;font-size:12px;letter-spacing:0.06em;white-space:nowrap;color:var(--seele-laranja-nerv);background:var(--seele-negro-absoluto);border:1px solid var(--seele-linha-forte)">{{ a.tecla }}</span>
+                  </li>
+                </sc-for>
+              </ul>
+            </sc-if>
+            <sc-if value="{{ secaoEhIdentidade }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:16px">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;gap:16px;padding-bottom:8px;border-bottom:1px solid var(--seele-linha)">
+                  <span style="font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:var(--seele-rotulo-painel)">CHAVE ED25519</span>
+                  <span style="font-size:13px;text-align:right;overflow-wrap:anywhere;color:var(--seele-osso)">782cc791 4b0e a55d 9f21</span>
+                </div>
+                <div style="display:flex;align-items:baseline;justify-content:space-between;gap:16px;padding-bottom:8px;border-bottom:1px solid var(--seele-linha)">
+                  <span style="font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:var(--seele-rotulo-painel)">APELIDO</span>
+                  <span style="font-size:13px;text-align:right;color:var(--seele-osso)">rafa</span>
+                </div>
+              </div>
+            </sc-if>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ---------------- modal: nomear ---------------- -->
+  <sc-if value="{{ modalNome }}" hint-placeholder-val="{{ false }}">
+    <div role="dialog" aria-modal="true" aria-labelledby="nome-titulo" style="position:fixed;inset:0;z-index:26;display:flex;align-items:center;justify-content:center;padding:32px">
+      <span style="position:absolute;inset:0;background:var(--seele-negro-absoluto);opacity:0.78"></span>
+      <div style="position:relative;width:100%;max-width:420px;background:var(--seele-negro-painel);border:1px solid var(--seele-laranja-nerv)">
+        <div style="padding:8px 16px;background:var(--seele-laranja-nerv);color:var(--seele-negro-absoluto)">
+          <h2 id="nome-titulo" style="margin:0;font-family:var(--seele-display);font-weight:900;font-size:15px;letter-spacing:0.08em">{{ nomeTitulo }}</h2>
+        </div>
+        <div style="padding:24px;display:flex;flex-direction:column;gap:16px">
+          <label style="display:flex;flex-direction:column;gap:6px">
+            <span style="font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:var(--seele-rotulo-painel)">{{ nomeRotulo }}</span>
+            <input ref="{{ campoNome }}" maxlength="48" spellcheck="false" autocomplete="off" placeholder="{{ nomePlaceholder }}" onKeyDown="{{ aoTeclarNome }}" style="width:100%">
+          </label>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button type="button" onClick="{{ fecharModal }}" style="font:inherit;font-size:11px;letter-spacing:0.14em;color:var(--seele-osso-apagado);background:none;border:1px solid var(--seele-linha-forte);padding:8px 14px;cursor:pointer">CANCELAR</button>
+            <button type="button" onClick="{{ confirmarNome }}" style="font:inherit;font-size:12px;letter-spacing:0.14em;padding:8px 18px;color:var(--seele-negro-absoluto);background:var(--seele-laranja-nerv);border:1px solid var(--seele-laranja-nerv);cursor:pointer">{{ nomeAcao }}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <div aria-hidden="true" style="position:fixed;inset:0;pointer-events:none;z-index:9;background:repeating-linear-gradient(180deg,transparent 0 2px,var(--seele-negro-absoluto) 2px 4px);opacity:0.06"></div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;mostrarTelemetria&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Densidade&quot;},&quot;notasVisiveis&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Densidade&quot;},&quot;larguraPessoas&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:328,&quot;min&quot;:260,&quot;max&quot;:420,&quot;step&quot;:4,&quot;unit&quot;:&quot;px&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Densidade&quot;}}">
+const CHAVE = "seele-proto-v1";
+
+const SECOES = [
+  { id: "porta", nome: "A PORTA", glifo: "chave" },
+  { id: "audio", nome: "MICROFONE E SOM", glifo: "audio" },
+  { id: "atalhos", nome: "ATALHOS", glifo: "teclado" },
+  { id: "aparencia", nome: "APARÊNCIA", glifo: "aparencia" },
+  { id: "identidade", nome: "IDENTIDADE", glifo: "chave" },
+];
+
+const GLIFOS = {
+  chave: [
+    ["circle", { cx: "5.2", cy: "5.2", r: "2.6", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],
+    ["path", { d: "M7 7l5.4 5.4M10.2 10.2l-1.6 1.6M12.4 12.4l-1.6 1.6", stroke: "currentColor", "stroke-width": "1.3", fill: "none" }],
+  ],
+  audio: [
+    ["circle", { cx: "8", cy: "8", r: "5", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],
+    ["rect", { x: "6.6", y: "4.4", width: "2.8", height: "7.2" }],
+  ],
+  teclado: [
+    ["rect", { x: "1.8", y: "4.5", width: "12.4", height: "7", fill: "none", stroke: "currentColor", "stroke-width": "1.2" }],
+    ["path", { d: "M4 6.7h1.2M6.6 6.7h1.2M9.2 6.7h1.2M11.8 6.7h1.2M4 9.3h8.9", stroke: "currentColor", "stroke-width": "1.1", fill: "none" }],
+  ],
+  aparencia: [
+    ["rect", { x: "2.5", y: "2.5", width: "11", height: "11", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],
+    ["rect", { x: "3.2", y: "3.2", width: "4.8", height: "9.6" }],
+  ],
+};
+
+function blocos(pct, total) {
+  const cheios = Math.max(0, Math.min(total, Math.round((pct / 100) * total)));
+  return "\u2588".repeat(cheios) + "\u2591".repeat(total - cheios);
+}
+
+function faixa(n) {
+  if (n >= 85) return "Nominal";
+  if (n >= 60) return "Degraded";
+  return "Critical";
+}
+
+function corFaixa(n) {
+  const f = faixa(n);
+  if (f === "Nominal") return "var(--seele-sync-nominal)";
+  if (f === "Degraded") return "var(--seele-sync-degradado)";
+  return "var(--seele-sync-critico)";
+}
+
+function marcaSync(n) {
+  const f = faixa(n);
+  return f === "Nominal" ? "\u2588" : f === "Degraded" ? "\u2593" : "\u2592";
+}
+
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.campo = React.createRef();
+    this.campoNome = React.createRef();
+    this.log = React.createRef();
+    let salvo = null;
+    try { salvo = JSON.parse(localStorage.getItem(CHAVE) || "null"); } catch (e) { salvo = null; }
+    this.state = Object.assign({
+      tela: "sessao",
+      vista: "conversa",
+      modoVoz: "tecla",
+      modal: null,
+      secao: "porta",
+      mudo: false,
+      surdo: false,
+      salaAtual: 1,
+      canalAtual: 1,
+      copiado: false,
+      anexo: null,
+      nomeAlvo: null,
+      relogio: "--:--:--",
+      segundos: 4271,
+      salas: [
+        { id: 1, nome: "PONTE", limite: 8, pessoas: ["rafa", "juli", "vitor"] },
+        { id: 2, nome: "OFICINA", limite: 6, pessoas: ["dani"] },
+        { id: 3, nome: "SILÊNCIO", limite: 4, pessoas: [] },
+      ],
+      canais: [
+        { id: 1, nome: "geral" },
+        { id: 2, nome: "obras" },
+        { id: 3, nome: "links" },
+        { id: 4, nome: "ruído" },
+      ],
+      mensagens: [
+        { id: 1, autor: "juli", hora: "20:14:02", corpo: "subi o seeled aqui de casa, a porta 8383 tá aberta no roteador" },
+        { id: 2, autor: "vitor", hora: "20:14:40", corpo: "UDP? levei meia hora pra descobrir que a regra que eu tinha escrito era TCP" },
+        { id: 3, autor: "rafa", hora: "20:15:11", corpo: "UDP. tá escrito no README, duas linhas depois do comando", propria: true },
+        { id: 4, autor: "juli", hora: "20:16:03", corpo: "o furo de NAT funcionou daqui pro celular do vitor, o encontro só apresentou os dois e esqueceu" },
+        { id: 5, autor: "dani", hora: "20:17:29", corpo: "entrei na oficina, alguém vem?" },
+      ],
+      pessoasSinal: { rafa: 96, juli: 88, vitor: 71, dani: 54 },
+      falando: "juli",
+    }, salvo || {});
+  }
+
+  aoFim() {
+    const el = this.log.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }
+
+  componentDidUpdate() { if (this.rolar) { this.rolar = false; this.preso = true; this.aoFim(); } this.observar(); }
+
+  observar() {
+    const el = this.log.current;
+    if (!el || this.observado === el) return;
+    if (this.obs) this.obs.disconnect();
+    this.observado = el;
+    this.obs = new ResizeObserver(() => { if (this.preso) el.scrollTop = el.scrollHeight; });
+    this.obs.observe(el);
+    for (const filho of el.children) this.obs.observe(filho);
+    el.scrollTop = el.scrollHeight;
+  }
+
+  componentDidMount() {
+    this.preso = true;
+    this.observar();
+    this.tick = setInterval(() => {
+      const d = new Date();
+      const p = (n) => String(n).padStart(2, "0");
+      this.setState((s) => ({ relogio: p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds()), segundos: s.segundos + 1 }));
+    }, 1000);
+  }
+
+  componentWillUnmount() { clearInterval(this.tick); if (this.obs) this.obs.disconnect(); }
+
+  guardar(patch) {
+    this.setState(patch, () => {
+      const s = this.state;
+      try {
+        localStorage.setItem(CHAVE, JSON.stringify({
+          tela: s.tela, vista: s.vista, modoVoz: s.modoVoz, secao: s.secao, mudo: s.mudo, surdo: s.surdo,
+          salaAtual: s.salaAtual, canalAtual: s.canalAtual,
+          salas: s.salas, canais: s.canais, mensagens: s.mensagens,
+        }));
+      } catch (e) {}
+    });
+  }
+
+  duracao() {
+    const s = this.state.segundos;
+    const p = (n) => String(n).padStart(2, "0");
+    return p(Math.floor(s / 3600)) + ":" + p(Math.floor((s % 3600) / 60)) + ":" + p(s % 60);
+  }
+
+  enviar() {
+    const el = this.campo.current;
+    const texto = el ? el.value.trim() : "";
+    const anexo = this.state.anexo;
+    if (!texto && !anexo) return;
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, "0");
+    const msg = {
+      id: Date.now(),
+      autor: "rafa",
+      propria: true,
+      hora: p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds()),
+      corpo: texto,
+      imagem: anexo ? anexo.url : null,
+      imagemNome: anexo ? anexo.nome : null,
+      imagemTamanho: anexo ? anexo.tamanho : null,
+    };
+    if (el) el.value = "";
+    this.rolar = true;
+    this.guardar((s) => ({ mensagens: s.mensagens.concat([msg]).slice(-40), anexo: null }));
+  }
+
+  aoColar(ev) {
+    const itens = (ev.clipboardData && ev.clipboardData.items) || [];
+    for (const item of itens) {
+      if (item.type && item.type.indexOf("image/") === 0) {
+        ev.preventDefault();
+        const arquivo = item.getAsFile();
+        if (!arquivo) return;
+        const leitor = new FileReader();
+        leitor.onload = () => this.setState({
+          anexo: {
+            url: leitor.result,
+            nome: arquivo.name || "colado-da-área-de-transferência.png",
+            tamanho: (arquivo.size / 1024).toFixed(0) + " KiB",
+          },
+        });
+        leitor.readAsDataURL(arquivo);
+        return;
+      }
+    }
+  }
+
+  exemploColado() {
+    const c = document.createElement("canvas");
+    c.width = 320; c.height = 180;
+    const g = c.getContext("2d");
+    g.fillStyle = "#0A0806"; g.fillRect(0, 0, 320, 180);
+    g.strokeStyle = "#F2521F"; g.lineWidth = 2; g.strokeRect(12, 12, 296, 156);
+    g.fillStyle = "#EAE3CF"; g.font = "600 15px monospace";
+    g.fillText("captura-da-tela.png", 32, 96);
+    this.setState({ anexo: { url: c.toDataURL(), nome: "captura-da-tela.png", tamanho: "84 KiB" } });
+  }
+
+  abrirNome(alvo) {
+    this.setState({ modal: "nome", nomeAlvo: alvo }, () => {
+      const el = this.campoNome.current;
+      if (el) { el.value = alvo.valor || ""; el.focus(); el.select(); }
+    });
+  }
+
+  confirmarNome() {
+    const el = this.campoNome.current;
+    const valor = el ? el.value.trim() : "";
+    const alvo = this.state.nomeAlvo;
+    if (!valor || !alvo) { this.setState({ modal: null, nomeAlvo: null }); return; }
+    if (alvo.tipo === "renomear") {
+      this.guardar((s) => ({ salas: s.salas.map((x) => (x.id === alvo.id ? Object.assign({}, x, { nome: valor.toUpperCase() }) : x)), modal: null, nomeAlvo: null }));
+    } else if (alvo.tipo === "nova-sala") {
+      this.guardar((s) => ({ salas: s.salas.concat([{ id: Date.now(), nome: valor.toUpperCase(), limite: 8, pessoas: [] }]), modal: null, nomeAlvo: null }));
+    } else {
+      this.guardar((s) => ({ canais: s.canais.concat([{ id: Date.now(), nome: valor.toLowerCase() }]), modal: null, nomeAlvo: null }));
+    }
+  }
+
+  icone(nome) {
+    const formas = GLIFOS[nome] || GLIFOS.chave;
+    return React.createElement(
+      "svg",
+      { className: "glifo", viewBox: "0 0 16 16", "aria-hidden": "true" },
+      formas.map(([tag, attrs], i) => React.createElement(tag, Object.assign({ key: i }, attrs)))
+    );
+  }
+
+  renderVals() {
+    const s = this.state;
+    const salaAtual = s.salas.find((x) => x.id === s.salaAtual) || null;
+    const canalAberto = s.canais.find((x) => x.id === s.canalAtual);
+
+    const btnIcone = "width:34px;height:34px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;cursor:pointer;border:1px solid ";
+    const estiloMic = s.mudo
+      ? btnIcone + "var(--seele-vermelho-alerta);color:var(--seele-negro-absoluto);background:var(--seele-vermelho-alerta)"
+      : btnIcone + "var(--seele-laranja-nerv);color:var(--seele-laranja-nerv);background:none";
+    const estiloSurdo = s.surdo
+      ? btnIcone + "var(--seele-osso);color:var(--seele-negro-absoluto);background:var(--seele-osso)"
+      : btnIcone + "var(--seele-linha-forte);color:var(--seele-osso-apagado);background:none";
+
+    const salas = s.salas.map((sala) => {
+      const dentro = sala.id === s.salaAtual;
+      return {
+        nome: sala.nome,
+        ocupacao: sala.pessoas.length + "/" + sala.limite,
+        dentro,
+        fora: !dentro,
+        rotuloRenomear: "Renomear " + sala.nome,
+        rotuloApagar: "Apagar " + sala.nome,
+        estiloItem: "display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--seele-linha);padding:10px 12px;border-left:3px solid " + (dentro ? "var(--seele-laranja-nerv);background:var(--seele-laranja-fraco)" : "transparent"),
+        estiloNome: "font:inherit;background:none;border:0;padding:0;cursor:pointer;text-align:left;min-width:0;font-family:var(--seele-display);font-weight:700;font-size:15px;letter-spacing:0.06em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:" + (dentro ? "var(--seele-laranja-nerv)" : "var(--seele-osso)"),
+        pessoas: sala.pessoas.length
+          ? sala.pessoas.map((n) => ({ nome: n, eu: n === "rafa" ? "(você)" : "", estiloEu: "flex:0 0 auto;color:var(--seele-padrao-azul)" }))
+          : [{ nome: "ninguém aqui", eu: "", estiloEu: "display:none" }],
+        entrar: () => this.guardar((st) => ({
+          salaAtual: sala.id,
+          salas: st.salas.map((x) => x.id === sala.id
+            ? Object.assign({}, x, { pessoas: x.pessoas.indexOf("rafa") < 0 ? x.pessoas.concat(["rafa"]) : x.pessoas })
+            : Object.assign({}, x, { pessoas: x.pessoas.filter((p) => p !== "rafa") })),
+        })),
+        sair: () => this.guardar((st) => ({
+          salaAtual: null,
+          salas: st.salas.map((x) => Object.assign({}, x, { pessoas: x.pessoas.filter((p) => p !== "rafa") })),
+        })),
+        renomear: () => this.abrirNome({ tipo: "renomear", id: sala.id, valor: sala.nome }),
+      };
+    });
+
+    const canais = s.canais.map((c) => {
+      const aberto = c.id === s.canalAtual;
+      return {
+        nome: c.nome,
+        abrir: () => this.guardar({ canalAtual: c.id }),
+        estilo: "width:100%;min-height:38px;display:flex;align-items:center;gap:8px;padding:0 12px;font:inherit;font-size:13px;text-align:left;cursor:pointer;border:0;border-left:3px solid " + (aberto ? "var(--seele-laranja-nerv)" : "transparent") + ";background:" + (aberto ? "var(--seele-linha)" : "none") + ";color:" + (aberto ? "var(--seele-osso)" : "var(--seele-osso-apagado)"),
+        estiloCerquilha: "flex:0 0 auto;color:" + (aberto ? "var(--seele-laranja-nerv)" : "var(--seele-linha-forte)"),
+      };
+    });
+
+    const mensagens = s.mensagens.map((m) => ({
+      autor: m.autor,
+      hora: m.hora,
+      corpo: m.corpo,
+      inicial: m.autor.slice(0, 2).toUpperCase(),
+      temImagem: !!m.imagem,
+      imagem: m.imagem,
+      imagemNome: m.imagemNome,
+      imagemTamanho: m.imagemTamanho,
+      estiloImagem: m.imagem ? "display:block;width:100%;height:220px;background-image:url(" + m.imagem + ");background-repeat:no-repeat;background-position:left top;background-size:contain;border:1px solid var(--seele-linha);background-color:var(--seele-negro-absoluto)" : "display:none",
+      estiloAvatar: "width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-family:var(--seele-display);font-weight:900;font-size:14px;border:1px solid " + (m.propria ? "var(--seele-padrao-azul);color:var(--seele-padrao-azul)" : "var(--seele-linha-forte);color:var(--seele-osso-apagado)"),
+      estiloAutor: "font-size:13px;letter-spacing:0.04em;color:" + (m.propria ? "var(--seele-padrao-azul)" : "var(--seele-osso-apagado)"),
+    }));
+
+    const grupos = s.salas.filter((x) => x.pessoas.length).map((sala) => ({
+      nome: sala.nome,
+      conta: sala.pessoas.length + " " + (sala.pessoas.length === 1 ? "pessoa" : "pessoas"),
+      aqui: sala.id === s.salaAtual ? "você está aqui" : "",
+      estiloAqui: "margin-left:auto;flex:0 0 auto;letter-spacing:0.1em;text-transform:lowercase",
+      estiloSala: "margin:0;position:sticky;top:0;z-index:1;display:flex;align-items:baseline;gap:8px;padding:8px 14px;background:var(--seele-negro-painel);border-bottom:1px solid var(--seele-linha);font-family:var(--seele-mono);font-size:9px;font-weight:normal;letter-spacing:0.16em;color:" + (sala.id === s.salaAtual ? "var(--seele-laranja-nerv);border-left:2px solid var(--seele-laranja-nerv)" : "var(--seele-rotulo-painel)"),
+      pessoas: sala.pessoas.map((n) => {
+        const v = s.pessoasSinal[n] != null ? s.pessoasSinal[n] : 80;
+        const cor = corFaixa(v);
+        const falando = n === s.falando;
+        const estado = n === "rafa" && s.mudo ? "MUDO" : falando ? "TRANSMITINDO" : "EM ESCUTA";
+        const fundo = estado === "MUDO" ? "var(--seele-laranja-nerv)" : estado === "TRANSMITINDO" ? "var(--seele-fosforo)" : "none";
+        return {
+          nome: n,
+          sinal: String(v),
+          marca: marcaSync(v),
+          barra: blocos(v, 20),
+          estado,
+          estiloItem: "border-bottom:1px solid var(--seele-linha);padding:10px 14px;display:flex;flex-direction:column;gap:6px;border-left:2px solid " + (falando ? "var(--seele-fosforo);background:var(--seele-fosforo-fraco)" : "transparent"),
+          estiloSync: "display:flex;align-items:baseline;gap:6px;flex:0 0 auto;color:" + cor,
+          estiloBarra: "display:block;font-size:11px;letter-spacing:0.02em;line-height:16px;white-space:nowrap;overflow:hidden;color:" + cor,
+          estiloPastilha: fundo === "none"
+            ? "padding:2px 6px;font-weight:600;white-space:nowrap;color:var(--seele-osso-apagado)"
+            : "padding:2px 6px;font-weight:600;white-space:nowrap;color:var(--seele-negro-absoluto);background:" + fundo,
+        };
+      }),
+    }));
+
+    const cartoes = (salaAtual ? salaAtual.pessoas : []).map((n) => {
+      const v = s.pessoasSinal[n] != null ? s.pessoasSinal[n] : 80;
+      const cor = corFaixa(v);
+      const falando = n === s.falando;
+      const estado = n === "rafa" && s.mudo ? "MUDO" : falando ? "FALANDO" : "EM ESCUTA";
+      return {
+        nome: n,
+        inicial: n.slice(0, 2).toUpperCase(),
+        sinal: String(v),
+        marca: marcaSync(v),
+        barra: blocos(v, 20),
+        estado,
+        estiloCartao: "display:flex;flex-direction:column;justify-content:space-between;gap:16px;padding:16px;min-width:0;border-right:1px solid var(--seele-linha);border-bottom:1px solid var(--seele-linha)" + (falando ? ";background:var(--seele-laranja-carga);box-shadow:inset 0 0 0 2px var(--seele-laranja-nerv)" : ""),
+        estiloAvatar: "display:flex;align-items:center;justify-content:center;width:40px;height:40px;flex:0 0 auto;font-family:var(--seele-display);font-weight:900;font-size:18px;letter-spacing:0.02em;border:1px solid " + (falando ? "var(--seele-laranja-nerv);color:var(--seele-laranja-nerv)" : "var(--seele-linha-forte);color:var(--seele-osso-apagado)"),
+        estiloNome: "font-family:var(--seele-display);font-weight:700;font-size:20px;letter-spacing:0.04em;line-height:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:" + (falando ? "var(--seele-laranja-nerv)" : "var(--seele-osso)"),
+        estiloPastilha: "padding:3px 8px;font-size:9px;letter-spacing:0.1em;white-space:nowrap;border:1px solid " + (falando ? "var(--seele-laranja-nerv);background:var(--seele-laranja-nerv);color:var(--seele-negro-absoluto)" : "var(--seele-linha-forte);color:var(--seele-osso-apagado)"),
+        estiloNumero: "display:flex;align-items:baseline;gap:6px;color:" + cor,
+        estiloBarra: "font-size:11px;letter-spacing:0.02em;white-space:nowrap;overflow:hidden;color:" + cor,
+      };
+    });
+
+    const estiloSec = (id) => "width:100%;min-height:52px;padding:8px 16px;display:flex;align-items:center;gap:14px;font:inherit;text-align:left;background:" + (s.secao === id ? "var(--seele-laranja-fraco)" : "none") + ";color:" + (s.secao === id ? "var(--seele-laranja-nerv)" : "var(--seele-osso)") + ";border:none;border-bottom:1px solid var(--seele-linha);border-left:2px solid " + (s.secao === id ? "var(--seele-laranja-nerv)" : "transparent") + ";cursor:pointer";
+    const iconeSec = (id) => "flex-shrink:0;font-size:16px;line-height:1;display:inline-flex;color:" + (s.secao === id ? "var(--seele-laranja-nerv)" : "var(--seele-osso-apagado)");
+
+    const estiloModo = (id) => "flex:1;min-width:168px;min-height:56px;padding:8px 16px;display:flex;flex-direction:column;justify-content:center;gap:2px;font:inherit;text-align:left;cursor:pointer;" + (s.modoVoz === id ? "color:var(--seele-laranja-nerv);background:var(--seele-laranja-fraco);border:1px solid var(--seele-laranja-nerv)" : "color:var(--seele-osso);background:none;border:1px solid var(--seele-linha-forte)");
+    const descModo = (id) => "font-size:9px;line-height:1.35;color:" + (s.modoVoz === id ? "var(--seele-laranja-nerv)" : "var(--seele-osso-apagado)");
+
+    const acaoBase = "display:flex;align-items:center;gap:8px;min-width:0;padding:8px 14px;font:inherit;text-align:left;border:0;border-right:1px solid var(--seele-linha);cursor:pointer;";
+
+    return {
+      servidorNome: "TÓQUIO-3",
+      servidorSub: "SERVIDOR · CONEXÃO SEGURA",
+      relogio: s.relogio,
+      emSessao: this.duracao(),
+      ehBoot: s.tela === "boot",
+      ehSessao: s.tela !== "boot",
+      vistaChamada: s.vista === "chamada",
+      vistaConversa: s.vista !== "chamada",
+      chamadaRotulo: s.vista === "chamada" ? "VER CONVERSA" : "CHAMADA",
+      estiloChamada: "flex:1;font:inherit;font-size:10px;letter-spacing:0.14em;padding:8px;cursor:pointer;border:1px solid var(--seele-laranja-nerv);" + (s.vista === "chamada" ? "color:var(--seele-negro-absoluto);background:var(--seele-laranja-nerv)" : "color:var(--seele-laranja-nerv);background:none"),
+      salaAcaoDica: salaAtual ? "sair de " + salaAtual.nome + ": você para de ouvir e de falar" : "você não está em nenhuma sala de voz",
+      estiloSairSala: "flex:1;font:inherit;font-size:10px;letter-spacing:0.14em;padding:8px;background:none;border:1px solid " + (salaAtual ? "var(--seele-linha-forte);color:var(--seele-osso-apagado);cursor:pointer" : "var(--seele-linha);color:var(--seele-linha-forte);cursor:not-allowed"),
+      alternarVista: () => this.guardar((st) => ({ vista: st.vista === "chamada" ? "conversa" : "chamada" })),
+      mostraTelemetria: s.tela !== "boot" && (this.props.mostrarTelemetria !== false),
+      salas, canais, mensagens, grupos, cartoes,
+      canalAberto: canalAberto ? canalAberto.nome : "—",
+      salaAtualNome: salaAtual ? salaAtual.nome : "——",
+      salaVazia: cartoes.length === 0,
+      salaVaziaTexto: salaAtual ? "NINGUÉM NESTA SALA" : "VOCÊ NÃO ESTÁ EM NENHUMA SALA DE VOZ",
+      pessoasConta: String(s.salas.reduce((a, x) => a + x.pessoas.length, 0)) + " EM SALAS DE VOZ",
+      falandoAgora: s.falando || "——",
+      eventos: [
+        { hora: "20:12:40", texto: "você entrou em " + (salaAtual ? salaAtual.nome : "—") },
+        { hora: "20:14:02", texto: "juli entrou na sala" },
+        { hora: "20:16:55", texto: "vitor abriu o microfone" },
+      ],
+      estiloSecPorta: estiloSec("porta"), iconePorta: iconeSec("porta"), irPorta: () => this.setState({ secao: "porta" }),
+      estiloSecAudio: estiloSec("audio"), iconeAudio: iconeSec("audio"), irAudio: () => this.setState({ secao: "audio" }),
+      estiloSecAtalhos: estiloSec("atalhos"), iconeAtalhos: iconeSec("atalhos"), irAtalhos: () => this.setState({ secao: "atalhos" }),
+      estiloSecAparencia: estiloSec("aparencia"), iconeAparencia: iconeSec("aparencia"), irAparencia: () => this.setState({ secao: "aparencia" }),
+      estiloSecIdentidade: estiloSec("identidade"), iconeIdentidade: iconeSec("identidade"), irIdentidade: () => this.setState({ secao: "identidade" }),
+      secaoNome: (SECOES.find((x) => x.id === s.secao) || SECOES[0]).nome,
+      secaoEhPorta: s.secao === "porta",
+      secaoEhAudio: s.secao === "audio",
+      secaoEhAtalhos: s.secao === "atalhos",
+      secaoEhAparencia: s.secao === "aparencia",
+      secaoEhIdentidade: s.secao === "identidade",
+      estiloModoTecla: estiloModo("tecla"), estiloModoDescTecla: descModo("tecla"), modoTecla: () => this.guardar({ modoVoz: "tecla" }),
+      estiloModoVoz: estiloModo("voz"), estiloModoDescVoz: descModo("voz"), modoVoz: () => this.guardar({ modoVoz: "voz" }),
+      estiloModoAberto: estiloModo("aberto"), estiloModoDescAberto: descModo("aberto"), modoAberto: () => this.guardar({ modoVoz: "aberto" }),
+      atalhos: [
+        { acao: "Falar", desc: "enquanto a tecla estiver apertada", tecla: "ESPAÇO" },
+        { acao: "Enviar a mensagem", desc: "o campo não tem botão de enviar", tecla: "ENTER" },
+        { acao: "Colar uma imagem", desc: "cai na prévia acima do campo", tecla: "CTRL+V" },
+        { acao: "Buscar no canal", desc: "abre a barra de busca", tecla: "/" },
+        { acao: "Fechar o que está por cima", desc: "modal, prévia ou busca", tecla: "ESC" },
+      ],
+      micRotulo: s.mudo ? "Microfone mudo — clique para abrir" : "Microfone aberto — clique para silenciar",
+      surdoRotulo: s.surdo ? "Você não está ouvindo — clique para voltar a ouvir" : "Ouvindo — clique para não ouvir ninguém",
+      vozEstado: (s.mudo ? "microfone mudo" : "microfone aberto") + " · " + (s.surdo ? "não está ouvindo" : "ouvindo"),
+      estiloMic, estiloSurdo,
+      falarRotulo: s.modoVoz === "tecla" ? "SEGURE ESPAÇO" : s.modoVoz === "voz" ? "ABRE QUANDO VOCÊ FALA" : "MICROFONE SEMPRE ABERTO",
+      estiloFalar: "font:inherit;font-size:10px;letter-spacing:0.14em;padding:10px;cursor:pointer;text-align:left;width:100%;border:1px solid var(--seele-linha-forte);background:none;color:var(--seele-osso-apagado)",
+      micTitulo: s.mudo ? "MICROFONE DESLIGADO" : "MICROFONE LIGADO",
+      micNota: s.mudo ? "clique para voltar a falar" : "clique para silenciar você",
+      surdoTitulo: s.surdo ? "SOM DESLIGADO" : "SOM LIGADO",
+      surdoNota: s.surdo ? "clique para voltar a ouvir" : "clique para não ouvir ninguém",
+      estiloAcaoMic: acaoBase + (s.mudo ? "background:var(--seele-laranja-nerv);color:var(--seele-negro-absoluto)" : "background:none;color:var(--seele-osso)"),
+      estiloAcaoSurdo: acaoBase + (s.surdo ? "background:var(--seele-osso);color:var(--seele-negro-absoluto)" : "background:none;color:var(--seele-osso)"),
+      temAnexo: !!s.anexo,
+      anexoUrl: s.anexo ? s.anexo.url : "",
+      anexoNome: s.anexo ? s.anexo.nome : "",
+      anexoTamanho: s.anexo ? s.anexo.tamanho : "",
+      estiloAnexoPrevia: "width:72px;height:72px;flex:0 0 auto;border:1px solid var(--seele-linha-forte);background-color:var(--seele-negro-absoluto);background-repeat:no-repeat;background-position:center;background-size:cover" + (s.anexo ? ";background-image:url(" + s.anexo.url + ")" : ""),
+      modalPorta: s.modal === "porta",
+      modalConfig: s.modal === "config",
+      modalNome: s.modal === "nome",
+      nomeTitulo: s.nomeAlvo ? (s.nomeAlvo.tipo === "renomear" ? "RENOMEAR A SALA" : s.nomeAlvo.tipo === "nova-sala" ? "NOVA SALA DE VOZ" : "NOVO CANAL") : "",
+      nomeRotulo: s.nomeAlvo && s.nomeAlvo.tipo === "novo-canal" ? "NOME DO CANAL" : "NOME DA SALA",
+      nomePlaceholder: s.nomeAlvo && s.nomeAlvo.tipo === "novo-canal" ? "nome do canal" : "nome da sala",
+      nomeAcao: s.nomeAlvo && s.nomeAlvo.tipo === "renomear" ? "RENOMEAR" : "CRIAR",
+      copiarRotulo: s.copiado ? "COPIADO" : "COPIAR",
+      estiloCopiar: "flex:0 0 auto;font:inherit;font-size:11px;letter-spacing:0.1em;padding:6px 12px;cursor:pointer;background:none;border:1px solid currentColor;color:" + (s.copiado ? "var(--seele-fosforo)" : "var(--seele-laranja-nerv)"),
+      log: this.log,
+      aoRolar: (ev) => {
+        const el = ev.currentTarget;
+        this.preso = el.scrollHeight - el.clientHeight - el.scrollTop <= 8;
+      },
+      campo: this.campo,
+      campoNome: this.campoNome,
+      entrar: () => this.guardar({ tela: "sessao" }),
+      hospedar: () => this.guardar({ tela: "sessao", modal: "porta" }),
+      desconectar: () => this.guardar({ tela: "boot", modal: null }),
+      irChamada: () => this.guardar({ tela: "chamada" }),
+      irSessao: () => this.guardar({ tela: "sessao" }),
+      sairDaSala: () => this.guardar((st) => ({
+        tela: "sessao", salaAtual: null,
+        salas: st.salas.map((x) => Object.assign({}, x, { pessoas: x.pessoas.filter((p) => p !== "rafa") })),
+      })),
+      alternarMudo: () => this.guardar((st) => ({ mudo: !st.mudo })),
+      alternarSurdo: () => this.guardar((st) => ({ surdo: !st.surdo })),
+      abrirConfig: () => this.setState({ modal: "config" }),
+      abrirConfigPorta: () => this.setState({ modal: "config", secao: "porta" }),
+      fecharModal: () => this.setState({ modal: null, nomeAlvo: null }),
+      abrirNovaSala: () => this.abrirNome({ tipo: "nova-sala", valor: "" }),
+      abrirNovoCanal: () => this.abrirNome({ tipo: "novo-canal", valor: "" }),
+      confirmarNome: () => this.confirmarNome(),
+      aoTeclarNome: (ev) => { if (ev.key === "Enter") { ev.preventDefault(); this.confirmarNome(); } if (ev.key === "Escape") this.setState({ modal: null, nomeAlvo: null }); },
+      aoTeclar: (ev) => {
+        if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); this.enviar(); }
+        if (ev.key === "Escape" && this.state.anexo) { ev.preventDefault(); this.setState({ anexo: null }); }
+      },
+      aoColar: (ev) => this.aoColar(ev),
+      colarExemplo: () => this.exemploColado(),
+      tirarAnexo: () => this.setState({ anexo: null }),
+      copiar: () => { this.setState({ copiado: true }); setTimeout(() => this.setState({ copiado: false }), 1600); },
+    };
+  }
+}
+
+</script>
+</body>
+</html>
