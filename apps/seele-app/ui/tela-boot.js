@@ -74,8 +74,14 @@ let ultimoApelido = null;
  * Uma bandeira e não um argumento de `conectar`: quem chama `conectar` de fora
  * — reconectar, trocar de servidor, um link de convite — está sempre indo a um
  * servidor que não é este, e não deveria precisar dizer isso.
+ *
+ * O nome é longo de propósito. Ele se chamava `hospedandoAqui`, que é o nome de
+ * uma **função** que `tela-sessao.js` já tinha — e os catorze scripts desta
+ * janela dividem um escopo global só. Um `let` colidindo com uma `function` de
+ * outro arquivo não é um aviso: é `SyntaxError` no arquivo inteiro, que deixa
+ * de carregar e leva junto tudo o que declarava.
  */
-let hospedandoAqui = false;
+let subindoServidorAqui = false;
 
 async function conectar(alvo, apelido, token) {
   ultimoAlvo = alvo ?? ultimoAlvo;
@@ -97,8 +103,8 @@ async function conectar(alvo, apelido, token) {
   // conferência de identidade que é a razão de a `#tela-auth` existir. Uma
   // tentativa de hospedar que dá errado não pode virar permissão para a
   // seguinte.
-  const nossoServidor = hospedandoAqui;
-  hospedandoAqui = false;
+  const nossoServidor = subindoServidorAqui;
+  subindoServidorAqui = false;
   // **Os valores chegam por argumento desde a 0.9.0.**
   //
   // Eles vinham de dois campos desta tela, e a comp tirou os dois: o endereço
@@ -274,8 +280,8 @@ async function hospedar() {
     // alvo da conexão que vem em seguida, e é o que `conectar()` sem argumento
     // vai usar.
     ultimoAlvo = anfitriao.aqui;
-    // E entrar aqui não pede para conferir a própria chave — ver `hospedandoAqui`.
-    hospedandoAqui = true;
+    // E entrar aqui não pede para conferir a própria chave — ver `subindoServidorAqui`.
+    subindoServidorAqui = true;
     mostrarAlcance(
       anfitriao.alcance,
       anfitriao.porta_recusada,
@@ -311,8 +317,12 @@ async function hospedar() {
 
 $("botao-hospedar").addEventListener("click", hospedar);
 
-// A tela de entrada é a primeira coisa que aparece, e a lista faz parte dela.
-desenharVisitados().catch((falha) => console.warn("conhecidos:", falha));
+// **Aqui havia um `desenharVisitados()` de um `desenharVisitados` que não
+// existe mais**, e ele foi o defeito mais caro desta leva: uma chamada solta no
+// topo de um script comum estoura na carga, e tudo depois dela deixa de ser
+// registrado — inclusive o `click` do `CONECTAR`, que fica na tela e não
+// responde a nada. A lista de visitados é do diálogo `ONDE VOCÊ JÁ ESTEVE`
+// agora, e ele a desenha quando abre.
 
 // ------------------------------------------------- o microfone, antes de entrar
 //

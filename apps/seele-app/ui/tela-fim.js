@@ -140,9 +140,10 @@ async function sairParaAEntrada() {
   $("tela-fim").hidden = true;
   $("tela-boot").hidden = false;
   esvaziarBarraDoServidor();
-  limparConvite();
-  // Depois do redesenho, porque a lista de visitados acabou de mudar de
-  // tamanho e o campo de endereço é o alvo desta tela.
+  // **Nada a limpar.** O token do convite não sobrevive a lugar nenhum desde a
+  // 0.9.0: ele viaja como argumento de `conectar`, dentro da mesma chamada em
+  // que é lido, e não há campo nem variável que o guarde entre uma conexão e a
+  // seguinte. Havia um `limparConvite()` aqui, e ele não existia mais.
   abrirTela("tela-boot");
 }
 
@@ -162,8 +163,14 @@ async function limparSessaoEncerrada() {
   desenhado = null;
   linhaAberta = null;
   await encerrarBusca();
-  subsistemas("", "·");
-  await desenharVisitados();
+  // **Nada a apagar.** Os três blocos do boot eram do formulário da entrada
+  // antiga, que os acendia conforme a conexão subia; a entrada da 0.9.0 tem uma
+  // leitura fixa, que é o que o produto é e não o que ele está fazendo. Havia um
+  // `subsistemas("", "·")` aqui, e ele não existia mais.
+  // **Nada a redesenhar.** A lista de visitados virou o diálogo `ONDE VOCÊ JÁ
+  // ESTEVE`, que a desenha quando abre — então ela já nasce em dia, e não há
+  // como ficar velha enquanto está fechada. Havia um `desenharVisitados()`
+  // aqui, e ele não existia mais.
 }
 
 // ------------------------------------------------------------------- ligação

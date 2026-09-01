@@ -2389,7 +2389,7 @@ async function pedirAEntrada() {
     "CONECTAR A OUTRO SERVIDOR",
     consequenciaDeIrParaAEntrada(daqui, hospedando),
     `SAIR DE ${daqui}`,
-    sairParaAEntrada,
+    sairDoServidorParaAEntrada,
   );
 }
 
@@ -2440,13 +2440,21 @@ async function trocarDeServidor(alvo, apelido) {
  * caminhos voltam à mesma tela, e quem quer outro servidor abre o diálogo de
  * conhecidos — onde escolher outro é apertar uma linha, e não apagar um
  * endereço que alguém deixou ali.
+ *
+ * **O nome era `sairParaAEntrada`, e `tela-fim.js` tem uma função homônima.**
+ * Os catorze scripts desta janela dividem um escopo global só, e duas
+ * `function` de mesmo nome em arquivos diferentes não são erro nenhum para o
+ * navegador: a que carrega depois vence, calada. `tela-fim.js` carrega depois,
+ * então esta aqui estava **morta**, e quem rodava no lugar dela era a de fechar
+ * o cartão de sessão encerrada — que não esconde `#tela-sessao` nem passa por
+ * `ejetar`. Quem apertasse o `+` numa sessão viva saía sem sair.
  */
-async function sairParaAEntrada() {
+async function sairDoServidorParaAEntrada() {
   await ejetar();
-  // Pelo mesmo motivo de `trocarDeServidor`, e aqui é ainda mais claro: quem
-  // apertou «conectar a outro servidor» já disse que não é aquele, e o token
-  // daquele não tem o que fazer no formulário do próximo.
-  limparConvite();
+  // **Nada a limpar.** O token do convite não sobrevive a lugar nenhum desde a
+  // 0.9.0: ele viaja como argumento de `conectar`, dentro da mesma chamada em
+  // que é lido, e não há campo nem variável que o guarde entre uma conexão e a
+  // seguinte. Havia um `limparConvite()` aqui, e ele não existia mais.
 }
 
 /** Ejeta e volta para a tela de entrada, sem fechar o programa. */
@@ -2455,6 +2463,7 @@ async function ejetar() {
   $("tela-sessao").hidden = true;
   $("tela-fim").hidden = true;
   $("tela-boot").hidden = false;
+  esvaziarBarraDoServidor();
   esquecerOLinkDaPorta();
   $("bateria").hidden = true;
   // A moderação pela mesma razão que a bateria: aberta, ela voltaria por cima
@@ -2482,14 +2491,18 @@ async function ejetar() {
   // Fecha a barra, e não só zera o termo: aberta, ela abriria a próxima sessão
   // já com o cursor num campo de busca sobre uma conversa que não existe.
   await alternarBusca(false);
-  // O convite não sobrevive à sessão que ele abriu: quem sai, digita outro
-  // endereço e aperta INSERT mandaria o token do servidor anterior ao novo.
-  limparConvite();
-  // E os três blocos do boot voltam a apagar. Deixá-los acesos seria a tela de
-  // entrada afirmando uma conexão que acabou de ser desfeita.
-  subsistemas("", "·");
-  // Quem acabou de sair de um servidor tem que vê-lo na lista.
-  await desenharVisitados();
+  // **Nada a limpar.** O token do convite não sobrevive a lugar nenhum desde a
+  // 0.9.0: ele viaja como argumento de `conectar`, dentro da mesma chamada em
+  // que é lido, e não há campo nem variável que o guarde entre uma conexão e a
+  // seguinte. Havia um `limparConvite()` aqui, e ele não existia mais.
+  // **Nada a apagar.** Os três blocos do boot eram do formulário da entrada
+  // antiga, que os acendia conforme a conexão subia; a entrada da 0.9.0 tem uma
+  // leitura fixa, que é o que o produto é e não o que ele está fazendo. Havia um
+  // `subsistemas("", "·")` aqui, e ele não existia mais.
+  // **Nada a redesenhar.** A lista de visitados virou o diálogo `ONDE VOCÊ JÁ
+  // ESTEVE`, que a desenha quando abre — então ela já nasce em dia, e não há
+  // como ficar velha enquanto está fechada. Havia um `desenharVisitados()`
+  // aqui, e ele não existia mais.
   // E o teclado sai junto. Sem isto o foco fica no `<body>`: quem apertou
   // DESCONECTAR com a tecla volta para a entrada tendo de tabular a tela toda
   // até o campo de endereço, que é a única coisa que se faz nela.

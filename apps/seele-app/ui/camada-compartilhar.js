@@ -475,7 +475,19 @@ $("compartilhar-comecar").addEventListener("click", async () => {
       await invoke("ajustar_limites_da_tela", { limites });
     }
     if (comecando) {
-      registrarEventoDaChamada("você começou a compartilhar a sua tela", "anotacao");
+      // **Aqui havia um `registrarEventoDaChamada`, e ele não existe mais.**
+      //
+      // O registro de eventos era da tela de chamada, que a comp da 0.9.0
+      // dissolve; a função saiu com ela e estas duas chamadas ficaram. Elas
+      // estouravam um `ReferenceError` **depois** de o `compartilhar_tela` do
+      // Rust ter dado certo — então a transmissão começava, o `catch` logo
+      // abaixo engolia o erro, e as duas linhas seguintes nunca rodavam: o
+      // diálogo não fechava e a chamada não abria.
+      //
+      // Para quem estava usando, isso é «o compartilhamento não funciona», com
+      // um `{}` escrito na caixa — porque `JSON.stringify` de um
+      // `ReferenceError` é o objeto vazio. Foi o relato de campo da 0.9.0.
+      //
       // Começou: esta caixa some e a chamada entra.
       //
       // Quem acabou de escolher uma tela quer **ver** o que está saindo, e
@@ -500,7 +512,7 @@ $("compartilhar-parar").addEventListener("click", async () => {
   erroDeTela = null;
   try {
     await invoke("parar_de_compartilhar");
-    registrarEventoDaChamada("você parou de compartilhar a tela", "anotacao");
+    // Sem registro de eventos aqui também — ver a nota em `compartilhar-comecar`.
   } catch (falha) {
     mostrarErroDeTela(falha);
   }

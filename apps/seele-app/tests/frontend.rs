@@ -2709,7 +2709,10 @@ fn the_add_server_button_carries_one_verb_and_not_the_two_the_v2_conflated() {
     // And the act behind it goes to the entrance and stops there. A `connect`
     // in here would be the `+` choosing a server for somebody who pressed it to
     // choose one.
-    let sai = js_function(&sessao, "async function sairParaAEntrada(");
+    // Pelo nome que só esta tela usa: `tela-fim.js` tem um `sairParaAEntrada`
+    // que carrega depois e vencia este silenciosamente, o que fazia este guarda
+    // conferir uma função que não rodava.
+    let sai = js_function(&sessao, "async function sairDoServidorParaAEntrada(");
     assert!(
         sai.contains("ejetar("),
         "the `+` reaches the entrance without ending the session, and this \
@@ -8650,7 +8653,7 @@ fn the_flag_that_skips_the_key_check_is_cleared_before_the_attempt_and_not_after
     let boot = read("ui/tela-boot.js");
     let conectar = js_function(&boot, "async function conectar(");
 
-    let Some((antes, depois)) = conectar.split_once("hospedandoAqui = false;") else {
+    let Some((antes, depois)) = conectar.split_once("subindoServidorAqui = false;") else {
         panic!("`conectar` nunca apaga a bandeira de hospedagem: {conectar}");
     };
     assert!(
@@ -8666,7 +8669,7 @@ fn the_flag_that_skips_the_key_check_is_cleared_before_the_attempt_and_not_after
 
     // E quem a liga é só o hospedar. Qualquer outro caminho ligando-a seria uma
     // conexão a servidor alheio dispensando a conferência.
-    let ligam = boot.matches("hospedandoAqui = true").count();
+    let ligam = boot.matches("subindoServidorAqui = true").count();
     assert_eq!(
         ligam, 1,
         "a bandeira que dispensa a conferência de chave é ligada em {ligam} \
@@ -8674,7 +8677,7 @@ fn the_flag_that_skips_the_key_check_is_cleared_before_the_attempt_and_not_after
     );
     let hospedar = js_function(&boot, "async function hospedar(");
     assert!(
-        hospedar.contains("hospedandoAqui = true"),
+        hospedar.contains("subindoServidorAqui = true"),
         "`hospedar` não liga a bandeira, então subir um servidor aqui ainda \
          pede para conferir a própria chave: {hospedar}"
     );
@@ -8711,5 +8714,422 @@ fn the_phrase_for_an_unknown_failure_reads_an_error_before_stringifying_it() {
         "o nome do erro não entra no detalhe, e ele é metade do diagnóstico: \
          `NotAllowedError` e `NotReadableError` mandam procurar coisas \
          diferentes:\n{desconhecida}"
+    );
+}
+
+/// Dois scripts não declaram o mesmo nome no topo.
+///
+/// **Este guarda existe porque a sua ausência derrubou o aplicativo inteiro em
+/// campo.** Os scripts desta janela são `<script src>` comuns, sem módulos: eles
+/// dividem **um** escopo global. Um `let` num arquivo com o mesmo nome de uma
+/// `function` de outro é `SyntaxError` — e não no ponto do conflito, mas no
+/// arquivo inteiro, que deixa de carregar e leva junto tudo o que declarava.
+///
+/// Foi o que aconteceu com um `let hospedandoAqui` de `tela-boot.js` contra a
+/// `async function hospedandoAqui()` de `tela-sessao.js`. O que a pessoa viu foi
+/// «Can't find variable: desenhar» no Mac, «Cannot access 'comecoDaSessao'
+/// before initialization» no Windows, o modal de perfil sem abrir e o botão
+/// `CONECTAR` sem responder — quatro sintomas sem relação aparente, um nome
+/// repetido. E os 154 guardas deste arquivo passaram, porque todos leem os
+/// scripts como texto e nenhum os carregava junto.
+///
+/// Duas `function` homônimas não são erro para o navegador, e por isso são
+/// piores: a que carrega depois vence, calada, e a outra vira código morto que
+/// os testes continuam conferindo. `sairParaAEntrada` estava assim, e o `+` da
+/// trilha rodava a função da tela de sessão encerrada — que não esconde a
+/// sessão. Nome repetido é acusado do mesmo jeito, seja qual for a palavra-chave.
+#[test]
+fn no_two_scripts_declare_the_same_name_at_the_top_level() {
+    let mut onde: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+
+    for nome in ui_files(".js") {
+        let texto = without_comments(&read(&format!("ui/{nome}")));
+        // Profundidade zero: só o topo do arquivo é o escopo compartilhado.
+        let mut fundura = 0i32;
+        for linha in texto.lines() {
+            let fundura_da_linha = fundura;
+            fundura += i32::try_from(linha.matches('{').count()).unwrap_or(0);
+            fundura -= i32::try_from(linha.matches('}').count()).unwrap_or(0);
+            if fundura_da_linha != 0 {
+                continue;
+            }
+            let corte = linha.trim_start_matches("async ");
+            let Some(resto) = ["function ", "let ", "const ", "class ", "var "]
+                .iter()
+                .find_map(|chave| corte.strip_prefix(chave))
+            else {
+                continue;
+            };
+            // O identificador, e a linha tem de começar pela palavra-chave: um
+            // `let` indentado está dentro de alguma coisa, e a fundura já o
+            // pegaria — isto é o cinto do suspensório.
+            if corte.len() != linha.len() && !linha.starts_with("async ") {
+                continue;
+            }
+            let fim = resto
+                .find(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '$')
+                .unwrap_or(resto.len());
+            let (identificador, _) = resto.split_at(fim);
+            if identificador.is_empty() {
+                continue;
+            }
+            let lista = onde.entry(identificador.to_owned()).or_default();
+            if !lista.contains(&nome) {
+                lista.push(nome.clone());
+            }
+        }
+    }
+
+    let repetidos: Vec<String> = onde
+        .iter()
+        .filter(|(_, arquivos)| arquivos.len() > 1)
+        .map(|(identificador, arquivos)| format!("`{identificador}` em {arquivos:?}"))
+        .collect();
+
+    assert!(
+        repetidos.is_empty(),
+        "estes nomes são declarados no topo de mais de um script, e os scripts \
+         desta janela dividem um escopo global só:\n  {}\n\nCom `let`, `const` \
+         ou `class` de um lado isto é `SyntaxError` no arquivo inteiro, que \
+         deixa de carregar. Com duas `function` é pior: o navegador aceita, a \
+         que carrega depois vence em silêncio, e a outra vira código morto. \
+         Renomeie a que for mais específica.",
+        repetidos.join("\n  ")
+    );
+}
+
+/// Ninguém chama uma função que nenhum script declara.
+///
+/// **Esta classe de defeito já entregou duas versões quebradas.** Quando uma
+/// tela sai, as funções dela saem junto — e as chamadas ficam. Ninguém reclama:
+/// o navegador só descobre o buraco quando a linha roda, e ela pode ser a linha
+/// de um caminho que ninguém percorre no dia do teste.
+///
+/// Duas custaram caro:
+///
+/// - `desenharVisitados()` sobreviveu solto no **topo** de `tela-boot.js`. Uma
+///   chamada de topo que estoura mata o resto do script: o `click` do
+///   `CONECTAR` era registrado depois dela e nunca chegou a existir. O botão
+///   ficava na tela sem responder a nada.
+/// - `registrarEventoDaChamada()` sobreviveu **uma linha depois** de o
+///   `compartilhar_tela` do Rust ter dado certo. A transmissão começava, o
+///   `ReferenceError` caía no `catch` logo abaixo, e as duas linhas seguintes —
+///   fechar a caixa e abrir a chamada — nunca rodavam. Na tela, «não funciona»,
+///   com um `{}` de detalhe, porque é isso que `JSON.stringify` de um
+///   `ReferenceError` devolve.
+///
+/// O guarda é grosseiro de propósito: ele não sabe escopo, então aceita como
+/// declarado qualquer nome que apareça como declaração, parâmetro ou
+/// desestruturação em **qualquer** script. Um falso negativo é o preço; o que
+/// ele nunca deixa passar é um nome que não existe em lugar nenhum.
+#[test]
+fn no_script_calls_a_function_that_no_script_declares() {
+    /// Fora comentários e o conteúdo de literais de texto: um `foo(` dentro de
+    /// uma frase não é uma chamada, e era de onde vinha todo o falso positivo.
+    fn sem_texto(bruto: &str) -> String {
+        let sem_comentario = without_comments(bruto);
+        let mut saida = String::with_capacity(sem_comentario.len());
+        let mut aspas: Option<char> = None;
+        let mut escapando = false;
+        // O último caractere que não era espaço, para saber se uma `/` abre uma
+        // expressão regular ou é divisão: depois de um valor ela divide, depois
+        // de um operador ou de um abre-parêntese ela abre. Sem isto, o `Key(` de
+        // `/^Key([A-Z])$/` conta como chamada — foi o que este guarda acusou na
+        // primeira vez que rodou.
+        let mut anterior = ' ';
+        let mut em_classe = false;
+        for c in sem_comentario.chars() {
+            if aspas == Some('/') {
+                if escapando {
+                    escapando = false;
+                } else if c == '\\' {
+                    escapando = true;
+                } else if c == '[' {
+                    em_classe = true;
+                } else if c == ']' {
+                    em_classe = false;
+                } else if c == '/' && !em_classe {
+                    aspas = None;
+                }
+                saida.push(' ');
+                continue;
+            }
+            if aspas.is_none()
+                && c == '/'
+                && matches!(
+                    anterior,
+                    '(' | ',' | '=' | ':' | '[' | '!' | '&' | '|' | '?' | '{' | ';' | ' '
+                )
+            {
+                aspas = Some('/');
+                em_classe = false;
+                saida.push(' ');
+                continue;
+            }
+            if !c.is_whitespace() {
+                anterior = c;
+            }
+            match aspas {
+                Some(fecha) => {
+                    if escapando {
+                        escapando = false;
+                    } else if c == '\\' {
+                        escapando = true;
+                    } else if c == fecha {
+                        aspas = None;
+                        saida.push(' ');
+                    }
+                }
+                None => {
+                    if c == '"' || c == '\'' || c == '`' {
+                        aspas = Some(c);
+                        saida.push(' ');
+                    } else {
+                        saida.push(c);
+                    }
+                }
+            }
+        }
+        saida
+    }
+
+    /// Todo identificador da linha, em ordem.
+    fn nomes(linha: &str) -> Vec<String> {
+        let mut achados = Vec::new();
+        let mut atual = String::new();
+        for c in linha.chars() {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '$' {
+                atual.push(c);
+            } else if !atual.is_empty() {
+                achados.push(std::mem::take(&mut atual));
+            }
+        }
+        if !atual.is_empty() {
+            achados.push(atual);
+        }
+        achados
+    }
+
+    const PALAVRAS: &[&str] = &[
+        "if",
+        "for",
+        "while",
+        "switch",
+        "catch",
+        "return",
+        "typeof",
+        "await",
+        "new",
+        "delete",
+        "void",
+        "throw",
+        "do",
+        "else",
+        "try",
+        "finally",
+        "of",
+        "in",
+        "instanceof",
+        "yield",
+        "async",
+        "function",
+        "super",
+        "eval",
+        "case",
+        "default",
+        "with",
+    ];
+    const GLOBAIS: &[&str] = &[
+        "console",
+        "window",
+        "document",
+        "navigator",
+        "location",
+        "fetch",
+        "setTimeout",
+        "setInterval",
+        "clearTimeout",
+        "clearInterval",
+        "requestAnimationFrame",
+        "cancelAnimationFrame",
+        "queueMicrotask",
+        "structuredClone",
+        "btoa",
+        "atob",
+        "Object",
+        "Array",
+        "String",
+        "Number",
+        "Boolean",
+        "Math",
+        "JSON",
+        "Date",
+        "Promise",
+        "Map",
+        "Set",
+        "WeakMap",
+        "WeakSet",
+        "Symbol",
+        "Proxy",
+        "Reflect",
+        "BigInt",
+        "RegExp",
+        "Function",
+        "Error",
+        "TypeError",
+        "RangeError",
+        "URL",
+        "URLSearchParams",
+        "Blob",
+        "File",
+        "FileReader",
+        "Image",
+        "Uint8Array",
+        "Uint8ClampedArray",
+        "Int8Array",
+        "Int16Array",
+        "Uint16Array",
+        "Int32Array",
+        "Uint32Array",
+        "Float32Array",
+        "Float64Array",
+        "ArrayBuffer",
+        "DataView",
+        "TextEncoder",
+        "TextDecoder",
+        "AbortController",
+        "Event",
+        "CustomEvent",
+        "VideoDecoder",
+        "VideoEncoder",
+        "EncodedVideoChunk",
+        "VideoFrame",
+        "ImageData",
+        "OffscreenCanvas",
+        "MediaStream",
+        "parseInt",
+        "parseFloat",
+        "isNaN",
+        "isFinite",
+        "encodeURIComponent",
+        "decodeURIComponent",
+        "encodeURI",
+        "decodeURI",
+        "alert",
+        "confirm",
+        "prompt",
+        "Intl",
+        "CSS",
+        "matchMedia",
+        "getComputedStyle",
+        "DOMParser",
+        "XMLHttpRequest",
+        "WebSocket",
+        "performance",
+        "crypto",
+        "localStorage",
+        "sessionStorage",
+        "IntersectionObserver",
+        "ResizeObserver",
+        "MutationObserver",
+    ];
+
+    let mut declarados: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut limpos: Vec<(String, String)> = Vec::new();
+
+    for nome in ui_files(".js") {
+        let texto = sem_texto(&read(&format!("ui/{nome}")));
+        for linha in texto.lines() {
+            let palavras = nomes(linha);
+            for (i, palavra) in palavras.iter().enumerate() {
+                // `function f`, `let x`, `const y`, `class C`, `var v`.
+                if matches!(
+                    palavra.as_str(),
+                    "function" | "let" | "const" | "class" | "var"
+                ) {
+                    if let Some(seguinte) = palavras.get(i + 1) {
+                        declarados.insert(seguinte.clone());
+                    }
+                }
+            }
+            // Parâmetros e desestruturação: tudo entre parênteses ou chaves
+            // conta como nome que existe. Grosseiro, e é a troca aceita — o
+            // guarda procura o nome que não existe em lugar nenhum.
+            let mut dentro = false;
+            let mut acumulado = String::new();
+            for c in linha.chars() {
+                match c {
+                    '(' | '{' | '[' => {
+                        dentro = true;
+                        acumulado.clear();
+                    }
+                    ')' | '}' | ']' => {
+                        if dentro {
+                            for nome in nomes(&acumulado) {
+                                declarados.insert(nome);
+                            }
+                        }
+                        dentro = false;
+                        acumulado.clear();
+                    }
+                    _ if dentro => acumulado.push(c),
+                    _ => {}
+                }
+            }
+            limpos.push((nome.clone(), linha.to_owned()));
+        }
+    }
+
+    let mut fantasmas: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> =
+        std::collections::BTreeMap::new();
+    for (arquivo, linha) in &limpos {
+        let letras: Vec<char> = linha.chars().collect();
+        let e_nome = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '$';
+        let mut i = 0usize;
+        while i < letras.len() {
+            if !e_nome(letras[i]) {
+                i += 1;
+                continue;
+            }
+            // A corrida inteira de uma vez. Andar de um em um foi o defeito da
+            // primeira versão deste guarda: ao pular o caractere depois de um
+            // ponto, ela recomeçava **dentro** da palavra, e `console.warn(`
+            // virava uma chamada a `arn()`.
+            let de = i;
+            while i < letras.len() && e_nome(letras[i]) {
+                i += 1;
+            }
+            // Precedido de ponto é propriedade; precedido de dígito é número.
+            let propriedade = de > 0 && (letras[de - 1] == '.' || letras[de - 1].is_ascii_digit());
+            // Seguido de `(`, com espaços no meio ou não, é chamada.
+            let mut j = i;
+            while j < letras.len() && letras[j] == ' ' {
+                j += 1;
+            }
+            if propriedade || j >= letras.len() || letras[j] != '(' {
+                continue;
+            }
+            let nome: String = letras[de..i].iter().collect();
+            let conhecido = declarados.contains(&nome)
+                || PALAVRAS.contains(&nome.as_str())
+                || GLOBAIS.contains(&nome.as_str());
+            if !conhecido {
+                fantasmas.entry(nome).or_default().insert(arquivo.clone());
+            }
+        }
+    }
+
+    let lista: Vec<String> = fantasmas
+        .iter()
+        .map(|(nome, arquivos)| format!("`{nome}()` chamada em {arquivos:?}"))
+        .collect();
+    assert!(
+        lista.is_empty(),
+        "estas funções são chamadas e nenhum script as declara:\n  {}\n\nUma \
+         chamada assim estoura `ReferenceError` quando a linha roda — e se ela \
+         estiver no topo de um script, leva junto tudo o que vinha depois. \
+         Quando uma tela sai, as chamadas dela saem também.",
+        lista.join("\n  ")
     );
 }
