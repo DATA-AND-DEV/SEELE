@@ -47,6 +47,15 @@ let telaDeOrigem = null;
 const escolhidoDe = { captura: null, saida: null };
 
 /**
+ * Id do aparelho para o nome dele, de cada lado.
+ *
+ * Existe para a linha `PADRÃO DA MÁQUINA` poder dizer no que ela deu. Ver
+ * [`marcarUmaLista`]: a lista é construída num lugar, que tem os nomes, e
+ * marcada noutro, que só tem o id do que abriu.
+ */
+const nomeDe = { captura: new Map(), saida: new Map() };
+
+/**
  * Os dois lados do áudio, e como cada um se pergunta ao Rust.
  *
  * Uma tabela e não duas cópias do mesmo desenho. Entrada e saída se escolhem
@@ -142,6 +151,7 @@ async function desenharUmLado(lado) {
     lado.lerEscolhido(),
   ]);
   escolhidoDe[lado.chave] = escolhido ?? null;
+  nomeDe[lado.chave] = new Map(dispositivos.map((d) => [d.id, d.name]));
 
   const lista = $(lado.lista);
   if (dispositivos.length === 0) {
@@ -225,6 +235,33 @@ function marcarUmaLista(chave, lista, aberto) {
 
     const alvo = botao.querySelector(".server-dispositivo-marca");
     if (alvo) alvo.textContent = marca;
+
+    // **A linha do padrão diz no que ela deu**, e isto é conserto de leitura,
+    // não enfeite.
+    //
+    // `PADRÃO DA MÁQUINA` não é um aparelho: é a ausência de escolha. Então ela
+    // nunca pode carregar `EM USO`, que sai do id do que o `Voice` abriu —
+    // quem escolhe o padrão lê `ESCOLHIDO` numa linha e `EM USO` noutra e
+    // conclui, com toda a razão de quem só tem a tela para ler, que a ordem foi
+    // gravada e não cumprida. Foi o relato: «mostra o microfone escolhido, mas
+    // o outro como em uso». Não havia defeito embaixo — as duas linhas eram o
+    // mesmo aparelho, e a tela é que não dizia isso.
+    //
+    // O nome resolvido e não uma terceira marca: `ESCOLHIDO · EM USO` nas duas
+    // linhas faria duas linhas dizerem que estão em uso, que é a mesma
+    // confusão do avesso.
+    // `id === null` e **não** `dataset.padrao`: aquele marca o aparelho que o
+    // sistema tem como padrão, e esta é a linha da ausência de escolha, que
+    // nasce com `ehPadrao` falso. Escrevi a comparação errada primeiro, e ela
+    // teria renomeado o aparelho em vez da linha.
+    if (id !== null) continue;
+    const nome = botao.querySelector(".server-dispositivo-nome");
+    const resolvido = aberto === null ? null : nomeDe[chave].get(aberto);
+    if (nome) {
+      nome.textContent = resolvido
+        ? `PADRÃO DA MÁQUINA · ${resolvido}`
+        : "PADRÃO DA MÁQUINA";
+    }
   }
 }
 
