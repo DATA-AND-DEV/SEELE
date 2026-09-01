@@ -115,10 +115,26 @@ async function conectar(alvo, apelido, token) {
       console.warn("apelido_local:", falha);
     }
   }
+  // **Lembrado só quando é escolha de alguém**, e esta ordem é o conserto de
+  // um defeito de campo que não tinha saída.
+  //
+  // A linha morava depois do recurso logo abaixo, e guardava o recurso junto.
+  // O efeito: quem chegava sem nome escolhido tentava entrar como `pessoa`,
+  // era recusada porque o nome já era de outra chave, ia ao perfil, escrevia o
+  // nome de verdade e gravava — e a tentativa seguinte lia este cache, achava
+  // `pessoa` guardado aqui, e **nunca mais consultava o perfil**. O nome novo
+  // ficava gravado no disco sem nunca sair da máquina. A pessoa trocava de
+  // apelido quantas vezes quisesse e recebia sempre a mesma recusa, num
+  // servidor com cinco nomes — e a única saída era fechar o app, porque este
+  // `let` só morre com ele.
+  //
+  // Um recurso não é escolha de ninguém e não tem o que fazer aqui. O cache
+  // continua guardando o que **veio** de escolha: o apelido daquela visita que
+  // o diálogo de conhecidos passa, e o da sessão que a troca de servidor passa.
+  if (apelido !== "") ultimoApelido = apelido;
   // E um nome, sempre: entrar sem nome nenhum é aparecer no roster como uma
   // linha vazia, que não é um estado que alguém escolheu.
   if (apelido === "") apelido = "pessoa";
-  ultimoApelido = apelido;
   // **A bandeira é lida e apagada aqui, e não depois do `connect`.**
   //
   // Apagá-la só no caminho feliz a deixaria ligada quando o `connect` falha —

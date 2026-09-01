@@ -9513,3 +9513,49 @@ fn every_surface_that_draws_a_person_dresses_their_portrait() {
         "a linha da mensagem desenha um avatar e não veste o retrato:\n{perto}"
     );
 }
+
+#[test]
+fn the_fallback_nickname_is_never_the_one_the_shell_remembers() {
+    // The field report: «pessoa não autorizada entra no link, eu autorizo,
+    // pessoa não consegue entrar porque nome já existe» — and then, decisively,
+    // «mesmo trocando o nick várias vezes, continua dando o erro de apelido, o
+    // que não faz sentido porque tem 5 nomes no servidor».
+    //
+    // Nothing was wrong with the names she typed. `conectar` reads the
+    // remembered nickname first and only asks the profile when there is none;
+    // the last line of that block used to hand the remembered slot whatever the
+    // block had produced — including `pessoa`, the fallback for somebody who
+    // never named themselves. From the first refusal on, the slot was full, the
+    // profile was never read again, and every name she saved stayed on disk.
+    // The shell kept sending `pessoa` until the app was closed, because that
+    // `let` lives as long as the window does.
+    //
+    // The order is the whole fix, so the order is what this guards: remember
+    // first, fall back second. Comments are stripped so that the prose above
+    // the code — which names both — cannot satisfy the assertion.
+    let corpo = without_comments(&js_function(
+        &read("ui/tela-boot.js"),
+        "async function conectar(",
+    ));
+    // The semicolon matters: the first line of `conectar` is
+    // `ultimoApelido = apelido ?? ultimoApelido;`, which contains the bare
+    // assignment as a prefix and sits before everything here. Anchoring on the
+    // prefix made this guard pass against the very ordering it exists to
+    // reject — it was written that way first, and the check that it fails on
+    // the old code is what caught it.
+    let lembra = corpo
+        .find("ultimoApelido = apelido;")
+        .expect("`conectar` stopped remembering the nickname at all");
+    let recurso = corpo
+        .find(r#"apelido = "pessoa""#)
+        .expect("`conectar` stopped having a fallback nickname");
+    assert!(
+        lembra < recurso,
+        "the fallback nickname is assigned before the shell remembers the \
+         nickname, so the fallback is what gets remembered.\n\
+         Somebody who arrives without a name is then refused for a nickname \
+         they never chose, and no name they save afterwards is ever read \
+         again — the profile is only consulted while the remembered slot is \
+         empty.\n{corpo}"
+    );
+}
