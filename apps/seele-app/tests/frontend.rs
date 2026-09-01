@@ -8679,3 +8679,37 @@ fn the_flag_that_skips_the_key_check_is_cleared_before_the_attempt_and_not_after
          pede para conferir a própria chave: {hospedar}"
     );
 }
+
+/// A frase de uma falha desconhecida lê `Error` antes de tentar `JSON.stringify`.
+///
+/// **Custou um ciclo inteiro de diagnóstico.** `JSON.stringify` de um `Error` ou
+/// de uma `DOMException` devolve `{}`: `name` e `message` são propriedades do
+/// protótipo, e o `stringify` só enumera as próprias. Toda falha de vídeo, de
+/// área de transferência ou de mídia chegava à tela como duas chaves e nada
+/// dentro — o pior detalhe possível, porque parece que o app tem a informação e
+/// escolheu não a mostrar.
+///
+/// O relato de campo foi «o erro de compartilhar tela trouxe {}», e aquele `{}`
+/// era exatamente a frase que diria por que o compartilhamento entre duas
+/// máquinas Windows parou de funcionar.
+#[test]
+fn the_phrase_for_an_unknown_failure_reads_an_error_before_stringifying_it() {
+    let frases = read("ui/frases.js");
+    let desconhecida = js_function(&frases, "function desconhecida(");
+
+    let Some((antes, _)) = desconhecida.split_once("JSON.stringify") else {
+        panic!("`desconhecida` nem tenta serializar a falha: {desconhecida}");
+    };
+    assert!(
+        antes.contains("instanceof Error") || antes.contains(".message"),
+        "`desconhecida` chama `JSON.stringify` sem antes tratar `Error` e \
+         `DOMException`, que serializam para `{{}}` — e a falha chega à tela \
+         como duas chaves vazias:\n{desconhecida}"
+    );
+    assert!(
+        desconhecida.contains("erro.name") || desconhecida.contains(".name,"),
+        "o nome do erro não entra no detalhe, e ele é metade do diagnóstico: \
+         `NotAllowedError` e `NotReadableError` mandam procurar coisas \
+         diferentes:\n{desconhecida}"
+    );
+}
