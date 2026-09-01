@@ -120,6 +120,24 @@ pub enum Aviso {
     /// decodificador do sistema, que a janela alcança, é acelerado por hardware
     /// e não exige o módulo do Cisco em quem só assiste. Só quem transmite
     /// precisa dele.
+    /// Um pacote de som da tela que se está assistindo.
+    ///
+    /// Separado do [`Self::TelaQuadro`] porque o destino é outro: a imagem vai
+    /// para a casca desenhar, o som vai para a mistura de saída — e é lá que o
+    /// isolamento total decide se ele toca.
+    TelaSom {
+        /// Qual transmissão.
+        tela: ScreenId,
+        /// Um pacote Opus, como o outro lado o produziu.
+        bytes: Vec<u8>,
+    },
+    /// Um quadro comprimido de uma tela alheia.
+    ///
+    /// Os bytes vão crus, como saíram do codificador do outro lado: quem
+    /// decodifica é a casca. Esta camada não decodifica de propósito — o
+    /// decodificador do sistema, que a janela alcança, é acelerado por hardware
+    /// e não exige o módulo do Cisco em quem só assiste. Só quem transmite
+    /// precisa dele.
     TelaQuadro {
         /// Qual transmissão.
         tela: ScreenId,
@@ -162,6 +180,12 @@ impl std::fmt::Debug for Aviso {
                 .field("tela", tela)
                 .field("largura", largura)
                 .field("altura", altura)
+                .finish(),
+            // Pelo mesmo motivo do quadro: os bytes viram um número.
+            Self::TelaSom { tela, bytes } => f
+                .debug_struct("TelaSom")
+                .field("tela", tela)
+                .field("bytes", &bytes.len())
                 .finish(),
             // Os bytes viram um número: um quadro-chave de 1080p tem 65 KiB, e
             // despejá-los num log é apagar o log.
@@ -2330,14 +2354,25 @@ fn escoar_tela_alheia(avisos: mpsc::UnboundedSender<Aviso>, fluxo: quinn::RecvSt
             loop {
                 match recepcao.proximo_quadro().await {
                     Ok(Some(quadro)) => {
-                        if avisos
-                            .send(Aviso::TelaQuadro {
+                        // **O som não atravessa a ponte.** Ele vai para a
+                        // mistura, aqui em Rust, e nunca para a casca: a janela
+                        // não tem o que fazer com um pacote Opus, e mandá-la
+                        // decodificar seria dar a ela um trabalho que este lado
+                        // já sabe fazer — e que precisa acontecer no mesmo lugar
+                        // onde o isolamento total vale.
+                        let aviso = if quadro.tipo == crate::tela::TipoDeQuadro::Som {
+                            Aviso::TelaSom {
                                 tela,
-                                chave: quadro.chave,
                                 bytes: quadro.bytes,
-                            })
-                            .is_err()
-                        {
+                            }
+                        } else {
+                            Aviso::TelaQuadro {
+                                tela,
+                                chave: quadro.chave(),
+                                bytes: quadro.bytes,
+                            }
+                        };
+                        if avisos.send(aviso).is_err() {
                             return;
                         }
                     }
@@ -3641,7 +3676,7 @@ mod tests {
             .await
             .expect("ler o primeiro quadro")
             .expect("o fluxo não podia ter acabado");
-        assert!(primeiro.chave, "o primeiro quadro de um fluxo é chave");
+        assert!(primeiro.chave(), "o primeiro quadro de um fluxo é chave");
         assert!(!primeiro.bytes.is_empty(), "saiu um quadro vazio");
 
         // E a queda do enlace fecha tudo: a bomba morre e o fluxo termina.

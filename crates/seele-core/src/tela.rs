@@ -728,15 +728,69 @@ pub const FATIAS_DO_QUADRO_CHAVE: usize = 4;
 /// só arruma a ordem de saída desta máquina, e o que arruma a voz é o teto.
 pub const PRIORIDADE_DA_TELA: i32 = -2;
 
+/// O que vem dentro de um quadro do fluxo de tela.
+///
+/// O byte de tipo era `u8::from(chave)` — zero ou um — e ganhou um terceiro
+/// valor quando o som passou a viajar junto. Nomeado em vez de escrito à mão
+/// porque agora são três lugares que precisam concordar: quem escreve aqui, quem
+/// lê em [`Recepcao::proximo_quadro`], e o `Enquadramento` do servidor, que
+/// recusa qualquer byte que não conheça.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum TipoDeQuadro {
+    /// Imagem que depende do quadro anterior.
+    Comum = 0,
+    /// Imagem que basta a si mesma. É por onde quem chega no meio entra.
+    Chave = 1,
+    /// Som do que está sendo mostrado, em Opus.
+    ///
+    /// **Dentro do mesmo fluxo da imagem, e não ao lado dele.** Dois fluxos
+    /// chegariam em ordens diferentes e precisariam de carimbo e de fila de
+    /// alinhamento; no mesmo fluxo, a ordem de chegada é a ordem de saída. E o
+    /// orçamento de banda da tela já mede o fluxo inteiro — um segundo fluxo
+    /// precisaria de um segundo teto e de uma segunda decisão sobre o que cede.
+    Som = 2,
+}
+
+impl TipoDeQuadro {
+    /// O byte que vai no fio.
+    #[must_use]
+    pub const fn byte(self) -> u8 {
+        self as u8
+    }
+
+    /// O tipo que um byte nomeia, ou nada.
+    ///
+    /// `None` é um fluxo que não é o nosso, e quem lê o trata como fim — nunca
+    /// como um quadro de tipo desconhecido a pular. Pular exigiria confiar no
+    /// tamanho que veio junto, e o tamanho é a única coisa que um fluxo de lixo
+    /// pode usar para pedir uma alocação absurda.
+    #[must_use]
+    pub const fn de_byte(byte: u8) -> Option<Self> {
+        match byte {
+            0 => Some(Self::Comum),
+            1 => Some(Self::Chave),
+            2 => Some(Self::Som),
+            _ => None,
+        }
+    }
+
+    /// É imagem que basta a si mesma?
+    #[must_use]
+    pub const fn e_chave(self) -> bool {
+        matches!(self, Self::Chave)
+    }
+}
+
 /// Escreve o cabeçalho de um quadro nos primeiros [`CABECALHO_DE_QUADRO_LEN`]
 /// bytes.
-fn escrever_cabecalho_de_quadro(chave: bool, tamanho: u32) -> [u8; CABECALHO_DE_QUADRO_LEN] {
+fn escrever_cabecalho_de_quadro(tipo: TipoDeQuadro, tamanho: u32) -> [u8; CABECALHO_DE_QUADRO_LEN] {
     let mut bytes = [0_u8; CABECALHO_DE_QUADRO_LEN];
     // Big-endian, pelo motivo que `seele_proto::media` já dá: é o que todo
     // protocolo de mídia em tempo real escreve, então uma captura aberta no
     // Wireshark se lê do jeito que um engenheiro espera.
     let tamanho = tamanho.to_be_bytes();
-    bytes[0] = u8::from(chave);
+    bytes[0] = tipo.byte();
     bytes[1] = tamanho[0];
     bytes[2] = tamanho[1];
     bytes[3] = tamanho[2];
@@ -936,6 +990,58 @@ impl Transmissao {
     ///
     /// [`ErroDeTela::Fluxo`] quando o fluxo morreu. Um quadro recusado não é
     /// erro: volta como [`Envio::Descartado`], porque descartar é a política.
+    /// Manda um pacote de som junto com a imagem.
+    ///
+    /// # O que ele **não** faz, e é a decisão que importa
+    ///
+    /// Ele não passa pelo balde do teto de banda, e não é descartado quando a
+    /// imagem é. O som custa 32 kbps contra os 1200 kbps do vídeo — menos de 3%
+    /// do orçamento — e é a metade da transmissão que continua útil quando a
+    /// imagem engasga: um jogo a 8 quadros **com som** é acompanhável; a 30
+    /// quadros mudo, não.
+    ///
+    /// Isso inverte a regra do vídeo de propósito, e é a mesma inversão que fez
+    /// `Movimento` virar o padrão da transmissão: a `specs/07` foi escrita
+    /// pensando em texto.
+    ///
+    /// Ele também não espera um quadro-chave em voo. Um quadro-chave sai em
+    /// quatro fatias ao longo de quatro tiques, e segurar o som por quatro
+    /// tiques é 80 ms de silêncio a cada quadro-chave — audível, e por um
+    /// motivo que não é dele.
+    ///
+    /// # Errors
+    ///
+    /// [`ErroDeTela::Fluxo`] quando o fluxo já foi embora.
+    pub async fn enviar_som(&mut self, bytes: &[u8]) -> Result<Envio, ErroDeTela> {
+        if bytes.is_empty() {
+            return Ok(Envio::Descartado(MotivoDeDescarte::Vazio));
+        }
+        if bytes.len() > MAX_QUADRO_LEN {
+            return Ok(Envio::Descartado(MotivoDeDescarte::GrandeDemais));
+        }
+        // `u32` cabe: `MAX_QUADRO_LEN` é 512 KiB e já foi conferido acima.
+        let tamanho = u32::try_from(bytes.len()).unwrap_or(u32::MAX);
+        self.escrever(&escrever_cabecalho_de_quadro(TipoDeQuadro::Som, tamanho))
+            .await?;
+        self.escrever(bytes).await?;
+        self.bytes_enviados += (CABECALHO_DE_QUADRO_LEN + bytes.len()) as u64;
+        Ok(Envio::Enviado)
+    }
+
+    /// Entrega um quadro codificado ao fluxo, ou diz por que não.
+    ///
+    /// Um quadro comum sai inteiro. Um quadro-chave sai em
+    /// [`FATIAS_DO_QUADRO_CHAVE`] fatias, uma por chamada, e é aí que o §3.3
+    /// acontece: o cabeçalho do quadro anuncia o tamanho **inteiro** e as
+    /// fatias vão preenchendo, porque um fluxo QUIC é uma sequência ordenada de
+    /// bytes e quem lê só termina quando a última fatia chega. Não há bandeira
+    /// de continuação nem remontagem do outro lado — espalhar é uma decisão de
+    /// **quando escrever**, e não um formato.
+    ///
+    /// # Errors
+    ///
+    /// [`ErroDeTela::Fluxo`] quando o fluxo morreu. Um quadro recusado não é
+    /// erro: volta como [`Envio::Descartado`], porque descartar é a política.
     pub async fn enviar_quadro(
         &mut self,
         bytes: &[u8],
@@ -968,7 +1074,12 @@ impl Transmissao {
 
         // `u32` cabe: `MAX_QUADRO_LEN` é 512 KiB e já foi conferido acima.
         let tamanho = u32::try_from(bytes.len()).unwrap_or(u32::MAX);
-        self.escrever(&escrever_cabecalho_de_quadro(chave, tamanho))
+        let tipo = if chave {
+            TipoDeQuadro::Chave
+        } else {
+            TipoDeQuadro::Comum
+        };
+        self.escrever(&escrever_cabecalho_de_quadro(tipo, tamanho))
             .await?;
         self.enviados += 1;
         self.bytes_enviados += total as u64;
@@ -1045,10 +1156,23 @@ impl Transmissao {
 /// Um quadro codificado que chegou inteiro.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuadroRecebido {
-    /// Se dá para começar a decodificar por ele.
-    pub chave: bool,
-    /// Os bytes, em Annex-B, como o encoder do outro lado os produziu.
+    /// O que veio dentro: imagem comum, imagem-chave, ou som.
+    ///
+    /// Era `chave: bool`, e virou um tipo de três valores quando o som passou a
+    /// viajar no mesmo fluxo. Quem só precisava daquela pergunta usa
+    /// [`Self::chave`].
+    pub tipo: TipoDeQuadro,
+    /// Os bytes, em Annex-B, como o encoder do outro lado os produziu — ou um
+    /// pacote Opus, quando o tipo é [`TipoDeQuadro::Som`].
     pub bytes: Vec<u8>,
+}
+
+impl QuadroRecebido {
+    /// É imagem que basta a si mesma?
+    #[must_use]
+    pub const fn chave(&self) -> bool {
+        self.tipo.e_chave()
+    }
 }
 
 /// Uma transmissão de tela chegando nesta máquina.
@@ -1149,7 +1273,13 @@ impl Recepcao {
             Err(erro) => return Err(ErroDeTela::Fluxo(erro.to_string())),
         }
 
-        let chave = cabecalho.first().copied().unwrap_or_default() != 0;
+        // Um byte que não nomeia tipo nenhum é um fluxo que não é o nosso, e a
+        // resposta é parar de ler — nunca pular pelo tamanho que veio junto,
+        // que é o único número que um fluxo de lixo controla.
+        let Some(tipo) = TipoDeQuadro::de_byte(cabecalho.first().copied().unwrap_or_default())
+        else {
+            return Err(ErroDeTela::QuadroVazio);
+        };
         let tamanho = cabecalho
             .get(1..CABECALHO_DE_QUADRO_LEN)
             .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
@@ -1168,7 +1298,7 @@ impl Recepcao {
             .read_exact(&mut bytes)
             .await
             .map_err(|erro| ErroDeTela::Fluxo(erro.to_string()))?;
-        Ok(Some(QuadroRecebido { chave, bytes }))
+        Ok(Some(QuadroRecebido { tipo, bytes }))
     }
 }
 
@@ -1773,7 +1903,7 @@ pub(crate) mod tests {
                 .await
                 .expect("ler")
                 .expect("o fluxo acabou cedo");
-            assert!(!quadro.chave);
+            assert!(!quadro.chave());
             assert_eq!(quadro.bytes.len(), 6 * 1024);
             assert_eq!(
                 quadro.bytes.first().copied(),
@@ -1857,7 +1987,7 @@ pub(crate) mod tests {
             .expect("o quadro-chave nunca terminou de chegar")
             .expect("ler")
             .expect("o fluxo acabou cedo");
-        assert!(recebida.chave, "chegou sem a marca de quadro-chave");
+        assert!(recebida.chave(), "chegou sem a marca de quadro-chave");
         assert_eq!(
             recebida.bytes, chave,
             "o quadro-chave espalhado não chegou igual ao que saiu"
@@ -1984,7 +2114,7 @@ pub(crate) mod tests {
         cabecalho().encode(&mut abertura).expect("cabeçalho");
         fluxo.write_all(&abertura).await.expect("abertura");
         fluxo
-            .write_all(&escrever_cabecalho_de_quadro(false, u32::MAX))
+            .write_all(&escrever_cabecalho_de_quadro(TipoDeQuadro::Comum, u32::MAX))
             .await
             .expect("quadro absurdo");
 
@@ -2007,7 +2137,7 @@ pub(crate) mod tests {
             .expect("tipo do fluxo");
         vazio.write_all(&abertura).await.expect("abertura");
         vazio
-            .write_all(&escrever_cabecalho_de_quadro(false, 0))
+            .write_all(&escrever_cabecalho_de_quadro(TipoDeQuadro::Comum, 0))
             .await
             .expect("quadro vazio");
         let mut recepcao = Recepcao::aceitar(&entrada).await.expect("aceitar");
@@ -2115,5 +2245,64 @@ mod o_eixo_da_degradacao {
             resolucao_para(6_000_000, Prioridade::default()),
             resolucao_para(6_000_000, Prioridade::Nitidez)
         );
+    }
+}
+
+#[cfg(test)]
+mod o_som_no_mesmo_fluxo {
+    //! O som viaja **dentro** do fluxo da tela, como um terceiro tipo de quadro.
+    //!
+    //! Dois fluxos separados chegariam em ordens diferentes e precisariam de
+    //! carimbo e de fila de alinhamento; no mesmo fluxo, a ordem de chegada é a
+    //! ordem de saída. E o orçamento de banda da tela já mede o fluxo inteiro —
+    //! um segundo fluxo precisaria de um segundo teto e de uma segunda decisão
+    //! sobre o que cede.
+
+    use super::{TipoDeQuadro, CABECALHO_DE_QUADRO_LEN};
+
+    #[test]
+    fn os_tres_tipos_vao_e_voltam() {
+        for tipo in [TipoDeQuadro::Comum, TipoDeQuadro::Chave, TipoDeQuadro::Som] {
+            assert_eq!(
+                TipoDeQuadro::de_byte(tipo.byte()),
+                Some(tipo),
+                "o byte de {tipo:?} não volta como {tipo:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn um_byte_que_nao_e_dos_tres_nao_vira_tipo_nenhum() {
+        // Nunca «pular pelo tamanho»: o tamanho é o único número que um fluxo
+        // de lixo controla, e confiar nele para pular é pedir a alocação que
+        // ele quiser.
+        for byte in [3_u8, 4, 200, u8::MAX] {
+            assert_eq!(
+                TipoDeQuadro::de_byte(byte),
+                None,
+                "o byte {byte} virou tipo"
+            );
+        }
+    }
+
+    #[test]
+    fn so_a_imagem_chave_e_porta_de_entrada() {
+        // Quem chega no meio precisa de uma imagem que baste a si mesma. Som
+        // não começa imagem nenhuma, e entrar por ele entregaria imagem pela
+        // metade — é a mesma regra que o `Enquadramento` do servidor guarda.
+        assert!(TipoDeQuadro::Chave.e_chave());
+        assert!(!TipoDeQuadro::Comum.e_chave());
+        assert!(
+            !TipoDeQuadro::Som.e_chave(),
+            "um quadro de som virou porta de entrada"
+        );
+    }
+
+    #[test]
+    fn o_cabecalho_do_som_leva_o_tipo_e_o_tamanho() {
+        let cabecalho = super::escrever_cabecalho_de_quadro(TipoDeQuadro::Som, 4);
+        assert_eq!(cabecalho.len(), CABECALHO_DE_QUADRO_LEN);
+        assert_eq!(cabecalho[0], TipoDeQuadro::Som.byte());
+        assert_eq!(&cabecalho[1..], &4_u32.to_be_bytes());
     }
 }

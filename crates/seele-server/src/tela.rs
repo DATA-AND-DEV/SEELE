@@ -45,6 +45,16 @@ use tokio::sync::mpsc;
 /// Um byte de tipo e quatro de tamanho, big-endian. Gêmeo de
 /// `seele_core::tela::CABECALHO_DE_QUADRO_LEN` — ver o cabeçalho deste módulo.
 pub const CABECALHO_DE_QUADRO_LEN: usize = 5;
+/// O byte de tipo de um quadro de imagem que basta a si mesmo.
+///
+/// Gêmeo de `seele_core::tela::TipoDeQuadro::Chave` — este módulo não depende
+/// daquele crate, e os dois lados do fio concordam por escrito e não por tipo.
+pub const TIPO_CHAVE: u8 = 1;
+/// O byte de tipo de um quadro de som.
+///
+/// Gêmeo de `seele_core::tela::TipoDeQuadro::Som`. O maior que este
+/// enquadramento aceita: ver a conferência em [`Enquadramento::entrada`].
+pub const TIPO_SOM: u8 = 2;
 
 /// Maior quadro codificado que este servidor repassa, em bytes.
 ///
@@ -654,14 +664,23 @@ impl Enquadramento {
                 .and_then(|quatro| <[u8; 4]>::try_from(quatro).ok())
                 .map_or(0, u32::from_be_bytes) as usize;
             self.cabecalho.clear();
-            // O byte de tipo é `u8::from(chave)` do outro lado, então 0 ou 1 e
-            // nada mais. Aceitar 2 seria aceitar que este fluxo já não é o que
-            // se pensa que é, e o resto da leitura seria adivinhação.
-            if tipo > 1 || tamanho == 0 || tamanho > MAX_QUADRO_LEN {
+            // Os três tipos que este fluxo carrega — imagem comum, imagem-chave
+            // e som —, e nada mais. Aceitar um quarto seria aceitar que o fluxo
+            // já não é o que se pensa que é, e o resto da leitura seria
+            // adivinhação sobre um tamanho que o outro lado escolheu.
+            //
+            // O `2` entrou quando o som passou a viajar junto com a imagem. Este
+            // servidor **não o entende** e não precisa: ele repassa por pedaço,
+            // sem remontar quadro. O que ele precisa saber é que o byte é
+            // legítimo, para não confundir um fluxo bom com lixo.
+            if tipo > TIPO_SOM || tamanho == 0 || tamanho > MAX_QUADRO_LEN {
                 return Err(FimDaTela::FluxoMalformado);
             }
             self.restam = tamanho;
-            if tipo == 1 && comeca_aqui && entrada.is_none() {
+            // **A porta de entrada é um quadro-chave de imagem, e só ele.** Um
+            // quadro de som não serve a quem chega no meio: ele não começa nada,
+            // e entrar por ele entregaria imagem pela metade.
+            if tipo == TIPO_CHAVE && comeca_aqui && entrada.is_none() {
                 entrada = Some(inicio);
             }
         }
@@ -1026,11 +1045,47 @@ mod tests {
     }
 
     #[test]
-    fn um_byte_de_tipo_que_nao_e_zero_nem_um_encerra_o_fluxo() {
+    fn um_byte_de_tipo_que_este_fluxo_nao_conhece_o_encerra() {
+        // O `2` **deixou de ser desconhecido**: é o som, que passou a viajar no
+        // mesmo fluxo da imagem. Este teste subiu para o primeiro byte que
+        // continua não sendo nada, e é o que ele sempre guardou — que um fluxo
+        // que já não é o que se pensa não é lido por adivinhação sobre um
+        // tamanho que o outro lado escolheu.
         let mut enq = Enquadramento::novo();
         assert_eq!(
-            enq.entrada(&[2, 0, 0, 0, 8]),
+            enq.entrada(&[3, 0, 0, 0, 8]),
             Err(FimDaTela::FluxoMalformado)
+        );
+    }
+
+    #[test]
+    fn um_quadro_de_som_atravessa_e_nao_e_porta_de_entrada() {
+        // O servidor **não entende** o som: ele repassa por pedaço, sem
+        // remontar quadro. O que ele precisa saber é que o byte é legítimo, para
+        // não confundir um fluxo bom com lixo.
+        let mut enq = Enquadramento::novo();
+        let som = {
+            let mut fluxo = vec![TIPO_SOM, 0, 0, 0, 4];
+            fluxo.extend_from_slice(&[1, 2, 3, 4]);
+            fluxo
+        };
+        assert_eq!(
+            enq.entrada(&som),
+            Ok(None),
+            "um quadro de som foi tratado como fluxo malformado"
+        );
+
+        // E ele não abre a porta para quem chega no meio: quem entra precisa de
+        // uma imagem que baste a si mesma, e som não começa imagem nenhuma.
+        let mut enq = Enquadramento::novo();
+        let mut fluxo = vec![TIPO_SOM, 0, 0, 0, 4];
+        fluxo.extend_from_slice(&[1, 2, 3, 4]);
+        let onde = fluxo.len();
+        fluxo.extend(quadro(true, 20));
+        assert_eq!(
+            enq.entrada(&fluxo),
+            Ok(Some(onde)),
+            "a porta de entrada não é o quadro-chave de imagem"
         );
     }
 }

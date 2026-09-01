@@ -3113,7 +3113,25 @@ async fn drive(
                             data: base64_de(&bytes),
                         });
                     }
+                    // **O som não vira evento.** Ele vai direto para a mistura,
+                    // que é onde o codec já mora e onde o isolamento total
+                    // decide se alguma coisa toca. Mandá-lo à casca seria pedir
+                    // a ela que decodificasse Opus para depois devolvê-lo.
+                    seele_core::enlace::Aviso::TelaSom { bytes, .. } => {
+                        if let Ok(voice) = shared.voice.lock() {
+                            if let Some(voice) = voice.as_ref() {
+                                voice.som_da_tela(bytes);
+                            }
+                        }
+                    }
                     seele_core::enlace::Aviso::TelaFechou { tela } => {
+                        // A transmissão acabou: o que sobrou na fila é som de
+                        // uma tela que já não está na frente de ninguém.
+                        if let Ok(voice) = shared.voice.lock() {
+                            if let Some(voice) = voice.as_ref() {
+                                voice.esquecer_o_som_da_tela();
+                            }
+                        }
                         shared.notify(&Event::ScreenClosed { screen: tela.0 });
                     }
                     // Cair não encerra: começa a bateria interna, e a casca

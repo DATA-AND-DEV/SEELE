@@ -159,6 +159,16 @@ struct Controls {
     relogio_seq: AtomicU32,
     /// O carimbo de tempo, em amostras. Ver [`Self::relogio_seq`].
     relogio_carimbo: AtomicU32,
+    /// Os pacotes de som da tela que se está assistindo, esperando a mistura.
+    ///
+    /// **Uma fila e não um canal**, porque quem escreve é uma tarefa `async` e
+    /// quem lê é a thread de áudio: os dois já dividem este `Arc`, e um canal
+    /// seria uma segunda ponte para o mesmo par.
+    ///
+    /// Com teto e jogando fora o **mais velho**, pela razão do módulo `laco`:
+    /// quem está atrasado meio segundo já perdeu a sincronia com a imagem, e
+    /// insistir nele afasta o som cada vez mais.
+    som_da_tela: Mutex<std::collections::VecDeque<Vec<u8>>>,
     /// Quadros que a Voice produziu e o transporte recusou.
     ///
     /// Terceira categoria, e ela faltava. `Telemetry` já distingue perda de
@@ -368,6 +378,17 @@ fn open_preferring(chosen: &DeviceChoice) -> Result<AudioIo, device::DeviceError
 /// A running voice path.
 ///
 /// Dropping it stops the audio.
+/// O `ssrc` que o som da tela usa na mistura.
+///
+/// Reservado, e alto de propósito: o `Ssrc` de uma pessoa é dado pelo servidor,
+/// que nunca entrega este. Um número fixo é o que permite dar ao som da tela um
+/// ganho próprio no dia em que alguém quiser um, sem inventar um segundo
+/// caminho de mistura.
+pub const SSRC_DA_TELA: u32 = u32::MAX;
+
+/// A running voice path.
+///
+/// Dropping it stops the audio.
 #[derive(Debug)]
 pub struct Voice {
     controls: Arc<Controls>,
@@ -507,6 +528,7 @@ impl Voice {
             recusados: std::sync::atomic::AtomicU64::new(0),
             anel_cheio: std::sync::atomic::AtomicU64::new(0),
             gains: Mutex::new(HashMap::new()),
+            som_da_tela: Mutex::new(std::collections::VecDeque::new()),
         });
         let telemetry = Arc::new(Mutex::new(AudioTelemetry::default()));
 
@@ -781,6 +803,36 @@ impl Voice {
         self.controls.total_isolation.store(on, Ordering::Relaxed);
     }
 
+    /// Põe na fila um pacote de som da tela que se está assistindo.
+    ///
+    /// Chamado por quem lê o fluxo da tela, que é uma tarefa `async` noutro
+    /// lugar. A decodificação acontece na thread de áudio, junto com a da voz:
+    /// é lá que o codec já mora, e é lá que o isolamento total decide se alguma
+    /// coisa toca.
+    pub fn som_da_tela(&self, pacote: Vec<u8>) {
+        /// Meio segundo a 20 ms por pacote.
+        const TETO: usize = 25;
+
+        let mut fila = self
+            .controls
+            .som_da_tela
+            .lock()
+            .unwrap_or_else(|envenenado| envenenado.into_inner());
+        while fila.len() >= TETO {
+            fila.pop_front();
+        }
+        fila.push_back(pacote);
+    }
+
+    /// Esquece o som da tela. Chamado quando a transmissão acaba.
+    pub fn esquecer_o_som_da_tela(&self) {
+        self.controls
+            .som_da_tela
+            .lock()
+            .unwrap_or_else(|envenenado| envenenado.into_inner())
+            .clear();
+    }
+
     /// Whether the speakers are muted.
     #[must_use]
     pub fn total_isolation(&self) -> bool {
@@ -947,6 +999,14 @@ async fn pipeline(
     let mut gate = VoiceGate::new(GateConfig::default(), GateMode::PushToTalk);
     let mut mixer = Mixer::new();
     let mut sources: Vec<Source> = Vec::new();
+    // O decodificador do som da tela, à parte dos das pessoas.
+    //
+    // À parte porque a fonte é outra: a voz de cada um chega por datagrama, com
+    // perda e reordenação, e por isso tem fila de compasso e ocultação. O som da
+    // tela chega pelo fluxo QUIC da imagem, que é ordenado e confiável — não há
+    // buraco a ocultar nem ordem a corrigir, e dar-lhe uma fila de compasso
+    // seria acrescentar atraso para resolver um problema que ele não tem.
+    let mut som_da_tela = VoiceDecoder::new().ok();
 
     let (mut captured, mut at_48k, mut pending) = (Vec::new(), Vec::new(), Vec::<f32>::new());
     let mut datagram = vec![0_u8; seele_proto::MAX_DATAGRAM_LEN];
@@ -1146,6 +1206,30 @@ async fn pipeline(
                         decoded.push((source.ssrc, samples));
                     }
                 }
+                // O som da tela, como mais uma fonte da mistura.
+                //
+                // **Uma fonte e não um caminho próprio**, e é o que faz o
+                // isolamento total continuar significando o que diz: quem se
+                // isola não ouve nem a voz nem a tela, porque quem decide isso é
+                // o `set_master` do misturador, uma vez, para todas as fontes.
+                //
+                // O `SSRC_DA_TELA` é reservado e não pode colidir com o de
+                // ninguém: `Ssrc` de pessoa vem do servidor, que nunca o
+                // entrega. Um número fixo aqui é o que dá ao som da tela um
+                // ganho próprio no dia em que alguém quiser um.
+                if let Some(decodificador) = som_da_tela.as_mut() {
+                    let pacote = controls
+                        .som_da_tela
+                        .lock()
+                        .unwrap_or_else(|envenenado| envenenado.into_inner())
+                        .pop_front();
+                    if let Some(pacote) = pacote {
+                        if let Ok(amostras) = decodificador.decode(&pacote) {
+                            decoded.push((SSRC_DA_TELA, amostras));
+                        }
+                    }
+                }
+
                 let borrowed: Vec<(u32, &[f32])> = decoded
                     .iter()
                     .map(|(talker, samples)| (*talker, samples.as_slice()))

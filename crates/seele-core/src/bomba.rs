@@ -79,7 +79,8 @@ use tokio::sync::mpsc as canal;
 
 use crate::tela::{intervalo_de_quadro, ErroDeTela, MotivoDeParada, TetoDeVideo, Transmissao};
 use crate::video::{
-    Ajuste, Captura, CapturaRecusou, Compartilhamento, ErroDeCompartilhamento, Passo,
+    Ajuste, Captura, CapturaRecusou, Compartilhamento, ErroDeCompartilhamento, FonteDeQuadros as _,
+    Passo,
 };
 
 /// O nome da thread do codificador.
@@ -206,6 +207,13 @@ pub enum EventoDaBomba {
     },
     /// Um quadro pronto para [`Transmissao::enviar_quadro`].
     Quadro(QuadroParaOFio),
+    /// Um pacote de som já codificado, para ir junto com a imagem.
+    ///
+    /// Separado do [`Self::Quadro`] porque o destino no fio é outro tipo de
+    /// quadro, e porque ele **não passa pelo teto**: o som custa menos de 3% do
+    /// orçamento do vídeo e é a metade da transmissão que continua útil quando a
+    /// imagem engasga.
+    Som(Vec<u8>),
     /// O vídeo parou, com motivo (§3.2).
     ///
     /// **A bomba continua viva.** Parar é a resposta do produto a um sinal
@@ -350,6 +358,10 @@ where
     let largados = Arc::new(AtomicU64::new(0));
 
     let laco = Laco {
+        // Um codificador por transmissão, com o teto de voz. `None` é uma
+        // máquina cujo Opus não abriu: a imagem continua indo, muda.
+        som: seele_audio::codec::VoiceEncoder::with_defaults().ok(),
+        sobra: VecDeque::new(),
         biblioteca,
         captura,
         fonte: None,
@@ -412,6 +424,17 @@ struct Laco<C: Captura> {
     ordens: mpsc::Receiver<Ordem>,
     para: canal::Sender<EventoDaBomba>,
     largados: Arc<AtomicU64>,
+    /// O codificador do som da tela, quando esta máquina tem um.
+    ///
+    /// `None` é uma transmissão muda, e não uma transmissão que não sai: a
+    /// imagem é o assunto, e o som é o que a acompanha.
+    som: Option<seele_audio::codec::VoiceEncoder>,
+    /// As amostras que sobraram de um pacote de 20 ms para o próximo.
+    ///
+    /// A captura entrega o que juntou desde o último tique, e o tique do vídeo
+    /// não é múltiplo do passo do codec. Sem esta sobra, cada tique jogaria fora
+    /// o resto — que é um pedaço de som a cada 33 ms, ou seja, um chiado.
+    sobra: VecDeque<f32>,
 }
 
 impl<C: Captura> Laco<C> {
@@ -503,6 +526,10 @@ impl<C: Captura> Laco<C> {
                 }
                 Err(erro) => return Some(erro.to_string()),
             }
+            // O som, a cada tique, e **fora** do `match` do quadro: um tique
+            // sem imagem nova — a tela parada — não é um tique sem som.
+            self.escoar_som();
+
             if self.fechado {
                 return None;
             }
@@ -512,6 +539,53 @@ impl<C: Captura> Laco<C> {
     }
 
     /// Um tique do codificador, com os empréstimos separados por campo.
+    /// Tira o som que a captura juntou e o entrega em pacotes de 20 ms.
+    ///
+    /// # Por que aqui, e não numa thread própria
+    ///
+    /// Porque é aqui que a captura está viva. Uma thread só para o som teria de
+    /// receber a fonte, e a fonte é a mesma do vídeo no macOS — o som sai do
+    /// `SCStream` da imagem. Duas donas do mesmo objeto seriam dois lugares
+    /// para o mesmo ciclo de vida.
+    ///
+    /// O ritmo do vídeo é o do som: a 30 quadros por segundo este laço acorda a
+    /// cada 33 ms e entrega um ou dois pacotes de 20 ms. Não é jitter que
+    /// alguém ouça — o outro lado recebe por fluxo ordenado e toca em fila —, e
+    /// o custo de acordar uma thread a mais para 32 kbps não se paga.
+    ///
+    /// # Silêncio não viaja
+    ///
+    /// Um pacote todo em zero é descartado antes de entrar no fio. Quem
+    /// compartilha uma janela parada não paga nada, e o Opus já distingue
+    /// silêncio de som baixo melhor do que um limiar aqui distinguiria.
+    fn escoar_som(&mut self) {
+        let Some(fonte) = self.fonte.as_ref() else {
+            return;
+        };
+        if self.som.is_none() {
+            return;
+        }
+        self.sobra.extend(fonte.tomar_som());
+
+        // Os pacotes são feitos antes de qualquer um sair, para o empréstimo do
+        // codificador acabar antes de `entregar_evento` pegar `self` de novo.
+        let mut pacotes = Vec::new();
+        while self.sobra.len() >= seele_audio::FRAME_SAMPLES {
+            let quadro: Vec<f32> = self.sobra.drain(..seele_audio::FRAME_SAMPLES).collect();
+            // Silêncio exato é o que uma máquina que não toca nada produz, e
+            // mandá-lo é gastar 32 kbps para dizer «nada».
+            if quadro.iter().all(|amostra| *amostra == 0.0) {
+                continue;
+            }
+            if let Some(Ok(pacote)) = self.som.as_mut().map(|codec| codec.encode(&quadro)) {
+                pacotes.push(pacote);
+            }
+        }
+        for pacote in pacotes {
+            self.entregar_evento(EventoDaBomba::Som(pacote));
+        }
+    }
+
     fn tique(&mut self, pedido_de_chave: bool) -> Result<Passo, ErroDeCompartilhamento> {
         let (Some(compartilhamento), Some(fonte)) =
             (self.compartilhamento.as_mut(), self.fonte.as_ref())
@@ -708,6 +782,22 @@ impl<C: Captura> Laco<C> {
                     return;
                 }
             }
+        }
+    }
+
+    /// Põe um evento na fila de saída, respeitando a ordem dos pendentes.
+    fn entregar_evento(&mut self, evento: EventoDaBomba) {
+        if !self.pendentes.is_empty() {
+            self.pendentes.push_back(evento);
+            self.escoar_pendentes();
+            return;
+        }
+        match self.para.try_send(evento) {
+            Ok(()) => {}
+            Err(canal::error::TrySendError::Full(evento)) => {
+                self.pendentes.push_back(evento);
+            }
+            Err(canal::error::TrySendError::Closed(_)) => self.fechado = true,
         }
     }
 
@@ -912,6 +1002,13 @@ pub async fn escoar_com_espelho(
             EventoDaBomba::Teto { teto_bps } => {
                 if let Some(viva) = transmissao.as_mut() {
                     viva.ajustar_teto(teto_bps, Instant::now());
+                }
+            }
+            EventoDaBomba::Som(pacote) => {
+                // Sem passar pelo teto e sem esperar quadro-chave em voo:
+                // ver `Transmissao::enviar_som` sobre por que o som não cede.
+                if let Some(viva) = transmissao.as_mut() {
+                    viva.enviar_som(&pacote).await?;
                 }
             }
             EventoDaBomba::Quadro(quadro) => {
@@ -1132,7 +1229,7 @@ mod tests {
     fn esperar_controle(eventos: &mut canal::Receiver<EventoDaBomba>) -> Option<EventoDaBomba> {
         loop {
             match esperar(eventos)? {
-                EventoDaBomba::Quadro(_) => {}
+                EventoDaBomba::Quadro(_) | EventoDaBomba::Som(_) => {}
                 outro => return Some(outro),
             }
         }
@@ -1475,7 +1572,7 @@ mod tests {
             .await
             .expect("ler o primeiro quadro")
             .expect("o fluxo não podia ter acabado");
-        assert!(primeiro.chave, "o primeiro quadro de um fluxo é chave");
+        assert!(primeiro.chave(), "o primeiro quadro de um fluxo é chave");
         assert!(!primeiro.bytes.is_empty());
 
         // Bloqueia a thread do teste por no máximo um intervalo de quadro; a

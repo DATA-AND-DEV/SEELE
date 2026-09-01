@@ -74,6 +74,22 @@ pub trait FonteDeQuadros {
     /// quadro que chega e encontra a vaga ocupada substitui o que estava lá. Um
     /// quadro velho entregue tarde é pior que um quadro perdido.
     fn tomar(&self) -> Option<QuadroI420>;
+
+    /// O som que a máquina está tocando, desde a última chamada.
+    ///
+    /// Vazio por padrão: uma captura que não sabe capturar som devolve nada, e
+    /// a transmissão sai muda em vez de não sair. É o que faz este método poder
+    /// nascer sem tocar em nenhum implementador de teste.
+    ///
+    /// **Uma fila, ao contrário de [`Self::tomar`].** A regra do §1 vale para
+    /// imagem: um quadro velho entregue tarde é pior que um quadro perdido. Som
+    /// é o contrário — uma amostra pulada é um estalo, e ninguém prefere o
+    /// silêncio de agora ao som de um décimo de segundo atrás.
+    ///
+    /// Mono, a 48 kHz, que é a taxa da casa.
+    fn tomar_som(&self) -> Vec<f32> {
+        Vec::new()
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -86,6 +102,16 @@ impl FonteDeQuadros for seele_video::captura::macos::CapturaDaTela {
         // concreto; esta ponte carrega só o que as duas capturas têm em comum,
         // e a do Windows não carimba o instante.
         Self::tomar(self).map(|da_tela| da_tela.quadro)
+    }
+
+    /// O som vem do **mesmo** `SCStream` da imagem — ver
+    /// `seele-video/src/captura/macos.rs`. É por isso que o macOS não precisa
+    /// do caminho de loopback que o Windows usa.
+    fn tomar_som(&self) -> Vec<f32> {
+        // Um quinto de segundo por vez: mais que um tique de vídeo, para uma
+        // pausa de captura não virar um buraco no som, e menos que a folga da
+        // fila, para nunca esvaziá-la de uma vez.
+        self.som().tomar(9_600)
     }
 }
 
@@ -222,6 +248,10 @@ where
 impl FonteDeQuadros for Box<dyn FonteDeQuadros + Send> {
     fn tomar(&self) -> Option<QuadroI420> {
         (**self).tomar()
+    }
+
+    fn tomar_som(&self) -> Vec<f32> {
+        (**self).tomar_som()
     }
 }
 
