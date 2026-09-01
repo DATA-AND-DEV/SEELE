@@ -66,6 +66,51 @@ fn output_stream<T: RawSample + cpal::SizedSample>(
 }
 
 /// Which half of the device pair a failure came from.
+/// Acha um dispositivo pelo id, ou o padrão do sistema.
+///
+/// Pública dentro do crate para `laco.rs`, que precisa achar uma **saída** para
+/// abri-la como entrada — é assim que o loopback do WASAPI se liga.
+pub(crate) fn resolver(
+    host: &cpal::Host,
+    wanted: Option<&str>,
+    side: Side,
+) -> Result<cpal::Device, DeviceError> {
+    resolve(host, wanted, side)
+}
+
+/// Abre um fluxo de entrada sobre um dispositivo e uma configuração já
+/// negociados.
+///
+/// O mesmo caminho que a voz usa, num ponto em que `laco.rs` pode entrar: ele
+/// tem uma configuração vinda de `default_input_config` numa saída, e não passa
+/// por `negociar`.
+pub(crate) fn abrir_entrada(
+    device: &cpal::Device,
+    config: &cpal::SupportedStreamConfig,
+    sink: CaptureSink,
+    counters: Arc<StreamCounters>,
+) -> Result<cpal::Stream, DeviceError> {
+    let formato = config.sample_format();
+    let stream_config = config.config();
+    let feito = match formato {
+        cpal::SampleFormat::F32 => input_stream::<f32>(device, stream_config, sink, counters),
+        cpal::SampleFormat::I16 => input_stream::<i16>(device, stream_config, sink, counters),
+        cpal::SampleFormat::U16 => input_stream::<u16>(device, stream_config, sink, counters),
+        outro => {
+            return Err(DeviceError::UnsupportedSampleFormat {
+                side: Side::Input,
+                format: outro,
+            })
+        }
+    };
+    feito.map_err(|source| DeviceError::Device {
+        side: Side::Input,
+        stage: Stage::Build,
+        source,
+    })
+}
+
+/// Which half of the device pair a failure came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {
     /// Capture.

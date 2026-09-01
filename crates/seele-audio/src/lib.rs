@@ -28,6 +28,7 @@ pub mod device;
 pub mod drift;
 pub mod gate;
 pub mod jitter;
+pub mod laco;
 pub mod latency;
 pub mod mixer;
 pub mod netsim;

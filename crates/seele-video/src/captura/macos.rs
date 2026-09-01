@@ -356,6 +356,65 @@ pub struct Vaga {
     ilegiveis: AtomicU64,
 }
 
+/// A fila do som que a tela está tocando.
+///
+/// **Uma fila e não uma vaga**, ao contrário da imagem. Um quadro velho de
+/// vídeo é lixo — quem chega tarde quer o de agora, e é por isso que a [`Vaga`]
+/// substitui em vez de acumular. Som é o contrário: uma amostra pulada é um
+/// estalo, e ninguém prefere o silêncio de agora ao som de um décimo de segundo
+/// atrás.
+///
+/// O teto existe mesmo assim, porque uma fila sem teto que ninguém lê é memória
+/// crescendo até o fim: meio segundo, a mesma folga do caminho do Windows.
+#[derive(Debug, Default)]
+pub struct FilaDeSom {
+    amostras: Mutex<std::collections::VecDeque<f32>>,
+    escritas: AtomicU64,
+    perdidas: AtomicU64,
+}
+
+impl FilaDeSom {
+    /// Meio segundo a 48 kHz, mono.
+    const TETO: usize = 24_000;
+
+    /// Guarda o que chegou, jogando fora o mais **velho** quando não cabe.
+    ///
+    /// O velho e não o novo: quem está atrasado meio segundo já perdeu a
+    /// sincronia com a imagem, e insistir nele afasta o som cada vez mais.
+    pub fn por(&self, amostras: &[f32]) {
+        let mut fila = self.amostras.lock().unwrap_or_else(|e| e.into_inner());
+        for amostra in amostras {
+            if fila.len() >= Self::TETO {
+                fila.pop_front();
+                self.perdidas.fetch_add(1, Ordering::Relaxed);
+            }
+            fila.push_back(*amostra);
+        }
+        self.escritas
+            .fetch_add(amostras.len() as u64, Ordering::Relaxed);
+    }
+
+    /// Tira até `quantas` amostras, na ordem em que chegaram.
+    #[must_use]
+    pub fn tomar(&self, quantas: usize) -> Vec<f32> {
+        let mut fila = self.amostras.lock().unwrap_or_else(|e| e.into_inner());
+        let quantas = quantas.min(fila.len());
+        fila.drain(..quantas).collect()
+    }
+
+    /// Quantas amostras já entraram. Para provar que o caminho anda.
+    #[must_use]
+    pub fn escritas(&self) -> u64 {
+        self.escritas.load(Ordering::Relaxed)
+    }
+
+    /// Quantas foram jogadas fora por ninguém as ler.
+    #[must_use]
+    pub fn perdidas(&self) -> u64 {
+        self.perdidas.load(Ordering::Relaxed)
+    }
+}
+
 impl Vaga {
     /// Põe um quadro, substituindo o que estiver lá.
     pub fn por(&self, quadro: QuadroDaTela) {
@@ -423,6 +482,42 @@ struct Entregador {
     vaga: Arc<Vaga>,
     largura: usize,
     altura: usize,
+    som: Arc<FilaDeSom>,
+}
+
+impl Entregador {
+    /// Tira as amostras de um `CMSampleBuffer` de áudio e as põe na fila.
+    ///
+    /// O ScreenCaptureKit entrega `f32` — o formato nativo dele — em buffers
+    /// **por canal**, e não intercalados. O que sai daqui é mono: a primeira
+    /// lista é o primeiro canal, e é ela que vai. Misturar os canais somando
+    /// dobraria o volume aparente de um som centralizado, e escolher um é a
+    /// mesma decisão que a captura de voz já toma no `on_capture`.
+    fn entregar_som(&self, amostra: &screencapturekit::cm::CMSampleBuffer) {
+        use screencapturekit::cm::CMSampleBufferExt as _;
+
+        let Some(lista) = amostra.audio_buffer_list() else {
+            return;
+        };
+        let Some(primeiro) = lista.buffer(0) else {
+            return;
+        };
+        let bytes = primeiro.data();
+        // Quatro bytes por amostra. Um resto significa um formato que não é o
+        // que se pediu, e nesse caso é melhor não entregar nada do que entregar
+        // ruído — o silêncio é legível, o ruído não.
+        if bytes.len() % 4 != 0 {
+            return;
+        }
+        // `try_into` e não índices: `chunks_exact(4)` já garante o tamanho, mas
+        // a garantia mora no iterador e não no tipo, e a folha de lints desta
+        // casa recusa indexação que só um argumento sustenta.
+        let amostras: Vec<f32> = bytes
+            .chunks_exact(4)
+            .filter_map(|quatro| quatro.try_into().ok().map(f32::from_le_bytes))
+            .collect();
+        self.som.por(&amostras);
+    }
 }
 
 impl SCStreamOutputTrait for Entregador {
@@ -431,6 +526,10 @@ impl SCStreamOutputTrait for Entregador {
         amostra: screencapturekit::cm::CMSampleBuffer,
         tipo: SCStreamOutputType,
     ) {
+        if tipo == SCStreamOutputType::Audio {
+            self.entregar_som(&amostra);
+            return;
+        }
         if tipo != SCStreamOutputType::Screen {
             return;
         }
@@ -480,6 +579,7 @@ pub struct CapturaDaTela {
     vaga: Arc<Vaga>,
     largura: usize,
     altura: usize,
+    som: Arc<FilaDeSom>,
 }
 
 impl CapturaDaTela {
@@ -552,7 +652,14 @@ impl CapturaDaTela {
             // três sistemas, mistura com o microfone, e eco. Dito por extenso
             // porque o padrão da biblioteca pode mudar e um `false` calado
             // ficaria a mercê disso.
-            .with_captures_audio(false)
+            // **O som da máquina vem no mesmo fluxo da imagem.**
+            //
+            // É a razão de o macOS não precisar do caminho de loopback do
+            // Windows: o ScreenCaptureKit entrega os dois pelo mesmo
+            // `SCStream`, sob o mesmo consentimento de gravação de tela, e sem
+            // um driver no meio. Estava escrito `false` desde que este arquivo
+            // nasceu, e a transmissão saía muda.
+            .with_captures_audio(true)
             // O conteúdo é encaixado, não esticado, e o que sobra é preto — a
             // mesma cor do quadro preto do codec, para que a tarja não custe
             // bits nem chame atenção.
@@ -561,14 +668,27 @@ impl CapturaDaTela {
             .with_background_color(0.0, 0.0, 0.0);
 
         let vaga = Arc::new(Vaga::default());
+        let som = Arc::new(FilaDeSom::default());
         let mut fluxo = SCStream::new(&filtro, &config);
         fluxo.add_output_handler(
             Entregador {
                 vaga: Arc::clone(&vaga),
                 largura,
                 altura,
+                som: Arc::clone(&som),
             },
             SCStreamOutputType::Screen,
+        );
+        // O mesmo entregador, para o outro tipo: é ele que sabe distinguir os
+        // dois, e um segundo objeto seria a mesma decisão escrita duas vezes.
+        fluxo.add_output_handler(
+            Entregador {
+                vaga: Arc::clone(&vaga),
+                largura,
+                altura,
+                som: Arc::clone(&som),
+            },
+            SCStreamOutputType::Audio,
         );
         fluxo
             .start_capture()
@@ -580,9 +700,24 @@ impl CapturaDaTela {
         Ok(Self {
             fluxo,
             vaga,
+            som,
             largura,
             altura,
         })
+    }
+
+    /// A posição onde os quadros aparecem.
+    ///
+    /// Devolvida como [`Arc`] de propósito: quem codifica mora noutra thread
+    /// (§2), e é ela que lê. Esta é a única fronteira entre as duas.
+    /// A fila do som que a tela está tocando.
+    ///
+    /// Vazia quando ninguém toca nada — que é diferente de não haver caminho:
+    /// silêncio também produz amostras, e é por isso que [`FilaDeSom::escritas`]
+    /// distingue os dois.
+    #[must_use]
+    pub fn som(&self) -> Arc<FilaDeSom> {
+        Arc::clone(&self.som)
     }
 
     /// A posição onde os quadros aparecem.
@@ -903,5 +1038,50 @@ mod testes {
             "o quadro veio todo preto — ou a tela está apagada, ou a conversão perdeu os pixels"
         );
         captura.parar().expect("a captura para");
+    }
+
+    /// O som do sistema chega pelo mesmo fluxo da imagem.
+    ///
+    /// **Pula em voz alta** sem permissão ou sem monitor, como a prova da
+    /// imagem — e pela mesma razão.
+    ///
+    /// Não afirma que há **barulho**: uma máquina em silêncio é um estado
+    /// legítimo, e um teste que exigisse música seria um teste que falha por
+    /// ninguém estar ouvindo nada. O que ele afirma é que o caminho existe e
+    /// anda — o silêncio também produz amostras, e é a contagem que separa
+    /// «ninguém está tocando» de «o áudio não está ligado».
+    #[test]
+    fn o_som_do_sistema_chega_junto_com_a_imagem() {
+        if !permissao().concedida() {
+            eprintln!("PULADO: o TCC não concedeu gravação de tela a este processo.");
+            return;
+        }
+        let lista = match fontes() {
+            Ok(l) => l,
+            Err(ErroDeCaptura::NadaParaCapturar) => {
+                eprintln!("PULADO: esta máquina não tem monitor nem janela.");
+                return;
+            }
+            Err(erro) => panic!("listar as fontes falhou: {erro}"),
+        };
+        let Some(monitor) = lista.iter().find(|f| matches!(f, Fonte::Monitor { .. })) else {
+            eprintln!("PULADO: nenhum monitor na lista.");
+            return;
+        };
+
+        let captura = CapturaDaTela::iniciar(monitor, Resolucao::P720, Cadencia::Q30)
+            .expect("a captura começa");
+        let som = captura.som();
+        let comeco = Instant::now();
+        while comeco.elapsed().as_secs_f64() < 3.0 && som.escritas() == 0 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let escritas = som.escritas();
+        captura.parar().expect("a captura para");
+
+        assert!(
+            escritas > 0,
+            "nenhuma amostra de som em três segundos. O `with_captures_audio`              voltou a `false`, ou o entregador parou de atender o tipo `Audio` —              e a transmissão sai muda sem erro nenhum, que foi como este defeito              chegou do campo."
+        );
     }
 }
