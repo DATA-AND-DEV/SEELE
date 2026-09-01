@@ -298,20 +298,39 @@ function desenhar(snapshot) {
  * nenhum — a ficha `C·02 / SERVER` que já o mostrou era um painel que o comp
  * não desenha, e saiu junto com a trilha voltando.
  */
-function desenharTopo(snapshot) {
-  const padrao = $("padrao");
-  padrao.dataset.padrao = snapshot.link_state;
-  // O rótulo diz o estado da conexão em palavras; o `data-padrao` continua
-  // sendo o nome do enum, que é por onde a folha escolhe a cor. As três frases
-  // são as três do `Trust` de `client.rs` — desligado, conectado sem
-  // verificar, verificado — e nenhuma delas é a cor que a antiga nomeava.
-  padrao.textContent = {
-    Offline: "SEM CONEXÃO",
-    Unverified: "CONEXÃO NÃO VERIFICADA",
-    Verified: "CONEXÃO SEGURA",
-  }[snapshot.link_state];
+function esvaziarBarraDoServidor() {
+  // A comp deixa os dois campos vazios na entrada — `s.tela === "boot" ? ""`
+  // nos dois. Sem isto a barra fica com o nome e o estado do servidor de onde
+  // se acabou de sair, que é uma janela dizendo que está conectada a um
+  // servidor de que já saiu. Foi o que apareceu em campo na tela inicial.
+  const rotulo = $("barra-servidor-nome");
+  rotulo.textContent = "";
+  rotulo.removeAttribute("title");
+  const sub = $("barra-servidor-sub");
+  sub.textContent = "";
+  delete sub.dataset.padrao;
+}
 
-  $("topo-pessoa").textContent = snapshot.nickname;
+function desenharTopo(snapshot) {
+  // O estado do enlace **é** o subtítulo do servidor, e não um selo à parte: a
+  // comp escreve `servidorSub: s.tela === "boot" ? "" : "SERVIDOR · CONEXÃO
+  // SEGURA"`, numa barra que tem quatro coisas e mais nenhuma. Ele morava aqui
+  // num `#padrao` próprio, com o retrato do servidor e o apelido ao lado, e os
+  // três não cabiam nos 32px — o relato de campo foi «o ícone do servidor
+  // cortado no meio lá em cima que o padding de conexão segura fora».
+  //
+  // As três frases são as três do `Trust` de `client.rs`. O `data-padrao`
+  // continua sendo o nome do enum, que é por onde a folha escolhe a cor: uma
+  // conexão não verificada não pode ser pintada como se fosse a boa.
+  const sub = $("barra-servidor-sub");
+  sub.dataset.padrao = snapshot.link_state;
+  sub.textContent = `SERVIDOR · ${
+    {
+      Offline: "SEM CONEXÃO",
+      Unverified: "CONEXÃO NÃO VERIFICADA",
+      Verified: "CONEXÃO SEGURA",
+    }[snapshot.link_state]
+  }`;
 
   const nome = snapshot.server;
   const rotulo = $("barra-servidor-nome");
@@ -326,31 +345,6 @@ function desenharTopo(snapshot) {
   }
 
   desenharTrilha(snapshot);
-  desenharPortaDoServer();
-}
-
-/**
- * `SERVIDOR · 7743` — a segunda linha do bloco do servidor.
- *
- * A porta sai do endereço que esta janela discou, e não do `Snapshot`: o
- * protocolo não carrega para onde nos conectamos, e o inventário §3.5
- * classifica o campo como **S** justamente por isso — "a casca já tem o alvo".
- *
- * Quando o alvo não nomeia porta, a linha fica só `SERVIDOR`. A porta
- * efetiva nesse caso é a padrão do produto (ADR 0005), e escrevê-la aqui seria
- * pôr uma constante de protocolo dentro do JavaScript, que é exatamente o que
- * `specs/06-clientes-gui.md` proíbe. O motivo vai no `title`.
- */
-function desenharPortaDoServer() {
-  const sub = $("barra-servidor-sub");
-  const porta = /:(\d+)$/.exec(alvoDoServer ?? "");
-  if (porta) {
-    sub.textContent = `SERVIDOR · ${porta[1]}`;
-    sub.removeAttribute("title");
-  } else {
-    sub.textContent = "SERVIDOR";
-    sub.title = "o endereço não nomeou porta; esta sessão está na porta padrão";
-  }
 }
 
 /**
@@ -816,18 +810,15 @@ function desenharOperador(snapshot) {
     snapshot.muted ? "microfone mudo" : "microfone aberto",
     snapshot.total_isolation ? "não está ouvindo" : "ouvindo",
     snapshot.speaking ? "no ar" : null,
+    // O modo entra na frase porque ele saiu da tela como botão: a comp escreve
+    // exatamente isto em `vozEstado`, e é assim que o operador continua dizendo
+    // como o microfone abre sem repetir o seletor da configuração.
+    { PushToTalk: "abre com a tecla", VoiceActivated: "abre por voz", Open: "sempre aberto" }[
+      snapshot.voice_mode
+    ] ?? null,
   ]
     .filter(Boolean)
     .join(" · ");
-
-  const voz = $("botao-voz");
-  // "MODO:" na frente porque `TECLA` sozinho não diz que é um seletor — e um
-  // seletor que ninguém reconhece como seletor é um botão que ninguém aperta.
-  voz.textContent = { PushToTalk: "MODO: TECLA", VoiceActivated: "MODO: VOZ", Open: "MODO: ABERTO" }[
-    snapshot.voice_mode
-  ] ?? "TECLA";
-  voz.disabled = !snapshot.audio_available;
-  voz.dataset.ativo = snapshot.voice_mode === "Open" ? "sim" : "nao";
 
 }
 
@@ -2925,16 +2916,11 @@ $("lista-roster").addEventListener("input", (evento) => {
   });
 });
 
-// TECLA → VOZ → ABERTO → TECLA. `specs/03-audio.md` faz de push-to-talk o
-// padrão porque ele nunca dispara sozinho; sair dele é sempre um ato explícito.
-$("botao-voz").addEventListener("click", async () => {
-  const snapshot = await invoke("snapshot");
-  const proximo = { PushToTalk: "VoiceActivated", VoiceActivated: "Open", Open: "PushToTalk" }[
-    snapshot.voice_mode
-  ] ?? "PushToTalk";
-  await invoke("set_voice_mode", { mode: proximo });
-  await atualizar();
-});
+// O modo de voz é escolhido na configuração, sob `MODO DE VOZ` — três botões
+// nomeados, um por modo, em `tela-server.js`. O operador tinha um quarto botão
+// que ciclava TECLA → VOZ → ABERTO, e a comp da 0.9.0 não o desenha: um ciclo
+// não mostra as opções que esconde, e quem quisesse VOZ estando em ABERTO
+// tinha de passar por TECLA para chegar lá.
 
 
 $("convite-copiar").addEventListener("click", async () => {

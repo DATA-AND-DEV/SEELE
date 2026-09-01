@@ -3,31 +3,6 @@
    as notas e os botões são de `base.css`, que carrega antes — e é a ordem que faz
    `.visitados-titulo` ganhar de `.rotulo` no elemento que tem as duas classes. */
 
-/* ---- a marca ----
-   `docs/marca.md`, direção 1c. Aqui morava a assinatura em contorno — o katakana
-   da abertura do anime, desenhado como `<path>` para não depender de face
-   japonesa nenhuma. A marca nova não tem esse problema porque não tem glifo
-   japonês: o símbolo é geometria (`marca-simbolo.svg`) e o nome é latino, na
-   Saira Condensed que este app embarca.
-
-   O nome sai em laranja e não em osso, e é a única aplicação da marca em que
-   isso vale: esta tela é onde o produto se apresenta, e o par símbolo-nome é o
-   assunto da tela inteira em vez de um carimbo num canto. */
-.boot-simbolo {
-  display: block;
-  width: 88px;
-  height: 88px;
-}
-
-.boot-nome {
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 96px;
-  line-height: 0.9;
-  letter-spacing: 0.02em;
-  color: var(--seele-laranja-nerv);
-}
-
 .boot-form { display: flex; flex-direction: column; gap: 16px; }
 
 .campo { display: flex; flex-direction: column; gap: 4px; }
@@ -400,41 +375,64 @@
 
 /* ---------------------------------------------- a entrada da 0.9.0
  *
- * Ela deixou de ser um formulário e virou uma pergunta de duas respostas. A
- * caixa é centrada e estreita — 480px, da comp —, porque não há nada a
- * comparar lado a lado: o que se escolhe aqui é entrar ou hospedar. */
+ * Os valores são os da comp, **por inteiro e não por diferença**. Escrever só
+ * o que muda foi o defeito da primeira tentativa: `base.css` desenha um
+ * `.boot-marca` empilhado para o cartão que a entrada e o fim dividem, e esta
+ * folha acrescentou `align-items:center` por cima sem zerar o
+ * `flex-direction:column` de lá. As duas regras têm a mesma especificidade,
+ * então o que sobrou foi a soma das duas: coluna **e** centrado — símbolo em
+ * cima, nome embaixo, tudo no meio. Nada disso está na comp, e ninguém
+ * escreveu; caiu da mistura.
+ *
+ * Por isso cada bloco aqui declara todas as propriedades que usa, inclusive as
+ * que por acaso já valeriam. Uma regra que só corrige a anterior depende dela
+ * para estar certa, e é o tipo de acoplamento que só aparece na tela de quem
+ * está usando. */
 
 .boot-caixa {
   margin: auto;
   width: 480px;
   max-width: 100%;
   padding: 32px;
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
   border: 1px solid var(--seele-linha-forte);
   background: var(--seele-negro-painel);
 }
 
+/* Símbolo e nome lado a lado, com o nome e a assinatura empilhados ao lado
+   dele: `display:flex;align-items:center;gap:20px` na comp, e o afastamento de
+   40px até a leitura vem daqui e não de um `gap` do cartão — a comp dá um
+   afastamento diferente a cada junta, e um `gap` só os igualaria todos. */
 .boot-marca {
+  margin: 0 0 40px;
   display: flex;
+  flex-direction: row;
   align-items: center;
-  gap: 16px;
+  gap: 20px;
 }
 
-.boot-simbolo { flex: 0 0 auto; }
+.boot-simbolo {
+  display: block;
+  width: 72px;
+  height: 72px;
+  flex: 0 0 auto;
+}
 
 .boot-marca-texto {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  align-items: flex-start;
+  gap: 8px;
   min-width: 0;
 }
 
-.boot-marca-titulo {
+/* `docs/marca.md`, direção 1c: o símbolo é geometria e o nome é latino, na
+   Saira Condensed que este app embarca. Laranja e não osso, e é a única
+   aplicação da marca em que isso vale — esta tela é onde o produto se
+   apresenta, e o par símbolo-nome é o assunto dela inteira. */
+.boot-nome {
   font-family: var(--seele-display);
   font-weight: 900;
-  font-size: 40px;
+  font-size: 56px;
   line-height: 1;
   letter-spacing: 0.02em;
   color: var(--seele-laranja-nerv);
@@ -447,30 +445,52 @@
   color: var(--seele-rotulo-painel);
 }
 
-/* A leitura de boot: monoespaçada e apagada, porque é o que o produto é e não
-   o que ele está fazendo. Ela não pisca nem rola — ver a nota no `index.html`
-   sobre por que ela é verdade e não cenário. */
+/* A leitura de boot: monoespaçada, sobre o negro absoluto e dentro de um
+   filete. Ela não pisca nem rola — ver a nota no `index.html` sobre por que ela
+   é verdade e não cenário. */
 .boot-leitura {
+  margin: 0 0 32px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   padding: 12px 14px;
   border: 1px solid var(--seele-linha);
   background: var(--seele-negro-absoluto);
+  overflow: hidden;
 }
 
+/* A primeira linha é o comando, e sai em fósforo; as do meio são o que ele
+   respondeu, e saem apagadas. É a hierarquia da comp, e ela é a de um terminal
+   de verdade — o que se digitou tem um brilho que o que voltou não tem.
+ *
+ * **Sem `white-space: nowrap`, e é uma diferença deliberada da comp.** Lá cada
+ * linha tem uma largura em `ch` e um `overflow: hidden`, porque ela as
+ * datilografa: a largura cresce de zero até o número de caracteres, e o corte é
+ * o efeito. Nós não datilografamos — a leitura é verdade e não cenário, e
+ * aparecer inteira de uma vez é o que ela deve fazer.
+ *
+ * Copiar o corte sem copiar a animação foi o que sobrou na primeira tentativa,
+ * e o resultado foi a terceira linha terminando em «na primeira vis». Um texto
+ * cortado numa tela que se apresenta é pior que um texto em duas linhas — e
+ * pior ainda porque o corpo de fonte do sistema e o idioma mudam onde ele
+ * corta, então ele estaria certo nesta máquina e errado na próxima. */
 .boot-linha {
+  display: block;
   font-family: var(--seele-mono);
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 18px;
   letter-spacing: 0.04em;
   color: var(--seele-osso-apagado);
+  white-space: normal;
 }
+
+.boot-linha:first-child { color: var(--seele-fosforo); }
 
 .boot-linha-pronto {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--seele-fosforo);
+  color: var(--seele-laranja-nerv);
 }
 
 /* O cursor pisca, e é a única animação desta tela.
@@ -480,9 +500,10 @@
  * ele para **sem sumir**, que é a regra que a varredura já segue: parado ele
  * continua sendo o cursor. */
 .boot-cursor {
-  width: 7px;
+  display: inline-block;
+  width: 8px;
   height: 14px;
-  background: var(--seele-fosforo);
+  background: var(--seele-laranja-nerv);
   animation: boot-cursor 1s steps(1) infinite;
 }
 
@@ -495,38 +516,73 @@
   .boot-cursor { animation: none; }
 }
 
+/* **Empilhadas, e não lado a lado.** A comp escreve `flex-direction:column`, e
+   a razão está na leitura: as duas saídas não são um par a comparar em largura
+   igual — `CONECTAR` é o que quase todo mundo quer, e `HOSPEDAR AQUI` é a
+   outra coisa. Uma sob a outra, em largura inteira, é o que dá a primeira ao
+   polegar e deixa a segunda visível sem competir. */
 .boot-saidas {
   display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
-.boot-saidas > button { flex: 1; }
+.boot-saidas > button {
+  width: 100%;
+  letter-spacing: 0.22em;
+  padding: 14px 16px;
+}
 
 /* O rodapé: quem você é, e os ajustes desta máquina. Separado por um filete
    porque é outra coisa — não é uma terceira saída. */
 .boot-rodape {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 8px;
+  margin-top: 24px;
   padding-top: 16px;
   border-top: 1px solid var(--seele-linha);
 }
 
+/* Contornado, ao contrário do bloco do operador da sessão: lá ele é o cabeçalho
+   de uma coluna e a moldura seria ruído; aqui ele divide a linha com a
+   engrenagem, e sem moldura pareceria texto ao lado de um botão. A comp
+   desenha os dois com o mesmo filete pela mesma razão. */
 .boot-perfil {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex: 1;
   min-width: 0;
-  padding: 0;
+  padding: 10px 12px;
   font: inherit;
   text-align: left;
+  color: var(--seele-osso-apagado);
   background: none;
-  border: 0;
+  border: 1px solid var(--seele-linha-forte);
   cursor: pointer;
+}
+
+#boot-perfil-nome { color: var(--seele-osso); }
+
+.boot-perfil:hover {
+  color: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
 }
 
 .boot-perfil:hover .operador-inicial {
   color: var(--seele-laranja-nerv);
   border-color: var(--seele-laranja-nerv);
 }
+
+/* A engrenagem, 44px de largo e da altura do vizinho — os dois se alinham pelo
+   `align-items:stretch` do rodapé, e não por uma altura escrita duas vezes. */
+.boot-rodape > .botao-fantasma {
+  width: 44px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+

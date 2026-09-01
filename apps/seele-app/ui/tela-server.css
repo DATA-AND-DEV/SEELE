@@ -20,14 +20,28 @@
   opacity: 0.78;
 }
 
-/* `relative` para ficar sobre o véu; `max-height` porque um diálogo mais alto
-   que a janela é uma tela com outro nome, e o que passa disso rola dentro. */
+/* A caixa, com os valores literais da comp — e três deles eram defeito.
+ *
+ * **`background`.** Ela não tinha nenhum. O véu do `::before` é 0,78 sobre o
+ * negro, e portanto translúcido: a tela de trás continuava legível através da
+ * configuração. Na entrada, cujo fundo é claro de textura, ficava «ainda mais
+ * feio» — que é como o relato de campo o descreveu.
+ *
+ * **`height` fixa, e não `max-height`.** Com a altura vindo do conteúdo, o
+ * diálogo mudava de tamanho a cada seção escolhida na coluna da esquerda: o
+ * mesmo diálogo, saltando, como se cada seção fosse uma janela diferente. A
+ * comp escreve `min(620px, calc(100vh - 96px))` — 620 quando cabe, e o que
+ * sobra da janela quando não cabe, sempre com os 32px de folga em volta mais
+ * a margem de 16 de cada lado.
+ *
+ * **`max-width` de 840px**, e não 1040: era largura nossa, não da comp. */
 .camada-server > .server {
   position: relative;
   width: 100%;
-  max-width: 1040px;
-  max-height: 100%;
-  border: 1px solid var(--seele-laranja-nerv);
+  max-width: 840px;
+  height: min(620px, calc(100vh - 96px));
+  background: var(--seele-negro-painel);
+  border: 1px solid var(--seele-linha-forte);
   overflow: hidden;
 }
 
@@ -66,7 +80,7 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-columns: 216px minmax(0, 1fr);
 }
 
 /* ---------- a coluna das seções ---------- */

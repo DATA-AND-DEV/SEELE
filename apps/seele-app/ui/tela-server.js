@@ -482,11 +482,20 @@ function uriDeIcone(bytes) {
   return `data:image/png;base64,${btoa(cru)}`;
 }
 
-/** Põe a imagem guardada nos dois lugares que a desenham, ou tira os dois. */
+/**
+ * Põe a imagem guardada onde ela se desenha, ou a tira.
+ *
+ * **Um lugar aqui, e não dois.** Havia um `<img>` na barra da janela, que tem
+ * 32px de altura: o retrato saía cortado ao meio e empurrava o resto da barra
+ * para fora. A trilha da esquerda já desenha o mesmo retrato num ladrilho de
+ * 56px, que é onde a comp dá identidade visual a um servidor, e ela o lê deste
+ * mesmo `iconeDesenhado.uri` no quadro seguinte — não há terceira cópia a
+ * manter em dia.
+ */
 function pintarIcone() {
   const uri = iconeDesenhado.uri;
-  for (const id of ["topo-server-icone", "server-icone-previa"]) {
-    const alvo = $(id);
+  {
+    const alvo = $("server-icone-previa");
     if (uri) alvo.src = uri;
     else alvo.removeAttribute("src");
     alvo.hidden = !uri;

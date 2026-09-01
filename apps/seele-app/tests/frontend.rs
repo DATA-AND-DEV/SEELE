@@ -3201,13 +3201,21 @@ fn the_picture_crosses_the_bridge_only_when_its_revision_moved() {
         "painting the picture asks Rust for something, so a redraw is not free \
          after all: {pinta}"
     );
-    for id in ["topo-server-icone", "server-icone-previa"] {
-        assert!(
-            pinta.contains(id),
-            "`pintarIcone` never touches `{id}`, so one of the two places the \
-             picture is drawn goes stale: {pinta}"
-        );
-    }
+    // The picture is drawn in one place from here — the settings preview. It
+    // used to be two, and the second was an `<img>` inside the 32px window bar,
+    // where it came out sliced in half and shoved the rest of the bar off the
+    // edge. The rail tile draws the same picture from the same
+    // `iconeDesenhado.uri` on the next frame, so it needs no second write.
+    assert!(
+        pinta.contains("server-icone-previa"),
+        "`pintarIcone` never touches the preview, so the place the picture is \
+         drawn goes stale: {pinta}"
+    );
+    assert!(
+        !pinta.contains("topo-server-icone"),
+        "the picture is being drawn into the window bar again; it is 32px tall \
+         and the picture comes out cut in half: {pinta}"
+    );
 
     // A session that ends forgets it. The revision of a *new* session starts
     // counting from zero again, so without this the picture of the server
@@ -8501,5 +8509,126 @@ fn a_nota_que_promete_o_enter_tem_quem_a_cumpra() {
         } else {
             "não trata Enter"
         }
+    );
+}
+
+/// Uma classe desenhada duas vezes tem de estar declarada como refinamento.
+///
+/// **O defeito que este guarda registra custou uma versão em campo.** A marca
+/// da entrada saiu empilhada e centrada na 0.9.0, e ninguém tinha escrito isso:
+/// `base.css` definia `.boot-marca` com `flex-direction: column` para o cartão
+/// que a entrada e o fim dividiam, e `tela-boot.css` acrescentou por cima um
+/// `align-items: center` sem zerar a direção. Mesma especificidade, folhas
+/// diferentes: o navegador não reporta nada, e o que vale é a **soma** — coluna
+/// da primeira, centro da segunda. O desenho resultante não estava em folha
+/// nenhuma.
+///
+/// A forma da falha é escrever a diferença em vez do valor. Uma regra que só
+/// corrige a de cima depende dela para estar certa, e passa a quebrar quando a
+/// de cima muda por outro motivo — que é o acoplamento mais caro que existe
+/// numa folha de estilo, porque só aparece na tela de quem está usando.
+///
+/// Refinar continua sendo legítimo: `.rotulo` e `.ausente` ganham em
+/// `acessibilidade.css` o que só vale sob `prefers-reduced-motion` e afins, e
+/// `.erro` ganha na entrada a largura que só faz sentido dentro do cartão. O que
+/// este guarda cobra é que o refinamento seja **declarado**, e não descoberto.
+#[test]
+fn no_class_is_drawn_by_two_stylesheets_without_being_a_declared_refinement() {
+    // Refinamentos legítimos: a classe é definida em `base.css` e uma segunda
+    // folha acrescenta o que só vale no contexto dela. Cada entrada carrega o
+    // motivo, e acrescentar uma aqui é a decisão que este guarda quer forçar a
+    // ser tomada de propósito.
+    const REFINAMENTOS: &[(&str, &str)] = &[
+        (".rotulo", "acessibilidade.css"),
+        (".ausente", "acessibilidade.css"),
+        (".erro", "tela-boot.css"),
+    ];
+
+    let folhas: Vec<(String, String)> = ui_files(".css")
+        .into_iter()
+        // `tokens.css` é cópia congelada do design (ADR 0014) e não define classe.
+        .filter(|nome| nome != "tokens.css")
+        .map(|nome| {
+            let texto = without_comments(&read(&format!("ui/{nome}")));
+            (nome, texto)
+        })
+        .collect();
+
+    let mut onde: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for (nome, texto) in &folhas {
+        // A profundidade de chaves, porque **só o topo conta**. Uma regra
+        // dentro de um `@media` é a mesma classe dita de novo de propósito,
+        // sob uma condição — é assim que `.boot-cursor` para de piscar sob
+        // `prefers-reduced-motion`, e acusá-la seria acusar exatamente o que a
+        // folha deve fazer.
+        let mut fundura = 0i32;
+        for linha in texto.lines() {
+            let corte = linha.trim_start();
+            let fundura_da_linha = fundura;
+            fundura += i32::try_from(linha.matches('{').count()).unwrap_or(0);
+            fundura -= i32::try_from(linha.matches('}').count()).unwrap_or(0);
+            if fundura_da_linha != 0 {
+                continue;
+            }
+            let Some(resto) = corte.strip_prefix('.') else {
+                continue;
+            };
+            // Só a classe **sozinha** abrindo a regra: `.classe {`.
+            //
+            // Um seletor agrupado — `.voice_room, .linha { border-left: … }` —
+            // fica de fora de propósito. Ele não é a mesma classe dita duas
+            // vezes: é a folha dizendo que dois itens dividem um traço, uma vez
+            // só, e desmembrá-lo em duas regras é que criaria a cópia. Um
+            // seletor composto (`.boot-marca.fim`) também fica: a
+            // especificidade maior é uma decisão explícita, não um empate.
+            let fim = resto
+                .find(|c: char| !c.is_ascii_alphanumeric() && c != '-' && c != '_')
+                .unwrap_or(resto.len());
+            let (classe, cauda) = resto.split_at(fim);
+            if classe.is_empty() || !cauda.trim_start().starts_with('{') {
+                continue;
+            }
+            // O nome da folha entra **uma vez por definição**, e não uma vez
+            // por folha: a mesma classe escrita duas vezes no mesmo arquivo é o
+            // mesmo defeito, e foi assim que `.operador-quem` apareceu — a
+            // primeira regra dizia `flex-direction: column`, a segunda dizia
+            // `align-items: center` e não zerava a direção, e o avatar subiu
+            // para cima do nome que devia estar ao lado dele.
+            onde.entry(format!(".{classe}"))
+                .or_default()
+                .push(nome.clone());
+        }
+    }
+
+    let mut acusadas = Vec::new();
+    for (classe, folhas_da_classe) in &onde {
+        if folhas_da_classe.len() < 2 {
+            continue;
+        }
+        // Uma folha citada duas vezes é uma classe definida duas vezes nela, e
+        // isso não tem refinamento que valha: é o mesmo arquivo brigando
+        // consigo mesmo, e a correção é sempre escrever uma regra só.
+        let repetida_no_mesmo_arquivo = {
+            let mut vistas = std::collections::BTreeSet::new();
+            !folhas_da_classe.iter().all(|folha| vistas.insert(folha))
+        };
+        let declarado = !repetida_no_mesmo_arquivo
+            && folhas_da_classe.iter().all(|folha| {
+                folha == "base.css" || REFINAMENTOS.iter().any(|(c, f)| c == classe && f == folha)
+            });
+        if !declarado {
+            acusadas.push(format!("{classe} em {folhas_da_classe:?}"));
+        }
+    }
+
+    assert!(
+        acusadas.is_empty(),
+        "estas classes são desenhadas por mais de uma folha sem estarem \
+         declaradas como refinamento, e o que vale na tela é a soma das regras \
+         e não a intenção de nenhuma delas:\n  {}\n\nOu a segunda folha escreve \
+         o valor inteiro e a primeira deixa de definir a classe, ou o par entra \
+         em REFINAMENTOS com o motivo escrito.",
+        acusadas.join("\n  ")
     );
 }

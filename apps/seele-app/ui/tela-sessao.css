@@ -164,27 +164,6 @@
 
 .topo .botao-fantasma { align-self: center; margin-right: 16px; }
 
-/* A cartela de estado da conexão. Saira 900 com tracking largo, como no comp:
-   ela é a primeira coisa que se lê ao voltar para a janela, e era 11px de texto
-   corrido.
-
-   `nowrap` porque a frase mais longa das três — a de conexão não verificada —
-   tem três palavras, e o cabeçalho tem 56px de altura: deixá-la quebrar seria
-   deixá-la sair pela borda de cima. Quem cede largura é a régua ao lado, que é
-   um vão. */
-.padrao {
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 16px;
-  letter-spacing: 0.12em;
-  white-space: nowrap;
-  color: var(--seele-padrao-azul);
-}
-.padrao[data-padrao="Orange"] { color: var(--seele-laranja-nerv); }
-.padrao[data-padrao="Offline"] { color: var(--seele-osso-apagado); }
-
-.topo-pessoa { font-size: var(--seele-t-rotulo); color: var(--seele-osso-apagado); }
-
 .relogio {
   font-size: var(--seele-t-dado);
   letter-spacing: 0.08em;
@@ -293,8 +272,8 @@
 
 /* O servidor em que se está. Desabilitado porque apertá-lo seria entrar onde já se
    está — mas ele não é decoração: é o rótulo da coluna, e `aria-current` diz
-   isso a quem escuta a tela. O `opacity` de `.botao-estado:disabled` não vale
-   aqui; um item apagado seria o contrário do que ele significa. */
+   isso a quem escuta a tela. Sem o esmaecimento de um botão desabilitado
+   qualquer; um item apagado seria o contrário do que ele significa. */
 .trilha-atual {
   border-left-color: var(--seele-laranja-nerv);
   background: var(--seele-laranja-fraco);
@@ -805,9 +784,7 @@ button.voice_room-nome:hover { text-decoration: underline; }
   background: var(--seele-negro-painel);
 }
 
-.operador-topo { display: flex; align-items: center; gap: 10px; }
-
-.operador-quem { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.operador-topo { display: flex; align-items: center; gap: 8px; }
 
 .operador-rotulo {
   font-size: var(--seele-t-micro);
@@ -823,12 +800,13 @@ button.voice_room-nome:hover { text-decoration: underline; }
   white-space: nowrap;
 }
 
-/* O `⚙` do comp v3, 38×38 e contornado. O glifo é o conteúdo inteiro do botão,
+/* O `⚙` do comp, 34×34 e contornado — a mesma medida do microfone e do fone
+   ao lado, que é o que os faz lerem como uma fileira só. O glifo é o conteúdo inteiro do botão,
    então o nome acessível é obrigatório e vive no `aria-label` do próprio botão
    — a nota ao lado é a metade que quem enxerga recebe. */
 .operador-config {
-  width: 38px;
-  height: 38px;
+  width: 34px;
+  height: 34px;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
@@ -845,31 +823,42 @@ button.voice_room-nome:hover { text-decoration: underline; }
   border-color: var(--seele-laranja-nerv);
 }
 
-/* A frase de identidade (inventário v3 §1.2), dita uma vez. Ela quebra em duas
-   ou três linhas de 268px e não é para caber numa: é uma frase, e não um
-   rótulo. */
-.operador-frase { margin-bottom: 2px; }
-
-.operador .botao-estado { width: 100%; text-align: left; }
-
-.botao-estado {
+/* Microfone e fone, com os valores da comp: 34×34, contornados, o glifo em
+ * 1,15em do corpo de 13px.
+ *
+ * **Quadrados, e este é o defeito que eles tinham.** Eles herdavam um
+ * `.operador .botao-estado { width: 100% }` que vencia por especificidade o
+ * `width: 34px` daqui, e um `font-size` de rótulo que deixava o glifo em 12px.
+ * O resultado em campo foram duas caixas largas e aparentemente vazias no meio
+ * da coluna — «os botões estão completamente estranhos». */
+.operador-glifo {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font: inherit;
-  font-size: var(--seele-t-rotulo);
-  letter-spacing: 0.14em;
   color: var(--seele-osso-apagado);
   background: none;
   border: 1px solid var(--seele-linha-forte);
-  padding: 8px;
+  padding: 0;
   cursor: pointer;
 }
 
-.botao-estado[data-ativo="sim"] {
+.operador-glifo .glifo { width: 1.15em; height: 1.15em; }
+
+.operador-glifo:hover {
+  color: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
+}
+
+/* Desligado é laranja cheio, como todo estado ligado desta casca. */
+.operador-glifo[data-ativo="sim"] {
   color: var(--seele-negro-absoluto);
   background: var(--seele-laranja-nerv);
   border-color: var(--seele-laranja-nerv);
 }
-
-.botao-estado:disabled { opacity: 0.5; cursor: default; }
 
 /* ---------- coluna 3: o canal aberto ---------- */
 
@@ -2000,30 +1989,12 @@ button.voice_room-nome:hover { text-decoration: underline; }
 #vista-conversa[hidden] { display: none; }
 
 
-/* Os dois controles de ícone do operador — microfone e som.
- *
- * Quadrado, para o desenho não ficar esticado dentro de um botão de rótulo. O
- * glifo em `1.4em` porque ele tem de ser lido a três metros de distância, que é
- * onde a pessoa está quando percebe que está muda. */
-.botao-glifo {
-  width: 34px;
-  min-height: 34px;
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-}
 
-.botao-glifo .glifo {
-  width: 1.4em;
-  height: 1.4em;
-  vertical-align: middle;
-}
-
-/* A linha que substituiu o botão de falar: estado, não instrução. */
+/* A linha que substituiu o botão de falar: estado, não instrução. Ela quebra
+   em duas linhas nos 268px da coluna e não é para caber numa — é uma frase, e
+   não um rótulo. */
 .operador-frase {
-  margin: 0;
+  margin: 0 0 2px;
   font-size: 11px;
   letter-spacing: 0.04em;
   color: var(--seele-osso-apagado);
@@ -2035,6 +2006,7 @@ button.voice_room-nome:hover { text-decoration: underline; }
    diz que responde é o cursor e a inicial acendendo ao passar. */
 .operador-quem {
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: 8px;
   flex: 1;
@@ -2050,13 +2022,16 @@ button.voice_room-nome:hover { text-decoration: underline; }
 .operador-quem-texto {
   display: flex;
   flex-direction: column;
+  gap: 2px;
   min-width: 0;
 }
 
-/* A inicial, que é o que os outros veem de quem não pôs imagem. */
+/* A inicial, que é o que os outros veem de quem não pôs imagem. 32×32, que é o
+   `estiloAvatarPequeno` da comp — a mesma medida aqui e no rodapé da entrada,
+   porque é a mesma pessoa nos dois lugares. */
 .operador-inicial {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   flex: 0 0 auto;
   display: flex;
   align-items: center;

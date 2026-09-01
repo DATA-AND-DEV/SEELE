@@ -348,7 +348,20 @@ function fraseDeErro(erro) {
 function desconhecida(erro) {
   let detalhe;
   try {
-    detalhe = typeof erro === "object" ? JSON.stringify(erro) : String(erro);
+    // **`Error` e `DOMException` primeiro, e é o caso que aparecia como `{}`.**
+    //
+    // `JSON.stringify` de um erro do navegador devolve o objeto vazio: `name` e
+    // `message` são propriedades do protótipo, e o `stringify` só enumera as
+    // próprias. Toda falha de `VideoDecoder`, de área de transferência ou de
+    // mídia chegava à tela como duas chaves e nada dentro — o pior detalhe
+    // possível, porque parece que o app tem a informação e não a mostra.
+    //
+    // Foi relatado em campo assim: «o erro de compartilhar tela trouxe {}».
+    if (erro instanceof Error || (erro && typeof erro.message === "string")) {
+      detalhe = [erro.name, erro.message].filter(Boolean).join(": ") || String(erro);
+    } else {
+      detalhe = typeof erro === "object" ? JSON.stringify(erro) : String(erro);
+    }
   } catch {
     // Um objeto com ciclo. Raro, e ainda assim melhor dizer o tipo que nada.
     detalhe = Object.prototype.toString.call(erro);

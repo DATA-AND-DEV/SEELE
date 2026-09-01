@@ -1,9 +1,17 @@
 /* SEELE — a tela de sessão encerrada (`#tela-fim`).
    O cartão é o mesmo da entrada e vive em `base.css`; o que muda é a cartela
    vermelha no lugar da assinatura, o motivo escrito abaixo dela e o par de
-   saídas — RECONECTAR e, menor, SAIR. */
+   saídas — RECONECTAR e, menor, SAIR.
 
-.boot-marca.fim {
+   **O título tem nome próprio, e passou a ter por um defeito.** Ele se chamava
+   `.boot-marca.fim` e herdava de um `.boot-marca` de `base.css` a margem de
+   baixo — mas `.boot-marca`, na entrada, é o **contêiner** do símbolo e do
+   nome, e este aqui é um `<h1>` de uma palavra. Duas coisas sem relação nenhuma
+   atrás do mesmo nome: no dia em que a entrada da 0.9.0 mudou o seu para uma
+   fileira, o título do fim virou uma fileira junto, e a margem de que ele
+   dependia sumiu quando a regra de `base.css` deixou de existir. */
+
+.fim-titulo {
   color: var(--seele-vermelho-alerta);
   font-family: var(--seele-display);
   font-weight: var(--seele-cartela);
@@ -11,6 +19,7 @@
   font-size: 32px;
   line-height: 32px;
   display: block;
+  margin: 0 0 32px;
 }
 
 /* Mesmo tratamento do `.erro` da entrada — `pre-line` e `overflow-wrap:

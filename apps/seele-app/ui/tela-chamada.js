@@ -580,7 +580,10 @@ function fraseDoEstado(pessoa) {
  * `chamada-ejetar` — microfone, isolamento, compartilhar e sair do servidor —
  * numa fileira própria da tela de chamada. A comp dissolve aquela tela e põe
  * microfone e isolamento no **operador**, que já os tinha; sair do servidor já
- * era `botao-desconectar`; e o compartilhar foi para a fileira do operador.
+ * era `botao-desconectar`; e o compartilhar foi para o cabeçalho do palco, ao
+ * lado de `TELA CHEIA` — a comp não o desenha em lugar nenhum, e a fileira do
+ * operador, onde ele parou primeiro, o deixava na tela o tempo todo, inclusive
+ * fora da chamada, onde não há palco que receba o que ele produz.
  *
  * Quatro botões que existiam em dois lugares viraram quatro em um. */
 

@@ -173,10 +173,15 @@ body { overflow: hidden; }
 }
 
 /* ---------- o cartão da entrada ----------
-   `.boot` e `.boot-marca` não são da tela de entrada: são o cartão centrado que
-   `#tela-boot` e `#tela-fim` já dividem hoje, e que a tela de autenticação vai
-   dividir amanhã. O que é só da entrada — a assinatura, o formulário, os
-   visitados — está em `tela-boot.css`; o que é só do fim está em `tela-fim.css`. */
+   `.boot` é o cartão centrado que `#tela-fim` usa, e que a tela de autenticação
+   vai dividir amanhã.
+
+   **`.boot-marca` saiu daqui.** Ele desenhava a marca empilhada, para o cartão
+   compartilhado, e a entrada da 0.9.0 a quer lado a lado — então `tela-boot.css`
+   passou a defini-la também. Duas folhas, a mesma classe, a mesma
+   especificidade: o que valeu foi a soma das duas, e a marca saiu empilhada
+   **e** centrada, que não é nenhuma das duas intenções. Hoje ela tem um
+   usuário só, e a regra mora junto dele. */
 
 .boot {
   margin: auto;
@@ -186,13 +191,6 @@ body { overflow: hidden; }
   background: var(--seele-negro-painel);
 }
 
-.boot-marca {
-  margin: 0 0 32px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-}
 
 /* ---------- campos e botões ----------
    Primitivos, e por isso comuns: a entrada e a sessão usam os dois. */
@@ -551,12 +549,22 @@ input:focus {
   text-overflow: ellipsis;
 }
 
+/* `SERVIDOR · CONEXÃO SEGURA` — o segundo campo do bloco do servidor, e é onde
+ * o estado do enlace mora. A comp o escreve assim e o deixa vazio na entrada.
+ *
+ * A cor é o estado, e é por isso que ela não é uma só: uma conexão que esta
+ * máquina ainda não verificou pintada como a verificada seria a folha de
+ * estilo mentindo sobre segurança. A palavra diz o mesmo, para quem a cor não
+ * alcança. */
 .barra-servidor-sub {
   font-size: 9px;
   letter-spacing: 0.2em;
   color: var(--seele-osso-apagado);
   white-space: nowrap;
 }
+
+.barra-servidor-sub[data-padrao="Verified"] { color: var(--seele-padrao-azul); }
+.barra-servidor-sub[data-padrao="Unverified"] { color: var(--seele-laranja-nerv); }
 
 .barra-relogio {
   display: flex;

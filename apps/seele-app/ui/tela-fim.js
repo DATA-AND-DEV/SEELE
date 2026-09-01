@@ -124,6 +124,7 @@ async function reconectar() {
   await limparSessaoEncerrada();
   $("tela-fim").hidden = true;
   $("tela-boot").hidden = false;
+  esvaziarBarraDoServidor();
   // O alvo volta pela memória do `conectar`, e não por um campo: a tela de
   // entrada da 0.9.0 não tem mais nenhum. Ver `ultimoAlvo` em `tela-boot.js`.
   ultimoAlvo = alvoDoFim;
@@ -138,6 +139,7 @@ async function sairParaAEntrada() {
   await limparSessaoEncerrada();
   $("tela-fim").hidden = true;
   $("tela-boot").hidden = false;
+  esvaziarBarraDoServidor();
   limparConvite();
   // Depois do redesenho, porque a lista de visitados acabou de mudar de
   // tamanho e o campo de endereço é o alvo desta tela.

@@ -715,6 +715,7 @@ function voltarParaAEntrada() {
   $("tela-auth").hidden = true;
   $("tela-boot").hidden = false;
   voltarParaTela("tela-boot");
+  esvaziarBarraDoServidor();
 }
 
 // ------------------------------------------------------------------- ligação

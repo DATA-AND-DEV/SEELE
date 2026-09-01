@@ -73,22 +73,6 @@
     <span id="barra-servidor-nome" class="barra-servidor-nome"></span>
     <span id="barra-servidor-sub" class="barra-servidor-sub"></span>
   </span>
-  <!--
-    **O estado do enlace, e a comp não o desenha.**
-
-    Ele morava na barra de topo da sessão, que a comp dissolve — e ela não o
-    põe em lugar nenhum. Largá-lo por isso seria largar informação de
-    segurança: é ele que diz se o certificado deste servidor é o mesmo de
-    ontem (ADR 0003), e é a única coisa da janela que responde «com quem eu
-    estou falando de verdade».
-
-    Vem para cá porque é o que sobrou de barra: o estado da conexão é da
-    janela, como o relógio, e não de uma tela dentro dela. Quem desenha decide
-    se é este o lugar.
-  -->
-  <span id="padrao" class="padrao"></span>
-  <span id="topo-pessoa" class="topo-pessoa"></span>
-  <img id="topo-server-icone" class="server-icone-topo" alt="" hidden>
   <time id="barra-relogio" class="barra-relogio">--:--:--</time>
   <span class="barra-controles">
     <button id="janela-minimizar" class="barra-controle" type="button"
@@ -250,14 +234,14 @@
       <img src="marca-simbolo.svg" alt="" class="boot-simbolo" width="72" height="72">
       <span class="boot-marca-texto">
         <!--
-          `boot-nome` e não uma classe nova: o
+          `boot-nome`, e uma classe só: o
           `a_entrada_desenha_a_marca_nova_e_nenhuma_citacao_do_anime` cobra que o
           nome seja **texto** nesta tela, e essa é a classe por onde ele o
           procura. Desenhado, o nome voltaria a depender de um arquivo por
           tamanho — que é o que o `docs/marca.md` gastou uma decisão para
           deixar de precisar.
         -->
-        <span class="boot-nome boot-marca-titulo">SEELE</span>
+        <span class="boot-nome">SEELE</span>
         <span class="boot-marca-sub">voz, vídeo e texto auto-hospedados</span>
       </span>
     </div>
@@ -985,6 +969,15 @@
             é forma, e `specs/06-clientes-gui.md` não aceita forma sozinha mais
             do que aceita cor sozinha.
           -->
+          <!--
+            Microfone e fone, e o script os desenha: a comp os põe **nesta
+            linha**, 34×34 ao lado do perfil e antes da engrenagem, e não como
+            botões de largura inteira embaixo. Nascem vazios porque o estado só
+            é conhecido no primeiro snapshot, e um desenho fixo aqui seria um
+            estado escrito na marcação para ser desmentido meio segundo depois.
+          -->
+          <button id="botao-mudo" class="operador-glifo" type="button"></button>
+          <button id="botao-surdo" class="operador-glifo" type="button"></button>
           <button id="botao-server-sessao" class="operador-config" type="button"
                   aria-label="Abrir configurações"
                   title="configuração local desta máquina"
@@ -1004,29 +997,27 @@
           que sobra aqui é dizer o que está acontecendo.
         -->
         <p id="voz-estado" class="operador-frase" role="status"></p>
-        <button id="botao-voz" class="botao-estado" type="button"
-                title="como o microfone abre">MODO: TECLA</button>
         <!--
-          Ícones, e o script os desenha: o microfone e o fone da comp da 0.9.0,
-          com a barra diagonal quando estão desligados. Nascem vazios porque o
-          estado só é conhecido no primeiro snapshot, e um desenho fixo aqui
-          seria um estado escrito na marcação para ser desmentido meio segundo
-          depois.
+          **O seletor de modo saiu daqui.** A comp da 0.9.0 não o desenha no
+          operador: ela o põe na configuração, sob `MODO DE VOZ`, e no operador
+          deixa só a frase — «microfone aberto · ouvindo · sempre aberto». Os
+          três modos já moram em `#server-modo-tecla`/`-voz`/`-aberto`, então o
+          botão daqui era o mesmo seletor dito duas vezes, e a segunda vez com
+          um rótulo pior: `MODO: ABERTO` não diz que é escolhível.
         -->
-        <button id="botao-mudo" class="botao-estado botao-glifo" type="button"></button>
-        <button id="botao-surdo" class="botao-estado botao-glifo" type="button"></button>
         <!--
           A fileira que a comp da 0.9.0 põe no pé do operador: sair da sala e
           alternar o que a coluna do meio mostra. As duas juntas porque a
           distinção entre elas é o assunto — **trocar de vista não é sair da
           sala** —, e pô-las lado a lado é o que torna a diferença visível.
 
-          O terceiro botão **não está na comp**, e é acréscimo deliberado:
-          compartilhar a tela morava em `chamada-acoes`, que a comp dissolve
-          junto com a tela de chamada. A comp não menciona compartilhamento em
-          lugar nenhum — nem para começar, nem para assistir. Tirar o botão
-          seria tirar o recurso, então ele fica aqui, ao lado do que também é
-          sobre estar numa sala. Quem desenha decide se é este o lugar.
+          **`COMPARTILHAR` saiu daqui**, e o relato de campo é o motivo:
+          «tem botão que SÓ DEVE APARECER EM CHAMADA e aparece o tempo
+          inteiro». Ele estava nesta fileira, que é do operador e portanto
+          está sempre na tela — inclusive quando a coluna do meio mostra a
+          conversa e não há palco nenhum para receber a imagem. Foi para o
+          cabeçalho do palco, ao lado de `TELA CHEIA`, que é onde a coisa que
+          ele produz aparece.
         -->
         <div class="operador-fileira">
           <button id="operador-sair" class="botao-fantasma" type="button"
@@ -1051,11 +1042,6 @@
           -->
           <button id="botao-desconectar" class="botao-fantasma" type="button"
                   title="sai deste servidor e volta à entrada; a sala e a conversa ficam para trás">DESCONECTAR</button>
-          <button id="chamada-compartilhar" class="botao-fantasma" type="button"
-                  title="mostrar um monitor ou uma janela sua para quem está na sala">
-            <span id="chamada-compartilhar-titulo">COMPARTILHAR</span>
-            <span id="chamada-compartilhar-nota" class="nota"></span>
-          </button>
         </div>
       </div>
     </section>
@@ -1123,6 +1109,16 @@
               Só aparece quando há imagem a ampliar: um botão de tela cheia numa
               sala onde ninguém compartilha promete uma coisa que não existe.
             -->
+            <!--
+              Começar a compartilhar mora no cabeçalho do palco: o palco é o
+              destino do que ele produz, e o botão à esquerda de `TELA CHEIA`
+              põe «mostrar a minha» e «ampliar a alheia» na mesma barra, que é
+              onde quem procura uma vai procurar a outra.
+            -->
+            <button id="chamada-compartilhar" class="chamada-palco-cheia" type="button"
+                    title="mostrar um monitor ou uma janela sua para quem está na sala">
+              COMPARTILHAR
+            </button>
             <button id="palco-cheia" class="chamada-palco-cheia" type="button" hidden>
               TELA CHEIA
             </button>
@@ -1156,7 +1152,7 @@
               com o `palco-quem` que a chamada mantém.
             -->
             <p id="palco-falha" class="chamada-palco-falha" role="status" hidden></p>
-            <p id="palco-nota" class="nota">Use COMPARTILHAR A TELA aqui embaixo para mostrar um monitor ou uma janela sua.</p>
+            <p id="palco-nota" class="nota">Use COMPARTILHAR, aqui em cima, para mostrar um monitor ou uma janela sua.</p>
             <!--
               O motivo de uma transmissão parada chega por extenso do outro lado
               (`TelaEmCurso::parada`), e é a única frase desta janela escrita
@@ -2569,7 +2565,7 @@
          data-foco="botao-voltar"
          data-anuncio="Enlace encerrado.">
   <div class="boot">
-    <h1 class="boot-marca fim">ENLACE ENCERRADO</h1>
+    <h1 class="fim-titulo">ENLACE ENCERRADO</h1>
     <p id="fim-motivo" class="fim-motivo"></p>
     <button id="botao-voltar" class="botao" type="button">VOLTAR À ENTRADA</button>
   </div>
