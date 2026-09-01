@@ -9565,3 +9565,33 @@ fn the_fallback_nickname_is_never_the_one_the_shell_remembers() {
          empty.\n{corpo}"
     );
 }
+
+#[test]
+fn o_glifo_de_um_botao_nao_e_alvo_de_clique() {
+    // Relato de campo, no Windows: «quando clico no meio dos botões de microfone
+    // e de fone não funciona; precisa clicar no cantinho do botão».
+    //
+    // O centro de um botão de glifo é o `<svg>`; a borda é o `<button>`. Em
+    // Chromium o clique no `<svg>` borbulha e o ouvinte roda — o laboratório de
+    // `tools/carga-da-casca.py` confirmou isso, e é por isso que o defeito não
+    // reproduz aqui. No WebView2 do Windows, não roda.
+    //
+    // `pointer-events: none` tira a pergunta do caminho: o alvo passa a ser
+    // sempre o botão, em qualquer motor. Uma linha de CSS que some numa
+    // reorganização de folha, e o sintoma que ela evita não aparece em nenhum
+    // teste que rode fora do Windows — daí o guarda.
+    let css = read("ui/base.css");
+    let Some(regra) = css
+        .split(".glifo {")
+        .nth(1)
+        .and_then(|d| d.split('}').next())
+    else {
+        panic!("a regra `.glifo` sumiu de `base.css`");
+    };
+    assert!(
+        regra.contains("pointer-events: none"),
+        "o glifo voltou a ser alvo de clique.\n\
+         No WebView2 isso faz o meio dos botões de microfone e de fone parar de \
+         responder, e só a borda funcionar."
+    );
+}

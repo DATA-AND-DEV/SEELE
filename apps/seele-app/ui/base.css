@@ -289,6 +289,21 @@ input:focus {
   height: 1em;
   vertical-align: -0.2em;
   fill: currentColor;
+  /* **O glifo não é alvo de clique**, e isto é conserto de um defeito de campo
+     no Windows: «quando clico no meio dos botões de microfone e de fone não
+     funciona; precisa clicar no cantinho do botão».
+
+     O centro de um `.operador-glifo` é o `<svg>`, e a borda é o `<button>`. Em
+     Chromium o clique no `<svg>` borbulha até o botão e o ouvinte roda — foi o
+     que o laboratório mostrou, e por isso o defeito não reproduz aqui. No
+     WebView2 do Windows, não. Em vez de descobrir de que lado está a razão num
+     motor que não tenho, tiro a pergunta do caminho: um ícone dentro de um botão
+     não tem por que ser alvo de nada, e com `pointer-events: none` o alvo é
+     sempre o botão, em qualquer motor.
+
+     Ninguém depende do contrário: nenhum ouvinte desta casca inspeciona o
+     `target` procurando um glifo. */
+  pointer-events: none;
 }
 
 /* ---------- a varredura ----------
