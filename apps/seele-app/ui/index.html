@@ -49,6 +49,57 @@
 <body>
 
 <!--
+  A barra da janela, da comp da 0.9.0.
+
+  Ela substitui a barra de título do sistema, e o que a torna nossa é o
+  `-webkit-app-region: drag` do CSS — arrastar por aqui move a janela.
+
+  **Ela é diferente nos dois sistemas, e isso é decisão de quem desenha.** No
+  Windows os três controles são nossos, à direita, e a marca fica à esquerda.
+  No macOS os três semáforos do sistema continuam no canto esquerdo — é onde a
+  mão vai num Mac —, então os nossos não existem e a marca vai para a direita
+  para não empurrá-los. Quem decide é o atributo `data-plataforma` que o script
+  põe aqui, lido do comando `plataforma`.
+
+  Os controles têm `aria-label` e são alcançáveis por teclado, ao contrário da
+  faixa que arrasta: `app-region` não é um gesto que o teclado tenha, e
+  `06-clientes-gui.md` obriga a haver caminho para tudo. Mover a janela pelo
+  teclado continua sendo o do sistema, nos dois.
+-->
+<header id="barra-janela" class="barra-janela" data-plataforma="">
+  <span class="barra-marca">SEELE</span>
+  <span class="barra-servidor">
+    <span id="barra-servidor-nome" class="barra-servidor-nome"></span>
+    <span id="barra-servidor-sub" class="barra-servidor-sub"></span>
+  </span>
+  <!--
+    **O estado do enlace, e a comp não o desenha.**
+
+    Ele morava na barra de topo da sessão, que a comp dissolve — e ela não o
+    põe em lugar nenhum. Largá-lo por isso seria largar informação de
+    segurança: é ele que diz se o certificado deste servidor é o mesmo de
+    ontem (ADR 0003), e é a única coisa da janela que responde «com quem eu
+    estou falando de verdade».
+
+    Vem para cá porque é o que sobrou de barra: o estado da conexão é da
+    janela, como o relógio, e não de uma tela dentro dela. Quem desenha decide
+    se é este o lugar.
+  -->
+  <span id="padrao" class="padrao"></span>
+  <span id="topo-pessoa" class="topo-pessoa"></span>
+  <img id="topo-server-icone" class="server-icone-topo" alt="" hidden>
+  <time id="barra-relogio" class="barra-relogio">--:--:--</time>
+  <span class="barra-controles">
+    <button id="janela-minimizar" class="barra-controle" type="button"
+            aria-label="Minimizar" title="minimizar">&#8211;</button>
+    <button id="janela-maximizar" class="barra-controle" type="button"
+            aria-label="Maximizar" title="maximizar">&#9633;</button>
+    <button id="janela-fechar" class="barra-controle barra-controle-fechar" type="button"
+            aria-label="Fechar" title="fechar">&#215;</button>
+  </span>
+</header>
+
+<!--
   A varredura. Fica fora das três telas de propósito — é um fundo sobre a
   janela inteira, e cada `.tela` aparece e some por baixo dela.
 
@@ -403,74 +454,6 @@
     deveriam". O par de réguas que o cercava vira uma régua só, que é o que
     sobra quando o texto entre elas sai.
   -->
-  <header class="topo">
-    <span class="topo-marca marca">SEELE</span>
-    <!--
-      O bloco que o comp escreve `TÓQUIO-3 / SERVER CENTRAL · 7743`. Ele voltou
-      para cá quando a ficha `C·02 / SERVER` saiu: aquele painel não existe no
-      comp, e o nome do servidor é a primeira coisa que o desenho diz.
-    -->
-    <!--
-      A imagem do servidor — o «à esquerda» do pedido, e o lugar onde ela vale
-      alguma coisa: ao lado do nome, no alto, onde a pessoa olha para saber em
-      que servidor está.
-
-      `alt=""` porque o nome está escrito no bloco ao lado, a um centímetro
-      daqui: uma descrição aqui faria um leitor de tela anunciar o mesmo
-      servidor duas vezes seguidas.
-
-      Nasce escondida e continua escondida enquanto não houver imagem — a
-      maioria dos servidores não tem uma, e um quadrado vazio no cabeçalho seria
-      uma moldura prometendo o que não existe. Quem a revela é `tela-server.js`,
-      que é quem sabe quando a imagem mudou.
-
-      A classe é `server-` e não `topo-` porque quem a pinta é `tela-server.css`:
-      esta imagem é a metade visível da tela de personalização, e as duas
-      metades mudam juntas. `tela-server.css` carrega depois de `tela-sessao.css`,
-      então nenhum empate de especificidade depende de sorte.
-    -->
-    <img id="topo-server-icone" class="server-icone-topo" alt="" hidden>
-    <span class="topo-server">
-      <span id="topo-server-nome" class="topo-server-nome">—</span>
-      <span id="topo-server-sub" class="topo-server-sub">SERVIDOR</span>
-    </span>
-    <span class="topo-bloco">
-      <span id="padrao" class="padrao">CONEXÃO SEGURA</span>
-      <span id="topo-pessoa" class="topo-pessoa"></span>
-    </span>
-    <span class="regua-larga" aria-hidden="true"></span>
-    <span class="topo-bloco topo-bloco-fim">
-      <time id="relogio" class="relogio">--:--:--</time>
-    </span>
-    <!--
-      A mesma tela da entrada, alcançada de dentro da sessão. Trocar de microfone
-      no meio de uma conversa é o caso que importa — é falando que se descobre
-      que a máquina abriu o errado — e a troca vale na hora, sem sair do servidor.
-    -->
-    <!--
-      A grade da sala de voz — a tela `chamada` do comp. Ela é a mesma sala vista de
-      outro ângulo: aqui está a conversa escrita, lá estão as pessoas. Alcançada
-      daqui e só daqui, porque não faz sentido fora de uma sessão.
-    -->
-    <button id="botao-chamada" class="botao-fantasma" type="button"
-            title="a grade da sala de voz, um cartão por pessoa">CHAMADA</button>
-    <!--
-      O `SERVER` que ficava aqui virou a engrenagem no rodapé da coluna de
-      canais, que é onde o comp v3 a põe: a configuração é do operador, e o
-      operador está lá embaixo. O `id` não mudou — `tela-server.js` registra o
-      ouvinte dele por nome, e mudar o nome só para mudar de lugar quebraria
-      outra tela sem necessidade.
-    -->
-    <!--
-      A saída, escrita. «DESCONECTAR» e não «SAIR» porque esta tela já tem um
-      botão chamado `SERVER`, e «sair do servidor» ao lado dele leria como sair da
-      configuração. E não «EJETAR», que é o vocabulário do tema mas não diz a
-      quem chega o que vai acontecer — o produto tem uma tela inteira chamada
-      SEELE, e ejetar pode ser lida como ejetar alguém.
-    -->
-    <button id="botao-desconectar" class="botao-fantasma" type="button"
-            title="encerrar esta sessão e voltar à tela de entrada">DESCONECTAR</button>
-  </header>
 
   <!--
     A sobreposição de alerta — a tela `alerta` do comp v2, inventário §4.
@@ -1133,6 +1116,24 @@
                   title="sair: você para de ouvir e de falar nesta sala">SAIR DA SALA</button>
           <button id="operador-vista" class="botao-fantasma" type="button"
                   title="a grade da sala de voz no lugar da conversa">CHAMADA</button>
+          <!--
+            **`DESCONECTAR` voltou para cá, e não por gosto.**
+
+            Ele morava na barra de topo da sessão, que a comp da 0.9.0
+            dissolve. Removê-lo com ela reprovou o
+            `the_add_server_button_carries_one_verb_and_not_the_two_the_v2_conflated`,
+            que guarda um achado pago num teste com duas máquinas: com «entrar
+            noutro servidor» e «sair deste» atrás do mesmo `+`, **ninguém
+            achava como sair**. O `+` da trilha continua sendo um verbo só, e
+            este é o outro, escrito.
+
+            Aqui e não noutro canto porque o vizinho certo é `SAIR DA SALA`: as
+            duas são saídas, de coisas diferentes, e é a palavra que as separa.
+            Pô-las lado a lado é o que torna a diferença legível — que é o
+            oposto exato do defeito que o guarda registra.
+          -->
+          <button id="botao-desconectar" class="botao-fantasma" type="button"
+                  title="sai deste servidor e volta à entrada; a sala e a conversa ficam para trás">DESCONECTAR</button>
           <button id="chamada-compartilhar" class="botao-fantasma" type="button"
                   title="mostrar um monitor ou uma janela sua para quem está na sala">
             <span id="chamada-compartilhar-titulo">COMPARTILHAR</span>

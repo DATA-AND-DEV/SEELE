@@ -15,7 +15,8 @@
         "minWidth": 720,
         "minHeight": 480,
         "resizable": true,
-        "theme": "Dark"
+        "theme": "Dark",
+        "titleBarStyle": "Overlay"
       }
     ],
     "security": {

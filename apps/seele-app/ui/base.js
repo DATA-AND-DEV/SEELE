@@ -337,3 +337,64 @@ window.addEventListener(
   // teclado. Um `preventDefault` tardio não impede o navegador de recarregar.
   true,
 );
+
+// ------------------------------------------------- a barra da janela
+//
+// Ela substitui a barra de título do sistema (comp da 0.9.0). O que ela faz
+// aqui é pouco e é tudo: descobrir em que sistema está, mover os controles de
+// acordo, e ligar os três botões à janela.
+//
+// **Por que a plataforma vem do Rust e não do `navigator`.** Porque o que se
+// quer saber não é qual motor desenha, é qual convenção de janela vale — e o
+// `userAgent` de um webview responde a primeira. O comando `plataforma` é o
+// mesmo `cfg` que decidiu tirar a decoração, então os dois não podem discordar.
+
+/** Põe na barra a plataforma, que é o que o CSS lê para arrumá-la. */
+async function arrumarBarraDaJanela() {
+  try {
+    const onde = await invoke("plataforma");
+    $("barra-janela").dataset.plataforma = onde;
+  } catch (falha) {
+    // Sem resposta, a barra fica na forma do Windows — os três controles
+    // desenhados. É o lado seguro: num Mac eles aparecem duplicados e feios;
+    // no Windows, a ausência deles é uma janela que não fecha.
+    console.warn("plataforma:", falha);
+    $("barra-janela").dataset.plataforma = "windows";
+  }
+}
+
+arrumarBarraDaJanela();
+
+// O relógio da barra. Local e não do servidor — é a hora de quem está olhando.
+setInterval(() => {
+  $("barra-relogio").textContent = new Date().toLocaleTimeString();
+}, 1000);
+
+/**
+ * Liga os três controles à janela desta casca.
+ *
+ * `getCurrentWindow` do Tauri, e não um comando nosso: minimizar, maximizar e
+ * fechar são da janela e não do produto, e escrever três comandos no `main.rs`
+ * seria três lugares nossos para um verbo que já existe pronto.
+ */
+function ligarControlesDaJanela() {
+  const janela = window.__TAURI__?.window?.getCurrentWindow?.();
+  if (!janela) {
+    // Fora do Tauri — um navegador aberto no `index.html` para olhar o
+    // desenho. Os botões ficam ali sem fazer nada, que é melhor que rebentar
+    // o resto do arquivo.
+    console.warn("sem janela do Tauri; os controles da barra não farão nada");
+    return;
+  }
+  $("janela-minimizar").addEventListener("click", () => {
+    janela.minimize().catch((falha) => console.warn("minimizar:", falha));
+  });
+  $("janela-maximizar").addEventListener("click", () => {
+    janela.toggleMaximize().catch((falha) => console.warn("maximizar:", falha));
+  });
+  $("janela-fechar").addEventListener("click", () => {
+    janela.close().catch((falha) => console.warn("fechar:", falha));
+  });
+}
+
+ligarControlesDaJanela();

@@ -314,7 +314,7 @@ function desenharTopo(snapshot) {
   $("topo-pessoa").textContent = snapshot.nickname;
 
   const nome = snapshot.server;
-  const rotulo = $("topo-server-nome");
+  const rotulo = $("barra-servidor-nome");
   if (nome) {
     medido(rotulo, nome);
     // O `title` porque o nome pode ser mais largo que o bloco e sair em
@@ -342,7 +342,7 @@ function desenharTopo(snapshot) {
  * `specs/06-clientes-gui.md` proíbe. O motivo vai no `title`.
  */
 function desenharPortaDoServer() {
-  const sub = $("topo-server-sub");
+  const sub = $("barra-servidor-sub");
   const porta = /:(\d+)$/.exec(alvoDoServer ?? "");
   if (porta) {
     sub.textContent = `SERVIDOR · ${porta[1]}`;
@@ -2952,7 +2952,6 @@ $("convite-copiar").addEventListener("click", async () => {
   }
 });
 
-$("botao-desconectar").addEventListener("click", ejetar);
 
 // A trilha, por delegação: os botões do histórico são reconstruídos quando a
 // lista muda, e um ouvinte por botão seria um ouvinte perdido a cada redesenho.
@@ -2963,6 +2962,10 @@ $("trilha-outros").addEventListener("click", (evento) => {
 });
 
 $("trilha-adicionar").addEventListener("click", pedirAEntrada);
+
+// A outra saída, escrita — ver a nota no `index.html`. Ela sai deste servidor;
+// o `SAIR DA SALA` ao lado sai só da sala de voz.
+$("botao-desconectar").addEventListener("click", ejetar);
 
 // A barra de espaço fala, exceto enquanto se digita — a mesma colisão que a TUI
 // resolve mantendo o push-to-talk fora do modo de inserção (decisão D19).
@@ -3047,9 +3050,9 @@ listen("seele://event", (evento) => {
 });
 
 // O relógio do topo é do relógio local, não do servidor.
-setInterval(() => {
-  $("relogio").textContent = new Date().toLocaleTimeString();
-}, 1000);
+/* O relógio saiu daqui na 0.9.0: ele mora na barra da janela, que a comp pôs
+   por cima de todas as telas. Dois `setInterval` para o mesmo número é o mesmo
+   número contado duas vezes, e o dia em que um deles parar ninguém sabe qual. */
 
 // A telemetria muda sozinha entre eventos — nível de entrada, RTT, deriva. O
 // uptime anda junto: ele é redesenhado por `desenharTelemetria`, e não por um

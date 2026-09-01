@@ -661,7 +661,6 @@ async function atualizarChamada() {
 
 // ------------------------------------------------------------------- ligação
 
-$("botao-chamada").addEventListener("click", abrirChamada);
 
 /**
  * O alternador da comp: a grade da sala **no lugar da conversa**, e de volta.

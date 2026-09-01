@@ -1601,6 +1601,40 @@ fn microfones() -> Vec<seele_ffi::CaptureDevice> {
     seele_ffi::capture_devices()
 }
 
+/// Qual sistema está desenhando esta janela.
+///
+/// # Por que a casca precisa saber
+///
+/// Ela quase nunca precisa — e é regra desta janela não saber de plataforma,
+/// porque o que muda entre elas é assunto do Rust. A barra de janela da 0.9.0 é
+/// a exceção, e a exceção é de convenção e não de capacidade:
+///
+/// - **no macOS** os três semáforos ficam à esquerda e são do sistema. Eles
+///   aparecem sobre a janela sem decoração quando se pede `Overlay`, e desenhar
+///   os nossos ali seria duplicá-los ou tirá-los. A marca vai para a direita,
+///   porque aquele canto é deles.
+/// - **no Windows** não há semáforo nenhum sem decoração, então os três botões
+///   são nossos, à direita, e a marca fica à esquerda como a comp a desenha.
+///
+/// Uma string e não um booleano: um `é_mac` responderia a esta pergunta e a
+/// nenhuma outra, e a próxima diferença de convenção nasceria com um segundo
+/// booleano ao lado.
+#[tauri::command]
+const fn plataforma() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "macos"
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "windows"
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        "outro"
+    }
+}
+
 /// Qual microfone está escolhido, ou `None` para o padrão da máquina.
 ///
 /// Vem do disco e não do `Snapshot`: são duas perguntas diferentes. Esta é "o
@@ -2493,6 +2527,35 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .manage(Session::default())
         .setup(move |app| {
+            // **A decoração do Windows sai; a do macOS fica.**
+            //
+            // A comp da 0.9.0 desenha a barra da janela — marca, servidor,
+            // relógio e os três controles. No Windows isso pede a janela sem
+            // decoração, e os controles passam a ser nossos.
+            //
+            // No macOS **não**, e a decisão é de quem desenha: o
+            // `titleBarStyle: Overlay` do `tauri.conf.json` já deixa a barra
+            // ser nossa mantendo os três semáforos do sistema no canto
+            // esquerdo, que é onde a mão vai num Mac. Tirá-los para desenhar os
+            // nossos no lugar seria cobrar do produto o preço de uma escolha
+            // estética. A casca sabe disso pelo comando `plataforma`, e move a
+            // marca para a direita para não empurrá-los.
+            //
+            // O que se perde no Windows, e é o custo aceito: o encaixe pelas
+            // bordas do sistema. O redimensionar continua, porque
+            // `decorations(false)` não o tira — só tira a moldura desenhada.
+            #[cfg(target_os = "windows")]
+            {
+                use tauri::Manager;
+                if let Some(janela) = app.get_webview_window("main") {
+                    if let Err(erro) = janela.set_decorations(false) {
+                        // Não é motivo para não abrir: uma janela com a barra
+                        // do sistema por cima da nossa é feia e funciona, e uma
+                        // que não abre não funciona.
+                        tracing::warn!(%erro, "não consegui tirar a decoração da janela");
+                    }
+                }
+            }
             // O módulo de vídeo passa a morar ao lado do banco, e não dentro do
             // pacote.
             //
@@ -2560,6 +2623,7 @@ fn main() {
             lembrar_aparencia_do_servidor,
             tela_cheia,
             microfones,
+            plataforma,
             microfone_escolhido,
             modo_de_voz_escolhido,
             tecla_de_falar,

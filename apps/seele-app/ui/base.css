@@ -29,6 +29,21 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 
+/* A altura da barra da janela, da comp da 0.9.0.
+ *
+ * **Aqui e não em `tokens.css`**, e a tentativa de pô-la lá foi recusada por um
+ * guarda com razão: aquele arquivo é cópia literal de `design/seele-tokens.css`,
+ * congelado no ADR 0014, e o `the_served_tokens_are_the_frozen_tokens` compara
+ * os dois byte a byte. Uma medida de layout que este arquivo inventou não é um
+ * token de design, e enfiá-la lá para ganhar uma variável seria descongelar a
+ * palheta por conveniência.
+ *
+ * Os dois lugares que a leem — `.barra-janela` e o `calc` de `.tela` — moram
+ * neste arquivo, então a variável aqui já os cobre. */
+:root {
+  --seele-barra-janela: 32px;
+}
+
 html, body {
   margin: 0;
   height: 100%;
@@ -44,7 +59,22 @@ html, body {
 
 body { overflow: hidden; }
 
-.tela { height: 100vh; display: flex; flex-direction: column; }
+/* `100vh` menos a barra da janela, que a 0.9.0 pôs por cima de todas as telas.
+ *
+ * Uma variável e não o número solto: a barra tem 32px em `.barra-janela`, e
+ * dois lugares com o mesmo número é um lugar para eles discordarem — o sintoma
+ * seria uma tela 32px mais alta que a janela, com o rodapé de telemetria
+ * cortado e nada dizendo por quê.
+ *
+ * `min-height` junto de `height` porque as telas são `flex` e o conteúdo delas
+ * rola por dentro: sem o mínimo, um filho que cresce empurra a tela para fora
+ * da janela em vez de rolar. */
+.tela {
+  height: calc(100vh - var(--seele-barra-janela));
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
 [hidden] { display: none !important; }
 
 /* ---------- a tela que acabou de entrar ----------
@@ -397,4 +427,177 @@ input:focus {
   font-size: var(--seele-t-dado);
   line-height: 1.4;
   color: var(--seele-osso);
+}
+
+
+/* ---------------------------------------------------------- a rolagem
+ *
+ * **Do produto, e não do sistema.** Sem estas regras o WebView2 desenha a
+ * barra clara do Windows sobre uma interface preta — uma faixa branca de 17px
+ * ao lado de cada lista, que é a única parte da janela que não é nossa.
+ *
+ * No macOS quase não se vê: o sistema usa barra sobreposta, que só aparece
+ * enquanto se rola. Foi por isso que isto passou tanto tempo sem ser notado —
+ * quem desenvolve está no Mac, e quem usa relatou do Windows.
+ *
+ * Duas famílias de propriedade porque nenhuma delas cobre tudo: o
+ * `::-webkit-scrollbar` é o que o WebView2 e o WebKit entendem, e o
+ * `scrollbar-color` é o padrão, que o Firefox e as versões novas dos dois
+ * também leem. Escrever só a padrão perderia a borda do polegar; escrever só a
+ * `-webkit-` perderia quem já migrou.
+ *
+ * Valores da comp da 0.9.0. A borda de 3px no polegar não é enfeite: ela é o
+ * negro do fundo, e é o que faz o polegar parecer flutuar em vez de encostar
+ * nas paredes do trilho. */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track { background: var(--seele-negro-absoluto); }
+
+*::-webkit-scrollbar-thumb {
+  background: var(--seele-linha-forte);
+  border: 3px solid var(--seele-negro-absoluto);
+}
+
+/* Laranja ao passar, como todo controle desta janela. */
+*::-webkit-scrollbar-thumb:hover { background: var(--seele-laranja-nerv); }
+
+/* Onde as duas barras se encontram, numa lista que rola nos dois eixos. Sem
+   isto o canto fica com o cinza do sistema, que é o defeito que estas regras
+   existem para tirar — só que num quadrado de 10px que ninguém procura. */
+*::-webkit-scrollbar-corner { background: var(--seele-negro-absoluto); }
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--seele-linha-forte) var(--seele-negro-absoluto);
+}
+
+
+/* ------------------------------------------------- a barra da janela
+ *
+ * Valores da comp da 0.9.0. `user-select: none` porque arrastar uma janela e
+ * selecionar o texto dela são gestos que se confundem no mesmo pixel.
+ *
+ * `-webkit-app-region: drag` é o que faz a faixa mover a janela; os controles
+ * pedem `no-drag` de volta, ou o clique neles vira um arrasto de zero pixel e
+ * o botão nunca dispara. */
+.barra-janela {
+  height: var(--seele-barra-janela);
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  background: var(--seele-negro-painel);
+  border-bottom: 1px solid var(--seele-linha);
+  user-select: none;
+  -webkit-app-region: drag;
+}
+
+.barra-marca {
+  width: 56px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid var(--seele-linha);
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  color: var(--seele-laranja-nerv);
+}
+
+/* **No macOS a marca vai para a direita.** O canto esquerdo é dos três
+   semáforos do sistema, que o `titleBarStyle: Overlay` mantém; a marca ali os
+   empurraria para dentro do conteúdo. `order` e não uma segunda marcação: é o
+   mesmo elemento noutro lugar, e duplicá-lo seria duplicar o que ele diz.
+
+   O recuo de 78px é onde os semáforos acabam — três botões de 12px com 8px
+   entre eles, mais a margem do sistema. Menos que isso e o nome do servidor
+   começa por baixo deles. */
+.barra-janela[data-plataforma="macos"] {
+  padding-left: 78px;
+}
+
+.barra-janela[data-plataforma="macos"] .barra-marca {
+  order: 3;
+  border-right: 0;
+  border-left: 1px solid var(--seele-linha);
+}
+
+/* Os controles nossos não existem no macOS: os do sistema estão desenhados por
+   cima, à esquerda, e dois conjuntos na mesma barra é a janela dizendo duas
+   vezes a mesma coisa. */
+.barra-janela[data-plataforma="macos"] .barra-controles { display: none; }
+
+.barra-servidor {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  min-width: 0;
+  flex: 1;
+}
+
+.barra-servidor-nome {
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--seele-osso);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.barra-servidor-sub {
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  color: var(--seele-osso-apagado);
+  white-space: nowrap;
+}
+
+.barra-relogio {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  border-left: 1px solid var(--seele-linha);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--seele-osso);
+  font-variant-numeric: tabular-nums;
+}
+
+.barra-controles {
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  -webkit-app-region: no-drag;
+}
+
+.barra-controle {
+  width: 44px;
+  border: 0;
+  border-left: 1px solid var(--seele-linha);
+  background: none;
+  color: var(--seele-osso-apagado);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.barra-controle:hover {
+  color: var(--seele-osso);
+  background: var(--seele-linha);
+}
+
+/* O fechar é o único que muda de cor ao passar, e é vermelho: `07-estetica.md`
+   reserva o vermelho para o que não tem volta, e fechar a janela no meio de uma
+   conversa é a coisa mais irreversível que esta barra oferece. */
+.barra-controle-fechar:hover {
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-vermelho-alerta);
 }
