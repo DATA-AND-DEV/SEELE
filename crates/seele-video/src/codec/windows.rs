@@ -456,10 +456,31 @@ impl Codificador {
             return Err(recusa("colher um quadro do codificador", erro));
         }
 
-        //  porque a struct do sistema não solta o que carrega: quem
-        // sai daqui com a amostra é quem passa a respondê-la, e o clone é o que
-        // dá a ela um dono com .
-        let Some(amostra) = saida.first().and_then(|b| (*b.pSample).clone()) else {
+        // **Tomar a posse, e não clonar.** Aqui vazavam 200 MB.
+        //
+        // `pSample` e `pEvents` são `ManuallyDrop`: o Rust não os solta, porque
+        // quem decide é o contrato do MFT — e num codificador que fornece as
+        // próprias amostras, o contrato é que **quem chama passa a responder por
+        // elas**. Clonar levava a contagem a dois e soltava um: a referência que
+        // o sistema entregou ficava viva para sempre, uma por quadro codificado.
+        //
+        // O sintoma foi relatado assim: «antes o SEELE nunca passava dos 20 MB,
+        // agora está consumindo quase 200 MB». A 60 quadros por segundo, cada
+        // amostra segurando o buffer codificado e, num MFT de hardware,
+        // possivelmente uma superfície da GPU.
+        //
+        // SAFETY: `saida` é nosso, local, e é descartado logo abaixo — deixar o
+        // `ManuallyDrop` inválido depois de tirar o valor é exatamente o uso que
+        // `take` documenta.
+        let Some(primeiro) = saida.first_mut() else {
+            return Ok(None);
+        };
+        let recolhida = unsafe { std::mem::ManuallyDrop::take(&mut primeiro.pSample) };
+        // A coleção de eventos vem pelo mesmo contrato e quase sempre vazia;
+        // soltá-la é a mesma obrigação, e esquecê-la seria o mesmo vazamento em
+        // ponto miúdo.
+        drop(unsafe { std::mem::ManuallyDrop::take(&mut primeiro.pEvents) });
+        let Some(amostra) = recolhida else {
             return Ok(None);
         };
         // SAFETY: a amostra é a que o MFT acabou de entregar.
