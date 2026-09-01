@@ -1590,3 +1590,26 @@ troca de entrada não é reproduzível de fora. A de saída é, e foi: passou.
 momento em que a pessoa não consegue ouvir e não pode receber a instrução «saia
 do servidor e volte» — o argumento que a própria `set_playback_device` escreve
 para justificar valer na hora.
+
+## 32 · O botão ENVIAR sai da barra de compor
+
+**Pedido de quem desenha o produto em 2026-08-31**, para a 0.9.0: *«era um
+ajuste de UI para remover o botão»*.
+
+Enter sempre enviou. A nota ao lado do campo já diz «Enter também envia», e o
+botão ao lado dela é a segunda maneira de fazer a mesma coisa ocupando o lugar
+mais valioso da barra.
+
+**A armadilha, e ela já está desarmada.** Sem o botão `type="submit"`, o envio
+implícito do navegador passa a se apoiar só na outra pré-condição — a de haver
+**exatamente um** campo de texto no formulário. Um campo a mais acrescentado
+depois apagaria o Enter sem tocar na frase que o promete.
+
+Por isso o ouvinte explícito de Enter entrou antes, em `tela-sessao.js`, com o
+guarda `a_nota_que_promete_o_enter_tem_quem_a_cumpra` prendendo a frase e o
+código juntos. **Quem remover o botão não precisa fazer mais nada além de
+remover o botão** — e o `ENVIAR` do `index.html` sai com o CSS
+`.compor-enviar`.
+
+**Quando dói.** Não dói: é ajuste de desenho, e está aqui para não se perder
+entre a conversa em que foi pedido e o pacote em que entra.

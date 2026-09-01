@@ -8459,14 +8459,18 @@ fn a_nota_que_promete_o_enter_tem_quem_a_cumpra() {
     // sozinho quando ele tem um campo de texto e um botão `type="submit"`.
     //
     // Aquilo funciona e tem pré-condições, e as pré-condições são sobre a forma
-    // do formulário. Um controle a mais nesta barra, um botão que passe a nascer
-    // desabilitado, um ouvinte de tecla acrescentado antes na fila — qualquer um
-    // dos três apaga a promessa sem tocar na frase que a faz.
+    // do formulário: exatamente um campo de texto, e um botão de submissão
+    // habilitado ou nenhum. Um campo a mais nesta barra apaga a promessa sem
+    // tocar na frase que a faz.
     //
-    // Foi relatado em campo que Enter não mandava, e a causa não foi encontrada.
-    // O que este guarda prende não é a causa: é que a frase e o código que a
-    // cumpre existam **juntos**, para que apagar um deles não deixe o outro
-    // mentindo sozinho na tela.
+    // **Nunca houve defeito aqui.** Uma versão anterior deste comentário dizia
+    // que Enter não mandava em campo; era leitura errada de um pedido que era
+    // outro — tirar o botão ENVIAR, que a 0.9.0 vai tirar. Fica escrito porque
+    // quem ler este guarda tem de saber que ele não guarda uma cicatriz.
+    //
+    // O que ele prende é que a frase e o código que a cumpre existam **juntos**,
+    // para que apagar um deles não deixe o outro mentindo sozinho na tela — e
+    // isso passa a valer de verdade no dia em que o botão sair.
     let page = without_comments(&read("ui/index.html"));
     let script = without_comments(&scripts());
 

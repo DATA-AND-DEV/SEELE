@@ -2616,22 +2616,26 @@ window.addEventListener("paste", (evento) => {
   colarImagem(evento).catch((falha) => console.warn("colar:", falha));
 });
 
-// **Enter manda, e este ouvinte existe para que isso não dependa de sorte.**
+// **Enter manda, e este ouvinte existe para que isso não dependa da forma do
+// formulário.**
 //
-// A nota ao lado do campo diz «Enter também envia». Até aqui essa promessa
+// A nota ao lado do campo diz «Enter também envia», e até aqui essa promessa
 // vinha inteira do *envio implícito* do navegador — o comportamento que faz um
-// `<form>` com um campo de texto e um botão `type="submit"` mandar sozinho ao
-// apertar Enter. Ele funciona, e tem pré-condições: exatamente um campo de
-// texto, um botão de submissão que não esteja desabilitado, e nenhum ouvinte
-// de tecla antes na fila. Três coisas que o próximo controle acrescentado a
-// esta barra pode quebrar sem que nada avise — e o que quebra é uma frase
-// escrita na tela.
+// `<form>` mandar sozinho ao apertar Enter. Ele funciona, e tem pré-condições:
+// **exatamente um** campo de texto, e um botão de submissão habilitado ou
+// nenhum. Duas coisas sobre a forma do formulário, que mudam quando alguém
+// mexe na barra de compor.
 //
-// Foi relatado em campo que Enter não mandava. A causa não foi encontrada
-// lendo: nada aqui desabilita o botão, nada intercepta a tecla, e o formulário
-// tem a forma exata que o envio implícito pede. **Isto não conserta uma causa
-// achada** — passa a promessa a ser dona de si, para que a resposta não dependa
-// mais de qual das pré-condições valia naquele instante.
+// **Registro de um erro meu, porque ele mudaria a leitura desta linha.** Este
+// ouvinte nasceu de um pedido que eu li errado: entendi «Enter não envia» onde
+// o pedido era «tire o botão ENVIAR, já que Enter envia». Enter sempre
+// funcionou. Escrevi aqui, e num commit, que havia um defeito relatado em
+// campo — não havia, e a frase saiu.
+//
+// O ouvinte fica porque o pedido de verdade é o que o torna necessário: com o
+// botão ENVIAR removido, a promessa passa a se apoiar só na regra do «um campo
+// de texto», e o próximo campo acrescentado a esta barra a apagaria sem tocar
+// na frase que a faz.
 //
 // `isComposing`: quem digita com IME — japonês, coreano, chinês — usa Enter
 // para confirmar a palavra que está montando. Mandar ali cortaria a frase no
