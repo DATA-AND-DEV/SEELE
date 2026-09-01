@@ -1535,6 +1535,21 @@
           -->
           <canvas id="palco-imagem" class="chamada-palco-imagem" hidden></canvas>
           <p id="palco-quem" class="chamada-palco-quem">NINGUÉM ESTÁ COMPARTILHANDO A TELA</p>
+          <!--
+            Por que a tela alheia não apareceu, **onde dá para ver**.
+
+            Todo desfecho ruim do lado de quem recebe era um `console.warn` e
+            nada mais: sem `VideoDecoder` na janela, quadro-chave sem SPS,
+            perfil que esta máquina não decodifica, decodificador que morreu.
+            Sete causas, uma tela preta, e quem está olhando não tem como
+            distinguir nenhuma delas — nem contá-la a quem pode consertar.
+            Foi assim que um defeito de perfil de vídeo custou uma versão
+            inteira em campo.
+
+            Escrito por `palco-imagem.js` e por mais ninguém, para não brigar
+            com o `palco-quem` que a chamada mantém.
+          -->
+          <p id="palco-falha" class="chamada-palco-falha" role="status" hidden></p>
           <p id="palco-nota" class="nota">Use COMPARTILHAR A TELA aqui embaixo para mostrar um monitor ou uma janela sua.</p>
           <!--
             O motivo de uma transmissão parada chega por extenso do outro lado

@@ -938,3 +938,20 @@ body[data-cinema="sim"]::after {
 body[data-vendo-tela="sim"] .varredura {
   display: none;
 }
+
+
+/*
+  Por que a tela alheia não apareceu.
+
+  Vermelho, que o `07-estetica.md` reserva para erro e queda — «se aparece,
+  algo está errado» —, e centralizado sobre o palco vazio, que é onde os olhos
+  já estão procurando a imagem que não veio.
+*/
+.chamada-palco-falha {
+  margin: 8px 0 0;
+  font-family: var(--seele-display);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-align: center;
+  color: var(--seele-vermelho-alerta);
+}

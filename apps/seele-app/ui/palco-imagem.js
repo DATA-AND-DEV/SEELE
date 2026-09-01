@@ -78,8 +78,43 @@ function codecDoSps(bytes) {
   return null;
 }
 
+/**
+ * Diz por que a tela alheia não apareceu, **onde dá para ver**.
+ *
+ * Todo desfecho ruim deste arquivo era um `console.warn` e mais nada. Sete
+ * causas diferentes — janela sem `VideoDecoder`, quadro-chave sem SPS, perfil
+ * que esta máquina não decodifica, decodificador morto, quadro ilegível —
+ * produziam a mesma tela preta muda, e quem estava olhando não tinha como
+ * distinguir nenhuma delas nem contá-la a quem pode consertar.
+ *
+ * O produto já pagou por isso: o defeito de perfil que custou a 0.8.5 em campo
+ * chegou como «não funciona», e o que estava no console dizia exatamente qual
+ * era. Ninguém abre o console de um aplicativo.
+ *
+ * O `console.warn` **fica** ao lado: ele carrega o objeto de erro inteiro, que
+ * esta frase não tem como carregar.
+ */
+function naoDeuParaMostrar(frase) {
+  const onde = $("palco-falha");
+  if (!onde) return;
+  onde.textContent = frase;
+  onde.hidden = false;
+}
+
+/** Apaga a explicação: alguma coisa voltou a funcionar. */
+function deuCerto() {
+  const onde = $("palco-falha");
+  if (onde) onde.hidden = true;
+}
+
 /** Desenha um quadro decodificado e o solta. */
 function pintar(quadro) {
+  // **Aqui e não em `configure`.** Configurar é dizer que se pretende
+  // decodificar; um quadro na tela é a prova de que se conseguiu. Uma
+  // explicação apagada cedo demais some no instante em que ela é mais
+  // verdadeira — entre armar e o primeiro quadro é exatamente onde o defeito
+  // de perfil da 0.8.5 morava.
+  deuCerto();
   const tela = $("palco-imagem");
   try {
     if (tela.width !== quadro.displayWidth || tela.height !== quadro.displayHeight) {
@@ -112,6 +147,7 @@ async function abrirImagemDaTela(tela, largura, altura) {
 
   if (typeof VideoDecoder === "undefined") {
     console.warn("esta janela não tem VideoDecoder; a tela alheia não será desenhada");
+    naoDeuParaMostrar("ESTA JANELA NÃO SABE DECODIFICAR VÍDEO · ATUALIZE O APLICATIVO");
     return;
   }
 
@@ -135,6 +171,7 @@ async function armarPeloSps(bytes) {
     const codec = codecDoSps(bytes);
     if (!codec) {
       console.warn("o quadro-chave veio sem SPS; não dá para saber o perfil");
+      naoDeuParaMostrar("O QUADRO NÃO DISSE EM QUE FORMATO VEIO");
       return;
     }
     const config = {
@@ -151,6 +188,9 @@ async function armarPeloSps(bytes) {
     if (daTela !== telaEmCurso) return;
     if (!veredito.supported) {
       console.warn("esta janela não decodifica", config.codec);
+      // O código do perfil junto: é ele que diz a quem conserta **qual**
+      // formato esta máquina recusou, e sem ele a frase não ajuda ninguém.
+      naoDeuParaMostrar(`ESTA MÁQUINA NÃO DECODIFICA ${config.codec}`);
       return;
     }
 
@@ -158,6 +198,7 @@ async function armarPeloSps(bytes) {
       output: pintar,
       error: (falha) => {
         console.warn("decodificador de tela:", falha);
+        naoDeuParaMostrar("O DECODIFICADOR DE VÍDEO PAROU · ESPERANDO O PRÓXIMO QUADRO-CHAVE");
         // Morreu: o próximo quadro-chave arma outro. Não adianta insistir com
         // este — um `VideoDecoder` em erro não volta.
         decodificador = null;
@@ -169,6 +210,7 @@ async function armarPeloSps(bytes) {
     esperandoChave = true;
   } catch (falha) {
     console.warn("armar o decodificador:", falha);
+    naoDeuParaMostrar("NÃO CONSEGUI PREPARAR O VÍDEO NESTA MÁQUINA");
   } finally {
     armando = false;
   }
@@ -185,6 +227,7 @@ function quadroDaTela(tela, chave, base64) {
     for (let i = 0; i < cru.length; i += 1) bytes[i] = cru.charCodeAt(i);
   } catch (falha) {
     console.warn("quadro de tela ilegível:", falha);
+    naoDeuParaMostrar("UM QUADRO CHEGOU ILEGÍVEL");
     return;
   }
 
@@ -225,6 +268,7 @@ function quadroDaTela(tela, chave, base64) {
     );
   } catch (falha) {
     console.warn("decode:", falha);
+    naoDeuParaMostrar("ESTE VÍDEO NÃO ESTÁ SENDO ACEITO PELO DECODIFICADOR");
   }
 }
 
@@ -241,6 +285,7 @@ function fecharImagemDaTela() {
   telaEmCurso = null;
   esperandoChave = true;
   medidasDaTela = null;
+  deuCerto();
   armando = false;
   delete document.body.dataset.vendoTela;
   const tela = $("palco-imagem");
