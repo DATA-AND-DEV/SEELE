@@ -214,6 +214,30 @@ pub enum EventoDaBomba {
     /// orçamento do vídeo e é a metade da transmissão que continua útil quando a
     /// imagem engasga.
     Som(Vec<u8>),
+    /// Um tique sem quadro novo, para o que ficou pela metade poder andar.
+    ///
+    /// Existe por um defeito de campo: «a tela ficou travada pra mim que estou
+    /// compartilhando e pra quem tá assistindo, em um frame só».
+    ///
+    /// Um quadro-chave viaja em [`FATIAS_DO_QUADRO_CHAVE`] fatias, e
+    /// [`Transmissao::enviar_quadro`] escreve **uma por chamada** — e só é
+    /// chamada quando um quadro novo chega. Nos dois tiques que não produzem
+    /// quadro, `SemQuadro` e `PuladoPeloTeto`, ela não era chamada, e o
+    /// quadro-chave em voo parava no ar. Enquanto ele está em voo todo quadro
+    /// que chega é descartado, inclusive o do espelho local: por isso quem
+    /// compartilha congela junto com quem assiste, e não sobra nem sintoma que
+    /// separe os dois.
+    ///
+    /// Não é preciso a tela estar parada. `PuladoPeloTeto` é o controle de taxa
+    /// do OpenH264 pulando por conta própria — 16,2% dos quadros em 1080p no
+    /// teto de 1200 kbps —, e quatro pulos seguidos bastam.
+    ///
+    /// É a metade que faltava do conserto que o som já tinha: «um tique sem
+    /// imagem nova — a tela parada — não é um tique sem som» está escrito em
+    /// [`Bomba::escoar_som`] desde então. Também não é um tique sem fatia.
+    ///
+    /// [`FATIAS_DO_QUADRO_CHAVE`]: crate::tela::FATIAS_DO_QUADRO_CHAVE
+    Escoar,
     /// O vídeo parou, com motivo (§3.2).
     ///
     /// **A bomba continua viva.** Parar é a resposta do produto a um sinal
@@ -524,7 +548,7 @@ impl<C: Captura> Laco<C> {
 
             self.escoar_pendentes();
             match self.tique(pedido_de_chave) {
-                Ok(Passo::SemQuadro | Passo::PuladoPeloTeto) => {}
+                Ok(Passo::SemQuadro | Passo::PuladoPeloTeto) => self.pedir_escoamento(),
                 Ok(Passo::Quadro(codificado)) => {
                     // O pedido só é atendido quando o quadro-chave de fato saiu:
                     // o controle de taxa do OpenH264 pula quadros por conta
@@ -809,6 +833,27 @@ impl<C: Captura> Laco<C> {
     }
 
     /// Põe um evento na fila de saída, respeitando a ordem dos pendentes.
+    /// Pede ao laço de envio que ande com o quadro-chave que ficou no ar.
+    ///
+    /// `try_send` cru e descarte no cheio, em vez de [`Self::entregar_evento`]:
+    /// dois pedidos de escoar são o mesmo pedido, e enfileirá-los encheria a
+    /// fila de cópias de uma ordem que o próximo tique repete de graça.
+    ///
+    /// E nada quando há pendente. A ordem entre os eventos é o contrato desta
+    /// bomba — um `Fluxo` sempre antes do primeiro quadro dele —, e furar a fila
+    /// para escoar seria pagar com a única garantia que o laço de envio tem. Uma
+    /// fila com pendente também não é o caso que este pedido existe para
+    /// resolver: ali o canal está cheio de quadro, e quadro escoa sozinho.
+    fn pedir_escoamento(&mut self) {
+        if !self.pendentes.is_empty() {
+            return;
+        }
+        match self.para.try_send(EventoDaBomba::Escoar) {
+            Ok(()) | Err(canal::error::TrySendError::Full(_)) => {}
+            Err(canal::error::TrySendError::Closed(_)) => self.fechado = true,
+        }
+    }
+
     fn entregar_evento(&mut self, evento: EventoDaBomba) {
         if !self.pendentes.is_empty() {
             self.pendentes.push_back(evento);
@@ -1034,6 +1079,11 @@ pub async fn escoar_com_espelho(
                     viva.enviar_som(&pacote).await?;
                 }
             }
+            EventoDaBomba::Escoar => {
+                if let Some(viva) = transmissao.as_mut() {
+                    viva.escoar_chave().await?;
+                }
+            }
             EventoDaBomba::Quadro(quadro) => {
                 // De um fluxo que já fechou. Escrevê-lo no fluxo de agora seria
                 // entregar 1080p sob um cabeçalho que anuncia 720p.
@@ -1170,6 +1220,76 @@ mod tests {
                 passo: AtomicUsize::new(0),
             })
         }
+    }
+
+    /// Uma tela que não muda: a captura abre, e a fonte nunca tem quadro novo.
+    ///
+    /// Não é um caso de laboratório. É o §1: macOS e Windows só entregam quadro
+    /// quando a imagem mudou, então uma janela parada produz exatamente isto —
+    /// tique atrás de tique com `tomar()` devolvendo `None`.
+    #[derive(Debug, Default, Clone)]
+    struct CapturaParada;
+
+    #[derive(Debug)]
+    struct FonteParada;
+
+    impl FonteDeQuadros for FonteParada {
+        fn tomar(&self) -> Option<QuadroI420> {
+            None
+        }
+    }
+
+    impl Captura for CapturaParada {
+        type Fonte = FonteParada;
+
+        fn iniciar(
+            &mut self,
+            _resolucao: Resolucao,
+            _cadencia: Cadencia,
+        ) -> Result<Self::Fonte, CapturaRecusou> {
+            Ok(FonteParada)
+        }
+    }
+
+    /// A tela parada tem de pedir o escoamento do que ficou pela metade.
+    ///
+    /// O defeito de campo: «a tela ficou travada pra mim que estou
+    /// compartilhando e pra quem tá assistindo, em um frame só». O quadro-chave
+    /// viaja em fatias e cada fatia precisa de uma chamada; as chamadas vinham
+    /// só dos quadros novos; sem quadro novo a chave parava no ar. E enquanto
+    /// ela está no ar todo quadro que chega é descartado — o do espelho local
+    /// junto —, que é por que os dois lados congelam iguais.
+    #[test]
+    fn um_tique_sem_imagem_pede_para_escoar_o_que_ficou_no_ar() {
+        let Some(biblioteca) = biblioteca() else {
+            return;
+        };
+        let fibra = TetoDeVideo::com_caminho(6_000_000)
+            .com_caminho_de_quem_hospeda(6_000_000)
+            .com_espectadores(1);
+        let (bomba, mut eventos) = ligar(
+            biblioteca,
+            CapturaParada,
+            arranjo(fibra, SignalBand::Nominal, Resolucao::P1080),
+            || {},
+        )
+        .expect("criar a thread da tela");
+
+        assert_eq!(
+            esperar(&mut eventos),
+            Some(EventoDaBomba::Fluxo {
+                geracao: 1,
+                resolucao: Resolucao::P1080,
+                teto_bps: 3_600_000,
+            })
+        );
+        assert_eq!(
+            esperar(&mut eventos),
+            Some(EventoDaBomba::Escoar),
+            "a tela parada não pediu escoamento, e um quadro-chave em voo \
+             ficaria no ar para sempre — com os dois lados congelados"
+        );
+        drop(bomba);
     }
 
     /// Um quadro com bordas duras, que é o conteúdo caro de uma tela de

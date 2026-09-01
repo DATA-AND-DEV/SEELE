@@ -1063,6 +1063,32 @@ impl Transmissao {
         self.escoar_som().await
     }
 
+    /// Anda com o quadro-chave em voo sem que um quadro novo precise chegar.
+    ///
+    /// [`Self::enviar_quadro`] escreve uma fatia por chamada, e quem a chama só
+    /// chama quando a captura entrega imagem nova. Um tique sem imagem —
+    /// `SemQuadro`, a tela parada — e um tique que o controle de taxa pulou —
+    /// `PuladoPeloTeto` — não a chamavam, e o quadro-chave ficava pela metade
+    /// no fio: quem assiste não fecha um quadro para decodificar, e quem
+    /// compartilha também não vê nada, porque enquanto há chave em voo todo
+    /// quadro que chega é descartado, o do espelho local inclusive.
+    ///
+    /// Não conta descarte. Nada foi descartado aqui — não havia quadro para
+    /// descartar, e é essa a diferença entre este caminho e o de cima.
+    pub async fn escoar_chave(&mut self) -> Result<(), ErroDeTela> {
+        let Some(mut voando) = self.em_voo.take() else {
+            return Ok(());
+        };
+        if self.escrever_fatia(&mut voando).await? {
+            // Fechou. O fluxo está entre quadros pela primeira vez desde que
+            // esta chave começou, e é a porta por onde o som que esperou sai.
+            self.escoar_som().await?;
+        } else {
+            self.em_voo = Some(voando);
+        }
+        Ok(())
+    }
+
     /// Escreve o som enfileirado, se o fluxo estiver entre quadros.
     ///
     /// Chamada por [`Self::enviar_som`] e por quem termina um quadro-chave: as
@@ -2064,6 +2090,74 @@ pub(crate) mod tests {
             .expect("ler")
             .expect("o fluxo acabou cedo");
         assert_eq!(seguinte.bytes, comum);
+    }
+
+    /// A chave fecha **sem nenhum quadro novo**, que é a tela parada do §1.
+    ///
+    /// O defeito de campo: «a tela ficou travada pra mim que estou
+    /// compartilhando e pra quem tá assistindo, em um frame só». O teste irmão
+    /// acima faz a chave andar com quadros comuns chegando; este a faz andar sem
+    /// nada chegando, que é a condição real — macOS e Windows só entregam
+    /// quadro quando a imagem muda, e o controle de taxa do OpenH264 pula por
+    /// conta própria mesmo quando ela muda.
+    ///
+    /// Sem [`Transmissao::escoar_chave`] não há segunda fatia: quem assiste
+    /// nunca fecha um quadro, e quem compartilha também não vê nada, porque com
+    /// chave em voo todo quadro que chega é descartado — o do espelho junto.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn o_quadro_chave_fecha_com_a_tela_parada() {
+        // O mesmo tamanho com sobra do teste irmão, e pela mesma razão: uma
+        // divisão exata esconderia bytes órfãos na última fatia.
+        let chave: Vec<u8> = (0..65 * 1024 + 3)
+            .map(|i| u8::try_from(i % 256).unwrap_or(0))
+            .collect();
+
+        let (saida, entrada) = par().await;
+        let inicio = Instant::now();
+        let mut transmissao = Transmissao::abrir(&saida, cabecalho(), 8_000_000, inicio)
+            .await
+            .expect("abrir");
+
+        assert_eq!(
+            transmissao
+                .enviar_quadro(&chave, true, inicio)
+                .await
+                .expect("chave"),
+            Envio::Espalhando
+        );
+
+        // Os tiques da tela parada. Nenhum quadro entra por aqui — é só o laço
+        // acordando no ritmo dele e encontrando a captura sem nada para dar.
+        for numero in 1..FATIAS_DO_QUADRO_CHAVE {
+            transmissao
+                .escoar_chave()
+                .await
+                .unwrap_or_else(|erro| panic!("escoar a fatia {numero}: {erro}"));
+        }
+
+        let mut recepcao = Recepcao::aceitar(&entrada).await.expect("aceitar");
+        let recebida = tokio::time::timeout(Duration::from_secs(5), recepcao.proximo_quadro())
+            .await
+            .expect("o quadro-chave nunca terminou de chegar com a tela parada")
+            .expect("ler")
+            .expect("o fluxo acabou cedo");
+        assert!(recebida.chave(), "chegou sem a marca de quadro-chave");
+        assert_eq!(
+            recebida.bytes, chave,
+            "o quadro-chave não chegou igual ao que saiu"
+        );
+
+        // E o fluxo voltou ao normal: o próximo quadro de verdade não é mais
+        // descartado por haver chave em voo.
+        let comum = vec![9_u8; 4096];
+        assert_eq!(
+            transmissao
+                .enviar_quadro(&comum, false, inicio + Duration::from_millis(200))
+                .await
+                .expect("comum"),
+            Envio::Enviado,
+            "a chave não soltou o fluxo depois de escoada"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
