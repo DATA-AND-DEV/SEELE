@@ -1651,3 +1651,41 @@ remover o botão** — e o `ENVIAR` do `index.html` sai com o CSS
 
 **Quando dói.** Não dói: é ajuste de desenho, e está aqui para não se perder
 entre a conversa em que foi pedido e o pacote em que entra.
+
+## 33 · O compartilhamento de tela parou entre duas máquinas Windows
+
+**Sintoma, relatado em 2026-08-31 e estreitado em 2026-09-01.** Entre duas
+máquinas Windows a tela não aparece. **É regressão:** quem relatou confirma que
+funcionava — *«era bem pixelado e feio, mas pelo menos mostrava que tava
+compartilhando»* — e parou entre a **0.8.4** e a **0.8.5**.
+
+**O que a 0.8.5 levou de vídeo, e o que cada um deles já custou de prova:**
+
+| mudança | estado |
+|---|---|
+| CABAC (`8c6661e`) | **eliminado.** A consequência dele era o perfil errado no decodificador, e o `ffd2025` a consertou na 0.8.6 — que não resolveu. |
+| eixo nitidez/movimento (`1acbdb3`) | **eliminado.** Só escolhe entre números que já existiam. |
+| reescritor de SPS (`60de331`) | **eliminado em 2026-09-01**, e esta era a hipótese forte: ele mexe bit a bit no cabeçalho, e só tinha sido provado contra o OpenH264 do macOS. Rodado no do Windows: SPS íntegro nas três resoluções, cor presente, 9 de 10 quadros de volta. |
+| reescrita da conversão (`bf1162d`) | **eliminado em 2026-09-01.** As duas bibliotecas novas têm caminhos SIMD por processador — NEON aqui, AVX2 lá —, e um defeito num não aparece no outro. As 135 combinações de formato passam **nos dois**. |
+
+**Por que o exemplo `cor.rs` não tinha provado nada disso antes.** Ele procurava
+o módulo do codec num caminho terminado em `.dylib`: **nunca teve como rodar no
+Windows.** A prova de que o SPS reescrito sobrevive ao codificador foi feita
+contra o OpenH264 do Mac, e o defeito é do Windows. Corrigido para aceitar
+`SEELE_OPENH264`, e é assim que os dois testes acima puderam ser feitos.
+
+**O que sobrou, e por que daqui não se alcança.** Os quatro passam em teste de
+unidade nas duas plataformas. O que os testes não tocam é o caminho de captura
+**de verdade** — a textura do D3D11, o `row_pitch` que o driver escolhe, o
+`on_frame_arrived` — e ele exige sessão gráfica. Por SSH a máquina não a tem.
+
+**As duas perguntas que separam o que restou**, e as duas são de campo:
+
+1. **O que aparece escrito no palco?** Desde `6410606` toda falha do lado de
+   quem recebe escreve no palco em vez de só no console — sete causas, sete
+   frases. A frase é o diagnóstico.
+2. **Mac → Windows funciona?** Se sim, o problema é o Windows **enviando**; se
+   não, é o Windows **recebendo**, e o alvo muda inteiro.
+
+**Quando dói.** Sempre que duas máquinas Windows tentam. É o caso da casa de
+quem relatou.
