@@ -1060,29 +1060,8 @@
 
 .compor-caixa:focus-within { border-color: var(--seele-laranja-nerv); }
 
-/* A nota é a instrução, e é por isso que ela está na tela e não num manual. */
-.compor-nota { flex: 0 0 auto; }
-
-/* `ENVIAR` com rótulo, no lugar do `▸` sozinho do v2. Campo sólido: é a ação
-   principal desta coluna e a única desta fileira. */
-.compor-enviar {
-  min-height: 44px;
-  padding: 0 20px;
-  flex: 0 0 auto;
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 15px;
-  letter-spacing: 0.14em;
-  color: var(--seele-negro-absoluto);
-  background: var(--seele-laranja-nerv);
-  border: 1px solid var(--seele-laranja-nerv);
-  cursor: pointer;
-}
-
-.compor-enviar:hover {
-  color: var(--seele-laranja-nerv);
-  background: none;
-}
+/* O `ENVIAR` saiu na 0.9.0 — ver `index.html`. A instrução que ele carregava
+   mora agora no `placeholder`, que é onde se olha quando se precisa dela. */
 
 /* `ARQUIVO` ao lado de `ENVIAR`, e fantasma contra ele: escolher um arquivo é
    preparar, e transmitir é o ato. Duas ações sólidas lado a lado deixariam a

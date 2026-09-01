@@ -1242,14 +1242,10 @@
         -->
         <span class="compor-caixa">
           <span class="prompt" aria-hidden="true">&gt;</span>
-          <input id="campo-mensagem" name="mensagem" placeholder="transmitir no canal"
+          <input id="campo-mensagem" name="mensagem"
+                 placeholder="transmitir no canal — Enter envia, Ctrl+V cola uma imagem"
                  maxlength="4000" autocomplete="off">
         </span>
-        <!--
-          `ENTER TRANSMITE` era um rótulo permanente de 9px ao lado do campo.
-          Virou nota: a mesma coisa em português, no tamanho em que se lê.
-        -->
-        <span class="nota compor-nota">Enter também envia</span>
         <!--
           Abre o seletor de arquivos do sistema. Antes ele não abria: o ADR 0027
           tinha decidido que escolher um arquivo era arrastá-lo para a conversa,
@@ -1261,8 +1257,22 @@
           para a mesma coisa, e só um deles se descobre sozinho.
         -->
         <button id="botao-anexar" class="compor-anexar" type="button"
-                title="escolher um arquivo; arrastar para a conversa também anexa">ARQUIVO</button>
-        <button id="botao-enviar" class="compor-enviar" type="submit">ENVIAR</button>
+                title="escolher um arquivo; Ctrl+V e arrastar também anexam">ARQUIVO</button>
+        <!--
+          **Não há botão ENVIAR**, e a comp da 0.9.0 escreve isso na marcação:
+          «compor: Enter envia, sem botão de enviar». Ele era a segunda maneira
+          de fazer o que a tecla já faz, ocupando o lugar mais valioso da barra.
+
+          O que o substitui é o `placeholder`, que diz as duas coisas no lugar
+          em que se está olhando quando se precisa saber.
+
+          Sem um botão `type="submit"`, o envio implícito do navegador passaria
+          a depender só da regra do «exatamente um campo de texto» — e o campo
+          seguinte que alguém acrescentasse aqui apagaria o Enter sem tocar em
+          nada visível. Por isso o ouvinte explícito entrou **antes**, em
+          `fc18fb2`, e o `a_nota_que_promete_o_enter_tem_quem_a_cumpra` prende
+          a promessa ao código que a cumpre.
+        -->
       </form>
     </section>
 

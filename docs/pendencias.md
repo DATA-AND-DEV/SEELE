@@ -1466,7 +1466,28 @@ ou se há contenção de verdade — porta, disco, ou o `Daemon::bind` esperando
 que a saturação atrasa. As duas têm conserto diferente: a primeira é o prazo, a
 segunda é o teste.
 
-**Por onde começar.** Rodar a conformidade com `--test-threads=1` e ver se some.
+### Respondida em 2026-08-31 · é carga, e a prova é de uma linha
+
+`cargo test -p seele-conformance --test acceptance_m5 -- --test-threads=1`:
+**15 de 15 passam, em 23,02 s.** Em paralelo o mesmo arquivo termina sempre em
+~20,01 s e reprova um teste em cerca de duas de cada três rodadas — nem sempre
+o mesmo.
+
+Os 23 s em série contra os 20 em paralelo dizem o resto: **o paralelismo não
+está comprando quase nada** neste crate. Cada teste levanta um servidor QUIC de
+verdade, com aperto de mão, TLS e banco; eles competem por porta, disco e CPU, e
+o que se ganha em sobreposição se perde em contenção.
+
+Então a escolha que este registro deixava em aberto está decidida pelos
+números: **serializar**, e não alargar prazo. Três segundos a mais por rodada
+compram uma suíte que volta a ser evidência.
+
+**O que falta é só o como.** Não há chave de `test-threads` no `Cargo.toml` de
+um crate — o caminho é um semáforo no `start()` da conformidade, limitando
+quantos servidores existem ao mesmo tempo dentro do binário de teste. Contido,
+e não mexe no resto do workspace.
+
+**Por onde começar (registro anterior).** Rodar a conformidade com `--test-threads=1` e ver se some.
 Se sumir, é carga, e a escolha é entre prazo maior e serializar aquele crate
 (`test-threads` no `Cargo.toml` do `seele-conformance`, que não afeta o resto do
 workspace). Se não sumir com uma linha só de execução, é contenção de recurso e o

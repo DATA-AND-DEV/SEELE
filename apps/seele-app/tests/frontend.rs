@@ -8474,7 +8474,12 @@ fn a_nota_que_promete_o_enter_tem_quem_a_cumpra() {
     let page = without_comments(&read("ui/index.html"));
     let script = without_comments(&scripts());
 
-    let promete = page.contains("Enter também envia");
+    // **A promessa mudou de lugar na 0.9.0**, junto com o botão que ela
+    // explicava. Era uma nota ao lado do campo — `Enter também envia` —, e
+    // virou parte do `placeholder`: `transmitir no canal — Enter envia, Ctrl+V
+    // cola uma imagem`. O lugar é melhor, e é o único que quem está prestes a
+    // digitar está olhando.
+    let promete = page.contains("Enter envia");
     let cumpre = script.contains("campo-mensagem") && script.contains("evento.key !== \"Enter\"");
 
     assert_eq!(

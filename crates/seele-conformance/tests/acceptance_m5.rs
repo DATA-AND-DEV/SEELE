@@ -742,7 +742,12 @@ async fn a_revisao_das_mensagens_anda_quando_alguem_fala() -> Result<()> {
 /// outra máquina, e um número que basta aqui reprova lá — é a pendência 29
 /// inteira.
 fn espere_ate(mut condicao: impl FnMut() -> bool) -> bool {
-    let limite = std::time::Instant::now() + Duration::from_secs(10);
+    // **Cinco segundos, e o número tem dono.** A suíte deste crate reprova o
+    // que passa de ~20 s sob a carga dela mesma (pendência 29), e um teste que
+    // espera dez segundos duas vezes gasta o orçamento inteiro só esperando.
+    // Cinco é folgado para um servidor local — o que se espera aqui leva
+    // milissegundos — e cabe duas vezes com sobra.
+    let limite = std::time::Instant::now() + Duration::from_secs(5);
     while std::time::Instant::now() < limite {
         if condicao() {
             return true;

@@ -1726,7 +1726,10 @@ function fraseDeColagem(falha) {
 function guardarAnexo(arquivo) {
   anexoPendente = arquivo;
   $("anexo-nome").textContent = arquivo.nome;
-  $("anexo-tamanho").textContent = emBytes(arquivo.tamanho);
+  // «pronto para enviar com Enter», como a comp da 0.9.0 escreve. Sem o botão
+  // ENVIAR, quem anexou precisa saber que a tecla manda os dois juntos — o
+  // arquivo e o que estiver escrito —, e o tamanho sozinho não diz isso.
+  $("anexo-tamanho").textContent = `${emBytes(arquivo.tamanho)} · pronto para enviar com Enter`;
   $("anexo-barra").hidden = true;
   $("anexo-estado").textContent = "";
   $("anexo-pendente").hidden = false;
